@@ -1,0 +1,781 @@
+0.9.4
+-----
+-Tracker list is searched as it comes in (thanks Mark Schreiber!)
+-Fixed selection of compressions/ciphers
+-Fixed file transfer issues (unchecked)
+-Fixed endianness issues with user colors (unchecked)
+-Improved user info dialog
+-Check to see if htxf->listen_addr exists
+-Logging support (unfinished, disabled)
+-Added -fsigned-char flag for compilation
+-Only offer IDEA encryption if it is supported (unsupported currently)
+-Fixed more compilation errors with compress/cipher
+-hxd commands are now checked for and passed to the server
+(note: one would have to use two slashes for hxd commands before and one has
+to use this double slash method for unrecognized hxd commands)
+
+0.9.3
+-----
+-Fixed endianness issues with task errors
+-hl_hdr's flag is long, not short
+-Fixed build errors on systems without OpenSSL and zlib
+-Fixed configure.in problem
+
+0.9.2
+-----
+-Fixed closing a blank news catalog browser
+-Now convert UNIX LF to Mac CR on the news posts and private messages
+-Fixed exec once again
+-exec now will output to whatever chat it was invoked from
+-File browsers are properly locked now
+-Free hldir in threaded news functions; fix memory leaks
+-Made buttons with placeholder letters look better
+-Improved the file browser a little bit
+-Added HOPE/compress/cipher support
+-Added HOPE/compress/cipher entries to Hotline bookmark format
+-Fixed segfault with using Connect dialog after invoking with ^K
+-Fixed --disable-ipv6 (thanks Josh Elsasser!)
+-Better error reporting in prefs_write/prefs_read functions
+-Fixed a memleak in prefs_read/prefs_write
+-Fixed an include in plugin.c
+-Display filename in preview window title
+
+0.9.1
+-----
+-Fixed network code with regards to being disconnected if two tasks are sent
+-File browsers are refreshed when a file is moved or deleted or a directory is
+created
+-News browsers are refreshed now too
+-Added del, mkdir, and mkcat functions to news folder browser
+-News folder browser of root directory now shows correct path
+-Improved default sizes/startup positions of windows
+-Display options window if no gtkhxrc file exists
+-Added del function to news catalog browser
+-Added option to browse news folders in same window
+
+0.9.0
+-----
+-Added Win32 support in hxd_fd code (Win32 support is unfinished)
+-Fixed alignment problems (thanks Johan Zandin!)
+-Added a "tracker connect" task and cancelling it will kill tracker threads
+-Fixed warning in xfers.c
+-Rewrote threaded news catalog browser
+-Added a hack to fix the date on news threads
+-Fixed GtkHx RPM for icon path and such
+-Fixed GtkHx compilation on non-X11 systems (removed gdk/gdkx.h include from gtk_hlist.c)
+-Debug no longer disables threads
+-Fixed memory leaks with news catalog and folder browsers
+-Redesigned news catalog and folder browsing code a bit
+-Added a refresh button to the news catalog and folder browsers
+
+0.8.17
+-----
+-File transfers now use pthreads, no more pipes and fork
+-Added preliminary file preview code
+-French translation updated (thanks jshubert!)
+-Prefs fixes
+-Fixed segfault with listing users if userlist was closed.
+-Implemented threaded news posting
+
+0.8.16
+-----
+-Removed /fnews
+-Fixed dates in threaded news
+-Added history to private messages
+-Updated XText widget to XChat 1.8.5's
+-Fixed Ctrl-K in chat and message windows
+-Fixed manpage
+-Fixed saving of preferences
+
+0.8.15
+-----
+-Fixed font error on startup if Chat window state was saved as closed
+-Added "You have been disconnected." message on unexpected disconnect.
+-Fixed multiple ls requests
+-Improved threaded news support
+-Fixed segfault with retrieving a threaded news post
+-Fixed declaration of partcount/size in threaded news
+
+0.8.14
+-----
+-Fixed IPv4 network.c compilation
+-Fixed xfer queue for 1.5+ servers
+-Implemented ability to cancel tasks
+-Updated SiN bookmark
+-Fixed broken usermod stuff
+-Fixed resume download
+-Fixed broken boolean preference parsing
+-Added news category/folder pixmaps
+-Fixed error dialog segfault
+-Don't call tsk->rcv() if there is an error
+-Fixed htxf_with_ref
+-Fixed some issues on IRIX
+-UID and icon are 16bit, not 32bit
+-Fixed starting downloads after queue
+-Fixes for pthreads
+-Fixed foregrounds in HList for other GTK themes
+-Added 1.5+ News button
+-Fixed -b option
+-Fixed bookmark conversion
+-Fixed saving window states
+-Updated XText from X-Chat 1.8.3
+-Added getopt code
+-Readded /server and /msg commands
+-Fixed some command line argument stuff
+-Fixed file browsing code
+-Display maximum XText lines value in prefs
+-Fixed changing nickname and icon simultaeneously
+
+0.8.13
+-----
+-Fixed file renaming segfault
+-Fixed segfault with bogus font
+-Fixed segfault with old prefs files
+-Added compliance for 1.5+ "No Agreement" data
+-Set ai_protocol hint to IPPROTO_TCP, no longer set ai_flags hint
+-Do gtk_threads_leave if socket() failed in tracker listing
+
+0.8.12
+-----
+-ANSI C compliance fixes (aaronl)
+-Fixed segfault if attempted to save a bookmark with a / in its name
+-Rewrote prefs code. It's much faster/cleaner/safer/smaller now (aaronl)
+-Fixed font memory leak
+-Removed drug-influenced code in usermod.c, but added a little more (aaronl)
+-Set sensitivity of up button in files window based on "Browse in Same Window" option
+-Disable up button in files window if at root dir
+-Store file name and file lengths in host byte order (aaronl)
+-Eliminate duplicate directory listing in "samewin" mode (aaronl)
+-Hitting "Stop Task" on "Connecting" task will cause a disconnect
+-Clicking on column headers in userlist sort the userlist
+-Don't allocate memory for a few constants (aaronl)
+-Do not copy incoming data. Major rework of rcv code. (aaronl)
+-Implemented new XText widget
+-Fix ancient memory overrun (aaronl)
+-Fixed file getinfo
+-Fixed out of bounds memory access with user part
+-Fixed 1.5 news category segfault
+-Fixed blocking on uploads
+-Fixed uploads
+-Implemented ability to rename file/set comment (via File Info window)
+-Recommend sox in deb
+-Send "decline chat" to server when "Decline" is clicked in private chat invitation dialog
+-Minor Users window UI fixes
+-Fixed a segfault with nick tab completion
+-Fixed gtk_editable_get_chars related memleaks (also, don't use it -aaronl)
+-Fixed segfault in htlc_read if task was NULL
+-Fixed out of bounds memory access in bookmark writing
+-Fixed Eliza make distclean
+
+0.8.11
+-----
+-Fixed sounds
+-Fixed segfault with "new" button in private chat selection dialog
+-Raise message window, when trying to open one, if it already exists
+-Fixed plugin segfaults
+-Fixed icon files loading memory corruption
+-More code cleanup
+-Cleaned up Info pixmap
+-Fixed file xfer bugs
+
+0.8.10
+-----
+-Fixed tooltip for Plugin Manager
+-Cleaned up more obsolete code
+-Removed 512 char limitation for prefs line (improved by aaronl)
+-More efficient prefsline parsing code
+-Memleak fixes in preferences
+-Fixed segfault with icon listing thread
+-Icon listing performance tweaks (aaronl)
+-Now set wm_class on windows
+-More localization
+-Fixed gettext/locale stuff
+-IPv6 stuff works
+-Fixed some gdk_input stuff
+-Remove functionless mutex (aaronl)
+-Fix stupid memory leak (aaronl)
+-Fix off-by-one buffer overflows (aaronl)
+-Use Glib functions uniformly (aaronl)
+-Use appropriate types for length and boolean arguments (aaronl)
+-Speed up some parsing code (aaronl)
+-Remove useless code from about.c (aaronl)
+-Made mutliple icon lists work again (aaronl)
+-Added a mode for nick tab-completion where a list of possible nicks is
+displayed
+-Don't use threads for icon viewing; be cooperative instead (aaronl)
+-Fix severe memory leak with icons (aaronl)
+-Show options window before icon list is completed (aaronl)
+-Only allow single icon to be selected (aaronl)
+-Remove unnecessary calls to gtk_widget_show (aaronl)
+-Major icon viewing speedups (aaronl)
+-Use memcpy in cicn code (aaronl)
+-Replace homebrew endianness crap with hton[ls]() (aaronl)
+-mmap icon files (aaronl)
+-Use inet_ntop() instead of inet_ntoa(), inet_pton() instead of
+inet_aton(), and got rid of inet_ntoa_r()
+-Remove unnecessary #include directives from many files (aaronl)
+-Don't cache pixmaps -- the OS does that for us (aaronl)
+-Fixed a bunch of out of bounds memory accesses
+-Fill in fields of connect dialog when converting old bookmark (aaronl)
+-Added support for looking up IPv6 hosts
+-Files are once again destroyed on disconnect
+-IPv6/IPv4 work simultaeneously (IPv4 support for impaired systems)
+-Port number is now stored in bookmarks
+-GtkEntry in bookmark save now grabs focus
+-Scrapped SOCKS support
+-Support C99 snprintf function (aaronl)
+-Darwin issues resolved
+-Kill tracker thread on quit
+
+0.8.9
+-----
+-Removed perl crap
+-Added plugin manager
+-Removed obsolete code
+-Working plugin code
+-Fixed regex compilation on non-POSIX systems
+-Fixed chat invitation dialogs
+-Timestamp fixes
+-Added label to icon entry in Icon Settings
+-Fixed uploads to hxd servers
+-Minor network fixes
+-Holding control while hitting enter in chat is now equivalent of /me
+-Holding shift while hitting enter in chat inserts a linebreak
+-Got rid of GtkHTree
+-Trackers in options now represented in GtkCList
+-Added /stats
+-Fixed segfault with closing Tasks
+-Chat subject is cleared on new connection
+-Warning fixes for gcc-3.0 (aaronl)
+-Added GtkHx server bookmark
+-Fixed segfault with connect
+-Fixed some stuff with bookmarks
+-Fixed memleak with bookmarks
+-Added blocking handshaking with 30second timeout
+-Fixed segfaults with having chat/users closed
+-RPM now installs sounds correctly
+-Fixed toolbar-closing quit
+-Added debug stuff to gtkthreads
+
+0.8.8
+-----
+-Fixed compilation on systems that do not have localtime_r function
+-Added some colour to the [hx] infoprefix
+-Added some colour to messages
+-Removed some debugging stuff from tab completion
+-Darwin compilation issues resolved
+-Fixed some link errors that occured on some systems
+-Split datapath into soundpath and iconpath
+-Added some more precision to human readable sizes
+-Multiple icon list support
+-Icon lists are reloaded at prefs change
+-Changed chat ignore code to receive UID from sender (only on latest hxd)
+-Now displays queue number on servers with server side queue
+-IPv6 Support (only on latest hxd) [broken at the moment]
+-Now receive server version number (Hotline 1.5+ servers)
+-Now receive server name (Hotline 1.5+ servers)
+-Fixed garbage at the end of error messages
+-Failed xfers are deleted from the tasks list now
+-Optimized ignore code and now report user's ignore status in chat
+-Fixed garbage in public chat if timestamp was disabled
+-Added popup menu to userlist
+-Changed name of toolbar -- toolbar now displays server address too
+-Added task progress bar for "connect"
+-Icon listing is now done in another thread (in options)
+-Fixed broken / commands
+-Nick change events of ignored people are no longer reported in chat
+-Plugin support [not finished]
+-If refresh is clicked while tracker is listing, current listing thread
+will be killed
+-Added progress bar for tracker in Tasks window
+-Finderinfo and resource fork are no longer saved in dot directories
+-New XText widget with smooth scrolling
+-Improved private chat window
+-Cleanup of gtk_threads on quit
+-Improved public chat window
+-Emails, URLs, and such are highlighted in XText widgets now
+-Improved news window ui
+-Improved msg window ui
+-If chat, news, tasks, or users are already open when appropriate button
+is clicked, they will be raised
+-Settings reorganization
+-Added more icons to icons.rsrc
+-Fixed error dialog for longer messages
+-Added a separator between user bookmarks and builtins
+-Updated SiN Grafix bookmark
+-Fixed error message and deletion of file xfers
+-Added session struct
+-Fixed chat history lockups
+-Added ability to stop tracker listing via task stop
+-Added subject for public chat
+-Autoconf fixes
+-DFA Regexps Tracker Search (93x faster) [aaronl]
+-Duplicate server entries in tracker are ignored now
+-Fixed segfault with tracker list parsing [aaronl]
+-Memory leak fixes with tracker list parsing [aaronl]
+-Added maximum lines option for XText widgets
+-Implemented binary search tree for tracker
+
+0.8.7
+-----
+-Private chat windows now are destroyed on disconnect
+-Fixed segfault if private chat window still open when disconnected
+-Window positions are now saved properly
+-Icon change/status change events are no longer announced in chat
+-Bookmark writing code optimized
+-Bookmark reading code reports error if bookmark in wrong format
+-Code cleanup
+-Bookmark conversion code implemented into GtkHx
+-Updated French translation
+-Added two more builtin bookmarks
+-Fixed GtkHx seg fault on servers that do not let guests chat
+-Fixed file download button
+-Multi-tracker support
+-Implemented transparency tinting (requires gdk-pixbuf)
+-Threaded news support (in progress)
+-Using glib types for portability
+-News no longer reloads on private chat join
+-Non blocking connect/login
+-Fixed chat focusing bug
+-Threaded tracker
+-Fixed segfault with messages
+-Fixed directory creation
+-SOCKS 4/5 support
+-Added ability to timestamp chat
+-Fixed private chat /me commands
+-Redid options window
+-Added perl scripting feature (in progress)	
+-Autoconf improvements
+-News no longer loads if news button is clicked while news is open
+-Show private messages at back now works
+-Added ability to toggle wordwrap
+-Added ability to browse in same window or create new windows
+-Sound command can now be specified
+-Failed tasks are now deleted from tasks window
+-Added ability to toggle case sensitivity in tracker search
+-Fixed another init bug with chat
+
+0.8.6
+-----
+-Fixed post news dialog ui
+-Fixed options window ui
+-Implemented ability to move files
+-Fixed prefs bugs
+-Fixed major init bugs
+-Fixed xtext transparency setting
+-Fixed file browsing bug
+-Close agreement/files windows on disconnect
+-Fixed private chat ui
+-GtkHx now uses Hotline Client bookmarks
+-New icons code
+
+0.8.5
+-----
+-Fixed a bug where message window input would lock up if empty message sent
+-Now clear chat on new connection
+-Now lists tracker when opened
+-Added ignore pixmap (thanks Philip!)
+-Got rid of hx_threads.h
+-Now use fork() instead of clone()
+-Added a /unignore
+-Added download path setting
+-GtkHx logo now 256 colors, using less memory
+-Regex supported in tracker search
+-Xfer ETA now displayed in hours:mins:secs
+-Fixed horizontal scrollbar in tracker
+-Data path now defaults to PREFIX/share/gtkhx
+-Got rid of xfer reporting from chat
+-Fixed crash if chat window closed
+-Got rid of ugly default toolbar
+-Added ability to manipulate the position of a queued file xfer
+-Better file browsing
+-No longer attempts to load news if disconnected
+-Added some command line options
+-Added check for Cygwin environment
+-Added a man page
+-Fixed more windows initialization bugs
+-Memleak fixes
+-Fixed clear for private chat
+-Fixed bug with listing a directory (listing time is no longer exponential)
+-Display number of servers found/total in tracker window
+-Added locale support
+-French translation added
+-Got rid of some extra code by rorschach
+-Display correct icon for upload/drop box directories
+-Added a header to the user_list for UID and Name
+-Fixed several GtkHx pixmaps
+-Fixed tracker code so it no longer uses GList
+-Added a debug option to GtkHx (./configure --enable-debug)
+-Got rid of getopt_r stuff
+-Code cleanup
+-Better looking gtk_hlist
+-Implemented ability to delete files
+-Fixed history code bugs
+-Better nick tab completion
+-GtkHx now plays nice on servers that have server-side download spot queueing
+-Task go now fully works
+-Option to not queue file transfers now works
+-New xtext
+-Cancel button in chat prompt dialog now works
+-Fixed random segfault with private messages
+
+0.8.4
+-----
+-Removed old user_print function
+-Fixed directory creation
+-Fixed up file navigation code
+-Fixed uploads
+-Bugfixes for window geometry: open/init
+-Made file transfer tasks sizes/speeds human readable
+-Fixed file transfers!
+-Tasks list now exists/is updated even when tasks window is closed
+-GtkHx properly quits if file xfers are in progress
+
+0.8.3
+-----
+-Ignore fixes
+-Reimplemented /help (simply lists available commands)
+-Implemented an icon viewer in options
+-Fixed private chat userlist
+-A notice is printed in private chat if subject is changed
+
+0.8.2
+-----
+-Fixed bug where one could send null private messages
+-Removed the annoying separator from private messages
+-Fixed high ascii in private messages
+-Fixed private message window input buffer
+-Fixed default font
+-Code cleanup
+-Fixed bug in preference parsing
+-Support for changing fonts
+-Support for gdk_fontset_load
+-No longer link with esd and gdk-pixbuf
+-Displays uid in userlist now
+-Redid sound code
+-Now use datapath for sounds and icons
+-Now check for glib in configure
+-Fixed segfault if chat is closed
+-Implemented ignore
+-Fixed line breaks in XText
+-Quit when toolbar is closed
+-Update transparency on other XText widgets if moved
+-Removed extra checks from configure
+	
+0.8.1
+-----
+-Nick tab completion
+-Fixed RPM dependencies
+-Cleanup of package
+-Fixed some warnings
+-Cleanup of code
+-High ascii fixed
+-Fixed bug where GtkHx would crash if news or tasks were closed
+-Private message windows now follow XText transparency setting
+
+0.8
+-----
+-New autoconf script
+-Code cleanup
+-Fixed up advanced toolbar sizes
+-Added statusbar to advanced toolbar mode
+-Displaying port along with IP now
+-Implemented message-chat
+-Got rid of gnome-color-picker, gdk_imlib
+-Fixed font in agreement
+-Numerous bugfixes
+-Implemented XText widget
+-Support for gdk_pixbuf (XText transparency)
+-Got rid of toolbar geometry
+-Closing toolbar quits GtkHx
+-Fixed debian package bugs
+-Fixed about window title
+-Temporarily removed color and font changing code
+
+0.7.1
+-----
+-Fixed crash if bookmark name was null
+-Cleaned up the deb a bit
+
+0.7
+-----
+-Fixed headers for readline
+-Added ability to change font
+-Added ability to change news colours
+-Fixed up the debian package for deps
+-Fixed default font
+-Sounds off by default now
+-Fixed up user editor
+-Fixed tasks window under enlightenment
+
+0.6
+-----
+-Added remote account administration
+-Working uploads
+-Different file icons depending on file type
+-Sizes now not only displayed in bytes
+-Icons and tooltips work if user_window was never opened
+-Fixed crash if user_window is closed
+-Better download support
+-No longer need readline
+-Added feature to use smaller toolbar
+-Got rid of au2h
+-Improved keyboard accelerators
+-Fixed defaults for chat color
+-Fixed prefs code
+-Improved debian package
+-Fixed message bug
+-Added ability to clear chat buffers (/clear)
+
+0.5
+-----
+-Fixed drag and drop bug
+-Fixed invitation dialog
+-Added ban pixmap (by philip)
+-Added gtkhx-pixmap for GNOME panel and such (by philip)
+-Re-arranged buttons in users_window
+-Added ability to choose path of icons.rsrc
+-Added BFI Support
+-Added Documentation (by philip)
+-Added file uploads
+-Working file download button
+-Fixed tasks window and files window resize
+-Fixed up refresh, news, upload, download, and connect pixmaps
+-Added sounds
+-Added user editor
+-Improved file browsing
+-New timer code
+-Working downloads
+-Major code cleanup
+-Added auto-reply feature
+
+0.4.2
+-----
+-Touched up the pixmaps
+-New timer code
+-Improved tasks, file transfers
+-Implemented private chat
+-Autoconf script fixed up
+-CafeLinux bookmark fixed
+-Code cleaned up
+
+0.4.1
+-----
+-GtkHx debianized
+-New gnome-color-picker code (gnome-libs-1.2.0)
+-Added chat input history
+-Text in chat window is saved when chat window is closed
+-Fixed a few segfaults
+-Working file browsing
+-Downloads implemented (buggy)
+-More pixmaps
+-Fixed a bunch of warnings during compilation
+-Ability to create directories
+-Ability to get file info
+
+0.4
+-----
+-Working tasks
+-Fixed bg/fg color code
+-Added pixmaps to buttons
+
+0.3.9
+-----
+-News now loads at connect if News window is open
+-Fixed "Hotline Communications" bookmark
+-Fixed up files window UI, still disfunctional
+
+0.3.8
+-----
+-Code cleaned up
+-Added tooltip to banbtn
+-Added ability to change chat font sizes
+-Freed prefsline after reading prefs
+-Changed userlist font
+
+0.3.7
+-----
+-Added ability to change foreground and background of Chat Window
+-Fixed compilation error on non-Linux systems
+-Added a check for GTK+ and imlib in the configure script
+
+0.3.6
+-----
+-Cleaned up users_window, added tooltips to buttons
+-Added private chat button -- Not functional yet
+-Fixed up window geometry code
+-Fixed some warnings
+
+0.3.5
+-----
+-Fixed major bookmark bug
+-Saving of window sizes/positions
+-User can now make users_window smaller
+-Saving of which windows are open
+
+0.3.4
+-----
+-Redid prefs file code (now ~/.gtkhxrc)
+-Added saving of Queue Download and Show Message at Back prefs (not working yet)
+-Fix of userlist bugs
+
+0.3.3
+-----
+-Added prefs file code. (~/.hxprefs)
+-Fixed up "Save Bookmark" dialog
+-Built-in bookmarks for new users
+-Implemented newer Hx code
+-Improved upon file browsing code
+
+0.3.2
+-----
+-New logo
+-Fixed compilation errors on some systems
+-Bookmark segfault bug fixed
+-Cleanup of some code
+-Fixed userlist bugs
+-No more hx_tty.c and agreement.c
+
+0.3.1
+-----
+-Added another possible icons.rsrc location; /usr/share/gtkhx/icons.rsrc
+-Implemented dialog for broadcasts
+-Added task error dialogs
+-Fixed agreement bug
+-New logo
+-Added bookmarks
+
+0.3
+------
+-Displays ip of server connected to in titles of Users, Tasks, News, and 
+Chat
+-Certain buttons greyed out when disconnected
+-Bugfixes
+-Made anything typed into password_entry be displayed as '*'
+-User Info window does not pop up if you do not have the privs
+-File browsing fixed.
+
+0.2.9a
+------
+-Added ban button
+-Added join/part in chat
+-Added option to toggle join/part in chat
+-Bugfixes
+-Added key accelerators: ctrl-k for connect, ctrl-q for quit
+-Removed "News Posted" when news was posted.
+-Added reload button to news
+
+0.2.8a
+------
+-Tasks
+-File browsing
+-Improved tracker
+-Fixed post button bug.
+-Better options window
+-Better userlist
+-Better connect window
+-Ban button temporarily removed
+-Message bugs fixed.
+
+0.2.6a
+------
+-Options box code redone.
+-Much code redone.  Not using hx_command() anymore
+-Userlist bug fixed
+-Ban feature added
+
+0.2.5a
+------
+-Fixed crash if users or news was closed
+-News word wrapping
+
+0.2.4a
+------
+-Tracker added.
+-Post button added to News.
+-Userlist bug fixes
+
+0.2.3a
+------
+-User icons
+-More stability
+-Size of message windows increased to accomodate other GTK+ themes.
+
+0.2.2a
+------
+-Added user colours.
+-More bugfixes
+
+0.2.1a
+------
+-Added message, info, and kick buttons
+-Bugfixes
+
+0.2a
+------
+-Spiffy userlist
+-Bugfixes
+
+0.1.9a
+------
+-Some warnings fixed..
+-Minor bugfixes
+
+0.1.8a
+------
+-Even more bugfixes
+-The current nickname and icon # is displayed in the options window now.
+-Options window UI improvements
+-Connect works
+-No longer have to type something/receive something in chat for nick change, 
+news post, etc to occur.
+
+0.1.7a
+------
+-Many bugfixes
+-Error message dialogs
+-Clear userlist on disconnect
+-Some console messages removed
+
+0.1.6a
+------
+-Fixed random crash bug
+-Added userinfo
+-Added messages, pretty buggy.
+
+0.1.5a
+------
+-Fixed it where GtkHx would puke into the console if userlist was closed.
+-Gave agreement fixed width font
+-Fixed compilation error in hx_commands.c on some machines
+-Added config script
+-Bugfixes
+
+0.1.4a
+------
+-Basic userlist added
+-Disconnect and Disagree work.
+-Bugfixes
+-Connect dialog partially working
+
+0.1.3a
+------
+-Added about box
+-Added news
+-Fixed up chat window
+-Bugfixes
+-Added news post (untested)
+-Added agreement window(buggy)
+
+0.1.2a
+------
+-Added ability to change nick and icon via Options.
+-The Quit button no longer makes the program do an Illegal Instruction 
+or Segmentation Fault.
+-Re-added agreement.
+
+0.1.1a
+------
+-Got rid of annoying colors.
+-Added semi-functional toolbar.
+-Minor fixes.

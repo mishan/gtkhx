@@ -1,0 +1,371 @@
+gtkhx (0.9.4-1) unstable; urgency=low
+  * New release
+ -- Misha Nasledov <misha@debian.org>  Mon, 31 Mar 2003 15:01:00 -0700
+
+gtkhx (0.9.3-2) unstable; urgency=low
+  * Fixed build errors
+  * Removed cipher support as it is pointless
+	
+ -- Misha Nasledov <misha@debian.org>  Thu, 30 Jan 2003 19:35:00 -0700
+
+gtkhx (0.9.3-1) unstable; urgency=low
+  * New release
+  * Fixed build errors and endianness issues
+
+ -- Misha Nasledov <misha@debian.org>  Fri, 22 Mar 2002 13:23:00 -0800
+
+gtkhx (0.9.2-1) unstable; urgency=low
+  * New release
+  * Added crypto and moved to non-US
+
+ -- Misha Nasledov <misha@debian.org>  Mon, 19 Feb 2002 19:13:00 -0800
+
+gtkhx (0.9.1-1) unstable; urgency=low
+  * New release
+
+ -- Misha Nasledov <misha@debian.org>  Mon, 21 Jan 2002 20:48:00 -0800
+
+gtkhx (0.9.0-1) unstable; urgency=low
+  * New release
+
+ -- Misha Nasledov <misha@debian.org>  Sat, 12 Jan 2002 19:16:00 -0800
+
+gtkhx (0.8.17-1) unstable; urgency=low
+  * New release
+  * Fixed user_create function. closes: #121710
+
+ -- Misha Nasledov <misha@debian.org>  Wed, 12 Dec 2001 10:22:00 -0700
+
+gtkhx (0.8.16-1) unstable; urgency=low
+  * Fixed manpage. closes: #118124 
+  * New release
+
+ -- Misha Nasledov <misha@debian.org>  Wed, 07 Nov 2001 10:40:00 -0700
+
+gtkhx (0.8.15-1) unstable; urgency=low
+  * New release
+  * Updated standards version
+
+ -- Misha Nasledov <misha@debian.org>  Wed, 31 Oct 2001 08:43:00 -0700
+
+gtkhx (0.8.14-1) unstable; urgency=low
+  * New release
+
+ -- Misha Nasledov <misha@debian.org>  Thu, 27 Aug 2001 09:15:00 -0700
+
+gtkhx (0.8.13-1) unstable; urgency=low
+  * New release
+
+ -- Misha Nasledov <misha@debian.org>  Sat, 15 Jul 2001 13:00:00 -0700
+
+gtkhx (0.8.12-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Add -fPIC to things in the plugins directory.
+  * copy in new config.{guess,sub} to get support for new architectures.
+    Closes: #104621.                                                    
+
+ -- LaMont Jones <lamont@smallone.fc.hp.com>  Sat, 14 Jul 2001 18:17:01 -0600
+
+gtkhx (0.8.12-1) unstable; urgency=low
+  * New upstream release
+  * Scrapped SOCKS support. closes: #85893
+
+ -- Misha Nasledov <misha@debian.org>  Sun, 27 Jun 2001 14:41:00 -0700
+
+gtkhx (0.8.11-1) unstable; urgency=low
+  * New upstream release
+
+ -- Misha Nasledov <misha@nasledov.com>  Sun, 10 Jun 2001 11:39:00 -0700
+
+gtkhx (0.8.10-1) unstable; urgency=low
+  * New upstream relelase
+
+ -- Misha Nasledov <misha@nasledov.com>  Sun, 27 May 2001 21:51:00 -0700
+
+gtkhx (0.8.9-1) unstable; urgency=high
+  * New upstream release
+  * Many bugfixes
+
+ -- Misha Nasledov <misha@nasledov.com>  Fri, 20 Apr 2001 11:04:00 -0700
+
+gtkhx (0.8.8-1) unstable; urgency=low
+  * New upstream release
+  * No longer install INSTALL
+
+ -- Misha Nasledov <misha@nasledov.com>  Fri, 30 Mar 2001 10:58:00 -0800
+
+gtkhx (0.8.7-1) unstable; urgency=medium
+  * Private chat windows are now destroyed on disconnect
+  * Fixed segfault if private chat window still open when disconnected
+  * Window positions are now saved properly
+  * Icon change/status change events are no longer announced in chat
+  * Bookmark writing code optimized
+  * Bookmark reading code reports error if wrong format
+  * Bookmark conversion code implemented into GtkHx
+  * Updated French translation
+  * Added two more built-in bookmarks
+  * Fixed GtkHx segfault on servers that do not let guests chat
+  * Fixed file download button
+  * Multi-tracker support
+  * Implemented transparency tinting
+  * Using glib types for portability
+  * News no longer reloads on private chat join
+  * Non blocking connect/login
+  * Non blocking tracker
+  * Fixed chat focusing bug
+  * Fixed segfault with private messages
+  * Fixed directory creation
+  * SOCKS 4/5 support
+  * Added ability to timestamp chat
+  * Fixed private chat /me commands
+  * Redid options window
+  * Autoconf improvements
+  * News no longer loads if news button is clicked while news is open
+  * Show private messages at back now works
+  * Added ability to toggle wordwrap in chat
+  * Added ability to browse in same window or create new windows
+  * Sound command can now be specified
+  * Failed tasks are now deleted from tasks window
+  * Added ability to toggle case sensitivity in tracker search
+  * Fixed another init bug with chat
+
+ -- Misha Nasledov <misha@nasledov.com>  Sat, 27 Jan 2001 11:46:00 -0800
+
+gtkhx (0.8.6-1) unstable; urgency=low
+
+  * Fixed post news dialog ui
+  * Fixed options window ui
+  * Implemented ability to move files
+  * Fixed prefs bugs
+  * Fixed major init bugs
+  * Fixed xtext transparency setting
+  * Fixed file browsing bug
+  * Close agreement/files windows on disconnect
+  * Fixed private chat ui
+  * GtkHx now uses Hotline Client bookmarks
+  * New icons code
+
+ -- Misha Nasledov <misha@nasledov.com>  Sun, 31 Dec 2000 19:53:00 -0800
+	
+gtkhx (0.8.5-1) unstable; urgency=low
+
+  * Fixed a bug where message window input would lock up if empty message was sent
+  * Now clear chat on new connection
+  * Tracker is now listed when tracker window is opened
+  * Added ignore pixmap (thanks Philip!)
+  * Code cleanup/weeding
+  * Now use fork() instead of clone()
+  * Added a /unignore
+  * Added download path setting
+  * GtkHx logo is now 256 colors
+  * Regex supported in tracker search
+  * Xfer ETA now displayed in hours:mins:secs
+  * Fixed horizontal scrollbar in tracker
+  * Data path now defaults to PREFIX/share/gtkhx
+  * Got rid of xfer reporting from chat
+  * Fixed crash if chat window closed
+  * Got rid of ugly default toolbar
+  * Added ability to manipulate the position of a queued file xfer
+  * Improved file browsing
+  * No longer attempts to load news if not connected
+  * Added some command line options
+  * Added check for Cygwin environment
+  * Added man page
+  * Fixed more window initialization bugs
+  * Memory leak fixes
+  * Fixed clear for private chat
+  * Fixed bug with listing a directory
+  * Display number of servers found/total in tracker
+  * Added locale support
+  * French translation added
+  * Display correct icon for upload/drop box directories
+  * Added a header to the user list for UID and Name
+  * Fixed several GtkHx pixmaps
+  * Fixed tracker code so it no longer uses GList
+  * Added debug option to GtkHx
+  * Improved gtk_hlist
+  * Implemented ability to delete files
+  * Fixed history code bugs
+  * Better nick tab completion
+  * Fixed issues on servers that have server-side download queueing
+  * Task go now fully works
+  * Option to not queue file transfers now works
+  * Newer XText widget
+  * Cancul button in private chat prompt dialog now works
+  * Fixed segfault with private messages
+
+ -- Misha Nasledov <misha@nasledov.com>  Thu, 21 Dec 2000 19:23:00 -0800
+
+gtkhx (0.8.4-1) unstable; urgency=high
+
+  * Removed old user_print function
+  * Fixed directory creation
+  * Fixed up file navigation code
+  * Fixed uploads
+  * Bugfixes for window geometry: open/init
+  * Made file transfer tasks sizes/speeds human readable
+  * Fixed file transfers
+  * Tasks list now exists/is updated even when tasks window is closed
+  * GtkHx properly quits if file xfers are in progress
+
+ -- Misha Nasledov <misha@nasledov.com>  Thu, 07 Dec 2000 13:30:00 -0800
+
+gtkhx (0.8.3-1) unstable; urgency=low
+
+  * Ignore bugfixes
+  * Reimplemented /help (simply lists available commands)
+  * Implemented an icon viewer in options
+  * Fixed private chat userlist
+  * A notice is printed in private chat if subject is changed
+
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 06 Dec 2000 00:10:00 -0800
+
+gtkhx (0.8.2-1) unstable; urgency=high
+
+  * Fixed bug where one could send null private messages
+  * Removed annoying separator in private messages
+  * Fixed high ascii in private messages
+  * Fixed private message window input buffer
+  * Fixed default font
+  * Code cleanup
+  * Fixed bug in preference parsing
+  * Support for changing fonts
+  * Support for gdk_fontset_load
+  * No longer use esound or gdk-pixbuf
+  * Display uid in userlist now
+  * Sound code redone
+  * Now use datapath for sounds/icons
+  * Now check for glib in configure
+  * Fixed segfault if chat is closed
+  * Implemented ignore
+  * Fixed line breaks in XText
+  * Quit when toolbar is closed
+  * Update transparency on other XText widgets if moved
+  * Removed extra checks from configure
+
+ -- Misha Nasledov <misha@nasledov.com>  Mon, 27 Nov 2000 15:17:00 -0700
+
+gtkhx (0.8.1-1) unstable; urgency=medium
+
+  * Nick-tab completion
+  * Cleanup of package
+  * Some warnings fixed
+  * Cleanup of code
+  * High ASCII fixed
+  * Fixed bug where GtkHx would crash if news or tasks was closed
+  * Private message windows now follow XText transparency setting
+
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 2 Nov 2000 9:24:00 -0700
+
+gtkhx (0.8-1) unstable; urgency=high
+
+  * New autoconf script
+  * Code cleanup
+  * Fixed advanced toolbar geometry
+  * Added statusbar to advanced toolbar mode
+  * Display port along with IP in window titles
+  * Implemented message-chat
+  * Got rid of gnome-color-picker and gdk-imlib
+  * Fixed font in agreement
+  * Numerous bugfixes
+  * Implemented XText widget
+  * Support for gdk_pixbuf (XText transparency)
+  * Got rid of toolbar geometry settings
+  * Closing toolbar now quits GtkHx
+  * Fixed about window title
+  * Temporarily removed color and font changing code
+  * Fixed build-dependencies (closes: bug#69919)
+  
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 18 Oct 2000 14:25:00 -0700
+
+gtkhx (0.7.1-1) unstable; urgency=low
+
+  * Fixed crash if bookmark name was null
+  * Cleaned up the deb a bit
+
+ -- Misha Nasledov <misha@nasledov.com>  Tue, 25 Jul 2000 00:00:00 -0700
+
+gtkhx (0.7-1) unstable; urgency=low
+
+  * Fixed headers for readline
+  * Added ability to change font
+  * Added ability to change news colours
+  * Fixed debian package for deps
+  * Fixed default font
+  * Sounds off by default now
+  * Fixed up user editor
+  * Fixed tasks window under enlightenment
+
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 19 Jul 2000 00:00:00 -0700
+
+gtkhx (0.6-1) unstable; urgency=low
+
+  * Added remote account administration
+  * Working uploads
+  * Added different file icons depending on file type
+  * Sizes now displayed in units based on magnitude of file size
+  * Icons and tooltips work if user window was never opened
+  * Fixed crash if user window was closed
+  * Better download support
+  * No longer need readline
+  * Added ability to use smaller toolbar
+  * Got rid of au2h
+  * Improved keyboard accelerators
+  * Fixed defaults for chat color 
+  * Fixed prefs code
+
+ -- Misha Nasledov <misha@nasledov.com>  Sat, 17 Jun 2000 00:22:00 -0700
+
+gtkhx (0.5-2) unstable; urgency=low
+
+  * Made it use debhelper
+  * Put a proper copyright statement in
+
+ -- Misha Nasledov <misha@nasledov.com>  Sun, 11 Jun 2000 17:30:12 +1000
+
+gtkhx (0.5-1) unstable; urgency=low
+
+  * fixed drag and drop bug
+  * fixed invitation dialog
+  * added ban pixmap
+  * added gtkhx pixmap for GNOME panel and such
+  * more code cleanup
+  * rearranged buttons in users_window
+  * added ability to customize icon path
+  * added bfi support
+  * added documentation
+  * added file uploads 
+  * working file download button
+  * fixed tasks and file window resize
+  * fixed pixmaps
+  * added sounds
+  * added user editor
+  * improved file browsing
+  * improved timer code 
+  * working downloads
+  * added auto reply feature
+
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 07 Jun 2000 21:16:00 -0700
+
+gtkhx (0.4.2-1) unstable; urgency=low
+
+  * touched up pixmaps
+  * new timer code
+  * improved tasks
+  * improved file transfers
+  * autoconf script fixed
+  * cafelinux bookmark fixed
+  * code cleanup
+
+ -- Misha Nasledov <misha@nasledov.com>  Mon, 05 Jun 2000 00:00:00 -0700
+
+gtkhx (0.4.1-1) unstable; urgency=low
+
+  * package debianized.
+
+ -- Misha Nasledov <misha@nasledov.com>  Wed, 24 May 2000 16:48:52 -0700
+
+Local variables:
+mode: debian-changelog
+End:

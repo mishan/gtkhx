@@ -1,0 +1,13 @@
+GtkHx is a GTK+ Hotline Client based on Hx, a console Hotline Client written by 
+Ryan Nielsen.  It is still under development and some features of it
+may not be completely working.  Read the INSTALL doc for more information on 
+compiling GtkHx and getting it to work.  GtkHx is under the GPL license.
+
+A few recommended Hotline servers:
+cafelinux.dhs.org
+hl.singrafix.com [guest/@sin]
+hlserver.com
+
+A few recommended Hotline trackers:
+hltracker.com
+darksidetracker.dhs.org

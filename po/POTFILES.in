@@ -1,0 +1,10 @@
+src/gtkhx.c
+src/chat.c
+src/news.c
+src/options.c
+src/toolbar.c
+src/usermod.c
+src/files.c
+src/connect.c
+src/tracker.c
+src/plugin.c

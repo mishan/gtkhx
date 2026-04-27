@@ -1,0 +1,14 @@
+gtkhx for Debian
+----------------------
+
+GtkHx is a Hotline Client based on Hx, a hotline client written by Ryan
+Nielsen.  It is still under development and some features of it may not
+be completely working.  Read the INSTALL doc for more information on
+compiling GtkHx and getting it to work.  GtkHx is under the GPL license.
+
+A few recommended Hotline servers:
+cafelinux.dhs.org
+hlserver.com
+
+--------------------------------------------------------------------
+Misha Nasledov <misha@debian.org>, Wed, 24 May 2000 16:48:52 -0700

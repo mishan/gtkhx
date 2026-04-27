@@ -1,0 +1,9 @@
+Installation Instructions for GtkHx
+==========================================
+1. './configure'
+2. '[g]make' (use gmake if you are on a non-GNU system)
+3. '[g]make install'
+
+If you do not have root access, GtkHx can be put anywhere, as well as
+icons.rsrc.  Just make sure you have the correct path set to icons.rsrc
+in the GtkHx preferences.

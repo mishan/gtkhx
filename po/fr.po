@@ -1,0 +1,619 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR Free Software Foundation, Inc.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"POT-Creation-Date: 2001-05-03 15:17-0700\n"
+"PO-Revision-Date: 2001-11-23 12:11GMT\n"
+"Last-Translator: Jean-Sébastien HUBERT <jshubert@netcourrier.com>\n"
+"Language-Team: français\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=ISO-8859-15\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: KBabel 0.9.5\n"
+
+#: src/gtkhx.c:212 src/gtkhx.c:231
+msgid "alloc color failed"
+msgstr "Échec de l'allocation des couleurs"
+
+#: src/chat.c:1187 src/gtkhx.c:361 src/usermod.c:351
+msgid "User Info"
+msgstr "Renseignements Personnels"
+
+#: src/gtkhx.c:411
+msgid "Agreement"
+msgstr "Ok"
+
+#: src/gtkhx.c:414
+msgid "Agree"
+msgstr "Ok"
+
+#: src/gtkhx.c:415
+msgid "Disagree"
+msgstr "Non"
+
+#: src/chat.c:823 src/chat.c:891 src/options.c:1290 src/toolbar.c:201
+msgid "Chat"
+msgstr "Chat"
+
+#: src/chat.c:995
+msgid "Subject Changed to"
+msgstr "Sujet changé par"
+
+#: src/chat.c:1008 src/options.c:1288
+msgid "Chat Invitation"
+msgstr "Invitation au Chat"
+
+#: src/chat.c:1010
+msgid "invites you to private chat"
+msgstr "T'invites à un Chat privé"
+
+#: src/chat.c:1013 src/options.c:1296
+msgid "Join"
+msgstr "Joindre"
+
+#: src/chat.c:1018
+#, fuzzy
+msgid "Decline"
+msgstr "Refuser"
+
+#: src/chat.c:1070
+msgid "UID"
+msgstr "Uid"
+
+#: src/chat.c:1070 src/files.c:545 src/plugin.c:139 src/tracker.c:369
+msgid "Name"
+msgstr "Nom"
+
+#: src/chat.c:1083 src/chat.c:1202
+msgid "Private Chat"
+msgstr "Chat Privé"
+
+#: src/chat.c:1168
+msgid "Msg"
+msgstr "Message"
+
+#: src/chat.c:1177
+msgid "Kick"
+msgstr "Expulser"
+
+#: src/chat.c:1197
+msgid "Ban"
+msgstr "Bannir"
+
+#: src/chat.c:1211
+msgid "Ignore"
+msgstr "Ignorer"
+
+#: src/news.c:112 src/news.c:187
+msgid "Post News"
+msgstr "Poster une nouvelle"
+
+#: src/connect.c:389 src/files.c:468 src/news.c:130 src/options.c:1719
+msgid "OK"
+msgstr "Ok"
+
+#: src/connect.c:391 src/connect.c:548 src/files.c:473 src/news.c:133
+#: src/options.c:1729 src/usermod.c:431
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/news.c:194
+msgid "Reload News"
+msgstr "Recharger les Nouvelles"
+
+#: src/news.c:198 src/news.c:235 src/options.c:1302 src/toolbar.c:177
+msgid "News"
+msgstr "Nouvelles"
+
+#: src/options.c:664
+#, c-format
+msgid "Cannot open %s for reading\n"
+msgstr "Ne peut ouvrir %s en lecture\n"
+
+#: src/options.c:691
+#, c-format
+msgid "Could not write to %s/.gtkhxrc\n"
+msgstr "Ecrire impossible de %s/.gtkhxrc\n"
+
+#: src/options.c:1058 src/options.c:1358
+msgid "Browse Fonts"
+msgstr "Explorer les polices"
+
+#: src/options.c:1168 src/options.c:1762
+msgid "Trackers"
+msgstr "Traqueurs"
+
+#: src/options.c:1183
+msgid "Address: "
+msgstr "Adresse: "
+
+#: src/options.c:1192
+msgid "Add"
+msgstr "Ajouter"
+
+#: src/options.c:1195
+msgid "Remove"
+msgstr "Retirer"
+
+#: src/options.c:1217
+msgid "File Browsing"
+msgstr "Explorer les Fichiers"
+
+#: src/options.c:1220
+msgid "Browse in Same Window"
+msgstr "Explorer dans la même fenêtre"
+
+#: src/options.c:1235
+msgid "SOCKS"
+msgstr ""
+
+#: src/options.c:1239
+msgid "Use SOCKS Server"
+msgstr "Utiliser un serveur SOCKS"
+
+#: src/options.c:1249
+#, fuzzy
+msgid "SOCKS Server: "
+msgstr "Serveur:"
+
+#: src/options.c:1253
+msgid "SOCKS Port: "
+msgstr "port SOCKS"
+
+#: src/options.c:1267
+msgid "Sound Command"
+msgstr "Commande sonore"
+
+#: src/options.c:1273
+msgid "Sound Command: "
+msgstr "Commande sonore"
+
+#: src/options.c:1284
+#, fuzzy
+msgid "Sounds"
+msgstr "Bruitages"
+
+#: src/options.c:1286
+msgid "Play Sounds For:"
+msgstr "Jouer des sons pour:"
+
+#: src/connect.c:336 src/options.c:1292
+msgid "Error"
+msgstr "Erreur"
+
+#: src/options.c:1294
+msgid "File Transfer Complete"
+msgstr "Téléchargement du fichier terminé"
+
+#: src/options.c:1298
+msgid "Login"
+msgstr "Login"
+
+#: src/options.c:1300
+msgid "Private Message"
+msgstr "Message privé"
+
+#: src/options.c:1304
+msgid "Leave"
+msgstr "Quitter"
+
+#: src/options.c:1337 src/options.c:1774
+#, fuzzy
+msgid "Fonts"
+msgstr "Polices"
+
+#: src/options.c:1341
+msgid "Font: "
+msgstr "Police: "
+
+#: src/options.c:1354
+msgid "Use gdk_fontset_load"
+msgstr "Utiliser gdk_fontset_load"
+
+#: src/options.c:1373
+msgid "Transparency"
+msgstr "Transparence"
+
+#: src/options.c:1379
+msgid "Use Transparent XText Widget"
+msgstr "Utiliser le Widget XText transparent"
+
+#: src/options.c:1385
+msgid "Red: "
+msgstr "Rouge"
+
+#: src/options.c:1386
+msgid "Green: "
+msgstr "Vert"
+
+#: src/options.c:1387
+msgid "Blue: "
+msgstr "Bleu"
+
+#: src/options.c:1392 src/options.c:1541 src/options.c:1770
+msgid "Miscellaeneous"
+msgstr "Divers"
+
+#: src/options.c:1396
+msgid "Timestamp Chat"
+msgstr ""
+
+#: src/options.c:1400
+msgid "Word Wrap"
+msgstr ""
+
+#: src/options.c:1406
+msgid "Maximum Lines (0 = Unlimited)    "
+msgstr "nombre max. de lignes(0=Sans limites)"
+
+#: src/options.c:1421
+#, fuzzy
+msgid "Notes"
+msgstr "Notes"
+
+#: src/options.c:1423
+msgid ""
+"You can have more then one icon list.\n"
+"Enter as many icon lists as you want, comma separated."
+msgstr ""
+"Vous pouvez avoir plus d'une liste d'icônes.\n"
+"Entrez les listes d'icônes séparées par des virgules."
+
+#: src/options.c:1428 src/options.c:1766
+#, fuzzy
+msgid "Paths"
+msgstr "Chemins:"
+
+#: src/options.c:1434
+msgid "Icon Path:"
+msgstr "Chemin des icônes"
+
+#: src/options.c:1445
+#, fuzzy
+msgid "Sound Path:"
+msgstr "Chemin des sons"
+
+#: src/options.c:1456
+msgid "Download Path:"
+msgstr "Répertoire de téléchargement"
+
+#: src/options.c:1492
+msgid "Icon"
+msgstr "Icône"
+
+#: src/options.c:1498
+msgid "Icon ID: "
+msgstr "Identifiant de l'icône:"
+
+#: src/options.c:1548
+msgid "Auto Reply"
+msgstr "Réponse auto"
+
+#: src/options.c:1556
+msgid "Show Private Messages at Back"
+msgstr "Montrer les messages privés au retour"
+
+#: src/options.c:1562
+msgid "Queue File Transfers"
+msgstr "Mettre les fichiers en attente"
+
+#: src/options.c:1568
+msgid "Show Join/Leave in Chat"
+msgstr "Montrer les aller-venue du salon"
+
+#: src/options.c:1574
+msgid "Case Sensitive Tracker Searching"
+msgstr "Recherche avec Tracker(sensible à la case)"
+
+#: src/options.c:1589
+msgid "General"
+msgstr "Général"
+
+#: src/options.c:1601
+msgid "Your Name:"
+msgstr "Votre Nom:"
+
+#: src/options.c:1724
+msgid "Apply"
+msgstr "Appliquer"
+
+#: src/options.c:1739
+msgid "Categories"
+msgstr "Catégories"
+
+#: src/options.c:1759
+#, fuzzy
+msgid "General Settings"
+msgstr "Réglages principaux"
+
+#: src/options.c:1762
+#, fuzzy
+msgid "Tracker Settings"
+msgstr "Configuration du Traqueur"
+
+#: src/options.c:1764
+msgid "Icon Settings"
+msgstr "Configuration des Icônes"
+
+#: src/options.c:1764
+msgid "Icons"
+msgstr "Icônes"
+
+#: src/options.c:1766
+msgid "Path Settings"
+msgstr "Config. des chemins"
+
+#: src/options.c:1768
+msgid "Files Settings"
+msgstr "Config. des fichiers"
+
+#: src/options.c:1768 src/toolbar.c:185
+msgid "Files"
+msgstr "Fichiers"
+
+#: src/options.c:1772
+msgid "XText Settings"
+msgstr "Config. d'XText"
+
+#: src/options.c:1774
+msgid "Font Settings"
+msgstr "Config. des polices"
+
+#: src/options.c:1776
+msgid "Sound Settings"
+msgstr "Config. des sons"
+
+#: src/options.c:1778
+msgid "SOCKS Settings"
+msgstr ""
+
+#: src/toolbar.c:98
+msgid "connection closed"
+msgstr "connexion fermée"
+
+#: src/toolbar.c:146
+msgid "Not Connected"
+msgstr "Non Connecté(e)"
+
+#: src/connect.c:552 src/toolbar.c:153 src/tracker.c:412
+msgid "Connect"
+msgstr "Connexion"
+
+#: src/toolbar.c:161 src/tracker.c:379
+msgid "Tracker"
+msgstr "Traqueur"
+
+#: src/toolbar.c:169
+msgid "Options"
+msgstr "Options"
+
+#: src/toolbar.c:193 src/tracker.c:369
+msgid "Users"
+msgstr "Utilisateurs"
+
+#: src/toolbar.c:209
+msgid "Post"
+msgstr "Poster"
+
+#: src/toolbar.c:217
+msgid "Tasks"
+msgstr "Tâches"
+
+#: src/toolbar.c:225
+msgid "About"
+msgstr "A propos"
+
+#: src/toolbar.c:233
+msgid "Disconnect"
+msgstr "Déconnexion"
+
+#: src/toolbar.c:241
+msgid "Quit"
+msgstr "Quitter"
+
+#: src/toolbar.c:249
+msgid "New User"
+msgstr "Nouveau Utilisateur"
+
+#: src/toolbar.c:257
+msgid "Edit User"
+msgstr "Éditer L'utilisateur"
+
+#: src/toolbar.c:263
+msgid "Plugin Manager"
+msgstr "Gestion des Plugins"
+
+#: src/usermod.c:315 src/usermod.c:320
+msgid "User Editor"
+msgstr "Éditeur D'utilisateur"
+
+#: src/files.c:1034 src/usermod.c:335
+msgid "Save"
+msgstr "Sauver"
+
+#: src/usermod.c:339
+msgid "Delete User"
+msgstr "Effacer L'utilisateur"
+
+#: src/plugin.c:156 src/usermod.c:342
+msgid "Close"
+msgstr "Fermer"
+
+#: src/connect.c:490 src/usermod.c:355
+msgid "Login:"
+msgstr "Nom d'utilisateur:"
+
+#: src/connect.c:394 src/usermod.c:360
+msgid "Name:"
+msgstr "Nom:"
+
+#: src/usermod.c:362
+msgid "Pass:"
+msgstr "Mot de passe:"
+
+#: src/usermod.c:430
+msgid "Open"
+msgstr "Ouvrir"
+
+#: src/usermod.c:432
+msgid "Login: "
+msgstr "Nom d'utilisateur: "
+
+#: src/usermod.c:433
+msgid "Open User"
+msgstr "Ouvrir L'utilisateur"
+
+#: src/files.c:218
+msgid "cannot create download directory"
+msgstr "Ne peut créer le répertoire de téléchargement"
+
+#: src/files.c:219
+msgid "aborting download"
+msgstr "abandon du téléchargement"
+
+#: src/files.c:249
+msgid "Upload..."
+msgstr "Transfert..."
+
+#: src/files.c:459
+#, fuzzy
+msgid "New Folder..."
+msgstr "Nouveau Répertoire..."
+
+#: src/files.c:463 src/files.c:1046
+msgid "Name: "
+msgstr "Nom: "
+
+#: src/files.c:545 src/files.c:1044
+msgid "Size"
+msgstr "Taille"
+
+#: src/files.c:587
+msgid "Parent Directory"
+msgstr "Répertoire parent"
+
+#: src/files.c:595
+msgid "Reload"
+msgstr "Recharger"
+
+#: src/files.c:602
+msgid "Download"
+msgstr "Télécharger"
+
+#: src/files.c:610
+msgid "Upload"
+msgstr "Transférer"
+
+#: src/files.c:620
+msgid "New Folder"
+msgstr "Nouveau répertoire"
+
+#: src/files.c:628
+msgid "Info"
+msgstr "Information"
+
+#: src/files.c:636
+msgid "Delete"
+msgstr "Effacer"
+
+#: src/files.c:1028
+msgid "File Info"
+msgstr "Infos fichier"
+
+#: src/files.c:1036
+msgid "Creator"
+msgstr "Crée par"
+
+#: src/files.c:1038
+msgid "Type"
+msgstr "Type de fichier"
+
+#: src/files.c:1040
+msgid "Modified"
+msgstr "Modifié"
+
+#: src/files.c:1042
+msgid "Created"
+msgstr "Créé"
+
+#: src/connect.c:244
+msgid "No such bookmark"
+msgstr "Le signet n'existe pas"
+
+#: src/connect.c:337
+msgid "You must specify a name for this bookmark with at least one character."
+msgstr "Vous devez indiquer un nom pour ce signet avec au moins une lettre."
+
+#: src/connect.c:395
+msgid "Save Bookmark..."
+msgstr "Sauvegarder le signet"
+
+#: src/connect.c:467
+msgid ""
+"Enter the server address, and if you have an account, your login and "
+"password. If not, leave the login and password blank."
+msgstr "Écrivez l'adresse du serveur, et si vous avez un compte, votre nom d'utilisateur et mot de passe."
+"Sinon, ne pas remplir les champs 'Nom d'utilisateur' et 'Mot de passe'."
+
+#: src/connect.c:483
+msgid "Server:"
+msgstr "Serveur:"
+
+#: src/connect.c:497
+msgid "Password:"
+msgstr "Mot de passe:"
+
+#: src/connect.c:544
+msgid "Save..."
+msgstr "Sauvegarde..."
+
+#: src/tracker.c:369
+msgid "Address"
+msgstr "Adresse"
+
+#: src/tracker.c:369
+msgid "Port"
+msgstr "Port"
+
+#: src/plugin.c:139 src/tracker.c:369
+msgid "Description"
+msgstr "Description"
+
+#: src/tracker.c:396
+msgid "Search: "
+msgstr "Recherche: "
+
+#: src/tracker.c:403
+msgid "Refresh"
+msgstr "Rafraîchir"
+
+#: src/plugin.c:89
+msgid "GtkHx - Select Plugin"
+msgstr "GtkHX - Sélection de Plugin"
+
+#: src/plugin.c:147
+msgid "GtkHx - Plugins"
+msgstr "GtkHx - Plugins"
+
+#: src/plugin.c:150
+#, fuzzy
+msgid "Load"
+msgstr "Charger"
+
+#: src/plugin.c:153
+#, fuzzy
+msgid "Unload"
+msgstr "Décharger"
+
+#: src/plugin.c:317
+#, fuzzy
+msgid "Loading"
+msgstr "Procédure de connexion"
+
+#: src/plugin.c:482
+msgid "Could not load plugin: "
+msgstr "Impossible de charger le plugin:"
+

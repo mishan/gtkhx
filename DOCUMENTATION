@@ -1,0 +1,172 @@
+A Brief Introduction to Hotline, and the GTK+ HotlineX Application
+
+-------------
+So, you've just installed GtkHx. Now, what exactly can you do with this new 
+toy? GtkHx tries very hard to mimic the user experience of Hotline Software's 
+Hotline client, most especially the 1.2 versions of this client. Users who are
+experienced with Hotline in general will pick it up in no time, much of the 
+reason why the interface was designed in the fashion it was.  
+---
+
+The Toolbar window:
+
+This window is the most important of them all, and is the "control center" of a
+GUI Hotline client. On this window are various buttons, each of which controls 
+a primary function of the Hotline client.  
+
+   --- The Connect button: This is quite strait-forward. You press the button,
+and are presented with a few options for connecting to a server. Simply enter 
+in the domain name or IP of the server, the login and password(If needed, 
+otherwise just leave the two fields blank for guest access to the server). A 
+quite useful feature of the client, is its ability to store addresses of 
+various Hotline servers. Click the "Save" button, then you're presented with 
+a prompt for the name of the book-mark. Enter in something which you'll 
+remember, and then whenever you click on the arrow pointing downwards, in the 
+connection dialog, you'll be given the option to connect to that server 
+without having to re-type or remember any details of that server( Address, 
+login and password, etc).
+
+   --- Disconnect button: Disconnects you from the server you're currently 
+connected to.
+
+   --- Tracker button: Opens the tracker window. What is a tracker? Well a 
+tracker is a server, just like a Hotline server, except instead of serving a 
+Hotline client in a normal fashion, it serves as a constantly changing listing
+of a whole number of Hotline servers. Any Hotline server operator has the 
+option of registering himself with one, or perhaps more, trackers. These
+trackers keep tabs on the servers, with a brief piece of information on them, 
+the current IP address of the tracker, and how many users are logged into the 
+server. The tracker is a wonderful tool, most especially for those servers 
+with dynamic IPs, whom would otherwise be lost to only the larger servers.
+     
+      So in the tracker window, you are presented with a typing line above an 
+otherwise pretty blank window. First you've got to set a tracker to use( Click
+ on the options button, on the tool bar, then enter a Hotline tracker address.
+) ( Don't know of a tracker? There are a few web sites which keep tabs on the 
+major trackers, one of the more notable is http://www.tracker-tracker.com ) 
+Once you have a tracker listing, you can hit the "refresh" button to have the 
+list of servers refreshed from the tracker, and you must hit the refresh 
+button to display your server listings the first time, as well.( The button 
+with a file on it, arrows spinning around in a circle). Once you see a server 
+that interests you, simply click on it, then click on the connect button at 
+the top of the tracker window. ( The button with 3 circles in a triangle )
+
+  --- Options button: This button brings up the general options dialog box. 
+Here you may set your:
+
+      General{
+
+          -user name
+
+          -the tracker you can use
+
+          -if you wish to display private messages behind the rest of 
+GtkHx(Very useful if someone is constantly messaging you) (not implemented yet)
+
+          -If you wish to, by default,  "Queue" your file transfers, meaning 
+one starts right after the other. This option is, by default,  set to on, as 
+most servers love it when the users don't hog the bandwidth, after all, the 
+services are free, so try and so some respect :)
+
+          -how you wish colors of the chat background and text to appear, and 
+the font size which text is displayed in chat.
+
+            }
+
+       Icon{
+
+          -The user icon which others see you as, on the user list. Currently, 
+GtkHx only supports changing this as a number, where the number corresponds to
+an actual icon. The default icon is 500, which is displayed on GtkHx as a 
+ying-yang, or as the text "UNIX" to most other Hotline clients.
+         
+          -You may also set the path to an "icon file", or a .rsrc file, which
+contains extra icons for hotline. Currently, there are few of these, in .rsrc
+format, for use.
+
+           }
+
+       Sound{
+
+          -Here, you may enable or disable all GtkHx sounds. You can also 
+select which sounds you want GtkHx to play.
+
+           }
+
+       Misc{
+
+          -Auto reply: Turning this option on, and typing in text in the field
+near it, allows GtkHx to respond to a message the second your client gets it. 
+Somewhat useful if you want to setup some sort of away or warning message 
+system.
+
+           }
+
+    --- News button: This button displays the news window, which shows news 
+posts from different users in a non-threaded manner. The paper icon in the 
+news window is a shortcut to the "Post News" window, which allows you to post 
+messages which other users can read and exchange ideas about. The refresh icon
+refreshes the news, and allows you to see new posts.
+
+    --- Post button: This button brings up a window, in which you can type 
+items to be posted to the news at the server. 
+
+    --- Files button: This button displays the files on the server. You may 
+navigate throughout the files in a macos/windows like manner, double clicking 
+the folders to open them, and double clicking on the files to download them.
+ 
+          -The refresh button refreshes the contents of the current directory.
+
+          -The down button downloads an item, the up button will (eventually) 
+upload an item
+
+          -The folder button creates a new folder, if you have the proper user
+privs
+
+          -The "i" button gets info on a folder or file, telling you what TYPE
+of file it is, before downloading, along with some file comments
+
+          -The trash button, naturally, sends the item to the server's 
+trashcan, if you have the proper user privs
+
+   --- Users button: This button displays the user window. In the user menu, 
+there is a list of every user on the server. Users who are inactive are marked
+with a grey name, and users who are admins, are marked with a red name. Every
+user can have an icon displayed next to their name, which can be set in the 
+options dialog box. Above the user listing is 5 buttons:
+
+         -Button with chat bubble, with a "!" mark in it: This button is 
+allows you to private message another user, which can also be done by double 
+clicking on their user name, in the user list. Select a user, then click on 
+this button, to send them a message privately.
+
+         -Button with a single red slash through it: This kicks, or 
+disconnects(without a time period set), a selected user. Only people with the 
+proper user privs can kick and otherwise ban users.
+
+         -Button with chat bubble, and a few lines of text in it: This allows
+you to create a "private chat" with another user. This acts just as normal 
+chat, with the slight difference of the chat title( Which can be set by typing
+into the text field above the private chat window, and hitting return ).
+
+         -"i" button: Select a user, click this button, and if you have the 
+proper user privs, you will be able to see information on what the user's IP 
+address is, what account they are logged in on, and what they are downloading 
+and uploading
+
+         -Button with two red slashes through it: Select a user, click on this
+button, and they are placed into the server's ban list. This, of course, can 
+only be done by users with the proper priveleges. 
+
+   --- Chat button: This button displays the main chat of the server you are 
+connected to
+
+   --- Tasks button: This button displays the tasks which GtkHx is doing at 
+any given time, such as downloading a file, getting user info, or sending a 
+private message. From here, you may cancel any given task by pressing the 
+standard red "kill" button, or force-unqueue a download or task, by pressing 
+the green "go" light button
+
+   --- About button: Standard application about box :)
+
+   --- Quit Button: Exits the GtkHx application

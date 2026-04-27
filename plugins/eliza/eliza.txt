@@ -1,0 +1,697 @@
+
+School
+
+Do you like school?
+Is your teacher a bore?
+What was your last project
+Have you ever failed a test?
+What do you learn in school, anyway?
+
+_war_
+destruct
+_causualt
+_bomb
+
+Tell me what you think of war.
+What did you think of the Gulf war?
+Do you know any war veterans?
+What do you think of nuclear bombs?
+How bad do you think the violence in our society is?
+What do you think of Saddam Hussein?
+
+_nintendo
+_video game
+_game
+
+Do you play videogames much?
+Perhaps you play too many games.
+Please!  I can't stand video games!
+
+_ninja
+_turtles
+
+Which is your favorite ninja turtle?
+
+_name
+
+Please don't name names.
+I'm afraid I'm not very good with names.
+
+cause
+_because_
+cuz
+
+Is that the real reason?
+Don't any other reasons come to mind?
+Does that reason explain anything else?
+What other reasons might there be?
+
+dream
+_nightmare
+
+What does that dream suggest to you?
+Do you dream often?
+What persons appear in your dreams?
+Are you disturbed by your dreams?
+What do you think your dreams mean?
+
+wife
+husband
+spouse
+
+Does your spouse worry you?
+How well do you get along with your spouse?
+Have you cheated on your spouse?
+
+mother
+_mom
+
+Tell me more about your mother.
+How does your mother treat you?
+How often do you see your mother?
+Perhaps you should bring your mother in to see me.
+
+father
+_dad
+
+Does your father intimidate you?
+Do you like your father?
+Why don't you try explaining this to your father?
+
+sister
+brother
+sibling
+
+Who else in your family*?
+Do you have any other siblings?
+Does this make you jealous?
+
+family
+
+Tell me about the rest of your family.
+How does your family get along?
+Did you come here to talk about your relatives?
+
+_girl
+
+Do you think about girls much?
+Do you find girls attractive?
+I would like to hear more about your feelings toward girls.
+
+_boy
+
+Do you like boys?
+Do you envy boys?
+What do you like about boys?
+What boys are cute?
+How well can you talk to boys?
+
+sex
+
+Does the topic of sex embarass you?
+What do your parents think about sex?
+Do you feel comfortable discussing sex?
+What do your friends tell you about sex?
+
+_hate
+_anger
+_angr
+_mad_
+_maddening_
+
+How often do you get angry?
+Try smashing egg cartons.
+Does your hate frighten you?
+Why are you angry?
+Maybe pillow-beating can help.
+Do you feel free to express your anger?
+How do you tell others that you're mad?
+What do you do to get rid of your frustrations?
+
+_love
+
+What kinds of people do you love?
+How do you express your love?
+How easily is it for you to love someone?
+
+_everybody
+_everyone
+_anybody
+_anyone
+_folks
+_people
+
+Who in particular are you thinking of?
+Are you being prejudiced?
+Everyone isn't the same.
+Who does this remind you of most?
+Who in particular?
+
+maybe
+
+You don't seem quite certain.
+Why the uncertain tone?
+Try to be more positive.
+You aren't sure.
+Why don't you know?
+
+always
+
+Can you think of a specific example?
+When?
+What are you thinking of?
+Really, always?
+
+never
+
+Can you think of any exceptions?
+Never ever?
+
+think
+
+Do you really think so?
+But you are not sure you*.
+Do you doubt you*?
+
+alike
+similar
+
+In what way?
+What resemblance do you see?
+What does the similarity suggest to you?
+What other connections do you see?
+Could there really be some connection?
+How?
+
+blame
+fault
+
+Blaming people probably won't help.
+I'm sure there is plenty of blame to go around.
+Who else might be at fault?
+
+_friend
+_buddy_
+_buddies_
+_chum
+_pal_
+
+Why do you bring up the topic of friends?
+Do your friends worry you?
+Do your friends pick on you?
+Do have any other friends?
+Prehaps your love for your friend bothers you.
+
+_suicide
+
+Have you mentioned this to your counselor?
+Do you contemplate suicide often?
+I think you should tell someone else about this.
+Does your own death worry you?
+Have you told anyone about this?
+
+_kill
+_murder
+_assasinate
+_strangle
+
+Who would you like to murder?
+Have you ever killed anyone?
+Do you think about death much?
+
+hurt
+pain
+agony
+
+You sound like you have been really hurt.
+It will take a long time to heal your pain.
+I empathize with you.
+I feel your pain.
+
+_die_
+passed away
+death
+dead
+dying
+
+Does death worry you?
+Dying is scary.
+What does your religion tell you about dying?
+
+computer
+machine
+_ibm
+keyboard
+screen
+monitor
+pc
+
+Computers worry you?
+Are you talking about me in particular?
+Are you frightened by machines?
+Why do you mention computers?
+What do machines have to do with your problem?
+What is it about machines that worries you?
+Are you able to communicate with computers?
+
+worry
+
+Do you worry about these things often?
+When do you usualy worry about this?
+Try not to let it bother you.
+You may be worrying too much.
+
+fraid
+_fear
+terror
+
+How often are you afraid?
+It's OK to be afraid sometimes.
+What other things do you fear?
+
+_doctor
+_hospital
+_nurs
+
+Maybe you should consult another doctor.
+Do hospitals scare you?
+
+_help
+
+I'm right here to help!
+I'm here to help you in any way I can.
+
+_nigger
+_nigga
+_kyke
+_kike
+_chink
+
+Are you feeling anger and hatred towards people of other races?
+Are you racist?
+Do you believe in white supremacy?
+
+_sorry_
+_apologiz
+_excuse me_
+_beg your pardon_
+
+Please don't apologize!
+Apologies are not necessary.
+What feelings do you have when you apologize?
+You don't need to feel defensive.
+
+_hello_
+_hey_
+privet
+_hi_
+greetings
+salutations
+_wuzzup_
+_wassup_
+_wazzup_
+_yo_
+_What's up_
+
+How do you do...please state your problem.
+Hello!
+Greetings.
+Welcome!  How are you today?
+Hello , my good friend !
+
+_body
+_hair
+_belly
+_chest
+_breast
+_boob
+_penis
+_skin_
+_scar_
+_scars_
+_tall
+short
+_fat
+weight
+skinny
+_thin_
+_bald
+ugly
+_diet
+
+What do you think of your body?
+You seem concerned about your body.
+What do you think other people see when they look at you?
+I think you look just fine.
+A lot of people feel the same way about their own bodies.
+
+_can you_
+
+That's a perfectly good question for you to ask.
+Don't you believe that I can*?
+Perhaps you would like to be able to*.
+You want to be able to*.
+I have never tried to*.
+
+_you can't_
+_you cannot_
+
+Who said I can't*?
+What if I can*?
+But I can*.
+Maybe you are secretly concerned that you can't*.
+
+_you can_
+
+How do you know I can*?
+Maybe I can't*.
+So what if I am able to*?
+Can you*?
+
+_can I_
+
+That's a perfectly good question for you to ask.
+Why don't you try to*?
+Perhaps you don't want to*.
+Do you want to be able to*?
+
+_you are_
+_you're_
+
+What makes you think I am*?
+Does it please you to believe I am*?
+Perhaps you would like to be*.
+Do you sometimes wish you were*?
+
+_you aren't_
+
+Why don't you think I am*?
+I'm not*.
+Why am I not*?
+Are you ever*?
+
+_I don't_
+
+Don't you really*?
+Why don't you*?
+Do you wish to be able to*?
+Do you want to*?
+Does that trouble you?
+
+_I feel_
+
+Tell me more about such feelings.
+Do you often feel*?
+You feel*.
+Does it hurt to feel*?
+
+_why don't you_
+
+That's a perfectly good question for you to ask.
+Do you really believe I don't*?
+Perhaps in good time I will*.
+Do you want me to*?
+
+_why can't i_
+_can't i_
+
+That's a perfectly good question for you to ask.
+Do you think you should be able to*?
+Why can't you*?
+
+_are you_
+
+That's a perfectly good question for you to ask.
+Why are you interested in whether or not I am*?
+Would you prefer if I were not*?
+Perhaps in your fantasies I am*.
+In your dreams.
+
+_I can't_
+
+How do you know you can't*?
+Have you tried?
+Perhaps now you can*.
+
+_I am_
+_I'm_
+
+Did you come to me because you are*?
+How long have you been*?
+Do you believe it is normal to be*?
+Do you like being*?
+
+_am I_
+
+That's a perfectly good question for you to ask.
+Do you think you are*?
+Do you want me to say you are*?
+Don't you know if you are*?
+It is possible you are*?
+What if you are*?
+Would it be scary to be*?
+
+_I wasn't_
+_I was not_
+
+For what reason weren't you*?
+I believe you.
+Would you like to be*?
+
+_I was_
+
+Why were you*?
+How come you are no longer*?
+What is it like to not be*?
+
+_I want_
+_I need_
+
+What would it mean to you if you got*?
+What other things do you want?
+Why do you want*?
+Suppose you soon got*?
+I sometimes also want*.
+What if I had*?
+
+_I_like
+
+What other things do you like?
+What kinds of things do you not like?
+You like*.
+
+_I have no_
+
+Why don't you have*?
+Perhaps you would like to have*.
+
+_I have_
+
+What other things do you have?
+Maybe you need to get rid of what you have.
+
+_I will_
+
+When will you do this?
+You will*!  Why on earth for?
+What other plans do you have for the future?
+
+_she_is_
+_she's_
+
+Why do you think she is*?
+In what way would you like to be*?
+Suppose she isn't*?
+
+_he_is_
+_he's_
+
+Why do you think he is*?
+In what way would you like to be*?
+Suppose he isn't*?
+
+what
+how
+who
+where
+when
+why
+
+
+I'll think it over the weekend.
+I don't know.
+Why do you ask?
+That question seems to interest you.
+What answer would please you the most?
+What do you think?
+That's a perfectly good question for you to ask.
+Such questions seem to be on your mind often.
+What is it that you really want to know?
+Why are you asking me?
+Who else have you asked?
+Have you asked such questions before?
+What else comes to mind when you ask that?
+You are a very inquisitive person.
+
+_you have_
+_they have_
+_she has_
+_he has_
+_you own_
+_she owns_
+_he owns_
+
+But what do you have?
+You want what others have.
+What would you like to have?
+You seem jealous.
+
+_thank you_
+
+You're welcome.
+Any time.
+No problem.
+Just doing my job.
+
+_your
+
+Why are you concerned about my*?
+What about your own*?
+
+_you
+_u_
+_ya_
+
+We were discussing you - not me.
+Oh, I*.
+You're not really talking about me, are you?
+Let's leave me out of this.
+Me?!?
+I just work here.
+You're not paying me to talk about myself.
+
+_yes
+_yeah
+_yep
+_yup
+
+You seem quite positive.
+Are you absolutely sure?
+I'll think it over the weekend.
+I see.
+I understand.
+Go on.
+
+_no
+
+Are you saying no just to be negative?
+You are being a bit negative.
+Why not?
+Are you sure?
+Why no?
+Suppose I said yes?
+
+shit
+damn
+fuck
+blya
+xuy
+naxuy
+xuy
+nahuy
+pidor
+pidar
+hell_
+cunt
+dick
+
+That's not very polite.
+Does it please you to use such language?
+What comes to mind when you say that?
+How does it feel to spout obscenities?
+Don't be concerned about offending me.
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+0
+_one_
+_two_
+_three_
+_four
+five_
+_six
+seven
+eight
+nine
+_ten_
+eleven
+twelve
+thirteen
+fifteen
+twenty
+thirty
+forty
+fifty
+ninty
+hundred
+thousand
+million
+billion
+
+I'm afraid I'm not very good with numbers.
+Sorry, but I'm no good with numbers.
+Don't quote figures, please.
+If you're into numbers, Carl Sagan is the one to talk to.
+
+haha
+hehe
+_he_he_
+_ha_ha_
+tee_hee
+_lol_
+rofl
+hj
+hfj
+
+;-)
+:-(
+:-)
+
+qz
+qfz
+brb
+
+;-)
+:-(
+:-)
+
+_T_T_
+
+Copyright (C) 1996-2000 by Vlad Zbarskiy.
+
+NULL
+
+I see.
+What does that suggest to you?
+$#%@?!  Sorry, I just sneezed.  What was that again?
+I'm not sure I understand you fully.
+Come now, elucidate your thoughts.
+*.
+Can you elaborate on that?
+You don't seem too clear on this.
+I'll think it over the weekend.
+Didn't you get enough sleep last night, or what?
+That is quite interesting.
+Fascinating.
+I'm not sure how to react to that.
+Perhaps it will become clearer to you in the future.
+I wish you could tell others about this.
+Ahhem...
+Go on, please.

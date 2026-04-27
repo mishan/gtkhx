@@ -1,0 +1,2 @@
+?package(gtkhx):needs=X11 section=Apps/Net\
+  title="GtkHx" command="/usr/bin/gtkhx"

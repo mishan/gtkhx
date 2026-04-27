@@ -1,0 +1,10 @@
+-Full file support
+-Update documentation
+-Write up API docs
+-Rewrite GtkHList to be a derived class of GtkCList
+-Don't look up colors in cicns -- set our own palette instead.
+-make sure data attached to prefs dialogs gets freed
+-store pref variables inside a union in cfgvar
+-fix preferences broken-ness
+-Reimplement SOCKS support.
+-GTK+ 2.0 support
