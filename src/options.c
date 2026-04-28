@@ -932,18 +932,18 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 {
 	GtkWidget *fontsel = gtk_font_selection_dialog_new(_("Browse Fonts"));
 
-	gtk_signal_connect_object(GTK_OBJECT(
+	g_signal_connect_swapped(GTK_OBJECT(
 								  GTK_FONT_SELECTION_DIALOG(
 									  fontsel)->cancel_button),
-							  "clicked", (GtkSignalFunc) gtk_widget_destroy,
+							  "clicked", (GCallback) gtk_widget_destroy,
 							  GTK_OBJECT(fontsel));
 
 	gtk_object_set_data(GTK_OBJECT(
 							GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
 						"entry", entry);
-	gtk_signal_connect(GTK_OBJECT(
+	g_signal_connect(GTK_OBJECT(
 						   GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
-					   "clicked", GTK_SIGNAL_FUNC(set_font), fontsel);
+					   "clicked", G_CALLBACK(set_font), fontsel);
 	gtk_font_selection_dialog_set_font_name(GTK_FONT_SELECTION_DIALOG(fontsel),
 											gtkhx_prefs.font);
 
@@ -983,14 +983,14 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 
 	lbox = gtk_hbox_new (0, 0);
 	gtk_box_pack_start (GTK_BOX (hbox), lbox, 0, 0, 2);
-	gtk_widget_set_usize (lbox, 60, 0);
+	gtk_widget_set_size_request (lbox, 60, 0);
 
 	lab = gtk_label_new (label);
 	gtk_box_pack_end (GTK_BOX (lbox), lab, 0, 0, 0);
 
 	adj = (GtkAdjustment *) gtk_adjustment_new (*value, 0, 255.0, 1, 25, 0);
-	gtk_signal_connect (GTK_OBJECT (adj), "value_changed",
-							  GTK_SIGNAL_FUNC (settings_slider_cb), value);
+	g_signal_connect (GTK_OBJECT (adj), "value_changed",
+							  G_CALLBACK (settings_slider_cb), value);
 
 	wid = gtk_hscale_new (adj);
 	gtk_scale_set_value_pos ((GtkScale *) wid, GTK_POS_RIGHT);
@@ -1051,7 +1051,7 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_container_add(GTK_CONTAINER(scroll), tracker_list);
 
 	gtk_box_pack_start(GTK_BOX(wid), scroll, 0, 0, 0);
-	gtk_widget_set_usize(scroll, 232, 246);
+	gtk_widget_set_size_request(scroll, 232, 246);
 
 	ent_hbox = gtk_hbox_new(0, 0);
 	gtk_box_pack_start(GTK_BOX(wid), ent_hbox, 0, 0, 0);
@@ -1066,12 +1066,12 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(wid), btnhbox, 0, 0, 0);
 
 	add = gtk_button_new_with_label(_("Add"));
-	gtk_signal_connect(GTK_OBJECT(add), "clicked",
-					   GTK_SIGNAL_FUNC(add_tracker), entry);
+	g_signal_connect(GTK_OBJECT(add), "clicked",
+					   G_CALLBACK(add_tracker), entry);
 
 	remove = gtk_button_new_with_label(_("Remove"));
-	gtk_signal_connect(GTK_OBJECT(remove), "clicked",
-					   GTK_SIGNAL_FUNC(remove_tracker),
+	g_signal_connect(GTK_OBJECT(remove), "clicked",
+					   G_CALLBACK(remove_tracker),
 					   tracker_list);
 
 	gtk_box_pack_start(GTK_BOX(btnhbox), add, 0, 0, 0);
@@ -1275,8 +1275,8 @@ static void settings_page_font(GtkWidget *vbox)
 	btn = gtk_button_new_with_label(_("Browse Fonts"));
 	gtk_table_attach(GTK_TABLE(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,
 					 0);
-	gtk_signal_connect(GTK_OBJECT(btn), "clicked",
-					   GTK_SIGNAL_FUNC(create_fontsel), cfgvars[FONT_IDX].widget);
+	g_signal_connect(GTK_OBJECT(btn), "clicked",
+					   G_CALLBACK(create_fontsel), cfgvars[FONT_IDX].widget);
 
 	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
 }
@@ -1466,10 +1466,10 @@ static void settings_page_icon(GtkWidget *vbox)
 							   (GtkHListCompareFunc)listsorthelper);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_widget_set_usize(scroll, 232, 256);
+	gtk_widget_set_size_request(scroll, 232, 256);
 
-	gtk_signal_connect(GTK_OBJECT(icon_list), "select_row",
-			   GTK_SIGNAL_FUNC(icon_row_selected), iv);
+	g_signal_connect(GTK_OBJECT(icon_list), "select_row",
+			   G_CALLBACK(icon_row_selected), iv);
 
 	gtk_container_add(GTK_CONTAINER(scroll), icon_list);
 	gtk_table_attach(GTK_TABLE(table), scroll, 0, 2, 1, 2,
@@ -1666,10 +1666,10 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_window_set_wmclass(GTK_WINDOW(dialog), "options", "GtkHx");
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
 	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
-	gtk_widget_set_usize(dialog, 570, 400);
+	gtk_widget_set_size_request(dialog, 570, 400);
 	gtk_object_set_data(GTK_OBJECT(dialog), "sess", sess);
-	gtk_signal_connect_object (GTK_OBJECT (dialog), "delete_event",
-							   GTK_SIGNAL_FUNC (close_options_window), 0);
+	g_signal_connect_swapped (GTK_OBJECT (dialog), "delete_event",
+							   G_CALLBACK (close_options_window), 0);
 
 	options_window = dialog;
 
@@ -1684,18 +1684,18 @@ void create_options_window(GtkWidget *widget, gpointer data)
 							FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));
-	gtk_signal_connect (GTK_OBJECT (wid), "clicked",
-						GTK_SIGNAL_FUNC (options_change), GINT_TO_POINTER(0));
+	g_signal_connect (GTK_OBJECT (wid), "clicked",
+						G_CALLBACK (options_change), GINT_TO_POINTER(0));
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Apply"));
-	gtk_signal_connect (GTK_OBJECT (wid), "clicked",
-						GTK_SIGNAL_FUNC (options_change), GINT_TO_POINTER(1));
+	g_signal_connect (GTK_OBJECT (wid), "clicked",
+						G_CALLBACK (options_change), GINT_TO_POINTER(1));
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Cancel"));
-	gtk_signal_connect (GTK_OBJECT (wid), "clicked",
-							  GTK_SIGNAL_FUNC (close_options_window), 0);
+	g_signal_connect (GTK_OBJECT (wid), "clicked",
+							  G_CALLBACK (close_options_window), 0);
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
 	hbox = gtk_hbox_new (0, 6);
@@ -1707,7 +1707,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	ctree = gtk_ctree_new_with_titles (1, 0, titles);
 	gtk_clist_set_selection_mode (GTK_CLIST (ctree), GTK_SELECTION_BROWSE);
 	gtk_ctree_set_indent (GTK_CTREE (ctree), 15);
-	gtk_widget_set_usize (ctree, 140, 0);
+	gtk_widget_set_size_request (ctree, 140, 0);
 	gtk_box_pack_start (GTK_BOX (hbox), ctree, 0, 0, 0);
 
 	frame = gtk_frame_new (NULL);
@@ -1719,8 +1719,8 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_notebook_set_show_border (GTK_NOTEBOOK (book), FALSE);
 	gtk_container_add (GTK_CONTAINER (frame), book);
 	gtk_object_set_user_data (GTK_OBJECT (ctree), book);
-	gtk_signal_connect (GTK_OBJECT (ctree), "tree_select_row",
-						GTK_SIGNAL_FUNC (settings_ctree_select), NULL);
+	g_signal_connect (GTK_OBJECT (ctree), "tree_select_row",
+						G_CALLBACK (settings_ctree_select), NULL);
 	page_index = 0;
 
 	vbox = settings_create_page(book, _("General Settings"), ctree,

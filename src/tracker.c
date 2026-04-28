@@ -389,22 +389,22 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_widget_realize(tracker_window);
 	style = gtk_widget_get_style(tracker_window);
 	gtk_window_set_title(GTK_WINDOW(tracker_window), _("Tracker"));
-	gtk_widget_set_usize(tracker_window, 640, 410);
-	gtk_signal_connect(GTK_OBJECT(tracker_window), "delete_event", GTK_SIGNAL_FUNC(close_tracker_window), 0);
+	gtk_widget_set_size_request(tracker_window, 640, 410);
+	g_signal_connect(GTK_OBJECT(tracker_window), "delete_event", G_CALLBACK(close_tracker_window), 0);
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
-	gtk_widget_set_usize(tracker_list, 0, 350);
+	gtk_widget_set_size_request(tracker_list, 0, 350);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 0, 160);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 1, 40);
 	gtk_hlist_set_column_justification(GTK_HLIST(tracker_list), 1, GTK_JUSTIFY_CENTER);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 96);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 40);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 1024);
-	gtk_signal_connect(GTK_OBJECT(tracker_list), "button_press_event", GTK_SIGNAL_FUNC(tracker_click), 0);
+	g_signal_connect(GTK_OBJECT(tracker_list), "button_press_event", G_CALLBACK(tracker_click), 0);
 
 
 	searchentry = gtk_entry_new();
-	gtk_signal_connect(GTK_OBJECT(searchentry), "activate", GTK_SIGNAL_FUNC(tracker_search), 0);
+	g_signal_connect(GTK_OBJECT(searchentry), "activate", G_CALLBACK(tracker_search), 0);
 	lbl_search = gtk_label_new(_("Search: "));
 	lbl_found = gtk_label_new("  0");
 	lbl_total = gtk_label_new(" / 0");
@@ -419,12 +419,12 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
 	pix = 0, icon = 0, mask = 0;
-	gtk_signal_connect(GTK_OBJECT(refreshbtn), "clicked",
-					   GTK_SIGNAL_FUNC(tracker_getlist), sess);
+	g_signal_connect(GTK_OBJECT(refreshbtn), "clicked",
+					   G_CALLBACK(tracker_getlist), sess);
 
 	connbtn = gtk_button_new();
-	gtk_signal_connect(GTK_OBJECT(connbtn), "clicked", 
-					   GTK_SIGNAL_FUNC(tracker_connect), 0);
+	g_signal_connect(GTK_OBJECT(connbtn), "clicked", 
+					   G_CALLBACK(tracker_connect), 0);
 	gtk_tooltips_set_tip(tooltips, connbtn, _("Connect"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(tracker_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
@@ -436,11 +436,11 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	tracker_window_scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tracker_window_scroll),
 				       GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-	gtk_widget_set_usize(tracker_window_scroll, 640, 350);
+	gtk_widget_set_size_request(tracker_window_scroll, 640, 350);
 	gtk_container_add(GTK_CONTAINER(tracker_window_scroll), tracker_list);
 
 	vbox = gtk_vbox_new(0, 0);
-	gtk_widget_set_usize(vbox, 640, 410);
+	gtk_widget_set_size_request(vbox, 640, 410);
 	hbox = gtk_hbox_new(0, 0);
 	searchhbox = gtk_hbox_new(0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), refreshbtn, 0, 0, 0);

@@ -942,7 +942,7 @@ void create_chat(session *sess)
 	gtk_object_sink(GTK_OBJECT(vscroll));
 
 	chat_hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
+	gtk_widget_set_size_request(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
 						 (gtkhx_prefs.geo.chat.ysize<<6)/1000);
 
 	gtk_object_ref(GTK_OBJECT(chat_hbox));
@@ -996,11 +996,11 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	chat_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(chat_window), "chat", "GtkHx");
 
-	gtk_widget_set_usize(chat_window, 412, 280);
+	gtk_widget_set_size_request(chat_window, 412, 280);
 	gtk_window_set_policy(GTK_WINDOW(chat_window), 1, 1, 0);
 
-	gtk_signal_connect(GTK_OBJECT(chat_window), "destroy",
-					   GTK_SIGNAL_FUNC(chat_close), gchat);
+	g_signal_connect(GTK_OBJECT(chat_window), "destroy",
+					   G_CALLBACK(chat_close), gchat);
 	gtk_window_set_title(GTK_WINDOW(chat_window), _("Chat"));
 	gtk_container_set_border_width(GTK_CONTAINER(chat_window), 0);
 
@@ -1010,19 +1010,19 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gchat->subject = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(gchat->subject), sess->chat_front->subject);
 	subj_hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(subj_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 20);
+	gtk_widget_set_size_request(subj_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(subj_frame), GTK_SHADOW_OUT);
 	gtk_container_add(GTK_CONTAINER(subj_frame), subj_hbox);
 	gtk_box_pack_start(GTK_BOX(subj_hbox), gchat->subject, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
 	gtk_widget_set_style(gchat->subject, gtktext_style);
-	gtk_signal_connect(GTK_OBJECT(gchat->subject), "activate",
-					   GTK_SIGNAL_FUNC(change_subject), GINT_TO_POINTER(0));
+	g_signal_connect(GTK_OBJECT(gchat->subject), "activate",
+					   G_CALLBACK(change_subject), GINT_TO_POINTER(0));
 
 	outputframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(outputframe), GTK_SHADOW_IN);
-	gtk_widget_set_usize(outputframe, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
+	gtk_widget_set_size_request(outputframe, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
 						 (gtkhx_prefs.geo.chat.ysize<<6)/100);
 
 	inputframe = gtk_frame_new(0);
@@ -1046,13 +1046,13 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_widget_realize(gchat->output);
 
 	hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
+	gtk_widget_set_size_request(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
 	gchat->input = gtk_text_new(0, 0);
 	gtk_widget_set_style(gchat->input, gtktext_style);
-	gtk_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
-					   GTK_SIGNAL_FUNC(chat_input_key_press), 0);
+	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
+					   G_CALLBACK(chat_input_key_press), 0);
 	gtk_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
 	gtk_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
 	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
@@ -1060,14 +1060,14 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 
 	gtk_box_pack_start(GTK_BOX(hbox), gchat->input, 1, 1, 0);
-	gtk_signal_connect(GTK_OBJECT(chat_window), "configure_event", 
-					   GTK_SIGNAL_FUNC(chat_move), gchat);
+	g_signal_connect(GTK_OBJECT(chat_window), "configure_event", 
+					   G_CALLBACK(chat_move), gchat);
 
 	gtk_object_set_data(GTK_OBJECT(chat_window), "sess", sess);
 
 	gtk_widget_set_uposition(chat_window, gtkhx_prefs.geo.chat.xpos, 
 							 gtkhx_prefs.geo.chat.ypos);
-	gtk_widget_set_usize(chat_window, gtkhx_prefs.geo.chat.xsize, 
+	gtk_widget_set_size_request(chat_window, gtkhx_prefs.geo.chat.xsize, 
 						 gtkhx_prefs.geo.chat.ysize);
 
 	gtk_widget_show_all(chat_window);
@@ -1214,14 +1214,14 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	join = gtk_button_new_with_label(_("Join"));
 	gtk_object_set_data(GTK_OBJECT(join), "dialog", dialog);
 	gtk_object_set_data(GTK_OBJECT(join), "htlc", htlc);
-	gtk_signal_connect(GTK_OBJECT(join), "clicked", GTK_SIGNAL_FUNC(join_chat),
+	g_signal_connect(GTK_OBJECT(join), "clicked", G_CALLBACK(join_chat),
 					   GINT_TO_POINTER(cid));
 
 
 	cancel = gtk_button_new_with_label(_("Decline"));
 	gtk_object_set_data(GTK_OBJECT(cancel), "cid", GINT_TO_POINTER(cid));
-	gtk_signal_connect(GTK_OBJECT(cancel), "clicked", 
-					   GTK_SIGNAL_FUNC(reject_chat), 
+	g_signal_connect(GTK_OBJECT(cancel), "clicked", 
+					   G_CALLBACK(reject_chat), 
 					   GTK_OBJECT(dialog));
 
 	hbox = gtk_hbox_new(0,0);
@@ -1285,12 +1285,12 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_widget_realize(pchat_window);
 
 	style = gtk_widget_get_style(pchat_window);
-	gtk_widget_set_usize(pchat_window, 700, 320);
+	gtk_widget_set_size_request(pchat_window, 700, 320);
 	gtk_window_set_policy(GTK_WINDOW(pchat_window), 1, 1, 0);
 
 	gtk_object_set_data(GTK_OBJECT(pchat_window), "sess", sess);
-	gtk_signal_connect(GTK_OBJECT(pchat_window), "destroy",
-					   GTK_SIGNAL_FUNC(pchat_close), gchat);
+	g_signal_connect(GTK_OBJECT(pchat_window), "destroy",
+					   G_CALLBACK(pchat_close), gchat);
 	title = g_strdup_printf("%s: 0x%08x", _("Private Chat"), chat->cid);
 	gtk_window_set_title(GTK_WINDOW(pchat_window), title);
 	gtk_container_set_border_width(GTK_CONTAINER(pchat_window), 0);
@@ -1299,7 +1299,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
 
 	subj_hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(subj_hbox, (612<<6)/82, 20);
+	gtk_widget_set_size_request(subj_hbox, (612<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(subj_frame), GTK_SHADOW_OUT);
 	gtk_container_add(GTK_CONTAINER(subj_frame), subj_hbox);
@@ -1308,8 +1308,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_entry_set_text(GTK_ENTRY(gchat->subject), chat->subject);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
 	gtk_widget_set_style(gchat->subject, gtktext_style);
-	gtk_signal_connect(GTK_OBJECT(gchat->subject), "activate", 
-					   GTK_SIGNAL_FUNC(change_subject), 
+	g_signal_connect(GTK_OBJECT(gchat->subject), "activate", 
+					   G_CALLBACK(change_subject), 
 					   GINT_TO_POINTER(chat->cid));
 
 	outputframe = gtk_frame_new(0);
@@ -1326,28 +1326,28 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_box_pack_start(GTK_BOX(vbox), vpane, 1, 1, 0);
 
 	pchat_hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(pchat_hbox, 500, 400);
+	gtk_widget_set_size_request(pchat_hbox, 500, 400);
 
 	gtk_box_pack_start(GTK_BOX(pchat_hbox), gchat->output, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(pchat_hbox), gchat->vscroll, 0, 0, 0);
 	gtk_container_add(GTK_CONTAINER(outputframe), pchat_hbox);
 
 	hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(hbox, 140, 50);
+	gtk_widget_set_size_request(hbox, 140, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
 	gchat->input = gtk_text_new(0, 0);
 	gtk_widget_set_style(gchat->input, gtktext_style);
-	gtk_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
-					   GTK_SIGNAL_FUNC(chat_input_key_press), 0);
+	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
+					   G_CALLBACK(chat_input_key_press), 0);
 	gtk_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
 	gtk_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
 	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
 	gtk_text_set_word_wrap(GTK_TEXT(gchat->input), 1);
 	gtk_box_pack_start(GTK_BOX(hbox), gchat->input, 1, 1, 0);
 
- 	gtk_signal_connect(GTK_OBJECT(pchat_window), "configure_event", 
-					   GTK_SIGNAL_FUNC(pchat_update_trans), gchat->output);
+ 	g_signal_connect(GTK_OBJECT(pchat_window), "configure_event", 
+					   G_CALLBACK(pchat_update_trans), gchat->output);
 
 	gchat->userlist = gtk_hlist_new_with_titles(2, titles);
 	gtk_hlist_set_column_width(GTK_HLIST(gchat->userlist), 0, 35);
@@ -1356,8 +1356,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_hlist_set_shadow_type(GTK_HLIST(gchat->userlist), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(gchat->userlist), 1, 
 									   GTK_JUSTIFY_LEFT);
-	gtk_signal_connect(GTK_OBJECT(gchat->userlist), "button_press_event",
-			   GTK_SIGNAL_FUNC(user_clicked), 0);
+	g_signal_connect(GTK_OBJECT(gchat->userlist), "button_press_event",
+			   G_CALLBACK(user_clicked), 0);
 
 	if (!users_style) {
 		if (!users_font)
@@ -1378,8 +1378,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(msg_btn), pix);
-	gtk_signal_connect(GTK_OBJECT(msg_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(open_message_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(msg_btn), "clicked", 
+					   G_CALLBACK(open_message_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, msg_btn, _("Msg"), 0);
 	icon = 0, pix = 0, mask = 0;
 
@@ -1390,8 +1390,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 kick_xpm);
     pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(kick_btn), pix);
-	gtk_signal_connect(GTK_OBJECT(kick_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(user_kick_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(kick_btn), "clicked", 
+					   G_CALLBACK(user_kick_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, kick_btn, _("Kick"), 0);
 	icon = 0, pix = 0, mask = 0;
 
@@ -1402,15 +1402,15 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 info_xpm);
     pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(info_btn), pix);
-	gtk_signal_connect(GTK_OBJECT(info_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(user_info_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(info_btn), "clicked", 
+					   G_CALLBACK(user_info_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, info_btn, _("User Info"), 0);
 	icon = 0, pix = 0, mask = 0;
 
 	ban_btn = gtk_button_new();
 	gtk_object_set_data(GTK_OBJECT(ban_btn), "sess", sess);
-	gtk_signal_connect(GTK_OBJECT(ban_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(user_ban_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(ban_btn), "clicked", 
+					   G_CALLBACK(user_ban_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window,
 										&mask, 
 										&style->bg[GTK_STATE_NORMAL], 
@@ -1423,8 +1423,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	chat_btn = gtk_button_new();
 	gtk_object_set_data(GTK_OBJECT(chat_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, chat_btn, _("Private Chat"), 0);
-	gtk_signal_connect(GTK_OBJECT(chat_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(user_chat_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(chat_btn), "clicked", 
+					   G_CALLBACK(user_chat_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 chat_xpm);
@@ -1435,8 +1435,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	igno_btn = gtk_button_new();
 	gtk_object_set_data(GTK_OBJECT(igno_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, igno_btn, _("Ignore"), 0);
-	gtk_signal_connect(GTK_OBJECT(igno_btn), "clicked", 
-					   GTK_SIGNAL_FUNC(user_igno_btn), gchat->userlist);
+	g_signal_connect(GTK_OBJECT(igno_btn), "clicked", 
+					   G_CALLBACK(user_igno_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										ignore_xpm);
@@ -1444,7 +1444,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_container_add(GTK_CONTAINER(igno_btn), pix);
 
 	topframe = gtk_frame_new(0);
-	gtk_widget_set_usize(topframe, -2, 30);
+	gtk_widget_set_size_request(topframe, -2, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_hbox_new(0,0);
@@ -1467,7 +1467,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 								   GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_widget_set_usize(scroll, 232, 232);
+	gtk_widget_set_size_request(scroll, 232, 232);
 	gtk_container_add(GTK_CONTAINER(scroll), gchat->userlist);
 	gtk_container_add(GTK_CONTAINER(userframe), scroll);
 

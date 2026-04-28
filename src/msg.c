@@ -233,12 +233,12 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 
 	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
 	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
-	gtk_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event", 
-					   GTK_SIGNAL_FUNC(msg_input_key_press), 0);
-	gtk_signal_connect(GTK_OBJECT(msg->inputbuf), "activate", 
-					   GTK_SIGNAL_FUNC(msg_input_activate), uid);
-	gtk_signal_connect(GTK_OBJECT(msg->window), "configure_event", 
-					   GTK_SIGNAL_FUNC(msg_update_trans), msg->outputbuf);
+	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event", 
+					   G_CALLBACK(msg_input_key_press), 0);
+	g_signal_connect(GTK_OBJECT(msg->inputbuf), "activate", 
+					   G_CALLBACK(msg_input_activate), uid);
+	g_signal_connect(GTK_OBJECT(msg->window), "configure_event", 
+					   G_CALLBACK(msg_update_trans), msg->outputbuf);
 
 	msg_list = msg;
 	return msg;
@@ -267,11 +267,11 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_window_set_title(GTK_WINDOW(msg->window), title);
 	g_free(title);
 
-	gtk_widget_set_usize(msg->window, 412, 280);
+	gtk_widget_set_size_request(msg->window, 412, 280);
 	gtk_window_set_policy(GTK_WINDOW(msg->window), 1, 1, 0);
 	gtk_container_set_border_width(GTK_CONTAINER(msg->window), 0);
 	hbox = gtk_hbox_new(0,0);
-	gtk_widget_set_usize(hbox, 500, 400);
+	gtk_widget_set_size_request(hbox, 500, 400);
 
 	outputframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(outputframe), GTK_SHADOW_IN);
@@ -282,8 +282,8 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	inputframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(inputframe), GTK_SHADOW_IN);
 	gtk_container_add(GTK_CONTAINER(inputframe), msg->inputbuf);
-	gtk_widget_set_usize(inputframe, 0, 40);
-	gtk_widget_set_usize(msg->inputbuf, 0, 40);
+	gtk_widget_set_size_request(inputframe, 0, 40);
+	gtk_widget_set_size_request(msg->inputbuf, 0, 40);
 
 	vpane = gtk_vpaned_new();
 	gtk_paned_pack1(GTK_PANED(vpane), outputframe, 0, 1);
@@ -298,7 +298,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_show_all(msg->window);
 
 	gtk_object_set_data(GTK_OBJECT(msg->window), "msg", msg);
-	gtk_signal_connect(GTK_OBJECT(msg->window), "delete_event", GTK_SIGNAL_FUNC(destroy_msgwin), 0);
+	g_signal_connect(GTK_OBJECT(msg->window), "delete_event", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
 	gtk_widget_grab_focus(msg->inputbuf);
@@ -380,8 +380,8 @@ void broadcastmsg(char *text)
 	textbox = gtk_text_new(0,0);
 	vscroll = gtk_vscrollbar_new(GTK_TEXT(textbox)->vadj);
 	hbox = gtk_hbox_new(0,0);
-	gtk_widget_set_usize(dialog, 300, 250);
-	gtk_widget_set_usize(textbox, 280, 220);
+	gtk_widget_set_size_request(dialog, 300, 250);
+	gtk_widget_set_size_request(textbox, 280, 220);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), hbox, TRUE, TRUE , 0);
@@ -391,7 +391,7 @@ void broadcastmsg(char *text)
     gtk_widget_grab_default (okbtn);
 	gtk_text_insert(GTK_TEXT(textbox), 0, 0, 0, text, strlen(text));
 	gtk_object_set_data(GTK_OBJECT(okbtn), "dialog", dialog);
-	gtk_signal_connect(GTK_OBJECT(okbtn), "clicked", GTK_SIGNAL_FUNC(broadcastok), 0);
+	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
 	gtk_widget_show_all(dialog);
 }

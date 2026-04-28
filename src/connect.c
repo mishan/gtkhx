@@ -357,7 +357,7 @@ static void prompt_conversion (char *name)
     gtk_window_set_title(GTK_WINDOW(dialog), "Convert Bookmark");
     gtk_container_border_width (GTK_CONTAINER(dialog), 5);
     label = gtk_label_new ("This bookmark is written in an old GtkHx format.\nWould you like to convert it to the new format?");
-    gtk_widget_set_usize(dialog, 250, 200);
+    gtk_widget_set_size_request(dialog, 250, 200);
     gtk_widget_show(dialog);
 
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog) ->vbox), label, TRUE, TRUE , 0);
@@ -367,11 +367,11 @@ static void prompt_conversion (char *name)
     okbutton = gtk_button_new_with_label ("Yes");
 	cancelbtn = gtk_button_new_with_label("No");
 
-    gtk_signal_connect (GTK_OBJECT (okbutton), "clicked", GTK_SIGNAL_FUNC(convert_bookmark), path);
+    g_signal_connect (GTK_OBJECT (okbutton), "clicked", G_CALLBACK(convert_bookmark), path);
 	gtk_object_set_data(GTK_OBJECT(okbutton), "dialog", dialog);
 
 
-	gtk_signal_connect_object(GTK_OBJECT(cancelbtn), "clicked", (GtkSignalFunc)gtk_widget_destroy, GTK_OBJECT(dialog));
+	g_signal_connect_swapped(GTK_OBJECT(cancelbtn), "clicked", (GCallback)gtk_widget_destroy, GTK_OBJECT(dialog));
 
     GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
 
@@ -473,8 +473,8 @@ static void list_bookmarks(GtkWidget *menu)
 				file = g_strdup(ent->d_name);
 				item = gtk_menu_item_new_with_label(file);
 				gtk_menu_append(GTK_MENU(menu), item);
-				gtk_signal_connect(GTK_OBJECT(item), "activate", GTK_SIGNAL_FUNC(open_bookmark), file);
-				gtk_signal_connect(GTK_OBJECT(item), "destroy", GTK_SIGNAL_FUNC(destroy_bookmark_item), file);
+				g_signal_connect(GTK_OBJECT(item), "activate", G_CALLBACK(open_bookmark), file);
+				g_signal_connect(GTK_OBJECT(item), "destroy", G_CALLBACK(destroy_bookmark_item), file);
 			}
 		}
 		closedir(dir);
@@ -618,7 +618,7 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	hbox = gtk_hbox_new(0,0);
 	label = gtk_label_new(_("Name:"));
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
-	gtk_widget_set_usize(dialog, 200, 100);
+	gtk_widget_set_size_request(dialog, 200, 100);
     gtk_container_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 0);
@@ -626,10 +626,10 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), ok, 0,0, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), cancel, 0,0, 0);
 	gtk_object_set_data(GTK_OBJECT(cancel), "dialog", dialog);
-	gtk_signal_connect(GTK_OBJECT(cancel), "clicked", GTK_SIGNAL_FUNC(cancel_save), 0);
+	g_signal_connect(GTK_OBJECT(cancel), "clicked", G_CALLBACK(cancel_save), 0);
 	gtk_object_set_data(GTK_OBJECT(ok), "name", name_entry);
 	gtk_object_set_data(GTK_OBJECT(ok), "dialog", dialog);
-	gtk_signal_connect(GTK_OBJECT(ok), "clicked", GTK_SIGNAL_FUNC(bookmark_save), 0);
+	g_signal_connect(GTK_OBJECT(ok), "clicked", G_CALLBACK(bookmark_save), 0);
 
 
 	gtk_widget_grab_default(ok);
@@ -719,8 +719,8 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_window_set_wmclass(GTK_WINDOW(connect_window), "connect", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(connect_window), "Connect");
 	gtk_window_set_position(GTK_WINDOW(connect_window), GTK_WIN_POS_CENTER);
-	gtk_signal_connect(GTK_OBJECT(connect_window), "destroy",
-			   GTK_SIGNAL_FUNC(close_connect_window), 0);
+	g_signal_connect(GTK_OBJECT(connect_window), "destroy",
+			   G_CALLBACK(close_connect_window), 0);
 	vbox1 = gtk_vbox_new(0, 10);
 	gtk_container_add(GTK_CONTAINER(connect_window), vbox1);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox1), 10);
@@ -783,14 +783,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	compressmenu = gtk_menu_new();
 	compress_item = gtk_menu_item_new_with_label("NONE");
 	gtk_menu_append(GTK_MENU(compressmenu), compress_item);
-	gtk_signal_connect(GTK_OBJECT(compress_item), "activate", GTK_SIGNAL_FUNC(select_compressor), GINT_TO_POINTER(0));
+	g_signal_connect(GTK_OBJECT(compress_item), "activate", G_CALLBACK(select_compressor), GINT_TO_POINTER(0));
 	{
 		int i;
 		
 		for(i = 0; valid_compressors[i]; i++) {
 			compress_item = gtk_menu_item_new_with_label(valid_compressors[i]);
 			gtk_menu_append(GTK_MENU(compressmenu), compress_item);
-			gtk_signal_connect(GTK_OBJECT(compress_item), "activate", GTK_SIGNAL_FUNC(select_compressor), GINT_TO_POINTER(i+1));			
+			g_signal_connect(GTK_OBJECT(compress_item), "activate", G_CALLBACK(select_compressor), GINT_TO_POINTER(i+1));			
 		}
 	}
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(compress_menu), compressmenu);
@@ -810,14 +810,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	ciphermenu = gtk_menu_new();
 	cipher_item = gtk_menu_item_new_with_label("NONE");
 	gtk_menu_append(GTK_MENU(ciphermenu), cipher_item);
-	gtk_signal_connect(GTK_OBJECT(cipher_item), "activate", GTK_SIGNAL_FUNC(select_cipher), GINT_TO_POINTER(0));
+	g_signal_connect(GTK_OBJECT(cipher_item), "activate", G_CALLBACK(select_cipher), GINT_TO_POINTER(0));
 	{
 		int i;
 		
 		for(i = 0; valid_ciphers[i]; i++) {
 			cipher_item = gtk_menu_item_new_with_label(valid_ciphers[i]);
 			gtk_menu_append(GTK_MENU(ciphermenu), cipher_item);
-;			gtk_signal_connect(GTK_OBJECT(cipher_item), "activate", GTK_SIGNAL_FUNC(select_cipher), GINT_TO_POINTER(i+1));			
+;			g_signal_connect(GTK_OBJECT(cipher_item), "activate", G_CALLBACK(select_cipher), GINT_TO_POINTER(i+1));			
 		}
 	}
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(cipher_menu), ciphermenu);
@@ -837,7 +837,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	port_entry = gtk_entry_new();
 	gtk_entry_set_max_length(GTK_ENTRY(port_entry), 6);
 	gtk_entry_set_text(GTK_ENTRY(port_entry), "5500");
-	gtk_widget_set_usize(port_entry, 45, 0);
+	gtk_widget_set_size_request(port_entry, 45, 0);
 	gtk_table_attach(GTK_TABLE(table1), port_entry, 3, 4, 0, 1,
 			  0,
 			 (GtkAttachOptions)0, 0, 0);
@@ -869,10 +869,10 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in3);
 	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in4);
 
-	gtk_signal_connect(GTK_OBJECT(built_in1), "activate", GTK_SIGNAL_FUNC(builtin_bookmark), GINT_TO_POINTER(1));
-	gtk_signal_connect(GTK_OBJECT(built_in2), "activate", GTK_SIGNAL_FUNC(builtin_bookmark), GINT_TO_POINTER(2));
-	gtk_signal_connect(GTK_OBJECT(built_in3), "activate", GTK_SIGNAL_FUNC(builtin_bookmark), GINT_TO_POINTER(3));
-	gtk_signal_connect(GTK_OBJECT(built_in4), "activate", GTK_SIGNAL_FUNC(builtin_bookmark), GINT_TO_POINTER(4));
+	g_signal_connect(GTK_OBJECT(built_in1), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(1));
+	g_signal_connect(GTK_OBJECT(built_in2), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(2));
+	g_signal_connect(GTK_OBJECT(built_in3), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(3));
+	g_signal_connect(GTK_OBJECT(built_in4), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(4));
 
 	gtk_option_menu_set_menu(GTK_OPTION_MENU(bookmarkmenu), bookmarkmenu_menu);
 
@@ -881,14 +881,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 	save_button = gtk_button_new_with_label(_("Save..."));
 	gtk_container_add(GTK_CONTAINER(hbuttonbox1), save_button);
-	gtk_signal_connect(GTK_OBJECT(save_button), "clicked", GTK_SIGNAL_FUNC(save_dialog), 0);
+	g_signal_connect(GTK_OBJECT(save_button), "clicked", G_CALLBACK(save_dialog), 0);
 
 	button_cancel = gtk_button_new_with_label(_("Cancel"));
-	gtk_signal_connect(GTK_OBJECT(button_cancel), "clicked", GTK_SIGNAL_FUNC(close_connect_window), 0);
+	g_signal_connect(GTK_OBJECT(button_cancel), "clicked", G_CALLBACK(close_connect_window), 0);
 	gtk_container_add(GTK_CONTAINER(hbuttonbox1), button_cancel);
 
 	button_connect = gtk_button_new_with_label(_("Connect"));
-	gtk_signal_connect(GTK_OBJECT(button_connect), "clicked", GTK_SIGNAL_FUNC(server_connect), sess);
+	g_signal_connect(GTK_OBJECT(button_connect), "clicked", G_CALLBACK(server_connect), sess);
 	gtk_container_add (GTK_CONTAINER (hbuttonbox1), button_connect);
 
 	gtk_widget_show_all(connect_window);

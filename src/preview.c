@@ -61,7 +61,7 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 	vscroll = gtk_vscrollbar_new(GTK_TEXT(text)->vadj);
 	hbox = gtk_hbox_new(0,0);
 
-	gtk_widget_set_usize(window, 400, 300);
+	gtk_widget_set_size_request(window, 400, 300);
 	gtk_box_pack_start(GTK_BOX(hbox), text, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
 	gtk_container_add(GTK_CONTAINER(window), hbox);

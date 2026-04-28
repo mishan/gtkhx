@@ -104,7 +104,7 @@ timer_add_secs (time_t secs, int (*fn)(), void *ptr)
 	struct timer *timer;
 	guint id;
 
-	id = gtk_timeout_add(secs * 1000, fn, ptr);
+	id = g_timeout_add(secs * 1000, fn, ptr);
 
 	timer = g_malloc(sizeof(struct timer));
 	timer->next = 0;
@@ -392,7 +392,7 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		char infotitle[45];
 
 		info_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-		gtk_widget_set_usize(info_window, 260, 250);
+		gtk_widget_set_size_request(info_window, 260, 250);
 
 		g_snprintf(infotitle, sizeof(infotitle), _("User Info: %s (%u)"), nam, uid);
 		gtk_window_set_title(GTK_WINDOW(info_window), infotitle);
@@ -444,20 +444,20 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	GtkWidget *vscroller;
 
 	agreementwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_widget_set_usize(agreementwin, 400, 500);
+	gtk_widget_set_size_request(agreementwin, 400, 500);
 	gtk_window_set_title(GTK_WINDOW(agreementwin), _("Agreement"));
 	agreetext = gtk_text_new(FALSE, 0);
-	gtk_widget_set_usize(agreetext, 382, 480);
+	gtk_widget_set_size_request(agreetext, 382, 480);
 	agreebtn = gtk_button_new_with_label(_("Agree"));
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
 	vbox = gtk_vbox_new(FALSE, 0);
 	hbox = gtk_hbox_new(FALSE, 0);
 	hboxtwo = gtk_hbox_new(FALSE, 0);
 	vscroller = gtk_vscrollbar_new(GTK_TEXT(agreetext)->vadj);
-	gtk_signal_connect(GTK_OBJECT(agreebtn), "clicked", 
-					   GTK_SIGNAL_FUNC(concurrence), sess);
-	gtk_signal_connect(GTK_OBJECT(disagreebtn), "clicked", 
-					   GTK_SIGNAL_FUNC(disagreement), sess);
+	g_signal_connect(GTK_OBJECT(agreebtn), "clicked", 
+					   G_CALLBACK(concurrence), sess);
+	g_signal_connect(GTK_OBJECT(disagreebtn), "clicked", 
+					   G_CALLBACK(disagreement), sess);
 	gtk_container_add(GTK_CONTAINER(agreementwin), vbox);
 	gtk_box_pack_start(GTK_BOX(vbox), hboxtwo, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(hboxtwo), agreetext, FALSE, FALSE, 0);

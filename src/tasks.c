@@ -145,7 +145,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
 	vbox = gtk_vbox_new(0, 0);
 	hbox = gtk_hbox_new(0, 0);
-	gtk_widget_set_usize(vbox, 240, 40);
+	gtk_widget_set_size_request(vbox, 240, 40);
 
 	if(htxf) {
 		gtk_box_pack_start(GTK_BOX(hbox), queue, 0, 0, 0);
@@ -549,7 +549,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 
 	topframe = gtk_frame_new(0);
-	gtk_widget_set_usize(topframe, -2, 30);
+	gtk_widget_set_size_request(topframe, -2, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_hbox_new(0,0);
@@ -560,8 +560,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(stopbtn), pix);
 	gtk_tooltips_set_tip(tooltips, stopbtn, _("Stop Task"), 0);
-	gtk_signal_connect(GTK_OBJECT(stopbtn), "clicked",
-			   GTK_SIGNAL_FUNC(task_stop), sess);
+	g_signal_connect(GTK_OBJECT(stopbtn), "clicked",
+			   G_CALLBACK(task_stop), sess);
 	icon = 0, mask = 0, pix = 0;
 
 	gobtn = gtk_button_new();
@@ -570,8 +570,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(gobtn), pix);
 	gtk_tooltips_set_tip(tooltips, gobtn, _("Start Task"), 0);
-	gtk_signal_connect(GTK_OBJECT(gobtn), "clicked",
-					   GTK_SIGNAL_FUNC(task_go), sess);
+	g_signal_connect(GTK_OBJECT(gobtn), "clicked",
+					   G_CALLBACK(task_go), sess);
 	icon = 0, mask = 0, pix = 0;
 
 	upbtn = gtk_button_new();
@@ -580,7 +580,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	gtk_tooltips_set_tip(tooltips, upbtn, _("Move Xfer Up in Queue"), 0);
-	gtk_signal_connect(GTK_OBJECT(upbtn), "clicked", GTK_SIGNAL_FUNC(task_up), 
+	g_signal_connect(GTK_OBJECT(upbtn), "clicked", G_CALLBACK(task_up), 
 					   sess);
 	icon = 0, mask = 0, pix = 0;
 
@@ -591,7 +591,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	pix = gtk_pixmap_new(icon, mask);
 	gtk_container_add(GTK_CONTAINER(dnbtn), pix);
 	gtk_tooltips_set_tip(tooltips, dnbtn, _("Move Xfer Down in Queue"), 0);
-	gtk_signal_connect(GTK_OBJECT(dnbtn), "clicked", GTK_SIGNAL_FUNC(task_dn), 
+	g_signal_connect(GTK_OBJECT(dnbtn), "clicked", G_CALLBACK(task_dn), 
 					   sess);
 
 	vbox = gtk_vbox_new(0, 0);
@@ -608,14 +608,14 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	tasks_vbox = vbox;
 	gtk_box_pack_start(GTK_BOX(vbox), sess->gtask_scroll, 1, 1, 0);
 
-	gtk_signal_connect(GTK_OBJECT(tasks_window), "destroy",
-					   GTK_SIGNAL_FUNC(tasks_destroy), sess);
+	g_signal_connect(GTK_OBJECT(tasks_window), "destroy",
+					   G_CALLBACK(tasks_destroy), sess);
 
 
 	init_keyaccel(tasks_window);
-	gtk_signal_connect(GTK_OBJECT(tasks_window), "configure_event", 
-					   GTK_SIGNAL_FUNC(tasks_move), sess);
-	gtk_widget_set_usize(tasks_window, gtkhx_prefs.geo.tasks.xsize, 
+	g_signal_connect(GTK_OBJECT(tasks_window), "configure_event", 
+					   G_CALLBACK(tasks_move), sess);
+	gtk_widget_set_size_request(tasks_window, gtkhx_prefs.geo.tasks.xsize, 
 						 gtkhx_prefs.geo.tasks.ysize);
 	gtk_widget_set_uposition(tasks_window, gtkhx_prefs.geo.tasks.xpos,
 							 gtkhx_prefs.geo.tasks.ypos);

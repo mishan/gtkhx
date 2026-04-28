@@ -327,11 +327,11 @@ void create_useredit_window (char *login, int new)
 
 	ues = g_malloc0(sizeof(struct useredit_session));
 	ues->window = window;
-	gtk_signal_connect(GTK_OBJECT(window), "destroy",
-			   GTK_SIGNAL_FUNC(useredit_destroy), ues);
+	g_signal_connect(GTK_OBJECT(window), "destroy",
+			   G_CALLBACK(useredit_destroy), ues);
 	vbox = 0;
 	usermod_scroll = gtk_scrolled_window_new(0, 0);
-	gtk_widget_set_usize(usermod_scroll, 250, 500);
+	gtk_widget_set_size_request(usermod_scroll, 250, 500);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(usermod_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
@@ -340,18 +340,18 @@ void create_useredit_window (char *login, int new)
 
 	wid = gtk_button_new_with_label(_("Save"));
 	gtk_object_set_data(GTK_OBJECT(wid), "new", GINT_TO_POINTER(new));
-	gtk_signal_connect(GTK_OBJECT(wid), "clicked",
-			   GTK_SIGNAL_FUNC(useredit_save), ues);
+	g_signal_connect(GTK_OBJECT(wid), "clicked",
+			   G_CALLBACK(useredit_save), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Delete User"));
-	gtk_signal_connect(GTK_OBJECT(wid), "clicked",
-			   GTK_SIGNAL_FUNC(useredit_delete), ues);
+	g_signal_connect(GTK_OBJECT(wid), "clicked",
+			   G_CALLBACK(useredit_delete), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Close"));
-	gtk_signal_connect(GTK_OBJECT(wid), "clicked",
-			   GTK_SIGNAL_FUNC(useredit_close), ues);
+	g_signal_connect(GTK_OBJECT(wid), "clicked",
+			   G_CALLBACK(useredit_close), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
 	gtk_box_pack_start(GTK_BOX(wvbox), btnhbox, 0, 0, 2);
@@ -410,8 +410,8 @@ void create_useredit_window (char *login, int new)
 		awi = i - nframes;
 		ues->access_widgets[awi].bitno = access_names[i].bitno;
 		ues->access_widgets[awi].widget = chk;
-		gtk_signal_connect(GTK_OBJECT(chk), "clicked",
-				   GTK_SIGNAL_FUNC(useredit_chk_activate), ues);
+		g_signal_connect(GTK_OBJECT(chk), "clicked",
+				   G_CALLBACK(useredit_chk_activate), ues);
 		gtk_box_pack_start(GTK_BOX(vbox), chk, 0, 0, 0);
 	}
 
@@ -453,9 +453,9 @@ void useredit_open_dialog()
 	gtk_box_pack_start(GTK_BOX(hboxtwo), cancelbtn, 0, 0, 0);
 
 	gtk_object_set_data(GTK_OBJECT(okbtn), "login", loginentry);
-	gtk_signal_connect(GTK_OBJECT(okbtn), "clicked", GTK_SIGNAL_FUNC(useredit_open), window);
+	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(useredit_open), window);
 
-	gtk_signal_connect(GTK_OBJECT(cancelbtn), "clicked", GTK_SIGNAL_FUNC(useredit_open_close), window);
+	g_signal_connect(GTK_OBJECT(cancelbtn), "clicked", G_CALLBACK(useredit_open_close), window);
 
 	gtk_widget_show_all(window);
 

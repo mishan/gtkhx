@@ -113,11 +113,11 @@ void create_about_window ()
     char version [50];
 
     frmAbout = gtk_window_new (GTK_WINDOW_DIALOG);
-    gtk_widget_set_usize (frmAbout, 482, 450);
+    gtk_widget_set_size_request (frmAbout, 482, 450);
     gtk_window_set_title (GTK_WINDOW (frmAbout), _("About GtkHx"));
     gtk_window_set_policy (GTK_WINDOW (frmAbout), FALSE, FALSE, FALSE);
-    gtk_signal_connect (GTK_OBJECT (frmAbout), "destroy",
-			GTK_SIGNAL_FUNC (on_frmAbout_destroy),
+    g_signal_connect (GTK_OBJECT (frmAbout), "destroy",
+			G_CALLBACK (on_frmAbout_destroy),
 			GTK_OBJECT (frmAbout));
 
     gtk_widget_realize(frmAbout);
@@ -129,19 +129,19 @@ void create_about_window ()
     cmdAboutClose = gtk_button_new_with_label (("Close"));
     gtk_fixed_put (GTK_FIXED (fixed), cmdAboutClose, 384, 393);
     gtk_widget_set_uposition (cmdAboutClose, 384, 403);
-    gtk_widget_set_usize (cmdAboutClose, 88, 36);
+    gtk_widget_set_size_request (cmdAboutClose, 88, 36);
     GTK_WIDGET_SET_FLAGS (cmdAboutClose, GTK_CAN_DEFAULT);
     gtk_widget_grab_focus (cmdAboutClose);
     gtk_widget_grab_default (cmdAboutClose);
-    gtk_signal_connect (GTK_OBJECT (cmdAboutClose), "clicked",
-			GTK_SIGNAL_FUNC (on_cmdAboutClose_clicked),
+    g_signal_connect (GTK_OBJECT (cmdAboutClose), "clicked",
+			G_CALLBACK (on_cmdAboutClose_clicked),
 			GTK_OBJECT(frmAbout));
 
 
     notebook = gtk_notebook_new ();
     gtk_fixed_put (GTK_FIXED (fixed), notebook, 8, 8);
     gtk_widget_set_uposition (notebook, 8, 8);
-    gtk_widget_set_usize (notebook, 466, 382);
+    gtk_widget_set_size_request (notebook, 466, 382);
 
 
     fixed1 = gtk_fixed_new ();
@@ -151,7 +151,7 @@ void create_about_window ()
     frame = gtk_frame_new (NULL);
     gtk_fixed_put (GTK_FIXED (fixed1), frame, 32, 12);
     gtk_widget_set_uposition (frame, 32, 12);
-    gtk_widget_set_usize (frame, 400, 200);
+    gtk_widget_set_size_request (frame, 400, 200);
     gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_OUT);
 
     icon = gdk_pixmap_create_from_xpm_d (frmAbout->window, &mask,
@@ -164,19 +164,19 @@ void create_about_window ()
     lblTitle = gtk_label_new (version);
     gtk_fixed_put (GTK_FIXED (fixed1), lblTitle, 8, 175);
     gtk_widget_set_uposition (lblTitle, 8, 215);
-    gtk_widget_set_usize (lblTitle, 448, 16);
+    gtk_widget_set_size_request (lblTitle, 448, 16);
 
 
     lblCopyright = gtk_label_new (_("Copyright (C) 2000-2002"));
     gtk_fixed_put (GTK_FIXED (fixed1), lblCopyright, 8, 191);
     gtk_widget_set_uposition (lblCopyright, 8, 321);
-    gtk_widget_set_usize (lblCopyright, 448, 16);
+    gtk_widget_set_size_request (lblCopyright, 448, 16);
 
 
     scrolledwindow = gtk_scrolled_window_new (NULL, NULL);
     gtk_fixed_put (GTK_FIXED (fixed1), scrolledwindow, 12, 220);
     gtk_widget_set_uposition (scrolledwindow, 12, 240);
-    gtk_widget_set_usize (scrolledwindow, 436, 100);
+    gtk_widget_set_size_request (scrolledwindow, 436, 100);
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow), 
 									GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 

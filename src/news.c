@@ -130,15 +130,15 @@ create_post_window (GtkWidget *widget, gpointer data)
 	post_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(post_window), "post", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(post_window), _("Post News"));
-	gtk_widget_set_usize(post_window, 300, 280);
-	gtk_signal_connect(GTK_OBJECT(post_window), "delete_event",
-			   GTK_SIGNAL_FUNC(close_post_window), 0);
+	gtk_widget_set_size_request(post_window, 300, 280);
+	g_signal_connect(GTK_OBJECT(post_window), "delete_event",
+			   G_CALLBACK(close_post_window), 0);
 
 	postprompt = gtk_text_new(0, 0);
 	gtk_text_set_editable(GTK_TEXT(postprompt), 1);
 	gtk_text_set_word_wrap(GTK_TEXT(postprompt), 1);
 	gtk_widget_set_style(postprompt, gtktext_style);
-	gtk_widget_set_usize(postprompt, 0, 260);
+	gtk_widget_set_size_request(postprompt, 0, 260);
 
 
 	vbox = gtk_vbox_new(0, 0);
@@ -149,12 +149,12 @@ create_post_window (GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
 
 	okbut = gtk_button_new_with_label(_("OK"));
-	gtk_signal_connect(GTK_OBJECT(okbut), "clicked",
-			   GTK_SIGNAL_FUNC(post_news), sess);
+	g_signal_connect(GTK_OBJECT(okbut), "clicked",
+			   G_CALLBACK(post_news), sess);
 	cancbut = gtk_button_new_with_label(_("Cancel"));
-	gtk_signal_connect(GTK_OBJECT(cancbut), "clicked",
+	g_signal_connect(GTK_OBJECT(cancbut), "clicked",
 
-			   GTK_SIGNAL_FUNC(close_post_window), 0);
+			   G_CALLBACK(close_post_window), 0);
 
 
 	gtk_box_pack_start(GTK_BOX(hbox), okbut, 0, 0, 0);
@@ -195,7 +195,7 @@ void create_news_window (session *sess)
 	tooltips = gtk_tooltips_new();
 
 	btn_frame = gtk_frame_new(0);
-	gtk_widget_set_usize(btn_frame, -2, 30);
+	gtk_widget_set_size_request(btn_frame, -2, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(btn_frame), GTK_SHADOW_OUT);
 
 	news_frame = gtk_frame_new(0);
@@ -226,22 +226,22 @@ void create_news_window (session *sess)
 	gtk_window_set_policy(GTK_WINDOW(news_window), 1, 1, 0);
 
 	gtk_window_set_title(GTK_WINDOW(news_window), _("News"));
-	gtk_widget_set_usize(news_window, 412, 384);
-	gtk_signal_connect(GTK_OBJECT(news_window), "delete_event",
-			   GTK_SIGNAL_FUNC(close_news_window), sess);
-	gtk_signal_connect(GTK_OBJECT(postButton), "clicked",
+	gtk_widget_set_size_request(news_window, 412, 384);
+	g_signal_connect(GTK_OBJECT(news_window), "delete_event",
+			   G_CALLBACK(close_news_window), sess);
+	g_signal_connect(GTK_OBJECT(postButton), "clicked",
 
-					   GTK_SIGNAL_FUNC(create_post_window), sess);
-	gtk_signal_connect(GTK_OBJECT(reloadButton), "clicked",
+					   G_CALLBACK(create_post_window), sess);
+	g_signal_connect(GTK_OBJECT(reloadButton), "clicked",
 
-					   GTK_SIGNAL_FUNC(reload_news), sess);
+					   G_CALLBACK(reload_news), sess);
 	vbox = gtk_vbox_new(0, 0);
 	gtk_container_add(GTK_CONTAINER(news_window), vbox);
 	hbox = gtk_hbox_new(0, 0);
 
 	gtk_container_add(GTK_CONTAINER(news_frame), hbox);
 
-	gtk_widget_set_usize(hbox, 512, 384);
+	gtk_widget_set_size_request(hbox, 512, 384);
 	gtk_box_pack_start(GTK_BOX(vbox), btn_frame, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(posthbox), postButton, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(posthbox), reloadButton, 0, 0, 0);
@@ -257,9 +257,9 @@ void create_news_window (session *sess)
 	gtk_box_pack_start(GTK_BOX(hbox), vscrollbar, 0, 0, 0);
 	gtk_widget_set_sensitive(postButton, FALSE);
 	gtk_widget_set_sensitive(reloadButton, FALSE);
-	gtk_signal_connect(GTK_OBJECT(news_window), "configure_event", 
-					   GTK_SIGNAL_FUNC(news_move), sess);
-	gtk_widget_set_usize(news_window, gtkhx_prefs.geo.news.xsize, 
+	g_signal_connect(GTK_OBJECT(news_window), "configure_event", 
+					   G_CALLBACK(news_move), sess);
+	gtk_widget_set_size_request(news_window, gtkhx_prefs.geo.news.xsize, 
 						 gtkhx_prefs.geo.news.ysize);
 	gtk_widget_set_uposition(news_window, gtkhx_prefs.geo.news.xpos, 
 							 gtkhx_prefs.geo.news.ypos);

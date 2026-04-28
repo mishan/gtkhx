@@ -244,15 +244,15 @@ void error_dialog (char *title, char *msg)
     gtk_window_set_title(GTK_WINDOW(dialog), title);
     gtk_container_border_width (GTK_CONTAINER(dialog), 5);
     label = gtk_label_new (message);
-    gtk_widget_set_usize(dialog, 250, 200);
+    gtk_widget_set_size_request(dialog, 250, 200);
 
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), label, TRUE, 
 						TRUE , 0);
 
     okbutton = gtk_button_new_with_label ("Ok");
 
-    gtk_signal_connect_object (GTK_OBJECT (okbutton), "clicked", 
-							   (GtkSignalFunc)gtk_widget_destroy, 
+    g_signal_connect_swapped (GTK_OBJECT (okbutton), "clicked", 
+							   (GCallback)gtk_widget_destroy, 
 							   GTK_OBJECT(dialog));
 
     GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
