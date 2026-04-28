@@ -103,17 +103,17 @@ void xfer_go (struct htxf_conn *htxf)
 			htxf->data_pos = data_size;
 			htxf->rsrc_pos = rsrc_size;
 		}
-		task_new(&sessions[0].htlc, rcv_task_file_get, htxf, 0, "xfer_go");
+		task_new(&the_session.htlc, rcv_task_file_get, htxf, 0, "xfer_go");
 		if (rfile != htxf->remotepath) {
 			hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
-			hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_GET, 0, 
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 
 					(data_size || rsrc_size) ? 3 : 2,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
 					HTLC_DATA_DIR, hldirlen, hldir,
 					HTLC_DATA_RFLT, 74, rflt);
 			g_free(hldir);
 		} else {
-			hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_GET, 0, 
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 
 					(data_size || rsrc_size) ? 2 : 1,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
 					HTLC_DATA_RFLT, 74, rflt);
@@ -124,15 +124,15 @@ void xfer_go (struct htxf_conn *htxf)
 
 		rfile = basename(htxf->path);
 		hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
-		task_new(&sessions[0].htlc, rcv_task_file_put, htxf, 0, "xfer_go");
+		task_new(&the_session.htlc, rcv_task_file_put, htxf, 0, "xfer_go");
 		if (exists_remote(htxf->remotepath)) {
-			hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_PUT, 0, 4,
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
 					HTLC_DATA_DIR, hldirlen, hldir,
 					HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
 					HTLC_DATA_HTXF_SIZE, 4, &size);
 		} else {
-			hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_PUT, 0, 3,
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
 					HTLC_DATA_DIR, hldirlen, hldir,
 					HTLC_DATA_HTXF_SIZE, 4, &size);
@@ -144,9 +144,9 @@ void xfer_go (struct htxf_conn *htxf)
 int xfer_go_timer (void *__arg)
 {
 	
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	xfer_go((struct htxf_conn *)__arg);
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 
 
 	return 0;
@@ -163,22 +163,22 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	htxf->type = type;
 	htxf->queue = -1;
 
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	xfers = g_realloc(xfers, (nxfers + 1) * sizeof(struct htxf_conn *));
 	xfers[nxfers] = htxf;
 	nxfers++;
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 
-	htxf->htlc = &sessions[0].htlc;
+	htxf->htlc = &the_session.htlc;
 	htxf->total_pos = 0;
 	htxf->total_size = 1;
-	hx_output.file_update(&sessions[0], htxf);
+	hx_output.file_update(&the_session, htxf);
 
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	if(nxfers == 1 || !gtkhx_prefs.queuedl) {
 		xfer_go(htxf);
 	}
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 
 	return htxf;
 }
@@ -247,7 +247,7 @@ static int rd_wr (int rd_fd, int wr_fd, guint32 data_len,
 			htxf->total_pos += r;
 
 			gtk_threads_enter();
-			hx_output.file_update(&sessions[0], htxf);
+			hx_output.file_update(&the_session, htxf);
 			gtk_threads_leave();
 		}
 		data_len -= pos;
@@ -287,7 +287,7 @@ static int preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf,
 		gtk_threads_enter();
 		p->output(p, buf, len);
 		htxf->total_pos += len;
-		hx_output.file_update(&sessions[0], htxf);
+		hx_output.file_update(&the_session, htxf);
 		gtk_threads_leave();
 		data_len -= len;
 	}
@@ -322,7 +322,7 @@ static void *get_thread (void *__arg)
 		len -= r;
 		htxf->total_pos += r;
 		gtk_threads_enter();
-		hx_output.file_update(&sessions[0], htxf);
+		hx_output.file_update(&the_session, htxf);
 		gtk_threads_leave();
 	}
 	pos = 0;
@@ -339,7 +339,7 @@ static void *get_thread (void *__arg)
 		htxf->total_pos += r;
 		
 		gtk_threads_enter();
-		hx_output.file_update(&sessions[0], htxf);
+		hx_output.file_update(&the_session, htxf);
 		gtk_threads_leave();
 	}
 	memcpy(typecrea, &buf[4], 8);
@@ -401,7 +401,7 @@ get_rsrc:
 		htxf->total_pos += r;
 
 		gtk_threads_enter();
-		hx_output.file_update(&sessions[0], htxf);
+		hx_output.file_update(&the_session, htxf);
 		gtk_threads_leave();
 	}
 	HN32(&len, &buf[12]);
@@ -425,16 +425,16 @@ done:
 	play_sound(FILE_DONE);
 	gtk_threads_enter();
 	htxf->total_pos = htxf->total_size;
-	hx_output.file_update(&sessions[0], htxf);
+	hx_output.file_update(&the_session, htxf);
 	gtk_threads_leave();
 
 ret:
 	close(s);
 
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	htxf->tid = 0;
 	xfer_delete(htxf);
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 	
 	return NULL;
 }
@@ -519,16 +519,16 @@ put_rsrc:
 done:
 	play_sound(FILE_DONE);
 	gtk_threads_enter();
-	hx_output.file_update(&sessions[0], htxf);
+	hx_output.file_update(&the_session, htxf);
 	gtk_threads_leave();
 
 ret:
 	close(s);
 
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	htxf->tid = 0;
 	xfer_delete(htxf);
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 
 	return NULL;
 }
@@ -556,7 +556,7 @@ void xfer_ready_write (struct htxf_conn *htxf)
 	unignore_signals(&oldset);
 
 	if (err) {
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "xfer: pthread_create: %s\n", strerror(err));
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "xfer: pthread_create: %s\n", strerror(err));
 		goto err_fd;
 	}
 	htxf->tid = tid;
@@ -565,9 +565,9 @@ void xfer_ready_write (struct htxf_conn *htxf)
 	return;
 
 err_fd:
-	LOCK_HTXF((&(sessions[0].htlc)));
+	LOCK_HTXF((&(the_session.htlc)));
 	xfer_delete(htxf);
-	UNLOCK_HTXF((&(sessions[0].htlc)));
+	UNLOCK_HTXF((&(the_session.htlc)));
 }
 
 void xfer_tasks_update (struct htlc_conn *htlc)
@@ -576,7 +576,7 @@ void xfer_tasks_update (struct htlc_conn *htlc)
 
 	for (i = 0; i < nxfers; i++) {
 		if (xfers[i]->htlc == htlc)
-			hx_output.file_update(&sessions[0], xfers[i]);
+			hx_output.file_update(&the_session, xfers[i]);
 	}
 }
 

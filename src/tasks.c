@@ -706,7 +706,7 @@ struct task * task_new (struct htlc_conn *htlc, void (*rcv)(), void *ptr,
 						void *data, const char *str)
 {
 	struct task *tsk;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	tsk = g_malloc(sizeof(struct task));
 	tsk->trans = htlc->trans;

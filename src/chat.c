@@ -126,14 +126,14 @@ void hx_invite_user(struct htlc_conn *htlc, guint16 uid, guint32 cid)
 void hx_chat_join (struct htlc_conn *htlc, guint32 cid)
 {
 	struct chat *chat;
-	chat = chat_with_cid(sess_from_htlc(htlc), cid);
+	chat = chat_with_cid(&the_session, cid);
 
 
 	if(chat) {
 		return;
 	}
 	else {
-		chat = chat_new(sess_from_htlc(htlc), cid);
+		chat = chat_new(&the_session, cid);
 		cid = htonl(cid);
 		task_new(htlc, rcv_task_user_list_switch, chat, 0, "join");
 		hlwrite(htlc, HTLC_HDR_CHAT_JOIN, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
@@ -144,7 +144,7 @@ void hx_part_chat(struct htlc_conn *htlc, guint32 cid)
 {
 	struct chat *chat;
 
-	chat = chat_with_cid(sess_from_htlc(htlc), cid);
+	chat = chat_with_cid(&the_session, cid);
 	cid = htonl(chat->cid);
 	hlwrite(htlc, HTLC_HDR_CHAT_PART, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
 }
@@ -407,7 +407,7 @@ void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid, const char *prefix,
 	char autobuf[256], *buf;
 	size_t mal_len;
 	size_t plen;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if(!sess) {
 		return;
@@ -445,7 +445,7 @@ void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt, ...)
 	va_list save;
 	char autobuf[256], *buf;
 	size_t mal_len;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if(!sess) {
 		return;
@@ -789,7 +789,7 @@ static void chat_input_key_press (GtkWidget *widget, GdkEventKey *event)
 		switch(k) {
 		case 'k':
 		case 'K':
-			create_connect_window(0,&sessions[0]);
+			create_connect_window(0,&the_session);
 			break;
 		}
 	}
@@ -973,7 +973,7 @@ void change_subject(GtkWidget *widget, gpointer data)
 	char *subject;
 
 	subject = gtk_entry_get_text(GTK_ENTRY(widget));
-	hx_change_subject(&sessions[0].htlc, GPOINTER_TO_INT(data), subject);
+	hx_change_subject(&the_session.htlc, GPOINTER_TO_INT(data), subject);
 }
 
 void create_chat_window (GtkWidget *widget, gpointer data)
@@ -1167,7 +1167,7 @@ static void join_chat(GtkWidget *widget, gpointer data)
 
 void output_chat_subject(struct htlc_conn *htlc, guint32 cid, char *buf)
 {
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct gtkhx_chat *gchat = gchat_with_cid(sess, cid);
 
 	if(!gchat)
@@ -1190,7 +1190,7 @@ void reject_chat(GtkWidget *btn, GtkWidget *dialog)
 {
 	guint32 cid = GPOINTER_TO_INT(gtk_object_get_data(GTK_OBJECT(btn), "cid"));
 
-	hx_reject_chat(&sessions[0].htlc, cid);
+	hx_reject_chat(&the_session.htlc, cid);
 	gtk_widget_destroy(dialog);
 }
 
@@ -1273,7 +1273,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	GdkPixmap *icon;
 	char *title;
 	gchar *titles[2];
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct gtkhx_chat *gchat = pchat_new(sess, chat);
 
 	titles[0] = _("UID");
@@ -1497,7 +1497,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 void hx_clear_chat(struct htlc_conn *htlc, guint32 cid, int subj)
 {
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct gtkhx_chat *gchat = gchat_with_cid(sess, cid);
 
 	gtk_xtext_clear(GTK_XTEXT(gchat->output));

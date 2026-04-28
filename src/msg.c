@@ -98,7 +98,7 @@ static void msg_input_key_press (GtkWidget *widget, GdkEventKey *event)
 		switch(k) {
 		case 'k':
 		case 'K':
-			create_connect_window(0,&sessions[0]);
+			create_connect_window(0,&the_session);
 			break;
 		}
 	}
@@ -179,14 +179,14 @@ static void msg_input_activate (GtkWidget *widget, gpointer data)
 	/* send the plugins information that we're sending a private message
 	   with content termed_buf to uid */
 #ifdef USE_PLUGIN
-	if(EMIT_SIGNAL(XP_SND_MSG, &sessions[0], termed_buf, &uid, 0, 0, 0) == 1) {
+	if(EMIT_SIGNAL(XP_SND_MSG, &the_session, termed_buf, &uid, 0, 0, 0) == 1) {
 		return;
 	}
 #endif
 	len = strlen(termed_buf);
-	msg_output(sessions[0].htlc.name, *uid, termed_buf);
+	msg_output(the_session.htlc.name, *uid, termed_buf);
 	LF2CR(termed_buf, len);
-	hx_send_msg(&sessions[0].htlc, *uid, termed_buf, len, 0);
+	hx_send_msg(&the_session.htlc, *uid, termed_buf, len, 0);
 	g_free(termed_buf);
 }
 
@@ -232,7 +232,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	gtk_text_set_word_wrap(GTK_TEXT(msg->inputbuf), 1);
 
 	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
-	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &sessions[0]);
+	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
 	gtk_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event", 
 					   GTK_SIGNAL_FUNC(msg_input_key_press), 0);
 	gtk_signal_connect(GTK_OBJECT(msg->inputbuf), "activate", 
@@ -321,7 +321,7 @@ void msg_output (char *name, guint16 uid, char *buf)
 	int brack_col;
 
 
-	brack_col = !(strcmp(name, sessions[0].htlc.name)) ? 13: 12;
+	brack_col = !(strcmp(name, the_session.htlc.name)) ? 13: 12;
 
 
 	text = g_strdup_printf("\003%d<\003%s\003%d>\003 %s", brack_col, name, brack_col, buf);

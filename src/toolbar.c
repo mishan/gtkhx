@@ -83,20 +83,20 @@ void disconnect_clicked (void)
 {
 	if(!connected) {
 		kill_threads();
-		setbtns(&sessions[0], 0);
+		setbtns(&the_session, 0);
 		set_status_bar(0);
-		set_disconnect_btn(&sessions[0], 0);
-		conn_task_update(&sessions[0], 2);
-		if(sessions[0].htlc.gdk_input) {
-			hxd_fd_clr(sessions[0].htlc.fd, FDR|FDW);
-			close(sessions[0].htlc.fd);
-			sessions[0].htlc.gdk_input = 0;
+		set_disconnect_btn(&the_session, 0);
+		conn_task_update(&the_session, 2);
+		if(the_session.htlc.gdk_input) {
+			hxd_fd_clr(the_session.htlc.fd, FDR|FDW);
+			close(the_session.htlc.fd);
+			the_session.htlc.gdk_input = 0;
 		}
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "%s: %s\n", server_addr, _("connection closed"));
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s: %s\n", server_addr, _("connection closed"));
 	}
 	
-	else if (sessions[0].htlc.fd) {
-		hx_htlc_close(&sessions[0].htlc, 1);
+	else if (the_session.htlc.fd) {
+		hx_htlc_close(&the_session.htlc, 1);
 	}
 }
 

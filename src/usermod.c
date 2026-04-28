@@ -177,8 +177,8 @@ useredit_login (char *login, struct useredit_session *ues)
 	size_t len;
 
 
-	if (&sessions[0].htlc)
-		hx_useredit_open(&sessions[0].htlc, login, user_open, ues);
+	if (&the_session.htlc)
+		hx_useredit_open(&the_session.htlc, login, user_open, ues);
 	len = strlen(login);
 	if (len > 31)
 		len = 31;
@@ -265,8 +265,8 @@ useredit_save (GtkWidget *widget, gpointer data)
 		useredit_get_login(ues->login_entry, ues);
 		new = 0;
 	}
-	if (&sessions[0].htlc) {
-		hx_useredit_create(&sessions[0].htlc, ues->login, ues->pass, ues->name, ues->access_buf);
+	if (&the_session.htlc) {
+		hx_useredit_create(&the_session.htlc, ues->login, ues->pass, ues->name, ues->access_buf);
 	}
 }
 
@@ -275,8 +275,8 @@ useredit_delete (GtkWidget *widget, gpointer data)
 {
 	struct useredit_session *ues = (struct useredit_session *)data;
 
-	if (&sessions[0].htlc)
-		hx_useredit_delete(&sessions[0].htlc, ues->login);
+	if (&the_session.htlc)
+		hx_useredit_delete(&the_session.htlc, ues->login);
 	gtk_widget_destroy(ues->window);
 }
 

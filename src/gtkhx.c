@@ -77,7 +77,7 @@ static int winput_tags[1024];
 
 const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
 
-session sessions[MAX_CONN];
+session the_session;
 
 void hx_quit (void)
 {
@@ -85,8 +85,8 @@ void hx_quit (void)
 	xfers_delete_all();
 	tracker_kill_threads();
 
-	if(sessions[0].htlc.fd) {
-		hx_htlc_close(&sessions[0].htlc, 1);
+	if(the_session.htlc.fd) {
+		hx_htlc_close(&the_session.htlc, 1);
 	}
 
 #if 0 /* XXX */
@@ -96,20 +96,6 @@ void hx_quit (void)
 	gtk_thread_exit();
 	gtk_main_quit();
 	exit(0);
-}
-
-session *sess_from_htlc(struct htlc_conn *htlc)
-{
-/*	int i; */
-	return &sessions[0];
-/*
-	for(i = 0; i < MAX_CONN; i++) {
-		if(&sessions[i].htlc == htlc) {
-			return &sessions[i];
-		}
-	}
-*/
-	return 0;
 }
 
 void
@@ -174,7 +160,7 @@ void hxd_fd_set (int fd, int rw)
 	GIOChannel *channel;
 
 	if (fd >= 1024) {
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 						 "gtkhx: fd %d >= 1024", fd);
 		hx_quit();
 	}
@@ -209,7 +195,7 @@ hxd_fd_clr (int fd, int rw)
 	int tag;
 
 	if (fd >= 1024) {
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 						 "gtkhx: fd %d >= 1024", fd);
 		hx_quit();
 	}
@@ -260,7 +246,7 @@ static void init_colors (GtkWidget *widget)
 										(user_colors[i].green & 0xff00) + 
 										((user_colors[i].blue & 0xff00) >> 8));
 		if (!gdk_colormap_alloc_color(colormap, &user_colors[i], 0, 1))
-			hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 							 _("alloc color failed"));
 	}
 
@@ -282,7 +268,7 @@ static void init_colors (GtkWidget *widget)
 								   (gdk_user_colors[i].green & 0xff00) + 
 								   ((gdk_user_colors[i].blue & 0xff00) >> 8));
 		if (!gdk_colormap_alloc_color(colormap, &gdk_user_colors[i], 0, 1))
-			hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 							 _("alloc color failed"));
 	}
 }
@@ -354,29 +340,29 @@ static void fe_init (void)
 	   this will be handled somewhere else in case of
 	   multiconnection support */
 
-	sessions[0].chat_list = &(sessions[0].__chat_list);
-	sessions[0].chat_tail = &(sessions[0].__chat_list);
-	sessions[0].chat_front = &(sessions[0].__chat_list);
-	sessions[0].__chat_list.user_list = &(sessions[0].__chat_list.__user_list);
-	sessions[0].__chat_list.user_tail = &(sessions[0].__chat_list.__user_list);
-	sessions[0].task_list = &(sessions[0].__task_list);
-	sessions[0].task_tail = &(sessions[0].__task_list);
+	the_session.chat_list = &(the_session.__chat_list);
+	the_session.chat_tail = &(the_session.__chat_list);
+	the_session.chat_front = &(the_session.__chat_list);
+	the_session.__chat_list.user_list = &(the_session.__chat_list.__user_list);
+	the_session.__chat_list.user_tail = &(the_session.__chat_list.__user_list);
+	the_session.task_list = &(the_session.__task_list);
+	the_session.task_tail = &(the_session.__task_list);
 
-	create_toolbar_window(&sessions[0]);
+	create_toolbar_window(&the_session);
 	init_colors(toolbar_window);
 
-	create_chat(&sessions[0]);
+	create_chat(&the_session);
 	if(gtkhx_prefs.geo.chat.init == 1)
-		create_chat_window(0, &sessions[0]);
+		create_chat_window(0, &the_session);
 	if(gtkhx_prefs.geo.news.init == 1)
-		create_news_window(&sessions[0]);
+		create_news_window(&the_session);
 	if(gtkhx_prefs.geo.users.init == 1)
-		create_users_window(0, &sessions[0]);
-	create_tasks(&sessions[0]);
+		create_users_window(0, &the_session);
+	create_tasks(&the_session);
 	if(gtkhx_prefs.geo.tasks.init == 1)
-		create_tasks_window(0, &sessions[0]);
+		create_tasks_window(0, &the_session);
 
-	reinit_gtktexts(&sessions[0]);
+	reinit_gtktexts(&the_session);
 }
 
 static void
@@ -600,7 +586,7 @@ main (int argc, char **argv, char **envp)
 {
 	struct sigaction act;
 
-	memset(&sessions[0], 0, sizeof(session));
+	memset(&the_session, 0, sizeof(session));
 
 #if defined(_SC_OPEN_MAX)
 	hxd_open_max = sysconf(_SC_OPEN_MAX);
@@ -694,7 +680,7 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
 {
 	if (*str) {
 #ifdef USE_PLUGIN
-		if(EMIT_SIGNAL(XP_SND_CHAT, sess_from_htlc(htlc), str, &cid, 0, 0, 0)
+		if(EMIT_SIGNAL(XP_SND_CHAT, &the_session, str, &cid, 0, 0, 0)
 		   == 1) {
 			return;
 		}
@@ -841,7 +827,7 @@ void hotline_client_init (int argc, char **argv)
 	if (!home || !user) {
 		pwe = getpwuid(getuid());
 		if (!pwe) {
-			hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "getpwuid: %s", 
+			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "getpwuid: %s", 
 							 strerror(errno));
 		} else {
 			if (!home)
@@ -852,16 +838,16 @@ void hotline_client_init (int argc, char **argv)
 		}
 	}
 
-	memset(&sessions[0].htlc, 0, sizeof(struct htlc_conn));
-	INITLOCK_HTXF((&(sessions[0].htlc)));
-	sessions[0].htlc.icon = 500;
+	memset(&the_session.htlc, 0, sizeof(struct htlc_conn));
+	INITLOCK_HTXF((&(the_session.htlc)));
+	the_session.htlc.icon = 500;
 	if (user)
 	{
-		strncpy(sessions[0].htlc.name, user, 31);
-		sessions[0].htlc.name[31] = '\0';
+		strncpy(the_session.htlc.name, user, 31);
+		the_session.htlc.name[31] = '\0';
 	}
 	else
-		strcpy(sessions[0].htlc.name, "Evaluation 0wn3r");
+		strcpy(the_session.htlc.name, "Evaluation 0wn3r");
 
 
 	gen_command_hash();
@@ -875,7 +861,7 @@ void hotline_client_init (int argc, char **argv)
 			pass = g_malloc(128);
 			get_password(pass);
 		}
-		hx_connect(&sessions[0].htlc, server, port, login ? login : "guest", 
+		hx_connect(&the_session.htlc, server, port, login ? login : "guest", 
 				   pass ? pass : "", 0);
 		g_free(server);
 		g_free(login);

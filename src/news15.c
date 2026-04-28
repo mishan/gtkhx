@@ -201,20 +201,20 @@ static void newsf_clicked(GtkWidget *widget, GdkEventButton *event)
 					gfnews->path = g_strdup(path);
 					gtk_window_set_title(GTK_WINDOW(gfnews->window), 
 										 gfnews->path);
-					hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+					hx_news15_fldr_list(&the_session.htlc, gfnews);
 				}
 				else {
 					struct gnews_folder *gfnews = NULL;
 
 					gfnews = create_gfnews_window(path);
-					hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+					hx_news15_fldr_list(&the_session.htlc, gfnews);
 				}
 			}
 			else {
 				struct gnews_catalog *gcnews;
 
 				gcnews = create_gcnews_window(path);				
-				hx_news15_cat_list(&sessions[0].htlc, gcnews);
+				hx_news15_cat_list(&the_session.htlc, gcnews);
 			}
 		}
 	}
@@ -282,7 +282,7 @@ static void gfnews_reload_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	if(gfnews->listing)
 		return;
 	gtk_hlist_clear(GTK_HLIST(gfnews->news_list));
-	hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }
 
 static void gfnews_mkdir(GtkWidget *widget, gpointer data)
@@ -296,8 +296,8 @@ static void gfnews_mkdir(GtkWidget *widget, gpointer data)
 
 	snprintf(pathname, MAXPATHLEN, "%s/%s", gfnews->path, name);
 
-	hx_news15_mkdir(&sessions[0].htlc, pathname);
-	hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+	hx_news15_mkdir(&the_session.htlc, pathname);
+	hx_news15_fldr_list(&the_session.htlc, gfnews);
 
 	gtk_widget_destroy(GTK_WIDGET(data));
 }
@@ -309,8 +309,8 @@ static void gfnews_mkcat(GtkWidget *widget, gpointer data)
 													  "gfnews");
 	char *name = gtk_entry_get_text(GTK_ENTRY(entry));
 
-	hx_news15_mkcat(&sessions[0].htlc, gfnews->path, name);
-	hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+	hx_news15_mkcat(&the_session.htlc, gfnews->path, name);
+	hx_news15_fldr_list(&the_session.htlc, gfnews);
 
 	gtk_widget_destroy(GTK_WIDGET(data));
 }
@@ -412,8 +412,8 @@ static void gfnews_delete_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 		else {
 			sprintf(path, "/%s", item->name);
 		}
-		hx_news15_delete(&sessions[0].htlc, path);
-		hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+		hx_news15_delete(&the_session.htlc, path);
+		hx_news15_fldr_list(&the_session.htlc, gfnews);
 	}
 }
 
@@ -440,7 +440,7 @@ static void gfnews_up_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	g_free(gfnews->path);
 	gfnews->path = g_strdup(gfnews->path_list->path);
 	gfnews->listing = 1;
-	hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }
 
 static GtkTargetEntry news15_drag[] =
@@ -479,10 +479,10 @@ static void news15_drag_receive(GtkWidget *target, GdkDragContext *context,
 		sprintf(patht, "%s/", gfnews_target->path);
 		
 /*		
-	hx_news15_move(&sessions[0].htlc, pathf, patht);
+	hx_news15_move(&the_session.htlc, pathf, patht);
 		
-hx_news15_fldr_list(&sessions[0].htlc, gfnews_target);
-hx_news15_fldr_list(&sessions[0].htlc, gfnews_source); 
+hx_news15_fldr_list(&the_session.htlc, gfnews_target);
+hx_news15_fldr_list(&the_session.htlc, gfnews_source); 
 */
 	}
 }
@@ -771,7 +771,7 @@ void newsc_clicked (GtkCTree *ctree, GList *node, gint column, struct gnews_cata
 {
 	struct news_item *item = gtk_ctree_node_get_row_data(ctree, (GtkCTreeNode *)node);
 
-	hx_news15_get_post(&sessions[0].htlc, item);
+	hx_news15_get_post(&the_session.htlc, item);
 	gcnews->row = (GtkCTreeNode *)node;
 }
 
@@ -786,9 +786,9 @@ void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 	char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
 
 	
-	hx_news15_post_thread(&sessions[0].htlc, gcnews->path, subjectbuf,
+	hx_news15_post_thread(&the_session.htlc, gcnews->path, subjectbuf,
 						  postid, textbuf);
-	hx_news15_cat_list(&sessions[0].htlc, gcnews);
+	hx_news15_cat_list(&the_session.htlc, gcnews);
 	gtk_widget_destroy(window);
 }
 
@@ -809,8 +809,8 @@ void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
 		return;
 	}
 
-	hx_news15_delete_thread(&sessions[0].htlc, gcnews->path, item->postid);
-	hx_news15_cat_list(&sessions[0].htlc, gcnews);
+	hx_news15_delete_thread(&the_session.htlc, gcnews->path, item->postid);
+	hx_news15_cat_list(&the_session.htlc, gcnews);
 }
 
 void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -916,10 +916,10 @@ void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 	char *textbuf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
 	char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
 
-	hx_news15_post_thread(&sessions[0].htlc, gcnews->path, subjectbuf,
+	hx_news15_post_thread(&the_session.htlc, gcnews->path, subjectbuf,
 						  0, textbuf);
 
-	hx_news15_cat_list(&sessions[0].htlc, gcnews);
+	hx_news15_cat_list(&the_session.htlc, gcnews);
 	gtk_widget_destroy(window);
 }
 
@@ -991,7 +991,7 @@ static void gcnews_reload_btn(GtkWidget *btn, struct gnews_catalog *gcnews)
 	if(gcnews->listing)
 		return;
 	gtk_clist_clear(GTK_CLIST(gcnews->news_tree));
-	hx_news15_cat_list(&sessions[0].htlc, gcnews);
+	hx_news15_cat_list(&the_session.htlc, gcnews);
 }
 
 struct gnews_catalog *create_gcnews_window (char *path)
@@ -1265,5 +1265,5 @@ void open_news15(GtkWidget *widget, session *sess)
 	
 	struct gnews_folder *gfnews = create_gfnews_window(NULL);
 
-	hx_news15_fldr_list(&sessions[0].htlc, gfnews);
+	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }

@@ -186,7 +186,7 @@ open_fldr (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 
 
 	gfl->row = 0;
-	hx_list_dir(&sessions[0].htlc, path, 1, 0, gfl);
+	hx_list_dir(&the_session.htlc, path, 1, 0, gfl);
 }
 
 static void
@@ -231,7 +231,7 @@ static void put_file(GtkWidget *widget, gpointer data)
 
 	snprintf(rpath, sizeof(rpath), "%s/%s", gfl->cfl->path, basename(lpath));
 
-	hx_put_file(&sessions[0].htlc, lpath, rpath);
+	hx_put_file(&the_session.htlc, lpath, rpath);
 	gtk_widget_destroy(GTK_WIDGET(data));
 
 }
@@ -304,8 +304,8 @@ static void delete_file (GtkWidget *widget, gpointer data)
 
 	snprintf(path, sizeof(path), "%s/%.*s", gfl->cfl->path,
 			 (int)fh->fnlen, fh->fname);
-	hx_file_delete(&sessions[0].htlc, path);
-	hx_list_dir(&sessions[0].htlc, gfl->cfl->path, 1, 0, gfl);
+	hx_file_delete(&the_session.htlc, path);
+	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
  }
 
 static void get_file_info(GtkWidget *widget, gpointer data)
@@ -320,7 +320,7 @@ static void get_file_info(GtkWidget *widget, gpointer data)
 	sprintf(path, "%s/%.*s", gfl->cfl->path,
 			 (int)fh->fnlen, fh->fname);
 
-	hx_file_info(&sessions[0].htlc, path);
+	hx_file_info(&the_session.htlc, path);
 }
 
 static void file_up_btn (GtkWidget *widget, gpointer data)
@@ -354,7 +354,7 @@ static void file_up_btn (GtkWidget *widget, gpointer data)
 
 	gfl->in_use = 1;
 	gfl->row = 0;
-	hx_list_dir(&sessions[0].htlc, gfl->path_list->path, 1, 0, gfl);
+	hx_list_dir(&the_session.htlc, gfl->path_list->path, 1, 0, gfl);
 }
 
 static void file_dl_btn (GtkWidget *widget, gpointer data)
@@ -421,7 +421,7 @@ static void file_reload_btn (GtkWidget *widget, gpointer data)
 	}
 
 	gtk_hlist_clear(GTK_HLIST(files_list));
-	hx_list_dir(&sessions[0].htlc, gfl->cfl->path, 1, 0, gfl);
+	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 }
 
 static void close_files_window (GtkWidget *widget, gpointer data)
@@ -444,8 +444,8 @@ static void makeDir(GtkWidget *widget, gpointer data)
 
 
 	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_entry_get_text(GTK_ENTRY(entry)));
-	hx_make_dir(&sessions[0].htlc, pathname);
-	hx_list_dir(&sessions[0].htlc, gfl->cfl->path, 1, 0, gfl);
+	hx_make_dir(&the_session.htlc, pathname);
+	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 
 	gtk_widget_destroy(GTK_WIDGET(data));
 }
@@ -524,15 +524,15 @@ static void files_drag_receive(GtkWidget *target, GdkDragContext *context,
 				fh->fname);
 		sprintf(patht, "%s/", gfl_target->cfl->path);
 
-		hx_file_move(&sessions[0].htlc, pathf, patht);
-/*		hx_file_link(&sessions[0].htlc, pathf, patht);
+		hx_file_move(&the_session.htlc, pathf, patht);
+/*		hx_file_link(&the_session.htlc, pathf, patht);
 
 		XXX: Pop up a dialog and prompt the user whether he wants to move 
 		or link the file or cancel */
 
-		hx_list_dir(&sessions[0].htlc, gfl_target->cfl->path, 1, 0, 
+		hx_list_dir(&the_session.htlc, gfl_target->cfl->path, 1, 0, 
 		gfl_target); 
-		hx_list_dir(&sessions[0].htlc, gfl_source->cfl->path, 1, 0, 
+		hx_list_dir(&the_session.htlc, gfl_source->cfl->path, 1, 0, 
 		gfl_source); 
 	}
 }
@@ -718,7 +718,7 @@ open_files (void)
 
 	struct gfile_list *gfl = create_files_window("/");
 
-	hx_list_dir(&sessions[0].htlc, "/", 1, 0, gfl);
+	hx_list_dir(&the_session.htlc, "/", 1, 0, gfl);
 }
 
 /* fileutils-4.0/lib/human.c */
@@ -1050,18 +1050,18 @@ void set_name_comment(GtkWidget *btn, gpointer data)
 	char *file;
 
 	file = dirchar_basename(path); 
-	task_new(&sessions[0].htlc, 0, 0, 0, "set file info");
+	task_new(&the_session.htlc, 0, 0, 0, "set file info");
 	if (file != path) {
 		guint16 hldirlen = 0;
 		guint8 *hldir = path_to_hldir(path, &hldirlen, 1);
-		hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_SETINFO, 0, 4,
+		hlwrite(&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 4,
 				HTLC_DATA_FILE_NAME, strlen(file), file,
 				HTLC_DATA_FILE_RENAME, strlen(name), name,
 				HTLC_DATA_FILE_COMMENT, strlen(comments), comments,
 				HTLC_DATA_DIR, hldirlen, hldir); 
 		g_free(hldir);
 	} else {
-		hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_SETINFO, 0, 3,
+		hlwrite(&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 3,
 				HTLC_DATA_FILE_NAME, strlen(file), file,
 				HTLC_DATA_FILE_RENAME, strlen(name), name,
 				HTLC_DATA_FILE_COMMENT, strlen(comments), comments); 
@@ -1294,8 +1294,8 @@ int exists_remote (char *path)
 		cfl->completing = COMPLETE_EXPAND;
 		cfl->path = g_strdup(path);
 		hldir = path_to_hldir(path, &hldirlen, 0);
-		task_new(&sessions[0].htlc, rcv_task_file_list, cfl, 0, "ls_exists");
-		hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_LIST, 0, 1,
+		task_new(&the_session.htlc, rcv_task_file_list, cfl, 0, "ls_exists");
+		hlwrite(&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1,
 			HTLC_DATA_DIR, hldirlen, hldir);
 		g_free(hldir);
 		return 0;

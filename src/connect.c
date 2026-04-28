@@ -559,7 +559,7 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 		}
 	}
 	if(!(bookmark = fopen(path, "w"))) {
-		hx_printf_prefix(&sessions[0].htlc, 0, "Could not open \"%s\" for writing.", path);
+		hx_printf_prefix(&the_session.htlc, 0, "Could not open \"%s\" for writing.", path);
 		g_free(dir);
 		g_free(dirtwo);
 		g_free(server_str);
@@ -898,6 +898,6 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 void connect_bookmark_name(char *name)
 {
-	create_connect_window(0,&sessions[0]);
+	create_connect_window(0,&the_session);
 	open_bookmark(0, name);
 }

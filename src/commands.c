@@ -293,7 +293,7 @@ usage:		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage %s <uid> <msg>\n", argv[0
 	}
 	uid = atou32(name);
 	if (!uid) {
-		struct chat *chat = chat_with_cid(sess_from_htlc(htlc), 0);
+		struct chat *chat = chat_with_cid(&the_session, 0);
 		user = hx_user_with_name(chat->user_list, name);
 		if (!user) {
 			hx_printf_prefix(htlc, cid, INFOPREFIX,
@@ -306,7 +306,7 @@ usage:		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage %s <uid> <msg>\n", argv[0
 	last_msg_nick[31] = 0;
 
 	if (!user) {
-		struct chat *chat = chat_with_cid(sess_from_htlc(htlc), 0);
+		struct chat *chat = chat_with_cid(&the_session, 0);
 		user = hx_user_with_uid(chat->user_list, uid);
 	}
 	if (user) {
@@ -375,13 +375,13 @@ exec_ready_read (int fd)
 		exec_close(fd);
 	} else {
 		buf[r] = 0;
-		if (hxd_files[fd].conn.htlc == &sessions[0].htlc) {
+		if (hxd_files[fd].conn.htlc == &the_session.htlc) {
 			LF2CR(buf, r);
 			if (buf[r - 1] == '\r')
 				buf[r - 1] = 0;
-			hx_send_chat(&sessions[0].htlc, buf, hxd_files[fd].cid, 0);
+			hx_send_chat(&the_session.htlc, buf, hxd_files[fd].cid, 0);
 		} else {
-			hx_printf(&sessions[0].htlc, hxd_files[fd].cid, "%s", buf);
+			hx_printf(&the_session.htlc, hxd_files[fd].cid, "%s", buf);
 		}
 	}
 }
@@ -458,7 +458,7 @@ COMMAND(ignore)
 {
 	guint32 uid;
 	struct hx_user *user= 0;
-	struct chat *chat = chat_with_cid(sess_from_htlc(htlc), 0);
+	struct chat *chat = chat_with_cid(&the_session, 0);
 
 	if(argc < 2) {
 		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage: %s <uid>\n", argv[0]);
@@ -605,7 +605,7 @@ void hx_command (char *str, guint32 cid)
 				add_arg(cur);
 			argv[argc] = 0;
 
-			cmd->fun(argc, argv, str, &sessions[0].htlc, cid);
+			cmd->fun(argc, argv, str, &the_session.htlc, cid);
 			g_free(s);
 			if (argv != auto_argv)
 				g_free(argv);
@@ -615,5 +615,5 @@ void hx_command (char *str, guint32 cid)
 	} while (cmd <= last_command && cmd->name[0] == *str);
 
   notfound:
-	hx_printf_prefix(&sessions[0].htlc, cid, INFOPREFIX, "%.*s: command not found\n", p - str, str);
+	hx_printf_prefix(&the_session.htlc, cid, INFOPREFIX, "%.*s: command not found\n", p - str, str);
 }

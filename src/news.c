@@ -307,7 +307,7 @@ void output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 		return;
 	}
 
-	sess = sess_from_htlc(htlc);
+	sess = &the_session;
 	if(!sess) {
 		return;
 	}
@@ -323,7 +323,7 @@ void output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
 	if(!gtkhx_prefs.geo.news.open)
 		return;
 
-	sess = sess_from_htlc(htlc);
+	sess = &the_session;
 	if(!sess) {
 		return;
 	}

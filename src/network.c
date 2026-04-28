@@ -108,7 +108,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	struct task *tsk, *tsknext;
 	char buf[HOSTLEN];
 
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if(conn_tid) {
 #ifndef WIN32
@@ -338,12 +338,12 @@ update_task (struct htlc_conn *htlc)
 			off += 20+ntohl(h->len);
 		}
 		if (h && (ntohl(h->type)&0xffffff) == HTLS_HDR_TASK) {
-			struct task *tsk = task_with_trans(sess_from_htlc(htlc),
+			struct task *tsk = task_with_trans(&the_session,
 											   ntohl(h->trans));
 			if (tsk) {
 				tsk->pos = htlc->in.pos;
 				tsk->len = htlc->in.len;
-				hx_output.task_update(sess_from_htlc(htlc), tsk);
+				hx_output.task_update(&the_session, tsk);
 			}
 		}
 	}
@@ -433,7 +433,7 @@ static void hx_thread_connect (void *arg)
 	char *pass = cdata->pass;
 	int secure = cdata->secure;
 	guint16 port = cdata->port;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 #ifdef USE_IPV6
 	char buf[HOSTLEN+1];
 #else
@@ -967,16 +967,16 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 				debug("entering gtk_threads\n");
 				gtk_threads_enter();
 #ifdef USE_IPV6
-				hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX,
+				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
 
 								 "%s: %s\n", serverstr, gai_strerror(error));
 #else
 # ifdef HAVE_HSTRERROR
-				hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX,
+				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
 								 _("DNS lookup for %s failed: %s\n"),
 								 serverstr, hstrerror(h_errno));
 # else
-				hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX,
+				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
 								 _("DNS lookup for %s failed\n"), serverstr);
 # endif
 #endif
@@ -1008,7 +1008,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 #endif
 			debug("entering gtk_threads\n");
 			gtk_threads_enter();
-			hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, _("tracker: %s\n"), strerror(errno));
+			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, _("tracker: %s\n"), strerror(errno));
 			trackconn_prog_update(sess, serverstr, 2, 2);
 			debug("leaving gtk_threads\n");
 			gtk_threads_leave();
@@ -1027,7 +1027,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 #endif
 		debug("entering gtk_threads\n");
 		gtk_threads_enter();
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, _("tracker: %s: %s"),
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, _("tracker: %s: %s"),
 
 						 serverstr, strerror(errno));
 		trackconn_prog_update(sess, serverstr, 2, 2);

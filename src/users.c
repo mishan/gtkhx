@@ -868,7 +868,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 void users_clear (struct htlc_conn *htlc, struct chat *chat)
 {
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if (!sess->users_list || !gtkhx_prefs.geo.users.open)
 		return;
@@ -885,7 +885,7 @@ void user_create (struct htlc_conn *htlc, struct chat *chat,
 	GdkPixmap *pixmap;
 	GdkBitmap *mask;
 	gint row;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	GtkWidget *losers_list = gtkhx_prefs.geo.users.open ?sess->users_list : 0;
 	gchar *nulls[2];
 	struct gtkhx_chat *gchat;
@@ -920,7 +920,7 @@ void user_delete (struct htlc_conn *htlc, struct chat *chat,
 {
 	gint row;
 	struct gtkhx_chat *gchat;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
 
 	if(chat->cid) {
@@ -948,7 +948,7 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	gint row;
 	gchar *rowdat[2];
 	struct gtkhx_chat *gchat;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
 	struct chat *cchat;
 

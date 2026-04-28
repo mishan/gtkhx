@@ -326,7 +326,7 @@ file_part (char *file)
 
 static void module_autoload (char *mod)
 {
-	hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "\002%s\00302: \017%s\00302...\017\n", _("Loading"), file_part (mod));
+	hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "\002%s\00302: \017%s\00302...\017\n", _("Loading"), file_part (mod));
 	module_load (mod);
 }
 
@@ -495,9 +495,9 @@ int module_load (char *name)
 
 	if (handle == NULL) {
 #ifdef HAVE_DLERROR
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "%s\n", (char *)dlerror());
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s\n", (char *)dlerror());
 #else
-		hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, "%s%s\n", _("Could not load plugin: "), name);
+		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s%s\n", _("Could not load plugin: "), name);
 #endif /* HAVE_DLERROR */
 		return 1;
 	}
@@ -506,7 +506,7 @@ int module_load (char *name)
 	if (module_init == NULL)
 		return 1;
 	m = g_malloc (sizeof (struct module));
-	if (module_init (MODULE_IFACE_VER, m, &sessions[0]) != 0) {
+	if (module_init (MODULE_IFACE_VER, m, &the_session) != 0) {
 		dlclose (handle);
 		return 1;
 	}

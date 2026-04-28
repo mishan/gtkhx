@@ -292,8 +292,6 @@ extern int task_inerror (struct htlc_conn *htlc);
 #define COMPLETE_LS_R	2
 #define COMPLETE_GET_R	3
 
-#define MAX_CONN 1
-
 #ifdef HAVE_DCGETTEXT
 #include <libintl.h>
 #define _(string) dgettext (PACKAGE, string)
@@ -553,9 +551,10 @@ typedef struct _session {
 	unsigned int connected:1;
 } session;
 
-extern session sessions[MAX_CONN];
-
-extern session *sess_from_htlc(struct htlc_conn *htlc);
+/* Single-session world. Phase 5 will revisit when multi-conn lands;
+ * the historical sessions[MAX_CONN] / sess_from_htlc() pretended to be
+ * an array but always returned &sessions[0]. */
+extern session the_session;
 
 extern char last_msg_nick[32];
 extern const char *INFOPREFIX;

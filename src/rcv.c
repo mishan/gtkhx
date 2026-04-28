@@ -93,7 +93,7 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 	guint16 len = 0;
 	char chatbuf[8192 + 1], *chat;
 	guint16 uid = 0;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct chat *hx_chat = chat_with_cid(sess, 0);
 
 	dh_start(htlc)
@@ -144,7 +144,7 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 	guint16 uid = 0;
 	guint16 msglen = 0, nlen = 0;
 	char msgbuf[8192 + 1], name[128 + 1];
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct chat *chat = chat_with_cid(sess, 0);
 	struct hx_user *user = 0;
 
@@ -206,12 +206,12 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 		CR2LF(dh->data, _len);
 		strip_ansi(dh->data, _len);
 #ifdef USE_PLUGIN
-		if(EMIT_SIGNAL(XP_RCV_AGREE, sess_from_htlc(htlc), dh->data, &_len, 0, 0, 0)
+		if(EMIT_SIGNAL(XP_RCV_AGREE, &the_session, dh->data, &_len, 0, 0, 0)
 		   == 1) {
 			return;
 		}
 #endif
-		hx_output.agreement(sess_from_htlc(htlc), dh->data, _len);
+		hx_output.agreement(&the_session, dh->data, _len);
 		
 	} dh_end();
 }
@@ -246,7 +246,7 @@ void hx_rcv_task (struct htlc_conn *htlc)
 	char error = 0;
 
 	HN32(&trans, &h->trans);
-	tsk = task_with_trans(sess_from_htlc(htlc), trans);
+	tsk = task_with_trans(&the_session, trans);
 
 	if (task_inerror(htlc)) {
 		task_error(htlc);
@@ -258,7 +258,7 @@ void hx_rcv_task (struct htlc_conn *htlc)
 		if (tsk->rcv && !error)
 			tsk->rcv(htlc, tsk->ptr, tsk->data);
 		if (hxd_files[fd].conn.htlc)
-			task_delete(sess_from_htlc(htlc), tsk);
+			task_delete(&the_session, tsk);
 	} else {
 		/*	hx_printf_prefix(0, INFOPREFIX, "got task 0x%08x\n", trans); */
 	}
@@ -271,7 +271,7 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	guint8 name[32];
 	struct chat *chat;
 	struct hx_user *user;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if (task_inerror(htlc))
 		return;
@@ -355,7 +355,7 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 	struct chat *chat;
 	struct hx_user *user;
 	char *col;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	dh_start(htlc) {
 		switch (_type) {
@@ -394,7 +394,7 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 	guint16 slen = 0;
 	guint8 subject[256];
 	struct chat *chat;
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	dh_start(htlc) {
 		switch (_type) {
@@ -432,7 +432,7 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 	guint32 cid = 0;
 	guint16 nlen;
 	guint8 name[32];
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	struct chat *chat = chat_with_cid(sess, 0);
 	struct hx_user *user = 0;
 
@@ -494,7 +494,7 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 		}
 	} dh_end();
 
-	setbtns(&sessions[0], 1);
+	setbtns(&the_session, 1);
 }
 
 void hx_rcv_dump (struct htlc_conn *htlc)
@@ -533,7 +533,7 @@ void hx_rcv_xfer_queue(struct htlc_conn *htlc)
 		return;
 	}
 	htxf->queue = queueid;
-	hx_output.xfer_queue(sess_from_htlc(htlc), htxf);
+	hx_output.xfer_queue(&the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);
@@ -808,7 +808,7 @@ void rcv_task_news_users(struct htlc_conn *htlc, struct chat *chat, int text)
 	/* this is only used for login events  */
 	rcv_task_user_list(htlc, chat, text);
 
-	reload_news(0, sess_from_htlc(htlc));
+	reload_news(0, &the_session);
 }
 
 void rcv_task_login (struct htlc_conn *htlc, char *pass)
@@ -818,7 +818,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 	guint16 version;
 	guint16 len;
 	char servername[8192+1];
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 	guint16 hc;
 	guint16 icon16;
 	guint8 *p, *mal = 0;
@@ -1192,7 +1192,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 	struct hx_user *user;
 	guint16 nlen, uid;
 	int new = 0;
-	struct gtkhx_chat *gchat = gchat_with_cid(sess_from_htlc(htlc), chat->cid);
+	struct gtkhx_chat *gchat = gchat_with_cid(&the_session, chat->cid);
 
 	dh_start(htlc) {
 		if (_type == HTLS_DATA_USER_LIST) {
@@ -1237,7 +1237,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 
 void rcv_task_user_list_switch (struct htlc_conn *htlc, struct chat *chat)
 {
-	session *sess = sess_from_htlc(htlc);
+	session *sess = &the_session;
 
 	if (task_inerror(htlc)) {
 		chat_delete(sess, chat);
@@ -1324,9 +1324,9 @@ void rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 				if (!ncfl->path)
 					ncfl->path = g_strdup(pathbuf);
 				hldir = path_to_hldir(pathbuf, &hldirlen, 0);
-				task_new(&sessions[0].htlc, rcv_task_file_list, ncfl, 0, 
+				task_new(&the_session.htlc, rcv_task_file_list, ncfl, 0, 
 						 "ls_complete");
-				hlwrite(&sessions[0].htlc, HTLC_HDR_FILE_LIST, 0, 1,
+				hlwrite(&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1,
 						HTLC_DATA_DIR, hldirlen, hldir);
 				g_free(hldir);
 			} else if (cfl->completing == COMPLETE_GET_R) {
@@ -1470,7 +1470,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 			htxf->gone = 0;
 			timer_add_secs(1, xfer_go_timer, htxf);
 		} else {
-			gtask_delete_htxf(sess_from_htlc(htlc), htxf);
+			gtask_delete_htxf(&the_session, htxf);
 			LOCK_HTXF(htlc);
 			xfer_delete(htxf);
 			UNLOCK_HTXF(htlc);
@@ -1509,11 +1509,11 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 				  buf, HOSTLEN);
 		if((error = getaddrinfo(buf, portstr, &hints, &htxf->listen_addr)))
 			{
-				hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 								 "htxf %s:%u failed: %s\n", 
 								 htlc->addr->ai_canonname, server_port+1, 
 								 gai_strerror(error));
-				gtask_delete_htxf(sess_from_htlc(htlc), htxf);
+				gtask_delete_htxf(&the_session, htxf);
 				xfer_delete(htxf);
 				return;
 			}
@@ -1523,7 +1523,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(sess_from_htlc(htlc), htxf); /* we most certainly want
+	hx_output.xfer_queue(&the_session, htxf); /* we most certainly want
 														 to output its position
 														 in the queue */
 
@@ -1548,7 +1548,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 #endif
 
 	if (task_inerror(htlc)) {
-		gtask_delete_htxf(sess_from_htlc(htlc), htxf);
+		gtask_delete_htxf(&the_session, htxf);
 		LOCK_HTXF(htlc);
 		xfer_delete(htxf);
 		UNLOCK_HTXF(htlc);
@@ -1598,11 +1598,11 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 				  buf, HOSTLEN);
 		if((error = getaddrinfo(buf, portstr, &hints,
 								&htxf->listen_addr))) {
-			hx_printf_prefix(&sessions[0].htlc, 0, INFOPREFIX, 
+			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
 							 "htxf %s:%u failed: %s\n", 
 							 htlc->addr->ai_canonname, server_port+1, 
 							 gai_strerror(error));
-			gtask_delete_htxf(sess_from_htlc(htlc), htxf);
+			gtask_delete_htxf(&the_session, htxf);
 			xfer_delete(htxf);
 			return;
 		}
@@ -1612,7 +1612,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(sess_from_htlc(htlc), htxf);
+	hx_output.xfer_queue(&the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);

@@ -265,7 +265,7 @@ static void changed_xtext (session *sess)
 /*
   static void changed_nickoricon (session *sess)
   {
-  hx_change_name_icon(&sessions[0].htlc);
+  hx_change_name_icon(&the_session.htlc);
   }
 */
 
@@ -388,7 +388,7 @@ struct cfgvar
 #ifdef USE_GDK_PIXBUF
 	{"GREEN", {&gtkhx_prefs.tint_green}, INT, 0, NULL, NULL},
 #endif
-	{"ICON", {&sessions[0].htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
+	{"ICON", {&the_session.htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
 	{"ICONS", {&gtkhx_prefs.icon_str}, STRING, 0, parse_icons, NULL},
 #if 0 /* XXX */
 	{"LOGGING", {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
@@ -397,7 +397,7 @@ struct cfgvar
 	{"NEWSXSIZE", {&gtkhx_prefs.geo.news.xsize}, INT, 0, NULL, NULL},
 	{"NEWSYPOS", {&gtkhx_prefs.geo.news.ypos}, INT, 0, NULL, NULL},
 	{"NEWSYSIZE", {&gtkhx_prefs.geo.news.ysize}, INT, 0, NULL, NULL},
-	{"NICK", {sessions[0].htlc.name}, STRING32, 0, /*changed_nickoricon*/NULL, NULL},
+	{"NICK", {the_session.htlc.name}, STRING32, 0, /*changed_nickoricon*/NULL, NULL},
 	{"OLD_NICKCOMPLETION", {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0, NULL,
 	 NULL},
 	{"OPENCHAT", {&gtkhx_prefs.geo.chat.init}, BOOLEAN, 0, NULL, NULL},
@@ -602,7 +602,7 @@ static void prefs_allocate(char *tag, char *rest)
 	}
 
 	if (result->changefunc)
-		(*(result->changefunc))(&sessions[0]);
+		(*(result->changefunc))(&the_session);
 }
 
 static void parse_line(char *line)
@@ -938,7 +938,7 @@ void options_change (GtkWidget *widget, gpointer data)
 	}
 
 	if(connected) {
-		hx_change_name_icon(&sessions[0].htlc);
+		hx_change_name_icon(&the_session.htlc);
 	}
 
 	parse_tracker_list();
@@ -990,16 +990,13 @@ settings_slider_cb (GtkAdjustment * adj, int *value)
 {
 	struct gtkhx_chat *gchat;
 	struct msgwin *msg;
-	int i;
 
 	*value = adj->value;
-	for(i = 0; i < sizeof(sessions)/sizeof(sessions[0]); i++) {
-		for(gchat = sessions[i].gchat_list; gchat; gchat = gchat->prev) {
-			GTK_XTEXT (gchat->output)->tint_red = gtkhx_prefs.tint_red;
-			GTK_XTEXT (gchat->output)->tint_green = gtkhx_prefs.tint_green;
-			GTK_XTEXT (gchat->output)->tint_blue = gtkhx_prefs.tint_blue;
-			gtk_xtext_refresh (GTK_XTEXT (gchat->output), gtkhx_prefs.trans_xtext);
-		}
+	for(gchat = the_session.gchat_list; gchat; gchat = gchat->prev) {
+		GTK_XTEXT (gchat->output)->tint_red = gtkhx_prefs.tint_red;
+		GTK_XTEXT (gchat->output)->tint_green = gtkhx_prefs.tint_green;
+		GTK_XTEXT (gchat->output)->tint_blue = gtkhx_prefs.tint_blue;
+		gtk_xtext_refresh (GTK_XTEXT (gchat->output), gtkhx_prefs.trans_xtext);
 	}
 	for(msg = msg_list; msg; msg = msg->prev) {
 		GTK_XTEXT (msg->outputbuf)->tint_red = gtkhx_prefs.tint_red;
@@ -1489,7 +1486,7 @@ static void settings_page_icon(GtkWidget *vbox)
 	gtk_table_attach(GTK_TABLE(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
-	sprintf(iconstr, "%u", sessions[0].htlc.icon);
+	sprintf(iconstr, "%u", the_session.htlc.icon);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICON_IDX].widget), iconstr);
 
 	scroll = gtk_scrolled_window_new(0,0);
@@ -1606,7 +1603,7 @@ static void settings_page_general(GtkWidget *vbox)
 	gtk_table_attach(GTK_TABLE(table), cfgvars[NICK_IDX].widget, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[NICK_IDX].widget), sessions[0].htlc.name);
+	gtk_entry_set_text(GTK_ENTRY(cfgvars[NICK_IDX].widget), the_session.htlc.name);
 
 	name = gtk_label_new(_("Your Name:"));
 	gtk_table_attach(GTK_TABLE(table), name, 0, 1, 0, 1,
