@@ -61,22 +61,14 @@ struct gtkhx_prefs gtkhx_prefs =
 	255,
 	255,
 #endif
-#ifdef WIN32
-	"sounds",
-#else
 	PREFIX"/share/gtkhx/sounds",
-#endif
 	"",
 	"fixed",
 	".",
 	NULL,
 	"hltracker.com",
 	NULL,
-#ifdef WIN32
-	"icons.rsrc",
-#else
 	PREFIX "/share/gtkhx/icons.rsrc",
-#endif
 	"play",
 	500,
 	{
@@ -654,12 +646,8 @@ void create_options_window(GtkWidget *widget, gpointer data);
 
 void prefs_read(void)
 {
-#ifndef WIN32
 	char *path = g_strdup_printf("%s/.gtkhxrc", getenv("HOME"));
 	FILE *prefs = fopen(path, "r");
-#else
-	FILE *prefs = fopen("gtkhxrc", "r");
-#endif
 	char *prefsline;
 	size_t prefslinelen = 256;
 
@@ -671,19 +659,12 @@ void prefs_read(void)
 			create_options_window(NULL, NULL);
 		}
 		else {
-			fprintf(stderr, "prefs_read: %s: %s\n", 
-#ifndef WIN32
-					path,
-#else
-					"gtkhxrc",
-#endif
-					strerror(errno));
+			fprintf(stderr, "prefs_read: %s: %s\n",
+					path, strerror(errno));
 			fflush(stderr);
 		}
 
-#ifndef WIN32
 		g_free(path);
-#endif
 		return;
 	}
 
@@ -692,35 +673,22 @@ void prefs_read(void)
 
 	g_free(prefsline);
 	fclose(prefs);
-#ifndef WIN32
 	g_free(path);
-#endif
 }
 
 void prefs_write(void)
 {
-#ifndef WIN32
 	char *path = g_strdup_printf("%s/.gtkhxrc", getenv("HOME"));
- 	FILE *prefs = fopen(path, "w");
-#else
- 	FILE *prefs = fopen("gtkhxrc", "w");
-#endif
+	FILE *prefs = fopen(path, "w");
 	time_t now;
 	int i;
 
 	if(!prefs) {
-		fprintf(stderr, "prefs_write: %s: %s\n", 
-#ifndef WIN32
-				  path,
-#else
-				  "gtkhxrc",
-#endif
-				  strerror(errno));
+		fprintf(stderr, "prefs_write: %s: %s\n",
+				path, strerror(errno));
 		fflush(stderr);
 
-#ifndef WIN32
-	g_free(path);
-#endif
+		g_free(path);
 		return;
 	}
 
@@ -758,9 +726,7 @@ void prefs_write(void)
 	}
 
 	fclose(prefs);
-#ifndef WIN32
 	g_free(path);
-#endif
 }
 
 static void parse_icons (session *sess)

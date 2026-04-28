@@ -58,11 +58,7 @@ struct htxf_conn {
 	guint8 type;
 	guint32 queue;	/* position in server queue */
 	int fd;
-#ifdef WIN32
-	int pid;
-#else
 	pthread_t tid;
-#endif
 
 #ifdef USE_IPV6
 	struct addrinfo *listen_addr;

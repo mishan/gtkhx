@@ -184,11 +184,7 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 		text[1] = nusersstr;
 		text[2] = g_malloc(HOSTLEN);
 
-#ifndef WIN32
 		inet_ntop(AF_INET, &root->addr, text[2], HOSTLEN);
-#else
-		snprintf(text[2], HOSTLEN, "%s", inet_ntoa(&root->addr));
-#endif
 
 		text[3] = portstr;
 		text[4] = root->desc;
@@ -335,11 +331,7 @@ tracker_click (GtkWidget *widget, GdkEventButton *event)
 		char buf[HOSTLEN];
 
 		server = gtk_hlist_get_row_data(GTK_HLIST(tracker_list), tracker_storow);
-#ifndef WIN32
 		inet_ntop(AF_INET, &server->addr, buf, HOSTLEN);
-#else
-		snprintf(buf, HOSTLEN, "%s", inet_ntoa(&server->addr));
-#endif
 #ifdef CONFIG_COMPRESS
 		memset(the_session.htlc.compressalg, 0, sizeof(the_session.htlc.compressalg));
 #endif
@@ -359,11 +351,7 @@ static void tracker_connect (void)
 		char buf[HOSTLEN];
 
 		create_connect_window(0, &the_session);
-#ifndef WIN32
 		inet_ntop(AF_INET, &server->addr, buf, HOSTLEN);
-#else
-		snprintf(buf, HOSTLEN, "%s", inet_ntoa(&server->addr));
-#endif
 		connect_set_entries(buf, 0, 0, server->port);
 	}
 }

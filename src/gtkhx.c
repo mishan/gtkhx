@@ -166,11 +166,7 @@ void hxd_fd_set (int fd, int rw)
 	}
 
 	
-#ifdef WIN32
-	channel = g_io_channel_win32_new_socket (fd);	
-#else
 	channel = g_io_channel_unix_new (fd);
-#endif
 	if (rw & FDR) {
 /*		printf("adding fd %d for reading\n", fd); */
 		if(rinput_tags[fd] != -1)

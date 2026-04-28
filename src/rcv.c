@@ -848,11 +848,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 	getnameinfo(htlc->addr->ai_addr, htlc->addr->ai_addrlen, buf, sizeof(buf),
 				NULL, 0, NI_NUMERICHOST);
 #else
-#ifndef WIN32
 	inet_ntop(AF_INET, &htlc->addr.sin_addr, buf, sizeof(buf));
-#else
-	snprintf(buf, sizeof(buf), "%s", inet_ntoa(htlc->addr.sin_addr));
-#endif
 #endif
 
 	if(!pass) {

@@ -37,11 +37,7 @@
 #include <time.h>
 #include <netinet/in.h>
 
-#ifndef WIN32
 #include <signal.h>
-#else
-#include <winbase.h>
-#endif
 
 #include "hx.h"
 #include "rcv.h"
@@ -62,11 +58,7 @@ guint16 server_port;
 struct log *server_log = NULL;
 #endif
 
-#ifndef WIN32
 pthread_t conn_tid;
-#else
-int conn_tid;
-#endif
 
 int connected;
 
@@ -111,23 +103,14 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	session *sess = &the_session;
 
 	if(conn_tid) {
-#ifndef WIN32
 		pthread_cancel(conn_tid);
-#else
-		TerminateThread((HANDLE)conn_tid, 0);
-		CloseHandle((HANDLE)conn_tid);
-#endif
 		conn_tid = 0;
 	}
 #ifdef USE_IPV6
 	getnameinfo(htlc->addr->ai_addr, htlc->addr->ai_addrlen, buf, 
 				sizeof(buf), NULL, 0, NI_NUMERICHOST);
 #else
-#ifndef WIN32
 	inet_ntop(AF_INET, &htlc->addr.sin_addr, buf, sizeof(buf));
-#else
-	snprintf(buf, sizeof(buf), "%s", inet_ntoa(htlc->addr.sin_addr));
-#endif
 #endif
 	hx_printf_prefix(htlc, 0, INFOPREFIX, "%s: %s\n", buf,
 
@@ -479,11 +462,7 @@ static void hx_thread_connect (void *arg)
 
 	debug("about to resolve host/address\n");
 #ifndef USE_IPV6
-#ifndef WIN32
 	if(!(inet_pton(AF_INET, serverstr, &saddr.sin_addr))) {
-#else
-		if(!(inet_aton(serverstr, &saddr.sin_addr))) {
-#endif
 		struct hostent *he;
 
 		if((he = gethostbyname(serverstr))) {
@@ -852,13 +831,8 @@ void hx_connect(struct htlc_conn *htlc, const char *serverstr, guint16 port,
 	cdata->pass = g_strdup(pass);
 	cdata->secure = secure;
 
-#ifdef WIN32
-	conn_tid = (int)CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)hx_thread_connect,
-							(void *)cdata, 0, (DWORD *)&pid);
-#else
-	pthread_create(&conn_tid, &attr, (void *)&hx_thread_connect, 
+	pthread_create(&conn_tid, &attr, (void *)&hx_thread_connect,
 				   (void *)cdata);
-#endif
 }
 
 int htxf_connect (struct htxf_conn *htxf)
@@ -947,11 +921,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 	gtk_threads_leave();
 	
 #ifndef USE_IPV6
-#ifndef WIN32
 	if(!inet_pton(AF_INET, serverstr, &saddr.sin_addr)) {
-#else
-		if(!inet_aton(serverstr, &saddr.sin_addr)) {
-#endif
 		struct hostent *he;
 
 
