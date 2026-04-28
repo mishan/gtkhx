@@ -15,6 +15,7 @@ project('gtkhx', 'c',
 cc = meson.get_compiler('c')
 
 add_project_arguments(
+  '-DHAVE_CONFIG_H=1',
   '-D_GNU_SOURCE',
   '-D_REENTRANT',
   '-DGETTEXT_PACKAGE="@0@"'.format(meson.project_name()),

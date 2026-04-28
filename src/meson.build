@@ -53,6 +53,17 @@ conf.set_quoted('VERSION',            meson.project_version())
 conf.set_quoted('GETTEXT_PACKAGE',    meson.project_name())
 conf.set_quoted('PACKAGE_LOCALE_DIR', get_option('prefix') / get_option('localedir'))
 
+# Headers/feature defines historically probed via autoconf. All universally
+# present on the targets we care about (any modern glibc/musl/BSD); we set
+# them unconditionally so the legacy `#ifdef HAVE_FOO` gates in vendored
+# code (notably dfa.c) take the right branch without us having to edit
+# 2,500 lines of GNU regex.
+conf.set('STDC_HEADERS',    1)
+conf.set('HAVE_STRING_H',   1)
+conf.set('HAVE_STDLIB_H',   1)
+conf.set('HAVE_LIMITS_H',   1)
+conf.set('HAVE_LIBINTL_H',  1)
+
 # IPv6 was conditional via --disable-ipv6; getaddrinfo is universal now.
 conf.set('USE_IPV6',       1)
 
