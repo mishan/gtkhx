@@ -16,10 +16,15 @@
 #ifdef CONFIG_CIPHER
 
 #include <stdint.h>
+#include <sys/types.h>		/* u_int8_t / u_int32_t */
 #include <nettle/arcfour.h>
 #include <nettle/blowfish.h>
 
-#include "hx.h"
+/* Note: cipher.h is pulled into protocol.h via the htlc_conn cipher_state
+ * fields, so this header MUST NOT include hx.h or session.h — that would
+ * create a cycle (protocol.h -> cipher.h -> hx.h -> session.h, where the
+ * session struct then references types not yet defined). Forward decls
+ * below are sufficient. */
 
 #define CIPHER_NONE	0
 #define CIPHER_RC4	1

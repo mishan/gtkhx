@@ -1,0 +1,279 @@
+/*
+ * session.h — GUI/session-level types.
+ *
+ * This is where GtkWidget* fields, the per-connection `session` struct,
+ * the output_functions vtable, and chat/news/file UI structures live.
+ * Anything that includes this header transitively pulls in <gtk/gtk.h>.
+ *
+ * Files that don't talk to widgets (hmac.c, rand.c, network code) should
+ * include protocol.h directly instead.
+ */
+
+#ifndef __gtkhx_SESSION_H
+#define __gtkhx_SESSION_H 1
+
+#include <gtk/gtk.h>
+
+#include "compat.h"
+#include "protocol.h"
+#include "prefs.h"
+#include "macres.h"
+
+/* ---- Message-window threading ------------------------------------- */
+
+struct msgwin {
+	struct msgwin *next, *prev;
+	guint16 *uid;
+	char *name;
+	GtkWidget *outputbuf;
+	GtkWidget *inputbuf;
+	GtkWidget *vscroll;
+	GtkWidget *window;
+	void *history;
+};
+
+/* ---- Custom timer wheel (gtkhx.c) --------------------------------- */
+
+struct timer {
+	struct timer *next, *prev;
+	guint id;
+	int (*fn)();
+	void *ptr;
+};
+
+/* ---- Icon/sound resource bundle ----------------------------------- */
+
+struct ifn {
+	char **files;
+	macres_file **cicns;
+	unsigned int n;
+};
+
+/* ---- Chat windows ------------------------------------------------- */
+
+struct gtkhx_chat {
+	struct gtkhx_chat *next, *prev;
+	GtkWidget *window;
+	GtkWidget *vscroll;
+	GtkWidget *output;
+	GtkWidget *input;
+	GtkWidget *subject;
+	GtkWidget *userlist;
+	guint32 cid;
+	struct chat *chat;
+	void *chat_history;
+};
+
+/* ---- News (1.5 threaded protocol) --------------------------------- */
+
+struct date_time {
+	guint16 base_year;
+	guint16 pad;
+	guint32 seconds;
+};
+
+struct news_post {
+	char *buf;
+	struct news_item *item;
+};
+
+struct news_parts {
+	int size;
+	char *mime_type;
+};
+
+struct news_item {
+	guint32 postid, parentid;
+	char *sender;
+	char *subject;
+	struct date_time date;
+	guint16 partcount;
+	guint16 size;
+	struct news_parts *parts;
+	GtkCTreeNode *node;
+	struct news_group *group;
+};
+
+struct news_group {
+	int post_count;
+	struct news_item *posts;
+	char *path;
+};
+
+struct gnews_catalog {
+	struct news_group *group;
+	struct gnews_catalog *next, *prev;
+	char *path;
+	GtkWidget *window;
+	GtkWidget *news_tree;
+	GtkWidget *news_text;
+	GtkWidget *authorlbl, *subjectlbl, *datelbl;
+	GtkCTreeNode *row;
+	char listing;
+};
+
+struct path_hist {
+	char path[4096];
+	struct path_hist *prev;
+};
+
+struct gnews_folder {
+	GtkWidget *window;
+	GtkWidget *news_list;
+	gint row, col;
+	struct news_folder *news;
+	struct gnews_folder *next, *prev;
+	char *path;
+	char listing;
+	GtkWidget *up_btn;
+	struct path_hist *path_list;
+};
+
+struct folder_item {
+	char *name;
+/*	guint16 icon; */
+	int type;
+};
+
+struct news_folder {
+	struct folder_item **entry;
+	char *path;
+	guint32 num_entries;
+};
+
+/* ---- User-list / chat membership ---------------------------------- */
+
+struct uesp_fn {
+	void *uesp;
+	void (*fn)(void *, const char *, const char *, const char *, const hl_access_bits);
+};
+
+struct hx_user {
+	struct hx_user *next, *prev;
+	guint16 uid;
+	guint16 icon;
+	guint16 color;
+	unsigned char name[32];
+	unsigned int ignore:1;
+};
+
+struct chat {
+	struct chat *next, *prev;
+	guint32 cid;
+	guint32 nusers;
+	struct hx_user __user_list;
+	struct hx_user *user_list;
+	struct hx_user *user_tail;
+	char subject[256];
+};
+
+/* ---- The session struct ------------------------------------------- */
+
+typedef struct _session {
+	GtkWidget *toolbar_window;
+	GtkWidget *news_window;
+	GtkWidget *chat_window;
+	GtkWidget *tasks_window;
+	GtkWidget *users_window;
+
+	GtkWidget *users_list;
+
+	GtkWidget *news_text;
+	GtkWidget *postButton;
+	GtkWidget *reloadButton;
+
+	GtkWidget *agreementwin;
+
+	struct gtkhx_chat *gchat_list;
+
+	struct gtask *gtask_list;
+	GtkWidget *gtklist, *gtask_scroll;
+
+	struct gnews_folder *gfnews_list;
+
+	struct gfile_list *gfile_list;
+
+	struct msgwin *msg_list;
+
+	struct gnews_catalog *gcnews_list;
+
+	struct task __task_list;
+	struct task *task_list, *task_tail;
+
+	struct hx_user __user_list;
+	struct hx_user *user_list, *user_tail;
+
+	struct chat *chat_front, *chat_tail, *chat_list;
+	struct chat __chat_list;
+
+	struct htlc_conn htlc;
+
+	unsigned int connected:1;
+} session;
+
+/* Single-session world. Phase 5 will revisit when multi-conn lands;
+ * the historical sessions[MAX_CONN] / sess_from_htlc() pretended to be
+ * an array but always returned &sessions[0]. */
+extern session the_session;
+
+extern char last_msg_nick[32];
+extern const char *INFOPREFIX;
+extern char *g_user_colors[4];
+
+extern char *colorstr (guint16 color);
+
+extern void hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style);
+
+extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
+			guint16 port, const char *login, const char *pass,
+			char secure);
+extern void hx_tracker_list (session *sess, char *addrstr, guint16 port);
+extern void hx_quit (void);
+
+/* ---- File browser cache ------------------------------------------- */
+
+struct cached_filelist {
+	struct cached_filelist *next, *prev;
+	char *path;
+	struct hl_filelist_hdr *fh;
+	guint32 fhlen;
+	unsigned int completing:2;
+	char **filter_argv;
+};
+
+/* ---- Output backend vtable (only the GUI implementation is alive) -- */
+
+struct output_functions {
+	void (*init)(int argc, char **argv);
+	void (*loop)(void);
+	void (*clear)(struct htlc_conn *htlc, guint32 cid, int subj);
+	void (*chat)(struct htlc_conn *htlc, guint32 cid, char *chat, guint16 len);
+	void (*msg)(char *name, guint16 uid, char *buf);
+	void (*agreement)(session *sess, const char *agreement, guint16 len);
+	void (*news_file)(struct htlc_conn *htlc, char *news, guint16 len);
+	void (*news_post)(struct htlc_conn *htlc, char *news, guint16 len);
+	void (*user_info)(guint16 uid, const char *nam, const char *info, guint16 len);
+	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);
+	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
+	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
+	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
+	void (*user_list)(struct htlc_conn *htlc);
+	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
+	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
+	void (*file_update)(session *sess, struct htxf_conn *htxf);
+	void (*tracker_server_create)(struct in_addr addr, guint16 port, guint16 nusers, const char *nam, const char *desc, int total);
+	void (*task_update)(session *sess, struct task *tsk);
+	void (*news_folder)(struct gnews_folder *gfnews);
+	void (*news_catalog)(struct gnews_catalog *gcnews);
+	void (*news_thread)(struct news_post *post);
+	void (*chat_subject)(struct htlc_conn *htlc, guint32 cid, char *buf);
+	void (*chat_invitation)(struct htlc_conn *htlc, guint32 cid, char *name);
+	void (*xfer_queue)(session *sess, struct htxf_conn *htxf);
+	void (*tracker_clear)(void);
+};
+
+extern struct output_functions hx_output;
+extern void timer_add_secs (time_t secs, int (*fn)(), void *ptr);
+extern void timer_delete_ptr (void *ptr);
+
+#endif /* ndef __gtkhx_SESSION_H */

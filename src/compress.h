@@ -3,6 +3,7 @@
 
 #ifdef CONFIG_COMPRESS
 
+#include <sys/types.h>		/* u_int32_t */
 #include <zlib.h>
 
 #define COMPRESS_NONE	0

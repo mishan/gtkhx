@@ -20,11 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glib.h>
-/* hx.h transitively pulls in GTK types; include the umbrella header
- * here until Phase 1.5 splits hx.h apart by concern. */
-#include <gtk/gtk.h>
-#include "hx.h"
+#include "protocol.h"
 
 u_int16_t
 hmac_xxx(u_int8_t *md, u_int8_t *key, u_int32_t keylen,
