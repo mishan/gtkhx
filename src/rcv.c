@@ -51,9 +51,6 @@
 #include "hfs.h"
 #include "connect.h"
 
-#include "sha.h"
-#include "md5.h"
-
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
 static char *hx_timeformat = "%c";

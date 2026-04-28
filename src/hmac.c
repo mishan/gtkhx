@@ -1,112 +1,62 @@
+/*
+ * MAC computation for the Hotline HOPE handshake.
+ *
+ * Replaces the in-tree md5.c/sha.c with GLib's GChecksum / GHmac so we
+ * can drop ~900 lines of vendored hash code. Behavior is preserved
+ * byte-for-byte for the four algorithms anyone has ever sent on the
+ * wire: SHA1, MD5, HMAC-SHA1, HMAC-MD5.
+ *
+ * The unprefixed "SHA1"/"MD5" branches compute a plain hash over
+ * key||text — this is not RFC 2104 HMAC, but it is what the original
+ * client did, and it's the construction some servers expect for the
+ * pre-HOPE password challenge. Don't "fix" the construction; we
+ * negotiate compatibility, not correctness.
+ *
+ * HAVAL was deleted in the previous commit (advertised by no server,
+ * computed by no client).
+ */
+
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <sys/ioctl.h>
-#include <gtk/gtk.h>
-#include <time.h>
-#include <netinet/in.h>
+#include <glib.h>
 #include "hx.h"
-#include "md5.h"
-#include "sha.h"
 
 u_int16_t
-hmac_xxx (u_int8_t *md, u_int8_t *key, u_int32_t keylen, u_int8_t *text, u_int32_t textlen, u_int8_t *macalg)
+hmac_xxx(u_int8_t *md, u_int8_t *key, u_int32_t keylen,
+         u_int8_t *text, u_int32_t textlen, u_int8_t *macalg)
 {
-	u_int8_t mdkey[20];
-	u_int8_t k_ipad[64], k_opad[64];
-	unsigned int i;
+	GChecksumType type;
+	gsize digest_len;
 
-	if (!strcmp(macalg, "SHA1")) {
-		struct sha_ctx ctx;
-
-		sha_init(&ctx);
-		sha_update(&ctx, key, keylen);
-		sha_update(&ctx, text, textlen);
-		sha_final(md, &ctx);
-
-		return 20;
-	} else if (!strcmp(macalg, "MD5")) {
-		struct md5_ctx ctx;
-
-		md5_init_ctx(&ctx);
-		md5_process_bytes(key, keylen, &ctx);
-		md5_process_bytes(text, textlen, &ctx);
-		md5_finish_ctx(&ctx, md);
-
-		return 16;
+	if (!strcmp((char *)macalg, "SHA1") || !strcmp((char *)macalg, "HMAC-SHA1")) {
+		type = G_CHECKSUM_SHA1;
+		digest_len = 20;
+	} else if (!strcmp((char *)macalg, "MD5") || !strcmp((char *)macalg, "HMAC-MD5")) {
+		type = G_CHECKSUM_MD5;
+		digest_len = 16;
+	} else {
+		return 0;
 	}
 
-	if (keylen > 64) {
-		if (!strcmp(macalg, "HMAC-SHA1")) {
-			struct sha_ctx ctx;
+	if (!strncmp((char *)macalg, "HMAC-", 5)) {
+		GHmac *hmac = g_hmac_new(type, key, keylen);
+		gsize out_len = digest_len;
 
-			sha_init(&ctx);
-			sha_update(&ctx, key, keylen);
-			sha_final(mdkey, &ctx);
-			keylen = 20;
-		} else if (!strcmp(macalg, "HMAC-MD5")) {
-			struct md5_ctx ctx;
+		g_hmac_update(hmac, text, textlen);
+		g_hmac_get_digest(hmac, md, &out_len);
+		g_hmac_unref(hmac);
+	} else {
+		/* Plain key||text hash — pre-HOPE challenge construction. */
+		GChecksum *cs = g_checksum_new(type);
+		gsize out_len = digest_len;
 
-			md5_init_ctx(&ctx);
-			md5_process_bytes(key, keylen, &ctx);
-			md5_finish_ctx(&ctx, mdkey);
-			keylen = 16;
-		} else {
-			return 0;
-		}
-		key = mdkey;
+		g_checksum_update(cs, key, keylen);
+		g_checksum_update(cs, text, textlen);
+		g_checksum_get_digest(cs, md, &out_len);
+		g_checksum_free(cs);
 	}
 
-	memcpy(k_ipad, key, keylen);
-	memcpy(k_opad, key, keylen);
-	memset(k_ipad+keylen, 0, 64 - keylen);
-	memset(k_opad+keylen, 0, 64 - keylen);
-
-	for (i = 0; i < 64; i++) {
-		k_ipad[i] ^= 0x36;
-		k_opad[i] ^= 0x5c;
-	}
-
-	if (!strcmp(macalg, "HMAC-SHA1")) {
-		struct sha_ctx ctx;
-
-		sha_init(&ctx);
-		sha_update(&ctx, k_ipad, 64);
-		sha_update(&ctx, text, textlen);
-		sha_final(md, &ctx);
-
-		sha_init(&ctx);
-		sha_update(&ctx, k_opad, 64);
-		sha_update(&ctx, md, 20);
-		sha_final(md, &ctx);
-
-		return 20;
-	} else if (!strcmp(macalg, "HMAC-MD5")) {
-		struct md5_ctx ctx;
-
-		md5_init_ctx(&ctx);
-		md5_process_bytes(k_ipad, 64, &ctx);
-		md5_process_bytes(text, textlen, &ctx);
-		md5_finish_ctx(&ctx, md);
-
-		md5_init_ctx(&ctx);
-		md5_process_bytes(k_opad, 64, &ctx);
-		md5_process_bytes(md, 16, &ctx);
-		md5_finish_ctx(&ctx, md);
-
-		return 16;
-	}
-
-	return 0;
+	return (u_int16_t)digest_len;
 }

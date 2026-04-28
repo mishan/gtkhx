@@ -53,9 +53,6 @@
 #include "inet.h"
 #include "log.h"
 
-#include "sha.h"
-#include "md5.h"
-
 char *server_addr;
 #ifdef USE_IPV6
 guint16 server_port;
