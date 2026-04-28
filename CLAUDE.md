@@ -18,7 +18,7 @@ The big rocks, by line count:
 | File                    | LOC  | Role                                                          |
 |-------------------------|------|---------------------------------------------------------------|
 | `src/gtk_hlist.c/.h`    | 8149 | **Custom widget** — fork of GtkCList. 5 consumers in-tree.    |
-| `src/xtext.c/.h`        | 3526 | **Custom widget** — fork of XChat 1.8.5 text widget.          |
+| `src/xtext.c/.h`        | 3526 | **Custom widget** — fork of XChat 1.8.5 text widget. Phase 2 swaps in HexChat's modern xtext. |
 | `src/dfa.c`             | 2550 | Regex/pattern matching engine.                                |
 | `src/options.c`         | 1816 | Preferences dialog + persistence.                             |
 | `src/rcv.c`             | 1623 | Hotline protocol receive path.                                |
@@ -105,8 +105,8 @@ tracker, console `hx` client, and a `ghx` GTK client. Default port 5500. GPL-2.0
   CVS-import commit). One logical change per commit, descriptive bodies. No `Co-Authored-By:
   Claude` trailers unless Misha asks.
 - **Don't re-litigate roadmap decisions** without a strong reason. The locked-in choices
-  (Meson, Nettle+GLib crypto, drop xtext, drop plugin API, GPL-2.0-or-later, single-conn
-  during ports) were made deliberately. ROADMAP.md is the source of truth.
+  (Meson, Nettle+GLib crypto, vendor HexChat's xtext, drop plugin API, GPL-2.0-or-later,
+  single-conn during ports) were made deliberately. ROADMAP.md is the source of truth.
 - **Don't break Hotline 1.2/1.5 wire compat.** Modern transport security is a Phase ∞
   effort that requires inventing a new protocol layer AND server-side cooperation
   (mhxd is the natural target). It is explicitly out of scope for the GTK ports.

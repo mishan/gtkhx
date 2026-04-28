@@ -22,7 +22,7 @@ A quick orientation, since everything below references it:
 - **Plugins:** dlopen-based, `MODULE_IFACE_VER 2`, signal-emit pattern. Sample + ELIZA included. *(Decision: ABI breaks; see "Decisions locked in".)*
 - **Two huge custom widgets** are the porting bottleneck:
   - **`gtk_hlist.c`** — a fork of GtkCList (~3500 LOC). 392 call sites in `files.c`, `users.c`, `tracker.c`, `news15.c`, `options.c`.
-  - **`xtext.c`** — XChat 1.8.5's text widget (~3500 LOC). Immediate-mode GDK drawing.
+  - **`xtext.c`** — XChat 1.8.5's text widget (~3500 LOC). Immediate-mode GDK drawing. **Plan: replace with HexChat's modern xtext fork** (`src/fe-gtk/xtext.c` from hexchat/hexchat) — same widget lineage, actively maintained against modern GTK.
 - **Hygiene debt:** CVS metadata in every directory, emacs autosave/lock leftovers (`#about.c#`, `.#commands.c.1.36`, `.#news15.c.1.33`, `.#xfers.c.1.40`, `.#commands.c.1.36`, `#rcv.c#`, `#tracker.c#`), generated autotools artifacts (`configure`, `aclocal.m4`, `Makefile.in`, `autom4te.cache/`) checked into the import.
 - **Known issues from the original TODO** (still applicable):
   - "Rewrite GtkHList to be a derived class of GtkCList" — i.e. the author already wanted to delete the fork.
@@ -86,7 +86,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
    - Once all five consumers are converted, delete the shim and inline the TreeView calls.
    - Expect the TreeView column model + cell renderer setup to be wordier than CList. That's the price of the real widget.
 5. **Replace GtkCTree (news threading)** with GtkTreeView in tree mode + GtkTreeStore. Same playbook.
-6. **Replace `xtext.c`.** **Decision: drop it, use GtkTextView.** The mIRC color codes and transparency are not priorities, which removes the only two features GtkTextView would have struggled with — making this a clean win. Keep the message-formatting code in `chat.c` / `commands.c`; only the rendering substrate changes. URL highlighting and per-user nick coloring are straightforward with GtkTextTag + a click event controller. (HexChat's modern xtext fork — `src/fe-gtk/xtext.c` in the hexchat/hexchat repo — uses cairo + Pango and could be vendored if a feature gap turns up later, but it's ~6000 lines of someone else's code to own. GtkTextView is the smaller surface.)
+6. **Replace `xtext.c`.** **Decision: vendor HexChat's modern xtext** (`src/fe-gtk/xtext.c` from hexchat/hexchat — same XChat-derived lineage, but actively maintained, GTK 2/3-compatible, cairo + Pango drawing). Drop GtkHx's stale ~3500 LOC fork in favor of HexChat's vendored copy. Keep the message-formatting code in `chat.c` / `commands.c`; only the widget changes. The chat-specific behaviors (URL highlighting, mIRC color parsing, indent rendering, context menus) come for free instead of being reimplemented on GtkTextView. (Earlier draft said drop xtext entirely for GtkTextView; rejected after weighing the reimplementation cost.)
 7. **GdkFont → Pango.** `gdk_font_load(name)` → `pango_font_description_from_string(name)`. `gtk_widget_modify_font()` to apply. Wherever the code measures text, switch to PangoLayout.
 8. **GtkPixmap → GtkImage.** ~56 sites; most are toolbar/icon use. The XPM headers in `src/pixmaps/` still load fine via `gdk_pixbuf_new_from_xpm_data`.
 9. **GtkOptionMenu → GtkComboBox** in `connect.c` (cipher/compression dropdowns).
@@ -100,7 +100,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 - The colormap dance in `init_colors()` (`gtkhx.c`) is pre-truecolor-era. With GTK 2 on any modern X server you can delete the `gdk_colormap_alloc_color` calls and just use `GdkColor` literals.
 - `gtk_text_insert(GTK_TEXT(w), font, fg, bg, str, len)` (the old GtkText) becomes a `GtkTextBuffer` + `GtkTextTag` operation — the per-call font/color args go away in favor of named tags.
-- `xtext.c`'s mIRC color parser (`\003NN`) and the `g_user_colors[]` table need to survive the rewrite — those are wire-protocol-shaped, not toolkit-shaped.
+- The `g_user_colors[]` table and any chat-side color/format logic that reaches into the widget need to survive the swap — those are wire-protocol-shaped, not toolkit-shaped. HexChat's xtext brings its own mIRC color parser (`\003NN`); reuse that path instead of carrying ours.
 - `news15.c` and `chat.c` both reach into widget internals (`GTK_TEXT(w)->vadj`). Replace with `gtk_scrolled_window_get_vadjustment()` / TextView's adjustments.
 
 **Exit criteria:** `gtkhx` builds against GTK 2, launches, connects to a Hotline server, joins chat, downloads a file, posts news. UI looks crufty but works.
@@ -113,7 +113,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 **Work items**
 
-1. **Drawing → cairo.** Anywhere `gdk_gc_*`, `gdk_draw_*`, or `expose_event` survived Phase 2 (custom drawing in `cicn.c` for icon rendering, anything left in xtext if you kept it), convert to cairo via `draw` signal handlers. `cicn.c` is the main custom-draw site outside the widgets you've already replaced.
+1. **Drawing → cairo.** Anywhere `gdk_gc_*`, `gdk_draw_*`, or `expose_event` survived Phase 2 (custom drawing in `cicn.c` for icon rendering), convert to cairo via `draw` signal handlers. `cicn.c` is the main custom-draw site outside the widgets we've already replaced. (HexChat's xtext, vendored in Phase 2, already draws via cairo + Pango — no Phase 3 work there.)
 2. **Drop `gdk_threads_enter` / `_leave` entirely.** GTK 3 deprecated them. Use `g_main_context_invoke()` to marshal from worker threads onto the main context. The Hotline I/O thread (`network.c`, `xfers.c`) is the main offender — all UI calls from those threads need to be wrapped.
 3. **GtkBox replaces GtkVBox / GtkHBox.** `gtk_vbox_new(homog, spacing)` → `gtk_box_new(GTK_ORIENTATION_VERTICAL, spacing)`.
 4. **GtkGrid replaces GtkTable** if you used any (`options.c` likely has some).
@@ -235,7 +235,7 @@ These were the open questions on the first draft. Answers:
 
 1. **Build system → Meson.** Replacing autotools in Phase 1.
 2. **GTK 1.2 baseline → skip.** First runnable target is GTK 2 (Phase 2).
-3. **Custom widget strategy → shim for `gtk_hlist`, in-place rewrite for `xtext`** (drop in favor of GtkTextView).
+3. **Custom widget strategy → shim for `gtk_hlist`, vendor HexChat's xtext to replace `xtext.c`** (in-tree XChat 1.8.5 fork is too far behind to keep maintaining).
 4. **Multi-connection → commit to it.** Plan it as a Phase 5 deliverable, but in the meantime: stop pretending `MAX_CONN > 1` works (it doesn't — `sess_from_htlc()` returns `&sessions[0]`), and treat the single-session shape as a known temporary state. Do *not* add abstractions for multi-conn during the GTK ports; do the ports against single-session, then refactor to N sessions in Phase 5 against a smaller, modern codebase. The original half-built abstraction is more confusing than helpful and should be straightened out, not extended.
 5. **Plugin API → break it.** Delete `plugins/sample`, keep `plugins/eliza` if it amuses anyone, but don't preserve the `MODULE_IFACE_VER 2` ABI. If a plugin system comes back, it'll be a Phase 5 redesign (e.g., embedded Lua or GJS) rather than the current dlopen pattern.
 6. **Crypto stack → GnuTLS + Nettle for ciphers, GLib's `GChecksum` / `GHmac` for hashes.** Rationale captured in the next section. OpenSSL is the fallback if Nettle ergonomics turn out worse than expected once we're elbows-deep in `cipher.c`.
