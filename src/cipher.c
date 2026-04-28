@@ -1,13 +1,36 @@
+/*
+ * Per-connection cipher state machine for the Hotline HOPE handshake.
+ *
+ * Crypto primitives now come from Nettle. The wire protocol predates
+ * common integrated cipher modes and asks for two things:
+ *
+ *   - ARC4 (RC4)            stream cipher, byte-at-a-time
+ *   - Blowfish in OFB-64    block cipher run as a keystream generator
+ *
+ * Nettle ships ECB Blowfish but no OFB helper, so blowfish_ofb64_crypt
+ * below is a tiny reimplementation of OpenSSL's BF_ofb64_encrypt: walk
+ * the keystream byte-by-byte, refilling ivec by encrypting it in-place
+ * every 8 bytes. Symmetric (encrypt == decrypt). The on-the-wire bytes
+ * are byte-identical to what the old OpenSSL path produced — verified
+ * against historical packet captures during the port.
+ *
+ * The HOPE rekey trick (random nibble in the header triggering N
+ * rounds of HMAC-stretching the cipher key) is unchanged.
+ */
+
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <gtk/gtk.h>
 #include <dirent.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include <nettle/arcfour.h>
+#include <nettle/blowfish.h>
 #include "hx.h"
 #include "cipher.h"
 
@@ -16,9 +39,6 @@
 #define CIPHER_DEBUG	0
 
 #if CIPHER_DEBUG
-#include <stdio.h>
-#include <unistd.h>
-
 static void
 writestuff (const char *str, u_int8_t type, const u_int8_t *buf, unsigned int len)
 {
@@ -26,11 +46,11 @@ writestuff (const char *str, u_int8_t type, const u_int8_t *buf, unsigned int le
 	char file[32];
 	FILE *fp;
 
-	sprintf(file, "/tmp/cipher.%d", getpid());
+	snprintf(file, sizeof file, "/tmp/cipher.%d", getpid());
 	fp = fopen(file, "a");
 	if (!fp)
 		return;
-	fprintf(fp, str);
+	fputs(str, fp);
 	fprintf(fp, "%u: ", type);
 	for (i = 0; i < len; i++)
 		fprintf(fp, "%2.2x", buf[i]);
@@ -39,6 +59,33 @@ writestuff (const char *str, u_int8_t type, const u_int8_t *buf, unsigned int le
 	fclose(fp);
 }
 #endif
+
+/*
+ * Blowfish in 64-bit Output Feedback mode.
+ *
+ * OFB is symmetric: same routine for encrypt and decrypt. State carried
+ * across calls is the 8-byte ivec (current keystream block) plus the
+ * byte index `num` into that block (0..7). When `num` rolls over to
+ * zero we re-encrypt ivec in place to produce the next keystream block.
+ *
+ * Matches OpenSSL's BF_ofb64_encrypt exactly, which is the contract
+ * the wire protocol expects. Safe for in-place (src == dst).
+ */
+static void
+blowfish_ofb64_crypt(blowfish_state *bs,
+                     const uint8_t *src, uint8_t *dst, size_t len)
+{
+	int n = bs->num;
+
+	while (len--) {
+		if (n == 0)
+			blowfish_encrypt(&bs->ctx, BLOWFISH_BLOCK_SIZE,
+			                 bs->ivec, bs->ivec);
+		*dst++ = *src++ ^ bs->ivec[n];
+		n = (n + 1) & 7;
+	}
+	bs->num = n;
+}
 
 u_int32_t
 cipher_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
@@ -55,26 +102,13 @@ cipher_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
 #endif
 	switch (htlc->cipher_decode_type) {
 		case CIPHER_RC4:
-			memcpy(&out->buf[out->pos], &in->buf[in->pos], len);
-			rc4_buffer(&out->buf[out->pos], len,
-				   &htlc->cipher_decode_state.rc4);
+			arcfour_crypt(&htlc->cipher_decode_state.rc4, len,
+			              &out->buf[out->pos], &in->buf[in->pos]);
 			break;
 		case CIPHER_BLOWFISH:
-			BF_ofb64_encrypt(&in->buf[in->pos],
-					 &out->buf[out->pos], len,
-					 &htlc->cipher_decode_state.blowfish.state,
-					 htlc->cipher_decode_state.blowfish.ivec,
-					 &htlc->cipher_decode_state.blowfish.num);
+			blowfish_ofb64_crypt(&htlc->cipher_decode_state.blowfish,
+			                     &in->buf[in->pos], &out->buf[out->pos], len);
 			break;
-#if !defined(CONFIG_NO_IDEA)
-		case CIPHER_IDEA:
-			idea_ofb64_encrypt(&in->buf[in->pos],
-					   &out->buf[out->pos], len,
-					   &htlc->cipher_decode_state.idea.state,
-					   htlc->cipher_decode_state.idea.ivec,
-					   &htlc->cipher_decode_state.idea.num);
-			break;
-#endif
 		default:
 			break;
 	}
@@ -131,25 +165,13 @@ do_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 #endif
 	switch (htlc->cipher_encode_type) {
 		case CIPHER_RC4:
-			rc4_buffer(&htlc->out.buf[pos], len,
-				   &htlc->cipher_encode_state.rc4);
+			arcfour_crypt(&htlc->cipher_encode_state.rc4, len,
+			              &htlc->out.buf[pos], &htlc->out.buf[pos]);
 			break;
 		case CIPHER_BLOWFISH:
-			BF_ofb64_encrypt(&htlc->out.buf[pos],
-					 &htlc->out.buf[pos], len,
-					 &htlc->cipher_encode_state.blowfish.state,
-					 htlc->cipher_encode_state.blowfish.ivec,
-					 &htlc->cipher_encode_state.blowfish.num);
+			blowfish_ofb64_crypt(&htlc->cipher_encode_state.blowfish,
+			                     &htlc->out.buf[pos], &htlc->out.buf[pos], len);
 			break;
-#if !defined(CONFIG_NO_IDEA)
-		case CIPHER_IDEA:
-			idea_ofb64_encrypt(&htlc->out.buf[pos],
-					   &htlc->out.buf[pos], len,
-					   &htlc->cipher_encode_state.idea.state,
-					   htlc->cipher_encode_state.idea.ivec,
-					   &htlc->cipher_encode_state.idea.num);
-			break;
-#endif
 		default:
 			break;
 	}
@@ -206,19 +228,19 @@ cipher_encode_init (struct htlc_conn *htlc)
 {
 	switch (htlc->cipher_encode_type) {
 		case CIPHER_RC4:
-			rc4_prepare_key(htlc->cipher_encode_key, htlc->cipher_encode_keylen,
-					&htlc->cipher_encode_state.rc4);
+			arcfour_set_key(&htlc->cipher_encode_state.rc4,
+			                htlc->cipher_encode_keylen,
+			                htlc->cipher_encode_key);
 			break;
 		case CIPHER_BLOWFISH:
-			BF_set_key(&htlc->cipher_encode_state.blowfish.state,
-				   htlc->cipher_encode_keylen, htlc->cipher_encode_key);
+			/* Re-init wipes ivec/num so a fresh key starts at OFB
+			 * block boundary, which matches the wire contract. */
+			memset(&htlc->cipher_encode_state.blowfish, 0,
+			       sizeof(htlc->cipher_encode_state.blowfish));
+			blowfish_set_key(&htlc->cipher_encode_state.blowfish.ctx,
+			                 htlc->cipher_encode_keylen,
+			                 htlc->cipher_encode_key);
 			break;
-#if !defined(CONFIG_NO_IDEA)
-		case CIPHER_IDEA:
-			idea_set_encrypt_key(htlc->cipher_encode_key,
-					     &htlc->cipher_encode_state.idea.state);
-			break;
-#endif
 		default:
 			break;
 	}
@@ -229,19 +251,17 @@ cipher_decode_init (struct htlc_conn *htlc)
 {
 	switch (htlc->cipher_decode_type) {
 		case CIPHER_RC4:
-			rc4_prepare_key(htlc->cipher_decode_key, htlc->cipher_decode_keylen,
-					&htlc->cipher_decode_state.rc4);
+			arcfour_set_key(&htlc->cipher_decode_state.rc4,
+			                htlc->cipher_decode_keylen,
+			                htlc->cipher_decode_key);
 			break;
 		case CIPHER_BLOWFISH:
-			BF_set_key(&htlc->cipher_decode_state.blowfish.state,
-				   htlc->cipher_decode_keylen, htlc->cipher_decode_key);
+			memset(&htlc->cipher_decode_state.blowfish, 0,
+			       sizeof(htlc->cipher_decode_state.blowfish));
+			blowfish_set_key(&htlc->cipher_decode_state.blowfish.ctx,
+			                 htlc->cipher_decode_keylen,
+			                 htlc->cipher_decode_key);
 			break;
-#if !defined(CONFIG_NO_IDEA)
-		case CIPHER_IDEA:
-			idea_set_encrypt_key(htlc->cipher_decode_key,
-					     &htlc->cipher_decode_state.idea.state);
-			break;
-#endif
 		default:
 			break;
 	}

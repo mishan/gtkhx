@@ -1,71 +1,74 @@
+/*
+ * Cryptographic RNG used by the cipher rekey machinery and any other
+ * caller that needs unpredictable bytes.
+ *
+ * Strategy:
+ *   1. getrandom(2) — Linux 3.17+, glibc 2.25+. Preferred.
+ *   2. /dev/urandom — fallback for kernels/libcs without getrandom.
+ *
+ * The original rand.c reached straight into OpenSSL's RAND_bytes; the
+ * Phase 1.3 modernization drops that dependency along with libssl. The
+ * function signature (u_int8_t buffer, returns nbytes on success or 0
+ * on failure) is preserved so call sites in cipher.c and elsewhere are
+ * untouched.
+ */
+
 #include "config.h"
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <gtk/gtk.h>
-#include <dirent.h>
 #include <sys/types.h>
-#include <netinet/in.h>
+#include <unistd.h>
+#include <sys/random.h>
+/* hx.h transitively pulls in GTK types; include the umbrella header
+ * here until Phase 1.5 splits hx.h apart by concern. */
+#include <gtk/gtk.h>
 #include "hx.h"
-#include "cipher.h"
 
-#if USE_OPENSSL
-#include <openssl/rand.h>
-/* zlib has a conflicting typedef with err.h */
-/* #include <openssl/err.h> */
-extern unsigned long ERR_get_error (void);
-extern char *ERR_error_string (unsigned long e, char *buf);
-#endif
+static unsigned int
+random_bytes_urandom(u_int8_t *buf, unsigned int nbytes)
+{
+	int fd;
+	unsigned int got = 0;
+
+	fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+
+	while (got < nbytes) {
+		ssize_t n = read(fd, buf + got, nbytes - got);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			return 0;
+		}
+		if (n == 0)
+			break;
+		got += (unsigned int)n;
+	}
+	close(fd);
+
+	return got == nbytes ? nbytes : 0;
+}
 
 unsigned int
-random_bytes (u_int8_t *buf, unsigned int nbytes)
+random_bytes(u_int8_t *buf, unsigned int nbytes)
 {
-#if !USE_OPENSSL
-	int fd;
-#endif
-	int ok;
+	unsigned int got = 0;
 
-#if USE_OPENSSL
-#if USE_OLD_OPENSSL
-	unsigned int i;
-
-	memset(buf, 0, nbytes);
-	RAND_bytes(buf, nbytes);
-	ok = 0;
-	for (i = 0; i < nbytes; i++) {
-		if (buf[i] != 0) {
-			ok = 1;
-			break;
+	while (got < nbytes) {
+		ssize_t n = getrandom(buf + got, nbytes - got, 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			/* ENOSYS on pre-3.17 kernels — fall back to /dev/urandom. */
+			return random_bytes_urandom(buf, nbytes);
 		}
+		got += (unsigned int)n;
 	}
-#else
-	if (!RAND_bytes(buf, nbytes)) {
-		char buf[120];
-		ERR_error_string(ERR_get_error(), buf);
-/*		hxd_log("RAND_bytes failed: %s", buf); */
-		g_print("RAND_bytes faild: %s\n", buf);
-		ok = 0;
-	} else {
-		ok = 1;
-	}
-#endif /* old openssl */
-#else
-	fd = open("/dev/urandom", O_RDONLY);
-	if (fd >= 0) {
-		if (read(fd, buf, nbytes) != nbytes)
-			ok = 0;
-		else
-			ok = 1;
-		close(fd);
-	} else {
-		ok = 0;
-	}
-#endif
 
-	if (ok)
-		return nbytes;
-	else
-		return 0;
+	return nbytes;
 }

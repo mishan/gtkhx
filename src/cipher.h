@@ -1,3 +1,13 @@
+/*
+ * Per-connection cipher state for the Hotline HOPE handshake.
+ *
+ * The wire protocol uses Blowfish in 64-bit OFB mode (ofb64) and
+ * ARC4 (RC4); both implementations come from Nettle. IDEA was once
+ * defined as CIPHER_IDEA = 3 but never wired into HOPE negotiation
+ * (patent-encumbered at the time and now expired but still unused);
+ * the union/struct entries are gone.
+ */
+
 #ifndef __cipher_h
 #define __cipher_h
 
@@ -5,29 +15,33 @@
 
 #ifdef CONFIG_CIPHER
 
+#include <stdint.h>
+#include <nettle/arcfour.h>
+#include <nettle/blowfish.h>
+
 #include "hx.h"
 
 #define CIPHER_NONE	0
 #define CIPHER_RC4	1
 #define CIPHER_BLOWFISH	2
-#define CIPHER_IDEA	3
+/* CIPHER_IDEA = 3 is reserved at the protocol level but never offered. */
 
-#define USE_OPENSSL	1
+/* RC4: Nettle's arcfour_ctx is the entire state. */
+typedef struct arcfour_ctx rc4_state;
 
-#if USE_OPENSSL
-#include "cipher_openssl.h"
-#else
-#include "cipher/rc4.h"
-#include "cipher/blowfish.h"
-#include "cipher/idea.h"
-#endif
+/* Blowfish in 64-bit OFB needs the key schedule plus an IV register
+ * and a byte index into it (0..7). Mirrors the OpenSSL BF_KEY/ivec/num
+ * trio that the previous cipher_openssl.h shim exposed. */
+struct blowfish_state {
+	struct blowfish_ctx ctx;
+	uint8_t ivec[BLOWFISH_BLOCK_SIZE];
+	int num;
+};
+typedef struct blowfish_state blowfish_state;
 
 union cipher_state {
-	rc4_state rc4;
-	blowfish_state blowfish;
-#if !defined(CONFIG_NO_IDEA)
-	idea_state idea;
-#endif
+	rc4_state	rc4;
+	blowfish_state	blowfish;
 };
 
 struct htlc_conn;

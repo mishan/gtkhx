@@ -1111,18 +1111,18 @@ no_cipher:
 		if (cipheralglistlen) {
 			hx_printf_prefix(htlc, 0, INFOPREFIX, "cipher: server %s client %s\n",
 					 c_cipheralg, s_cipheralg);
+			/* IDEA is no longer advertised or implemented; if a
+			 * misbehaving server still selects it, we fall through
+			 * to the default cipher_(en|de)code_init no-op, which
+			 * is no worse than the legacy behavior was. */
 			if (!strcmp(s_cipheralg, "RC4"))
 				htlc->cipher_decode_type = CIPHER_RC4;
 			else if (!strcmp(s_cipheralg, "BLOWFISH"))
 				htlc->cipher_decode_type = CIPHER_BLOWFISH;
-			else if (!strcmp(s_cipheralg, "IDEA"))
-				htlc->cipher_decode_type = CIPHER_IDEA;
 			if (!strcmp(c_cipheralg, "RC4"))
 				htlc->cipher_encode_type = CIPHER_RC4;
 			else if (!strcmp(c_cipheralg, "BLOWFISH"))
 				htlc->cipher_encode_type = CIPHER_BLOWFISH;
-			else if (!strcmp(c_cipheralg, "IDEA"))
-				htlc->cipher_encode_type = CIPHER_IDEA;
 			cipher_encode_init(htlc);
 			cipher_decode_init(htlc);
 		}

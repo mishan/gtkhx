@@ -21,6 +21,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+/* hx.h transitively pulls in GTK types; include the umbrella header
+ * here until Phase 1.5 splits hx.h apart by concern. */
+#include <gtk/gtk.h>
 #include "hx.h"
 
 u_int16_t

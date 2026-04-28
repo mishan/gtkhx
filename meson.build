@@ -47,7 +47,7 @@ gtk_dep     = dependency('gtk+-2.0',  version : '>= 2.24')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 zlib_dep    = dependency('zlib')
-nettle_dep  = dependency('nettle',    version : '>= 3.0', required: false)
+nettle_dep  = dependency('nettle',    version : '>= 3.0')
 threads_dep = dependency('threads')
 
 # Optional: only present on systems that don't fold libintl into libc.
