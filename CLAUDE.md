@@ -55,13 +55,23 @@ packaging when there's a buildable binary again.)
 
 ## Build status
 
-**Currently does not build.** GTK+ 1.2 is unobtainable on modern systems. Phase 2 of the
-roadmap produces the first runnable binary (against GTK 2). Don't spend time trying to
-revive the 1.2 build in vintage Docker — it's not on the path.
+**Phase 1 is complete; Phase 2 (GTK 2 port) in progress.** `meson.build` already pins
+`gtk+-2.0 >= 2.24`, but the source is still GTK 1.2 idioms. `meson setup build && meson
+compile -C build` runs and produces a punch list of GTK-2-incompatible API uses:
 
-The repo has been cleaned of regenerable autotools artifacts. `./autogen.sh` →
-`./configure` → `make` is the historical build entry point; the inputs (`configure.in`,
-`Makefile.am`, `acconfig.h`) are still in-tree until Phase 1 replaces them with Meson.
+- `src/gtk_hlist.c` (~140 errors) — in-tree GtkCList fork. **Don't fix it; replace it.**
+  Phase 2.7 builds a `gtk_hlist_compat.[ch]` shim over GtkTreeView+GtkListStore that keeps
+  the existing `gtk_hlist_*` API surface, then drops the fork. The 5 consumers
+  (`tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`, ~392 sites) keep compiling
+  unchanged.
+- `src/xtext.c` (~6 errors) — in-tree XChat 1.8.5 fork. **Don't fix it; replace it.**
+  Phase 2.6 vendors HexChat's xtext.
+- The rest is mostly mechanical: 165 `gtk_signal_connect` (Phase 2.2), 27 `GtkStyle->font`
+  (Phase 2.3), GtkText → GtkTextView in `about.c`/`news15.c` (Phase 2.4), GtkPixmap → GtkImage
+  and GtkOptionMenu → GtkComboBox (Phase 2.5).
+
+`gtkthreads.c` and `gtkhx.c` need a threading first-cut (Phase 2.9) for `g_thread_init` /
+`gdk_threads_enter`. Then it should run.
 
 ## Idioms and pitfalls specific to this codebase
 
