@@ -33,6 +33,7 @@
 #include <termios.h>
 #include <ctype.h>
 #include <pwd.h>
+#include <getopt.h>
 #include "hx.h"
 #include "gtk_hlist.h"
 #include "macres.h"
@@ -55,7 +56,6 @@
 #include "xfers.h"
 #include "plugin.h"
 #include "commands.h"
-#include "getopt.h"
 #include "log.h"
 
 char last_msg_nick[32];
@@ -785,24 +785,22 @@ void hotline_client_init (int argc, char **argv)
 	char *pass = 0;
 	char *bookmark = 0;
 	int prompt_pass = 0;
-	struct opt_r opt;
 	guint16 port = 5500;
 
-	opt.ind = 0;
-	opt.err_printf = (void (*)(const char *fmt, ...))printf;
+	optind = 0;
 	if(argc > 1) {
-	while((opt_char = getopt_long_r(argc, argv, "s:ht:pl:b:", hx_options, &index, &opt)) != EOF)  {
+	while((opt_char = getopt_long(argc, argv, "s:ht:pl:b:", hx_options, &index)) != -1)  {
 		if (opt_char == 0)
 			opt_char = hx_options[index].val;
 		switch(opt_char) {
 		case 't':
-			if(opt.arg) {
-				port = strtoul(opt.arg, 0, 0);
+			if(optarg) {
+				port = strtoul(optarg, 0, 0);
 			}
 			break;
 		case 's':
-			if(opt.arg) {
-				server = g_strdup(opt.arg);
+			if(optarg) {
+				server = g_strdup(optarg);
 				if(bookmark) {
 					g_free(bookmark);
 				}
@@ -813,8 +811,8 @@ void hotline_client_init (int argc, char **argv)
 			exit(0);
 			break;
 		case 'l':
-			if(opt.arg) {
-				login = g_strdup(opt.arg);
+			if(optarg) {
+				login = g_strdup(optarg);
 			}
 			break;
 		case 'p':
@@ -823,8 +821,8 @@ void hotline_client_init (int argc, char **argv)
 
 
 		case 'b':
-			if(opt.arg) {
-				bookmark = g_strdup(opt.arg);
+			if(optarg) {
+				bookmark = g_strdup(optarg);
 				if(server) {
 					g_free(server);
 				}

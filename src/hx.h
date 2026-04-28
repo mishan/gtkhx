@@ -176,22 +176,6 @@ extern char **hxd_environ;
 extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
 #endif
 
-#ifndef HAVE_LOCALTIME_R
-extern struct tm *localtime_r (const time_t *t, struct tm *tm);
-#endif
-
-#if !defined(HAVE_SNPRINTF) || defined(__hpux__)
-extern int snprintf (char *str, size_t count, const char *fmt, ...);
-#endif
-
-#if !defined(HAVE_VSNPRINTF) || defined(__hpux__)
-extern int vsnprintf (char *str, size_t count, const char *fmt, va_list ap);
-#endif
-
-#ifndef HAVE_BASENAME
-extern char *basename (const char *path);
-#endif
-
 #ifndef RETSIGTYPE
 #define RETSIGTYPE void
 #endif

@@ -2,7 +2,6 @@ bin_PROGRAMS = gtkhx
 
 gtkhx_SOURCES = \
 	about.c \
-	basename.c \
 	chat.c \
 	cicn.c \
 	cipher.c \
@@ -11,8 +10,6 @@ gtkhx_SOURCES = \
 	connect.c \
 	dfa.c \
 	files.c \
-	getopt_r.c \
-	getopt1_r.c \
 	gtk_hlist.c \
 	gtkhx.c \
 	gtkthreads.c \
@@ -21,7 +18,6 @@ gtkhx_SOURCES = \
 	hfs.c \
 	history.c \
 	hmac.c \
-	localtime_r.c \
 	log.c \
 	macres.c \
 	md5.c \
@@ -34,10 +30,8 @@ gtkhx_SOURCES = \
 	preview.c \
 	rand.c \
 	rcv.c \
-	snprintf.c \
 	sha.c \
 	sound.c \
-	strcasestr.c \
 	tasks.c \
 	toolbar.c \
 	tracker.c \

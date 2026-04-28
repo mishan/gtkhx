@@ -39,7 +39,7 @@
 #include "users.h"
 #include "sound.h"
 #include "msg.h"
-#include "getopt.h"
+#include <getopt.h>
 
 
 void
@@ -152,30 +152,29 @@ COMMAND(server)
 {
 	u_int16_t port = 0;
 	char *serverstr = 0, *portstr = 0, *login = 0, *pass = 0;
-	struct opt_r opt;
 	int o, longind;
 
-	opt.err_printf = NULL;
-	opt.ind = 0;
-	while ((o = getopt_long_r(argc, argv, "l:p:", server_opts, &longind, &opt)) != EOF) {
+	opterr = 0;	/* don't spam stderr on bad input from chat */
+	optind = 0;	/* reset getopt state across invocations */
+	while ((o = getopt_long(argc, argv, "l:p:", server_opts, &longind)) != -1) {
 		if (o == 0)
 			o = server_opts[longind].val;
 		switch (o) {
 			case 'l':
-				login = opt.arg;
+				login = optarg;
 				break;
 			case 'p':
-				pass = opt.arg;
+				pass = optarg;
 				break;
 			default:
 				goto usage;
 		}
 	}
 
-	if (opt.ind < argc) {
-		serverstr = argv[opt.ind];
-		if (opt.ind + 1 < argc) {
-			portstr = argv[opt.ind + 1];
+	if (optind < argc) {
+		serverstr = argv[optind];
+		if (optind + 1 < argc) {
+			portstr = argv[optind + 1];
 		}
 	}
 
