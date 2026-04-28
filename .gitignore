@@ -53,3 +53,63 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ----------------------------------------------------------------
+# Autotools generated files (will be replaced by Meson in Phase 1)
+# ----------------------------------------------------------------
+/configure
+/configure~
+/configure.scan
+/aclocal.m4
+/autom4te.cache/
+/config.h
+/config.h.in
+/config.h.in~
+/config.log
+/config.status
+/config.guess
+/config.sub
+/depcomp
+/install-sh
+/missing
+/mkinstalldirs
+/compile
+/stamp-h
+/stamp-h.in
+/stamp-h1
+/libtool
+/ltmain.sh
+
+# Per-directory generated Makefiles
+Makefile
+Makefile.in
+
+# gettext / NLS
+/ABOUT-NLS
+po/*.gmo
+po/*.mo
+po/stamp-po
+po/POTFILES
+po/Makevars.template
+intl/Makefile
+
+# Editor scratch files
+*~
+\#*\#
+.\#*
+
+# GtkHx build outputs
+src/gtkhx
+src/gtkhx_*
+
+# Plugin build outputs
+plugins/*/*.so
+plugins/sample/sample
+plugins/eliza/eliza
+
+# Meson / Ninja (Phase 1+)
+/build/
+/builddir/
+.ninja_log
+.ninja_deps
+
