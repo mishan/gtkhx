@@ -154,7 +154,7 @@ void list_icons (void)
 			if(!pixmap) continue;
 
 			nfound++;
-			sprintf(buf, "%u", r->resid);
+			g_snprintf(buf, sizeof(buf), "%u", r->resid);
 			row = gtk_hlist_append(GTK_HLIST(icon_list), text);
 			id = r->resid;
 			gtk_hlist_set_row_data(GTK_HLIST(icon_list), row, (gpointer)id);
@@ -1424,7 +1424,7 @@ icon_row_selected (GtkWidget *widget, gint row, gint column, GdkEventButton *eve
 	if(!icon) {
 		return;
 	}
-	sprintf(buf, "%u", icon);
+	g_snprintf(buf, sizeof(buf), "%u", icon);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICON_IDX].widget), buf);
 }
 
@@ -1452,7 +1452,7 @@ static void settings_page_icon(GtkWidget *vbox)
 	gtk_table_attach(GTK_TABLE(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
-	sprintf(iconstr, "%u", the_session.htlc.icon);
+	g_snprintf(iconstr, sizeof(iconstr), "%u", the_session.htlc.icon);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICON_IDX].widget), iconstr);
 
 	scroll = gtk_scrolled_window_new(0,0);

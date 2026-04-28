@@ -25,7 +25,7 @@ writestuff (const char *str, guint8 type, const guint8 *buf, unsigned int len)
 	char file[32];
 	FILE *fp;
 
-	sprintf(file, "/tmp/compress.%d", getpid());
+	g_snprintf(file, sizeof(file), "/tmp/compress.%d", getpid());
 	fp = fopen(file, "a");
 	if (!fp)
 		return;

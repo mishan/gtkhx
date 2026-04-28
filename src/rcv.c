@@ -1499,7 +1499,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 #ifdef USE_IPV6
 	{
 		char buf[HOSTLEN];
-		sprintf(portstr, "%u", server_port+1);
+		g_snprintf(portstr, sizeof(portstr), "%u", server_port+1);
 
 		inet_ntop(htlc->addr->ai_family, &htlc->addr->ai_addr->sa_data[2],
 				  buf, HOSTLEN);
@@ -1589,7 +1589,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	{
 		char buf[HOSTLEN];
 
-		sprintf(portstr, "%u", server_port+1);
+		g_snprintf(portstr, sizeof(portstr), "%u", server_port+1);
 		inet_ntop(htlc->addr->ai_family, &htlc->addr->ai_addr->sa_data[2], 
 				  buf, HOSTLEN);
 		if((error = getaddrinfo(buf, portstr, &hints,

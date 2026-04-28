@@ -190,10 +190,10 @@ static void newsf_clicked(GtkWidget *widget, GdkEventButton *event)
 
 			
 			if(strcmp(gfnews->news->path, "/")) {
-				sprintf(path, "%s/%s", gfnews->news->path, item->name);
+				g_snprintf(path, sizeof(path), "%s/%s", gfnews->news->path, item->name);
 			}
 			else {
-				sprintf(path, "/%s", item->name);
+				g_snprintf(path, sizeof(path), "/%s", item->name);
 			}
 			if(item->type == 1) {
 				if(gtkhx_prefs.news_samewin) {
@@ -407,10 +407,10 @@ static void gfnews_delete_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 		char path[4096];
 		
 		if(strcmp(gfnews->news->path, "/")) {
-			sprintf(path, "%s/%s", gfnews->news->path, item->name);
+			g_snprintf(path, sizeof(path), "%s/%s", gfnews->news->path, item->name);
 		}
 		else {
-			sprintf(path, "/%s", item->name);
+			g_snprintf(path, sizeof(path), "/%s", item->name);
 		}
 		hx_news15_delete(&the_session.htlc, path);
 		hx_news15_fldr_list(&the_session.htlc, gfnews);
@@ -475,8 +475,8 @@ static void news15_drag_receive(GtkWidget *target, GdkDragContext *context,
 
 	/* XXX: this doesn't actually do anything */
 	if(strcmp(gfnews_source->path, gfnews_target->path)) {
-		sprintf(pathf, "%s/%s", gfnews_source->path, item->name);
-		sprintf(patht, "%s/", gfnews_target->path);
+		g_snprintf(pathf, sizeof(pathf), "%s/%s", gfnews_source->path, item->name);
+		g_snprintf(patht, sizeof(patht), "%s/", gfnews_target->path);
 		
 /*		
 	hx_news15_move(&the_session.htlc, pathf, patht);

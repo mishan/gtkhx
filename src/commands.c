@@ -109,7 +109,8 @@ COMMAND(stats)
 	mins = secs/60;
 	secs %= 60;
 
-	sprintf(stat_str, "has been online for %d years, %d days, %02d hours, "
+	g_snprintf(stat_str, sizeof(stat_str),
+			"has been online for %d years, %d days, %02d hours, "
 			"%02d mins, %02lu secs.", years, days, hours, mins, secs);
  	hx_send_chat(htlc, stat_str, cid, 1);
 }

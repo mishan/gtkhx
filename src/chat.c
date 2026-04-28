@@ -360,8 +360,9 @@ static void xoutput_chat (session *sess, guint32 cid, char *chat)
 			int len = strlen(chat);
 			
 			if(len > 18 && !strncmp(INFOPREFIX, copy, 18)) {
-				memmove(&copy[7], &copy[18], len-17);
-				sprintf(copy, " [hx] %s", &copy[7]);
+				char *new_copy = g_strdup_printf(" [hx] %s", &copy[18]);
+				g_free(copy);
+				copy = new_copy;
 				len = strlen(copy);
 			}
 			if(gtkhx_prefs.timestamp) {
@@ -587,7 +588,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 
 	/* Is the text more than just a nick? */
 
-	sprintf(not_nick_chars, " .?%c", ':');
+	g_snprintf(not_nick_chars, sizeof(not_nick_chars), " .?%c", ':');
 
 	if (strcspn (text, not_nick_chars) != strlen (text)) {
 		/* If we're doing old-style nick completion and the text input widget

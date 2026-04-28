@@ -304,11 +304,11 @@ static void user_popup(struct hx_user *user, GdkEventButton *event,
 	sub = menu_quick_sub(user->name, menu);
 	gtk_object_set_data(GTK_OBJECT(menu), "sess", sess);
 
-	sprintf(buf, _("Icon: %d"), user->icon);
+	g_snprintf(buf, sizeof(buf), _("Icon: %d"), user->icon);
 	menu_quick_item(buf, sub, 1, 0);
-	sprintf(buf, _("UID: %d"), user->uid);
+	g_snprintf(buf, sizeof(buf), _("UID: %d"), user->uid);
 	menu_quick_item(buf, sub, 1, 0);
-	sprintf(buf, _("Status: %s%s"), user->color >= 2 ? _("Admin") :
+	g_snprintf(buf, sizeof(buf), _("Status: %s%s"), user->color >= 2 ? _("Admin") :
 			_("Guest"), user->color % 2 ? _(" (Away)") : "");
 	menu_quick_item(buf, sub, 1, 0);
 

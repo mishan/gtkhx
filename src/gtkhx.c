@@ -394,7 +394,7 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		info_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 		gtk_widget_set_usize(info_window, 260, 250);
 
-		sprintf(infotitle, _("User Info: %s (%u)"), nam, uid);
+		g_snprintf(infotitle, sizeof(infotitle), _("User Info: %s (%u)"), nam, uid);
 		gtk_window_set_title(GTK_WINDOW(info_window), infotitle);
 
 		hbox = gtk_hbox_new(0, 0);

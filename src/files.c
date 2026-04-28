@@ -317,7 +317,7 @@ static void get_file_info(GtkWidget *widget, gpointer data)
 	gfl = gfl_with_hlist((GtkWidget *)data);
 	fh = gtk_hlist_get_row_data(GTK_HLIST(data), gfl->row);
 
-	sprintf(path, "%s/%.*s", gfl->cfl->path,
+	g_snprintf(path, sizeof(path), "%s/%.*s", gfl->cfl->path,
 			 (int)fh->fnlen, fh->fname);
 
 	hx_file_info(&the_session.htlc, path);
@@ -520,9 +520,9 @@ static void files_drag_receive(GtkWidget *target, GdkDragContext *context,
 	gfl_target = gfl_with_hlist(target);
 
 	if(strcmp(gfl_source->cfl->path, gfl_target->cfl->path)) {
-		sprintf(pathf, "%s/%.*s", gfl_source->cfl->path, (int)fh->fnlen,
-				fh->fname);
-		sprintf(patht, "%s/", gfl_target->cfl->path);
+		g_snprintf(pathf, sizeof(pathf), "%s/%.*s", gfl_source->cfl->path,
+				(int)fh->fnlen, fh->fname);
+		g_snprintf(patht, sizeof(patht), "%s/", gfl_target->cfl->path);
 
 		hx_file_move(&the_session.htlc, pathf, patht);
 /*		hx_file_link(&the_session.htlc, pathf, patht);
@@ -807,7 +807,7 @@ human_readable (guint32 n, char *buf,
 	  double damt = n * (double) multiplier;
 
 	  if (! base)
-	    sprintf (buf, "%.0f", damt);
+	    g_snprintf (buf, LONGEST_HUMAN_READABLE, "%.0f", damt);
 	  else
 	    {
 	      double e = 1;
@@ -822,9 +822,9 @@ human_readable (guint32 n, char *buf,
 
 	      damt /= e;
 
-	      sprintf (buf, "%.1f%c", damt, human_suffixes[power]);
+	      g_snprintf (buf, LONGEST_HUMAN_READABLE, "%.1f%c", damt, human_suffixes[power]);
 	      if (4 < strlen (buf))
-		sprintf (buf, "%.0f%c", damt, human_suffixes[power]);
+		g_snprintf (buf, LONGEST_HUMAN_READABLE, "%.0f%c", damt, human_suffixes[power]);
 	    }
 
 	  return buf;
@@ -1016,7 +1016,7 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 		namstr[fh->fnlen] = 0;
 		if (!memcmp(&fh->ftype, "fldr", 4)) {
 			sizstr = humanbuf;
-			sprintf(sizstr, "(%u)", (fh->fsize));
+			g_snprintf(sizstr, LONGEST_HUMAN_READABLE+1, "(%u)", fh->fsize);
 		}
 		else {
 			sizstr = human_size(humanbuf, fh->fsize);

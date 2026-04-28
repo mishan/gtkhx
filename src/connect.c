@@ -107,7 +107,7 @@ static void close_connect_window (void)
 void connect_set_entries (const char *address, const char *login, const char *password, guint16 port)
 {
 	char buf[HOSTLEN];
-	sprintf(buf, "%u", port);
+	g_snprintf(buf, sizeof(buf), "%u", port);
 
 	if (address)
 		gtk_entry_set_text(GTK_ENTRY(address_entry), address);
@@ -303,7 +303,7 @@ static void convert_bookmark(GtkWidget *widget, gpointer data)
 			}
 		}
 		p++;
-		sprintf(port, "%u", atoi(p));
+		g_snprintf(port, sizeof(port), "%u", atoi(p));
 	}
 
 
@@ -442,7 +442,7 @@ static void open_bookmark(GtkWidget *widget, gpointer data)
 			}
 		}
 		p++;
-		sprintf(port, "%u", atoi(p));
+		g_snprintf(port, sizeof(port), "%u", atoi(p));
 
 	}
 

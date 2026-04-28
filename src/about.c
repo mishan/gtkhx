@@ -159,7 +159,7 @@ void create_about_window ()
     pixmap = gtk_pixmap_new(icon, mask);
     gtk_container_add (GTK_CONTAINER (frame), pixmap);
 
-    sprintf (version, (Ver), VERSION); /* Insert version from config.h */
+    g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */
 
     lblTitle = gtk_label_new (version);
     gtk_fixed_put (GTK_FIXED (fixed1), lblTitle, 8, 175);

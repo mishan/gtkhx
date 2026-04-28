@@ -108,7 +108,7 @@ void output_xfer_queue(session *sess, struct htxf_conn *htxf)
 		return;
 	}
 
-	sprintf(qid, "%d", htxf->queue);
+	g_snprintf(qid, sizeof(qid), "%d", htxf->queue);
 	gtk_label_set_text(GTK_LABEL(gtsk->queue), qid);
 }
 
@@ -134,7 +134,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 
 	if(htxf) {
 		if(htxf->queue > 0) {
-			sprintf(qid, "%d", htxf->queue);
+			g_snprintf(qid, sizeof(qid), "%d", htxf->queue);
 			queue = gtk_label_new(qid);
 		}
 		else {
@@ -229,7 +229,7 @@ void track_prog_update (session *sess, char *str, int num, int total)
 
 	label = gtsk->label;
 	pbar = gtsk->pbar;
-	sprintf(taskstr, _("Task (Listing Tracker: %s) %u/%u"),
+	g_snprintf(taskstr, sizeof(taskstr), _("Task (Listing Tracker: %s) %u/%u"),
 			 str, pos, total);
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 
@@ -257,7 +257,7 @@ void trackconn_prog_update (session *sess, char *str, int num, int total)
 
 	label = gtsk->label;
 	pbar = gtsk->pbar;
-	sprintf(taskstr, _("Task (Connecting to Tracker: %s) %u/%u"),
+	g_snprintf(taskstr, sizeof(taskstr), _("Task (Connecting to Tracker: %s) %u/%u"),
 			 str, pos, total);
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 

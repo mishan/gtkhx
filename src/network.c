@@ -429,7 +429,7 @@ static void hx_thread_connect (void *arg)
 	int error;
 
 	server_port = port;
-	sprintf(portstr, "%u", port);
+	g_snprintf(portstr, sizeof(portstr), "%u", port);
 
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = PF_UNSPEC;
@@ -905,7 +905,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	sprintf(portstr, "%u", port);
+	g_snprintf(portstr, sizeof(portstr), "%u", port);
 #else
 	struct sockaddr_in saddr;
 
