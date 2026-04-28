@@ -62,8 +62,6 @@ hmac_xxx (u_int8_t *md, u_int8_t *key, u_int32_t keylen, u_int8_t *text, u_int32
 			md5_process_bytes(key, keylen, &ctx);
 			md5_finish_ctx(&ctx, mdkey);
 			keylen = 16;
-		} else if (!strncmp(macalg, "HMAC-HAVAL", 10)) {
-			return 0;
 		} else {
 			return 0;
 		}
@@ -108,8 +106,6 @@ hmac_xxx (u_int8_t *md, u_int8_t *key, u_int32_t keylen, u_int8_t *text, u_int32
 		md5_finish_ctx(&ctx, md);
 
 		return 16;
-	} else if (!strncmp(macalg, "HMAC-HAVAL", 10)) {
-		return 0;
 	}
 
 	return 0;
