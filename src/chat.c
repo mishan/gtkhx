@@ -575,6 +575,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 	struct hx_user *user = 0, *match_user = 0;
 	char not_nick_chars[16] = "";
 	int first = 0, i, j, match_count = 0;
+	int cursor_pos = -1;
 	size_t len, slen, match_pos = 0;
 	char buf[2048], nick_buf[2048] = {0}, *b4 = NULL, *c5 = NULL, 
 											  *match_text = NULL, 
@@ -738,7 +739,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 		}
 		else {
 			snprintf (buf, sizeof (buf), "%s %s%s", b4, match_text, c5);
-			GTK_EDITABLE(entry)->current_pos = strlen (b4) + strlen (match_text);
+			cursor_pos = strlen (b4) + strlen (match_text);
 			g_free (b4);
 			g_free (c5);
 		}
@@ -751,8 +752,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 		}
 		else {
 			snprintf (buf, sizeof (buf), "%s %s%s", b4, match_user->name, c5);
-			GTK_EDITABLE(entry)->current_pos = strlen (b4) + 
-				strlen(match_user->name);
+			cursor_pos = strlen (b4) + strlen(match_user->name);
 			if(b4)
 				g_free (b4);
 			if(c5)
@@ -763,26 +763,39 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 	ptr = buf;
 	while(*ptr == ' ') ptr++;
 
-	gtk_editable_delete_text (GTK_EDITABLE (entry), 0, -1);
-	gtk_text_insert(GTK_TEXT(entry), 0, 0, 0, ptr, -1);
+	{
+		GtkTextBuffer *ebuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(entry));
+		gtk_text_buffer_set_text(ebuf, ptr, -1);
+		if (cursor_pos >= 0) {
+			GtkTextIter cursor_iter;
+			int total = gtk_text_buffer_get_char_count(ebuf);
+			if (cursor_pos > total) cursor_pos = total;
+			gtk_text_buffer_get_iter_at_offset(ebuf, &cursor_iter, cursor_pos);
+			gtk_text_buffer_place_cursor(ebuf, &cursor_iter);
+		}
+	}
 
 	return 0;
 }
 
-static void chat_input_key_press (GtkWidget *widget, GdkEventKey *event)
+static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 {
-	GtkText *text;
-	guint point, len;
+	GtkTextView *text;
+	GtkTextBuffer *buf;
+	GtkTextMark *insert_mark;
+	GtkTextIter insert_iter;
+	guint point;
 	guint k, s;
-	char *p;
 	HIST_ENTRY *hent = NULL;
 	struct gtkhx_chat *gchat = g_object_get_data(GTK_OBJECT(widget), "gchat");
 	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
 
-	text = GTK_TEXT(widget);
+	text = GTK_TEXT_VIEW(widget);
+	buf = gtk_text_view_get_buffer(text);
 
-	point = gtk_text_get_point(text);
-	len = gtk_text_get_length(text);
+	insert_mark = gtk_text_buffer_get_insert(buf);
+	gtk_text_buffer_get_iter_at_mark(buf, &insert_iter, insert_mark);
+	point = gtk_text_iter_get_offset(&insert_iter);
 
 	k = event->keyval; s = event->state;
 	/* handle this weird bug */
@@ -795,38 +808,46 @@ static void chat_input_key_press (GtkWidget *widget, GdkEventKey *event)
 		}
 	}
 	else if (s & GDK_SHIFT_MASK && k == GDK_Return) {
-		/* insert a linebreak if shift is held */
-		int position;
-
-		position = text->point.index;
-		gtk_editable_insert_text (GTK_EDITABLE(text), "\n", 1, &position);
-		return;
+		/* insert a linebreak if shift is held — let GtkTextView default */
+		return FALSE;
 	}
 	else if (k == GDK_Return) {
+		GtkTextIter start, end;
 
-		gtk_signal_emit_stop_by_name(GTK_OBJECT(widget), "key_press_event");
-		gtk_text_set_editable(text, 0);
+		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		gtk_text_view_set_editable(text, FALSE);
 		g_free(termed_buf);
-		termed_buf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, len);
+
+		gtk_text_buffer_get_start_iter(buf, &start);
+		gtk_text_buffer_get_end_iter(buf, &end);
+		termed_buf = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
 
 		add_history(gchat->chat_history, termed_buf);
 		using_history(gchat->chat_history);
 
-		hotline_client_input(&sess->htlc, termed_buf, gchat->cid, 
+		hotline_client_input(&sess->htlc, termed_buf, gchat->cid,
 							 (s&GDK_CONTROL_MASK) ? 1 : 0);
 
-		gtk_text_set_point(text, 0);
-		gtk_text_forward_delete(text, len);
-		gtk_text_set_editable(text, 1);
+		gtk_text_buffer_get_start_iter(buf, &start);
+		gtk_text_buffer_get_end_iter(buf, &end);
+		gtk_text_buffer_delete(buf, &start, &end);
+		gtk_text_view_set_editable(text, TRUE);
+		return TRUE;
 	}
 
 
 	else if (k == GDK_Tab) {
-		gtk_signal_emit_stop_by_name(GTK_OBJECT(widget), "key_press_event");
-		p = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
+		GtkTextIter start, end;
+		char *p;
+
+		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		gtk_text_buffer_get_start_iter(buf, &start);
+		gtk_text_buffer_get_end_iter(buf, &end);
+		p = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
 		tab_nick_comp(sess, p, 1, point, widget);
 		g_free(p);
 		gtk_widget_grab_focus(GTK_WIDGET(text));
+		return TRUE;
 	}
 
 
@@ -838,20 +859,16 @@ static void chat_input_key_press (GtkWidget *widget, GdkEventKey *event)
 	}
 
 	if (hent) {
-		gtk_text_freeze(text);
-		gtk_text_set_point(text, 0);
-		len = gtk_text_get_length(text);
-		gtk_text_forward_delete(text, len);
+		GtkTextIter end;
 
-
-		len = strlen(hent->line);
-		gtk_text_insert(text, 0, 0, 0, hent->line, len);
-		gtk_text_thaw(text);
-
-		len = gtk_text_get_length(text);
-		gtk_editable_set_position(GTK_EDITABLE(text), len);
-
+		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
+		gtk_text_buffer_get_end_iter(buf, &end);
+		gtk_text_buffer_place_cursor(buf, &end);
+		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		return TRUE;
 	}
+
+	return FALSE;
 }
 
 static void chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data) 
@@ -1049,18 +1066,24 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
-	gchat->input = gtk_text_new(0, 0);
+	gchat->input = gtk_text_view_new();
 	gtk_widget_set_style(gchat->input, gtktext_style);
-	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
+	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
 	g_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
-	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
-	gtk_text_set_word_wrap(GTK_TEXT(gchat->input), 1);
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(gchat->input), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(gchat->input), GTK_WRAP_WORD);
 
 
-	gtk_box_pack_start(GTK_BOX(hbox), gchat->input, 1, 1, 0);
-	g_signal_connect(GTK_OBJECT(chat_window), "configure_event", 
+	{
+		GtkWidget *input_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(input_scroll),
+		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(input_scroll), gchat->input);
+		gtk_box_pack_start(GTK_BOX(hbox), input_scroll, 1, 1, 0);
+	}
+	g_signal_connect(GTK_OBJECT(chat_window), "configure_event",
 					   G_CALLBACK(chat_move), gchat);
 
 	g_object_set_data(GTK_OBJECT(chat_window), "sess", sess);
@@ -1336,15 +1359,21 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_widget_set_size_request(hbox, 140, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
-	gchat->input = gtk_text_new(0, 0);
+	gchat->input = gtk_text_view_new();
 	gtk_widget_set_style(gchat->input, gtktext_style);
-	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
+	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
 	g_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
-	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
-	gtk_text_set_word_wrap(GTK_TEXT(gchat->input), 1);
-	gtk_box_pack_start(GTK_BOX(hbox), gchat->input, 1, 1, 0);
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(gchat->input), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(gchat->input), GTK_WRAP_WORD);
+	{
+		GtkWidget *pchat_input_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(pchat_input_scroll),
+		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(pchat_input_scroll), gchat->input);
+		gtk_box_pack_start(GTK_BOX(hbox), pchat_input_scroll, 1, 1, 0);
+	}
 
  	g_signal_connect(GTK_OBJECT(pchat_window), "configure_event", 
 					   G_CALLBACK(pchat_update_trans), gchat->output);

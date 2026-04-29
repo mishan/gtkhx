@@ -79,18 +79,18 @@ struct msgwin *msgwin_with_uid (guint16 uid)
 	return 0;
 }
 
-static void msg_input_key_press (GtkWidget *widget, GdkEventKey *event)
+static void msg_input_activate (GtkWidget *widget, gpointer data);
+
+static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 {
-	GtkText *text;
-	guint point, len;
+	GtkTextView *text;
+	GtkTextBuffer *buf;
 	guint k, s;
 	HIST_ENTRY *hent = NULL;
 	struct msgwin *msg = g_object_get_data(GTK_OBJECT(widget), "msg");
 
-	text = GTK_TEXT(widget);
-
-	point = gtk_text_get_point(text);
-	len = gtk_text_get_length(text);
+	text = GTK_TEXT_VIEW(widget);
+	buf = gtk_text_view_get_buffer(text);
 
 	k = event->keyval; s = event->state;
 	/* handle this weird bug */
@@ -103,24 +103,23 @@ static void msg_input_key_press (GtkWidget *widget, GdkEventKey *event)
 		}
 	}
 	else if (s & GDK_SHIFT_MASK && k == GDK_Return) {
-		/* insert a linebreak if shift is held */
-		int position;
-
-		position = text->point.index;
-		gtk_editable_insert_text (GTK_EDITABLE(text), "\n", 1, &position);
-		gtk_text_set_point(text, position);
-		return;
+		/* insert a linebreak if shift is held — let GtkTextView default */
+		return FALSE;
 	}
 	else if (k == GDK_Return) {
-		char *buf;
+		GtkTextIter start, end;
+		char *line;
 
-		gtk_text_set_editable(text, 0);
-		buf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, len);
-
-		add_history(msg->history, buf);
+		gtk_text_buffer_get_start_iter(buf, &start);
+		gtk_text_buffer_get_end_iter(buf, &end);
+		line = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
+		add_history(msg->history, line);
 		using_history(msg->history);
+		g_free(line);
 
-		g_free(buf);
+		msg_input_activate(widget, msg->uid);
+		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		return TRUE;
 	}
 	else if (k == GDK_Up) {
 		hent = previous_history(msg->history);
@@ -130,20 +129,16 @@ static void msg_input_key_press (GtkWidget *widget, GdkEventKey *event)
 	}
 
 	if (hent) {
-		gtk_text_freeze(text);
-		gtk_text_set_point(text, 0);
-		len = gtk_text_get_length(text);
-		gtk_text_forward_delete(text, len);
+		GtkTextIter end;
 
-
-		len = strlen(hent->line);
-		gtk_text_insert(text, 0, 0, 0, hent->line, len);
-		gtk_text_thaw(text);
-
-		len = gtk_text_get_length(text);
-		gtk_editable_set_position(GTK_EDITABLE(text), len);
-
+		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
+		gtk_text_buffer_get_end_iter(buf, &end);
+		gtk_text_buffer_place_cursor(buf, &end);
+		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		return TRUE;
 	}
+
+	return FALSE;
 }
 
 static void msg_update_trans (GtkWidget *win, GdkEventConfigure *event, gpointer data)
@@ -158,21 +153,23 @@ static void msg_update_trans (GtkWidget *win, GdkEventConfigure *event, gpointer
 
 static void msg_input_activate (GtkWidget *widget, gpointer data)
 {
-	GtkText *text;
-	guint point, len;
+	GtkTextView *text;
+	GtkTextBuffer *buf;
+	GtkTextIter start, end;
+	guint len;
 	char *termed_buf = NULL;
 	guint16 *uid = data;
 
-	text = GTK_TEXT(widget);
-	point = gtk_text_get_point(text);
-	len = gtk_text_get_length(text);
-	termed_buf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, len);
+	text = GTK_TEXT_VIEW(widget);
+	buf = gtk_text_view_get_buffer(text);
+	gtk_text_buffer_get_start_iter(buf, &start);
+	gtk_text_buffer_get_end_iter(buf, &end);
+	termed_buf = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
 
-	gtk_text_set_point(text, 0);
-	gtk_text_forward_delete(text, len);
-	gtk_text_set_editable(text, 1);
+	gtk_text_buffer_delete(buf, &start, &end);
 
 	if(termed_buf[0] == 0) {
+		g_free(termed_buf);
 		return;
 	}
 
@@ -225,19 +222,19 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 
 	gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), 0, gtkhx_prefs.trans_xtext, 1);
 	msg->vscroll = gtk_vscrollbar_new(GTK_XTEXT(msg->outputbuf)->adj);
-	msg->inputbuf = gtk_text_new(0,0);
+	msg->inputbuf = gtk_text_view_new();
 
 	gtk_widget_set_style(msg->inputbuf, gtktext_style);
-	gtk_text_set_editable(GTK_TEXT(msg->inputbuf), 1);
-	gtk_text_set_word_wrap(GTK_TEXT(msg->inputbuf), 1);
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(msg->inputbuf), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(msg->inputbuf), GTK_WRAP_WORD);
 
 	g_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
 	g_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
-	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event", 
-					   G_CALLBACK(msg_input_key_press), 0);
-	g_signal_connect(GTK_OBJECT(msg->inputbuf), "activate", 
-					   G_CALLBACK(msg_input_activate), uid);
-	g_signal_connect(GTK_OBJECT(msg->window), "configure_event", 
+	/* Note: GtkTextView has no "activate" signal — Return is dispatched
+	   from msg_input_key_press, which calls msg_input_activate(). */
+	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event",
+					   G_CALLBACK(msg_input_key_press), uid);
+	g_signal_connect(GTK_OBJECT(msg->window), "configure_event",
 					   G_CALLBACK(msg_update_trans), msg->outputbuf);
 
 	msg_list = msg;
@@ -366,30 +363,35 @@ void broadcastok(GtkWidget *widget, gpointer data)
 void broadcastmsg(char *text)
 {
 
-	GtkWidget *hbox;
 	GtkWidget *dialog;
 	GtkWidget *okbtn;
 	GtkWidget *textbox;
-	GtkWidget *vscroll;
+	GtkWidget *scroll;
+	GtkTextBuffer *tbuf;
 
 
 	dialog = gtk_dialog_new();
 	okbtn = gtk_button_new_with_label(_("OK"));
     GTK_WIDGET_SET_FLAGS (okbtn, GTK_CAN_DEFAULT);
 
-	textbox = gtk_text_new(0,0);
-	vscroll = gtk_vscrollbar_new(GTK_TEXT(textbox)->vadj);
-	hbox = gtk_hbox_new(0,0);
+	textbox = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(textbox), FALSE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textbox), GTK_WRAP_WORD);
+	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textbox));
+	gtk_text_buffer_set_text(tbuf, text, strlen(text));
+
+	scroll = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(scroll), textbox);
+
 	gtk_widget_set_size_request(dialog, 300, 250);
-	gtk_widget_set_size_request(textbox, 280, 220);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), hbox, TRUE, TRUE , 0);
-	gtk_box_pack_start(GTK_BOX(hbox), textbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
+    gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), scroll, TRUE, TRUE , 0);
 	gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
-	gtk_text_insert(GTK_TEXT(textbox), 0, 0, 0, text, strlen(text));
 	g_object_set_data(GTK_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
