@@ -24,6 +24,11 @@
 #include <errno.h>
 #include <fnmatch.h>
 #include <netinet/in.h>
+/* gdk_image_new_bitmap is gated behind GDK_ENABLE_BROKEN in GTK 2 and is
+ * removed entirely in GTK 3. Phase 3 will replace the entire GdkImage →
+ * GdkPixmap pipeline below with GdkPixbuf/Cairo; for Phase 2 we just enable
+ * the "broken" symbol to keep the existing draw path working. */
+#define GDK_ENABLE_BROKEN
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #include <sys/time.h>

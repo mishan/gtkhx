@@ -52,7 +52,7 @@ void init_keyaccel(GtkWidget *widget)
 		gtk_widget_add_accelerator(quit_btn, "clicked" ,accel_group, 'q', GDK_CONTROL_MASK, 0);
 	}
 	
-	gtk_accel_group_attach (accel_group, GTK_OBJECT(widget));
+	gtk_window_add_accel_group (GTK_WINDOW(widget), accel_group);
 }
 
 void set_disconnect_btn(session *sess, int stat)
