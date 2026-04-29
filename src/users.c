@@ -47,9 +47,7 @@ static int user_storow, user_stocolumn;
 #define COL_USERNAME 1
 static int user_click_col;
 
-GtkStyle *users_style;
-
-GdkFont *users_font;
+PangoFontDescription *users_font_desc;
 
 GdkColor user_colors[8];
 GdkColor gdk_user_colors[4];
@@ -719,17 +717,10 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(GTK_OBJECT(users_list), "button_press_event",
 					   G_CALLBACK(user_clicked), sess);
 
-	if (!users_style) {
-		if (!users_font)
-			users_font = gdk_font_load("-adobe-helvetica-normal-r-*-*-10-140-*\
--*-*-*-*-*");
-		if (users_font) {
-			users_style = gtk_style_new();
-			users_style->font = users_font;
-		}
-	}
-	if (users_style)
-		gtk_widget_set_style(users_list, users_style);
+	if (!users_font_desc)
+		users_font_desc = pango_font_description_from_string ("Sans 10");
+	if (users_font_desc)
+		gtk_widget_modify_font (users_list, users_font_desc);
 
 	users_window_scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(users_window_scroll),

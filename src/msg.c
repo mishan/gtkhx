@@ -210,7 +210,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	msg->outputbuf = gtk_xtext_new(0,0);
 
 	gtk_xtext_set_palette (GTK_XTEXT (msg->outputbuf), colors);
-	gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font, 0);
+	gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font_desc, 0);
 #ifdef USE_GDK_PIXBUF
 	GTK_XTEXT(msg->outputbuf)->tint_red = gtkhx_prefs.tint_red;
 	GTK_XTEXT(msg->outputbuf)->tint_green = gtkhx_prefs.tint_green;
@@ -224,7 +224,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	msg->vscroll = gtk_vscrollbar_new(GTK_XTEXT(msg->outputbuf)->adj);
 	msg->inputbuf = gtk_text_view_new();
 
-	gtk_widget_set_style(msg->inputbuf, gtktext_style);
+	gtkhx_apply_text_style(msg->inputbuf);
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(msg->inputbuf), TRUE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(msg->inputbuf), GTK_WRAP_WORD);
 

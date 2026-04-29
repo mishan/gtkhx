@@ -13,8 +13,7 @@ extern GdkColor gdk_user_colors[4];
 extern GdkGC *users_gc;
 extern GdkGC *mask_gc;
 
-extern GtkStyle *users_style;
-extern GdkFont *users_font;
+extern PangoFontDescription *users_font_desc;
 
 
 extern void create_users_window (GtkWidget *widget, gpointer data);

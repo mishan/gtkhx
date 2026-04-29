@@ -63,12 +63,22 @@ char *g_user_colors[4] = {WHITE_BOLD, WHITE, RED_BOLD, RED};
 
 struct ifn user_icon_files;
 struct ifn icon_files;
-GtkStyle *gtktext_style = NULL;
 GdkColor fg_col;
 GdkColor bg_col;
 
-GdkFont *gtkhx_font;
+PangoFontDescription *gtkhx_font_desc;
 GtkTooltips *tooltips;
+
+void
+gtkhx_apply_text_style (GtkWidget *w)
+{
+	if (!w)
+		return;
+	if (gtkhx_font_desc)
+		gtk_widget_modify_font (w, gtkhx_font_desc);
+	gtk_widget_modify_text (w, GTK_STATE_NORMAL, &fg_col);
+	gtk_widget_modify_base (w, GTK_STATE_NORMAL, &bg_col);
+}
 static GtkWidget *agreetext;
 static struct timer *timer_list;
 

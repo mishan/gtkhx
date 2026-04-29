@@ -54,8 +54,7 @@
 #include "pixmaps/ignore.xpm"
 
 static char *termed_buf = 0;
-extern GdkFont *gtkhx_font;
-extern GtkStyle *gtktext_style;
+extern PangoFontDescription *gtkhx_font_desc;
 
 #define WORD_URL     1
 #define WORD_NICK    2
@@ -939,7 +938,7 @@ void create_chat(session *sess)
 
 	text = gtk_xtext_new(0,0);
 	gtk_xtext_set_palette (GTK_XTEXT (text), colors);
-	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font, 0);
+	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font_desc, 0);
 	gtk_xtext_set_background(GTK_XTEXT(text), NULL, gtkhx_prefs.trans_xtext, 1);
 	GTK_WIDGET_UNSET_FLAGS(text, GTK_CAN_FOCUS);
 #ifdef USE_GDK_PIXBUF
@@ -1033,7 +1032,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(subj_frame), subj_hbox);
 	gtk_box_pack_start(GTK_BOX(subj_hbox), gchat->subject, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
-	gtk_widget_set_style(gchat->subject, gtktext_style);
+	gtkhx_apply_text_style(gchat->subject);
 	g_signal_connect(GTK_OBJECT(gchat->subject), "activate",
 					   G_CALLBACK(change_subject), GINT_TO_POINTER(0));
 
@@ -1067,7 +1066,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
 	gchat->input = gtk_text_view_new();
-	gtk_widget_set_style(gchat->input, gtktext_style);
+	gtkhx_apply_text_style(gchat->input);
 	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(G_OBJECT(gchat->input), "gchat", gchat);
@@ -1125,7 +1124,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 
 	text = gtk_xtext_new(0,0);
 	gtk_xtext_set_palette(GTK_XTEXT(text), colors);
-	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font, 0);
+	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font_desc, 0);
 #ifdef USE_GDK_PIXBUF
 	GTK_XTEXT(text)->tint_red = gtkhx_prefs.tint_red;
 	GTK_XTEXT(text)->tint_green = gtkhx_prefs.tint_green;
@@ -1139,7 +1138,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
 
 	subject = gtk_entry_new();
-	gtk_widget_set_style(subject, gtktext_style);
+	gtkhx_apply_text_style(subject);
 
 	userlist = gtk_hlist_new(2);
 	gtk_hlist_set_column_width(GTK_HLIST(userlist), 0, 30);
@@ -1330,7 +1329,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_box_pack_start(GTK_BOX(subj_hbox), gchat->subject, 1, 1, 0);
 	gtk_entry_set_text(GTK_ENTRY(gchat->subject), chat->subject);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
-	gtk_widget_set_style(gchat->subject, gtktext_style);
+	gtkhx_apply_text_style(gchat->subject);
 	g_signal_connect(GTK_OBJECT(gchat->subject), "activate", 
 					   G_CALLBACK(change_subject), 
 					   GINT_TO_POINTER(chat->cid));
@@ -1360,7 +1359,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
 	gchat->input = gtk_text_view_new();
-	gtk_widget_set_style(gchat->input, gtktext_style);
+	gtkhx_apply_text_style(gchat->input);
 	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(G_OBJECT(gchat->input), "sess", sess);
@@ -1388,18 +1387,10 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(GTK_OBJECT(gchat->userlist), "button_press_event",
 			   G_CALLBACK(user_clicked), 0);
 
-	if (!users_style) {
-		if (!users_font)
-			users_font = gdk_font_load("-adobe-helvetica-normal-r-*-*-10"
-									   "-140-*-*-*-*-*-*");
-		if (users_font) {
-			users_style = gtk_style_new();
-			users_style->font = users_font;
-		}
-	}
-	else {
-		gtk_widget_set_style(gchat->userlist, users_style);
-	}
+	if (!users_font_desc)
+		users_font_desc = pango_font_description_from_string ("Sans 10");
+	if (users_font_desc)
+		gtk_widget_modify_font (gchat->userlist, users_font_desc);
 
 	msg_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(msg_btn), "sess", sess);

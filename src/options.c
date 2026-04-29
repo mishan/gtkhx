@@ -182,51 +182,30 @@ void list_icons (void)
 }
 
 
-static void new_style (void)
-{
-	gtktext_style = gtk_style_new();
-
-	gtktext_style->fg[GTK_STATE_NORMAL] = fg_col;
-	gtktext_style->text[GTK_STATE_NORMAL] = fg_col;
-	gtktext_style->light[GTK_STATE_NORMAL] = fg_col;
-
-	gtktext_style->bg[GTK_STATE_NORMAL] = bg_col;
-	gtktext_style->base[GTK_STATE_NORMAL] = bg_col;
-	gtktext_style->dark[GTK_STATE_NORMAL] = bg_col;
-
-	gtktext_style->font = gtkhx_font;
-}
-
 void reinit_gtktexts (session *sess)
 {
 	struct msgwin *msg;
 	struct gtkhx_chat *gchat;
 
-	if(gtktext_style) {
-		gtk_style_unref(gtktext_style);
-	}
-
-	new_style();
-
 	if(gtkhx_prefs.geo.news.open) {
-		gtk_widget_set_style(sess->news_text, gtktext_style);
+		gtkhx_apply_text_style(sess->news_text);
 	}
 	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
 		if(gchat->cid == 0 && !gtkhx_prefs.geo.chat.open)
 			continue;
-		gtk_xtext_set_font(GTK_XTEXT(gchat->output), gtkhx_font, 0);
+		gtk_xtext_set_font(GTK_XTEXT(gchat->output), gtkhx_font_desc, 0);
 		gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
 		if(gchat->input) {
-			gtk_widget_set_style(gchat->input, gtktext_style);
+			gtkhx_apply_text_style(gchat->input);
 		}
 		if(gchat->subject) {
-			gtk_widget_set_style(gchat->subject, gtktext_style);
+			gtkhx_apply_text_style(gchat->subject);
 		}
 	}
 	for(msg = sess->msg_list; msg; msg = msg->prev) {
-		gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font, 0);
+		gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font_desc, 0);
 		gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
-		gtk_widget_set_style(msg->inputbuf, gtktext_style);
+		gtkhx_apply_text_style(msg->inputbuf);
 	}
 }
 
@@ -263,27 +242,25 @@ static void changed_xtext (session *sess)
 
 static void changed_font (session *sess)
 {
-	if(gtkhx_font) {
-		gdk_font_unref(gtkhx_font);
+	if (gtkhx_font_desc) {
+		pango_font_description_free (gtkhx_font_desc);
+		gtkhx_font_desc = NULL;
 	}
 
-	if(gtkhx_prefs.use_fontset) {
-		gtkhx_font = gdk_fontset_load(gtkhx_prefs.font);
-	}
-	else {
-		gtkhx_font = gdk_font_load(gtkhx_prefs.font);
-	}
+	if (gtkhx_prefs.font && *gtkhx_prefs.font)
+		gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
 
-	if(!gtkhx_font) {
-		g_warning("Bad font \"%s\"\n", gtkhx_prefs.font);
-		gtkhx_font = gdk_font_load("fixed");
-		if(gtkhx_prefs.font)
-			g_free(gtkhx_prefs.font);
-		gtkhx_prefs.font = g_strdup("fixed");
+	if (!gtkhx_font_desc) {
+		g_warning ("Bad font \"%s\"\n",
+		           gtkhx_prefs.font ? gtkhx_prefs.font : "");
+		gtkhx_font_desc = pango_font_description_from_string ("Monospace 10");
+		if (gtkhx_prefs.font)
+			g_free (gtkhx_prefs.font);
+		gtkhx_prefs.font = g_strdup ("Monospace 10");
 	}
 
 	if (sess) {
-		reinit_gtktexts(sess);
+		reinit_gtktexts (sess);
 	}
 }
 
@@ -376,7 +353,6 @@ struct cfgvar
 	{"NEWS_SAMEWINDOW", {&gtkhx_prefs.news_samewin}, BOOLEAN, 0, 
 	 changed_newssamewin, NULL},
 	{"FONT", {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
-	{"FONTSET", {&gtkhx_prefs.use_fontset}, BOOLEAN, 0, NULL, NULL},
 #ifdef USE_GDK_PIXBUF
 	{"GREEN", {&gtkhx_prefs.tint_green}, INT, 0, NULL, NULL},
 #endif
@@ -446,7 +422,6 @@ enum
 	FILE_SAMEWINDOW_IDX,
 	NEWS_SAMEWINDOW_IDX,
 	FONT_IDX,
-	FONTSET_IDX,
 	GREEN_IDX,
 	ICON_IDX,
 	ICONS_IDX,
@@ -500,16 +475,8 @@ enum
 
 void init_variables(void) /* default settings if prefs file is not found. */
 {
-	gtkhx_font = gdk_font_load("-b&h-lucidatypewriter-medium-r-normal-*-*-100-*-*-m-*-iso8859-1");
-	if(!gtkhx_font) {
-		gtkhx_font = gdk_font_load("fixed");          /* fall back to the 
-														 fixed font if ! 
-														 default font */
-		gtkhx_prefs.font = g_strdup("fixed");
-	}
-	else {
-		gtkhx_prefs.font = g_strdup("-b&h-lucidatypewriter-medium-r-normal-*-*-100-*-*-m-*-iso8859-1");
-	}
+	gtkhx_prefs.font = g_strdup ("Monospace 10");
+	gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
 	cfgvars[FONT_IDX].allocated = 1;
 
 
@@ -519,8 +486,6 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	bg_col.red = 0x0000;
 	bg_col.green = 0x0000;
 	bg_col.blue = 0x0000;
-
-	new_style();
 
 	changed_case(NULL);
 
@@ -1263,14 +1228,6 @@ static void settings_page_font(GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
 
 	table2 = gtk_table_new(2, 1, 0);
-
-	cfgvars[FONTSET_IDX].widget = gtk_check_button_new_with_label(
-		_("Use gdk_fontset_load"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
-								 cfgvars[FONTSET_IDX].widget,
-								 gtkhx_prefs.use_fontset);
-	gtk_table_attach(GTK_TABLE(table2), cfgvars[FONTSET_IDX].widget, 0, 1, 3,
-					 4, GTK_FILL, GTK_FILL, 0, 0);
 
 	btn = gtk_button_new_with_label(_("Browse Fonts"));
 	gtk_table_attach(GTK_TABLE(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,

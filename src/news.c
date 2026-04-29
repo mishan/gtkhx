@@ -143,7 +143,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 	postprompt = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(postprompt), TRUE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(postprompt), GTK_WRAP_WORD);
-	gtk_widget_set_style(postprompt, gtktext_style);
+	gtkhx_apply_text_style(postprompt);
 
 	{
 		GtkWidget *post_scroll = gtk_scrolled_window_new(NULL, NULL);
@@ -263,7 +263,7 @@ void create_news_window (session *sess)
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(news_text), FALSE);
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(news_text), FALSE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(news_text), GTK_WRAP_WORD);
-	gtk_widget_set_style(news_text, gtktext_style);
+	gtkhx_apply_text_style(news_text);
 
 	news_scroll = gtk_scrolled_window_new(NULL, NULL);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(news_scroll),

@@ -48,7 +48,6 @@ struct gtkhx_prefs {
 	unsigned char showjoin;
 	unsigned char showback;
 	unsigned char auto_reply;
-	unsigned char use_fontset;
 	unsigned char timestamp;
 	unsigned char word_wrap;
 	unsigned char file_samewin;

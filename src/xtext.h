@@ -161,7 +161,10 @@ void gtk_xtext_append (GtkXText * xtext, unsigned char *text, int len);
 void gtk_xtext_append_indent (GtkXText * xtext,
 										unsigned char *left_text, int left_len,
 										unsigned char *right_text, int right_len);
-void gtk_xtext_set_font (GtkXText * xtext, GdkFont * font, char *name);
+/* Phase 2.3: GdkFont * → PangoFontDescription *. xtext.c is slated for
+ * wholesale replacement in Phase 2.6 (vendor HexChat's xtext); the legacy
+ * implementation does not currently compile and is not linked. */
+void gtk_xtext_set_font (GtkXText * xtext, PangoFontDescription * font, char *name);
 void gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap,
 										 int trans, int shaded);
 void gtk_xtext_set_palette (GtkXText * xtext, GdkColor palette[]);
