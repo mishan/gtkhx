@@ -8,7 +8,7 @@ gtkhx_sources = files(
   'connect.c',
   'dfa.c',
   'files.c',
-  'gtk_hlist.c',
+  'gtk_hlist_compat.c',
   'gtkhx.c',
   'gtkthreads.c',
   'gtkutil.c',
