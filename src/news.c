@@ -221,7 +221,7 @@ void create_news_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										postnews_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(postButton), pix);
 	gtk_tooltips_set_tip(tooltips, postButton, _("Post News"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -230,7 +230,7 @@ void create_news_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										refresh_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(reloadButton), pix);
 	gtk_tooltips_set_tip(tooltips, reloadButton, _("Reload News"), 0);
 	icon = 0, pix = 0, mask = 0;

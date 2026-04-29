@@ -203,11 +203,12 @@ static void server_connect (GtkWidget *widget, gpointer data)
 }
 
 #ifdef CONFIG_COMPRESS
-void select_compressor(GtkWidget *compress_item, gpointer data);
+static void compress_combo_changed (GtkComboBox *combo, gpointer data);
 #endif
 #ifdef CONFIG_CIPHER
-void select_cipher(GtkWidget *cipher_item, gpointer data);
+static void cipher_combo_changed (GtkComboBox *combo, gpointer data);
 #endif
+static void builtin_bookmark (GtkWidget *widget, gpointer data);
 
 void set_the_entries (char *address, char *login, char *password, char *port,
 					  char secure, char compress, char cipher)
@@ -239,12 +240,10 @@ void set_the_entries (char *address, char *login, char *password, char *port,
 
 	gtk_toggle_button_set_active((GtkToggleButton*)hope, secure);
 #ifdef CONFIG_COMPRESS
-	gtk_option_menu_set_history(GTK_OPTION_MENU(compress_menu), compress);
-	select_compressor(NULL, GINT_TO_POINTER((int)compress));
+	gtk_combo_box_set_active(GTK_COMBO_BOX(compress_menu), compress);
 #endif
 #ifdef CONFIG_CIPHER
-	gtk_option_menu_set_history(GTK_OPTION_MENU(cipher_menu), cipher);
-	select_cipher(NULL, GINT_TO_POINTER((int)cipher));
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cipher_menu), cipher);
 #endif
 }
 
@@ -451,41 +450,67 @@ static void open_bookmark(GtkWidget *widget, gpointer data)
 	close(bm);
 }
 
-static void destroy_bookmark_item (GtkWidget *item, char *file)
-{
+/*
+ * Bookmark dropdown bookkeeping. Each combo entry maps to either a
+ * filesystem bookmark (file != NULL) or a built-in (builtin_idx
+ * 1..4). The GArray is stashed on the combo via g_object_set_data_full
+ * so it (and the strdup'd file strings) get freed when the combo is
+ * destroyed.
+ */
+typedef struct {
+	int   builtin_idx;
+	char *file;
+} BookmarkEntry;
 
-	if(file) {
-		g_free(file);
+static void
+bookmark_entries_free (gpointer data)
+{
+	GArray *a = data;
+	guint i;
+	if (!a)
+		return;
+	for (i = 0; i < a->len; i++) {
+		BookmarkEntry *e = &g_array_index (a, BookmarkEntry, i);
+		g_free (e->file);
 	}
+	g_array_free (a, TRUE);
 }
 
-static void list_bookmarks(GtkWidget *menu)
+static void
+bookmark_combo_changed (GtkComboBox *combo, gpointer user_data)
+{
+	GArray *entries = g_object_get_data (G_OBJECT (combo), "entries");
+	int idx = gtk_combo_box_get_active (combo);
+	BookmarkEntry *e;
+
+	(void) user_data;
+	if (!entries || idx < 0 || (guint) idx >= entries->len)
+		return;
+	e = &g_array_index (entries, BookmarkEntry, idx);
+	if (e->builtin_idx)
+		builtin_bookmark (NULL, GINT_TO_POINTER (e->builtin_idx));
+	else if (e->file)
+		open_bookmark (NULL, e->file);
+}
+
+static void list_bookmarks (GtkWidget *combo, GArray *entries)
 {
 	struct dirent *ent;
-	char *file;
-	char *path = g_strdup_printf("%s/.hx/bookmarks/", getenv("HOME"));
-	DIR *dir = opendir(path);
-	GtkWidget *item;
+	char *path = g_strdup_printf ("%s/.hx/bookmarks/", getenv ("HOME"));
+	DIR *dir = opendir (path);
 
-
-	if(dir) {
-		while((ent = readdir(dir)))	{
-			if(*ent->d_name != '.')		{
-				file = g_strdup(ent->d_name);
-				item = gtk_menu_item_new_with_label(file);
-				gtk_menu_append(GTK_MENU(menu), item);
-				g_signal_connect(GTK_OBJECT(item), "activate", G_CALLBACK(open_bookmark), file);
-				g_signal_connect(GTK_OBJECT(item), "destroy", G_CALLBACK(destroy_bookmark_item), file);
+	if (dir) {
+		while ((ent = readdir (dir))) {
+			if (*ent->d_name != '.') {
+				BookmarkEntry e = { 0, g_strdup (ent->d_name) };
+				gtk_combo_box_text_append_text (
+					GTK_COMBO_BOX_TEXT (combo), ent->d_name);
+				g_array_append_val (entries, e);
 			}
 		}
-		closedir(dir);
-
-
+		closedir (dir);
 	}
-	item = gtk_menu_item_new();
-	gtk_menu_append(GTK_MENU(menu), item);
-
-	g_free(path);
+	g_free (path);
 }
 
 static void cancel_save(GtkWidget *widget, gpointer data)
@@ -657,26 +682,24 @@ static void builtin_bookmark(GtkWidget *widget, gpointer data)
 }
 
 #ifdef CONFIG_COMPRESS
-void select_compressor(GtkWidget *compress_item, gpointer data)
+static void compress_combo_changed (GtkComboBox *combo, gpointer data)
 {
-	int i = GPOINTER_TO_INT(data);
-
-//	if(i >= 0 && valid_compressors[i-1]) {
-		gtk_object_remove_data(GTK_OBJECT(compress_menu), "compress");
-		g_object_set_data(G_OBJECT(compress_menu), "compress", GINT_TO_POINTER(i));
-//	}
+	int i = gtk_combo_box_get_active (combo);
+	(void) data;
+	if (i < 0)
+		return;
+	g_object_set_data (G_OBJECT (combo), "compress", GINT_TO_POINTER (i));
 }
 #endif
 
 #ifdef CONFIG_CIPHER
-void select_cipher(GtkWidget *compress_item, gpointer data)
+static void cipher_combo_changed (GtkComboBox *combo, gpointer data)
 {
-	int i = GPOINTER_TO_INT(data);
-
-//	if(i >= 0 && valid_ciphers[i-1]) {
-	gtk_object_remove_data(GTK_OBJECT(cipher_menu), "cipher");
-	g_object_set_data(G_OBJECT(cipher_menu), "cipher", GINT_TO_POINTER(i));
-//	}
+	int i = gtk_combo_box_get_active (combo);
+	(void) data;
+	if (i < 0)
+		return;
+	g_object_set_data (G_OBJECT (combo), "cipher", GINT_TO_POINTER (i));
 }
 #endif
 
@@ -691,23 +714,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	GtkWidget *pass_label;
 #ifdef CONFIG_COMPRESS
 	GtkWidget *compress_label;
-	GtkWidget *compress_item;
-	GtkWidget *compressmenu;
 #endif
 #ifdef CONFIG_CIPHER
 	GtkWidget *cipher_label;
-	GtkWidget *cipher_item;
-	GtkWidget *ciphermenu;
 #endif
 	GtkWidget *button_connect, *button_cancel;
 	GtkWidget *bookmarkmenu;
-	GtkWidget *bookmarkmenu_menu;
 	GtkWidget *hbuttonbox1;
 	GtkWidget *save_button;
- 	GtkWidget *built_in1;
-  	GtkWidget *built_in2;
-	GtkWidget *built_in3;
-	GtkWidget *built_in4;
 	GtkWidget *port_label;
 	session *sess = data;
 
@@ -778,23 +792,19 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_label_set_justify(GTK_LABEL(compress_label), GTK_JUSTIFY_LEFT);
 	gtk_misc_set_alignment(GTK_MISC(compress_label), 0, 0.5);
 
-	compress_menu = gtk_option_menu_new();
+	compress_menu = gtk_combo_box_text_new ();
 	gtk_table_attach(GTK_TABLE(table1), compress_menu, 1, 2, 4, 5, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	compressmenu = gtk_menu_new();
-	compress_item = gtk_menu_item_new_with_label("NONE");
-	gtk_menu_append(GTK_MENU(compressmenu), compress_item);
-	g_signal_connect(GTK_OBJECT(compress_item), "activate", G_CALLBACK(select_compressor), GINT_TO_POINTER(0));
+	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (compress_menu), "NONE");
 	{
 		int i;
-		
-		for(i = 0; valid_compressors[i]; i++) {
-			compress_item = gtk_menu_item_new_with_label(valid_compressors[i]);
-			gtk_menu_append(GTK_MENU(compressmenu), compress_item);
-			g_signal_connect(GTK_OBJECT(compress_item), "activate", G_CALLBACK(select_compressor), GINT_TO_POINTER(i+1));			
-		}
+		for (i = 0; valid_compressors[i]; i++)
+			gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (compress_menu),
+			                                valid_compressors[i]);
 	}
-	gtk_option_menu_set_menu(GTK_OPTION_MENU(compress_menu), compressmenu);
+	g_signal_connect (compress_menu, "changed",
+	                  G_CALLBACK (compress_combo_changed), NULL);
+	gtk_combo_box_set_active (GTK_COMBO_BOX (compress_menu), 0);
 #endif
 
 #ifdef CONFIG_CIPHER
@@ -805,23 +815,19 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_label_set_justify(GTK_LABEL(cipher_label), GTK_JUSTIFY_LEFT);
 	gtk_misc_set_alignment(GTK_MISC(cipher_label), 0, 0.5);
 
-	cipher_menu = gtk_option_menu_new();
+	cipher_menu = gtk_combo_box_text_new ();
 	gtk_table_attach(GTK_TABLE(table1), cipher_menu, 1, 2, 5, 6, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	ciphermenu = gtk_menu_new();
-	cipher_item = gtk_menu_item_new_with_label("NONE");
-	gtk_menu_append(GTK_MENU(ciphermenu), cipher_item);
-	g_signal_connect(GTK_OBJECT(cipher_item), "activate", G_CALLBACK(select_cipher), GINT_TO_POINTER(0));
+	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cipher_menu), "NONE");
 	{
 		int i;
-		
-		for(i = 0; valid_ciphers[i]; i++) {
-			cipher_item = gtk_menu_item_new_with_label(valid_ciphers[i]);
-			gtk_menu_append(GTK_MENU(ciphermenu), cipher_item);
-;			g_signal_connect(GTK_OBJECT(cipher_item), "activate", G_CALLBACK(select_cipher), GINT_TO_POINTER(i+1));			
-		}
+		for (i = 0; valid_ciphers[i]; i++)
+			gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cipher_menu),
+			                                valid_ciphers[i]);
 	}
-	gtk_option_menu_set_menu(GTK_OPTION_MENU(cipher_menu), ciphermenu);
+	g_signal_connect (cipher_menu, "changed",
+	                  G_CALLBACK (cipher_combo_changed), NULL);
+	gtk_combo_box_set_active (GTK_COMBO_BOX (cipher_menu), 0);
 #endif
 
 	address_entry = gtk_entry_new();
@@ -854,28 +860,30 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 
-	bookmarkmenu = gtk_option_menu_new();
+	bookmarkmenu = gtk_combo_box_text_new ();
 	gtk_table_attach(GTK_TABLE(table1), bookmarkmenu, 4, 5, 0, 1,
 			 (GtkAttachOptions)0,
 			 (GtkAttachOptions)0, 0, 0);
 
-	bookmarkmenu_menu = gtk_menu_new();
-	list_bookmarks(bookmarkmenu_menu);
- 	built_in1 = gtk_menu_item_new_with_label("Hotline Communications");
-	built_in2 = gtk_menu_item_new_with_label("CafeLinux");
-	built_in3 = gtk_menu_item_new_with_label("GtkHx");
-	built_in4 = gtk_menu_item_new_with_label("SiN Grafix");
-	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in1);
-	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in2);
-	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in3);
-	gtk_menu_append(GTK_MENU(bookmarkmenu_menu), built_in4);
+	{
+		static const char *const builtin_names[] = {
+			"Hotline Communications", "CafeLinux", "GtkHx", "SiN Grafix"
+		};
+		GArray *entries = g_array_new (FALSE, FALSE, sizeof (BookmarkEntry));
+		int i;
 
-	g_signal_connect(GTK_OBJECT(built_in1), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(1));
-	g_signal_connect(GTK_OBJECT(built_in2), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(2));
-	g_signal_connect(GTK_OBJECT(built_in3), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(3));
-	g_signal_connect(GTK_OBJECT(built_in4), "activate", G_CALLBACK(builtin_bookmark), GINT_TO_POINTER(4));
-
-	gtk_option_menu_set_menu(GTK_OPTION_MENU(bookmarkmenu), bookmarkmenu_menu);
+		list_bookmarks (bookmarkmenu, entries);
+		for (i = 0; i < 4; i++) {
+			BookmarkEntry e = { i + 1, NULL };
+			gtk_combo_box_text_append_text (
+				GTK_COMBO_BOX_TEXT (bookmarkmenu), builtin_names[i]);
+			g_array_append_val (entries, e);
+		}
+		g_object_set_data_full (G_OBJECT (bookmarkmenu), "entries",
+		                        entries, bookmark_entries_free);
+		g_signal_connect (bookmarkmenu, "changed",
+		                  G_CALLBACK (bookmark_combo_changed), NULL);
+	}
 
 	hbuttonbox1 = gtk_hbutton_box_new();
 	gtk_box_pack_start(GTK_BOX(vbox1), hbuttonbox1, 1, 1, 0);

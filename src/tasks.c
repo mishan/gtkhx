@@ -557,7 +557,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	stopbtn = gtk_button_new();
 	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], kick_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(stopbtn), pix);
 	gtk_tooltips_set_tip(tooltips, stopbtn, _("Stop Task"), 0);
 	g_signal_connect(GTK_OBJECT(stopbtn), "clicked",
@@ -567,7 +567,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	gobtn = gtk_button_new();
 	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], start_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(gobtn), pix);
 	gtk_tooltips_set_tip(tooltips, gobtn, _("Start Task"), 0);
 	g_signal_connect(GTK_OBJECT(gobtn), "clicked",
@@ -577,7 +577,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	upbtn = gtk_button_new();
 	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], up_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	gtk_tooltips_set_tip(tooltips, upbtn, _("Move Xfer Up in Queue"), 0);
 	g_signal_connect(GTK_OBJECT(upbtn), "clicked", G_CALLBACK(task_up), 
@@ -588,7 +588,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	dnbtn = gtk_button_new();
 	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], down_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(dnbtn), pix);
 	gtk_tooltips_set_tip(tooltips, dnbtn, _("Move Xfer Down in Queue"), 0);
 	g_signal_connect(GTK_OBJECT(dnbtn), "clicked", G_CALLBACK(task_dn), 

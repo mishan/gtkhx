@@ -156,7 +156,7 @@ void create_about_window ()
 
     icon = gdk_pixmap_create_from_xpm_d (frmAbout->window, &mask,
 										 &frmAbout->style->white, gtkhx_xpm);
-    pixmap = gtk_pixmap_new(icon, mask);
+    pixmap = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (frame), pixmap);
 
     g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */

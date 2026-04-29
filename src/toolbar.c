@@ -151,7 +151,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 connect_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (connect_btn), pix);
 	gtk_tooltips_set_tip(tooltips, connect_btn, _("Connect"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -163,7 +163,7 @@ void create_toolbar_window (session *sess)
 										 &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 tracker_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (tracker_btn), pix);
 	gtk_tooltips_set_tip(tooltips, tracker_btn, _("Tracker"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -174,7 +174,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 options_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (options_btn), pix);
 	gtk_tooltips_set_tip(tooltips, options_btn, _("Options"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -186,7 +186,7 @@ void create_toolbar_window (session *sess)
 										&mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										news_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(news_btn), pix);
 	gtk_tooltips_set_tip(tooltips, news_btn, _("News"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -198,7 +198,7 @@ void create_toolbar_window (session *sess)
 										&mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										newscat_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(news15_btn), pix);
 	gtk_tooltips_set_tip(tooltips, news15_btn, _("News (1.5+)"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -209,7 +209,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										files_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(files_btn), pix);
 	gtk_tooltips_set_tip(tooltips, files_btn, _("Files"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -220,7 +220,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										users_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(userlist_btn), pix);
 	gtk_tooltips_set_tip(tooltips, userlist_btn, _("Users"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -230,7 +230,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_chat_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], chat_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(chat_btn), pix);
 	gtk_tooltips_set_tip(tooltips, chat_btn, _("Chat"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -242,7 +242,7 @@ void create_toolbar_window (session *sess)
 										&mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										postnews_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(post_btn), pix);
 	gtk_tooltips_set_tip(tooltips, post_btn, _("Post"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -253,7 +253,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 tasks_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (tasks_btn), pix);
 	gtk_tooltips_set_tip(tooltips, tasks_btn, _("Tasks"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -264,7 +264,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										info_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(about_btn), pix);
 	gtk_tooltips_set_tip(tooltips, about_btn, _("About"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -275,7 +275,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 kick_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (disconnect_btn),  pix);
 	gtk_tooltips_set_tip(tooltips, disconnect_btn, _("Disconnect"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -286,7 +286,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 quit_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER(quit_btn), pix);
 	gtk_tooltips_set_tip(tooltips, quit_btn, _("Quit"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -298,7 +298,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 newuser_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (usernew_btn),  pix);
 	gtk_tooltips_set_tip(tooltips, usernew_btn, _("New User"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -309,7 +309,7 @@ void create_toolbar_window (session *sess)
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 edituser_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
     gtk_container_add (GTK_CONTAINER (usermod_btn),  pix);
 	gtk_tooltips_set_tip(tooltips, usermod_btn, _("Edit User"), 0);
 	icon = 0, pix = 0, mask = 0;

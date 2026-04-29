@@ -416,7 +416,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d(tracker_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										refresh_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 	g_signal_connect(GTK_OBJECT(refreshbtn), "clicked",
@@ -429,7 +429,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d(tracker_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										connect_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(connbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 

@@ -1396,7 +1396,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_object_set_data(G_OBJECT(msg_btn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(msg_btn), pix);
 	g_signal_connect(GTK_OBJECT(msg_btn), "clicked", 
 					   G_CALLBACK(open_message_btn), gchat->userlist);
@@ -1408,7 +1408,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 kick_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(kick_btn), pix);
 	g_signal_connect(GTK_OBJECT(kick_btn), "clicked", 
 					   G_CALLBACK(user_kick_btn), gchat->userlist);
@@ -1420,7 +1420,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL], 
 										 info_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(info_btn), pix);
 	g_signal_connect(GTK_OBJECT(info_btn), "clicked", 
 					   G_CALLBACK(user_info_btn), gchat->userlist);
@@ -1435,7 +1435,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										&mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										ban_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(ban_btn), pix);
 	gtk_tooltips_set_tip(tooltips, ban_btn, _("Ban"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -1448,7 +1448,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 chat_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(chat_btn), pix);
 	icon = 0, pix = 0, mask = 0;
 
@@ -1460,7 +1460,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
 										ignore_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(igno_btn), pix);
 
 	topframe = gtk_frame_new(0);

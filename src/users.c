@@ -732,7 +732,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_object_set_data(G_OBJECT(msgbtn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(msgbtn), pix);
 	g_signal_connect(GTK_OBJECT(msgbtn), "clicked",
 					   G_CALLBACK(open_message_btn), users_list);
@@ -744,7 +744,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
 										 kick_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(kickbtn), pix);
 	g_signal_connect(GTK_OBJECT(kickbtn), "clicked",
 					   G_CALLBACK(user_kick_btn), users_list);
@@ -756,7 +756,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
 										 info_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(infobtn), pix);
 	g_signal_connect(GTK_OBJECT(infobtn), "clicked",
 					   G_CALLBACK(user_info_btn), users_list);
@@ -769,7 +769,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(user_ban_btn), users_list);
 	icon = gdk_pixmap_create_from_xpm_d(users_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL], ban_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(banbtn), pix);
 	gtk_tooltips_set_tip(tooltips, banbtn, _("Ban"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -782,7 +782,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
 										 chat_xpm);
-    pix = gtk_pixmap_new(icon, mask);
+    pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(chatbtn), pix);
 	icon = 0, pix = 0, mask = 0;
 
@@ -794,7 +794,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = gdk_pixmap_create_from_xpm_d(users_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL],
 										ignore_xpm);
-	pix = gtk_pixmap_new(icon, mask);
+	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(ignobtn), pix);
 
 	gtk_widget_set_sensitive(msgbtn, FALSE);
