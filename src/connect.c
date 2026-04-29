@@ -24,6 +24,7 @@
 #include <gtk/gtk.h>
 #include <dirent.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include "hx.h"
 #include "chat.h"

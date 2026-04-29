@@ -59,7 +59,7 @@ void gtk_threads_main() {
   gtk_calls not made by the main thread should be wrapped between
   gtk_thread_enter and gtk_thread_leave
 */
-void gtk_threads_enter(b){
+void gtk_threads_enter(int b){
 	char c;
 	debug("gtkthreads: enter\n");
 

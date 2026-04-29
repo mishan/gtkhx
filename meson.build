@@ -20,6 +20,7 @@ add_project_arguments(
   '-D_REENTRANT',
   '-DGETTEXT_PACKAGE="@0@"'.format(meson.project_name()),
   '-DLOCALEDIR="@0@"'.format(get_option('prefix') / get_option('localedir')),
+  '-DPREFIX="@0@"'.format(get_option('prefix')),
   language : 'c',
 )
 
