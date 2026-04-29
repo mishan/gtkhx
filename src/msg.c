@@ -146,7 +146,7 @@ static void msg_update_trans (GtkWidget *win, GdkEventConfigure *event, gpointer
 	GtkWidget *xtext = data;
 
 	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(xtext), 1);
+		gtk_xtext_refresh(GTK_XTEXT(xtext));
 	}
 
 }
@@ -207,20 +207,17 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	msg->history = history_new();
 
 	msg->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	msg->outputbuf = gtk_xtext_new(0,0);
-
-	gtk_xtext_set_palette (GTK_XTEXT (msg->outputbuf), colors);
-	gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font_desc, 0);
-#ifdef USE_GDK_PIXBUF
-	GTK_XTEXT(msg->outputbuf)->tint_red = gtkhx_prefs.tint_red;
-	GTK_XTEXT(msg->outputbuf)->tint_green = gtkhx_prefs.tint_green;
-	GTK_XTEXT(msg->outputbuf)->tint_blue = gtkhx_prefs.tint_blue;
-#endif
+	{
+		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+		msg->outputbuf = gtk_xtext_new (colors, 0);
+		gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
+		g_free (fontname);
+	}
 	GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(msg->outputbuf)->urlcheck_function = word_check;
 	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
 
-	gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), 0, gtkhx_prefs.trans_xtext, 1);
+	gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), NULL);
 	msg->vscroll = gtk_vscrollbar_new(GTK_XTEXT(msg->outputbuf)->adj);
 	msg->inputbuf = gtk_text_view_new();
 

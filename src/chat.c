@@ -327,11 +327,11 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 		new_text = g_malloc(len+12);
 		timecpy(new_text);
 		memcpy(new_text +11, chat, len);
-		gtk_xtext_append(GTK_XTEXT(text), new_text, len+11);
+		gtk_xtext_append(GTK_XTEXT(text)->buffer, new_text, len+11, 0);
 		g_free(new_text);
 	}
 	else {
-		gtk_xtext_append(GTK_XTEXT(text), chat, len);
+		gtk_xtext_append(GTK_XTEXT(text)->buffer, chat, len, 0);
 	}
 }
 
@@ -889,7 +889,7 @@ static void chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 	}
 
 	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
+		gtk_xtext_refresh(GTK_XTEXT(gchat->output));
 	}
 }
 
@@ -936,16 +936,17 @@ void create_chat(session *sess)
 
 	gchat = g_malloc(sizeof(struct gtkhx_chat));
 
-	text = gtk_xtext_new(0,0);
-	gtk_xtext_set_palette (GTK_XTEXT (text), colors);
-	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font_desc, 0);
-	gtk_xtext_set_background(GTK_XTEXT(text), NULL, gtkhx_prefs.trans_xtext, 1);
+	{
+		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+		text = gtk_xtext_new (colors, 0);
+		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
+		g_free (fontname);
+	}
+	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
 	GTK_WIDGET_UNSET_FLAGS(text, GTK_CAN_FOCUS);
-#ifdef USE_GDK_PIXBUF
-	GTK_XTEXT(text)->tint_red = gtkhx_prefs.tint_red;
-	GTK_XTEXT(text)->tint_green = gtkhx_prefs.tint_green;
-	GTK_XTEXT(text)->tint_blue = gtkhx_prefs.tint_blue;
-#endif
+	/* Phase 2.6: tint_red/green/blue dropped — HexChat's xtext doesn't
+	 * carry the tinted-transparency feature.  trans_xtext is honored
+	 * only as a "draw the root window through" toggle now. */
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
@@ -1122,19 +1123,17 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 		sess->gchat_list->next = gchat;
 	}
 
-	text = gtk_xtext_new(0,0);
-	gtk_xtext_set_palette(GTK_XTEXT(text), colors);
-	gtk_xtext_set_font(GTK_XTEXT(text), gtkhx_font_desc, 0);
-#ifdef USE_GDK_PIXBUF
-	GTK_XTEXT(text)->tint_red = gtkhx_prefs.tint_red;
-	GTK_XTEXT(text)->tint_green = gtkhx_prefs.tint_green;
-	GTK_XTEXT(text)->tint_blue = gtkhx_prefs.tint_blue;
-#endif
+	{
+		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+		text = gtk_xtext_new (colors, 0);
+		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
+		g_free (fontname);
+	}
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
 
-	gtk_xtext_set_background(GTK_XTEXT(text), 0, gtkhx_prefs.trans_xtext, 1);
+	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
 	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
 
 	subject = gtk_entry_new();
@@ -1265,7 +1264,7 @@ void pchat_update_trans (GtkWidget *win, GdkEventConfigure *event,
 	GtkWidget *xtext = data;
 
 	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(xtext), 1);
+		gtk_xtext_refresh(GTK_XTEXT(xtext));
 	}
 
 }
@@ -1521,7 +1520,7 @@ void hx_clear_chat(struct htlc_conn *htlc, guint32 cid, int subj)
 	session *sess = &the_session;
 	struct gtkhx_chat *gchat = gchat_with_cid(sess, cid);
 
-	gtk_xtext_clear(GTK_XTEXT(gchat->output));
+	gtk_xtext_clear(GTK_XTEXT(gchat->output)->buffer, 0);
 	if(gtkhx_prefs.geo.chat.open) {
 		if(subj) {
 			gtk_entry_set_text(GTK_ENTRY(gchat->subject), "");

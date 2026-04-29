@@ -13,5 +13,5 @@ extern void hx_news15_fldr_list(struct htlc_conn *htlc, char *path);
 
 
 extern void open_news15(GtkWidget *widget, session *sess);
-struct gnews_folder *gfnews_list;
+extern struct gnews_folder *gfnews_list;
 #endif

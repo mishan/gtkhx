@@ -190,22 +190,26 @@ void reinit_gtktexts (session *sess)
 	if(gtkhx_prefs.geo.news.open) {
 		gtkhx_apply_text_style(sess->news_text);
 	}
-	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		if(gchat->cid == 0 && !gtkhx_prefs.geo.chat.open)
-			continue;
-		gtk_xtext_set_font(GTK_XTEXT(gchat->output), gtkhx_font_desc, 0);
-		gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
-		if(gchat->input) {
-			gtkhx_apply_text_style(gchat->input);
+	{
+		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
+			if(gchat->cid == 0 && !gtkhx_prefs.geo.chat.open)
+				continue;
+			gtk_xtext_set_font(GTK_XTEXT(gchat->output), fontname);
+			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
+			if(gchat->input) {
+				gtkhx_apply_text_style(gchat->input);
+			}
+			if(gchat->subject) {
+				gtkhx_apply_text_style(gchat->subject);
+			}
 		}
-		if(gchat->subject) {
-			gtkhx_apply_text_style(gchat->subject);
+		for(msg = sess->msg_list; msg; msg = msg->prev) {
+			gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), fontname);
+			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf));
+			gtkhx_apply_text_style(msg->inputbuf);
 		}
-	}
-	for(msg = sess->msg_list; msg; msg = msg->prev) {
-		gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), gtkhx_font_desc, 0);
-		gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
-		gtkhx_apply_text_style(msg->inputbuf);
+		g_free (fontname);
 	}
 }
 
@@ -217,18 +221,16 @@ static void changed_xtext (session *sess)
 		struct gtkhx_chat *gchat;
 		struct msgwin *msg;
 		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			gtk_xtext_set_background(GTK_XTEXT(gchat->output), 0,
-				gtkhx_prefs.trans_xtext, 1);
-				GTK_XTEXT(gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
-				GTK_XTEXT(gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
-			gtk_xtext_refresh(GTK_XTEXT(gchat->output), 1);
+			gtk_xtext_set_background(GTK_XTEXT(gchat->output), NULL);
+			GTK_XTEXT(gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
+			GTK_XTEXT(gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
+			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
 		}
 		for(msg = sess->msg_list; msg; msg = msg->prev) {
-			gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), 0,
-				gtkhx_prefs.trans_xtext, 1);
-				GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
-				GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf), 1);
+			gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), NULL);
+			GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
+			GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
+			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf));
 		}
 	}
 }
@@ -916,6 +918,10 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 }
 
 #ifdef USE_GDK_PIXBUF
+/* Phase 2.6: HexChat's xtext does not implement tinted transparency, so
+ * the slider value is now stored to gtkhx_prefs only (preserved across
+ * sessions for forward-compatibility) and the widget refresh just
+ * re-renders to pick up any other pref changes. */
 static void
 settings_slider_cb (GtkAdjustment * adj, int *value)
 {
@@ -924,17 +930,10 @@ settings_slider_cb (GtkAdjustment * adj, int *value)
 
 	*value = adj->value;
 	for(gchat = the_session.gchat_list; gchat; gchat = gchat->prev) {
-		GTK_XTEXT (gchat->output)->tint_red = gtkhx_prefs.tint_red;
-		GTK_XTEXT (gchat->output)->tint_green = gtkhx_prefs.tint_green;
-		GTK_XTEXT (gchat->output)->tint_blue = gtkhx_prefs.tint_blue;
-		gtk_xtext_refresh (GTK_XTEXT (gchat->output), gtkhx_prefs.trans_xtext);
+		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
 	}
 	for(msg = msg_list; msg; msg = msg->prev) {
-		GTK_XTEXT (msg->outputbuf)->tint_red = gtkhx_prefs.tint_red;
-		GTK_XTEXT (msg->outputbuf)->tint_green = gtkhx_prefs.tint_green;
-		GTK_XTEXT (msg->outputbuf)->tint_blue = gtkhx_prefs.tint_blue;
-		gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf),
-						   gtkhx_prefs.trans_xtext);
+		gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
 	}
 }
 static void
