@@ -137,12 +137,12 @@ static void server_connect (GtkWidget *widget, gpointer data)
 	secure = gtk_toggle_button_get_active((GtkToggleButton*)hope);
 	if(secure) {
 #ifdef CONFIG_COMPRESS
-		char compress = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(compress_menu), "compress"));
+		char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
 		char *compress_algo = NULL;
 		int colen = 0;
 #endif
 #ifdef CONFIG_CIPHER
-		char cipher = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(cipher_menu), "cipher"));
+		char cipher = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cipher_menu), "cipher"));
 		char *cipher_algo = NULL;
 		int cilen = 0;
 #endif
@@ -278,7 +278,7 @@ static void convert_bookmark(GtkWidget *widget, gpointer data)
 	if(!widget) {
 		return;
 	}
-	dialog = g_object_get_data(GTK_OBJECT(widget), "dialog");
+	dialog = g_object_get_data(G_OBJECT(widget), "dialog");
 	memset(zeros, 0, 256);
 
 	if(!bm) {
@@ -369,7 +369,7 @@ static void prompt_conversion (char *name)
 	cancelbtn = gtk_button_new_with_label("No");
 
     g_signal_connect (GTK_OBJECT (okbutton), "clicked", G_CALLBACK(convert_bookmark), path);
-	g_object_set_data(GTK_OBJECT(okbutton), "dialog", dialog);
+	g_object_set_data(G_OBJECT(okbutton), "dialog", dialog);
 
 
 	g_signal_connect_swapped(GTK_OBJECT(cancelbtn), "clicked", (GCallback)gtk_widget_destroy, GTK_OBJECT(dialog));
@@ -490,27 +490,27 @@ static void list_bookmarks(GtkWidget *menu)
 
 static void cancel_save(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "dialog");
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
 	gtk_widget_destroy(dialog);
 }
 
 /* cut down this tree with a herring */
 static void bookmark_save(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *name_entry = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "name");
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "dialog");
+	GtkWidget *name_entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "name");
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
 	char *server = gtk_entry_get_text(GTK_ENTRY(address_entry));
 	char *login = gtk_entry_get_text(GTK_ENTRY(login_entry));
 	char *pass = gtk_entry_get_text(GTK_ENTRY(password_entry));
 	char *port = gtk_entry_get_text(GTK_ENTRY(port_entry));
 	char secure = gtk_toggle_button_get_active((GtkToggleButton*)hope);
 #ifdef CONFIG_COMPRESS
-	char compress = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(compress_menu), "compress"));
+	char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
 #else
 	char compress = 0;
 #endif
 #ifdef CONFIG_CIPHER
-	char cipher = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(cipher_menu), "cipher"));
+	char cipher = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cipher_menu), "cipher"));
 #else
 	char cipher = 0;
 #endif
@@ -626,10 +626,10 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(hbox), name_entry, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), ok, 0,0, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), cancel, 0,0, 0);
-	g_object_set_data(GTK_OBJECT(cancel), "dialog", dialog);
+	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
 	g_signal_connect(GTK_OBJECT(cancel), "clicked", G_CALLBACK(cancel_save), 0);
-	g_object_set_data(GTK_OBJECT(ok), "name", name_entry);
-	g_object_set_data(GTK_OBJECT(ok), "dialog", dialog);
+	g_object_set_data(G_OBJECT(ok), "name", name_entry);
+	g_object_set_data(G_OBJECT(ok), "dialog", dialog);
 	g_signal_connect(GTK_OBJECT(ok), "clicked", G_CALLBACK(bookmark_save), 0);
 
 
@@ -663,7 +663,7 @@ void select_compressor(GtkWidget *compress_item, gpointer data)
 
 //	if(i >= 0 && valid_compressors[i-1]) {
 		gtk_object_remove_data(GTK_OBJECT(compress_menu), "compress");
-		g_object_set_data(GTK_OBJECT(compress_menu), "compress", GINT_TO_POINTER(i));
+		g_object_set_data(G_OBJECT(compress_menu), "compress", GINT_TO_POINTER(i));
 //	}
 }
 #endif
@@ -675,7 +675,7 @@ void select_cipher(GtkWidget *compress_item, gpointer data)
 
 //	if(i >= 0 && valid_ciphers[i-1]) {
 	gtk_object_remove_data(GTK_OBJECT(cipher_menu), "cipher");
-	g_object_set_data(GTK_OBJECT(cipher_menu), "cipher", GINT_TO_POINTER(i));
+	g_object_set_data(G_OBJECT(cipher_menu), "cipher", GINT_TO_POINTER(i));
 //	}
 }
 #endif

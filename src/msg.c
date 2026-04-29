@@ -87,7 +87,7 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 	GtkTextBuffer *buf;
 	guint k, s;
 	HIST_ENTRY *hent = NULL;
-	struct msgwin *msg = g_object_get_data(GTK_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
 
 	text = GTK_TEXT_VIEW(widget);
 	buf = gtk_text_view_get_buffer(text);
@@ -228,8 +228,8 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(msg->inputbuf), TRUE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(msg->inputbuf), GTK_WRAP_WORD);
 
-	g_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
-	g_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
+	g_object_set_data(G_OBJECT(msg->inputbuf), "msg", msg);
+	g_object_set_data(G_OBJECT(msg->inputbuf), "sess", &the_session);
 	/* Note: GtkTextView has no "activate" signal — Return is dispatched
 	   from msg_input_key_press, which calls msg_input_activate(). */
 	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event",
@@ -243,7 +243,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 
 void destroy_msgwin (GtkWidget *widget, gpointer data)
 {
-	struct msgwin *msg = g_object_get_data(GTK_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
 	msgwin_delete(msg);
 	gtk_widget_destroy(widget);
 }
@@ -294,7 +294,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 	gtk_widget_show_all(msg->window);
 
-	g_object_set_data(GTK_OBJECT(msg->window), "msg", msg);
+	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
 	g_signal_connect(GTK_OBJECT(msg->window), "delete_event", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
@@ -356,7 +356,7 @@ void msg_output (char *name, guint16 uid, char *buf)
 
 void broadcastok(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "dialog");
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
 	gtk_widget_destroy(dialog);
 }
 
@@ -392,7 +392,7 @@ void broadcastmsg(char *text)
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), scroll, TRUE, TRUE , 0);
 	gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
-	g_object_set_data(GTK_OBJECT(okbtn), "dialog", dialog);
+	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
 	gtk_widget_show_all(dialog);

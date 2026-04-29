@@ -199,13 +199,13 @@ menu_quick_item_with_callback (session *sess, void *callback, char *label,
 	gtk_menu_append (GTK_MENU (menu), item);
 	g_signal_connect (GTK_OBJECT (item), "activate",
 							  G_CALLBACK (callback), arg);
-	g_object_set_data(GTK_OBJECT(item), "sess", sess);
+	g_object_set_data(G_OBJECT(item), "sess", sess);
 	gtk_widget_show (item);
 }
 
 static void user_kick_menu (GtkWidget *menu, struct hx_user *user)
 {
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 	if (!user)
 		return;
@@ -214,7 +214,7 @@ static void user_kick_menu (GtkWidget *menu, struct hx_user *user)
 
 static void user_ban_menu (GtkWidget *menu, struct hx_user *user)
 {
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 	if (!user)
 		return;
@@ -223,7 +223,7 @@ static void user_ban_menu (GtkWidget *menu, struct hx_user *user)
 
 static void user_igno_menu (GtkWidget *menu, struct hx_user *user)
 {
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 	if(!user) {
 		return;
@@ -236,7 +236,7 @@ static void user_igno_menu (GtkWidget *menu, struct hx_user *user)
 
 static void user_unigno_menu (GtkWidget *menu, struct hx_user *user)
 {
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 	if(!user) {
 		return;
@@ -249,7 +249,7 @@ static void user_unigno_menu (GtkWidget *menu, struct hx_user *user)
 
 static void user_info_menu(GtkWidget *menu, struct hx_user *user)
 {
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 	if (!user)
 		return;
@@ -277,7 +277,7 @@ static void user_pchat_menu(GtkWidget *menu, struct hx_user *user)
 {
 	int with_cid = 0;
 	struct gtkhx_chat *gchat;
-	session *sess = g_object_get_data(GTK_OBJECT(menu), "sess");
+	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
 
 
 	if(!user)
@@ -302,7 +302,7 @@ static void user_popup(struct hx_user *user, GdkEventButton *event,
 	char buf[128];
 
 	sub = menu_quick_sub(user->name, menu);
-	g_object_set_data(GTK_OBJECT(menu), "sess", sess);
+	g_object_set_data(G_OBJECT(menu), "sess", sess);
 
 	g_snprintf(buf, sizeof(buf), _("Icon: %d"), user->icon);
 	menu_quick_item(buf, sub, 1, 0);
@@ -425,7 +425,7 @@ void user_info_btn (GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	GtkWidget *users_list = data;
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
 	if (!users_list)
 		return;
@@ -440,7 +440,7 @@ void user_kick_btn (GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	GtkWidget *users_list = data;
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
 	if (!users_list)
 		return;
@@ -454,7 +454,7 @@ void user_igno_btn (GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	GtkWidget *users_list = data;
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
 	if(!users_list) {
 		return;
@@ -473,7 +473,7 @@ void user_ban_btn (GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	GtkWidget *users_list = data;
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
 	if(!users_list)
 		return;
@@ -486,12 +486,12 @@ void user_ban_btn (GtkWidget *widget, gpointer data)
 
 static void invite_u_to_chat(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 														 "dialog");
-	GtkWidget *list = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 													   "list");
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
-	guint32 *cid = g_object_get_data(GTK_OBJECT(widget), "cid");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
+	guint32 *cid = g_object_get_data(G_OBJECT(widget), "cid");
 	char *titles[2] = {};
 
 	gtk_clist_get_text(GTK_CLIST(list), *cid, 0, titles);
@@ -503,10 +503,10 @@ static void invite_u_to_chat(GtkWidget *widget, gpointer data)
 
 static void create_new_chat(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 														 "dialog");
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
-	guint32 *cid = g_object_get_data(GTK_OBJECT(widget), "cid");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
+	guint32 *cid = g_object_get_data(G_OBJECT(widget), "cid");
 	guint16 *uid = data;
 
 	g_free(cid);
@@ -542,11 +542,11 @@ static void prompt_chat(session *sess, guint16 _uid)
 	gtk_container_border_width (GTK_CONTAINER(dialog), 5);
 
 	invite = gtk_button_new_with_label(_("Invite"));
-	g_object_set_data(GTK_OBJECT(invite), "cid", cid);
+	g_object_set_data(G_OBJECT(invite), "cid", cid);
 
-	g_object_set_data(GTK_OBJECT(invite), "dialog", dialog);
+	g_object_set_data(G_OBJECT(invite), "dialog", dialog);
 
-	g_object_set_data(GTK_OBJECT(invite), "sess", sess);
+	g_object_set_data(G_OBJECT(invite), "sess", sess);
 	GTK_WIDGET_SET_FLAGS(invite, GTK_CAN_DEFAULT);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
@@ -557,9 +557,9 @@ static void prompt_chat(session *sess, guint16 _uid)
 	new = gtk_button_new_with_label(_("New"));
 	g_signal_connect(GTK_OBJECT(new), "clicked",
 					   G_CALLBACK(create_new_chat), uid);
-	g_object_set_data(GTK_OBJECT(new), "cid", cid);
-	g_object_set_data(GTK_OBJECT(new), "dialog", dialog);
-	g_object_set_data(GTK_OBJECT(new), "sess", sess);
+	g_object_set_data(G_OBJECT(new), "cid", cid);
+	g_object_set_data(G_OBJECT(new), "dialog", dialog);
+	g_object_set_data(G_OBJECT(new), "sess", sess);
 
 	btnhbox = gtk_hbox_new(0,0);
 
@@ -587,7 +587,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 
 		gtk_clist_append(GTK_CLIST(list), entry);
 	}
-	g_object_set_data(GTK_OBJECT(invite), "list", list);
+	g_object_set_data(G_OBJECT(invite), "list", list);
 	g_signal_connect(GTK_OBJECT(invite), "clicked",
 					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
 
@@ -608,7 +608,7 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 	int with_cid = 0;
 	struct gtkhx_chat *gchat;
 	GtkWidget *users_list = data;
-	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
 	if(!users_list)
 		return;
@@ -738,7 +738,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(users_window_scroll), users_list);
 
 	msgbtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(msgbtn), "sess", sess);
+	g_object_set_data(G_OBJECT(msgbtn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
 	pix = gtk_pixmap_new(icon, mask);
@@ -749,7 +749,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = 0, pix = 0, mask = 0;
 
 	kickbtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(kickbtn), "sess", sess);
+	g_object_set_data(G_OBJECT(kickbtn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
 										 kick_xpm);
@@ -761,7 +761,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = 0, pix = 0, mask = 0;
 
 	infobtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(infobtn), "sess", sess);
+	g_object_set_data(G_OBJECT(infobtn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
 										 info_xpm);
@@ -773,7 +773,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = 0, pix = 0, mask = 0;
 
 	banbtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(banbtn), "sess", sess);
+	g_object_set_data(G_OBJECT(banbtn), "sess", sess);
 	g_signal_connect(GTK_OBJECT(banbtn), "clicked",
 					   G_CALLBACK(user_ban_btn), users_list);
 	icon = gdk_pixmap_create_from_xpm_d(users_window->window, &mask,
@@ -784,7 +784,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = 0, pix = 0, mask = 0;
 
 	chatbtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(chatbtn), "sess", sess);
+	g_object_set_data(G_OBJECT(chatbtn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, chatbtn, _("Private Chat"), 0);
 	g_signal_connect(GTK_OBJECT(chatbtn), "clicked",
 					   G_CALLBACK(user_chat_btn), users_list);
@@ -796,7 +796,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = 0, pix = 0, mask = 0;
 
 	ignobtn = gtk_button_new();
-	g_object_set_data(GTK_OBJECT(ignobtn), "sess", sess);
+	g_object_set_data(G_OBJECT(ignobtn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, ignobtn, _("Ignore"), 0);
 	g_signal_connect(GTK_OBJECT(ignobtn), "clicked",
 					   G_CALLBACK(user_igno_btn), users_list);

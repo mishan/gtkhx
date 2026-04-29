@@ -270,7 +270,7 @@ void delete_gfnews(struct gnews_folder *gfnews)
 
 void destroy_gfnews_browser(GtkWidget *widget, gpointer data)
 {
-	struct gnews_folder *gfnews = g_object_get_data(GTK_OBJECT(widget), 
+	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget), 
 													  "gfnews");
 
 	delete_gfnews(gfnews);
@@ -287,9 +287,9 @@ static void gfnews_reload_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 static void gfnews_mkdir(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 														"entry");
-	struct gnews_folder *gfnews = g_object_get_data(GTK_OBJECT(widget),
+	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
 													  "gfnews");
 	char *name = gtk_entry_get_text(GTK_ENTRY(entry));
 	char pathname[MAXPATHLEN];
@@ -303,9 +303,9 @@ static void gfnews_mkdir(GtkWidget *widget, gpointer data)
 }
 static void gfnews_mkcat(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 														"entry");
-	struct gnews_folder *gfnews = g_object_get_data(GTK_OBJECT(widget),
+	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
 													  "gfnews");
 	char *name = gtk_entry_get_text(GTK_ENTRY(entry));
 
@@ -337,8 +337,8 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(GTK_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(GTK_OBJECT(okBtn), "gfnews", gfnews);
+	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
+	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
 	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(gfnews_mkdir),
 					   dialog);
 
@@ -378,8 +378,8 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(GTK_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(GTK_OBJECT(okBtn), "gfnews", gfnews);
+	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
+	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
 	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(gfnews_mkcat),
 					   dialog);
 
@@ -535,7 +535,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	style = gtk_widget_get_style(news_window);
 	gtk_widget_set_size_request(news_window, 264, 400);
 	gtk_window_set_title(GTK_WINDOW(news_window), gfnews->path);
-	g_object_set_data(GTK_OBJECT(news_window), "gfnews", gfnews);
+	g_object_set_data(G_OBJECT(news_window), "gfnews", gfnews);
 	g_signal_connect(GTK_OBJECT(news_window), "delete_event", 
 					   G_CALLBACK(destroy_gfnews_browser), 0);
 
@@ -759,7 +759,7 @@ void delete_gcnews(struct gnews_catalog *gcnews)
 
 static void destroy_gcnews_browser(GtkWidget *widget, gpointer data)
 {
-	struct gnews_catalog *gcnews = g_object_get_data(GTK_OBJECT(widget), 
+	struct gnews_catalog *gcnews = g_object_get_data(G_OBJECT(widget), 
 													   "gcnews");
 
 	delete_gcnews(gcnews);
@@ -777,10 +777,10 @@ void newsc_clicked (GtkCTree *ctree, GList *node, gint column, struct gnews_cata
 
 void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
-	GtkWidget *text = g_object_get_data(GTK_OBJECT(btn), "text");
-	GtkWidget *reply = g_object_get_data(GTK_OBJECT(btn), "reply");
-	GtkWidget *subject = g_object_get_data(GTK_OBJECT(btn), "subject");
-	GtkWidget *window = g_object_get_data(GTK_OBJECT(btn), "window");
+	GtkWidget *text = g_object_get_data(G_OBJECT(btn), "text");
+	GtkWidget *reply = g_object_get_data(G_OBJECT(btn), "reply");
+	GtkWidget *subject = g_object_get_data(G_OBJECT(btn), "subject");
+	GtkWidget *window = g_object_get_data(G_OBJECT(btn), "window");
 	char *textbuf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
 	guint32 postid = atoi(gtk_entry_get_text(GTK_ENTRY(reply)));
 	char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
@@ -892,10 +892,10 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	hbox = gtk_hbox_new(1, 0);
 
 	post = gtk_button_new_with_label(_("Post"));
-	g_object_set_data(GTK_OBJECT(post), "text", text);
-	g_object_set_data(GTK_OBJECT(post), "reply", inreplyto);
-	g_object_set_data(GTK_OBJECT(post), "subject", subject);
-	g_object_set_data(GTK_OBJECT(post), "window", window);
+	g_object_set_data(G_OBJECT(post), "text", text);
+	g_object_set_data(G_OBJECT(post), "reply", inreplyto);
+	g_object_set_data(G_OBJECT(post), "subject", subject);
+	g_object_set_data(G_OBJECT(post), "window", window);
 	g_signal_connect(GTK_OBJECT(post), "clicked", G_CALLBACK(news15_do_reply), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
@@ -914,9 +914,9 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 
 void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
-	GtkWidget *text = g_object_get_data(GTK_OBJECT(btn), "text");
-	GtkWidget *subject = g_object_get_data(GTK_OBJECT(btn), "subject");
-	GtkWidget *window = g_object_get_data(GTK_OBJECT(btn), "window");
+	GtkWidget *text = g_object_get_data(G_OBJECT(btn), "text");
+	GtkWidget *subject = g_object_get_data(G_OBJECT(btn), "subject");
+	GtkWidget *window = g_object_get_data(G_OBJECT(btn), "window");
 	GtkTextBuffer *tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text));
 	GtkTextIter tstart, tend;
 	char *textbuf;
@@ -982,9 +982,9 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	hbox = gtk_hbox_new(1, 0);
 
 	post = gtk_button_new_with_label(_("Post"));
-	g_object_set_data(GTK_OBJECT(post), "text", text);
-	g_object_set_data(GTK_OBJECT(post), "subject", subject);
-	g_object_set_data(GTK_OBJECT(post), "window", window);
+	g_object_set_data(G_OBJECT(post), "text", text);
+	g_object_set_data(G_OBJECT(post), "subject", subject);
+	g_object_set_data(G_OBJECT(post), "window", window);
 	g_signal_connect(GTK_OBJECT(post), "clicked", G_CALLBACK(news15_do_post), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
@@ -1053,7 +1053,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	style = gtk_widget_get_style(news_window);
 	gtk_widget_set_size_request(news_window, 570, 375); 
 	gtk_window_set_title(GTK_WINDOW(news_window), path);
-	g_object_set_data(GTK_OBJECT(news_window), "gcnews", gcnews);
+	g_object_set_data(G_OBJECT(news_window), "gcnews", gcnews);
 	g_signal_connect(GTK_OBJECT(news_window), "delete_event", 
 					   G_CALLBACK(destroy_gcnews_browser), 0);
 

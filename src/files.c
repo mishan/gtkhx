@@ -219,7 +219,7 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 static void put_file(GtkWidget *widget, gpointer data)
 {
 	char *lpath = gtk_file_selection_get_filename(GTK_FILE_SELECTION(data));
-	GtkWidget *files_list = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *files_list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 															 "files_list");
 	struct gfile_list *gfl;
 	char rpath[4096];
@@ -251,7 +251,7 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 	g_signal_connect(GTK_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
 					   "clicked", G_CALLBACK(put_file), file_dialog);
 
-	g_object_set_data(GTK_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
+	g_object_set_data(G_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
 						"files_list", data);
 
 	gtk_widget_show_all(file_dialog);
@@ -427,7 +427,7 @@ static void file_reload_btn (GtkWidget *widget, gpointer data)
 static void close_files_window (GtkWidget *widget, gpointer data)
 {
 	struct gfile_list *gfl = (struct gfile_list *)g_object_get_data(
-		GTK_OBJECT(widget), "gfl");
+		G_OBJECT(widget), "gfl");
 
 	gfl_delete(gfl);
 	gtk_widget_destroy(widget);
@@ -435,9 +435,9 @@ static void close_files_window (GtkWidget *widget, gpointer data)
 
 static void makeDir(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 														"entry");
-	GtkWidget *files_list = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget),
+	GtkWidget *files_list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
 															 "hlist");
 	char pathname[MAXPATHLEN];
 	struct gfile_list *gfl = gfl_with_hlist(files_list);
@@ -472,8 +472,8 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(GTK_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(GTK_OBJECT(okBtn), "hlist", data);
+	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
+	g_object_set_data(G_OBJECT(okBtn), "hlist", data);
 	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(makeDir),
 					   dialog);
 
@@ -593,7 +593,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_size_request(files_window, 264, 400);
 
 	gfl = gfl_new(files_window, files_list, path);
-	g_object_set_data(GTK_OBJECT(files_window), "gfl", gfl);
+	g_object_set_data(G_OBJECT(files_window), "gfl", gfl);
 	g_signal_connect(GTK_OBJECT(files_window), "delete_event",
 			   G_CALLBACK(close_files_window), files_list);
 
@@ -1042,9 +1042,9 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 
 void set_name_comment(GtkWidget *btn, gpointer data)
 {
-	GtkWidget *name_entry = g_object_get_data(GTK_OBJECT(btn), "name");
-	GtkWidget *comments_text = g_object_get_data(GTK_OBJECT(btn), "comments");
-	char *path = g_object_get_data(GTK_OBJECT(btn), "path");
+	GtkWidget *name_entry = g_object_get_data(G_OBJECT(btn), "name");
+	GtkWidget *comments_text = g_object_get_data(G_OBJECT(btn), "comments");
+	char *path = g_object_get_data(G_OBJECT(btn), "path");
 	char *name = gtk_entry_get_text(GTK_ENTRY(name_entry));
 	char *comments = gtk_editable_get_chars(GTK_EDITABLE(comments_text), 0, -1);
 	char *file;
@@ -1137,9 +1137,9 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	gtk_box_pack_start(GTK_BOX(vbox), comments_text, 0, 0, 4);
 	gtk_box_pack_start(GTK_BOX(vbox), savebtn, 0, 0, 0);
 
-	g_object_set_data(GTK_OBJECT(savebtn), "name", name_entry);
-	g_object_set_data(GTK_OBJECT(savebtn), "comments", comments_text);
-	g_object_set_data(GTK_OBJECT(savebtn), "path", path);
+	g_object_set_data(G_OBJECT(savebtn), "name", name_entry);
+	g_object_set_data(G_OBJECT(savebtn), "comments", comments_text);
+	g_object_set_data(G_OBJECT(savebtn), "path", path);
 	g_signal_connect(GTK_OBJECT(savebtn), "clicked", 
 					   G_CALLBACK(set_name_comment), NULL);
 
