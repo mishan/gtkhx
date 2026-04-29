@@ -1100,7 +1100,8 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
 
 	name_entry = gtk_entry_new();
-	comments_text = gtk_text_new(0,0);
+	comments_text = gtk_text_view_new();
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(comments_text), GTK_WRAP_WORD);
 	vbox = gtk_vbox_new(0,0);
 	name_hbox = gtk_hbox_new(0,0);
 	savebtn = gtk_button_new_with_label(_("Save"));
@@ -1117,9 +1118,11 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	size_label = gtk_label_new(text);
 	name_label = gtk_label_new(_("Name: "));
 	gtk_entry_set_text(GTK_ENTRY(name_entry), name);
-	gtk_text_insert(GTK_TEXT(comments_text), 0, 0, 0, comments,
-					strlen(comments));
-	gtk_text_set_editable(GTK_TEXT(comments_text), TRUE);
+	{
+		GtkTextBuffer *cbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(comments_text));
+		gtk_text_buffer_set_text(cbuf, comments, strlen(comments));
+	}
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(comments_text), TRUE);
 	g_free(text);
 
 	gtk_container_add(GTK_CONTAINER(window), vbox);

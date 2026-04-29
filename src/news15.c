@@ -875,12 +875,16 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtk_table_attach(GTK_TABLE(table), textlbl, 0, 1, 2, 3, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	hbox = gtk_hbox_new(0, 0);
-	text = gtk_text_new(0, 0);
-	gtk_editable_set_editable(GTK_EDITABLE(text), 1);
-	vscroll = gtk_vscrollbar_new(GTK_TEXT(text)->vadj);
-
-	gtk_box_pack_start(GTK_BOX(hbox), text, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
+	text = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD);
+	{
+		GtkWidget *text_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(text_scroll),
+		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(text_scroll), text);
+		gtk_box_pack_start(GTK_BOX(hbox), text_scroll, 1, 1, 0);
+	}
 
 	gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 10);
@@ -913,11 +917,18 @@ void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *text = g_object_get_data(GTK_OBJECT(btn), "text");
 	GtkWidget *subject = g_object_get_data(GTK_OBJECT(btn), "subject");
 	GtkWidget *window = g_object_get_data(GTK_OBJECT(btn), "window");
-	char *textbuf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
-	char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
+	GtkTextBuffer *tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text));
+	GtkTextIter tstart, tend;
+	char *textbuf;
+	const char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
+
+	gtk_text_buffer_get_start_iter(tbuf, &tstart);
+	gtk_text_buffer_get_end_iter(tbuf, &tend);
+	textbuf = gtk_text_buffer_get_text(tbuf, &tstart, &tend, FALSE);
 
 	hx_news15_post_thread(&the_session.htlc, gcnews->path, subjectbuf,
 						  0, textbuf);
+	g_free(textbuf);
 
 	hx_news15_cat_list(&the_session.htlc, gcnews);
 	gtk_widget_destroy(window);
@@ -954,12 +965,16 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtk_table_attach(GTK_TABLE(table), textlbl, 0, 1, 1, 2, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	hbox = gtk_hbox_new(0, 0);
-	text = gtk_text_new(0, 0);
-	gtk_editable_set_editable(GTK_EDITABLE(text), 1);
-	vscroll = gtk_vscrollbar_new(GTK_TEXT(text)->vadj);
-
-	gtk_box_pack_start(GTK_BOX(hbox), text, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
+	text = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD);
+	{
+		GtkWidget *post_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(post_scroll),
+		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(post_scroll), text);
+		gtk_box_pack_start(GTK_BOX(hbox), post_scroll, 1, 1, 0);
+	}
 
 	gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 10);
@@ -1138,7 +1153,10 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_box_pack_start (GTK_BOX (vbox2), scrolledwindow1, TRUE, TRUE, 0);
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow1), GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 	
-	news_text = gtk_text_new (NULL, NULL);
+	news_text = gtk_text_view_new ();
+	gtk_text_view_set_editable (GTK_TEXT_VIEW (news_text), FALSE);
+	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (news_text), FALSE);
+	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (news_text), GTK_WRAP_WORD);
 	gtk_container_add (GTK_CONTAINER (scrolledwindow1), news_text);
 	gtk_widget_show_all(news_window);
 
@@ -1256,8 +1274,10 @@ void output_news_thread(struct news_post *post)
 	}
 	
 	/* output the contents of the post */
- 	gtk_text_insert(GTK_TEXT(gcnews->news_text), 0, 0, 0, post->buf, 
-					strlen(post->buf));
+	{
+		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(gcnews->news_text));
+		gtk_text_buffer_set_text(buf, post->buf, strlen(post->buf));
+	}
 }
 
 void open_news15(GtkWidget *widget, session *sess)

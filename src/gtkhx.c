@@ -387,8 +387,8 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 	if(len > 0) {
 		GtkWidget *info_window;
 		GtkWidget *info_text;
-		GtkWidget *vscroll;
-		GtkWidget *hbox;
+		GtkWidget *info_scroll;
+		GtkTextBuffer *info_buf;
 		char infotitle[45];
 
 		info_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -397,15 +397,18 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		g_snprintf(infotitle, sizeof(infotitle), _("User Info: %s (%u)"), nam, uid);
 		gtk_window_set_title(GTK_WINDOW(info_window), infotitle);
 
-		hbox = gtk_hbox_new(0, 0);
-		info_text = gtk_text_new(0, 0);
-		vscroll = gtk_vscrollbar_new(GTK_TEXT(info_text)->vadj);
+		info_text = gtk_text_view_new();
+		gtk_text_view_set_editable(GTK_TEXT_VIEW(info_text), FALSE);
+		gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(info_text), FALSE);
+		info_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(info_text));
+		gtk_text_buffer_set_text(info_buf, info, len);
 
-		gtk_box_pack_start(GTK_BOX(hbox), info_text, 1, 1, 0);
-		gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
+		info_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(info_scroll),
+		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(info_scroll), info_text);
+		gtk_container_add(GTK_CONTAINER(info_window), info_scroll);
 
-		gtk_container_add(GTK_CONTAINER(info_window), hbox);
-		gtk_text_insert(GTK_TEXT(info_text), 0, 0, 0, info, len);
 		init_keyaccel(info_window);
 		gtk_widget_show_all(info_window);
 	}
@@ -440,33 +443,35 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	GtkWidget *disagreebtn;
 	GtkWidget *vbox;
 	GtkWidget *hbox;
-	GtkWidget *hboxtwo;
-	GtkWidget *vscroller;
+	GtkWidget *agree_scroll;
+	GtkTextBuffer *agree_buf;
 
 	agreementwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_set_size_request(agreementwin, 400, 500);
 	gtk_window_set_title(GTK_WINDOW(agreementwin), _("Agreement"));
-	agreetext = gtk_text_new(FALSE, 0);
-	gtk_widget_set_size_request(agreetext, 382, 480);
+	agreetext = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(agreetext), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(agreetext), FALSE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(agreetext), GTK_WRAP_WORD);
+	agree_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(agreetext));
+	gtk_text_buffer_set_text(agree_buf, agreement, len);
+	agree_scroll = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(agree_scroll),
+	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(agree_scroll), agreetext);
 	agreebtn = gtk_button_new_with_label(_("Agree"));
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
 	vbox = gtk_vbox_new(FALSE, 0);
 	hbox = gtk_hbox_new(FALSE, 0);
-	hboxtwo = gtk_hbox_new(FALSE, 0);
-	vscroller = gtk_vscrollbar_new(GTK_TEXT(agreetext)->vadj);
-	g_signal_connect(GTK_OBJECT(agreebtn), "clicked", 
+	g_signal_connect(GTK_OBJECT(agreebtn), "clicked",
 					   G_CALLBACK(concurrence), sess);
-	g_signal_connect(GTK_OBJECT(disagreebtn), "clicked", 
+	g_signal_connect(GTK_OBJECT(disagreebtn), "clicked",
 					   G_CALLBACK(disagreement), sess);
 	gtk_container_add(GTK_CONTAINER(agreementwin), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), hboxtwo, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hboxtwo), agreetext, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hboxtwo), vscroller, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(vbox), agree_scroll, TRUE, TRUE, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), agreebtn, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), disagreebtn, FALSE, FALSE, 0);
-	gtk_text_insert(GTK_TEXT(agreetext),  gtkhx_font, NULL, NULL, agreement, 
-					len);
 	init_keyaccel(agreementwin);
 	gtk_widget_show_all(agreementwin);
 	sess->agreementwin = agreementwin;

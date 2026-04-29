@@ -104,15 +104,15 @@ void create_about_window ()
     GtkWidget *lblCopyright;
     GtkWidget *scrolledwindow;
     GtkWidget *txtCredits;
+    GtkTextBuffer *credits_buf;
     GtkWidget *lblCredits;
     GtkWidget *pixmap;
     GdkPixmap *icon;
     GdkBitmap *mask;
-    GdkFont   *fixed_font;
     GtkAdjustment *adj;
     char version [50];
 
-    frmAbout = gtk_window_new (GTK_WINDOW_DIALOG);
+    frmAbout = gtk_window_new (GTK_WINDOW_TOPLEVEL);
     gtk_widget_set_size_request (frmAbout, 482, 450);
     gtk_window_set_title (GTK_WINDOW (frmAbout), _("About GtkHx"));
     gtk_window_set_policy (GTK_WINDOW (frmAbout), FALSE, FALSE, FALSE);
@@ -181,14 +181,13 @@ void create_about_window ()
 									GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 
 
-    fixed_font = gdk_font_load (CREDITS_FONT);
-
-    txtCredits = gtk_text_new (NULL, NULL);
+    txtCredits = gtk_text_view_new ();
+    gtk_text_view_set_editable (GTK_TEXT_VIEW (txtCredits), FALSE);
+    gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (txtCredits), FALSE);
     gtk_container_add (GTK_CONTAINER (scrolledwindow), txtCredits);
     gtk_widget_realize (txtCredits);
-    gtk_text_insert (GTK_TEXT (txtCredits), fixed_font, NULL, NULL, 
-					 (get_credits()), -1);
-    gtk_text_set_point(GTK_TEXT(txtCredits), 0);
+    credits_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (txtCredits));
+    gtk_text_buffer_set_text (credits_buf, get_credits(), -1);
 
     adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW(
 												   scrolledwindow));
@@ -203,17 +202,10 @@ void create_about_window ()
 }
 
 /* This is an internally used function to set notebook tab widgets. */
-static void set_notebook_tab (GtkWidget *notebook, gint page_num, 
+static void set_notebook_tab (GtkWidget *notebook, gint page_num,
 							  GtkWidget *widget)
 {
-    GtkNotebookPage *page;
     GtkWidget *notebook_page;
-    page = (GtkNotebookPage*) g_list_nth (GTK_NOTEBOOK (notebook)->children,
-										  page_num)->data;
-    notebook_page = page->child;
-    gtk_widget_ref (notebook_page);
-    gtk_notebook_remove_page (GTK_NOTEBOOK (notebook), page_num);
-    gtk_notebook_insert_page (GTK_NOTEBOOK (notebook), notebook_page,
-			      widget, page_num);
-    gtk_widget_unref (notebook_page);
+    notebook_page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), page_num);
+    gtk_notebook_set_tab_label (GTK_NOTEBOOK (notebook), notebook_page, widget);
 }

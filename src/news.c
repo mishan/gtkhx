@@ -61,7 +61,8 @@ void reload_news (GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if(gtkhx_prefs.geo.news.open) {
-		gtk_editable_delete_text(GTK_EDITABLE(sess->news_text), 0, -1);
+		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
+		gtk_text_buffer_set_text(buf, "", -1);
 		hx_get_news(&sess->htlc);
 	}
 }
@@ -106,11 +107,16 @@ static void post_news (GtkWidget *widget, gpointer data)
 	char *posttext;
 	session *sess = data;
 	int len;
+	GtkTextBuffer *buf;
+	GtkTextIter start, end;
 
-	posttext = gtk_editable_get_chars(GTK_EDITABLE(postprompt), 0, -1);
+	buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(postprompt));
+	gtk_text_buffer_get_start_iter(buf, &start);
+	gtk_text_buffer_get_end_iter(buf, &end);
+	posttext = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
 	len = strlen(posttext);
 	LF2CR(posttext, len);
-	if (posttext[len - 1] == '\r')
+	if (len > 0 && posttext[len - 1] == '\r')
 		posttext[len - 1] = 0;
 	hx_post_news(&sess->htlc, posttext, len);
 
@@ -134,16 +140,22 @@ create_post_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(GTK_OBJECT(post_window), "delete_event",
 			   G_CALLBACK(close_post_window), 0);
 
-	postprompt = gtk_text_new(0, 0);
-	gtk_text_set_editable(GTK_TEXT(postprompt), 1);
-	gtk_text_set_word_wrap(GTK_TEXT(postprompt), 1);
+	postprompt = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(postprompt), TRUE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(postprompt), GTK_WRAP_WORD);
 	gtk_widget_set_style(postprompt, gtktext_style);
-	gtk_widget_set_size_request(postprompt, 0, 260);
 
+	{
+		GtkWidget *post_scroll = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(post_scroll),
+		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+		gtk_container_add(GTK_CONTAINER(post_scroll), postprompt);
+		gtk_widget_set_size_request(post_scroll, 0, 260);
 
-	vbox = gtk_vbox_new(0, 0);
-	gtk_container_add(GTK_CONTAINER(post_window), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), postprompt, 0, 0, 0);
+		vbox = gtk_vbox_new(0, 0);
+		gtk_container_add(GTK_CONTAINER(post_window), vbox);
+		gtk_box_pack_start(GTK_BOX(vbox), post_scroll, 0, 0, 0);
+	}
 
 	hbox = gtk_hbox_new(0, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
@@ -166,7 +178,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 
 void create_news_window (session *sess)
 {
-	GtkWidget *vscrollbar;
+	GtkWidget *news_scroll;
 	GtkWidget *hbox, *vbox;
 	GtkWidget *posthbox;
 	GtkWidget *btn_frame, *news_frame;
@@ -247,14 +259,17 @@ void create_news_window (session *sess)
 	gtk_box_pack_start(GTK_BOX(posthbox), reloadButton, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), news_frame, 1, 1, 0);
 
-	news_text = gtk_text_new(0, 0);
-	gtk_editable_set_editable(GTK_EDITABLE(news_text), 0);
-	gtk_text_set_word_wrap(GTK_TEXT(news_text), 1);
+	news_text = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(news_text), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(news_text), FALSE);
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(news_text), GTK_WRAP_WORD);
 	gtk_widget_set_style(news_text, gtktext_style);
-	gtk_box_pack_start(GTK_BOX(hbox), news_text, 1, 1, 0);
 
-	vscrollbar = gtk_vscrollbar_new(GTK_TEXT(news_text)->vadj);
-	gtk_box_pack_start(GTK_BOX(hbox), vscrollbar, 0, 0, 0);
+	news_scroll = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(news_scroll),
+	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(news_scroll), news_text);
+	gtk_box_pack_start(GTK_BOX(hbox), news_scroll, 1, 1, 0);
 	gtk_widget_set_sensitive(postButton, FALSE);
 	gtk_widget_set_sensitive(reloadButton, FALSE);
 	g_signal_connect(GTK_OBJECT(news_window), "configure_event", 
@@ -312,13 +327,19 @@ void output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 		return;
 	}
 
-	gtk_text_set_point(GTK_TEXT(sess->news_text), 0);
-	gtk_text_insert(GTK_TEXT(sess->news_text), 0, 0, 0, news, len);
+	{
+		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
+		GtkTextIter start;
+		gtk_text_buffer_get_start_iter(buf, &start);
+		gtk_text_buffer_insert(buf, &start, news, len);
+	}
 }
 
 void output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
 {
 	session *sess;
+	GtkTextBuffer *buf;
+	GtkTextIter end;
 
 	if(!gtkhx_prefs.geo.news.open)
 		return;
@@ -328,7 +349,9 @@ void output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
 		return;
 	}
 
-	gtk_text_insert(GTK_TEXT(sess->news_text), 0, 0, 0, news, len);
+	buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
+	gtk_text_buffer_get_end_iter(buf, &end);
+	gtk_text_buffer_insert(buf, &end, news, len);
 }
 
 

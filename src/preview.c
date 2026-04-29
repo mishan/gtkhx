@@ -52,19 +52,20 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 	struct hx_text_preview *tp = malloc(sizeof(struct hx_text_preview));
 	GtkWidget *window;
 	GtkWidget *text;
-	GtkWidget *vscroll;
-	GtkWidget *hbox;
+	GtkWidget *scroll;
 
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(window), p->name);
-	text = gtk_text_new(0,0);
-	vscroll = gtk_vscrollbar_new(GTK_TEXT(text)->vadj);
-	hbox = gtk_hbox_new(0,0);
+	text = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text), FALSE);
+	scroll = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(scroll), text);
 
 	gtk_widget_set_size_request(window, 400, 300);
-	gtk_box_pack_start(GTK_BOX(hbox), text, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), vscroll, 0, 0, 0);
-	gtk_container_add(GTK_CONTAINER(window), hbox);
+	gtk_container_add(GTK_CONTAINER(window), scroll);
 
 	gtk_widget_show_all(window);
 
@@ -79,8 +80,15 @@ static void hx_preview_text_output (struct hx_preview *p, char *buf, int len)
 {
 	struct hx_text_preview *tp = p->data;
 
-	CR2LF(buf, len);
-	gtk_text_insert(GTK_TEXT(tp->text), NULL, NULL, NULL, buf, len);
+	{
+		GtkTextBuffer *tbuf;
+		GtkTextIter end;
+
+		CR2LF(buf, len);
+		tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tp->text));
+		gtk_text_buffer_get_end_iter(tbuf, &end);
+		gtk_text_buffer_insert(tbuf, &end, buf, len);
+	}
 }
 
 struct hx_preview *hx_preview_new(char *creator, char *type, char *name)
