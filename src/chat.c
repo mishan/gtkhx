@@ -776,8 +776,8 @@ static void chat_input_key_press (GtkWidget *widget, GdkEventKey *event)
 	guint k, s;
 	char *p;
 	HIST_ENTRY *hent = NULL;
-	struct gtkhx_chat *gchat = gtk_object_get_data(GTK_OBJECT(widget), "gchat");
-	session *sess = gtk_object_get_data(GTK_OBJECT(widget), "sess");
+	struct gtkhx_chat *gchat = g_object_get_data(GTK_OBJECT(widget), "gchat");
+	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
 
 	text = GTK_TEXT(widget);
 
@@ -858,7 +858,7 @@ static void chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y, width, height;
 	struct gtkhx_chat *gchat = data;
-	session *sess = gtk_object_get_data(GTK_OBJECT(w), "sess");
+	session *sess = g_object_get_data(GTK_OBJECT(w), "sess");
 
 	gdk_window_get_root_origin(sess->chat_window->window, &x, &y);
 	gdk_window_get_size(sess->chat_window->window, &width, &height);
@@ -1053,8 +1053,8 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_style(gchat->input, gtktext_style);
 	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
 					   G_CALLBACK(chat_input_key_press), 0);
-	gtk_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
-	gtk_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
+	g_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
+	g_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
 	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
 	gtk_text_set_word_wrap(GTK_TEXT(gchat->input), 1);
 
@@ -1063,7 +1063,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(GTK_OBJECT(chat_window), "configure_event", 
 					   G_CALLBACK(chat_move), gchat);
 
-	gtk_object_set_data(GTK_OBJECT(chat_window), "sess", sess);
+	g_object_set_data(GTK_OBJECT(chat_window), "sess", sess);
 
 	gtk_widget_set_uposition(chat_window, gtkhx_prefs.geo.chat.xpos, 
 							 gtkhx_prefs.geo.chat.ypos);
@@ -1149,7 +1149,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 static void pchat_close (GtkWidget *widget, gpointer data)
 {
 	struct gtkhx_chat *gchat = data;
-	session *sess = gtk_object_get_data(GTK_OBJECT(widget), "sess");
+	session *sess = g_object_get_data(GTK_OBJECT(widget), "sess");
 
 	hx_part_chat(&sess->htlc, gchat->cid);
 	gchat_delete(sess, gchat);
@@ -1158,9 +1158,9 @@ static void pchat_close (GtkWidget *widget, gpointer data)
 
 static void join_chat(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)gtk_object_get_data(GTK_OBJECT(widget), 
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), 
 														 "dialog");
-	struct htlc_conn *htlc = gtk_object_get_data(GTK_OBJECT(widget), "htlc");
+	struct htlc_conn *htlc = g_object_get_data(GTK_OBJECT(widget), "htlc");
 
 	gtk_widget_destroy(dialog);
 	hx_chat_join(htlc, GPOINTER_TO_INT(data));
@@ -1189,7 +1189,7 @@ void hx_reject_chat(struct htlc_conn *htlc, guint32 _cid)
 
 void reject_chat(GtkWidget *btn, GtkWidget *dialog)
 {
-	guint32 cid = GPOINTER_TO_INT(gtk_object_get_data(GTK_OBJECT(btn), "cid"));
+	guint32 cid = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(btn), "cid"));
 
 	hx_reject_chat(&the_session.htlc, cid);
 	gtk_widget_destroy(dialog);
@@ -1212,14 +1212,14 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 
 	label = gtk_label_new(message);
 	join = gtk_button_new_with_label(_("Join"));
-	gtk_object_set_data(GTK_OBJECT(join), "dialog", dialog);
-	gtk_object_set_data(GTK_OBJECT(join), "htlc", htlc);
+	g_object_set_data(GTK_OBJECT(join), "dialog", dialog);
+	g_object_set_data(GTK_OBJECT(join), "htlc", htlc);
 	g_signal_connect(GTK_OBJECT(join), "clicked", G_CALLBACK(join_chat),
 					   GINT_TO_POINTER(cid));
 
 
 	cancel = gtk_button_new_with_label(_("Decline"));
-	gtk_object_set_data(GTK_OBJECT(cancel), "cid", GINT_TO_POINTER(cid));
+	g_object_set_data(GTK_OBJECT(cancel), "cid", GINT_TO_POINTER(cid));
 	g_signal_connect(GTK_OBJECT(cancel), "clicked", 
 					   G_CALLBACK(reject_chat), 
 					   GTK_OBJECT(dialog));
@@ -1288,7 +1288,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_widget_set_size_request(pchat_window, 700, 320);
 	gtk_window_set_policy(GTK_WINDOW(pchat_window), 1, 1, 0);
 
-	gtk_object_set_data(GTK_OBJECT(pchat_window), "sess", sess);
+	g_object_set_data(GTK_OBJECT(pchat_window), "sess", sess);
 	g_signal_connect(GTK_OBJECT(pchat_window), "destroy",
 					   G_CALLBACK(pchat_close), gchat);
 	title = g_strdup_printf("%s: 0x%08x", _("Private Chat"), chat->cid);
@@ -1340,8 +1340,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_widget_set_style(gchat->input, gtktext_style);
 	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event", 
 					   G_CALLBACK(chat_input_key_press), 0);
-	gtk_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
-	gtk_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
+	g_object_set_data(GTK_OBJECT(gchat->input), "sess", sess);
+	g_object_set_data(GTK_OBJECT(gchat->input), "gchat", gchat);
 	gtk_text_set_editable(GTK_TEXT(gchat->input), 1);
 	gtk_text_set_word_wrap(GTK_TEXT(gchat->input), 1);
 	gtk_box_pack_start(GTK_BOX(hbox), gchat->input, 1, 1, 0);
@@ -1373,7 +1373,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	}
 
 	msg_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(msg_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(msg_btn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
 	pix = gtk_pixmap_new(icon, mask);
@@ -1384,7 +1384,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = 0, pix = 0, mask = 0;
 
 	kick_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(kick_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(kick_btn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
 										 kick_xpm);
@@ -1396,7 +1396,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = 0, pix = 0, mask = 0;
 
 	info_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(info_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(info_btn), "sess", sess);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL], 
 										 info_xpm);
@@ -1408,7 +1408,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = 0, pix = 0, mask = 0;
 
 	ban_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(ban_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(ban_btn), "sess", sess);
 	g_signal_connect(GTK_OBJECT(ban_btn), "clicked", 
 					   G_CALLBACK(user_ban_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window,
@@ -1421,7 +1421,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = 0, pix = 0, mask = 0;
 
 	chat_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(chat_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(chat_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, chat_btn, _("Private Chat"), 0);
 	g_signal_connect(GTK_OBJECT(chat_btn), "clicked", 
 					   G_CALLBACK(user_chat_btn), gchat->userlist);
@@ -1433,7 +1433,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = 0, pix = 0, mask = 0;
 
 	igno_btn = gtk_button_new();
-	gtk_object_set_data(GTK_OBJECT(igno_btn), "sess", sess);
+	g_object_set_data(GTK_OBJECT(igno_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, igno_btn, _("Ignore"), 0);
 	g_signal_connect(GTK_OBJECT(igno_btn), "clicked", 
 					   G_CALLBACK(user_igno_btn), gchat->userlist);

@@ -155,7 +155,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	gtk_box_pack_start(GTK_BOX(vbox), pbar, 1, 1, 0);
 
 	listitem = gtk_list_item_new();
-	gtk_object_set_data(GTK_OBJECT(listitem), "gtsk", gtsk);
+	g_object_set_data(GTK_OBJECT(listitem), "gtsk", gtsk);
 	gtk_container_add(GTK_CONTAINER(listitem), vbox);
 
 	if (sess->gtklist) {
@@ -351,7 +351,7 @@ task_stop (GtkWidget *widget, gpointer data)
 	for(lp = GTK_LIST(sess->gtklist)->selection; lp; lp = next) {
 		next = lp->next;
 		listitem = (GtkWidget *)lp->data;
-		gtsk = (struct gtask *)gtk_object_get_data(GTK_OBJECT(listitem), "gtsk");
+		gtsk = (struct gtask *)g_object_get_data(GTK_OBJECT(listitem), "gtsk");
 
 
 		if (gtsk->htxf) {
@@ -399,7 +399,7 @@ task_up(GtkWidget *widget, gpointer data)
 		return;
 	}
 	listitem = sel->data;
-	gtsk = gtk_object_get_data(GTK_OBJECT(listitem), "gtsk");
+	gtsk = g_object_get_data(GTK_OBJECT(listitem), "gtsk");
 
 
 	if(!gtsk->htxf) {
@@ -442,7 +442,7 @@ static void task_dn(GtkWidget *widget, gpointer data)
 		return;
 	}
 	listitem = sel->data;
-	gtsk = gtk_object_get_data(GTK_OBJECT(listitem), "gtsk");
+	gtsk = g_object_get_data(GTK_OBJECT(listitem), "gtsk");
 
 
 	if(!gtsk->htxf) {
@@ -487,7 +487,7 @@ task_go (GtkWidget *widget, gpointer data)
 		return;
 	}
 	listitem = sel->data;
-	gtsk = (struct gtask *)gtk_object_get_data(GTK_OBJECT(listitem), "gtsk");
+	gtsk = (struct gtask *)g_object_get_data(GTK_OBJECT(listitem), "gtsk");
 	if (gtsk->htxf) {
 		xfer_go(gtsk->htxf);
 	}

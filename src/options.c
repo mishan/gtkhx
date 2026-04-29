@@ -832,7 +832,7 @@ void options_change (GtkWidget *widget, gpointer data)
 {
 	int i;
 
-	session *sess = gtk_object_get_data(GTK_OBJECT(options_window), "sess");
+	session *sess = g_object_get_data(GTK_OBJECT(options_window), "sess");
 
 	for (i=0; i != sizeof(cfgvars)/sizeof(cfgvars[0]); ++i)
 	{
@@ -918,7 +918,7 @@ void options_change (GtkWidget *widget, gpointer data)
 
 static void set_font (GtkWidget *btn, GtkWidget *fontsel)
 {
-	GtkWidget *entry = (GtkWidget *)gtk_object_get_data(GTK_OBJECT(btn),
+	GtkWidget *entry = (GtkWidget *)g_object_get_data(GTK_OBJECT(btn),
 														"entry");
 
 	gtk_entry_set_text(GTK_ENTRY(entry),
@@ -938,7 +938,7 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 							  "clicked", (GCallback) gtk_widget_destroy,
 							  GTK_OBJECT(fontsel));
 
-	gtk_object_set_data(GTK_OBJECT(
+	g_object_set_data(GTK_OBJECT(
 							GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
 						"entry", entry);
 	g_signal_connect(GTK_OBJECT(
@@ -1590,7 +1590,7 @@ settings_ctree_select (GtkWidget * ctree, GtkCTreeNode * node)
 	if (!GTK_CLIST (ctree)->selection)
 		return;
 
-	book = GTK_WIDGET (gtk_object_get_user_data (GTK_OBJECT (ctree)));
+	book = GTK_WIDGET (g_object_get_data (G_OBJECT (ctree), "user_data"));
 	page = (gint) gtk_ctree_node_get_row_data (GTK_CTREE (ctree), node);
 
 	gtk_notebook_set_page (GTK_NOTEBOOK (book), page);
@@ -1667,7 +1667,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
 	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
 	gtk_widget_set_size_request(dialog, 570, 400);
-	gtk_object_set_data(GTK_OBJECT(dialog), "sess", sess);
+	g_object_set_data(GTK_OBJECT(dialog), "sess", sess);
 	g_signal_connect_swapped (GTK_OBJECT (dialog), "delete_event",
 							   G_CALLBACK (close_options_window), 0);
 
@@ -1718,7 +1718,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_notebook_set_show_tabs (GTK_NOTEBOOK (book), FALSE);
 	gtk_notebook_set_show_border (GTK_NOTEBOOK (book), FALSE);
 	gtk_container_add (GTK_CONTAINER (frame), book);
-	gtk_object_set_user_data (GTK_OBJECT (ctree), book);
+	g_object_set_data (G_OBJECT (ctree), "user_data", book);
 	g_signal_connect (GTK_OBJECT (ctree), "tree_select_row",
 						G_CALLBACK (settings_ctree_select), NULL);
 	page_index = 0;

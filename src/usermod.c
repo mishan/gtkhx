@@ -192,7 +192,7 @@ static void useredit_open_close(GtkWidget *widget, gpointer data)
 
 static void useredit_open(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *loginentry = (GtkWidget *)gtk_object_get_data(GTK_OBJECT(widget), "login");
+	GtkWidget *loginentry = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "login");
 	char *login = gtk_entry_get_text(GTK_ENTRY(loginentry));
 
 	create_useredit_window(login, 0);
@@ -257,7 +257,7 @@ static void
 useredit_save (GtkWidget *widget, gpointer data)
 {
 	struct useredit_session *ues = (struct useredit_session *)data;
-	int new = GPOINTER_TO_INT(gtk_object_get_data(GTK_OBJECT(widget), "new"));
+	int new = GPOINTER_TO_INT(g_object_get_data(GTK_OBJECT(widget), "new"));
 
 
 	useredit_name_pass(ues->name_entry, ues->pass_entry, ues);
@@ -339,7 +339,7 @@ void create_useredit_window (char *login, int new)
 	btnhbox = gtk_hbox_new(0, 0);
 
 	wid = gtk_button_new_with_label(_("Save"));
-	gtk_object_set_data(GTK_OBJECT(wid), "new", GINT_TO_POINTER(new));
+	g_object_set_data(GTK_OBJECT(wid), "new", GINT_TO_POINTER(new));
 	g_signal_connect(GTK_OBJECT(wid), "clicked",
 			   G_CALLBACK(useredit_save), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
@@ -452,7 +452,7 @@ void useredit_open_dialog()
 	gtk_box_pack_start(GTK_BOX(hboxtwo), okbtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hboxtwo), cancelbtn, 0, 0, 0);
 
-	gtk_object_set_data(GTK_OBJECT(okbtn), "login", loginentry);
+	g_object_set_data(GTK_OBJECT(okbtn), "login", loginentry);
 	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(useredit_open), window);
 
 	g_signal_connect(GTK_OBJECT(cancelbtn), "clicked", G_CALLBACK(useredit_open_close), window);

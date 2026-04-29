@@ -85,7 +85,7 @@ static void msg_input_key_press (GtkWidget *widget, GdkEventKey *event)
 	guint point, len;
 	guint k, s;
 	HIST_ENTRY *hent = NULL;
-	struct msgwin *msg = gtk_object_get_data(GTK_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(GTK_OBJECT(widget), "msg");
 
 	text = GTK_TEXT(widget);
 
@@ -231,8 +231,8 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	gtk_text_set_editable(GTK_TEXT(msg->inputbuf), 1);
 	gtk_text_set_word_wrap(GTK_TEXT(msg->inputbuf), 1);
 
-	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
-	gtk_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
+	g_object_set_data(GTK_OBJECT(msg->inputbuf), "msg", msg);
+	g_object_set_data(GTK_OBJECT(msg->inputbuf), "sess", &the_session);
 	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event", 
 					   G_CALLBACK(msg_input_key_press), 0);
 	g_signal_connect(GTK_OBJECT(msg->inputbuf), "activate", 
@@ -246,7 +246,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 
 void destroy_msgwin (GtkWidget *widget, gpointer data)
 {
-	struct msgwin *msg = gtk_object_get_data(GTK_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(GTK_OBJECT(widget), "msg");
 	msgwin_delete(msg);
 	gtk_widget_destroy(widget);
 }
@@ -297,7 +297,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 	gtk_widget_show_all(msg->window);
 
-	gtk_object_set_data(GTK_OBJECT(msg->window), "msg", msg);
+	g_object_set_data(GTK_OBJECT(msg->window), "msg", msg);
 	g_signal_connect(GTK_OBJECT(msg->window), "delete_event", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
@@ -359,7 +359,7 @@ void msg_output (char *name, guint16 uid, char *buf)
 
 void broadcastok(GtkWidget *widget, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)gtk_object_get_data(GTK_OBJECT(widget), "dialog");
+	GtkWidget *dialog = (GtkWidget *)g_object_get_data(GTK_OBJECT(widget), "dialog");
 	gtk_widget_destroy(dialog);
 }
 
@@ -390,7 +390,7 @@ void broadcastmsg(char *text)
 	gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
 	gtk_text_insert(GTK_TEXT(textbox), 0, 0, 0, text, strlen(text));
-	gtk_object_set_data(GTK_OBJECT(okbtn), "dialog", dialog);
+	g_object_set_data(GTK_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
 	gtk_widget_show_all(dialog);
