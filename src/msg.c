@@ -262,7 +262,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	g_free(title);
 
 	gtk_widget_set_size_request(msg->window, 412, 280);
-	gtk_window_set_policy(GTK_WINDOW(msg->window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
 	gtk_container_set_border_width(GTK_CONTAINER(msg->window), 0);
 	hbox = gtk_hbox_new(0,0);
 	gtk_widget_set_size_request(hbox, 500, 400);

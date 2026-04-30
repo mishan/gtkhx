@@ -464,7 +464,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
 	entryHbox = gtk_hbox_new(0,0);
 
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
@@ -585,7 +585,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	files_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(files_window), "files", "GtkHx");
-	gtk_window_set_policy(GTK_WINDOW(files_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
 	gtk_widget_realize(files_window);
 	style = gtk_widget_get_style(files_window);
@@ -1084,7 +1084,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	char *text;
 
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_container_border_width (GTK_CONTAINER(window), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
 	g_signal_connect(window, "delete_event",
 					   (GCallback) gtk_widget_destroy, window);
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));

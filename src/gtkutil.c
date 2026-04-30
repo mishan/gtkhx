@@ -242,7 +242,7 @@ void error_dialog (char *title, char *msg)
     dialog = gtk_dialog_new();
 
     gtk_window_set_title(GTK_WINDOW(dialog), title);
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
     label = gtk_label_new (message);
     gtk_widget_set_size_request(dialog, 250, 200);
 

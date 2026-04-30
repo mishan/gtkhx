@@ -132,7 +132,7 @@ void create_toolbar_window (session *sess)
 	toolbar_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(toolbar_window), "toolbar", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(toolbar_window), "GtkHx");
-	gtk_window_set_policy(GTK_WINDOW(toolbar_window), 0, 0, 0);
+	gtk_window_set_resizable(GTK_WINDOW(toolbar_window), FALSE);
 	g_signal_connect(toolbar_window, "delete_event",
 			   G_CALLBACK(close_toolbar_window), 0);
 
@@ -324,7 +324,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(toolbar_window, "configure_event", G_CALLBACK(tool_move), 0);
 	g_signal_connect(toolbar_window, "delete_event", G_CALLBACK(quit_btn), 0);
 
-	gtk_widget_set_uposition(toolbar_window, gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
+	gtk_window_move(GTK_WINDOW(toolbar_window), gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
 
 	gtk_widget_show_all(toolbar_window);
 	init_keyaccel(toolbar_window);

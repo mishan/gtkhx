@@ -1051,7 +1051,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_wmclass(GTK_WINDOW(chat_window), "chat", "GtkHx");
 
 	gtk_widget_set_size_request(chat_window, 412, 280);
-	gtk_window_set_policy(GTK_WINDOW(chat_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(chat_window), TRUE);
 
 	g_signal_connect(chat_window, "destroy",
 					   G_CALLBACK(chat_close), gchat);
@@ -1125,8 +1125,8 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 	g_object_set_data(G_OBJECT(chat_window), "sess", sess);
 
-	gtk_widget_set_uposition(chat_window, gtkhx_prefs.geo.chat.xpos, 
-							 gtkhx_prefs.geo.chat.ypos);
+	gtk_window_move(GTK_WINDOW(chat_window), gtkhx_prefs.geo.chat.xpos,
+					gtkhx_prefs.geo.chat.ypos);
 	gtk_widget_set_size_request(chat_window, gtkhx_prefs.geo.chat.xsize, 
 						 gtkhx_prefs.geo.chat.ysize);
 
@@ -1264,7 +1264,7 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Chat Invitation"));
-	gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+	gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	message = g_strdup_printf("%s %s: 0x%08x", name,
 							  _("invites you to private chat"),  cid);
 
@@ -1344,7 +1344,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	style = gtk_widget_get_style(pchat_window);
 	gtk_widget_set_size_request(pchat_window, 700, 320);
-	gtk_window_set_policy(GTK_WINDOW(pchat_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(pchat_window), TRUE);
 
 	g_object_set_data(G_OBJECT(pchat_window), "sess", sess);
 	g_signal_connect(pchat_window, "destroy",

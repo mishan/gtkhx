@@ -355,7 +355,7 @@ static void prompt_conversion (char *name)
     dialog = gtk_dialog_new();
 
     gtk_window_set_title(GTK_WINDOW(dialog), "Convert Bookmark");
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
     label = gtk_label_new ("This bookmark is written in an old GtkHx format.\nWould you like to convert it to the new format?");
     gtk_widget_set_size_request(dialog, 250, 200);
     gtk_widget_show(dialog);
@@ -645,7 +645,7 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	label = gtk_label_new(_("Name:"));
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
 	gtk_widget_set_size_request(dialog, 200, 100);
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), name_entry, 0, 0, 0);

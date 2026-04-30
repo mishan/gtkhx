@@ -542,7 +542,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	tasks_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(tasks_window), "tasks", "GtkHx");
-	gtk_window_set_policy(GTK_WINDOW(tasks_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
 	gtk_widget_realize(tasks_window);
 	style = gtk_widget_get_style(tasks_window);
 	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));
@@ -613,8 +613,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(tasks_move), sess);
 	gtk_widget_set_size_request(tasks_window, gtkhx_prefs.geo.tasks.xsize, 
 						 gtkhx_prefs.geo.tasks.ysize);
-	gtk_widget_set_uposition(tasks_window, gtkhx_prefs.geo.tasks.xpos,
-							 gtkhx_prefs.geo.tasks.ypos);
+	gtk_window_move(GTK_WINDOW(tasks_window), gtkhx_prefs.geo.tasks.xpos,
+					gtkhx_prefs.geo.tasks.ypos);
 	gtk_widget_show_all(tasks_window);
 
 

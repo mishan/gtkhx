@@ -231,7 +231,7 @@ void create_news_window (session *sess)
 	gtk_tooltips_set_tip(tooltips, reloadButton, _("Reload News"), 0);
 	icon = 0, pix = 0, mask = 0;
 
-	gtk_window_set_policy(GTK_WINDOW(news_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 
 	gtk_window_set_title(GTK_WINDOW(news_window), _("News"));
 	gtk_widget_set_size_request(news_window, 412, 384);
@@ -272,8 +272,8 @@ void create_news_window (session *sess)
 					   G_CALLBACK(news_move), sess);
 	gtk_widget_set_size_request(news_window, gtkhx_prefs.geo.news.xsize, 
 						 gtkhx_prefs.geo.news.ysize);
-	gtk_widget_set_uposition(news_window, gtkhx_prefs.geo.news.xpos, 
-							 gtkhx_prefs.geo.news.ypos);
+	gtk_window_move(GTK_WINDOW(news_window), gtkhx_prefs.geo.news.xpos,
+					gtkhx_prefs.geo.news.ypos);
 
 	gtk_widget_show_all(news_window);
 

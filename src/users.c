@@ -537,7 +537,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Private Chat Invitation"));
-	gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+	gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 
 	invite = gtk_button_new_with_label(_("Invite"));
 	g_object_set_data(G_OBJECT(invite), "cid", cid);
@@ -698,7 +698,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	style = gtk_widget_get_style(users_window);
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
 	gtk_widget_set_size_request(users_window, 264, 400);
-	gtk_window_set_policy(GTK_WINDOW(users_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(users_window), TRUE);
 	g_signal_connect(users_window, "delete_event",
 			   G_CALLBACK(close_users_window), sess);
 
@@ -822,8 +822,8 @@ void create_users_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(users_move), sess);
 	gtk_widget_set_size_request(users_window, gtkhx_prefs.geo.users.xsize,
 						 gtkhx_prefs.geo.users.ysize);
-	gtk_widget_set_uposition(users_window, gtkhx_prefs.geo.users.xpos,
-							 gtkhx_prefs.geo.users.ypos);
+	gtk_window_move(GTK_WINDOW(users_window), gtkhx_prefs.geo.users.xpos,
+					gtkhx_prefs.geo.users.ypos);
 	gtk_widget_show_all(users_window);
 
 	gtkhx_prefs.geo.users.open = 1;

@@ -358,7 +358,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Folder..."));
 	entryHbox = gtk_hbox_new(0,0);
 
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
@@ -399,7 +399,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Category..."));
 	entryHbox = gtk_hbox_new(0,0);
 
-    gtk_container_border_width (GTK_CONTAINER(dialog), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
@@ -558,7 +558,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gfnews->path_list->prev = NULL;
 
 	news_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_policy(GTK_WINDOW(news_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 
 	gtk_widget_realize(news_window);
 	style = gtk_widget_get_style(news_window);
@@ -847,7 +847,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_set_size_request(window, 320, 250);
 	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
-    gtk_container_border_width (GTK_CONTAINER(window), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
 
 	vbox = gtk_vbox_new(0,0);
 	table = gtk_table_new(3, 2, 0);
@@ -960,7 +960,7 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_set_size_request(window, 320, 250);
 	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
-    gtk_container_border_width (GTK_CONTAINER(window), 5);
+    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
 
 	vbox = gtk_vbox_new(0,0);
 	table = gtk_table_new(2, 2, 0);
@@ -1061,7 +1061,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	}
 
 	news_window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_policy(GTK_WINDOW(news_window), 1, 1, 0);
+	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 	gtk_widget_realize(news_window);
 	style = gtk_widget_get_style(news_window);
 	gtk_widget_set_size_request(news_window, 570, 375); 
