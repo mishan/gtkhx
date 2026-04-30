@@ -16,75 +16,58 @@
  * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+/*
+ * Phase 2.9: Threading first cut.
+ *
+ * The original gtkthreads.c approximated GDK's global lock with a custom
+ * pipe + pthread_cond_t + pthread_mutex_t + gdk_input_add() integration —
+ * because GTK+ 1.2 had no real threading support and the pipe trick was
+ * how you marshaled wake-ups onto the GTK main loop.
+ *
+ * GTK 2 ships gdk_threads_enter() / gdk_threads_leave() (and the GDK
+ * global lock that backs them), which is exactly the abstraction the
+ * old code was reinventing. Replace the custom plumbing with thin wrappers
+ * so the ~60 enter/leave call sites in network.c and xfers.c don't have
+ * to change.
+ *
+ * gdk_threads_init() is called once from gtkhx.c init() before gtk_init().
+ *
+ * Note: gdk_threads_enter / leave are themselves deprecated in GTK 3.
+ * Phase 3 will rip the lock out entirely and switch worker→UI marshaling
+ * to g_main_context_invoke(). For now this is the minimal change that
+ * gets us off the custom code without churn at every call site.
+ */
+
 #include "config.h"
-#include <stdlib.h>
-#include <stdio.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <netinet/in.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <time.h>
-#include "hx.h"
+#include "gtkthreads.h"
 
-pthread_cond_t Xcond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t Xmutex = PTHREAD_MUTEX_INITIALIZER;
-int Xpipe[2];
-
-/* this routine is called when something has written to the Xpipe */
-static void threadcall(void *a,int b,GdkInputCondition c) 
+void gtk_threads_init(void)
 {
-	debug("gtkthreads: call\n");
-
-	pthread_cond_wait(&Xcond,&Xmutex);
-	debug("gtkthreads: call 2\n");
-
+	/* The main thread holds the GDK lock for the lifetime of gtk_main();
+	 * worker threads acquire it via gtk_threads_enter() before touching
+	 * any GDK/GTK state. */
+	gdk_threads_enter();
 }
 
-void gtk_threads_init(void) {
-	pipe(Xpipe);
-	pthread_mutex_lock(&Xmutex);
-}
-
-void gtk_threads_main() {
-	gdk_input_add(Xpipe[0],GDK_INPUT_READ,threadcall,0);
+void gtk_threads_main(void)
+{
 	gtk_main();
+	gdk_threads_leave();
 }
 
-
-/*
-  gtk_calls not made by the main thread should be wrapped between
-  gtk_thread_enter and gtk_thread_leave
-*/
-void gtk_threads_enter(int b){
-	char c;
-	debug("gtkthreads: enter\n");
-
-	write(Xpipe[1],"A",1);
-	debug("gtkthreads: enter 2\n");
-
-	pthread_mutex_lock(&Xmutex);
-	debug("gtkthreads: enter 3\n");
-
-	read(Xpipe[0],&c,1);
-
-	debug("gtkthreads: enter 4\n");
+void gtk_threads_enter(void)
+{
+	gdk_threads_enter();
 }
 
-void gtk_threads_leave(){
-	debug("gtkthreads: leave\n");
-	pthread_cond_signal(&Xcond);
-	debug("gtkthreads: leave 2\n");
-	pthread_mutex_unlock(&Xmutex);
-	debug("gtkthreads: leave 3\n");
+void gtk_threads_leave(void)
+{
+	gdk_threads_leave();
 }
 
-void gtk_thread_exit(){
-	pthread_cond_destroy(&Xcond);
-	pthread_mutex_destroy(&Xmutex);
-	close(Xpipe[0]);
-	close(Xpipe[1]);
+void gtk_thread_exit(void)
+{
+	/* Nothing to clean up — the GDK lock manages itself. */
 }

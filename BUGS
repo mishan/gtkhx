@@ -1,3 +1,2 @@
 - Loading the tracker crashes
 - Connecting with icons.rsrc present in /usr/local/share/gtkhx crashes
-- the colors of xtext.c seem to be random on every startup

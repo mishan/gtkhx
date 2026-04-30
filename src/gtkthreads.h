@@ -19,10 +19,10 @@
 #ifndef GTKTHREADS_H
 #define GTKTHREADS_H
 
-extern void gtk_threads_enter();
-extern void gtk_threads_leave();
-extern void gtk_threads_init();
-extern void gtk_threads_main();
-extern void gtk_thread_exit();
+extern void gtk_threads_enter(void);
+extern void gtk_threads_leave(void);
+extern void gtk_threads_init(void);
+extern void gtk_threads_main(void);
+extern void gtk_thread_exit(void);
 
 #endif

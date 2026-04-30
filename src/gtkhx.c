@@ -387,6 +387,11 @@ static void init (int argc, char **argv)
 		winput_tags[i] = -1;
 	}
 	gtk_set_locale();
+	/* Phase 2.9: initialize GDK's thread lock before gtk_init so that the
+	 * worker threads in network.c / xfers.c can call gdk_threads_enter()
+	 * later. GLib's threading subsystem itself has been auto-initialized
+	 * since GLib 2.32, so g_thread_init() is no longer required. */
+	gdk_threads_init();
 	gtk_init(&argc, &argv);
 	fe_init();
 }
