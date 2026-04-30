@@ -422,7 +422,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	num_total = 0;
 
 	refreshbtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, refreshbtn, _("Refresh"), 0);
+	gtk_widget_set_tooltip_text(refreshbtn, _("Refresh"));
 	pb = gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
@@ -434,7 +434,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	connbtn = gtk_button_new();
 	g_signal_connect(connbtn, "clicked",
 					   G_CALLBACK(tracker_connect), 0);
-	gtk_tooltips_set_tip(tooltips, connbtn, _("Connect"), 0);
+	gtk_widget_set_tooltip_text(connbtn, _("Connect"));
 	pb = gdk_pixbuf_new_from_xpm_data((const char **)connect_xpm);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);

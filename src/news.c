@@ -189,7 +189,6 @@ void create_news_window (session *sess)
 	GdkPixmap *icon;
 	GtkWidget *pix;
 	GdkBitmap *mask;
-	GtkTooltips *tooltips;
 
 
 	if (gtkhx_prefs.geo.news.open) {
@@ -203,8 +202,6 @@ void create_news_window (session *sess)
 
 	gtk_widget_realize(news_window);
 	style = gtk_widget_get_style(news_window);
-
-	tooltips = gtk_tooltips_new();
 
 	btn_frame = gtk_frame_new(0);
 	gtk_widget_set_size_request(btn_frame, -2, 30);
@@ -221,14 +218,14 @@ void create_news_window (session *sess)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)postnews_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(postButton), pix);
-	gtk_tooltips_set_tip(tooltips, postButton, _("Post News"), 0);
+	gtk_widget_set_tooltip_text(postButton, _("Post News"));
 	icon = 0, pix = 0, mask = 0;
 
 	reloadButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadButton), pix);
-	gtk_tooltips_set_tip(tooltips, reloadButton, _("Reload News"), 0);
+	gtk_widget_set_tooltip_text(reloadButton, _("Reload News"));
 	icon = 0, pix = 0, mask = 0;
 
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);

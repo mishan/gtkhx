@@ -67,7 +67,6 @@ GdkColor fg_col;
 GdkColor bg_col;
 
 PangoFontDescription *gtkhx_font_desc;
-GtkTooltips *tooltips;
 
 void
 gtkhx_apply_text_style (GtkWidget *w)
@@ -333,7 +332,6 @@ static void fe_init (void)
 {
 	GtkWidget *widg = gtk_button_new();
 
-	tooltips = gtk_tooltips_new();
 	generate_colors(widg);
 	gtk_widget_destroy(widg);
 	init_variables();

@@ -735,7 +735,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(msgbtn), pix);
 	g_signal_connect(msgbtn, "clicked",
 					   G_CALLBACK(open_message_btn), users_list);
-	gtk_tooltips_set_tip(tooltips, msgbtn, _("Msg"), 0);
+	gtk_widget_set_tooltip_text(msgbtn, _("Msg"));
 	icon = 0, pix = 0, mask = 0;
 
 	kickbtn = gtk_button_new();
@@ -745,7 +745,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(kickbtn), pix);
 	g_signal_connect(kickbtn, "clicked",
 					   G_CALLBACK(user_kick_btn), users_list);
-	gtk_tooltips_set_tip(tooltips, kickbtn, _("Kick"), 0);
+	gtk_widget_set_tooltip_text(kickbtn, _("Kick"));
 	icon = 0, pix = 0, mask = 0;
 
 	infobtn = gtk_button_new();
@@ -755,7 +755,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(infobtn), pix);
 	g_signal_connect(infobtn, "clicked",
 					   G_CALLBACK(user_info_btn), users_list);
-	gtk_tooltips_set_tip(tooltips, infobtn, _("User Info"), 0);
+	gtk_widget_set_tooltip_text(infobtn, _("User Info"));
 	icon = 0, pix = 0, mask = 0;
 
 	banbtn = gtk_button_new();
@@ -765,12 +765,12 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)ban_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(banbtn), pix);
-	gtk_tooltips_set_tip(tooltips, banbtn, _("Ban"), 0);
+	gtk_widget_set_tooltip_text(banbtn, _("Ban"));
 	icon = 0, pix = 0, mask = 0;
 
 	chatbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(chatbtn), "sess", sess);
-	gtk_tooltips_set_tip(tooltips, chatbtn, _("Private Chat"), 0);
+	gtk_widget_set_tooltip_text(chatbtn, _("Private Chat"));
 	g_signal_connect(chatbtn, "clicked",
 					   G_CALLBACK(user_chat_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)chat_xpm);
@@ -780,7 +780,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	ignobtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(ignobtn), "sess", sess);
-	gtk_tooltips_set_tip(tooltips, ignobtn, _("Ignore"), 0);
+	gtk_widget_set_tooltip_text(ignobtn, _("Ignore"));
 	g_signal_connect(ignobtn, "clicked",
 					   G_CALLBACK(user_igno_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)ignore_xpm);

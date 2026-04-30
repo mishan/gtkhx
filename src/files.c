@@ -611,7 +611,7 @@ static struct gfile_list *create_files_window (char *path)
 	gfl->up_btn = upbtn;
 	g_signal_connect(upbtn, "clicked",
 					   G_CALLBACK(file_up_btn), files_list);
-	gtk_tooltips_set_tip(tooltips, upbtn, _("Parent Directory"), 0);
+	gtk_widget_set_tooltip_text(upbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
@@ -620,14 +620,14 @@ static struct gfile_list *create_files_window (char *path)
 	reloadbtn =  gtk_button_new();
 	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(file_reload_btn), files_list);
-	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
+	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, downloadbtn, _("Download"), 0);
+	gtk_widget_set_tooltip_text(downloadbtn, _("Download"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)dl_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
@@ -636,12 +636,12 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	prebtn = gtk_button_new_with_label("[ P ]");
-	gtk_tooltips_set_tip(tooltips, prebtn, _("Preview"), 0);
+	gtk_widget_set_tooltip_text(prebtn, _("Preview"));
 	g_signal_connect(prebtn, "clicked",
 					   G_CALLBACK(file_pre_btn), files_list);
 
 	uploadbtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, uploadbtn, _("Upload"), 0);
+	gtk_widget_set_tooltip_text(uploadbtn, _("Upload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)ul_xpm);
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
@@ -650,7 +650,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	crtfldbtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, crtfldbtn, _("New Folder"), 0);
+	gtk_widget_set_tooltip_text(crtfldbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)mkdir_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
@@ -659,7 +659,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	filinfobtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, filinfobtn, _("Info"), 0);
+	gtk_widget_set_tooltip_text(filinfobtn, _("Info"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)info_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
@@ -668,7 +668,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	delbtn = gtk_button_new();
-	gtk_tooltips_set_tip(tooltips, delbtn, _("Delete"), 0);
+	gtk_widget_set_tooltip_text(delbtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)trash_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(delbtn), pix);

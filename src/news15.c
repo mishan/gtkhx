@@ -601,7 +601,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	parentbtn =  gtk_button_new();
 	g_signal_connect(parentbtn, "clicked",
 					   G_CALLBACK(gfnews_up_btn), gfnews);
-	gtk_tooltips_set_tip(tooltips, parentbtn, _("Parent Directory"), 0);
+	gtk_widget_set_tooltip_text(parentbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(parentbtn), pix);
@@ -612,7 +612,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	reloadbtn =  gtk_button_new();
 	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(gfnews_reload_btn), gfnews);
-	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
+	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
@@ -621,7 +621,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	deletebtn =  gtk_button_new();
 	g_signal_connect(deletebtn, "clicked",
 					   G_CALLBACK(gfnews_delete_btn), gfnews);
-	gtk_tooltips_set_tip(tooltips, deletebtn, _("Delete"), 0);
+	gtk_widget_set_tooltip_text(deletebtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)trash_xpm);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
@@ -631,7 +631,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	mkdirbtn =  gtk_button_new();
 	g_signal_connect(mkdirbtn, "clicked",
 					   G_CALLBACK(gfnews_mkdir_btn), gfnews);
-	gtk_tooltips_set_tip(tooltips, mkdirbtn, _("New Folder"), 0);
+	gtk_widget_set_tooltip_text(mkdirbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)newsfld_xpm);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
@@ -641,7 +641,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	mkcatbtn =  gtk_button_new();
 	g_signal_connect(mkcatbtn, "clicked",
 					   G_CALLBACK(gfnews_mkcat_btn), gfnews);
-	gtk_tooltips_set_tip(tooltips, mkcatbtn, _("New Category"), 0);
+	gtk_widget_set_tooltip_text(mkcatbtn, _("New Category"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)newscat_xpm);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
@@ -1089,7 +1089,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	reloadbtn =  gtk_button_new();
 	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(gcnews_reload_btn), gcnews);
-	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
+	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
@@ -1098,7 +1098,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	postbtn =  gtk_button_new();
 	g_signal_connect(postbtn, "clicked",
 					   G_CALLBACK(news15_post), gcnews);
-	gtk_tooltips_set_tip(tooltips, postbtn, _("Post Thread"), 0);
+	gtk_widget_set_tooltip_text(postbtn, _("Post Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)postnews_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(postbtn), pix);
@@ -1107,13 +1107,13 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	replybtn = gtk_button_new_with_label ("[ R ]");
 	g_signal_connect(replybtn, "clicked",
 					   G_CALLBACK(news15_reply), gcnews);
-	gtk_tooltips_set_tip(tooltips, replybtn, _("Reply To Thread"), 0);
+	gtk_widget_set_tooltip_text(replybtn, _("Reply To Thread"));
 
 
 	deletebtn =  gtk_button_new();
 	g_signal_connect(deletebtn, "clicked",
 					   G_CALLBACK(news15_delete), gcnews);
-	gtk_tooltips_set_tip(tooltips, deletebtn, _("Delete Thread"), 0);
+	gtk_widget_set_tooltip_text(deletebtn, _("Delete Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)trash_xpm);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(deletebtn), pix);

@@ -3,7 +3,6 @@
 
 extern struct ifn icon_files;
 extern struct ifn user_icon_files;
-extern GtkTooltips *tooltips;
 extern GtkWidget *agreementwin;
 extern PangoFontDescription *gtkhx_font_desc;
 
