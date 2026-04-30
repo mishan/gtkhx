@@ -91,6 +91,7 @@ close_tracker_window (GtkWidget *widget, gpointer data)
 
 	tracker_list_destroy(tracker_server_tree);
 	dfafree(current_search);
+	current_search = NULL;
 }
 
 pthread_t track_tid = 0;
@@ -169,6 +170,13 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 	if(!root) {
 		return;
 	}
+	/* Defensive: the worker thread feeds new servers through here as
+	 * tracker_server_create runs, so a stray result that arrives before
+	 * current_search is set up (or after teardown) would deref NULL in
+	 * dfaexec. The window's first-open path now initializes preg before
+	 * spawning the worker, but keep the guard for paranoia. */
+	if (!preg)
+		return;
 
 	namelen = strlen(root->name);
 	desclen = strlen(root->desc);
@@ -367,14 +375,12 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	GtkWidget *tracker_window_scroll;
 	GtkWidget *refreshbtn;
 	GtkWidget *connbtn;
-	GdkPixmap *icon;
-	GdkBitmap *mask;
+	GdkPixbuf *pb;
 	GtkWidget *pix;
 	GtkWidget *lbl_search;
-	GtkStyle *style;
 	gchar *titles[5];
 	session *sess = data;
-   
+
 	titles[0] = _("Name");
 	titles[1] = _("Users");
 	titles[2] = _("Address");
@@ -386,8 +392,12 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
 	tracker_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(tracker_window), "tracker", "GtkHx");
-	gtk_widget_realize(tracker_window);
-	style = gtk_widget_get_style(tracker_window);
+	/* Phase 2 cleanup: don't gtk_widget_realize() the toplevel here — it
+	 * trips a GTK_WIDGET_ANCHORED assertion in GTK 2 when called before
+	 * gtk_widget_show*. The legacy code did it to obtain a parent
+	 * GdkWindow for gdk_pixmap_create_from_xpm_d(); we now build pixbufs
+	 * directly via gdk_pixbuf_new_from_xpm_data(), which needs no
+	 * drawable. */
 	gtk_window_set_title(GTK_WINDOW(tracker_window), _("Tracker"));
 	gtk_widget_set_size_request(tracker_window, 640, 410);
 	g_signal_connect(GTK_OBJECT(tracker_window), "delete_event", G_CALLBACK(close_tracker_window), 0);
@@ -413,25 +423,23 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
 	refreshbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, refreshbtn, _("Refresh"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(tracker_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], 
-										refresh_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	pb = gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
+	pix = gtk_image_new_from_pixbuf(pb);
+	if (pb) g_object_unref(pb);
 	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
-	pix = 0, icon = 0, mask = 0;
+	pix = 0; pb = 0;
 	g_signal_connect(GTK_OBJECT(refreshbtn), "clicked",
 					   G_CALLBACK(tracker_getlist), sess);
 
 	connbtn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(connbtn), "clicked", 
+	g_signal_connect(GTK_OBJECT(connbtn), "clicked",
 					   G_CALLBACK(tracker_connect), 0);
 	gtk_tooltips_set_tip(tooltips, connbtn, _("Connect"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(tracker_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], 
-										connect_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	pb = gdk_pixbuf_new_from_xpm_data((const char **)connect_xpm);
+	pix = gtk_image_new_from_pixbuf(pb);
+	if (pb) g_object_unref(pb);
 	gtk_container_add(GTK_CONTAINER(connbtn), pix);
-	pix = 0, icon = 0, mask = 0;
+	pix = 0; pb = 0;
 
 	tracker_window_scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tracker_window_scroll),
@@ -457,10 +465,16 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_widget_show_all(tracker_window);
 
 	gtk_widget_grab_focus(searchentry);
-	tracker_getlist(0,sess);
 
+	/* Initialize the search filter BEFORE spawning the tracker worker.
+	 * Each result the worker streams in calls tracker_server_create →
+	 * tracker_search_tree(current_search, ...), which dereferences
+	 * current_search inside dfaexec. The legacy ordering raced: the
+	 * worker could fire faster than the synchronous init below it. */
 	current_search = g_malloc(sizeof(struct dfa));
 	dfacomp("", 0, current_search, 1);
+
+	tracker_getlist(0, sess);
 }
 
 void dfaerror (const char *mesg)
