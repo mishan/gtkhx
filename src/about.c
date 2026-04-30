@@ -130,7 +130,7 @@ void create_about_window ()
     gtk_fixed_put (GTK_FIXED (fixed), cmdAboutClose, 384, 393);
     gtk_widget_set_uposition (cmdAboutClose, 384, 403);
     gtk_widget_set_size_request (cmdAboutClose, 88, 36);
-    GTK_WIDGET_SET_FLAGS (cmdAboutClose, GTK_CAN_DEFAULT);
+    gtk_widget_set_can_default(cmdAboutClose, TRUE);
     gtk_widget_grab_focus (cmdAboutClose);
     gtk_widget_grab_default (cmdAboutClose);
     g_signal_connect (cmdAboutClose, "clicked",

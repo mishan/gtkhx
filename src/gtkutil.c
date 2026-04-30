@@ -255,7 +255,7 @@ void error_dialog (char *title, char *msg)
 							   (GCallback)gtk_widget_destroy, 
 							   dialog);
 
-    GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
+    gtk_widget_set_can_default(okbutton, TRUE);
 
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog)->action_area), okbutton, 
 						TRUE, TRUE, 0);

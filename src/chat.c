@@ -1283,7 +1283,7 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 					   dialog);
 
 	hbox = gtk_hbox_new(0,0);
-	GTK_WIDGET_SET_FLAGS(join, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default(join, TRUE);
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), label, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), hbox, 0, 0, 0);

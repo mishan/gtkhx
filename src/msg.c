@@ -369,7 +369,7 @@ void broadcastmsg(char *text)
 
 	dialog = gtk_dialog_new();
 	okbtn = gtk_button_new_with_label(_("OK"));
-    GTK_WIDGET_SET_FLAGS (okbtn, GTK_CAN_DEFAULT);
+    gtk_widget_set_can_default(okbtn, TRUE);
 
 	textbox = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);

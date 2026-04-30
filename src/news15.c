@@ -377,7 +377,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 							  dialog);
 
 	btnHbox = gtk_hbox_new(0,0);
-	GTK_WIDGET_SET_FLAGS(okBtn, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default(okBtn, TRUE);
 	gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog)->action_area), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
@@ -418,7 +418,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 							  dialog);
 
 	btnHbox = gtk_hbox_new(0,0);
-	GTK_WIDGET_SET_FLAGS(okBtn, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default(okBtn, TRUE);
 	gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog)->action_area), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);

@@ -373,7 +373,7 @@ static void prompt_conversion (char *name)
 
 	g_signal_connect_swapped(cancelbtn, "clicked", (GCallback)gtk_widget_destroy, dialog);
 
-    GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
+    gtk_widget_set_can_default(okbutton, TRUE);
 
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbutton, 0, 0, 0);
     gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), cancelbtn, 0, 0, 0);
@@ -638,7 +638,7 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 
 	dialog = gtk_dialog_new();
 	ok = gtk_button_new_with_label(_("OK"));
-	GTK_WIDGET_SET_FLAGS(ok, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default(ok, TRUE);
 	cancel = gtk_button_new_with_label(_("Cancel"));
 	name_entry = gtk_entry_new();
 	hbox = gtk_hbox_new(0,0);

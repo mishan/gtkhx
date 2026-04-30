@@ -545,7 +545,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_object_set_data(G_OBJECT(invite), "dialog", dialog);
 
 	g_object_set_data(G_OBJECT(invite), "sess", sess);
-	GTK_WIDGET_SET_FLAGS(invite, GTK_CAN_DEFAULT);
+	gtk_widget_set_can_default(invite, TRUE);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancel, "clicked",
