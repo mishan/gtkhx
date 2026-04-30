@@ -40,11 +40,12 @@ add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c'
 # -----------------------------------------------------------------------------
 # Dependencies
 #
-# GTK pin starts at 2.x for Phase 2 and gets bumped per phase: 2 -> 3 -> 4.
+# GTK pin advances per phase: 2 -> 3 -> 4. Phase 3 is in progress; the floor is
+# 3.22 (the last LTS-grade release of GTK 3, ships in every supported distro).
 # Per ROADMAP: Nettle for legacy Hotline ciphers (Blowfish/RC4) + GLib hashes;
 # no GnuTLS (Phase ∞ work, requires server-side cooperation).
 # -----------------------------------------------------------------------------
-gtk_dep     = dependency('gtk+-2.0',  version : '>= 2.24')
+gtk_dep     = dependency('gtk+-3.0',  version : '>= 3.22')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 zlib_dep    = dependency('zlib')
