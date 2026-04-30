@@ -61,8 +61,26 @@ extern PangoFontDescription *gtkhx_font_desc;
 #define WORD_HOST    4
 #define WORD_EMAIL   5
 
+/*
+ * Phase 2.6.B: 37-entry palette laid out for HexChat's xtext.
+ *
+ * Slot layout expected by GtkXText (see xtext.h):
+ *   0..15   mIRC colors 0..15
+ *   16..31  mIRC colors 16..31 (bold/extended; HexChat duplicates 0..15)
+ *   32      XTEXT_MARK_FG   selection foreground
+ *   33      XTEXT_MARK_BG   selection background
+ *   34      XTEXT_FG        default text foreground
+ *   35      XTEXT_BG        default text background
+ *   36      XTEXT_MARKER    marker line color
+ *
+ * The previous (GTK 1.2 / XChat 1.8.5) widget only consulted slots 0..19,
+ * with 16/17 = mark bg/fg and 18/19 = fg/bg.  HexChat's xtext reads
+ * past slot 19 and was getting uninitialized memory, which is why the
+ * default background looked weird.
+ */
 GdkColor colors[] =
 {
+	/* mIRC 0..15 */
 	{0, 0,      0,      0},      /* 0  black */
 	{0, 0xcccc, 0xcccc, 0xcccc}, /* 1  white */
 	{0, 0,      0,      0xcccc}, /* 2  blue */
@@ -79,10 +97,29 @@ GdkColor colors[] =
 	{0, 0xffff, 0,      0xffff}, /* 13 pink */
 	{0, 0x7777, 0x7777, 0x7777}, /* 14 grey */
 	{0, 0x9999, 0x9999, 0x9999}, /* 15 light grey */
-	{0, 0,      0,      0xcccc}, /* 16 blue markBack */
-	{0, 0xeeee, 0xeeee, 0xeeee}, /* 17 white markFore */
-	{0, 0xcccc, 0xcccc, 0xcccc}, /* 18 foreground (white) */
-	{0, 0,      0,      0},      /* 19 background (black) */
+	/* mIRC 16..31 — duplicate of 0..15 (HexChat does the same) */
+	{0, 0,      0,      0},      /* 16 black */
+	{0, 0xcccc, 0xcccc, 0xcccc}, /* 17 white */
+	{0, 0,      0,      0xcccc}, /* 18 blue */
+	{0, 0,      0xcccc, 0},      /* 19 green */
+	{0, 0xcccc, 0,      0},      /* 20 red */
+	{0, 0xbbbb, 0xbbbb, 0},      /* 21 yellow/brown */
+	{0, 0xbbbb, 0,      0xbbbb}, /* 22 purple */
+	{0, 0xffff, 0xaaaa, 0},      /* 23 orange */
+	{0, 0xffff, 0xffff, 0},      /* 24 yellow */
+	{0, 0,      0xffff, 0},      /* 25 green */
+	{0, 0,      0xcccc, 0xcccc}, /* 26 aqua */
+	{0, 0,      0xffff, 0xffff}, /* 27 light aqua */
+	{0, 0,      0,      0xffff}, /* 28 blue */
+	{0, 0xffff, 0,      0xffff}, /* 29 pink */
+	{0, 0x7777, 0x7777, 0x7777}, /* 30 grey */
+	{0, 0x9999, 0x9999, 0x9999}, /* 31 light grey */
+	/* UI roles */
+	{0, 0xeeee, 0xeeee, 0xeeee}, /* 32 XTEXT_MARK_FG (light) */
+	{0, 0x2020, 0x4a4a, 0x8787}, /* 33 XTEXT_MARK_BG (blue) */
+	{0, 0xcccc, 0xcccc, 0xcccc}, /* 34 XTEXT_FG (light) */
+	{0, 0,      0,      0},      /* 35 XTEXT_BG (black) */
+	{0, 0xcccc, 0,      0},      /* 36 XTEXT_MARKER (red) */
 };
 
 void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, 
@@ -918,7 +955,7 @@ void generate_colors(GtkWidget *widget)
 	int i;
 
 	if (!colors[0].pixel) {
-		for(i=0; i<20; i++) {
+		for(i=0; i<37; i++) {
 			colors[i].pixel = (unsigned long)((colors[i].red & 0xff00) * 256 +
 											  (colors[i].green & 0xff00) +
 											  (colors[i].blue & 0xff00) / 256);
