@@ -368,13 +368,13 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
 	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
-	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(gfnews_mkdir),
+	g_signal_connect(okBtn, "clicked", G_CALLBACK(gfnews_mkdir),
 					   dialog);
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(GTK_OBJECT(cancelBtn), "clicked",
+	g_signal_connect_swapped(cancelBtn, "clicked",
 							  (GCallback) gtk_widget_destroy,
-							  GTK_OBJECT(dialog));
+							  dialog);
 
 	btnHbox = gtk_hbox_new(0,0);
 	GTK_WIDGET_SET_FLAGS(okBtn, GTK_CAN_DEFAULT);
@@ -409,13 +409,13 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
 	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
-	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(gfnews_mkcat),
+	g_signal_connect(okBtn, "clicked", G_CALLBACK(gfnews_mkcat),
 					   dialog);
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(GTK_OBJECT(cancelBtn), "clicked",
+	g_signal_connect_swapped(cancelBtn, "clicked",
 							  (GCallback) gtk_widget_destroy,
-							  GTK_OBJECT(dialog));
+							  dialog);
 
 	btnHbox = gtk_hbox_new(0,0);
 	GTK_WIDGET_SET_FLAGS(okBtn, GTK_CAN_DEFAULT);
@@ -565,7 +565,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_size_request(news_window, 264, 400);
 	gtk_window_set_title(GTK_WINDOW(news_window), gfnews->path);
 	g_object_set_data(G_OBJECT(news_window), "gfnews", gfnews);
-	g_signal_connect(GTK_OBJECT(news_window), "delete_event", 
+	g_signal_connect(news_window, "delete_event", 
 					   G_CALLBACK(destroy_gfnews_browser), 0);
 
 	news_scroll = gtk_scrolled_window_new(0, 0);
@@ -579,15 +579,15 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_hlist_set_shadow_type(GTK_HLIST(news_list), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(news_list), 0, 
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(GTK_OBJECT(news_list), "button_press_event", 
+	g_signal_connect(news_list, "button_press_event", 
 					   G_CALLBACK(newsf_clicked), 0);
 
-	g_signal_connect(GTK_OBJECT(news_list), "drag_data_get",
+	g_signal_connect(news_list, "drag_data_get",
 					   G_CALLBACK(news15_drag_send), 0);
 	gtk_drag_source_set(news_list, GDK_BUTTON1_MASK, news15_drag, 1,
 						GDK_ACTION_MOVE);
 
-	g_signal_connect(GTK_OBJECT(news_list), "drag_data_received",
+	g_signal_connect(news_list, "drag_data_received",
 					   G_CALLBACK(news15_drag_receive), 0);
 	gtk_drag_dest_set(news_list, GTK_DEST_DEFAULT_ALL, news15_drag, 1,
 					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
@@ -599,7 +599,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	hbuttonbox = gtk_hbox_new(0,0);
 
 	parentbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(parentbtn), "clicked",
+	g_signal_connect(parentbtn, "clicked",
 					   G_CALLBACK(gfnews_up_btn), gfnews);
 	gtk_tooltips_set_tip(tooltips, parentbtn, _("Parent Directory"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -612,7 +612,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	reloadbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(reloadbtn), "clicked",
+	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(gfnews_reload_btn), gfnews);
 	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -623,7 +623,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	deletebtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(deletebtn), "clicked",
+	g_signal_connect(deletebtn, "clicked",
 					   G_CALLBACK(gfnews_delete_btn), gfnews);
 	gtk_tooltips_set_tip(tooltips, deletebtn, _("Delete"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -635,7 +635,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	mkdirbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(mkdirbtn), "clicked",
+	g_signal_connect(mkdirbtn, "clicked",
 					   G_CALLBACK(gfnews_mkdir_btn), gfnews);
 	gtk_tooltips_set_tip(tooltips, mkdirbtn, _("New Folder"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -647,7 +647,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	mkcatbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(mkcatbtn), "clicked",
+	g_signal_connect(mkcatbtn, "clicked",
 					   G_CALLBACK(gfnews_mkcat_btn), gfnews);
 	gtk_tooltips_set_tip(tooltips, mkcatbtn, _("New Category"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -919,10 +919,10 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_object_set_data(G_OBJECT(post), "reply", inreplyto);
 	g_object_set_data(G_OBJECT(post), "subject", subject);
 	g_object_set_data(G_OBJECT(post), "window", window);
-	g_signal_connect(GTK_OBJECT(post), "clicked", G_CALLBACK(news15_do_reply), gcnews);
+	g_signal_connect(post, "clicked", G_CALLBACK(news15_do_reply), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(GTK_OBJECT(cancel), "clicked", G_CALLBACK(news15_cancel_post), 
+	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
 					   window);
 
 	gtk_box_pack_start(GTK_BOX(hbox), post, 0, 0, 0);
@@ -1008,10 +1008,10 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_object_set_data(G_OBJECT(post), "text", text);
 	g_object_set_data(G_OBJECT(post), "subject", subject);
 	g_object_set_data(G_OBJECT(post), "window", window);
-	g_signal_connect(GTK_OBJECT(post), "clicked", G_CALLBACK(news15_do_post), gcnews);
+	g_signal_connect(post, "clicked", G_CALLBACK(news15_do_post), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(GTK_OBJECT(cancel), "clicked", G_CALLBACK(news15_cancel_post), 
+	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
 					   window);
 
 	gtk_box_pack_start(GTK_BOX(hbox), post, 0, 0, 0);
@@ -1079,7 +1079,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_widget_set_size_request(news_window, 570, 375); 
 	gtk_window_set_title(GTK_WINDOW(news_window), path);
 	g_object_set_data(G_OBJECT(news_window), "gcnews", gcnews);
-	g_signal_connect(GTK_OBJECT(news_window), "delete_event", 
+	g_signal_connect(news_window, "delete_event", 
 					   G_CALLBACK(destroy_gcnews_browser), 0);
 
 	hpaned1 = gtk_hpaned_new ();
@@ -1099,7 +1099,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox1);
 	
 	reloadbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(reloadbtn), "clicked",
+	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(gcnews_reload_btn), gcnews);
 	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -1110,7 +1110,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	postbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(postbtn), "clicked",
+	g_signal_connect(postbtn, "clicked",
 					   G_CALLBACK(news15_post), gcnews);
 	gtk_tooltips_set_tip(tooltips, postbtn, _("Post Thread"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -1121,13 +1121,13 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 	
 	replybtn = gtk_button_new_with_label ("[ R ]");
-	g_signal_connect(GTK_OBJECT(replybtn), "clicked",
+	g_signal_connect(replybtn, "clicked",
 					   G_CALLBACK(news15_reply), gcnews);
 	gtk_tooltips_set_tip(tooltips, replybtn, _("Reply To Thread"), 0);
 
 
 	deletebtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(deletebtn), "clicked",
+	g_signal_connect(deletebtn, "clicked",
 					   G_CALLBACK(news15_delete), gcnews);
 	gtk_tooltips_set_tip(tooltips, deletebtn, _("Delete Thread"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(news_window->window, &mask,
@@ -1171,7 +1171,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_tree_selection_set_mode(
 		gtk_tree_view_get_selection(GTK_TREE_VIEW(news_tree)),
 		GTK_SELECTION_BROWSE);
-	g_signal_connect(GTK_OBJECT(news_tree), "cursor-changed",
+	g_signal_connect(news_tree, "cursor-changed",
 					   G_CALLBACK(newsc_clicked), gcnews);
 	gtk_container_add (GTK_CONTAINER (viewport1), news_tree);
 

@@ -899,17 +899,17 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 {
 	GtkWidget *fontsel = gtk_font_selection_dialog_new(_("Browse Fonts"));
 
-	g_signal_connect_swapped(GTK_OBJECT(
+	g_signal_connect_swapped(
 								  GTK_FONT_SELECTION_DIALOG(
-									  fontsel)->cancel_button),
+									  fontsel)->cancel_button,
 							  "clicked", (GCallback) gtk_widget_destroy,
-							  GTK_OBJECT(fontsel));
+							  fontsel);
 
 	g_object_set_data(G_OBJECT(
 							GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
 						"entry", entry);
-	g_signal_connect(GTK_OBJECT(
-						   GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
+	g_signal_connect(
+						   GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button,
 					   "clicked", G_CALLBACK(set_font), fontsel);
 	gtk_font_selection_dialog_set_font_name(GTK_FONT_SELECTION_DIALOG(fontsel),
 											gtkhx_prefs.font);
@@ -953,7 +953,7 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 	gtk_box_pack_end (GTK_BOX (lbox), lab, 0, 0, 0);
 
 	adj = (GtkAdjustment *) gtk_adjustment_new (*value, 0, 255.0, 1, 25, 0);
-	g_signal_connect (GTK_OBJECT (adj), "value_changed",
+	g_signal_connect (adj, "value_changed",
 							  G_CALLBACK (settings_slider_cb), value);
 
 	wid = gtk_hscale_new (adj);
@@ -1030,11 +1030,11 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(wid), btnhbox, 0, 0, 0);
 
 	add = gtk_button_new_with_label(_("Add"));
-	g_signal_connect(GTK_OBJECT(add), "clicked",
+	g_signal_connect(add, "clicked",
 					   G_CALLBACK(add_tracker), entry);
 
 	remove = gtk_button_new_with_label(_("Remove"));
-	g_signal_connect(GTK_OBJECT(remove), "clicked",
+	g_signal_connect(remove, "clicked",
 					   G_CALLBACK(remove_tracker),
 					   tracker_list);
 
@@ -1231,7 +1231,7 @@ static void settings_page_font(GtkWidget *vbox)
 	btn = gtk_button_new_with_label(_("Browse Fonts"));
 	gtk_table_attach(GTK_TABLE(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,
 					 0);
-	g_signal_connect(GTK_OBJECT(btn), "clicked",
+	g_signal_connect(btn, "clicked",
 					   G_CALLBACK(create_fontsel), cfgvars[FONT_IDX].widget);
 
 	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
@@ -1424,7 +1424,7 @@ static void settings_page_icon(GtkWidget *vbox)
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 	gtk_widget_set_size_request(scroll, 232, 256);
 
-	g_signal_connect(GTK_OBJECT(icon_list), "select_row",
+	g_signal_connect(icon_list, "select_row",
 			   G_CALLBACK(icon_row_selected), iv);
 
 	gtk_container_add(GTK_CONTAINER(scroll), icon_list);
@@ -1649,7 +1649,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
 	gtk_widget_set_size_request(dialog, 570, 400);
 	g_object_set_data(G_OBJECT(dialog), "sess", sess);
-	g_signal_connect_swapped (GTK_OBJECT (dialog), "delete_event",
+	g_signal_connect_swapped (dialog, "delete_event",
 							   G_CALLBACK (close_options_window), 0);
 
 	options_window = dialog;
@@ -1665,17 +1665,17 @@ void create_options_window(GtkWidget *widget, gpointer data)
 							FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));
-	g_signal_connect (GTK_OBJECT (wid), "clicked",
+	g_signal_connect (wid, "clicked",
 						G_CALLBACK (options_change), GINT_TO_POINTER(0));
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Apply"));
-	g_signal_connect (GTK_OBJECT (wid), "clicked",
+	g_signal_connect (wid, "clicked",
 						G_CALLBACK (options_change), GINT_TO_POINTER(1));
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Cancel"));
-	g_signal_connect (GTK_OBJECT (wid), "clicked",
+	g_signal_connect (wid, "clicked",
 							  G_CALLBACK (close_options_window), 0);
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
@@ -1708,7 +1708,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_notebook_set_show_border (GTK_NOTEBOOK (book), FALSE);
 	gtk_container_add (GTK_CONTAINER (frame), book);
 	g_object_set_data (G_OBJECT (ctree), "user_data", book);
-	g_signal_connect (GTK_OBJECT (ctree), "cursor-changed",
+	g_signal_connect (ctree, "cursor-changed",
 						G_CALLBACK (settings_ctree_select), NULL);
 	page_index = 0;
 

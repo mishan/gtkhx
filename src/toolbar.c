@@ -133,7 +133,7 @@ void create_toolbar_window (session *sess)
 	gtk_window_set_wmclass(GTK_WINDOW(toolbar_window), "toolbar", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(toolbar_window), "GtkHx");
 	gtk_window_set_policy(GTK_WINDOW(toolbar_window), 0, 0, 0);
-	g_signal_connect(GTK_OBJECT(toolbar_window), "delete_event",
+	g_signal_connect(toolbar_window, "delete_event",
 			   G_CALLBACK(close_toolbar_window), 0);
 
 	gtk_widget_realize(toolbar_window);
@@ -146,7 +146,7 @@ void create_toolbar_window (session *sess)
 									_("Not Connected"));
 
 	connect_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(connect_btn), "clicked", 
+	g_signal_connect(connect_btn, "clicked", 
 					   G_CALLBACK(create_connect_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -157,7 +157,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	tracker_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(tracker_btn), "clicked", 
+	g_signal_connect(tracker_btn, "clicked", 
 					   G_CALLBACK(create_tracker_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, 
 										 &mask, 
@@ -169,7 +169,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	options_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(options_btn), "clicked", 
+	g_signal_connect(options_btn, "clicked", 
 					   G_CALLBACK(create_options_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -180,7 +180,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	news_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(news_btn), "clicked",
+	g_signal_connect(news_btn, "clicked",
 					   G_CALLBACK(open_news), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, 
 										&mask, 
@@ -192,7 +192,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	news15_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(news15_btn), "clicked",
+	g_signal_connect(news15_btn, "clicked",
 					   G_CALLBACK(open_news15), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, 
 										&mask, 
@@ -204,7 +204,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	files_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(files_btn), "clicked", 
+	g_signal_connect(files_btn, "clicked", 
 					   G_CALLBACK(open_files), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
@@ -215,7 +215,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	userlist_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(userlist_btn), "clicked", 
+	g_signal_connect(userlist_btn, "clicked", 
 					   G_CALLBACK(create_users_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
@@ -226,7 +226,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	chat_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(chat_btn), "clicked", 
+	g_signal_connect(chat_btn, "clicked", 
 					   G_CALLBACK(create_chat_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], chat_xpm);
@@ -236,7 +236,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	post_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(post_btn), "clicked", 
+	g_signal_connect(post_btn, "clicked", 
 					   G_CALLBACK(create_post_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, 
 										&mask, 
@@ -248,7 +248,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	tasks_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(tasks_btn), "clicked", 
+	g_signal_connect(tasks_btn, "clicked", 
 					   G_CALLBACK(create_tasks_window), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -259,7 +259,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	about_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(about_btn), "clicked", 
+	g_signal_connect(about_btn, "clicked", 
 					   G_CALLBACK(create_about_window), 0);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 
@@ -270,7 +270,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	disconnect_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(disconnect_btn), "clicked",
+	g_signal_connect(disconnect_btn, "clicked",
 					   G_CALLBACK(disconnect_clicked), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -281,7 +281,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	quit_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(quit_btn), "clicked", 
+	g_signal_connect(quit_btn, "clicked", 
 					   G_CALLBACK(hx_quit), 0);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -293,7 +293,7 @@ void create_toolbar_window (session *sess)
 
 
 	usernew_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(usernew_btn), "clicked", 
+	g_signal_connect(usernew_btn, "clicked", 
 					   G_CALLBACK(create_new_user), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -304,7 +304,7 @@ void create_toolbar_window (session *sess)
 	icon = 0, pix = 0, mask = 0;
 
 	usermod_btn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(usermod_btn), "clicked", 
+	g_signal_connect(usermod_btn, "clicked", 
 					   G_CALLBACK(useredit_open_dialog), sess);
 	icon = gdk_pixmap_create_from_xpm_d (toolbar_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -316,7 +316,7 @@ void create_toolbar_window (session *sess)
 
 #ifdef USE_PLUGIN
 	plugin_btn = gtk_button_new_with_label("[ P ]");
-	g_signal_connect(GTK_OBJECT(plugin_btn), "clicked", 
+	g_signal_connect(plugin_btn, "clicked", 
 					   G_CALLBACK(create_plugin_manager), 0);
 	gtk_tooltips_set_tip(tooltips, plugin_btn, _("Plugin Manager"), 0);
 #endif
@@ -354,8 +354,8 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_sensitive(usernew_btn, FALSE);
 	gtk_widget_set_sensitive(news15_btn, FALSE);
 
-	g_signal_connect(GTK_OBJECT(toolbar_window), "configure_event", G_CALLBACK(tool_move), 0);
-	g_signal_connect(GTK_OBJECT(toolbar_window), "delete_event", G_CALLBACK(quit_btn), 0);
+	g_signal_connect(toolbar_window, "configure_event", G_CALLBACK(tool_move), 0);
+	g_signal_connect(toolbar_window, "delete_event", G_CALLBACK(quit_btn), 0);
 
 	gtk_widget_set_uposition(toolbar_window, gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
 

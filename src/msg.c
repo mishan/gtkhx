@@ -118,7 +118,7 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 		g_free(line);
 
 		msg_input_activate(widget, msg->uid);
-		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		g_signal_stop_emission_by_name(widget, "key_press_event");
 		return TRUE;
 	}
 	else if (k == GDK_Up) {
@@ -134,7 +134,7 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
 		gtk_text_buffer_get_end_iter(buf, &end);
 		gtk_text_buffer_place_cursor(buf, &end);
-		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		g_signal_stop_emission_by_name(widget, "key_press_event");
 		return TRUE;
 	}
 
@@ -229,9 +229,9 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	g_object_set_data(G_OBJECT(msg->inputbuf), "sess", &the_session);
 	/* Note: GtkTextView has no "activate" signal — Return is dispatched
 	   from msg_input_key_press, which calls msg_input_activate(). */
-	g_signal_connect(GTK_OBJECT(msg->inputbuf), "key_press_event",
+	g_signal_connect(msg->inputbuf, "key_press_event",
 					   G_CALLBACK(msg_input_key_press), uid);
-	g_signal_connect(GTK_OBJECT(msg->window), "configure_event",
+	g_signal_connect(msg->window, "configure_event",
 					   G_CALLBACK(msg_update_trans), msg->outputbuf);
 
 	msg_list = msg;
@@ -292,7 +292,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_show_all(msg->window);
 
 	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
-	g_signal_connect(GTK_OBJECT(msg->window), "delete_event", G_CALLBACK(destroy_msgwin), 0);
+	g_signal_connect(msg->window, "delete_event", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
 	gtk_widget_grab_focus(msg->inputbuf);
@@ -390,7 +390,7 @@ void broadcastmsg(char *text)
 	gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
-	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(broadcastok), 0);
+	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
 	gtk_widget_show_all(dialog);
 }

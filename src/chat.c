@@ -850,7 +850,7 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	else if (k == GDK_Return) {
 		GtkTextIter start, end;
 
-		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		g_signal_stop_emission_by_name(widget, "key_press_event");
 		gtk_text_view_set_editable(text, FALSE);
 		g_free(termed_buf);
 
@@ -876,7 +876,7 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 		GtkTextIter start, end;
 		char *p;
 
-		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		g_signal_stop_emission_by_name(widget, "key_press_event");
 		gtk_text_buffer_get_start_iter(buf, &start);
 		gtk_text_buffer_get_end_iter(buf, &end);
 		p = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
@@ -900,7 +900,7 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
 		gtk_text_buffer_get_end_iter(buf, &end);
 		gtk_text_buffer_place_cursor(buf, &end);
-		g_signal_stop_emission_by_name(GTK_OBJECT(widget), "key_press_event");
+		g_signal_stop_emission_by_name(widget, "key_press_event");
 		return TRUE;
 	}
 
@@ -990,17 +990,17 @@ void create_chat(session *sess)
 
 	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
 
-	gtk_object_ref(GTK_OBJECT(text));
-	gtk_object_sink(GTK_OBJECT(text));
-	gtk_object_ref(GTK_OBJECT(vscroll));
-	gtk_object_sink(GTK_OBJECT(vscroll));
+	gtk_object_ref(text);
+	gtk_object_sink(text);
+	gtk_object_ref(vscroll);
+	gtk_object_sink(vscroll);
 
 	chat_hbox = gtk_hbox_new(0, 0);
 	gtk_widget_set_size_request(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
 						 (gtkhx_prefs.geo.chat.ysize<<6)/1000);
 
-	gtk_object_ref(GTK_OBJECT(chat_hbox));
-	gtk_object_sink(GTK_OBJECT(chat_hbox));
+	gtk_object_ref(chat_hbox);
+	gtk_object_sink(chat_hbox);
 	gtk_box_pack_start(GTK_BOX(chat_hbox), text, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(chat_hbox), vscroll, 0, 0, 0);
 
@@ -1053,7 +1053,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(chat_window, 412, 280);
 	gtk_window_set_policy(GTK_WINDOW(chat_window), 1, 1, 0);
 
-	g_signal_connect(GTK_OBJECT(chat_window), "destroy",
+	g_signal_connect(chat_window, "destroy",
 					   G_CALLBACK(chat_close), gchat);
 	gtk_window_set_title(GTK_WINDOW(chat_window), _("Chat"));
 	gtk_container_set_border_width(GTK_CONTAINER(chat_window), 0);
@@ -1071,7 +1071,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(subj_hbox), gchat->subject, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
 	gtkhx_apply_text_style(gchat->subject);
-	g_signal_connect(GTK_OBJECT(gchat->subject), "activate",
+	g_signal_connect(gchat->subject, "activate",
 					   G_CALLBACK(change_subject), GINT_TO_POINTER(0));
 
 	outputframe = gtk_frame_new(0);
@@ -1105,7 +1105,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 	gchat->input = gtk_text_view_new();
 	gtkhx_apply_text_style(gchat->input);
-	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
+	g_signal_connect(gchat->input, "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(G_OBJECT(gchat->input), "gchat", gchat);
 	g_object_set_data(G_OBJECT(gchat->input), "sess", sess);
@@ -1120,7 +1120,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 		gtk_container_add(GTK_CONTAINER(input_scroll), gchat->input);
 		gtk_box_pack_start(GTK_BOX(hbox), input_scroll, 1, 1, 0);
 	}
-	g_signal_connect(GTK_OBJECT(chat_window), "configure_event",
+	g_signal_connect(chat_window, "configure_event",
 					   G_CALLBACK(chat_move), gchat);
 
 	g_object_set_data(G_OBJECT(chat_window), "sess", sess);
@@ -1183,14 +1183,14 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gtk_hlist_set_shadow_type(GTK_HLIST(userlist), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(userlist), 0, 
 									   GTK_JUSTIFY_LEFT);
-	gtk_object_ref(GTK_OBJECT(text));
-	gtk_object_sink(GTK_OBJECT(text));
-	gtk_object_ref(GTK_OBJECT(vscroll));
-	gtk_object_sink(GTK_OBJECT(vscroll));
-	gtk_object_ref(GTK_OBJECT(subject));
-	gtk_object_sink(GTK_OBJECT(subject));
-	gtk_object_ref(GTK_OBJECT(userlist));
-	gtk_object_sink(GTK_OBJECT(userlist));
+	gtk_object_ref(text);
+	gtk_object_sink(text);
+	gtk_object_ref(vscroll);
+	gtk_object_sink(vscroll);
+	gtk_object_ref(subject);
+	gtk_object_sink(subject);
+	gtk_object_ref(userlist);
+	gtk_object_sink(userlist);
 
 	gchat->cid = chat->cid;
 	gchat->chat = chat;
@@ -1272,15 +1272,15 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	join = gtk_button_new_with_label(_("Join"));
 	g_object_set_data(G_OBJECT(join), "dialog", dialog);
 	g_object_set_data(G_OBJECT(join), "htlc", htlc);
-	g_signal_connect(GTK_OBJECT(join), "clicked", G_CALLBACK(join_chat),
+	g_signal_connect(join, "clicked", G_CALLBACK(join_chat),
 					   GINT_TO_POINTER(cid));
 
 
 	cancel = gtk_button_new_with_label(_("Decline"));
 	g_object_set_data(G_OBJECT(cancel), "cid", GINT_TO_POINTER(cid));
-	g_signal_connect(GTK_OBJECT(cancel), "clicked", 
+	g_signal_connect(cancel, "clicked", 
 					   G_CALLBACK(reject_chat), 
-					   GTK_OBJECT(dialog));
+					   dialog);
 
 	hbox = gtk_hbox_new(0,0);
 	GTK_WIDGET_SET_FLAGS(join, GTK_CAN_DEFAULT);
@@ -1347,7 +1347,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_window_set_policy(GTK_WINDOW(pchat_window), 1, 1, 0);
 
 	g_object_set_data(G_OBJECT(pchat_window), "sess", sess);
-	g_signal_connect(GTK_OBJECT(pchat_window), "destroy",
+	g_signal_connect(pchat_window, "destroy",
 					   G_CALLBACK(pchat_close), gchat);
 	title = g_strdup_printf("%s: 0x%08x", _("Private Chat"), chat->cid);
 	gtk_window_set_title(GTK_WINDOW(pchat_window), title);
@@ -1366,7 +1366,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_entry_set_text(GTK_ENTRY(gchat->subject), chat->subject);
 	gtk_box_pack_start(GTK_BOX(vbox), subj_frame, 0, 1, 0);
 	gtkhx_apply_text_style(gchat->subject);
-	g_signal_connect(GTK_OBJECT(gchat->subject), "activate", 
+	g_signal_connect(gchat->subject, "activate", 
 					   G_CALLBACK(change_subject), 
 					   GINT_TO_POINTER(chat->cid));
 
@@ -1396,7 +1396,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	gchat->input = gtk_text_view_new();
 	gtkhx_apply_text_style(gchat->input);
-	g_signal_connect(GTK_OBJECT(gchat->input), "key_press_event",
+	g_signal_connect(gchat->input, "key_press_event",
 					   G_CALLBACK(chat_input_key_press), 0);
 	g_object_set_data(G_OBJECT(gchat->input), "sess", sess);
 	g_object_set_data(G_OBJECT(gchat->input), "gchat", gchat);
@@ -1410,7 +1410,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 		gtk_box_pack_start(GTK_BOX(hbox), pchat_input_scroll, 1, 1, 0);
 	}
 
- 	g_signal_connect(GTK_OBJECT(pchat_window), "configure_event", 
+ 	g_signal_connect(pchat_window, "configure_event", 
 					   G_CALLBACK(pchat_update_trans), gchat->output);
 
 	gchat->userlist = gtk_hlist_new_with_titles(2, titles);
@@ -1420,7 +1420,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_hlist_set_shadow_type(GTK_HLIST(gchat->userlist), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(gchat->userlist), 1, 
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(GTK_OBJECT(gchat->userlist), "button_press_event",
+	g_signal_connect(gchat->userlist, "button_press_event",
 			   G_CALLBACK(user_clicked), 0);
 
 	if (!users_font_desc)
@@ -1434,7 +1434,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(msg_btn), pix);
-	g_signal_connect(GTK_OBJECT(msg_btn), "clicked", 
+	g_signal_connect(msg_btn, "clicked", 
 					   G_CALLBACK(open_message_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, msg_btn, _("Msg"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -1446,7 +1446,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 kick_xpm);
     pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(kick_btn), pix);
-	g_signal_connect(GTK_OBJECT(kick_btn), "clicked", 
+	g_signal_connect(kick_btn, "clicked", 
 					   G_CALLBACK(user_kick_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, kick_btn, _("Kick"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -1458,14 +1458,14 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 										 info_xpm);
     pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(info_btn), pix);
-	g_signal_connect(GTK_OBJECT(info_btn), "clicked", 
+	g_signal_connect(info_btn, "clicked", 
 					   G_CALLBACK(user_info_btn), gchat->userlist);
 	gtk_tooltips_set_tip(tooltips, info_btn, _("User Info"), 0);
 	icon = 0, pix = 0, mask = 0;
 
 	ban_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(ban_btn), "sess", sess);
-	g_signal_connect(GTK_OBJECT(ban_btn), "clicked", 
+	g_signal_connect(ban_btn, "clicked", 
 					   G_CALLBACK(user_ban_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window,
 										&mask, 
@@ -1479,7 +1479,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	chat_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(chat_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, chat_btn, _("Private Chat"), 0);
-	g_signal_connect(GTK_OBJECT(chat_btn), "clicked", 
+	g_signal_connect(chat_btn, "clicked", 
 					   G_CALLBACK(user_chat_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d (pchat_window->window, &mask, 
 										 &style->bg[GTK_STATE_NORMAL], 
@@ -1491,7 +1491,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	igno_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(igno_btn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, igno_btn, _("Ignore"), 0);
-	g_signal_connect(GTK_OBJECT(igno_btn), "clicked", 
+	g_signal_connect(igno_btn, "clicked", 
 					   G_CALLBACK(user_igno_btn), gchat->userlist);
 	icon = gdk_pixmap_create_from_xpm_d(pchat_window->window, &mask, 
 										&style->bg[GTK_STATE_NORMAL], 

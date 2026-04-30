@@ -400,7 +400,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	 * drawable. */
 	gtk_window_set_title(GTK_WINDOW(tracker_window), _("Tracker"));
 	gtk_widget_set_size_request(tracker_window, 640, 410);
-	g_signal_connect(GTK_OBJECT(tracker_window), "delete_event", G_CALLBACK(close_tracker_window), 0);
+	g_signal_connect(tracker_window, "delete_event", G_CALLBACK(close_tracker_window), 0);
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
 	gtk_widget_set_size_request(tracker_list, 0, 350);
@@ -410,11 +410,11 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 96);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 40);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 1024);
-	g_signal_connect(GTK_OBJECT(tracker_list), "button_press_event", G_CALLBACK(tracker_click), 0);
+	g_signal_connect(tracker_list, "button_press_event", G_CALLBACK(tracker_click), 0);
 
 
 	searchentry = gtk_entry_new();
-	g_signal_connect(GTK_OBJECT(searchentry), "activate", G_CALLBACK(tracker_search), 0);
+	g_signal_connect(searchentry, "activate", G_CALLBACK(tracker_search), 0);
 	lbl_search = gtk_label_new(_("Search: "));
 	lbl_found = gtk_label_new("  0");
 	lbl_total = gtk_label_new(" / 0");
@@ -428,11 +428,11 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	if (pb) g_object_unref(pb);
 	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
 	pix = 0; pb = 0;
-	g_signal_connect(GTK_OBJECT(refreshbtn), "clicked",
+	g_signal_connect(refreshbtn, "clicked",
 					   G_CALLBACK(tracker_getlist), sess);
 
 	connbtn = gtk_button_new();
-	g_signal_connect(GTK_OBJECT(connbtn), "clicked",
+	g_signal_connect(connbtn, "clicked",
 					   G_CALLBACK(tracker_connect), 0);
 	gtk_tooltips_set_tip(tooltips, connbtn, _("Connect"), 0);
 	pb = gdk_pixbuf_new_from_xpm_data((const char **)connect_xpm);

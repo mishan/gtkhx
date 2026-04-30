@@ -251,9 +251,9 @@ void error_dialog (char *title, char *msg)
 
     okbutton = gtk_button_new_with_label ("Ok");
 
-    g_signal_connect_swapped (GTK_OBJECT (okbutton), "clicked", 
+    g_signal_connect_swapped (okbutton, "clicked", 
 							   (GCallback)gtk_widget_destroy, 
-							   GTK_OBJECT(dialog));
+							   dialog);
 
     GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
 

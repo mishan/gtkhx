@@ -478,9 +478,9 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
 	vbox = gtk_vbox_new(FALSE, 0);
 	hbox = gtk_hbox_new(FALSE, 0);
-	g_signal_connect(GTK_OBJECT(agreebtn), "clicked",
+	g_signal_connect(agreebtn, "clicked",
 					   G_CALLBACK(concurrence), sess);
-	g_signal_connect(GTK_OBJECT(disagreebtn), "clicked",
+	g_signal_connect(disagreebtn, "clicked",
 					   G_CALLBACK(disagreement), sess);
 	gtk_container_add(GTK_CONTAINER(agreementwin), vbox);
 	gtk_box_pack_start(GTK_BOX(vbox), agree_scroll, TRUE, TRUE, 0);

@@ -327,7 +327,7 @@ void create_useredit_window (char *login, int new)
 
 	ues = g_malloc0(sizeof(struct useredit_session));
 	ues->window = window;
-	g_signal_connect(GTK_OBJECT(window), "destroy",
+	g_signal_connect(window, "destroy",
 			   G_CALLBACK(useredit_destroy), ues);
 	vbox = 0;
 	usermod_scroll = gtk_scrolled_window_new(0, 0);
@@ -340,17 +340,17 @@ void create_useredit_window (char *login, int new)
 
 	wid = gtk_button_new_with_label(_("Save"));
 	g_object_set_data(G_OBJECT(wid), "new", GINT_TO_POINTER(new));
-	g_signal_connect(GTK_OBJECT(wid), "clicked",
+	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_save), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Delete User"));
-	g_signal_connect(GTK_OBJECT(wid), "clicked",
+	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_delete), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Close"));
-	g_signal_connect(GTK_OBJECT(wid), "clicked",
+	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_close), ues);
 	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
 
@@ -410,7 +410,7 @@ void create_useredit_window (char *login, int new)
 		awi = i - nframes;
 		ues->access_widgets[awi].bitno = access_names[i].bitno;
 		ues->access_widgets[awi].widget = chk;
-		g_signal_connect(GTK_OBJECT(chk), "clicked",
+		g_signal_connect(chk, "clicked",
 				   G_CALLBACK(useredit_chk_activate), ues);
 		gtk_box_pack_start(GTK_BOX(vbox), chk, 0, 0, 0);
 	}
@@ -453,9 +453,9 @@ void useredit_open_dialog()
 	gtk_box_pack_start(GTK_BOX(hboxtwo), cancelbtn, 0, 0, 0);
 
 	g_object_set_data(G_OBJECT(okbtn), "login", loginentry);
-	g_signal_connect(GTK_OBJECT(okbtn), "clicked", G_CALLBACK(useredit_open), window);
+	g_signal_connect(okbtn, "clicked", G_CALLBACK(useredit_open), window);
 
-	g_signal_connect(GTK_OBJECT(cancelbtn), "clicked", G_CALLBACK(useredit_open_close), window);
+	g_signal_connect(cancelbtn, "clicked", G_CALLBACK(useredit_open_close), window);
 
 	gtk_widget_show_all(window);
 

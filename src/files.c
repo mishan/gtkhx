@@ -240,15 +240,15 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 {
 	GtkWidget *file_dialog = gtk_file_selection_new(_("Upload..."));
 
-	g_signal_connect_swapped(GTK_OBJECT(file_dialog), "destroy",
+	g_signal_connect_swapped(file_dialog, "destroy",
 							  (GCallback)gtk_widget_destroy,
-							  GTK_OBJECT(file_dialog));
-	g_signal_connect_swapped(GTK_OBJECT(
+							  file_dialog);
+	g_signal_connect_swapped(
 								  GTK_FILE_SELECTION(
-									  file_dialog)->cancel_button),
+									  file_dialog)->cancel_button,
 							  "clicked", (GCallback) gtk_widget_destroy,
-							  GTK_OBJECT(file_dialog));
-	g_signal_connect(GTK_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
+							  file_dialog);
+	g_signal_connect(GTK_FILE_SELECTION(file_dialog)->ok_button,
 					   "clicked", G_CALLBACK(put_file), file_dialog);
 
 	g_object_set_data(G_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
@@ -474,13 +474,13 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
 	g_object_set_data(G_OBJECT(okBtn), "hlist", data);
-	g_signal_connect(GTK_OBJECT(okBtn), "clicked", G_CALLBACK(makeDir),
+	g_signal_connect(okBtn, "clicked", G_CALLBACK(makeDir),
 					   dialog);
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(GTK_OBJECT(cancelBtn), "clicked",
+	g_signal_connect_swapped(cancelBtn, "clicked",
 							  (GCallback) gtk_widget_destroy,
-							  GTK_OBJECT(dialog));
+							  dialog);
 
 	btnHbox = gtk_hbox_new(0,0);
 	GTK_WIDGET_SET_FLAGS(okBtn, GTK_CAN_DEFAULT);
@@ -570,15 +570,15 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_hlist_set_shadow_type(GTK_HLIST(files_list), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(files_list), 0,
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(GTK_OBJECT(files_list), "button_press_event",
+	g_signal_connect(files_list, "button_press_event",
 					   G_CALLBACK(file_clicked), 0);
 
-	g_signal_connect(GTK_OBJECT(files_list), "drag_data_get",
+	g_signal_connect(files_list, "drag_data_get",
 					   G_CALLBACK(files_drag_send), 0);
 	gtk_drag_source_set(files_list, GDK_BUTTON1_MASK, files_drag, 1,
 						GDK_ACTION_MOVE);
 
-	g_signal_connect(GTK_OBJECT(files_list), "drag_data_received",
+	g_signal_connect(files_list, "drag_data_received",
 					   G_CALLBACK(files_drag_receive), 0);
 	gtk_drag_dest_set(files_list, GTK_DEST_DEFAULT_ALL, files_drag, 1,
 					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
@@ -594,7 +594,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	gfl = gfl_new(files_window, files_list, path);
 	g_object_set_data(G_OBJECT(files_window), "gfl", gfl);
-	g_signal_connect(GTK_OBJECT(files_window), "delete_event",
+	g_signal_connect(files_window, "delete_event",
 			   G_CALLBACK(close_files_window), files_list);
 
 	files_window_scroll = gtk_scrolled_window_new(0, 0);
@@ -609,7 +609,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	upbtn = gtk_button_new();
 	gfl->up_btn = upbtn;
-	g_signal_connect(GTK_OBJECT(upbtn), "clicked",
+	g_signal_connect(upbtn, "clicked",
 					   G_CALLBACK(file_up_btn), files_list);
 	gtk_tooltips_set_tip(tooltips, upbtn, _("Parent Directory"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
@@ -619,7 +619,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 	reloadbtn =  gtk_button_new();
-	g_signal_connect(GTK_OBJECT(reloadbtn), "clicked",
+	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(file_reload_btn), files_list);
 	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
@@ -634,21 +634,21 @@ static struct gfile_list *create_files_window (char *path)
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL], dl_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
-	g_signal_connect(GTK_OBJECT(downloadbtn), "clicked",
+	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
 	gtk_container_add(GTK_CONTAINER(downloadbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
 	prebtn = gtk_button_new_with_label("[ P ]");
 	gtk_tooltips_set_tip(tooltips, prebtn, _("Preview"), 0);
-	g_signal_connect(GTK_OBJECT(prebtn), "clicked",
+	g_signal_connect(prebtn, "clicked",
 					   G_CALLBACK(file_pre_btn), files_list);
 
 	uploadbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, uploadbtn, _("Upload"), 0);
 	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL], ul_xpm);
-	g_signal_connect(GTK_OBJECT(uploadbtn), "clicked",
+	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(uploadbtn), pix);
@@ -661,7 +661,7 @@ static struct gfile_list *create_files_window (char *path)
 										mkdir_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
-	g_signal_connect(GTK_OBJECT(crtfldbtn), "clicked",
+	g_signal_connect(crtfldbtn, "clicked",
 					   G_CALLBACK(makeDirDialog), files_list);
 	pix = 0, icon = 0, mask = 0;
 
@@ -671,7 +671,7 @@ static struct gfile_list *create_files_window (char *path)
 										&style->bg[GTK_STATE_NORMAL], info_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
-	g_signal_connect(GTK_OBJECT(filinfobtn), "clicked",
+	g_signal_connect(filinfobtn, "clicked",
 					   G_CALLBACK(get_file_info), files_list);
 	pix = 0, icon = 0, mask = 0;
 
@@ -682,7 +682,7 @@ static struct gfile_list *create_files_window (char *path)
 										trash_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(delbtn), pix);
-	g_signal_connect(GTK_OBJECT(delbtn), "clicked",
+	g_signal_connect(delbtn, "clicked",
 					   G_CALLBACK(delete_file), files_list);
 	pix = 0, icon = 0, mask = 0;
 
@@ -1095,7 +1095,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_container_border_width (GTK_CONTAINER(window), 5);
-	g_signal_connect(GTK_OBJECT(window), "delete_event",
+	g_signal_connect(window, "delete_event",
 					   (GCallback) gtk_widget_destroy, window);
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
 
@@ -1140,10 +1140,10 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	g_object_set_data(G_OBJECT(savebtn), "name", name_entry);
 	g_object_set_data(G_OBJECT(savebtn), "comments", comments_text);
 	g_object_set_data(G_OBJECT(savebtn), "path", path);
-	g_signal_connect(GTK_OBJECT(savebtn), "clicked", 
+	g_signal_connect(savebtn, "clicked", 
 					   G_CALLBACK(set_name_comment), NULL);
 
-	g_signal_connect(GTK_OBJECT(window), "destroy", G_CALLBACK(close_file_info), path);
+	g_signal_connect(window, "destroy", G_CALLBACK(close_file_info), path);
 
 	gtk_widget_show_all(window);
 	init_keyaccel(window);

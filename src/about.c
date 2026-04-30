@@ -116,9 +116,9 @@ void create_about_window ()
     gtk_widget_set_size_request (frmAbout, 482, 450);
     gtk_window_set_title (GTK_WINDOW (frmAbout), _("About GtkHx"));
     gtk_window_set_policy (GTK_WINDOW (frmAbout), FALSE, FALSE, FALSE);
-    g_signal_connect (GTK_OBJECT (frmAbout), "destroy",
+    g_signal_connect (frmAbout, "destroy",
 			G_CALLBACK (on_frmAbout_destroy),
-			GTK_OBJECT (frmAbout));
+			frmAbout);
 
     gtk_widget_realize(frmAbout);
 
@@ -133,9 +133,9 @@ void create_about_window ()
     GTK_WIDGET_SET_FLAGS (cmdAboutClose, GTK_CAN_DEFAULT);
     gtk_widget_grab_focus (cmdAboutClose);
     gtk_widget_grab_default (cmdAboutClose);
-    g_signal_connect (GTK_OBJECT (cmdAboutClose), "clicked",
+    g_signal_connect (cmdAboutClose, "clicked",
 			G_CALLBACK (on_cmdAboutClose_clicked),
-			GTK_OBJECT(frmAbout));
+			frmAbout);
 
 
     notebook = gtk_notebook_new ();

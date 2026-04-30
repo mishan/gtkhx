@@ -367,11 +367,11 @@ static void prompt_conversion (char *name)
     okbutton = gtk_button_new_with_label ("Yes");
 	cancelbtn = gtk_button_new_with_label("No");
 
-    g_signal_connect (GTK_OBJECT (okbutton), "clicked", G_CALLBACK(convert_bookmark), path);
+    g_signal_connect (okbutton, "clicked", G_CALLBACK(convert_bookmark), path);
 	g_object_set_data(G_OBJECT(okbutton), "dialog", dialog);
 
 
-	g_signal_connect_swapped(GTK_OBJECT(cancelbtn), "clicked", (GCallback)gtk_widget_destroy, GTK_OBJECT(dialog));
+	g_signal_connect_swapped(cancelbtn, "clicked", (GCallback)gtk_widget_destroy, dialog);
 
     GTK_WIDGET_SET_FLAGS (okbutton, GTK_CAN_DEFAULT);
 
@@ -652,10 +652,10 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), ok, 0,0, 0);
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), cancel, 0,0, 0);
 	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
-	g_signal_connect(GTK_OBJECT(cancel), "clicked", G_CALLBACK(cancel_save), 0);
+	g_signal_connect(cancel, "clicked", G_CALLBACK(cancel_save), 0);
 	g_object_set_data(G_OBJECT(ok), "name", name_entry);
 	g_object_set_data(G_OBJECT(ok), "dialog", dialog);
-	g_signal_connect(GTK_OBJECT(ok), "clicked", G_CALLBACK(bookmark_save), 0);
+	g_signal_connect(ok, "clicked", G_CALLBACK(bookmark_save), 0);
 
 
 	gtk_widget_grab_default(ok);
@@ -734,7 +734,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_window_set_wmclass(GTK_WINDOW(connect_window), "connect", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(connect_window), "Connect");
 	gtk_window_set_position(GTK_WINDOW(connect_window), GTK_WIN_POS_CENTER);
-	g_signal_connect(GTK_OBJECT(connect_window), "destroy",
+	g_signal_connect(connect_window, "destroy",
 			   G_CALLBACK(close_connect_window), 0);
 	vbox1 = gtk_vbox_new(0, 10);
 	gtk_container_add(GTK_CONTAINER(connect_window), vbox1);
@@ -890,14 +890,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 	save_button = gtk_button_new_with_label(_("Save..."));
 	gtk_container_add(GTK_CONTAINER(hbuttonbox1), save_button);
-	g_signal_connect(GTK_OBJECT(save_button), "clicked", G_CALLBACK(save_dialog), 0);
+	g_signal_connect(save_button, "clicked", G_CALLBACK(save_dialog), 0);
 
 	button_cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(GTK_OBJECT(button_cancel), "clicked", G_CALLBACK(close_connect_window), 0);
+	g_signal_connect(button_cancel, "clicked", G_CALLBACK(close_connect_window), 0);
 	gtk_container_add(GTK_CONTAINER(hbuttonbox1), button_cancel);
 
 	button_connect = gtk_button_new_with_label(_("Connect"));
-	g_signal_connect(GTK_OBJECT(button_connect), "clicked", G_CALLBACK(server_connect), sess);
+	g_signal_connect(button_connect, "clicked", G_CALLBACK(server_connect), sess);
 	gtk_container_add (GTK_CONTAINER (hbuttonbox1), button_connect);
 
 	gtk_widget_show_all(connect_window);

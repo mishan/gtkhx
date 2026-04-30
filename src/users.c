@@ -195,7 +195,7 @@ menu_quick_item_with_callback (session *sess, void *callback, char *label,
 
 	item = gtk_menu_item_new_with_label (label);
 	gtk_menu_append (GTK_MENU (menu), item);
-	g_signal_connect (GTK_OBJECT (item), "activate",
+	g_signal_connect (item, "activate",
 							  G_CALLBACK (callback), arg);
 	g_object_set_data(G_OBJECT(item), "sess", sess);
 	gtk_widget_show (item);
@@ -548,12 +548,12 @@ static void prompt_chat(session *sess, guint16 _uid)
 	GTK_WIDGET_SET_FLAGS(invite, GTK_CAN_DEFAULT);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(GTK_OBJECT(cancel), "clicked",
+	g_signal_connect_swapped(cancel, "clicked",
 							  (GCallback)gtk_widget_destroy,
-							  GTK_OBJECT(dialog));
+							  dialog);
 
 	new = gtk_button_new_with_label(_("New"));
-	g_signal_connect(GTK_OBJECT(new), "clicked",
+	g_signal_connect(new, "clicked",
 					   G_CALLBACK(create_new_chat), uid);
 	g_object_set_data(G_OBJECT(new), "cid", cid);
 	g_object_set_data(G_OBJECT(new), "dialog", dialog);
@@ -569,7 +569,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	list = gtk_clist_new_with_titles(2, titles);
 	gtk_clist_set_selection_mode(GTK_CLIST(list), GTK_SELECTION_EXTENDED);
 	gtk_clist_set_column_width (GTK_CLIST (list), 0, 80);
-	g_signal_connect(GTK_OBJECT(list), "select_row",
+	g_signal_connect(list, "select_row",
 					   G_CALLBACK(select_cid), cid);
 
 	gtk_container_add(GTK_CONTAINER(scroll), list);
@@ -586,7 +586,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 		gtk_clist_append(GTK_CLIST(list), entry);
 	}
 	g_object_set_data(G_OBJECT(invite), "list", list);
-	g_signal_connect(GTK_OBJECT(invite), "clicked",
+	g_signal_connect(invite, "clicked",
 					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
 
 	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), scroll, 0, 0, 0);
@@ -699,7 +699,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
 	gtk_widget_set_size_request(users_window, 264, 400);
 	gtk_window_set_policy(GTK_WINDOW(users_window), 1, 1, 0);
-	g_signal_connect(GTK_OBJECT(users_window), "delete_event",
+	g_signal_connect(users_window, "delete_event",
 			   G_CALLBACK(close_users_window), sess);
 
 
@@ -712,9 +712,9 @@ void create_users_window (GtkWidget *widget, gpointer data)
 									   GTK_JUSTIFY_LEFT);
 	gtk_hlist_set_compare_func(GTK_HLIST(users_list),
 							   (GtkHListCompareFunc) users_sort);
-	g_signal_connect(GTK_OBJECT(users_list), "click_column",
+	g_signal_connect(users_list, "click_column",
 					   G_CALLBACK(usercol_clicked), sess);
-	g_signal_connect(GTK_OBJECT(users_list), "button_press_event",
+	g_signal_connect(users_list, "button_press_event",
 					   G_CALLBACK(user_clicked), sess);
 
 	if (!users_font_desc)
@@ -734,7 +734,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 										 &style->bg[GTK_STATE_NORMAL], msg_xpm);
 	pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(msgbtn), pix);
-	g_signal_connect(GTK_OBJECT(msgbtn), "clicked",
+	g_signal_connect(msgbtn, "clicked",
 					   G_CALLBACK(open_message_btn), users_list);
 	gtk_tooltips_set_tip(tooltips, msgbtn, _("Msg"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -746,7 +746,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 										 kick_xpm);
     pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(kickbtn), pix);
-	g_signal_connect(GTK_OBJECT(kickbtn), "clicked",
+	g_signal_connect(kickbtn, "clicked",
 					   G_CALLBACK(user_kick_btn), users_list);
 	gtk_tooltips_set_tip(tooltips, kickbtn, _("Kick"), 0);
 	icon = 0, pix = 0, mask = 0;
@@ -758,14 +758,14 @@ void create_users_window (GtkWidget *widget, gpointer data)
 										 info_xpm);
     pix = gtk_image_new_from_pixmap(icon, mask);
 	gtk_container_add(GTK_CONTAINER(infobtn), pix);
-	g_signal_connect(GTK_OBJECT(infobtn), "clicked",
+	g_signal_connect(infobtn, "clicked",
 					   G_CALLBACK(user_info_btn), users_list);
 	gtk_tooltips_set_tip(tooltips, infobtn, _("User Info"), 0);
 	icon = 0, pix = 0, mask = 0;
 
 	banbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(banbtn), "sess", sess);
-	g_signal_connect(GTK_OBJECT(banbtn), "clicked",
+	g_signal_connect(banbtn, "clicked",
 					   G_CALLBACK(user_ban_btn), users_list);
 	icon = gdk_pixmap_create_from_xpm_d(users_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL], ban_xpm);
@@ -777,7 +777,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	chatbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(chatbtn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, chatbtn, _("Private Chat"), 0);
-	g_signal_connect(GTK_OBJECT(chatbtn), "clicked",
+	g_signal_connect(chatbtn, "clicked",
 					   G_CALLBACK(user_chat_btn), users_list);
 	icon = gdk_pixmap_create_from_xpm_d (users_window->window, &mask,
 										 &style->bg[GTK_STATE_NORMAL],
@@ -789,7 +789,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	ignobtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(ignobtn), "sess", sess);
 	gtk_tooltips_set_tip(tooltips, ignobtn, _("Ignore"), 0);
-	g_signal_connect(GTK_OBJECT(ignobtn), "clicked",
+	g_signal_connect(ignobtn, "clicked",
 					   G_CALLBACK(user_igno_btn), users_list);
 	icon = gdk_pixmap_create_from_xpm_d(users_window->window, &mask,
 										&style->bg[GTK_STATE_NORMAL],
@@ -828,7 +828,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	init_keyaccel(users_window);
 
-	g_signal_connect(GTK_OBJECT(users_window), "configure_event",
+	g_signal_connect(users_window, "configure_event",
 					   G_CALLBACK(users_move), sess);
 	gtk_widget_set_size_request(users_window, gtkhx_prefs.geo.users.xsize,
 						 gtkhx_prefs.geo.users.ysize);

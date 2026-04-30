@@ -137,7 +137,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_wmclass(GTK_WINDOW(post_window), "post", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(post_window), _("Post News"));
 	gtk_widget_set_size_request(post_window, 300, 280);
-	g_signal_connect(GTK_OBJECT(post_window), "delete_event",
+	g_signal_connect(post_window, "delete_event",
 			   G_CALLBACK(close_post_window), 0);
 
 	postprompt = gtk_text_view_new();
@@ -161,10 +161,10 @@ create_post_window (GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
 
 	okbut = gtk_button_new_with_label(_("OK"));
-	g_signal_connect(GTK_OBJECT(okbut), "clicked",
+	g_signal_connect(okbut, "clicked",
 			   G_CALLBACK(post_news), sess);
 	cancbut = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(GTK_OBJECT(cancbut), "clicked",
+	g_signal_connect(cancbut, "clicked",
 
 			   G_CALLBACK(close_post_window), 0);
 
@@ -239,12 +239,12 @@ void create_news_window (session *sess)
 
 	gtk_window_set_title(GTK_WINDOW(news_window), _("News"));
 	gtk_widget_set_size_request(news_window, 412, 384);
-	g_signal_connect(GTK_OBJECT(news_window), "delete_event",
+	g_signal_connect(news_window, "delete_event",
 			   G_CALLBACK(close_news_window), sess);
-	g_signal_connect(GTK_OBJECT(postButton), "clicked",
+	g_signal_connect(postButton, "clicked",
 
 					   G_CALLBACK(create_post_window), sess);
-	g_signal_connect(GTK_OBJECT(reloadButton), "clicked",
+	g_signal_connect(reloadButton, "clicked",
 
 					   G_CALLBACK(reload_news), sess);
 	vbox = gtk_vbox_new(0, 0);
@@ -272,7 +272,7 @@ void create_news_window (session *sess)
 	gtk_box_pack_start(GTK_BOX(hbox), news_scroll, 1, 1, 0);
 	gtk_widget_set_sensitive(postButton, FALSE);
 	gtk_widget_set_sensitive(reloadButton, FALSE);
-	g_signal_connect(GTK_OBJECT(news_window), "configure_event", 
+	g_signal_connect(news_window, "configure_event", 
 					   G_CALLBACK(news_move), sess);
 	gtk_widget_set_size_request(news_window, gtkhx_prefs.geo.news.xsize, 
 						 gtkhx_prefs.geo.news.ysize);

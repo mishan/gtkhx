@@ -92,11 +92,11 @@ static void load_plugin (GtkWidget *widget, gpointer data)
 	gtk_file_selection_hide_fileop_buttons(GTK_FILE_SELECTION(config));
 
 
-	gtk_signal_connect(GTK_OBJECT(GTK_FILE_SELECTION(config)->ok_button),
+	gtk_signal_connect(GTK_FILE_SELECTION(config)->ok_button,
 			"clicked", GTK_SIGNAL_FUNC(do_load), config);
 
 
-	gtk_signal_connect(GTK_OBJECT(GTK_FILE_SELECTION(config)->cancel_button), "clicked", GTK_SIGNAL_FUNC(close_load_plugin), config);
+	gtk_signal_connect(GTK_FILE_SELECTION(config)->cancel_button, "clicked", GTK_SIGNAL_FUNC(close_load_plugin), config);
 
 	init_keyaccel(config);
 	gtk_widget_show(config);
@@ -151,18 +151,18 @@ void create_plugin_manager(void)
 	plugin_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(plugin_window), "plugins", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(plugin_window), _("GtkHx - Plugins"));
-	gtk_signal_connect(GTK_OBJECT(plugin_window), "delete_event", GTK_SIGNAL_FUNC(close_plugin_window), 0);
+	gtk_signal_connect(plugin_window, "delete_event", GTK_SIGNAL_FUNC(close_plugin_window), 0);
 
 
 	loadbtn = gtk_button_new_with_label(_("Load"));
-	gtk_signal_connect(GTK_OBJECT(loadbtn), "clicked", GTK_SIGNAL_FUNC(load_plugin), 0);
+	gtk_signal_connect(loadbtn, "clicked", GTK_SIGNAL_FUNC(load_plugin), 0);
 
 	unloadbtn = gtk_button_new_with_label(_("Unload"));
 
-	gtk_signal_connect(GTK_OBJECT(unloadbtn), "clicked", GTK_SIGNAL_FUNC(unload_plugin), 0);
+	gtk_signal_connect(unloadbtn, "clicked", GTK_SIGNAL_FUNC(unload_plugin), 0);
 
 	closebtn = gtk_button_new_with_label(_("Close"));
-	gtk_signal_connect(GTK_OBJECT(closebtn), "clicked", GTK_SIGNAL_FUNC(close_plugin_window), 0);
+	gtk_signal_connect(closebtn, "clicked", GTK_SIGNAL_FUNC(close_plugin_window), 0);
 
 
 	vbox = gtk_vbox_new(0, 0);
@@ -174,7 +174,7 @@ void create_plugin_manager(void)
 	gtk_clist_set_selection_mode(GTK_CLIST(plugin_list), GTK_SELECTION_EXTENDED);
 	gtk_clist_set_column_width (GTK_CLIST (plugin_list), 0, 40);
 	gtk_widget_set_usize(plugin_list, 350, 200);
-	gtk_signal_connect(GTK_OBJECT(plugin_list), "select_row", GTK_SIGNAL_FUNC(plugin_row_select), 0);
+	gtk_signal_connect(plugin_list, "select_row", GTK_SIGNAL_FUNC(plugin_row_select), 0);
 	gtk_container_add(GTK_CONTAINER(scroll), plugin_list);
 
 	gtk_box_pack_start(GTK_BOX(vbox), scroll, 0, 0, 0);
