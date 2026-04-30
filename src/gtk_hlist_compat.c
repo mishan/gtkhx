@@ -327,7 +327,7 @@ gtk_hlist_set_column_justification (GtkHList *hlist, gint column,
 	default:                 align = 0.0; break;
 	}
 	gtk_tree_view_column_set_alignment (col, align);
-	cells = gtk_tree_view_column_get_cell_renderers (col);
+	cells = gtk_cell_layout_get_cells (GTK_CELL_LAYOUT (col));
 	for (l = cells; l; l = l->next)
 		g_object_set (l->data, "xalign", align, NULL);
 	g_list_free (cells);

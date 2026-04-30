@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <gtk/gtk.h>
 #include <string.h>
+#include "hx.h"
 #include "about.h"
 #include "pixmaps/gtkhx.xpm"
 

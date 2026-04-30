@@ -41,6 +41,17 @@
 typedef GdkPixbuf GdkPixmap;
 typedef GdkPixbuf GdkBitmap;
 typedef gpointer  GdkColormap;
+/*
+ * GdkGC and GdkImage have no runtime equivalents in GTK 3 (cairo replaces
+ * graphics-contexts; GdkPixbuf replaces image buffers). The legacy
+ * declarations of these still appear in users.h / options.c / cicn.c —
+ * code that Phase 3.4 will rewrite over cairo. Aliasing them to gpointer
+ * lets the headers parse so the rest of the tree compiles in the
+ * meantime; any *use* site will fail to link against missing functions
+ * (gdk_gc_new, gdk_draw_image, ...) and is on the Phase 3.4 worklist.
+ */
+typedef gpointer  GdkGC;
+typedef gpointer  GdkImage;
 
 /* ---- Message-window threading ------------------------------------- */
 

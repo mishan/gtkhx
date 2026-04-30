@@ -25,6 +25,14 @@
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 
+/* Phase 3.2: GdkPixmap and GdkBitmap were removed in GTK 3. Existing
+ * callers still pass these types; alias them to GdkPixbuf so the shim
+ * signatures keep their old names while pixbuf-pointers flow through. */
+#if GTK_CHECK_VERSION(3, 0, 0)
+typedef GdkPixbuf GdkPixmap;
+typedef GdkPixbuf GdkBitmap;
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

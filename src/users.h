@@ -1,6 +1,8 @@
 #ifndef HX_USERS_H
 #define HX_USERS_H
 
+#include "session.h"
+
 extern GtkWidget *msgbtn;
 extern GtkWidget *kickbtn;
 extern GtkWidget *infobtn;
