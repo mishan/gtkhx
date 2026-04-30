@@ -246,7 +246,7 @@ void error_dialog (char *title, char *msg)
     label = gtk_label_new (message);
     gtk_widget_set_size_request(dialog, 250, 200);
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), label, TRUE, 
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), label, TRUE, 
 						TRUE , 0);
 
     okbutton = gtk_button_new_with_label ("Ok");
@@ -257,7 +257,7 @@ void error_dialog (char *title, char *msg)
 
     gtk_widget_set_can_default(okbutton, TRUE);
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog)->action_area), okbutton, 
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbutton, 
 						TRUE, TRUE, 0);
 
 

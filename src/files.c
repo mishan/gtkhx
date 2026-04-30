@@ -465,7 +465,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	entryHbox = gtk_hbox_new(0,0);
 
     gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), entryHbox ,0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
 	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntryLabel, 0, 0, 0);
@@ -484,7 +484,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 
 	btnHbox = gtk_hbox_new(0,0);
 	gtk_widget_set_can_default(okBtn, TRUE);
-	gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog)->action_area), btnHbox);
+	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
 	gtk_widget_show_all(dialog);

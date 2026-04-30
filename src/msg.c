@@ -102,11 +102,11 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 			break;
 		}
 	}
-	else if (s & GDK_SHIFT_MASK && k == GDK_Return) {
+	else if (s & GDK_SHIFT_MASK && k == GDK_KEY_Return) {
 		/* insert a linebreak if shift is held — let GtkTextView default */
 		return FALSE;
 	}
-	else if (k == GDK_Return) {
+	else if (k == GDK_KEY_Return) {
 		GtkTextIter start, end;
 		char *line;
 
@@ -121,10 +121,10 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 		g_signal_stop_emission_by_name(widget, "key_press_event");
 		return TRUE;
 	}
-	else if (k == GDK_Up) {
+	else if (k == GDK_KEY_Up) {
 		hent = previous_history(msg->history);
 	}
-	else if (k == GDK_Down) {
+	else if (k == GDK_KEY_Down) {
 		hent = next_history(msg->history);
 	}
 
@@ -299,7 +299,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 
 	if(gtkhx_prefs.showback) {
-		gdk_window_lower(msg->window->window);
+		gdk_window_lower(gtk_widget_get_window(msg->window));
 	}
 
 	return msg;
@@ -386,8 +386,8 @@ void broadcastmsg(char *text)
 	gtk_widget_set_size_request(dialog, 300, 250);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox), scroll, TRUE, TRUE , 0);
-	gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbtn, TRUE, TRUE, 0);
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), scroll, TRUE, TRUE , 0);
+	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);

@@ -82,8 +82,9 @@ static void news_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 	int x, y, width, height;
 	session *sess = data;
 
-	gdk_window_get_root_origin(sess->news_window->window, &x, &y);
-	gdk_window_get_size(sess->news_window->window, &width, &height);
+	gdk_window_get_root_origin(gtk_widget_get_window(sess->news_window), &x, &y);
+	width = gdk_window_get_width(gtk_widget_get_window(sess->news_window));
+	height = gdk_window_get_height(gtk_widget_get_window(sess->news_window));
 
 	if(e->send_event) { /* Is a position event */
 		gtkhx_prefs.geo.news.xpos = x;
@@ -192,7 +193,7 @@ void create_news_window (session *sess)
 
 
 	if (gtkhx_prefs.geo.news.open) {
-		gdk_window_raise(sess->news_window->window);
+		gdk_window_raise(gtk_widget_get_window(sess->news_window));
 		return;
 	}
 
@@ -301,7 +302,7 @@ void open_news (GtkWidget *widget, gpointer data)
 		}
 	}
 	else {
-		gdk_window_raise(sess->news_window->window);
+		gdk_window_raise(gtk_widget_get_window(sess->news_window));
 		gtk_widget_grab_focus(sess->news_window);
 	}
 }

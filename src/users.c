@@ -262,7 +262,7 @@ static void user_msg_menu(GtkWidget *menu, struct hx_user *user)
 		return;
 
 	if((msg = msgwin_with_uid(user->uid))) {
-		gdk_window_raise(msg->window->window);
+		gdk_window_raise(gtk_widget_get_window(msg->window));
 	}
 	else {
 		create_msgwin(user->uid, user->name);
@@ -382,7 +382,7 @@ void user_clicked (GtkWidget *widget, GdkEventButton *event, gpointer data)
 				struct msgwin *msg = NULL;
 
 				if((msg = msgwin_with_uid(user->uid))) {
-					gdk_window_raise(msg->window->window);
+					gdk_window_raise(gtk_widget_get_window(msg->window));
 				}
 				else {
 					create_msgwin(user->uid, user->name);
@@ -589,8 +589,8 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_signal_connect(invite, "clicked",
 					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
 
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), scroll, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), btnhbox, 0, 0,
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), scroll, 0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnhbox, 0, 0,
 					   0);
 	gtk_box_pack_start(GTK_BOX(btnhbox), invite, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnhbox), new, 0, 0, 0);
@@ -644,8 +644,9 @@ static void users_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 	int x, y, width, height;
 	session *sess = data;
 
-	gdk_window_get_root_origin(sess->users_window->window, &x, &y);
-	gdk_window_get_size(sess->users_window->window, &width, &height);
+	gdk_window_get_root_origin(gtk_widget_get_window(sess->users_window), &x, &y);
+	width = gdk_window_get_width(gtk_widget_get_window(sess->users_window));
+	height = gdk_window_get_height(gtk_widget_get_window(sess->users_window));
 	if(e->send_event) { /* Is a position event */
 		gtkhx_prefs.geo.users.xpos = x;
 		gtkhx_prefs.geo.users.ypos = y;
@@ -688,7 +689,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	titles[1] = _("Name");
 
 	if (gtkhx_prefs.geo.users.open) {
-		gdk_window_raise(sess->users_window->window);
+		gdk_window_raise(gtk_widget_get_window(sess->users_window));
 		return;
 	}
 

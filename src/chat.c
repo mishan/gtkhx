@@ -843,11 +843,11 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 			break;
 		}
 	}
-	else if (s & GDK_SHIFT_MASK && k == GDK_Return) {
+	else if (s & GDK_SHIFT_MASK && k == GDK_KEY_Return) {
 		/* insert a linebreak if shift is held — let GtkTextView default */
 		return FALSE;
 	}
-	else if (k == GDK_Return) {
+	else if (k == GDK_KEY_Return) {
 		GtkTextIter start, end;
 
 		g_signal_stop_emission_by_name(widget, "key_press_event");
@@ -872,7 +872,7 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	}
 
 
-	else if (k == GDK_Tab) {
+	else if (k == GDK_KEY_Tab) {
 		GtkTextIter start, end;
 		char *p;
 
@@ -887,10 +887,10 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	}
 
 
-	else if (k == GDK_Up) {
+	else if (k == GDK_KEY_Up) {
 		hent = previous_history(gchat->chat_history);
 	}
-	else if (k == GDK_Down) {
+	else if (k == GDK_KEY_Down) {
 		hent = next_history(gchat->chat_history);
 	}
 
@@ -913,8 +913,9 @@ static void chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 	struct gtkhx_chat *gchat = data;
 	session *sess = g_object_get_data(G_OBJECT(w), "sess");
 
-	gdk_window_get_root_origin(sess->chat_window->window, &x, &y);
-	gdk_window_get_size(sess->chat_window->window, &width, &height);
+	gdk_window_get_root_origin(gtk_widget_get_window(sess->chat_window), &x, &y);
+	width = gdk_window_get_width(gtk_widget_get_window(sess->chat_window));
+	height = gdk_window_get_height(gtk_widget_get_window(sess->chat_window));
 
 	if(e->send_event) { /* Is a position event */
 		gtkhx_prefs.geo.chat.xpos = x;
@@ -1042,7 +1043,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if (gtkhx_prefs.geo.chat.open) {
-		gdk_window_raise(sess->chat_window->window);
+		gdk_window_raise(gtk_widget_get_window(sess->chat_window));
 		return;
 	}
 
@@ -1285,8 +1286,8 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	hbox = gtk_hbox_new(0,0);
 	gtk_widget_set_can_default(join, TRUE);
 
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), hbox, 0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label, 0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), join, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), cancel, 0, 0, 0);
 	gtk_widget_grab_default(join);

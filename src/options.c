@@ -138,11 +138,11 @@ void list_icons (void)
 			image = (GdkImage *)cicn_to_gdkimage(colormap, visual, r->data, r->datalen, &maskim);
 
 			off = image->width > 400 ? 198 : 0;
-			pixmap = gdk_pixmap_new(icon_list->window, image->width-off, image->height, image->depth);
+			pixmap = gdk_pixmap_new(gtk_widget_get_window(icon_list), image->width-off, image->height, image->depth);
 			if (!gc) gc = gdk_gc_new (pixmap);
 			gdk_draw_image(pixmap, gc, image, off, 0, 0, 0, image->width-off, image->height);
 			if (maskim) {
-				mask = gdk_pixmap_new(icon_list->window, image->width-off, image->height, 1);
+				mask = gdk_pixmap_new(gtk_widget_get_window(icon_list), image->width-off, image->height, 1);
 				if (!mask_gc) mask_gc = gdk_gc_new (mask);
 				gdk_draw_image(mask, mask_gc, maskim, off, 0, 0, 0, image->width-off, image->height);
 				gdk_image_destroy(maskim);
@@ -1639,7 +1639,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if(options_window) {
-		gdk_window_raise(options_window->window);
+		gdk_window_raise(gtk_widget_get_window(options_window));
 		return;
 	}
 
@@ -1655,13 +1655,13 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	options_window = dialog;
 
 	gtk_container_set_border_width
-		(GTK_CONTAINER (GTK_DIALOG (dialog)->action_area), 2);
-	gtk_box_set_homogeneous (GTK_BOX (GTK_DIALOG (dialog)->action_area),
+		(GTK_CONTAINER (gtk_dialog_get_action_area(GTK_DIALOG (dialog))), 2);
+	gtk_box_set_homogeneous (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))),
 									 FALSE);
 
 	hbbox = gtk_hbutton_box_new ();
 	gtk_button_box_set_spacing (GTK_BUTTON_BOX (hbbox), 4);
-	gtk_box_pack_end (GTK_BOX (GTK_DIALOG (dialog)->action_area), hbbox,
+	gtk_box_pack_end (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))), hbbox,
 							FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));
@@ -1681,7 +1681,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 
 	hbox = gtk_hbox_new (0, 6);
 	gtk_container_set_border_width (GTK_CONTAINER (hbox), 6);
-	gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox),
+	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))),
 							  hbox, TRUE, TRUE, 0);
 
 	store = gtk_tree_store_new(OPT_N_COLS, G_TYPE_STRING, G_TYPE_INT);

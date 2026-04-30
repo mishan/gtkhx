@@ -104,7 +104,7 @@ static void tool_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y;
 
-	gdk_window_get_root_origin(toolbar_window->window, &x, &y);
+	gdk_window_get_root_origin(gtk_widget_get_window(toolbar_window), &x, &y);
 
 
 	if(e->send_event) { /* Is a position event */

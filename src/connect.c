@@ -360,7 +360,7 @@ static void prompt_conversion (char *name)
     gtk_widget_set_size_request(dialog, 250, 200);
     gtk_widget_show(dialog);
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog) ->vbox), label, TRUE, TRUE , 0);
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), label, TRUE, TRUE , 0);
 
     gtk_widget_show(label);
 
@@ -375,8 +375,8 @@ static void prompt_conversion (char *name)
 
     gtk_widget_set_can_default(okbutton, TRUE);
 
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), okbutton, 0, 0, 0);
-    gtk_box_pack_start (GTK_BOX (GTK_DIALOG(dialog) ->action_area), cancelbtn, 0, 0, 0);
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbutton, 0, 0, 0);
+    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), cancelbtn, 0, 0, 0);
 
     gtk_widget_grab_default (okbutton);
 
@@ -646,11 +646,11 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
 	gtk_widget_set_size_request(dialog, 200, 100);
     gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->vbox), hbox, 0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), name_entry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), ok, 0,0, 0);
-	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog)->action_area), cancel, 0,0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), ok, 0,0, 0);
+	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), cancel, 0,0, 0);
 	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
 	g_signal_connect(cancel, "clicked", G_CALLBACK(cancel_save), 0);
 	g_object_set_data(G_OBJECT(ok), "name", name_entry);
@@ -726,7 +726,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	session *sess = data;
 
 	if (connect_window) {
-		gdk_window_raise(connect_window->window);
+		gdk_window_raise(gtk_widget_get_window(connect_window));
 		return;
 	}
 

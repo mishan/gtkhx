@@ -498,8 +498,9 @@ static void tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 	int x, y, width, height;
 	session *sess = data;
 
-	gdk_window_get_root_origin(sess->tasks_window->window, &x, &y);
-	gdk_window_get_size(sess->tasks_window->window, &width, &height);
+	gdk_window_get_root_origin(gtk_widget_get_window(sess->tasks_window), &x, &y);
+	width = gdk_window_get_width(gtk_widget_get_window(sess->tasks_window));
+	height = gdk_window_get_height(gtk_widget_get_window(sess->tasks_window));
 	if(e->send_event) { /* Is a position event */
 		gtkhx_prefs.geo.tasks.xpos = x;
 		gtkhx_prefs.geo.tasks.ypos = y;
@@ -536,7 +537,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if (gtkhx_prefs.geo.tasks.open) {
-		gdk_window_raise(sess->tasks_window->window);
+		gdk_window_raise(gtk_widget_get_window(sess->tasks_window));
 		return;
 	}
 
