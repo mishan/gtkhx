@@ -154,9 +154,8 @@ void create_about_window ()
     gtk_widget_set_size_request (frame, 400, 200);
     gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_OUT);
 
-    icon = gdk_pixmap_create_from_xpm_d (frmAbout->window, &mask,
-										 &frmAbout->style->white, gtkhx_xpm);
-    pixmap = gtk_image_new_from_pixmap(icon, mask);
+    icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)gtkhx_xpm);
+    pixmap = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtk_container_add (GTK_CONTAINER (frame), pixmap);
 
     g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */

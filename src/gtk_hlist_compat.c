@@ -144,47 +144,17 @@ refresh_row_count (GtkHList *hlist)
 static GdkPixbuf *
 pixmap_to_pixbuf (GdkPixmap *pixmap, GdkBitmap *mask)
 {
-	GdkPixbuf *pb;
-	gint w = 0, h = 0;
-
+	/* Phase 3.2: GdkPixmap and GdkBitmap are aliased to GdkPixbuf in
+	 * session.h for the GTK 3 transition. The legacy implementation here
+	 * called gdk_pixbuf_get_from_drawable + gdk_drawable_get_image and
+	 * applied the bitmap as alpha by hand — none of which exists on
+	 * GTK 3. Now: take a strong ref to the input so the caller's free
+	 * pattern (caller drops its own ref afterwards) doesn't double-free,
+	 * and ignore the bitmap mask: pixbufs already carry alpha. */
+	(void)mask;
 	if (!pixmap)
 		return NULL;
-	gdk_drawable_get_size (GDK_DRAWABLE (pixmap), &w, &h);
-	if (w <= 0 || h <= 0)
-		return NULL;
-	pb = gdk_pixbuf_get_from_drawable (NULL, GDK_DRAWABLE (pixmap),
-	                                   NULL, 0, 0, 0, 0, w, h);
-	if (mask && pb) {
-		/* Apply the bitmap mask as alpha. gdk_pixbuf_get_from_drawable
-		 * does not honour the bitmap; do it by hand. */
-		GdkImage *img;
-		gint x, y;
-		guchar *pixels;
-		gint rowstride, n_chan;
-		GdkPixbuf *with_alpha;
-
-		with_alpha = gdk_pixbuf_add_alpha (pb, FALSE, 0, 0, 0);
-		g_object_unref (pb);
-		pb = with_alpha;
-		if (!pb)
-			return NULL;
-		pixels    = gdk_pixbuf_get_pixels (pb);
-		rowstride = gdk_pixbuf_get_rowstride (pb);
-		n_chan    = gdk_pixbuf_get_n_channels (pb);
-
-		img = gdk_drawable_get_image (GDK_DRAWABLE (mask), 0, 0, w, h);
-		if (img) {
-			for (y = 0; y < h; y++) {
-				for (x = 0; x < w; x++) {
-					guint32 v = gdk_image_get_pixel (img, x, y);
-					if (v == 0)
-						pixels[y * rowstride + x * n_chan + 3] = 0;
-				}
-			}
-			g_object_unref (img);
-		}
-	}
-	return pb;
+	return g_object_ref ((GdkPixbuf *)pixmap);
 }
 
 /* ------------------------------------------------------------------ */

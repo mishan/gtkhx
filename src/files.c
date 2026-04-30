@@ -612,9 +612,8 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(upbtn, "clicked",
 					   G_CALLBACK(file_up_btn), files_list);
 	gtk_tooltips_set_tip(tooltips, upbtn, _("Parent Directory"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL], up_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -622,18 +621,15 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(file_reload_btn), files_list);
 	gtk_tooltips_set_tip(tooltips, reloadbtn, _("Reload"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL],
-										refresh_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, downloadbtn, _("Download"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL], dl_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)dl_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
 	gtk_container_add(GTK_CONTAINER(downloadbtn), pix);
@@ -646,20 +642,17 @@ static struct gfile_list *create_files_window (char *path)
 
 	uploadbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, uploadbtn, _("Upload"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL], ul_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)ul_xpm);
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(uploadbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
 	crtfldbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, crtfldbtn, _("New Folder"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL],
-										mkdir_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)mkdir_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
 	g_signal_connect(crtfldbtn, "clicked",
 					   G_CALLBACK(makeDirDialog), files_list);
@@ -667,9 +660,8 @@ static struct gfile_list *create_files_window (char *path)
 
 	filinfobtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, filinfobtn, _("Info"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL], info_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)info_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
 	g_signal_connect(filinfobtn, "clicked",
 					   G_CALLBACK(get_file_info), files_list);
@@ -677,10 +669,8 @@ static struct gfile_list *create_files_window (char *path)
 
 	delbtn = gtk_button_new();
 	gtk_tooltips_set_tip(tooltips, delbtn, _("Delete"), 0);
-	icon = gdk_pixmap_create_from_xpm_d(toolbar_window->window, &mask,
-										&style->bg[GTK_STATE_NORMAL],
-										trash_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)trash_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(delbtn), pix);
 	g_signal_connect(delbtn, "clicked",
 					   G_CALLBACK(delete_file), files_list);

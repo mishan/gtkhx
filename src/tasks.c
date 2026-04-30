@@ -555,9 +555,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	hbuttonbox = gtk_hbox_new(0,0);
 
 	stopbtn = gtk_button_new();
-	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], kick_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)kick_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(stopbtn), pix);
 	gtk_tooltips_set_tip(tooltips, stopbtn, _("Stop Task"), 0);
 	g_signal_connect(stopbtn, "clicked",
@@ -565,9 +564,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	icon = 0, mask = 0, pix = 0;
 
 	gobtn = gtk_button_new();
-	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], start_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)start_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(gobtn), pix);
 	gtk_tooltips_set_tip(tooltips, gobtn, _("Start Task"), 0);
 	g_signal_connect(gobtn, "clicked",
@@ -575,9 +573,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	icon = 0, mask = 0, pix = 0;
 
 	upbtn = gtk_button_new();
-	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], up_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	gtk_tooltips_set_tip(tooltips, upbtn, _("Move Xfer Up in Queue"), 0);
 	g_signal_connect(upbtn, "clicked", G_CALLBACK(task_up), 
@@ -586,9 +583,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 
 	dnbtn = gtk_button_new();
-	icon = gdk_pixmap_create_from_xpm_d(tasks_window->window, &mask, 
-										&style->bg[GTK_STATE_NORMAL], down_xpm);
-	pix = gtk_image_new_from_pixmap(icon, mask);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)down_xpm);
+	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(dnbtn), pix);
 	gtk_tooltips_set_tip(tooltips, dnbtn, _("Move Xfer Down in Queue"), 0);
 	g_signal_connect(dnbtn, "clicked", G_CALLBACK(task_dn), 
