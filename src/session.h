@@ -90,7 +90,7 @@ struct news_item {
 	guint16 partcount;
 	guint16 size;
 	struct news_parts *parts;
-	GtkCTreeNode *node;
+	GtkTreeIter iter;	/* Phase 2.8: was GtkCTreeNode *node */
 	struct news_group *group;
 };
 
@@ -105,10 +105,11 @@ struct gnews_catalog {
 	struct gnews_catalog *next, *prev;
 	char *path;
 	GtkWidget *window;
-	GtkWidget *news_tree;
+	GtkWidget *news_tree;	/* GtkTreeView since Phase 2.8 */
+	GtkTreeStore *news_store;
 	GtkWidget *news_text;
 	GtkWidget *authorlbl, *subjectlbl, *datelbl;
-	GtkCTreeNode *row;
+	/* selection is queried from news_tree at use time; no cached row */
 	char listing;
 };
 

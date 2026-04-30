@@ -1537,25 +1537,48 @@ static void settings_page_general(GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
 }
 
+/* Phase 2.8: GtkCTree → GtkTreeView in tree mode.
+ *
+ * The settings dialog's left-hand category tree used to be a GtkCTree;
+ * it's now a GtkTreeView backed by a GtkTreeStore with two columns:
+ *
+ *   OPT_COL_LABEL  G_TYPE_STRING   the visible category name
+ *   OPT_COL_PAGE   G_TYPE_INT      the GtkNotebook page index to flip to
+ *
+ * The selection callback reads the page index out of the model and
+ * sets the notebook page; helper settings_create_page() now takes
+ * GtkTreeIter * arguments instead of GtkCTreeNode **. */
+enum {
+	OPT_COL_LABEL = 0,
+	OPT_COL_PAGE,
+	OPT_N_COLS
+};
+
 static void
-settings_ctree_select (GtkWidget * ctree, GtkCTreeNode * node)
+settings_ctree_select (GtkTreeView *tree, gpointer user_data)
 {
 	GtkWidget *book;
+	GtkTreeSelection *sel;
+	GtkTreeModel *model;
+	GtkTreeIter iter;
 	gint page;
 
-	if (!GTK_CLIST (ctree)->selection)
+	(void)user_data;
+
+	sel = gtk_tree_view_get_selection(tree);
+	if (!gtk_tree_selection_get_selected(sel, &model, &iter))
 		return;
 
-	book = GTK_WIDGET (g_object_get_data (G_OBJECT (ctree), "user_data"));
-	page = (gint) gtk_ctree_node_get_row_data (GTK_CTREE (ctree), node);
+	book = GTK_WIDGET (g_object_get_data (G_OBJECT (tree), "user_data"));
+	gtk_tree_model_get(model, &iter, OPT_COL_PAGE, &page, -1);
 
 	gtk_notebook_set_page (GTK_NOTEBOOK (book), page);
 }
 
 static GtkWidget *
-settings_create_page (GtkWidget * book, gchar * book_label, GtkWidget * ctree,
-							 gchar * tree_label, GtkCTreeNode * parent,
-							 GtkCTreeNode ** node, gint page_index,
+settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
+							 gchar *tree_label, GtkTreeIter *parent,
+							 GtkTreeIter *node, gint page_index,
 							 void (*draw_func) (GtkWidget *))
 {
 	GtkWidget *frame;
@@ -1581,12 +1604,12 @@ settings_create_page (GtkWidget * book, gchar * book_label, GtkWidget * ctree,
 	gtk_container_set_border_width (GTK_CONTAINER (vbox), 4);
 	gtk_container_add (GTK_CONTAINER (vvbox), vbox);
 
-	/* label on the tree */
-	*node = gtk_ctree_insert_node (GTK_CTREE (ctree), parent, NULL,
-								   &tree_label, 0, NULL, NULL, NULL, NULL,
-								   FALSE, FALSE);
-	gtk_ctree_node_set_row_data (GTK_CTREE (ctree), *node,
-										  (gpointer) page_index);
+	/* row in the category tree */
+	gtk_tree_store_append (store, node, parent);
+	gtk_tree_store_set (store, node,
+						OPT_COL_LABEL, tree_label,
+						OPT_COL_PAGE, page_index,
+						-1);
 
 	/* call the draw func if there is one */
 	if (draw_func)
@@ -1599,8 +1622,11 @@ settings_create_page (GtkWidget * book, gchar * book_label, GtkWidget * ctree,
 
 void create_options_window(GtkWidget *widget, gpointer data)
 {
-	GtkCTreeNode *last_top;
-	GtkCTreeNode *last_child;
+	GtkTreeIter last_top;
+	GtkTreeIter last_child;
+	GtkTreeStore *store;
+	GtkTreeViewColumn *col;
+	GtkCellRenderer *renderer;
 	GtkWidget *dialog;
 	GtkWidget *hbbox;
 	GtkWidget *frame;
@@ -1609,7 +1635,6 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	GtkWidget *hbox;
 	GtkWidget *vbox;
 	GtkWidget *wid;
-	gchar *titles[1];
 	gint page_index;
 	session *sess = data;
 
@@ -1659,10 +1684,18 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start (GTK_BOX (GTK_DIALOG (dialog)->vbox),
 							  hbox, TRUE, TRUE, 0);
 
-	titles[0] = _("Categories");
-	ctree = gtk_ctree_new_with_titles (1, 0, titles);
-	gtk_clist_set_selection_mode (GTK_CLIST (ctree), GTK_SELECTION_BROWSE);
-	gtk_ctree_set_indent (GTK_CTREE (ctree), 15);
+	store = gtk_tree_store_new(OPT_N_COLS, G_TYPE_STRING, G_TYPE_INT);
+	ctree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+	g_object_unref(store);  /* the view owns the only ref now */
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(ctree), TRUE);
+	renderer = gtk_cell_renderer_text_new();
+	col = gtk_tree_view_column_new_with_attributes(_("Categories"), renderer,
+												   "text", OPT_COL_LABEL,
+												   NULL);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(ctree), col);
+	gtk_tree_selection_set_mode(
+		gtk_tree_view_get_selection(GTK_TREE_VIEW(ctree)),
+		GTK_SELECTION_BROWSE);
 	gtk_widget_set_size_request (ctree, 140, 0);
 	gtk_box_pack_start (GTK_BOX (hbox), ctree, 0, 0, 0);
 
@@ -1675,59 +1708,64 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_notebook_set_show_border (GTK_NOTEBOOK (book), FALSE);
 	gtk_container_add (GTK_CONTAINER (frame), book);
 	g_object_set_data (G_OBJECT (ctree), "user_data", book);
-	g_signal_connect (GTK_OBJECT (ctree), "tree_select_row",
+	g_signal_connect (GTK_OBJECT (ctree), "cursor-changed",
 						G_CALLBACK (settings_ctree_select), NULL);
 	page_index = 0;
 
-	vbox = settings_create_page(book, _("General Settings"), ctree,
-								_("General Settings"), 0, &last_top,
+	vbox = settings_create_page(book, _("General Settings"), store,
+								_("General Settings"), NULL, &last_top,
 								page_index++, settings_page_general);
-	gtk_ctree_select (GTK_CTREE (ctree), last_top);
 
-	vbox = settings_create_page(book, _("Tracker Settings"), ctree,
-								_("Tracker Settings"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Tracker Settings"), store,
+								_("Tracker Settings"), &last_top, &last_child,
 								page_index++, settings_page_tracker);
 
-	vbox = settings_create_page(book, _("Icon Settings"), ctree,
-								_("Icon Settings"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Icon Settings"), store,
+								_("Icon Settings"), &last_top, &last_child,
 								page_index++, settings_page_icon);
 
-	vbox = settings_create_page(book, _("Path Settings"), ctree,
-								_("Paths"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Path Settings"), store,
+								_("Paths"), &last_top, &last_child,
 								page_index++, settings_page_path);
 
-	vbox = settings_create_page(book, _("Files Settings"), ctree,
-								_("Files Settings"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Files Settings"), store,
+								_("Files Settings"), &last_top, &last_child,
 								page_index++, settings_page_files);
 
-	vbox = settings_create_page(book, _("Threaded News Settings"), ctree,
-								_("Threaded News"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Threaded News Settings"), store,
+								_("Threaded News"), &last_top, &last_child,
 								page_index++, settings_page_news15);
 
 #if 0 /* XXX */
-	vbox = settings_create_page(book, _("Logging Settings"), ctree,
-								_("Logging Settings"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Logging Settings"), store,
+								_("Logging Settings"), &last_top, &last_child,
 								page_index++, settings_page_logging);
 #endif
 
-	vbox = settings_create_page(book, _("Miscellaeneous"), ctree,
-								_("Miscellaeneous"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Miscellaeneous"), store,
+								_("Miscellaeneous"), &last_top, &last_child,
 								page_index++, settings_page_misc);
 
-	vbox = settings_create_page(book, _("XText Settings"), ctree,
-								_("XText Settings"), 0, &last_top,
+	vbox = settings_create_page(book, _("XText Settings"), store,
+								_("XText Settings"), NULL, &last_top,
 								page_index++, settings_page_xtext);
 
-	vbox = settings_create_page(book, _("Font Settings"), ctree,
-								_("Fonts Settings"), last_top, &last_child,
+	vbox = settings_create_page(book, _("Font Settings"), store,
+								_("Fonts Settings"), &last_top, &last_child,
 								page_index++, settings_page_font);
 
-	vbox = settings_create_page(book, _("Sound Settings"), ctree,
-								_("Sound Settings"), 0, &last_top,
+	vbox = settings_create_page(book, _("Sound Settings"), store,
+								_("Sound Settings"), NULL, &last_top,
 								page_index++, settings_page_sound);
 
-	gtk_ctree_expand_recursive ((GtkCTree *) ctree, 0);
-	gtk_clist_select_row (GTK_CLIST (ctree), 0, 0);
+	gtk_tree_view_expand_all (GTK_TREE_VIEW (ctree));
+	{
+		GtkTreeIter first;
+		if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &first))
+			gtk_tree_selection_select_iter(
+				gtk_tree_view_get_selection(GTK_TREE_VIEW(ctree)),
+				&first);
+	}
 
 	gtk_widget_show_all(dialog);
 

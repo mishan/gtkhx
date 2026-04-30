@@ -48,6 +48,35 @@ struct gnews_folder *gfnews_list = NULL;
 struct gnews_folder *gfnews_with_hlist (GtkWidget *hlist);
 struct gnews_catalog *gcnews_list = NULL;
 struct gnews_catalog *create_gcnews_window (char *path);
+
+/* Phase 2.8: GtkTreeStore column layout for the news thread tree.
+ * Column 0 is the subject text shown in the visible column; column 1
+ * carries the underlying news_item pointer so the selection callbacks
+ * can recover it without keeping a separate row-data table. */
+enum {
+	NEWS_COL_SUBJECT = 0,
+	NEWS_COL_ITEM,
+	NEWS_N_COLS
+};
+
+/* Return the news_item * for the currently selected row, or NULL. */
+static struct news_item *gcnews_selected_item(struct gnews_catalog *gcnews)
+{
+	GtkTreeSelection *sel;
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	struct news_item *item = NULL;
+
+	if (!gcnews || !gcnews->news_tree)
+		return NULL;
+
+	sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(gcnews->news_tree));
+	if (!gtk_tree_selection_get_selected(sel, &model, &iter))
+		return NULL;
+
+	gtk_tree_model_get(model, &iter, NEWS_COL_ITEM, &item, -1);
+	return item;
+}
 struct gnews_folder *create_gfnews_window(char *path);
 
 void hx_news15_get_post(struct htlc_conn *htlc, struct news_item *item)
@@ -766,13 +795,14 @@ static void destroy_gcnews_browser(GtkWidget *widget, gpointer data)
 	gtk_widget_destroy(widget);
 }
 
-void newsc_clicked (GtkCTree *ctree, GList *node, gint column, struct gnews_catalog *gcnews)
-
+/* Phase 2.8: now the GtkTreeView "cursor-changed" handler. */
+void newsc_clicked (GtkTreeView *tree, struct gnews_catalog *gcnews)
 {
-	struct news_item *item = gtk_ctree_node_get_row_data(ctree, (GtkCTreeNode *)node);
+	struct news_item *item = gcnews_selected_item(gcnews);
 
-	hx_news15_get_post(&the_session.htlc, item);
-	gcnews->row = (GtkCTreeNode *)node;
+	if (item)
+		hx_news15_get_post(&the_session.htlc, item);
+	(void)tree;
 }
 
 void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -799,18 +829,14 @@ void news15_cancel_post(GtkWidget *btn, GtkWidget *window)
 
 void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
-	struct news_item *item = NULL;
+	struct news_item *item = gcnews_selected_item(gcnews);
 
-	if(gcnews->row) {
-		item = gtk_ctree_node_get_row_data(GTK_CTREE(gcnews->news_tree), 
-										   gcnews->row);
-	}
-	else {
+	if (!item)
 		return;
-	}
 
 	hx_news15_delete_thread(&the_session.htlc, gcnews->path, item->postid);
 	hx_news15_cat_list(&the_session.htlc, gcnews);
+	(void)btn;
 }
 
 void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -828,10 +854,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *hbox, *vbox;
 	GtkWidget *table;
 
-	if(gcnews->row) {
-		item = gtk_ctree_node_get_row_data(
-			GTK_CTREE(gcnews->news_tree), gcnews->row);
-	}
+	item = gcnews_selected_item(gcnews);
 
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_widget_set_size_request(window, 320, 250);
@@ -1005,8 +1028,10 @@ static void gcnews_reload_btn(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	if(gcnews->listing)
 		return;
-	gtk_clist_clear(GTK_CLIST(gcnews->news_tree));
+	if (gcnews->news_store)
+		gtk_tree_store_clear(gcnews->news_store);
 	hx_news15_cat_list(&the_session.htlc, gcnews);
+	(void)btn;
 }
 
 struct gnews_catalog *create_gcnews_window (char *path)
@@ -1127,10 +1152,26 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	viewport1 = gtk_viewport_new (NULL, NULL);
 	gtk_container_add (GTK_CONTAINER (scrolledwindow2), viewport1);
 	
-	news_tree = gtk_ctree_new (1, 0);
-	gtk_clist_set_row_height(GTK_CLIST(news_tree), 18); 
-	gtk_clist_set_shadow_type(GTK_CLIST(news_tree), GTK_SHADOW_NONE);
-	g_signal_connect(GTK_OBJECT(news_tree), "tree_select_row", 
+	/* Phase 2.8: GtkTreeView (in tree mode) replaces GtkCTree.
+	 * news_store holds the model; news_tree is the view. */
+	gcnews->news_store = gtk_tree_store_new(NEWS_N_COLS,
+											G_TYPE_STRING,
+											G_TYPE_POINTER);
+	news_tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(gcnews->news_store));
+	g_object_unref(gcnews->news_store);  /* the view holds the only ref now */
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(news_tree), FALSE);
+	{
+		GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+		GtkTreeViewColumn *col;
+		col = gtk_tree_view_column_new_with_attributes("Subject", renderer,
+													   "text", NEWS_COL_SUBJECT,
+													   NULL);
+		gtk_tree_view_append_column(GTK_TREE_VIEW(news_tree), col);
+	}
+	gtk_tree_selection_set_mode(
+		gtk_tree_view_get_selection(GTK_TREE_VIEW(news_tree)),
+		GTK_SELECTION_BROWSE);
+	g_signal_connect(GTK_OBJECT(news_tree), "cursor-changed",
 					   G_CALLBACK(newsc_clicked), gcnews);
 	gtk_container_add (GTK_CONTAINER (viewport1), news_tree);
 
@@ -1176,35 +1217,45 @@ struct gnews_catalog *create_gcnews_window (char *path)
 void output_news_catalog(struct gnews_catalog *gcnews)
 {
 	struct news_group *group = gcnews->group;
-	GtkCTreeNode *parent;
+	GtkTreeStore *store = gcnews->news_store;
 	int i;
 
 	gcnews->group->path = gcnews->path;
 
-	gtk_clist_clear(GTK_CLIST(gcnews->news_tree));
+	if (!store)
+		return;
 
-	gtk_clist_freeze(GTK_CLIST(gcnews->news_tree));
-	for(i = 0; i < group->post_count; i++) {
+	gtk_tree_store_clear(store);
+
+	/* Detach the view from the model during the bulk insert so the
+	 * row-inserted signal doesn't trigger O(N) work per row. This is
+	 * the GtkTreeView equivalent of the old gtk_clist_freeze/thaw. */
+	g_object_ref(store);
+	gtk_tree_view_set_model(GTK_TREE_VIEW(gcnews->news_tree), NULL);
+
+	for (i = 0; i < group->post_count; i++) {
 		struct news_item *item = &(group->posts[i]);
+		GtkTreeIter *parent_iter = NULL;
 		int j;
-		parent = 0;
 
-		if(!item) continue;
-		for(j = 0; j < group->post_count; j++) {
-			if(group->posts[j].postid == item->parentid) {
-				parent = group->posts[j].node;
+		for (j = 0; j < group->post_count; j++) {
+			if (j != i && group->posts[j].postid == item->parentid) {
+				parent_iter = &(group->posts[j].iter);
 				break;
 			}
 		}
 
-
-		item->node = gtk_ctree_insert_node(GTK_CTREE(gcnews->news_tree), 
-										   parent, 0, &item->subject, 0, 0, 0,
-										   0, 0, 0, 0);
-		gtk_ctree_node_set_row_data(GTK_CTREE(gcnews->news_tree), item->node,
-									item);
+		gtk_tree_store_append(store, &item->iter, parent_iter);
+		gtk_tree_store_set(store, &item->iter,
+						   NEWS_COL_SUBJECT, item->subject ? item->subject : "",
+						   NEWS_COL_ITEM, item,
+						   -1);
 	}
-	gtk_clist_thaw(GTK_CLIST(gcnews->news_tree));
+
+	gtk_tree_view_set_model(GTK_TREE_VIEW(gcnews->news_tree),
+							GTK_TREE_MODEL(store));
+	g_object_unref(store);
+	gtk_tree_view_expand_all(GTK_TREE_VIEW(gcnews->news_tree));
 
 	gcnews->listing = 0;
 }
