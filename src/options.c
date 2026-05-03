@@ -106,6 +106,21 @@ struct icon_viewer {
 
 void list_icons (void)
 {
+	/* Phase 3.2 stub: the cicn icon-viewer renders Mac classic resource
+	 * icons via GdkImage/GdkPixmap/GdkGC + cicn_to_gdkimage().  All four
+	 * APIs are gone in GTK 3 and cicn.c itself needs a cairo-surface
+	 * rewrite to produce GdkPixbufs (or cairo_surface_t).  That work is
+	 * Phase 3.4; until then the icon viewer just shows an empty list so
+	 * the rest of the options dialog stays usable.
+	 *
+	 * Original rendering loop is preserved below the early return so the
+	 * Phase 3.4 rewrite has a recipe to translate. */
+	GtkWidget *icon_list = iv->icon_list;
+	gtk_hlist_freeze(GTK_HLIST(icon_list));
+	gtk_hlist_thaw(GTK_HLIST(icon_list));
+	return;
+
+#if 0  /* PHASE_3_4: rewrite over cairo + GdkPixbuf */
 	GdkPixmap *pixmap;
 	GdkBitmap *mask;
 	gint row;
@@ -113,7 +128,6 @@ void list_icons (void)
 	guint32 icon;
 	unsigned int nfound = 0;
 	char buf[16];
-	GtkWidget *icon_list = iv->icon_list;
 	guint16 nres = 0;
 	int i;
 	guint32 id;
@@ -179,6 +193,7 @@ void list_icons (void)
 		gtk_hlist_sort(GTK_HLIST(icon_list));
 	}
 	gtk_hlist_thaw(GTK_HLIST(icon_list));
+#endif
 }
 
 
@@ -765,13 +780,13 @@ static void parse_tracker_list(void)
 		g_free(gtkhx_prefs.tracker);
 	}
 
-	gtkhx_prefs.num_tracker = GTK_CLIST(list)->rows;
-	gtkhx_prefs.tracker = g_malloc(GTK_CLIST(list)->rows * sizeof(char*));
+	gtkhx_prefs.num_tracker = GTK_HLIST(list)->rows;
+	gtkhx_prefs.tracker = g_malloc(GTK_HLIST(list)->rows * sizeof(char*));
 	if (cfgvars[TRACKER_IDX].allocated) g_free (gtkhx_prefs.tracker_str);
 	gtkhx_prefs.tracker_str = g_malloc0(1);
 
-	for(i = 0; i < GTK_CLIST(list)->rows; i++) {
-		char *tracker = gtk_clist_get_row_data(GTK_CLIST(list), i);
+	for(i = 0; i < GTK_HLIST(list)->rows; i++) {
+		char *tracker = gtk_hlist_get_row_data(GTK_HLIST(list), i);
 		size_t trackersize = strlen(tracker)+1;
 		gtkhx_prefs.tracker_str = g_realloc(gtkhx_prefs.tracker_str,
 											len+trackersize+1);
@@ -899,17 +914,23 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 {
 	GtkWidget *fontsel = gtk_font_selection_dialog_new(_("Browse Fonts"));
 
+	/* Phase 3.2: GtkFontSelectionDialog struct fields ok_button /
+	 * cancel_button became opaque in GTK 3 (the whole class is
+	 * deprecated in favour of GtkFontChooserDialog, which we'll move to
+	 * in the deprecation pass).  Use the accessor pair for now. */
 	g_signal_connect_swapped(
-								  GTK_FONT_SELECTION_DIALOG(
-									  fontsel)->cancel_button,
+								  gtk_font_selection_dialog_get_cancel_button(
+									  GTK_FONT_SELECTION_DIALOG(fontsel)),
 							  "clicked", (GCallback) gtk_widget_destroy,
 							  fontsel);
 
 	g_object_set_data(G_OBJECT(
-							GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button),
+							gtk_font_selection_dialog_get_ok_button(
+								GTK_FONT_SELECTION_DIALOG(fontsel))),
 						"entry", entry);
 	g_signal_connect(
-						   GTK_FONT_SELECTION_DIALOG(fontsel)->ok_button,
+						   gtk_font_selection_dialog_get_ok_button(
+							   GTK_FONT_SELECTION_DIALOG(fontsel)),
 					   "clicked", G_CALLBACK(set_font), fontsel);
 	gtk_font_selection_dialog_set_font_name(GTK_FONT_SELECTION_DIALOG(fontsel),
 											gtkhx_prefs.font);
@@ -928,7 +949,7 @@ settings_slider_cb (GtkAdjustment * adj, int *value)
 	struct gtkhx_chat *gchat;
 	struct msgwin *msg;
 
-	*value = adj->value;
+	*value = gtk_adjustment_get_value(adj);
 	for(gchat = the_session.gchat_list; gchat; gchat = gchat->prev) {
 		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
 	}
@@ -985,15 +1006,34 @@ static void add_tracker(GtkWidget *add, GtkWidget *entry)
 	char *tracker = g_strdup(gtk_entry_get_text(GTK_ENTRY(entry)));
 	gint row;
 
-	row = gtk_clist_append(GTK_CLIST(tracker_list), &tracker);
-	gtk_clist_set_row_data(GTK_CLIST(tracker_list), row,
+	row = gtk_hlist_append(GTK_HLIST(tracker_list), &tracker);
+	gtk_hlist_set_row_data(GTK_HLIST(tracker_list), row,
 						   tracker);
 	gtk_entry_set_text(GTK_ENTRY(entry), "");
 }
 
 static void remove_tracker(GtkWidget *del, GtkWidget *list)
 {
-	gtk_clist_remove(GTK_CLIST(list), GTK_CLIST(list)->focus_row);
+	/* Phase 3.2: GtkCList tracked the focused row in a public ->focus_row
+	 * field. The gtk_hlist_compat shim is built on GtkTreeView, where
+	 * "focus" lives in GtkTreeSelection.  Resolve the selected row's
+	 * index via the underlying tree-view selection and feed it to
+	 * gtk_hlist_remove. */
+	GtkTreeSelection *sel;
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+	GtkTreePath *path;
+	gint row;
+
+	sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(list));
+	if (!gtk_tree_selection_get_selected(sel, &model, &iter))
+		return;
+
+	path = gtk_tree_model_get_path(model, &iter);
+	row = gtk_tree_path_get_indices(path)[0];
+	gtk_tree_path_free(path);
+
+	gtk_hlist_remove(GTK_HLIST(list), row);
 }
 
 static void settings_page_tracker (GtkWidget *vbox)
@@ -1011,7 +1051,7 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
-	tracker_list = gtk_clist_new(1);
+	tracker_list = gtk_hlist_new(1);
 	gtk_container_add(GTK_CONTAINER(scroll), tracker_list);
 
 	gtk_box_pack_start(GTK_BOX(wid), scroll, 0, 0, 0);
@@ -1044,9 +1084,9 @@ static void settings_page_tracker (GtkWidget *vbox)
 	for(i = 0; i < gtkhx_prefs.num_tracker; i++) {
 		char *tracker = g_strdup(gtkhx_prefs.tracker[i]);
 
-		row = gtk_clist_append(GTK_CLIST(tracker_list),
+		row = gtk_hlist_append(GTK_HLIST(tracker_list),
 							   &tracker);
-		gtk_clist_set_row_data(GTK_CLIST(tracker_list), row,
+		gtk_hlist_set_row_data(GTK_HLIST(tracker_list), row,
 							   tracker);
 	}
 }
@@ -1572,7 +1612,7 @@ settings_ctree_select (GtkTreeView *tree, gpointer user_data)
 	book = GTK_WIDGET (g_object_get_data (G_OBJECT (tree), "user_data"));
 	gtk_tree_model_get(model, &iter, OPT_COL_PAGE, &page, -1);
 
-	gtk_notebook_set_page (GTK_NOTEBOOK (book), page);
+	gtk_notebook_set_current_page (GTK_NOTEBOOK (book), page);
 }
 
 static GtkWidget *
@@ -1660,7 +1700,9 @@ void create_options_window(GtkWidget *widget, gpointer data)
 									 FALSE);
 
 	hbbox = gtk_hbutton_box_new ();
-	gtk_button_box_set_spacing (GTK_BUTTON_BOX (hbbox), 4);
+	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
+	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
+	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
 	gtk_box_pack_end (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))), hbbox,
 							FALSE, FALSE, 0);
 
