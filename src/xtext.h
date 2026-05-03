@@ -31,6 +31,10 @@
 #define HEXCHAT_XTEXT_H
 
 #include <gtk/gtk.h>
+/* Phase 3.2: pull in compat typedefs (GdkPixmap, GdkDrawable, GdkGC) so
+ * consumers of xtext.h compile under GTK 3 even though the actual cairo
+ * rewrite of xtext.c is deferred to Phase 3.4. */
+#include "session.h"
 
 #define GTK_TYPE_XTEXT              (gtk_xtext_get_type ())
 #define GTK_XTEXT(object)           (G_TYPE_CHECK_INSTANCE_CAST ((object), GTK_TYPE_XTEXT, GtkXText))

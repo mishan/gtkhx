@@ -52,6 +52,11 @@ typedef gpointer  GdkColormap;
  */
 typedef gpointer  GdkGC;
 typedef gpointer  GdkImage;
+/* GdkDrawable was the abstract parent of GdkWindow + GdkPixmap in GTK 2.
+ * GTK 3 deletes it; cairo surfaces are the modern equivalent. xtext.h
+ * still declares one; aliasing it to gpointer lets the header parse for
+ * unrelated consumers. */
+typedef gpointer  GdkDrawable;
 
 /* ---- Message-window threading ------------------------------------- */
 
