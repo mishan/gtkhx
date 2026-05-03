@@ -499,7 +499,7 @@ static void files_drag_send(GtkWidget *source, GdkDragContext *context,
 							guint eventTime)
 {
 	/* We are the knights who say "Nee!" */
-	gtk_selection_data_set(selection, selection->type,  0, 0, 0);
+	gtk_selection_data_set(selection, gtk_selection_data_get_target(selection), 0, NULL, 0);
 }
 
 static void files_drag_receive(GtkWidget *target, GdkDragContext *context,

@@ -941,7 +941,7 @@ static void chat_close (GtkWidget *widget, gpointer data)
 
 	wind_tmp = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 
-	gtk_container_remove(GTK_CONTAINER(hbox->parent), hbox);
+	gtk_container_remove(GTK_CONTAINER(gtk_widget_get_parent(hbox)), hbox);
 	gtk_container_add(GTK_CONTAINER(wind_tmp), hbox);
 	gtk_widget_realize(gchat->output);
 	gchat->input = 0;
@@ -954,13 +954,15 @@ static void chat_close (GtkWidget *widget, gpointer data)
 void generate_colors(GtkWidget *widget)
 {
 	int i;
+	(void) widget;
 
+	/* GTK 3 has no GdkColormap and no gdk_color_alloc(); GdkColor.pixel
+	 * is just packed RGB on truecolor displays. */
 	if (!colors[0].pixel) {
 		for(i=0; i<37; i++) {
 			colors[i].pixel = (unsigned long)((colors[i].red & 0xff00) * 256 +
 											  (colors[i].green & 0xff00) +
 											  (colors[i].blue & 0xff00) / 256);
-			gdk_color_alloc(gtk_widget_get_colormap(widget), &colors[i]);
 		}
 	}
 }
@@ -981,7 +983,7 @@ void create_chat(session *sess)
 		g_free (fontname);
 	}
 	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
-	GTK_WIDGET_UNSET_FLAGS(text, GTK_CAN_FOCUS);
+	gtk_widget_set_can_focus(text, FALSE);
 	/* Phase 2.6: tint_red/green/blue dropped — HexChat's xtext doesn't
 	 * carry the tinted-transparency feature.  trans_xtext is honored
 	 * only as a "draw the root window through" toggle now. */
@@ -991,17 +993,14 @@ void create_chat(session *sess)
 
 	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
 
-	gtk_object_ref(text);
-	gtk_object_sink(text);
-	gtk_object_ref(vscroll);
-	gtk_object_sink(vscroll);
+	g_object_ref_sink(text);
+	g_object_ref_sink(vscroll);
 
 	chat_hbox = gtk_hbox_new(0, 0);
 	gtk_widget_set_size_request(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
 						 (gtkhx_prefs.geo.chat.ysize<<6)/1000);
 
-	gtk_object_ref(chat_hbox);
-	gtk_object_sink(chat_hbox);
+	g_object_ref_sink(chat_hbox);
 	gtk_box_pack_start(GTK_BOX(chat_hbox), text, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(chat_hbox), vscroll, 0, 0, 0);
 
@@ -1184,14 +1183,10 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gtk_hlist_set_shadow_type(GTK_HLIST(userlist), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(userlist), 0, 
 									   GTK_JUSTIFY_LEFT);
-	gtk_object_ref(text);
-	gtk_object_sink(text);
-	gtk_object_ref(vscroll);
-	gtk_object_sink(vscroll);
-	gtk_object_ref(subject);
-	gtk_object_sink(subject);
-	gtk_object_ref(userlist);
-	gtk_object_sink(userlist);
+	g_object_ref_sink(text);
+	g_object_ref_sink(vscroll);
+	g_object_ref_sink(subject);
+	g_object_ref_sink(userlist);
 
 	gchat->cid = chat->cid;
 	gchat->chat = chat;

@@ -247,7 +247,7 @@ useredit_chk_activate (GtkWidget *widget, gpointer data)
 	if (i == NACCESS)
 		return;
 	bitno = ues->access_widgets[i].bitno;
-	if (GTK_TOGGLE_BUTTON(widget)->active)
+	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget)))
 		set_bit(ues->access_buf, bitno);
 	else
 		unset_bit(ues->access_buf, bitno);

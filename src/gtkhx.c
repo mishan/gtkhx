@@ -32,6 +32,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <ctype.h>
+#include <locale.h>
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
@@ -141,7 +142,7 @@ timer_delete_ptr (void *ptr)
 				timer->prev->next = timer->next;
 			if (timer == timer_list)
 				timer_list = timer->next;
-			gtk_timeout_remove(timer->id);
+			g_source_remove(timer->id);
 			g_free(timer); /* bring out yer dead! */
 		}
 	}
@@ -218,8 +219,13 @@ hxd_fd_clr (int fd, int rw)
 
 static void init_colors (GtkWidget *widget)
 {
-	GdkColormap *colormap;
 	int i;
+	(void) widget;
+	/* GTK 3 has no GdkColormap; truecolor is assumed and the .pixel
+	 * field on GdkColor has no real meaning past being the packed RGB.
+	 * The legacy code allocated colors from a paletted colormap; here
+	 * we just compute the packed RGB and rely on cairo (Phase 3.4) for
+	 * the actual draw. */
 	user_colors[0].red = 0x0000;
 	user_colors[0].green = 00000;
 	user_colors[0].blue = 0x0000;
@@ -245,14 +251,10 @@ static void init_colors (GtkWidget *widget)
 	user_colors[7].green = 0xffff;
 	user_colors[7].blue = 0xffff;
 
-	colormap = gtk_widget_get_colormap(widget);
 	for (i = 0; i < 8; i++) {
-		user_colors[i].pixel = (gulong)(((user_colors[i].red & 0xff00) << 8) + 
-										(user_colors[i].green & 0xff00) + 
+		user_colors[i].pixel = (gulong)(((user_colors[i].red & 0xff00) << 8) +
+										(user_colors[i].green & 0xff00) +
 										((user_colors[i].blue & 0xff00) >> 8));
-		if (!gdk_colormap_alloc_color(colormap, &user_colors[i], 0, 1))
-			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
-							 _("alloc color failed"));
 	}
 
 	gdk_user_colors[0].red = 0;
@@ -269,12 +271,9 @@ static void init_colors (GtkWidget *widget)
 	gdk_user_colors[3].blue = 0xb0b0;
 
 	for (i = 0; i < 4; i++) {
-		colors[i].pixel = (gulong)(((gdk_user_colors[i].red & 0xff00) << 8) + 
-								   (gdk_user_colors[i].green & 0xff00) + 
+		colors[i].pixel = (gulong)(((gdk_user_colors[i].red & 0xff00) << 8) +
+								   (gdk_user_colors[i].green & 0xff00) +
 								   ((gdk_user_colors[i].blue & 0xff00) >> 8));
-		if (!gdk_colormap_alloc_color(colormap, &gdk_user_colors[i], 0, 1))
-			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
-							 _("alloc color failed"));
 	}
 }
 
@@ -384,7 +383,9 @@ static void init (int argc, char **argv)
 		rinput_tags[i] = -1;
 		winput_tags[i] = -1;
 	}
-	gtk_set_locale();
+	/* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
+	 * setlocale() itself. */
+	setlocale(LC_ALL, "");
 	/* Phase 2.9: initialize GDK's thread lock before gtk_init so that the
 	 * worker threads in network.c / xfers.c can call gdk_threads_enter()
 	 * later. GLib's threading subsystem itself has been auto-initialized
