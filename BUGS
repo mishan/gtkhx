@@ -1,2 +1,9 @@
+High priority:
+
 - Loading the tracker crashes
 - Connecting with icons.rsrc present in /usr/local/share/gtkhx crashes
+
+Low priority:
+
+- The connection to hlserver.com eventually gets closed for some reason (possibly server timeout). If it is
+  a server activity timeout, it would be nice to indicate that
