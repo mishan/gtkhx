@@ -56,17 +56,20 @@ void create_tasks(session *sess)
 {
 	GtkWidget *gtklist, *gtask_scroll;
 
-	gtklist = gtk_list_new();
-	gtk_object_ref(gtklist);
-	gtk_object_sink(gtklist);
+	/* Phase 3.2: ported from GtkList (removed in GTK 3) to GtkListBox.
+	 * Each transfer/task is a GtkListBoxRow holding the label+pbar
+	 * vbox; gtsk->listitem points at the row, with the gtsk pointer
+	 * stashed via g_object_set_data on the row itself. */
+	gtklist = gtk_list_box_new();
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(gtklist),
+									GTK_SELECTION_MULTIPLE);
+	g_object_ref_sink(gtklist);
 
 	gtask_scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(gtask_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(gtask_scroll), 
-										  gtklist);
-	gtk_object_ref(gtask_scroll);
-	gtk_object_sink(gtask_scroll);
+	gtk_container_add(GTK_CONTAINER(gtask_scroll), gtklist);
+	g_object_ref_sink(gtask_scroll);
 
 	sess->gtklist = gtklist;
 	sess->gtask_scroll = gtask_scroll;
@@ -154,15 +157,12 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), pbar, 1, 1, 0);
 
-	listitem = gtk_list_item_new();
+	listitem = gtk_list_box_row_new();
 	g_object_set_data(G_OBJECT(listitem), "gtsk", gtsk);
 	gtk_container_add(GTK_CONTAINER(listitem), vbox);
 
 	if (sess->gtklist) {
-		GList *itemlist;
-
-		itemlist = g_list_append(0, listitem);
-		gtk_list_append_items(GTK_LIST(sess->gtklist), itemlist);
+		gtk_list_box_insert(GTK_LIST_BOX(sess->gtklist), listitem, -1);
 		gtk_widget_show_all(listitem);
 	}
 
@@ -180,11 +180,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 static void gtask_delete (session *sess, struct gtask *gtsk)
 {
 	if(sess->gtklist) {
-		GList *itemlist;
-
-		itemlist = g_list_append(0, gtsk->listitem);
-		gtk_list_remove_items(GTK_LIST(sess->gtklist), itemlist);
-		g_list_free(itemlist);
+		gtk_container_remove(GTK_CONTAINER(sess->gtklist), gtsk->listitem);
 	}
 	if (gtsk->next)
 		gtsk->next->prev = gtsk->prev;
@@ -234,7 +230,7 @@ void track_prog_update (session *sess, char *str, int num, int total)
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 
 	if (pos)
-		gtk_progress_bar_update(GTK_PROGRESS_BAR(pbar), 
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), 
 								(gfloat)pos / (gfloat)(pos + total));
 
 	if (num >= total)
@@ -262,7 +258,7 @@ void trackconn_prog_update (session *sess, char *str, int num, int total)
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 
 	if (pos)
-		gtk_progress_bar_update(GTK_PROGRESS_BAR(pbar), 
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), 
 								(gfloat)pos / (gfloat)(pos + total));
 
 	if (num >= total)
@@ -293,7 +289,7 @@ void conn_task_update(session *sess, int stat)
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 
 	if (pos)
-		gtk_progress_bar_update(GTK_PROGRESS_BAR(pbar), 
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), 
 								(gfloat)pos / (gfloat)(pos + len));
 
 	if (stat == len)
@@ -319,7 +315,7 @@ void task_update (session *sess, struct task *tsk)
 			 tsk->trans, tsk->str ? tsk->str : "", pos, pos+len);
 	gtk_label_set_text(GTK_LABEL(label), taskstr);
 	if (pos)
-		gtk_progress_bar_update(GTK_PROGRESS_BAR(pbar), 
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), 
 								(gfloat)pos / (gfloat)(pos + len));
 
 	if (len == 0)
@@ -341,14 +337,19 @@ static void
 task_stop (GtkWidget *widget, gpointer data)
 {
 	struct gtask *gtsk;
-	GList *lp, *next;
+	GList *sel, *lp, *next;
 	GtkWidget *listitem;
 	session *sess = data;
 
 	if (!gtkhx_prefs.geo.tasks.open)
 		return;
 
-	for(lp = GTK_LIST(sess->gtklist)->selection; lp; lp = next) {
+	/* Phase 3.2: gtk_list_box_get_selected_rows returns a GList* of
+	 * GtkListBoxRow* (the rows themselves, not their children).
+	 * Caller owns the GList and must g_list_free() it; the rows
+	 * themselves are owned by the list box. */
+	sel = gtk_list_box_get_selected_rows(GTK_LIST_BOX(sess->gtklist));
+	for(lp = sel; lp; lp = next) {
 		next = lp->next;
 		listitem = (GtkWidget *)lp->data;
 		gtsk = (struct gtask *)g_object_get_data(G_OBJECT(listitem), "gtsk");
@@ -378,15 +379,28 @@ task_stop (GtkWidget *widget, gpointer data)
 /*			gtask_delete(sess, gtsk); */
 		}
 	}
+	g_list_free(sel);
+}
+
+/* Phase 3.2: Move a GtkListBoxRow to a new index by ref'ing it,
+ * removing it from the container, and re-inserting at the new index.
+ * The list box re-acquires its ref on insert. */
+static void
+gtklist_row_move(GtkListBox *box, GtkWidget *row, int new_index)
+{
+	g_object_ref(row);
+	gtk_container_remove(GTK_CONTAINER(box), row);
+	gtk_list_box_insert(box, row, new_index);
+	g_object_unref(row);
+	gtk_list_box_select_row(box, GTK_LIST_BOX_ROW(row));
 }
 
 static void
 task_up(GtkWidget *widget, gpointer data)
 {
 	struct gtask *gtsk;
-	GList *sel, *prev;
-	GtkWidget *listitem, *item_prev;
-	GList *to_switch;
+	GList *sel;
+	GtkWidget *listitem;
 	int num, gtkpos;
 	session *sess = data;
 
@@ -394,11 +408,12 @@ task_up(GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	sel = GTK_LIST(sess->gtklist)->selection;
+	sel = gtk_list_box_get_selected_rows(GTK_LIST_BOX(sess->gtklist));
 	if(!sel) {
 		return;
 	}
 	listitem = sel->data;
+	g_list_free(sel);
 	gtsk = g_object_get_data(G_OBJECT(listitem), "gtsk");
 
 
@@ -415,33 +430,30 @@ task_up(GtkWidget *widget, gpointer data)
 
 	xfer_up(num);
 
-	gtkpos = gtk_list_child_position(GTK_LIST(sess->gtklist), listitem);
-	gtk_list_select_item(GTK_LIST(sess->gtklist), gtkpos-1);
-	prev = GTK_LIST(sess->gtklist)->selection;
-	item_prev = prev->data;
-	to_switch = g_list_append(0, item_prev);
-	to_switch = g_list_append(0, listitem);
-	gtk_list_remove_items_no_unref(GTK_LIST(sess->gtklist), to_switch);
-	gtk_list_insert_items(GTK_LIST(sess->gtklist), to_switch, gtkpos-1);
+	gtkpos = gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(listitem));
+	if(gtkpos <= 0) {
+		return;
+	}
+	gtklist_row_move(GTK_LIST_BOX(sess->gtklist), listitem, gtkpos - 1);
 }
 
 static void task_dn(GtkWidget *widget, gpointer data)
 {
 	struct gtask *gtsk;
-	GList *sel, *prev;
-	GtkWidget *listitem, *item_prev;
-	GList *to_switch;
+	GList *sel;
+	GtkWidget *listitem;
 	int num, gtkpos;
 	session *sess = data;
 
 	if(!gtkhx_prefs.queuedl) {
 		return;
 	}
-	sel = GTK_LIST(sess->gtklist)->selection;
+	sel = gtk_list_box_get_selected_rows(GTK_LIST_BOX(sess->gtklist));
 	if(!sel) {
 		return;
 	}
 	listitem = sel->data;
+	g_list_free(sel);
 	gtsk = g_object_get_data(G_OBJECT(listitem), "gtsk");
 
 
@@ -460,14 +472,8 @@ static void task_dn(GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	gtkpos = gtk_list_child_position(GTK_LIST(sess->gtklist), listitem);
-	gtk_list_select_item(GTK_LIST(sess->gtklist), gtkpos+1);
-	prev = GTK_LIST(sess->gtklist)->selection;
-	item_prev = prev->data;
-	to_switch = g_list_append(0, item_prev);
-	to_switch = g_list_append(0, listitem);
-	gtk_list_remove_items_no_unref(GTK_LIST(sess->gtklist), to_switch);
-	gtk_list_insert_items(GTK_LIST(sess->gtklist), to_switch, gtkpos+1);
+	gtkpos = gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(listitem));
+	gtklist_row_move(GTK_LIST_BOX(sess->gtklist), listitem, gtkpos + 1);
 }
 
 static void
@@ -482,11 +488,12 @@ task_go (GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	sel = GTK_LIST(sess->gtklist)->selection;
+	sel = gtk_list_box_get_selected_rows(GTK_LIST_BOX(sess->gtklist));
 	if(!sel) {
 		return;
 	}
 	listitem = sel->data;
+	g_list_free(sel);
 	gtsk = (struct gtask *)g_object_get_data(G_OBJECT(listitem), "gtsk");
 	if (gtsk->htxf) {
 		xfer_go(gtsk->htxf);
@@ -686,7 +693,7 @@ void file_update (session *sess, struct htxf_conn *htxf)
 	gtk_label_set_text(GTK_LABEL(label), str);
 
 	if(((gfloat)pos/size) <= 1) {
-		gtk_progress_bar_update(GTK_PROGRESS_BAR(pbar), (gfloat)pos/size);
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), (gfloat)pos/size);
 	}
 
 	g_free(posstr);
