@@ -216,46 +216,45 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 	htxf->opt.retry = 0;
 }
 
-static void put_file(GtkWidget *widget, gpointer data)
+/* Phase 3.2: GtkFileSelection was removed in GTK 3 (deprecated since
+ * 2.4).  Replaced wholesale with GtkFileChooserDialog.  The old
+ * "ok_button"/"cancel_button" public field-clicked-handler dance becomes
+ * a single "response" handler that switches on GTK_RESPONSE_ACCEPT vs.
+ * GTK_RESPONSE_CANCEL.  files_list is passed in via user_data instead
+ * of being stashed on the OK button. */
+static void
+upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 {
-	char *lpath = gtk_file_selection_get_filename(GTK_FILE_SELECTION(data));
-	GtkWidget *files_list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-															 "files_list");
+	GtkWidget *files_list = user_data;
 	struct gfile_list *gfl;
+	char *lpath;
 	char rpath[4096];
 
-	gfl = gfl_with_hlist(files_list);
-	if(!gfl || !gfl->cfl) {
-		return;
+	if (response_id == GTK_RESPONSE_ACCEPT) {
+		lpath = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+		gfl = gfl_with_hlist(files_list);
+		if (gfl && gfl->cfl && lpath) {
+			snprintf(rpath, sizeof(rpath), "%s/%s",
+					 gfl->cfl->path, basename(lpath));
+			hx_put_file(&the_session.htlc, lpath, rpath);
+		}
+		g_free(lpath);
 	}
-
-	snprintf(rpath, sizeof(rpath), "%s/%s", gfl->cfl->path, basename(lpath));
-
-	hx_put_file(&the_session.htlc, lpath, rpath);
-	gtk_widget_destroy(GTK_WIDGET(data));
-
+	gtk_widget_destroy(GTK_WIDGET(dialog));
 }
 
 static void get_put_data (GtkWidget *widget, gpointer data)
 {
-	GtkWidget *file_dialog = gtk_file_selection_new(_("Upload..."));
+	GtkWidget *file_dialog = gtk_file_chooser_dialog_new(
+		_("Upload..."), NULL, GTK_FILE_CHOOSER_ACTION_OPEN,
+		_("_Cancel"), GTK_RESPONSE_CANCEL,
+		_("_Open"),   GTK_RESPONSE_ACCEPT,
+		NULL);
 
-	g_signal_connect_swapped(file_dialog, "destroy",
-							  (GCallback)gtk_widget_destroy,
-							  file_dialog);
-	g_signal_connect_swapped(
-								  GTK_FILE_SELECTION(
-									  file_dialog)->cancel_button,
-							  "clicked", (GCallback) gtk_widget_destroy,
-							  file_dialog);
-	g_signal_connect(GTK_FILE_SELECTION(file_dialog)->ok_button,
-					   "clicked", G_CALLBACK(put_file), file_dialog);
-
-	g_object_set_data(G_OBJECT(GTK_FILE_SELECTION(file_dialog)->ok_button),
-						"files_list", data);
+	g_signal_connect(file_dialog, "response",
+					 G_CALLBACK(upload_file_response), data);
 
 	gtk_widget_show_all(file_dialog);
-	gtk_grab_add(file_dialog);
 }
 
 static void file_clicked (GtkWidget *widget, GdkEventButton *event)
