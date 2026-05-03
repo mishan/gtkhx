@@ -154,7 +154,7 @@ static GtkWidget *menu_quick_sub (char *name, GtkWidget * menu)
 
  	sub_menu = gtk_menu_new ();
  	sub_item = gtk_menu_item_new_with_label (name);
- 	gtk_menu_append (GTK_MENU (menu), sub_item);
+ 	gtk_menu_shell_append (GTK_MENU_SHELL (menu), sub_item);
  	gtk_widget_show (sub_item);
  	gtk_menu_item_set_submenu (GTK_MENU_ITEM (sub_item), sub_menu);
 
@@ -176,7 +176,7 @@ static GtkWidget * menu_quick_item ( char *label, GtkWidget * menu,
 		item = gtk_menu_item_new ();
 	else
 		item = gtk_menu_item_new_with_label (label);
-	gtk_menu_append (GTK_MENU (menu), item);
+	gtk_menu_shell_append (GTK_MENU_SHELL (menu), item);
 	g_object_set_data (G_OBJECT (item), "user_data", userdata);
 
 	if (!sensitive)
@@ -194,7 +194,7 @@ menu_quick_item_with_callback (session *sess, void *callback, char *label,
 	GtkWidget *item;
 
 	item = gtk_menu_item_new_with_label (label);
-	gtk_menu_append (GTK_MENU (menu), item);
+	gtk_menu_shell_append (GTK_MENU_SHELL (menu), item);
 	g_signal_connect (item, "activate",
 							  G_CALLBACK (callback), arg);
 	g_object_set_data(G_OBJECT(item), "sess", sess);
@@ -328,11 +328,12 @@ static void user_popup(struct hx_user *user, GdkEventButton *event,
 	menu_popup (menu, event);
 }
 
-int users_sort(GtkCList *clist, const GtkHListRow *ptr1,
-			   const GtkHListRow *ptr2)
+int users_sort(GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
 {
-	struct hx_user *usr1 = ptr1->data;
-	struct hx_user *usr2 = ptr2->data;
+	const GtkHListRow *row1 = ptr1;
+	const GtkHListRow *row2 = ptr2;
+	struct hx_user *usr1 = row1->data;
+	struct hx_user *usr2 = row2->data;
 
 	if(user_click_col == COL_UID) {
 		if(usr1->uid < usr2->uid)
@@ -490,11 +491,16 @@ static void invite_u_to_chat(GtkWidget *widget, gpointer data)
 													   "list");
 	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 	guint32 *cid = g_object_get_data(G_OBJECT(widget), "cid");
-	char *titles[2] = {};
+	guint32 chat_cid;
 
-	gtk_clist_get_text(GTK_CLIST(list), *cid, 0, titles);
+	/* Phase 3.2: GtkCList exposed gtk_clist_get_text(); the
+	 * gtk_hlist_compat shim doesn't reach into cell text.  We now stash
+	 * the cid as row_data when populating the list and read it straight
+	 * back here, skipping the parse-from-display-string round-trip. */
+	chat_cid = GPOINTER_TO_UINT(
+		gtk_hlist_get_row_data(GTK_HLIST(list), *cid));
 
-	hx_invite_user(&sess->htlc, GPOINTER_TO_INT(data), atou32(titles[0]));
+	hx_invite_user(&sess->htlc, GPOINTER_TO_INT(data), chat_cid);
 	gtk_widget_destroy(dialog);
 	g_free(cid);
 }
@@ -566,9 +572,12 @@ static void prompt_chat(session *sess, guint16 _uid)
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
-	list = gtk_clist_new_with_titles(2, titles);
-	gtk_clist_set_selection_mode(GTK_CLIST(list), GTK_SELECTION_EXTENDED);
-	gtk_clist_set_column_width (GTK_CLIST (list), 0, 80);
+	list = gtk_hlist_new_with_titles(2, titles);
+	/* Phase 3.2: GTK_SELECTION_EXTENDED was renamed to
+	 * GTK_SELECTION_MULTIPLE in GTK 2.0 (same semantics: shift/ctrl
+	 * range and toggle selection). */
+	gtk_hlist_set_selection_mode(GTK_HLIST(list), GTK_SELECTION_MULTIPLE);
+	gtk_hlist_set_column_width (GTK_HLIST (list), 0, 80);
 	g_signal_connect(list, "select_row",
 					   G_CALLBACK(select_cid), cid);
 
@@ -576,6 +585,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	gtk_widget_set_size_request(list, 350, 200);
 
 	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
+		gint row;
 		if(!gchat->cid)
 			continue;
 
@@ -583,7 +593,11 @@ static void prompt_chat(session *sess, guint16 _uid)
 		entry[1] = gchat->chat->subject;
 
 
-		gtk_clist_append(GTK_CLIST(list), entry);
+		row = gtk_hlist_append(GTK_HLIST(list), entry);
+		/* Stash the cid as row_data so invite_u_to_chat can recover it
+		 * without parsing back the display string. */
+		gtk_hlist_set_row_data(GTK_HLIST(list), row,
+							   GUINT_TO_POINTER(gchat->chat->cid));
 	}
 	g_object_set_data(G_OBJECT(invite), "list", list);
 	g_signal_connect(invite, "clicked",
