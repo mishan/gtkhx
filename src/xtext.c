@@ -601,18 +601,10 @@ gtk_xtext_init (GtkXText * xtext)
 	xtext->dont_render2 = FALSE;
 	gtk_xtext_scroll_adjustments (xtext, NULL, NULL);
 
-	{
-		static const GtkTargetEntry targets[] = {
-			{ "UTF8_STRING", 0, TARGET_UTF8_STRING },
-			{ "STRING", 0, TARGET_STRING },
-			{ "TEXT",   0, TARGET_TEXT }, 
-			{ "COMPOUND_TEXT", 0, TARGET_COMPOUND_TEXT }
-		};
-		static const gint n_targets = sizeof (targets) / sizeof (targets[0]);
-
-		gtk_selection_add_targets (GTK_WIDGET (xtext), GDK_SELECTION_PRIMARY,
-											targets, n_targets);
-	}
+	/* Phase 3.4b: gtk_selection_add_targets is deferred until realize().
+	 * On Wayland (and arguably under GTK 3 in general) calling it from
+	 * init() crashes inside the backend selection setup because the
+	 * widget has no display yet. */
 }
 
 static void
@@ -830,6 +822,19 @@ gtk_xtext_realize (GtkWidget * widget)
 		gdk_window_get_display (window), GDK_HAND1);
 	xtext->resize_cursor = gdk_cursor_new_for_display (
 		gdk_window_get_display (window), GDK_LEFT_SIDE);
+
+	{
+		static const GtkTargetEntry targets[] = {
+			{ "UTF8_STRING", 0, TARGET_UTF8_STRING },
+			{ "STRING", 0, TARGET_STRING },
+			{ "TEXT",   0, TARGET_TEXT },
+			{ "COMPOUND_TEXT", 0, TARGET_COMPOUND_TEXT }
+		};
+		static const gint n_targets = sizeof (targets) / sizeof (targets[0]);
+
+		gtk_selection_add_targets (widget, GDK_SELECTION_PRIMARY,
+		                           targets, n_targets);
+	}
 
 	backend_init (xtext);
 }
