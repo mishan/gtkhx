@@ -619,10 +619,17 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	init_keyaccel(tasks_window);
 	g_signal_connect(tasks_window, "configure_event", 
 					   G_CALLBACK(tasks_move), sess);
-	gtk_widget_set_size_request(tasks_window, gtkhx_prefs.geo.tasks.xsize, 
-						 gtkhx_prefs.geo.tasks.ysize);
-	gtk_window_move(GTK_WINDOW(tasks_window), gtkhx_prefs.geo.tasks.xpos,
-					gtkhx_prefs.geo.tasks.ypos);
+	/* Phase 3.x: only apply saved geometry when the prefs file actually
+	 * has one (see users.c for rationale — zero-size collapses the
+	 * window under GTK 3). */
+	if (gtkhx_prefs.geo.tasks.xsize > 0 && gtkhx_prefs.geo.tasks.ysize > 0)
+		gtk_window_set_default_size(GTK_WINDOW(tasks_window),
+		                            gtkhx_prefs.geo.tasks.xsize,
+		                            gtkhx_prefs.geo.tasks.ysize);
+	if (gtkhx_prefs.geo.tasks.xpos > 0 || gtkhx_prefs.geo.tasks.ypos > 0)
+		gtk_window_move(GTK_WINDOW(tasks_window),
+		                gtkhx_prefs.geo.tasks.xpos,
+		                gtkhx_prefs.geo.tasks.ypos);
 	gtk_widget_show_all(tasks_window);
 
 

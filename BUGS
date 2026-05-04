@@ -2,6 +2,7 @@ High priority:
 
 - Loading the tracker crashes
 - Connecting with icons.rsrc present in /usr/local/share/gtkhx crashes
+- Chat / users / news / tasks windows no longer show
 
 Low priority:
 

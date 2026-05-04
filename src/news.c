@@ -268,10 +268,17 @@ void create_news_window (session *sess)
 	gtk_widget_set_sensitive(reloadButton, FALSE);
 	g_signal_connect(news_window, "configure_event", 
 					   G_CALLBACK(news_move), sess);
-	gtk_widget_set_size_request(news_window, gtkhx_prefs.geo.news.xsize, 
-						 gtkhx_prefs.geo.news.ysize);
-	gtk_window_move(GTK_WINDOW(news_window), gtkhx_prefs.geo.news.xpos,
-					gtkhx_prefs.geo.news.ypos);
+	/* Phase 3.x: only apply saved geometry when the prefs file actually
+	 * has one (see users.c for rationale — zero-size collapses the
+	 * window under GTK 3). */
+	if (gtkhx_prefs.geo.news.xsize > 0 && gtkhx_prefs.geo.news.ysize > 0)
+		gtk_window_set_default_size(GTK_WINDOW(news_window),
+		                            gtkhx_prefs.geo.news.xsize,
+		                            gtkhx_prefs.geo.news.ysize);
+	if (gtkhx_prefs.geo.news.xpos > 0 || gtkhx_prefs.geo.news.ypos > 0)
+		gtk_window_move(GTK_WINDOW(news_window),
+		                gtkhx_prefs.geo.news.xpos,
+		                gtkhx_prefs.geo.news.ypos);
 
 	gtk_widget_show_all(news_window);
 

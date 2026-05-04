@@ -833,10 +833,20 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	g_signal_connect(users_window, "configure_event",
 					   G_CALLBACK(users_move), sess);
-	gtk_widget_set_size_request(users_window, gtkhx_prefs.geo.users.xsize,
-						 gtkhx_prefs.geo.users.ysize);
-	gtk_window_move(GTK_WINDOW(users_window), gtkhx_prefs.geo.users.xpos,
-					gtkhx_prefs.geo.users.ypos);
+	/* Phase 3.x: only apply saved geometry when the prefs file actually
+	 * has one. On a fresh install the geo struct is zeroed, and calling
+	 * set_size_request(window, 0, 0) collapses the window to 0x0 — under
+	 * GTK 3 the compositor then refuses to map it and the window never
+	 * appears. The earlier set_size_request(264, 400) call serves as
+	 * the default size. */
+	if (gtkhx_prefs.geo.users.xsize > 0 && gtkhx_prefs.geo.users.ysize > 0)
+		gtk_window_set_default_size(GTK_WINDOW(users_window),
+		                            gtkhx_prefs.geo.users.xsize,
+		                            gtkhx_prefs.geo.users.ysize);
+	if (gtkhx_prefs.geo.users.xpos > 0 || gtkhx_prefs.geo.users.ypos > 0)
+		gtk_window_move(GTK_WINDOW(users_window),
+		                gtkhx_prefs.geo.users.xpos,
+		                gtkhx_prefs.geo.users.ypos);
 	gtk_widget_show_all(users_window);
 
 	gtkhx_prefs.geo.users.open = 1;

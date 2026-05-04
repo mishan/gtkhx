@@ -1125,10 +1125,18 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 	g_object_set_data(G_OBJECT(chat_window), "sess", sess);
 
-	gtk_window_move(GTK_WINDOW(chat_window), gtkhx_prefs.geo.chat.xpos,
-					gtkhx_prefs.geo.chat.ypos);
-	gtk_widget_set_size_request(chat_window, gtkhx_prefs.geo.chat.xsize, 
-						 gtkhx_prefs.geo.chat.ysize);
+	/* Phase 3.x: only apply saved geometry when the prefs file actually
+	 * has one (see users.c for rationale — zero-size collapses the
+	 * window under GTK 3). The earlier set_size_request(412, 280)
+	 * call serves as the default. */
+	if (gtkhx_prefs.geo.chat.xpos > 0 || gtkhx_prefs.geo.chat.ypos > 0)
+		gtk_window_move(GTK_WINDOW(chat_window),
+		                gtkhx_prefs.geo.chat.xpos,
+		                gtkhx_prefs.geo.chat.ypos);
+	if (gtkhx_prefs.geo.chat.xsize > 0 && gtkhx_prefs.geo.chat.ysize > 0)
+		gtk_window_set_default_size(GTK_WINDOW(chat_window),
+		                            gtkhx_prefs.geo.chat.xsize,
+		                            gtkhx_prefs.geo.chat.ysize);
 
 	gtk_widget_show_all(chat_window);
 	init_keyaccel(chat_window);
