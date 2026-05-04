@@ -218,7 +218,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
 
 	gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), NULL);
-	msg->vscroll = gtk_vscrollbar_new(GTK_XTEXT(msg->outputbuf)->adj);
+	msg->vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(msg->outputbuf)->adj);
 	msg->inputbuf = gtk_text_view_new();
 
 	gtkhx_apply_text_style(msg->inputbuf);
@@ -264,7 +264,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_set_size_request(msg->window, 412, 280);
 	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
 	gtk_container_set_border_width(GTK_CONTAINER(msg->window), 0);
-	hbox = gtk_hbox_new(0,0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, 500, 400);
 
 	outputframe = gtk_frame_new(0);
@@ -279,7 +279,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_set_size_request(inputframe, 0, 40);
 	gtk_widget_set_size_request(msg->inputbuf, 0, 40);
 
-	vpane = gtk_vpaned_new();
+	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_pack1(GTK_PANED(vpane), outputframe, 0, 1);
 	gtk_paned_pack2(GTK_PANED(vpane), inputframe, 0, 1);
 	gtk_paned_set_position(GTK_PANED(vpane), 230);

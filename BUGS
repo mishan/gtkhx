@@ -2,7 +2,7 @@ High priority:
 
 - Loading the tracker crashes
 - Connecting with icons.rsrc present in /usr/local/share/gtkhx crashes
-- Chat / users / news / tasks windows no longer show
+- Chat window does not initially display. It works after closing and reopening it
 
 Low priority:
 

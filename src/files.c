@@ -454,7 +454,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
-	entryHbox = gtk_hbox_new(0,0);
+	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
@@ -474,7 +474,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 							  (GCallback) gtk_widget_destroy,
 							  dialog);
 
-	btnHbox = gtk_hbox_new(0,0);
+	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_can_default(okBtn, TRUE);
 	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
@@ -595,7 +595,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
-	hbuttonbox = gtk_hbox_new(0,0);
+	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	upbtn = gtk_button_new();
 	gfl->up_btn = upbtn;
@@ -667,7 +667,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = 0, icon = 0, mask = 0;
 
 
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 400);
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), upbtn, 0, 0, 2);
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), reloadbtn, 0, 0, 2);
@@ -1082,8 +1082,8 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	name_entry = gtk_entry_new();
 	comments_text = gtk_text_view_new();
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(comments_text), GTK_WRAP_WORD);
-	vbox = gtk_vbox_new(0,0);
-	name_hbox = gtk_hbox_new(0,0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	name_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	savebtn = gtk_button_new_with_label(_("Save"));
 
 	text = g_strdup_printf("%s: %s", _("Creator"), creator);

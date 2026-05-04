@@ -557,7 +557,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_object_set_data(G_OBJECT(new), "dialog", dialog);
 	g_object_set_data(G_OBJECT(new), "sess", sess);
 
-	btnhbox = gtk_hbox_new(0,0);
+	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 
 	scroll = gtk_scrolled_window_new(0, 0);
@@ -802,7 +802,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_sensitive(chatbtn, FALSE);
 	gtk_widget_set_sensitive(ignobtn, FALSE);
 
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 400);
 
 	topframe = gtk_frame_new(0);
@@ -810,7 +810,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
-	hbuttonbox = gtk_hbox_new(0,0);
+	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
 
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), msgbtn, 0, 0, 0);

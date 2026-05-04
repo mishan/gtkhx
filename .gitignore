@@ -113,3 +113,5 @@ plugins/eliza/eliza
 .ninja_log
 .ninja_deps
 
+build.log
+setup.log

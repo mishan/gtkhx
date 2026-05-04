@@ -950,10 +950,10 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 	GtkAdjustment *adj;
 	GtkWidget *wid, *hbox, *lbox, *lab;
 
-	hbox = gtk_hbox_new (0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start (GTK_BOX (vbox), hbox, 0, 0, 2);
 
-	lbox = gtk_hbox_new (0, 0);
+	lbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start (GTK_BOX (hbox), lbox, 0, 0, 2);
 	gtk_widget_set_size_request (lbox, 60, 0);
 
@@ -964,7 +964,7 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 	g_signal_connect (adj, "value_changed",
 							  G_CALLBACK (settings_slider_cb), value);
 
-	wid = gtk_hscale_new (adj);
+	wid = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, adj);
 	gtk_scale_set_value_pos ((GtkScale *) wid, GTK_POS_RIGHT);
 	gtk_scale_set_digits ((GtkScale *) wid, 0);
 	gtk_container_add (GTK_CONTAINER (hbox), wid);
@@ -981,7 +981,7 @@ settings_create_group (GtkWidget * vvbox, gchar * title)
 	frame = gtk_frame_new (title);
 	gtk_box_pack_start (GTK_BOX (vvbox), frame, FALSE, FALSE, 0);
 
-	vbox = gtk_vbox_new (FALSE, 2);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	gtk_container_set_border_width (GTK_CONTAINER (vbox), 2);
 	gtk_container_add (GTK_CONTAINER (frame), vbox);
 
@@ -1044,7 +1044,7 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(wid), scroll, 0, 0, 0);
 	gtk_widget_set_size_request(scroll, 232, 246);
 
-	ent_hbox = gtk_hbox_new(0, 0);
+	ent_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start(GTK_BOX(wid), ent_hbox, 0, 0, 0);
 
 	lbl = gtk_label_new(_("Address: "));
@@ -1053,7 +1053,7 @@ static void settings_page_tracker (GtkWidget *vbox)
 	gtk_box_pack_start(GTK_BOX(ent_hbox), lbl, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(ent_hbox), entry, 0, 0, 0);
 
-	btnhbox = gtk_hbox_new(0, 0);
+	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start(GTK_BOX(wid), btnhbox, 0, 0, 0);
 
 	add = gtk_button_new_with_label(_("Add"));
@@ -1613,7 +1613,7 @@ settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
 	GtkWidget *vvbox;
 	GtkWidget *vbox;
 
-	vvbox = gtk_vbox_new (FALSE, 0);
+	vvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
 	/* border for the label */
 	frame = gtk_frame_new (NULL);
@@ -1627,7 +1627,7 @@ settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
 	gtk_container_add (GTK_CONTAINER (frame), label);
 
 	/* vbox for the tab */
-	vbox = gtk_vbox_new (FALSE, 2);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	gtk_container_set_border_width (GTK_CONTAINER (vbox), 4);
 	gtk_container_add (GTK_CONTAINER (vvbox), vbox);
 
@@ -1686,7 +1686,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_box_set_homogeneous (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))),
 									 FALSE);
 
-	hbbox = gtk_hbutton_box_new ();
+	hbbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
 	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
 	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
@@ -1708,7 +1708,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 							  G_CALLBACK (close_options_window), 0);
 	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
 
-	hbox = gtk_hbox_new (0, 6);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtk_container_set_border_width (GTK_CONTAINER (hbox), 6);
 	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))),
 							  hbox, TRUE, TRUE, 0);

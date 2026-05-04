@@ -717,8 +717,8 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	gtk_container_add(GTK_CONTAINER(agree_scroll), agreetext);
 	agreebtn = gtk_button_new_with_label(_("Agree"));
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
-	vbox = gtk_vbox_new(FALSE, 0);
-	hbox = gtk_hbox_new(FALSE, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	g_signal_connect(agreebtn, "clicked",
 					   G_CALLBACK(concurrence), sess);
 	g_signal_connect(disagreebtn, "clicked",

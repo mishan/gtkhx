@@ -273,8 +273,8 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_tooltip_text(plugin_btn, _("Plugin Manager"));
 #endif
 
-	vbox = gtk_vbox_new(0, 0);
-	hbox = gtk_hbox_new(0, 2);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
 	gtk_container_set_border_width(GTK_CONTAINER(hbox), 2);
 	gtk_container_add(GTK_CONTAINER(toolbar_window), vbox);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);

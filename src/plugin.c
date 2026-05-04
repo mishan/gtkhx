@@ -165,7 +165,7 @@ void create_plugin_manager(void)
 	gtk_signal_connect(closebtn, "clicked", GTK_SIGNAL_FUNC(close_plugin_window), 0);
 
 
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
@@ -179,7 +179,7 @@ void create_plugin_manager(void)
 
 	gtk_box_pack_start(GTK_BOX(vbox), scroll, 0, 0, 0);
 
-	btnhbox = gtk_hbox_new(0, 0);
+	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	gtk_box_pack_start(GTK_BOX(btnhbox), loadbtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnhbox), unloadbtn, 0, 0, 0);

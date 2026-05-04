@@ -335,8 +335,8 @@ void create_useredit_window (char *login, int new)
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(usermod_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
-	wvbox = gtk_vbox_new(0, 0);
-	btnhbox = gtk_hbox_new(0, 0);
+	wvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	wid = gtk_button_new_with_label(_("Save"));
 	g_object_set_data(G_OBJECT(wid), "new", GINT_TO_POINTER(new));
@@ -391,7 +391,7 @@ void create_useredit_window (char *login, int new)
 	gtk_table_set_col_spacings(GTK_TABLE(info_table), 5);
 	gtk_box_pack_start(GTK_BOX(wvbox), info_frame, 0, 0, 2);
 
-	avbox = gtk_vbox_new(0, 0);
+	avbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(usermod_scroll), avbox);
 	gtk_container_add(GTK_CONTAINER(window), wvbox);
 	gtk_box_pack_start(GTK_BOX(wvbox), usermod_scroll, 0, 0, 2);
@@ -401,7 +401,7 @@ void create_useredit_window (char *login, int new)
 		if (access_names[i].bitno == -1) {
 			nframes++;
 			frame = gtk_frame_new(access_names[i].name);
-			vbox = gtk_vbox_new(0, 0);
+			vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 			gtk_container_add(GTK_CONTAINER(frame), vbox);
 			gtk_box_pack_start(GTK_BOX(avbox), frame, 0, 0, 0);
 			continue;
@@ -434,9 +434,9 @@ void useredit_open_dialog()
 	GtkWidget *loginlbl;
 
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	hbox = gtk_hbox_new(0,0);
-	vbox = gtk_vbox_new(0,0);
-	hboxtwo = gtk_hbox_new(0,0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	hboxtwo = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	loginentry = gtk_entry_new();
 	okbtn = gtk_button_new_with_label(_("Open"));
 	cancelbtn = gtk_button_new_with_label(_("Cancel"));

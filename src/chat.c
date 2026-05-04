@@ -985,12 +985,12 @@ void create_chat(session *sess)
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
 
-	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
+	vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(text)->adj);
 
 	g_object_ref_sink(text);
 	g_object_ref_sink(vscroll);
 
-	chat_hbox = gtk_hbox_new(0, 0);
+	chat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
 						 (gtkhx_prefs.geo.chat.ysize<<6)/1000);
 
@@ -1052,12 +1052,12 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(chat_window), _("Chat"));
 	gtk_container_set_border_width(GTK_CONTAINER(chat_window), 0);
 
-	vbox = gtk_vbox_new(0, 4);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
 
 	gchat->subject = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(gchat->subject), sess->chat_front->subject);
-	subj_hbox = gtk_hbox_new(0, 0);
+	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(subj_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(subj_frame), GTK_SHADOW_OUT);
@@ -1076,7 +1076,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	inputframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(inputframe), GTK_SHADOW_IN);
 
-	vpaned = gtk_vpaned_new();
+	vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_pack1(GTK_PANED(vpaned), outputframe, 0, 1);
 	gtk_paned_pack2(GTK_PANED(vpaned), inputframe, 0, 1);
 	gtk_container_set_border_width(GTK_CONTAINER(vpaned), 5);
@@ -1093,7 +1093,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtk_container_add(GTK_CONTAINER(outputframe), chat_hbox);
 	gtk_widget_realize(gchat->output);
 
-	hbox = gtk_hbox_new(0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
@@ -1173,7 +1173,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
 
 	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
-	vscroll = gtk_vscrollbar_new(GTK_XTEXT(text)->adj);
+	vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(text)->adj);
 
 	subject = gtk_entry_new();
 	gtkhx_apply_text_style(subject);
@@ -1280,7 +1280,7 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 					   G_CALLBACK(reject_chat), 
 					   dialog);
 
-	hbox = gtk_hbox_new(0,0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_can_default(join, TRUE);
 
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label, 0, 0, 0);
@@ -1349,10 +1349,10 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_window_set_title(GTK_WINDOW(pchat_window), title);
 	gtk_container_set_border_width(GTK_CONTAINER(pchat_window), 0);
 
-	vbox = gtk_vbox_new(0, 4);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox), 5);
 
-	subj_hbox = gtk_hbox_new(0, 0);
+	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(subj_hbox, (612<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(subj_frame), GTK_SHADOW_OUT);
@@ -1372,21 +1372,21 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	inputframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(inputframe), GTK_SHADOW_IN);
 
-	vpane = gtk_vpaned_new();
+	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_pack1(GTK_PANED(vpane), outputframe, 0, 1);
 	gtk_paned_pack2(GTK_PANED(vpane), inputframe, 0, 1);
 	gtk_paned_set_position(GTK_PANED(vpane), 240);
 
 	gtk_box_pack_start(GTK_BOX(vbox), vpane, 1, 1, 0);
 
-	pchat_hbox = gtk_hbox_new(0, 0);
+	pchat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(pchat_hbox, 500, 400);
 
 	gtk_box_pack_start(GTK_BOX(pchat_hbox), gchat->output, 1, 1, 0);
 	gtk_box_pack_start(GTK_BOX(pchat_hbox), gchat->vscroll, 0, 0, 0);
 	gtk_container_add(GTK_CONTAINER(outputframe), pchat_hbox);
 
-	hbox = gtk_hbox_new(0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, 140, 50);
 	gtk_container_add(GTK_CONTAINER(inputframe), hbox);
 
@@ -1487,7 +1487,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
-	hbuttonbox = gtk_hbox_new(0,0);
+	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
 
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), msg_btn, 0, 0, 0);
@@ -1499,7 +1499,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), igno_btn, 0, 0, 0);
 
 
-	user_vbox = gtk_vbox_new(0, 0);
+	user_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
 	userframe = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(userframe), GTK_SHADOW_IN);
@@ -1515,7 +1515,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_box_pack_start(GTK_BOX(user_vbox), userframe, 1, 1, 0);
 
 
-	hpane = gtk_hpaned_new();
+	hpane = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_paned_pack1(GTK_PANED(hpane), vbox, 0, 1);
 	gtk_paned_pack2(GTK_PANED(hpane), user_vbox, 0, 1);
 	gtk_paned_set_position(GTK_PANED(hpane), 435);

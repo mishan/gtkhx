@@ -151,12 +151,12 @@ create_post_window (GtkWidget *widget, gpointer data)
 		gtk_container_add(GTK_CONTAINER(post_scroll), postprompt);
 		gtk_widget_set_size_request(post_scroll, 0, 260);
 
-		vbox = gtk_vbox_new(0, 0);
+		vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 		gtk_container_add(GTK_CONTAINER(post_window), vbox);
 		gtk_box_pack_start(GTK_BOX(vbox), post_scroll, 0, 0, 0);
 	}
 
-	hbox = gtk_hbox_new(0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
 
 	okbut = gtk_button_new_with_label(_("OK"));
@@ -206,7 +206,7 @@ void create_news_window (session *sess)
 	news_frame = gtk_frame_new(0);
 	gtk_frame_set_shadow_type(GTK_FRAME(news_frame), GTK_SHADOW_IN);
 
-	posthbox = gtk_hbox_new(0,0);
+	posthbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	gtk_container_add(GTK_CONTAINER(btn_frame), posthbox);
 
@@ -236,9 +236,9 @@ void create_news_window (session *sess)
 	g_signal_connect(reloadButton, "clicked",
 
 					   G_CALLBACK(reload_news), sess);
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(news_window), vbox);
-	hbox = gtk_hbox_new(0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	gtk_container_add(GTK_CONTAINER(news_frame), hbox);
 

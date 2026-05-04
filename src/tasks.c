@@ -142,8 +142,8 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	}
 
 	gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
-	vbox = gtk_vbox_new(0, 0);
-	hbox = gtk_hbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 40);
 
 	if(htxf) {
@@ -554,7 +554,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
-	hbuttonbox = gtk_hbox_new(0,0);
+	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	stopbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
@@ -592,7 +592,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(dnbtn, "clicked", G_CALLBACK(task_dn), 
 					   sess);
 
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), stopbtn, 0, 0, 2);
 	gtk_box_pack_start(GTK_BOX(hbuttonbox), gobtn, 0, 0, 0);

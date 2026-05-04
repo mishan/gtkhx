@@ -641,7 +641,7 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_widget_set_can_default(ok, TRUE);
 	cancel = gtk_button_new_with_label(_("Cancel"));
 	name_entry = gtk_entry_new();
-	hbox = gtk_hbox_new(0,0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	label = gtk_label_new(_("Name:"));
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
 	gtk_widget_set_size_request(dialog, 200, 100);
@@ -736,7 +736,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_window_set_position(GTK_WINDOW(connect_window), GTK_WIN_POS_CENTER);
 	g_signal_connect(connect_window, "destroy",
 			   G_CALLBACK(close_connect_window), 0);
-	vbox1 = gtk_vbox_new(0, 10);
+	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 	gtk_container_add(GTK_CONTAINER(connect_window), vbox1);
 	gtk_container_set_border_width(GTK_CONTAINER(vbox1), 10);
 
@@ -885,7 +885,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 		                  G_CALLBACK (bookmark_combo_changed), NULL);
 	}
 
-	hbuttonbox1 = gtk_hbutton_box_new();
+	hbuttonbox1 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_box_pack_start(GTK_BOX(vbox1), hbuttonbox1, 1, 1, 0);
 
 	save_button = gtk_button_new_with_label(_("Save..."));

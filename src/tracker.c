@@ -445,10 +445,10 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(tracker_window_scroll, 640, 350);
 	gtk_container_add(GTK_CONTAINER(tracker_window_scroll), tracker_list);
 
-	vbox = gtk_vbox_new(0, 0);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 640, 410);
-	hbox = gtk_hbox_new(0, 0);
-	searchhbox = gtk_hbox_new(0, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), refreshbtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), connbtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), lbl_found, 0, 0, 0);
