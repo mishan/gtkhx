@@ -1421,8 +1421,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	if (!users_font_desc)
 		users_font_desc = pango_font_description_from_string ("Sans 10");
-	if (users_font_desc)
-		gtk_widget_modify_font (gchat->userlist, users_font_desc);
+	gtkhx_refresh_userlist_css (users_font_desc);
+	gtkhx_apply_userlist_style (gchat->userlist);
 
 	msg_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(msg_btn), "sess", sess);

@@ -732,8 +732,8 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	if (!users_font_desc)
 		users_font_desc = pango_font_description_from_string ("Sans 10");
-	if (users_font_desc)
-		gtk_widget_modify_font (users_list, users_font_desc);
+	gtkhx_refresh_userlist_css (users_font_desc);
+	gtkhx_apply_userlist_style (users_list);
 
 	users_window_scroll = gtk_scrolled_window_new(0, 0);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(users_window_scroll),

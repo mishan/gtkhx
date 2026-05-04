@@ -69,15 +69,140 @@ GdkColor bg_col;
 
 PangoFontDescription *gtkhx_font_desc;
 
+/*
+ * Phase 3.5: gtk_widget_modify_font/text/base were deprecated in GTK 3.0
+ * and removed in GTK 4. Replace them with a single screen-wide
+ * GtkCssProvider whose body is rebuilt whenever the font or colors
+ * change; the per-widget step then collapses to "tag the widget with
+ * a class name so the provider's selector matches."
+ *
+ * The provider is attached at GTK_STYLE_PROVIDER_PRIORITY_APPLICATION,
+ * which beats the user's theme but sits below !important inline rules.
+ * That matches the precedence the old gtk_widget_modify_* family had.
+ */
+static GtkCssProvider *gtkhx_css_provider = NULL;
+static GtkCssProvider *gtkhx_userlist_css_provider = NULL;
+
+static void
+gdkcolor_to_css (const GdkColor *c, char *out, size_t outsz)
+{
+	g_snprintf (out, outsz, "rgb(%u,%u,%u)",
+	            (unsigned) (c->red   >> 8),
+	            (unsigned) (c->green >> 8),
+	            (unsigned) (c->blue  >> 8));
+}
+
+static void
+ensure_provider_attached (GtkCssProvider *prov)
+{
+	GdkScreen *screen = gdk_screen_get_default ();
+	if (!screen)
+		return;
+	gtk_style_context_add_provider_for_screen (
+		screen, GTK_STYLE_PROVIDER (prov),
+		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+void
+gtkhx_refresh_css (void)
+{
+	gchar *fontstr;
+	char fg_buf[32], bg_buf[32];
+	gchar *css;
+	GError *err = NULL;
+
+	if (!gtkhx_css_provider) {
+		gtkhx_css_provider = gtk_css_provider_new ();
+		ensure_provider_attached (gtkhx_css_provider);
+	}
+
+	fontstr = gtkhx_font_desc
+		? pango_font_description_to_string (gtkhx_font_desc)
+		: g_strdup ("Monospace 10");
+	gdkcolor_to_css (&fg_col, fg_buf, sizeof fg_buf);
+	gdkcolor_to_css (&bg_col, bg_buf, sizeof bg_buf);
+
+	/* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
+	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
+	 * inner "text" CSS node so the input area picks up the same look. */
+	css = g_strdup_printf (
+		".gtkhx-text, .gtkhx-text text {"
+		"  font: %s;"
+		"  color: %s;"
+		"  background-color: %s;"
+		"  caret-color: %s;"
+		"}"
+		".gtkhx-text text selection {"
+		"  background-color: %s;"
+		"  color: %s;"
+		"}",
+		fontstr, fg_buf, bg_buf, fg_buf,
+		fg_buf, bg_buf);
+
+	if (!gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1, &err)) {
+		g_warning ("gtkhx CSS load failed: %s", err ? err->message : "?");
+		g_clear_error (&err);
+	}
+
+	g_free (css);
+	g_free (fontstr);
+}
+
+void
+gtkhx_refresh_userlist_css (PangoFontDescription *fd)
+{
+	gchar *fontstr;
+	gchar *css;
+	GError *err = NULL;
+
+	if (!gtkhx_userlist_css_provider) {
+		gtkhx_userlist_css_provider = gtk_css_provider_new ();
+		ensure_provider_attached (gtkhx_userlist_css_provider);
+	}
+
+	fontstr = fd ? pango_font_description_to_string (fd)
+	             : g_strdup ("Sans 10");
+	css = g_strdup_printf (".gtkhx-userlist { font: %s; }", fontstr);
+
+	if (!gtk_css_provider_load_from_data (gtkhx_userlist_css_provider,
+	                                      css, -1, &err)) {
+		g_warning ("gtkhx userlist CSS load failed: %s",
+		           err ? err->message : "?");
+		g_clear_error (&err);
+	}
+
+	g_free (css);
+	g_free (fontstr);
+}
+
 void
 gtkhx_apply_text_style (GtkWidget *w)
 {
+	GtkStyleContext *ctx;
+
 	if (!w)
 		return;
-	if (gtkhx_font_desc)
-		gtk_widget_modify_font (w, gtkhx_font_desc);
-	gtk_widget_modify_text (w, GTK_STATE_NORMAL, &fg_col);
-	gtk_widget_modify_base (w, GTK_STATE_NORMAL, &bg_col);
+	if (!gtkhx_css_provider)
+		gtkhx_refresh_css ();
+
+	ctx = gtk_widget_get_style_context (w);
+	if (!gtk_style_context_has_class (ctx, "gtkhx-text"))
+		gtk_style_context_add_class (ctx, "gtkhx-text");
+}
+
+void
+gtkhx_apply_userlist_style (GtkWidget *w)
+{
+	GtkStyleContext *ctx;
+
+	if (!w)
+		return;
+	if (!gtkhx_userlist_css_provider)
+		gtkhx_refresh_userlist_css (NULL);
+
+	ctx = gtk_widget_get_style_context (w);
+	if (!gtk_style_context_has_class (ctx, "gtkhx-userlist"))
+		gtk_style_context_add_class (ctx, "gtkhx-userlist");
 }
 static GtkWidget *agreetext;
 static struct timer *timer_list;
@@ -337,6 +462,10 @@ static void fe_init (void)
 
 	memset(&icon_files, 0, sizeof(icon_files));
 	prefs_read();
+	/* Phase 3.5: prep the screen-wide CSS provider once prefs are loaded
+	 * so the very first widget that gets gtkhx_apply_text_style() picks
+	 * up the right look on the first paint. */
+	gtkhx_refresh_css ();
 	init_icons();
 
 	/* initialize some pointers with linked list

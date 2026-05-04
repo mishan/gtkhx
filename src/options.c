@@ -259,6 +259,10 @@ static void changed_font (session *sess)
 		gtkhx_prefs.font = g_strdup ("Monospace 10");
 	}
 
+	/* Phase 3.5: rebuild the screen-wide CSS provider so already-tagged
+	 * widgets pick up the new font without needing per-widget calls. */
+	gtkhx_refresh_css ();
+
 	if (sess) {
 		reinit_gtktexts (sess);
 	}
