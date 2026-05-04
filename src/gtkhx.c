@@ -283,6 +283,11 @@ const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
 
 session the_session;
 
+/* Forward declaration of the application object owned by loop(). hx_quit()
+ * needs to call g_application_quit on it, but loop() comes much later
+ * in this TU and gtkhx_app's definition lives there. */
+static GtkApplication *gtkhx_app;
+
 void hx_quit (void)
 {
 	prefs_write();
@@ -298,7 +303,13 @@ void hx_quit (void)
 #endif
 
 	gtk_thread_exit();
-	gtk_main_quit();
+	/* Phase 3.6: g_application_quit() ends g_application_run() in loop().
+	 * Fall back to gtk_main_quit if hx_quit is somehow called before the
+	 * app is constructed (it shouldn't be, but the symmetry is cheap). */
+	if (gtkhx_app)
+		g_application_quit (G_APPLICATION (gtkhx_app));
+	else
+		gtk_main_quit();
 	exit(0);
 }
 
@@ -566,11 +577,45 @@ static void fe_init (void)
 	reinit_gtktexts(&the_session);
 }
 
+/*
+ * Phase 3.6: drive the main loop through a GtkApplication instead of
+ * a bare gtk_main(). gtk_main() is gone in GTK 4; GtkApplication is the
+ * portable replacement and gives us a well-defined "active" lifecycle,
+ * a primary window registration, and a place to hang DBus actions
+ * later.
+ *
+ * The existing two-step init/loop split is preserved deliberately:
+ * fe_init() (UI construction) and the optional CLI auto-connect that
+ * happens between them in hotline_client_init() both run BEFORE we
+ * enter the loop, so by the time gtkhx_activate fires the toolbar
+ * window already exists. The activate handler just registers it with
+ * the app so closing it terminates g_application_run cleanly.
+ */
+static void
+gtkhx_activate (GtkApplication *app, gpointer user_data)
+{
+	(void) user_data;
+	if (toolbar_window)
+		gtk_application_add_window (app, GTK_WINDOW (toolbar_window));
+}
+
 static void
 loop (void)
 {
 	gtk_threads_init();
-	gtk_threads_main();
+
+	gtkhx_app = gtk_application_new ("com.nasledov.gtkhx",
+	                                 G_APPLICATION_NON_UNIQUE);
+	g_signal_connect (gtkhx_app, "activate",
+	                  G_CALLBACK (gtkhx_activate), NULL);
+
+	/* g_application_run() takes argc/argv only to forward them to a
+	 * "command-line" handler we don't install — pass 0/NULL so it
+	 * doesn't try to re-parse our flags. */
+	g_application_run (G_APPLICATION (gtkhx_app), 0, NULL);
+
+	g_object_unref (gtkhx_app);
+	gtkhx_app = NULL;
 }
 
 static void init (int argc, char **argv)

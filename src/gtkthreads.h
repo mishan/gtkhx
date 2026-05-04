@@ -22,7 +22,6 @@
 extern void gtk_threads_enter(void);
 extern void gtk_threads_leave(void);
 extern void gtk_threads_init(void);
-extern void gtk_threads_main(void);
 extern void gtk_thread_exit(void);
 
 #endif

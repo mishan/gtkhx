@@ -74,12 +74,6 @@ void gtk_threads_init(void)
 	g_main_context_set_poll_func(ctx, gtkhx_locked_poll);
 }
 
-void gtk_threads_main(void)
-{
-	gtk_main();
-	g_rec_mutex_unlock(&gtkhx_main_lock);
-}
-
 void gtk_threads_enter(void)
 {
 	g_rec_mutex_lock(&gtkhx_main_lock);
