@@ -539,7 +539,6 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	GdkBitmap *mask;
 	GdkPixmap *icon;
 	GtkWidget *pix;
-	GtkStyle *style;
 	GtkWidget *tasks_window;
 	session *sess = data;
 
@@ -551,8 +550,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	tasks_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(tasks_window), "tasks", "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
-	gtk_widget_realize(tasks_window);
-	style = gtk_widget_get_style(tasks_window);
+	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));
 
 

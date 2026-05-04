@@ -555,7 +555,6 @@ static struct gfile_list *create_files_window (char *path)
 	GdkBitmap *mask;
 	GdkPixmap *icon;
 	GtkWidget *pix;
-	GtkStyle *style;
 	struct gfile_list *gfl;
 	gchar *titles[2];
 
@@ -586,8 +585,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_window_set_wmclass(GTK_WINDOW(files_window), "files", "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
-	gtk_widget_realize(files_window);
-	style = gtk_widget_get_style(files_window);
+	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_window_set_title(GTK_WINDOW(files_window), path);
 	gtk_widget_set_size_request(files_window, 264, 400);
 

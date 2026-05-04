@@ -1330,7 +1330,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	GtkWidget *info_btn;
 	GtkWidget *igno_btn;
 	GtkWidget *chat_btn;
-	GtkStyle *style;
 	GdkBitmap *mask;
 	GtkWidget *pix;
 	GdkPixmap *icon;
@@ -1344,9 +1343,8 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	pchat_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(pchat_window), "pchat", "GtkHx");
-	gtk_widget_realize(pchat_window);
+	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
-	style = gtk_widget_get_style(pchat_window);
 	gtk_widget_set_size_request(pchat_window, 700, 320);
 	gtk_window_set_resizable(GTK_WINDOW(pchat_window), TRUE);
 

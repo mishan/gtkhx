@@ -689,7 +689,6 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	GtkWidget *users_window_scroll;
 	GtkWidget *vbox;
 	GtkWidget *hbuttonbox, *topframe;
-	GtkStyle *style;
 	GdkBitmap *mask;
 	GtkWidget *pix;
 	GdkPixmap *icon;
@@ -707,8 +706,10 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	users_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(users_window), "users", "GtkHx");
-	gtk_widget_realize(users_window);
-	style = gtk_widget_get_style(users_window);
+	/* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
+	 * pair that left `style' unread. Forcing realize on a toplevel
+	 * before its children are packed is a footgun under GTK 3 Wayland —
+	 * it creates the wl_surface in an under-committed state. */
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
 	gtk_widget_set_size_request(users_window, 264, 400);
 	gtk_window_set_resizable(GTK_WINDOW(users_window), TRUE);

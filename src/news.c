@@ -186,7 +186,6 @@ void create_news_window (session *sess)
 	GtkWidget *news_text;
 	GtkWidget *news_window;
 	GtkWidget *postButton, *reloadButton;
- 	GtkStyle *style;
 	GdkPixmap *icon;
 	GtkWidget *pix;
 	GdkBitmap *mask;
@@ -200,9 +199,7 @@ void create_news_window (session *sess)
 	news_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_wmclass(GTK_WINDOW(news_window), "news", "GtkHx");
 
-
-	gtk_widget_realize(news_window);
-	style = gtk_widget_get_style(news_window);
+	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
 	btn_frame = gtk_frame_new(0);
 	gtk_widget_set_size_request(btn_frame, -1, 30);
