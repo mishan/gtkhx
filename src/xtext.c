@@ -762,7 +762,7 @@ gtk_xtext_unrealize (GtkWidget * widget)
 	backend_deinit (GTK_XTEXT (widget));
 
 	/* if there are still events in the queue, this'll avoid segfault */
-	gdk_window_set_user_data (widget->window, NULL);
+	gdk_window_set_user_data (gtk_widget_get_window(widget), NULL);
 
 	if (parent_class->unrealize)
 		(* GTK_WIDGET_CLASS (parent_class)->unrealize) (widget);
@@ -776,14 +776,18 @@ gtk_xtext_realize (GtkWidget * widget)
 	GdkGCValues val;
 	GdkColor col;
 	GdkColormap *cmap;
+	GtkAllocation allocation;
+	GdkWindow *parent_window;
+	GdkWindow *window;
 
 	gtk_widget_set_realized (widget, TRUE);
 	xtext = GTK_XTEXT (widget);
 
-	attributes.x = widget->allocation.x;
-	attributes.y = widget->allocation.y;
-	attributes.width = widget->allocation.width;
-	attributes.height = widget->allocation.height;
+	gtk_widget_get_allocation(widget, &allocation);
+	attributes.x = allocation.x;
+	attributes.y = allocation.y;
+	attributes.width = allocation.width;
+	attributes.height = allocation.height;
 	attributes.wclass = GDK_INPUT_OUTPUT;
 	attributes.window_type = GDK_WINDOW_CHILD;
 	attributes.event_mask = gtk_widget_get_events (widget) |
@@ -794,28 +798,29 @@ gtk_xtext_realize (GtkWidget * widget)
 	attributes.colormap = cmap;
 	attributes.visual = gtk_widget_get_visual (widget);
 
-	widget->window = gdk_window_new (widget->parent->window, &attributes,
+	GdkWindow *parent_window = gtk_widget_get_parent_window(widget);
+	GdkWindow *window = gdk_window_new (parent_window, &attributes,
 												GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL |
 												GDK_WA_COLORMAP);
+	gtk_widget_set_window(widget, window);
+	gdk_window_set_user_data (gtk_widget_get_window(widget), widget);
 
-	gdk_window_set_user_data (widget->window, widget);
-
-	xtext->depth = gdk_window_get_visual (widget->window)->depth;
+	xtext->depth = gdk_window_get_visual (gtk_widget_get_window(widget))->depth;
 
 	val.subwindow_mode = GDK_INCLUDE_INFERIORS;
 	val.graphics_exposures = 0;
 
-	xtext->bgc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->bgc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 													 GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->fgc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->fgc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 													 GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->light_gc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->light_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->dark_gc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->dark_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->thin_gc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->thin_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->marker_gc = gdk_gc_new_with_values (widget->window, &val,
+	xtext->marker_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
 											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
 
 	/* for the separator bar (light) */
@@ -841,7 +846,7 @@ gtk_xtext_realize (GtkWidget * widget)
 	xtext_set_fg (xtext, xtext->bgc, XTEXT_BG);
 
 	/* draw directly to window */
-	xtext->draw_buf = widget->window;
+	xtext->draw_buf = gtk_widget_get_window(widget);
 
 	if (xtext->pixmap)
 	{
@@ -851,11 +856,10 @@ gtk_xtext_realize (GtkWidget * widget)
 		gdk_gc_set_fill (xtext->bgc, GDK_TILED);
 	}
 
-	xtext->hand_cursor = gdk_cursor_new_for_display (gdk_window_get_display (widget->window), GDK_HAND1);
-	xtext->resize_cursor = gdk_cursor_new_for_display (gdk_window_get_display (widget->window), GDK_LEFT_SIDE);
+	xtext->hand_cursor = gdk_cursor_new_for_display (gdk_window_get_display (gtk_widget_get_window(widget)), GDK_HAND1);
+	xtext->resize_cursor = gdk_cursor_new_for_display (gdk_window_get_display (gtk_widget_get_window(widget)), GDK_LEFT_SIDE);
 
-	gdk_window_set_back_pixmap (widget->window, NULL, FALSE);
-	widget->style = gtk_style_attach (widget->style, widget->window);
+	gdk_window_set_back_pixmap (gtk_widget_get_window(widget), NULL, FALSE);
 
 	backend_init (xtext);
 }
@@ -876,13 +880,13 @@ gtk_xtext_size_allocate (GtkWidget * widget, GtkAllocation * allocation)
 	if (allocation->width == xtext->buffer->window_width)
 		height_only = TRUE;
 
-	widget->allocation = *allocation;
+	gtk_widget_set_allocation(widget, allocation);
 	if (gtk_widget_get_realized (GTK_WIDGET(widget)))
 	{
 		xtext->buffer->window_width = allocation->width;
 		xtext->buffer->window_height = allocation->height;
 
-		gdk_window_move_resize (widget->window, allocation->x, allocation->y,
+		gdk_window_move_resize (gtk_widget_get_window(widget), allocation->x, allocation->y,
 										allocation->width, allocation->height);
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		if (!height_only)
@@ -1141,9 +1145,11 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	textentry *ent_start, *ent_end;
 	int x, y;
 
+	GtkAllocation alloc;
+	gtk_widget_get_allocation(widget, &alloc);
 	if (area->x == 0 && area->y == 0 &&
-		 area->height == widget->allocation.height &&
-		 area->width == widget->allocation.width)
+		 area->height == alloc.height &&
+		 area->width == alloc.width)
 	{
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		gtk_xtext_render_page (xtext);
@@ -1171,14 +1177,14 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	/* y is the last pixel y location it rendered text at */
 	y = gtk_xtext_render_ents (xtext, ent_start, ent_end);
 
-	if (y && y < widget->allocation.height && !ent_end->next)
+	if (y && y < alloc.height && !ent_end->next)
 	{
 		GdkRectangle rect;
 
 		rect.x = 0;
 		rect.y = y;
-		rect.width = widget->allocation.width;
-		rect.height = widget->allocation.height - y;
+		rect.width = alloc.width;
+		rect.height = alloc.height - y;
 
 		/* fill any space below the last line that also intersects with
 			the exposure rectangle */
@@ -1727,7 +1733,7 @@ gtk_xtext_leave_notify (GtkWidget * widget, GdkEventCrossing * event)
 		xtext->hilight_start = -1;
 		xtext->hilight_end = -1;
 		xtext->cursor_hand = FALSE;
-		gdk_window_set_cursor (widget->window, 0);
+		gdk_window_set_cursor (gtk_widget_get_window(widget), 0);
 		xtext->hilight_ent = NULL;
 	}
 
@@ -1737,7 +1743,7 @@ gtk_xtext_leave_notify (GtkWidget * widget, GdkEventCrossing * event)
 		xtext->hilight_start = -1;
 		xtext->hilight_end = -1;
 		xtext->cursor_resize = FALSE;
-		gdk_window_set_cursor (widget->window, 0);
+		gdk_window_set_cursor (gtk_widget_get_window(widget), 0);
 		xtext->hilight_ent = NULL;
 	}
 
@@ -1826,12 +1832,14 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 	int redraw, tmp, x, y, offset, len, line_x;
 	textentry *word_ent;
 	int word_type;
+	GtkAllocation alloc;
 
-	gdk_window_get_pointer (widget->window, &x, &y, &mask);
+	gtk_widget_get_allocation(widget, &alloc);
+	gdk_window_get_pointer (gtk_widget_get_window(widget), &x, &y, &mask);
 
 	if (xtext->moving_separator)
 	{
-		if (x < (3 * widget->allocation.width) / 5 && x > 15)
+		if (x < (3 * alloc.width) / 5 && x > 15)
 		{
 			tmp = xtext->buffer->indent;
 			xtext->buffer->indent = x;
@@ -2004,12 +2012,14 @@ gtk_xtext_button_release (GtkWidget * widget, GdkEventButton * event)
 	GtkXText *xtext = GTK_XTEXT (widget);
 	unsigned char *word;
 	int old;
+	GtkAllocation alloc;
 
+	gtk_widget_get_allocation(widget, &alloc);
 	if (xtext->moving_separator)
 	{
 		xtext->moving_separator = FALSE;
 		old = xtext->buffer->indent;
-		if (event->x < (4 * widget->allocation.width) / 5 && event->x > 15)
+		if (event->x < (4 * alloc.width) / 5 && event->x > 15)
 			xtext->buffer->indent = event->x;
 		gtk_xtext_fix_indent (xtext->buffer);
 		if (xtext->buffer->indent != old)
@@ -2081,7 +2091,7 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 	unsigned char *word;
 	int line_x, x, y, offset, len;
 
-	gdk_window_get_pointer (widget->window, &x, &y, &mask);
+	gdk_window_get_pointer (gtk_widget_get_window(widget), &x, &y, &mask);
 
 	if (event->button == 3 || event->button == 2) /* right/middle click */
 	{
@@ -2309,7 +2319,7 @@ gtk_xtext_selection_get (GtkWidget * widget,
 	case TARGET_COMPOUND_TEXT:
 #ifdef GDK_WINDOWING_X11
 		{
-			GdkDisplay *display = gdk_window_get_display (widget->window);
+			GdkDisplay *display = gdk_window_get_display (gtk_widget_get_window(widget));
 			GdkAtom encoding;
 			gint format;
 			gint new_length;
