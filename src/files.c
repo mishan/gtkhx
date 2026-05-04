@@ -601,7 +601,7 @@ static struct gfile_list *create_files_window (char *path)
 								   GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
 	topframe = gtk_frame_new(0);
-	gtk_widget_set_size_request(topframe, -2, 30);
+	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_hbox_new(0,0);

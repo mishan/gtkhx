@@ -205,7 +205,7 @@ void create_news_window (session *sess)
 	style = gtk_widget_get_style(news_window);
 
 	btn_frame = gtk_frame_new(0);
-	gtk_widget_set_size_request(btn_frame, -2, 30);
+	gtk_widget_set_size_request(btn_frame, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(btn_frame), GTK_SHADOW_OUT);
 
 	news_frame = gtk_frame_new(0);

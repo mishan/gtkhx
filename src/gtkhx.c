@@ -103,10 +103,82 @@ ensure_provider_attached (GtkCssProvider *prov)
 		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
+/* Map a Pango font description to a CSS properties block. We can't use
+ * the GTK CSS `font: <pango-string>;` shorthand because GTK 3.20+ flags
+ * the unit-less point size as a parse error ("not a number"). Emit the
+ * properties individually so the standard CSS parser is happy. */
+static gchar *
+pango_to_css_props (const PangoFontDescription *fd)
+{
+	const char *family;
+	gint size_pt;
+	gboolean is_abs;
+	PangoWeight weight;
+	PangoStyle style;
+	const char *weight_s;
+	const char *style_s;
+
+	if (!fd)
+		return g_strdup ("");
+
+	family   = pango_font_description_get_family (fd);
+	size_pt  = pango_font_description_get_size (fd);
+	is_abs   = pango_font_description_get_size_is_absolute (fd);
+	weight   = pango_font_description_get_weight (fd);
+	style    = pango_font_description_get_style (fd);
+
+	switch (weight) {
+	case PANGO_WEIGHT_THIN:       weight_s = "100"; break;
+	case PANGO_WEIGHT_ULTRALIGHT: weight_s = "200"; break;
+	case PANGO_WEIGHT_LIGHT:      weight_s = "300"; break;
+	case PANGO_WEIGHT_BOOK:       weight_s = "380"; break;
+	case PANGO_WEIGHT_NORMAL:     weight_s = "400"; break;
+	case PANGO_WEIGHT_MEDIUM:     weight_s = "500"; break;
+	case PANGO_WEIGHT_SEMIBOLD:   weight_s = "600"; break;
+	case PANGO_WEIGHT_BOLD:       weight_s = "700"; break;
+	case PANGO_WEIGHT_ULTRABOLD:  weight_s = "800"; break;
+	case PANGO_WEIGHT_HEAVY:      weight_s = "900"; break;
+	case PANGO_WEIGHT_ULTRAHEAVY: weight_s = "1000"; break;
+	default:                      weight_s = "400"; break;
+	}
+
+	switch (style) {
+	case PANGO_STYLE_ITALIC:  style_s = "italic";  break;
+	case PANGO_STYLE_OBLIQUE: style_s = "oblique"; break;
+	case PANGO_STYLE_NORMAL:
+	default:                  style_s = "normal";  break;
+	}
+
+	if (size_pt <= 0)
+		return g_strdup_printf (
+			"font-family: \"%s\";"
+			"font-weight: %s;"
+			"font-style: %s;",
+			family ? family : "Monospace", weight_s, style_s);
+
+	if (is_abs) {
+		return g_strdup_printf (
+			"font-family: \"%s\";"
+			"font-size: %dpx;"
+			"font-weight: %s;"
+			"font-style: %s;",
+			family ? family : "Monospace",
+			size_pt / PANGO_SCALE, weight_s, style_s);
+	}
+
+	return g_strdup_printf (
+		"font-family: \"%s\";"
+		"font-size: %dpt;"
+		"font-weight: %s;"
+		"font-style: %s;",
+		family ? family : "Monospace",
+		size_pt / PANGO_SCALE, weight_s, style_s);
+}
+
 void
 gtkhx_refresh_css (void)
 {
-	gchar *fontstr;
+	gchar *fontprops;
 	char fg_buf[32], bg_buf[32];
 	gchar *css;
 	GError *err = NULL;
@@ -116,9 +188,7 @@ gtkhx_refresh_css (void)
 		ensure_provider_attached (gtkhx_css_provider);
 	}
 
-	fontstr = gtkhx_font_desc
-		? pango_font_description_to_string (gtkhx_font_desc)
-		: g_strdup ("Monospace 10");
+	fontprops = pango_to_css_props (gtkhx_font_desc);
 	gdkcolor_to_css (&fg_col, fg_buf, sizeof fg_buf);
 	gdkcolor_to_css (&bg_col, bg_buf, sizeof bg_buf);
 
@@ -127,7 +197,7 @@ gtkhx_refresh_css (void)
 	 * inner "text" CSS node so the input area picks up the same look. */
 	css = g_strdup_printf (
 		".gtkhx-text, .gtkhx-text text {"
-		"  font: %s;"
+		"  %s"
 		"  color: %s;"
 		"  background-color: %s;"
 		"  caret-color: %s;"
@@ -136,7 +206,7 @@ gtkhx_refresh_css (void)
 		"  background-color: %s;"
 		"  color: %s;"
 		"}",
-		fontstr, fg_buf, bg_buf, fg_buf,
+		fontprops, fg_buf, bg_buf, fg_buf,
 		fg_buf, bg_buf);
 
 	if (!gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1, &err)) {
@@ -145,13 +215,13 @@ gtkhx_refresh_css (void)
 	}
 
 	g_free (css);
-	g_free (fontstr);
+	g_free (fontprops);
 }
 
 void
 gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 {
-	gchar *fontstr;
+	gchar *fontprops;
 	gchar *css;
 	GError *err = NULL;
 
@@ -160,9 +230,8 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 		ensure_provider_attached (gtkhx_userlist_css_provider);
 	}
 
-	fontstr = fd ? pango_font_description_to_string (fd)
-	             : g_strdup ("Sans 10");
-	css = g_strdup_printf (".gtkhx-userlist { font: %s; }", fontstr);
+	fontprops = pango_to_css_props (fd);
+	css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
 
 	if (!gtk_css_provider_load_from_data (gtkhx_userlist_css_provider,
 	                                      css, -1, &err)) {
@@ -172,7 +241,7 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	}
 
 	g_free (css);
-	g_free (fontstr);
+	g_free (fontprops);
 }
 
 void

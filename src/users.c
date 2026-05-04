@@ -812,7 +812,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 
 	topframe = gtk_frame_new(0);
 	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
-	gtk_widget_set_size_request(topframe, -2, 30);
+	gtk_widget_set_size_request(topframe, -1, 30);
 	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_hbox_new(0,0);

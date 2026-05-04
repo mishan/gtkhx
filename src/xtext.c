@@ -3608,8 +3608,13 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 	if (xtext->font)
 		backend_font_close (xtext);
 
-	/* realize now, so that font_open has a XDisplay */
-	gtk_widget_realize (GTK_WIDGET (xtext));
+	/* Phase 3.4b: the GTK 1.2-era forced realize here was needed so the
+	 * old XDrawString backend had a XDisplay. The cairo+Pango backend
+	 * resolves fonts through the widget's Pango context, which falls
+	 * back to the default screen on unrealized widgets — and forcing
+	 * realize at construction time triggers an `anchored' assertion
+	 * because callers set the font right after gtk_xtext_new(), before
+	 * parenting the widget. Just drop it. */
 
 	backend_font_open (xtext, name);
 	if (xtext->font == NULL)
