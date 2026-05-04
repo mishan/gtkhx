@@ -16,6 +16,32 @@
  * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+/*
+ * Phase 3.4 rewrite: produce GdkPixbuf directly instead of going through
+ * the GTK 1/2 GdkImage → GdkPixmap + GdkBitmap mask pipeline.  GdkImage,
+ * gdk_image_put_pixel, gdk_pixmap_new, gdk_draw_image, gdk_image_new_bitmap,
+ * and the colormap-based pixel allocator are all gone in GTK 3.
+ *
+ * Approach: walk the Mac classic cicn resource the same way the original
+ * decoder did (1/2/4/8 bpp pixel paths against a per-icon color table,
+ * falling back to the canonical Mac palette for any indexes the table
+ * doesn't override) but write packed RGBA bytes straight into a
+ * GdkPixbuf.  The mask bitmap is folded into the pixbuf's alpha channel
+ * (Mac classic iconMask: 1 = visible, 0 = transparent), removing the need
+ * for a separate GdkBitmap output.
+ *
+ * Public API:
+ *   GdkPixbuf *cicn_to_pixbuf (void *cicn_rsrc, unsigned int len);
+ *   void load_icon (GtkWidget *, guint16, struct ifn *, char recurse,
+ *                   GdkPixbuf **out, GdkPixbuf **mask_unused);
+ *
+ * The mask out-param is kept for source-level compatibility with the old
+ * 5-parameter call sites; it is always set to NULL and the gtk_hlist
+ * compat shim's pixmap_to_pixbuf() already ignores it (alpha lives in the
+ * pixbuf).  The widget out-param is also kept, but is now only consulted
+ * for a fallback colormap-free decode (no GdkVisual lookup needed).
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,11 +50,6 @@
 #include <errno.h>
 #include <fnmatch.h>
 #include <netinet/in.h>
-/* gdk_image_new_bitmap is gated behind GDK_ENABLE_BROKEN in GTK 2 and is
- * removed entirely in GTK 3. Phase 3 will replace the entire GdkImage →
- * GdkPixmap pipeline below with GdkPixbuf/Cairo; for Phase 2 we just enable
- * the "broken" symbol to keep the existing draw path working. */
-#define GDK_ENABLE_BROKEN
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #include <sys/time.h>
@@ -41,289 +62,157 @@
 
 #define DEFAULT_ICON	135
 
+/* Canonical Mac classic 8-bit palette.  Each channel is in the legacy
+ * 16-bit-per-channel form (high byte is the 8-bit value, low byte is
+ * usually a copy or zero), to match the per-icon ColorTable stored inside
+ * cicn resources.  Anywhere we'd packed an X11 pixel before, we now pack
+ * 0xRRGGBB -- alpha is added separately when we write the pixbuf. */
+
 static const RGBColor rgb_8[256] = {
-	{ 0xff00, 0xff00, 0xff00 },
-	{ 0xff00, 0xfe00, 0xcb00 },
-	{ 0xff00, 0xfe00, 0x9a00 },
-	{ 0xff00, 0xfe00, 0x6600 },
-	{ 0xff00, 0xfe00, 0x3300 },
-	{ 0xfe00, 0xfe00, 0x0000 },
-	{ 0xff00, 0xcb00, 0xfe00 },
-	{ 0xff00, 0xcb00, 0xcb00 },
-	{ 0xff00, 0xcc00, 0x9a00 },
-	{ 0xff00, 0xcc00, 0x6600 },
-	{ 0xff00, 0xcc00, 0x3300 },
-	{ 0xfe00, 0xcb00, 0x0000 },
-	{ 0xff00, 0x9a00, 0xfe00 },
-	{ 0xff00, 0x9a00, 0xcc00 },
-	{ 0xff00, 0x9a00, 0x9a00 },
-	{ 0xff00, 0x9900, 0x6600 },
-	{ 0xff00, 0x9900, 0x3300 },
-	{ 0xfe00, 0x9800, 0x0000 },
-	{ 0xff00, 0x6600, 0xfe00 },
-	{ 0xff00, 0x6600, 0xcc00 },
-	{ 0xff00, 0x6600, 0x9900 },
-	{ 0xff00, 0x6600, 0x6600 },
-	{ 0xff00, 0x6600, 0x3300 },
-	{ 0xfe00, 0x6500, 0x0000 },
-	{ 0xff00, 0x3300, 0xfe00 },
-	{ 0xff00, 0x3300, 0xcc00 },
-	{ 0xff00, 0x3300, 0x9900 },
-	{ 0xff00, 0x3300, 0x6600 },
-	{ 0xff00, 0x3300, 0x3300 },
-	{ 0xfe00, 0x3200, 0x0000 },
-	{ 0xfe00, 0x0000, 0xfe00 },
-	{ 0xfe00, 0x0000, 0xcb00 },
-	{ 0xfe00, 0x0000, 0x9800 },
-	{ 0xfe00, 0x0000, 0x6500 },
-	{ 0xfe00, 0x0000, 0x3200 },
-	{ 0xfe00, 0x0000, 0x0000 },
-	{ 0xcb00, 0xff00, 0xff00 },
-	{ 0xcb00, 0xff00, 0xcb00 },
-	{ 0xcc00, 0xff00, 0x9a00 },
-	{ 0xcc00, 0xff00, 0x6600 },
-	{ 0xcc00, 0xff00, 0x3300 },
-	{ 0xcb00, 0xfe00, 0x0000 },
-	{ 0xcb00, 0xcb00, 0xff00 },
-	{ 0xcc00, 0xcc00, 0xcc00 },
-	{ 0xcc00, 0xcc00, 0x9900 },
-	{ 0xcc00, 0xcc00, 0x6600 },
-	{ 0xcb00, 0xcb00, 0x3200 },
-	{ 0xcd00, 0xcd00, 0x0000 },
-	{ 0xcc00, 0x9a00, 0xff00 },
-	{ 0xcc00, 0x9900, 0xcc00 },
-	{ 0xcc00, 0x9900, 0x9900 },
-	{ 0xcc00, 0x9900, 0x6600 },
-	{ 0xcb00, 0x9800, 0x3200 },
-	{ 0xcd00, 0x9a00, 0x0000 },
-	{ 0xcc00, 0x6600, 0xff00 },
-	{ 0xcc00, 0x6600, 0xcc00 },
-	{ 0xcc00, 0x6600, 0x9900 },
-	{ 0xcc00, 0x6600, 0x6600 },
-	{ 0xcb00, 0x6500, 0x3200 },
-	{ 0xcd00, 0x6600, 0x0000 },
-	{ 0xcc00, 0x3300, 0xff00 },
-	{ 0xcb00, 0x3200, 0xcb00 },
-	{ 0xcb00, 0x3200, 0x9800 },
-	{ 0xcb00, 0x3200, 0x6500 },
-	{ 0xcb00, 0x3200, 0x3200 },
-	{ 0xcd00, 0x3300, 0x0000 },
-	{ 0xcb00, 0x0000, 0xfe00 },
-	{ 0xcd00, 0x0000, 0xcd00 },
-	{ 0xcd00, 0x0000, 0x9a00 },
-	{ 0xcd00, 0x0000, 0x6600 },
-	{ 0xcd00, 0x0000, 0x3300 },
-	{ 0xcd00, 0x0000, 0x0000 },
-	{ 0x9a00, 0xff00, 0xff00 },
-	{ 0x9a00, 0xff00, 0xcc00 },
-	{ 0x9a00, 0xff00, 0x9a00 },
-	{ 0x9900, 0xff00, 0x6600 },
-	{ 0x9900, 0xff00, 0x3300 },
-	{ 0x9900, 0xfe00, 0x0000 },
-	{ 0x9a00, 0xcc00, 0xff00 },
-	{ 0x9900, 0xcc00, 0xcc00 },
-	{ 0x0000, 0x9800, 0x6500 },
-	{ 0x9900, 0xcc00, 0x6600 },
-	{ 0x9900, 0xcb00, 0x3200 },
-	{ 0x9a00, 0xcd00, 0x0000 },
-	{ 0x9a00, 0x9a00, 0xff00 },
-	{ 0x9900, 0x9900, 0xcc00 },
-	{ 0x9900, 0x9900, 0x9900 },
-	{ 0x9800, 0x9800, 0x6500 },
-	{ 0x9a00, 0x9a00, 0x3300 },
-	{ 0x9800, 0x9800, 0x0000 },
-	{ 0x9900, 0x6600, 0xff00 },
-	{ 0x9900, 0x6600, 0xcc00 },
-	{ 0x9800, 0x6500, 0x9800 },
-	{ 0x9800, 0x6500, 0x6500 },
-	{ 0x9a00, 0x6600, 0x3300 },
-	{ 0x9800, 0x6500, 0x0000 },
-	{ 0x9900, 0x3300, 0xff00 },
-	{ 0x9800, 0x3200, 0xcb00 },
-	{ 0x9a00, 0x3300, 0x9a00 },
-	{ 0x9a00, 0x3300, 0x6600 },
-	{ 0x9a00, 0x3300, 0x3300 },
-	{ 0x9800, 0x3200, 0x0000 },
-	{ 0x9800, 0x0000, 0xfe00 },
-	{ 0x9a00, 0x0000, 0xcd00 },
-	{ 0x9800, 0x0000, 0x9800 },
-	{ 0x9800, 0x0000, 0x6500 },
-	{ 0x9800, 0x0000, 0x3200 },
-	{ 0x9800, 0x0000, 0x0000 },
-	{ 0x6600, 0xff00, 0xff00 },
-	{ 0x6600, 0xff00, 0xcc00 },
-	{ 0x6600, 0xff00, 0x9900 },
-	{ 0x6600, 0xff00, 0x6600 },
-	{ 0x6600, 0xff00, 0x3300 },
-	{ 0x6600, 0xfe00, 0x0000 },
-	{ 0x6600, 0xcc00, 0xff00 },
-	{ 0x6600, 0xcc00, 0xcc00 },
-	{ 0x6600, 0xcc00, 0x9900 },
-	{ 0x6600, 0xcc00, 0x6600 },
-	{ 0x6600, 0xcb00, 0x3200 },
-	{ 0x6600, 0xcd00, 0x0000 },
-	{ 0x6600, 0x9900, 0xff00 },
-	{ 0x6600, 0x9900, 0xcc00 },
-	{ 0x6500, 0x9800, 0x9800 },
-	{ 0x6500, 0x9800, 0x6500 },
-	{ 0x6600, 0x9a00, 0x3300 },
-	{ 0x6500, 0x9800, 0x0000 },
-	{ 0x6600, 0x6600, 0xff00 },
-	{ 0x6600, 0x6600, 0xcc00 },
-	{ 0x6500, 0x6500, 0x9800 },
-	{ 0x6600, 0x6600, 0x6600 },
-	{ 0x6500, 0x6500, 0x3200 },
-	{ 0x6600, 0x6600, 0x0000 },
-	{ 0x6600, 0x3300, 0xff00 },
-	{ 0x6500, 0x3200, 0xcb00 },
-	{ 0x6600, 0x3300, 0x9a00 },
-	{ 0x6500, 0x3200, 0x6500 },
-	{ 0x6500, 0x3200, 0x3200 },
-	{ 0x6600, 0x3300, 0x0000 },
-	{ 0x6500, 0x0000, 0xfe00 },
-	{ 0x6600, 0x0000, 0xcd00 },
-	{ 0x6500, 0x0000, 0x9800 },
-	{ 0x6600, 0x0000, 0x6600 },
-	{ 0x6600, 0x0000, 0x3300 },
-	{ 0x6600, 0x0000, 0x0000 },
-	{ 0x3300, 0xff00, 0xff00 },
-	{ 0x3300, 0xff00, 0xcc00 },
-	{ 0x3300, 0xff00, 0x9900 },
-	{ 0x3300, 0xff00, 0x6600 },
-	{ 0x3300, 0xff00, 0x3300 },
-	{ 0x3300, 0xfe00, 0x0000 },
-	{ 0x3300, 0xcc00, 0xff00 },
-	{ 0x3200, 0xcb00, 0xcb00 },
-	{ 0x3200, 0xcb00, 0x9800 },
-	{ 0x3200, 0xcb00, 0x6500 },
-	{ 0x3300, 0xcb00, 0x3200 },
-	{ 0x3300, 0xcd00, 0x0000 },
-	{ 0x3300, 0x9900, 0xff00 },
-	{ 0x3200, 0x9900, 0xcb00 },
-	{ 0x3300, 0x9a00, 0x9a00 },
-	{ 0x3300, 0x9a00, 0x6600 },
-	{ 0x3300, 0x9a00, 0x3300 },
-	{ 0x3200, 0x9800, 0x0000 },
-	{ 0x3300, 0x6600, 0xff00 },
-	{ 0x3200, 0x6600, 0xcb00 },
-	{ 0x3300, 0x6600, 0x9a00 },
-	{ 0x3200, 0x6500, 0x6500 },
-	{ 0x3200, 0x6500, 0x3200 },
-	{ 0x3300, 0x6600, 0x0000 },
-	{ 0x3300, 0x3300, 0xff00 },
-	{ 0x3200, 0x3300, 0xcb00 },
-	{ 0x3300, 0x3300, 0x9a00 },
-	{ 0x3200, 0x3200, 0x6500 },
-	{ 0x3300, 0x3300, 0x3300 },
-	{ 0x3300, 0x3300, 0x0000 },
-	{ 0x3200, 0x0000, 0xfe00 },
-	{ 0x3300, 0x0000, 0xcd00 },
-	{ 0x3200, 0x0000, 0x9800 },
-	{ 0x3300, 0x0000, 0x6600 },
-	{ 0x3300, 0x0000, 0x3300 },
-	{ 0x3300, 0x0000, 0x0000 },
-	{ 0x0000, 0xfe00, 0xfe00 },
-	{ 0x0000, 0xfe00, 0xcb00 },
-	{ 0x0000, 0xfe00, 0x9800 },
-	{ 0x0000, 0xfe00, 0x6500 },
-	{ 0x0000, 0xfe00, 0x3200 },
-	{ 0x0000, 0xfe00, 0x0000 },
-	{ 0x0000, 0xcb00, 0xfe00 },
-	{ 0x0000, 0xcd00, 0xcd00 },
-	{ 0x0000, 0xcd00, 0x9a00 },
-	{ 0x0000, 0xcd00, 0x6600 },
-	{ 0x0000, 0xcd00, 0x3300 },
-	{ 0x0000, 0xcd00, 0x0000 },
-	{ 0x0000, 0x9800, 0xfe00 },
-	{ 0x0000, 0x9a00, 0xcd00 },
-	{ 0x0000, 0x9800, 0x9800 },
-	{ 0x0000, 0x9800, 0x6500 },
-	{ 0x0000, 0x9800, 0x3200 },
-	{ 0x0000, 0x9800, 0x0000 },
-	{ 0x0000, 0x6600, 0xfe00 },
-	{ 0x0000, 0x6600, 0xcd00 },
-	{ 0x0000, 0x6500, 0x9800 },
-	{ 0x0000, 0x6600, 0x6600 },
-	{ 0x0000, 0x6600, 0x3300 },
-	{ 0x0000, 0x6600, 0x0000 },
-	{ 0x0000, 0x3300, 0xfe00 },
-	{ 0x0000, 0x3300, 0xcd00 },
-	{ 0x0000, 0x3200, 0x9800 },
-	{ 0x0000, 0x3300, 0x6600 },
-	{ 0x0000, 0x3300, 0x3300 },
-	{ 0x0000, 0x3300, 0x0000 },
-	{ 0x0000, 0x0000, 0xfe00 },
-	{ 0x0000, 0x0000, 0xcd00 },
-	{ 0x0000, 0x0000, 0x9800 },
-	{ 0x0000, 0x0000, 0x6600 },
-	{ 0x0000, 0x0000, 0x3300 },
-	{ 0xef00, 0x0000, 0x0000 },
-	{ 0xdc00, 0x0000, 0x0000 },
-	{ 0xba00, 0x0000, 0x0000 },
-	{ 0xab00, 0x0000, 0x0000 },
-	{ 0x8900, 0x0000, 0x0000 },
-	{ 0x7700, 0x0000, 0x0000 },
-	{ 0x5500, 0x0000, 0x0000 },
-	{ 0x4400, 0x0000, 0x0000 },
-	{ 0x2200, 0x0000, 0x0000 },
-	{ 0x1100, 0x0000, 0x0000 },
-	{ 0x0000, 0xef00, 0x0000 },
-	{ 0x0000, 0xdc00, 0x0000 },
-	{ 0x0000, 0xba00, 0x0000 },
-	{ 0x0000, 0xab00, 0x0000 },
-	{ 0x0000, 0x8900, 0x0000 },
-	{ 0x0000, 0x7700, 0x0000 },
-	{ 0x0000, 0x5500, 0x0000 },
-	{ 0x0000, 0x4400, 0x0000 },
-	{ 0x0000, 0x2200, 0x0000 },
-	{ 0x0000, 0x1100, 0x0000 },
-	{ 0x0000, 0x0000, 0xef00 },
-	{ 0x0000, 0x0000, 0xdc00 },
-	{ 0x0000, 0x0000, 0xba00 },
-	{ 0x0000, 0x0000, 0xab00 },
-	{ 0x0000, 0x0000, 0x8900 },
-	{ 0x0000, 0x0000, 0x7700 },
-	{ 0x0000, 0x0000, 0x5500 },
-	{ 0x0000, 0x0000, 0x4400 },
-	{ 0x0000, 0x0000, 0x2200 },
-	{ 0x0000, 0x0000, 0x1100 },
-	{ 0xee00, 0xee00, 0xee00 },
-	{ 0xdd00, 0xdd00, 0xdd00 },
-	{ 0xbb00, 0xbb00, 0xbb00 },
-	{ 0xaa00, 0xaa00, 0xaa00 },
-	{ 0x8800, 0x8800, 0x8800 },
-	{ 0x7700, 0x7700, 0x7700 },
-	{ 0x5500, 0x5500, 0x5500 },
-	{ 0x4400, 0x4400, 0x4400 },
-	{ 0x2200, 0x2200, 0x2200 },
-	{ 0x1100, 0x1100, 0x1100 },
-	{ 0x0000, 0x0000, 0x0000 }
+	{ 0xff00, 0xff00, 0xff00 }, { 0xff00, 0xfe00, 0xcb00 },
+	{ 0xff00, 0xfe00, 0x9a00 }, { 0xff00, 0xfe00, 0x6600 },
+	{ 0xff00, 0xfe00, 0x3300 }, { 0xfe00, 0xfe00, 0x0000 },
+	{ 0xff00, 0xcb00, 0xfe00 }, { 0xff00, 0xcb00, 0xcb00 },
+	{ 0xff00, 0xcc00, 0x9a00 }, { 0xff00, 0xcc00, 0x6600 },
+	{ 0xff00, 0xcc00, 0x3300 }, { 0xfe00, 0xcb00, 0x0000 },
+	{ 0xff00, 0x9a00, 0xfe00 }, { 0xff00, 0x9a00, 0xcc00 },
+	{ 0xff00, 0x9a00, 0x9a00 }, { 0xff00, 0x9900, 0x6600 },
+	{ 0xff00, 0x9900, 0x3300 }, { 0xfe00, 0x9800, 0x0000 },
+	{ 0xff00, 0x6600, 0xfe00 }, { 0xff00, 0x6600, 0xcc00 },
+	{ 0xff00, 0x6600, 0x9900 }, { 0xff00, 0x6600, 0x6600 },
+	{ 0xff00, 0x6600, 0x3300 }, { 0xfe00, 0x6500, 0x0000 },
+	{ 0xff00, 0x3300, 0xfe00 }, { 0xff00, 0x3300, 0xcc00 },
+	{ 0xff00, 0x3300, 0x9900 }, { 0xff00, 0x3300, 0x6600 },
+	{ 0xff00, 0x3300, 0x3300 }, { 0xfe00, 0x3200, 0x0000 },
+	{ 0xfe00, 0x0000, 0xfe00 }, { 0xfe00, 0x0000, 0xcb00 },
+	{ 0xfe00, 0x0000, 0x9800 }, { 0xfe00, 0x0000, 0x6500 },
+	{ 0xfe00, 0x0000, 0x3200 }, { 0xfe00, 0x0000, 0x0000 },
+	{ 0xcb00, 0xff00, 0xff00 }, { 0xcb00, 0xff00, 0xcb00 },
+	{ 0xcc00, 0xff00, 0x9a00 }, { 0xcc00, 0xff00, 0x6600 },
+	{ 0xcc00, 0xff00, 0x3300 }, { 0xcb00, 0xfe00, 0x0000 },
+	{ 0xcb00, 0xcb00, 0xff00 }, { 0xcc00, 0xcc00, 0xcc00 },
+	{ 0xcc00, 0xcc00, 0x9900 }, { 0xcc00, 0xcc00, 0x6600 },
+	{ 0xcb00, 0xcb00, 0x3200 }, { 0xcd00, 0xcd00, 0x0000 },
+	{ 0xcc00, 0x9a00, 0xff00 }, { 0xcc00, 0x9900, 0xcc00 },
+	{ 0xcc00, 0x9900, 0x9900 }, { 0xcc00, 0x9900, 0x6600 },
+	{ 0xcb00, 0x9800, 0x3200 }, { 0xcd00, 0x9a00, 0x0000 },
+	{ 0xcc00, 0x6600, 0xff00 }, { 0xcc00, 0x6600, 0xcc00 },
+	{ 0xcc00, 0x6600, 0x9900 }, { 0xcc00, 0x6600, 0x6600 },
+	{ 0xcb00, 0x6500, 0x3200 }, { 0xcd00, 0x6600, 0x0000 },
+	{ 0xcc00, 0x3300, 0xff00 }, { 0xcb00, 0x3200, 0xcb00 },
+	{ 0xcb00, 0x3200, 0x9800 }, { 0xcb00, 0x3200, 0x6500 },
+	{ 0xcb00, 0x3200, 0x3200 }, { 0xcd00, 0x3300, 0x0000 },
+	{ 0xcb00, 0x0000, 0xfe00 }, { 0xcd00, 0x0000, 0xcd00 },
+	{ 0xcd00, 0x0000, 0x9a00 }, { 0xcd00, 0x0000, 0x6600 },
+	{ 0xcd00, 0x0000, 0x3300 }, { 0xcd00, 0x0000, 0x0000 },
+	{ 0x9a00, 0xff00, 0xff00 }, { 0x9a00, 0xff00, 0xcc00 },
+	{ 0x9a00, 0xff00, 0x9a00 }, { 0x9900, 0xff00, 0x6600 },
+	{ 0x9900, 0xff00, 0x3300 }, { 0x9900, 0xfe00, 0x0000 },
+	{ 0x9a00, 0xcc00, 0xff00 }, { 0x9900, 0xcc00, 0xcc00 },
+	{ 0x0000, 0x9800, 0x6500 }, { 0x9900, 0xcc00, 0x6600 },
+	{ 0x9900, 0xcb00, 0x3200 }, { 0x9a00, 0xcd00, 0x0000 },
+	{ 0x9a00, 0x9a00, 0xff00 }, { 0x9900, 0x9900, 0xcc00 },
+	{ 0x9900, 0x9900, 0x9900 }, { 0x9800, 0x9800, 0x6500 },
+	{ 0x9a00, 0x9a00, 0x3300 }, { 0x9800, 0x9800, 0x0000 },
+	{ 0x9900, 0x6600, 0xff00 }, { 0x9900, 0x6600, 0xcc00 },
+	{ 0x9800, 0x6500, 0x9800 }, { 0x9800, 0x6500, 0x6500 },
+	{ 0x9a00, 0x6600, 0x3300 }, { 0x9800, 0x6500, 0x0000 },
+	{ 0x9900, 0x3300, 0xff00 }, { 0x9800, 0x3200, 0xcb00 },
+	{ 0x9a00, 0x3300, 0x9a00 }, { 0x9a00, 0x3300, 0x6600 },
+	{ 0x9a00, 0x3300, 0x3300 }, { 0x9800, 0x3200, 0x0000 },
+	{ 0x9800, 0x0000, 0xfe00 }, { 0x9a00, 0x0000, 0xcd00 },
+	{ 0x9800, 0x0000, 0x9800 }, { 0x9800, 0x0000, 0x6500 },
+	{ 0x9800, 0x0000, 0x3200 }, { 0x9800, 0x0000, 0x0000 },
+	{ 0x6600, 0xff00, 0xff00 }, { 0x6600, 0xff00, 0xcc00 },
+	{ 0x6600, 0xff00, 0x9900 }, { 0x6600, 0xff00, 0x6600 },
+	{ 0x6600, 0xff00, 0x3300 }, { 0x6600, 0xfe00, 0x0000 },
+	{ 0x6600, 0xcc00, 0xff00 }, { 0x6600, 0xcc00, 0xcc00 },
+	{ 0x6600, 0xcc00, 0x9900 }, { 0x6600, 0xcc00, 0x6600 },
+	{ 0x6600, 0xcb00, 0x3200 }, { 0x6600, 0xcd00, 0x0000 },
+	{ 0x6600, 0x9900, 0xff00 }, { 0x6600, 0x9900, 0xcc00 },
+	{ 0x6500, 0x9800, 0x9800 }, { 0x6500, 0x9800, 0x6500 },
+	{ 0x6600, 0x9a00, 0x3300 }, { 0x6500, 0x9800, 0x0000 },
+	{ 0x6600, 0x6600, 0xff00 }, { 0x6600, 0x6600, 0xcc00 },
+	{ 0x6500, 0x6500, 0x9800 }, { 0x6600, 0x6600, 0x6600 },
+	{ 0x6500, 0x6500, 0x3200 }, { 0x6600, 0x6600, 0x0000 },
+	{ 0x6600, 0x3300, 0xff00 }, { 0x6500, 0x3200, 0xcb00 },
+	{ 0x6600, 0x3300, 0x9a00 }, { 0x6500, 0x3200, 0x6500 },
+	{ 0x6500, 0x3200, 0x3200 }, { 0x6600, 0x3300, 0x0000 },
+	{ 0x6500, 0x0000, 0xfe00 }, { 0x6600, 0x0000, 0xcd00 },
+	{ 0x6500, 0x0000, 0x9800 }, { 0x6600, 0x0000, 0x6600 },
+	{ 0x6600, 0x0000, 0x3300 }, { 0x6600, 0x0000, 0x0000 },
+	{ 0x3300, 0xff00, 0xff00 }, { 0x3300, 0xff00, 0xcc00 },
+	{ 0x3300, 0xff00, 0x9900 }, { 0x3300, 0xff00, 0x6600 },
+	{ 0x3300, 0xff00, 0x3300 }, { 0x3300, 0xfe00, 0x0000 },
+	{ 0x3300, 0xcc00, 0xff00 }, { 0x3200, 0xcb00, 0xcb00 },
+	{ 0x3200, 0xcb00, 0x9800 }, { 0x3200, 0xcb00, 0x6500 },
+	{ 0x3300, 0xcb00, 0x3200 }, { 0x3300, 0xcd00, 0x0000 },
+	{ 0x3300, 0x9900, 0xff00 }, { 0x3200, 0x9900, 0xcb00 },
+	{ 0x3300, 0x9a00, 0x9a00 }, { 0x3300, 0x9a00, 0x6600 },
+	{ 0x3300, 0x9a00, 0x3300 }, { 0x3200, 0x9800, 0x0000 },
+	{ 0x3300, 0x6600, 0xff00 }, { 0x3200, 0x6600, 0xcb00 },
+	{ 0x3300, 0x6600, 0x9a00 }, { 0x3200, 0x6500, 0x6500 },
+	{ 0x3200, 0x6500, 0x3200 }, { 0x3300, 0x6600, 0x0000 },
+	{ 0x3300, 0x3300, 0xff00 }, { 0x3200, 0x3300, 0xcb00 },
+	{ 0x3300, 0x3300, 0x9a00 }, { 0x3200, 0x3200, 0x6500 },
+	{ 0x3300, 0x3300, 0x3300 }, { 0x3300, 0x3300, 0x0000 },
+	{ 0x3200, 0x0000, 0xfe00 }, { 0x3300, 0x0000, 0xcd00 },
+	{ 0x3200, 0x0000, 0x9800 }, { 0x3300, 0x0000, 0x6600 },
+	{ 0x3300, 0x0000, 0x3300 }, { 0x3300, 0x0000, 0x0000 },
+	{ 0x0000, 0xfe00, 0xfe00 }, { 0x0000, 0xfe00, 0xcb00 },
+	{ 0x0000, 0xfe00, 0x9800 }, { 0x0000, 0xfe00, 0x6500 },
+	{ 0x0000, 0xfe00, 0x3200 }, { 0x0000, 0xfe00, 0x0000 },
+	{ 0x0000, 0xcb00, 0xfe00 }, { 0x0000, 0xcd00, 0xcd00 },
+	{ 0x0000, 0xcd00, 0x9a00 }, { 0x0000, 0xcd00, 0x6600 },
+	{ 0x0000, 0xcd00, 0x3300 }, { 0x0000, 0xcd00, 0x0000 },
+	{ 0x0000, 0x9800, 0xfe00 }, { 0x0000, 0x9a00, 0xcd00 },
+	{ 0x0000, 0x9800, 0x9800 }, { 0x0000, 0x9800, 0x6500 },
+	{ 0x0000, 0x9800, 0x3200 }, { 0x0000, 0x9800, 0x0000 },
+	{ 0x0000, 0x6600, 0xfe00 }, { 0x0000, 0x6600, 0xcd00 },
+	{ 0x0000, 0x6500, 0x9800 }, { 0x0000, 0x6600, 0x6600 },
+	{ 0x0000, 0x6600, 0x3300 }, { 0x0000, 0x6600, 0x0000 },
+	{ 0x0000, 0x3300, 0xfe00 }, { 0x0000, 0x3300, 0xcd00 },
+	{ 0x0000, 0x3200, 0x9800 }, { 0x0000, 0x3300, 0x6600 },
+	{ 0x0000, 0x3300, 0x3300 }, { 0x0000, 0x3300, 0x0000 },
+	{ 0x0000, 0x0000, 0xfe00 }, { 0x0000, 0x0000, 0xcd00 },
+	{ 0x0000, 0x0000, 0x9800 }, { 0x0000, 0x0000, 0x6600 },
+	{ 0x0000, 0x0000, 0x3300 }, { 0xef00, 0x0000, 0x0000 },
+	{ 0xdc00, 0x0000, 0x0000 }, { 0xba00, 0x0000, 0x0000 },
+	{ 0xab00, 0x0000, 0x0000 }, { 0x8900, 0x0000, 0x0000 },
+	{ 0x7700, 0x0000, 0x0000 }, { 0x5500, 0x0000, 0x0000 },
+	{ 0x4400, 0x0000, 0x0000 }, { 0x2200, 0x0000, 0x0000 },
+	{ 0x1100, 0x0000, 0x0000 }, { 0x0000, 0xef00, 0x0000 },
+	{ 0x0000, 0xdc00, 0x0000 }, { 0x0000, 0xba00, 0x0000 },
+	{ 0x0000, 0xab00, 0x0000 }, { 0x0000, 0x8900, 0x0000 },
+	{ 0x0000, 0x7700, 0x0000 }, { 0x0000, 0x5500, 0x0000 },
+	{ 0x0000, 0x4400, 0x0000 }, { 0x0000, 0x2200, 0x0000 },
+	{ 0x0000, 0x1100, 0x0000 }, { 0x0000, 0x0000, 0xef00 },
+	{ 0x0000, 0x0000, 0xdc00 }, { 0x0000, 0x0000, 0xba00 },
+	{ 0x0000, 0x0000, 0xab00 }, { 0x0000, 0x0000, 0x8900 },
+	{ 0x0000, 0x0000, 0x7700 }, { 0x0000, 0x0000, 0x5500 },
+	{ 0x0000, 0x0000, 0x4400 }, { 0x0000, 0x0000, 0x2200 },
+	{ 0x0000, 0x0000, 0x1100 }, { 0xee00, 0xee00, 0xee00 },
+	{ 0xdd00, 0xdd00, 0xdd00 }, { 0xbb00, 0xbb00, 0xbb00 },
+	{ 0xaa00, 0xaa00, 0xaa00 }, { 0x8800, 0x8800, 0x8800 },
+	{ 0x7700, 0x7700, 0x7700 }, { 0x5500, 0x5500, 0x5500 },
+	{ 0x4400, 0x4400, 0x4400 }, { 0x2200, 0x2200, 0x2200 },
+	{ 0x1100, 0x1100, 0x1100 }, { 0x0000, 0x0000, 0x0000 }
 };
 
 static const RGBColor rgb_4[16] = {
-	{ 0xffff, 0xffff, 0xffff },
-	{ 0xffff, 0xffff, 0x0000 },
-	{ 0xffff, 0xa0a0, 0x7a7a },
-	{ 0xffff, 0x0000, 0x0000 },
-	{ 0xffff, 0x1414, 0x9393 },
-	{ 0x8a8a, 0x2b2b, 0xe2e2 },
-	{ 0x0000, 0x0000, 0x8080 },
-	{ 0x6464, 0x9595, 0xeded },
-	{ 0x2222, 0x8b8b, 0x2222 },
-	{ 0x0000, 0x6464, 0x0000 },
-	{ 0x8b8b, 0x4545, 0x1313 },
-	{ 0xd2d2, 0xb4b4, 0x8c8c },
-	{ 0xd3d3, 0xd3d3, 0xd3d3 },
-	{ 0xbebe, 0xbebe, 0xbebe },
-	{ 0x6969, 0x6969, 0x6969 },
-	{ 0x0000, 0x0000, 0x0000 }
+	{ 0xffff, 0xffff, 0xffff }, { 0xffff, 0xffff, 0x0000 },
+	{ 0xffff, 0xa0a0, 0x7a7a }, { 0xffff, 0x0000, 0x0000 },
+	{ 0xffff, 0x1414, 0x9393 }, { 0x8a8a, 0x2b2b, 0xe2e2 },
+	{ 0x0000, 0x0000, 0x8080 }, { 0x6464, 0x9595, 0xeded },
+	{ 0x2222, 0x8b8b, 0x2222 }, { 0x0000, 0x6464, 0x0000 },
+	{ 0x8b8b, 0x4545, 0x1313 }, { 0xd2d2, 0xb4b4, 0x8c8c },
+	{ 0xd3d3, 0xd3d3, 0xd3d3 }, { 0xbebe, 0xbebe, 0xbebe },
+	{ 0x6969, 0x6969, 0x6969 }, { 0x0000, 0x0000, 0x0000 }
 };
 
 static const RGBColor rgb_2[4] = {
-	{ 0xffff, 0xffff, 0xffff },
-	{ 0xffff, 0xffff, 0x0000 },
-	{ 0x0000, 0xffff, 0xffff },
-	{ 0x0000, 0x0000, 0x0000 }
+	{ 0xffff, 0xffff, 0xffff }, { 0xffff, 0xffff, 0x0000 },
+	{ 0x0000, 0xffff, 0xffff }, { 0x0000, 0x0000, 0x0000 }
 };
 
 static const RGBColor rgb_1[2] = {
@@ -331,359 +220,184 @@ static const RGBColor rgb_1[2] = {
 	{ 0x0000, 0x0000, 0x0000 }
 };
 
-void
-palette_get_rgb_8 (unsigned int *palette)
+/* RGBColor stores each channel in the legacy 16-bit-per-channel form
+ * (high byte = the actual 8-bit value).  Pack to 8-bit RGB. */
+static inline guint32
+rgb_pack (const RGBColor *c)
 {
-	unsigned int i;
-
-	for (i = 0; i < 256; i++) {
-		palette[i] = ((rgb_8[i].blue >> 8) << 16)
-			   | ((rgb_8[i].green >> 8) << 8)
-			   | ((rgb_8[i].red >> 8) << 0)
-			   | 0xff000000;
-	}
+	return ((guint32)(c->red   >> 8) << 16)
+	     | ((guint32)(c->green >> 8) <<  8)
+	     | ((guint32)(c->blue  >> 8) <<  0);
 }
 
-static unsigned int cmap_8[256], cmap_4[16], cmap_2[4], cmap_1[2];
-#if WHITE_CLEAR
-static unsigned int white = 0;
-#endif
-
-static unsigned int
-rgb_to_pixel (GdkColormap *colormap, const RGBColor *rgb)
+/*
+ * Build a 256-entry palette table for an icon: take the canonical Mac
+ * palette as the default, then overlay any entries the per-icon
+ * ColorTable specifies.  bpp determines how many entries we actually
+ * care about, but we always size the array at 256 (cheap, simple).
+ */
+static void
+build_palette (guint32 *out, unsigned int bpp, ColorTable *ct)
 {
-	GdkColor col;
+	unsigned int n = 1u << bpp;
+	unsigned int i, ctsize;
+	const RGBColor *defpal;
 
-	col.pixel = 0;
-	col.red = rgb->red;
-	col.green = rgb->green;
-	col.blue = rgb->blue;
-
-	if (!gdk_colormap_alloc_color(colormap, &col, 0, 1))
-		fprintf(stderr, "rgb_to_pixel: can't allocate %u/%u/%u\n",
-			rgb->red, rgb->green, rgb->blue);
-
-
-	return col.pixel;
-}
-
-GdkImage *cicn_to_gdkimage (GdkColormap *colormap, GdkVisual *visual,
-		  void *cicn_rsrc, unsigned int len, GdkImage **maskimp)
-{
-	GdkImage *gim;
-	GdkImage *mim;
-	PixMap *pm = (PixMap *)((unsigned char *)cicn_rsrc);
-	BitMap *mbm = (BitMap *)((unsigned char *)cicn_rsrc + 50);
-	BitMap *bm = (BitMap *)((unsigned char *)cicn_rsrc + 64);
-	unsigned int height = ntohs(pm->bounds.bottom) - ntohs(pm->bounds.top);
-	unsigned int width = ntohs(pm->bounds.right) - ntohs(pm->bounds.left);
-	unsigned int bpp = ntohs(pm->pixelSize);
-	ColorTable *ct = (ColorTable *)
-			((unsigned char *)cicn_rsrc
-			+ 50 + 14 + 14 + 4
-			+ (ntohs(mbm->rowBytes) * (ntohs(mbm->bounds.bottom) - ntohs(mbm->bounds.top)))
-			+ (ntohs(bm->rowBytes) * (ntohs(bm->bounds.bottom) - ntohs(bm->bounds.top))));
-	unsigned int i, x, y, rowBytes, ctsize;
-	unsigned int idlen;
-	unsigned char *base_id, *id;
-	unsigned char maski, maskp, *maskfb;
-	unsigned int maskfb_size;
-
-#if WHITE_CLEAR
-	if (!white)
-		white = rgb_to_pixel(colormap, &rgb_8[0]);
-#endif
-
-	rowBytes = ntohs(pm->rowBytes) & 0x7fff;
-	idlen = height * rowBytes;
 	switch (bpp) {
-		case 8:
-			memset(cmap_8, 257, 256);
-			break;
-		case 4:
-			memset(cmap_4, 17, 16);
-			break;
-		case 2:
-			memset(cmap_2, 5, 4);
-			break;
-		case 1:
-			memset(cmap_1, 2, 2);
-			break;
-		default:
-			return 0;
-	}
-	base_id = (((unsigned char *)cicn_rsrc + len) - idlen);
-
-	if (mbm->bounds.right == 0 || mbm->bounds.bottom == 0) {
-		maskfb = 0;
-	} else {
-		unsigned char *md = ((unsigned char *)cicn_rsrc) + 82;
-		unsigned int mrb = ntohs(mbm->rowBytes);
-		unsigned int w3 = (width >> 3) + ((width % 8) ? 1 : 0);
-
-		maskfb_size = ((((w3<<3) * height) / 8) + 1);
-		maskfb = g_malloc(maskfb_size);
-		if (!maskfb)
-			return 0;
-		for (y = 0; y < height; y++) {
-			id = md + mrb * y;
-			for (x = 0; x < w3; x++) {
-				maskfb[y * w3 + x] = ~(*id);
-				id++;
-			}
-		}
+		case 8: defpal = rgb_8; break;
+		case 4: defpal = rgb_4; break;
+		case 2: defpal = rgb_2; break;
+		case 1: defpal = rgb_1; break;
+		default: return;
 	}
 
-	gim = gdk_image_new(GDK_IMAGE_FASTEST, visual, width, height);
-	if (!gim)
-		return 0;
+	for (i = 0; i < n; i++)
+		out[i] = rgb_pack (&defpal[i]);
 
-	ctsize = ntohs(ct->ctSize) + 1;
+	ctsize = ntohs (ct->ctSize) + 1;
 	for (i = 0; i < ctsize; i++) {
-		unsigned int v = ntohs(ct->ctTable[i].value);
-		if (bpp == 8)
-			cmap_8[v&0xff] = rgb_to_pixel(colormap, &ct->ctTable[i].rgb);
-		else if (bpp == 4)
-			cmap_4[v&0xf] = rgb_to_pixel(colormap, &ct->ctTable[i].rgb);
-		else if (bpp == 2)
-			cmap_2[v&0x3] = rgb_to_pixel(colormap, &ct->ctTable[i].rgb);
-		else if (bpp == 1)
-			cmap_1[v&0x1] = rgb_to_pixel(colormap, &ct->ctTable[i].rgb);
+		unsigned int v = ntohs (ct->ctTable[i].value) & (n - 1);
+		out[v] = rgb_pack (&ct->ctTable[i].rgb);
 	}
-
-	if (bpp == 1) {
-		for (y = 0; y < height; y++) {
-			id = base_id + rowBytes * y;
-			for (x = 0; x < width; x++) {
-				unsigned int i, j, k, l, m, n, o, p;
-				i = *id >> 7;
-				j = (*id & 0x40) >> 6;
-				k = (*id & 0x20) >> 5;
-				l = (*id & 0x10) >> 4;
-				m = (*id & 0x8) >> 3;
-				n = (*id & 0x4) >> 2;
-				o = (*id & 0x2) >> 1;
-				p = *id & 0x1;
-				if (cmap_1[i] == 2)
-					cmap_1[i] = rgb_to_pixel(colormap, &rgb_1[i]);
-				if (cmap_1[j] == 2)
-					cmap_1[j] = rgb_to_pixel(colormap, &rgb_1[j]);
-				if (cmap_1[k] == 2)
-					cmap_1[k] = rgb_to_pixel(colormap, &rgb_1[k]);
-				if (cmap_1[l] == 2)
-					cmap_1[l] = rgb_to_pixel(colormap, &rgb_1[l]);
-				if (cmap_1[m] == 2)
-					cmap_1[m] = rgb_to_pixel(colormap, &rgb_1[m]);
-				if (cmap_1[n] == 2)
-					cmap_1[n] = rgb_to_pixel(colormap, &rgb_1[n]);
-				if (cmap_1[o] == 2)
-					cmap_1[o] = rgb_to_pixel(colormap, &rgb_1[o]);
-				if (cmap_1[p] == 2)
-					cmap_1[p] = rgb_to_pixel(colormap, &rgb_1[p]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[i]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[j]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[k]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[l]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[m]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[n]);
-				gdk_image_put_pixel(gim, x++, y, cmap_1[o]);
-				gdk_image_put_pixel(gim, x, y, cmap_1[p]);
-#if WHITE_CLEAR
-				if (maskfb) {
-					maskp = ((cmap_1[i]!=white)?0:1<<7)
-						| ((cmap_1[j]!=white)?0:1<<6)
-						| ((cmap_1[k]!=white)?0:1<<5)
-						| ((cmap_1[l]!=white)?0:1<<4)
-						| ((cmap_1[m]!=white)?0:1<<3)
-						| ((cmap_1[n]!=white)?0:1<<2)
-						| ((cmap_1[o]!=white)?0:1<<1)
-						| ((cmap_1[p]!=white)?0:1);
-					maskfb[y * (width>>3) + (x>>3)] |= maskp;
-				}
-#endif
-				id++;
-			}
-		}
-	} else if (bpp == 2) {
-		for (y = 0; y < height; y++) {
-			id = base_id + rowBytes * y;
-			maski = 7;
-			maskp = 0;
-			for (x = 0; x < width; x++) {
-				unsigned int i = *id >> 6;
-				unsigned int j = (*id & 0x30) >> 4;
-				unsigned int k = (*id & 0xc) >> 2;
-				unsigned int l = *id & 0x3;
-				if (cmap_2[i] == 5)
-					cmap_2[i] = rgb_to_pixel(colormap, &rgb_2[i]);
-				if (cmap_2[j] == 5)
-					cmap_2[j] = rgb_to_pixel(colormap, &rgb_2[j]);
-				if (cmap_2[k] == 5)
-					cmap_2[k] = rgb_to_pixel(colormap, &rgb_2[k]);
-				if (cmap_2[l] == 5)
-					cmap_2[l] = rgb_to_pixel(colormap, &rgb_2[l]);
-				gdk_image_put_pixel(gim, x++, y, cmap_2[i]);
-				gdk_image_put_pixel(gim, x++, y, cmap_2[j]);
-				gdk_image_put_pixel(gim, x++, y, cmap_2[k]);
-				gdk_image_put_pixel(gim, x, y, cmap_2[l]);
-#if WHITE_CLEAR
-				if (maskfb) {
-					maskp |= ((cmap_2[i]!=white)?0:1<<maski)
-						| ((cmap_2[j]!=white)?0:1<<(maski-1))
-						| ((cmap_2[k]!=white)?0:1<<(maski-2))
-						| ((cmap_2[l]!=white)?0:1<<(maski-3));
-					if (maski == 3) {
-						maskfb[y * (width>>3) + (x>>3)] |= maskp;
-						maski = 7;
-						maskp = 0;
-					} else {
-						maski = 3;
-					}
-				}
-#endif
-				id++;
-			}
-		}
-	} else if (bpp == 4) {
-		for (y = 0; y < height; y++) {
-			id = base_id + rowBytes * y;
-			maski = 7;
-			maskp = 0;
-			for (x = 0; x < width; x++) {
-				unsigned int i = *id >> 4;
-				unsigned int j = *id & 0xf;
-				if (cmap_4[i] == 17)
-					cmap_4[i] = rgb_to_pixel(colormap, &rgb_4[i]);
-				if (cmap_4[j] == 17)
-					cmap_4[j] = rgb_to_pixel(colormap, &rgb_4[j]);
-				gdk_image_put_pixel(gim, x++, y, cmap_4[i]);
-				gdk_image_put_pixel(gim, x, y, cmap_4[j]);
-#if WHITE_CLEAR
-				if (maskfb) {
-					maskp |= ((cmap_4[i]!=white)?0:1<<maski)
-						| ((cmap_4[j]!=white)?0:1<<(maski-1));
-					if (maski == 1) {
-						maskfb[y * (width>>3) + (x>>3)] |= maskp;
-						maski = 7;
-						maskp = 0;
-					} else {
-						maski -= 2;
-					}
-				}
-#endif
-				id++;
-			}
-		}
-	} else if (bpp == 8) {
-		for (y = 0; y < height; y++) {
-			id = base_id + rowBytes * y;
-			maski = 7;
-			maskp = 0;
-			for (x = 0; x < width; x++) {
-				unsigned int i = *id++;
-				if (cmap_8[i] == 257)
-					cmap_8[i] = rgb_to_pixel(colormap, &rgb_8[i]);
-				gdk_image_put_pixel(gim, x, y, cmap_8[i]);
-#if WHITE_CLEAR
-				if (maskfb) {
-					maskp |= ((cmap_8[i]!=white)?0:1<<maski);
-					if (!maski) {
-						maskfb[y * (width>>3) + (x>>3)] |= maskp;
-						maski = 7;
-						maskp = 0;
-					} else {
-						maski--;
-					}
-				}
-#endif
-			}
-		}
-	}
-
-	if (maskimp) {
-		if (!maskfb)
-			mim = 0;
-		else
-			mim = gdk_image_new_bitmap(visual, maskfb, width, height);
-		*maskimp = mim;
-	}
-
-	return gim;
 }
 
-void load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse, GdkPixmap **pixmap_out, GdkBitmap **mask_out)
+/*
+ * Decode a Mac classic cicn resource into a freshly-allocated ARGB
+ * GdkPixbuf.  Returns NULL on malformed input.  The caller owns the
+ * pixbuf (one strong ref) and should g_object_unref() it when done.
+ *
+ * Mask handling: if the cicn has a mask BitMap, its bits become the
+ * pixbuf alpha (Mac classic: 1 = visible, 0 = transparent).  If there
+ * is no mask, the pixbuf is fully opaque.
+ */
+GdkPixbuf *
+cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 {
-	GdkPixmap *pixmap=0;
-	GdkBitmap *mask=0;
-	GdkGC *gc;
-	GdkImage *image=0;
-	GdkImage *maskim=0;
-	GdkVisual *visual;
-	GdkColormap *colormap;
-	gint off, width, height, depth;
-	macres_res *cicn;
+	PixMap *pm  = (PixMap *)((unsigned char *)cicn_rsrc);
+	BitMap *mbm = (BitMap *)((unsigned char *)cicn_rsrc + 50);
+	BitMap *bm  = (BitMap *)((unsigned char *)cicn_rsrc + 64);
+	unsigned int height = ntohs (pm->bounds.bottom) - ntohs (pm->bounds.top);
+	unsigned int width  = ntohs (pm->bounds.right)  - ntohs (pm->bounds.left);
+	unsigned int bpp    = ntohs (pm->pixelSize);
+	unsigned int mbm_h  = ntohs (mbm->bounds.bottom) - ntohs (mbm->bounds.top);
+	unsigned int mbm_rb = ntohs (mbm->rowBytes);
+	unsigned int bm_h   = ntohs (bm->bounds.bottom)  - ntohs (bm->bounds.top);
+	unsigned int bm_rb  = ntohs (bm->rowBytes);
+	unsigned int rowBytes = ntohs (pm->rowBytes) & 0x7fff;
+	ColorTable *ct;
+	guint32 palette[256];
+	GdkPixbuf *pb;
+	guchar *pixels, *prow;
+	int rowstride, n_channels;
+	const unsigned char *pixdata, *maskdata;
+	unsigned int x, y;
+	gboolean have_mask;
+
+	if (bpp != 1 && bpp != 2 && bpp != 4 && bpp != 8)
+		return NULL;
+	if (width == 0 || height == 0)
+		return NULL;
+
+	/* Color table sits after both bitmap data blocks; pixel data is
+	 * the trailing rowBytes*height bytes of the resource. */
+	ct = (ColorTable *)((unsigned char *)cicn_rsrc
+		+ 50 + 14 + 14 + 4
+		+ mbm_rb * mbm_h
+		+ bm_rb  * bm_h);
+	pixdata = ((unsigned char *)cicn_rsrc + len) - rowBytes * height;
+	maskdata = (unsigned char *)cicn_rsrc + 82;
+	have_mask = (mbm->bounds.right != 0 && mbm->bounds.bottom != 0);
+
+	build_palette (palette, bpp, ct);
+
+	pb = gdk_pixbuf_new (GDK_COLORSPACE_RGB, TRUE, 8, width, height);
+	if (!pb)
+		return NULL;
+	pixels     = gdk_pixbuf_get_pixels (pb);
+	rowstride  = gdk_pixbuf_get_rowstride (pb);
+	n_channels = gdk_pixbuf_get_n_channels (pb);  /* always 4 with alpha */
+
+	for (y = 0; y < height; y++) {
+		const unsigned char *id = pixdata + rowBytes * y;
+		const unsigned char *mp = have_mask ? (maskdata + mbm_rb * y) : NULL;
+		prow = pixels + y * rowstride;
+		for (x = 0; x < width; x++) {
+			unsigned int idx;
+			guint32 rgb;
+			guchar a;
+
+			switch (bpp) {
+				case 1:
+					idx = (id[x >> 3] >> (7 - (x & 7))) & 0x01;
+					break;
+				case 2:
+					idx = (id[x >> 2] >> ((3 - (x & 3)) * 2)) & 0x03;
+					break;
+				case 4:
+					idx = (id[x >> 1] >> ((1 - (x & 1)) * 4)) & 0x0f;
+					break;
+				case 8:
+				default:
+					idx = id[x];
+					break;
+			}
+			rgb = palette[idx];
+			a = mp ? (((mp[x >> 3] >> (7 - (x & 7))) & 0x01) ? 0xff : 0x00)
+			       : 0xff;
+
+			prow[0] = (rgb >> 16) & 0xff;  /* R */
+			prow[1] = (rgb >>  8) & 0xff;  /* G */
+			prow[2] = (rgb      ) & 0xff;  /* B */
+			prow[3] = a;
+			prow += n_channels;
+		}
+	}
+
+	return pb;
+}
+
+/*
+ * Look up an icon by Mac resource ID across the loaded resource files,
+ * decode it to a GdkPixbuf, and hand back ownership via *pixbuf_out.
+ * The mask out-param is unused (alpha lives in the pixbuf) and is set
+ * to NULL for source compatibility with the GTK 1.2-era 5-arg signature
+ * still in use at call sites.
+ */
+void
+load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
+           GdkPixbuf **pixbuf_out, GdkPixbuf **mask_out)
+{
+	macres_res *cicn = NULL;
+	GdkPixbuf *pb;
 	unsigned int i;
+
+	(void)widget;
 
 	for (i = 0; i < ifn->n; i++) {
 		if (!ifn->cicns[i])
 			continue;
-		cicn = macres_file_get_resid_of_type(ifn->cicns[i], TYPE_cicn, icon);
+		cicn = macres_file_get_resid_of_type (ifn->cicns[i], TYPE_cicn, icon);
 		if (cicn)
-			goto found;
+			break;
 	}
-	goto failure;
-found:
-	colormap = gtk_widget_get_colormap(widget);
-	visual = gtk_widget_get_visual(widget);
-	image = cicn_to_gdkimage(colormap, visual, cicn->data, cicn->datalen, &maskim);
-	if (!image)
+	if (!cicn)
 		goto failure;
-	depth = image->depth;
-	width = image->width;
-	height = image->height;
-	off = width > 400 ? 198 : 0;
-	pixmap = gdk_pixmap_new(widget->window, width-off, height, depth);
-	if (!pixmap)
-		goto failure;
-	gc = users_gc;
-	if (!gc) {
-		gc = gdk_gc_new(pixmap);
-		if (!gc)
-			goto failure;
-		users_gc = gc;
-	}
-	gdk_draw_image(pixmap, gc, image, off, 0, 0, 0, width-off, height);
-	gdk_image_destroy(image);
-	image = 0;
-	if (maskim) {
-		mask = gdk_pixmap_new(widget->window, width-off, height, 1);
-		if (!mask)
-			goto failure;
-		gc = mask_gc;
-		if (!gc) {
-			gc = gdk_gc_new(mask);
-			if (!gc)
-				goto failure;
-			mask_gc = gc;
-		}
-		gdk_draw_image(mask, gc, maskim, off, 0, 0, 0, width-off, height);
-		gdk_image_destroy(maskim);
-	} else {
-		mask = 0;
-	}
 
-	*pixmap_out = pixmap;
-	*mask_out = mask;
+	pb = cicn_to_pixbuf (cicn->data, cicn->datalen);
+	if (!pb)
+		goto failure;
+
+	*pixbuf_out = pb;
+	if (mask_out)
+		*mask_out = NULL;
 	return;
 
-	failure:
-	if (pixmap) gdk_pixmap_unref (pixmap);
-	if (mask) gdk_pixmap_unref (mask);
-	if (image) gdk_image_destroy (image);
-	if (maskim) gdk_image_destroy (maskim);
-	if (recurse) load_icon (widget, DEFAULT_ICON, ifn, 0, pixmap_out, mask_out);
-	else {
-		*pixmap_out = 0;
-		*mask_out = 0;
+failure:
+	if (recurse) {
+		load_icon (widget, DEFAULT_ICON, ifn, 0, pixbuf_out, mask_out);
+	} else {
+		*pixbuf_out = NULL;
+		if (mask_out)
+			*mask_out = NULL;
 	}
 }

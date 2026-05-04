@@ -98,6 +98,14 @@ struct cicn_resource {
 
 struct ifn;
 
-void load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse, GdkPixmap **pixmap, GdkBitmap **bitmap);
-extern GdkImage *cicn_to_gdkimage (GdkColormap *colormap, GdkVisual *visual, void *cicn_rsrc, unsigned int len, GdkImage **maskimp);
+/*
+ * Phase 3.4: cicn decoder produces GdkPixbuf directly (alpha encodes the
+ * Mac classic icon mask).  GdkPixmap/GdkBitmap are aliased to GdkPixbuf
+ * in session.h for the GTK 3 transition, so the historical 5-arg
+ * signature still works at call sites; the mask out-param is always set
+ * to NULL by load_icon().
+ */
+void load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
+                GdkPixbuf **pixbuf_out, GdkPixbuf **mask_unused);
+extern GdkPixbuf *cicn_to_pixbuf (void *cicn_rsrc, unsigned int len);
 

@@ -53,8 +53,6 @@ GdkColor user_colors[8];
 GdkColor gdk_user_colors[4];
 
 GtkWidget *msgbtn, *kickbtn, *infobtn, *banbtn, *chatbtn, *ignobtn;
-GdkGC *users_gc;
-GdkGC *mask_gc;
 
 void hx_change_name_icon (struct htlc_conn *htlc)
 {

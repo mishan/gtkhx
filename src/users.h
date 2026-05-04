@@ -12,8 +12,6 @@ extern GtkWidget *ignobtn;
 
 extern GdkColor user_colors[8];
 extern GdkColor gdk_user_colors[4];
-extern GdkGC *users_gc;
-extern GdkGC *mask_gc;
 
 extern PangoFontDescription *users_font_desc;
 

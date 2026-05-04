@@ -106,94 +106,77 @@ struct icon_viewer {
 
 void list_icons (void)
 {
-	/* Phase 3.2 stub: the cicn icon-viewer renders Mac classic resource
-	 * icons via GdkImage/GdkPixmap/GdkGC + cicn_to_gdkimage().  All four
-	 * APIs are gone in GTK 3 and cicn.c itself needs a cairo-surface
-	 * rewrite to produce GdkPixbufs (or cairo_surface_t).  That work is
-	 * Phase 3.4; until then the icon viewer just shows an empty list so
-	 * the rest of the options dialog stays usable.
-	 *
-	 * Original rendering loop is preserved below the early return so the
-	 * Phase 3.4 rewrite has a recipe to translate. */
+	/* Phase 3.4: cicn_to_pixbuf returns a GdkPixbuf directly with the
+	 * Mac classic mask folded into the alpha channel, so the original
+	 * GdkImage/GdkPixmap/GdkGC dance collapses to a single decode +
+	 * crop.  Wide icons (the 32x32 family bundles four variants in a
+	 * 4*32-pixel row) are clipped to the rightmost 32 px to mirror the
+	 * historical "off = width > 400 ? 198 : 0" hack. */
 	GtkWidget *icon_list = iv->icon_list;
-	gtk_hlist_freeze(GTK_HLIST(icon_list));
-	gtk_hlist_thaw(GTK_HLIST(icon_list));
-	return;
-
-#if 0  /* PHASE_3_4: rewrite over cairo + GdkPixbuf */
-	GdkPixmap *pixmap;
-	GdkBitmap *mask;
-	gint row;
-	gchar *text[2] = {0, 0};
+	gchar *text[2] = {NULL, NULL};
+	char buf[16];
+	GdkColor col = {0, 0, 0};
+	guint16 nres;
 	guint32 icon;
 	unsigned int nfound = 0;
-	char buf[16];
-	guint16 nres = 0;
 	int i;
-	guint32 id;
-	GdkColormap *colormap = gtk_widget_get_colormap(icon_list);
-	GdkVisual *visual = gtk_widget_get_visual(icon_list);
-	GdkGC *gc = NULL;
-	GdkImage *image;
-	GdkImage *maskim;
-	int off;
-	GdkColor col = {0, 0, 0};
 
 	text[1] = buf;
-	gtk_hlist_freeze(GTK_HLIST(icon_list));
+	gtk_hlist_freeze (GTK_HLIST (icon_list));
 	for (i = 0; i < icon_files.n; ++i) {
-		if (!icon_files.cicns[i]) continue;
-		nres = macres_file_num_res_of_type(icon_files.cicns[i], TYPE_cicn);
-		for(icon = 0; icon < nres; icon++) {
-			macres_res *r = 0;
-			r = macres_file_get_nth_res_of_type(icon_files.cicns[i], TYPE_cicn, icon);
-			if(!r) continue;
+		if (!icon_files.cicns[i])
+			continue;
+		nres = macres_file_num_res_of_type (icon_files.cicns[i], TYPE_cicn);
+		for (icon = 0; icon < nres; icon++) {
+			macres_res *r;
+			GdkPixbuf *pb, *cropped;
+			int width, height, off;
+			gint row;
 
-			image = (GdkImage *)cicn_to_gdkimage(colormap, visual, r->data, r->datalen, &maskim);
+			r = macres_file_get_nth_res_of_type (icon_files.cicns[i], TYPE_cicn, icon);
+			if (!r)
+				continue;
 
-			off = image->width > 400 ? 198 : 0;
-			pixmap = gdk_pixmap_new(gtk_widget_get_window(icon_list), image->width-off, image->height, image->depth);
-			if (!gc) gc = gdk_gc_new (pixmap);
-			gdk_draw_image(pixmap, gc, image, off, 0, 0, 0, image->width-off, image->height);
-			if (maskim) {
-				mask = gdk_pixmap_new(gtk_widget_get_window(icon_list), image->width-off, image->height, 1);
-				if (!mask_gc) mask_gc = gdk_gc_new (mask);
-				gdk_draw_image(mask, mask_gc, maskim, off, 0, 0, 0, image->width-off, image->height);
-				gdk_image_destroy(maskim);
+			pb = cicn_to_pixbuf (r->data, r->datalen);
+			if (!pb) {
+				g_free (r);
+				continue;
 			}
-			else
-				mask = 0;
-
-			gdk_image_destroy(image);
-			if(!pixmap) continue;
+			width  = gdk_pixbuf_get_width (pb);
+			height = gdk_pixbuf_get_height (pb);
+			off = width > 400 ? 198 : 0;
+			if (off) {
+				cropped = gdk_pixbuf_new_subpixbuf (pb, off, 0,
+				                                   width - off, height);
+				g_object_unref (pb);
+				pb = cropped;
+			}
 
 			nfound++;
-			g_snprintf(buf, sizeof(buf), "%u", r->resid);
-			row = gtk_hlist_append(GTK_HLIST(icon_list), text);
-			id = r->resid;
-			gtk_hlist_set_row_data(GTK_HLIST(icon_list), row, (gpointer)id);
-			gtk_hlist_set_foreground(GTK_HLIST(icon_list), row, &col);
-			gtk_hlist_set_pixtext(GTK_HLIST(icon_list), row, 0, "", 34, pixmap, mask);
-			gdk_pixmap_unref(pixmap);
-			if(mask) gdk_pixmap_unref(mask);
+			g_snprintf (buf, sizeof (buf), "%u", r->resid);
+			row = gtk_hlist_append (GTK_HLIST (icon_list), text);
+			gtk_hlist_set_row_data (GTK_HLIST (icon_list), row,
+			                        GUINT_TO_POINTER (r->resid));
+			gtk_hlist_set_foreground (GTK_HLIST (icon_list), row, &col);
+			gtk_hlist_set_pixtext (GTK_HLIST (icon_list), row, 0, "", 34,
+			                       pb, NULL);
+			g_object_unref (pb);
 
-			/*	g_free (r->name);  */
 			g_free (r);
 
-			/* Cooperative multitasking */
+			/* Cooperative multitasking — keep the dialog responsive while
+			 * paging through hundreds of resource entries. */
 			if (icon % 10 == 0) {
-				while (gtk_events_pending()) gtk_main_iteration();
-
-				if (!options_window)/*Have we been destroyed?!*/
+				while (gtk_events_pending ())
+					gtk_main_iteration ();
+				if (!options_window)
 					return;
 			}
 		}
 	}
-	if(nfound >= 2) {
-		gtk_hlist_sort(GTK_HLIST(icon_list));
-	}
-	gtk_hlist_thaw(GTK_HLIST(icon_list));
-#endif
+	if (nfound >= 2)
+		gtk_hlist_sort (GTK_HLIST (icon_list));
+	gtk_hlist_thaw (GTK_HLIST (icon_list));
 }
 
 
