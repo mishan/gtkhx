@@ -9,7 +9,7 @@
   touching call sites.
 -->
 <gresources>
-  <gresource prefix="/com/nasledov/gtkhx/pixmaps">
+  <gresource prefix="/com/nasledov/gtkhx">
     <file>pixmaps/ban.xpm</file>
     <file>pixmaps/chat.xpm</file>
     <file>pixmaps/connect.xpm</file>
