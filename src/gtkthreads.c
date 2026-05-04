@@ -17,57 +17,80 @@
  */
 
 /*
- * Phase 2.9: Threading first cut.
+ * Phase 3.3: drop the deprecated gdk_threads_enter/leave + gdk_threads_init
+ * pair (gone in GTK 4 entirely, deprecated since GTK 3.6) and reimplement
+ * the same single-mutex semantics on top of GRecMutex + a custom main-loop
+ * poll function.
  *
- * The original gtkthreads.c approximated GDK's global lock with a custom
- * pipe + pthread_cond_t + pthread_mutex_t + gdk_input_add() integration —
- * because GTK+ 1.2 had no real threading support and the pipe trick was
- * how you marshaled wake-ups onto the GTK main loop.
+ * The behavior we faithfully preserve from the GDK 2 lock:
+ *   - The main thread holds the lock for the lifetime of gtk_main(), and
+ *     only releases it while blocked inside poll() waiting for events.
+ *   - Worker threads (network.c, xfers.c) call gtk_threads_enter() before
+ *     touching any GTK/GDK state and gtk_threads_leave() afterwards.
+ *   - A worker thread's enter() will block until the main thread is in
+ *     poll(), at which point it acquires the lock, mutates UI state, and
+ *     releases — and the main thread reacquires when poll returns.
  *
- * GTK 2 ships gdk_threads_enter() / gdk_threads_leave() (and the GDK
- * global lock that backs them), which is exactly the abstraction the
- * old code was reinventing. Replace the custom plumbing with thin wrappers
- * so the ~60 enter/leave call sites in network.c and xfers.c don't have
- * to change.
- *
- * gdk_threads_init() is called once from gtkhx.c init() before gtk_init().
- *
- * Note: gdk_threads_enter / leave are themselves deprecated in GTK 3.
- * Phase 3 will rip the lock out entirely and switch worker→UI marshaling
- * to g_main_context_invoke(). For now this is the minimal change that
- * gets us off the custom code without churn at every call site.
+ * Why not g_main_context_invoke() at every call site? The 56 enter/leave
+ * brackets in network.c and xfers.c each compose multiple GTK calls with
+ * captured locals, so a literal g_main_context_invoke() conversion would
+ * require lifting each block into a dedicated marshaling struct +
+ * callback. That refactor is real work and is deferred — this change just
+ * gets us off the deprecated GDK lock without churn at every site.
  */
 
 #include "config.h"
 #include <gtk/gtk.h>
-#include <gdk/gdk.h>
+#include <glib.h>
 #include "gtkthreads.h"
+
+static GRecMutex gtkhx_main_lock;
+static GPollFunc gtkhx_orig_poll = NULL;
+
+/* Custom poll wrapper that releases the lock while blocking and
+ * re-acquires it before returning. Called by GLib's main context every
+ * iteration of the main loop. */
+static gint
+gtkhx_locked_poll(GPollFD *ufds, guint nfsd, gint timeout)
+{
+	gint ret;
+
+	g_rec_mutex_unlock(&gtkhx_main_lock);
+	ret = gtkhx_orig_poll ? gtkhx_orig_poll(ufds, nfsd, timeout)
+	                      : g_poll(ufds, nfsd, timeout);
+	g_rec_mutex_lock(&gtkhx_main_lock);
+
+	return ret;
+}
 
 void gtk_threads_init(void)
 {
-	/* The main thread holds the GDK lock for the lifetime of gtk_main();
-	 * worker threads acquire it via gtk_threads_enter() before touching
-	 * any GDK/GTK state. */
-	gdk_threads_enter();
+	GMainContext *ctx = g_main_context_default();
+
+	g_rec_mutex_init(&gtkhx_main_lock);
+	g_rec_mutex_lock(&gtkhx_main_lock);
+
+	gtkhx_orig_poll = g_main_context_get_poll_func(ctx);
+	g_main_context_set_poll_func(ctx, gtkhx_locked_poll);
 }
 
 void gtk_threads_main(void)
 {
 	gtk_main();
-	gdk_threads_leave();
+	g_rec_mutex_unlock(&gtkhx_main_lock);
 }
 
 void gtk_threads_enter(void)
 {
-	gdk_threads_enter();
+	g_rec_mutex_lock(&gtkhx_main_lock);
 }
 
 void gtk_threads_leave(void)
 {
-	gdk_threads_leave();
+	g_rec_mutex_unlock(&gtkhx_main_lock);
 }
 
 void gtk_thread_exit(void)
 {
-	/* Nothing to clean up — the GDK lock manages itself. */
+	/* Nothing to clean up — the mutex outlives the process. */
 }

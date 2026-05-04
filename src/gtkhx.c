@@ -386,11 +386,10 @@ static void init (int argc, char **argv)
 	/* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
 	 * setlocale() itself. */
 	setlocale(LC_ALL, "");
-	/* Phase 2.9: initialize GDK's thread lock before gtk_init so that the
-	 * worker threads in network.c / xfers.c can call gdk_threads_enter()
-	 * later. GLib's threading subsystem itself has been auto-initialized
-	 * since GLib 2.32, so g_thread_init() is no longer required. */
-	gdk_threads_init();
+	/* Phase 3.3: gdk_threads_init() is gone in GTK 4 and deprecated since
+	 * GTK 3.6. The worker threads still need a serializing lock against
+	 * the main thread; gtkthreads.c now provides one via GRecMutex +
+	 * a custom GMainContext poll function (see gtkthreads.c). */
 	gtk_init(&argc, &argv);
 	fe_init();
 }
