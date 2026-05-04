@@ -34,8 +34,6 @@
 #include "tasks.h"
 #include "rcv.h"
 
-#include "pixmaps/postnews.xpm"
-#include "pixmaps/refresh.xpm"
 
 static GtkWidget *post_window;
 static GtkWidget *postprompt;
@@ -213,14 +211,14 @@ void create_news_window (session *sess)
 	gtk_container_add(GTK_CONTAINER(btn_frame), posthbox);
 
 	postButton = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)postnews_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(postButton), pix);
 	gtk_widget_set_tooltip_text(postButton, _("Post News"));
 	icon = 0, pix = 0, mask = 0;
 
 	reloadButton = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadButton), pix);
 	gtk_widget_set_tooltip_text(reloadButton, _("Reload News"));

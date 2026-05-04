@@ -33,8 +33,6 @@
 #include "gtkutil.h"
 #include "connect.h"
 #include "gtk_hlist.h"
-#include "pixmaps/refresh.xpm"
-#include "pixmaps/connect.xpm"
 #include "dfa.h"
 #include "chat.h"
 
@@ -423,7 +421,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
 	refreshbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(refreshbtn, _("Refresh"));
-	pb = gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
+	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
 	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
@@ -435,7 +433,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(connbtn, "clicked",
 					   G_CALLBACK(tracker_connect), 0);
 	gtk_widget_set_tooltip_text(connbtn, _("Connect"));
-	pb = gdk_pixbuf_new_from_xpm_data((const char **)connect_xpm);
+	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
 	gtk_container_add(GTK_CONTAINER(connbtn), pix);

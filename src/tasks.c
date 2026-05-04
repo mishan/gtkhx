@@ -35,10 +35,6 @@
 #include "toolbar.h"
 #include "tasks.h"
 
-#include "pixmaps/kick.xpm"
-#include "pixmaps/start.xpm"
-#include "pixmaps/up.xpm"
-#include "pixmaps/down.xpm"
 
 static GtkWidget *tasks_vbox;
 
@@ -561,7 +557,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	hbuttonbox = gtk_hbox_new(0,0);
 
 	stopbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)kick_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(stopbtn), pix);
 	gtk_widget_set_tooltip_text(stopbtn, _("Stop Task"));
@@ -570,7 +566,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	icon = 0, mask = 0, pix = 0;
 
 	gobtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)start_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/start.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(gobtn), pix);
 	gtk_widget_set_tooltip_text(gobtn, _("Start Task"));
@@ -579,7 +575,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	icon = 0, mask = 0, pix = 0;
 
 	upbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	gtk_widget_set_tooltip_text(upbtn, _("Move Xfer Up in Queue"));
@@ -589,7 +585,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 
 	dnbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)down_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/down.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(dnbtn), pix);
 	gtk_widget_set_tooltip_text(dnbtn, _("Move Xfer Down in Queue"));

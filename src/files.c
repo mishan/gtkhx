@@ -40,13 +40,6 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "files.h"
-#include "pixmaps/refresh.xpm"
-#include "pixmaps/ul.xpm"
-#include "pixmaps/dl.xpm"
-#include "pixmaps/mkdir.xpm"
-#include "pixmaps/trash.xpm"
-#include "pixmaps/info.xpm"
-#include "pixmaps/up.xpm"
 
 
 #define ICON_FILE	400
@@ -609,7 +602,7 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(upbtn, "clicked",
 					   G_CALLBACK(file_up_btn), files_list);
 	gtk_widget_set_tooltip_text(upbtn, _("Parent Directory"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)up_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(upbtn), pix);
 	pix = 0, icon = 0, mask = 0;
@@ -618,14 +611,14 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(reloadbtn, "clicked",
 					   G_CALLBACK(file_reload_btn), files_list);
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)refresh_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(downloadbtn, _("Download"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)dl_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/dl.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
@@ -639,7 +632,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	uploadbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(uploadbtn, _("Upload"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)ul_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ul.xpm", NULL);
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
@@ -648,7 +641,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	crtfldbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(crtfldbtn, _("New Folder"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)mkdir_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/mkdir.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
 	g_signal_connect(crtfldbtn, "clicked",
@@ -657,7 +650,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	filinfobtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(filinfobtn, _("Info"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)info_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
 	g_signal_connect(filinfobtn, "clicked",
@@ -666,7 +659,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	delbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(delbtn, _("Delete"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_xpm_data((const char **)trash_xpm);
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_container_add(GTK_CONTAINER(delbtn), pix);
 	g_signal_connect(delbtn, "clicked",
