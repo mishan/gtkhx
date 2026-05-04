@@ -156,8 +156,8 @@ struct _GtkXText
 	xtext_buffer *selection_buffer;
 
 	GtkAdjustment *adj;
-	GdkPixmap *pixmap;				/* 0 = use palette[19] */
-	GdkDrawable *draw_buf;			/* points to ->window */
+	cairo_surface_t *bg_surface;	/* 0 = use palette[XTEXT_BG] (was: pixmap) */
+	cairo_t *cr;					/* transient: set during gtk_xtext_draw, NULL otherwise */
 	GdkCursor *hand_cursor;
 	GdkCursor *resize_cursor;
 
@@ -168,12 +168,9 @@ struct _GtkXText
 	int last_win_h;
 	int last_win_w;
 
-	GdkGC *bgc;						  /* backing pixmap */
-	GdkGC *fgc;						  /* text foreground color */
-	GdkGC *light_gc;				  /* sep bar */
-	GdkGC *dark_gc;
-	GdkGC *thin_gc;
-	GdkGC *marker_gc;
+	/* Phase 3.4b: GdkGCs removed.  Drawing now uses cairo with palette colors directly. */
+	int cur_fg;						/* currently-active foreground palette index */
+	int cur_bg;						/* currently-active background palette index */
 	GdkColor palette[XTEXT_COLS];
 
 	gint io_tag;					  /* for delayed refresh events */

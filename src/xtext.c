@@ -240,7 +240,50 @@ static void gtk_xtext_search_fini (xtext_buffer *);
 static gboolean gtk_xtext_search_init (xtext_buffer *buf, const gchar *text, gtk_xtext_search_flags flags, GError **perr);
 static char * gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent, int *ret_off, int *ret_len, GSList **slp);
 
-#define xtext_draw_bg(xt,x,y,w,h) gdk_draw_rectangle(xt->draw_buf, xt->bgc, 1, x, y, w, h);
+/* Phase 3.4b: cairo helpers.  GdkColor is gushort R/G/B (0..65535);
+ * cairo_set_source_rgb wants doubles 0..1. */
+static inline void
+xtext_cairo_set_source_color (cairo_t *cr, const GdkColor *col)
+{
+	cairo_set_source_rgb (cr,
+		col->red   / 65535.0,
+		col->green / 65535.0,
+		col->blue  / 65535.0);
+}
+
+static inline void
+xtext_cairo_set_source_idx (GtkXText *xt, cairo_t *cr, int idx)
+{
+	xtext_cairo_set_source_color (cr, &xt->palette[idx]);
+}
+
+/* Background fill: either background pattern (if user set one) or
+ * solid palette[XTEXT_BG] / palette[xtext->cur_bg]. */
+static void
+xtext_draw_bg (GtkXText *xt, int x, int y, int w, int h)
+{
+	cairo_t *cr = xt->cr;
+	if (cr == NULL)
+	{
+		gtk_widget_queue_draw_area (GTK_WIDGET (xt), x, y, w, h);
+		return;
+	}
+	cairo_save (cr);
+	if (xt->bg_surface)
+	{
+		cairo_pattern_t *pat = cairo_pattern_create_for_surface (xt->bg_surface);
+		cairo_pattern_set_extend (pat, CAIRO_EXTEND_REPEAT);
+		cairo_set_source (cr, pat);
+		cairo_pattern_destroy (pat);
+	}
+	else
+	{
+		xtext_cairo_set_source_idx (xt, cr, xt->cur_bg);
+	}
+	cairo_rectangle (cr, x, y, w, h);
+	cairo_fill (cr);
+	cairo_restore (cr);
+}
 
 /* ======================================= */
 /* ============ PANGO BACKEND ============ */
@@ -449,10 +492,9 @@ backend_get_text_width_slp (GtkXText *xtext, guchar *str, GSList *slp)
 
 /* simplified version of gdk_draw_layout_line_with_colors() */
 
-static void 
-xtext_draw_layout_line (GdkDrawable      *drawable,
-								GdkGC            *gc,
-								gint              x, 
+static void
+xtext_draw_layout_line (cairo_t          *cr,
+								gint              x,
 								gint              y,
 								PangoLayoutLine  *line)
 {
@@ -467,63 +509,72 @@ xtext_draw_layout_line (GdkDrawable      *drawable,
 		pango_glyph_string_extents (run->glyphs, run->item->analysis.font,
 											 NULL, &logical_rect);
 
-		gdk_draw_glyphs (drawable, gc, run->item->analysis.font,
-							  x + x_off / PANGO_SCALE, y, run->glyphs);
+		cairo_move_to (cr, x + x_off / PANGO_SCALE, y);
+		pango_cairo_show_glyph_string (cr, run->item->analysis.font, run->glyphs);
 
 		x_off += logical_rect.width;
 		tmp_list = tmp_list->next;
 	}
 }
 
+/* Phase 3.4b: GdkGC parameter dropped.  fg_idx/bg_idx are palette
+ * indices.  If called outside the draw signal (xtext->cr is NULL),
+ * simply skip — paint() will redo the work on the next draw tick. */
 static void
-backend_draw_text_emph (GtkXText *xtext, int dofill, GdkGC *gc, int x, int y,
-						 char *str, int len, int str_width, int emphasis)
+backend_draw_text_emph (GtkXText *xtext, int dofill, int fg_idx, int bg_idx,
+						 int x, int y, char *str, int len, int str_width, int emphasis)
 {
-	GdkGCValues val;
-	GdkColor col;
+	cairo_t *cr = xtext->cr;
 	PangoLayoutLine *line;
+
+	if (cr == NULL)
+		return;
 
 	pango_layout_set_attributes (xtext->layout, attr_lists[emphasis]);
 	pango_layout_set_text (xtext->layout, str, len);
 
 	if (dofill)
 	{
-		gdk_gc_get_values (gc, &val);
-		col.pixel = val.background.pixel;
-		gdk_gc_set_foreground (gc, &col);
-		gdk_draw_rectangle (xtext->draw_buf, gc, 1, x, y -
-									xtext->font->ascent, str_width, xtext->fontsize);
-		col.pixel = val.foreground.pixel;
-		gdk_gc_set_foreground (gc, &col);
+		cairo_save (cr);
+		xtext_cairo_set_source_idx (xtext, cr, bg_idx);
+		cairo_rectangle (cr, x, y - xtext->font->ascent,
+							  str_width, xtext->fontsize);
+		cairo_fill (cr);
+		cairo_restore (cr);
 	}
 
+	cairo_save (cr);
+	xtext_cairo_set_source_idx (xtext, cr, fg_idx);
 	line = pango_layout_get_lines (xtext->layout)->data;
-
-	xtext_draw_layout_line (xtext->draw_buf, gc, x, y, line);
+	xtext_draw_layout_line (cr, x, y, line);
+	cairo_restore (cr);
 }
 
 static void
-xtext_set_fg (GtkXText *xtext, GdkGC *gc, int index)
+xtext_set_fg (GtkXText *xtext, int index)
 {
-	gdk_gc_set_foreground (gc, &xtext->palette[index]);
+	xtext->cur_fg = index;
 }
 
 static void
-xtext_set_bg (GtkXText *xtext, GdkGC *gc, int index)
+xtext_set_bg (GtkXText *xtext, int index)
 {
-	gdk_gc_set_background (gc, &xtext->palette[index]);
+	xtext->cur_bg = index;
 }
 
 static void
 gtk_xtext_init (GtkXText * xtext)
 {
-	xtext->pixmap = NULL;
+	xtext->bg_surface = NULL;
+	xtext->cr = NULL;
 	xtext->io_tag = 0;
 	xtext->add_io_tag = 0;
 	xtext->scroll_tag = 0;
 	xtext->max_lines = 0;
 	xtext->col_back = XTEXT_BG;
 	xtext->col_fore = XTEXT_FG;
+	xtext->cur_fg = XTEXT_FG;
+	xtext->cur_bg = XTEXT_BG;
 	xtext->nc = 0;
 	xtext->pixel_offset = 0;
 	xtext->underline = FALSE;
@@ -571,7 +622,10 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 
 	if (buf->xtext->buffer == buf)
 	{
-		double page_size = GTK_WIDGET (buf->xtext)->allocation.height / buf->xtext->fontsize;
+		GtkAllocation alloc;
+		double page_size;
+		gtk_widget_get_allocation (GTK_WIDGET (buf->xtext), &alloc);
+		page_size = alloc.height / buf->xtext->fontsize;
 		gtk_adjustment_set_lower(adj, 0);
 		gtk_adjustment_set_upper(adj, buf->num_lines);
 
@@ -655,9 +709,9 @@ gtk_xtext_new (GdkColor palette[], int separator)
 }
 
 static void
-gtk_xtext_destroy (GtkObject * object)
+gtk_xtext_destroy (GtkWidget * widget)
 {
-	GtkXText *xtext = GTK_XTEXT (object);
+	GtkXText *xtext = GTK_XTEXT (widget);
 
 	if (xtext->add_io_tag)
 	{
@@ -677,10 +731,10 @@ gtk_xtext_destroy (GtkObject * object)
 		xtext->io_tag = 0;
 	}
 
-	if (xtext->pixmap)
+	if (xtext->bg_surface)
 	{
-		g_object_unref (xtext->pixmap);
-		xtext->pixmap = NULL;
+		cairo_surface_destroy (xtext->bg_surface);
+		xtext->bg_surface = NULL;
 	}
 
 	if (xtext->font)
@@ -693,56 +747,19 @@ gtk_xtext_destroy (GtkObject * object)
 	{
 		g_signal_handlers_disconnect_matched (G_OBJECT (xtext->adj),
 					G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, xtext);
-	/*	gtk_signal_disconnect_by_data (G_OBJECT (xtext->adj), xtext);*/
 		g_object_unref (G_OBJECT (xtext->adj));
 		xtext->adj = NULL;
 	}
 
-	if (xtext->bgc)
-	{
-		g_object_unref (xtext->bgc);
-		xtext->bgc = NULL;
-	}
-
-	if (xtext->fgc)
-	{
-		g_object_unref (xtext->fgc);
-		xtext->fgc = NULL;
-	}
-
-	if (xtext->light_gc)
-	{
-		g_object_unref (xtext->light_gc);
-		xtext->light_gc = NULL;
-	}
-
-	if (xtext->dark_gc)
-	{
-		g_object_unref (xtext->dark_gc);
-		xtext->dark_gc = NULL;
-	}
-
-	if (xtext->thin_gc)
-	{
-		g_object_unref (xtext->thin_gc);
-		xtext->thin_gc = NULL;
-	}
-
-	if (xtext->marker_gc)
-	{
-		g_object_unref (xtext->marker_gc);
-		xtext->marker_gc = NULL;
-	}
-
 	if (xtext->hand_cursor)
 	{
-		gdk_cursor_unref (xtext->hand_cursor);
+		g_object_unref (xtext->hand_cursor);
 		xtext->hand_cursor = NULL;
 	}
 
 	if (xtext->resize_cursor)
 	{
-		gdk_cursor_unref (xtext->resize_cursor);
+		g_object_unref (xtext->resize_cursor);
 		xtext->resize_cursor = NULL;
 	}
 
@@ -752,8 +769,8 @@ gtk_xtext_destroy (GtkObject * object)
 		xtext->orig_buffer = NULL;
 	}
 
-	if (GTK_OBJECT_CLASS (parent_class)->destroy)
-		(*GTK_OBJECT_CLASS (parent_class)->destroy) (object);
+	if (GTK_WIDGET_CLASS (parent_class)->destroy)
+		(*GTK_WIDGET_CLASS (parent_class)->destroy) (widget);
 }
 
 static void
@@ -761,21 +778,27 @@ gtk_xtext_unrealize (GtkWidget * widget)
 {
 	backend_deinit (GTK_XTEXT (widget));
 
-	/* if there are still events in the queue, this'll avoid segfault */
-	gdk_window_set_user_data (gtk_widget_get_window(widget), NULL);
-
+	/* GTK 3: parent class unrealize tears down the window via
+	 * gtk_widget_unregister_window().  The legacy
+	 * gdk_window_set_user_data(window, NULL) belt-and-braces is gone. */
 	if (parent_class->unrealize)
 		(* GTK_WIDGET_CLASS (parent_class)->unrealize) (widget);
 }
 
+/*
+ * Phase 3.4b: realize over the GTK 3 idioms.  GdkColormap is gone (the
+ * window inherits visual + colormap from its parent), GdkGCs are
+ * replaced by per-draw cairo source setup (the bgc/fgc/light/dark/thin
+ * /marker GCs were just remembered colors with optional tiled fill —
+ * see xtext_cairo_set_palette and the bg_pattern cache below), and the
+ * gdk_window_set_back_pixmap call is no longer needed because cairo
+ * draws fill the entire dirty rectangle each tick.
+ */
 static void
 gtk_xtext_realize (GtkWidget * widget)
 {
 	GtkXText *xtext;
 	GdkWindowAttr attributes;
-	GdkGCValues val;
-	GdkColor col;
-	GdkColormap *cmap;
 	GtkAllocation allocation;
 	GdkWindow *parent_window;
 	GdkWindow *window;
@@ -783,93 +806,37 @@ gtk_xtext_realize (GtkWidget * widget)
 	gtk_widget_set_realized (widget, TRUE);
 	xtext = GTK_XTEXT (widget);
 
-	gtk_widget_get_allocation(widget, &allocation);
+	gtk_widget_get_allocation (widget, &allocation);
 	attributes.x = allocation.x;
 	attributes.y = allocation.y;
 	attributes.width = allocation.width;
 	attributes.height = allocation.height;
 	attributes.wclass = GDK_INPUT_OUTPUT;
 	attributes.window_type = GDK_WINDOW_CHILD;
+	attributes.visual = gtk_widget_get_visual (widget);
 	attributes.event_mask = gtk_widget_get_events (widget) |
 		GDK_EXPOSURE_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK
 		| GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK;
 
-	cmap = gtk_widget_get_colormap (widget);
-	attributes.colormap = cmap;
-	attributes.visual = gtk_widget_get_visual (widget);
+	parent_window = gtk_widget_get_parent_window (widget);
+	window = gdk_window_new (parent_window, &attributes,
+	                         GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
+	gtk_widget_set_window (widget, window);
+	gtk_widget_register_window (widget, window);
 
-	GdkWindow *parent_window = gtk_widget_get_parent_window(widget);
-	GdkWindow *window = gdk_window_new (parent_window, &attributes,
-												GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL |
-												GDK_WA_COLORMAP);
-	gtk_widget_set_window(widget, window);
-	gdk_window_set_user_data (gtk_widget_get_window(widget), widget);
+	xtext->depth = gdk_visual_get_depth (gdk_window_get_visual (window));
 
-	xtext->depth = gdk_window_get_visual (gtk_widget_get_window(widget))->depth;
-
-	val.subwindow_mode = GDK_INCLUDE_INFERIORS;
-	val.graphics_exposures = 0;
-
-	xtext->bgc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-													 GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->fgc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-													 GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->light_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->dark_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->thin_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-	xtext->marker_gc = gdk_gc_new_with_values (gtk_widget_get_window(widget), &val,
-											GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-
-	/* for the separator bar (light) */
-	col.red = 0xffff; col.green = 0xffff; col.blue = 0xffff;
-	gdk_colormap_alloc_color (cmap, &col, FALSE, TRUE);
-	gdk_gc_set_foreground (xtext->light_gc, &col);
-
-	/* for the separator bar (dark) */
-	col.red = 0x1111; col.green = 0x1111; col.blue = 0x1111;
-	gdk_colormap_alloc_color (cmap, &col, FALSE, TRUE);
-	gdk_gc_set_foreground (xtext->dark_gc, &col);
-
-	/* for the separator bar (thinline) */
-	col.red = 0x8e38; col.green = 0x8e38; col.blue = 0x9f38;
-	gdk_colormap_alloc_color (cmap, &col, FALSE, TRUE);
-	gdk_gc_set_foreground (xtext->thin_gc, &col);
-
-	/* for the marker bar (marker) */
-	gdk_gc_set_foreground (xtext->marker_gc, &xtext->palette[XTEXT_MARKER]);
-
-	xtext_set_fg (xtext, xtext->fgc, XTEXT_FG);
-	xtext_set_bg (xtext, xtext->fgc, XTEXT_BG);
-	xtext_set_fg (xtext, xtext->bgc, XTEXT_BG);
-
-	/* draw directly to window */
-	xtext->draw_buf = gtk_widget_get_window(widget);
-
-	if (xtext->pixmap)
-	{
-		gdk_gc_set_tile (xtext->bgc, xtext->pixmap);
-		gdk_gc_set_ts_origin (xtext->bgc, 0, 0);
-		xtext->ts_x = xtext->ts_y = 0;
-		gdk_gc_set_fill (xtext->bgc, GDK_TILED);
-	}
-
-	xtext->hand_cursor = gdk_cursor_new_for_display (gdk_window_get_display (gtk_widget_get_window(widget)), GDK_HAND1);
-	xtext->resize_cursor = gdk_cursor_new_for_display (gdk_window_get_display (gtk_widget_get_window(widget)), GDK_LEFT_SIDE);
-
-	gdk_window_set_back_pixmap (gtk_widget_get_window(widget), NULL, FALSE);
+	xtext->hand_cursor = gdk_cursor_new_for_display (
+		gdk_window_get_display (window), GDK_HAND1);
+	xtext->resize_cursor = gdk_cursor_new_for_display (
+		gdk_window_get_display (window), GDK_LEFT_SIDE);
 
 	backend_init (xtext);
 }
 
-static void
-gtk_xtext_size_request (GtkWidget * widget, GtkRequisition * requisition)
-{
-	requisition->width = 200;
-	requisition->height = 90;
-}
+/* Phase 3.4b: gtk_xtext_size_request removed.  GTK 3 widgets advertise
+ * their size via get_preferred_width/height — left as the implicit
+ * default for now (the parent GtkScrolledWindow drives layout). */
 
 static void
 gtk_xtext_size_allocate (GtkWidget * widget, GtkAllocation * allocation)
@@ -1064,50 +1031,73 @@ gtk_xtext_find_char (GtkXText * xtext, int x, int y, int *off, int *out_of_bound
 	return ent;
 }
 
+/* Cairo-friendly vertical line: position at half-pixel for crisp rendering. */
+static void
+xtext_cairo_vline (cairo_t *cr, int x, int y, int height)
+{
+	cairo_set_line_width (cr, 1);
+	cairo_move_to (cr, x + 0.5, y);
+	cairo_line_to (cr, x + 0.5, y + height);
+	cairo_stroke (cr);
+}
+
 static void
 gtk_xtext_draw_sep (GtkXText * xtext, int y)
 {
 	int x, height;
-	GdkGC *light, *dark;
+	cairo_t *cr = xtext->cr;
+
+	if (cr == NULL)
+		return;	/* deferred to next draw signal */
 
 	if (y == -1)
 	{
+		GtkAllocation alloc;
+		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
 		y = 0;
-		height = GTK_WIDGET (xtext)->allocation.height;
+		height = alloc.height;
 	} else
 	{
 		height = xtext->fontsize;
 	}
 
-	/* draw the separator line */
-	if (xtext->separator && xtext->buffer->indent)
+	if (!xtext->separator || !xtext->buffer->indent)
+		return;
+
+	x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
+	if (x < 1)
+		return;
+
+	cairo_save (cr);
+
+	/* Use neutral palette colors as light/dark — was traditionally a
+	 * computed pair around the bg shade.  The "thin" variant is just
+	 * the dark color; the bevelled variant draws light + dark side by side. */
+	if (xtext->thinline)
 	{
-		light = xtext->light_gc;
-		dark = xtext->dark_gc;
-
-		x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
-		if (x < 1)
-			return;
-
-		if (xtext->thinline)
+		if (xtext->moving_separator)
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_FG);
+		else
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_BG);
+		xtext_cairo_vline (cr, x, y, height);
+	} else
+	{
+		if (xtext->moving_separator)
 		{
-			if (xtext->moving_separator)
-				gdk_draw_line (xtext->draw_buf, light, x, y, x, y + height);
-			else
-				gdk_draw_line (xtext->draw_buf, xtext->thin_gc, x, y, x, y + height);
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_FG);
+			xtext_cairo_vline (cr, x - 1, y, height);
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_BG);
+			xtext_cairo_vline (cr, x, y, height);
 		} else
 		{
-			if (xtext->moving_separator)
-			{
-				gdk_draw_line (xtext->draw_buf, light, x - 1, y, x - 1, y + height);
-				gdk_draw_line (xtext->draw_buf, dark, x, y, x, y + height);
-			} else
-			{
-				gdk_draw_line (xtext->draw_buf, dark, x - 1, y, x - 1, y + height);
-				gdk_draw_line (xtext->draw_buf, light, x, y, x, y + height);
-			}
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_BG);
+			xtext_cairo_vline (cr, x - 1, y, height);
+			xtext_cairo_set_source_idx (xtext, cr, XTEXT_FG);
+			xtext_cairo_vline (cr, x, y, height);
 		}
 	}
+
+	cairo_restore (cr);
 }
 
 static void
@@ -1127,10 +1117,23 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 	}
 	else return;
 
-	x = 0;
-	width = GTK_WIDGET (xtext)->allocation.width;
+	{
+		GtkAllocation alloc;
+		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
+		x = 0;
+		width = alloc.width;
+	}
 
-	gdk_draw_line (xtext->draw_buf, xtext->marker_gc, x, render_y, x + width, render_y);
+	if (xtext->cr)
+	{
+		cairo_save (xtext->cr);
+		xtext_cairo_set_source_idx (xtext, xtext->cr, XTEXT_MARKER);
+		cairo_set_line_width (xtext->cr, 1);
+		cairo_move_to (xtext->cr, x, render_y + 0.5);
+		cairo_line_to (xtext->cr, x + width, render_y + 0.5);
+		cairo_stroke (xtext->cr);
+		cairo_restore (xtext->cr);
+	}
 
 	if (gtk_window_has_toplevel_focus (GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (xtext)))))
 	{
@@ -1206,10 +1209,27 @@ xit:
 		gtk_xtext_draw_sep (xtext, -1);
 }
 
+/* Phase 3.4b: GTK 3 draw signal handler.  Cairo gives us a clipped cr
+ * directly; we compute the dirty rectangle via cairo_clip_extents and
+ * stash cr on the xtext for the rendering primitives to use during this
+ * paint, then clear it on exit. */
 static gboolean
-gtk_xtext_expose (GtkWidget * widget, GdkEventExpose * event)
+gtk_xtext_draw (GtkWidget * widget, cairo_t * cr)
 {
-	gtk_xtext_paint (widget, &event->area);
+	GtkXText *xtext = GTK_XTEXT (widget);
+	GdkRectangle area;
+	double x1, y1, x2, y2;
+
+	cairo_clip_extents (cr, &x1, &y1, &x2, &y2);
+	area.x = (int) x1;
+	area.y = (int) y1;
+	area.width = (int) (x2 - x1);
+	area.height = (int) (y2 - y1);
+
+	xtext->cr = cr;
+	gtk_xtext_paint (widget, &area);
+	xtext->cr = NULL;
+
 	return FALSE;
 }
 
@@ -1533,7 +1553,7 @@ gtk_xtext_scrolldown_timeout (GtkXText * xtext)
 	xtext_buffer *buf = xtext->buffer;
 	GtkAdjustment *adj = xtext->adj;
 
-	gdk_window_get_pointer (GTK_WIDGET (xtext)->window, 0, &p_y, 0);
+	gdk_window_get_pointer (gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
 	win_height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
 
 	if (buf->last_ent_end == NULL ||	/* If context has changed OR */
@@ -1566,7 +1586,7 @@ gtk_xtext_scrollup_timeout (GtkXText * xtext)
 	GtkAdjustment *adj = xtext->adj;
 	int delta_y;
 
-	gdk_window_get_pointer (GTK_WIDGET (xtext)->window, 0, &p_y, 0);
+	gdk_window_get_pointer (gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
 
 	if (buf->last_ent_start == NULL ||	/* If context has changed OR */
 		 buf->pagetop_ent == NULL ||		/* pagetop_ent is reset OR */
@@ -1889,7 +1909,7 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 		{
 			if (!xtext->cursor_resize)
 			{
-				gdk_window_set_cursor (GTK_WIDGET (xtext)->window,
+				gdk_window_set_cursor (gtk_widget_get_window (GTK_WIDGET (xtext)),
 										  		xtext->resize_cursor);
 				xtext->cursor_hand = FALSE;
 				xtext->cursor_resize = TRUE;
@@ -1911,7 +1931,7 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 		{
 			if (!xtext->cursor_hand)
 			{
-				gdk_window_set_cursor (GTK_WIDGET (xtext)->window,
+				gdk_window_set_cursor (gtk_widget_get_window (GTK_WIDGET (xtext)),
 										  		xtext->hand_cursor);
 				xtext->cursor_hand = TRUE;
 				xtext->cursor_resize = FALSE;
@@ -2401,21 +2421,21 @@ gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustmen
 static void
 gtk_xtext_class_init (GtkXTextClass * class)
 {
-	GtkObjectClass *object_class;
 	GtkWidgetClass *widget_class;
 	GtkXTextClass *xtext_class;
 
-	object_class = (GtkObjectClass *) class;
 	widget_class = (GtkWidgetClass *) class;
 	xtext_class = (GtkXTextClass *) class;
 
 	parent_class = g_type_class_peek (gtk_widget_get_type ());
 
 	/* Phase 2.6: HexChat carries hand-written marshallers in
-	 * common/marshal.c; we use g_cclosure_marshal_generic instead. */
+	 * common/marshal.c; we use g_cclosure_marshal_generic instead.
+	 * Phase 3.4b: GtkObject is gone in GTK 3 — every signal now hangs
+	 * off the GObjectClass / GtkWidgetClass directly. */
 	xtext_signals[WORD_CLICK] =
 		g_signal_new ("word_click",
-							G_TYPE_FROM_CLASS (object_class),
+							G_TYPE_FROM_CLASS (class),
 							G_SIGNAL_RUN_FIRST | G_SIGNAL_ACTION,
 							G_STRUCT_OFFSET (GtkXTextClass, word_click),
 							NULL, NULL,
@@ -2424,7 +2444,7 @@ gtk_xtext_class_init (GtkXTextClass * class)
 							2, G_TYPE_POINTER, G_TYPE_POINTER);
 	xtext_signals[SET_SCROLL_ADJUSTMENTS] =
 		g_signal_new ("set_scroll_adjustments",
-							G_OBJECT_CLASS_TYPE (object_class),
+							G_TYPE_FROM_CLASS (class),
 							G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
 							G_STRUCT_OFFSET (GtkXTextClass, set_scroll_adjustments),
 							NULL, NULL,
@@ -2432,21 +2452,25 @@ gtk_xtext_class_init (GtkXTextClass * class)
 							G_TYPE_NONE,
 							2, GTK_TYPE_ADJUSTMENT, GTK_TYPE_ADJUSTMENT);
 
-	object_class->destroy = gtk_xtext_destroy;
+	/* Phase 3.4b: ::destroy moved from GtkObjectClass to GtkWidgetClass
+	 * in GTK 3.0; expose_event was replaced by the draw signal which
+	 * gives us a pre-clipped cairo_t.  set_scroll_adjustments_signal
+	 * is no longer a class field — modern scrollable widgets implement
+	 * GtkScrollable instead, but for now we keep the legacy custom
+	 * signal alive (the consumer in gtkhx.c connects to it directly). */
+	widget_class->destroy = gtk_xtext_destroy;
 
 	widget_class->realize = gtk_xtext_realize;
 	widget_class->unrealize = gtk_xtext_unrealize;
-	widget_class->size_request = gtk_xtext_size_request;
 	widget_class->size_allocate = gtk_xtext_size_allocate;
 	widget_class->button_press_event = gtk_xtext_button_press;
 	widget_class->button_release_event = gtk_xtext_button_release;
 	widget_class->motion_notify_event = gtk_xtext_motion_notify;
 	widget_class->selection_clear_event = (void *)gtk_xtext_selection_kill;
 	widget_class->selection_get = gtk_xtext_selection_get;
-	widget_class->expose_event = gtk_xtext_expose;
+	widget_class->draw = gtk_xtext_draw;
 	widget_class->scroll_event = gtk_xtext_scroll;
 	widget_class->leave_notify_event = gtk_xtext_leave_notify;
-	widget_class->set_scroll_adjustments_signal = xtext_signals[SET_SCROLL_ADJUSTMENTS];
 
 	xtext_class->word_click = NULL;
 	xtext_class->set_scroll_adjustments = gtk_xtext_scroll_adjustments;
@@ -2650,15 +2674,23 @@ gtk_xtext_text_width (GtkXText *xtext, unsigned char *text, int len)
 	return width;
 }
 
-/* actually draw text to screen (one run with the same color/attribs) */
+/* actually draw text to screen (one run with the same color/attribs)
+ *
+ * Phase 3.4b: the previous implementation built a per-run GdkPixmap,
+ * tile-aligned the bg GC, drew text into it, then blitted via
+ * gdk_draw_drawable to align the background pattern across runs.  Cairo
+ * achieves the same effect natively: a CAIRO_EXTEND_REPEAT pattern set
+ * with cairo_pattern_set_matrix at (-ts_x, -ts_y) tiles correctly across
+ * the whole widget without any per-run buffering.  So we just draw
+ * straight to xtext->cr — no intermediate surface, no blit. */
 
 static int
 gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
-								int len, GdkGC *gc, int *emphasis)
+								int len, int *emphasis)
 {
 	int str_width, dofill;
-	GdkDrawable *pix = NULL;
-	int dest_x = 0, dest_y = 0;
+	cairo_t *cr = xtext->cr;
+	int dest_x = 0;
 
 	if (xtext->dont_render || len < 1 || xtext->hidden)
 		return 0;
@@ -2668,7 +2700,6 @@ gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
 	if (xtext->dont_render2)
 		return str_width;
 
-	/* roll-your-own clipping (avoiding XftDrawString is always good!) */
 	if (x > xtext->clip_x2 || x + str_width < xtext->clip_x)
 		return str_width;
 	if (y - xtext->font->ascent > xtext->clip_y2 || (y - xtext->font->ascent) + xtext->fontsize < xtext->clip_y)
@@ -2682,77 +2713,47 @@ gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
 			goto dounder;
 	}
 
-	pix = gdk_pixmap_new (xtext->draw_buf, str_width, xtext->fontsize, xtext->depth);
-	if (pix)
-	{
-		dest_x = x;
-		dest_y = y - xtext->font->ascent;
-
-		gdk_gc_set_ts_origin (xtext->bgc, xtext->ts_x - x, xtext->ts_y - dest_y);
-
-		x = 0;
-		y = xtext->font->ascent;
-		xtext->draw_buf = pix;
-	}
-
+	dest_x = x;
 	dofill = TRUE;
 
-	/* backcolor is always handled by XDrawImageString */
-	if (!xtext->backcolor && xtext->pixmap)
+	/* If we have a background pattern image and no explicit backcolor,
+	 * paint it under the text run so we don't double-fill. */
+	if (!xtext->backcolor && xtext->bg_surface)
 	{
-	/* draw the background pixmap behind the text - CAUSES FLICKER HERE!! */
 		xtext_draw_bg (xtext, x, y - xtext->font->ascent, str_width,
 							xtext->fontsize);
-		dofill = FALSE;	/* already drawn the background */
+		dofill = FALSE;
 	}
 
-	backend_draw_text_emph (xtext, dofill, gc, x, y, str, len, str_width, *emphasis);
+	backend_draw_text_emph (xtext, dofill, xtext->cur_fg, xtext->cur_bg,
+								  x, y, (char *) str, len, str_width, *emphasis);
 
-	if (pix)
+	if (cr && xtext->strikethrough)
 	{
-		GdkRectangle clip;
-		GdkRectangle dest;
-
-		gdk_gc_set_ts_origin (xtext->bgc, xtext->ts_x, xtext->ts_y);
-		xtext->draw_buf = GTK_WIDGET (xtext)->window;
-		clip.x = xtext->clip_x;
-		clip.y = xtext->clip_y;
-		clip.width = xtext->clip_x2 - xtext->clip_x;
-		clip.height = xtext->clip_y2 - xtext->clip_y;
-
-		dest.x = dest_x;
-		dest.y = dest_y;
-		dest.width = str_width;
-		dest.height = xtext->fontsize;
-
-		if (gdk_rectangle_intersect (&clip, &dest, &dest))
-			/* dump the DB to window, but only within the clip_x/x2/y/y2 */
-			gdk_draw_drawable (xtext->draw_buf, xtext->bgc, pix,
-									 dest.x - dest_x, dest.y - dest_y,
-									 dest.x, dest.y, dest.width, dest.height);
-		g_object_unref (pix);
-	}
-
-	if (xtext->strikethrough)
-	{
-		/* pango_attr_strikethrough_new does not render in the custom widget so we need to reinvent the wheel */
-		y = dest_y + (xtext->fontsize / 2);
-		gdk_draw_line (xtext->draw_buf, gc, dest_x, y, dest_x + str_width - 1, y);
+		int sy = y - xtext->font->ascent + (xtext->fontsize / 2);
+		cairo_save (cr);
+		xtext_cairo_set_source_idx (xtext, cr, xtext->cur_fg);
+		cairo_set_line_width (cr, 1);
+		cairo_move_to (cr, dest_x, sy + 0.5);
+		cairo_line_to (cr, dest_x + str_width, sy + 0.5);
+		cairo_stroke (cr);
+		cairo_restore (cr);
 	}
 
 	if (xtext->underline)
 	{
 dounder:
-
-		if (pix)
-			y = dest_y + xtext->font->ascent + 1;
-		else
+		if (cr)
 		{
-			y++;
-			dest_x = x;
+			int uy = y + 1;
+			cairo_save (cr);
+			xtext_cairo_set_source_idx (xtext, cr, xtext->cur_fg);
+			cairo_set_line_width (cr, 1);
+			cairo_move_to (cr, dest_x, uy + 0.5);
+			cairo_line_to (cr, dest_x + str_width, uy + 0.5);
+			cairo_stroke (cr);
+			cairo_restore (cr);
 		}
-		/* draw directly to window, it's out of the range of our DB */
-		gdk_draw_line (xtext->draw_buf, gc, dest_x, y, dest_x + str_width - 1, y);
 	}
 
 	return str_width;
@@ -2771,9 +2772,9 @@ gtk_xtext_reset (GtkXText * xtext, int mark, int attribs)
 	{
 		xtext->backcolor = FALSE;
 		if (xtext->col_fore != XTEXT_FG)
-			xtext_set_fg (xtext, xtext->fgc, XTEXT_FG);
+			xtext_set_fg (xtext, XTEXT_FG);
 		if (xtext->col_back != XTEXT_BG)
-			xtext_set_bg (xtext, xtext->fgc, XTEXT_BG);
+			xtext_set_bg (xtext, XTEXT_BG);
 	}
 	xtext->col_fore = XTEXT_FG;
 	xtext->col_back = XTEXT_BG;
@@ -2841,14 +2842,13 @@ gtk_xtext_search_offset (xtext_buffer *buf, textentry *ent, unsigned int off)
 
 /* render a single line, which WONT wrap, and parse mIRC colors */
 
-#define RENDER_FLUSH x += gtk_xtext_render_flush (xtext, x, y, pstr, j, gc, emphasis)
+#define RENDER_FLUSH x += gtk_xtext_render_flush (xtext, x, y, pstr, j, emphasis)
 
 static int
 gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 							 unsigned char *str, int len, int win_width, int indent,
 							 int line, int left_only, int *x_size_ret, int *emphasis)
 {
-	GdkGC *gc;
 	int i = 0, x = indent, j = 0;
 	unsigned char *pstr = str;
 	int col_num, tmp;
@@ -2862,14 +2862,13 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 	xtext->in_hilight = FALSE;
 
 	offset = str - ent->str;
-
-	gc = xtext->fgc;				  /* our foreground GC */
+	/* Phase 3.4b: GdkGC removed; xtext->cur_fg/cur_bg track current colors. */
 
 	if (ent->mark_start != -1 &&
 		 ent->mark_start <= i + offset && ent->mark_end > i + offset)
 	{
-		xtext_set_bg (xtext, gc, XTEXT_MARK_BG);
-		xtext_set_fg (xtext, gc, XTEXT_MARK_FG);
+		xtext_set_bg (xtext, XTEXT_MARK_BG);
+		xtext_set_fg (xtext, XTEXT_MARK_FG);
 		xtext->backcolor = TRUE;
 		mark = TRUE;
 	}
@@ -2943,7 +2942,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 						col_num = col_num % XTEXT_MIRC_COLS;
 					xtext->col_fore = col_num;
 					if (!mark)
-						xtext_set_fg (xtext, gc, col_num);
+						xtext_set_fg (xtext, col_num);
 				}
 			} else
 			{
@@ -2973,7 +2972,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 						else
 							xtext->backcolor = TRUE;
 						if (!mark)
-							xtext_set_bg (xtext, gc, col_num);
+							xtext_set_bg (xtext, col_num);
 						xtext->col_back = col_num;
 					} else
 					{
@@ -2983,7 +2982,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 						if (col_num > XTEXT_MAX_COLOR)
 							col_num = col_num % XTEXT_MIRC_COLS;
 						if (!mark)
-							xtext_set_fg (xtext, gc, col_num);
+							xtext_set_fg (xtext, col_num);
 						xtext->col_fore = col_num;
 					}
 					xtext->parsing_backcolor = FALSE;
@@ -3007,14 +3006,14 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 				{
 					if (k & GTK_MATCH_CUR)
 					{
-						xtext_set_bg (xtext, gc, XTEXT_MARK_BG);
-						xtext_set_fg (xtext, gc, XTEXT_MARK_FG);
+						xtext_set_bg (xtext, XTEXT_MARK_BG);
+						xtext_set_fg (xtext, XTEXT_MARK_FG);
 						xtext->backcolor = TRUE;
 						srch_mark = TRUE;
 					} else
 					{
-						xtext_set_bg (xtext, gc, xtext->col_back);
-						xtext_set_fg (xtext, gc, xtext->col_fore);
+						xtext_set_bg (xtext, xtext->col_back);
+						xtext_set_fg (xtext, xtext->col_fore);
 						xtext->backcolor = (xtext->col_back != XTEXT_BG)? TRUE: FALSE;
 						srch_mark = FALSE;
 					}
@@ -3024,15 +3023,15 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 					xtext->underline = (k & GTK_MATCH_CUR)? TRUE: FALSE;
 					if (k & (GTK_MATCH_START | GTK_MATCH_MID))
 					{
-						xtext_set_bg (xtext, gc, XTEXT_MARK_BG);
-						xtext_set_fg (xtext, gc, XTEXT_MARK_FG);
+						xtext_set_bg (xtext, XTEXT_MARK_BG);
+						xtext_set_fg (xtext, XTEXT_MARK_FG);
 						xtext->backcolor = TRUE;
 						srch_mark = TRUE;
 					}
 					if (k & GTK_MATCH_END)
 					{
-						xtext_set_bg (xtext, gc, xtext->col_back);
-						xtext_set_fg (xtext, gc, xtext->col_fore);
+						xtext_set_bg (xtext, xtext->col_back);
+						xtext_set_fg (xtext, xtext->col_fore);
 						xtext->backcolor = (xtext->col_back != XTEXT_BG)? TRUE: FALSE;
 						srch_mark = FALSE;
 						xtext->underline = FALSE;
@@ -3055,8 +3054,8 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 				xtext->col_back = tmp;
 				if (!mark)
 				{
-					xtext_set_fg (xtext, gc, xtext->col_fore);
-					xtext_set_bg (xtext, gc, xtext->col_back);
+					xtext_set_fg (xtext, xtext->col_fore);
+					xtext_set_bg (xtext, xtext->col_back);
 				}
 				if (xtext->col_back != XTEXT_BG)
 					xtext->backcolor = TRUE;
@@ -3143,7 +3142,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 		/* have we been told to stop rendering at this point? */
 		if (xtext->jump_out_offset > 0 && xtext->jump_out_offset <= (i + offset))
 		{
-			gtk_xtext_render_flush (xtext, x, y, pstr, j, gc, emphasis);
+			gtk_xtext_render_flush (xtext, x, y, pstr, j, emphasis);
 			ret = 0;	/* skip the rest of the lines, we're done. */
 			j = 0;
 			break;
@@ -3177,8 +3176,8 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 			RENDER_FLUSH;
 			pstr += j;
 			j = 0;
-			xtext_set_bg (xtext, gc, XTEXT_MARK_BG);
-			xtext_set_fg (xtext, gc, XTEXT_MARK_FG);
+			xtext_set_bg (xtext, XTEXT_MARK_BG);
+			xtext_set_fg (xtext, XTEXT_MARK_FG);
 			xtext->backcolor = TRUE;
 			if (srch_underline)
 			{
@@ -3193,8 +3192,8 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 			RENDER_FLUSH;
 			pstr += j;
 			j = 0;
-			xtext_set_bg (xtext, gc, xtext->col_back);
-			xtext_set_fg (xtext, gc, xtext->col_fore);
+			xtext_set_bg (xtext, xtext->col_back);
+			xtext_set_fg (xtext, xtext->col_fore);
 			if (xtext->col_back != XTEXT_BG)
 				xtext->backcolor = TRUE;
 			else
@@ -3209,8 +3208,8 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 
 	if (mark || srch_mark)
 	{
-		xtext_set_bg (xtext, gc, xtext->col_back);
-		xtext_set_fg (xtext, gc, xtext->col_fore);
+		xtext_set_bg (xtext, xtext->col_back);
+		xtext_set_fg (xtext, xtext->col_fore);
 		if (xtext->col_back != XTEXT_BG)
 			xtext->backcolor = TRUE;
 		else
@@ -3543,16 +3542,11 @@ gtk_xtext_set_palette (GtkXText * xtext, GdkColor palette[])
 		xtext->palette[i] = palette[i];
 	}
 
-	if (gtk_widget_get_realized (GTK_WIDGET(xtext)))
-	{
-		xtext_set_fg (xtext, xtext->fgc, XTEXT_FG);
-		xtext_set_bg (xtext, xtext->fgc, XTEXT_BG);
-		xtext_set_fg (xtext, xtext->bgc, XTEXT_BG);
-
-		gdk_gc_set_foreground (xtext->marker_gc, &xtext->palette[XTEXT_MARKER]);
-	}
 	xtext->col_fore = XTEXT_FG;
 	xtext->col_back = XTEXT_BG;
+	xtext->cur_fg = XTEXT_FG;
+	xtext->cur_bg = XTEXT_BG;
+	gtk_widget_queue_draw (GTK_WIDGET (xtext));
 }
 
 static void
@@ -3632,39 +3626,28 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 	return TRUE;
 }
 
+/* Phase 3.4b: gtk_xtext_set_background takes a GdkPixbuf now (alias to
+ * GdkPixmap in compat headers).  We stash a cairo_surface_t version for
+ * fast tiled fill via cairo_pattern. */
 void
 gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap)
 {
-	GdkGCValues val;
-
-	if (xtext->pixmap)
+	if (xtext->bg_surface)
 	{
-		g_object_unref (xtext->pixmap);
-		xtext->pixmap = NULL;
+		cairo_surface_destroy (xtext->bg_surface);
+		xtext->bg_surface = NULL;
 	}
 
 	dontscroll (xtext->buffer);
-	xtext->pixmap = pixmap;
 
-	if (pixmap != 0)
+	if (pixmap != NULL)
 	{
-		g_object_ref (pixmap);
-		if (gtk_widget_get_realized (GTK_WIDGET(xtext)))
-		{
-			gdk_gc_set_tile (xtext->bgc, pixmap);
-			gdk_gc_set_ts_origin (xtext->bgc, 0, 0);
-			xtext->ts_x = xtext->ts_y = 0;
-			gdk_gc_set_fill (xtext->bgc, GDK_TILED);
-		}
-	} else if (gtk_widget_get_realized (GTK_WIDGET(xtext)))
-	{
-		g_object_unref (xtext->bgc);
-		val.subwindow_mode = GDK_INCLUDE_INFERIORS;
-		val.graphics_exposures = 0;
-		xtext->bgc = gdk_gc_new_with_values (GTK_WIDGET (xtext)->window,
-								&val, GDK_GC_EXPOSURES | GDK_GC_SUBWINDOW);
-		xtext_set_fg (xtext, xtext->bgc, XTEXT_BG);
+		/* Convert the pixbuf to a cairo image surface for repeating fill. */
+		xtext->bg_surface = gdk_cairo_surface_create_from_pixbuf (pixmap, 1, NULL);
+		xtext->ts_x = xtext->ts_y = 0;
 	}
+
+	gtk_widget_queue_draw (GTK_WIDGET (xtext));
 }
 
 void
@@ -3915,7 +3898,11 @@ gtk_xtext_render_page (GtkXText * xtext)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	gdk_drawable_get_size (GTK_WIDGET (xtext)->window, &width, &height);
+	{
+		GdkWindow *win = gtk_widget_get_window (GTK_WIDGET (xtext));
+		width = gdk_window_get_width (win);
+		height = gdk_window_get_height (win);
+	}
 
 	if (width < 34 || height < xtext->fontsize || width < xtext->buffer->indent + 32)
 		return;
@@ -3938,43 +3925,11 @@ gtk_xtext_render_page (GtkXText * xtext)
 	pos = (int)gtk_adjustment_get_value(xtext->adj) * xtext->fontsize;
 	overlap = xtext->buffer->last_pixel_pos - pos;
 	xtext->buffer->last_pixel_pos = pos;
-
-#ifndef __APPLE__
-	if (!xtext->pixmap && abs (overlap) < height)
-	{
-		GdkRectangle area;
-
-		/* so the obscured regions are exposed */
-		gdk_gc_set_exposures (xtext->fgc, TRUE);
-		if (overlap < 1)	/* DOWN */
-		{
-			int remainder;
-
-			gdk_draw_drawable (xtext->draw_buf, xtext->fgc, xtext->draw_buf,
-									 0, -overlap, 0, 0, width, height + overlap);
-			remainder = ((height - xtext->font->descent) % xtext->fontsize) +
-							xtext->font->descent;
-			area.y = (height + overlap) - remainder;
-			area.height = remainder - overlap;
-		} else
-		{
-			gdk_draw_drawable (xtext->draw_buf, xtext->fgc, xtext->draw_buf,
-									 0, 0, 0, overlap, width, height - overlap);
-			area.y = 0;
-			area.height = overlap;
-		}
-		gdk_gc_set_exposures (xtext->fgc, FALSE);
-
-		if (area.height > 0)
-		{
-			area.x = 0;
-			area.width = width;
-			gtk_xtext_paint (GTK_WIDGET (xtext), &area);
-		}
-
-		return;
-	}
-#endif
+	(void) overlap;	/* Phase 3.4b: scroll-by-blit optimization removed
+		 * (relied on gdk_draw_drawable + gdk_gc_set_exposures).  Cairo's
+		 * draw model handles partial repaints via the dirty rect supplied
+		 * to the draw signal — caller code does gtk_widget_queue_draw_area
+		 * for selective repaint instead. */
 
 	width -= MARGIN;
 	lines_max = ((height + xtext->pixel_offset) / xtext->fontsize) + 1;
