@@ -915,7 +915,7 @@ find_x (GtkXText *xtext, textentry *ent, int x, int subline, int indent)
 	GSList *list;
 	GSList *hid = NULL;
 	offlen_t *meta;
-	int off, len, wid, mbl, mbw;
+	int off;
 
 	/* Skip to the first chunk of stuff for the subline */
 	if (subline > 0)
@@ -932,50 +932,84 @@ find_x (GtkXText *xtext, textentry *ent, int x, int subline, int indent)
 	{
 		suboff = 0;
 		list = ent->slp;
-	} 
-	/* Step to the first character of the subline */
+	}
 	if (list == NULL)
 		return 0;
+
+	/* Phase 4.9 follow-up: walk the slp chunks measuring the combined-
+	 * layout width of each chunk's segment that falls in this subline.
+	 * The earlier implementation summed per-character widths; each one
+	 * was Pango's ceil-rounded single-char extent, and the rendering
+	 * uses Pango's ceil-rounded combined-layout extent — which is
+	 * always ≤ the sum of the per-char ceils. The accumulated drift
+	 * made find_x reach `x` after fewer characters than the rendering
+	 * had actually drawn to that point, and selection started 1-2
+	 * characters to the left of the click.
+	 *
+	 * Now we measure the way we draw: for each chunk get its combined
+	 * width (backend_get_text_width_emph already does this after the
+	 * earlier commit), and if the click falls inside a chunk hand off
+	 * to pango_layout_xy_to_index for accurate sub-chunk lookup.
+	 *
+	 * `off` is the byte offset of the cursor within ent->str. Each
+	 * iteration covers a chunk-shaped segment starting at `off` and
+	 * ending at min(meta->off + meta->len, end-of-line). */
 	meta = list->data;
-	off = meta->off;
-	len = meta->len;
+	off = (meta->off > suboff) ? meta->off : suboff;
 	if (meta->emph & EMPH_HIDDEN)
 		hid = list;
-	while (len > 0)
-	{
-		if (off >= suboff)
-			break;
-		mbl = charlen (ent->str + off);
-		len -= mbl;
-		off += mbl;
-	}
-	if (len < 0)
-		return ent->str_len;		/* Bad char -- return max offset. */
 
-	/* Step through characters to find the one at the x position */
-	wid = x - indent;
-	len = meta->len - (off - meta->off);
-	while (wid > 0)
+	while (list)
 	{
-		mbl = charlen (ent->str + off);
-		mbw = backend_get_text_width_emph (xtext, ent->str + off, mbl, meta->emph);
-		wid -= mbw;
-		xx += mbw;
-		if (xx >= x)
-			return off;
-		len -= mbl;
-		off += mbl;
-		if (len <= 0)
+		int chunk_end = meta->off + meta->len;
+		int seg_len = chunk_end - off;
+		int seg_width;
+
+		if (seg_len > 0)
 		{
-			if (meta->emph & EMPH_HIDDEN)
-				hid = list;
-			list = g_slist_next (list);
-			if (list == NULL)
-				return ent->str_len;
-			meta = list->data;
-			off = meta->off;
-			len = meta->len;
+			seg_width = backend_get_text_width_emph (xtext,
+			                ent->str + off, seg_len, meta->emph);
+
+			if (xx + seg_width > x)
+			{
+				int local_x = x - xx;
+				int index = 0;
+				int trailing = 0;
+				int emph_only = meta->emph & (EMPH_ITAL | EMPH_BOLD);
+
+				if (local_x < 0)
+					local_x = 0;
+
+				/* Hidden chunks contribute no width but the byte range
+				 * still belongs to the line; treat the click as landing
+				 * on the chunk's start offset. */
+				if (meta->emph & EMPH_HIDDEN)
+					return off;
+
+				pango_layout_set_attributes (xtext->layout,
+				                             attr_lists[emph_only]);
+				pango_layout_set_text (xtext->layout,
+				                       (const char *) (ent->str + off),
+				                       seg_len);
+				pango_layout_xy_to_index (xtext->layout,
+				                          local_x * PANGO_SCALE, 0,
+				                          &index, &trailing);
+
+				return off + index;
+			}
+
+			xx += seg_width;
+			off = chunk_end;
 		}
+
+		if (meta->emph & EMPH_HIDDEN)
+			hid = list;
+		list = g_slist_next (list);
+		if (list == NULL)
+			break;
+		meta = list->data;
+		if (off < meta->off)
+			off = meta->off;
 	}
 
 	/* If previous chunk exists and is marked hidden, regard it as unhidden */
@@ -985,7 +1019,7 @@ find_x (GtkXText *xtext, textentry *ent, int x, int subline, int indent)
 		off = meta->off;
 	}
 
-	/* Return offset of character at x within subline */
+	/* Click was past the last chunk's end — return the line-end offset */
 	return off;
 }
 
