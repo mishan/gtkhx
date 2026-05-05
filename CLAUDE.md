@@ -55,23 +55,49 @@ packaging when there's a buildable binary again.)
 
 ## Build status
 
-**Phase 1 is complete; Phase 2 (GTK 2 port) in progress.** `meson.build` already pins
-`gtk+-2.0 >= 2.24`, but the source is still GTK 1.2 idioms. `meson setup build && meson
-compile -C build` runs and produces a punch list of GTK-2-incompatible API uses:
+**Phases 1, 2, 3, and most of 4 are complete.** `meson.build` pins `gtk4 >= 4.6`,
+the in-tree custom widgets are gone (`gtk_hlist_compat.[ch]` shim over
+GtkTreeView+GtkListStore lives in five consumers; xtext is HexChat's modern fork),
+and `meson setup build && meson compile -C build` produces a working binary.
 
-- `src/gtk_hlist.c` (~140 errors) — in-tree GtkCList fork. **Don't fix it; replace it.**
-  Phase 2.7 builds a `gtk_hlist_compat.[ch]` shim over GtkTreeView+GtkListStore that keeps
-  the existing `gtk_hlist_*` API surface, then drops the fork. The 5 consumers
-  (`tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`, ~392 sites) keep compiling
-  unchanged.
-- `src/xtext.c` (~6 errors) — in-tree XChat 1.8.5 fork. **Don't fix it; replace it.**
-  Phase 2.6 vendors HexChat's xtext.
-- The rest is mostly mechanical: 165 `gtk_signal_connect` (Phase 2.2), 27 `GtkStyle->font`
-  (Phase 2.3), GtkText → GtkTextView in `about.c`/`news15.c` (Phase 2.4), GtkPixmap → GtkImage
-  and GtkOptionMenu → GtkComboBox (Phase 2.5).
+What's *runnable* on first boot from this branch:
 
-`gtkthreads.c` and `gtkhx.c` need a threading first-cut (Phase 2.9) for `g_thread_init` /
-`gdk_threads_enter`. Then it should run.
+- The application launches under GTK 4 on Wayland.
+- Toolbar window appears, Ctrl+K opens the connect dialog (GtkShortcutController),
+  Ctrl+Q quits.
+- Tracker, users, files, news, options windows all build and lay out under GTK 4
+  containers (`gtk_box_append`, `gtk_window_set_child`, etc.).
+- Right-click on a user opens a `GtkPopoverMenu` from a `GMenu` model with the
+  Kick/Ban/Ignore/Info/Msg/Pchat actions wired through `GAction`s.
+- Chat input handles Tab nick completion, Return-to-send, Up/Down history via
+  `GtkEventControllerKey`.
+- Hotline protocol layer (rcv.c / commands.c / hotline.h / cipher.c / compress.c)
+  is unchanged — wire-format compatibility with 1.2/1.5 servers is preserved.
+
+What's *degraded* and tracked as Phase 4 follow-up work:
+
+- **xtext interaction**: the rendering / text-append / font / palette path is
+  intact, but the click/motion/scroll/selection event stack is wrapped in
+  `#if 0` in `src/xtext.c` (after the snapshot vfunc rewrite). Selection by
+  drag, click-to-URL hand cursor, scroll-zoom, and primary-clipboard
+  ownership are off until those handlers come back as GTK 4 event
+  controllers. The `#if 0` block has a docblock above it naming every dead
+  function.
+- **Files drag-and-drop**: cross-window file move via DnD is stripped
+  pending the `GtkDragSource` / `GtkDropTarget` port (Phase 4.8 follow-up
+  inside `files.c`).
+- **xtext background pixmap**: `gdk_cairo_surface_create_from_pixbuf` is
+  gone in GTK 4; `gtk_xtext_set_background` is a no-op until the pixbuf
+  bytes get rendered into a `cairo_image_surface_t` manually.
+- **Window position restoration**: `gtk_window_get_position` is gone and
+  Wayland gives clients no portable way to set their absolute position
+  anyway. Size restoration works via the quit-time save path; positions
+  restore from prefs only when the compositor cooperates.
+- **`MAX_CONN > 1`**: still a half-built abstraction. Phase 5 work.
+
+The GtkApplication / activate plumbing in `gtkhx.c` still drives all the
+window construction, so the Phase 3.6 toplevel-registration walk continues
+to apply.
 
 ## Idioms and pitfalls specific to this codebase
 
