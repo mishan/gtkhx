@@ -129,28 +129,74 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 ## Phase 4 — Port to GTK 4
 
-**Goal:** Land on the current toolkit. The breaking changes here are conceptual, not just renames.
+**Goal:** Land on the current toolkit. The breaking changes here are conceptual, not just renames. Following the Phase 3 pattern: bump the meson dep first, then drive the resulting punch list to zero with mostly-mechanical sub-phases, ending on a runnable binary.
 
-**Work items**
+**Pre-flight decisions** (lock these in before starting 4.1):
 
-1. **Event controllers replace event signals.** `button_press_event`, `key_press_event`, `motion_notify_event` are gone. Use `GtkGestureClick`, `GtkEventControllerKey`, `GtkEventControllerMotion`. Affects every dialog and the chat/users widgets.
-2. **No more `GtkContainer`.** Widgets are now parents of widgets directly; `gtk_container_add(window, child)` → `gtk_window_set_child(window, child)`. Boxes use `gtk_box_append`. Touches every UI file.
-3. **No more `gtk_widget_show_all`.** Widgets are visible by default; explicit `gtk_widget_set_visible` where needed.
-4. **GtkBuilder + UI XML.** Strongly recommended for GTK 4 — describe layouts in `.ui` files, bind callbacks in code. Pays for itself when you want HeaderBar, popovers, etc. Big rewrite of dialog construction code in `connect.c`, `options.c`, `usermod.c`.
-5. **GtkColumnView replaces GtkTreeView** for the user list, file list, tracker list, news list. (GtkTreeView is technically still there in 4 but deprecated; use GListModel + GtkColumnView for new work.)
-6. **Drag-and-drop is completely new.** If file-list DnD ever worked, it'll need the new `GtkDropTarget` / `GtkDragSource` API.
-7. **HeaderBar replaces toolbar window.** The main toolbar in `toolbar.c` becomes a headerbar on the chat window, or stays as a sidebar — UX call. Either way, `GtkToolbar` is gone.
-8. **No more X11 assumptions.** Wayland is the default. `USE_XLIB` and any `gdk/gdkx.h` paths get deleted (or properly conditionalized).
-9. **GIO for file I/O and async.** Many of the hand-rolled pthread + queue patterns in `xfers.c` and `network.c` can become `GTask` + `GSocketClient` + `GFile`. Big simplification, but a real refactor.
-10. **`GtkApplication` from Phase 3 stays, with adjustments.**
+- **Drawing model for `xtext.c`:** keep cairo via `gtk_snapshot_append_cairo()`, don't rewrite around `GskRenderNode`s. Cheaper, preserves the Phase 3.4b cairo work.
+- **`gtk_hlist_compat`:** stay on `GtkTreeView` through Phase 4, even though it's deprecated in 4.10. The five consumers and the `gtk_hlist_*` API surface are stable; migrating to `GtkColumnView`+`GListModel` is a separate axis of change and would double the effort. Defer to a Phase 4.x or Phase 5 sub-phase.
+- **UI definition:** stay code-driven, do **not** introduce `.ui` XML + `GtkBuilder` in this phase. Mixing structural API changes with a description-language rewrite is asking for confusion. `.ui` migration can happen incrementally afterward, dialog-by-dialog.
+- **Toolbar:** the `toolbar.c` window stays as a separate window of buttons — it's already drawn that way and the layout works. Defer the move to a `GtkHeaderBar` on the chat/main window to a Phase 5 UX sub-phase.
+- **`gtk_widget_set_visible`:** widgets are visible by default in GTK 4, so most `gtk_widget_show_all` calls just disappear rather than being replaced.
 
-**Gotchas**
+**Why a sub-phased plan, not a big-bang rewrite:** Phase 3 worked the same way and the discipline of "every commit ends on a clean build" caught real regressions early (the cicn `sizeof(void *)` bug, the toolbar `delete-event` callback typo, the chat-window-doesn't-show race). Same approach here.
 
-- The protocol-side code (`hotline.h`, `network.c`'s wire handling, `compress.c`, `cipher.c`) shouldn't change at all in this phase. If a Phase 4 patch touches `hotline.h`, something's wrong.
-- The pthread-based xfer code can stay if you want; converting to GTask is a quality-of-life improvement, not a requirement.
-- File dialogs change: `GtkFileChooserDialog` → `GtkFileDialog` (async, returns via callback).
+**Sub-phases**
 
-**Exit criteria:** Runs natively on Wayland. Looks like a 2026 GNOME app. No deprecation warnings against current GTK 4.
+1. **4.1 — Bump meson dep, first GTK 4 build attempt.** Switch `dependency('gtk+-3.0')` → `dependency('gtk4')`. Don't fix anything yet — just look at the error wall. Expected categories: `gtk_container_add` / `GTK_CONTAINER` (~167 sites), `gtk_box_pack_start` / `_end` (~221 sites), `gtk_widget_show_all` (~37 sites), `gtk_widget_destroy` (~50 sites), `gtk_widget_get_window` / `GdkWindow` (~46 sites), event signal connections + `GdkEventXxx` struct field access (~25 sites), `gtk_image_new_from_pixbuf` (~51 sites — most still work, some need attention), the entire `xtext.c` draw signal path. Expect 1000+ compile errors — that's the punch list for the rest of the phase. Add `-Wno-error=deprecated-declarations` temporarily so the bulk of work is just the breaking changes, not deprecations.
+2. **4.2 — Container / box API sweep (the big mechanical one).**
+   - `gtk_container_add(window, child)` → `gtk_window_set_child(window, child)`
+   - `gtk_container_add(scrolled, child)` → `gtk_scrolled_window_set_child(scrolled, child)`
+   - `gtk_container_add(frame, child)` → `gtk_frame_set_child(frame, child)`
+   - `gtk_container_add(button, child)` → `gtk_button_set_child(button, child)`
+   - `gtk_box_pack_start(box, w, expand, fill, padding)` → `gtk_box_append(box, w)` plus `gtk_widget_set_hexpand(w, expand)` / margin properties for padding (the pattern we already established for the table → grid migration in Phase 3.9c).
+   - `gtk_box_pack_end` → `gtk_box_append` after a `gtk_widget_set_halign(GTK_ALIGN_END)`, or a small wrapper that walks the box backwards.
+   - This is ~400 sites total. Worth a `gtkhx_box_append_packed(box, w, expand, fill, padding)` helper to keep the diff narrow and the per-call expansion uniform.
+3. **4.3 — Show / destroy / realize sweep.**
+   - `gtk_widget_show_all(w)` → drop in most cases (widgets visible by default in GTK 4); promote to `gtk_widget_set_visible(w, TRUE)` only where the widget's `visible` property was explicitly cleared.
+   - `gtk_widget_destroy(window)` → `gtk_window_destroy(window)` for toplevels.
+   - `gtk_widget_destroy(widget)` for non-window widgets → unparent / `g_object_unref`.
+   - Scrub the leftover `gtk_widget_realize` + `gtk_widget_get_style` dead-code pattern again — Phase 3 hit it in five places, expect a couple more in odd corners.
+4. **4.4 — GdkWindow → GdkSurface.**
+   - `gtk_widget_get_window(w)` → `gtk_native_get_surface(gtk_widget_get_native(w))` (with NULL-safety).
+   - `gdk_window_get_width` / `_get_height` → `gdk_surface_get_width` / `_get_height`.
+   - `gdk_window_get_root_origin` is gone — under Wayland there is no absolute root origin to get. The `gtkhx_save_window_positions` Wayland-skip from Phase 3.x becomes the only path.
+   - `gdk_window_raise` → `gtk_window_present` for toplevels (the use sites in `create_*_window` early-out paths).
+5. **4.5 — Event signals → `GtkEventController`s (the biggest conceptual jump).** GTK 4 widgets no longer emit `button_press_event`, `key_press_event`, `motion_notify_event`, `enter_notify_event`, `leave_notify_event`, `configure_event` directly. Each becomes an event controller you attach to the widget:
+   - `button-press-event` / `button-release-event` → `GtkGestureClick` (bound to "pressed" / "released" signals).
+   - `key-press-event` / `key-release-event` → `GtkEventControllerKey` (bound to "key-pressed" / "key-released").
+   - `motion-notify-event` / `enter-notify-event` / `leave-notify-event` → `GtkEventControllerMotion`.
+   - `configure-event` → no replacement on widgets; toplevel size changes come via `GtkWindow::default-width` notify or `GtkWidget::size-allocate`. Position has already gone away on Wayland.
+   - `delete-event` → `GtkWindow::close-request`.
+   - The event-handler functions also need their signatures updated (no `GdkEventXxx *event` param; the controller signal carries x/y/state directly).
+   - Roughly 25 handlers to convert across `chat.c`, `users.c`, `files.c`, `news15.c`, `xtext.c`. The `chat_input_key_press` handler in `chat.c` is the most complex (Tab nick completion + Return to send + Up/Down history) — it's the one that'll be most painful.
+6. **4.6 — GdkEvent struct access → accessor functions.** Where event handlers still get a `GdkEvent *` (e.g. for popup menus where the activating event matters), `event->x`, `event->y`, `event->button`, `event->state`, `event->keyval` are gone — all have `gdk_event_get_*` accessor functions in GTK 4.
+7. **4.7 — Menus, popups, file dialogs.**
+   - `GtkMenu` is gone — the `users.c` user popup menu becomes a `GtkPopoverMenu` driven by a `GMenuModel`. The handful of submenu / item helpers (`menu_quick_sub`, `menu_quick_item`) need rewriting around `GMenu` items.
+   - `GtkFileChooserDialog` → `GtkFileDialog` (async, callback-based; the `upload_file_response` pattern in `files.c` becomes a `GtkFileDialog::open` callback).
+   - `gtk_dialog_get_action_area` is finally gone in GTK 4. The `gtkhx_dialog_action_area` wrapper from Phase 3.9b becomes either a refactor onto `gtk_dialog_add_button` (for response-based buttons) or rewrite the dialogs that pack pre-made widgets to use a custom `GtkBox` instead of the action area.
+8. **4.8 — Drag and drop.** Four sites (`files.c` and the news folder/catalog browsers in `news15.c`). `gtk_drag_dest_set` → `GtkDropTarget`, `gtk_drag_source_set` → `GtkDragSource`. Both attach as event controllers.
+9. **4.9 — `xtext.c` custom widget — snapshot rewrite.** The `draw` signal is gone; widgets implement a `snapshot` vfunc instead. The Phase 3.4b cairo work survives: replace the `draw` handler with a `snapshot` vfunc that calls `gtk_snapshot_append_cairo()` to get a `cairo_t` and runs the existing draw code unchanged. Realize/unrealize handlers no longer create their own `GdkWindow` (widgets don't have one in GTK 4); the cursor / selection-targets setup migrates to event controllers (Phase 4.5/4.8). Watch out for `gtk_xtext_set_font`'s no-realize-needed property — already done in Phase 3.4b, should carry over fine.
+10. **4.10 — `gtk_hlist_compat` deprecation containment.** Wrap the implementation file in `G_GNUC_BEGIN_IGNORE_DEPRECATIONS` / `G_GNUC_END_IGNORE_DEPRECATIONS` so the GtkTreeView usage compiles cleanly under GTK 4's deprecation flags. Add a TODO/Phase-5 comment pointing at the `GtkColumnView`+`GListModel` migration. The five consumers don't change.
+11. **4.11 — Toolbar, accelerators, GtkApplication adjustments.**
+   - `GtkToolbar` is gone — the `toolbar.c` window's content is already a `GtkBox` of buttons, so no real change beyond removing any leftover toolbar-specific styling.
+   - `gtk_window_add_accel_group` is gone → `GtkShortcutController` attached to each window. The Ctrl+K (connect) and Ctrl+Q (quit) accelerators in `gtkutil.c init_keyaccel` get reimplemented as `GtkShortcut` instances.
+   - `GtkApplication` from Phase 3.6 mostly survives. The `gtk_application_add_window` walk in `gtkhx_activate` should still work; verify the activate semantics under GTK 4.
+   - `gtk_main_iteration` / `gtk_events_pending` (2 sites) → `g_main_context_iteration` / `g_main_context_pending` on the default context.
+12. **4.12 — First boot + bug-finding round.** This is where the unknowns surface. Phase 3 hit several show-stoppers in this window (the `Ptr` 64-bit struct layout bug in cicn, the toolbar `delete-event` callback typo, the chat window not appearing on Wayland because `gtk_application_add_window` only ran for the toolbar, the `GResource` doubled-prefix path). Expect similar surprises here. Plan for several iterative debugging commits before the binary is reliably useful.
+13. **4.13 — Lock in.** `-Werror=deprecated-declarations` again, this time targeting GTK 4. Anything that survives goes into Phase 5 follow-up tasks.
+
+**Gotchas worth flagging up front**
+
+- The protocol-side code (`hotline.h`, `network.c`'s wire handling, `compress.c`, `cipher.c`, `commands.c`, `rcv.c`) shouldn't change at all in this phase. If a Phase 4 patch touches `hotline.h`, something's wrong.
+- The pthread-based xfer code can stay; converting `xfers.c` to `GTask` + `GSocketClient` is a quality-of-life improvement, not a port requirement. Defer to Phase 5.
+- The `gtkthreads.c` recursive-mutex + custom poll function from Phase 3.3 is GTK-version-agnostic — it should survive Phase 4 unchanged. The cleaner long-term answer is `g_main_context_invoke()` at every worker→UI boundary, but that's a per-call-site refactor (~56 sites in `network.c` and `xfers.c`) and is also Phase 5 territory.
+- File dialogs change: `GtkFileChooserDialog` → `GtkFileDialog` is async (callback-based, no `gtk_dialog_run`). Existing dialog use sites become a request + a response handler.
+- `gtk_widget_set_size_request` still exists in GTK 4 with the same semantics — the Phase 3.x `-2` → `-1` cleanup carries over.
+- Wayland is the only backend that matters in GTK 4 (the X11 backend exists but you can't assume it). The `USE_XLIB` define in `config.h` becomes a no-op; remove it.
+- `GdkPixmap`/`GdkBitmap` typedef aliases (in `session.h` and `gtk_hlist_compat.h`) survive Phase 4 — they're our own types, not GTK's. Keep until the consumers can be unwound (Phase 5 cleanup).
+
+**Exit criteria:** Runs natively on Wayland. Connects to mhxd / hlserver.com, joins chat, browses files, lists tracker servers. Builds with `-Werror=deprecated-declarations` against current GTK 4. UX is no worse than the Phase 3 binary; HeaderBar and other GTK-4-native UX touches are explicitly Phase 5 work.
 
 ---
 
