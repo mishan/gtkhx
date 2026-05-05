@@ -937,7 +937,19 @@ void users_clear (struct htlc_conn *htlc, struct chat *chat)
 	gtk_hlist_clear(GTK_HLIST(sess->users_list));
 }
 
-#define colorgdk(color) (&gdk_user_colors[color % 4])
+/* Phase 5 dark-theme: the four-slot palette is { regular, idle, admin,
+ * admin-idle }. The "regular" slot used to be hard-coded black, which
+ * is invisible against a dark theme's row background. Returning NULL
+ * for that slot lets the cell renderer fall back to the GTK theme's
+ * default foreground so regular users read on both light and dark
+ * themes. The other three slots stay distinctive enough to convey
+ * status under either theme. */
+static GdkRGBA *user_color_gdk (guint16 color)
+{
+	if ((color % 4) == 0)
+		return NULL;
+	return &gdk_user_colors[color % 4];
+}
 
 void user_create (struct htlc_conn *htlc, struct chat *chat,
 				  struct hx_user *user, const char *nam, guint16 icon,
@@ -967,7 +979,7 @@ void user_create (struct htlc_conn *htlc, struct chat *chat,
 	row = gtk_hlist_append(GTK_HLIST(losers_list), nulls);
 	gtk_hlist_set_row_data(GTK_HLIST(losers_list), row, user);
 	g_free(nulls[0]);
-	gtk_hlist_set_foreground(GTK_HLIST(losers_list), row, colorgdk(color));
+	gtk_hlist_set_foreground(GTK_HLIST(losers_list), row, user_color_gdk(color));
 	load_icon(losers_list, icon, &icon_files, 1, &pixmap, &mask);
 	if (!pixmap)
 		gtk_hlist_set_text(GTK_HLIST(losers_list), row, 1, nam);
@@ -1046,7 +1058,7 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	gtk_hlist_insert(GTK_HLIST(losers_list), row, rowdat);
 	g_free(rowdat[0]);
 	gtk_hlist_set_row_data(GTK_HLIST(losers_list), row, user);
-	gtk_hlist_set_foreground(GTK_HLIST(losers_list), row, colorgdk(color));
+	gtk_hlist_set_foreground(GTK_HLIST(losers_list), row, user_color_gdk(color));
 	load_icon(sess->users_window, icon, &icon_files, 1, &pixmap, &mask);
 	if (!pixmap)
 		gtk_hlist_set_text(GTK_HLIST(losers_list), row, 1, nam);
