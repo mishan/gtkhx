@@ -35,6 +35,7 @@
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"
+#include "toolbar.h"
 
 void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)
@@ -247,11 +248,16 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	return msg;
 }
 
-void destroy_msgwin (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" on (GtkWindow *, gpointer)
+ * returning TRUE to inhibit close, FALSE to allow default destroy.
+ * Just unlink the msg from the list — the framework destroys the
+ * widget. */
+gboolean destroy_msgwin (GtkWindow *window, gpointer data)
 {
-	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(G_OBJECT(window), "msg");
+	(void) data;
 	msgwin_delete(msg);
-	gtkhx_widget_destroy(widget);
+	return FALSE;
 }
 
 
@@ -298,7 +304,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_show(msg->window);
 
 	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
-	g_signal_connect(msg->window, "delete_event", G_CALLBACK(destroy_msgwin), 0);
+	g_signal_connect(msg->window, "close-request", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
 	gtk_widget_grab_focus(msg->inputbuf);
@@ -379,6 +385,9 @@ void broadcastmsg(char *text)
 	dialog = gtk_dialog_new();
 	okbtn = gtk_button_new_with_label(_("OK"));
     /* Phase 4.2: gtk_widget_set_can_default removed */
+	if (toolbar_window)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog),
+		                             GTK_WINDOW(toolbar_window));
 
 	textbox = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);

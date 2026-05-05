@@ -65,24 +65,28 @@ void reload_news (GtkWidget *widget, gpointer data)
 	}
 }
 
-static void close_news_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request on (GtkWindow *, gpointer); FALSE
+ * allows default destroy. */
+static gboolean close_news_window (GtkWindow *window, gpointer data)
 {
 	session *sess = data;
+	(void) window;
 
-	gtkhx_widget_destroy(widget);
 	gtkhx_prefs.geo.news.open = 0;
 	gtkhx_prefs.geo.news.init = 0;
 	sess->news_window = 0;
+	return FALSE;
 }
 
 /* Phase 4.5: configure-event is gone in GTK 4. News window size is
  * captured at hx_quit() time alongside position; see gtkhx.c
  * gtkhx_save_window_positions. */
 
-static void close_post_window (GtkWidget *widget, gpointer data)
+static gboolean close_post_window (GtkWindow *window, gpointer data)
 {
-	gtkhx_widget_destroy(post_window);
+	(void) window; (void) data;
 	post_window = 0;
+	return FALSE;
 }
 
 static void post_news (GtkWidget *widget, gpointer data)
@@ -119,7 +123,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 	post_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(post_window), _("Post News"));
 	gtk_widget_set_size_request(post_window, 300, 280);
-	g_signal_connect(post_window, "delete_event",
+	g_signal_connect(post_window, "close-request",
 			   G_CALLBACK(close_post_window), 0);
 
 	postprompt = gtk_text_view_new();
@@ -208,7 +212,7 @@ void create_news_window (session *sess)
 
 	gtk_window_set_title(GTK_WINDOW(news_window), _("News"));
 	gtk_widget_set_size_request(news_window, 412, 384);
-	g_signal_connect(news_window, "delete_event",
+	g_signal_connect(news_window, "close-request",
 			   G_CALLBACK(close_news_window), sess);
 	g_signal_connect(postButton, "clicked",
 

@@ -79,17 +79,20 @@ void tracker_clear (void)
 	gtk_hlist_clear(GTK_HLIST(tracker_list));
 }
 
-static void
-close_tracker_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request on (GtkWindow *, gpointer). */
+static gboolean
+close_tracker_window (GtkWindow *window, gpointer data)
 {
+	(void) window; (void) data;
+
 	tracker_clear();
-	gtkhx_widget_destroy(widget);
 	tracker_window = 0;
 	tracker_list = 0;
 
 	tracker_list_destroy(tracker_server_tree);
 	dfafree(current_search);
 	current_search = NULL;
+	return FALSE;
 }
 
 pthread_t track_tid = 0;
@@ -425,7 +428,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	 * drawable. */
 	gtk_window_set_title(GTK_WINDOW(tracker_window), _("Tracker"));
 	gtk_widget_set_size_request(tracker_window, 640, 410);
-	g_signal_connect(tracker_window, "delete_event", G_CALLBACK(close_tracker_window), 0);
+	g_signal_connect(tracker_window, "close-request", G_CALLBACK(close_tracker_window), 0);
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
 	gtk_widget_set_size_request(tracker_list, 0, 350);

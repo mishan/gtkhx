@@ -428,13 +428,18 @@ static void file_reload_btn (GtkWidget *widget, gpointer data)
 	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 }
 
-static void close_files_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
+ * (GtkWindow *, gpointer) returning TRUE to inhibit close, FALSE to
+ * allow the default destroy. The body just clears the per-window
+ * model state — the framework destroys the widget itself. */
+static gboolean close_files_window (GtkWindow *window, gpointer data)
 {
 	struct gfile_list *gfl = (struct gfile_list *)g_object_get_data(
-		G_OBJECT(widget), "gfl");
+		G_OBJECT(window), "gfl");
+	(void) data;
 
 	gfl_delete(gfl);
-	gtkhx_widget_destroy(widget);
+	return FALSE;
 }
 
 static void makeDir(GtkWidget *widget, gpointer data)
@@ -463,9 +468,14 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	GtkWidget *nameEntryLabel;
 	GtkWidget *entryHbox;
 	GtkWidget *btnHbox;
+	GtkRoot *root = gtk_widget_get_root (widget);
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
+	/* Phase 4.5: anchor to whatever GtkWindow contains the button that
+	 * triggered us — GTK 4 wants every dialog to have a transient parent. */
+	if (root && GTK_IS_WINDOW (root))
+		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
@@ -568,7 +578,7 @@ static struct gfile_list *create_files_window (char *path)
 
 	gfl = gfl_new(files_window, files_list, path);
 	g_object_set_data(G_OBJECT(files_window), "gfl", gfl);
-	g_signal_connect(files_window, "delete_event",
+	g_signal_connect(files_window, "close-request",
 			   G_CALLBACK(close_files_window), files_list);
 
 	files_window_scroll = gtk_scrolled_window_new();
@@ -1058,8 +1068,8 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 
 	window = gtk_window_new();
     (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
-	g_signal_connect(window, "delete_event",
-					   (GCallback) gtkhx_widget_destroy, window);
+	/* Phase 4.5: close-request returns FALSE to let the default destroy
+	 * proceed; the file info dialog has no per-instance teardown. */
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
 
 	name_entry = gtk_entry_new();

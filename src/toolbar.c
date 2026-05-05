@@ -59,9 +59,15 @@ static void create_new_user ()
 	create_useredit_window(0,1);
 }
 
-static void close_toolbar_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
+ * returning gboolean. Returning TRUE inhibits the default destroy —
+ * we always want to call hx_quit() (which calls exit()), so the
+ * return value never actually flows back. */
+static gboolean close_toolbar_window (GtkWindow *window, gpointer data)
 {
+	(void) window; (void) data;
 	hx_quit();
+	return FALSE;
 }
 
 void disconnect_clicked (void)
@@ -107,8 +113,8 @@ void create_toolbar_window (session *sess)
 	toolbar_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(toolbar_window), "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(toolbar_window), FALSE);
-	g_signal_connect(toolbar_window, "delete_event",
-			   G_CALLBACK(close_toolbar_window), 0);
+	/* Phase 4.5: close-request connect lives further down with the
+	 * post-realize wiring; this used to be a stray duplicate connect. */
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
@@ -303,7 +309,7 @@ void create_toolbar_window (session *sess)
 	 * because the last GtkApplication window was gone, but no prefs
 	 * survived. Wire this to close_toolbar_window, which calls
 	 * hx_quit() properly. */
-	g_signal_connect(toolbar_window, "delete_event",
+	g_signal_connect(toolbar_window, "close-request",
 	                 G_CALLBACK(close_toolbar_window), 0);
 
 	/* Phase 4.2: gtk_window_move removed (Wayland) */

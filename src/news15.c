@@ -298,13 +298,16 @@ void delete_gfnews(struct gnews_folder *gfnews)
 	g_free(gfnews);
 }
 
-void destroy_gfnews_browser(GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request returns FALSE so default destroy
+ * proceeds; the framework destroys the widget. */
+gboolean destroy_gfnews_browser(GtkWindow *window, gpointer data)
 {
-	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget), 
-													  "gfnews");
+	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(window),
+														  "gfnews");
+	(void) data;
 
 	delete_gfnews(gfnews);
-	gtkhx_widget_destroy(widget);
+	return FALSE;
 }
 
 static void gfnews_reload_btn(GtkWidget *btn, struct gnews_folder *gfnews)
@@ -354,9 +357,12 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	GtkWidget *nameEntryLabel;
 	GtkWidget *entryHbox;
 	GtkWidget *btnHbox;
+	GtkRoot *root = gtk_widget_get_root (btn);
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Folder..."));
+	if (root && GTK_IS_WINDOW (root))
+		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
@@ -395,9 +401,12 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	GtkWidget *nameEntryLabel;
 	GtkWidget *entryHbox;
 	GtkWidget *btnHbox;
+	GtkRoot *root = gtk_widget_get_root (btn);
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Category..."));
+	if (root && GTK_IS_WINDOW (root))
+		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
@@ -533,7 +542,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_size_request(news_window, 264, 400);
 	gtk_window_set_title(GTK_WINDOW(news_window), gfnews->path);
 	g_object_set_data(G_OBJECT(news_window), "gfnews", gfnews);
-	g_signal_connect(news_window, "delete_event",
+	g_signal_connect(news_window, "close-request",
 					   G_CALLBACK(destroy_gfnews_browser), 0);
 
 	news_scroll = gtk_scrolled_window_new();
@@ -742,13 +751,15 @@ void delete_gcnews(struct gnews_catalog *gcnews)
 }
 
 
-static void destroy_gcnews_browser(GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request — FALSE allows default destroy. */
+static gboolean destroy_gcnews_browser(GtkWindow *window, gpointer data)
 {
-	struct gnews_catalog *gcnews = g_object_get_data(G_OBJECT(widget), 
+	struct gnews_catalog *gcnews = g_object_get_data(G_OBJECT(window),
 													   "gcnews");
+	(void) data;
 
 	delete_gcnews(gcnews);
-	gtkhx_widget_destroy(widget);
+	return FALSE;
 }
 
 /* Phase 2.8: now the GtkTreeView "cursor-changed" handler. */
@@ -1032,7 +1043,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_widget_set_size_request(news_window, 570, 375);
 	gtk_window_set_title(GTK_WINDOW(news_window), path);
 	g_object_set_data(G_OBJECT(news_window), "gcnews", gcnews);
-	g_signal_connect(news_window, "delete_event",
+	g_signal_connect(news_window, "close-request",
 					   G_CALLBACK(destroy_gcnews_browser), 0);
 
 	hpaned1 = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
