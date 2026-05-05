@@ -440,32 +440,28 @@ static int
 backend_get_text_width_emph (GtkXText *xtext, guchar *str, int len, int emphasis)
 {
 	int width;
-	int deltaw;
-	int mbl;
 
-	if (*str == 0)
+	if (len <= 0 || *str == 0)
 		return 0;
 
 	if ((emphasis & EMPH_HIDDEN))
 		return 0;
 	emphasis &= (EMPH_ITAL | EMPH_BOLD);
 
-	width = 0;
+	/* Phase 4.9 follow-up: ask Pango for the layout width of the whole
+	 * string. The earlier implementation summed per-character integer
+	 * widths from the fontwidths[] table; for any font where Pango's
+	 * combined-layout width differs from the integer sum (most non-
+	 * monospace runs, and even some "monospace" fonts under hinting /
+	 * sub-pixel positioning) the BG rectangle in backend_draw_text_emph
+	 * came out 1-3 px narrower than the text Pango actually drew. At
+	 * selection boundaries inside a word that drift was visible: a
+	 * thin unselected gap appeared between adjacent runs ("connect|ed"
+	 * → "connect ed"). Measuring with the same code path drawing uses
+	 * keeps width and rendering aligned. */
 	pango_layout_set_attributes (xtext->layout, attr_lists[emphasis]);
-	while (len > 0)
-	{
-		mbl = charlen(str);
-		if (*str < 128)
-			deltaw = fontwidths[emphasis][*str];
-		else
-		{
-			pango_layout_set_text (xtext->layout, str, mbl);
-			pango_layout_get_pixel_size (xtext->layout, &deltaw, NULL);
-		}
-		width += deltaw;
-		str += mbl;
-		len -= mbl;
-	}
+	pango_layout_set_text (xtext->layout, (const char *) str, len);
+	pango_layout_get_pixel_size (xtext->layout, &width, NULL);
 
 	return width;
 }
