@@ -179,6 +179,59 @@ on_column_clicked (GtkTreeViewColumn *col, gpointer user_data)
 	g_signal_emit (hlist, click_column_signal, 0, idx);
 }
 
+/*
+ * Per-column sort function used by every hlist column so clicking the
+ * header sorts the rows by that column. Uses g_utf8_collate to do a
+ * locale-aware string compare; numeric columns stored as decimal text
+ * (for example "10" vs "9") sort lexically rather than numerically,
+ * which is good enough for now — consumers that want a smarter compare
+ * can override per-column with gtk_tree_sortable_set_sort_func().
+ *
+ * user_data is the model column index (HLIST_COL_TEXT(i)) wrapped in
+ * a GINT pointer.
+ */
+static gint
+hlist_text_column_compare (GtkTreeModel *model,
+                           GtkTreeIter  *a,
+                           GtkTreeIter  *b,
+                           gpointer      user_data)
+{
+	gint   col   = GPOINTER_TO_INT (user_data);
+	gchar *sa    = NULL;
+	gchar *sb    = NULL;
+	gint   result;
+
+	gtk_tree_model_get (model, a, col, &sa, -1);
+	gtk_tree_model_get (model, b, col, &sb, -1);
+
+	/* Numeric-looking strings sort numerically when both sides parse
+	 * cleanly — keeps "9" before "10" without consumers having to
+	 * register a custom compare. Falls through to a locale-aware
+	 * string compare otherwise. */
+	if (sa && sb) {
+		gchar *ea = NULL, *eb = NULL;
+		gint64 na, nb;
+
+		na = g_ascii_strtoll (sa, &ea, 10);
+		nb = g_ascii_strtoll (sb, &eb, 10);
+		if (ea && eb && ea != sa && eb != sb && *ea == '\0' && *eb == '\0') {
+			result = (na < nb) ? -1 : (na > nb) ? 1 : 0;
+		} else {
+			result = g_utf8_collate (sa, sb);
+		}
+	} else if (sa) {
+		result = 1;
+	} else if (sb) {
+		result = -1;
+	} else {
+		result = 0;
+	}
+
+	g_free (sa);
+	g_free (sb);
+	return result;
+}
+
 static void
 on_selection_changed (GtkTreeSelection *sel, gpointer user_data)
 {
@@ -241,6 +294,20 @@ gtk_hlist_construct (gint n_columns, gchar **titles)
 		                   GINT_TO_POINTER (i));
 		g_signal_connect (col, "clicked",
 		                  G_CALLBACK (on_column_clicked), self);
+
+		/* Phase 5: register a sort function for this text column on
+		 * the model and link the column header to it via
+		 * sort_column_id. GtkTreeView handles the click → toggle
+		 * ascending/descending state and the header arrow indicator
+		 * automatically. The callback above (on_column_clicked) still
+		 * fires for legacy click_column consumers but the visible
+		 * sort effect is now driven by GtkTreeSortable. */
+		gtk_tree_sortable_set_sort_func (GTK_TREE_SORTABLE (priv->store),
+		                                 HLIST_COL_TEXT (i),
+		                                 hlist_text_column_compare,
+		                                 GINT_TO_POINTER (HLIST_COL_TEXT (i)),
+		                                 NULL);
+		gtk_tree_view_column_set_sort_column_id (col, HLIST_COL_TEXT (i));
 
 		pixr = gtk_cell_renderer_pixbuf_new ();
 		gtk_tree_view_column_pack_start (col, pixr, FALSE);
