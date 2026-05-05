@@ -40,6 +40,7 @@
 #include "network.h"
 #include "news15.h"
 #include "log.h"
+#include "gtkutil.h"
 
 time_t start_time;
 time_t total_time;
@@ -885,44 +886,40 @@ void options_change (GtkWidget *widget, gpointer data)
 	}
 }
 
-static void set_font (GtkWidget *btn, GtkWidget *fontsel)
+/* Phase 3.9: GtkFontSelectionDialog was deprecated in GTK 3.2 in favor
+ * of GtkFontChooserDialog. The two have entirely different APIs —
+ * Selection exposes ok_button / cancel_button widgets you wire up by
+ * hand, Chooser uses the GtkDialog "response" signal. The handler
+ * below is the GtkChooserDialog equivalent of the old set_font
+ * + destroy pair. */
+static void
+fontsel_response (GtkDialog *dialog, gint response, gpointer user_data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(btn),
-														"entry");
+	GtkWidget *entry = user_data;
 
-	gtk_entry_set_text(GTK_ENTRY(entry),
-					   gtk_font_selection_dialog_get_font_name(
-						   GTK_FONT_SELECTION_DIALOG(fontsel)));
-
-	gtk_widget_destroy(fontsel);
+	if (response == GTK_RESPONSE_OK) {
+		char *font = gtk_font_chooser_get_font (GTK_FONT_CHOOSER (dialog));
+		if (font) {
+			gtk_entry_set_text (GTK_ENTRY (entry), font);
+			g_free (font);
+		}
+	}
+	gtk_widget_destroy (GTK_WIDGET (dialog));
 }
 
 static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 {
-	GtkWidget *fontsel = gtk_font_selection_dialog_new(_("Browse Fonts"));
+	GtkWidget *fontsel = gtk_font_chooser_dialog_new (_("Browse Fonts"), NULL);
+	(void) btn;
 
-	/* Phase 3.2: GtkFontSelectionDialog struct fields ok_button /
-	 * cancel_button became opaque in GTK 3 (the whole class is
-	 * deprecated in favour of GtkFontChooserDialog, which we'll move to
-	 * in the deprecation pass).  Use the accessor pair for now. */
-	g_signal_connect_swapped(
-								  gtk_font_selection_dialog_get_cancel_button(
-									  GTK_FONT_SELECTION_DIALOG(fontsel)),
-							  "clicked", (GCallback) gtk_widget_destroy,
-							  fontsel);
+	if (gtkhx_prefs.font && *gtkhx_prefs.font)
+		gtk_font_chooser_set_font (GTK_FONT_CHOOSER (fontsel),
+		                           gtkhx_prefs.font);
 
-	g_object_set_data(G_OBJECT(
-							gtk_font_selection_dialog_get_ok_button(
-								GTK_FONT_SELECTION_DIALOG(fontsel))),
-						"entry", entry);
-	g_signal_connect(
-						   gtk_font_selection_dialog_get_ok_button(
-							   GTK_FONT_SELECTION_DIALOG(fontsel)),
-					   "clicked", G_CALLBACK(set_font), fontsel);
-	gtk_font_selection_dialog_set_font_name(GTK_FONT_SELECTION_DIALOG(fontsel),
-											gtkhx_prefs.font);
+	g_signal_connect (fontsel, "response",
+	                  G_CALLBACK (fontsel_response), entry);
 
-	gtk_widget_show_all(fontsel);
+	gtk_widget_show_all (fontsel);
 }
 
 #ifdef USE_GDK_PIXBUF
@@ -1346,7 +1343,7 @@ static void settings_page_path(GtkWidget *vbox)
 
 	lbl = gtk_label_new(_("Icon Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(lbl), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 0, 1, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
@@ -1358,7 +1355,7 @@ static void settings_page_path(GtkWidget *vbox)
 
 	lbl = gtk_label_new(_("Sound Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(lbl), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 1, 2, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
@@ -1371,7 +1368,7 @@ static void settings_page_path(GtkWidget *vbox)
 
 	lbl = gtk_label_new(_("Download Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(lbl), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 2, 3, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
@@ -1559,7 +1556,7 @@ static void settings_page_general(GtkWidget *vbox)
 	                  (GtkAttachOptions)(GTK_FILL),
 	                  (GtkAttachOptions)(GTK_FILL), 0, 0);
 	gtk_label_set_justify(GTK_LABEL(name), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(name), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(name), 0.0);
 
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
 }
@@ -1622,8 +1619,11 @@ settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
 
 	/* label */
 	label = gtk_label_new (book_label);
-	gtk_misc_set_alignment (GTK_MISC (label), 0.0, 0.5);
-	gtk_misc_set_padding (GTK_MISC (label), 2, 1);
+	gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+	gtk_widget_set_margin_start  (label, 2);
+	gtk_widget_set_margin_end    (label, 2);
+	gtk_widget_set_margin_top    (label, 1);
+	gtk_widget_set_margin_bottom (label, 1);
 	gtk_container_add (GTK_CONTAINER (frame), label);
 
 	/* vbox for the tab */
@@ -1681,15 +1681,15 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	options_window = dialog;
 
 	gtk_container_set_border_width
-		(GTK_CONTAINER (gtk_dialog_get_action_area(GTK_DIALOG (dialog))), 2);
-	gtk_box_set_homogeneous (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))),
+		(GTK_CONTAINER (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), 2);
+	gtk_box_set_homogeneous (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))),
 									 FALSE);
 
 	hbbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
 	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
 	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
-	gtk_box_pack_end (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG (dialog))), hbbox,
+	gtk_box_pack_end (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), hbbox,
 							FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));

@@ -476,7 +476,7 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_can_default(okBtn, TRUE);
-	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnHbox);
+	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
 	gtk_widget_show_all(dialog);

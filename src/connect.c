@@ -375,8 +375,8 @@ static void prompt_conversion (char *name)
 
     gtk_widget_set_can_default(okbutton, TRUE);
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbutton, 0, 0, 0);
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), cancelbtn, 0, 0, 0);
+    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 0, 0, 0);
+    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), cancelbtn, 0, 0, 0);
 
     gtk_widget_grab_default (okbutton);
 
@@ -649,8 +649,8 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), name_entry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), ok, 0,0, 0);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), cancel, 0,0, 0);
+	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), ok, 0,0, 0);
+	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), cancel, 0,0, 0);
 	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
 	g_signal_connect(cancel, "clicked", G_CALLBACK(cancel_save), 0);
 	g_object_set_data(G_OBJECT(ok), "name", name_entry);
@@ -744,7 +744,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_box_pack_start(GTK_BOX(vbox1), help_label, 0, 1, 0);
 	gtk_label_set_justify(GTK_LABEL(help_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_line_wrap(GTK_LABEL(help_label), 1);
-	gtk_misc_set_alignment(GTK_MISC(help_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(help_label), 0.0);
 
 	frame1 = gtk_frame_new(0);
 	gtk_box_pack_start(GTK_BOX(vbox1), frame1, 1, 1, 0);
@@ -761,21 +761,21 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(server_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(server_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(server_label), 0.0);
 
 	login_label = gtk_label_new(_("Login:"));
 	gtk_table_attach(GTK_TABLE(table1), login_label, 0, 1, 1, 2,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(login_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(login_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(login_label), 0.0);
 
 	pass_label = gtk_label_new(_("Password:"));
 	gtk_table_attach(GTK_TABLE(table1), pass_label, 0, 1, 2, 3,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(pass_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(pass_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(pass_label), 0.0);
 
 	hope = gtk_check_button_new_with_label(_("Secure (HOPE)"));
 	gtk_toggle_button_set_active((GtkToggleButton*)hope, 0);
@@ -789,7 +789,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(compress_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(compress_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(compress_label), 0.0);
 
 	compress_menu = gtk_combo_box_text_new ();
 	gtk_table_attach(GTK_TABLE(table1), compress_menu, 1, 2, 4, 5, GTK_EXPAND|GTK_FILL, 0, 0, 0);
@@ -812,7 +812,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(cipher_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(cipher_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(cipher_label), 0.0);
 
 	cipher_menu = gtk_combo_box_text_new ();
 	gtk_table_attach(GTK_TABLE(table1), cipher_menu, 1, 2, 5, 6, GTK_EXPAND|GTK_FILL, 0, 0, 0);
@@ -838,7 +838,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_table_attach(GTK_TABLE(table1), port_label, 2, 3, 0, 1, GTK_FILL, 0, 0, 0);
 
 	gtk_label_set_justify(GTK_LABEL(port_label), GTK_JUSTIFY_LEFT);
-	gtk_misc_set_alignment(GTK_MISC(port_label), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(port_label), 0.0);
 
 	port_entry = gtk_entry_new();
 	gtk_entry_set_max_length(GTK_ENTRY(port_entry), 6);

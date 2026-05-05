@@ -101,6 +101,27 @@ safe_strcpy (char *dest, const char *src, int bytes_left)
 	g_strlcpy (dest, src, bytes_left);
 }
 
+/* Phase 3.9: gdk_window_get_pointer was deprecated in GTK 3.0 in favor
+ * of gdk_window_get_device_position, which needs a GdkDevice — get it
+ * from the window's default seat. */
+static inline void
+xtext_get_pointer (GdkWindow *win, gint *x, gint *y, GdkModifierType *mask)
+{
+	GdkDisplay *display;
+	GdkSeat    *seat;
+	GdkDevice  *pointer;
+	if (!win) {
+		if (x) *x = 0;
+		if (y) *y = 0;
+		if (mask) *mask = 0;
+		return;
+	}
+	display = gdk_window_get_display (win);
+	seat    = gdk_display_get_default_seat (display);
+	pointer = gdk_seat_get_pointer (seat);
+	gdk_window_get_device_position (win, pointer, x, y, mask);
+}
+
 /* --- HexChat glue: case-insensitive substring search from util.c ----- *
  * Currently only the lastlog/search code paths reach this; if those
  * are excluded by the consumer, GCC flags it as unused.  G_GNUC_UNUSED
@@ -1558,7 +1579,7 @@ gtk_xtext_scrolldown_timeout (GtkXText * xtext)
 	xtext_buffer *buf = xtext->buffer;
 	GtkAdjustment *adj = xtext->adj;
 
-	gdk_window_get_pointer (gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
+	xtext_get_pointer(gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
 	win_height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
 
 	if (buf->last_ent_end == NULL ||	/* If context has changed OR */
@@ -1591,7 +1612,7 @@ gtk_xtext_scrollup_timeout (GtkXText * xtext)
 	GtkAdjustment *adj = xtext->adj;
 	int delta_y;
 
-	gdk_window_get_pointer (gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
+	xtext_get_pointer(gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
 
 	if (buf->last_ent_start == NULL ||	/* If context has changed OR */
 		 buf->pagetop_ent == NULL ||		/* pagetop_ent is reset OR */
@@ -1860,7 +1881,7 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 	GtkAllocation alloc;
 
 	gtk_widget_get_allocation(widget, &alloc);
-	gdk_window_get_pointer (gtk_widget_get_window(widget), &x, &y, &mask);
+	xtext_get_pointer(gtk_widget_get_window(widget), &x, &y, &mask);
 
 	if (xtext->moving_separator)
 	{
@@ -2116,7 +2137,7 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 	unsigned char *word;
 	int line_x, x, y, offset, len;
 
-	gdk_window_get_pointer (gtk_widget_get_window(widget), &x, &y, &mask);
+	xtext_get_pointer(gtk_widget_get_window(widget), &x, &y, &mask);
 
 	if (event->button == 3 || event->button == 2) /* right/middle click */
 	{

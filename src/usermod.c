@@ -367,7 +367,7 @@ void create_useredit_window (char *login, int new)
 	}
 	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Login:"));
-	gtk_misc_set_alignment(GTK_MISC(wid), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
 	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
 
@@ -375,7 +375,7 @@ void create_useredit_window (char *login, int new)
 	ues->name_entry = wid;
 	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 1, 2, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Name:"));
-	gtk_misc_set_alignment(GTK_MISC(wid), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
 	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 1, 2, GTK_FILL, GTK_FILL, 0, 0);
 
@@ -383,7 +383,7 @@ void create_useredit_window (char *login, int new)
 	ues->pass_entry = wid;
 	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 2, 3, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Pass:"));
-	gtk_misc_set_alignment(GTK_MISC(wid), 0, 0.5);
+	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
 	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 2, 3, GTK_FILL, GTK_FILL, 0, 0);
 
@@ -392,7 +392,10 @@ void create_useredit_window (char *login, int new)
 	gtk_box_pack_start(GTK_BOX(wvbox), info_frame, 0, 0, 2);
 
 	avbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(usermod_scroll), avbox);
+	/* Phase 3.9: gtk_scrolled_window_add_with_viewport was deprecated
+	 * in 3.8 — gtk_container_add now wraps non-scrollable children in
+	 * a viewport automatically. */
+	gtk_container_add(GTK_CONTAINER(usermod_scroll), avbox);
 	gtk_container_add(GTK_CONTAINER(window), wvbox);
 	gtk_box_pack_start(GTK_BOX(wvbox), usermod_scroll, 0, 0, 2);
 

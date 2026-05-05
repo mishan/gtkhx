@@ -1,9 +1,17 @@
+Better Settings Management:
 - Support new config path ~/.config/gtkhx that gets loaded before trying $GTKHX_PATH
 - Load *.rsrc files from $CONFIG_PATH/icons (e.g. ~/config.gtkhx/icons/*.rsrc and /usr/local/share/gtkhx/icons/*.rsrc)
+- Cleaner settings management code
+
+Pulling in any new developments from over the years:
+- Look into rebasing hx-specific code (especially anything protocol related) from mhxd
+- Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
+
+Features:
+- Log chat history / server, and be able to bring that chat history back up when connecting to a server
 
 Old:
--Full file support
+-Full file support (not sure what this means)
 -Write up API docs
--store pref variables inside a union in cfgvar
 -fix preferences broken-ness
--Reimplement SOCKS support.
+-Reimplement SOCKS support (see mhxd source)

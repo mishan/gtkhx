@@ -155,8 +155,9 @@ static GtkWidget *menu_quick_sub (char *name, GtkWidget * menu)
 
 static void menu_popup (GtkWidget *menu, GdkEventButton *event)
 {
-	gtk_menu_popup (GTK_MENU (menu), NULL, NULL, NULL, NULL,
-						 event->button, event->time);
+	/* Phase 3.9: gtk_menu_popup deprecated in 3.22 — gtk_menu_popup_at_pointer
+	 * is the replacement and figures out the device/screen automatically. */
+	gtk_menu_popup_at_pointer (GTK_MENU (menu), (GdkEvent *) event);
 	gtk_widget_show (menu);
 }
 
@@ -596,7 +597,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
 
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), scroll, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnhbox, 0, 0,
+	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnhbox, 0, 0,
 					   0);
 	gtk_box_pack_start(GTK_BOX(btnhbox), invite, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnhbox), new, 0, 0, 0);

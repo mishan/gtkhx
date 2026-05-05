@@ -1277,7 +1277,7 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	gtk_widget_set_can_default(join, TRUE);
 
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
+	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), join, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(hbox), cancel, 0, 0, 0);
 	gtk_widget_grab_default(join);

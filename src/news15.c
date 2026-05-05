@@ -372,7 +372,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_can_default(okBtn, TRUE);
-	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnHbox);
+	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
 	gtk_widget_show_all(dialog);
@@ -413,7 +413,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_can_default(okBtn, TRUE);
-	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_action_area(GTK_DIALOG(dialog))), btnHbox);
+	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
 	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
 	gtk_widget_show_all(dialog);
@@ -1029,7 +1029,6 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	GtkWidget *postbtn;
 	GtkWidget *replybtn;
 	GtkWidget *deletebtn;
-	GtkWidget *alignment1;
 	GtkWidget *news_tree;
 	GtkWidget *vbox2;
 	GtkWidget *authorlbl;
@@ -1120,11 +1119,12 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_box_pack_start(GTK_BOX(hbuttonbox1), replybtn, 0, 0, 2);
 	gtk_box_pack_start(GTK_BOX(hbuttonbox1), deletebtn, 0, 0, 2);
 
-	alignment1 = gtk_alignment_new (0.5, 0.5, 1, 1);
-	gtk_box_pack_start (GTK_BOX (vbox1), alignment1, TRUE, TRUE, 0);
-
+	/* Phase 3.9: dropped a GtkAlignment(0.5, 0.5, 1, 1) wrapper around
+	 * the scrolled window. The xscale/yscale=1 made it expand to fill,
+	 * which is what gtk_box_pack_start(TRUE, TRUE) already provides;
+	 * GtkAlignment is gone in GTK 4 anyway. */
 	scrolledwindow2 = gtk_scrolled_window_new (NULL, NULL);
-	gtk_container_add (GTK_CONTAINER (alignment1), scrolledwindow2);
+	gtk_box_pack_start (GTK_BOX (vbox1), scrolledwindow2, TRUE, TRUE, 0);
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow2), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
 	viewport1 = gtk_viewport_new (NULL, NULL);

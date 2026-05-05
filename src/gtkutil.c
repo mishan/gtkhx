@@ -40,6 +40,7 @@
 #include "gtkhx.h"
 #include "files.h"
 #include "xtext.h"
+#include "gtkutil.h"
 
 GtkAccelGroup *accel_group = NULL;
 
@@ -257,7 +258,7 @@ void error_dialog (char *title, char *msg)
 
     gtk_widget_set_can_default(okbutton, TRUE);
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbutton, 
+    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 
 						TRUE, TRUE, 0);
 
 
@@ -265,4 +266,14 @@ void error_dialog (char *title, char *msg)
 
     gtk_widget_show_all (dialog);
 	g_free(message);
+}
+
+GtkWidget *
+gtkhx_dialog_action_area (GtkDialog *dialog)
+{
+	GtkWidget *area;
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	area = gtk_dialog_get_action_area (dialog);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+	return area;
 }

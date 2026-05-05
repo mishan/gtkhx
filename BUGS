@@ -1,8 +1,5 @@
 High priority:
 
-- Connecting with icons.rsrc present no longer crashes, but user list icons still do not appear. Warning below:
-
-(gtkhx:61404): GdkPixbuf-CRITICAL **: 16:26:49.949: gdk_pixbuf_calculate_rowstride: assertion 'width > 0' failed
 
 Low priority:
 

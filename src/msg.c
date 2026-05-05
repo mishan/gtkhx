@@ -386,7 +386,7 @@ void broadcastmsg(char *text)
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
     gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), scroll, TRUE, TRUE , 0);
-	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
+	gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
     gtk_widget_grab_default (okbtn);
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
