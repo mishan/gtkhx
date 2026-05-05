@@ -1,3 +1,10 @@
+0.9.5 (WIP)
+-----
+- Tons of fixes, esp for modern systems / 64-bit architectures
+- GTK+ 1.2 -> GTK+ 4.x + libadwaita
+- Totally revamped Settings window
+- XDG-compliant config (~/.hx/ -> ~/.config/gtkhx/ and ~/.gtkhxrc -> ~/.config/gtkhx/gtkhxrc)
+
 0.9.4
 -----
 -Tracker list is searched as it comes in (thanks Mark Schreiber!)
