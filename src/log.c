@@ -49,32 +49,19 @@ static struct log *loglist = NULL;
 struct log *create_log(char *name)
 {
 	struct log *log = malloc(sizeof(struct log));
-	char *home = getenv("HOME");
-	char *path1 = g_strdup_printf("%s/.hx", home);
-	char *path2 = g_strdup_printf("%s/.hx/logs/", home);
-	DIR *dir;
+	/* Phase 5: logs live under $CONFIG/logs/. Drop the legacy
+	 * ~/.hx/logs/ path entirely — the rest of this TU is wrapped in
+	 * an #if 0 (logging is the TODO Features 'Log chat history /
+	 * server' bullet, never finished), so there's no on-disk legacy
+	 * to preserve. */
+	char *path = g_build_filename (gtkhx_config_dir (), "logs", NULL);
 
-	log->filename = g_strdup_printf("%s/%s.log", path2, name);
-	dir = opendir(path1);
-	if(!dir) {
-		mkdir(path1, S_IRUSR | S_IWUSR | S_IXUSR);
-		mkdir(path2, S_IRUSR | S_IWUSR | S_IXUSR);
-	}
-	else {
-		closedir(dir);
-		dir = opendir(path2);
-		if(!dir) {
-			mkdir(path2, S_IRUSR | S_IWUSR | S_IXUSR);
-		}
-		else {
-			closedir(dir);
-		}
-	}
-	g_free(path1);
-	g_free(path2);
-	
+	log->filename = g_strdup_printf ("%s/%s.log", path, name);
+	g_mkdir_with_parents (path, S_IRUSR | S_IWUSR | S_IXUSR);
+	g_free (path);
+
 	log->fd = open(log->filename, O_WRONLY|O_APPEND|O_CREAT, S_IRUSR | S_IWUSR);
-	
+
 	log->next = NULL;
 	log->prev = loglist;
 	if(loglist) loglist->next = log;
