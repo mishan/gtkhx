@@ -183,14 +183,17 @@ make_pixmap_button (const char *resource_name,
 
 void create_toolbar_window (session *sess)
 {
-	GApplication *app = g_application_get_default ();
-	GtkWidget *header, *toolbar_view;
-	GtkWidget *hbox;
+	GApplication *app = gtkhx_get_application ();
+	GtkWidget *header;
+	GtkWidget *hbox, *vbox;
 
 	/* Phase 5: register the hamburger-menu actions on the application
-	 * the first time the toolbar is built. Idempotent: GActionMap
-	 * silently overwrites duplicates with a critical warning, so we
-	 * only add them once. */
+	 * the first time the toolbar is built. The g_application_get_default()
+	 * route was unreliable here — at this stage the AdwApplication is
+	 * built but g_application_get_default() returned NULL on first
+	 * activation in some configurations, leaving the menu items grey.
+	 * gtkhx_get_application() returns the actual gtkhx_app pointer so
+	 * the registration is deterministic. */
 	if (app && !g_action_map_lookup_action (G_ACTION_MAP (app), "settings")) {
 		g_action_map_add_action_entries (G_ACTION_MAP (app),
 		                                 app_actions,
@@ -298,12 +301,20 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_margin_bottom (status_bar, 4);
 
 	/* ------------- compose ------------- */
-	toolbar_view = adw_toolbar_view_new ();
-	adw_toolbar_view_add_top_bar    (ADW_TOOLBAR_VIEW (toolbar_view), header);
-	adw_toolbar_view_set_content    (ADW_TOOLBAR_VIEW (toolbar_view), hbox);
-	adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view), status_bar);
+	/* Phase 5: AdwToolbarView reserves a chunk of vertical space for
+	 * its content slot — for a single row of small icon buttons that
+	 * results in a window taller than the buttons need. Compose with
+	 * a plain vertical GtkBox instead. AdwHeaderBar still acts as the
+	 * window title bar inside an AdwApplicationWindow; it doesn't
+	 * require AdwToolbarView wrapping. The window stays
+	 * non-resizable, so its size collapses to the natural height of
+	 * the box (header + button row + status label). */
+	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append (GTK_BOX (vbox), header);
+	gtk_box_append (GTK_BOX (vbox), hbox);
+	gtk_box_append (GTK_BOX (vbox), status_bar);
 	adw_application_window_set_content (ADW_APPLICATION_WINDOW (toolbar_window),
-	                                    toolbar_view);
+	                                    vbox);
 
 	/* Initial sensitivity: pre-connection, only Connect + the global
 	 * menu items are usable. setbtns() flips the rest on at login. */

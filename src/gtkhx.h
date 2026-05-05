@@ -35,6 +35,15 @@ extern void gtkhx_refresh_userlist_css (PangoFontDescription *fd);
  * spawned from a context without a natural parent widget. */
 extern GtkWindow *gtkhx_active_window (void);
 
+/* Returns the AdwApplication singleton as a plain GApplication, or
+ * NULL during very early startup before loop() constructs it.
+ * Callers that need to register GActions or hand the application
+ * pointer to a constructor should use this rather than
+ * g_application_get_default() — get_default() relies on a
+ * thread-local that's set during GApplication's constructor and
+ * isn't a guaranteed contract for our callers' timing assumptions. */
+extern GApplication *gtkhx_get_application (void);
+
 /* Returns the per-user config directory, creating it if needed.
  * Resolution: $GTKHX_PATH > $XDG_CONFIG_HOME/gtkhx > $HOME/.config/gtkhx.
  * String is owned by the function; do not free. Cached after the

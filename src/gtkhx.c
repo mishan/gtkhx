@@ -305,6 +305,12 @@ gtkhx_active_window (void)
 	return gtk_application_get_active_window (GTK_APPLICATION (gtkhx_app));
 }
 
+GApplication *
+gtkhx_get_application (void)
+{
+	return G_APPLICATION (gtkhx_app);
+}
+
 /* Phase 5 settings management:
  *
  * Resolve the per-user config root, in priority order:
