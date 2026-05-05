@@ -125,9 +125,9 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static const GActionEntry app_actions[] = {
-	{"settings", on_action_settings, NULL, NULL, NULL, {0, 0, 0}},
-	{"about",    on_action_about,    NULL, NULL, NULL, {0, 0, 0}},
-	{"quit",     on_action_quit,     NULL, NULL, NULL, {0, 0, 0}},
+	{ .name = "settings", .activate = on_action_settings },
+	{ .name = "about",    .activate = on_action_about    },
+	{ .name = "quit",     .activate = on_action_quit     },
 };
 
 /* Phase 5: build the GtkMenuButton + GMenuModel that hangs off the
@@ -187,19 +187,18 @@ void create_toolbar_window (session *sess)
 	GtkWidget *header;
 	GtkWidget *hbox, *vbox;
 
-	/* Phase 5: register the hamburger-menu actions on the application
-	 * the first time the toolbar is built. The g_application_get_default()
-	 * route was unreliable here — at this stage the AdwApplication is
-	 * built but g_application_get_default() returned NULL on first
-	 * activation in some configurations, leaving the menu items grey.
-	 * gtkhx_get_application() returns the actual gtkhx_app pointer so
-	 * the registration is deterministic. */
-	if (app && !g_action_map_lookup_action (G_ACTION_MAP (app), "settings")) {
-		g_action_map_add_action_entries (G_ACTION_MAP (app),
-		                                 app_actions,
-		                                 G_N_ELEMENTS (app_actions),
-		                                 sess);
-	}
+	/* Phase 5: register the hamburger-menu actions on the application.
+	 * Always register unconditionally — the previous "lookup first"
+	 * guard was masking a real failure (the items came up greyed in
+	 * the menu, so something on the lookup-or-add path wasn't doing
+	 * what we expected). g_action_map_add_action_entries with
+	 * duplicates emits a g_critical, which we'd rather see than a
+	 * silent skip. */
+	g_assert (app != NULL);
+	g_action_map_add_action_entries (G_ACTION_MAP (app),
+	                                 app_actions,
+	                                 G_N_ELEMENTS (app_actions),
+	                                 sess);
 
 	/* Phase 5: AdwApplicationWindow gives us the proper "headerless"
 	 * window where the AdwHeaderBar serves as the title bar. The
@@ -209,6 +208,22 @@ void create_toolbar_window (session *sess)
 	toolbar_window = adw_application_window_new (GTK_APPLICATION (app));
 	gtk_window_set_title (GTK_WINDOW (toolbar_window), "GtkHx");
 	gtk_window_set_resizable (GTK_WINDOW (toolbar_window), FALSE);
+	/* Phase 5: AdwApplicationWindow's default natural-size computation
+	 * leaves visible empty space below our content for reasons not
+	 * yet diagnosed. Pin the window to a size that matches the
+	 * natural content height (header ~46px + button row ~46px +
+	 * status label ~22px ≈ 110px). non-resizable means GTK clamps
+	 * up to the actual minimum if our estimate is too small. */
+	gtk_window_set_default_size (GTK_WINDOW (toolbar_window), 480, 110);
+
+	/* Phase 5: belt-and-suspenders for the "app." action prefix —
+	 * GtkApplicationWindow auto-attaches the application's action
+	 * group under "app", but pinning it explicitly removes any doubt
+	 * about widget-tree resolution from the AdwHeaderBar's hamburger
+	 * popover. Idempotent: a second insert under the same name
+	 * replaces the first. */
+	gtk_widget_insert_action_group (GTK_WIDGET (toolbar_window), "app",
+	                                G_ACTION_GROUP (app));
 
 	/* ------------- header bar (top) ------------- */
 	header = adw_header_bar_new ();
