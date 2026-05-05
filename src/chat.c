@@ -935,7 +935,7 @@ static void chat_close (GtkWidget *widget, gpointer data)
 
 	gtkhx_widget_remove_child(gtk_widget_get_parent(hbox), hbox);
 	gtkhx_widget_set_child(wind_tmp, hbox);
-	gtk_widget_realize(gchat->output);
+	/* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 	gchat->input = 0;
 	gchat->subject = 0;
 
@@ -991,7 +991,12 @@ void create_chat(session *sess)
 
 	wind_tmp = gtk_window_new();
 	gtkhx_widget_set_child(wind_tmp, chat_hbox);
-	gtk_widget_realize(text);
+	/* Phase 4.5: dropped explicit gtk_widget_realize(text). Forcing
+	 * realize before the toplevel maps was a GTK 1.2/2 idiom; under
+	 * GTK 4 widgets are windowless and realize automatically once
+	 * their root widget is shown. The early-realize call here was
+	 * the trigger for a gtk_css_node_insert_after critical at
+	 * startup. */
 
 	gchat->chat_history = history_new();
 	gchat->cid = 0;
@@ -1078,7 +1083,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 
 	gtkhx_widget_set_child(outputframe, chat_hbox);
-	gtk_widget_realize(gchat->output);
+	/* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
