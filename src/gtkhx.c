@@ -662,19 +662,44 @@ void init_icons (void)
 	}
 
 	/* Phase 5: build the list of icon resource files from auto-discovery
-	 * locations only. The legacy ICONS pref (a comma-separated list of
-	 * .rsrc paths) was retired with the path-pref cleanup — drop a
-	 * file into $CONFIG/icons/ instead. Sources, in priority order:
-	 *   1. $CONFIG/icons/                — per-user drop-in icon packs
-	 *   2. $PREFIX/share/gtkhx/icons/    — distro-shipped packs
-	 * Both directories are scanned for *.rsrc files. */
+	 * locations. The legacy ICONS pref (a comma-separated list of .rsrc
+	 * paths) was retired with the path-pref cleanup — drop a file into
+	 * $CONFIG/icons/ instead. Sources, in priority order:
+	 *   1. $CONFIG/icons/                            — per-user drop-ins
+	 *   2. $XDG_DATA_HOME/gtkhx/icons/               — Flatpak / app-style
+	 *   3. each $XDG_DATA_DIRS/gtkhx/icons/          — distro-shipped
+	 *      (covers /usr/share, /usr/local/share, snap mounts, etc.)
+	 *   4. $PREFIX/share/gtkhx/icons/                — build-time fixed path
+	 *   5. $PREFIX/share/gtkhx/                      — legacy top-level
+	 *      (autotools-era installs put icons.rsrc directly here)
+	 *
+	 * collect_rsrc_files de-dupes by absolute path string, so the same
+	 * file showing up in two of these (e.g. PREFIX matches an XDG dir)
+	 * doesn't load twice. */
 	paths = g_ptr_array_new ();
 
 	user_dir = g_build_filename (gtkhx_config_dir (), "icons", NULL);
 	collect_rsrc_files (paths, user_dir);
 	g_free (user_dir);
 
+	{
+		char *p = g_build_filename (g_get_user_data_dir (),
+		                            "gtkhx", "icons", NULL);
+		collect_rsrc_files (paths, p);
+		g_free (p);
+	}
+
+	{
+		const char * const *dirs = g_get_system_data_dirs ();
+		for (; dirs && *dirs; dirs++) {
+			char *p = g_build_filename (*dirs, "gtkhx", "icons", NULL);
+			collect_rsrc_files (paths, p);
+			g_free (p);
+		}
+	}
+
 	collect_rsrc_files (paths, PREFIX "/share/gtkhx/icons");
+	collect_rsrc_files (paths, PREFIX "/share/gtkhx");
 
 	ifn->files = g_malloc (paths->len * sizeof (char *));
 	ifn->cicns = g_malloc (paths->len * sizeof (macres_file *));

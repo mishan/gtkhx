@@ -117,6 +117,16 @@ install_data(
   install_dir : get_option('datadir') / 'gtkhx' / 'sounds',
 )
 
+# Phase 5: the legacy autotools build dropped icons.rsrc at the top of
+# datadir/gtkhx/. Auto-discovery in init_icons() scans datadir/gtkhx/icons/
+# now, so install the resource into the new directory. Pre-existing
+# installs at the legacy top-level location also still work because
+# init_icons() scans datadir/gtkhx/ as a fallback.
+install_data(
+  files('icons.rsrc'),
+  install_dir : get_option('datadir') / 'gtkhx' / 'icons',
+)
+
 install_man('gtkhx.1')
 
 # -----------------------------------------------------------------------------
