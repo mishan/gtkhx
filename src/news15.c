@@ -192,20 +192,27 @@ void hx_news15_mkdir(struct htlc_conn *htlc, char *path)
 	g_free(hldir);
 }
 
-static void newsf_clicked(GtkWidget *widget, GdkEventButton *event)
+/* Phase 4.5: button-press-event is gone in GTK 4. Folder-list
+ * single/double-click handling lives on a GtkGestureClick controller
+ * now. n_press == 2 gates the descend-into-folder action. */
+static void newsf_pressed (GtkGestureClick *gesture, int n_press,
+                           double x, double y, gpointer data)
 {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
 	struct gnews_folder *gfnews;
 	int row, col;
+	(void) data;
 
 	gfnews = gfnews_with_hlist(widget);
 	if(!gfnews)
 		return;
 	gtk_hlist_get_selection_info(GTK_HLIST(widget),
-								 event->x, event->y, &row, &col);
+								 (int) x, (int) y, &row, &col);
 
 	if(gfnews->listing)
 		return;
-	if(event->type == GDK_2BUTTON_PRESS) {
+	if(n_press == 2) {
 		struct folder_item *item = gtk_hlist_get_row_data(GTK_HLIST(widget), 
 														  gfnews->row);
 		if(item) {
@@ -466,49 +473,18 @@ static void gfnews_up_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }
 
-static GtkTargetEntry news15_drag[] =
-{{"hlist", GTK_TARGET_SAME_APP, 0}};
-
-static void news15_drag_send(GtkWidget *source, GdkDragContext *context,
-							 GtkSelectionData *selection, guint targetType,
-							 guint eventTime)
-{
-	/* We are the knights who say "Nee!" */
-	gtk_selection_data_set(selection, gtk_selection_data_get_target(selection), 0, NULL, 0);
-}
-
-static void news15_drag_receive(GtkWidget *target, GdkDragContext *context,
-								int x, int y, GtkSelectionData *selection,
-								guint targetType, guint time, gpointer data)
-{
-	GtkWidget *source = gtk_drag_get_source_widget(context);
-	struct gnews_folder *gfnews_target, *gfnews_source;
-	struct folder_item *item = NULL;
-	char pathf[4096], patht[4096];
-	
-	return;
-	
-	gfnews_source = gfnews_with_hlist(source);
-	item = gtk_hlist_get_row_data(GTK_HLIST(source), gfnews_source->row);
-	if(!item) {
-		return;
-	}
-	
-	gfnews_target = gfnews_with_hlist(target);
-
-	/* XXX: this doesn't actually do anything */
-	if(strcmp(gfnews_source->path, gfnews_target->path)) {
-		g_snprintf(pathf, sizeof(pathf), "%s/%s", gfnews_source->path, item->name);
-		g_snprintf(patht, sizeof(patht), "%s/", gfnews_target->path);
-		
-/*		
-	hx_news15_move(&the_session.htlc, pathf, patht);
-		
-hx_news15_fldr_list(&the_session.htlc, gfnews_target);
-hx_news15_fldr_list(&the_session.htlc, gfnews_source); 
-*/
-	}
-}
+/* Phase 4.8: news15 had a drag-and-drop scaffold (drag_data_get +
+ * drag_data_received with a GTK_TARGET_SAME_APP "hlist" target) that
+ * never actually moved anything — drag_send was a no-op send and
+ * drag_receive returned at its first statement. The XXX comment block
+ * inside it was the never-implemented hx_news15_move dispatch.
+ *
+ * GtkTargetEntry, GdkDragContext, GtkSelectionData, GTK_TARGET_SAME_APP,
+ * gtk_drag_source_set / gtk_drag_dest_set are all gone in GTK 4 (the
+ * replacement is GtkDragSource / GtkDropTarget controllers). Rather
+ * than port the dead code, drop it. If multi-folder rearrangement
+ * comes back as a feature, it's a clean GtkDragSource + GtkDropTarget
+ * implementation under GTK 4. */
 
 
 struct gnews_folder *create_gfnews_window(char *path)
@@ -571,18 +547,20 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_hlist_set_shadow_type(GTK_HLIST(news_list), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(news_list), 0, 
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(news_list, "button_press_event", 
-					   G_CALLBACK(newsf_clicked), 0);
-
-	g_signal_connect(news_list, "drag_data_get",
-					   G_CALLBACK(news15_drag_send), 0);
-	gtk_drag_source_set(news_list, GDK_BUTTON1_MASK, news15_drag, 1,
-						GDK_ACTION_MOVE);
-
-	g_signal_connect(news_list, "drag_data_received",
-					   G_CALLBACK(news15_drag_receive), 0);
-	gtk_drag_dest_set(news_list, GTK_DEST_DEFAULT_ALL, news15_drag, 1,
-					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
+	{
+		/* Phase 4.5: button-press-event is gone — the gesture controller
+		 * dispatches single-click row tracking and double-click
+		 * descent through newsf_pressed. */
+		GtkGesture *click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+		                               GDK_BUTTON_PRIMARY);
+		g_signal_connect (click, "pressed",
+		                  G_CALLBACK (newsf_pressed), NULL);
+		gtk_widget_add_controller (news_list,
+		                           GTK_EVENT_CONTROLLER (click));
+	}
+	/* Phase 4.8: dead drag-and-drop scaffold removed. See note above
+	 * the news15_drag* removal. */
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);

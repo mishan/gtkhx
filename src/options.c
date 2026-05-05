@@ -1399,11 +1399,16 @@ static int listsorthelper (GtkHList *hlist,
 	return 0;
 }
 
+/* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
+ * "select_row" with a NULL GdkEvent so the param is just GdkEvent *
+ * now. The handler only reads `row'. */
 static void
-icon_row_selected (GtkWidget *widget, gint row, gint column, GdkEventButton *event, gpointer data)
+icon_row_selected (GtkWidget *widget, gint row, gint column,
+                   GdkEvent *event, gpointer data)
 {
 	guint16 icon;
 	char buf[16];
+	(void) column; (void) event; (void) data;
 
 	if(!GTK_HLIST(widget)->rows) return;
 	icon = GPOINTER_TO_INT(gtk_hlist_get_row_data(GTK_HLIST(widget), row));

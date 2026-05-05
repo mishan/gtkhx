@@ -250,11 +250,18 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 	gtk_widget_show(file_dialog);
 }
 
-static void file_clicked (GtkWidget *widget, GdkEventButton *event)
+/* Phase 4.5: button-press-event is gone in GTK 4. Files-list single
+ * and double click handling lives on a GtkGestureClick controller
+ * now; n_press == 2 gates open-folder / get-file, single-click just
+ * remembers the row for the toolbar buttons. */
+static void file_pressed (GtkGestureClick *gesture, int n_press,
+                          double x, double y, gpointer data)
 {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
 	struct gfile_list *gfl;
-	int row;
-	int column;
+	int row, column;
+	(void) data;
 
 	gfl = gfl_with_hlist(widget);
 
@@ -262,9 +269,9 @@ static void file_clicked (GtkWidget *widget, GdkEventButton *event)
 		return;
 
 	gtk_hlist_get_selection_info(GTK_HLIST(widget),
-				     event->x, event->y, &row, &column);
+				     (int) x, (int) y, &row, &column);
 
-	if (event->type == GDK_2BUTTON_PRESS) {
+	if (n_press == 2) {
 		struct hl_filelist_hdr *fh;
 
 		fh = gtk_hlist_get_row_data(GTK_HLIST(widget), gfl->row);
@@ -483,51 +490,21 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
-static GtkTargetEntry files_drag[] =
-{{"hlist", GTK_TARGET_SAME_APP, 0}};
-
-static void files_drag_send(GtkWidget *source, GdkDragContext *context,
-							GtkSelectionData *selection, guint targetType,
-							guint eventTime)
-{
-	/* We are the knights who say "Nee!" */
-	gtk_selection_data_set(selection, gtk_selection_data_get_target(selection), 0, NULL, 0);
-}
-
-static void files_drag_receive(GtkWidget *target, GdkDragContext *context,
-							   int x, int y, GtkSelectionData *selection,
-							   guint targetType, guint time, gpointer data)
-{
-	GtkWidget *source = gtk_drag_get_source_widget(context);
-	struct gfile_list *gfl_source, *gfl_target;
-	struct hl_filelist_hdr *fh;
-	char pathf[4096], patht[4096];
-
-	gfl_source = gfl_with_hlist(source);
-	fh = gtk_hlist_get_row_data(GTK_HLIST(source), gfl_source->row);
-	if(!fh) {
-		return;
-	}
-
-	gfl_target = gfl_with_hlist(target);
-
-	if(strcmp(gfl_source->cfl->path, gfl_target->cfl->path)) {
-		g_snprintf(pathf, sizeof(pathf), "%s/%.*s", gfl_source->cfl->path,
-				(int)fh->fnlen, fh->fname);
-		g_snprintf(patht, sizeof(patht), "%s/", gfl_target->cfl->path);
-
-		hx_file_move(&the_session.htlc, pathf, patht);
-/*		hx_file_link(&the_session.htlc, pathf, patht);
-
-		XXX: Pop up a dialog and prompt the user whether he wants to move 
-		or link the file or cancel */
-
-		hx_list_dir(&the_session.htlc, gfl_target->cfl->path, 1, 0, 
-		gfl_target); 
-		hx_list_dir(&the_session.htlc, gfl_source->cfl->path, 1, 0, 
-		gfl_source); 
-	}
-}
+/* Phase 4.8: drag-and-drop between file lists
+ *
+ * GTK 3 GtkTargetEntry / gtk_drag_source_set / gtk_drag_dest_set with
+ * the "drag_data_get" + "drag_data_received" signals are gone in
+ * GTK 4 — replaced by GtkDragSource / GtkDropTarget event controllers
+ * with a GdkContentProvider on the source side. The original code
+ * here moved a file from one window's path to another's via
+ * hx_file_move on drop.
+ *
+ * The full GTK 4 port (intra-app drag of an opaque struct pointer
+ * via a custom GType, async drop callback) is a clean self-contained
+ * piece of work but doesn't gate first-boot. Stripped for now;
+ * tracked as a Phase 4.8 follow-up. The right-click context menu's
+ * "Move" item (if it returns) covers the same UX for the moment.
+ */
 
 static struct gfile_list *create_files_window (char *path)
 {
@@ -561,18 +538,21 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_hlist_set_shadow_type(GTK_HLIST(files_list), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(files_list), 0,
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(files_list, "button_press_event",
-					   G_CALLBACK(file_clicked), 0);
-
-	g_signal_connect(files_list, "drag_data_get",
-					   G_CALLBACK(files_drag_send), 0);
-	gtk_drag_source_set(files_list, GDK_BUTTON1_MASK, files_drag, 1,
-						GDK_ACTION_MOVE);
-
-	g_signal_connect(files_list, "drag_data_received",
-					   G_CALLBACK(files_drag_receive), 0);
-	gtk_drag_dest_set(files_list, GTK_DEST_DEFAULT_ALL, files_drag, 1,
-					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
+	{
+		/* Phase 4.5: button-press-event is gone — gesture controller
+		 * dispatches single-click row tracking and double-click
+		 * open-folder / get-file via file_pressed. */
+		GtkGesture *click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+		                               GDK_BUTTON_PRIMARY);
+		g_signal_connect (click, "pressed",
+		                  G_CALLBACK (file_pressed), NULL);
+		gtk_widget_add_controller (files_list,
+		                           GTK_EVENT_CONTROLLER (click));
+	}
+	/* Phase 4.8: drag-and-drop between file lists is stripped pending
+	 * the GtkDragSource / GtkDropTarget port. See note above the
+	 * removed files_drag_* helpers. */
 
 	files_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);

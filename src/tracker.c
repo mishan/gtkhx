@@ -340,24 +340,39 @@ tracker_server_create (struct in_addr addr, guint16 port, guint16 nusers,
 static int tracker_storow;
 static int tracker_stocol;
 
+/* Phase 4.5: button-press-event is gone in GTK 4. The tracker list's
+ * single/double-click handling lives on a GtkGestureClick controller
+ * now; the "pressed" signal fires with widget-local x/y, and n_press
+ * gates the double-click connect. */
 static void
-tracker_click (GtkWidget *widget, GdkEventButton *event)
+tracker_pressed (GtkGestureClick *gesture, int n_press,
+                 double x, double y, gpointer data)
 {
-	gtk_hlist_get_selection_info(GTK_HLIST(widget), event->x, event->y,
-				     &tracker_storow, &tracker_stocol);
-	if (event->type == GDK_2BUTTON_PRESS) {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
+	(void) data;
+
+	gtk_hlist_get_selection_info (GTK_HLIST (widget), (int) x, (int) y,
+	                              &tracker_storow, &tracker_stocol);
+
+	if (n_press == 2) {
 		struct tracker_server *server;
 		char buf[HOSTLEN];
 
-		server = gtk_hlist_get_row_data(GTK_HLIST(tracker_list), tracker_storow);
-		inet_ntop(AF_INET, &server->addr, buf, HOSTLEN);
+		server = gtk_hlist_get_row_data (GTK_HLIST (tracker_list),
+		                                 tracker_storow);
+		if (!server)
+			return;
+		inet_ntop (AF_INET, &server->addr, buf, HOSTLEN);
 #ifdef CONFIG_COMPRESS
-		memset(the_session.htlc.compressalg, 0, sizeof(the_session.htlc.compressalg));
+		memset (the_session.htlc.compressalg, 0,
+		        sizeof (the_session.htlc.compressalg));
 #endif
 #ifdef CONFIG_CIPHER
-		memset(the_session.htlc.cipheralg, 0, sizeof(the_session.htlc.cipheralg));
+		memset (the_session.htlc.cipheralg, 0,
+		        sizeof (the_session.htlc.cipheralg));
 #endif
-		hx_connect(&the_session.htlc, buf, server->port, "", "", 0);
+		hx_connect (&the_session.htlc, buf, server->port, "", "", 0);
 	}
 }
 
@@ -420,7 +435,17 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 96);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 40);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 1024);
-	g_signal_connect(tracker_list, "button_press_event", G_CALLBACK(tracker_click), 0);
+	{
+		/* Phase 4.5: button-press-event is gone — install a gesture
+		 * controller for the double-click-to-connect path. */
+		GtkGesture *click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+		                               GDK_BUTTON_PRIMARY);
+		g_signal_connect (click, "pressed",
+		                  G_CALLBACK (tracker_pressed), NULL);
+		gtk_widget_add_controller (tracker_list,
+		                           GTK_EVENT_CONTROLLER (click));
+	}
 
 
 	searchentry = gtk_entry_new();
