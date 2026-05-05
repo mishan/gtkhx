@@ -1383,15 +1383,30 @@ static void settings_page_sound (AdwPreferencesPage *page)
 	adw_preferences_page_add (page, cmd);
 }
 
-static void settings_page_font (AdwPreferencesPage *page)
+/* Phase 5 follow-up: the old standalone Font page only ever applied
+ * to the xtext-based chat / private-message widgets, so it folds into
+ * the Chat page as a Font group. */
+static void settings_page_chat (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *grp;
-	GtkWidget *entry_row;
-	GtkWidget *btn;
+	AdwPreferencesGroup *output_grp, *font_grp;
+	GtkWidget *entry_row, *btn;
 
-	grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-	adw_preferences_group_set_title (grp, _("Font"));
-	adw_preferences_group_set_description (grp,
+	output_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (output_grp, _("Chat output"));
+	adw_preferences_group_add (output_grp,
+		pref_switch_row ("TIMESTAMP", _("Show timestamps"), NULL));
+	adw_preferences_group_add (output_grp,
+		pref_switch_row ("WORDWRAP", _("Word wrap"), NULL));
+	adw_preferences_group_add (output_grp,
+		pref_spin_row   ("XBUF_MAX",
+		                 _("Scrollback lines"),
+		                 _("0 keeps unlimited scrollback"),
+		                 0, 0xffff, 1));
+	adw_preferences_page_add (page, output_grp);
+
+	font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (font_grp, _("Font"));
+	adw_preferences_group_set_description (font_grp,
 		_("Pango font description, e.g. \"Monospace 11\""));
 
 	entry_row = pref_entry_row ("FONT", _("Font"));
@@ -1404,25 +1419,8 @@ static void settings_page_font (AdwPreferencesPage *page)
 	                  G_CALLBACK (create_fontsel), entry_row);
 	adw_entry_row_add_suffix (ADW_ENTRY_ROW (entry_row), btn);
 
-	adw_preferences_group_add (grp, entry_row);
-	adw_preferences_page_add (page, grp);
-}
-
-static void settings_page_xtext (AdwPreferencesPage *page)
-{
-	AdwPreferencesGroup *grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-
-	adw_preferences_group_set_title (grp, _("Chat output"));
-	adw_preferences_group_add (grp, 
-		pref_switch_row ("TIMESTAMP", _("Show timestamps"), NULL));
-	adw_preferences_group_add (grp, 
-		pref_switch_row ("WORDWRAP", _("Word wrap"), NULL));
-	adw_preferences_group_add (grp, 
-		pref_spin_row   ("XBUF_MAX",
-		                 _("Scrollback lines"),
-		                 _("0 keeps unlimited scrollback"),
-		                 0, 0xffff, 1));
-	adw_preferences_page_add (page, grp);
+	adw_preferences_group_add (font_grp, entry_row);
+	adw_preferences_page_add (page, font_grp);
 }
 
 static void settings_page_path (AdwPreferencesPage *page)
@@ -1488,16 +1486,24 @@ icon_row_selected (GtkWidget *widget, gint row, gint column,
 /* Icon page is also custom (commit E follow-up). The Icon ID becomes a
  * proper AdwSpinRow; the icon picker stays as the legacy GtkHList
  * inside an embedded row beneath. */
-static void settings_page_icon (AdwPreferencesPage *page)
+/* Phase 5 follow-up: the old standalone General page (just NICK) folds
+ * into the Identity page since they're both "who am I to the server"
+ * settings. Display name first, then icon ID, then the resource picker. */
+static void settings_page_identity (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *id_grp, *picker_grp;
+	AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
 	GtkWidget *picker_row, *vbox, *scroll, *icon_list;
 
 	iv = g_malloc (sizeof (struct icon_viewer));
 
+	name_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (name_grp, _("Display name"));
+	adw_preferences_group_add (name_grp, pref_entry_row ("NICK", _("Your name")));
+	adw_preferences_page_add (page, name_grp);
+
 	id_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (id_grp, _("Identity icon"));
-	adw_preferences_group_add (id_grp, 
+	adw_preferences_group_add (id_grp,
 		pref_spin_row ("ICON",
 		               _("Icon ID"),
 		               _("Numeric ID from the loaded icon resource files"),
@@ -1580,15 +1586,6 @@ static void settings_page_misc (AdwPreferencesPage *page)
 	adw_preferences_page_add (page, behavior);
 }
 
-static void settings_page_general (AdwPreferencesPage *page)
-{
-	AdwPreferencesGroup *grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-
-	adw_preferences_group_set_title (grp, _("Identity"));
-	adw_preferences_group_add (grp, pref_entry_row ("NICK", _("Your name")));
-	adw_preferences_page_add (page, grp);
-}
-
 /* Phase 5: appearance page hosts the THEME combo (system / light / dark).
  * Lives at the top of the Settings sidebar because it's the most visually
  * impactful pref. */
@@ -1644,13 +1641,13 @@ void create_options_window (GtkWidget *widget, gpointer data)
 
 	win = ADW_PREFERENCES_WINDOW (adw_preferences_window_new ());
 	gtk_window_set_title (GTK_WINDOW (win), _("GtkHx Preferences"));
-	/* Default size needs to be wide enough that the 11-page top
+	/* Default size needs to be wide enough that the 9-page top
 	 * AdwViewSwitcher fits horizontally. If it doesn't, libadwaita
 	 * collapses to an AdwViewSwitcherBar at the bottom — adaptive
-	 * behavior, but unexpected for a desktop Settings window. 960px
+	 * behavior, but unexpected for a desktop Settings window. 840px
 	 * keeps the row of icons on top on standard displays; the user
-	 * can always shrink the window manually if they want the bar. */
-	gtk_window_set_default_size (GTK_WINDOW (win), 960, 640);
+	 * can still shrink the window manually if they want the bar. */
+	gtk_window_set_default_size (GTK_WINDOW (win), 840, 640);
 	{
 		GtkWindow *parent = gtkhx_active_window ();
 		if (parent)
@@ -1665,14 +1662,10 @@ void create_options_window (GtkWidget *widget, gpointer data)
 
 	settings_add_page (win, _("Appearance"), "preferences-color-symbolic",
 	                   settings_page_appearance);
-	settings_add_page (win, _("General"),    "preferences-system-symbolic",
-	                   settings_page_general);
 	settings_add_page (win, _("Identity"),   "user-info-symbolic",
-	                   settings_page_icon);
+	                   settings_page_identity);
 	settings_add_page (win, _("Chat"),       "user-available-symbolic",
-	                   settings_page_xtext);
-	settings_add_page (win, _("Font"),       "preferences-desktop-font-symbolic",
-	                   settings_page_font);
+	                   settings_page_chat);
 	settings_add_page (win, _("Sound"),      "audio-speakers-symbolic",
 	                   settings_page_sound);
 	settings_add_page (win, _("Files"),      "folder-symbolic",
