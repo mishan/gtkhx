@@ -1463,8 +1463,8 @@ static void
 icon_row_selected (GtkWidget *widget, gint row, gint column,
                    GdkEvent *event, gpointer data)
 {
+	struct cfgvar *v;
 	guint16 icon;
-	char buf[16];
 	(void) column; (void) event; (void) data;
 
 	if(!GTK_HLIST(widget)->rows) return;
@@ -1472,8 +1472,17 @@ icon_row_selected (GtkWidget *widget, gint row, gint column,
 	if(!icon) {
 		return;
 	}
-	g_snprintf(buf, sizeof(buf), "%u", icon);
-	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("ICON")).widget), buf);
+	/* Phase 5: ICON's widget is now an AdwSpinRow, not a GtkEntry. The
+	 * old GTK_EDITABLE / gtk_editable_set_text path technically resolved
+	 * (AdwSpinRow implements GtkEditable) but didn't update the spin
+	 * value — and walked the editable vtable on a freshly-constructed
+	 * row, which is the most plausible cause of the open-Settings
+	 * segfault we couldn't reproduce. Use the proper API: setting the
+	 * value fires notify::value, which routes through on_spin_row_value
+	 * to write back to gtkhx_prefs.num_icons + prefs_write. */
+	v = cfgvar_for_name ("ICON");
+	if (v && v->widget && ADW_IS_SPIN_ROW (v->widget))
+		adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
 }
 
 /* Icon page is also custom (commit E follow-up). The Icon ID becomes a
@@ -1635,7 +1644,13 @@ void create_options_window (GtkWidget *widget, gpointer data)
 
 	win = ADW_PREFERENCES_WINDOW (adw_preferences_window_new ());
 	gtk_window_set_title (GTK_WINDOW (win), _("GtkHx Preferences"));
-	gtk_window_set_default_size (GTK_WINDOW (win), 720, 560);
+	/* Default size needs to be wide enough that the 11-page top
+	 * AdwViewSwitcher fits horizontally. If it doesn't, libadwaita
+	 * collapses to an AdwViewSwitcherBar at the bottom — adaptive
+	 * behavior, but unexpected for a desktop Settings window. 960px
+	 * keeps the row of icons on top on standard displays; the user
+	 * can always shrink the window manually if they want the bar. */
+	gtk_window_set_default_size (GTK_WINDOW (win), 960, 640);
 	{
 		GtkWindow *parent = gtkhx_active_window ();
 		if (parent)
