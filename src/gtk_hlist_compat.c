@@ -639,14 +639,26 @@ gtk_hlist_get_selection_info (GtkHList *hlist, gint x, gint y,
 {
 	GtkTreePath       *path = NULL;
 	GtkTreeViewColumn *col  = NULL;
+	gint               bx   = 0;
+	gint               by   = 0;
 
 	if (row)    *row    = -1;
 	if (column) *column = -1;
 
 	g_return_val_if_fail (GTK_IS_HLIST (hlist), 0);
 
+	/* Callers (user_pressed, file_pressed, tracker_pressed, …) hand us
+	 * widget-relative coordinates straight from the GtkGestureClick. But
+	 * gtk_tree_view_get_path_at_pos wants bin-window coordinates — i.e.
+	 * relative to the area below the column header, not the widget. With
+	 * headers visible (gtk_hlist_new_with_titles flips them on) the two
+	 * differ by the header height, which is enough to push every click
+	 * one row too far down. Convert before looking up. */
+	gtk_tree_view_convert_widget_to_bin_window_coords (GTK_TREE_VIEW (hlist),
+	                                                   x, y, &bx, &by);
+
 	if (!gtk_tree_view_get_path_at_pos (GTK_TREE_VIEW (hlist),
-	                                    x, y, &path, &col, NULL, NULL))
+	                                    bx, by, &path, &col, NULL, NULL))
 		return 0;
 
 	if (path) {
