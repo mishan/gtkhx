@@ -230,6 +230,10 @@ rgb_pack (const RGBColor *c)
 	     | ((guint32)(c->blue  >> 8) <<  0);
 }
 
+/* Defined further down — declared here so cicn_to_pixbuf can wrap its
+ * output through the halo before returning. */
+GdkPixbuf *cicn_add_halo (GdkPixbuf *src);
+
 /*
  * Build a 256-entry palette table for an icon: take the canonical Mac
  * palette as the default, then overlay any entries the per-icon
@@ -376,7 +380,100 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 		}
 	}
 
+	{
+		GdkPixbuf *halo = cicn_add_halo (pb);
+		if (halo) {
+			g_object_unref (pb);
+			pb = halo;
+		}
+	}
+
 	return pb;
+}
+
+/*
+ * Add a 1px halo around the icon's visible silhouette.
+ *
+ * Mac classic cicn icons are designed against the platinum / white
+ * Mac OS chat window background; rendered against a dark GTK theme
+ * row, the icon body is fine but its edge has nothing separating it
+ * from the dark background — light strokes inside the icon get
+ * swallowed visually. We expand the pixbuf by 1px on each side and
+ * paint a semi-transparent medium grey on each transparent pixel
+ * adjacent to an opaque one. The halo blends with the row BG via
+ * cairo, so on a light theme it reads as a faint outline and on a
+ * dark theme it reads as a definition-improving rim, without
+ * touching the icon's own pixels.
+ *
+ * Returns a newly-allocated pixbuf the caller owns; falls back to
+ * NULL on allocation failure (caller continues using the un-haloed
+ * source pixbuf).
+ */
+GdkPixbuf *
+cicn_add_halo (GdkPixbuf *src)
+{
+	int sw, sh, dw, dh;
+	int rowstride;
+	guchar *pixels;
+	guchar *alpha_snap;
+	GdkPixbuf *dst;
+	int x, y;
+
+	if (!src || !gdk_pixbuf_get_has_alpha (src))
+		return NULL;
+	if (gdk_pixbuf_get_n_channels (src) != 4)
+		return NULL;
+
+	sw = gdk_pixbuf_get_width  (src);
+	sh = gdk_pixbuf_get_height (src);
+	dw = sw + 2;
+	dh = sh + 2;
+
+	dst = gdk_pixbuf_new (GDK_COLORSPACE_RGB, TRUE, 8, dw, dh);
+	if (!dst)
+		return NULL;
+
+	gdk_pixbuf_fill (dst, 0x00000000);
+	gdk_pixbuf_copy_area (src, 0, 0, sw, sh, dst, 1, 1);
+
+	rowstride = gdk_pixbuf_get_rowstride (dst);
+	pixels    = gdk_pixbuf_get_pixels    (dst);
+
+	/* Snapshot the alpha plane so the halo we paint as we walk
+	 * doesn't itself feed back into the next pixel's neighbour
+	 * check. */
+	alpha_snap = g_malloc ((gsize) dw * (gsize) dh);
+	for (y = 0; y < dh; y++)
+		for (x = 0; x < dw; x++)
+			alpha_snap[y * dw + x] = pixels[y * rowstride + x * 4 + 3];
+
+	for (y = 0; y < dh; y++) {
+		for (x = 0; x < dw; x++) {
+			guchar *p;
+			gboolean has_neighbour;
+
+			if (alpha_snap[y * dw + x] != 0)
+				continue;	/* already part of the icon */
+
+			has_neighbour = FALSE;
+			if (x > 0    && alpha_snap[y * dw + (x - 1)] != 0) has_neighbour = TRUE;
+			if (x < dw-1 && alpha_snap[y * dw + (x + 1)] != 0) has_neighbour = TRUE;
+			if (y > 0    && alpha_snap[(y - 1) * dw + x] != 0) has_neighbour = TRUE;
+			if (y < dh-1 && alpha_snap[(y + 1) * dw + x] != 0) has_neighbour = TRUE;
+
+			if (!has_neighbour)
+				continue;
+
+			p = pixels + y * rowstride + x * 4;
+			p[0] = 0x80;	/* medium grey reads on both light and dark themes */
+			p[1] = 0x80;
+			p[2] = 0x80;
+			p[3] = 0xa0;	/* ~63% — definition without a heavy border */
+		}
+	}
+
+	g_free (alpha_snap);
+	return dst;
 }
 
 /*

@@ -121,4 +121,5 @@ struct ifn;
 void load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
                 GdkPixbuf **pixbuf_out, GdkPixbuf **mask_unused);
 extern GdkPixbuf *cicn_to_pixbuf (void *cicn_rsrc, unsigned int len);
+extern GdkPixbuf *cicn_add_halo  (GdkPixbuf *src);
 
