@@ -1279,8 +1279,12 @@ void output_news_thread(struct news_post *post)
 	}
 	
 	timet = date_to_unix(&item->date);
-		
-	gtk_editable_delete_text(GTK_EDITABLE(gcnews->news_text), 0, -1);
+
+	/* news_text is a GtkTextView, not a GtkEditable — gtk_editable_*
+	 * functions don't apply and trip a Gtk-CRITICAL on the cast. The
+	 * gtk_text_buffer_set_text call below already replaces the buffer's
+	 * entire content, so the legacy "clear then write" pattern from the
+	 * GtkText era collapses to just "write". */
 
 	if (item) {
 		char *date = g_strdup_printf("Date: %s", ctime(&timet));
