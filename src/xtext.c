@@ -234,13 +234,17 @@ static gboolean gtk_xtext_search_init (xtext_buffer *buf, const gchar *text, gtk
 static char * gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent, int *ret_off, int *ret_len, GSList **slp);
 static gboolean gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
                                      gdouble dx, gdouble dy, gpointer user_data);
-static void gtk_xtext_pressed_cb  (GtkGestureClick *gesture, gint n_press,
-                                   gdouble dx, gdouble dy, gpointer user_data);
-static void gtk_xtext_released_cb (GtkGestureClick *gesture, gint n_press,
-                                   gdouble dx, gdouble dy, gpointer user_data);
-static void gtk_xtext_motion_cb   (GtkEventControllerMotion *controller,
-                                   gdouble dx, gdouble dy, gpointer user_data);
-static void gtk_xtext_leave_cb    (GtkEventControllerMotion *controller, gpointer user_data);
+static void gtk_xtext_pressed_cb     (GtkGestureClick *gesture, gint n_press,
+                                      gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_drag_begin_cb  (GtkGestureDrag *drag, gdouble x, gdouble y,
+                                      gpointer user_data);
+static void gtk_xtext_drag_update_cb (GtkGestureDrag *drag, gdouble offset_x,
+                                      gdouble offset_y, gpointer user_data);
+static void gtk_xtext_drag_end_cb    (GtkGestureDrag *drag, gdouble offset_x,
+                                      gdouble offset_y, gpointer user_data);
+static void gtk_xtext_motion_cb      (GtkEventControllerMotion *controller,
+                                      gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_leave_cb       (GtkEventControllerMotion *controller, gpointer user_data);
 
 /* Phase 3.10: palette colors are GdkRGBA, which is what
  * gdk_cairo_set_source_rgba consumes — no per-draw conversion. */
@@ -602,21 +606,35 @@ gtk_xtext_init (GtkXText * xtext)
 	{
 		GtkEventController *scroll;
 		GtkGesture *click;
+		GtkGesture *drag;
 		GtkEventController *motion;
 
 		scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
 		g_signal_connect (scroll, "scroll", G_CALLBACK (gtk_xtext_scroll_cb), xtext);
 		gtk_widget_add_controller (GTK_WIDGET (xtext), scroll);
 
-		/* button = 0 means "any button"; we dispatch by current_button in
-		 * the callback so primary / secondary / middle all flow through one
-		 * gesture and its single n_press counter (so double/triple-click
-		 * detection works for left-click selection). */
+		/* GtkGestureClick (button = 0, any) handles click-shaped events:
+		 * right/middle-click WORD_CLICK plus double/triple-click word/line
+		 * select. We don't connect "released" — the primary-button release
+		 * path runs through GtkGestureDrag::drag-end below, since
+		 * GtkGestureClick suppresses "released" once motion exceeds the
+		 * click threshold and that breaks drag-to-select. */
 		click = gtk_gesture_click_new ();
 		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
-		g_signal_connect (click, "pressed",  G_CALLBACK (gtk_xtext_pressed_cb),  xtext);
-		g_signal_connect (click, "released", G_CALLBACK (gtk_xtext_released_cb), xtext);
+		g_signal_connect (click, "pressed", G_CALLBACK (gtk_xtext_pressed_cb), xtext);
 		gtk_widget_add_controller (GTK_WIDGET (xtext), GTK_EVENT_CONTROLLER (click));
+
+		/* GtkGestureDrag drives the primary-button press/move/release
+		 * cycle: drag-begin sets up the selection start (or grabs the
+		 * separator bar), drag-update extends the selection, drag-end
+		 * cleans up + autocopies. Unlike GtkGestureClick, all three
+		 * fire unconditionally regardless of drag distance. */
+		drag = gtk_gesture_drag_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (drag), GDK_BUTTON_PRIMARY);
+		g_signal_connect (drag, "drag-begin",  G_CALLBACK (gtk_xtext_drag_begin_cb),  xtext);
+		g_signal_connect (drag, "drag-update", G_CALLBACK (gtk_xtext_drag_update_cb), xtext);
+		g_signal_connect (drag, "drag-end",    G_CALLBACK (gtk_xtext_drag_end_cb),    xtext);
+		gtk_widget_add_controller (GTK_WIDGET (xtext), GTK_EVENT_CONTROLLER (drag));
 
 		motion = gtk_event_controller_motion_new ();
 		g_signal_connect (motion, "motion", G_CALLBACK (gtk_xtext_motion_cb), xtext);
@@ -1932,57 +1950,20 @@ gtk_xtext_motion_cb (GtkEventControllerMotion *controller,
 {
 	GtkXText *xtext = user_data;
 	GtkWidget *widget = GTK_WIDGET (xtext);
-	GdkModifierType mask;
-	int redraw, tmp, x, y, offset, len, line_x;
+	int x, y, offset, len, line_x;
 	textentry *word_ent;
 	int word_type;
-	int alloc_w;
 
+	(void) controller;
 	x = (int) dx;
 	y = (int) dy;
-	mask = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (controller));
-	alloc_w = gtk_widget_get_width (widget);
 
-	if (xtext->moving_separator)
-	{
-		if (x < (3 * alloc_w) / 5 && x > 15)
-		{
-			tmp = xtext->buffer->indent;
-			xtext->buffer->indent = x;
-			gtk_xtext_fix_indent (xtext->buffer);
-			if (tmp != xtext->buffer->indent)
-			{
-				gtk_xtext_recalc_widths (xtext->buffer, FALSE);
-				if (xtext->buffer->scrollbar_down)
-					gtk_adjustment_set_value (xtext->adj, gtk_adjustment_get_upper(xtext->adj) -
-													  gtk_adjustment_get_page_size(xtext->adj));
-				if (!xtext->io_tag)
-					xtext->io_tag = g_timeout_add (REFRESH_TIMEOUT,
-																(GSourceFunc)
-																gtk_xtext_adjustment_timeout,
-																xtext);
-			}
-		}
+	/* While the user is dragging a selection or the separator bar,
+	 * GtkGestureDrag's drag-update handler owns the work — we'd just
+	 * double up if we tried to extend selection here too. Same for
+	 * cursor changes; the cursor stays "selecting" through the drag. */
+	if (xtext->button_down || xtext->moving_separator)
 		return;
-	}
-
-	if (xtext->button_down)
-	{
-		redraw = gtk_xtext_check_mark_stamp (xtext, mask);
-		xtext->select_end_x = x;
-		xtext->select_end_y = y;
-		gtk_xtext_selection_update (xtext, y, !redraw);
-
-		/* user has pressed or released SHIFT, must redraw entire selection */
-		if (redraw)
-		{
-			xtext->force_stamp = TRUE;
-			gtk_xtext_render_ents (xtext, xtext->buffer->last_ent_start,
-										  xtext->buffer->last_ent_end);
-			xtext->force_stamp = FALSE;
-		}
-		return;
-	}
 
 	if (xtext->separator && xtext->buffer->indent)
 	{
@@ -2110,90 +2091,19 @@ gtk_xtext_unselect (GtkXText *xtext)
 	xtext->buffer->last_ent_end = NULL;
 }
 
-static void
-gtk_xtext_released_cb (GtkGestureClick *gesture, gint n_press,
-                       gdouble dx, gdouble dy, gpointer user_data)
-{
-	GtkXText *xtext = user_data;
-	GtkWidget *widget = GTK_WIDGET (xtext);
-	unsigned char *word;
-	int old;
-	int alloc_w;
-	int x = (int) dx;
-	int y = (int) dy;
-	guint button;
-	GdkModifierType state;
-	GdkEvent *event;
-
-	(void) n_press;
-
-	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
-	state  = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
-	event  = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (gesture));
-
-	alloc_w = gtk_widget_get_width (widget);
-	if (xtext->moving_separator)
-	{
-		xtext->moving_separator = FALSE;
-		old = xtext->buffer->indent;
-		if (x < (4 * alloc_w) / 5 && x > 15)
-			xtext->buffer->indent = x;
-		gtk_xtext_fix_indent (xtext->buffer);
-		if (xtext->buffer->indent != old)
-		{
-			gtk_xtext_recalc_widths (xtext->buffer, FALSE);
-			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
-			gtk_xtext_render_page (xtext);
-		} else
-			gtk_xtext_draw_sep (xtext, -1);
-		return;
-	}
-
-	if (button == GDK_BUTTON_PRIMARY)
-	{
-		xtext->button_down = FALSE;
-		if (xtext->scroll_tag)
-		{
-			g_source_remove (xtext->scroll_tag);
-			xtext->scroll_tag = 0;
-		}
-
-		/* got a new selection? */
-		if (xtext->buffer->last_ent_start)
-		{
-			xtext->color_paste = FALSE;
-			if (state & STATE_CTRL || prefs.hex_text_autocopy_color)
-				xtext->color_paste = TRUE;
-			if (prefs.hex_text_autocopy_text)
-			{
-				gtk_xtext_set_clip_owner (widget);
-			}
-		}
-
-		if (xtext->word_select || xtext->line_select)
-		{
-			xtext->word_select = FALSE;
-			xtext->line_select = FALSE;
-			return;
-		}
-
-		if (xtext->select_start_x == x &&
-			 xtext->select_start_y == y &&
-			 xtext->buffer->last_ent_start)
-		{
-			gtk_xtext_unselect (xtext);
-			xtext->mark_stamp = FALSE;
-			return;
-		}
-
-		if (!gtk_xtext_is_selecting (xtext))
-		{
-			word = gtk_xtext_get_word (xtext, x, y, 0, 0, 0, 0);
-			g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
-								word ? word : NULL, event);
-		}
-	}
-}
+/* Phase 4.9 follow-up: GtkGestureClick is the wrong tool for the
+ * primary-button drag-to-select path. Once the pointer drifts past
+ * the click threshold, the gesture's update routine resets n_press
+ * to 0; gtk_gesture_click_end then refuses to emit "released"
+ * (it gates on n_press > 0). Result: button_down stuck true, hover
+ * motion keeps extending the selection, copy-on-release never runs.
+ *
+ * Fix: GtkGestureDrag drives the press/move/release cycle on the
+ * primary button. drag-begin / drag-update / drag-end fire
+ * unconditionally regardless of click recognition. GtkGestureClick
+ * still handles right/middle-click WORD_CLICK and double/triple-
+ * click word/line select via "pressed" — those are click-shaped,
+ * not drag-shaped, so the GtkGestureClick semantics are right. */
 
 static void
 gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
@@ -2203,7 +2113,7 @@ gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
 	GdkModifierType mask;
 	textentry *ent;
 	unsigned char *word;
-	int line_x, offset, len;
+	int offset, len;
 	int x = (int) dx;
 	int y = (int) dy;
 	guint button;
@@ -2214,8 +2124,7 @@ gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
 	event  = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (gesture));
 
 	/* right/middle click — emit WORD_CLICK so chat.c (or whoever)
-	 * can pop a context menu. The GtkGestureClick fires "pressed"
-	 * for every click; use button to distinguish. */
+	 * can pop a context menu. */
 	if (button == GDK_BUTTON_SECONDARY || button == GDK_BUTTON_MIDDLE)
 	{
 		word = gtk_xtext_get_word (xtext, x, y, 0, 0, 0, 0);
@@ -2226,6 +2135,10 @@ gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
 
 	if (button != GDK_BUTTON_PRIMARY)		  /* we only want left button */
 		return;
+
+	/* n_press == 1 is handled by the GtkGestureDrag — drag-begin sets
+	 * button_down + select_start. We only care about double/triple
+	 * click here. */
 
 	if (n_press == 2)	/* WORD select */
 	{
@@ -2258,24 +2171,170 @@ gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
 
 		return;
 	}
+}
 
-	/* check if it was a separator-bar click */
+static void
+gtk_xtext_drag_begin_cb (GtkGestureDrag *drag, gdouble x, gdouble y,
+                         gpointer user_data)
+{
+	GtkXText *xtext = user_data;
+	int ix = (int) x;
+	int iy = (int) y;
+	int line_x;
+
+	(void) drag;
+
+	/* check if the press landed on the separator bar */
 	if (xtext->separator && xtext->buffer->indent)
 	{
 		line_x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
-		if (line_x == x || line_x == x + 1 || line_x == x - 1)
+		if (line_x == ix || line_x == ix + 1 || line_x == ix - 1)
 		{
 			xtext->moving_separator = TRUE;
-			/* draw the separator line */
 			gtk_xtext_draw_sep (xtext, -1);
 			return;
 		}
 	}
 
+	/* normal drag-to-select start */
 	xtext->button_down = TRUE;
-	xtext->select_start_x = x;
-	xtext->select_start_y = y;
-	xtext->select_start_adj = gtk_adjustment_get_value(xtext->adj);
+	xtext->select_start_x = ix;
+	xtext->select_start_y = iy;
+	xtext->select_start_adj = gtk_adjustment_get_value (xtext->adj);
+}
+
+static void
+gtk_xtext_drag_update_cb (GtkGestureDrag *drag, gdouble offset_x,
+                          gdouble offset_y, gpointer user_data)
+{
+	GtkXText *xtext = user_data;
+	GtkWidget *widget = GTK_WIDGET (xtext);
+	GdkModifierType mask;
+	int redraw, tmp;
+	int x = xtext->select_start_x + (int) offset_x;
+	int y = xtext->select_start_y + (int) offset_y;
+	int alloc_w;
+
+	mask = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (drag));
+
+	if (xtext->moving_separator)
+	{
+		alloc_w = gtk_widget_get_width (widget);
+		if (x < (3 * alloc_w) / 5 && x > 15)
+		{
+			tmp = xtext->buffer->indent;
+			xtext->buffer->indent = x;
+			gtk_xtext_fix_indent (xtext->buffer);
+			if (tmp != xtext->buffer->indent)
+			{
+				gtk_xtext_recalc_widths (xtext->buffer, FALSE);
+				if (xtext->buffer->scrollbar_down)
+					gtk_adjustment_set_value (xtext->adj,
+						gtk_adjustment_get_upper (xtext->adj) -
+						gtk_adjustment_get_page_size (xtext->adj));
+				if (!xtext->io_tag)
+					xtext->io_tag = g_timeout_add (REFRESH_TIMEOUT,
+						(GSourceFunc) gtk_xtext_adjustment_timeout, xtext);
+			}
+		}
+		return;
+	}
+
+	if (!xtext->button_down)
+		return;
+
+	redraw = gtk_xtext_check_mark_stamp (xtext, mask);
+	xtext->select_end_x = x;
+	xtext->select_end_y = y;
+	gtk_xtext_selection_update (xtext, y, !redraw);
+
+	/* user has pressed or released SHIFT, must redraw entire selection */
+	if (redraw)
+	{
+		xtext->force_stamp = TRUE;
+		gtk_xtext_render_ents (xtext, xtext->buffer->last_ent_start,
+		                              xtext->buffer->last_ent_end);
+		xtext->force_stamp = FALSE;
+	}
+}
+
+static void
+gtk_xtext_drag_end_cb (GtkGestureDrag *drag, gdouble offset_x,
+                       gdouble offset_y, gpointer user_data)
+{
+	GtkXText *xtext = user_data;
+	GtkWidget *widget = GTK_WIDGET (xtext);
+	unsigned char *word;
+	int old;
+	int alloc_w;
+	int x = xtext->select_start_x + (int) offset_x;
+	int y = xtext->select_start_y + (int) offset_y;
+	GdkModifierType state;
+	GdkEvent *event;
+
+	state = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (drag));
+	event = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (drag));
+
+	alloc_w = gtk_widget_get_width (widget);
+	if (xtext->moving_separator)
+	{
+		xtext->moving_separator = FALSE;
+		old = xtext->buffer->indent;
+		if (x < (4 * alloc_w) / 5 && x > 15)
+			xtext->buffer->indent = x;
+		gtk_xtext_fix_indent (xtext->buffer);
+		if (xtext->buffer->indent != old)
+		{
+			gtk_xtext_recalc_widths (xtext->buffer, FALSE);
+			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
+			gtk_xtext_render_page (xtext);
+		} else
+			gtk_xtext_draw_sep (xtext, -1);
+		return;
+	}
+
+	xtext->button_down = FALSE;
+	if (xtext->scroll_tag)
+	{
+		g_source_remove (xtext->scroll_tag);
+		xtext->scroll_tag = 0;
+	}
+
+	/* got a new selection? */
+	if (xtext->buffer->last_ent_start)
+	{
+		xtext->color_paste = FALSE;
+		if (state & STATE_CTRL || prefs.hex_text_autocopy_color)
+			xtext->color_paste = TRUE;
+		if (prefs.hex_text_autocopy_text)
+		{
+			gtk_xtext_set_clip_owner (widget);
+		}
+	}
+
+	if (xtext->word_select || xtext->line_select)
+	{
+		xtext->word_select = FALSE;
+		xtext->line_select = FALSE;
+		return;
+	}
+
+	/* zero-distance drag (i.e. a plain click) → unselect / WORD_CLICK */
+	if (xtext->select_start_x == x &&
+	    xtext->select_start_y == y &&
+	    xtext->buffer->last_ent_start)
+	{
+		gtk_xtext_unselect (xtext);
+		xtext->mark_stamp = FALSE;
+		return;
+	}
+
+	if (!gtk_xtext_is_selecting (xtext))
+	{
+		word = gtk_xtext_get_word (xtext, x, y, 0, 0, 0, 0);
+		g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
+		                    word ? (gpointer) word : (gpointer) "", event);
+	}
 }
 
 static gboolean
