@@ -21,6 +21,7 @@
 #include <string.h>
 #include "hx.h"
 #include "about.h"
+#include "gtkutil.h"
 
 
 #ifdef HAVE_DCGETTEXT

@@ -44,6 +44,7 @@
 #include "sound.h"
 #include "files.h"
 #include "preview.h"
+#include "gtkutil.h"
 
 static struct hx_preview *hx_preview_list = NULL;
 

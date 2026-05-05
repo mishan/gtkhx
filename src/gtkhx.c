@@ -95,11 +95,14 @@ gdkrgba_to_css (const GdkRGBA *c, char *out, size_t outsz)
 static void
 ensure_provider_attached (GtkCssProvider *prov)
 {
-	GdkScreen *screen = gdk_screen_get_default ();
-	if (!screen)
+	/* Phase 4.4: GdkScreen / add_provider_for_screen are gone in GTK 4.
+	 * Attach to the default GdkDisplay instead — under Wayland there is
+	 * no per-screen partition anyway. */
+	GdkDisplay *display = gdk_display_get_default ();
+	if (!display)
 		return;
-	gtk_style_context_add_provider_for_screen (
-		screen, GTK_STYLE_PROVIDER (prov),
+	gtk_style_context_add_provider_for_display (
+		display, GTK_STYLE_PROVIDER (prov),
 		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
@@ -181,7 +184,6 @@ gtkhx_refresh_css (void)
 	gchar *fontprops;
 	char fg_buf[32], bg_buf[32];
 	gchar *css;
-	GError *err = NULL;
 
 	if (!gtkhx_css_provider) {
 		gtkhx_css_provider = gtk_css_provider_new ();
@@ -209,10 +211,11 @@ gtkhx_refresh_css (void)
 		fontprops, fg_buf, bg_buf, fg_buf,
 		fg_buf, bg_buf);
 
-	if (!gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1, &err)) {
-		g_warning ("gtkhx CSS load failed: %s", err ? err->message : "?");
-		g_clear_error (&err);
-	}
+	/* Phase 4.x: GTK 4's gtk_css_provider_load_from_data is void and no
+	 * longer takes a GError. Parse errors come via the `parsing-error`
+	 * signal — but for these hardcoded strings a parse failure is a
+	 * developer bug, not a runtime condition we need to log. */
+	gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1);
 
 	g_free (css);
 	g_free (fontprops);
@@ -223,7 +226,6 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 {
 	gchar *fontprops;
 	gchar *css;
-	GError *err = NULL;
 
 	if (!gtkhx_userlist_css_provider) {
 		gtkhx_userlist_css_provider = gtk_css_provider_new ();
@@ -233,12 +235,7 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	fontprops = pango_to_css_props (fd);
 	css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
 
-	if (!gtk_css_provider_load_from_data (gtkhx_userlist_css_provider,
-	                                      css, -1, &err)) {
-		g_warning ("gtkhx userlist CSS load failed: %s",
-		           err ? err->message : "?");
-		g_clear_error (&err);
-	}
+	gtk_css_provider_load_from_data (gtkhx_userlist_css_provider, css, -1);
 
 	g_free (css);
 	g_free (fontprops);
@@ -366,12 +363,11 @@ void hx_quit (void)
 
 	gtk_thread_exit();
 	/* Phase 3.6: g_application_quit() ends g_application_run() in loop().
-	 * Fall back to gtk_main_quit if hx_quit is somehow called before the
-	 * app is constructed (it shouldn't be, but the symmetry is cheap). */
+	 * Phase 4.x: gtk_main_quit() is gone in GTK 4 — there is no main-loop
+	 * fallback. If hx_quit fires before the GtkApplication is constructed
+	 * we just fall through to exit(). */
 	if (gtkhx_app)
 		g_application_quit (G_APPLICATION (gtkhx_app));
-	else
-		gtk_main_quit();
 	exit(0);
 }
 
@@ -688,8 +684,11 @@ static void init (int argc, char **argv)
 	/* Phase 3.3: gdk_threads_init() is gone in GTK 4 and deprecated since
 	 * GTK 3.6. The worker threads still need a serializing lock against
 	 * the main thread; gtkthreads.c now provides one via GRecMutex +
-	 * a custom GMainContext poll function (see gtkthreads.c). */
-	gtk_init(&argc, &argv);
+	 * a custom GMainContext poll function (see gtkthreads.c).
+	 * Phase 4.x: gtk_init() in GTK 4 takes no arguments — argc/argv
+	 * parsing is the application's job (we don't use any GTK-owned flags
+	 * anyway). */
+	gtk_init();
 	fe_init();
 }
 

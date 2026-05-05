@@ -883,7 +883,10 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 		                  G_CALLBACK (bookmark_combo_changed), NULL);
 	}
 
-	hbuttonbox1 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+	/* Phase 4.x: GtkButtonBox is gone. A horizontal GtkBox with the
+	 * usual button-row spacing is the documented replacement;
+	 * gtkhx_widget_set_child below dispatches to gtk_box_append for us. */
+	hbuttonbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 	gtkhx_box_pack(vbox1, hbuttonbox1, 1, 1, 0);
 
 	save_button = gtk_button_new_with_label(_("Save..."));

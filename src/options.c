@@ -1160,8 +1160,10 @@ static void settings_page_sound(GtkWidget *vbox)
 					 GTK_FILL, GTK_FILL, 0, 0);
 
 	cfgvars[SND_CMD_IDX].widget = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[SND_CMD_IDX].widget),
-					   gtkhx_prefs.snd_cmd);
+	/* Phase 4.x: GtkEntry.text is now on the GtkEditable interface.
+	 * gtk_entry_set_text/get_text were dropped — use the editable APIs. */
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SND_CMD_IDX].widget),
+						   gtkhx_prefs.snd_cmd);
 	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[SND_CMD_IDX].widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
@@ -1367,8 +1369,8 @@ static void settings_page_path(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPATH_IDX].widget, 1, 2, 1, 2,
 					 (GTK_EXPAND|GTK_FILL),
 					 0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[SOUNDPATH_IDX].widget),
-					   gtkhx_prefs.sound_path);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SOUNDPATH_IDX].widget),
+						   gtkhx_prefs.sound_path);
 
 	lbl = gtk_label_new(_("Download Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
@@ -1380,8 +1382,8 @@ static void settings_page_path(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[DOWNLOAD_IDX].widget, 1, 2, 2,
 					 3, (GTK_EXPAND|GTK_FILL),
 					 0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[DOWNLOAD_IDX].widget),
-					   gtkhx_prefs.download_path);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[DOWNLOAD_IDX].widget),
+						   gtkhx_prefs.download_path);
 
 	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
@@ -1487,8 +1489,8 @@ static void settings_page_misc(GtkWidget *vbox)
 					 GTK_FILL, 0, 0, 0);
 
 	cfgvars[AUTOREPLYMSG_IDX].widget = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[AUTOREPLYMSG_IDX].widget),
-					   gtkhx_prefs.auto_reply_msg);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[AUTOREPLYMSG_IDX].widget),
+						   gtkhx_prefs.auto_reply_msg);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYMSG_IDX].widget, 1, 2, 0,
 					 1, 0, 0, 0, 0);
 
@@ -1683,15 +1685,20 @@ void create_options_window(GtkWidget *widget, gpointer data)
 
 	options_window = dialog;
 
-	gtk_container_set_border_width
-		(GTK_CONTAINER (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), 2);
-	gtk_box_set_homogeneous (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))),
-									 FALSE);
+	{
+		GtkWidget *aa = gtkhx_dialog_action_area(GTK_DIALOG(dialog));
+		/* Phase 4.x: gtk_container_set_border_width is gone. Use the
+		 * widget margin properties instead. */
+		gtk_widget_set_margin_start (aa, 2);
+		gtk_widget_set_margin_end (aa, 2);
+		gtk_widget_set_margin_top (aa, 2);
+		gtk_widget_set_margin_bottom (aa, 2);
+		gtk_box_set_homogeneous (GTK_BOX (aa), FALSE);
+	}
 
-	hbbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
-	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
-	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
-	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
+	/* Phase 4.x: GtkButtonBox is gone. A horizontal GtkBox with a small
+	 * spacing is the documented replacement. */
+	hbbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
 	gtkhx_box_pack_end(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), hbbox, FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));

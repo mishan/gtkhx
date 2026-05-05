@@ -385,7 +385,7 @@ static void
 gtklist_row_move(GtkListBox *box, GtkWidget *row, int new_index)
 {
 	g_object_ref(row);
-	gtkhx_widget_remove_child(box, row);
+	gtkhx_widget_remove_child(GTK_WIDGET(box), row);
 	gtk_list_box_insert(box, row, new_index);
 	g_object_unref(row);
 	gtk_list_box_select_row(box, GTK_LIST_BOX_ROW(row));
