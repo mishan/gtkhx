@@ -48,15 +48,14 @@
  * instances bound to GtkKeyvalTrigger triggers and GtkCallbackAction
  * actions.
  *
- * The original behavior: every window the user opens gets Ctrl+K
- * (connect dialog) and Ctrl+Q (quit) wired to the toolbar's
- * connect_btn and quit_btn "clicked" signal. We preserve that by
- * installing a fresh per-window controller whose callbacks emit
- * "clicked" on those buttons directly. (A future Phase 5 cleanup
- * could move these to GtkApplication-level GActions with
- * gtk_application_set_accels_for_action — that's the modern idiom
- * but requires also reworking the toolbar buttons to fire actions
- * instead of "clicked", which is more invasive.) */
+ * Behavior: every window the user opens gets Ctrl+K (connect dialog)
+ * and Ctrl+Q (quit) wired up. Connect still goes through the
+ * AdwHeaderBar's connect_btn (so visual feedback works). Quit fires
+ * the app.quit GAction directly, since after the Phase 5 toolbar
+ * refactor Quit lives in the hamburger menu and there is no quit_btn
+ * to "click". The GAction approach is the modern path for the rest
+ * of these too — see gtk_application_set_accels_for_action — but
+ * Connect's button-driven flow is harmless for now. */
 
 static gboolean
 keyaccel_connect_cb (GtkWidget *w, GVariant *args, gpointer data)
@@ -70,9 +69,11 @@ keyaccel_connect_cb (GtkWidget *w, GVariant *args, gpointer data)
 static gboolean
 keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
+	GApplication *app = g_application_get_default ();
 	(void) w; (void) args; (void) data;
-	if (quit_btn)
-		g_signal_emit_by_name (quit_btn, "clicked");
+	if (app)
+		g_action_group_activate_action (G_ACTION_GROUP (app),
+		                                "quit", NULL);
 	return TRUE;
 }
 
@@ -138,45 +139,40 @@ void setbtns(session *sess, int stat)
 	}
 }
 
-/* Phase 4.13: GtkStatusbar is deprecated in GTK 4.10. The connection
- * status indicator is a single-line label that needs neither the
- * statusbar's stack-of-messages model nor its frame chrome. A Phase 5
- * follow-up replaces it with a plain GtkLabel; until then suppress
- * deprecations on the status-bar machinery. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+/* Phase 5: status_bar is now a GtkLabel (was GtkStatusbar — deprecated
+ * in GTK 4.10). The toolbar always replaced the message wholesale, so
+ * the message-stack model the GtkStatusbar provided was overhead that
+ * earned us nothing. A single gtk_label_set_text per state change
+ * does what we want. */
 void set_status_bar(int status)
 {
-	if(!status_bar) {
+	const char *fixed = NULL;
+	char *fmt = NULL;
+
+	if (!status_bar) {
 		return;
 	}
 
-	/* XXX: switch statement here */
-	if(status == -1) {
-		char *str;
+	switch (status) {
+	case -1:
+		fmt = g_strdup_printf ("%s %s", _("Connecting to"), server_addr);
+		break;
+	case 0:
+		fixed = _("Not Connected");
+		break;
+	case 1:
+		fmt = g_strdup_printf ("%s %s", _("Connected to"), server_addr);
+		break;
+	case 2:
+		fmt = g_strdup_printf ("%s %s", _("Logged in to"), server_addr);
+		break;
+	default:
+		return;
+	}
 
-		gtk_statusbar_remove(GTK_STATUSBAR(status_bar), context_status, status_msg);
-		str = g_strdup_printf("%s %s", _("Connecting to"), server_addr);
-		status_msg = gtk_statusbar_push(GTK_STATUSBAR(status_bar), context_status, str);
-		g_free(str);
-	}
-	else if(!status) {
-		gtk_statusbar_remove(GTK_STATUSBAR(status_bar), context_status, status_msg);
-		status_msg = gtk_statusbar_push(GTK_STATUSBAR(status_bar), context_status, _("Not Connected"));
-	}
-	else if(status == 1) {
-		char *str = g_strdup_printf("%s %s", _("Connected to"), server_addr);
-		gtk_statusbar_remove(GTK_STATUSBAR(status_bar), context_status, status_msg);
-		status_msg = gtk_statusbar_push(GTK_STATUSBAR(status_bar), context_status, str);
-		g_free(str);
-	}
-	else if(status == 2) {
-		char *str = g_strdup_printf("%s %s", _("Logged in to"), server_addr);
-		gtk_statusbar_remove(GTK_STATUSBAR(status_bar), context_status, status_msg);
-		status_msg = gtk_statusbar_push(GTK_STATUSBAR(status_bar), context_status, str);
-		g_free(str);
-	}
+	gtk_label_set_text (GTK_LABEL (status_bar), fmt ? fmt : fixed);
+	g_free (fmt);
 }
-G_GNUC_END_IGNORE_DEPRECATIONS
 
 void changetitlesconnected(session *sess)
 {
