@@ -290,51 +290,56 @@ static GtkApplication *gtkhx_app;
 
 /*
  * Phase 3.x: capture each toplevel's final position into prefs before
- * prefs_write. The configure-event handlers stopped recording position
- * because the first configure after gtk_widget_show_all reports the
- * compositor-chosen position rather than what gtk_window_move asked
- * for — saving on every configure clobbered prefs to 0,0 immediately
- * on Wayland, breaking position restoration on the next launch.
+ * prefs_write.
  *
- * Capturing here at quit time gives the values the user actually
- * lived with. Sizes are still tracked on every configure (the
- * steady-state value is correct and the user-driven changes need
- * no special handling).
+ * Wayland caveat: the protocol deliberately does not expose absolute
+ * toplevel positions to clients, and gtk_window_move is a documented
+ * no-op there too. gtk_window_get_position therefore returns (0, 0)
+ * on every Wayland session, so saving it would overwrite legitimately-
+ * useful X11-era prefs with garbage. Detect Wayland by GdkDisplay
+ * type name and skip the position save entirely on that backend —
+ * size persistence still works because gtk_window_get_size returns
+ * the real current allocation on both backends.
+ *
+ * On X11 / Quartz the read is honest, so the captured values match
+ * what the user actually lived with by quit time.
  */
+static gboolean
+gtkhx_backend_supports_position (void)
+{
+	GdkDisplay *display = gdk_display_get_default ();
+	const char *name;
+
+	if (!display)
+		return TRUE;
+	name = G_OBJECT_TYPE_NAME (display);
+	if (name && g_str_has_prefix (name, "GdkWayland"))
+		return FALSE;
+	return TRUE;
+}
+
+static void
+save_pos (GtkWidget *w, Window_Geo *geo)
+{
+	int x, y;
+	if (!w || !gtk_widget_get_realized (w))
+		return;
+	gtk_window_get_position (GTK_WINDOW (w), &x, &y);
+	geo->xpos = x;
+	geo->ypos = y;
+}
+
 static void
 gtkhx_save_window_positions (void)
 {
-	int x, y;
+	if (!gtkhx_backend_supports_position ())
+		return;
 
-	if (toolbar_window && gtk_widget_get_realized (toolbar_window)) {
-		gtk_window_get_position (GTK_WINDOW (toolbar_window), &x, &y);
-		gtkhx_prefs.geo.tool.xpos = x;
-		gtkhx_prefs.geo.tool.ypos = y;
-	}
-	if (the_session.chat_window
-	    && gtk_widget_get_realized (the_session.chat_window)) {
-		gtk_window_get_position (GTK_WINDOW (the_session.chat_window), &x, &y);
-		gtkhx_prefs.geo.chat.xpos = x;
-		gtkhx_prefs.geo.chat.ypos = y;
-	}
-	if (the_session.users_window
-	    && gtk_widget_get_realized (the_session.users_window)) {
-		gtk_window_get_position (GTK_WINDOW (the_session.users_window), &x, &y);
-		gtkhx_prefs.geo.users.xpos = x;
-		gtkhx_prefs.geo.users.ypos = y;
-	}
-	if (the_session.tasks_window
-	    && gtk_widget_get_realized (the_session.tasks_window)) {
-		gtk_window_get_position (GTK_WINDOW (the_session.tasks_window), &x, &y);
-		gtkhx_prefs.geo.tasks.xpos = x;
-		gtkhx_prefs.geo.tasks.ypos = y;
-	}
-	if (the_session.news_window
-	    && gtk_widget_get_realized (the_session.news_window)) {
-		gtk_window_get_position (GTK_WINDOW (the_session.news_window), &x, &y);
-		gtkhx_prefs.geo.news.xpos = x;
-		gtkhx_prefs.geo.news.ypos = y;
-	}
+	save_pos (toolbar_window,            &gtkhx_prefs.geo.tool);
+	save_pos (the_session.chat_window,   &gtkhx_prefs.geo.chat);
+	save_pos (the_session.users_window,  &gtkhx_prefs.geo.users);
+	save_pos (the_session.tasks_window,  &gtkhx_prefs.geo.tasks);
+	save_pos (the_session.news_window,   &gtkhx_prefs.geo.news);
 }
 
 void hx_quit (void)

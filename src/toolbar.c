@@ -303,7 +303,16 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_sensitive(news15_btn, FALSE);
 
 	g_signal_connect(toolbar_window, "configure_event", G_CALLBACK(tool_move), 0);
-	g_signal_connect(toolbar_window, "delete_event", G_CALLBACK(quit_btn), 0);
+	/* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
+	 * a GtkWidget pointer, not a function. Calling a widget address as
+	 * code did nothing useful (and tripped CFI on hardened builds), so
+	 * closing the toolbar via the WM's X button skipped hx_quit and
+	 * with it the prefs_write + position-save pass. The app exited
+	 * because the last GtkApplication window was gone, but no prefs
+	 * survived. Wire this to close_toolbar_window, which calls
+	 * hx_quit() properly. */
+	g_signal_connect(toolbar_window, "delete_event",
+	                 G_CALLBACK(close_toolbar_window), 0);
 
 	gtk_window_move(GTK_WINDOW(toolbar_window), gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
 

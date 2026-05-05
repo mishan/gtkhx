@@ -4,11 +4,7 @@ High priority:
 
 (gtkhx:61404): GdkPixbuf-CRITICAL **: 16:26:49.949: gdk_pixbuf_calculate_rowstride: assertion 'width > 0' failed
 
-- Tracker works now, but warnings are present:
-
-(gtkhx:59766): Pango-WARNING **: 16:24:31.313: Invalid UTF-8 string passed to pango_layout_set_text()
-
-- Window position restoration on startup no longer works
+- Window position saving is not working (but size saving is working)
 
 Low priority:
 
