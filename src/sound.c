@@ -36,9 +36,12 @@ struct hx_sounds hxsnd =
 
 /* Phase 5: resolve a sound file by name across the layered sound
  * search path:
- *   1. $CONFIG/sounds/<name>          — per-user drop-ins
- *   2. gtkhx_prefs.sound_path/<name>  — legacy single-path config
- *   3. $PREFIX/share/gtkhx/sounds/    — distro / system default
+ *   1. $CONFIG/sounds/<name>        — per-user drop-ins
+ *   2. $PREFIX/share/gtkhx/sounds/  — distro / system default
+ *
+ * The legacy SOUNDPATH cfgvar (an explicit single-directory fallback)
+ * was retired with the path-pref cleanup. Drop sound files into
+ * $CONFIG/sounds/ instead.
  *
  * Returns the first existing path, or NULL if none was found.
  * Caller g_frees. */
@@ -51,13 +54,6 @@ sound_resolve (const char *name)
 	if (g_file_test (candidate, G_FILE_TEST_EXISTS))
 		return candidate;
 	g_free (candidate);
-
-	if (gtkhx_prefs.sound_path && *gtkhx_prefs.sound_path) {
-		candidate = g_build_filename (gtkhx_prefs.sound_path, name, NULL);
-		if (g_file_test (candidate, G_FILE_TEST_EXISTS))
-			return candidate;
-		g_free (candidate);
-	}
 
 	candidate = g_build_filename (PREFIX "/share/gtkhx/sounds", name, NULL);
 	if (g_file_test (candidate, G_FILE_TEST_EXISTS))

@@ -68,19 +68,15 @@ GtkWidget *tracker_list = NULL;
 
 struct gtkhx_prefs gtkhx_prefs =
 {
-	0,
-	0,
+	0,			/* num_tracker */
 	"system",	/* theme: "system" / "light" / "dark" */
-	PREFIX"/share/gtkhx/sounds",
-	"",
-	"fixed",
-	".",
-	NULL,
-	"hltracker.com",
-	NULL,
-	PREFIX "/share/gtkhx/icons.rsrc",
-	"play",
-	500,
+	"",			/* auto_reply_msg */
+	"fixed",	/* font */
+	".",		/* download_path */
+	NULL,		/* tracker (char **) */
+	"hltracker.com",	/* tracker_str */
+	"play",		/* snd_cmd */
+	500,		/* xbuf_max */
 	{
 		{412, 312, 10, 434, 0, 1},
 		{412, 384, 10, 50, 0, 1},
@@ -386,7 +382,11 @@ struct cfgvar
 	 changed_filesamewin, NULL},
 	{"FONT", {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
 	{"ICON", {&the_session.htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
-	{"ICONS", {&gtkhx_prefs.icon_str}, STRING, 0, parse_icons, NULL},
+	/* Phase 5: ICONS used to be a comma-separated list of *.rsrc files.
+	 * Auto-discovery in $CONFIG/icons/ + $PREFIX/share/gtkhx/icons/
+	 * replaces it; the cfgvar is gone so a stray ICONS=... line in a
+	 * legacy gtkhxrc is silently dropped by prefs_allocate's bsearch
+	 * miss path, and prefs_write never re-emits one. */
 #if 0 /* XXX */
 	{"LOGGING", {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
 #endif 
@@ -416,7 +416,10 @@ struct cfgvar
 	{"SOUNDMSG", {&hxsnd.msg}, BOOLEAN, 0, NULL, NULL},
 	{"SOUNDNEWS", {&hxsnd.news}, BOOLEAN, 0, NULL, NULL},
 	{"SOUNDPART", {&hxsnd.part}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDPATH", {&gtkhx_prefs.sound_path}, STRING, 0, NULL, NULL},
+	/* Phase 5: SOUNDPATH used to set a fallback directory for sound
+	 * files. Auto-discovery in $CONFIG/sounds/ + $PREFIX/share/gtkhx/sounds/
+	 * replaces it; the cfgvar is gone so legacy gtkhxrc lines are
+	 * silently dropped at parse time. */
 	{"SOUNDSON", {&hxsnd.on}, BOOLEAN, 0, NULL, NULL},
 	{"TASKXPOS", {&gtkhx_prefs.geo.tasks.xpos}, INT, 0, NULL, NULL},
 	{"TASKXSIZE", {&gtkhx_prefs.geo.tasks.xsize}, INT, 0, NULL, NULL},
@@ -757,7 +760,6 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	changed_case(NULL);
 
 	parse_tracker(NULL);
-	parse_icons(NULL);
 
 	start_time = time(NULL);
 }
@@ -1064,33 +1066,6 @@ void prefs_write(void)
 
 	g_key_file_free (kf);
 	g_free (path);
-}
-
-static void parse_icons (session *sess)
-{
-	char *com, *icons = gtkhx_prefs.icon_str;
-	int i;
-
-	if(gtkhx_prefs.icon) {
-		for (i = 0; i != gtkhx_prefs.num_icons; ++i) {
-			g_free(gtkhx_prefs.icon[i]);
-		}
-		g_free(gtkhx_prefs.icon);
-		gtkhx_prefs.icon = NULL;
-	}
-	gtkhx_prefs.num_icons = 0;
-	if(!*icons || !*(icons+1)) return;
-	for (i=0; ; ++i) {
-		if (!(com = strchr (icons, ','))) com = &icons[strlen(icons)];
-		gtkhx_prefs.num_icons++;
-		gtkhx_prefs.icon = g_realloc(gtkhx_prefs.icon, (i+1)*sizeof(char*));
-		gtkhx_prefs.icon[i] = g_malloc(com-icons+1);
-		memcpy(gtkhx_prefs.icon[i], icons, com-icons);
-		gtkhx_prefs.icon[i][com-icons] = '\0';
-		if (!*com) break;
-		icons = com+1;
-	}
-	init_icons();
 }
 
 static void parse_tracker (session *sess)
@@ -1475,7 +1450,7 @@ icon_row_selected (GtkWidget *widget, gint row, gint column,
 	 * row, which is the most plausible cause of the open-Settings
 	 * segfault we couldn't reproduce. Use the proper API: setting the
 	 * value fires notify::value, which routes through on_spin_row_value
-	 * to write back to gtkhx_prefs.num_icons + prefs_write. */
+	 * to write back to the_session.htlc.icon + prefs_write. */
 	v = cfgvar_for_name ("ICON");
 	if (v && v->widget && ADW_IS_SPIN_ROW (v->widget))
 		adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);

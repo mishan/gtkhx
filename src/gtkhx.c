@@ -321,7 +321,7 @@ gtkhx_active_window (void)
  *   $CONFIG/gtkhxrc      — main prefs file
  *   $CONFIG/bookmarks/   — connect.c bookmarks (replaces ~/.hx/bookmarks)
  *   $CONFIG/logs/        — log.c (replaces ~/.hx/logs)
- *   $CONFIG/icons/*.rsrc — auto-discovered Mac classic icon resources
+ *   $CONFIG/icons/       — auto-discovered Mac classic icon resources (.rsrc)
  *   $CONFIG/sounds/      — user-supplied chat sound effects
  */
 const char *
@@ -599,8 +599,8 @@ char *colorstr (guint16 color)
 
 /* Phase 5: scan a directory for *.rsrc files and append each one to
  * a GPtrArray of full paths. Skips entries whose path is already in
- * the array (so a file in $CONFIG/icons doesn't get double-loaded
- * if it's also explicitly listed in gtkhx_prefs.icon[]). */
+ * the array, so the same file showing up in both $CONFIG/icons and
+ * the system data dir doesn't get loaded twice. */
 static void
 collect_rsrc_files (GPtrArray *out, const char *dir)
 {
@@ -661,22 +661,14 @@ void init_icons (void)
 		g_free(ifn->files);
 	}
 
-	/* Phase 5: build the list of icon resource files from three
-	 * sources, in priority order:
-	 *   1. gtkhx_prefs.icon[] — user-configured paths from prefs
-	 *      (legacy single-icon-rsrc setup; survives unchanged so
-	 *      existing configs keep working)
-	 *   2. $CONFIG/icons/*.rsrc — per-user drop-in icon packs
-	 *   3. $PREFIX/share/gtkhx/icons/*.rsrc — distro-shipped packs
-	 *
-	 * collect_rsrc_files de-dupes by path string, so a file listed
-	 * in prefs *and* present in $CONFIG/icons doesn't load twice. */
+	/* Phase 5: build the list of icon resource files from auto-discovery
+	 * locations only. The legacy ICONS pref (a comma-separated list of
+	 * .rsrc paths) was retired with the path-pref cleanup — drop a
+	 * file into $CONFIG/icons/ instead. Sources, in priority order:
+	 *   1. $CONFIG/icons/                — per-user drop-in icon packs
+	 *   2. $PREFIX/share/gtkhx/icons/    — distro-shipped packs
+	 * Both directories are scanned for *.rsrc files. */
 	paths = g_ptr_array_new ();
-
-	for (i = 0; i < gtkhx_prefs.num_icons; i++) {
-		if (gtkhx_prefs.icon[i] && *gtkhx_prefs.icon[i])
-			g_ptr_array_add (paths, g_strdup (gtkhx_prefs.icon[i]));
-	}
 
 	user_dir = g_build_filename (gtkhx_config_dir (), "icons", NULL);
 	collect_rsrc_files (paths, user_dir);

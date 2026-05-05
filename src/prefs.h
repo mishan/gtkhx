@@ -20,20 +20,16 @@ typedef struct {
 
 struct gtkhx_prefs {
 	int num_tracker;
-	int num_icons;
 	/* Phase 5: color-scheme preference, applied via AdwStyleManager.
 	 * Stored as one of "system" / "light" / "dark" (case-sensitive).
 	 * "system" follows the desktop-wide org.freedesktop.appearance
 	 * setting; the others force the corresponding scheme. */
 	char *theme;
-	char *sound_path;
 	char *auto_reply_msg;
 	char *font;
 	char *download_path;
 	char **tracker;
 	char *tracker_str;
-	char **icon;
-	char *icon_str;
 	char *snd_cmd;
 	int xbuf_max;
 
