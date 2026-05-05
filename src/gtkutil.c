@@ -42,18 +42,60 @@
 #include "xtext.h"
 #include "gtkutil.h"
 
-GtkAccelGroup *accel_group = NULL;
+/* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
+ * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
+ * in GTK 4 — replaced by GtkShortcutController plus GtkShortcut
+ * instances bound to GtkKeyvalTrigger triggers and GtkCallbackAction
+ * actions.
+ *
+ * The original behavior: every window the user opens gets Ctrl+K
+ * (connect dialog) and Ctrl+Q (quit) wired to the toolbar's
+ * connect_btn and quit_btn "clicked" signal. We preserve that by
+ * installing a fresh per-window controller whose callbacks emit
+ * "clicked" on those buttons directly. (A future Phase 5 cleanup
+ * could move these to GtkApplication-level GActions with
+ * gtk_application_set_accels_for_action — that's the modern idiom
+ * but requires also reworking the toolbar buttons to fire actions
+ * instead of "clicked", which is more invasive.) */
 
-
-void init_keyaccel(GtkWidget *widget)
+static gboolean
+keyaccel_connect_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	if(!accel_group) {
-		accel_group = gtk_accel_group_new();
-		gtk_widget_add_accelerator(connect_btn, "clicked" , accel_group, 'k', GDK_CONTROL_MASK, 0);
-		gtk_widget_add_accelerator(quit_btn, "clicked" ,accel_group, 'q', GDK_CONTROL_MASK, 0);
-	}
-	
-	gtk_window_add_accel_group (GTK_WINDOW(widget), accel_group);
+	(void) w; (void) args; (void) data;
+	if (connect_btn)
+		g_signal_emit_by_name (connect_btn, "clicked");
+	return TRUE;
+}
+
+static gboolean
+keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
+{
+	(void) w; (void) args; (void) data;
+	if (quit_btn)
+		g_signal_emit_by_name (quit_btn, "clicked");
+	return TRUE;
+}
+
+void init_keyaccel (GtkWidget *widget)
+{
+	GtkEventController *ctrl = gtk_shortcut_controller_new ();
+	GtkShortcut *sc;
+
+	gtk_event_controller_set_propagation_phase (ctrl, GTK_PHASE_CAPTURE);
+
+	sc = gtk_shortcut_new (
+		gtk_keyval_trigger_new ('k', GDK_CONTROL_MASK),
+		gtk_callback_action_new (keyaccel_connect_cb, NULL, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	sc = gtk_shortcut_new (
+		gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
+		gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	gtk_widget_add_controller (widget, ctrl);
 }
 
 void set_disconnect_btn(session *sess, int stat)
