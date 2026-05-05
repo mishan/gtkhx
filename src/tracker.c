@@ -432,13 +432,12 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(tracker_window, "close-request", G_CALLBACK(close_tracker_window), 0);
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
-	gtk_widget_set_size_request(tracker_list, 0, 350);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 0, 160);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 1, 40);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 0, 200);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 1, 60);
 	gtk_hlist_set_column_justification(GTK_HLIST(tracker_list), 1, GTK_JUSTIFY_CENTER);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 96);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 40);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 1024);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 130);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 60);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 320);
 	{
 		/* Phase 4.5: button-press-event is gone — install a gesture
 		 * controller for the double-click-to-connect path. */
@@ -483,21 +482,39 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	tracker_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tracker_window_scroll),
 				       GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-	gtk_widget_set_size_request(tracker_window_scroll, 640, 350);
+	gtk_scrolled_window_set_has_frame (GTK_SCROLLED_WINDOW (tracker_window_scroll), TRUE);
+	gtk_widget_set_vexpand (tracker_window_scroll, TRUE);
 	gtkhx_widget_set_child(tracker_window_scroll, tracker_list);
 
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_widget_set_size_request(vbox, 640, 410);
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	/* Phase 5 layout: 8 px gutter on the toolbar/search/list rows, a
+	 * separator between the toolbar (refresh / connect / counts) and
+	 * the search row so the eye groups the two halves correctly, and
+	 * 8 px of margin on the outer vbox so the content doesn't touch
+	 * the window frame. The legacy zero-spacing layout was crammed —
+	 * everything looked like one indistinguishable strip. */
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+	gtk_widget_set_margin_start  (vbox, 8);
+	gtk_widget_set_margin_end    (vbox, 8);
+	gtk_widget_set_margin_top    (vbox, 8);
+	gtk_widget_set_margin_bottom (vbox, 8);
+
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtkhx_box_pack(hbox, refreshbtn, 0, 0, 0);
 	gtkhx_box_pack(hbox, connbtn, 0, 0, 0);
+	/* push the counts to the right side so the toolbar reads as
+	 * "actions on the left, status on the right" rather than four
+	 * widgets stacked together. */
+	gtk_widget_set_hexpand (lbl_found, TRUE);
+	gtk_widget_set_halign (lbl_found, GTK_ALIGN_END);
 	gtkhx_box_pack(hbox, lbl_found, 0, 0, 0);
 	gtkhx_box_pack(hbox, lbl_total, 0, 0, 0);
 	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
+
+	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtkhx_box_pack(searchhbox, lbl_search, 0, 0, 0);
 	gtkhx_box_pack(searchhbox, searchentry, 1, 1, 0);
 	gtkhx_box_pack(vbox, searchhbox, 0, 0, 0);
+
 	gtkhx_box_pack(vbox, tracker_window_scroll, 1, 1, 0);
 	gtkhx_widget_set_child(tracker_window, vbox);
 	init_keyaccel(tracker_window);
