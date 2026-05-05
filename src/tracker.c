@@ -166,7 +166,6 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 	char nusersstr[8], portstr[8], *text[5];
 	int namelen, desclen;
 	char flag;
-	GdkRGBA col = {0, 0, 0, 1};
 
 	if(!root) {
 		return;
@@ -200,7 +199,9 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 
 
 		row = gtk_hlist_append(GTK_HLIST(tracker_list), text);
-		gtk_hlist_set_foreground(GTK_HLIST(tracker_list), row, &col);
+		/* Phase 5: no per-row foreground override — let the GTK theme's
+		 * default foreground apply so the tracker list reads correctly
+		 * under both light and dark themes. */
 		g_free(text[2]);
 		gtk_hlist_set_row_data(GTK_HLIST(tracker_list), row, root);
 		num_found++;
