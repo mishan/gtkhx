@@ -605,8 +605,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 
 	init_keyaccel(tasks_window);
-	g_signal_connect(tasks_window, "configure_event", 
-					   G_CALLBACK(tasks_move), sess);
+	
 	/* Phase 3.x: only apply saved geometry when the prefs file actually
 	 * has one (see users.c for rationale — zero-size collapses the
 	 * window under GTK 3). */

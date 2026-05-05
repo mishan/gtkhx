@@ -1101,8 +1101,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 		gtkhx_widget_set_child(input_scroll, gchat->input);
 		gtkhx_box_pack(hbox, input_scroll, 1, 1, 0);
 	}
-	g_signal_connect(chat_window, "configure_event",
-					   G_CALLBACK(chat_move), gchat);
+	
 
 	g_object_set_data(G_OBJECT(chat_window), "sess", sess);
 
@@ -1387,8 +1386,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 		gtkhx_box_pack(hbox, pchat_input_scroll, 1, 1, 0);
 	}
 
- 	g_signal_connect(pchat_window, "configure_event", 
-					   G_CALLBACK(pchat_update_trans), gchat->output);
+ 	
 
 	gchat->userlist = gtk_hlist_new_with_titles(2, titles);
 	gtk_hlist_set_column_width(GTK_HLIST(gchat->userlist), 0, 35);

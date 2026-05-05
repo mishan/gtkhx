@@ -250,8 +250,7 @@ void create_news_window (session *sess)
 	gtkhx_box_pack(hbox, news_scroll, 1, 1, 0);
 	gtk_widget_set_sensitive(postButton, FALSE);
 	gtk_widget_set_sensitive(reloadButton, FALSE);
-	g_signal_connect(news_window, "configure_event", 
-					   G_CALLBACK(news_move), sess);
+	
 	/* Phase 3.x: only apply saved geometry when the prefs file actually
 	 * has one (see users.c for rationale — zero-size collapses the
 	 * window under GTK 3). */

@@ -318,28 +318,35 @@ gtkhx_backend_supports_position (void)
 	return TRUE;
 }
 
+/* Phase 4.5: also capture size at quit. Previously the configure-event
+ * handlers in chat/users/tasks/news did the per-resize size save and
+ * this function only did position. GTK 4 has no configure-event on
+ * widgets, so we move size into the quit-time pass too. */
 static void
-save_pos (GtkWidget *w, Window_Geo *geo)
+save_geo (GtkWidget *w, Window_Geo *geo, gboolean save_pos_too)
 {
-	int x, y;
+	int width, height;
 	if (!w || !gtk_widget_get_realized (w))
 		return;
-	gtk_window_get_position (GTK_WINDOW (w), &x, &y);
-	geo->xpos = x;
-	geo->ypos = y;
+	gtk_window_get_default_size (GTK_WINDOW (w), &width, &height);
+	if (width  > 0) geo->xsize = width;
+	if (height > 0) geo->ysize = height;
+	(void) save_pos_too;  /* position save is no longer possible client-side
+	                       * under Wayland, and gtk_window_get_position is
+	                       * gone entirely in GTK 4 — keep the existing
+	                       * prefs values from a prior X11 session. */
 }
 
 static void
 gtkhx_save_window_positions (void)
 {
-	if (!gtkhx_backend_supports_position ())
-		return;
+	gboolean want_pos = gtkhx_backend_supports_position ();
 
-	save_pos (toolbar_window,            &gtkhx_prefs.geo.tool);
-	save_pos (the_session.chat_window,   &gtkhx_prefs.geo.chat);
-	save_pos (the_session.users_window,  &gtkhx_prefs.geo.users);
-	save_pos (the_session.tasks_window,  &gtkhx_prefs.geo.tasks);
-	save_pos (the_session.news_window,   &gtkhx_prefs.geo.news);
+	save_geo (toolbar_window,            &gtkhx_prefs.geo.tool,  want_pos);
+	save_geo (the_session.chat_window,   &gtkhx_prefs.geo.chat,  want_pos);
+	save_geo (the_session.users_window,  &gtkhx_prefs.geo.users, want_pos);
+	save_geo (the_session.tasks_window,  &gtkhx_prefs.geo.tasks, want_pos);
+	save_geo (the_session.news_window,   &gtkhx_prefs.geo.news,  want_pos);
 }
 
 void hx_quit (void)

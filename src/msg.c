@@ -231,8 +231,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	   from msg_input_key_press, which calls msg_input_activate(). */
 	g_signal_connect(msg->inputbuf, "key_press_event",
 					   G_CALLBACK(msg_input_key_press), uid);
-	g_signal_connect(msg->window, "configure_event",
-					   G_CALLBACK(msg_update_trans), msg->outputbuf);
+	
 
 	msg_list = msg;
 	return msg;

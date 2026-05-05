@@ -300,7 +300,7 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_sensitive(usernew_btn, FALSE);
 	gtk_widget_set_sensitive(news15_btn, FALSE);
 
-	g_signal_connect(toolbar_window, "configure_event", G_CALLBACK(tool_move), 0);
+	
 	/* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
 	 * a GtkWidget pointer, not a function. Calling a widget address as
 	 * code did nothing useful (and tripped CFI on hardened builds), so
