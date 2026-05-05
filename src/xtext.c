@@ -513,18 +513,72 @@ xtext_draw_layout_line (cairo_t          *cr,
 
 /* Phase 3.4b: GdkGC parameter dropped.  fg_idx/bg_idx are palette
  * indices.  If called outside the draw signal (xtext->cr is NULL),
- * simply skip — paint() will redo the work on the next draw tick. */
+ * simply skip — paint() will redo the work on the next draw tick.
+ *
+ * Phase 4.9 follow-up: mark_local_start / mark_local_end are run-local
+ * byte offsets [0..len] of the portion of this run that falls inside
+ * the current selection (or both -1 / equal for "no selection in this
+ * run"). Selection coloring is applied as Pango attributes on top of
+ * the emphasis attribute list, so the run lays out as a single
+ * continuous string regardless of where the selection sits inside it.
+ * That keeps glyph positions stable across selection changes — the
+ * old approach of splitting a run at mark boundaries caused the text
+ * after the selection to drift slightly when the selection grew or
+ * shrank, because Pango's per-layout combined-extent rounding doesn't
+ * sum exactly across multiple sub-layouts. */
 static void
 backend_draw_text_emph (GtkXText *xtext, int dofill, int fg_idx, int bg_idx,
-						 int x, int y, char *str, int len, int str_width, int emphasis)
+                        int x, int y, char *str, int len, int str_width, int emphasis,
+                        int mark_local_start, int mark_local_end)
 {
 	cairo_t *cr = xtext->cr;
 	PangoLayoutLine *line;
+	PangoAttrList *attrs;
+	gboolean owns_attrs = FALSE;
 
 	if (cr == NULL)
 		return;
 
-	pango_layout_set_attributes (xtext->layout, attr_lists[emphasis]);
+	/* Build the layout attribute list. If the run has no selection
+	 * overlap, reuse the cached static attr_lists[emphasis] verbatim;
+	 * otherwise build a fresh list combining emphasis + mark fg/bg. */
+	if (mark_local_start < mark_local_end &&
+	    mark_local_start >= 0 && mark_local_end <= len)
+	{
+		PangoAttribute *attr;
+		const GdkRGBA *fg = &xtext->palette[XTEXT_MARK_FG];
+		const GdkRGBA *bg = &xtext->palette[XTEXT_MARK_BG];
+
+		attrs = pango_attr_list_new ();
+		owns_attrs = TRUE;
+
+		if (emphasis & EMPH_BOLD)
+			pango_attr_list_insert (attrs,
+				pango_attr_weight_new (PANGO_WEIGHT_BOLD));
+		if (emphasis & EMPH_ITAL)
+			pango_attr_list_insert (attrs,
+				pango_attr_style_new (PANGO_STYLE_ITALIC));
+
+		attr = pango_attr_foreground_new ((guint16)(fg->red   * 65535.0),
+		                                  (guint16)(fg->green * 65535.0),
+		                                  (guint16)(fg->blue  * 65535.0));
+		attr->start_index = mark_local_start;
+		attr->end_index   = mark_local_end;
+		pango_attr_list_insert (attrs, attr);
+
+		attr = pango_attr_background_new ((guint16)(bg->red   * 65535.0),
+		                                  (guint16)(bg->green * 65535.0),
+		                                  (guint16)(bg->blue  * 65535.0));
+		attr->start_index = mark_local_start;
+		attr->end_index   = mark_local_end;
+		pango_attr_list_insert (attrs, attr);
+	}
+	else
+	{
+		attrs = attr_lists[emphasis];
+	}
+
+	pango_layout_set_attributes (xtext->layout, attrs);
 	pango_layout_set_text (xtext->layout, str, len);
 
 	if (dofill)
@@ -539,9 +593,29 @@ backend_draw_text_emph (GtkXText *xtext, int dofill, int fg_idx, int bg_idx,
 
 	cairo_save (cr);
 	xtext_cairo_set_source_idx (xtext, cr, fg_idx);
-	line = pango_layout_get_lines (xtext->layout)->data;
-	xtext_draw_layout_line (cr, x, y, line);
+
+	if (owns_attrs)
+	{
+		/* pango_cairo_show_layout honors PangoAttribute foreground +
+		 * background attributes, which is how the mark fg/bg gets
+		 * painted on top of the run-default fill. The cairo source
+		 * we set above is used for any glyphs that don't have a
+		 * foreground attribute applied. */
+		cairo_move_to (cr, x, y - xtext->font->ascent);
+		pango_cairo_show_layout (cr, xtext->layout);
+	}
+	else
+	{
+		/* No selection in this run — use the existing fast path that
+		 * draws raw glyph strings without re-running attribute
+		 * application. */
+		line = pango_layout_get_lines (xtext->layout)->data;
+		xtext_draw_layout_line (cr, x, y, line);
+	}
 	cairo_restore (cr);
+
+	if (owns_attrs)
+		pango_attr_list_unref (attrs);
 }
 
 static void
@@ -2793,7 +2867,8 @@ gtk_xtext_text_width (GtkXText *xtext, unsigned char *text, int len)
 
 static int
 gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
-								int len, int *emphasis)
+                        int len, int *emphasis,
+                        int mark_local_start, int mark_local_end)
 {
 	int str_width, dofill;
 	cairo_t *cr = xtext->cr;
@@ -2824,7 +2899,8 @@ gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
 	dofill = TRUE;
 
 	backend_draw_text_emph (xtext, dofill, xtext->cur_fg, xtext->cur_bg,
-								  x, y, (char *) str, len, str_width, *emphasis);
+	                        x, y, (char *) str, len, str_width, *emphasis,
+	                        mark_local_start, mark_local_end);
 
 	if (cr && xtext->strikethrough)
 	{
@@ -2940,7 +3016,21 @@ gtk_xtext_search_offset (xtext_buffer *buf, textentry *ent, unsigned int off)
 
 /* render a single line, which WONT wrap, and parse mIRC colors */
 
-#define RENDER_FLUSH x += gtk_xtext_render_flush (xtext, x, y, pstr, j, emphasis)
+/* Phase 4.9 follow-up: compute the run-local byte range of the selection
+ * for the run that's about to be flushed (pstr..pstr+j inside ent->str).
+ * mark_start / mark_end are entry-wide byte offsets; translate by the
+ * run's offset within ent->str. Empty/clamped-to-zero range means "no
+ * selection in this run." Doing it inline in the macro keeps RENDER_FLUSH
+ * a single expression so the existing `x += RENDER_FLUSH` callsites
+ * compile unchanged. */
+#define RENDER_FLUSH \
+	x += gtk_xtext_render_flush (xtext, x, y, pstr, j, emphasis, \
+		((ent->mark_start < 0) \
+			? -1 \
+			: CLAMP (ent->mark_start - (int)((pstr) - ent->str), 0, j)), \
+		((ent->mark_end < 0) \
+			? -1 \
+			: CLAMP (ent->mark_end   - (int)((pstr) - ent->str), 0, j)))
 
 static int
 gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
@@ -2965,9 +3055,10 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 	if (ent->mark_start != -1 &&
 		 ent->mark_start <= i + offset && ent->mark_end > i + offset)
 	{
-		xtext_set_bg (xtext, XTEXT_MARK_BG);
-		xtext_set_fg (xtext, XTEXT_MARK_FG);
-		xtext->backcolor = TRUE;
+		/* Phase 4.9 follow-up: don't switch run colors here — the
+		 * mark fg/bg get applied per-run via PangoAttribute in
+		 * backend_draw_text_emph instead, so glyph positions don't
+		 * depend on whether the selection sits inside this subline. */
 		mark = TRUE;
 	}
 	if (xtext->hilight_ent == ent &&
@@ -3240,7 +3331,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 		/* have we been told to stop rendering at this point? */
 		if (xtext->jump_out_offset > 0 && xtext->jump_out_offset <= (i + offset))
 		{
-			gtk_xtext_render_flush (xtext, x, y, pstr, j, emphasis);
+			RENDER_FLUSH;
 			ret = 0;	/* skip the rest of the lines, we're done. */
 			j = 0;
 			break;
@@ -3269,14 +3360,18 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 			}
 		}
 
-		if (!mark && ent->mark_start == (i + offset))
+		/* Phase 4.9 follow-up: selection coloring is now applied as
+		 * Pango attributes on whatever run contains the marked range
+		 * (see backend_draw_text_emph + RENDER_FLUSH). We still track
+		 * `mark` as a state flag — it gates srch_underline interaction
+		 * and the post-loop final-run color reset — but we no longer
+		 * split runs at mark_start / mark_end, which is what was
+		 * causing the trailing text to drift when the selection
+		 * extended (per-run combined-extent rounding doesn't sum
+		 * across multiple sub-layouts the way a single layout does). */
+		if (!mark && ent->mark_start != -1 &&
+		    ent->mark_start <= (i + offset) && ent->mark_end > (i + offset))
 		{
-			RENDER_FLUSH;
-			pstr += j;
-			j = 0;
-			xtext_set_bg (xtext, XTEXT_MARK_BG);
-			xtext_set_fg (xtext, XTEXT_MARK_FG);
-			xtext->backcolor = TRUE;
 			if (srch_underline)
 			{
 				xtext->underline = FALSE;
@@ -3285,17 +3380,8 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 			mark = TRUE;
 		}
 
-		if (mark && ent->mark_end == (i + offset))
+		if (mark && ent->mark_end <= (i + offset))
 		{
-			RENDER_FLUSH;
-			pstr += j;
-			j = 0;
-			xtext_set_bg (xtext, xtext->col_back);
-			xtext_set_fg (xtext, xtext->col_fore);
-			if (xtext->col_back != XTEXT_BG)
-				xtext->backcolor = TRUE;
-			else
-				xtext->backcolor = FALSE;
 			mark = FALSE;
 		}
 
