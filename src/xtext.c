@@ -3859,6 +3859,25 @@ gtk_xtext_render_ents (GtkXText * xtext, textentry * enta, textentry * entb)
 	int subline;
 	int drawing = FALSE;
 
+	/* Phase 4.9 follow-up: outside a snapshot pass we have no cairo
+	 * context to draw into — backend_draw_text_emph silently bails on
+	 * cr==NULL. That's fine for the actual drawing, but the caller
+	 * has already mutated the source-of-truth state (mark_start/end
+	 * for selection, hilight_ent / hilight_start / hilight_end for
+	 * URL hilights, jump_in/out_offset, etc.). Queue a redraw so the
+	 * next snapshot picks up those changes; the snapshot path's own
+	 * gtk_xtext_paint will re-enter render_ents with cr set and
+	 * actually draw.
+	 *
+	 * Without this, drag-to-select, single-click-to-deselect, and
+	 * URL hand-cursor hilighting all silently no-op until something
+	 * else invalidates the widget (a dialog, scroll, focus change). */
+	if (xtext->cr == NULL)
+	{
+		gtk_widget_queue_draw (GTK_WIDGET (xtext));
+		return 0;
+	}
+
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
