@@ -356,10 +356,8 @@ struct cfgvar
 	{"CHATYSIZE", {&gtkhx_prefs.geo.chat.ysize}, INT, 0, NULL, NULL},
 	{"DOWNLOAD", {&gtkhx_prefs.download_path}, STRING, 0, changed_downloadpath,
 	 NULL},
-	{"FILE_SAMEWINDOW", {&gtkhx_prefs.file_samewin}, BOOLEAN, 0, 
+	{"FILE_SAMEWINDOW", {&gtkhx_prefs.file_samewin}, BOOLEAN, 0,
 	 changed_filesamewin, NULL},
-	{"NEWS_SAMEWINDOW", {&gtkhx_prefs.news_samewin}, BOOLEAN, 0, 
-	 changed_newssamewin, NULL},
 	{"FONT", {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
 	{"ICON", {&the_session.htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
 	{"ICONS", {&gtkhx_prefs.icon_str}, STRING, 0, parse_icons, NULL},
@@ -370,6 +368,8 @@ struct cfgvar
 	{"NEWSXSIZE", {&gtkhx_prefs.geo.news.xsize}, INT, 0, NULL, NULL},
 	{"NEWSYPOS", {&gtkhx_prefs.geo.news.ypos}, INT, 0, NULL, NULL},
 	{"NEWSYSIZE", {&gtkhx_prefs.geo.news.ysize}, INT, 0, NULL, NULL},
+	{"NEWS_SAMEWINDOW", {&gtkhx_prefs.news_samewin}, BOOLEAN, 0,
+	 changed_newssamewin, NULL},
 	{"NICK", {the_session.htlc.name}, STRING32, 0, /*changed_nickoricon*/NULL, NULL},
 	{"OLD_NICKCOMPLETION", {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0, NULL,
 	 NULL},
@@ -423,17 +423,47 @@ struct cfgvar
  * construction these calls drive. */
 static int cfgnamecmp_const (const void *key, const void *mem);
 
+/* Verify cfgvars[] is sorted alphabetically by name — bsearch needs
+ * this and there's no compiler check. Run once at first call. */
+static void
+cfgvars_assert_sorted (void)
+{
+	static gboolean checked;
+	gsize i;
+
+	if (checked)
+		return;
+	checked = TRUE;
+
+	for (i = 1; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++) {
+		if (strcmp (cfgvars[i - 1].name, cfgvars[i].name) >= 0) {
+			g_error ("cfgvars[] is not sorted: \"%s\" must come before \"%s\"",
+			         cfgvars[i].name, cfgvars[i - 1].name);
+		}
+	}
+}
+
 static struct cfgvar *
 cfgvar_for_name (const char *name)
 {
-	struct cfgvar *r = bsearch (name, cfgvars,
-	                            sizeof (cfgvars) / sizeof (cfgvars[0]),
-	                            sizeof (cfgvars[0]),
-	                            cfgnamecmp_const);
+	struct cfgvar *r;
+
+	cfgvars_assert_sorted ();
+
+	r = bsearch (name, cfgvars,
+	             sizeof (cfgvars) / sizeof (cfgvars[0]),
+	             sizeof (cfgvars[0]),
+	             cfgnamecmp_const);
 	if (!r) {
+		/* Returning &cfgvars[0] as a fallback was actively dangerous —
+		 * callers write to whatever field they expect (uchar / int /
+		 * char**), and treating a STRING entry as a BOOLEAN scribbles
+		 * across the str pointer and crashes on the next free(). NULL
+		 * is the honest return; every caller in this file is paired
+		 * with a *valid* name literal, so a NULL is a coding bug we
+		 * want to surface, not paper over. */
 		g_warning ("cfgvar_for_name: unknown pref \"%s\"", name);
-		/* Fall back to the first entry so callers don't crash. */
-		return &cfgvars[0];
+		return NULL;
 	}
 	return r;
 }
