@@ -169,7 +169,7 @@ user_open (void *__uesp, const char *name, const char *login, const char *pass, 
 	ues->access_buf = access;
 	for (i = 0; i < NACCESS; i++) {
 		on = test_bit(ues->access_buf, ues->access_widgets[i].bitno);
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ues->access_widgets[i].widget), on);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(ues->access_widgets[i].widget), on);
 	}
 }
 static void
@@ -248,7 +248,7 @@ useredit_chk_activate (GtkWidget *widget, gpointer data)
 	if (i == NACCESS)
 		return;
 	bitno = ues->access_widgets[i].bitno;
-	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget)))
+	if (gtk_check_button_get_active(GTK_CHECK_BUTTON(widget)))
 		set_bit(ues->access_buf, bitno);
 	else
 		unset_bit(ues->access_buf, bitno);

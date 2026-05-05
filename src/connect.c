@@ -29,6 +29,7 @@
 #include "hx.h"
 #include "chat.h"
 #include "gtkutil.h"
+#include "toolbar.h"
 
 static GtkWidget *connect_window;
 static GtkWidget *address_entry;
@@ -134,7 +135,7 @@ static void server_connect (GtkWidget *widget, gpointer data)
 	server = gtk_editable_get_text(GTK_EDITABLE(address_entry));
 	pass = gtk_editable_get_text(GTK_EDITABLE(password_entry));
 	portstr = gtk_editable_get_text(GTK_EDITABLE(port_entry));
-	secure = gtk_toggle_button_get_active((GtkToggleButton*)hope);
+	secure = gtk_check_button_get_active((GtkCheckButton*)hope);
 	if(secure) {
 #ifdef CONFIG_COMPRESS
 		char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
@@ -238,7 +239,7 @@ void set_the_entries (char *address, char *login, char *password, char *port,
 		gtk_editable_set_text(GTK_EDITABLE(port_entry), "5500");
 	}
 
-	gtk_toggle_button_set_active((GtkToggleButton*)hope, secure);
+	gtk_check_button_set_active((GtkCheckButton*)hope, secure);
 #ifdef CONFIG_COMPRESS
 	gtk_combo_box_set_active(GTK_COMBO_BOX(compress_menu), compress);
 #endif
@@ -355,6 +356,11 @@ static void prompt_conversion (char *name)
     dialog = gtk_dialog_new();
 
     gtk_window_set_title(GTK_WINDOW(dialog), "Convert Bookmark");
+    /* Phase 4.5: anchor to the toolbar window — there's no other obvious
+     * parent at this entry-point (called from the prefs load path). */
+    if (toolbar_window)
+        gtk_window_set_transient_for(GTK_WINDOW(dialog),
+                                     GTK_WINDOW(toolbar_window));
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
     label = gtk_label_new ("This bookmark is written in an old GtkHx format.\nWould you like to convert it to the new format?");
     gtk_widget_set_size_request(dialog, 250, 200);
@@ -528,7 +534,7 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 	char *login = gtk_editable_get_text(GTK_EDITABLE(login_entry));
 	char *pass = gtk_editable_get_text(GTK_EDITABLE(password_entry));
 	char *port = gtk_editable_get_text(GTK_EDITABLE(port_entry));
-	char secure = gtk_toggle_button_get_active((GtkToggleButton*)hope);
+	char secure = gtk_check_button_get_active((GtkCheckButton*)hope);
 #ifdef CONFIG_COMPRESS
 	char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
 #else
@@ -644,6 +650,9 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	label = gtk_label_new(_("Name:"));
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
+	if (toolbar_window)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog),
+		                             GTK_WINDOW(toolbar_window));
 	gtk_widget_set_size_request(dialog, 200, 100);
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), hbox, 0, 0, 0);
@@ -777,7 +786,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_label_set_xalign(GTK_LABEL(pass_label), 0.0);
 
 	hope = gtk_check_button_new_with_label(_("Secure (HOPE)"));
-	gtk_toggle_button_set_active((GtkToggleButton*)hope, 0);
+	gtk_check_button_set_active((GtkCheckButton*)hope, 0);
 	gtkhx_grid_attach_table(GTK_GRID(table1), hope, 0, 1, 3, 4,
 			 (GTK_EXPAND|GTK_FILL),
 			 0, 0, 0);
