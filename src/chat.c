@@ -1395,8 +1395,12 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_hlist_set_shadow_type(GTK_HLIST(gchat->userlist), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(gchat->userlist), 1, 
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(gchat->userlist, "button_press_event",
-			   G_CALLBACK(user_clicked), 0);
+	/* Phase 4.5: button-press-event is gone in GTK 4. Install the same
+	 * gesture controller the standalone Users window uses. The previous
+	 * GTK-3 path passed user_clicked the chat-userlist with data=0, which
+	 * meant the right-click menu would deref a NULL session — fixed in
+	 * passing here by handing it the live session. */
+	users_attach_click_gesture(gchat->userlist, sess);
 
 	if (!users_font_desc)
 		users_font_desc = pango_font_description_from_string ("Sans 10");

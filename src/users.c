@@ -136,189 +136,231 @@ struct hx_user *hx_user_with_name(struct hx_user *ulist, char *name)
 	return 0;
 }
 
-static GtkWidget *menu_quick_sub (char *name, GtkWidget * menu)
-{
-	GtkWidget *sub_menu;
- 	GtkWidget *sub_item;
+/* Phase 4.7: GtkMenu + gtk_menu_popup_at_pointer are gone in GTK 4.
+ * The user-list right-click menu is now built as a GMenu model, hung
+ * off a GtkPopoverMenu with its action group's user/sess context
+ * captured per-click in a small UserActionCtx that lives for the life
+ * of the popover (released on the popover's "closed" signal). */
 
-	if (!name)
-	 	return menu;
-
- 	sub_menu = gtk_menu_new ();
- 	sub_item = gtk_menu_item_new_with_label (name);
- 	gtk_menu_shell_append (GTK_MENU_SHELL (menu), sub_item);
- 	gtk_widget_show (sub_item);
- 	gtk_menu_item_set_submenu (GTK_MENU_ITEM (sub_item), sub_menu);
-
-	return (sub_menu);
-}
-
-static void menu_popup (GtkWidget *menu, GdkEventButton *event)
-{
-	/* Phase 3.9: gtk_menu_popup deprecated in 3.22 — gtk_menu_popup_at_pointer
-	 * is the replacement and figures out the device/screen automatically. */
-	gtk_menu_popup_at_pointer (GTK_MENU (menu), (GdkEvent *) event);
-	gtk_widget_show (menu);
-}
-
-static GtkWidget * menu_quick_item ( char *label, GtkWidget * menu,
-									 int sensitive, gpointer userdata)
-{
-	GtkWidget *item;
-	if (!label)
-		item = gtk_menu_item_new ();
-	else
-		item = gtk_menu_item_new_with_label (label);
-	gtk_menu_shell_append (GTK_MENU_SHELL (menu), item);
-	g_object_set_data (G_OBJECT (item), "user_data", userdata);
-
-	if (!sensitive)
-		gtk_widget_set_sensitive (GTK_WIDGET (item), FALSE);
-
-	gtk_widget_show (item);
-
-	return item;
-}
-
-void
-menu_quick_item_with_callback (session *sess, void *callback, char *label,
-							   GtkWidget * menu, void *arg)
-{
-	GtkWidget *item;
-
-	item = gtk_menu_item_new_with_label (label);
-	gtk_menu_shell_append (GTK_MENU_SHELL (menu), item);
-	g_signal_connect (item, "activate",
-							  G_CALLBACK (callback), arg);
-	g_object_set_data(G_OBJECT(item), "sess", sess);
-	gtk_widget_show (item);
-}
-
-static void user_kick_menu (GtkWidget *menu, struct hx_user *user)
-{
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-	if (!user)
-		return;
-	hx_kick_user(&sess->htlc, user->uid, 0);
-}
-
-static void user_ban_menu (GtkWidget *menu, struct hx_user *user)
-{
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-	if (!user)
-		return;
-	hx_kick_user(&sess->htlc, user->uid, 1);
-}
-
-static void user_igno_menu (GtkWidget *menu, struct hx_user *user)
-{
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-	if(!user) {
-		return;
-	}
-
-	user->ignore = 1;
-	hx_printf_prefix(&sess->htlc, 0, INFOPREFIX, _("ignore: %s is now ignored\n"),
-					 user->name);
-}
-
-static void user_unigno_menu (GtkWidget *menu, struct hx_user *user)
-{
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-	if(!user) {
-		return;
-	}
-
-	user->ignore = 0;
-	hx_printf_prefix(&sess->htlc, 0, INFOPREFIX, _("ignore: %s is now unignored\n"),
-					 user->name);
-}
-
-static void user_info_menu(GtkWidget *menu, struct hx_user *user)
-{
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-	if (!user)
-		return;
-	hx_get_user_info(&sess->htlc, user->uid);
-}
-
-static void user_msg_menu(GtkWidget *menu, struct hx_user *user)
-{
-	struct msgwin *msg;
-
-	if (!user)
-		return;
-
-	if((msg = msgwin_with_uid(user->uid))) {
-		gtk_window_present(GTK_WINDOW(msg->window));
-	}
-	else {
-		create_msgwin(user->uid, user->name);
-	}
-}
+struct UserActionCtx {
+	session         *sess;
+	struct hx_user  *user;
+};
 
 static void prompt_chat (session *sess, guint16 uid);
 
-static void user_pchat_menu(GtkWidget *menu, struct hx_user *user)
+static void
+user_action_ctx_free (gpointer data)
 {
-	int with_cid = 0;
-	struct gtkhx_chat *gchat;
-	session *sess = g_object_get_data(G_OBJECT(menu), "sess");
-
-
-	if(!user)
-		return;
-	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		if(gchat->cid) {
-			with_cid = 1;
-		}
-	}
-	if(!with_cid)
-		hx_chat_user(&sess->htlc, user->uid);
-	else
-		prompt_chat(sess, user->uid);
+	g_free (data);
 }
 
-static void user_popup(struct hx_user *user, GdkEventButton *event,
-					   session *sess)
+static void
+on_user_kick (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
+	struct UserActionCtx *ctx = user_data;
+	(void) action; (void) param;
+	if (!ctx->user) return;
+	hx_kick_user (&ctx->sess->htlc, ctx->user->uid, 0);
+}
 
-	GtkWidget *menu = gtk_menu_new ();
-	GtkWidget *sub;
+static void
+on_user_ban (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	(void) action; (void) param;
+	if (!ctx->user) return;
+	hx_kick_user (&ctx->sess->htlc, ctx->user->uid, 1);
+}
+
+static void
+on_user_ignore (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	(void) action; (void) param;
+	if (!ctx->user) return;
+	ctx->user->ignore = 1;
+	hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
+	                  _("ignore: %s is now ignored\n"), ctx->user->name);
+}
+
+static void
+on_user_unignore (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	(void) action; (void) param;
+	if (!ctx->user) return;
+	ctx->user->ignore = 0;
+	hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
+	                  _("ignore: %s is now unignored\n"), ctx->user->name);
+}
+
+static void
+on_user_info (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	(void) action; (void) param;
+	if (!ctx->user) return;
+	hx_get_user_info (&ctx->sess->htlc, ctx->user->uid);
+}
+
+static void
+on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	struct msgwin *msg;
+	(void) action; (void) param;
+
+	if (!ctx->user) return;
+
+	if ((msg = msgwin_with_uid (ctx->user->uid)))
+		gtk_window_present (GTK_WINDOW (msg->window));
+	else
+		create_msgwin (ctx->user->uid, ctx->user->name);
+}
+
+static void
+on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	struct UserActionCtx *ctx = user_data;
+	struct gtkhx_chat *gchat;
+	int with_cid = 0;
+	(void) action; (void) param;
+
+	if (!ctx->user) return;
+
+	for (gchat = ctx->sess->gchat_list; gchat; gchat = gchat->prev)
+		if (gchat->cid)
+			with_cid = 1;
+
+	if (!with_cid)
+		hx_chat_user (&ctx->sess->htlc, ctx->user->uid);
+	else
+		prompt_chat (ctx->sess, ctx->user->uid);
+}
+
+static const GActionEntry user_action_entries[] = {
+	{ "kick",     on_user_kick,     NULL, NULL, NULL, {0} },
+	{ "ban",      on_user_ban,      NULL, NULL, NULL, {0} },
+	{ "ignore",   on_user_ignore,   NULL, NULL, NULL, {0} },
+	{ "unignore", on_user_unignore, NULL, NULL, NULL, {0} },
+	{ "info",     on_user_info,     NULL, NULL, NULL, {0} },
+	{ "msg",      on_user_msg,      NULL, NULL, NULL, {0} },
+	{ "pchat",    on_user_pchat,    NULL, NULL, NULL, {0} },
+};
+
+static void
+user_popover_closed (GtkPopover *popover, gpointer data)
+{
+	(void) data;
+	/* Phase 4.7: the GtkPopoverMenu was parented to the user list with
+	 * gtk_widget_set_parent; reverse it on close so the popover and its
+	 * action context are released. */
+	gtk_widget_unparent (GTK_WIDGET (popover));
+}
+
+static void
+user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
+            double x, double y)
+{
+	GMenu *model;
+	GMenu *info_section;
+	GMenu *moderate_section;
+	GMenu *ignore_section;
+	GMenu *interact_section;
+	GtkWidget *popover;
+	GSimpleActionGroup *actions;
+	struct UserActionCtx *ctx;
 	char buf[128];
+	int i;
 
-	sub = menu_quick_sub(user->name, menu);
-	g_object_set_data(G_OBJECT(menu), "sess", sess);
+	if (!user || !sess)
+		return;
 
-	g_snprintf(buf, sizeof(buf), _("Icon: %d"), user->icon);
-	menu_quick_item(buf, sub, 1, 0);
-	g_snprintf(buf, sizeof(buf), _("UID: %d"), user->uid);
-	menu_quick_item(buf, sub, 1, 0);
-	g_snprintf(buf, sizeof(buf), _("Status: %s%s"), user->color >= 2 ? _("Admin") :
-			_("Guest"), user->color % 2 ? _(" (Away)") : "");
-	menu_quick_item(buf, sub, 1, 0);
+	ctx = g_new0 (struct UserActionCtx, 1);
+	ctx->sess = sess;
+	ctx->user = user;
 
-	menu_quick_item(0, menu, 0, 0);
+	model = g_menu_new ();
 
-	menu_quick_item_with_callback(sess, user_kick_menu, _("Kick"), menu, user);
-	menu_quick_item_with_callback(sess, user_ban_menu, _("Ban"), menu, user);
-	menu_quick_item_with_callback(sess, user_igno_menu, _("Ignore"),
-								  menu, user);
-	menu_quick_item_with_callback(sess, user_unigno_menu, _("UnIgnore"),
-								  menu, user);
-	menu_quick_item_with_callback(sess, user_info_menu, _("Get User Info"),
-								  menu, user);
-	menu_quick_item_with_callback(sess, user_msg_menu, _("Private Message"),
-								  menu, user);
-	menu_quick_item_with_callback(sess, user_pchat_menu, _("Private Chat"),
-								  menu, user);
+	/* Info header — disabled "noop" entries built from the user's
+	 * current state. We use a section to get a separator between the
+	 * info block and the actions below. */
+	info_section = g_menu_new ();
+	g_menu_append (info_section, user->name, "user.noop");
+	g_snprintf (buf, sizeof (buf), _("Icon: %d  UID: %d"), user->icon, user->uid);
+	g_menu_append (info_section, buf, "user.noop");
+	g_snprintf (buf, sizeof (buf), _("Status: %s%s"),
+	            user->color >= 2 ? _("Admin") : _("Guest"),
+	            user->color % 2 ? _(" (Away)") : "");
+	g_menu_append (info_section, buf, "user.noop");
+	g_menu_append_section (model, NULL, G_MENU_MODEL (info_section));
+	g_object_unref (info_section);
 
-	menu_popup (menu, event);
+	/* Kick / Ban */
+	moderate_section = g_menu_new ();
+	g_menu_append (moderate_section, _("Kick"), "user.kick");
+	g_menu_append (moderate_section, _("Ban"),  "user.ban");
+	g_menu_append_section (model, NULL, G_MENU_MODEL (moderate_section));
+	g_object_unref (moderate_section);
+
+	/* Ignore / UnIgnore */
+	ignore_section = g_menu_new ();
+	g_menu_append (ignore_section, _("Ignore"),   "user.ignore");
+	g_menu_append (ignore_section, _("UnIgnore"), "user.unignore");
+	g_menu_append_section (model, NULL, G_MENU_MODEL (ignore_section));
+	g_object_unref (ignore_section);
+
+	/* Interact */
+	interact_section = g_menu_new ();
+	g_menu_append (interact_section, _("Get User Info"),    "user.info");
+	g_menu_append (interact_section, _("Private Message"),  "user.msg");
+	g_menu_append (interact_section, _("Private Chat"),     "user.pchat");
+	g_menu_append_section (model, NULL, G_MENU_MODEL (interact_section));
+	g_object_unref (interact_section);
+
+	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
+	g_object_unref (model);
+	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
+	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+	gtk_widget_set_halign (popover, GTK_ALIGN_START);
+
+	actions = g_simple_action_group_new ();
+	for (i = 0; i < (int) G_N_ELEMENTS (user_action_entries); i++) {
+		const GActionEntry *e = &user_action_entries[i];
+		GSimpleAction *act = g_simple_action_new (e->name, NULL);
+		/* ctx is owned by the popover (set below with destroy notify);
+		 * each action's closure holds a borrowed pointer that is valid
+		 * for as long as the popover — and thus the action group — is
+		 * alive. Synchronous activation means the borrow is always safe
+		 * inside the handler. */
+		g_signal_connect (act, "activate", G_CALLBACK (e->activate), ctx);
+		g_action_map_add_action (G_ACTION_MAP (actions), G_ACTION (act));
+		g_object_unref (act);
+	}
+	/* Disabled "noop" used by info entries — present so they render but
+	 * inert when clicked. */
+	{
+		GSimpleAction *noop = g_simple_action_new ("noop", NULL);
+		g_simple_action_set_enabled (noop, FALSE);
+		g_action_map_add_action (G_ACTION_MAP (actions), G_ACTION (noop));
+		g_object_unref (noop);
+	}
+
+	gtk_widget_insert_action_group (popover, "user", G_ACTION_GROUP (actions));
+	g_object_unref (actions);
+
+	/* Hang the ctx off the popover so its lifetime matches the popover's
+	 * — when the popover is unparented the destroy notify frees it. */
+	g_object_set_data_full (G_OBJECT (popover), "user-action-ctx",
+	                        ctx, user_action_ctx_free);
+
+	gtk_widget_set_parent (popover, anchor);
+	g_signal_connect (popover, "closed",
+	                  G_CALLBACK (user_popover_closed), NULL);
+
+	gtk_popover_popup (GTK_POPOVER (popover));
 }
 
 int users_sort(GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
@@ -358,46 +400,63 @@ void usercol_clicked(GtkWidget *clist, gint col, gpointer data)
 	gtk_hlist_sort(GTK_HLIST(clist));
 }
 
-void user_clicked (GtkWidget *widget, GdkEventButton *event, gpointer data)
+/* Phase 4.5: GTK 4 widgets don't emit button-press-event. Clicks come
+ * via a GtkGestureClick controller; the "pressed" signal carries
+ * (gesture, n_press, x, y, user_data). The button is read off the
+ * gesture itself with gtk_gesture_single_get_current_button. */
+static void
+user_pressed (GtkGestureClick *gesture, int n_press,
+              double x, double y, gpointer data)
 {
-	int row;
-	int column;
-	session *sess = data;
+	GtkWidget *list = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
+	session  *sess = data;
+	guint     button = gtk_gesture_single_get_current_button (
+		GTK_GESTURE_SINGLE (gesture));
+	int row = -1, column = -1;
 
-	gtk_hlist_get_selection_info(GTK_HLIST(widget),
-				     event->x, event->y, &row, &column);
-	if(event->button == 1) {
-		if (event->type == GDK_2BUTTON_PRESS) {
-			struct hx_user *user;
+	gtk_hlist_get_selection_info (GTK_HLIST (list), (int) x, (int) y,
+	                              &row, &column);
 
-
-			user = gtk_hlist_get_row_data(GTK_HLIST(widget), row);
+	if (button == GDK_BUTTON_PRIMARY) {
+		if (n_press == 2) {
+			struct hx_user *user =
+				gtk_hlist_get_row_data (GTK_HLIST (list), row);
 			if (user) {
-				struct msgwin *msg = NULL;
-
-				if((msg = msgwin_with_uid(user->uid))) {
-					gtk_window_present(GTK_WINDOW(msg->window));
-				}
-				else {
-					create_msgwin(user->uid, user->name);
-				}
+				struct msgwin *msg = msgwin_with_uid (user->uid);
+				if (msg)
+					gtk_window_present (GTK_WINDOW (msg->window));
+				else
+					create_msgwin (user->uid, user->name);
 			}
-		}
-		else {
-			user_storow = row;
+		} else if (row >= 0) {
+			user_storow    = row;
 			user_stocolumn = column;
 		}
-	}
-	else if(event->button == 3) {
-		struct hx_user *user;
-
-
-		user = gtk_hlist_get_row_data(GTK_HLIST(widget), row);
-		if(user) {
-			gtk_hlist_select_row(GTK_HLIST(widget), row, 0);
-			user_popup(user, event, sess);
+	} else if (button == GDK_BUTTON_SECONDARY) {
+		struct hx_user *user =
+			gtk_hlist_get_row_data (GTK_HLIST (list), row);
+		if (user) {
+			gtk_hlist_select_row (GTK_HLIST (list), row, 0);
+			user_popup (list, user, sess, x, y);
 		}
 	}
+}
+
+void
+users_attach_click_gesture (GtkWidget *list, session *sess)
+{
+	/* Phase 4.5: a GtkGestureClick with button=0 fires for every button.
+	 * GTK_PHASE_BUBBLE so the GtkTreeView's own selection click runs first
+	 * (it does single-click row selection and is the source of the row
+	 * highlight we want under our right-click menu). */
+	GtkGesture *click = gtk_gesture_click_new ();
+
+	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+	gtk_event_controller_set_propagation_phase (
+		GTK_EVENT_CONTROLLER (click), GTK_PHASE_BUBBLE);
+	g_signal_connect (click, "pressed", G_CALLBACK (user_pressed), sess);
+	gtk_widget_add_controller (list, GTK_EVENT_CONTROLLER (click));
 }
 
 void open_message_btn (GtkWidget *widget, gpointer data)
@@ -511,10 +570,16 @@ static void create_new_chat(GtkWidget *widget, gpointer data)
 	gtkhx_widget_destroy(dialog);
 }
 
-void select_cid(GtkWidget *widget, gint row, gint col, GdkEventButton *event,
-				gpointer data)
+/* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
+ * "select_row" with a NULL GdkEvent so the parameter is just typed
+ * as the bare GdkEvent* now. The handler only reads `row'. */
+static void
+select_cid (GtkWidget *widget, gint row, gint col, GdkEvent *event,
+            gpointer data)
 {
-	guint32 *cid = data; *cid = row;
+	guint32 *cid = data;
+	(void) widget; (void) col; (void) event;
+	*cid = row;
 }
 
 static void prompt_chat(session *sess, guint16 _uid)
@@ -634,42 +699,24 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 
 
 
-static void close_users_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
+ * when a window's titlebar close button is clicked. The handler returns
+ * FALSE to allow the default destroy to proceed. */
+static gboolean close_users_window (GtkWindow *window, gpointer data)
 {
 	session *sess = data;
+	(void) window;
 
 	sess->users_window = 0;
 	sess->users_list = 0;
-	gtkhx_widget_destroy(widget);
 	gtkhx_prefs.geo.users.open = 0;
 	gtkhx_prefs.geo.users.init = 0;
-}
-
-/*
- * Phase 3.x: configure-event handler saves SIZE only.
- *
- * The previous version saved position too, but the first configure
- * event after gtk_widget_show_all reports the WM/compositor's chosen
- * position rather than the gtk_window_move() we requested at startup.
- * On Wayland (where client-side positioning is a no-op) that
- * silently overwrote the saved prefs with 0,0 on the very first map,
- * which is why position restoration looked broken on the next launch.
- *
- * Position is now captured at hx_quit() time when the window's
- * coordinates have settled (see gtkhx.c gtkhx_save_window_positions).
- * Size is fine to track on every configure — it's user-driven and
- * the steady-state value is correct.
- */
-static gboolean users_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	(void) e; (void) data;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.users.xsize = width;
-	gtkhx_prefs.geo.users.ysize = height;
 	return FALSE;
 }
+
+/* Phase 4.5: the configure-event size tracker is gone — GTK 4 widgets
+ * don't fire configure-event. Window size is now captured at hx_quit()
+ * time alongside the position; see gtkhx.c gtkhx_save_window_positions. */
 
 void user_list (session *sess)
 {
@@ -715,7 +762,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
 	gtk_widget_set_size_request(users_window, 264, 400);
 	gtk_window_set_resizable(GTK_WINDOW(users_window), TRUE);
-	g_signal_connect(users_window, "delete_event",
+	g_signal_connect(users_window, "close-request",
 			   G_CALLBACK(close_users_window), sess);
 
 
@@ -730,8 +777,10 @@ void create_users_window (GtkWidget *widget, gpointer data)
 							   (GtkHListCompareFunc) users_sort);
 	g_signal_connect(users_list, "click_column",
 					   G_CALLBACK(usercol_clicked), sess);
-	g_signal_connect(users_list, "button_press_event",
-					   G_CALLBACK(user_clicked), sess);
+	/* Phase 4.5: button-press-event is gone in GTK 4. The gesture
+	 * controller installed here dispatches double-clicks to the message
+	 * window and right-clicks to the user popup. */
+	users_attach_click_gesture(users_list, sess);
 
 	if (!users_font_desc)
 		users_font_desc = pango_font_description_from_string ("Sans 10");
