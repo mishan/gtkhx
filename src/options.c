@@ -610,12 +610,55 @@ static size_t read_line(FILE *prefs, char **line, size_t *len)
 
 void create_options_window(GtkWidget *widget, gpointer data);
 
+/* Phase 5: prefs path resolution. Primary location is
+ *   $CONFIG/gtkhxrc
+ * (where $CONFIG is gtkhx_config_dir()). Fall back to the legacy
+ * ~/.gtkhxrc on first run so existing users don't lose their config —
+ * subsequent saves go to the new path, and the legacy file is left
+ * alone for the user to clean up themselves. */
+static char *
+prefs_primary_path (void)
+{
+	return g_build_filename (gtkhx_config_dir (), "gtkhxrc", NULL);
+}
+
+static char *
+prefs_legacy_path (void)
+{
+	const char *home = g_getenv ("HOME");
+	if (!home || !*home)
+		home = g_get_home_dir ();
+	if (!home)
+		return NULL;
+	return g_build_filename (home, ".gtkhxrc", NULL);
+}
+
 void prefs_read(void)
 {
-	char *path = g_strdup_printf("%s/.gtkhxrc", getenv("HOME"));
+	char *path = prefs_primary_path ();
 	FILE *prefs = fopen(path, "r");
 	char *prefsline;
 	size_t prefslinelen = 256;
+	gboolean from_legacy = FALSE;
+
+	if (!prefs && errno == ENOENT) {
+		/* New-style file doesn't exist; try the legacy ~/.gtkhxrc as
+		 * a migration read so existing users keep their settings. */
+		char *legacy = prefs_legacy_path ();
+		if (legacy) {
+			prefs = fopen (legacy, "r");
+			if (prefs) {
+				g_message ("Migrating prefs from %s to %s on next save",
+				           legacy, path);
+				from_legacy = TRUE;
+			} else if (errno != ENOENT) {
+				fprintf (stderr, "prefs_read: %s: %s\n",
+				         legacy, strerror (errno));
+				fflush (stderr);
+			}
+			g_free (legacy);
+		}
+	}
 
 	prefsline = g_malloc (prefslinelen);
 
@@ -630,6 +673,7 @@ void prefs_read(void)
 			fflush(stderr);
 		}
 
+		g_free(prefsline);
 		g_free(path);
 		return;
 	}
@@ -640,11 +684,12 @@ void prefs_read(void)
 	g_free(prefsline);
 	fclose(prefs);
 	g_free(path);
+	(void) from_legacy;	/* future: the next prefs_write covers this */
 }
 
 void prefs_write(void)
 {
-	char *path = g_strdup_printf("%s/.gtkhxrc", getenv("HOME"));
+	char *path = prefs_primary_path ();
 	FILE *prefs = fopen(path, "w");
 	time_t now;
 	int i;
