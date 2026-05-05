@@ -1039,7 +1039,6 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 	char namstr[255];
 	struct gfile_list *gfl = (struct gfile_list *)data;
 	struct path_hist *path = 0;
-	GdkRGBA col = {0, 0, 0, 1};
 
 	files_list = gfl->hlist;
 	gtk_window_set_title(GTK_WINDOW(gfl->window), cfl->path);
@@ -1082,7 +1081,9 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 		else {
 			sizstr = human_size(humanbuf, fh->fsize);
 		}
-		gtk_hlist_set_foreground(GTK_HLIST(files_list), row, &col);
+		/* Phase 5 dark-theme: no per-row foreground override — theme
+		 * default applies, so file size + name read on both light
+		 * and dark themes. */
 		gtk_hlist_set_text(GTK_HLIST(files_list), row, 0, sizstr);
 		
 		if (!pixmap) {
