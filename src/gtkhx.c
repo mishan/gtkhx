@@ -299,6 +299,59 @@ gtkhx_active_window (void)
 	return gtk_application_get_active_window (gtkhx_app);
 }
 
+/* Phase 5 settings management:
+ *
+ * Resolve the per-user config root, in priority order:
+ *   1. $GTKHX_PATH if set (escape hatch / portable installs)
+ *   2. $XDG_CONFIG_HOME/gtkhx
+ *   3. $HOME/.config/gtkhx
+ *
+ * The directory is created with mkdir -p semantics on first call so
+ * downstream callers never have to worry about ENOENT on the parent.
+ * The returned string is owned by this function — caller must not
+ * free. Subsequent calls return the cached path.
+ *
+ * Subdirectories used by the rest of the codebase:
+ *   $CONFIG/gtkhxrc      — main prefs file
+ *   $CONFIG/bookmarks/   — connect.c bookmarks (replaces ~/.hx/bookmarks)
+ *   $CONFIG/logs/        — log.c (replaces ~/.hx/logs)
+ *   $CONFIG/icons/*.rsrc — auto-discovered Mac classic icon resources
+ *   $CONFIG/sounds/      — user-supplied chat sound effects
+ */
+const char *
+gtkhx_config_dir (void)
+{
+	static char *cached;
+	const char *override;
+	const char *xdg;
+	const char *home;
+
+	if (cached)
+		return cached;
+
+	override = g_getenv ("GTKHX_PATH");
+	if (override && *override) {
+		cached = g_strdup (override);
+	} else {
+		xdg = g_getenv ("XDG_CONFIG_HOME");
+		if (xdg && *xdg) {
+			cached = g_build_filename (xdg, "gtkhx", NULL);
+		} else {
+			home = g_getenv ("HOME");
+			if (!home || !*home)
+				home = g_get_home_dir ();
+			cached = g_build_filename (home ? home : "/", ".config", "gtkhx", NULL);
+		}
+	}
+
+	if (g_mkdir_with_parents (cached, 0700) != 0) {
+		g_warning ("gtkhx_config_dir: mkdir %s: %s",
+		           cached, g_strerror (errno));
+	}
+
+	return cached;
+}
+
 /*
  * Phase 3.x: capture each toplevel's final position into prefs before
  * prefs_write.

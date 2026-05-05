@@ -35,4 +35,10 @@ extern void gtkhx_refresh_userlist_css (PangoFontDescription *fd);
  * spawned from a context without a natural parent widget. */
 extern GtkWindow *gtkhx_active_window (void);
 
+/* Returns the per-user config directory, creating it if needed.
+ * Resolution: $GTKHX_PATH > $XDG_CONFIG_HOME/gtkhx > $HOME/.config/gtkhx.
+ * String is owned by the function; do not free. Cached after the
+ * first call. */
+extern const char *gtkhx_config_dir (void);
+
 #endif
