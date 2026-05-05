@@ -497,17 +497,9 @@ task_go (GtkWidget *widget, gpointer data)
 }
 
 /* Phase 3.x: see users.c users_move() for rationale — size on
- * configure, position deferred to quit. */
-static gboolean tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	(void) e; (void) data;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.tasks.xsize = width;
-	gtkhx_prefs.geo.tasks.ysize = height;
-	return FALSE;
-}
+ * configure, position deferred to quit.
+ * Phase 4.5: gone — GTK 4 widgets don't fire configure-event. Tasks
+ * window size is captured at hx_quit() in gtkhx.c. */
 
 void task_tasks_update (session *sess)
 {

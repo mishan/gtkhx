@@ -905,23 +905,11 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	return FALSE;
 }
 
-/* Phase 3.x: see users.c users_move() for rationale — size on
- * configure, position deferred to quit. */
-static gboolean chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	struct gtkhx_chat *gchat = data;
-	(void) e;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.chat.xsize = width;
-	gtkhx_prefs.geo.chat.ysize = height;
-
-	if(gtkhx_prefs.trans_xtext && gchat) {
-		gtk_xtext_refresh(GTK_XTEXT(gchat->output));
-	}
-	return FALSE;
-}
+/* Phase 4.5: configure-event is gone in GTK 4. Window size for the
+ * chat window is captured at hx_quit() in gtkhx.c gtkhx_save_window_positions
+ * alongside position. The transparent-xtext refresh that used to ride
+ * along on configure is gone — under Wayland we don't get true
+ * transparency anyway. */
 
 static GtkWidget *chat_hbox;
 static GtkWidget *wind_tmp;
@@ -1277,16 +1265,10 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	g_free(message);
 }
 
-void pchat_update_trans (GtkWidget *win, GdkEventConfigure *event, 
-						 gpointer data)
-{
-	GtkWidget *xtext = data;
-
-	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(xtext));
-	}
-
-}
+/* Phase 4.5: pchat_update_trans was a configure-event handler that
+ * forced an xtext refresh on every resize so transparency would track
+ * the new window position. configure-event is gone in GTK 4 and
+ * Wayland doesn't expose true window-relative transparency anyway. */
 
 struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc, 
 										struct chat *chat)

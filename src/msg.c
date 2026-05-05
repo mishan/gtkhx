@@ -141,15 +141,10 @@ static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpoi
 	return FALSE;
 }
 
-static void msg_update_trans (GtkWidget *win, GdkEventConfigure *event, gpointer data)
-{
-	GtkWidget *xtext = data;
-
-	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(xtext));
-	}
-
-}
+/* Phase 4.5: msg_update_trans was a configure-event handler that
+ * forced an xtext refresh on resize so transparency would track the
+ * new window position. configure-event is gone in GTK 4, and Wayland
+ * doesn't expose true window-relative transparency anyway. */
 
 static void msg_input_activate (GtkWidget *widget, gpointer data)
 {

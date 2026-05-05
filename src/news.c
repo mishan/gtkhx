@@ -75,18 +75,9 @@ static void close_news_window (GtkWidget *widget, gpointer data)
 	sess->news_window = 0;
 }
 
-/* Phase 3.x: see users.c users_move() for rationale — size on
- * configure, position deferred to quit. */
-static gboolean news_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	(void) e; (void) data;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.news.xsize = width;
-	gtkhx_prefs.geo.news.ysize = height;
-	return FALSE;
-}
+/* Phase 4.5: configure-event is gone in GTK 4. News window size is
+ * captured at hx_quit() time alongside position; see gtkhx.c
+ * gtkhx_save_window_positions. */
 
 static void close_post_window (GtkWidget *widget, gpointer data)
 {

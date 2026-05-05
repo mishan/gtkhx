@@ -85,15 +85,9 @@ void disconnect_clicked (void)
 	}
 }
 
-/* Phase 3.x: position is now captured at hx_quit() time (see
- * gtkhx_save_window_positions in gtkhx.c) and the toolbar has no
- * resizable size to save, so this handler is a no-op kept for the
- * signal connection symmetry. */
-static gboolean tool_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	(void) w; (void) e; (void) data;
-	return FALSE;
-}
+/* Phase 4.5: configure-event is gone in GTK 4 and the toolbar window
+ * has no resizable size to save anyway. Position is captured at
+ * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
 void create_toolbar_window (session *sess)
 {

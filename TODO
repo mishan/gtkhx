@@ -13,7 +13,9 @@ Code Modernization:
 - Define string / resource consts instead of repeating them
 
 Features:
+- Custom color palette
 - Log chat history / server, and be able to bring that chat history back up when connecting to a server
+
 
 Old:
 -Full file support (not sure what this means)
