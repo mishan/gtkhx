@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <sys/time.h>
 #include <time.h>
 #include <netinet/in.h>
@@ -69,6 +70,7 @@ struct gtkhx_prefs gtkhx_prefs =
 {
 	0,
 	0,
+	"system",	/* theme: "system" / "light" / "dark" */
 	PREFIX"/share/gtkhx/sounds",
 	"",
 	"fixed",
@@ -309,6 +311,30 @@ static void changed_filesamewin (session *sess)
 		gtk_widget_set_sensitive(gfl->up_btn, gtkhx_prefs.file_samewin);
 	}
 }
+
+/* Phase 5: apply the THEME pref to libadwaita's style manager. The pref
+ * is one of "system" / "light" / "dark"; anything else falls back to
+ * the system default so a hand-edited gtkhxrc with a typo doesn't lock
+ * the user into a broken state. Called both at startup (after prefs_read)
+ * and via the cfgvar change-callback when the user picks a new value
+ * in Settings. */
+static void changed_theme (session *sess)
+{
+	AdwStyleManager *sm = adw_style_manager_get_default ();
+	const char *theme = gtkhx_prefs.theme ? gtkhx_prefs.theme : "system";
+	AdwColorScheme scheme;
+
+	(void) sess;
+
+	if (g_strcmp0 (theme, "light") == 0)
+		scheme = ADW_COLOR_SCHEME_FORCE_LIGHT;
+	else if (g_strcmp0 (theme, "dark") == 0)
+		scheme = ADW_COLOR_SCHEME_FORCE_DARK;
+	else
+		scheme = ADW_COLOR_SCHEME_DEFAULT;
+
+	adw_style_manager_set_color_scheme (sm, scheme);
+}
 static void changed_newssamewin (session *sess)
 {
 	struct gnews_folder *gfnews;
@@ -396,6 +422,7 @@ struct cfgvar
 	{"TASKXSIZE", {&gtkhx_prefs.geo.tasks.xsize}, INT, 0, NULL, NULL},
 	{"TASKYPOS", {&gtkhx_prefs.geo.tasks.ypos}, INT, 0, NULL, NULL},
 	{"TASKYSIZE", {&gtkhx_prefs.geo.tasks.ysize}, INT, 0, NULL, NULL},
+	{"THEME", {&gtkhx_prefs.theme}, STRING, 0, changed_theme, NULL},
 	{"TIME", {&total_time}, TIME_T, 0, NULL, NULL},
 	{"TIMESTAMP", {&gtkhx_prefs.timestamp}, BOOLEAN, 0, NULL, NULL},
 	{"TOOLXPOS", {&gtkhx_prefs.geo.tool.xpos}, INT, 0, NULL, NULL},
