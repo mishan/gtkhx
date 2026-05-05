@@ -255,6 +255,8 @@ static void gtk_xtext_search_textentry_fini (gpointer, gpointer);
 static void gtk_xtext_search_fini (xtext_buffer *);
 static gboolean gtk_xtext_search_init (xtext_buffer *buf, const gchar *text, gtk_xtext_search_flags flags, GError **perr);
 static char * gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent, int *ret_off, int *ret_len, GSList **slp);
+static gboolean gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
+                                     gdouble dx, gdouble dy, gpointer user_data);
 
 /* Phase 3.10: palette colors are GdkRGBA, which is what
  * gdk_cairo_set_source_rgba consumes — no per-draw conversion. */
@@ -619,10 +621,18 @@ gtk_xtext_init (GtkXText * xtext)
 	xtext->dont_render2 = FALSE;
 	gtk_xtext_scroll_adjustments (xtext, NULL, NULL);
 
-	/* Phase 3.4b: gtk_selection_add_targets is deferred until realize().
-	 * On Wayland (and arguably under GTK 3 in general) calling it from
-	 * init() crashes inside the backend selection setup because the
-	 * widget has no display yet. */
+	/* Phase 4.9: install GTK 4 event controllers. The widgets-vs-event-
+	 * signals split means clicks/motion/scroll/keys reach the widget via
+	 * controllers rather than ::button_press_event / ::motion_notify_event
+	 * / ::scroll_event. Each controller has its own bound-signal contract;
+	 * the handlers live a few hundred lines below. */
+	{
+		GtkEventController *scroll;
+
+		scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+		g_signal_connect (scroll, "scroll", G_CALLBACK (gtk_xtext_scroll_cb), xtext);
+		gtk_widget_add_controller (GTK_WIDGET (xtext), scroll);
+	}
 }
 
 static void
@@ -1446,22 +1456,59 @@ lamejump:
 	xtext->skip_stamp = FALSE;
 }
 
+/* Phase 4.9: GtkEventControllerScroll callback for the wheel.
+ *
+ * Replaces the GTK 3 ::scroll-event handler. The controller is created
+ * with GTK_EVENT_CONTROLLER_SCROLL_VERTICAL so dy is meaningful (down
+ * is positive, up is negative); we ignore dx. The old handler nudged
+ * the adjustment by page_increment/10 per scroll tick — preserve that
+ * cadence and just multiply by dy so smooth-scroll devices (touchpads,
+ * Wayland high-resolution wheels) act proportionally. */
+static gboolean
+gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
+                     gdouble dx, gdouble dy, gpointer user_data)
+{
+	GtkXText *xtext = user_data;
+	GtkAdjustment *adj = xtext->adj;
+	gdouble step;
+	gdouble new_value;
+	gdouble lower, upper, page_size;
+
+	(void) controller;
+	(void) dx;
+
+	step = gtk_adjustment_get_page_increment (adj) / 10.0;
+	new_value = gtk_adjustment_get_value (adj) + (dy * step);
+
+	lower     = gtk_adjustment_get_lower (adj);
+	upper     = gtk_adjustment_get_upper (adj);
+	page_size = gtk_adjustment_get_page_size (adj);
+
+	if (new_value < lower)
+		new_value = lower;
+	if (new_value > upper - page_size)
+		new_value = upper - page_size;
+
+	gtk_adjustment_set_value (adj, new_value);
+	return GDK_EVENT_STOP;
+}
+
 /* Phase 4.9: BIG DEAD HANDLER BLOCK
  *
- * Everything from gtk_xtext_selection_draw through gtk_xtext_scroll
- * below is the GTK 3 button/motion/scroll/selection handler stack.
+ * Everything from gtk_xtext_selection_draw through gtk_xtext_button_release
+ * below is the GTK 3 button/motion/selection handler stack.
  * In GTK 4 these signals don't exist on widgets — clicks become
- * GtkGestureClick, motion becomes GtkEventControllerMotion, scroll
- * becomes GtkEventControllerScroll, primary-selection ownership moves
- * to gdk_clipboard_set_value on the surface's primary clipboard.
+ * GtkGestureClick, motion becomes GtkEventControllerMotion, and
+ * primary-selection ownership moves to gdk_clipboard_set_text on
+ * the surface's primary clipboard.
  *
  * Re-implementing them all properly is non-trivial (timer-driven
  * auto-scroll during selection, click-to-URL hand cursor, mIRC
  * color-stripping copy, etc.). For now the block is wrapped in
  * #if 0 so the rest of the widget — which is the rendering / text
  * append / font / palette path that the chat output actually exercises
- * — links and runs. Selection, click-to-URL, scroll-to-zoom, and
- * primary-clipboard ownership are degraded until Phase 4.9 follow-up.
+ * — links and runs. Selection, click-to-URL, and primary-clipboard
+ * ownership are degraded until Phase 4.9 follow-up.
  *
  * Tracked specifically:
  *  - gtk_xtext_selection_draw
@@ -1473,7 +1520,6 @@ lamejump:
  *  - gtk_xtext_button_release / gtk_xtext_button_press
  *  - gtk_xtext_selection_kill / gtk_xtext_selection_get_text /
  *    gtk_xtext_selection_get
- *  - gtk_xtext_scroll
  */
 #if 0  /* Phase 4.9 follow-up — see note above. */
 
