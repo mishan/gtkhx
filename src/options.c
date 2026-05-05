@@ -410,71 +410,44 @@ struct cfgvar
 	{"XBUF_MAX", {&gtkhx_prefs.xbuf_max}, INT, 0, changed_xtext, NULL}
 };
 
-enum
+/* Phase 5: the parallel FOO_IDX enum that paired up with cfgvars[] is
+ * gone. Every (*cfgvar_for_name("FOO")) reference is now cfgvar_for_name("FOO"),
+ * which bsearch-finds the entry by its config-file key. The enum was
+ * a maintenance footgun: every new pref needed an entry in two places
+ * in a specific order, and a missing #if-guarded entry (LOGGING_IDX)
+ * could shift all the indices below it.
+ *
+ * cfgvars[] stays sorted alphabetically by name (the file/dialog
+ * construction order doesn't depend on it), and bsearch over ~50
+ * entries is ~6 string compares — negligible against the GTK widget
+ * construction these calls drive. */
+static int cfgnamecmp_const (const void *key, const void *mem);
+
+static struct cfgvar *
+cfgvar_for_name (const char *name)
 {
-	AUTOREPLYMSG_IDX,
-	AUTOREPLYON_IDX,
-	CHATXPOS_IDX,
-	CHATXSIZE_IDX,
-	CHATYPOS_IDX,
-	CHATYSIZE_IDX,
-	DOWNLOAD_IDX,
-	FILE_SAMEWINDOW_IDX,
-	NEWS_SAMEWINDOW_IDX,
-	FONT_IDX,
-	ICON_IDX,
-	ICONS_IDX,
-#if 0 /* XXX */
-	LOGGING_IDX,
-#endif
-	NEWSXPOS_IDX,
-	NEWSXSIZE_IDX,
-	NEWSYPOS_IDX,
-	NEWSYSIZE_IDX,
-	NICK_IDX,
-	OLD_NICKCOMPLETION_IDX,
-	OPENCHAT_IDX,
-	OPENNEWS_IDX,
-	OPENTASKS_IDX,
-	OPENUSERS_IDX,
-	QUEUEDL_IDX,
-	SHOWBACK_IDX,
-	SHOWJOIN_IDX,
-	SND_CMD_IDX,
-	SOUNDCHAT_IDX,
-	SOUNDERROR_IDX,
-	SOUNDFILE_IDX,
-	SOUNDINVITE_IDX,
-	SOUNDJOIN_IDX,
-	SOUNDLOGIN_IDX,
-	SOUNDMSG_IDX,
-	SOUNDNEWS_IDX,
-	SOUNDPART_IDX,
-	SOUNDPATH_IDX,
-	SOUNDSON_IDX,
-	TASKXPOS_IDX,
-	TASKXSIZE_IDX,
-	TASKYPOS_IDX,
-	TASKYSIZE_IDX,
-	TIME_IDX,
-	TIMESTAMP_IDX,
-	TOOLXPOS_IDX,
-	TOOLYPOS_IDX,
-	TRACKER_IDX,
-	TRACKER_CASE_IDX,
-	USERXPOS_IDX,
-	USERXSIZE_IDX,
-	USERYPOS_IDX,
-	USERYSIZE_IDX,
-	WORDWRAP_IDX,
-	XBUF_MAX_IDX
-};
+	struct cfgvar *r = bsearch (name, cfgvars,
+	                            sizeof (cfgvars) / sizeof (cfgvars[0]),
+	                            sizeof (cfgvars[0]),
+	                            cfgnamecmp_const);
+	if (!r) {
+		g_warning ("cfgvar_for_name: unknown pref \"%s\"", name);
+		/* Fall back to the first entry so callers don't crash. */
+		return &cfgvars[0];
+	}
+	return r;
+}
+
+static int cfgnamecmp_const (const void *key, const void *mem)
+{
+	return strcmp ((const char *) key, ((const struct cfgvar *) mem)->name);
+}
 
 void init_variables(void) /* default settings if prefs file is not found. */
 {
 	gtkhx_prefs.font = g_strdup ("Monospace 10");
 	gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
-	cfgvars[FONT_IDX].allocated = 1;
+	(*cfgvar_for_name("FONT")).allocated = 1;
 
 
 	/* Phase 3.10: GdkRGBA defaults — light grey foreground on black,
@@ -496,16 +469,13 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	start_time = time(NULL);
 }
 
-static int cfgnamecmp (char *key, struct cfgvar *mem)
-{
-	return strcmp(key, mem->name);
-}
-
 static void prefs_allocate(char *tag, char *rest)
 {
 	struct cfgvar *result;
-	result= bsearch (tag, cfgvars, sizeof(cfgvars)/sizeof(cfgvars[0]),
-			sizeof(cfgvars[0]), (int (*)(const void*, const void*))cfgnamecmp);
+	result = bsearch (tag, cfgvars,
+	                  sizeof (cfgvars) / sizeof (cfgvars[0]),
+	                  sizeof (cfgvars[0]),
+	                  cfgnamecmp_const);
 
 	if (!result) return;
 
@@ -874,7 +844,7 @@ static void parse_tracker_list(void)
 
 	gtkhx_prefs.num_tracker = GTK_HLIST(list)->rows;
 	gtkhx_prefs.tracker = g_malloc(GTK_HLIST(list)->rows * sizeof(char*));
-	if (cfgvars[TRACKER_IDX].allocated) g_free (gtkhx_prefs.tracker_str);
+	if ((*cfgvar_for_name("TRACKER")).allocated) g_free (gtkhx_prefs.tracker_str);
 	gtkhx_prefs.tracker_str = g_malloc0(1);
 
 	for(i = 0; i < GTK_HLIST(list)->rows; i++) {
@@ -1162,12 +1132,12 @@ static void settings_page_news15 (GtkWidget *vbox)
 	wid = settings_create_group(vbox, _("News Folder Browsing"));
 	table = gtkhx_grid_new_table(1, 1, 0);
 
-	cfgvars[NEWS_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("NEWS_SAMEWINDOW")).widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[NEWS_SAMEWINDOW_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("NEWS_SAMEWINDOW")).widget,
 								 gtkhx_prefs.news_samewin);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NEWS_SAMEWINDOW_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("NEWS_SAMEWINDOW")).widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1183,12 +1153,12 @@ static void settings_page_files(GtkWidget *vbox)
 	wid = settings_create_group(vbox, _("File Browsing"));
 	table = gtkhx_grid_new_table(1, 1, 0);
 
-	cfgvars[FILE_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("FILE_SAMEWINDOW")).widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[FILE_SAMEWINDOW_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("FILE_SAMEWINDOW")).widget,
 								 gtkhx_prefs.file_samewin);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FILE_SAMEWINDOW_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("FILE_SAMEWINDOW")).widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1204,12 +1174,12 @@ static void settings_page_logging (GtkWidget *vbox)
 	wid = settings_create_group(vbox, _("Logging"));
 	table = gtkhx_grid_new_table(1, 1, 0);
 
-	cfgvars[LOGGING_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("LOGGING")).widget = gtk_check_button_new_with_label(
 		_("Log Chats/Private Messages"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[LOGGING_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("LOGGING")).widget,
 								 gtkhx_prefs.logging);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[LOGGING_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("LOGGING")).widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1234,75 +1204,75 @@ static void settings_page_sound(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table2), lbl, 0, 1, 2, 3,
 					 GTK_FILL, GTK_FILL, 0, 0);
 
-	cfgvars[SND_CMD_IDX].widget = gtk_entry_new();
+	(*cfgvar_for_name("SND_CMD")).widget = gtk_entry_new();
 	/* Phase 4.x: GtkEntry.text is now on the GtkEditable interface.
 	 * gtk_entry_set_text/get_text were dropped — use the editable APIs. */
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SND_CMD_IDX].widget),
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("SND_CMD")).widget),
 						   gtkhx_prefs.snd_cmd);
-	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[SND_CMD_IDX].widget, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table2), (*cfgvar_for_name("SND_CMD")).widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
 	gtkhx_box_pack(wid, table2, 0, 0, 0);
 
 	wid = settings_create_group(vbox, _("Sounds"));
 
-	cfgvars[SOUNDSON_IDX].widget = gtk_check_button_new_with_label(_("Play Sounds For:"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDSON_IDX].widget, hxsnd.on);
-	cfgvars[SOUNDINVITE_IDX].widget = gtk_check_button_new_with_label(_("Chat Invitation"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDINVITE_IDX].widget,
+	(*cfgvar_for_name("SOUNDSON")).widget = gtk_check_button_new_with_label(_("Play Sounds For:"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDSON")).widget, hxsnd.on);
+	(*cfgvar_for_name("SOUNDINVITE")).widget = gtk_check_button_new_with_label(_("Chat Invitation"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDINVITE")).widget,
 								 hxsnd.invite);
-	cfgvars[SOUNDCHAT_IDX].widget = gtk_check_button_new_with_label(_("Chat"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDCHAT_IDX].widget,
+	(*cfgvar_for_name("SOUNDCHAT")).widget = gtk_check_button_new_with_label(_("Chat"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDCHAT")).widget,
 								 hxsnd.chat);
-	cfgvars[SOUNDERROR_IDX].widget = gtk_check_button_new_with_label(_("Error"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDERROR_IDX].widget,
+	(*cfgvar_for_name("SOUNDERROR")).widget = gtk_check_button_new_with_label(_("Error"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDERROR")).widget,
 								 hxsnd.error);
-	cfgvars[SOUNDFILE_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("SOUNDFILE")).widget = gtk_check_button_new_with_label(
 		_("File Transfer Complete"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDFILE_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDFILE")).widget,
 								 hxsnd.file);
-	cfgvars[SOUNDJOIN_IDX].widget = gtk_check_button_new_with_label(_("Join"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDJOIN_IDX].widget,
+	(*cfgvar_for_name("SOUNDJOIN")).widget = gtk_check_button_new_with_label(_("Join"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDJOIN")).widget,
 								 hxsnd.join);
-	cfgvars[SOUNDLOGIN_IDX].widget = gtk_check_button_new_with_label(_("Login"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDLOGIN_IDX].widget,
+	(*cfgvar_for_name("SOUNDLOGIN")).widget = gtk_check_button_new_with_label(_("Login"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDLOGIN")).widget,
 								 hxsnd.login);
-	cfgvars[SOUNDMSG_IDX].widget = gtk_check_button_new_with_label(_("Private Message"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDMSG_IDX].widget, hxsnd.msg);
-	cfgvars[SOUNDNEWS_IDX].widget = gtk_check_button_new_with_label(_("News"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDNEWS_IDX].widget,
+	(*cfgvar_for_name("SOUNDMSG")).widget = gtk_check_button_new_with_label(_("Private Message"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDMSG")).widget, hxsnd.msg);
+	(*cfgvar_for_name("SOUNDNEWS")).widget = gtk_check_button_new_with_label(_("News"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDNEWS")).widget,
 								 hxsnd.news);
-	cfgvars[SOUNDPART_IDX].widget = gtk_check_button_new_with_label(_("Leave"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDPART_IDX].widget,
+	(*cfgvar_for_name("SOUNDPART")).widget = gtk_check_button_new_with_label(_("Leave"));
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SOUNDPART")).widget,
 								 hxsnd.part);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDSON_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDSON")).widget, 0, 1, 0, 1,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 4);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDINVITE_IDX].widget, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDINVITE")).widget, 1, 2, 1, 2,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDCHAT_IDX].widget, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDCHAT")).widget, 1, 2, 2, 3,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDERROR_IDX].widget, 1, 2, 3, 4,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDERROR")).widget, 1, 2, 3, 4,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDFILE_IDX].widget, 1, 2, 4, 5,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDFILE")).widget, 1, 2, 4, 5,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDJOIN_IDX].widget, 1, 2, 5, 6,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDJOIN")).widget, 1, 2, 5, 6,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDLOGIN_IDX].widget, 1, 2, 6, 7,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDLOGIN")).widget, 1, 2, 6, 7,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDMSG_IDX].widget, 1, 2, 7, 8,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDMSG")).widget, 1, 2, 7, 8,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDNEWS_IDX].widget, 1, 2, 8, 9,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDNEWS")).widget, 1, 2, 8, 9,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPART_IDX].widget, 1, 2, 9, 10,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDPART")).widget, 1, 2, 9, 10,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	gtkhx_box_pack(wid, table, 0, 0, 0);
@@ -1324,9 +1294,9 @@ static void settings_page_font(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 2, 3,
 					 GTK_FILL, GTK_FILL, 0, 0);
 
-	cfgvars[FONT_IDX].widget = gtk_entry_new();
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[FONT_IDX].widget), gtkhx_prefs.font);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FONT_IDX].widget, 1, 2, 2, 3,
+	(*cfgvar_for_name("FONT")).widget = gtk_entry_new();
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("FONT")).widget), gtkhx_prefs.font);
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("FONT")).widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
 	gtkhx_box_pack(wid, table, 0, 0, 0);
@@ -1337,7 +1307,7 @@ static void settings_page_font(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,
 					 0);
 	g_signal_connect(btn, "clicked",
-					   G_CALLBACK(create_fontsel), cfgvars[FONT_IDX].widget);
+					   G_CALLBACK(create_fontsel), (*cfgvar_for_name("FONT")).widget);
 
 	gtkhx_box_pack(wid, table2, 0, 0, 0);
 }
@@ -1353,27 +1323,27 @@ static void settings_page_xtext(GtkWidget *vbox)
 
 	table2 = gtkhx_grid_new_table(2, 2, 0);
 
-	cfgvars[TIMESTAMP_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("TIMESTAMP")).widget = gtk_check_button_new_with_label(
 		_("Timestamp Chat"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[TIMESTAMP_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("TIMESTAMP")).widget,
 								 gtkhx_prefs.timestamp);
-	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[TIMESTAMP_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table2), (*cfgvar_for_name("TIMESTAMP")).widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
-	cfgvars[WORDWRAP_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("WORDWRAP")).widget = gtk_check_button_new_with_label(
 		_("Word Wrap"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[WORDWRAP_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("WORDWRAP")).widget,
 								 gtkhx_prefs.word_wrap);
-	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[WORDWRAP_IDX].widget, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table2), (*cfgvar_for_name("WORDWRAP")).widget, 1, 2, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	adj = (GtkAdjustment *)gtk_adjustment_new(gtkhx_prefs.xbuf_max, 0, 0xffff,
 											  1, 1, 1);
-	cfgvars[XBUF_MAX_IDX].widget = gtk_spin_button_new(adj, 1, 0);
+	(*cfgvar_for_name("XBUF_MAX")).widget = gtk_spin_button_new(adj, 1, 0);
 	lbl = gtk_label_new(_("Maximum Lines (0 = Unlimited)    "));
 
 	gtkhx_grid_attach_table(GTK_GRID(table2), lbl, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
-	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[XBUF_MAX_IDX].widget, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table2), (*cfgvar_for_name("XBUF_MAX")).widget, 1, 2, 1, 2,
 					 GTK_FILL, 0, 0, 0);
 
 	gtkhx_box_pack(wid, table2, 0, 0, 0);
@@ -1406,11 +1376,11 @@ static void settings_page_path(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 0, 1, GTK_FILL,
 					 0, 0, 0);
 
-	cfgvars[ICONS_IDX].widget = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICONS_IDX].widget, 1, 2, 0, 1,
+	(*cfgvar_for_name("ICONS")).widget = gtk_entry_new();
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("ICONS")).widget, 1, 2, 0, 1,
 					 (GTK_EXPAND|GTK_FILL),
 					 0, 0, 0);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICONS_IDX].widget), gtkhx_prefs.icon_str);
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("ICONS")).widget), gtkhx_prefs.icon_str);
 
 	lbl = gtk_label_new(_("Sound Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
@@ -1418,11 +1388,11 @@ static void settings_page_path(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 1, 2, GTK_FILL,
 					 0, 0, 0);
 
-	cfgvars[SOUNDPATH_IDX].widget = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPATH_IDX].widget, 1, 2, 1, 2,
+	(*cfgvar_for_name("SOUNDPATH")).widget = gtk_entry_new();
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SOUNDPATH")).widget, 1, 2, 1, 2,
 					 (GTK_EXPAND|GTK_FILL),
 					 0, 0, 0);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SOUNDPATH_IDX].widget),
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("SOUNDPATH")).widget),
 						   gtkhx_prefs.sound_path);
 
 	lbl = gtk_label_new(_("Download Path:"));
@@ -1431,11 +1401,11 @@ static void settings_page_path(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 2, 3, GTK_FILL,
 					 0, 0, 0);
 
-	cfgvars[DOWNLOAD_IDX].widget = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[DOWNLOAD_IDX].widget, 1, 2, 2,
+	(*cfgvar_for_name("DOWNLOAD")).widget = gtk_entry_new();
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("DOWNLOAD")).widget, 1, 2, 2,
 					 3, (GTK_EXPAND|GTK_FILL),
 					 0, 0, 0);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[DOWNLOAD_IDX].widget),
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("DOWNLOAD")).widget),
 						   gtkhx_prefs.download_path);
 
 	gtkhx_box_pack(wid, table, 0, 0, 0);
@@ -1469,7 +1439,7 @@ icon_row_selected (GtkWidget *widget, gint row, gint column,
 		return;
 	}
 	g_snprintf(buf, sizeof(buf), "%u", icon);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICON_IDX].widget), buf);
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("ICON")).widget), buf);
 }
 
 static void settings_page_icon(GtkWidget *vbox)
@@ -1492,12 +1462,12 @@ static void settings_page_icon(GtkWidget *vbox)
 	label = gtk_label_new(_("Icon ID: "));
 	gtkhx_grid_attach_table(GTK_GRID(table), label, 0, 1, 0, 1, 0, 0, 0, 0);
 
-	cfgvars[ICON_IDX].widget = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
+	(*cfgvar_for_name("ICON")).widget = gtk_entry_new();
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("ICON")).widget, 1, 2, 0, 1,
 			 (GTK_EXPAND | GTK_FILL),
 			 0, 0, 0);
 	g_snprintf(iconstr, sizeof(iconstr), "%u", the_session.htlc.icon);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICON_IDX].widget), iconstr);
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("ICON")).widget), iconstr);
 
 	scroll = gtk_scrolled_window_new();
 
@@ -1539,58 +1509,58 @@ static void settings_page_misc(GtkWidget *vbox)
 	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
 
-	cfgvars[AUTOREPLYON_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("AUTOREPLYON")).widget = gtk_check_button_new_with_label(
 		_("Auto Reply"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[AUTOREPLYON_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("AUTOREPLYON")).widget,
 								 gtkhx_prefs.auto_reply);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYON_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("AUTOREPLYON")).widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
-	cfgvars[AUTOREPLYMSG_IDX].widget = gtk_entry_new();
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[AUTOREPLYMSG_IDX].widget),
+	(*cfgvar_for_name("AUTOREPLYMSG")).widget = gtk_entry_new();
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("AUTOREPLYMSG")).widget),
 						   gtkhx_prefs.auto_reply_msg);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYMSG_IDX].widget, 1, 2, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("AUTOREPLYMSG")).widget, 1, 2, 0,
 					 1, 0, 0, 0, 0);
 
-	cfgvars[SHOWBACK_IDX].widget = gtk_check_button_new_with_label (
+	(*cfgvar_for_name("SHOWBACK")).widget = gtk_check_button_new_with_label (
 		_("Show Private Messages at Back"));
-	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SHOWBACK_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)(*cfgvar_for_name("SHOWBACK")).widget,
 								 gtkhx_prefs.showback);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWBACK_IDX].widget, 0, 1, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SHOWBACK")).widget, 0, 1, 1, 2,
 			 (GTK_FILL),
 			 (GTK_FILL), 0, 0);
 
-	cfgvars[QUEUEDL_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("QUEUEDL")).widget = gtk_check_button_new_with_label(
 		_("Queue File Transfers"));
 	gtk_check_button_set_active((GtkCheckButton*)
-								 cfgvars[QUEUEDL_IDX].widget, gtkhx_prefs.queuedl);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[QUEUEDL_IDX].widget, 0, 1, 2, 3,
+								 (*cfgvar_for_name("QUEUEDL")).widget, gtkhx_prefs.queuedl);
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("QUEUEDL")).widget, 0, 1, 2, 3,
 			 (GTK_FILL), (GTK_FILL), 0, 0);
 
-	cfgvars[SHOWJOIN_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("SHOWJOIN")).widget = gtk_check_button_new_with_label(
 		_("Show Join/Leave in Chat"));
 	gtk_check_button_set_active((GtkCheckButton*)
-									cfgvars[SHOWJOIN_IDX].widget,
+									(*cfgvar_for_name("SHOWJOIN")).widget,
 									gtkhx_prefs.showjoin);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWJOIN_IDX].widget, 0, 1, 3, 4,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("SHOWJOIN")).widget, 0, 1, 3, 4,
 			 (GTK_FILL),
 			 (GTK_FILL), 0, 0);
 
-	cfgvars[TRACKER_CASE_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("TRACKER_CASE")).widget = gtk_check_button_new_with_label(
 		_("Case Sensitive Tracker Searching"));
 	gtk_check_button_set_active((GtkCheckButton*)
-								 cfgvars[TRACKER_CASE_IDX].widget,
+								 (*cfgvar_for_name("TRACKER_CASE")).widget,
 								 gtkhx_prefs.track_case);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRACKER_CASE_IDX].widget, 0, 1, 4, 5,
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("TRACKER_CASE")).widget, 0, 1, 4, 5,
 			 (GTK_FILL),
 			 (GTK_FILL), 0, 0);
 
-	cfgvars[OLD_NICKCOMPLETION_IDX].widget = gtk_check_button_new_with_label(
+	(*cfgvar_for_name("OLD_NICKCOMPLETION")).widget = gtk_check_button_new_with_label(
 		_("Use old-style nick completion"));
 	gtk_check_button_set_active((GtkCheckButton*)
-								 cfgvars[OLD_NICKCOMPLETION_IDX].widget,
+								 (*cfgvar_for_name("OLD_NICKCOMPLETION")).widget,
 								 gtkhx_prefs.old_nickcompletion);
-	gtkhx_grid_attach_table(GTK_GRID(table),cfgvars[OLD_NICKCOMPLETION_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table),(*cfgvar_for_name("OLD_NICKCOMPLETION")).widget, 0,
 					 1, 5, 6, (GTK_FILL),
 					 (GTK_FILL), 0, 0);
 
@@ -1609,11 +1579,11 @@ static void settings_page_general(GtkWidget *vbox)
 	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
 	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
-	cfgvars[NICK_IDX].widget = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NICK_IDX].widget, 1, 2, 0, 1,
+	(*cfgvar_for_name("NICK")).widget = gtk_entry_new();
+	gtkhx_grid_attach_table(GTK_GRID(table), (*cfgvar_for_name("NICK")).widget, 1, 2, 0, 1,
 			 (GTK_EXPAND | GTK_FILL),
 			 0, 0, 0);
-	gtk_editable_set_text(GTK_EDITABLE(cfgvars[NICK_IDX].widget), the_session.htlc.name);
+	gtk_editable_set_text(GTK_EDITABLE((*cfgvar_for_name("NICK")).widget), the_session.htlc.name);
 
 	name = gtk_label_new(_("Your Name:"));
 	gtkhx_grid_attach_table(GTK_GRID(table), name, 0, 1, 0, 1,
