@@ -42,6 +42,7 @@
 #include "news15.h"
 #include "log.h"
 #include "gtkutil.h"
+#include "cfgkeys.h"
 
 /* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
  * for the icon viewer and the prefs notebook tree (Phase 2.x work),
@@ -69,7 +70,7 @@ GtkWidget *tracker_list = NULL;
 struct gtkhx_prefs gtkhx_prefs =
 {
 	0,			/* num_tracker */
-	"system",	/* theme: "system" / "light" / "dark" */
+	CFG_THEME_SYSTEM,	/* theme: see CFG_THEME_* in cfgkeys.h */
 	"",			/* auto_reply_msg */
 	"fixed",	/* font */
 	".",		/* download_path */
@@ -102,7 +103,6 @@ struct gtkhx_prefs gtkhx_prefs =
 };
 
 static void parse_tracker (session *);
-static void parse_icons (session *);
 
 struct icon_viewer {
 	guint32 icon_high;
@@ -317,14 +317,14 @@ static void changed_filesamewin (session *sess)
 static void changed_theme (session *sess)
 {
 	AdwStyleManager *sm = adw_style_manager_get_default ();
-	const char *theme = gtkhx_prefs.theme ? gtkhx_prefs.theme : "system";
+	const char *theme = gtkhx_prefs.theme ? gtkhx_prefs.theme : CFG_THEME_SYSTEM;
 	AdwColorScheme scheme;
 
 	(void) sess;
 
-	if (g_strcmp0 (theme, "light") == 0)
+	if (g_strcmp0 (theme, CFG_THEME_LIGHT) == 0)
 		scheme = ADW_COLOR_SCHEME_FORCE_LIGHT;
-	else if (g_strcmp0 (theme, "dark") == 0)
+	else if (g_strcmp0 (theme, CFG_THEME_DARK) == 0)
 		scheme = ADW_COLOR_SCHEME_FORCE_DARK;
 	else
 		scheme = ADW_COLOR_SCHEME_DEFAULT;
@@ -370,78 +370,81 @@ struct cfgvar
 	GtkWidget *widget;
 } cfgvars[] =
 {
-	{"AUTOREPLYMSG", {&gtkhx_prefs.auto_reply_msg}, STRING, 0, NULL, NULL},
-	{"AUTOREPLYON", {&gtkhx_prefs.auto_reply}, BOOLEAN, 0, NULL, NULL},
-	{"CHATXPOS", {&gtkhx_prefs.geo.chat.xpos}, INT, 0, NULL, NULL},
-	{"CHATXSIZE", {&gtkhx_prefs.geo.chat.xsize}, INT, 0, NULL, NULL},
-	{"CHATYPOS", {&gtkhx_prefs.geo.chat.ypos}, INT, 0, NULL, NULL},
-	{"CHATYSIZE", {&gtkhx_prefs.geo.chat.ysize}, INT, 0, NULL, NULL},
-	{"DOWNLOAD", {&gtkhx_prefs.download_path}, STRING, 0, changed_downloadpath,
-	 NULL},
-	{"FILE_SAMEWINDOW", {&gtkhx_prefs.file_samewin}, BOOLEAN, 0,
+	{CFG_AUTOREPLY_MSG, {&gtkhx_prefs.auto_reply_msg}, STRING, 0, NULL, NULL},
+	{CFG_AUTOREPLY_ON, {&gtkhx_prefs.auto_reply}, BOOLEAN, 0, NULL, NULL},
+	{CFG_CHAT_XPOS, {&gtkhx_prefs.geo.chat.xpos}, INT, 0, NULL, NULL},
+	{CFG_CHAT_XSIZE, {&gtkhx_prefs.geo.chat.xsize}, INT, 0, NULL, NULL},
+	{CFG_CHAT_YPOS, {&gtkhx_prefs.geo.chat.ypos}, INT, 0, NULL, NULL},
+	{CFG_CHAT_YSIZE, {&gtkhx_prefs.geo.chat.ysize}, INT, 0, NULL, NULL},
+	{CFG_DOWNLOAD, {&gtkhx_prefs.download_path}, STRING, 0,
+	 changed_downloadpath, NULL},
+	{CFG_FILE_SAMEWIN, {&gtkhx_prefs.file_samewin}, BOOLEAN, 0,
 	 changed_filesamewin, NULL},
-	{"FONT", {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
-	{"ICON", {&the_session.htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
+	{CFG_FONT, {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
+	{CFG_ICON, {&the_session.htlc.icon}, UINT16, 0,
+	 /*changed_nickoricon*/NULL, NULL},
 	/* Phase 5: ICONS used to be a comma-separated list of *.rsrc files.
 	 * Auto-discovery in $CONFIG/icons/ + $PREFIX/share/gtkhx/icons/
 	 * replaces it; the cfgvar is gone so a stray ICONS=... line in a
 	 * legacy gtkhxrc is silently dropped by prefs_allocate's bsearch
 	 * miss path, and prefs_write never re-emits one. */
 #if 0 /* XXX */
-	{"LOGGING", {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
-#endif 
-	{"NEWSXPOS", {&gtkhx_prefs.geo.news.xpos}, INT, 0, NULL, NULL},
-	{"NEWSXSIZE", {&gtkhx_prefs.geo.news.xsize}, INT, 0, NULL, NULL},
-	{"NEWSYPOS", {&gtkhx_prefs.geo.news.ypos}, INT, 0, NULL, NULL},
-	{"NEWSYSIZE", {&gtkhx_prefs.geo.news.ysize}, INT, 0, NULL, NULL},
-	{"NEWS_SAMEWINDOW", {&gtkhx_prefs.news_samewin}, BOOLEAN, 0,
+	{CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
+#endif
+	{CFG_NEWS_XPOS, {&gtkhx_prefs.geo.news.xpos}, INT, 0, NULL, NULL},
+	{CFG_NEWS_XSIZE, {&gtkhx_prefs.geo.news.xsize}, INT, 0, NULL, NULL},
+	{CFG_NEWS_YPOS, {&gtkhx_prefs.geo.news.ypos}, INT, 0, NULL, NULL},
+	{CFG_NEWS_YSIZE, {&gtkhx_prefs.geo.news.ysize}, INT, 0, NULL, NULL},
+	{CFG_NEWS_SAMEWIN, {&gtkhx_prefs.news_samewin}, BOOLEAN, 0,
 	 changed_newssamewin, NULL},
-	{"NICK", {the_session.htlc.name}, STRING32, 0, /*changed_nickoricon*/NULL, NULL},
-	{"OLD_NICKCOMPLETION", {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0, NULL,
-	 NULL},
-	{"OPENCHAT", {&gtkhx_prefs.geo.chat.init}, BOOLEAN, 0, NULL, NULL},
-	{"OPENNEWS", {&gtkhx_prefs.geo.news.init}, BOOLEAN, 0, NULL, NULL},
-	{"OPENTASKS", {&gtkhx_prefs.geo.tasks.init}, BOOLEAN, 0, NULL, NULL},
-	{"OPENUSERS", {&gtkhx_prefs.geo.users.init}, BOOLEAN, 0, NULL, NULL},
-	{"QUEUEDL", {&gtkhx_prefs.queuedl}, BOOLEAN, 0, NULL, NULL},
-	{"SHOWBACK", {&gtkhx_prefs.showback}, BOOLEAN, 0, NULL, NULL},
-	{"SHOWJOIN", {&gtkhx_prefs.showjoin}, BOOLEAN, 0, NULL, NULL},
-	{"SND_CMD", {&gtkhx_prefs.snd_cmd}, STRING, 0, NULL, NULL},
-	{"SOUNDCHAT", {&hxsnd.chat}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDERROR", {&hxsnd.error}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDFILE", {&hxsnd.file}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDINVITE", {&hxsnd.invite}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDJOIN", {&hxsnd.join}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDLOGIN", {&hxsnd.login}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDMSG", {&hxsnd.msg}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDNEWS", {&hxsnd.news}, BOOLEAN, 0, NULL, NULL},
-	{"SOUNDPART", {&hxsnd.part}, BOOLEAN, 0, NULL, NULL},
+	{CFG_NICK, {the_session.htlc.name}, STRING32, 0,
+	 /*changed_nickoricon*/NULL, NULL},
+	{CFG_OLD_NICKCOMP, {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0,
+	 NULL, NULL},
+	{CFG_OPEN_CHAT, {&gtkhx_prefs.geo.chat.init}, BOOLEAN, 0, NULL, NULL},
+	{CFG_OPEN_NEWS, {&gtkhx_prefs.geo.news.init}, BOOLEAN, 0, NULL, NULL},
+	{CFG_OPEN_TASKS, {&gtkhx_prefs.geo.tasks.init}, BOOLEAN, 0, NULL, NULL},
+	{CFG_OPEN_USERS, {&gtkhx_prefs.geo.users.init}, BOOLEAN, 0, NULL, NULL},
+	{CFG_QUEUEDL, {&gtkhx_prefs.queuedl}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SHOWBACK, {&gtkhx_prefs.showback}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SHOWJOIN, {&gtkhx_prefs.showjoin}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_CMD, {&gtkhx_prefs.snd_cmd}, STRING, 0, NULL, NULL},
+	{CFG_SND_CHAT, {&hxsnd.chat}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_ERROR, {&hxsnd.error}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_FILE, {&hxsnd.file}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_INVITE, {&hxsnd.invite}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_JOIN, {&hxsnd.join}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_LOGIN, {&hxsnd.login}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_MSG, {&hxsnd.msg}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_NEWS, {&hxsnd.news}, BOOLEAN, 0, NULL, NULL},
+	{CFG_SND_PART, {&hxsnd.part}, BOOLEAN, 0, NULL, NULL},
 	/* Phase 5: SOUNDPATH used to set a fallback directory for sound
 	 * files. Auto-discovery in $CONFIG/sounds/ + $PREFIX/share/gtkhx/sounds/
 	 * replaces it; the cfgvar is gone so legacy gtkhxrc lines are
 	 * silently dropped at parse time. */
-	{"SOUNDSON", {&hxsnd.on}, BOOLEAN, 0, NULL, NULL},
-	{"TASKXPOS", {&gtkhx_prefs.geo.tasks.xpos}, INT, 0, NULL, NULL},
-	{"TASKXSIZE", {&gtkhx_prefs.geo.tasks.xsize}, INT, 0, NULL, NULL},
-	{"TASKYPOS", {&gtkhx_prefs.geo.tasks.ypos}, INT, 0, NULL, NULL},
-	{"TASKYSIZE", {&gtkhx_prefs.geo.tasks.ysize}, INT, 0, NULL, NULL},
-	{"THEME", {&gtkhx_prefs.theme}, STRING, 0, changed_theme, NULL},
-	{"TIME", {&total_time}, TIME_T, 0, NULL, NULL},
-	{"TIMESTAMP", {&gtkhx_prefs.timestamp}, BOOLEAN, 0, NULL, NULL},
-	{"TOOLXPOS", {&gtkhx_prefs.geo.tool.xpos}, INT, 0, NULL, NULL},
-	{"TOOLYPOS", {&gtkhx_prefs.geo.tool.ypos}, INT, 0, NULL, NULL},
-	{"TRACKER", {&gtkhx_prefs.tracker_str}, STRING, 0, parse_tracker, NULL},
-	{"TRACKER_CASE", {&gtkhx_prefs.track_case}, BOOLEAN, 0, changed_case, NULL},
-	{"USERXPOS", {&gtkhx_prefs.geo.users.xpos}, INT, 0, NULL, NULL},
-	{"USERXSIZE", {&gtkhx_prefs.geo.users.xsize}, INT, 0, NULL, NULL},
-	{"USERYPOS", {&gtkhx_prefs.geo.users.ypos}, INT, 0, NULL, NULL},
-	{"USERYSIZE", {&gtkhx_prefs.geo.users.ysize}, INT, 0, NULL, NULL},
-	{"WORDWRAP", {&gtkhx_prefs.word_wrap}, BOOLEAN, 0, changed_xtext, NULL},
-	{"XBUF_MAX", {&gtkhx_prefs.xbuf_max}, INT, 0, changed_xtext, NULL}
+	{CFG_SOUNDS_ON, {&hxsnd.on}, BOOLEAN, 0, NULL, NULL},
+	{CFG_TASK_XPOS, {&gtkhx_prefs.geo.tasks.xpos}, INT, 0, NULL, NULL},
+	{CFG_TASK_XSIZE, {&gtkhx_prefs.geo.tasks.xsize}, INT, 0, NULL, NULL},
+	{CFG_TASK_YPOS, {&gtkhx_prefs.geo.tasks.ypos}, INT, 0, NULL, NULL},
+	{CFG_TASK_YSIZE, {&gtkhx_prefs.geo.tasks.ysize}, INT, 0, NULL, NULL},
+	{CFG_THEME, {&gtkhx_prefs.theme}, STRING, 0, changed_theme, NULL},
+	{CFG_TIME, {&total_time}, TIME_T, 0, NULL, NULL},
+	{CFG_TIMESTAMP, {&gtkhx_prefs.timestamp}, BOOLEAN, 0, NULL, NULL},
+	{CFG_TOOL_XPOS, {&gtkhx_prefs.geo.tool.xpos}, INT, 0, NULL, NULL},
+	{CFG_TOOL_YPOS, {&gtkhx_prefs.geo.tool.ypos}, INT, 0, NULL, NULL},
+	{CFG_TRACKER, {&gtkhx_prefs.tracker_str}, STRING, 0, parse_tracker, NULL},
+	{CFG_TRACKER_CASE, {&gtkhx_prefs.track_case}, BOOLEAN, 0,
+	 changed_case, NULL},
+	{CFG_USER_XPOS, {&gtkhx_prefs.geo.users.xpos}, INT, 0, NULL, NULL},
+	{CFG_USER_XSIZE, {&gtkhx_prefs.geo.users.xsize}, INT, 0, NULL, NULL},
+	{CFG_USER_YPOS, {&gtkhx_prefs.geo.users.ypos}, INT, 0, NULL, NULL},
+	{CFG_USER_YSIZE, {&gtkhx_prefs.geo.users.ysize}, INT, 0, NULL, NULL},
+	{CFG_WORDWRAP, {&gtkhx_prefs.word_wrap}, BOOLEAN, 0, changed_xtext, NULL},
+	{CFG_XBUF_MAX, {&gtkhx_prefs.xbuf_max}, INT, 0, changed_xtext, NULL}
 };
 
 /* Phase 5: the parallel FOO_IDX enum that paired up with cfgvars[] is
- * gone. Every (*cfgvar_for_name("FOO")) reference is now cfgvar_for_name("FOO"),
+ * gone. Every (*cfgvar_for_name(CFG_FOO)) reference is now cfgvar_for_name(CFG_FOO),
  * which bsearch-finds the entry by its config-file key. The enum was
  * a maintenance footgun: every new pref needed an entry in two places
  * in a specific order, and a missing #if-guarded entry (LOGGING_IDX)
@@ -743,7 +746,7 @@ void init_variables(void) /* default settings if prefs file is not found. */
 {
 	gtkhx_prefs.font = g_strdup ("Monospace 10");
 	gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
-	(*cfgvar_for_name("FONT")).allocated = 1;
+	(*cfgvar_for_name(CFG_FONT)).allocated = 1;
 
 
 	/* Phase 3.10: GdkRGBA defaults — light grey foreground on black,
@@ -901,8 +904,8 @@ prefs_legacy_path (void)
 /* Phase 5: read a GKeyFile [gtkhx] section, feeding each entry through
  * prefs_allocate. Reuses the legacy parser's type dispatch — no
  * per-cfgvar plumbing change. Returns TRUE if the keyfile parsed
- * cleanly (whether or not the section was empty). */
-#define GTKHX_KEYFILE_GROUP "gtkhx"
+ * cleanly (whether or not the section was empty). The section name
+ * ("gtkhx") lives in cfgkeys.h as CFG_KEYFILE_GROUP. */
 static gboolean
 prefs_read_keyfile (const char *path)
 {
@@ -919,7 +922,7 @@ prefs_read_keyfile (const char *path)
 		return FALSE;
 	}
 
-	keys = g_key_file_get_keys (kf, GTKHX_KEYFILE_GROUP, &n_keys, &err);
+	keys = g_key_file_get_keys (kf, CFG_KEYFILE_GROUP, &n_keys, &err);
 	if (!keys) {
 		/* No [gtkhx] section — almost certainly a legacy KEY=VALUE
 		 * file we just got lucky parsing. Fall through to the
@@ -930,7 +933,7 @@ prefs_read_keyfile (const char *path)
 	}
 
 	for (i = 0; i < n_keys; i++) {
-		gchar *value = g_key_file_get_value (kf, GTKHX_KEYFILE_GROUP,
+		gchar *value = g_key_file_get_value (kf, CFG_KEYFILE_GROUP,
 		                                     keys[i], NULL);
 		if (value) {
 			prefs_allocate (keys[i], value);
@@ -1024,34 +1027,34 @@ void prefs_write(void)
 	kf = g_key_file_new ();
 	g_key_file_set_comment (kf, NULL, NULL,
 	                        " GtkHx preferences (GKeyFile format).\n"
-	                        " Edit values under [" GTKHX_KEYFILE_GROUP "] or use Settings.",
+	                        " Edit values under [" CFG_KEYFILE_GROUP "] or use Settings.",
 	                        NULL);
 
 	for (i = 0; i != (int)(sizeof (cfgvars) / sizeof (cfgvars[0])); ++i) {
 		struct cfgvar *v = &cfgvars[i];
 		switch (v->type) {
 		case UINT16:
-			g_key_file_set_integer (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_integer (kf, CFG_KEYFILE_GROUP, v->name,
 			                        (gint) *v->variable.uint16);
 			break;
 		case STRING:
-			g_key_file_set_string (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_string (kf, CFG_KEYFILE_GROUP, v->name,
 			                       *v->variable.str ? *v->variable.str : "");
 			break;
 		case INT:
-			g_key_file_set_integer (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_integer (kf, CFG_KEYFILE_GROUP, v->name,
 			                        *v->variable.integer);
 			break;
 		case TIME_T:
-			g_key_file_set_int64 (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_int64 (kf, CFG_KEYFILE_GROUP, v->name,
 			                      (gint64) *v->variable.timet);
 			break;
 		case STRING32:
-			g_key_file_set_string (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_string (kf, CFG_KEYFILE_GROUP, v->name,
 			                       v->variable.str32);
 			break;
 		case BOOLEAN:
-			g_key_file_set_boolean (kf, GTKHX_KEYFILE_GROUP, v->name,
+			g_key_file_set_boolean (kf, CFG_KEYFILE_GROUP, v->name,
 			                        *v->variable.uchar ? TRUE : FALSE);
 			break;
 		}
@@ -1112,7 +1115,7 @@ static void parse_tracker_list(void)
 
 	gtkhx_prefs.num_tracker = GTK_HLIST(list)->rows;
 	gtkhx_prefs.tracker = g_malloc(GTK_HLIST(list)->rows * sizeof(char*));
-	if ((*cfgvar_for_name("TRACKER")).allocated) g_free (gtkhx_prefs.tracker_str);
+	if ((*cfgvar_for_name(CFG_TRACKER)).allocated) g_free (gtkhx_prefs.tracker_str);
 	gtkhx_prefs.tracker_str = g_malloc0(1);
 
 	for(i = 0; i < GTK_HLIST(list)->rows; i++) {
@@ -1297,7 +1300,7 @@ static void settings_page_news15 (AdwPreferencesPage *page)
 
 	adw_preferences_group_set_title (grp, _("News Folder Browsing"));
 	adw_preferences_group_add (grp, 
-		pref_switch_row ("NEWS_SAMEWINDOW",
+		pref_switch_row (CFG_NEWS_SAMEWIN,
 		                 _("Browse in Same Window"),
 		                 _("Replace the current window when descending into a folder")));
 	adw_preferences_page_add (page, grp);
@@ -1309,7 +1312,7 @@ static void settings_page_files (AdwPreferencesPage *page)
 
 	adw_preferences_group_set_title (grp, _("File Browsing"));
 	adw_preferences_group_add (grp, 
-		pref_switch_row ("FILE_SAMEWINDOW",
+		pref_switch_row (CFG_FILE_SAMEWIN,
 		                 _("Browse in Same Window"),
 		                 _("Replace the current window when descending into a folder")));
 	adw_preferences_page_add (page, grp);
@@ -1322,7 +1325,7 @@ static void settings_page_sound (AdwPreferencesPage *page)
 	master = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (master, _("Sounds"));
 	adw_preferences_group_add (master, 
-		pref_switch_row ("SOUNDSON",
+		pref_switch_row (CFG_SOUNDS_ON,
 		                 _("Play sounds"),
 		                 _("Master switch for chat and transfer alerts")));
 	adw_preferences_page_add (page, master);
@@ -1330,23 +1333,23 @@ static void settings_page_sound (AdwPreferencesPage *page)
 	events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (events, _("Events"));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDINVITE", _("Chat invitation"), NULL));
+		pref_switch_row (CFG_SND_INVITE, _("Chat invitation"), NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDCHAT",   _("Chat message"),    NULL));
+		pref_switch_row (CFG_SND_CHAT,   _("Chat message"),    NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDERROR",  _("Error"),           NULL));
+		pref_switch_row (CFG_SND_ERROR,  _("Error"),           NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDFILE",   _("Transfer complete"), NULL));
+		pref_switch_row (CFG_SND_FILE,   _("Transfer complete"), NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDJOIN",   _("Join"),            NULL));
+		pref_switch_row (CFG_SND_JOIN,   _("Join"),            NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDLOGIN",  _("Login"),           NULL));
+		pref_switch_row (CFG_SND_LOGIN,  _("Login"),           NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDMSG",    _("Private message"), NULL));
+		pref_switch_row (CFG_SND_MSG,    _("Private message"), NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDNEWS",   _("News post"),       NULL));
+		pref_switch_row (CFG_SND_NEWS,   _("News post"),       NULL));
 	adw_preferences_group_add (events, 
-		pref_switch_row ("SOUNDPART",   _("Leave"),           NULL));
+		pref_switch_row (CFG_SND_PART,   _("Leave"),           NULL));
 	adw_preferences_page_add (page, events);
 
 	cmd = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -1354,7 +1357,7 @@ static void settings_page_sound (AdwPreferencesPage *page)
 	adw_preferences_group_set_description (cmd,
 		_("Player invoked with the sound file as its first argument"));
 	adw_preferences_group_add (cmd, 
-		pref_entry_row ("SND_CMD", _("Command")));
+		pref_entry_row (CFG_SND_CMD, _("Command")));
 	adw_preferences_page_add (page, cmd);
 }
 
@@ -1369,11 +1372,11 @@ static void settings_page_chat (AdwPreferencesPage *page)
 	output_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (output_grp, _("Chat output"));
 	adw_preferences_group_add (output_grp,
-		pref_switch_row ("TIMESTAMP", _("Show timestamps"), NULL));
+		pref_switch_row (CFG_TIMESTAMP, _("Show timestamps"), NULL));
 	adw_preferences_group_add (output_grp,
-		pref_switch_row ("WORDWRAP", _("Word wrap"), NULL));
+		pref_switch_row (CFG_WORDWRAP, _("Word wrap"), NULL));
 	adw_preferences_group_add (output_grp,
-		pref_spin_row   ("XBUF_MAX",
+		pref_spin_row   (CFG_XBUF_MAX,
 		                 _("Scrollback lines"),
 		                 _("0 keeps unlimited scrollback"),
 		                 0, 0xffff, 1));
@@ -1384,7 +1387,7 @@ static void settings_page_chat (AdwPreferencesPage *page)
 	adw_preferences_group_set_description (font_grp,
 		_("Pango font description, e.g. \"Monospace 11\""));
 
-	entry_row = pref_entry_row ("FONT", _("Font"));
+	entry_row = pref_entry_row (CFG_FONT, _("Font"));
 
 	/* Add a Browse button as a suffix on the entry row so users get a
 	 * native font picker without leaving the prefs context. */
@@ -1411,7 +1414,7 @@ static void settings_page_path (AdwPreferencesPage *page)
 	 * gtkhxrc files still parse cleanly — they just no longer appear
 	 * as editable settings. */
 	adw_preferences_group_add (grp,
-		pref_entry_row ("DOWNLOAD",  _("Download directory")));
+		pref_entry_row (CFG_DOWNLOAD,  _("Download directory")));
 
 	adw_preferences_page_add (page, grp);
 }
@@ -1451,7 +1454,7 @@ icon_row_selected (GtkWidget *widget, gint row, gint column,
 	 * segfault we couldn't reproduce. Use the proper API: setting the
 	 * value fires notify::value, which routes through on_spin_row_value
 	 * to write back to the_session.htlc.icon + prefs_write. */
-	v = cfgvar_for_name ("ICON");
+	v = cfgvar_for_name (CFG_ICON);
 	if (v && v->widget && ADW_IS_SPIN_ROW (v->widget))
 		adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
 }
@@ -1471,13 +1474,13 @@ static void settings_page_identity (AdwPreferencesPage *page)
 
 	name_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (name_grp, _("Display name"));
-	adw_preferences_group_add (name_grp, pref_entry_row ("NICK", _("Your name")));
+	adw_preferences_group_add (name_grp, pref_entry_row (CFG_NICK, _("Your name")));
 	adw_preferences_page_add (page, name_grp);
 
 	id_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (id_grp, _("Identity icon"));
 	adw_preferences_group_add (id_grp,
-		pref_spin_row ("ICON",
+		pref_spin_row (CFG_ICON,
 		               _("Icon ID"),
 		               _("Numeric ID from the loaded icon resource files"),
 		               0, 65535, 1));
@@ -1531,30 +1534,30 @@ static void settings_page_misc (AdwPreferencesPage *page)
 	autoreply = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (autoreply, _("Auto Reply"));
 	adw_preferences_group_add (autoreply, 
-		pref_switch_row ("AUTOREPLYON",
+		pref_switch_row (CFG_AUTOREPLY_ON,
 		                 _("Enable auto reply"), NULL));
 	adw_preferences_group_add (autoreply, 
-		pref_entry_row ("AUTOREPLYMSG", _("Reply message")));
+		pref_entry_row (CFG_AUTOREPLY_MSG, _("Reply message")));
 	adw_preferences_page_add (page, autoreply);
 
 	behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (behavior, _("Behavior"));
 	adw_preferences_group_add (behavior, 
-		pref_switch_row ("SHOWBACK",
+		pref_switch_row (CFG_SHOWBACK,
 		                 _("Show private messages at back"),
 		                 _("Don't raise the chat window when a private message arrives")));
 	adw_preferences_group_add (behavior, 
-		pref_switch_row ("QUEUEDL",
+		pref_switch_row (CFG_QUEUEDL,
 		                 _("Queue file transfers"),
 		                 _("Run downloads one at a time instead of in parallel")));
 	adw_preferences_group_add (behavior, 
-		pref_switch_row ("SHOWJOIN",
+		pref_switch_row (CFG_SHOWJOIN,
 		                 _("Show join / leave in chat"), NULL));
 	adw_preferences_group_add (behavior, 
-		pref_switch_row ("TRACKER_CASE",
+		pref_switch_row (CFG_TRACKER_CASE,
 		                 _("Case-sensitive tracker search"), NULL));
 	adw_preferences_group_add (behavior, 
-		pref_switch_row ("OLD_NICKCOMPLETION",
+		pref_switch_row (CFG_OLD_NICKCOMP,
 		                 _("Old-style nick completion"), NULL));
 	adw_preferences_page_add (page, behavior);
 }
@@ -1565,7 +1568,9 @@ static void settings_page_misc (AdwPreferencesPage *page)
 static void settings_page_appearance (AdwPreferencesPage *page)
 {
 	AdwPreferencesGroup *grp;
-	static const char *vals[]   = { "system", "light", "dark" };
+	static const char *vals[]   = {
+		CFG_THEME_SYSTEM, CFG_THEME_LIGHT, CFG_THEME_DARK
+	};
 	const char *labels[3];
 
 	labels[0] = _("Follow system");
@@ -1578,7 +1583,7 @@ static void settings_page_appearance (AdwPreferencesPage *page)
 		_("Color scheme. \"Follow system\" tracks the desktop's "
 		  "light/dark preference."));
 	adw_preferences_group_add (grp, 
-		pref_combo_row ("THEME", _("Theme"), vals, labels, 3));
+		pref_combo_row (CFG_THEME, _("Theme"), vals, labels, 3));
 	adw_preferences_page_add (page, grp);
 }
 

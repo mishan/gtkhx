@@ -1,0 +1,123 @@
+/*
+ * cfgkeys.h — config-key string constants.
+ *
+ * The cfgvars[] table in options.c is keyed by short upper-case strings
+ * ("FONT", "ICON", "THEME", ...). The same strings appear at the call
+ * sites where the dialog rows are built (pref_*_row("FONT", ...)) and
+ * where code reaches into the table by name (cfgvar_for_name("FONT")).
+ * Repeating the literal at every site is a typo magnet and makes
+ * grep-based refactors brittle: misspelling "FONT" as "FNT" compiles
+ * cleanly, runs, and silently drops the pref.
+ *
+ * Centralize the keys here as #defines so:
+ *   1. The compiler still folds them into a single .rodata copy.
+ *   2. A typo at a call site is now a "use of undeclared identifier"
+ *      compile error instead of a runtime drop.
+ *   3. The full set of config keys is discoverable in one place,
+ *      grouped by what they configure.
+ *
+ * Anything that touches a cfgvar by string name should use these
+ * constants rather than hard-coding the literal. The cfgvars[] table
+ * uses them as initializer values, so its alphabetic-sort invariant is
+ * preserved (the literals collapse to the same bytes either way).
+ *
+ * Adding a new pref: define the key here, add the cfgvars[] entry, and
+ * the cfgvars_assert_sorted() check at startup will catch a misordered
+ * insert before bsearch does anything subtle.
+ */
+
+#ifndef __gtkhx_CFGKEYS_H
+#define __gtkhx_CFGKEYS_H 1
+
+/* Identity */
+#define CFG_NICK            "NICK"
+#define CFG_ICON            "ICON"
+
+/* Auto-reply */
+#define CFG_AUTOREPLY_ON    "AUTOREPLYON"
+#define CFG_AUTOREPLY_MSG   "AUTOREPLYMSG"
+
+/* Behavior toggles */
+#define CFG_QUEUEDL         "QUEUEDL"
+#define CFG_SHOWBACK        "SHOWBACK"
+#define CFG_SHOWJOIN        "SHOWJOIN"
+#define CFG_TRACKER_CASE    "TRACKER_CASE"
+#define CFG_OLD_NICKCOMP    "OLD_NICKCOMPLETION"
+
+/* Chat output */
+#define CFG_TIMESTAMP       "TIMESTAMP"
+#define CFG_WORDWRAP        "WORDWRAP"
+#define CFG_XBUF_MAX        "XBUF_MAX"
+#define CFG_FONT            "FONT"
+
+/* Files / news same-window navigation */
+#define CFG_FILE_SAMEWIN    "FILE_SAMEWINDOW"
+#define CFG_NEWS_SAMEWIN    "NEWS_SAMEWINDOW"
+
+/* Sounds */
+#define CFG_SOUNDS_ON       "SOUNDSON"
+#define CFG_SND_CMD         "SND_CMD"
+#define CFG_SND_INVITE      "SOUNDINVITE"
+#define CFG_SND_CHAT        "SOUNDCHAT"
+#define CFG_SND_ERROR       "SOUNDERROR"
+#define CFG_SND_FILE        "SOUNDFILE"
+#define CFG_SND_JOIN        "SOUNDJOIN"
+#define CFG_SND_LOGIN       "SOUNDLOGIN"
+#define CFG_SND_MSG         "SOUNDMSG"
+#define CFG_SND_NEWS        "SOUNDNEWS"
+#define CFG_SND_PART        "SOUNDPART"
+
+/* Paths */
+#define CFG_DOWNLOAD        "DOWNLOAD"
+
+/* Tracker list (single comma-separated string) */
+#define CFG_TRACKER         "TRACKER"
+
+/* Appearance */
+#define CFG_THEME           "THEME"
+
+/* THEME string values (case-sensitive — must match changed_theme()). */
+#define CFG_THEME_SYSTEM    "system"
+#define CFG_THEME_LIGHT     "light"
+#define CFG_THEME_DARK      "dark"
+
+/* Logging (currently #if-0'd out, kept here for symmetry) */
+#define CFG_LOGGING         "LOGGING"
+
+/* Timer / startup bookkeeping */
+#define CFG_TIME            "TIME"
+
+/* Window geometry — five windows × four corners + an OPEN flag.
+ * Names match the historic gtkhxrc keys; consumers always use these
+ * five base names so a global 5x5 sweep still finds every reference. */
+#define CFG_CHAT_XPOS       "CHATXPOS"
+#define CFG_CHAT_YPOS       "CHATYPOS"
+#define CFG_CHAT_XSIZE      "CHATXSIZE"
+#define CFG_CHAT_YSIZE      "CHATYSIZE"
+#define CFG_OPEN_CHAT       "OPENCHAT"
+
+#define CFG_NEWS_XPOS       "NEWSXPOS"
+#define CFG_NEWS_YPOS       "NEWSYPOS"
+#define CFG_NEWS_XSIZE      "NEWSXSIZE"
+#define CFG_NEWS_YSIZE      "NEWSYSIZE"
+#define CFG_OPEN_NEWS       "OPENNEWS"
+
+#define CFG_TOOL_XPOS       "TOOLXPOS"
+#define CFG_TOOL_YPOS       "TOOLYPOS"
+
+#define CFG_TASK_XPOS       "TASKXPOS"
+#define CFG_TASK_YPOS       "TASKYPOS"
+#define CFG_TASK_XSIZE      "TASKXSIZE"
+#define CFG_TASK_YSIZE      "TASKYSIZE"
+#define CFG_OPEN_TASKS      "OPENTASKS"
+
+#define CFG_USER_XPOS       "USERXPOS"
+#define CFG_USER_YPOS       "USERYPOS"
+#define CFG_USER_XSIZE      "USERXSIZE"
+#define CFG_USER_YSIZE      "USERYSIZE"
+#define CFG_OPEN_USERS      "OPENUSERS"
+
+/* GKeyFile section name for the prefs file. */
+#define CFG_KEYFILE_GROUP   "gtkhx"
+
+#endif /* ndef __gtkhx_CFGKEYS_H */
