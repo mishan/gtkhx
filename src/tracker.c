@@ -433,10 +433,10 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 0, 200);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 1, 60);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 1, 76);
 	gtk_hlist_set_column_justification(GTK_HLIST(tracker_list), 1, GTK_JUSTIFY_CENTER);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 130);
-	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 60);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 2, 150);
+	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 3, 70);
 	gtk_hlist_set_column_width(GTK_HLIST(tracker_list), 4, 320);
 	{
 		/* Phase 4.5: button-press-event is gone — install a gesture
