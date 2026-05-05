@@ -786,26 +786,24 @@ static void parse_tracker_list(void)
 	}
 }
 
-/* Phase 4.5: bookkeeping that runs both on explicit close (Cancel /
- * OK button) and on close-request. The window destruction itself is
- * handled by the close-request default handler — when the Cancel
- * button fires, we kick the same path off via gtk_window_destroy. */
-static void close_options_bookkeeping (void)
+/* Phase 4.5: bookkeeping that runs on every dialog teardown path —
+ * Cancel button, OK button (close-on-OK), and the user clicking the
+ * window's close X. We attach to GtkWidget::destroy because in GTK 4
+ * gtk_window_destroy() does NOT emit close-request: the close-request
+ * signal is only fired for user-initiated close attempts (or
+ * gtk_window_close()). Hooking destroy catches every path the
+ * teardown can take, so options_window never points at a freed
+ * GObject the next time create_options_window runs. */
+static void close_options_bookkeeping (GtkWidget *widget, gpointer data)
 {
+	(void) widget; (void) data;
 	options_window = 0;
 	g_free(iv);
 	iv = NULL;
 }
 
-/* close-request handler: returns FALSE so default destroy proceeds. */
-static gboolean close_options_window_request (GtkWindow *window, gpointer data)
-{
-	(void) window; (void) data;
-	close_options_bookkeeping();
-	return FALSE;
-}
-
-/* Cancel button: destroy the dialog, which fires close-request. */
+/* Cancel button: destroy the dialog. The destroy signal handler clears
+ * the singleton state. */
 static void close_options_window_cancel (GtkWidget *btn, gpointer data)
 {
 	(void) btn; (void) data;
@@ -1632,8 +1630,11 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
 	gtk_widget_set_size_request(dialog, 570, 400);
 	g_object_set_data(G_OBJECT(dialog), "sess", sess);
-	g_signal_connect (dialog, "close-request",
-	                  G_CALLBACK (close_options_window_request), 0);
+	/* Phase 5: hook destroy (not close-request) so the bookkeeping
+	 * fires on every teardown path — Cancel/OK buttons call
+	 * gtk_window_destroy which does NOT emit close-request in GTK 4. */
+	g_signal_connect (dialog, "destroy",
+	                  G_CALLBACK (close_options_bookkeeping), NULL);
 
 	options_window = dialog;
 
