@@ -1,9 +1,3 @@
-Better Settings Management:
-- Support new config path ~/.config/gtkhx that gets loaded before trying $GTKHX_PATH
-- Load *.rsrc files from $CONFIG_PATH/icons (e.g. ~/.config/gtkhx/icons/*.rsrc and /usr/local/share/gtkhx/icons/*.rsrc)
-- Cleaner settings management code
-- Look into using JSON or YML
-
 Pulling in any new developments from over the years:
 - Look into rebasing hx-specific code (especially anything protocol related) from mhxd
 - Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
