@@ -81,60 +81,69 @@ struct msgwin *msgwin_with_uid (guint16 uid)
 
 static void msg_input_activate (GtkWidget *widget, gpointer data);
 
-static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+/* Phase 4.5: GTK 4 widgets don't emit key-press-event; keyboard input
+ * comes via a GtkEventControllerKey installed on the widget. The
+ * "key-pressed" signal carries (controller, keyval, keycode, state,
+ * user_data). Returning TRUE inhibits further propagation, FALSE lets
+ * the GtkTextView's default text input proceed (used here for the
+ * Shift+Return → newline path and for ordinary typing). */
+static gboolean
+msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
+                       guint keycode, GdkModifierType state, gpointer user_data)
 {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (ctrl));
 	GtkTextView *text;
 	GtkTextBuffer *buf;
-	guint k, s;
 	HIST_ENTRY *hent = NULL;
-	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data (G_OBJECT (widget), "msg");
+	(void) keycode; (void) user_data;
 
-	text = GTK_TEXT_VIEW(widget);
-	buf = gtk_text_view_get_buffer(text);
+	if (!msg)
+		return FALSE;
 
-	k = event->keyval; s = event->state;
-	/* handle this weird bug */
-	if (s & GDK_CONTROL_MASK) {
-		switch(k) {
+	text = GTK_TEXT_VIEW (widget);
+	buf  = gtk_text_view_get_buffer (text);
+
+	if (state & GDK_CONTROL_MASK) {
+		switch (keyval) {
 		case 'k':
 		case 'K':
-			create_connect_window(0,&the_session);
-			break;
+			create_connect_window (0, &the_session);
+			return TRUE;
 		}
 	}
-	else if (s & GDK_SHIFT_MASK && k == GDK_KEY_Return) {
-		/* insert a linebreak if shift is held — let GtkTextView default */
+	else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
+		/* Insert a linebreak if shift is held — let GtkTextView default. */
 		return FALSE;
 	}
-	else if (k == GDK_KEY_Return) {
+	else if (keyval == GDK_KEY_Return) {
 		GtkTextIter start, end;
 		char *line;
 
-		gtk_text_buffer_get_start_iter(buf, &start);
-		gtk_text_buffer_get_end_iter(buf, &end);
-		line = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
-		add_history(msg->history, line);
-		using_history(msg->history);
-		g_free(line);
+		gtk_text_buffer_get_start_iter (buf, &start);
+		gtk_text_buffer_get_end_iter   (buf, &end);
+		line = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
+		add_history (msg->history, line);
+		using_history (msg->history);
+		g_free (line);
 
-		msg_input_activate(widget, msg->uid);
-		g_signal_stop_emission_by_name(widget, "key_press_event");
+		msg_input_activate (widget, msg->uid);
 		return TRUE;
 	}
-	else if (k == GDK_KEY_Up) {
-		hent = previous_history(msg->history);
+	else if (keyval == GDK_KEY_Up) {
+		hent = previous_history (msg->history);
 	}
-	else if (k == GDK_KEY_Down) {
-		hent = next_history(msg->history);
+	else if (keyval == GDK_KEY_Down) {
+		hent = next_history (msg->history);
 	}
 
 	if (hent) {
 		GtkTextIter end;
 
-		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
-		gtk_text_buffer_get_end_iter(buf, &end);
-		gtk_text_buffer_place_cursor(buf, &end);
-		g_signal_stop_emission_by_name(widget, "key_press_event");
+		gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
+		gtk_text_buffer_get_end_iter (buf, &end);
+		gtk_text_buffer_place_cursor (buf, &end);
 		return TRUE;
 	}
 
@@ -223,9 +232,15 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	g_object_set_data(G_OBJECT(msg->inputbuf), "msg", msg);
 	g_object_set_data(G_OBJECT(msg->inputbuf), "sess", &the_session);
 	/* Note: GtkTextView has no "activate" signal — Return is dispatched
-	   from msg_input_key_press, which calls msg_input_activate(). */
-	g_signal_connect(msg->inputbuf, "key_press_event",
-					   G_CALLBACK(msg_input_key_press), uid);
+	 * from msg_input_key_pressed, which calls msg_input_activate().
+	 * Phase 4.5: key-press-event is gone in GTK 4; install a
+	 * GtkEventControllerKey on the input view instead. */
+	{
+		GtkEventController *kctrl = gtk_event_controller_key_new ();
+		g_signal_connect (kctrl, "key-pressed",
+		                  G_CALLBACK (msg_input_key_pressed), uid);
+		gtk_widget_add_controller (msg->inputbuf, kctrl);
+	}
 	
 
 	msg_list = msg;
@@ -289,9 +304,12 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_widget_grab_focus(msg->inputbuf);
 
 
-	if(gtkhx_prefs.showback) {
-		gdk_window_lower(gtk_widget_get_window(msg->window));
-	}
+	/* Phase 4.4: GdkWindow / gdk_window_lower / gtk_widget_get_window
+	 * are gone in GTK 4. The "showback" pref used to lower the new
+	 * message window to the back of the stack so it didn't steal focus.
+	 * Wayland doesn't let clients re-order themselves in the stack, so
+	 * the pref no longer has a meaningful implementation; the window
+	 * comes up at whatever position the compositor picks. */
 
 	return msg;
 }
