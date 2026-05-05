@@ -123,7 +123,6 @@ void list_icons (void)
 	GtkWidget *icon_list = iv->icon_list;
 	gchar *text[2] = {NULL, NULL};
 	char buf[16];
-	GdkRGBA col = {0, 0, 0, 1};
 	guint16 nres;
 	guint32 icon;
 	unsigned int nfound = 0;
@@ -165,7 +164,9 @@ void list_icons (void)
 			row = gtk_hlist_append (GTK_HLIST (icon_list), text);
 			gtk_hlist_set_row_data (GTK_HLIST (icon_list), row,
 			                        GUINT_TO_POINTER (r->resid));
-			gtk_hlist_set_foreground (GTK_HLIST (icon_list), row, &col);
+			/* Phase 5 dark-theme: no per-row foreground override —
+			 * theme default applies, so the resid label reads on
+			 * both light and dark themes. */
 			gtk_hlist_set_pixtext (GTK_HLIST (icon_list), row, 0, "", 34,
 			                       pb, NULL);
 			g_object_unref (pb);
