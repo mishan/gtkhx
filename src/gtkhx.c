@@ -95,11 +95,14 @@ gdkrgba_to_css (const GdkRGBA *c, char *out, size_t outsz)
 static void
 ensure_provider_attached (GtkCssProvider *prov)
 {
-	GdkScreen *screen = gdk_screen_get_default ();
-	if (!screen)
+	/* Phase 4.4: GdkScreen / add_provider_for_screen are gone in GTK 4.
+	 * Attach to the default GdkDisplay instead — under Wayland there is
+	 * no per-screen partition anyway. */
+	GdkDisplay *display = gdk_display_get_default ();
+	if (!display)
 		return;
-	gtk_style_context_add_provider_for_screen (
-		screen, GTK_STYLE_PROVIDER (prov),
+	gtk_style_context_add_provider_for_display (
+		display, GTK_STYLE_PROVIDER (prov),
 		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
@@ -181,7 +184,6 @@ gtkhx_refresh_css (void)
 	gchar *fontprops;
 	char fg_buf[32], bg_buf[32];
 	gchar *css;
-	GError *err = NULL;
 
 	if (!gtkhx_css_provider) {
 		gtkhx_css_provider = gtk_css_provider_new ();
@@ -209,10 +211,13 @@ gtkhx_refresh_css (void)
 		fontprops, fg_buf, bg_buf, fg_buf,
 		fg_buf, bg_buf);
 
-	if (!gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1, &err)) {
-		g_warning ("gtkhx CSS load failed: %s", err ? err->message : "?");
-		g_clear_error (&err);
-	}
+	/* Phase 4.13: gtk_css_provider_load_from_data is deprecated in
+	 * GTK 4.12 in favor of gtk_css_provider_load_from_string (which
+	 * takes a NUL-terminated str rather than (str, len)). Parse errors
+	 * still come via the `parsing-error` signal — for these hardcoded
+	 * strings a parse failure is a developer bug, not a runtime issue
+	 * we need to log. */
+	gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
 	g_free (css);
 	g_free (fontprops);
@@ -223,7 +228,6 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 {
 	gchar *fontprops;
 	gchar *css;
-	GError *err = NULL;
 
 	if (!gtkhx_userlist_css_provider) {
 		gtkhx_userlist_css_provider = gtk_css_provider_new ();
@@ -233,12 +237,7 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	fontprops = pango_to_css_props (fd);
 	css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
 
-	if (!gtk_css_provider_load_from_data (gtkhx_userlist_css_provider,
-	                                      css, -1, &err)) {
-		g_warning ("gtkhx userlist CSS load failed: %s",
-		           err ? err->message : "?");
-		g_clear_error (&err);
-	}
+	gtk_css_provider_load_from_string (gtkhx_userlist_css_provider, css);
 
 	g_free (css);
 	g_free (fontprops);
@@ -247,31 +246,29 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 void
 gtkhx_apply_text_style (GtkWidget *w)
 {
-	GtkStyleContext *ctx;
-
 	if (!w)
 		return;
 	if (!gtkhx_css_provider)
 		gtkhx_refresh_css ();
 
-	ctx = gtk_widget_get_style_context (w);
-	if (!gtk_style_context_has_class (ctx, "gtkhx-text"))
-		gtk_style_context_add_class (ctx, "gtkhx-text");
+	/* Phase 4.5: gtk_style_context_add_class is deprecated in GTK 4.10
+	 * and was the source of a gtk_css_node_insert_after assertion when
+	 * adding the class on a widget whose CSS node hadn't been parented
+	 * yet. gtk_widget_add_css_class is the modern, safer path. */
+	if (!gtk_widget_has_css_class (w, "gtkhx-text"))
+		gtk_widget_add_css_class (w, "gtkhx-text");
 }
 
 void
 gtkhx_apply_userlist_style (GtkWidget *w)
 {
-	GtkStyleContext *ctx;
-
 	if (!w)
 		return;
 	if (!gtkhx_userlist_css_provider)
 		gtkhx_refresh_userlist_css (NULL);
 
-	ctx = gtk_widget_get_style_context (w);
-	if (!gtk_style_context_has_class (ctx, "gtkhx-userlist"))
-		gtk_style_context_add_class (ctx, "gtkhx-userlist");
+	if (!gtk_widget_has_css_class (w, "gtkhx-userlist"))
+		gtk_widget_add_css_class (w, "gtkhx-userlist");
 }
 static GtkWidget *agreetext;
 static struct timer *timer_list;
@@ -318,28 +315,35 @@ gtkhx_backend_supports_position (void)
 	return TRUE;
 }
 
+/* Phase 4.5: also capture size at quit. Previously the configure-event
+ * handlers in chat/users/tasks/news did the per-resize size save and
+ * this function only did position. GTK 4 has no configure-event on
+ * widgets, so we move size into the quit-time pass too. */
 static void
-save_pos (GtkWidget *w, Window_Geo *geo)
+save_geo (GtkWidget *w, Window_Geo *geo, gboolean save_pos_too)
 {
-	int x, y;
+	int width, height;
 	if (!w || !gtk_widget_get_realized (w))
 		return;
-	gtk_window_get_position (GTK_WINDOW (w), &x, &y);
-	geo->xpos = x;
-	geo->ypos = y;
+	gtk_window_get_default_size (GTK_WINDOW (w), &width, &height);
+	if (width  > 0) geo->xsize = width;
+	if (height > 0) geo->ysize = height;
+	(void) save_pos_too;  /* position save is no longer possible client-side
+	                       * under Wayland, and gtk_window_get_position is
+	                       * gone entirely in GTK 4 — keep the existing
+	                       * prefs values from a prior X11 session. */
 }
 
 static void
 gtkhx_save_window_positions (void)
 {
-	if (!gtkhx_backend_supports_position ())
-		return;
+	gboolean want_pos = gtkhx_backend_supports_position ();
 
-	save_pos (toolbar_window,            &gtkhx_prefs.geo.tool);
-	save_pos (the_session.chat_window,   &gtkhx_prefs.geo.chat);
-	save_pos (the_session.users_window,  &gtkhx_prefs.geo.users);
-	save_pos (the_session.tasks_window,  &gtkhx_prefs.geo.tasks);
-	save_pos (the_session.news_window,   &gtkhx_prefs.geo.news);
+	save_geo (toolbar_window,            &gtkhx_prefs.geo.tool,  want_pos);
+	save_geo (the_session.chat_window,   &gtkhx_prefs.geo.chat,  want_pos);
+	save_geo (the_session.users_window,  &gtkhx_prefs.geo.users, want_pos);
+	save_geo (the_session.tasks_window,  &gtkhx_prefs.geo.tasks, want_pos);
+	save_geo (the_session.news_window,   &gtkhx_prefs.geo.news,  want_pos);
 }
 
 void hx_quit (void)
@@ -359,12 +363,11 @@ void hx_quit (void)
 
 	gtk_thread_exit();
 	/* Phase 3.6: g_application_quit() ends g_application_run() in loop().
-	 * Fall back to gtk_main_quit if hx_quit is somehow called before the
-	 * app is constructed (it shouldn't be, but the symmetry is cheap). */
+	 * Phase 4.x: gtk_main_quit() is gone in GTK 4 — there is no main-loop
+	 * fallback. If hx_quit fires before the GtkApplication is constructed
+	 * we just fall through to exit(). */
 	if (gtkhx_app)
 		g_application_quit (G_APPLICATION (gtkhx_app));
-	else
-		gtk_main_quit();
 	exit(0);
 }
 
@@ -567,7 +570,7 @@ static void fe_init (void)
 	GtkWidget *widg = gtk_button_new();
 
 	generate_colors(widg);
-	gtk_widget_destroy(widg);
+	gtkhx_widget_destroy(widg);
 	init_variables();
 
 	memset(&icon_files, 0, sizeof(icon_files));
@@ -681,8 +684,11 @@ static void init (int argc, char **argv)
 	/* Phase 3.3: gdk_threads_init() is gone in GTK 4 and deprecated since
 	 * GTK 3.6. The worker threads still need a serializing lock against
 	 * the main thread; gtkthreads.c now provides one via GRecMutex +
-	 * a custom GMainContext poll function (see gtkthreads.c). */
-	gtk_init(&argc, &argv);
+	 * a custom GMainContext poll function (see gtkthreads.c).
+	 * Phase 4.x: gtk_init() in GTK 4 takes no arguments — argc/argv
+	 * parsing is the application's job (we don't use any GTK-owned flags
+	 * anyway). */
+	gtk_init();
 	fe_init();
 }
 
@@ -696,7 +702,7 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		GtkTextBuffer *info_buf;
 		char infotitle[45];
 
-		info_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+		info_window = gtk_window_new();
 		gtk_widget_set_size_request(info_window, 260, 250);
 
 		g_snprintf(infotitle, sizeof(infotitle), _("User Info: %s (%u)"), nam, uid);
@@ -708,14 +714,14 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		info_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(info_text));
 		gtk_text_buffer_set_text(info_buf, info, len);
 
-		info_scroll = gtk_scrolled_window_new(NULL, NULL);
+		info_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(info_scroll),
 		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-		gtk_container_add(GTK_CONTAINER(info_scroll), info_text);
-		gtk_container_add(GTK_CONTAINER(info_window), info_scroll);
+		gtkhx_widget_set_child(info_scroll, info_text);
+		gtkhx_widget_set_child(info_window, info_scroll);
 
 		init_keyaccel(info_window);
-		gtk_widget_show_all(info_window);
+		gtk_window_present(GTK_WINDOW(info_window));
 	}
 }
 
@@ -729,7 +735,7 @@ static void concurrence(GtkWidget *widget, gpointer data)
 {
 	session *sess  = data;
 
-	gtk_widget_destroy(sess->agreementwin);
+	gtkhx_widget_destroy(sess->agreementwin);
 	sess->agreementwin = 0;
 }
 
@@ -751,7 +757,7 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	GtkWidget *agree_scroll;
 	GtkTextBuffer *agree_buf;
 
-	agreementwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	agreementwin = gtk_window_new();
 	gtk_widget_set_size_request(agreementwin, 400, 500);
 	gtk_window_set_title(GTK_WINDOW(agreementwin), _("Agreement"));
 	agreetext = gtk_text_view_new();
@@ -760,10 +766,10 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(agreetext), GTK_WRAP_WORD);
 	agree_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(agreetext));
 	gtk_text_buffer_set_text(agree_buf, agreement, len);
-	agree_scroll = gtk_scrolled_window_new(NULL, NULL);
+	agree_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(agree_scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(agree_scroll), agreetext);
+	gtkhx_widget_set_child(agree_scroll, agreetext);
 	agreebtn = gtk_button_new_with_label(_("Agree"));
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -772,13 +778,13 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 					   G_CALLBACK(concurrence), sess);
 	g_signal_connect(disagreebtn, "clicked",
 					   G_CALLBACK(disagreement), sess);
-	gtk_container_add(GTK_CONTAINER(agreementwin), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), agree_scroll, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), agreebtn, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), disagreebtn, FALSE, FALSE, 0);
+	gtkhx_widget_set_child(agreementwin, vbox);
+	gtkhx_box_pack(vbox, agree_scroll, TRUE, TRUE, 0);
+	gtkhx_box_pack(vbox, hbox, FALSE, FALSE, 0);
+	gtkhx_box_pack(hbox, agreebtn, FALSE, FALSE, 0);
+	gtkhx_box_pack(hbox, disagreebtn, FALSE, FALSE, 0);
 	init_keyaccel(agreementwin);
-	gtk_widget_show_all(agreementwin);
+	gtk_window_present(GTK_WINDOW(agreementwin));
 	sess->agreementwin = agreementwin;
 }
 

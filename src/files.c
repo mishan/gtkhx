@@ -125,7 +125,7 @@ void destroy_gfl_list(void)
 
 	for(gfl = gfile_list; gfl; gfl = prev) {
 		prev = gfl->prev;
-		gtk_widget_destroy(gfl->window);
+		gtkhx_widget_destroy(gfl->window);
 		gfl_delete(gfl);
 	}
 	gfile_list = 0;
@@ -215,6 +215,10 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
  * a single "response" handler that switches on GTK_RESPONSE_ACCEPT vs.
  * GTK_RESPONSE_CANCEL.  files_list is passed in via user_data instead
  * of being stashed on the OK button. */
+/* Phase 4.13: GtkFileChooserDialog and gtk_file_chooser_get_file are
+ * deprecated in GTK 4.10 — replacement is GtkFileDialog with an async
+ * open/save callback. Phase 4.7 follow-up tracks the migration. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 static void
 upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 {
@@ -224,7 +228,11 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 	char rpath[4096];
 
 	if (response_id == GTK_RESPONSE_ACCEPT) {
-		lpath = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+		/* Phase 4.7: gtk_file_chooser_get_filename returned a g_malloc'd
+		 * char* in GTK 3. In GTK 4 the chooser returns a GFile, so we
+		 * grab the path off it and free the GFile afterwards. */
+		GFile *gf = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
+		lpath = gf ? g_file_get_path (gf) : NULL;
 		gfl = gfl_with_hlist(files_list);
 		if (gfl && gfl->cfl && lpath) {
 			snprintf(rpath, sizeof(rpath), "%s/%s",
@@ -232,8 +240,9 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 			hx_put_file(&the_session.htlc, lpath, rpath);
 		}
 		g_free(lpath);
+		if (gf) g_object_unref (gf);
 	}
-	gtk_widget_destroy(GTK_WIDGET(dialog));
+	gtkhx_widget_destroy(GTK_WIDGET(dialog));
 }
 
 static void get_put_data (GtkWidget *widget, gpointer data)
@@ -247,14 +256,22 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 	g_signal_connect(file_dialog, "response",
 					 G_CALLBACK(upload_file_response), data);
 
-	gtk_widget_show_all(file_dialog);
+	gtk_window_present(GTK_WINDOW(file_dialog));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
-static void file_clicked (GtkWidget *widget, GdkEventButton *event)
+/* Phase 4.5: button-press-event is gone in GTK 4. Files-list single
+ * and double click handling lives on a GtkGestureClick controller
+ * now; n_press == 2 gates open-folder / get-file, single-click just
+ * remembers the row for the toolbar buttons. */
+static void file_pressed (GtkGestureClick *gesture, int n_press,
+                          double x, double y, gpointer data)
 {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
 	struct gfile_list *gfl;
-	int row;
-	int column;
+	int row, column;
+	(void) data;
 
 	gfl = gfl_with_hlist(widget);
 
@@ -262,9 +279,9 @@ static void file_clicked (GtkWidget *widget, GdkEventButton *event)
 		return;
 
 	gtk_hlist_get_selection_info(GTK_HLIST(widget),
-				     event->x, event->y, &row, &column);
+				     (int) x, (int) y, &row, &column);
 
-	if (event->type == GDK_2BUTTON_PRESS) {
+	if (n_press == 2) {
 		struct hl_filelist_hdr *fh;
 
 		fh = gtk_hlist_get_row_data(GTK_HLIST(widget), gfl->row);
@@ -416,13 +433,18 @@ static void file_reload_btn (GtkWidget *widget, gpointer data)
 	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 }
 
-static void close_files_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
+ * (GtkWindow *, gpointer) returning TRUE to inhibit close, FALSE to
+ * allow the default destroy. The body just clears the per-window
+ * model state — the framework destroys the widget itself. */
+static gboolean close_files_window (GtkWindow *window, gpointer data)
 {
 	struct gfile_list *gfl = (struct gfile_list *)g_object_get_data(
-		G_OBJECT(widget), "gfl");
+		G_OBJECT(window), "gfl");
+	(void) data;
 
 	gfl_delete(gfl);
-	gtk_widget_destroy(widget);
+	return FALSE;
 }
 
 static void makeDir(GtkWidget *widget, gpointer data)
@@ -435,13 +457,15 @@ static void makeDir(GtkWidget *widget, gpointer data)
 	struct gfile_list *gfl = gfl_with_hlist(files_list);
 
 
-	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_entry_get_text(GTK_ENTRY(entry)));
+	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_editable_get_text(GTK_EDITABLE(entry)));
 	hx_make_dir(&the_session.htlc, pathname);
 	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
+/* Phase 4.13: GtkDialog deprecated in 4.10 — Phase 4.7 follow-up. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 static void makeDirDialog(GtkWidget *widget, gpointer data)
 {
 	GtkWidget *dialog;
@@ -451,17 +475,22 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	GtkWidget *nameEntryLabel;
 	GtkWidget *entryHbox;
 	GtkWidget *btnHbox;
+	GtkRoot *root = gtk_widget_get_root (widget);
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
+	/* Phase 4.5: anchor to whatever GtkWindow contains the button that
+	 * triggered us — GTK 4 wants every dialog to have a transient parent. */
+	if (root && GTK_IS_WINDOW (root))
+		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntryLabel, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
@@ -471,62 +500,110 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtk_widget_destroy,
+							  (GCallback) gtkhx_widget_destroy,
 							  dialog);
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_can_default(okBtn, TRUE);
-	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
-	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_default(okBtn);
+	/* Phase 4.2: gtk_widget_set_can_default removed */
+	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
+	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
+	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
+	gtk_window_present(GTK_WINDOW(dialog));
+	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
-static GtkTargetEntry files_drag[] =
-{{"hlist", GTK_TARGET_SAME_APP, 0}};
-
-static void files_drag_send(GtkWidget *source, GdkDragContext *context,
-							GtkSelectionData *selection, guint targetType,
-							guint eventTime)
+/* Phase 4.8: drag-and-drop between file lists.
+ *
+ * GTK 4 replaces GtkTargetEntry / gtk_drag_source_set / gtk_drag_dest_set
+ * (with the "drag_data_get" + "drag_data_received" signal pair) with two
+ * event controllers: GtkDragSource on the source widget, advertising a
+ * GdkContentProvider; GtkDropTarget on the destination, accepting one or
+ * more GTypes. There is no longer a gtk_drag_get_source_widget(context)
+ * accessor on the receive side — the source has to actually push data
+ * across.
+ *
+ * The original GTK 3 code cheated: drag_send was a no-op (selection_data
+ * empty) and drag_receive used gtk_drag_get_source_widget to fetch the
+ * source widget directly. To keep the wire-payload trivial we mirror
+ * that intra-app-only design: the content provider holds a GtkWidget*
+ * (GTK_TYPE_WIDGET) pointing at the source files_list, and the drop
+ * callback derives source/target gfl via gfl_with_hlist on each end.
+ *
+ * The selected source row was already recorded by file_pressed on the
+ * preceding click (gfl->row), so we don't have to capture it at
+ * drag-start time. */
+static gboolean files_drop_cb (GtkDropTarget *target, const GValue *value,
+                               double x, double y, gpointer user_data)
 {
-	/* We are the knights who say "Nee!" */
-	gtk_selection_data_set(selection, gtk_selection_data_get_target(selection), 0, NULL, 0);
-}
-
-static void files_drag_receive(GtkWidget *target, GdkDragContext *context,
-							   int x, int y, GtkSelectionData *selection,
-							   guint targetType, guint time, gpointer data)
-{
-	GtkWidget *source = gtk_drag_get_source_widget(context);
+	GtkWidget *target_widget;
+	GtkWidget *source_widget;
 	struct gfile_list *gfl_source, *gfl_target;
 	struct hl_filelist_hdr *fh;
 	char pathf[4096], patht[4096];
 
-	gfl_source = gfl_with_hlist(source);
-	fh = gtk_hlist_get_row_data(GTK_HLIST(source), gfl_source->row);
-	if(!fh) {
-		return;
-	}
+	(void) x;
+	(void) y;
+	(void) user_data;
 
-	gfl_target = gfl_with_hlist(target);
+	target_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
 
-	if(strcmp(gfl_source->cfl->path, gfl_target->cfl->path)) {
-		g_snprintf(pathf, sizeof(pathf), "%s/%.*s", gfl_source->cfl->path,
-				(int)fh->fnlen, fh->fname);
-		g_snprintf(patht, sizeof(patht), "%s/", gfl_target->cfl->path);
+	if (!G_VALUE_HOLDS (value, GTK_TYPE_WIDGET))
+		return FALSE;
+	source_widget = g_value_get_object (value);
+	if (!source_widget || source_widget == target_widget)
+		return FALSE;	/* same window — let it be a no-op */
 
-		hx_file_move(&the_session.htlc, pathf, patht);
-/*		hx_file_link(&the_session.htlc, pathf, patht);
+	gfl_source = gfl_with_hlist (source_widget);
+	gfl_target = gfl_with_hlist (target_widget);
+	if (!gfl_source || !gfl_target)
+		return FALSE;
 
-		XXX: Pop up a dialog and prompt the user whether he wants to move 
-		or link the file or cancel */
+	fh = gtk_hlist_get_row_data (GTK_HLIST (source_widget), gfl_source->row);
+	if (!fh)
+		return FALSE;
 
-		hx_list_dir(&the_session.htlc, gfl_target->cfl->path, 1, 0, 
-		gfl_target); 
-		hx_list_dir(&the_session.htlc, gfl_source->cfl->path, 1, 0, 
-		gfl_source); 
-	}
+	if (strcmp (gfl_source->cfl->path, gfl_target->cfl->path) == 0)
+		return FALSE;	/* same directory; nothing to do */
+
+	g_snprintf (pathf, sizeof pathf, "%s/%.*s", gfl_source->cfl->path,
+	            (int) fh->fnlen, fh->fname);
+	g_snprintf (patht, sizeof patht, "%s/", gfl_target->cfl->path);
+
+	hx_file_move (&the_session.htlc, pathf, patht);
+	/*	hx_file_link(&the_session.htlc, pathf, patht);
+	 *
+	 *	XXX: Pop up a dialog and prompt the user whether he wants to
+	 *	move or link the file or cancel — preserved from the GTK 3
+	 *	code so we don't lose the design intent. */
+
+	hx_list_dir (&the_session.htlc, gfl_target->cfl->path, 1, 0, gfl_target);
+	hx_list_dir (&the_session.htlc, gfl_source->cfl->path, 1, 0, gfl_source);
+
+	return TRUE;
+}
+
+static void files_attach_dnd (GtkWidget *files_list)
+{
+	GtkDragSource *source;
+	GtkDropTarget *target;
+	GdkContentProvider *provider;
+	GValue widget_value = G_VALUE_INIT;
+
+	g_value_init (&widget_value, GTK_TYPE_WIDGET);
+	g_value_set_object (&widget_value, files_list);
+	provider = gdk_content_provider_new_for_value (&widget_value);
+	g_value_unset (&widget_value);
+
+	source = gtk_drag_source_new ();
+	gtk_drag_source_set_content (source, provider);
+	gtk_drag_source_set_actions (source, GDK_ACTION_MOVE);
+	g_object_unref (provider);
+	gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (source));
+
+	target = gtk_drop_target_new (GTK_TYPE_WIDGET, GDK_ACTION_MOVE);
+	g_signal_connect (target, "drop", G_CALLBACK (files_drop_cb), NULL);
+	gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (target));
 }
 
 static struct gfile_list *create_files_window (char *path)
@@ -561,20 +638,23 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_hlist_set_shadow_type(GTK_HLIST(files_list), GTK_SHADOW_NONE);
 	gtk_hlist_set_column_justification(GTK_HLIST(files_list), 0,
 									   GTK_JUSTIFY_LEFT);
-	g_signal_connect(files_list, "button_press_event",
-					   G_CALLBACK(file_clicked), 0);
+	{
+		/* Phase 4.5: button-press-event is gone — gesture controller
+		 * dispatches single-click row tracking and double-click
+		 * open-folder / get-file via file_pressed. */
+		GtkGesture *click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+		                               GDK_BUTTON_PRIMARY);
+		g_signal_connect (click, "pressed",
+		                  G_CALLBACK (file_pressed), NULL);
+		gtk_widget_add_controller (files_list,
+		                           GTK_EVENT_CONTROLLER (click));
+	}
+	/* Phase 4.8: drag-and-drop between file lists. See files_drop_cb /
+	 * files_attach_dnd above. */
+	files_attach_dnd (files_list);
 
-	g_signal_connect(files_list, "drag_data_get",
-					   G_CALLBACK(files_drag_send), 0);
-	gtk_drag_source_set(files_list, GDK_BUTTON1_MASK, files_drag, 1,
-						GDK_ACTION_MOVE);
-
-	g_signal_connect(files_list, "drag_data_received",
-					   G_CALLBACK(files_drag_receive), 0);
-	gtk_drag_dest_set(files_list, GTK_DEST_DEFAULT_ALL, files_drag, 1,
-					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
-
-	files_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	files_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
@@ -583,16 +663,15 @@ static struct gfile_list *create_files_window (char *path)
 
 	gfl = gfl_new(files_window, files_list, path);
 	g_object_set_data(G_OBJECT(files_window), "gfl", gfl);
-	g_signal_connect(files_window, "delete_event",
+	g_signal_connect(files_window, "close-request",
 			   G_CALLBACK(close_files_window), files_list);
 
-	files_window_scroll = gtk_scrolled_window_new(0, 0);
+	files_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(files_window_scroll),
 								   GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -602,8 +681,8 @@ static struct gfile_list *create_files_window (char *path)
 					   G_CALLBACK(file_up_btn), files_list);
 	gtk_widget_set_tooltip_text(upbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(upbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(upbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	reloadbtn =  gtk_button_new();
@@ -611,17 +690,17 @@ static struct gfile_list *create_files_window (char *path)
 					   G_CALLBACK(file_reload_btn), files_list);
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(downloadbtn, _("Download"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/dl.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
-	gtk_container_add(GTK_CONTAINER(downloadbtn), pix);
+	gtkhx_widget_set_child(downloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	prebtn = gtk_button_new_with_label("[ P ]");
@@ -634,15 +713,15 @@ static struct gfile_list *create_files_window (char *path)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ul.xpm", NULL);
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(uploadbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(uploadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	crtfldbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(crtfldbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/mkdir.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(crtfldbtn, pix);
 	g_signal_connect(crtfldbtn, "clicked",
 					   G_CALLBACK(makeDirDialog), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -650,8 +729,8 @@ static struct gfile_list *create_files_window (char *path)
 	filinfobtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(filinfobtn, _("Info"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(filinfobtn, pix);
 	g_signal_connect(filinfobtn, "clicked",
 					   G_CALLBACK(get_file_info), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -659,8 +738,8 @@ static struct gfile_list *create_files_window (char *path)
 	delbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(delbtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(delbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(delbtn, pix);
 	g_signal_connect(delbtn, "clicked",
 					   G_CALLBACK(delete_file), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -668,22 +747,22 @@ static struct gfile_list *create_files_window (char *path)
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 400);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), upbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), reloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), downloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), uploadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), crtfldbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), filinfobtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), delbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), prebtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, upbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, reloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, downloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, uploadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, crtfldbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, filinfobtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, delbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, prebtn, 0, 0, 2);
 
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
-	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
-	gtk_container_add(GTK_CONTAINER(files_window_scroll), files_list);
-	gtk_box_pack_start(GTK_BOX(vbox), files_window_scroll, 1, 1, 0);
-	gtk_container_add(GTK_CONTAINER(files_window), vbox);
+	gtkhx_widget_set_child(topframe, hbuttonbox);
+	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
+	gtkhx_widget_set_child(files_window_scroll, files_list);
+	gtkhx_box_pack(vbox, files_window_scroll, 1, 1, 0);
+	gtkhx_widget_set_child(files_window, vbox);
 
-	gtk_widget_show_all(files_window);
+	gtk_window_present(GTK_WINDOW(files_window));
 	init_keyaccel(files_window);
 
 	gfl->cfl = NULL;
@@ -1024,7 +1103,7 @@ void set_name_comment(GtkWidget *btn, gpointer data)
 	GtkWidget *name_entry = g_object_get_data(G_OBJECT(btn), "name");
 	GtkWidget *comments_text = g_object_get_data(G_OBJECT(btn), "comments");
 	char *path = g_object_get_data(G_OBJECT(btn), "path");
-	char *name = gtk_entry_get_text(GTK_ENTRY(name_entry));
+	char *name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
 	char *comments = gtk_editable_get_chars(GTK_EDITABLE(comments_text), 0, -1);
 	char *file;
 
@@ -1072,10 +1151,10 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	GtkWidget *savebtn;
 	char *text;
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
-	g_signal_connect(window, "delete_event",
-					   (GCallback) gtk_widget_destroy, window);
+	window = gtk_window_new();
+    (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
+	/* Phase 4.5: close-request returns FALSE to let the default destroy
+	 * proceed; the file info dialog has no per-instance teardown. */
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
 
 	name_entry = gtk_entry_new();
@@ -1096,7 +1175,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	text = g_strdup_printf("%s: %u", _("Size"), size);
 	size_label = gtk_label_new(text);
 	name_label = gtk_label_new(_("Name: "));
-	gtk_entry_set_text(GTK_ENTRY(name_entry), name);
+	gtk_editable_set_text(GTK_EDITABLE(name_entry), name);
 	{
 		GtkTextBuffer *cbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(comments_text));
 		gtk_text_buffer_set_text(cbuf, comments, strlen(comments));
@@ -1104,17 +1183,17 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(comments_text), TRUE);
 	g_free(text);
 
-	gtk_container_add(GTK_CONTAINER(window), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), name_hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(name_hbox), name_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(name_hbox), name_entry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), creator_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), type_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), size_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), created_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), modified_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), comments_text, 0, 0, 4);
-	gtk_box_pack_start(GTK_BOX(vbox), savebtn, 0, 0, 0);
+	gtkhx_widget_set_child(window, vbox);
+	gtkhx_box_pack(vbox, name_hbox, 0, 0, 0);
+	gtkhx_box_pack(name_hbox, name_label, 0, 0, 0);
+	gtkhx_box_pack(name_hbox, name_entry, 0, 0, 0);
+	gtkhx_box_pack(vbox, creator_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, type_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, size_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, created_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, modified_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, comments_text, 0, 0, 4);
+	gtkhx_box_pack(vbox, savebtn, 0, 0, 0);
 
 	g_object_set_data(G_OBJECT(savebtn), "name", name_entry);
 	g_object_set_data(G_OBJECT(savebtn), "comments", comments_text);
@@ -1124,7 +1203,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 
 	g_signal_connect(window, "destroy", G_CALLBACK(close_file_info), path);
 
-	gtk_widget_show_all(window);
+	gtk_window_present(GTK_WINDOW(window));
 	init_keyaccel(window);
 }
 

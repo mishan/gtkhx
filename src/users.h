@@ -22,7 +22,13 @@ extern void user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_us
 extern void user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
 extern void user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
 extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
-extern void user_clicked (GtkWidget *widget, GdkEventButton *event);
+/* Phase 4.5/4.7: user_clicked was the GdkEventButton-shaped GtkCList
+ * "button_press_event" handler. GTK 4 widgets don't emit
+ * button_press_event — clicks come via a GtkGestureClick controller.
+ * users_attach_click_gesture() installs a controller on `list' that
+ * dispatches double-clicks to the message window and right-clicks to
+ * the user popup, pulling the session from `sess'. */
+extern void users_attach_click_gesture (GtkWidget *list, session *sess);
 extern void open_message_btn (GtkWidget *widget, gpointer data);
 extern void user_info_btn (GtkWidget *widget, gpointer data);
 extern void user_kick_btn (GtkWidget *widget, gpointer data);

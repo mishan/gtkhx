@@ -58,9 +58,11 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
-#endif
+/* Phase 4.9: gdk/gdkx.h is the X11-specific GDK backend header. GTK 4
+ * makes Wayland the assumed backend (per ROADMAP §Phase 4 gotchas) and
+ * gdkx.h's contents (GdkX11Display* types, gdk_x11_*) aren't part of
+ * what xtext touches anyway — the include was vestigial from XChat
+ * 1.8.5's X11-era assumptions. Drop. */
 
 #include "config.h"
 #include "xtext.h"
@@ -99,27 +101,6 @@ safe_strcpy (char *dest, const char *src, int bytes_left)
 {
 	if (bytes_left < 1) return;
 	g_strlcpy (dest, src, bytes_left);
-}
-
-/* Phase 3.9: gdk_window_get_pointer was deprecated in GTK 3.0 in favor
- * of gdk_window_get_device_position, which needs a GdkDevice — get it
- * from the window's default seat. */
-static inline void
-xtext_get_pointer (GdkWindow *win, gint *x, gint *y, GdkModifierType *mask)
-{
-	GdkDisplay *display;
-	GdkSeat    *seat;
-	GdkDevice  *pointer;
-	if (!win) {
-		if (x) *x = 0;
-		if (y) *y = 0;
-		if (mask) *mask = 0;
-		return;
-	}
-	display = gdk_window_get_display (win);
-	seat    = gdk_display_get_default_seat (display);
-	pointer = gdk_seat_get_pointer (seat);
-	gdk_window_get_device_position (win, pointer, x, y, mask);
 }
 
 /* --- HexChat glue: case-insensitive substring search from util.c ----- *
@@ -212,15 +193,6 @@ enum
 	LAST_SIGNAL
 };
 
-/* values for selection info */
-enum
-{
-	TARGET_UTF8_STRING,
-	TARGET_STRING,
-	TARGET_TEXT,
-	TARGET_COMPOUND_TEXT
-};
-
 static guint xtext_signals[LAST_SIGNAL];
 
 /* nocasestrstr() and xtext_get_stamp_str() are defined locally in the
@@ -260,6 +232,15 @@ static void gtk_xtext_search_textentry_fini (gpointer, gpointer);
 static void gtk_xtext_search_fini (xtext_buffer *);
 static gboolean gtk_xtext_search_init (xtext_buffer *buf, const gchar *text, gtk_xtext_search_flags flags, GError **perr);
 static char * gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent, int *ret_off, int *ret_len, GSList **slp);
+static gboolean gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
+                                     gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_pressed_cb  (GtkGestureClick *gesture, gint n_press,
+                                   gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_released_cb (GtkGestureClick *gesture, gint n_press,
+                                   gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_motion_cb   (GtkEventControllerMotion *controller,
+                                   gdouble dx, gdouble dy, gpointer user_data);
+static void gtk_xtext_leave_cb    (GtkEventControllerMotion *controller, gpointer user_data);
 
 /* Phase 3.10: palette colors are GdkRGBA, which is what
  * gdk_cairo_set_source_rgba consumes — no per-draw conversion. */
@@ -283,7 +264,12 @@ xtext_draw_bg (GtkXText *xt, int x, int y, int w, int h)
 	cairo_t *cr = xt->cr;
 	if (cr == NULL)
 	{
-		gtk_widget_queue_draw_area (GTK_WIDGET (xt), x, y, w, h);
+		/* Phase 4.9: gtk_widget_queue_draw_area is gone — GTK 4 redraws
+		 * always cover the full widget. Position information is
+		 * unused, so the area-specific call collapses to a plain
+		 * queue_draw. */
+		(void) x; (void) y; (void) w; (void) h;
+		gtk_widget_queue_draw (GTK_WIDGET (xt));
 		return;
 	}
 	cairo_save (cr);
@@ -619,10 +605,35 @@ gtk_xtext_init (GtkXText * xtext)
 	xtext->dont_render2 = FALSE;
 	gtk_xtext_scroll_adjustments (xtext, NULL, NULL);
 
-	/* Phase 3.4b: gtk_selection_add_targets is deferred until realize().
-	 * On Wayland (and arguably under GTK 3 in general) calling it from
-	 * init() crashes inside the backend selection setup because the
-	 * widget has no display yet. */
+	/* Phase 4.9: install GTK 4 event controllers. The widgets-vs-event-
+	 * signals split means clicks/motion/scroll/keys reach the widget via
+	 * controllers rather than ::button_press_event / ::motion_notify_event
+	 * / ::scroll_event. Each controller has its own bound-signal contract;
+	 * the handlers live a few hundred lines below. */
+	{
+		GtkEventController *scroll;
+		GtkGesture *click;
+		GtkEventController *motion;
+
+		scroll = gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+		g_signal_connect (scroll, "scroll", G_CALLBACK (gtk_xtext_scroll_cb), xtext);
+		gtk_widget_add_controller (GTK_WIDGET (xtext), scroll);
+
+		/* button = 0 means "any button"; we dispatch by current_button in
+		 * the callback so primary / secondary / middle all flow through one
+		 * gesture and its single n_press counter (so double/triple-click
+		 * detection works for left-click selection). */
+		click = gtk_gesture_click_new ();
+		gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+		g_signal_connect (click, "pressed",  G_CALLBACK (gtk_xtext_pressed_cb),  xtext);
+		g_signal_connect (click, "released", G_CALLBACK (gtk_xtext_released_cb), xtext);
+		gtk_widget_add_controller (GTK_WIDGET (xtext), GTK_EVENT_CONTROLLER (click));
+
+		motion = gtk_event_controller_motion_new ();
+		g_signal_connect (motion, "motion", G_CALLBACK (gtk_xtext_motion_cb), xtext);
+		g_signal_connect (motion, "leave",  G_CALLBACK (gtk_xtext_leave_cb),  xtext);
+		gtk_widget_add_controller (GTK_WIDGET (xtext), motion);
+	}
 }
 
 static void
@@ -632,10 +643,12 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 
 	if (buf->xtext->buffer == buf)
 	{
-		GtkAllocation alloc;
 		double page_size;
-		gtk_widget_get_allocation (GTK_WIDGET (buf->xtext), &alloc);
-		page_size = alloc.height / buf->xtext->fontsize;
+		/* Phase 4.13: gtk_widget_get_allocation is deprecated in 4.10
+		 * (replacement is gtk_widget_compute_bounds, but we only need
+		 * width/height which the bare accessors give us). */
+		int alloc_h = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
+		page_size = alloc_h / buf->xtext->fontsize;
 		gtk_adjustment_set_lower(adj, 0);
 		gtk_adjustment_set_upper(adj, buf->num_lines);
 
@@ -718,9 +731,12 @@ gtk_xtext_new (GdkRGBA palette[], int separator)
 	return GTK_WIDGET (xtext);
 }
 
+/* Phase 4.9: GtkWidget::destroy is gone in GTK 4 — teardown moved to
+ * GObjectClass::dispose. Same body, different signature. */
 static void
-gtk_xtext_destroy (GtkWidget * widget)
+gtk_xtext_dispose (GObject * object)
 {
+	GtkWidget *widget = GTK_WIDGET (object);
 	GtkXText *xtext = GTK_XTEXT (widget);
 
 	if (xtext->add_io_tag)
@@ -779,8 +795,7 @@ gtk_xtext_destroy (GtkWidget * widget)
 		xtext->orig_buffer = NULL;
 	}
 
-	if (GTK_WIDGET_CLASS (parent_class)->destroy)
-		(*GTK_WIDGET_CLASS (parent_class)->destroy) (widget);
+	G_OBJECT_CLASS (parent_class)->dispose (object);
 }
 
 static void
@@ -804,55 +819,31 @@ gtk_xtext_unrealize (GtkWidget * widget)
  * gdk_window_set_back_pixmap call is no longer needed because cairo
  * draws fill the entire dirty rectangle each tick.
  */
+/* Phase 4.9: GTK 4 widgets are "windowless" — they don't own their
+ * own GdkSurface; GdkSurface only attaches to GtkRoot (toplevel /
+ * popover / native). The whole "create a child GdkWindow with a
+ * specific event mask" pattern is gone. The realize handler now
+ * just chains to the parent class and sets up the GTK-4-only state
+ * (cursors are GdkCursor*; selection targets move to the gesture/
+ * controller layer). */
 static void
 gtk_xtext_realize (GtkWidget * widget)
 {
-	GtkXText *xtext;
-	GdkWindowAttr attributes;
-	GtkAllocation allocation;
-	GdkWindow *parent_window;
-	GdkWindow *window;
+	GtkXText *xtext = GTK_XTEXT (widget);
 
-	gtk_widget_set_realized (widget, TRUE);
-	xtext = GTK_XTEXT (widget);
+	GTK_WIDGET_CLASS (parent_class)->realize (widget);
 
-	gtk_widget_get_allocation (widget, &allocation);
-	attributes.x = allocation.x;
-	attributes.y = allocation.y;
-	attributes.width = allocation.width;
-	attributes.height = allocation.height;
-	attributes.wclass = GDK_INPUT_OUTPUT;
-	attributes.window_type = GDK_WINDOW_CHILD;
-	attributes.visual = gtk_widget_get_visual (widget);
-	attributes.event_mask = gtk_widget_get_events (widget) |
-		GDK_EXPOSURE_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK
-		| GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK;
+	/* Phase 4.9: GdkCursor in GTK 4 is themed-name-based; depth is
+	 * never read by the cairo draw path so leave it zero. */
+	xtext->depth = 0;
+	xtext->hand_cursor   = gdk_cursor_new_from_name ("pointer", NULL);
+	xtext->resize_cursor = gdk_cursor_new_from_name ("ew-resize", NULL);
 
-	parent_window = gtk_widget_get_parent_window (widget);
-	window = gdk_window_new (parent_window, &attributes,
-	                         GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
-	gtk_widget_set_window (widget, window);
-	gtk_widget_register_window (widget, window);
-
-	xtext->depth = gdk_visual_get_depth (gdk_window_get_visual (window));
-
-	xtext->hand_cursor = gdk_cursor_new_for_display (
-		gdk_window_get_display (window), GDK_HAND1);
-	xtext->resize_cursor = gdk_cursor_new_for_display (
-		gdk_window_get_display (window), GDK_LEFT_SIDE);
-
-	{
-		static const GtkTargetEntry targets[] = {
-			{ "UTF8_STRING", 0, TARGET_UTF8_STRING },
-			{ "STRING", 0, TARGET_STRING },
-			{ "TEXT",   0, TARGET_TEXT },
-			{ "COMPOUND_TEXT", 0, TARGET_COMPOUND_TEXT }
-		};
-		static const gint n_targets = sizeof (targets) / sizeof (targets[0]);
-
-		gtk_selection_add_targets (widget, GDK_SELECTION_PRIMARY,
-		                           targets, n_targets);
-	}
+	/* Phase 4.9: GtkTargetEntry / gtk_selection_add_targets /
+	 * GDK_SELECTION_PRIMARY are gone in GTK 4. PRIMARY-selection text
+	 * support migrates to gdk_clipboard_set_value on the surface's
+	 * primary clipboard — handled at the controller layer in a
+	 * Phase 4.9 follow-up. */
 
 	backend_init (xtext);
 }
@@ -861,23 +852,29 @@ gtk_xtext_realize (GtkWidget * widget)
  * their size via get_preferred_width/height — left as the implicit
  * default for now (the parent GtkScrolledWindow drives layout). */
 
+/* Phase 4.9: GTK 4 size_allocate vfunc takes (widget, width, height,
+ * baseline) instead of a GtkAllocation*. Position is implicit (the
+ * widget is always at 0,0 in its own coordinate space — GTK 4 does
+ * the offset on the parent's behalf). gtk_widget_set_allocation /
+ * gdk_window_move_resize are gone; the parent-class chain handles
+ * what remains. */
 static void
-gtk_xtext_size_allocate (GtkWidget * widget, GtkAllocation * allocation)
+gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline)
 {
 	GtkXText *xtext = GTK_XTEXT (widget);
 	int height_only = FALSE;
+	(void) baseline;
 
-	if (allocation->width == xtext->buffer->window_width)
+	if (width == xtext->buffer->window_width)
 		height_only = TRUE;
 
-	gtk_widget_set_allocation(widget, allocation);
-	if (gtk_widget_get_realized (GTK_WIDGET(widget)))
-	{
-		xtext->buffer->window_width = allocation->width;
-		xtext->buffer->window_height = allocation->height;
+	GTK_WIDGET_CLASS (parent_class)->size_allocate (widget, width, height, baseline);
 
-		gdk_window_move_resize (gtk_widget_get_window(widget), allocation->x, allocation->y,
-										allocation->width, allocation->height);
+	if (gtk_widget_get_realized (widget))
+	{
+		xtext->buffer->window_width  = width;
+		xtext->buffer->window_height = height;
+
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		if (!height_only)
 			gtk_xtext_calc_lines (xtext->buffer, FALSE);
@@ -1075,10 +1072,8 @@ gtk_xtext_draw_sep (GtkXText * xtext, int y)
 
 	if (y == -1)
 	{
-		GtkAllocation alloc;
-		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
 		y = 0;
-		height = alloc.height;
+		height = gtk_widget_get_height (GTK_WIDGET (xtext));
 	} else
 	{
 		height = xtext->fontsize;
@@ -1141,10 +1136,8 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 	else return;
 
 	{
-		GtkAllocation alloc;
-		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
 		x = 0;
-		width = alloc.width;
+		width = gtk_widget_get_width (GTK_WIDGET (xtext));
 	}
 
 	if (xtext->cr)
@@ -1158,9 +1151,17 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 		cairo_restore (xtext->cr);
 	}
 
-	if (gtk_window_has_toplevel_focus (GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (xtext)))))
 	{
-		xtext->buffer->marker_seen = TRUE;
+		/* Phase 4.9: gtk_widget_get_toplevel and
+		 * gtk_window_has_toplevel_focus are gone in GTK 4. The
+		 * replacements are gtk_widget_get_root (returns a GtkRoot,
+		 * which a GtkWindow implements) and gtk_window_is_active. */
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (xtext));
+		if (root && GTK_IS_WINDOW (root) &&
+		    gtk_window_is_active (GTK_WINDOW (root)))
+		{
+			xtext->buffer->marker_seen = TRUE;
+		}
 	}
 }
 
@@ -1171,11 +1172,11 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	textentry *ent_start, *ent_end;
 	int x, y;
 
-	GtkAllocation alloc;
-	gtk_widget_get_allocation(widget, &alloc);
+	int alloc_w = gtk_widget_get_width  (widget);
+	int alloc_h = gtk_widget_get_height (widget);
 	if (area->x == 0 && area->y == 0 &&
-		 area->height == alloc.height &&
-		 area->width == alloc.width)
+		 area->height == alloc_h &&
+		 area->width  == alloc_w)
 	{
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		gtk_xtext_render_page (xtext);
@@ -1203,14 +1204,14 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	/* y is the last pixel y location it rendered text at */
 	y = gtk_xtext_render_ents (xtext, ent_start, ent_end);
 
-	if (y && y < alloc.height && !ent_end->next)
+	if (y && y < alloc_h && !ent_end->next)
 	{
 		GdkRectangle rect;
 
 		rect.x = 0;
 		rect.y = y;
-		rect.width = alloc.width;
-		rect.height = alloc.height - y;
+		rect.width = alloc_w;
+		rect.height = alloc_h - y;
 
 		/* fill any space below the last line that also intersects with
 			the exposure rectangle */
@@ -1236,24 +1237,36 @@ xit:
  * directly; we compute the dirty rectangle via cairo_clip_extents and
  * stash cr on the xtext for the rendering primitives to use during this
  * paint, then clear it on exit. */
-static gboolean
-gtk_xtext_draw (GtkWidget * widget, cairo_t * cr)
+/* Phase 4.9: GtkWidget::draw is gone in GTK 4 — replaced by ::snapshot,
+ * which hands us a GtkSnapshot that records render nodes rather than
+ * a pre-clipped cairo_t. We preserve the existing cairo paint path
+ * (unchanged since Phase 3.4b) by asking the snapshot for a cairo_t
+ * over the widget's bounding rectangle and feeding it through. The
+ * GdkRectangle synthesised here is the whole widget area; per-region
+ * clip optimization can revisit later. */
+static void
+gtk_xtext_snapshot (GtkWidget * widget, GtkSnapshot * snapshot)
 {
 	GtkXText *xtext = GTK_XTEXT (widget);
 	GdkRectangle area;
-	double x1, y1, x2, y2;
+	graphene_rect_t bounds;
+	cairo_t *cr;
 
-	cairo_clip_extents (cr, &x1, &y1, &x2, &y2);
-	area.x = (int) x1;
-	area.y = (int) y1;
-	area.width = (int) (x2 - x1);
-	area.height = (int) (y2 - y1);
+	area.x = 0;
+	area.y = 0;
+	area.width  = gtk_widget_get_width (widget);
+	area.height = gtk_widget_get_height (widget);
+	if (area.width <= 0 || area.height <= 0)
+		return;
+
+	bounds = GRAPHENE_RECT_INIT (0, 0, (float) area.width, (float) area.height);
+	cr = gtk_snapshot_append_cairo (snapshot, &bounds);
 
 	xtext->cr = cr;
 	gtk_xtext_paint (widget, &area);
 	xtext->cr = NULL;
 
-	return FALSE;
+	cairo_destroy (cr);
 }
 
 /* render a selection that has extended or contracted upward */
@@ -1444,8 +1457,62 @@ lamejump:
 	xtext->skip_stamp = FALSE;
 }
 
+/* Phase 4.9: GtkEventControllerScroll callback for the wheel.
+ *
+ * Replaces the GTK 3 ::scroll-event handler. The controller is created
+ * with GTK_EVENT_CONTROLLER_SCROLL_VERTICAL so dy is meaningful (down
+ * is positive, up is negative); we ignore dx. The old handler nudged
+ * the adjustment by page_increment/10 per scroll tick — preserve that
+ * cadence and just multiply by dy so smooth-scroll devices (touchpads,
+ * Wayland high-resolution wheels) act proportionally. */
+static gboolean
+gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
+                     gdouble dx, gdouble dy, gpointer user_data)
+{
+	GtkXText *xtext = user_data;
+	GtkAdjustment *adj = xtext->adj;
+	gdouble step;
+	gdouble new_value;
+	gdouble lower, upper, page_size;
+
+	(void) controller;
+	(void) dx;
+
+	step = gtk_adjustment_get_page_increment (adj) / 10.0;
+	new_value = gtk_adjustment_get_value (adj) + (dy * step);
+
+	lower     = gtk_adjustment_get_lower (adj);
+	upper     = gtk_adjustment_get_upper (adj);
+	page_size = gtk_adjustment_get_page_size (adj);
+
+	if (new_value < lower)
+		new_value = lower;
+	if (new_value > upper - page_size)
+		new_value = upper - page_size;
+
+	gtk_adjustment_set_value (adj, new_value);
+	return GDK_EVENT_STOP;
+}
+
+/* Phase 4.9: GTK 4 input layer.
+ *
+ * GTK 4 widgets no longer emit ::button_press_event, ::motion_notify_event,
+ * ::leave_notify_event, ::scroll_event, ::selection_get, or
+ * ::selection_clear_event. Clicks come through a single GtkGestureClick
+ * (button=0 — any button — dispatched by current_button in the callback,
+ * which keeps n_press unified so double/triple-click detection still
+ * works for left-click selection), motion through GtkEventControllerMotion,
+ * scroll through GtkEventControllerScroll (above), and clipboard ownership
+ * is asserted via gdk_clipboard_set_text on the regular and primary
+ * GdkClipboards. Pointer cursors are set with gtk_widget_set_cursor.
+ *
+ * The selection auto-scroll timers (scrollup_timeout / scrolldown_timeout)
+ * used to query live pointer position via xtext_get_pointer; that helper
+ * is gone, so they read xtext->select_end_y, which the motion controller
+ * keeps updated while the button is held. */
+
 static void
-gtk_xtext_selection_draw (GtkXText * xtext, GdkEventMotion * event, gboolean render)
+gtk_xtext_selection_draw (GtkXText * xtext, gboolean render)
 {
 	textentry *ent;
 	textentry *ent_end;
@@ -1576,8 +1643,12 @@ gtk_xtext_scrolldown_timeout (GtkXText * xtext)
 	xtext_buffer *buf = xtext->buffer;
 	GtkAdjustment *adj = xtext->adj;
 
-	xtext_get_pointer(gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
-	win_height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: GTK 4 has no synchronous "where is the pointer right now"
+	 * accessor on a widget; the motion controller updates select_end_y on
+	 * every move, so we use that as the pointer's last known y. The timer
+	 * keeps firing as long as last-known-y is past the edge. */
+	p_y = xtext->select_end_y;
+	win_height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	if (buf->last_ent_end == NULL ||	/* If context has changed OR */
 		 buf->pagetop_ent == NULL ||	/* pagetop_ent is reset OR */
@@ -1591,7 +1662,7 @@ gtk_xtext_scrolldown_timeout (GtkXText * xtext)
 	xtext->select_start_y -= xtext->fontsize;
 	xtext->select_start_adj++;
 	gtk_adjustment_set_value(adj, gtk_adjustment_get_value(adj) + 1);
-	gtk_xtext_selection_draw (xtext, NULL, TRUE);
+	gtk_xtext_selection_draw (xtext, TRUE);
 	gtk_xtext_render_ents (xtext, buf->pagetop_ent->next, buf->last_ent_end);
 	xtext->scroll_tag = g_timeout_add (gtk_xtext_timeout_ms (xtext, p_y - win_height),
 													(GSourceFunc)
@@ -1609,7 +1680,7 @@ gtk_xtext_scrollup_timeout (GtkXText * xtext)
 	GtkAdjustment *adj = xtext->adj;
 	int delta_y;
 
-	xtext_get_pointer(gtk_widget_get_window (GTK_WIDGET (xtext)), 0, &p_y, 0);
+	p_y = xtext->select_end_y;
 
 	if (buf->last_ent_start == NULL ||	/* If context has changed OR */
 		 buf->pagetop_ent == NULL ||		/* pagetop_ent is reset OR */
@@ -1630,7 +1701,7 @@ gtk_xtext_scrollup_timeout (GtkXText * xtext)
 	}
 	xtext->select_start_y += delta_y;
 	xtext->select_start_adj = gtk_adjustment_get_value(adj);
-	gtk_xtext_selection_draw (xtext, NULL, TRUE);
+	gtk_xtext_selection_draw (xtext, TRUE);
 	gtk_xtext_render_ents (xtext, buf->pagetop_ent->prev, buf->last_ent_end);
 	xtext->scroll_tag = g_timeout_add (gtk_xtext_timeout_ms (xtext, p_y),
 													(GSourceFunc)
@@ -1641,7 +1712,7 @@ gtk_xtext_scrollup_timeout (GtkXText * xtext)
 }
 
 static void
-gtk_xtext_selection_update (GtkXText * xtext, GdkEventMotion * event, int p_y, gboolean render)
+gtk_xtext_selection_update (GtkXText * xtext, int p_y, gboolean render)
 {
 	int win_height;
 	int moved;
@@ -1651,7 +1722,7 @@ gtk_xtext_selection_update (GtkXText * xtext, GdkEventMotion * event, int p_y, g
 		return;
 	}
 
-	win_height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	win_height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	/* selecting past top of window, scroll up! */
 	if (p_y < 0 && gtk_adjustment_get_value(xtext->adj) >= 0)
@@ -1670,7 +1741,7 @@ gtk_xtext_selection_update (GtkXText * xtext, GdkEventMotion * event, int p_y, g
 		moved = (int)gtk_adjustment_get_value(xtext->adj) - xtext->select_start_adj;
 		xtext->select_start_y -= (moved * xtext->fontsize);
 		xtext->select_start_adj = gtk_adjustment_get_value(xtext->adj);
-		gtk_xtext_selection_draw (xtext, event, render);
+		gtk_xtext_selection_draw (xtext, render);
 	}
 }
 
@@ -1765,10 +1836,10 @@ gtk_xtext_unrender_hilight (GtkXText *xtext)
 	xtext->un_hilight = FALSE;
 }
 
-static gboolean
-gtk_xtext_leave_notify (GtkWidget * widget, GdkEventCrossing * event)
+static void
+gtk_xtext_leave (GtkXText *xtext)
 {
-	GtkXText *xtext = GTK_XTEXT (widget);
+	GtkWidget *widget = GTK_WIDGET (xtext);
 
 	if (xtext->cursor_hand)
 	{
@@ -1776,7 +1847,7 @@ gtk_xtext_leave_notify (GtkWidget * widget, GdkEventCrossing * event)
 		xtext->hilight_start = -1;
 		xtext->hilight_end = -1;
 		xtext->cursor_hand = FALSE;
-		gdk_window_set_cursor (gtk_widget_get_window(widget), 0);
+		gtk_widget_set_cursor (widget, NULL);
 		xtext->hilight_ent = NULL;
 	}
 
@@ -1786,11 +1857,16 @@ gtk_xtext_leave_notify (GtkWidget * widget, GdkEventCrossing * event)
 		xtext->hilight_start = -1;
 		xtext->hilight_end = -1;
 		xtext->cursor_resize = FALSE;
-		gdk_window_set_cursor (gtk_widget_get_window(widget), 0);
+		gtk_widget_set_cursor (widget, NULL);
 		xtext->hilight_ent = NULL;
 	}
+}
 
-	return FALSE;
+static void
+gtk_xtext_leave_cb (GtkEventControllerMotion *controller, gpointer user_data)
+{
+	(void) controller;
+	gtk_xtext_leave (user_data);
 }
 
 /* check if we should mark time stamps, and if a redraw is needed */
@@ -1867,22 +1943,26 @@ gtk_xtext_get_word_adjust (GtkXText *xtext, int x, int y, textentry **word_ent, 
 	return word_type;
 }
 
-static gboolean
-gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
+static void
+gtk_xtext_motion_cb (GtkEventControllerMotion *controller,
+                     gdouble dx, gdouble dy, gpointer user_data)
 {
-	GtkXText *xtext = GTK_XTEXT (widget);
+	GtkXText *xtext = user_data;
+	GtkWidget *widget = GTK_WIDGET (xtext);
 	GdkModifierType mask;
 	int redraw, tmp, x, y, offset, len, line_x;
 	textentry *word_ent;
 	int word_type;
-	GtkAllocation alloc;
+	int alloc_w;
 
-	gtk_widget_get_allocation(widget, &alloc);
-	xtext_get_pointer(gtk_widget_get_window(widget), &x, &y, &mask);
+	x = (int) dx;
+	y = (int) dy;
+	mask = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (controller));
+	alloc_w = gtk_widget_get_width (widget);
 
 	if (xtext->moving_separator)
 	{
-		if (x < (3 * alloc.width) / 5 && x > 15)
+		if (x < (3 * alloc_w) / 5 && x > 15)
 		{
 			tmp = xtext->buffer->indent;
 			xtext->buffer->indent = x;
@@ -1900,19 +1980,15 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 																xtext);
 			}
 		}
-		return FALSE;
+		return;
 	}
 
 	if (xtext->button_down)
 	{
 		redraw = gtk_xtext_check_mark_stamp (xtext, mask);
-		gtk_grab_add (widget);
-		/*gdk_pointer_grab (widget->window, TRUE,
-									GDK_BUTTON_RELEASE_MASK |
-									GDK_BUTTON_MOTION_MASK, NULL, NULL, 0);*/
 		xtext->select_end_x = x;
 		xtext->select_end_y = y;
-		gtk_xtext_selection_update (xtext, event, y, !redraw);
+		gtk_xtext_selection_update (xtext, y, !redraw);
 
 		/* user has pressed or released SHIFT, must redraw entire selection */
 		if (redraw)
@@ -1922,7 +1998,7 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 										  xtext->buffer->last_ent_end);
 			xtext->force_stamp = FALSE;
 		}
-		return FALSE;
+		return;
 	}
 
 	if (xtext->separator && xtext->buffer->indent)
@@ -1932,17 +2008,16 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 		{
 			if (!xtext->cursor_resize)
 			{
-				gdk_window_set_cursor (gtk_widget_get_window (GTK_WIDGET (xtext)),
-										  		xtext->resize_cursor);
+				gtk_widget_set_cursor (widget, xtext->resize_cursor);
 				xtext->cursor_hand = FALSE;
 				xtext->cursor_resize = TRUE;
 			}
-			return FALSE;
+			return;
 		}
 	}
 
 	if (xtext->urlcheck_function == NULL)
-		return FALSE;
+		return;
 
 	word_type = gtk_xtext_get_word_adjust (xtext, x, y, &word_ent, &offset, &len);
 	if (word_type > 0)
@@ -1954,8 +2029,7 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 		{
 			if (!xtext->cursor_hand)
 			{
-				gdk_window_set_cursor (gtk_widget_get_window (GTK_WIDGET (xtext)),
-										  		xtext->hand_cursor);
+				gtk_widget_set_cursor (widget, xtext->hand_cursor);
 				xtext->cursor_hand = TRUE;
 				xtext->cursor_resize = FALSE;
 			}
@@ -1978,35 +2052,39 @@ gtk_xtext_motion_notify (GtkWidget * widget, GdkEventMotion * event)
 			xtext->render_hilights_only = FALSE;
 			xtext->skip_stamp = FALSE;
 		}
-		return FALSE;
+		return;
 	}
 
-	gtk_xtext_leave_notify (widget, NULL);
-
-	return FALSE;
+	gtk_xtext_leave (xtext);
 }
 
 static void
-gtk_xtext_set_clip_owner (GtkWidget * xtext, GdkEventButton * event)
+gtk_xtext_set_clip_owner (GtkWidget * widget)
 {
+	GtkXText *xtext = GTK_XTEXT (widget);
 	char *str;
 	int len;
 
-	if (GTK_XTEXT (xtext)->selection_buffer &&
-		GTK_XTEXT (xtext)->selection_buffer != GTK_XTEXT (xtext)->buffer)
-		gtk_xtext_selection_clear (GTK_XTEXT (xtext)->selection_buffer);
+	if (xtext->selection_buffer && xtext->selection_buffer != xtext->buffer)
+		gtk_xtext_selection_clear (xtext->selection_buffer);
 
-	GTK_XTEXT (xtext)->selection_buffer = GTK_XTEXT (xtext)->buffer;
+	xtext->selection_buffer = xtext->buffer;
 
-	str = gtk_xtext_selection_get_text (GTK_XTEXT (xtext), &len);
+	str = gtk_xtext_selection_get_text (xtext, &len);
 	if (str)
 	{
 		if (str[0])
 		{
-			gtk_clipboard_set_text (gtk_widget_get_clipboard (xtext, GDK_SELECTION_CLIPBOARD), str, len);
-			
-			gtk_selection_owner_set (xtext, GDK_SELECTION_PRIMARY, event ? event->time : GDK_CURRENT_TIME);
-			gtk_selection_owner_set (xtext, GDK_SELECTION_SECONDARY, event ? event->time : GDK_CURRENT_TIME);
+			/* Phase 4.9: GTK 4 unified the GtkClipboard / X11-selection
+			 * model into GdkClipboard. The regular clipboard is what
+			 * Ctrl+V pastes from; the primary clipboard is the X-style
+			 * "select to copy, middle-click to paste" selection that
+			 * Wayland and X both still expose. gtk_widget_get_clipboard /
+			 * gtk_widget_get_primary_clipboard pick the clipboard for the
+			 * widget's display. We don't need the GTK 3 selection-owner
+			 * dance — gdk_clipboard_set_text is the whole API. */
+			gdk_clipboard_set_text (gtk_widget_get_clipboard (widget), str);
+			gdk_clipboard_set_text (gtk_widget_get_primary_clipboard (widget), str);
 		}
 
 		g_free (str);
@@ -2016,7 +2094,7 @@ gtk_xtext_set_clip_owner (GtkWidget * xtext, GdkEventButton * event)
 void
 gtk_xtext_copy_selection (GtkXText *xtext)
 {
-	gtk_xtext_set_clip_owner (GTK_WIDGET (xtext), NULL);
+	gtk_xtext_set_clip_owner (GTK_WIDGET (xtext));
 }
 
 static void
@@ -2049,21 +2127,34 @@ gtk_xtext_unselect (GtkXText *xtext)
 	xtext->buffer->last_ent_end = NULL;
 }
 
-static gboolean
-gtk_xtext_button_release (GtkWidget * widget, GdkEventButton * event)
+static void
+gtk_xtext_released_cb (GtkGestureClick *gesture, gint n_press,
+                       gdouble dx, gdouble dy, gpointer user_data)
 {
-	GtkXText *xtext = GTK_XTEXT (widget);
+	GtkXText *xtext = user_data;
+	GtkWidget *widget = GTK_WIDGET (xtext);
 	unsigned char *word;
 	int old;
-	GtkAllocation alloc;
+	int alloc_w;
+	int x = (int) dx;
+	int y = (int) dy;
+	guint button;
+	GdkModifierType state;
+	GdkEvent *event;
 
-	gtk_widget_get_allocation(widget, &alloc);
+	(void) n_press;
+
+	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+	state  = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
+	event  = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (gesture));
+
+	alloc_w = gtk_widget_get_width (widget);
 	if (xtext->moving_separator)
 	{
 		xtext->moving_separator = FALSE;
 		old = xtext->buffer->indent;
-		if (event->x < (4 * alloc.width) / 5 && event->x > 15)
-			xtext->buffer->indent = event->x;
+		if (x < (4 * alloc_w) / 5 && x > 15)
+			xtext->buffer->indent = x;
 		gtk_xtext_fix_indent (xtext->buffer);
 		if (xtext->buffer->indent != old)
 		{
@@ -2072,10 +2163,10 @@ gtk_xtext_button_release (GtkWidget * widget, GdkEventButton * event)
 			gtk_xtext_render_page (xtext);
 		} else
 			gtk_xtext_draw_sep (xtext, -1);
-		return FALSE;
+		return;
 	}
 
-	if (event->button == 1)
+	if (button == GDK_BUTTON_PRIMARY)
 	{
 		xtext->button_down = FALSE;
 		if (xtext->scroll_tag)
@@ -2084,18 +2175,15 @@ gtk_xtext_button_release (GtkWidget * widget, GdkEventButton * event)
 			xtext->scroll_tag = 0;
 		}
 
-		gtk_grab_remove (widget);
-		/*gdk_pointer_ungrab (0);*/
-
 		/* got a new selection? */
 		if (xtext->buffer->last_ent_start)
 		{
 			xtext->color_paste = FALSE;
-			if (event->state & STATE_CTRL || prefs.hex_text_autocopy_color)
+			if (state & STATE_CTRL || prefs.hex_text_autocopy_color)
 				xtext->color_paste = TRUE;
 			if (prefs.hex_text_autocopy_text)
 			{
-				gtk_xtext_set_clip_owner (GTK_WIDGET (xtext), event);
+				gtk_xtext_set_clip_owner (widget);
 			}
 		}
 
@@ -2103,62 +2191,66 @@ gtk_xtext_button_release (GtkWidget * widget, GdkEventButton * event)
 		{
 			xtext->word_select = FALSE;
 			xtext->line_select = FALSE;
-			return FALSE;
+			return;
 		}
 
-		if (xtext->select_start_x == event->x &&
-			 xtext->select_start_y == event->y &&
+		if (xtext->select_start_x == x &&
+			 xtext->select_start_y == y &&
 			 xtext->buffer->last_ent_start)
 		{
 			gtk_xtext_unselect (xtext);
 			xtext->mark_stamp = FALSE;
-			return FALSE;
+			return;
 		}
 
 		if (!gtk_xtext_is_selecting (xtext))
 		{
-			word = gtk_xtext_get_word (xtext, event->x, event->y, 0, 0, 0, 0);
-			g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0, word ? word : NULL, event);
+			word = gtk_xtext_get_word (xtext, x, y, 0, 0, 0, 0);
+			g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
+								word ? word : NULL, event);
 		}
 	}
-
-	return FALSE;
 }
 
-static gboolean
-gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
+static void
+gtk_xtext_pressed_cb (GtkGestureClick *gesture, gint n_press,
+                      gdouble dx, gdouble dy, gpointer user_data)
 {
-	GtkXText *xtext = GTK_XTEXT (widget);
+	GtkXText *xtext = user_data;
 	GdkModifierType mask;
 	textentry *ent;
 	unsigned char *word;
-	int line_x, x, y, offset, len;
+	int line_x, offset, len;
+	int x = (int) dx;
+	int y = (int) dy;
+	guint button;
+	GdkEvent *event;
 
-	xtext_get_pointer(gtk_widget_get_window(widget), &x, &y, &mask);
+	button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+	mask   = gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (gesture));
+	event  = gtk_event_controller_get_current_event (GTK_EVENT_CONTROLLER (gesture));
 
-	if (event->button == 3 || event->button == 2) /* right/middle click */
+	/* right/middle click — emit WORD_CLICK so chat.c (or whoever)
+	 * can pop a context menu. The GtkGestureClick fires "pressed"
+	 * for every click; use button to distinguish. */
+	if (button == GDK_BUTTON_SECONDARY || button == GDK_BUTTON_MIDDLE)
 	{
 		word = gtk_xtext_get_word (xtext, x, y, 0, 0, 0, 0);
-		if (word)
-		{
-			g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
-								word, event);
-		} else
-			g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
-								"", event);
-		return FALSE;
+		g_signal_emit (G_OBJECT (xtext), xtext_signals[WORD_CLICK], 0,
+		                    word ? (gpointer) word : (gpointer) "", event);
+		return;
 	}
 
-	if (event->button != 1)		  /* we only want left button */
-		return FALSE;
+	if (button != GDK_BUTTON_PRIMARY)		  /* we only want left button */
+		return;
 
-	if (event->type == GDK_2BUTTON_PRESS)	/* WORD select */
+	if (n_press == 2)	/* WORD select */
 	{
 		gtk_xtext_check_mark_stamp (xtext, mask);
 		if (gtk_xtext_get_word (xtext, x, y, &ent, &offset, &len, 0))
 		{
 			if (len == 0)
-				return FALSE;
+				return;
 			gtk_xtext_selection_clear (xtext->buffer);
 			ent->mark_start = offset;
 			ent->mark_end = offset + len;
@@ -2166,10 +2258,10 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 			xtext->word_select = TRUE;
 		}
 
-		return FALSE;
+		return;
 	}
 
-	if (event->type == GDK_3BUTTON_PRESS)	/* LINE select */
+	if (n_press == 3)	/* LINE select */
 	{
 		gtk_xtext_check_mark_stamp (xtext, mask);
 		if (gtk_xtext_get_word (xtext, x, y, &ent, 0, 0, 0))
@@ -2181,7 +2273,7 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 			xtext->line_select = TRUE;
 		}
 
-		return FALSE;
+		return;
 	}
 
 	/* check if it was a separator-bar click */
@@ -2193,7 +2285,7 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 			xtext->moving_separator = TRUE;
 			/* draw the separator line */
 			gtk_xtext_draw_sep (xtext, -1);
-			return FALSE;
+			return;
 		}
 	}
 
@@ -2201,20 +2293,6 @@ gtk_xtext_button_press (GtkWidget * widget, GdkEventButton * event)
 	xtext->select_start_x = x;
 	xtext->select_start_y = y;
 	xtext->select_start_adj = gtk_adjustment_get_value(xtext->adj);
-
-	return FALSE;
-}
-
-/* another program has claimed the selection */
-
-static gboolean
-gtk_xtext_selection_kill (GtkXText *xtext, GdkEventSelection *event)
-{
-#ifndef WIN32
-	if (xtext->buffer->last_ent_start)
-		gtk_xtext_unselect (xtext);
-#endif
-	return TRUE;
 }
 
 static gboolean
@@ -2335,80 +2413,12 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	return stripped;
 }
 
-/* another program is asking for our selection */
-
-static void
-gtk_xtext_selection_get (GtkWidget * widget,
-								 GtkSelectionData * selection_data_ptr,
-								 guint info, guint time)
-{
-	GtkXText *xtext = GTK_XTEXT (widget);
-	char *stripped;
-	guchar *new_text;
-	int len;
-	gsize glen;
-
-	stripped = gtk_xtext_selection_get_text (xtext, &len);
-	if (!stripped)
-		return;
-
-	switch (info)
-	{
-	case TARGET_UTF8_STRING:
-		/* it's already in utf8 */
-		gtk_selection_data_set_text (selection_data_ptr, stripped, len);
-		break;
-	case TARGET_TEXT:
-	case TARGET_COMPOUND_TEXT:
-#ifdef GDK_WINDOWING_X11
-		{
-			GdkDisplay *display = gdk_window_get_display (gtk_widget_get_window(widget));
-			GdkAtom encoding;
-			gint format;
-			gint new_length;
-
-			gdk_x11_display_string_to_compound_text (display, stripped, &encoding,
-												&format, &new_text, &new_length);
-			gtk_selection_data_set (selection_data_ptr, encoding, format,
-											new_text, new_length);
-			gdk_x11_free_compound_text (new_text);
-
-		}
-		break;
-#endif
-	default:
-		new_text = g_locale_from_utf8 (stripped, len, NULL, &glen, NULL);
-		gtk_selection_data_set (selection_data_ptr, GDK_SELECTION_TYPE_STRING,
-										8, new_text, glen);
-		g_free (new_text);
-	}
-
-	g_free (stripped);
-}
-
-static gboolean
-gtk_xtext_scroll (GtkWidget *widget, GdkEventScroll *event)
-{
-	GtkXText *xtext = GTK_XTEXT (widget);
-	gfloat new_value;
-
-	if (event->direction == GDK_SCROLL_UP)		/* mouse wheel pageUp */
-	{
-		new_value = gtk_adjustment_get_value(xtext->adj) - (gtk_adjustment_get_page_increment(xtext->adj) / 10);
-		if (new_value < gtk_adjustment_get_lower(xtext->adj))
-			new_value = gtk_adjustment_get_lower(xtext->adj);
-		gtk_adjustment_set_value (xtext->adj, new_value);
-	}
-	else if (event->direction == GDK_SCROLL_DOWN)	/* mouse wheel pageDn */
-	{
-		new_value = gtk_adjustment_get_value(xtext->adj) + (gtk_adjustment_get_page_increment(xtext->adj) / 10);
-		if (new_value > (gtk_adjustment_get_upper(xtext->adj) - gtk_adjustment_get_page_size(xtext->adj)))
-			new_value = gtk_adjustment_get_upper(xtext->adj) - gtk_adjustment_get_page_size(xtext->adj);
-		gtk_adjustment_set_value (xtext->adj, new_value);
-	}
-
-	return FALSE;
-}
+/* Phase 4.9: gtk_xtext_selection_get (X11 selection-protocol callback) and
+ * gtk_xtext_selection_kill (called when another client took the selection)
+ * went away with the GtkClipboard → GdkClipboard transition. GdkClipboard
+ * owns its data via a GValue, so we don't supply text on demand and we
+ * don't get told when ownership changes; the existing in-buffer marks
+ * survive whether or not anyone else owns the X primary selection. */
 
 static void
 gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustment *vadj)
@@ -2444,11 +2454,13 @@ gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustmen
 static void
 gtk_xtext_class_init (GtkXTextClass * class)
 {
+	GObjectClass   *object_class;
 	GtkWidgetClass *widget_class;
-	GtkXTextClass *xtext_class;
+	GtkXTextClass  *xtext_class;
 
+	object_class = (GObjectClass *) class;
 	widget_class = (GtkWidgetClass *) class;
-	xtext_class = (GtkXTextClass *) class;
+	xtext_class  = (GtkXTextClass *) class;
 
 	parent_class = g_type_class_peek (gtk_widget_get_type ());
 
@@ -2475,27 +2487,27 @@ gtk_xtext_class_init (GtkXTextClass * class)
 							G_TYPE_NONE,
 							2, GTK_TYPE_ADJUSTMENT, GTK_TYPE_ADJUSTMENT);
 
-	/* Phase 3.4b: ::destroy moved from GtkObjectClass to GtkWidgetClass
-	 * in GTK 3.0; expose_event was replaced by the draw signal which
-	 * gives us a pre-clipped cairo_t.  set_scroll_adjustments_signal
-	 * is no longer a class field — modern scrollable widgets implement
-	 * GtkScrollable instead, but for now we keep the legacy custom
-	 * signal alive (the consumer in gtkhx.c connects to it directly). */
-	widget_class->destroy = gtk_xtext_destroy;
+	/* Phase 4.9: GTK 4 vfunc wiring.
+	 *  - GtkWidgetClass::destroy is gone; teardown moved to
+	 *    GObjectClass::dispose.
+	 *  - GtkWidgetClass::draw is gone; widgets implement ::snapshot.
+	 *  - button_press_event / button_release_event / motion_notify_event /
+	 *    leave_notify_event / scroll_event / selection_get /
+	 *    selection_clear_event are gone — clicks/motion/scroll move
+	 *    to GtkEventController controllers attached at instance_init,
+	 *    and selection ownership migrates to GdkClipboard. The
+	 *    underlying handlers (gtk_xtext_button_press etc.) are
+	 *    Phase 4.9 follow-up: they're still defined below but no
+	 *    longer wired into the class.
+	 */
+	object_class->dispose = gtk_xtext_dispose;
 
-	widget_class->realize = gtk_xtext_realize;
-	widget_class->unrealize = gtk_xtext_unrealize;
+	widget_class->realize       = gtk_xtext_realize;
+	widget_class->unrealize     = gtk_xtext_unrealize;
 	widget_class->size_allocate = gtk_xtext_size_allocate;
-	widget_class->button_press_event = gtk_xtext_button_press;
-	widget_class->button_release_event = gtk_xtext_button_release;
-	widget_class->motion_notify_event = gtk_xtext_motion_notify;
-	widget_class->selection_clear_event = (void *)gtk_xtext_selection_kill;
-	widget_class->selection_get = gtk_xtext_selection_get;
-	widget_class->draw = gtk_xtext_draw;
-	widget_class->scroll_event = gtk_xtext_scroll;
-	widget_class->leave_notify_event = gtk_xtext_leave_notify;
+	widget_class->snapshot      = gtk_xtext_snapshot;
 
-	xtext_class->word_click = NULL;
+	xtext_class->word_click             = NULL;
 	xtext_class->set_scroll_adjustments = gtk_xtext_scroll_adjustments;
 }
 
@@ -3670,8 +3682,14 @@ gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap)
 
 	if (pixmap != NULL)
 	{
-		/* Convert the pixbuf to a cairo image surface for repeating fill. */
-		xtext->bg_surface = gdk_cairo_surface_create_from_pixbuf (pixmap, 1, NULL);
+		/* Phase 4.9: gdk_cairo_surface_create_from_pixbuf was removed
+		 * from the public API in GTK 4 (still present in
+		 * gdk/deprecated/gdkpixbuf.h but not part of the toolkit's
+		 * supported surface). Background-pixmap support is degraded
+		 * pending a Phase 4.9 follow-up that renders the pixbuf into
+		 * a cairo_image_surface_t manually via gdk_pixbuf_read_pixels
+		 * + cairo_image_surface_create_for_data. */
+		(void) pixmap;
 		xtext->ts_x = xtext->ts_y = 0;
 	}
 
@@ -3742,8 +3760,12 @@ gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal)
 	int height;
 	int lines;
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (buf->xtext)));
-	width = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (buf->xtext)));
+	/* Phase 4.9: gtk_widget_get_window / gdk_window_get_width / _height
+	 * are gone in GTK 4. Widget size is available directly via
+	 * gtk_widget_get_width / gtk_widget_get_height (the same numbers
+	 * the size_allocate vfunc receives). */
+	height = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
+	width  = gtk_widget_get_width  (GTK_WIDGET (buf->xtext));
 	width -= MARGIN;
 
 	if (width < 30 || height < buf->xtext->fontsize || width < buf->indent + 30)
@@ -3837,8 +3859,9 @@ gtk_xtext_render_ents (GtkXText * xtext, textentry * enta, textentry * entb)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
-	width = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see gtk_xtext_calc_lines / gtk_xtext_render_page note. */
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
+	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
 	width -= MARGIN;
 
 	if (width < 32 || height < xtext->fontsize || width < xtext->buffer->indent + 30)
@@ -3926,11 +3949,11 @@ gtk_xtext_render_page (GtkXText * xtext)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	{
-		GdkWindow *win = gtk_widget_get_window (GTK_WIDGET (xtext));
-		width = gdk_window_get_width (win);
-		height = gdk_window_get_height (win);
-	}
+	/* Phase 4.9: GdkWindow / gdk_window_get_width / _height /
+	 * gtk_widget_get_window are gone in GTK 4. Widget pixel size is
+	 * available directly off the widget. */
+	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	if (width < 34 || height < xtext->fontsize || width < xtext->buffer->indent + 32)
 		return;
@@ -4199,7 +4222,8 @@ gtk_xtext_check_ent_visibility (GtkXText * xtext, textentry *find_ent, int add)
 		return FALSE;
 	}
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see render_page note. */
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	ent = buf->pagetop_ent;
 	/* If top line not completely displayed return FALSE */
@@ -4697,13 +4721,23 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	ent->sublines = NULL;
 	buf->num_lines += gtk_xtext_lines_taken (buf, ent);
 
-	if ((buf->marker_pos == NULL || buf->marker_seen) && (buf->xtext->buffer != buf || 
-		!gtk_window_has_toplevel_focus (GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (buf->xtext))))))
 	{
-		buf->marker_pos = ent;
-		buf->marker_state = MARKER_IS_SET;
-		dontscroll (buf); /* force scrolling off */
-		buf->marker_seen = FALSE;
+		/* Phase 4.9: gtk_widget_get_toplevel and
+		 * gtk_window_has_toplevel_focus are gone; use the GtkRoot path
+		 * (matches the gtk_xtext_draw_marker site). */
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (buf->xtext));
+		gboolean toplevel_active =
+			(root && GTK_IS_WINDOW (root) &&
+			 gtk_window_is_active (GTK_WINDOW (root)));
+
+		if ((buf->marker_pos == NULL || buf->marker_seen)
+		    && (buf->xtext->buffer != buf || !toplevel_active))
+		{
+			buf->marker_pos = ent;
+			buf->marker_state = MARKER_IS_SET;
+			dontscroll (buf); /* force scrolling off */
+			buf->marker_seen = FALSE;
+		}
 	}
 
 	if (buf->xtext->max_lines > 2 && buf->xtext->max_lines < buf->num_lines)
@@ -5057,8 +5091,9 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 	if (!gtk_widget_get_realized (GTK_WIDGET (xtext)))
 		gtk_widget_realize (GTK_WIDGET (xtext));
 
-	h = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
-	w = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see render_page note. */
+	h = gtk_widget_get_height (GTK_WIDGET (xtext));
+	w = gtk_widget_get_width  (GTK_WIDGET (xtext));
 
 	/* after a font change */
 	if (buf->needs_recalc)

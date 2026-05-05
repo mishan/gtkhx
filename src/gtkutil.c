@@ -42,18 +42,60 @@
 #include "xtext.h"
 #include "gtkutil.h"
 
-GtkAccelGroup *accel_group = NULL;
+/* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
+ * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
+ * in GTK 4 — replaced by GtkShortcutController plus GtkShortcut
+ * instances bound to GtkKeyvalTrigger triggers and GtkCallbackAction
+ * actions.
+ *
+ * The original behavior: every window the user opens gets Ctrl+K
+ * (connect dialog) and Ctrl+Q (quit) wired to the toolbar's
+ * connect_btn and quit_btn "clicked" signal. We preserve that by
+ * installing a fresh per-window controller whose callbacks emit
+ * "clicked" on those buttons directly. (A future Phase 5 cleanup
+ * could move these to GtkApplication-level GActions with
+ * gtk_application_set_accels_for_action — that's the modern idiom
+ * but requires also reworking the toolbar buttons to fire actions
+ * instead of "clicked", which is more invasive.) */
 
-
-void init_keyaccel(GtkWidget *widget)
+static gboolean
+keyaccel_connect_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	if(!accel_group) {
-		accel_group = gtk_accel_group_new();
-		gtk_widget_add_accelerator(connect_btn, "clicked" , accel_group, 'k', GDK_CONTROL_MASK, 0);
-		gtk_widget_add_accelerator(quit_btn, "clicked" ,accel_group, 'q', GDK_CONTROL_MASK, 0);
-	}
-	
-	gtk_window_add_accel_group (GTK_WINDOW(widget), accel_group);
+	(void) w; (void) args; (void) data;
+	if (connect_btn)
+		g_signal_emit_by_name (connect_btn, "clicked");
+	return TRUE;
+}
+
+static gboolean
+keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
+{
+	(void) w; (void) args; (void) data;
+	if (quit_btn)
+		g_signal_emit_by_name (quit_btn, "clicked");
+	return TRUE;
+}
+
+void init_keyaccel (GtkWidget *widget)
+{
+	GtkEventController *ctrl = gtk_shortcut_controller_new ();
+	GtkShortcut *sc;
+
+	gtk_event_controller_set_propagation_phase (ctrl, GTK_PHASE_CAPTURE);
+
+	sc = gtk_shortcut_new (
+		gtk_keyval_trigger_new ('k', GDK_CONTROL_MASK),
+		gtk_callback_action_new (keyaccel_connect_cb, NULL, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	sc = gtk_shortcut_new (
+		gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
+		gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	gtk_widget_add_controller (widget, ctrl);
 }
 
 void set_disconnect_btn(session *sess, int stat)
@@ -96,6 +138,12 @@ void setbtns(session *sess, int stat)
 	}
 }
 
+/* Phase 4.13: GtkStatusbar is deprecated in GTK 4.10. The connection
+ * status indicator is a single-line label that needs neither the
+ * statusbar's stack-of-messages model nor its frame chrome. A Phase 5
+ * follow-up replaces it with a plain GtkLabel; until then suppress
+ * deprecations on the status-bar machinery. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void set_status_bar(int status)
 {
 	if(!status_bar) {
@@ -128,6 +176,7 @@ void set_status_bar(int status)
 		g_free(str);
 	}
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 void changetitlesconnected(session *sess)
 {
@@ -194,7 +243,7 @@ void close_connected_windows(session *sess)
 	struct gtkhx_chat *gchat, *prev = NULL;
 
 	if(sess->agreementwin) {
-		gtk_widget_destroy(sess->agreementwin);
+		gtkhx_widget_destroy(sess->agreementwin);
 		sess->agreementwin = NULL;
 	}
 	destroy_gfl_list();
@@ -203,7 +252,7 @@ void close_connected_windows(session *sess)
 	for(gchat = sess->gchat_list; gchat; gchat = prev) {
 		prev = gchat->prev;
 		if(gchat->cid) {
-			gtk_widget_destroy(gchat->window);
+			gtkhx_widget_destroy(gchat->window);
 			gchat_delete(sess, gchat);
 		}
 	}
@@ -220,6 +269,13 @@ char *add_break(char *msg, int pos)
 	return msg;
 }
 
+/* Phase 4.13: GtkDialog and gtk_dialog_get_content_area are deprecated
+ * in GTK 4.10 in favor of GtkAlertDialog (for simple message dialogs)
+ * and GtkWindow (for custom multi-button forms). Migrating every
+ * GtkDialog call site is a sizable Phase 4.7 follow-up the ROADMAP
+ * already documented as deferred — until then suppress deprecations
+ * on the dialog wrappers. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void error_dialog (char *title, char *msg)
 {
     GtkWidget *label;
@@ -243,40 +299,55 @@ void error_dialog (char *title, char *msg)
     dialog = gtk_dialog_new();
 
     gtk_window_set_title(GTK_WINDOW(dialog), title);
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
     label = gtk_label_new (message);
     gtk_widget_set_size_request(dialog, 250, 200);
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), label, TRUE, 
-						TRUE , 0);
+    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
 
     okbutton = gtk_button_new_with_label ("Ok");
 
     g_signal_connect_swapped (okbutton, "clicked", 
-							   (GCallback)gtk_widget_destroy, 
+							   (GCallback)gtkhx_widget_destroy, 
 							   dialog);
 
-    gtk_widget_set_can_default(okbutton, TRUE);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
 
-    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 
-						TRUE, TRUE, 0);
+    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbutton, TRUE, TRUE, 0);
 
 
-    gtk_widget_grab_default (okbutton);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
-    gtk_widget_show_all (dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
 	g_free(message);
 }
 
+/* Phase 4.2: gtk_dialog_get_action_area is fully removed in GTK 4
+ * (the action area widget is gone too). Synthesize one: a horizontal
+ * GtkBox attached to the bottom of the dialog's content area on
+ * first call, cached on the dialog via g_object_set_data so repeat
+ * calls return the same box. Callers' gtkhx_box_pack(area, btn, ...)
+ * just append to this box. */
 GtkWidget *
 gtkhx_dialog_action_area (GtkDialog *dialog)
 {
 	GtkWidget *area;
-	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-	area = gtk_dialog_get_action_area (dialog);
-	G_GNUC_END_IGNORE_DEPRECATIONS
+
+	if (!dialog)
+		return NULL;
+	area = g_object_get_data (G_OBJECT (dialog), "gtkhx-action-area");
+	if (!area) {
+		GtkWidget *content = gtk_dialog_get_content_area (dialog);
+		area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+		gtk_widget_set_halign (area, GTK_ALIGN_END);
+		gtk_widget_set_margin_top (area, 6);
+		if (GTK_IS_BOX (content))
+			gtk_box_append (GTK_BOX (content), area);
+		g_object_set_data (G_OBJECT (dialog), "gtkhx-action-area", area);
+	}
 	return area;
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 GtkWidget *
 gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous)
@@ -326,4 +397,165 @@ gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
 	gtk_widget_set_halign  (child, GTK_ALIGN_FILL);
 	gtk_widget_set_valign  (child, GTK_ALIGN_FILL);
 	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+}
+
+/* Phase 4.2: GtkContainer is gone — dispatch on parent type to the
+ * right child setter. Box gets append (call sites that want
+ * gtk_box_pack_start semantics should use gtkhx_box_pack instead;
+ * this helper covers the simple "put one child in a parent" case
+ * gtk_container_add was usually doing). */
+void
+gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child)
+{
+	if (!parent || !child)
+		return;
+
+	if (GTK_IS_WINDOW (parent))
+		gtk_window_set_child (GTK_WINDOW (parent), child);
+	else if (GTK_IS_SCROLLED_WINDOW (parent))
+		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), child);
+	else if (GTK_IS_FRAME (parent))
+		gtk_frame_set_child (GTK_FRAME (parent), child);
+	else if (GTK_IS_BUTTON (parent))
+		gtk_button_set_child (GTK_BUTTON (parent), child);
+	else if (GTK_IS_BOX (parent))
+		gtk_box_append (GTK_BOX (parent), child);
+	else if (GTK_IS_VIEWPORT (parent))
+		gtk_viewport_set_child (GTK_VIEWPORT (parent), child);
+	else if (GTK_IS_POPOVER (parent))
+		gtk_popover_set_child (GTK_POPOVER (parent), child);
+	else if (GTK_IS_LIST_BOX_ROW (parent))
+		gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (parent), child);
+	else if (GTK_IS_LIST_BOX (parent))
+		gtk_list_box_append (GTK_LIST_BOX (parent), child);
+	else
+		g_warning ("gtkhx_widget_set_child: unhandled parent type %s",
+		           G_OBJECT_TYPE_NAME (parent));
+}
+
+void
+gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child)
+{
+	if (!parent || !child)
+		return;
+
+	if (GTK_IS_BOX (parent))
+		gtk_box_remove (GTK_BOX (parent), child);
+	else if (GTK_IS_LIST_BOX (parent))
+		gtk_list_box_remove (GTK_LIST_BOX (parent), child);
+	else
+		gtk_widget_unparent (child);
+}
+
+static void
+gtkhx_box_pack_apply (GtkWidget *child, GtkOrientation orient,
+                      gboolean expand, gboolean fill, guint padding)
+{
+	gboolean horiz = (orient == GTK_ORIENTATION_HORIZONTAL);
+
+	if (expand) {
+		if (horiz) gtk_widget_set_hexpand (child, TRUE);
+		else       gtk_widget_set_vexpand (child, TRUE);
+	}
+	if (fill) {
+		if (horiz) gtk_widget_set_halign (child, GTK_ALIGN_FILL);
+		else       gtk_widget_set_valign (child, GTK_ALIGN_FILL);
+	}
+	if (padding) {
+		if (horiz) {
+			gtk_widget_set_margin_start (child, padding);
+			gtk_widget_set_margin_end   (child, padding);
+		} else {
+			gtk_widget_set_margin_top    (child, padding);
+			gtk_widget_set_margin_bottom (child, padding);
+		}
+	}
+}
+
+void
+gtkhx_box_pack (GtkWidget *box, GtkWidget *child,
+                gboolean expand, gboolean fill, guint padding)
+{
+	if (!box || !child)
+		return;
+	g_return_if_fail (GTK_IS_BOX (box));
+	gtkhx_box_pack_apply (child, gtk_orientable_get_orientation (GTK_ORIENTABLE (box)),
+	                      expand, fill, padding);
+	gtk_box_append (GTK_BOX (box), child);
+}
+
+void
+gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
+                    gboolean expand, gboolean fill, guint padding)
+{
+	GtkOrientation orient;
+
+	if (!box || !child)
+		return;
+	g_return_if_fail (GTK_IS_BOX (box));
+	orient = gtk_orientable_get_orientation (GTK_ORIENTABLE (box));
+	gtkhx_box_pack_apply (child, orient, expand, fill, padding);
+	/* Push toward the trailing edge to mimic gtk_box_pack_end. */
+	if (orient == GTK_ORIENTATION_HORIZONTAL)
+		gtk_widget_set_halign (child, GTK_ALIGN_END);
+	else
+		gtk_widget_set_valign (child, GTK_ALIGN_END);
+	gtk_box_append (GTK_BOX (box), child);
+}
+
+/* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
+ * The replacement chain is gdk_texture_new_for_pixbuf →
+ * gtk_image_new_from_paintable. Wrap that here so the per-site
+ * migration is just a name swap (and the returned floating GtkImage
+ * has the same ownership story).
+ *
+ * gdk_texture_new_for_pixbuf is itself deprecated in GTK 4.16 (the
+ * suggested replacement loads the pixbuf bytes via GBytes /
+ * gdk_memory_texture_new). The pixbuf-first path is what the rest of
+ * GtkHx hands us — every icon comes from gdk_pixbuf_new_from_resource —
+ * so the GBytes round-trip is a Phase 5 follow-up alongside the
+ * GResource-based texture loader. Suppress the inner deprecation
+ * here so we keep the strict deprecation gate on. */
+GtkWidget *
+gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
+{
+	GtkWidget *image;
+	GdkTexture *tex;
+
+	if (!pixbuf)
+		return gtk_image_new ();
+
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	tex = gdk_texture_new_for_pixbuf (pixbuf);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+
+	image = gtk_image_new_from_paintable (GDK_PAINTABLE (tex));
+	g_object_unref (tex);
+	return image;
+}
+
+/* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
+ * gtk_window_destroy which tears down the surface and drops refs.
+ * Non-toplevels: if the widget has a parent, unparent it (the
+ * parent drops its ref); if floating, sink + unref. */
+void
+gtkhx_widget_destroy (GtkWidget *widget)
+{
+	GtkWidget *parent;
+
+	if (!widget)
+		return;
+	if (GTK_IS_WINDOW (widget)) {
+		gtk_window_destroy (GTK_WINDOW (widget));
+		return;
+	}
+	parent = gtk_widget_get_parent (widget);
+	if (parent) {
+		gtk_widget_unparent (widget);
+	} else if (g_object_is_floating (widget)) {
+		g_object_ref_sink (widget);
+		g_object_unref (widget);
+	} else {
+		g_object_unref (widget);
+	}
 }

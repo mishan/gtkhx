@@ -71,14 +71,14 @@ static void plugin_row_select (GtkWidget *widget, gint row, gint col, GdkEventBu
 
 static void close_load_plugin (GtkWidget *btn, GtkWidget *window)
 {
-	gtk_widget_destroy(window);
+	gtkhx_widget_destroy(window);
 }
 
 static void do_load(GtkWidget *m, gpointer n) {
 	char* file = gtk_file_selection_get_filename(GTK_FILE_SELECTION(n));
 
 	module_load(file);
-	gtk_widget_destroy(GTK_WIDGET(n));
+	gtkhx_widget_destroy(GTK_WIDGET(n));
 }
 
 static void load_plugin (GtkWidget *widget, gpointer data)
@@ -99,12 +99,12 @@ static void load_plugin (GtkWidget *widget, gpointer data)
 	gtk_signal_connect(GTK_FILE_SELECTION(config)->cancel_button, "clicked", GTK_SIGNAL_FUNC(close_load_plugin), config);
 
 	init_keyaccel(config);
-	gtk_widget_show(config);
+	gtk_window_present(GTK_WINDOW(config));
 }
 
 static void close_plugin_window(GtkWidget *window, gpointer data)
 {
-	gtk_widget_destroy(plugin_window);
+	gtkhx_widget_destroy(plugin_window);
 	plugin_window = 0;
 	plugin_list = 0;
 }
@@ -148,7 +148,7 @@ void create_plugin_manager(void)
 		return;
 	}
 
-	plugin_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	plugin_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(plugin_window), _("GtkHx - Plugins"));
 	gtk_signal_connect(plugin_window, "delete_event", GTK_SIGNAL_FUNC(close_plugin_window), 0);
 
@@ -165,7 +165,7 @@ void create_plugin_manager(void)
 
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	scroll = gtk_scrolled_window_new(0, 0);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
@@ -174,24 +174,24 @@ void create_plugin_manager(void)
 	gtk_clist_set_column_width (GTK_CLIST (plugin_list), 0, 40);
 	gtk_widget_set_usize(plugin_list, 350, 200);
 	gtk_signal_connect(plugin_list, "select_row", GTK_SIGNAL_FUNC(plugin_row_select), 0);
-	gtk_container_add(GTK_CONTAINER(scroll), plugin_list);
+	gtkhx_widget_set_child(scroll, plugin_list);
 
-	gtk_box_pack_start(GTK_BOX(vbox), scroll, 0, 0, 0);
+	gtkhx_box_pack(vbox, scroll, 0, 0, 0);
 
 	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-	gtk_box_pack_start(GTK_BOX(btnhbox), loadbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), unloadbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), closebtn, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, loadbtn, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, unloadbtn, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, closebtn, 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(vbox), btnhbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, btnhbox, 0, 0, 0);
 
-	gtk_container_add(GTK_CONTAINER(plugin_window), vbox);
+	gtkhx_widget_set_child(plugin_window, vbox);
 
 	fe_pluginlist_update();
 
 	init_keyaccel(plugin_window);
-	gtk_widget_show_all(plugin_window);
+	gtk_window_present(GTK_WINDOW(plugin_window));
 
 }
 

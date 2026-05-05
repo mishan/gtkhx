@@ -35,6 +35,7 @@
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"
+#include "toolbar.h"
 
 void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)
@@ -81,75 +82,79 @@ struct msgwin *msgwin_with_uid (guint16 uid)
 
 static void msg_input_activate (GtkWidget *widget, gpointer data);
 
-static gboolean msg_input_key_press (GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+/* Phase 4.5: GTK 4 widgets don't emit key-press-event; keyboard input
+ * comes via a GtkEventControllerKey installed on the widget. The
+ * "key-pressed" signal carries (controller, keyval, keycode, state,
+ * user_data). Returning TRUE inhibits further propagation, FALSE lets
+ * the GtkTextView's default text input proceed (used here for the
+ * Shift+Return → newline path and for ordinary typing). */
+static gboolean
+msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
+                       guint keycode, GdkModifierType state, gpointer user_data)
 {
+	GtkWidget *widget = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (ctrl));
 	GtkTextView *text;
 	GtkTextBuffer *buf;
-	guint k, s;
 	HIST_ENTRY *hent = NULL;
-	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data (G_OBJECT (widget), "msg");
+	(void) keycode; (void) user_data;
 
-	text = GTK_TEXT_VIEW(widget);
-	buf = gtk_text_view_get_buffer(text);
+	if (!msg)
+		return FALSE;
 
-	k = event->keyval; s = event->state;
-	/* handle this weird bug */
-	if (s & GDK_CONTROL_MASK) {
-		switch(k) {
+	text = GTK_TEXT_VIEW (widget);
+	buf  = gtk_text_view_get_buffer (text);
+
+	if (state & GDK_CONTROL_MASK) {
+		switch (keyval) {
 		case 'k':
 		case 'K':
-			create_connect_window(0,&the_session);
-			break;
+			create_connect_window (0, &the_session);
+			return TRUE;
 		}
 	}
-	else if (s & GDK_SHIFT_MASK && k == GDK_KEY_Return) {
-		/* insert a linebreak if shift is held — let GtkTextView default */
+	else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
+		/* Insert a linebreak if shift is held — let GtkTextView default. */
 		return FALSE;
 	}
-	else if (k == GDK_KEY_Return) {
+	else if (keyval == GDK_KEY_Return) {
 		GtkTextIter start, end;
 		char *line;
 
-		gtk_text_buffer_get_start_iter(buf, &start);
-		gtk_text_buffer_get_end_iter(buf, &end);
-		line = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
-		add_history(msg->history, line);
-		using_history(msg->history);
-		g_free(line);
+		gtk_text_buffer_get_start_iter (buf, &start);
+		gtk_text_buffer_get_end_iter   (buf, &end);
+		line = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
+		add_history (msg->history, line);
+		using_history (msg->history);
+		g_free (line);
 
-		msg_input_activate(widget, msg->uid);
-		g_signal_stop_emission_by_name(widget, "key_press_event");
+		msg_input_activate (widget, msg->uid);
 		return TRUE;
 	}
-	else if (k == GDK_KEY_Up) {
-		hent = previous_history(msg->history);
+	else if (keyval == GDK_KEY_Up) {
+		hent = previous_history (msg->history);
 	}
-	else if (k == GDK_KEY_Down) {
-		hent = next_history(msg->history);
+	else if (keyval == GDK_KEY_Down) {
+		hent = next_history (msg->history);
 	}
 
 	if (hent) {
 		GtkTextIter end;
 
-		gtk_text_buffer_set_text(buf, hent->line, strlen(hent->line));
-		gtk_text_buffer_get_end_iter(buf, &end);
-		gtk_text_buffer_place_cursor(buf, &end);
-		g_signal_stop_emission_by_name(widget, "key_press_event");
+		gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
+		gtk_text_buffer_get_end_iter (buf, &end);
+		gtk_text_buffer_place_cursor (buf, &end);
 		return TRUE;
 	}
 
 	return FALSE;
 }
 
-static void msg_update_trans (GtkWidget *win, GdkEventConfigure *event, gpointer data)
-{
-	GtkWidget *xtext = data;
-
-	if(gtkhx_prefs.trans_xtext) {
-		gtk_xtext_refresh(GTK_XTEXT(xtext));
-	}
-
-}
+/* Phase 4.5: msg_update_trans was a configure-event handler that
+ * forced an xtext refresh on resize so transparency would track the
+ * new window position. configure-event is gone in GTK 4, and Wayland
+ * doesn't expose true window-relative transparency anyway. */
 
 static void msg_input_activate (GtkWidget *widget, gpointer data)
 {
@@ -206,7 +211,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	
 	msg->history = history_new();
 
-	msg->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	msg->window = gtk_window_new();
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
 		msg->outputbuf = gtk_xtext_new (colors, 0);
@@ -228,21 +233,31 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	g_object_set_data(G_OBJECT(msg->inputbuf), "msg", msg);
 	g_object_set_data(G_OBJECT(msg->inputbuf), "sess", &the_session);
 	/* Note: GtkTextView has no "activate" signal — Return is dispatched
-	   from msg_input_key_press, which calls msg_input_activate(). */
-	g_signal_connect(msg->inputbuf, "key_press_event",
-					   G_CALLBACK(msg_input_key_press), uid);
-	g_signal_connect(msg->window, "configure_event",
-					   G_CALLBACK(msg_update_trans), msg->outputbuf);
+	 * from msg_input_key_pressed, which calls msg_input_activate().
+	 * Phase 4.5: key-press-event is gone in GTK 4; install a
+	 * GtkEventControllerKey on the input view instead. */
+	{
+		GtkEventController *kctrl = gtk_event_controller_key_new ();
+		g_signal_connect (kctrl, "key-pressed",
+		                  G_CALLBACK (msg_input_key_pressed), uid);
+		gtk_widget_add_controller (msg->inputbuf, kctrl);
+	}
+	
 
 	msg_list = msg;
 	return msg;
 }
 
-void destroy_msgwin (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" on (GtkWindow *, gpointer)
+ * returning TRUE to inhibit close, FALSE to allow default destroy.
+ * Just unlink the msg from the list — the framework destroys the
+ * widget. */
+gboolean destroy_msgwin (GtkWindow *window, gpointer data)
 {
-	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
+	struct msgwin *msg = g_object_get_data(G_OBJECT(window), "msg");
+	(void) data;
 	msgwin_delete(msg);
-	gtk_widget_destroy(widget);
+	return FALSE;
 }
 
 
@@ -262,44 +277,45 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 	gtk_widget_set_size_request(msg->window, 412, 280);
 	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
-	gtk_container_set_border_width(GTK_CONTAINER(msg->window), 0);
+	(gtk_widget_set_margin_start(msg->window, 0), gtk_widget_set_margin_end(msg->window, 0), gtk_widget_set_margin_top(msg->window, 0), gtk_widget_set_margin_bottom(msg->window, 0));
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, 500, 400);
 
 	outputframe = gtk_frame_new(0);
-	gtk_frame_set_shadow_type(GTK_FRAME(outputframe), GTK_SHADOW_IN);
-	gtk_container_add(GTK_CONTAINER(outputframe), hbox);
-	gtk_box_pack_start(GTK_BOX(hbox), msg->outputbuf, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), msg->vscroll, 0, 0, 0);
+	gtkhx_widget_set_child(outputframe, hbox);
+	gtkhx_box_pack(hbox, msg->outputbuf, 1, 1, 0);
+	gtkhx_box_pack(hbox, msg->vscroll, 0, 0, 0);
 
 	inputframe = gtk_frame_new(0);
-	gtk_frame_set_shadow_type(GTK_FRAME(inputframe), GTK_SHADOW_IN);
-	gtk_container_add(GTK_CONTAINER(inputframe), msg->inputbuf);
+	gtkhx_widget_set_child(inputframe, msg->inputbuf);
 	gtk_widget_set_size_request(inputframe, 0, 40);
 	gtk_widget_set_size_request(msg->inputbuf, 0, 40);
 
 	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_pack1(GTK_PANED(vpane), outputframe, 0, 1);
-	gtk_paned_pack2(GTK_PANED(vpane), inputframe, 0, 1);
+	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
+	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
 	gtk_paned_set_position(GTK_PANED(vpane), 230);
-	gtk_container_set_border_width(GTK_CONTAINER(vpane), 5);
+	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
 
 
-	gtk_container_add(GTK_CONTAINER(msg->window), vpane);
+	gtkhx_widget_set_child(msg->window, vpane);
 
 
-	gtk_widget_show_all(msg->window);
+	gtk_window_present(GTK_WINDOW(msg->window));
 
 	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
-	g_signal_connect(msg->window, "delete_event", G_CALLBACK(destroy_msgwin), 0);
+	g_signal_connect(msg->window, "close-request", G_CALLBACK(destroy_msgwin), 0);
 	init_keyaccel(msg->window);
 
 	gtk_widget_grab_focus(msg->inputbuf);
 
 
-	if(gtkhx_prefs.showback) {
-		gdk_window_lower(gtk_widget_get_window(msg->window));
-	}
+	/* Phase 4.4: GdkWindow / gdk_window_lower / gtk_widget_get_window
+	 * are gone in GTK 4. The "showback" pref used to lower the new
+	 * message window to the back of the stack so it didn't steal focus.
+	 * Wayland doesn't let clients re-order themselves in the stack, so
+	 * the pref no longer has a meaningful implementation; the window
+	 * comes up at whatever position the compositor picks. */
 
 	return msg;
 }
@@ -353,9 +369,12 @@ void msg_output (char *name, guint16 uid, char *buf)
 void broadcastok(GtkWidget *widget, gpointer data)
 {
 	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
-	gtk_widget_destroy(dialog);
+	gtkhx_widget_destroy(dialog);
 }
 
+/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
+ * GTK 4.10 — Phase 4.7 follow-up. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void broadcastmsg(char *text)
 {
 
@@ -368,7 +387,10 @@ void broadcastmsg(char *text)
 
 	dialog = gtk_dialog_new();
 	okbtn = gtk_button_new_with_label(_("OK"));
-    gtk_widget_set_can_default(okbtn, TRUE);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
+	if (toolbar_window)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog),
+		                             GTK_WINDOW(toolbar_window));
 
 	textbox = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);
@@ -377,19 +399,20 @@ void broadcastmsg(char *text)
 	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textbox));
 	gtk_text_buffer_set_text(tbuf, text, strlen(text));
 
-	scroll = gtk_scrolled_window_new(NULL, NULL);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(scroll), textbox);
+	gtkhx_widget_set_child(scroll, textbox);
 
 	gtk_widget_set_size_request(dialog, 300, 250);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), scroll, TRUE, TRUE , 0);
-	gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
-    gtk_widget_grab_default (okbtn);
+    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), scroll, TRUE, TRUE, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbtn, TRUE, TRUE, 0);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
-	gtk_widget_show_all(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS

@@ -42,6 +42,19 @@
 #include "log.h"
 #include "gtkutil.h"
 
+/* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
+ * for the icon viewer and the prefs notebook tree (Phase 2.x work),
+ * plus GtkDialog for the prefs dialog itself, GtkFontChooserDialog
+ * for the font picker, and GtkComboBox for assorted dropdowns. All
+ * those API families are deprecated in GTK 4.10+ in favor of
+ * GtkColumnView/GListModel, GtkAlertDialog/GtkWindow, GtkFontDialog,
+ * and GtkDropDown respectively. The migrations are tracked as
+ * Phase 5 (tree-view), Phase 4.7 (dialogs), and a Phase 5 UX
+ * follow-up (combo boxes, font chooser); until then suppress
+ * deprecations across the file so the rest of the tree can keep
+ * -Werror=deprecated-declarations on. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
 time_t start_time;
 time_t total_time;
 
@@ -168,8 +181,8 @@ void list_icons (void)
 			/* Cooperative multitasking — keep the dialog responsive while
 			 * paging through hundreds of resource entries. */
 			if (icon % 10 == 0) {
-				while (gtk_events_pending ())
-					gtk_main_iteration ();
+				while (g_main_context_pending(NULL))
+					g_main_context_iteration(NULL, TRUE);
 				if (!options_window)
 					return;
 			}
@@ -794,11 +807,31 @@ static void parse_tracker_list(void)
 	}
 }
 
-static void close_options_window (void)
+/* Phase 4.5: bookkeeping that runs both on explicit close (Cancel /
+ * OK button) and on close-request. The window destruction itself is
+ * handled by the close-request default handler — when the Cancel
+ * button fires, we kick the same path off via gtk_window_destroy. */
+static void close_options_bookkeeping (void)
 {
-	gtk_widget_destroy(options_window);
 	options_window = 0;
 	g_free(iv);
+	iv = NULL;
+}
+
+/* close-request handler: returns FALSE so default destroy proceeds. */
+static gboolean close_options_window_request (GtkWindow *window, gpointer data)
+{
+	(void) window; (void) data;
+	close_options_bookkeeping();
+	return FALSE;
+}
+
+/* Cancel button: destroy the dialog, which fires close-request. */
+static void close_options_window_cancel (GtkWidget *btn, gpointer data)
+{
+	(void) btn; (void) data;
+	if (options_window)
+		gtk_window_destroy(GTK_WINDOW(options_window));
 }
 
 
@@ -815,7 +848,7 @@ void options_change (GtkWidget *widget, gpointer data)
 		switch (v->type) {
 		case UINT16:
 		{
-			char *str = gtk_entry_get_text(GTK_ENTRY(v->widget));
+			char *str = gtk_editable_get_text(GTK_EDITABLE(v->widget));
 			guint16 g;;
 			
 			if(!str) continue;
@@ -826,7 +859,7 @@ void options_change (GtkWidget *widget, gpointer data)
 			}
 			case INT:
 			{
-				char *st = gtk_entry_get_text (GTK_ENTRY(v->widget));
+				char *st = gtk_editable_get_text(GTK_EDITABLE(v->widget));
 
 				int in;
 				if(!st) continue;
@@ -837,7 +870,7 @@ void options_change (GtkWidget *widget, gpointer data)
 			}
 			case STRING32:
 			{
-				char *s = gtk_entry_get_text(GTK_ENTRY(v->widget));
+				char *s = gtk_editable_get_text(GTK_EDITABLE(v->widget));
 				if(!s) continue;
 				if (!strcmp(s, v->variable.str32)) continue;
 				strncpy(v->variable.str32, s, 31);
@@ -846,7 +879,7 @@ void options_change (GtkWidget *widget, gpointer data)
 			}
 			case STRING:
 			{
-				char *string = gtk_entry_get_text(GTK_ENTRY(v->widget));
+				char *string = gtk_editable_get_text(GTK_EDITABLE(v->widget));
 				if(!string) continue;
 /*				if (!*v->variable.str || strcmp (*v->variable.str, string))
 				{
@@ -866,8 +899,8 @@ void options_change (GtkWidget *widget, gpointer data)
 			}
 			case BOOLEAN:
 			{
-				unsigned char b = gtk_toggle_button_get_active(
-					(GtkToggleButton*)v->widget);
+				unsigned char b = gtk_check_button_get_active(
+					(GtkCheckButton*)v->widget);
 				if (b == *v->variable.uchar) continue;
 				*v->variable.uchar = b;
 				break;
@@ -886,7 +919,11 @@ void options_change (GtkWidget *widget, gpointer data)
 	prefs_write();
 
 	if(!GPOINTER_TO_INT(data)) {
-		close_options_window();
+		/* Phase 4.5: explicit close from the OK button — destroy
+		 * the dialog, which fires close-request and runs the
+		 * bookkeeping in close_options_window_request. */
+		if (options_window)
+			gtk_window_destroy(GTK_WINDOW(options_window));
 	}
 }
 
@@ -904,11 +941,11 @@ fontsel_response (GtkDialog *dialog, gint response, gpointer user_data)
 	if (response == GTK_RESPONSE_OK) {
 		char *font = gtk_font_chooser_get_font (GTK_FONT_CHOOSER (dialog));
 		if (font) {
-			gtk_entry_set_text (GTK_ENTRY (entry), font);
+			gtk_editable_set_text(GTK_EDITABLE(entry), font);
 			g_free (font);
 		}
 	}
-	gtk_widget_destroy (GTK_WIDGET (dialog));
+	gtkhx_widget_destroy (GTK_WIDGET (dialog));
 }
 
 static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
@@ -923,7 +960,7 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 	g_signal_connect (fontsel, "response",
 	                  G_CALLBACK (fontsel_response), entry);
 
-	gtk_widget_show_all (fontsel);
+	gtk_window_present(GTK_WINDOW(fontsel));
 }
 
 #ifdef USE_GDK_PIXBUF
@@ -952,14 +989,14 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 	GtkWidget *wid, *hbox, *lbox, *lab;
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start (GTK_BOX (vbox), hbox, 0, 0, 2);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 2);
 
 	lbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start (GTK_BOX (hbox), lbox, 0, 0, 2);
+	gtkhx_box_pack(hbox, lbox, 0, 0, 2);
 	gtk_widget_set_size_request (lbox, 60, 0);
 
 	lab = gtk_label_new (label);
-	gtk_box_pack_end (GTK_BOX (lbox), lab, 0, 0, 0);
+	gtkhx_box_pack_end(lbox, lab, 0, 0, 0);
 
 	adj = (GtkAdjustment *) gtk_adjustment_new (*value, 0, 255.0, 1, 25, 0);
 	g_signal_connect (adj, "value_changed",
@@ -968,7 +1005,7 @@ settings_slider (GtkWidget * vbox, char *label, int *value)
 	wid = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, adj);
 	gtk_scale_set_value_pos ((GtkScale *) wid, GTK_POS_RIGHT);
 	gtk_scale_set_digits ((GtkScale *) wid, 0);
-	gtk_container_add (GTK_CONTAINER (hbox), wid);
+	gtkhx_widget_set_child(hbox, wid);
 }
 
 #endif
@@ -980,24 +1017,24 @@ settings_create_group (GtkWidget * vvbox, gchar * title)
 	GtkWidget *vbox;
 
 	frame = gtk_frame_new (title);
-	gtk_box_pack_start (GTK_BOX (vvbox), frame, FALSE, FALSE, 0);
+	gtkhx_box_pack(vvbox, frame, FALSE, FALSE, 0);
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-	gtk_container_set_border_width (GTK_CONTAINER (vbox), 2);
-	gtk_container_add (GTK_CONTAINER (frame), vbox);
+	(gtk_widget_set_margin_start(vbox, 2), gtk_widget_set_margin_end(vbox, 2), gtk_widget_set_margin_top(vbox, 2), gtk_widget_set_margin_bottom(vbox, 2));
+	gtkhx_widget_set_child(frame, vbox);
 
 	return vbox;
 }
 
 static void add_tracker(GtkWidget *add, GtkWidget *entry)
 {
-	char *tracker = g_strdup(gtk_entry_get_text(GTK_ENTRY(entry)));
+	char *tracker = g_strdup(gtk_editable_get_text(GTK_EDITABLE(entry)));
 	gint row;
 
 	row = gtk_hlist_append(GTK_HLIST(tracker_list), &tracker);
 	gtk_hlist_set_row_data(GTK_HLIST(tracker_list), row,
 						   tracker);
-	gtk_entry_set_text(GTK_ENTRY(entry), "");
+	gtk_editable_set_text(GTK_EDITABLE(entry), "");
 }
 
 static void remove_tracker(GtkWidget *del, GtkWidget *list)
@@ -1035,27 +1072,27 @@ static void settings_page_tracker (GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Trackers"));
 
-	scroll = gtk_scrolled_window_new(0, 0);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
 	tracker_list = gtk_hlist_new(1);
-	gtk_container_add(GTK_CONTAINER(scroll), tracker_list);
+	gtkhx_widget_set_child(scroll, tracker_list);
 
-	gtk_box_pack_start(GTK_BOX(wid), scroll, 0, 0, 0);
+	gtkhx_box_pack(wid, scroll, 0, 0, 0);
 	gtk_widget_set_size_request(scroll, 232, 246);
 
 	ent_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(wid), ent_hbox, 0, 0, 0);
+	gtkhx_box_pack(wid, ent_hbox, 0, 0, 0);
 
 	lbl = gtk_label_new(_("Address: "));
 	entry = gtk_entry_new();
 
-	gtk_box_pack_start(GTK_BOX(ent_hbox), lbl, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(ent_hbox), entry, 0, 0, 0);
+	gtkhx_box_pack(ent_hbox, lbl, 0, 0, 0);
+	gtkhx_box_pack(ent_hbox, entry, 0, 0, 0);
 
 	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(wid), btnhbox, 0, 0, 0);
+	gtkhx_box_pack(wid, btnhbox, 0, 0, 0);
 
 	add = gtk_button_new_with_label(_("Add"));
 	g_signal_connect(add, "clicked",
@@ -1066,8 +1103,8 @@ static void settings_page_tracker (GtkWidget *vbox)
 					   G_CALLBACK(remove_tracker),
 					   tracker_list);
 
-	gtk_box_pack_start(GTK_BOX(btnhbox), add, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), remove, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, add, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, remove, 0, 0, 0);
 
 	for(i = 0; i < gtkhx_prefs.num_tracker; i++) {
 		char *tracker = g_strdup(gtkhx_prefs.tracker[i]);
@@ -1089,14 +1126,14 @@ static void settings_page_news15 (GtkWidget *vbox)
 
 	cfgvars[NEWS_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
-	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[NEWS_SAMEWINDOW_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[NEWS_SAMEWINDOW_IDX].widget,
 								 gtkhx_prefs.news_samewin);
 
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NEWS_SAMEWINDOW_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 
@@ -1110,14 +1147,14 @@ static void settings_page_files(GtkWidget *vbox)
 
 	cfgvars[FILE_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
-	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[FILE_SAMEWINDOW_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[FILE_SAMEWINDOW_IDX].widget,
 								 gtkhx_prefs.file_samewin);
 
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FILE_SAMEWINDOW_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 #if 0 /* XXX */
@@ -1131,14 +1168,14 @@ static void settings_page_logging (GtkWidget *vbox)
 
 	cfgvars[LOGGING_IDX].widget = gtk_check_button_new_with_label(
 		_("Log Chats/Private Messages"));
-	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[LOGGING_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[LOGGING_IDX].widget,
 								 gtkhx_prefs.logging);
 
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[LOGGING_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 #endif
 
@@ -1160,43 +1197,45 @@ static void settings_page_sound(GtkWidget *vbox)
 					 GTK_FILL, GTK_FILL, 0, 0);
 
 	cfgvars[SND_CMD_IDX].widget = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[SND_CMD_IDX].widget),
-					   gtkhx_prefs.snd_cmd);
+	/* Phase 4.x: GtkEntry.text is now on the GtkEditable interface.
+	 * gtk_entry_set_text/get_text were dropped — use the editable APIs. */
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SND_CMD_IDX].widget),
+						   gtkhx_prefs.snd_cmd);
 	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[SND_CMD_IDX].widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
+	gtkhx_box_pack(wid, table2, 0, 0, 0);
 
 	wid = settings_create_group(vbox, _("Sounds"));
 
 	cfgvars[SOUNDSON_IDX].widget = gtk_check_button_new_with_label(_("Play Sounds For:"));
-	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[SOUNDSON_IDX].widget, hxsnd.on);
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDSON_IDX].widget, hxsnd.on);
 	cfgvars[SOUNDINVITE_IDX].widget = gtk_check_button_new_with_label(_("Chat Invitation"));
-	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[SOUNDINVITE_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDINVITE_IDX].widget,
 								 hxsnd.invite);
 	cfgvars[SOUNDCHAT_IDX].widget = gtk_check_button_new_with_label(_("Chat"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDCHAT_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDCHAT_IDX].widget,
 								 hxsnd.chat);
 	cfgvars[SOUNDERROR_IDX].widget = gtk_check_button_new_with_label(_("Error"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDERROR_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDERROR_IDX].widget,
 								 hxsnd.error);
 	cfgvars[SOUNDFILE_IDX].widget = gtk_check_button_new_with_label(
 		_("File Transfer Complete"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDFILE_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDFILE_IDX].widget,
 								 hxsnd.file);
 	cfgvars[SOUNDJOIN_IDX].widget = gtk_check_button_new_with_label(_("Join"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDJOIN_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDJOIN_IDX].widget,
 								 hxsnd.join);
 	cfgvars[SOUNDLOGIN_IDX].widget = gtk_check_button_new_with_label(_("Login"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDLOGIN_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDLOGIN_IDX].widget,
 								 hxsnd.login);
 	cfgvars[SOUNDMSG_IDX].widget = gtk_check_button_new_with_label(_("Private Message"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDMSG_IDX].widget, hxsnd.msg);
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDMSG_IDX].widget, hxsnd.msg);
 	cfgvars[SOUNDNEWS_IDX].widget = gtk_check_button_new_with_label(_("News"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDNEWS_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDNEWS_IDX].widget,
 								 hxsnd.news);
 	cfgvars[SOUNDPART_IDX].widget = gtk_check_button_new_with_label(_("Leave"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDPART_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SOUNDPART_IDX].widget,
 								 hxsnd.part);
 
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDSON_IDX].widget, 0, 1, 0, 1,
@@ -1228,7 +1267,7 @@ static void settings_page_sound(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPART_IDX].widget, 1, 2, 9, 10,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 static void settings_page_font(GtkWidget *vbox)
@@ -1248,11 +1287,11 @@ static void settings_page_font(GtkWidget *vbox)
 					 GTK_FILL, GTK_FILL, 0, 0);
 
 	cfgvars[FONT_IDX].widget = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[FONT_IDX].widget), gtkhx_prefs.font);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[FONT_IDX].widget), gtkhx_prefs.font);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FONT_IDX].widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 
 	table2 = gtkhx_grid_new_table(2, 1, 0);
 
@@ -1262,7 +1301,7 @@ static void settings_page_font(GtkWidget *vbox)
 	g_signal_connect(btn, "clicked",
 					   G_CALLBACK(create_fontsel), cfgvars[FONT_IDX].widget);
 
-	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
+	gtkhx_box_pack(wid, table2, 0, 0, 0);
 }
 
 static void settings_page_xtext(GtkWidget *vbox)
@@ -1277,16 +1316,16 @@ static void settings_page_xtext(GtkWidget *vbox)
 
 	table = gtkhx_grid_new_table(4, 1, 0);
 	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
-	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
+	(gtk_widget_set_margin_start(table, 10), gtk_widget_set_margin_end(table, 10), gtk_widget_set_margin_top(table, 10), gtk_widget_set_margin_bottom(table, 10));
 
 	cfgvars[TRANSPARENT_IDX].widget = gtk_check_button_new_with_label(
 		_("Use Transparent XText Widget"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
+	gtk_check_button_set_active((GtkCheckButton*)
 								 cfgvars[TRANSPARENT_IDX].widget,
 								 gtkhx_prefs.trans_xtext);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRANSPARENT_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 
 #ifdef USE_GDK_PIXBUF
 	settings_slider(wid, _("Red: "), &gtkhx_prefs.tint_red);
@@ -1300,14 +1339,14 @@ static void settings_page_xtext(GtkWidget *vbox)
 
 	cfgvars[TIMESTAMP_IDX].widget = gtk_check_button_new_with_label(
 		_("Timestamp Chat"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[TIMESTAMP_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[TIMESTAMP_IDX].widget,
 								 gtkhx_prefs.timestamp);
 	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[TIMESTAMP_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	cfgvars[WORDWRAP_IDX].widget = gtk_check_button_new_with_label(
 		_("Word Wrap"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[WORDWRAP_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[WORDWRAP_IDX].widget,
 								 gtkhx_prefs.word_wrap);
 	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[WORDWRAP_IDX].widget, 1, 2, 0, 1,
 					 GTK_FILL, 0, 0, 0);
@@ -1321,7 +1360,7 @@ static void settings_page_xtext(GtkWidget *vbox)
 	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[XBUF_MAX_IDX].widget, 1, 2, 1, 2,
 					 GTK_FILL, 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
+	gtkhx_box_pack(wid, table2, 0, 0, 0);
 }
 
 static void settings_page_path(GtkWidget *vbox)
@@ -1337,7 +1376,7 @@ static void settings_page_path(GtkWidget *vbox)
 						   "Enter as many icon lists as you want,"
 						   " comma separated."));
 
-	gtk_box_pack_start(GTK_BOX(wid), desc, 0, 0, 0);
+	gtkhx_box_pack(wid, desc, 0, 0, 0);
 
 	wid = settings_create_group(vbox, _("Paths"));
 
@@ -1349,41 +1388,41 @@ static void settings_page_path(GtkWidget *vbox)
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 0, 1, GTK_FILL,
-					 (GtkAttachOptions) 0, 0, 0);
+					 0, 0, 0);
 
 	cfgvars[ICONS_IDX].widget = gtk_entry_new();
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICONS_IDX].widget, 1, 2, 0, 1,
-					 (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
-					 (GtkAttachOptions) 0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICONS_IDX].widget), gtkhx_prefs.icon_str);
+					 (GTK_EXPAND|GTK_FILL),
+					 0, 0, 0);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICONS_IDX].widget), gtkhx_prefs.icon_str);
 
 	lbl = gtk_label_new(_("Sound Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 1, 2, GTK_FILL,
-					 (GtkAttachOptions) 0, 0, 0);
+					 0, 0, 0);
 
 	cfgvars[SOUNDPATH_IDX].widget = gtk_entry_new();
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPATH_IDX].widget, 1, 2, 1, 2,
-					 (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
-					 (GtkAttachOptions) 0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[SOUNDPATH_IDX].widget),
-					   gtkhx_prefs.sound_path);
+					 (GTK_EXPAND|GTK_FILL),
+					 0, 0, 0);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[SOUNDPATH_IDX].widget),
+						   gtkhx_prefs.sound_path);
 
 	lbl = gtk_label_new(_("Download Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
 	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 2, 3, GTK_FILL,
-					 (GtkAttachOptions) 0, 0, 0);
+					 0, 0, 0);
 
 	cfgvars[DOWNLOAD_IDX].widget = gtk_entry_new();
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[DOWNLOAD_IDX].widget, 1, 2, 2,
-					 3, (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
-					 (GtkAttachOptions) 0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[DOWNLOAD_IDX].widget),
-					   gtkhx_prefs.download_path);
+					 3, (GTK_EXPAND|GTK_FILL),
+					 0, 0, 0);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[DOWNLOAD_IDX].widget),
+						   gtkhx_prefs.download_path);
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 static int listsorthelper (GtkHList *hlist,
@@ -1397,11 +1436,16 @@ static int listsorthelper (GtkHList *hlist,
 	return 0;
 }
 
+/* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
+ * "select_row" with a NULL GdkEvent so the param is just GdkEvent *
+ * now. The handler only reads `row'. */
 static void
-icon_row_selected (GtkWidget *widget, gint row, gint column, GdkEventButton *event, gpointer data)
+icon_row_selected (GtkWidget *widget, gint row, gint column,
+                   GdkEvent *event, gpointer data)
 {
 	guint16 icon;
 	char buf[16];
+	(void) column; (void) event; (void) data;
 
 	if(!GTK_HLIST(widget)->rows) return;
 	icon = GPOINTER_TO_INT(gtk_hlist_get_row_data(GTK_HLIST(widget), row));
@@ -1409,7 +1453,7 @@ icon_row_selected (GtkWidget *widget, gint row, gint column, GdkEventButton *eve
 		return;
 	}
 	g_snprintf(buf, sizeof(buf), "%u", icon);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICON_IDX].widget), buf);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICON_IDX].widget), buf);
 }
 
 static void settings_page_icon(GtkWidget *vbox)
@@ -1434,12 +1478,12 @@ static void settings_page_icon(GtkWidget *vbox)
 
 	cfgvars[ICON_IDX].widget = gtk_entry_new();
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
-			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
-			 (GtkAttachOptions)0, 0, 0);
+			 (GTK_EXPAND | GTK_FILL),
+			 0, 0, 0);
 	g_snprintf(iconstr, sizeof(iconstr), "%u", the_session.htlc.icon);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICON_IDX].widget), iconstr);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[ICON_IDX].widget), iconstr);
 
-	scroll = gtk_scrolled_window_new(0,0);
+	scroll = gtk_scrolled_window_new();
 
 	icon_list = gtk_hlist_new(2);
 	gtk_hlist_set_selection_mode(GTK_HLIST(icon_list), GTK_SELECTION_SINGLE);
@@ -1455,16 +1499,16 @@ static void settings_page_icon(GtkWidget *vbox)
 	g_signal_connect(icon_list, "select_row",
 			   G_CALLBACK(icon_row_selected), iv);
 
-	gtk_container_add(GTK_CONTAINER(scroll), icon_list);
+	gtkhx_widget_set_child(scroll, icon_list);
 	gtkhx_grid_attach_table(GTK_GRID(table), scroll, 0, 2, 1, 2,
-			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
-			 (GtkAttachOptions)0, 0, 0);
+			 (GTK_EXPAND | GTK_FILL),
+			 0, 0, 0);
 
 	iv->icon_list = icon_list;
 	iv->nfound = 0;
 	iv->icon_high = 0;
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 static void settings_page_misc(GtkWidget *vbox)
@@ -1481,60 +1525,60 @@ static void settings_page_misc(GtkWidget *vbox)
 
 	cfgvars[AUTOREPLYON_IDX].widget = gtk_check_button_new_with_label(
 		_("Auto Reply"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[AUTOREPLYON_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[AUTOREPLYON_IDX].widget,
 								 gtkhx_prefs.auto_reply);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYON_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	cfgvars[AUTOREPLYMSG_IDX].widget = gtk_entry_new();
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[AUTOREPLYMSG_IDX].widget),
-					   gtkhx_prefs.auto_reply_msg);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[AUTOREPLYMSG_IDX].widget),
+						   gtkhx_prefs.auto_reply_msg);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYMSG_IDX].widget, 1, 2, 0,
 					 1, 0, 0, 0, 0);
 
 	cfgvars[SHOWBACK_IDX].widget = gtk_check_button_new_with_label (
 		_("Show Private Messages at Back"));
-	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SHOWBACK_IDX].widget,
+	gtk_check_button_set_active((GtkCheckButton*)cfgvars[SHOWBACK_IDX].widget,
 								 gtkhx_prefs.showback);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWBACK_IDX].widget, 0, 1, 1, 2,
-			 (GtkAttachOptions)(GTK_FILL),
-			 (GtkAttachOptions)(GTK_FILL), 0, 0);
+			 (GTK_FILL),
+			 (GTK_FILL), 0, 0);
 
 	cfgvars[QUEUEDL_IDX].widget = gtk_check_button_new_with_label(
 		_("Queue File Transfers"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
+	gtk_check_button_set_active((GtkCheckButton*)
 								 cfgvars[QUEUEDL_IDX].widget, gtkhx_prefs.queuedl);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[QUEUEDL_IDX].widget, 0, 1, 2, 3,
-			 (GtkAttachOptions)(GTK_FILL), (GtkAttachOptions)(GTK_FILL), 0, 0);
+			 (GTK_FILL), (GTK_FILL), 0, 0);
 
 	cfgvars[SHOWJOIN_IDX].widget = gtk_check_button_new_with_label(
 		_("Show Join/Leave in Chat"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
+	gtk_check_button_set_active((GtkCheckButton*)
 									cfgvars[SHOWJOIN_IDX].widget,
 									gtkhx_prefs.showjoin);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWJOIN_IDX].widget, 0, 1, 3, 4,
-			 (GtkAttachOptions)(GTK_FILL),
-			 (GtkAttachOptions)(GTK_FILL), 0, 0);
+			 (GTK_FILL),
+			 (GTK_FILL), 0, 0);
 
 	cfgvars[TRACKER_CASE_IDX].widget = gtk_check_button_new_with_label(
 		_("Case Sensitive Tracker Searching"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
+	gtk_check_button_set_active((GtkCheckButton*)
 								 cfgvars[TRACKER_CASE_IDX].widget,
 								 gtkhx_prefs.track_case);
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRACKER_CASE_IDX].widget, 0, 1, 4, 5,
-			 (GtkAttachOptions)(GTK_FILL),
-			 (GtkAttachOptions)(GTK_FILL), 0, 0);
+			 (GTK_FILL),
+			 (GTK_FILL), 0, 0);
 
 	cfgvars[OLD_NICKCOMPLETION_IDX].widget = gtk_check_button_new_with_label(
 		_("Use old-style nick completion"));
-	gtk_toggle_button_set_active((GtkToggleButton *)
+	gtk_check_button_set_active((GtkCheckButton*)
 								 cfgvars[OLD_NICKCOMPLETION_IDX].widget,
 								 gtkhx_prefs.old_nickcompletion);
 	gtkhx_grid_attach_table(GTK_GRID(table),cfgvars[OLD_NICKCOMPLETION_IDX].widget, 0,
-					 1, 5, 6, (GtkAttachOptions)(GTK_FILL),
-					 (GtkAttachOptions)(GTK_FILL), 0, 0);
+					 1, 5, 6, (GTK_FILL),
+					 (GTK_FILL), 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 static void settings_page_general(GtkWidget *vbox)
@@ -1551,18 +1595,18 @@ static void settings_page_general(GtkWidget *vbox)
 
 	cfgvars[NICK_IDX].widget = gtk_entry_new();
 	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NICK_IDX].widget, 1, 2, 0, 1,
-			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
-			 (GtkAttachOptions)0, 0, 0);
-	gtk_entry_set_text(GTK_ENTRY(cfgvars[NICK_IDX].widget), the_session.htlc.name);
+			 (GTK_EXPAND | GTK_FILL),
+			 0, 0, 0);
+	gtk_editable_set_text(GTK_EDITABLE(cfgvars[NICK_IDX].widget), the_session.htlc.name);
 
 	name = gtk_label_new(_("Your Name:"));
 	gtkhx_grid_attach_table(GTK_GRID(table), name, 0, 1, 0, 1,
-	                  (GtkAttachOptions)(GTK_FILL),
-	                  (GtkAttachOptions)(GTK_FILL), 0, 0);
+	                  (GTK_FILL),
+	                  (GTK_FILL), 0, 0);
 	gtk_label_set_justify(GTK_LABEL(name), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(name), 0.0);
 
-	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
+	gtkhx_box_pack(wid, table, 0, 0, 0);
 }
 
 /* Phase 2.8: GtkCTree → GtkTreeView in tree mode.
@@ -1618,8 +1662,7 @@ settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
 
 	/* border for the label */
 	frame = gtk_frame_new (NULL);
-	gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_OUT);
-	gtk_box_pack_start (GTK_BOX (vvbox), frame, FALSE, TRUE, 0);
+	gtkhx_box_pack(vvbox, frame, FALSE, TRUE, 0);
 
 	/* label */
 	label = gtk_label_new (book_label);
@@ -1628,12 +1671,12 @@ settings_create_page (GtkWidget *book, gchar *book_label, GtkTreeStore *store,
 	gtk_widget_set_margin_end    (label, 2);
 	gtk_widget_set_margin_top    (label, 1);
 	gtk_widget_set_margin_bottom (label, 1);
-	gtk_container_add (GTK_CONTAINER (frame), label);
+	gtkhx_widget_set_child(frame, label);
 
 	/* vbox for the tab */
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-	gtk_container_set_border_width (GTK_CONTAINER (vbox), 4);
-	gtk_container_add (GTK_CONTAINER (vvbox), vbox);
+	(gtk_widget_set_margin_start(vbox, 4), gtk_widget_set_margin_end(vbox, 4), gtk_widget_set_margin_top(vbox, 4), gtk_widget_set_margin_bottom(vbox, 4));
+	gtkhx_widget_set_child(vvbox, vbox);
 
 	/* row in the category tree */
 	gtk_tree_store_append (store, node, parent);
@@ -1670,51 +1713,54 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if(options_window) {
-		gdk_window_raise(gtk_widget_get_window(options_window));
+		gtk_window_present(GTK_WINDOW(options_window));
 		return;
 	}
 
 	dialog = gtk_dialog_new ();
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
-	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
+	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
 	gtk_widget_set_size_request(dialog, 570, 400);
 	g_object_set_data(G_OBJECT(dialog), "sess", sess);
-	g_signal_connect_swapped (dialog, "delete_event",
-							   G_CALLBACK (close_options_window), 0);
+	g_signal_connect (dialog, "close-request",
+	                  G_CALLBACK (close_options_window_request), 0);
 
 	options_window = dialog;
 
-	gtk_container_set_border_width
-		(GTK_CONTAINER (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), 2);
-	gtk_box_set_homogeneous (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))),
-									 FALSE);
+	{
+		GtkWidget *aa = gtkhx_dialog_action_area(GTK_DIALOG(dialog));
+		/* Phase 4.x: gtk_container_set_border_width is gone. Use the
+		 * widget margin properties instead. */
+		gtk_widget_set_margin_start (aa, 2);
+		gtk_widget_set_margin_end (aa, 2);
+		gtk_widget_set_margin_top (aa, 2);
+		gtk_widget_set_margin_bottom (aa, 2);
+		gtk_box_set_homogeneous (GTK_BOX (aa), FALSE);
+	}
 
-	hbbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
-	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
-	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
-	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
-	gtk_box_pack_end (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), hbbox,
-							FALSE, FALSE, 0);
+	/* Phase 4.x: GtkButtonBox is gone. A horizontal GtkBox with a small
+	 * spacing is the documented replacement. */
+	hbbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+	gtkhx_box_pack_end(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), hbbox, FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));
 	g_signal_connect (wid, "clicked",
 						G_CALLBACK (options_change), GINT_TO_POINTER(0));
-	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
+	gtkhx_box_pack(hbbox, wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Apply"));
 	g_signal_connect (wid, "clicked",
 						G_CALLBACK (options_change), GINT_TO_POINTER(1));
-	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
+	gtkhx_box_pack(hbbox, wid, 0, 0, 0);
 
 	wid = gtk_button_new_with_label (_("Cancel"));
 	g_signal_connect (wid, "clicked",
-							  G_CALLBACK (close_options_window), 0);
-	gtk_box_pack_start (GTK_BOX (hbbox), wid, 0, 0, 0);
+							  G_CALLBACK (close_options_window_cancel), 0);
+	gtkhx_box_pack(hbbox, wid, 0, 0, 0);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	gtk_container_set_border_width (GTK_CONTAINER (hbox), 6);
-	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))),
-							  hbox, TRUE, TRUE, 0);
+	(gtk_widget_set_margin_start(hbox, 6), gtk_widget_set_margin_end(hbox, 6), gtk_widget_set_margin_top(hbox, 6), gtk_widget_set_margin_bottom(hbox, 6));
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), hbox, TRUE, TRUE, 0);
 
 	store = gtk_tree_store_new(OPT_N_COLS, G_TYPE_STRING, G_TYPE_INT);
 	ctree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
@@ -1729,16 +1775,15 @@ void create_options_window(GtkWidget *widget, gpointer data)
 		gtk_tree_view_get_selection(GTK_TREE_VIEW(ctree)),
 		GTK_SELECTION_BROWSE);
 	gtk_widget_set_size_request (ctree, 140, 0);
-	gtk_box_pack_start (GTK_BOX (hbox), ctree, 0, 0, 0);
+	gtkhx_box_pack(hbox, ctree, 0, 0, 0);
 
 	frame = gtk_frame_new (NULL);
-	gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_IN);
-	gtk_box_pack_start (GTK_BOX (hbox), frame, TRUE, TRUE, 0);
+	gtkhx_box_pack(hbox, frame, TRUE, TRUE, 0);
 
 	book = gtk_notebook_new ();
 	gtk_notebook_set_show_tabs (GTK_NOTEBOOK (book), FALSE);
 	gtk_notebook_set_show_border (GTK_NOTEBOOK (book), FALSE);
-	gtk_container_add (GTK_CONTAINER (frame), book);
+	gtkhx_widget_set_child(frame, book);
 	g_object_set_data (G_OBJECT (ctree), "user_data", book);
 	g_signal_connect (ctree, "cursor-changed",
 						G_CALLBACK (settings_ctree_select), NULL);
@@ -1799,7 +1844,10 @@ void create_options_window(GtkWidget *widget, gpointer data)
 				&first);
 	}
 
-	gtk_widget_show_all(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 
 	list_icons();
 }
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+/* Phase 4.13: end of file-level deprecation suppression — see top of file. */

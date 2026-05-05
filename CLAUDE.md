@@ -55,35 +55,46 @@ packaging when there's a buildable binary again.)
 
 ## Build status
 
-**Phases 1, 2, 3 complete. Phase 4 (GTK 4 port) in progress on a separate
-`phase-4` branch.** `main` is on GTK 3.22+ (`meson.build` pins `gtk+-3.0 >= 3.22`),
-builds clean against current GTK 3 with `-Werror=deprecated-declarations`, and
-runs as a usable binary connecting to mhxd / hlserver.com.
+**Phases 1, 2, 3, and most of 4 are complete.** `meson.build` pins `gtk4 >= 4.6`,
+the in-tree custom widgets are gone (`gtk_hlist_compat.[ch]` shim over
+GtkTreeView+GtkListStore lives in five consumers; xtext is HexChat's modern fork),
+and `meson setup build && meson compile -C build` produces a working binary.
 
-**Phase 4 work lives on the `phase-4` branch**, not main. The branch has the
-meson dep bumped to `gtk4 >= 4.6`, a Phase-3-style helpers layer in `gtkutil`
-absorbing the breaking-change vocabulary (GtkContainer → widget setters,
-gtk_box_pack_start → append + properties, gtk_widget_destroy →
-gtk_window_destroy / unparent, etc.), the bulk-mechanical sweeps applied,
-and the configure-event handlers retired in favor of quit-time geometry save.
+What's *runnable* on first boot from this branch:
 
-As of the last `phase-4` commit:
+- The application launches under GTK 4 on Wayland.
+- Toolbar window appears, Ctrl+K opens the connect dialog (GtkShortcutController),
+  Ctrl+Q quits.
+- Tracker, users, files, news, options windows all build and lay out under GTK 4
+  containers (`gtk_box_append`, `gtk_window_set_child`, etc.).
+- Right-click on a user opens a `GtkPopoverMenu` from a `GMenu` model with the
+  Kick/Ban/Ignore/Info/Msg/Pchat actions wired through `GAction`s.
+- Chat input handles Tab nick completion, Return-to-send, Up/Down history via
+  `GtkEventControllerKey`.
+- Hotline protocol layer (rcv.c / commands.c / hotline.h / cipher.c / compress.c)
+  is unchanged — wire-format compatibility with 1.2/1.5 servers is preserved.
 
-  - 90 build errors remain, down from 492 at the meson bump.
-  - Remaining error categories all map to deferred sub-phases:
-    ~28 events (4.5/4.6 — GtkEventControllers + accessor functions),
-    ~14 DnD (4.8 — GtkDropTarget/GtkDragSource), CSS provider signature
-    drift, plus the not-yet-attempted xtext.c snapshot rewrite (4.9, ~3500
-    lines vendor code), gtk_hlist_compat deprecation containment (4.10),
-    GtkMenu → GtkPopoverMenu (4.7), GtkAccelGroup → GtkShortcutController
-    (4.11).
+What's *degraded* and tracked as Phase 4 follow-up work:
 
-When a future session resumes Phase 4, do `git checkout phase-4` and pick
-up at sub-phase 4.5 (event handler rewrite). The ROADMAP entry for Phase 4
-in this repo's ROADMAP.md is the source of truth for the sub-phase plan
-and the pre-flight decisions (xtext stays on cairo via
-gtk_snapshot_append_cairo, gtk_hlist_compat stays on GtkTreeView with
-deprecation pragmas, no .ui XML, etc.).
+- **xtext background pixmap**: `gdk_cairo_surface_create_from_pixbuf` is
+  gone in GTK 4; `gtk_xtext_set_background` is a no-op until the pixbuf
+  bytes get rendered into a `cairo_image_surface_t` manually.
+- **Selection auto-scroll while dragging**: the scrollup/down timers read
+  `xtext->select_end_y` (kept live by the motion controller) rather than
+  the live device position, since GTK 4 has no synchronous "where is the
+  pointer" accessor on a widget. If the user drags out of the widget and
+  the pointer goes still, the timers fire correctly using the last known
+  position; if the pointer is moving past the edge they keep up. Coarse
+  but correct; matches HexChat's GTK 4 fork behaviour.
+- **Window position restoration**: `gtk_window_get_position` is gone and
+  Wayland gives clients no portable way to set their absolute position
+  anyway. Size restoration works via the quit-time save path; positions
+  restore from prefs only when the compositor cooperates.
+- **`MAX_CONN > 1`**: still a half-built abstraction. Phase 5 work.
+
+The GtkApplication / activate plumbing in `gtkhx.c` still drives all the
+window construction, so the Phase 3.6 toplevel-registration walk continues
+to apply.
 
 ## Idioms and pitfalls specific to this codebase
 

@@ -65,33 +65,28 @@ void reload_news (GtkWidget *widget, gpointer data)
 	}
 }
 
-static void close_news_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 close-request on (GtkWindow *, gpointer); FALSE
+ * allows default destroy. */
+static gboolean close_news_window (GtkWindow *window, gpointer data)
 {
 	session *sess = data;
+	(void) window;
 
-	gtk_widget_destroy(widget);
 	gtkhx_prefs.geo.news.open = 0;
 	gtkhx_prefs.geo.news.init = 0;
 	sess->news_window = 0;
-}
-
-/* Phase 3.x: see users.c users_move() for rationale — size on
- * configure, position deferred to quit. */
-static gboolean news_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	(void) e; (void) data;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.news.xsize = width;
-	gtkhx_prefs.geo.news.ysize = height;
 	return FALSE;
 }
 
-static void close_post_window (GtkWidget *widget, gpointer data)
+/* Phase 4.5: configure-event is gone in GTK 4. News window size is
+ * captured at hx_quit() time alongside position; see gtkhx.c
+ * gtkhx_save_window_positions. */
+
+static gboolean close_post_window (GtkWindow *window, gpointer data)
 {
-	gtk_widget_destroy(post_window);
+	(void) window; (void) data;
 	post_window = 0;
+	return FALSE;
 }
 
 static void post_news (GtkWidget *widget, gpointer data)
@@ -113,7 +108,7 @@ static void post_news (GtkWidget *widget, gpointer data)
 	hx_post_news(&sess->htlc, posttext, len);
 
 	g_free(posttext);
-	gtk_widget_destroy(post_window);
+	gtkhx_widget_destroy(post_window);
 	post_window = 0;
 }
 
@@ -125,10 +120,10 @@ create_post_window (GtkWidget *widget, gpointer data)
 	GtkWidget *vbox, *hbox;
 	session *sess = data;
 
-	post_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	post_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(post_window), _("Post News"));
 	gtk_widget_set_size_request(post_window, 300, 280);
-	g_signal_connect(post_window, "delete_event",
+	g_signal_connect(post_window, "close-request",
 			   G_CALLBACK(close_post_window), 0);
 
 	postprompt = gtk_text_view_new();
@@ -137,19 +132,19 @@ create_post_window (GtkWidget *widget, gpointer data)
 	gtkhx_apply_text_style(postprompt);
 
 	{
-		GtkWidget *post_scroll = gtk_scrolled_window_new(NULL, NULL);
+		GtkWidget *post_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(post_scroll),
 		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-		gtk_container_add(GTK_CONTAINER(post_scroll), postprompt);
+		gtkhx_widget_set_child(post_scroll, postprompt);
 		gtk_widget_set_size_request(post_scroll, 0, 260);
 
 		vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-		gtk_container_add(GTK_CONTAINER(post_window), vbox);
-		gtk_box_pack_start(GTK_BOX(vbox), post_scroll, 0, 0, 0);
+		gtkhx_widget_set_child(post_window, vbox);
+		gtkhx_box_pack(vbox, post_scroll, 0, 0, 0);
 	}
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 
 	okbut = gtk_button_new_with_label(_("OK"));
 	g_signal_connect(okbut, "clicked",
@@ -160,10 +155,10 @@ create_post_window (GtkWidget *widget, gpointer data)
 			   G_CALLBACK(close_post_window), 0);
 
 
-	gtk_box_pack_start(GTK_BOX(hbox), okbut, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), cancbut, 0, 0, 0);
+	gtkhx_box_pack(hbox, okbut, 0, 0, 0);
+	gtkhx_box_pack(hbox, cancbut, 0, 0, 0);
 
-	gtk_widget_show_all(post_window);
+	gtk_window_present(GTK_WINDOW(post_window));
 	gtk_widget_grab_focus(postprompt);
 }
 
@@ -182,36 +177,34 @@ void create_news_window (session *sess)
 
 
 	if (gtkhx_prefs.geo.news.open) {
-		gdk_window_raise(gtk_widget_get_window(sess->news_window));
+		gtk_window_present(GTK_WINDOW(sess->news_window));
 		return;
 	}
 
-	news_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	news_window = gtk_window_new();
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
 	btn_frame = gtk_frame_new(0);
 	gtk_widget_set_size_request(btn_frame, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(btn_frame), GTK_SHADOW_OUT);
 
 	news_frame = gtk_frame_new(0);
-	gtk_frame_set_shadow_type(GTK_FRAME(news_frame), GTK_SHADOW_IN);
 
 	posthbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-	gtk_container_add(GTK_CONTAINER(btn_frame), posthbox);
+	gtkhx_widget_set_child(btn_frame, posthbox);
 
 	postButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(postButton), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(postButton, pix);
 	gtk_widget_set_tooltip_text(postButton, _("Post News"));
 	icon = 0, pix = 0, mask = 0;
 
 	reloadButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(reloadButton), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(reloadButton, pix);
 	gtk_widget_set_tooltip_text(reloadButton, _("Reload News"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -219,7 +212,7 @@ void create_news_window (session *sess)
 
 	gtk_window_set_title(GTK_WINDOW(news_window), _("News"));
 	gtk_widget_set_size_request(news_window, 412, 384);
-	g_signal_connect(news_window, "delete_event",
+	g_signal_connect(news_window, "close-request",
 			   G_CALLBACK(close_news_window), sess);
 	g_signal_connect(postButton, "clicked",
 
@@ -228,16 +221,16 @@ void create_news_window (session *sess)
 
 					   G_CALLBACK(reload_news), sess);
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(news_window), vbox);
+	gtkhx_widget_set_child(news_window, vbox);
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-	gtk_container_add(GTK_CONTAINER(news_frame), hbox);
+	gtkhx_widget_set_child(news_frame, hbox);
 
 	gtk_widget_set_size_request(hbox, 512, 384);
-	gtk_box_pack_start(GTK_BOX(vbox), btn_frame, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(posthbox), postButton, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(posthbox), reloadButton, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), news_frame, 1, 1, 0);
+	gtkhx_box_pack(vbox, btn_frame, 0, 0, 0);
+	gtkhx_box_pack(posthbox, postButton, 0, 0, 0);
+	gtkhx_box_pack(posthbox, reloadButton, 0, 0, 0);
+	gtkhx_box_pack(vbox, news_frame, 1, 1, 0);
 
 	news_text = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(news_text), FALSE);
@@ -245,15 +238,14 @@ void create_news_window (session *sess)
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(news_text), GTK_WRAP_WORD);
 	gtkhx_apply_text_style(news_text);
 
-	news_scroll = gtk_scrolled_window_new(NULL, NULL);
+	news_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(news_scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(news_scroll), news_text);
-	gtk_box_pack_start(GTK_BOX(hbox), news_scroll, 1, 1, 0);
+	gtkhx_widget_set_child(news_scroll, news_text);
+	gtkhx_box_pack(hbox, news_scroll, 1, 1, 0);
 	gtk_widget_set_sensitive(postButton, FALSE);
 	gtk_widget_set_sensitive(reloadButton, FALSE);
-	g_signal_connect(news_window, "configure_event", 
-					   G_CALLBACK(news_move), sess);
+	
 	/* Phase 3.x: only apply saved geometry when the prefs file actually
 	 * has one (see users.c for rationale — zero-size collapses the
 	 * window under GTK 3). */
@@ -262,11 +254,9 @@ void create_news_window (session *sess)
 		                            gtkhx_prefs.geo.news.xsize,
 		                            gtkhx_prefs.geo.news.ysize);
 	if (gtkhx_prefs.geo.news.xpos > 0 || gtkhx_prefs.geo.news.ypos > 0)
-		gtk_window_move(GTK_WINDOW(news_window),
-		                gtkhx_prefs.geo.news.xpos,
-		                gtkhx_prefs.geo.news.ypos);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
 
-	gtk_widget_show_all(news_window);
+	gtk_window_present(GTK_WINDOW(news_window));
 
 	if(connected == 1) {
 		changetitlespecific(news_window, _("News"));
@@ -295,7 +285,7 @@ void open_news (GtkWidget *widget, gpointer data)
 		}
 	}
 	else {
-		gdk_window_raise(gtk_widget_get_window(sess->news_window));
+		gtk_window_present(GTK_WINDOW(sess->news_window));
 		gtk_widget_grab_focus(sess->news_window);
 	}
 }

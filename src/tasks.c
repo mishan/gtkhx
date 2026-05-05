@@ -61,10 +61,10 @@ void create_tasks(session *sess)
 									GTK_SELECTION_MULTIPLE);
 	g_object_ref_sink(gtklist);
 
-	gtask_scroll = gtk_scrolled_window_new(0, 0);
+	gtask_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(gtask_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_container_add(GTK_CONTAINER(gtask_scroll), gtklist);
+	gtkhx_widget_set_child(gtask_scroll, gtklist);
 	g_object_ref_sink(gtask_scroll);
 
 	sess->gtklist = gtklist;
@@ -147,19 +147,18 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	gtk_widget_set_size_request(vbox, 240, 40);
 
 	if(htxf) {
-		gtk_box_pack_start(GTK_BOX(hbox), queue, 0, 0, 0);
+		gtkhx_box_pack(hbox, queue, 0, 0, 0);
 	}
-	gtk_box_pack_start(GTK_BOX(hbox), label, 0, 0, 4);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), pbar, 1, 1, 0);
+	gtkhx_box_pack(hbox, label, 0, 0, 4);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, pbar, 1, 1, 0);
 
 	listitem = gtk_list_box_row_new();
 	g_object_set_data(G_OBJECT(listitem), "gtsk", gtsk);
-	gtk_container_add(GTK_CONTAINER(listitem), vbox);
+	gtkhx_widget_set_child(listitem, vbox);
 
 	if (sess->gtklist) {
 		gtk_list_box_insert(GTK_LIST_BOX(sess->gtklist), listitem, -1);
-		gtk_widget_show_all(listitem);
 	}
 
 	gtsk->label = label;
@@ -176,7 +175,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 static void gtask_delete (session *sess, struct gtask *gtsk)
 {
 	if(sess->gtklist) {
-		gtk_container_remove(GTK_CONTAINER(sess->gtklist), gtsk->listitem);
+		gtkhx_widget_remove_child(sess->gtklist, gtsk->listitem);
 	}
 	if (gtsk->next)
 		gtsk->next->prev = gtsk->prev;
@@ -323,7 +322,7 @@ tasks_destroy (GtkWidget *widget, gpointer data)
 {
 	session *sess = data;
 
-	gtk_container_remove(GTK_CONTAINER(tasks_vbox), sess->gtask_scroll);
+	gtkhx_widget_remove_child(tasks_vbox, sess->gtask_scroll);
 	gtkhx_prefs.geo.tasks.open = 0;
 	gtkhx_prefs.geo.tasks.init = 0;
 }
@@ -385,7 +384,7 @@ static void
 gtklist_row_move(GtkListBox *box, GtkWidget *row, int new_index)
 {
 	g_object_ref(row);
-	gtk_container_remove(GTK_CONTAINER(box), row);
+	gtkhx_widget_remove_child(GTK_WIDGET(box), row);
 	gtk_list_box_insert(box, row, new_index);
 	g_object_unref(row);
 	gtk_list_box_select_row(box, GTK_LIST_BOX_ROW(row));
@@ -497,17 +496,9 @@ task_go (GtkWidget *widget, gpointer data)
 }
 
 /* Phase 3.x: see users.c users_move() for rationale — size on
- * configure, position deferred to quit. */
-static gboolean tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
-{
-	int width, height;
-	(void) e; (void) data;
-
-	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-	gtkhx_prefs.geo.tasks.xsize = width;
-	gtkhx_prefs.geo.tasks.ysize = height;
-	return FALSE;
-}
+ * configure, position deferred to quit.
+ * Phase 4.5: gone — GTK 4 widgets don't fire configure-event. Tasks
+ * window size is captured at hx_quit() in gtkhx.c. */
 
 void task_tasks_update (session *sess)
 {
@@ -535,11 +526,11 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	if (gtkhx_prefs.geo.tasks.open) {
-		gdk_window_raise(gtk_widget_get_window(sess->tasks_window));
+		gtk_window_present(GTK_WINDOW(sess->tasks_window));
 		return;
 	}
 
-	tasks_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	tasks_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));
@@ -547,14 +538,13 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	stopbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(stopbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(stopbtn, pix);
 	gtk_widget_set_tooltip_text(stopbtn, _("Stop Task"));
 	g_signal_connect(stopbtn, "clicked",
 			   G_CALLBACK(task_stop), sess);
@@ -562,8 +552,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	gobtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/start.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(gobtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(gobtn, pix);
 	gtk_widget_set_tooltip_text(gobtn, _("Start Task"));
 	g_signal_connect(gobtn, "clicked",
 					   G_CALLBACK(task_go), sess);
@@ -571,8 +561,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	upbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(upbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(upbtn, pix);
 	gtk_widget_set_tooltip_text(upbtn, _("Move Xfer Up in Queue"));
 	g_signal_connect(upbtn, "clicked", G_CALLBACK(task_up), 
 					   sess);
@@ -581,33 +571,32 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	dnbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/down.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(dnbtn), pix);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+	gtkhx_widget_set_child(dnbtn, pix);
 	gtk_widget_set_tooltip_text(dnbtn, _("Move Xfer Down in Queue"));
 	g_signal_connect(dnbtn, "clicked", G_CALLBACK(task_dn), 
 					   sess);
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), stopbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), gobtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), upbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), dnbtn, 0, 0, 0);
+	gtkhx_box_pack(hbuttonbox, stopbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, gobtn, 0, 0, 0);
+	gtkhx_box_pack(hbuttonbox, upbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, dnbtn, 0, 0, 0);
 
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
-	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
-	gtk_container_add(GTK_CONTAINER(tasks_window), vbox);
+	gtkhx_widget_set_child(topframe, hbuttonbox);
+	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
+	gtkhx_widget_set_child(tasks_window, vbox);
 
 	tasks_vbox = vbox;
-	gtk_box_pack_start(GTK_BOX(vbox), sess->gtask_scroll, 1, 1, 0);
+	gtkhx_box_pack(vbox, sess->gtask_scroll, 1, 1, 0);
 
 	g_signal_connect(tasks_window, "destroy",
 					   G_CALLBACK(tasks_destroy), sess);
 
 
 	init_keyaccel(tasks_window);
-	g_signal_connect(tasks_window, "configure_event", 
-					   G_CALLBACK(tasks_move), sess);
+	
 	/* Phase 3.x: only apply saved geometry when the prefs file actually
 	 * has one (see users.c for rationale — zero-size collapses the
 	 * window under GTK 3). */
@@ -616,10 +605,8 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.tasks.xsize,
 		                            gtkhx_prefs.geo.tasks.ysize);
 	if (gtkhx_prefs.geo.tasks.xpos > 0 || gtkhx_prefs.geo.tasks.ypos > 0)
-		gtk_window_move(GTK_WINDOW(tasks_window),
-		                gtkhx_prefs.geo.tasks.xpos,
-		                gtkhx_prefs.geo.tasks.ypos);
-	gtk_widget_show_all(tasks_window);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
+	gtk_window_present(GTK_WINDOW(tasks_window));
 
 
 	if(connected == 1) {

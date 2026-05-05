@@ -21,6 +21,7 @@
 #include <string.h>
 #include "hx.h"
 #include "about.h"
+#include "gtkutil.h"
 
 
 #ifdef HAVE_DCGETTEXT
@@ -81,12 +82,12 @@ GtkWidget *frmAbout;
 
 void on_cmdAboutClose_clicked ()
 {
-	gtk_widget_destroy(frmAbout);
+	gtkhx_widget_destroy(frmAbout);
 }
 
 void on_frmAbout_destroy ()
 {
-    gtk_widget_destroy(frmAbout);
+    gtkhx_widget_destroy(frmAbout);
 	about_open = FALSE;
 
 }
@@ -112,7 +113,7 @@ void create_about_window ()
     GtkAdjustment *adj;
     char version [50];
 
-    frmAbout = gtk_window_new (GTK_WINDOW_TOPLEVEL);
+    frmAbout = gtk_window_new();
     gtk_widget_set_size_request (frmAbout, 482, 450);
     gtk_window_set_title (GTK_WINDOW (frmAbout), _("About GtkHx"));
     gtk_window_set_resizable(GTK_WINDOW (frmAbout), FALSE);
@@ -120,18 +121,17 @@ void create_about_window ()
 			G_CALLBACK (on_frmAbout_destroy),
 			frmAbout);
 
-    gtk_widget_realize(frmAbout);
-
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
     fixed = gtk_fixed_new ();
-    gtk_container_add (GTK_CONTAINER (frmAbout), fixed);
+    gtkhx_widget_set_child(frmAbout, fixed);
 
     cmdAboutClose = gtk_button_new_with_label (("Close"));
     gtk_fixed_put (GTK_FIXED (fixed), cmdAboutClose, 384, 403);
     gtk_widget_set_size_request (cmdAboutClose, 88, 36);
-    gtk_widget_set_can_default(cmdAboutClose, TRUE);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
     gtk_widget_grab_focus (cmdAboutClose);
-    gtk_widget_grab_default (cmdAboutClose);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
     g_signal_connect (cmdAboutClose, "clicked",
 			G_CALLBACK (on_cmdAboutClose_clicked),
 			frmAbout);
@@ -143,17 +143,16 @@ void create_about_window ()
 
 
     fixed1 = gtk_fixed_new ();
-    gtk_container_add (GTK_CONTAINER (notebook), fixed1);
+    gtkhx_widget_set_child(notebook, fixed1);
 
 
     frame = gtk_frame_new (NULL);
     gtk_fixed_put (GTK_FIXED (fixed1), frame, 32, 12);
     gtk_widget_set_size_request (frame, 400, 200);
-    gtk_frame_set_shadow_type (GTK_FRAME (frame), GTK_SHADOW_OUT);
 
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/gtkhx.xpm", NULL);
-    pixmap = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (frame), pixmap);
+    pixmap = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+    gtkhx_widget_set_child(frame, pixmap);
 
     g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */
 
@@ -167,7 +166,7 @@ void create_about_window ()
     gtk_widget_set_size_request (lblCopyright, 448, 16);
 
 
-    scrolledwindow = gtk_scrolled_window_new (NULL, NULL);
+    scrolledwindow = gtk_scrolled_window_new();
     gtk_fixed_put (GTK_FIXED (fixed1), scrolledwindow, 12, 240);
     gtk_widget_set_size_request (scrolledwindow, 436, 100);
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow), 
@@ -177,8 +176,8 @@ void create_about_window ()
     txtCredits = gtk_text_view_new ();
     gtk_text_view_set_editable (GTK_TEXT_VIEW (txtCredits), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (txtCredits), FALSE);
-    gtk_container_add (GTK_CONTAINER (scrolledwindow), txtCredits);
-    gtk_widget_realize (txtCredits);
+    gtkhx_widget_set_child(scrolledwindow, txtCredits);
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
     credits_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (txtCredits));
     gtk_text_buffer_set_text (credits_buf, get_credits(), -1);
 
@@ -189,7 +188,7 @@ void create_about_window ()
     lblCredits = gtk_label_new (_("Credits"));
     set_notebook_tab (notebook, 0, lblCredits);
 
-    gtk_widget_show_all(frmAbout);
+    gtk_window_present(GTK_WINDOW(frmAbout));
     about_open = TRUE;
 	}
 }
