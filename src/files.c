@@ -247,8 +247,11 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 
 static void get_put_data (GtkWidget *widget, gpointer data)
 {
+	GtkRoot *root = gtk_widget_get_root (widget);
 	GtkWidget *file_dialog = gtk_file_chooser_dialog_new(
-		_("Upload..."), NULL, GTK_FILE_CHOOSER_ACTION_OPEN,
+		_("Upload..."),
+		GTK_IS_WINDOW (root) ? GTK_WINDOW (root) : NULL,
+		GTK_FILE_CHOOSER_ACTION_OPEN,
 		_("_Cancel"), GTK_RESPONSE_CANCEL,
 		_("_Open"),   GTK_RESPONSE_ACCEPT,
 		NULL);

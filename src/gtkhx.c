@@ -285,6 +285,20 @@ session the_session;
  * in this TU and gtkhx_app's definition lives there. */
 static GtkApplication *gtkhx_app;
 
+/* Phase 5: the dialog code paths in gtkutil.c (error_dialog) and
+ * options.c need a transient parent to satisfy GTK 4's "GtkDialog
+ * mapped without a transient parent" warning. Expose the application's
+ * currently-active window so callers without a widget context can
+ * still parent their dialogs correctly. Returns NULL during early
+ * startup before the application is constructed. */
+GtkWindow *
+gtkhx_active_window (void)
+{
+	if (!gtkhx_app)
+		return NULL;
+	return gtk_application_get_active_window (gtkhx_app);
+}
+
 /*
  * Phase 3.x: capture each toplevel's final position into prefs before
  * prefs_write.

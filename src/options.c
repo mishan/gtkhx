@@ -1629,6 +1629,16 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
 	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
 	gtk_widget_set_size_request(dialog, 570, 400);
+	/* Phase 5: parent the prefs dialog on the active toplevel so GTK
+	 * doesn't warn about a top-level dialog mapped without
+	 * transient_for. The Options window is invoked from the toolbar
+	 * and from menu items in any window; whichever one has focus is
+	 * the natural parent. */
+	{
+		GtkWindow *parent = gtkhx_active_window ();
+		if (parent)
+			gtk_window_set_transient_for (GTK_WINDOW (dialog), parent);
+	}
 	g_object_set_data(G_OBJECT(dialog), "sess", sess);
 	/* Phase 5: hook destroy (not close-request) so the bookkeeping
 	 * fires on every teardown path — Cancel/OK buttons call

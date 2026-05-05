@@ -30,4 +30,9 @@ extern void gtkhx_refresh_css (void);
 /* Rebuild the user list CSS provider after the user list font changes. */
 extern void gtkhx_refresh_userlist_css (PangoFontDescription *fd);
 
+/* Returns the application's currently-active toplevel, or NULL during
+ * early startup. Callers use it as a transient parent for dialogs
+ * spawned from a context without a natural parent widget. */
+extern GtkWindow *gtkhx_active_window (void);
+
 #endif

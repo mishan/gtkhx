@@ -298,6 +298,15 @@ void error_dialog (char *title, char *msg)
 
     dialog = gtk_dialog_new();
 
+    /* Phase 5: silence "GtkDialog mapped without a transient parent"
+     * for the no-context error_dialog path. The application's active
+     * toplevel is the right parent. */
+    {
+        GtkWindow *parent = gtkhx_active_window ();
+        if (parent)
+            gtk_window_set_transient_for (GTK_WINDOW (dialog), parent);
+    }
+
     gtk_window_set_title(GTK_WINDOW(dialog), title);
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
     label = gtk_label_new (message);
