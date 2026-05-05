@@ -231,6 +231,13 @@ void create_toolbar_window (session *sess)
 	gtk_widget_set_margin_end    (hbox, 6);
 	gtk_widget_set_margin_top    (hbox, 6);
 	gtk_widget_set_margin_bottom (hbox, 6);
+	/* Phase 5: AdwToolbarView's content slot fills vertically, which
+	 * stretches a single row of icon buttons into uncomfortably tall
+	 * rectangles. Pin the row to its natural height and center it
+	 * vertically so the toolbar reads as a strip of buttons rather
+	 * than a wall of them. */
+	gtk_widget_set_valign (hbox, GTK_ALIGN_CENTER);
+	gtk_widget_set_vexpand (hbox, FALSE);
 
 	gtk_box_append (GTK_BOX (hbox),
 		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.xpm",
