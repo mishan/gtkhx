@@ -105,7 +105,15 @@ gtk_hlist_class_init (GtkHListClass *klass)
 
 	/* select_row mirrors the legacy GtkCList "select_row" signature
 	 * (row, column, GdkEvent*). The compat shim emits this from a
-	 * GtkTreeSelection "changed" handler. */
+	 * GtkTreeSelection "changed" handler.
+	 *
+	 * The third arg is typed as G_TYPE_POINTER instead of
+	 * GDK_TYPE_EVENT because the va-args FFI machinery GLib uses for
+	 * the generic marshaller can't bridge GdkEvent through va_list:
+	 *   "va_to_ffi_type: Unsupported fundamental type: GdkEvent"
+	 * fires every time a handler runs. We always emit NULL for the
+	 * event parameter (no caller ever reads it) so a typeless pointer
+	 * is identical at the call boundary and dodges the warning. */
 	select_row_signal = g_signal_new (
 		"select_row",
 		G_TYPE_FROM_CLASS (klass),
@@ -114,7 +122,7 @@ gtk_hlist_class_init (GtkHListClass *klass)
 		NULL, NULL,
 		NULL,                            /* generic marshaller */
 		G_TYPE_NONE, 3,
-		G_TYPE_INT, G_TYPE_INT, GDK_TYPE_EVENT);
+		G_TYPE_INT, G_TYPE_INT, G_TYPE_POINTER);
 }
 
 static void

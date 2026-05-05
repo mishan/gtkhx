@@ -1429,15 +1429,13 @@ static void settings_page_path (AdwPreferencesPage *page)
 
 	grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (grp, _("Paths"));
-	adw_preferences_group_set_description (grp,
-		_("Multi-value paths are comma-separated. "
-		  "Drop *.rsrc icon packs into ~/.config/gtkhx/icons/ for auto-discovery."));
-
-	adw_preferences_group_add (grp, 
-		pref_entry_row ("ICONS",     _("Icon resource files")));
-	adw_preferences_group_add (grp, 
-		pref_entry_row ("SOUNDPATH", _("Sound directory")));
-	adw_preferences_group_add (grp, 
+	/* Icon and sound paths used to live here. Auto-discovery now finds
+	 * *.rsrc icon packs in ~/.config/gtkhx/icons/ and sound files in
+	 * ~/.config/gtkhx/sounds/ + the system data dir, so neither needs
+	 * a UI row. The ICONS / SOUNDPATH cfgvars stay defined so legacy
+	 * gtkhxrc files still parse cleanly — they just no longer appear
+	 * as editable settings. */
+	adw_preferences_group_add (grp,
 		pref_entry_row ("DOWNLOAD",  _("Download directory")));
 
 	adw_preferences_page_add (page, grp);
