@@ -107,4 +107,14 @@ extern void gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
  */
 extern void gtkhx_widget_destroy (GtkWidget *widget);
 
+/*
+ * Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12 in
+ * favor of gtk_image_new_from_paintable + a GdkTexture built off the
+ * pixbuf. This helper centralizes the conversion so the ~50 call
+ * sites become a single sed-rename. Returns a fresh-floating
+ * GtkImage; the caller takes ownership the same way as the legacy
+ * function.
+ */
+extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
+
 #endif

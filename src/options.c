@@ -42,6 +42,19 @@
 #include "log.h"
 #include "gtkutil.h"
 
+/* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
+ * for the icon viewer and the prefs notebook tree (Phase 2.x work),
+ * plus GtkDialog for the prefs dialog itself, GtkFontChooserDialog
+ * for the font picker, and GtkComboBox for assorted dropdowns. All
+ * those API families are deprecated in GTK 4.10+ in favor of
+ * GtkColumnView/GListModel, GtkAlertDialog/GtkWindow, GtkFontDialog,
+ * and GtkDropDown respectively. The migrations are tracked as
+ * Phase 5 (tree-view), Phase 4.7 (dialogs), and a Phase 5 UX
+ * follow-up (combo boxes, font chooser); until then suppress
+ * deprecations across the file so the rest of the tree can keep
+ * -Werror=deprecated-declarations on. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
 time_t start_time;
 time_t total_time;
 
@@ -947,7 +960,7 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 	g_signal_connect (fontsel, "response",
 	                  G_CALLBACK (fontsel_response), entry);
 
-	gtk_widget_show(fontsel);
+	gtk_window_present(GTK_WINDOW(fontsel));
 }
 
 #ifdef USE_GDK_PIXBUF
@@ -1831,7 +1844,10 @@ void create_options_window(GtkWidget *widget, gpointer data)
 				&first);
 	}
 
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 
 	list_icons();
 }
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+/* Phase 4.13: end of file-level deprecation suppression — see top of file. */

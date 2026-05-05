@@ -632,10 +632,12 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 
 	if (buf->xtext->buffer == buf)
 	{
-		GtkAllocation alloc;
 		double page_size;
-		gtk_widget_get_allocation (GTK_WIDGET (buf->xtext), &alloc);
-		page_size = alloc.height / buf->xtext->fontsize;
+		/* Phase 4.13: gtk_widget_get_allocation is deprecated in 4.10
+		 * (replacement is gtk_widget_compute_bounds, but we only need
+		 * width/height which the bare accessors give us). */
+		int alloc_h = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
+		page_size = alloc_h / buf->xtext->fontsize;
 		gtk_adjustment_set_lower(adj, 0);
 		gtk_adjustment_set_upper(adj, buf->num_lines);
 
@@ -1059,10 +1061,8 @@ gtk_xtext_draw_sep (GtkXText * xtext, int y)
 
 	if (y == -1)
 	{
-		GtkAllocation alloc;
-		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
 		y = 0;
-		height = alloc.height;
+		height = gtk_widget_get_height (GTK_WIDGET (xtext));
 	} else
 	{
 		height = xtext->fontsize;
@@ -1125,10 +1125,8 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 	else return;
 
 	{
-		GtkAllocation alloc;
-		gtk_widget_get_allocation (GTK_WIDGET (xtext), &alloc);
 		x = 0;
-		width = alloc.width;
+		width = gtk_widget_get_width (GTK_WIDGET (xtext));
 	}
 
 	if (xtext->cr)
@@ -1163,11 +1161,11 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	textentry *ent_start, *ent_end;
 	int x, y;
 
-	GtkAllocation alloc;
-	gtk_widget_get_allocation(widget, &alloc);
+	int alloc_w = gtk_widget_get_width  (widget);
+	int alloc_h = gtk_widget_get_height (widget);
 	if (area->x == 0 && area->y == 0 &&
-		 area->height == alloc.height &&
-		 area->width == alloc.width)
+		 area->height == alloc_h &&
+		 area->width  == alloc_w)
 	{
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		gtk_xtext_render_page (xtext);
@@ -1195,14 +1193,14 @@ gtk_xtext_paint (GtkWidget *widget, GdkRectangle *area)
 	/* y is the last pixel y location it rendered text at */
 	y = gtk_xtext_render_ents (xtext, ent_start, ent_end);
 
-	if (y && y < alloc.height && !ent_end->next)
+	if (y && y < alloc_h && !ent_end->next)
 	{
 		GdkRectangle rect;
 
 		rect.x = 0;
 		rect.y = y;
-		rect.width = alloc.width;
-		rect.height = alloc.height - y;
+		rect.width = alloc_w;
+		rect.height = alloc_h - y;
 
 		/* fill any space below the last line that also intersects with
 			the exposure rectangle */

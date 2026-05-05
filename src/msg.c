@@ -301,7 +301,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtkhx_widget_set_child(msg->window, vpane);
 
 
-	gtk_widget_show(msg->window);
+	gtk_window_present(GTK_WINDOW(msg->window));
 
 	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
 	g_signal_connect(msg->window, "close-request", G_CALLBACK(destroy_msgwin), 0);
@@ -372,6 +372,9 @@ void broadcastok(GtkWidget *widget, gpointer data)
 	gtkhx_widget_destroy(dialog);
 }
 
+/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
+ * GTK 4.10 — Phase 4.7 follow-up. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void broadcastmsg(char *text)
 {
 
@@ -410,5 +413,6 @@ void broadcastmsg(char *text)
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS

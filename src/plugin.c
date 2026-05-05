@@ -99,7 +99,7 @@ static void load_plugin (GtkWidget *widget, gpointer data)
 	gtk_signal_connect(GTK_FILE_SELECTION(config)->cancel_button, "clicked", GTK_SIGNAL_FUNC(close_load_plugin), config);
 
 	init_keyaccel(config);
-	gtk_widget_show(config);
+	gtk_window_present(GTK_WINDOW(config));
 }
 
 static void close_plugin_window(GtkWidget *window, gpointer data)
@@ -191,7 +191,7 @@ void create_plugin_manager(void)
 	fe_pluginlist_update();
 
 	init_keyaccel(plugin_window);
-	gtk_widget_show(plugin_window);
+	gtk_window_present(GTK_WINDOW(plugin_window));
 
 }
 

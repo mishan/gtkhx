@@ -582,6 +582,9 @@ select_cid (GtkWidget *widget, gint row, gint col, GdkEvent *event,
 	*cid = row;
 }
 
+/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
+ * GTK 4.10 — Phase 4.7 follow-up. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 static void prompt_chat(session *sess, guint16 _uid)
 {
 	GtkWidget *dialog;
@@ -672,8 +675,9 @@ static void prompt_chat(session *sess, guint16 _uid)
 	gtkhx_box_pack(btnhbox, new, 0, 0, 0);
 	gtkhx_box_pack(btnhbox, cancel, 0, 0, 0);
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 
 void user_chat_btn(GtkWidget *widget, gpointer data)
@@ -801,7 +805,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	msgbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(msgbtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/msg.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(msgbtn, pix);
 	g_signal_connect(msgbtn, "clicked",
 					   G_CALLBACK(open_message_btn), users_list);
@@ -811,7 +815,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	kickbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(kickbtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(kickbtn, pix);
 	g_signal_connect(kickbtn, "clicked",
 					   G_CALLBACK(user_kick_btn), users_list);
@@ -821,7 +825,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	infobtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(infobtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(infobtn, pix);
 	g_signal_connect(infobtn, "clicked",
 					   G_CALLBACK(user_info_btn), users_list);
@@ -833,7 +837,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(banbtn, "clicked",
 					   G_CALLBACK(user_ban_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ban.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(banbtn, pix);
 	gtk_widget_set_tooltip_text(banbtn, _("Ban"));
 	icon = 0, pix = 0, mask = 0;
@@ -844,7 +848,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(chatbtn, "clicked",
 					   G_CALLBACK(user_chat_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(chatbtn, pix);
 	icon = 0, pix = 0, mask = 0;
 
@@ -854,7 +858,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_signal_connect(ignobtn, "clicked",
 					   G_CALLBACK(user_igno_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ignore.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(ignobtn, pix);
 
 	gtk_widget_set_sensitive(msgbtn, FALSE);
@@ -900,7 +904,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.users.ysize);
 	if (gtkhx_prefs.geo.users.xpos > 0 || gtkhx_prefs.geo.users.ypos > 0)
 		/* Phase 4.2: gtk_window_move removed (Wayland) */
-	gtk_widget_show(users_window);
+	gtk_window_present(GTK_WINDOW(users_window));
 
 	gtkhx_prefs.geo.users.open = 1;
 	gtkhx_prefs.geo.users.init = 1;

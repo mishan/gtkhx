@@ -37,6 +37,15 @@
 #include "rcv.h"
 #include "files.h"
 
+/* Phase 4.13: this file uses GtkTreeView + GtkTreeStore directly for
+ * the news thread tree (Phase 2.8 work) and GtkDialog for the
+ * mkdir / mkcat prompts. Both API families are deprecated in
+ * GTK 4.10 in favor of GtkColumnView/GListModel and GtkAlertDialog/
+ * GtkWindow respectively. The replacement migrations are tracked
+ * as Phase 5 (tree-view) and Phase 4.7 (dialogs) follow-ups; until
+ * then suppress deprecations across the file so the rest of the
+ * tree can keep -Werror=deprecated-declarations on. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
 struct gnews_folder *gfnews_list = NULL;
 struct gnews_folder *gfnews_with_hlist (GtkWidget *hlist);
@@ -388,7 +397,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
 	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
 	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
@@ -432,7 +441,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
 	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
 	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
@@ -581,7 +590,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 					   G_CALLBACK(gfnews_up_btn), gfnews);
 	gtk_widget_set_tooltip_text(parentbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(parentbtn, pix);
 	gtk_widget_set_sensitive(parentbtn, gtkhx_prefs.news_samewin);
 	gfnews->up_btn = parentbtn;
@@ -592,7 +601,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 					   G_CALLBACK(gfnews_reload_btn), gfnews);
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -602,7 +611,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_tooltip_text(deletebtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
 
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(deletebtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -612,7 +621,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_tooltip_text(mkdirbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newsfld.xpm", NULL);
 
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(mkdirbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -622,7 +631,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_tooltip_text(mkcatbtn, _("New Category"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newscat.xpm", NULL);
 
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(mkcatbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -643,7 +652,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gfnews->window = news_window;
 	gfnews->news_list = news_list;
 
-	gtk_widget_show(news_window);
+	gtk_window_present(GTK_WINDOW(news_window));
 	init_keyaccel(news_window);
 
 	gfnews_list = gfnews;
@@ -899,7 +908,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 
 	gtkhx_widget_set_child(window, vbox);
 	init_keyaccel(window);
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 }
 
 void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -988,7 +997,7 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 
 	gtkhx_widget_set_child(window, vbox);
 	init_keyaccel(window);
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 }
 
 static void gcnews_reload_btn(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -1066,7 +1075,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 					   G_CALLBACK(gcnews_reload_btn), gcnews);
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -1075,7 +1084,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 					   G_CALLBACK(news15_post), gcnews);
 	gtk_widget_set_tooltip_text(postbtn, _("Post Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(postbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 	
@@ -1090,7 +1099,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 					   G_CALLBACK(news15_delete), gcnews);
 	gtk_widget_set_tooltip_text(deletebtn, _("Delete Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(deletebtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -1157,7 +1166,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (news_text), FALSE);
 	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (news_text), GTK_WRAP_WORD);
 	gtkhx_widget_set_child(scrolledwindow1, news_text);
-	gtk_widget_show(news_window);
+	gtk_window_present(GTK_WINDOW(news_window));
 
 	gcnews->window = news_window;
 	gcnews->news_tree = news_tree;
@@ -1296,3 +1305,6 @@ void open_news15(GtkWidget *widget, session *sess)
 
 	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+/* Phase 4.13: end of file-level deprecation suppression — see top of file. */

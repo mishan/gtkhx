@@ -45,7 +45,11 @@ extra_warnings = [
   # Phase 4.1: temporarily downgrade to a warning so the GTK 4 port can
   # focus on breaking-change errors first; deprecations come back as
   # errors in Phase 4.13.
-  # '-Werror=deprecated-declarations',
+  # Phase 4.13: re-enabled. The GTK 4 port is clean of deprecated
+  # symbols outside gtk_hlist_compat.c, which wraps its GtkTreeView
+  # usage in G_GNUC_BEGIN/END_IGNORE_DEPRECATIONS pending the Phase 5
+  # GtkColumnView migration.
+  '-Werror=deprecated-declarations',
 ]
 add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c')
 

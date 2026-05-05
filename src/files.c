@@ -215,6 +215,10 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
  * a single "response" handler that switches on GTK_RESPONSE_ACCEPT vs.
  * GTK_RESPONSE_CANCEL.  files_list is passed in via user_data instead
  * of being stashed on the OK button. */
+/* Phase 4.13: GtkFileChooserDialog and gtk_file_chooser_get_file are
+ * deprecated in GTK 4.10 — replacement is GtkFileDialog with an async
+ * open/save callback. Phase 4.7 follow-up tracks the migration. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 static void
 upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 {
@@ -252,8 +256,9 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 	g_signal_connect(file_dialog, "response",
 					 G_CALLBACK(upload_file_response), data);
 
-	gtk_widget_show(file_dialog);
+	gtk_window_present(GTK_WINDOW(file_dialog));
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* Phase 4.5: button-press-event is gone in GTK 4. Files-list single
  * and double click handling lives on a GtkGestureClick controller
@@ -459,6 +464,8 @@ static void makeDir(GtkWidget *widget, gpointer data)
 	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
+/* Phase 4.13: GtkDialog deprecated in 4.10 — Phase 4.7 follow-up. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 static void makeDirDialog(GtkWidget *widget, gpointer data)
 {
 	GtkWidget *dialog;
@@ -501,9 +508,10 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
 	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
 	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* Phase 4.8: drag-and-drop between file lists
  *
@@ -596,7 +604,7 @@ static struct gfile_list *create_files_window (char *path)
 					   G_CALLBACK(file_up_btn), files_list);
 	gtk_widget_set_tooltip_text(upbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(upbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
@@ -605,14 +613,14 @@ static struct gfile_list *create_files_window (char *path)
 					   G_CALLBACK(file_reload_btn), files_list);
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(downloadbtn, _("Download"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/dl.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
 	gtkhx_widget_set_child(downloadbtn, pix);
@@ -628,14 +636,14 @@ static struct gfile_list *create_files_window (char *path)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ul.xpm", NULL);
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(uploadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	crtfldbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(crtfldbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/mkdir.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(crtfldbtn, pix);
 	g_signal_connect(crtfldbtn, "clicked",
 					   G_CALLBACK(makeDirDialog), files_list);
@@ -644,7 +652,7 @@ static struct gfile_list *create_files_window (char *path)
 	filinfobtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(filinfobtn, _("Info"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(filinfobtn, pix);
 	g_signal_connect(filinfobtn, "clicked",
 					   G_CALLBACK(get_file_info), files_list);
@@ -653,7 +661,7 @@ static struct gfile_list *create_files_window (char *path)
 	delbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(delbtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(delbtn, pix);
 	g_signal_connect(delbtn, "clicked",
 					   G_CALLBACK(delete_file), files_list);
@@ -677,7 +685,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtkhx_box_pack(vbox, files_window_scroll, 1, 1, 0);
 	gtkhx_widget_set_child(files_window, vbox);
 
-	gtk_widget_show(files_window);
+	gtk_window_present(GTK_WINDOW(files_window));
 	init_keyaccel(files_window);
 
 	gfl->cfl = NULL;
@@ -1118,7 +1126,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 
 	g_signal_connect(window, "destroy", G_CALLBACK(close_file_info), path);
 
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 	init_keyaccel(window);
 }
 

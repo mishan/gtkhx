@@ -211,11 +211,13 @@ gtkhx_refresh_css (void)
 		fontprops, fg_buf, bg_buf, fg_buf,
 		fg_buf, bg_buf);
 
-	/* Phase 4.x: GTK 4's gtk_css_provider_load_from_data is void and no
-	 * longer takes a GError. Parse errors come via the `parsing-error`
-	 * signal — but for these hardcoded strings a parse failure is a
-	 * developer bug, not a runtime condition we need to log. */
-	gtk_css_provider_load_from_data (gtkhx_css_provider, css, -1);
+	/* Phase 4.13: gtk_css_provider_load_from_data is deprecated in
+	 * GTK 4.12 in favor of gtk_css_provider_load_from_string (which
+	 * takes a NUL-terminated str rather than (str, len)). Parse errors
+	 * still come via the `parsing-error` signal — for these hardcoded
+	 * strings a parse failure is a developer bug, not a runtime issue
+	 * we need to log. */
+	gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
 	g_free (css);
 	g_free (fontprops);
@@ -235,7 +237,7 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	fontprops = pango_to_css_props (fd);
 	css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
 
-	gtk_css_provider_load_from_data (gtkhx_userlist_css_provider, css, -1);
+	gtk_css_provider_load_from_string (gtkhx_userlist_css_provider, css);
 
 	g_free (css);
 	g_free (fontprops);
@@ -719,7 +721,7 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		gtkhx_widget_set_child(info_window, info_scroll);
 
 		init_keyaccel(info_window);
-		gtk_widget_show(info_window);
+		gtk_window_present(GTK_WINDOW(info_window));
 	}
 }
 
@@ -782,7 +784,7 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	gtkhx_box_pack(hbox, agreebtn, FALSE, FALSE, 0);
 	gtkhx_box_pack(hbox, disagreebtn, FALSE, FALSE, 0);
 	init_keyaccel(agreementwin);
-	gtk_widget_show(agreementwin);
+	gtk_window_present(GTK_WINDOW(agreementwin));
 	sess->agreementwin = agreementwin;
 }
 

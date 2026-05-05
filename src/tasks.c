@@ -159,7 +159,6 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 
 	if (sess->gtklist) {
 		gtk_list_box_insert(GTK_LIST_BOX(sess->gtklist), listitem, -1);
-		gtk_widget_show(listitem);
 	}
 
 	gtsk->label = label;
@@ -544,7 +543,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	stopbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(stopbtn, pix);
 	gtk_widget_set_tooltip_text(stopbtn, _("Stop Task"));
 	g_signal_connect(stopbtn, "clicked",
@@ -553,7 +552,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	gobtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/start.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(gobtn, pix);
 	gtk_widget_set_tooltip_text(gobtn, _("Start Task"));
 	g_signal_connect(gobtn, "clicked",
@@ -562,7 +561,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	upbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(upbtn, pix);
 	gtk_widget_set_tooltip_text(upbtn, _("Move Xfer Up in Queue"));
 	g_signal_connect(upbtn, "clicked", G_CALLBACK(task_up), 
@@ -572,7 +571,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 
 	dnbtn = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/down.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(dnbtn, pix);
 	gtk_widget_set_tooltip_text(dnbtn, _("Move Xfer Down in Queue"));
 	g_signal_connect(dnbtn, "clicked", G_CALLBACK(task_dn), 
@@ -607,7 +606,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.tasks.ysize);
 	if (gtkhx_prefs.geo.tasks.xpos > 0 || gtkhx_prefs.geo.tasks.ypos > 0)
 		/* Phase 4.2: gtk_window_move removed (Wayland) */
-	gtk_widget_show(tasks_window);
+	gtk_window_present(GTK_WINDOW(tasks_window));
 
 
 	if(connected == 1) {

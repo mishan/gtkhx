@@ -158,7 +158,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 	gtkhx_box_pack(hbox, okbut, 0, 0, 0);
 	gtkhx_box_pack(hbox, cancbut, 0, 0, 0);
 
-	gtk_widget_show(post_window);
+	gtk_window_present(GTK_WINDOW(post_window));
 	gtk_widget_grab_focus(postprompt);
 }
 
@@ -196,14 +196,14 @@ void create_news_window (session *sess)
 
 	postButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(postButton, pix);
 	gtk_widget_set_tooltip_text(postButton, _("Post News"));
 	icon = 0, pix = 0, mask = 0;
 
 	reloadButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(reloadButton, pix);
 	gtk_widget_set_tooltip_text(reloadButton, _("Reload News"));
 	icon = 0, pix = 0, mask = 0;
@@ -256,7 +256,7 @@ void create_news_window (session *sess)
 	if (gtkhx_prefs.geo.news.xpos > 0 || gtkhx_prefs.geo.news.ypos > 0)
 		/* Phase 4.2: gtk_window_move removed (Wayland) */
 
-	gtk_widget_show(news_window);
+	gtk_window_present(GTK_WINDOW(news_window));
 
 	if(connected == 1) {
 		changetitlespecific(news_window, _("News"));

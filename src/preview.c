@@ -68,7 +68,7 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 	gtk_widget_set_size_request(window, 400, 300);
 	gtkhx_widget_set_child(window, scroll);
 
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 
 	tp->window = window;
 	tp->text = text;

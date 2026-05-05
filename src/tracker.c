@@ -462,7 +462,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	refreshbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(refreshbtn, _("Refresh"));
 	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf(pb);
+	pix = gtkhx_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
 	gtkhx_widget_set_child(refreshbtn, pix);
 	pix = 0; pb = 0;
@@ -474,7 +474,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(tracker_connect), 0);
 	gtk_widget_set_tooltip_text(connbtn, _("Connect"));
 	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf(pb);
+	pix = gtkhx_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
 	gtkhx_widget_set_child(connbtn, pix);
 	pix = 0; pb = 0;
@@ -500,7 +500,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtkhx_box_pack(vbox, tracker_window_scroll, 1, 1, 0);
 	gtkhx_widget_set_child(tracker_window, vbox);
 	init_keyaccel(tracker_window);
-	gtk_widget_show(tracker_window);
+	gtk_window_present(GTK_WINDOW(tracker_window));
 
 	gtk_widget_grab_focus(searchentry);
 

@@ -118,17 +118,22 @@ void create_toolbar_window (session *sess)
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
+	/* Phase 4.13: GtkStatusbar deprecated in GTK 4.10 — replacement
+	 * is a plain GtkLabel (Phase 5 follow-up; see set_status_bar in
+	 * gtkutil.c for the same suppression). */
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 	status_bar = gtk_statusbar_new();
-	context_status = gtk_statusbar_get_context_id((GtkStatusbar *)status_bar, 
+	context_status = gtk_statusbar_get_context_id((GtkStatusbar *)status_bar,
 												  "foobar");
 	status_msg = gtk_statusbar_push((GtkStatusbar *)status_bar, context_status,
 									_("Not Connected"));
+	G_GNUC_END_IGNORE_DEPRECATIONS
 
 	connect_btn = gtk_button_new();
 	g_signal_connect(connect_btn, "clicked", 
 					   G_CALLBACK(create_connect_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(connect_btn, pix);
 	gtk_widget_set_tooltip_text(connect_btn, _("Connect"));
 	icon = 0, pix = 0, mask = 0;
@@ -137,7 +142,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(tracker_btn, "clicked", 
 					   G_CALLBACK(create_tracker_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/tracker.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(tracker_btn, pix);
 	gtk_widget_set_tooltip_text(tracker_btn, _("Tracker"));
 	icon = 0, pix = 0, mask = 0;
@@ -146,7 +151,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(options_btn, "clicked", 
 					   G_CALLBACK(create_options_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/options.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(options_btn, pix);
 	gtk_widget_set_tooltip_text(options_btn, _("Options"));
 	icon = 0, pix = 0, mask = 0;
@@ -155,7 +160,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(news_btn, "clicked",
 					   G_CALLBACK(open_news), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/news.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(news_btn, pix);
 	gtk_widget_set_tooltip_text(news_btn, _("News"));
 	icon = 0, pix = 0, mask = 0;
@@ -164,7 +169,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(news15_btn, "clicked",
 					   G_CALLBACK(open_news15), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newscat.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(news15_btn, pix);
 	gtk_widget_set_tooltip_text(news15_btn, _("News (1.5+)"));
 	icon = 0, pix = 0, mask = 0;
@@ -173,7 +178,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(files_btn, "clicked", 
 					   G_CALLBACK(open_files), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/files.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(files_btn, pix);
 	gtk_widget_set_tooltip_text(files_btn, _("Files"));
 	icon = 0, pix = 0, mask = 0;
@@ -182,7 +187,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(userlist_btn, "clicked", 
 					   G_CALLBACK(create_users_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/users.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(userlist_btn, pix);
 	gtk_widget_set_tooltip_text(userlist_btn, _("Users"));
 	icon = 0, pix = 0, mask = 0;
@@ -191,7 +196,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(chat_btn, "clicked", 
 					   G_CALLBACK(create_chat_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(chat_btn, pix);
 	gtk_widget_set_tooltip_text(chat_btn, _("Chat"));
 	icon = 0, pix = 0, mask = 0;
@@ -200,7 +205,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(post_btn, "clicked", 
 					   G_CALLBACK(create_post_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(post_btn, pix);
 	gtk_widget_set_tooltip_text(post_btn, _("Post"));
 	icon = 0, pix = 0, mask = 0;
@@ -209,7 +214,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(tasks_btn, "clicked", 
 					   G_CALLBACK(create_tasks_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/tasks.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(tasks_btn, pix);
 	gtk_widget_set_tooltip_text(tasks_btn, _("Tasks"));
 	icon = 0, pix = 0, mask = 0;
@@ -218,7 +223,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(about_btn, "clicked", 
 					   G_CALLBACK(create_about_window), 0);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(about_btn, pix);
 	gtk_widget_set_tooltip_text(about_btn, _("About"));
 	icon = 0, pix = 0, mask = 0;
@@ -227,7 +232,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(disconnect_btn, "clicked",
 					   G_CALLBACK(disconnect_clicked), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(disconnect_btn, pix);
 	gtk_widget_set_tooltip_text(disconnect_btn, _("Disconnect"));
 	icon = 0, pix = 0, mask = 0;
@@ -236,7 +241,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(quit_btn, "clicked", 
 					   G_CALLBACK(hx_quit), 0);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/quit.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(quit_btn, pix);
 	gtk_widget_set_tooltip_text(quit_btn, _("Quit"));
 	icon = 0, pix = 0, mask = 0;
@@ -246,7 +251,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(usernew_btn, "clicked", 
 					   G_CALLBACK(create_new_user), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newuser.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(usernew_btn, pix);
 	gtk_widget_set_tooltip_text(usernew_btn, _("New User"));
 	icon = 0, pix = 0, mask = 0;
@@ -255,7 +260,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(usermod_btn, "clicked", 
 					   G_CALLBACK(useredit_open_dialog), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/edituser.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(usermod_btn, pix);
 	gtk_widget_set_tooltip_text(usermod_btn, _("Edit User"));
 	icon = 0, pix = 0, mask = 0;
@@ -314,7 +319,7 @@ void create_toolbar_window (session *sess)
 
 	/* Phase 4.2: gtk_window_move removed (Wayland) */
 
-	gtk_widget_show(toolbar_window);
+	gtk_window_present(GTK_WINDOW(toolbar_window));
 	init_keyaccel(toolbar_window);
 
 	if(connected) {

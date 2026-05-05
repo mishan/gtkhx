@@ -1,5 +1,6 @@
 High priority:
 
+- When right clicking or double clicking on a user in the Users list, the wrong user is pulled into the popup menu or private chat window. It looks like an off by one
 
 Low priority:
 

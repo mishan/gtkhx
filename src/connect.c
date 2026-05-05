@@ -31,6 +31,15 @@
 #include "gtkutil.h"
 #include "toolbar.h"
 
+/* Phase 4.13: this file uses GtkComboBoxText for the cipher /
+ * compress / bookmark dropdowns, plus GtkDialog for the bookmark
+ * convert + save prompts. GtkComboBoxText is deprecated in GTK 4.10
+ * in favor of GtkDropDown + GtkStringList; GtkDialog in favor of
+ * GtkWindow / GtkAlertDialog. Both migrations are tracked as
+ * follow-ups (Phase 5 UX for the dropdowns, Phase 4.7 for dialogs);
+ * until then suppress deprecations across the file. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
 static GtkWidget *connect_window;
 static GtkWidget *address_entry;
 static GtkWidget *login_entry;
@@ -364,11 +373,10 @@ static void prompt_conversion (char *name)
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
     label = gtk_label_new ("This bookmark is written in an old GtkHx format.\nWould you like to convert it to the new format?");
     gtk_widget_set_size_request(dialog, 250, 200);
-    gtk_widget_show(dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
 
     gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
 
-    gtk_widget_show(label);
 
     okbutton = gtk_button_new_with_label ("Yes");
 	cancelbtn = gtk_button_new_with_label("No");
@@ -386,7 +394,7 @@ static void prompt_conversion (char *name)
 
     /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
-    gtk_widget_show(dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
 
 }
 
@@ -668,7 +676,7 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 
 
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 	init_keyaccel(dialog);
 
 	gtk_widget_grab_focus(name_entry);
@@ -910,7 +918,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	g_signal_connect(button_connect, "clicked", G_CALLBACK(server_connect), sess);
 	gtkhx_widget_set_child(hbuttonbox1, button_connect);
 
-	gtk_widget_show(connect_window);
+	gtk_window_present(GTK_WINDOW(connect_window));
 	init_keyaccel(connect_window);
 	gtk_widget_grab_focus(address_entry);
 }
@@ -920,3 +928,6 @@ void connect_bookmark_name(char *name)
 	create_connect_window(0,&the_session);
 	open_bookmark(0, name);
 }
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+/* Phase 4.13: end of file-level deprecation suppression — see top of file. */

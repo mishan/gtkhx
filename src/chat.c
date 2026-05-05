@@ -1128,7 +1128,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.chat.xsize,
 		                            gtkhx_prefs.geo.chat.ysize);
 
-	gtk_widget_show(chat_window);
+	gtk_window_present(GTK_WINDOW(chat_window));
 	init_keyaccel(chat_window);
 
 	if(connected) {
@@ -1247,6 +1247,9 @@ void reject_chat(GtkWidget *btn, GtkWidget *dialog)
 	gtkhx_widget_destroy(dialog);
 }
 
+/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
+ * 4.10 — Phase 4.7 follow-up replaces with GtkAlertDialog/GtkWindow. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 {
 	GtkWidget *dialog;
@@ -1290,9 +1293,10 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
-	gtk_widget_show(dialog);
+	gtk_window_present(GTK_WINDOW(dialog));
 	g_free(message);
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* Phase 4.5: pchat_update_trans was a configure-event handler that
  * forced an xtext refresh on every resize so transparency would track
@@ -1426,7 +1430,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	msg_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(msg_btn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/msg.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(msg_btn, pix);
 	g_signal_connect(msg_btn, "clicked", 
 					   G_CALLBACK(open_message_btn), gchat->userlist);
@@ -1436,7 +1440,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	kick_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(kick_btn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(kick_btn, pix);
 	g_signal_connect(kick_btn, "clicked", 
 					   G_CALLBACK(user_kick_btn), gchat->userlist);
@@ -1446,7 +1450,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	info_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(info_btn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(info_btn, pix);
 	g_signal_connect(info_btn, "clicked", 
 					   G_CALLBACK(user_info_btn), gchat->userlist);
@@ -1458,7 +1462,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(ban_btn, "clicked", 
 					   G_CALLBACK(user_ban_btn), gchat->userlist);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ban.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(ban_btn, pix);
 	gtk_widget_set_tooltip_text(ban_btn, _("Ban"));
 	icon = 0, pix = 0, mask = 0;
@@ -1469,7 +1473,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(chat_btn, "clicked", 
 					   G_CALLBACK(user_chat_btn), gchat->userlist);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
-    pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(chat_btn, pix);
 	icon = 0, pix = 0, mask = 0;
 
@@ -1479,7 +1483,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(igno_btn, "clicked", 
 					   G_CALLBACK(user_igno_btn), gchat->userlist);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ignore.xpm", NULL);
-	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(igno_btn, pix);
 
 	topframe = gtk_frame_new(0);
@@ -1519,7 +1523,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	gtkhx_widget_set_child(pchat_window, hpane);
 
-	gtk_widget_show(pchat_window);
+	gtk_window_present(GTK_WINDOW(pchat_window));
 	init_keyaccel(pchat_window);
 
 

@@ -32,6 +32,15 @@
 
 #include <string.h>
 
+/* Phase 4.10: GtkTreeView and friends are deprecated in GTK 4.10 in
+ * favor of GtkColumnView + GListModel. The migration is a separate
+ * axis of change tracked in the ROADMAP — see "Phase 4.10
+ * gtk_hlist_compat deprecation containment" and the Phase 5
+ * GtkColumnView/GListModel item. Until then, the entire shim file is
+ * built with deprecation warnings suppressed so the rest of the
+ * tree can lock in -Werror=deprecated-declarations cleanly. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
 /* Storage column offsets: see header comment above. */
 #define HLIST_COL_DATA          0
 #define HLIST_COL_FG            1
@@ -760,3 +769,6 @@ gtk_hlist_sort (GtkHList *hlist)
 		GTK_TREE_SORTABLE_DEFAULT_SORT_COLUMN_ID,
 		priv->sort_type);
 }
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+/* Phase 4.10: end of deprecation suppression — see top of file. */

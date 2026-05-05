@@ -422,7 +422,7 @@ void create_useredit_window (char *login, int new)
 	if(!new) {
 		useredit_login(login, ues);
 	}
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 }
 
 
@@ -461,7 +461,7 @@ void useredit_open_dialog()
 
 	g_signal_connect(cancelbtn, "clicked", G_CALLBACK(useredit_open_close), window);
 
-	gtk_widget_show(window);
+	gtk_window_present(GTK_WINDOW(window));
 
 	gtk_widget_grab_focus(loginentry);
 }

@@ -138,6 +138,12 @@ void setbtns(session *sess, int stat)
 	}
 }
 
+/* Phase 4.13: GtkStatusbar is deprecated in GTK 4.10. The connection
+ * status indicator is a single-line label that needs neither the
+ * statusbar's stack-of-messages model nor its frame chrome. A Phase 5
+ * follow-up replaces it with a plain GtkLabel; until then suppress
+ * deprecations on the status-bar machinery. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void set_status_bar(int status)
 {
 	if(!status_bar) {
@@ -170,6 +176,7 @@ void set_status_bar(int status)
 		g_free(str);
 	}
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 void changetitlesconnected(session *sess)
 {
@@ -262,6 +269,13 @@ char *add_break(char *msg, int pos)
 	return msg;
 }
 
+/* Phase 4.13: GtkDialog and gtk_dialog_get_content_area are deprecated
+ * in GTK 4.10 in favor of GtkAlertDialog (for simple message dialogs)
+ * and GtkWindow (for custom multi-button forms). Migrating every
+ * GtkDialog call site is a sizable Phase 4.7 follow-up the ROADMAP
+ * already documented as deferred — until then suppress deprecations
+ * on the dialog wrappers. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 void error_dialog (char *title, char *msg)
 {
     GtkWidget *label;
@@ -304,7 +318,7 @@ void error_dialog (char *title, char *msg)
 
     /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
-    gtk_widget_show(dialog);
+    gtk_window_present(GTK_WINDOW(dialog));
 	g_free(message);
 }
 
@@ -333,6 +347,7 @@ gtkhx_dialog_action_area (GtkDialog *dialog)
 	}
 	return area;
 }
+G_GNUC_END_IGNORE_DEPRECATIONS
 
 GtkWidget *
 gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous)
@@ -486,6 +501,37 @@ gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
 	else
 		gtk_widget_set_valign (child, GTK_ALIGN_END);
 	gtk_box_append (GTK_BOX (box), child);
+}
+
+/* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
+ * The replacement chain is gdk_texture_new_for_pixbuf →
+ * gtk_image_new_from_paintable. Wrap that here so the per-site
+ * migration is just a name swap (and the returned floating GtkImage
+ * has the same ownership story).
+ *
+ * gdk_texture_new_for_pixbuf is itself deprecated in GTK 4.16 (the
+ * suggested replacement loads the pixbuf bytes via GBytes /
+ * gdk_memory_texture_new). The pixbuf-first path is what the rest of
+ * GtkHx hands us — every icon comes from gdk_pixbuf_new_from_resource —
+ * so the GBytes round-trip is a Phase 5 follow-up alongside the
+ * GResource-based texture loader. Suppress the inner deprecation
+ * here so we keep the strict deprecation gate on. */
+GtkWidget *
+gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
+{
+	GtkWidget *image;
+	GdkTexture *tex;
+
+	if (!pixbuf)
+		return gtk_image_new ();
+
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	tex = gdk_texture_new_for_pixbuf (pixbuf);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+
+	image = gtk_image_new_from_paintable (GDK_PAINTABLE (tex));
+	g_object_unref (tex);
+	return image;
 }
 
 /* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use

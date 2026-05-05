@@ -121,8 +121,7 @@ void create_about_window ()
 			G_CALLBACK (on_frmAbout_destroy),
 			frmAbout);
 
-    gtk_widget_realize(frmAbout);
-
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
     fixed = gtk_fixed_new ();
     gtkhx_widget_set_child(frmAbout, fixed);
@@ -152,7 +151,7 @@ void create_about_window ()
     gtk_widget_set_size_request (frame, 400, 200);
 
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/gtkhx.xpm", NULL);
-    pixmap = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
+    pixmap = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
     gtkhx_widget_set_child(frame, pixmap);
 
     g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */
@@ -178,7 +177,7 @@ void create_about_window ()
     gtk_text_view_set_editable (GTK_TEXT_VIEW (txtCredits), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (txtCredits), FALSE);
     gtkhx_widget_set_child(scrolledwindow, txtCredits);
-    gtk_widget_realize (txtCredits);
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
     credits_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (txtCredits));
     gtk_text_buffer_set_text (credits_buf, get_credits(), -1);
 
@@ -189,7 +188,7 @@ void create_about_window ()
     lblCredits = gtk_label_new (_("Credits"));
     set_notebook_tab (notebook, 0, lblCredits);
 
-    gtk_widget_show(frmAbout);
+    gtk_window_present(GTK_WINDOW(frmAbout));
     about_open = TRUE;
 	}
 }
