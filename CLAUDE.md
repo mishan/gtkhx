@@ -76,9 +76,6 @@ What's *runnable* on first boot from this branch:
 
 What's *degraded* and tracked as Phase 4 follow-up work:
 
-- **xtext background pixmap**: `gdk_cairo_surface_create_from_pixbuf` is
-  gone in GTK 4; `gtk_xtext_set_background` is a no-op until the pixbuf
-  bytes get rendered into a `cairo_image_surface_t` manually.
 - **Selection auto-scroll while dragging**: the scrollup/down timers read
   `xtext->select_end_y` (kept live by the motion controller) rather than
   the live device position, since GTK 4 has no synchronous "where is the
