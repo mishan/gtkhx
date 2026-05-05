@@ -513,21 +513,98 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 }
 G_GNUC_END_IGNORE_DEPRECATIONS
 
-/* Phase 4.8: drag-and-drop between file lists
+/* Phase 4.8: drag-and-drop between file lists.
  *
- * GTK 3 GtkTargetEntry / gtk_drag_source_set / gtk_drag_dest_set with
- * the "drag_data_get" + "drag_data_received" signals are gone in
- * GTK 4 — replaced by GtkDragSource / GtkDropTarget event controllers
- * with a GdkContentProvider on the source side. The original code
- * here moved a file from one window's path to another's via
- * hx_file_move on drop.
+ * GTK 4 replaces GtkTargetEntry / gtk_drag_source_set / gtk_drag_dest_set
+ * (with the "drag_data_get" + "drag_data_received" signal pair) with two
+ * event controllers: GtkDragSource on the source widget, advertising a
+ * GdkContentProvider; GtkDropTarget on the destination, accepting one or
+ * more GTypes. There is no longer a gtk_drag_get_source_widget(context)
+ * accessor on the receive side — the source has to actually push data
+ * across.
  *
- * The full GTK 4 port (intra-app drag of an opaque struct pointer
- * via a custom GType, async drop callback) is a clean self-contained
- * piece of work but doesn't gate first-boot. Stripped for now;
- * tracked as a Phase 4.8 follow-up. The right-click context menu's
- * "Move" item (if it returns) covers the same UX for the moment.
- */
+ * The original GTK 3 code cheated: drag_send was a no-op (selection_data
+ * empty) and drag_receive used gtk_drag_get_source_widget to fetch the
+ * source widget directly. To keep the wire-payload trivial we mirror
+ * that intra-app-only design: the content provider holds a GtkWidget*
+ * (GTK_TYPE_WIDGET) pointing at the source files_list, and the drop
+ * callback derives source/target gfl via gfl_with_hlist on each end.
+ *
+ * The selected source row was already recorded by file_pressed on the
+ * preceding click (gfl->row), so we don't have to capture it at
+ * drag-start time. */
+static gboolean files_drop_cb (GtkDropTarget *target, const GValue *value,
+                               double x, double y, gpointer user_data)
+{
+	GtkWidget *target_widget;
+	GtkWidget *source_widget;
+	struct gfile_list *gfl_source, *gfl_target;
+	struct hl_filelist_hdr *fh;
+	char pathf[4096], patht[4096];
+
+	(void) x;
+	(void) y;
+	(void) user_data;
+
+	target_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
+
+	if (!G_VALUE_HOLDS (value, GTK_TYPE_WIDGET))
+		return FALSE;
+	source_widget = g_value_get_object (value);
+	if (!source_widget || source_widget == target_widget)
+		return FALSE;	/* same window — let it be a no-op */
+
+	gfl_source = gfl_with_hlist (source_widget);
+	gfl_target = gfl_with_hlist (target_widget);
+	if (!gfl_source || !gfl_target)
+		return FALSE;
+
+	fh = gtk_hlist_get_row_data (GTK_HLIST (source_widget), gfl_source->row);
+	if (!fh)
+		return FALSE;
+
+	if (strcmp (gfl_source->cfl->path, gfl_target->cfl->path) == 0)
+		return FALSE;	/* same directory; nothing to do */
+
+	g_snprintf (pathf, sizeof pathf, "%s/%.*s", gfl_source->cfl->path,
+	            (int) fh->fnlen, fh->fname);
+	g_snprintf (patht, sizeof patht, "%s/", gfl_target->cfl->path);
+
+	hx_file_move (&the_session.htlc, pathf, patht);
+	/*	hx_file_link(&the_session.htlc, pathf, patht);
+	 *
+	 *	XXX: Pop up a dialog and prompt the user whether he wants to
+	 *	move or link the file or cancel — preserved from the GTK 3
+	 *	code so we don't lose the design intent. */
+
+	hx_list_dir (&the_session.htlc, gfl_target->cfl->path, 1, 0, gfl_target);
+	hx_list_dir (&the_session.htlc, gfl_source->cfl->path, 1, 0, gfl_source);
+
+	return TRUE;
+}
+
+static void files_attach_dnd (GtkWidget *files_list)
+{
+	GtkDragSource *source;
+	GtkDropTarget *target;
+	GdkContentProvider *provider;
+	GValue widget_value = G_VALUE_INIT;
+
+	g_value_init (&widget_value, GTK_TYPE_WIDGET);
+	g_value_set_object (&widget_value, files_list);
+	provider = gdk_content_provider_new_for_value (&widget_value);
+	g_value_unset (&widget_value);
+
+	source = gtk_drag_source_new ();
+	gtk_drag_source_set_content (source, provider);
+	gtk_drag_source_set_actions (source, GDK_ACTION_MOVE);
+	g_object_unref (provider);
+	gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (source));
+
+	target = gtk_drop_target_new (GTK_TYPE_WIDGET, GDK_ACTION_MOVE);
+	g_signal_connect (target, "drop", G_CALLBACK (files_drop_cb), NULL);
+	gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (target));
+}
 
 static struct gfile_list *create_files_window (char *path)
 {
@@ -573,9 +650,9 @@ static struct gfile_list *create_files_window (char *path)
 		gtk_widget_add_controller (files_list,
 		                           GTK_EVENT_CONTROLLER (click));
 	}
-	/* Phase 4.8: drag-and-drop between file lists is stripped pending
-	 * the GtkDragSource / GtkDropTarget port. See note above the
-	 * removed files_drag_* helpers. */
+	/* Phase 4.8: drag-and-drop between file lists. See files_drop_cb /
+	 * files_attach_dnd above. */
+	files_attach_dnd (files_list);
 
 	files_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
