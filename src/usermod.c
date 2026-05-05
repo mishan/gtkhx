@@ -160,9 +160,9 @@ user_open (void *__uesp, const char *name, const char *login, const char *pass, 
 	unsigned int i;
 	int on;
 
-	gtk_entry_set_text(GTK_ENTRY(ues->name_entry), name);
-	gtk_entry_set_text(GTK_ENTRY(ues->login_entry), login);
-	gtk_entry_set_text(GTK_ENTRY(ues->pass_entry), pass);
+	gtk_editable_set_text(GTK_EDITABLE(ues->name_entry), name);
+	gtk_editable_set_text(GTK_EDITABLE(ues->login_entry), login);
+	gtk_editable_set_text(GTK_EDITABLE(ues->pass_entry), pass);
 	strcpy(ues->name, name);
 	strcpy(ues->login, login);
 	strcpy(ues->pass, pass);
@@ -188,16 +188,16 @@ useredit_login (char *login, struct useredit_session *ues)
 
 static void useredit_open_close(GtkWidget *widget, gpointer data)
 {
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
 static void useredit_open(GtkWidget *widget, gpointer data)
 {
 	GtkWidget *loginentry = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "login");
-	char *login = gtk_entry_get_text(GTK_ENTRY(loginentry));
+	char *login = gtk_editable_get_text(GTK_EDITABLE(loginentry));
 
 	create_useredit_window(login, 0);
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
 static void useredit_name_pass(GtkWidget *name_entry, GtkWidget *pass_entry, struct useredit_session *ues)
@@ -206,14 +206,14 @@ static void useredit_name_pass(GtkWidget *name_entry, GtkWidget *pass_entry, str
 	char *pass;
 	size_t len;
 
-	name = gtk_entry_get_text(GTK_ENTRY(name_entry));
+	name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
 	len = strlen(name);
 	if (len > 31)
 		len = 31;
 	memcpy(ues->name, name, len);
 	ues->name[len] = 0;
 
-	pass = gtk_entry_get_text(GTK_ENTRY(pass_entry));
+	pass = gtk_editable_get_text(GTK_EDITABLE(pass_entry));
 	len = strlen(pass);
 	if (len > 31)
 		len = 31;
@@ -226,7 +226,7 @@ static void useredit_get_login(GtkWidget *login_entry, struct useredit_session *
 	char *login;
 	size_t len;
 
-	login = gtk_entry_get_text(GTK_ENTRY(login_entry));
+	login = gtk_editable_get_text(GTK_EDITABLE(login_entry));
 	len = strlen(login);
 	if (len > 31)
 		len = 31;
@@ -278,7 +278,7 @@ useredit_delete (GtkWidget *widget, gpointer data)
 
 	if (&the_session.htlc)
 		hx_useredit_delete(&the_session.htlc, ues->login);
-	gtk_widget_destroy(ues->window);
+	gtkhx_widget_destroy(ues->window);
 }
 
 static void
@@ -286,7 +286,7 @@ useredit_close (GtkWidget *widget, gpointer data)
 {
 	struct useredit_session *ues = (struct useredit_session *)data;
 
-	gtk_widget_destroy(ues->window);
+	gtkhx_widget_destroy(ues->window);
 }
 
 static void
@@ -315,7 +315,7 @@ void create_useredit_window (char *login, int new)
 	char *title;
 
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	window = gtk_window_new();
 
 	if(!new) {
 		title = g_strdup_printf("%s: %s", _("User Editor"), login);
@@ -331,7 +331,7 @@ void create_useredit_window (char *login, int new)
 	g_signal_connect(window, "destroy",
 			   G_CALLBACK(useredit_destroy), ues);
 	vbox = 0;
-	usermod_scroll = gtk_scrolled_window_new(0, 0);
+	usermod_scroll = gtk_scrolled_window_new();
 	gtk_widget_set_size_request(usermod_scroll, 250, 500);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(usermod_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
@@ -343,23 +343,23 @@ void create_useredit_window (char *login, int new)
 	g_object_set_data(G_OBJECT(wid), "new", GINT_TO_POINTER(new));
 	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_save), ues);
-	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
+	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Delete User"));
 	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_delete), ues);
-	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
+	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
 
 	wid = gtk_button_new_with_label(_("Close"));
 	g_signal_connect(wid, "clicked",
 			   G_CALLBACK(useredit_close), ues);
-	gtk_box_pack_start(GTK_BOX(btnhbox), wid, 0, 0, 2);
+	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
 
-	gtk_box_pack_start(GTK_BOX(wvbox), btnhbox, 0, 0, 2);
+	gtkhx_box_pack(wvbox, btnhbox, 0, 0, 2);
 
 	info_frame = gtk_frame_new(_("User Info"));
 	info_table = gtkhx_grid_new_table(3, 2, 0);
-	gtk_container_add(GTK_CONTAINER(info_frame), info_table);
+	gtkhx_widget_set_child(info_frame, info_table);
 
 	wid = gtk_entry_new();
 	ues->login_entry = wid;
@@ -390,15 +390,15 @@ void create_useredit_window (char *login, int new)
 
 	gtk_grid_set_row_spacing(GTK_GRID(info_table), 10);
 	gtk_grid_set_column_spacing(GTK_GRID(info_table), 5);
-	gtk_box_pack_start(GTK_BOX(wvbox), info_frame, 0, 0, 2);
+	gtkhx_box_pack(wvbox, info_frame, 0, 0, 2);
 
 	avbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	/* Phase 3.9: gtk_scrolled_window_add_with_viewport was deprecated
 	 * in 3.8 — gtk_container_add now wraps non-scrollable children in
 	 * a viewport automatically. */
-	gtk_container_add(GTK_CONTAINER(usermod_scroll), avbox);
-	gtk_container_add(GTK_CONTAINER(window), wvbox);
-	gtk_box_pack_start(GTK_BOX(wvbox), usermod_scroll, 0, 0, 2);
+	gtkhx_widget_set_child(usermod_scroll, avbox);
+	gtkhx_widget_set_child(window, wvbox);
+	gtkhx_box_pack(wvbox, usermod_scroll, 0, 0, 2);
 
 
 	for (i = 0; i < sizeof(access_names)/sizeof(struct access_name); i++) {
@@ -406,8 +406,8 @@ void create_useredit_window (char *login, int new)
 			nframes++;
 			frame = gtk_frame_new(access_names[i].name);
 			vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-			gtk_container_add(GTK_CONTAINER(frame), vbox);
-			gtk_box_pack_start(GTK_BOX(avbox), frame, 0, 0, 0);
+			gtkhx_widget_set_child(frame, vbox);
+			gtkhx_box_pack(avbox, frame, 0, 0, 0);
 			continue;
 		}
 		chk = gtk_check_button_new_with_label(access_names[i].name);
@@ -416,13 +416,13 @@ void create_useredit_window (char *login, int new)
 		ues->access_widgets[awi].widget = chk;
 		g_signal_connect(chk, "clicked",
 				   G_CALLBACK(useredit_chk_activate), ues);
-		gtk_box_pack_start(GTK_BOX(vbox), chk, 0, 0, 0);
+		gtkhx_box_pack(vbox, chk, 0, 0, 0);
 	}
 
 	if(!new) {
 		useredit_login(login, ues);
 	}
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 }
 
 
@@ -437,7 +437,7 @@ void useredit_open_dialog()
 	GtkWidget *cancelbtn;
 	GtkWidget *loginlbl;
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	window = gtk_window_new();
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	hboxtwo = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -448,20 +448,20 @@ void useredit_open_dialog()
 	gtk_window_set_title(GTK_WINDOW(window), _("Open User"));
 
 
-	gtk_container_add(GTK_CONTAINER(window), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), loginlbl, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), loginentry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hboxtwo, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hboxtwo), okbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hboxtwo), cancelbtn, 0, 0, 0);
+	gtkhx_widget_set_child(window, vbox);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
+	gtkhx_box_pack(hbox, loginlbl, 0, 0, 0);
+	gtkhx_box_pack(hbox, loginentry, 0, 0, 0);
+	gtkhx_box_pack(vbox, hboxtwo, 0, 0, 0);
+	gtkhx_box_pack(hboxtwo, okbtn, 0, 0, 0);
+	gtkhx_box_pack(hboxtwo, cancelbtn, 0, 0, 0);
 
 	g_object_set_data(G_OBJECT(okbtn), "login", loginentry);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(useredit_open), window);
 
 	g_signal_connect(cancelbtn, "clicked", G_CALLBACK(useredit_open_close), window);
 
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 
 	gtk_widget_grab_focus(loginentry);
 }

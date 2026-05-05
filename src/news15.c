@@ -297,7 +297,7 @@ void destroy_gfnews_browser(GtkWidget *widget, gpointer data)
 													  "gfnews");
 
 	delete_gfnews(gfnews);
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 }
 
 static void gfnews_reload_btn(GtkWidget *btn, struct gnews_folder *gfnews)
@@ -314,7 +314,7 @@ static void gfnews_mkdir(GtkWidget *widget, gpointer data)
 														"entry");
 	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
 													  "gfnews");
-	char *name = gtk_entry_get_text(GTK_ENTRY(entry));
+	char *name = gtk_editable_get_text(GTK_EDITABLE(entry));
 	char pathname[MAXPATHLEN];
 
 	snprintf(pathname, MAXPATHLEN, "%s/%s", gfnews->path, name);
@@ -322,7 +322,7 @@ static void gfnews_mkdir(GtkWidget *widget, gpointer data)
 	hx_news15_mkdir(&the_session.htlc, pathname);
 	hx_news15_fldr_list(&the_session.htlc, gfnews);
 
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 static void gfnews_mkcat(GtkWidget *widget, gpointer data)
 {
@@ -330,12 +330,12 @@ static void gfnews_mkcat(GtkWidget *widget, gpointer data)
 														"entry");
 	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
 													  "gfnews");
-	char *name = gtk_entry_get_text(GTK_ENTRY(entry));
+	char *name = gtk_editable_get_text(GTK_EDITABLE(entry));
 
 	hx_news15_mkcat(&the_session.htlc, gfnews->path, name);
 	hx_news15_fldr_list(&the_session.htlc, gfnews);
 
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
 static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
@@ -352,12 +352,12 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Folder..."));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntryLabel, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
@@ -367,16 +367,16 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtk_widget_destroy,
+							  (GCallback) gtkhx_widget_destroy,
 							  dialog);
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_can_default(okBtn, TRUE);
+	/* Phase 4.2: gtk_widget_set_can_default removed */
 	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
-	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_default(okBtn);
+	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
+	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
+	gtk_widget_show(dialog);
+	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
 static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
@@ -393,12 +393,12 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Category..."));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntryLabel, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
@@ -408,16 +408,16 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtk_widget_destroy,
+							  (GCallback) gtkhx_widget_destroy,
 							  dialog);
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_can_default(okBtn, TRUE);
+	/* Phase 4.2: gtk_widget_set_can_default removed */
 	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
-	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_default(okBtn);
+	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
+	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
+	gtk_widget_show(dialog);
+	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
 static void gfnews_delete_btn(GtkWidget *btn, struct gnews_folder *gfnews)
@@ -550,7 +550,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	strcpy(gfnews->path_list->path, gfnews->path);
 	gfnews->path_list->prev = NULL;
 
-	news_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	news_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
@@ -560,7 +560,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	g_signal_connect(news_window, "delete_event",
 					   G_CALLBACK(destroy_gfnews_browser), 0);
 
-	news_scroll = gtk_scrolled_window_new(0, 0);
+	news_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(news_scroll), 
 								   GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
@@ -586,7 +586,6 @@ struct gnews_folder *create_gfnews_window(char *path)
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -596,7 +595,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_tooltip_text(parentbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(parentbtn), pix);
+	gtkhx_widget_set_child(parentbtn, pix);
 	gtk_widget_set_sensitive(parentbtn, gtkhx_prefs.news_samewin);
 	gfnews->up_btn = parentbtn;
 	pix = 0, icon = 0, mask = 0;
@@ -607,7 +606,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
+	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	deletebtn =  gtk_button_new();
@@ -617,7 +616,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(deletebtn), pix);
+	gtkhx_widget_set_child(deletebtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	mkdirbtn =  gtk_button_new();
@@ -627,7 +626,7 @@ struct gnews_folder *create_gfnews_window(char *path)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newsfld.xpm", NULL);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(mkdirbtn), pix);
+	gtkhx_widget_set_child(mkdirbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	mkcatbtn =  gtk_button_new();
@@ -637,27 +636,27 @@ struct gnews_folder *create_gfnews_window(char *path)
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newscat.xpm", NULL);
 
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(mkcatbtn), pix);
+	gtkhx_widget_set_child(mkcatbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), parentbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), reloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), mkdirbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), mkcatbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), deletebtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, parentbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, reloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, mkdirbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, mkcatbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, deletebtn, 0, 0, 2);
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 400);
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
-	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
-	gtk_container_add(GTK_CONTAINER(news_scroll), news_list);
-	gtk_box_pack_start(GTK_BOX(vbox), news_scroll, 1, 1, 0);
-	gtk_container_add(GTK_CONTAINER(news_window), vbox);
+	gtkhx_widget_set_child(topframe, hbuttonbox);
+	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
+	gtkhx_widget_set_child(news_scroll, news_list);
+	gtkhx_box_pack(vbox, news_scroll, 1, 1, 0);
+	gtkhx_widget_set_child(news_window, vbox);
 
 	gfnews->window = news_window;
 	gfnews->news_list = news_list;
 
-	gtk_widget_show_all(news_window);
+	gtk_widget_show(news_window);
 	init_keyaccel(news_window);
 
 	gfnews_list = gfnews;
@@ -771,7 +770,7 @@ static void destroy_gcnews_browser(GtkWidget *widget, gpointer data)
 													   "gcnews");
 
 	delete_gcnews(gcnews);
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 }
 
 /* Phase 2.8: now the GtkTreeView "cursor-changed" handler. */
@@ -791,19 +790,19 @@ void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *subject = g_object_get_data(G_OBJECT(btn), "subject");
 	GtkWidget *window = g_object_get_data(G_OBJECT(btn), "window");
 	char *textbuf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
-	guint32 postid = atoi(gtk_entry_get_text(GTK_ENTRY(reply)));
-	char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
+	guint32 postid = atoi(gtk_editable_get_text(GTK_EDITABLE(reply)));
+	char *subjectbuf = gtk_editable_get_text(GTK_EDITABLE(subject));
 
 	
 	hx_news15_post_thread(&the_session.htlc, gcnews->path, subjectbuf,
 						  postid, textbuf);
 	hx_news15_cat_list(&the_session.htlc, gcnews);
-	gtk_widget_destroy(window);
+	gtkhx_widget_destroy(window);
 }
 
 void news15_cancel_post(GtkWidget *btn, GtkWidget *window)
 {
-	gtk_widget_destroy(window);
+	gtkhx_widget_destroy(window);
 }
 
 void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -835,10 +834,10 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 
 	item = gcnews_selected_item(gcnews);
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	window = gtk_window_new();
 	gtk_widget_set_size_request(window, 320, 250);
 	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
-    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
+    (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	table = gtkhx_grid_new_table(3, 2, 0);
@@ -848,7 +847,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	if(item) {
 		char *buf = g_strdup_printf("%d", item->postid);
 		
-		gtk_entry_set_text(GTK_ENTRY(inreplyto), buf);
+		gtk_editable_set_text(GTK_EDITABLE(inreplyto), buf);
 		g_free(buf);
 	}
 
@@ -861,11 +860,11 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	if(item) {
 		if(strncasecmp(item->subject, "re:", 3)) {
 			char *buf = g_strdup_printf("Re: %s", item->subject);
-			gtk_entry_set_text(GTK_ENTRY(subject), buf);
+			gtk_editable_set_text(GTK_EDITABLE(subject), buf);
 			g_free(buf);
 		}
 		else {
-			gtk_entry_set_text(GTK_ENTRY(subject), item->subject);
+			gtk_editable_set_text(GTK_EDITABLE(subject), item->subject);
 		}
 	}
 
@@ -881,15 +880,15 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), TRUE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD);
 	{
-		GtkWidget *text_scroll = gtk_scrolled_window_new(NULL, NULL);
+		GtkWidget *text_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(text_scroll),
 		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-		gtk_container_add(GTK_CONTAINER(text_scroll), text);
-		gtk_box_pack_start(GTK_BOX(hbox), text_scroll, 1, 1, 0);
+		gtkhx_widget_set_child(text_scroll, text);
+		gtkhx_box_pack(hbox, text_scroll, 1, 1, 0);
 	}
 
-	gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 10);
+	gtkhx_box_pack(vbox, table, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 10);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -904,14 +903,14 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
 					   window);
 
-	gtk_box_pack_start(GTK_BOX(hbox), post, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), cancel, 0, 0, 0);
+	gtkhx_box_pack(hbox, post, 0, 0, 0);
+	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 
-	gtk_container_add(GTK_CONTAINER(window), vbox);
+	gtkhx_widget_set_child(window, vbox);
 	init_keyaccel(window);
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 }
 
 void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -922,7 +921,7 @@ void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkTextBuffer *tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text));
 	GtkTextIter tstart, tend;
 	char *textbuf;
-	const char *subjectbuf = gtk_entry_get_text(GTK_ENTRY(subject));
+	const char *subjectbuf = gtk_editable_get_text(GTK_EDITABLE(subject));
 
 	gtk_text_buffer_get_start_iter(tbuf, &tstart);
 	gtk_text_buffer_get_end_iter(tbuf, &tend);
@@ -933,7 +932,7 @@ void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_free(textbuf);
 
 	hx_news15_cat_list(&the_session.htlc, gcnews);
-	gtk_widget_destroy(window);
+	gtkhx_widget_destroy(window);
 }
 
 void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -948,10 +947,10 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *hbox, *vbox;
 	GtkWidget *table;
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	window = gtk_window_new();
 	gtk_widget_set_size_request(window, 320, 250);
 	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
-    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
+    (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	table = gtkhx_grid_new_table(2, 2, 0);
@@ -971,15 +970,15 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), TRUE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD);
 	{
-		GtkWidget *post_scroll = gtk_scrolled_window_new(NULL, NULL);
+		GtkWidget *post_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(post_scroll),
 		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-		gtk_container_add(GTK_CONTAINER(post_scroll), text);
-		gtk_box_pack_start(GTK_BOX(hbox), post_scroll, 1, 1, 0);
+		gtkhx_widget_set_child(post_scroll, text);
+		gtkhx_box_pack(hbox, post_scroll, 1, 1, 0);
 	}
 
-	gtk_box_pack_start(GTK_BOX(vbox), table, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 10);
+	gtkhx_box_pack(vbox, table, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 10);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -993,14 +992,14 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
 					   window);
 
-	gtk_box_pack_start(GTK_BOX(hbox), post, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), cancel, 0, 0, 0);
+	gtkhx_box_pack(hbox, post, 0, 0, 0);
+	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
 
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 
-	gtk_container_add(GTK_CONTAINER(window), vbox);
+	gtkhx_widget_set_child(window, vbox);
 	init_keyaccel(window);
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 }
 
 static void gcnews_reload_btn(GtkWidget *btn, struct gnews_catalog *gcnews)
@@ -1049,7 +1048,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 		gcnews_list->next = gcnews;
 	}
 
-	news_window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
+	news_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_widget_set_size_request(news_window, 570, 375);
@@ -1059,20 +1058,19 @@ struct gnews_catalog *create_gcnews_window (char *path)
 					   G_CALLBACK(destroy_gcnews_browser), 0);
 
 	hpaned1 = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_container_add (GTK_CONTAINER (news_window), hpaned1);
-	gtk_container_set_border_width (GTK_CONTAINER (hpaned1), 4);
+	gtkhx_widget_set_child(news_window, hpaned1);
+	(gtk_widget_set_margin_start(hpaned1, 4), gtk_widget_set_margin_end(hpaned1, 4), gtk_widget_set_margin_top(hpaned1, 4), gtk_widget_set_margin_bottom(hpaned1, 4));
 	gtk_paned_set_position (GTK_PANED (hpaned1), 285);
 	
 	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_paned_pack1 (GTK_PANED (hpaned1), vbox1, FALSE, TRUE);
+	gtk_paned_set_start_child(GTK_PANED(hpaned1), vbox1);
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
-	gtk_box_pack_start(GTK_BOX(vbox1), topframe, 0, 0, 0);
+	gtkhx_box_pack(vbox1, topframe, 0, 0, 0);
 	
 	hbuttonbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox1);
+	gtkhx_widget_set_child(topframe, hbuttonbox1);
 	
 	reloadbtn =  gtk_button_new();
 	g_signal_connect(reloadbtn, "clicked",
@@ -1080,7 +1078,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
+	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	postbtn =  gtk_button_new();
@@ -1089,7 +1087,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_widget_set_tooltip_text(postbtn, _("Post Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(postbtn), pix);
+	gtkhx_widget_set_child(postbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 	
 	replybtn = gtk_button_new_with_label ("[ R ]");
@@ -1104,24 +1102,24 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_widget_set_tooltip_text(deletebtn, _("Delete Thread"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(deletebtn), pix);
+	gtkhx_widget_set_child(deletebtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
-	gtk_box_pack_start(GTK_BOX(hbuttonbox1), reloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox1), postbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox1), replybtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox1), deletebtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox1, reloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox1, postbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox1, replybtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox1, deletebtn, 0, 0, 2);
 
 	/* Phase 3.9: dropped a GtkAlignment(0.5, 0.5, 1, 1) wrapper around
 	 * the scrolled window. The xscale/yscale=1 made it expand to fill,
 	 * which is what gtk_box_pack_start(TRUE, TRUE) already provides;
 	 * GtkAlignment is gone in GTK 4 anyway. */
-	scrolledwindow2 = gtk_scrolled_window_new (NULL, NULL);
-	gtk_box_pack_start (GTK_BOX (vbox1), scrolledwindow2, TRUE, TRUE, 0);
+	scrolledwindow2 = gtk_scrolled_window_new();
+	gtkhx_box_pack(vbox1, scrolledwindow2, TRUE, TRUE, 0);
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow2), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
 	viewport1 = gtk_viewport_new (NULL, NULL);
-	gtk_container_add (GTK_CONTAINER (scrolledwindow2), viewport1);
+	gtkhx_widget_set_child(scrolledwindow2, viewport1);
 	
 	/* Phase 2.8: GtkTreeView (in tree mode) replaces GtkCTree.
 	 * news_store holds the model; news_tree is the view. */
@@ -1144,33 +1142,33 @@ struct gnews_catalog *create_gcnews_window (char *path)
 		GTK_SELECTION_BROWSE);
 	g_signal_connect(news_tree, "cursor-changed",
 					   G_CALLBACK(newsc_clicked), gcnews);
-	gtk_container_add (GTK_CONTAINER (viewport1), news_tree);
+	gtkhx_widget_set_child(viewport1, news_tree);
 
 	vbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_paned_pack2 (GTK_PANED (hpaned1), vbox2, TRUE, TRUE);
+	gtk_paned_set_end_child(GTK_PANED(hpaned1), vbox2);
 	
 	authorlbl = gtk_label_new (_("Author: "));
 	gtk_label_set_justify(GTK_LABEL(authorlbl), GTK_JUSTIFY_LEFT);
-	gtk_box_pack_start (GTK_BOX (vbox2), authorlbl, 0, 1, 0);
+	gtkhx_box_pack(vbox2, authorlbl, 0, 1, 0);
 	
 	datelbl = gtk_label_new (_("Date: "));
 	gtk_label_set_justify(GTK_LABEL(datelbl), GTK_JUSTIFY_LEFT);
-	gtk_box_pack_start (GTK_BOX (vbox2), datelbl, 0, 1, 0);
+	gtkhx_box_pack(vbox2, datelbl, 0, 1, 0);
 	
 	subjectlbl = gtk_label_new (_("Subject: "));
 	gtk_label_set_justify(GTK_LABEL(subjectlbl), GTK_JUSTIFY_LEFT);
-	gtk_box_pack_start (GTK_BOX (vbox2), subjectlbl, 0, 1, 0);
+	gtkhx_box_pack(vbox2, subjectlbl, 0, 1, 0);
 	
-	scrolledwindow1 = gtk_scrolled_window_new (NULL, NULL);
-	gtk_box_pack_start (GTK_BOX (vbox2), scrolledwindow1, TRUE, TRUE, 0);
+	scrolledwindow1 = gtk_scrolled_window_new();
+	gtkhx_box_pack(vbox2, scrolledwindow1, TRUE, TRUE, 0);
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow1), GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 	
 	news_text = gtk_text_view_new ();
 	gtk_text_view_set_editable (GTK_TEXT_VIEW (news_text), FALSE);
 	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (news_text), FALSE);
 	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (news_text), GTK_WRAP_WORD);
-	gtk_container_add (GTK_CONTAINER (scrolledwindow1), news_text);
-	gtk_widget_show_all(news_window);
+	gtkhx_widget_set_child(scrolledwindow1, news_text);
+	gtk_widget_show(news_window);
 
 	gcnews->window = news_window;
 	gcnews->news_tree = news_tree;

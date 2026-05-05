@@ -194,7 +194,7 @@ void close_connected_windows(session *sess)
 	struct gtkhx_chat *gchat, *prev = NULL;
 
 	if(sess->agreementwin) {
-		gtk_widget_destroy(sess->agreementwin);
+		gtkhx_widget_destroy(sess->agreementwin);
 		sess->agreementwin = NULL;
 	}
 	destroy_gfl_list();
@@ -203,7 +203,7 @@ void close_connected_windows(session *sess)
 	for(gchat = sess->gchat_list; gchat; gchat = prev) {
 		prev = gchat->prev;
 		if(gchat->cid) {
-			gtk_widget_destroy(gchat->window);
+			gtkhx_widget_destroy(gchat->window);
 			gchat_delete(sess, gchat);
 		}
 	}
@@ -243,7 +243,7 @@ void error_dialog (char *title, char *msg)
     dialog = gtk_dialog_new();
 
     gtk_window_set_title(GTK_WINDOW(dialog), title);
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
     label = gtk_label_new (message);
     gtk_widget_set_size_request(dialog, 250, 200);
 
@@ -253,18 +253,18 @@ void error_dialog (char *title, char *msg)
     okbutton = gtk_button_new_with_label ("Ok");
 
     g_signal_connect_swapped (okbutton, "clicked", 
-							   (GCallback)gtk_widget_destroy, 
+							   (GCallback)gtkhx_widget_destroy, 
 							   dialog);
 
-    gtk_widget_set_can_default(okbutton, TRUE);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
 
     gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 
 						TRUE, TRUE, 0);
 
 
-    gtk_widget_grab_default (okbutton);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
-    gtk_widget_show_all (dialog);
+    gtk_widget_show(dialog);
 	g_free(message);
 }
 
@@ -326,4 +326,120 @@ gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
 	gtk_widget_set_halign  (child, GTK_ALIGN_FILL);
 	gtk_widget_set_valign  (child, GTK_ALIGN_FILL);
 	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+}
+
+/* Phase 4.2: GtkContainer is gone — dispatch on parent type to the
+ * right child setter. Box gets append (call sites that want
+ * gtk_box_pack_start semantics should use gtkhx_box_pack instead;
+ * this helper covers the simple "put one child in a parent" case
+ * gtk_container_add was usually doing). */
+void
+gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child)
+{
+	if (!parent || !child)
+		return;
+
+	if (GTK_IS_WINDOW (parent))
+		gtk_window_set_child (GTK_WINDOW (parent), child);
+	else if (GTK_IS_SCROLLED_WINDOW (parent))
+		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), child);
+	else if (GTK_IS_FRAME (parent))
+		gtk_frame_set_child (GTK_FRAME (parent), child);
+	else if (GTK_IS_BUTTON (parent))
+		gtk_button_set_child (GTK_BUTTON (parent), child);
+	else if (GTK_IS_BOX (parent))
+		gtk_box_append (GTK_BOX (parent), child);
+	else if (GTK_IS_VIEWPORT (parent))
+		gtk_viewport_set_child (GTK_VIEWPORT (parent), child);
+	else if (GTK_IS_POPOVER (parent))
+		gtk_popover_set_child (GTK_POPOVER (parent), child);
+	else if (GTK_IS_LIST_BOX_ROW (parent))
+		gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (parent), child);
+	else if (GTK_IS_LIST_BOX (parent))
+		gtk_list_box_append (GTK_LIST_BOX (parent), child);
+	else
+		g_warning ("gtkhx_widget_set_child: unhandled parent type %s",
+		           G_OBJECT_TYPE_NAME (parent));
+}
+
+static void
+gtkhx_box_pack_apply (GtkWidget *child, GtkOrientation orient,
+                      gboolean expand, gboolean fill, guint padding)
+{
+	gboolean horiz = (orient == GTK_ORIENTATION_HORIZONTAL);
+
+	if (expand) {
+		if (horiz) gtk_widget_set_hexpand (child, TRUE);
+		else       gtk_widget_set_vexpand (child, TRUE);
+	}
+	if (fill) {
+		if (horiz) gtk_widget_set_halign (child, GTK_ALIGN_FILL);
+		else       gtk_widget_set_valign (child, GTK_ALIGN_FILL);
+	}
+	if (padding) {
+		if (horiz) {
+			gtk_widget_set_margin_start (child, padding);
+			gtk_widget_set_margin_end   (child, padding);
+		} else {
+			gtk_widget_set_margin_top    (child, padding);
+			gtk_widget_set_margin_bottom (child, padding);
+		}
+	}
+}
+
+void
+gtkhx_box_pack (GtkWidget *box, GtkWidget *child,
+                gboolean expand, gboolean fill, guint padding)
+{
+	if (!box || !child)
+		return;
+	g_return_if_fail (GTK_IS_BOX (box));
+	gtkhx_box_pack_apply (child, gtk_orientable_get_orientation (GTK_ORIENTABLE (box)),
+	                      expand, fill, padding);
+	gtk_box_append (GTK_BOX (box), child);
+}
+
+void
+gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
+                    gboolean expand, gboolean fill, guint padding)
+{
+	GtkOrientation orient;
+
+	if (!box || !child)
+		return;
+	g_return_if_fail (GTK_IS_BOX (box));
+	orient = gtk_orientable_get_orientation (GTK_ORIENTABLE (box));
+	gtkhx_box_pack_apply (child, orient, expand, fill, padding);
+	/* Push toward the trailing edge to mimic gtk_box_pack_end. */
+	if (orient == GTK_ORIENTATION_HORIZONTAL)
+		gtk_widget_set_halign (child, GTK_ALIGN_END);
+	else
+		gtk_widget_set_valign (child, GTK_ALIGN_END);
+	gtk_box_append (GTK_BOX (box), child);
+}
+
+/* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
+ * gtk_window_destroy which tears down the surface and drops refs.
+ * Non-toplevels: if the widget has a parent, unparent it (the
+ * parent drops its ref); if floating, sink + unref. */
+void
+gtkhx_widget_destroy (GtkWidget *widget)
+{
+	GtkWidget *parent;
+
+	if (!widget)
+		return;
+	if (GTK_IS_WINDOW (widget)) {
+		gtk_window_destroy (GTK_WINDOW (widget));
+		return;
+	}
+	parent = gtk_widget_get_parent (widget);
+	if (parent) {
+		gtk_widget_unparent (widget);
+	} else if (g_object_is_floating (widget)) {
+		g_object_ref_sink (widget);
+		g_object_unref (widget);
+	} else {
+		g_object_unref (widget);
+	}
 }

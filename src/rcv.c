@@ -1225,7 +1225,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			memcpy(chat->subject, dh->data, slen);
 			chat->subject[slen] = 0;
 			if(gchat && gchat->subject) {
-				gtk_entry_set_text(GTK_ENTRY(gchat->subject), chat->subject);
+				gtk_editable_set_text(GTK_EDITABLE(gchat->subject), chat->subject);
 			}
 		}
 	} dh_end();

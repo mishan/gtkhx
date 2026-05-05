@@ -110,7 +110,7 @@ void create_toolbar_window (session *sess)
 	GdkPixmap *icon;
 	GtkWidget *vbox;
 
-	toolbar_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	toolbar_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(toolbar_window), "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(toolbar_window), FALSE);
 	g_signal_connect(toolbar_window, "delete_event",
@@ -129,7 +129,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_connect_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (connect_btn), pix);
+    gtkhx_widget_set_child(connect_btn, pix);
 	gtk_widget_set_tooltip_text(connect_btn, _("Connect"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -138,7 +138,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_tracker_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/tracker.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (tracker_btn), pix);
+    gtkhx_widget_set_child(tracker_btn, pix);
 	gtk_widget_set_tooltip_text(tracker_btn, _("Tracker"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -147,7 +147,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_options_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/options.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (options_btn), pix);
+    gtkhx_widget_set_child(options_btn, pix);
 	gtk_widget_set_tooltip_text(options_btn, _("Options"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -156,7 +156,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(open_news), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/news.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(news_btn), pix);
+	gtkhx_widget_set_child(news_btn, pix);
 	gtk_widget_set_tooltip_text(news_btn, _("News"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -165,7 +165,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(open_news15), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newscat.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(news15_btn), pix);
+	gtkhx_widget_set_child(news15_btn, pix);
 	gtk_widget_set_tooltip_text(news15_btn, _("News (1.5+)"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -174,7 +174,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(open_files), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/files.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(files_btn), pix);
+	gtkhx_widget_set_child(files_btn, pix);
 	gtk_widget_set_tooltip_text(files_btn, _("Files"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -183,7 +183,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_users_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/users.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(userlist_btn), pix);
+	gtkhx_widget_set_child(userlist_btn, pix);
 	gtk_widget_set_tooltip_text(userlist_btn, _("Users"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -192,7 +192,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_chat_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(chat_btn), pix);
+	gtkhx_widget_set_child(chat_btn, pix);
 	gtk_widget_set_tooltip_text(chat_btn, _("Chat"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -201,7 +201,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_post_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(post_btn), pix);
+	gtkhx_widget_set_child(post_btn, pix);
 	gtk_widget_set_tooltip_text(post_btn, _("Post"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -210,7 +210,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_tasks_window), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/tasks.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (tasks_btn), pix);
+    gtkhx_widget_set_child(tasks_btn, pix);
 	gtk_widget_set_tooltip_text(tasks_btn, _("Tasks"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -219,7 +219,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_about_window), 0);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(about_btn), pix);
+	gtkhx_widget_set_child(about_btn, pix);
 	gtk_widget_set_tooltip_text(about_btn, _("About"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -228,7 +228,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(disconnect_clicked), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (disconnect_btn),  pix);
+    gtkhx_widget_set_child(disconnect_btn, pix);
 	gtk_widget_set_tooltip_text(disconnect_btn, _("Disconnect"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -237,7 +237,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(hx_quit), 0);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/quit.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER(quit_btn), pix);
+    gtkhx_widget_set_child(quit_btn, pix);
 	gtk_widget_set_tooltip_text(quit_btn, _("Quit"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -247,7 +247,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(create_new_user), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newuser.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (usernew_btn),  pix);
+    gtkhx_widget_set_child(usernew_btn, pix);
 	gtk_widget_set_tooltip_text(usernew_btn, _("New User"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -256,7 +256,7 @@ void create_toolbar_window (session *sess)
 					   G_CALLBACK(useredit_open_dialog), sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/edituser.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-    gtk_container_add (GTK_CONTAINER (usermod_btn),  pix);
+    gtkhx_widget_set_child(usermod_btn, pix);
 	gtk_widget_set_tooltip_text(usermod_btn, _("Edit User"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -269,29 +269,29 @@ void create_toolbar_window (session *sess)
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-	gtk_container_set_border_width(GTK_CONTAINER(hbox), 2);
-	gtk_container_add(GTK_CONTAINER(toolbar_window), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), connect_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), disconnect_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), tracker_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), options_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), news_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), post_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), news15_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), files_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), userlist_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), chat_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), tasks_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), usernew_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), usermod_btn, 0, 0, 0);
+	(gtk_widget_set_margin_start(hbox, 2), gtk_widget_set_margin_end(hbox, 2), gtk_widget_set_margin_top(hbox, 2), gtk_widget_set_margin_bottom(hbox, 2));
+	gtkhx_widget_set_child(toolbar_window, vbox);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
+	gtkhx_box_pack(hbox, connect_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, disconnect_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, tracker_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, options_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, news_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, post_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, news15_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, files_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, userlist_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, chat_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, tasks_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, usernew_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, usermod_btn, 0, 0, 0);
 #ifdef USE_PLUGIN
-	gtk_box_pack_start(GTK_BOX(hbox), plugin_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, plugin_btn, 0, 0, 0);
 
 #endif
-	gtk_box_pack_start(GTK_BOX(hbox), about_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), quit_btn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), status_bar, 0, 0, 0);
+	gtkhx_box_pack(hbox, about_btn, 0, 0, 0);
+	gtkhx_box_pack(hbox, quit_btn, 0, 0, 0);
+	gtkhx_box_pack(vbox, status_bar, 0, 0, 0);
 
 	gtk_widget_set_sensitive(disconnect_btn, FALSE);
 	gtk_widget_set_sensitive(files_btn, FALSE);
@@ -314,7 +314,7 @@ void create_toolbar_window (session *sess)
 
 	gtk_window_move(GTK_WINDOW(toolbar_window), gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
 
-	gtk_widget_show_all(toolbar_window);
+	gtk_widget_show(toolbar_window);
 	init_keyaccel(toolbar_window);
 
 	if(connected) {

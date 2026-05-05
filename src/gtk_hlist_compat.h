@@ -79,7 +79,7 @@ struct _GtkHellText
 struct _GtkHListRow
 {
 	GtkHellText **cell;           /* cell[col] — text only; pixmaps NULL */
-	GtkStateType state;
+	int          state;           /* Phase 4.2: was GtkStateType (gone in GTK 4) */
 	GdkRGBA      foreground;      /* Phase 3.10 */
 	GdkRGBA      background;      /* Phase 3.10 */
 	gpointer     style;           /* unused — was GtkStyle * */
@@ -125,8 +125,27 @@ GtkWidget *gtk_hlist_new                 (gint        columns);
 GtkWidget *gtk_hlist_new_with_titles     (gint        columns,
                                           gchar      *titles[]);
 
+/* Phase 4.2: was GtkShadowType — gone in GTK 4. The implementation
+ * is a no-op anyway (the framing belongs to the enclosing
+ * GtkScrolledWindow), so the parameter is just `int' now and the
+ * GTK_SHADOW_* compat values below let call sites stay unchanged. */
 void       gtk_hlist_set_shadow_type     (GtkHList   *hlist,
-                                          GtkShadowType type);
+                                          int         type);
+
+/* Phase 4.2: GTK_SHADOW_* enum is gone in GTK 4. The values are
+ * never read (set_shadow_type is a no-op) — the defines exist so
+ * gtk_hlist_set_shadow_type(GTK_HLIST(w), GTK_SHADOW_NONE) compiles
+ * unchanged. */
+#ifndef GTK_SHADOW_NONE
+typedef enum {
+	GTK_SHADOW_NONE = 0,
+	GTK_SHADOW_IN   = 1,
+	GTK_SHADOW_OUT  = 2,
+	GTK_SHADOW_ETCHED_IN  = 3,
+	GTK_SHADOW_ETCHED_OUT = 4
+} GtkShadowType;
+#define GTK_SHADOW_NONE  GTK_SHADOW_NONE
+#endif
 void       gtk_hlist_set_selection_mode  (GtkHList   *hlist,
                                           GtkSelectionMode mode);
 

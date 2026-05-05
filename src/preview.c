@@ -54,20 +54,20 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 	GtkWidget *text;
 	GtkWidget *scroll;
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(window), p->name);
 	text = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), FALSE);
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text), FALSE);
-	scroll = gtk_scrolled_window_new(NULL, NULL);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(scroll), text);
+	gtkhx_widget_set_child(scroll, text);
 
 	gtk_widget_set_size_request(window, 400, 300);
-	gtk_container_add(GTK_CONTAINER(window), scroll);
+	gtkhx_widget_set_child(window, scroll);
 
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 
 	tp->window = window;
 	tp->text = text;

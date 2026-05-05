@@ -255,7 +255,7 @@ static void user_msg_menu(GtkWidget *menu, struct hx_user *user)
 		return;
 
 	if((msg = msgwin_with_uid(user->uid))) {
-		gdk_window_raise(gtk_widget_get_window(msg->window));
+		gtk_window_present(GTK_WINDOW(msg->window));
 	}
 	else {
 		create_msgwin(user->uid, user->name);
@@ -376,7 +376,7 @@ void user_clicked (GtkWidget *widget, GdkEventButton *event, gpointer data)
 				struct msgwin *msg = NULL;
 
 				if((msg = msgwin_with_uid(user->uid))) {
-					gdk_window_raise(gtk_widget_get_window(msg->window));
+					gtk_window_present(GTK_WINDOW(msg->window));
 				}
 				else {
 					create_msgwin(user->uid, user->name);
@@ -494,7 +494,7 @@ static void invite_u_to_chat(GtkWidget *widget, gpointer data)
 		gtk_hlist_get_row_data(GTK_HLIST(list), *cid));
 
 	hx_invite_user(&sess->htlc, GPOINTER_TO_INT(data), chat_cid);
-	gtk_widget_destroy(dialog);
+	gtkhx_widget_destroy(dialog);
 	g_free(cid);
 }
 
@@ -508,7 +508,7 @@ static void create_new_chat(GtkWidget *widget, gpointer data)
 
 	g_free(cid);
 	hx_chat_user(&sess->htlc, *uid);
-	gtk_widget_destroy(dialog);
+	gtkhx_widget_destroy(dialog);
 }
 
 void select_cid(GtkWidget *widget, gint row, gint col, GdkEventButton *event,
@@ -536,7 +536,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Private Chat Invitation"));
-	gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+	(gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 
 	invite = gtk_button_new_with_label(_("Invite"));
 	g_object_set_data(G_OBJECT(invite), "cid", cid);
@@ -544,11 +544,11 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_object_set_data(G_OBJECT(invite), "dialog", dialog);
 
 	g_object_set_data(G_OBJECT(invite), "sess", sess);
-	gtk_widget_set_can_default(invite, TRUE);
+	/* Phase 4.2: gtk_widget_set_can_default removed */
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancel, "clicked",
-							  (GCallback)gtk_widget_destroy,
+							  (GCallback)gtkhx_widget_destroy,
 							  dialog);
 
 	new = gtk_button_new_with_label(_("New"));
@@ -561,7 +561,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 
-	scroll = gtk_scrolled_window_new(0, 0);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
@@ -574,7 +574,7 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_signal_connect(list, "select_row",
 					   G_CALLBACK(select_cid), cid);
 
-	gtk_container_add(GTK_CONTAINER(scroll), list);
+	gtkhx_widget_set_child(scroll, list);
 	gtk_widget_set_size_request(list, 350, 200);
 
 	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
@@ -599,11 +599,11 @@ static void prompt_chat(session *sess, guint16 _uid)
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), scroll, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnhbox, 0, 0,
 					   0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), invite, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), new, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnhbox), cancel, 0, 0, 0);
-	gtk_widget_grab_default(invite);
-	gtk_widget_show_all(dialog);
+	gtkhx_box_pack(btnhbox, invite, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, new, 0, 0, 0);
+	gtkhx_box_pack(btnhbox, cancel, 0, 0, 0);
+	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
+	gtk_widget_show(dialog);
 }
 
 
@@ -641,7 +641,7 @@ static void close_users_window (GtkWidget *widget, gpointer data)
 
 	sess->users_window = 0;
 	sess->users_list = 0;
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 	gtkhx_prefs.geo.users.open = 0;
 	gtkhx_prefs.geo.users.init = 0;
 }
@@ -704,11 +704,11 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	titles[1] = _("Name");
 
 	if (gtkhx_prefs.geo.users.open) {
-		gdk_window_raise(gtk_widget_get_window(sess->users_window));
+		gtk_window_present(GTK_WINDOW(sess->users_window));
 		return;
 	}
 
-	users_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	users_window = gtk_window_new();
 	/* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
 	 * pair that left `style' unread. Forcing realize on a toplevel
 	 * before its children are packed is a footgun under GTK 3 Wayland —
@@ -739,17 +739,17 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtkhx_refresh_userlist_css (users_font_desc);
 	gtkhx_apply_userlist_style (users_list);
 
-	users_window_scroll = gtk_scrolled_window_new(0, 0);
+	users_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(users_window_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 	gtk_widget_set_size_request(users_window_scroll, 240, 400);
-	gtk_container_add(GTK_CONTAINER(users_window_scroll), users_list);
+	gtkhx_widget_set_child(users_window_scroll, users_list);
 
 	msgbtn = gtk_button_new();
 	g_object_set_data(G_OBJECT(msgbtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/msg.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(msgbtn), pix);
+	gtkhx_widget_set_child(msgbtn, pix);
 	g_signal_connect(msgbtn, "clicked",
 					   G_CALLBACK(open_message_btn), users_list);
 	gtk_widget_set_tooltip_text(msgbtn, _("Msg"));
@@ -759,7 +759,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_object_set_data(G_OBJECT(kickbtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(kickbtn), pix);
+	gtkhx_widget_set_child(kickbtn, pix);
 	g_signal_connect(kickbtn, "clicked",
 					   G_CALLBACK(user_kick_btn), users_list);
 	gtk_widget_set_tooltip_text(kickbtn, _("Kick"));
@@ -769,7 +769,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	g_object_set_data(G_OBJECT(infobtn), "sess", sess);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(infobtn), pix);
+	gtkhx_widget_set_child(infobtn, pix);
 	g_signal_connect(infobtn, "clicked",
 					   G_CALLBACK(user_info_btn), users_list);
 	gtk_widget_set_tooltip_text(infobtn, _("User Info"));
@@ -781,7 +781,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(user_ban_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ban.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(banbtn), pix);
+	gtkhx_widget_set_child(banbtn, pix);
 	gtk_widget_set_tooltip_text(banbtn, _("Ban"));
 	icon = 0, pix = 0, mask = 0;
 
@@ -792,7 +792,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(user_chat_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
     pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(chatbtn), pix);
+	gtkhx_widget_set_child(chatbtn, pix);
 	icon = 0, pix = 0, mask = 0;
 
 	ignobtn = gtk_button_new();
@@ -802,7 +802,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(user_igno_btn), users_list);
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ignore.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(ignobtn), pix);
+	gtkhx_widget_set_child(ignobtn, pix);
 
 	gtk_widget_set_sensitive(msgbtn, FALSE);
 	gtk_widget_set_sensitive(kickbtn, FALSE);
@@ -815,23 +815,22 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(vbox, 240, 400);
 
 	topframe = gtk_frame_new(0);
-	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
+	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
+	gtkhx_widget_set_child(topframe, hbuttonbox);
 
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), msgbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), chatbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), infobtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), kickbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), banbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), ignobtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, msgbtn, 0, 0, 0);
+	gtkhx_box_pack(hbuttonbox, chatbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, infobtn, 0, 0, 0);
+	gtkhx_box_pack(hbuttonbox, kickbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, banbtn, 0, 0, 0);
+	gtkhx_box_pack(hbuttonbox, ignobtn, 0, 0, 2);
 
-	gtk_box_pack_start(GTK_BOX(vbox), users_window_scroll, 1, 1, 0);
+	gtkhx_box_pack(vbox, users_window_scroll, 1, 1, 0);
 
-	gtk_container_add(GTK_CONTAINER(users_window), vbox);
+	gtkhx_widget_set_child(users_window, vbox);
 
 	init_keyaccel(users_window);
 
@@ -851,7 +850,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 		gtk_window_move(GTK_WINDOW(users_window),
 		                gtkhx_prefs.geo.users.xpos,
 		                gtkhx_prefs.geo.users.ypos);
-	gtk_widget_show_all(users_window);
+	gtk_widget_show(users_window);
 
 	gtkhx_prefs.geo.users.open = 1;
 	gtkhx_prefs.geo.users.init = 1;

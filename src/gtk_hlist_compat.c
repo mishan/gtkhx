@@ -278,12 +278,14 @@ gtk_hlist_new_with_titles (gint columns, gchar *titles[])
 /* ------------------------------------------------------------------ */
 
 void
-gtk_hlist_set_shadow_type (GtkHList *hlist, GtkShadowType type)
+gtk_hlist_set_shadow_type (GtkHList *hlist, int type)
 {
 	(void) hlist; (void) type;
 	/* The legacy widget drew its own shadow; GtkTreeView delegates
 	 * framing to its enclosing GtkScrolledWindow. The consumers
-	 * always wrap us in one, so this is a no-op. */
+	 * always wrap us in one, so this is a no-op. Parameter is `int'
+	 * (was GtkShadowType in pre-GTK4) so the GTK_SHADOW_NONE call
+	 * sites still pass — see compat values in gtk_hlist_compat.h. */
 }
 
 void

@@ -125,7 +125,7 @@ void destroy_gfl_list(void)
 
 	for(gfl = gfile_list; gfl; gfl = prev) {
 		prev = gfl->prev;
-		gtk_widget_destroy(gfl->window);
+		gtkhx_widget_destroy(gfl->window);
 		gfl_delete(gfl);
 	}
 	gfile_list = 0;
@@ -233,7 +233,7 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 		}
 		g_free(lpath);
 	}
-	gtk_widget_destroy(GTK_WIDGET(dialog));
+	gtkhx_widget_destroy(GTK_WIDGET(dialog));
 }
 
 static void get_put_data (GtkWidget *widget, gpointer data)
@@ -247,7 +247,7 @@ static void get_put_data (GtkWidget *widget, gpointer data)
 	g_signal_connect(file_dialog, "response",
 					 G_CALLBACK(upload_file_response), data);
 
-	gtk_widget_show_all(file_dialog);
+	gtk_widget_show(file_dialog);
 }
 
 static void file_clicked (GtkWidget *widget, GdkEventButton *event)
@@ -422,7 +422,7 @@ static void close_files_window (GtkWidget *widget, gpointer data)
 		G_OBJECT(widget), "gfl");
 
 	gfl_delete(gfl);
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 }
 
 static void makeDir(GtkWidget *widget, gpointer data)
@@ -435,11 +435,11 @@ static void makeDir(GtkWidget *widget, gpointer data)
 	struct gfile_list *gfl = gfl_with_hlist(files_list);
 
 
-	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_entry_get_text(GTK_ENTRY(entry)));
+	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_editable_get_text(GTK_EDITABLE(entry)));
 	hx_make_dir(&the_session.htlc, pathname);
 	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 
-	gtk_widget_destroy(GTK_WIDGET(data));
+	gtkhx_widget_destroy(GTK_WIDGET(data));
 }
 
 static void makeDirDialog(GtkWidget *widget, gpointer data)
@@ -456,12 +456,12 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
-    gtk_container_set_border_width (GTK_CONTAINER(dialog), 5);
+    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntryLabel, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(entryHbox), nameEntry, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
+	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
 
 	okBtn = gtk_button_new_with_label(_("OK"));
 	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
@@ -471,16 +471,16 @@ static void makeDirDialog(GtkWidget *widget, gpointer data)
 
 	cancelBtn = gtk_button_new_with_label(_("Cancel"));
 	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtk_widget_destroy,
+							  (GCallback) gtkhx_widget_destroy,
 							  dialog);
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_can_default(okBtn, TRUE);
+	/* Phase 4.2: gtk_widget_set_can_default removed */
 	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
-	gtk_box_pack_start(GTK_BOX(btnHbox), okBtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(btnHbox), cancelBtn, 0, 0, 0);
-	gtk_widget_show_all(dialog);
-	gtk_widget_grab_default(okBtn);
+	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
+	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
+	gtk_widget_show(dialog);
+	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 }
 
 static GtkTargetEntry files_drag[] =
@@ -574,7 +574,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_drag_dest_set(files_list, GTK_DEST_DEFAULT_ALL, files_drag, 1,
 					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
 
-	files_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	files_window = gtk_window_new();
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
@@ -586,13 +586,12 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(files_window, "delete_event",
 			   G_CALLBACK(close_files_window), files_list);
 
-	files_window_scroll = gtk_scrolled_window_new(0, 0);
+	files_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(files_window_scroll),
 								   GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
 	topframe = gtk_frame_new(0);
 	gtk_widget_set_size_request(topframe, -1, 30);
-	gtk_frame_set_shadow_type(GTK_FRAME(topframe), GTK_SHADOW_OUT);
 
 	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -603,7 +602,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_tooltip_text(upbtn, _("Parent Directory"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(upbtn), pix);
+	gtkhx_widget_set_child(upbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	reloadbtn =  gtk_button_new();
@@ -612,7 +611,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(reloadbtn), pix);
+	gtkhx_widget_set_child(reloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	downloadbtn = gtk_button_new();
@@ -621,7 +620,7 @@ static struct gfile_list *create_files_window (char *path)
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
 	g_signal_connect(downloadbtn, "clicked",
 					   G_CALLBACK(file_dl_btn), files_list);
-	gtk_container_add(GTK_CONTAINER(downloadbtn), pix);
+	gtkhx_widget_set_child(downloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	prebtn = gtk_button_new_with_label("[ P ]");
@@ -635,14 +634,14 @@ static struct gfile_list *create_files_window (char *path)
 	g_signal_connect(uploadbtn, "clicked",
 					   G_CALLBACK(get_put_data), files_list);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(uploadbtn), pix);
+	gtkhx_widget_set_child(uploadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
 	crtfldbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(crtfldbtn, _("New Folder"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/mkdir.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(crtfldbtn), pix);
+	gtkhx_widget_set_child(crtfldbtn, pix);
 	g_signal_connect(crtfldbtn, "clicked",
 					   G_CALLBACK(makeDirDialog), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -651,7 +650,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_tooltip_text(filinfobtn, _("Info"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(filinfobtn), pix);
+	gtkhx_widget_set_child(filinfobtn, pix);
 	g_signal_connect(filinfobtn, "clicked",
 					   G_CALLBACK(get_file_info), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -660,7 +659,7 @@ static struct gfile_list *create_files_window (char *path)
 	gtk_widget_set_tooltip_text(delbtn, _("Delete"));
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtk_container_add(GTK_CONTAINER(delbtn), pix);
+	gtkhx_widget_set_child(delbtn, pix);
 	g_signal_connect(delbtn, "clicked",
 					   G_CALLBACK(delete_file), files_list);
 	pix = 0, icon = 0, mask = 0;
@@ -668,22 +667,22 @@ static struct gfile_list *create_files_window (char *path)
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 240, 400);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), upbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), reloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), downloadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), uploadbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), crtfldbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), filinfobtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), delbtn, 0, 0, 2);
-	gtk_box_pack_start(GTK_BOX(hbuttonbox), prebtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, upbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, reloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, downloadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, uploadbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, crtfldbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, filinfobtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, delbtn, 0, 0, 2);
+	gtkhx_box_pack(hbuttonbox, prebtn, 0, 0, 2);
 
-	gtk_container_add(GTK_CONTAINER(topframe), hbuttonbox);
-	gtk_box_pack_start(GTK_BOX(vbox), topframe, 0, 0, 0);
-	gtk_container_add(GTK_CONTAINER(files_window_scroll), files_list);
-	gtk_box_pack_start(GTK_BOX(vbox), files_window_scroll, 1, 1, 0);
-	gtk_container_add(GTK_CONTAINER(files_window), vbox);
+	gtkhx_widget_set_child(topframe, hbuttonbox);
+	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
+	gtkhx_widget_set_child(files_window_scroll, files_list);
+	gtkhx_box_pack(vbox, files_window_scroll, 1, 1, 0);
+	gtkhx_widget_set_child(files_window, vbox);
 
-	gtk_widget_show_all(files_window);
+	gtk_widget_show(files_window);
 	init_keyaccel(files_window);
 
 	gfl->cfl = NULL;
@@ -1024,7 +1023,7 @@ void set_name_comment(GtkWidget *btn, gpointer data)
 	GtkWidget *name_entry = g_object_get_data(G_OBJECT(btn), "name");
 	GtkWidget *comments_text = g_object_get_data(G_OBJECT(btn), "comments");
 	char *path = g_object_get_data(G_OBJECT(btn), "path");
-	char *name = gtk_entry_get_text(GTK_ENTRY(name_entry));
+	char *name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
 	char *comments = gtk_editable_get_chars(GTK_EDITABLE(comments_text), 0, -1);
 	char *file;
 
@@ -1072,10 +1071,10 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	GtkWidget *savebtn;
 	char *text;
 
-	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_container_set_border_width (GTK_CONTAINER(window), 5);
+	window = gtk_window_new();
+    (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
 	g_signal_connect(window, "delete_event",
-					   (GCallback) gtk_widget_destroy, window);
+					   (GCallback) gtkhx_widget_destroy, window);
 	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
 
 	name_entry = gtk_entry_new();
@@ -1096,7 +1095,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	text = g_strdup_printf("%s: %u", _("Size"), size);
 	size_label = gtk_label_new(text);
 	name_label = gtk_label_new(_("Name: "));
-	gtk_entry_set_text(GTK_ENTRY(name_entry), name);
+	gtk_editable_set_text(GTK_EDITABLE(name_entry), name);
 	{
 		GtkTextBuffer *cbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(comments_text));
 		gtk_text_buffer_set_text(cbuf, comments, strlen(comments));
@@ -1104,17 +1103,17 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(comments_text), TRUE);
 	g_free(text);
 
-	gtk_container_add(GTK_CONTAINER(window), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), name_hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(name_hbox), name_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(name_hbox), name_entry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), creator_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), type_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), size_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), created_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), modified_label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), comments_text, 0, 0, 4);
-	gtk_box_pack_start(GTK_BOX(vbox), savebtn, 0, 0, 0);
+	gtkhx_widget_set_child(window, vbox);
+	gtkhx_box_pack(vbox, name_hbox, 0, 0, 0);
+	gtkhx_box_pack(name_hbox, name_label, 0, 0, 0);
+	gtkhx_box_pack(name_hbox, name_entry, 0, 0, 0);
+	gtkhx_box_pack(vbox, creator_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, type_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, size_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, created_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, modified_label, 0, 0, 0);
+	gtkhx_box_pack(vbox, comments_text, 0, 0, 4);
+	gtkhx_box_pack(vbox, savebtn, 0, 0, 0);
 
 	g_object_set_data(G_OBJECT(savebtn), "name", name_entry);
 	g_object_set_data(G_OBJECT(savebtn), "comments", comments_text);
@@ -1124,7 +1123,7 @@ void output_file_info(char *path, char *name, char *creator, char *type,
 
 	g_signal_connect(window, "destroy", G_CALLBACK(close_file_info), path);
 
-	gtk_widget_show_all(window);
+	gtk_widget_show(window);
 	init_keyaccel(window);
 }
 

@@ -206,7 +206,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	
 	msg->history = history_new();
 
-	msg->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	msg->window = gtk_window_new();
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
 		msg->outputbuf = gtk_xtext_new (colors, 0);
@@ -242,7 +242,7 @@ void destroy_msgwin (GtkWidget *widget, gpointer data)
 {
 	struct msgwin *msg = g_object_get_data(G_OBJECT(widget), "msg");
 	msgwin_delete(msg);
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 }
 
 
@@ -262,33 +262,31 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 	gtk_widget_set_size_request(msg->window, 412, 280);
 	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
-	gtk_container_set_border_width(GTK_CONTAINER(msg->window), 0);
+	(gtk_widget_set_margin_start(msg->window, 0), gtk_widget_set_margin_end(msg->window, 0), gtk_widget_set_margin_top(msg->window, 0), gtk_widget_set_margin_bottom(msg->window, 0));
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_size_request(hbox, 500, 400);
 
 	outputframe = gtk_frame_new(0);
-	gtk_frame_set_shadow_type(GTK_FRAME(outputframe), GTK_SHADOW_IN);
-	gtk_container_add(GTK_CONTAINER(outputframe), hbox);
-	gtk_box_pack_start(GTK_BOX(hbox), msg->outputbuf, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), msg->vscroll, 0, 0, 0);
+	gtkhx_widget_set_child(outputframe, hbox);
+	gtkhx_box_pack(hbox, msg->outputbuf, 1, 1, 0);
+	gtkhx_box_pack(hbox, msg->vscroll, 0, 0, 0);
 
 	inputframe = gtk_frame_new(0);
-	gtk_frame_set_shadow_type(GTK_FRAME(inputframe), GTK_SHADOW_IN);
-	gtk_container_add(GTK_CONTAINER(inputframe), msg->inputbuf);
+	gtkhx_widget_set_child(inputframe, msg->inputbuf);
 	gtk_widget_set_size_request(inputframe, 0, 40);
 	gtk_widget_set_size_request(msg->inputbuf, 0, 40);
 
 	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_pack1(GTK_PANED(vpane), outputframe, 0, 1);
-	gtk_paned_pack2(GTK_PANED(vpane), inputframe, 0, 1);
+	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
+	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
 	gtk_paned_set_position(GTK_PANED(vpane), 230);
-	gtk_container_set_border_width(GTK_CONTAINER(vpane), 5);
+	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
 
 
-	gtk_container_add(GTK_CONTAINER(msg->window), vpane);
+	gtkhx_widget_set_child(msg->window, vpane);
 
 
-	gtk_widget_show_all(msg->window);
+	gtk_widget_show(msg->window);
 
 	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
 	g_signal_connect(msg->window, "delete_event", G_CALLBACK(destroy_msgwin), 0);
@@ -353,7 +351,7 @@ void msg_output (char *name, guint16 uid, char *buf)
 void broadcastok(GtkWidget *widget, gpointer data)
 {
 	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
-	gtk_widget_destroy(dialog);
+	gtkhx_widget_destroy(dialog);
 }
 
 void broadcastmsg(char *text)
@@ -368,7 +366,7 @@ void broadcastmsg(char *text)
 
 	dialog = gtk_dialog_new();
 	okbtn = gtk_button_new_with_label(_("OK"));
-    gtk_widget_set_can_default(okbtn, TRUE);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
 
 	textbox = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);
@@ -377,19 +375,19 @@ void broadcastmsg(char *text)
 	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textbox));
 	gtk_text_buffer_set_text(tbuf, text, strlen(text));
 
-	scroll = gtk_scrolled_window_new(NULL, NULL);
+	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(scroll), textbox);
+	gtkhx_widget_set_child(scroll, textbox);
 
 	gtk_widget_set_size_request(dialog, 300, 250);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
     gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), scroll, TRUE, TRUE , 0);
 	gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
-    gtk_widget_grab_default (okbtn);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
 	init_keyaccel(dialog);
-	gtk_widget_show_all(dialog);
+	gtk_widget_show(dialog);
 }

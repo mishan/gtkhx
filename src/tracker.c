@@ -83,7 +83,7 @@ static void
 close_tracker_window (GtkWidget *widget, gpointer data)
 {
 	tracker_clear();
-	gtk_widget_destroy(widget);
+	gtkhx_widget_destroy(widget);
 	tracker_window = 0;
 	tracker_list = 0;
 
@@ -215,7 +215,7 @@ void tracker_search  (GtkWidget *widget, gpointer data)
 	current_search = g_malloc(sizeof(struct dfa));
 
 	num_found = 0;
-	str = gtk_entry_get_text(GTK_ENTRY(widget));
+	str = gtk_editable_get_text(GTK_EDITABLE(widget));
 	dfacomp(str, strlen(str), current_search, 1);
 	tracker_clear();
 	gtk_hlist_freeze(GTK_HLIST(tracker_list));
@@ -401,7 +401,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	if (tracker_window)
 		return;
 
-	tracker_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	tracker_window = gtk_window_new();
 	/* Phase 2 cleanup: don't gtk_widget_realize() the toplevel here — it
 	 * trips a GTK_WIDGET_ANCHORED assertion in GTK 2 when called before
 	 * gtk_widget_show*. The legacy code did it to obtain a parent
@@ -436,7 +436,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
-	gtk_container_add(GTK_CONTAINER(refreshbtn), pix);
+	gtkhx_widget_set_child(refreshbtn, pix);
 	pix = 0; pb = 0;
 	g_signal_connect(refreshbtn, "clicked",
 					   G_CALLBACK(tracker_getlist), sess);
@@ -448,31 +448,31 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
 	pix = gtk_image_new_from_pixbuf(pb);
 	if (pb) g_object_unref(pb);
-	gtk_container_add(GTK_CONTAINER(connbtn), pix);
+	gtkhx_widget_set_child(connbtn, pix);
 	pix = 0; pb = 0;
 
-	tracker_window_scroll = gtk_scrolled_window_new(0, 0);
+	tracker_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tracker_window_scroll),
 				       GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 	gtk_widget_set_size_request(tracker_window_scroll, 640, 350);
-	gtk_container_add(GTK_CONTAINER(tracker_window_scroll), tracker_list);
+	gtkhx_widget_set_child(tracker_window_scroll, tracker_list);
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_widget_set_size_request(vbox, 640, 410);
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), refreshbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), connbtn, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), lbl_found, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), lbl_total, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(searchhbox), lbl_search, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(searchhbox), searchentry, 1, 1, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), searchhbox, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), tracker_window_scroll, 1, 1, 0);
-	gtk_container_add(GTK_CONTAINER(tracker_window), vbox);
+	gtkhx_box_pack(hbox, refreshbtn, 0, 0, 0);
+	gtkhx_box_pack(hbox, connbtn, 0, 0, 0);
+	gtkhx_box_pack(hbox, lbl_found, 0, 0, 0);
+	gtkhx_box_pack(hbox, lbl_total, 0, 0, 0);
+	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
+	gtkhx_box_pack(searchhbox, lbl_search, 0, 0, 0);
+	gtkhx_box_pack(searchhbox, searchentry, 1, 1, 0);
+	gtkhx_box_pack(vbox, searchhbox, 0, 0, 0);
+	gtkhx_box_pack(vbox, tracker_window_scroll, 1, 1, 0);
+	gtkhx_widget_set_child(tracker_window, vbox);
 	init_keyaccel(tracker_window);
-	gtk_widget_show_all(tracker_window);
+	gtk_widget_show(tracker_window);
 
 	gtk_widget_grab_focus(searchentry);
 

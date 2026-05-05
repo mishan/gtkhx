@@ -567,7 +567,7 @@ static void fe_init (void)
 	GtkWidget *widg = gtk_button_new();
 
 	generate_colors(widg);
-	gtk_widget_destroy(widg);
+	gtkhx_widget_destroy(widg);
 	init_variables();
 
 	memset(&icon_files, 0, sizeof(icon_files));
@@ -696,7 +696,7 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		GtkTextBuffer *info_buf;
 		char infotitle[45];
 
-		info_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+		info_window = gtk_window_new();
 		gtk_widget_set_size_request(info_window, 260, 250);
 
 		g_snprintf(infotitle, sizeof(infotitle), _("User Info: %s (%u)"), nam, uid);
@@ -708,14 +708,14 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 		info_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(info_text));
 		gtk_text_buffer_set_text(info_buf, info, len);
 
-		info_scroll = gtk_scrolled_window_new(NULL, NULL);
+		info_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(info_scroll),
 		                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-		gtk_container_add(GTK_CONTAINER(info_scroll), info_text);
-		gtk_container_add(GTK_CONTAINER(info_window), info_scroll);
+		gtkhx_widget_set_child(info_scroll, info_text);
+		gtkhx_widget_set_child(info_window, info_scroll);
 
 		init_keyaccel(info_window);
-		gtk_widget_show_all(info_window);
+		gtk_widget_show(info_window);
 	}
 }
 
@@ -729,7 +729,7 @@ static void concurrence(GtkWidget *widget, gpointer data)
 {
 	session *sess  = data;
 
-	gtk_widget_destroy(sess->agreementwin);
+	gtkhx_widget_destroy(sess->agreementwin);
 	sess->agreementwin = 0;
 }
 
@@ -751,7 +751,7 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	GtkWidget *agree_scroll;
 	GtkTextBuffer *agree_buf;
 
-	agreementwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	agreementwin = gtk_window_new();
 	gtk_widget_set_size_request(agreementwin, 400, 500);
 	gtk_window_set_title(GTK_WINDOW(agreementwin), _("Agreement"));
 	agreetext = gtk_text_view_new();
@@ -760,10 +760,10 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(agreetext), GTK_WRAP_WORD);
 	agree_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(agreetext));
 	gtk_text_buffer_set_text(agree_buf, agreement, len);
-	agree_scroll = gtk_scrolled_window_new(NULL, NULL);
+	agree_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(agree_scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_container_add(GTK_CONTAINER(agree_scroll), agreetext);
+	gtkhx_widget_set_child(agree_scroll, agreetext);
 	agreebtn = gtk_button_new_with_label(_("Agree"));
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -772,13 +772,13 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 					   G_CALLBACK(concurrence), sess);
 	g_signal_connect(disagreebtn, "clicked",
 					   G_CALLBACK(disagreement), sess);
-	gtk_container_add(GTK_CONTAINER(agreementwin), vbox);
-	gtk_box_pack_start(GTK_BOX(vbox), agree_scroll, TRUE, TRUE, 0);
-	gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), agreebtn, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(hbox), disagreebtn, FALSE, FALSE, 0);
+	gtkhx_widget_set_child(agreementwin, vbox);
+	gtkhx_box_pack(vbox, agree_scroll, TRUE, TRUE, 0);
+	gtkhx_box_pack(vbox, hbox, FALSE, FALSE, 0);
+	gtkhx_box_pack(hbox, agreebtn, FALSE, FALSE, 0);
+	gtkhx_box_pack(hbox, disagreebtn, FALSE, FALSE, 0);
 	init_keyaccel(agreementwin);
-	gtk_widget_show_all(agreementwin);
+	gtk_widget_show(agreementwin);
 	sess->agreementwin = agreementwin;
 }
 
