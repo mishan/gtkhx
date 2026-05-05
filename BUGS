@@ -1,8 +1,18 @@
 High priority:
 
-- Loading the tracker crashes
-- Connecting with icons.rsrc present in /usr/local/share/gtkhx crashes
-- Chat window does not initially display. It works after closing and reopening it
+- Chat window does not initially display, but it shows up in my window list. It works after closing and reopening it
+- Connecting with icons.rsrc present no longer crashes, but user list icons still do not appear. Warning below:
+
+(gtkhx:61404): GdkPixbuf-CRITICAL **: 16:26:49.949: gdk_pixbuf_calculate_rowstride: assertion 'width > 0' failed
+
+- Tracker works now, but warnings are present:
+
+(gtkhx:59766): Pango-WARNING **: 16:24:31.313: Invalid UTF-8 string passed to pango_layout_set_text()
+
+- Window position saving no longer works
+- On exit, a glib warning is emitted:
+
+(gtkhx:59766): GLib-CRITICAL **: 16:28:26.308: Source ID 4294967295 was not found when attempting to remove it
 
 Low priority:
 

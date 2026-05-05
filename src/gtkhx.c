@@ -594,9 +594,28 @@ static void fe_init (void)
 static void
 gtkhx_activate (GtkApplication *app, gpointer user_data)
 {
+	GList *toplevels, *l;
+
 	(void) user_data;
-	if (toolbar_window)
-		gtk_application_add_window (app, GTK_WINDOW (toolbar_window));
+
+	/* fe_init() ran before g_application_run(), which means every
+	 * window the auto-open path created (chat / users / tasks / news,
+	 * plus the toolbar itself) already exists and has had show_all()
+	 * called on it. Any toplevel that isn't registered with the
+	 * GtkApplication doesn't get its xdg_toplevel commit serviced
+	 * during the activate cycle on Wayland — symptom: the chat window
+	 * stays invisible until the user closes and re-opens it (the
+	 * second open happens after the app is fully up and works fine).
+	 *
+	 * Sweep gtk_window_list_toplevels() and add every GtkWindow the
+	 * app doesn't already own. Idempotent — add_window() is a no-op
+	 * if the window is already in the app's list. */
+	toplevels = gtk_window_list_toplevels ();
+	for (l = toplevels; l; l = l->next) {
+		if (GTK_IS_WINDOW (l->data))
+			gtk_application_add_window (app, GTK_WINDOW (l->data));
+	}
+	g_list_free (toplevels);
 }
 
 static void

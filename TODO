@@ -1,5 +1,5 @@
-- Load *.rsrc files from $GTKHX_PATH/icons (e.g. /usr/local/share/gtkhx/icons/*.rsrc)
-- Support new config path ~/.config/gtkhx where icons can be kept as well
+- Support new config path ~/.config/gtkhx that gets loaded before trying $GTKHX_PATH
+- Load *.rsrc files from $CONFIG_PATH/icons (e.g. ~/config.gtkhx/icons/*.rsrc and /usr/local/share/gtkhx/icons/*.rsrc)
 
 Old:
 -Full file support
