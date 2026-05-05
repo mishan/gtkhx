@@ -55,23 +55,35 @@ packaging when there's a buildable binary again.)
 
 ## Build status
 
-**Phase 1 is complete; Phase 2 (GTK 2 port) in progress.** `meson.build` already pins
-`gtk+-2.0 >= 2.24`, but the source is still GTK 1.2 idioms. `meson setup build && meson
-compile -C build` runs and produces a punch list of GTK-2-incompatible API uses:
+**Phases 1, 2, 3 complete. Phase 4 (GTK 4 port) in progress on a separate
+`phase-4` branch.** `main` is on GTK 3.22+ (`meson.build` pins `gtk+-3.0 >= 3.22`),
+builds clean against current GTK 3 with `-Werror=deprecated-declarations`, and
+runs as a usable binary connecting to mhxd / hlserver.com.
 
-- `src/gtk_hlist.c` (~140 errors) — in-tree GtkCList fork. **Don't fix it; replace it.**
-  Phase 2.7 builds a `gtk_hlist_compat.[ch]` shim over GtkTreeView+GtkListStore that keeps
-  the existing `gtk_hlist_*` API surface, then drops the fork. The 5 consumers
-  (`tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`, ~392 sites) keep compiling
-  unchanged.
-- `src/xtext.c` (~6 errors) — in-tree XChat 1.8.5 fork. **Don't fix it; replace it.**
-  Phase 2.6 vendors HexChat's xtext.
-- The rest is mostly mechanical: 165 `gtk_signal_connect` (Phase 2.2), 27 `GtkStyle->font`
-  (Phase 2.3), GtkText → GtkTextView in `about.c`/`news15.c` (Phase 2.4), GtkPixmap → GtkImage
-  and GtkOptionMenu → GtkComboBox (Phase 2.5).
+**Phase 4 work lives on the `phase-4` branch**, not main. The branch has the
+meson dep bumped to `gtk4 >= 4.6`, a Phase-3-style helpers layer in `gtkutil`
+absorbing the breaking-change vocabulary (GtkContainer → widget setters,
+gtk_box_pack_start → append + properties, gtk_widget_destroy →
+gtk_window_destroy / unparent, etc.), the bulk-mechanical sweeps applied,
+and the configure-event handlers retired in favor of quit-time geometry save.
 
-`gtkthreads.c` and `gtkhx.c` need a threading first-cut (Phase 2.9) for `g_thread_init` /
-`gdk_threads_enter`. Then it should run.
+As of the last `phase-4` commit:
+
+  - 90 build errors remain, down from 492 at the meson bump.
+  - Remaining error categories all map to deferred sub-phases:
+    ~28 events (4.5/4.6 — GtkEventControllers + accessor functions),
+    ~14 DnD (4.8 — GtkDropTarget/GtkDragSource), CSS provider signature
+    drift, plus the not-yet-attempted xtext.c snapshot rewrite (4.9, ~3500
+    lines vendor code), gtk_hlist_compat deprecation containment (4.10),
+    GtkMenu → GtkPopoverMenu (4.7), GtkAccelGroup → GtkShortcutController
+    (4.11).
+
+When a future session resumes Phase 4, do `git checkout phase-4` and pick
+up at sub-phase 4.5 (event handler rewrite). The ROADMAP entry for Phase 4
+in this repo's ROADMAP.md is the source of truth for the sub-phase plan
+and the pre-flight decisions (xtext stays on cairo via
+gtk_snapshot_append_cairo, gtk_hlist_compat stays on GtkTreeView with
+deprecation pragmas, no .ui XML, etc.).
 
 ## Idioms and pitfalls specific to this codebase
 
