@@ -1121,11 +1121,15 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtkhx_box_pack(vbox1, scrolledwindow2, TRUE, TRUE, 0);
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow2), GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
-	viewport1 = gtk_viewport_new (NULL, NULL);
-	gtkhx_widget_set_child(scrolledwindow2, viewport1);
-	
-	/* Phase 2.8: GtkTreeView (in tree mode) replaces GtkCTree.
-	 * news_store holds the model; news_tree is the view. */
+	/* Phase 5: GtkTreeView (in tree mode) replaces GtkCTree (Phase 2.8).
+	 * news_store holds the model; news_tree is the view.
+	 *
+	 * No GtkViewport wrapper between scrolledwindow2 and news_tree:
+	 * GtkScrolledWindow only auto-wraps children that don't implement
+	 * GtkScrollable, and GtkTreeView does — adding a viewport made
+	 * the view dark-on-dark on some themes (the viewport carries a
+	 * .view CSS class whose background landed under text whose
+	 * foreground stayed at the default cell-renderer black). */
 	gcnews->news_store = gtk_tree_store_new(NEWS_N_COLS,
 											G_TYPE_STRING,
 											G_TYPE_POINTER);
@@ -1135,6 +1139,11 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	{
 		GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
 		GtkTreeViewColumn *col;
+		/* Ensure the renderer never has a stale foreground-set TRUE
+		 * lingering from any future model column attribute mapping —
+		 * the catalog model has no foreground column so the theme
+		 * default should always apply. */
+		g_object_set (renderer, "foreground-set", FALSE, NULL);
 		col = gtk_tree_view_column_new_with_attributes("Subject", renderer,
 													   "text", NEWS_COL_SUBJECT,
 													   NULL);
@@ -1145,7 +1154,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 		GTK_SELECTION_BROWSE);
 	g_signal_connect(news_tree, "cursor-changed",
 					   G_CALLBACK(newsc_clicked), gcnews);
-	gtkhx_widget_set_child(viewport1, news_tree);
+	gtkhx_widget_set_child(scrolledwindow2, news_tree);
 
 	vbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_paned_set_end_child(GTK_PANED(hpaned1), vbox2);
