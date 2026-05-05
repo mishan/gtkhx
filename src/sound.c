@@ -25,6 +25,7 @@
 #include <gtk/gtk.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "gtkhx.h"
 #include "sound.h"
 
 struct hx_sounds hxsnd =
@@ -33,19 +34,61 @@ struct hx_sounds hxsnd =
 	1, 1, 1, 1, 1, 1, 1, 1, 1
 };
 
+/* Phase 5: resolve a sound file by name across the layered sound
+ * search path:
+ *   1. $CONFIG/sounds/<name>          — per-user drop-ins
+ *   2. gtkhx_prefs.sound_path/<name>  — legacy single-path config
+ *   3. $PREFIX/share/gtkhx/sounds/    — distro / system default
+ *
+ * Returns the first existing path, or NULL if none was found.
+ * Caller g_frees. */
+static char *
+sound_resolve (const char *name)
+{
+	char *candidate;
+
+	candidate = g_build_filename (gtkhx_config_dir (), "sounds", name, NULL);
+	if (g_file_test (candidate, G_FILE_TEST_EXISTS))
+		return candidate;
+	g_free (candidate);
+
+	if (gtkhx_prefs.sound_path && *gtkhx_prefs.sound_path) {
+		candidate = g_build_filename (gtkhx_prefs.sound_path, name, NULL);
+		if (g_file_test (candidate, G_FILE_TEST_EXISTS))
+			return candidate;
+		g_free (candidate);
+	}
+
+	candidate = g_build_filename (PREFIX "/share/gtkhx/sounds", name, NULL);
+	if (g_file_test (candidate, G_FILE_TEST_EXISTS))
+		return candidate;
+	g_free (candidate);
+
+	return NULL;
+}
+
 void play(char *name)
 {
-	pid_t pid = fork();
+	pid_t pid;
+	char *arg = sound_resolve (name);
 
+	/* If we couldn't find the sound anywhere, don't bother forking.
+	 * Avoids spawning a player just to have it fail with ENOENT. */
+	if (!arg)
+		return;
+
+	pid = fork();
 	if(pid == -1) {
+		g_free (arg);
 		return;
 	}
 
 	if(pid == 0) {
-		char *arg=g_strdup_printf("%s/%s", gtkhx_prefs.sound_path, name);
 		execlp(gtkhx_prefs.snd_cmd, gtkhx_prefs.snd_cmd, arg, NULL);
 		_exit(127);
 	}
+
+	g_free (arg);
 }
 
 void play_sound(int sound)
