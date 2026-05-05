@@ -1081,14 +1081,14 @@ static void settings_page_news15 (GtkWidget *vbox)
 	GtkWidget *table;
 
 	wid = settings_create_group(vbox, _("News Folder Browsing"));
-	table = gtk_table_new(1, 1, 0);
+	table = gtkhx_grid_new_table(1, 1, 0);
 
 	cfgvars[NEWS_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
 	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[NEWS_SAMEWINDOW_IDX].widget,
 								 gtkhx_prefs.news_samewin);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[NEWS_SAMEWINDOW_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NEWS_SAMEWINDOW_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1102,14 +1102,14 @@ static void settings_page_files(GtkWidget *vbox)
 	GtkWidget *table;
 
 	wid = settings_create_group(vbox, _("File Browsing"));
-	table = gtk_table_new(1, 1, 0);
+	table = gtkhx_grid_new_table(1, 1, 0);
 
 	cfgvars[FILE_SAMEWINDOW_IDX].widget = gtk_check_button_new_with_label(
 		_("Browse in Same Window"));
 	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[FILE_SAMEWINDOW_IDX].widget,
 								 gtkhx_prefs.file_samewin);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[FILE_SAMEWINDOW_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FILE_SAMEWINDOW_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1123,14 +1123,14 @@ static void settings_page_logging (GtkWidget *vbox)
 	GtkWidget *table;
 
 	wid = settings_create_group(vbox, _("Logging"));
-	table = gtk_table_new(1, 1, 0);
+	table = gtkhx_grid_new_table(1, 1, 0);
 
 	cfgvars[LOGGING_IDX].widget = gtk_check_button_new_with_label(
 		_("Log Chats/Private Messages"));
 	gtk_toggle_button_set_active((GtkToggleButton*)cfgvars[LOGGING_IDX].widget,
 								 gtkhx_prefs.logging);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[LOGGING_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[LOGGING_IDX].widget, 0,
 										1, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 
@@ -1146,19 +1146,19 @@ static void settings_page_sound(GtkWidget *vbox)
 	GtkWidget *lbl;
 
 	wid = settings_create_group(vbox, _("Sound Command"));
-	table2 = gtk_table_new(1, 2, 0);
+	table2 = gtkhx_grid_new_table(1, 2, 0);
 
-	table = gtk_table_new(10, 2, 0);
-	gtk_table_set_col_spacings(GTK_TABLE(table2), 5);
+	table = gtkhx_grid_new_table(10, 2, 0);
+	gtk_grid_set_column_spacing(GTK_GRID(table2), 5);
 
 	lbl = gtk_label_new(_("Sound Command: "));
-	gtk_table_attach(GTK_TABLE(table2), lbl, 0, 1, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table2), lbl, 0, 1, 2, 3,
 					 GTK_FILL, GTK_FILL, 0, 0);
 
 	cfgvars[SND_CMD_IDX].widget = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[SND_CMD_IDX].widget),
 					   gtkhx_prefs.snd_cmd);
-	gtk_table_attach(GTK_TABLE(table2), cfgvars[SND_CMD_IDX].widget, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[SND_CMD_IDX].widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
 	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
@@ -1195,33 +1195,33 @@ static void settings_page_sound(GtkWidget *vbox)
 	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SOUNDPART_IDX].widget,
 								 hxsnd.part);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDSON_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDSON_IDX].widget, 0, 1, 0, 1,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 4);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDINVITE_IDX].widget, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDINVITE_IDX].widget, 1, 2, 1, 2,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDCHAT_IDX].widget, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDCHAT_IDX].widget, 1, 2, 2, 3,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDERROR_IDX].widget, 1, 2, 3, 4,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDERROR_IDX].widget, 1, 2, 3, 4,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDFILE_IDX].widget, 1, 2, 4, 5,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDFILE_IDX].widget, 1, 2, 4, 5,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDJOIN_IDX].widget, 1, 2, 5, 6,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDJOIN_IDX].widget, 1, 2, 5, 6,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDLOGIN_IDX].widget, 1, 2, 6, 7,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDLOGIN_IDX].widget, 1, 2, 6, 7,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDMSG_IDX].widget, 1, 2, 7, 8,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDMSG_IDX].widget, 1, 2, 7, 8,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDNEWS_IDX].widget, 1, 2, 8, 9,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDNEWS_IDX].widget, 1, 2, 8, 9,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDPART_IDX].widget, 1, 2, 9, 10,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPART_IDX].widget, 1, 2, 9, 10,
 					 GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
@@ -1237,23 +1237,23 @@ static void settings_page_font(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Fonts"));
 
-	table = gtk_table_new(1, 2, 0);
+	table = gtkhx_grid_new_table(1, 2, 0);
 
 	lbl = gtk_label_new(_("Font: "));
-	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 2, 3,
 					 GTK_FILL, GTK_FILL, 0, 0);
 
 	cfgvars[FONT_IDX].widget = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[FONT_IDX].widget), gtkhx_prefs.font);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[FONT_IDX].widget, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[FONT_IDX].widget, 1, 2, 2, 3,
 					 (GTK_EXPAND|GTK_FILL), 0, 0, 0);
 
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
 
-	table2 = gtk_table_new(2, 1, 0);
+	table2 = gtkhx_grid_new_table(2, 1, 0);
 
 	btn = gtk_button_new_with_label(_("Browse Fonts"));
-	gtk_table_attach(GTK_TABLE(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table2), btn, 0, 1, 4, 5, GTK_FILL, GTK_FILL, 0,
 					 0);
 	g_signal_connect(btn, "clicked",
 					   G_CALLBACK(create_fontsel), cfgvars[FONT_IDX].widget);
@@ -1271,8 +1271,8 @@ static void settings_page_xtext(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Transparency"));
 
-	table = gtk_table_new(4, 1, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
+	table = gtkhx_grid_new_table(4, 1, 0);
+	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
 	gtk_container_set_border_width(GTK_CONTAINER(table), 10);
 
 	cfgvars[TRANSPARENT_IDX].widget = gtk_check_button_new_with_label(
@@ -1280,7 +1280,7 @@ static void settings_page_xtext(GtkWidget *vbox)
 	gtk_toggle_button_set_active((GtkToggleButton *)
 								 cfgvars[TRANSPARENT_IDX].widget,
 								 gtkhx_prefs.trans_xtext);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[TRANSPARENT_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRANSPARENT_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 	gtk_box_pack_start(GTK_BOX(wid), table, 0, 0, 0);
 
@@ -1292,20 +1292,20 @@ static void settings_page_xtext(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Miscellaeneous"));
 
-	table2 = gtk_table_new(2, 2, 0);
+	table2 = gtkhx_grid_new_table(2, 2, 0);
 
 	cfgvars[TIMESTAMP_IDX].widget = gtk_check_button_new_with_label(
 		_("Timestamp Chat"));
 	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[TIMESTAMP_IDX].widget,
 								 gtkhx_prefs.timestamp);
-	gtk_table_attach(GTK_TABLE(table2), cfgvars[TIMESTAMP_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[TIMESTAMP_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	cfgvars[WORDWRAP_IDX].widget = gtk_check_button_new_with_label(
 		_("Word Wrap"));
 	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[WORDWRAP_IDX].widget,
 								 gtkhx_prefs.word_wrap);
-	gtk_table_attach(GTK_TABLE(table2), cfgvars[WORDWRAP_IDX].widget, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[WORDWRAP_IDX].widget, 1, 2, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	adj = (GtkAdjustment *)gtk_adjustment_new(gtkhx_prefs.xbuf_max, 0, 0xffff,
@@ -1313,8 +1313,8 @@ static void settings_page_xtext(GtkWidget *vbox)
 	cfgvars[XBUF_MAX_IDX].widget = gtk_spin_button_new(adj, 1, 0);
 	lbl = gtk_label_new(_("Maximum Lines (0 = Unlimited)    "));
 
-	gtk_table_attach(GTK_TABLE(table2), lbl, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
-	gtk_table_attach(GTK_TABLE(table2), cfgvars[XBUF_MAX_IDX].widget, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table2), lbl, 0, 1, 1, 2, GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(table2), cfgvars[XBUF_MAX_IDX].widget, 1, 2, 1, 2,
 					 GTK_FILL, 0, 0, 0);
 
 	gtk_box_pack_start(GTK_BOX(wid), table2, 0, 0, 0);
@@ -1337,18 +1337,18 @@ static void settings_page_path(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Paths"));
 
-	table = gtk_table_new(3, 2, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+	table = gtkhx_grid_new_table(3, 2, 0);
+	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
+	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
 	lbl = gtk_label_new(_("Icon Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
-	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 0, 1, GTK_FILL,
+	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 0, 1, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
 	cfgvars[ICONS_IDX].widget = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table), cfgvars[ICONS_IDX].widget, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICONS_IDX].widget, 1, 2, 0, 1,
 					 (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
 					 (GtkAttachOptions) 0, 0, 0);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[ICONS_IDX].widget), gtkhx_prefs.icon_str);
@@ -1356,11 +1356,11 @@ static void settings_page_path(GtkWidget *vbox)
 	lbl = gtk_label_new(_("Sound Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
-	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 1, 2, GTK_FILL,
+	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 1, 2, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
 	cfgvars[SOUNDPATH_IDX].widget = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SOUNDPATH_IDX].widget, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SOUNDPATH_IDX].widget, 1, 2, 1, 2,
 					 (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
 					 (GtkAttachOptions) 0, 0, 0);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[SOUNDPATH_IDX].widget),
@@ -1369,11 +1369,11 @@ static void settings_page_path(GtkWidget *vbox)
 	lbl = gtk_label_new(_("Download Path:"));
 	gtk_label_set_justify(GTK_LABEL(lbl), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(lbl), 0.0);
-	gtk_table_attach(GTK_TABLE(table), lbl, 0, 1, 2, 3, GTK_FILL,
+	gtkhx_grid_attach_table(GTK_GRID(table), lbl, 0, 1, 2, 3, GTK_FILL,
 					 (GtkAttachOptions) 0, 0, 0);
 
 	cfgvars[DOWNLOAD_IDX].widget = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table), cfgvars[DOWNLOAD_IDX].widget, 1, 2, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[DOWNLOAD_IDX].widget, 1, 2, 2,
 					 3, (GtkAttachOptions) (GTK_EXPAND|GTK_FILL),
 					 (GtkAttachOptions) 0, 0, 0);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[DOWNLOAD_IDX].widget),
@@ -1421,15 +1421,15 @@ static void settings_page_icon(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Icon"));
 
-	table = gtk_table_new(3, 2, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+	table = gtkhx_grid_new_table(3, 2, 0);
+	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
+	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
 	label = gtk_label_new(_("Icon ID: "));
-	gtk_table_attach(GTK_TABLE(table), label, 0, 1, 0, 1, 0, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(table), label, 0, 1, 0, 1, 0, 0, 0, 0);
 
 	cfgvars[ICON_IDX].widget = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[ICON_IDX].widget, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	g_snprintf(iconstr, sizeof(iconstr), "%u", the_session.htlc.icon);
@@ -1452,7 +1452,7 @@ static void settings_page_icon(GtkWidget *vbox)
 			   G_CALLBACK(icon_row_selected), iv);
 
 	gtk_container_add(GTK_CONTAINER(scroll), icon_list);
-	gtk_table_attach(GTK_TABLE(table), scroll, 0, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), scroll, 0, 2, 1, 2,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 
@@ -1470,29 +1470,29 @@ static void settings_page_misc(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("Miscellaeneous"));
 
-	table = gtk_table_new(7, 2, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+	table = gtkhx_grid_new_table(7, 2, 0);
+	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
+	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
 
 	cfgvars[AUTOREPLYON_IDX].widget = gtk_check_button_new_with_label(
 		_("Auto Reply"));
 	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[AUTOREPLYON_IDX].widget,
 								 gtkhx_prefs.auto_reply);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[AUTOREPLYON_IDX].widget, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYON_IDX].widget, 0, 1, 0, 1,
 					 GTK_FILL, 0, 0, 0);
 
 	cfgvars[AUTOREPLYMSG_IDX].widget = gtk_entry_new();
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[AUTOREPLYMSG_IDX].widget),
 					   gtkhx_prefs.auto_reply_msg);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[AUTOREPLYMSG_IDX].widget, 1, 2, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[AUTOREPLYMSG_IDX].widget, 1, 2, 0,
 					 1, 0, 0, 0, 0);
 
 	cfgvars[SHOWBACK_IDX].widget = gtk_check_button_new_with_label (
 		_("Show Private Messages at Back"));
 	gtk_toggle_button_set_active((GtkToggleButton *)cfgvars[SHOWBACK_IDX].widget,
 								 gtkhx_prefs.showback);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SHOWBACK_IDX].widget, 0, 1, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWBACK_IDX].widget, 0, 1, 1, 2,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)(GTK_FILL), 0, 0);
 
@@ -1500,7 +1500,7 @@ static void settings_page_misc(GtkWidget *vbox)
 		_("Queue File Transfers"));
 	gtk_toggle_button_set_active((GtkToggleButton *)
 								 cfgvars[QUEUEDL_IDX].widget, gtkhx_prefs.queuedl);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[QUEUEDL_IDX].widget, 0, 1, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[QUEUEDL_IDX].widget, 0, 1, 2, 3,
 			 (GtkAttachOptions)(GTK_FILL), (GtkAttachOptions)(GTK_FILL), 0, 0);
 
 	cfgvars[SHOWJOIN_IDX].widget = gtk_check_button_new_with_label(
@@ -1508,7 +1508,7 @@ static void settings_page_misc(GtkWidget *vbox)
 	gtk_toggle_button_set_active((GtkToggleButton *)
 									cfgvars[SHOWJOIN_IDX].widget,
 									gtkhx_prefs.showjoin);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[SHOWJOIN_IDX].widget, 0, 1, 3, 4,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[SHOWJOIN_IDX].widget, 0, 1, 3, 4,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)(GTK_FILL), 0, 0);
 
@@ -1517,7 +1517,7 @@ static void settings_page_misc(GtkWidget *vbox)
 	gtk_toggle_button_set_active((GtkToggleButton *)
 								 cfgvars[TRACKER_CASE_IDX].widget,
 								 gtkhx_prefs.track_case);
-	gtk_table_attach(GTK_TABLE(table), cfgvars[TRACKER_CASE_IDX].widget, 0, 1, 4, 5,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRACKER_CASE_IDX].widget, 0, 1, 4, 5,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)(GTK_FILL), 0, 0);
 
@@ -1526,7 +1526,7 @@ static void settings_page_misc(GtkWidget *vbox)
 	gtk_toggle_button_set_active((GtkToggleButton *)
 								 cfgvars[OLD_NICKCOMPLETION_IDX].widget,
 								 gtkhx_prefs.old_nickcompletion);
-	gtk_table_attach(GTK_TABLE(table),cfgvars[OLD_NICKCOMPLETION_IDX].widget, 0,
+	gtkhx_grid_attach_table(GTK_GRID(table),cfgvars[OLD_NICKCOMPLETION_IDX].widget, 0,
 					 1, 5, 6, (GtkAttachOptions)(GTK_FILL),
 					 (GtkAttachOptions)(GTK_FILL), 0, 0);
 
@@ -1541,18 +1541,18 @@ static void settings_page_general(GtkWidget *vbox)
 
 	wid = settings_create_group(vbox, _("General"));
 
-	table = gtk_table_new(2, 2, 0);
-	gtk_table_set_row_spacings(GTK_TABLE(table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+	table = gtkhx_grid_new_table(2, 2, 0);
+	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
+	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
 
 	cfgvars[NICK_IDX].widget = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table), cfgvars[NICK_IDX].widget, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[NICK_IDX].widget, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_entry_set_text(GTK_ENTRY(cfgvars[NICK_IDX].widget), the_session.htlc.name);
 
 	name = gtk_label_new(_("Your Name:"));
-	gtk_table_attach(GTK_TABLE(table), name, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table), name, 0, 1, 0, 1,
 	                  (GtkAttachOptions)(GTK_FILL),
 	                  (GtkAttachOptions)(GTK_FILL), 0, 0);
 	gtk_label_set_justify(GTK_LABEL(name), GTK_JUSTIFY_LEFT);

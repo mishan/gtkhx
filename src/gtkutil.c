@@ -277,3 +277,53 @@ gtkhx_dialog_action_area (GtkDialog *dialog)
 	G_GNUC_END_IGNORE_DEPRECATIONS
 	return area;
 }
+
+GtkWidget *
+gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous)
+{
+	GtkWidget *grid = gtk_grid_new ();
+	(void) rows; (void) cols;  /* Grid grows automatically. */
+	if (homogeneous) {
+		gtk_grid_set_row_homogeneous    (GTK_GRID (grid), TRUE);
+		gtk_grid_set_column_homogeneous (GTK_GRID (grid), TRUE);
+	}
+	return grid;
+}
+
+void
+gtkhx_grid_attach_table (GtkGrid *grid, GtkWidget *child,
+                         int left, int right,
+                         int top,  int bottom,
+                         int xoptions, int yoptions,
+                         int xpad, int ypad)
+{
+	if (xoptions & GTK_EXPAND) gtk_widget_set_hexpand (child, TRUE);
+	if (yoptions & GTK_EXPAND) gtk_widget_set_vexpand (child, TRUE);
+	gtk_widget_set_halign (child, (xoptions & GTK_FILL)
+	                       ? GTK_ALIGN_FILL : GTK_ALIGN_CENTER);
+	gtk_widget_set_valign (child, (yoptions & GTK_FILL)
+	                       ? GTK_ALIGN_FILL : GTK_ALIGN_CENTER);
+	if (xpad) {
+		gtk_widget_set_margin_start (child, xpad);
+		gtk_widget_set_margin_end   (child, xpad);
+	}
+	if (ypad) {
+		gtk_widget_set_margin_top    (child, ypad);
+		gtk_widget_set_margin_bottom (child, ypad);
+	}
+	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+}
+
+void
+gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
+                                  int left, int right,
+                                  int top,  int bottom)
+{
+	/* Mirror gtk_table_attach_defaults: GTK_EXPAND|GTK_FILL on both
+	 * axes, no padding. */
+	gtk_widget_set_hexpand (child, TRUE);
+	gtk_widget_set_vexpand (child, TRUE);
+	gtk_widget_set_halign  (child, GTK_ALIGN_FILL);
+	gtk_widget_set_valign  (child, GTK_ALIGN_FILL);
+	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+}

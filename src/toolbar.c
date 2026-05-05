@@ -105,7 +105,6 @@ void create_toolbar_window (session *sess)
 	GtkWidget *chat_btn;
 	GtkWidget *about_btn;
 	GtkWidget *tasks_btn;
-	GtkStyle *style;
 	GdkBitmap *mask;
 	GtkWidget *pix;
 	GdkPixmap *icon;
@@ -117,8 +116,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(toolbar_window, "delete_event",
 			   G_CALLBACK(close_toolbar_window), 0);
 
-	gtk_widget_realize(toolbar_window);
-	style = gtk_widget_get_style(toolbar_window);
+	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
 	status_bar = gtk_statusbar_new();
 	context_status = gtk_statusbar_get_context_id((GtkStatusbar *)status_bar, 

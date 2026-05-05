@@ -29,6 +29,7 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "gtk_hlist.h"
+#include "gtkutil.h"
 
 #define NACCESS	28
 void create_useredit_window (char *login, int new);
@@ -357,7 +358,7 @@ void create_useredit_window (char *login, int new)
 	gtk_box_pack_start(GTK_BOX(wvbox), btnhbox, 0, 0, 2);
 
 	info_frame = gtk_frame_new(_("User Info"));
-	info_table = gtk_table_new(3, 2, 0);
+	info_table = gtkhx_grid_new_table(3, 2, 0);
 	gtk_container_add(GTK_CONTAINER(info_frame), info_table);
 
 	wid = gtk_entry_new();
@@ -365,30 +366,30 @@ void create_useredit_window (char *login, int new)
 	if(!new) {
 		gtk_editable_set_editable(GTK_EDITABLE(wid), 0);
 	}
-	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Login:"));
 	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
 
 	wid = gtk_entry_new();
 	ues->name_entry = wid;
-	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 1, 2, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 1, 2, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Name:"));
 	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 1, 2, GTK_FILL, GTK_FILL, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 1, 2, GTK_FILL, GTK_FILL, 0, 0);
 
 	wid = gtk_entry_new();
 	ues->pass_entry = wid;
-	gtk_table_attach(GTK_TABLE(info_table), wid, 1, 2, 2, 3, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 2, 3, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 	wid = gtk_label_new(_("Pass:"));
 	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
 	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtk_table_attach(GTK_TABLE(info_table), wid, 0, 1, 2, 3, GTK_FILL, GTK_FILL, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 2, 3, GTK_FILL, GTK_FILL, 0, 0);
 
-	gtk_table_set_row_spacings(GTK_TABLE(info_table), 10);
-	gtk_table_set_col_spacings(GTK_TABLE(info_table), 5);
+	gtk_grid_set_row_spacing(GTK_GRID(info_table), 10);
+	gtk_grid_set_column_spacing(GTK_GRID(info_table), 5);
 	gtk_box_pack_start(GTK_BOX(wvbox), info_frame, 0, 0, 2);
 
 	avbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

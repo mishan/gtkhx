@@ -750,28 +750,28 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_box_pack_start(GTK_BOX(vbox1), frame1, 1, 1, 0);
 	gtk_frame_set_shadow_type(GTK_FRAME(frame1), GTK_SHADOW_IN);
 
- 	table1 = gtk_table_new(3, 6, 0);
+ 	table1 = gtkhx_grid_new_table(3, 6, 0);
 	gtk_container_add(GTK_CONTAINER(frame1), table1);
 	gtk_container_set_border_width(GTK_CONTAINER(table1), 10);
-	gtk_table_set_row_spacings(GTK_TABLE(table1), 5);
-	gtk_table_set_col_spacings(GTK_TABLE(table1), 5);
+	gtk_grid_set_row_spacing(GTK_GRID(table1), 5);
+	gtk_grid_set_column_spacing(GTK_GRID(table1), 5);
 
 	server_label = gtk_label_new(_("Server:"));
-	gtk_table_attach(GTK_TABLE(table1), server_label, 0, 1, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table1), server_label, 0, 1, 0, 1,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(server_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(server_label), 0.0);
 
 	login_label = gtk_label_new(_("Login:"));
-	gtk_table_attach(GTK_TABLE(table1), login_label, 0, 1, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table1), login_label, 0, 1, 1, 2,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(login_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(login_label), 0.0);
 
 	pass_label = gtk_label_new(_("Password:"));
-	gtk_table_attach(GTK_TABLE(table1), pass_label, 0, 1, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table1), pass_label, 0, 1, 2, 3,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(pass_label), GTK_JUSTIFY_LEFT);
@@ -779,20 +779,20 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 	hope = gtk_check_button_new_with_label(_("Secure (HOPE)"));
 	gtk_toggle_button_set_active((GtkToggleButton*)hope, 0);
-	gtk_table_attach(GTK_TABLE(table1), hope, 0, 1, 3, 4,
+	gtkhx_grid_attach_table(GTK_GRID(table1), hope, 0, 1, 3, 4,
 			 (GtkAttachOptions)(GTK_EXPAND|GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	
 #ifdef CONFIG_COMPRESS
 	compress_label = gtk_label_new(_("Compress: "));
-	gtk_table_attach(GTK_TABLE(table1), compress_label, 0, 1, 4, 5,
+	gtkhx_grid_attach_table(GTK_GRID(table1), compress_label, 0, 1, 4, 5,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(compress_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(compress_label), 0.0);
 
 	compress_menu = gtk_combo_box_text_new ();
-	gtk_table_attach(GTK_TABLE(table1), compress_menu, 1, 2, 4, 5, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(table1), compress_menu, 1, 2, 4, 5, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (compress_menu), "NONE");
 	{
@@ -808,14 +808,14 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 #ifdef CONFIG_CIPHER
 	cipher_label = gtk_label_new(_("Cipher: "));
-	gtk_table_attach(GTK_TABLE(table1), cipher_label, 0, 1, 5, 6,
+	gtkhx_grid_attach_table(GTK_GRID(table1), cipher_label, 0, 1, 5, 6,
 			 (GtkAttachOptions)(GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	gtk_label_set_justify(GTK_LABEL(cipher_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(cipher_label), 0.0);
 
 	cipher_menu = gtk_combo_box_text_new ();
-	gtk_table_attach(GTK_TABLE(table1), cipher_menu, 1, 2, 5, 6, GTK_EXPAND|GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(table1), cipher_menu, 1, 2, 5, 6, GTK_EXPAND|GTK_FILL, 0, 0, 0);
 
 	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cipher_menu), "NONE");
 	{
@@ -830,12 +830,12 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 #endif
 
 	address_entry = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table1), address_entry, 1, 2, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table1), address_entry, 1, 2, 0, 1,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 
 	port_label = gtk_label_new(_("Port:"));
-	gtk_table_attach(GTK_TABLE(table1), port_label, 2, 3, 0, 1, GTK_FILL, 0, 0, 0);
+	gtkhx_grid_attach_table(GTK_GRID(table1), port_label, 2, 3, 0, 1, GTK_FILL, 0, 0, 0);
 
 	gtk_label_set_justify(GTK_LABEL(port_label), GTK_JUSTIFY_LEFT);
 	gtk_label_set_xalign(GTK_LABEL(port_label), 0.0);
@@ -844,23 +844,23 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	gtk_entry_set_max_length(GTK_ENTRY(port_entry), 6);
 	gtk_entry_set_text(GTK_ENTRY(port_entry), "5500");
 	gtk_widget_set_size_request(port_entry, 45, 0);
-	gtk_table_attach(GTK_TABLE(table1), port_entry, 3, 4, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table1), port_entry, 3, 4, 0, 1,
 			  0,
 			 (GtkAttachOptions)0, 0, 0);
 
 
 	login_entry = gtk_entry_new();
-	gtk_table_attach(GTK_TABLE(table1), login_entry, 1, 2, 1, 2,
+	gtkhx_grid_attach_table(GTK_GRID(table1), login_entry, 1, 2, 1, 2,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 	password_entry = gtk_entry_new();
 	gtk_entry_set_visibility(GTK_ENTRY(password_entry), 0);
-	gtk_table_attach(GTK_TABLE(table1), password_entry, 1, 2, 2, 3,
+	gtkhx_grid_attach_table(GTK_GRID(table1), password_entry, 1, 2, 2, 3,
 			 (GtkAttachOptions)(GTK_EXPAND | GTK_FILL),
 			 (GtkAttachOptions)0, 0, 0);
 
 	bookmarkmenu = gtk_combo_box_text_new ();
-	gtk_table_attach(GTK_TABLE(table1), bookmarkmenu, 4, 5, 0, 1,
+	gtkhx_grid_attach_table(GTK_GRID(table1), bookmarkmenu, 4, 5, 0, 1,
 			 (GtkAttachOptions)0,
 			 (GtkAttachOptions)0, 0, 0);
 
