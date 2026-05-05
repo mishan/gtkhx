@@ -591,13 +591,55 @@ char *colorstr (guint16 color)
 	return col;
 }
 
+/* Phase 5: scan a directory for *.rsrc files and append each one to
+ * a GPtrArray of full paths. Skips entries whose path is already in
+ * the array (so a file in $CONFIG/icons doesn't get double-loaded
+ * if it's also explicitly listed in gtkhx_prefs.icon[]). */
+static void
+collect_rsrc_files (GPtrArray *out, const char *dir)
+{
+	GDir *d;
+	const char *name;
+
+	if (!dir || !*dir)
+		return;
+	d = g_dir_open (dir, 0, NULL);
+	if (!d)
+		return;
+
+	while ((name = g_dir_read_name (d))) {
+		char *path;
+		guint i;
+		gboolean dup = FALSE;
+
+		if (!g_str_has_suffix (name, ".rsrc"))
+			continue;
+
+		path = g_build_filename (dir, name, NULL);
+		for (i = 0; i < out->len; i++) {
+			if (g_strcmp0 (g_ptr_array_index (out, i), path) == 0) {
+				dup = TRUE;
+				break;
+			}
+		}
+		if (dup)
+			g_free (path);
+		else
+			g_ptr_array_add (out, path);
+	}
+
+	g_dir_close (d);
+}
+
 void init_icons (void)
 {
 	int fd, i;
 	struct ifn *ifn = &icon_files;
+	GPtrArray *paths;
+	char *user_dir;
 
 	if(ifn->cicns) {
-		for(i = 0; i < ifn->n; i++) {
+		for(i = 0; i < (int) ifn->n; i++) {
 			if(ifn->cicns[i]) {
 				macres_file_delete(ifn->cicns[i]);
 				ifn->cicns[i] = 0;
@@ -608,26 +650,52 @@ void init_icons (void)
 	}
 
 	if(ifn->files) {
-		for(i = 0; i < ifn->n; i++)
+		for(i = 0; i < (int) ifn->n; i++)
 			g_free(ifn->files[i]);
 		g_free(ifn->files);
 	}
 
-	ifn->files = g_malloc(gtkhx_prefs.num_icons*sizeof(char *));
-	ifn->cicns = g_malloc(sizeof(macres_file *) * gtkhx_prefs.num_icons);
+	/* Phase 5: build the list of icon resource files from three
+	 * sources, in priority order:
+	 *   1. gtkhx_prefs.icon[] — user-configured paths from prefs
+	 *      (legacy single-icon-rsrc setup; survives unchanged so
+	 *      existing configs keep working)
+	 *   2. $CONFIG/icons/*.rsrc — per-user drop-in icon packs
+	 *   3. $PREFIX/share/gtkhx/icons/*.rsrc — distro-shipped packs
+	 *
+	 * collect_rsrc_files de-dupes by path string, so a file listed
+	 * in prefs *and* present in $CONFIG/icons doesn't load twice. */
+	paths = g_ptr_array_new ();
 
-	for(i = 0; i < gtkhx_prefs.num_icons; i++) {
-		ifn->files[i] = g_strdup(gtkhx_prefs.icon[i]);
-		fd = open(ifn->files[i], O_RDONLY);
-		if(fd < 0) {
-			g_warning("%s: %s\n", ifn->files[i], strerror(errno));
+	for (i = 0; i < gtkhx_prefs.num_icons; i++) {
+		if (gtkhx_prefs.icon[i] && *gtkhx_prefs.icon[i])
+			g_ptr_array_add (paths, g_strdup (gtkhx_prefs.icon[i]));
+	}
+
+	user_dir = g_build_filename (gtkhx_config_dir (), "icons", NULL);
+	collect_rsrc_files (paths, user_dir);
+	g_free (user_dir);
+
+	collect_rsrc_files (paths, PREFIX "/share/gtkhx/icons");
+
+	ifn->files = g_malloc (paths->len * sizeof (char *));
+	ifn->cicns = g_malloc (paths->len * sizeof (macres_file *));
+
+	for (i = 0; i < (int) paths->len; i++) {
+		ifn->files[i] = (char *) g_ptr_array_index (paths, i);
+		fd = open (ifn->files[i], O_RDONLY);
+		if (fd < 0) {
+			g_warning ("%s: %s\n", ifn->files[i], strerror (errno));
 			ifn->cicns[i] = 0;
 			continue;
 		}
-		ifn->cicns[i] = macres_file_open(fd);
+		ifn->cicns[i] = macres_file_open (fd);
 		close (fd);
 	}
-	ifn->n = gtkhx_prefs.num_icons;
+	ifn->n = paths->len;
+	/* free the GPtrArray shell only — element strings transferred
+	 * ownership to ifn->files. */
+	g_ptr_array_free (paths, FALSE);
 }
 
 extern void reinit_gtktexts(session *sess);
