@@ -302,8 +302,21 @@ tracker_server_create (struct in_addr addr, guint16 port, guint16 nusers,
 	server->addr = addr;
 	server->port = port;
 	server->nusers = nusers;
-	server->name = g_strdup(nam);
-	server->desc = g_strdup(desc);
+	/* Phase 3.x: server names from old Hotline trackers are MacRoman-
+	 * encoded. Pango requires UTF-8; without conversion any non-ASCII
+	 * byte (very common in Mac-era server names) makes
+	 * gtk_label_set_text → pango_layout_set_text print the
+	 * "Invalid UTF-8 string passed to pango_layout_set_text" critical.
+	 * Convert with fallback so unmappable bytes degrade to '?' rather
+	 * than dropping the whole row. */
+	server->name = g_convert_with_fallback(nam,   -1, "UTF-8", "MACINTOSH",
+	                                       "?", NULL, NULL, NULL);
+	if (!server->name)
+		server->name = g_strdup(nam ? nam : "");
+	server->desc = g_convert_with_fallback(desc,  -1, "UTF-8", "MACINTOSH",
+	                                       "?", NULL, NULL, NULL);
+	if (!server->desc)
+		server->desc = g_strdup(desc ? desc : "");
 	server->left = 0;
 	server->right = 0;
 	insert_server(server, tracker_server_tree);

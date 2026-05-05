@@ -496,21 +496,20 @@ task_go (GtkWidget *widget, gpointer data)
 	}
 }
 
-static void tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
+/* Phase 3.x: see users.c users_move() for rationale. */
+static gboolean tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y, width, height;
-	session *sess = data;
+	(void) e; (void) data;
 
-	gdk_window_get_root_origin(gtk_widget_get_window(sess->tasks_window), &x, &y);
-	width = gdk_window_get_width(gtk_widget_get_window(sess->tasks_window));
-	height = gdk_window_get_height(gtk_widget_get_window(sess->tasks_window));
-	if(e->send_event) { /* Is a position event */
-		gtkhx_prefs.geo.tasks.xpos = x;
-		gtkhx_prefs.geo.tasks.ypos = y;
-	} else { /* Is a size event */
-		gtkhx_prefs.geo.tasks.xsize = width;
-		gtkhx_prefs.geo.tasks.ysize = height;
-	}
+	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
+	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
+
+	gtkhx_prefs.geo.tasks.xpos = x;
+	gtkhx_prefs.geo.tasks.ypos = y;
+	gtkhx_prefs.geo.tasks.xsize = width;
+	gtkhx_prefs.geo.tasks.ysize = height;
+	return FALSE;
 }
 
 void task_tasks_update (session *sess)

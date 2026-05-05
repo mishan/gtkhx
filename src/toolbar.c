@@ -85,17 +85,17 @@ void disconnect_clicked (void)
 	}
 }
 
-static void tool_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
+/* Phase 3.x: see users.c users_move() for rationale. The toolbar has
+ * no size to save (it's set non-resizable) — just track position. */
+static gboolean tool_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y;
+	(void) e; (void) data;
 
-	gdk_window_get_root_origin(gtk_widget_get_window(toolbar_window), &x, &y);
-
-
-	if(e->send_event) { /* Is a position event */
-		gtkhx_prefs.geo.tool.xpos = x;
-		gtkhx_prefs.geo.tool.ypos = y;
-	}
+	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
+	gtkhx_prefs.geo.tool.xpos = x;
+	gtkhx_prefs.geo.tool.ypos = y;
+	return FALSE;
 }
 
 void create_toolbar_window (session *sess)

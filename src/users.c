@@ -645,21 +645,36 @@ static void close_users_window (GtkWidget *widget, gpointer data)
 	gtkhx_prefs.geo.users.init = 0;
 }
 
-static void users_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
+/*
+ * Phase 3.x: rewrite the configure handler.
+ *
+ * The old implementation had three problems:
+ *
+ *   1. It dispatched on `e->send_event' to decide between "position
+ *      event" and "size event". GTK 3 / Wayland fires the same
+ *      configure-event for both, with send_event=FALSE in both cases,
+ *      so position changes never landed in prefs.
+ *   2. It dereferenced sess->users_window, which is NULL during the
+ *      first configure event (set after gtk_widget_show_all returns).
+ *   3. It returned void instead of gboolean — undefined behavior in a
+ *      handler signature that GLib reads back as TRUE/FALSE.
+ *
+ * Use the widget passed to the handler directly, capture both pos and
+ * size on every configure, and propagate the event by returning FALSE.
+ */
+static gboolean users_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y, width, height;
-	session *sess = data;
+	(void) e; (void) data;
 
-	gdk_window_get_root_origin(gtk_widget_get_window(sess->users_window), &x, &y);
-	width = gdk_window_get_width(gtk_widget_get_window(sess->users_window));
-	height = gdk_window_get_height(gtk_widget_get_window(sess->users_window));
-	if(e->send_event) { /* Is a position event */
-		gtkhx_prefs.geo.users.xpos = x;
-		gtkhx_prefs.geo.users.ypos = y;
-	} else { /* Is a size event */
-		gtkhx_prefs.geo.users.xsize = width;
-		gtkhx_prefs.geo.users.ysize = height;
-	}
+	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
+	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
+
+	gtkhx_prefs.geo.users.xpos = x;
+	gtkhx_prefs.geo.users.ypos = y;
+	gtkhx_prefs.geo.users.xsize = width;
+	gtkhx_prefs.geo.users.ysize = height;
+	return FALSE;
 }
 
 void user_list (session *sess)

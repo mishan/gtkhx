@@ -901,28 +901,28 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	return FALSE;
 }
 
-static void chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data) 
+/* Phase 3.x: see users.c users_move() for rationale — capture both
+ * pos and size on every configure event, use the widget directly
+ * (sess->chat_window is NULL during the very first configure), and
+ * return gboolean so GLib's event-handler protocol works. */
+static gboolean chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
 	int x, y, width, height;
 	struct gtkhx_chat *gchat = data;
-	session *sess = g_object_get_data(G_OBJECT(w), "sess");
+	(void) e;
 
-	gdk_window_get_root_origin(gtk_widget_get_window(sess->chat_window), &x, &y);
-	width = gdk_window_get_width(gtk_widget_get_window(sess->chat_window));
-	height = gdk_window_get_height(gtk_widget_get_window(sess->chat_window));
+	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
+	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
 
-	if(e->send_event) { /* Is a position event */
-		gtkhx_prefs.geo.chat.xpos = x;
-		gtkhx_prefs.geo.chat.ypos = y;
-	}
-	else { /* Is a size event */
-		gtkhx_prefs.geo.chat.xsize = width;
-		gtkhx_prefs.geo.chat.ysize = height;
-	}
+	gtkhx_prefs.geo.chat.xpos = x;
+	gtkhx_prefs.geo.chat.ypos = y;
+	gtkhx_prefs.geo.chat.xsize = width;
+	gtkhx_prefs.geo.chat.ysize = height;
 
-	if(gtkhx_prefs.trans_xtext) {
+	if(gtkhx_prefs.trans_xtext && gchat) {
 		gtk_xtext_refresh(GTK_XTEXT(gchat->output));
 	}
+	return FALSE;
 }
 
 static GtkWidget *chat_hbox;

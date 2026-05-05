@@ -410,12 +410,17 @@ hxd_fd_clr (int fd, int rw)
 						 "gtkhx: fd %d >= 1024", fd);
 		hx_quit();
 	}
-	if (rw & FDR) {
+	/* The arrays are pre-zeroed to -1 (see init()), so a clear request
+	 * for a fd that was never set up — e.g. cleanup at exit on a
+	 * connection that only ever had a read watch — would otherwise call
+	 * g_source_remove((guint)-1) and trip GLib's "Source ID 4294967295
+	 * was not found" critical. */
+	if ((rw & FDR) && rinput_tags[fd] != -1) {
 		tag = rinput_tags[fd];
 		g_source_remove(tag);
 		rinput_tags[fd] = -1;
 	}
-	if (rw & FDW) {
+	if ((rw & FDW) && winput_tags[fd] != -1) {
 		tag = winput_tags[fd];
 		g_source_remove(tag);
 		winput_tags[fd] = -1;
