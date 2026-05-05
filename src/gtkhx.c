@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -282,8 +283,13 @@ session the_session;
 
 /* Forward declaration of the application object owned by loop(). hx_quit()
  * needs to call g_application_quit on it, but loop() comes much later
- * in this TU and gtkhx_app's definition lives there. */
-static GtkApplication *gtkhx_app;
+ * in this TU and gtkhx_app's definition lives there.
+ *
+ * Phase 5: AdwApplication subclasses GtkApplication, so the existing
+ * gtk_application_* call sites keep working unchanged. The upgrade
+ * gives us libadwaita's AdwStyleManager (color-scheme tracking,
+ * Adwaita stylesheet) for free. */
+static AdwApplication *gtkhx_app;
 
 /* Phase 5: the dialog code paths in gtkutil.c (error_dialog) and
  * options.c need a transient parent to satisfy GTK 4's "GtkDialog
@@ -296,7 +302,7 @@ gtkhx_active_window (void)
 {
 	if (!gtkhx_app)
 		return NULL;
-	return gtk_application_get_active_window (gtkhx_app);
+	return gtk_application_get_active_window (GTK_APPLICATION (gtkhx_app));
 }
 
 /* Phase 5 settings management:
@@ -791,7 +797,12 @@ loop (void)
 {
 	gtk_threads_init();
 
-	gtkhx_app = gtk_application_new ("com.nasledov.gtkhx",
+	/* Phase 5: AdwApplication wraps GtkApplication and additionally
+	 * calls adw_init() so libadwaita's stylesheet, types, and the
+	 * AdwStyleManager singleton are available app-wide. The activate
+	 * signal still fires the same way; existing window-registration
+	 * logic in gtkhx_activate stays unchanged. */
+	gtkhx_app = adw_application_new ("com.nasledov.gtkhx",
 	                                 G_APPLICATION_NON_UNIQUE);
 	g_signal_connect (gtkhx_app, "activate",
 	                  G_CALLBACK (gtkhx_activate), NULL);

@@ -62,6 +62,12 @@ add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c'
 # no GnuTLS (Phase ∞ work, requires server-side cooperation).
 # -----------------------------------------------------------------------------
 gtk_dep     = dependency('gtk4',      version : '>= 4.6')
+# Phase 5: libadwaita gives us AdwApplication (color-scheme tracking),
+# AdwPreferencesWindow (modern Settings layout), AdwHeaderBar, AdwToast,
+# AdwAboutWindow. 1.4 is the floor that ships AdwSwitchRow / AdwEntryRow /
+# AdwSpinRow / AdwComboRow as a coherent set; older versions miss pieces
+# we want for the Settings refactor.
+adw_dep     = dependency('libadwaita-1', version : '>= 1.4')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 zlib_dep    = dependency('zlib')
@@ -76,6 +82,7 @@ math_dep    = cc.find_library('m',  required : false)
 
 deps = [
   gtk_dep,
+  adw_dep,
   glib_dep,
   gthread_dep,
   zlib_dep,
@@ -117,10 +124,11 @@ install_man('gtkhx.1')
 # -----------------------------------------------------------------------------
 summary(
   {
-    'GTK'    : gtk_dep.version(),
-    'GLib'   : glib_dep.version(),
-    'Nettle' : nettle_dep.version(),
-    'zlib'   : zlib_dep.version(),
+    'GTK'        : gtk_dep.version(),
+    'libadwaita' : adw_dep.version(),
+    'GLib'       : glib_dep.version(),
+    'Nettle'     : nettle_dep.version(),
+    'zlib'       : zlib_dep.version(),
   },
   section : 'Dependencies',
 )
