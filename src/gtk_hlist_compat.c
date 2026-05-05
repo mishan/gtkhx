@@ -435,7 +435,7 @@ gtk_hlist_set_pixtext (GtkHList *hlist, gint row, gint column,
 }
 
 void
-gtk_hlist_set_foreground (GtkHList *hlist, gint row, GdkColor *color)
+gtk_hlist_set_foreground (GtkHList *hlist, gint row, GdkRGBA *color)
 {
 	GtkHListPrivate *priv;
 	GtkTreeIter iter;
@@ -446,8 +446,13 @@ gtk_hlist_set_foreground (GtkHList *hlist, gint row, GdkColor *color)
 	if (!iter_at_row (priv, row, &iter))
 		return;
 	if (color) {
+		/* Phase 3.10: GdkRGBA channels are doubles 0..1 — scale to
+		 * 16-bit to keep emitting the same #RRRRGGGGBBBB hex string
+		 * the GtkCellRendererText 'foreground' attribute expects. */
 		g_snprintf (buf, sizeof buf, "#%04x%04x%04x",
-		            color->red, color->green, color->blue);
+		            (unsigned) (color->red   * 65535),
+		            (unsigned) (color->green * 65535),
+		            (unsigned) (color->blue  * 65535));
 		gtk_list_store_set (priv->store, &iter,
 		                    HLIST_COL_FG,     buf,
 		                    HLIST_COL_FG_SET, TRUE,

@@ -1,7 +1,7 @@
 #ifndef HX_CHAT_H
 #define HX_CHAT_H
 
-extern GdkColor colors[];
+extern GdkRGBA colors[];
 
 extern struct chat *chat_new (session *sess, guint32 cid);
 extern void chat_delete (session *sess, struct chat *chat);

@@ -80,8 +80,8 @@ struct _GtkHListRow
 {
 	GtkHellText **cell;           /* cell[col] — text only; pixmaps NULL */
 	GtkStateType state;
-	GdkColor     foreground;
-	GdkColor     background;
+	GdkRGBA      foreground;      /* Phase 3.10 */
+	GdkRGBA      background;      /* Phase 3.10 */
 	gpointer     style;           /* unused — was GtkStyle * */
 	gpointer     data;
 	GDestroyNotify destroy;       /* unused by consumers */
@@ -164,7 +164,7 @@ void       gtk_hlist_set_pixtext         (GtkHList   *hlist,
 
 void       gtk_hlist_set_foreground      (GtkHList   *hlist,
                                           gint        row,
-                                          GdkColor   *color);
+                                          GdkRGBA    *color);
 
 gint       gtk_hlist_append              (GtkHList   *hlist,
                                           gchar      *text[]);

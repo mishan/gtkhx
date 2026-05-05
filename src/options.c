@@ -116,7 +116,7 @@ void list_icons (void)
 	GtkWidget *icon_list = iv->icon_list;
 	gchar *text[2] = {NULL, NULL};
 	char buf[16];
-	GdkColor col = {0, 0, 0};
+	GdkRGBA col = {0, 0, 0, 1};
 	guint16 nres;
 	guint32 icon;
 	unsigned int nfound = 0;
@@ -485,12 +485,16 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	cfgvars[FONT_IDX].allocated = 1;
 
 
-	fg_col.red = 0xcccc;
-	fg_col.green = 0xcccc;
-	fg_col.blue = 0xcccc;
-	bg_col.red = 0x0000;
-	bg_col.green = 0x0000;
-	bg_col.blue = 0x0000;
+	/* Phase 3.10: GdkRGBA defaults — light grey foreground on black,
+	 * preserving the historic 0xcccc/0xffff fraction. */
+	fg_col.red   = 0xcccc / 65535.0;
+	fg_col.green = 0xcccc / 65535.0;
+	fg_col.blue  = 0xcccc / 65535.0;
+	fg_col.alpha = 1.0;
+	bg_col.red   = 0.0;
+	bg_col.green = 0.0;
+	bg_col.blue  = 0.0;
+	bg_col.alpha = 1.0;
 
 	changed_case(NULL);
 

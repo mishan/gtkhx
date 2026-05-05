@@ -43,8 +43,8 @@ static int user_click_col;
 
 PangoFontDescription *users_font_desc;
 
-GdkColor user_colors[8];
-GdkColor gdk_user_colors[4];
+GdkRGBA user_colors[8];
+GdkRGBA gdk_user_colors[4];
 
 GtkWidget *msgbtn, *kickbtn, *infobtn, *banbtn, *chatbtn, *ignobtn;
 

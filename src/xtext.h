@@ -169,9 +169,11 @@ struct _GtkXText
 	int last_win_w;
 
 	/* Phase 3.4b: GdkGCs removed.  Drawing now uses cairo with palette colors directly. */
+	/* Phase 3.10: palette is GdkRGBA (4 doubles 0..1) — feeds directly
+	 * into cairo_set_source_rgba without any per-draw division. */
 	int cur_fg;						/* currently-active foreground palette index */
 	int cur_bg;						/* currently-active background palette index */
-	GdkColor palette[XTEXT_COLS];
+	GdkRGBA palette[XTEXT_COLS];
 
 	gint io_tag;					  /* for delayed refresh events */
 	gint add_io_tag;				  /* "" when adding new text */
@@ -275,7 +277,7 @@ struct _GtkXTextClass
 	void (*set_scroll_adjustments) (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustment *vadj);
 };
 
-GtkWidget *gtk_xtext_new (GdkColor palette[], int separator);
+GtkWidget *gtk_xtext_new (GdkRGBA palette[], int separator);
 void gtk_xtext_append (xtext_buffer *buf, unsigned char *text, int len, time_t stamp);
 void gtk_xtext_append_indent (xtext_buffer *buf,
 										unsigned char *left_text, int left_len,
@@ -283,7 +285,7 @@ void gtk_xtext_append_indent (xtext_buffer *buf,
 										time_t stamp);
 int gtk_xtext_set_font (GtkXText *xtext, char *name);
 void gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap);
-void gtk_xtext_set_palette (GtkXText * xtext, GdkColor palette[]);
+void gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[]);
 void gtk_xtext_clear (xtext_buffer *buf, int lines);
 void gtk_xtext_refresh (GtkXText * xtext);
 int gtk_xtext_lastlog (xtext_buffer *out, xtext_buffer *search_area);

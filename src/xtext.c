@@ -261,15 +261,12 @@ static void gtk_xtext_search_fini (xtext_buffer *);
 static gboolean gtk_xtext_search_init (xtext_buffer *buf, const gchar *text, gtk_xtext_search_flags flags, GError **perr);
 static char * gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent, int *ret_off, int *ret_len, GSList **slp);
 
-/* Phase 3.4b: cairo helpers.  GdkColor is gushort R/G/B (0..65535);
- * cairo_set_source_rgb wants doubles 0..1. */
+/* Phase 3.10: palette colors are GdkRGBA, which is what
+ * gdk_cairo_set_source_rgba consumes — no per-draw conversion. */
 static inline void
-xtext_cairo_set_source_color (cairo_t *cr, const GdkColor *col)
+xtext_cairo_set_source_color (cairo_t *cr, const GdkRGBA *col)
 {
-	cairo_set_source_rgb (cr,
-		col->red   / 65535.0,
-		col->green / 65535.0,
-		col->blue  / 65535.0);
+	gdk_cairo_set_source_rgba (cr, (GdkRGBA *) col);
 }
 
 static inline void
@@ -706,7 +703,7 @@ gtk_xtext_adjustment_changed (GtkAdjustment * adj, GtkXText * xtext)
 }
 
 GtkWidget *
-gtk_xtext_new (GdkColor palette[], int separator)
+gtk_xtext_new (GdkRGBA palette[], int separator)
 {
 	GtkXText *xtext;
 
@@ -3559,7 +3556,7 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 }
 
 void
-gtk_xtext_set_palette (GtkXText * xtext, GdkColor palette[])
+gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[])
 {
 	int i;
 

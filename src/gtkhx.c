@@ -64,8 +64,8 @@ char *g_user_colors[4] = {WHITE_BOLD, WHITE, RED_BOLD, RED};
 
 struct ifn user_icon_files;
 struct ifn icon_files;
-GdkColor fg_col;
-GdkColor bg_col;
+GdkRGBA fg_col;
+GdkRGBA bg_col;
 
 PangoFontDescription *gtkhx_font_desc;
 
@@ -84,12 +84,12 @@ static GtkCssProvider *gtkhx_css_provider = NULL;
 static GtkCssProvider *gtkhx_userlist_css_provider = NULL;
 
 static void
-gdkcolor_to_css (const GdkColor *c, char *out, size_t outsz)
+gdkrgba_to_css (const GdkRGBA *c, char *out, size_t outsz)
 {
 	g_snprintf (out, outsz, "rgb(%u,%u,%u)",
-	            (unsigned) (c->red   >> 8),
-	            (unsigned) (c->green >> 8),
-	            (unsigned) (c->blue  >> 8));
+	            (unsigned) (c->red   * 255),
+	            (unsigned) (c->green * 255),
+	            (unsigned) (c->blue  * 255));
 }
 
 static void
@@ -189,8 +189,8 @@ gtkhx_refresh_css (void)
 	}
 
 	fontprops = pango_to_css_props (gtkhx_font_desc);
-	gdkcolor_to_css (&fg_col, fg_buf, sizeof fg_buf);
-	gdkcolor_to_css (&bg_col, bg_buf, sizeof bg_buf);
+	gdkrgba_to_css (&fg_col, fg_buf, sizeof fg_buf);
+	gdkrgba_to_css (&bg_col, bg_buf, sizeof bg_buf);
 
 	/* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
 	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
@@ -484,62 +484,32 @@ hxd_fd_clr (int fd, int rw)
 
 static void init_colors (GtkWidget *widget)
 {
-	int i;
+	/* Phase 3.10: GdkRGBA all the way down. The GTK 1.2-era manual
+	 * .pixel computation is gone for good — paletted colormaps have
+	 * been gone since GTK 3, and cairo + Pango consume the float
+	 * channels directly. Initializer literals via the RGB16 macro
+	 * preserve the historic 16-bit channel values used by the rest
+	 * of the codebase. */
+	static const GdkRGBA defaults_user_colors[8] = {
+		RGB16 (0x0000, 0x0000, 0x0000),
+		RGB16 (0xffff, 0x0000, 0x0000),
+		RGB16 (0x0000, 0xffff, 0x0000),
+		RGB16 (0xffff, 0xffff, 0x0000),
+		RGB16 (0x0000, 0x0000, 0xffff),
+		RGB16 (0xffff, 0x0000, 0xffff),
+		RGB16 (0x0000, 0xffff, 0xffff),
+		RGB16 (0xffff, 0xffff, 0xffff),
+	};
+	static const GdkRGBA defaults_gdk_user_colors[4] = {
+		RGB16 (0x0000, 0x0000, 0x0000), /* black */
+		RGB16 (0xa0a0, 0xa0a0, 0xa0a0), /* grey */
+		RGB16 (0xffff, 0x0000, 0x0000), /* red */
+		RGB16 (0xffff, 0xa7a7, 0xb0b0), /* light pink */
+	};
+
 	(void) widget;
-	/* GTK 3 has no GdkColormap; truecolor is assumed and the .pixel
-	 * field on GdkColor has no real meaning past being the packed RGB.
-	 * The legacy code allocated colors from a paletted colormap; here
-	 * we just compute the packed RGB and rely on cairo (Phase 3.4) for
-	 * the actual draw. */
-	user_colors[0].red = 0x0000;
-	user_colors[0].green = 00000;
-	user_colors[0].blue = 0x0000;
-	user_colors[1].red = 0xffff;
-	user_colors[1].green = 0x0000;
-	user_colors[1].blue = 0x0000;
-	user_colors[2].red = 0x0000;
-	user_colors[2].green = 0xffff;
-	user_colors[2].blue = 0x0000;
-	user_colors[3].red = 0xffff;
-	user_colors[3].green = 0xffff;
-	user_colors[3].blue = 0x0000;
-	user_colors[4].red = 0x0000;
-	user_colors[4].green = 0x0000;
-	user_colors[4].blue = 0xffff;
-	user_colors[5].red = 0xffff;
-	user_colors[5].green = 0x0000;
-	user_colors[5].blue = 0xffff;
-	user_colors[6].red = 0x0000;
-	user_colors[6].green = 0xffff;
-	user_colors[6].blue = 0xffff;
-	user_colors[7].red = 0xffff;
-	user_colors[7].green = 0xffff;
-	user_colors[7].blue = 0xffff;
-
-	for (i = 0; i < 8; i++) {
-		user_colors[i].pixel = (gulong)(((user_colors[i].red & 0xff00) << 8) +
-										(user_colors[i].green & 0xff00) +
-										((user_colors[i].blue & 0xff00) >> 8));
-	}
-
-	gdk_user_colors[0].red = 0;
-	gdk_user_colors[0].green = 0;
-	gdk_user_colors[0].blue = 0;
-	gdk_user_colors[1].red = 0xa0a0;
-	gdk_user_colors[1].green = 0xa0a0;
-	gdk_user_colors[1].blue = 0xa0a0;
-	gdk_user_colors[2].red = 0xffff;
-	gdk_user_colors[2].green = 0;
-	gdk_user_colors[2].blue = 0;
-	gdk_user_colors[3].red = 0xffff;
-	gdk_user_colors[3].green = 0xa7a7;
-	gdk_user_colors[3].blue = 0xb0b0;
-
-	for (i = 0; i < 4; i++) {
-		colors[i].pixel = (gulong)(((gdk_user_colors[i].red & 0xff00) << 8) +
-								   (gdk_user_colors[i].green & 0xff00) +
-								   ((gdk_user_colors[i].blue & 0xff00) >> 8));
-	}
+	memcpy (user_colors,     defaults_user_colors,     sizeof user_colors);
+	memcpy (gdk_user_colors, defaults_gdk_user_colors, sizeof gdk_user_colors);
 }
 
 char *colorstr (guint16 color)

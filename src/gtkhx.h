@@ -8,8 +8,8 @@ extern PangoFontDescription *gtkhx_font_desc;
 
 extern struct ifn user_icon_files;
 extern struct ifn icon_files;
-extern GdkColor fg_col;
-extern GdkColor bg_col;
+extern GdkRGBA fg_col;
+extern GdkRGBA bg_col;
 
 extern void init_icons (void);
 

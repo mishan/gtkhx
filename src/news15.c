@@ -672,7 +672,7 @@ void output_news_folder (struct gnews_folder *gfnews)
 	gint row, i;
 	GdkPixmap *icon;
 	GdkBitmap *mask;
-	GdkColor col = {0,0,0};
+	GdkRGBA col = {0, 0, 0, 1};
 	struct path_hist *path = NULL;
 
 	news_list = gfnews->news_list;

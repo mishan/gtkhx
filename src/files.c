@@ -957,7 +957,7 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 	char namstr[255];
 	struct gfile_list *gfl = (struct gfile_list *)data;
 	struct path_hist *path = 0;
-	GdkColor col = {0, 0, 0};
+	GdkRGBA col = {0, 0, 0, 1};
 
 	files_list = gfl->hlist;
 	gtk_window_set_title(GTK_WINDOW(gfl->window), cfl->path);

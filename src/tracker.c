@@ -163,7 +163,7 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 	char nusersstr[8], portstr[8], *text[5];
 	int namelen, desclen;
 	char flag;
-	GdkColor col = {0, 0, 0};
+	GdkRGBA col = {0, 0, 0, 1};
 
 	if(!root) {
 		return;

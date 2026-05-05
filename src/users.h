@@ -10,8 +10,8 @@ extern GtkWidget *banbtn;
 extern GtkWidget *chatbtn;
 extern GtkWidget *ignobtn;
 
-extern GdkColor user_colors[8];
-extern GdkColor gdk_user_colors[4];
+extern GdkRGBA user_colors[8];
+extern GdkRGBA gdk_user_colors[4];
 
 extern PangoFontDescription *users_font_desc;
 

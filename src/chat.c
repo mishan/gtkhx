@@ -72,48 +72,52 @@ extern PangoFontDescription *gtkhx_font_desc;
  * past slot 19 and was getting uninitialized memory, which is why the
  * default background looked weird.
  */
-GdkColor colors[] =
+/* Phase 3.10: GdkColor (16-bit per channel + paletted-X11 pixel slot)
+ * → GdkRGBA (4 doubles 0..1, no pixel slot). Each row is one color
+ * literal preserved exactly via the RGB16 macro from compat.h, which
+ * folds (channel/65535.0) at compile time. */
+GdkRGBA colors[] =
 {
 	/* mIRC 0..15 */
-	{0, 0,      0,      0},      /* 0  black */
-	{0, 0xcccc, 0xcccc, 0xcccc}, /* 1  white */
-	{0, 0,      0,      0xcccc}, /* 2  blue */
-	{0, 0,      0xcccc, 0},      /* 3  green */
-	{0, 0xcccc, 0,      0},      /* 4  red */
-	{0, 0xbbbb, 0xbbbb, 0},      /* 5  yellow/brown */
-	{0, 0xbbbb, 0,      0xbbbb}, /* 6  purple */
-	{0, 0xffff, 0xaaaa, 0},      /* 7  orange */
-	{0, 0xffff, 0xffff, 0},      /* 8  yellow */
-	{0, 0,      0xffff, 0},      /* 9  green */
-	{0, 0,      0xcccc, 0xcccc}, /* 10 aqua */
-	{0, 0,      0xffff, 0xffff}, /* 11 light aqua */
-	{0, 0,      0,      0xffff}, /* 12 blue */
-	{0, 0xffff, 0,      0xffff}, /* 13 pink */
-	{0, 0x7777, 0x7777, 0x7777}, /* 14 grey */
-	{0, 0x9999, 0x9999, 0x9999}, /* 15 light grey */
+	RGB16 (0,      0,      0     ), /* 0  black */
+	RGB16 (0xcccc, 0xcccc, 0xcccc), /* 1  white */
+	RGB16 (0,      0,      0xcccc), /* 2  blue */
+	RGB16 (0,      0xcccc, 0     ), /* 3  green */
+	RGB16 (0xcccc, 0,      0     ), /* 4  red */
+	RGB16 (0xbbbb, 0xbbbb, 0     ), /* 5  yellow/brown */
+	RGB16 (0xbbbb, 0,      0xbbbb), /* 6  purple */
+	RGB16 (0xffff, 0xaaaa, 0     ), /* 7  orange */
+	RGB16 (0xffff, 0xffff, 0     ), /* 8  yellow */
+	RGB16 (0,      0xffff, 0     ), /* 9  green */
+	RGB16 (0,      0xcccc, 0xcccc), /* 10 aqua */
+	RGB16 (0,      0xffff, 0xffff), /* 11 light aqua */
+	RGB16 (0,      0,      0xffff), /* 12 blue */
+	RGB16 (0xffff, 0,      0xffff), /* 13 pink */
+	RGB16 (0x7777, 0x7777, 0x7777), /* 14 grey */
+	RGB16 (0x9999, 0x9999, 0x9999), /* 15 light grey */
 	/* mIRC 16..31 — duplicate of 0..15 (HexChat does the same) */
-	{0, 0,      0,      0},      /* 16 black */
-	{0, 0xcccc, 0xcccc, 0xcccc}, /* 17 white */
-	{0, 0,      0,      0xcccc}, /* 18 blue */
-	{0, 0,      0xcccc, 0},      /* 19 green */
-	{0, 0xcccc, 0,      0},      /* 20 red */
-	{0, 0xbbbb, 0xbbbb, 0},      /* 21 yellow/brown */
-	{0, 0xbbbb, 0,      0xbbbb}, /* 22 purple */
-	{0, 0xffff, 0xaaaa, 0},      /* 23 orange */
-	{0, 0xffff, 0xffff, 0},      /* 24 yellow */
-	{0, 0,      0xffff, 0},      /* 25 green */
-	{0, 0,      0xcccc, 0xcccc}, /* 26 aqua */
-	{0, 0,      0xffff, 0xffff}, /* 27 light aqua */
-	{0, 0,      0,      0xffff}, /* 28 blue */
-	{0, 0xffff, 0,      0xffff}, /* 29 pink */
-	{0, 0x7777, 0x7777, 0x7777}, /* 30 grey */
-	{0, 0x9999, 0x9999, 0x9999}, /* 31 light grey */
+	RGB16 (0,      0,      0     ), /* 16 black */
+	RGB16 (0xcccc, 0xcccc, 0xcccc), /* 17 white */
+	RGB16 (0,      0,      0xcccc), /* 18 blue */
+	RGB16 (0,      0xcccc, 0     ), /* 19 green */
+	RGB16 (0xcccc, 0,      0     ), /* 20 red */
+	RGB16 (0xbbbb, 0xbbbb, 0     ), /* 21 yellow/brown */
+	RGB16 (0xbbbb, 0,      0xbbbb), /* 22 purple */
+	RGB16 (0xffff, 0xaaaa, 0     ), /* 23 orange */
+	RGB16 (0xffff, 0xffff, 0     ), /* 24 yellow */
+	RGB16 (0,      0xffff, 0     ), /* 25 green */
+	RGB16 (0,      0xcccc, 0xcccc), /* 26 aqua */
+	RGB16 (0,      0xffff, 0xffff), /* 27 light aqua */
+	RGB16 (0,      0,      0xffff), /* 28 blue */
+	RGB16 (0xffff, 0,      0xffff), /* 29 pink */
+	RGB16 (0x7777, 0x7777, 0x7777), /* 30 grey */
+	RGB16 (0x9999, 0x9999, 0x9999), /* 31 light grey */
 	/* UI roles */
-	{0, 0xeeee, 0xeeee, 0xeeee}, /* 32 XTEXT_MARK_FG (light) */
-	{0, 0x2020, 0x4a4a, 0x8787}, /* 33 XTEXT_MARK_BG (blue) */
-	{0, 0xcccc, 0xcccc, 0xcccc}, /* 34 XTEXT_FG (light) */
-	{0, 0,      0,      0},      /* 35 XTEXT_BG (black) */
-	{0, 0xcccc, 0,      0},      /* 36 XTEXT_MARKER (red) */
+	RGB16 (0xeeee, 0xeeee, 0xeeee), /* 32 XTEXT_MARK_FG (light) */
+	RGB16 (0x2020, 0x4a4a, 0x8787), /* 33 XTEXT_MARK_BG (blue) */
+	RGB16 (0xcccc, 0xcccc, 0xcccc), /* 34 XTEXT_FG (light) */
+	RGB16 (0,      0,      0     ), /* 35 XTEXT_BG (black) */
+	RGB16 (0xcccc, 0,      0     ), /* 36 XTEXT_MARKER (red) */
 };
 
 void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, 
@@ -941,18 +945,11 @@ static void chat_close (GtkWidget *widget, gpointer data)
 
 void generate_colors(GtkWidget *widget)
 {
-	int i;
 	(void) widget;
-
-	/* GTK 3 has no GdkColormap and no gdk_color_alloc(); GdkColor.pixel
-	 * is just packed RGB on truecolor displays. */
-	if (!colors[0].pixel) {
-		for(i=0; i<37; i++) {
-			colors[i].pixel = (unsigned long)((colors[i].red & 0xff00) * 256 +
-											  (colors[i].green & 0xff00) +
-											  (colors[i].blue & 0xff00) / 256);
-		}
-	}
+	/* Phase 3.10: nothing to do — the colors[] palette is GdkRGBA now,
+	 * which has no .pixel field. The function is kept as a stub for
+	 * the existing caller in fe_init() and could be deleted as a
+	 * follow-up. */
 }
 
 
