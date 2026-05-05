@@ -601,6 +601,11 @@ static void prompt_chat(session *sess, guint16 _uid)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Private Chat Invitation"));
+	/* Phase 4.5: GTK 4 wants a transient parent for free-floating dialogs
+	 * so the WM/compositor places it correctly. */
+	if (sess && sess->users_window)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog),
+		                             GTK_WINDOW(sess->users_window));
 	(gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 
 	invite = gtk_button_new_with_label(_("Invite"));

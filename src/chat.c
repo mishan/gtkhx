@@ -1253,6 +1253,11 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 
 	dialog = gtk_dialog_new();
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Chat Invitation"));
+	/* Phase 4.5: anchor the dialog to the main chat window so the
+	 * compositor doesn't complain about a free-floating GtkDialog. */
+	if (the_session.chat_window)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog),
+		                             GTK_WINDOW(the_session.chat_window));
 	(gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
 	message = g_strdup_printf("%s %s: 0x%08x", name,
 							  _("invites you to private chat"),  cid);

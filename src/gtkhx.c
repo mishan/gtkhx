@@ -244,31 +244,29 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 void
 gtkhx_apply_text_style (GtkWidget *w)
 {
-	GtkStyleContext *ctx;
-
 	if (!w)
 		return;
 	if (!gtkhx_css_provider)
 		gtkhx_refresh_css ();
 
-	ctx = gtk_widget_get_style_context (w);
-	if (!gtk_style_context_has_class (ctx, "gtkhx-text"))
-		gtk_style_context_add_class (ctx, "gtkhx-text");
+	/* Phase 4.5: gtk_style_context_add_class is deprecated in GTK 4.10
+	 * and was the source of a gtk_css_node_insert_after assertion when
+	 * adding the class on a widget whose CSS node hadn't been parented
+	 * yet. gtk_widget_add_css_class is the modern, safer path. */
+	if (!gtk_widget_has_css_class (w, "gtkhx-text"))
+		gtk_widget_add_css_class (w, "gtkhx-text");
 }
 
 void
 gtkhx_apply_userlist_style (GtkWidget *w)
 {
-	GtkStyleContext *ctx;
-
 	if (!w)
 		return;
 	if (!gtkhx_userlist_css_provider)
 		gtkhx_refresh_userlist_css (NULL);
 
-	ctx = gtk_widget_get_style_context (w);
-	if (!gtk_style_context_has_class (ctx, "gtkhx-userlist"))
-		gtk_style_context_add_class (ctx, "gtkhx-userlist");
+	if (!gtk_widget_has_css_class (w, "gtkhx-userlist"))
+		gtk_widget_add_css_class (w, "gtkhx-userlist");
 }
 static GtkWidget *agreetext;
 static struct timer *timer_list;
