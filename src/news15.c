@@ -673,7 +673,6 @@ void output_news_folder (struct gnews_folder *gfnews)
 	gint row, i;
 	GdkPixmap *icon;
 	GdkBitmap *mask;
-	GdkRGBA col = {0, 0, 0, 1};
 	struct path_hist *path = NULL;
 
 	news_list = gfnews->news_list;
@@ -708,9 +707,9 @@ void output_news_folder (struct gnews_folder *gfnews)
 				? "/com/nasledov/gtkhx/pixmaps/newsfld.xpm"
 				: "/com/nasledov/gtkhx/pixmaps/newscat.xpm",
 			NULL);
-		gtk_hlist_set_pixtext(GTK_HLIST(news_list), row, 0, item->name, 34, 
+		gtk_hlist_set_pixtext(GTK_HLIST(news_list), row, 0, item->name, 34,
 							  icon, mask);
-		gtk_hlist_set_foreground(GTK_HLIST(news_list), row, &col);
+		/* Phase 5 dark-theme: theme default foreground applies. */
 	}
 	gtk_hlist_thaw(GTK_HLIST(news_list));
 
