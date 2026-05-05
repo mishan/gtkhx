@@ -596,9 +596,8 @@ static void prompt_chat(session *sess, guint16 _uid)
 	g_signal_connect(invite, "clicked",
 					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
 
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), scroll, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnhbox, 0, 0,
-					   0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), scroll, 0, 0, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnhbox, 0, 0, 0);
 	gtkhx_box_pack(btnhbox, invite, 0, 0, 0);
 	gtkhx_box_pack(btnhbox, new, 0, 0, 0);
 	gtkhx_box_pack(btnhbox, cancel, 0, 0, 0);
@@ -847,9 +846,7 @@ void create_users_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.users.xsize,
 		                            gtkhx_prefs.geo.users.ysize);
 	if (gtkhx_prefs.geo.users.xpos > 0 || gtkhx_prefs.geo.users.ypos > 0)
-		gtk_window_move(GTK_WINDOW(users_window),
-		                gtkhx_prefs.geo.users.xpos,
-		                gtkhx_prefs.geo.users.ypos);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
 	gtk_widget_show(users_window);
 
 	gtkhx_prefs.geo.users.open = 1;

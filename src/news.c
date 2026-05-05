@@ -260,9 +260,7 @@ void create_news_window (session *sess)
 		                            gtkhx_prefs.geo.news.xsize,
 		                            gtkhx_prefs.geo.news.ysize);
 	if (gtkhx_prefs.geo.news.xpos > 0 || gtkhx_prefs.geo.news.ypos > 0)
-		gtk_window_move(GTK_WINDOW(news_window),
-		                gtkhx_prefs.geo.news.xpos,
-		                gtkhx_prefs.geo.news.ypos);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
 
 	gtk_widget_show(news_window);
 

@@ -74,6 +74,13 @@ extern void gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
 extern void gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child);
 
 /*
+ * Phase 4.2: gtk_container_remove is gone too — dispatch to the
+ * type-specific remove call (gtk_box_remove / gtk_list_box_remove /
+ * etc.), or unparent for plain children.
+ */
+extern void gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child);
+
+/*
  * Phase 4.2: gtk_box_pack_start / pack_end are gone too. The old API
  * carried four parameters that GTK 4 splits across the box (which
  * just appends in order) and the child widget (hexpand / vexpand

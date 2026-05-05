@@ -312,7 +312,7 @@ void create_toolbar_window (session *sess)
 	g_signal_connect(toolbar_window, "delete_event",
 	                 G_CALLBACK(close_toolbar_window), 0);
 
-	gtk_window_move(GTK_WINDOW(toolbar_window), gtkhx_prefs.geo.tool.xpos, gtkhx_prefs.geo.tool.ypos);
+	/* Phase 4.2: gtk_window_move removed (Wayland) */
 
 	gtk_widget_show(toolbar_window);
 	init_keyaccel(toolbar_window);

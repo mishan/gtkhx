@@ -383,8 +383,8 @@ void broadcastmsg(char *text)
 	gtk_widget_set_size_request(dialog, 300, 250);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), scroll, TRUE, TRUE , 0);
-	gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbtn, TRUE, TRUE, 0);
+    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), scroll, TRUE, TRUE, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbtn, TRUE, TRUE, 0);
     /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
 	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);

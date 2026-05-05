@@ -360,7 +360,7 @@ static void prompt_conversion (char *name)
     gtk_widget_set_size_request(dialog, 250, 200);
     gtk_widget_show(dialog);
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), label, TRUE, TRUE , 0);
+    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
 
     gtk_widget_show(label);
 
@@ -375,8 +375,8 @@ static void prompt_conversion (char *name)
 
     /* Phase 4.2: gtk_widget_set_can_default removed */
 
-    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 0, 0, 0);
-    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), cancelbtn, 0, 0, 0);
+    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbutton, 0, 0, 0);
+    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), cancelbtn, 0, 0, 0);
 
     /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
 
@@ -646,11 +646,11 @@ static void save_dialog(GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
 	gtk_widget_set_size_request(dialog, 200, 100);
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), hbox, 0, 0, 0);
 	gtkhx_box_pack(hbox, label, 0, 0, 0);
 	gtkhx_box_pack(hbox, name_entry, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), ok, 0,0, 0);
-	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), cancel, 0,0, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), ok, 0, 0, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), cancel, 0, 0, 0);
 	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
 	g_signal_connect(cancel, "clicked", G_CALLBACK(cancel_save), 0);
 	g_object_set_data(G_OBJECT(ok), "name", name_entry);
@@ -732,7 +732,7 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 	connect_window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(connect_window), "Connect");
-	gtk_window_set_position(GTK_WINDOW(connect_window), GTK_WIN_POS_CENTER);
+	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
 	g_signal_connect(connect_window, "destroy",
 			   G_CALLBACK(close_connect_window), 0);
 	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);

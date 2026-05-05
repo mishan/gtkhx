@@ -176,7 +176,7 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 static void gtask_delete (session *sess, struct gtask *gtsk)
 {
 	if(sess->gtklist) {
-		gtk_container_remove(GTK_CONTAINER(sess->gtklist), gtsk->listitem);
+		gtkhx_widget_remove_child(sess->gtklist, gtsk->listitem);
 	}
 	if (gtsk->next)
 		gtsk->next->prev = gtsk->prev;
@@ -323,7 +323,7 @@ tasks_destroy (GtkWidget *widget, gpointer data)
 {
 	session *sess = data;
 
-	gtk_container_remove(GTK_CONTAINER(tasks_vbox), sess->gtask_scroll);
+	gtkhx_widget_remove_child(tasks_vbox, sess->gtask_scroll);
 	gtkhx_prefs.geo.tasks.open = 0;
 	gtkhx_prefs.geo.tasks.init = 0;
 }
@@ -385,7 +385,7 @@ static void
 gtklist_row_move(GtkListBox *box, GtkWidget *row, int new_index)
 {
 	g_object_ref(row);
-	gtk_container_remove(GTK_CONTAINER(box), row);
+	gtkhx_widget_remove_child(box, row);
 	gtk_list_box_insert(box, row, new_index);
 	g_object_unref(row);
 	gtk_list_box_select_row(box, GTK_LIST_BOX_ROW(row));
@@ -615,9 +615,7 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 		                            gtkhx_prefs.geo.tasks.xsize,
 		                            gtkhx_prefs.geo.tasks.ysize);
 	if (gtkhx_prefs.geo.tasks.xpos > 0 || gtkhx_prefs.geo.tasks.ypos > 0)
-		gtk_window_move(GTK_WINDOW(tasks_window),
-		                gtkhx_prefs.geo.tasks.xpos,
-		                gtkhx_prefs.geo.tasks.ypos);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
 	gtk_widget_show(tasks_window);
 
 

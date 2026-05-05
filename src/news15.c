@@ -353,7 +353,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
 	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
@@ -372,7 +372,7 @@ static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	/* Phase 4.2: gtk_widget_set_can_default removed */
-	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
+	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
 	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
 	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
 	gtk_widget_show(dialog);
@@ -394,7 +394,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), entryHbox ,0, 0, 0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
 	nameEntryLabel = gtk_label_new(_("Name: "));
 	nameEntry = gtk_entry_new();
 	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
@@ -413,7 +413,7 @@ static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 
 	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	/* Phase 4.2: gtk_widget_set_can_default removed */
-	gtk_container_add(GTK_CONTAINER(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), btnHbox);
+	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
 	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
 	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
 	gtk_widget_show(dialog);

@@ -933,7 +933,7 @@ static void chat_close (GtkWidget *widget, gpointer data)
 
 	wind_tmp = gtk_window_new();
 
-	gtk_container_remove(GTK_CONTAINER(gtk_widget_get_parent(hbox)), hbox);
+	gtkhx_widget_remove_child(gtk_widget_get_parent(hbox), hbox);
 	gtkhx_widget_set_child(wind_tmp, hbox);
 	gtk_widget_realize(gchat->output);
 	gchat->input = 0;
@@ -1072,7 +1072,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gtkhx_box_pack(vbox, vpaned, 1, 1, 0);
 
 	if(wind_tmp) {
-		gtk_container_remove(GTK_CONTAINER(wind_tmp), chat_hbox);
+		gtkhx_widget_remove_child(wind_tmp, chat_hbox);
 		gtkhx_widget_destroy(wind_tmp);
 	}
 
@@ -1111,9 +1111,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	 * window under GTK 3). The earlier set_size_request(412, 280)
 	 * call serves as the default. */
 	if (gtkhx_prefs.geo.chat.xpos > 0 || gtkhx_prefs.geo.chat.ypos > 0)
-		gtk_window_move(GTK_WINDOW(chat_window),
-		                gtkhx_prefs.geo.chat.xpos,
-		                gtkhx_prefs.geo.chat.ypos);
+		/* Phase 4.2: gtk_window_move removed (Wayland) */
 	if (gtkhx_prefs.geo.chat.xsize > 0 && gtkhx_prefs.geo.chat.ysize > 0)
 		gtk_window_set_default_size(GTK_WINDOW(chat_window),
 		                            gtkhx_prefs.geo.chat.xsize,
@@ -1270,8 +1268,8 @@ void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	/* Phase 4.2: gtk_widget_set_can_default removed */
 
-	gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), label, 0, 0, 0);
-	gtk_box_pack_start(GTK_BOX(gtkhx_dialog_action_area(GTK_DIALOG(dialog))), hbox, 0, 0, 0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), label, 0, 0, 0);
+	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), hbox, 0, 0, 0);
 	gtkhx_box_pack(hbox, join, 0, 0, 0);
 	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
 	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */

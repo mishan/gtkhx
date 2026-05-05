@@ -1675,7 +1675,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 
 	dialog = gtk_dialog_new ();
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
-	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
+	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
 	gtk_widget_set_size_request(dialog, 570, 400);
 	g_object_set_data(G_OBJECT(dialog), "sess", sess);
 	g_signal_connect_swapped (dialog, "delete_event",
@@ -1692,8 +1692,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	/* Phase 3.2: gtk_button_box_set_spacing was removed in GTK 3.
 	 * GtkButtonBox descends from GtkBox, so use gtk_box_set_spacing. */
 	gtk_box_set_spacing (GTK_BOX (hbbox), 4);
-	gtk_box_pack_end (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), hbbox,
-							FALSE, FALSE, 0);
+	gtkhx_box_pack_end(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), hbbox, FALSE, FALSE, 0);
 
 	wid = gtk_button_new_with_label (_("OK"));
 	g_signal_connect (wid, "clicked",
@@ -1712,8 +1711,7 @@ void create_options_window(GtkWidget *widget, gpointer data)
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	(gtk_widget_set_margin_start(hbox, 6), gtk_widget_set_margin_end(hbox, 6), gtk_widget_set_margin_top(hbox, 6), gtk_widget_set_margin_bottom(hbox, 6));
-	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))),
-							  hbox, TRUE, TRUE, 0);
+	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), hbox, TRUE, TRUE, 0);
 
 	store = gtk_tree_store_new(OPT_N_COLS, G_TYPE_STRING, G_TYPE_INT);
 	ctree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));

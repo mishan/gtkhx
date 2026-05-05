@@ -247,8 +247,7 @@ void error_dialog (char *title, char *msg)
     label = gtk_label_new (message);
     gtk_widget_set_size_request(dialog, 250, 200);
 
-    gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area(GTK_DIALOG (dialog))), label, TRUE, 
-						TRUE , 0);
+    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
 
     okbutton = gtk_button_new_with_label ("Ok");
 
@@ -258,8 +257,7 @@ void error_dialog (char *title, char *msg)
 
     /* Phase 4.2: gtk_widget_set_can_default removed */
 
-    gtk_box_pack_start (GTK_BOX (gtkhx_dialog_action_area(GTK_DIALOG(dialog))), okbutton, 
-						TRUE, TRUE, 0);
+    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbutton, TRUE, TRUE, 0);
 
 
     /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
@@ -268,13 +266,29 @@ void error_dialog (char *title, char *msg)
 	g_free(message);
 }
 
+/* Phase 4.2: gtk_dialog_get_action_area is fully removed in GTK 4
+ * (the action area widget is gone too). Synthesize one: a horizontal
+ * GtkBox attached to the bottom of the dialog's content area on
+ * first call, cached on the dialog via g_object_set_data so repeat
+ * calls return the same box. Callers' gtkhx_box_pack(area, btn, ...)
+ * just append to this box. */
 GtkWidget *
 gtkhx_dialog_action_area (GtkDialog *dialog)
 {
 	GtkWidget *area;
-	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-	area = gtk_dialog_get_action_area (dialog);
-	G_GNUC_END_IGNORE_DEPRECATIONS
+
+	if (!dialog)
+		return NULL;
+	area = g_object_get_data (G_OBJECT (dialog), "gtkhx-action-area");
+	if (!area) {
+		GtkWidget *content = gtk_dialog_get_content_area (dialog);
+		area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+		gtk_widget_set_halign (area, GTK_ALIGN_END);
+		gtk_widget_set_margin_top (area, 6);
+		if (GTK_IS_BOX (content))
+			gtk_box_append (GTK_BOX (content), area);
+		g_object_set_data (G_OBJECT (dialog), "gtkhx-action-area", area);
+	}
 	return area;
 }
 
@@ -360,6 +374,20 @@ gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child)
 	else
 		g_warning ("gtkhx_widget_set_child: unhandled parent type %s",
 		           G_OBJECT_TYPE_NAME (parent));
+}
+
+void
+gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child)
+{
+	if (!parent || !child)
+		return;
+
+	if (GTK_IS_BOX (parent))
+		gtk_box_remove (GTK_BOX (parent), child);
+	else if (GTK_IS_LIST_BOX (parent))
+		gtk_list_box_remove (GTK_LIST_BOX (parent), child);
+	else
+		gtk_widget_unparent (child);
 }
 
 static void
