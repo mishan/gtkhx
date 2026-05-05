@@ -224,7 +224,11 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 	char rpath[4096];
 
 	if (response_id == GTK_RESPONSE_ACCEPT) {
-		lpath = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+		/* Phase 4.7: gtk_file_chooser_get_filename returned a g_malloc'd
+		 * char* in GTK 3. In GTK 4 the chooser returns a GFile, so we
+		 * grab the path off it and free the GFile afterwards. */
+		GFile *gf = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
+		lpath = gf ? g_file_get_path (gf) : NULL;
 		gfl = gfl_with_hlist(files_list);
 		if (gfl && gfl->cfl && lpath) {
 			snprintf(rpath, sizeof(rpath), "%s/%s",
@@ -232,6 +236,7 @@ upload_file_response(GtkDialog *dialog, gint response_id, gpointer user_data)
 			hx_put_file(&the_session.htlc, lpath, rpath);
 		}
 		g_free(lpath);
+		if (gf) g_object_unref (gf);
 	}
 	gtkhx_widget_destroy(GTK_WIDGET(dialog));
 }
