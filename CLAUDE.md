@@ -76,9 +76,6 @@ What's *runnable* on first boot from this branch:
 
 What's *degraded* and tracked as Phase 4 follow-up work:
 
-- **Files drag-and-drop**: cross-window file move via DnD is stripped
-  pending the `GtkDragSource` / `GtkDropTarget` port (Phase 4.8 follow-up
-  inside `files.c`).
 - **xtext background pixmap**: `gdk_cairo_surface_create_from_pixbuf` is
   gone in GTK 4; `gtk_xtext_set_background` is a no-op until the pixbuf
   bytes get rendered into a `cairo_image_surface_t` manually.
