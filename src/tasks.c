@@ -496,17 +496,14 @@ task_go (GtkWidget *widget, gpointer data)
 	}
 }
 
-/* Phase 3.x: see users.c users_move() for rationale. */
+/* Phase 3.x: see users.c users_move() for rationale — size on
+ * configure, position deferred to quit. */
 static gboolean tasks_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
-	int x, y, width, height;
+	int width, height;
 	(void) e; (void) data;
 
-	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
 	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-
-	gtkhx_prefs.geo.tasks.xpos = x;
-	gtkhx_prefs.geo.tasks.ypos = y;
 	gtkhx_prefs.geo.tasks.xsize = width;
 	gtkhx_prefs.geo.tasks.ysize = height;
 	return FALSE;
@@ -543,7 +540,6 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	}
 
 	tasks_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(tasks_window), "tasks", "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));

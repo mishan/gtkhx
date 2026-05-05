@@ -575,7 +575,6 @@ static struct gfile_list *create_files_window (char *path)
 					  GDK_ACTION_MOVE|GDK_ACTION_LINK);
 
 	files_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(files_window), "files", "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */

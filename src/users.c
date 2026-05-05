@@ -646,32 +646,26 @@ static void close_users_window (GtkWidget *widget, gpointer data)
 }
 
 /*
- * Phase 3.x: rewrite the configure handler.
+ * Phase 3.x: configure-event handler saves SIZE only.
  *
- * The old implementation had three problems:
+ * The previous version saved position too, but the first configure
+ * event after gtk_widget_show_all reports the WM/compositor's chosen
+ * position rather than the gtk_window_move() we requested at startup.
+ * On Wayland (where client-side positioning is a no-op) that
+ * silently overwrote the saved prefs with 0,0 on the very first map,
+ * which is why position restoration looked broken on the next launch.
  *
- *   1. It dispatched on `e->send_event' to decide between "position
- *      event" and "size event". GTK 3 / Wayland fires the same
- *      configure-event for both, with send_event=FALSE in both cases,
- *      so position changes never landed in prefs.
- *   2. It dereferenced sess->users_window, which is NULL during the
- *      first configure event (set after gtk_widget_show_all returns).
- *   3. It returned void instead of gboolean — undefined behavior in a
- *      handler signature that GLib reads back as TRUE/FALSE.
- *
- * Use the widget passed to the handler directly, capture both pos and
- * size on every configure, and propagate the event by returning FALSE.
+ * Position is now captured at hx_quit() time when the window's
+ * coordinates have settled (see gtkhx.c gtkhx_save_window_positions).
+ * Size is fine to track on every configure — it's user-driven and
+ * the steady-state value is correct.
  */
 static gboolean users_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
-	int x, y, width, height;
+	int width, height;
 	(void) e; (void) data;
 
-	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
 	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-
-	gtkhx_prefs.geo.users.xpos = x;
-	gtkhx_prefs.geo.users.ypos = y;
 	gtkhx_prefs.geo.users.xsize = width;
 	gtkhx_prefs.geo.users.ysize = height;
 	return FALSE;
@@ -714,7 +708,6 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	}
 
 	users_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(users_window), "users", "GtkHx");
 	/* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
 	 * pair that left `style' unread. Forcing realize on a toplevel
 	 * before its children are packed is a footgun under GTK 3 Wayland —

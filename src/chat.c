@@ -901,21 +901,15 @@ static gboolean chat_input_key_press (GtkWidget *widget, GdkEventKey *event, gpo
 	return FALSE;
 }
 
-/* Phase 3.x: see users.c users_move() for rationale — capture both
- * pos and size on every configure event, use the widget directly
- * (sess->chat_window is NULL during the very first configure), and
- * return gboolean so GLib's event-handler protocol works. */
+/* Phase 3.x: see users.c users_move() for rationale — size on
+ * configure, position deferred to quit. */
 static gboolean chat_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
-	int x, y, width, height;
+	int width, height;
 	struct gtkhx_chat *gchat = data;
 	(void) e;
 
-	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
 	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-
-	gtkhx_prefs.geo.chat.xpos = x;
-	gtkhx_prefs.geo.chat.ypos = y;
 	gtkhx_prefs.geo.chat.xsize = width;
 	gtkhx_prefs.geo.chat.ysize = height;
 
@@ -1042,7 +1036,6 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 	gchat = gchat_with_cid(sess, 0);
 	chat_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(chat_window), "chat", "GtkHx");
 
 	gtk_widget_set_size_request(chat_window, 412, 280);
 	gtk_window_set_resizable(GTK_WINDOW(chat_window), TRUE);
@@ -1336,7 +1329,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	titles[1] = _("Name");
 
 	pchat_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(pchat_window), "pchat", "GtkHx");
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
 	gtk_widget_set_size_request(pchat_window, 700, 320);

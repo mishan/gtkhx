@@ -731,7 +731,6 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	}
 
 	connect_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(connect_window), "connect", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(connect_window), "Connect");
 	gtk_window_set_position(GTK_WINDOW(connect_window), GTK_WIN_POS_CENTER);
 	g_signal_connect(connect_window, "destroy",

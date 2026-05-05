@@ -1671,7 +1671,6 @@ void create_options_window(GtkWidget *widget, gpointer data)
 	}
 
 	dialog = gtk_dialog_new ();
-	gtk_window_set_wmclass(GTK_WINDOW(dialog), "options", "GtkHx");
 	gtk_window_set_title (GTK_WINDOW (dialog), _("GtkHx Preferences"));
 	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
 	gtk_widget_set_size_request(dialog, 570, 400);

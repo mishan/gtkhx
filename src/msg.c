@@ -257,7 +257,6 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	msg = create_msg(uid, name);
 
 	title = g_strdup_printf("%s (%u)", name, uid);
-	gtk_window_set_wmclass(GTK_WINDOW(msg->window), "msg", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(msg->window), title);
 	g_free(title);
 

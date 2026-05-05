@@ -85,16 +85,13 @@ void disconnect_clicked (void)
 	}
 }
 
-/* Phase 3.x: see users.c users_move() for rationale. The toolbar has
- * no size to save (it's set non-resizable) — just track position. */
+/* Phase 3.x: position is now captured at hx_quit() time (see
+ * gtkhx_save_window_positions in gtkhx.c) and the toolbar has no
+ * resizable size to save, so this handler is a no-op kept for the
+ * signal connection symmetry. */
 static gboolean tool_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
-	int x, y;
-	(void) e; (void) data;
-
-	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
-	gtkhx_prefs.geo.tool.xpos = x;
-	gtkhx_prefs.geo.tool.ypos = y;
+	(void) w; (void) e; (void) data;
 	return FALSE;
 }
 
@@ -115,7 +112,6 @@ void create_toolbar_window (session *sess)
 	GtkWidget *vbox;
 
 	toolbar_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(toolbar_window), "toolbar", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(toolbar_window), "GtkHx");
 	gtk_window_set_resizable(GTK_WINDOW(toolbar_window), FALSE);
 	g_signal_connect(toolbar_window, "delete_event",

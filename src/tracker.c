@@ -402,7 +402,6 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 		return;
 
 	tracker_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(tracker_window), "tracker", "GtkHx");
 	/* Phase 2 cleanup: don't gtk_widget_realize() the toplevel here — it
 	 * trips a GTK_WIDGET_ANCHORED assertion in GTK 2 when called before
 	 * gtk_widget_show*. The legacy code did it to obtain a parent

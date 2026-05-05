@@ -75,17 +75,14 @@ static void close_news_window (GtkWidget *widget, gpointer data)
 	sess->news_window = 0;
 }
 
-/* Phase 3.x: see users.c users_move() for rationale. */
+/* Phase 3.x: see users.c users_move() for rationale — size on
+ * configure, position deferred to quit. */
 static gboolean news_move(GtkWidget *w, GdkEventConfigure *e, gpointer data)
 {
-	int x, y, width, height;
+	int width, height;
 	(void) e; (void) data;
 
-	gtk_window_get_position(GTK_WINDOW(w), &x, &y);
 	gtk_window_get_size(GTK_WINDOW(w), &width, &height);
-
-	gtkhx_prefs.geo.news.xpos = x;
-	gtkhx_prefs.geo.news.ypos = y;
 	gtkhx_prefs.geo.news.xsize = width;
 	gtkhx_prefs.geo.news.ysize = height;
 	return FALSE;
@@ -129,7 +126,6 @@ create_post_window (GtkWidget *widget, gpointer data)
 	session *sess = data;
 
 	post_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(post_window), "post", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(post_window), _("Post News"));
 	gtk_widget_set_size_request(post_window, 300, 280);
 	g_signal_connect(post_window, "delete_event",
@@ -191,7 +187,6 @@ void create_news_window (session *sess)
 	}
 
 	news_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(news_window), "news", "GtkHx");
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 

@@ -149,7 +149,6 @@ void create_plugin_manager(void)
 	}
 
 	plugin_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_window_set_wmclass(GTK_WINDOW(plugin_window), "plugins", "GtkHx");
 	gtk_window_set_title(GTK_WINDOW(plugin_window), _("GtkHx - Plugins"));
 	gtk_signal_connect(plugin_window, "delete_event", GTK_SIGNAL_FUNC(close_plugin_window), 0);
 
