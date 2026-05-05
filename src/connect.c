@@ -29,6 +29,7 @@
 #include "hx.h"
 #include "chat.h"
 #include "gtkutil.h"
+#include "gtkhx.h"
 #include "toolbar.h"
 
 /* Phase 4.13: this file uses GtkComboBoxText for the cipher /
@@ -398,10 +399,67 @@ static void prompt_conversion (char *name)
 
 }
 
+/* Phase 5: bookmarks live under $CONFIG/bookmarks/. Legacy
+ * ~/.hx/bookmarks/ is consulted as a read-fallback only — bookmarks
+ * saved from this version always go to the new path. */
+static char *
+bookmarks_dir_primary (void)
+{
+	return g_build_filename (gtkhx_config_dir (), "bookmarks", NULL);
+}
+
+static char *
+bookmarks_dir_legacy (void)
+{
+	const char *home = g_getenv ("HOME");
+	if (!home || !*home)
+		home = g_get_home_dir ();
+	if (!home)
+		return NULL;
+	return g_build_filename (home, ".hx", "bookmarks", NULL);
+}
+
+/* Resolve a bookmark name to an open fd and the path it came from.
+ * Tries $CONFIG/bookmarks/<name> first; if absent, falls back to the
+ * legacy ~/.hx/bookmarks/<name>. Caller g_frees *out_path on the
+ * non-error return. Returns -1 with *out_path set to NULL on failure. */
+static int
+open_bookmark_file (const char *name, char **out_path)
+{
+	char *primary = bookmarks_dir_primary ();
+	char *path    = g_build_filename (primary, name, NULL);
+	int   bm      = open (path, O_RDONLY);
+
+	g_free (primary);
+
+	if (bm < 0 && errno == ENOENT) {
+		char *legacy = bookmarks_dir_legacy ();
+		if (legacy) {
+			char *legacy_path = g_build_filename (legacy, name, NULL);
+			bm = open (legacy_path, O_RDONLY);
+			if (bm >= 0) {
+				g_free (path);
+				path = legacy_path;
+			} else {
+				g_free (legacy_path);
+			}
+			g_free (legacy);
+		}
+	}
+
+	if (bm < 0) {
+		g_free (path);
+		*out_path = NULL;
+	} else {
+		*out_path = path;
+	}
+	return bm;
+}
+
 static void open_bookmark(GtkWidget *widget, gpointer data)
 {
-	char *path = g_strdup_printf("%s/.hx/bookmarks/%s", getenv("HOME"), (char *)data);
-	int bm = open(path, O_RDONLY);
+	char *path = NULL;
+	int   bm   = open_bookmark_file ((char *) data, &path);
 	char junk[132];
 	char login[33];
 	char pass[33];
@@ -507,24 +565,55 @@ bookmark_combo_changed (GtkComboBox *combo, gpointer user_data)
 		open_bookmark (NULL, e->file);
 }
 
-static void list_bookmarks (GtkWidget *combo, GArray *entries)
+/* Phase 5: list bookmarks from both the new $CONFIG/bookmarks and the
+ * legacy ~/.hx/bookmarks. Names that exist in both win on the new
+ * path (we walk new first; legacy entries only get appended if their
+ * name isn't already present). */
+static gboolean
+combo_already_has (GArray *entries, const char *name)
+{
+	guint i;
+	for (i = 0; i < entries->len; i++) {
+		BookmarkEntry *e = &g_array_index (entries, BookmarkEntry, i);
+		if (e->file && g_strcmp0 (e->file, name) == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void
+list_bookmarks_from_dir (GtkWidget *combo, GArray *entries, const char *path)
 {
 	struct dirent *ent;
-	char *path = g_strdup_printf ("%s/.hx/bookmarks/", getenv ("HOME"));
 	DIR *dir = opendir (path);
 
-	if (dir) {
-		while ((ent = readdir (dir))) {
-			if (*ent->d_name != '.') {
-				BookmarkEntry e = { 0, g_strdup (ent->d_name) };
-				gtk_combo_box_text_append_text (
-					GTK_COMBO_BOX_TEXT (combo), ent->d_name);
-				g_array_append_val (entries, e);
-			}
-		}
-		closedir (dir);
+	if (!dir)
+		return;
+
+	while ((ent = readdir (dir))) {
+		if (*ent->d_name == '.')
+			continue;
+		if (combo_already_has (entries, ent->d_name))
+			continue;
+		BookmarkEntry e = { 0, g_strdup (ent->d_name) };
+		gtk_combo_box_text_append_text (
+			GTK_COMBO_BOX_TEXT (combo), ent->d_name);
+		g_array_append_val (entries, e);
 	}
-	g_free (path);
+	closedir (dir);
+}
+
+static void list_bookmarks (GtkWidget *combo, GArray *entries)
+{
+	char *primary = bookmarks_dir_primary ();
+	char *legacy  = bookmarks_dir_legacy ();
+
+	list_bookmarks_from_dir (combo, entries, primary);
+	if (legacy)
+		list_bookmarks_from_dir (combo, entries, legacy);
+
+	g_free (primary);
+	g_free (legacy);
 }
 
 static void cancel_save(GtkWidget *widget, gpointer data)
@@ -553,14 +642,14 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 #else
 	char cipher = 0;
 #endif
-	char *home = getenv("HOME");
 	char *name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
-	char *dir = g_strdup_printf("%s/.hx/bookmarks/", home);
+	/* Phase 5: bookmarks now save under $CONFIG/bookmarks/. The
+	 * config dir is created by gtkhx_config_dir on first call;
+	 * we just need to make sure the bookmarks subdir exists. */
+	char *dir = bookmarks_dir_primary ();
 	char *path = NULL;
-	char *dirtwo = g_strdup_printf("%s/.hx/", home);
 	char *server_str = g_strdup_printf("%s:%s", server, port);
 	FILE *bookmark = NULL;
-	DIR *hxdir = opendir(dirtwo);
 	size_t len, len_total;
 	char zeros[256];
 	int i;
@@ -569,11 +658,10 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 
 	if(!name) {
 		error_dialog( _("Error"),
-					  _("You must specify a name for this bookmark " 
+					  _("You must specify a name for this bookmark "
 						"with at least one character.")
 			);
 		g_free(dir);
-		g_free(dirtwo);
 		g_free(server_str);
 		return;
 	}
@@ -583,25 +671,20 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 		if(name[i] == '/')
 			name[i] = '\\';
 	}
-	path = g_strdup_printf("%s%s", dir, name);
+	path = g_build_filename (dir, name, NULL);
 
-	if(!hxdir) {
-		mkdir(dirtwo, 0770);
-		mkdir(dir, 0770);
-	}
-	else {
-		closedir(hxdir);
-		if(!(hxdir = opendir(dir))) {
-			mkdir(dir, 0770);
-		}
-		else {
-			closedir(hxdir);
-		}
+	if (g_mkdir_with_parents (dir, 0770) != 0) {
+		hx_printf_prefix(&the_session.htlc, 0,
+		                 "Could not create bookmarks dir \"%s\": %s",
+		                 dir, g_strerror (errno));
+		g_free(dir);
+		g_free(server_str);
+		g_free(path);
+		return;
 	}
 	if(!(bookmark = fopen(path, "w"))) {
 		hx_printf_prefix(&the_session.htlc, 0, "Could not open \"%s\" for writing.", path);
 		g_free(dir);
-		g_free(dirtwo);
 		g_free(server_str);
 		g_free(path);
 		return;
@@ -635,7 +718,6 @@ static void bookmark_save(GtkWidget *widget, gpointer data)
 
 	g_free(path);
 	g_free(dir);
-	g_free(dirtwo);
 	g_free(server_str);
 }
 
