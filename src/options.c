@@ -633,111 +633,174 @@ prefs_legacy_path (void)
 	return g_build_filename (home, ".gtkhxrc", NULL);
 }
 
+/* Phase 5: read a GKeyFile [gtkhx] section, feeding each entry through
+ * prefs_allocate. Reuses the legacy parser's type dispatch — no
+ * per-cfgvar plumbing change. Returns TRUE if the keyfile parsed
+ * cleanly (whether or not the section was empty). */
+#define GTKHX_KEYFILE_GROUP "gtkhx"
+static gboolean
+prefs_read_keyfile (const char *path)
+{
+	GKeyFile *kf;
+	GError *err = NULL;
+	gchar **keys;
+	gsize i, n_keys;
+
+	kf = g_key_file_new ();
+	if (!g_key_file_load_from_file (kf, path,
+	                                G_KEY_FILE_KEEP_COMMENTS, &err)) {
+		g_key_file_free (kf);
+		g_error_free (err);
+		return FALSE;
+	}
+
+	keys = g_key_file_get_keys (kf, GTKHX_KEYFILE_GROUP, &n_keys, &err);
+	if (!keys) {
+		/* No [gtkhx] section — almost certainly a legacy KEY=VALUE
+		 * file we just got lucky parsing. Fall through to the
+		 * line-by-line parser. */
+		g_clear_error (&err);
+		g_key_file_free (kf);
+		return FALSE;
+	}
+
+	for (i = 0; i < n_keys; i++) {
+		gchar *value = g_key_file_get_value (kf, GTKHX_KEYFILE_GROUP,
+		                                     keys[i], NULL);
+		if (value) {
+			prefs_allocate (keys[i], value);
+			g_free (value);
+		}
+	}
+
+	g_strfreev (keys);
+	g_key_file_free (kf);
+	return TRUE;
+}
+
+/* Legacy KEY=VALUE line-by-line reader. Used as a fallback when the
+ * file at the primary path turned out not to be a GKeyFile (because
+ * it's the pre-migration format) and for reading the legacy
+ * ~/.gtkhxrc on first run after upgrade. */
+static gboolean
+prefs_read_legacy_lines (const char *path)
+{
+	FILE *prefs = fopen (path, "r");
+	char *prefsline;
+	size_t prefslinelen = 256;
+
+	if (!prefs)
+		return FALSE;
+
+	prefsline = g_malloc (prefslinelen);
+	while (read_line (prefs, &prefsline, &prefslinelen))
+		parse_line (prefsline);
+
+	g_free (prefsline);
+	fclose (prefs);
+	return TRUE;
+}
+
 void prefs_read(void)
 {
 	char *path = prefs_primary_path ();
-	FILE *prefs = fopen(path, "r");
-	char *prefsline;
-	size_t prefslinelen = 256;
-	gboolean from_legacy = FALSE;
 
-	if (!prefs && errno == ENOENT) {
-		/* New-style file doesn't exist; try the legacy ~/.gtkhxrc as
-		 * a migration read so existing users keep their settings. */
+	/* Try the new GKeyFile format first. */
+	if (g_file_test (path, G_FILE_TEST_EXISTS)) {
+		if (!prefs_read_keyfile (path)) {
+			/* File exists but isn't a GKeyFile — must be the
+			 * pre-migration KEY=VALUE format sitting at the new
+			 * path. Read it via the legacy line parser; the next
+			 * prefs_write will rewrite it as GKeyFile. */
+			if (!prefs_read_legacy_lines (path)) {
+				fprintf (stderr, "prefs_read: %s: %s\n",
+				         path, strerror (errno));
+				fflush (stderr);
+			}
+		}
+		g_free (path);
+		return;
+	}
+
+	/* New-style file doesn't exist; try the legacy ~/.gtkhxrc as a
+	 * migration read so existing users don't lose their config. */
+	{
 		char *legacy = prefs_legacy_path ();
 		if (legacy) {
-			prefs = fopen (legacy, "r");
-			if (prefs) {
+			if (g_file_test (legacy, G_FILE_TEST_EXISTS)) {
 				g_message ("Migrating prefs from %s to %s on next save",
 				           legacy, path);
-				from_legacy = TRUE;
-			} else if (errno != ENOENT) {
-				fprintf (stderr, "prefs_read: %s: %s\n",
-				         legacy, strerror (errno));
-				fflush (stderr);
+				prefs_read_legacy_lines (legacy);
+				g_free (legacy);
+				g_free (path);
+				return;
 			}
 			g_free (legacy);
 		}
 	}
 
-	prefsline = g_malloc (prefslinelen);
-
-	if(!prefs) {
-		/* file doesn't exist */
-		if(errno == ENOENT) {
-			create_options_window(NULL, NULL);
-		}
-		else {
-			fprintf(stderr, "prefs_read: %s: %s\n",
-					path, strerror(errno));
-			fflush(stderr);
-		}
-
-		g_free(prefsline);
-		g_free(path);
-		return;
-	}
-
-	while(read_line(prefs, &prefsline, &prefslinelen))
-		parse_line(prefsline);
-
-	g_free(prefsline);
-	fclose(prefs);
-	g_free(path);
-	(void) from_legacy;	/* future: the next prefs_write covers this */
+	/* No prefs anywhere — first run; pop the prefs dialog. */
+	create_options_window (NULL, NULL);
+	g_free (path);
 }
 
 void prefs_write(void)
 {
 	char *path = prefs_primary_path ();
-	FILE *prefs = fopen(path, "w");
+	GKeyFile *kf;
+	GError *err = NULL;
 	time_t now;
 	int i;
 
-	if(!prefs) {
-		fprintf(stderr, "prefs_write: %s: %s\n",
-				path, strerror(errno));
-		fflush(stderr);
-
-		g_free(path);
-		return;
-	}
-
-	now = time(NULL);
-	total_time += (now-start_time);
+	now = time (NULL);
+	total_time += (now - start_time);
 	start_time = now;
 
-	fprintf(prefs, "# This is the GtkHx preferences file\n");
-	fprintf(prefs, "# Lines starting with '#' are comments\n\n");
+	kf = g_key_file_new ();
+	g_key_file_set_comment (kf, NULL, NULL,
+	                        " GtkHx preferences (GKeyFile format).\n"
+	                        " Edit values under [" GTKHX_KEYFILE_GROUP "] or use Settings.",
+	                        NULL);
 
-	for (i=0; i != sizeof(cfgvars)/sizeof(cfgvars[0]); ++i)
-	{
+	for (i = 0; i != (int)(sizeof (cfgvars) / sizeof (cfgvars[0])); ++i) {
 		struct cfgvar *v = &cfgvars[i];
-		switch (v->type)
-		{
-			case UINT16:
-				fprintf(prefs, "%s=%u\n", v->name, *v->variable.uint16);
-				break;
-			case STRING:
-				fprintf(prefs, "%s=%s\n", v->name, *v->variable.str);
-				break;
-			case INT:
-				fprintf(prefs, "%s=%d\n", v->name, *v->variable.integer);
-				break;
-			case TIME_T:
-				fprintf(prefs, "%s=%ld\n", v->name, *v->variable.timet);
-				break;
-			case STRING32:
-				fprintf(prefs, "%s=%s\n", v->name, v->variable.str32);
-				break;
-			case BOOLEAN:
-				fprintf(prefs, "%s=%d\n", v->name, *v->variable.uchar);
-				break;
+		switch (v->type) {
+		case UINT16:
+			g_key_file_set_integer (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                        (gint) *v->variable.uint16);
+			break;
+		case STRING:
+			g_key_file_set_string (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                       *v->variable.str ? *v->variable.str : "");
+			break;
+		case INT:
+			g_key_file_set_integer (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                        *v->variable.integer);
+			break;
+		case TIME_T:
+			g_key_file_set_int64 (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                      (gint64) *v->variable.timet);
+			break;
+		case STRING32:
+			g_key_file_set_string (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                       v->variable.str32);
+			break;
+		case BOOLEAN:
+			g_key_file_set_boolean (kf, GTKHX_KEYFILE_GROUP, v->name,
+			                        *v->variable.uchar ? TRUE : FALSE);
+			break;
 		}
 	}
 
-	fclose(prefs);
-	g_free(path);
+	if (!g_key_file_save_to_file (kf, path, &err)) {
+		fprintf (stderr, "prefs_write: %s: %s\n",
+		         path, err ? err->message : "unknown error");
+		fflush (stderr);
+		g_clear_error (&err);
+	}
+
+	g_key_file_free (kf);
+	g_free (path);
 }
 
 static void parse_icons (session *sess)
