@@ -129,6 +129,16 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 		sess->gtask_list->next = gtsk;
 
 	pbar = gtk_progress_bar_new();
+	/* Phase 5 dark-theme follow-up: surface percent on the bar itself
+	 * and give it real vertical room. The default GTK 4 progress-bar
+	 * trough is ~6 px tall, which is hard to read against any theme;
+	 * a 16 px floor keeps it visible without dwarfing the row, and
+	 * show_text overlays percentage right where the eye looks. The
+	 * descriptive label above still carries filename + transferred /
+	 * total / speed / ETA. */
+	gtk_progress_bar_set_show_text (GTK_PROGRESS_BAR (pbar), TRUE);
+	gtk_widget_set_size_request (pbar, -1, 16);
+	gtk_widget_set_valign (pbar, GTK_ALIGN_CENTER);
 	label = gtk_label_new("");
 
 	if(htxf) {
@@ -142,14 +152,16 @@ static struct gtask *gtask_new (session *sess, guint32 trans,
 	}
 
 	gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(vbox, 240, 40);
+	gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
+	gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	gtk_widget_set_size_request(vbox, 240, 50);
 
 	if(htxf) {
 		gtkhx_box_pack(hbox, queue, 0, 0, 0);
 	}
-	gtkhx_box_pack(hbox, label, 0, 0, 4);
+	gtkhx_box_pack(hbox, label, 1, 1, 4);
 	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 	gtkhx_box_pack(vbox, pbar, 1, 1, 0);
 
