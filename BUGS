@@ -4,9 +4,11 @@ High priority:
 
 (gtkhx:61404): GdkPixbuf-CRITICAL **: 16:26:49.949: gdk_pixbuf_calculate_rowstride: assertion 'width > 0' failed
 
-- Window position saving is not working (but size saving is working)
-
 Low priority:
 
 - The connection to hlserver.com eventually gets closed for some reason (possibly server timeout). If it is
   a server activity timeout, it would be nice to indicate that
+
+Won't Fix:
+
+- Window position saving does not work on Wayland

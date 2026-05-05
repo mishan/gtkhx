@@ -1,7 +1,20 @@
 #define TYPE_cicn	0x6369636e
 
-typedef void *Ptr;
-typedef void **Handle;
+/*
+ * Ptr / Handle are pinned to 4 bytes regardless of host word size.
+ * Mac classic stored pointers as 32-bit values inline in the cicn
+ * resource on disk, and the decoder casts cicn_rsrc directly to
+ * `struct PixMap *' to read fields by name. With `void *' this struct
+ * is 4 bytes larger on 64-bit hosts than the wire format, which
+ * shifts every field after baseAddr by 4 bytes — pm->bounds.right
+ * ends up reading the wrong half of the cicn header and produces a
+ * wildly wrong width, then gdk_pixbuf_new(width=garbage) trips its
+ * `width > 0' assertion. The actual values aren't used as live
+ * pointers anywhere; we just need 4 bytes of placeholder so the rest
+ * of the struct lines up.
+ */
+typedef guint32 Ptr;
+typedef guint32 Handle;
 typedef guint32 Fixed;
 
 struct Rect {

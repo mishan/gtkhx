@@ -276,12 +276,25 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 	PixMap *pm  = (PixMap *)((unsigned char *)cicn_rsrc);
 	BitMap *mbm = (BitMap *)((unsigned char *)cicn_rsrc + 50);
 	BitMap *bm  = (BitMap *)((unsigned char *)cicn_rsrc + 64);
-	unsigned int height = ntohs (pm->bounds.bottom) - ntohs (pm->bounds.top);
-	unsigned int width  = ntohs (pm->bounds.right)  - ntohs (pm->bounds.left);
+	/* Bounds are stored as (top, left, bottom, right) Mac classic Rects
+	 * — guint16 each. Validate ordering BEFORE the subtraction; an
+	 * inverted Rect (right < left or bottom < top, which we have seen
+	 * in user-supplied icons.rsrc files) makes the unsigned diff wrap
+	 * to a huge value that gets reinterpreted as a negative int by
+	 * gdk_pixbuf_new, tripping its `width > 0' assertion. Cap at 4096
+	 * on each axis as a sanity ceiling for cicn icons (the format's
+	 * native max is 64). */
+	guint16 b_top    = ntohs (pm->bounds.top);
+	guint16 b_left   = ntohs (pm->bounds.left);
+	guint16 b_bottom = ntohs (pm->bounds.bottom);
+	guint16 b_right  = ntohs (pm->bounds.right);
+	guint16 mb_top    = ntohs (mbm->bounds.top);
+	guint16 mb_bottom = ntohs (mbm->bounds.bottom);
+	guint16 bb_top    = ntohs (bm->bounds.top);
+	guint16 bb_bottom = ntohs (bm->bounds.bottom);
+	unsigned int width, height, mbm_h, bm_h;
 	unsigned int bpp    = ntohs (pm->pixelSize);
-	unsigned int mbm_h  = ntohs (mbm->bounds.bottom) - ntohs (mbm->bounds.top);
 	unsigned int mbm_rb = ntohs (mbm->rowBytes);
-	unsigned int bm_h   = ntohs (bm->bounds.bottom)  - ntohs (bm->bounds.top);
 	unsigned int bm_rb  = ntohs (bm->rowBytes);
 	unsigned int rowBytes = ntohs (pm->rowBytes) & 0x7fff;
 	ColorTable *ct;
@@ -295,7 +308,17 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 
 	if (bpp != 1 && bpp != 2 && bpp != 4 && bpp != 8)
 		return NULL;
-	if (width == 0 || height == 0)
+	if (b_right <= b_left || b_bottom <= b_top)
+		return NULL;
+	if (mb_bottom < mb_top || bb_bottom < bb_top)
+		return NULL;
+
+	width  = b_right  - b_left;
+	height = b_bottom - b_top;
+	mbm_h  = mb_bottom - mb_top;
+	bm_h   = bb_bottom - bb_top;
+
+	if (width > 4096 || height > 4096)
 		return NULL;
 
 	/* Color table sits after both bitmap data blocks; pixel data is
