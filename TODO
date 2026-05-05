@@ -8,6 +8,8 @@ UI Modernization:
 Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them
+- Separation of concerns -- separate UI code from non-UI code
+- Follow MVC architecture
 
 Sound:
 - Look into better way to play sounds -- is there some GNOME/GTK+ preferred way?
