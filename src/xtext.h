@@ -273,7 +273,13 @@ struct _GtkXText
 struct _GtkXTextClass
 {
 	GtkWidgetClass parent_class;
-	void (*word_click) (GtkXText * xtext, char *word, GdkEventButton * event);
+	/* Phase 4.9: GdkEventButton is gone in GTK 4; the signal arg is now
+	 * the bare GdkEvent. The signal is registered as G_TYPE_POINTER on
+	 * both endpoints, so the type-system marshalling was never reading
+	 * the concrete struct shape. Consumers (chat.c, msg.c) that handle
+	 * word_click can use gdk_event_get_button / gdk_event_get_position
+	 * accessor functions to read state. */
+	void (*word_click) (GtkXText * xtext, char *word, GdkEvent * event);
 	void (*set_scroll_adjustments) (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustment *vadj);
 };
 

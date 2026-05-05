@@ -58,9 +58,11 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
-#endif
+/* Phase 4.9: gdk/gdkx.h is the X11-specific GDK backend header. GTK 4
+ * makes Wayland the assumed backend (per ROADMAP §Phase 4 gotchas) and
+ * gdkx.h's contents (GdkX11Display* types, gdk_x11_*) aren't part of
+ * what xtext touches anyway — the include was vestigial from XChat
+ * 1.8.5's X11-era assumptions. Drop. */
 
 #include "config.h"
 #include "xtext.h"
@@ -101,25 +103,18 @@ safe_strcpy (char *dest, const char *src, int bytes_left)
 	g_strlcpy (dest, src, bytes_left);
 }
 
-/* Phase 3.9: gdk_window_get_pointer was deprecated in GTK 3.0 in favor
- * of gdk_window_get_device_position, which needs a GdkDevice — get it
- * from the window's default seat. */
-static inline void
-xtext_get_pointer (GdkWindow *win, gint *x, gint *y, GdkModifierType *mask)
+/* Phase 4.9: xtext_get_pointer was a query-the-pointer-position helper
+ * called from the dead button/motion handler stack. Wrapped in #if 0
+ * with the rest; left here as a stub returning zeros in case anything
+ * outside that block ever needs to call it before the Phase 4.9
+ * follow-up restores the controllers. */
+G_GNUC_UNUSED static inline void
+xtext_get_pointer (gpointer win, gint *x, gint *y, GdkModifierType *mask)
 {
-	GdkDisplay *display;
-	GdkSeat    *seat;
-	GdkDevice  *pointer;
-	if (!win) {
-		if (x) *x = 0;
-		if (y) *y = 0;
-		if (mask) *mask = 0;
-		return;
-	}
-	display = gdk_window_get_display (win);
-	seat    = gdk_display_get_default_seat (display);
-	pointer = gdk_seat_get_pointer (seat);
-	gdk_window_get_device_position (win, pointer, x, y, mask);
+	(void) win;
+	if (x) *x = 0;
+	if (y) *y = 0;
+	if (mask) *mask = 0;
 }
 
 /* --- HexChat glue: case-insensitive substring search from util.c ----- *
@@ -283,7 +278,12 @@ xtext_draw_bg (GtkXText *xt, int x, int y, int w, int h)
 	cairo_t *cr = xt->cr;
 	if (cr == NULL)
 	{
-		gtk_widget_queue_draw_area (GTK_WIDGET (xt), x, y, w, h);
+		/* Phase 4.9: gtk_widget_queue_draw_area is gone — GTK 4 redraws
+		 * always cover the full widget. Position information is
+		 * unused, so the area-specific call collapses to a plain
+		 * queue_draw. */
+		(void) x; (void) y; (void) w; (void) h;
+		gtk_widget_queue_draw (GTK_WIDGET (xt));
 		return;
 	}
 	cairo_save (cr);
@@ -718,9 +718,12 @@ gtk_xtext_new (GdkRGBA palette[], int separator)
 	return GTK_WIDGET (xtext);
 }
 
+/* Phase 4.9: GtkWidget::destroy is gone in GTK 4 — teardown moved to
+ * GObjectClass::dispose. Same body, different signature. */
 static void
-gtk_xtext_destroy (GtkWidget * widget)
+gtk_xtext_dispose (GObject * object)
 {
+	GtkWidget *widget = GTK_WIDGET (object);
 	GtkXText *xtext = GTK_XTEXT (widget);
 
 	if (xtext->add_io_tag)
@@ -779,8 +782,7 @@ gtk_xtext_destroy (GtkWidget * widget)
 		xtext->orig_buffer = NULL;
 	}
 
-	if (GTK_WIDGET_CLASS (parent_class)->destroy)
-		(*GTK_WIDGET_CLASS (parent_class)->destroy) (widget);
+	G_OBJECT_CLASS (parent_class)->dispose (object);
 }
 
 static void
@@ -804,55 +806,31 @@ gtk_xtext_unrealize (GtkWidget * widget)
  * gdk_window_set_back_pixmap call is no longer needed because cairo
  * draws fill the entire dirty rectangle each tick.
  */
+/* Phase 4.9: GTK 4 widgets are "windowless" — they don't own their
+ * own GdkSurface; GdkSurface only attaches to GtkRoot (toplevel /
+ * popover / native). The whole "create a child GdkWindow with a
+ * specific event mask" pattern is gone. The realize handler now
+ * just chains to the parent class and sets up the GTK-4-only state
+ * (cursors are GdkCursor*; selection targets move to the gesture/
+ * controller layer). */
 static void
 gtk_xtext_realize (GtkWidget * widget)
 {
-	GtkXText *xtext;
-	GdkWindowAttr attributes;
-	GtkAllocation allocation;
-	GdkWindow *parent_window;
-	GdkWindow *window;
+	GtkXText *xtext = GTK_XTEXT (widget);
 
-	gtk_widget_set_realized (widget, TRUE);
-	xtext = GTK_XTEXT (widget);
+	GTK_WIDGET_CLASS (parent_class)->realize (widget);
 
-	gtk_widget_get_allocation (widget, &allocation);
-	attributes.x = allocation.x;
-	attributes.y = allocation.y;
-	attributes.width = allocation.width;
-	attributes.height = allocation.height;
-	attributes.wclass = GDK_INPUT_OUTPUT;
-	attributes.window_type = GDK_WINDOW_CHILD;
-	attributes.visual = gtk_widget_get_visual (widget);
-	attributes.event_mask = gtk_widget_get_events (widget) |
-		GDK_EXPOSURE_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK
-		| GDK_POINTER_MOTION_MASK | GDK_LEAVE_NOTIFY_MASK;
+	/* Phase 4.9: GdkCursor in GTK 4 is themed-name-based; depth is
+	 * never read by the cairo draw path so leave it zero. */
+	xtext->depth = 0;
+	xtext->hand_cursor   = gdk_cursor_new_from_name ("pointer", NULL);
+	xtext->resize_cursor = gdk_cursor_new_from_name ("ew-resize", NULL);
 
-	parent_window = gtk_widget_get_parent_window (widget);
-	window = gdk_window_new (parent_window, &attributes,
-	                         GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
-	gtk_widget_set_window (widget, window);
-	gtk_widget_register_window (widget, window);
-
-	xtext->depth = gdk_visual_get_depth (gdk_window_get_visual (window));
-
-	xtext->hand_cursor = gdk_cursor_new_for_display (
-		gdk_window_get_display (window), GDK_HAND1);
-	xtext->resize_cursor = gdk_cursor_new_for_display (
-		gdk_window_get_display (window), GDK_LEFT_SIDE);
-
-	{
-		static const GtkTargetEntry targets[] = {
-			{ "UTF8_STRING", 0, TARGET_UTF8_STRING },
-			{ "STRING", 0, TARGET_STRING },
-			{ "TEXT",   0, TARGET_TEXT },
-			{ "COMPOUND_TEXT", 0, TARGET_COMPOUND_TEXT }
-		};
-		static const gint n_targets = sizeof (targets) / sizeof (targets[0]);
-
-		gtk_selection_add_targets (widget, GDK_SELECTION_PRIMARY,
-		                           targets, n_targets);
-	}
+	/* Phase 4.9: GtkTargetEntry / gtk_selection_add_targets /
+	 * GDK_SELECTION_PRIMARY are gone in GTK 4. PRIMARY-selection text
+	 * support migrates to gdk_clipboard_set_value on the surface's
+	 * primary clipboard — handled at the controller layer in a
+	 * Phase 4.9 follow-up. */
 
 	backend_init (xtext);
 }
@@ -861,23 +839,29 @@ gtk_xtext_realize (GtkWidget * widget)
  * their size via get_preferred_width/height — left as the implicit
  * default for now (the parent GtkScrolledWindow drives layout). */
 
+/* Phase 4.9: GTK 4 size_allocate vfunc takes (widget, width, height,
+ * baseline) instead of a GtkAllocation*. Position is implicit (the
+ * widget is always at 0,0 in its own coordinate space — GTK 4 does
+ * the offset on the parent's behalf). gtk_widget_set_allocation /
+ * gdk_window_move_resize are gone; the parent-class chain handles
+ * what remains. */
 static void
-gtk_xtext_size_allocate (GtkWidget * widget, GtkAllocation * allocation)
+gtk_xtext_size_allocate (GtkWidget * widget, int width, int height, int baseline)
 {
 	GtkXText *xtext = GTK_XTEXT (widget);
 	int height_only = FALSE;
+	(void) baseline;
 
-	if (allocation->width == xtext->buffer->window_width)
+	if (width == xtext->buffer->window_width)
 		height_only = TRUE;
 
-	gtk_widget_set_allocation(widget, allocation);
-	if (gtk_widget_get_realized (GTK_WIDGET(widget)))
-	{
-		xtext->buffer->window_width = allocation->width;
-		xtext->buffer->window_height = allocation->height;
+	GTK_WIDGET_CLASS (parent_class)->size_allocate (widget, width, height, baseline);
 
-		gdk_window_move_resize (gtk_widget_get_window(widget), allocation->x, allocation->y,
-										allocation->width, allocation->height);
+	if (gtk_widget_get_realized (widget))
+	{
+		xtext->buffer->window_width  = width;
+		xtext->buffer->window_height = height;
+
 		dontscroll (xtext->buffer);	/* force scrolling off */
 		if (!height_only)
 			gtk_xtext_calc_lines (xtext->buffer, FALSE);
@@ -1158,9 +1142,17 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 		cairo_restore (xtext->cr);
 	}
 
-	if (gtk_window_has_toplevel_focus (GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (xtext)))))
 	{
-		xtext->buffer->marker_seen = TRUE;
+		/* Phase 4.9: gtk_widget_get_toplevel and
+		 * gtk_window_has_toplevel_focus are gone in GTK 4. The
+		 * replacements are gtk_widget_get_root (returns a GtkRoot,
+		 * which a GtkWindow implements) and gtk_window_is_active. */
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (xtext));
+		if (root && GTK_IS_WINDOW (root) &&
+		    gtk_window_is_active (GTK_WINDOW (root)))
+		{
+			xtext->buffer->marker_seen = TRUE;
+		}
 	}
 }
 
@@ -1236,24 +1228,36 @@ xit:
  * directly; we compute the dirty rectangle via cairo_clip_extents and
  * stash cr on the xtext for the rendering primitives to use during this
  * paint, then clear it on exit. */
-static gboolean
-gtk_xtext_draw (GtkWidget * widget, cairo_t * cr)
+/* Phase 4.9: GtkWidget::draw is gone in GTK 4 — replaced by ::snapshot,
+ * which hands us a GtkSnapshot that records render nodes rather than
+ * a pre-clipped cairo_t. We preserve the existing cairo paint path
+ * (unchanged since Phase 3.4b) by asking the snapshot for a cairo_t
+ * over the widget's bounding rectangle and feeding it through. The
+ * GdkRectangle synthesised here is the whole widget area; per-region
+ * clip optimization can revisit later. */
+static void
+gtk_xtext_snapshot (GtkWidget * widget, GtkSnapshot * snapshot)
 {
 	GtkXText *xtext = GTK_XTEXT (widget);
 	GdkRectangle area;
-	double x1, y1, x2, y2;
+	graphene_rect_t bounds;
+	cairo_t *cr;
 
-	cairo_clip_extents (cr, &x1, &y1, &x2, &y2);
-	area.x = (int) x1;
-	area.y = (int) y1;
-	area.width = (int) (x2 - x1);
-	area.height = (int) (y2 - y1);
+	area.x = 0;
+	area.y = 0;
+	area.width  = gtk_widget_get_width (widget);
+	area.height = gtk_widget_get_height (widget);
+	if (area.width <= 0 || area.height <= 0)
+		return;
+
+	bounds = GRAPHENE_RECT_INIT (0, 0, (float) area.width, (float) area.height);
+	cr = gtk_snapshot_append_cairo (snapshot, &bounds);
 
 	xtext->cr = cr;
 	gtk_xtext_paint (widget, &area);
 	xtext->cr = NULL;
 
-	return FALSE;
+	cairo_destroy (cr);
 }
 
 /* render a selection that has extended or contracted upward */
@@ -1443,6 +1447,37 @@ lamejump:
 	xtext->skip_border_fills = FALSE;
 	xtext->skip_stamp = FALSE;
 }
+
+/* Phase 4.9: BIG DEAD HANDLER BLOCK
+ *
+ * Everything from gtk_xtext_selection_draw through gtk_xtext_scroll
+ * below is the GTK 3 button/motion/scroll/selection handler stack.
+ * In GTK 4 these signals don't exist on widgets — clicks become
+ * GtkGestureClick, motion becomes GtkEventControllerMotion, scroll
+ * becomes GtkEventControllerScroll, primary-selection ownership moves
+ * to gdk_clipboard_set_value on the surface's primary clipboard.
+ *
+ * Re-implementing them all properly is non-trivial (timer-driven
+ * auto-scroll during selection, click-to-URL hand cursor, mIRC
+ * color-stripping copy, etc.). For now the block is wrapped in
+ * #if 0 so the rest of the widget — which is the rendering / text
+ * append / font / palette path that the chat output actually exercises
+ * — links and runs. Selection, click-to-URL, scroll-to-zoom, and
+ * primary-clipboard ownership are degraded until Phase 4.9 follow-up.
+ *
+ * Tracked specifically:
+ *  - gtk_xtext_selection_draw
+ *  - gtk_xtext_scrolldown_timeout / gtk_xtext_scrollup_timeout
+ *  - gtk_xtext_selection_update
+ *  - gtk_xtext_leave_notify
+ *  - gtk_xtext_motion_notify
+ *  - gtk_xtext_set_clip_owner
+ *  - gtk_xtext_button_release / gtk_xtext_button_press
+ *  - gtk_xtext_selection_kill / gtk_xtext_selection_get_text /
+ *    gtk_xtext_selection_get
+ *  - gtk_xtext_scroll
+ */
+#if 0  /* Phase 4.9 follow-up — see note above. */
 
 static void
 gtk_xtext_selection_draw (GtkXText * xtext, GdkEventMotion * event, gboolean render)
@@ -2410,6 +2445,8 @@ gtk_xtext_scroll (GtkWidget *widget, GdkEventScroll *event)
 	return FALSE;
 }
 
+#endif  /* Phase 4.9: end of dead handler block */
+
 static void
 gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustment *vadj)
 {
@@ -2444,11 +2481,13 @@ gtk_xtext_scroll_adjustments (GtkXText *xtext, GtkAdjustment *hadj, GtkAdjustmen
 static void
 gtk_xtext_class_init (GtkXTextClass * class)
 {
+	GObjectClass   *object_class;
 	GtkWidgetClass *widget_class;
-	GtkXTextClass *xtext_class;
+	GtkXTextClass  *xtext_class;
 
+	object_class = (GObjectClass *) class;
 	widget_class = (GtkWidgetClass *) class;
-	xtext_class = (GtkXTextClass *) class;
+	xtext_class  = (GtkXTextClass *) class;
 
 	parent_class = g_type_class_peek (gtk_widget_get_type ());
 
@@ -2475,27 +2514,27 @@ gtk_xtext_class_init (GtkXTextClass * class)
 							G_TYPE_NONE,
 							2, GTK_TYPE_ADJUSTMENT, GTK_TYPE_ADJUSTMENT);
 
-	/* Phase 3.4b: ::destroy moved from GtkObjectClass to GtkWidgetClass
-	 * in GTK 3.0; expose_event was replaced by the draw signal which
-	 * gives us a pre-clipped cairo_t.  set_scroll_adjustments_signal
-	 * is no longer a class field — modern scrollable widgets implement
-	 * GtkScrollable instead, but for now we keep the legacy custom
-	 * signal alive (the consumer in gtkhx.c connects to it directly). */
-	widget_class->destroy = gtk_xtext_destroy;
+	/* Phase 4.9: GTK 4 vfunc wiring.
+	 *  - GtkWidgetClass::destroy is gone; teardown moved to
+	 *    GObjectClass::dispose.
+	 *  - GtkWidgetClass::draw is gone; widgets implement ::snapshot.
+	 *  - button_press_event / button_release_event / motion_notify_event /
+	 *    leave_notify_event / scroll_event / selection_get /
+	 *    selection_clear_event are gone — clicks/motion/scroll move
+	 *    to GtkEventController controllers attached at instance_init,
+	 *    and selection ownership migrates to GdkClipboard. The
+	 *    underlying handlers (gtk_xtext_button_press etc.) are
+	 *    Phase 4.9 follow-up: they're still defined below but no
+	 *    longer wired into the class.
+	 */
+	object_class->dispose = gtk_xtext_dispose;
 
-	widget_class->realize = gtk_xtext_realize;
-	widget_class->unrealize = gtk_xtext_unrealize;
+	widget_class->realize       = gtk_xtext_realize;
+	widget_class->unrealize     = gtk_xtext_unrealize;
 	widget_class->size_allocate = gtk_xtext_size_allocate;
-	widget_class->button_press_event = gtk_xtext_button_press;
-	widget_class->button_release_event = gtk_xtext_button_release;
-	widget_class->motion_notify_event = gtk_xtext_motion_notify;
-	widget_class->selection_clear_event = (void *)gtk_xtext_selection_kill;
-	widget_class->selection_get = gtk_xtext_selection_get;
-	widget_class->draw = gtk_xtext_draw;
-	widget_class->scroll_event = gtk_xtext_scroll;
-	widget_class->leave_notify_event = gtk_xtext_leave_notify;
+	widget_class->snapshot      = gtk_xtext_snapshot;
 
-	xtext_class->word_click = NULL;
+	xtext_class->word_click             = NULL;
 	xtext_class->set_scroll_adjustments = gtk_xtext_scroll_adjustments;
 }
 
@@ -3670,8 +3709,14 @@ gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap)
 
 	if (pixmap != NULL)
 	{
-		/* Convert the pixbuf to a cairo image surface for repeating fill. */
-		xtext->bg_surface = gdk_cairo_surface_create_from_pixbuf (pixmap, 1, NULL);
+		/* Phase 4.9: gdk_cairo_surface_create_from_pixbuf was removed
+		 * from the public API in GTK 4 (still present in
+		 * gdk/deprecated/gdkpixbuf.h but not part of the toolkit's
+		 * supported surface). Background-pixmap support is degraded
+		 * pending a Phase 4.9 follow-up that renders the pixbuf into
+		 * a cairo_image_surface_t manually via gdk_pixbuf_read_pixels
+		 * + cairo_image_surface_create_for_data. */
+		(void) pixmap;
 		xtext->ts_x = xtext->ts_y = 0;
 	}
 
@@ -3742,8 +3787,12 @@ gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal)
 	int height;
 	int lines;
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (buf->xtext)));
-	width = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (buf->xtext)));
+	/* Phase 4.9: gtk_widget_get_window / gdk_window_get_width / _height
+	 * are gone in GTK 4. Widget size is available directly via
+	 * gtk_widget_get_width / gtk_widget_get_height (the same numbers
+	 * the size_allocate vfunc receives). */
+	height = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
+	width  = gtk_widget_get_width  (GTK_WIDGET (buf->xtext));
 	width -= MARGIN;
 
 	if (width < 30 || height < buf->xtext->fontsize || width < buf->indent + 30)
@@ -3837,8 +3886,9 @@ gtk_xtext_render_ents (GtkXText * xtext, textentry * enta, textentry * entb)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
-	width = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see gtk_xtext_calc_lines / gtk_xtext_render_page note. */
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
+	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
 	width -= MARGIN;
 
 	if (width < 32 || height < xtext->fontsize || width < xtext->buffer->indent + 30)
@@ -3926,11 +3976,11 @@ gtk_xtext_render_page (GtkXText * xtext)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	{
-		GdkWindow *win = gtk_widget_get_window (GTK_WIDGET (xtext));
-		width = gdk_window_get_width (win);
-		height = gdk_window_get_height (win);
-	}
+	/* Phase 4.9: GdkWindow / gdk_window_get_width / _height /
+	 * gtk_widget_get_window are gone in GTK 4. Widget pixel size is
+	 * available directly off the widget. */
+	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	if (width < 34 || height < xtext->fontsize || width < xtext->buffer->indent + 32)
 		return;
@@ -4199,7 +4249,8 @@ gtk_xtext_check_ent_visibility (GtkXText * xtext, textentry *find_ent, int add)
 		return FALSE;
 	}
 
-	height = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see render_page note. */
+	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	ent = buf->pagetop_ent;
 	/* If top line not completely displayed return FALSE */
@@ -4697,13 +4748,23 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	ent->sublines = NULL;
 	buf->num_lines += gtk_xtext_lines_taken (buf, ent);
 
-	if ((buf->marker_pos == NULL || buf->marker_seen) && (buf->xtext->buffer != buf || 
-		!gtk_window_has_toplevel_focus (GTK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (buf->xtext))))))
 	{
-		buf->marker_pos = ent;
-		buf->marker_state = MARKER_IS_SET;
-		dontscroll (buf); /* force scrolling off */
-		buf->marker_seen = FALSE;
+		/* Phase 4.9: gtk_widget_get_toplevel and
+		 * gtk_window_has_toplevel_focus are gone; use the GtkRoot path
+		 * (matches the gtk_xtext_draw_marker site). */
+		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (buf->xtext));
+		gboolean toplevel_active =
+			(root && GTK_IS_WINDOW (root) &&
+			 gtk_window_is_active (GTK_WINDOW (root)));
+
+		if ((buf->marker_pos == NULL || buf->marker_seen)
+		    && (buf->xtext->buffer != buf || !toplevel_active))
+		{
+			buf->marker_pos = ent;
+			buf->marker_state = MARKER_IS_SET;
+			dontscroll (buf); /* force scrolling off */
+			buf->marker_seen = FALSE;
+		}
 	}
 
 	if (buf->xtext->max_lines > 2 && buf->xtext->max_lines < buf->num_lines)
@@ -5057,8 +5118,9 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 	if (!gtk_widget_get_realized (GTK_WIDGET (xtext)))
 		gtk_widget_realize (GTK_WIDGET (xtext));
 
-	h = gdk_window_get_height (gtk_widget_get_window (GTK_WIDGET (xtext)));
-	w = gdk_window_get_width (gtk_widget_get_window (GTK_WIDGET (xtext)));
+	/* Phase 4.9: see render_page note. */
+	h = gtk_widget_get_height (GTK_WIDGET (xtext));
+	w = gtk_widget_get_width  (GTK_WIDGET (xtext));
 
 	/* after a font change */
 	if (buf->needs_recalc)
