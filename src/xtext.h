@@ -156,7 +156,6 @@ struct _GtkXText
 	xtext_buffer *selection_buffer;
 
 	GtkAdjustment *adj;
-	cairo_surface_t *bg_surface;	/* 0 = use palette[XTEXT_BG] (was: pixmap) */
 	cairo_t *cr;					/* transient: set during gtk_xtext_draw, NULL otherwise */
 	GdkCursor *hand_cursor;
 	GdkCursor *resize_cursor;
@@ -290,7 +289,6 @@ void gtk_xtext_append_indent (xtext_buffer *buf,
 										unsigned char *right_text, int right_len,
 										time_t stamp);
 int gtk_xtext_set_font (GtkXText *xtext, char *name);
-void gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap);
 void gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[]);
 void gtk_xtext_clear (xtext_buffer *buf, int lines);
 void gtk_xtext_refresh (GtkXText * xtext);

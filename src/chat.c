@@ -919,9 +919,7 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
 
 /* Phase 4.5: configure-event is gone in GTK 4. Window size for the
  * chat window is captured at hx_quit() in gtkhx.c gtkhx_save_window_positions
- * alongside position. The transparent-xtext refresh that used to ride
- * along on configure is gone — under Wayland we don't get true
- * transparency anyway. */
+ * alongside position. */
 
 static GtkWidget *chat_hbox;
 static GtkWidget *wind_tmp;
@@ -967,11 +965,7 @@ void create_chat(session *sess)
 		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
 		g_free (fontname);
 	}
-	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
 	gtk_widget_set_can_focus(text, FALSE);
-	/* Phase 2.6: tint_red/green/blue dropped — HexChat's xtext doesn't
-	 * carry the tinted-transparency feature.  trans_xtext is honored
-	 * only as a "draw the root window through" toggle now. */
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
@@ -1168,7 +1162,6 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
 
-	gtk_xtext_set_background(GTK_XTEXT(text), NULL);
 	vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(text)->adj);
 
 	subject = gtk_entry_new();

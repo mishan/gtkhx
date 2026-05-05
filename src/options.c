@@ -69,12 +69,6 @@ struct gtkhx_prefs gtkhx_prefs =
 {
 	0,
 	0,
-	0,
-#ifdef USE_GDK_PIXBUF
-	255,
-	255,
-	255,
-#endif
 	PREFIX"/share/gtkhx/sounds",
 	"",
 	"fixed",
@@ -233,13 +227,11 @@ static void changed_xtext (session *sess)
 		struct gtkhx_chat *gchat;
 		struct msgwin *msg;
 		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			gtk_xtext_set_background(GTK_XTEXT(gchat->output), NULL);
 			GTK_XTEXT(gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
 			GTK_XTEXT(gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
 			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
 		}
 		for(msg = sess->msg_list; msg; msg = msg->prev) {
-			gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), NULL);
 			GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
 			GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
 			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf));
@@ -357,9 +349,6 @@ struct cfgvar
 {
 	{"AUTOREPLYMSG", {&gtkhx_prefs.auto_reply_msg}, STRING, 0, NULL, NULL},
 	{"AUTOREPLYON", {&gtkhx_prefs.auto_reply}, BOOLEAN, 0, NULL, NULL},
-#ifdef USE_GDK_PIXBUF
-	{"BLUE", {&gtkhx_prefs.tint_blue}, INT, 0, NULL, NULL},
-#endif
 	{"CHATXPOS", {&gtkhx_prefs.geo.chat.xpos}, INT, 0, NULL, NULL},
 	{"CHATXSIZE", {&gtkhx_prefs.geo.chat.xsize}, INT, 0, NULL, NULL},
 	{"CHATYPOS", {&gtkhx_prefs.geo.chat.ypos}, INT, 0, NULL, NULL},
@@ -371,9 +360,6 @@ struct cfgvar
 	{"NEWS_SAMEWINDOW", {&gtkhx_prefs.news_samewin}, BOOLEAN, 0, 
 	 changed_newssamewin, NULL},
 	{"FONT", {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
-#ifdef USE_GDK_PIXBUF
-	{"GREEN", {&gtkhx_prefs.tint_green}, INT, 0, NULL, NULL},
-#endif
 	{"ICON", {&the_session.htlc.icon}, UINT16, 0, /*changed_nickoricon*/NULL, NULL},
 	{"ICONS", {&gtkhx_prefs.icon_str}, STRING, 0, parse_icons, NULL},
 #if 0 /* XXX */
@@ -391,9 +377,6 @@ struct cfgvar
 	{"OPENTASKS", {&gtkhx_prefs.geo.tasks.init}, BOOLEAN, 0, NULL, NULL},
 	{"OPENUSERS", {&gtkhx_prefs.geo.users.init}, BOOLEAN, 0, NULL, NULL},
 	{"QUEUEDL", {&gtkhx_prefs.queuedl}, BOOLEAN, 0, NULL, NULL},
-#ifdef USE_GDK_PIXBUF
-	{"RED", {&gtkhx_prefs.tint_red}, INT, 0, NULL, NULL},
-#endif
 	{"SHOWBACK", {&gtkhx_prefs.showback}, BOOLEAN, 0, NULL, NULL},
 	{"SHOWJOIN", {&gtkhx_prefs.showjoin}, BOOLEAN, 0, NULL, NULL},
 	{"SND_CMD", {&gtkhx_prefs.snd_cmd}, STRING, 0, NULL, NULL},
@@ -418,7 +401,6 @@ struct cfgvar
 	{"TOOLYPOS", {&gtkhx_prefs.geo.tool.ypos}, INT, 0, NULL, NULL},
 	{"TRACKER", {&gtkhx_prefs.tracker_str}, STRING, 0, parse_tracker, NULL},
 	{"TRACKER_CASE", {&gtkhx_prefs.track_case}, BOOLEAN, 0, changed_case, NULL},
-	{"TRANSPARENT", {&gtkhx_prefs.trans_xtext}, BOOLEAN, 0, changed_xtext,NULL},
 	{"USERXPOS", {&gtkhx_prefs.geo.users.xpos}, INT, 0, NULL, NULL},
 	{"USERXSIZE", {&gtkhx_prefs.geo.users.xsize}, INT, 0, NULL, NULL},
 	{"USERYPOS", {&gtkhx_prefs.geo.users.ypos}, INT, 0, NULL, NULL},
@@ -431,7 +413,6 @@ enum
 {
 	AUTOREPLYMSG_IDX,
 	AUTOREPLYON_IDX,
-	BLUE_IDX,
 	CHATXPOS_IDX,
 	CHATXSIZE_IDX,
 	CHATYPOS_IDX,
@@ -440,7 +421,6 @@ enum
 	FILE_SAMEWINDOW_IDX,
 	NEWS_SAMEWINDOW_IDX,
 	FONT_IDX,
-	GREEN_IDX,
 	ICON_IDX,
 	ICONS_IDX,
 #if 0 /* XXX */
@@ -457,7 +437,6 @@ enum
 	OPENTASKS_IDX,
 	OPENUSERS_IDX,
 	QUEUEDL_IDX,
-	RED_IDX,
 	SHOWBACK_IDX,
 	SHOWJOIN_IDX,
 	SND_CMD_IDX,
@@ -482,7 +461,6 @@ enum
 	TOOLYPOS_IDX,
 	TRACKER_IDX,
 	TRACKER_CASE_IDX,
-	TRANSPARENT_IDX,
 	USERXPOS_IDX,
 	USERXSIZE_IDX,
 	USERYPOS_IDX,
@@ -963,53 +941,6 @@ static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 	gtk_window_present(GTK_WINDOW(fontsel));
 }
 
-#ifdef USE_GDK_PIXBUF
-/* Phase 2.6: HexChat's xtext does not implement tinted transparency, so
- * the slider value is now stored to gtkhx_prefs only (preserved across
- * sessions for forward-compatibility) and the widget refresh just
- * re-renders to pick up any other pref changes. */
-static void
-settings_slider_cb (GtkAdjustment * adj, int *value)
-{
-	struct gtkhx_chat *gchat;
-	struct msgwin *msg;
-
-	*value = gtk_adjustment_get_value(adj);
-	for(gchat = the_session.gchat_list; gchat; gchat = gchat->prev) {
-		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
-	}
-	for(msg = msg_list; msg; msg = msg->prev) {
-		gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
-	}
-}
-static void
-settings_slider (GtkWidget * vbox, char *label, int *value)
-{
-	GtkAdjustment *adj;
-	GtkWidget *wid, *hbox, *lbox, *lab;
-
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtkhx_box_pack(vbox, hbox, 0, 0, 2);
-
-	lbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtkhx_box_pack(hbox, lbox, 0, 0, 2);
-	gtk_widget_set_size_request (lbox, 60, 0);
-
-	lab = gtk_label_new (label);
-	gtkhx_box_pack_end(lbox, lab, 0, 0, 0);
-
-	adj = (GtkAdjustment *) gtk_adjustment_new (*value, 0, 255.0, 1, 25, 0);
-	g_signal_connect (adj, "value_changed",
-							  G_CALLBACK (settings_slider_cb), value);
-
-	wid = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, adj);
-	gtk_scale_set_value_pos ((GtkScale *) wid, GTK_POS_RIGHT);
-	gtk_scale_set_digits ((GtkScale *) wid, 0);
-	gtkhx_widget_set_child(hbox, wid);
-}
-
-#endif
-
 static GtkWidget *
 settings_create_group (GtkWidget * vvbox, gchar * title)
 {
@@ -1308,30 +1239,8 @@ static void settings_page_xtext(GtkWidget *vbox)
 {
 	GtkWidget *lbl;
 	GtkWidget *wid;
-	GtkWidget *table;
 	GtkWidget *table2;
 	GtkAdjustment *adj;
-
-	wid = settings_create_group(vbox, _("Transparency"));
-
-	table = gtkhx_grid_new_table(4, 1, 0);
-	gtk_grid_set_row_spacing(GTK_GRID(table), 10);
-	(gtk_widget_set_margin_start(table, 10), gtk_widget_set_margin_end(table, 10), gtk_widget_set_margin_top(table, 10), gtk_widget_set_margin_bottom(table, 10));
-
-	cfgvars[TRANSPARENT_IDX].widget = gtk_check_button_new_with_label(
-		_("Use Transparent XText Widget"));
-	gtk_check_button_set_active((GtkCheckButton*)
-								 cfgvars[TRANSPARENT_IDX].widget,
-								 gtkhx_prefs.trans_xtext);
-	gtkhx_grid_attach_table(GTK_GRID(table), cfgvars[TRANSPARENT_IDX].widget, 0, 1, 0, 1,
-					 GTK_FILL, 0, 0, 0);
-	gtkhx_box_pack(wid, table, 0, 0, 0);
-
-#ifdef USE_GDK_PIXBUF
-	settings_slider(wid, _("Red: "), &gtkhx_prefs.tint_red);
-	settings_slider(wid, _("Green: "), &gtkhx_prefs.tint_green);
-	settings_slider(wid, _("Blue: "), &gtkhx_prefs.tint_blue);
-#endif
 
 	wid = settings_create_group(vbox, _("Miscellaeneous"));
 

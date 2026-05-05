@@ -273,17 +273,7 @@ xtext_draw_bg (GtkXText *xt, int x, int y, int w, int h)
 		return;
 	}
 	cairo_save (cr);
-	if (xt->bg_surface)
-	{
-		cairo_pattern_t *pat = cairo_pattern_create_for_surface (xt->bg_surface);
-		cairo_pattern_set_extend (pat, CAIRO_EXTEND_REPEAT);
-		cairo_set_source (cr, pat);
-		cairo_pattern_destroy (pat);
-	}
-	else
-	{
-		xtext_cairo_set_source_idx (xt, cr, xt->cur_bg);
-	}
+	xtext_cairo_set_source_idx (xt, cr, xt->cur_bg);
 	cairo_rectangle (cr, x, y, w, h);
 	cairo_fill (cr);
 	cairo_restore (cr);
@@ -569,7 +559,6 @@ xtext_set_bg (GtkXText *xtext, int index)
 static void
 gtk_xtext_init (GtkXText * xtext)
 {
-	xtext->bg_surface = NULL;
 	xtext->cr = NULL;
 	xtext->io_tag = 0;
 	xtext->add_io_tag = 0;
@@ -755,12 +744,6 @@ gtk_xtext_dispose (GObject * object)
 	{
 		g_source_remove (xtext->io_tag);
 		xtext->io_tag = 0;
-	}
-
-	if (xtext->bg_surface)
-	{
-		cairo_surface_destroy (xtext->bg_surface);
-		xtext->bg_surface = NULL;
 	}
 
 	if (xtext->font)
@@ -2751,15 +2734,6 @@ gtk_xtext_render_flush (GtkXText * xtext, int x, int y, unsigned char *str,
 	dest_x = x;
 	dofill = TRUE;
 
-	/* If we have a background pattern image and no explicit backcolor,
-	 * paint it under the text run so we don't double-fill. */
-	if (!xtext->backcolor && xtext->bg_surface)
-	{
-		xtext_draw_bg (xtext, x, y - xtext->font->ascent, str_width,
-							xtext->fontsize);
-		dofill = FALSE;
-	}
-
 	backend_draw_text_emph (xtext, dofill, xtext->cur_fg, xtext->cur_bg,
 								  x, y, (char *) str, len, str_width, *emphasis);
 
@@ -3664,36 +3638,6 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 		gtk_xtext_recalc_widths (xtext->buffer, TRUE);
 
 	return TRUE;
-}
-
-/* Phase 3.4b: gtk_xtext_set_background takes a GdkPixbuf now (alias to
- * GdkPixmap in compat headers).  We stash a cairo_surface_t version for
- * fast tiled fill via cairo_pattern. */
-void
-gtk_xtext_set_background (GtkXText * xtext, GdkPixmap * pixmap)
-{
-	if (xtext->bg_surface)
-	{
-		cairo_surface_destroy (xtext->bg_surface);
-		xtext->bg_surface = NULL;
-	}
-
-	dontscroll (xtext->buffer);
-
-	if (pixmap != NULL)
-	{
-		/* Phase 4.9: gdk_cairo_surface_create_from_pixbuf was removed
-		 * from the public API in GTK 4 (still present in
-		 * gdk/deprecated/gdkpixbuf.h but not part of the toolkit's
-		 * supported surface). Background-pixmap support is degraded
-		 * pending a Phase 4.9 follow-up that renders the pixbuf into
-		 * a cairo_image_surface_t manually via gdk_pixbuf_read_pixels
-		 * + cairo_image_surface_create_for_data. */
-		(void) pixmap;
-		xtext->ts_x = xtext->ts_y = 0;
-	}
-
-	gtk_widget_queue_draw (GTK_WIDGET (xtext));
 }
 
 void

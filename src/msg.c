@@ -222,7 +222,6 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	GTK_XTEXT(msg->outputbuf)->urlcheck_function = word_check;
 	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
 
-	gtk_xtext_set_background(GTK_XTEXT(msg->outputbuf), NULL);
 	msg->vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(msg->outputbuf)->adj);
 	msg->inputbuf = gtk_text_view_new();
 
