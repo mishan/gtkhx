@@ -34,6 +34,14 @@ extra_warnings = [
   '-Wstrict-prototypes',
   '-Wmissing-prototypes',
   '-Wno-unused-parameter',
+  # Phase 3.9: lock in the deprecation pass — the tree is clean of GTK 3
+  # deprecations as of the wmclass / table-to-grid sweeps. Promote any
+  # future use of a deprecated GTK / GLib / GDK symbol to a hard error
+  # so we don't silently accumulate the next round. The few sites we
+  # have to keep using deprecated API for (gtk_dialog_get_action_area)
+  # live behind the G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma in
+  # gtkutil.c — the pragma is honored even with -Werror.
+  '-Werror=deprecated-declarations',
 ]
 add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c')
 
