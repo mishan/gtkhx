@@ -76,19 +76,19 @@ What's *runnable* on first boot from this branch:
 
 What's *degraded* and tracked as Phase 4 follow-up work:
 
-- **xtext interaction**: the rendering / text-append / font / palette path is
-  intact, but the click/motion/scroll/selection event stack is wrapped in
-  `#if 0` in `src/xtext.c` (after the snapshot vfunc rewrite). Selection by
-  drag, click-to-URL hand cursor, scroll-zoom, and primary-clipboard
-  ownership are off until those handlers come back as GTK 4 event
-  controllers. The `#if 0` block has a docblock above it naming every dead
-  function.
 - **Files drag-and-drop**: cross-window file move via DnD is stripped
   pending the `GtkDragSource` / `GtkDropTarget` port (Phase 4.8 follow-up
   inside `files.c`).
 - **xtext background pixmap**: `gdk_cairo_surface_create_from_pixbuf` is
   gone in GTK 4; `gtk_xtext_set_background` is a no-op until the pixbuf
   bytes get rendered into a `cairo_image_surface_t` manually.
+- **Selection auto-scroll while dragging**: the scrollup/down timers read
+  `xtext->select_end_y` (kept live by the motion controller) rather than
+  the live device position, since GTK 4 has no synchronous "where is the
+  pointer" accessor on a widget. If the user drags out of the widget and
+  the pointer goes still, the timers fire correctly using the last known
+  position; if the pointer is moving past the edge they keep up. Coarse
+  but correct; matches HexChat's GTK 4 fork behaviour.
 - **Window position restoration**: `gtk_window_get_position` is gone and
   Wayland gives clients no portable way to set their absolute position
   anyway. Size restoration works via the quit-time save path; positions
