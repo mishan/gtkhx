@@ -41,19 +41,23 @@ extra_warnings = [
   # have to keep using deprecated API for (gtk_dialog_get_action_area)
   # live behind the G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma in
   # gtkutil.c — the pragma is honored even with -Werror.
-  '-Werror=deprecated-declarations',
+  #
+  # Phase 4.1: temporarily downgrade to a warning so the GTK 4 port can
+  # focus on breaking-change errors first; deprecations come back as
+  # errors in Phase 4.13.
+  # '-Werror=deprecated-declarations',
 ]
 add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c')
 
 # -----------------------------------------------------------------------------
 # Dependencies
 #
-# GTK pin advances per phase: 2 -> 3 -> 4. Phase 3 is in progress; the floor is
-# 3.22 (the last LTS-grade release of GTK 3, ships in every supported distro).
+# GTK pin advances per phase: 2 -> 3 -> 4. Phase 4 is in progress; floor is
+# 4.6 (the GtkApplication and snapshot APIs we lean on are stable from there).
 # Per ROADMAP: Nettle for legacy Hotline ciphers (Blowfish/RC4) + GLib hashes;
 # no GnuTLS (Phase ∞ work, requires server-side cooperation).
 # -----------------------------------------------------------------------------
-gtk_dep     = dependency('gtk+-3.0',  version : '>= 3.22')
+gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 zlib_dep    = dependency('zlib')
