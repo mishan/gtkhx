@@ -1,6 +1,21 @@
 High priority:
 
-(none)
+- Various parts of GtkHx UI don't work well with Dark Theme
+ - Tracker list entries use black text instead of white
+ - User list icons look weird with dark background
+ - Tasks in the "Tasks" window are unclear. We need a better progress bar
+
+- Tracker layout is too compact / busy, doesn't have enough spacing
+- Clicking on the columns in the Tracker window doesn't sort the entries by that column
+- Opening Options, closing them, and opening them again fails
+
+(gtkhx:226190): Gtk-CRITICAL **: 14:07:36.189: gtk_window_present: assertion 'GTK_IS_WINDOW (window)' failed
+
+Medium priority:
+
+- Whenever a dialog pops up, a warning is emitted
+
+Gtk-Message: 12:10:16.131: GtkDialog mapped without a transient parent. This is discouraged.
 
 Low priority:
 
