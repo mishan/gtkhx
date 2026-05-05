@@ -297,17 +297,21 @@ gtk_hlist_construct (gint n_columns, gchar **titles)
 
 		/* Phase 5: register a sort function for this text column on
 		 * the model and link the column header to it via
-		 * sort_column_id. GtkTreeView handles the click → toggle
-		 * ascending/descending state and the header arrow indicator
-		 * automatically. The callback above (on_column_clicked) still
-		 * fires for legacy click_column consumers but the visible
-		 * sort effect is now driven by GtkTreeSortable. */
-		gtk_tree_sortable_set_sort_func (GTK_TREE_SORTABLE (priv->store),
-		                                 HLIST_COL_TEXT (i),
-		                                 hlist_text_column_compare,
-		                                 GINT_TO_POINTER (HLIST_COL_TEXT (i)),
-		                                 NULL);
-		gtk_tree_view_column_set_sort_column_id (col, HLIST_COL_TEXT (i));
+		 * sort_column_id, but only when the list will actually have
+		 * a visible header to click — set_sort_column_id installs an
+		 * indicator-arrow widget hierarchy that asserts during
+		 * mapping if the column header isn't present (the
+		 * gtk_css_node_insert_after assertion). gtk_hlist_new() lists
+		 * (no titles) keep the legacy gtk_hlist_set_compare_func +
+		 * gtk_hlist_sort path and don't get auto-sort. */
+		if (titles != NULL) {
+			gtk_tree_sortable_set_sort_func (GTK_TREE_SORTABLE (priv->store),
+			                                 HLIST_COL_TEXT (i),
+			                                 hlist_text_column_compare,
+			                                 GINT_TO_POINTER (HLIST_COL_TEXT (i)),
+			                                 NULL);
+			gtk_tree_view_column_set_sort_column_id (col, HLIST_COL_TEXT (i));
+		}
 
 		pixr = gtk_cell_renderer_pixbuf_new ();
 		gtk_tree_view_column_pack_start (col, pixr, FALSE);
