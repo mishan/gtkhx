@@ -676,15 +676,52 @@ build_bookmark_menu_from_dir (GMenu *menu, const char *path)
 	closedir (dir);
 }
 
+/* Phase 5: same display names the connect-dialog combo uses (in
+ * create_connect_window's builtin_names array). Indexes here MUST
+ * line up with builtin_bookmark's switch on GPOINTER_TO_INT(data) —
+ * 1..4 maps to hlserver / cafelinux / nasledov / singrafix. */
+static const char *const builtin_bookmark_names[] = {
+	NULL,                       /* index 0 unused */
+	"Hotline Communications",
+	"CafeLinux",
+	"GtkHx",
+	"SiN Grafix",
+};
+#define BUILTIN_BOOKMARK_MAX 4
+
 GMenu *
 connect_build_bookmark_menu (void)
 {
 	GMenu *menu = g_menu_new ();
+	GMenu *builtins = g_menu_new ();
+	GMenu *saved = g_menu_new ();
 	char *primary = bookmarks_dir_primary ();
 	char *legacy  = bookmarks_dir_legacy ();
+	int i;
 
-	build_bookmark_menu_from_dir (menu, primary);
-	build_bookmark_menu_from_dir (menu, legacy);
+	/* Built-in section: hardcoded "well-known" Hotline servers from
+	 * the connect dialog's builtin list. They target a separate
+	 * action (app.connect_builtin) with an integer parameter so the
+	 * action handler can dispatch to builtin_bookmark by index. */
+	for (i = 1; i <= BUILTIN_BOOKMARK_MAX; i++) {
+		GMenuItem *item = g_menu_item_new (builtin_bookmark_names[i], NULL);
+		g_menu_item_set_action_and_target_value (
+			item, "app.connect_builtin", g_variant_new_int32 (i));
+		g_menu_append_item (builtins, item);
+		g_object_unref (item);
+	}
+	g_menu_append_section (menu, NULL, G_MENU_MODEL (builtins));
+	g_object_unref (builtins);
+
+	/* Saved bookmarks: scanned from disk. Appended as a separate
+	 * section so the GtkPopoverMenu draws a separator between the
+	 * built-ins and the user-saved entries. */
+	build_bookmark_menu_from_dir (saved, primary);
+	build_bookmark_menu_from_dir (saved, legacy);
+	if (g_menu_model_get_n_items (G_MENU_MODEL (saved)) > 0) {
+		g_menu_append_section (menu, NULL, G_MENU_MODEL (saved));
+	}
+	g_object_unref (saved);
 
 	g_free (primary);
 	g_free (legacy);
@@ -696,6 +733,16 @@ connect_open_bookmark_by_name (const char *name)
 {
 	if (name && *name)
 		open_bookmark (NULL, (gpointer) name);
+}
+
+/* Phase 5: invoked from app.connect_builtin to load one of the
+ * hardcoded "well-known" servers by index (1..4). Wraps the static
+ * builtin_bookmark so toolbar.c doesn't have to reach in. */
+void
+connect_open_builtin_bookmark (int idx)
+{
+	if (idx >= 1 && idx <= BUILTIN_BOOKMARK_MAX)
+		builtin_bookmark (NULL, GINT_TO_POINTER (idx));
 }
 
 /* Phase 5: bookmark save migrates to AdwAlertDialog with the name

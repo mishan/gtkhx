@@ -31,4 +31,10 @@ extern GMenu *connect_build_bookmark_menu (void);
  * have to reach into connect.c's static functions. */
 extern void connect_open_bookmark_by_name (const char *name);
 
+/* Phase 5: load one of the hardcoded "well-known" Hotline server
+ * bookmarks (Hotline Communications / CafeLinux / GtkHx / SiN
+ * Grafix). idx is 1..4 — same numbering the connect dialog's
+ * builtin combo uses. */
+extern void connect_open_builtin_bookmark (int idx);
+
 #endif

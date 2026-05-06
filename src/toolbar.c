@@ -123,6 +123,21 @@ on_action_open_bookmark (GSimpleAction *action, GVariant *param,
 	connect_open_bookmark_by_name (name);
 }
 
+/* Phase 5: app.connect_builtin fires from the SplitButton's
+ * dropdown for one of the hardcoded "well-known" Hotline servers.
+ * Index 1..4 — same numbering the connect dialog's built-in combo
+ * has used since forever. */
+static void
+on_action_connect_builtin (GSimpleAction *action, GVariant *param,
+                           gpointer user_data)
+{
+	(void) action; (void) user_data;
+
+	if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_INT32))
+		return;
+	connect_open_builtin_bookmark (g_variant_get_int32 (param));
+}
+
 /* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
  * returning gboolean. Returning TRUE inhibits the default destroy —
  * we always want to call hx_quit() (which calls exit()), so the
@@ -215,13 +230,15 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static const GActionEntry app_actions[] = {
-	{ .name = "settings",      .activate = on_action_settings      },
-	{ .name = "about",         .activate = on_action_about         },
-	{ .name = "user_new",      .activate = on_action_user_new      },
-	{ .name = "user_edit",     .activate = on_action_user_edit     },
-	{ .name = "open_bookmark", .activate = on_action_open_bookmark,
+	{ .name = "settings",        .activate = on_action_settings        },
+	{ .name = "about",           .activate = on_action_about           },
+	{ .name = "user_new",        .activate = on_action_user_new        },
+	{ .name = "user_edit",       .activate = on_action_user_edit       },
+	{ .name = "open_bookmark",   .activate = on_action_open_bookmark,
 	  .parameter_type = "s" },
-	{ .name = "quit",          .activate = on_action_quit          },
+	{ .name = "connect_builtin", .activate = on_action_connect_builtin,
+	  .parameter_type = "i" },
+	{ .name = "quit",            .activate = on_action_quit            },
 };
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
