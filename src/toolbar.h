@@ -38,4 +38,10 @@ extern void toolbar_show_toast (const char *text);
 extern void toolbar_show_connection_lost (const char *server);
 extern void toolbar_hide_banner (void);
 
+/* Phase 5: rescan the bookmarks directory and refresh the Connect
+ * SplitButton's dropdown menu. Called from connect.c after a
+ * successful Save Bookmark so newly-added entries show up without
+ * restarting the app. */
+extern void toolbar_refresh_bookmarks (void);
+
 #endif

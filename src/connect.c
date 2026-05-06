@@ -133,91 +133,86 @@ void connect_set_entries (const char *address, const char *login, const char *pa
 	gtk_editable_set_text(GTK_EDITABLE(port_entry), buf);
 }
 
+/* Phase 5: shared "actually connect" path. Plumbs the compress /
+ * cipher algorithm strings onto sess->htlc (zeroing them when the
+ * connection isn't HOPE-secure or when no algorithm is selected),
+ * resolves the port string, and fires hx_connect.
+ *
+ * Used by server_connect (form-driven) and the SplitButton bookmark
+ * paths (data-driven, dialog-bypassing).
+ *
+ * compress / cipher are the AdwComboRow indexes (0 == NONE), the
+ * non-zero values index into valid_compressors[] / valid_ciphers[]. */
+static void
+connect_with_args (session *sess,
+                   const char *server, guint16 port,
+                   const char *login,  const char *pass,
+                   char secure, char compress, char cipher)
+{
+	(void) compress; (void) cipher;
+
+#ifdef CONFIG_COMPRESS
+	memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
+	if (secure && compress) {
+		const char *compress_algo = valid_compressors[compress - 1];
+		if (compress_algo && valid_compress (compress_algo)) {
+			size_t colen = strlen (compress_algo);
+			if (colen >= sizeof (sess->htlc.compressalg))
+				colen = sizeof (sess->htlc.compressalg) - 1;
+			memcpy (sess->htlc.compressalg, compress_algo, colen);
+			sess->htlc.compressalg[colen] = 0;
+		}
+	}
+#endif
+#ifdef CONFIG_CIPHER
+	memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
+	if (secure && cipher) {
+		const char *cipher_algo = valid_ciphers[cipher - 1];
+		if (cipher_algo && valid_cipher (cipher_algo)) {
+			size_t cilen = strlen (cipher_algo);
+			if (cilen >= sizeof (sess->htlc.cipheralg))
+				cilen = sizeof (sess->htlc.cipheralg) - 1;
+			memcpy (sess->htlc.cipheralg, cipher_algo, cilen);
+			sess->htlc.cipheralg[cilen] = 0;
+		}
+	}
+#endif
+
+	hx_connect (&sess->htlc, server, port, login, pass, secure);
+}
+
 static void server_connect (GtkWidget *widget, gpointer data)
 {
-	char *server;
-	char *login;
-	char *pass;
-	char *portstr;
+	const char *server, *login, *pass, *portstr;
 	int secure;
 	session *sess = data;
 	guint16 port = 5500;
+	char compress = 0, cipher = 0;
+	(void) widget;
 
-	login = gtk_editable_get_text(GTK_EDITABLE(login_entry));
-	server = gtk_editable_get_text(GTK_EDITABLE(address_entry));
-	pass = gtk_editable_get_text(GTK_EDITABLE(password_entry));
-	portstr = gtk_editable_get_text(GTK_EDITABLE(port_entry));
-	secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
-	if(secure) {
+	login   = gtk_editable_get_text (GTK_EDITABLE (login_entry));
+	server  = gtk_editable_get_text (GTK_EDITABLE (address_entry));
+	pass    = gtk_editable_get_text (GTK_EDITABLE (password_entry));
+	portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+	secure  = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
 #ifdef CONFIG_COMPRESS
-		char compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
-		char *compress_algo = NULL;
-		int colen = 0;
+	compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
 #endif
 #ifdef CONFIG_CIPHER
-		char cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
-		char *cipher_algo = NULL;
-		int cilen = 0;
+	cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
 #endif
 
-#ifdef CONFIG_COMPRESS
-		if(compress) {
-			compress_algo = valid_compressors[compress-1];
-			colen = strlen(compress_algo);
-			if(compress_algo && valid_compress(compress_algo)) {
-				strncpy(sess->htlc.compressalg, compress_algo, colen);
-				sess->htlc.compressalg[colen] = 0;
-			}
-			else {
-				memset(sess->htlc.compressalg, 0, sizeof(sess->htlc.compressalg));
-			}
-		}
-		else {
-			memset(sess->htlc.compressalg, 0, sizeof(sess->htlc.compressalg));
-		}
+	if (portstr && portstr[0])
+		port = atoi (portstr);
 
-#endif
-#ifdef CONFIG_CIPHER
-		if(cipher) {
-			cipher_algo = valid_ciphers[cipher-1];
-			cilen = strlen(cipher_algo);
-			if(cipher_algo && valid_cipher(cipher_algo)) {
-				strncpy(sess->htlc.cipheralg, cipher_algo, cilen);
-				sess->htlc.cipheralg[cilen] = 0;
-			}
-			else {
-				memset(sess->htlc.cipheralg, 0, sizeof(sess->htlc.cipheralg));
-			}
-		}
-		else {
-			memset(sess->htlc.cipheralg, 0, sizeof(sess->htlc.cipheralg));
-		}
-#endif
-	}
-
-	else {
-#ifdef CONFIG_COMPRESS
-		memset(sess->htlc.compressalg, 0, sizeof(sess->htlc.compressalg));
-#endif
-#ifdef CONFIG_CIPHER
-		memset(sess->htlc.cipheralg, 0, sizeof(sess->htlc.cipheralg));
-#endif
-	}
-
-	
-	if(portstr[0]) {
-		port = atoi(portstr);
-	}
-	
-	hx_connect(&sess->htlc, server, port, login, pass, secure);
+	connect_with_args (sess, server, port, login, pass,
+	                   (char) secure, compress, cipher);
 
 	if (connect_window) {
 		adw_dialog_close (ADW_DIALOG (connect_window));
 		connect_window = 0;
 	}
 }
-
-static void builtin_bookmark (GtkWidget *widget, gpointer data);
 
 void set_the_entries (char *address, char *login, char *password, char *port,
 					  char secure, char compress, char cipher)
@@ -461,70 +456,124 @@ open_bookmark_file (const char *name, char **out_path)
 	return bm;
 }
 
-static void open_bookmark(GtkWidget *widget, gpointer data)
-{
-	char *path = NULL;
-	int   bm   = open_bookmark_file ((char *) data, &path);
-	char junk[132];
+/* Phase 5: parsed contents of an HTsc-format bookmark file.
+ * server/port are split (port populated only if the bookmark stored
+ * "host:port"); login/pass are NUL-terminated within their 33-byte
+ * fields. */
+struct bookmark_parsed {
+	char server[128];
 	char login[33];
 	char pass[33];
-	char server[128];
+	char port[HOSTLEN];
 	char secure;
 	char compress;
 	char cipher;
+};
+
+/* Phase 5: read the new-format (HTsc) bookmark at $name and fill *out.
+ * Returns 0 on success.
+ *  -1: bookmark doesn't exist
+ *  -2: file is in the legacy format (caller should run prompt_conversion)
+ *  -3: short read / corrupt file
+ *
+ * On the legacy-format path the caller gets the file path through
+ * *out_legacy_path so it can hand it to prompt_conversion; the path
+ * is g_strdup'd, caller g_frees. */
+static int
+bookmark_parse (const char *name, struct bookmark_parsed *out, char **out_legacy_path)
+{
+	char *path = NULL;
+	int   bm   = open_bookmark_file (name, &path);
+	char junk[132];
 	char header[5];
 	char len_addr;
-	char *p, port[HOSTLEN];
+	char *p;
 	size_t len;
 
-	if(bm < 0) {
-		g_warning("%s \"%s\"\n", _("No such bookmark"), (char *)data);
-		return;
-	}
+	if (out_legacy_path)
+		*out_legacy_path = NULL;
+	if (bm < 0)
+		return -1;
 
-	read(bm, header, 4);
+	memset (out, 0, sizeof (*out));
+
+	if (read (bm, header, 4) != 4) goto bad;
 	header[4] = '\0';
-
-	if(strcmp(header, "HTsc")) {
-		close(bm);
-		prompt_conversion(path);
-		g_free(path);
-		return;
+	if (strcmp (header, "HTsc") != 0) {
+		close (bm);
+		if (out_legacy_path)
+			*out_legacy_path = path;
+		else
+			g_free (path);
+		return -2;
 	}
-	g_free(path);
+	g_free (path);
 
-	read(bm, junk, 132);
-	read(bm, login, 33);
-	read(bm, &len_addr, 1);
-	read(bm, pass, 33);
-	read(bm, &len_addr, 1);
+	if (read (bm, junk, 132)         != 132) goto bad;
+	if (read (bm, out->login, 33)    !=  33) goto bad;
+	if (read (bm, &len_addr, 1)      !=   1) goto bad;
+	if (read (bm, out->pass, 33)     !=  33) goto bad;
+	if (read (bm, &len_addr, 1)      !=   1) goto bad;
 
-	len =  len_addr;
+	len = len_addr;
+	if (len >= sizeof (out->server)) goto bad;
+	if (read (bm, out->server, len) != (ssize_t) len) goto bad;
+	out->server[len] = 0;
 
-	read(bm, server, len);
-	server[len] = 0;
+	if (read (bm, &out->secure,   1) != 1) goto bad;
+	if (read (bm, &out->compress, 1) != 1) goto bad;
+	if (read (bm, &out->cipher,   1) != 1) goto bad;
 
-	read(bm, &secure, 1);
-	read(bm, &compress, 1);
-	read(bm, &cipher, 1);
+	close (bm);
 
-
-	port[0] = '\0';
-	if(( p = strrchr(server, ':')) ) {
-		int i;
-		for(i = 0; i < strlen(server); i++) {
-			if(&(server[i]) == p) {
-				server[i] = 0;
+	out->port[0] = '\0';
+	if ((p = strrchr (out->server, ':'))) {
+		size_t i;
+		for (i = 0; i < strlen (out->server); i++) {
+			if (&out->server[i] == p) {
+				out->server[i] = 0;
 				break;
 			}
 		}
 		p++;
-		g_snprintf(port, sizeof(port), "%u", atoi(p));
+		g_snprintf (out->port, sizeof (out->port), "%u", atoi (p));
+	}
+	return 0;
 
+bad:
+	close (bm);
+	return -3;
+}
+
+/* Phase 5 legacy entry point — fills the connect-dialog widgets from
+ * a saved bookmark. Used internally by code that opens the dialog
+ * first (the SplitButton menu uses connect_open_bookmark_by_name
+ * instead, which connects directly without showing the dialog). */
+static void open_bookmark(GtkWidget *widget, gpointer data)
+{
+	struct bookmark_parsed bm;
+	char *legacy_path = NULL;
+	int rc;
+	(void) widget;
+
+	rc = bookmark_parse ((char *) data, &bm, &legacy_path);
+	if (rc == -1) {
+		g_warning ("%s \"%s\"\n", _("No such bookmark"), (char *) data);
+		return;
+	}
+	if (rc == -2) {
+		prompt_conversion (legacy_path);
+		g_free (legacy_path);
+		return;
+	}
+	if (rc != 0) {
+		g_warning ("%s \"%s\"\n",
+		           _("Could not read bookmark"), (char *) data);
+		return;
 	}
 
-	set_the_entries(server, login, pass, port, secure, compress, cipher);
-	close(bm);
+	set_the_entries (bm.server, bm.login, bm.pass, bm.port,
+	                 bm.secure, bm.compress, bm.cipher);
 }
 
 /* Phase 5: scan a bookmarks dir and append each entry as a menu item
@@ -631,21 +680,67 @@ connect_build_bookmark_menu (void)
 	return menu;
 }
 
+/* Phase 5: connect to a saved bookmark directly — no dialog. The
+ * SplitButton dropdown calls this when the user picks a bookmark.
+ * Parses the file via bookmark_parse, sets up the session's
+ * compress/cipher state, and calls hx_connect.
+ *
+ * Legacy-format bookmarks fall back to the prompt_conversion flow,
+ * which opens an AdwAlertDialog and rewrites the file in-place;
+ * after conversion the user has to click the bookmark again to
+ * connect. We don't auto-retry because converting + connecting
+ * silently would hide the format change from the user. */
 void
 connect_open_bookmark_by_name (const char *name)
 {
-	if (name && *name)
-		open_bookmark (NULL, (gpointer) name);
+	struct bookmark_parsed bm;
+	char *legacy_path = NULL;
+	int rc;
+	guint16 port = 5500;
+
+	if (!name || !*name)
+		return;
+
+	rc = bookmark_parse (name, &bm, &legacy_path);
+	if (rc == -1) {
+		g_warning ("%s \"%s\"\n", _("No such bookmark"), name);
+		return;
+	}
+	if (rc == -2) {
+		prompt_conversion (legacy_path);
+		g_free (legacy_path);
+		return;
+	}
+	if (rc != 0) {
+		g_warning ("%s \"%s\"\n", _("Could not read bookmark"), name);
+		return;
+	}
+
+	if (bm.port[0])
+		port = atoi (bm.port);
+
+	connect_with_args (&the_session, bm.server, port,
+	                   bm.login, bm.pass,
+	                   bm.secure, bm.compress, bm.cipher);
 }
 
-/* Phase 5: invoked from app.connect_builtin to load one of the
- * hardcoded "well-known" servers by index (1..4). Wraps the static
- * builtin_bookmark so toolbar.c doesn't have to reach in. */
+/* Phase 5: connect to a built-in "well-known" Hotline server. After
+ * the recent cleanup only Hotline Communications (idx 1, hlserver.com)
+ * remains; the switch is preserved as a structure so adding more
+ * built-ins later is a single new case. */
 void
 connect_open_builtin_bookmark (int idx)
 {
-	if (idx >= 1 && idx <= BUILTIN_BOOKMARK_MAX)
-		builtin_bookmark (NULL, GINT_TO_POINTER (idx));
+	const char *server;
+
+	switch (idx) {
+	case 1: server = "hlserver.com"; break;
+	default:
+		g_warning ("connect_open_builtin_bookmark: unknown idx %d", idx);
+		return;
+	}
+
+	connect_with_args (&the_session, server, 5500, "", "", 0, 0, 0);
 }
 
 /* Phase 5: bookmark save migrates to AdwAlertDialog with the name
@@ -742,6 +837,11 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response, gpointer d
 
 	fclose (bookmark);
 
+	/* Phase 5: refresh the SplitButton's bookmark dropdown so the
+	 * just-saved entry shows up without an app restart. Skipped on
+	 * the failure paths via the goto out below. */
+	toolbar_refresh_bookmarks ();
+
 out:
 	g_free (path);
 	g_free (dir);
@@ -786,13 +886,6 @@ static void save_dialog (GtkWidget *widget, gpointer data)
 
 	adw_dialog_present (dialog,
 	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
-}
-
-static void builtin_bookmark(GtkWidget *widget, gpointer data)
-{
-	if(GPOINTER_TO_INT(data) == 1) {
-		set_the_entries("hlserver.com", "", "", "5500", 0, 0, 0);
-	}
 }
 
 /* Phase 5: AdwDialog with AdwPreferencesGroup form rows replaces the

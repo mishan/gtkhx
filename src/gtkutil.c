@@ -310,6 +310,36 @@ void close_connected_windows(session *sess)
 	}
 }
 
+/* Phase 5: see prototype comment in gtkutil.h. */
+char *
+gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
+{
+	char *converted;
+	gsize bytes_written = 0;
+
+	if (!bytes) {
+		if (out_len) *out_len = 0;
+		return g_strdup ("");
+	}
+
+	if (g_utf8_validate (bytes, len, NULL)) {
+		if (out_len) *out_len = len;
+		return g_strndup (bytes, len);
+	}
+
+	converted = g_convert (bytes, (gssize) len,
+	                       "UTF-8", "MACINTOSH",
+	                       NULL, &bytes_written, NULL);
+	if (converted) {
+		if (out_len) *out_len = bytes_written;
+		return converted;
+	}
+
+	converted = g_utf8_make_valid (bytes, (gssize) len);
+	if (out_len) *out_len = strlen (converted);
+	return converted;
+}
+
 /* Phase 5: error_dialog is an AdwAlertDialog now. The old GtkDialog
  * + manual GtkLabel + manual OK button + manual line-wrapping path
  * was the canonical example of "things AdwAlertDialog gives you for

@@ -42,49 +42,10 @@ static GtkWidget *postprompt;
 GtkWidget *reloadButton;
 GtkWidget *postButton;
 
-/*
- * Hotline news bodies are 8-bit text in whatever encoding the server
- * happened to use — historically Mac Roman (the original Hotline
- * client/server shipped on classic Mac OS), occasionally Latin-1 from
- * later Unix servers, sometimes already UTF-8 on modern stacks like
- * mhxd. GtkTextBuffer asserts UTF-8 on insert, so we have to convert
- * before stuffing bytes in. Strategy:
- *   1. If the input is already valid UTF-8, return a copy verbatim.
- *   2. Try Mac Roman → UTF-8 (iconv knows it as MACINTOSH).
- *   3. Fall back to g_utf8_make_valid, which substitutes U+FFFD for
- *      anything that isn't self-consistent UTF-8.
- *
- * Caller g_frees the result. If out_len is non-NULL it receives the
- * UTF-8 byte length (excluding trailing NUL).
- */
-char *
-gtkhx_news_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
-{
-	char *converted;
-	gsize bytes_written = 0;
-
-	if (!bytes) {
-		if (out_len) *out_len = 0;
-		return g_strdup ("");
-	}
-
-	if (g_utf8_validate (bytes, len, NULL)) {
-		if (out_len) *out_len = len;
-		return g_strndup (bytes, len);
-	}
-
-	converted = g_convert (bytes, (gssize) len,
-	                       "UTF-8", "MACINTOSH",
-	                       NULL, &bytes_written, NULL);
-	if (converted) {
-		if (out_len) *out_len = bytes_written;
-		return converted;
-	}
-
-	converted = g_utf8_make_valid (bytes, (gssize) len);
-	if (out_len) *out_len = strlen (converted);
-	return converted;
-}
+/* Phase 5: gtkhx_text_to_utf8 → gtkhx_text_to_utf8 (moved to
+ * gtkutil — server names, news bodies, post subjects all want the
+ * same Mac Roman / Latin-1 / already-UTF-8 fallback chain). The
+ * old name in this TU is gone; callers just include gtkutil.h. */
 
 void hx_get_news (struct htlc_conn *htlc)
 {
@@ -337,7 +298,7 @@ void output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
 		GtkTextIter start;
 		gsize utf8_len;
-		char *utf8 = gtkhx_news_text_to_utf8(news, len, &utf8_len);
+		char *utf8 = gtkhx_text_to_utf8(news, len, &utf8_len);
 		gtk_text_buffer_get_start_iter(buf, &start);
 		gtk_text_buffer_insert(buf, &start, utf8, (gint) utf8_len);
 		g_free(utf8);
@@ -362,7 +323,7 @@ void output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
 
 	buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
 	gtk_text_buffer_get_end_iter(buf, &end);
-	utf8 = gtkhx_news_text_to_utf8(news, len, &utf8_len);
+	utf8 = gtkhx_text_to_utf8(news, len, &utf8_len);
 	gtk_text_buffer_insert(buf, &end, utf8, (gint) utf8_len);
 	g_free(utf8);
 }

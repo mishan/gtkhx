@@ -368,25 +368,23 @@ make_pixmap_button (const char *resource_name,
 	                            TOOLBAR_ICON_SCALE, cb, user_data);
 }
 
-/* Phase 5: rebuild the bookmark menu just before the AdwSplitButton
- * popover renders. The popover is parented to the split button, so
- * we walk back to that to get the AdwSplitButton handle. Cheap —
- * scanning two directories of small files. */
-static void
-on_connect_popover_show (GtkPopover *popover, gpointer user_data)
+/* Phase 5: rebuild the AdwSplitButton's bookmark menu. Called from
+ * connect.c after a successful Save Bookmark so newly-saved
+ * entries appear in the dropdown without restarting the app. The
+ * earlier lazy-rebuild-on-popover-show approach (a "show" signal
+ * hook on the popover) had a chicken-and-egg problem: AdwSplitButton
+ * creates its popover lazily, so on the first dropdown click the
+ * popover didn't yet exist when we connected the signal, and the
+ * menu wouldn't update. An explicit refresh call from the save path
+ * is simpler and behaves predictably. */
+void
+toolbar_refresh_bookmarks (void)
 {
-	GtkWidget *split;
 	GMenu *menu;
-	(void) user_data;
-
-	split = gtk_widget_get_parent (GTK_WIDGET (popover));
-	while (split && !ADW_IS_SPLIT_BUTTON (split))
-		split = gtk_widget_get_parent (split);
-	if (!split)
+	if (!connect_btn || !ADW_IS_SPLIT_BUTTON (connect_btn))
 		return;
-
 	menu = connect_build_bookmark_menu ();
-	adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (split),
+	adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
 	                                 G_MENU_MODEL (menu));
 	g_object_unref (menu);
 }
@@ -418,11 +416,10 @@ void create_toolbar_window (session *sess)
 	header = adw_header_bar_new ();
 
 	/* Phase 5: AdwSplitButton — primary click opens the connect
-	 * dialog (the existing flow); the dropdown chevron exposes a
-	 * menu of saved bookmarks targeting app.open_bookmark with the
-	 * name as parameter. The menu is rebuilt lazily on each popup
-	 * so newly-saved bookmarks show up without a restart — see
-	 * the popover->show signal hook below. */
+	 * dialog; the dropdown chevron exposes a menu of saved
+	 * bookmarks targeting app.open_bookmark with the bookmark name
+	 * as parameter. Refresh of the menu happens from the bookmark
+	 * save path via toolbar_refresh_bookmarks(). */
 	connect_btn = adw_split_button_new ();
 	adw_split_button_set_icon_name (ADW_SPLIT_BUTTON (connect_btn),
 	                                "network-transmit-receive-symbolic");
@@ -435,17 +432,6 @@ void create_toolbar_window (session *sess)
 		adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
 		                                 G_MENU_MODEL (menu));
 		g_object_unref (menu);
-
-		/* Rebuild the menu when the user opens the dropdown so
-		 * Save Bookmark hits show up without an app restart. */
-		{
-			GtkPopover *pop = adw_split_button_get_popover (
-				ADW_SPLIT_BUTTON (connect_btn));
-			if (pop)
-				g_signal_connect (pop, "show",
-				                  G_CALLBACK (on_connect_popover_show),
-				                  NULL);
-		}
 	}
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), connect_btn);
 

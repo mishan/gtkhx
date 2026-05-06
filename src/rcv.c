@@ -1148,9 +1148,16 @@ no_cipher:
 					CR2LF(servername, len);
 					strip_ansi(servername, len);
 					servername[len] = 0;
-					if(server_addr) 
+					if(server_addr)
 						g_free(server_addr);
-					server_addr = g_strdup(servername);
+					/* Phase 5: server names from old Hotline servers are
+					 * 8-bit Mac Roman text, not UTF-8 — and gtk_window_set_title
+					 * et al. assert UTF-8. gtkhx_text_to_utf8 handles the
+					 * already-UTF-8 / Mac-Roman / fall-back-to-substitute
+					 * cascade. */
+					server_addr = gtkhx_text_to_utf8 (servername,
+					                                  strlen (servername),
+					                                  NULL);
 					changetitlesconnected(sess);
 					break;
 				}

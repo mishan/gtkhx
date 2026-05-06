@@ -12,6 +12,28 @@ extern void close_connected_windows(session *sess);
 extern void error_dialog(char *title, char *msg);
 
 /*
+ * Phase 5: convert a buffer of 8-bit text in unknown encoding to
+ * valid UTF-8. Hotline servers send strings (server names, news
+ * bodies, post subjects, etc.) in whatever encoding they happened
+ * to use — historically Mac Roman (the original Mac-OS-classic
+ * stack), occasionally Latin-1 from later Unix servers, sometimes
+ * already UTF-8 on modern stacks like mhxd. GTK widgets that take
+ * text (GtkTextBuffer, gtk_window_set_title, …) assert UTF-8 on
+ * input, so anything we get from the wire has to be sanitized
+ * before it lands in a widget.
+ *
+ * Strategy:
+ *   1. If the input is already valid UTF-8, return a copy verbatim.
+ *   2. Try Mac Roman → UTF-8 (iconv knows it as MACINTOSH).
+ *   3. Fall back to g_utf8_make_valid, which substitutes U+FFFD for
+ *      anything that isn't self-consistent UTF-8.
+ *
+ * Caller g_frees the result. If out_len is non-NULL it receives
+ * the UTF-8 byte length (excluding trailing NUL).
+ */
+extern char *gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len);
+
+/*
  * Phase 3.9: GtkTable → GtkGrid migration helpers. The two APIs have
  * different shapes: Table takes (left, right, top, bottom) inclusive
  * spans plus per-axis xoptions/yoptions/xpad/ypad; Grid takes

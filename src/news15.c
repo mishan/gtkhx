@@ -42,7 +42,7 @@
  * because news15.h has stale prototypes for a couple of the
  * hx_news15_* functions that conflict with their definitions in this
  * file — fixing that header is out of scope for the news-encoding bug. */
-extern char *gtkhx_news_text_to_utf8 (const char *bytes, gsize len, gsize *out_len);
+/* Phase 5: gtkhx_text_to_utf8 lives in gtkutil.h now. */
 
 /* Phase 4.13: this file uses GtkTreeView + GtkTreeStore directly for
  * the news thread tree (Phase 2.8 work) and GtkDialog for the
@@ -1271,7 +1271,7 @@ void output_news_thread(struct news_post *post)
 	{
 		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(gcnews->news_text));
 		gsize utf8_len;
-		char *utf8 = gtkhx_news_text_to_utf8(post->buf, strlen(post->buf), &utf8_len);
+		char *utf8 = gtkhx_text_to_utf8(post->buf, strlen(post->buf), &utf8_len);
 		gtk_text_buffer_set_text(buf, utf8, (gint) utf8_len);
 		g_free(utf8);
 	}
