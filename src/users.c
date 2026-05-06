@@ -536,41 +536,6 @@ void user_ban_btn (GtkWidget *widget, gpointer data)
 }
 
 
-static void invite_u_to_chat(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-														 "dialog");
-	GtkWidget *list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-													   "list");
-	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
-	guint32 *cid = g_object_get_data(G_OBJECT(widget), "cid");
-	guint32 chat_cid;
-
-	/* Phase 3.2: GtkCList exposed gtk_clist_get_text(); the
-	 * gtk_hlist_compat shim doesn't reach into cell text.  We now stash
-	 * the cid as row_data when populating the list and read it straight
-	 * back here, skipping the parse-from-display-string round-trip. */
-	chat_cid = GPOINTER_TO_UINT(
-		gtk_hlist_get_row_data(GTK_HLIST(list), *cid));
-
-	hx_invite_user(&sess->htlc, GPOINTER_TO_INT(data), chat_cid);
-	gtkhx_widget_destroy(dialog);
-	g_free(cid);
-}
-
-static void create_new_chat(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-														 "dialog");
-	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
-	guint32 *cid = g_object_get_data(G_OBJECT(widget), "cid");
-	guint16 *uid = data;
-
-	g_free(cid);
-	hx_chat_user(&sess->htlc, *uid);
-	gtkhx_widget_destroy(dialog);
-}
-
 /* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
  * "select_row" with a NULL GdkEvent so the parameter is just typed
  * as the bare GdkEvent* now. The handler only reads `row'. */
@@ -583,102 +548,117 @@ select_cid (GtkWidget *widget, gint row, gint col, GdkEvent *event,
 	*cid = row;
 }
 
-/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
- * GTK 4.10 — Phase 4.7 follow-up. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-static void prompt_chat(session *sess, guint16 _uid)
+/* Phase 5: AdwAlertDialog with three responses (Cancel / New / Invite)
+ * replaces the hand-rolled GtkDialog. The chat list (GtkHList of
+ * existing pchat sessions) goes in extra-child. The response
+ * handler dispatches by id: "invite" reads the selected row's
+ * stashed cid and calls hx_invite_user, "new" creates a fresh pchat
+ * via hx_chat_user, "cancel" does nothing.
+ *
+ * State carried through user_data: sess + uid + list + selected_row.
+ * The list pointer lets the response handler reach back into the
+ * GtkHList for row_data; selected_row is updated by select_cid as
+ * the user picks a different row. Both freed via the "closed"
+ * signal once the response handler returns. */
+struct prompt_chat_ctx {
+	session  *sess;
+	guint16   uid;
+	GtkWidget *list;       /* the GtkHList of existing pchats */
+	guint32   selected_row;
+};
+
+static void
+prompt_chat_response (AdwAlertDialog *dialog, const char *response, gpointer data)
 {
-	GtkWidget *dialog;
-	GtkWidget *invite;
-	GtkWidget *cancel;
-	GtkWidget *btnhbox;
-	GtkWidget *new;
-	GtkWidget *list;
-	GtkWidget *scroll;
-	char *titles[] = {"CID", "Subject"};
-	char *entry[2];
-	struct gtkhx_chat *gchat = 0;
-	guint32 *cid = g_malloc(sizeof(guint32));
-	guint16 *uid = g_malloc(sizeof(guint16));
-	
-	*uid = _uid;
+	struct prompt_chat_ctx *ctx = data;
+	(void) dialog;
 
-	dialog = gtk_dialog_new();
-	gtk_window_set_title(GTK_WINDOW(dialog), _("Private Chat Invitation"));
-	/* Phase 4.5: GTK 4 wants a transient parent for free-floating dialogs
-	 * so the WM/compositor places it correctly. */
-	if (sess && sess->users_window)
-		gtk_window_set_transient_for(GTK_WINDOW(dialog),
-		                             GTK_WINDOW(sess->users_window));
-	(gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-
-	invite = gtk_button_new_with_label(_("Invite"));
-	g_object_set_data(G_OBJECT(invite), "cid", cid);
-
-	g_object_set_data(G_OBJECT(invite), "dialog", dialog);
-
-	g_object_set_data(G_OBJECT(invite), "sess", sess);
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-
-	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(cancel, "clicked",
-							  (GCallback)gtkhx_widget_destroy,
-							  dialog);
-
-	new = gtk_button_new_with_label(_("New"));
-	g_signal_connect(new, "clicked",
-					   G_CALLBACK(create_new_chat), uid);
-	g_object_set_data(G_OBJECT(new), "cid", cid);
-	g_object_set_data(G_OBJECT(new), "dialog", dialog);
-	g_object_set_data(G_OBJECT(new), "sess", sess);
-
-	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-
-	scroll = gtk_scrolled_window_new();
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
-				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-
-	list = gtk_hlist_new_with_titles(2, titles);
-	/* Phase 3.2: GTK_SELECTION_EXTENDED was renamed to
-	 * GTK_SELECTION_MULTIPLE in GTK 2.0 (same semantics: shift/ctrl
-	 * range and toggle selection). */
-	gtk_hlist_set_selection_mode(GTK_HLIST(list), GTK_SELECTION_MULTIPLE);
-	gtk_hlist_set_column_width (GTK_HLIST (list), 0, 80);
-	g_signal_connect(list, "select_row",
-					   G_CALLBACK(select_cid), cid);
-
-	gtkhx_widget_set_child(scroll, list);
-	gtk_widget_set_size_request(list, 350, 200);
-
-	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		gint row;
-		if(!gchat->cid)
-			continue;
-
-		entry[0] = g_strdup_printf("0x%08x", gchat->chat->cid);
-		entry[1] = gchat->chat->subject;
-
-
-		row = gtk_hlist_append(GTK_HLIST(list), entry);
-		/* Stash the cid as row_data so invite_u_to_chat can recover it
-		 * without parsing back the display string. */
-		gtk_hlist_set_row_data(GTK_HLIST(list), row,
-							   GUINT_TO_POINTER(gchat->chat->cid));
+	if (g_strcmp0 (response, "invite") == 0) {
+		guint32 chat_cid = GPOINTER_TO_UINT (
+			gtk_hlist_get_row_data (GTK_HLIST (ctx->list),
+			                        ctx->selected_row));
+		hx_invite_user (&ctx->sess->htlc, ctx->uid, chat_cid);
+	} else if (g_strcmp0 (response, "new") == 0) {
+		hx_chat_user (&ctx->sess->htlc, ctx->uid);
 	}
-	g_object_set_data(G_OBJECT(invite), "list", list);
-	g_signal_connect(invite, "clicked",
-					   G_CALLBACK(invite_u_to_chat), GINT_TO_POINTER(uid));
-
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), scroll, 0, 0, 0);
-	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnhbox, 0, 0, 0);
-	gtkhx_box_pack(btnhbox, invite, 0, 0, 0);
-	gtkhx_box_pack(btnhbox, new, 0, 0, 0);
-	gtkhx_box_pack(btnhbox, cancel, 0, 0, 0);
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-	gtk_window_present(GTK_WINDOW(dialog));
 }
-G_GNUC_END_IGNORE_DEPRECATIONS
+
+static void
+prompt_chat_closed (AdwDialog *dialog, gpointer data)
+{
+	(void) dialog;
+	g_free (data);
+}
+
+static void prompt_chat (session *sess, guint16 _uid)
+{
+	AdwDialog *dialog;
+	GtkWidget *list, *scroll;
+	struct gtkhx_chat *gchat;
+	struct prompt_chat_ctx *ctx;
+	char *titles[] = { "CID", "Subject" };
+	char *entry[2];
+
+	dialog = adw_alert_dialog_new (
+		_("Private Chat Invitation"),
+		_("Invite this user to an existing private chat, "
+		  "or create a new one."));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "new",    _("_New Chat"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "invite", _("_Invite"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "invite",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+	                                       "invite");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog),
+	                                       "cancel");
+
+	ctx = g_new0 (struct prompt_chat_ctx, 1);
+	ctx->sess = sess;
+	ctx->uid  = _uid;
+
+	scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+	                                GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
+
+	list = gtk_hlist_new_with_titles (2, titles);
+	gtk_hlist_set_selection_mode (GTK_HLIST (list), GTK_SELECTION_SINGLE);
+	gtk_hlist_set_column_width   (GTK_HLIST (list), 0, 80);
+	g_signal_connect (list, "select_row",
+	                  G_CALLBACK (select_cid), &ctx->selected_row);
+	gtkhx_widget_set_child (scroll, list);
+	gtk_widget_set_size_request (scroll, 350, 200);
+
+	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
+		gint row;
+		if (!gchat->cid)
+			continue;
+		entry[0] = g_strdup_printf ("0x%08x", gchat->chat->cid);
+		entry[1] = gchat->chat->subject;
+		row = gtk_hlist_append (GTK_HLIST (list), entry);
+		/* Stash the cid as row_data so the response handler can
+		 * recover it without parsing back the display string. */
+		gtk_hlist_set_row_data (GTK_HLIST (list), row,
+		                        GUINT_TO_POINTER (gchat->chat->cid));
+	}
+	ctx->list = list;
+
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
+
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (prompt_chat_response), ctx);
+	g_signal_connect (dialog, "closed",
+	                  G_CALLBACK (prompt_chat_closed), ctx);
+
+	adw_dialog_present (dialog,
+	                    sess && sess->users_window
+	                    ? GTK_WIDGET (sess->users_window)
+	                    : NULL);
+}
 
 
 void user_chat_btn(GtkWidget *widget, gpointer data)

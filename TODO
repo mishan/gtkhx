@@ -13,6 +13,8 @@ UI Modernization:
 - Bigger button icons
 - Move edit/new user buttons to Admin submenu in hamburger menu
 
+Bookmark Management
+
 Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them
