@@ -977,8 +977,14 @@ void create_chat(session *sess)
 	g_object_ref_sink(vscroll);
 
 	chat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(chat_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
-						 (gtkhx_prefs.geo.chat.ysize<<6)/1000);
+	/* Phase 5: dropped GTK 1.2-era set_size_request derived from saved
+	 * xsize/ysize. set_size_request sets BOTH minimum and natural
+	 * size in GTK 4 — so saving a wide chat window then re-opening it
+	 * baked the previous width in as a hard floor that prevented the
+	 * user from shrinking it. With hexpand/vexpand+FILL on the inner
+	 * widgets (handled by gtkhx_box_pack with expand=fill=1) the
+	 * window now resizes freely down to chat_window's own
+	 * set_size_request floor. */
 
 	g_object_ref_sink(chat_hbox);
 	gtkhx_box_pack(chat_hbox, text, 1, 1, 0);
@@ -1051,7 +1057,6 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	gchat->subject = gtk_entry_new();
 	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), sess->chat_front->subject);
 	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(subj_hbox, (gtkhx_prefs.geo.chat.xsize<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtkhx_widget_set_child(subj_frame, subj_hbox);
 	gtkhx_box_pack(subj_hbox, gchat->subject, 1, 1, 0);
@@ -1061,9 +1066,6 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 					   G_CALLBACK(change_subject), GINT_TO_POINTER(0));
 
 	outputframe = gtk_frame_new(0);
-	gtk_widget_set_size_request(outputframe, (gtkhx_prefs.geo.chat.xsize<<6)/82, 
-						 (gtkhx_prefs.geo.chat.ysize<<6)/100);
-
 	inputframe = gtk_frame_new(0);
 
 	vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
@@ -1084,7 +1086,10 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	/* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(hbox, (gtkhx_prefs.geo.chat.xsize<<6)/100, 50);
+	/* Phase 5: keep just the height floor (input area must be at least
+	 * tall enough to type into); width was previously baked from saved
+	 * xsize and prevented the chat window from shrinking horizontally. */
+	gtk_widget_set_size_request(hbox, -1, 50);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
