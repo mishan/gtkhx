@@ -5,6 +5,8 @@ Pulling in any new developments from over the years:
 Settings cleanup:
 - Move "Appearance" and "Paths" tabs under new "General"
 - Combine "News" and "File" tabs either under new "Interface" or under "General" as well
+- Move "Show join / leave in chat" and "Old-style nick completion" settings to "Chat" tab
+- Move "Case-sensitive tracker search" setting to "Trackers" tab
 
 UI Modernization:
 - Look into libadwaita

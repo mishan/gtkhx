@@ -1,6 +1,7 @@
 High priority:
 
 - File Previews do not work, and they lock up the application
+- Icons are showing up twice in Settings (two identical rows per icon)
 
 Medium priority:
 
