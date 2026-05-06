@@ -747,8 +747,6 @@ void user_list (session *sess)
 void create_users_window (GtkWidget *widget, gpointer data)
 {
 	GtkWidget *users_window_scroll;
-	GtkWidget *vbox;
-	GtkWidget *hbuttonbox, *topframe;
 	GdkBitmap *mask;
 	GtkWidget *pix;
 	GdkPixmap *icon;
@@ -765,9 +763,6 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	}
 
 	users_window = gtk_window_new();
-	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-	gtk_window_set_titlebar(GTK_WINDOW(users_window), adw_header_bar_new());
 	/* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
 	 * pair that left `style' unread. Forcing realize on a toplevel
 	 * before its children are packed is a footgun under GTK 3 Wayland —
@@ -872,26 +867,28 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_sensitive(chatbtn, FALSE);
 	gtk_widget_set_sensitive(ignobtn, FALSE);
 
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_widget_set_size_request(vbox, 240, 400);
+	/* Phase 5: action buttons live in the AdwHeaderBar instead of an
+	 * in-content topframe + hbuttonbox row. Communication actions
+	 * (Msg, Private Chat) on the start; moderation actions (Info,
+	 * Kick, Ban, Ignore) packed end-to-start so the visible order
+	 * reads info / kick / ban / ignore left-to-right with the close
+	 * button at the very right. The window's child collapses to the
+	 * scrolled user list — no outer vbox or topframe. */
+	{
+		GtkWidget *header = adw_header_bar_new ();
 
-	topframe = gtk_frame_new(0);
-	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
-	gtk_widget_set_size_request(topframe, -1, 30);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), msgbtn);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), chatbtn);
 
-	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtkhx_widget_set_child(topframe, hbuttonbox);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), ignobtn);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), banbtn);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), kickbtn);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), infobtn);
 
-	gtkhx_box_pack(hbuttonbox, msgbtn, 0, 0, 0);
-	gtkhx_box_pack(hbuttonbox, chatbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, infobtn, 0, 0, 0);
-	gtkhx_box_pack(hbuttonbox, kickbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, banbtn, 0, 0, 0);
-	gtkhx_box_pack(hbuttonbox, ignobtn, 0, 0, 2);
+		gtk_window_set_titlebar (GTK_WINDOW (users_window), header);
+	}
 
-	gtkhx_box_pack(vbox, users_window_scroll, 1, 1, 0);
-
-	gtkhx_widget_set_child(users_window, vbox);
+	gtk_window_set_child (GTK_WINDOW (users_window), users_window_scroll);
 
 	init_keyaccel(users_window);
 
