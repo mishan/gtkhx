@@ -90,6 +90,7 @@ create_about_window (GtkWidget *widget, gpointer data)
 	GtkWidget *scrolled, *credits;
 	GtkTextBuffer *credits_buf;
 	GdkPixbuf *logo_pb;
+	GdkTexture *logo_tex;
 	char *markup;
 
 	(void) widget; (void) data;
@@ -102,7 +103,7 @@ create_about_window (GtkWidget *widget, gpointer data)
 	about_window = gtk_window_new ();
 	gtk_window_set_title (GTK_WINDOW (about_window), _("About GtkHx"));
 	gtk_window_set_resizable (GTK_WINDOW (about_window), FALSE);
-	gtk_window_set_default_size (GTK_WINDOW (about_window), 480, 460);
+	gtk_window_set_default_size (GTK_WINDOW (about_window), 480, 540);
 	gtk_window_set_titlebar (GTK_WINDOW (about_window), adw_header_bar_new ());
 
 	{
@@ -121,12 +122,23 @@ create_about_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_margin_start  (box, 18);
 	gtk_widget_set_margin_end    (box, 18);
 
-	/* Logo */
+	/* Logo — GtkPicture for natural-size rendering. The gtkhx.xpm
+	 * resource is 400x200; GtkImage would treat it as a themed icon
+	 * and scale it down to ~24px (giving the "thin colored bar"
+	 * look). GtkPicture renders the paintable at its real
+	 * dimensions, with set_can_shrink(FALSE) pinning it so the
+	 * dialog's width drives sizing rather than the picture being
+	 * stretched. */
 	logo_pb = gdk_pixbuf_new_from_resource (
 		"/com/nasledov/gtkhx/pixmaps/gtkhx.xpm", NULL);
-	logo = gtkhx_image_new_from_pixbuf (logo_pb);
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	logo_tex = gdk_texture_new_for_pixbuf (logo_pb);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+	logo = gtk_picture_new_for_paintable (GDK_PAINTABLE (logo_tex));
+	gtk_picture_set_can_shrink (GTK_PICTURE (logo), FALSE);
 	gtk_widget_set_halign (logo, GTK_ALIGN_CENTER);
 	gtk_box_append (GTK_BOX (box), logo);
+	g_clear_object (&logo_tex);
 	g_clear_object (&logo_pb);
 
 	/* Title — "GtkHx 0.9.5-dev" in a larger weight */
