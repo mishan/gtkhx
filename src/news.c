@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdk.h>
 #include <sys/time.h>
 #include <time.h>
@@ -209,9 +210,8 @@ create_post_window (GtkWidget *widget, gpointer data)
 void create_news_window (session *sess)
 {
 	GtkWidget *news_scroll;
-	GtkWidget *hbox, *vbox;
-	GtkWidget *posthbox;
-	GtkWidget *btn_frame, *news_frame;
+	GtkWidget *hbox;
+	GtkWidget *news_frame;
 	GtkWidget *news_text;
 	GtkWidget *news_window;
 	GtkWidget *postButton, *reloadButton;
@@ -228,15 +228,6 @@ void create_news_window (session *sess)
 	news_window = gtk_window_new();
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
-
-	btn_frame = gtk_frame_new(0);
-	gtk_widget_set_size_request(btn_frame, -1, 30);
-
-	news_frame = gtk_frame_new(0);
-
-	posthbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-	gtkhx_widget_set_child(btn_frame, posthbox);
 
 	postButton = gtk_button_new();
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
@@ -259,22 +250,25 @@ void create_news_window (session *sess)
 	g_signal_connect(news_window, "close-request",
 			   G_CALLBACK(close_news_window), sess);
 	g_signal_connect(postButton, "clicked",
-
 					   G_CALLBACK(create_post_window), sess);
 	g_signal_connect(reloadButton, "clicked",
-
 					   G_CALLBACK(reload_news), sess);
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtkhx_widget_set_child(news_window, vbox);
+
+	/* Phase 5: AdwHeaderBar replaces both the default GtkWindow title
+	 * bar and the in-content btn_frame + posthbox row. Post on the
+	 * start, Reload on the end. */
+	{
+		GtkWidget *header = adw_header_bar_new ();
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), postButton);
+		adw_header_bar_pack_end   (ADW_HEADER_BAR (header), reloadButton);
+		gtk_window_set_titlebar (GTK_WINDOW (news_window), header);
+	}
+
+	news_frame = gtk_frame_new(0);
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
 	gtkhx_widget_set_child(news_frame, hbox);
-
 	gtk_widget_set_size_request(hbox, 512, 384);
-	gtkhx_box_pack(vbox, btn_frame, 0, 0, 0);
-	gtkhx_box_pack(posthbox, postButton, 0, 0, 0);
-	gtkhx_box_pack(posthbox, reloadButton, 0, 0, 0);
-	gtkhx_box_pack(vbox, news_frame, 1, 1, 0);
+	gtk_window_set_child(GTK_WINDOW(news_window), news_frame);
 
 	news_text = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(news_text), FALSE);

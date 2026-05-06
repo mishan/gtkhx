@@ -9,6 +9,7 @@ Settings cleanup:
 UI Modernization:
 - Look into libadwaita
 - Bigger button icons
+- Move edit/new user buttons to Admin submenu in hamburger menu
 
 Code Modernization:
 - Better modules with more code reuse

@@ -518,9 +518,6 @@ struct gnews_folder *create_gfnews_window(char *path)
 	GtkWidget *news_window;
 	GtkWidget *news_list;
 	GtkWidget *news_scroll;
-	GtkWidget *topframe;
-	GtkWidget *hbuttonbox;
-	GtkWidget *vbox;
 	GtkWidget *parentbtn;
 	GtkWidget *reloadbtn;
 	GtkWidget *deletebtn;
@@ -552,9 +549,6 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gfnews->path_list->prev = NULL;
 
 	news_window = gtk_window_new();
-	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-	gtk_window_set_titlebar(GTK_WINDOW(news_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
@@ -589,11 +583,6 @@ struct gnews_folder *create_gfnews_window(char *path)
 	}
 	/* Phase 4.8: dead drag-and-drop scaffold removed. See note above
 	 * the news15_drag* removal. */
-
-	topframe = gtk_frame_new(0);
-	gtk_widget_set_size_request(topframe, -1, 30);
-
-	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	parentbtn =  gtk_button_new();
 	g_signal_connect(parentbtn, "clicked",
@@ -645,19 +634,27 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gtkhx_widget_set_child(mkcatbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
-	gtkhx_box_pack(hbuttonbox, parentbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, reloadbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, mkdirbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, mkcatbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, deletebtn, 0, 0, 2);
+	/* Phase 5: action buttons live in the AdwHeaderBar. Navigation
+	 * (Parent / Reload) on the start; creation + destruction
+	 * (New Folder / New Category / Delete) on the end. pack_end
+	 * appends from the right edge inward, so deletebtn first /
+	 * mkcatbtn / mkdirbtn last yields mkdir / mkcat / delete
+	 * left-to-right with the close button at the very right. */
+	{
+		GtkWidget *header = adw_header_bar_new ();
 
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_widget_set_size_request(vbox, 240, 400);
-	gtkhx_widget_set_child(topframe, hbuttonbox);
-	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), parentbtn);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), reloadbtn);
+
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), deletebtn);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), mkcatbtn);
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), mkdirbtn);
+
+		gtk_window_set_titlebar (GTK_WINDOW (news_window), header);
+	}
+
 	gtkhx_widget_set_child(news_scroll, news_list);
-	gtkhx_box_pack(vbox, news_scroll, 1, 1, 0);
-	gtkhx_widget_set_child(news_window, vbox);
+	gtk_window_set_child(GTK_WINDOW(news_window), news_scroll);
 
 	gfnews->window = news_window;
 	gfnews->news_list = news_list;
@@ -1025,7 +1022,6 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	GtkWidget *news_window;
 	GtkWidget *hpaned1;
 	GtkWidget *vbox1;
-	GtkWidget *hbuttonbox1;
 	GtkWidget *reloadbtn;
 	GtkWidget *postbtn;
 	GtkWidget *replybtn;
@@ -1039,7 +1035,6 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	GtkWidget *news_text;
 	GtkWidget *scrolledwindow2;
 	GtkWidget *viewport1;
-	GtkWidget *topframe;
 	GdkBitmap *mask;
 	GdkPixmap *icon;
 	GtkWidget *pix;
@@ -1056,9 +1051,6 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	}
 
 	news_window = gtk_window_new();
-	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-	gtk_window_set_titlebar(GTK_WINDOW(news_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_widget_set_size_request(news_window, 570, 375);
@@ -1071,16 +1063,9 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtkhx_widget_set_child(news_window, hpaned1);
 	(gtk_widget_set_margin_start(hpaned1, 4), gtk_widget_set_margin_end(hpaned1, 4), gtk_widget_set_margin_top(hpaned1, 4), gtk_widget_set_margin_bottom(hpaned1, 4));
 	gtk_paned_set_position (GTK_PANED (hpaned1), 285);
-	
+
 	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_paned_set_start_child(GTK_PANED(hpaned1), vbox1);
-
-	topframe = gtk_frame_new(0);
-	gtk_widget_set_size_request(topframe, -1, 30);
-	gtkhx_box_pack(vbox1, topframe, 0, 0, 0);
-	
-	hbuttonbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtkhx_widget_set_child(topframe, hbuttonbox1);
 	
 	reloadbtn =  gtk_button_new();
 	g_signal_connect(reloadbtn, "clicked",
@@ -1115,10 +1100,21 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtkhx_widget_set_child(deletebtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
-	gtkhx_box_pack(hbuttonbox1, reloadbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox1, postbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox1, replybtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox1, deletebtn, 0, 0, 2);
+	/* Phase 5: action buttons live in the AdwHeaderBar instead of a
+	 * topframe + hbuttonbox row inside the left pane. Reload + Post
+	 * + Reply are non-destructive on the start; Delete (destructive)
+	 * sits at the end. */
+	{
+		GtkWidget *header = adw_header_bar_new ();
+
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), reloadbtn);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), postbtn);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), replybtn);
+
+		adw_header_bar_pack_end (ADW_HEADER_BAR (header), deletebtn);
+
+		gtk_window_set_titlebar (GTK_WINDOW (news_window), header);
+	}
 
 	/* Phase 3.9: dropped a GtkAlignment(0.5, 0.5, 1, 1) wrapper around
 	 * the scrolled window. The xscale/yscale=1 made it expand to fill,
