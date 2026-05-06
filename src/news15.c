@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdk.h>
 #include <sys/time.h>
 #include <time.h>
@@ -551,6 +552,9 @@ struct gnews_folder *create_gfnews_window(char *path)
 	gfnews->path_list->prev = NULL;
 
 	news_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(news_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
@@ -1052,6 +1056,9 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	}
 
 	news_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(news_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_widget_set_size_request(news_window, 570, 375);

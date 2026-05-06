@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <time.h>
@@ -543,6 +544,9 @@ void create_tasks_window (GtkWidget *widget, gpointer data)
 	}
 
 	tasks_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(tasks_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));

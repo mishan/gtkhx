@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
 #include <sys/types.h>
 #include <ctype.h>
@@ -1032,6 +1033,9 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 
 	gchat = gchat_with_cid(sess, 0);
 	chat_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar replaces the default GtkWindow title bar
+	 * for the unified Adwaita look across all GtkHx windows. */
+	gtk_window_set_titlebar(GTK_WINDOW(chat_window), adw_header_bar_new());
 
 	gtk_widget_set_size_request(chat_window, 412, 280);
 	gtk_window_set_resizable(GTK_WINDOW(chat_window), TRUE);
@@ -1328,6 +1332,9 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	titles[1] = _("Name");
 
 	pchat_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(pchat_window), adw_header_bar_new());
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
 	gtk_widget_set_size_request(pchat_window, 700, 320);

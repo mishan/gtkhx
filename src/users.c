@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
@@ -764,6 +765,9 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	}
 
 	users_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(users_window), adw_header_bar_new());
 	/* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
 	 * pair that left `style' unread. Forcing realize on a toplevel
 	 * before its children are packed is a footgun under GTK 3 Wayland —

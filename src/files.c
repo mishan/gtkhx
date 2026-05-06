@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <ctype.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -658,6 +659,9 @@ static struct gfile_list *create_files_window (char *path)
 	files_attach_dnd (files_list);
 
 	files_window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency. */
+	gtk_window_set_titlebar(GTK_WINDOW(files_window), adw_header_bar_new());
 	gtk_window_set_resizable(GTK_WINDOW(files_window), TRUE);
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
