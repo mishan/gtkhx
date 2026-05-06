@@ -49,11 +49,35 @@
 
 static struct hx_preview *hx_preview_list = NULL;
 
-/* Phase 5: GTK 4 GtkTextBuffer requires valid UTF-8; injecting raw
- * bytes from a binary file (or any file with invalid sequences in
- * the middle) hits an assertion that takes the app down. Sanitize
- * with g_utf8_make_valid so binary content displays as garbled text
- * rather than crashing the app. */
+/* Phase 5 v2: previously we did the gtk_text_buffer_insert directly from
+ * the download worker thread under gtk_threads_enter. That serializes the
+ * insert with the rest of the GUI but holds the GTK lock for the duration
+ * of every insert — and inserts get linearly slower as the buffer grows,
+ * because the GtkTextView's layout cache rebuilds. For a multi-MB preview
+ * the worker reacquires the lock at high frequency, starving the main
+ * thread until poll() can no longer service input. Symptom: app appears
+ * frozen mid-preview.
+ *
+ * The fix is to keep the worker out of GTK entirely for previews. The
+ * worker copies each chunk into a heap buffer and pushes it onto the
+ * default main context via g_idle_add. The main thread services the idle
+ * queue between input events at G_PRIORITY_DEFAULT_IDLE (lower priority
+ * than user input), so the GUI stays responsive while the buffer fills.
+ *
+ * Lifetime: the parent `struct hx_preview` and `struct hx_text_preview`
+ * stay alive for the duration of the program (the hx_preview_list leak
+ * predates this fix and is tracked separately). The close-request
+ * handler sets tp->closed = TRUE; both the worker-side hx_preview_text_output
+ * and any already-queued idle callbacks check that flag and bail before
+ * touching the (now-destroyed) text view.
+ */
+
+struct preview_chunk {
+	struct hx_text_preview *tp;
+	char  *data;
+	gsize  len;
+};
+
 static gboolean
 preview_window_close_request (GtkWindow *window, gpointer user_data)
 {
@@ -62,6 +86,35 @@ preview_window_close_request (GtkWindow *window, gpointer user_data)
 	if (tp)
 		tp->closed = TRUE;
 	return FALSE;  /* let the default destroy proceed */
+}
+
+static gboolean
+preview_chunk_idle (gpointer user_data)
+{
+	struct preview_chunk *chunk = user_data;
+	GtkTextBuffer *tbuf;
+	GtkTextIter end;
+	char *valid;
+
+	if (chunk->tp && !chunk->tp->closed) {
+		/* g_utf8_make_valid returns a fresh g_strdup'd copy with
+		 * invalid sequences replaced by U+FFFD. Binary content stays
+		 * renderable; valid UTF-8 passes through unchanged. The
+		 * caller's chunk is length-bounded so embedded NULs are
+		 * tolerated up to here — gtk_text_buffer_insert with -1 will
+		 * still strlen-truncate at the first NUL, but for any
+		 * vaguely text-like preview that's fine and for binary
+		 * files the user only loses the chunk past a NUL anyway. */
+		valid = g_utf8_make_valid (chunk->data, chunk->len);
+		tbuf  = gtk_text_view_get_buffer (GTK_TEXT_VIEW (chunk->tp->text));
+		gtk_text_buffer_get_end_iter (tbuf, &end);
+		gtk_text_buffer_insert (tbuf, &end, valid, -1);
+		g_free (valid);
+	}
+
+	g_free (chunk->data);
+	g_free (chunk);
+	return G_SOURCE_REMOVE;
 }
 
 static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
@@ -102,23 +155,23 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 static void hx_preview_text_output (struct hx_preview *p, char *buf, int len)
 {
 	struct hx_text_preview *tp = p->data;
-	GtkTextBuffer *tbuf;
-	GtkTextIter end;
-	char *valid;
+	struct preview_chunk *chunk;
 
-	if (!tp || tp->closed)
+	if (!tp || tp->closed || len <= 0)
 		return;
 
-	CR2LF(buf, len);
-	/* g_utf8_make_valid takes a length-bounded buffer and returns a
-	 * fresh g_strdup'd copy with invalid sequences replaced by U+FFFD.
-	 * Binary content stays renderable; valid UTF-8 passes through
-	 * unchanged. */
-	valid = g_utf8_make_valid(buf, len);
-	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tp->text));
-	gtk_text_buffer_get_end_iter(tbuf, &end);
-	gtk_text_buffer_insert(tbuf, &end, valid, -1);
-	g_free(valid);
+	/* CR2LF rewrites the caller's buffer in place; do it before we copy
+	 * out so the idle callback gets the cleaned-up bytes. */
+	CR2LF (buf, len);
+
+	chunk = g_new (struct preview_chunk, 1);
+	chunk->tp   = tp;
+	chunk->data = g_memdup2 (buf, len);
+	chunk->len  = len;
+
+	/* Hand off to the main thread. Worker returns immediately rather
+	 * than holding the GTK lock while the text view re-lays out. */
+	g_idle_add (preview_chunk_idle, chunk);
 }
 
 struct hx_preview *hx_preview_new(char *creator, char *type, char *name)
