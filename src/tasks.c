@@ -37,8 +37,6 @@
 #include "tasks.h"
 
 
-static GtkWidget *tasks_vbox;
-
 struct gtask {
 	struct gtask *next, *prev;
 	guint32 trans;
@@ -334,8 +332,16 @@ static void
 tasks_destroy (GtkWidget *widget, gpointer data)
 {
 	session *sess = data;
+	(void) widget;
 
-	gtkhx_widget_remove_child(tasks_vbox, sess->gtask_scroll);
+	/* Phase 5: gtask_scroll used to live inside an outer vbox that
+	 * also held the topframe + button row; here we unparented it
+	 * from that vbox so the next create_tasks_window could re-attach
+	 * it as a fresh child. With the buttons moved into the
+	 * AdwHeaderBar, gtask_scroll is the window's direct child — so
+	 * we just unparent it from whatever its current parent is. */
+	if (sess->gtask_scroll && gtk_widget_get_parent (sess->gtask_scroll))
+		gtk_widget_unparent (sess->gtask_scroll);
 	gtkhx_prefs.geo.tasks.open = 0;
 	gtkhx_prefs.geo.tasks.init = 0;
 }
@@ -523,92 +529,79 @@ void task_tasks_update (session *sess)
 }
 
 
+/* Phase 5: helper to build a GtkButton with a pixmap-resource icon.
+ * Same shape as toolbar.c's make_pixmap_button — but local to tasks.c
+ * since there's no shared header for it (yet). */
+static GtkWidget *
+tasks_pixmap_button (const char *resource_name,
+                     const char *tooltip,
+                     GCallback   cb,
+                     gpointer    user_data)
+{
+	GtkWidget *btn = gtk_button_new ();
+	GdkPixbuf *pb;
+	GtkWidget *image;
+
+	pb = gdk_pixbuf_new_from_resource (resource_name, NULL);
+	image = gtkhx_image_new_from_pixbuf (pb);
+	gtkhx_widget_set_child (btn, image);
+	gtk_widget_set_tooltip_text (btn, tooltip);
+	if (cb)
+		g_signal_connect (btn, "clicked", cb, user_data);
+	g_clear_object (&pb);
+	return btn;
+}
+
 void create_tasks_window (GtkWidget *widget, gpointer data)
 {
-	GtkWidget *vbox;
-	GtkWidget *hbuttonbox;
-	GtkWidget *topframe;
-	GtkWidget *stopbtn;
-	GtkWidget *gobtn;
-	GtkWidget *upbtn;
-	GtkWidget *dnbtn;
-	GdkBitmap *mask;
-	GdkPixmap *icon;
-	GtkWidget *pix;
+	GtkWidget *header;
+	GtkWidget *stopbtn, *gobtn, *upbtn, *dnbtn;
 	GtkWidget *tasks_window;
 	session *sess = data;
 
 	if (gtkhx_prefs.geo.tasks.open) {
-		gtk_window_present(GTK_WINDOW(sess->tasks_window));
+		gtk_window_present (GTK_WINDOW (sess->tasks_window));
 		return;
 	}
 
-	tasks_window = gtk_window_new();
-	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-	gtk_window_set_titlebar(GTK_WINDOW(tasks_window), adw_header_bar_new());
-	gtk_window_set_resizable(GTK_WINDOW(tasks_window), TRUE);
-	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
-	gtk_window_set_title(GTK_WINDOW(tasks_window), _("Tasks"));
+	tasks_window = gtk_window_new ();
+	gtk_window_set_resizable (GTK_WINDOW (tasks_window), TRUE);
+	gtk_window_set_title (GTK_WINDOW (tasks_window), _("Tasks"));
 
+	/* Phase 5: AdwHeaderBar replaces both the default GtkWindow
+	 * title bar and the in-content "topframe + hbuttonbox" row. The
+	 * four task-control buttons (Stop / Start on the start, Move Up /
+	 * Down on the end) live directly in the headerbar — exactly the
+	 * shape AdwHeaderBar was designed for. The content area drops
+	 * down to just the task scrolledwindow. */
+	header = adw_header_bar_new ();
 
-	topframe = gtk_frame_new(0);
-	gtk_widget_set_size_request(topframe, -1, 30);
+	stopbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.xpm",
+	                               _("Stop Task"),
+	                               G_CALLBACK (task_stop), sess);
+	gobtn  = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.xpm",
+	                              _("Start Task"),
+	                              G_CALLBACK (task_go), sess);
+	upbtn  = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/up.xpm",
+	                              _("Move Xfer Up in Queue"),
+	                              G_CALLBACK (task_up), sess);
+	dnbtn  = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/down.xpm",
+	                              _("Move Xfer Down in Queue"),
+	                              G_CALLBACK (task_dn), sess);
 
-	hbuttonbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), stopbtn);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), gobtn);
+	/* pack_end appends from the right edge inward, so up appears
+	 * to the left of down to match the natural reading order. */
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), dnbtn);
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), upbtn);
 
-	stopbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(stopbtn, pix);
-	gtk_widget_set_tooltip_text(stopbtn, _("Stop Task"));
-	g_signal_connect(stopbtn, "clicked",
-			   G_CALLBACK(task_stop), sess);
-	icon = 0, mask = 0, pix = 0;
+	gtk_window_set_titlebar (GTK_WINDOW (tasks_window), header);
 
-	gobtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/start.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(gobtn, pix);
-	gtk_widget_set_tooltip_text(gobtn, _("Start Task"));
-	g_signal_connect(gobtn, "clicked",
-					   G_CALLBACK(task_go), sess);
-	icon = 0, mask = 0, pix = 0;
+	gtk_window_set_child (GTK_WINDOW (tasks_window), sess->gtask_scroll);
 
-	upbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(upbtn, pix);
-	gtk_widget_set_tooltip_text(upbtn, _("Move Xfer Up in Queue"));
-	g_signal_connect(upbtn, "clicked", G_CALLBACK(task_up), 
-					   sess);
-	icon = 0, mask = 0, pix = 0;
-
-
-	dnbtn = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/down.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(dnbtn, pix);
-	gtk_widget_set_tooltip_text(dnbtn, _("Move Xfer Down in Queue"));
-	g_signal_connect(dnbtn, "clicked", G_CALLBACK(task_dn), 
-					   sess);
-
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-	gtkhx_box_pack(hbuttonbox, stopbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, gobtn, 0, 0, 0);
-	gtkhx_box_pack(hbuttonbox, upbtn, 0, 0, 2);
-	gtkhx_box_pack(hbuttonbox, dnbtn, 0, 0, 0);
-
-	gtkhx_widget_set_child(topframe, hbuttonbox);
-	gtkhx_box_pack(vbox, topframe, 0, 0, 0);
-	gtkhx_widget_set_child(tasks_window, vbox);
-
-	tasks_vbox = vbox;
-	gtkhx_box_pack(vbox, sess->gtask_scroll, 1, 1, 0);
-
-	g_signal_connect(tasks_window, "destroy",
-					   G_CALLBACK(tasks_destroy), sess);
+	g_signal_connect (tasks_window, "destroy",
+	                  G_CALLBACK (tasks_destroy), sess);
 
 
 	init_keyaccel(tasks_window);
