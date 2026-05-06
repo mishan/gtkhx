@@ -1205,14 +1205,38 @@ static void pchat_close (GtkWidget *widget, gpointer data)
 }
 
 
-static void join_chat(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), 
-														 "dialog");
-	struct htlc_conn *htlc = g_object_get_data(G_OBJECT(widget), "htlc");
+/* Forward decl — hx_reject_chat is defined further down (in the
+ * "subject change" cluster) but the AdwAlertDialog response handler
+ * needs to see it. */
+void hx_reject_chat (struct htlc_conn *htlc, guint32 _cid);
 
-	gtkhx_widget_destroy(dialog);
-	hx_chat_join(htlc, GPOINTER_TO_INT(data));
+/* Phase 5: Phase 4 invitation flow used qdata on the Join button to
+ * thread state into the click handler; AdwAlertDialog dispatches by
+ * response id, so we carry the htlc + cid pair through the response
+ * signal as a small heap-allocated context. The dialog's "closed"
+ * signal frees it after the response handler runs. */
+struct chat_invite_ctx {
+	struct htlc_conn *htlc;
+	guint32           cid;
+};
+
+static void
+chat_invite_response (AdwAlertDialog *dialog, const char *response, gpointer data)
+{
+	struct chat_invite_ctx *ctx = data;
+	(void) dialog;
+
+	if (g_strcmp0 (response, "join") == 0)
+		hx_chat_join (ctx->htlc, ctx->cid);
+	else
+		hx_reject_chat (ctx->htlc, ctx->cid);
+}
+
+static void
+chat_invite_closed (AdwDialog *dialog, gpointer data)
+{
+	(void) dialog;
+	g_free (data);
 }
 
 void output_chat_subject(struct htlc_conn *htlc, guint32 cid, char *buf)
@@ -1236,64 +1260,44 @@ void hx_reject_chat(struct htlc_conn *htlc, guint32 _cid)
 			HTLC_DATA_CHAT_ID, 4, &cid);
 }
 
-void reject_chat(GtkWidget *btn, GtkWidget *dialog)
-{
-	guint32 cid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "cid"));
-
-	hx_reject_chat(&the_session.htlc, cid);
-	gtkhx_widget_destroy(dialog);
-}
-
-/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
- * 4.10 — Phase 4.7 follow-up replaces with GtkAlertDialog/GtkWindow. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+/* Phase 5: AdwAlertDialog with two responses (Join / Decline) replaces
+ * the hand-rolled GtkDialog + label + two buttons. Decline (and ESC)
+ * declines the invite via hx_reject_chat; Join calls hx_chat_join.
+ * Both go through the same response handler: the response id keys
+ * the action. */
 void output_chat_invitation(struct htlc_conn *htlc, guint32 cid, char *name)
 {
-	GtkWidget *dialog;
-	GtkWidget *join;
-	GtkWidget *cancel;
-	GtkWidget *hbox;
-	GtkWidget *label;
-	char *message;
+	AdwDialog *dialog;
+	struct chat_invite_ctx *ctx;
+	char *body;
 
-	dialog = gtk_dialog_new();
-	gtk_window_set_title(GTK_WINDOW(dialog), _("Chat Invitation"));
-	/* Phase 4.5: anchor the dialog to the main chat window so the
-	 * compositor doesn't complain about a free-floating GtkDialog. */
-	if (the_session.chat_window)
-		gtk_window_set_transient_for(GTK_WINDOW(dialog),
-		                             GTK_WINDOW(the_session.chat_window));
-	(gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	message = g_strdup_printf("%s %s: 0x%08x", name,
-							  _("invites you to private chat"),  cid);
+	body = g_strdup_printf ("%s %s: 0x%08x",
+	                        name, _("invites you to private chat"), cid);
 
-	label = gtk_label_new(message);
-	join = gtk_button_new_with_label(_("Join"));
-	g_object_set_data(G_OBJECT(join), "dialog", dialog);
-	g_object_set_data(G_OBJECT(join), "htlc", htlc);
-	g_signal_connect(join, "clicked", G_CALLBACK(join_chat),
-					   GINT_TO_POINTER(cid));
+	dialog = adw_alert_dialog_new (_("Chat Invitation"), body);
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "decline", _("_Decline"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "join",    _("_Join"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "join",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+	                                       "join");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog),
+	                                       "decline");
 
+	ctx = g_new (struct chat_invite_ctx, 1);
+	ctx->htlc = htlc;
+	ctx->cid  = cid;
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (chat_invite_response), ctx);
+	g_signal_connect (dialog, "closed",
+	                  G_CALLBACK (chat_invite_closed), ctx);
 
-	cancel = gtk_button_new_with_label(_("Decline"));
-	g_object_set_data(G_OBJECT(cancel), "cid", GINT_TO_POINTER(cid));
-	g_signal_connect(cancel, "clicked", 
-					   G_CALLBACK(reject_chat), 
-					   dialog);
-
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), label, 0, 0, 0);
-	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), hbox, 0, 0, 0);
-	gtkhx_box_pack(hbox, join, 0, 0, 0);
-	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-
-	gtk_window_present(GTK_WINDOW(dialog));
-	g_free(message);
+	adw_dialog_present (dialog, GTK_WIDGET (the_session.chat_window));
+	g_free (body);
 }
-G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* Phase 4.5: pchat_update_trans was a configure-event handler that
  * forced an xtext refresh on every resize so transparency would track
