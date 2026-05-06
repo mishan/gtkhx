@@ -109,12 +109,13 @@ guint8 *list_n (guint8 *list, guint16 listlen, unsigned int n)
 	}
 }
 
+/* Wired to AdwDialog::closed — fires after the dialog has dismissed
+ * (close-X, ESC, or our own adw_dialog_close from server_connect).
+ * All we do is clear the singleton pointer so the next
+ * create_connect_window builds a fresh dialog. */
 static void close_connect_window (void)
 {
-	if (connect_window) {
-		adw_dialog_close (ADW_DIALOG (connect_window));
-		connect_window = 0;
-	}
+	connect_window = 0;
 }
 
 void connect_set_entries (const char *address, const char *login, const char *password, guint16 port)
