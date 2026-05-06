@@ -144,11 +144,24 @@ void setbtns(session *sess, int stat)
  * in GTK 4.10). The toolbar always replaced the message wholesale, so
  * the message-stack model the GtkStatusbar provided was overhead that
  * earned us nothing. A single gtk_label_set_text per state change
- * does what we want. */
+ * does what we want.
+ *
+ * The label shows the persistent state ("Logged in to ...") for
+ * ambient awareness. Important state transitions also fire an
+ * AdwToast over the toolbar so the change is visible without the
+ * user having to glance at the corner of the window: login success
+ * is the canonical positive transition, disconnect-from-connected is
+ * the canonical "you've lost connectivity" negative transition. The
+ * intermediate "Connecting..." / TCP-connected states are
+ * label-only because they're either expected (you just clicked
+ * Connect) or short-lived (TCP-connected almost always becomes
+ * Logged-in within milliseconds). */
 void set_status_bar(int status)
 {
+	static int last_status = 0;
 	const char *fixed = NULL;
 	char *fmt = NULL;
+	char *toast = NULL;
 
 	if (!status_bar) {
 		return;
@@ -160,19 +173,31 @@ void set_status_bar(int status)
 		break;
 	case 0:
 		fixed = _("Not Connected");
+		/* Toast only on a real disconnect — first-launch state
+		 * change of 0 -> 0 shouldn't surface a notification, and
+		 * neither should a Connect-canceled (last_status == -1). */
+		if (last_status == 1 || last_status == 2)
+			toast = g_strdup_printf ("%s %s",
+			                         _("Disconnected from"),
+			                         server_addr);
 		break;
 	case 1:
 		fmt = g_strdup_printf ("%s %s", _("Connected to"), server_addr);
 		break;
 	case 2:
 		fmt = g_strdup_printf ("%s %s", _("Logged in to"), server_addr);
+		toast = g_strdup (fmt);
 		break;
 	default:
 		return;
 	}
 
 	gtk_label_set_text (GTK_LABEL (status_bar), fmt ? fmt : fixed);
+	if (toast)
+		toolbar_show_toast (toast);
 	g_free (fmt);
+	g_free (toast);
+	last_status = status;
 }
 
 void changetitlesconnected(session *sess)

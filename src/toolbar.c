@@ -60,6 +60,14 @@ GtkWidget *plugin_btn;
  * status_msg / context_status globals are gone with it. */
 GtkWidget *status_bar;
 
+/* Phase 5: AdwToastOverlay anchors transient notifications over the
+ * toolbar content. set_status_bar() pushes a toast for "Logged in"
+ * to give positive feedback at connection time; the persistent
+ * status label still shows the current state for ambient awareness.
+ * Static — only the toolbar.c-internal wiring touches it directly,
+ * external callers go through toolbar_show_toast(). */
+static AdwToastOverlay *toolbar_toast;
+
 static void create_new_user (void)
 {
 	create_useredit_window(0,1);
@@ -161,6 +169,20 @@ static const GActionEntry app_actions[] = {
 	{ .name = "about",    .activate = on_action_about    },
 	{ .name = "quit",     .activate = on_action_quit     },
 };
+
+/* Phase 5: push a transient AdwToast onto the toolbar window's
+ * AdwToastOverlay. No-op until the toolbar is built (toolbar_toast
+ * starts NULL), so callers can safely fire toasts during early
+ * startup without guarding. The toast auto-dismisses after libadwaita's
+ * default timeout (~5s); duplicate text replaces the previous toast
+ * cleanly. */
+void
+toolbar_show_toast (const char *text)
+{
+	if (!toolbar_toast || !text)
+		return;
+	adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (text));
+}
 
 /* Phase 5: register the hamburger-menu actions on the application.
  * Called from gtkhx_activate AFTER the AdwApplication is constructed
@@ -352,7 +374,15 @@ void create_toolbar_window (session *sess)
 	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 	gtk_box_append (GTK_BOX (vbox), hbox);
 	gtk_box_append (GTK_BOX (vbox), status_bar);
-	gtk_window_set_child (GTK_WINDOW (toolbar_window), vbox);
+
+	/* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()
+	 * can push transient notifications over the button row. Toasts
+	 * surface as a sliding banner at the bottom of the overlay; the
+	 * persistent status label stays visible underneath for ambient
+	 * connection state. */
+	toolbar_toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
+	adw_toast_overlay_set_child (toolbar_toast, vbox);
+	gtk_window_set_child (GTK_WINDOW (toolbar_window), GTK_WIDGET (toolbar_toast));
 
 	/* Initial sensitivity: pre-connection, only Connect + the global
 	 * menu items are usable. setbtns() flips the rest on at login. */

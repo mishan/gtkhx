@@ -28,4 +28,9 @@ extern void disconnect_clicked (void);
  * caller should only call this once). */
 extern void toolbar_register_actions (GApplication *app, session *sess);
 
+/* Phase 5: push a transient AdwToast onto the toolbar window's
+ * AdwToastOverlay. Safe to call before the toolbar is built (no-op).
+ * The toast auto-dismisses after libadwaita's default timeout. */
+extern void toolbar_show_toast (const char *text);
+
 #endif
