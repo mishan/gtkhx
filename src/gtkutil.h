@@ -106,4 +106,24 @@ extern void gtkhx_widget_destroy (GtkWidget *widget);
  */
 extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
 
+/*
+ * Phase 5: build a GtkButton with a pixel-art XPM icon loaded from a
+ * GResource path. The pixbuf is scaled up by an integer factor with
+ * nearest-neighbor interpolation before becoming the button's child,
+ * which preserves the crisp pixel-art look at modern desktop sizes
+ * (16px sources upscaled to 32px work well). Pass scale = 1 for the
+ * legacy 1x rendering, scale = 2 for the standard "bigger toolbar
+ * button" treatment.
+ *
+ * If cb is non-NULL it's wired to the button's "clicked" signal with
+ * user_data; if cb is NULL the caller is responsible for hooking up
+ * the button. The returned button has its tooltip set; pack it into
+ * an AdwHeaderBar / GtkBox / etc. as needed.
+ */
+extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
+                                       const char *tooltip,
+                                       int         scale,
+                                       GCallback   cb,
+                                       gpointer    user_data);
+
 #endif

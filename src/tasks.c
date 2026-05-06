@@ -529,27 +529,19 @@ void task_tasks_update (session *sess)
 }
 
 
-/* Phase 5: helper to build a GtkButton with a pixmap-resource icon.
- * Same shape as toolbar.c's make_pixmap_button — but local to tasks.c
- * since there's no shared header for it (yet). */
+/* Phase 5: 2x scale on tasks-headerbar pixmap buttons (matches the
+ * toolbar treatment). gtkhx_pixmap_button in gtkutil.c handles the
+ * upscale + button construction. */
+#define TASKS_ICON_SCALE 2
+
 static GtkWidget *
 tasks_pixmap_button (const char *resource_name,
                      const char *tooltip,
                      GCallback   cb,
                      gpointer    user_data)
 {
-	GtkWidget *btn = gtk_button_new ();
-	GdkPixbuf *pb;
-	GtkWidget *image;
-
-	pb = gdk_pixbuf_new_from_resource (resource_name, NULL);
-	image = gtkhx_image_new_from_pixbuf (pb);
-	gtkhx_widget_set_child (btn, image);
-	gtk_widget_set_tooltip_text (btn, tooltip);
-	if (cb)
-		g_signal_connect (btn, "clicked", cb, user_data);
-	g_clear_object (&pb);
-	return btn;
+	return gtkhx_pixmap_button (resource_name, tooltip,
+	                            TASKS_ICON_SCALE, cb, user_data);
 }
 
 void create_tasks_window (GtkWidget *widget, gpointer data)

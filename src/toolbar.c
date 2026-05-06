@@ -226,27 +226,21 @@ build_hamburger (void)
 	return btn;
 }
 
-/* Helper: build one of the legacy pixmap-icon buttons for the content
- * row. Centralizes the gdk_pixbuf_new_from_resource + set_child + tooltip
- * dance so adding a new toolbar action is one line at the call site. */
+/* Phase 5: 2x scale on the toolbar pixmap buttons. The historic
+ * 16x16 XPMs read as tiny pixel-art runes at modern desktop sizes;
+ * the gtkhx_pixmap_button helper in gtkutil.c upscales them with
+ * nearest-neighbor before rendering, keeping the crisp blocky look
+ * but at a more visually-prominent 32x32. */
+#define TOOLBAR_ICON_SCALE 2
+
 static GtkWidget *
 make_pixmap_button (const char *resource_name,
                     const char *tooltip,
                     GCallback   cb,
                     gpointer    user_data)
 {
-	GtkWidget *btn = gtk_button_new ();
-	GdkPixbuf *pb;
-	GtkWidget *image;
-
-	pb = gdk_pixbuf_new_from_resource (resource_name, NULL);
-	image = gtkhx_image_new_from_pixbuf (pb);
-	gtkhx_widget_set_child (btn, image);
-	gtk_widget_set_tooltip_text (btn, tooltip);
-	if (cb)
-		g_signal_connect (btn, "clicked", cb, user_data);
-	g_clear_object (&pb);
-	return btn;
+	return gtkhx_pixmap_button (resource_name, tooltip,
+	                            TOOLBAR_ICON_SCALE, cb, user_data);
 }
 
 /* Phase 4.5: configure-event is gone in GTK 4 and the toolbar window

@@ -485,6 +485,48 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
 	return image;
 }
 
+/* Phase 5: build a button around a GResource pixbuf icon. The
+ * default toolbar XPMs are 16x16 pixel art that looks tiny at
+ * modern desktop sizes, so scale up by an integer factor with
+ * GDK_INTERP_NEAREST (preserves the crisp blocky pixels — bilinear
+ * scaling would blur them into mush).
+ *
+ * gdk_pixbuf_scale_simple at GDK_INTERP_NEAREST is just a 1:N
+ * pixel duplication, so the result is identical to drawing the
+ * source pixbuf at N × pixel size. The texture is created from
+ * the scaled pixbuf and the GtkImage takes ownership of the
+ * paintable through gtkhx_image_new_from_pixbuf. */
+GtkWidget *
+gtkhx_pixmap_button (const char *resource_name,
+                     const char *tooltip,
+                     int         scale,
+                     GCallback   cb,
+                     gpointer    user_data)
+{
+	GtkWidget *btn = gtk_button_new ();
+	GdkPixbuf *src, *use_pb;
+	GtkWidget *image;
+
+	src = gdk_pixbuf_new_from_resource (resource_name, NULL);
+	if (src && scale > 1) {
+		int w = gdk_pixbuf_get_width  (src) * scale;
+		int h = gdk_pixbuf_get_height (src) * scale;
+		use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
+		g_object_unref (src);
+	} else {
+		use_pb = src;
+	}
+
+	image = gtkhx_image_new_from_pixbuf (use_pb);
+	gtkhx_widget_set_child (btn, image);
+	if (tooltip)
+		gtk_widget_set_tooltip_text (btn, tooltip);
+	if (cb)
+		g_signal_connect (btn, "clicked", cb, user_data);
+	g_clear_object (&use_pb);
+	return btn;
+}
+
 /* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
  * gtk_window_destroy which tears down the surface and drops refs.
  * Non-toplevels: if the widget has a parent, unparent it (the
