@@ -813,6 +813,14 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 			gtk_application_add_window (app, GTK_WINDOW (l->data));
 	}
 	g_list_free (toplevels);
+
+	/* Phase 5: register the toolbar's hamburger-menu actions
+	 * (app.settings / app.about / app.quit). The actions can't be
+	 * added during create_toolbar_window because that runs in
+	 * fe_init() — before g_application_run, so before the
+	 * AdwApplication exists. Now that we're in the activate handler
+	 * the application is alive, so wire them in. */
+	toolbar_register_actions (G_APPLICATION (app), &the_session);
 }
 
 static void

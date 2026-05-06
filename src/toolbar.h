@@ -19,4 +19,13 @@ extern GtkWidget *status_bar;
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 
+/* Phase 5: register the hamburger-menu's GActions on the application.
+ * Call from gtkhx_activate after the AdwApplication is constructed —
+ * fe_init() runs create_toolbar_window earlier (before
+ * g_application_run), so the actions can't be added at toolbar
+ * construction time. Idempotent: GActionMap silently overwrites a
+ * second registration with a g_critical (we want to see that, so
+ * caller should only call this once). */
+extern void toolbar_register_actions (GApplication *app, session *sess);
+
 #endif
