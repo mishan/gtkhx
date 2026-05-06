@@ -379,11 +379,6 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 
 	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
 	g_object_unref (model);
-	/* Phase 5: bind the info_label to the "user-info" custom menu
-	 * item we declared above. GtkPopoverMenu renders the named
-	 * widget in place of the section content. */
-	gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover),
-	                            info_label, "user-info");
 	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
 	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
 	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
@@ -398,7 +393,21 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	                        ctx, user_action_ctx_free);
 	g_object_set_data (G_OBJECT (popover), "user-action-anchor", anchor);
 
+	/* Phase 5: parent the popover to the anchor first, then bind the
+	 * custom info_label child. Doing the add_child before set_parent
+	 * left the popover's internal CSS tree disconnected from the
+	 * anchor's, and the subsequent set_parent triggered a
+	 * gtk_css_node_insert_after critical when GTK reattached the
+	 * subtree. Parent-then-add_child keeps the CSS hierarchy
+	 * connected for the entire add_child operation. */
 	gtk_widget_set_parent (popover, anchor);
+
+	/* Phase 5: bind the info_label to the "user-info" custom menu
+	 * item we declared above. GtkPopoverMenu renders the named
+	 * widget in place of the section content. */
+	gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover),
+	                            info_label, "user-info");
+
 	g_signal_connect (popover, "closed",
 	                  G_CALLBACK (user_popover_closed), NULL);
 
