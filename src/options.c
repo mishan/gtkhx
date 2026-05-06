@@ -1607,7 +1607,7 @@ static void settings_page_appearance (AdwPreferencesPage *page)
  * draw_func against it. Centralizes the metadata so adding pages stays
  * a one-liner. */
 static void
-settings_add_page (AdwPreferencesWindow *win,
+settings_add_page (AdwPreferencesDialog *dlg,
                    const char *title,
                    const char *icon,
                    void (*draw_func) (AdwPreferencesPage *))
@@ -1618,62 +1618,69 @@ settings_add_page (AdwPreferencesWindow *win,
 		adw_preferences_page_set_icon_name (page, icon);
 	if (draw_func)
 		draw_func (page);
-	adw_preferences_window_add (win, page);
+	adw_preferences_dialog_add (dlg, page);
 }
 
 void create_options_window (GtkWidget *widget, gpointer data)
 {
-	AdwPreferencesWindow *win;
+	AdwPreferencesDialog *dlg;
+	GtkWidget *parent;
 	session *sess = data;
 
 	(void) widget;
 
+	parent = GTK_WIDGET (gtkhx_active_window ());
+
 	if (options_window) {
-		gtk_window_present (GTK_WINDOW (options_window));
+		adw_dialog_present (ADW_DIALOG (options_window), parent);
 		return;
 	}
 
-	win = ADW_PREFERENCES_WINDOW (adw_preferences_window_new ());
-	gtk_window_set_title (GTK_WINDOW (win), _("GtkHx Preferences"));
-	/* Default size needs to be wide enough that the 9-page top
-	 * AdwViewSwitcher fits horizontally. If it doesn't, libadwaita
-	 * collapses to an AdwViewSwitcherBar at the bottom — adaptive
-	 * behavior, but unexpected for a desktop Settings window. 840px
-	 * keeps the row of icons on top on standard displays; the user
-	 * can still shrink the window manually if they want the bar. */
-	gtk_window_set_default_size (GTK_WINDOW (win), 840, 640);
-	{
-		GtkWindow *parent = gtkhx_active_window ();
-		if (parent)
-			gtk_window_set_transient_for (GTK_WINDOW (win), parent);
-	}
-	gtk_window_set_modal (GTK_WINDOW (win), FALSE);
-	g_object_set_data (G_OBJECT (win), "sess", sess);
-	g_signal_connect (win, "destroy",
+	/* Phase 5: AdwPreferencesDialog (libadwaita 1.6+) replaces
+	 * AdwPreferencesWindow, which became deprecated alongside the
+	 * old AdwAboutWindow / AdwMessageDialog when the new adaptive
+	 * AdwDialog family arrived. The settings construction is
+	 * essentially unchanged — same 9 pages with the same draw
+	 * functions — but the outer container is the dialog now,
+	 * presented via adw_dialog_present rather than gtk_window_present.
+	 *
+	 * AdwDialog auto-handles transient_for / modal-against-parent /
+	 * proper sizing, so the explicit gtk_window_set_transient_for +
+	 * gtk_window_set_modal pair is gone. Default size still pinned
+	 * to 840x640 via set_content_width/height — wide enough that the
+	 * 9-page top AdwViewSwitcher fits horizontally before libadwaita
+	 * adaptively collapses it to a bottom bar. */
+	dlg = ADW_PREFERENCES_DIALOG (adw_preferences_dialog_new ());
+	adw_dialog_set_title (ADW_DIALOG (dlg), _("GtkHx Preferences"));
+	adw_dialog_set_content_width  (ADW_DIALOG (dlg), 840);
+	adw_dialog_set_content_height (ADW_DIALOG (dlg), 640);
+
+	g_object_set_data (G_OBJECT (dlg), "sess", sess);
+	g_signal_connect (dlg, "closed",
 	                  G_CALLBACK (close_options_bookkeeping), NULL);
 
-	options_window = GTK_WIDGET (win);
+	options_window = GTK_WIDGET (dlg);
 
-	settings_add_page (win, _("Appearance"), "preferences-color-symbolic",
+	settings_add_page (dlg, _("Appearance"), "preferences-color-symbolic",
 	                   settings_page_appearance);
-	settings_add_page (win, _("Identity"),   "user-info-symbolic",
+	settings_add_page (dlg, _("Identity"),   "user-info-symbolic",
 	                   settings_page_identity);
-	settings_add_page (win, _("Chat"),       "user-available-symbolic",
+	settings_add_page (dlg, _("Chat"),       "user-available-symbolic",
 	                   settings_page_chat);
-	settings_add_page (win, _("Sound"),      "audio-speakers-symbolic",
+	settings_add_page (dlg, _("Sound"),      "audio-speakers-symbolic",
 	                   settings_page_sound);
-	settings_add_page (win, _("Files"),      "folder-symbolic",
+	settings_add_page (dlg, _("Files"),      "folder-symbolic",
 	                   settings_page_files);
-	settings_add_page (win, _("News"),       "view-list-symbolic",
+	settings_add_page (dlg, _("News"),       "view-list-symbolic",
 	                   settings_page_news15);
-	settings_add_page (win, _("Trackers"),   "network-server-symbolic",
+	settings_add_page (dlg, _("Trackers"),   "network-server-symbolic",
 	                   settings_page_tracker);
-	settings_add_page (win, _("Paths"),      "folder-saved-search-symbolic",
+	settings_add_page (dlg, _("Paths"),      "folder-saved-search-symbolic",
 	                   settings_page_path);
-	settings_add_page (win, _("Misc"),       "applications-other-symbolic",
+	settings_add_page (dlg, _("Misc"),       "applications-other-symbolic",
 	                   settings_page_misc);
 
-	gtk_window_present (GTK_WINDOW (win));
+	adw_dialog_present (ADW_DIALOG (dlg), parent);
 
 	/* Populate the icon picker now that its hlist exists. list_icons
 	 * walks the loaded resource files and inserts a row per icon. */
