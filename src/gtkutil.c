@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -254,77 +255,24 @@ void close_connected_windows(session *sess)
 	}
 }
 
-char *add_break(char *msg, int pos)
-{
-	size_t len = strlen(msg);	
-
-	msg = g_realloc(msg, len+1);
-	memmove(&msg[pos+1], &msg[pos], len-pos);
-	msg[pos] = '\n';
-
-	return msg;
-}
-
-/* Phase 4.13: GtkDialog and gtk_dialog_get_content_area are deprecated
- * in GTK 4.10 in favor of GtkAlertDialog (for simple message dialogs)
- * and GtkWindow (for custom multi-button forms). Migrating every
- * GtkDialog call site is a sizable Phase 4.7 follow-up the ROADMAP
- * already documented as deferred — until then suppress deprecations
- * on the dialog wrappers. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+/* Phase 5: error_dialog is an AdwAlertDialog now. The old GtkDialog
+ * + manual GtkLabel + manual OK button + manual line-wrapping path
+ * was the canonical example of "things AdwAlertDialog gives you for
+ * free". libadwaita handles line wrapping inside the body text, the
+ * dialog is auto-modal to its parent, ESC dismisses, and the visual
+ * styling matches every other modern GNOME app's error popup. The
+ * old add_break() helper that hand-inserted '\n' every 50 chars is
+ * gone with it. */
 void error_dialog (char *title, char *msg)
 {
-    GtkWidget *label;
-    GtkWidget *dialog;
-    GtkWidget *okbutton;
-	char *message = g_strdup(msg);
-	size_t len = strlen(message);
-	int i;
+	AdwDialog *dlg;
 
-	/* insert a line break at every 50 chars, otherwise the message will just
-	   run off */
-	if(len > 50) {
-		for(i = 0; i < len; i++) {
-			if((!(i%50)) && i) {
-				message = add_break(message, i);
-				len++;
-			}
-		}
-	}
+	dlg = adw_alert_dialog_new (title, msg);
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dlg), "ok", _("_OK"));
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dlg), "ok");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dlg), "ok");
 
-    dialog = gtk_dialog_new();
-
-    /* Phase 5: silence "GtkDialog mapped without a transient parent"
-     * for the no-context error_dialog path. The application's active
-     * toplevel is the right parent. */
-    {
-        GtkWindow *parent = gtkhx_active_window ();
-        if (parent)
-            gtk_window_set_transient_for (GTK_WINDOW (dialog), parent);
-    }
-
-    gtk_window_set_title(GTK_WINDOW(dialog), title);
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-    label = gtk_label_new (message);
-    gtk_widget_set_size_request(dialog, 250, 200);
-
-    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
-
-    okbutton = gtk_button_new_with_label ("Ok");
-
-    g_signal_connect_swapped (okbutton, "clicked", 
-							   (GCallback)gtkhx_widget_destroy, 
-							   dialog);
-
-    /* Phase 4.2: gtk_widget_set_can_default removed */
-
-    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbutton, TRUE, TRUE, 0);
-
-
-    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-
-    gtk_window_present(GTK_WINDOW(dialog));
-	g_free(message);
+	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
 }
 
 /* Phase 4.2: gtk_dialog_get_action_area is fully removed in GTK 4
@@ -332,7 +280,14 @@ void error_dialog (char *title, char *msg)
  * GtkBox attached to the bottom of the dialog's content area on
  * first call, cached on the dialog via g_object_set_data so repeat
  * calls return the same box. Callers' gtkhx_box_pack(area, btn, ...)
- * just append to this box. */
+ * just append to this box.
+ *
+ * Phase 4.13: GtkDialog and gtk_dialog_get_content_area are deprecated
+ * in GTK 4.10. The remaining call sites — bookmark editor / file
+ * info / connect / chat subject — are sizable Phase 4.7 follow-ups,
+ * so the deprecation warnings stay suppressed locally until each
+ * one migrates to AdwDialog or AdwWindow. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 GtkWidget *
 gtkhx_dialog_action_area (GtkDialog *dialog)
 {

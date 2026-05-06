@@ -1419,12 +1419,22 @@ static void settings_page_path (AdwPreferencesPage *page)
 	adw_preferences_page_add (page, grp);
 }
 
+/* Phase 5: ptr1->cell[1] is already a GtkHellText *. The historic
+ * GTK_HELL_TEXT() macro applied here expands to ((GtkHellText *) &(c)),
+ * which takes the *address* of the array element and reads the
+ * struct fields off that — i.e. ->text reads from cell[2] (out of
+ * bounds of the alloca'd cells_a/cells_b arrays in
+ * sort_iter_compare). atoi(garbage_pointer) is the SIGSEGV the icon
+ * picker hit on Settings open. Use the cell pointer directly. */
 static int listsorthelper (GtkHList *hlist,
 				GtkHListRow *ptr1,
 				GtkHListRow *ptr2)
 {
-	int i1=atoi(GTK_HELL_TEXT(ptr1->cell[1])->text);
-	int i2=atoi(GTK_HELL_TEXT(ptr2->cell[1])->text);
+	GtkHellText *c1 = ptr1 ? ptr1->cell[1] : NULL;
+	GtkHellText *c2 = ptr2 ? ptr2->cell[1] : NULL;
+	int i1 = (c1 && c1->text) ? atoi (c1->text) : 0;
+	int i2 = (c2 && c2->text) ? atoi (c2->text) : 0;
+	(void) hlist;
 	if (i1 < i2) return -1;
 	if (i1 > i2) return 1;
 	return 0;
