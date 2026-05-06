@@ -677,11 +677,19 @@ void init_icons (void)
 	 *      (covers /usr/share, /usr/local/share, snap mounts, etc.)
 	 *   4. $PREFIX/share/gtkhx/icons/                — build-time fixed path
 	 *   5. $PREFIX/share/gtkhx/                      — legacy top-level
-	 *      (autotools-era installs put icons.rsrc directly here)
+	 *      (autotools-era installs put icons.rsrc directly here),
+	 *      ONLY if 1-4 turned up nothing
 	 *
 	 * collect_rsrc_files de-dupes by absolute path string, so the same
 	 * file showing up in two of these (e.g. PREFIX matches an XDG dir)
-	 * doesn't load twice. */
+	 * doesn't load twice. The legacy top-level scan is special-cased:
+	 * if the meson install has put icons.rsrc into both
+	 * $PREFIX/share/gtkhx/icons/icons.rsrc (new) AND
+	 * $PREFIX/share/gtkhx/icons.rsrc (legacy autotools-era leftover),
+	 * those are different paths so the path-string de-dupe doesn't
+	 * catch them — they have the same content though, and you'd see
+	 * every icon doubled in the Settings picker. So only fall back to
+	 * the legacy top-level scan if the proper scans found zero files. */
 	paths = g_ptr_array_new ();
 
 	user_dir = g_build_filename (gtkhx_config_dir (), "icons", NULL);
@@ -705,7 +713,9 @@ void init_icons (void)
 	}
 
 	collect_rsrc_files (paths, PREFIX "/share/gtkhx/icons");
-	collect_rsrc_files (paths, PREFIX "/share/gtkhx");
+
+	if (paths->len == 0)
+		collect_rsrc_files (paths, PREFIX "/share/gtkhx");
 
 	ifn->files = g_malloc (paths->len * sizeof (char *));
 	ifn->cicns = g_malloc (paths->len * sizeof (macres_file *));
