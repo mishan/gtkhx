@@ -4,7 +4,9 @@ High priority:
 
 Medium priority:
 
-(none)
+- Right clicking on a user in the Users list gives a warning:
+
+(gtkhx:285643): Gtk-CRITICAL **: 19:06:59.176: gtk_css_node_insert_after: assertion 'previous_sibling == NULL || previous_sibling->parent == parent' failed
 
 Low priority:
 

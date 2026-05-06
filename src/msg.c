@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
 #include <netinet/in.h>
 #include "hx.h"
@@ -365,53 +366,39 @@ void msg_output (char *name, guint16 uid, char *buf)
 }
 
 
-void broadcastok(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
-	gtkhx_widget_destroy(dialog);
-}
-
-/* Phase 4.13: GtkDialog + gtk_dialog_get_content_area deprecated in
- * GTK 4.10 — Phase 4.7 follow-up. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+/* Phase 5: AdwAlertDialog with a scrolled non-editable GtkTextView
+ * as extra-child replaces the hand-rolled GtkDialog. The broadcast
+ * text can run long, so it goes in extra_child (which is exposed
+ * through a scrolled view) rather than body (which is a plain
+ * GtkLabel without scrolling). Single OK response handles dismiss
+ * + ESC + window-close-X uniformly. */
 void broadcastmsg(char *text)
 {
-
-	GtkWidget *dialog;
-	GtkWidget *okbtn;
-	GtkWidget *textbox;
-	GtkWidget *scroll;
+	AdwDialog *dialog;
+	GtkWidget *textbox, *scroll;
 	GtkTextBuffer *tbuf;
 
+	dialog = adw_alert_dialog_new (_("Broadcast"), NULL);
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "ok", _("_OK"));
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "ok");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "ok");
 
-	dialog = gtk_dialog_new();
-	okbtn = gtk_button_new_with_label(_("OK"));
-    /* Phase 4.2: gtk_widget_set_can_default removed */
-	if (toolbar_window)
-		gtk_window_set_transient_for(GTK_WINDOW(dialog),
-		                             GTK_WINDOW(toolbar_window));
+	textbox = gtk_text_view_new ();
+	gtk_text_view_set_editable (GTK_TEXT_VIEW (textbox), FALSE);
+	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (textbox), FALSE);
+	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (textbox), GTK_WRAP_WORD);
+	tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textbox));
+	gtk_text_buffer_set_text (tbuf, text, strlen (text));
 
-	textbox = gtk_text_view_new();
-	gtk_text_view_set_editable(GTK_TEXT_VIEW(textbox), FALSE);
-	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(textbox), FALSE);
-	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textbox), GTK_WRAP_WORD);
-	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textbox));
-	gtk_text_buffer_set_text(tbuf, text, strlen(text));
+	scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+	                                GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_widget_set_size_request (scroll, 300, 220);
+	gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), textbox);
 
-	scroll = gtk_scrolled_window_new();
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
-	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtkhx_widget_set_child(scroll, textbox);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
 
-	gtk_widget_set_size_request(dialog, 300, 250);
-    gtk_window_set_title(GTK_WINDOW(dialog), _("Broadcast"));
-
-    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), scroll, TRUE, TRUE, 0);
-	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbtn, TRUE, TRUE, 0);
-    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-	g_object_set_data(G_OBJECT(okbtn), "dialog", dialog);
-	g_signal_connect(okbtn, "clicked", G_CALLBACK(broadcastok), 0);
-	init_keyaccel(dialog);
-	gtk_window_present(GTK_WINDOW(dialog));
+	adw_dialog_present (dialog,
+	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }
-G_GNUC_END_IGNORE_DEPRECATIONS
