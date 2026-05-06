@@ -8,6 +8,7 @@ Settings cleanup:
 
 UI Modernization:
 - Look into libadwaita
+- Bigger button icons
 
 Code Modernization:
 - Better modules with more code reuse
