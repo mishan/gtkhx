@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -274,129 +275,133 @@ static void strip_lf(char *buf)
 	return;
 }
 
-static void convert_bookmark(GtkWidget *widget, gpointer data)
+/* Phase 5: legacy-bookmark conversion runs from the AdwAlertDialog
+ * "convert" response. Path is passed through user_data; freed via
+ * the dialog's "closed" signal once the response is handled.
+ *
+ * Old shape was a click handler on the OK button that pulled the
+ * dialog pointer out of qdata so it could destroy itself. With
+ * AdwAlertDialog the dialog auto-dismisses when the response
+ * handler returns, so the explicit destroy is gone — we only do
+ * the file-rewrite work here. */
+static void
+convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
 {
-	GtkWidget *dialog;
-	FILE *bm = fopen((char *)data, "r");
+	FILE *bm;
 	char server[128];
 	char login[64];
 	char pass[64];
 	char zeros[256];
 	char *p, port[HOSTLEN];
 	size_t len, len_total;
-	
-	if(!widget) {
+
+	(void) dialog;
+
+	if (g_strcmp0 (response, "convert") != 0)
 		return;
-	}
-	dialog = g_object_get_data(G_OBJECT(widget), "dialog");
-	memset(zeros, 0, 256);
 
-	if(!bm) {
-		fprintf(stderr, "Could not open '%s' for reading...Aborting\n", (char *)data);
-		exit(1);
+	bm = fopen ((char *) data, "r");
+	if (!bm) {
+		fprintf (stderr,
+		         "Could not open '%s' for reading...Aborting\n",
+		         (char *) data);
+		exit (1);
 	}
+	memset (zeros, 0, 256);
 
-	fgets(server, 128, bm);
-	server[strlen(server)-1] = '\0';
-	fgets(login, 64, bm);
-	login[strlen(login)-1] = '\0';
-	fgets(pass, 64, bm);
-	strip_lf(pass);
-	fclose(bm);
+	fgets (server, 128, bm);
+	server[strlen (server) - 1] = '\0';
+	fgets (login, 64, bm);
+	login[strlen (login) - 1] = '\0';
+	fgets (pass, 64, bm);
+	strip_lf (pass);
+	fclose (bm);
 
 	port[0] = '\0';
-	if(( p = strrchr(server, ':')) ) {
+	if ((p = strrchr (server, ':'))) {
 		int i;
-		for(i = 0; i < strlen(server); i++) {
-			if(&(server[i]) == p) {
+		for (i = 0; i < strlen (server); i++) {
+			if (&(server[i]) == p) {
 				server[i] = 0;
 				break;
 			}
 		}
 		p++;
-		g_snprintf(port, sizeof(port), "%u", atoi(p));
+		g_snprintf (port, sizeof (port), "%u", atoi (p));
 	}
 
+	set_the_entries (server, login, pass, port, 0, 0, 0);
 
-	set_the_entries(server, login, pass, port, 0, 0, 0);
-
-	bm = fopen(data, "w");
-	if(!bm) {
-		fprintf(stderr, "Could not open '%s' for writing...Aborting\n", (char *)data);
+	bm = fopen (data, "w");
+	if (!bm) {
+		fprintf (stderr,
+		         "Could not open '%s' for writing...Aborting\n",
+		         (char *) data);
+		return;
 	}
 
+	fprintf (bm, "HTsc%c%c", 0, 1);
+	fwrite (zeros, 1, 129, bm);
 
-	fprintf(bm, "HTsc%c%c", 0, 1);
-	fwrite(zeros, 1, 129, bm);
+	len = strlen (login);
+	len_total = 33 - len;
+	fprintf (bm, "%c", len);
+	fprintf (bm, "%s", login);
+	fwrite (zeros, 1, len_total, bm);
 
-	len = strlen(login);
-	len_total = 33-len;
-	fprintf(bm, "%c", len);
-	fprintf(bm, "%s", login);
-	fwrite(zeros, 1, len_total, bm);
+	len = strlen (pass);
+	len_total = 33 - len;
+	fprintf (bm, "%c", len);
+	fprintf (bm, "%s", pass);
+	fwrite (zeros, 1, len_total, bm);
 
-	len = strlen(pass);
-	len_total = 33-len;
-	fprintf(bm, "%c", len);
-	fprintf(bm, "%s", pass);
-	fwrite(zeros, 1, len_total, bm);
-
-	len = strlen(server);
-	len_total = 256-len;
-	fprintf(bm, "%c", len);
-	fprintf(bm, "%s", server);
+	len = strlen (server);
+	len_total = 256 - len;
+	fprintf (bm, "%c", len);
+	fprintf (bm, "%s", server);
 
 	/* secure:0, compress:0, cipher:0 */
-	fprintf(bm, "%c%c%c", 0, 0, 0);
-	fwrite(zeros, 1, len_total-3, bm);
+	fprintf (bm, "%c%c%c", 0, 0, 0);
+	fwrite (zeros, 1, len_total - 3, bm);
 
-	fclose(bm);
-	g_free((char *)data);
-	gtkhx_widget_destroy(dialog);
+	fclose (bm);
+}
+
+static void
+prompt_conversion_closed (AdwDialog *dialog, gpointer data)
+{
+	(void) dialog;
+	g_free (data);
 }
 
 static void prompt_conversion (char *name)
 {
-    GtkWidget *label;
-    GtkWidget *dialog;
-    GtkWidget *okbutton;
-	GtkWidget *cancelbtn;
-	char *path = g_strdup(name);
+	AdwDialog *dialog;
+	char *path = g_strdup (name);
 
-    dialog = gtk_dialog_new();
+	dialog = adw_alert_dialog_new (
+		_("Convert Bookmark"),
+		_("This bookmark is written in an old GtkHx format. "
+		  "Would you like to convert it to the new format?"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "no",      _("_No"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "convert", _("_Convert"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "convert",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+	                                       "convert");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog),
+	                                       "no");
 
-    gtk_window_set_title(GTK_WINDOW(dialog), "Convert Bookmark");
-    /* Phase 4.5: anchor to the toolbar window — there's no other obvious
-     * parent at this entry-point (called from the prefs load path). */
-    if (toolbar_window)
-        gtk_window_set_transient_for(GTK_WINDOW(dialog),
-                                     GTK_WINDOW(toolbar_window));
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-    label = gtk_label_new ("This bookmark is written in an old GtkHx format.\nWould you like to convert it to the new format?");
-    gtk_widget_set_size_request(dialog, 250, 200);
-    gtk_window_present(GTK_WINDOW(dialog));
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (convert_bookmark), path);
+	g_signal_connect (dialog, "closed",
+	                  G_CALLBACK (prompt_conversion_closed), path);
 
-    gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG (dialog)), label, TRUE, TRUE, 0);
-
-
-    okbutton = gtk_button_new_with_label ("Yes");
-	cancelbtn = gtk_button_new_with_label("No");
-
-    g_signal_connect (okbutton, "clicked", G_CALLBACK(convert_bookmark), path);
-	g_object_set_data(G_OBJECT(okbutton), "dialog", dialog);
-
-
-	g_signal_connect_swapped(cancelbtn, "clicked", (GCallback)gtkhx_widget_destroy, dialog);
-
-    /* Phase 4.2: gtk_widget_set_can_default removed */
-
-    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), okbutton, 0, 0, 0);
-    gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), cancelbtn, 0, 0, 0);
-
-    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-
-    gtk_window_present(GTK_WINDOW(dialog));
-
+	adw_dialog_present (dialog,
+	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }
 
 /* Phase 5: bookmarks live under $CONFIG/bookmarks/. Legacy
@@ -616,152 +621,146 @@ static void list_bookmarks (GtkWidget *combo, GArray *entries)
 	g_free (legacy);
 }
 
-static void cancel_save(GtkWidget *widget, gpointer data)
+/* Phase 5: bookmark save migrates to AdwAlertDialog with the name
+ * entry as extra-child. The response handler reads the entry, does
+ * the file-write work, and lets the dialog auto-dismiss. The
+ * cancel_save click handler is gone — "cancel" response (and ESC,
+ * via close_response) handle it. */
+static void
+bookmark_save_response (AdwAlertDialog *dialog, const char *response, gpointer data)
 {
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
-	gtkhx_widget_destroy(dialog);
-}
-
-/* cut down this tree with a herring */
-static void bookmark_save(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *name_entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "name");
-	GtkWidget *dialog = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "dialog");
-	char *server = gtk_editable_get_text(GTK_EDITABLE(address_entry));
-	char *login = gtk_editable_get_text(GTK_EDITABLE(login_entry));
-	char *pass = gtk_editable_get_text(GTK_EDITABLE(password_entry));
-	char *port = gtk_editable_get_text(GTK_EDITABLE(port_entry));
-	char secure = gtk_check_button_get_active((GtkCheckButton*)hope);
-#ifdef CONFIG_COMPRESS
-	char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
-#else
-	char compress = 0;
-#endif
-#ifdef CONFIG_CIPHER
-	char cipher = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cipher_menu), "cipher"));
-#else
-	char cipher = 0;
-#endif
-	char *name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
-	/* Phase 5: bookmarks now save under $CONFIG/bookmarks/. The
-	 * config dir is created by gtkhx_config_dir on first call;
-	 * we just need to make sure the bookmarks subdir exists. */
-	char *dir = bookmarks_dir_primary ();
-	char *path = NULL;
-	char *server_str = g_strdup_printf("%s:%s", server, port);
+	GtkEditable *name_entry;
+	const char *name;
+	const char *server, *login, *pass, *port;
+	char secure;
+	char compress = 0, cipher = 0;
+	char *dir, *path = NULL, *server_str;
 	FILE *bookmark = NULL;
 	size_t len, len_total;
 	char zeros[256];
+	char *editable_name;
 	int i;
 
+	(void) data;
+
+	if (g_strcmp0 (response, "save") != 0)
+		return;
+
+	name_entry = GTK_EDITABLE (adw_alert_dialog_get_extra_child (dialog));
+	name = name_entry ? gtk_editable_get_text (name_entry) : NULL;
+	if (!name || !*name) {
+		error_dialog (_("Error"),
+		              _("You must specify a name for this bookmark "
+		                "with at least one character."));
+		return;
+	}
+
+	server = gtk_editable_get_text (GTK_EDITABLE (address_entry));
+	login  = gtk_editable_get_text (GTK_EDITABLE (login_entry));
+	pass   = gtk_editable_get_text (GTK_EDITABLE (password_entry));
+	port   = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+	secure = gtk_check_button_get_active ((GtkCheckButton *) hope);
+#ifdef CONFIG_COMPRESS
+	compress = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (compress_menu),
+	                                               "compress"));
+#endif
+#ifdef CONFIG_CIPHER
+	cipher = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (cipher_menu),
+	                                             "cipher"));
+#endif
+
+	dir = bookmarks_dir_primary ();
+	server_str = g_strdup_printf ("%s:%s", server, port);
 	memset (zeros, 0, 256);
 
-	if(!name) {
-		error_dialog( _("Error"),
-					  _("You must specify a name for this bookmark "
-						"with at least one character.")
-			);
-		g_free(dir);
-		g_free(server_str);
-		return;
+	/* Convert any '/' in the name to '\\' to avoid path traversal. */
+	editable_name = g_strdup (name);
+	len = strlen (editable_name);
+	for (i = 0; i < len; i++) {
+		if (editable_name[i] == '/')
+			editable_name[i] = '\\';
 	}
-
-	len = strlen(name);
-	for(i = 0; i < len; i++) {
-		if(name[i] == '/')
-			name[i] = '\\';
-	}
-	path = g_build_filename (dir, name, NULL);
+	path = g_build_filename (dir, editable_name, NULL);
 
 	if (g_mkdir_with_parents (dir, 0770) != 0) {
-		hx_printf_prefix(&the_session.htlc, 0,
-		                 "Could not create bookmarks dir \"%s\": %s",
-		                 dir, g_strerror (errno));
-		g_free(dir);
-		g_free(server_str);
-		g_free(path);
-		return;
+		hx_printf_prefix (&the_session.htlc, 0,
+		                  "Could not create bookmarks dir \"%s\": %s",
+		                  dir, g_strerror (errno));
+		goto out;
 	}
-	if(!(bookmark = fopen(path, "w"))) {
-		hx_printf_prefix(&the_session.htlc, 0, "Could not open \"%s\" for writing.", path);
-		g_free(dir);
-		g_free(server_str);
-		g_free(path);
-		return;
+	if (!(bookmark = fopen (path, "w"))) {
+		hx_printf_prefix (&the_session.htlc, 0,
+		                  "Could not open \"%s\" for writing.", path);
+		goto out;
 	}
 
-	fprintf(bookmark, "HTsc%c%c", 0, 1);
-	fwrite(zeros, 1, 129, bookmark);
+	fprintf (bookmark, "HTsc%c%c", 0, 1);
+	fwrite (zeros, 1, 129, bookmark);
 
-	len = strlen(login);
-	len_total = 33-len;
-	fprintf(bookmark, "%c%s", len, login);
-	fwrite(zeros, 1, len_total, bookmark);
+	len = strlen (login);
+	len_total = 33 - len;
+	fprintf (bookmark, "%c%s", len, login);
+	fwrite (zeros, 1, len_total, bookmark);
 
-	len = strlen(pass);
-	len_total = 33-len;
-	fprintf(bookmark, "%c%s", len, pass);
-	fwrite(zeros, 1, len_total, bookmark);
+	len = strlen (pass);
+	len_total = 33 - len;
+	fprintf (bookmark, "%c%s", len, pass);
+	fwrite (zeros, 1, len_total, bookmark);
 
-	len = strlen(server_str);
-	len_total = 256-len;
-	fprintf(bookmark, "%c%s", len, server_str);
+	len = strlen (server_str);
+	len_total = 256 - len;
+	fprintf (bookmark, "%c%s", len, server_str);
 
-	
-	fprintf(bookmark, "%c%c%c", secure, compress, cipher);
+	fprintf (bookmark, "%c%c%c", secure, compress, cipher);
 	len_total -= 3;
-	fwrite(zeros, 1, len_total, bookmark);
+	fwrite (zeros, 1, len_total, bookmark);
 
-	fclose(bookmark);
+	fclose (bookmark);
 
-	gtkhx_widget_destroy(dialog);
-
-	g_free(path);
-	g_free(dir);
-	g_free(server_str);
+out:
+	g_free (path);
+	g_free (dir);
+	g_free (server_str);
+	g_free (editable_name);
 }
 
-
-static void save_dialog(GtkWidget *widget, gpointer data)
+static void
+save_dialog_entry_activate (GtkEntry *entry, gpointer data)
 {
-	GtkWidget *dialog;
-	GtkWidget *ok;
-	GtkWidget *cancel;
+	(void) entry;
+	g_signal_emit_by_name (data, "response", "save");
+}
+
+static void save_dialog (GtkWidget *widget, gpointer data)
+{
+	AdwDialog *dialog;
 	GtkWidget *name_entry;
-	GtkWidget *label;
-	GtkWidget *hbox;
 
+	(void) widget; (void) data;
 
-	dialog = gtk_dialog_new();
-	ok = gtk_button_new_with_label(_("OK"));
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-	cancel = gtk_button_new_with_label(_("Cancel"));
-	name_entry = gtk_entry_new();
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	label = gtk_label_new(_("Name:"));
-	gtk_window_set_title(GTK_WINDOW(dialog), _("Save Bookmark..."));
-	if (toolbar_window)
-		gtk_window_set_transient_for(GTK_WINDOW(dialog),
-		                             GTK_WINDOW(toolbar_window));
-	gtk_widget_set_size_request(dialog, 200, 100);
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), hbox, 0, 0, 0);
-	gtkhx_box_pack(hbox, label, 0, 0, 0);
-	gtkhx_box_pack(hbox, name_entry, 0, 0, 0);
-	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), ok, 0, 0, 0);
-	gtkhx_box_pack(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), cancel, 0, 0, 0);
-	g_object_set_data(G_OBJECT(cancel), "dialog", dialog);
-	g_signal_connect(cancel, "clicked", G_CALLBACK(cancel_save), 0);
-	g_object_set_data(G_OBJECT(ok), "name", name_entry);
-	g_object_set_data(G_OBJECT(ok), "dialog", dialog);
-	g_signal_connect(ok, "clicked", G_CALLBACK(bookmark_save), 0);
+	dialog = adw_alert_dialog_new (_("Save Bookmark"),
+	                               _("Enter a name for this bookmark."));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "save",   _("_Save"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "save",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "save");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
 
+	name_entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (name_entry), TRUE);
+	g_signal_connect (name_entry, "activate",
+	                  G_CALLBACK (save_dialog_entry_activate), dialog);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), name_entry);
 
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
-	gtk_window_present(GTK_WINDOW(dialog));
-	init_keyaccel(dialog);
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (bookmark_save_response), NULL);
 
-	gtk_widget_grab_focus(name_entry);
+	adw_dialog_present (dialog,
+	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }
 
 static void builtin_bookmark(GtkWidget *widget, gpointer data)
