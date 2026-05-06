@@ -33,14 +33,12 @@
 #include "gtkhx.h"
 #include "toolbar.h"
 
-/* Phase 4.13: this file uses GtkComboBoxText for the cipher /
- * compress / bookmark dropdowns, plus GtkDialog for the bookmark
- * convert + save prompts. GtkComboBoxText is deprecated in GTK 4.10
- * in favor of GtkDropDown + GtkStringList; GtkDialog in favor of
- * GtkWindow / GtkAlertDialog. Both migrations are tracked as
- * follow-ups (Phase 5 UX for the dropdowns, Phase 4.7 for dialogs);
- * until then suppress deprecations across the file. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+/* Phase 5: the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
+ * that used to live here suppressed warnings from the GtkComboBoxText
+ * dropdowns + the GtkDialog bookmark prompts. Both migrations are
+ * done (AdwComboRow / AdwAlertDialog), so the pragma is no longer
+ * needed and the matching G_GNUC_END is also gone from the bottom
+ * of the file. */
 
 static GtkWidget *connect_window;
 static GtkWidget *address_entry;
@@ -113,8 +111,10 @@ guint8 *list_n (guint8 *list, guint16 listlen, unsigned int n)
 
 static void close_connect_window (void)
 {
-	gtkhx_widget_destroy(connect_window);
-	connect_window = 0;
+	if (connect_window) {
+		adw_dialog_close (ADW_DIALOG (connect_window));
+		connect_window = 0;
+	}
 }
 
 void connect_set_entries (const char *address, const char *login, const char *password, guint16 port)
@@ -146,15 +146,15 @@ static void server_connect (GtkWidget *widget, gpointer data)
 	server = gtk_editable_get_text(GTK_EDITABLE(address_entry));
 	pass = gtk_editable_get_text(GTK_EDITABLE(password_entry));
 	portstr = gtk_editable_get_text(GTK_EDITABLE(port_entry));
-	secure = gtk_check_button_get_active((GtkCheckButton*)hope);
+	secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
 	if(secure) {
 #ifdef CONFIG_COMPRESS
-		char compress = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(compress_menu), "compress"));
+		char compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
 		char *compress_algo = NULL;
 		int colen = 0;
 #endif
 #ifdef CONFIG_CIPHER
-		char cipher = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cipher_menu), "cipher"));
+		char cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
 		char *cipher_algo = NULL;
 		int cilen = 0;
 #endif
@@ -209,17 +209,13 @@ static void server_connect (GtkWidget *widget, gpointer data)
 	}
 	
 	hx_connect(&sess->htlc, server, port, login, pass, secure);
-	
-	gtkhx_widget_destroy(connect_window);
-	connect_window = 0;
+
+	if (connect_window) {
+		adw_dialog_close (ADW_DIALOG (connect_window));
+		connect_window = 0;
+	}
 }
 
-#ifdef CONFIG_COMPRESS
-static void compress_combo_changed (GtkComboBox *combo, gpointer data);
-#endif
-#ifdef CONFIG_CIPHER
-static void cipher_combo_changed (GtkComboBox *combo, gpointer data);
-#endif
 static void builtin_bookmark (GtkWidget *widget, gpointer data);
 
 void set_the_entries (char *address, char *login, char *password, char *port,
@@ -250,12 +246,15 @@ void set_the_entries (char *address, char *login, char *password, char *port,
 		gtk_editable_set_text(GTK_EDITABLE(port_entry), "5500");
 	}
 
-	gtk_check_button_set_active((GtkCheckButton*)hope, secure);
+	if (hope)
+		adw_switch_row_set_active (ADW_SWITCH_ROW (hope), secure ? TRUE : FALSE);
 #ifdef CONFIG_COMPRESS
-	gtk_combo_box_set_active(GTK_COMBO_BOX(compress_menu), compress);
+	if (compress_menu)
+		adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), compress);
 #endif
 #ifdef CONFIG_CIPHER
-	gtk_combo_box_set_active(GTK_COMBO_BOX(cipher_menu), cipher);
+	if (cipher_menu)
+		adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), cipher);
 #endif
 }
 
@@ -527,100 +526,6 @@ static void open_bookmark(GtkWidget *widget, gpointer data)
 	close(bm);
 }
 
-/*
- * Bookmark dropdown bookkeeping. Each combo entry maps to either a
- * filesystem bookmark (file != NULL) or a built-in (builtin_idx
- * 1..4). The GArray is stashed on the combo via g_object_set_data_full
- * so it (and the strdup'd file strings) get freed when the combo is
- * destroyed.
- */
-typedef struct {
-	int   builtin_idx;
-	char *file;
-} BookmarkEntry;
-
-static void
-bookmark_entries_free (gpointer data)
-{
-	GArray *a = data;
-	guint i;
-	if (!a)
-		return;
-	for (i = 0; i < a->len; i++) {
-		BookmarkEntry *e = &g_array_index (a, BookmarkEntry, i);
-		g_free (e->file);
-	}
-	g_array_free (a, TRUE);
-}
-
-static void
-bookmark_combo_changed (GtkComboBox *combo, gpointer user_data)
-{
-	GArray *entries = g_object_get_data (G_OBJECT (combo), "entries");
-	int idx = gtk_combo_box_get_active (combo);
-	BookmarkEntry *e;
-
-	(void) user_data;
-	if (!entries || idx < 0 || (guint) idx >= entries->len)
-		return;
-	e = &g_array_index (entries, BookmarkEntry, idx);
-	if (e->builtin_idx)
-		builtin_bookmark (NULL, GINT_TO_POINTER (e->builtin_idx));
-	else if (e->file)
-		open_bookmark (NULL, e->file);
-}
-
-/* Phase 5: list bookmarks from both the new $CONFIG/bookmarks and the
- * legacy ~/.hx/bookmarks. Names that exist in both win on the new
- * path (we walk new first; legacy entries only get appended if their
- * name isn't already present). */
-static gboolean
-combo_already_has (GArray *entries, const char *name)
-{
-	guint i;
-	for (i = 0; i < entries->len; i++) {
-		BookmarkEntry *e = &g_array_index (entries, BookmarkEntry, i);
-		if (e->file && g_strcmp0 (e->file, name) == 0)
-			return TRUE;
-	}
-	return FALSE;
-}
-
-static void
-list_bookmarks_from_dir (GtkWidget *combo, GArray *entries, const char *path)
-{
-	struct dirent *ent;
-	DIR *dir = opendir (path);
-
-	if (!dir)
-		return;
-
-	while ((ent = readdir (dir))) {
-		if (*ent->d_name == '.')
-			continue;
-		if (combo_already_has (entries, ent->d_name))
-			continue;
-		BookmarkEntry e = { 0, g_strdup (ent->d_name) };
-		gtk_combo_box_text_append_text (
-			GTK_COMBO_BOX_TEXT (combo), ent->d_name);
-		g_array_append_val (entries, e);
-	}
-	closedir (dir);
-}
-
-static void list_bookmarks (GtkWidget *combo, GArray *entries)
-{
-	char *primary = bookmarks_dir_primary ();
-	char *legacy  = bookmarks_dir_legacy ();
-
-	list_bookmarks_from_dir (combo, entries, primary);
-	if (legacy)
-		list_bookmarks_from_dir (combo, entries, legacy);
-
-	g_free (primary);
-	g_free (legacy);
-}
-
 /* Phase 5: scan a bookmarks dir and append each entry as a menu item
  * targeting app.open_bookmark with the bookmark name as a string
  * variant. Skips dotfiles (".", "..", and any hidden override files)
@@ -783,14 +688,12 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response, gpointer d
 	login  = gtk_editable_get_text (GTK_EDITABLE (login_entry));
 	pass   = gtk_editable_get_text (GTK_EDITABLE (password_entry));
 	port   = gtk_editable_get_text (GTK_EDITABLE (port_entry));
-	secure = gtk_check_button_get_active ((GtkCheckButton *) hope);
+	secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
 #ifdef CONFIG_COMPRESS
-	compress = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (compress_menu),
-	                                               "compress"));
+	compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
 #endif
 #ifdef CONFIG_CIPHER
-	cipher = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (cipher_menu),
-	                                             "cipher"));
+	cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
 #endif
 
 	dir = bookmarks_dir_primary ();
@@ -903,229 +806,195 @@ static void builtin_bookmark(GtkWidget *widget, gpointer data)
 	}
 }
 
-#ifdef CONFIG_COMPRESS
-static void compress_combo_changed (GtkComboBox *combo, gpointer data)
-{
-	int i = gtk_combo_box_get_active (combo);
-	(void) data;
-	if (i < 0)
-		return;
-	g_object_set_data (G_OBJECT (combo), "compress", GINT_TO_POINTER (i));
-}
-#endif
-
-#ifdef CONFIG_CIPHER
-static void cipher_combo_changed (GtkComboBox *combo, gpointer data)
-{
-	int i = gtk_combo_box_get_active (combo);
-	(void) data;
-	if (i < 0)
-		return;
-	g_object_set_data (G_OBJECT (combo), "cipher", GINT_TO_POINTER (i));
-}
-#endif
-
+/* Phase 5: AdwDialog with AdwPreferencesGroup form rows replaces the
+ * hand-laid GtkGrid + GtkFrame + per-cell label/entry layout. The
+ * bookmark combo is gone — the SplitButton dropdown on the toolbar
+ * Connect button does that job now, and there's no point repeating
+ * the menu inside the dialog itself.
+ *
+ * Layout:
+ *   AdwHeaderBar
+ *     end:  Save Bookmark…   (pill button)
+ *     end:  Connect           (pill button, suggested-action)
+ *   AdwPreferencesGroup "Server"
+ *     description: help text
+ *     AdwEntryRow Server, AdwSpinRow Port
+ *   AdwPreferencesGroup "Account"
+ *     AdwEntryRow Login, AdwPasswordEntryRow Password
+ *   AdwPreferencesGroup "Connection"
+ *     AdwSwitchRow Secure (HOPE)
+ *   #ifdef CONFIG_COMPRESS / CIPHER: AdwComboRow Compress / Cipher
+ *     in the same Connection group
+ *
+ * Cancel is the close-X on the headerbar; ESC dismisses. The header's
+ * Connect button is the default response so Enter from any of the
+ * entry rows submits. */
 void create_connect_window (GtkWidget *btn, gpointer data)
 {
-	GtkWidget *vbox1;
-	GtkWidget *help_label;
-	GtkWidget *frame1;
-	GtkWidget *table1;
-	GtkWidget *server_label;
-	GtkWidget *login_label;
-	GtkWidget *pass_label;
-#ifdef CONFIG_COMPRESS
-	GtkWidget *compress_label;
-#endif
-#ifdef CONFIG_CIPHER
-	GtkWidget *cipher_label;
-#endif
-	GtkWidget *button_connect, *button_cancel;
-	GtkWidget *bookmarkmenu;
-	GtkWidget *hbuttonbox1;
-	GtkWidget *save_button;
-	GtkWidget *port_label;
+	AdwDialog *dlg;
+	GtkWidget *toolbar_view, *header;
+	GtkWidget *content, *clamp;
+	GtkWidget *connect_action_btn, *save_action_btn;
+	AdwPreferencesGroup *server_grp, *account_grp, *conn_grp;
 	session *sess = data;
+	(void) btn;
 
 	if (connect_window) {
-		gtk_window_present(GTK_WINDOW(connect_window));
+		adw_dialog_present (ADW_DIALOG (connect_window), NULL);
 		return;
 	}
 
-	connect_window = gtk_window_new();
-	gtk_window_set_title(GTK_WINDOW(connect_window), "Connect");
-	/* Phase 4.2: gtk_window_set_position removed in GTK 4 */
-	g_signal_connect(connect_window, "destroy",
-			   G_CALLBACK(close_connect_window), 0);
-	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-	gtkhx_widget_set_child(connect_window, vbox1);
-	(gtk_widget_set_margin_start(vbox1, 10), gtk_widget_set_margin_end(vbox1, 10), gtk_widget_set_margin_top(vbox1, 10), gtk_widget_set_margin_bottom(vbox1, 10));
+	dlg = ADW_DIALOG (adw_dialog_new ());
+	adw_dialog_set_title (dlg, _("Connect"));
+	adw_dialog_set_content_width  (dlg, 480);
+	adw_dialog_set_content_height (dlg, 560);
 
+	connect_window = GTK_WIDGET (dlg);
+	g_signal_connect (dlg, "closed",
+	                  G_CALLBACK (close_connect_window), NULL);
 
-	help_label = gtk_label_new(_("Enter the server address, and if you have an account, your login and password. If not, leave the login and password blank."));
-	gtkhx_box_pack(vbox1, help_label, 0, 1, 0);
-	gtk_label_set_justify(GTK_LABEL(help_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_wrap(GTK_LABEL(help_label), 1);
-	gtk_label_set_xalign(GTK_LABEL(help_label), 0.0);
+	/* Header bar: Save..., Connect (suggested) on the end. Close-X
+	 * is automatic on the start (handled by AdwDialog). */
+	header = adw_header_bar_new ();
 
-	frame1 = gtk_frame_new(0);
-	gtkhx_box_pack(vbox1, frame1, 1, 1, 0);
+	save_action_btn = gtk_button_new_with_label (_("Save Bookmark…"));
+	g_signal_connect (save_action_btn, "clicked",
+	                  G_CALLBACK (save_dialog), NULL);
+	adw_header_bar_pack_end (ADW_HEADER_BAR (header), save_action_btn);
 
- 	table1 = gtkhx_grid_new_table(3, 6, 0);
-	gtkhx_widget_set_child(frame1, table1);
-	(gtk_widget_set_margin_start(table1, 10), gtk_widget_set_margin_end(table1, 10), gtk_widget_set_margin_top(table1, 10), gtk_widget_set_margin_bottom(table1, 10));
-	gtk_grid_set_row_spacing(GTK_GRID(table1), 5);
-	gtk_grid_set_column_spacing(GTK_GRID(table1), 5);
+	connect_action_btn = gtk_button_new_with_label (_("Connect"));
+	gtk_widget_add_css_class (connect_action_btn, "suggested-action");
+	g_signal_connect (connect_action_btn, "clicked",
+	                  G_CALLBACK (server_connect), sess);
+	adw_header_bar_pack_end (ADW_HEADER_BAR (header), connect_action_btn);
 
-	server_label = gtk_label_new(_("Server:"));
-	gtkhx_grid_attach_table(GTK_GRID(table1), server_label, 0, 1, 0, 1,
-			 (GTK_FILL),
-			 0, 0, 0);
-	gtk_label_set_justify(GTK_LABEL(server_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(server_label), 0.0);
+	/* AdwToolbarView wraps the headerbar + scrollable content. */
+	toolbar_view = adw_toolbar_view_new ();
+	adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
 
-	login_label = gtk_label_new(_("Login:"));
-	gtkhx_grid_attach_table(GTK_GRID(table1), login_label, 0, 1, 1, 2,
-			 (GTK_FILL),
-			 0, 0, 0);
-	gtk_label_set_justify(GTK_LABEL(login_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(login_label), 0.0);
+	/* Content vbox holding the preference groups. AdwClamp keeps the
+	 * form a comfortable width (no edge-to-edge stretching on wide
+	 * dialogs) and centers it horizontally. */
+	content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
+	gtk_widget_set_margin_top    (content, 18);
+	gtk_widget_set_margin_bottom (content, 18);
+	gtk_widget_set_margin_start  (content, 18);
+	gtk_widget_set_margin_end    (content, 18);
 
-	pass_label = gtk_label_new(_("Password:"));
-	gtkhx_grid_attach_table(GTK_GRID(table1), pass_label, 0, 1, 2, 3,
-			 (GTK_FILL),
-			 0, 0, 0);
-	gtk_label_set_justify(GTK_LABEL(pass_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(pass_label), 0.0);
+	/* ------------------------------ Server group ------------------------------ */
+	server_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (server_grp, _("Server"));
+	adw_preferences_group_set_description (server_grp,
+		_("Enter the server address. If you have an account, fill in your "
+		  "login and password below; otherwise leave them blank."));
 
-	hope = gtk_check_button_new_with_label(_("Secure (HOPE)"));
-	gtk_check_button_set_active((GtkCheckButton*)hope, 0);
-	gtkhx_grid_attach_table(GTK_GRID(table1), hope, 0, 1, 3, 4,
-			 (GTK_EXPAND|GTK_FILL),
-			 0, 0, 0);
-	
+	address_entry = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (address_entry),
+	                               _("Server"));
+	gtk_entry_set_activates_default (GTK_ENTRY (address_entry), TRUE);
+	adw_preferences_group_add (server_grp, address_entry);
+
+	port_entry = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (port_entry),
+	                               _("Port"));
+	gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
+	gtk_entry_set_activates_default (GTK_ENTRY (port_entry), TRUE);
+	adw_preferences_group_add (server_grp, port_entry);
+
+	gtk_box_append (GTK_BOX (content), GTK_WIDGET (server_grp));
+
+	/* ----------------------------- Account group ----------------------------- */
+	account_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (account_grp, _("Account"));
+
+	login_entry = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (login_entry),
+	                               _("Login"));
+	gtk_entry_set_activates_default (GTK_ENTRY (login_entry), TRUE);
+	adw_preferences_group_add (account_grp, login_entry);
+
+	password_entry = adw_password_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (password_entry),
+	                               _("Password"));
+	gtk_entry_set_activates_default (GTK_ENTRY (password_entry), TRUE);
+	adw_preferences_group_add (account_grp, password_entry);
+
+	gtk_box_append (GTK_BOX (content), GTK_WIDGET (account_grp));
+
+	/* --------------------------- Connection group --------------------------- */
+	conn_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (conn_grp, _("Connection"));
+
+	hope = adw_switch_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (hope),
+	                               _("Secure (HOPE)"));
+	adw_action_row_set_subtitle   (ADW_ACTION_ROW (hope),
+	                               _("Encrypt and optionally compress the connection"));
+	adw_switch_row_set_active     (ADW_SWITCH_ROW (hope), FALSE);
+	adw_preferences_group_add (conn_grp, hope);
+
 #ifdef CONFIG_COMPRESS
-	compress_label = gtk_label_new(_("Compress: "));
-	gtkhx_grid_attach_table(GTK_GRID(table1), compress_label, 0, 1, 4, 5,
-			 (GTK_FILL),
-			 0, 0, 0);
-	gtk_label_set_justify(GTK_LABEL(compress_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(compress_label), 0.0);
-
-	compress_menu = gtk_combo_box_text_new ();
-	gtkhx_grid_attach_table(GTK_GRID(table1), compress_menu, 1, 2, 4, 5, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-
-	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (compress_menu), "NONE");
 	{
+		GtkStringList *list = gtk_string_list_new (NULL);
 		int i;
+		gtk_string_list_append (list, "NONE");
 		for (i = 0; valid_compressors[i]; i++)
-			gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (compress_menu),
-			                                valid_compressors[i]);
+			gtk_string_list_append (list, valid_compressors[i]);
+		compress_menu = adw_combo_row_new ();
+		adw_preferences_row_set_title (ADW_PREFERENCES_ROW (compress_menu),
+		                               _("Compression"));
+		adw_combo_row_set_model    (ADW_COMBO_ROW (compress_menu),
+		                            G_LIST_MODEL (list));
+		adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), 0);
+		g_object_unref (list);
+		adw_preferences_group_add (conn_grp, compress_menu);
 	}
-	g_signal_connect (compress_menu, "changed",
-	                  G_CALLBACK (compress_combo_changed), NULL);
-	gtk_combo_box_set_active (GTK_COMBO_BOX (compress_menu), 0);
 #endif
 
 #ifdef CONFIG_CIPHER
-	cipher_label = gtk_label_new(_("Cipher: "));
-	gtkhx_grid_attach_table(GTK_GRID(table1), cipher_label, 0, 1, 5, 6,
-			 (GTK_FILL),
-			 0, 0, 0);
-	gtk_label_set_justify(GTK_LABEL(cipher_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(cipher_label), 0.0);
-
-	cipher_menu = gtk_combo_box_text_new ();
-	gtkhx_grid_attach_table(GTK_GRID(table1), cipher_menu, 1, 2, 5, 6, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-
-	gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cipher_menu), "NONE");
 	{
+		GtkStringList *list = gtk_string_list_new (NULL);
 		int i;
+		gtk_string_list_append (list, "NONE");
 		for (i = 0; valid_ciphers[i]; i++)
-			gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cipher_menu),
-			                                valid_ciphers[i]);
+			gtk_string_list_append (list, valid_ciphers[i]);
+		cipher_menu = adw_combo_row_new ();
+		adw_preferences_row_set_title (ADW_PREFERENCES_ROW (cipher_menu),
+		                               _("Cipher"));
+		adw_combo_row_set_model    (ADW_COMBO_ROW (cipher_menu),
+		                            G_LIST_MODEL (list));
+		adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), 0);
+		g_object_unref (list);
+		adw_preferences_group_add (conn_grp, cipher_menu);
 	}
-	g_signal_connect (cipher_menu, "changed",
-	                  G_CALLBACK (cipher_combo_changed), NULL);
-	gtk_combo_box_set_active (GTK_COMBO_BOX (cipher_menu), 0);
 #endif
 
-	address_entry = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table1), address_entry, 1, 2, 0, 1,
-			 (GTK_EXPAND | GTK_FILL),
-			 0, 0, 0);
+	gtk_box_append (GTK_BOX (content), GTK_WIDGET (conn_grp));
 
-	port_label = gtk_label_new(_("Port:"));
-	gtkhx_grid_attach_table(GTK_GRID(table1), port_label, 2, 3, 0, 1, GTK_FILL, 0, 0, 0);
-
-	gtk_label_set_justify(GTK_LABEL(port_label), GTK_JUSTIFY_LEFT);
-	gtk_label_set_xalign(GTK_LABEL(port_label), 0.0);
-
-	port_entry = gtk_entry_new();
-	gtk_entry_set_max_length(GTK_ENTRY(port_entry), 6);
-	gtk_editable_set_text(GTK_EDITABLE(port_entry), "5500");
-	gtk_widget_set_size_request(port_entry, 45, 0);
-	gtkhx_grid_attach_table(GTK_GRID(table1), port_entry, 3, 4, 0, 1,
-			  0,
-			 0, 0, 0);
-
-
-	login_entry = gtk_entry_new();
-	gtkhx_grid_attach_table(GTK_GRID(table1), login_entry, 1, 2, 1, 2,
-			 (GTK_EXPAND | GTK_FILL),
-			 0, 0, 0);
-	password_entry = gtk_entry_new();
-	gtk_entry_set_visibility(GTK_ENTRY(password_entry), 0);
-	gtkhx_grid_attach_table(GTK_GRID(table1), password_entry, 1, 2, 2, 3,
-			 (GTK_EXPAND | GTK_FILL),
-			 0, 0, 0);
-
-	bookmarkmenu = gtk_combo_box_text_new ();
-	gtkhx_grid_attach_table(GTK_GRID(table1), bookmarkmenu, 4, 5, 0, 1,
-			 0,
-			 0, 0, 0);
-
+	/* AdwClamp wrapping content keeps the form readable on wide
+	 * dialogs (max-width ~600 by default). Wrap in a scrolled
+	 * window so the dialog can still shrink on small screens
+	 * without clipping the bottom group. */
+	clamp = adw_clamp_new ();
+	adw_clamp_set_child (ADW_CLAMP (clamp), content);
 	{
-		static const char *const builtin_names[] = {
-			"Hotline Communications", "CafeLinux", "GtkHx", "SiN Grafix"
-		};
-		GArray *entries = g_array_new (FALSE, FALSE, sizeof (BookmarkEntry));
-		int i;
-
-		list_bookmarks (bookmarkmenu, entries);
-		for (i = 0; i < 4; i++) {
-			BookmarkEntry e = { i + 1, NULL };
-			gtk_combo_box_text_append_text (
-				GTK_COMBO_BOX_TEXT (bookmarkmenu), builtin_names[i]);
-			g_array_append_val (entries, e);
-		}
-		g_object_set_data_full (G_OBJECT (bookmarkmenu), "entries",
-		                        entries, bookmark_entries_free);
-		g_signal_connect (bookmarkmenu, "changed",
-		                  G_CALLBACK (bookmark_combo_changed), NULL);
+		GtkWidget *scrolled = gtk_scrolled_window_new ();
+		gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+		                                GTK_POLICY_NEVER,
+		                                GTK_POLICY_AUTOMATIC);
+		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled),
+		                               clamp);
+		adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view),
+		                              scrolled);
 	}
 
-	/* Phase 4.x: GtkButtonBox is gone. A horizontal GtkBox with the
-	 * usual button-row spacing is the documented replacement;
-	 * gtkhx_widget_set_child below dispatches to gtk_box_append for us. */
-	hbuttonbox1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-	gtkhx_box_pack(vbox1, hbuttonbox1, 1, 1, 0);
+	adw_dialog_set_child (dlg, toolbar_view);
 
-	save_button = gtk_button_new_with_label(_("Save..."));
-	gtkhx_widget_set_child(hbuttonbox1, save_button);
-	g_signal_connect(save_button, "clicked", G_CALLBACK(save_dialog), 0);
+	/* Default-widget so Enter from any AdwEntryRow submits Connect. */
+	gtk_widget_set_receives_default (connect_action_btn, TRUE);
 
-	button_cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(button_cancel, "clicked", G_CALLBACK(close_connect_window), 0);
-	gtkhx_widget_set_child(hbuttonbox1, button_cancel);
-
-	button_connect = gtk_button_new_with_label(_("Connect"));
-	g_signal_connect(button_connect, "clicked", G_CALLBACK(server_connect), sess);
-	gtkhx_widget_set_child(hbuttonbox1, button_connect);
-
-	gtk_window_present(GTK_WINDOW(connect_window));
-	init_keyaccel(connect_window);
-	gtk_widget_grab_focus(address_entry);
+	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
+	gtk_widget_grab_focus (address_entry);
 }
 
 void connect_bookmark_name(char *name)
@@ -1134,5 +1003,3 @@ void connect_bookmark_name(char *name)
 	open_bookmark(0, name);
 }
 
-G_GNUC_END_IGNORE_DEPRECATIONS
-/* Phase 4.13: end of file-level deprecation suppression — see top of file. */
