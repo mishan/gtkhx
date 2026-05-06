@@ -451,71 +451,74 @@ static gboolean close_files_window (GtkWindow *window, gpointer data)
 	return FALSE;
 }
 
-static void makeDir(GtkWidget *widget, gpointer data)
+/* Phase 5: AdwAlertDialog with a GtkEntry as extra-child replaces
+ * the hand-rolled GtkDialog + label + entry + OK/Cancel buttons.
+ * The response callback handles both buttons (id-string dispatch);
+ * the entry's "activate" signal forwards to the same response so
+ * Enter-to-submit works. The dialog auto-dismisses when the
+ * response handler returns. */
+
+static void
+makeDir_response (AdwAlertDialog *dialog, const char *response, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-														"entry");
-	GtkWidget *files_list = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-															 "hlist");
+	GtkEditable *entry;
+	GtkWidget *files_list = data;
+	struct gfile_list *gfl;
 	char pathname[MAXPATHLEN];
-	struct gfile_list *gfl = gfl_with_hlist(files_list);
 
+	if (g_strcmp0 (response, "create") != 0)
+		return;
 
-	snprintf(pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path, gtk_editable_get_text(GTK_EDITABLE(entry)));
-	hx_make_dir(&the_session.htlc, pathname);
-	hx_list_dir(&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
+	entry = GTK_EDITABLE (adw_alert_dialog_get_extra_child (dialog));
+	gfl = gfl_with_hlist (files_list);
+	if (!gfl || !entry)
+		return;
 
-	gtkhx_widget_destroy(GTK_WIDGET(data));
+	snprintf (pathname, MAXPATHLEN, "%s/%s",
+	          gfl->cfl->path, gtk_editable_get_text (entry));
+	hx_make_dir (&the_session.htlc, pathname);
+	hx_list_dir (&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
 }
 
-/* Phase 4.13: GtkDialog deprecated in 4.10 — Phase 4.7 follow-up. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-static void makeDirDialog(GtkWidget *widget, gpointer data)
+static void
+makeDir_entry_activate (GtkEntry *entry, gpointer data)
 {
-	GtkWidget *dialog;
-	GtkWidget *nameEntry;
-	GtkWidget *okBtn;
-	GtkWidget *cancelBtn;
-	GtkWidget *nameEntryLabel;
-	GtkWidget *entryHbox;
-	GtkWidget *btnHbox;
-	GtkRoot *root = gtk_widget_get_root (widget);
-
-	dialog = gtk_dialog_new();
-	gtk_window_set_title(GTK_WINDOW(dialog), _("New Folder..."));
-	/* Phase 4.5: anchor to whatever GtkWindow contains the button that
-	 * triggered us — GTK 4 wants every dialog to have a transient parent. */
-	if (root && GTK_IS_WINDOW (root))
-		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
-	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
-	nameEntryLabel = gtk_label_new(_("Name: "));
-	nameEntry = gtk_entry_new();
-	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
-	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
-
-	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(G_OBJECT(okBtn), "hlist", data);
-	g_signal_connect(okBtn, "clicked", G_CALLBACK(makeDir),
-					   dialog);
-
-	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtkhx_widget_destroy,
-							  dialog);
-
-	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
-	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
-	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_window_present(GTK_WINDOW(dialog));
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
+	(void) entry;
+	/* adw_alert_dialog_response (the obvious "activate this response
+	 * id" call) is libadwaita 1.7+; our floor is 1.6. Emitting the
+	 * "response" signal by name does the same thing — handlers run,
+	 * dialog auto-closes. */
+	g_signal_emit_by_name (data, "response", "create");
 }
-G_GNUC_END_IGNORE_DEPRECATIONS
+
+static void makeDirDialog (GtkWidget *widget, gpointer data)
+{
+	AdwDialog *dialog;
+	GtkWidget *entry;
+
+	dialog = adw_alert_dialog_new (_("New Folder"),
+	                               _("Enter a name for the new folder."));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "create", _("C_reate"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "create",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+
+	entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+	g_signal_connect (entry, "activate",
+	                  G_CALLBACK (makeDir_entry_activate), dialog);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (makeDir_response), data);
+
+	adw_dialog_present (dialog, widget);
+}
 
 /* Phase 4.8: drag-and-drop between file lists.
  *
