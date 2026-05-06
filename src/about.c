@@ -18,12 +18,11 @@
 #include "config.h"
 #include <stdio.h>
 #include <gtk/gtk.h>
-#include <adwaita.h>
 #include <string.h>
 #include "hx.h"
 #include "about.h"
-#include "gtkhx.h"
 #include "gtkutil.h"
+
 
 #ifdef HAVE_DCGETTEXT
 #include <libintl.h>
@@ -32,61 +31,165 @@
 #define _(string) (string)
 #endif
 
-/* Phase 5: AdwAboutDialog (libadwaita 1.6+) replaces the hand-laid
- * GtkFixed-based GtkDialog. AdwDialog is the modern adaptive dialog
- * family — presents as a centered window on desktop and a bottom
- * sheet on mobile. We don't need to track the dialog as a singleton:
- * adw_dialog_present is idempotent for an already-presented dialog
- * (it just re-focuses), and the dialog auto-destroys when closed. */
+static void set_notebook_tab (GtkWidget *notebook, gint page_num,
+							  GtkWidget *widget);
 
-void
-create_about_window (GtkWidget *widget, gpointer data)
+#define ABOUT_DEFAULT_WIDTH               100
+#define ABOUT_MAX_WIDTH                   600
+#define LINE_SKIP                          4
+
+static gchar Ver[]    = "GtkHx %s";
+
+/* external variables */
+
+gchar *get_credits()
+{
+   static gchar credits[] =
+"\
+       Main Programming: Misha Nasledov \n\
+                         <misha@nasledov.com>\n\
+                         Ryan Nielsen \n\
+                         <ran@krazynet.com>\n\
+                         David Raufeisen\n\
+                         <david@fortyoz.org>\n\
+                         Aaron Lehmann\n\
+                         <aaronl@vitelus.com>\n\n\
+               Graphics: apocalypse\n\
+                         <apocalypse@cafelinux.dhs.org>\n\
+                         Philip Neustrom\n\
+                         <codetoad@pacbell.net>\n\n\
+          Documentation: Philip Neustrom\n\
+                         <codetoad@pacbell.net>\n\n\
+               Web Site: Jonathan C. Sitte\n\
+                         <jcsitte@jcsitte.com>\n\n\
+    French Localization: Jean-Sebastien Hubert\n\
+                         <jshubert@mirabellug.org>\n\
+";
+   return (gchar*) credits;
+}
+
+gboolean about_open = FALSE;
+GtkWidget *frmAbout;
+
+void on_cmdAboutClose_clicked ()
+{
+	gtkhx_widget_destroy(frmAbout);
+}
+
+void on_frmAbout_destroy ()
+{
+    gtkhx_widget_destroy(frmAbout);
+	about_open = FALSE;
+
+}
+
+void create_about_window (GtkWidget *widget, gpointer data)
 {
 	(void) widget; (void) data;
 
-	/* Authors of the original GtkHx development effort, preserved
-	 * from the previous about dialog. Format follows AdwAboutDialog
-	 * convention: "Name <email>". */
-	static const char *developers[] = {
-		"Misha Nasledov <misha@nasledov.com>",
-		"Ryan Nielsen <ran@krazynet.com>",
-		"David Raufeisen <david@fortyoz.org>",
-		"Aaron Lehmann <aaronl@vitelus.com>",
-		NULL,
-	};
-	static const char *artists[] = {
-		"apocalypse <apocalypse@cafelinux.dhs.org>",
-		"Philip Neustrom <codetoad@pacbell.net>",
-		NULL,
-	};
-	static const char *documenters[] = {
-		"Philip Neustrom <codetoad@pacbell.net>",
-		NULL,
-	};
+	if(about_open == FALSE)
+	{
+    GtkWidget *fixed;
+    GtkWidget *cmdAboutClose;
+    GtkWidget *notebook;
+    GtkWidget *fixed1;
+    GtkWidget *frame;
+    GtkWidget *lblTitle;
+    GtkWidget *lblCopyright;
+    GtkWidget *scrolledwindow;
+    GtkWidget *txtCredits;
+    GtkTextBuffer *credits_buf;
+    GtkWidget *lblCredits;
+    GtkWidget *pixmap;
+    GdkPixmap *icon;
+    GtkAdjustment *adj;
+    char version [50];
 
-	AdwDialog *dlg = ADW_DIALOG (adw_about_dialog_new ());
+    frmAbout = gtk_window_new();
+    gtk_widget_set_size_request (frmAbout, 482, 450);
+    gtk_window_set_title (GTK_WINDOW (frmAbout), _("About GtkHx"));
+    gtk_window_set_resizable(GTK_WINDOW (frmAbout), FALSE);
+    g_signal_connect (frmAbout, "destroy",
+			G_CALLBACK (on_frmAbout_destroy),
+			frmAbout);
 
-	g_object_set (dlg,
-		"application-name", "GtkHx",
-		"application-icon", "applications-internet-symbolic",
-		"version", VERSION,
-		"developer-name", "Misha Nasledov",
-		"copyright", "© 2000–2026 Misha Nasledov",
-		"license-type", GTK_LICENSE_GPL_2_0,
-		"comments", _("A GTK client for the Hotline protocol."),
-		"website", "https://github.com/nasledov/gtkhx",
-		"issue-url", "https://github.com/nasledov/gtkhx/issues",
-		NULL);
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
-	adw_about_dialog_set_developers  (ADW_ABOUT_DIALOG (dlg), developers);
-	adw_about_dialog_set_artists     (ADW_ABOUT_DIALOG (dlg), artists);
-	adw_about_dialog_set_documenters (ADW_ABOUT_DIALOG (dlg), documenters);
-	/* "translator-credits" is a magic gettext string — translators
-	 * fill it in via po files. The fallback English string lists the
-	 * historic French translator. */
-	adw_about_dialog_set_translator_credits (
-		ADW_ABOUT_DIALOG (dlg),
-		_("Jean-Sebastien Hubert <jshubert@mirabellug.org>"));
+    fixed = gtk_fixed_new ();
+    gtkhx_widget_set_child(frmAbout, fixed);
 
-	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
+    cmdAboutClose = gtk_button_new_with_label (("Close"));
+    gtk_fixed_put (GTK_FIXED (fixed), cmdAboutClose, 384, 403);
+    gtk_widget_set_size_request (cmdAboutClose, 88, 36);
+    /* Phase 4.2: gtk_widget_set_can_default removed */
+    gtk_widget_grab_focus (cmdAboutClose);
+    /* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
+    g_signal_connect (cmdAboutClose, "clicked",
+			G_CALLBACK (on_cmdAboutClose_clicked),
+			frmAbout);
+
+
+    notebook = gtk_notebook_new ();
+    gtk_fixed_put (GTK_FIXED (fixed), notebook, 8, 8);
+    gtk_widget_set_size_request (notebook, 466, 382);
+
+
+    fixed1 = gtk_fixed_new ();
+    gtkhx_widget_set_child(notebook, fixed1);
+
+
+    frame = gtk_frame_new (NULL);
+    gtk_fixed_put (GTK_FIXED (fixed1), frame, 32, 12);
+    gtk_widget_set_size_request (frame, 400, 200);
+
+    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/gtkhx.xpm", NULL);
+    pixmap = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
+    gtkhx_widget_set_child(frame, pixmap);
+
+    g_snprintf (version, sizeof(version), Ver, VERSION); /* Insert version from config.h */
+
+    lblTitle = gtk_label_new (version);
+    gtk_fixed_put (GTK_FIXED (fixed1), lblTitle, 8, 215);
+    gtk_widget_set_size_request (lblTitle, 448, 16);
+
+
+    lblCopyright = gtk_label_new (_("Copyright (C) 2000-2002"));
+    gtk_fixed_put (GTK_FIXED (fixed1), lblCopyright, 8, 321);
+    gtk_widget_set_size_request (lblCopyright, 448, 16);
+
+
+    scrolledwindow = gtk_scrolled_window_new();
+    gtk_fixed_put (GTK_FIXED (fixed1), scrolledwindow, 12, 240);
+    gtk_widget_set_size_request (scrolledwindow, 436, 100);
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolledwindow),
+									GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+
+    txtCredits = gtk_text_view_new ();
+    gtk_text_view_set_editable (GTK_TEXT_VIEW (txtCredits), FALSE);
+    gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (txtCredits), FALSE);
+    gtkhx_widget_set_child(scrolledwindow, txtCredits);
+    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
+    credits_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (txtCredits));
+    gtk_text_buffer_set_text (credits_buf, get_credits(), -1);
+
+    adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW(
+												   scrolledwindow));
+    gtk_adjustment_set_value (adj, 0);
+
+    lblCredits = gtk_label_new (_("Credits"));
+    set_notebook_tab (notebook, 0, lblCredits);
+
+    gtk_window_present(GTK_WINDOW(frmAbout));
+    about_open = TRUE;
+	}
+}
+
+/* This is an internally used function to set notebook tab widgets. */
+static void set_notebook_tab (GtkWidget *notebook, gint page_num,
+							  GtkWidget *widget)
+{
+    GtkWidget *notebook_page;
+    notebook_page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), page_num);
+    gtk_notebook_set_tab_label (GTK_NOTEBOOK (notebook), notebook_page, widget);
 }
