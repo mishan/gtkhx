@@ -102,26 +102,58 @@ void disconnect_clicked (void)
  * functions so the menu items stay one g_action_map_add_action_entries
  * call away from working alongside the historic toolbar buttons. The
  * GAction approach also means the menu items pick up keyboard
- * accelerators for free if we ever wire any (gtk_application_set_accels_for_action). */
+ * accelerators for free if we ever wire any (gtk_application_set_accels_for_action).
+ *
+ * The action callbacks defer their real work to g_idle_add — when the
+ * action fires from a hamburger menu item, the popover is mid-dismiss
+ * and the GdkSurface for it is still alive on the click stack. Building
+ * a new top-level dialog (especially the AdwPreferencesWindow with its
+ * 9 pages and the icon-picker GtkHList that walks main-loop iterations)
+ * inside that callstack hit a Heisenbug — segfault on bare run, no
+ * crash under gdb. Letting the click chain unwind first via the idle
+ * source side-steps it cleanly. */
+static gboolean
+defer_open_settings (gpointer data)
+{
+	create_options_window (NULL, data);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean
+defer_open_about (gpointer data)
+{
+	(void) data;
+	create_about_window (NULL, NULL);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean
+defer_quit (gpointer data)
+{
+	(void) data;
+	hx_quit ();
+	return G_SOURCE_REMOVE;
+}
+
 static void
 on_action_settings (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
 	(void) action; (void) param;
-	create_options_window (NULL, user_data);
+	g_idle_add (defer_open_settings, user_data);
 }
 
 static void
 on_action_about (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
 	(void) action; (void) param; (void) user_data;
-	create_about_window (NULL, NULL);
+	g_idle_add (defer_open_about, NULL);
 }
 
 static void
 on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
 	(void) action; (void) param; (void) user_data;
-	hx_quit ();
+	g_idle_add (defer_quit, NULL);
 }
 
 static const GActionEntry app_actions[] = {

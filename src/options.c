@@ -1470,7 +1470,13 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
 	GtkWidget *picker_row, *vbox, *scroll, *icon_list;
 
-	iv = g_malloc (sizeof (struct icon_viewer));
+	/* Phase 5: g_malloc0 — zero-fill the struct so any read of
+	 * iv->icon_list / nfound / icon_high before they're set later in
+	 * this function returns 0 / NULL deterministically. The previous
+	 * g_malloc gave us a struct full of whatever was at that address,
+	 * which is exactly the kind of "crashes without gdb, runs fine
+	 * with gdb" Heisenbug glibc's allocator likes to deliver. */
+	iv = g_malloc0 (sizeof (struct icon_viewer));
 
 	name_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (name_grp, _("Display name"));
