@@ -514,11 +514,13 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
  * GDK_INTERP_NEAREST (preserves the crisp blocky pixels — bilinear
  * scaling would blur them into mush).
  *
- * gdk_pixbuf_scale_simple at GDK_INTERP_NEAREST is just a 1:N
- * pixel duplication, so the result is identical to drawing the
- * source pixbuf at N × pixel size. The texture is created from
- * the scaled pixbuf and the GtkImage takes ownership of the
- * paintable through gtkhx_image_new_from_pixbuf. */
+ * Rendering goes through GtkPicture rather than GtkImage:
+ * GtkImage has a default min-width / min-height of ~16px from its
+ * Adwaita CSS that clamps the visible size regardless of the
+ * source paintable's natural dimensions, so a 32x32 pixbuf in a
+ * GtkImage would still render at 16x16. GtkPicture doesn't carry
+ * those constraints — with set_can_shrink(FALSE) it renders at
+ * the paintable's natural size. */
 GtkWidget *
 gtkhx_pixmap_button (const char *resource_name,
                      const char *tooltip,
@@ -528,7 +530,8 @@ gtkhx_pixmap_button (const char *resource_name,
 {
 	GtkWidget *btn = gtk_button_new ();
 	GdkPixbuf *src, *use_pb;
-	GtkWidget *image;
+	GdkTexture *tex;
+	GtkWidget *picture;
 
 	src = gdk_pixbuf_new_from_resource (resource_name, NULL);
 	if (src && scale > 1) {
@@ -540,8 +543,20 @@ gtkhx_pixmap_button (const char *resource_name,
 		use_pb = src;
 	}
 
-	image = gtkhx_image_new_from_pixbuf (use_pb);
-	gtkhx_widget_set_child (btn, image);
+	if (use_pb) {
+		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+		tex = gdk_texture_new_for_pixbuf (use_pb);
+		G_GNUC_END_IGNORE_DEPRECATIONS
+		picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+		g_object_unref (tex);
+		/* set_can_shrink(FALSE) pins the picture at the paintable's
+		 * natural size — GtkButton then sizes itself around that. */
+		gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+	} else {
+		picture = gtk_picture_new ();
+	}
+	gtkhx_widget_set_child (btn, picture);
+
 	if (tooltip)
 		gtk_widget_set_tooltip_text (btn, tooltip);
 	if (cb)
