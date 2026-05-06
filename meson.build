@@ -64,10 +64,12 @@ add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c'
 gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 # Phase 5: libadwaita gives us AdwApplication (color-scheme tracking),
 # AdwPreferencesWindow (modern Settings layout), AdwHeaderBar, AdwToast,
-# AdwAboutWindow. 1.4 is the floor that ships AdwSwitchRow / AdwEntryRow /
-# AdwSpinRow / AdwComboRow as a coherent set; older versions miss pieces
-# we want for the Settings refactor.
-adw_dep     = dependency('libadwaita-1', version : '>= 1.4')
+# AdwAboutDialog, AdwAlertDialog. 1.6 is the floor that ships the new
+# adaptive AdwDialog family (AdwAboutDialog / AdwAlertDialog /
+# AdwPreferencesDialog) — the old AdwAboutWindow / AdwMessageDialog
+# became deprecated in 1.6 and we pick up -Werror=deprecated-declarations
+# from the build flags. 1.6 was released April 2024; widely available.
+adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 zlib_dep    = dependency('zlib')
