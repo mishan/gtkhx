@@ -589,11 +589,8 @@ build_bookmark_menu_from_dir (GMenu *menu, const char *path)
 static const char *const builtin_bookmark_names[] = {
 	NULL,                       /* index 0 unused */
 	"Hotline Communications",
-	"CafeLinux",
-	"GtkHx",
-	"SiN Grafix",
 };
-#define BUILTIN_BOOKMARK_MAX 4
+#define BUILTIN_BOOKMARK_MAX 1
 
 GMenu *
 connect_build_bookmark_menu (void)
@@ -795,15 +792,6 @@ static void builtin_bookmark(GtkWidget *widget, gpointer data)
 {
 	if(GPOINTER_TO_INT(data) == 1) {
 		set_the_entries("hlserver.com", "", "", "5500", 0, 0, 0);
-	}
-	else if(GPOINTER_TO_INT(data) == 2) {
-		set_the_entries("cafelinux.dhs.org", "", "", "5500", 1, 1, 2);
-	}
-	else if(GPOINTER_TO_INT(data) == 3) {
-		set_the_entries("gtkhx.nasledov.com", "", "", "5500", 1, 1, 2);
-	}
-	else if(GPOINTER_TO_INT(data) == 4) {
-		set_the_entries("hl.singrafix.com", "guest", "@sin", "5500", 1, 1, 2);
 	}
 }
 

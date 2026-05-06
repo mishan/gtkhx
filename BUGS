@@ -1,7 +1,71 @@
+Highest priority:
+
+- Bookmarks aren't working. When a user selects one, the client doesn't connect. Warnings are emitted in the console:
+
+(gtkhx:349045): Gtk-CRITICAL **: 15:28:24.922: gtk_editable_set_text: assertion 'GTK_IS_EDITABLE (editable)' failed
+
+- The first click on the split button for bookmarks does not do anything
+
 High priority:
 
+- "Users" right-click popup menu does not work. It displays, but I cannot select any of the actions. Warning below:
+
+(gtkhx:349045): Gtk-CRITICAL **: 15:29:21.407: gtk_css_node_insert_after: assertion 'previous_sibling == NULL || previous_sibling->parent == parent' failed
+
 - File Previews do not work, and they lock up the application
-- Icons are showing up twice in Settings (two identical rows per icon)
+- Servers with non-ASCII names generate warnings on connect, and the window titlebars have corrupt names
+
+(gtkhx:348897): Gdk-WARNING **: 15:26:27.979: Invalid utf8 passed to gdk_surface_set_title: 'GtkHx (Ba\xb6M\xbf\xbfn)'
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_new_take_string(): requires valid UTF-8
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_ref_sink: assertion 'value != NULL' failed
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_unref: assertion 'value != NULL' failed
+
+(gtkhx:348897): Gdk-WARNING **: 15:26:27.979: Invalid utf8 passed to gdk_surface_set_title: 'News (Ba\xb6M\xbf\xbfn)'
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_new_take_string(): requires valid UTF-8
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_ref_sink: assertion 'value != NULL' failed
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_unref: assertion 'value != NULL' failed
+
+(gtkhx:348897): Gdk-WARNING **: 15:26:27.979: Invalid utf8 passed to gdk_surface_set_title: 'Chat (Ba\xb6M\xbf\xbfn)'
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_new_take_string(): requires valid UTF-8
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_ref_sink: assertion 'value != NULL' failed
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_unref: assertion 'value != NULL' failed
+
+(gtkhx:348897): Gdk-WARNING **: 15:26:27.979: Invalid utf8 passed to gdk_surface_set_title: 'Users (Ba\xb6M\xbf\xbfn)'
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_new_take_string(): requires valid UTF-8
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_ref_sink: assertion 'value != NULL' failed
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_unref: assertion 'value != NULL' failed
+
+(gtkhx:348897): Gdk-WARNING **: 15:26:27.979: Invalid utf8 passed to gdk_surface_set_title: 'Tasks (Ba\xb6M\xbf\xbfn)'
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_new_take_string(): requires valid UTF-8
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_ref_sink: assertion 'value != NULL' failed
+
+(gtkhx:348897): GLib-CRITICAL **: 15:26:27.979: g_variant_unref: assertion 'value != NULL' failed
+
+(gtkhx:348897): Pango-WARNING **: 15:26:27.979: Invalid UTF-8 string passed to pango_layout_set_text()
+
+(gtkhx:348897): Pango-WARNING **: 15:26:27.990: Invalid UTF-8 string passed to pango_layout_set_text()
+
+(gtkhx:348897): Pango-WARNING **: 15:26:27.990: Invalid UTF-8 string passed to pango_layout_set_text()
+
+(gtkhx:348897): Pango-WARNING **: 15:26:27.991: Invalid UTF-8 string passed to pango_layout_set_text()
+
+(gtkhx:348897): Gtk-CRITICAL **: 15:26:29.971: gtk_css_node_insert_after: assertion 'previous_sibling == NULL || previous_sibling->parent == parent' failed
+
+(gtkhx:348897): Pango-WARNING **: 15:26:30.837: Invalid UTF-8 string passed to pango_layout_set_text()
 
 Medium priority:
 
