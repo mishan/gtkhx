@@ -6,7 +6,12 @@ UI Modernization:
 - Icon picker in settings should display larger icons, and a better layout. Maybe two entries per row?
 - Tracker -- move icons into titlebar, use modern search field
 
-Bookmark Management
+Bookmarks
+- Better bookmark management, allowing user to add/edit/delete bookmarks
+- Remove servers that no longer exist from built-in bookmarks
+
+Tracker
+- Ship with some more built in trackers configured
 
 Code Modernization:
 - Better modules with more code reuse
