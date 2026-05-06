@@ -278,14 +278,14 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
             double x, double y)
 {
 	GMenu *model;
-	GMenu *info_section;
 	GMenu *moderate_section;
 	GMenu *ignore_section;
 	GMenu *interact_section;
 	GtkWidget *popover;
+	GtkWidget *info_label;
 	GSimpleActionGroup *actions;
 	struct UserActionCtx *ctx;
-	char buf[128];
+	char *info_markup;
 	int i;
 
 	if (!user || !sess)
@@ -297,19 +297,37 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 
 	model = g_menu_new ();
 
-	/* Info header — disabled "noop" entries built from the user's
-	 * current state. We use a section to get a separator between the
-	 * info block and the actions below. */
-	info_section = g_menu_new ();
-	g_menu_append (info_section, user->name, "user.noop");
-	g_snprintf (buf, sizeof (buf), _("Icon: %d  UID: %d"), user->icon, user->uid);
-	g_menu_append (info_section, buf, "user.noop");
-	g_snprintf (buf, sizeof (buf), _("Status: %s%s"),
-	            user->color >= 2 ? _("Admin") : _("Guest"),
-	            user->color % 2 ? _(" (Away)") : "");
-	g_menu_append (info_section, buf, "user.noop");
-	g_menu_append_section (model, NULL, G_MENU_MODEL (info_section));
-	g_object_unref (info_section);
+	/* Phase 5: info section was three disabled "noop" menu items at
+	 * the top showing the user's name / icon-uid / admin-status.
+	 * That layout broke hover routing in GtkPopoverMenu — once the
+	 * cursor entered the menu the highlight got stuck on the first
+	 * non-disabled item below the noops. The fix is to render the
+	 * info as a real label widget via gtk_popover_menu_add_child +
+	 * a "custom" GMenuItem rather than abusing disabled menu items.
+	 * Built as Pango markup so the user's name reads bold. */
+	info_markup = g_markup_printf_escaped (
+		"<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>",
+		user->name, user->uid, user->icon,
+		user->color >= 2 ? _("Admin") : _("Guest"),
+		user->color % 2 ? _(" (Away)") : "");
+	info_label = gtk_label_new (NULL);
+	gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
+	gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
+	gtk_widget_set_margin_start  (info_label, 12);
+	gtk_widget_set_margin_end    (info_label, 12);
+	gtk_widget_set_margin_top    (info_label, 8);
+	gtk_widget_set_margin_bottom (info_label, 4);
+	g_free (info_markup);
+	{
+		GMenu *info_section = g_menu_new ();
+		GMenuItem *info_item = g_menu_item_new (NULL, NULL);
+		g_menu_item_set_attribute (info_item, "custom", "s",
+		                           "user-info");
+		g_menu_append_item (info_section, info_item);
+		g_object_unref (info_item);
+		g_menu_append_section (model, NULL, G_MENU_MODEL (info_section));
+		g_object_unref (info_section);
+	}
 
 	/* Kick / Ban */
 	moderate_section = g_menu_new ();
@@ -356,20 +374,16 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 		g_action_map_add_action (G_ACTION_MAP (actions), G_ACTION (act));
 		g_object_unref (act);
 	}
-	/* Disabled "noop" used by info entries — present so they render but
-	 * inert when clicked. */
-	{
-		GSimpleAction *noop = g_simple_action_new ("noop", NULL);
-		g_simple_action_set_enabled (noop, FALSE);
-		g_action_map_add_action (G_ACTION_MAP (actions), G_ACTION (noop));
-		g_object_unref (noop);
-	}
-
 	gtk_widget_insert_action_group (anchor, "user", G_ACTION_GROUP (actions));
 	g_object_unref (actions);
 
 	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
 	g_object_unref (model);
+	/* Phase 5: bind the info_label to the "user-info" custom menu
+	 * item we declared above. GtkPopoverMenu renders the named
+	 * widget in place of the section content. */
+	gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover),
+	                            info_label, "user-info");
 	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
 	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
 	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
