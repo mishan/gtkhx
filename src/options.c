@@ -1292,30 +1292,43 @@ static void settings_page_tracker (AdwPreferencesPage *page)
 	}
 
 	adw_preferences_page_add (page, grp);
+
+	/* Phase 5: TRACKER_CASE used to be tucked into Misc → Behavior;
+	 * it's a tracker-specific search option, so it lives here in
+	 * its own Search group. */
+	{
+		AdwPreferencesGroup *search_grp =
+			ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+		adw_preferences_group_set_title (search_grp, _("Search"));
+		adw_preferences_group_add (search_grp,
+			pref_switch_row (CFG_TRACKER_CASE,
+			                 _("Case-sensitive tracker search"), NULL));
+		adw_preferences_page_add (page, search_grp);
+	}
 }
 
-static void settings_page_news15 (AdwPreferencesPage *page)
+/* Phase 5: News + Files used to be two separate pages, each with a
+ * single Browse-in-Same-Window toggle. They're consolidated here as
+ * an "Interface" page with one group per browser. */
+static void settings_page_interface (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	AdwPreferencesGroup *files_grp, *news_grp;
 
-	adw_preferences_group_set_title (grp, _("News Folder Browsing"));
-	adw_preferences_group_add (grp, 
-		pref_switch_row (CFG_NEWS_SAMEWIN,
-		                 _("Browse in Same Window"),
-		                 _("Replace the current window when descending into a folder")));
-	adw_preferences_page_add (page, grp);
-}
-
-static void settings_page_files (AdwPreferencesPage *page)
-{
-	AdwPreferencesGroup *grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-
-	adw_preferences_group_set_title (grp, _("File Browsing"));
-	adw_preferences_group_add (grp, 
+	files_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (files_grp, _("File Browsing"));
+	adw_preferences_group_add (files_grp,
 		pref_switch_row (CFG_FILE_SAMEWIN,
 		                 _("Browse in Same Window"),
 		                 _("Replace the current window when descending into a folder")));
-	adw_preferences_page_add (page, grp);
+	adw_preferences_page_add (page, files_grp);
+
+	news_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (news_grp, _("News Folder Browsing"));
+	adw_preferences_group_add (news_grp,
+		pref_switch_row (CFG_NEWS_SAMEWIN,
+		                 _("Browse in Same Window"),
+		                 _("Replace the current window when descending into a folder")));
+	adw_preferences_page_add (page, news_grp);
 }
 
 static void settings_page_sound (AdwPreferencesPage *page)
@@ -1363,10 +1376,12 @@ static void settings_page_sound (AdwPreferencesPage *page)
 
 /* Phase 5 follow-up: the old standalone Font page only ever applied
  * to the xtext-based chat / private-message widgets, so it folds into
- * the Chat page as a Font group. */
+ * the Chat page as a Font group. SHOWJOIN and OLD_NICKCOMP also live
+ * here now (moved from Misc → Behavior) since they're chat-window
+ * concerns rather than session-wide misc. */
 static void settings_page_chat (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *output_grp, *font_grp;
+	AdwPreferencesGroup *output_grp, *font_grp, *behavior_grp;
 	GtkWidget *entry_row, *btn;
 
 	output_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -1399,25 +1414,19 @@ static void settings_page_chat (AdwPreferencesPage *page)
 
 	adw_preferences_group_add (font_grp, entry_row);
 	adw_preferences_page_add (page, font_grp);
+
+	behavior_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (behavior_grp, _("Behavior"));
+	adw_preferences_group_add (behavior_grp,
+		pref_switch_row (CFG_SHOWJOIN,
+		                 _("Show join / leave in chat"), NULL));
+	adw_preferences_group_add (behavior_grp,
+		pref_switch_row (CFG_OLD_NICKCOMP,
+		                 _("Old-style nick completion"),
+		                 _("Match against the most recently typed prefix instead of all users")));
+	adw_preferences_page_add (page, behavior_grp);
 }
 
-static void settings_page_path (AdwPreferencesPage *page)
-{
-	AdwPreferencesGroup *grp;
-
-	grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-	adw_preferences_group_set_title (grp, _("Paths"));
-	/* Icon and sound paths used to live here. Auto-discovery now finds
-	 * *.rsrc icon packs in ~/.config/gtkhx/icons/ and sound files in
-	 * ~/.config/gtkhx/sounds/ + the system data dir, so neither needs
-	 * a UI row. The ICONS / SOUNDPATH cfgvars stay defined so legacy
-	 * gtkhxrc files still parse cleanly — they just no longer appear
-	 * as editable settings. */
-	adw_preferences_group_add (grp,
-		pref_entry_row (CFG_DOWNLOAD,  _("Download directory")));
-
-	adw_preferences_page_add (page, grp);
-}
 
 /* Phase 5: ptr1->cell[1] is already a GtkHellText *. The historic
  * GTK_HELL_TEXT() macro applied here expands to ((GtkHellText *) &(c)),
@@ -1543,47 +1552,44 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	adw_preferences_page_add (page, picker_grp);
 }
 
+/* Phase 5: Misc used to be a catchall for Behavior toggles. Most of
+ * those have moved to the page they belong on (showjoin /
+ * old_nickcomp → Chat, tracker_case → Trackers); what stays here is
+ * Auto Reply plus the two genuinely cross-cutting behaviours
+ * (queue downloads, show pchats at back). */
 static void settings_page_misc (AdwPreferencesPage *page)
 {
 	AdwPreferencesGroup *behavior, *autoreply;
 
 	autoreply = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (autoreply, _("Auto Reply"));
-	adw_preferences_group_add (autoreply, 
+	adw_preferences_group_add (autoreply,
 		pref_switch_row (CFG_AUTOREPLY_ON,
 		                 _("Enable auto reply"), NULL));
-	adw_preferences_group_add (autoreply, 
+	adw_preferences_group_add (autoreply,
 		pref_entry_row (CFG_AUTOREPLY_MSG, _("Reply message")));
 	adw_preferences_page_add (page, autoreply);
 
 	behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (behavior, _("Behavior"));
-	adw_preferences_group_add (behavior, 
+	adw_preferences_group_add (behavior,
 		pref_switch_row (CFG_SHOWBACK,
 		                 _("Show private messages at back"),
 		                 _("Don't raise the chat window when a private message arrives")));
-	adw_preferences_group_add (behavior, 
+	adw_preferences_group_add (behavior,
 		pref_switch_row (CFG_QUEUEDL,
 		                 _("Queue file transfers"),
 		                 _("Run downloads one at a time instead of in parallel")));
-	adw_preferences_group_add (behavior, 
-		pref_switch_row (CFG_SHOWJOIN,
-		                 _("Show join / leave in chat"), NULL));
-	adw_preferences_group_add (behavior, 
-		pref_switch_row (CFG_TRACKER_CASE,
-		                 _("Case-sensitive tracker search"), NULL));
-	adw_preferences_group_add (behavior, 
-		pref_switch_row (CFG_OLD_NICKCOMP,
-		                 _("Old-style nick completion"), NULL));
 	adw_preferences_page_add (page, behavior);
 }
 
-/* Phase 5: appearance page hosts the THEME combo (system / light / dark).
- * Lives at the top of the Settings sidebar because it's the most visually
- * impactful pref. */
-static void settings_page_appearance (AdwPreferencesPage *page)
+/* Phase 5: General page consolidates Appearance (theme combo) + Paths
+ * (download directory). Both pages were small enough to feel
+ * silly as standalone sidebar entries — folding them together gives
+ * a tidier first stop in the Settings sidebar. */
+static void settings_page_general (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *grp;
+	AdwPreferencesGroup *appearance_grp, *paths_grp;
 	static const char *vals[]   = {
 		CFG_THEME_SYSTEM, CFG_THEME_LIGHT, CFG_THEME_DARK
 	};
@@ -1593,14 +1599,25 @@ static void settings_page_appearance (AdwPreferencesPage *page)
 	labels[1] = _("Light");
 	labels[2] = _("Dark");
 
-	grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-	adw_preferences_group_set_title (grp, _("Appearance"));
-	adw_preferences_group_set_description (grp,
+	appearance_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (appearance_grp, _("Appearance"));
+	adw_preferences_group_set_description (appearance_grp,
 		_("Color scheme. \"Follow system\" tracks the desktop's "
 		  "light/dark preference."));
-	adw_preferences_group_add (grp, 
+	adw_preferences_group_add (appearance_grp,
 		pref_combo_row (CFG_THEME, _("Theme"), vals, labels, 3));
-	adw_preferences_page_add (page, grp);
+	adw_preferences_page_add (page, appearance_grp);
+
+	/* Phase 5: icon and sound paths used to live here too. Auto-
+	 * discovery now finds *.rsrc icon packs in ~/.config/gtkhx/icons/
+	 * and sound files in ~/.config/gtkhx/sounds/ + the system data
+	 * dir, so neither needs a UI row. The ICONS / SOUNDPATH cfgvars
+	 * stay defined so legacy gtkhxrc files still parse cleanly. */
+	paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (paths_grp, _("Paths"));
+	adw_preferences_group_add (paths_grp,
+		pref_entry_row (CFG_DOWNLOAD, _("Download directory")));
+	adw_preferences_page_add (page, paths_grp);
 }
 
 /* Helper: build a fresh AdwPreferencesPage with title + icon and run the
@@ -1661,23 +1678,19 @@ void create_options_window (GtkWidget *widget, gpointer data)
 
 	options_window = GTK_WIDGET (dlg);
 
-	settings_add_page (dlg, _("Appearance"), "preferences-color-symbolic",
-	                   settings_page_appearance);
-	settings_add_page (dlg, _("Identity"),   "user-info-symbolic",
+	settings_add_page (dlg, _("General"),   "preferences-system-symbolic",
+	                   settings_page_general);
+	settings_add_page (dlg, _("Identity"),  "user-info-symbolic",
 	                   settings_page_identity);
-	settings_add_page (dlg, _("Chat"),       "user-available-symbolic",
+	settings_add_page (dlg, _("Chat"),      "user-available-symbolic",
 	                   settings_page_chat);
-	settings_add_page (dlg, _("Sound"),      "audio-speakers-symbolic",
+	settings_add_page (dlg, _("Sound"),     "audio-speakers-symbolic",
 	                   settings_page_sound);
-	settings_add_page (dlg, _("Files"),      "folder-symbolic",
-	                   settings_page_files);
-	settings_add_page (dlg, _("News"),       "view-list-symbolic",
-	                   settings_page_news15);
-	settings_add_page (dlg, _("Trackers"),   "network-server-symbolic",
+	settings_add_page (dlg, _("Interface"), "view-list-symbolic",
+	                   settings_page_interface);
+	settings_add_page (dlg, _("Trackers"),  "network-server-symbolic",
 	                   settings_page_tracker);
-	settings_add_page (dlg, _("Paths"),      "folder-saved-search-symbolic",
-	                   settings_page_path);
-	settings_add_page (dlg, _("Misc"),       "applications-other-symbolic",
+	settings_add_page (dlg, _("Misc"),      "applications-other-symbolic",
 	                   settings_page_misc);
 
 	adw_dialog_present (ADW_DIALOG (dlg), parent);
