@@ -300,40 +300,6 @@ void error_dialog (char *title, char *msg)
 	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
 }
 
-/* Phase 4.2: gtk_dialog_get_action_area is fully removed in GTK 4
- * (the action area widget is gone too). Synthesize one: a horizontal
- * GtkBox attached to the bottom of the dialog's content area on
- * first call, cached on the dialog via g_object_set_data so repeat
- * calls return the same box. Callers' gtkhx_box_pack(area, btn, ...)
- * just append to this box.
- *
- * Phase 4.13: GtkDialog and gtk_dialog_get_content_area are deprecated
- * in GTK 4.10. The remaining call sites — bookmark editor / file
- * info / connect / chat subject — are sizable Phase 4.7 follow-ups,
- * so the deprecation warnings stay suppressed locally until each
- * one migrates to AdwDialog or AdwWindow. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-GtkWidget *
-gtkhx_dialog_action_area (GtkDialog *dialog)
-{
-	GtkWidget *area;
-
-	if (!dialog)
-		return NULL;
-	area = g_object_get_data (G_OBJECT (dialog), "gtkhx-action-area");
-	if (!area) {
-		GtkWidget *content = gtk_dialog_get_content_area (dialog);
-		area = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-		gtk_widget_set_halign (area, GTK_ALIGN_END);
-		gtk_widget_set_margin_top (area, 6);
-		if (GTK_IS_BOX (content))
-			gtk_box_append (GTK_BOX (content), area);
-		g_object_set_data (G_OBJECT (dialog), "gtkhx-action-area", area);
-	}
-	return area;
-}
-G_GNUC_END_IGNORE_DEPRECATIONS
-
 GtkWidget *
 gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous)
 {
