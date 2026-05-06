@@ -215,9 +215,6 @@ void create_news_window (session *sess)
 	GtkWidget *news_text;
 	GtkWidget *news_window;
 	GtkWidget *postButton, *reloadButton;
-	GdkPixmap *icon;
-	GtkWidget *pix;
-	GdkBitmap *mask;
 
 
 	if (gtkhx_prefs.geo.news.open) {
@@ -229,19 +226,13 @@ void create_news_window (session *sess)
 
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
-	postButton = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(postButton, pix);
-	gtk_widget_set_tooltip_text(postButton, _("Post News"));
-	icon = 0, pix = 0, mask = 0;
-
-	reloadButton = gtk_button_new();
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(reloadButton, pix);
-	gtk_widget_set_tooltip_text(reloadButton, _("Reload News"));
-	icon = 0, pix = 0, mask = 0;
+	/* Phase 5: 2x-scaled headerbar buttons via the shared helper. */
+	postButton = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/postnews.xpm",
+		_("Post News"), 2, NULL, NULL);
+	reloadButton = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+		_("Reload News"), 2, NULL, NULL);
 
 	gtk_window_set_resizable(GTK_WINDOW(news_window), TRUE);
 

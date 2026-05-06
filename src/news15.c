@@ -518,9 +518,6 @@ struct gnews_folder *create_gfnews_window(char *path)
 	GtkWidget *deletebtn;
 	GtkWidget *mkdirbtn;
 	GtkWidget *mkcatbtn;
-	GdkBitmap *mask;
-	GdkPixmap *icon;
-	GtkWidget *pix;
 
 	gfnews->listing = 0;
 	gfnews->prev = 0;
@@ -579,55 +576,33 @@ struct gnews_folder *create_gfnews_window(char *path)
 	/* Phase 4.8: dead drag-and-drop scaffold removed. See note above
 	 * the news15_drag* removal. */
 
-	parentbtn =  gtk_button_new();
-	g_signal_connect(parentbtn, "clicked",
-					   G_CALLBACK(gfnews_up_btn), gfnews);
-	gtk_widget_set_tooltip_text(parentbtn, _("Parent Directory"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(parentbtn, pix);
-	gtk_widget_set_sensitive(parentbtn, gtkhx_prefs.news_samewin);
+	/* Phase 5: 2x-scaled headerbar buttons via gtkhx_pixmap_button. */
+	parentbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/up.xpm",
+		_("Parent Directory"), 2,
+		G_CALLBACK (gfnews_up_btn), gfnews);
+	gtk_widget_set_sensitive (parentbtn, gtkhx_prefs.news_samewin);
 	gfnews->up_btn = parentbtn;
-	pix = 0, icon = 0, mask = 0;
 
-	reloadbtn =  gtk_button_new();
-	g_signal_connect(reloadbtn, "clicked",
-					   G_CALLBACK(gfnews_reload_btn), gfnews);
-	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(reloadbtn, pix);
-	pix = 0, icon = 0, mask = 0;
+	reloadbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+		_("Reload"), 2,
+		G_CALLBACK (gfnews_reload_btn), gfnews);
 
-	deletebtn =  gtk_button_new();
-	g_signal_connect(deletebtn, "clicked",
-					   G_CALLBACK(gfnews_delete_btn), gfnews);
-	gtk_widget_set_tooltip_text(deletebtn, _("Delete"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
+	deletebtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/trash.xpm",
+		_("Delete"), 2,
+		G_CALLBACK (gfnews_delete_btn), gfnews);
 
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(deletebtn, pix);
-	pix = 0, icon = 0, mask = 0;
+	mkdirbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/newsfld.xpm",
+		_("New Folder"), 2,
+		G_CALLBACK (gfnews_mkdir_btn), gfnews);
 
-	mkdirbtn =  gtk_button_new();
-	g_signal_connect(mkdirbtn, "clicked",
-					   G_CALLBACK(gfnews_mkdir_btn), gfnews);
-	gtk_widget_set_tooltip_text(mkdirbtn, _("New Folder"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newsfld.xpm", NULL);
-
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(mkdirbtn, pix);
-	pix = 0, icon = 0, mask = 0;
-
-	mkcatbtn =  gtk_button_new();
-	g_signal_connect(mkcatbtn, "clicked",
-					   G_CALLBACK(gfnews_mkcat_btn), gfnews);
-	gtk_widget_set_tooltip_text(mkcatbtn, _("New Category"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/newscat.xpm", NULL);
-
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(mkcatbtn, pix);
-	pix = 0, icon = 0, mask = 0;
+	mkcatbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/newscat.xpm",
+		_("New Category"), 2,
+		G_CALLBACK (gfnews_mkcat_btn), gfnews);
 
 	/* Phase 5: action buttons live in the AdwHeaderBar. Navigation
 	 * (Parent / Reload) on the start; creation + destruction
@@ -1029,10 +1004,6 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	GtkWidget *scrolledwindow1;
 	GtkWidget *news_text;
 	GtkWidget *scrolledwindow2;
-	GtkWidget *viewport1;
-	GdkBitmap *mask;
-	GdkPixmap *icon;
-	GtkWidget *pix;
 
 	gcnews->listing = 0;
 	gcnews->prev = gcnews_list;
@@ -1062,38 +1033,27 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_paned_set_start_child(GTK_PANED(hpaned1), vbox1);
 	
-	reloadbtn =  gtk_button_new();
-	g_signal_connect(reloadbtn, "clicked",
-					   G_CALLBACK(gcnews_reload_btn), gcnews);
-	gtk_widget_set_tooltip_text(reloadbtn, _("Reload"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(reloadbtn, pix);
-	pix = 0, icon = 0, mask = 0;
+	/* Phase 5: 2x-scaled headerbar buttons via gtkhx_pixmap_button. */
+	reloadbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+		_("Reload"), 2,
+		G_CALLBACK (gcnews_reload_btn), gcnews);
 
-	postbtn =  gtk_button_new();
-	g_signal_connect(postbtn, "clicked",
-					   G_CALLBACK(news15_post), gcnews);
-	gtk_widget_set_tooltip_text(postbtn, _("Post Thread"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/postnews.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(postbtn, pix);
-	pix = 0, icon = 0, mask = 0;
-	
+	postbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/postnews.xpm",
+		_("Post Thread"), 2,
+		G_CALLBACK (news15_post), gcnews);
+
+	/* Reply has no dedicated XPM yet — keep the "[ R ]" text label. */
 	replybtn = gtk_button_new_with_label ("[ R ]");
-	g_signal_connect(replybtn, "clicked",
-					   G_CALLBACK(news15_reply), gcnews);
-	gtk_widget_set_tooltip_text(replybtn, _("Reply To Thread"));
+	g_signal_connect (replybtn, "clicked",
+	                  G_CALLBACK (news15_reply), gcnews);
+	gtk_widget_set_tooltip_text (replybtn, _("Reply To Thread"));
 
-
-	deletebtn =  gtk_button_new();
-	g_signal_connect(deletebtn, "clicked",
-					   G_CALLBACK(news15_delete), gcnews);
-	gtk_widget_set_tooltip_text(deletebtn, _("Delete Thread"));
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(deletebtn, pix);
-	pix = 0, icon = 0, mask = 0;
+	deletebtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/trash.xpm",
+		_("Delete Thread"), 2,
+		G_CALLBACK (news15_delete), gcnews);
 
 	/* Phase 5: action buttons live in the AdwHeaderBar instead of a
 	 * topframe + hbuttonbox row inside the left pane. Reload + Post

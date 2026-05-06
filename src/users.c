@@ -727,9 +727,6 @@ void user_list (session *sess)
 void create_users_window (GtkWidget *widget, gpointer data)
 {
 	GtkWidget *users_window_scroll;
-	GdkBitmap *mask;
-	GtkWidget *pix;
-	GdkPixmap *icon;
 	GtkWidget *users_list;
 	GtkWidget *users_window;
 	gchar *titles[2];
@@ -781,64 +778,37 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_size_request(users_window_scroll, 240, 400);
 	gtkhx_widget_set_child(users_window_scroll, users_list);
 
-	msgbtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(msgbtn), "sess", sess);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/msg.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(msgbtn, pix);
-	g_signal_connect(msgbtn, "clicked",
-					   G_CALLBACK(open_message_btn), users_list);
-	gtk_widget_set_tooltip_text(msgbtn, _("Msg"));
-	icon = 0, pix = 0, mask = 0;
+	/* Phase 5: per-user action buttons via the shared
+	 * gtkhx_pixmap_button helper (2x scale, matches the toolbar). */
+	msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.xpm",
+	                              _("Msg"), 2,
+	                              G_CALLBACK (open_message_btn), users_list);
+	g_object_set_data (G_OBJECT (msgbtn), "sess", sess);
 
-	kickbtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(kickbtn), "sess", sess);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/kick.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(kickbtn, pix);
-	g_signal_connect(kickbtn, "clicked",
-					   G_CALLBACK(user_kick_btn), users_list);
-	gtk_widget_set_tooltip_text(kickbtn, _("Kick"));
-	icon = 0, pix = 0, mask = 0;
+	kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.xpm",
+	                               _("Kick"), 2,
+	                               G_CALLBACK (user_kick_btn), users_list);
+	g_object_set_data (G_OBJECT (kickbtn), "sess", sess);
 
-	infobtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(infobtn), "sess", sess);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(infobtn, pix);
-	g_signal_connect(infobtn, "clicked",
-					   G_CALLBACK(user_info_btn), users_list);
-	gtk_widget_set_tooltip_text(infobtn, _("User Info"));
-	icon = 0, pix = 0, mask = 0;
+	infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.xpm",
+	                               _("User Info"), 2,
+	                               G_CALLBACK (user_info_btn), users_list);
+	g_object_set_data (G_OBJECT (infobtn), "sess", sess);
 
-	banbtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(banbtn), "sess", sess);
-	g_signal_connect(banbtn, "clicked",
-					   G_CALLBACK(user_ban_btn), users_list);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ban.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(banbtn, pix);
-	gtk_widget_set_tooltip_text(banbtn, _("Ban"));
-	icon = 0, pix = 0, mask = 0;
+	banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.xpm",
+	                              _("Ban"), 2,
+	                              G_CALLBACK (user_ban_btn), users_list);
+	g_object_set_data (G_OBJECT (banbtn), "sess", sess);
 
-	chatbtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(chatbtn), "sess", sess);
-	gtk_widget_set_tooltip_text(chatbtn, _("Private Chat"));
-	g_signal_connect(chatbtn, "clicked",
-					   G_CALLBACK(user_chat_btn), users_list);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(chatbtn, pix);
-	icon = 0, pix = 0, mask = 0;
+	chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.xpm",
+	                               _("Private Chat"), 2,
+	                               G_CALLBACK (user_chat_btn), users_list);
+	g_object_set_data (G_OBJECT (chatbtn), "sess", sess);
 
-	ignobtn = gtk_button_new();
-	g_object_set_data(G_OBJECT(ignobtn), "sess", sess);
-	gtk_widget_set_tooltip_text(ignobtn, _("Ignore"));
-	g_signal_connect(ignobtn, "clicked",
-					   G_CALLBACK(user_igno_btn), users_list);
-	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/ignore.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
-	gtkhx_widget_set_child(ignobtn, pix);
+	ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.xpm",
+	                               _("Ignore"), 2,
+	                               G_CALLBACK (user_igno_btn), users_list);
+	g_object_set_data (G_OBJECT (ignobtn), "sess", sess);
 
 	gtk_widget_set_sensitive(msgbtn, FALSE);
 	gtk_widget_set_sensitive(kickbtn, FALSE);
