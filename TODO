@@ -1,3 +1,7 @@
+Security:
+- Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
+- Look into what newer Hotline clients/servers support (ties into mhxd epic)
+
 Pulling in any new developments from over the years:
 - Look into rebasing hx-specific code (especially anything protocol related) from mhxd
 - Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
