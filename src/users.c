@@ -253,7 +253,20 @@ static const GActionEntry user_action_entries[] = {
 static void
 user_popover_closed (GtkPopover *popover, gpointer data)
 {
+	GtkWidget *anchor;
 	(void) data;
+
+	/* Phase 5: clear the "user" action group we installed on the
+	 * anchor in user_popup. Each right-click installs a fresh
+	 * action group with handlers bound to the just-clicked user;
+	 * leaving the previous group on the anchor would leak the ctx
+	 * + run handlers against a stale user pointer if the popover
+	 * is somehow re-shown without re-creating it. Passing NULL
+	 * clears the slot. */
+	anchor = g_object_get_data (G_OBJECT (popover), "user-action-anchor");
+	if (anchor)
+		gtk_widget_insert_action_group (anchor, "user", NULL);
+
 	/* Phase 4.7: the GtkPopoverMenu was parented to the user list with
 	 * gtk_widget_set_parent; reverse it on close so the popover and its
 	 * action context are released. */
@@ -320,13 +333,16 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	g_menu_append_section (model, NULL, G_MENU_MODEL (interact_section));
 	g_object_unref (interact_section);
 
-	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
-	g_object_unref (model);
-	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
-	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
-	gtk_widget_set_halign (popover, GTK_ALIGN_START);
-
+	/* Phase 5: build the GSimpleActionGroup BEFORE the popover, then
+	 * install it on the anchor widget. The earlier code created the
+	 * popover from the menu model first and inserted the action group
+	 * onto the popover afterwards — which left the menu items stuck
+	 * in a "no action available" disabled state at construction time
+	 * (the user reported "popup menu does not work; items can't be
+	 * selected"). Moving the action group onto the anchor first means
+	 * gtk_popover_menu_new_from_model resolves user.kick / user.ban /
+	 * user.info / user.msg / user.pchat to live actions as it builds
+	 * the GtkButton items, so they come up enabled and clickable. */
 	actions = g_simple_action_group_new ();
 	for (i = 0; i < (int) G_N_ELEMENTS (user_action_entries); i++) {
 		const GActionEntry *e = &user_action_entries[i];
@@ -349,13 +365,24 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 		g_object_unref (noop);
 	}
 
-	gtk_widget_insert_action_group (popover, "user", G_ACTION_GROUP (actions));
+	gtk_widget_insert_action_group (anchor, "user", G_ACTION_GROUP (actions));
 	g_object_unref (actions);
 
+	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
+	g_object_unref (model);
+	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
+	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
+	gtk_widget_set_halign (popover, GTK_ALIGN_START);
+
 	/* Hang the ctx off the popover so its lifetime matches the popover's
-	 * — when the popover is unparented the destroy notify frees it. */
+	 * — when the popover is unparented the destroy notify frees it.
+	 * The action group on the anchor outlives the popover but its
+	 * activate handlers borrow ctx, so we also unhook the action group
+	 * from the anchor on close (see user_popover_closed). */
 	g_object_set_data_full (G_OBJECT (popover), "user-action-ctx",
 	                        ctx, user_action_ctx_free);
+	g_object_set_data (G_OBJECT (popover), "user-action-anchor", anchor);
 
 	gtk_widget_set_parent (popover, anchor);
 	g_signal_connect (popover, "closed",
