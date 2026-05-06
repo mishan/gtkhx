@@ -621,6 +621,83 @@ static void list_bookmarks (GtkWidget *combo, GArray *entries)
 	g_free (legacy);
 }
 
+/* Phase 5: scan a bookmarks dir and append each entry as a menu item
+ * targeting app.open_bookmark with the bookmark name as a string
+ * variant. Skips dotfiles (".", "..", and any hidden override files)
+ * and de-dupes against names already in the menu so the legacy
+ * ~/.hx/bookmarks/ pass doesn't add doubles for entries that exist
+ * in both locations. */
+static gboolean
+menu_already_has_bookmark (GMenu *menu, const char *name)
+{
+	int i, n = g_menu_model_get_n_items (G_MENU_MODEL (menu));
+	for (i = 0; i < n; i++) {
+		GVariant *target;
+		const char *existing;
+		gboolean match = FALSE;
+
+		target = g_menu_model_get_item_attribute_value (
+			G_MENU_MODEL (menu), i, G_MENU_ATTRIBUTE_TARGET, NULL);
+		if (!target)
+			continue;
+		existing = g_variant_get_string (target, NULL);
+		match = g_strcmp0 (existing, name) == 0;
+		g_variant_unref (target);
+		if (match)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void
+build_bookmark_menu_from_dir (GMenu *menu, const char *path)
+{
+	struct dirent *ent;
+	DIR *dir;
+
+	if (!path || !(dir = opendir (path)))
+		return;
+
+	while ((ent = readdir (dir))) {
+		GMenuItem *item;
+
+		if (*ent->d_name == '.')
+			continue;
+		if (menu_already_has_bookmark (menu, ent->d_name))
+			continue;
+
+		item = g_menu_item_new (ent->d_name, NULL);
+		g_menu_item_set_action_and_target_value (
+			item, "app.open_bookmark",
+			g_variant_new_string (ent->d_name));
+		g_menu_append_item (menu, item);
+		g_object_unref (item);
+	}
+	closedir (dir);
+}
+
+GMenu *
+connect_build_bookmark_menu (void)
+{
+	GMenu *menu = g_menu_new ();
+	char *primary = bookmarks_dir_primary ();
+	char *legacy  = bookmarks_dir_legacy ();
+
+	build_bookmark_menu_from_dir (menu, primary);
+	build_bookmark_menu_from_dir (menu, legacy);
+
+	g_free (primary);
+	g_free (legacy);
+	return menu;
+}
+
+void
+connect_open_bookmark_by_name (const char *name)
+{
+	if (name && *name)
+		open_bookmark (NULL, (gpointer) name);
+}
+
 /* Phase 5: bookmark save migrates to AdwAlertDialog with the name
  * entry as extra-child. The response handler reads the entry, does
  * the file-write work, and lets the dialog auto-dismiss. The

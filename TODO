@@ -2,16 +2,9 @@ Pulling in any new developments from over the years:
 - Look into rebasing hx-specific code (especially anything protocol related) from mhxd
 - Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
 
-Settings cleanup:
-- Move "Appearance" and "Paths" tabs under new "General"
-- Combine "News" and "File" tabs either under new "Interface" or under "General" as well
-- Move "Show join / leave in chat" and "Old-style nick completion" settings to "Chat" tab
-- Move "Case-sensitive tracker search" setting to "Trackers" tab
-
 UI Modernization:
-- Bigger button icons
-- Move edit/new user buttons to Admin submenu in hamburger menu
 - Icon picker in settings should display larger icons, and a better layout. Maybe two entries per row?
+- Tracker -- move icons into titlebar, use modern search field
 
 Bookmark Management
 

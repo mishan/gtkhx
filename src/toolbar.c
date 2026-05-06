@@ -106,6 +106,23 @@ on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
 	useredit_open_dialog (NULL, user_data);
 }
 
+/* Phase 5: app.open_bookmark fires from the AdwSplitButton's
+ * dropdown menu. The GVariant parameter carries the bookmark
+ * name as a string; connect_open_bookmark_by_name reads the
+ * file and dispatches to the existing connect path. */
+static void
+on_action_open_bookmark (GSimpleAction *action, GVariant *param,
+                         gpointer user_data)
+{
+	const char *name;
+	(void) action; (void) user_data;
+
+	if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_STRING))
+		return;
+	name = g_variant_get_string (param, NULL);
+	connect_open_bookmark_by_name (name);
+}
+
 /* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
  * returning gboolean. Returning TRUE inhibits the default destroy —
  * we always want to call hx_quit() (which calls exit()), so the
@@ -198,11 +215,13 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static const GActionEntry app_actions[] = {
-	{ .name = "settings",  .activate = on_action_settings  },
-	{ .name = "about",     .activate = on_action_about     },
-	{ .name = "user_new",  .activate = on_action_user_new  },
-	{ .name = "user_edit", .activate = on_action_user_edit },
-	{ .name = "quit",      .activate = on_action_quit      },
+	{ .name = "settings",      .activate = on_action_settings      },
+	{ .name = "about",         .activate = on_action_about         },
+	{ .name = "user_new",      .activate = on_action_user_new      },
+	{ .name = "user_edit",     .activate = on_action_user_edit     },
+	{ .name = "open_bookmark", .activate = on_action_open_bookmark,
+	  .parameter_type = "s" },
+	{ .name = "quit",          .activate = on_action_quit          },
 };
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
@@ -332,6 +351,29 @@ make_pixmap_button (const char *resource_name,
 	                            TOOLBAR_ICON_SCALE, cb, user_data);
 }
 
+/* Phase 5: rebuild the bookmark menu just before the AdwSplitButton
+ * popover renders. The popover is parented to the split button, so
+ * we walk back to that to get the AdwSplitButton handle. Cheap —
+ * scanning two directories of small files. */
+static void
+on_connect_popover_show (GtkPopover *popover, gpointer user_data)
+{
+	GtkWidget *split;
+	GMenu *menu;
+	(void) user_data;
+
+	split = gtk_widget_get_parent (GTK_WIDGET (popover));
+	while (split && !ADW_IS_SPLIT_BUTTON (split))
+		split = gtk_widget_get_parent (split);
+	if (!split)
+		return;
+
+	menu = connect_build_bookmark_menu ();
+	adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (split),
+	                                 G_MENU_MODEL (menu));
+	g_object_unref (menu);
+}
+
 /* Phase 4.5: configure-event is gone in GTK 4 and the toolbar window
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
@@ -358,11 +400,36 @@ void create_toolbar_window (session *sess)
 	/* ------------- header bar (top) ------------- */
 	header = adw_header_bar_new ();
 
-	connect_btn = gtk_button_new_from_icon_name ("network-transmit-receive-symbolic");
+	/* Phase 5: AdwSplitButton — primary click opens the connect
+	 * dialog (the existing flow); the dropdown chevron exposes a
+	 * menu of saved bookmarks targeting app.open_bookmark with the
+	 * name as parameter. The menu is rebuilt lazily on each popup
+	 * so newly-saved bookmarks show up without a restart — see
+	 * the popover->show signal hook below. */
+	connect_btn = adw_split_button_new ();
+	adw_split_button_set_icon_name (ADW_SPLIT_BUTTON (connect_btn),
+	                                "network-transmit-receive-symbolic");
 	gtk_widget_add_css_class (connect_btn, "suggested-action");
 	gtk_widget_set_tooltip_text (connect_btn, _("Connect"));
 	g_signal_connect (connect_btn, "clicked",
 	                  G_CALLBACK (create_connect_window), sess);
+	{
+		GMenu *menu = connect_build_bookmark_menu ();
+		adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
+		                                 G_MENU_MODEL (menu));
+		g_object_unref (menu);
+
+		/* Rebuild the menu when the user opens the dropdown so
+		 * Save Bookmark hits show up without an app restart. */
+		{
+			GtkPopover *pop = adw_split_button_get_popover (
+				ADW_SPLIT_BUTTON (connect_btn));
+			if (pop)
+				g_signal_connect (pop, "show",
+				                  G_CALLBACK (on_connect_popover_show),
+				                  NULL);
+		}
+	}
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), connect_btn);
 
 	disconnect_btn = gtk_button_new_from_icon_name ("network-offline-symbolic");
