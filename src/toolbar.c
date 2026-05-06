@@ -47,7 +47,7 @@
 #include "toolbar.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn, *post_btn;
-GtkWidget *disconnect_btn, *usermod_btn, *usernew_btn, *news15_btn;
+GtkWidget *disconnect_btn, *news15_btn;
 
 #ifdef USE_PLUGIN
 GtkWidget *plugin_btn;
@@ -68,9 +68,24 @@ GtkWidget *status_bar;
  * external callers go through toolbar_show_toast(). */
 static AdwToastOverlay *toolbar_toast;
 
-static void create_new_user (void)
+/* Phase 5: New User / Edit User used to be standalone toolbar
+ * buttons. They're admin actions used rarely (only by sysops),
+ * so they fold into an Admin submenu in the hamburger. The
+ * GActions below carry the same dispatch the old click handlers
+ * did; their enabled state is toggled in setbtns() to mirror
+ * the historic per-button sensitivity. */
+static void
+on_action_user_new (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	create_useredit_window(0,1);
+	(void) action; (void) param; (void) user_data;
+	create_useredit_window (0, 1);
+}
+
+static void
+on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	(void) action; (void) param;
+	useredit_open_dialog (NULL, user_data);
 }
 
 /* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
@@ -165,9 +180,11 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static const GActionEntry app_actions[] = {
-	{ .name = "settings", .activate = on_action_settings },
-	{ .name = "about",    .activate = on_action_about    },
-	{ .name = "quit",     .activate = on_action_quit     },
+	{ .name = "settings",  .activate = on_action_settings  },
+	{ .name = "about",     .activate = on_action_about     },
+	{ .name = "user_new",  .activate = on_action_user_new  },
+	{ .name = "user_edit", .activate = on_action_user_edit },
+	{ .name = "quit",      .activate = on_action_quit      },
 };
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
@@ -194,29 +211,58 @@ toolbar_show_toast (const char *text)
 void
 toolbar_register_actions (GApplication *app, session *sess)
 {
+	GAction *act;
+
 	g_return_if_fail (app != NULL);
 
 	g_action_map_add_action_entries (G_ACTION_MAP (app),
 	                                 app_actions,
 	                                 G_N_ELEMENTS (app_actions),
 	                                 sess);
+
+	/* Admin actions start disabled until login (gtkutil.c setbtns
+	 * flips them on with the rest of the connection-gated UI). */
+	act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_new");
+	if (G_IS_SIMPLE_ACTION (act))
+		g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
+	act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_edit");
+	if (G_IS_SIMPLE_ACTION (act))
+		g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
 }
 
 /* Phase 5: build the GtkMenuButton + GMenuModel that hangs off the
- * end of the AdwHeaderBar. Three entries — Settings, About, Quit —
- * since those are the global, server-independent actions. The
- * connection-specific buttons stay on the content row where the
- * user clicks them often. */
+ * end of the AdwHeaderBar. The connection-specific feature buttons
+ * stay in the content row where the user clicks them often; the
+ * menu collects the global / less-frequent actions:
+ *
+ *   Settings
+ *   About GtkHx
+ *   Admin >
+ *     New User...
+ *     Edit User...
+ *   Quit
+ *
+ * Admin is a submenu (separate GMenu wrapped via append_submenu)
+ * because New / Edit User are sysop-only — keeping them visible
+ * but tucked away from the everyday user-flow. The GActions stay
+ * disabled at startup; setbtns() flips them on at login (and only
+ * for accounts whose privileges actually grant admin). */
 static GtkWidget *
 build_hamburger (void)
 {
-	GMenu *menu;
+	GMenu *menu, *admin_menu;
 	GtkWidget *btn;
+
+	admin_menu = g_menu_new ();
+	g_menu_append (admin_menu, _("New User…"),  "app.user_new");
+	g_menu_append (admin_menu, _("Edit User…"), "app.user_edit");
 
 	menu = g_menu_new ();
 	g_menu_append (menu, _("Settings"),    "app.settings");
 	g_menu_append (menu, _("About GtkHx"), "app.about");
+	g_menu_append_submenu (menu, _("Admin"), G_MENU_MODEL (admin_menu));
 	g_menu_append (menu, _("Quit"),        "app.quit");
+	g_object_unref (admin_menu);
 
 	btn = gtk_menu_button_new ();
 	gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
@@ -330,14 +376,9 @@ void create_toolbar_window (session *sess)
 		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tasks.xpm",
 		                    _("Tasks"),
 		                    G_CALLBACK (create_tasks_window), sess));
-	usernew_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newuser.xpm",
-	                                  _("New User"),
-	                                  G_CALLBACK (create_new_user), sess);
-	gtk_box_append (GTK_BOX (hbox), usernew_btn);
-	usermod_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/edituser.xpm",
-	                                  _("Edit User"),
-	                                  G_CALLBACK (useredit_open_dialog), sess);
-	gtk_box_append (GTK_BOX (hbox), usermod_btn);
+	/* Phase 5: New User / Edit User used to be toolbar buttons.
+	 * They've moved into the hamburger menu's Admin submenu — sysop
+	 * actions don't need to occupy primary real estate. */
 
 #ifdef USE_PLUGIN
 	plugin_btn = gtk_button_new_with_label ("[ P ]");
@@ -379,12 +420,12 @@ void create_toolbar_window (session *sess)
 	gtk_window_set_child (GTK_WINDOW (toolbar_window), GTK_WIDGET (toolbar_toast));
 
 	/* Initial sensitivity: pre-connection, only Connect + the global
-	 * menu items are usable. setbtns() flips the rest on at login. */
+	 * menu items are usable. setbtns() flips the rest on at login,
+	 * including the Admin submenu's app.user_new / app.user_edit
+	 * GActions. */
 	gtk_widget_set_sensitive (disconnect_btn, FALSE);
 	gtk_widget_set_sensitive (files_btn,      FALSE);
 	gtk_widget_set_sensitive (post_btn,       FALSE);
-	gtk_widget_set_sensitive (usermod_btn,    FALSE);
-	gtk_widget_set_sensitive (usernew_btn,    FALSE);
 	gtk_widget_set_sensitive (news15_btn,     FALSE);
 
 	/* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
@@ -407,8 +448,6 @@ void create_toolbar_window (session *sess)
 		gtk_widget_set_sensitive (disconnect_btn, TRUE);
 		gtk_widget_set_sensitive (files_btn,      TRUE);
 		gtk_widget_set_sensitive (post_btn,       TRUE);
-		gtk_widget_set_sensitive (usermod_btn,    TRUE);
-		gtk_widget_set_sensitive (usernew_btn,    TRUE);
 		gtk_widget_set_sensitive (news15_btn,     TRUE);
 		changetitlespecific (toolbar_window, "GtkHx");
 	}

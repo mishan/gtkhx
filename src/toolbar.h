@@ -6,8 +6,6 @@ extern GtkWidget *files_btn;
 extern GtkWidget *connect_btn;
 extern GtkWidget *post_btn;
 extern GtkWidget *disconnect_btn;
-extern GtkWidget *usermod_btn;
-extern GtkWidget *usernew_btn;
 extern GtkWidget *news15_btn;
 
 /* Phase 5: status_bar is a GtkLabel now (was GtkStatusbar — deprecated

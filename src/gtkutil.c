@@ -105,6 +105,25 @@ void set_disconnect_btn(session *sess, int stat)
 	gtk_widget_set_sensitive(disconnect_btn, stat);
 }
 
+/* Phase 5: helper to flip a hamburger-menu GAction's enabled state.
+ * The Admin submenu's New User / Edit User entries used to be
+ * standalone toolbar buttons whose sensitivity was driven by the
+ * connection state; with the actions on the application instead,
+ * we toggle GSimpleAction::enabled and the menu items grey out
+ * automatically. */
+static void
+set_app_action_enabled (const char *name, gboolean enabled)
+{
+	GApplication *app = g_application_get_default ();
+	GAction *action;
+
+	if (!app)
+		return;
+	action = g_action_map_lookup_action (G_ACTION_MAP (app), name);
+	if (G_IS_SIMPLE_ACTION (action))
+		g_simple_action_set_enabled (G_SIMPLE_ACTION (action), enabled);
+}
+
 void setbtns(session *sess, int stat)
 {
 	if(gtkhx_prefs.geo.users.open) {
@@ -123,9 +142,13 @@ void setbtns(session *sess, int stat)
 	}
 
 	gtk_widget_set_sensitive(files_btn, stat);
-	gtk_widget_set_sensitive(usermod_btn, stat);
-	gtk_widget_set_sensitive(usernew_btn, stat);
-	
+
+	/* Phase 5: New User / Edit User moved from toolbar buttons to
+	 * the hamburger menu's Admin submenu. Flip the corresponding
+	 * GActions instead of the old GtkWidget pointers. */
+	set_app_action_enabled ("user_new",  stat);
+	set_app_action_enabled ("user_edit", stat);
+
 	if(!stat) {
 		gtk_widget_set_sensitive(news15_btn, stat);
 		gtk_widget_set_sensitive(post_btn, stat);
