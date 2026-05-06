@@ -334,122 +334,117 @@ static void gfnews_reload_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 	hx_news15_fldr_list(&the_session.htlc, gfnews);
 }
 
-static void gfnews_mkdir(GtkWidget *widget, gpointer data)
+/* Phase 5: AdwAlertDialog with a GtkEntry as extra-child replaces the
+ * hand-rolled GtkDialog used by the New News Folder / New News
+ * Category prompts. The two flows differ only in their post-create
+ * action, so they share the same dialog skeleton: a small struct
+ * carries the gfnews context plus a tag that on_response dispatches
+ * on. The struct is freed via the dialog's "closed" signal. */
+
+enum gfnews_create_kind { GFNEWS_CREATE_DIR, GFNEWS_CREATE_CAT };
+
+struct gfnews_create_ctx {
+	struct gnews_folder *gfnews;
+	enum gfnews_create_kind kind;
+};
+
+static void
+gfnews_create_response (AdwAlertDialog *dialog, const char *response, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-														"entry");
-	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
-													  "gfnews");
-	char *name = gtk_editable_get_text(GTK_EDITABLE(entry));
-	char pathname[MAXPATHLEN];
+	struct gfnews_create_ctx *ctx = data;
+	GtkEditable *entry;
+	const char *name;
 
-	snprintf(pathname, MAXPATHLEN, "%s/%s", gfnews->path, name);
+	if (g_strcmp0 (response, "create") != 0)
+		return;
 
-	hx_news15_mkdir(&the_session.htlc, pathname);
-	hx_news15_fldr_list(&the_session.htlc, gfnews);
+	entry = GTK_EDITABLE (adw_alert_dialog_get_extra_child (dialog));
+	if (!entry)
+		return;
+	name = gtk_editable_get_text (entry);
 
-	gtkhx_widget_destroy(GTK_WIDGET(data));
+	if (ctx->kind == GFNEWS_CREATE_DIR) {
+		char pathname[MAXPATHLEN];
+		snprintf (pathname, MAXPATHLEN, "%s/%s",
+		          ctx->gfnews->path, name);
+		hx_news15_mkdir (&the_session.htlc, pathname);
+	} else {
+		hx_news15_mkcat (&the_session.htlc, ctx->gfnews->path, name);
+	}
+	hx_news15_fldr_list (&the_session.htlc, ctx->gfnews);
 }
-static void gfnews_mkcat(GtkWidget *widget, gpointer data)
+
+static void
+gfnews_create_closed (AdwDialog *dialog, gpointer data)
 {
-	GtkWidget *entry = (GtkWidget *)g_object_get_data(G_OBJECT(widget),
-														"entry");
-	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(widget),
-													  "gfnews");
-	char *name = gtk_editable_get_text(GTK_EDITABLE(entry));
+	(void) dialog;
+	g_free (data);
+}
 
-	hx_news15_mkcat(&the_session.htlc, gfnews->path, name);
-	hx_news15_fldr_list(&the_session.htlc, gfnews);
+static void
+gfnews_create_entry_activate (GtkEntry *entry, gpointer data)
+{
+	(void) entry;
+	g_signal_emit_by_name (data, "response", "create");
+}
 
-	gtkhx_widget_destroy(GTK_WIDGET(data));
+static void
+gfnews_create_dialog (GtkWidget *btn, struct gnews_folder *gfnews,
+                      enum gfnews_create_kind kind)
+{
+	AdwDialog *dialog;
+	GtkWidget *entry;
+	struct gfnews_create_ctx *ctx;
+	const char *title, *body, *create_label;
+
+	if (kind == GFNEWS_CREATE_DIR) {
+		title = _("New News Folder");
+		body  = _("Enter a name for the new news folder.");
+		create_label = _("C_reate Folder");
+	} else {
+		title = _("New News Category");
+		body  = _("Enter a name for the new news category.");
+		create_label = _("C_reate Category");
+	}
+
+	dialog = adw_alert_dialog_new (title, body);
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "create", create_label);
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "create",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+	                                       "create");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog),
+	                                       "cancel");
+
+	entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+	g_signal_connect (entry, "activate",
+	                  G_CALLBACK (gfnews_create_entry_activate), dialog);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+
+	ctx = g_new (struct gfnews_create_ctx, 1);
+	ctx->gfnews = gfnews;
+	ctx->kind   = kind;
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (gfnews_create_response), ctx);
+	g_signal_connect (dialog, "closed",
+	                  G_CALLBACK (gfnews_create_closed), ctx);
+
+	adw_dialog_present (dialog, btn);
 }
 
 static void gfnews_mkdir_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 {
-	GtkWidget *dialog;
-	GtkWidget *nameEntry;
-	GtkWidget *okBtn;
-	GtkWidget *cancelBtn;
-	GtkWidget *nameEntryLabel;
-	GtkWidget *entryHbox;
-	GtkWidget *btnHbox;
-	GtkRoot *root = gtk_widget_get_root (btn);
-
-	dialog = gtk_dialog_new();
-	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Folder..."));
-	if (root && GTK_IS_WINDOW (root))
-		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
-	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
-	nameEntryLabel = gtk_label_new(_("Name: "));
-	nameEntry = gtk_entry_new();
-	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
-	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
-
-	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
-	g_signal_connect(okBtn, "clicked", G_CALLBACK(gfnews_mkdir),
-					   dialog);
-
-	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtkhx_widget_destroy,
-							  dialog);
-
-	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
-	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
-	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_window_present(GTK_WINDOW(dialog));
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
+	gfnews_create_dialog (btn, gfnews, GFNEWS_CREATE_DIR);
 }
 
 static void gfnews_mkcat_btn(GtkWidget *btn, struct gnews_folder *gfnews)
 {
-	GtkWidget *dialog;
-	GtkWidget *nameEntry;
-	GtkWidget *okBtn;
-	GtkWidget *cancelBtn;
-	GtkWidget *nameEntryLabel;
-	GtkWidget *entryHbox;
-	GtkWidget *btnHbox;
-	GtkRoot *root = gtk_widget_get_root (btn);
-
-	dialog = gtk_dialog_new();
-	gtk_window_set_title(GTK_WINDOW(dialog), _("New News Category..."));
-	if (root && GTK_IS_WINDOW (root))
-		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(root));
-	entryHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-    (gtk_widget_set_margin_start(dialog, 5), gtk_widget_set_margin_end(dialog, 5), gtk_widget_set_margin_top(dialog, 5), gtk_widget_set_margin_bottom(dialog, 5));
-	gtkhx_box_pack(gtk_dialog_get_content_area(GTK_DIALOG(dialog)), entryHbox, 0, 0, 0);
-	nameEntryLabel = gtk_label_new(_("Name: "));
-	nameEntry = gtk_entry_new();
-	gtkhx_box_pack(entryHbox, nameEntryLabel, 0, 0, 0);
-	gtkhx_box_pack(entryHbox, nameEntry, 0, 0, 0);
-
-	okBtn = gtk_button_new_with_label(_("OK"));
-	g_object_set_data(G_OBJECT(okBtn), "entry", nameEntry);
-	g_object_set_data(G_OBJECT(okBtn), "gfnews", gfnews);
-	g_signal_connect(okBtn, "clicked", G_CALLBACK(gfnews_mkcat),
-					   dialog);
-
-	cancelBtn = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect_swapped(cancelBtn, "clicked",
-							  (GCallback) gtkhx_widget_destroy,
-							  dialog);
-
-	btnHbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 4.2: gtk_widget_set_can_default removed */
-	gtkhx_widget_set_child(gtkhx_dialog_action_area(GTK_DIALOG(dialog)), btnHbox);
-	gtkhx_box_pack(btnHbox, okBtn, 0, 0, 0);
-	gtkhx_box_pack(btnHbox, cancelBtn, 0, 0, 0);
-	gtk_window_present(GTK_WINDOW(dialog));
-	/* Phase 4.2: gtk_widget_grab_default removed (use gtk_window_set_default_widget if needed) */
+	gfnews_create_dialog (btn, gfnews, GFNEWS_CREATE_CAT);
 }
 
 static void gfnews_delete_btn(GtkWidget *btn, struct gnews_folder *gfnews)
