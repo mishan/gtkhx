@@ -33,6 +33,7 @@
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
@@ -48,31 +49,52 @@
 
 static struct hx_preview *hx_preview_list = NULL;
 
+/* Phase 5: GTK 4 GtkTextBuffer requires valid UTF-8; injecting raw
+ * bytes from a binary file (or any file with invalid sequences in
+ * the middle) hits an assertion that takes the app down. Sanitize
+ * with g_utf8_make_valid so binary content displays as garbled text
+ * rather than crashing the app. */
+static gboolean
+preview_window_close_request (GtkWindow *window, gpointer user_data)
+{
+	struct hx_text_preview *tp = user_data;
+	(void) window;
+	if (tp)
+		tp->closed = TRUE;
+	return FALSE;  /* let the default destroy proceed */
+}
+
 static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 {
-	struct hx_text_preview *tp = malloc(sizeof(struct hx_text_preview));
+	struct hx_text_preview *tp = g_malloc0(sizeof(struct hx_text_preview));
 	GtkWidget *window;
 	GtkWidget *text;
 	GtkWidget *scroll;
 
 	window = gtk_window_new();
 	gtk_window_set_title(GTK_WINDOW(window), p->name);
+	gtk_window_set_titlebar(GTK_WINDOW(window), adw_header_bar_new());
 	text = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), FALSE);
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text), FALSE);
+	gtk_text_view_set_monospace(GTK_TEXT_VIEW(text), TRUE);
 	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	gtkhx_widget_set_child(scroll, text);
 
-	gtk_widget_set_size_request(window, 400, 300);
+	gtk_window_set_default_size(GTK_WINDOW(window), 480, 360);
 	gtkhx_widget_set_child(window, scroll);
-
-	gtk_window_present(GTK_WINDOW(window));
 
 	tp->window = window;
 	tp->text = text;
 	tp->p = p;
+	tp->closed = FALSE;
+
+	g_signal_connect(window, "close-request",
+	                 G_CALLBACK(preview_window_close_request), tp);
+
+	gtk_window_present(GTK_WINDOW(window));
 
 	return tp;
 }
@@ -80,16 +102,23 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 static void hx_preview_text_output (struct hx_preview *p, char *buf, int len)
 {
 	struct hx_text_preview *tp = p->data;
+	GtkTextBuffer *tbuf;
+	GtkTextIter end;
+	char *valid;
 
-	{
-		GtkTextBuffer *tbuf;
-		GtkTextIter end;
+	if (!tp || tp->closed)
+		return;
 
-		CR2LF(buf, len);
-		tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tp->text));
-		gtk_text_buffer_get_end_iter(tbuf, &end);
-		gtk_text_buffer_insert(tbuf, &end, buf, len);
-	}
+	CR2LF(buf, len);
+	/* g_utf8_make_valid takes a length-bounded buffer and returns a
+	 * fresh g_strdup'd copy with invalid sequences replaced by U+FFFD.
+	 * Binary content stays renderable; valid UTF-8 passes through
+	 * unchanged. */
+	valid = g_utf8_make_valid(buf, len);
+	tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tp->text));
+	gtk_text_buffer_get_end_iter(tbuf, &end);
+	gtk_text_buffer_insert(tbuf, &end, valid, -1);
+	g_free(valid);
 }
 
 struct hx_preview *hx_preview_new(char *creator, char *type, char *name)
