@@ -11,6 +11,7 @@ Settings cleanup:
 UI Modernization:
 - Bigger button icons
 - Move edit/new user buttons to Admin submenu in hamburger menu
+- Icon picker in settings should display larger icons, and a better layout. Maybe two entries per row?
 
 Bookmark Management
 

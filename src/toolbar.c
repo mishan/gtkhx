@@ -68,6 +68,24 @@ GtkWidget *status_bar;
  * external callers go through toolbar_show_toast(). */
 static AdwToastOverlay *toolbar_toast;
 
+/* Phase 5: AdwBanner sits above the content row and surfaces
+ * connection-issue state that needs user action — typically "Lost
+ * connection — Reconnect" after an unexpected disconnect. Hidden by
+ * default; toolbar_show_connection_lost / toolbar_hide_banner toggle
+ * the "revealed" property. The banner button opens the connect
+ * dialog with the existing server fields, letting the user
+ * re-Connect with one click after the dialog appears. */
+static AdwBanner *toolbar_banner;
+
+static void
+on_banner_button_clicked (AdwBanner *banner, gpointer user_data)
+{
+	(void) banner;
+	if (toolbar_banner)
+		adw_banner_set_revealed (toolbar_banner, FALSE);
+	create_connect_window (NULL, user_data);
+}
+
 /* Phase 5: New User / Edit User used to be standalone toolbar
  * buttons. They're admin actions used rarely (only by sysops),
  * so they fold into an Admin submenu in the hamburger. The
@@ -199,6 +217,31 @@ toolbar_show_toast (const char *text)
 	if (!toolbar_toast || !text)
 		return;
 	adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (text));
+}
+
+/* Phase 5: surface "lost connection" with a Reconnect button. The
+ * banner is built once with the toolbar; here we just set the title
+ * text to the live server name and reveal it. set_status_bar() drives
+ * the show/hide on the 1/2 -> 0 (and 2 -> 0) transitions; a fresh
+ * login (status == 2) clears the banner via toolbar_hide_banner. */
+void
+toolbar_show_connection_lost (const char *server)
+{
+	char *title;
+
+	if (!toolbar_banner)
+		return;
+	title = g_strdup_printf (_("Lost connection to %s"), server ? server : "");
+	adw_banner_set_title    (toolbar_banner, title);
+	adw_banner_set_revealed (toolbar_banner, TRUE);
+	g_free (title);
+}
+
+void
+toolbar_hide_banner (void)
+{
+	if (toolbar_banner)
+		adw_banner_set_revealed (toolbar_banner, FALSE);
 }
 
 /* Phase 5: register the hamburger-menu actions on the application.
@@ -406,7 +449,18 @@ void create_toolbar_window (session *sess)
 	 * natural height of those two children. */
 	gtk_window_set_titlebar (GTK_WINDOW (toolbar_window), header);
 
+	/* Phase 5: AdwBanner sits above the content row for "lost
+	 * connection" state with an actionable Reconnect button.
+	 * Hidden by default; toolbar_show_connection_lost() reveals
+	 * it from set_status_bar() on the 1/2 -> 0 transition. */
+	toolbar_banner = ADW_BANNER (adw_banner_new (""));
+	adw_banner_set_button_label (toolbar_banner, _("Reconnect"));
+	adw_banner_set_revealed (toolbar_banner, FALSE);
+	g_signal_connect (toolbar_banner, "button-clicked",
+	                  G_CALLBACK (on_banner_button_clicked), sess);
+
 	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append (GTK_BOX (vbox), GTK_WIDGET (toolbar_banner));
 	gtk_box_append (GTK_BOX (vbox), hbox);
 	gtk_box_append (GTK_BOX (vbox), status_bar);
 

@@ -193,23 +193,30 @@ void set_status_bar(int status)
 	switch (status) {
 	case -1:
 		fmt = g_strdup_printf ("%s %s", _("Connecting to"), server_addr);
+		/* Hide any leftover "lost connection" banner — the user
+		 * is actively trying to reconnect. */
+		toolbar_hide_banner ();
 		break;
 	case 0:
 		fixed = _("Not Connected");
-		/* Toast only on a real disconnect — first-launch state
-		 * change of 0 -> 0 shouldn't surface a notification, and
-		 * neither should a Connect-canceled (last_status == -1). */
-		if (last_status == 1 || last_status == 2)
+		/* Toast + banner only on a real disconnect — first-launch
+		 * state change of 0 -> 0 shouldn't surface a notification,
+		 * and neither should a Connect-canceled (last_status == -1). */
+		if (last_status == 1 || last_status == 2) {
 			toast = g_strdup_printf ("%s %s",
 			                         _("Disconnected from"),
 			                         server_addr);
+			toolbar_show_connection_lost (server_addr);
+		}
 		break;
 	case 1:
 		fmt = g_strdup_printf ("%s %s", _("Connected to"), server_addr);
+		toolbar_hide_banner ();
 		break;
 	case 2:
 		fmt = g_strdup_printf ("%s %s", _("Logged in to"), server_addr);
 		toast = g_strdup (fmt);
+		toolbar_hide_banner ();
 		break;
 	default:
 		return;

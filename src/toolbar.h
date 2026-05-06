@@ -31,4 +31,11 @@ extern void toolbar_register_actions (GApplication *app, session *sess);
  * The toast auto-dismisses after libadwaita's default timeout. */
 extern void toolbar_show_toast (const char *text);
 
+/* Phase 5: reveal / hide the toolbar's AdwBanner. show_connection_lost
+ * sets the banner text to "Lost connection to <server>" and reveals
+ * the banner with a Reconnect button; hide_banner just sets revealed
+ * to FALSE. Safe to call before the toolbar is built (no-op). */
+extern void toolbar_show_connection_lost (const char *server);
+extern void toolbar_hide_banner (void);
+
 #endif
