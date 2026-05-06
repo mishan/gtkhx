@@ -6,10 +6,8 @@ non-ASCII server name corruption / file preview lockup)
 
 Medium priority:
 
-- Chat window width cannot be reduced beyond a certain point
-- Right clicking on a user in the Users list gives a warning:
-
-(gtkhx:285643): Gtk-CRITICAL **: 19:06:59.176: gtk_css_node_insert_after: assertion 'previous_sibling == NULL || previous_sibling->parent == parent' failed
+(none — chat-window minimum-width and right-click CSS-node-insert-after
+warning resolved this session)
 
 Low priority:
 
