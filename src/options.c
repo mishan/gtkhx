@@ -106,36 +106,51 @@ static void parse_tracker (session *);
 struct icon_viewer {
 	guint32 icon_high;
 	unsigned int nfound;
-	GtkWidget *icon_list;
+	GtkWidget *icon_list; /* Phase 5: now a GtkFlowBox, not a GtkHList */
 };
+
+/* Phase 5: forward declarations for the icon-picker FlowBox helpers.
+ * The implementations live further down (after struct cfgvar and
+ * cfgvar_for_name) since they touch the cfgvar lookup table; the
+ * forward decls let list_icons() and settings_page_identity() —
+ * both up here — wire them. */
+static int  icon_picker_sort_cb (GtkFlowBoxChild *a, GtkFlowBoxChild *b,
+                                 gpointer data);
+static void icon_flow_child_activated (GtkFlowBox *flowbox,
+                                       GtkFlowBoxChild *child,
+                                       gpointer data);
 
 void list_icons (void)
 {
-	/* Phase 3.4: cicn_to_pixbuf returns a GdkPixbuf directly with the
-	 * Mac classic mask folded into the alpha channel, so the original
-	 * GdkImage/GdkPixmap/GdkGC dance collapses to a single decode +
-	 * crop.  Wide icons (the 32x32 family bundles four variants in a
-	 * 4*32-pixel row) are clipped to the rightmost 32 px to mirror the
-	 * historical "off = width > 400 ? 198 : 0" hack. */
+	/* Phase 5: replaced the 1-row-per-icon GtkHList layout (18px tall
+	 * rows, 34px icons) with a GtkFlowBox that auto-flows multiple
+	 * larger icons per row. Each entry is now a 64x64 image plus the
+	 * resource-ID label, packed into a vertical box and inserted as
+	 * a flowbox child. The flowbox itself is configured with min/max
+	 * children per line so the picker grows to as many columns as
+	 * fit the picker width without going single-column-narrow.
+	 *
+	 * Phase 3.4: cicn_to_pixbuf returns a GdkPixbuf directly with the
+	 * Mac classic mask folded into the alpha channel. Wide icons
+	 * (the 32x32 family bundles four variants in a 4*32-pixel row)
+	 * are clipped to the rightmost 32 px to mirror the historical
+	 * "off = width > 400 ? 198 : 0" hack. */
 	GtkWidget *icon_list = iv->icon_list;
-	gchar *text[2] = {NULL, NULL};
-	char buf[16];
 	guint16 nres;
 	guint32 icon;
 	unsigned int nfound = 0;
 	int i;
 
-	text[1] = buf;
-	gtk_hlist_freeze (GTK_HLIST (icon_list));
 	for (i = 0; i < icon_files.n; ++i) {
 		if (!icon_files.cicns[i])
 			continue;
 		nres = macres_file_num_res_of_type (icon_files.cicns[i], TYPE_cicn);
 		for (icon = 0; icon < nres; icon++) {
 			macres_res *r;
-			GdkPixbuf *pb, *cropped;
+			GdkPixbuf *pb, *cropped, *scaled;
+			GtkWidget *child, *vbox, *image, *label;
 			int width, height, off;
-			gint row;
+			char buf[16];
 
 			r = macres_file_get_nth_res_of_type (icon_files.cicns[i], TYPE_cicn, icon);
 			if (!r)
@@ -156,18 +171,38 @@ void list_icons (void)
 				pb = cropped;
 			}
 
+			/* Scale to a uniform display size — the source pixbufs
+			 * vary (16x16, 32x32, sometimes wider) and the picker
+			 * looks sloppy if some entries are tiny next to others.
+			 * Nearest-neighbor preserves the pixel-art look on
+			 * scale-up; for the rare 64+ source we let GTK use
+			 * BILINEAR via paintable scaling further down. */
+			scaled = gdk_pixbuf_scale_simple (pb, 64, 64, GDK_INTERP_NEAREST);
+			g_object_unref (pb);
+			pb = scaled ? scaled : pb;
+
 			nfound++;
 			g_snprintf (buf, sizeof (buf), "%u", r->resid);
-			row = gtk_hlist_append (GTK_HLIST (icon_list), text);
-			gtk_hlist_set_row_data (GTK_HLIST (icon_list), row,
-			                        GUINT_TO_POINTER (r->resid));
-			/* Phase 5 dark-theme: no per-row foreground override —
-			 * theme default applies, so the resid label reads on
-			 * both light and dark themes. */
-			gtk_hlist_set_pixtext (GTK_HLIST (icon_list), row, 0, "", 34,
-			                       pb, NULL);
-			g_object_unref (pb);
 
+			vbox  = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+			image = gtkhx_image_new_from_pixbuf (pb);
+			gtk_widget_set_size_request (image, 64, 64);
+			label = gtk_label_new (buf);
+			gtk_widget_add_css_class (label, "caption");
+			gtk_box_append (GTK_BOX (vbox), image);
+			gtk_box_append (GTK_BOX (vbox), label);
+			gtk_widget_set_margin_start  (vbox, 6);
+			gtk_widget_set_margin_end    (vbox, 6);
+			gtk_widget_set_margin_top    (vbox, 6);
+			gtk_widget_set_margin_bottom (vbox, 6);
+
+			child = gtk_flow_box_child_new ();
+			gtk_flow_box_child_set_child (GTK_FLOW_BOX_CHILD (child), vbox);
+			g_object_set_data (G_OBJECT (child), "resid",
+			                   GUINT_TO_POINTER (r->resid));
+			gtk_flow_box_append (GTK_FLOW_BOX (icon_list), child);
+
+			g_object_unref (pb);
 			g_free (r);
 
 			/* Cooperative multitasking — keep the dialog responsive while
@@ -181,8 +216,7 @@ void list_icons (void)
 		}
 	}
 	if (nfound >= 2)
-		gtk_hlist_sort (GTK_HLIST (icon_list));
-	gtk_hlist_thaw (GTK_HLIST (icon_list));
+		gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (icon_list));
 }
 
 
@@ -506,6 +540,43 @@ static int cfgnamecmp_const (const void *key, const void *mem)
 
 /* prefs_write is defined after the row helpers but called by them. */
 void prefs_write (void);
+
+/* Phase 5: helper to compare two flowbox children by their stored
+ * resource ID so the icon picker stays sorted by ID. Forward-declared
+ * up near list_icons() because it's wired there too. */
+static int
+icon_picker_sort_cb (GtkFlowBoxChild *a, GtkFlowBoxChild *b, gpointer data)
+{
+	guint id_a = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (a), "resid"));
+	guint id_b = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (b), "resid"));
+	(void) data;
+
+	if (id_a < id_b) return -1;
+	if (id_a > id_b) return 1;
+	return 0;
+}
+
+/* Phase 5: handler for the FlowBox's child-activated signal. The
+ * activated child carries the resid as g_object_set_data; copy it
+ * into the AdwSpinRow so the user's selection becomes the active
+ * icon ID — same write-through behaviour the legacy
+ * icon_row_selected() had against the GtkHList row. */
+static void
+icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
+                           gpointer data)
+{
+	struct cfgvar *v;
+	guint icon;
+	(void) flowbox; (void) data;
+
+	icon = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (child), "resid"));
+	if (!icon)
+		return;
+
+	v = cfgvar_for_name (CFG_ICON);
+	if (v && v->widget && ADW_IS_SPIN_ROW (v->widget))
+		adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
+}
 
 /* ------------------------------------------------------------------- *
  * Phase 5: AdwPreferencesRow helpers
@@ -1432,62 +1503,16 @@ static void settings_page_chat (AdwPreferencesPage *page)
 }
 
 
-/* Phase 5: ptr1->cell[1] is already a GtkHellText *. The historic
- * GTK_HELL_TEXT() macro applied here expands to ((GtkHellText *) &(c)),
- * which takes the *address* of the array element and reads the
- * struct fields off that — i.e. ->text reads from cell[2] (out of
- * bounds of the alloca'd cells_a/cells_b arrays in
- * sort_iter_compare). atoi(garbage_pointer) is the SIGSEGV the icon
- * picker hit on Settings open. Use the cell pointer directly. */
-static int listsorthelper (GtkHList *hlist,
-				GtkHListRow *ptr1,
-				GtkHListRow *ptr2)
-{
-	GtkHellText *c1 = ptr1 ? ptr1->cell[1] : NULL;
-	GtkHellText *c2 = ptr2 ? ptr2->cell[1] : NULL;
-	int i1 = (c1 && c1->text) ? atoi (c1->text) : 0;
-	int i2 = (c2 && c2->text) ? atoi (c2->text) : 0;
-	(void) hlist;
-	if (i1 < i2) return -1;
-	if (i1 > i2) return 1;
-	return 0;
-}
-
-/* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
- * "select_row" with a NULL GdkEvent so the param is just GdkEvent *
- * now. The handler only reads `row'. */
-static void
-icon_row_selected (GtkWidget *widget, gint row, gint column,
-                   GdkEvent *event, gpointer data)
-{
-	struct cfgvar *v;
-	guint16 icon;
-	(void) column; (void) event; (void) data;
-
-	if(!GTK_HLIST(widget)->rows) return;
-	icon = GPOINTER_TO_INT(gtk_hlist_get_row_data(GTK_HLIST(widget), row));
-	if(!icon) {
-		return;
-	}
-	/* Phase 5: ICON's widget is now an AdwSpinRow, not a GtkEntry. The
-	 * old GTK_EDITABLE / gtk_editable_set_text path technically resolved
-	 * (AdwSpinRow implements GtkEditable) but didn't update the spin
-	 * value — and walked the editable vtable on a freshly-constructed
-	 * row, which is the most plausible cause of the open-Settings
-	 * segfault we couldn't reproduce. Use the proper API: setting the
-	 * value fires notify::value, which routes through on_spin_row_value
-	 * to write back to the_session.htlc.icon + prefs_write. */
-	v = cfgvar_for_name (CFG_ICON);
-	if (v && v->widget && ADW_IS_SPIN_ROW (v->widget))
-		adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
-}
-
-/* Icon page is also custom (commit E follow-up). The Icon ID becomes a
- * proper AdwSpinRow; the icon picker stays as the legacy GtkHList
- * inside an embedded row beneath. */
 /* Phase 5 follow-up: the old standalone General page (just NICK) folds
  * into the Identity page since they're both "who am I to the server"
- * settings. Display name first, then icon ID, then the resource picker. */
+ * settings. Display name first, then icon ID, then the resource picker.
+ *
+ * Phase 5 follow-up #2: icon picker is now a GtkFlowBox with 64x64
+ * pixel-art icons in a multi-column grid, replacing the legacy
+ * 1-row-per-icon GtkHList. See icon_flow_child_activated (above) for
+ * the click handler — this used to be icon_row_selected but the
+ * flowbox emits child-activated, not select_row, so the dispatch
+ * shape changed. */
 static void settings_page_identity (AdwPreferencesPage *page)
 {
 	AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
@@ -1529,17 +1554,24 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
 	                                GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_widget_set_size_request (scroll, -1, 280);
+	/* Phase 5: taller picker than the old 280px so two rows of 64px
+	 * icons + their labels fit without immediate scrolling. */
+	gtk_widget_set_size_request (scroll, -1, 360);
 
-	icon_list = gtk_hlist_new (2);
-	gtk_hlist_set_selection_mode (GTK_HLIST (icon_list), GTK_SELECTION_SINGLE);
-	gtk_hlist_set_column_width (GTK_HLIST (icon_list), 0, 260);
-	gtk_hlist_set_column_width (GTK_HLIST (icon_list), 1, 42);
-	gtk_hlist_set_row_height (GTK_HLIST (icon_list), 18);
-	gtk_hlist_set_compare_func (GTK_HLIST (icon_list),
-	                            (GtkHListCompareFunc) listsorthelper);
-	g_signal_connect (icon_list, "select_row",
-	                  G_CALLBACK (icon_row_selected), iv);
+	icon_list = gtk_flow_box_new ();
+	gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
+	                                 GTK_SELECTION_SINGLE);
+	gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
+	/* Two columns minimum (the user's explicit ask), four maximum so
+	 * we don't end up with very wide rows on a maximised window. */
+	gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
+	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
+	gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (icon_list), 4);
+	gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
+	gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
+	                            icon_picker_sort_cb, NULL, NULL);
+	g_signal_connect (icon_list, "child-activated",
+	                  G_CALLBACK (icon_flow_child_activated), iv);
 	gtkhx_widget_set_child (scroll, icon_list);
 	gtk_box_append (GTK_BOX (vbox), scroll);
 
