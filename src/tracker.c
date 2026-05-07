@@ -95,18 +95,51 @@ close_tracker_window (GtkWindow *window, gpointer data)
 	return FALSE;
 }
 
+/* Phase 5: track_tid was previously a bare pthread_t set by
+ * pthread_create + cleared at various points by main-thread code that
+ * called pthread_cancel / pthread_kill on it. The thread was created
+ * detached, which auto-reaps the thread struct the moment it returns
+ * — so any stale value in track_tid pointed at freed libpthread
+ * internal state. tracker_kill_threads() at quit time would walk that
+ * stale handle inside __pthread_kill_implementation and segfault.
+ *
+ * Fix: create the thread joinable. The pthread_t handle remains valid
+ * until pthread_join is called, so we can pthread_kill (signal it to
+ * exit) and pthread_join (reap it) without TOCTOU on the handle.
+ *
+ * track_tid is touched only from the main thread (UI handlers and the
+ * quit path), so a plain global without a mutex is fine — the only
+ * race would be the worker thread modifying it, which it doesn't. */
 pthread_t track_tid = 0;
 
 void tracker_kill_threads(void)
 {
-	if(track_tid) {
+	pthread_t tid = track_tid;
+
+	if (!tid)
+		return;
+
+	/* Clear the global before we do anything else so a re-entrant
+	 * caller (or a second Ctrl+Q) doesn't try to kill the same thread
+	 * twice. */
+	track_tid = 0;
+
+	/* SIGUSR1 wakes the worker out of any blocking I/O; the handler
+	 * (tracker_sighandler) calls pthread_exit. pthread_kill on a
+	 * thread that has already returned is permitted on a joinable
+	 * thread that hasn't been joined yet — it returns 0 or ESRCH but
+	 * does not crash. */
 #ifdef USING_DARWIN
-		kill(track_tid, SIGUSR1);
+	kill(tid, SIGUSR1);
 #else
-		pthread_kill(track_tid, SIGUSR1);
+	pthread_kill(tid, SIGUSR1);
 #endif
-		track_tid = 0;
-	}
+
+	/* Reap. If the thread had already returned naturally, this
+	 * unblocks immediately and frees the libpthread internal state.
+	 * If it was still running, this blocks until SIGUSR1 took effect.
+	 * Either way the handle is now safe to discard. */
+	pthread_join(tid, NULL);
 }
 
 void tracker_sighandler (int signum)
@@ -138,13 +171,16 @@ tracker_getlist (GtkWidget *widget, gpointer data)
 	pthread_attr_t attr;
 
 
-	if(track_tid) {
-		pthread_cancel(track_tid);
-		track_tid = 0;
-	}
+	/* Phase 5: route through tracker_kill_threads — it does the
+	 * pthread_kill + pthread_join dance correctly. The previous code
+	 * here pthread_cancel'd a possibly-detached possibly-already-
+	 * reaped handle, which is the same UAF pattern that crashed at
+	 * Ctrl+Q. */
+	tracker_kill_threads();
 
 	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	/* Phase 5: drop PTHREAD_CREATE_DETACHED — see comment near
+	 * track_tid. Default is joinable, which is what we want. */
 
 	tracker_clear();
 	num_found = 0;
