@@ -176,16 +176,23 @@ static void hx_preview_text_output (struct hx_preview *p, char *buf, int len)
 
 struct hx_preview *hx_preview_new(char *creator, char *type, char *name)
 {
-	struct hx_preview *p = malloc(sizeof(struct hx_preview));
+	/* Phase 5: g_malloc0 (was malloc) so creator[5]/type[5] trailing
+	 * bytes are deterministically zero — strncpy of 4 bytes leaves
+	 * the 5th uninitialized which is fine but trips up valgrind /
+	 * asan and bites us if anything ever reads them as a NUL-terminated
+	 * string. */
+	struct hx_preview *p = g_malloc0 (sizeof (struct hx_preview));
 
-	strncpy(p->creator, creator, 4);
-	strncpy(p->type, type, 4);
+	if (creator)
+		strncpy (p->creator, creator, 4);
+	if (type)
+		strncpy (p->type, type, 4);
 
 	/* XXX: select appropriate output plugin */
 
 	/* text */
-	p->name = g_strdup(name);
-	p->data = hx_text_preview_new(p);
+	p->name = g_strdup (name ? name : "");
+	p->data = hx_text_preview_new (p);
 	p->output = hx_preview_text_output;
 
 
