@@ -56,7 +56,6 @@
 
 /* Sounds */
 #define CFG_SOUNDS_ON       "SOUNDSON"
-#define CFG_SND_CMD         "SND_CMD"
 #define CFG_SND_INVITE      "SOUNDINVITE"
 #define CFG_SND_CHAT        "SOUNDCHAT"
 #define CFG_SND_ERROR       "SOUNDERROR"

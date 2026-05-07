@@ -24,13 +24,10 @@
 #include <stdlib.h>
 #include <gtk/gtk.h>
 #include <netinet/in.h>
+#include <gsound.h>
 #include "hx.h"
 #include "gtkhx.h"
 #include "sound.h"
-
-#ifdef HAVE_GSOUND
-#include <gsound.h>
-#endif
 
 struct hx_sounds hxsnd =
 {
@@ -42,10 +39,6 @@ struct hx_sounds hxsnd =
  * search path:
  *   1. $CONFIG/sounds/<name>        — per-user drop-ins
  *   2. $PREFIX/share/gtkhx/sounds/  — distro / system default
- *
- * The legacy SOUNDPATH cfgvar (an explicit single-directory fallback)
- * was retired with the path-pref cleanup. Drop sound files into
- * $CONFIG/sounds/ instead.
  *
  * Returns the first existing path, or NULL if none was found.
  * Caller g_frees. */
@@ -67,31 +60,15 @@ sound_resolve (const char *name)
 	return NULL;
 }
 
-#ifdef HAVE_GSOUND
-
-/* Phase 5: replaced the fork+execlp("play", ...) path with GSound, a
- * tiny GLib-style wrapper over libcanberra. play_full hands the
- * filename to libcanberra, which decodes + mixes it in-process and
- * hands the result to PulseAudio / PipeWire / ALSA without spawning
- * a player. The call returns immediately so the caller (often a
- * worker thread completing a file transfer) doesn't pay fork-in-
- * multithreaded-process latency or leave zombie children behind.
- *
- * We DO want the async-result callback even though we have nothing
- * to do with the success case — without it, GSound's "simple"
- * variant drops errors on the floor and the symptom is "sounds
- * never play, no diagnostic, no idea why." Common failures are
- * libcanberra missing the sndfile-with-aiff backend, GSoundContext
- * unable to reach the audio server (XDG_RUNTIME_DIR not set in a
- * weird login session), or a bad media-role tag. */
+/* Phase 5: GSound (a thin GLib-style wrapper over libcanberra) is the
+ * one and only playback path. Fire-and-forget, in-process, async — no
+ * fork, no execlp, no zombie children, no waitpid. The "snd_cmd"
+ * preference and the legacy fork+exec fallback have been retired;
+ * libcanberra speaks PulseAudio / PipeWire / ALSA directly via its
+ * usual backend autodetection. */
 
 static GSoundContext *gtkhx_gsound_ctx = NULL;
 
-/* Initialised on first call. GSoundContext lazy-init on the calling
- * thread is fine here — the worker threads that fire transfer-done
- * sounds are already serialized on gtk_threads_enter, and the main-
- * thread paths fire from the UI loop. First-touch is therefore
- * single-threaded for practical purposes. */
 static GSoundContext *
 gtkhx_gsound_get (void)
 {
@@ -141,8 +118,12 @@ void play (char *name)
 	char          *path;
 
 	path = sound_resolve (name);
-	if (!path)
+	if (!path) {
+		g_message ("sound: '%s' not found in $CONFIG/sounds or "
+		           PREFIX "/share/gtkhx/sounds; skipping",
+		           name);
 		return;
+	}
 
 	ctx = gtkhx_gsound_get ();
 	if (!ctx) {
@@ -150,11 +131,8 @@ void play (char *name)
 		return;
 	}
 
-	/* play_full so we can collect errors via the callback. play_simple
-	 * also queues asynchronously but discards the result; that's how
-	 * we ended up shipping a no-op-sounding configuration without
-	 * noticing. The callback owns `path` (transferred via user_data)
-	 * and frees it. */
+	/* play_full so we collect errors via the callback. The callback
+	 * owns `path` (transferred via user_data) and frees it. */
 	gsound_context_play_full (ctx, NULL,
 	                          gtkhx_gsound_play_done, path,
 	                          GSOUND_ATTR_MEDIA_FILENAME, path,
@@ -162,37 +140,10 @@ void play (char *name)
 	                          NULL);
 }
 
-#else /* !HAVE_GSOUND — legacy fork+execlp fallback */
-
-void play (char *name)
-{
-	pid_t pid;
-	char *arg = sound_resolve (name);
-
-	/* If we couldn't find the sound anywhere, don't bother forking.
-	 * Avoids spawning a player just to have it fail with ENOENT. */
-	if (!arg)
-		return;
-
-	pid = fork();
-	if(pid == -1) {
-		g_free (arg);
-		return;
-	}
-
-	if(pid == 0) {
-		execlp(gtkhx_prefs.snd_cmd, gtkhx_prefs.snd_cmd, arg, NULL);
-		_exit(127);
-	}
-
-	g_free (arg);
-}
-
-#endif /* HAVE_GSOUND */
-
 void play_sound(int sound)
 {
 	if(!hxsnd.on) {
+		g_debug ("play_sound: hxsnd.on is false, skipping sound %d", sound);
 		return;
 	}
 

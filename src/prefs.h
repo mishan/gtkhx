@@ -30,7 +30,6 @@ struct gtkhx_prefs {
 	char *download_path;
 	char **tracker;
 	char *tracker_str;
-	char *snd_cmd;
 	int xbuf_max;
 
 	struct {

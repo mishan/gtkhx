@@ -76,7 +76,6 @@ struct gtkhx_prefs gtkhx_prefs =
 	".",		/* download_path */
 	NULL,		/* tracker (char **) */
 	"hltracker.com",	/* tracker_str */
-	"play",		/* snd_cmd */
 	500,		/* xbuf_max */
 	{
 		{412, 312, 10, 434, 0, 1},
@@ -408,7 +407,6 @@ struct cfgvar
 	{CFG_QUEUEDL, {&gtkhx_prefs.queuedl}, BOOLEAN, 0, NULL, NULL},
 	{CFG_SHOWBACK, {&gtkhx_prefs.showback}, BOOLEAN, 0, NULL, NULL},
 	{CFG_SHOWJOIN, {&gtkhx_prefs.showjoin}, BOOLEAN, 0, NULL, NULL},
-	{CFG_SND_CMD, {&gtkhx_prefs.snd_cmd}, STRING, 0, NULL, NULL},
 	{CFG_SND_CHAT, {&hxsnd.chat}, BOOLEAN, 0, NULL, NULL},
 	{CFG_SND_ERROR, {&hxsnd.error}, BOOLEAN, 0, NULL, NULL},
 	{CFG_SND_FILE, {&hxsnd.file}, BOOLEAN, 0, NULL, NULL},
@@ -1347,11 +1345,11 @@ static void settings_page_interface (AdwPreferencesPage *page)
 
 static void settings_page_sound (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *master, *events, *cmd;
+	AdwPreferencesGroup *master, *events;
 
 	master = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (master, _("Sounds"));
-	adw_preferences_group_add (master, 
+	adw_preferences_group_add (master,
 		pref_switch_row (CFG_SOUNDS_ON,
 		                 _("Play sounds"),
 		                 _("Master switch for chat and transfer alerts")));
@@ -1359,33 +1357,25 @@ static void settings_page_sound (AdwPreferencesPage *page)
 
 	events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (events, _("Events"));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_INVITE, _("Chat invitation"), NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_CHAT,   _("Chat message"),    NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_ERROR,  _("Error"),           NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_FILE,   _("Transfer complete"), NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_JOIN,   _("Join"),            NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_LOGIN,  _("Login"),           NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_MSG,    _("Private message"), NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_NEWS,   _("News post"),       NULL));
-	adw_preferences_group_add (events, 
+	adw_preferences_group_add (events,
 		pref_switch_row (CFG_SND_PART,   _("Leave"),           NULL));
 	adw_preferences_page_add (page, events);
-
-	cmd = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-	adw_preferences_group_set_title (cmd, _("Sound command"));
-	adw_preferences_group_set_description (cmd,
-		_("Player invoked with the sound file as its first argument"));
-	adw_preferences_group_add (cmd, 
-		pref_entry_row (CFG_SND_CMD, _("Command")));
-	adw_preferences_page_add (page, cmd);
 }
 
 /* Phase 5 follow-up: the old standalone Font page only ever applied

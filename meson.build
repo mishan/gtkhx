@@ -78,13 +78,9 @@ threads_dep = dependency('threads')
 
 # Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
 # It's a thin GLib-style wrapper over libcanberra that plays an arbitrary
-# audio file fire-and-forget, in-process, without spawning a player. If
-# the build host doesn't have it, sound.c falls back to the legacy
-# fork+exec path automatically — see HAVE_GSOUND below.
-gsound_dep = dependency('gsound', required : false)
-if gsound_dep.found()
-  add_project_arguments('-DHAVE_GSOUND=1', language : 'c')
-endif
+# audio file fire-and-forget, in-process. Required — Misha confirmed
+# GSound is the canonical path; the fallback fork+exec code was retired.
+gsound_dep = dependency('gsound')
 
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
@@ -152,7 +148,7 @@ summary(
     'GLib'       : glib_dep.version(),
     'Nettle'     : nettle_dep.version(),
     'zlib'       : zlib_dep.version(),
-    'GSound'     : gsound_dep.found() ? gsound_dep.version() : 'no (sounds will fork an external player)',
+    'GSound'     : gsound_dep.version(),
   },
   section : 'Dependencies',
 )
