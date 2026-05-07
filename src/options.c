@@ -175,9 +175,12 @@ void list_icons (void)
 			 * vary (16x16, 32x32, sometimes wider) and the picker
 			 * looks sloppy if some entries are tiny next to others.
 			 * Nearest-neighbor preserves the pixel-art look on
-			 * scale-up; the source resources are 16/32px, so 96px
-			 * is a 6x/3x integer enlargement that stays crisp. */
-			scaled = gdk_pixbuf_scale_simple (pb, 96, 96, GDK_INTERP_NEAREST);
+			 * scale-up; 56px is a comfortable middle ground between
+			 * the legacy ~34px (too small) and 96px (too dominant).
+			 * Hits a tidy 3.5x of 16px and 1.75x of 32px sources —
+			 * the slight non-integer scale isn't perfectly crisp but
+			 * is fine for a thumbnail at this size. */
+			scaled = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
 			g_object_unref (pb);
 			pb = scaled ? scaled : pb;
 
@@ -188,11 +191,10 @@ void list_icons (void)
 			/* Phase 5: GtkPicture, not GtkImage. Adwaita's
 			 * stylesheet sizes GtkImage to icon-button dimensions
 			 * (~16-24px) regardless of the paintable's natural
-			 * size, so the previous gtkhx_image_new_from_pixbuf +
-			 * set_size_request(96, 96) made the *cell* 96 px tall
+			 * size, so set_size_request on a wrapper grew the cell
 			 * but kept the icon clamped tiny inside it. GtkPicture
 			 * with can_shrink=FALSE pins to the paintable's natural
-			 * 96x96 — same fix gtkhx_pixmap_button uses for the
+			 * size — same fix gtkhx_pixmap_button uses for the
 			 * toolbar buttons. */
 			{
 				GdkTexture *tex;
@@ -1570,20 +1572,21 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
 	                                GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	/* Phase 5: taller picker so two rows of 96px icons + their labels
-	 * fit without immediate scrolling (96 + ~16 label + 8 padding *
-	 * 2 rows ~= 240 plus breathing room). */
-	gtk_widget_set_size_request (scroll, -1, 460);
+	/* Phase 5: picker height tuned to ~3 rows of 56px icons + their
+	 * labels visible at a time. Was 460 at 96px icons (too dominant);
+	 * 320 at 56px keeps the picker present without taking over the
+	 * page. */
+	gtk_widget_set_size_request (scroll, -1, 320);
 
 	icon_list = gtk_flow_box_new ();
 	gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
 	                                 GTK_SELECTION_SINGLE);
 	gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
-	/* Two columns minimum (the user's explicit ask), three maximum at
-	 * 96px each — at 4 the rows ran wider than the typical settings
-	 * dialog and forced horizontal cramming. */
+	/* Two columns minimum, four maximum. With 56px icons, four
+	 * columns fits comfortably in the typical settings dialog
+	 * width without horizontal cramming. */
 	gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
-	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 3);
+	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
 	gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (icon_list), 4);
 	gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
 	gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
