@@ -28,6 +28,7 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
+#include <adwaita.h>
 #include "hx.h"
 #include "gtkhx.h"
 #include "gtkutil.h"
@@ -434,16 +435,13 @@ void
 create_tracker_window (GtkWidget *widget, gpointer data)
 {
 	GtkWidget *vbox;
-
-	GtkWidget *hbox;
+	GtkWidget *header;
 	GtkWidget *searchhbox;
 	GtkWidget *searchentry;
 	GtkWidget *tracker_window_scroll;
 	GtkWidget *refreshbtn;
 	GtkWidget *connbtn;
-	GdkPixbuf *pb;
-	GtkWidget *pix;
-	GtkWidget *lbl_search;
+	GtkWidget *count_box;
 	gchar *titles[5];
 	session *sess = data;
 
@@ -457,14 +455,8 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 		return;
 
 	tracker_window = gtk_window_new();
-	/* Phase 2 cleanup: don't gtk_widget_realize() the toplevel here — it
-	 * trips a GTK_WIDGET_ANCHORED assertion in GTK 2 when called before
-	 * gtk_widget_show*. The legacy code did it to obtain a parent
-	 * GdkWindow for gdk_pixmap_create_from_xpm_d(); we now build pixbufs
-	 * directly via gdk_pixbuf_new_from_xpm_data(), which needs no
-	 * drawable. */
 	gtk_window_set_title(GTK_WINDOW(tracker_window), _("Tracker"));
-	gtk_widget_set_size_request(tracker_window, 640, 410);
+	gtk_window_set_default_size(GTK_WINDOW(tracker_window), 720, 500);
 	g_signal_connect(tracker_window, "close-request", G_CALLBACK(close_tracker_window), 0);
 
 	tracker_list = gtk_hlist_new_with_titles(5, titles);
@@ -486,34 +478,47 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 		                           GTK_EVENT_CONTROLLER (click));
 	}
 
+	/* Phase 5: GtkSearchEntry replaces the legacy "Search:" label +
+	 * GtkEntry pair. SearchEntry has its own search-glass icon and
+	 * a clear-button when text is present, so the label becomes
+	 * redundant. The placeholder text takes the label's job. */
+	searchentry = gtk_search_entry_new();
+	gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (searchentry),
+	                                       _("Search trackers"));
+	g_signal_connect(searchentry, "activate",
+	                 G_CALLBACK(tracker_search), 0);
 
-	searchentry = gtk_entry_new();
-	g_signal_connect(searchentry, "activate", G_CALLBACK(tracker_search), 0);
-	lbl_search = gtk_label_new(_("Search: "));
-	lbl_found = gtk_label_new("  0");
-	lbl_total = gtk_label_new(" / 0");
 	num_found = 0;
 	num_total = 0;
+	lbl_found = gtk_label_new("0");
+	lbl_total = gtk_label_new(" / 0");
+	gtk_widget_add_css_class (lbl_found, "dim-label");
+	gtk_widget_add_css_class (lbl_total, "dim-label");
 
-	refreshbtn = gtk_button_new();
-	gtk_widget_set_tooltip_text(refreshbtn, _("Refresh"));
-	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf(pb);
-	if (pb) g_object_unref(pb);
-	gtkhx_widget_set_child(refreshbtn, pix);
-	pix = 0; pb = 0;
-	g_signal_connect(refreshbtn, "clicked",
-					   G_CALLBACK(tracker_getlist), sess);
+	/* Phase 5: action buttons live in the AdwHeaderBar now, not in a
+	 * row beneath. Refresh + Connect on the leading edge, the live
+	 * found-count "N / M" indicator on the trailing edge. */
+	refreshbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+		_("Refresh tracker list"),
+		2,
+		G_CALLBACK (tracker_getlist), sess);
+	connbtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/connect.xpm",
+		_("Connect to selected server"),
+		2,
+		G_CALLBACK (tracker_connect), 0);
 
-	connbtn = gtk_button_new();
-	g_signal_connect(connbtn, "clicked",
-					   G_CALLBACK(tracker_connect), 0);
-	gtk_widget_set_tooltip_text(connbtn, _("Connect"));
-	pb = gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/connect.xpm", NULL);
-	pix = gtkhx_image_new_from_pixbuf(pb);
-	if (pb) g_object_unref(pb);
-	gtkhx_widget_set_child(connbtn, pix);
-	pix = 0; pb = 0;
+	header = adw_header_bar_new ();
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), refreshbtn);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), connbtn);
+
+	count_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_append (GTK_BOX (count_box), lbl_found);
+	gtk_box_append (GTK_BOX (count_box), lbl_total);
+	adw_header_bar_pack_end (ADW_HEADER_BAR (header), count_box);
+
+	gtk_window_set_titlebar (GTK_WINDOW (tracker_window), header);
 
 	tracker_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(tracker_window_scroll),
@@ -522,32 +527,17 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	gtk_widget_set_vexpand (tracker_window_scroll, TRUE);
 	gtkhx_widget_set_child(tracker_window_scroll, tracker_list);
 
-	/* Phase 5 layout: 8 px gutter on the toolbar/search/list rows, a
-	 * separator between the toolbar (refresh / connect / counts) and
-	 * the search row so the eye groups the two halves correctly, and
-	 * 8 px of margin on the outer vbox so the content doesn't touch
-	 * the window frame. The legacy zero-spacing layout was crammed —
-	 * everything looked like one indistinguishable strip. */
+	/* Phase 5 layout: actions live in the headerbar, content vbox
+	 * just holds the search row + the list. 8 px outer margin so
+	 * content doesn't touch the window frame; 8 px gutter between
+	 * the search field and the list. */
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
 	gtk_widget_set_margin_start  (vbox, 8);
 	gtk_widget_set_margin_end    (vbox, 8);
 	gtk_widget_set_margin_top    (vbox, 8);
 	gtk_widget_set_margin_bottom (vbox, 8);
 
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	gtkhx_box_pack(hbox, refreshbtn, 0, 0, 0);
-	gtkhx_box_pack(hbox, connbtn, 0, 0, 0);
-	/* push the counts to the right side so the toolbar reads as
-	 * "actions on the left, status on the right" rather than four
-	 * widgets stacked together. */
-	gtk_widget_set_hexpand (lbl_found, TRUE);
-	gtk_widget_set_halign (lbl_found, GTK_ALIGN_END);
-	gtkhx_box_pack(hbox, lbl_found, 0, 0, 0);
-	gtkhx_box_pack(hbox, lbl_total, 0, 0, 0);
-	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
-
 	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	gtkhx_box_pack(searchhbox, lbl_search, 0, 0, 0);
 	gtkhx_box_pack(searchhbox, searchentry, 1, 1, 0);
 	gtkhx_box_pack(vbox, searchhbox, 0, 0, 0);
 
