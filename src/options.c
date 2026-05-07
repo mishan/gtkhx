@@ -176,7 +176,7 @@ void list_icons (void)
 			 * looks sloppy if some entries are tiny next to others.
 			 * Nearest-neighbor preserves the pixel-art look on
 			 * scale-up; the source resources are 16/32px, so 96px
-			 * is a 6x/3x integer-ish enlargement that stays crisp. */
+			 * is a 6x/3x integer enlargement that stays crisp. */
 			scaled = gdk_pixbuf_scale_simple (pb, 96, 96, GDK_INTERP_NEAREST);
 			g_object_unref (pb);
 			pb = scaled ? scaled : pb;
@@ -185,8 +185,24 @@ void list_icons (void)
 			g_snprintf (buf, sizeof (buf), "%u", r->resid);
 
 			vbox  = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-			image = gtkhx_image_new_from_pixbuf (pb);
-			gtk_widget_set_size_request (image, 96, 96);
+			/* Phase 5: GtkPicture, not GtkImage. Adwaita's
+			 * stylesheet sizes GtkImage to icon-button dimensions
+			 * (~16-24px) regardless of the paintable's natural
+			 * size, so the previous gtkhx_image_new_from_pixbuf +
+			 * set_size_request(96, 96) made the *cell* 96 px tall
+			 * but kept the icon clamped tiny inside it. GtkPicture
+			 * with can_shrink=FALSE pins to the paintable's natural
+			 * 96x96 — same fix gtkhx_pixmap_button uses for the
+			 * toolbar buttons. */
+			{
+				GdkTexture *tex;
+				G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+				tex = gdk_texture_new_for_pixbuf (pb);
+				G_GNUC_END_IGNORE_DEPRECATIONS
+				image = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+				g_object_unref (tex);
+				gtk_picture_set_can_shrink (GTK_PICTURE (image), FALSE);
+			}
 			label = gtk_label_new (buf);
 			gtk_widget_add_css_class (label, "caption");
 			gtk_box_append (GTK_BOX (vbox), image);
