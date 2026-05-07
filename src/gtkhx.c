@@ -831,6 +831,20 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 	 * AdwApplication exists. Now that we're in the activate handler
 	 * the application is alive, so wire them in. */
 	toolbar_register_actions (G_APPLICATION (app), &the_session);
+
+	/* Phase 5: bind Ctrl+Q (and Ctrl+K) to GApplication actions so the
+	 * accelerators work from every window without per-window
+	 * GtkShortcutController plumbing. Previously these were installed
+	 * only on windows that called init_keyaccel(), so e.g. typing
+	 * Ctrl+Q with the chat window focused did nothing. Application-
+	 * level accels work in any window the GtkApplication owns —
+	 * gtk_application_add_window above brings the existing toplevels
+	 * into that set. */
+	{
+		const char *quit_accels[] = { "<Control>q", NULL };
+		gtk_application_set_accels_for_action (app, "app.quit",
+		                                       quit_accels);
+	}
 }
 
 static void
