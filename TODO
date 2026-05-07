@@ -24,9 +24,6 @@ Code Modernization:
 - Separation of concerns -- separate UI code from non-UI code
 - Follow MVC architecture
 
-Sound:
-- Look into better way to play sounds -- is there some GNOME/GTK+ preferred way?
-
 Features:
 - Custom color palette
 - Log chat history / server, and be able to bring that chat history back up when connecting to a server
