@@ -70,22 +70,28 @@ sound_resolve (const char *name)
 #ifdef HAVE_GSOUND
 
 /* Phase 5: replaced the fork+execlp("play", ...) path with GSound, a
- * tiny GLib-style wrapper over libcanberra. play_simple_async
- * decodes + mixes the .aiff in-process and hands it to PulseAudio /
- * PipeWire / ALSA without spawning a player; the call returns
- * immediately so the caller (often a worker thread completing a file
- * transfer) doesn't pay fork-in-multithreaded-process latency or
- * leave zombie children behind. We never look at the result — for
- * notification sounds, dropping a play on the floor is fine. */
+ * tiny GLib-style wrapper over libcanberra. play_full hands the
+ * filename to libcanberra, which decodes + mixes it in-process and
+ * hands the result to PulseAudio / PipeWire / ALSA without spawning
+ * a player. The call returns immediately so the caller (often a
+ * worker thread completing a file transfer) doesn't pay fork-in-
+ * multithreaded-process latency or leave zombie children behind.
+ *
+ * We DO want the async-result callback even though we have nothing
+ * to do with the success case — without it, GSound's "simple"
+ * variant drops errors on the floor and the symptom is "sounds
+ * never play, no diagnostic, no idea why." Common failures are
+ * libcanberra missing the sndfile-with-aiff backend, GSoundContext
+ * unable to reach the audio server (XDG_RUNTIME_DIR not set in a
+ * weird login session), or a bad media-role tag. */
 
 static GSoundContext *gtkhx_gsound_ctx = NULL;
 
-/* Initialised on first call; caller must hold the GTK thread lock or
- * be on the main thread. GSoundContext is thread-safe per its own
- * docs (libcanberra's pulse backend handles its own locking) but
- * lazy-init on first call is simpler than a g_once_init pattern and
- * fine for a tool whose first sound plays after the user has done
- * something that ran on the main loop. */
+/* Initialised on first call. GSoundContext lazy-init on the calling
+ * thread is fine here — the worker threads that fire transfer-done
+ * sounds are already serialized on gtk_threads_enter, and the main-
+ * thread paths fire from the UI loop. First-touch is therefore
+ * single-threaded for practical purposes. */
 static GSoundContext *
 gtkhx_gsound_get (void)
 {
@@ -105,6 +111,30 @@ gtkhx_gsound_get (void)
 	return gtkhx_gsound_ctx;
 }
 
+static void
+gtkhx_gsound_play_done (GObject *source, GAsyncResult *result, gpointer data)
+{
+	GError *err = NULL;
+	char   *path = data;
+
+	if (!gsound_context_play_full_finish (GSOUND_CONTEXT (source), result, &err)) {
+		/* G_IO_ERROR_CANCELLED is the only failure we don't want to
+		 * surface — that's the "user already triggered another sound
+		 * or the context is being torn down" path. Everything else
+		 * (file not found, decoder unavailable, audio server
+		 * unreachable) the user wants to know about; otherwise sounds
+		 * just silently never work and the failure mode is
+		 * mysterious. */
+		if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+			g_warning ("gsound: failed to play %s: %s",
+			           path ? path : "(null)",
+			           err ? err->message : "(no detail)");
+		}
+		g_clear_error (&err);
+	}
+	g_free (path);
+}
+
 void play (char *name)
 {
 	GSoundContext *ctx;
@@ -120,15 +150,16 @@ void play (char *name)
 		return;
 	}
 
-	/* Fire and forget. NULL callback means "we don't care about the
-	 * result" — GSound will still log a warning on its own bus if
-	 * playback fails for some reason (no audio server, file not
-	 * decodable, etc.). */
-	gsound_context_play_simple (ctx, NULL, NULL,
-	                            GSOUND_ATTR_MEDIA_FILENAME, path,
-	                            GSOUND_ATTR_MEDIA_ROLE,     "event",
-	                            NULL);
-	g_free (path);
+	/* play_full so we can collect errors via the callback. play_simple
+	 * also queues asynchronously but discards the result; that's how
+	 * we ended up shipping a no-op-sounding configuration without
+	 * noticing. The callback owns `path` (transferred via user_data)
+	 * and frees it. */
+	gsound_context_play_full (ctx, NULL,
+	                          gtkhx_gsound_play_done, path,
+	                          GSOUND_ATTR_MEDIA_FILENAME, path,
+	                          GSOUND_ATTR_MEDIA_ROLE,     "event",
+	                          NULL);
 }
 
 #else /* !HAVE_GSOUND — legacy fork+execlp fallback */
