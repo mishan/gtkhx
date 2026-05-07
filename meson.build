@@ -117,15 +117,15 @@ subdir('po')
 # -----------------------------------------------------------------------------
 install_data(
   files(
-    'sounds/chatinvite.aiff',
-    'sounds/chatpost.aiff',
-    'sounds/error.aiff',
-    'sounds/filedone.aiff',
-    'sounds/join.aiff',
-    'sounds/logged-in.aiff',
-    'sounds/message.aiff',
-    'sounds/newspost.aiff',
-    'sounds/part.aiff',
+    'sounds/chatinvite.wav',
+    'sounds/chatpost.wav',
+    'sounds/error.wav',
+    'sounds/filedone.wav',
+    'sounds/join.wav',
+    'sounds/logged-in.wav',
+    'sounds/message.wav',
+    'sounds/newspost.wav',
+    'sounds/part.wav',
   ),
   install_dir : get_option('datadir') / 'gtkhx' / 'sounds',
 )

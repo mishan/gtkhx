@@ -9,6 +9,7 @@ Pulling in any new developments from over the years:
 UI Modernization:
 - Icon picker in settings should display larger icons, and a better layout. Maybe two entries per row?
 - Tracker -- move icons into titlebar, use modern search field
+- Agreement window -- add some polish, make the buttons look nicer and less cramped, allow hitting Enter to agree
 
 Bookmarks
 - Better bookmark management, allowing user to add/edit/delete bookmarks

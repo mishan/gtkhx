@@ -199,41 +199,41 @@ void play_sound(int sound)
 	switch(sound) {
 	case CHAT_INVITE:
 		if (hxsnd.invite)
-			play("chatinvite.aiff");
+			play("chatinvite.wav");
 		break;
 	case CHAT_POST:
 		if (hxsnd.chat)
-			play("chatpost.aiff");
+			play("chatpost.wav");
 		break;
 	case ERROR:
 		if (hxsnd.error)
-			play("error.aiff");
+			play("error.wav");
 		break;
 	case FILE_DONE:
 		if (hxsnd.file)
-			play("filedone.aiff");
+			play("filedone.wav");
 		break;
 	case USER_JOIN:
 		if (hxsnd.join)
-			play("join.aiff");
+			play("join.wav");
 		break;
 	case LOGIN:
 		if (hxsnd.login)
-			play("logged-in.aiff");
+			play("logged-in.wav");
 		break;
 	case MSG:
 		if(hxsnd.msg)
 
-			play("message.aiff");
+			play("message.wav");
 
 		break;
 	case NEWS_POST:
 		if(hxsnd.news)
-			play("newspost.aiff");
+			play("newspost.wav");
 		break;
 	case USER_PART:
 		if(hxsnd.part)
-			play("part.aiff");
+			play("part.wav");
 		break;
 	}
 

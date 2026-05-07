@@ -1,13 +1,10 @@
 High priority:
 
-(none — all earlier high-priority items resolved this session: bookmarks
-not working / split-button first-click / right-click popup actions /
-non-ASCII server name corruption / file preview lockup)
+- File preview should have line wrap enabled
 
 Medium priority:
 
-(none — chat-window minimum-width and right-click CSS-node-insert-after
-warning resolved this session)
+(none)
 
 Low priority:
 
