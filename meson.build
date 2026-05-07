@@ -76,6 +76,16 @@ zlib_dep    = dependency('zlib')
 nettle_dep  = dependency('nettle',    version : '>= 3.0')
 threads_dep = dependency('threads')
 
+# Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
+# It's a thin GLib-style wrapper over libcanberra that plays an arbitrary
+# audio file fire-and-forget, in-process, without spawning a player. If
+# the build host doesn't have it, sound.c falls back to the legacy
+# fork+exec path automatically — see HAVE_GSOUND below.
+gsound_dep = dependency('gsound', required : false)
+if gsound_dep.found()
+  add_project_arguments('-DHAVE_GSOUND=1', language : 'c')
+endif
+
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -90,6 +100,7 @@ deps = [
   zlib_dep,
   nettle_dep,
   threads_dep,
+  gsound_dep,
   intl_dep,
   dl_dep,
   math_dep,
@@ -141,6 +152,7 @@ summary(
     'GLib'       : glib_dep.version(),
     'Nettle'     : nettle_dep.version(),
     'zlib'       : zlib_dep.version(),
+    'GSound'     : gsound_dep.found() ? gsound_dep.version() : 'no (sounds will fork an external player)',
   },
   section : 'Dependencies',
 )

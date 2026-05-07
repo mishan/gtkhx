@@ -131,6 +131,11 @@ static struct hx_text_preview *hx_text_preview_new(struct hx_preview *p)
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(text), FALSE);
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text), FALSE);
 	gtk_text_view_set_monospace(GTK_TEXT_VIEW(text), TRUE);
+	/* Phase 5: word-char wrap so long lines flow within the preview
+	 * window instead of overflowing the viewport. WORD_CHAR breaks
+	 * preferentially on word boundaries but falls back to mid-word
+	 * for content with no whitespace (long paths, hex dumps, etc.). */
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text), GTK_WRAP_WORD_CHAR);
 	scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
