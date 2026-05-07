@@ -788,9 +788,23 @@ static void prefs_allocate(char *tag, char *rest)
 		}
 		case BOOLEAN:
 		{
+			/* Phase 5: prefs_write emits booleans via
+			 * g_key_file_set_boolean which writes the literal
+			 * "true" / "false" — but this parser used to accept
+			 * only '0'/'1' and silently fall through on anything
+			 * else. Result: every boolean pref reverted to its
+			 * struct-init default on every startup, which is what
+			 * Misha was seeing with SOUNDSON / TIMESTAMP /
+			 * FILESAMEWIN. Accept both spellings, case-insensitively,
+			 * and also the GKeyFile-friendly "yes"/"no" since
+			 * GKeyFile's own get_boolean tolerates them too. */
 			unsigned char c;
-			if (*rest == '0') c = 0;
-			else if (*rest == '1') c = 1;
+			if (*rest == '0' || *rest == 'f' || *rest == 'F' ||
+			    *rest == 'n' || *rest == 'N')
+				c = 0;
+			else if (*rest == '1' || *rest == 't' || *rest == 'T' ||
+			         *rest == 'y' || *rest == 'Y')
+				c = 1;
 			else return;
 			if (*result->variable.uchar == c) return;
 			*result->variable.uchar = c;
