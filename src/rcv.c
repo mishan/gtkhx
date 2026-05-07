@@ -40,6 +40,7 @@
 #include "chat.h"
 #include "tasks.h"
 #include "files.h"
+#include "preview.h"
 #include "gtkutil.h"
 #include "msg.h"
 #include "news.h"
@@ -1529,6 +1530,19 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	hx_output.xfer_queue(&the_session, htxf); /* we most certainly want
 														 to output its position
 														 in the queue */
+
+	/* Phase 5: for previews, build the GtkWindow + GtkTextView on the
+	 * main thread (we are on the main thread here — this is the
+	 * GIOChannel callback path). The download worker subsequently
+	 * feeds bytes via htxf->preview without ever touching GTK,
+	 * sidestepping a class of lockups we hit when constructing
+	 * widgets and calling gtk_window_present from a worker thread
+	 * under gtk_threads_enter. */
+	if (htxf->opt.preview && !htxf->preview) {
+		char *name = dirchar_basename (htxf->path);
+		htxf->preview = hx_preview_new ("    ", "    ",
+		                                name ? name : htxf->path);
+	}
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);

@@ -75,6 +75,14 @@ struct htxf_conn {
 	struct {
 		guint32 retry:1, preview:1, reserved:30;
 	} opt;
+
+	/* Phase 5: when opt.preview is set, the preview window is created
+	 * on the main thread (in rcv_task_file_get) and stashed here so
+	 * the download worker thread doesn't have to construct GTK widgets
+	 * itself. The worker only feeds bytes through preview->output()
+	 * (which g_idle_add's them onto the main thread's queue). NULL
+	 * for non-preview transfers. */
+	void *preview;
 };
 
 struct htlc_conn {

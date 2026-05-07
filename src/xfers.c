@@ -371,12 +371,20 @@ static void *get_thread (void *__arg)
 		close(f);
 	}
 	else {
-		char *name = dirchar_basename(htxf->path);
-
-		gtk_threads_enter();
-		p = hx_preview_new(&typecrea[3], &typecrea[0], name);
-		gtk_threads_leave();
-		if(!p) {
+		/* Phase 5: hx_preview_new used to be called from this worker
+		 * thread under gtk_threads_enter, which constructed the
+		 * GtkWindow + AdwHeaderBar and called gtk_window_present from
+		 * a non-main thread. That triggered an intermittent lockup —
+		 * symptom was the app freezing immediately on Preview, even
+		 * for a tiny file with no console warnings. Wayland's compositor
+		 * round-trip during window mapping does not play nicely from
+		 * worker threads under our serializing lock.
+		 *
+		 * Now rcv_task_file_get builds the preview window on the main
+		 * thread and stashes the struct hx_preview * here. The worker
+		 * just streams bytes through it. */
+		p = (struct hx_preview *) htxf->preview;
+		if (!p) {
 			goto ret;
 		}
 		retval = preview_get(s, len, htxf, p);
