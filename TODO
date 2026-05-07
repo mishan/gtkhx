@@ -6,10 +6,9 @@ Pulling in any new developments from over the years:
 - Look into rebasing hx-specific code (especially anything protocol related) from mhxd
 - Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
 
-UI Modernization:
-- Icon picker in settings should display larger icons, and a better layout. Maybe two entries per row?
-- Tracker -- move icons into titlebar, use modern search field
-- Agreement window -- add some polish, make the buttons look nicer and less cramped, allow hitting Enter to agree
+File Previews:
+- Look into using some sort of library that lets us view different file types with some embedded viewer
+  e.g. There's an RTF file on some server and it would be nice to preview the rendered version of it
 
 Bookmarks
 - Better bookmark management, allowing user to add/edit/delete bookmarks
