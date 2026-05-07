@@ -959,31 +959,72 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	GtkTextBuffer *agree_buf;
 
 	agreementwin = gtk_window_new();
-	gtk_widget_set_size_request(agreementwin, 400, 500);
+	/* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+	 * consistency (chat, news, files, tasks, users, preview, this). */
+	gtk_window_set_titlebar(GTK_WINDOW(agreementwin), adw_header_bar_new());
+	gtk_window_set_default_size(GTK_WINDOW(agreementwin), 460, 540);
 	gtk_window_set_title(GTK_WINDOW(agreementwin), _("Agreement"));
+
 	agreetext = gtk_text_view_new();
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(agreetext), FALSE);
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(agreetext), FALSE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(agreetext), GTK_WRAP_WORD);
+	gtk_text_view_set_left_margin  (GTK_TEXT_VIEW(agreetext), 12);
+	gtk_text_view_set_right_margin (GTK_TEXT_VIEW(agreetext), 12);
+	gtk_text_view_set_top_margin   (GTK_TEXT_VIEW(agreetext), 12);
+	gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(agreetext), 12);
 	agree_buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(agreetext));
 	gtk_text_buffer_set_text(agree_buf, agreement, len);
+
 	agree_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(agree_scroll),
 	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	gtkhx_widget_set_child(agree_scroll, agreetext);
+
+	/* Phase 5: Adwaita action-class buttons. .suggested-action paints
+	 * Agree in the accent colour, .destructive-action paints Disagree
+	 * red — the visual treatment HIG-compliant Adwaita apps use for
+	 * a primary / dismissive button pair. */
 	agreebtn = gtk_button_new_with_label(_("Agree"));
+	gtk_widget_add_css_class (agreebtn, "suggested-action");
+	gtk_widget_add_css_class (agreebtn, "pill");
+
 	disagreebtn = gtk_button_new_with_label(_("Disagree"));
+	gtk_widget_add_css_class (disagreebtn, "destructive-action");
+	gtk_widget_add_css_class (disagreebtn, "pill");
+
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+	/* Right-align the button row, with margins for breathing room.
+	 * The previous layout packed both buttons left-aligned and
+	 * flush against each other — visually cramped and not where
+	 * users expect dialog buttons. */
+	gtk_widget_set_halign (hbox, GTK_ALIGN_END);
+	gtk_widget_set_margin_start  (hbox, 12);
+	gtk_widget_set_margin_end    (hbox, 12);
+	gtk_widget_set_margin_top    (hbox, 12);
+	gtk_widget_set_margin_bottom (hbox, 12);
+
 	g_signal_connect(agreebtn, "clicked",
 					   G_CALLBACK(concurrence), sess);
 	g_signal_connect(disagreebtn, "clicked",
 					   G_CALLBACK(disagreement), sess);
+
 	gtkhx_widget_set_child(agreementwin, vbox);
 	gtkhx_box_pack(vbox, agree_scroll, TRUE, TRUE, 0);
 	gtkhx_box_pack(vbox, hbox, FALSE, FALSE, 0);
-	gtkhx_box_pack(hbox, agreebtn, FALSE, FALSE, 0);
+	/* Disagree on the left, Agree on the right (HIG-conventional;
+	 * the affirmative action sits where Enter lives). */
 	gtkhx_box_pack(hbox, disagreebtn, FALSE, FALSE, 0);
+	gtkhx_box_pack(hbox, agreebtn, FALSE, FALSE, 0);
+
+	/* Phase 5: pressing Enter activates Agree. The text view is
+	 * read-only so it doesn't consume Return; setting the default
+	 * widget here is what makes Enter trigger the affirmative
+	 * action when nothing else has focus. */
+	gtk_widget_set_receives_default (agreebtn, TRUE);
+	gtk_window_set_default_widget   (GTK_WINDOW(agreementwin), agreebtn);
+
 	init_keyaccel(agreementwin);
 	gtk_window_present(GTK_WINDOW(agreementwin));
 	sess->agreementwin = agreementwin;
