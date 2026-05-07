@@ -175,9 +175,9 @@ void list_icons (void)
 			 * vary (16x16, 32x32, sometimes wider) and the picker
 			 * looks sloppy if some entries are tiny next to others.
 			 * Nearest-neighbor preserves the pixel-art look on
-			 * scale-up; for the rare 64+ source we let GTK use
-			 * BILINEAR via paintable scaling further down. */
-			scaled = gdk_pixbuf_scale_simple (pb, 64, 64, GDK_INTERP_NEAREST);
+			 * scale-up; the source resources are 16/32px, so 96px
+			 * is a 6x/3x integer-ish enlargement that stays crisp. */
+			scaled = gdk_pixbuf_scale_simple (pb, 96, 96, GDK_INTERP_NEAREST);
 			g_object_unref (pb);
 			pb = scaled ? scaled : pb;
 
@@ -186,7 +186,7 @@ void list_icons (void)
 
 			vbox  = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
 			image = gtkhx_image_new_from_pixbuf (pb);
-			gtk_widget_set_size_request (image, 64, 64);
+			gtk_widget_set_size_request (image, 96, 96);
 			label = gtk_label_new (buf);
 			gtk_widget_add_css_class (label, "caption");
 			gtk_box_append (GTK_BOX (vbox), image);
@@ -1554,18 +1554,20 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
 	                                GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	/* Phase 5: taller picker than the old 280px so two rows of 64px
-	 * icons + their labels fit without immediate scrolling. */
-	gtk_widget_set_size_request (scroll, -1, 360);
+	/* Phase 5: taller picker so two rows of 96px icons + their labels
+	 * fit without immediate scrolling (96 + ~16 label + 8 padding *
+	 * 2 rows ~= 240 plus breathing room). */
+	gtk_widget_set_size_request (scroll, -1, 460);
 
 	icon_list = gtk_flow_box_new ();
 	gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
 	                                 GTK_SELECTION_SINGLE);
 	gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
-	/* Two columns minimum (the user's explicit ask), four maximum so
-	 * we don't end up with very wide rows on a maximised window. */
+	/* Two columns minimum (the user's explicit ask), three maximum at
+	 * 96px each — at 4 the rows ran wider than the typical settings
+	 * dialog and forced horizontal cramming. */
 	gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
-	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
+	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 3);
 	gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (icon_list), 4);
 	gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
 	gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
