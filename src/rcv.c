@@ -51,6 +51,7 @@
 #include "news15.h"
 #include "hfs.h"
 #include "proto_trace.h"
+#include "debug.h"
 #include "connect.h"
 
 static size_t news_len = 0;
@@ -59,6 +60,73 @@ static char *hx_timeformat = "%c";
 extern int xfer_go_timer (void *__arg);
 
 void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text);
+/* Phase 5: forward decl so do_post_login_fetches (defined just below)
+ * can hand it to task_new before the implementation site. */
+void rcv_task_news_users(struct htlc_conn *htlc, struct chat *chat, int text);
+
+/* Phase 5: post-login state-machine. The server's reply to
+ * HTLC_HDR_LOGIN is split across two messages on most servers — a
+ * TASK reply with our UID and (optionally) version + server name,
+ * followed by a HTLS_HDR_USER_SELFINFO with our access bits and our
+ * own user record. If we fire HTLC_HDR_USER_GETLIST as soon as the
+ * TASK arrives (the original behaviour), some servers (hlserver.com
+ * is the known case) complain "0 command(s) at a time, please."
+ * because they're still mid-conversation about the login.
+ *
+ * Defer the post-login fetches until either:
+ *   - HTLS_HDR_USER_SELFINFO arrives (the canonical signal), or
+ *   - 2 seconds elapse with no SELFINFO (fallback for old servers
+ *     that may not send SELFINFO at all).
+ *
+ * `post_login_fetched` is the single-fire guard: whichever path
+ * runs first sets it, the other path becomes a no-op. Reset on
+ * each login attempt at the top of rcv_task_login's else branch. */
+static gboolean post_login_fetched   = FALSE;
+static guint    post_login_timer_id  = 0;
+
+static void
+do_post_login_fetches (struct htlc_conn *htlc)
+{
+	if (post_login_fetched)
+		return;
+	post_login_fetched = TRUE;
+
+	if (post_login_timer_id) {
+		g_source_remove (post_login_timer_id);
+		post_login_timer_id = 0;
+	}
+
+	/* Fetch users + (gated) news. rcv_task_news_users handles
+	 * both — it calls rcv_task_user_list on the USER_GETLIST
+	 * reply and then reload_news, the latter of which is itself
+	 * gated on HL_ACCESS_READ_NEWS. */
+	task_new (htlc, rcv_task_news_users, the_session.chat_list, 0, "who");
+	hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
+}
+
+static gboolean
+post_login_fallback (gpointer data)
+{
+	struct htlc_conn *htlc = data;
+
+	post_login_timer_id = 0;
+	if (htlc && htlc->fd && !post_login_fetched) {
+		debug_log ("login",
+		   "SELFINFO didn't arrive after 2s, firing fetches anyway");
+		do_post_login_fetches (htlc);
+	}
+	return G_SOURCE_REMOVE;
+}
+
+void
+rcv_login_reset (void)
+{
+	if (post_login_timer_id) {
+		g_source_remove (post_login_timer_id);
+		post_login_timer_id = 0;
+	}
+	post_login_fetched = FALSE;
+}
 
 /*
 void print_binary(char *buf, int len)
@@ -497,6 +565,14 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	} dh_end();
 
 	setbtns(&the_session, 1);
+
+	/* Phase 5: SELFINFO is the canonical signal that the server has
+	 * finished the post-login conversation. Fire the deferred
+	 * USER_GETLIST + news fetches now — see do_post_login_fetches
+	 * comment in this file for why deferring was necessary. The
+	 * helper is single-fire, so the fallback timer is a no-op if
+	 * SELFINFO beat it (the common case). */
+	do_post_login_fetches (htlc);
 }
 
 void hx_rcv_dump (struct htlc_conn *htlc)
@@ -1137,6 +1213,14 @@ no_cipher:
 			set_status_bar(2);
 			connected = 1;
 
+			/* Reset post-login fetch state before scheduling so
+			 * a reconnection during this process state starts clean. */
+			post_login_fetched = FALSE;
+			if (post_login_timer_id) {
+				g_source_remove (post_login_timer_id);
+				post_login_timer_id = 0;
+			}
+
 			dh_start(htlc) {
 				switch (_type) {
 				case HTLS_DATA_UID:
@@ -1181,9 +1265,14 @@ no_cipher:
 			if (htlc->version >= 150)
 				ping_start (htlc);
 
-			/* this will get news and users */
-			task_new(htlc, rcv_task_news_users, sess->chat_list, 0, "who");
-			hlwrite(htlc, HTLC_HDR_USER_GETLIST, 0, 0);
+			/* Phase 5: do NOT fire HTLC_HDR_USER_GETLIST yet — wait
+			 * for HTLS_HDR_USER_SELFINFO to arrive so the server's
+			 * post-login conversation has fully landed. See the
+			 * commentary on do_post_login_fetches above for the
+			 * rationale. The fallback timer covers servers that
+			 * don't send SELFINFO. */
+			post_login_timer_id = g_timeout_add_seconds (
+				2, post_login_fallback, htlc);
 		}
 	}
 }

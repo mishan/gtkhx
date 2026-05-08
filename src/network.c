@@ -154,6 +154,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	session *sess = &the_session;
 
 	ping_stop ();
+	rcv_login_reset ();
 
 	if(conn_tid) {
 		pthread_cancel(conn_tid);

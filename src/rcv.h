@@ -39,5 +39,9 @@ extern void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path);
 extern void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf);
 extern void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf);
 
+/* Phase 5: drop any pending post-login fallback timer. Called from
+ * hx_htlc_close so we don't fire fetches into a closed connection if
+ * the user disconnects within the 2-second SELFINFO window. */
+extern void rcv_login_reset (void);
 
 #endif /* HX_RCV_H */
