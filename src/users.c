@@ -401,16 +401,14 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
 	gtk_widget_set_halign (popover, GTK_ALIGN_START);
 
-	/* Phase 5: floor the popover height so GtkPopoverMenu doesn't
-	 * clip the bottom items. The default sizing was allocating
-	 * ~200 px and silently truncating Private Chat off the bottom;
-	 * the natural content height (info header + Ignore section +
-	 * Interact section) is ~230 px in the no-kick case. Setting a
-	 * 240 px minimum is enough to defeat the silent clip without
-	 * leaving lots of trailing whitespace below the content. The
-	 * popover still grows if more content needs it (e.g. when the
-	 * Kick/Ban section is added on a privileged account). */
-	gtk_widget_set_size_request (popover, -1, 240);
+	/* Phase 5: floor the popover height comfortably above the no-kick
+	 * natural content size. The earlier 240 minimum was *just* under
+	 * the natural with-2-line-header height, which left GtkPopoverMenu
+	 * in a slightly-scrolling state — scroll mode swallows clicks, so
+	 * items become unselectable. 280 gives the no-kick layout enough
+	 * slack that nothing scrolls; the with-kick layout still gets to
+	 * grow past 280 if needed. */
+	gtk_widget_set_size_request (popover, -1, 280);
 
 	/* Hang the ctx off the popover so its lifetime matches the popover's
 	 * — when the popover is unparented the destroy notify frees it.
