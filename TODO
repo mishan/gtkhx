@@ -2,6 +2,9 @@ Docs:
 - Rewrite README to explain this project better
 - Write a section about migrating from 0.9.4 to modern versions
 
+i18n:
+- Translate to other languages
+
 Security:
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 - Look into what newer Hotline clients/servers support (ties into mhxd epic)
