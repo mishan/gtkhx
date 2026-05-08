@@ -1136,11 +1136,7 @@ no_cipher:
 			setbtns(sess, 1);
 			set_status_bar(2);
 			connected = 1;
-			/* Phase 5: start the PING keepalive timer now that
-			 * we're past the login handshake. ping_stop() is
-			 * called from hx_htlc_close on the way down. */
-			ping_start (htlc);
-			
+
 			dh_start(htlc) {
 				switch (_type) {
 				case HTLS_DATA_UID:
@@ -1172,12 +1168,23 @@ no_cipher:
 					break;
 				}
 			} dh_end();
-			
-			
+
+			/* Phase 5: PING keepalive only on confirmed 1.5+ servers.
+			 * htlc->version is populated by the HTLS_DATA_VERSION
+			 * chunk just parsed above; servers that don't advertise
+			 * a version (1.0/1.2 originals like hlserver.com) leave
+			 * it at 0, and sending HTLC_HDR_PING to them earns a
+			 * task-error toast every minute ("Uh, no.") plus the
+			 * ERROR sound. >= 150 is the bar — that covers every
+			 * server we've seen (Badmoon at 190, mhxd at 150+) that
+			 * implements PING, and excludes the ones that don't. */
+			if (htlc->version >= 150)
+				ping_start (htlc);
+
 			/* this will get news and users */
 			task_new(htlc, rcv_task_news_users, sess->chat_list, 0, "who");
 			hlwrite(htlc, HTLC_HDR_USER_GETLIST, 0, 0);
-		}	
+		}
 	}
 }
 	
