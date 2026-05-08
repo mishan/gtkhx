@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include <sys/time.h>
 #include <time.h>
 #include <netinet/in.h>
@@ -30,6 +31,7 @@
 #include "rcv.h"
 #include "gtk_hlist.h"
 #include "gtkutil.h"
+#include "toolbar.h"
 
 #define NACCESS	28
 void create_useredit_window (char *login, int new);
@@ -168,8 +170,11 @@ user_open (void *__uesp, const char *name, const char *login, const char *pass, 
 	strcpy(ues->pass, pass);
 	ues->access_buf = access;
 	for (i = 0; i < NACCESS; i++) {
+		if (!ues->access_widgets[i].widget)
+			continue;
 		on = test_bit(ues->access_buf, ues->access_widgets[i].bitno);
-		gtk_check_button_set_active(GTK_CHECK_BUTTON(ues->access_widgets[i].widget), on);
+		adw_switch_row_set_active (
+			ADW_SWITCH_ROW (ues->access_widgets[i].widget), on);
 	}
 }
 static void
@@ -186,18 +191,21 @@ useredit_login (char *login, struct useredit_session *ues)
 	memcpy(ues->login, login, len+1);
 }
 
-static void useredit_open_close(GtkWidget *widget, gpointer data)
+/* Phase 5: AdwAlertDialog response callback. The "open" response opens
+ * the User Editor for the entered login; "cancel" / window-close
+ * just dismisses. */
+static void
+useredit_open_response (AdwAlertDialog *dialog, const char *response,
+                        gpointer data)
 {
-	gtkhx_widget_destroy(GTK_WIDGET(data));
-}
+	GtkWidget *entry = data;
 
-static void useredit_open(GtkWidget *widget, gpointer data)
-{
-	GtkWidget *loginentry = (GtkWidget *)g_object_get_data(G_OBJECT(widget), "login");
-	char *login = gtk_editable_get_text(GTK_EDITABLE(loginentry));
-
-	create_useredit_window(login, 0);
-	gtkhx_widget_destroy(GTK_WIDGET(data));
+	if (g_strcmp0 (response, "open") == 0) {
+		const char *login = gtk_editable_get_text (GTK_EDITABLE (entry));
+		if (login && *login)
+			create_useredit_window ((char *) login, 0);
+	}
+	(void) dialog;
 }
 
 static void useredit_name_pass(GtkWidget *name_entry, GtkWidget *pass_entry, struct useredit_session *ues)
@@ -241,6 +249,8 @@ useredit_chk_activate (GtkWidget *widget, gpointer data)
 	unsigned int i;
 	int bitno;
 
+	/* Phase 5: notify::active passes the GObject; AdwSwitchRow's
+	 * active property is the source of truth for the toggle. */
 	for (i = 0; i < NACCESS; i++) {
 		if (ues->access_widgets[i].widget == widget)
 			break;
@@ -248,7 +258,7 @@ useredit_chk_activate (GtkWidget *widget, gpointer data)
 	if (i == NACCESS)
 		return;
 	bitno = ues->access_widgets[i].bitno;
-	if (gtk_check_button_get_active(GTK_CHECK_BUTTON(widget)))
+	if (adw_switch_row_get_active (ADW_SWITCH_ROW (widget)))
 		set_bit(ues->access_buf, bitno);
 	else
 		unset_bit(ues->access_buf, bitno);
@@ -297,171 +307,196 @@ useredit_destroy (GtkWidget *widget, gpointer data)
 }
 
 
+/* Phase 5: full Adwaita rewrite of the User Editor. The legacy layout
+ * was a vbox of GtkFrames containing GtkCheckButtons — functionally
+ * fine but visually noisy and inconsistent with the rest of the app
+ * (Settings dialog uses AdwPreferencesPage with AdwSwitchRow per
+ * toggle).
+ *
+ * New layout:
+ *   AdwHeaderBar (Save / Delete / window controls)
+ *   AdwPreferencesPage in a scrolled view, containing
+ *     AdwPreferencesGroup "Identity"
+ *       AdwEntryRow Login        (insensitive when editing existing)
+ *       AdwEntryRow Display name
+ *       AdwPasswordEntryRow Password
+ *     AdwPreferencesGroup "File Privileges"
+ *       AdwSwitchRow per access bit
+ *     AdwPreferencesGroup "Chat Privileges"
+ *       AdwSwitchRow per access bit
+ *     AdwPreferencesGroup "News" / "User Privileges" / "Admin Privileges"
+ *       (same)
+ *
+ * The header-bar Save button is .suggested-action (accent-coloured),
+ * Delete is .destructive-action (red); both are hidden in the New
+ * User flow until something useful would happen there. */
 void create_useredit_window (char *login, int new)
 {
-	GtkWidget *window;
-	GtkWidget *usermod_scroll;
-	GtkWidget *wvbox;
-	GtkWidget *avbox;
-	GtkWidget *vbox;
-	GtkWidget *frame;
-	GtkWidget *info_frame;
-	GtkWidget *chk;
-	GtkWidget *info_table;
-	GtkWidget *btnhbox;
-	GtkWidget *wid;
-	unsigned int i, awi, nframes = 0;
+	GtkWidget         *window, *header;
+	GtkWidget         *toolbar_view;
+	GtkWidget         *page;
+	GtkWidget         *save_btn, *delete_btn;
+	GtkWidget         *info_grp, *current_grp = NULL;
+	GtkWidget         *login_row, *name_row, *pass_row;
+	GtkWidget         *switch_row;
+	unsigned int       i, awi, nframes = 0;
 	struct useredit_session *ues;
-	char *title;
-
+	char              *title;
 
 	window = gtk_window_new();
+	gtk_window_set_default_size (GTK_WINDOW (window), 520, 680);
 
-	if(!new) {
-		title = g_strdup_printf("%s: %s", _("User Editor"), login);
-		gtk_window_set_title(GTK_WINDOW(window), title);
-		g_free(title);
-	}
-	else {
-		gtk_window_set_title(GTK_WINDOW(window), _("User Editor"));
+	if (!new) {
+		title = g_strdup_printf ("%s: %s", _("User Editor"), login);
+		gtk_window_set_title (GTK_WINDOW (window), title);
+		g_free (title);
+	} else {
+		gtk_window_set_title (GTK_WINDOW (window), _("New User"));
 	}
 
-	ues = g_malloc0(sizeof(struct useredit_session));
+	ues = g_malloc0 (sizeof (struct useredit_session));
 	ues->window = window;
-	g_signal_connect(window, "destroy",
-			   G_CALLBACK(useredit_destroy), ues);
-	vbox = 0;
-	usermod_scroll = gtk_scrolled_window_new();
-	gtk_widget_set_size_request(usermod_scroll, 250, 500);
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(usermod_scroll),
-				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
+	g_signal_connect (window, "destroy",
+	                  G_CALLBACK (useredit_destroy), ues);
 
-	wvbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	btnhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	/* ---- Header bar ---- */
+	header = adw_header_bar_new ();
 
-	wid = gtk_button_new_with_label(_("Save"));
-	g_object_set_data(G_OBJECT(wid), "new", GINT_TO_POINTER(new));
-	g_signal_connect(wid, "clicked",
-			   G_CALLBACK(useredit_save), ues);
-	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
+	save_btn = gtk_button_new_with_label (_("Save"));
+	gtk_widget_add_css_class (save_btn, "suggested-action");
+	g_object_set_data (G_OBJECT (save_btn), "new", GINT_TO_POINTER (new));
+	g_signal_connect (save_btn, "clicked",
+	                  G_CALLBACK (useredit_save), ues);
+	adw_header_bar_pack_end (ADW_HEADER_BAR (header), save_btn);
 
-	wid = gtk_button_new_with_label(_("Delete User"));
-	g_signal_connect(wid, "clicked",
-			   G_CALLBACK(useredit_delete), ues);
-	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
-
-	wid = gtk_button_new_with_label(_("Close"));
-	g_signal_connect(wid, "clicked",
-			   G_CALLBACK(useredit_close), ues);
-	gtkhx_box_pack(btnhbox, wid, 0, 0, 2);
-
-	gtkhx_box_pack(wvbox, btnhbox, 0, 0, 2);
-
-	info_frame = gtk_frame_new(_("User Info"));
-	info_table = gtkhx_grid_new_table(3, 2, 0);
-	gtkhx_widget_set_child(info_frame, info_table);
-
-	wid = gtk_entry_new();
-	ues->login_entry = wid;
-	if(!new) {
-		gtk_editable_set_editable(GTK_EDITABLE(wid), 0);
+	if (!new) {
+		/* No 'Delete' for a brand-new account that isn't on the
+		 * server yet — there's nothing to delete. */
+		delete_btn = gtk_button_new_with_label (_("Delete"));
+		gtk_widget_add_css_class (delete_btn, "destructive-action");
+		g_signal_connect (delete_btn, "clicked",
+		                  G_CALLBACK (useredit_delete), ues);
+		adw_header_bar_pack_start (ADW_HEADER_BAR (header), delete_btn);
 	}
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 0, 1, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-	wid = gtk_label_new(_("Login:"));
-	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
-	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 0, 1, GTK_FILL, GTK_FILL, 0, 0);
 
-	wid = gtk_entry_new();
-	ues->name_entry = wid;
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 1, 2, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-	wid = gtk_label_new(_("Name:"));
-	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
-	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 1, 2, GTK_FILL, GTK_FILL, 0, 0);
+	/* ---- Content: AdwPreferencesPage in a scrolled view ----
+	 * AdwPreferencesPage already does its own AdwClamp-ed layout
+	 * with proper spacing; we don't need an outer scroll because the
+	 * page is itself scrollable. */
+	page = adw_preferences_page_new ();
 
-	wid = gtk_entry_new();
-	ues->pass_entry = wid;
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 1, 2, 2, 3, GTK_EXPAND|GTK_FILL, 0, 0, 0);
-	wid = gtk_label_new(_("Pass:"));
-	gtk_label_set_xalign(GTK_LABEL(wid), 0.0);
-	gtk_label_set_justify(GTK_LABEL(wid), GTK_JUSTIFY_LEFT);
-	gtkhx_grid_attach_table(GTK_GRID(info_table), wid, 0, 1, 2, 3, GTK_FILL, GTK_FILL, 0, 0);
+	/* Identity group */
+	info_grp = adw_preferences_group_new ();
+	adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (info_grp),
+	                                 _("Identity"));
 
-	gtk_grid_set_row_spacing(GTK_GRID(info_table), 10);
-	gtk_grid_set_column_spacing(GTK_GRID(info_table), 5);
-	gtkhx_box_pack(wvbox, info_frame, 0, 0, 2);
+	login_row = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (login_row),
+	                               _("Login"));
+	if (!new) {
+		/* Login is the primary key on the server side; not editable
+		 * once set. */
+		gtk_editable_set_editable (GTK_EDITABLE (login_row), FALSE);
+	}
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_grp), login_row);
+	ues->login_entry = login_row;
 
-	avbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	/* Phase 3.9: gtk_scrolled_window_add_with_viewport was deprecated
-	 * in 3.8 — gtk_container_add now wraps non-scrollable children in
-	 * a viewport automatically. */
-	gtkhx_widget_set_child(usermod_scroll, avbox);
-	gtkhx_widget_set_child(window, wvbox);
-	gtkhx_box_pack(wvbox, usermod_scroll, 0, 0, 2);
+	name_row = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_row),
+	                               _("Display name"));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_grp), name_row);
+	ues->name_entry = name_row;
 
+	pass_row = adw_password_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (pass_row),
+	                               _("Password"));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_grp), pass_row);
+	ues->pass_entry = pass_row;
 
-	for (i = 0; i < sizeof(access_names)/sizeof(struct access_name); i++) {
+	adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
+	                          ADW_PREFERENCES_GROUP (info_grp));
+
+	/* ---- Access bits as AdwPreferencesGroup of AdwSwitchRow ----
+	 * Sentinels in access_names[] (bitno == -1) are section headers;
+	 * each one starts a new group with that title. Subsequent
+	 * non-sentinel entries become AdwSwitchRow children of that
+	 * group. */
+	for (i = 0; i < sizeof (access_names) / sizeof (struct access_name); i++) {
 		if (access_names[i].bitno == -1) {
 			nframes++;
-			frame = gtk_frame_new(access_names[i].name);
-			vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-			gtkhx_widget_set_child(frame, vbox);
-			gtkhx_box_pack(avbox, frame, 0, 0, 0);
+			current_grp = adw_preferences_group_new ();
+			adw_preferences_group_set_title (
+				ADW_PREFERENCES_GROUP (current_grp),
+				access_names[i].name);
+			adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
+				ADW_PREFERENCES_GROUP (current_grp));
 			continue;
 		}
-		chk = gtk_check_button_new_with_label(access_names[i].name);
+		switch_row = adw_switch_row_new ();
+		adw_preferences_row_set_title (ADW_PREFERENCES_ROW (switch_row),
+		                               access_names[i].name);
 		awi = i - nframes;
-		ues->access_widgets[awi].bitno = access_names[i].bitno;
-		ues->access_widgets[awi].widget = chk;
-		g_signal_connect(chk, "clicked",
-				   G_CALLBACK(useredit_chk_activate), ues);
-		gtkhx_box_pack(vbox, chk, 0, 0, 0);
+		ues->access_widgets[awi].bitno  = access_names[i].bitno;
+		ues->access_widgets[awi].widget = switch_row;
+		g_signal_connect (switch_row, "notify::active",
+		                  G_CALLBACK (useredit_chk_activate), ues);
+		if (current_grp)
+			adw_preferences_group_add (
+				ADW_PREFERENCES_GROUP (current_grp), switch_row);
 	}
 
-	if(!new) {
-		useredit_login(login, ues);
-	}
-	gtk_window_present(GTK_WINDOW(window));
+	/* ---- Wrap in AdwToolbarView so the headerbar gets the proper
+	 * top-bar styling and the page sits in the content slot. */
+	toolbar_view = adw_toolbar_view_new ();
+	adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
+	adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), page);
+	gtk_window_set_child (GTK_WINDOW (window), toolbar_view);
+
+	if (!new)
+		useredit_login (login, ues);
+
+	gtk_window_present (GTK_WINDOW (window));
 }
 
 
-void useredit_open_dialog()
+/* Phase 5: AdwAlertDialog with an AdwEntryRow extra-child replaces
+ * the hand-rolled GtkWindow + Open/Cancel buttons. The dialog
+ * presents over the toolbar window, has Cancel + Open responses
+ * (Open is the default + suggested-action style), and routes
+ * window-close (Esc / X) to Cancel. */
+void useredit_open_dialog (void)
 {
-	GtkWidget *window;
-	GtkWidget *hbox;
-	GtkWidget *vbox;
-	GtkWidget *hboxtwo;
-	GtkWidget *loginentry;
-	GtkWidget *okbtn;
-	GtkWidget *cancelbtn;
-	GtkWidget *loginlbl;
+	AdwDialog *dialog;
+	GtkWidget *prefs_grp;
+	GtkWidget *entry;
 
-	window = gtk_window_new();
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	hboxtwo = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	loginentry = gtk_entry_new();
-	okbtn = gtk_button_new_with_label(_("Open"));
-	cancelbtn = gtk_button_new_with_label(_("Cancel"));
-	loginlbl = gtk_label_new(_("Login: "));
-	gtk_window_set_title(GTK_WINDOW(window), _("Open User"));
+	dialog = adw_alert_dialog_new (_("Open User"),
+	                               _("Enter the login of the account to edit."));
 
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "open",   _("_Open"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "open",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "open");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
 
-	gtkhx_widget_set_child(window, vbox);
-	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
-	gtkhx_box_pack(hbox, loginlbl, 0, 0, 0);
-	gtkhx_box_pack(hbox, loginentry, 0, 0, 0);
-	gtkhx_box_pack(vbox, hboxtwo, 0, 0, 0);
-	gtkhx_box_pack(hboxtwo, okbtn, 0, 0, 0);
-	gtkhx_box_pack(hboxtwo, cancelbtn, 0, 0, 0);
+	/* AdwEntryRow inside an AdwPreferencesGroup gives the dialog the
+	 * same row-style input field used elsewhere in the app
+	 * (Connect dialog, Settings). */
+	prefs_grp = adw_preferences_group_new ();
+	entry = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (entry), _("Login"));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (prefs_grp), entry);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), prefs_grp);
 
-	g_object_set_data(G_OBJECT(okbtn), "login", loginentry);
-	g_signal_connect(okbtn, "clicked", G_CALLBACK(useredit_open), window);
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (useredit_open_response), entry);
 
-	g_signal_connect(cancelbtn, "clicked", G_CALLBACK(useredit_open_close), window);
+	adw_dialog_present (dialog,
+	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 
-	gtk_window_present(GTK_WINDOW(window));
-
-	gtk_widget_grab_focus(loginentry);
+	gtk_widget_grab_focus (entry);
 }
