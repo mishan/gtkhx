@@ -139,6 +139,55 @@ install_data(
 install_man('gtkhx.1')
 
 # -----------------------------------------------------------------------------
+# Desktop integration: .desktop file + hicolor app icon.
+#
+# Together with the GApplication app-id ("com.nasledov.gtkhx") set in
+# gtkhx.c::loop, these let GNOME Shell / KWin / etc. associate running
+# windows with the .desktop entry — the Wayland dock / alt-tab / window
+# list pick up the icon automatically.
+#
+# The same XPM is also bundled in the gresource (see
+# src/gtkhx.gresource.xml) so the in-process gtk_icon_theme_add_
+# resource_path lookup in gtkhx_activate works without `meson install`,
+# i.e. in dev runs straight from the build dir.
+# -----------------------------------------------------------------------------
+desktop_file = files('data/com.nasledov.gtkhx.desktop')
+
+install_data(
+  desktop_file,
+  install_dir : get_option('datadir') / 'applications',
+)
+
+install_data(
+  files('src/pixmaps/gtkhx_icon.xpm'),
+  install_dir : get_option('datadir') / 'icons' / 'hicolor' / '16x16' / 'apps',
+  rename : 'com.nasledov.gtkhx.xpm',
+)
+
+# Validate the .desktop file at test time if the freedesktop validator
+# is available (it ships with the desktop-file-utils package on most
+# distros). Catches typos in Categories / Keywords / KeyName casing
+# before they ship.
+desktop_validate = find_program('desktop-file-validate', required : false)
+if desktop_validate.found()
+  test(
+    'validate-desktop',
+    desktop_validate,
+    args : [desktop_file],
+  )
+endif
+
+# Refresh the gtk-update-icon-cache and update-desktop-database state
+# after `meson install` so the freshly-installed icon and .desktop
+# entry are visible to the desktop session without a logout. No-ops if
+# the tools are missing.
+gnome = import('gnome')
+gnome.post_install(
+  gtk_update_icon_cache    : true,
+  update_desktop_database  : true,
+)
+
+# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 summary(

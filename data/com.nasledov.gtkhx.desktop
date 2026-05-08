@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=GtkHx
+GenericName=Hotline Client
+Comment=Connect to Hotline servers to chat and share files
+Exec=gtkhx
+Icon=com.nasledov.gtkhx
+Terminal=false
+Categories=Network;Chat;FileTransfer;
+StartupNotify=true
+StartupWMClass=com.nasledov.gtkhx
+Keywords=Hotline;chat;files;P2P;
