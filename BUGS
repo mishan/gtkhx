@@ -1,6 +1,7 @@
 High priority:
 
 - Private Message and Private Chat windows are wrongly sized. Chat appears cut off in top left corner until window is resized larger. The window is already larger than it needs to be, and the input box is too large
+- "Reconnect" does not reconnect to the server one was just disconnected from, nor fill in the Connect dialog with the details of that server
 
 Medium priority:
 
