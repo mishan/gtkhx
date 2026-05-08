@@ -1,3 +1,6 @@
+UX Improvement:
+- Don't show buttons for actions that the user can't perform (e.g. kick/ban), News (1.5) or even News/News Post if News is disabled entirely
+
 Security:
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 - Look into what newer Hotline clients/servers support (ties into mhxd epic)
