@@ -1,5 +1,7 @@
 UX Improvement:
-- Don't show buttons for actions that the user can't perform (e.g. kick/ban), News (1.5) or even News/News Post if News is disabled entirely
+- Don't show buttons for Users actions that the user can't perform (e.g. kick/ban)
+- Don't show News (1.5) button for servers that don't support threaded news
+- Don't show old News buttons if the server does not support the old style News
 
 Security:
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
