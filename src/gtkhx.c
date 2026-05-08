@@ -1169,6 +1169,23 @@ main (int argc, char **argv, char **envp)
 
 	memset(&the_session, 0, sizeof(session));
 
+	/* Set the GLib program name early so GTK 4 picks it up as the
+	 * Wayland xdg_toplevel app_id (and the X11 WM_CLASS) on every
+	 * window's first commit. The default would be argv[0]
+	 * ("gtkhx"), which is not what the .desktop file declares —
+	 * compositors look up the icon and group windows by app_id, so
+	 * a mismatch leaves the dock with no icon and no .desktop
+	 * association.
+	 *
+	 * Has to happen before any window is created. fe_init() (called
+	 * from hotline_client_init below) constructs the toolbar and
+	 * the auto-opened windows synchronously, so this must precede
+	 * that. The same value is repeated in adw_application_new in
+	 * loop() — both call sites have to match for GTK 4 to be
+	 * consistent. */
+	g_set_prgname ("com.nasledov.gtkhx");
+	g_set_application_name ("GtkHx");
+
 #if defined(_SC_OPEN_MAX)
 	hxd_open_max = sysconf(_SC_OPEN_MAX);
 #elif defined(RLIMIT_NOFILE)
