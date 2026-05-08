@@ -306,28 +306,24 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	 * info as a real label widget via gtk_popover_menu_add_child +
 	 * a "custom" GMenuItem rather than abusing disabled menu items.
 	 * Built as Pango markup so the user's name reads bold. */
-	/* Phase 5 (third pass): minimal single-line info header — bold
-	 * name plus a dim role tag (Admin / Guest, optionally "Away").
-	 * The earlier two-line and longer single-line variants both
-	 * exceeded the popover's natural width and Pango wrapped the
-	 * label, giving back any vertical savings and forcing the
-	 * popover to scroll. Pinning to name + role + away is the
-	 * minimum that's still informative; UID and Icon ID are
-	 * available via Get User Info one click below. nowrap on the
-	 * label makes the popover widen to fit instead of stacking. */
+	/* Phase 5: two-line info header with the verbose details Misha
+	 * preferred — bold name on top, dim small details below. The
+	 * earlier vertical-clipping symptom turned out to be the
+	 * popover's surface being sized too small (see size-request
+	 * below), not the header layout itself; once the surface has
+	 * enough room, two lines of header fit fine. */
 	info_markup = g_markup_printf_escaped (
-		"<b>%s</b>  <span alpha=\"60%%\">%s%s</span>",
-		user->name,
+		"<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>",
+		user->name, user->uid, user->icon,
 		user->color >= 2 ? _("Admin") : _("Guest"),
-		user->color % 2 ? _(" · Away") : "");
+		user->color % 2 ? _(" (Away)") : "");
 	info_label = gtk_label_new (NULL);
 	gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
 	gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
-	gtk_label_set_wrap   (GTK_LABEL (info_label), FALSE);
 	gtk_widget_set_margin_start  (info_label, 12);
 	gtk_widget_set_margin_end    (info_label, 12);
-	gtk_widget_set_margin_top    (info_label, 6);
-	gtk_widget_set_margin_bottom (info_label, 2);
+	gtk_widget_set_margin_top    (info_label, 8);
+	gtk_widget_set_margin_bottom (info_label, 4);
 	g_free (info_markup);
 	{
 		GMenu *info_section = g_menu_new ();
@@ -404,6 +400,18 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
 	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
 	gtk_widget_set_halign (popover, GTK_ALIGN_START);
+
+	/* Phase 5: force a comfortable min-height on the popover surface
+	 * so GtkPopoverMenu doesn't clip the bottom items. The default
+	 * sizing was allocating ~200 px and silently truncating Private
+	 * Chat off the bottom. The two-line info header (~50 px) plus
+	 * five menu items + two section dividers (~190 px) plus the
+	 * with-kick variant adds another two items + divider (~80 px),
+	 * so 340 covers the worst case with breathing room. The popover
+	 * still negotiates upward if content needs more, and shrinks
+	 * within the toplevel's available space if the window is short
+	 * — set_size_request is a *minimum* request, not a hard pin. */
+	gtk_widget_set_size_request (popover, -1, 340);
 
 	/* Hang the ctx off the popover so its lifetime matches the popover's
 	 * — when the popover is unparented the destroy notify frees it.
