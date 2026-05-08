@@ -713,10 +713,14 @@ static struct gfile_list *create_files_window (char *path)
 	gtkhx_widget_set_child(downloadbtn, pix);
 	pix = 0, icon = 0, mask = 0;
 
-	prebtn = gtk_button_new_with_label("[ P ]");
+	prebtn = gtk_button_new();
+	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/preview.xpm", NULL);
+	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtk_widget_set_tooltip_text(prebtn, _("Preview"));
 	g_signal_connect(prebtn, "clicked",
 					   G_CALLBACK(file_pre_btn), files_list);
+	gtkhx_widget_set_child(prebtn, pix);
+	pix = 0, icon = 0, mask = 0;
 
 	uploadbtn = gtk_button_new();
 	gtk_widget_set_tooltip_text(uploadbtn, _("Upload"));
