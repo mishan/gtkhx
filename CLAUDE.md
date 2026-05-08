@@ -11,104 +11,127 @@ system, and crypto along the way. **Full backward compatibility with the Hotline
 1.5 wire protocols is a hard requirement.** Servers are scarce and ancient; we don't get
 to break them.
 
-## Source layout (~42k LOC C, 88 files in `src/`)
+## Source layout (~36k LOC C, 83 files in `src/`)
 
 The big rocks, by line count:
 
 | File                    | LOC  | Role                                                          |
 |-------------------------|------|---------------------------------------------------------------|
-| `src/gtk_hlist.c/.h`    | 8149 | **Custom widget** — fork of GtkCList. 5 consumers in-tree.    |
-| `src/xtext.c/.h`        | 3526 | **Custom widget** — fork of XChat 1.8.5 text widget. Phase 2 swaps in HexChat's modern xtext. |
+| `src/xtext.c/.h`        | 4500 | **Custom widget** — HexChat's modern xtext fork (vendored Phase 2). |
 | `src/dfa.c`             | 2550 | Regex/pattern matching engine.                                |
-| `src/options.c`         | 1816 | Preferences dialog + persistence.                             |
-| `src/rcv.c`             | 1623 | Hotline protocol receive path.                                |
-| `src/chat.c`            | 1509 | Chat window UI.                                               |
-| `src/files.c`           | 1462 | File browser UI.                                              |
-| `src/news15.c`          | 1269 | Threaded news (1.5 protocol).                                 |
-| `src/network.c`         | 1196 | Connection / pthread worker.                                  |
-| `src/users.c`           |  995 | User list UI.                                                 |
-| `src/connect.c`         |  903 | Connection dialog + setup.                                    |
-| `src/gtkhx.c`           |  892 | `main()`, custom timer/fd plumbing, GTK init.                 |
+| `src/options.c`         | ~1900| Settings (AdwPreferencesDialog) + GKeyFile persistence.       |
+| `src/rcv.c`             | ~1700| Hotline protocol receive path.                                |
+| `src/chat.c`            | ~1500| Chat window UI (xtext output, GtkTextView input).             |
+| `src/files.c`           | ~1500| File browser UI (gtk_hlist_compat).                           |
+| `src/news15.c`          | ~1300| Threaded news (1.5 protocol).                                 |
+| `src/network.c`         | ~1300| Connection / pthread worker, hlwrite, ping keepalive.         |
+| `src/users.c`           | ~1000| User list UI + right-click popup.                             |
+| `src/connect.c`         |  ~900| Connect dialog (AdwDialog) + bookmark management.             |
+| `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
+| `src/gtk_hlist_compat.c`|  ~800| Shim: GtkHList API over GtkTreeView+GtkListStore.             |
 | `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
 | `src/cipher.c`          |  ~~~ | Per-connection cipher (Blowfish/RC4); HOPE negotiation.       |
 | `src/compress.c`        |  ~~~ | zlib compression layer; HOPE negotiation.                     |
 | `src/hmac.c`            |  ~~~ | HMAC-MD5 / HMAC-SHA / HMAC-HAVAL.                             |
-| `src/md5.c` `src/sha.c` `src/haval.c` | ~~~ | Hash primitives (to be replaced by GLib/Nettle in Phase 1). |
-| `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Slated for removal** — see ROADMAP.   |
-| `src/gtkthreads.c`      |  ~~~ | Custom pthread↔GTK plumbing (pipe + cond + `gdk_input_add`).  |
+| `src/md5.c` `src/sha.c` `src/haval.c` | ~~~ | Hash primitives (Phase 5 follow-up: replace with GLib/Nettle). |
+| `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Compiled out** (`USE_PLUGIN` undef).  |
+| `src/gtkthreads.c`      |  ~~~ | GRecMutex + custom poll wrapper for worker↔main serialization.|
+| `src/debug.c/.h`        |  ~~~ | Categorised runtime logger (`GTKHX_DEBUG=cat1,cat2`).         |
+| `src/proto_trace.c/.h`  |  ~~~ | Hotline wire-protocol trace (debug category `proto`).         |
+| `src/hl_access.h`       |  ~~~ | Account-access-bit constants matching mhxd's `hl_access_bits`.|
 
 `src/hx.h` (655 lines) is the kitchen-sink header: session struct, output_functions, most
 typedefs. `src/hotline.h` is the wire-protocol constants/structs.
 
 Other top-level dirs:
 
-- `plugins/sample/` — example plugin. Will be deleted.
-- `plugins/eliza/` — toy ELIZA chatbot plugin. Keep if it amuses Misha.
-- `intl/` — vendored GNU gettext runtime (~30 files). Phase 1 will delete this in favor
-  of the system gettext.
-- `po/` — translations. Currently has French only.
-- `macros/` — autoconf macros. Phase 1 will delete (Meson handles this differently).
-- `sounds/` — `.wav` files for chat alerts.
+- `plugins/sample/` — example plugin. Build-disabled (`USE_PLUGIN` undef).
+- `plugins/eliza/` — toy ELIZA chatbot plugin. Build-disabled.
+- `po/` — translations. French only.
+- `sounds/` — `.wav` files for chat alerts (was `.aiff`, converted Phase 5 for libcanberra
+  compatibility).
+- `mhxd/` — full mhxd source vendored locally for cross-reading
+  (`hl_access_bits` struct, opcode tables, ChangeLog). Not built; reference only.
 
-(Old `debian/` packaging and `gtkhx.spec` were removed in Phase 0 — re-add fresh
-packaging when there's a buildable binary again.)
+(Old `debian/` packaging, `gtkhx.spec`, `intl/`, `macros/` were removed in Phase 0–1.
+Re-add fresh packaging when ready to ship.)
 
 ## Build status
 
-**Phases 1, 2, 3, and most of 4 are complete.** `meson.build` pins `gtk4 >= 4.6`,
-the in-tree custom widgets are gone (`gtk_hlist_compat.[ch]` shim over
-GtkTreeView+GtkListStore lives in five consumers; xtext is HexChat's modern fork),
-and `meson setup build && meson compile -C build` produces a working binary.
+**Phases 1, 2, 3, and 4 are complete. Phase 5 (post-port modernization) is active.**
+`meson.build` pins `gtk4 >= 4.6` and `libadwaita-1 >= 1.6`. `meson setup build &&
+meson compile -C build` produces a working binary.
 
-What's *runnable* on first boot from this branch:
+The custom GtkCList fork is gone (replaced by `gtk_hlist_compat` over GtkTreeView+
+GtkListStore — five consumers, ~392 sites); xtext is HexChat's modern fork. The
+GtkApplication / activate plumbing in `gtkhx.c` drives all window construction.
 
-- The application launches under GTK 4 on Wayland.
-- Toolbar window appears, Ctrl+K opens the connect dialog (GtkShortcutController),
-  Ctrl+Q quits.
-- Tracker, users, files, news, options windows all build and lay out under GTK 4
-  containers (`gtk_box_append`, `gtk_window_set_child`, etc.).
-- Right-click on a user opens a `GtkPopoverMenu` from a `GMenu` model with the
-  Kick/Ban/Ignore/Info/Msg/Pchat actions wired through `GAction`s.
-- Chat input handles Tab nick completion, Return-to-send, Up/Down history via
-  `GtkEventControllerKey`.
-- Hotline protocol layer (rcv.c / commands.c / hotline.h / cipher.c / compress.c)
-  is unchanged — wire-format compatibility with 1.2/1.5 servers is preserved.
+What's runnable and reasonably polished on this branch:
 
-What's *degraded* and tracked as Phase 4 follow-up work:
+- Launches under GTK 4 / libadwaita on Wayland with light/dark/system theme tracking
+  via AdwStyleManager.
+- Every user-facing window uses `AdwHeaderBar` chrome consistently: toolbar, chat,
+  private chat, private message, news, news15, files, users, tasks, tracker, preview,
+  agreement, user editor, about. Settings is `AdwPreferencesDialog`; Connect, Open
+  User, broadcast, and confirmation prompts are `AdwDialog` / `AdwAlertDialog`.
+- Toolbar uses `AdwSplitButton` for Connect-with-bookmark, `AdwBanner` for connection-
+  loss notice with Reconnect, `AdwToastOverlay` for transient feedback. Hamburger menu
+  via `GMenu` + `GAction` on the application.
+- Tracker has a `GtkSearchEntry` and action buttons in the headerbar.
+- Settings icon picker is a `GtkFlowBox` grid of 56 px GtkPicture-rendered icons (was
+  a 18-px-row GtkHList).
+- Hotline protocol layer (`rcv.c` / `commands.c` / `hotline.h` / `cipher.c` /
+  `compress.c`) is unchanged — wire-format compat with 1.2/1.5/1.9 servers preserved.
+- Chat / private-message text is sanitised through `gtkhx_text_to_utf8` (Mac Roman →
+  UTF-8 with U+FFFD fallback) before reaching xtext/Pango.
+- Sound playback is in-process via GSound; no fork+exec of an external player.
 
-- **Selection auto-scroll while dragging**: the scrollup/down timers read
-  `xtext->select_end_y` (kept live by the motion controller) rather than
-  the live device position, since GTK 4 has no synchronous "where is the
-  pointer" accessor on a widget. If the user drags out of the widget and
-  the pointer goes still, the timers fire correctly using the last known
-  position; if the pointer is moving past the edge they keep up. Coarse
-  but correct; matches HexChat's GTK 4 fork behaviour.
-- **Window position restoration**: `gtk_window_get_position` is gone and
-  Wayland gives clients no portable way to set their absolute position
-  anyway. Size restoration works via the quit-time save path; positions
-  restore from prefs only when the compositor cooperates.
-- **`MAX_CONN > 1`**: still a half-built abstraction. Phase 5 work.
+Phase 5 protocol-aware work landed:
 
-The GtkApplication / activate plumbing in `gtkhx.c` still drives all the
-window construction, so the Phase 3.6 toplevel-registration walk continues
-to apply.
+- `HTLC_HDR_PING` keepalive every 60 s while connected, gated on `htlc->version >= 150`
+  so 1.0/1.2 servers don't error-spam our toasts.
+- Post-login state machine waits for `HTLS_HDR_USER_SELFINFO` before firing
+  `USER_GETLIST`, with a 2 s fallback timer for old servers that don't send SELFINFO.
+- `hl_access.h` decodes the access bitmap; `news.c` skips auto-fetch when
+  `HL_ACCESS_READ_NEWS` is unset; users.c hides Kick/Ban menu and toolbar buttons when
+  `HL_ACCESS_DISCONNECT_USERS` is unset; toolbar greys out News / Post / News (1.5+)
+  buttons by version + access bits.
+
+What's degraded and remaining:
+
+- **Selection auto-scroll while dragging**: scrollup/down timers read
+  `xtext->select_end_y` (kept live by the motion controller) rather than the live
+  device position; GTK 4 has no synchronous "where is the pointer" accessor.
+- **Window position restoration**: `gtk_window_get_position` is gone and Wayland
+  gives clients no portable way to set absolute position. Size restores from prefs;
+  position only restores when the compositor cooperates.
+- **`MAX_CONN > 1`**: still a half-built abstraction. The plan is tabbed UI for
+  multi-conn (see memory `gtkhx_future_ui.md`).
+- **CSS-node-insert-after warnings**: occasional `gtk_css_node_insert_after` criticals
+  during widget construction. Most call sites have been audited; remaining cases are
+  pre-existing GTK 4 noise.
 
 ## Idioms and pitfalls specific to this codebase
 
 - **Multi-connection scaffolding is a lie.** `hx.h` has `MAX_CONN`/`sessions[]`, but
   `sess_from_htlc()` literally returns `&sessions[0]`. Don't propagate the abstraction
-  during ports — collapse to explicit single-session, then build real multi-conn against
-  the modernized codebase in Phase 5.
-- **Custom timer/fd plumbing in `gtkhx.c`.** Uses `hxd_fd_set`/`hxd_fd_clr` for socket
-  watches and a custom timer wheel rather than `g_timeout_add` / `g_io_add_watch` / a
-  `GMainContext`. Will be replaced when the GTK port lands.
-- **Threading.** `gtkthreads.c` uses a pipe + `pthread_cond_t` + `gdk_input_add` to
-  marshal results from worker threads back to the GTK thread. The GTK 2 port can keep
-  this with `gdk_input_add` → `g_io_add_watch`; Phase 4 (GTK 4) should move to
-  `g_main_context_invoke` / `GTask`.
-- **`gtk_hlist` consumers** (5 files): `tracker.c`, `news15.c`, `options.c`, `users.c`,
-  `files.c`. ~392 use sites total. The plan is a `gtk_hlist_compat` shim over
-  GtkTreeView/GtkListStore, then migrate consumers one at a time, then delete the shim.
+  during follow-up work — collapse to explicit single-session. Real multi-conn lands
+  in Phase 5 with a tabbed UI (see memory `gtkhx_future_ui.md`).
+- **Socket watches in `gtkhx.c`.** `hxd_fd_set`/`hxd_fd_clr` are now thin wrappers
+  around `g_io_add_watch` on a `GIOChannel`. The custom-timer-wheel from the original
+  is gone; `g_timeout_add_seconds` is used everywhere now (e.g. ping keepalive,
+  post-login fallback).
+- **Threading.** `gtkthreads.c` uses a `GRecMutex` plus a custom `GMainContext` poll
+  wrapper that releases the lock during `poll()` and re-acquires it after. Worker
+  threads (network.c, xfers.c) call `gtk_threads_enter()` / `gtk_threads_leave()`
+  brackets around any GTK widget access — same single-mutex semantics the GDK lock
+  used to provide, just on a non-deprecated foundation. Per-window UI dispatch from
+  workers prefers `g_idle_add` (see preview.c) so the worker doesn't hold the lock
+  during slow GTK operations.
+- **`gtk_hlist_compat`.** Five consumers (`tracker.c`, `news15.c`, `options.c`,
+  `users.c`, `files.c`) still use the GtkHList API. The compat shim wraps
+  GtkTreeView+GtkListStore. Eventually we want `GtkColumnView` per consumer and the
+  shim deleted; for now the shim works and isn't on fire.
 - **HOPE handshake.** `cipher.c` and `compress.c` negotiate the optional HOPE
   encryption/compression extension during connection setup. Don't change the negotiated
   format — only the implementation underneath. `hmac.c` checks for `"HMAC-HAVAL"` MAC at
@@ -122,12 +145,47 @@ to apply.
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.
 
-## Reference server
+## Debug infrastructure
 
-For testing once Phase 2 produces a binary: **mhxd**
-(<https://github.com/kangsterizer/mhxd>) — 2023 merge of three forks of HotlineX, same
-codebase family that GtkHx's protocol stack came from. Builds `hxd` server, `hxtrackd`
-tracker, console `hx` client, and a `ghx` GTK client. Default port 5500. GPL-2.0-or-later.
+Set `GTKHX_DEBUG` to a comma-separated list of categories before launch:
+
+```sh
+GTKHX_DEBUG=proto             # full Hotline wire trace (in/out, types, chunks)
+GTKHX_DEBUG=proto,news,login  # several at once
+GTKHX_DEBUG=all               # everything
+```
+
+Output goes to stderr, prefixed `[<category>]`. See `src/debug.{c,h}` for the
+infrastructure and `src/proto_trace.{c,h}` for the protocol trace (the first and
+biggest consumer). Existing categories: `proto`, `news`, `login`, `msg`. Add new
+ones inline — `debug_log("xfer", "starting transfer %u", htxf->ref)` just works,
+no registration needed.
+
+The protocol trace is invaluable for diagnosing "server doesn't like X" bugs —
+matching outgoing trans IDs against incoming `HTLS_HDR_TASK flag=1` task-error
+replies tells you exactly which client request the server rejected and why.
+
+## Reference servers and protocol versions
+
+Several live and local servers are useful for compatibility testing:
+
+- **mhxd** (<https://github.com/kangsterizer/mhxd>, also vendored under `mhxd/`
+  for offline cross-reading) — 2023 merge of three forks of HotlineX, same
+  codebase family that GtkHx's protocol stack came from. Builds `hxd` server,
+  `hxtrackd` tracker, console `hx` client, `ghx` GTK client. Default port 5500.
+  GPL-2.0-or-later. Use it as the controlled / repeatable test target and as
+  the canonical reference for opcodes, the access bitmap struct, and the
+  ChangeLog of post-original protocol additions.
+- **hlserver.com** — running a modern-but-not-original Hotline server. Doesn't
+  advertise `HTLS_DATA_VERSION` and rejects unknown opcodes (e.g.
+  `HTLC_HDR_PING`) with task errors, so behaves like a 1.0/1.2 server from the
+  client's perspective. Useful for "does our 1.0/1.2 path still work" checks.
+- **Badmoon** — confirmed Hotline 1.9 server (`HTLS_DATA_VERSION=0x00be=190`).
+  Speaks `HTLC_HDR_PING`. The first concrete 1.9-server data point we have.
+
+Hotline 1.9 protocol exists in the wild — TLS-over-Hotline has been seen in
+third-party screenshots. See ROADMAP Phase ∞ and the long-form notes in memory
+(`gtkhx_protocol_19.md`).
 
 ## Conventions for working in this repo
 
