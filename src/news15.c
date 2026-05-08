@@ -759,19 +759,34 @@ void newsc_clicked (GtkTreeView *tree, struct gnews_catalog *gcnews)
 
 void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
-	GtkWidget *text = g_object_get_data(G_OBJECT(btn), "text");
-	GtkWidget *reply = g_object_get_data(G_OBJECT(btn), "reply");
-	GtkWidget *subject = g_object_get_data(G_OBJECT(btn), "subject");
-	GtkWidget *window = g_object_get_data(G_OBJECT(btn), "window");
-	char *textbuf = gtk_editable_get_chars(GTK_EDITABLE(text), 0, -1);
-	guint32 postid = atoi(gtk_editable_get_text(GTK_EDITABLE(reply)));
-	char *subjectbuf = gtk_editable_get_text(GTK_EDITABLE(subject));
+	GtkWidget *text    = g_object_get_data (G_OBJECT (btn), "text");
+	GtkWidget *reply   = g_object_get_data (G_OBJECT (btn), "reply");
+	GtkWidget *subject = g_object_get_data (G_OBJECT (btn), "subject");
+	GtkWidget *window  = g_object_get_data (G_OBJECT (btn), "window");
+	GtkTextBuffer *tbuf;
+	GtkTextIter tstart, tend;
+	char *textbuf;
+	guint32 postid;
+	const char *subjectbuf;
 
-	
-	hx_news15_post_thread(&the_session.htlc, gcnews->path, subjectbuf,
-						  postid, textbuf);
-	hx_news15_cat_list(&the_session.htlc, gcnews);
-	gtkhx_widget_destroy(window);
+	/* `text` is a GtkTextView (see news15_post_window); pull body
+	 * via the buffer API. The previous gtk_editable_get_chars
+	 * call returned NULL and the next strlen segfaulted on Post.
+	 * Mirror what news15_do_post already does. */
+	tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (text));
+	gtk_text_buffer_get_start_iter (tbuf, &tstart);
+	gtk_text_buffer_get_end_iter   (tbuf, &tend);
+	textbuf = gtk_text_buffer_get_text (tbuf, &tstart, &tend, FALSE);
+
+	postid     = atoi (gtk_editable_get_text (GTK_EDITABLE (reply)));
+	subjectbuf = gtk_editable_get_text (GTK_EDITABLE (subject));
+
+	hx_news15_post_thread (&the_session.htlc, gcnews->path, subjectbuf,
+	                       postid, textbuf);
+	g_free (textbuf);
+
+	hx_news15_cat_list (&the_session.htlc, gcnews);
+	gtkhx_widget_destroy (window);
 }
 
 void news15_cancel_post(GtkWidget *btn, GtkWidget *window)
