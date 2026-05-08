@@ -124,3 +124,17 @@ test_path_util = executable('test_path_util',
 )
 test('path_util', test_path_util,
      suite : 'unit')
+
+# prefs_parser — prefs_parse_boolean. The BOOLEAN-pref logic was
+# extracted out of options.c specifically for this test (options.c
+# pulls in GTK + Adwaita + the entire UI tree; prefs_parser.c is
+# pure GLib). Regression net for the GKeyFile true/false bug we
+# already shipped a fix for.
+test_prefs_parser = executable('test_prefs_parser',
+  'unit/test_prefs_parser.c',
+  '../src/prefs_parser.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('prefs_parser', test_prefs_parser,
+     suite : 'unit')
