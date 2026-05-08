@@ -27,6 +27,9 @@ Code Modernization:
 - Separation of concerns -- separate UI code from non-UI code
 - Follow MVC architecture
 
+Code Cleanup:
+- Remove #define/#ifdef/#ifndef for things like USE_IPV6 and other things we should just consider a given these days
+
 Features:
 - Custom color palette
 - Log chat history / server, and be able to bring that chat history back up when connecting to a server
