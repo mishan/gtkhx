@@ -37,7 +37,6 @@
 #include "tasks.h"
 #include "connect.h"
 #include "toolbar.h"
-#include "debug.h"
 
 void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)
@@ -383,54 +382,12 @@ void msg_output (char *name, guint16 uid, char *buf)
  * shape of what we've seen in the wild on hlserver.com et al. */
 #define BROADCAST_TOAST_MAX 160
 
-/* Phase 5: dedupe repeated identical broadcasts within a sliding
- * window. hlserver.com sends "0 command(s) at a time, please." in
- * response to every command we issue, which made every action toast
- * the same message. Once-per-N-seconds is the right ergonomic — the
- * user sees the message the first time it arrives so they're aware,
- * and silently drops it if it keeps coming. Real admin announcements
- * almost never repeat verbatim within a minute, so this doesn't hide
- * anything important.
- *
- * Reset on disconnect via broadcastmsg_session_reset (called from
- * hx_htlc_close) so a fresh connection sees the same broadcast
- * fresh. */
-#define BROADCAST_DEDUPE_WINDOW_SEC 60
-
-static char    *last_broadcast_text = NULL;
-static gint64   last_broadcast_time = 0;
-
-void
-broadcastmsg_session_reset (void)
-{
-	g_clear_pointer (&last_broadcast_text, g_free);
-	last_broadcast_time = 0;
-}
-
 void broadcastmsg(char *text)
 {
 	AdwDialog *dialog;
 	GtkWidget *textbox, *scroll;
 	GtkTextBuffer *tbuf;
 	gsize len = text ? strlen (text) : 0;
-	gint64 now;
-
-	/* Dedupe identical text within a sliding window. */
-	now = g_get_monotonic_time ();
-	if (last_broadcast_text && text &&
-	    !strcmp (last_broadcast_text, text) &&
-	    (now - last_broadcast_time) <
-	        (gint64) BROADCAST_DEDUPE_WINDOW_SEC * G_USEC_PER_SEC) {
-		debug_log ("msg",
-		    "suppressing repeat broadcast within %d s window: \"%.40s%s\"",
-		    BROADCAST_DEDUPE_WINDOW_SEC,
-		    text, len > 40 ? "..." : "");
-		last_broadcast_time = now;
-		return;
-	}
-	g_free (last_broadcast_text);
-	last_broadcast_text = text ? g_strdup (text) : NULL;
-	last_broadcast_time = now;
 
 	if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
 		toolbar_show_toast (text);

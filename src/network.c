@@ -48,7 +48,6 @@
 #include "users.h"
 #include "inet.h"
 #include "log.h"
-#include "msg.h"
 #include "proto_trace.h"
 
 char *server_addr;
@@ -156,7 +155,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
 	ping_stop ();
 	rcv_login_reset ();
-	broadcastmsg_session_reset ();
 
 	if(conn_tid) {
 		pthread_cancel(conn_tid);
