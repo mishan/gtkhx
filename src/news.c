@@ -72,8 +72,8 @@ void reload_news (GtkWidget *widget, gpointer data)
 	/* Phase 5: ask the access bitmap before hitting the wire. The
 	 * server told us at SELFINFO time which permissions our account
 	 * has — see hx_rcv_user_selfinfo populating htlc->access — and
-	 * sending HTLC_HDR_NEWS_GETFILE without HL_ACCESS_NEWS_READ_ART
-	 * just earns us a task error ("Uh, no.") on every login. Skip
+	 * sending HTLC_HDR_NEWS_GETFILE without HL_ACCESS_READ_NEWS just
+	 * earns us a task error ("Uh, no.") on every login. Skip
 	 * the request entirely instead.
 	 *
 	 * Only gate when access has actually been populated (any bit
@@ -99,10 +99,10 @@ void reload_news (GtkWidget *widget, gpointer data)
 			}
 		}
 		if (any_bit_set &&
-		    !hl_access_has (access, HL_ACCESS_NEWS_READ_ART)) {
+		    !hl_access_has (access, HL_ACCESS_READ_NEWS)) {
 			debug_log ("news",
 			    "skipping HTLC_HDR_NEWS_GETFILE — account lacks "
-			    "HL_ACCESS_NEWS_READ_ART (bit 20)");
+			    "HL_ACCESS_READ_NEWS (bit 20)");
 			return;
 		}
 	}
