@@ -68,3 +68,22 @@ test_byte_swap = executable('test_byte_swap',
 )
 test('byte_swap', test_byte_swap,
      suite : 'unit')
+
+# proto_names — proto_hdr_name / proto_data_name from proto_trace.c
+# map opcode integers to the symbolic names we print in [proto]
+# traces. Compile proto_trace.c and debug.c in directly (debug is
+# pulled in as a transitive symbol via debug_log calls inside
+# proto_trace.c that the linker still needs to resolve, even though
+# the two name functions don't call it themselves).
+#
+# proto_trace.c was deliberately decoupled from hx.h so we can compile
+# it here without GTK / Adwaita; it only needs protocol.h + glib.
+test_proto_names = executable('test_proto_names',
+  'unit/test_proto_names.c',
+  '../src/proto_trace.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('proto_names', test_proto_names,
+     suite : 'unit')

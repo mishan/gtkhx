@@ -1,0 +1,221 @@
+/*
+ * tests/unit/test_proto_names.c — verify proto_hdr_name() and
+ * proto_data_name() map opcode integers to the symbolic names we
+ * print in [proto] traces.
+ *
+ * Why bother testing string-table functions:
+ *   - The trace logger is the diagnostic tool we reach for whenever a
+ *     server says "Uh, no." or sends an unexpected reply — see the
+ *     hlserver / Badmoon / mhxd debugging history. If a switch case
+ *     returns the wrong constant, every "what just went over the
+ *     wire?" investigation that uses the trace gets misled.
+ *   - The two functions also have a 0x????-fallback path for unknown
+ *     opcodes that uses a static buffer; we exercise that too so we
+ *     don't accidentally change the format string and break log
+ *     greps people have learned.
+ *
+ * Coverage:
+ *   - One known opcode from each major group (HTLC_HDR_*, HTLS_HDR_*,
+ *     HTLC_HDR_PING, HTLC/S_DATA_*).
+ *   - Unknown opcode → "0x000123"-style hex fallback.
+ */
+
+#include "config.h"
+#include <string.h>
+#include <glib.h>
+/* protocol.h transitively pulls in compat.h (where PACKED is
+ * defined) and hotline.h (where HTLC_HDR_* / HTLS_DATA_* opcodes
+ * live) in the right order. Including hotline.h directly without
+ * compat.h first chokes on the PACKED attribute. */
+#include "protocol.h"
+#include "proto_trace.h"
+
+/* ---------- proto_hdr_name ---------- */
+
+static void
+test_hdr_login (void)
+{
+	g_assert_cmpstr (proto_hdr_name (HTLC_HDR_LOGIN),
+	                 ==, "HTLC_HDR_LOGIN");
+}
+
+static void
+test_hdr_chat (void)
+{
+	g_assert_cmpstr (proto_hdr_name (HTLC_HDR_CHAT),
+	                 ==, "HTLC_HDR_CHAT");
+}
+
+static void
+test_hdr_news_getfile (void)
+{
+	g_assert_cmpstr (proto_hdr_name (HTLC_HDR_NEWS_GETFILE),
+	                 ==, "HTLC_HDR_NEWS_GETFILE");
+}
+
+static void
+test_hdr_user_getlist (void)
+{
+	g_assert_cmpstr (proto_hdr_name (HTLC_HDR_USER_GETLIST),
+	                 ==, "HTLC_HDR_USER_GETLIST");
+}
+
+static void
+test_hdr_ping (void)
+{
+	/* HTLC_HDR_PING = 0x1f4 = 500 (mhxd extension; we send it once
+	 * a minute on >= 1.5 servers). The proto trace uses the
+	 * "HTLC/S_HDR_*" combined-direction form for opcodes that share
+	 * the same numeric value in both directions (PING, MSG_BROADCAST,
+	 * CHAT_INVITE — see proto_trace.c). Catches a renumber AND a
+	 * label-style change. */
+	g_assert_cmpstr (proto_hdr_name (HTLC_HDR_PING),
+	                 ==, "HTLC/S_HDR_PING");
+}
+
+static void
+test_hdr_task_reply (void)
+{
+	/* Server-side task reply opcode — what task-error replies arrive
+	 * tagged as in the trace ("← trans=N type=HTLS_HDR_TASK ..."). */
+	g_assert_cmpstr (proto_hdr_name (HTLS_HDR_TASK),
+	                 ==, "HTLS_HDR_TASK");
+}
+
+static void
+test_hdr_unknown_falls_back_to_hex (void)
+{
+	/* No real opcode collides with 0xdead. The static buffer
+	 * fallback formats it as "0x00dead" via %06x. */
+	const char *out = proto_hdr_name (0xdeadu);
+	g_assert_nonnull (out);
+	g_assert_cmpstr  (out, ==, "0x00dead");
+}
+
+static void
+test_hdr_unknown_zero_falls_back (void)
+{
+	/* Opcode 0 isn't a real Hotline opcode either. */
+	const char *out = proto_hdr_name (0u);
+	g_assert_nonnull (out);
+	g_assert_cmpstr  (out, ==, "0x000000");
+}
+
+/* ---------- proto_data_name ---------- */
+
+static void
+test_data_access_chunk (void)
+{
+	/* HTLC_DATA_ACCESS / HTLS_DATA_ACCESS are the same opcode 0x6e
+	 * by design (the 8-byte access bitmap chunk). The aliased name
+	 * the trace prints is whatever proto_data_name's switch picks. */
+	g_assert_cmpstr (proto_data_name (HTLS_DATA_ACCESS),
+	                 ==, "HTLC/S_DATA_ACCESS");
+}
+
+static void
+test_data_taskerror (void)
+{
+	g_assert_cmpstr (proto_data_name (HTLS_DATA_TASKERROR),
+	                 ==, "HTLS_DATA_TASKERROR");
+}
+
+static void
+test_data_version (void)
+{
+	g_assert_cmpstr (proto_data_name (HTLS_DATA_VERSION),
+	                 ==, "HTLS_DATA_VERSION");
+}
+
+static void
+test_data_chat (void)
+{
+	/* HTLC_DATA_CHAT == HTLS_DATA_CHAT == 0x65, and the same opcode
+	 * is reused for MSG / NEWS_POST / AGREEMENT / USER_INFO bodies.
+	 * proto_trace.c returns the combined label so a [proto] dump
+	 * line tells you all the meanings at a glance. */
+	g_assert_cmpstr (proto_data_name (HTLS_DATA_CHAT),
+	                 ==, "HTLC/S_DATA_CHAT/MSG/NEWS_POST/AGREEMENT/USER_INFO (0x65)");
+}
+
+static void
+test_data_unknown_falls_back_to_hex (void)
+{
+	/* DATA_* are 16-bit opcodes; %04x for the hex fallback. */
+	const char *out = proto_data_name ((guint16) 0xbeefu);
+	g_assert_nonnull (out);
+	g_assert_cmpstr  (out, ==, "0xbeef");
+}
+
+static void
+test_data_unknown_zero_falls_back (void)
+{
+	const char *out = proto_data_name ((guint16) 0u);
+	g_assert_nonnull (out);
+	g_assert_cmpstr  (out, ==, "0x0000");
+}
+
+/* ---------- Static buffer reuse note ----------
+ *
+ * proto_hdr_name and proto_data_name each hand out a per-call static
+ * buffer for the hex fallback path (single-threaded by virtue of
+ * being called from the trace logger only). Document the contract
+ * with a test: two consecutive calls to the same function with
+ * different unknown opcodes must NOT both return identical strings —
+ * the second call clobbers the first. (Callers must therefore use
+ * the result before the next call.)
+ *
+ * If we ever switch to a thread-local or non-shared formatter, this
+ * test changes — leave it here as the explicit canary.
+ */
+static void
+test_hdr_unknown_buffer_is_overwritten_on_next_call (void)
+{
+	const char *first = proto_hdr_name (0x111111u);
+	const char *second = proto_hdr_name (0x222222u);
+	/* Same buffer pointer, same string content (the second call
+	 * stomped the first). This is the documented behaviour. */
+	g_assert_true   (first == second);
+	g_assert_cmpstr (first, ==, "0x222222");
+}
+
+int
+main (int argc, char **argv)
+{
+	g_test_init (&argc, &argv, NULL);
+
+	g_test_add_func ("/proto_names/hdr_login",
+	                 test_hdr_login);
+	g_test_add_func ("/proto_names/hdr_chat",
+	                 test_hdr_chat);
+	g_test_add_func ("/proto_names/hdr_news_getfile",
+	                 test_hdr_news_getfile);
+	g_test_add_func ("/proto_names/hdr_user_getlist",
+	                 test_hdr_user_getlist);
+	g_test_add_func ("/proto_names/hdr_ping",
+	                 test_hdr_ping);
+	g_test_add_func ("/proto_names/hdr_task_reply",
+	                 test_hdr_task_reply);
+	g_test_add_func ("/proto_names/hdr_unknown_falls_back_to_hex",
+	                 test_hdr_unknown_falls_back_to_hex);
+	g_test_add_func ("/proto_names/hdr_unknown_zero_falls_back",
+	                 test_hdr_unknown_zero_falls_back);
+
+	g_test_add_func ("/proto_names/data_access_chunk",
+	                 test_data_access_chunk);
+	g_test_add_func ("/proto_names/data_taskerror",
+	                 test_data_taskerror);
+	g_test_add_func ("/proto_names/data_version",
+	                 test_data_version);
+	g_test_add_func ("/proto_names/data_chat",
+	                 test_data_chat);
+	g_test_add_func ("/proto_names/data_unknown_falls_back_to_hex",
+	                 test_data_unknown_falls_back_to_hex);
+	g_test_add_func ("/proto_names/data_unknown_zero_falls_back",
+	                 test_data_unknown_zero_falls_back);
+
+	g_test_add_func ("/proto_names/hdr_unknown_buffer_is_overwritten_on_next_call",
+	                 test_hdr_unknown_buffer_is_overwritten_on_next_call);
+
+	return g_test_run ();
+}

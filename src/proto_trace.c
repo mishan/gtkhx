@@ -13,8 +13,12 @@
 #include <ctype.h>
 #include <glib.h>
 #include <netinet/in.h>
-#include "hx.h"
-#include "hotline.h"
+/* Deliberately do NOT include hx.h. proto_trace.c only needs the
+ * wire-protocol opcode constants and the htlc_conn struct, both of
+ * which protocol.h provides (it transitively pulls in hotline.h
+ * after compat.h's PACKED macro is in scope). Skipping hx.h means
+ * the unit tests can compile this translation unit without dragging
+ * in GTK, libadwaita, or any session / widget plumbing. */
 #include "protocol.h"
 #include "debug.h"
 #include "proto_trace.h"
