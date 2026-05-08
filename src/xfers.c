@@ -50,6 +50,66 @@ int nxfers = 0;
 struct htxf_conn **xfers = 0;
 void xfer_delete (struct htxf_conn *htxf);
 
+/*
+ * Worker → main thread marshal helpers for the xfer workers.
+ *
+ * Each get_thread / put_thread streams bytes and reports progress
+ * via hx_output.file_update. post_file_update marshals each
+ * progress callback to the main thread asynchronously.
+ *
+ * Async on its own would create a use-after-free: the worker calls
+ * xfer_delete at the end of its run, freeing htxf, while main-thread
+ * idle dispatchers still hold the htxf pointer. To avoid that, the
+ * worker's exit-path xfer_delete is also marshaled, via
+ * post_xfer_cleanup. GLib runs idles in FIFO order at the same
+ * priority, so cleanup runs after all already-queued file_updates —
+ * htxf stays alive for every pending dispatcher.
+ *
+ * Outstanding race: a server-initiated cancel can call xfer_delete
+ * from rcv.c on the main thread while the worker is mid-stream,
+ * freeing htxf before later worker idles run. Closing this needs
+ * htxf reference-counting or a deletion-mark + drain protocol;
+ * tracked under connection-ownership cleanup.
+ */
+struct fu_job {
+	struct htxf_conn *htxf;
+};
+static gboolean
+fu_dispatch (gpointer data)
+{
+	struct fu_job *j = data;
+	hx_output.file_update (&the_session, j->htxf);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_file_update (struct htxf_conn *htxf)
+{
+	struct fu_job *j = g_new0 (struct fu_job, 1);
+	j->htxf = htxf;
+	gtkhx_post_to_main (fu_dispatch, j);
+}
+
+struct cleanup_job {
+	struct htxf_conn *htxf;
+};
+static gboolean
+cleanup_dispatch (gpointer data)
+{
+	struct cleanup_job *j = data;
+	j->htxf->tid = 0;
+	xfer_delete (j->htxf);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_xfer_cleanup (struct htxf_conn *htxf)
+{
+	struct cleanup_job *j = g_new0 (struct cleanup_job, 1);
+	j->htxf = htxf;
+	gtkhx_post_to_main (cleanup_dispatch, j);
+}
+
 static void ignore_signals (sigset_t *oldset)
 {
 	sigset_t set;
@@ -143,12 +203,7 @@ void xfer_go (struct htxf_conn *htxf)
 
 int xfer_go_timer (void *__arg)
 {
-	
-	LOCK_HTXF((&(the_session.htlc)));
 	xfer_go((struct htxf_conn *)__arg);
-	UNLOCK_HTXF((&(the_session.htlc)));
-
-
 	return 0;
 }
 
@@ -163,22 +218,18 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	htxf->type = type;
 	htxf->queue = -1;
 
-	LOCK_HTXF((&(the_session.htlc)));
 	xfers = g_realloc(xfers, (nxfers + 1) * sizeof(struct htxf_conn *));
 	xfers[nxfers] = htxf;
 	nxfers++;
-	UNLOCK_HTXF((&(the_session.htlc)));
 
 	htxf->htlc = &the_session.htlc;
 	htxf->total_pos = 0;
 	htxf->total_size = 1;
 	hx_output.file_update(&the_session, htxf);
 
-	LOCK_HTXF((&(the_session.htlc)));
 	if(nxfers == 1 || !gtkhx_prefs.queuedl) {
 		xfer_go(htxf);
 	}
-	UNLOCK_HTXF((&(the_session.htlc)));
 
 	return htxf;
 }
@@ -246,9 +297,7 @@ static int rd_wr (int rd_fd, int wr_fd, guint32 data_len,
 			len -= r;
 			htxf->total_pos += r;
 
-			gtk_threads_enter();
-			hx_output.file_update(&the_session, htxf);
-			gtk_threads_leave();
+			post_file_update(htxf);
 		}
 		data_len -= pos;
 	}
@@ -283,12 +332,14 @@ static int preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf,
 
 		/* XXX: Here is where we should output to some preview widget */
 		/*			g_print("%.*s", len, &(buf[pos])); */
-		
-		gtk_threads_enter();
+
+		/* p->output is hx_preview_text_output, which already does
+		 * its own g_idle_add to marshal the gtk_text_buffer_insert
+		 * to the main thread (see preview.c). It is safe to call
+		 * directly from the worker — no GTK lock needed. */
 		p->output(p, buf, len);
 		htxf->total_pos += len;
-		hx_output.file_update(&the_session, htxf);
-		gtk_threads_leave();
+		post_file_update(htxf);
 		data_len -= len;
 	}
 	g_free(buf);
@@ -321,9 +372,7 @@ static void *get_thread (void *__arg)
 		pos += r;
 		len -= r;
 		htxf->total_pos += r;
-		gtk_threads_enter();
-		hx_output.file_update(&the_session, htxf);
-		gtk_threads_leave();
+		post_file_update(htxf);
 	}
 	pos = 0;
 	len = (buf[38] ? 0x100 : 0) + buf[39];
@@ -337,10 +386,8 @@ static void *get_thread (void *__arg)
 		pos += r;
 		len -= r;
 		htxf->total_pos += r;
-		
-		gtk_threads_enter();
-		hx_output.file_update(&the_session, htxf);
-		gtk_threads_leave();
+
+		post_file_update(htxf);
 	}
 	memcpy(typecrea, &buf[4], 8);
 	memset(&fi, 0, sizeof(struct hfs_cap_info));
@@ -371,18 +418,13 @@ static void *get_thread (void *__arg)
 		close(f);
 	}
 	else {
-		/* Phase 5: hx_preview_new used to be called from this worker
-		 * thread under gtk_threads_enter, which constructed the
-		 * GtkWindow + AdwHeaderBar and called gtk_window_present from
-		 * a non-main thread. That triggered an intermittent lockup —
-		 * symptom was the app freezing immediately on Preview, even
-		 * for a tiny file with no console warnings. Wayland's compositor
-		 * round-trip during window mapping does not play nicely from
-		 * worker threads under our serializing lock.
-		 *
-		 * Now rcv_task_file_get builds the preview window on the main
-		 * thread and stashes the struct hx_preview * here. The worker
-		 * just streams bytes through it. */
+		/* The preview window is constructed on the main thread by
+		 * rcv_task_file_get and stashed here as a struct hx_preview *;
+		 * the worker just streams bytes through it. Constructing
+		 * GtkWindow + AdwHeaderBar and calling gtk_window_present
+		 * from a worker thread caused intermittent lockups — Wayland
+		 * compositor round-trips during window mapping don't play
+		 * nicely from non-main threads. */
 		p = (struct hx_preview *) htxf->preview;
 		if (!p) {
 			goto ret;
@@ -408,9 +450,7 @@ get_rsrc:
 		len -= r;
 		htxf->total_pos += r;
 
-		gtk_threads_enter();
-		hx_output.file_update(&the_session, htxf);
-		gtk_threads_leave();
+		post_file_update(htxf);
 	}
 	HN32(&len, &buf[12]);
 	if (!len)
@@ -431,19 +471,16 @@ done:
 	if(!htxf->opt.preview)
 		hfsinfo_write(htxf->path, &fi);
 	play_sound(FILE_DONE);
-	gtk_threads_enter();
 	htxf->total_pos = htxf->total_size;
-	hx_output.file_update(&the_session, htxf);
-	gtk_threads_leave();
+	post_file_update(htxf);
 
 ret:
 	close(s);
 
-	LOCK_HTXF((&(the_session.htlc)));
-	htxf->tid = 0;
-	xfer_delete(htxf);
-	UNLOCK_HTXF((&(the_session.htlc)));
-	
+	/* Cleanup is marshaled to the main thread so it runs AFTER
+	 * every file_update idle posted above — GMainContext FIFO
+	 * ordering keeps htxf alive for every pending dispatcher. */
+	post_xfer_cleanup(htxf);
 	return NULL;
 }
 
@@ -526,17 +563,13 @@ put_rsrc:
 
 done:
 	play_sound(FILE_DONE);
-	gtk_threads_enter();
-	hx_output.file_update(&the_session, htxf);
-	gtk_threads_leave();
+	post_file_update(htxf);
 
 ret:
 	close(s);
 
-	LOCK_HTXF((&(the_session.htlc)));
-	htxf->tid = 0;
-	xfer_delete(htxf);
-	UNLOCK_HTXF((&(the_session.htlc)));
+	/* See get_thread for the cleanup-via-marshal rationale. */
+	post_xfer_cleanup(htxf);
 
 	return NULL;
 }
@@ -573,9 +606,7 @@ void xfer_ready_write (struct htxf_conn *htxf)
 	return;
 
 err_fd:
-	LOCK_HTXF((&(the_session.htlc)));
 	xfer_delete(htxf);
-	UNLOCK_HTXF((&(the_session.htlc)));
 }
 
 void xfer_tasks_update (struct htlc_conn *htlc)

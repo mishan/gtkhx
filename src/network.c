@@ -38,6 +38,7 @@
 #include <netinet/in.h>
 
 #include <signal.h>
+#include <stdarg.h>
 
 #include "hx.h"
 #include "rcv.h"
@@ -462,6 +463,320 @@ struct connect_data {
 };
 
 
+/*
+ * Worker → main thread marshal helpers.
+ *
+ * Each post_* allocates a job, deep-copies any caller-owned strings
+ * out of the worker's stack, and queues a one-shot idle on the
+ * default main context. The dispatcher runs the original UI function
+ * on the main thread, frees the job, returns G_SOURCE_REMOVE.
+ *
+ * Used by hx_thread_connect (connect/login flow), hx_tracker_list
+ * (tracker fetch flow), and any future worker-thread caller of
+ * GTK-touching functions in this file. See gtkthreads.h for the
+ * thread-contract rationale.
+ */
+
+/* (session *, int) — for conn_task_update, set_disconnect_btn, setbtns */
+struct si_job {
+	void (*fn)(session *, int);
+	session *sess;
+	int n;
+};
+static gboolean
+si_dispatch (gpointer data)
+{
+	struct si_job *j = data;
+	j->fn (j->sess, j->n);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_session_int (void (*fn)(session *, int), session *sess, int n)
+{
+	struct si_job *j = g_new0 (struct si_job, 1);
+	j->fn = fn;
+	j->sess = sess;
+	j->n = n;
+	gtkhx_post_to_main (si_dispatch, j);
+}
+
+/* (int) — for set_status_bar */
+struct i_job {
+	void (*fn)(int);
+	int n;
+};
+static gboolean
+i_dispatch (gpointer data)
+{
+	struct i_job *j = data;
+	j->fn (j->n);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_int (void (*fn)(int), int n)
+{
+	struct i_job *j = g_new0 (struct i_job, 1);
+	j->fn = fn;
+	j->n = n;
+	gtkhx_post_to_main (i_dispatch, j);
+}
+
+/* task_new(htlc, rcv, ptr, data, str). The caller's `ptr` is forwarded
+ * to task_new which stores it in tsk->ptr without copying — so we pass
+ * it through unchanged and don't free it. `str` is g_strdup'd inside
+ * task_new, so we deep-copy here only to keep the worker's stack
+ * buffer alive until dispatch (and free our copy after). */
+/* `rcv` keeps task_new's K&R-style "unspecified args" signature so
+ * the heterogeneous rcv_task_* callbacks (rcv_task_login,
+ * rcv_task_file_get, ...) all flow through without a cast — same
+ * contract the legacy task_new uses. -Wstrict-prototypes warns about
+ * the empty parens but doesn't error in this build. */
+struct tn_job {
+	struct htlc_conn *htlc;
+	void (*rcv)();
+	void *ptr;
+	void *data;
+	char *str;
+};
+static gboolean
+tn_dispatch (gpointer data)
+{
+	struct tn_job *j = data;
+	task_new (j->htlc, j->rcv, j->ptr, j->data, j->str);
+	g_free (j->str);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_task_new (struct htlc_conn *htlc, void (*rcv)(),
+               void *ptr, void *data, const char *str)
+{
+	struct tn_job *j = g_new0 (struct tn_job, 1);
+	j->htlc = htlc;
+	j->rcv = rcv;
+	j->ptr = ptr;
+	j->data = data;
+	j->str = g_strdup (str ? str : "");
+	gtkhx_post_to_main (tn_dispatch, j);
+}
+
+/* (session *, char *, int, int) — for trackconn_prog_update,
+ * track_prog_update. Used by the tracker worker. */
+struct prog_job {
+	void (*fn)(session *, char *, int, int);
+	session *sess;
+	char *str;
+	int num;
+	int total;
+};
+static gboolean
+prog_dispatch (gpointer data)
+{
+	struct prog_job *j = data;
+	j->fn (j->sess, j->str, j->num, j->total);
+	g_free (j->str);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_prog (void (*fn)(session *, char *, int, int),
+           session *sess, const char *str, int num, int total)
+{
+	struct prog_job *j = g_new0 (struct prog_job, 1);
+	j->fn = fn;
+	j->sess = sess;
+	j->str = g_strdup (str ? str : "");
+	j->num = num;
+	j->total = total;
+	gtkhx_post_to_main (prog_dispatch, j);
+}
+
+/* tracker_server_create(addr, port, nusers, name, desc, total). */
+struct ts_job {
+	struct in_addr addr;
+	guint16 port;
+	guint16 nusers;
+	char *name;
+	char *desc;
+	int total;
+};
+static gboolean
+ts_dispatch (gpointer data)
+{
+	struct ts_job *j = data;
+	hx_output.tracker_server_create (j->addr, j->port, j->nusers,
+	                                 j->name, j->desc, j->total);
+	g_free (j->name);
+	g_free (j->desc);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void
+post_ts (struct in_addr addr, guint16 port, guint16 nusers,
+         const char *name, const char *desc, int total)
+{
+	struct ts_job *j = g_new0 (struct ts_job, 1);
+	j->addr = addr;
+	j->port = port;
+	j->nusers = nusers;
+	j->name = g_strdup (name ? name : "");
+	j->desc = g_strdup (desc ? desc : "");
+	j->total = total;
+	gtkhx_post_to_main (ts_dispatch, j);
+}
+
+/* hx_printf_prefix(htlc, cid, prefix, fmt, ...). Format on the worker,
+ * pass the already-formatted text through "%s" so any % in the captured
+ * text isn't reinterpreted by hx_printf_prefix's own vsnprintf. */
+struct log_job {
+	struct htlc_conn *htlc;
+	guint32 cid;
+	char *prefix;
+	char *text;
+};
+static gboolean
+log_dispatch (gpointer data)
+{
+	struct log_job *j = data;
+	hx_printf_prefix (j->htlc, j->cid, j->prefix, "%s", j->text);
+	g_free (j->prefix);
+	g_free (j->text);
+	g_free (j);
+	return G_SOURCE_REMOVE;
+}
+static void G_GNUC_PRINTF (4, 5)
+post_log (struct htlc_conn *htlc, guint32 cid,
+          const char *prefix, const char *fmt, ...)
+{
+	struct log_job *j = g_new0 (struct log_job, 1);
+	va_list ap;
+
+	j->htlc = htlc;
+	j->cid = cid;
+	j->prefix = g_strdup (prefix ? prefix : "");
+	va_start (ap, fmt);
+	j->text = g_strdup_vprintf (fmt, ap);
+	va_end (ap);
+	gtkhx_post_to_main (log_dispatch, j);
+}
+
+/*
+ * Synchronous worker → main login-send dispatchers.
+ *
+ * The hlwrite calls in hx_thread_connect mutate htlc->out (the
+ * connection send qbuf), htlc->trans (transaction counter),
+ * htlc->{cipher,compress}_* (encoding state), and the global
+ * fd_set via hxd_fd_set. All of those are now main-thread-only on
+ * every other path; these three login-send sites are the last
+ * worker-thread writers. Marshal them via gtkhx_invoke_sync so the
+ * worker blocks while the main thread runs the actual hlwrite.
+ *
+ * Sync rather than async because (a) the worker has nothing to do
+ * until the packet is queued, (b) the args are stack locals
+ * (icon16, llen/plen, encoded buffers) that we'd otherwise have to
+ * deep-copy for an async post, and (c) the legacy bracketed code
+ * was synchronous, so we preserve the original ordering contract
+ * exactly. The gtkhx_invoke_sync footgun (don't call from main)
+ * doesn't apply here — hx_thread_connect is always a worker.
+ */
+struct login_secure_args {
+	struct htlc_conn *htlc;
+	int hc;
+	const guint8 *buf;          /* 1-byte zero, used for both empty
+	                             * login and empty password fields */
+	const guint8 *macalglist;
+	guint16 macalglistlen;
+#ifdef CONFIG_CIPHER
+	const guint8 *cipheralglist;
+	guint16 cipheralglistlen;
+#endif
+#ifdef CONFIG_COMPRESS
+	const guint8 *compressalglist;
+	guint16 compressalglistlen;
+#endif
+};
+
+static gboolean
+login_secure_dispatch (gpointer data)
+{
+	struct login_secure_args *a = data;
+	hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, a->hc,
+	    HTLC_DATA_LOGIN, 1, a->buf,
+	    HTLC_DATA_PASSWORD, 1, a->buf,
+	    HTLC_DATA_MAC_ALG, a->macalglistlen, a->macalglist,
+#ifdef CONFIG_CIPHER
+	    HTLC_DATA_CIPHER_ALG, a->cipheralglistlen, a->cipheralglist,
+#endif
+#ifdef CONFIG_COMPRESS
+	    HTLC_DATA_COMPRESS_ALG, a->compressalglistlen, a->compressalglist,
+#endif
+	    HTLC_DATA_SESSIONKEY, 0, 0);
+	return G_SOURCE_REMOVE;
+}
+
+/* Covers both the password-bearing and password-less legacy login
+ * paths. encpass == NULL signals the no-password variant; the field
+ * is omitted from the packet (hc 3 instead of 4). */
+struct login_args {
+	struct htlc_conn *htlc;
+	guint16 icon16;
+	const guint8 *enclogin;
+	guint16 llen;
+	const guint8 *encpass;
+	guint16 plen;
+};
+
+static gboolean
+login_dispatch (gpointer data)
+{
+	struct login_args *a = data;
+	if (a->encpass) {
+		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 4,
+		    HTLC_DATA_ICON, 2, &a->icon16,
+		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
+		    HTLC_DATA_PASSWORD, a->plen, a->encpass,
+		    HTLC_DATA_NAME, strlen ((const char *)a->htlc->name),
+		                    a->htlc->name);
+	} else {
+		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 3,
+		    HTLC_DATA_ICON, 2, &a->icon16,
+		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
+		    HTLC_DATA_NAME, strlen ((const char *)a->htlc->name),
+		                    a->htlc->name);
+	}
+	return G_SOURCE_REMOVE;
+}
+
+/* Initialize the connection's qbuf state (and assign the freshly
+ * connected fd) on the main thread. The worker used to memset
+ * these directly, but htlc->in/out/trans/rcv are read by
+ * htlc_read/htlc_write on the main thread, and htlc->fd is read by
+ * htlc_write — initializing all of them on the same thread as the
+ * readers eliminates the cross-thread visibility question entirely.
+ *
+ * Run via gtkhx_invoke_sync from the worker before the fd watch is
+ * installed, so the dispatch returns (and all writes are visible)
+ * by the time the main loop can pick the fd up. */
+struct htlc_init_args {
+	struct htlc_conn *htlc;
+	int fd;
+};
+
+static gboolean
+htlc_init_dispatch (gpointer data)
+{
+	struct htlc_init_args *a = data;
+	a->htlc->fd = a->fd;
+	a->htlc->trans = 1;
+	memset (&a->htlc->in,  0, sizeof (struct qbuf));
+	memset (&a->htlc->out, 0, sizeof (struct qbuf));
+	a->htlc->rcv = hx_rcv_hdr;
+	qbuf_set (&a->htlc->in, 0, SIZEOF_HL_HDR);
+	return G_SOURCE_REMOVE;
+}
+
 static void hx_thread_connect (void *arg)
 {
 	int s;
@@ -508,15 +823,10 @@ static void hx_thread_connect (void *arg)
 	
 	htlc->gdk_input = 0;
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	hx_printf_prefix(htlc, 0, INFOPREFIX, _("connecting to %s\n"),
-					 server_addr);
-	conn_task_update(sess, 0);
-	set_status_bar(-1);
-	set_disconnect_btn(sess, 1);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
+	post_log(htlc, 0, INFOPREFIX, _("connecting to %s\n"), server_addr);
+	post_session_int(conn_task_update, sess, 0);
+	post_int(set_status_bar, -1);
+	post_session_int(set_disconnect_btn, sess, 1);
 
 
 	debug("about to resolve host/address\n");
@@ -533,29 +843,23 @@ static void hx_thread_connect (void *arg)
 #else
 		if((error = getaddrinfo(serverstr, portstr, &hints, &he))) {
 #endif
-			debug("entering gtk_threads\n");
-			gtk_threads_enter();
-
 #ifdef USE_IPV6
-			hx_printf_prefix(htlc, 0, INFOPREFIX, "%s: %s\n", serverstr,
-
-							 gai_strerror(error));
+			post_log(htlc, 0, INFOPREFIX, "%s: %s\n", serverstr,
+			         gai_strerror(error));
 #else
 # ifdef HAVE_HSTRERROR
-			hx_printf_prefix(htlc, 0, INFOPREFIX, _("DNS lookup for %s failed: %s\n"),
-				serverstr, hstrerror(h_errno));
+			post_log(htlc, 0, INFOPREFIX,
+			         _("DNS lookup for %s failed: %s\n"),
+			         serverstr, hstrerror(h_errno));
 # else
-			hx_printf_prefix(htlc, 0, INFOPREFIX, _("DNS lookup for %s failed\n"),
-							 serverstr);
+			post_log(htlc, 0, INFOPREFIX,
+			         _("DNS lookup for %s failed\n"), serverstr);
 # endif
 #endif
-
-			setbtns(sess, 0);
-			set_status_bar(0);
-			set_disconnect_btn(sess, 0);
-			conn_task_update(sess, 2);
-			debug("leaving gtk_threads\n");
-			gtk_threads_leave();
+			post_session_int(setbtns, sess, 0);
+			post_int(set_status_bar, 0);
+			post_session_int(set_disconnect_btn, sess, 0);
+			post_session_int(conn_task_update, sess, 2);
 			return;
 		}
 #ifndef USE_IPV6
@@ -574,15 +878,11 @@ static void hx_thread_connect (void *arg)
 		}
 		else {
 #endif
-			debug("entering gtk_threads\n");
-			gtk_threads_enter();
-			hx_printf_prefix(htlc, 0, INFOPREFIX, _("socket: %s\n"), strerror(errno));
-			setbtns(sess, 0);
-			set_status_bar(0);
-			set_disconnect_btn(sess, 0);
-			conn_task_update(sess, 2);
-			debug("leaving gtk_threads\n");
-			gtk_threads_leave();
+			post_log(htlc, 0, INFOPREFIX, _("socket: %s\n"), strerror(errno));
+			post_session_int(setbtns, sess, 0);
+			post_int(set_status_bar, 0);
+			post_session_int(set_disconnect_btn, sess, 0);
+			post_session_int(conn_task_update, sess, 2);
 			return;
 #ifdef USE_IPV6
 		}
@@ -592,53 +892,38 @@ static void hx_thread_connect (void *arg)
 	debug("created socket\n");
 
 	if (s >= hxd_open_max) {
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		hx_printf_prefix(htlc, 0, INFOPREFIX, "%s:%d: Too many open files (%d >= %d)",
-						 __FILE__, __LINE__, s, hxd_open_max);
-		setbtns(sess, 0);
-		set_status_bar(0);
-		set_disconnect_btn(sess, 0);
-		conn_task_update(sess, 2);
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+		post_log(htlc, 0, INFOPREFIX,
+		         "%s:%d: Too many open files (%d >= %d)",
+		         __FILE__, __LINE__, s, hxd_open_max);
+		post_session_int(setbtns, sess, 0);
+		post_int(set_status_bar, 0);
+		post_session_int(set_disconnect_btn, sess, 0);
+		post_session_int(conn_task_update, sess, 2);
 		close(s);
 		return;
 	}
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	conn_task_update(sess, 1);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
+	post_session_int(conn_task_update, sess, 1);
 #ifdef USE_IPV6
 
 	if (connect(s, he->ai_addr, he->ai_addrlen)) {
 #else
 	if(connect(s, (struct sockaddr *)&saddr, sizeof(saddr))) {
 #endif
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		hx_printf_prefix(htlc, 0, INFOPREFIX, _("connect: %s\n"),
-						 strerror(errno));
-		setbtns(sess, 0);
-		set_status_bar(0);
-		set_disconnect_btn(sess, 0);
-		conn_task_update(sess, 2);
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+		post_log(htlc, 0, INFOPREFIX, _("connect: %s\n"),
+		         strerror(errno));
+		post_session_int(setbtns, sess, 0);
+		post_int(set_status_bar, 0);
+		post_session_int(set_disconnect_btn, sess, 0);
+		post_session_int(conn_task_update, sess, 2);
 		close(s);
 		return;
 	}
 	debug("connected\n");
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	set_status_bar(1);
-	hx_printf_prefix(htlc, 0, INFOPREFIX, _("connected to %s\n"), server_addr);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
-	
+	post_int(set_status_bar, 1);
+	post_log(htlc, 0, INFOPREFIX, _("connected to %s\n"), server_addr);
+
 	{
 		char magic[HTLS_MAGIC_LEN];
 		fd_set rfds;
@@ -655,31 +940,23 @@ static void hx_thread_connect (void *arg)
 		if(FD_ISSET(s, &rfds)) {
 			read(s, magic, HTLS_MAGIC_LEN);
 			if(strncmp(HTLS_MAGIC, magic, HTLS_MAGIC_LEN)) {
-				debug("entering gtk_threads\n");
-				gtk_threads_enter();
-				hx_printf_prefix(htlc, 0, INFOPREFIX,
-								 _("invalid hotline server\n"));
-				setbtns(sess, 0);
-				set_status_bar(0);
-				set_disconnect_btn(sess, 0);
-				conn_task_update(sess, 2);
-				debug("leaving gtk_threads\n");
-				gtk_threads_leave();
+				post_log(htlc, 0, INFOPREFIX,
+				         _("invalid hotline server\n"));
+				post_session_int(setbtns, sess, 0);
+				post_int(set_status_bar, 0);
+				post_session_int(set_disconnect_btn, sess, 0);
+				post_session_int(conn_task_update, sess, 2);
 				close(s);
 				return;
 			}
 		}
 		else {
-			debug("entering gtk_threads\n");
-			gtk_threads_enter();
-			hx_printf_prefix(htlc, 0, INFOPREFIX, 
-							 _("no response from server after thirty seconds"));
-			setbtns(sess, 0);
-			set_status_bar(0);
-			set_disconnect_btn(sess, 0);
-			conn_task_update(sess, 2);
-			debug("leaving gtk_threads\n");
-			gtk_threads_leave();
+			post_log(htlc, 0, INFOPREFIX,
+			         _("no response from server after thirty seconds"));
+			post_session_int(setbtns, sess, 0);
+			post_int(set_status_bar, 0);
+			post_session_int(set_disconnect_btn, sess, 0);
+			post_session_int(conn_task_update, sess, 2);
 			close(s);
 			return;
 		}
@@ -691,20 +968,17 @@ static void hx_thread_connect (void *arg)
 	htlc->addr = saddr;
 #endif
 
-	htlc->fd = s;
-	htlc->trans = 1;
+	{
+		/* Phase 5: htlc state init runs on the main thread via
+		 * gtkhx_invoke_sync. The fields touched here (fd, trans,
+		 * in, out, rcv) are read on the main thread by htlc_read /
+		 * htlc_write / hlwrite / task_new, so the writes belong on
+		 * the same thread as the readers. */
+		struct htlc_init_args ia = { .htlc = htlc, .fd = s };
+		gtkhx_invoke_sync (htlc_init_dispatch, &ia);
+	}
 
-	memset(&htlc->in, 0, sizeof(struct qbuf));
-	memset(&htlc->out, 0, sizeof(struct qbuf));
-
-	htlc->rcv = hx_rcv_hdr;
-	qbuf_set(&htlc->in, 0, SIZEOF_HL_HDR);
-
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	conn_task_update(sess, 2);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
+	post_session_int(conn_task_update, sess, 2);
 
 	set_nonblocking(s);
 	fd_closeonexec(s, 1);
@@ -739,11 +1013,13 @@ static void hx_thread_connect (void *arg)
 		u_int16_t macalglistlen;
 
 		buf[0] = 0;
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		task_new(htlc, rcv_task_login, pass ? g_strdup(pass) : g_strdup(buf), 0, "login");
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+		/* task_new mutates session->task_list and creates a GTK task
+		 * widget — must run on main. The pass/buf pointer is stored
+		 * in tsk->ptr; we hand it off to the dispatcher unchanged so
+		 * task ownership semantics match the legacy code. */
+		post_task_new(htlc, rcv_task_login,
+		              pass ? g_strdup(pass) : g_strdup(buf),
+		              0, "login");
 		strcpy(htlc->macalg, "HMAC-SHA1");
 		{
 			guint16 val = 2;
@@ -793,26 +1069,33 @@ static void hx_thread_connect (void *arg)
 		} else
 			cipheralglistlen = 0;
 #endif
-		hlwrite(htlc, HTLC_HDR_LOGIN, 0, hc,
-			HTLC_DATA_LOGIN, 1, buf,
-			HTLC_DATA_PASSWORD, 1, buf,
-			HTLC_DATA_MAC_ALG, macalglistlen, macalglist,
+		{
+			/* Phase 5: hlwrite runs on the main thread. Args are
+			 * stack locals so we capture by pointer; gtkhx_invoke_sync
+			 * blocks the worker until the dispatch returns, keeping
+			 * the args alive. */
+			struct login_secure_args la = {
+				.htlc = htlc,
+				.hc = hc,
+				.buf = (const guint8 *)buf,
+				.macalglist = macalglist,
+				.macalglistlen = macalglistlen,
 #ifdef CONFIG_CIPHER
-			HTLC_DATA_CIPHER_ALG, cipheralglistlen, cipheralglist,
+				.cipheralglist = cipheralglist,
+				.cipheralglistlen = cipheralglistlen,
 #endif
 #ifdef CONFIG_COMPRESS
-			HTLC_DATA_COMPRESS_ALG, compressalglistlen, compressalglist,
+				.compressalglist = compressalglist,
+				.compressalglistlen = compressalglistlen,
 #endif
-			HTLC_DATA_SESSIONKEY, 0, 0);
+			};
+			gtkhx_invoke_sync (login_secure_dispatch, &la);
+		}
 		return;
 	}
 
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	task_new(htlc, rcv_task_login, 0, 0, "login");
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
+	post_task_new(htlc, rcv_task_login, 0, 0, "login");
 
 	icon16 = htons(htlc->icon);
 	if (login) {
@@ -823,28 +1106,30 @@ static void hx_thread_connect (void *arg)
 	} else
 		llen = 0;
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-
+	/* Phase 5: legacy login send. hl_encode runs on the worker
+	 * (it's a pure transformation on stack buffers), then we
+	 * sync-invoke the actual hlwrite on the main thread. encpass
+	 * == NULL on the no-password path; login_dispatch picks the
+	 * right packet shape from that. */
 	if (pass) {
 		plen = strlen(pass);
 		if (plen > 64)
 			plen = 64;
 		hl_encode(encpass, pass, plen);
-		hlwrite(htlc, HTLC_HDR_LOGIN, 0, 4,
-				HTLC_DATA_ICON, 2, &icon16,
-				HTLC_DATA_LOGIN, llen, enclogin,
-				HTLC_DATA_PASSWORD, plen, encpass,
-				HTLC_DATA_NAME, strlen(htlc->name), htlc->name);
+	} else {
+		plen = 0;
 	}
-	else {
-		hlwrite(htlc, HTLC_HDR_LOGIN, 0, 3,
-				HTLC_DATA_ICON, 2, &icon16,
-				HTLC_DATA_LOGIN, llen, enclogin,
-				HTLC_DATA_NAME, strlen(htlc->name), htlc->name);
+	{
+		struct login_args la = {
+			.htlc = htlc,
+			.icon16 = icon16,
+			.enclogin = (const guint8 *)enclogin,
+			.llen = llen,
+			.encpass = pass ? (const guint8 *)encpass : NULL,
+			.plen = plen,
+		};
+		gtkhx_invoke_sync (login_dispatch, &la);
 	}
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
 
 	g_free(cdata->login);
 	g_free(cdata->pass);
@@ -944,6 +1229,10 @@ static int b_read (int fd, void *bufp, size_t len)
 	return pos;
 }
 
+/* The post_* marshal helpers used here (post_prog, post_ts, post_log)
+ * are defined above hx_thread_connect so both worker paths can share
+ * them. See the block comment there for the design rationale. */
+
 void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 {
 	int s;
@@ -972,13 +1261,9 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 	saddr.sin_port = htons(port);
 	saddr.sin_family = AF_INET;
 #endif
-	
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	trackconn_prog_update(sess, serverstr, 0, 2);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
-	
+
+	post_prog(trackconn_prog_update, sess, serverstr, 0, 2);
+
 #ifndef USE_IPV6
 	if(!inet_pton(AF_INET, serverstr, &saddr.sin_addr)) {
 		struct hostent *he;
@@ -993,36 +1278,27 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 #else
 			if((error = getaddrinfo(serverstr, portstr, &hints, &he))) {
 #endif
-				debug("entering gtk_threads\n");
-				gtk_threads_enter();
 #ifdef USE_IPV6
-				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
-
-								 "%s: %s\n", serverstr, gai_strerror(error));
+				post_log(&the_session.htlc, 0, INFOPREFIX,
+				         "%s: %s\n", serverstr, gai_strerror(error));
 #else
 # ifdef HAVE_HSTRERROR
-				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
-								 _("DNS lookup for %s failed: %s\n"),
-								 serverstr, hstrerror(h_errno));
+				post_log(&the_session.htlc, 0, INFOPREFIX,
+				         _("DNS lookup for %s failed: %s\n"),
+				         serverstr, hstrerror(h_errno));
 # else
-				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX,
-								 _("DNS lookup for %s failed\n"), serverstr);
+				post_log(&the_session.htlc, 0, INFOPREFIX,
+				         _("DNS lookup for %s failed\n"), serverstr);
 # endif
 #endif
-				trackconn_prog_update(sess, serverstr, 2, 2);
-				debug("leaving gtk_threads\n");
-				gtk_threads_leave();
+				post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
 				return;
 			}
 #ifndef USE_IPV6
 		}
 #endif
-		
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		trackconn_prog_update(sess, serverstr, 1, 2);
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+
+		post_prog(trackconn_prog_update, sess, serverstr, 1, 2);
 
 #ifdef USE_IPV6
 	while((s = socket(he->ai_family, SOCK_STREAM, IPPROTO_TCP)) < 0) {
@@ -1035,12 +1311,9 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 		}
 		else {
 #endif
-			debug("entering gtk_threads\n");
-			gtk_threads_enter();
-			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, _("tracker: %s\n"), strerror(errno));
-			trackconn_prog_update(sess, serverstr, 2, 2);
-			debug("leaving gtk_threads\n");
-			gtk_threads_leave();
+			post_log(&the_session.htlc, 0, INFOPREFIX,
+			         _("tracker: %s\n"), strerror(errno));
+			post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
 			return;
 #ifdef USE_IPV6
 		}
@@ -1054,27 +1327,23 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 #else
 	if((connect(s, (struct sockaddr *)&saddr, sizeof(struct sockaddr)))) {
 #endif
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, _("tracker: %s: %s"),
-
-						 serverstr, strerror(errno));
-		trackconn_prog_update(sess, serverstr, 2, 2);
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+		post_log(&the_session.htlc, 0, INFOPREFIX,
+		         _("tracker: %s: %s"),
+		         serverstr, strerror(errno));
+		post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
 		return;
 	}
 
-	debug("entering gtk_threads\n");
-	gtk_threads_enter();
-	trackconn_prog_update(sess, serverstr, 2, 2);
-	debug("leaving gtk_threads\n");
-	gtk_threads_leave();
+	post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
 
 	if (write(s, HTRK_MAGIC, HTRK_MAGIC_LEN) != HTRK_MAGIC_LEN)
 		goto funk_dat;
 
-	track_prog_update(sess, serverstr, 0, 0);
+	/* Phase 5: this and the (0, total) call below were previously
+	 * called bare — touching GTK widgets from the worker thread
+	 * without even the recursive-mutex shim around them. Marshalled
+	 * now like every other UI call in this function. */
+	post_prog(track_prog_update, sess, serverstr, 0, 0);
 
 	if (b_read(s, buf, 14) != 14) {
 		goto funk_dat;
@@ -1083,7 +1352,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 
 	nservers = ntohs(*((guint16 *)(&(buf[10]))));
 	total = nservers;
-	track_prog_update(sess, serverstr, 0, total);
+	post_prog(track_prog_update, sess, serverstr, 0, total);
 	for (i = 1; nservers; nservers--, i++) {
 		if (b_read(s, buf, 8) == -1) {
 			break;
@@ -1130,12 +1399,9 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 		CR2LF(desc, (size_t)buf[0]);
 		strip_ansi(desc, (size_t)buf[0]);
 
-		debug("entering gtk_threads\n");
-		gtk_threads_enter();
-		hx_output.tracker_server_create(a, port, nusers, name, desc, total);
-		track_prog_update(sess, serverstr, i, total);
-		debug("leaving gtk_threads\n");
-		gtk_threads_leave();
+		post_ts(a, port, nusers,
+		        (const char *)name, (const char *)desc, total);
+		post_prog(track_prog_update, sess, serverstr, i, total);
 	}
   funk_dat:
 

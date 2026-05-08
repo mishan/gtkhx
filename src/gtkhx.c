@@ -441,7 +441,6 @@ void hx_quit (void)
 	close_logs();
 #endif
 
-	gtk_thread_exit();
 	/* Phase 3.6: g_application_quit() ends g_application_run() in loop().
 	 * Phase 4.x: gtk_main_quit() is gone in GTK 4 — there is no main-loop
 	 * fallback. If hx_quit fires before the GtkApplication is constructed
@@ -851,8 +850,6 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 static void
 loop (void)
 {
-	gtk_threads_init();
-
 	/* Phase 5: AdwApplication wraps GtkApplication and additionally
 	 * calls adw_init() so libadwaita's stylesheet, types, and the
 	 * AdwStyleManager singleton are available app-wide. The activate
@@ -1402,7 +1399,6 @@ void hotline_client_init (int argc, char **argv)
 	}
 
 	memset(&the_session.htlc, 0, sizeof(struct htlc_conn));
-	INITLOCK_HTXF((&(the_session.htlc)));
 	the_session.htlc.icon = 500;
 	if (user)
 	{

@@ -110,7 +110,6 @@ struct htlc_conn {
 	hl_access_bits access;
 	guint8 name[32];
 	guint8 login[32];
-	pthread_mutex_t htxf_mutex;
 
 	unsigned int gdk_input:1;
 
@@ -144,9 +143,14 @@ struct htlc_conn {
 #endif
 };
 
-#define LOCK_HTXF(htlc)		pthread_mutex_lock(&(htlc->htxf_mutex));
-#define UNLOCK_HTXF(htlc)	pthread_mutex_unlock(&(htlc->htxf_mutex));
-#define INITLOCK_HTXF(htlc)	pthread_mutex_init(&(htlc->htxf_mutex), 0);
+/* Phase 5: LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize
+ * cross-thread access to the global xfers[] array between worker
+ * threads (get_thread, put_thread, the connect worker) and main.
+ * After every xfer-related mutator was moved onto the main thread
+ * (via gtkhx_post_to_main / gtkhx_invoke_sync), the mutex had no
+ * job left and was removed. The fields-of-htlc_conn entry for
+ * htxf_mutex is gone above, so don't reintroduce these macros
+ * without also adding back the field. */
 
 extern void htlc_close (struct htlc_conn *htlc);
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...);

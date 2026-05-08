@@ -32,8 +32,8 @@ struct htlc_conn;
 /* Type-name lookups. Return a literal string for known opcodes
  * ("HTLC_HDR_LOGIN", "HTLS_DATA_TASKERROR"), and a static "0x????"
  * fallback (held in a per-call static buffer; not thread-safe — only
- * call from the trace logger which is single-threaded by virtue of
- * being on the main thread or under gtk_threads_enter). */
+ * call from the trace logger, which is single-threaded by virtue of
+ * being on the main thread). */
 extern const char *proto_hdr_name  (guint32 type);
 extern const char *proto_data_name (guint16 type);
 

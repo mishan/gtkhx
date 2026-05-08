@@ -1563,13 +1563,11 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	hints.ai_socktype = SOCK_STREAM;
 #endif
 
-	LOCK_HTXF(htlc);
 	for(i = 0; i < nxfers; i++) {
 		if(xfers[i] == htxf) {
 			break;
 		}
 	}
-	UNLOCK_HTXF(htlc);
 
 	if(i == nxfers) {
 		return;
@@ -1580,9 +1578,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 			timer_add_secs(1, xfer_go_timer, htxf);
 		} else {
 			gtask_delete_htxf(&the_session, htxf);
-			LOCK_HTXF(htlc);
 			xfer_delete(htxf);
-			UNLOCK_HTXF(htlc);
 		}
 		return;
 	}
@@ -1636,13 +1632,12 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 														 to output its position
 														 in the queue */
 
-	/* Phase 5: for previews, build the GtkWindow + GtkTextView on the
-	 * main thread (we are on the main thread here — this is the
+	/* For previews, build the GtkWindow + GtkTextView on the main
+	 * thread (we are on the main thread here — this is the
 	 * GIOChannel callback path). The download worker subsequently
 	 * feeds bytes via htxf->preview without ever touching GTK,
 	 * sidestepping a class of lockups we hit when constructing
-	 * widgets and calling gtk_window_present from a worker thread
-	 * under gtk_threads_enter. */
+	 * widgets and calling gtk_window_present from a worker. */
 	if (htxf->opt.preview && !htxf->preview) {
 		char *name = dirchar_basename (htxf->path);
 		htxf->preview = hx_preview_new ("    ", "    ",
@@ -1671,9 +1666,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 
 	if (task_inerror(htlc)) {
 		gtask_delete_htxf(&the_session, htxf);
-		LOCK_HTXF(htlc);
 		xfer_delete(htxf);
-		UNLOCK_HTXF(htlc);
 		return;
 	}
 

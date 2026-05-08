@@ -49,27 +49,20 @@
 
 static struct hx_preview *hx_preview_list = NULL;
 
-/* Phase 5 v2: previously we did the gtk_text_buffer_insert directly from
- * the download worker thread under gtk_threads_enter. That serializes the
- * insert with the rest of the GUI but holds the GTK lock for the duration
- * of every insert — and inserts get linearly slower as the buffer grows,
- * because the GtkTextView's layout cache rebuilds. For a multi-MB preview
- * the worker reacquires the lock at high frequency, starving the main
- * thread until poll() can no longer service input. Symptom: app appears
- * frozen mid-preview.
- *
- * The fix is to keep the worker out of GTK entirely for previews. The
- * worker copies each chunk into a heap buffer and pushes it onto the
- * default main context via g_idle_add. The main thread services the idle
- * queue between input events at G_PRIORITY_DEFAULT_IDLE (lower priority
- * than user input), so the GUI stays responsive while the buffer fills.
+/* The worker stays out of GTK entirely for previews: each chunk is
+ * copied into a heap buffer and pushed onto the default main
+ * context via g_idle_add. The main thread services the idle queue
+ * between input events at G_PRIORITY_DEFAULT_IDLE (lower priority
+ * than user input), so the GUI stays responsive while a multi-MB
+ * preview is filling.
  *
  * Lifetime: the parent `struct hx_preview` and `struct hx_text_preview`
- * stay alive for the duration of the program (the hx_preview_list leak
- * predates this fix and is tracked separately). The close-request
- * handler sets tp->closed = TRUE; both the worker-side hx_preview_text_output
- * and any already-queued idle callbacks check that flag and bail before
- * touching the (now-destroyed) text view.
+ * stay alive for the duration of the program (the hx_preview_list
+ * leak predates this and is tracked separately). The close-request
+ * handler sets tp->closed = TRUE; both the worker-side
+ * hx_preview_text_output and any already-queued idle callbacks
+ * check that flag and bail before touching the (now-destroyed)
+ * text view.
  */
 
 struct preview_chunk {

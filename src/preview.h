@@ -15,12 +15,15 @@ struct hx_text_preview { /* text viewing is built-in */
 	GtkWidget *window;
 	GtkWidget *text;
 	struct hx_preview *p;
-	/* Phase 5: set TRUE when the user closes the preview window. The
-	 * download worker thread checks this before writing to the text
-	 * buffer — if the window's gone, the writes are skipped instead
-	 * of running into a freed GtkTextBuffer. The flag is read/written
-	 * under gtk_threads_enter so the worker and the close-request
-	 * handler don't race. */
+	/* Set TRUE on the main thread when the user closes the preview
+	 * window. The hx_preview_text_output path on the worker thread
+	 * checks this before queuing a chunk; the preview_chunk_idle
+	 * dispatcher (also main thread) checks it again before writing
+	 * to the text buffer. If the window's gone, the writes are
+	 * skipped instead of running into a freed GtkTextBuffer.
+	 * Plain gboolean — single-writer (main) means any stale read
+	 * by the worker just queues one extra chunk that the dispatcher
+	 * will then drop. */
 	gboolean closed;
 };
 
