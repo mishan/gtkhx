@@ -183,3 +183,17 @@ test_selfinfo = executable('test_selfinfo',
 )
 test('selfinfo', test_selfinfo,
      suite : 'proto')
+
+# chat — hx_chat_extract pulls body + chat-id + uid out of an
+# HTLS_HDR_CHAT message and runs the same CR2LF / strip_ansi /
+# leading-LF strip the original handler does, so the chat widget
+# never sees raw wire bytes.
+test_chat_proto = executable('test_chat_proto',
+  'proto/test_chat.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('chat', test_chat_proto,
+     suite : 'proto')

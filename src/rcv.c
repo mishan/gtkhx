@@ -159,53 +159,29 @@ int task_inerror (struct htlc_conn *htlc)
 
 void hx_rcv_chat (struct htlc_conn *htlc)
 {
-	guint32 cid = 0;
-	guint16 len = 0;
-	char chatbuf[8192 + 1], *chat;
-	guint16 uid = 0;
+	struct hx_chat_msg msg;
 	session *sess = &the_session;
 	struct chat *hx_chat = chat_with_cid(sess, 0);
 
-	dh_start(htlc)
-		switch (_type) {
-		case HTLS_DATA_CHAT:
-			len = _len > (sizeof(chatbuf) - 1) ? (sizeof(chatbuf) - 1) : _len;
-			memcpy(chatbuf, dh->data, len);
-			break;
-		case HTLS_DATA_CHAT_ID:
-			dh_getint(cid);
-			break;
-		case HTLS_DATA_UID: /* this only works on hxd 0.1.35 or higher */
-			dh_getint(uid);
-			break;
-		}
-	dh_end()
+	/* Chunk parse + CR2LF/strip_ansi + leading-LF strip lives in
+	 * proto_helpers.c so the Tier 2 unit tests can drive it. */
+	if (!hx_chat_extract (htlc, &msg))
+		return;
 
-	if(uid) { /* do ignoring stuff */
-		struct hx_user *user = hx_user_with_uid(hx_chat->user_list, uid);
+	if(msg.uid) { /* do ignoring stuff */
+		struct hx_user *user = hx_user_with_uid(hx_chat->user_list, msg.uid);
 		if(user && user->ignore) {
 			return;
 		}
 	}
 
-	CR2LF(chatbuf, len);
-	strip_ansi(chatbuf, len);
-	chatbuf[len] = 0;
-
-	if (chatbuf[0] == '\n') {
-		chat = chatbuf+1;
-		len--;
-	} else {
-		chat = chatbuf;
-	}
-
 #ifdef USE_PLUGIN
-	if(EMIT_SIGNAL(XP_RCV_CHAT, sess, chat, &cid, &uid, 0, 0) == 1) {
+	if(EMIT_SIGNAL(XP_RCV_CHAT, sess, msg.text, &msg.cid, &msg.uid, 0, 0) == 1) {
 		return;
 	}
 #endif
 
-	hx_output.chat(htlc, cid, chat, len);
+	hx_output.chat(htlc, msg.cid, msg.text, msg.text_len);
 	play_sound(CHAT_POST);
 }
 

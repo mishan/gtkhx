@@ -68,4 +68,46 @@ enum {
 
 extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc);
 
+/*
+ * Result of parsing a HTLS_HDR_CHAT message. Output of hx_chat_extract.
+ *
+ * The handler in rcv.c reads HTLS_DATA_CHAT, HTLS_DATA_CHAT_ID, and
+ * HTLS_DATA_UID into local variables, then sanitises the chat body:
+ *
+ *   1. Cap len at (buffer_size - 1) — defensive truncation.
+ *   2. CR2LF: '\r' wire-line-endings → '\n'.
+ *   3. strip_ansi: low-control bytes → printable.
+ *   4. NUL-terminate.
+ *   5. If the sanitised body begins with '\n', strip the leading LF
+ *      (advances `text` by one and decrements `text_len` by one);
+ *      this is what the original handler did to avoid a leading
+ *      blank line in the chat widget for the common
+ *      "\nUser: message" Hotline format.
+ *
+ * `text` is a NUL-terminated pointer into the embedded buffer; it
+ * may equal &buf[0] or &buf[1] depending on the leading-LF strip.
+ * Callers MUST NOT free `text`.
+ *
+ * Buffer size matches the historical 8 KiB stack buffer used by
+ * hx_rcv_chat. Larger payloads are silently truncated.
+ */
+struct hx_chat_msg {
+	guint32 cid;
+	guint16 uid;
+	char    buf[8192 + 1];   /* NUL-terminated */
+	char   *text;            /* points into buf */
+	guint16 text_len;        /* bytes (no NUL), matches strlen(text) */
+};
+
+/*
+ * Walk the chunks in htlc->in, fill *out with the parsed + sanitised
+ * chat message. Always returns TRUE on a well-formed wire buffer
+ * (the function tolerates missing CHAT_ID / UID — those default to
+ * zero — and an empty body is a valid "" message).
+ *
+ * NULL out is treated as a programmer error and returns FALSE.
+ */
+extern gboolean hx_chat_extract (struct htlc_conn *htlc,
+                                 struct hx_chat_msg *out);
+
 #endif /* HX_PROTO_HELPERS_H */

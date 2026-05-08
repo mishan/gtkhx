@@ -53,6 +53,56 @@ task_error_extract (struct htlc_conn *htlc, char *out,
 	return found;
 }
 
+gboolean
+hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->cid = 0;
+	out->uid = 0;
+	out->buf[0] = '\0';
+	out->text = out->buf;
+	out->text_len = 0;
+
+	guint16 len = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_CHAT:
+			len = (_len > (sizeof (out->buf) - 1))
+			      ? (sizeof (out->buf) - 1)
+			      : _len;
+			memcpy (out->buf, dh->data, len);
+			break;
+		case HTLS_DATA_CHAT_ID:
+			dh_getint (out->cid);
+			break;
+		case HTLS_DATA_UID:
+			dh_getint (out->uid);
+			break;
+		}
+	} dh_end ();
+
+	CR2LF (out->buf, len);
+	strip_ansi (out->buf, len);
+	out->buf[len] = '\0';
+
+	/* Hotline servers commonly format a chat line as
+	 * "\nUser: message" — the leading LF would render as a blank
+	 * line in the chat widget, so the original handler stripped
+	 * it. Preserve the behaviour. */
+	if (out->buf[0] == '\n') {
+		out->text = out->buf + 1;
+		out->text_len = (len > 0) ? (guint16) (len - 1) : 0;
+	} else {
+		out->text = out->buf;
+		out->text_len = len;
+	}
+
+	return TRUE;
+}
+
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {
