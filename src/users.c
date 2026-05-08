@@ -306,22 +306,24 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	 * info as a real label widget via gtk_popover_menu_add_child +
 	 * a "custom" GMenuItem rather than abusing disabled menu items.
 	 * Built as Pango markup so the user's name reads bold. */
-	/* Phase 5: single-line info header — was two lines (name on
-	 * top, details in <small> below) but the extra line plus
-	 * generous margins pushed the popup tall enough that the
-	 * bottom items got clipped by the Users window's lower edge
-	 * on the typical default-sized window. Bold name + dim-label
-	 * details on one line is dense but readable, and frees ~24px
-	 * of vertical space the menu items need. */
+	/* Phase 5 (third pass): minimal single-line info header — bold
+	 * name plus a dim role tag (Admin / Guest, optionally "Away").
+	 * The earlier two-line and longer single-line variants both
+	 * exceeded the popover's natural width and Pango wrapped the
+	 * label, giving back any vertical savings and forcing the
+	 * popover to scroll. Pinning to name + role + away is the
+	 * minimum that's still informative; UID and Icon ID are
+	 * available via Get User Info one click below. nowrap on the
+	 * label makes the popover widen to fit instead of stacking. */
 	info_markup = g_markup_printf_escaped (
-		"<b>%s</b>  <span alpha=\"60%%\">"
-		"UID %d · Icon %d · %s%s</span>",
-		user->name, user->uid, user->icon,
+		"<b>%s</b>  <span alpha=\"60%%\">%s%s</span>",
+		user->name,
 		user->color >= 2 ? _("Admin") : _("Guest"),
-		user->color % 2 ? _(" (Away)") : "");
+		user->color % 2 ? _(" · Away") : "");
 	info_label = gtk_label_new (NULL);
 	gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
 	gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
+	gtk_label_set_wrap   (GTK_LABEL (info_label), FALSE);
 	gtk_widget_set_margin_start  (info_label, 12);
 	gtk_widget_set_margin_end    (info_label, 12);
 	gtk_widget_set_margin_top    (info_label, 6);
