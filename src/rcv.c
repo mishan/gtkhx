@@ -1460,7 +1460,7 @@ void rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 				p = basename(lpath+1);
 				if (p)
 					dirchar_fix(p);
-				htxf = xfer_new(lpath+1, pathbuf, XFER_GET);
+				htxf = xfer_new(lpath+1, pathbuf, XFER_GET, 0);
 				htxf->filter_argv = cfl->filter_argv;
 				g_free(lpath);
 			}

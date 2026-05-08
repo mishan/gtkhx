@@ -217,8 +217,8 @@ int xfer_go_timer (void *__arg)
 	return 0;
 }
 
-struct htxf_conn *xfer_new (const char *path, const char *remotepath, 
-							guint16 type)
+struct htxf_conn *xfer_new (const char *path, const char *remotepath,
+							guint16 type, int preview)
 {
 	struct htxf_conn *htxf;
 
@@ -227,6 +227,13 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	strcpy(htxf->path, path);
 	htxf->type = type;
 	htxf->queue = -1;
+	/* opt.preview MUST be set before xfer_go runs below — xfer_go
+	 * gates the resume-offset protocol on !opt.preview. Setting it
+	 * via the returned htxf pointer after this function returns is
+	 * too late: when nxfers == 1 (or queueing is off) we call
+	 * xfer_go inline, and the wire request goes out before the
+	 * caller can flip opt.preview. */
+	htxf->opt.preview = preview ? 1 : 0;
 
 	xfers = g_realloc(xfers, (nxfers + 1) * sizeof(struct htxf_conn *));
 	xfers[nxfers] = htxf;

@@ -205,7 +205,7 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 	}
 
 
-	htxf = xfer_new(lpath, rpath, XFER_GET);
+	htxf = xfer_new(lpath, rpath, XFER_GET, 0);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
@@ -390,7 +390,7 @@ static void file_dl_btn (GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	htxf = xfer_new(lpath, rpath, XFER_GET);
+	htxf = xfer_new(lpath, rpath, XFER_GET, 0);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
@@ -415,10 +415,13 @@ static void file_pre_btn (GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	htxf = xfer_new(lpath, rpath, XFER_GET);
+	/* opt.preview is set inside xfer_new (before the inner xfer_go
+	 * call) so the resume-offset protocol is correctly disabled
+	 * for previews. Setting it on the returned htxf here would be
+	 * too late. */
+	htxf = xfer_new(lpath, rpath, XFER_GET, 1);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
-	htxf->opt.preview = 1;
 }
 
 
@@ -1478,7 +1481,7 @@ void hx_put_file(struct htlc_conn *htlc, char *lpath, char *rpath)
 {
 	struct htxf_conn *htxf;
 
-	htxf = xfer_new(lpath, rpath, XFER_PUT);
+	htxf = xfer_new(lpath, rpath, XFER_PUT, 0);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
