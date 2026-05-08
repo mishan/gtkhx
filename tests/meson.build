@@ -33,3 +33,18 @@ test_hl_access = executable('test_hl_access',
 )
 test('hl_access', test_hl_access,
      suite : 'unit')
+
+# text_util — gtkhx_text_to_utf8 lives in src/text_util.c (broken out
+# of gtkutil.c specifically so this test doesn't have to drag in GTK,
+# Adwaita, and the rest of gtkhx's header pile). Compile the source
+# in directly rather than linking a shared lib — it's pure GLib, the
+# binary stays small, and the test stays a single self-contained
+# translation unit pair.
+test_text_util = executable('test_text_util',
+  'unit/test_text_util.c',
+  '../src/text_util.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('text_util', test_text_util,
+     suite : 'unit')
