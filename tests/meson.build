@@ -98,3 +98,17 @@ test_text_sanitisers = executable('test_text_sanitisers',
 )
 test('text_sanitisers', test_text_sanitisers,
      suite : 'unit')
+
+# hmac — the HOPE handshake's MAC dispatcher. RFC 2104 / RFC 2202
+# canonical vectors for the HMAC-prefixed branches; cross-checked
+# GChecksum hand-computed digests for the legacy unprefixed key||text
+# branches. hmac.c is a thin GChecksum / GHmac wrapper, so this
+# really tests the dispatch glue + GLib's primitives.
+test_hmac = executable('test_hmac',
+  'unit/test_hmac.c',
+  '../src/hmac.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('hmac', test_hmac,
+     suite : 'unit')
