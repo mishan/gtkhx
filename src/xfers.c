@@ -123,15 +123,75 @@ static void unignore_signals (sigset_t *oldset)
 	sigprocmask(SIG_SETMASK, oldset, 0);
 }
 
+/* Does either fork (data or resource) of the local path exist? */
+static int
+local_path_exists (const char *path)
+{
+	struct stat sb;
+	if (stat (path, &sb) == 0)
+		return 1;
+	if (resource_len (path) > 0)
+		return 1;
+	return 0;
+}
+
+/* If the local path collides with an existing file, mutate it in
+ * place to a non-colliding variant by inserting " (N)" before the
+ * last extension:
+ *
+ *   /dl/foo.txt        with foo.txt present  →  /dl/foo (1).txt
+ *   /dl/archive.tar.gz with that present     →  /dl/archive.tar (1).gz
+ *   /dl/README         with that present     →  /dl/README (1)
+ *
+ * N counts up from 1. A leading dot in the basename (".bashrc") is
+ * treated as part of the name, not an extension. After ~10000 tries
+ * we give up and leave path at its last attempt — the subsequent
+ * open() will overwrite at that name, which is the same behavior
+ * as before this helper existed; the user has bigger problems if
+ * they have ten thousand "foo (N).txt" copies. */
+static void
+uniquify_local_path (char *path, size_t cap)
+{
+	const char *base, *dot;
+	char prefix[MAXPATHLEN];
+	char suffix[MAXPATHLEN];
+	size_t pre_len;
+	int n;
+
+	if (!local_path_exists (path))
+		return;
+
+	base = strrchr (path, '/');
+	base = base ? base + 1 : path;
+	dot = strrchr (base, '.');
+	if (dot == base)            /* leading-dot basename, no extension */
+		dot = NULL;
+
+	if (dot) {
+		pre_len = dot - path;
+		if (pre_len >= sizeof prefix)
+			pre_len = sizeof prefix - 1;
+		memcpy (prefix, path, pre_len);
+		prefix[pre_len] = '\0';
+		g_strlcpy (suffix, dot, sizeof suffix);
+	} else {
+		g_strlcpy (prefix, path, sizeof prefix);
+		suffix[0] = '\0';
+	}
+
+	for (n = 1; n < 10000; n++) {
+		snprintf (path, cap, "%s (%d)%s", prefix, n, suffix);
+		if (!local_path_exists (path))
+			return;
+	}
+}
+
 void xfer_go (struct htxf_conn *htxf)
 {
 	char *rfile;
 	guint16 hldirlen;
 	guint8 *hldir;
-	guint32 data_size = 0, rsrc_size = 0;
-	guint8 rflt[74];
-	struct stat sb;
-	
+
 	if (htxf->gone)
 		return;
 
@@ -144,51 +204,38 @@ void xfer_go (struct htxf_conn *htxf)
 /*		hx_htlc.nr_puts++; */
 	}
 	if (htxf->type == XFER_GET) {
-		/* Resume offset comes from the local file's existing size
-		 * — but ONLY for real downloads. Previews always start
-		 * from byte 0; if the local file is already as large as
-		 * (or larger than) the server's copy, asking the server
-		 * to resume from data_pos = local_size would have it send
-		 * zero bytes, leaving the worker blocked in read() forever
-		 * and the preview window stuck empty. Server eventually
-		 * times the connection out. */
-		if (!htxf->opt.preview) {
-			if (!stat(htxf->path, &sb))
-				data_size = sb.st_size;
-			rsrc_size = resource_len(htxf->path);
-		}
+		/* If a same-named file already exists in the download
+		 * directory, pick a unique alternative (file.txt →
+		 * file (1).txt → file (2).txt → ...) so we don't write
+		 * over the existing copy.
+		 *
+		 * The CVS-era code instead asked the server to resume
+		 * from data_pos = local_file_size via an HTLC_DATA_RFLT
+		 * chunk on the FILE_GET request. With no UI to surface
+		 * "this is a partial-resume" to the user, the common case
+		 * (file already downloaded in full) silently sent a
+		 * resume-past-EOF request and the worker would block on
+		 * read() forever waiting for bytes the server had nothing
+		 * to send — the user just saw a hung progress bar.
+		 *
+		 * Skipped for previews — they don't write to disk and
+		 * always start from byte 0. */
+		if (!htxf->opt.preview)
+			uniquify_local_path (htxf->path, sizeof htxf->path);
 
 		rfile = dirchar_basename(htxf->remotepath);
-		if (data_size || rsrc_size) {
-			memcpy(rflt, "\
-                          RFLT\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
-                          \0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\2\
-                          DATA\0\0\0\0\0\0\0\0\0\0\0\0\
-                          MACR\0\0\0\0\0\0\0\0\0\0\0\0", 74);
-			/*   XXX: Fix this, aaron */
-			/*	 HN32(&rflt[46], data_size);
-				 HN32(&rflt[62], rsrc_size); */
-			S32HTON(data_size, &rflt[46]);
-			S32HTON(rsrc_size, &rflt[62]);
-			htxf->data_pos = data_size;
-			htxf->rsrc_pos = rsrc_size;
-		}
 		task_new(&the_session.htlc, rcv_task_file_get, htxf, 0, "xfer_go");
 		if (rfile != htxf->remotepath) {
 			hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
-			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 
-					(data_size || rsrc_size) ? 3 : 2,
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 2,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
-					HTLC_DATA_DIR, hldirlen, hldir,
-					HTLC_DATA_RFLT, 74, rflt);
+					HTLC_DATA_DIR, hldirlen, hldir);
 			g_free(hldir);
 		} else {
-			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 
-					(data_size || rsrc_size) ? 2 : 1,
-					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
-					HTLC_DATA_RFLT, 74, rflt);
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 1,
+					HTLC_DATA_FILE_NAME, strlen(rfile), rfile);
 		}
-	} 
+	}
 	else {
 		guint32 size = htonl(htxf->total_size);
 
