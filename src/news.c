@@ -29,11 +29,13 @@
 #include <netinet/in.h>
 
 #include "hx.h"
+#include "hl_access.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "gtkhx.h"
 #include "tasks.h"
 #include "rcv.h"
+#include "debug.h"
 
 
 static GtkWidget *post_window;
@@ -64,7 +66,48 @@ void reload_news (GtkWidget *widget, gpointer data)
 {
 	session *sess = data;
 
-	if(gtkhx_prefs.geo.news.open) {
+	if (!gtkhx_prefs.geo.news.open)
+		return;
+
+	/* Phase 5: ask the access bitmap before hitting the wire. The
+	 * server told us at SELFINFO time which permissions our account
+	 * has — see hx_rcv_user_selfinfo populating htlc->access — and
+	 * sending HTLC_HDR_NEWS_GETFILE without HL_ACCESS_NEWS_READ_ART
+	 * just earns us a task error ("Uh, no.") on every login. Skip
+	 * the request entirely instead.
+	 *
+	 * Only gate when access has actually been populated (any bit
+	 * set is a good-enough proxy; an unauthenticated state has all
+	 * zeros). If access is still zero — pre-login or some weird
+	 * server that never sent SELFINFO — fall through and try the
+	 * fetch the legacy way.
+	 *
+	 * The user-initiated Refresh button hits this same function;
+	 * dropping the auto-fetch on a no-permission server also stops
+	 * a manual refresh from working there, which is the right
+	 * behaviour: the server would just reject it anyway. We surface
+	 * a debug-channel note so the user can confirm via
+	 * GTKHX_DEBUG=news what's happening. */
+	{
+		const guint8 *access = (const guint8 *) &sess->htlc.access;
+		gboolean any_bit_set = FALSE;
+		int i;
+		for (i = 0; i < 8; i++) {
+			if (access[i]) {
+				any_bit_set = TRUE;
+				break;
+			}
+		}
+		if (any_bit_set &&
+		    !hl_access_has (access, HL_ACCESS_NEWS_READ_ART)) {
+			debug_log ("news",
+			    "skipping HTLC_HDR_NEWS_GETFILE — account lacks "
+			    "HL_ACCESS_NEWS_READ_ART (bit 20)");
+			return;
+		}
+	}
+
+	{
 		GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(sess->news_text));
 		gtk_text_buffer_set_text(buf, "", -1);
 		hx_get_news(&sess->htlc);
