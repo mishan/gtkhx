@@ -1124,32 +1124,54 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 
 void set_name_comment(GtkWidget *btn, gpointer data)
 {
-	GtkWidget *name_entry = g_object_get_data(G_OBJECT(btn), "name");
-	GtkWidget *comments_text = g_object_get_data(G_OBJECT(btn), "comments");
-	char *path = g_object_get_data(G_OBJECT(btn), "path");
-	char *name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
-	char *comments = gtk_editable_get_chars(GTK_EDITABLE(comments_text), 0, -1);
+	GtkWidget *name_entry    = g_object_get_data (G_OBJECT (btn), "name");
+	GtkWidget *comments_text = g_object_get_data (G_OBJECT (btn), "comments");
+	char *path = g_object_get_data (G_OBJECT (btn), "path");
+	const char *name;
+	char *comments;
 	char *file;
+	GtkTextBuffer *cbuf;
+	GtkTextIter cstart, cend;
 
-	file = dirchar_basename(path); 
-	task_new(&the_session.htlc, 0, 0, 0, "set file info");
+	(void) data;
+
+	/* gtk_editable_get_text returns a const string owned by the
+	 * entry — don't free it. */
+	name = gtk_editable_get_text (GTK_EDITABLE (name_entry));
+	if (!name)
+		name = "";
+
+	/* The comments widget is a GtkTextView, not a GtkEditable —
+	 * gtk_editable_get_chars on it would null-deref, which is what
+	 * the previous code did and what crashed Save. Pull the text
+	 * via the buffer API instead. gtk_text_buffer_get_text returns
+	 * a fresh g_malloc'd copy that we own. */
+	cbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (comments_text));
+	gtk_text_buffer_get_start_iter (cbuf, &cstart);
+	gtk_text_buffer_get_end_iter   (cbuf, &cend);
+	comments = gtk_text_buffer_get_text (cbuf, &cstart, &cend, FALSE);
+	if (!comments)
+		comments = g_strdup ("");
+
+	file = dirchar_basename (path);
+	task_new (&the_session.htlc, 0, 0, 0, "set file info");
 	if (file != path) {
 		guint16 hldirlen = 0;
-		guint8 *hldir = path_to_hldir(path, &hldirlen, 1);
-		hlwrite(&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 4,
-				HTLC_DATA_FILE_NAME, strlen(file), file,
-				HTLC_DATA_FILE_RENAME, strlen(name), name,
-				HTLC_DATA_FILE_COMMENT, strlen(comments), comments,
-				HTLC_DATA_DIR, hldirlen, hldir); 
-		g_free(hldir);
+		guint8 *hldir = path_to_hldir (path, &hldirlen, 1);
+		hlwrite (&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 4,
+		         HTLC_DATA_FILE_NAME,    strlen (file),     file,
+		         HTLC_DATA_FILE_RENAME,  strlen (name),     name,
+		         HTLC_DATA_FILE_COMMENT, strlen (comments), comments,
+		         HTLC_DATA_DIR,          hldirlen,          hldir);
+		g_free (hldir);
 	} else {
-		hlwrite(&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 3,
-				HTLC_DATA_FILE_NAME, strlen(file), file,
-				HTLC_DATA_FILE_RENAME, strlen(name), name,
-				HTLC_DATA_FILE_COMMENT, strlen(comments), comments); 
-	} 
-	
-	g_free(comments);
+		hlwrite (&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 3,
+		         HTLC_DATA_FILE_NAME,    strlen (file),     file,
+		         HTLC_DATA_FILE_RENAME,  strlen (name),     name,
+		         HTLC_DATA_FILE_COMMENT, strlen (comments), comments);
+	}
+
+	g_free (comments);
 }
 
 void close_file_info(GtkWidget *win, char *path)
