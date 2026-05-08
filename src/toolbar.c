@@ -47,7 +47,7 @@
 #include "toolbar.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn, *post_btn;
-GtkWidget *disconnect_btn, *news15_btn;
+GtkWidget *disconnect_btn, *news15_btn, *news_btn;
 
 #ifdef USE_PLUGIN
 GtkWidget *plugin_btn;
@@ -461,10 +461,10 @@ void create_toolbar_window (session *sess)
 		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.xpm",
 		                    _("Tracker"),
 		                    G_CALLBACK (create_tracker_window), sess));
-	gtk_box_append (GTK_BOX (hbox),
-		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.xpm",
-		                    _("News"),
-		                    G_CALLBACK (open_news), sess));
+	news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.xpm",
+	                               _("News"),
+	                               G_CALLBACK (open_news), sess);
+	gtk_box_append (GTK_BOX (hbox), news_btn);
 	post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.xpm",
 	                               _("Post"),
 	                               G_CALLBACK (create_post_window), sess);

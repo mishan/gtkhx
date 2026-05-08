@@ -42,6 +42,7 @@
 #include "files.h"
 #include "xtext.h"
 #include "gtkutil.h"
+#include "hl_access.h"
 
 /* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
@@ -149,17 +150,44 @@ void setbtns(session *sess, int stat)
 	set_app_action_enabled ("user_new",  stat);
 	set_app_action_enabled ("user_edit", stat);
 
-	if(!stat) {
-		gtk_widget_set_sensitive(news15_btn, stat);
-		gtk_widget_set_sensitive(post_btn, stat);
-	}
-	else if(sess->htlc.version >= 150) {
-		gtk_widget_set_sensitive(news15_btn, TRUE);
-		gtk_widget_set_sensitive(post_btn, FALSE);
-	}
-	else if(sess->htlc.version < 150) {
-		gtk_widget_set_sensitive(post_btn, TRUE);
-		gtk_widget_set_sensitive(news15_btn, FALSE);
+	/* Phase 5: News-related buttons get visibility gating, not just
+	 * sensitivity. Three buttons / three independent decisions:
+	 *
+	 *   news_btn   (legacy News): show on pre-1.5 servers when the
+	 *               account has HL_ACCESS_READ_NEWS. Hidden on 1.5+
+	 *               servers entirely (their News goes through
+	 *               news15_btn instead).
+	 *   post_btn   (legacy Post): show on pre-1.5 servers when the
+	 *               account has HL_ACCESS_POST_NEWS.
+	 *   news15_btn (threaded News): show on 1.5+ servers when the
+	 *               account has HL_ACCESS_READ_NEWS. mhxd's struct
+	 *               has one read bit gating both legacy and threaded
+	 *               news, so the same access bit applies.
+	 *
+	 * On disconnect we don't know what the next server will allow,
+	 * so put everything back to the pre-connection visible-but-
+	 * insensitive state — same shape the toolbar shows at startup. */
+	if (!stat) {
+		gtk_widget_set_visible   (news_btn,   TRUE);
+		gtk_widget_set_sensitive (news_btn,   FALSE);
+		gtk_widget_set_visible   (post_btn,   TRUE);
+		gtk_widget_set_sensitive (post_btn,   FALSE);
+		gtk_widget_set_visible   (news15_btn, TRUE);
+		gtk_widget_set_sensitive (news15_btn, FALSE);
+	} else {
+		const guint8 *access = (const guint8 *) &sess->htlc.access;
+		gboolean can_read  = hl_access_has (access, HL_ACCESS_READ_NEWS);
+		gboolean can_post  = hl_access_has (access, HL_ACCESS_POST_NEWS);
+		gboolean is_15plus = sess->htlc.version >= 150;
+
+		gtk_widget_set_visible   (news_btn,   !is_15plus && can_read);
+		gtk_widget_set_sensitive (news_btn,   can_read);
+
+		gtk_widget_set_visible   (post_btn,   !is_15plus && can_post);
+		gtk_widget_set_sensitive (post_btn,   can_post);
+
+		gtk_widget_set_visible   (news15_btn, is_15plus && can_read);
+		gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
 	}
 }
 
