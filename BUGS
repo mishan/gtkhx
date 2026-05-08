@@ -1,6 +1,6 @@
 High priority:
 
-(none)
+- Private Message and Private Chat windows are wrongly sized. Chat appears cut off in top left corner until window is resized larger. The window is already larger than it needs to be, and the input box is too large
 
 Medium priority:
 
