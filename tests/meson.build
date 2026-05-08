@@ -87,3 +87,14 @@ test_proto_names = executable('test_proto_names',
 )
 test('proto_names', test_proto_names,
      suite : 'unit')
+
+# text_sanitisers — CR2LF / LF2CR (compat.h macros) and strip_ansi
+# (protocol.h static inline). Header-only, but strip_ansi's home is
+# protocol.h, so the test pulls in proto_test_deps.
+test_text_sanitisers = executable('test_text_sanitisers',
+  'unit/test_text_sanitisers.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('text_sanitisers', test_text_sanitisers,
+     suite : 'unit')
