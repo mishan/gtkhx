@@ -351,24 +351,45 @@ void gchat_delete (session *sess, struct gtkhx_chat *gchat)
 
 void xprintline(GtkWidget *text, char *chat, size_t len)
 {
-	char *new_text;
+	char  *new_text;
+	char  *valid;
+	gsize  valid_len;
 
-	if(len == -1) {
+	if((ssize_t)len == -1) {
 		len = strlen(chat);
 	}
 	if(len == 0) {
 		len = 1;
 	}
+
+	/* Phase 5: chat / msg bytes from the wire arrive in whatever
+	 * encoding the server happened to use — historically Mac Roman
+	 * on Mac-OS-classic servers, occasionally Latin-1 from later
+	 * Unix forks, sometimes already UTF-8 on modern stacks. xtext
+	 * eventually hands the bytes to Pango, which asserts UTF-8 and
+	 * emits "Invalid UTF-8 string passed to pango_layout_set_text()"
+	 * for any 8-bit content. gtkhx_text_to_utf8 walks the
+	 * already-UTF-8 / Mac-Roman / fallback-to-substitute cascade and
+	 * always returns a valid-UTF-8 g_strdup'd copy. */
+	valid = gtkhx_text_to_utf8 (chat, len, &valid_len);
+	if (!valid) {
+		/* Defensive — gtkhx_text_to_utf8 should never return NULL,
+		 * but if it does we'd rather drop the line than crash. */
+		return;
+	}
+
 	if(gtkhx_prefs.timestamp) {
-		new_text = g_malloc(len+12);
+		new_text = g_malloc(valid_len+12);
 		timecpy(new_text);
-		memcpy(new_text +11, chat, len);
-		gtk_xtext_append(GTK_XTEXT(text)->buffer, new_text, len+11, 0);
+		memcpy(new_text +11, valid, valid_len);
+		gtk_xtext_append(GTK_XTEXT(text)->buffer, (unsigned char *)new_text, valid_len+11, 0);
 		g_free(new_text);
 	}
 	else {
-		gtk_xtext_append(GTK_XTEXT(text)->buffer, chat, len, 0);
+		gtk_xtext_append(GTK_XTEXT(text)->buffer, (unsigned char *)valid, valid_len, 0);
 	}
+
+	g_free (valid);
 }
 
 static void xoutput_chat (session *sess, guint32 cid, char *chat)
