@@ -49,28 +49,52 @@
 int nxfers = 0;
 struct htxf_conn **xfers = 0;
 void xfer_delete (struct htxf_conn *htxf);
+static void xfer_remove_from_list (struct htxf_conn *htxf);
 
 /*
- * Worker → main thread marshal helpers for the xfer workers.
+ * Reference counting and the worker → main marshal helpers.
  *
- * Each get_thread / put_thread streams bytes and reports progress
- * via hx_output.file_update. post_file_update marshals each
- * progress callback to the main thread asynchronously.
+ * See the lifecycle comment over the refcount field in
+ * struct htxf_conn (protocol.h) for the ownership model. In short:
  *
- * Async on its own would create a use-after-free: the worker calls
- * xfer_delete at the end of its run, freeing htxf, while main-thread
- * idle dispatchers still hold the htxf pointer. To avoid that, the
- * worker's exit-path xfer_delete is also marshaled, via
- * post_xfer_cleanup. GLib runs idles in FIFO order at the same
- * priority, so cleanup runs after all already-queued file_updates —
- * htxf stays alive for every pending dispatcher.
+ *   - xfers[] holds 1 ref per htxf; dropped by xfer_remove_from_list
+ *     when xfer_delete (server-cancel from rcv.c, err_fd from
+ *     xfer_ready_write) or cleanup_dispatch (worker normal exit)
+ *     unlinks the htxf.
+ *   - The worker thread holds 1 ref taken in xfer_ready_write
+ *     before pthread_create; dropped by cleanup_dispatch on its
+ *     behalf when the worker queues post_xfer_cleanup at exit.
+ *   - Each pending post_file_update / post_xfer_cleanup idle holds
+ *     1 ref while it's queued; dropped by its dispatcher.
  *
- * Outstanding race: a server-initiated cancel can call xfer_delete
- * from rcv.c on the main thread while the worker is mid-stream,
- * freeing htxf before later worker idles run. Closing this needs
- * htxf reference-counting or a deletion-mark + drain protocol;
- * tracked under connection-ownership cleanup.
+ * htxf_conn is freed only when all owners have unref'd. Cancel —
+ * either server-initiated or app-shutdown — sets htxf->canceled so
+ * dispatchers skip their work, but the htxf stays alive until every
+ * outstanding ref drops. No use-after-free even if the worker is
+ * mid-stream when the server cancels.
  */
+static struct htxf_conn *
+htxf_ref (struct htxf_conn *htxf)
+{
+	if (htxf)
+		g_atomic_int_inc (&htxf->refcount);
+	return htxf;
+}
+
+static void
+htxf_unref (struct htxf_conn *htxf)
+{
+	if (!htxf)
+		return;
+	if (!g_atomic_int_dec_and_test (&htxf->refcount))
+		return;
+#ifdef USE_IPV6
+	if (htxf->listen_addr)
+		freeaddrinfo (htxf->listen_addr);
+#endif
+	g_free (htxf);
+}
+
 struct fu_job {
 	struct htxf_conn *htxf;
 };
@@ -78,7 +102,9 @@ static gboolean
 fu_dispatch (gpointer data)
 {
 	struct fu_job *j = data;
-	hx_output.file_update (&the_session, j->htxf);
+	if (!j->htxf->canceled)
+		hx_output.file_update (&the_session, j->htxf);
+	htxf_unref (j->htxf);
 	g_free (j);
 	return G_SOURCE_REMOVE;
 }
@@ -86,7 +112,7 @@ static void
 post_file_update (struct htxf_conn *htxf)
 {
 	struct fu_job *j = g_new0 (struct fu_job, 1);
-	j->htxf = htxf;
+	j->htxf = htxf_ref (htxf);
 	gtkhx_post_to_main (fu_dispatch, j);
 }
 
@@ -98,7 +124,12 @@ cleanup_dispatch (gpointer data)
 {
 	struct cleanup_job *j = data;
 	j->htxf->tid = 0;
-	xfer_delete (j->htxf);
+	/* Unlink from xfers[] if the server didn't already cancel us
+	 * out of it; xfer_remove_from_list is a no-op on a not-found
+	 * pointer. */
+	xfer_remove_from_list (j->htxf);
+	/* Drop the worker thread's ref. */
+	htxf_unref (j->htxf);
 	g_free (j);
 	return G_SOURCE_REMOVE;
 }
@@ -106,6 +137,9 @@ static void
 post_xfer_cleanup (struct htxf_conn *htxf)
 {
 	struct cleanup_job *j = g_new0 (struct cleanup_job, 1);
+	/* The worker thread's ref is handed off to the cleanup job
+	 * directly — no additional ref taken here. cleanup_dispatch
+	 * unrefs on the worker's behalf. */
 	j->htxf = htxf;
 	gtkhx_post_to_main (cleanup_dispatch, j);
 }
@@ -312,6 +346,11 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	strcpy(htxf->path, path);
 	htxf->type = type;
 	htxf->queue = -1;
+	/* refcount = 1 represents the xfers[] array's ownership. The
+	 * worker thread will take its own ref before pthread_create
+	 * (in xfer_ready_write). */
+	htxf->refcount = 1;
+	htxf->canceled = FALSE;
 	/* opt.preview and srv_data_size MUST be set before xfer_go
 	 * runs below — xfer_go gates its resume / rename decision on
 	 * both. Setting these via the returned htxf pointer after this
@@ -692,7 +731,14 @@ void xfer_ready_write (struct htxf_conn *htxf)
  	sigaction(SIGTSTP, &act, &tstpact);
 	sigaction(SIGCONT, &act, &contact);
 
-	err = pthread_create(&tid, 0, ((htxf->type == XFER_GET) ? 
+	/* Take the worker thread's reference BEFORE pthread_create so
+	 * the htxf can't be freed mid-spawn if some other path drops
+	 * the xfers[] ref between here and the worker's first
+	 * htxf_ref call. cleanup_dispatch drops this ref on the
+	 * worker's behalf at exit. */
+	htxf_ref (htxf);
+
+	err = pthread_create(&tid, 0, ((htxf->type == XFER_GET) ?
 								   get_thread : put_thread), htxf);
 
 	sigaction(SIGTSTP, &tstpact, 0);
@@ -700,6 +746,9 @@ void xfer_ready_write (struct htxf_conn *htxf)
 	unignore_signals(&oldset);
 
 	if (err) {
+		/* pthread_create failed — we'll never get a
+		 * cleanup_dispatch to drop the ref, so drop it here. */
+		htxf_unref (htxf);
 		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "xfer: pthread_create: %s\n", strerror(err));
 		goto err_fd;
 	}
@@ -722,53 +771,67 @@ void xfer_tasks_update (struct htlc_conn *htlc)
 	}
 }
 
+/* Best-effort cancellation of all in-flight transfers at app shutdown.
+ * Each htxf has its xfers[] ref dropped here; the worker's ref (and
+ * any pending dispatcher refs) keep the htxf alive until the workers
+ * actually exit. The process is going down anyway, so leaks of the
+ * worker-still-running case don't matter. */
 void xfers_delete_all (void)
 {
-	struct htxf_conn *htxf;
 	int i;
 
 	for (i = 0; i < nxfers; i++) {
-		htxf = xfers[i];
-		if (htxf->tid) {
-//			void *thread_retval;
-
-			pthread_cancel(htxf->tid);
-//			pthread_join(htxf->tid, &thread_retval);
-			g_free(htxf);
-		}
+		struct htxf_conn *htxf = xfers[i];
+		htxf->canceled = TRUE;
+		if (htxf->tid)
+			pthread_cancel (htxf->tid);
+		htxf_unref (htxf);   /* drop xfers[] ref */
 	}
 	nxfers = 0;
 }
 
-void xfer_delete (struct htxf_conn *htxf)
+/* Internal: remove htxf from the xfers[] array and drop the
+ * array's reference. Idempotent — if the htxf isn't in the array,
+ * does nothing. The actual free happens via the unref only when the
+ * last owner (worker, queued dispatchers) drops their refs. */
+static void
+xfer_remove_from_list (struct htxf_conn *htxf)
 {
 	int i;
 
 	for (i = 0; i < nxfers; i++) {
-		if (xfers[i] == htxf) {
-			if(htxf->tid) {
-//				void *thread_retval;
-				
-				pthread_cancel(htxf->tid);
-//				pthread_join(htxf->tid, &thread_retval);
-			}
-#ifdef USE_IPV6
-			if(htxf->listen_addr) {
-				freeaddrinfo(htxf->listen_addr);
-			}
-#endif
-			g_free(htxf);
-			if (nxfers > (i+1)) {
-				memcpy(&xfers[i], &xfers[i+1], (nxfers-(i+1)) * 
-					   sizeof(struct htxf_conn *));
-			}
-			nxfers--;
-			if (nxfers) {
-				xfer_go(xfers[0]);
-			}
-			break;
+		if (xfers[i] != htxf)
+			continue;
+
+		if (nxfers > (i + 1)) {
+			memcpy (&xfers[i], &xfers[i + 1],
+			        (nxfers - (i + 1)) * sizeof (struct htxf_conn *));
 		}
+		nxfers--;
+		htxf_unref (htxf);   /* drop the xfers[] ref */
+		if (nxfers)
+			xfer_go (xfers[0]);
+		return;
 	}
+}
+
+/* Public: cancel an in-flight transfer.
+ *
+ * Called from rcv.c when the server sends a cancel / error and from
+ * xfer_ready_write's err_fd path when pthread_create fails. Sets
+ * htxf->canceled so any pending or future dispatchers skip their
+ * work, kicks the worker thread (best-effort — pthread_cancel is
+ * async), and unlinks from xfers[] (which drops the array's ref). */
+void
+xfer_delete (struct htxf_conn *htxf)
+{
+	if (!htxf)
+		return;
+
+	htxf->canceled = TRUE;
+	if (htxf->tid)
+		pthread_cancel (htxf->tid);
+	xfer_remove_from_list (htxf);
 }
 
 

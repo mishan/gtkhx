@@ -60,6 +60,31 @@ struct htxf_conn {
 	 * server size is unknown). 0 == unknown — listing wasn't
 	 * available for this transfer. */
 	guint32 srv_data_size;
+	/* Lifecycle: htxf_conn is reference-counted to handle the
+	 * cross-thread ownership knot between the xfers[] array, the
+	 * per-xfer worker thread, and any pending main-thread idles
+	 * the worker has queued (post_file_update / post_xfer_cleanup).
+	 *
+	 * Owners that increment refcount on acquire and decrement on
+	 * release:
+	 *   1  the xfers[] array (xfer_new → xfer_remove_from_list)
+	 *   1  the worker thread (xfer_ready_write → cleanup_dispatch)
+	 *   N  each pending post_* idle (post_*  → its dispatcher)
+	 *
+	 * xfer_delete (called from rcv.c when the server cancels, and
+	 * from xfer_ready_write's err_fd path) sets `canceled` and
+	 * removes the htxf from xfers[] (which drops the xfers[] ref).
+	 * If the worker and queued idles still hold refs, the htxf
+	 * stays alive, the worker exits cleanly, idles run with the
+	 * canceled flag set and skip their work, and the last unref
+	 * frees. No use-after-free; no race window.
+	 *
+	 * Mutate refcount only via g_atomic_int_*. Mutate `canceled`
+	 * only on the main thread (so the worker reads a coherent
+	 * value via volatile-equivalent access — gint reads are
+	 * atomic on every architecture we run on). */
+	gint     refcount;
+	gboolean canceled;
 	guint32 ref;	/* xfer id */
 	guint8 gone;
 	guint8 type;
