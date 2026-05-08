@@ -366,17 +366,33 @@ void msg_output (char *name, guint16 uid, char *buf)
 }
 
 
-/* Phase 5: AdwAlertDialog with a scrolled non-editable GtkTextView
- * as extra-child replaces the hand-rolled GtkDialog. The broadcast
- * text can run long, so it goes in extra_child (which is exposed
- * through a scrolled view) rather than body (which is a plain
- * GtkLabel without scrolling). Single OK response handles dismiss
- * + ESC + window-close-X uniformly. */
+/* Phase 5: short broadcasts go through toolbar_show_toast, long ones
+ * through an AdwAlertDialog with a scrolled GtkTextView extra child.
+ *
+ * The split exists because servers use HTLS_HDR_MSG_BROADCAST for two
+ * different things:
+ *   - Real admin announcements ("Server going down in 5 minutes")
+ *     that the user really should see and acknowledge.
+ *   - Rate-limit / auto-rejection notes ("0 command(s) at a time,
+ *     please.") that are short, automated, and not worth a modal
+ *     dialog the user has to click through.
+ *
+ * Length is a usable proxy: short = automated nag, long = real
+ * announcement. The 160-char cutoff is heuristic but matches the
+ * shape of what we've seen in the wild on hlserver.com et al. */
+#define BROADCAST_TOAST_MAX 160
+
 void broadcastmsg(char *text)
 {
 	AdwDialog *dialog;
 	GtkWidget *textbox, *scroll;
 	GtkTextBuffer *tbuf;
+	gsize len = text ? strlen (text) : 0;
+
+	if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
+		toolbar_show_toast (text);
+		return;
+	}
 
 	dialog = adw_alert_dialog_new (_("Broadcast"), NULL);
 	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
