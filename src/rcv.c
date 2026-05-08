@@ -50,6 +50,7 @@
 #include "usermod.h"
 #include "news15.h"
 #include "hfs.h"
+#include "proto_trace.h"
 #include "connect.h"
 
 static size_t news_len = 0;
@@ -546,9 +547,13 @@ void hx_rcv_hdr (struct htlc_conn *htlc)
 	struct hl_hdr *h = (struct hl_hdr *)htlc->in.buf;
 	guint32 len;
 	guint32 type;
+	guint32 trace_trans, trace_flag;
 
 	HN32(&len, &h->len);
 	HN32(&type, &h->type);
+	HN32(&trace_trans, &h->trans);
+	HN32(&trace_flag,  &h->flag);
+	proto_trace_recv_hdr (type, trace_trans, trace_flag, len);
 	if (len < 2) {
 		len = 0;
 	}

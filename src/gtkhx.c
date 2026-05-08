@@ -47,6 +47,7 @@
 #include "tasks.h"
 #include "network.h"
 #include "gtkutil.h"
+#include "debug.h"
 #include "toolbar.h"
 #include "chat.h"
 #include "msg.h"
@@ -874,6 +875,14 @@ loop (void)
 static void init (int argc, char **argv)
 {
 	int i;
+
+	/* Phase 5: parse the GTKHX_DEBUG env var into the categorised
+	 * debug logger before anything else, so init paths can already
+	 * call debug_log("startup", ...) etc. The proto_trace module
+	 * checks debug_category_enabled("proto") on every send/recv
+	 * hook — a lookup against a (possibly empty) hash table, cheap
+	 * enough to leave unconditionally. */
+	debug_init ();
 
 	for(i = 0; i < 1024; i++) {
 		rinput_tags[i] = -1;

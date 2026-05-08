@@ -48,6 +48,7 @@
 #include "users.h"
 #include "inet.h"
 #include "log.h"
+#include "proto_trace.h"
 
 char *server_addr;
 #ifdef USE_IPV6
@@ -358,6 +359,11 @@ static void htlc_read (int fd)
 					if (!hxd_files[fd].conn.htlc)
 						return;
 				} else {
+					/* Phase 5: body is fully buffered now;
+					 * dump its data chunks before dispatch.
+					 * No-op when "proto" debug category is
+					 * disabled. */
+					proto_trace_recv_chunks (htlc);
 					htlc->rcv(htlc);
 					if (!hxd_files[fd].conn.htlc)
 						return;
@@ -1099,6 +1105,7 @@ void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	struct qbuf *q;
 	guint32 this_off, pos;
 	guint32 len = 0;
+	guint32 my_trans;
 
 	if (!htlc->fd) {
 		return;
@@ -1111,11 +1118,14 @@ void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	q->buf = g_realloc(q->buf, q->pos + q->len);
 
 	h.type = htonl(type);
-	h.trans = htonl(htlc->trans);
+	my_trans = htlc->trans;
+	h.trans = htonl(my_trans);
 	htlc->trans++;
 
 	h.flag = htonl(flag);
 	h.hc = htons(hc);
+
+	proto_trace_send_begin (type, my_trans, hc);
 
 	va_start (ap, hc);
 	while (hc) {
@@ -1136,10 +1146,12 @@ void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 			memcpy (&q->buf[pos], data, l);
 			pos += l;
 		}
+		proto_trace_send_chunk (t, l, data);
 		hc--;
 	}
 	va_end(ap);
-	
+	proto_trace_send_end ();
+
 	len = pos - this_off;
 	h.len = h.len2= htonl(len - (SIZEOF_HL_HDR - sizeof(h.hc)));
 	memcpy(q->buf + this_off, &h, SIZEOF_HL_HDR);
