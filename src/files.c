@@ -1157,78 +1157,127 @@ void close_file_info(GtkWidget *win, char *path)
 	g_free(path);
 }
 
-void output_file_info(char *path, char *name, char *creator, char *type, 
-					  char *comments, char *modified, char *created, 
-					  guint32 size)
+/* Single read-only metadata row in the File Info dialog. Title is
+ * the field name (e.g. "Size"); subtitle is the value, rendered as
+ * an em-dash when the value is missing or empty so the row stays
+ * informative either way. The subtitle is selectable for copy. */
+static GtkWidget *
+hx_file_info_row (const char *title, const char *value)
 {
-	GtkWidget *window;
-	GtkWidget *creator_label;
-	GtkWidget *type_label;
-	GtkWidget *modified_label;
-	GtkWidget *created_label;
-	GtkWidget *size_label;
-	GtkWidget *name_entry;
-	GtkWidget *name_label;
-	GtkWidget *comments_text;
-	GtkWidget *name_hbox;
+	GtkWidget *row = adw_action_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+	adw_action_row_set_subtitle (ADW_ACTION_ROW (row),
+	                             (value && value[0]) ? value : "—");
+	adw_action_row_set_subtitle_selectable (ADW_ACTION_ROW (row), TRUE);
+	return row;
+}
+
+void output_file_info (char *path, char *name, char *creator, char *type,
+                       char *comments, char *modified, char *created,
+                       guint32 size)
+{
+	GtkWidget *window, *header, *savebtn;
 	GtkWidget *vbox;
-	GtkWidget *savebtn;
-	char *text;
+	GtkWidget *name_group, *name_entry;
+	GtkWidget *info_group;
+	GtkWidget *comments_group, *comments_scroll, *comments_text;
+	GtkTextBuffer *cbuf;
+	char humanbuf[LONGEST_HUMAN_READABLE + 1];
+	char sizestr[64];
 
-	window = gtk_window_new();
-    (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
-	/* Phase 4.5: close-request returns FALSE to let the default destroy
-	 * proceed; the file info dialog has no per-instance teardown. */
-	gtk_window_set_title(GTK_WINDOW(window), _("File Info"));
+	window = gtk_window_new ();
+	gtk_window_set_title (GTK_WINDOW (window), _("File Info"));
+	gtk_window_set_default_size (GTK_WINDOW (window), 460, 540);
 
-	name_entry = gtk_entry_new();
-	comments_text = gtk_text_view_new();
-	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(comments_text), GTK_WRAP_WORD);
-	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	name_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	savebtn = gtk_button_new_with_label(_("Save"));
+	/* AdwHeaderBar with Save action on the trailing edge. */
+	header = adw_header_bar_new ();
+	savebtn = gtk_button_new_with_label (_("Save"));
+	gtk_widget_add_css_class (savebtn, "suggested-action");
+	adw_header_bar_pack_end (ADW_HEADER_BAR (header), savebtn);
+	gtk_window_set_titlebar (GTK_WINDOW (window), header);
 
-	text = g_strdup_printf("%s: %s", _("Creator"), creator);
-	creator_label = gtk_label_new(text);
-	text = g_strdup_printf("%s: %s", _("Type"), type);
-	type_label = gtk_label_new(text);
-	text = g_strdup_printf("%s: %s", _("Modified"), modified);
-	modified_label = gtk_label_new(text);
-	text = g_strdup_printf("%s: %s", _("Created"), created);
-	created_label = gtk_label_new(text);
-	text = g_strdup_printf("%s: %u", _("Size"), size);
-	size_label = gtk_label_new(text);
-	name_label = gtk_label_new(_("Name: "));
-	gtk_editable_set_text(GTK_EDITABLE(name_entry), name);
-	{
-		GtkTextBuffer *cbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(comments_text));
-		gtk_text_buffer_set_text(cbuf, comments, strlen(comments));
+	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
+	gtk_widget_set_margin_start  (vbox, 12);
+	gtk_widget_set_margin_end    (vbox, 12);
+	gtk_widget_set_margin_top    (vbox, 12);
+	gtk_widget_set_margin_bottom (vbox, 12);
+
+	/* Name (editable). AdwEntryRow keeps the label inline with the
+	 * field and gives us a wide entry that doesn't truncate the
+	 * file name visually. */
+	name_group = adw_preferences_group_new ();
+	name_entry = adw_entry_row_new ();
+	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (name_entry),
+	                               _("Name"));
+	gtk_editable_set_text (GTK_EDITABLE (name_entry), name ? name : "");
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (name_group), name_entry);
+	gtk_box_append (GTK_BOX (vbox), name_group);
+
+	/* Read-only metadata. */
+	if (size > 0) {
+		char *human = human_size (humanbuf, size);
+		if (size >= 1024)
+			g_snprintf (sizestr, sizeof sizestr, "%s (%u %s)",
+			            human, size, _("bytes"));
+		else
+			g_snprintf (sizestr, sizeof sizestr, "%u %s",
+			            size, _("bytes"));
+	} else {
+		sizestr[0] = '\0';
 	}
-	gtk_text_view_set_editable(GTK_TEXT_VIEW(comments_text), TRUE);
-	g_free(text);
 
-	gtkhx_widget_set_child(window, vbox);
-	gtkhx_box_pack(vbox, name_hbox, 0, 0, 0);
-	gtkhx_box_pack(name_hbox, name_label, 0, 0, 0);
-	gtkhx_box_pack(name_hbox, name_entry, 0, 0, 0);
-	gtkhx_box_pack(vbox, creator_label, 0, 0, 0);
-	gtkhx_box_pack(vbox, type_label, 0, 0, 0);
-	gtkhx_box_pack(vbox, size_label, 0, 0, 0);
-	gtkhx_box_pack(vbox, created_label, 0, 0, 0);
-	gtkhx_box_pack(vbox, modified_label, 0, 0, 0);
-	gtkhx_box_pack(vbox, comments_text, 0, 0, 4);
-	gtkhx_box_pack(vbox, savebtn, 0, 0, 0);
+	info_group = adw_preferences_group_new ();
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group),
+	                           hx_file_info_row (_("Creator"),  creator));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group),
+	                           hx_file_info_row (_("Type"),     type));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group),
+	                           hx_file_info_row (_("Size"),     sizestr));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group),
+	                           hx_file_info_row (_("Created"),  created));
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_group),
+	                           hx_file_info_row (_("Modified"), modified));
+	gtk_box_append (GTK_BOX (vbox), info_group);
 
-	g_object_set_data(G_OBJECT(savebtn), "name", name_entry);
-	g_object_set_data(G_OBJECT(savebtn), "comments", comments_text);
-	g_object_set_data(G_OBJECT(savebtn), "path", path);
-	g_signal_connect(savebtn, "clicked", 
-					   G_CALLBACK(set_name_comment), NULL);
+	/* Comments. AdwPreferencesGroup gives us a titled section; the
+	 * scrolled text view is added directly to the group. */
+	comments_group = adw_preferences_group_new ();
+	adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (comments_group),
+	                                 _("Comments"));
+	comments_text = gtk_text_view_new ();
+	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (comments_text),
+	                             GTK_WRAP_WORD_CHAR);
+	gtk_text_view_set_editable (GTK_TEXT_VIEW (comments_text), TRUE);
+	cbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (comments_text));
+	gtk_text_buffer_set_text (cbuf, comments ? comments : "",
+	                          comments ? strlen (comments) : 0);
 
-	g_signal_connect(window, "destroy", G_CALLBACK(close_file_info), path);
+	comments_scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (comments_scroll),
+	                                GTK_POLICY_AUTOMATIC,
+	                                GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_has_frame (GTK_SCROLLED_WINDOW (comments_scroll),
+	                                   TRUE);
+	gtk_widget_set_size_request (comments_scroll, -1, 140);
+	gtkhx_widget_set_child (comments_scroll, comments_text);
+	adw_preferences_group_add (ADW_PREFERENCES_GROUP (comments_group),
+	                           comments_scroll);
+	gtk_widget_set_vexpand (comments_group, TRUE);
+	gtk_box_append (GTK_BOX (vbox), comments_group);
 
-	gtk_window_present(GTK_WINDOW(window));
-	init_keyaccel(window);
+	gtkhx_widget_set_child (window, vbox);
+
+	g_object_set_data (G_OBJECT (savebtn), "name",     name_entry);
+	g_object_set_data (G_OBJECT (savebtn), "comments", comments_text);
+	g_object_set_data (G_OBJECT (savebtn), "path",     path);
+	g_signal_connect (savebtn, "clicked",
+	                  G_CALLBACK (set_name_comment), NULL);
+
+	g_signal_connect (window, "destroy",
+	                  G_CALLBACK (close_file_info), path);
+
+	gtk_window_present (GTK_WINDOW (window));
+	init_keyaccel (window);
 }
 
 struct cached_filelist *cfl_lookup (const char *path)

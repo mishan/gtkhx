@@ -1484,6 +1484,40 @@ void rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 	cfl->completing = COMPLETE_NONE;
 }
 
+/* Format a Hotline 8-byte timestamp into a locale-formatted string.
+ *
+ * Wire layout (big-endian):
+ *   bytes 0-1: year (decorative; usually the Mac epoch base 1904)
+ *   bytes 2-3: milliseconds (typically zero, ignored here)
+ *   bytes 4-7: seconds since 1904-01-01 00:00:00 UTC
+ *
+ * 0x7c25b080 = 2082844800, the offset between the Mac classic
+ * epoch (1904) and the Unix epoch (1970), in seconds.
+ *
+ * Servers commonly send ts=0 to mean "no timestamp set" rather than
+ * literally 1904-01-01. Detect that and return an empty string —
+ * the dialog renders empty values as an em-dash so we don't show
+ * the user a date in the year 1838. */
+static void
+hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
+{
+	guint32 ts;
+	time_t t;
+	struct tm tm;
+
+	if (cap == 0) return;
+	out[0] = '\0';
+
+	HN32 (&ts, (guint8 *) &bytes[4]);
+	if (ts == 0)
+		return;
+
+	t = (time_t) ts - (time_t) 0x7c25b080;
+	if (!localtime_r (&t, &tm))
+		return;
+	strftime (out, cap, hx_timeformat, &tm);
+}
+
 void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 {
 	guint8 icon[4], type[32], crea[32], date_create[8], date_modify[8];
@@ -1491,12 +1525,12 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 	guint16 nlen, clen, tlen;
 	guint32 size = 0;
 	char created[32], modified[32];
-	time_t t;
-	struct tm tm;
 
 	if (task_inerror(htlc))
 		return;
 	name[0] = comment[0] = type[0] = crea[0] = 0;
+	memset (date_create, 0, sizeof date_create);
+	memset (date_modify, 0, sizeof date_modify);
 	dh_start(htlc) {
 		switch(_type) {
 		case HTLS_DATA_FILE_ICON:
@@ -1514,8 +1548,13 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 			crea[clen] = 0;
 			break;
 		case HTLS_DATA_FILE_SIZE:
-			if (_len >= 4)
-				HN32(&size, dh->data);
+			/* Some servers (mhxd) emit the size in the smallest
+			 * big-endian width that fits, so we may see len 1, 2,
+			 * 3, or 4. Read whatever bytes arrived as a big-endian
+			 * unsigned and zero-extend to guint32. */
+			size = 0;
+			for (guint16 i = 0; i < _len && i < 4; i++)
+				size = (size << 8) | dh->data[i];
 			break;
 		case HTLS_DATA_FILE_NAME:
 			nlen = (_len > 255) ? 255 : _len;
@@ -1540,15 +1579,11 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 			break;
 		}
 	} dh_end();
-	
-	t = ntohl(*((guint32 *)&date_create[4])) - 0x7c25b080;
-	localtime_r(&t, &tm);
-	strftime(created, 31, hx_timeformat, &tm);
-	t = ntohl(*((guint32 *)&date_modify[4])) - 0x7c25b080;
-	localtime_r(&t, &tm);
-	strftime(modified, 31, hx_timeformat, &tm);
 
-	hx_output.file_info(path, name, crea, type, comment, modified, created, 
+	hx_format_hotline_date (date_create, created,  sizeof created);
+	hx_format_hotline_date (date_modify, modified, sizeof modified);
+
+	hx_output.file_info(path, name, crea, type, comment, modified, created,
 						size);
 }
 
