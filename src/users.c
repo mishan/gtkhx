@@ -306,8 +306,16 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	 * info as a real label widget via gtk_popover_menu_add_child +
 	 * a "custom" GMenuItem rather than abusing disabled menu items.
 	 * Built as Pango markup so the user's name reads bold. */
+	/* Phase 5: single-line info header — was two lines (name on
+	 * top, details in <small> below) but the extra line plus
+	 * generous margins pushed the popup tall enough that the
+	 * bottom items got clipped by the Users window's lower edge
+	 * on the typical default-sized window. Bold name + dim-label
+	 * details on one line is dense but readable, and frees ~24px
+	 * of vertical space the menu items need. */
 	info_markup = g_markup_printf_escaped (
-		"<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>",
+		"<b>%s</b>  <span alpha=\"60%%\">"
+		"UID %d · Icon %d · %s%s</span>",
 		user->name, user->uid, user->icon,
 		user->color >= 2 ? _("Admin") : _("Guest"),
 		user->color % 2 ? _(" (Away)") : "");
@@ -316,8 +324,8 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
 	gtk_widget_set_margin_start  (info_label, 12);
 	gtk_widget_set_margin_end    (info_label, 12);
-	gtk_widget_set_margin_top    (info_label, 8);
-	gtk_widget_set_margin_bottom (info_label, 4);
+	gtk_widget_set_margin_top    (info_label, 6);
+	gtk_widget_set_margin_bottom (info_label, 2);
 	g_free (info_markup);
 	{
 		GMenu *info_section = g_menu_new ();
@@ -806,7 +814,14 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	 * before its children are packed is a footgun under GTK 3 Wayland —
 	 * it creates the wl_surface in an under-committed state. */
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
-	gtk_widget_set_size_request(users_window, 264, 400);
+	/* Phase 5: default-size, not size_request — set_size_request
+	 * sets both min AND natural in GTK 4, baking in a floor that
+	 * (a) wasn't intended and (b) made the right-click popover
+	 * clip its bottom items on the typical 400px-tall window.
+	 * 320 wide × 480 tall gives the popup full breathing room
+	 * (5 menu items + 1 info header + section gaps ≈ 280px) and
+	 * is still resizable down for narrow displays. */
+	gtk_window_set_default_size(GTK_WINDOW(users_window), 320, 480);
 	gtk_window_set_resizable(GTK_WINDOW(users_window), TRUE);
 	g_signal_connect(users_window, "close-request",
 			   G_CALLBACK(close_users_window), sess);
@@ -836,7 +851,11 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	users_window_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(users_window_scroll),
 				       GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	gtk_widget_set_size_request(users_window_scroll, 240, 400);
+	/* Phase 5: dropped explicit 240x400 size_request; vexpand on
+	 * the scroll lets it grow with the window naturally, and the
+	 * 240px min width was a holdover that prevented the user from
+	 * shrinking the window narrower than that. */
+	gtk_widget_set_vexpand (users_window_scroll, TRUE);
 	gtkhx_widget_set_child(users_window_scroll, users_list);
 
 	/* Phase 5: per-user action buttons via the shared

@@ -129,11 +129,31 @@ void setbtns(session *sess, int stat)
 {
 	if(gtkhx_prefs.geo.users.open) {
 		gtk_widget_set_sensitive(msgbtn, stat);
-		gtk_widget_set_sensitive(kickbtn, stat);
 		gtk_widget_set_sensitive(infobtn, stat);
-		gtk_widget_set_sensitive(banbtn, stat);
 		gtk_widget_set_sensitive(chatbtn, stat);
 		gtk_widget_set_sensitive(ignobtn, stat);
+		/* Phase 5: kick / ban get visibility gating in the Users
+		 * window — hide them entirely when the account doesn't
+		 * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
+		 * mhxd's struct.) On disconnect, hide them too: we don't
+		 * know what the next server will allow, and an unauthorised
+		 * kick button next to a friendly Msg button is worse UX
+		 * than just dropping the icon.
+		 *
+		 * Same access-bit gate as the right-click popup's Kick/Ban
+		 * section, so the toolbar and the popup agree on what's
+		 * available. */
+		if (stat &&
+		    hl_access_has ((const guint8 *) &sess->htlc.access,
+		                   HL_ACCESS_DISCONNECT_USERS)) {
+			gtk_widget_set_visible   (kickbtn, TRUE);
+			gtk_widget_set_sensitive (kickbtn, TRUE);
+			gtk_widget_set_visible   (banbtn,  TRUE);
+			gtk_widget_set_sensitive (banbtn,  TRUE);
+		} else {
+			gtk_widget_set_visible (kickbtn, FALSE);
+			gtk_widget_set_visible (banbtn,  FALSE);
+		}
 	}
 	if(gtkhx_prefs.geo.news.open) {
 		gtk_widget_set_sensitive(sess->postButton, stat);
@@ -150,29 +170,22 @@ void setbtns(session *sess, int stat)
 	set_app_action_enabled ("user_new",  stat);
 	set_app_action_enabled ("user_edit", stat);
 
-	/* Phase 5: News-related buttons get visibility gating, not just
-	 * sensitivity. Three buttons / three independent decisions:
+	/* Phase 5: News-related toolbar buttons get sensitivity-only
+	 * gating — they always remain visible so the toolbar shape
+	 * doesn't reshape between connections. Three buttons, three
+	 * independent decisions:
 	 *
-	 *   news_btn   (legacy News): show on pre-1.5 servers when the
-	 *               account has HL_ACCESS_READ_NEWS. Hidden on 1.5+
-	 *               servers entirely (their News goes through
-	 *               news15_btn instead).
-	 *   post_btn   (legacy Post): show on pre-1.5 servers when the
-	 *               account has HL_ACCESS_POST_NEWS.
-	 *   news15_btn (threaded News): show on 1.5+ servers when the
-	 *               account has HL_ACCESS_READ_NEWS. mhxd's struct
-	 *               has one read bit gating both legacy and threaded
-	 *               news, so the same access bit applies.
-	 *
-	 * On disconnect we don't know what the next server will allow,
-	 * so put everything back to the pre-connection visible-but-
-	 * insensitive state — same shape the toolbar shows at startup. */
+	 *   news_btn   (legacy News): enabled on pre-1.5 servers when
+	 *               the account has HL_ACCESS_READ_NEWS.
+	 *   post_btn   (legacy Post): enabled on pre-1.5 servers when
+	 *               the account has HL_ACCESS_POST_NEWS.
+	 *   news15_btn (threaded News): enabled on 1.5+ servers when
+	 *               the account has HL_ACCESS_READ_NEWS. mhxd's
+	 *               struct has one read bit gating both legacy and
+	 *               threaded news, so the same access bit applies. */
 	if (!stat) {
-		gtk_widget_set_visible   (news_btn,   TRUE);
 		gtk_widget_set_sensitive (news_btn,   FALSE);
-		gtk_widget_set_visible   (post_btn,   TRUE);
 		gtk_widget_set_sensitive (post_btn,   FALSE);
-		gtk_widget_set_visible   (news15_btn, TRUE);
 		gtk_widget_set_sensitive (news15_btn, FALSE);
 	} else {
 		const guint8 *access = (const guint8 *) &sess->htlc.access;
@@ -180,13 +193,8 @@ void setbtns(session *sess, int stat)
 		gboolean can_post  = hl_access_has (access, HL_ACCESS_POST_NEWS);
 		gboolean is_15plus = sess->htlc.version >= 150;
 
-		gtk_widget_set_visible   (news_btn,   !is_15plus && can_read);
-		gtk_widget_set_sensitive (news_btn,   can_read);
-
-		gtk_widget_set_visible   (post_btn,   !is_15plus && can_post);
-		gtk_widget_set_sensitive (post_btn,   can_post);
-
-		gtk_widget_set_visible   (news15_btn, is_15plus && can_read);
+		gtk_widget_set_sensitive (news_btn,   !is_15plus && can_read);
+		gtk_widget_set_sensitive (post_btn,   !is_15plus && can_post);
 		gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
 	}
 }
