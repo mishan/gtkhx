@@ -26,6 +26,7 @@
 #include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
+#include "hl_access.h"
 #include "gtk_hlist.h"
 #include "cicn.h"
 #include "network.h"
@@ -329,12 +330,22 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 		g_object_unref (info_section);
 	}
 
-	/* Kick / Ban */
-	moderate_section = g_menu_new ();
-	g_menu_append (moderate_section, _("Kick"), "user.kick");
-	g_menu_append (moderate_section, _("Ban"),  "user.ban");
-	g_menu_append_section (model, NULL, G_MENU_MODEL (moderate_section));
-	g_object_unref (moderate_section);
+	/* Kick / Ban — only show when the account has DISCONNECT_USERS.
+	 * mhxd's struct hl_access_bits has a single bit (22) that gates
+	 * both kick and ban; servers that don't grant it reject the
+	 * commands at the wire level anyway, so hiding the menu entries
+	 * keeps users from clicking buttons that won't work. The whole
+	 * section is omitted (rather than disabled-but-visible) when the
+	 * bit is off — the section separator goes with it, so the popup
+	 * collapses cleanly. */
+	if (hl_access_has ((const guint8 *) &sess->htlc.access,
+	                   HL_ACCESS_DISCONNECT_USERS)) {
+		moderate_section = g_menu_new ();
+		g_menu_append (moderate_section, _("Kick"), "user.kick");
+		g_menu_append (moderate_section, _("Ban"),  "user.ban");
+		g_menu_append_section (model, NULL, G_MENU_MODEL (moderate_section));
+		g_object_unref (moderate_section);
+	}
 
 	/* Ignore / UnIgnore */
 	ignore_section = g_menu_new ();
