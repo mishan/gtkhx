@@ -805,6 +805,27 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 
 	(void) user_data;
 
+	/* Hook the bundled icon up to the icon theme so windows can
+	 * find it by name, then declare it as the default icon for
+	 * every window we open. The pixmap is aliased into the
+	 * gresource at /com/nasledov/gtkhx/icons/16x16/apps/
+	 * com.nasledov.gtkhx.xpm — i.e., the conventional
+	 * <prefix>/<size>/<context>/<name>.<ext> layout that
+	 * gtk_icon_theme_add_resource_path scans. The icon name itself
+	 * matches our GApplication app-id ("com.nasledov.gtkhx") so a
+	 * future .desktop file with Icon=com.nasledov.gtkhx and a
+	 * matching system-installed icon path will Just Work for
+	 * Wayland compositor / dock integration. */
+	{
+		GdkDisplay *display = gdk_display_get_default ();
+		if (display) {
+			GtkIconTheme *theme = gtk_icon_theme_get_for_display (display);
+			gtk_icon_theme_add_resource_path (theme,
+			    "/com/nasledov/gtkhx/icons");
+		}
+		gtk_window_set_default_icon_name ("com.nasledov.gtkhx");
+	}
+
 	/* fe_init() ran before g_application_run(), which means every
 	 * window the auto-open path created (chat / users / tasks / news,
 	 * plus the toolbar itself) already exists and has had show_all()

@@ -18,6 +18,13 @@
     <file>pixmaps/edituser.xpm</file>
     <file>pixmaps/files.xpm</file>
     <file>pixmaps/gtkhx.xpm</file>
+    <!-- App icon. Aliased so GtkIconTheme finds it under the
+         conventional <theme>/<size>/<context>/<name> layout once we
+         register /com/nasledov/gtkhx/icons as a resource icon path
+         (see gtkhx_activate). The icon-name "com.nasledov.gtkhx"
+         matches our GApplication app-id, which is what a future
+         .desktop file would set Icon= to. -->
+    <file alias="icons/16x16/apps/com.nasledov.gtkhx.xpm">pixmaps/gtkhx_icon.xpm</file>
     <file>pixmaps/ignore.xpm</file>
     <file>pixmaps/info.xpm</file>
     <file>pixmaps/kick.xpm</file>
