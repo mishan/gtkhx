@@ -8,7 +8,7 @@ extern struct htxf_conn **xfers;
 //extern size_t resource_len (const char *path);
 extern void xfer_go (struct htxf_conn *htxf);
 extern int xfer_go_timer (void *__arg);
-extern struct htxf_conn *xfer_new (const char *path, const char *remotepath, guint16 type, int preview);
+extern struct htxf_conn *xfer_new (const char *path, const char *remotepath, guint16 type, int preview, guint32 srv_data_size);
 extern void xfer_up (int num);
 extern int xfer_down (int num);
 extern int xfer_num (struct htxf_conn *htxf);

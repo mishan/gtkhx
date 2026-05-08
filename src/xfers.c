@@ -191,6 +191,8 @@ void xfer_go (struct htxf_conn *htxf)
 	char *rfile;
 	guint16 hldirlen;
 	guint8 *hldir;
+	guint8 rflt[74];
+	int resuming = 0;
 
 	if (htxf->gone)
 		return;
@@ -204,36 +206,71 @@ void xfer_go (struct htxf_conn *htxf)
 /*		hx_htlc.nr_puts++; */
 	}
 	if (htxf->type == XFER_GET) {
-		/* If a same-named file already exists in the download
-		 * directory, pick a unique alternative (file.txt →
-		 * file (1).txt → file (2).txt → ...) so we don't write
-		 * over the existing copy.
+		/* Resume vs rename decision for downloads (skipped for
+		 * previews, which don't write to disk):
 		 *
-		 * The CVS-era code instead asked the server to resume
-		 * from data_pos = local_file_size via an HTLC_DATA_RFLT
-		 * chunk on the FILE_GET request. With no UI to surface
-		 * "this is a partial-resume" to the user, the common case
-		 * (file already downloaded in full) silently sent a
-		 * resume-past-EOF request and the worker would block on
-		 * read() forever waiting for bytes the server had nothing
-		 * to send — the user just saw a hung progress bar.
+		 *   - local file doesn't exist     →  fresh download
+		 *   - local exists & local < srv   →  resume from local size
+		 *   - local exists & local == srv  →  rename (file's already
+		 *                                     fully downloaded —
+		 *                                     don't blow it away,
+		 *                                     don't ask the server
+		 *                                     to resume past EOF)
+		 *   - local exists & local > srv   →  rename (probably a
+		 *                                     different file with
+		 *                                     the same name)
+		 *   - local exists & srv unknown   →  rename (no listing
+		 *                                     captured at xfer_new
+		 *                                     time — safer to keep
+		 *                                     the existing copy)
 		 *
-		 * Skipped for previews — they don't write to disk and
-		 * always start from byte 0. */
-		if (!htxf->opt.preview)
-			uniquify_local_path (htxf->path, sizeof htxf->path);
+		 * srv_data_size comes from the file listing's fsize and
+		 * was captured at xfer_new. Treats only the data fork —
+		 * the listing doesn't expose resource fork sizes, so for
+		 * resumes we trust the worker's tot_len >= total_size
+		 * check in get_thread to terminate the resource fork loop
+		 * cleanly when the local rsrc fork is already complete. */
+		if (!htxf->opt.preview) {
+			struct stat sb;
+			if (stat (htxf->path, &sb) == 0) {
+				guint32 local_data = (guint32) sb.st_size;
+				if (htxf->srv_data_size > 0
+				    && local_data < htxf->srv_data_size) {
+					htxf->data_pos = local_data;
+					htxf->rsrc_pos = resource_len (htxf->path);
+					resuming = 1;
+				} else {
+					uniquify_local_path (htxf->path,
+					                     sizeof htxf->path);
+				}
+			}
+		}
+
+		if (resuming) {
+			memcpy (rflt, "\
+                          RFLT\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
+                          \0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\2\
+                          DATA\0\0\0\0\0\0\0\0\0\0\0\0\
+                          MACR\0\0\0\0\0\0\0\0\0\0\0\0", 74);
+			S32HTON (htxf->data_pos, &rflt[46]);
+			S32HTON (htxf->rsrc_pos, &rflt[62]);
+		}
 
 		rfile = dirchar_basename(htxf->remotepath);
 		task_new(&the_session.htlc, rcv_task_file_get, htxf, 0, "xfer_go");
 		if (rfile != htxf->remotepath) {
 			hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
-			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 2,
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0,
+					resuming ? 3 : 2,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
-					HTLC_DATA_DIR, hldirlen, hldir);
+					HTLC_DATA_DIR, hldirlen, hldir,
+					HTLC_DATA_RFLT, 74, rflt);
 			g_free(hldir);
 		} else {
-			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0, 1,
-					HTLC_DATA_FILE_NAME, strlen(rfile), rfile);
+			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0,
+					resuming ? 2 : 1,
+					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,
+					HTLC_DATA_RFLT, 74, rflt);
 		}
 	}
 	else {
@@ -265,7 +302,8 @@ int xfer_go_timer (void *__arg)
 }
 
 struct htxf_conn *xfer_new (const char *path, const char *remotepath,
-							guint16 type, int preview)
+							guint16 type, int preview,
+							guint32 srv_data_size)
 {
 	struct htxf_conn *htxf;
 
@@ -274,13 +312,14 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	strcpy(htxf->path, path);
 	htxf->type = type;
 	htxf->queue = -1;
-	/* opt.preview MUST be set before xfer_go runs below — xfer_go
-	 * gates the resume-offset protocol on !opt.preview. Setting it
-	 * via the returned htxf pointer after this function returns is
-	 * too late: when nxfers == 1 (or queueing is off) we call
-	 * xfer_go inline, and the wire request goes out before the
-	 * caller can flip opt.preview. */
+	/* opt.preview and srv_data_size MUST be set before xfer_go
+	 * runs below — xfer_go gates its resume / rename decision on
+	 * both. Setting these via the returned htxf pointer after this
+	 * function returns is too late: when nxfers == 1 (or queueing
+	 * is off) we call xfer_go inline, and the wire request goes
+	 * out before the caller could flip them. */
 	htxf->opt.preview = preview ? 1 : 0;
+	htxf->srv_data_size = srv_data_size;
 
 	xfers = g_realloc(xfers, (nxfers + 1) * sizeof(struct htxf_conn *));
 	xfers[nxfers] = htxf;

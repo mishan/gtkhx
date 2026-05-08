@@ -189,6 +189,7 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 	char rpath[4096], lpath[4096];
 	struct htxf_conn *htxf;
 	struct stat sb;
+	guint32 fsize;
 
 	snprintf(rpath, sizeof(rpath), "%s/%.*s", cfl->path, (int)fh->fnlen,
 			fh->fname);
@@ -204,8 +205,8 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 		}
 	}
 
-
-	htxf = xfer_new(lpath, rpath, XFER_GET, 0);
+	HN32(&fsize, &fh->fsize);
+	htxf = xfer_new(lpath, rpath, XFER_GET, 0, fsize);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
@@ -390,7 +391,11 @@ static void file_dl_btn (GtkWidget *widget, gpointer data)
 		return;
 	}
 
-	htxf = xfer_new(lpath, rpath, XFER_GET, 0);
+	{
+		guint32 fsize;
+		HN32(&fsize, &fh->fsize);
+		htxf = xfer_new(lpath, rpath, XFER_GET, 0, fsize);
+	}
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
@@ -416,10 +421,11 @@ static void file_pre_btn (GtkWidget *widget, gpointer data)
 	}
 
 	/* opt.preview is set inside xfer_new (before the inner xfer_go
-	 * call) so the resume-offset protocol is correctly disabled
+	 * call) so the resume / rename decision is correctly skipped
 	 * for previews. Setting it on the returned htxf here would be
-	 * too late. */
-	htxf = xfer_new(lpath, rpath, XFER_GET, 1);
+	 * too late. srv_data_size is irrelevant for previews — they
+	 * never resume — so 0 is fine. */
+	htxf = xfer_new(lpath, rpath, XFER_GET, 1, 0);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }
@@ -1481,7 +1487,9 @@ void hx_put_file(struct htlc_conn *htlc, char *lpath, char *rpath)
 {
 	struct htxf_conn *htxf;
 
-	htxf = xfer_new(lpath, rpath, XFER_PUT, 0);
+	/* Uploads don't use srv_data_size — that's a download-side
+	 * heuristic for resume vs rename. */
+	htxf = xfer_new(lpath, rpath, XFER_PUT, 0, 0);
 	htxf->filter_argv = 0;
 	htxf->opt.retry = 0;
 }

@@ -53,6 +53,13 @@ struct htlc_conn;
 struct htxf_conn {
 	guint32 data_size, data_pos, rsrc_size, rsrc_pos;
 	guint32 total_size, total_pos;
+	/* Server's data-fork size from the file listing, captured at
+	 * xfer_new time. Used by xfer_go to choose between resume
+	 * (local exists and is strictly smaller than server) and
+	 * rename-on-collision (local is the same size or larger, or
+	 * server size is unknown). 0 == unknown — listing wasn't
+	 * available for this transfer. */
+	guint32 srv_data_size;
 	guint32 ref;	/* xfer id */
 	guint8 gone;
 	guint8 type;
