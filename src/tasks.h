@@ -12,6 +12,9 @@ extern void create_tasks_window (GtkWidget *widget, gpointer data);
 extern void file_update (session *sess, struct htxf_conn *htxf);
 extern void task_delete (session *sess, struct task *tsk);
 extern void task_error (struct htlc_conn *htlc);
+/* Pure-protocol-parsing half of task_error, broken out into
+ * proto_helpers.c for the Tier 2 unit tests. */
+#include "proto_helpers.h"
 extern void conn_task_update(session *sess, int stat);
 extern struct task *task_new (struct htlc_conn *htlc, void (*rcv)(), void *ptr, void *data, const char *str);
 extern struct task *task_with_trans (session *sess, guint32 trans);

@@ -744,33 +744,34 @@ struct task *task_with_trans (session *sess, guint32 trans)
 	return 0;
 }
 
+/* task_error_extract lives in proto_helpers.c so the Tier 2 unit
+ * tests can drive it without a GTK build. The prototype is in
+ * tasks.h via #include "proto_helpers.h". */
+
 void task_error (struct htlc_conn *htlc)
 {
-	char errormsg[8192+1];
+	char errormsg[8192 + 1];
+	gsize len = 0;
 
-	dh_start(htlc) {
-		if (_type == HTLS_DATA_TASKERROR) {
-			strncpy(errormsg, dh->data, _len);
-			CR2LF(errormsg, _len);
-			strip_ansi(errormsg, _len);
-			errormsg[_len] = 0;
-			/* Phase 5: server task errors used to pop a modal
-			 * error_dialog. That's too heavy for the common case —
-			 * the server rejecting one of our auto-fired bootstrap
-			 * requests (news fetch on a no-news-permission account,
-			 * user list on a server that rate-limits, etc.) made
-			 * every login on certain servers (hlserver.com is the
-			 * known-bad example) yield a dialog the user has to
-			 * click through before they can do anything else.
-			 *
-			 * Toast instead: AdwToast slides in over the toolbar
-			 * window's overlay, auto-dismisses after a few
-			 * seconds, doesn't steal focus. The user still sees
-			 * the message; they're just not blocked by it. The
-			 * ERROR sound still fires so the alert isn't fully
-			 * silent. */
-			toolbar_show_toast (errormsg);
-			play_sound(ERROR);
-		}
-	} dh_end();
+	if (!task_error_extract (htlc, errormsg,
+	                         sizeof (errormsg), &len))
+		return;
+
+	(void) len;
+	/* Phase 5: server task errors used to pop a modal
+	 * error_dialog. That's too heavy for the common case —
+	 * the server rejecting one of our auto-fired bootstrap
+	 * requests (news fetch on a no-news-permission account,
+	 * user list on a server that rate-limits, etc.) made
+	 * every login on certain servers (hlserver.com is the
+	 * known-bad example) yield a dialog the user has to
+	 * click through before they can do anything else.
+	 *
+	 * Toast instead: AdwToast slides in over the toolbar
+	 * window's overlay, auto-dismisses after a few seconds,
+	 * doesn't steal focus. The user still sees the message;
+	 * they're just not blocked by it. The ERROR sound still
+	 * fires so the alert isn't fully silent. */
+	toolbar_show_toast (errormsg);
+	play_sound (ERROR);
 }

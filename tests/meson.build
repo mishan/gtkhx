@@ -138,3 +138,33 @@ test_prefs_parser = executable('test_prefs_parser',
 )
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
+
+# -----------------------------------------------------------------------------
+# Tier 2 — proto/
+#
+# Protocol-parser tests that drive a fake struct htlc_conn (with an
+# in.buf the wire_fixture builder packed by hand) through helpers
+# extracted from rcv.c / tasks.c into proto_helpers.c.
+# -----------------------------------------------------------------------------
+
+# Shared wire-fixture builder used by every Tier 2 test. Compile it
+# in via a static library so individual test binaries don't each
+# carry their own copy of the object code.
+proto_test_inc = include_directories('proto', '../src')
+
+wire_fixture_lib = static_library(
+  'wire_fixture',
+  'proto/wire_fixture.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+
+test_task_error = executable('test_task_error',
+  'proto/test_task_error.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('task_error', test_task_error,
+     suite : 'proto')
