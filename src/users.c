@@ -401,14 +401,15 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
 	gtk_widget_set_halign (popover, GTK_ALIGN_START);
 
-	/* Phase 5: floor the popover height comfortably above the no-kick
-	 * natural content size. The earlier 240 minimum was *just* under
-	 * the natural with-2-line-header height, which left GtkPopoverMenu
-	 * in a slightly-scrolling state — scroll mode swallows clicks, so
-	 * items become unselectable. 280 gives the no-kick layout enough
-	 * slack that nothing scrolls; the with-kick layout still gets to
-	 * grow past 280 if needed. */
-	gtk_widget_set_size_request (popover, -1, 280);
+	/* Phase 5: previously experimented with gtk_widget_set_size_request
+	 * on the popover to defeat a silent height clip — that broke
+	 * event routing into the menu items (hover wouldn't even
+	 * highlight). The popover itself sizes to its content correctly;
+	 * the original symptom was that the *toplevel window* didn't
+	 * have enough vertical room above + below the click point for
+	 * the natural content size. The clean fix is to make the Users
+	 * window default-size tall enough that the popover always fits
+	 * without GtkPopoverMenu's surface needing any size override. */
 
 	/* Hang the ctx off the popover so its lifetime matches the popover's
 	 * — when the popover is unparented the destroy notify frees it.
@@ -823,12 +824,13 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_window_set_title(GTK_WINDOW(users_window), _("Users"));
 	/* Phase 5: default-size, not size_request — set_size_request
 	 * sets both min AND natural in GTK 4, baking in a floor that
-	 * (a) wasn't intended and (b) made the right-click popover
-	 * clip its bottom items on the typical 400px-tall window.
-	 * 320 wide × 480 tall gives the popup full breathing room
-	 * (5 menu items + 1 info header + section gaps ≈ 280px) and
-	 * is still resizable down for narrow displays. */
-	gtk_window_set_default_size(GTK_WINDOW(users_window), 320, 480);
+	 * wasn't intended. 320 wide × 600 tall gives the right-click
+	 * popover ample room to render its full content (info header
+	 * + up to 7 menu items + section dividers ≈ 320 px) at any
+	 * click position in the user list, without needing to fight
+	 * GtkPopoverMenu's internal sizing. The window stays
+	 * resizable for narrow displays. */
+	gtk_window_set_default_size(GTK_WINDOW(users_window), 320, 600);
 	gtk_window_set_resizable(GTK_WINDOW(users_window), TRUE);
 	g_signal_connect(users_window, "close-request",
 			   G_CALLBACK(close_users_window), sess);
