@@ -87,6 +87,11 @@ proto_hdr_name (guint32 type)
 	case HTLC_HDR_ICON_GET:        return "HTLC_HDR_ICON_GET";
 	case HTLC_HDR_FILE_HASH:       return "HTLC_HDR_FILE_HASH";
 
+	/* Phase 5 mhxd additions; HTLC and HTLS PING share opcode 0x1f4. */
+	case HTLC_HDR_PING:            return "HTLC/S_HDR_PING";
+	case HTLC_HDR_AGREEMENTAGREE:  return "HTLC_HDR_AGREEMENTAGREE";
+	case HTLC_HDR_KILLDOWNLOAD:    return "HTLC_HDR_KILLDOWNLOAD";
+
 	/* Server → client */
 	case HTLS_HDR_NEWS_POST:       return "HTLS_HDR_NEWS_POST";
 	case HTLS_HDR_MSG:             return "HTLS_HDR_MSG";

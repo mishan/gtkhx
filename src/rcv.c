@@ -1136,6 +1136,10 @@ no_cipher:
 			setbtns(sess, 1);
 			set_status_bar(2);
 			connected = 1;
+			/* Phase 5: start the PING keepalive timer now that
+			 * we're past the login handshake. ping_stop() is
+			 * called from hx_htlc_close on the way down. */
+			ping_start (htlc);
 			
 			dh_start(htlc) {
 				switch (_type) {

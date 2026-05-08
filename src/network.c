@@ -92,6 +92,56 @@ fd_lock_write (int fd)
 	return fcntl(fd, F_SETLK, &lk);
 }
 
+/* Phase 5: PING keepalive. Some servers (hlserver.com is the known
+ * case) drop idle connections after a few minutes of silence. mhxd
+ * defines HTLC_HDR_PING / HTLS_HDR_PING for client-driven keepalive;
+ * we send an empty PING every PING_INTERVAL_SEC seconds while
+ * connected, and the server resets its idle timer on receipt. The
+ * server replies with HTLS_HDR_TASK flag=0 (no chunks) — we treat
+ * it like any other no-op task reply.
+ *
+ * Old (1.0/1.2) servers will respond with a task error to the
+ * unknown opcode, which task_error() now toasts (instead of modal-
+ * dialoging) — annoying but not fatal. If that proves to be a
+ * compat problem in the wild, we can gate sending on a
+ * server-supports-ping flag detected from version info, but for
+ * now sending unconditionally matches mhxd's hx client behaviour. */
+
+#define PING_INTERVAL_SEC 60
+
+static guint ping_timer_id = 0;
+
+static gboolean
+ping_tick (gpointer data)
+{
+	struct htlc_conn *htlc = data;
+
+	if (!htlc || !htlc->fd) {
+		ping_timer_id = 0;
+		return G_SOURCE_REMOVE;
+	}
+	hlwrite (htlc, HTLC_HDR_PING, 0, 0);
+	return G_SOURCE_CONTINUE;
+}
+
+void
+ping_start (struct htlc_conn *htlc)
+{
+	if (ping_timer_id || !htlc || !htlc->fd)
+		return;
+	ping_timer_id = g_timeout_add_seconds (PING_INTERVAL_SEC,
+	                                       ping_tick, htlc);
+}
+
+void
+ping_stop (void)
+{
+	if (ping_timer_id) {
+		g_source_remove (ping_timer_id);
+		ping_timer_id = 0;
+	}
+}
+
 void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
@@ -102,6 +152,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	char buf[HOSTLEN];
 
 	session *sess = &the_session;
+
+	ping_stop ();
 
 	if(conn_tid) {
 		pthread_cancel(conn_tid);
