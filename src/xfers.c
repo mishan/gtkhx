@@ -144,10 +144,20 @@ void xfer_go (struct htxf_conn *htxf)
 /*		hx_htlc.nr_puts++; */
 	}
 	if (htxf->type == XFER_GET) {
-		if (!stat(htxf->path, &sb))
-			data_size = sb.st_size;
-		rsrc_size = resource_len(htxf->path);
-		
+		/* Resume offset comes from the local file's existing size
+		 * — but ONLY for real downloads. Previews always start
+		 * from byte 0; if the local file is already as large as
+		 * (or larger than) the server's copy, asking the server
+		 * to resume from data_pos = local_size would have it send
+		 * zero bytes, leaving the worker blocked in read() forever
+		 * and the preview window stuck empty. Server eventually
+		 * times the connection out. */
+		if (!htxf->opt.preview) {
+			if (!stat(htxf->path, &sb))
+				data_size = sb.st_size;
+			rsrc_size = resource_len(htxf->path);
+		}
+
 		rfile = dirchar_basename(htxf->remotepath);
 		if (data_size || rsrc_size) {
 			memcpy(rflt, "\
