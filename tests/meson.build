@@ -112,3 +112,15 @@ test_hmac = executable('test_hmac',
 )
 test('hmac', test_hmac,
      suite : 'unit')
+
+# path_util — path_basename(path, sep). Pure GLib, no globals
+# (the dir_char-aware dirchar_basename in files.c is now a thin
+# wrapper around this). Compile path_util.c in directly.
+test_path_util = executable('test_path_util',
+  'unit/test_path_util.c',
+  '../src/path_util.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('path_util', test_path_util,
+     suite : 'unit')

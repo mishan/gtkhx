@@ -23,6 +23,7 @@ gtkhx_sources = files(
   'news.c',
   'news15.c',
   'options.c',
+  'path_util.c',
   'plugin.c',
   'preview.c',
   'proto_trace.c',

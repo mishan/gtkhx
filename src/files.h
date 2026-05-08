@@ -12,6 +12,10 @@ extern struct cached_filelist *cfl_lookup (const char *path);
 extern guint8 dir_char;
 
 extern  guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file);
+/* dirchar_basename is a thin wrapper around path_basename that uses
+ * the dir_char global. The unit-testable underlying function lives
+ * in path_util.h. */
+#include "path_util.h"
 extern char *dirchar_basename (char *path);
 extern inline void dirchar_fix (char *lpath);
 extern inline void dirmask (char *dst, char *src, char *mask);

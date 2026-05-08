@@ -1371,17 +1371,14 @@ guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
 	return hldir;
 }
 
+/* Phase 5: dirchar_basename is now a thin wrapper around the
+ * dir_char-free path_basename(path, sep) so the unit tests can
+ * exercise the underlying logic without linking files.c. The shape
+ * stays identical for callers; dir_char is still the global the
+ * Hotline-server-driven dirchar_change() rewrites. */
 char *dirchar_basename (char *path)
 {
-	size_t len;
-
-	len = strlen(path);
-	while (len--) {
-		if (path[len] == dir_char)
-			return path+len+1;
-	}
-
-	return path;
+	return path_basename (path, (char) dir_char);
 }
 
 inline void dirchar_fix (char *lpath)
