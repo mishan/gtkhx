@@ -31,6 +31,7 @@ Code Modernization:
 - Follow MVC architecture
 
 Code Cleanup:
+- Fix all warnings
 - Remove #define/#ifdef/#ifndef for things like USE_IPV6 and other things we should just consider a given these days
 
 Features:
