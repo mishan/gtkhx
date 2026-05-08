@@ -18,6 +18,14 @@ test_deps = [
   gtk_dep,
 ]
 
+# Tests that include protocol.h need cipher / compress headers via
+# nettle and zlib. Kept separate from test_deps so pure-GLib tests
+# (hl_access, text_util) don't pull in unnecessary link args.
+proto_test_deps = test_deps + [
+  nettle_dep,
+  zlib_dep,
+]
+
 test_inc = include_directories('../src')
 
 # -----------------------------------------------------------------------------
@@ -47,4 +55,16 @@ test_text_util = executable('test_text_util',
   include_directories : test_inc,
 )
 test('text_util', test_text_util,
+     suite : 'unit')
+
+# byte_swap — HN16 / HN32 macros from protocol.h. Header-only macros,
+# but protocol.h pulls in cipher.h / compress.h, so the test needs
+# nettle + zlib on its dep list. Worth it: these macros are the
+# load-bearing piece of every chunk parse in rcv.c.
+test_byte_swap = executable('test_byte_swap',
+  'unit/test_byte_swap.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('byte_swap', test_byte_swap,
      suite : 'unit')
