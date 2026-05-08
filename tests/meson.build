@@ -168,3 +168,18 @@ test_task_error = executable('test_task_error',
 )
 test('task_error', test_task_error,
      suite : 'proto')
+
+# selfinfo — hx_selfinfo_parse extracts the access bitmap, UID, icon,
+# and display name from a HTLS_HDR_USER_SELFINFO payload. The Phase
+# 5 post-login state machine fires off USER_GETLIST + news on this
+# message, so getting the parse wrong means downstream gating
+# (READ_NEWS, DISCONNECT_USERS) compares against the wrong values.
+test_selfinfo = executable('test_selfinfo',
+  'proto/test_selfinfo.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('selfinfo', test_selfinfo,
+     suite : 'proto')

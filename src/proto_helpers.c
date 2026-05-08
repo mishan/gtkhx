@@ -52,3 +52,37 @@ task_error_extract (struct htlc_conn *htlc, char *out,
 
 	return found;
 }
+
+unsigned
+hx_selfinfo_parse (struct htlc_conn *htlc)
+{
+	struct hl_userlist_hdr *uh;
+	guint16 nlen;
+	unsigned seen = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_ACCESS:
+			if (_len != 8)
+				break;
+			memcpy (&htlc->access, dh->data, 8);
+			seen |= HX_SELFINFO_ACCESS;
+			break;
+		case HTLS_DATA_USER_LIST:
+			if (_len < (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR))
+				break;
+			uh = (struct hl_userlist_hdr *) dh;
+			HN16 (&htlc->uid,  &htlc->uid);
+			HN16 (&htlc->icon, &uh->icon);
+			HN16 (&uh->color,  &uh->color);
+			HN16 (&nlen,       &uh->nlen);
+			nlen = (nlen > 31) ? 31 : nlen;
+			memcpy (htlc->name, uh->name, nlen);
+			htlc->name[nlen] = 0;
+			seen |= HX_SELFINFO_USER_LIST;
+			break;
+		}
+	} dh_end ();
+
+	return seen;
+}

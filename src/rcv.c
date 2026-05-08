@@ -539,30 +539,10 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 
 void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 {
-	struct hl_userlist_hdr *uh;
-	guint16 nlen;
-
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_ACCESS:
-			if (_len != 8)
-				break;
-			memcpy(&htlc->access, dh->data, 8);
-			break;
-		case HTLS_DATA_USER_LIST:
-			if (_len < (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR))
-				break;
-			uh = (struct hl_userlist_hdr *)dh;
-			HN16(&htlc->uid, &htlc->uid);
-			HN16(&htlc->icon, &uh->icon);
-			HN16(&uh->color, &uh->color);
-			HN16(&nlen, &uh->nlen);
-			nlen = (nlen > 31) ? 31 : nlen;
-			memcpy(htlc->name, uh->name, nlen);
-			htlc->name[nlen] = 0;
-			break;
-		}
-	} dh_end();
+	/* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
+	 * into htlc->access / uid / icon / name) is in proto_helpers.c
+	 * so the Tier 2 unit tests can drive it without GTK. */
+	hx_selfinfo_parse (htlc);
 
 	setbtns(&the_session, 1);
 
