@@ -213,6 +213,11 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	msg->history = history_new();
 
 	msg->window = gtk_window_new();
+	/* Phase 5: AdwHeaderBar across all GtkHx secondary windows for
+	 * consistent chrome with the toolbar / chat / news / files /
+	 * preview / agreement windows. The msg window had been left as
+	 * a bare GtkWindow with the system default titlebar. */
+	gtk_window_set_titlebar (GTK_WINDOW (msg->window), adw_header_bar_new ());
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
 		msg->outputbuf = gtk_xtext_new (colors, 0);

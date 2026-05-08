@@ -824,8 +824,14 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	item = gcnews_selected_item(gcnews);
 
 	window = gtk_window_new();
-	gtk_widget_set_size_request(window, 320, 250);
-	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
+	/* Phase 5: AdwHeaderBar + default-size for the Reply variant of
+	 * Post News (1.5+). The legacy gtk_widget_set_size_request was
+	 * baking 320x250 in as a hard floor — switched to
+	 * gtk_window_set_default_size so the user can shrink the window
+	 * if their screen is narrow. */
+	gtk_window_set_titlebar (GTK_WINDOW (window), adw_header_bar_new ());
+	gtk_window_set_default_size (GTK_WINDOW (window), 420, 320);
+	gtk_window_set_title(GTK_WINDOW(window), _("Reply to News Post"));
     (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
 
 	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -882,6 +888,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	post = gtk_button_new_with_label(_("Post"));
+	gtk_widget_add_css_class (post, "suggested-action");
 	g_object_set_data(G_OBJECT(post), "text", text);
 	g_object_set_data(G_OBJECT(post), "reply", inreplyto);
 	g_object_set_data(G_OBJECT(post), "subject", subject);
@@ -889,11 +896,15 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	g_signal_connect(post, "clicked", G_CALLBACK(news15_do_reply), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
+	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post),
 					   window);
 
-	gtkhx_box_pack(hbox, post, 0, 0, 0);
+	/* Phase 5: right-align the button row so Post sits where Enter
+	 * lives (HIG-conventional), with Cancel to its left. */
+	gtk_widget_set_halign (hbox, GTK_ALIGN_END);
+	gtk_box_set_spacing  (GTK_BOX (hbox), 8);
 	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
+	gtkhx_box_pack(hbox, post, 0, 0, 0);
 
 	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 
@@ -937,7 +948,10 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *table;
 
 	window = gtk_window_new();
-	gtk_widget_set_size_request(window, 320, 250);
+	/* Phase 5: AdwHeaderBar + default-size; same treatment as the
+	 * Reply variant above. */
+	gtk_window_set_titlebar (GTK_WINDOW (window), adw_header_bar_new ());
+	gtk_window_set_default_size (GTK_WINDOW (window), 420, 320);
 	gtk_window_set_title(GTK_WINDOW(window), _("Post News (1.5+)"));
     (gtk_widget_set_margin_start(window, 5), gtk_widget_set_margin_end(window, 5), gtk_widget_set_margin_top(window, 5), gtk_widget_set_margin_bottom(window, 5));
 
@@ -972,17 +986,20 @@ void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
 	post = gtk_button_new_with_label(_("Post"));
+	gtk_widget_add_css_class (post, "suggested-action");
 	g_object_set_data(G_OBJECT(post), "text", text);
 	g_object_set_data(G_OBJECT(post), "subject", subject);
 	g_object_set_data(G_OBJECT(post), "window", window);
 	g_signal_connect(post, "clicked", G_CALLBACK(news15_do_post), gcnews);
 
 	cancel = gtk_button_new_with_label(_("Cancel"));
-	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post), 
+	g_signal_connect(cancel, "clicked", G_CALLBACK(news15_cancel_post),
 					   window);
 
-	gtkhx_box_pack(hbox, post, 0, 0, 0);
+	gtk_widget_set_halign (hbox, GTK_ALIGN_END);
+	gtk_box_set_spacing  (GTK_BOX (hbox), 8);
 	gtkhx_box_pack(hbox, cancel, 0, 0, 0);
+	gtkhx_box_pack(hbox, post, 0, 0, 0);
 
 	gtkhx_box_pack(vbox, hbox, 0, 0, 0);
 
