@@ -18,13 +18,25 @@
     <file>pixmaps/edituser.xpm</file>
     <file>pixmaps/files.xpm</file>
     <file>pixmaps/gtkhx.xpm</file>
-    <!-- App icon. Aliased so GtkIconTheme finds it under the
+    <!-- App icon. Aliased so GtkIconTheme finds them under the
          conventional <theme>/<size>/<context>/<name> layout once we
          register /com/nasledov/gtkhx/icons as a resource icon path
          (see gtkhx_activate). The icon-name "com.nasledov.gtkhx"
-         matches our GApplication app-id, which is what a future
-         .desktop file would set Icon= to. -->
-    <file alias="icons/16x16/apps/com.nasledov.gtkhx.xpm">pixmaps/gtkhx_icon.xpm</file>
+         matches our GApplication app-id, which is what the .desktop
+         file's Icon= line is set to.
+         Multiple sizes so the icon theme can pick the best match
+         for whatever pixel size the requester needs (16 for menus,
+         48-64 for taskbars, 128+ for the activities overview). The
+         16-pixel source XPM is upscaled with nearest-neighbor to
+         keep the pixel art crisp at large sizes; if a hand-drawn
+         scalable SVG ever lands, it can join this list and the
+         icon theme will prefer it. -->
+    <file alias="icons/16x16/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_16.png</file>
+    <file alias="icons/32x32/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_32.png</file>
+    <file alias="icons/48x48/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_48.png</file>
+    <file alias="icons/64x64/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_64.png</file>
+    <file alias="icons/128x128/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_128.png</file>
+    <file alias="icons/256x256/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_256.png</file>
     <file>pixmaps/ignore.xpm</file>
     <file>pixmaps/info.xpm</file>
     <file>pixmaps/kick.xpm</file>

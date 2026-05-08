@@ -158,11 +158,21 @@ install_data(
   install_dir : get_option('datadir') / 'applications',
 )
 
-install_data(
-  files('src/pixmaps/gtkhx_icon.xpm'),
-  install_dir : get_option('datadir') / 'icons' / 'hicolor' / '16x16' / 'apps',
-  rename : 'com.nasledov.gtkhx.xpm',
-)
+# Install the app icon at every size we have a PNG for. PNG (not
+# XPM) because most modern Wayland docks / GNOME Shell only honor
+# PNG and SVG even though the hicolor spec technically allows XPM.
+# rename: keeps the in-tree filenames decoupled from the install
+# names — the install side has to be com.nasledov.gtkhx.png to match
+# the .desktop file's Icon= field. Sizes 16-256 cover menus through
+# the GNOME activities overview; the dock picks the closest match.
+foreach sz : ['16', '32', '48', '64', '128', '256']
+  install_data(
+    files('src/pixmaps/gtkhx_icon_' + sz + '.png'),
+    install_dir : get_option('datadir') / 'icons' / 'hicolor'
+                  / (sz + 'x' + sz) / 'apps',
+    rename : 'com.nasledov.gtkhx.png',
+  )
+endforeach
 
 # Validate the .desktop file at test time if the freedesktop validator
 # is available (it ships with the desktop-file-utils package on most
