@@ -6,11 +6,12 @@
 - Totally revamped Settings window
 - XDG-compliant config (~/.hx/ -> ~/.config/gtkhx/ and ~/.gtkhxrc -> ~/.config/gtkhx/gtkhxrc)
 - Use libgsound / libcanberra instead of executing binary to play sounds
-- Converted AIFF sounds to WAV
+- Converted AIFF sounds to WAV for better GSound compatibility
 - Do not attempt to fetch News/Agreement if the user does not have permission
 - Prevent/block user actions that the server does not allow
 - Support newer HL protocol commands like PING
 - Scrapped Plugin support for now
+- Debug logging support with HL protocol tracing
 
 0.9.4
 -----
