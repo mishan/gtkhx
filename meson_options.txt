@@ -1,0 +1,9 @@
+# Build-time options for GtkHx.
+#
+# Set on the meson configure line:
+#   meson configure build -Dtests=false
+
+option('tests',
+  type        : 'boolean',
+  value       : true,
+  description : 'Build the unit test suite. See tests/PROPOSAL.md.')

@@ -211,3 +211,18 @@ summary(
   },
   section : 'Dependencies',
 )
+
+# -----------------------------------------------------------------------------
+# Test suite. See tests/PROPOSAL.md for the overall plan.
+# Default-on; pass -Dtests=false to skip.
+# -----------------------------------------------------------------------------
+if get_option('tests')
+  subdir('tests')
+endif
+
+summary(
+  {
+    'Tests'      : get_option('tests'),
+  },
+  section : 'Build',
+)
