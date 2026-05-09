@@ -17,9 +17,10 @@
  */
 
 
-#warning XXX: Logging code unfinished
-#if 0 /* XXX: this code isn't done and I don't have the time to work on it,
-		 this is so the client doesn't log in its unfinished state in 0.9.4 */
+/* This whole file is gated off behind #if 0 — the chat-logging code
+ * was never finished. The follow-up is tracked in TODO; revisit when
+ * we wire log writing into chat.c / news.c / msg.c output paths. */
+#if 0
 
 #include "config.h"
 

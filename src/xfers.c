@@ -215,7 +215,13 @@ uniquify_local_path (char *path, size_t cap)
 	}
 
 	for (n = 1; n < 10000; n++) {
-		snprintf (path, cap, "%s (%d)%s", prefix, n, suffix);
+		/* The precision specifiers cap each component at slightly under
+		 * half of MAXPATHLEN so GCC can prove the format fits in path's
+		 * cap bytes. snprintf would truncate safely either way; the
+		 * specifiers exist only to satisfy the static analysis. */
+		snprintf (path, cap, "%.*s (%d)%.*s",
+		          MAXPATHLEN / 2 - 16, prefix, n,
+		          MAXPATHLEN / 2 - 16, suffix);
 		if (!local_path_exists (path))
 			return;
 	}

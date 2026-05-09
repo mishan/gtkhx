@@ -204,7 +204,7 @@ macres_file_open (int fd)
 void
 macres_file_delete (macres_file *mrf)
 {
-	int i;
+	guint32 i;
 	munmap (mrf->base, mrf->len);
 
 

@@ -282,7 +282,7 @@ struct gnews_folder *gfnews_with_hlist (GtkWidget *hlist)
 
 static void delete_gfnews(struct gnews_folder *gfnews)
 {
-	int i;
+	guint32 i;
 	
 	if (gfnews->next)
 		gfnews->next->prev = gfnews->prev;
@@ -627,7 +627,8 @@ void output_news_folder (struct gnews_folder *gfnews)
 {
 	struct news_folder *news = gfnews->news;
 	GtkWidget *news_list;
-	gint row, i;
+	gint row;
+	guint32 i;
 	GdkPixmap *icon;
 	GdkBitmap *mask = NULL;
 	struct path_hist *path = NULL;

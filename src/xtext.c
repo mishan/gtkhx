@@ -59,6 +59,7 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 
 #define GDK_MULTIHEAD_SAFE
 #define MARGIN 2						/* dont touch. */

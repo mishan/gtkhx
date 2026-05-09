@@ -495,7 +495,8 @@ COMMAND(clear)
 
 struct hx_command {
 	char *name;
-	void (*fun)();
+	void (*fun)(int argc, char **argv, char *str,
+	            struct htlc_conn *htlc, guint32 cid);
 };
 
 static struct hx_command *commands, *last_command;

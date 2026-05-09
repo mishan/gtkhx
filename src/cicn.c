@@ -222,12 +222,16 @@ static const RGBColor rgb_1[2] = {
 
 /* RGBColor stores each channel in the legacy 16-bit-per-channel form
  * (high byte = the actual 8-bit value).  Pack to 8-bit RGB. */
+/* Take RGBColor by value — the alternative was '&ct->ctTable[i].rgb'
+ * inside a packed struct, which trips -Waddress-of-packed-member
+ * because the resulting pointer might not satisfy RGBColor's natural
+ * alignment. RGBColor is only 6 bytes so the by-value copy is cheap. */
 static inline guint32
-rgb_pack (const RGBColor *c)
+rgb_pack (RGBColor c)
 {
-	return ((guint32)(c->red   >> 8) << 16)
-	     | ((guint32)(c->green >> 8) <<  8)
-	     | ((guint32)(c->blue  >> 8) <<  0);
+	return ((guint32)(c.red   >> 8) << 16)
+	     | ((guint32)(c.green >> 8) <<  8)
+	     | ((guint32)(c.blue  >> 8) <<  0);
 }
 
 /* Defined further down — declared here so cicn_to_pixbuf can wrap its
@@ -256,12 +260,12 @@ build_palette (guint32 *out, unsigned int bpp, ColorTable *ct)
 	}
 
 	for (i = 0; i < n; i++)
-		out[i] = rgb_pack (&defpal[i]);
+		out[i] = rgb_pack (defpal[i]);
 
 	ctsize = ntohs (ct->ctSize) + 1;
 	for (i = 0; i < ctsize; i++) {
 		unsigned int v = ntohs (ct->ctTable[i].value) & (n - 1);
-		out[v] = rgb_pack (&ct->ctTable[i].rgb);
+		out[v] = rgb_pack (ct->ctTable[i].rgb);
 	}
 }
 

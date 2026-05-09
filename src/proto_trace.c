@@ -200,7 +200,7 @@ data_preview (const guint8 *data, guint16 len)
 	printable = TRUE;
 	for (i = 0; i < show; i++) {
 		guint8 c = data[i];
-		if (c == 0 && i == show - 1 && i == len - 1)
+		if (c == 0 && i == show - 1 && i == (gsize) (len - 1))
 			continue; /* trailing NUL is fine */
 		if (!isprint (c) && c != '\t' && c != '\n' && c != '\r') {
 			printable = FALSE;

@@ -194,8 +194,8 @@ void hx_change_subject(struct htlc_conn *htlc, guint32 cid, char *subject)
 int word_check (GtkWidget * xtext, char *word)
 {
 	char *at, *dot;
-	int i, dots;
-	size_t len = strlen (word);
+	size_t i, len = strlen (word);
+	int dots;
 
 	if (!strncasecmp (word, "irc://", 6))
 		return WORD_URL;
@@ -243,7 +243,7 @@ int word_check (GtkWidget * xtext, char *word)
 	}
 	if (dots == 3)
 	{
-		if (inet_addr (word) != -1)
+		if (inet_addr (word) != INADDR_NONE)
 			return WORD_HOST;
 	}
 
@@ -772,7 +772,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 			}
 
 
-			if (match_pos == -1)
+			if (match_pos == (size_t) -1)
 				break;
 
 

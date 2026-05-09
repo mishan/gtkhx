@@ -298,7 +298,7 @@ void conn_task_update(session *sess, int stat)
 		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), 
 								(gfloat)pos / (gfloat)(pos + len));
 
-	if (stat == len)
+	if ((guint32) stat == len)
 		gtask_delete(sess, gtsk);
 }
 
@@ -373,17 +373,17 @@ task_stop (GtkWidget *widget, gpointer data)
 			xfer_delete(gtsk->htxf);
 			gtask_delete(sess, gtsk);
 		}
-		else if(gtsk->trans == -127) {
+		else if(gtsk->trans == (guint32) -127) {
 			tracker_kill_threads();
 			gtask_delete(sess, gtsk);
 		}
-		else if(gtsk->trans == -128) {
+		else if(gtsk->trans == (guint32) -128) {
 			disconnect_clicked();
 			/* disconnect_clicked updates connection task, so it should already
 			   handle deleting the task */
 /*			gtask_delete(sess, gtsk); */
 		}
-		else if(gtsk->trans == -129) {
+		else if(gtsk->trans == (guint32) -129) {
 			tracker_kill_threads();
 			gtask_delete(sess, gtsk);
 		}
@@ -631,11 +631,10 @@ void file_update (session *sess, struct htxf_conn *htxf)
 	GtkWidget *pbar;
 	GtkWidget *label;
 	struct gtask *gtsk;
-	char str[4096];
 	char humanbuf[LONGEST_HUMAN_READABLE+1], *posstr, *sizestr, *bpsstr;
 	guint32 pos, size;
 	struct timeval now;
-	time_t sdiff, usdiff, Bps, eta;
+	time_t sdiff, Bps, eta;
 	int hrs, mins, secs;
 
 	gtsk = gtask_with_htxf(sess, htxf);
@@ -649,7 +648,6 @@ void file_update (session *sess, struct htxf_conn *htxf)
 
 	gettimeofday(&now, 0);
 	sdiff = now.tv_sec - htxf->start.tv_sec;
-	usdiff = now.tv_usec - htxf->start.tv_usec;
 	if (!sdiff)
 		sdiff = 1;
 	Bps = pos / sdiff;
@@ -671,10 +669,18 @@ void file_update (session *sess, struct htxf_conn *htxf)
 	memset(&humanbuf, 0, sizeof(humanbuf));
 	bpsstr = g_strdup(human_size(humanbuf, Bps));
 
-	snprintf(str, sizeof(str), _("%s  %s/%s  %s/s  ETA: %d:%02d:%02d  %s"),
-		 htxf->type == XFER_GET ? "get" : "put",
-		 posstr, sizestr, bpsstr, hrs, mins, secs, htxf->path);
-	gtk_label_set_text(GTK_LABEL(label), str);
+	{
+		/* htxf->path is up to MAXPATHLEN (4096) bytes — if we held the
+		 * format result in a fixed-size local snprintf walks GCC's
+		 * worst-case length analysis right into a -Wformat-truncation
+		 * warning. Use g_strdup_printf and let GLib size the buffer. */
+		char *line = g_strdup_printf (
+			_("%s  %s/%s  %s/s  ETA: %d:%02d:%02d  %s"),
+			htxf->type == XFER_GET ? "get" : "put",
+			posstr, sizestr, bpsstr, hrs, mins, secs, htxf->path);
+		gtk_label_set_text (GTK_LABEL (label), line);
+		g_free (line);
+	}
 
 	if(((gfloat)pos/size) <= 1) {
 		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(pbar), (gfloat)pos/size);

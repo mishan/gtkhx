@@ -149,7 +149,7 @@ static void tracker_sighandler (int signum)
 	pthread_exit(0);
 }
 
-static void tracker_getlist_thread(void *data)
+static void *tracker_getlist_thread(void *data)
 {
 	int i;
 	session *sess = data;
@@ -164,6 +164,7 @@ static void tracker_getlist_thread(void *data)
 	for(i = 0; i < gtkhx_prefs.num_tracker; i++) {
 		hx_tracker_list(sess, gtkhx_prefs.tracker[i], HTRK_TCPPORT);
 	}
+	return NULL;
 }
 
 static void
@@ -194,7 +195,7 @@ tracker_getlist (GtkWidget *widget, gpointer data)
 	gtk_label_set_text(GTK_LABEL(lbl_found), "  0");
 	gtk_label_set_text(GTK_LABEL(lbl_total), " / 0");
 
-	pthread_create(&track_tid, &attr, (void*(*)(void*))tracker_getlist_thread, sess);
+	pthread_create(&track_tid, &attr, tracker_getlist_thread, sess);
 }
 
 
@@ -259,7 +260,7 @@ static void tracker_search  (GtkWidget *widget, gpointer data)
 
 	num_found = 0;
 	str = gtk_editable_get_text(GTK_EDITABLE(widget));
-	dfacomp(str, strlen(str), current_search, 1);
+	dfacomp((char *) str, strlen(str), current_search, 1);
 	tracker_clear();
 	gtk_hlist_freeze(GTK_HLIST(tracker_list));
 

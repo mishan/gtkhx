@@ -141,7 +141,7 @@ static void list_icons (void)
 	guint16 nres;
 	guint32 icon;
 	unsigned int nfound = 0;
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < icon_files.n; ++i) {
 		if (!icon_files.cicns[i])

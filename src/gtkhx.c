@@ -1302,7 +1302,7 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
 
 static void get_password(char *buf)
 {
-	int i;
+	size_t i;
 	struct termios termio;
 	struct termios tmp;
 

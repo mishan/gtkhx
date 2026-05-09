@@ -315,8 +315,8 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
 
 	port[0] = '\0';
 	if ((p = strrchr (server, ':'))) {
-		int i;
-		for (i = 0; i < strlen (server); i++) {
+		size_t i, slen = strlen (server);
+		for (i = 0; i < slen; i++) {
 			if (&(server[i]) == p) {
 				server[i] = 0;
 				break;
@@ -762,7 +762,7 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response, gpointer d
 	size_t len, len_total;
 	char zeros[256];
 	char *editable_name;
-	int i;
+	size_t i;
 
 	(void) data;
 
