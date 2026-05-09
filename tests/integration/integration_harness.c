@@ -21,9 +21,12 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <stdarg.h>
 #include <glib.h>
 #include "compat.h"      /* PACKED — required before hotline.h */
 #include "hotline.h"
+#include "protocol.h"
+#include "proto_helpers.h"
 #include "integration_harness.h"
 
 static const char *
@@ -181,6 +184,140 @@ integration_close (int fd)
 {
 	if (fd >= 0)
 		close (fd);
+}
+
+/* ---- High-level message helpers --------------------------------- */
+
+gboolean
+integration_send_message (int fd, struct htlc_conn *htlc,
+                          guint32 type, guint32 flag, int hc, ...)
+{
+	/* Reset the out buffer so successive sends each pack into a
+	 * fresh buffer (otherwise hlpack appends, which would confuse
+	 * our 'now write that out' step below). */
+	g_free (htlc->out.buf);
+	htlc->out.buf = NULL;
+	htlc->out.pos = 0;
+	htlc->out.len = 0;
+
+	va_list ap;
+	va_start (ap, hc);
+	hlpack (htlc, type, flag, hc, ap);
+	va_end (ap);
+
+	gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+
+	g_free (htlc->out.buf);
+	htlc->out.buf = NULL;
+	htlc->out.pos = 0;
+	htlc->out.len = 0;
+	return ok;
+}
+
+gboolean
+integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
+{
+	/* Reset in buffer. */
+	g_free (htlc->in.buf);
+	htlc->in.buf = NULL;
+	htlc->in.pos = 0;
+	htlc->in.len = 0;
+
+	/* Wait for the first header byte to be available. */
+	fd_set rfds;
+	FD_ZERO (&rfds);
+	FD_SET (fd, &rfds);
+	struct timeval tv = {
+		.tv_sec  = timeout_ms / 1000,
+		.tv_usec = (timeout_ms % 1000) * 1000,
+	};
+	int sr = select (fd + 1, &rfds, NULL, NULL, &tv);
+	if (sr <= 0)
+		return FALSE;
+
+	/* Read the 22-byte hl_hdr first to learn the message length. */
+	guint8 hdr_bytes[SIZEOF_HL_HDR];
+	if (!integration_recv (fd, hdr_bytes, SIZEOF_HL_HDR))
+		return FALSE;
+
+	const struct hl_hdr *h = (const struct hl_hdr *) hdr_bytes;
+	guint32 wire_len = ntohl (h->len);
+	guint16 hc       = ntohs (h->hc);
+
+	/* h->len is "data section bytes minus (SIZEOF_HL_HDR -
+	 * sizeof(hc))"; back it out to the body byte count.
+	 *
+	 * Cap at 1 MiB — same MAX_HOTLINE_PACKET_LEN that network.c
+	 * enforces — to avoid accidental DoS against the harness when
+	 * pointed at a misbehaving server. */
+	if (wire_len > MAX_HOTLINE_PACKET_LEN)
+		return FALSE;
+
+	guint32 body_len = 0;
+	if (wire_len + (SIZEOF_HL_HDR - sizeof (h->hc)) >= SIZEOF_HL_HDR) {
+		body_len = wire_len + (SIZEOF_HL_HDR - sizeof (h->hc))
+		           - SIZEOF_HL_HDR;
+	}
+	(void) hc;  /* hc is read by dh_start via the header bytes. */
+
+	/* Allocate the full message buffer, copy the header in, read
+	 * the rest. */
+	gsize total = SIZEOF_HL_HDR + body_len;
+	htlc->in.buf = g_malloc (total);
+	memcpy (htlc->in.buf, hdr_bytes, SIZEOF_HL_HDR);
+	if (body_len > 0) {
+		if (!integration_recv (fd, htlc->in.buf + SIZEOF_HL_HDR,
+		                       body_len)) {
+			g_free (htlc->in.buf);
+			htlc->in.buf = NULL;
+			return FALSE;
+		}
+	}
+	htlc->in.pos = total;
+	htlc->in.len = total;
+	return TRUE;
+}
+
+void
+integration_release_htlc (struct htlc_conn *htlc)
+{
+	g_free (htlc->in.buf);
+	g_free (htlc->out.buf);
+	htlc->in.buf = NULL;
+	htlc->out.buf = NULL;
+}
+
+/* hl_code is an XOR-with-0xff cipher used by Hotline for the
+ * obfuscated login / password fields. Inline copy here so the
+ * harness doesn't have to link network.c. */
+static void
+hl_code_inline (void *dst, const void *src, gsize len)
+{
+	const guint8 *s = src;
+	guint8 *d = dst;
+	for (gsize i = 0; i < len; i++)
+		d[i] = ~s[i];
+}
+
+gboolean
+integration_login_guest (int fd, struct htlc_conn *htlc,
+                         const char *display_name, guint16 icon)
+{
+	const char *login = "guest";
+	gsize llen = strlen (login);
+	guint8 enclogin[64];
+	g_assert_cmpuint (llen, <=, sizeof (enclogin));
+	hl_code_inline (enclogin, login, llen);
+
+	guint16 icon_be = htons (icon);
+	gsize nlen = strlen (display_name);
+
+	return integration_send_message (
+		fd, htlc,
+		HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/3,
+		(int) HTLC_DATA_ICON,  (int) sizeof (icon_be), &icon_be,
+		(int) HTLC_DATA_LOGIN, (int) llen, enclogin,
+		(int) HTLC_DATA_NAME,  (int) nlen, (guint8 *) display_name);
 }
 
 int

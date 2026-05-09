@@ -329,11 +329,14 @@ test('news_file', test_news_file,
 integration_test_inc = include_directories('integration', '../src')
 
 # Shared harness lib — opens the socket, runs the magic handshake,
-# provides blocking send / recv primitives. Future integration tests
-# will link this and layer login / chat / file-list flows on top.
+# provides blocking send / recv primitives, and (via proto_helpers
+# bundled in) packs / parses Hotline messages on top of the wire.
+# Tests link this lib and layer login / chat / file-list flows on
+# top.
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
+  '../src/proto_helpers.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )
@@ -345,5 +348,19 @@ test_integration_handshake = executable('test_integration_handshake',
   link_with           : integration_harness_lib,
 )
 test('handshake', test_integration_handshake,
+     suite   : 'integration',
+     timeout : 30)
+
+# login — guest login + post-login state-machine round-trip. Sends
+# HTLC_HDR_LOGIN, drains pre-SELFINFO chatter, verifies SELFINFO
+# parses cleanly and our display name round-trips. Negative case
+# checks a malformed login doesn't yield SELFINFO.
+test_integration_login = executable('test_integration_login',
+  'integration/test_login.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('login', test_integration_login,
      suite   : 'integration',
      timeout : 30)

@@ -85,4 +85,64 @@ extern void integration_close (int fd);
  */
 extern int integration_open_or_skip (void);
 
+/* ---- Higher-level helpers built on send / recv ----------------- */
+
+struct htlc_conn;
+
+/*
+ * Pack and send a Hotline message via the production hlpack helper.
+ * Variadic args follow the same shape as hlwrite():
+ *
+ *   integration_send_message (fd, htlc, type, flag, hc,
+ *                             type1, len1, data1,
+ *                             type2, len2, data2, ...);
+ *
+ * `htlc` is used purely as scratch space — its in.buf may be nuked
+ * by integration_recv_message. The caller owns lifetime; pass a
+ * memset-zero'd struct htlc_conn on the stack and free its in/out
+ * bufs at end of test via integration_release_htlc.
+ *
+ * Returns TRUE on full send.
+ */
+extern gboolean integration_send_message (int fd, struct htlc_conn *htlc,
+                                          guint32 type, guint32 flag,
+                                          int hc, ...);
+
+/*
+ * Read one full Hotline message into htlc->in (overwriting any
+ * previous contents). The caller can then walk the chunks via
+ * dh_start, drive proto_helpers extractors, etc.
+ *
+ * Times out after `timeout_ms` if no header arrives. Returns TRUE
+ * on a clean read; FALSE on timeout, short read, or oversized
+ * payload (> 1 MiB, which is the same cap network.c enforces).
+ */
+extern gboolean integration_recv_message (int fd, struct htlc_conn *htlc,
+                                          int timeout_ms);
+
+/*
+ * Free any g_malloc'd qbuf memory inside htlc->in / htlc->out.
+ * Safe to call on a memset-zero htlc.
+ */
+extern void integration_release_htlc (struct htlc_conn *htlc);
+
+/*
+ * Send a guest login (no password). This is the canonical "any
+ * server should accept this" handshake — mhxd's default config
+ * exposes a `guest` account with no password and basic permissions
+ * (chat, file download, etc.).
+ *
+ * Sends HTLC_HDR_LOGIN with three chunks:
+ *   HTLC_DATA_ICON   = `icon` big-endian
+ *   HTLC_DATA_LOGIN  = hl_code-encoded "guest"
+ *   HTLC_DATA_NAME   = `display_name` (utf8 bytes, unencoded)
+ *
+ * Servers that don't have a guest account will respond with a
+ * task-error; the test should consume the next message and
+ * inspect the flag bit.
+ */
+extern gboolean integration_login_guest (int fd, struct htlc_conn *htlc,
+                                         const char *display_name,
+                                         guint16 icon);
+
 #endif /* HX_INTEGRATION_HARNESS_H */
