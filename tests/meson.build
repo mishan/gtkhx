@@ -304,3 +304,46 @@ test_news_file = executable('test_news_file',
 )
 test('news_file', test_news_file,
      suite : 'proto')
+
+# -----------------------------------------------------------------------------
+# Tier 3 — integration/
+#
+# Real-server protocol-level tests. Each test opens a TCP connection
+# to the configured Hotline server (mhxd Docker container at
+# localhost:5500 by default; override with GTKHX_TEST_HOST /
+# GTKHX_TEST_PORT) and drives the wire protocol end-to-end.
+#
+# Skip-if-unavailable: if the server isn't reachable within the
+# connect timeout, the test calls g_test_skip and exits cleanly.
+# That lets the integration suite live alongside unit + proto in
+# the default `meson test` invocation without requiring everyone to
+# run Docker.
+#
+# Bring up a server for these tests with:
+#   cd tests/mhxd && docker build -t gtkhx-mhxd .
+#   docker run --rm -p 5500:5500 gtkhx-mhxd
+#
+# See tests/mhxd/README.md for details.
+# -----------------------------------------------------------------------------
+
+integration_test_inc = include_directories('integration', '../src')
+
+# Shared harness lib — opens the socket, runs the magic handshake,
+# provides blocking send / recv primitives. Future integration tests
+# will link this and layer login / chat / file-list flows on top.
+integration_harness_lib = static_library(
+  'integration_harness',
+  'integration/integration_harness.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+)
+
+test_integration_handshake = executable('test_integration_handshake',
+  'integration/test_handshake.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('handshake', test_integration_handshake,
+     suite   : 'integration',
+     timeout : 30)
