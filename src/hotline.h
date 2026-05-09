@@ -197,6 +197,14 @@ struct hl_user_data {
 #define HTLS_HDR_CHAT_USER_CHANGE	((guint32) 0x00000075)
 #define HTLS_HDR_CHAT_USER_PART		((guint32) 0x00000076)
 #define HTLS_HDR_CHAT_SUBJECT		((guint32) 0x00000077)
+/* HTLS_HDR_BANNER (0x7a) — sent unsolicited after login when the
+ * server config has banner.type set. Carries HTLS_DATA_BANNER_TYPE
+ * (4 bytes) and optionally HTLS_DATA_BANNER_URL. GtkHx currently
+ * doesn't read this; the integration suite uses it to verify the
+ * post-login broadcast train. */
+#define HTLS_HDR_BANNER			((guint32) 0x0000007a)
+#define HTLS_DATA_BANNER_TYPE		((guint16) 0x0098)
+#define HTLS_DATA_BANNER_URL		((guint16) 0x0099)
 #define HTLS_HDR_USER_CHANGE		((guint32) 0x0000012d)
 #define HTLS_HDR_USER_PART		((guint32) 0x0000012e)
 #define HTLS_HDR_USER_SELFINFO		((guint32) 0x00000162)

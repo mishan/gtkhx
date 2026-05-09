@@ -543,3 +543,56 @@ test_integration_file_get = executable('test_integration_file_get',
 test('file_get', test_integration_file_get,
      suite   : 'integration',
      timeout : 30)
+
+# banner — verify the post-AGREEMENTAGREE banner broadcast.
+test_integration_banner = executable('test_integration_banner',
+  'integration/test_banner.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('banner', test_integration_banner,
+     suite   : 'integration',
+     timeout : 30)
+
+# chat_subject — Alice creates a private chat naming Bob, then sets
+# the chat subject; verifies HTLS_HDR_CHAT_SUBJECT broadcasts to
+# the chat members with the new subject text.
+test_integration_chat_subject = executable('test_integration_chat_subject',
+  'integration/test_chat_subject.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_subject', test_integration_chat_subject,
+     suite   : 'integration',
+     timeout : 30)
+
+# news15 — threaded-news 1.5+ opcodes. HTLC_HDR_NEWSDIRLIST root
+# listing returns at least one HTLS_DATA_NEWS_DIRLIST_EXTENDED
+# chunk (mhxd ships with cat_irasshaimase pre-seeded under
+# newsdir/).
+test_integration_news15 = executable('test_integration_news15',
+  'integration/test_news15.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('news15', test_integration_news15,
+     suite   : 'integration',
+     timeout : 30)
+
+# file_put — request/reply phase only. Sends HTLC_HDR_FILE_PUT
+# targeted at the seeded Uploads/ directory; verifies the TASK
+# reply correlates by trans and either carries an HTXF_REF or a
+# task-error (server-permission-dependent). Full upload (FILP-
+# wrapped data over the subchannel) is a future extension.
+test_integration_file_put = executable('test_integration_file_put',
+  'integration/test_file_put.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_put', test_integration_file_put,
+     suite   : 'integration',
+     timeout : 30)

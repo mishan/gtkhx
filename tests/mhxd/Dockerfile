@@ -150,7 +150,8 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
     && printf 'tier-3 integration suite test data\n' \
-        > /opt/mhxd/run/files/integration_seed.txt
+        > /opt/mhxd/run/files/integration_seed.txt \
+    && mkdir -p /opt/mhxd/run/files/Uploads
 
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.
