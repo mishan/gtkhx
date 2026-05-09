@@ -239,3 +239,28 @@ test_small_handlers = executable('test_small_handlers',
 )
 test('small_handlers', test_small_handlers,
      suite : 'proto')
+
+# user_change — five-chunk handler covering user joins / renames /
+# icon and colour changes in the chat user list. The optional
+# COLOUR chunk + got_color flag is the contract worth pinning down.
+test_user_change = executable('test_user_change',
+  'proto/test_user_change.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('user_change', test_user_change,
+     suite : 'proto')
+
+# xfer_queue — REF + QUEUE chunks during file-transfer queueing.
+# queueid 0 is the "ready to start" signal.
+test_xfer_queue = executable('test_xfer_queue',
+  'proto/test_xfer_queue.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('xfer_queue', test_xfer_queue,
+     suite : 'proto')

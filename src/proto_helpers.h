@@ -202,4 +202,49 @@ struct hx_chat_invite_msg {
 extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
                                         struct hx_chat_invite_msg *out);
 
+/*
+ * Result of parsing a HTLS_HDR_USER_CHANGE message.
+ *
+ * The handler walks five chunks:
+ *   HTLS_DATA_UID     — affected user's UID
+ *   HTLS_DATA_ICON    — new icon
+ *   HTLS_DATA_NAME    — new display name (max 31, strip_ansi-sanitised,
+ *                       NUL-terminated)
+ *   HTLS_DATA_COLOUR  — new colour. Optional — set `got_color` only
+ *                       when the chunk was present, since "no change"
+ *                       is the default.
+ *   HTLS_DATA_CHAT_ID — which chat (cid 0 = main chat)
+ *
+ * Same shape as the other extractors: missing chunks default to zero
+ * / "" / FALSE; NULL out returns FALSE.
+ */
+struct hx_user_change_msg {
+	guint16  uid;
+	guint16  icon;
+	guint16  color;
+	gboolean got_color;
+	guint32  cid;
+	char     name[32];        /* NUL-terminated */
+	guint16  name_len;
+};
+extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
+                                        struct hx_user_change_msg *out);
+
+/*
+ * Result of parsing a HTLS_HDR_XFER_QUEUE message.
+ *
+ * Two chunks:
+ *   HTLS_DATA_HTXF_REF — file-transfer reference (32-bit)
+ *   HTLS_DATA_QUEUE    — queue position (32-bit; 0 means "ready,
+ *                        you can start the transfer")
+ *
+ * Both default to 0 if the chunk is missing.
+ */
+struct hx_xfer_queue_msg {
+	guint32 ref;
+	guint32 queueid;
+};
+extern gboolean hx_xfer_queue_extract (struct htlc_conn *htlc,
+                                       struct hx_xfer_queue_msg *out);
+
 #endif /* HX_PROTO_HELPERS_H */

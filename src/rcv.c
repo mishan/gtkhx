@@ -292,9 +292,7 @@ void hx_rcv_task (struct htlc_conn *htlc)
 
 void hx_rcv_user_change (struct htlc_conn *htlc)
 {
-	guint32 cid = 0;
-	guint16 nlen = 0, got_color = 0, uid = 0, color = 0, icon = 0;
-	guint8 name[32];
+	struct hx_user_change_msg uc;
 	struct chat *chat;
 	struct hx_user *user;
 	session *sess = &the_session;
@@ -302,29 +300,17 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	if (task_inerror(htlc))
 		return;
 
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_UID:
-			dh_getint(uid);
-			break;
-		case HTLS_DATA_ICON:
-			dh_getint(icon);
-			break;
-		case HTLS_DATA_NAME:
-			nlen = (_len > 31) ? 31 : _len;
-			memcpy(name, dh->data, nlen);
-			name[nlen] = 0;
-			strip_ansi(name, nlen);
-			break;
-		case HTLS_DATA_COLOUR:
-			dh_getint(color);
-			got_color = 1;
-			break;
-		case HTLS_DATA_CHAT_ID:
-			dh_getint(cid);
-			break;
-		}
-	} dh_end();
+	if (!hx_user_change_extract (htlc, &uc))
+		return;
+
+	/* Local aliases — keep the rest of the handler readable. */
+	guint16 uid = uc.uid;
+	guint16 icon = uc.icon;
+	guint16 color = uc.color;
+	gboolean got_color = uc.got_color;
+	guint32 cid = uc.cid;
+	guint8 *name = (guint8 *) uc.name;
+	guint16 nlen = uc.name_len;
 
 	chat = chat_with_cid(sess, cid);
 	if (!chat) {
@@ -487,28 +473,20 @@ void hx_rcv_dump (struct htlc_conn *htlc)
 
 void hx_rcv_xfer_queue(struct htlc_conn *htlc)
 {
-	guint32 ref = 0, queueid = 0;
+	struct hx_xfer_queue_msg xq;
 	struct htxf_conn *htxf;
 
-	dh_start(htlc) {
-		switch(_type) {
-		case HTLS_DATA_HTXF_REF:
-			dh_getint(ref);
-			break;
-		case HTLS_DATA_QUEUE:
-			dh_getint(queueid);
-			break;
-		}
-	} dh_end();
+	if (!hx_xfer_queue_extract (htlc, &xq))
+		return;
 
-	htxf = htxf_with_ref(ref);
+	htxf = htxf_with_ref(xq.ref);
 
 	if(!htxf) {
 		g_warning(_("Received queue id (%d) for xfer ref %d\n"
-				  "No such xfer.\n"), queueid, ref);
+				  "No such xfer.\n"), xq.queueid, xq.ref);
 		return;
 	}
-	htxf->queue = queueid;
+	htxf->queue = xq.queueid;
 	hx_output.xfer_queue(&the_session, htxf);
 
 	if(!htxf->queue) {

@@ -288,6 +288,76 @@ hx_chat_invite_extract (struct htlc_conn *htlc,
 	return TRUE;
 }
 
+gboolean
+hx_user_change_extract (struct htlc_conn *htlc,
+                        struct hx_user_change_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->uid = 0;
+	out->icon = 0;
+	out->color = 0;
+	out->got_color = FALSE;
+	out->cid = 0;
+	out->name[0] = '\0';
+	out->name_len = 0;
+
+	guint16 nlen = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_UID:
+			dh_getint (out->uid);
+			break;
+		case HTLS_DATA_ICON:
+			dh_getint (out->icon);
+			break;
+		case HTLS_DATA_NAME:
+			nlen = (_len > 31) ? 31 : _len;
+			memcpy (out->name, dh->data, nlen);
+			strip_ansi (out->name, nlen);
+			break;
+		case HTLS_DATA_COLOUR:
+			dh_getint (out->color);
+			out->got_color = TRUE;
+			break;
+		case HTLS_DATA_CHAT_ID:
+			dh_getint (out->cid);
+			break;
+		}
+	} dh_end ();
+
+	out->name[nlen] = '\0';
+	out->name_len = nlen;
+
+	return TRUE;
+}
+
+gboolean
+hx_xfer_queue_extract (struct htlc_conn *htlc,
+                       struct hx_xfer_queue_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->ref = 0;
+	out->queueid = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_HTXF_REF:
+			dh_getint (out->ref);
+			break;
+		case HTLS_DATA_QUEUE:
+			dh_getint (out->queueid);
+			break;
+		}
+	} dh_end ();
+
+	return TRUE;
+}
+
 void
 hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
         int hc, va_list ap)
