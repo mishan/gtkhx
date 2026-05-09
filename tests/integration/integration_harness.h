@@ -183,4 +183,39 @@ extern int integration_open_login_or_skip (struct htlc_conn *htlc,
                                            const char *display_name,
                                            guint16 icon);
 
+/* ---- HTXF subchannel helpers ---------------------------------- */
+
+/*
+ * Open a TCP connection to the file-transfer subchannel. mhxd
+ * binds this on the main port + 1 (5501 by default), per
+ * mhxd/src/hxd/files.c rcv_file_get's
+ *     htxf->listen_sockaddr.SIN_PORT =
+ *         htons(ntohs(...) + 1);
+ *
+ * Honors GTKHX_TEST_HOST; the subchannel port comes from
+ * GTKHX_TEST_PORT + 1 (or GTKHX_TEST_XFER_PORT if set explicitly).
+ *
+ * Returns the fd on success, or -1 if the subchannel can't be
+ * reached. The caller closes via integration_close.
+ */
+extern int integration_connect_xfer (void);
+
+/*
+ * Send the 16-byte HTXF transfer header that initiates a file
+ * transfer subchannel exchange:
+ *
+ *   guint32 magic    = htonl(0x48545846)   /* "HTXF" *\/
+ *   guint32 ref      = htonl(ref_from_TASK_reply)
+ *   guint32 size     = htonl(total_size_from_TASK_reply)
+ *   guint32 unknown  = 0
+ *
+ * After this header, the server (for downloads) starts streaming
+ * the flat-file payload, or (for uploads) waits for the client
+ * to stream it.
+ *
+ * Returns TRUE on a clean send.
+ */
+extern gboolean integration_send_xfer_hdr (int fd, guint32 ref,
+                                           guint32 total_size);
+
 #endif /* HX_INTEGRATION_HARNESS_H */

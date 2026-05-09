@@ -333,6 +333,39 @@ integration_login_guest (int fd, struct htlc_conn *htlc,
 			&clientversion_be);
 }
 
+/* ---- HTXF subchannel helpers ----------------------------------- */
+
+static int
+test_xfer_port (void)
+{
+	const char *p = g_getenv ("GTKHX_TEST_XFER_PORT");
+	if (p && *p) {
+		int v = atoi (p);
+		if (v > 0 && v < 65536)
+			return v;
+	}
+	return test_port () + 1;
+}
+
+int
+integration_connect_xfer (void)
+{
+	return connect_with_timeout (test_host (), test_xfer_port (),
+	                             /*timeout_ms=*/2000);
+}
+
+gboolean
+integration_send_xfer_hdr (int fd, guint32 ref, guint32 total_size)
+{
+	guint32 wire[4] = {
+		htonl (HTXF_MAGIC_INT),
+		htonl (ref),
+		htonl (total_size),
+		0,                          /* unknown — always zero */
+	};
+	return integration_send (fd, wire, sizeof (wire));
+}
+
 int
 integration_open_or_skip (void)
 {

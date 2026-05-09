@@ -127,6 +127,12 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #     implementation has a quirk:
 #         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
 #     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
+#
+# (4) Seed files/test.txt and files/integration_seed.txt with
+#     known content. mhxd's run/hxd/ skeleton ships without a
+#     files/ directory, so the file_list test sees a task-error
+#     (ENOENT) and the file_get test wouldn't have any target.
+#     Two tiny text files cover both flows.
 #     so the table holds onto every connection forever and every
 #     second connection from the same IP gets rejected.
 #     The integration suite fires several connections per second
@@ -140,7 +146,11 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
-        /opt/mhxd/run/hxd.conf
+        /opt/mhxd/run/hxd.conf \
+    && mkdir -p /opt/mhxd/run/files \
+    && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
+    && printf 'tier-3 integration suite test data\n' \
+        > /opt/mhxd/run/files/integration_seed.txt
 
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.

@@ -526,3 +526,20 @@ test_integration_user_rename = executable('test_integration_user_rename',
 test('user_rename', test_integration_user_rename,
      suite   : 'integration',
      timeout : 30)
+
+# file_get — full HTXF subchannel exchange. Sends FILE_GET on the
+# main port (5500), receives the TASK reply with HTXF_REF +
+# HTXF_SIZE, opens a fresh TCP connection to the subchannel
+# port (5501 by default; override via GTKHX_TEST_XFER_PORT),
+# sends the 16-byte HTXF magic header, reads the streamed
+# payload, and substring-searches for our seeded 'hello world'
+# content. The Dockerfile seeds files/test.txt for this purpose.
+test_integration_file_get = executable('test_integration_file_get',
+  'integration/test_file_get.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_get', test_integration_file_get,
+     suite   : 'integration',
+     timeout : 30)
