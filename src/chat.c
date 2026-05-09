@@ -1363,7 +1363,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	GtkWidget *info_btn;
 	GtkWidget *igno_btn;
 	GtkWidget *chat_btn;
-	GdkBitmap *mask;
 	GtkWidget *pix;
 	GdkPixmap *icon;
 	char *title;
@@ -1478,7 +1477,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(msg_btn, "clicked", 
 					   G_CALLBACK(open_message_btn), gchat->userlist);
 	gtk_widget_set_tooltip_text(msg_btn, _("Msg"));
-	icon = 0, pix = 0, mask = 0;
+	icon = 0, pix = 0;
 
 	kick_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(kick_btn), "sess", sess);
@@ -1488,7 +1487,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(kick_btn, "clicked", 
 					   G_CALLBACK(user_kick_btn), gchat->userlist);
 	gtk_widget_set_tooltip_text(kick_btn, _("Kick"));
-	icon = 0, pix = 0, mask = 0;
+	icon = 0, pix = 0;
 
 	info_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(info_btn), "sess", sess);
@@ -1498,7 +1497,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	g_signal_connect(info_btn, "clicked", 
 					   G_CALLBACK(user_info_btn), gchat->userlist);
 	gtk_widget_set_tooltip_text(info_btn, _("User Info"));
-	icon = 0, pix = 0, mask = 0;
+	icon = 0, pix = 0;
 
 	ban_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(ban_btn), "sess", sess);
@@ -1508,7 +1507,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(ban_btn, pix);
 	gtk_widget_set_tooltip_text(ban_btn, _("Ban"));
-	icon = 0, pix = 0, mask = 0;
+	icon = 0, pix = 0;
 
 	chat_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(chat_btn), "sess", sess);
@@ -1518,7 +1517,7 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	icon = (GdkPixmap *)gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/chat.xpm", NULL);
     pix = gtkhx_image_new_from_pixbuf((GdkPixbuf *)icon);
 	gtkhx_widget_set_child(chat_btn, pix);
-	icon = 0, pix = 0, mask = 0;
+	icon = 0, pix = 0;
 
 	igno_btn = gtk_button_new();
 	g_object_set_data(G_OBJECT(igno_btn), "sess", sess);

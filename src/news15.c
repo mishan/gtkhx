@@ -279,17 +279,6 @@ struct gnews_folder *gfnews_with_hlist (GtkWidget *hlist)
 	return 0;
 }
 
-static struct gnews_folder *gfnews_with_path (char *path)
-{
-	struct gnews_folder *gfnews;
-
-	for(gfnews = gfnews_list; gfnews; gfnews = gfnews->prev) {
-		if(!strcmp(gfnews->news->path, path)) {
-			return gfnews;
-		}
-	}
-	return 0;
-}
 
 static void delete_gfnews(struct gnews_folder *gfnews)
 {
@@ -684,18 +673,6 @@ void output_news_folder (struct gnews_folder *gfnews)
 	gfnews->listing = 0;
 }
 
-static struct gnews_catalog *gcnews_with_path(char *path)
-{
-	struct gnews_catalog *gcnews;
-
-	for(gcnews = gcnews_list; gcnews; gcnews = gcnews->prev) {
-		if(!strcmp(path, gcnews->path)) {
-			return gcnews;
-		}
-	}
-	return 0;
-}
-
 static struct gnews_catalog *gcnews_with_group (struct news_group *group)
 {
 	struct gnews_catalog *gcnews;
@@ -813,7 +790,6 @@ static void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *subjectlbl;
 	GtkWidget *text;
 	GtkWidget *textlbl;
-	GtkWidget *vscroll;
 	GtkWidget *post, *cancel;
 	GtkWidget *hbox, *vbox;
 	GtkWidget *table;
@@ -939,7 +915,6 @@ static void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 	GtkWidget *subjectlbl;
 	GtkWidget *text;
 	GtkWidget *textlbl;
-	GtkWidget *vscroll;
 	GtkWidget *post, *cancel;
 	GtkWidget *hbox, *vbox;
 	GtkWidget *table;

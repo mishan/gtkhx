@@ -128,7 +128,7 @@ macres_file_read_res_map (macres_file *mrf)
 macres_res_ref_list *
 macres_file_read_res_ref_list (macres_file *mrf, guint32 type);
 
-static macres_res_ref_list *
+static G_GNUC_UNUSED macres_res_ref_list *
 macres_res_ref_list_new (macres_file *mrf, guint32 type, macres_res_type_list *rtl)
 {
 	macres_res_ref_list *rl;
@@ -146,7 +146,7 @@ macres_res_ref_list_new (macres_file *mrf, guint32 type, macres_res_type_list *r
 	return rl;
 }
 
-static macres_res *
+static G_GNUC_UNUSED macres_res *
 macres_res_new (const guint8 *name, guint8 namelen, const guint8 *data, guint32 len)
 {
 	macres_res *mr;

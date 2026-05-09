@@ -288,13 +288,6 @@ useredit_delete (GtkWidget *widget, gpointer data)
 	gtkhx_widget_destroy(ues->window);
 }
 
-static void
-useredit_close (GtkWidget *widget, gpointer data)
-{
-	struct useredit_session *ues = (struct useredit_session *)data;
-
-	gtkhx_widget_destroy(ues->window);
-}
 
 static void
 useredit_destroy (GtkWidget *widget, gpointer data)
