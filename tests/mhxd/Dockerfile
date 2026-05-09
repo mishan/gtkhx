@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libssl-dev \
         zlib1g-dev \
         libpcre2-dev \
+        libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Pull mhxd master and build with the feature set GtkHx exercises:
@@ -84,16 +85,44 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
         --enable-hope \
         --enable-cipher \
         --enable-compress \
-        --enable-ipv6 \
+#        --enable-ipv6 \
         --enable-hxtrackd \
         --enable-hldump \
     && (make -j"$(nproc)" || make) \
+    && mkdir -p /opt/mhxd \
     && make install
 
 # Runtime config skeleton. mhxd wants a directory with hxd.conf,
 # accounts/, news/, banlist, etc. Copy the upstream `run/hxd/` tree
-# into /opt/mhxd/run as the seed.
-RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run
+# into /opt/mhxd/run as the seed, then patch the bits that bite a
+# containerised test environment:
+#
+# (1) ident 1 → ident 0
+#     mhxd's default config does an identd lookup against every
+#     connecting client BEFORE sending HTLS_MAGIC (see
+#     src/hxd/hlserver.c:312, `if (hxd_cfg.options.ident) start_ident
+#     (htlc); else hxd_fd_set(s, FDR);`). In a Docker container
+#     with no ident server reachable, this hangs the handshake
+#     until the ident query times out (several seconds), and even
+#     then subsequent connections behave non-deterministically.
+#     The conf file itself acknowledges this: `# disable if you
+#     have problems with firewalls`. Turn it off.
+#
+# (2) version 0 → version 185
+#     The version=0 path in mhxd's rcv_login suppresses
+#     HTLS_HDR_USER_SELFINFO entirely (see src/hxd/rcv.c:133,
+#     gated on `if (hxd_cfg.options.version != 0)`), and the
+#     loginreply degenerates to a single-chunk TASK with just our
+#     UID. GtkHx — and our Tier 3 integration tests — expect the
+#     modern flow: loginreply with uid+version+banner+name, then
+#     AGREEMENT, then SELFINFO. Switching to 185 (act as Hotline
+#     1.8.5) makes mhxd take that path and lets the
+#     test_login.c assertions actually fire.
+RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
+    && sed -i 's/^\([[:space:]]*\)ident 1;/\1ident 0;/' \
+        /opt/mhxd/run/hxd.conf \
+    && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
+        /opt/mhxd/run/hxd.conf
 
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.
@@ -124,4 +153,4 @@ WORKDIR /opt/mhxd/run
 
 # Run hxd in foreground (-d would daemonize; we want stdout in
 # `docker logs`). The cwd holds hxd.conf so no -f flag needed.
-CMD ["/opt/mhxd/sbin/hxd"]
+CMD ["/opt/mhxd/run/bin/hxd"]
