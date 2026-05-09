@@ -298,9 +298,16 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 	guint32 _pos, _max;							\
 	guint16 _len, _type;							\
 	_pos = SIZEOF_HL_HDR;							\
-	_max = _htlc->in.pos;							\
+	_max = (_htlc)->in.pos;							\
 	while (1) {								\
-		if(_pos + SIZEOF_HL_DATA_HDR >= _max) break;			\
+		/* Phase 5: this used to be `>=`, which silently skipped a	\
+		 * zero-length chunk that exactly filled the buffer (its	\
+		 * 4-byte header at pos==max-4 was rejected before HN16		\
+		 * even ran). The bottom check (`_len > ...`) catches		\
+		 * truncated payloads, so the upper guard only needs to		\
+		 * ensure the header itself fits. Caught by the hlwrite		\
+		 * round-trip Tier 2 test with a zero-len trailing chunk. */	\
+		if(_pos + SIZEOF_HL_DATA_HDR > _max) break;			\
 		HN16(&_len, &dh->len);						\
 		if(_len > (_max - _pos) - SIZEOF_HL_DATA_HDR) break;		\
 		HN16(&_type, &dh->type);

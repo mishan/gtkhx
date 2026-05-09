@@ -20,6 +20,7 @@
  */
 
 #include <glib.h>
+#include <stdarg.h>
 
 struct htlc_conn;
 
@@ -126,5 +127,35 @@ struct hx_msg_msg {
 
 extern gboolean hx_msg_extract (struct htlc_conn *htlc,
                                 struct hx_msg_msg *out);
+
+/*
+ * Pack a single Hotline message (22-byte hl_hdr + `hc` data chunks)
+ * into htlc->out.buf at the current end-of-buffer position.
+ *
+ * Pure protocol-packing logic, broken out of hlwrite() in network.c
+ * so the Tier 2 unit tests can exercise the SEND path without the
+ * worker-thread / fd / cipher / compress side-effects hlwrite layers
+ * on top.
+ *
+ * The varargs (passed via va_list `ap`) are HC triples of:
+ *
+ *   guint16 type, guint16 len, guint8 *data
+ *
+ * one per chunk. `data` is allowed to be NULL when `len == 0`.
+ *
+ * Side effects:
+ *   - htlc->out.buf is g_realloc'd to fit the new message and
+ *     populated with the wire bytes (header + chunks).
+ *   - htlc->out.len is bumped.
+ *   - htlc->trans is incremented (the transaction ID assigned to
+ *     this message is the value htlc->trans had on entry).
+ *
+ * No fd write, no cipher / compression, no proto_trace logging —
+ * those layers stay in hlwrite(). Caller must initialise
+ * htlc->out (qbuf_set or zeroed via memset) before the first
+ * hlpack call.
+ */
+extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                    int hc, va_list ap);
 
 #endif /* HX_PROTO_HELPERS_H */

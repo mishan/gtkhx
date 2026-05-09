@@ -23,6 +23,8 @@
 
 #include "config.h"
 #include <string.h>
+#include <stdarg.h>
+#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -193,4 +195,57 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 	} dh_end ();
 
 	return seen;
+}
+
+void
+hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
+        int hc, va_list ap)
+{
+	struct hl_hdr h;
+	struct hl_data_hdr dhs;
+	struct qbuf *q = &htlc->out;
+	guint32 this_off, pos;
+	guint32 my_trans;
+
+	this_off = q->pos + q->len;
+	pos = this_off + SIZEOF_HL_HDR;
+	q->len += SIZEOF_HL_HDR;
+	q->buf = g_realloc (q->buf, q->pos + q->len);
+
+	h.type  = htonl (type);
+	my_trans = htlc->trans;
+	h.trans = htonl (my_trans);
+	htlc->trans++;
+	h.flag = htonl (flag);
+	h.hc   = htons ((guint16) hc);
+
+	while (hc) {
+		guint16 t = (guint16) va_arg (ap, int);
+		guint16 l = (guint16) va_arg (ap, int);
+		guint8 *data;
+
+		dhs.type = htons (t);
+		dhs.len  = htons (l);
+
+		q->len += SIZEOF_HL_DATA_HDR + l;
+		q->buf = g_realloc (q->buf, q->pos + q->len);
+		memcpy (&q->buf[pos], (guint8 *) &dhs, SIZEOF_HL_DATA_HDR);
+		pos += SIZEOF_HL_DATA_HDR;
+
+		data = va_arg (ap, guint8 *);
+		if (l) {
+			memcpy (&q->buf[pos], data, l);
+			pos += l;
+		}
+		hc--;
+	}
+
+	/* Header's len/len2 fields encode the byte count from the start
+	 * of the data section (i.e. total - SIZEOF_HL_HDR + sizeof(hc),
+	 * since hc is part of the data section in the wire format).
+	 * Match hlwrite's encoding exactly. */
+	guint32 packed_len = pos - this_off;
+	h.len = h.len2 = htonl (packed_len -
+	                        (SIZEOF_HL_HDR - sizeof (h.hc)));
+	memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }

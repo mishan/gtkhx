@@ -213,3 +213,16 @@ test_msg_proto = executable('test_msg_proto',
 )
 test('msg', test_msg_proto,
      suite : 'proto')
+
+# hlwrite — round-trip the wire packer (hlpack, extracted from
+# hlwrite() in network.c) through the dh_start walker. Proves the
+# send-side encoder and the receive-side decoder agree on the wire
+# format end-to-end.
+test_hlwrite = executable('test_hlwrite',
+  'proto/test_hlwrite.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('hlwrite', test_hlwrite,
+     suite : 'proto')

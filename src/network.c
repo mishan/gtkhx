@@ -1418,62 +1418,50 @@ void kill_threads(void) {
 
 void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
-	va_list ap;
-	struct hl_hdr h;
-	struct hl_data_hdr dhs;
-	struct qbuf *q;
-	guint32 this_off, pos;
-	guint32 len = 0;
-	guint32 my_trans;
+	va_list ap, ap_trace;
+	guint32 this_off, len;
 
 	if (!htlc->fd) {
 		return;
 	}
 
-	q = &htlc->out;
-	this_off = q->pos + q->len;
-	pos = this_off + SIZEOF_HL_HDR;
-	q->len += SIZEOF_HL_HDR;
-	q->buf = g_realloc(q->buf, q->pos + q->len);
+	this_off = htlc->out.pos + htlc->out.len;
 
-	h.type = htonl(type);
-	my_trans = htlc->trans;
-	h.trans = htonl(my_trans);
-	htlc->trans++;
-
-	h.flag = htonl(flag);
-	h.hc = htons(hc);
-
+	/* Phase 5: the buffer-packing logic lives in hlpack
+	 * (proto_helpers.c) so the Tier 2 unit tests can drive the
+	 * SEND path without the fd / proto_trace / compress / cipher
+	 * side effects. proto_trace stays here in hlwrite — it needs
+	 * the per-chunk hook *during* the walk, which is awkward to
+	 * expose through the va_list interface. We re-walk the args
+	 * for the trace; the pack itself only happens once.
+	 *
+	 * Trans ID for the trace: it's whatever htlc->trans was BEFORE
+	 * hlpack increments it. */
+	guint32 my_trans = htlc->trans;
 	proto_trace_send_begin (type, my_trans, hc);
 
 	va_start (ap, hc);
-	while (hc) {
-		guint16 t, l;
-		guint8 *data;
+	va_copy (ap_trace, ap);
+	hlpack (htlc, type, flag, hc, ap);
+	va_end (ap);
 
-		t = (guint16)va_arg (ap, int);
-		l = (guint16)va_arg (ap, int);
-		dhs.type = htons (t);
-		dhs.len = htons (l);
-
-		q->len += SIZEOF_HL_DATA_HDR + l;
-		q->buf = g_realloc (q->buf, q->pos + q->len);
-		memcpy (&q->buf[pos], (guint8 *)&dhs, 4);
-		pos += 4;
-		data = va_arg (ap, guint8 *);
-		if (l) {
-			memcpy (&q->buf[pos], data, l);
-			pos += l;
+	{
+		int hc_trace = hc;
+		while (hc_trace) {
+			guint16 t = (guint16) va_arg (ap_trace, int);
+			guint16 l = (guint16) va_arg (ap_trace, int);
+			guint8 *data = va_arg (ap_trace, guint8 *);
+			proto_trace_send_chunk (t, l, data);
+			hc_trace--;
 		}
-		proto_trace_send_chunk (t, l, data);
-		hc--;
 	}
-	va_end(ap);
+	va_end (ap_trace);
 	proto_trace_send_end ();
 
-	len = pos - this_off;
-	h.len = h.len2= htonl(len - (SIZEOF_HL_HDR - sizeof(h.hc)));
-	memcpy(q->buf + this_off, &h, SIZEOF_HL_HDR);
+	/* Length of the packed message (header + chunks), used by the
+	 * cipher / compress hooks below. */
+	len = (htlc->out.pos + htlc->out.len) - this_off;
+
 	hxd_fd_set(htlc->fd, FDW);
 #ifdef CONFIG_COMPRESS
 	if (htlc->compress_encode_type != COMPRESS_NONE)
