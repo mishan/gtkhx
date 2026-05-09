@@ -7,11 +7,16 @@ extern void output_news_folder(struct gnews_folder *gfnews);
 extern void output_news_catalog(struct gnews_catalog *gcnews);
 extern void output_news_thread(struct news_post *post);
 
-extern void hx_news15_get_post(struct htlc_conn *htlc, struct news_item *item);
-extern void hx_news15_cat_list(struct htlc_conn *htlc, char *path);
-extern void hx_news15_fldr_list(struct htlc_conn *htlc, char *path);
-
-
-extern void open_news15(GtkWidget *widget, session *sess);
+/* Public API: only the entry points actually called from outside
+ * news15.c live here. Everything else (the post_thread / delete_thread
+ * / delete / mkcat / mkdir helpers, the gfnews/gcnews list-walkers
+ * etc.) is file-local and stays static in news15.c. */
+extern void hx_news15_get_post (struct htlc_conn *htlc,
+				struct news_item *item);
+extern void hx_news15_cat_list (struct htlc_conn *htlc,
+				struct gnews_catalog *gcnews);
+extern void hx_news15_fldr_list (struct htlc_conn *htlc,
+				 struct gnews_folder *gfnews);
+extern void open_news15 (GtkWidget *widget, session *sess);
 extern struct gnews_folder *gfnews_list;
 #endif

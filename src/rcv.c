@@ -48,6 +48,7 @@
 #include "plugin.h"
 #include "users.h"
 #include "usermod.h"
+#include "rcv.h"
 #include "news15.h"
 #include "hfs.h"
 #include "proto_trace.h"

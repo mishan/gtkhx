@@ -37,11 +37,8 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "files.h"
+#include "news15.h"
 
-/* Defined in news.c. Pulled in via local extern rather than news15.h
- * because news15.h has stale prototypes for a couple of the
- * hx_news15_* functions that conflict with their definitions in this
- * file — fixing that header is out of scope for the news-encoding bug. */
 /* Phase 5: gtkhx_text_to_utf8 lives in gtkutil.h now. */
 
 /* Phase 4.13: this file uses GtkTreeView + GtkTreeStore directly for
@@ -134,7 +131,7 @@ void hx_news15_fldr_list(struct htlc_conn *htlc, struct gnews_folder *gfnews)
 	g_free(hldir);
 }
 
-void hx_news15_post_thread(struct htlc_conn *htlc, char *path, char *subject,
+static void hx_news15_post_thread(struct htlc_conn *htlc, char *path, char *subject,
 						   guint32 threadid, char *text)
 {
 	guint8 *hldir;
@@ -154,7 +151,7 @@ void hx_news15_post_thread(struct htlc_conn *htlc, char *path, char *subject,
 	g_free(hldir);
 }
 
-void hx_news15_delete_thread(struct htlc_conn *htlc, char *path, 
+static void hx_news15_delete_thread(struct htlc_conn *htlc, char *path,
 							 guint32 threadid)
 {
 	guint8 *hldir;
@@ -171,7 +168,7 @@ void hx_news15_delete_thread(struct htlc_conn *htlc, char *path,
 
 
 
-void hx_news15_delete(struct htlc_conn *htlc, char *path)
+static void hx_news15_delete(struct htlc_conn *htlc, char *path)
 {
 	guint8 *hldir;
 	guint16 hldirlen;
@@ -183,7 +180,7 @@ void hx_news15_delete(struct htlc_conn *htlc, char *path)
 	g_free(hldir);
 }
 
-void hx_news15_mkcat(struct htlc_conn *htlc, char *path, char *name)
+static void hx_news15_mkcat(struct htlc_conn *htlc, char *path, char *name)
 {
 	guint8 *hldir;
 	guint16 hldirlen;
@@ -196,7 +193,7 @@ void hx_news15_mkcat(struct htlc_conn *htlc, char *path, char *name)
 	g_free(hldir);
 }
 
-void hx_news15_mkdir(struct htlc_conn *htlc, char *path)
+static void hx_news15_mkdir(struct htlc_conn *htlc, char *path)
 {
 	guint8 *hldir;
 	guint16 hldirlen;
@@ -282,7 +279,7 @@ struct gnews_folder *gfnews_with_hlist (GtkWidget *hlist)
 	return 0;
 }
 
-struct gnews_folder *gfnews_with_path (char *path)
+static struct gnews_folder *gfnews_with_path (char *path)
 {
 	struct gnews_folder *gfnews;
 
@@ -294,7 +291,7 @@ struct gnews_folder *gfnews_with_path (char *path)
 	return 0;
 }
 
-void delete_gfnews(struct gnews_folder *gfnews)
+static void delete_gfnews(struct gnews_folder *gfnews)
 {
 	int i;
 	
@@ -316,7 +313,7 @@ void delete_gfnews(struct gnews_folder *gfnews)
 
 /* Phase 4.5: GTK 4 close-request returns FALSE so default destroy
  * proceeds; the framework destroys the widget. */
-gboolean destroy_gfnews_browser(GtkWindow *window, gpointer data)
+static gboolean destroy_gfnews_browser(GtkWindow *window, gpointer data)
 {
 	struct gnews_folder *gfnews = g_object_get_data(G_OBJECT(window),
 														  "gfnews");
@@ -687,7 +684,7 @@ void output_news_folder (struct gnews_folder *gfnews)
 	gfnews->listing = 0;
 }
 
-struct gnews_catalog *gcnews_with_path(char *path)
+static struct gnews_catalog *gcnews_with_path(char *path)
 {
 	struct gnews_catalog *gcnews;
 
@@ -699,7 +696,7 @@ struct gnews_catalog *gcnews_with_path(char *path)
 	return 0;
 }
 
-struct gnews_catalog *gcnews_with_group (struct news_group *group)
+static struct gnews_catalog *gcnews_with_group (struct news_group *group)
 {
 	struct gnews_catalog *gcnews;
 
@@ -712,7 +709,7 @@ struct gnews_catalog *gcnews_with_group (struct news_group *group)
 	return 0;
 }
 
-void delete_gcnews(struct gnews_catalog *gcnews)
+static void delete_gcnews(struct gnews_catalog *gcnews)
 {
 	int i;
 
@@ -748,7 +745,7 @@ static gboolean destroy_gcnews_browser(GtkWindow *window, gpointer data)
 }
 
 /* Phase 2.8: now the GtkTreeView "cursor-changed" handler. */
-void newsc_clicked (GtkTreeView *tree, struct gnews_catalog *gcnews)
+static void newsc_clicked (GtkTreeView *tree, struct gnews_catalog *gcnews)
 {
 	struct news_item *item = gcnews_selected_item(gcnews);
 
@@ -757,7 +754,7 @@ void newsc_clicked (GtkTreeView *tree, struct gnews_catalog *gcnews)
 	(void)tree;
 }
 
-void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
+static void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	GtkWidget *text    = g_object_get_data (G_OBJECT (btn), "text");
 	GtkWidget *reply   = g_object_get_data (G_OBJECT (btn), "reply");
@@ -789,12 +786,12 @@ void news15_do_reply(GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtkhx_widget_destroy (window);
 }
 
-void news15_cancel_post(GtkWidget *btn, GtkWidget *window)
+static void news15_cancel_post(GtkWidget *btn, GtkWidget *window)
 {
 	gtkhx_widget_destroy(window);
 }
 
-void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
+static void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	struct news_item *item = gcnews_selected_item(gcnews);
 
@@ -806,7 +803,7 @@ void news15_delete(GtkWidget *btn, struct gnews_catalog *gcnews)
 	(void)btn;
 }
 
-void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
+static void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	struct news_item *item = NULL;
 	GtkWidget *window;
@@ -913,7 +910,7 @@ void news15_reply (GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtk_window_present(GTK_WINDOW(window));
 }
 
-void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
+static void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	GtkWidget *text = g_object_get_data(G_OBJECT(btn), "text");
 	GtkWidget *subject = g_object_get_data(G_OBJECT(btn), "subject");
@@ -935,7 +932,7 @@ void news15_do_post(GtkWidget *btn, struct gnews_catalog *gcnews)
 	gtkhx_widget_destroy(window);
 }
 
-void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
+static void news15_post (GtkWidget *btn, struct gnews_catalog *gcnews)
 {
 	GtkWidget *window;
 	GtkWidget *subject;

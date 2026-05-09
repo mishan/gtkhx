@@ -32,7 +32,7 @@ extern void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat,
 extern void rcv_task_user_list_switch (struct htlc_conn *htlc, 
 									   struct chat *chat);
 extern void rcv_task_kick (struct htlc_conn *htlc);
-extern void rcv_task_user_info (struct htlc_conn *htlc, guint32 uid, int text);
+extern void rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text);
 extern void rcv_task_file_list (struct htlc_conn *htlc, 
 								struct cached_filelist *cfl, void *data);
 extern void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path);
