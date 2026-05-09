@@ -145,4 +145,42 @@ extern gboolean integration_login_guest (int fd, struct htlc_conn *htlc,
                                          const char *display_name,
                                          guint16 icon);
 
+/*
+ * Drain server messages until we either see HTLS_HDR_USER_SELFINFO
+ * (login fully accepted, server has sent us our session state) or
+ * a task-error reply (login refused). Returns the wire type that
+ * broke the loop, or 0 on timeout.
+ *
+ * The caller already-sent integration_login_guest before calling
+ * this. The harness loops up to `max_messages` per call (8 by
+ * default if you pass 0) so a server that interleaves AGREEMENT
+ * or banner messages before SELFINFO is handled cleanly.
+ *
+ * On success the LAST received message is in htlc->in — typically
+ * the SELFINFO or the task-error chunk — and the caller can run
+ * extractors against it directly.
+ */
+extern guint32 integration_drain_until_selfinfo_or_error (
+		int fd, struct htlc_conn *htlc, int max_messages);
+
+/*
+ * Compose the previous helpers: open the socket, run the magic
+ * handshake, send a guest login, drain to SELFINFO. Returns the
+ * fd on full success, or -1 if any step failed (with the
+ * appropriate g_test_skip / g_test_fail already called). The
+ * caller closes the fd when done via integration_close.
+ *
+ * `display_name` is the string the server sees for our chat /
+ * user-list entry. `icon` is the small-icon id (412 is a sensible
+ * default — that's GtkHx's own icon).
+ *
+ * On return, `htlc` is in the state the harness left it: the last
+ * received message (the SELFINFO) is in htlc->in and the htlc
+ * fields hx_selfinfo_parse fills (uid, icon, name, access) are
+ * already populated.
+ */
+extern int integration_open_login_or_skip (struct htlc_conn *htlc,
+                                           const char *display_name,
+                                           guint16 icon);
+
 #endif /* HX_INTEGRATION_HARNESS_H */

@@ -364,3 +364,43 @@ test_integration_login = executable('test_integration_login',
 test('login', test_integration_login,
      suite   : 'integration',
      timeout : 30)
+
+# chat_roundtrip — login, send chat, expect the broadcast back.
+# Single-user mhxd still broadcasts the message (to us), which is
+# how the chat widget shows our own typing.
+test_integration_chat = executable('test_integration_chat',
+  'integration/test_chat_roundtrip.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_roundtrip', test_integration_chat,
+     suite   : 'integration',
+     timeout : 30)
+
+# user_list — login, send HTLC_HDR_USER_GETLIST, parse the
+# HTLS_DATA_USER_LIST chunks, find our own session in the list,
+# verify name + icon round-trip via the wire.
+test_integration_user_list = executable('test_integration_user_list',
+  'integration/test_user_list.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_list', test_integration_user_list,
+     suite   : 'integration',
+     timeout : 30)
+
+# ping — verify the Phase 5 keepalive opcode round-trips. mhxd
+# (>=1.5 servers in general) accepts HTLC_HDR_PING and replies
+# with a non-error TASK. If a future mhxd commit removes the
+# handler this test fails loudly.
+test_integration_ping = executable('test_integration_ping',
+  'integration/test_ping.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('ping', test_integration_ping,
+     suite   : 'integration',
+     timeout : 30)

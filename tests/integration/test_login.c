@@ -37,88 +37,25 @@ hdr_type (const struct htlc_conn *htlc)
 	return ntohl (h->type);
 }
 
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
-}
-
-/* Drain server messages until we see a SELFINFO or a task-error.
- * Returns the message type that broke the loop, or 0 on timeout. */
-static guint32
-drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc)
-{
-	for (int i = 0; i < 8; i++) {   /* upper bound — servers
-	                                 * shouldn't send 8+ pre-
-	                                 * SELFINFO messages */
-		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
-			return 0;
-
-		guint32 type = hdr_type (htlc);
-		guint32 flag = hdr_flag (htlc);
-
-		if (type == HTLS_HDR_TASK && (flag & 1)) {
-			/* Task-error reply — login refused. */
-			return type;
-		}
-		if (type == HTLS_HDR_USER_SELFINFO)
-			return type;
-
-		/* Otherwise loop to read the next message (TASK loginreply
-		 * with version+name, AGREEMENT, etc. — we don't care
-		 * about those for this test). */
-	}
-	return 0;
-}
-
 static void
 test_login_guest_succeeds (void)
 {
-	int fd = integration_open_or_skip ();
+	struct htlc_conn htlc;
+	int fd = integration_open_login_or_skip (
+		&htlc, "GtkHx Tier-3 test", 412);
 	if (fd < 0)
 		return;
 
-	struct htlc_conn htlc;
-	memset (&htlc, 0, sizeof (htlc));
+	/* integration_open_login_or_skip already parsed SELFINFO into
+	 * htlc.access / uid / icon / name. Sanity-check the session
+	 * state. */
 
-	g_assert_true (integration_login_guest (
-		fd, &htlc, "GtkHx Tier-3 test", 412));
+	/* Some access bit must be set — even a guest account has
+	 * download / chat permissions. */
+	g_assert_cmphex (htlc.access, !=, 0);
 
-	guint32 type = drain_until_selfinfo_or_error (fd, &htlc);
-
-	if (type == HTLS_HDR_TASK) {
-		/* Server rejected the login — probably no guest account.
-		 * Pull the error text out so the failure log is useful. */
-		char err[256];
-		gsize err_len = 0;
-		if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
-			g_test_fail_printf (
-				"server rejected guest login: \"%s\". "
-				"This server may not have a guest account.",
-				err);
-		} else {
-			g_test_fail_printf (
-				"server rejected guest login (no error chunk).");
-		}
-	} else if (type == 0) {
-		g_test_fail_printf (
-			"timed out waiting for SELFINFO after guest login.");
-	} else {
-		/* type == HTLS_HDR_USER_SELFINFO — parse and assert it's
-		 * sensible. */
-		unsigned seen = hx_selfinfo_parse (&htlc);
-		g_assert_true (seen & HX_SELFINFO_USER_LIST);
-
-		/* Some access bit must be set — even a guest account has
-		 * download / chat permissions. If access is all zero,
-		 * something's wrong. */
-		g_assert_cmphex (htlc.access, !=, 0);
-
-		/* Our display name should round-trip back unchanged. */
-		g_assert_cmpstr ((const char *) htlc.name, ==,
-		                 "GtkHx Tier-3 test");
-	}
+	/* Our display name should round-trip back unchanged. */
+	g_assert_cmpstr ((const char *) htlc.name, ==, "GtkHx Tier-3 test");
 
 	integration_release_htlc (&htlc);
 	integration_close (fd);

@@ -347,3 +347,95 @@ integration_open_or_skip (void)
 
 	return fd;
 }
+
+/* Pull the message type field out of the just-received header. */
+static guint32
+hdr_type (const struct htlc_conn *htlc)
+{
+	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+	return ntohl (h->type);
+}
+
+static guint32
+hdr_flag (const struct htlc_conn *htlc)
+{
+	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+	return ntohl (h->flag);
+}
+
+guint32
+integration_drain_until_selfinfo_or_error (int fd,
+                                           struct htlc_conn *htlc,
+                                           int max_messages)
+{
+	if (max_messages <= 0)
+		max_messages = 8;
+
+	for (int i = 0; i < max_messages; i++) {
+		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
+			return 0;
+
+		guint32 type = hdr_type (htlc);
+		guint32 flag = hdr_flag (htlc);
+
+		if (type == HTLS_HDR_TASK && (flag & 1))
+			return type;     /* task-error: login refused */
+		if (type == HTLS_HDR_USER_SELFINFO)
+			return type;     /* success */
+
+		/* Otherwise loop — TASK loginreply with version+name,
+		 * AGREEMENT, BANNER, etc. */
+	}
+	return 0;
+}
+
+int
+integration_open_login_or_skip (struct htlc_conn *htlc,
+                                const char *display_name, guint16 icon)
+{
+	memset (htlc, 0, sizeof (*htlc));
+
+	int fd = integration_open_or_skip ();
+	if (fd < 0)
+		return -1;
+
+	if (!integration_login_guest (fd, htlc, display_name, icon)) {
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		g_test_fail_printf ("integration_login_guest failed");
+		return -1;
+	}
+
+	guint32 type =
+		integration_drain_until_selfinfo_or_error (fd, htlc, 8);
+
+	if (type == HTLS_HDR_TASK) {
+		char err[256];
+		gsize err_len = 0;
+		if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+			g_test_fail_printf (
+				"server rejected guest login: \"%s\". "
+				"Check the test server's accounts/ for a "
+				"`guest` account with no password.", err);
+		} else {
+			g_test_fail_printf (
+				"server rejected guest login (no error chunk).");
+		}
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		return -1;
+	}
+	if (type != HTLS_HDR_USER_SELFINFO) {
+		g_test_fail_printf (
+			"timed out waiting for SELFINFO after guest login.");
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		return -1;
+	}
+
+	/* Parse SELFINFO into htlc->access / uid / icon / name so the
+	 * caller can read its session state directly. */
+	hx_selfinfo_parse (htlc);
+
+	return fd;
+}

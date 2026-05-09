@@ -119,24 +119,27 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #     1.8.5) makes mhxd take that path and lets the
 #     test_login.c assertions actually fire.
 #
-# (3) reconn_time 2 → reconn_time 0   (and conn_max 5 → 100)
-#     `nospam` is enabled by default. Its reconn_time setting
-#     drops any connection from the same address within 2 seconds
-#     of the previous one. Our integration tests fire connections
-#     from 127.0.0.1 milliseconds apart (handshake/smoke followed
-#     by handshake/two_connections, plus parallel test runs); the
-#     second connection always gets dropped before it completes
-#     the handshake. Turn the per-IP reconnect cooldown off, and
-#     bump the per-IP concurrent-connection cap so parallel test
-#     runs aren't capped out at 5.
+# (3) operation.nospam yes → operation.nospam no
+#     The default config enables nospam, whose check_connections()
+#     in src/hxd/spam.c rejects any connection from an IP that
+#     already has an entry in the recent-connections table.
+#     reconn_time was the obvious knob to adjust, but the
+#     implementation has a quirk:
+#         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
+#     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
+#     so the table holds onto every connection forever and every
+#     second connection from the same IP gets rejected.
+#     The integration suite fires several connections per second
+#     from 127.0.0.1, which trips this on every test after the
+#     first. Disable nospam outright via the operation section —
+#     the check at hlserver.c:401 short-circuits when nospam=no
+#     and the spam.* settings stop mattering.
 RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)ident 1;/\1ident 0;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
-    && sed -i 's/^\([[:space:]]*\)reconn_time 2;/\1reconn_time 0;/' \
-        /opt/mhxd/run/hxd.conf \
-    && sed -i 's/^\([[:space:]]*\)conn_max 5;/\1conn_max 100;/' \
+    && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
         /opt/mhxd/run/hxd.conf
 
 # -----------------------------------------------------------------------------
