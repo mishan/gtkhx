@@ -103,6 +103,47 @@ hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
 	return TRUE;
 }
 
+gboolean
+hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->uid = 0;
+	out->name[0] = '\0';
+	out->name_len = 0;
+	out->msg[0] = '\0';
+	out->msg_len = 0;
+
+	guint16 nlen = 0, msglen = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_UID:
+			dh_getint (out->uid);
+			break;
+		case HTLS_DATA_MSG:
+			msglen = (_len > 8192) ? 8192 : _len;
+			memcpy (out->msg, dh->data, msglen);
+			break;
+		case HTLS_DATA_NAME:
+			nlen = (_len > 128) ? 128 : _len;
+			memcpy (out->name, dh->data, nlen);
+			strip_ansi (out->name, nlen);
+			break;
+		}
+	} dh_end ();
+
+	CR2LF (out->msg, msglen);
+	strip_ansi (out->msg, msglen);
+	out->name[nlen] = '\0';
+	out->msg[msglen] = '\0';
+	out->name_len = nlen;
+	out->msg_len  = msglen;
+
+	return TRUE;
+}
+
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {

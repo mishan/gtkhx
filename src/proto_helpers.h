@@ -110,4 +110,28 @@ struct hx_chat_msg {
 extern gboolean hx_chat_extract (struct htlc_conn *htlc,
                                  struct hx_chat_msg *out);
 
+/*
+ * Result of parsing a HTLS_HDR_MSG (private message) frame.
+ *
+ * The handler in rcv.c reads three chunks:
+ *   HTLS_DATA_UID   — sender UID (0 = server broadcast)
+ *   HTLS_DATA_NAME  — sender display name (max 128 bytes;
+ *                     strip_ansi-sanitised)
+ *   HTLS_DATA_MSG   — message body (max 8192 bytes; CR→LF +
+ *                     strip_ansi-sanitised)
+ *
+ * Both `name` and `msg` are NUL-terminated. Lengths are bytes
+ * (excluding the NUL).
+ */
+struct hx_msg_msg {
+	guint16 uid;
+	char    name[128 + 1];
+	guint16 name_len;
+	char    msg[8192 + 1];
+	guint16 msg_len;
+};
+
+extern gboolean hx_msg_extract (struct htlc_conn *htlc,
+                                struct hx_msg_msg *out);
+
 #endif /* HX_PROTO_HELPERS_H */

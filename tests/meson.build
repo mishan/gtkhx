@@ -197,3 +197,19 @@ test_chat_proto = executable('test_chat_proto',
 )
 test('chat', test_chat_proto,
      suite : 'proto')
+
+# msg — hx_msg_extract pulls uid + sender name + body out of an
+# HTLS_HDR_MSG (private message) frame. The handler treats name and
+# body asymmetrically: both go through strip_ansi but only the body
+# gets CR2LF (since names shouldn't have line endings). Pin that
+# down so a future "consistency" pass that adds CR2LF to names
+# trips the test.
+test_msg_proto = executable('test_msg_proto',
+  'proto/test_msg.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('msg', test_msg_proto,
+     suite : 'proto')

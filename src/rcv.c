@@ -187,57 +187,37 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 
 void hx_rcv_msg (struct htlc_conn *htlc)
 {
-	guint16 uid = 0;
-	guint16 msglen = 0, nlen = 0;
-	char msgbuf[8192 + 1], name[128 + 1];
+	struct hx_msg_msg pm;
 	session *sess = &the_session;
 	struct chat *chat = chat_with_cid(sess, 0);
 	struct hx_user *user = 0;
 
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_UID:
-			dh_getint(uid);
-			break;
-		case HTLS_DATA_MSG:
-			msglen = (_len > 8192) ? 8192 : _len;
-			memcpy(msgbuf, dh->data, msglen);
-			break;
-		case HTLS_DATA_NAME:
-			nlen = (_len > 128) ? 128 : _len;
-			memcpy(name, dh->data, nlen);
-			strip_ansi(name, nlen);
-			break;
-		}
-	} dh_end();
-	
-	
-	user = hx_user_with_uid(chat->user_list, uid);
+	/* Chunk parse + name/body sanitisation lives in proto_helpers.c
+	 * so the Tier 2 unit tests can drive it. */
+	if (!hx_msg_extract (htlc, &pm))
+		return;
+
+	user = hx_user_with_uid(chat->user_list, pm.uid);
 	if(user && user->ignore) {
 		return;
 	}
-	
-	CR2LF(msgbuf, msglen);
-	strip_ansi(msgbuf, msglen);
-	name[nlen] = 0;
-	msgbuf[msglen] = 0;
 
 #ifdef USE_PLUGIN
-	if(EMIT_SIGNAL(XP_RCV_MSG, sess, msgbuf, name, &uid, 0, 0) == 1) {
+	if(EMIT_SIGNAL(XP_RCV_MSG, sess, pm.msg, pm.name, &pm.uid, 0, 0) == 1) {
 		return;
 	}
 #endif
 
-	if(uid > 0) {
-		hx_output.msg(name, uid, msgbuf);
+	if(pm.uid > 0) {
+		hx_output.msg(pm.name, pm.uid, pm.msg);
 	}
 	else {
-		broadcastmsg(msgbuf);
+		broadcastmsg(pm.msg);
 	}
 	play_sound(MSG);
 
 	if (!*last_msg_nick) {
-		strncpy(last_msg_nick, name, 31);
+		strncpy(last_msg_nick, pm.name, 31);
 		last_msg_nick[31] = 0;
 	}
 }
