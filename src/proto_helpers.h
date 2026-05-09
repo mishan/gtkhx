@@ -44,17 +44,10 @@ extern gboolean task_error_extract (struct htlc_conn *htlc,
  * htlc fields the GUI then reads:
  *
  *   - htlc->access  — 8-byte access bitmap (HTLS_DATA_ACCESS chunk)
- *   - htlc->uid     — our session UID (read from htlc->uid via
- *                     HN16, since the original code byte-swaps the
- *                     existing field rather than the chunk body)
+ *   - htlc->uid     — our session UID (read from the user-list
+ *                     chunk's `uid` field, host-order)
  *   - htlc->icon    — our chat-list icon
  *   - htlc->name    — our display name (NUL-terminated, max 31)
- *
- * The "uid is byte-swapped from htlc->uid not from the chunk body"
- * is a quirk of the original handler that's preserved here. The GUI
- * sets htlc->uid earlier (during login), and the chunk just signals
- * "go act on the value already there now"; the handler then HN16-
- * swaps it in place so subsequent code reads it host-order.
  *
  * Returns the bitwise OR of every chunk type that was actually
  * recognised (e.g. (HX_SELFINFO_ACCESS | HX_SELFINFO_USER_LIST)).

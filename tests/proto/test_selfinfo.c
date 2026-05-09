@@ -139,7 +139,7 @@ test_selfinfo_extracts_user_list (void)
 	const char *name = "Misha";
 	gsize plen = build_userlist_payload (
 		payload, sizeof (payload),
-		/*uid*/  0,         /* unused — see HN16 quirk note below */
+		/*uid*/  0x1234,
 		/*icon*/ 412,
 		/*color*/ 0,
 		name, strlen (name));
@@ -149,52 +149,46 @@ test_selfinfo_extracts_user_list (void)
 	unsigned seen = hx_selfinfo_parse (&htlc);
 	g_assert_true   (seen & HX_SELFINFO_USER_LIST);
 
+	g_assert_cmphex (htlc.uid,  ==, 0x1234);
 	g_assert_cmphex (htlc.icon, ==, 412);
 	g_assert_cmpstr ((const char *) htlc.name, ==, "Misha");
-
-	/* htlc.uid: see test_selfinfo_uid_handler_quirk — the original
-	 * handler does HN16(&htlc->uid, &htlc->uid), which is a no-op
-	 * with a bug (writes from[1] to both bytes). We preserve the
-	 * existing behaviour here rather than fix it without a code
-	 * audit; downstream callers that read htlc->uid (chat, msg)
-	 * appear to set it from elsewhere. */
 
 	wire_fixture_free (&htlc);
 }
 
-/* Pin down the HN16(&htlc->uid, &htlc->uid) quirk so a future fix
- * trips this test on purpose. The macro reads from[1] twice (because
- * the first line clobbers from[0] with from[1]), so both bytes end
- * up as the original high byte. Effect: htlc->uid's two bytes both
- * become whatever its high byte was before SELFINFO. */
+/* Regression-net for the self-aliasing HN16 bug we fixed in Phase 5
+ * (commit `selfinfo HN16` — the previous code did
+ *   HN16 (&htlc->uid, &htlc->uid)
+ * which corrupted htlc->uid into (high<<8)|high). Set htlc->uid
+ * pre-call to a non-zero value, point the wire UID at a different
+ * value, confirm we end up with the wire UID. If anyone reverts to
+ * the self-alias form, this test fails loudly because htlc->uid will
+ * be neither the pre-call value nor the wire value. */
 static void
-test_selfinfo_uid_handler_quirk (void)
+test_selfinfo_uid_overrides_pre_call_value (void)
 {
 	struct htlc_conn htlc;
 	wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
-	/* Pre-set htlc->uid bytes to 0x12 0x34 in memory. */
-	guint8 *uid_bytes = (guint8 *) &htlc.uid;
-	uid_bytes[0] = 0x12;
-	uid_bytes[1] = 0x34;
+	/* Pre-populate htlc->uid (this is what the LOGIN_REPLY handler
+	 * does earlier in the connection lifecycle). */
+	htlc.uid = 0xbeef;
 
 	guint8 payload[32];
 	gsize plen = build_userlist_payload (
 		payload, sizeof (payload),
-		0, 0, 0, "x", 1);
+		/*uid*/  0x00cd,
+		0, 0, "x", 1);
 	wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST,
 	                        (guint16) plen, payload);
 
 	hx_selfinfo_parse (&htlc);
 
-	/* After the buggy HN16, both bytes equal the *original* high
-	 * byte (the first MSB-source read happens before the LSB write
-	 * clobbers it on most compilers). The exact post-state isn't
-	 * what matters — what matters is the test fails LOUDLY if
-	 * someone "fixes" the macro without auditing every call site. */
-	g_assert_cmpuint (uid_bytes[0], ==, uid_bytes[1]);
-
-	wire_fixture_free (&htlc);
+	/* The wire UID wins; the pre-call value is irrelevant.
+	 * Specifically NOT equal to (0xbe << 8) | 0xbe = 0xbebe — that
+	 * was the buggy outcome of the self-aliasing HN16. */
+	g_assert_cmphex (htlc.uid, ==, 0x00cd);
+	g_assert_cmphex (htlc.uid, !=, 0xbebe);
 }
 
 static void
@@ -265,14 +259,15 @@ test_selfinfo_parses_both_chunks (void)
 	const char *name = "admin";
 	gsize plen = build_userlist_payload (
 		payload, sizeof (payload),
-		0, 100, 0, name, strlen (name));
+		/*uid*/ 5, /*icon*/ 100, /*color*/ 0,
+		name, strlen (name));
 	wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST,
 	                        (guint16) plen, payload);
 
 	unsigned seen = hx_selfinfo_parse (&htlc);
 	g_assert_cmpuint (seen, ==,
 	                  (HX_SELFINFO_ACCESS | HX_SELFINFO_USER_LIST));
-	/* htlc.uid: see test_selfinfo_uid_handler_quirk. */
+	g_assert_cmphex  (htlc.uid,  ==, 5);
 	g_assert_cmphex  (htlc.icon, ==, 100);
 	g_assert_cmpstr  ((const char *) htlc.name, ==, "admin");
 	/* All-ones in every byte → guint64 is 0xffffffffffffffff. */
@@ -325,8 +320,8 @@ main (int argc, char **argv)
 
 	g_test_add_func ("/proto/selfinfo/extracts_user_list",
 	                 test_selfinfo_extracts_user_list);
-	g_test_add_func ("/proto/selfinfo/uid_handler_quirk",
-	                 test_selfinfo_uid_handler_quirk);
+	g_test_add_func ("/proto/selfinfo/uid_overrides_pre_call_value",
+	                 test_selfinfo_uid_overrides_pre_call_value);
 	g_test_add_func ("/proto/selfinfo/truncates_name_at_31",
 	                 test_selfinfo_truncates_name_at_31);
 	g_test_add_func ("/proto/selfinfo/skips_too_short_user_list",

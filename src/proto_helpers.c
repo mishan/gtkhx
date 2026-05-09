@@ -163,9 +163,26 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 			if (_len < (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR))
 				break;
 			uh = (struct hl_userlist_hdr *) dh;
-			HN16 (&htlc->uid,  &htlc->uid);
+			/* Phase 5: the line used to be
+			 *   HN16 (&htlc->uid, &htlc->uid);
+			 * which is a self-aliasing HN16. The macro reads
+			 * from[1] twice (the first line clobbers from[0]),
+			 * so both bytes ended up as the original high byte
+			 * — corrupting htlc->uid into (high<<8)|high on every
+			 * SELFINFO. The user_change handler at rcv.c uses
+			 * htlc->uid to detect "this is me" and copy
+			 * icon/color/name back out of the user-list row;
+			 * with the corruption that branch never matched.
+			 * Fix: extract the wire uid out of the chunk like
+			 * the surrounding HN16 calls do for icon and nlen. */
+			HN16 (&htlc->uid,  &uh->uid);
 			HN16 (&htlc->icon, &uh->icon);
-			HN16 (&uh->color,  &uh->color);
+			/* Phase 5: the original handler also had
+			 *   HN16 (&uh->color, &uh->color);
+			 * Same self-alias issue, but on a chunk field nothing
+			 * else reads. Drop it — if we ever wanted to capture
+			 * our own colour out of SELFINFO we'd need an
+			 * htlc->color field write parallel to the icon line. */
 			HN16 (&nlen,       &uh->nlen);
 			nlen = (nlen > 31) ? 31 : nlen;
 			memcpy (htlc->name, uh->name, nlen);
