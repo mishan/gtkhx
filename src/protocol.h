@@ -292,24 +292,42 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 
 /* ---- Walking data-header lists in incoming packets ----------------- */
 
+/*
+ * Phase 5: dh_start moved from while-with-tail-increment to a for
+ * loop with the position increment in the third clause. The two
+ * shapes are equivalent for normal break/iteration, but they
+ * differ on `continue`:
+ *
+ *   while-tail-increment: continue jumps over the increment →
+ *                         infinite loop on any non-matching chunk.
+ *   for-with-increment:   continue runs the increment, then re-
+ *                         evaluates the condition → next chunk.
+ *
+ * The whole tree had three `continue` sites inside dh_start
+ * (hx_rcv_news_post, hx_rcv_agreement_file, and rcv_task_news_file's
+ * subroutine). They never hung in the wild because real wire
+ * messages of those types only carried matching chunks — a server
+ * that mixed e.g. an HTLS_DATA_UID into HTLS_HDR_NEWS_POST would
+ * have hung us. Caught by the Tier 2 hx_news_post_walk test that
+ * deliberately inserts a non-NEWS chunk in the middle of a NEWS_POST
+ * fixture.
+ *
+ * The condition is a comma-expression that runs HN16 as a side
+ * effect and ANDs the bounds checks. Reads dh->len, then bounds-
+ * checks; reads dh->type only after we've confirmed the chunk fits.
+ */
 #define dh_start(_htlc)								\
 {										\
 	struct hl_data_hdr *dh = (struct hl_data_hdr *)(&((_htlc)->in.buf[SIZEOF_HL_HDR])); \
-	guint32 _pos, _max;							\
-	guint16 _len, _type;							\
-	_pos = SIZEOF_HL_HDR;							\
-	_max = (_htlc)->in.pos;							\
-	while (1) {								\
-		/* Phase 5: this used to be `>=`, which silently skipped a	\
-		 * zero-length chunk that exactly filled the buffer (its	\
-		 * 4-byte header at pos==max-4 was rejected before HN16		\
-		 * even ran). The bottom check (`_len > ...`) catches		\
-		 * truncated payloads, so the upper guard only needs to		\
-		 * ensure the header itself fits. Caught by the hlwrite		\
-		 * round-trip Tier 2 test with a zero-len trailing chunk. */	\
-		if(_pos + SIZEOF_HL_DATA_HDR > _max) break;			\
+	guint32 _pos = SIZEOF_HL_HDR;						\
+	guint32 _max = (_htlc)->in.pos;						\
+	guint16 _len = 0, _type = 0;						\
+	for (;									\
+	     _pos + SIZEOF_HL_DATA_HDR <= _max;					\
+	     _pos += SIZEOF_HL_DATA_HDR + _len,					\
+	     dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR + _len)) { \
 		HN16(&_len, &dh->len);						\
-		if(_len > (_max - _pos) - SIZEOF_HL_DATA_HDR) break;		\
+		if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR) break;		\
 		HN16(&_type, &dh->type);
 
 #define dh_getint(_word)						\
@@ -320,8 +338,6 @@ do {if (_len == 4)							\
 } while (0)
 
 #define dh_end()							\
-		_pos += SIZEOF_HL_DATA_HDR + _len,			\
-		dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR + _len); \
 	}								\
 }
 

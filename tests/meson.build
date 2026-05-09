@@ -264,3 +264,17 @@ test_xfer_queue = executable('test_xfer_queue',
 )
 test('xfer_queue', test_xfer_queue,
      suite : 'proto')
+
+# news_post — hx_news_post_walk callback API. The previous handler
+# maintained a dead-code accumulator with cross-call leakage; this
+# test pins down the simpler "sanitise per chunk, emit per chunk"
+# semantics the cleanup committed to.
+test_news_post = executable('test_news_post',
+  'proto/test_news_post.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('news_post', test_news_post,
+     suite : 'proto')

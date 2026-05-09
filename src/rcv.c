@@ -242,26 +242,23 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 	} dh_end();
 }
 
+/* Phase 5: rewritten to use hx_news_post_walk in proto_helpers.c.
+ * The previous version maintained an unbounded-growth news_buf
+ * accumulator that the emit code never actually consumed —
+ * hx_output.news_post was called with just the new chunk's `_len`
+ * bytes regardless of how much had been accumulated. See the
+ * walker comment in proto_helpers.h for the full breakdown. */
+static void
+news_post_emit (void *user, const char *bytes, gsize len)
+{
+	struct htlc_conn *htlc = user;
+	hx_output.news_post (htlc, (char *) bytes, (guint16) len);
+	play_sound (NEWS_POST);
+}
+
 void hx_rcv_news_post (struct htlc_conn *htlc)
 {
-	dh_start(htlc) {
-		if (_type != HTLS_DATA_NEWS)
-			continue;
-
-		news_len += _len;
-		news_buf = g_realloc(news_buf, news_len + 1);
-
-		memmove(&(news_buf[_len]), news_buf, news_len - _len);
-		memcpy(news_buf, dh->data, _len);
-
-		CR2LF(news_buf, _len);
-		strip_ansi(news_buf, _len);
-		news_buf[news_len] = '\0';
-
-		hx_output.news_post(htlc, news_buf, _len);
-
-		play_sound(NEWS_POST);
-	} dh_end();
+	hx_news_post_walk (htlc, news_post_emit, htlc);
 }
 
 void hx_rcv_task (struct htlc_conn *htlc)

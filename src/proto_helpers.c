@@ -358,6 +358,37 @@ hx_xfer_queue_extract (struct htlc_conn *htlc,
 	return TRUE;
 }
 
+int
+hx_news_post_walk (struct htlc_conn *htlc,
+                   hx_news_post_cb cb, void *user)
+{
+	int seen = 0;
+
+	dh_start (htlc) {
+		if (_type != HTLS_DATA_NEWS)
+			continue;
+
+		/* Sanitise into a heap buffer we own — chunk bodies can
+		 * be up to 64 KiB (uint16 length), too big for the stack
+		 * on every platform. NUL-terminate for the cb's
+		 * convenience. The buffer is freed before returning. */
+		gsize len = _len;
+		char *buf = g_malloc (len + 1);
+		memcpy (buf, dh->data, len);
+		CR2LF (buf, len);
+		strip_ansi (buf, len);
+		buf[len] = '\0';
+
+		seen++;
+		if (cb)
+			cb (user, buf, len);
+
+		g_free (buf);
+	} dh_end ();
+
+	return seen;
+}
+
 void
 hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
         int hc, va_list ap)
