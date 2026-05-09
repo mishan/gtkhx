@@ -444,3 +444,43 @@ test_integration_two_client_chat = executable('test_integration_two_client_chat'
 test('two_client_chat', test_integration_two_client_chat,
      suite   : 'integration',
      timeout : 30)
+
+# msg_roundtrip — A→B private message via HTLC_HDR_MSG. B parses
+# the broadcast through hx_msg_extract (a Tier 2 helper) and
+# verifies uid + name + body all round-trip.
+test_integration_msg = executable('test_integration_msg',
+  'integration/test_msg_roundtrip.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('msg_roundtrip', test_integration_msg,
+     suite   : 'integration',
+     timeout : 30)
+
+# user_info — HTLC_HDR_USER_GETINFO for our own session. Verifies
+# the TASK reply carries HTLS_DATA_USER_INFO + HTLS_DATA_NAME and
+# the info text mentions our login.
+test_integration_user_info = executable('test_integration_user_info',
+  'integration/test_user_info.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_info', test_integration_user_info,
+     suite   : 'integration',
+     timeout : 30)
+
+# user_change_broadcast — Alice and Bob both connect; Alice
+# verifies she receives HTLS_HDR_USER_CHANGE when Bob joins and
+# HTLS_HDR_USER_PART when Bob disconnects. Exercises mhxd's
+# snd_user_join / snd_user_part broadcast paths.
+test_integration_user_change = executable('test_integration_user_change',
+  'integration/test_user_change_broadcast.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_change_broadcast', test_integration_user_change,
+     suite   : 'integration',
+     timeout : 30)
