@@ -43,12 +43,13 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 #                           OFF: there's an auto-enable-if-nothing-else
 #                           in configure.in, but it's defeated as soon
 #                           as we pass --enable-hxtrackd. Explicit is
-#                           safer than implicit, so we pass it.
-#   --enable-hx           — text-mode hx client. Not strictly needed
-#                           but pulling it in is what the
-#                           --enable-all path does, and gates the
-#                           same -I../cipher path the server's
-#                           common code needs.
+#                           safer than implicit, so we pass it. This
+#                           ALSO trips the configure.in:779 guard that
+#                           adds -I../cipher to COMMONINCLUDES, which
+#                           is what src/common needs to find cipher.h.
+#                           (--enable-hx would trip the same guard but
+#                           pulls in a libreadline build dep we don't
+#                           need; we only want the server here.)
 #   --with-pthreads       — thread model (mhxd's default is fork/clone)
 #   --enable-hope         — secure login handshake; GtkHx negotiates this
 #   --enable-cipher       — Blowfish/RC4 link encryption
@@ -60,13 +61,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 #                           server side, mirrors what GtkHx's
 #                           GTKHX_DEBUG=proto does on the client.
 #
-# Without --enable-hxd / --enable-hx, configure leaves the
-# `-I../cipher` substitution out of COMMONINCLUDES, and src/common
-# fails to compile with `cipher.h: No such file or directory`. The
-# guard at configure.in:779 reads
+# Without --enable-hxd, configure leaves the `-I../cipher`
+# substitution out of COMMONINCLUDES, and src/common fails to compile
+# with `cipher.h: No such file or directory`. The guard at
+# configure.in:779 reads
 #   if test $enable_hxd = yes -o $enable_hx = yes; then
 #     ... COMMONINCLUDES="$COMMONINCLUDES -I../cipher"
-# so we have to opt in explicitly.
+# Either alone is sufficient; --enable-hxd is what we actually want
+# anyway since it builds the server we run as the test target.
 #
 # `make -j$(nproc) || make` because mhxd's autotools graph isn't
 # fully parallel-safe — fall back to single-job if the parallel run
@@ -78,7 +80,6 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
     && ./configure \
         --prefix=/opt/mhxd \
         --enable-hxd \
-        --enable-hx \
         --with-pthreads \
         --enable-hope \
         --enable-cipher \
