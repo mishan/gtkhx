@@ -367,7 +367,6 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 	struct hx_user_part_msg pm;
 	struct chat *chat;
 	struct hx_user *user;
-	char *col;
 	session *sess = &the_session;
 
 	if (!hx_user_part_extract (htlc, &pm))
@@ -379,7 +378,6 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 
 	user = hx_user_with_uid(chat->user_list, pm.uid);
 	if (user) {
-		col = colorstr(user->color);
 		hx_output.user_delete(htlc, chat, user);
 
 		if(gtkhx_prefs.showjoin) {
@@ -649,7 +647,6 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 	struct news_item *ni;
 	unsigned char *ptr;
 	int p, j;
-	int exit = 0;
 
 	/* Taken from fidelio =) */
 #define get_pstring(ret) if(*ptr==0){ret=NULL;}else{ret=g_malloc(1+*ptr); \
@@ -663,7 +660,6 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 			ptr += *ptr;
 			ptr += 2;
 			if(!group->post_count) {
-				exit = 1;
 				break;
 			}
 			
@@ -692,11 +688,6 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 		}
 		
 	} dh_end();
-/*	
-	if(exit) {
-
-		return;
-		} */
 
 	gcnews->group = group;
 	hx_output.news_catalog(gcnews);
@@ -783,7 +774,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 	guint16 icon16;
 	guint8 *p, *mal = 0;
 	guint16 mal_len = 0;
-	guint16 sklen = 0, macalglen = 0, secure_login = 0, secure_password = 0;
+	guint16 sklen = 0, macalglen = 0, secure_login = 0;
 	guint8 password_mac[20];
 	guint8 login[32];
 	guint16 llen, pmaclen;
@@ -832,8 +823,13 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 					secure_login = 1;
 				break;
 			case HTLS_DATA_PASSWORD:
-				if (_len && _len == strlen(htlc->macalg) && !memcmp(htlc->macalg, dh->data, _len))
-					secure_password = 1;
+				/* Server is offering a secure-password handshake by
+				 * naming our advertised MAC algorithm. We currently
+				 * don't act on this signal — we always send a fresh
+				 * HMAC if we have a sessionkey, regardless. The
+				 * detection is left in place commented out as a hook
+				 * for future password-only HOPE work. */
+				(void) htlc;
 				break;
 			case HTLS_DATA_MAC_ALG:
 				mal_len = _len;

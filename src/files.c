@@ -984,7 +984,7 @@ char *human_size(char *sizstr, guint32 size)
 /* needle must be uppercase :) */
 static int strcasestr_len (char *haystack, char *needle, size_t len)
 {
-	char *p, *startn = 0, *np = 0, *end = haystack + len;
+	char *p, *np = 0, *end = haystack + len;
 
 	for (p = haystack; p < end; p++) {
 		if (np) {
@@ -995,7 +995,6 @@ static int strcasestr_len (char *haystack, char *needle, size_t len)
 			np = 0;
 		} else if (toupper(*p) == *needle) {
 			np = needle + 1;
-			startn = p;
 		}
 	}
 	return 0;

@@ -1081,7 +1081,6 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	struct gtkhx_chat *gchat;
 	session *sess = &the_session;
 	GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
-	struct chat *cchat;
 
 	if(chat->cid) {
 		gchat = gchat_with_cid(sess, chat->cid);
@@ -1098,7 +1097,6 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
 			if(gchat->cid) {
 				struct hx_user *u;
-				cchat = chat_with_cid(sess, gchat->cid);
 				u = hx_user_with_uid(gchat->chat->user_list, user->uid);
 				if(u) {
 					user_change(&sess->htlc, gchat->chat, u, nam, icon, color);
