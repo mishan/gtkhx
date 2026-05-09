@@ -77,7 +77,7 @@ test_user_list_contains_self (void)
 	 * Budget: 16 messages × 3 s timeout. The matching TASK
 	 * normally arrives within 1-2 messages even under contention. */
 	gboolean got_user_list = FALSE;
-	for (int i = 0; i < 16 && !got_user_list; i++) {
+	for (int i = 0; i < 64 && !got_user_list; i++) {
 		g_assert_true (integration_recv_message (
 			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)

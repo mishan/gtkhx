@@ -95,7 +95,7 @@ test_two_client_chat_a_to_b (void)
 	struct hx_chat_msg cm;
 	g_assert_true (drain_until_chat_from_uid (
 		fd_b, &htlc_b, htlc_a.uid, &cm,
-		/*max_messages=*/16));
+		/*max_messages=*/64));
 
 	/* B's view of the broadcast: A's uid, A's name in the
 	 * formatted body, and our line in there too. */

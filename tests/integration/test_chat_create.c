@@ -79,7 +79,7 @@ test_chat_create_invites_target (void)
 	/* Drain Alice's connection for the TASK reply. */
 	gboolean alice_got_reply = FALSE;
 	guint32 chat_id = 0;
-	for (int i = 0; i < 16 && !alice_got_reply; i++) {
+	for (int i = 0; i < 64 && !alice_got_reply; i++) {
 		g_assert_true (integration_recv_message (
 			fd_a, &htlc_a, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc_a) != HTLS_HDR_TASK)
@@ -103,7 +103,7 @@ test_chat_create_invites_target (void)
 	/* On Bob's connection, drain looking for HTLS_HDR_CHAT_INVITE. */
 	gboolean bob_got_invite = FALSE;
 	struct hx_chat_invite_msg im = { 0 };
-	for (int i = 0; i < 16 && !bob_got_invite; i++) {
+	for (int i = 0; i < 64 && !bob_got_invite; i++) {
 		if (!integration_recv_message (
 				fd_b, &htlc_b, /*timeout_ms=*/3000))
 			break;

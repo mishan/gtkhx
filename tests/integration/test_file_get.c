@@ -82,7 +82,7 @@ test_file_get_round_trip (void)
 
 	/* Drain to the TASK reply. */
 	gboolean got_reply = FALSE;
-	for (int i = 0; i < 16 && !got_reply; i++) {
+	for (int i = 0; i < 64 && !got_reply; i++) {
 		g_assert_true (integration_recv_message (
 			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)

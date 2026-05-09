@@ -84,13 +84,14 @@ send_chat (int fd, struct htlc_conn *htlc, const char *text)
 
 /* ---------- Test cases ---------- */
 
-/* Drain budget: bumped from 4 to 16 to absorb cross-talk from
- * other concurrent integration tests sharing the same mhxd. We
- * filter by uid in drain_until_own_chat, so the budget only
- * controls how patient we are before declaring the server didn't
- * echo our chat. 16 messages × 3 s timeout = 48 s upper bound;
- * the test() target's 30 s timeout caps it lower in practice. */
-#define CHAT_DRAIN_BUDGET 16
+/* Drain budget: bumped from 4 to 16 to 64 in successive batches as
+ * the parallel test suite grew. We filter by uid in
+ * drain_until_own_chat, so the budget only controls how patient we
+ * are before declaring the server didn't echo our chat. With 15+
+ * parallel integration tests each broadcasting login/logout
+ * USER_CHANGEs to every connection, sub-second cross-talk volumes
+ * of 30+ messages are routine; 64 leaves comfortable headroom. */
+#define CHAT_DRAIN_BUDGET 64
 
 static void
 test_chat_roundtrip_simple (void)

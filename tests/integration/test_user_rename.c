@@ -98,7 +98,7 @@ test_user_rename_broadcasts (void)
 	struct hx_user_change_msg uc;
 	g_assert_true (drain_for_rename (
 		fd_b, &htlc_b, htlc_a.uid, new_name, &uc,
-		/*max_messages=*/16));
+		/*max_messages=*/64));
 
 	g_assert_cmphex  (uc.uid,  ==, htlc_a.uid);
 	g_assert_cmpstr  (uc.name, ==, new_name);

@@ -81,7 +81,7 @@ test_news_post_then_fetch (void)
 		HTLC_HDR_NEWS_GETFILE, /*flag=*/0, /*hc=*/0));
 
 	gboolean got_reply = FALSE;
-	for (int i = 0; i < 16 && !got_reply; i++) {
+	for (int i = 0; i < 64 && !got_reply; i++) {
 		g_assert_true (integration_recv_message (
 			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)
@@ -139,7 +139,7 @@ test_news_post_broadcasts_to_other_clients (void)
 
 	/* On B's connection, drain looking for HTLS_HDR_NEWS_POST. */
 	gboolean got_post = FALSE;
-	for (int i = 0; i < 16 && !got_post; i++) {
+	for (int i = 0; i < 64 && !got_post; i++) {
 		if (!integration_recv_message (
 				fd_b, &htlc_b, /*timeout_ms=*/3000))
 			break;

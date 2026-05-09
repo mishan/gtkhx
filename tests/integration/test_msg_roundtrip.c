@@ -86,7 +86,7 @@ test_msg_roundtrip_a_to_b (void)
 	struct hx_msg_msg pm;
 	g_assert_true (drain_until_msg_from_uid (
 		fd_b, &htlc_b, htlc_a.uid, &pm,
-		/*max_messages=*/16));
+		/*max_messages=*/64));
 
 	g_assert_cmphex (pm.uid, ==, htlc_a.uid);
 	g_assert_cmpstr (pm.name, ==, "MsgAlice Tier-3");

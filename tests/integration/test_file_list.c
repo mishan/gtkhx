@@ -67,7 +67,7 @@ test_file_list_round_trip (void)
 
 	/* Drain looking for the TASK reply matching our trans. */
 	gboolean got_reply = FALSE;
-	for (int i = 0; i < 16 && !got_reply; i++) {
+	for (int i = 0; i < 64 && !got_reply; i++) {
 		g_assert_true (integration_recv_message (
 			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)

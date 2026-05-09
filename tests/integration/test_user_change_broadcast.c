@@ -100,7 +100,7 @@ test_user_change_join_and_part (void)
 	 * after Alice's own SELFINFO drain — we generously look up to
 	 * 16 messages back through Alice's pending receive queue. */
 	g_assert_true (drain_for_user_change (
-		fd_a, &htlc_a, htlc_b.uid, /*max_messages=*/16));
+		fd_a, &htlc_a, htlc_b.uid, /*max_messages=*/64));
 
 	/* Disconnect Bob — close socket, expect mhxd to broadcast
 	 * USER_PART to Alice. */
@@ -108,7 +108,7 @@ test_user_change_join_and_part (void)
 	integration_close (fd_b);
 
 	g_assert_true (drain_for_user_part (
-		fd_a, &htlc_a, htlc_b.uid, /*max_messages=*/16));
+		fd_a, &htlc_a, htlc_b.uid, /*max_messages=*/64));
 
 	integration_release_htlc (&htlc_a);
 	integration_close (fd_a);
