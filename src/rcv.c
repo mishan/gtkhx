@@ -376,35 +376,26 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 
 void hx_rcv_user_part (struct htlc_conn *htlc)
 {
-	guint16 uid = 0;
-	guint32 cid = 0;
+	struct hx_user_part_msg pm;
 	struct chat *chat;
 	struct hx_user *user;
 	char *col;
 	session *sess = &the_session;
 
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_UID:
-			dh_getint(uid);
-			break;
-		case HTLS_DATA_CHAT_ID:
-			dh_getint(cid);
-			break;
-		}
-	} dh_end();
-	
-	chat = chat_with_cid(sess, cid);
+	if (!hx_user_part_extract (htlc, &pm))
+		return;
+
+	chat = chat_with_cid(sess, pm.cid);
 	if (!chat)
 		return;
 
-	user = hx_user_with_uid(chat->user_list, uid);
+	user = hx_user_with_uid(chat->user_list, pm.uid);
 	if (user) {
 		col = colorstr(user->color);
 		hx_output.user_delete(htlc, chat, user);
 
 		if(gtkhx_prefs.showjoin) {
-			hx_printf_prefix(htlc, cid, INFOPREFIX, _("parts: %s \n"), user->name);
+			hx_printf_prefix(htlc, pm.cid, INFOPREFIX, _("parts: %s \n"), user->name);
 		}
 
 		hx_user_delete(&chat->user_tail, user);
@@ -416,80 +407,51 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 
 void hx_rcv_chat_subject (struct htlc_conn *htlc)
 {
-	guint32 cid = 0;
-	guint16 slen = 0;
-	guint8 subject[256];
+	struct hx_chat_subject_msg sm;
 	struct chat *chat;
 	session *sess = &the_session;
 
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_CHAT_ID:
-			dh_getint(cid);
-			break;
-		case HTLS_DATA_CHAT_SUBJECT:
-			slen = (_len > 255) ? 255 : _len;
-			memcpy(subject, dh->data, slen);
-			break;
-		}
-	} dh_end();
+	if (!hx_chat_subject_extract (htlc, &sm))
+		return;
 
-	if (slen) {
-		chat = chat_with_cid(sess, cid);
+	if (sm.subject_len) {
+		chat = chat_with_cid(sess, sm.cid);
 		if (!chat)
 			return;
-		if(strcmp(subject, chat->subject) == 0)
+		if(strcmp(sm.subject, chat->subject) == 0)
 			return;
-		memcpy(chat->subject, subject, slen);
-		chat->subject[slen] = 0;
-		
+		memcpy(chat->subject, sm.subject, sm.subject_len);
+		chat->subject[sm.subject_len] = 0;
+
 #ifdef USE_PLUGIN
-		if(EMIT_SIGNAL(XP_RCV_SUBJ, sess, chat->subject, &cid, 0, 0, 0) == 1) {
+		if(EMIT_SIGNAL(XP_RCV_SUBJ, sess, chat->subject, &sm.cid, 0, 0, 0) == 1) {
 			return;
 		}
 #endif
-		hx_output.chat_subject(htlc, cid, chat->subject);
+		hx_output.chat_subject(htlc, sm.cid, chat->subject);
 	}
 }
 
 void hx_rcv_chat_invite (struct htlc_conn *htlc)
 {
-	guint16 uid = 0;
-	guint32 cid = 0;
-	guint16 nlen;
-	guint8 name[32];
+	struct hx_chat_invite_msg im;
 	session *sess = &the_session;
 	struct chat *chat = chat_with_cid(sess, 0);
 	struct hx_user *user = 0;
 
-	name[0] = 0;
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLS_DATA_UID:
-			dh_getint(uid);
-			break;
-		case HTLS_DATA_CHAT_ID:
-			dh_getint(cid);
-			break;
-		case HTLS_DATA_NAME:
-			nlen = (_len > 31) ? 31 : _len;
-			memcpy(name, dh->data, nlen);
-			name[nlen] = 0;
-			strip_ansi(name, nlen);
-			break;
-		}
-	} dh_end();
+	if (!hx_chat_invite_extract (htlc, &im))
+		return;
 
-	user = hx_user_with_uid(chat->user_list, uid);
+	user = hx_user_with_uid(chat->user_list, im.uid);
 	if(user && user->ignore) {
 		return;
 	}
 #ifdef USE_PLUGIN
-	if(EMIT_SIGNAL(XP_RCV_INVITE, sess, name, &uid, &cid, 0, 0) == 1) {
+	if(EMIT_SIGNAL(XP_RCV_INVITE, sess, im.name, &im.uid, &im.cid, 0, 0) == 1) {
 		return;
 	}
 #endif
-	hx_output.chat_invitation(htlc, cid, name);
+	hx_output.chat_invitation(htlc, im.cid, im.name);
 	play_sound(CHAT_INVITE);
 }
 

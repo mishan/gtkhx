@@ -226,3 +226,16 @@ test_hlwrite = executable('test_hlwrite',
 )
 test('hlwrite', test_hlwrite,
      suite : 'proto')
+
+# small_handlers — three small chunk-walkers (user_part, chat_subject,
+# chat_invite) batched into one binary. Same shape, no per-handler
+# complexity to justify separate test programs.
+test_small_handlers = executable('test_small_handlers',
+  'proto/test_small_handlers.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('small_handlers', test_small_handlers,
+     suite : 'proto')

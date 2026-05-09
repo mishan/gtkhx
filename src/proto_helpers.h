@@ -158,4 +158,48 @@ extern gboolean hx_msg_extract (struct htlc_conn *htlc,
 extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
                     int hc, va_list ap);
 
+/*
+ * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
+ * from a fixed set of chunks":
+ *
+ *   hx_user_part_extract:
+ *     HTLS_HDR_USER_PART — fills uid + cid only.
+ *
+ *   hx_chat_subject_extract:
+ *     HTLS_HDR_CHAT_SUBJECT — fills cid + subject (max 255, no
+ *     CR2LF / strip_ansi; subjects shouldn't have line endings).
+ *
+ *   hx_chat_invite_extract:
+ *     HTLS_HDR_CHAT_INVITE — fills uid + cid + name. Name is
+ *     strip_ansi-sanitised, max 31 bytes, NUL-terminated.
+ *
+ * All three return TRUE unconditionally on a well-formed message;
+ * missing chunks default to zero / "". NULL out is a programming
+ * error and returns FALSE.
+ */
+
+struct hx_user_part_msg {
+	guint16 uid;
+	guint32 cid;
+};
+extern gboolean hx_user_part_extract (struct htlc_conn *htlc,
+                                      struct hx_user_part_msg *out);
+
+struct hx_chat_subject_msg {
+	guint32 cid;
+	char    subject[256];   /* NUL-terminated, max 255 chars */
+	guint16 subject_len;
+};
+extern gboolean hx_chat_subject_extract (struct htlc_conn *htlc,
+                                         struct hx_chat_subject_msg *out);
+
+struct hx_chat_invite_msg {
+	guint16 uid;
+	guint32 cid;
+	char    name[32];       /* NUL-terminated, max 31 chars */
+	guint16 name_len;
+};
+extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
+                                        struct hx_chat_invite_msg *out);
+
 #endif /* HX_PROTO_HELPERS_H */

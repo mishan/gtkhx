@@ -197,6 +197,97 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 	return seen;
 }
 
+gboolean
+hx_user_part_extract (struct htlc_conn *htlc,
+                      struct hx_user_part_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->uid = 0;
+	out->cid = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_UID:
+			dh_getint (out->uid);
+			break;
+		case HTLS_DATA_CHAT_ID:
+			dh_getint (out->cid);
+			break;
+		}
+	} dh_end ();
+
+	return TRUE;
+}
+
+gboolean
+hx_chat_subject_extract (struct htlc_conn *htlc,
+                         struct hx_chat_subject_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->cid = 0;
+	out->subject[0] = '\0';
+	out->subject_len = 0;
+
+	guint16 slen = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_CHAT_ID:
+			dh_getint (out->cid);
+			break;
+		case HTLS_DATA_CHAT_SUBJECT:
+			slen = (_len > 255) ? 255 : _len;
+			memcpy (out->subject, dh->data, slen);
+			break;
+		}
+	} dh_end ();
+
+	out->subject[slen] = '\0';
+	out->subject_len = slen;
+
+	return TRUE;
+}
+
+gboolean
+hx_chat_invite_extract (struct htlc_conn *htlc,
+                        struct hx_chat_invite_msg *out)
+{
+	if (!out)
+		return FALSE;
+
+	out->uid = 0;
+	out->cid = 0;
+	out->name[0] = '\0';
+	out->name_len = 0;
+
+	guint16 nlen = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_UID:
+			dh_getint (out->uid);
+			break;
+		case HTLS_DATA_CHAT_ID:
+			dh_getint (out->cid);
+			break;
+		case HTLS_DATA_NAME:
+			nlen = (_len > 31) ? 31 : _len;
+			memcpy (out->name, dh->data, nlen);
+			strip_ansi (out->name, nlen);
+			break;
+		}
+	} dh_end ();
+
+	out->name[nlen] = '\0';
+	out->name_len = nlen;
+
+	return TRUE;
+}
+
 void
 hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
         int hc, va_list ap)
