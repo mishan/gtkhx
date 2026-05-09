@@ -193,7 +193,12 @@ struct hx_user {
 	guint16 uid;
 	guint16 icon;
 	guint16 color;
-	unsigned char name[32];
+	/* Display name. Stored as char[] (rather than unsigned char[]) so
+	 * the rest of the codebase can pass it to strcmp/strlen/strcpy
+	 * without -Wpointer-sign casts. The Hotline wire is byte-oriented
+	 * but in practice the name field always holds an ASCII/Mac Roman
+	 * string. */
+	char name[32];
 	unsigned int ignore:1;
 };
 

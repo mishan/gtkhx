@@ -140,19 +140,26 @@ struct htlc_conn {
 	} flags;
 
 	hl_access_bits access;
-	guint8 name[32];
-	guint8 login[32];
+	/* Name/login on the wire are bytes, but the rest of GtkHx uses
+	 * them as C strings (passed to strcmp/strlen/strcpy throughout
+	 * rcv.c, users.c, network.c). Typing them as char* avoids a wave
+	 * of -Wpointer-sign warnings without changing storage layout —
+	 * char and guint8 are both 1 byte, just signed/unsigned. Same
+	 * reasoning applies to macalg / cipheralg / compressalg below
+	 * (those hold strings like "HMAC-SHA1", "RC4", "GZIP"). */
+	char name[32];
+	char login[32];
 
 	unsigned int gdk_input:1;
 
 	guint16 color;
 
-	u_int8_t macalg[32];
+	char macalg[32];
 	u_int8_t sessionkey[64];
 	u_int16_t sklen;
 
 #if defined(CONFIG_CIPHER)
-	u_int8_t cipheralg[32];
+	char cipheralg[32];
 	union cipher_state cipher_encode_state;
 	union cipher_state cipher_decode_state;
 	u_int8_t cipher_encode_key[32];
@@ -166,7 +173,7 @@ struct htlc_conn {
 #endif
 #endif
 #if defined(CONFIG_COMPRESS)
-	u_int8_t compressalg[32];
+	char compressalg[32];
 	union compress_state compress_encode_state;
 	union compress_state compress_decode_state;
 	u_int16_t compress_encode_type, compress_decode_type;
