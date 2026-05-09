@@ -102,8 +102,8 @@ on_action_user_new (GSimpleAction *action, GVariant *param, gpointer user_data)
 static void
 on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param;
-	useredit_open_dialog (NULL, user_data);
+	(void) action; (void) param; (void) user_data;
+	useredit_open_dialog ();
 }
 
 /* Phase 5: app.open_bookmark fires from the AdwSplitButton's

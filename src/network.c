@@ -528,14 +528,12 @@ post_int (void (*fn)(int), int n)
  * it through unchanged and don't free it. `str` is g_strdup'd inside
  * task_new, so we deep-copy here only to keep the worker's stack
  * buffer alive until dispatch (and free our copy after). */
-/* `rcv` keeps task_new's K&R-style "unspecified args" signature so
- * the heterogeneous rcv_task_* callbacks (rcv_task_login,
- * rcv_task_file_get, ...) all flow through without a cast — same
- * contract the legacy task_new uses. -Wstrict-prototypes warns about
- * the empty parens but doesn't error in this build. */
+/* `rcv` rides the canonical rcv_task_fn typedef from protocol.h. The
+ * heterogeneous rcv_task_* implementations are cast to this type by
+ * their caller; we just thread the value through to task_new. */
 struct tn_job {
 	struct htlc_conn *htlc;
-	void (*rcv)();
+	rcv_task_fn rcv;
 	void *ptr;
 	void *data;
 	char *str;
@@ -550,7 +548,7 @@ tn_dispatch (gpointer data)
 	return G_SOURCE_REMOVE;
 }
 static void
-post_task_new (struct htlc_conn *htlc, void (*rcv)(),
+post_task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
                void *ptr, void *data, const char *str)
 {
 	struct tn_job *j = g_new0 (struct tn_job, 1);
@@ -1017,7 +1015,7 @@ static void hx_thread_connect (void *arg)
 		 * widget — must run on main. The pass/buf pointer is stored
 		 * in tsk->ptr; we hand it off to the dispatcher unchanged so
 		 * task ownership semantics match the legacy code. */
-		post_task_new(htlc, rcv_task_login,
+		post_task_new(htlc, RCV_TASK_FN(rcv_task_login),
 		              pass ? g_strdup(pass) : g_strdup(buf),
 		              0, "login");
 		strcpy(htlc->macalg, "HMAC-SHA1");
@@ -1095,7 +1093,7 @@ static void hx_thread_connect (void *arg)
 	}
 
 
-	post_task_new(htlc, rcv_task_login, 0, 0, "login");
+	post_task_new(htlc, RCV_TASK_FN(rcv_task_login), 0, 0, "login");
 
 	icon16 = htons(htlc->icon);
 	if (login) {

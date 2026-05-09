@@ -96,7 +96,7 @@ void hx_news15_get_post(struct htlc_conn *htlc, struct news_item *item)
 	guint32 postid;
 
 	hldir = path_to_hldir(item->group->path, &hldirlen, 0);
-	task_new(htlc, rcv_task_news_post, item, 0, "news_post");
+	task_new(htlc, RCV_TASK_FN(rcv_task_news_post), item, 0, "news_post");
 
 	postid = htonl(item->postid);
 	hlwrite(htlc, HTLC_HDR_GETTHREAD, 0, 3,
@@ -114,7 +114,7 @@ void hx_news15_cat_list(struct htlc_conn *htlc, struct gnews_catalog *gcnews)
 
 	gcnews->listing = 1;
 	hldir = path_to_hldir(gcnews->path, &hldirlen, 0);
-	task_new(htlc, rcv_task_newscat_list, gcnews, 0, "news_category");
+	task_new(htlc, RCV_TASK_FN(rcv_task_newscat_list), gcnews, 0, "news_category");
 	hlwrite(htlc, HTLC_HDR_NEWSCATLIST, 0, 1, 
 			HTLC_DATA_NEWSPATH, hldirlen, hldir);
 	g_free(hldir);
@@ -127,7 +127,7 @@ void hx_news15_fldr_list(struct htlc_conn *htlc, struct gnews_folder *gfnews)
 
 	gfnews->listing = 1;
 	hldir = path_to_hldir(gfnews->path, &hldirlen, 0);
-	task_new(htlc, rcv_task_newsfolder_list, gfnews, 0, "news_folder");
+	task_new(htlc, RCV_TASK_FN(rcv_task_newsfolder_list), gfnews, 0, "news_folder");
 
 	hlwrite(htlc, HTLC_HDR_NEWSDIRLIST, 0, 1, 
 			HTLC_DATA_NEWSPATH, hldirlen, hldir);

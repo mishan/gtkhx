@@ -291,7 +291,7 @@ void xfer_go (struct htxf_conn *htxf)
 		}
 
 		rfile = dirchar_basename(htxf->remotepath);
-		task_new(&the_session.htlc, rcv_task_file_get, htxf, 0, "xfer_go");
+		task_new(&the_session.htlc, RCV_TASK_FN(rcv_task_file_get), htxf, 0, "xfer_go");
 		if (rfile != htxf->remotepath) {
 			hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
 			hlwrite(&the_session.htlc, HTLC_HDR_FILE_GET, 0,
@@ -312,7 +312,7 @@ void xfer_go (struct htxf_conn *htxf)
 
 		rfile = basename(htxf->path);
 		hldir = path_to_hldir(htxf->remotepath, &hldirlen, 1);
-		task_new(&the_session.htlc, rcv_task_file_put, htxf, 0, "xfer_go");
+		task_new(&the_session.htlc, RCV_TASK_FN(rcv_task_file_put), htxf, 0, "xfer_go");
 		if (exists_remote(htxf->remotepath)) {
 			hlwrite(&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
 					HTLC_DATA_FILE_NAME, strlen(rfile), rfile,

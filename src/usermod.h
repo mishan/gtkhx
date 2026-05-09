@@ -2,7 +2,7 @@
 #define HX_USERMOD_H
 
 extern void create_useredit_window (char *login, int new);
-extern void useredit_open_dialog();
+extern void useredit_open_dialog(void);
 
 
 extern void hx_useredit_create(struct htlc_conn *htlc, const char *login, const char *pass, const char *name, const hl_access_bits access);

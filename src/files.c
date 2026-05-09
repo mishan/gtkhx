@@ -1381,7 +1381,7 @@ char *dirchar_basename (char *path)
 	return path_basename (path, (char) dir_char);
 }
 
-inline void dirchar_fix (char *lpath)
+void dirchar_fix (char *lpath)
 {
 	char *p;
 
@@ -1390,7 +1390,7 @@ inline void dirchar_fix (char *lpath)
 			*p = (dir_char == '/' ? ':' : dir_char);
 }
 
-inline void dirmask (char *dst, char *src, char *mask)
+void dirmask (char *dst, char *src, char *mask)
 {
 	while (*mask && *src && *mask++ == *src++) ;
 
@@ -1447,7 +1447,7 @@ int exists_remote (char *path)
 		cfl->completing = COMPLETE_EXPAND;
 		cfl->path = g_strdup(path);
 		hldir = path_to_hldir(path, &hldirlen, 0);
-		task_new(&the_session.htlc, rcv_task_file_list, cfl, 0, "ls_exists");
+		task_new(&the_session.htlc, RCV_TASK_FN(rcv_task_file_list), cfl, 0, "ls_exists");
 		hlwrite(&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1,
 			HTLC_DATA_DIR, hldirlen, hldir);
 		g_free(hldir);
@@ -1489,7 +1489,7 @@ void hx_list_dir (struct htlc_conn *htlc, const char *path, int reload,
 		cfl->completing = COMPLETE_LS_R;
 
 	hldir = path_to_hldir(path, &hldirlen, 0);
-	task_new(htlc, rcv_task_file_list, cfl, (void *)gfl, "ls");
+	task_new(htlc, RCV_TASK_FN(rcv_task_file_list), cfl, (void *)gfl, "ls");
 	hlwrite(htlc, HTLC_HDR_FILE_LIST, 0, 1,
 		HTLC_DATA_DIR, hldirlen, hldir);
 	g_free(hldir);
@@ -1535,7 +1535,7 @@ void hx_file_info(struct htlc_conn *htlc, char *_path)
 	guint16 hldirlen;
 	char *path = g_strdup(_path);
 
-	task_new(htlc, rcv_task_file_getinfo, path, 0, "finfo");
+	task_new(htlc, RCV_TASK_FN(rcv_task_file_getinfo), path, 0, "finfo");
 	file = dirchar_basename(path); 
 
 	if(file != path) {

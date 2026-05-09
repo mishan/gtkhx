@@ -219,9 +219,25 @@ extern char **hxd_environ;
 
 extern int  fd_closeonexec (int fd, int on);
 extern int  fd_lock_write  (int fd);
-extern void timer_add      (struct timeval *tv, void (*fn)(), void *ptr);
 
 /* ---- Tasks (in-flight protocol transactions) ----------------------- */
+
+/* Type-erased per-task callback. The dispatcher in rcv.c calls it as
+ * (htlc, ptr, data) when a TASK reply arrives, but the rcv_task_*
+ * implementations have heterogeneous argument lists (some 1, some 2,
+ * some 3 args). Callers cast their function pointer to rcv_task_fn at
+ * task_new() time; extras are silently ignored on the register-passing
+ * ABIs we run on. This typedef replaces the historic K&R-style
+ * `void (*)()` so -Wstrict-prototypes doesn't trip on every consumer
+ * of this header. */
+struct htlc_conn;
+typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
+
+/* Cast a heterogeneous rcv_task_* implementation to the canonical
+ * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is
+ * GCC's documented escape hatch for -Wcast-function-type when the
+ * type-erasure is intentional (see GCC manual §6.45). */
+#define RCV_TASK_FN(f) ((rcv_task_fn)(void(*)(void))(f))
 
 struct task {
 	struct task *next, *prev;
@@ -231,7 +247,7 @@ struct task {
 
 	char *str;
 	void *ptr;
-	void (*rcv)();
+	rcv_task_fn rcv;
 };
 
 extern int task_inerror (struct htlc_conn *htlc);

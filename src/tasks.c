@@ -690,7 +690,7 @@ void file_update (session *sess, struct htxf_conn *htxf)
 }
 
 
-struct task * task_new (struct htlc_conn *htlc, void (*rcv)(), void *ptr, 
+struct task * task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr,
 						void *data, const char *str)
 {
 	struct task *tsk;

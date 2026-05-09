@@ -16,7 +16,7 @@ extern void task_error (struct htlc_conn *htlc);
  * proto_helpers.c for the Tier 2 unit tests. */
 #include "proto_helpers.h"
 extern void conn_task_update(session *sess, int stat);
-extern struct task *task_new (struct htlc_conn *htlc, void (*rcv)(), void *ptr, void *data, const char *str);
+extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data, const char *str);
 extern struct task *task_with_trans (session *sess, guint32 trans);
 extern void track_prog_update (session *sess, char *str, int num, int total);
 extern void trackconn_prog_update (session *sess, char *str, int num, int total);

@@ -62,7 +62,7 @@ void hx_change_name_icon (struct htlc_conn *htlc)
 void hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 {
 	uid = htons(uid);
-	task_new(htlc, rcv_task_kick, 0, 0, "kick");
+	task_new(htlc, RCV_TASK_FN(rcv_task_kick), 0, 0, "kick");
 	if (ban) {
 		ban = htons(ban);
 		hlwrite(htlc, HTLC_HDR_USER_KICK, 0, 2,
@@ -79,7 +79,7 @@ void hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
 	guint16 *_uid = g_malloc(sizeof(guint16));
 	*_uid = uid;
 	
-	task_new(htlc, rcv_task_user_info, (void *)_uid, 0, "info");
+	task_new(htlc, RCV_TASK_FN(rcv_task_user_info), (void *)_uid, 0, "info");
 	uid = htons(uid);
 	hlwrite(htlc, HTLC_HDR_USER_GETINFO, 0, 1,
 			HTLC_DATA_UID, 2, &uid);

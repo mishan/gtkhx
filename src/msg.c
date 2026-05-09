@@ -42,7 +42,7 @@ void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)
 {
 	uid = htons(uid);
-	task_new(htlc, rcv_task_msg, data, 0, data ? data : "msg");
+	task_new(htlc, RCV_TASK_FN(rcv_task_msg), data, 0, data ? data : "msg");
 	hlwrite(htlc, HTLC_HDR_MSG, 0, 2,
 		HTLC_DATA_UID, 2, &uid,
 		HTLC_DATA_MSG, len, msg);

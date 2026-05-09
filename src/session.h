@@ -76,7 +76,7 @@ struct msgwin {
 struct timer {
 	struct timer *next, *prev;
 	guint id;
-	int (*fn)();
+	int (*fn)(void *);
 	void *ptr;
 };
 
@@ -313,7 +313,7 @@ struct output_functions {
 };
 
 extern struct output_functions hx_output;
-extern void timer_add_secs (time_t secs, int (*fn)(), void *ptr);
+extern void timer_add_secs (time_t secs, int (*fn)(void *), void *ptr);
 extern void timer_delete_ptr (void *ptr);
 
 #endif /* ndef __gtkhx_SESSION_H */

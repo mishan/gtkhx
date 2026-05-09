@@ -81,7 +81,7 @@ hx_useredit_open (struct htlc_conn *htlc, const char *login, void (*fn)(void *, 
 	uespfn = g_malloc(sizeof(struct uesp_fn));
 	uespfn->uesp = uesp;
 	uespfn->fn = fn;
-	task_new(htlc, rcv_task_user_open, uespfn, 0, "user open");
+	task_new(htlc, RCV_TASK_FN(rcv_task_user_open), uespfn, 0, "user open");
 	hlwrite(htlc, HTLC_HDR_ACCOUNT_READ, 0, 1,
 		HTLC_DATA_LOGIN, strlen(login), login);
 }

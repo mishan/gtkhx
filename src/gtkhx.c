@@ -451,12 +451,12 @@ void hx_quit (void)
 }
 
 void
-timer_add_secs (time_t secs, int (*fn)(), void *ptr)
+timer_add_secs (time_t secs, int (*fn)(void *), void *ptr)
 {
 	struct timer *timer;
 	guint id;
 
-	id = g_timeout_add(secs * 1000, fn, ptr);
+	id = g_timeout_add(secs * 1000, (GSourceFunc) fn, ptr);
 
 	timer = g_malloc(sizeof(struct timer));
 	timer->next = 0;

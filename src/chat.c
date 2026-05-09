@@ -145,7 +145,7 @@ void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid,
 void hx_chat_user (struct htlc_conn *htlc, guint16 uid)
 {
 	uid = htons(uid);
-	task_new(htlc, hx_rcv_user_change, 0, 0, "chat");
+	task_new(htlc, RCV_TASK_FN(hx_rcv_user_change), 0, 0, "chat");
 	hlwrite(htlc, HTLC_HDR_CHAT_CREATE, 0, 1, HTLC_DATA_UID, 2, &uid);
 }
 
@@ -170,7 +170,7 @@ void hx_chat_join (struct htlc_conn *htlc, guint32 cid)
 	else {
 		chat = chat_new(&the_session, cid);
 		cid = htonl(cid);
-		task_new(htlc, rcv_task_user_list_switch, chat, 0, "join");
+		task_new(htlc, RCV_TASK_FN(rcv_task_user_list_switch), chat, 0, "join");
 		hlwrite(htlc, HTLC_HDR_CHAT_JOIN, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
 	}
 }

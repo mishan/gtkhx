@@ -17,8 +17,8 @@ extern  guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
  * in path_util.h. */
 #include "path_util.h"
 extern char *dirchar_basename (char *path);
-extern inline void dirchar_fix (char *lpath);
-extern inline void dirmask (char *dst, char *src, char *mask);
+extern void dirchar_fix (char *lpath);
+extern void dirmask (char *dst, char *src, char *mask);
 extern int exists_remote (char *path);
 
 extern void hx_list_dir (struct htlc_conn *htlc, const char *path,

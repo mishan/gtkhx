@@ -100,7 +100,7 @@ do_post_login_fetches (struct htlc_conn *htlc)
 	 * both — it calls rcv_task_user_list on the USER_GETLIST
 	 * reply and then reload_news, the latter of which is itself
 	 * gated on HL_ACCESS_READ_NEWS. */
-	task_new (htlc, rcv_task_news_users, the_session.chat_list, 0, "who");
+	task_new (htlc, RCV_TASK_FN(rcv_task_news_users), the_session.chat_list, 0, "who");
 	hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
 }
 
@@ -903,7 +903,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 			hx_htlc_close(htlc, 0);
 			return;
 		}
-		task_new(htlc, rcv_task_login, 0, 0, "login");
+		task_new(htlc, RCV_TASK_FN(rcv_task_login), 0, 0, "login");
 		icon16 = htons(htlc->icon);
 		if (secure_login) {
 			llen = hmac_xxx(login, htlc->login, strlen(htlc->login),
@@ -1310,7 +1310,7 @@ void rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 				if (!ncfl->path)
 					ncfl->path = g_strdup(pathbuf);
 				hldir = path_to_hldir(pathbuf, &hldirlen, 0);
-				task_new(&the_session.htlc, rcv_task_file_list, ncfl, 0, 
+				task_new(&the_session.htlc, RCV_TASK_FN(rcv_task_file_list), ncfl, 0,
 						 "ls_complete");
 				hlwrite(&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1,
 						HTLC_DATA_DIR, hldirlen, hldir);

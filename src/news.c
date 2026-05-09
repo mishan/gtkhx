@@ -51,7 +51,7 @@ GtkWidget *postButton;
 
 void hx_get_news (struct htlc_conn *htlc)
 {
-	task_new(htlc, rcv_task_news_file, 0, 0, "news");
+	task_new(htlc, RCV_TASK_FN(rcv_task_news_file), 0, 0, "news");
 	hlwrite(htlc, HTLC_HDR_NEWS_GETFILE, 0, 0);
 }
 
