@@ -480,7 +480,7 @@ static int preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf,
 		 * its own g_idle_add to marshal the gtk_text_buffer_insert
 		 * to the main thread (see preview.c). It is safe to call
 		 * directly from the worker — no GTK lock needed. */
-		p->output(p, buf, len);
+		p->output(p, (char *) buf, len);
 		htxf->total_pos += len;
 		post_file_update(htxf);
 		data_len -= len;

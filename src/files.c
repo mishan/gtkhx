@@ -1007,8 +1007,8 @@ icon_of_fh (struct hl_filelist_hdr *fh)
 	guint16 icon;
 
 	if (!memcmp(&fh->ftype, "fldr", 4)) {
-		if(	strcasestr_len(fh->fname, "DROP BOX", fh->fnlen) ||
-			strcasestr_len(fh->fname, "UPLOAD", fh->fnlen)) {
+		if(	strcasestr_len((char *) fh->fname, "DROP BOX", fh->fnlen) ||
+			strcasestr_len((char *) fh->fname, "UPLOAD", fh->fnlen)) {
 			icon = ICON_FOLDER_IN;
 		}
 		else {
@@ -1457,7 +1457,7 @@ int exists_remote (char *path)
 
 	for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
 		 fh += fh->len + SIZEOF_HL_DATA_HDR) {
-		if ((int)fh->fnlen == len && !strncmp(fh->fname, ent, len))
+		if ((int)fh->fnlen == len && !strncmp((char *) fh->fname, ent, len))
 			return 1;
 	}
 

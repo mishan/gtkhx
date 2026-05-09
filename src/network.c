@@ -1237,7 +1237,7 @@ void hx_tracker_list(session *sess, char *serverstr, guint16 port)
 	int s;
 	guint16 nusers, nservers;
 	unsigned char buf[HOSTLEN];
-	unsigned char name[512], desc[512];
+	char name[512], desc[512];
 	struct in_addr a;
 	int total;
 	int i;

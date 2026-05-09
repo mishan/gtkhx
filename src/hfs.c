@@ -214,7 +214,7 @@ suffix (const char *path)
 static void
 suffix_type_creator (char *buf, const char *path)
 {
-	u_int8_t *tc = UNKNOWN_TYPECREA;
+	const char *tc = UNKNOWN_TYPECREA;
 	char *suff;
 
 	if (!(suff = suffix(path)))
@@ -307,7 +307,7 @@ type_creator (u_int8_t *buf, const char *path)
 	}
 
 use_suffix:
-	suffix_type_creator(buf, path);
+	suffix_type_creator((char *) buf, path);
 }
 
 void
@@ -412,7 +412,7 @@ hfsinfo_read (const char *path, struct hfsinfo *fi)
 	}
 
 	if (!(*(u_int32_t *)(&fi->type[0])) || !(*(u_int32_t *)(&fi->type[4])))
-		suffix_type_creator(fi->type, path);
+		suffix_type_creator((char *) fi->type, path);
 	if (!fi->create_time || !fi->modify_time) {
 		if (!stat(path, &sb)) {
 			u_int32_t htime = hfs_u_to_htime(sb.st_mtime);
@@ -633,7 +633,7 @@ comment_write (const char *path, char *comment, int comlen)
 						hdr.cap.fi_version = HFS_CAP_VERSION;
 						hdr.cap.fi_magic = HFS_CAP_MAGIC;
 						hdr.cap.fi_datemagic = HFS_CAP_DMAGIC;
-						suffix_type_creator(hdr.cap.fi_fndr, path);
+						suffix_type_creator((char *) hdr.cap.fi_fndr, path);
 					}
 					hdr.cap.fi_comln = comlen;
 					memcpy(hdr.cap.fi_comnt, comment, comlen);

@@ -370,7 +370,7 @@ static void
 exec_ready_read (int fd)
 {
 	ssize_t r;
-	guint8 buf[0x4000];
+	char buf[0x4000];
 
 	r = read(fd, buf, sizeof(buf) - 1);
 	if (r == 0 || (r < 0 && errno != EINTR)) {
