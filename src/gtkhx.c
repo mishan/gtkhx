@@ -1157,9 +1157,9 @@ void hotline_client_init (int argc, char **argv);
 #endif
 
 static RETSIGTYPE
-sig_fpe (int sig, int fpe)
+sig_fpe (int sig)
 {
-	g_error("SIGFPE (%d): %d", sig, fpe);
+	g_error("SIGFPE (%d)", sig);
 	abort();
 }
 
@@ -1216,7 +1216,7 @@ main (int argc, char **argv, char **envp)
 	sigemptyset(&act.sa_mask);
 	sigaction(SIGPIPE, &act, 0);
 	sigaction(SIGHUP, &act, 0);
-	act.sa_handler = (RETSIGTYPE (*)(int))sig_fpe;
+	act.sa_handler = sig_fpe;
 	sigaction(SIGFPE, &act, 0);
 	act.sa_handler = sig_bus;
 	sigaction(SIGBUS, &act, 0);

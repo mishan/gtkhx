@@ -247,10 +247,10 @@ static void newsf_pressed (GtkGestureClick *gesture, int n_press,
 					hx_news15_fldr_list(&the_session.htlc, gfnews);
 				}
 				else {
-					struct gnews_folder *gfnews = NULL;
+					struct gnews_folder *new_gfnews = NULL;
 
-					gfnews = create_gfnews_window(path);
-					hx_news15_fldr_list(&the_session.htlc, gfnews);
+					new_gfnews = create_gfnews_window(path);
+					hx_news15_fldr_list(&the_session.htlc, new_gfnews);
 				}
 			}
 			else {

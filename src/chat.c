@@ -666,8 +666,9 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 		}
 		j = pos;
 
-		/* !! FIXME !! */
-		if (len - j < 0)
+		/* len is size_t (unsigned); j is int. Compare directly to avoid
+		 * the underflow trap an 'len - j < 0' check would walk into. */
+		if (j < 0 || (size_t) j > len)
 			return 0;
 
 		b4 = (char *) g_malloc (len + 1);

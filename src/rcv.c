@@ -311,7 +311,7 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	guint16 color = uc.color;
 	gboolean got_color = uc.got_color;
 	guint32 cid = uc.cid;
-	guint8 *name = (guint8 *) uc.name;
+	char *name = uc.name;
 	guint16 nlen = uc.name_len;
 
 	chat = chat_with_cid(sess, cid);
@@ -781,7 +781,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 #ifdef CONFIG_CIPHER
 	u_int8_t *s_cipher_al = 0, *c_cipher_al = 0;
 	u_int16_t s_cipher_al_len = 0, c_cipher_al_len = 0;
-	u_int8_t s_cipheralg[32], c_cipheralg[32];
+	char s_cipheralg[32], c_cipheralg[32];
 	u_int16_t s_cipheralglen = 0, c_cipheralglen = 0;
 	u_int8_t cipheralglist[64];
 	u_int16_t cipheralglistlen;
@@ -789,7 +789,7 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 #ifdef CONFIG_COMPRESS
 	guint8 *s_compress_al = 0, *c_compress_al = 0;
 	guint16 s_compress_al_len = 0, c_compress_al_len = 0;
-	guint8 s_compressalg[32], c_compressalg[32];
+	char s_compressalg[32], c_compressalg[32];
 	guint16 s_compressalglen = 0, c_compressalglen = 0;
 	guint8 compressalglist[64];
 	guint16 compressalglistlen;

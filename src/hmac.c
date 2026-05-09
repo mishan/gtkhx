@@ -23,23 +23,23 @@
 #include "protocol.h"
 
 u_int16_t
-hmac_xxx(u_int8_t *md, u_int8_t *key, u_int32_t keylen,
-         u_int8_t *text, u_int32_t textlen, u_int8_t *macalg)
+hmac_xxx(u_int8_t *md, const void *key, u_int32_t keylen,
+         const void *text, u_int32_t textlen, const char *macalg)
 {
 	GChecksumType type;
 	gsize digest_len;
 
-	if (!strcmp((char *)macalg, "SHA1") || !strcmp((char *)macalg, "HMAC-SHA1")) {
+	if (!strcmp(macalg, "SHA1") || !strcmp(macalg, "HMAC-SHA1")) {
 		type = G_CHECKSUM_SHA1;
 		digest_len = 20;
-	} else if (!strcmp((char *)macalg, "MD5") || !strcmp((char *)macalg, "HMAC-MD5")) {
+	} else if (!strcmp(macalg, "MD5") || !strcmp(macalg, "HMAC-MD5")) {
 		type = G_CHECKSUM_MD5;
 		digest_len = 16;
 	} else {
 		return 0;
 	}
 
-	if (!strncmp((char *)macalg, "HMAC-", 5)) {
+	if (!strncmp(macalg, "HMAC-", 5)) {
 		GHmac *hmac = g_hmac_new(type, key, keylen);
 		gsize out_len = digest_len;
 

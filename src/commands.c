@@ -575,35 +575,35 @@ void hx_command (char *str, guint32 cid)
 	cmd = commands + command_hash[i];
 	do {
 		if (cmd && !strncmp(str, cmd->name, p - str) && cmd->fun) {
-			char *p, *cur, *s;
+			char *q, *cur, *s;
 			char c, quote = 0;
 			char *auto_argv[16], **argv = auto_argv;
 			int argc = 0;
 
 			s = g_strdup(str);
 			killspace(s);
-			for (p = cur = s; (c = *p); p++) {
+			for (q = cur = s; (c = *q); q++) {
 				if (c == '\'' || c == '"') {
 					if (quote == c) {
-						*p = 0;
+						*q = 0;
 						add_arg(cur);
-						killspace(p+1);
+						killspace(q+1);
 						quote = 0;
-						cur = p+1;
+						cur = q+1;
 					} else if (!quote) {
 						quote = c;
-						cur = p+1;
+						cur = q+1;
 					}
 				} else if (!quote && isspace(c)) {
-					*p = 0;
+					*q = 0;
 					add_arg(cur);
-					killspace(p+1);
-					cur = p+1;
+					killspace(q+1);
+					cur = q+1;
 				} else if (c == '\\') {
-					chrexpand(p, strlen(p));
+					chrexpand(q, strlen(q));
 				}
 			}
-			if (p != cur)
+			if (q != cur)
 				add_arg(cur);
 			argv[argc] = 0;
 

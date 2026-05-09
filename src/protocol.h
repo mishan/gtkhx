@@ -268,8 +268,9 @@ extern int task_inerror (struct htlc_conn *htlc);
 
 /* ---- Crypto helpers (implementations in hmac.c / rand.c) ----------- */
 
-extern u_int16_t hmac_xxx (u_int8_t *md, u_int8_t *key, u_int32_t keylen,
-			   u_int8_t *text, u_int32_t textlen, u_int8_t *macalg);
+extern u_int16_t hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
+			   const void *text, u_int32_t textlen,
+			   const char *macalg);
 
 #if defined(CONFIG_CIPHER)
 extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
