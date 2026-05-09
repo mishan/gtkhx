@@ -74,8 +74,8 @@ test_hmac_md5_rfc2104_vector_1 (void)
 	guint8 md[16] = { 0 };
 
 	guint16 mdlen = hmac_xxx (md, key, sizeof (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "HMAC-MD5");
+	                          data, strlen (data),
+	                          "HMAC-MD5");
 	g_assert_cmpuint (mdlen, ==, 16);
 	assert_md_equals_hex (md, 16, "9294727a3638bb1c13f48ef8158bfc9d");
 }
@@ -91,9 +91,9 @@ test_hmac_md5_rfc2104_vector_2 (void)
 	const char *data = "what do ya want for nothing?";
 	guint8 md[16] = { 0 };
 
-	guint16 mdlen = hmac_xxx (md, (guint8 *) key, strlen (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "HMAC-MD5");
+	guint16 mdlen = hmac_xxx (md, key, strlen (key),
+	                          data, strlen (data),
+	                          "HMAC-MD5");
 	g_assert_cmpuint (mdlen, ==, 16);
 	assert_md_equals_hex (md, 16, "750c783e6ab0b503eaa86e310a5db738");
 }
@@ -113,7 +113,7 @@ test_hmac_md5_rfc2104_vector_3 (void)
 
 	guint16 mdlen = hmac_xxx (md, key, sizeof (key),
 	                          data, sizeof (data),
-	                          (guint8 *) "HMAC-MD5");
+	                          "HMAC-MD5");
 	g_assert_cmpuint (mdlen, ==, 16);
 	assert_md_equals_hex (md, 16, "56be34521d144c88dbb8c733f0e8b3f6");
 }
@@ -133,8 +133,8 @@ test_hmac_sha1_rfc2202_vector_1 (void)
 	guint8 md[20] = { 0 };
 
 	guint16 mdlen = hmac_xxx (md, key, sizeof (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "HMAC-SHA1");
+	                          data, strlen (data),
+	                          "HMAC-SHA1");
 	g_assert_cmpuint (mdlen, ==, 20);
 	assert_md_equals_hex (md, 20,
 	                      "b617318655057264e28bc0b6fb378c8ef146be00");
@@ -151,9 +151,9 @@ test_hmac_sha1_rfc2202_vector_2 (void)
 	const char *data = "what do ya want for nothing?";
 	guint8 md[20] = { 0 };
 
-	guint16 mdlen = hmac_xxx (md, (guint8 *) key, strlen (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "HMAC-SHA1");
+	guint16 mdlen = hmac_xxx (md, key, strlen (key),
+	                          data, strlen (data),
+	                          "HMAC-SHA1");
 	g_assert_cmpuint (mdlen, ==, 20);
 	assert_md_equals_hex (md, 20,
 	                      "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
@@ -174,7 +174,7 @@ test_hmac_sha1_rfc2202_vector_3 (void)
 
 	guint16 mdlen = hmac_xxx (md, key, sizeof (key),
 	                          data, sizeof (data),
-	                          (guint8 *) "HMAC-SHA1");
+	                          "HMAC-SHA1");
 	g_assert_cmpuint (mdlen, ==, 20);
 	assert_md_equals_hex (md, 20,
 	                      "125d7342b9ac11cd91a39af48aa17b4f63f175d3");
@@ -203,18 +203,18 @@ test_unprefixed_md5_concatenates_key_and_text (void)
 	g_checksum_get_digest (cs, expected, &expected_len);
 	g_checksum_free (cs);
 
-	guint16 mdlen = hmac_xxx (md, (guint8 *) key, strlen (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "MD5");
+	guint16 mdlen = hmac_xxx (md, key, strlen (key),
+	                          data, strlen (data),
+	                          "MD5");
 	g_assert_cmpuint (mdlen, ==, 16);
 	g_assert_cmpmem (md, mdlen, expected, expected_len);
 
 	/* And it must NOT equal the RFC 2104 HMAC-MD5 of the same key /
 	 * text — that's the whole point of the two branches. */
 	guint8 hmac_md[16] = { 0 };
-	hmac_xxx (hmac_md, (guint8 *) key, strlen (key),
-	          (guint8 *) data, strlen (data),
-	          (guint8 *) "HMAC-MD5");
+	hmac_xxx (hmac_md, key, strlen (key),
+	          data, strlen (data),
+	          "HMAC-MD5");
 	g_assert_false (memcmp (md, hmac_md, 16) == 0);
 }
 
@@ -233,9 +233,9 @@ test_unprefixed_sha1_concatenates_key_and_text (void)
 	g_checksum_get_digest (cs, expected, &expected_len);
 	g_checksum_free (cs);
 
-	guint16 mdlen = hmac_xxx (md, (guint8 *) key, strlen (key),
-	                          (guint8 *) data, strlen (data),
-	                          (guint8 *) "SHA1");
+	guint16 mdlen = hmac_xxx (md, key, strlen (key),
+	                          data, strlen (data),
+	                          "SHA1");
 	g_assert_cmpuint (mdlen, ==, 20);
 	g_assert_cmpmem (md, mdlen, expected, expected_len);
 }
@@ -253,16 +253,16 @@ test_unknown_algorithm_returns_zero (void)
 	 * client). Anything we don't know goes to the "return 0" arm. */
 	g_assert_cmpuint (hmac_xxx (md, key, sizeof (key),
 	                            data, sizeof (data),
-	                            (guint8 *) "HAVAL"), ==, 0);
+	                            "HAVAL"), ==, 0);
 	g_assert_cmpuint (hmac_xxx (md, key, sizeof (key),
 	                            data, sizeof (data),
-	                            (guint8 *) "HMAC-HAVAL"), ==, 0);
+	                            "HMAC-HAVAL"), ==, 0);
 	g_assert_cmpuint (hmac_xxx (md, key, sizeof (key),
 	                            data, sizeof (data),
-	                            (guint8 *) "SHA256"), ==, 0);
+	                            "SHA256"), ==, 0);
 	g_assert_cmpuint (hmac_xxx (md, key, sizeof (key),
 	                            data, sizeof (data),
-	                            (guint8 *) ""), ==, 0);
+	                            ""), ==, 0);
 }
 
 int

@@ -1242,7 +1242,7 @@ void rcv_task_kick (struct htlc_conn *htlc)
 void rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
 {
 	guint16 ilen = 0, nlen = 0;
-	guint8 info[4096 + 1], name[32];
+	char info[4096 + 1], name[32];
 	guint16 uid = *_uid;
 	g_free(_uid);
 
@@ -1394,8 +1394,9 @@ hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
 
 void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 {
-	guint8 icon[4], type[32], crea[32], date_create[8], date_modify[8];
-	guint8 name[256], comment[256];
+	guint8 icon[4], date_create[8], date_modify[8];
+	char type[32], crea[32];
+	char name[256], comment[256];
 	guint16 nlen, clen, tlen;
 	guint32 size = 0;
 	char created[32], modified[32];
@@ -1449,7 +1450,13 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 			memcpy(comment, dh->data, clen);
 			comment[clen] = 0;
 			CR2LF(comment, clen);
-			strip_ansi(name, clen);
+			/* historical bug: pre-cleanup version called
+			 * strip_ansi(name, clen) here, stripping ANSI from the
+			 * filename buffer using the comment length. We hit it
+			 * during the pointer-sign retype pass — surfaced because
+			 * GCC complained about (now-mismatched) sign once both
+			 * buffers became char[]. */
+			strip_ansi(comment, clen);
 			break;
 		}
 	} dh_end();
