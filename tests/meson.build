@@ -484,3 +484,45 @@ test_integration_user_change = executable('test_integration_user_change',
 test('user_change_broadcast', test_integration_user_change,
      suite   : 'integration',
      timeout : 30)
+
+# news_post — post to news, fetch back, verify it's there. Plus
+# the unsolicited HTLS_HDR_NEWS_POST broadcast to other clients.
+# Mutates server state; uses a per-run random marker so reruns
+# in the same container don't false-positive on residue.
+test_integration_news_post = executable('test_integration_news_post',
+  'integration/test_news_post.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('news_post', test_integration_news_post,
+     suite   : 'integration',
+     timeout : 30)
+
+# chat_create — Alice creates a private chat naming Bob; Bob's
+# connection receives HTLS_HDR_CHAT_INVITE with Alice's uid +
+# name + the new chat_id. End-to-end exercise of mhxd's
+# rcv_chat_create + snd_chat_invite.
+test_integration_chat_create = executable('test_integration_chat_create',
+  'integration/test_chat_create.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_create', test_integration_chat_create,
+     suite   : 'integration',
+     timeout : 30)
+
+# user_rename — Alice changes name + icon via HTLC_HDR_USER_CHANGE;
+# Bob's connection receives HTLS_HDR_USER_CHANGE with the new
+# values. Filter by uid AND name to walk past Alice's join
+# broadcast that landed earlier under her original name.
+test_integration_user_rename = executable('test_integration_user_rename',
+  'integration/test_user_rename.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_rename', test_integration_user_rename,
+     suite   : 'integration',
+     timeout : 30)
