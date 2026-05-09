@@ -268,7 +268,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	g_free(server_addr);
 	server_addr = NULL;
 }
-unsigned int
+static unsigned int
 decode (struct htlc_conn *htlc)
 {
 	struct qbuf *in = &htlc->read_in;

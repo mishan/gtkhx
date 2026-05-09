@@ -258,7 +258,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
  * returning TRUE to inhibit close, FALSE to allow default destroy.
  * Just unlink the msg from the list — the framework destroys the
  * widget. */
-gboolean destroy_msgwin (GtkWindow *window, gpointer data)
+static gboolean destroy_msgwin (GtkWindow *window, gpointer data)
 {
 	struct msgwin *msg = g_object_get_data(G_OBJECT(window), "msg");
 	(void) data;

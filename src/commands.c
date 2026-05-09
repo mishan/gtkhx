@@ -197,7 +197,7 @@ usage:
 	hx_connect(htlc, serverstr, port, login, pass, 0);
 }
 
-u_int32_t cmd_arg (int argn, char *str)
+static u_int32_t cmd_arg (int argn, char *str)
 {
 	char *p, *cur;
 	char c, quote = 0;

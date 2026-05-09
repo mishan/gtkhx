@@ -60,6 +60,7 @@
 #include "plugin.h"
 #include "commands.h"
 #include "log.h"
+#include "gtkhx.h"
 
 char last_msg_nick[32];
 char *g_user_colors[4] = {WHITE_BOLD, WHITE, RED_BOLD, RED};
@@ -1115,7 +1116,7 @@ qbuf_add (struct qbuf *q, void *buf, guint32 len)
 
 extern void hlclient_reap_pid (pid_t pid, int status);
 
-RETSIGTYPE sig_chld (int sig)
+static RETSIGTYPE sig_chld (int sig)
 {
 	int status, serrno = errno;
 	pid_t pid;
@@ -1153,7 +1154,6 @@ void hotline_client_init (int argc, char **argv);
 
 #if !defined(_SC_OPEN_MAX) && defined(HAVE_GETRLIMIT)
 #include <sys/resource.h>
-#include "gtkhx.h"
 #endif
 
 static RETSIGTYPE
@@ -1300,7 +1300,7 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
 	}
 }
 
-void get_password(char *buf)
+static void get_password(char *buf)
 {
 	int i;
 	struct termios termio;

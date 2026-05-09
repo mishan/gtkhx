@@ -838,7 +838,7 @@ const char human_suffixes[] = {
    133456345 to 127M, 56990456345 to 53G, and so on.  Numbers smaller
    than -OUTPUT_BLOCK_SIZE aren't modified.  */
 
-char *
+static char *
 human_readable (guint32 n, char *buf,
 		int from_block_size, int output_block_size)
 {
@@ -982,7 +982,7 @@ char *human_size(char *sizstr, guint32 size)
 }
 
 /* needle must be uppercase :) */
-int strcasestr_len (char *haystack, char *needle, size_t len)
+static int strcasestr_len (char *haystack, char *needle, size_t len)
 {
 	char *p, *startn = 0, *np = 0, *end = haystack + len;
 

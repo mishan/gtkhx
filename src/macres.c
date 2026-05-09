@@ -66,7 +66,7 @@ static inline guint16 _e_int16(unsigned char **base)
 #define e_int24(foo) _e_int24(&foo)
 #define e_int16(foo) _e_int16(&foo)
 
-macres_res_type_list *
+static macres_res_type_list *
 macres_res_type_list_get (macres_res_type_list *typelist, guint32 ntypes, guint32 type)
 {
 	guint32 i;
@@ -90,7 +90,7 @@ macres_file_num_res_of_type (macres_file *mrf, guint32 type)
 	return 0;
 }
 
-macres_res_type_list *
+static macres_res_type_list *
 macres_file_read_res_type_list (macres_file *mrf)
 {
 	guint32 i;
@@ -111,7 +111,7 @@ macres_file_read_res_type_list (macres_file *mrf)
 	return rtl;
 }
 
-int
+static int
 macres_file_read_res_map (macres_file *mrf)
 {
 	unsigned char *filepos = mrf->base + mrf->res_map_off + 24;
@@ -128,7 +128,7 @@ macres_file_read_res_map (macres_file *mrf)
 macres_res_ref_list *
 macres_file_read_res_ref_list (macres_file *mrf, guint32 type);
 
-macres_res_ref_list *
+static macres_res_ref_list *
 macres_res_ref_list_new (macres_file *mrf, guint32 type, macres_res_type_list *rtl)
 {
 	macres_res_ref_list *rl;
@@ -146,7 +146,7 @@ macres_res_ref_list_new (macres_file *mrf, guint32 type, macres_res_type_list *r
 	return rl;
 }
 
-macres_res *
+static macres_res *
 macres_res_new (const guint8 *name, guint8 namelen, const guint8 *data, guint32 len)
 {
 	macres_res *mr;

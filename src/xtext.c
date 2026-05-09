@@ -140,7 +140,7 @@ url_last (int *lstart, int *lend)
 /* --- HexChat glue: timestamp formatter ----------------------------- *
  * HexChat reads prefs.hex_stamp_text_format ("%H:%M:%S " by default) and
  * applies strftime(3).  We hard-code the same default. */
-int
+static int
 xtext_get_stamp_str (time_t tim, char **ret)
 {
 	char buf[64];
@@ -3815,7 +3815,12 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 	return TRUE;
 }
 
-void
+/* gtk_xtext_save was dropped from the public API in the GTK 4 port
+ * (see xtext.h header comment) — no consumers, and the helper relied
+ * on hexchat write helpers we don't carry. The body is kept as a
+ * static so its stripping-by-color logic can be referenced by the
+ * eventual saved-log feature without re-discovering the algorithm. */
+static void G_GNUC_UNUSED
 gtk_xtext_save (GtkXText * xtext, int fh)
 {
 	textentry *ent;
