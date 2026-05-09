@@ -271,4 +271,56 @@ typedef void (*hx_news_post_cb) (void *user, const char *bytes,
 extern int hx_news_post_walk (struct htlc_conn *htlc,
                               hx_news_post_cb cb, void *user);
 
+/*
+ * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
+ *
+ * Three outcomes:
+ *   HX_AGREEMENT_OK         — HTLS_DATA_AGREEMENT chunk found, copied
+ *                             into `out` with CR2LF + strip_ansi
+ *                             applied, NUL-terminated. *out_len is
+ *                             the byte length excluding the NUL.
+ *   HX_AGREEMENT_NONE       — HTLS_DATA_NOAGREEMENT chunk found
+ *                             (server has no agreement to display);
+ *                             out is left untouched.
+ *   HX_AGREEMENT_NOT_FOUND  — neither chunk type was present.
+ *
+ * The original handler walked the chunk list in order and returned
+ * early on NOAGREEMENT. This extractor preserves that order
+ * sensitivity: a NOAGREEMENT chunk *before* an AGREEMENT chunk
+ * wins (we return _NONE and ignore the later text).
+ *
+ * `out_size` must be at least 1 if `out` is non-NULL. NULL `out`
+ * with HX_AGREEMENT_OK fixture would return HX_AGREEMENT_OK without
+ * filling anything, which is useless; pass NULL only when you don't
+ * actually need the text.
+ */
+typedef enum {
+	HX_AGREEMENT_OK,
+	HX_AGREEMENT_NONE,
+	HX_AGREEMENT_NOT_FOUND,
+} hx_agreement_result;
+
+extern hx_agreement_result hx_agreement_extract (struct htlc_conn *htlc,
+                                                 char *out, gsize out_size,
+                                                 gsize *out_len);
+
+/*
+ * Extract the body of an HTLS_HDR_NEWS_FILE response (the one-shot
+ * news file fetched by HTLC_HDR_NEWS_GETFILE).
+ *
+ * Same shape as task_error_extract. Returns TRUE iff an
+ * HTLS_DATA_NEWS chunk was found and `out` was filled. NUL-
+ * terminates on success. Truncates to (out_size - 1) if the
+ * message body is larger than the caller's buffer.
+ *
+ * The original handler used the rcv.c news_buf/news_len scratch
+ * globals; this version uses caller-owned storage. The handler at
+ * rcv_task_news_file in rcv.c can keep using the scratch globals
+ * (which other code paths still reach for) — this extractor exists
+ * to make the parsing testable without sharing global state.
+ */
+extern gboolean hx_news_file_extract (struct htlc_conn *htlc,
+                                      char *out, gsize out_size,
+                                      gsize *out_len);
+
 #endif /* HX_PROTO_HELPERS_H */

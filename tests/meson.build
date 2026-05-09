@@ -278,3 +278,29 @@ test_news_post = executable('test_news_post',
 )
 test('news_post', test_news_post,
      suite : 'proto')
+
+# agreement — HTLS_HDR_AGREEMENT handler. Three-way result:
+# OK / NONE / NOT_FOUND. The order-sensitive cases (NOAGREEMENT
+# before AGREEMENT wins) are the contract worth pinning down.
+test_agreement = executable('test_agreement',
+  'proto/test_agreement.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('agreement', test_agreement,
+     suite : 'proto')
+
+# news_file — one-shot HTLS_HDR_NEWS_FILE response (the news_file
+# fetched via HTLC_HDR_NEWS_GETFILE). First-NEWS-chunk-wins; same
+# truncation + sanitisation contract as the other text extractors.
+test_news_file = executable('test_news_file',
+  'proto/test_news_file.c',
+  '../src/proto_helpers.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('news_file', test_news_file,
+     suite : 'proto')

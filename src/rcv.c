@@ -224,22 +224,26 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 
 void hx_rcv_agreement_file (struct htlc_conn *htlc)
 {
-	dh_start(htlc) {
-		if (_type == HTLS_DATA_NOAGREEMENT)
-			return;
-		if (_type != HTLS_DATA_AGREEMENT)
-			continue;
-		CR2LF(dh->data, _len);
-		strip_ansi(dh->data, _len);
+	/* Phase 5: chunk-walking + sanitisation lives in
+	 * hx_agreement_extract. The 16 KiB cap is generous; mhxd
+	 * agreements hover around 1-2 KiB on the public servers and
+	 * the protocol's chunk length is uint16 (max 65535) anyway. */
+	char buf[16384];
+	gsize body_len = 0;
+	hx_agreement_result r =
+		hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
+
+	if (r != HX_AGREEMENT_OK)
+		return;
+
 #ifdef USE_PLUGIN
-		if(EMIT_SIGNAL(XP_RCV_AGREE, &the_session, dh->data, &_len, 0, 0, 0)
-		   == 1) {
-			return;
-		}
+	guint16 plugin_len = (guint16) body_len;
+	if (EMIT_SIGNAL (XP_RCV_AGREE, &the_session, buf, &plugin_len,
+	                 0, 0, 0) == 1) {
+		return;
+	}
 #endif
-		hx_output.agreement(&the_session, dh->data, _len);
-		
-	} dh_end();
+	hx_output.agreement (&the_session, buf, (guint16) body_len);
 }
 
 /* Phase 5: rewritten to use hx_news_post_walk in proto_helpers.c.
@@ -1150,22 +1154,22 @@ no_cipher:
 	}
 }
 	
-	void rcv_task_news_file (struct htlc_conn *htlc)
+void rcv_task_news_file (struct htlc_conn *htlc)
 {
-	dh_start(htlc) {
-		if (_type != HTLS_DATA_NEWS)
-			continue;
-		news_len = _len;
-		news_buf = g_realloc(news_buf, news_len + 1);
-		memcpy(news_buf, dh->data, news_len);
-		CR2LF(news_buf, news_len);
-		strip_ansi(news_buf, news_len);
-		news_buf[news_len] = 0;
-	dh_end()
-
+	/* Phase 5: parse + sanitise in hx_news_file_extract. We still
+	 * use the file-scope news_buf scratch as the destination so
+	 * downstream-allocated callers reading news_len/news_buf get
+	 * the same shape as before (the lifetime is "until the next
+	 * NEWS_FILE arrives"). */
+	gsize copied = 0;
+	news_buf = g_realloc (news_buf, 65536);
+	if (hx_news_file_extract (htlc, (char *) news_buf, 65536, &copied)) {
+		news_len = copied;
+	} else {
+		news_len = 0;
+		news_buf[0] = 0;
 	}
-
-	hx_output.news_file(htlc, news_buf, news_len);
+	hx_output.news_file (htlc, (char *) news_buf, news_len);
 }
 
 void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)

@@ -358,6 +358,60 @@ hx_xfer_queue_extract (struct htlc_conn *htlc,
 	return TRUE;
 }
 
+hx_agreement_result
+hx_agreement_extract (struct htlc_conn *htlc, char *out,
+                      gsize out_size, gsize *out_len)
+{
+	dh_start (htlc) {
+		if (_type == HTLS_DATA_NOAGREEMENT)
+			return HX_AGREEMENT_NONE;
+		if (_type != HTLS_DATA_AGREEMENT)
+			continue;
+
+		if (out && out_size > 0) {
+			gsize copy_len = _len;
+			if (copy_len > out_size - 1)
+				copy_len = out_size - 1;
+			memcpy (out, dh->data, copy_len);
+			CR2LF (out, copy_len);
+			strip_ansi (out, copy_len);
+			out[copy_len] = '\0';
+			if (out_len) *out_len = copy_len;
+		}
+		return HX_AGREEMENT_OK;
+	} dh_end ();
+
+	return HX_AGREEMENT_NOT_FOUND;
+}
+
+gboolean
+hx_news_file_extract (struct htlc_conn *htlc, char *out,
+                      gsize out_size, gsize *out_len)
+{
+	if (!out || out_size == 0)
+		return FALSE;
+
+	gboolean found = FALSE;
+	dh_start (htlc) {
+		if (_type != HTLS_DATA_NEWS)
+			continue;
+		if (found)
+			continue;   /* first NEWS chunk wins */
+
+		gsize copy_len = _len;
+		if (copy_len > out_size - 1)
+			copy_len = out_size - 1;
+		memcpy (out, dh->data, copy_len);
+		CR2LF (out, copy_len);
+		strip_ansi (out, copy_len);
+		out[copy_len] = '\0';
+		if (out_len) *out_len = copy_len;
+		found = TRUE;
+	} dh_end ();
+
+	return found;
+}
+
 int
 hx_news_post_walk (struct htlc_conn *htlc,
                    hx_news_post_cb cb, void *user)
