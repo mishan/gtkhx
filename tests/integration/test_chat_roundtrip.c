@@ -37,16 +37,30 @@ hdr_type (const struct htlc_conn *htlc)
 	return ntohl (h->type);
 }
 
-/* Drain server messages until we see one of `wanted_type`. Returns
- * TRUE if found within `max_messages`, FALSE on timeout. */
+/* Drain server messages until we see an HTLS_HDR_CHAT broadcast
+ * whose uid matches `wanted_uid`. We have to filter by uid because
+ * meson runs integration test binaries in parallel: chat broadcasts
+ * from other concurrent test processes (logged in under different
+ * names) hit our connection too, and they'd otherwise be the first
+ * HTLS_HDR_CHAT we see and trick our assertion.
+ *
+ * Returns TRUE if our own chat is found within `max_messages`,
+ * FALSE on timeout. On success the matching message is in htlc->in
+ * and `out` is filled via hx_chat_extract. */
 static gboolean
-drain_until_type (int fd, struct htlc_conn *htlc,
-                  guint32 wanted_type, int max_messages)
+drain_until_own_chat (int fd, struct htlc_conn *htlc,
+                      guint16 wanted_uid,
+                      struct hx_chat_msg *out,
+                      int max_messages)
 {
 	for (int i = 0; i < max_messages; i++) {
 		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
 			return FALSE;
-		if (hdr_type (htlc) == wanted_type)
+		if (hdr_type (htlc) != HTLS_HDR_CHAT)
+			continue;
+		if (!hx_chat_extract (htlc, out))
+			continue;
+		if (out->uid == wanted_uid)
 			return TRUE;
 	}
 	return FALSE;
@@ -70,6 +84,14 @@ send_chat (int fd, struct htlc_conn *htlc, const char *text)
 
 /* ---------- Test cases ---------- */
 
+/* Drain budget: bumped from 4 to 16 to absorb cross-talk from
+ * other concurrent integration tests sharing the same mhxd. We
+ * filter by uid in drain_until_own_chat, so the budget only
+ * controls how patient we are before declaring the server didn't
+ * echo our chat. 16 messages × 3 s timeout = 48 s upper bound;
+ * the test() target's 30 s timeout caps it lower in practice. */
+#define CHAT_DRAIN_BUDGET 16
+
 static void
 test_chat_roundtrip_simple (void)
 {
@@ -82,11 +104,9 @@ test_chat_roundtrip_simple (void)
 	const char *line = "hello from the integration suite";
 	g_assert_true (send_chat (fd, &htlc, line));
 
-	g_assert_true (drain_until_type (
-		fd, &htlc, HTLS_HDR_CHAT, /*max_messages=*/4));
-
 	struct hx_chat_msg cm;
-	g_assert_true (hx_chat_extract (&htlc, &cm));
+	g_assert_true (drain_until_own_chat (
+		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 
 	/* The server prepends the name and a colon to the body via its
 	 * chat_format template. Pin down the parts that should always
@@ -96,10 +116,6 @@ test_chat_roundtrip_simple (void)
 
 	/* cid 0 = main chat (the only chat we ever joined). */
 	g_assert_cmphex (cm.cid, ==, 0);
-
-	/* uid in the broadcast should match our own session uid that
-	 * mhxd assigned us at login. */
-	g_assert_cmphex (cm.uid, ==, htlc.uid);
 
 	integration_release_htlc (&htlc);
 	integration_close (fd);
@@ -122,11 +138,10 @@ test_chat_roundtrip_unicode_payload (void)
 	/* "☃ 日本語" — snowman + Japanese, both common edge cases. */
 
 	g_assert_true (send_chat (fd, &htlc, line));
-	g_assert_true (drain_until_type (
-		fd, &htlc, HTLS_HDR_CHAT, /*max_messages=*/4));
 
 	struct hx_chat_msg cm;
-	g_assert_true (hx_chat_extract (&htlc, &cm));
+	g_assert_true (drain_until_own_chat (
+		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
 
 	integration_release_htlc (&htlc);
@@ -145,17 +160,16 @@ test_chat_roundtrip_two_messages_in_order (void)
 	g_assert_true (send_chat (fd, &htlc, "first message"));
 	g_assert_true (send_chat (fd, &htlc, "second message"));
 
-	/* Read first broadcast. */
-	g_assert_true (drain_until_type (
-		fd, &htlc, HTLS_HDR_CHAT, /*max_messages=*/4));
 	struct hx_chat_msg cm;
-	g_assert_true (hx_chat_extract (&htlc, &cm));
+
+	/* Read first broadcast (filtered to our own uid). */
+	g_assert_true (drain_until_own_chat (
+		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "first message"));
 
 	/* Read second broadcast. */
-	g_assert_true (drain_until_type (
-		fd, &htlc, HTLS_HDR_CHAT, /*max_messages=*/4));
-	g_assert_true (hx_chat_extract (&htlc, &cm));
+	g_assert_true (drain_until_own_chat (
+		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "second message"));
 
 	integration_release_htlc (&htlc);

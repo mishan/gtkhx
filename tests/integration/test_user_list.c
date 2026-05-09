@@ -34,6 +34,13 @@ hdr_type (const struct htlc_conn *htlc)
 	return ntohl (h->type);
 }
 
+static guint32
+hdr_trans (const struct htlc_conn *htlc)
+{
+	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+	return ntohl (h->trans);
+}
+
 static void
 test_user_list_contains_self (void)
 {
@@ -48,19 +55,34 @@ test_user_list_contains_self (void)
 	 * htlc->uid stays. */
 	guint16 self_uid = htlc.uid;
 
+	/* Save the trans value hlpack will assign to our request, so
+	 * we can match the reply against it. mhxd's reply uses the
+	 * SAME trans the request carried — that's how task replies
+	 * are correlated to their originating request. */
+	guint32 our_trans = htlc.trans;
+
 	/* Send HTLC_HDR_USER_GETLIST with no chunks (the request
 	 * carries no payload — server replies with the list). */
 	g_assert_true (integration_send_message (
 		fd, &htlc,
 		HTLC_HDR_USER_GETLIST, /*flag=*/0, /*hc=*/0));
 
-	/* Wait for the TASK reply. mhxd sometimes sends an empty TASK
-	 * "ack" before the populated TASK, so loop. */
+	/* Drain looking for the TASK reply matching our trans. We
+	 * filter by trans because meson runs integration test
+	 * binaries in parallel: USER_CHANGE / CHAT broadcasts from
+	 * other concurrent test processes (each logged in as a
+	 * different user) hit our connection too, and we need to
+	 * walk past them.
+	 *
+	 * Budget: 16 messages × 3 s timeout. The matching TASK
+	 * normally arrives within 1-2 messages even under contention. */
 	gboolean got_user_list = FALSE;
-	for (int i = 0; i < 4 && !got_user_list; i++) {
+	for (int i = 0; i < 16 && !got_user_list; i++) {
 		g_assert_true (integration_recv_message (
 			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)
+			continue;
+		if (hdr_trans (&htlc) != our_trans)
 			continue;
 
 		dh_start (&htlc) {

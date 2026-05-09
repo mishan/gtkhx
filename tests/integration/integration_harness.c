@@ -311,13 +311,26 @@ integration_login_guest (int fd, struct htlc_conn *htlc,
 
 	guint16 icon_be = htons (icon);
 	gsize nlen = strlen (display_name);
+	/* Advertise ourselves as Hotline 1.8.5. mhxd uses this in
+	 * rcv_login to decide whether to set htlc->access_extra.can_ping
+	 * (gated on clientversion >= 150 at src/hxd/rcv.c:1600). Without
+	 * this chunk, mhxd silently rejects HTLC_HDR_PING with a task-
+	 * error. GtkHx's own login path doesn't send it today, but
+	 * sending it here makes the integration suite cover the modern
+	 * client behaviour mhxd was designed against — and lets the
+	 * ping test exercise its actual contract. */
+	guint16 clientversion_be = htons (185);
 
 	return integration_send_message (
 		fd, htlc,
-		HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/3,
-		(int) HTLC_DATA_ICON,  (int) sizeof (icon_be), &icon_be,
-		(int) HTLC_DATA_LOGIN, (int) llen, enclogin,
-		(int) HTLC_DATA_NAME,  (int) nlen, (guint8 *) display_name);
+		HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/4,
+		(int) HTLC_DATA_ICON,          (int) sizeof (icon_be),
+			&icon_be,
+		(int) HTLC_DATA_LOGIN,         (int) llen, enclogin,
+		(int) HTLC_DATA_NAME,          (int) nlen,
+			(guint8 *) display_name,
+		(int) HTLC_DATA_CLIENTVERSION, (int) sizeof (clientversion_be),
+			&clientversion_be);
 }
 
 int

@@ -150,6 +150,14 @@ struct hl_user_data {
 #define HTLC_DATA_ACCESS		((guint16) 0x006e)
 #define HTLC_DATA_BAN			((guint16) 0x0071)
 #define HTLC_DATA_CHAT_ID		((guint16) 0x0072)
+/* mhxd extension. Sent in HTLC_HDR_LOGIN to advertise the client's
+ * Hotline-protocol version. mhxd uses values >= 150 as a "modern
+ * client" gate that unlocks features like HTLC_HDR_PING acceptance
+ * (see mhxd/src/hxd/rcv.c around the can_ping flag set in
+ * rcv_login). GtkHx itself doesn't send this in its production
+ * login path today; the integration test harness sends it so the
+ * Tier 3 PING test exercises the modern-client codepath. */
+#define HTLC_DATA_CLIENTVERSION		((guint16) 0x00a0)
 #define HTLC_DATA_CHAT_SUBJECT		((guint16) 0x0073)
 #define HTLC_DATA_FILE_NAME		((guint16) 0x00c9)
 #define HTLC_DATA_DIR			((guint16) 0x00ca)
