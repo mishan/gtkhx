@@ -18,6 +18,31 @@
 /* Written June, 1988 by Mike Haertel
    Modified July, 1988 by Arthur David Olson to assist BMG speedups  */
 
+/* This is vendored GNU dfa.c circa 1988-2000. Two of GCC's modern
+ * warnings flag idioms baked into the original lex/parse code that
+ * we're not going to refactor:
+ *
+ *   -Wswitch                — case statements cover both 'token' enum
+ *                             values and raw ASCII chars (e.g. '$',
+ *                             '(', '*'). The switch expression is
+ *                             unsigned int so this is well-defined,
+ *                             but GCC sees the case labels falling
+ *                             outside the named enum and complains.
+ *
+ *   -Wimplicit-fallthrough  — three deliberate fall-throughs in the
+ *                             dfaanalyze tokenizer (STAR/PLUS into
+ *                             QMARK, default into EMPTY, etc.). The
+ *                             algorithm depends on them.
+ *
+ *   -Wstrict-prototypes     — one K&R-style empty-paren declaration
+ *                             of a static helper.
+ *
+ * Suppress these inside dfa.c rather than restructuring the parser. */
+#pragma GCC diagnostic ignored "-Wswitch"
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#pragma GCC diagnostic ignored "-Wshadow"
+
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif

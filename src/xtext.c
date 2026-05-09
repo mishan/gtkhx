@@ -27,6 +27,15 @@
  * of edits.  The diff against upstream is intentionally narrow so we can
  * pull future bug fixes by re-running the same elision pass.
  *
+ * To keep that diff narrow — and because hexchat's xtext picked specific
+ * char/uchar conventions and inner-shadowing patterns we won't be undoing
+ * — suppress the warnings the vendored code naturally trips on:
+ *   -Wpointer-sign           (gchar/unsigned-char mixing on strings)
+ *   -Wshadow                 (small inner-scope re-declarations)
+ *   -Wsign-compare           (comparisons mixing signed/unsigned ints)
+ *   -Wcast-function-type     (GtkXText class_init / instance_init casts)
+ *   -Wimplicit-fallthrough   (one deliberate fall-through in find_next_wrap)
+ *
  * Glue replaced relative to upstream:
  *   - hexchat config.h / fe-gtk.h / fkeys.h includes are gone
  *   - prefs.hex_text_autocopy_*, hex_stamp_text, hex_text_indent live in
@@ -43,6 +52,13 @@
  *     with g_cclosure_marshal_generic
  *   - gtk_xtext_set_marker_last(session*) removed
  */
+
+/* See the file-header comment for the rationale on these. */
+#pragma GCC diagnostic ignored "-Wpointer-sign"
+#pragma GCC diagnostic ignored "-Wshadow"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
 
 #define GDK_MULTIHEAD_SAFE
 #define MARGIN 2						/* dont touch. */
