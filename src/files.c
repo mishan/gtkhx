@@ -1327,7 +1327,7 @@ void cfl_print (struct cached_filelist *cfl, void *data)
 
 struct x_fhdr {
 	guint16 enc PACKED;
-	guint8 len, name[1] PACKED;
+	guint8 len, name[1];
 };
 
 guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file)

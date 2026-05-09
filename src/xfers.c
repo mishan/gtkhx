@@ -532,7 +532,7 @@ static void *get_thread (void *__arg)
 		post_file_update(htxf);
 	}
 	memcpy(typecrea, &buf[4], 8);
-	memset(&fi, 0, sizeof(struct hfs_cap_info));
+	memset(&fi, 0, sizeof(fi));
 	fi.comlen = buf[73 + buf[71]];
 	memcpy(fi.type, "HTftHTLC", 8);
 	memcpy(fi.comment, &buf[74 + buf[71]], fi.comlen);

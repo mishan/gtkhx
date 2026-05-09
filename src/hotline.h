@@ -14,13 +14,13 @@ struct hl_hdr {
 	guint32	len PACKED,
 			len2 PACKED;
 	guint16	hc PACKED;
-	guint8	data[ZERO_SIZE_ARRAY_SIZE] PACKED;
+	guint8	data[ZERO_SIZE_ARRAY_SIZE];
 };
 
 struct hl_data_hdr {
 	guint16	type PACKED,
 			len PACKED;
-	guint8	data[ZERO_SIZE_ARRAY_SIZE] PACKED;
+	guint8	data[ZERO_SIZE_ARRAY_SIZE];
 };
 
 struct htxf_hdr {
@@ -38,7 +38,7 @@ struct hl_filelist_hdr {
 	guint32	fsize PACKED,
 			unknown PACKED,
 			fnlen PACKED;
-	guint8	fname[ZERO_SIZE_ARRAY_SIZE] PACKED;
+	guint8	fname[ZERO_SIZE_ARRAY_SIZE];
 };
 
 struct hl_userlist_hdr {
@@ -48,7 +48,7 @@ struct hl_userlist_hdr {
 			icon PACKED,
 			color PACKED,
 			nlen PACKED;
-	guint8	name[ZERO_SIZE_ARRAY_SIZE] PACKED;
+	guint8	name[ZERO_SIZE_ARRAY_SIZE];
 };
 
 struct htrk_hdr {

@@ -369,16 +369,37 @@ hfsinfo_read (const char *path, struct hfsinfo *fi)
 									fi->comlen = 0;
 								break;
 							case HFS_HDR_OLDI:
-							case HFS_HDR_DATES:
-								r = read(f, &fi->create_time, 8);
-								if (r != 8)
+							case HFS_HDR_DATES: {
+								/* DATES record on disk is two 4-byte
+								 * timestamps; we copy them out of a
+								 * local buffer so GCC doesn't see us
+								 * write 8 bytes through a 4-byte
+								 * field pointer (-Wstringop-overflow). */
+								u_int8_t tbuf[8];
+								r = read(f, tbuf, sizeof (tbuf));
+								if (r != (int) sizeof (tbuf)) {
 									fi->create_time = fi->modify_time = 0;
+								} else {
+									memcpy(&fi->create_time, tbuf, 4);
+									memcpy(&fi->modify_time, tbuf + 4, 4);
+								}
 								break;
-							case HFS_HDR_FINFO:
-								r = read(f, fi->type, 8);
-								if (r != 8)
-									memset(fi->type, 0, 8);
+							}
+							case HFS_HDR_FINFO: {
+								/* FINFO is type[4] then creator[4] on
+								 * disk. Same warning-avoidance dance
+								 * as DATES above. */
+								u_int8_t fbuf[8];
+								r = read(f, fbuf, sizeof (fbuf));
+								if (r != (int) sizeof (fbuf)) {
+									memset(fi->type, 0, sizeof (fi->type));
+									memset(fi->creator, 0, sizeof (fi->creator));
+								} else {
+									memcpy(fi->type, fbuf, sizeof (fi->type));
+									memcpy(fi->creator, fbuf + 4, sizeof (fi->creator));
+								}
 								break;
+							}
 							case HFS_HDR_RSRC:
 								fi->rsrclen = ntohl(descr->length);
 								break;

@@ -784,9 +784,16 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 	/* no match, if we found more common chars among matches, display 
 	   them in entry */
 	if (match_user == NULL) {
+		size_t nb_off = 0;
 		while (match_list) {
+			int n;
 			nick = ((struct hx_user *)match_list->data)->name;
-			sprintf (nick_buf, "%s%s ", nick_buf, nick);
+			n = snprintf (nick_buf + nb_off,
+			              sizeof (nick_buf) - nb_off,
+			              "%s ", nick);
+			if (n < 0 || (size_t) n >= sizeof (nick_buf) - nb_off)
+				break;
+			nb_off += (size_t) n;
 			match_list = g_slist_next (match_list);
 		}
 		hx_printf(&sess->htlc, 0, "%s", nick_buf);

@@ -340,19 +340,19 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
 
 	len = strlen (login);
 	len_total = 33 - len;
-	fprintf (bm, "%c", len);
+	fprintf (bm, "%c", (int) len);
 	fprintf (bm, "%s", login);
 	fwrite (zeros, 1, len_total, bm);
 
 	len = strlen (pass);
 	len_total = 33 - len;
-	fprintf (bm, "%c", len);
+	fprintf (bm, "%c", (int) len);
 	fprintf (bm, "%s", pass);
 	fwrite (zeros, 1, len_total, bm);
 
 	len = strlen (server);
 	len_total = 256 - len;
-	fprintf (bm, "%c", len);
+	fprintf (bm, "%c", (int) len);
 	fprintf (bm, "%s", server);
 
 	/* secure:0, compress:0, cipher:0 */
@@ -819,17 +819,17 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response, gpointer d
 
 	len = strlen (login);
 	len_total = 33 - len;
-	fprintf (bookmark, "%c%s", len, login);
+	fprintf (bookmark, "%c%s", (int) len, login);
 	fwrite (zeros, 1, len_total, bookmark);
 
 	len = strlen (pass);
 	len_total = 33 - len;
-	fprintf (bookmark, "%c%s", len, pass);
+	fprintf (bookmark, "%c%s", (int) len, pass);
 	fwrite (zeros, 1, len_total, bookmark);
 
 	len = strlen (server_str);
 	len_total = 256 - len;
-	fprintf (bookmark, "%c%s", len, server_str);
+	fprintf (bookmark, "%c%s", (int) len, server_str);
 
 	fprintf (bookmark, "%c%c%c", secure, compress, cipher);
 	len_total -= 3;
