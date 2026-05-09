@@ -36,6 +36,7 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "debug.h"
+#include "news.h"
 
 
 static GtkWidget *post_window;

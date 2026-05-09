@@ -40,6 +40,7 @@
 #include "sound.h"
 #include "msg.h"
 #include <getopt.h>
+#include "commands.h"
 
 
 void

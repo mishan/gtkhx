@@ -1153,6 +1153,7 @@ void hotline_client_init (int argc, char **argv);
 
 #if !defined(_SC_OPEN_MAX) && defined(HAVE_GETRLIMIT)
 #include <sys/resource.h>
+#include "gtkhx.h"
 #endif
 
 static RETSIGTYPE
@@ -1249,7 +1250,7 @@ char *hxd_commands[] = {
 
 int hxdcmd_len = sizeof(hxd_commands)/sizeof(hxd_commands[0]);
 
-int is_hxdcmd(char *str)
+static int is_hxdcmd(char *str)
 {
 	int i;
 	char *ptr;
@@ -1327,7 +1328,7 @@ void get_password(char *buf)
 	}
 }
 
-void print_help (char *name)
+static void print_help (char *name)
 {
 	printf(_("GtkHx %s, Copyright (C) 2000-2002 Misha Nasledov\n"), VERSION);
 	printf(_("GtkHx comes with ABSOLUTELY NO WARRANTY.\n"));

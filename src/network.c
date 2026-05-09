@@ -50,6 +50,7 @@
 #include "inet.h"
 #include "log.h"
 #include "proto_trace.h"
+#include "network.h"
 
 char *server_addr;
 #ifdef USE_IPV6

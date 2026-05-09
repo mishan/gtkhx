@@ -1122,7 +1122,7 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 	gfl->in_use = 0;
 }
 
-void set_name_comment(GtkWidget *btn, gpointer data)
+static void set_name_comment(GtkWidget *btn, gpointer data)
 {
 	GtkWidget *name_entry    = g_object_get_data (G_OBJECT (btn), "name");
 	GtkWidget *comments_text = g_object_get_data (G_OBJECT (btn), "comments");
@@ -1174,7 +1174,7 @@ void set_name_comment(GtkWidget *btn, gpointer data)
 	g_free (comments);
 }
 
-void close_file_info(GtkWidget *win, char *path)
+static void close_file_info(GtkWidget *win, char *path)
 {
 	g_free(path);
 }

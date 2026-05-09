@@ -36,6 +36,7 @@
 #include "gtkutil.h"
 #include "tasks.h"
 #include "rcv.h"
+#include "users.h"
 
 static int user_storow, user_stocolumn;
 
@@ -461,7 +462,7 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	gtk_popover_popup (GTK_POPOVER (popover));
 }
 
-int users_sort(GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
+static int users_sort(GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
 {
 	const GtkHListRow *row1 = ptr1;
 	const GtkHListRow *row2 = ptr2;
@@ -492,7 +493,7 @@ int users_sort(GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
 	return 0;
 }
 
-void usercol_clicked(GtkWidget *clist, gint col, gpointer data)
+static void usercol_clicked(GtkWidget *clist, gint col, gpointer data)
 {
 	user_click_col = col;
 	gtk_hlist_sort(GTK_HLIST(clist));

@@ -519,7 +519,7 @@ task_go (GtkWidget *widget, gpointer data)
  * Phase 4.5: gone — GTK 4 widgets don't fire configure-event. Tasks
  * window size is captured at hx_quit() in gtkhx.c. */
 
-void task_tasks_update (session *sess)
+static void task_tasks_update (session *sess)
 {
 	struct task *tsk;
 

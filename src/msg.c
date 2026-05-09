@@ -37,6 +37,7 @@
 #include "tasks.h"
 #include "connect.h"
 #include "toolbar.h"
+#include "msg.h"
 
 void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)

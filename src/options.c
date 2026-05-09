@@ -44,6 +44,7 @@
 #include "gtkutil.h"
 #include "cfgkeys.h"
 #include "prefs_parser.h"
+#include "options.h"
 
 /* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
  * for the icon viewer and the prefs notebook tree (Phase 2.x work),
@@ -121,7 +122,7 @@ static void icon_flow_child_activated (GtkFlowBox *flowbox,
                                        GtkFlowBoxChild *child,
                                        gpointer data);
 
-void list_icons (void)
+static void list_icons (void)
 {
 	/* Phase 5: replaced the 1-row-per-icon GtkHList layout (18px tall
 	 * rows, 34px icons) with a GtkFlowBox that auto-flows multiple

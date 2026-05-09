@@ -1042,7 +1042,7 @@ void create_chat(session *sess)
 	sess->gchat_list = gchat;
 }
 
-void change_subject(GtkWidget *widget, gpointer data)
+static void change_subject(GtkWidget *widget, gpointer data)
 {
 	char *subject;
 

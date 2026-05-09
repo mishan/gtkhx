@@ -36,6 +36,7 @@
 #include "gtk_hlist.h"
 #include "dfa.h"
 #include "chat.h"
+#include "tracker.h"
 
 static GtkWidget *tracker_window;
 static GtkWidget *tracker_list;
@@ -143,7 +144,7 @@ void tracker_kill_threads(void)
 	pthread_join(tid, NULL);
 }
 
-void tracker_sighandler (int signum)
+static void tracker_sighandler (int signum)
 {
 	pthread_exit(0);
 }
@@ -248,7 +249,7 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 	tracker_search_tree(preg, root->right);
 }
 
-void tracker_search  (GtkWidget *widget, gpointer data)
+static void tracker_search  (GtkWidget *widget, gpointer data)
 {
 	char *num, *str;
 
@@ -270,14 +271,14 @@ void tracker_search  (GtkWidget *widget, gpointer data)
 }
 
 
-int find_server (struct in_addr addr, guint16 port, struct tracker_server *root)
+static int find_server (struct in_addr addr, guint16 port, struct tracker_server *root)
 {
 	/* a one-liner to traverse a binary search tree ...
 	   kids: don't do this for your computer science course! */
 	return (root && (((root->addr.s_addr == addr.s_addr) && (root->port == port)) || (find_server(addr, port, (root->addr.s_addr == addr.s_addr) ? ((root->port > port) ? root->left : root->right) : ((root->addr.s_addr > addr.s_addr) ? root->left : root->right)))));
 }
 
-void insert_server (struct tracker_server *server, struct tracker_server *root)
+static void insert_server (struct tracker_server *server, struct tracker_server *root)
 {
 	/* tree is null...set this server as the root */
 	if(!tracker_server_tree) {

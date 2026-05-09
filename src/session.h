@@ -297,7 +297,7 @@ struct output_functions {
 	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
 	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
 	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_list)(struct htlc_conn *htlc);
+	void (*user_list)(session *sess);
 	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
 	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
 	void (*file_update)(session *sess, struct htxf_conn *htxf);

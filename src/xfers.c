@@ -45,6 +45,7 @@
 #include "files.h"
 #include "preview.h"
 #include "gtkthreads.h"
+#include "xfers.h"
 
 int nxfers = 0;
 struct htxf_conn **xfers = 0;

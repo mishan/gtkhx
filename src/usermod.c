@@ -32,6 +32,7 @@
 #include "gtk_hlist.h"
 #include "gtkutil.h"
 #include "toolbar.h"
+#include "usermod.h"
 
 #define NACCESS	28
 void create_useredit_window (char *login, int new);

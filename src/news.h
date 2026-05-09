@@ -5,7 +5,7 @@ extern GtkWidget *reloadButton;
 extern GtkWidget *postButton;
 
 extern void reload_news (GtkWidget *widget, gpointer data);
-extern void create_post_window (void);
+extern void create_post_window (GtkWidget *widget, gpointer data);
 extern void create_news_window (session *sess);
 extern void open_news (GtkWidget *widget, gpointer data);
 

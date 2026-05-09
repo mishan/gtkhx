@@ -112,7 +112,7 @@ gtkhx_gsound_play_done (GObject *source, GAsyncResult *result, gpointer data)
 	g_free (path);
 }
 
-void play (char *name)
+static void play (char *name)
 {
 	GSoundContext *ctx;
 	char          *path;

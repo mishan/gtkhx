@@ -17,7 +17,7 @@ extern PangoFontDescription *users_font_desc;
 
 
 extern void create_users_window (GtkWidget *widget, gpointer data);
-extern void user_list (struct htlc_conn *htlc);
+extern void user_list (session *sess);
 extern void user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
 extern void user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
 extern void user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);

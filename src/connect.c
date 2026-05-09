@@ -32,6 +32,7 @@
 #include "gtkutil.h"
 #include "gtkhx.h"
 #include "toolbar.h"
+#include "connect.h"
 
 /* Phase 5: the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
  * that used to live here suppressed warnings from the GtkComboBoxText
