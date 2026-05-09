@@ -404,3 +404,43 @@ test_integration_ping = executable('test_integration_ping',
 test('ping', test_integration_ping,
      suite   : 'integration',
      timeout : 30)
+
+# file_list — request the root file list and verify the round-trip
+# completes (whether with a real listing or a tolerant task-error
+# if files/ is empty on the server).
+test_integration_file_list = executable('test_integration_file_list',
+  'integration/test_file_list.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_list', test_integration_file_list,
+     suite   : 'integration',
+     timeout : 30)
+
+# news_fetch — HTLC_HDR_NEWS_GETFILE round-trip. Verifies the
+# server returns the news body and uses hx_news_file_extract
+# (a Tier 2 helper) to parse the chunk.
+test_integration_news_fetch = executable('test_integration_news_fetch',
+  'integration/test_news_fetch.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('news_fetch', test_integration_news_fetch,
+     suite   : 'integration',
+     timeout : 30)
+
+# two_client_chat — the cross-user broadcast path. Client A sends
+# chat, client B (a separate logged-in connection) receives it
+# tagged with A's uid + name. Proves the server actually fans out
+# to all members.
+test_integration_two_client_chat = executable('test_integration_two_client_chat',
+  'integration/test_two_client_chat.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('two_client_chat', test_integration_two_client_chat,
+     suite   : 'integration',
+     timeout : 30)
