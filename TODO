@@ -29,7 +29,7 @@ Tracker
 
 Code Modernization:
 - Better modules with more code reuse
-- Define string / resource consts instead of repeating them
+- Define string / resource consts instead of repeating them (or having them littered throughout the code)
 - Separation of concerns -- separate UI code from non-UI code
 - Follow MVC architecture
 
