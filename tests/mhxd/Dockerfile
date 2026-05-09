@@ -38,6 +38,17 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 
 # Pull mhxd master and build with the feature set GtkHx exercises:
 #
+#   --enable-hxd          — the actual server binary. Despite the help
+#                           text saying --disable-hxd, the default is
+#                           OFF: there's an auto-enable-if-nothing-else
+#                           in configure.in, but it's defeated as soon
+#                           as we pass --enable-hxtrackd. Explicit is
+#                           safer than implicit, so we pass it.
+#   --enable-hx           — text-mode hx client. Not strictly needed
+#                           but pulling it in is what the
+#                           --enable-all path does, and gates the
+#                           same -I../cipher path the server's
+#                           common code needs.
 #   --with-pthreads       — thread model (mhxd's default is fork/clone)
 #   --enable-hope         — secure login handshake; GtkHx negotiates this
 #   --enable-cipher       — Blowfish/RC4 link encryption
@@ -49,6 +60,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 #                           server side, mirrors what GtkHx's
 #                           GTKHX_DEBUG=proto does on the client.
 #
+# Without --enable-hxd / --enable-hx, configure leaves the
+# `-I../cipher` substitution out of COMMONINCLUDES, and src/common
+# fails to compile with `cipher.h: No such file or directory`. The
+# guard at configure.in:779 reads
+#   if test $enable_hxd = yes -o $enable_hx = yes; then
+#     ... COMMONINCLUDES="$COMMONINCLUDES -I../cipher"
+# so we have to opt in explicitly.
+#
 # `make -j$(nproc) || make` because mhxd's autotools graph isn't
 # fully parallel-safe — fall back to single-job if the parallel run
 # stumbled.
@@ -58,6 +77,8 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
     && ./autogen.sh \
     && ./configure \
         --prefix=/opt/mhxd \
+        --enable-hxd \
+        --enable-hx \
         --with-pthreads \
         --enable-hope \
         --enable-cipher \
@@ -65,7 +86,7 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
         --enable-ipv6 \
         --enable-hxtrackd \
         --enable-hldump \
-    && make -j"$(nproc)" || make \
+    && (make -j"$(nproc)" || make) \
     && make install
 
 # Runtime config skeleton. mhxd wants a directory with hxd.conf,
