@@ -514,16 +514,29 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 								write(f, fi->comment, fi->comlen);
 								break;
 							case HFS_HDR_OLDI:
-							case HFS_HDR_DATES:
+							case HFS_HDR_DATES: {
+								/* DATES record on disk is two 4-byte
+								 * timestamps stored back-to-back. Same
+								 * pattern as hfsinfo_read above; copy
+								 * to a local buffer to avoid a pointer
+								 * read past the create_time field. */
+								u_int8_t tbuf[8];
 								if (descr->length < 8)
 									descr->length = 8;
-								write(f, &fi->create_time, 8);
+								memcpy(tbuf, &fi->create_time, 4);
+								memcpy(tbuf + 4, &fi->modify_time, 4);
+								write(f, tbuf, sizeof (tbuf));
 								break;
-							case HFS_HDR_FINFO:
+							}
+							case HFS_HDR_FINFO: {
+								u_int8_t fbuf[8];
 								if (descr->length < 8)
 									descr->length = 8;
-								write(f, fi->type, 8);
+								memcpy(fbuf, fi->type, 4);
+								memcpy(fbuf + 4, fi->creator, 4);
+								write(f, fbuf, sizeof (fbuf));
 								break;
+							}
 							case HFS_HDR_RSRC:
 								descr->length = htonl(fi->rsrclen);
 								break;

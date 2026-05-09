@@ -734,7 +734,12 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 			   node1->data && node2->data && (node1->data != node2->data) &&
 			   !strcasecmp(((struct hx_user *)node1->data)->name,
 						   ((struct hx_user *)node2->data)->name)) {
-				g_slist_remove(match_list, node2->data);
+				/* g_slist_remove returns the (possibly new) list head;
+				 * dropping it leaks the change for any case where
+				 * node2 was the head node, AND triggers
+				 * -Wunused-result on the warn_unused_result
+				 * attribute. Capture and re-seat. */
+				match_list = g_slist_remove(match_list, node2->data);
 				match_count--;
 			}
 		}

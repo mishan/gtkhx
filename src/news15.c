@@ -640,7 +640,7 @@ void output_news_folder (struct gnews_folder *gfnews)
 	GtkWidget *news_list;
 	gint row, i;
 	GdkPixmap *icon;
-	GdkBitmap *mask;
+	GdkBitmap *mask = NULL;
 	struct path_hist *path = NULL;
 
 	news_list = gfnews->news_list;
