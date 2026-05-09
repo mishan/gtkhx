@@ -180,6 +180,8 @@ compress_encode_init (struct htlc_conn *htlc)
 	err = deflateInit(stream, level);
 #if COMPRESS_DEBUG
 	writestuff("di: ", err, 0, 0);
+#else
+	(void) err;
 #endif
 }
 
@@ -196,6 +198,8 @@ compress_decode_init (struct htlc_conn *htlc)
 	err = inflateInit(stream);
 #if COMPRESS_DEBUG
 	writestuff("ii: ", err, 0, 0);
+#else
+	(void) err;
 #endif
 }
 

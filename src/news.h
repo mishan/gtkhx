@@ -1,8 +1,6 @@
 #ifndef HX_NEWS_H
 #define HX_NEWS_H
 
-extern GtkWidget *reloadButton;
-extern GtkWidget *postButton;
 
 extern void reload_news (GtkWidget *widget, gpointer data);
 extern void create_post_window (GtkWidget *widget, gpointer data);

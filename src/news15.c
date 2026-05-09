@@ -131,7 +131,7 @@ void hx_news15_fldr_list(struct htlc_conn *htlc, struct gnews_folder *gfnews)
 	g_free(hldir);
 }
 
-static void hx_news15_post_thread(struct htlc_conn *htlc, char *path, char *subject,
+static void hx_news15_post_thread(struct htlc_conn *htlc, char *path, const char *subject,
 						   guint32 threadid, char *text)
 {
 	guint8 *hldir;
@@ -180,7 +180,7 @@ static void hx_news15_delete(struct htlc_conn *htlc, char *path)
 	g_free(hldir);
 }
 
-static void hx_news15_mkcat(struct htlc_conn *htlc, char *path, char *name)
+static void hx_news15_mkcat(struct htlc_conn *htlc, char *path, const char *name)
 {
 	guint8 *hldir;
 	guint16 hldirlen;

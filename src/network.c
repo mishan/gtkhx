@@ -297,12 +297,12 @@ decode (struct htlc_conn *htlc)
 
 #ifdef CONFIG_CIPHER
 #ifdef CONFIG_COMPRESS
-	if (htlc->compressalg && htlc->compress_decode_type != COMPRESS_NONE)
+	if (htlc->compressalg[0] && htlc->compress_decode_type != COMPRESS_NONE)
 		max = 0xffffffff;
 	else
 #endif
 		max = htlc->in.len;
-	if (htlc->cipheralg && htlc->cipher_decode_type != CIPHER_NONE) {
+	if (htlc->cipheralg[0] && htlc->cipher_decode_type != CIPHER_NONE) {
 		memcpy(&cipher_state, &htlc->cipher_decode_state, sizeof(cipher_state));
 		out = &cipher_out;
 		len = cipher_decode(htlc, out, in, max, &inused);

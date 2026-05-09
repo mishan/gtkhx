@@ -1044,10 +1044,10 @@ void create_chat(session *sess)
 
 static void change_subject(GtkWidget *widget, gpointer data)
 {
-	char *subject;
+	const char *subject;
 
 	subject = gtk_editable_get_text(GTK_EDITABLE(widget));
-	hx_change_subject(&the_session.htlc, GPOINTER_TO_INT(data), subject);
+	hx_change_subject(&the_session.htlc, GPOINTER_TO_INT(data), (char *) subject);
 }
 
 void create_chat_window (GtkWidget *widget, gpointer data)

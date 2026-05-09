@@ -204,7 +204,7 @@ extern int integration_connect_xfer (void);
  * Send the 16-byte HTXF transfer header that initiates a file
  * transfer subchannel exchange:
  *
- *   guint32 magic    = htonl(0x48545846)   /* "HTXF" *\/
+ *   guint32 magic    = htonl(0x48545846)   // "HTXF"
  *   guint32 ref      = htonl(ref_from_TASK_reply)
  *   guint32 size     = htonl(total_size_from_TASK_reply)
  *   guint32 unknown  = 0

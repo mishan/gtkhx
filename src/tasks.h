@@ -1,7 +1,6 @@
 #ifndef HX_TASKS_H
 #define HX_TASKS_H
 
-extern GtkWidget *tasks_window;
 
 extern void create_tasks (session *sess);
 extern void output_xfer_queue (session *sess, struct htxf_conn *htxf);

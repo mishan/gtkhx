@@ -251,7 +251,8 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 
 static void tracker_search  (GtkWidget *widget, gpointer data)
 {
-	char *num, *str;
+	char *num;
+	const char *str;
 
 	dfafree(current_search);
 	current_search = g_malloc(sizeof(struct dfa));

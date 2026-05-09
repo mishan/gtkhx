@@ -42,9 +42,6 @@
 static GtkWidget *post_window;
 static GtkWidget *postprompt;
 
-GtkWidget *reloadButton;
-GtkWidget *postButton;
-
 /* Phase 5: gtkhx_text_to_utf8 → gtkhx_text_to_utf8 (moved to
  * gtkutil — server names, news bodies, post subjects all want the
  * same Mac Roman / Latin-1 / already-UTF-8 fallback chain). The

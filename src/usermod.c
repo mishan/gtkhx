@@ -184,8 +184,7 @@ useredit_login (char *login, struct useredit_session *ues)
 	size_t len;
 
 
-	if (&the_session.htlc)
-		hx_useredit_open(&the_session.htlc, login, user_open, ues);
+	hx_useredit_open(&the_session.htlc, login, user_open, ues);
 	len = strlen(login);
 	if (len > 31)
 		len = 31;
@@ -211,8 +210,8 @@ useredit_open_response (AdwAlertDialog *dialog, const char *response,
 
 static void useredit_name_pass(GtkWidget *name_entry, GtkWidget *pass_entry, struct useredit_session *ues)
 {
-	char *name;
-	char *pass;
+	const char *name;
+	const char *pass;
 	size_t len;
 
 	name = gtk_editable_get_text(GTK_EDITABLE(name_entry));
@@ -232,7 +231,7 @@ static void useredit_name_pass(GtkWidget *name_entry, GtkWidget *pass_entry, str
 
 static void useredit_get_login(GtkWidget *login_entry, struct useredit_session *ues)
 {
-	char *login;
+	const char *login;
 	size_t len;
 
 	login = gtk_editable_get_text(GTK_EDITABLE(login_entry));
@@ -277,9 +276,7 @@ useredit_save (GtkWidget *widget, gpointer data)
 		useredit_get_login(ues->login_entry, ues);
 		new = 0;
 	}
-	if (&the_session.htlc) {
-		hx_useredit_create(&the_session.htlc, ues->login, ues->pass, ues->name, ues->access_buf);
-	}
+	hx_useredit_create(&the_session.htlc, ues->login, ues->pass, ues->name, ues->access_buf);
 }
 
 static void
@@ -287,8 +284,7 @@ useredit_delete (GtkWidget *widget, gpointer data)
 {
 	struct useredit_session *ues = (struct useredit_session *)data;
 
-	if (&the_session.htlc)
-		hx_useredit_delete(&the_session.htlc, ues->login);
+	hx_useredit_delete(&the_session.htlc, ues->login);
 	gtkhx_widget_destroy(ues->window);
 }
 
