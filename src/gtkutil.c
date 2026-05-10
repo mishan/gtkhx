@@ -79,6 +79,23 @@ keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
 	return TRUE;
 }
 
+/* Phase 5: Ctrl+W — close the focused window. Skips the toolbar
+ * (the toolbar is the application's anchor; closing it via the WM's
+ * X button does drive hx_quit, but we don't want a casual Ctrl+W to
+ * tear down the whole app). For every other window, route through
+ * gtk_window_close so the existing close-request handler still
+ * runs — keeps preference / position saving in lockstep with the
+ * normal close path. The widget arg is the controller's widget
+ * (the window we attached to), so casting to GtkWindow is safe. */
+static gboolean
+keyaccel_close_cb (GtkWidget *w, GVariant *args, gpointer data)
+{
+	(void) args; (void) data;
+	if (GTK_IS_WINDOW (w))
+		gtk_window_close (GTK_WINDOW (w));
+	return TRUE;
+}
+
 void init_keyaccel (GtkWidget *widget)
 {
 	GtkEventController *ctrl = gtk_shortcut_controller_new ();
@@ -97,6 +114,18 @@ void init_keyaccel (GtkWidget *widget)
 		gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
 	gtk_shortcut_controller_add_shortcut (
 		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	/* Ctrl+W → close, except on the toolbar (see keyaccel_close_cb).
+	 * Compared by pointer equality: at this call site, toolbar.c
+	 * passes the same toolbar_window global that we read here. */
+	if (widget != toolbar_window) {
+		sc = gtk_shortcut_new (
+			gtk_keyval_trigger_new ('w', GDK_CONTROL_MASK),
+			gtk_callback_action_new (keyaccel_close_cb,
+			                         NULL, NULL));
+		gtk_shortcut_controller_add_shortcut (
+			GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+	}
 
 	gtk_widget_add_controller (widget, ctrl);
 }

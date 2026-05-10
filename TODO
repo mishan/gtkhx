@@ -1,3 +1,6 @@
+New Hotline Features:
+- Banner support (integrate into Toolbar?)
+
 Docs:
 - Rewrite README to explain this project better
 - Write a section about migrating from 0.9.4 to modern versions
