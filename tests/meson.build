@@ -596,3 +596,60 @@ test_integration_file_put = executable('test_integration_file_put',
 test('file_put', test_integration_file_put,
      suite   : 'integration',
      timeout : 30)
+
+# file_info — HTLC_HDR_FILE_GETINFO on the seeded test.txt. Verifies
+# the TASK reply carries HTLS_DATA_FILE_NAME and a FILE_SIZE that
+# matches the 12-byte "hello world\n" payload.
+test_integration_file_info = executable('test_integration_file_info',
+  'integration/test_file_info.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_info', test_integration_file_info,
+     suite   : 'integration',
+     timeout : 30)
+
+# file_list_subdir — FILE_LIST with a hand-built HTLC_DATA_DIR
+# pointing at the seeded files/Uploads/ subdirectory. Covers the
+# DIR-chunked variant of file listing (the existing test_file_list
+# only exercises the no-DIR root path).
+test_integration_file_list_subdir = executable('test_integration_file_list_subdir',
+  'integration/test_file_list_subdir.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_list_subdir', test_integration_file_list_subdir,
+     suite   : 'integration',
+     timeout : 30)
+
+# chat_join — Bob accepts Alice's private-chat invite via
+# HTLC_HDR_CHAT_JOIN. Verifies Bob's TASK reply carries USER_LIST
+# entries for the joined members AND that Alice's connection sees
+# HTLS_HDR_CHAT_USER_CHANGE tagged with Bob's uid. Pins down
+# mhxd's rcv_chat_join broadcast loop end-to-end.
+test_integration_chat_join = executable('test_integration_chat_join',
+  'integration/test_chat_join.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_join', test_integration_chat_join,
+     suite   : 'integration',
+     timeout : 30)
+
+# chat_decline — Bob refuses Alice's private-chat invite via
+# HTLC_HDR_CHAT_DECLINE. mhxd's rcv_chat_decline is silent (no
+# reply, no broadcast); we round-trip a PING on each side after
+# the decline to prove no stray frames slipped in and the
+# connections stay healthy.
+test_integration_chat_decline = executable('test_integration_chat_decline',
+  'integration/test_chat_decline.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_decline', test_integration_chat_decline,
+     suite   : 'integration',
+     timeout : 30)
