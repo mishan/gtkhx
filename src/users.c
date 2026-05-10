@@ -242,53 +242,92 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
 		prompt_chat (ctx->sess, ctx->user->uid);
 }
 
-static const GActionEntry user_action_entries[] = {
-	{ "kick",     on_user_kick,     NULL, NULL, NULL, {0} },
-	{ "ban",      on_user_ban,      NULL, NULL, NULL, {0} },
-	{ "ignore",   on_user_ignore,   NULL, NULL, NULL, {0} },
-	{ "unignore", on_user_unignore, NULL, NULL, NULL, {0} },
-	{ "info",     on_user_info,     NULL, NULL, NULL, {0} },
-	{ "msg",      on_user_msg,      NULL, NULL, NULL, {0} },
-	{ "pchat",    on_user_pchat,    NULL, NULL, NULL, {0} },
-};
+/* Phase 5: the GActionEntry table that drove the old GtkPopoverMenu
+ * is gone — the bare-popover rewrite invokes the on_user_* handlers
+ * directly via on_user_btn_clicked. The handler signatures still
+ * take (GSimpleAction*, GVariant*, gpointer) so a future caller that
+ * wants to reach them through GAction can do so without re-shaping
+ * the body of each handler. */
 
 static void
 user_popover_closed (GtkPopover *popover, gpointer data)
 {
-	GtkWidget *anchor;
 	(void) data;
-
-	/* Phase 5: clear the "user" action group we installed on the
-	 * anchor in user_popup. Each right-click installs a fresh
-	 * action group with handlers bound to the just-clicked user;
-	 * leaving the previous group on the anchor would leak the ctx
-	 * + run handlers against a stale user pointer if the popover
-	 * is somehow re-shown without re-creating it. Passing NULL
-	 * clears the slot. */
-	anchor = g_object_get_data (G_OBJECT (popover), "user-action-anchor");
-	if (anchor)
-		gtk_widget_insert_action_group (anchor, "user", NULL);
-
-	/* Phase 4.7: the GtkPopoverMenu was parented to the user list with
-	 * gtk_widget_set_parent; reverse it on close so the popover and its
-	 * action context are released. */
+	/* Unparent on close so the popover, its ctx, and per-button
+	 * closures all get released. The popover was parented to the
+	 * user list anchor in user_popup. */
 	gtk_widget_unparent (GTK_WIDGET (popover));
+}
+
+/* Per-button closure carries the user context plus the action
+ * handler to invoke on click. The action handlers' signatures
+ * still take (GSimpleAction*, GVariant*, gpointer) so the on_user_*
+ * functions can stay shared with any future code that wants to
+ * drive them through GAction; we just pass NULL/NULL here. */
+struct user_btn_ctx {
+	struct UserActionCtx *user_ctx;
+	void (*activate)(GSimpleAction *, GVariant *, gpointer);
+	GtkPopover *popover;
+};
+
+static void
+on_user_btn_clicked (GtkButton *btn, gpointer data)
+{
+	struct user_btn_ctx *bctx = data;
+	(void) btn;
+	bctx->activate (NULL, NULL, bctx->user_ctx);
+	gtk_popover_popdown (bctx->popover);
+}
+
+static void
+user_btn_ctx_free (gpointer data, GClosure *closure)
+{
+	(void) closure;
+	g_free (data);
+}
+
+/* Append a flat button row to the popover's vertical box. Caller
+ * passes the action handler from on_user_*; we wrap it in a click
+ * closure that activates it with the popover's ctx and dismisses. */
+static void
+user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
+                          struct UserActionCtx *user_ctx,
+                          const char *label,
+                          void (*activate)(GSimpleAction *, GVariant *,
+                                           gpointer))
+{
+	GtkWidget *btn = gtk_button_new_with_label (label);
+	struct user_btn_ctx *bctx = g_new0 (struct user_btn_ctx, 1);
+
+	gtk_widget_add_css_class (btn, "flat");
+	gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
+	/* Left-align label inside the flat button so the menu reads
+	 * like a menu, not a row of centred captions. */
+	{
+		GtkWidget *lbl = gtk_button_get_child (GTK_BUTTON (btn));
+		if (GTK_IS_LABEL (lbl)) {
+			gtk_label_set_xalign (GTK_LABEL (lbl), 0.0);
+			gtk_widget_set_hexpand (lbl, TRUE);
+		}
+	}
+
+	bctx->user_ctx = user_ctx;
+	bctx->activate = activate;
+	bctx->popover  = popover;
+	g_signal_connect_data (btn, "clicked",
+	                       G_CALLBACK (on_user_btn_clicked),
+	                       bctx, user_btn_ctx_free, 0);
+	gtk_box_append (vbox, btn);
 }
 
 static void
 user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
             double x, double y)
 {
-	GMenu *model;
-	GMenu *moderate_section;
-	GMenu *ignore_section;
-	GMenu *interact_section;
-	GtkWidget *popover;
-	GtkWidget *info_label;
-	GSimpleActionGroup *actions;
+	GtkWidget *popover, *vbox, *info_label, *sep;
 	struct UserActionCtx *ctx;
 	char *info_markup;
-	int i;
+	GdkRectangle rect = { (int) x, (int) y, 1, 1 };
 
 	if (!user || !sess)
 		return;
@@ -297,22 +336,40 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	ctx->sess = sess;
 	ctx->user = user;
 
-	model = g_menu_new ();
+	/* Phase 5: dropped GtkPopoverMenu in favour of a bare GtkPopover
+	 * with a vertical box of flat buttons. GtkPopoverMenu had two
+	 * regressions:
+	 *
+	 *   - It wraps its model items in an internal GtkScrolledWindow
+	 *     with a non-overridable max-content-height; the menu's last
+	 *     item kept getting clipped and the user had to scroll to
+	 *     see it. The CSS workaround that used to disable max-height
+	 *     on the inner scrolledwindow stopped applying after a GTK /
+	 *     libadwaita refresh.
+	 *
+	 *   - Hover routing got stuck on the first item once the popover
+	 *     opened; the cursor's motion events didn't re-target items
+	 *     after the keyboard-focus default landed on "Ignore", so
+	 *     the user couldn't pick anything except by arrow keys.
+	 *
+	 * Building the popover by hand avoids both: a GtkBox with native
+	 * GtkButtons hover correctly, sizes to its natural content
+	 * height, and gives us full control over separators / styling.
+	 * The on_user_* action handlers stay as-is and are invoked from
+	 * a thin per-button click closure (see on_user_btn_clicked). */
+	popover = gtk_popover_new ();
+	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+	gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
+	gtk_widget_set_halign (popover, GTK_ALIGN_START);
 
-	/* Phase 5: info section was three disabled "noop" menu items at
-	 * the top showing the user's name / icon-uid / admin-status.
-	 * That layout broke hover routing in GtkPopoverMenu — once the
-	 * cursor entered the menu the highlight got stuck on the first
-	 * non-disabled item below the noops. The fix is to render the
-	 * info as a real label widget via gtk_popover_menu_add_child +
-	 * a "custom" GMenuItem rather than abusing disabled menu items.
-	 * Built as Pango markup so the user's name reads bold. */
-	/* Phase 5: two-line info header with the verbose details Misha
-	 * preferred — bold name on top, dim small details below. The
-	 * earlier vertical-clipping symptom turned out to be the
-	 * popover's surface being sized too small (see size-request
-	 * below), not the header layout itself; once the surface has
-	 * enough room, two lines of header fit fine. */
+	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_margin_start  (vbox, 4);
+	gtk_widget_set_margin_end    (vbox, 4);
+	gtk_widget_set_margin_top    (vbox, 4);
+	gtk_widget_set_margin_bottom (vbox, 4);
+	gtk_popover_set_child (GTK_POPOVER (popover), vbox);
+
+	/* Header: bold name + dim details. */
 	info_markup = g_markup_printf_escaped (
 		"<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>",
 		user->name, user->uid, user->icon,
@@ -321,144 +378,57 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	info_label = gtk_label_new (NULL);
 	gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
 	gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
-	gtk_widget_set_margin_start  (info_label, 12);
-	gtk_widget_set_margin_end    (info_label, 12);
-	gtk_widget_set_margin_top    (info_label, 8);
+	gtk_widget_set_margin_start  (info_label, 8);
+	gtk_widget_set_margin_end    (info_label, 8);
+	gtk_widget_set_margin_top    (info_label, 4);
 	gtk_widget_set_margin_bottom (info_label, 4);
 	g_free (info_markup);
-	{
-		GMenu *info_section = g_menu_new ();
-		GMenuItem *info_item = g_menu_item_new (NULL, NULL);
-		g_menu_item_set_attribute (info_item, "custom", "s",
-		                           "user-info");
-		g_menu_append_item (info_section, info_item);
-		g_object_unref (info_item);
-		g_menu_append_section (model, NULL, G_MENU_MODEL (info_section));
-		g_object_unref (info_section);
-	}
+	gtk_box_append (GTK_BOX (vbox), info_label);
 
-	/* Kick / Ban — only show when the account has DISCONNECT_USERS.
-	 * mhxd's struct hl_access_bits has a single bit (22) that gates
-	 * both kick and ban; servers that don't grant it reject the
-	 * commands at the wire level anyway, so hiding the menu entries
-	 * keeps users from clicking buttons that won't work. The whole
-	 * section is omitted (rather than disabled-but-visible) when the
-	 * bit is off — the section separator goes with it, so the popup
-	 * collapses cleanly. */
+	sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+	gtk_box_append (GTK_BOX (vbox), sep);
+
+	/* Kick / Ban — only when the account has DISCONNECT_USERS.
+	 * Same rule as before: hidden, not disabled, since the server
+	 * would reject the wire op anyway. */
 	if (hl_access_has ((const guint8 *) &sess->htlc.access,
 	                   HL_ACCESS_DISCONNECT_USERS)) {
-		moderate_section = g_menu_new ();
-		g_menu_append (moderate_section, _("Kick"), "user.kick");
-		g_menu_append (moderate_section, _("Ban"),  "user.ban");
-		g_menu_append_section (model, NULL, G_MENU_MODEL (moderate_section));
-		g_object_unref (moderate_section);
+		user_popup_append_button (GTK_BOX (vbox),
+		                          GTK_POPOVER (popover), ctx,
+		                          _("Kick"), on_user_kick);
+		user_popup_append_button (GTK_BOX (vbox),
+		                          GTK_POPOVER (popover), ctx,
+		                          _("Ban"),  on_user_ban);
+		gtk_box_append (GTK_BOX (vbox),
+		    gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
 	}
 
 	/* Ignore / UnIgnore */
-	ignore_section = g_menu_new ();
-	g_menu_append (ignore_section, _("Ignore"),   "user.ignore");
-	g_menu_append (ignore_section, _("UnIgnore"), "user.unignore");
-	g_menu_append_section (model, NULL, G_MENU_MODEL (ignore_section));
-	g_object_unref (ignore_section);
+	user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover),
+	                          ctx, _("Ignore"),   on_user_ignore);
+	user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover),
+	                          ctx, _("UnIgnore"), on_user_unignore);
+	gtk_box_append (GTK_BOX (vbox),
+	    gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
 
 	/* Interact */
-	interact_section = g_menu_new ();
-	g_menu_append (interact_section, _("Get User Info"),    "user.info");
-	g_menu_append (interact_section, _("Private Message"),  "user.msg");
-	g_menu_append (interact_section, _("Private Chat"),     "user.pchat");
-	g_menu_append_section (model, NULL, G_MENU_MODEL (interact_section));
-	g_object_unref (interact_section);
+	user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover),
+	                          ctx, _("Get User Info"),   on_user_info);
+	user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover),
+	                          ctx, _("Private Message"), on_user_msg);
+	user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover),
+	                          ctx, _("Private Chat"),    on_user_pchat);
 
-	/* Phase 5: build the GSimpleActionGroup BEFORE the popover, then
-	 * install it on the anchor widget. The earlier code created the
-	 * popover from the menu model first and inserted the action group
-	 * onto the popover afterwards — which left the menu items stuck
-	 * in a "no action available" disabled state at construction time
-	 * (the user reported "popup menu does not work; items can't be
-	 * selected"). Moving the action group onto the anchor first means
-	 * gtk_popover_menu_new_from_model resolves user.kick / user.ban /
-	 * user.info / user.msg / user.pchat to live actions as it builds
-	 * the GtkButton items, so they come up enabled and clickable. */
-	actions = g_simple_action_group_new ();
-	for (i = 0; i < (int) G_N_ELEMENTS (user_action_entries); i++) {
-		const GActionEntry *e = &user_action_entries[i];
-		GSimpleAction *act = g_simple_action_new (e->name, NULL);
-		/* ctx is owned by the popover (set below with destroy notify);
-		 * each action's closure holds a borrowed pointer that is valid
-		 * for as long as the popover — and thus the action group — is
-		 * alive. Synchronous activation means the borrow is always safe
-		 * inside the handler. */
-		g_signal_connect (act, "activate", G_CALLBACK (e->activate), ctx);
-		g_action_map_add_action (G_ACTION_MAP (actions), G_ACTION (act));
-		g_object_unref (act);
-	}
-	gtk_widget_insert_action_group (anchor, "user", G_ACTION_GROUP (actions));
-	g_object_unref (actions);
-
-	popover = gtk_popover_menu_new_from_model (G_MENU_MODEL (model));
-	g_object_unref (model);
-	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-	gtk_popover_set_pointing_to (GTK_POPOVER (popover),
-	                             &(GdkRectangle) { (int) x, (int) y, 1, 1 });
-	gtk_widget_set_halign (popover, GTK_ALIGN_START);
-
-	/* Phase 5: GtkPopoverMenu wraps its menu items in an internal
-	 * GtkScrolledWindow with max-content-height capped — we don't
-	 * control this from the public API, and the cap clips our 5-7
-	 * item menu to ~210 px regardless of how much room the toplevel
-	 * window has. Apply a one-shot CSS override on the popover
-	 * widget that disables max-height on the inner scrolled
-	 * window, so the popover sizes to its natural content height
-	 * without clipping or scrolling.
-	 *
-	 * The CSS class is namespaced (`gtkhx-user-popover`) so other
-	 * popovers in the app are unaffected. The provider is
-	 * application-display level (one-shot install through the
-	 * static guard) since per-widget CSS providers in GTK 4 are
-	 * cumbersome. */
-	{
-		static GtkCssProvider *menu_css_provider = NULL;
-		if (!menu_css_provider) {
-			menu_css_provider = gtk_css_provider_new ();
-			gtk_css_provider_load_from_string (menu_css_provider,
-			    ".gtkhx-user-popover scrolledwindow { "
-			    "  max-height: none; "
-			    "}");
-			gtk_style_context_add_provider_for_display (
-			    gdk_display_get_default (),
-			    GTK_STYLE_PROVIDER (menu_css_provider),
-			    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-		}
-		gtk_widget_add_css_class (popover, "gtkhx-user-popover");
-	}
-
-	/* Hang the ctx off the popover so its lifetime matches the popover's
-	 * — when the popover is unparented the destroy notify frees it.
-	 * The action group on the anchor outlives the popover but its
-	 * activate handlers borrow ctx, so we also unhook the action group
-	 * from the anchor on close (see user_popover_closed). */
+	/* ctx outlives any one button-click — bound to the popover,
+	 * freed when it's unparented. The on_user_btn_clicked closure
+	 * borrows the pointer; safe since clicks fire synchronously
+	 * while the popover (and so the ctx) is still alive. */
 	g_object_set_data_full (G_OBJECT (popover), "user-action-ctx",
 	                        ctx, user_action_ctx_free);
-	g_object_set_data (G_OBJECT (popover), "user-action-anchor", anchor);
 
-	/* Phase 5: parent the popover to the anchor first, then bind the
-	 * custom info_label child. Doing the add_child before set_parent
-	 * left the popover's internal CSS tree disconnected from the
-	 * anchor's, and the subsequent set_parent triggered a
-	 * gtk_css_node_insert_after critical when GTK reattached the
-	 * subtree. Parent-then-add_child keeps the CSS hierarchy
-	 * connected for the entire add_child operation. */
 	gtk_widget_set_parent (popover, anchor);
-
-	/* Phase 5: bind the info_label to the "user-info" custom menu
-	 * item we declared above. GtkPopoverMenu renders the named
-	 * widget in place of the section content. */
-	gtk_popover_menu_add_child (GTK_POPOVER_MENU (popover),
-	                            info_label, "user-info");
-
 	g_signal_connect (popover, "closed",
 	                  G_CALLBACK (user_popover_closed), NULL);
-
 	gtk_popover_popup (GTK_POPOVER (popover));
 }
 
