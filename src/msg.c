@@ -39,6 +39,7 @@
 #include "toolbar.h"
 #include "users.h"
 #include "cicn.h"
+#include "gtkurl.h"
 #include "msg.h"
 
 void
@@ -369,6 +370,8 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(msg->outputbuf)->urlcheck_function = word_check;
 	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
+	g_signal_connect (msg->outputbuf, "word_click",
+	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
 	msg->vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(msg->outputbuf)->adj);
 	msg->inputbuf = gtk_text_view_new();

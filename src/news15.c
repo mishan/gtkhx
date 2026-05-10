@@ -36,6 +36,7 @@
 #include "gtk_hlist.h"
 #include "tasks.h"
 #include "rcv.h"
+#include "gtkurl.h"
 #include "files.h"
 #include "news15.h"
 
@@ -1142,6 +1143,7 @@ struct gnews_catalog *create_gcnews_window (char *path)
 	gtk_text_view_set_editable (GTK_TEXT_VIEW (news_text), FALSE);
 	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (news_text), FALSE);
 	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (news_text), GTK_WRAP_WORD);
+	gtkurl_textview_install (GTK_TEXT_VIEW (news_text));
 	gtkhx_widget_set_child(scrolledwindow1, news_text);
 	gtk_window_present(GTK_WINDOW(news_window));
 
@@ -1280,6 +1282,10 @@ void output_news_thread(struct news_post *post)
 		gtk_text_buffer_set_text(buf, utf8, (gint) utf8_len);
 		g_free(utf8);
 	}
+
+	/* Tag any URLs in the just-loaded post with the "url" GtkTextTag
+	 * so they hover-underline + answer the right-click popup. */
+	gtkurl_textview_apply_tags (GTK_TEXT_VIEW (gcnews->news_text));
 }
 
 void open_news15(GtkWidget *widget, session *sess)

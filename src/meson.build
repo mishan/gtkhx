@@ -12,6 +12,7 @@ gtkhx_sources = files(
   'gtk_hlist_compat.c',
   'gtkhx.c',
   'gtkthreads.c',
+  'gtkurl.c',
   'gtkutil.c',
   'hfs.c',
   'history.c',

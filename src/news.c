@@ -37,6 +37,7 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "debug.h"
+#include "gtkurl.h"
 #include "news.h"
 
 
@@ -611,6 +612,7 @@ void create_news_window (session *sess)
 	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(news_text), FALSE);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(news_text), GTK_WRAP_WORD);
 	gtkhx_apply_text_style(news_text);
+	gtkurl_textview_install (GTK_TEXT_VIEW (news_text));
 
 	news_scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(news_scroll),
@@ -738,6 +740,11 @@ void output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 		g_free(utf8);
 	}
 
+	/* Re-tag URLs across the whole buffer so the new chunk's links
+	 * pick up the "url" GtkTextTag (foreground + hover-underline +
+	 * right-click popup). Cheap — single regex pass over the buffer. */
+	gtkurl_textview_apply_tags (GTK_TEXT_VIEW (sess->news_text));
+
 	/* If the user has Find open, re-run the search so the new post
 	 * picks up its highlights too. No-op if the bar is hidden or the
 	 * entry is empty. */
@@ -771,6 +778,9 @@ void output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
 	utf8 = gtkhx_text_to_utf8(news, len, &utf8_len);
 	gtk_text_buffer_insert(buf, &end, utf8, (gint) utf8_len);
 	g_free(utf8);
+
+	/* Re-tag URLs (mirrors output_news_post). */
+	gtkurl_textview_apply_tags (GTK_TEXT_VIEW (sess->news_text));
 
 	/* Same Find-still-active reconciliation as output_news_post —
 	 * the bulk-load path appends the whole news file in one go, and

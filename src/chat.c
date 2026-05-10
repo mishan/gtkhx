@@ -41,6 +41,7 @@
 #include "gtk_hlist.h"
 #include "gtkhx.h"
 #include "chat.h"
+#include "gtkurl.h"
 #include "plugin.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -1004,6 +1005,8 @@ void create_chat(session *sess)
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
+	g_signal_connect (text, "word_click",
+	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
 	vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(text)->adj);
 
@@ -1204,6 +1207,8 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
+	g_signal_connect (text, "word_click",
+	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
 	vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(text)->adj);
 
