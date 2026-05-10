@@ -360,10 +360,12 @@ static void
 user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
             double x, double y)
 {
-	GtkWidget *popover, *vbox, *info_label, *sep;
+	GtkWidget *popover, *vbox, *info_label, *sep, *parent;
 	struct UserActionCtx *ctx;
 	char *info_markup;
-	GdkRectangle rect = { (int) x, (int) y, 1, 1 };
+	GdkRectangle rect;
+	graphene_point_t src_pt = { (float) x, (float) y };
+	graphene_point_t dst_pt = { (float) x, (float) y };
 
 	if (!user || !sess)
 		return;
@@ -373,6 +375,28 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	ctx = g_new0 (struct UserActionCtx, 1);
 	ctx->sess = sess;
 	ctx->user = user;
+
+	/* Phase 5: parent the popover to the toplevel root, NOT the
+	 * user-list anchor. Same fix that gtkurl_show_popup needed:
+	 * GtkPopover's autohide grab needs a 'top-most parent' in the
+	 * widget tree, and the user list (a GtkTreeView wrapped in a
+	 * GtkScrolledWindow) is not it. Anchoring there lets the
+	 * popover render but breaks pointer-motion routing into its
+	 * children — clicks still work because they're button-press
+	 * events, but :hover never triggers, so the buttons looked
+	 * frozen. Translating click coords from anchor-local to
+	 * toplevel-local keeps pointing_to right. */
+	parent = GTK_WIDGET (gtk_widget_get_root (anchor));
+	if (!parent)
+		parent = anchor;
+	if (parent != anchor) {
+		if (gtk_widget_compute_point (anchor, parent,
+		                              &src_pt, &dst_pt)) {
+			x = dst_pt.x;
+			y = dst_pt.y;
+		}
+	}
+	rect.x = (int) x; rect.y = (int) y; rect.width = 1; rect.height = 1;
 
 	/* Phase 5: dropped GtkPopoverMenu in favour of a bare GtkPopover
 	 * with a vertical box of flat buttons. GtkPopoverMenu had two
@@ -464,7 +488,7 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 	g_object_set_data_full (G_OBJECT (popover), "user-action-ctx",
 	                        ctx, user_action_ctx_free);
 
-	gtk_widget_set_parent (popover, anchor);
+	gtk_widget_set_parent (popover, parent);
 	g_signal_connect (popover, "closed",
 	                  G_CALLBACK (user_popover_closed), NULL);
 	gtk_popover_popup (GTK_POPOVER (popover));
