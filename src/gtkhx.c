@@ -991,22 +991,31 @@ static void concurrence(GtkWidget *widget, gpointer data)
 	session *sess  = data;
 	(void) widget;
 
-	/* Phase 5: send HTLC_HDR_AGREEMENTAGREE if and only if SELFINFO
-	 * hasn't already arrived. Two distinct server flavours need
-	 * different handling here:
+	/* Phase 5: deliver NAME + ICON to the server when the user
+	 * clicks Agree. Two distinct server flavours need different
+	 * messages:
 	 *
 	 *   - mhxd-style legacy flow: AGREEMENT arrives BEFORE SELFINFO;
-	 *     login is gated on AGREEMENTAGREE. logged_in == 0 → send.
+	 *     login is gated on AGREEMENTAGREE. Send AGREEMENTAGREE —
+	 *     this both completes login and tells the server who we
+	 *     are. (logged_in == 0 case.)
 	 *   - 1.9-style auto-accept: SELFINFO arrives BEFORE AGREEMENT;
 	 *     login is already complete by the time we show the
 	 *     dialog. Some 1.9 servers (e.g. MacSecret.com) disconnect
 	 *     when they receive AGREEMENTAGREE for an already-logged-in
-	 *     session. logged_in == 1 → don't send.
+	 *     session, but the server still doesn't know our NAME.
+	 *     Send USER_CHANGE instead — same NAME + ICON payload,
+	 *     no agreement-already-accepted misfire. (logged_in == 1
+	 *     case.)
 	 *
 	 * In either case the dialog closes with the click; the wire op
-	 * is what's gated. */
-	if (sess->htlc.fd && !sess->htlc.flags.logged_in)
-		hx_send_agreement_agree (&sess->htlc);
+	 * is what differs. */
+	if (sess->htlc.fd) {
+		if (!sess->htlc.flags.logged_in)
+			hx_send_agreement_agree (&sess->htlc);
+		else
+			hx_change_name_icon (&sess->htlc);
+	}
 
 	gtkhx_widget_destroy(sess->agreementwin);
 	sess->agreementwin = 0;

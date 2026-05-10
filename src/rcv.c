@@ -243,18 +243,22 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 	 * has nothing to click 'Agree' on, so login would stall. Send
 	 * AGREEMENTAGREE automatically in those cases.
 	 *
-	 * BUT only when SELFINFO hasn't already arrived. 1.9-style
-	 * servers (e.g. MacSecret.com) treat LOGIN as the complete
-	 * signal — SELFINFO lands BEFORE AGREEMENT, login is already
-	 * done, and sending AGREEMENTAGREE on a fully-logged-in
-	 * session prompts those servers to disconnect us.
+	 * On 1.9-style servers (e.g. MacSecret.com) SELFINFO lands
+	 * BEFORE AGREEMENT — login is already complete and sending
+	 * AGREEMENTAGREE for an already-logged-in session can prompt
+	 * the server to disconnect us. The server still doesn't know
+	 * our NAME though, so send USER_CHANGE (same NAME + ICON
+	 * payload, safe on a logged-in session). Mirrors the gating
+	 * in gtkhx.c::concurrence for the with-agreement path.
 	 *
 	 * For HX_AGREEMENT_OK, fall through to popping the agreement
-	 * window. The Agree button (gtkhx.c::concurrence) sends
-	 * AGREEMENTAGREE only if !logged_in for the same reason. */
+	 * window — concurrence handles the wire op when the user
+	 * clicks Agree. */
 	if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
 		if (!htlc->flags.logged_in)
 			hx_send_agreement_agree (htlc);
+		else
+			hx_change_name_icon (htlc);
 		return;
 	}
 	if (r != HX_AGREEMENT_OK)
