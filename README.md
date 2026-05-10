@@ -1,16 +1,15 @@
 GtkHx is a GTK+ Hotline Client based on Hx, a console Hotline Client written by 
-Ryan Nielsen.  It is still under development and some features of it
-may not be completely working.  Read the INSTALL doc for more information on 
-compiling GtkHx and getting it to work.  GtkHx is under the GPL license.
+Ryan Nielsen. It is still under development and some features of it may not be
+completely working.
 
-Building:
+## Building:
 
 ```
 meson setup build
-cd build && meson compile
+cd build && meson compile && meson install
 ```
 
-Testing:
+## Testing:
 
 A local mhxd instance should be running for the integration tests to run. An
 mhxd Docker container is provided. To run it:
@@ -21,7 +20,7 @@ docker run -d -p 5500:5500 -p 5501:5501 gtkhx-mhxd
 cd build & meson test
 ```
 
-Flatpak:
+## Flatpak:
 
 ```
 flatpak-builder --user --install --force-clean build-flatpak \
