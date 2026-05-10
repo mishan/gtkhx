@@ -140,12 +140,35 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #     first. Disable nospam outright via the operation section —
 #     the check at hlserver.c:401 short-circuits when nospam=no
 #     and the spam.* settings stop mattering.
+#
+# (5) paths.luser "./login" → paths.luser ""
+#     mhxd's rcv_login fires cmd_exec(htlc, 0, hxd_cfg.paths.luser)
+#     on every successful login (mhxd/src/hxd/rcv.c:161). The
+#     default config sets luser to "./login" — a hook for sysops
+#     to wire up a login-time script. We don't have one in the
+#     test container, but cmd_exec doesn't early-out on missing
+#     binary: it forks, runs through the path-construction dance,
+#     execve fails inside the child, child _exit(1)s. Each test
+#     login leaks one of those into the container's process
+#     table. SIGCHLD reaping IS wired up (chld_wait via
+#     timer_add_secs(0, ...)), but the timer-driven reap doesn't
+#     keep up with the integration suite's connect rate, and
+#     [login] <defunct> processes accumulate. Eventually mhxd hits
+#     limits.total_exec and silently rejects later test connections
+#     — that's the "container becomes unresponsive" symptom.
+#
+#     Setting luser to "" makes cmd_exec's strlen(cmdpath) > 0
+#     guard at commands.c:192 short-circuit before any fork. The
+#     hook stays available for sysops who want it; we just don't
+#     use it in the test container.
 RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)ident 1;/\1ident 0;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
+        /opt/mhxd/run/hxd.conf \
+    && sed -i 's|^\([[:space:]]*\)luser "[^"]*";|\1luser "";|' \
         /opt/mhxd/run/hxd.conf \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
