@@ -1928,15 +1928,30 @@ gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent,
 	if (xtext->urlcheck_function && xtext->urlcheck_function (GTK_WIDGET (xtext), word))
 	{
 		int start, end;
-		url_last (&start, &end);
 
-		/* make sure we're not before the start of the match */
-		if (len_to_offset < start)
-			return NULL;
+		/* Phase 5: url_last is a stub that returns 0 (no sub-word match
+		 * info — see comment near its definition). The HexChat code
+		 * here used the start/end out-params to crop a partial match
+		 * inside the larger token; with no match info we fall back to
+		 * "the whole word IS the URL", same as the matching call site
+		 * in gtk_xtext_get_word_adjust which already gates this on
+		 * url_last's return value. Without the gate, start=end=0 made
+		 * `len_to_offset - 0 >= 0 - 0` always true (len_to_offset is
+		 * non-negative), so we returned NULL for every URL hover and
+		 * right-click, which read as "right-click on URL does
+		 * nothing" / "URLs don't underline on hover" in chat / msg /
+		 * pchat. Guarding the bounds check on url_last's return value
+		 * fixes both. */
+		if (url_last (&start, &end))
+		{
+			/* make sure we're not before the start of the match */
+			if (len_to_offset < start)
+				return NULL;
 
-		/* and not after it */
-		if (len_to_offset - start >= end - start)
-			return NULL;
+			/* and not after it */
+			if (len_to_offset - start >= end - start)
+				return NULL;
+		}
 	}
 
 	return word;

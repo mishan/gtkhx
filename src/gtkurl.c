@@ -512,12 +512,13 @@ gtkurl_xtext_word_click (GtkWidget *xtext, char *word,
 	guint button;
 	double x, y;
 	char *normalized;
+	GdkEventType evtype;
 	(void) data;
 
 	if (!event || !word || !*word)
 		return;
-	if (gdk_event_get_event_type (event) != GDK_BUTTON_PRESS &&
-	    gdk_event_get_event_type (event) != GDK_BUTTON_RELEASE)
+	evtype = gdk_event_get_event_type (event);
+	if (evtype != GDK_BUTTON_PRESS && evtype != GDK_BUTTON_RELEASE)
 		return;
 	button = gdk_button_event_get_button (event);
 	if (button != GDK_BUTTON_SECONDARY && button != GDK_BUTTON_MIDDLE)
