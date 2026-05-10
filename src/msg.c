@@ -268,7 +268,8 @@ msg_format_user_markup (const struct hx_user *user,
 void
 msgwin_refresh_user_info (struct msgwin *msg)
 {
-	struct hx_user *user;
+	struct chat *pubchat;
+	struct hx_user *user = NULL;
 	GdkPixbuf *pixbuf = NULL;
 	GdkPixbuf *unused_mask = NULL;
 	char *markup = NULL;
@@ -276,7 +277,14 @@ msgwin_refresh_user_info (struct msgwin *msg)
 	if (!msg || !msg->info_label || !msg->info_image)
 		return;
 
-	user = hx_user_with_uid (the_session.user_list, *msg->uid);
+	/* The user list is per-chat; the public chat (cid=0) carries the
+	 * server-wide list we want here. session.user_list is a stale
+	 * vestigial field that's never wired up in network.c — using it
+	 * dereferences NULL on the very first PM (segfault Misha hit).
+	 * chat_with_cid is the canonical "global user list" lookup. */
+	pubchat = chat_with_cid (&the_session, 0);
+	if (pubchat && pubchat->user_list)
+		user = hx_user_with_uid (pubchat->user_list, *msg->uid);
 
 	msg_format_user_markup (user, msg->name, *msg->uid, &markup);
 	gtk_label_set_markup (GTK_LABEL (msg->info_label), markup);
