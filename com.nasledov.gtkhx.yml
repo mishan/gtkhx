@@ -14,15 +14,16 @@
 # below for a `git` source pointing at github.com/nasledov/gtkhx
 # at a tagged commit; the rest of the manifest stays put.
 #
-# Runtime choice: GNOME 48 ships GTK 4.18 / libadwaita 1.7 / glib
-# 2.84, well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita
-# >= 1.6). It also includes nettle, zlib, libcanberra, and gsound,
-# so we don't need to vendor any of GtkHx's external deps as
-# separate modules.
+# Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
+# 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
+# well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
+# It also includes nettle, zlib, libcanberra, and gsound, so we
+# don't need to vendor any of GtkHx's external deps as separate
+# modules.
 
 app-id: com.nasledov.gtkhx
 runtime: org.gnome.Platform
-runtime-version: "48"
+runtime-version: "49"
 sdk: org.gnome.Sdk
 command: gtkhx
 

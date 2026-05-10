@@ -29,6 +29,6 @@ flatpak-builder --user --install --force-clean build-flatpak \
 flatpak run com.nasledov.gtkhx
 ```
 
-The manifest pins org.gnome.Platform 48 and pulls the source from the
+The manifest pins org.gnome.Platform 49 and pulls the source from the
 working tree, so edits land in subsequent flatpak-builder runs without
 needing a fresh clone.
