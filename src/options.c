@@ -45,6 +45,7 @@
 #include "cfgkeys.h"
 #include "prefs_parser.h"
 #include "options.h"
+#include "text_util.h"
 #include "tracker.h"
 
 /* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
@@ -1113,10 +1114,47 @@ static void prefs_allocate(char *tag, char *rest)
 			break;
 		}
 		case STRING32:
-			if (!strncmp(result->variable.str32, rest, 31)) return;
-			strncpy (result->variable.str32, rest, 31);
-			result->variable.str32[31] = '\0';
+		{
+			/* Phase 5: defend against corrupt non-UTF-8 bytes in
+			 * the prefs file. NICK lives in a STRING32 buffer that
+			 * doubles as htlc->name on the wire AND as the source
+			 * for a GtkEntry in Settings. GTK's input method
+			 * context asserts the surrounding text is valid UTF-8
+			 * (gtk_im_context_set_surrounding_with_selection),
+			 * so a NICK with non-UTF-8 bytes makes the field
+			 * un-editable — the user can't even type in their own
+			 * name. The bytes can land in gtkhxrc via earlier
+			 * server round-trips (proto_helpers.c / rcv.c
+			 * unconditionally memcpy server-supplied name bytes
+			 * over htlc->name when SELFINFO / USER_CHANGE arrive
+			 * for our own UID) which then get serialised back as
+			 * the literal NICK= value at next prefs save.
+			 *
+			 * Validate UTF-8 here. If clean, fast-path strncpy.
+			 * If not, pipe through gtkhx_text_to_utf8 which
+			 * tries Mac Roman → UTF-8 then falls back to
+			 * g_utf8_make_valid (replacement-char insertion).
+			 * Non-NICK STRING32 fields (none today, but the
+			 * pattern would extend to any future addition)
+			 * benefit from the same defence at no cost. */
+			gsize rest_len = strlen (rest);
+			if (g_utf8_validate (rest, rest_len, NULL)) {
+				if (!strncmp (result->variable.str32, rest, 31))
+					return;
+				strncpy (result->variable.str32, rest, 31);
+				result->variable.str32[31] = '\0';
+			} else {
+				gchar *clean = gtkhx_text_to_utf8 (rest, rest_len, NULL);
+				if (!strncmp (result->variable.str32, clean, 31)) {
+					g_free (clean);
+					return;
+				}
+				strncpy (result->variable.str32, clean, 31);
+				result->variable.str32[31] = '\0';
+				g_free (clean);
+			}
 			break;
+		}
 		case UINT16:
 		{
 			guint16 g = (guint16) atoi(rest);
