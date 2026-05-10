@@ -300,7 +300,17 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
 	struct user_btn_ctx *bctx = g_new0 (struct user_btn_ctx, 1);
 
 	gtk_widget_add_css_class (btn, "flat");
+	gtk_widget_add_css_class (btn, "gtkhx-user-popup-item");
 	gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
+	/* Phase 5: keyboard focus on the first button auto-paints a
+	 * focus ring when the popover opens; the user reads that as
+	 * 'this item is hovered' and gets confused when cursor motion
+	 * doesn't update it. We don't expect the popup to be navigated
+	 * by keyboard (right-click → click is the path), so just turn
+	 * focus off for these buttons. The CSS provider below adds a
+	 * visible :hover background so cursor tracking is obvious. */
+	gtk_widget_set_focusable (btn, FALSE);
+	gtk_widget_set_can_focus  (btn, FALSE);
 	/* Left-align label inside the flat button so the menu reads
 	 * like a menu, not a row of centred captions. */
 	{
@@ -320,6 +330,32 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
 	gtk_box_append (vbox, btn);
 }
 
+/* One-shot CSS provider giving our user-popup buttons a clearly
+ * visible :hover background. Adwaita's default flat-button hover is
+ * subtle enough that mouse tracking can be hard to read, especially
+ * when the user is expecting menu-style highlighting. Install on the
+ * default display once; namespaced selector keeps the rule scoped to
+ * our popup buttons. */
+static void
+user_popup_install_css (void)
+{
+	static GtkCssProvider *provider = NULL;
+	if (provider)
+		return;
+	provider = gtk_css_provider_new ();
+	gtk_css_provider_load_from_string (provider,
+	    ".gtkhx-user-popup-item { "
+	    "  padding: 4px 10px; "
+	    "} "
+	    ".gtkhx-user-popup-item:hover { "
+	    "  background-color: alpha(currentColor, 0.10); "
+	    "}");
+	gtk_style_context_add_provider_for_display (
+	    gdk_display_get_default (),
+	    GTK_STYLE_PROVIDER (provider),
+	    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
 static void
 user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
             double x, double y)
@@ -331,6 +367,8 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess,
 
 	if (!user || !sess)
 		return;
+
+	user_popup_install_css ();
 
 	ctx = g_new0 (struct UserActionCtx, 1);
 	ctx->sess = sess;
