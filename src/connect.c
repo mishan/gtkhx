@@ -119,6 +119,50 @@ static void close_connect_window (void)
 	connect_window = 0;
 }
 
+/* ---- Last-connection cache --------------------------------------------
+ *
+ * Captures the parameters used for the most recent connect_with_args
+ * call so they survive past hx_htlc_close (which frees server_addr).
+ * Used by:
+ *   - create_connect_window to pre-fill the form when re-opening the
+ *     Connect dialog after a disconnect
+ *   - connect_reconnect_last to fire a fresh connect attempt against
+ *     the same server without showing the dialog (the Reconnect
+ *     banner button after an unexpected disconnect)
+ *
+ * Cleared on app exit; not persisted to disk. The bookmark mechanism
+ * is the durable equivalent. valid is 0 until the user has actually
+ * connected once during this run.
+ */
+static struct {
+	int     valid;
+	char   *server;
+	guint16 port;
+	char   *login;
+	char   *pass;
+	char    secure;
+	char    compress;
+	char    cipher;
+} last_conn = { 0, NULL, 0, NULL, NULL, 0, 0, 0 };
+
+static void
+last_conn_set (const char *server, guint16 port,
+               const char *login, const char *pass,
+               char secure, char compress, char cipher)
+{
+	g_free (last_conn.server);
+	g_free (last_conn.login);
+	g_free (last_conn.pass);
+	last_conn.server   = g_strdup (server ? server : "");
+	last_conn.port     = port;
+	last_conn.login    = g_strdup (login  ? login  : "");
+	last_conn.pass     = g_strdup (pass   ? pass   : "");
+	last_conn.secure   = secure;
+	last_conn.compress = compress;
+	last_conn.cipher   = cipher;
+	last_conn.valid    = 1;
+}
+
 void connect_set_entries (const char *address, const char *login, const char *password, guint16 port)
 {
 	char buf[HOSTLEN];
@@ -179,7 +223,28 @@ connect_with_args (session *sess,
 	}
 #endif
 
+	last_conn_set (server, port, login, pass, secure, compress, cipher);
+
 	hx_connect (&sess->htlc, server, port, login, pass, secure);
+}
+
+/* Reconnect to the most-recently-used server, no dialog. Wired to
+ * the toolbar's "Lost connection — Reconnect" banner button. If
+ * the user hasn't connected yet this run (e.g. cold start with the
+ * banner somehow already showing — defensive), fall back to opening
+ * the Connect dialog so they have something to fill in. */
+void
+connect_reconnect_last (void)
+{
+	if (!last_conn.valid || !last_conn.server || !last_conn.server[0]) {
+		create_connect_window (NULL, &the_session);
+		return;
+	}
+	connect_with_args (&the_session,
+	                   last_conn.server, last_conn.port,
+	                   last_conn.login,  last_conn.pass,
+	                   last_conn.secure,
+	                   last_conn.compress, last_conn.cipher);
 }
 
 static void server_connect (GtkWidget *widget, gpointer data)
@@ -1085,6 +1150,36 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 
 	/* Default-widget so Enter from any AdwEntryRow submits Connect. */
 	gtk_widget_set_receives_default (connect_action_btn, TRUE);
+
+	/* If we connected during this run, pre-populate the form with
+	 * those values. Reconnect-after-disconnect is the obvious case
+	 * — the user expects the dialog to show the server they were
+	 * just on, not a blank form. */
+	if (last_conn.valid && last_conn.server && last_conn.server[0]) {
+		char portbuf[16];
+		g_snprintf (portbuf, sizeof (portbuf), "%u", last_conn.port);
+		gtk_editable_set_text (GTK_EDITABLE (address_entry),
+		                       last_conn.server);
+		gtk_editable_set_text (GTK_EDITABLE (login_entry),
+		                       last_conn.login ? last_conn.login : "");
+		gtk_editable_set_text (GTK_EDITABLE (password_entry),
+		                       last_conn.pass ? last_conn.pass : "");
+		gtk_editable_set_text (GTK_EDITABLE (port_entry), portbuf);
+		adw_switch_row_set_active (ADW_SWITCH_ROW (hope),
+		                           last_conn.secure ? TRUE : FALSE);
+#ifdef CONFIG_COMPRESS
+		if (compress_menu)
+			adw_combo_row_set_selected (
+				ADW_COMBO_ROW (compress_menu),
+				last_conn.compress);
+#endif
+#ifdef CONFIG_CIPHER
+		if (cipher_menu)
+			adw_combo_row_set_selected (
+				ADW_COMBO_ROW (cipher_menu),
+				last_conn.cipher);
+#endif
+	}
 
 	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
 	gtk_widget_grab_focus (address_entry);

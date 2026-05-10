@@ -29,6 +29,15 @@ extern GMenu *connect_build_bookmark_menu (void);
  * have to reach into connect.c's static functions. */
 extern void connect_open_bookmark_by_name (const char *name);
 
+/* Reconnect to the server captured in connect.c's last-connection
+ * cache, bypassing the Connect dialog. The cache is populated by
+ * every connect_with_args call (form-driven, bookmark-driven, and
+ * URL-driven), and survives past hx_htlc_close. Falls back to
+ * opening the Connect dialog if no successful connect has happened
+ * this run. Wired to the toolbar's "Lost connection — Reconnect"
+ * banner button. */
+extern void connect_reconnect_last (void);
+
 /* Phase 5: load one of the hardcoded "well-known" Hotline server
  * bookmarks (Hotline Communications / CafeLinux / GtkHx / SiN
  * Grafix). idx is 1..4 — same numbering the connect dialog's

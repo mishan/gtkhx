@@ -72,18 +72,20 @@ static AdwToastOverlay *toolbar_toast;
  * connection-issue state that needs user action — typically "Lost
  * connection — Reconnect" after an unexpected disconnect. Hidden by
  * default; toolbar_show_connection_lost / toolbar_hide_banner toggle
- * the "revealed" property. The banner button opens the connect
- * dialog with the existing server fields, letting the user
- * re-Connect with one click after the dialog appears. */
+ * the "revealed" property. The banner button reconnects to the same
+ * server we just lost — connect_reconnect_last replays the cached
+ * params from connect.c without showing the dialog (one-click
+ * reconnect after a network blip). The cache falls back to opening
+ * the dialog if it's empty. */
 static AdwBanner *toolbar_banner;
 
 static void
 on_banner_button_clicked (AdwBanner *banner, gpointer user_data)
 {
-	(void) banner;
+	(void) banner; (void) user_data;
 	if (toolbar_banner)
 		adw_banner_set_revealed (toolbar_banner, FALSE);
-	create_connect_window (NULL, user_data);
+	connect_reconnect_last ();
 }
 
 /* Phase 5: New User / Edit User used to be standalone toolbar
