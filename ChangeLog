@@ -1,7 +1,7 @@
 1.0.0 (WIP)
 -----
 - Tons of fixes, esp for modern systems / 64-bit architectures
-- Fixed compile warnings
+- Fixed all compile warnings
 - Switch to meson for build system
 - GTK+ 1.2 -> GTK+ 4.x + libadwaita
 - Rewrote threading/event model
@@ -15,6 +15,10 @@
 - Scrapped Plugin support for now
 - Debug logging support with HL protocol tracing
 - Unit tests and integration tests that run against an mhxd instance
+- URLs in Chat / Message / Private Chat / News can now be right clicked
+- News now has a text search feature
+- Tracker search case sensitivity can now be toggled in the Tracker window
+- Flatpak package support
 
 0.9.4
 -----
