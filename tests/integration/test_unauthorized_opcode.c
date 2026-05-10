@@ -1,25 +1,33 @@
 /*
  * tests/integration/test_unauthorized_opcode.c — sending a
- * privileged opcode (FILE_MKDIR) as guest is rejected — either
- * silently dropped by the dispatcher's access gate, or accepted
- * by the dispatcher and turned into a task-error by the handler
- * once it hits filesystem-level checks. Either outcome counts.
+ * privileged opcode (FILE_MKDIR) as guest is silently dropped
+ * by the mhxd dispatcher.
  *
  * mhxd's main rcv loop (mhxd/src/hxd/rcv.c around line 380+)
- * gates the FILE_MKDIR opcode on htlc->access.create_folders.
- * In practice the guest account ships without an explicit access
- * file, and the access defaults at construction time vary across
- * mhxd builds — so the dispatcher's gate behaviour depends on
- * what bits the server actually loaded. Empirically (this test
- * against the default container), mhxd accepts the message and
- * the handler responds with a task-error (file ops fail at the
- * fs gate one layer down).
+ * gates each privileged HTLC_HDR_* on the corresponding access
+ * bit BEFORE setting htlc->rcv to a handler. If the bit is unset,
+ * the handler never runs and no reply is sent. FILE_MKDIR is
+ * gated on htlc->access.create_folders.
  *
- * The contract worth pinning down is the negative one: a
- * non-error TASK reply for FILE_MKDIR would mean the directory
- * actually got created — i.e. the auth gate slipped. We assert
- * that didn't happen, while tolerating both "no reply" and
- * "task-error" as legitimate rejections.
+ * The default upstream guest UserData has all eight byte-0
+ * access bits set, which makes FILE_MKDIR pass through and gives
+ * a misleading 'guest can mkdir' result. Our Dockerfile patches
+ * guest's binary UserData at byte 4 with a 0x60 mask — keeping
+ * download_files (bit 5) and upload_files (bit 6), clearing
+ * everything else including create_folders (bit 2). See the
+ * comment block in tests/mhxd/Dockerfile next to the dd patch.
+ *
+ * Test contract:
+ *   1. Login as guest.
+ *   2. Send HTLC_HDR_FILE_MKDIR for some name.
+ *   3. Drain a short window — assert no TASK frame correlated to
+ *      our trans arrives. The dispatcher drops it silently.
+ *   4. Round-trip a PING; the pong-trans must match. Proves the
+ *      dispatcher still consumed our message cleanly without
+ *      leaving stale framing behind.
+ *
+ * Catches a regression where the dispatcher accidentally lets a
+ * privileged opcode through when the access bit is clear.
  */
 
 #include "config.h"
@@ -74,18 +82,11 @@ test_unauthorized_mkdir_silently_dropped (void)
 			(guint8 *) new_dir));
 
 	/* Drain a short window; record any TASK frame whose trans
-	 * matches our MKDIR. Two acceptable outcomes:
-	 *
-	 *   - No reply at all (dispatcher gate dropped silently).
-	 *   - TASK with flag=1 (handler ran but rejected via
-	 *     task-error — usually filesystem-level EACCES /
-	 *     EEXIST / etc).
-	 *
-	 * What we MUST NOT see is a TASK with flag=0 (success) for
-	 * our mkdir trans — that would mean the guest just created
-	 * a directory the auth gate should have blocked. */
-	gboolean got_mkdir_success = FALSE;
-	gboolean got_mkdir_error   = FALSE;
+	 * matches our MKDIR. With guest's create_folders bit cleared
+	 * by the Dockerfile patch, mhxd's dispatcher refuses to set
+	 * htlc->rcv for FILE_MKDIR — no handler runs, no reply is
+	 * sent. We expect the drain to time out empty. */
+	gboolean got_mkdir_reply = FALSE;
 	for (int i = 0; i < 8; i++) {
 		if (!integration_recv_message (
 				fd, &htlc, /*timeout_ms=*/500))
@@ -94,22 +95,10 @@ test_unauthorized_mkdir_silently_dropped (void)
 			continue;
 		if (hdr_trans (&htlc) != mkdir_trans)
 			continue;
-		if (hdr_flag (&htlc) & 1) {
-			got_mkdir_error = TRUE;
-			char err[256];
-			gsize err_len = 0;
-			if (task_error_extract (
-				&htlc, err, sizeof (err), &err_len))
-				g_test_message (
-					"server rejected mkdir: \"%s\"", err);
-		} else {
-			got_mkdir_success = TRUE;
-		}
+		got_mkdir_reply = TRUE;
 		break;
 	}
-	g_assert_false (got_mkdir_success);
-	g_test_message ("mkdir rejected via %s",
-	                got_mkdir_error ? "task-error" : "silent drop");
+	g_assert_false (got_mkdir_reply);
 
 	/* Probe with PING — the dispatcher should still be in a clean
 	 * state, accepting the next request and replying normally. */

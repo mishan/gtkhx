@@ -167,6 +167,46 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
         > /opt/mhxd/run/files/integration_seed.txt \
     && mkdir -p /opt/mhxd/run/files/Uploads
 
+# (6) Lock down guest's file-mutation bits in the binary UserData
+#
+#     mhxd's struct hl_user_data starts with a 4-byte magic followed
+#     by struct hl_access_bits (8 bytes of bitfields). On little-
+#     endian hosts (mhxd's only target in practice), byte 4 of
+#     UserData is the first 8 access bits in this order:
+#
+#       bit 0: rename_folders
+#       bit 1: delete_folders
+#       bit 2: create_folders
+#       bit 3: move_files
+#       bit 4: rename_files
+#       bit 5: download_files
+#       bit 6: upload_files
+#       bit 7: delete_files
+#
+#     The upstream guest UserData has all of these set, which lets
+#     a logged-in guest run HTLC_HDR_FILE_MKDIR / FILE_DELETE /
+#     FILE_MOVE etc. — that's not the security posture a real
+#     server would ship, and it lets a privileged-opcode test pass
+#     for the wrong reason ('mkdir succeeded for guest' instead of
+#     'mkdir was rejected because guest lacks the bit').
+#
+#     Mask byte 4 with 0x60 = 0b01100000: keep only download_files
+#     (bit 5) and upload_files (bit 6). file_get and file_put need
+#     those for their existing tests; everything else gets cleared.
+#
+#     Done with dd + a tiny shell pipeline so we don't need to
+#     install python or perl into the build stage. Read byte 4 via
+#     `dd | od`, mask in shell arithmetic, format the result as
+#     '\xHH' for printf, write back via dd seek+notrunc.
+RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 skip=4 status=none \
+          | od -An -vtu1 | tr -d ' ') \
+ && m=$(( b & 0x60 )) \
+ && hex=$(printf '%02x' "$m") \
+ && printf "\\x$hex" \
+      | dd of=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 seek=4 conv=notrunc status=none
+
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.
 # -----------------------------------------------------------------------------
