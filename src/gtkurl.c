@@ -386,36 +386,30 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url,
 	GList     *alts, *l;
 	GdkRectangle rect = { 0 };
 	GtkWidget *parent;
-	graphene_point_t src_pt = { (float) x, (float) y };
-	graphene_point_t dst_pt = { 0, 0 };
 
 	if (!anchor || !url || !*url)
 		return;
 
 	/* Phase 5: GtkPopover has to be parented to a widget that's safe
 	 * to grab from. Anchoring directly to a GtkTextView nested inside
-	 * a GtkScrolledWindow tripped GDK's "Tried to map a grabbing
-	 * popup with a non-top most parent" — the popover would appear
-	 * but click-outside-to-dismiss broke and Escape left the global
-	 * grab leaked, so the rest of the app stopped responding to
-	 * mouse events.
+	 * a GtkScrolledWindow (or an xtext deep in the chat layout) tripped
+	 * GDK's "Tried to map a grabbing popup with a non-top most parent"
+	 * — the popover appeared but click-outside-to-dismiss broke and
+	 * Escape leaked the grab, freezing the rest of the app. Parenting
+	 * to the toplevel sidesteps this.
 	 *
-	 * Parenting to the toplevel GtkWindow avoids the issue. We
-	 * translate the click position into toplevel-relative coords
-	 * before pointing_to so the popover still anchors at the cursor.
-	 * Falls through to the original anchor when the widget hasn't
-	 * been rooted yet (shouldn't happen in practice — the popup is
-	 * only triggered by a click on a mapped widget). */
+	 * Contract: callers pass (x, y) in TOPLEVEL-ROOT-RELATIVE coords.
+	 * gtkurl_textview_install's gesture handler hands us widget-local
+	 * coords, which it converts via gtk_widget_compute_point before
+	 * calling. gtkurl_xtext_word_click hands us coords from
+	 * gdk_event_get_position, which are surface-local (= root-local
+	 * in single-surface GTK 4) — no translation needed. The earlier
+	 * version of this function did the anchor→root translation
+	 * unconditionally, which left the xtext path double-translated
+	 * and the popup landed off-screen, looking inert. */
 	parent = GTK_WIDGET (gtk_widget_get_root (anchor));
 	if (!parent)
 		parent = anchor;
-	if (parent != anchor) {
-		if (gtk_widget_compute_point (anchor, parent,
-		                              &src_pt, &dst_pt)) {
-			x = dst_pt.x;
-			y = dst_pt.y;
-		}
-	}
 
 	popover = gtk_popover_new ();
 	gtk_widget_set_parent (popover, parent);
@@ -531,10 +525,10 @@ gtkurl_xtext_word_click (GtkWidget *xtext, char *word,
 	if (!gtkurl_is_url (word))
 		return;
 
-	/* gdk_event_get_position is surface-relative; for the xtext
-	 * content area that lines up with widget-relative one-to-one
-	 * (xtext fills its surface), so we use the position directly
-	 * as the popover anchor. */
+	/* gdk_event_get_position is surface-relative, which is the same
+	 * as toplevel-root-relative in GTK 4's single-surface model.
+	 * gtkurl_show_popup expects root-local coords, so pass through
+	 * directly with no translation. */
 	if (!gdk_event_get_position (event, &x, &y))
 		x = y = 0;
 
@@ -743,6 +737,9 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press,
 	guint button;
 	GtkTextIter iter;
 	char *url;
+	GtkWidget *root;
+	graphene_point_t src_pt = { (float) x, (float) y };
+	graphene_point_t dst_pt = { (float) x, (float) y };
 	(void) n_press;
 
 	button = gtk_gesture_single_get_current_button (
@@ -755,6 +752,17 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press,
 	url = url_at_iter (tv, &iter);
 	if (!url)
 		return;
+
+	/* gesture x/y are widget-local; gtkurl_show_popup wants them in
+	 * the toplevel-root coordinate space. Translate. */
+	root = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (tv)));
+	if (root && root != GTK_WIDGET (tv)) {
+		if (gtk_widget_compute_point (GTK_WIDGET (tv), root,
+		                              &src_pt, &dst_pt)) {
+			x = dst_pt.x;
+			y = dst_pt.y;
+		}
+	}
 
 	gtkurl_show_popup (GTK_WIDGET (tv), url, x, y);
 	g_free (url);
