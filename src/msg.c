@@ -215,81 +215,61 @@ static void msg_input_activate (GtkWidget *widget, gpointer data)
  * scaled if the source isn't already that. When the icon is unknown
  * (server iconset doesn't ship it, or user picked an icon we don't
  * have) the image clears to nothing so the layout doesn't sag. */
+/* Low-level renderer: take the recipient's display name + status
+ * triple as explicit values and paint the info pane. Both public
+ * entry points below funnel through here. `display_name == NULL` and
+ * `have_status == FALSE` together mean "we don't know who this
+ * person is" — render the bare uid + fallback name from create_msgwin
+ * with no Admin/Guest line. */
 static void
-msg_format_user_markup (const struct hx_user *user,
-                        const char *fallback_name, guint16 uid,
-                        char **markup_out)
+msg_apply_user_view (struct msgwin *msg,
+                     const char *display_name,
+                     guint16 icon, guint16 color,
+                     gboolean have_status)
 {
-	const char *display_name = (user && user->name[0])
-		? user->name
-		: (fallback_name ? fallback_name : "");
-	guint16 color = user ? user->color : 0;
-	guint16 icon_id = user ? user->icon : 0;
 	GdkRGBA *rgba = user_color_gdk (color);
-	char *name_esc = g_markup_escape_text (display_name, -1);
-	const char *status = (color >= 2) ? _("Admin") : _("Guest");
-	const char *away   = (color % 2)  ? _(" (Away)") : "";
-
-	if (rgba) {
-		/* gdk_user_colors stores values in [0..1] floats; convert to
-		 * the 8-bit hex Pango wants. Two-digit precision is fine for
-		 * the four colors we ship. */
-		char hex[8];
-		g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
-		            (int) (rgba->red   * 255.0 + 0.5),
-		            (int) (rgba->green * 255.0 + 0.5),
-		            (int) (rgba->blue  * 255.0 + 0.5));
-		if (user)
-			*markup_out = g_strdup_printf (
-				"<span foreground=\"%s\"><b>%s</b></span>\n"
-				"<small>UID %u · Icon %u · %s%s</small>",
-				hex, name_esc, uid, icon_id, status, away);
-		else
-			*markup_out = g_strdup_printf (
-				"<span foreground=\"%s\"><b>%s</b></span>\n"
-				"<small>UID %u</small>",
-				hex, name_esc, uid);
-	} else {
-		if (user)
-			*markup_out = g_strdup_printf (
-				"<b>%s</b>\n"
-				"<small>UID %u · Icon %u · %s%s</small>",
-				name_esc, uid, icon_id, status, away);
-		else
-			*markup_out = g_strdup_printf (
-				"<b>%s</b>\n"
-				"<small>UID %u</small>",
-				name_esc, uid);
-	}
-
-	g_free (name_esc);
-}
-
-void
-msgwin_refresh_user_info (struct msgwin *msg)
-{
-	struct chat *pubchat;
-	struct hx_user *user = NULL;
+	char *name_esc;
+	char *markup;
 	GdkPixbuf *pixbuf = NULL;
 	GdkPixbuf *unused_mask = NULL;
-	char *markup = NULL;
 
 	if (!msg || !msg->info_label || !msg->info_image)
 		return;
+	if (!display_name || !*display_name)
+		display_name = msg->name ? msg->name : "";
 
-	/* The user list is per-chat; the public chat (cid=0) carries the
-	 * server-wide list we want here. chat_with_cid is the canonical
-	 * "global user list" lookup the rest of the codebase uses
-	 * (rcv.c, commands.c, users.c). The chat_list pointer can be
-	 * reset to all-zeros mid-disconnect (network.c:215), so guard
-	 * the user_list deref against the brief NULL window too. */
-	pubchat = chat_with_cid (&the_session, 0);
-	if (pubchat && pubchat->user_list)
-		user = hx_user_with_uid (pubchat->user_list, *msg->uid);
+	name_esc = g_markup_escape_text (display_name, -1);
 
-	msg_format_user_markup (user, msg->name, *msg->uid, &markup);
+	if (have_status) {
+		const char *status = (color >= 2) ? _("Admin") : _("Guest");
+		const char *away   = (color % 2)  ? _(" (Away)") : "";
+		if (rgba) {
+			/* gdk_user_colors stores values in [0..1] floats;
+			 * convert to the 8-bit hex Pango wants. */
+			char hex[8];
+			g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
+			            (int) (rgba->red   * 255.0 + 0.5),
+			            (int) (rgba->green * 255.0 + 0.5),
+			            (int) (rgba->blue  * 255.0 + 0.5));
+			markup = g_strdup_printf (
+				"<span foreground=\"%s\"><b>%s</b></span>\n"
+				"<small>UID %u · Icon %u · %s%s</small>",
+				hex, name_esc, *msg->uid, icon, status, away);
+		} else {
+			markup = g_strdup_printf (
+				"<b>%s</b>\n"
+				"<small>UID %u · Icon %u · %s%s</small>",
+				name_esc, *msg->uid, icon, status, away);
+		}
+	} else {
+		markup = g_strdup_printf (
+			"<b>%s</b>\n<small>UID %u</small>",
+			name_esc, *msg->uid);
+	}
+
 	gtk_label_set_markup (GTK_LABEL (msg->info_label), markup);
 	g_free (markup);
+	g_free (name_esc);
 
 	/* Always reload — icon ID can change when the user changes their
 	 * icon mid-conversation. load_icon falls back through the icon
@@ -300,9 +280,8 @@ msgwin_refresh_user_info (struct msgwin *msg)
 	 * itself (gdk_texture_new_for_pixbuf) was deprecated in GTK 4.16
 	 * — same migration story as gtkhx_image_new_from_pixbuf in
 	 * gtkutil.c, suppress here until we move icons off GdkPixbuf. */
-	load_icon (msg->info_image,
-	           user ? user->icon : 0,
-	           &icon_files, 1, &pixbuf, &unused_mask);
+	load_icon (msg->info_image, icon, &icon_files, 1,
+	           &pixbuf, &unused_mask);
 	if (pixbuf) {
 		GdkTexture *tex;
 		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
@@ -315,6 +294,46 @@ msgwin_refresh_user_info (struct msgwin *msg)
 	} else {
 		gtk_image_clear (GTK_IMAGE (msg->info_image));
 	}
+}
+
+void
+msgwin_refresh_user_info (struct msgwin *msg)
+{
+	struct chat *pubchat;
+	struct hx_user *user = NULL;
+
+	if (!msg)
+		return;
+
+	/* The user list is per-chat; the public chat (cid=0) carries the
+	 * server-wide list we want here. chat_with_cid is the canonical
+	 * "global user list" lookup the rest of the codebase uses
+	 * (rcv.c, commands.c, users.c). The chat_list pointer can be
+	 * reset to all-zeros mid-disconnect (network.c:215), so guard
+	 * the user_list deref against the brief NULL window too. */
+	pubchat = chat_with_cid (&the_session, 0);
+	if (pubchat && pubchat->user_list)
+		user = hx_user_with_uid (pubchat->user_list, *msg->uid);
+
+	if (user)
+		msg_apply_user_view (msg, user->name, user->icon, user->color,
+		                     TRUE);
+	else
+		msg_apply_user_view (msg, NULL, 0, 0, FALSE);
+}
+
+/* Bypass the cache lookup. Called from users.c::user_change with the
+ * NEW name/icon/color values straight off the wire — at that point
+ * rcv.c hasn't yet patched them onto the cached hx_user struct (the
+ * rename-detection comparison at rcv.c:338-339 needs the old values
+ * to still be there when user_change returns), so a cache-based
+ * refresh would render stale data. Take the new values directly. */
+void
+msgwin_apply_user_change (struct msgwin *msg,
+                          const char *nam,
+                          guint16 icon, guint16 color)
+{
+	msg_apply_user_view (msg, nam, icon, color, TRUE);
 }
 
 static struct msgwin *create_msg (guint16 _uid, char *name)

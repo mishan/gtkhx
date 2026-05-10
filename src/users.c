@@ -1126,11 +1126,15 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	 * pane (icon / name / status) so it tracks the user changing
 	 * their nick or going idle. Only fires on the global-list pass
 	 * (cid==0) to avoid duplicate refreshes from the per-pchat
-	 * recursion above — the public chat at cid=0 holds the
-	 * server-wide user list msgwin_refresh_user_info reads from. */
+	 * recursion above. We pass the new nam/icon/color through
+	 * directly rather than re-reading user->* — rcv.c hasn't
+	 * patched the new values onto the cached struct yet at this
+	 * point in the dispatch (its rename-detection compares
+	 * user->name vs nam after we return), so a cache-lookup
+	 * refresh would paint the OLD identity. */
 	if (!chat->cid) {
 		struct msgwin *mw = msgwin_with_uid (user->uid);
 		if (mw)
-			msgwin_refresh_user_info (mw);
+			msgwin_apply_user_change (mw, nam, icon, color);
 	}
 }
