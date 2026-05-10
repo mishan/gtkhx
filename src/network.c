@@ -51,6 +51,7 @@
 #include "log.h"
 #include "proto_trace.h"
 #include "network.h"
+#include "banner.h"
 
 char *server_addr;
 #ifdef USE_IPV6
@@ -157,6 +158,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
 	ping_stop ();
 	rcv_login_reset ();
+	banner_clear ();
 
 	if(conn_tid) {
 		pthread_cancel(conn_tid);

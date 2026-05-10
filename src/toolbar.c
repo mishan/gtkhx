@@ -41,6 +41,7 @@
 #include "files.h"
 #include "usermod.h"
 #include "about.h"
+#include "banner.h"
 #include "options.h"
 #include "gtkthreads.h"
 #include "plugin.h"
@@ -534,6 +535,11 @@ void create_toolbar_window (session *sess)
 	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 	gtk_box_append (GTK_BOX (vbox), GTK_WIDGET (toolbar_banner));
 	gtk_box_append (GTK_BOX (vbox), hbox);
+	/* Phase 5: server banner row (banner.c). Hidden until an
+	 * HTLS_HDR_BANNER message arrives. Sits above the status bar
+	 * so it doesn't push the persistent connection state out of
+	 * sight. */
+	gtk_box_append (GTK_BOX (vbox), banner_widget_new ());
 	gtk_box_append (GTK_BOX (vbox), status_bar);
 
 	/* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()

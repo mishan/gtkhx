@@ -54,6 +54,7 @@
 #include "proto_trace.h"
 #include "debug.h"
 #include "connect.h"
+#include "banner.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -433,6 +434,21 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 	}
 }
 
+void hx_rcv_banner (struct htlc_conn *htlc)
+{
+	struct hx_banner_msg bm;
+
+	/* Phase 5: HTLS_HDR_BANNER arrives unsolicited from the server
+	 * after the AGREEMENTAGREE round-trip. Parse the type +
+	 * optional URL and hand off to banner.c, which owns the
+	 * toolbar widget and the URL/HTXF fetch state machines. */
+	if (!hx_banner_extract (htlc, &bm))
+		return;
+
+	banner_handle_message (htlc, bm.type, bm.has_url,
+	                       bm.has_url ? bm.url : NULL);
+}
+
 void hx_rcv_chat_invite (struct htlc_conn *htlc)
 {
 	struct hx_chat_invite_msg im;
@@ -572,6 +588,9 @@ void hx_rcv_hdr (struct htlc_conn *htlc)
 		break;
 	case HTLS_HDR_AGREEMENT:
 		htlc->rcv = hx_rcv_agreement_file;
+		break;
+	case HTLS_HDR_BANNER:
+		htlc->rcv = hx_rcv_banner;
 		break;
 	case HTLS_HDR_POLITEQUIT:
 		hx_printf_prefix(htlc, 0, INFOPREFIX, _("polite quit\n"));

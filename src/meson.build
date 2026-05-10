@@ -1,5 +1,6 @@
 gtkhx_sources = files(
   'about.c',
+  'banner.c',
   'chat.c',
   'cicn.c',
   'cipher.c',

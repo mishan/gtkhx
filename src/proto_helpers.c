@@ -146,6 +146,45 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
 	return TRUE;
 }
 
+gboolean
+hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
+{
+	gboolean got_type = FALSE;
+
+	if (!out)
+		return FALSE;
+
+	memset (out->type, 0, sizeof (out->type));
+	out->has_url = FALSE;
+	out->url[0]  = '\0';
+	out->url_len = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_BANNER_TYPE:
+			/* Per mhxd's rcv_agreementagree, the type is always
+			 * 4 bytes (right-padded with spaces for shorter codes
+			 * like "URL"). Reject anything else as malformed. */
+			if (_len != 4)
+				continue;
+			memcpy (out->type, dh->data, 4);
+			out->type[4] = '\0';
+			got_type = TRUE;
+			break;
+		case HTLS_DATA_BANNER_URL:
+			out->url_len = (_len > sizeof (out->url) - 1)
+				? (guint16) (sizeof (out->url) - 1)
+				: _len;
+			memcpy (out->url, dh->data, out->url_len);
+			out->url[out->url_len] = '\0';
+			out->has_url = TRUE;
+			break;
+		}
+	} dh_end ();
+
+	return got_type;
+}
+
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {
