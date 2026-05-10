@@ -1,30 +1,35 @@
 /*
  * tests/integration/test_unauthorized_opcode.c — sending a
- * privileged opcode (FILE_MKDIR) as guest is silently dropped
- * by the mhxd dispatcher.
+ * privileged opcode (FILE_MKDIR) as guest is rejected by the
+ * mhxd dispatcher with a TASK task-error reply.
  *
  * mhxd's main rcv loop (mhxd/src/hxd/rcv.c around line 380+)
  * gates each privileged HTLC_HDR_* on the corresponding access
- * bit BEFORE setting htlc->rcv to a handler. If the bit is unset,
- * the handler never runs and no reply is sent. FILE_MKDIR is
- * gated on htlc->access.create_folders.
+ * bit BEFORE setting htlc->rcv. When the bit is unset, htlc->rcv
+ * stays NULL and the post-switch tail at rcv.c:580 emits
+ *
+ *   snd_errorstr(htlc, "Transaction rejected. (Unknown or non-authorised)");
+ *
+ * — i.e. an HTLS_HDR_TASK with the error bit set, correlated to
+ * our trans. FILE_MKDIR is gated on htlc->access.create_folders.
  *
  * The default upstream guest UserData has all eight byte-0
- * access bits set, which makes FILE_MKDIR pass through and gives
- * a misleading 'guest can mkdir' result. Our Dockerfile patches
- * guest's binary UserData at byte 4 with a 0x60 mask — keeping
- * download_files (bit 5) and upload_files (bit 6), clearing
- * everything else including create_folders (bit 2). See the
- * comment block in tests/mhxd/Dockerfile next to the dd patch.
+ * access bits set, which would make FILE_MKDIR pass through and
+ * give a misleading 'guest can mkdir' result. Our Dockerfile
+ * patches guest's binary UserData at byte 4 with a 0x60 mask —
+ * keeping download_files (bit 5) and upload_files (bit 6),
+ * clearing everything else including create_folders (bit 2). See
+ * the comment block in tests/mhxd/Dockerfile next to the dd patch.
  *
  * Test contract:
  *   1. Login as guest.
  *   2. Send HTLC_HDR_FILE_MKDIR for some name.
- *   3. Drain a short window — assert no TASK frame correlated to
- *      our trans arrives. The dispatcher drops it silently.
+ *   3. Drain to TASK with our trans. Assert flag bit 1 is set
+ *      (rejected) and that NO non-error TASK reply for our trans
+ *      ever arrives — the directory must not actually be created.
  *   4. Round-trip a PING; the pong-trans must match. Proves the
- *      dispatcher still consumed our message cleanly without
- *      leaving stale framing behind.
+ *      dispatcher's rejection path left the stream in a clean
+ *      state.
  *
  * Catches a regression where the dispatcher accidentally lets a
  * privileged opcode through when the access bit is clear.
@@ -81,24 +86,33 @@ test_unauthorized_mkdir_silently_dropped (void)
 		(int) HTLC_DATA_FILE_NAME, (int) strlen (new_dir),
 			(guint8 *) new_dir));
 
-	/* Drain a short window; record any TASK frame whose trans
-	 * matches our MKDIR. With guest's create_folders bit cleared
-	 * by the Dockerfile patch, mhxd's dispatcher refuses to set
-	 * htlc->rcv for FILE_MKDIR — no handler runs, no reply is
-	 * sent. We expect the drain to time out empty. */
-	gboolean got_mkdir_reply = FALSE;
-	for (int i = 0; i < 8; i++) {
-		if (!integration_recv_message (
-				fd, &htlc, /*timeout_ms=*/500))
-			break;
+	/* Drain to the TASK reply matching our trans. With guest's
+	 * create_folders bit cleared, the dispatcher's post-switch
+	 * tail emits HTLS_HDR_TASK with flag=1 carrying a
+	 * "Transaction rejected" TASKERROR chunk. */
+	gboolean got_reject = FALSE;
+	gboolean got_success = FALSE;
+	for (int i = 0; i < 32 && !got_reject && !got_success; i++) {
+		g_assert_true (integration_recv_message (
+			fd, &htlc, /*timeout_ms=*/3000));
 		if (hdr_type (&htlc) != HTLS_HDR_TASK)
 			continue;
 		if (hdr_trans (&htlc) != mkdir_trans)
 			continue;
-		got_mkdir_reply = TRUE;
-		break;
+		if (hdr_flag (&htlc) & 1) {
+			got_reject = TRUE;
+			char err[256];
+			gsize err_len = 0;
+			if (task_error_extract (
+				&htlc, err, sizeof (err), &err_len))
+				g_test_message (
+					"server rejected mkdir: \"%s\"", err);
+		} else {
+			got_success = TRUE;
+		}
 	}
-	g_assert_false (got_mkdir_reply);
+	g_assert_false (got_success);
+	g_assert_true  (got_reject);
 
 	/* Probe with PING — the dispatcher should still be in a clean
 	 * state, accepting the next request and replying normally. */

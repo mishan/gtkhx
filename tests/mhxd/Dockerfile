@@ -196,14 +196,23 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
 #
 #     Done with dd + a tiny shell pipeline so we don't need to
 #     install python or perl into the build stage. Read byte 4 via
-#     `dd | od`, mask in shell arithmetic, format the result as
-#     '\xHH' for printf, write back via dd seek+notrunc.
+#     `dd | od`, mask in shell arithmetic, format the masked result
+#     as a printf octal escape (\NNN) and write back via dd
+#     seek+notrunc.
+#
+#     Why octal not hex: dash's printf (the /bin/sh on Debian) does
+#     NOT interpret '\xHH' escapes — it writes the literal text
+#     '\x20' instead of the byte 0x20. POSIX printf is only
+#     guaranteed to handle '\NNN' octal. The double-printf trick
+#     below builds a format string '\NNN' from the masked decimal
+#     byte and feeds it to a second printf that emits the actual
+#     byte. (Verified end-to-end against the upstream guest seed.)
 RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 skip=4 status=none \
           | od -An -vtu1 | tr -d ' ') \
  && m=$(( b & 0x60 )) \
- && hex=$(printf '%02x' "$m") \
- && printf "\\x$hex" \
+ && fmt=$(printf '\\\\%03o' "$m") \
+ && printf "$fmt" \
       | dd of=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 seek=4 conv=notrunc status=none
 
