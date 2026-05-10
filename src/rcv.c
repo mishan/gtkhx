@@ -234,6 +234,21 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 	hx_agreement_result r =
 		hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
 
+	/* Phase 5: legacy login flow (banner support) — the server is
+	 * waiting for HTLC_HDR_AGREEMENTAGREE before it sends SELFINFO
+	 * and any banner. If there's no agreement to display
+	 * (HX_AGREEMENT_NONE — server config has agreement disabled,
+	 * or HX_AGREEMENT_NOT_FOUND — malformed payload), the user
+	 * has nothing to click 'Agree' on, so login would stall. Send
+	 * AGREEMENTAGREE automatically in those cases.
+	 *
+	 * For HX_AGREEMENT_OK, fall through to popping the agreement
+	 * window. The Agree button (gtkhx.c::concurrence) sends
+	 * AGREEMENTAGREE explicitly. */
+	if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
+		hx_send_agreement_agree (htlc);
+		return;
+	}
 	if (r != HX_AGREEMENT_OK)
 		return;
 

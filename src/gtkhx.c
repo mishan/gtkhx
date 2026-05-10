@@ -989,6 +989,16 @@ static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat,
 static void concurrence(GtkWidget *widget, gpointer data)
 {
 	session *sess  = data;
+	(void) widget;
+
+	/* Phase 5: previously the Agree button just closed the dialog —
+	 * GtkHx had skipped the legacy AGREEMENTAGREE phase by sending
+	 * NAME at LOGIN time (the mhxd-style modern flow). Now we send
+	 * a real HTLC_HDR_AGREEMENTAGREE: it both (a) completes the
+	 * server-side login state machine AND (b) triggers the banner
+	 * broadcast on servers configured to send one. */
+	if (sess->htlc.fd)
+		hx_send_agreement_agree (&sess->htlc);
 
 	gtkhx_widget_destroy(sess->agreementwin);
 	sess->agreementwin = 0;

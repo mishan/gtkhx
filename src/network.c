@@ -717,7 +717,22 @@ login_secure_dispatch (gpointer data)
 
 /* Covers both the password-bearing and password-less legacy login
  * paths. encpass == NULL signals the no-password variant; the field
- * is omitted from the packet (hc 3 instead of 4). */
+ * is omitted from the packet (hc 2 instead of 3).
+ *
+ * Phase 5: NAME used to be sent here (the modern, mhxd-extension
+ * flow), but mhxd's banner-send code path is gated on
+ * htlc->access_extra.can_agree, which is ONLY set when LOGIN
+ * arrived without a NAME chunk. The banner support work needs the
+ * legacy two-stage flow:
+ *
+ *   client → LOGIN (no NAME)
+ *   server → loginreply TASK + AGREEMENT
+ *   client → AGREEMENTAGREE with NAME + ICON  (see hx_send_agreement_agree)
+ *   server → SELFINFO + USER_GETLIST + (if configured) HTLS_HDR_BANNER
+ *
+ * The legacy flow is also more compatible with original Hotline
+ * 1.0 / 1.2 servers, which spec'd NAME at AGREEMENTAGREE-time
+ * rather than LOGIN-time. */
 struct login_args {
 	struct htlc_conn *htlc;
 	guint16 icon16;
@@ -732,20 +747,38 @@ login_dispatch (gpointer data)
 {
 	struct login_args *a = data;
 	if (a->encpass) {
-		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 4,
-		    HTLC_DATA_ICON, 2, &a->icon16,
-		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
-		    HTLC_DATA_PASSWORD, a->plen, a->encpass,
-		    HTLC_DATA_NAME, strlen ((const char *)a->htlc->name),
-		                    a->htlc->name);
-	} else {
 		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 3,
 		    HTLC_DATA_ICON, 2, &a->icon16,
 		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
-		    HTLC_DATA_NAME, strlen ((const char *)a->htlc->name),
-		                    a->htlc->name);
+		    HTLC_DATA_PASSWORD, a->plen, a->encpass);
+	} else {
+		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 2,
+		    HTLC_DATA_ICON, 2, &a->icon16,
+		    HTLC_DATA_LOGIN, a->llen, a->enclogin);
 	}
 	return G_SOURCE_REMOVE;
+}
+
+/* Phase 5: HTLC_HDR_AGREEMENTAGREE with NAME + ICON. Sent from
+ * gtkhx.c::concurrence (Agree button) once the agreement-window
+ * is dismissed. Two server-side effects:
+ *
+ *   1. mhxd's rcv_agreementagree finishes login (calls account_read
+ *      against our login, sets access bits, broadcasts join), and
+ *      sends SELFINFO + USER_GETLIST.
+ *   2. If the server config has banner.type set, mhxd unconditionally
+ *      sends HTLS_HDR_BANNER from inside that handler.
+ *
+ * ICON comes from htlc->icon (preserved across the connect), NAME
+ * from htlc->name (set from prefs.nick at connect time). */
+void
+hx_send_agreement_agree (struct htlc_conn *htlc)
+{
+	guint16 icon16 = htons (htlc->icon);
+
+	hlwrite (htlc, HTLC_HDR_AGREEMENTAGREE, 0, 2,
+	    HTLC_DATA_ICON, 2, &icon16,
+	    HTLC_DATA_NAME, strlen ((const char *) htlc->name), htlc->name);
 }
 
 /* Initialize the connection's qbuf state (and assign the freshly
