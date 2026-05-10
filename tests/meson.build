@@ -744,3 +744,46 @@ test_integration_msg_to_unknown_uid = executable('test_integration_msg_to_unknow
 test('msg_to_unknown_uid', test_integration_msg_to_unknown_uid,
      suite   : 'integration',
      timeout : 30)
+
+# news_catlist — list articles inside the seeded cat_irasshaimase
+# threaded-news category. The existing news15 test only covers the
+# root-level dirlist; this goes one level deeper and exercises
+# mhxd's HTLC_HDR_NEWSCATLIST + cat_to_path packed-path parser.
+# Tolerant to tnews-disabled / empty-category edge cases.
+test_integration_news_catlist = executable('test_integration_news_catlist',
+  'integration/test_news_catlist.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('news_catlist', test_integration_news_catlist,
+     suite   : 'integration',
+     timeout : 30)
+
+# user_list_grows — Alice's USER_GETLIST reply count grows by one
+# when Bob logs in. Complements test_user_list (single-client
+# self-presence) by proving the server actually enumerates other
+# users in the reply, not just the requester.
+test_integration_user_list_grows = executable('test_integration_user_list_grows',
+  'integration/test_user_list_grows.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_list_grows', test_integration_user_list_grows,
+     suite   : 'integration',
+     timeout : 30)
+
+# chat_long — 1500-byte chat message survives the broadcast wire
+# intact. Stresses the proto parser past any < 256 byte happy-path
+# and the qbuf growth in network.c. Catches signed-byte
+# truncation / off-by-one regressions that would clip the body.
+test_integration_chat_long = executable('test_integration_chat_long',
+  'integration/test_chat_long.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_long', test_integration_chat_long,
+     suite   : 'integration',
+     timeout : 30)
