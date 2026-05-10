@@ -5,9 +5,6 @@ Docs:
 i18n:
 - Translate to other languages
 
-Packaging:
-- Flatpak support
-
 Security:
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 - Look into what newer Hotline clients/servers support (ties into mhxd epic)
@@ -22,7 +19,6 @@ File Previews:
 
 Bookmarks
 - Better bookmark management, allowing user to add/edit/delete bookmarks
-- Remove servers that no longer exist from built-in bookmarks
 
 Tracker
 - Ship with some more built in trackers configured
@@ -34,7 +30,6 @@ Code Modernization:
 - Follow MVC architecture
 
 Code Cleanup:
-- Fix all warnings
 - Remove #define/#ifdef/#ifndef for things like USE_IPV6 and other things we should just consider a given these days
 
 Features:
@@ -44,6 +39,4 @@ Features:
 
 Old:
 -Full file support (not sure what this means)
--Write up API docs
--fix preferences broken-ness
 -Reimplement SOCKS support (see mhxd source)
