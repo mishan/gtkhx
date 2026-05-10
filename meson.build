@@ -82,6 +82,15 @@ threads_dep = dependency('threads')
 # GSound is the canonical path; the fallback fork+exec code was retired.
 gsound_dep = dependency('gsound')
 
+# Phase 5: libsoup-3 powers the URL-mode banner fetcher in banner.c.
+# Modern Hotline servers can advertise a banner via HTLS_HDR_BANNER as
+# either an http(s) URL (URL-mode) or as bytes pulled over the HTXF
+# subchannel (file-mode). Both modes display in the toolbar's banner
+# row; URL-mode needs an HTTP client to actually retrieve the bytes.
+# 3.0 is the GLib-2 / GIO-3-aligned series; available everywhere
+# Adwaita 1.6 is.
+soup_dep = dependency('libsoup-3.0', version : '>= 3.0')
+
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -97,6 +106,7 @@ deps = [
   nettle_dep,
   threads_dep,
   gsound_dep,
+  soup_dep,
   intl_dep,
   dl_dep,
   math_dep,
