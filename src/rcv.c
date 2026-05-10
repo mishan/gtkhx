@@ -1141,11 +1141,25 @@ no_cipher:
 			connected = 1;
 
 			/* Reset post-login fetch state before scheduling so
-			 * a reconnection during this process state starts clean. */
-			post_login_fetched = FALSE;
-			if (post_login_timer_id) {
-				g_source_remove (post_login_timer_id);
-				post_login_timer_id = 0;
+			 * a reconnection during this process state starts clean.
+			 *
+			 * BUT — on 1.9-style servers (MacSecret.com, etc.) the
+			 * server fires HTLS_HDR_USER_SELFINFO *before* the
+			 * loginreply TASK arrives. SELFINFO already triggered
+			 * do_post_login_fetches and set post_login_fetched=TRUE,
+			 * so if we reset it here and arm the fallback timer, the
+			 * timer fires 2s later and fetches everything a second
+			 * time. Skip the reset (and the timer arm below) when
+			 * fetches have already gone out. rcv_login_reset() at
+			 * the top of every login attempt handles the across-
+			 * reconnects clean-slate case. */
+			gboolean already_fetched = post_login_fetched;
+			if (!already_fetched) {
+				post_login_fetched = FALSE;
+				if (post_login_timer_id) {
+					g_source_remove (post_login_timer_id);
+					post_login_timer_id = 0;
+				}
 			}
 
 			dh_start(htlc) {
@@ -1197,9 +1211,15 @@ no_cipher:
 			 * post-login conversation has fully landed. See the
 			 * commentary on do_post_login_fetches above for the
 			 * rationale. The fallback timer covers servers that
-			 * don't send SELFINFO. */
-			post_login_timer_id = g_timeout_add_seconds (
-				2, post_login_fallback, htlc);
+			 * don't send SELFINFO.
+			 *
+			 * Skip arming the timer if SELFINFO already arrived
+			 * before this TASK reply (1.9-style flow); the fetches
+			 * have already gone out and a second pass would just
+			 * duplicate them. */
+			if (!already_fetched)
+				post_login_timer_id = g_timeout_add_seconds (
+					2, post_login_fallback, htlc);
 		}
 	}
 }
