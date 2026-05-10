@@ -1,10 +1,6 @@
 High priority:
 
-- Private Message and Private Chat windows are wrongly sized. Chat appears cut off in top left corner until window is resized larger. The window is already larger than it needs to be, and the input box is too large
-- "Reconnect" does not reconnect to the server one was just disconnected from, nor fill in the Connect dialog with the details of that server
-- Integration test issue? I notice lots of [login] <defunct> processes that originate from mhxd. Are the tests leaving behind
-  stale connections? Does our mhxd container have a reasonable timeout set? This may be why the mhxd container eventually
-  becomes unresponsive
+(none)
 
 Medium priority:
 
