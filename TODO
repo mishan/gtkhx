@@ -1,8 +1,3 @@
-GtkHx Development:
-- GitHub Actions that run tests on pull requests and block merge when tests fail
-- Claude should start making branches for changes, instead of committing to `main`. Misha
-  will open up pull requests using these branches, review the code, and merge when ready.
-
 New Hotline Features:
 - Banner support (integrate into Toolbar?)
 

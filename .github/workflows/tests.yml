@@ -1,0 +1,161 @@
+# GtkHx CI — runs the full test suite on every push and pull request.
+#
+# Three tiers (see tests/PROPOSAL.md):
+#
+#   unit         — pure-function tests, no GTK / network. Fast.
+#   proto        — wire-format parsers driven from canned fixtures.
+#   integration  — end-to-end against the mhxd Docker container in
+#                  tests/mhxd/Dockerfile. Slower (rebuilds the
+#                  container on every run unless the layer cache is
+#                  warm).
+#
+# Two jobs:
+#
+#   build-and-test  — Single Fedora job that builds the GtkHx binary
+#                     and runs unit + proto tests. Doesn't need
+#                     Docker. Targets a Fedora image because GtkHx
+#                     needs libadwaita >= 1.6, which Ubuntu's stable
+#                     LTS images don't ship.
+#
+#   integration     — Same Fedora image, plus a sibling step that
+#                     builds the mhxd container and starts it on
+#                     localhost:5500 / 5501. The integration suite
+#                     defaults to those ports (see tests/integration/
+#                     integration_harness.h).
+#
+# Branch protection on `main` should require both jobs green before
+# merge. That setup is in the GitHub repository UI — Settings →
+# Branches → Branch protection rules.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same PR / branch when a new push
+# comes in. Saves CI minutes; the latest commit is the one we care
+# about.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + unit + proto
+    runs-on: ubuntu-latest
+    container:
+      # Fedora ships current gtk4 / libadwaita / nettle. Pinned to
+      # a major so a Fedora 43 release with surprise breakage doesn't
+      # red the suite the day it lands; bump deliberately.
+      image: fedora:42
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install build deps
+        # desktop-file-utils → update-desktop-database (required by
+        # meson.build's gnome.post_install at setup time, even though
+        # it's a no-op until `meson install`) AND desktop-file-validate
+        # (consumed by the validate-desktop meson test).
+        # appstream → appstreamcli for the validate-metainfo test.
+        # gtk-update-icon-cache is bundled with the gtk4 runtime on
+        # Fedora; pulled in transitively by gtk4-devel.
+        run: |
+          dnf -y install \
+            meson ninja-build pkgconf-pkg-config gcc \
+            gtk4-devel libadwaita-devel \
+            glib2-devel gobject-introspection-devel \
+            nettle-devel zlib-devel \
+            gsound-devel \
+            gettext-devel \
+            desktop-file-utils appstream \
+            git
+
+      - name: meson setup
+        run: meson setup build
+
+      - name: meson compile
+        run: meson compile -C build
+
+      - name: meson test (unit + proto)
+        run: |
+          meson test -C build --suite unit --suite proto \
+            --print-errorlogs
+
+      - name: upload meson test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-build-and-test
+          path: build/meson-logs/
+
+  integration:
+    name: integration vs mhxd
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: build mhxd test container
+        run: |
+          docker build -t gtkhx-mhxd tests/mhxd
+
+      - name: start mhxd
+        run: |
+          docker run -d --name gtkhx-mhxd \
+            -p 5500:5500 -p 5501:5501 \
+            gtkhx-mhxd
+          # Give mhxd a moment to listen on 5500. The integration
+          # harness's connect timeout is 2s, so a brief sleep is
+          # enough; longer waits keep CI fast.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if (echo > /dev/tcp/127.0.0.1/5500) 2>/dev/null; then
+              echo "mhxd is up"; break
+            fi
+            sleep 1
+          done
+
+      # The build itself runs in a Fedora container so we have the
+      # right libadwaita; the test binaries then talk to mhxd on the
+      # runner's localhost via the docker port mappings.
+      - name: install build deps + build + test (integration)
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/src" -w /src \
+            -e GTKHX_TEST_HOST=127.0.0.1 \
+            -e GTKHX_TEST_PORT=5500 \
+            fedora:42 bash -c '
+              dnf -y install \
+                meson ninja-build pkgconf-pkg-config gcc \
+                gtk4-devel libadwaita-devel \
+                glib2-devel gobject-introspection-devel \
+                nettle-devel zlib-devel \
+                gsound-devel \
+                gettext-devel \
+                desktop-file-utils appstream \
+                git
+              meson setup build
+              meson compile -C build
+              meson test -C build --suite integration \
+                --print-errorlogs
+            '
+
+      - name: dump mhxd logs on failure
+        if: failure()
+        run: docker logs gtkhx-mhxd || true
+
+      - name: upload meson test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-integration
+          path: build/meson-logs/
+
+      - name: stop mhxd
+        if: always()
+        run: docker rm -f gtkhx-mhxd || true

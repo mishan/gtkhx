@@ -189,6 +189,12 @@ third-party screenshots. See ROADMAP Phase ∞ and the long-form notes in memory
 
 ## Conventions for working in this repo
 
+- **Branches, not direct main commits.** All changes go on a feature branch named
+  `claude/<short-topic>` (kebab-case). Don't commit to `main` directly. Misha opens a
+  pull request from the branch, reviews, and merges. If you need to make follow-up
+  changes after review feedback, push more commits to the same branch — don't squash
+  / force-push without asking. CI (`.github/workflows/tests.yml`) runs on every push
+  and PR; a green build is the merge gate.
 - **Commits.** Author identity is `Misha Nasledov <misha@nasledov.com>` (matches the
   CVS-import commit). One logical change per commit, descriptive bodies. No `Co-Authored-By:
   Claude` trailers unless Misha asks.
