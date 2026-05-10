@@ -629,6 +629,17 @@ void create_news_window (session *sess)
 	g_object_set_data_full (G_OBJECT (news_window), "search-ctx",
 	                        search_ctx, news_search_ctx_free);
 
+	/* Create the search-match / search-current tags up front. The
+	 * news content paths (output_news_post / output_news_file) call
+	 * news_search_run after each new chunk arrives, and the very
+	 * first call's news_search_clear_highlights tries to remove these
+	 * tags by name — without a prior ensure-pass, GtkTextBuffer warns
+	 * "Unknown tag 'search-match'" / "Unknown tag 'search-current'"
+	 * once per news load. Ensuring the tags here once at window-build
+	 * time is cheaper than guarding every remove_tag_by_name caller. */
+	news_search_ensure_tags (
+		gtk_text_view_get_buffer (search_ctx->text_view));
+
 	search_bar = news_search_bar_new (search_ctx);
 	/* set_key_capture_widget covers Esc-closes-bar and printable-
 	 * key-opens-bar-with-text. It does NOT cover Ctrl+F — that
