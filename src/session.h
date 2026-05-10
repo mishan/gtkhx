@@ -255,8 +255,14 @@ typedef struct _session {
 	struct task __task_list;
 	struct task *task_list, *task_tail;
 
-	struct hx_user __user_list;
-	struct hx_user *user_list, *user_tail;
+	/* Phase 5: removed session-level user_list / user_tail / __user_list.
+	 * Those fields were declared but never wired up (network.c only ever
+	 * initializes chat_list->user_list, and every consumer reads through
+	 * chat->user_list — usually chat_with_cid(sess, 0)->user_list, the
+	 * public chat). Dead fields are a hazard: I dereferenced
+	 * session.user_list in the new PM info pane and segfaulted on the
+	 * first PM open. The canonical "global user list" lookup is the
+	 * public chat at cid=0 — use chat_with_cid(sess, 0)->user_list. */
 
 	struct chat *chat_front, *chat_tail, *chat_list;
 	struct chat __chat_list;

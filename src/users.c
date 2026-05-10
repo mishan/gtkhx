@@ -1126,8 +1126,8 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	 * pane (icon / name / status) so it tracks the user changing
 	 * their nick or going idle. Only fires on the global-list pass
 	 * (cid==0) to avoid duplicate refreshes from the per-pchat
-	 * recursion above — the_session.user_list is the source of truth
-	 * msgwin_refresh_user_info reads from. */
+	 * recursion above — the public chat at cid=0 holds the
+	 * server-wide user list msgwin_refresh_user_info reads from. */
 	if (!chat->cid) {
 		struct msgwin *mw = msgwin_with_uid (user->uid);
 		if (mw)

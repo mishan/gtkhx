@@ -364,10 +364,13 @@ typedef struct _session {
 
 	struct task __task_list;
 	struct task *task_list, *task_tail;
-	
-	struct hx_user __user_list;
-	struct hx_user *user_list, *user_tail;
-	
+
+	/* session-level user_list / user_tail / __user_list were never
+	 * wired up (see session.h) and were removed in Phase 5 to keep
+	 * this ABI mirror in lockstep with the in-tree session struct.
+	 * Plugins reading the global user list should use the public
+	 * chat at cid=0 — chat_with_cid(sess, 0)->user_list. */
+
 	struct chat *chat_front, *chat_tail, *chat_list;
 	struct chat __chat_list;
 
