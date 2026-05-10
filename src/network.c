@@ -928,7 +928,22 @@ static void hx_thread_connect (void *arg)
 		fd_set rfds;
 		struct timeval tv;
 
-		write(s, HTLC_MAGIC, HTLC_MAGIC_LEN);
+		/* The magic write/read pair is the Hotline handshake.
+		 * If write fails, the subsequent select+read will see a
+		 * dead socket and the magic compare downstream will reject
+		 * the connection. We do explicitly check both calls so a
+		 * partial-write or short-read produces a clean rejection
+		 * instead of a stale buffer compare. */
+		if (write(s, HTLC_MAGIC, HTLC_MAGIC_LEN) != HTLC_MAGIC_LEN) {
+			post_log(htlc, 0, INFOPREFIX,
+			         _("error writing client magic\n"));
+			post_session_int(setbtns, sess, 0);
+			post_int(set_status_bar, 0);
+			post_session_int(set_disconnect_btn, sess, 0);
+			post_session_int(conn_task_update, sess, 2);
+			close(s);
+			return;
+		}
 
 		FD_ZERO(&rfds);
 		FD_SET(s, &rfds);
@@ -937,7 +952,17 @@ static void hx_thread_connect (void *arg)
 		select(s+1, &rfds, NULL, NULL, &tv);
 
 		if(FD_ISSET(s, &rfds)) {
-			read(s, magic, HTLS_MAGIC_LEN);
+			ssize_t magic_n = read(s, magic, HTLS_MAGIC_LEN);
+			if (magic_n != HTLS_MAGIC_LEN) {
+				post_log(htlc, 0, INFOPREFIX,
+				         _("error reading server magic\n"));
+				post_session_int(setbtns, sess, 0);
+				post_int(set_status_bar, 0);
+				post_session_int(set_disconnect_btn, sess, 0);
+				post_session_int(conn_task_update, sess, 2);
+				close(s);
+				return;
+			}
 			if(strncmp(HTLS_MAGIC, magic, HTLS_MAGIC_LEN)) {
 				post_log(htlc, 0, INFOPREFIX,
 				         _("invalid hotline server\n"));

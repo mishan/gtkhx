@@ -31,6 +31,24 @@
 #define DIRCHAR			'/'
 #define UNKNOWN_TYPECREA	"TEXTR*ch"
 
+/* Best-effort write helper for the finderinfo writers below. The
+ * HFS metadata files (.finderinfo / ._<file> / etc.) are always
+ * companions to a real data file — if the metadata write fails,
+ * the data file is fine, the resource fork just isn't preserved.
+ * Log a g_warning so the failure is at least visible, but don't
+ * propagate the error upward (no caller knows what to do with
+ * "metadata partially written"). Avoids the wave of
+ * -Wunused-result fortify warnings the bare write() calls trip
+ * under release builds. */
+static inline void
+hfs_write (int fd, const void *buf, size_t len)
+{
+	ssize_t n = write (fd, buf, len);
+	if (n != (ssize_t) len)
+		g_warning ("hfs_write: short write to finderinfo (%zd/%zu)",
+		           n, len);
+}
+
 struct hfs_config {
 	long fork;
 	long file_perm;
@@ -455,7 +473,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 					memcpy(hdr.cap.fi_ctime, &fi->create_time, 8);
 					hdr.cap.fi_comln = fi->comlen > 200 ? 200 : fi->comlen;
 					memcpy(hdr.cap.fi_comnt, fi->comment, hdr.cap.fi_comln);
-					write(f, &hdr.cap, SIZEOF_HFS_CAP_INFO);
+					hfs_write(f, &hdr.cap, SIZEOF_HFS_CAP_INFO);
 					break;
 				case HFS_FORK_NETATALK:
 				case HFS_FORK_DOUBLE:
@@ -511,7 +529,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 								if (r == SIZEOF_HFS_DBL_HDR)
 									break;
 								descr->length = htonl(fi->comlen);
-								write(f, fi->comment, fi->comlen);
+								hfs_write(f, fi->comment, fi->comlen);
 								break;
 							case HFS_HDR_OLDI:
 							case HFS_HDR_DATES: {
@@ -525,7 +543,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 									descr->length = 8;
 								memcpy(tbuf, &fi->create_time, 4);
 								memcpy(tbuf + 4, &fi->modify_time, 4);
-								write(f, tbuf, sizeof (tbuf));
+								hfs_write(f, tbuf, sizeof (tbuf));
 								break;
 							}
 							case HFS_HDR_FINFO: {
@@ -534,7 +552,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 									descr->length = 8;
 								memcpy(fbuf, fi->type, 4);
 								memcpy(fbuf + 4, fi->creator, 4);
-								write(f, fbuf, sizeof (fbuf));
+								hfs_write(f, fbuf, sizeof (fbuf));
 								break;
 							}
 							case HFS_HDR_RSRC:
@@ -548,7 +566,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 					else
 						hdr.dbl.version = htonl(HFS_HDR_VERSION_2);
 					lseek(f, 0, SEEK_SET);
-					write(f, &hdr.dbl, SIZEOF_HFS_DBL_HDR + 
+					hfs_write(f, &hdr.dbl, SIZEOF_HFS_DBL_HDR +
 						  SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries));
 					break;
 			}
@@ -638,7 +656,7 @@ comment_write (const char *path, char *comment, int comlen)
 					hdr.cap.fi_comln = comlen;
 					memcpy(hdr.cap.fi_comnt, comment, comlen);
 					lseek(f, 0, SEEK_SET);
-					write(f, &hdr.cap, SIZEOF_HFS_CAP_INFO);
+					hfs_write(f, &hdr.cap, SIZEOF_HFS_CAP_INFO);
 					break;			}
 			fsync(f);
 			close(f);

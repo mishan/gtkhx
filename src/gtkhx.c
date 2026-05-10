@@ -1314,7 +1314,14 @@ static void get_password(char *buf)
 	/* The knights who say "nee" demand a..
 	   SHRUBBERY! */
 	printf("Password: ");
-	fgets(buf, 128, stdin);
+	if (!fgets(buf, 128, stdin)) {
+		/* EOF or read error on stdin (e.g. tty closed mid-prompt).
+		 * Restore the terminal flags before returning so the
+		 * caller's shell isn't left with echo disabled. */
+		buf[0] = '\0';
+		tcsetattr(0, TCSANOW, &termio);
+		return;
+	}
 	printf("\n");
 	termio.c_lflag = tmp.c_lflag;
 	tcsetattr(0, TCSANOW, &termio);

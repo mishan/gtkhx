@@ -305,11 +305,21 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
 	}
 	memset (zeros, 0, 256);
 
-	fgets (server, 128, bm);
+	/* Bail if the bookmark file is shorter than the three lines we
+	 * need. Without these checks, a truncated file leaves later
+	 * strlen()/strrchr() walking uninitialised stack — crash on a
+	 * malformed bookmark. */
+	if (!fgets (server, 128, bm) ||
+	    !fgets (login,  64, bm) ||
+	    !fgets (pass,   64, bm)) {
+		fprintf (stderr,
+		         "Bookmark file '%s' truncated; aborting\n",
+		         (char *) data);
+		fclose (bm);
+		exit (1);
+	}
 	server[strlen (server) - 1] = '\0';
-	fgets (login, 64, bm);
 	login[strlen (login) - 1] = '\0';
-	fgets (pass, 64, bm);
 	strip_lf (pass);
 	fclose (bm);
 

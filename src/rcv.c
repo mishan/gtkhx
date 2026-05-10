@@ -462,11 +462,17 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 void hx_rcv_dump (struct htlc_conn *htlc)
 {
 	int fd;
+	ssize_t n;
 
 	fd = open("hx.dump", O_WRONLY|O_APPEND|O_CREAT, 0644);
 	if (fd < 0)
 		return;
-	write(fd, htlc->in.buf, htlc->in.pos);
+	/* Best-effort diagnostic dump — if the write fails or comes up
+	 * short there's no recovery path, but we shouldn't silently
+	 * pretend it succeeded either. */
+	n = write(fd, htlc->in.buf, htlc->in.pos);
+	if (n != (ssize_t) htlc->in.pos)
+		g_warning ("hx_rcv_dump: short write to hx.dump");
 	fsync(fd);
 	close(fd);
 }
