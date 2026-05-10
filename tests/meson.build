@@ -653,3 +653,46 @@ test_integration_chat_decline = executable('test_integration_chat_decline',
 test('chat_decline', test_integration_chat_decline,
      suite   : 'integration',
      timeout : 30)
+
+# chat_part — Bob joins Alice's chat then leaves. Alice's
+# connection should receive HTLS_HDR_CHAT_USER_PART tagged with
+# the chat_id and Bob's uid. Pins down mhxd's rcv_chat_part
+# broadcast loop; complements chat_join from batch 8.
+test_integration_chat_part = executable('test_integration_chat_part',
+  'integration/test_chat_part.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_part', test_integration_chat_part,
+     suite   : 'integration',
+     timeout : 30)
+
+# login_bad — login with a non-existent account name. Verifies the
+# server replies with a TASK + flag=1 (error bit) carrying a
+# TASKERROR chunk, and crucially that no SELFINFO follows. Pins
+# the negative path of the login state machine.
+test_integration_login_bad = executable('test_integration_login_bad',
+  'integration/test_login_bad.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('login_bad', test_integration_login_bad,
+     suite   : 'integration',
+     timeout : 30)
+
+# msg_self — pin down what mhxd does when the client sends
+# HTLC_HDR_MSG addressed to its own uid. The actual handling
+# (echo / drop / task-error) is tolerant; the assertion is that
+# whatever happens, the stream stays clean enough that a follow-up
+# PING round-trips with matching trans.
+test_integration_msg_self = executable('test_integration_msg_self',
+  'integration/test_msg_self.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('msg_self', test_integration_msg_self,
+     suite   : 'integration',
+     timeout : 30)
