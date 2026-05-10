@@ -68,6 +68,16 @@ struct msgwin {
 	GtkWidget *inputbuf;
 	GtkWidget *vscroll;
 	GtkWidget *window;
+	/* Phase 5: header pane above the chat showing the recipient's
+	 * icon + name + status. info_image is a GtkImage (Mac classic
+	 * cicn rendered to GdkPixbuf via load_icon); info_label is a
+	 * single GtkLabel with Pango markup — bold (optionally
+	 * coloured) name on top, dim small details (UID · Icon ·
+	 * Admin/Guest [Away]) below. msgwin_refresh_user_info()
+	 * repopulates both when the user changes their nick / icon /
+	 * idle state. */
+	GtkWidget *info_image;
+	GtkWidget *info_label;
 	void *history;
 };
 

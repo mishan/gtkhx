@@ -1002,7 +1002,7 @@ void users_clear (struct htlc_conn *htlc, struct chat *chat)
  * default foreground so regular users read on both light and dark
  * themes. The other three slots stay distinctive enough to convey
  * status under either theme. */
-static GdkRGBA *user_color_gdk (guint16 color)
+GdkRGBA *user_color_gdk (guint16 color)
 {
 	if ((color % 4) == 0)
 		return NULL;
@@ -1121,4 +1121,16 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	else
 		gtk_hlist_set_pixtext(GTK_HLIST(losers_list), row, 1, nam, 34, pixmap,
 							  mask);
+
+	/* Phase 5: if this user has an open PM window, refresh its info
+	 * pane (icon / name / status) so it tracks the user changing
+	 * their nick or going idle. Only fires on the global-list pass
+	 * (cid==0) to avoid duplicate refreshes from the per-pchat
+	 * recursion above — the_session.user_list is the source of truth
+	 * msgwin_refresh_user_info reads from. */
+	if (!chat->cid) {
+		struct msgwin *mw = msgwin_with_uid (user->uid);
+		if (mw)
+			msgwin_refresh_user_info (mw);
+	}
 }

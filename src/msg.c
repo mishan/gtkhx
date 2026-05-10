@@ -37,6 +37,8 @@
 #include "tasks.h"
 #include "connect.h"
 #include "toolbar.h"
+#include "users.h"
+#include "cicn.h"
 #include "msg.h"
 
 void
@@ -195,6 +197,117 @@ static void msg_input_activate (GtkWidget *widget, gpointer data)
 }
 
 
+/* Phase 5: header pane above the PM chat that mirrors the bits of
+ * the recipient's identity that the global user list shows — icon,
+ * name, idle/admin status. Built from the cached hx_user the chat
+ * keeps for that uid; falls back to the name we were created with
+ * (and uid only) when the user has already left the public chat by
+ * the time the PM window opens.
+ *
+ * Colour: regular users (slot 0) intentionally don't get a foreground
+ * override, so the GTK theme's default colour kicks in and reads on
+ * both light and dark themes — same rule user_color_gdk() applies in
+ * the user list. Admins / idle / admin-idle get the matching colour
+ * from gdk_user_colors[] applied as a Pango <span> on the bold name.
+ *
+ * Icon: load_icon() yields a GdkPixbuf out of the Mac-classic cicn
+ * resource bundle. We feed it to GtkImage at default 32px pixel size,
+ * scaled if the source isn't already that. When the icon is unknown
+ * (server iconset doesn't ship it, or user picked an icon we don't
+ * have) the image clears to nothing so the layout doesn't sag. */
+static void
+msg_format_user_markup (const struct hx_user *user,
+                        const char *fallback_name, guint16 uid,
+                        char **markup_out)
+{
+	const char *display_name = (user && user->name[0])
+		? user->name
+		: (fallback_name ? fallback_name : "");
+	guint16 color = user ? user->color : 0;
+	guint16 icon_id = user ? user->icon : 0;
+	GdkRGBA *rgba = user_color_gdk (color);
+	char *name_esc = g_markup_escape_text (display_name, -1);
+	const char *status = (color >= 2) ? _("Admin") : _("Guest");
+	const char *away   = (color % 2)  ? _(" (Away)") : "";
+
+	if (rgba) {
+		/* gdk_user_colors stores values in [0..1] floats; convert to
+		 * the 8-bit hex Pango wants. Two-digit precision is fine for
+		 * the four colors we ship. */
+		char hex[8];
+		g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
+		            (int) (rgba->red   * 255.0 + 0.5),
+		            (int) (rgba->green * 255.0 + 0.5),
+		            (int) (rgba->blue  * 255.0 + 0.5));
+		if (user)
+			*markup_out = g_strdup_printf (
+				"<span foreground=\"%s\"><b>%s</b></span>\n"
+				"<small>UID %u · Icon %u · %s%s</small>",
+				hex, name_esc, uid, icon_id, status, away);
+		else
+			*markup_out = g_strdup_printf (
+				"<span foreground=\"%s\"><b>%s</b></span>\n"
+				"<small>UID %u</small>",
+				hex, name_esc, uid);
+	} else {
+		if (user)
+			*markup_out = g_strdup_printf (
+				"<b>%s</b>\n"
+				"<small>UID %u · Icon %u · %s%s</small>",
+				name_esc, uid, icon_id, status, away);
+		else
+			*markup_out = g_strdup_printf (
+				"<b>%s</b>\n"
+				"<small>UID %u</small>",
+				name_esc, uid);
+	}
+
+	g_free (name_esc);
+}
+
+void
+msgwin_refresh_user_info (struct msgwin *msg)
+{
+	struct hx_user *user;
+	GdkPixbuf *pixbuf = NULL;
+	GdkPixbuf *unused_mask = NULL;
+	char *markup = NULL;
+
+	if (!msg || !msg->info_label || !msg->info_image)
+		return;
+
+	user = hx_user_with_uid (the_session.user_list, *msg->uid);
+
+	msg_format_user_markup (user, msg->name, *msg->uid, &markup);
+	gtk_label_set_markup (GTK_LABEL (msg->info_label), markup);
+	g_free (markup);
+
+	/* Always reload — icon ID can change when the user changes their
+	 * icon mid-conversation. load_icon falls back through the icon
+	 * file chain; pixbuf comes back NULL when nothing matches and we
+	 * just blank the GtkImage in that case. GTK 4 deprecates
+	 * gtk_image_set_from_pixbuf; wrap the pixbuf in a GdkTexture and
+	 * feed it to set_from_paintable instead. The texture wrapper
+	 * itself (gdk_texture_new_for_pixbuf) was deprecated in GTK 4.16
+	 * — same migration story as gtkhx_image_new_from_pixbuf in
+	 * gtkutil.c, suppress here until we move icons off GdkPixbuf. */
+	load_icon (msg->info_image,
+	           user ? user->icon : 0,
+	           &icon_files, 1, &pixbuf, &unused_mask);
+	if (pixbuf) {
+		GdkTexture *tex;
+		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+		tex = gdk_texture_new_for_pixbuf (pixbuf);
+		G_GNUC_END_IGNORE_DEPRECATIONS
+		gtk_image_set_from_paintable (GTK_IMAGE (msg->info_image),
+		                              GDK_PAINTABLE (tex));
+		gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
+		g_object_unref (tex);
+	} else {
+		gtk_image_clear (GTK_IMAGE (msg->info_image));
+	}
+}
+
 static struct msgwin *create_msg (guint16 _uid, char *name)
 {
 	struct msgwin *msg;
@@ -272,6 +385,7 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	GtkWidget *hbox;
 	GtkWidget *outputframe, *inputframe;
 	GtkWidget *vpane;
+	GtkWidget *info_box, *outer_vbox;
 	struct msgwin *msg;
 	char *title;
 
@@ -318,8 +432,40 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_paned_set_position(GTK_PANED(vpane), 220);
 	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
 
+	/* Recipient info pane: small horizontal strip with icon + name +
+	 * status sitting between the headerbar and the chat paned. The
+	 * vbox just below is the new top-level child of the window —
+	 * info pane on top, paned filling the rest. */
+	msg->info_image = gtk_image_new ();
+	gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
+	gtk_widget_set_size_request (msg->info_image, 32, 32);
 
-	gtkhx_widget_set_child(msg->window, vpane);
+	msg->info_label = gtk_label_new (NULL);
+	gtk_label_set_xalign (GTK_LABEL (msg->info_label), 0.0);
+	gtk_label_set_yalign (GTK_LABEL (msg->info_label), 0.5);
+	gtk_label_set_use_markup (GTK_LABEL (msg->info_label), TRUE);
+	gtk_label_set_ellipsize (GTK_LABEL (msg->info_label), PANGO_ELLIPSIZE_END);
+	gtk_widget_set_hexpand (msg->info_label, TRUE);
+
+	info_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+	gtk_widget_set_margin_start  (info_box, 10);
+	gtk_widget_set_margin_end    (info_box, 10);
+	gtk_widget_set_margin_top    (info_box, 6);
+	gtk_widget_set_margin_bottom (info_box, 4);
+	gtk_box_append (GTK_BOX (info_box), msg->info_image);
+	gtk_box_append (GTK_BOX (info_box), msg->info_label);
+
+	outer_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append (GTK_BOX (outer_vbox), info_box);
+	gtk_box_append (GTK_BOX (outer_vbox),
+	                gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+	gtk_widget_set_vexpand (vpane, TRUE);
+	gtk_box_append (GTK_BOX (outer_vbox), vpane);
+
+	gtkhx_widget_set_child(msg->window, outer_vbox);
+
+	/* Populate from the cached user list now that the widgets exist. */
+	msgwin_refresh_user_info (msg);
 
 
 	gtk_window_present(GTK_WINDOW(msg->window));

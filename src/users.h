@@ -13,6 +13,12 @@ extern GtkWidget *ignobtn;
 extern GdkRGBA user_colors[8];
 extern GdkRGBA gdk_user_colors[4];
 
+/* Resolve a user's status colour to the GdkRGBA the user list uses
+ * for that row's foreground. Returns NULL for the regular-user slot
+ * so callers can fall through to the GTK theme's default colour
+ * (hard-coding black would be invisible on dark themes). */
+extern GdkRGBA *user_color_gdk (guint16 color);
+
 extern PangoFontDescription *users_font_desc;
 
 
