@@ -292,12 +292,19 @@ static void changed_xtext (session *sess)
 	}
 }
 
-/*
-  static void changed_nickoricon (session *sess)
-  {
-  hx_change_name_icon(&the_session.htlc);
-  }
-*/
+/* Phase 5: re-enabled. The Settings nick/icon controls used to be
+ * inert — changing them updated gtkhx_prefs / the_session.htlc but
+ * never told the server, so the user list still showed your old
+ * nick/icon until reconnect. hlwrite is already a no-op when
+ * htlc->fd is 0 (network.c:1448), so this is safe to call before
+ * connect too: prefs_read doesn't run change-callbacks anyway, only
+ * the Adw row notify handlers do, so the wire packet only fires
+ * when the user actually toggles a control in Settings. */
+static void changed_nickoricon (session *sess)
+{
+	(void) sess;
+	hx_change_name_icon (&the_session.htlc);
+}
 
 static void changed_font (session *sess)
 {
@@ -442,7 +449,7 @@ struct cfgvar
 	 changed_filesamewin, NULL},
 	{CFG_FONT, {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
 	{CFG_ICON, {&the_session.htlc.icon}, UINT16, 0,
-	 /*changed_nickoricon*/NULL, NULL},
+	 changed_nickoricon, NULL},
 	/* Phase 5: ICONS used to be a comma-separated list of *.rsrc files.
 	 * Auto-discovery in $CONFIG/icons/ + $PREFIX/share/gtkhx/icons/
 	 * replaces it; the cfgvar is gone so a stray ICONS=... line in a
@@ -458,7 +465,7 @@ struct cfgvar
 	{CFG_NEWS_SAMEWIN, {&gtkhx_prefs.news_samewin}, BOOLEAN, 0,
 	 changed_newssamewin, NULL},
 	{CFG_NICK, {the_session.htlc.name}, STRING32, 0,
-	 /*changed_nickoricon*/NULL, NULL},
+	 changed_nickoricon, NULL},
 	{CFG_OLD_NICKCOMP, {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0,
 	 NULL, NULL},
 	{CFG_OPEN_CHAT, {&gtkhx_prefs.geo.chat.init}, BOOLEAN, 0, NULL, NULL},
