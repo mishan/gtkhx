@@ -281,11 +281,18 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtk_window_set_title(GTK_WINDOW(msg->window), title);
 	g_free(title);
 
-	gtk_widget_set_size_request(msg->window, 412, 280);
+	/* Phase 5: switch from set_size_request (which sets BOTH min
+	 * AND natural size in GTK 4) to set_default_size for the
+	 * initial window size, and drop the forced 500x400 minimum on
+	 * the inner hbox. The old combination was the cause of the
+	 * "chat appears cut off in top-left until resized" bug — the
+	 * inner hbox demanded 400px tall but the paned was giving it
+	 * 230px, so xtext rendered into a 400px-tall surface that got
+	 * clipped to 230px visible. */
+	gtk_window_set_default_size(GTK_WINDOW(msg->window), 460, 340);
 	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
 	(gtk_widget_set_margin_start(msg->window, 0), gtk_widget_set_margin_end(msg->window, 0), gtk_widget_set_margin_top(msg->window, 0), gtk_widget_set_margin_bottom(msg->window, 0));
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(hbox, 500, 400);
 
 	outputframe = gtk_frame_new(0);
 	gtkhx_widget_set_child(outputframe, hbox);
@@ -294,13 +301,21 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 
 	inputframe = gtk_frame_new(0);
 	gtkhx_widget_set_child(inputframe, msg->inputbuf);
-	gtk_widget_set_size_request(inputframe, 0, 40);
-	gtk_widget_set_size_request(msg->inputbuf, 0, 40);
+	gtk_widget_set_size_request(inputframe, 0, 60);
 
 	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
 	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
-	gtk_paned_set_position(GTK_PANED(vpane), 230);
+	/* Window grows → output area takes the extra room; input
+	 * stays at whatever size the user picks. shrink_end=FALSE
+	 * keeps the user from collapsing the input below 60px. */
+	gtk_paned_set_resize_start_child(GTK_PANED(vpane), TRUE);
+	gtk_paned_set_resize_end_child  (GTK_PANED(vpane), FALSE);
+	gtk_paned_set_shrink_end_child  (GTK_PANED(vpane), FALSE);
+	/* Initial divider position. With default 340px window and
+	 * ~30px headerbar + 10px margins, the paned area is ~290px;
+	 * 220 puts ~70px below the divider for the input. */
+	gtk_paned_set_position(GTK_PANED(vpane), 220);
 	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
 
 

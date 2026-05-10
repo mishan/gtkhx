@@ -1379,7 +1379,15 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtk_window_set_titlebar(GTK_WINDOW(pchat_window), adw_header_bar_new());
 	/* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
-	gtk_widget_set_size_request(pchat_window, 700, 320);
+	/* Phase 5: same fix as create_msgwin — set_size_request sets
+	 * BOTH minimum and natural size in GTK 4, which combined with
+	 * the inner widgets' size_requests below was forcing the
+	 * window to come up at the natural-size of the layout (often
+	 * larger than the screen, with the chat output clipped to the
+	 * paned's allocated band). Use set_default_size for the
+	 * initial size and let the user shrink as far as the inner
+	 * minimums allow. */
+	gtk_window_set_default_size(GTK_WINDOW(pchat_window), 720, 440);
 	gtk_window_set_resizable(GTK_WINDOW(pchat_window), TRUE);
 
 	g_object_set_data(G_OBJECT(pchat_window), "sess", sess);
@@ -1393,7 +1401,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	(gtk_widget_set_margin_start(vbox, 5), gtk_widget_set_margin_end(vbox, 5), gtk_widget_set_margin_top(vbox, 5), gtk_widget_set_margin_bottom(vbox, 5));
 
 	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(subj_hbox, (612<<6)/82, 20);
 	subj_frame = gtk_frame_new(0);
 	gtkhx_widget_set_child(subj_frame, subj_hbox);
 	gchat->subject = gtk_entry_new();
@@ -1412,19 +1419,24 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
 	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
 	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
-	gtk_paned_set_position(GTK_PANED(vpane), 240);
+	/* Output area takes the extra room when the window grows;
+	 * input stays at its natural size. shrink_end=FALSE keeps the
+	 * user from collapsing the input below its 60px floor. */
+	gtk_paned_set_resize_start_child(GTK_PANED(vpane), TRUE);
+	gtk_paned_set_resize_end_child  (GTK_PANED(vpane), FALSE);
+	gtk_paned_set_shrink_end_child  (GTK_PANED(vpane), FALSE);
+	gtk_paned_set_position(GTK_PANED(vpane), 290);
 
 	gtkhx_box_pack(vbox, vpane, 1, 1, 0);
 
 	pchat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(pchat_hbox, 500, 400);
 
 	gtkhx_box_pack(pchat_hbox, gchat->output, 1, 1, 0);
 	gtkhx_box_pack(pchat_hbox, gchat->vscroll, 0, 0, 0);
 	gtkhx_widget_set_child(outputframe, pchat_hbox);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(hbox, 140, 50);
+	gtk_widget_set_size_request(hbox, -1, 60);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
