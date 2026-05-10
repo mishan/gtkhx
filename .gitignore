@@ -115,3 +115,8 @@ plugins/eliza/eliza
 
 build.log
 setup.log
+
+# Flatpak (flatpak-builder)
+/build-flatpak/
+/.flatpak-builder/
+/repo/

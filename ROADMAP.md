@@ -237,9 +237,9 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 
 **Packaging & distribution**
 
-- **Flatpak manifest.** Once on GTK 4, this is straightforward and is the path of least resistance for end users.
-- **AppStream metadata** (`gtkhx.appdata.xml`) so it shows up in software centers.
-- **`gtkhx.desktop`** with proper categories.
+- ✅ **Flatpak manifest.** `com.nasledov.gtkhx.yml` at the repo root, GNOME 48 runtime, local-source variant for development. To submit to Flathub, swap the `dir` source for a `git` source pointing at a tagged commit and add screenshots to `data/screenshots/`.
+- ✅ **AppStream metadata** (`data/com.nasledov.gtkhx.metainfo.xml`) — full Flathub-ready: id, name, summary, description, screenshots, releases, OARS-1.1 content_rating, branding colors. Validated at `meson test` time via `appstreamcli validate --pedantic`.
+- ✅ **`com.nasledov.gtkhx.desktop`** with proper categories (Network/Chat/FileTransfer), validated at test time via `desktop-file-validate`.
 - **Update or remove the RPM spec and `debian/`.** The `debian/` dir is 2003-era; most distros want a Flatpak / Snap these days, or rebuild from upstream tarball.
 
 **Quality / process**

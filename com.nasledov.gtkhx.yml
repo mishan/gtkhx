@@ -1,0 +1,70 @@
+# GtkHx — Flatpak manifest, GNOME 48 runtime, local-source variant.
+#
+# Build:
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#                   com.nasledov.gtkhx.yml
+#
+# Run:
+#   flatpak run com.nasledov.gtkhx
+#
+# Distribution target is Flathub-ready. The app-id, license tags,
+# AppStream metainfo, and OARS content_rating in
+# data/com.nasledov.gtkhx.metainfo.xml all line up with what
+# Flathub's review bot looks for. To submit, swap the `dir` source
+# below for a `git` source pointing at github.com/nasledov/gtkhx
+# at a tagged commit; the rest of the manifest stays put.
+#
+# Runtime choice: GNOME 48 ships GTK 4.18 / libadwaita 1.7 / glib
+# 2.84, well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita
+# >= 1.6). It also includes nettle, zlib, libcanberra, and gsound,
+# so we don't need to vendor any of GtkHx's external deps as
+# separate modules.
+
+app-id: com.nasledov.gtkhx
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+command: gtkhx
+
+# Sandbox permissions. Each line is justified — Flathub reviewers
+# expect a finish-args list that's the minimum for the app to work.
+finish-args:
+  # Connecting to Hotline servers (TCP 5500/5501 by default).
+  - --share=network
+
+  # X11 fallback for non-Wayland sessions; GTK 4 prefers Wayland
+  # but Linux desktops with i3 / older Xfce / KDE-on-X11 still
+  # exist and shouldn't be left out.
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+
+  # GPU acceleration for GTK 4's Vulkan/OpenGL renderer. Falls
+  # back to software rendering if /dev/dri isn't present, but
+  # without dri access the renderer would log a stream of
+  # "no GPU" warnings on every redraw.
+  - --device=dri
+
+  # Sound effects (chat/msg/news ping sounds) via gsound, which
+  # talks to PulseAudio / PipeWire on the host. Without this
+  # gsound silently no-ops — fine for testing but disappoints
+  # users on first launch.
+  - --socket=pulseaudio
+
+  # ~/Downloads access for received-file destinations. The user
+  # picks the path in Settings; XDG_DOWNLOAD_DIR is the default.
+  # Without this the file-transfer save dialog can't write
+  # anywhere outside the app's private $XDG_DATA_HOME.
+  - --filesystem=xdg-download
+
+modules:
+  - name: gtkhx
+    buildsystem: meson
+    config-opts:
+      - --buildtype=release
+    sources:
+      # Local-source variant: builds from the working tree. Swap
+      # this for a `type: git` block when targeting a Flathub
+      # submission.
+      - type: dir
+        path: .

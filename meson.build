@@ -187,6 +187,33 @@ if desktop_validate.found()
   )
 endif
 
+# AppStream metainfo. Software centers (GNOME Software, KDE
+# Discover, elementary AppCenter) and Flathub's review pipeline
+# read this file to render the in-store listing — name, summary,
+# description, screenshots, releases, OARS content rating. The
+# id MUST match com.nasledov.gtkhx; the launchable's desktop-id
+# MUST match the installed .desktop filename above. Mismatches
+# get silently dropped from search results, which is hard to
+# diagnose after the fact.
+metainfo_file = files('data/com.nasledov.gtkhx.metainfo.xml')
+
+install_data(
+  metainfo_file,
+  install_dir : get_option('datadir') / 'metainfo',
+)
+
+# Validate the metainfo at test time if appstreamcli is on the
+# build host. Catches schema typos, missing required fields, OARS
+# mistakes, and broken release entries before submission.
+appstreamcli = find_program('appstreamcli', required : false)
+if appstreamcli.found()
+  test(
+    'validate-metainfo',
+    appstreamcli,
+    args : ['validate', '--no-net', '--pedantic', metainfo_file],
+  )
+endif
+
 # Refresh the gtk-update-icon-cache and update-desktop-database state
 # after `meson install` so the freshly-installed icon and .desktop
 # entry are visible to the desktop session without a logout. No-ops if

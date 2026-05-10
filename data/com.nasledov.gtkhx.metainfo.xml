@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metainfo for GtkHx.
+
+  This file describes the app to software centers (GNOME Software,
+  KDE Discover, elementary's AppCenter), and to Flathub's review
+  pipeline. The schema is documented at:
+    https://www.freedesktop.org/software/appstream/docs/
+
+  Validate with:
+    appstreamcli validate data/com.nasledov.gtkhx.metainfo.xml
+
+  Field choices that aren't obvious:
+
+    - <id> must match the Flatpak app-id and the
+      <launchable> desktop-id. Flathub's review tooling rejects
+      mismatches.
+
+    - <metadata_license> covers THIS XML file's license. CC0-1.0
+      is the Flathub default; <project_license> below is GtkHx's
+      own GPL-2.0-or-later.
+
+    - <content_rating type="oars-1.1"> needs to be present even
+      if every category is "none" — Flathub uses it for the
+      "all-ages" badge and for parental-control filters. Skip it
+      and the review bot rejects the submission.
+
+    - <screenshots> is required for Flathub. We list URLs that
+      will resolve once the project's hosting is set up. For a
+      pre-publication local build the URLs don't have to fetch
+      yet, but they must be present and well-formed.
+
+    - <releases> wants at least one entry. Keep these in
+      reverse-chronological order. Bump on each tagged release.
+-->
+<component type="desktop-application">
+  <id>com.nasledov.gtkhx</id>
+
+  <name>GtkHx</name>
+  <summary>Hotline client for chat and file sharing</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+
+  <developer id="com.nasledov">
+    <name>Misha Nasledov</name>
+  </developer>
+
+  <description>
+    <p>
+      GtkHx is a client for the Hotline protocol, the late-1990s
+      chat-and-file-sharing system that predated modern messaging
+      apps. It connects to Hotline 1.2, 1.5, 1.8, and 1.9 servers,
+      including the post-original mhxd fork that's still active
+      today.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Public chat with formatted text and color-coded users</li>
+      <li>Private messages and private chat rooms</li>
+      <li>News (1.0 flat-file and 1.5+ threaded categories)</li>
+      <li>File browser, downloads, uploads, and previews</li>
+      <li>Tracker browsing for finding active servers</li>
+      <li>Bookmark manager for quick reconnects</li>
+      <li>HOPE secure-login + Blowfish/RC4 link encryption</li>
+    </ul>
+    <p>
+      GtkHx was originally written in 2000 against GTK+ 1.2 and
+      has been ported forward to GTK 4 with libadwaita styling.
+      Wire compatibility with original Hotline servers is preserved.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.nasledov.gtkhx.desktop</launchable>
+
+  <url type="homepage">https://github.com/nasledov/gtkhx</url>
+  <url type="bugtracker">https://github.com/nasledov/gtkhx/issues</url>
+  <url type="vcs-browser">https://github.com/nasledov/gtkhx</url>
+
+  <categories>
+    <category>Network</category>
+    <category>Chat</category>
+    <category>FileTransfer</category>
+  </categories>
+
+  <keywords>
+    <keyword>Hotline</keyword>
+    <keyword>chat</keyword>
+    <keyword>files</keyword>
+    <keyword>P2P</keyword>
+  </keywords>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">600</display_length>
+  </requires>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The main toolbar and chat window</caption>
+      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/chat.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Browsing files on a Hotline server</caption>
+      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/files.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The Hotline tracker — finding servers</caption>
+      <image>https://raw.githubusercontent.com/nasledov/gtkhx/main/data/screenshots/tracker.png</image>
+    </screenshot>
+  </screenshots>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#cccccc</color>
+    <color type="primary" scheme_preference="dark">#3d3846</color>
+  </branding>
+
+  <!--
+    OARS content rating. GtkHx is a generic chat / file-transfer
+    client; Hotline servers can host any content, but the app
+    itself doesn't ship objectionable content. Flathub treats
+    user-generated network content as "intense" for chat-with-
+    strangers, "none" for everything else.
+  -->
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-info">moderate</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="1.0.0-dev" date="2026-05-09">
+      <description>
+        <p>
+          Phase 4 milestone: full GTK 4 + libadwaita port. New
+          Adwaita-styled connect / settings / preferences dialogs,
+          AdwHeaderBar across every window, dark-theme awareness
+          via AdwStyleManager, sound playback through GSound,
+          GtkApplication / GIOChannel-based main loop, and the
+          start of a three-tier (unit / proto / integration) test
+          suite that runs against a containerised mhxd server.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>
