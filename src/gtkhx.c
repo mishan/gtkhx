@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2000-2002 Misha Nasledov <misha@nasledov.com>
+ * Copyright (C) 2000-2026 Misha Nasledov <misha@nasledov.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by the
@@ -1337,7 +1337,7 @@ static void get_password(char *buf)
 
 static void print_help (char *name)
 {
-	printf(_("GtkHx %s, Copyright (C) 2000-2002 Misha Nasledov\n"), VERSION);
+	printf(_("GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"), VERSION);
 	printf(_("GtkHx comes with ABSOLUTELY NO WARRANTY.\n"));
 	printf(_("This is free software, and you are welcome\n"));
 	printf(_("to redistribute it under certain conditions.\n\n"));
