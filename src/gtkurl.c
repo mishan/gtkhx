@@ -385,13 +385,42 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url,
 	GAppInfo  *def_app;
 	GList     *alts, *l;
 	GdkRectangle rect = { 0 };
+	GtkWidget *parent;
+	graphene_point_t src_pt = { (float) x, (float) y };
+	graphene_point_t dst_pt = { 0, 0 };
 
 	if (!anchor || !url || !*url)
 		return;
 
+	/* Phase 5: GtkPopover has to be parented to a widget that's safe
+	 * to grab from. Anchoring directly to a GtkTextView nested inside
+	 * a GtkScrolledWindow tripped GDK's "Tried to map a grabbing
+	 * popup with a non-top most parent" — the popover would appear
+	 * but click-outside-to-dismiss broke and Escape left the global
+	 * grab leaked, so the rest of the app stopped responding to
+	 * mouse events.
+	 *
+	 * Parenting to the toplevel GtkWindow avoids the issue. We
+	 * translate the click position into toplevel-relative coords
+	 * before pointing_to so the popover still anchors at the cursor.
+	 * Falls through to the original anchor when the widget hasn't
+	 * been rooted yet (shouldn't happen in practice — the popup is
+	 * only triggered by a click on a mapped widget). */
+	parent = GTK_WIDGET (gtk_widget_get_root (anchor));
+	if (!parent)
+		parent = anchor;
+	if (parent != anchor) {
+		if (gtk_widget_compute_point (anchor, parent,
+		                              &src_pt, &dst_pt)) {
+			x = dst_pt.x;
+			y = dst_pt.y;
+		}
+	}
+
 	popover = gtk_popover_new ();
-	gtk_widget_set_parent (popover, anchor);
+	gtk_widget_set_parent (popover, parent);
 	gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+	gtk_popover_set_autohide (GTK_POPOVER (popover), TRUE);
 
 	rect.x = (int) x; rect.y = (int) y; rect.width = 1; rect.height = 1;
 	gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
@@ -718,7 +747,7 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press,
 
 	button = gtk_gesture_single_get_current_button (
 		GTK_GESTURE_SINGLE (gesture));
-	if (button != GDK_BUTTON_SECONDARY && button != GDK_BUTTON_MIDDLE)
+	if (button != GDK_BUTTON_SECONDARY)
 		return;
 
 	if (!window_to_buffer_iter (tv, x, y, &iter))
@@ -750,7 +779,15 @@ gtkurl_textview_install (GtkTextView *tv)
 	ensure_url_tags (tv);
 
 	click = GTK_EVENT_CONTROLLER (gtk_gesture_click_new ());
-	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
+	gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+	                               GDK_BUTTON_SECONDARY);
+	/* CAPTURE phase so we run before GtkTextView's own
+	 * right-click-to-popup-context-menu controller, which is in
+	 * BUBBLE phase by default. We claim the sequence inside the
+	 * handler to suppress the default menu when the click landed
+	 * on a URL. */
+	gtk_event_controller_set_propagation_phase (click,
+	                                            GTK_PHASE_CAPTURE);
 	g_signal_connect (click, "pressed",
 	                  G_CALLBACK (on_textview_pressed), tv);
 	gtk_widget_add_controller (GTK_WIDGET (tv), click);
