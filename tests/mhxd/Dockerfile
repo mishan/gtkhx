@@ -206,12 +206,21 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
 #     guaranteed to handle '\NNN' octal. The double-printf trick
 #     below builds a format string '\NNN' from the masked decimal
 #     byte and feeds it to a second printf that emits the actual
-#     byte. (Verified end-to-end against the upstream guest seed.)
+#     byte.
+#
+#     Backslash count matters: the inner printf format is in
+#     SINGLE quotes (preserves literally), so we want exactly two
+#     backslashes — '\\' — feeding into printf, which collapses to
+#     a single backslash on output, giving '\NNN'. Four backslashes
+#     would output '\\NNN' instead, and the outer printf would
+#     then emit a literal '\' followed by digits. (Spent a build
+#     fighting that.) Verified against both the upstream guest
+#     seed and an all-bits-set synthetic input.
 RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 skip=4 status=none \
           | od -An -vtu1 | tr -d ' ') \
  && m=$(( b & 0x60 )) \
- && fmt=$(printf '\\\\%03o' "$m") \
+ && fmt=$(printf '\\%03o' "$m") \
  && printf "$fmt" \
       | dd of=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 seek=4 conv=notrunc status=none
