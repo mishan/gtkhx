@@ -34,6 +34,7 @@
 #include "news.h"
 #include "network.h"
 #include "toolbar.h"
+#include "tracker.h"
 #include "tasks.h"
 #include "users.h"
 #include "chat.h"
@@ -96,6 +97,20 @@ keyaccel_close_cb (GtkWidget *w, GVariant *args, gpointer data)
 	return TRUE;
 }
 
+/* Phase 5: Ctrl+T — open (or focus) the Tracker window. Same
+ * everywhere init_keyaccel runs, including the toolbar, so the
+ * shortcut works even with no other window in focus. tracker.c's
+ * create_tracker_window is idempotent: if the tracker is already
+ * up, the early-return at the top of the function leaves the
+ * existing window alone. */
+static gboolean
+keyaccel_tracker_cb (GtkWidget *w, GVariant *args, gpointer data)
+{
+	(void) w; (void) args; (void) data;
+	create_tracker_window (NULL, &the_session);
+	return TRUE;
+}
+
 void init_keyaccel (GtkWidget *widget)
 {
 	GtkEventController *ctrl = gtk_shortcut_controller_new ();
@@ -112,6 +127,13 @@ void init_keyaccel (GtkWidget *widget)
 	sc = gtk_shortcut_new (
 		gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
 		gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+	/* Ctrl+T → open the Tracker window (or focus it if already up). */
+	sc = gtk_shortcut_new (
+		gtk_keyval_trigger_new ('t', GDK_CONTROL_MASK),
+		gtk_callback_action_new (keyaccel_tracker_cb, NULL, NULL));
 	gtk_shortcut_controller_add_shortcut (
 		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
 
