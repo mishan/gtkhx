@@ -136,7 +136,25 @@ struct htlc_conn {
 	guint16 version;
 
 	struct {
-		guint32 visible:1, reserved:31;
+		guint32 visible:1,
+		/* Phase 5: set on the first HTLS_HDR_USER_SELFINFO. Used
+		 * by the agreement-window Agree button to decide whether
+		 * sending HTLC_HDR_AGREEMENTAGREE is appropriate.
+		 *
+		 * mhxd-style legacy flow: SELFINFO doesn't arrive until
+		 * AFTER AGREEMENTAGREE, so logged_in is still 0 when the
+		 * user clicks Agree → we send AGREEMENTAGREE.
+		 *
+		 * 1.9-style auto-accept flow (e.g. MacSecret.com): SELFINFO
+		 * arrives immediately after LOGIN — login is complete
+		 * before the agreement window opens. logged_in is 1 by
+		 * the time the user clicks Agree → we DO NOT send
+		 * AGREEMENTAGREE (some 1.9 servers disconnect when they
+		 * see one for an already-logged-in session).
+		 *
+		 * Reset to 0 in hx_htlc_close so reconnect starts fresh. */
+		         logged_in:1,
+		         reserved:30;
 	} flags;
 
 	hl_access_bits access;

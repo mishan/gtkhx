@@ -21,7 +21,9 @@
 #include "config.h"
 #include <string.h>
 #include <gtk/gtk.h>
-#include <libsoup/soup.h>
+#ifdef HAVE_LIBSOUP
+# include <libsoup/soup.h>
+#endif
 #include "compat.h"
 #include "debug.h"
 #include "banner.h"
@@ -40,8 +42,10 @@
 static GtkWidget    *banner_root    = NULL;  /* outer GtkBox */
 static GtkWidget    *banner_picture = NULL;  /* GtkPicture */
 static GtkWidget    *banner_caption = NULL;  /* GtkLabel */
+#ifdef HAVE_LIBSOUP
 static SoupSession  *soup_session   = NULL;
 static GCancellable *fetch_cancel   = NULL;
+#endif
 static char         *current_url    = NULL;  /* for click-to-open */
 
 /* ------------------------------------------------------------------- *
@@ -49,10 +53,12 @@ static char         *current_url    = NULL;  /* for click-to-open */
  * ------------------------------------------------------------------- */
 
 static void banner_show_caption (const char *text);
+#ifdef HAVE_LIBSOUP
 static void banner_show_pixbuf  (GdkPixbuf *pb);
 static void banner_start_url_fetch (const char *url);
 static void on_soup_send_done (GObject *source, GAsyncResult *result,
                                gpointer user_data);
+#endif
 static void on_banner_clicked (GtkGestureClick *gesture, int n_press,
                                double x, double y, gpointer user_data);
 
@@ -140,14 +146,18 @@ banner_handle_message (struct htlc_conn *htlc,
 	gtk_widget_set_visible (banner_root, TRUE);
 
 	if (has_url && url && *url) {
-		/* URL-mode: cache the URL for click-to-open, kick off the
-		 * fetch. The caption shows the URL while the image loads;
-		 * banner_show_pixbuf swaps in the image on completion. */
+		/* URL-mode: cache the URL for click-to-open. With libsoup
+		 * present we kick off an inline fetch and swap in the
+		 * decoded image when it lands; without libsoup we leave
+		 * the URL caption in place and rely on the click handler
+		 * to open the URL in the user's browser. */
 		g_free (current_url);
 		current_url = g_strdup (url);
 		gtk_widget_set_tooltip_text (banner_root, url);
 		banner_show_caption (url);
+#ifdef HAVE_LIBSOUP
 		banner_start_url_fetch (url);
+#endif
 		return;
 	}
 
@@ -167,10 +177,12 @@ banner_handle_message (struct htlc_conn *htlc,
 void
 banner_clear (void)
 {
+#ifdef HAVE_LIBSOUP
 	if (fetch_cancel) {
 		g_cancellable_cancel (fetch_cancel);
 		g_clear_object (&fetch_cancel);
 	}
+#endif
 	g_free (current_url);
 	current_url = NULL;
 
@@ -198,6 +210,7 @@ banner_show_caption (const char *text)
 		                    text ? text : "");
 }
 
+#ifdef HAVE_LIBSOUP
 static void
 banner_show_pixbuf (GdkPixbuf *pb)
 {
@@ -339,6 +352,7 @@ on_soup_send_done (GObject *source, GAsyncResult *result,
 	g_object_unref (pb);
 	g_object_unref (msg);
 }
+#endif /* HAVE_LIBSOUP */
 
 /* Click handler ------------------------------------------------------ */
 

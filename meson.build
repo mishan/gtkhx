@@ -87,9 +87,14 @@ gsound_dep = dependency('gsound')
 # either an http(s) URL (URL-mode) or as bytes pulled over the HTXF
 # subchannel (file-mode). Both modes display in the toolbar's banner
 # row; URL-mode needs an HTTP client to actually retrieve the bytes.
-# 3.0 is the GLib-2 / GIO-3-aligned series; available everywhere
-# Adwaita 1.6 is.
-soup_dep = dependency('libsoup-3.0', version : '>= 3.0')
+#
+# Optional: when libsoup-3 isn't on the build host, banner.c falls
+# back to a click-to-open caption for URL-mode banners — the URL is
+# shown as a clickable line that opens in the user's default browser.
+# File-mode (HTXF) is unaffected. The HAVE_LIBSOUP define gates the
+# fetch / decode code path inside banner.c.
+soup_dep = dependency('libsoup-3.0', version : '>= 3.0',
+                      required : false)
 
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)

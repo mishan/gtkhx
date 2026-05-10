@@ -243,11 +243,18 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 	 * has nothing to click 'Agree' on, so login would stall. Send
 	 * AGREEMENTAGREE automatically in those cases.
 	 *
+	 * BUT only when SELFINFO hasn't already arrived. 1.9-style
+	 * servers (e.g. MacSecret.com) treat LOGIN as the complete
+	 * signal — SELFINFO lands BEFORE AGREEMENT, login is already
+	 * done, and sending AGREEMENTAGREE on a fully-logged-in
+	 * session prompts those servers to disconnect us.
+	 *
 	 * For HX_AGREEMENT_OK, fall through to popping the agreement
 	 * window. The Agree button (gtkhx.c::concurrence) sends
-	 * AGREEMENTAGREE explicitly. */
+	 * AGREEMENTAGREE only if !logged_in for the same reason. */
 	if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
-		hx_send_agreement_agree (htlc);
+		if (!htlc->flags.logged_in)
+			hx_send_agreement_agree (htlc);
 		return;
 	}
 	if (r != HX_AGREEMENT_OK)
@@ -478,6 +485,12 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * into htlc->access / uid / icon / name) is in proto_helpers.c
 	 * so the Tier 2 unit tests can drive it without GTK. */
 	hx_selfinfo_parse (htlc);
+
+	/* Phase 5: SELFINFO is the canonical 'login complete' signal.
+	 * Track it on htlc->flags so the agreement Agree button can
+	 * tell whether to send AGREEMENTAGREE. See the comment on the
+	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
+	htlc->flags.logged_in = 1;
 
 	setbtns(&the_session, 1);
 

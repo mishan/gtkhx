@@ -991,13 +991,21 @@ static void concurrence(GtkWidget *widget, gpointer data)
 	session *sess  = data;
 	(void) widget;
 
-	/* Phase 5: previously the Agree button just closed the dialog —
-	 * GtkHx had skipped the legacy AGREEMENTAGREE phase by sending
-	 * NAME at LOGIN time (the mhxd-style modern flow). Now we send
-	 * a real HTLC_HDR_AGREEMENTAGREE: it both (a) completes the
-	 * server-side login state machine AND (b) triggers the banner
-	 * broadcast on servers configured to send one. */
-	if (sess->htlc.fd)
+	/* Phase 5: send HTLC_HDR_AGREEMENTAGREE if and only if SELFINFO
+	 * hasn't already arrived. Two distinct server flavours need
+	 * different handling here:
+	 *
+	 *   - mhxd-style legacy flow: AGREEMENT arrives BEFORE SELFINFO;
+	 *     login is gated on AGREEMENTAGREE. logged_in == 0 → send.
+	 *   - 1.9-style auto-accept: SELFINFO arrives BEFORE AGREEMENT;
+	 *     login is already complete by the time we show the
+	 *     dialog. Some 1.9 servers (e.g. MacSecret.com) disconnect
+	 *     when they receive AGREEMENTAGREE for an already-logged-in
+	 *     session. logged_in == 1 → don't send.
+	 *
+	 * In either case the dialog closes with the click; the wire op
+	 * is what's gated. */
+	if (sess->htlc.fd && !sess->htlc.flags.logged_in)
 		hx_send_agreement_agree (&sess->htlc);
 
 	gtkhx_widget_destroy(sess->agreementwin);

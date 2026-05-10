@@ -87,6 +87,15 @@ conf.set('USE_XLIB',        1)
 # gdk-pixbuf was conditional in 1.2 era; required for any GTK >= 2.
 conf.set('USE_GDK_PIXBUF',  1)
 
+# libsoup-3 is optional. When found, banner.c builds the URL-mode
+# fetcher that decodes server banners inline; without it, URL-mode
+# banners render as a clickable line that opens in the user's
+# default browser. File-mode banners (HTXF subchannel) are
+# unaffected either way.
+if soup_dep.found()
+  conf.set('HAVE_LIBSOUP', 1)
+endif
+
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,
 # gtk_signal_connect, gtk_widget_set_usize). Per ROADMAP, the dlopen
 # plugin API is slated for removal, so rather than rewrite it for GTK 3

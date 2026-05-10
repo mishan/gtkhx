@@ -160,6 +160,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	rcv_login_reset ();
 	banner_clear ();
 
+	/* Reset the per-session login flag so the next connect starts
+	 * fresh. concurrence() reads this to decide whether to send
+	 * AGREEMENTAGREE; a stale 1 from a previous session would skip
+	 * the legacy flow on the next connect. */
+	htlc->flags.logged_in = 0;
+
 	if(conn_tid) {
 		pthread_cancel(conn_tid);
 		conn_tid = 0;
