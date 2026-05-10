@@ -36,10 +36,14 @@
 #include "gtk_hlist.h"
 #include "dfa.h"
 #include "chat.h"
+#include "options.h"
+#include "cfgkeys.h"
 #include "tracker.h"
 
 static GtkWidget *tracker_window;
 static GtkWidget *tracker_list;
+static GtkWidget *tracker_search_entry;
+static GtkWidget *tracker_case_btn;
 static GtkWidget *lbl_found, *lbl_total;
 static int num_found, num_total;
 static struct dfa *current_search;
@@ -90,6 +94,8 @@ close_tracker_window (GtkWindow *window, gpointer data)
 	tracker_clear();
 	tracker_window = 0;
 	tracker_list = 0;
+	tracker_search_entry = NULL;
+	tracker_case_btn = NULL;
 
 	tracker_list_destroy(tracker_server_tree);
 	dfafree(current_search);
@@ -250,16 +256,29 @@ static void tracker_search_tree (struct dfa *preg, struct tracker_server *root)
 	tracker_search_tree(preg, root->right);
 }
 
-static void tracker_search  (GtkWidget *widget, gpointer data)
+/* Phase 5: tracker_search runs every time the visible filter needs to
+ * be re-applied — when the search entry's text changes, when the user
+ * hits Enter, or when the case-sensitive toggle flips. We always read
+ * the current entry text out of the cached tracker_search_entry rather
+ * than out of the signal's `widget` argument, so the same routine can
+ * be called from any of the three signal handlers (search-changed,
+ * activate, case-toggle) plus the on-resync paths that don't get
+ * called with a widget at all. */
+static void tracker_rerun_search (void)
 {
 	char *num;
 	const char *str;
+
+	if (!tracker_list || !tracker_search_entry)
+		return;
 
 	dfafree(current_search);
 	current_search = g_malloc(sizeof(struct dfa));
 
 	num_found = 0;
-	str = gtk_editable_get_text(GTK_EDITABLE(widget));
+	str = gtk_editable_get_text (GTK_EDITABLE (tracker_search_entry));
+	if (!str)
+		str = "";
 	dfacomp((char *) str, strlen(str), current_search, 1);
 	tracker_clear();
 	gtk_hlist_freeze(GTK_HLIST(tracker_list));
@@ -270,6 +289,31 @@ static void tracker_search  (GtkWidget *widget, gpointer data)
 	num = g_strdup_printf("  %d", num_found);
 	gtk_label_set_text(GTK_LABEL(lbl_found), num);
 	g_free(num);
+}
+
+static void tracker_search (GtkWidget *widget, gpointer data)
+{
+	(void) widget; (void) data;
+	tracker_rerun_search ();
+}
+
+void tracker_search_refresh (void)
+{
+	tracker_rerun_search ();
+}
+
+/* "Aa" case-sensitive toggle in the search row. Routes through the
+ * generic prefs setter so the Settings switch (if open) stays in
+ * lockstep, the dfa fold flag updates via the cfgvar change-callback,
+ * and the new value persists. Then re-run the search so the visible
+ * result list reflects the new case mode immediately. */
+static void
+tracker_case_toggled (GtkToggleButton *btn, gpointer data)
+{
+	(void) data;
+	gtkhx_prefs_set_bool (CFG_TRACKER_CASE,
+	                      gtk_toggle_button_get_active (btn) ? 1 : 0);
+	tracker_rerun_search ();
 }
 
 
@@ -484,12 +528,35 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	/* Phase 5: GtkSearchEntry replaces the legacy "Search:" label +
 	 * GtkEntry pair. SearchEntry has its own search-glass icon and
 	 * a clear-button when text is present, so the label becomes
-	 * redundant. The placeholder text takes the label's job. */
+	 * redundant. The placeholder text takes the label's job.
+	 *
+	 * "search-changed" fires with a small built-in debounce as the user
+	 * types — that's the signal that drives live filtering. "activate"
+	 * (Enter) is wired too as a no-op shortcut so the user's muscle
+	 * memory of "type query, hit Enter" still works; with live filtering
+	 * the list is already up to date by the time Enter lands. */
 	searchentry = gtk_search_entry_new();
+	tracker_search_entry = searchentry;
 	gtk_search_entry_set_placeholder_text (GTK_SEARCH_ENTRY (searchentry),
 	                                       _("Search trackers"));
+	g_signal_connect(searchentry, "search-changed",
+	                 G_CALLBACK(tracker_search), 0);
 	g_signal_connect(searchentry, "activate",
 	                 G_CALLBACK(tracker_search), 0);
+
+	/* Case-sensitive toggle, tucked next to the search field so the
+	 * user doesn't have to dig into Settings to flip it. State is
+	 * mirrored to the gtkhx_prefs.track_case cfgvar (and from there to
+	 * gtkhxrc) via gtkhx_prefs_set_bool, which also keeps the
+	 * Settings page in lockstep when both happen to be open. */
+	tracker_case_btn = gtk_toggle_button_new_with_label ("Aa");
+	gtk_widget_set_tooltip_text (tracker_case_btn,
+	                             _("Match case in tracker search"));
+	gtk_widget_add_css_class (tracker_case_btn, "flat");
+	gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (tracker_case_btn),
+	                              gtkhx_prefs.track_case ? TRUE : FALSE);
+	g_signal_connect (tracker_case_btn, "toggled",
+	                  G_CALLBACK (tracker_case_toggled), NULL);
 
 	num_found = 0;
 	num_total = 0;
@@ -542,6 +609,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
 	searchhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtkhx_box_pack(searchhbox, searchentry, 1, 1, 0);
+	gtkhx_box_pack(searchhbox, tracker_case_btn, 0, 0, 0);
 	gtkhx_box_pack(vbox, searchhbox, 0, 0, 0);
 
 	gtkhx_box_pack(vbox, tracker_window_scroll, 1, 1, 0);

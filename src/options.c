@@ -45,6 +45,7 @@
 #include "cfgkeys.h"
 #include "prefs_parser.h"
 #include "options.h"
+#include "tracker.h"
 
 /* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
  * for the icon viewer and the prefs notebook tree (Phase 2.x work),
@@ -346,10 +347,16 @@ static void changed_downloadpath (session *sess)
 
 static void changed_case (session *sess)
 {
+	(void) sess;
 	dfasyntax ((RE_CHAR_CLASSES | RE_CONTEXT_INDEP_ANCHORS |
 				RE_CONTEXT_INDEP_OPS | RE_HAT_LISTS_NOT_NEWLINE |
 				RE_NEWLINE_ALT | RE_NO_BK_PARENS | RE_NO_BK_VBAR),
 				!gtkhx_prefs.track_case, '\n');
+	/* If the Tracker window is open, refresh its filter against the
+	 * already-cached server tree so the visible result list reflects
+	 * the new fold mode immediately. No-op when the Tracker isn't
+	 * open. */
+	tracker_search_refresh ();
 }
 
 static void changed_filesamewin (session *sess)
@@ -1242,10 +1249,49 @@ static void parse_tracker_list(void)
  * GObject the next time create_options_window runs. */
 static void close_options_bookkeeping (GtkWidget *widget, gpointer data)
 {
+	size_t i;
 	(void) widget; (void) data;
 	options_window = 0;
 	g_free(iv);
 	iv = NULL;
+	/* Phase 5: per-cfgvar widget pointers are populated as Settings
+	 * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
+	 * point at AdwPreferencesRow children of the dialog. Once the dialog
+	 * tears down those rows are freed; any external caller that later
+	 * does `if (v->widget) ...` would dereference garbage. Clear the
+	 * pointers so callers like gtkhx_prefs_set_bool() can safely test
+	 * v->widget for "Settings is open right now". */
+	for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++)
+		cfgvars[i].widget = NULL;
+}
+
+/* Generic public BOOLEAN cfgvar setter, used by per-window UI (e.g.
+ * the Tracker case-sensitive toggle) to flip a cfgvar without reaching
+ * into options.c internals. If the Settings window is open, we route
+ * through the AdwSwitchRow so its visible state stays in lockstep
+ * (the row's notify::active handler then writes the variable + calls
+ * the change-callback + persists). Otherwise we write the variable
+ * directly and run the change-callback ourselves. */
+void
+gtkhx_prefs_set_bool (const char *name, int value)
+{
+	struct cfgvar *v = cfgvar_for_name (name);
+	int new_val = value ? 1 : 0;
+
+	if (!v || v->type != BOOLEAN)
+		return;
+	if (*v->variable.uchar == new_val)
+		return;
+
+	if (v->widget && ADW_IS_SWITCH_ROW (v->widget)) {
+		/* The notify::active handler does all the bookkeeping. */
+		adw_switch_row_set_active (ADW_SWITCH_ROW (v->widget),
+		                           new_val ? TRUE : FALSE);
+		return;
+	}
+
+	*v->variable.uchar = (unsigned char) new_val;
+	pref_apply (v);
 }
 
 /* Phase 3.9: GtkFontSelectionDialog was deprecated in GTK 3.2 in favor
