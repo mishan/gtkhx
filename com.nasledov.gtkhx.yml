@@ -17,9 +17,10 @@
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
-# It also includes nettle, zlib, libcanberra, and gsound, so we
-# don't need to vendor any of GtkHx's external deps as separate
-# modules.
+# nettle and zlib are present in the runtime; libcanberra and
+# gsound are NOT (gsound stopped being included around the GNOME
+# 47/48 transition, and the runtime never had libcanberra). We
+# build both as inline modules below.
 
 app-id: com.nasledov.gtkhx
 runtime: org.gnome.Platform
@@ -59,6 +60,30 @@ finish-args:
   - --filesystem=xdg-download
 
 modules:
+  # libcanberra — gsound's audio backend. Last upstream release
+  # is 0.30 from 2012; no successor has shipped because the API
+  # is essentially "complete" for the desktop event-sound use
+  # case GtkHx makes of it. Build with --disable-oss because the
+  # Flatpak sandbox doesn't expose /dev/dsp; everything else is
+  # the upstream default.
+  - name: libcanberra
+    config-opts:
+      - --disable-oss
+    sources:
+      - type: archive
+        url: http://0pointer.de/lennart/projects/libcanberra/libcanberra-0.30.tar.xz
+        sha256: c2b671e67e0c288a69fc33dc1b6f1b534d07882c2aceed37004bf48c601afa72
+
+  # gsound — GObject wrapper around libcanberra. The 1.0.3
+  # tarball still builds cleanly against modern GLib; gsound has
+  # been in maintenance mode for years.
+  - name: gsound
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/gsound/1.0/gsound-1.0.3.tar.xz
+        sha256: ca2d039e1ebd148647017a7f548862350bc9af01986d39f10cfdc8e95f07881a
+
   - name: gtkhx
     buildsystem: meson
     config-opts:
