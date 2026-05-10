@@ -175,10 +175,16 @@ void setbtns(session *sess, int stat)
 	 * doesn't reshape between connections. Three buttons, three
 	 * independent decisions:
 	 *
-	 *   news_btn   (legacy News): enabled on pre-1.5 servers when
-	 *               the account has HL_ACCESS_READ_NEWS.
-	 *   post_btn   (legacy Post): enabled on pre-1.5 servers when
-	 *               the account has HL_ACCESS_POST_NEWS.
+	 *   news_btn   (legacy News): enabled when the account has
+	 *               HL_ACCESS_READ_NEWS. The legacy news file
+	 *               protocol exists on every Hotline server
+	 *               version including 1.5+ — Badmoon (1.9) and
+	 *               other modern servers serve both legacy and
+	 *               threaded news side by side, so don't gate this
+	 *               on server version.
+	 *   post_btn   (legacy Post): enabled when the account has
+	 *               HL_ACCESS_POST_NEWS. Same multi-version
+	 *               availability as news_btn.
 	 *   news15_btn (threaded News): enabled on 1.5+ servers when
 	 *               the account has HL_ACCESS_READ_NEWS. mhxd's
 	 *               struct has one read bit gating both legacy and
@@ -193,8 +199,8 @@ void setbtns(session *sess, int stat)
 		gboolean can_post  = hl_access_has (access, HL_ACCESS_POST_NEWS);
 		gboolean is_15plus = sess->htlc.version >= 150;
 
-		gtk_widget_set_sensitive (news_btn,   !is_15plus && can_read);
-		gtk_widget_set_sensitive (post_btn,   !is_15plus && can_post);
+		gtk_widget_set_sensitive (news_btn,   can_read);
+		gtk_widget_set_sensitive (post_btn,   can_post);
 		gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
 	}
 }

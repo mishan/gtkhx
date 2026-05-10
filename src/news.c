@@ -24,6 +24,7 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gdk/gdk.h>
+#include <gdk/gdkkeysyms.h>
 #include <sys/time.h>
 #include <time.h>
 #include <netinet/in.h>
@@ -298,6 +299,19 @@ on_find_btn_clicked (GtkButton *btn, gpointer data)
 	                                !was_open);
 	if (!was_open)
 		gtk_widget_grab_focus (ctx->search_entry);
+}
+
+/* GtkShortcutController callback for Ctrl+F. Same behaviour as
+ * clicking the Find headerbar button: open the bar (if not already
+ * open) and focus the entry so typing starts narrowing matches. */
+static gboolean
+on_find_shortcut (GtkWidget *widget, GVariant *args, gpointer data)
+{
+	struct news_search_ctx *ctx = data;
+	(void) widget; (void) args;
+	gtk_search_bar_set_search_mode (GTK_SEARCH_BAR (ctx->search_bar), TRUE);
+	gtk_widget_grab_focus (ctx->search_entry);
+	return TRUE;
 }
 
 /* Build the search bar and its child layout. Caller wires it into the
@@ -616,12 +630,24 @@ void create_news_window (session *sess)
 	                        search_ctx, news_search_ctx_free);
 
 	search_bar = news_search_bar_new (search_ctx);
-	/* Capture key events from the whole window so Ctrl+F /
-	 * Esc work even when focus is on the news text view, not
-	 * just the entry. set_key_capture_widget hooks the bar's
-	 * built-in key controller to a wider scope. */
+	/* set_key_capture_widget covers Esc-closes-bar and printable-
+	 * key-opens-bar-with-text. It does NOT cover Ctrl+F — that
+	 * needs an explicit GtkShortcutController. (My first attempt
+	 * relied on the capture widget alone and Ctrl+F silently did
+	 * nothing.) */
 	gtk_search_bar_set_key_capture_widget (GTK_SEARCH_BAR (search_bar),
 	                                       news_window);
+	{
+		GtkEventController *sc = gtk_shortcut_controller_new ();
+		gtk_event_controller_set_propagation_phase (sc, GTK_PHASE_CAPTURE);
+		gtk_shortcut_controller_add_shortcut (
+			GTK_SHORTCUT_CONTROLLER (sc),
+			gtk_shortcut_new (
+				gtk_keyval_trigger_new (GDK_KEY_f, GDK_CONTROL_MASK),
+				gtk_callback_action_new (on_find_shortcut,
+				                         search_ctx, NULL)));
+		gtk_widget_add_controller (news_window, sc);
+	}
 
 	g_signal_connect (findButton, "clicked",
 	                  G_CALLBACK (on_find_btn_clicked), search_ctx);
