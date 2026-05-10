@@ -696,3 +696,51 @@ test_integration_msg_self = executable('test_integration_msg_self',
 test('msg_self', test_integration_msg_self,
      suite   : 'integration',
      timeout : 30)
+
+# chat_in_pchat — chat message routed through a private chat
+# (HTLC_DATA_CHAT_ID != 0). Alice creates a pchat with Bob, Bob
+# joins, Alice sends a chat tagged with the chat_id; Bob receives
+# HTLS_HDR_CHAT carrying that same chat_id and the body. Pins the
+# multi-cid routing path that complements the public-chat broadcast
+# already covered by test_chat_roundtrip / test_two_client_chat.
+test_integration_chat_in_pchat = executable('test_integration_chat_in_pchat',
+  'integration/test_chat_in_pchat.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_in_pchat', test_integration_chat_in_pchat,
+     suite   : 'integration',
+     timeout : 30)
+
+# unauthorized_opcode — guest sends HTLC_HDR_FILE_MKDIR without
+# access.create_folders. mhxd's main rcv loop gates the dispatch
+# on the access bit and silently drops the request when it's
+# unset. Test asserts no TASK reply correlates to our trans, then
+# round-trips a PING to prove the dispatcher is still healthy.
+# Catches a regression where the dispatcher accidentally promotes
+# a privileged opcode for the guest role.
+test_integration_unauthorized_opcode = executable('test_integration_unauthorized_opcode',
+  'integration/test_unauthorized_opcode.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('unauthorized_opcode', test_integration_unauthorized_opcode,
+     suite   : 'integration',
+     timeout : 30)
+
+# msg_to_unknown_uid — sending HTLC_HDR_MSG to a uid that isn't a
+# live connection. mhxd's hxd_rcv_msg looks targets up via
+# isclient(); a NULL hit drops the message without acknowledgment.
+# Test verifies no echo / task-error came back and the stream is
+# still in a clean dispatcher state via a follow-up PING.
+test_integration_msg_to_unknown_uid = executable('test_integration_msg_to_unknown_uid',
+  'integration/test_msg_to_unknown_uid.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('msg_to_unknown_uid', test_integration_msg_to_unknown_uid,
+     suite   : 'integration',
+     timeout : 30)
