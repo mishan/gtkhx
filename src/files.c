@@ -1077,12 +1077,20 @@ void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
 	gtk_hlist_freeze(GTK_HLIST(files_list));
 	gtk_hlist_clear(GTK_HLIST(files_list));
 
+	/* Phase 5: walk the packed chunk array by BYTES. `fh` is a
+	 * struct hl_filelist_hdr * — bare pointer arithmetic
+	 * (`fh += N`) scales by sizeof(struct hl_filelist_hdr) (24 with
+	 * packed attribute + zero-size flexible array), not by 1. Result:
+	 * the increment overshoots by ~24x and the loop terminated after
+	 * the first chunk, showing only one entry no matter how many the
+	 * server sent. Cast through (char *) for the step. */
 	for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
-		 fh += fh->len + SIZEOF_HL_DATA_HDR) {
+		 fh = (struct hl_filelist_hdr *)
+			 ((char *) fh + fh->len + SIZEOF_HL_DATA_HDR)) {
 		fh->fnlen = ntohl(fh->fnlen);
 		fh->len = ntohs(fh->len);
 		fh->fsize = ntohl(fh->fsize);
-		
+
 		row = gtk_hlist_append(GTK_HLIST(files_list), nulls);
 		gtk_hlist_set_row_data(GTK_HLIST(files_list), row, fh);
 		icon = icon_of_fh(fh);
@@ -1454,8 +1462,12 @@ int exists_remote (char *path)
 	if (!cfl->fh)
 		return 0;
 
+	/* Phase 5: byte-arithmetic step. See the matching comment in
+	 * output_file_list — `fh` is a struct pointer so bare
+	 * `fh += N` scales by sizeof(struct hl_filelist_hdr). */
 	for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
-		 fh += fh->len + SIZEOF_HL_DATA_HDR) {
+		 fh = (struct hl_filelist_hdr *)
+			 ((char *) fh + fh->len + SIZEOF_HL_DATA_HDR)) {
 		if ((int)fh->fnlen == len && !strncmp((char *) fh->fname, ent, len))
 			return 1;
 	}
