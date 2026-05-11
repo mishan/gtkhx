@@ -363,15 +363,20 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 			color = user->color;
 		}
 		hx_output.user_change(htlc, chat, user, name, icon, color);
-		if((user->color == color && user->icon == icon) || 
-		   strcmp(name, user->name)) {
-			if(user->ignore) { 
-				return;
-			}
-			hx_printf_prefix(htlc, cid, INFOPREFIX, _("%s is now known as %s\n"),
-							 user->name, name);
+		/* Phase 5: print "X is now known as Y" only when the name
+		 * actually changed AND it isn't us. Suppressing the self
+		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
+		 * our nick on the server) from spamming a redundant
+		 * "misha is now known as misha" notice. Also bail on
+		 * ignored users early so we neither toast nor log them. */
+		if (user->ignore)
+			return;
+		if (uid != htlc->uid &&
+		    nlen > 0 && strcmp (name, user->name) != 0) {
+			hx_printf_prefix (htlc, cid, INFOPREFIX,
+			                  _("%s is now known as %s\n"),
+			                  user->name, name);
 		}
-		
 	}
 	if (nlen) {
 		memcpy(user->name, name, nlen);
