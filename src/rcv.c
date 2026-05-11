@@ -1309,7 +1309,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 	struct hl_userlist_hdr *uh;
 	struct hx_user *user;
 	guint16 nlen, uid;
-	int new = 0;
+	int new;
 	struct gtkhx_chat *gchat = gchat_with_cid(&the_session, chat->cid);
 
 	dh_start(htlc) {
@@ -1317,6 +1317,22 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			uh = (struct hl_userlist_hdr *)dh;
 			HN16(&uid, &uh->uid);
 			user = hx_user_with_uid(chat->user_list, uid);
+			/* Phase 5: reset `new` per chunk. Previously declared
+			 * once at the top of the function and set to 1 inside
+			 * the "user not found" branch, then never reset — so
+			 * after the first new user in the response, every
+			 * subsequent EXISTING user (found via hx_user_with_uid)
+			 * inherited new=1 from the previous iteration and got
+			 * a spurious hx_output.user_create call, doubling the
+			 * UI row.
+			 *
+			 * Latent since the original handler; surfaced when
+			 * hx_rcv_user_selfinfo started pushing USER_CHANGE
+			 * before USER_GETLIST — that broadcast adds our own
+			 * entry first, then USER_GETLIST returns [others, us]
+			 * and the existing-us match was using the stale new=1
+			 * from the first new other-user. */
+			new = 0;
 			if (!user) {
 				new = 1;
 				user = hx_user_new(&chat->user_tail);
