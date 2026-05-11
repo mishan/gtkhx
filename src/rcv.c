@@ -55,6 +55,7 @@
 #include "debug.h"
 #include "connect.h"
 #include "banner.h"
+#include "hl_access.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -385,42 +386,29 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	if ((uid) && (uid == htlc->uid)) {
 		htlc->icon = user->icon;
 		htlc->color = user->color;
-		/* Phase 5: defend htlc->name against non-UTF-8 server
-		 * bytes — see the matching comment in
-		 * proto_helpers.c hx_selfinfo_extract for the rationale
-		 * (server-side corrupt-bytes feedback loop into gtkhxrc).
-		 * user->name has already been bounded to <= 31 bytes
-		 * upstream so a fresh strncpy with NUL-pad is safe. */
-		gsize unlen = strlen (user->name);
-		if (g_utf8_validate (user->name, unlen, NULL)) {
-			debug_log_name_write ("USER_CHANGE self",
-			                      user->name, unlen);
-			strncpy (htlc->name, user->name, 31);
-			htlc->name[31] = '\0';
-		} else {
-			gchar *clean = gtkhx_text_to_utf8 (
-				user->name, unlen, NULL);
-			gsize clen = clean ? strlen (clean) : 0;
-			/* Phase 5: trace the sanitisation. Logged under
-			 * category 'name'; the hex dump captures the
-			 * original wire bytes for forensics. */
-			GString *hex = g_string_new (NULL);
-			for (gsize i = 0; i < unlen; i++) {
-				if (i) g_string_append_c (hex, ' ');
-				g_string_append_printf (hex, "%02x",
-				                        ((const guint8 *) user->name)[i]);
-			}
+		/* Phase 5: deliberately do NOT copy user->name into
+		 * htlc->name. Servers can legitimately override a user's
+		 * display name — guests get pinned to things like "Read
+		 * the agreement" before they have HL_ACCESS_USERNAME_CHANGE
+		 * — and that override should appear in the user list (which
+		 * user->name already feeds) but must not bleed into our
+		 * htlc->name buffer, which doubles as the persisted NICK=
+		 * prefs value. Letting the server's override land in
+		 * htlc->name and then prefs_write persists 'Read the
+		 * agreement' as the user's nick forever.
+		 *
+		 * Display paths read user_list entries (chat output, user
+		 * window, etc.); htlc->name is reserved for the wire-side
+		 * USER_CHANGE we *send* and the gtkhxrc persistence. The
+		 * two diverging is exactly the model the protocol expects. */
+		if (uid && uid == htlc->uid) {
+			gsize unlen = strlen (user->name);
 			debug_log ("name",
-			           "USER_CHANGE name bytes not valid UTF-8 "
-			           "(uid=%u len=%zu), sanitised: [%s] -> '%s'",
-			           (unsigned) uid, (size_t) unlen, hex->str,
-			           clean ? clean : "(null)");
-			g_string_free (hex, TRUE);
-
-			if (clen > 31) clen = 31;
-			if (clean) memcpy (htlc->name, clean, clen);
-			htlc->name[clen] = 0;
-			g_free (clean);
+			           "USER_CHANGE for our uid=%u: server says "
+			           "'%.*s' (%zu bytes); keeping local "
+			           "htlc->name = '%s'",
+			           (unsigned) uid, (int) unlen, user->name,
+			           (size_t) unlen, htlc->name);
 		}
 	}
 }
@@ -522,8 +510,11 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 {
 	/* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
-	 * into htlc->access / uid / icon / name) is in proto_helpers.c
-	 * so the Tier 2 unit tests can drive it without GTK. */
+	 * into htlc->access / uid / icon) is in proto_helpers.c so the
+	 * Tier 2 unit tests can drive it without GTK. NB: the parser
+	 * deliberately ignores the server-supplied name bytes (see the
+	 * comment there) — we treat our local prefs nick as authoritative
+	 * and push it back to the server immediately below. */
 	hx_selfinfo_parse (htlc);
 
 	/* Phase 5: SELFINFO is the canonical 'login complete' signal.
@@ -533,6 +524,37 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	htlc->flags.logged_in = 1;
 
 	setbtns(&the_session, 1);
+
+	/* Phase 5: push our local nick + icon to the server right after
+	 * login completes — gated on HL_ACCESS_USE_ANY_NAME. Two reasons:
+	 *
+	 *   1. We just switched to the legacy two-stage flow (no NAME in
+	 *      LOGIN). On servers without an agreement gate (hlserver.com),
+	 *      we'd otherwise never tell the server who we are; the
+	 *      server falls back to its IP-keyed cache of our previous
+	 *      session's nick. USER_CHANGE here overwrites that cache
+	 *      with the bytes we actually want.
+	 *   2. Even on agreement-gated servers (mhxd), AGREEMENTAGREE
+	 *      eventually sends NAME — but that's gated on the user
+	 *      clicking Agree. Pushing here covers the case where the
+	 *      agreement window is closed without clicking (or there is
+	 *      no agreement to display).
+	 *
+	 * Access-bit gate: HL_ACCESS_USE_ANY_NAME (bit 26) is the
+	 * permission to override the server-assigned display name. Guests
+	 * on many servers are intentionally pinned to a default like
+	 * "Read the agreement" via the absence of this bit. Sending a
+	 * USER_CHANGE we have no permission for earns a task-error
+	 * "Uh, no." toast and pollutes the log — so just don't.
+	 *
+	 * htlc->name comes from prefs.nick at connect time (CFG_NICK
+	 * cfgvar maps directly to it). The server's view (in user_list)
+	 * may still differ from htlc->name after this — that's the
+	 * design. Chat output reads user_list (server-truthful);
+	 * prefs / Settings read htlc->name (user-chosen). */
+	if (hl_access_has ((const guint8 *) &htlc->access,
+	                   HL_ACCESS_USE_ANY_NAME))
+		hx_change_name_icon (htlc);
 
 	/* Phase 5: SELFINFO is the canonical signal that the server has
 	 * finished the post-login conversation. Fire the deferred

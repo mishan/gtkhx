@@ -129,20 +129,32 @@ test_selfinfo_skips_malformed_long_access (void)
 
 /* ---------- User list chunk ---------- */
 
+/* Phase 5: hx_selfinfo_parse intentionally does NOT write htlc.name
+ * any more. The server caches the user's nick across sessions and on
+ * reconnect echoes it back via this chunk; copying the bytes into
+ * htlc->name lets a previously-corrupt cached value clobber the
+ * user's local prefs nick. The new policy is "local nick wins" —
+ * hx_rcv_user_selfinfo pushes our htlc->name to the server via
+ * USER_CHANGE right after the parse, overwriting whatever the server
+ * cached. uid / icon / access still parse normally. */
 static void
 test_selfinfo_extracts_user_list (void)
 {
 	struct htlc_conn htlc;
 	wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
+	/* Pre-populate htlc.name with the user's local nick. The parse
+	 * must leave it alone. */
+	strncpy ((char *) htlc.name, "Local", sizeof (htlc.name) - 1);
+
 	guint8 payload[64];
-	const char *name = "Misha";
+	const char *server_name = "Misha";
 	gsize plen = build_userlist_payload (
 		payload, sizeof (payload),
 		/*uid*/  0x1234,
 		/*icon*/ 412,
 		/*color*/ 0,
-		name, strlen (name));
+		server_name, strlen (server_name));
 	wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST,
 	                        (guint16) plen, payload);
 
@@ -151,7 +163,9 @@ test_selfinfo_extracts_user_list (void)
 
 	g_assert_cmphex (htlc.uid,  ==, 0x1234);
 	g_assert_cmphex (htlc.icon, ==, 412);
-	g_assert_cmpstr ((const char *) htlc.name, ==, "Misha");
+	/* htlc.name is unchanged — the server-supplied "Misha" must not
+	 * overwrite the pre-call "Local". */
+	g_assert_cmpstr ((const char *) htlc.name, ==, "Local");
 
 	wire_fixture_free (&htlc);
 }
@@ -191,15 +205,24 @@ test_selfinfo_uid_overrides_pre_call_value (void)
 	g_assert_cmphex (htlc.uid, !=, 0xbebe);
 }
 
+/* Phase 5: hx_selfinfo_parse no longer writes htlc->name, so a long
+ * server-supplied name shouldn't corrupt either htlc->name or the
+ * adjacent htlc->login field. Verify that an oversized USER_LIST name
+ * parses cleanly with all neighbouring state untouched. */
 static void
-test_selfinfo_truncates_name_at_31 (void)
+test_selfinfo_long_server_name_leaves_local_intact (void)
 {
 	struct htlc_conn htlc;
 	wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
-	/* htlc->name is 32 bytes (31 chars + NUL). The handler caps
-	 * nlen at 31 to leave room for the trailing NUL. Verify that
-	 * a 64-byte name is truncated cleanly without overflowing. */
+	/* Pre-populate htlc.name and htlc.login with sentinels. Both
+	 * 32-byte fixed buffers sit adjacent in struct htlc_conn; an
+	 * old-style memcpy(htlc->name, uh->name, nlen) without a length
+	 * cap could spill into htlc->login. The new behaviour writes
+	 * neither. */
+	strncpy ((char *) htlc.name,  "Local", sizeof (htlc.name) - 1);
+	strncpy ((char *) htlc.login, "user",  sizeof (htlc.login) - 1);
+
 	char long_name[64];
 	memset (long_name, 'X', sizeof (long_name));
 	guint8 payload[80];
@@ -212,10 +235,8 @@ test_selfinfo_truncates_name_at_31 (void)
 
 	hx_selfinfo_parse (&htlc);
 
-	g_assert_cmpuint (strlen ((const char *) htlc.name), ==, 31);
-	for (gsize i = 0; i < 31; i++)
-		g_assert_cmphex (htlc.name[i], ==, 'X');
-	g_assert_cmphex  (htlc.name[31], ==, '\0');
+	g_assert_cmpstr ((const char *) htlc.name,  ==, "Local");
+	g_assert_cmpstr ((const char *) htlc.login, ==, "user");
 
 	wire_fixture_free (&htlc);
 }
@@ -235,6 +256,9 @@ test_selfinfo_skips_too_short_user_list (void)
 	unsigned seen = hx_selfinfo_parse (&htlc);
 	g_assert_false (seen & HX_SELFINFO_USER_LIST);
 	g_assert_cmpuint (htlc.icon, ==, 0);
+	/* htlc.name is not touched by the parse path anyway (see
+	 * test_selfinfo_extracts_user_list); the wire_fixture_init
+	 * memset leaves it zeroed, so the [0]==0 check still holds. */
 	g_assert_cmphex (htlc.name[0], ==, 0);
 
 	wire_fixture_free (&htlc);
@@ -269,7 +293,11 @@ test_selfinfo_parses_both_chunks (void)
 	                  (HX_SELFINFO_ACCESS | HX_SELFINFO_USER_LIST));
 	g_assert_cmphex  (htlc.uid,  ==, 5);
 	g_assert_cmphex  (htlc.icon, ==, 100);
-	g_assert_cmpstr  ((const char *) htlc.name, ==, "admin");
+	/* Phase 5: htlc.name is not written by hx_selfinfo_parse; the
+	 * server-supplied "admin" stays in the wire chunk but doesn't
+	 * land in htlc.name. wire_fixture_init zeros the struct so the
+	 * pre-call value is "". */
+	g_assert_cmpstr  ((const char *) htlc.name, ==, "");
 	/* All-ones in every byte → guint64 is 0xffffffffffffffff. */
 	g_assert_cmphex  (htlc.access, ==, G_GUINT64_CONSTANT (0xffffffffffffffff));
 
@@ -322,8 +350,8 @@ main (int argc, char **argv)
 	                 test_selfinfo_extracts_user_list);
 	g_test_add_func ("/proto/selfinfo/uid_overrides_pre_call_value",
 	                 test_selfinfo_uid_overrides_pre_call_value);
-	g_test_add_func ("/proto/selfinfo/truncates_name_at_31",
-	                 test_selfinfo_truncates_name_at_31);
+	g_test_add_func ("/proto/selfinfo/long_server_name_leaves_local_intact",
+	                 test_selfinfo_long_server_name_leaves_local_intact);
 	g_test_add_func ("/proto/selfinfo/skips_too_short_user_list",
 	                 test_selfinfo_skips_too_short_user_list);
 

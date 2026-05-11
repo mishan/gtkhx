@@ -228,51 +228,40 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 			 * htlc->color field write parallel to the icon line. */
 			HN16 (&nlen,       &uh->nlen);
 			nlen = (nlen > 31) ? 31 : nlen;
-			/* Phase 5: name bytes from the server are whatever
-			 * encoding the server happened to store. If a previous
-			 * session wrote corrupt bytes to the server's user
-			 * record (any of the gtkhx 1.0 / Mac Roman / accidental
-			 * one's-complement paths), SELFINFO faithfully echoes
-			 * them back; copying them verbatim into htlc->name
-			 * pollutes the in-memory string AND, on the next
-			 * prefs_write, persists them as the NICK= line — so
-			 * the corruption survives reconnects and even
-			 * gtkhxrc-wipes-via-Settings. Validate UTF-8 here;
-			 * sanitise via gtkhx_text_to_utf8 (Mac Roman ->
-			 * UTF-8, then g_utf8_make_valid replacement char) if
-			 * the bytes aren't already valid. */
-			if (g_utf8_validate ((const char *) uh->name, nlen, NULL)) {
-				debug_log_name_write ("SELFINFO USER_LIST",
-				                      (const char *) uh->name, nlen);
-				memcpy (htlc->name, uh->name, nlen);
-				htlc->name[nlen] = 0;
-			} else {
-				gchar *clean = gtkhx_text_to_utf8 (
-					(const char *) uh->name, nlen, NULL);
-				gsize clen = clean ? strlen (clean) : 0;
-				/* Phase 5: trace the sanitisation. If a server is
-				 * round-tripping corrupt name bytes back to us this
-				 * fires every SELFINFO with USER_LIST. The 'before'
-				 * hex makes the original wire bytes recoverable for
-				 * forensics; the 'after' shows what htlc->name ends
-				 * up with. Logged under category 'name'. */
+			/* Phase 5: deliberately DO NOT overwrite htlc->name
+			 * with the server-supplied bytes. The server caches
+			 * our nick across sessions (hlserver.com keys by IP)
+			 * and on every reconnect sends back whatever it
+			 * remembered — including bytes from a previous broken
+			 * client (Hotline 1.x's Mac Roman, gtkhx's pre-sanitiser
+			 * raw-bytes era, an accidental one's-complement, etc.).
+			 * Letting that overwrite our local prefs value sets up
+			 * a feedback loop: server sends corrupt bytes →
+			 * htlc->name picks them up → prefs_write persists →
+			 * next session sends the same corrupt bytes back to the
+			 * server. (See hx_rcv_user_selfinfo: it now pushes our
+			 * local name + icon via hx_change_name_icon right after
+			 * the parse, so the server's cache gets updated to
+			 * match our prefs instead of the other way around.)
+			 *
+			 * uh->name is still chunk-bounded so the wire frame
+			 * stays valid; we just don't write the bytes anywhere.
+			 * Surface them under category 'name' for forensics. */
+			if (nlen) {
 				GString *hex = g_string_new (NULL);
-				for (guint16 i = 0; i < nlen; i++) {
+				guint16 i;
+				for (i = 0; i < nlen; i++) {
 					if (i) g_string_append_c (hex, ' ');
 					g_string_append_printf (hex, "%02x",
 					                        ((const guint8 *) uh->name)[i]);
 				}
 				debug_log ("name",
-				           "SELFINFO USER_LIST name bytes not valid "
-				           "UTF-8 (nlen=%u), sanitised: [%s] -> '%s'",
-				           (unsigned) nlen, hex->str,
-				           clean ? clean : "(null)");
+				           "SELFINFO USER_LIST cached name "
+				           "ignored (nlen=%u hex=[%s]) — local "
+				           "prefs nick wins; will push via "
+				           "USER_CHANGE",
+				           (unsigned) nlen, hex->str);
 				g_string_free (hex, TRUE);
-
-				if (clen > 31) clen = 31;
-				if (clean) memcpy (htlc->name, clean, clen);
-				htlc->name[clen] = 0;
-				g_free (clean);
 			}
 			seen |= HX_SELFINFO_USER_LIST;
 			break;
