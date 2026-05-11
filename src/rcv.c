@@ -525,6 +525,14 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 
 	setbtns(&the_session, 1);
 
+	/* Phase 5: SELFINFO is the canonical signal that the server has
+	 * finished the post-login conversation. Fire the deferred
+	 * USER_GETLIST + news fetches now — see do_post_login_fetches
+	 * comment in this file for why deferring was necessary. The
+	 * helper is single-fire, so the fallback timer is a no-op if
+	 * SELFINFO beat it (the common case). */
+	do_post_login_fetches (htlc);
+
 	/* Phase 5: push our local nick + icon to the server right after
 	 * login completes — gated on HL_ACCESS_USE_ANY_NAME. Two reasons:
 	 *
@@ -539,6 +547,15 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 *      clicking Agree. Pushing here covers the case where the
 	 *      agreement window is closed without clicking (or there is
 	 *      no agreement to display).
+	 *
+	 * Sequencing note: sent AFTER do_post_login_fetches (USER_GETLIST)
+	 * so the server returns its user-list response first, with us at
+	 * our natural chronological position (last to join → last in
+	 * list). If we sent USER_CHANGE first, the server's broadcast of
+	 * the change arrived before the GETLIST response and we ended
+	 * up at the TOP of the local user_list instead of the bottom.
+	 * (Servers process inbound packets in order over TCP and reply
+	 * in order, so reordering the sends reorders the receives.)
 	 *
 	 * Access-bit gate: HL_ACCESS_USE_ANY_NAME (bit 26) is the
 	 * permission to override the server-assigned display name. Guests
@@ -555,14 +572,6 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	if (hl_access_has ((const guint8 *) &htlc->access,
 	                   HL_ACCESS_USE_ANY_NAME))
 		hx_change_name_icon (htlc);
-
-	/* Phase 5: SELFINFO is the canonical signal that the server has
-	 * finished the post-login conversation. Fire the deferred
-	 * USER_GETLIST + news fetches now — see do_post_login_fetches
-	 * comment in this file for why deferring was necessary. The
-	 * helper is single-fire, so the fallback timer is a no-op if
-	 * SELFINFO beat it (the common case). */
-	do_post_login_fetches (htlc);
 }
 
 void hx_rcv_dump (struct htlc_conn *htlc)
