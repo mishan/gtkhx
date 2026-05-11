@@ -385,7 +385,41 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	if ((uid) && (uid == htlc->uid)) {
 		htlc->icon = user->icon;
 		htlc->color = user->color;
-		strcpy(htlc->name, user->name);
+		/* Phase 5: defend htlc->name against non-UTF-8 server
+		 * bytes — see the matching comment in
+		 * proto_helpers.c hx_selfinfo_extract for the rationale
+		 * (server-side corrupt-bytes feedback loop into gtkhxrc).
+		 * user->name has already been bounded to <= 31 bytes
+		 * upstream so a fresh strncpy with NUL-pad is safe. */
+		gsize unlen = strlen (user->name);
+		if (g_utf8_validate (user->name, unlen, NULL)) {
+			strncpy (htlc->name, user->name, 31);
+			htlc->name[31] = '\0';
+		} else {
+			gchar *clean = gtkhx_text_to_utf8 (
+				user->name, unlen, NULL);
+			gsize clen = clean ? strlen (clean) : 0;
+			/* Phase 5: trace the sanitisation. Logged under
+			 * category 'name'; the hex dump captures the
+			 * original wire bytes for forensics. */
+			GString *hex = g_string_new (NULL);
+			for (gsize i = 0; i < unlen; i++) {
+				if (i) g_string_append_c (hex, ' ');
+				g_string_append_printf (hex, "%02x",
+				                        ((const guint8 *) user->name)[i]);
+			}
+			debug_log ("name",
+			           "USER_CHANGE name bytes not valid UTF-8 "
+			           "(uid=%u len=%zu), sanitised: [%s] -> '%s'",
+			           (unsigned) uid, (size_t) unlen, hex->str,
+			           clean ? clean : "(null)");
+			g_string_free (hex, TRUE);
+
+			if (clen > 31) clen = 31;
+			if (clean) memcpy (htlc->name, clean, clen);
+			htlc->name[clen] = 0;
+			g_free (clean);
+		}
 	}
 }
 

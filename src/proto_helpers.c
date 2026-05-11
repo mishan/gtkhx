@@ -29,6 +29,8 @@
 #include "protocol.h"
 #include "hotline.h"
 #include "proto_helpers.h"
+#include "text_util.h"
+#include "debug.h"
 
 gboolean
 task_error_extract (struct htlc_conn *htlc, char *out,
@@ -226,8 +228,50 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 			 * htlc->color field write parallel to the icon line. */
 			HN16 (&nlen,       &uh->nlen);
 			nlen = (nlen > 31) ? 31 : nlen;
-			memcpy (htlc->name, uh->name, nlen);
-			htlc->name[nlen] = 0;
+			/* Phase 5: name bytes from the server are whatever
+			 * encoding the server happened to store. If a previous
+			 * session wrote corrupt bytes to the server's user
+			 * record (any of the gtkhx 1.0 / Mac Roman / accidental
+			 * one's-complement paths), SELFINFO faithfully echoes
+			 * them back; copying them verbatim into htlc->name
+			 * pollutes the in-memory string AND, on the next
+			 * prefs_write, persists them as the NICK= line — so
+			 * the corruption survives reconnects and even
+			 * gtkhxrc-wipes-via-Settings. Validate UTF-8 here;
+			 * sanitise via gtkhx_text_to_utf8 (Mac Roman ->
+			 * UTF-8, then g_utf8_make_valid replacement char) if
+			 * the bytes aren't already valid. */
+			if (g_utf8_validate ((const char *) uh->name, nlen, NULL)) {
+				memcpy (htlc->name, uh->name, nlen);
+				htlc->name[nlen] = 0;
+			} else {
+				gchar *clean = gtkhx_text_to_utf8 (
+					(const char *) uh->name, nlen, NULL);
+				gsize clen = clean ? strlen (clean) : 0;
+				/* Phase 5: trace the sanitisation. If a server is
+				 * round-tripping corrupt name bytes back to us this
+				 * fires every SELFINFO with USER_LIST. The 'before'
+				 * hex makes the original wire bytes recoverable for
+				 * forensics; the 'after' shows what htlc->name ends
+				 * up with. Logged under category 'name'. */
+				GString *hex = g_string_new (NULL);
+				for (guint16 i = 0; i < nlen; i++) {
+					if (i) g_string_append_c (hex, ' ');
+					g_string_append_printf (hex, "%02x",
+					                        ((const guint8 *) uh->name)[i]);
+				}
+				debug_log ("name",
+				           "SELFINFO USER_LIST name bytes not valid "
+				           "UTF-8 (nlen=%u), sanitised: [%s] -> '%s'",
+				           (unsigned) nlen, hex->str,
+				           clean ? clean : "(null)");
+				g_string_free (hex, TRUE);
+
+				if (clen > 31) clen = 31;
+				if (clean) memcpy (htlc->name, clean, clen);
+				htlc->name[clen] = 0;
+				g_free (clean);
+			}
 			seen |= HX_SELFINFO_USER_LIST;
 			break;
 		}
