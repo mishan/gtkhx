@@ -47,6 +47,7 @@
 #include "options.h"
 #include "text_util.h"
 #include "tracker.h"
+#include "debug.h"
 
 /* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
  * for the icon viewer and the prefs notebook tree (Phase 2.x work),
@@ -879,6 +880,12 @@ on_entry_row_text (AdwEntryRow *row, GParamSpec *pspec, gpointer data)
 	case STRING32:
 		if (strncmp (v->variable.str32, txt, 31) == 0)
 			return;
+		{
+			char lbl[64];
+			g_snprintf (lbl, sizeof lbl,
+			            "entry_row %s", v->name);
+			debug_log_name_write (lbl, txt, strlen (txt));
+		}
 		strncpy (v->variable.str32, txt, 31);
 		v->variable.str32[31] = '\0';
 		break;
@@ -1115,29 +1122,29 @@ static void prefs_allocate(char *tag, char *rest)
 		}
 		case STRING32:
 		{
-			/* Phase 5: defend against corrupt non-UTF-8 bytes in
-			 * the prefs file. NICK lives in a STRING32 buffer that
-			 * doubles as htlc->name on the wire AND as the source
-			 * for a GtkEntry in Settings. GTK's input method
-			 * context asserts the surrounding text is valid UTF-8
+			gsize rest_len = strlen (rest);
+			/* Phase 5: trace every STRING32 load so the htlc->name
+			 * corruption hunt has a full audit trail of what came
+			 * out of gtkhxrc before any sanitisation. The label
+			 * encodes the key name so we can disambiguate NICK
+			 * from any future STRING32. */
+			{
+				char lbl[64];
+				g_snprintf (lbl, sizeof lbl,
+				            "prefs_load %s", result->name);
+				debug_log_name_write (lbl, rest, rest_len);
+			}
+			/* Defend against corrupt non-UTF-8 bytes in the prefs
+			 * file. NICK lives in a STRING32 buffer that doubles
+			 * as htlc->name on the wire AND as the source for a
+			 * GtkEntry in Settings. GTK's input method context
+			 * asserts the surrounding text is valid UTF-8
 			 * (gtk_im_context_set_surrounding_with_selection),
 			 * so a NICK with non-UTF-8 bytes makes the field
-			 * un-editable — the user can't even type in their own
-			 * name. The bytes can land in gtkhxrc via earlier
-			 * server round-trips (proto_helpers.c / rcv.c
-			 * unconditionally memcpy server-supplied name bytes
-			 * over htlc->name when SELFINFO / USER_CHANGE arrive
-			 * for our own UID) which then get serialised back as
-			 * the literal NICK= value at next prefs save.
-			 *
-			 * Validate UTF-8 here. If clean, fast-path strncpy.
-			 * If not, pipe through gtkhx_text_to_utf8 which
-			 * tries Mac Roman → UTF-8 then falls back to
-			 * g_utf8_make_valid (replacement-char insertion).
-			 * Non-NICK STRING32 fields (none today, but the
-			 * pattern would extend to any future addition)
-			 * benefit from the same defence at no cost. */
-			gsize rest_len = strlen (rest);
+			 * un-editable. Validate UTF-8 here and pipe through
+			 * gtkhx_text_to_utf8 (Mac Roman → UTF-8, then
+			 * g_utf8_make_valid replacement-char fallback) if
+			 * the bytes aren't already valid. */
 			if (g_utf8_validate (rest, rest_len, NULL)) {
 				if (!strncmp (result->variable.str32, rest, 31))
 					return;
@@ -1419,9 +1426,22 @@ void prefs_write(void)
 			                      (gint64) *v->variable.timet);
 			break;
 		case STRING32:
+		{
+			/* Phase 5: trace the value about to be persisted. If
+			 * the htlc->name corruption has happened between the
+			 * explicit write site and this save, the hex here
+			 * shows what's actually going to disk. The gtkhxrc
+			 * file is the only stable record of the corrupt
+			 * state, so log the bytes here too. */
+			char lbl[64];
+			g_snprintf (lbl, sizeof lbl,
+			            "prefs_write %s", v->name);
+			debug_log_name_write (lbl, v->variable.str32,
+			                      strlen (v->variable.str32));
 			g_key_file_set_string (kf, CFG_KEYFILE_GROUP, v->name,
 			                       v->variable.str32);
 			break;
+		}
 		case BOOLEAN:
 			g_key_file_set_boolean (kf, CFG_KEYFILE_GROUP, v->name,
 			                        *v->variable.uchar ? TRUE : FALSE);

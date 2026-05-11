@@ -242,6 +242,8 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 			 * UTF-8, then g_utf8_make_valid replacement char) if
 			 * the bytes aren't already valid. */
 			if (g_utf8_validate ((const char *) uh->name, nlen, NULL)) {
+				debug_log_name_write ("SELFINFO USER_LIST",
+				                      (const char *) uh->name, nlen);
 				memcpy (htlc->name, uh->name, nlen);
 				htlc->name[nlen] = 0;
 			} else {

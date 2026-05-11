@@ -393,6 +393,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 		 * upstream so a fresh strncpy with NUL-pad is safe. */
 		gsize unlen = strlen (user->name);
 		if (g_utf8_validate (user->name, unlen, NULL)) {
+			debug_log_name_write ("USER_CHANGE self",
+			                      user->name, unlen);
 			strncpy (htlc->name, user->name, 31);
 			htlc->name[31] = '\0';
 		} else {
