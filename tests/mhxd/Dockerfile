@@ -129,6 +129,20 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
 #     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
 #
+# (3b) banner.url → known test fixture
+#     The upstream config advertises
+#     http://vivahx.com/images/vivahx.gif as the post-AGREEMENTAGREE
+#     banner URL. Override to a stable placehold.co URL whose
+#     rendered image carries the text "GtkHx Test Banner" — that
+#     way both the automated test (assert exact URL string) and
+#     manual smoke-testing (connect GtkHx, look at the toolbar)
+#     have a known fixture to verify against. The placehold.co
+#     service produces a 468x60 PNG, the standard web ad banner
+#     size, so the banner widget gets a realistically-shaped
+#     image to render.
+#     Keep this URL in sync with GTKHX_TEST_BANNER_URL_DEFAULT in
+#     tests/integration/test_banner.c.
+#
 # (4) Seed files/test.txt and files/integration_seed.txt with
 #     known content. mhxd's run/hxd/ skeleton ships without a
 #     files/ directory, so the file_list test sees a task-error
@@ -160,6 +174,8 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
+        /opt/mhxd/run/hxd.conf \
+    && sed -i 's|^\([[:space:]]*\)url "[^"]*";|\1url "https://placehold.co/468x60/png?text=GtkHx+Test+Banner";|' \
         /opt/mhxd/run/hxd.conf \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
