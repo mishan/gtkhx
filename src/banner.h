@@ -58,4 +58,12 @@ extern void banner_handle_message (struct htlc_conn *htlc,
  * after we connect to another. */
 extern void banner_clear (void);
 
+/* Continuation of the file-mode banner flow: the server'"'"'s reply
+ * to our HTLC_HDR_DOWNLOAD_BANNER carries a transfer refnum +
+ * size. rcv_task_banner_get extracts them and calls this so
+ * banner.c can spin up an HTXF worker to fetch the bytes.
+ * Called on the main thread. */
+extern void banner_handle_htxf_reply (struct htlc_conn *htlc,
+                                      guint32 ref, guint32 size);
+
 #endif /* HX_BANNER_H */

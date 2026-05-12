@@ -1818,3 +1818,37 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 		xfer_ready_write(htxf);
 	}
 }
+
+/* Reply to our HTLC_HDR_DOWNLOAD_BANNER. The server gives us a
+ * transfer reference and total byte count; banner.c spins up an
+ * HTXF worker thread to actually fetch the bytes off
+ * server_port + 1. */
+void rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data)
+{
+	guint32 ref = 0, size = 0;
+	(void) ptr;
+	(void) data;
+
+	if (task_inerror (htlc)) {
+		debug_log ("banner",
+		           "DOWNLOAD_BANNER task error from server");
+		return;
+	}
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_HTXF_REF:
+			dh_getint (ref);
+			break;
+		case HTLS_DATA_HTXF_SIZE:
+			dh_getint (size);
+			break;
+		}
+	} dh_end ();
+
+	debug_log ("banner",
+	           "DOWNLOAD_BANNER reply: ref=%u size=%u",
+	           ref, size);
+
+	banner_handle_htxf_reply (htlc, ref, size);
+}
