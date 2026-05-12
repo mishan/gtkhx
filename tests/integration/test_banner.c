@@ -1,18 +1,27 @@
 /*
- * tests/integration/test_banner.c — verify the server sends an
- * HTLS_HDR_BANNER broadcast after the client agrees to the
- * agreement.
+ * tests/integration/test_banner.c — verify the server's banner
+ * announcement and (in file mode) the HTXF subchannel fetch.
  *
- * mhxd's rcv_agreementagree (mhxd/src/hxd/rcv.c) sends the banner
- * unconditionally if hxd_cfg.banner.type is non-empty. The shipped
- * config has:
- *   banner {
- *       type "URL";
- *       url  "http://vivahx.com/images/vivahx.gif";
- *   }
- * so an HTLS_HDR_BANNER should arrive carrying both
- * HTLS_DATA_BANNER_TYPE = "URL " (4 bytes) and
- * HTLS_DATA_BANNER_URL  = the configured URL.
+ * Hotline 1.9 has two banner modes:
+ *
+ *   URL  — server's HTLS_HDR_BANNER carries TYPE="URL " plus a
+ *          HTLS_DATA_BANNER_URL string. The client (in production)
+ *          fetches the image via HTTP itself.
+ *   FILE — server's HTLS_HDR_BANNER carries a binary TYPE
+ *          ("GIFf", "JPEG", "PICT", ...) and no URL. The client
+ *          follows up with HTLC_HDR_DOWNLOAD_BANNER; the server
+ *          replies with HTLS_DATA_HTXF_REF + HTLS_DATA_HTXF_SIZE;
+ *          the client opens base_port+1, writes the HTXF preamble,
+ *          and reads `size` bytes of image data.
+ *
+ * The gtkhx-mhxd container is runtime-configurable via BANNER_MODE
+ * (see tests/mhxd/docker-entrypoint.sh). Each test below is
+ * mode-aware: it inspects HTLS_HDR_BANNER's TYPE field and skips
+ * with g_test_skip if the server is serving the other mode. That
+ * way:
+ *
+ *   docker run gtkhx-mhxd                        → URL test fires
+ *   docker run -e BANNER_MODE=JPEG gtkhx-mhxd    → HTXF test fires
  *
  * mhxd gates rcv_agreementagree on htlc->access_extra.can_agree,
  * which is only set in rcv_login's `got_name == false` branch
@@ -20,14 +29,8 @@
  * agreement-agree message). The standard
  * integration_open_login_or_skip helper sends NAME at login time,
  * which puts us in the modern-client branch where can_agree == 0
- * — and AGREEMENTAGREE gets rejected.
- *
- * So this test does a hand-rolled "skinny" login without NAME,
- * then sends AGREEMENTAGREE carrying NAME + ICON to trigger
- * mhxd's banner-send code path. GtkHx itself does the modern
- * (with-NAME) login and never sees the banner from mhxd as a
- * result; the integration suite covers the flow GtkHx WOULD see
- * if it followed the legacy path.
+ * — and AGREEMENTAGREE gets rejected. So we hand-roll a "skinny"
+ * login (no NAME) below to put mhxd in the legacy flow.
  */
 
 #include "config.h"
@@ -41,11 +44,26 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
+/* The URL the gtkhx-mhxd test container is configured to advertise
+ * when BANNER_MODE=URL (the default). Kept in sync by hand with
+ * tests/mhxd/docker-entrypoint.sh's URL_DEFAULT. Override at run
+ * time via $GTKHX_TEST_BANNER_URL — useful when pointing the
+ * suite at a non-default test server. */
+#define GTKHX_TEST_BANNER_URL_DEFAULT \
+	"https://placehold.co/468x60/png?text=GtkHx+Test+Banner"
+
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
 	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
 	return ntohl (h->type);
+}
+
+static guint32
+hdr_trans (const struct htlc_conn *htlc)
+{
+	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+	return ntohl (h->trans);
 }
 
 /* hl_code: XOR-with-0xff cipher used by the LOGIN chunk encoding. */
@@ -61,10 +79,7 @@ hl_code_inline (void *dst, const void *src, gsize len)
 /* Skinny login: ICON + LOGIN + CLIENTVERSION, no NAME. mhxd's
  * rcv_login then takes the in_login=1 branch and sets can_agree=1,
  * deferring user_loginupdate (and the SELFINFO send) until we
- * follow up with AGREEMENTAGREE.
- *
- * The standard integration_send_message uses the calling htlc's
- * out buffer; we work directly here to keep banner self-contained. */
+ * follow up with AGREEMENTAGREE. */
 static gboolean
 send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
 {
@@ -83,79 +98,248 @@ send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
 		(int) HTLC_DATA_CLIENTVERSION,  (int) sizeof (cv_be), &cv_be);
 }
 
-static void
-test_banner_arrives_after_agreementagree (void)
+/* Shared setup: skinny-login → AGREEMENTAGREE → drain until
+ * HTLS_HDR_BANNER. On success returns a valid `fd` (caller closes),
+ * populates out_type / out_url with the banner's chunks (g_strndup'd;
+ * nullable on absent), and leaves htlc->in holding the
+ * HTLS_HDR_BANNER frame so the caller can match on type without
+ * reparsing. Returns -1 on any failure path (test_skip or test_fail
+ * already called). */
+static int
+banner_setup_or_skip (struct htlc_conn *htlc,
+                      gchar **out_type, gchar **out_url)
 {
-	struct htlc_conn htlc;
-	memset (&htlc, 0, sizeof (htlc));
+	memset (htlc, 0, sizeof (*htlc));
+	*out_type = NULL;
+	*out_url  = NULL;
 
 	int fd = integration_open_or_skip ();
 	if (fd < 0)
-		return;
+		return -1;
 
-	g_assert_true (send_skinny_login (fd, &htlc, 412));
+	if (!send_skinny_login (fd, htlc, 412)) {
+		g_test_fail_printf ("skinny login send failed");
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		return -1;
+	}
 
-	/* Drain past the loginreply TASK and any AGREEMENT chunks
-	 * mhxd sent. We don't expect SELFINFO at this point because
-	 * in_login=1 keeps user_loginupdate gated until
-	 * AGREEMENTAGREE. Drain a few messages opportunistically; the
-	 * actual messages we DO want come AFTER the AGREEMENTAGREE we
-	 * send next. */
+	/* Drain past the loginreply TASK + AGREEMENT mhxd sends
+	 * before we agree. The real interesting messages arrive
+	 * after AGREEMENTAGREE. */
 	for (int i = 0; i < 4; i++) {
-		if (!integration_recv_message (
-				fd, &htlc, /*timeout_ms=*/2000))
+		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/2000))
 			break;
 	}
 
-	/* Send HTLC_HDR_AGREEMENTAGREE with NAME + ICON. mhxd's
-	 * rcv_agreementagree finishes login, runs user_loginupdate
-	 * (sending SELFINFO), and unconditionally sends the banner
-	 * if banner.type is configured. */
 	const char *name = "Banner Tier-3";
 	guint16 icon_be = htons (412);
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/2,
-		(int) HTLC_DATA_NAME, (int) strlen (name), (guint8 *) name,
-		(int) HTLC_DATA_ICON, (int) sizeof (icon_be), &icon_be));
+	if (!integration_send_message (
+			fd, htlc,
+			HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/2,
+			(int) HTLC_DATA_NAME, (int) strlen (name), (guint8 *) name,
+			(int) HTLC_DATA_ICON, (int) sizeof (icon_be), &icon_be)) {
+		g_test_fail_printf ("AGREEMENTAGREE send failed");
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		return -1;
+	}
 
-	/* Drain looking for HTLS_HDR_BANNER. */
 	gboolean got_banner = FALSE;
-	gchar *banner_type = NULL;
-	gchar *banner_url = NULL;
 	for (int i = 0; i < 64 && !got_banner; i++) {
-		if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000))
+		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
 			break;
-		if (hdr_type (&htlc) != HTLS_HDR_BANNER)
+		if (hdr_type (htlc) != HTLS_HDR_BANNER)
 			continue;
 		got_banner = TRUE;
 
-		dh_start (&htlc) {
+		dh_start (htlc) {
 			switch (_type) {
 			case HTLS_DATA_BANNER_TYPE:
-				banner_type = g_strndup (
+				*out_type = g_strndup (
 					(const char *) dh->data, _len);
 				break;
 			case HTLS_DATA_BANNER_URL:
-				banner_url = g_strndup (
+				*out_url = g_strndup (
 					(const char *) dh->data, _len);
 				break;
 			}
 		} dh_end ();
 	}
-	g_assert_true (got_banner);
+	if (!got_banner) {
+		g_test_fail_printf ("no HTLS_HDR_BANNER received");
+		integration_release_htlc (htlc);
+		integration_close (fd);
+		return -1;
+	}
+	g_test_message ("banner type=\"%s\" url=\"%s\"",
+	                *out_type ? *out_type : "(null)",
+	                *out_url  ? *out_url  : "(null)");
+	return fd;
+}
 
-	/* Banner type is exactly 4 bytes — "URL " (trailing-space
-	 * padded) per the shipped config. The URL is whatever the
-	 * config says; we just assert it's non-empty. */
+/* Strip a single trailing space to normalise "URL " ↔ "URL". */
+static gboolean
+banner_type_is_url (const char *t)
+{
+	if (!t)
+		return FALSE;
+	gsize n = strlen (t);
+	if (n > 0 && t[n - 1] == ' ')
+		n--;
+	return n == 3 && g_ascii_strncasecmp (t, "URL", 3) == 0;
+}
+
+/* URL mode: server's HTLS_HDR_BANNER carried TYPE="URL " plus the
+ * expected URL string. Skips if the container is in HTXF mode. */
+static void
+test_banner_url_mode (void)
+{
+	struct htlc_conn htlc;
+	gchar *banner_type = NULL, *banner_url = NULL;
+	int fd = banner_setup_or_skip (&htlc, &banner_type, &banner_url);
+	if (fd < 0)
+		return;
+
+	if (!banner_type_is_url (banner_type)) {
+		g_test_skip ("server is not in URL banner mode");
+		goto cleanup;
+	}
+
 	g_assert_nonnull (banner_type);
 	g_assert_cmpuint (strlen (banner_type), ==, 4);
-	g_test_message ("banner type: \"%s\"", banner_type);
+	g_assert_cmpstr (banner_type, ==, "URL ");
 
+	/* URL must match the container's configured banner exactly.
+	 * Kept in sync with tests/mhxd/docker-entrypoint.sh's
+	 * URL_DEFAULT. $GTKHX_TEST_BANNER_URL overrides for ad-hoc
+	 * runs against a non-default test server. */
+	const char *expected_url = g_getenv ("GTKHX_TEST_BANNER_URL");
+	if (!expected_url || !*expected_url)
+		expected_url = GTKHX_TEST_BANNER_URL_DEFAULT;
 	g_assert_nonnull (banner_url);
-	g_assert_cmpuint (strlen (banner_url), >, 0);
-	g_test_message ("banner url:  \"%s\"", banner_url);
+	g_assert_cmpstr (banner_url, ==, expected_url);
 
+cleanup:
+	g_free (banner_type);
+	g_free (banner_url);
+	integration_release_htlc (&htlc);
+	integration_close (fd);
+}
+
+/* Validate that a buffer starts with the magic bytes for the
+ * declared banner image type. */
+static gboolean
+banner_bytes_match_type (const char *type, const guint8 *bytes,
+                         gsize len)
+{
+	if (!type || !bytes || len < 4)
+		return FALSE;
+	if (strcmp (type, "JPEG") == 0)
+		return bytes[0] == 0xff && bytes[1] == 0xd8;
+	if (strcmp (type, "GIFf") == 0 || strcmp (type, "GIF ") == 0)
+		return bytes[0] == 'G' && bytes[1] == 'I'
+		    && bytes[2] == 'F' && bytes[3] == '8';
+	if (strcmp (type, "PICT") == 0)
+		/* QuickDraw PICT: first 512 bytes are header padding;
+		 * we don't validate the inner format, just accept any
+		 * non-zero prefix. */
+		return TRUE;
+	if (strcmp (type, "PNG ") == 0)
+		return bytes[0] == 0x89 && bytes[1] == 'P'
+		    && bytes[2] == 'N' && bytes[3] == 'G';
+	/* Unknown / unhandled image types: accept rather than fail
+	 * the test on an unfamiliar magic. */
+	return TRUE;
+}
+
+/* HTXF (file) mode: server announced a binary TYPE without a URL.
+ * Exercise the full follow-up — HTLC_HDR_DOWNLOAD_BANNER → TASK
+ * reply with REF+SIZE → HTXF subchannel → bytes — and verify the
+ * downloaded data starts with the correct magic for the declared
+ * type. Skips if the container is in URL mode. */
+static void
+test_banner_htxf_mode (void)
+{
+	struct htlc_conn htlc;
+	gchar *banner_type = NULL, *banner_url = NULL;
+	int fd = banner_setup_or_skip (&htlc, &banner_type, &banner_url);
+	if (fd < 0)
+		return;
+
+	if (banner_type_is_url (banner_type)) {
+		g_test_skip ("server is in URL banner mode");
+		goto cleanup;
+	}
+	if (banner_url && *banner_url) {
+		/* Server is in a confused state — declared a binary type
+		 * but also shipped a URL. Per 1.9 spec the client
+		 * dispatches on type, so this is still a valid test
+		 * target; flag it in the log but proceed with HTXF. */
+		g_test_message (
+			"warning: server type=\"%s\" but also sent URL=\"%s\"; "
+			"proceeding with HTXF fetch per spec",
+			banner_type, banner_url);
+	}
+
+	/* hlpack (called inside integration_send_message) reads
+	 * htlc->trans for the on-wire value and *then* increments
+	 * it. Capture the pre-send value so we can match the TASK
+	 * reply's trans field against what actually went out — not
+	 * the post-increment value. */
+	guint32 our_trans = htlc.trans;
+	if (!integration_send_message (
+			fd, &htlc,
+			HTLC_HDR_DOWNLOAD_BANNER, /*flag=*/0, /*hc=*/0)) {
+		g_test_fail_printf ("HTLC_HDR_DOWNLOAD_BANNER send failed");
+		goto cleanup;
+	}
+
+	/* Drain looking for the TASK reply matching our trans. */
+	guint32 ref = 0, size = 0;
+	gboolean got_reply = FALSE;
+	for (int i = 0; i < 16 && !got_reply; i++) {
+		if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000))
+			break;
+		if (hdr_type (&htlc) != HTLS_HDR_TASK)
+			continue;
+		if (hdr_trans (&htlc) != our_trans)
+			continue;
+		got_reply = TRUE;
+		dh_start (&htlc) {
+			switch (_type) {
+			case HTLS_DATA_HTXF_REF:
+				dh_getint (ref);
+				break;
+			case HTLS_DATA_HTXF_SIZE:
+				dh_getint (size);
+				break;
+			}
+		} dh_end ();
+	}
+	g_assert_true (got_reply);
+	g_assert_cmpuint (ref,  >, 0);
+	g_assert_cmpuint (size, >, 0);
+	g_assert_cmpuint (size, <, 1u << 20);	/* sanity cap: <1 MB */
+	g_test_message ("HTXF ref=%u size=%u", ref, size);
+
+	/* Open the HTXF subchannel and pull the bytes. */
+	int xfer_fd = integration_connect_xfer ();
+	g_assert_cmpint (xfer_fd, >=, 0);
+	g_assert_true (integration_send_xfer_hdr (xfer_fd, ref, size));
+
+	guint8 *bytes = g_malloc (size);
+	g_assert_true (integration_recv (xfer_fd, bytes, size));
+	integration_close (xfer_fd);
+
+	g_test_message (
+		"first 4 bytes: %02x %02x %02x %02x",
+		bytes[0], bytes[1], bytes[2], bytes[3]);
+	g_assert_true (banner_bytes_match_type (banner_type, bytes, size));
+
+	g_free (bytes);
+
+cleanup:
 	g_free (banner_type);
 	g_free (banner_url);
 	integration_release_htlc (&htlc);
@@ -167,8 +351,10 @@ main (int argc, char **argv)
 {
 	g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/banner/arrives_after_agreementagree",
-	                 test_banner_arrives_after_agreementagree);
+	g_test_add_func ("/integration/banner/url_mode",
+	                 test_banner_url_mode);
+	g_test_add_func ("/integration/banner/htxf_mode",
+	                 test_banner_htxf_mode);
 
 	return g_test_run ();
 }

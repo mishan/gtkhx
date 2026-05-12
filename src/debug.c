@@ -94,3 +94,42 @@ debug_log (const char *cat, const char *fmt, ...)
 	if (fmtlen == 0 || fmt[fmtlen - 1] != '\n')
 		g_printerr ("\n");
 }
+
+/* Phase 5: tracing helper for the htlc->name corruption hunt. Each
+ * write site to htlc->name calls this with a label naming the call
+ * site, the bytes about to be copied, and their length. With
+ * GTKHX_DEBUG=name set, a per-write line dumps the source label, the
+ * length, the hex bytes, and the printable rendering — which lets us
+ * see exactly which path stamps corrupt bytes into the buffer when
+ * the bug recurs. Quiet when the category is off (single hash lookup
+ * via debug_category_enabled). */
+void
+debug_log_name_write (const char *label, const char *src, gsize srclen)
+{
+	GString *hex;
+	GString *printable;
+	gsize    i;
+
+	if (!debug_category_enabled ("name"))
+		return;
+
+	hex       = g_string_new (NULL);
+	printable = g_string_new (NULL);
+	for (i = 0; i < srclen; i++) {
+		guint8 b = (guint8) src[i];
+		if (i) g_string_append_c (hex, ' ');
+		g_string_append_printf (hex, "%02x", b);
+		if (b >= 0x20 && b < 0x7f)
+			g_string_append_c (printable, (char) b);
+		else
+			g_string_append_c (printable, '.');
+	}
+	debug_log ("name",
+	           "write site '%s' len=%zu hex=[%s] printable='%s'",
+	           label ? label : "(null)",
+	           (size_t) srclen,
+	           hex->str,
+	           printable->str);
+	g_string_free (hex, TRUE);
+	g_string_free (printable, TRUE);
+}

@@ -29,6 +29,8 @@
 #include "protocol.h"
 #include "hotline.h"
 #include "proto_helpers.h"
+#include "text_util.h"
+#include "debug.h"
 
 gboolean
 task_error_extract (struct htlc_conn *htlc, char *out,
@@ -146,6 +148,45 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
 	return TRUE;
 }
 
+gboolean
+hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
+{
+	gboolean got_type = FALSE;
+
+	if (!out)
+		return FALSE;
+
+	memset (out->type, 0, sizeof (out->type));
+	out->has_url = FALSE;
+	out->url[0]  = '\0';
+	out->url_len = 0;
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_BANNER_TYPE:
+			/* Per mhxd's rcv_agreementagree, the type is always
+			 * 4 bytes (right-padded with spaces for shorter codes
+			 * like "URL"). Reject anything else as malformed. */
+			if (_len != 4)
+				continue;
+			memcpy (out->type, dh->data, 4);
+			out->type[4] = '\0';
+			got_type = TRUE;
+			break;
+		case HTLS_DATA_BANNER_URL:
+			out->url_len = (_len > sizeof (out->url) - 1)
+				? (guint16) (sizeof (out->url) - 1)
+				: _len;
+			memcpy (out->url, dh->data, out->url_len);
+			out->url[out->url_len] = '\0';
+			out->has_url = TRUE;
+			break;
+		}
+	} dh_end ();
+
+	return got_type;
+}
+
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {
@@ -187,8 +228,41 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 			 * htlc->color field write parallel to the icon line. */
 			HN16 (&nlen,       &uh->nlen);
 			nlen = (nlen > 31) ? 31 : nlen;
-			memcpy (htlc->name, uh->name, nlen);
-			htlc->name[nlen] = 0;
+			/* Phase 5: deliberately DO NOT overwrite htlc->name
+			 * with the server-supplied bytes. The server caches
+			 * our nick across sessions (hlserver.com keys by IP)
+			 * and on every reconnect sends back whatever it
+			 * remembered — including bytes from a previous broken
+			 * client (Hotline 1.x's Mac Roman, gtkhx's pre-sanitiser
+			 * raw-bytes era, an accidental one's-complement, etc.).
+			 * Letting that overwrite our local prefs value sets up
+			 * a feedback loop: server sends corrupt bytes →
+			 * htlc->name picks them up → prefs_write persists →
+			 * next session sends the same corrupt bytes back to the
+			 * server. (See hx_rcv_user_selfinfo: it now pushes our
+			 * local name + icon via hx_change_name_icon right after
+			 * the parse, so the server's cache gets updated to
+			 * match our prefs instead of the other way around.)
+			 *
+			 * uh->name is still chunk-bounded so the wire frame
+			 * stays valid; we just don't write the bytes anywhere.
+			 * Surface them under category 'name' for forensics. */
+			if (nlen) {
+				GString *hex = g_string_new (NULL);
+				guint16 i;
+				for (i = 0; i < nlen; i++) {
+					if (i) g_string_append_c (hex, ' ');
+					g_string_append_printf (hex, "%02x",
+					                        ((const guint8 *) uh->name)[i]);
+				}
+				debug_log ("name",
+				           "SELFINFO USER_LIST cached name "
+				           "ignored (nlen=%u hex=[%s]) — local "
+				           "prefs nick wins; will push via "
+				           "USER_CHANGE",
+				           (unsigned) nlen, hex->str);
+				g_string_free (hex, TRUE);
+			}
 			seen |= HX_SELFINFO_USER_LIST;
 			break;
 		}

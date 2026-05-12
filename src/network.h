@@ -40,4 +40,11 @@ extern void hl_code (void *__dst, const void *__src, size_t len);
 extern void ping_start (struct htlc_conn *htlc);
 extern void ping_stop  (void);
 
+/* Phase 5: send HTLC_HDR_AGREEMENTAGREE carrying NAME + ICON. The
+ * legacy Hotline two-stage login flow defers identity disclosure
+ * to this message; see the comment block above login_dispatch in
+ * network.c. Triggered by the Agree button on the agreement window
+ * (gtkhx.c::concurrence). */
+extern void hx_send_agreement_agree (struct htlc_conn *htlc);
+
 #endif /* HX_NETWORK_H */

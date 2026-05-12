@@ -13,6 +13,7 @@ extern void hx_rcv_chat_invite    (struct htlc_conn *htlc);
 extern void hx_rcv_user_selfinfo  (struct htlc_conn *htlc);
 extern void hx_rcv_dump           (struct htlc_conn *htlc);
 extern void hx_rcv_xfer_queue     (struct htlc_conn *htlc);
+extern void hx_rcv_banner         (struct htlc_conn *htlc);
 extern void hx_rcv_magic          (struct htlc_conn *htlc);
 extern void hx_rcv_hdr            (struct htlc_conn *htlc);
 

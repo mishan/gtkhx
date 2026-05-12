@@ -59,6 +59,48 @@ related files inside the container if you need elevated testing.
 5498 is exposed by the image but only useful if you swap the
 container's CMD to launch `hxtrackd` instead of `hxd`.
 
+## Banner configuration
+
+Hotline servers advertise a per-connection banner image after the
+client agrees to the server agreement. Two modes on the wire:
+
+- **URL mode** — server tells the client a URL to fetch the image
+  from over HTTP. Default.
+- **File mode** — server holds the image bytes and ships them over
+  the HTXF subchannel (port 5501) after the client sends
+  `HTLC_HDR_DOWNLOAD_BANNER`.
+
+The entrypoint script reads three environment variables at startup
+and patches `hxd.conf`'s `banner` block accordingly:
+
+| Var           | Values                            | Default                                                    |
+|---------------|-----------------------------------|------------------------------------------------------------|
+| `BANNER_MODE` | `URL`, `GIFf`, `JPEG`             | `URL`                                                      |
+| `BANNER_URL`  | any URL (URL mode only)           | `https://placehold.co/468x60/png?text=GtkHx+Test+Banner`   |
+| `BANNER_FILE` | path inside the container         | `/opt/mhxd/run/banner.jpg` (JPEG) / `banner.gif` (GIFf)    |
+
+The image is fetched from placehold.co at build time and baked
+into the image (`/opt/mhxd/run/banner.jpg` and `.gif`), so HTXF
+mode works without runtime network access.
+
+Examples:
+
+```sh
+# Default: URL mode, placehold.co fixture
+docker run --rm -p 5500:5500 -p 5501:5501 gtkhx-mhxd
+
+# File mode, baked-in JPEG
+docker run --rm -p 5500:5500 -p 5501:5501 \
+    -e BANNER_MODE=JPEG gtkhx-mhxd
+
+# File mode, GIF, bring your own banner
+docker run --rm -p 5500:5500 -p 5501:5501 \
+    -e BANNER_MODE=GIFf \
+    -e BANNER_FILE=/opt/mhxd/run/custom.gif \
+    -v $PWD/my_banner.gif:/opt/mhxd/run/custom.gif:ro \
+    gtkhx-mhxd
+```
+
 ## Iterate
 
 If you want to test a different branch / fork / patched mhxd, edit

@@ -129,6 +129,40 @@ extern gboolean hx_msg_extract (struct htlc_conn *htlc,
                                 struct hx_msg_msg *out);
 
 /*
+ * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
+ * URL from the message. Server protocol shape (per mhxd's
+ * rcv_agreementagree):
+ *
+ *   HTLS_DATA_BANNER_TYPE  — exactly 4 bytes, e.g. "URL ", "JPEG",
+ *                            "GIFf", "PICT". Trailing-space padded
+ *                            for shorter codes.
+ *   HTLS_DATA_BANNER_URL   — optional. Present only when the server
+ *                            is configured for URL-mode banners
+ *                            (banner.url set). Other modes (file-
+ *                            backed JPEG/GIF) omit this and expect
+ *                            the client to follow up with
+ *                            HTLC_HDR_BANNER_GET.
+ *
+ * On success returns TRUE and fills `out`:
+ *   .type[5]  — NUL-terminated 4-byte type code (always 4 chars).
+ *   .url[]    — empty string when URL chunk wasn't present.
+ *   .url_len  — strlen(url).
+ *   .has_url  — TRUE only when HTLS_DATA_BANNER_URL was present.
+ *
+ * Returns FALSE if the type chunk is missing or wrong-sized
+ * (anything other than exactly 4 bytes — the protocol pins this).
+ */
+struct hx_banner_msg {
+	char     type[5];
+	gboolean has_url;
+	char     url[1024 + 1];
+	guint16  url_len;
+};
+
+extern gboolean hx_banner_extract (struct htlc_conn *htlc,
+                                   struct hx_banner_msg *out);
+
+/*
  * Pack a single Hotline message (22-byte hl_hdr + `hc` data chunks)
  * into htlc->out.buf at the current end-of-buffer position.
  *

@@ -54,6 +54,8 @@
 #include "proto_trace.h"
 #include "debug.h"
 #include "connect.h"
+#include "banner.h"
+#include "hl_access.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -234,6 +236,32 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 	hx_agreement_result r =
 		hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
 
+	/* Phase 5: legacy login flow (banner support) — the server is
+	 * waiting for HTLC_HDR_AGREEMENTAGREE before it sends SELFINFO
+	 * and any banner. If there's no agreement to display
+	 * (HX_AGREEMENT_NONE — server config has agreement disabled,
+	 * or HX_AGREEMENT_NOT_FOUND — malformed payload), the user
+	 * has nothing to click 'Agree' on, so login would stall. Send
+	 * AGREEMENTAGREE automatically in those cases.
+	 *
+	 * On 1.9-style servers (e.g. MacSecret.com) SELFINFO lands
+	 * BEFORE AGREEMENT — login is already complete and sending
+	 * AGREEMENTAGREE for an already-logged-in session can prompt
+	 * the server to disconnect us. The server still doesn't know
+	 * our NAME though, so send USER_CHANGE (same NAME + ICON
+	 * payload, safe on a logged-in session). Mirrors the gating
+	 * in gtkhx.c::concurrence for the with-agreement path.
+	 *
+	 * For HX_AGREEMENT_OK, fall through to popping the agreement
+	 * window — concurrence handles the wire op when the user
+	 * clicks Agree. */
+	if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
+		if (!htlc->flags.logged_in)
+			hx_send_agreement_agree (htlc);
+		else
+			hx_change_name_icon (htlc);
+		return;
+	}
 	if (r != HX_AGREEMENT_OK)
 		return;
 
@@ -314,12 +342,42 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	char *name = uc.name;
 	guint16 nlen = uc.name_len;
 
+	/* Phase 5: self-detection by name. Some 1.9-style servers
+	 * (e.g. The Mobius Strip) omit USER_LIST from SELFINFO, so
+	 * htlc->uid stays 0 after login. The first USER_CHANGE
+	 * broadcast we receive is the server echoing back the
+	 * USER_CHANGE we just sent (post-SELFINFO) — its name
+	 * matches our local htlc->name and carries our newly-assigned
+	 * UID. Adopt that UID as ours. Without this, the rest of the
+	 * handler treats the broadcast as a stranger joining: it
+	 * adds a row before the USER_LIST reply arrives (so we end
+	 * up at the top of the user list) and announces "join: <us>"
+	 * in chat. */
+	if (htlc->uid == 0 && uid != 0 && nlen > 0
+	    && strlen ((const char *) htlc->name) == (size_t) nlen
+	    && memcmp (htlc->name, name, nlen) == 0) {
+		htlc->uid = uid;
+		debug_log ("login",
+		           "adopted self uid=%u from USER_CHANGE "
+		           "broadcast (SELFINFO didn't carry it)",
+		           (unsigned) uid);
+	}
+	gboolean is_self = (uid != 0 && uid == htlc->uid);
+
 	chat = chat_with_cid(sess, cid);
 	if (!chat) {
 		chat = chat_new(sess, cid);
 	}
 	user = hx_user_with_uid(chat->user_list, uid);
 	if (!user) {
+		if (is_self) {
+			/* Don't add our own row here. The USER_LIST reply
+			 * (or any subsequent broadcast that mentions us)
+			 * will create it in the proper position. Adding it
+			 * now would put us at the top of the user list and
+			 * spam a "join: <us>" line in chat. */
+			return;
+		}
 		user = hx_user_new(&chat->user_tail);
 		chat->nusers++;
 		user->uid = uid;
@@ -335,15 +393,20 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 			color = user->color;
 		}
 		hx_output.user_change(htlc, chat, user, name, icon, color);
-		if((user->color == color && user->icon == icon) || 
-		   strcmp(name, user->name)) {
-			if(user->ignore) { 
-				return;
-			}
-			hx_printf_prefix(htlc, cid, INFOPREFIX, _("%s is now known as %s\n"),
-							 user->name, name);
+		/* Phase 5: print "X is now known as Y" only when the name
+		 * actually changed AND it isn't us. Suppressing the self
+		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
+		 * our nick on the server) from spamming a redundant
+		 * "misha is now known as misha" notice. Also bail on
+		 * ignored users early so we neither toast nor log them. */
+		if (user->ignore)
+			return;
+		if (uid != htlc->uid &&
+		    nlen > 0 && strcmp (name, user->name) != 0) {
+			hx_printf_prefix (htlc, cid, INFOPREFIX,
+			                  _("%s is now known as %s\n"),
+			                  user->name, name);
 		}
-		
 	}
 	if (nlen) {
 		memcpy(user->name, name, nlen);
@@ -358,7 +421,30 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	if ((uid) && (uid == htlc->uid)) {
 		htlc->icon = user->icon;
 		htlc->color = user->color;
-		strcpy(htlc->name, user->name);
+		/* Phase 5: deliberately do NOT copy user->name into
+		 * htlc->name. Servers can legitimately override a user's
+		 * display name — guests get pinned to things like "Read
+		 * the agreement" before they have HL_ACCESS_USERNAME_CHANGE
+		 * — and that override should appear in the user list (which
+		 * user->name already feeds) but must not bleed into our
+		 * htlc->name buffer, which doubles as the persisted NICK=
+		 * prefs value. Letting the server's override land in
+		 * htlc->name and then prefs_write persists 'Read the
+		 * agreement' as the user's nick forever.
+		 *
+		 * Display paths read user_list entries (chat output, user
+		 * window, etc.); htlc->name is reserved for the wire-side
+		 * USER_CHANGE we *send* and the gtkhxrc persistence. The
+		 * two diverging is exactly the model the protocol expects. */
+		if (uid && uid == htlc->uid) {
+			gsize unlen = strlen (user->name);
+			debug_log ("name",
+			           "USER_CHANGE for our uid=%u: server says "
+			           "'%.*s' (%zu bytes); keeping local "
+			           "htlc->name = '%s'",
+			           (unsigned) uid, (int) unlen, user->name,
+			           (size_t) unlen, htlc->name);
+		}
 	}
 }
 
@@ -418,6 +504,21 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 	}
 }
 
+void hx_rcv_banner (struct htlc_conn *htlc)
+{
+	struct hx_banner_msg bm;
+
+	/* Phase 5: HTLS_HDR_BANNER arrives unsolicited from the server
+	 * after the AGREEMENTAGREE round-trip. Parse the type +
+	 * optional URL and hand off to banner.c, which owns the
+	 * toolbar widget and the URL/HTXF fetch state machines. */
+	if (!hx_banner_extract (htlc, &bm))
+		return;
+
+	banner_handle_message (htlc, bm.type, bm.has_url,
+	                       bm.has_url ? bm.url : NULL);
+}
+
 void hx_rcv_chat_invite (struct htlc_conn *htlc)
 {
 	struct hx_chat_invite_msg im;
@@ -444,9 +545,18 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 {
 	/* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
-	 * into htlc->access / uid / icon / name) is in proto_helpers.c
-	 * so the Tier 2 unit tests can drive it without GTK. */
+	 * into htlc->access / uid / icon) is in proto_helpers.c so the
+	 * Tier 2 unit tests can drive it without GTK. NB: the parser
+	 * deliberately ignores the server-supplied name bytes (see the
+	 * comment there) — we treat our local prefs nick as authoritative
+	 * and push it back to the server immediately below. */
 	hx_selfinfo_parse (htlc);
+
+	/* Phase 5: SELFINFO is the canonical 'login complete' signal.
+	 * Track it on htlc->flags so the agreement Agree button can
+	 * tell whether to send AGREEMENTAGREE. See the comment on the
+	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
+	htlc->flags.logged_in = 1;
 
 	setbtns(&the_session, 1);
 
@@ -457,6 +567,46 @@ void hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * helper is single-fire, so the fallback timer is a no-op if
 	 * SELFINFO beat it (the common case). */
 	do_post_login_fetches (htlc);
+
+	/* Phase 5: push our local nick + icon to the server right after
+	 * login completes — gated on HL_ACCESS_USE_ANY_NAME. Two reasons:
+	 *
+	 *   1. We just switched to the legacy two-stage flow (no NAME in
+	 *      LOGIN). On servers without an agreement gate (hlserver.com),
+	 *      we'd otherwise never tell the server who we are; the
+	 *      server falls back to its IP-keyed cache of our previous
+	 *      session's nick. USER_CHANGE here overwrites that cache
+	 *      with the bytes we actually want.
+	 *   2. Even on agreement-gated servers (mhxd), AGREEMENTAGREE
+	 *      eventually sends NAME — but that's gated on the user
+	 *      clicking Agree. Pushing here covers the case where the
+	 *      agreement window is closed without clicking (or there is
+	 *      no agreement to display).
+	 *
+	 * Sequencing note: sent AFTER do_post_login_fetches (USER_GETLIST)
+	 * so the server returns its user-list response first, with us at
+	 * our natural chronological position (last to join → last in
+	 * list). If we sent USER_CHANGE first, the server's broadcast of
+	 * the change arrived before the GETLIST response and we ended
+	 * up at the TOP of the local user_list instead of the bottom.
+	 * (Servers process inbound packets in order over TCP and reply
+	 * in order, so reordering the sends reorders the receives.)
+	 *
+	 * Access-bit gate: HL_ACCESS_USE_ANY_NAME (bit 26) is the
+	 * permission to override the server-assigned display name. Guests
+	 * on many servers are intentionally pinned to a default like
+	 * "Read the agreement" via the absence of this bit. Sending a
+	 * USER_CHANGE we have no permission for earns a task-error
+	 * "Uh, no." toast and pollutes the log — so just don't.
+	 *
+	 * htlc->name comes from prefs.nick at connect time (CFG_NICK
+	 * cfgvar maps directly to it). The server's view (in user_list)
+	 * may still differ from htlc->name after this — that's the
+	 * design. Chat output reads user_list (server-truthful);
+	 * prefs / Settings read htlc->name (user-chosen). */
+	if (hl_access_has ((const guint8 *) &htlc->access,
+	                   HL_ACCESS_USE_ANY_NAME))
+		hx_change_name_icon (htlc);
 }
 
 void hx_rcv_dump (struct htlc_conn *htlc)
@@ -557,6 +707,9 @@ void hx_rcv_hdr (struct htlc_conn *htlc)
 		break;
 	case HTLS_HDR_AGREEMENT:
 		htlc->rcv = hx_rcv_agreement_file;
+		break;
+	case HTLS_HDR_BANNER:
+		htlc->rcv = hx_rcv_banner;
 		break;
 	case HTLS_HDR_POLITEQUIT:
 		hx_printf_prefix(htlc, 0, INFOPREFIX, _("polite quit\n"));
@@ -1094,11 +1247,25 @@ no_cipher:
 			connected = 1;
 
 			/* Reset post-login fetch state before scheduling so
-			 * a reconnection during this process state starts clean. */
-			post_login_fetched = FALSE;
-			if (post_login_timer_id) {
-				g_source_remove (post_login_timer_id);
-				post_login_timer_id = 0;
+			 * a reconnection during this process state starts clean.
+			 *
+			 * BUT — on 1.9-style servers (MacSecret.com, etc.) the
+			 * server fires HTLS_HDR_USER_SELFINFO *before* the
+			 * loginreply TASK arrives. SELFINFO already triggered
+			 * do_post_login_fetches and set post_login_fetched=TRUE,
+			 * so if we reset it here and arm the fallback timer, the
+			 * timer fires 2s later and fetches everything a second
+			 * time. Skip the reset (and the timer arm below) when
+			 * fetches have already gone out. rcv_login_reset() at
+			 * the top of every login attempt handles the across-
+			 * reconnects clean-slate case. */
+			gboolean already_fetched = post_login_fetched;
+			if (!already_fetched) {
+				post_login_fetched = FALSE;
+				if (post_login_timer_id) {
+					g_source_remove (post_login_timer_id);
+					post_login_timer_id = 0;
+				}
 			}
 
 			dh_start(htlc) {
@@ -1150,9 +1317,15 @@ no_cipher:
 			 * post-login conversation has fully landed. See the
 			 * commentary on do_post_login_fetches above for the
 			 * rationale. The fallback timer covers servers that
-			 * don't send SELFINFO. */
-			post_login_timer_id = g_timeout_add_seconds (
-				2, post_login_fallback, htlc);
+			 * don't send SELFINFO.
+			 *
+			 * Skip arming the timer if SELFINFO already arrived
+			 * before this TASK reply (1.9-style flow); the fetches
+			 * have already gone out and a second pass would just
+			 * duplicate them. */
+			if (!already_fetched)
+				post_login_timer_id = g_timeout_add_seconds (
+					2, post_login_fallback, htlc);
 		}
 	}
 }
@@ -1180,7 +1353,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 	struct hl_userlist_hdr *uh;
 	struct hx_user *user;
 	guint16 nlen, uid;
-	int new = 0;
+	int new;
 	struct gtkhx_chat *gchat = gchat_with_cid(&the_session, chat->cid);
 
 	dh_start(htlc) {
@@ -1188,6 +1361,22 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			uh = (struct hl_userlist_hdr *)dh;
 			HN16(&uid, &uh->uid);
 			user = hx_user_with_uid(chat->user_list, uid);
+			/* Phase 5: reset `new` per chunk. Previously declared
+			 * once at the top of the function and set to 1 inside
+			 * the "user not found" branch, then never reset — so
+			 * after the first new user in the response, every
+			 * subsequent EXISTING user (found via hx_user_with_uid)
+			 * inherited new=1 from the previous iteration and got
+			 * a spurious hx_output.user_create call, doubling the
+			 * UI row.
+			 *
+			 * Latent since the original handler; surfaced when
+			 * hx_rcv_user_selfinfo started pushing USER_CHANGE
+			 * before USER_GETLIST — that broadcast adds our own
+			 * entry first, then USER_GETLIST returns [others, us]
+			 * and the existing-us match was using the stale new=1
+			 * from the first new other-user. */
+			new = 0;
 			if (!user) {
 				new = 1;
 				user = hx_user_new(&chat->user_tail);
@@ -1658,4 +1847,38 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);
 	}
+}
+
+/* Reply to our HTLC_HDR_DOWNLOAD_BANNER. The server gives us a
+ * transfer reference and total byte count; banner.c spins up an
+ * HTXF worker thread to actually fetch the bytes off
+ * server_port + 1. */
+void rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data)
+{
+	guint32 ref = 0, size = 0;
+	(void) ptr;
+	(void) data;
+
+	if (task_inerror (htlc)) {
+		debug_log ("banner",
+		           "DOWNLOAD_BANNER task error from server");
+		return;
+	}
+
+	dh_start (htlc) {
+		switch (_type) {
+		case HTLS_DATA_HTXF_REF:
+			dh_getint (ref);
+			break;
+		case HTLS_DATA_HTXF_SIZE:
+			dh_getint (size);
+			break;
+		}
+	} dh_end ();
+
+	debug_log ("banner",
+	           "DOWNLOAD_BANNER reply: ref=%u size=%u",
+	           ref, size);
+
+	banner_handle_htxf_reply (htlc, ref, size);
 }

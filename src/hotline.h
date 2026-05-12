@@ -205,6 +205,15 @@ struct hl_user_data {
 #define HTLS_HDR_BANNER			((guint32) 0x0000007a)
 #define HTLS_DATA_BANNER_TYPE		((guint16) 0x0098)
 #define HTLS_DATA_BANNER_URL		((guint16) 0x0099)
+
+/* HTLC_HDR_DOWNLOAD_BANNER (0xd4 = 212, myTran_DownloadBanner per
+ * the Hotline 1.9 spec) — sent by the client after receiving
+ * HTLS_HDR_BANNER without a URL chunk. The server replies with a
+ * TASK carrying HTLS_DATA_HTXF_REF + HTLS_DATA_HTXF_SIZE; the
+ * client opens base_port+1, sends the 16-byte HTXF header and
+ * reads `size` bytes of banner image (GIFf / JPEG / ...). No
+ * parameters in the request itself. */
+#define HTLC_HDR_DOWNLOAD_BANNER	((guint32) 0x000000d4)
 #define HTLS_HDR_USER_CHANGE		((guint32) 0x0000012d)
 #define HTLS_HDR_USER_PART		((guint32) 0x0000012e)
 #define HTLS_HDR_USER_SELFINFO		((guint32) 0x00000162)
