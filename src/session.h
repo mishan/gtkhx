@@ -208,8 +208,11 @@ struct uesp_fn {
 	void (*fn)(void *, const char *, const char *, const char *, const hl_access_bits);
 };
 
+/* Phase 5+ (GLib-collections): no more next/prev. Users live in
+ * chat->users, a GHashTable<u16 uid, struct hx_user*>. Lookup by
+ * uid via hx_user_with_uid is now O(1); name lookup (uncommon)
+ * still walks. */
 struct hx_user {
-	struct hx_user *next, *prev;
 	guint16 uid;
 	guint16 icon;
 	guint16 color;
@@ -224,12 +227,11 @@ struct hx_user {
 
 struct chat {
 	/* Phase 5+: no next/prev — chats live in session->chats, a
-	 * GHashTable<u32 cid, struct chat*>. */
+	 * GHashTable<u32 cid, struct chat*>. Members likewise live in
+	 * chat->users, a GHashTable<u16 uid, struct hx_user*>. */
 	guint32 cid;
 	guint32 nusers;
-	struct hx_user __user_list;
-	struct hx_user *user_list;
-	struct hx_user *user_tail;
+	GHashTable *users;
 	char subject[256];
 };
 

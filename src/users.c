@@ -87,56 +87,57 @@ void hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
 }
 
 
-struct hx_user * hx_user_new (struct hx_user **utailp)
+/* Phase 5+: per-chat user list lives in chat->users, a
+ * GHashTable<u16 uid, struct hx_user*>. hx_user_new mallocs a fresh
+ * hx_user, stamps its uid, and inserts it; hx_user_delete drops it
+ * from the table (the table's value-destroy notify g_frees the
+ * struct); hx_user_with_uid is an O(1) lookup. */
+struct hx_user *
+hx_user_new (struct chat *chat, guint16 uid)
 {
-	struct hx_user *user, *tail = *utailp;
-
-	user = g_malloc0(sizeof(struct hx_user));
-
-	user->next = 0;
-	user->prev = tail;
-	tail->next = user;
-	tail = user;
-	*utailp = tail;
-
+	struct hx_user *user = g_malloc0 (sizeof (struct hx_user));
+	user->uid = uid;
+	g_hash_table_insert (chat->users,
+	                     GUINT_TO_POINTER ((guint) uid), user);
 	return user;
 }
 
 void
-hx_user_delete (struct hx_user **utailp, struct hx_user *user)
+hx_user_delete (struct chat *chat, struct hx_user *user)
 {
-	if (user->next)
-		user->next->prev = user->prev;
-	if (user->prev)
-		user->prev->next = user->next;
-	if (*utailp == user)
-		*utailp = user->prev;
-	g_free(user);
+	if (!user || !chat || !chat->users)
+		return;
+	g_hash_table_remove (chat->users,
+	                     GUINT_TO_POINTER ((guint) user->uid));
 }
 
-struct hx_user * hx_user_with_uid (struct hx_user *ulist, guint16 uid)
+struct hx_user *
+hx_user_with_uid (struct chat *chat, guint16 uid)
 {
-	struct hx_user *userp;
-
-	for (userp = ulist->next; userp; userp = userp->next)
-		if (userp->uid == uid)
-			return userp;
-
-
-	return 0;
+	if (!chat || !chat->users)
+		return NULL;
+	return g_hash_table_lookup (chat->users,
+	                            GUINT_TO_POINTER ((guint) uid));
 }
 
-struct hx_user *hx_user_with_name(struct hx_user *ulist, char *name)
+/* Name lookup remains a linear scan — only one caller
+ * (commands.c handle_command_msg) uses it, and we expect chat
+ * membership lists to stay small enough for that not to matter. */
+struct hx_user *
+hx_user_with_name (struct chat *chat, const char *name)
 {
-	struct hx_user *user;
+	GHashTableIter iter;
+	gpointer val;
 
-	for(user = ulist; user; user = user->next) {
-		if(strcmp(user->name, name) == 0) {
-			return user;
-		}
+	if (!chat || !chat->users)
+		return NULL;
+	g_hash_table_iter_init (&iter, chat->users);
+	while (g_hash_table_iter_next (&iter, NULL, &val)) {
+		struct hx_user *u = val;
+		if (strcmp (u->name, name) == 0)
+			return u;
 	}
-
-	return 0;
+	return NULL;
 }
 
 /* Phase 4.7: GtkMenu + gtk_menu_popup_at_pointer are gone in GTK 4.
@@ -860,18 +861,26 @@ static gboolean close_users_window (GtkWindow *window, gpointer data)
 
 void user_list (session *sess)
 {
-	struct hx_user *user;
+	struct chat *pub;
 
 	if (!sess->users_window)
 		return;
 
-	gtk_hlist_freeze(GTK_HLIST(sess->users_list));
-	gtk_hlist_clear(GTK_HLIST(sess->users_list));
-	for (user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
-		hx_output.user_create(&sess->htlc, chat_with_cid (sess, 0), user, user->name,
-							  user->icon, user->color);
+	pub = chat_with_cid (sess, 0);
+	gtk_hlist_freeze (GTK_HLIST (sess->users_list));
+	gtk_hlist_clear  (GTK_HLIST (sess->users_list));
+	if (pub && pub->users) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, pub->users);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct hx_user *user = val;
+			hx_output.user_create (&sess->htlc, pub, user,
+			                       user->name, user->icon,
+			                       user->color);
+		}
 	}
-	gtk_hlist_thaw(GTK_HLIST(sess->users_list));
+	gtk_hlist_thaw (GTK_HLIST (sess->users_list));
 }
 
 void create_users_window (GtkWidget *widget, gpointer data)
@@ -1166,8 +1175,7 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 				continue;
 			gchat = val;
 			struct hx_user *u =
-				hx_user_with_uid (gchat->chat->user_list,
-				                  user->uid);
+				hx_user_with_uid (gchat->chat, user->uid);
 			if (u)
 				user_change (&sess->htlc, gchat->chat, u,
 				             nam, icon, color);

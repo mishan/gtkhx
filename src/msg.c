@@ -329,12 +329,11 @@ msgwin_refresh_user_info (struct msgwin *msg)
 	/* The user list is per-chat; the public chat (cid=0) carries the
 	 * server-wide list we want here. chat_with_cid is the canonical
 	 * "global user list" lookup the rest of the codebase uses
-	 * (rcv.c, commands.c, users.c). The chat_list pointer can be
-	 * reset to all-zeros mid-disconnect (network.c:215), so guard
-	 * the user_list deref against the brief NULL window too. */
+	 * (rcv.c, commands.c, users.c). hx_user_with_uid is defensive
+	 * against a NULL chat / chat->users so we don't need an extra
+	 * mid-disconnect guard. */
 	pubchat = chat_with_cid (&the_session, 0);
-	if (pubchat && pubchat->user_list)
-		user = hx_user_with_uid (pubchat->user_list, *msg->uid);
+	user = hx_user_with_uid (pubchat, *msg->uid);
 
 	if (user)
 		msg_apply_user_view (msg, user->name, user->icon, user->color,

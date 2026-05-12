@@ -282,36 +282,31 @@ int word_check (GtkWidget * xtext, char *word)
 /* Phase 5+: chat lifecycle on GHashTable.
  *
  * chat_free() is the GDestroyNotify the hashtable invokes when an
- * entry is replaced, removed, or the table itself is destroyed. It
- * walks chat->user_list and reclaims any hx_user nodes left on the
- * intrusive list (Phase 1.5 will move hx_user to its own hashtable
- * per chat; until then the linked list lives on inside struct chat)
- * before freeing the chat struct itself. The embedded __user_list
- * sentinel is part of struct chat — no separate free for it.
+ * entry is replaced, removed, or the table itself is destroyed.
+ * chat->users (a sub-hashtable of struct hx_user* keyed on uid)
+ * is destroyed first — its own value-destroy notify (g_free, via
+ * users_table_new below) reclaims each hx_user — and then the
+ * chat struct itself is freed.
  *
- * The callers that previously did chat_delete (rcv.c, network.c
- * teardown, etc.) used to be responsible for clearing users
- * themselves before the unhook. Moving that responsibility into the
- * destroy notify means g_hash_table_destroy and g_hash_table_remove
- * Do The Right Thing — a future caller can't accidentally leak a
- * chat's user nodes by skipping the manual user walk. */
+ * Pre-Phase-1.5 callers used to be responsible for clearing users
+ * themselves before chat_delete; the migration to per-chat hashtable
+ * means g_hash_table_destroy / g_hash_table_remove Do The Right
+ * Thing — no caller can accidentally leak a chat's users by
+ * skipping the manual walk. */
+static GHashTable *users_table_new (void)
+{
+	return g_hash_table_new_full (g_direct_hash, g_direct_equal,
+	                              NULL, g_free);
+}
+
 static void chat_free (gpointer p)
 {
 	struct chat *chat = p;
-	struct hx_user *user, *unext;
 
 	if (!chat)
 		return;
-
-	/* Walk the intrusive user list, reclaiming each heap-allocated
-	 * hx_user. The sentinel __user_list lives in the chat struct
-	 * itself and is freed alongside it below. */
-	if (chat->user_list) {
-		for (user = chat->user_list->next; user; user = unext) {
-			unext = user->next;
-			g_free (user);
-		}
-	}
+	if (chat->users)
+		g_hash_table_destroy (chat->users);
 	g_free (chat);
 }
 
@@ -333,9 +328,8 @@ struct chat *chat_new (session *sess, guint32 cid)
 	struct chat *chat;
 
 	chat = g_malloc0 (sizeof (struct chat));
-	chat->cid = cid;
-	chat->user_list = &chat->__user_list;
-	chat->user_tail = &chat->__user_list;
+	chat->cid   = cid;
+	chat->users = users_table_new ();
 
 	g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
 	return chat;
@@ -740,78 +734,129 @@ nick_comp_get_nick (char *tx, char *n)
 	return -1;
 }
 
+/* Phase 5+: materialise the public chat's users into a name-sorted
+ * GPtrArray so tab-completion has a deterministic walk order across
+ * calls. Before the GHashTable migration the underlying linked list
+ * happened to be in join order, which was arbitrary anyway — sorting
+ * by name gives the user a more useful experience while we have to
+ * materialise an array. Caller owns the returned array and must
+ * g_ptr_array_free (arr, TRUE); the user pointers are NOT owned. */
+static int hx_user_name_cmp (gconstpointer a, gconstpointer b)
+{
+	const struct hx_user *ua = *(const struct hx_user *const *) a;
+	const struct hx_user *ub = *(const struct hx_user *const *) b;
+	return g_ascii_strcasecmp (ua->name, ub->name);
+}
+
+static GPtrArray *
+public_chat_users_sorted (session *sess)
+{
+	GPtrArray *arr = g_ptr_array_new ();
+	struct chat *pub = chat_with_cid (sess, 0);
+	if (pub && pub->users) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, pub->users);
+		while (g_hash_table_iter_next (&iter, NULL, &val))
+			g_ptr_array_add (arr, val);
+		g_ptr_array_sort (arr, hx_user_name_cmp);
+	}
+	return arr;
+}
+
 static void
 nick_comp_chng (session *sess, char *text, int updown)
 {
-	struct hx_user *user, *last = NULL;
 	char nick[64];
-	size_t len, slen;
+	size_t len;
+	GPtrArray *arr;
 
 	if (nick_comp_get_nick (text, nick) == -1)
 		return;
 	len = strlen (nick);
 
-	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next)  {
-		slen = strlen (user->name);
-		if (len != slen) {
-			last = user;
+	arr = public_chat_users_sorted (sess);
+	for (guint i = 0; i < arr->len; i++) {
+		struct hx_user *user = arr->pdata[i];
+		size_t slen = strlen (user->name);
+		if (len != slen)
 			continue;
-		}
 		if (strncasecmp (user->name, nick, len) == 0) {
 			if (updown == 0) {
-				if (user->next == NULL) {
-					return;
+				/* Step forward: pick the next nick in sort order
+				 * whose length differs (matches the original
+				 * length-mismatch skip semantics). Bail at the
+				 * end of the list. */
+				guint j;
+				for (j = i + 1; j < arr->len; j++) {
+					struct hx_user *u = arr->pdata[j];
+					if (strlen (u->name) == len)
+						continue;
+					snprintf (nick, sizeof (nick), "%s%c ",
+					          u->name, ':');
+					goto done;
 				}
-				snprintf (nick, sizeof (nick), "%s%c ", (
-							  (struct hx_user *) user->next)->name, ':');
-			}
-
-			else {
-				if (last == NULL) {
-					return;
+				goto done;
+			} else {
+				/* Step backward: pick the most recent prior nick
+				 * whose length differed from the current
+				 * candidate. */
+				if (i == 0)
+					goto done;
+				for (guint j = i; j-- > 0;) {
+					struct hx_user *u = arr->pdata[j];
+					if (strlen (u->name) == len)
+						continue;
+					snprintf (nick, sizeof (nick), "%s%c ",
+					          u->name, ':');
+					goto done;
 				}
-				snprintf (nick, sizeof (nick), "%s%c ", last->name, ':');
+				goto done;
 			}
-			return;
 		}
-		last = user;
 	}
+done:
+	g_ptr_array_free (arr, TRUE);
 }
 
 static int
 tab_nick_comp_next (session *sess, char *b4, char *nick, char *c5, int shift)
 {
-	struct hx_user *user = 0, *last = NULL;
 	char buf[4096];
+	GPtrArray *arr = public_chat_users_sorted (sess);
+	gboolean handled = FALSE;
 
-	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
-		if (strcmp (user->name, nick) == 0)
-			break;
-		last = user;
-	}
-	if (!user)
-		return 0;
-	if (shift) {
-		if (last)
-			snprintf (buf, 4096, "%s %s%s", b4, last->name, c5);
-		else
-			snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
-	}
-
-	else {
-		if (user && user->next) {
-			snprintf (buf, 4096, "%s %s%s", b4, (user->next)->name, c5);
-		}
-		else {
-			if (chat_with_cid (sess, 0)->user_list->next) {
-				snprintf (buf, 4096, "%s %s%s", b4, 
-						  (chat_with_cid (sess, 0)->user_list->next)->name, c5);
+	for (guint i = 0; i < arr->len; i++) {
+		struct hx_user *user = arr->pdata[i];
+		if (strcmp (user->name, nick) != 0)
+			continue;
+		handled = TRUE;
+		if (shift) {
+			if (i > 0) {
+				struct hx_user *last = arr->pdata[i - 1];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          last->name, c5);
+			} else {
+				snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
 			}
-			else {
+		} else {
+			if (i + 1 < arr->len) {
+				struct hx_user *next = arr->pdata[i + 1];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          next->name, c5);
+			} else if (arr->len > 0) {
+				struct hx_user *first = arr->pdata[0];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          first->name, c5);
+			} else {
 				snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
 			}
 		}
+		break;
 	}
+	g_ptr_array_free (arr, TRUE);
+	if (!handled)
+		return 0;
 
 	return 1;
 }
@@ -892,14 +937,21 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 	if (text[0] == 0)
 		return 0;
 
-	/* make a list of matches */
-	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
-		slen = strlen (user->name);
-		if (len > slen) {
-			continue;
-		}
-		if (strncasecmp (user->name, text, len) == 0) {
-			match_list = g_slist_prepend (match_list, user);
+	/* make a list of matches — walk the public chat's user hashtable. */
+	{
+		struct chat *pub = chat_with_cid (sess, 0);
+		if (pub && pub->users) {
+			GHashTableIter iter;
+			gpointer val;
+			g_hash_table_iter_init (&iter, pub->users);
+			while (g_hash_table_iter_next (&iter, NULL, &val)) {
+				user = val;
+				slen = strlen (user->name);
+				if (len > slen)
+					continue;
+				if (strncasecmp (user->name, text, len) == 0)
+					match_list = g_slist_prepend (match_list, user);
+			}
 		}
 	}
 	match_list = g_slist_reverse (match_list); /* faster then _append */

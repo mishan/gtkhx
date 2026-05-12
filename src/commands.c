@@ -296,7 +296,7 @@ usage:		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage %s <uid> <msg>\n", argv[0
 	uid = atou32(name);
 	if (!uid) {
 		struct chat *chat = chat_with_cid(&the_session, 0);
-		user = hx_user_with_name(chat->user_list, name);
+		user = hx_user_with_name (chat, name);
 		if (!user) {
 			hx_printf_prefix(htlc, cid, INFOPREFIX,
 							 "%s: no such nickname %s\n", argv[0], name);
@@ -309,7 +309,7 @@ usage:		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage %s <uid> <msg>\n", argv[0
 
 	if (!user) {
 		struct chat *chat = chat_with_cid(&the_session, 0);
-		user = hx_user_with_uid(chat->user_list, uid);
+		user = hx_user_with_uid (chat, uid);
 	}
 	if (user) {
 		hx_printf(htlc, 0, "[%s(%u)]-> %s", user->name, uid, msg);
@@ -476,7 +476,7 @@ COMMAND(ignore)
 		hx_printf_prefix(htlc, cid, INFOPREFIX, "usage: %s <uid>\n", argv[0]);
 		return;
 	}
-	user = hx_user_with_uid(chat->user_list, uid);
+	user = hx_user_with_uid (chat, uid);
 	if(!user) {
 		hx_printf_prefix(htlc, cid, INFOPREFIX, "%s: no such user with uid %d\n", argv[0], uid);
 		return;

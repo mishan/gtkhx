@@ -44,10 +44,10 @@ extern void user_chat_btn(GtkWidget *widget, gpointer data);
 
 
 
-extern struct hx_user *hx_user_new (struct hx_user **utailp);
-extern void hx_user_delete (struct hx_user **utailp, struct hx_user *user);
-extern struct hx_user *hx_user_with_uid (struct hx_user *ulist, guint16 uid);
-extern struct hx_user *hx_user_with_name (struct hx_user *ulist, char *name);
+extern struct hx_user *hx_user_new (struct chat *chat, guint16 uid);
+extern void hx_user_delete (struct chat *chat, struct hx_user *user);
+extern struct hx_user *hx_user_with_uid (struct chat *chat, guint16 uid);
+extern struct hx_user *hx_user_with_name (struct chat *chat, const char *name);
 extern void hx_change_name_icon (struct htlc_conn *htlc);
 extern void hx_get_user_info (struct htlc_conn *htlc, guint16 uid);
 extern void hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban);

@@ -229,19 +229,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 			if (GPOINTER_TO_UINT (key) != 0) {
 				non_public = g_list_prepend (non_public, key);
 			} else {
-				/* Public chat: walk + free users, then reset
-				 * the sentinel pointers. The struct chat
-				 * itself stays in the table. */
-				struct hx_user *user, *unext;
-				for (user = chat->user_list->next; user;
-				     user = unext) {
-					unext = user->next;
-					g_free (user);
-				}
-				memset (&chat->__user_list, 0,
-				        sizeof (struct hx_user));
-				chat->user_list = chat->user_tail =
-					&chat->__user_list;
+				/* Public chat: clear the per-chat users
+				 * hashtable in place. The struct chat itself
+				 * stays in the session->chats table; the users
+				 * table's value-destroy notify reclaims each
+				 * hx_user. */
+				if (chat->users)
+					g_hash_table_remove_all (chat->users);
 				chat->nusers = 0;
 				chat->subject[0] = '\0';
 			}

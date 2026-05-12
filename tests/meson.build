@@ -196,6 +196,19 @@ test_gchat_hash = executable('test_gchat_hash',
 test('gchat_hash', test_gchat_hash,
      suite : 'unit')
 
+# hx_user_hash — Phase 1.5 replaces the intrusive hx_user linked
+# list per chat (chat->__user_list / user_list / user_tail with
+# next/prev fields on each hx_user) with chat->users, a
+# GHashTable<u16 uid, struct hx_user*>. Layout-stub approach;
+# the integration suite covers the real path against mhxd.
+test_hx_user_hash = executable('test_hx_user_hash',
+  'unit/test_hx_user_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hx_user_hash', test_hx_user_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #
