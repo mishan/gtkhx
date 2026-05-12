@@ -1,7 +1,10 @@
 #ifndef HX_MSG_H
 #define HX_MSG_H
 
-extern struct msgwin *msg_list;
+/* Phase 5+: lazy-allocate the session's PM-window GHashTable. Safe to
+ * call multiple times — only the first call constructs the table.
+ * gtkhx.c calls it before the first create_msgwin at startup. */
+extern void msg_windows_init (session *sess);
 
 extern struct msgwin *create_msgwin(guint16 uid, char *name);
 extern struct msgwin *msgwin_with_uid(guint16 uid);

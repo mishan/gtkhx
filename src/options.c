@@ -67,8 +67,6 @@ time_t total_time;
 
 static struct icon_viewer *iv;
 
-extern struct msgwin *msg_list;
-
 GtkWidget *options_window = NULL;
 GtkWidget *tracker_list = NULL;
 
@@ -284,7 +282,6 @@ static void list_icons (void)
 
 void reinit_gtktexts (session *sess)
 {
-	struct msgwin *msg;
 	struct gtkhx_chat *gchat;
 
 	if(gtkhx_prefs.geo.news.open) {
@@ -304,10 +301,24 @@ void reinit_gtktexts (session *sess)
 				gtkhx_apply_text_style(gchat->subject);
 			}
 		}
-		for(msg = sess->msg_list; msg; msg = msg->prev) {
-			gtk_xtext_set_font(GTK_XTEXT(msg->outputbuf), fontname);
-			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf));
-			gtkhx_apply_text_style(msg->inputbuf);
+		/* Phase 5+: walk the PM-window hashtable. The pre-port
+		 * code walked `sess->msg_list` here, but that field was
+		 * never populated — the real msg_list global lived in
+		 * msg.c, so this loop was a silent no-op for years and
+		 * font-changes never reached open PM windows. The
+		 * migration to session->msg_windows fixes that as a side
+		 * effect. */
+		if (sess->msg_windows) {
+			GHashTableIter iter;
+			gpointer val;
+			g_hash_table_iter_init (&iter, sess->msg_windows);
+			while (g_hash_table_iter_next (&iter, NULL, &val)) {
+				struct msgwin *msg = val;
+				gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf),
+				                    fontname);
+				gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+				gtkhx_apply_text_style (msg->inputbuf);
+			}
 		}
 		g_free (fontname);
 	}
@@ -319,22 +330,29 @@ static void changed_xtext (session *sess)
 	if (sess)
 	{
 		struct gtkhx_chat *gchat;
-		struct msgwin *msg;
 		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
 			GTK_XTEXT(gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
 			GTK_XTEXT(gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
 			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
 		}
-		for(msg = sess->msg_list; msg; msg = msg->prev) {
-			GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
-			GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-			gtk_xtext_refresh(GTK_XTEXT(msg->outputbuf));
+		if (sess->msg_windows) {
+			GHashTableIter iter;
+			gpointer val;
+			g_hash_table_iter_init (&iter, sess->msg_windows);
+			while (g_hash_table_iter_next (&iter, NULL, &val)) {
+				struct msgwin *msg = val;
+				GTK_XTEXT (msg->outputbuf)->wordwrap =
+					gtkhx_prefs.word_wrap;
+				GTK_XTEXT (msg->outputbuf)->max_lines =
+					gtkhx_prefs.xbuf_max;
+				gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+			}
 		}
 	}
 }
 
 /* Phase 5: apply the CFG_TIMESTAMP toggle to every live xtext buffer
- * — chat / pchat outputs in gchat_list, plus PM outputs in msg_list.
+ * — chat / pchat outputs in gchat_list, plus PM outputs in msg_windows.
  * Native xtext stamps are flipped per-buffer via gtk_xtext_set_time_stamp.
  * gtk_xtext_refresh forces a full re-render so the new state is visible
  * without scrolling the buffer first. */
@@ -343,16 +361,22 @@ static void changed_timestamp (session *sess)
 	if (!sess)
 		return;
 	struct gtkhx_chat *gchat;
-	struct msgwin *msg;
 	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
 		gtk_xtext_set_time_stamp (GTK_XTEXT (gchat->output)->buffer,
 		                          gtkhx_prefs.timestamp);
 		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
 	}
-	for (msg = sess->msg_list; msg; msg = msg->prev) {
-		gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
-		                          gtkhx_prefs.timestamp);
-		gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+	if (sess->msg_windows) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->msg_windows);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct msgwin *msg = val;
+			gtk_xtext_set_time_stamp (
+				GTK_XTEXT (msg->outputbuf)->buffer,
+				gtkhx_prefs.timestamp);
+			gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+		}
 	}
 }
 
@@ -440,14 +464,19 @@ static void changed_stampformat (session *sess)
 	if (!sess)
 		return;
 	struct gtkhx_chat *gchat;
-	struct msgwin *msg;
 	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
 		gtk_xtext_set_stamp_format (GTK_XTEXT (gchat->output),
 		                            gtkhx_prefs.stamp_format);
 	}
-	for (msg = sess->msg_list; msg; msg = msg->prev) {
-		gtk_xtext_set_stamp_format (GTK_XTEXT (msg->outputbuf),
-		                            gtkhx_prefs.stamp_format);
+	if (sess->msg_windows) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->msg_windows);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct msgwin *msg = val;
+			gtk_xtext_set_stamp_format (GTK_XTEXT (msg->outputbuf),
+			                            gtkhx_prefs.stamp_format);
+		}
 	}
 }
 

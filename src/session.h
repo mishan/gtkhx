@@ -60,8 +60,13 @@ typedef gpointer  GdkDrawable;
 
 /* ---- Message-window threading ------------------------------------- */
 
+/* Phase 5+ (GLib-collections): no more next/prev. Open PM windows
+ * live in session->msg_windows, a GHashTable<u16 uid, struct
+ * msgwin*>. Lookup by uid is O(1) via msgwin_with_uid (now a thin
+ * g_hash_table_lookup wrapper); the table owns the msgwin and frees
+ * it (name + uid heap pointer + struct itself) via msgwin_free when
+ * the user closes the window. */
 struct msgwin {
-	struct msgwin *next, *prev;
 	guint16 *uid;
 	char *name;
 	GtkWidget *outputbuf;
@@ -248,7 +253,14 @@ typedef struct _session {
 
 	struct gfile_list *gfile_list;
 
-	struct msgwin *msg_list;
+	/* Phase 5+: open PM windows keyed on the recipient's uid.
+	 * Replaces the file-scope `msg_list` global in msg.c and the
+	 * dead `sess->msg_list` field that was declared here but never
+	 * populated (a long-standing bug — options.c font / wordwrap /
+	 * timestamp iterations over the dead session pointer were
+	 * silently no-oping). Lookup is O(1) via msgwin_with_uid;
+	 * iteration uses GHashTableIter. */
+	GHashTable *msg_windows;
 
 	struct gnews_catalog *gcnews_list;
 

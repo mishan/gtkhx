@@ -52,37 +52,57 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, 
 		HTLC_DATA_MSG, len, msg);
 }
 
-struct msgwin *msg_list;
 void msg_output (char *name, guint16 uid, char *buf);
 
+/* Phase 5+: msgwin lifecycle on GHashTable.
+ *
+ * msgwin_free() is the GDestroyNotify the hashtable invokes when an
+ * entry is removed or the table itself is destroyed. Mirrors the
+ * heap-cleanup that the old msgwin_delete linked-list unhook used to
+ * do (name + the heap-allocated uid pointer + the struct itself).
+ * The GTK widgets owned by msg->window are reclaimed by GTK's own
+ * teardown when the window is destroyed by the close-request
+ * handler. msg->history is intentionally not freed here — the
+ * pre-existing readline-history leak is out of scope for the
+ * Phase 1 mechanical migration. */
+static void msgwin_free (gpointer p)
+{
+	struct msgwin *msg = p;
+	if (!msg)
+		return;
+	g_free (msg->name);
+	g_free (msg->uid);
+	g_free (msg);
+}
+
+void msg_windows_init (session *sess)
+{
+	if (!sess->msg_windows)
+		sess->msg_windows = g_hash_table_new_full (
+			g_direct_hash, g_direct_equal,
+			NULL, msgwin_free);
+}
+
+/* Unhook the window from the per-session table; the value-destroy
+ * notify (msgwin_free) reclaims the msgwin. Called from
+ * destroy_msgwin (the close-request handler). */
 static void msgwin_delete (struct msgwin *msg)
 {
-	if (msg->next)
-		msg->next->prev = msg->prev;
-	if (msg->prev)
-		msg->prev->next = msg->next;
-	if (msg == msg_list)
-		msg_list = msg->prev;
-
-	g_free(msg->name);
-	g_free(msg->uid);
-	g_free(msg);
+	session *sess = &the_session;
+	if (!msg || !sess->msg_windows)
+		return;
+	g_hash_table_remove (sess->msg_windows,
+	                     GUINT_TO_POINTER ((guint) *msg->uid));
 }
 
 
 struct msgwin *msgwin_with_uid (guint16 uid)
 {
-	struct msgwin *msg;
-
-
-	for (msg = msg_list; msg; msg = msg->prev) {
-		if (*(msg->uid) == uid)
-			return msg;
-
-	}
-
-
-	return 0;
+	session *sess = &the_session;
+	if (!sess->msg_windows)
+		return NULL;
+	return g_hash_table_lookup (sess->msg_windows,
+	                            GUINT_TO_POINTER ((guint) uid));
 }
 
 static void msg_input_activate (GtkWidget *widget, gpointer data);
@@ -345,11 +365,6 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 
  	msg = g_malloc(sizeof(struct msgwin));
 
-	msg->next = 0;
-	msg->prev = msg_list;
-	if(msg_list) {
-		msg_list->next = msg;
-	}
 	msg->name = g_strdup(name);
 	msg->uid = uid;
 	
@@ -400,7 +415,11 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	}
 	
 
-	msg_list = msg;
+	/* Phase 5+: stash the msgwin in the session's PM-windows table
+	 * keyed on uid. msg_windows_init() at startup guarantees the
+	 * table exists by the time we land here. */
+	g_hash_table_insert (the_session.msg_windows,
+	                     GUINT_TO_POINTER ((guint) _uid), msg);
 	return msg;
 }
 

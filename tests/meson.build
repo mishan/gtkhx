@@ -156,6 +156,20 @@ test_task_hash = executable('test_task_hash',
 test('task_hash', test_task_hash,
      suite : 'unit')
 
+# msgwin_hash — Phase 1.2 replaces the doubly-linked msg_list (a
+# file-scope global in msg.c) with GHashTable<u16 uid, struct msgwin*>
+# on the session. struct msgwin lives in session.h, which pulls in
+# gtk + adwaita, so this test exercises a layout-compatible stub
+# rather than linking msg.c. The integration suite covers the real
+# msgwin path end-to-end against mhxd.
+test_msgwin_hash = executable('test_msgwin_hash',
+  'unit/test_msgwin_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('msgwin_hash', test_msgwin_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #

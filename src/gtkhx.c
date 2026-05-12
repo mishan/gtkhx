@@ -792,6 +792,7 @@ static void fe_init (void)
 	the_session.__chat_list.user_list = &(the_session.__chat_list.__user_list);
 	the_session.__chat_list.user_tail = &(the_session.__chat_list.__user_list);
 	tasks_init (&the_session);
+	msg_windows_init (&the_session);
 
 	create_toolbar_window(&the_session);
 	init_colors(toolbar_window);
