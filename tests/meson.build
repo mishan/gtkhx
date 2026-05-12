@@ -292,6 +292,23 @@ test_msg_proto = executable('test_msg_proto',
 test('msg', test_msg_proto,
      suite : 'proto')
 
+# banner — hx_banner_extract pulls the 4-byte type code and optional
+# URL out of an HTLS_HDR_BANNER message. Type chunk is pinned to
+# exactly 4 bytes by the protocol; wrong sizes are refused so the
+# downstream "URL " vs "JPEG"/"GIFf"/"PICT" dispatch in banner.c
+# only ever compares against well-formed type codes.
+test_banner = executable('test_banner',
+  'proto/test_banner.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('banner', test_banner,
+     suite : 'proto')
+
 # hlwrite — round-trip the wire packer (hlpack, extracted from
 # hlwrite() in network.c) through the dh_start walker. Proves the
 # send-side encoder and the receive-side decoder agree on the wire
