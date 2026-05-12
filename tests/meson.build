@@ -415,6 +415,22 @@ test_chat_event = executable('test_chat_event',
 test('chat_event', test_chat_event,
      suite : 'proto')
 
+# msg_event — HxMsgEvent is the private-message counterpart to
+# HxChatEvent, payload of GtkhxSession::msg. The constructor's
+# contract: stash uid + set is_broadcast on uid==0, UTF-8-sanitise
+# name + body once, stamp is_self on byte-equal name vs. self_nick.
+# Pins each step so msg.c and notify.c stay in agreement.
+test_msg_event = executable('test_msg_event',
+  'proto/test_msg_event.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('msg_event', test_msg_event,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #
