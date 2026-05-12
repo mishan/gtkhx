@@ -187,10 +187,19 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 #endif
 
 	/* Phase 3+: hx_output.chat → "chat" signal on the session
-	 * emitter. The existing output_chat handler in chat.c is
-	 * connected at startup in gtkhx.c. */
-	gtkhx_session_emit_chat (gtkhx_session_get_default (),
-	                         htlc, msg.cid, msg.text, msg.text_len);
+	 * emitter. Phase 5+: payload is a boxed HxChatEvent that
+	 * bundles the UTF-8-validated line, sender/body slices, and
+	 * info/self flags — every subscriber (chat.c renderer,
+	 * notify.c) reads the same parsed view. */
+	{
+		HxChatEvent *ev = hx_chat_event_new (
+			msg.text, msg.text_len, msg.cid,
+			the_session.htlc.name[0]
+				? the_session.htlc.name : NULL);
+		gtkhx_session_emit_chat (gtkhx_session_get_default (),
+		                         htlc, ev);
+		hx_chat_event_free (ev);
+	}
 	play_sound (CHAT_POST);
 }
 
@@ -218,7 +227,16 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 #endif
 
 	if(pm.uid > 0) {
-		gtkhx_session_emit_msg (gtkhx_session_get_default (), pm.name, pm.uid, pm.msg);
+		/* Phase 5+: msg signal payload is a boxed HxMsgEvent
+		 * (parsed once; every subscriber sees the same
+		 * UTF-8-sanitised, self-classified view). */
+		HxMsgEvent *ev = hx_msg_event_new (
+			pm.uid, pm.name, pm.name_len,
+			pm.msg,  pm.msg_len,
+			the_session.htlc.name[0]
+				? the_session.htlc.name : NULL);
+		gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
+		hx_msg_event_free (ev);
 	}
 	else {
 		broadcastmsg(pm.msg);

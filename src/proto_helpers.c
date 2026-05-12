@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <netinet/in.h>
 #include <glib.h>
+#include <glib-object.h>
 #include "protocol.h"
 #include "hotline.h"
 #include "proto_helpers.h"
@@ -676,3 +677,134 @@ hx_highlight_match (const char *body, gsize body_len,
 	}
 	return FALSE;
 }
+
+/* ---- HxChatEvent --------------------------------------------------- */
+
+/* The "[hx]" info-line prefix. Local copy of the same byte sequence
+ * that gtkhx.c::INFOPREFIX exports — proto_helpers must stay free of
+ * the GUI tree so we can't reference the gtkhx.c symbol from the Tier
+ * 2 unit tests, but the prefix bytes are stable (hx_printf_prefix
+ * emits exactly these) so a duplicated constant is acceptable.
+ *
+ * The full string is " <ETX>10[<ETX>03hx<ETX>10]<ETX> " — mIRC colour
+ * 10 around brackets, colour 3 around "hx", trailing reset. */
+static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";
+#define HX_INFO_PREFIX_LEN (sizeof (hx_info_prefix) - 1)
+
+HxChatEvent *
+hx_chat_event_new (const char *raw, gsize raw_len,
+                   guint32 cid, const char *self_nick)
+{
+	HxChatEvent *e;
+	gsize line_len = 0;
+
+	e = g_new0 (HxChatEvent, 1);
+	e->cid = cid;
+
+	/* gtkhx_text_to_utf8 always returns a g_strdup-ed copy, even
+	 * on empty input — caller owns the result. */
+	e->line = gtkhx_text_to_utf8 (raw, raw_len, &line_len);
+	e->line_len = line_len;
+
+	/* Detect the info-prefix branch up front — info lines should
+	 * skip both the sender/body split and any highlight matching
+	 * downstream. */
+	if (e->line_len >= HX_INFO_PREFIX_LEN
+	    && memcmp (e->line, hx_info_prefix, HX_INFO_PREFIX_LEN) == 0)
+		e->is_info = TRUE;
+
+	if (!e->is_info && e->line_len > 0) {
+		gsize so = 0, sl = 0, bo = 0, bl = 0;
+		if (hx_chat_split_nick_body (e->line, e->line_len,
+		                              &so, &sl, &bo, &bl)) {
+			e->sender_off = so;
+			e->sender_len = sl;
+			e->body_off   = bo;
+			e->body_len   = bl;
+
+			if (self_nick && *self_nick && sl > 0
+			    && strlen (self_nick) == sl
+			    && memcmp (e->line + so, self_nick, sl) == 0)
+				e->is_self = TRUE;
+		}
+	}
+
+	return e;
+}
+
+HxChatEvent *
+hx_chat_event_copy (HxChatEvent *e)
+{
+	HxChatEvent *c;
+	if (!e)
+		return NULL;
+	c = g_new0 (HxChatEvent, 1);
+	*c = *e;                          /* shallow copy first */
+	c->line = g_strndup (e->line, e->line_len);
+	return c;
+}
+
+void
+hx_chat_event_free (HxChatEvent *e)
+{
+	if (!e)
+		return;
+	g_free (e->line);
+	g_free (e);
+}
+
+G_DEFINE_BOXED_TYPE (HxChatEvent, hx_chat_event,
+                     hx_chat_event_copy, hx_chat_event_free)
+
+/* ---- HxMsgEvent ---------------------------------------------------- */
+
+HxMsgEvent *
+hx_msg_event_new (guint16 uid,
+                  const char *name, gsize name_len,
+                  const char *body, gsize body_len,
+                  const char *self_nick)
+{
+	HxMsgEvent *e;
+	gsize nlen = 0, blen = 0;
+
+	e = g_new0 (HxMsgEvent, 1);
+	e->uid          = uid;
+	e->is_broadcast = (uid == 0);
+	e->name         = gtkhx_text_to_utf8 (name, name_len, &nlen);
+	e->name_len     = nlen;
+	e->body         = gtkhx_text_to_utf8 (body, body_len, &blen);
+	e->body_len     = blen;
+
+	if (self_nick && *self_nick && nlen > 0
+	    && strlen (self_nick) == nlen
+	    && memcmp (e->name, self_nick, nlen) == 0)
+		e->is_self = TRUE;
+
+	return e;
+}
+
+HxMsgEvent *
+hx_msg_event_copy (HxMsgEvent *e)
+{
+	HxMsgEvent *c;
+	if (!e)
+		return NULL;
+	c = g_new0 (HxMsgEvent, 1);
+	*c = *e;
+	c->name = g_strndup (e->name, e->name_len);
+	c->body = g_strndup (e->body, e->body_len);
+	return c;
+}
+
+void
+hx_msg_event_free (HxMsgEvent *e)
+{
+	if (!e)
+		return;
+	g_free (e->name);
+	g_free (e->body);
+	g_free (e);
+}
+
+G_DEFINE_BOXED_TYPE (HxMsgEvent, hx_msg_event,
+                     hx_msg_event_copy, hx_msg_event_free)

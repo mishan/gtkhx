@@ -397,6 +397,24 @@ test_news_file = executable('test_news_file',
 test('news_file', test_news_file,
      suite : 'proto')
 
+# chat_event — hx_chat_event_new is the parsed value-object the
+# GtkhxSession::chat signal carries to chat.c and notify.c. Pins
+# the UTF-8 fix-up, "[hx]" info-prefix detect, sender/body split,
+# and is_self compare so a future refactor of any one step doesn't
+# silently de-sync the consumers. Doesn't use the wire fixture —
+# the constructor takes already-sanitised body bytes, not a wire
+# frame.
+test_chat_event = executable('test_chat_event',
+  'proto/test_chat_event.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('chat_event', test_chat_event,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #

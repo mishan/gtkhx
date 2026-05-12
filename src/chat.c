@@ -385,6 +385,192 @@ void gchat_delete (session *sess, struct gtkhx_chat *gchat)
 	g_hash_table_remove (sess->gchats, GUINT_TO_POINTER (gchat->cid));
 }
 
+/* Render a single chat line into an xtext buffer with the
+ * HexChat-style nick column. Inputs are slices into `line`
+ * (already-validated UTF-8); the caller is responsible for the
+ * UTF-8 conversion + the sender/body split (either inline, as
+ * xprintline below does, or pre-parsed via HxChatEvent for the
+ * chat-signal path).
+ *
+ * `is_info` suppresses the highlight check (info lines are never
+ * highlighted). `is_self` controls the bracket colour: mIRC 13
+ * (pink) for our own lines, 12 (light blue) for others.
+ *
+ * If name_len == 0 the line is rendered without a nick column —
+ * either because hx_chat_split_nick_body didn't match (emote,
+ * raw server prose) or the caller wanted a plain append. */
+static void
+xprintline_render (GtkWidget *text,
+                   const char *line, gsize line_len,
+                   gsize name_off, gsize name_len,
+                   gsize body_off, gsize body_len,
+                   gboolean is_info, gboolean is_self)
+{
+	gchar *display_nick = NULL;
+	const char *display_body = NULL;
+	gsize display_body_len = 0;
+	const char *self_nick =
+		(the_session.htlc.name[0] != '\0')
+			? (const char *) the_session.htlc.name
+			: NULL;
+
+	if (is_info && name_len > 0) {
+		/* The info-prefix branch: caller's name_off/len describe
+		 * the "[hx]" inside the INFOPREFIX wrapper bytes; render
+		 * it as the nick. */
+		display_nick = g_strndup (line + name_off, name_len);
+		display_body = line + body_off;
+		display_body_len = body_len;
+	} else if (name_len > 0) {
+		/* "Nick: body" — wrap the nick in coloured brackets the
+		 * same way msg.c::msg_output does. Phase 5+: brackets
+		 * coloured mIRC 13 (pink) for self, 12 (light blue) for
+		 * others. */
+		int brack_col = is_self ? 13 : 12;
+		display_nick = g_strdup_printf (
+			"\003%d<\003%.*s\003%d>\003",
+			brack_col,
+			(int) name_len, line + name_off,
+			brack_col);
+		display_body = line + body_off;
+		display_body_len = body_len;
+	}
+
+	/* Highlight-on-mention. Skip if it's an info line, if we said
+	 * the line ourselves, or if there's no parsed body to scan. */
+	gboolean do_highlight = FALSE;
+	if (display_nick && !is_info && !is_self && display_body_len > 0) {
+		GPtrArray *words = g_ptr_array_new ();
+		if (self_nick && *self_nick)
+			g_ptr_array_add (words, (gpointer) self_nick);
+		gchar **extras = NULL;
+		if (gtkhx_prefs.highlight_words
+		    && *gtkhx_prefs.highlight_words) {
+			extras = g_strsplit (
+				gtkhx_prefs.highlight_words, ",", -1);
+			for (gsize ei = 0; extras && extras[ei]; ei++) {
+				gchar *w = g_strstrip (extras[ei]);
+				if (*w)
+					g_ptr_array_add (words, w);
+			}
+		}
+		g_ptr_array_add (words, NULL);
+		do_highlight = hx_highlight_match (
+			display_body, display_body_len,
+			(const char * const *) words->pdata);
+		g_ptr_array_unref (words);
+		if (extras)
+			g_strfreev (extras);
+	}
+
+	if (display_nick) {
+		gchar *nick_buf = display_nick;
+		gchar *body_buf = NULL;
+		const char *body_ptr = display_body;
+		gsize body_ptr_len = display_body_len;
+
+		if (do_highlight) {
+			/* \002 = ATTR_BOLD, \003 04 = mIRC colour 4
+			 * (light red), \017 = ATTR_RESET. */
+			nick_buf = g_strdup_printf (
+				"\002\00304%s", display_nick);
+			body_buf = g_strndup (display_body, display_body_len);
+			gchar *with_reset = g_strdup_printf (
+				"%s\017", body_buf);
+			g_free (body_buf);
+			body_buf = with_reset;
+			body_ptr = body_buf;
+			body_ptr_len = strlen (body_buf);
+			g_free (display_nick);
+		}
+
+		gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
+		                         (unsigned char *) nick_buf,
+		                         strlen (nick_buf),
+		                         (unsigned char *) body_ptr,
+		                         body_ptr_len,
+		                         0);
+		g_free (nick_buf);
+		g_free (body_buf);
+	} else {
+		gtk_xtext_append (GTK_XTEXT (text)->buffer,
+		                  (unsigned char *) line, line_len, 0);
+	}
+}
+
+/* Render an HxChatEvent (pre-parsed chat message) into a chat
+ * window's xtext buffer. Bypasses the legacy hx_printf →
+ * chat-log-line → xoutput_chat round-trip — the rcv.c emitter
+ * already validated UTF-8 + ran the sender/body split, so this
+ * just hands the slices to xprintline_render. Multi-line bodies
+ * render the first line with the nick column; subsequent lines
+ * fall through as continuation. */
+void
+output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
+{
+	struct gtkhx_chat *gchat;
+	const char *body;
+	gsize first_body_len;
+	const char *nl;
+	(void) htlc;
+
+	if (!e)
+		return;
+	gchat = gchat_with_cid (&the_session, e->cid);
+	if (!gchat)
+		return;
+
+	if (e->sender_len == 0 && !e->is_info) {
+		/* Server prose that didn't parse as "Nick: body" — emote,
+		 * announcement, etc. Render verbatim, splitting on
+		 * newlines so each visible line is its own xtext entry
+		 * (matches xoutput_chat behaviour for raw lines). */
+		const char *cur = e->line;
+		const char *end = e->line + e->line_len;
+		while (cur < end) {
+			const char *next_nl = memchr (cur, '\n', end - cur);
+			gsize seg_len = next_nl
+				? (gsize)(next_nl - cur)
+				: (gsize)(end - cur);
+			gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
+			                  (unsigned char *) cur, seg_len, 0);
+			if (!next_nl) break;
+			cur = next_nl + 1;
+		}
+		return;
+	}
+
+	/* Find the first newline within the body slice — only the
+	 * first line carries the nick column; subsequent lines render
+	 * as plain continuation. */
+	body = e->line + e->body_off;
+	nl = e->body_len > 0
+		? memchr (body, '\n', e->body_len)
+		: NULL;
+	first_body_len = nl ? (gsize)(nl - body) : e->body_len;
+
+	xprintline_render (gchat->output,
+	                   e->line, e->body_off + first_body_len,
+	                   e->sender_off, e->sender_len,
+	                   e->body_off,   first_body_len,
+	                   e->is_info, e->is_self);
+
+	if (nl) {
+		const char *cur = nl + 1;
+		const char *end = body + e->body_len;
+		while (cur < end) {
+			const char *next_nl = memchr (cur, '\n', end - cur);
+			gsize seg_len = next_nl
+				? (gsize)(next_nl - cur)
+				: (gsize)(end - cur);
+			gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
+			                  (unsigned char *) cur, seg_len, 0);
+			if (!next_nl) break;
+			cur = next_nl + 1;
+		}
+	}
+}
+
 void xprintline(GtkWidget *text, char *chat, size_t len)
 {
 	char  *valid;
@@ -432,148 +618,47 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	 * time in chat.c / msg.c, and re-applied to live buffers when
 	 * the user toggles CFG_TIMESTAMP via Settings. */
 
-	/* Phase 5+: HexChat-style nick column. Lines that look like
-	 * "  name:  body" get rewritten into a left part ("<name>",
-	 * including the brackets) and a right part ("body"); xtext's
-	 * gtk_xtext_append_indent draws the left part flush-right
-	 * against the indent column and the right part flush-left
-	 * after it, so all nicks align visually and the bodies start
-	 * at a common left edge. Info messages produced by
-	 * hx_printf_prefix (recognisable by the leading INFOPREFIX
-	 * with its mIRC-coloured "[hx]") get a "[hx]" nick so they
-	 * slot into the same column.
-	 *
-	 * Lines that don't match either pattern (emotes, raw output
-	 * without a colon) fall through to plain append. */
+	/* Find the parse facts xprintline_render needs: INFOPREFIX
+	 * branch, or "Nick: body" split, or neither (raw render).
+	 * This is the same work HxChatEvent does at signal-emit time —
+	 * duplicated here because log lines (hx_printf path) don't
+	 * carry an event. */
 	gsize name_off = 0, name_len = 0;
 	gsize body_off = 0, body_len = 0;
-	gchar *display_nick = NULL;
-	const char *display_body = NULL;
-	gsize display_body_len = 0;
-	gboolean is_info = FALSE;	/* INFOPREFIX branch — never highlight */
-	gboolean said_by_self = FALSE;	/* self vs other — controls bracket colour */
+	gboolean is_info = FALSE;
+	gboolean said_by_self = FALSE;
 	const char *self_nick =
 		(the_session.htlc.name[0] != '\0')
 			? (const char *) the_session.htlc.name
 			: NULL;
-	{
-		const char *info_prefix = INFOPREFIX;
-		gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
 
-		if (info_prefix_len > 0
-		    && valid_len >= info_prefix_len
-		    && memcmp (valid, info_prefix, info_prefix_len) == 0) {
-			/* Preserve the colour codes around "[hx]" so the
-			 * info-prefix renders the same hue it always did,
-			 * just in the nick column now. */
-			display_nick = g_strndup (valid + 1,
-			                          info_prefix_len - 2);
-			display_body = valid + info_prefix_len;
-			display_body_len = valid_len - info_prefix_len;
-			is_info = TRUE;
-		} else if (hx_chat_split_nick_body (valid, valid_len,
-		                                    &name_off, &name_len,
-		                                    &body_off, &body_len)) {
-			/* Phase 5+: colour the angle brackets to match
-			 * msg.c::msg_output — mIRC palette 13 (pink) for
-			 * our own lines, 12 (light blue) for everyone
-			 * else'"'"'s. Format:
-			 *
-			 *   "\003<col><\003<name>\003<col>>\003"
-			 *
-			 * \003<col> opens the colour run; bare \003 closes
-			 * it (xtext parses both forms). The brackets get
-			 * the colour; the name itself stays in the default
-			 * foreground so highlight colour codes (when
-			 * applied below) can override cleanly. */
-			if (self_nick && name_len > 0
-			    && strlen (self_nick) == name_len
-			    && memcmp (valid + name_off,
-			               self_nick, name_len) == 0)
-				said_by_self = TRUE;
-			int brack_col = said_by_self ? 13 : 12;
-			display_nick = g_strdup_printf (
-				"\003%d<\003%.*s\003%d>\003",
-				brack_col,
-				(int) name_len, valid + name_off,
-				brack_col);
-			display_body = valid + body_off;
-			display_body_len = body_len;
-		}
-	}
+	const char *info_prefix = INFOPREFIX;
+	gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
 
-	/* Phase 5+: highlight-on-mention. Scan the body for
-	 * occurrences of our own nick (always) plus any
-	 * comma-separated words in gtkhx_prefs.highlight_words. If
-	 * any match — and this isn't an [hx] info line, and we
-	 * didn't send the line ourselves — wrap nick + body in
-	 * inline mIRC ATTR codes (\002 bold + \003 04 light-red +
-	 * \017 reset) so xtext renders the line bold red. */
-	gboolean do_highlight = FALSE;
-	if (display_nick && !is_info && display_body_len > 0) {
-		if (!said_by_self) {
-			/* Build the words[] list: own nick (if known) +
-			 * the comma-split of gtkhx_prefs.highlight_words.
-			 * NULL-terminated. */
-			GPtrArray *words = g_ptr_array_new ();
-			if (self_nick && *self_nick)
-				g_ptr_array_add (words, (gpointer) self_nick);
-			gchar **extras = NULL;
-			if (gtkhx_prefs.highlight_words
-			    && *gtkhx_prefs.highlight_words) {
-				extras = g_strsplit (
-					gtkhx_prefs.highlight_words, ",", -1);
-				for (gsize ei = 0; extras && extras[ei]; ei++) {
-					gchar *w = g_strstrip (extras[ei]);
-					if (*w)
-						g_ptr_array_add (words, w);
-				}
-			}
-			g_ptr_array_add (words, NULL);
-			do_highlight = hx_highlight_match (
-				display_body, display_body_len,
-				(const char * const *) words->pdata);
-			g_ptr_array_unref (words);
-			if (extras)
-				g_strfreev (extras);
-		}
-	}
-
-	if (display_nick) {
-		gchar *nick_buf = display_nick;
-		gchar *body_buf = NULL;
-		const char *body_ptr = display_body;
-		gsize body_ptr_len = display_body_len;
-
-		if (do_highlight) {
-			/* \002 = ATTR_BOLD, \003 04 = mIRC colour 4
-			 * (light red), \017 = ATTR_RESET. Wrap nick
-			 * with the open codes and body with the close
-			 * code so the reset lands at end-of-line. */
-			nick_buf = g_strdup_printf (
-				"\002\00304%s", display_nick);
-			body_buf = g_strndup (display_body, display_body_len);
-			gchar *with_reset = g_strdup_printf (
-				"%s\017", body_buf);
-			g_free (body_buf);
-			body_buf = with_reset;
-			body_ptr = body_buf;
-			body_ptr_len = strlen (body_buf);
-			g_free (display_nick);
-		}
-
-		gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
-		                         (unsigned char *) nick_buf,
-		                         strlen (nick_buf),
-		                         (unsigned char *) body_ptr,
-		                         body_ptr_len,
-		                         0);
-		g_free (nick_buf);
-		g_free (body_buf);
+	if (info_prefix_len > 0
+	    && valid_len >= info_prefix_len
+	    && memcmp (valid, info_prefix, info_prefix_len) == 0) {
+		/* INFOPREFIX branch: nick = the "[hx]" inside the wrapper
+		 * bytes (skip the leading space, drop the trailing). */
+		name_off = 1;
+		name_len = info_prefix_len - 2;
+		body_off = info_prefix_len;
+		body_len = valid_len - info_prefix_len;
+		is_info = TRUE;
+	} else if (hx_chat_split_nick_body (valid, valid_len,
+	                                    &name_off, &name_len,
+	                                    &body_off, &body_len)) {
+		if (self_nick && name_len > 0
+		    && strlen (self_nick) == name_len
+		    && memcmp (valid + name_off, self_nick, name_len) == 0)
+			said_by_self = TRUE;
 	} else {
-		gtk_xtext_append (GTK_XTEXT (text)->buffer,
-		                  (unsigned char *) valid, valid_len, 0);
+		name_len = 0;
 	}
+
+	xprintline_render (text, valid, valid_len,
+	                   name_off, name_len, body_off, body_len,
+	                   is_info, said_by_self);
 
 	g_free (valid);
 }

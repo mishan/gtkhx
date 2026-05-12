@@ -74,9 +74,12 @@ gtkhx_session_init (GtkhxSession *self)
 static void
 gtkhx_session_class_init (GtkhxSessionClass *klass)
 {
-	/* "chat" — incoming chat-message body on a chat-id. Replaces
-	 * hx_output.chat. Matches the vtable signature so the existing
-	 * output_chat handler in chat.c connects without an adapter. */
+	/* "chat" — incoming chat message. Phase 5+: payload is a
+	 * boxed HxChatEvent that carries cid, UTF-8 line, sender /
+	 * body slices, is_info / is_self flags — every subscriber
+	 * gets the same parse result without re-doing the work. The
+	 * boxed type's copy/free hooks (G_DEFINE_BOXED_TYPE in
+	 * proto_helpers.c) handle the multi-subscriber lifetime. */
 	signals[SIGNAL_CHAT] = g_signal_new (
 		"chat",
 		G_TYPE_FROM_CLASS (klass),
@@ -85,11 +88,9 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		NULL, NULL,              /* accumulator + data */
 		NULL,                    /* marshaller: NULL → libffi-derived */
 		G_TYPE_NONE,
-		4,
+		2,
 		G_TYPE_POINTER,          /* struct htlc_conn * */
-		G_TYPE_UINT,             /* cid */
-		G_TYPE_POINTER,          /* body */
-		G_TYPE_UINT);            /* len (guint16 widened) */
+		HX_TYPE_CHAT_EVENT);     /* HxChatEvent * (boxed) */
 
 	/* "chat-subject" — subject changed in chat `cid`. Replaces
 	 * hx_output.chat_subject. The arg list is (htlc, cid,
@@ -111,17 +112,15 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		G_TYPE_NONE, 3,
 		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
 
-	/* "msg" — incoming private message. Replaces hx_output.msg.
-	 * No htlc arg (the original vtable signature was already
-	 * htlc-less); body is NUL-terminated. */
+	/* "msg" — incoming private message. Phase 5+: payload is a
+	 * boxed HxMsgEvent (uid + name + body + is_self/is_broadcast
+	 * flags), same architectural shape as the "chat" signal. */
 	signals[SIGNAL_MSG] = g_signal_new (
 		"msg",
 		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
 		NULL, NULL, NULL,
-		G_TYPE_NONE, 3,
-		G_TYPE_POINTER,          /* sender name */
-		G_TYPE_UINT,             /* uid (guint16 widened) */
-		G_TYPE_POINTER);         /* body */
+		G_TYPE_NONE, 1,
+		HX_TYPE_MSG_EVENT);
 
 	/* "agreement" — post-login agreement text from the server.
 	 * (session*, agreement-string, len). */
@@ -305,10 +304,9 @@ gtkhx_session_get_default (void)
 void
 gtkhx_session_emit_chat (GtkhxSession *self,
                          struct htlc_conn *htlc,
-                         guint32 cid, const char *body, guint16 len)
+                         HxChatEvent *event)
 {
-	g_signal_emit (self, signals[SIGNAL_CHAT], 0,
-	               htlc, cid, body, (guint) len);
+	g_signal_emit (self, signals[SIGNAL_CHAT], 0, htlc, event);
 }
 
 void
@@ -330,11 +328,9 @@ gtkhx_session_emit_chat_invitation (GtkhxSession *self,
 }
 
 void
-gtkhx_session_emit_msg (GtkhxSession *self,
-                        const char *name, guint16 uid, const char *body)
+gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event)
 {
-	g_signal_emit (self, signals[SIGNAL_MSG], 0,
-	               name, (guint) uid, body);
+	g_signal_emit (self, signals[SIGNAL_MSG], 0, event);
 }
 
 void
