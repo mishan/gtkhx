@@ -61,101 +61,75 @@
 
 guint8 dir_char  = '/';
 
-struct gfile_list *gfile_list;
+/* Phase 5+: open file-browser windows kept as a GList of pointers.
+ * Replaces the intrusive next/prev fields that used to live on
+ * struct gfile_list. */
+GList *gfile_list;
+
+static void gfl_free (struct gfile_list *gfl)
+{
+	struct path_hist *path, *prev;
+
+	for (path = gfl->path_list; path; path = prev) {
+		prev = path->prev;
+		g_free (path);
+	}
+	g_free (gfl->cfl);
+	g_free (gfl);
+}
 
 static struct gfile_list *gfl_new (GtkWidget *window, GtkWidget *hlist,
 								   char *path)
 {
 	struct gfile_list *gfl;
 
-	gfl = g_malloc(sizeof(struct gfile_list));
-	gfl->next = 0;
-	gfl->prev = 0;
-
-	if (gfile_list) {
-		gfile_list->next = gfl;
-		gfl->prev = gfile_list;
-	}
-
-	gfl->cfl = 0;
+	gfl = g_malloc0 (sizeof (struct gfile_list));
 	gfl->window = window;
-	gfl->hlist = hlist;
-	gfl->row = 0;
-	gfl->column = 0;
-
-	gfl->path_list = g_malloc(sizeof(struct path_hist)+strlen(path));
-	strcpy(gfl->path_list->path, path);
+	gfl->hlist  = hlist;
+	gfl->path_list = g_malloc (sizeof (struct path_hist) + strlen (path));
+	strcpy (gfl->path_list->path, path);
 	gfl->path_list->prev = NULL;
 
-	gfl->in_use = 0;
-
-	gfile_list = gfl;
-
+	gfile_list = g_list_prepend (gfile_list, gfl);
 	return gfl;
 }
 
 static void gfl_delete (struct gfile_list *gfl)
 {
-	struct path_hist *path, *prev;
-
-	for(path = gfl->path_list; path; path = prev) {
-		if(path->prev) {
-			prev = path->prev;
-		}
-		else {
-			prev = 0;
-		}
-		g_free(path);
-	}
-
-	g_free(gfl->cfl);
-
-	if (gfl->next)
-		gfl->next->prev = gfl->prev;
-	if (gfl->prev)
-		gfl->prev->next = gfl->next;
-	if (gfl == gfile_list)
-		gfile_list = gfl->prev;
-	g_free(gfl);
+	gfile_list = g_list_remove (gfile_list, gfl);
+	gfl_free (gfl);
 }
 
-void destroy_gfl_list(void)
+void destroy_gfl_list (void)
 {
-	struct gfile_list *gfl, *prev;
-
-
-	for(gfl = gfile_list; gfl; gfl = prev) {
-		prev = gfl->prev;
-		gtkhx_widget_destroy(gfl->window);
-		gfl_delete(gfl);
+	GList *snapshot = gfile_list;
+	gfile_list = NULL;
+	for (GList *l = snapshot; l; l = l->next) {
+		struct gfile_list *gfl = l->data;
+		gtkhx_widget_destroy (gfl->window);
+		gfl_free (gfl);
 	}
-	gfile_list = 0;
+	g_list_free (snapshot);
 }
 
 static struct gfile_list *gfl_with_hlist (GtkWidget *hlist)
 {
-	struct gfile_list *gfl;
-
-	for(gfl = gfile_list; gfl; gfl = gfl->prev) {
-		if(gfl->hlist == hlist) {
+	for (GList *l = gfile_list; l; l = l->next) {
+		struct gfile_list *gfl = l->data;
+		if (gfl->hlist == hlist)
 			return gfl;
-		}
 	}
-
-	return 0;
+	return NULL;
 }
 
 static struct gfile_list *gfl_with_path (char *path)
 {
-	struct gfile_list *gfl;
-
-	for(gfl = gfile_list; gfl; gfl = gfl->prev) {
-		if(!strcmp(path, gfl->cfl->path)) {
+	for (GList *l = gfile_list; l; l = l->next) {
+		struct gfile_list *gfl = l->data;
+		if (gfl->cfl && !strcmp (path, gfl->cfl->path))
 			return gfl;
-		}
 	}
-
-	return 0;
+	return NULL;
 }
 
 static void
@@ -1433,8 +1407,9 @@ int exists_remote (char *path)
 		return -1;
 
 
-	for(gfl = gfile_list; gfl; gfl = gfl->prev) {
-		if(!strncmp(gfl->cfl->path, path, blen)) {
+	for (GList *l = gfile_list; l; l = l->next) {
+		gfl = l->data;
+		if (gfl->cfl && !strncmp (gfl->cfl->path, path, blen)) {
 			cfl = gfl->cfl;
 			break;
 		}

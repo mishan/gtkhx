@@ -527,10 +527,11 @@ static void changed_case (session *sess)
 
 static void changed_filesamewin (session *sess)
 {
-	struct gfile_list *gfl;
-
-	for(gfl = gfile_list; gfl; gfl = gfl->prev) {
-		gtk_widget_set_sensitive(gfl->up_btn, gtkhx_prefs.file_samewin);
+	(void) sess;
+	for (GList *l = gfile_list; l; l = l->next) {
+		struct gfile_list *gfl = l->data;
+		gtk_widget_set_sensitive (gfl->up_btn,
+		                          gtkhx_prefs.file_samewin);
 	}
 }
 
