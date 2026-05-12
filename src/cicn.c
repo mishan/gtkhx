@@ -410,14 +410,17 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 		if (ct_off + 8 + 4 * 8 <= len) {
 			GString *s = g_string_new (NULL);
 			for (unsigned int i = 0; i < 4 && i <= ctSize_raw; i++) {
-				ColorSpec *cs = &ct->ctTable[i];
+				/* ColorTable's ctTable[] is PACKED — take care
+				 * to read fields directly rather than binding a
+				 * pointer to the element (-Waddress-of-packed-
+				 * member). Same idiom build_palette uses. */
 				if (i) g_string_append_c (s, ' ');
 				g_string_append_printf (s,
 				    "[v=%u r=%04x g=%04x b=%04x]",
-				    ntohs (cs->value),
-				    ntohs (cs->rgb.red),
-				    ntohs (cs->rgb.green),
-				    ntohs (cs->rgb.blue));
+				    ntohs (ct->ctTable[i].value),
+				    ntohs (ct->ctTable[i].rgb.red),
+				    ntohs (ct->ctTable[i].rgb.green),
+				    ntohs (ct->ctTable[i].rgb.blue));
 			}
 			debug_log ("icon", "  CT[0..3]: %s", s->str);
 			g_string_free (s, TRUE);
