@@ -5,7 +5,6 @@ System Notifications:
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
-- System tray support -- can it hide/restore all the GtkHx windows? That would be neat!
 - Publish to Flathub
 
 Files:
