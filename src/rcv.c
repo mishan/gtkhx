@@ -342,12 +342,42 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	char *name = uc.name;
 	guint16 nlen = uc.name_len;
 
+	/* Phase 5: self-detection by name. Some 1.9-style servers
+	 * (e.g. The Mobius Strip) omit USER_LIST from SELFINFO, so
+	 * htlc->uid stays 0 after login. The first USER_CHANGE
+	 * broadcast we receive is the server echoing back the
+	 * USER_CHANGE we just sent (post-SELFINFO) — its name
+	 * matches our local htlc->name and carries our newly-assigned
+	 * UID. Adopt that UID as ours. Without this, the rest of the
+	 * handler treats the broadcast as a stranger joining: it
+	 * adds a row before the USER_LIST reply arrives (so we end
+	 * up at the top of the user list) and announces "join: <us>"
+	 * in chat. */
+	if (htlc->uid == 0 && uid != 0 && nlen > 0
+	    && strlen ((const char *) htlc->name) == (size_t) nlen
+	    && memcmp (htlc->name, name, nlen) == 0) {
+		htlc->uid = uid;
+		debug_log ("login",
+		           "adopted self uid=%u from USER_CHANGE "
+		           "broadcast (SELFINFO didn't carry it)",
+		           (unsigned) uid);
+	}
+	gboolean is_self = (uid != 0 && uid == htlc->uid);
+
 	chat = chat_with_cid(sess, cid);
 	if (!chat) {
 		chat = chat_new(sess, cid);
 	}
 	user = hx_user_with_uid(chat->user_list, uid);
 	if (!user) {
+		if (is_self) {
+			/* Don't add our own row here. The USER_LIST reply
+			 * (or any subsequent broadcast that mentions us)
+			 * will create it in the proper position. Adding it
+			 * now would put us at the top of the user list and
+			 * spam a "join: <us>" line in chat. */
+			return;
+		}
 		user = hx_user_new(&chat->user_tail);
 		chat->nusers++;
 		user->uid = uid;
