@@ -37,15 +37,14 @@
 #include "network.h"
 #include "banner.h"
 
-/* Inline forward decls so we don't have to pull in hx.h (which
- * brings session + a transitive zoo of UI deps). task_new'"'"'s real
- * declaration lives in tasks.h. */
+/* Inline forward decl so we don't have to pull in hx.h (which
+ * brings session + a transitive zoo of UI deps). task_new's real
+ * declaration lives in tasks.h. rcv_task_banner_get is declared
+ * over in banner.h next to its file-mode partner so rcv.c also
+ * sees it via -Wmissing-prototypes. */
 struct task;
 extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
                               void *ptr, void *data, const char *str);
-/* rcv.c — referenced via RCV_TASK_FN below. */
-extern void rcv_task_banner_get (struct htlc_conn *htlc,
-                                 void *ptr, void *data);
 
 /* ------------------------------------------------------------------- *
  * Module state — single banner per process. The toolbar is the only
