@@ -834,54 +834,74 @@ void rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
 	}
 }
 
-void rcv_task_newscat_list(struct htlc_conn *htlc, 
+/* Translate one parsed hx_newscat_post into the GUI's news_item. The
+ * field shapes match 1:1 except for the parts array (which we copy
+ * shallowly and steal the mime_type pointers from) and the GTK-only
+ * `iter` field (zeroed; news15.c populates it later). The `group`
+ * back-pointer is set by the caller. */
+static void
+news_item_take_from_wire (struct news_item *ni, struct hx_newscat_post *p)
+{
+	guint16 j;
+
+	ni->postid             = p->postid;
+	ni->parentid           = p->parentid;
+	ni->date.base_year     = p->date_base_year;
+	ni->date.pad           = p->date_pad;
+	ni->date.seconds       = p->date_seconds;
+	ni->partcount          = p->partcount;
+	ni->size               = p->size_total;
+
+	/* Steal ownership of subject + sender strings — the wire struct
+	 * will be cleared next so it won't double-free. */
+	ni->subject            = p->subject;
+	ni->sender             = p->sender;
+	p->subject = p->sender = NULL;
+
+	if (p->partcount) {
+		ni->parts = g_new0 (struct news_parts, p->partcount);
+		for (j = 0; j < p->partcount; j++) {
+			ni->parts[j].size      = p->parts[j].size;
+			ni->parts[j].mime_type = p->parts[j].mime_type;
+			p->parts[j].mime_type  = NULL;     /* stolen */
+		}
+	} else {
+		ni->parts = NULL;
+	}
+
+	memset (&ni->iter, 0, sizeof (ni->iter));
+}
+
+void rcv_task_newscat_list(struct htlc_conn *htlc,
 						   struct gnews_catalog *gcnews)
 {
-	struct news_group *group = g_malloc(sizeof(struct news_group));
-	struct news_item *ni;
-	unsigned char *ptr;
-	int p, j;
+	struct news_group *group = g_malloc0(sizeof(struct news_group));
+	struct hx_newscat parsed;
+	guint32 i;
 
-	/* Taken from fidelio =) */
-#define get_pstring(ret) if(*ptr==0){ret=NULL;}else{ret=g_malloc(1+*ptr); \
- memcpy(ret,ptr+1,*ptr); (ret)[*ptr]=0;ptr+=*ptr;} ptr++;
+	if (!hx_newscat_parse (htlc, &parsed)) {
+		/* No CATLIST chunk or malformed payload. Surface an empty
+		 * group rather than a NULL — preserves the original
+		 * behaviour (the parser bailed out of the loop and still
+		 * emitted an empty signal payload). */
+		group->post_count = 0;
+		group->posts      = NULL;
+		gcnews->group     = group;
+		gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
+		return;
+	}
 
-	dh_start(htlc) {
-		switch (_type) {
-		case HTLC_DATA_CATLIST:
-			ptr = dh->data+4;
-			HN32(&group->post_count, ptr); ptr += 4; 
-			ptr += *ptr;
-			ptr += 2;
-			if(!group->post_count) {
-				break;
-			}
-			
-			group->posts = g_malloc(sizeof(struct news_item)*group->post_count);
-			
-			for(p = 0, ni = group->posts; p < group->post_count; p++, ni++) {
-				HN32(&ni->postid, ptr); ptr += 4;
-				HN16(&ni->date.base_year, ptr); ptr += 2;
- 				HN16(&ni->date.pad, ptr); ptr += 2;  
-				HN32(&ni->date.seconds, ptr); ptr += 4;
-				HN32(&ni->parentid, ptr); ptr += 8;
-				HN16(&ni->partcount, ptr); ptr += 2; 
-				
-				get_pstring(ni->subject);
-				get_pstring(ni->sender);
-				ni->parts = g_malloc(sizeof(struct news_parts)*ni->partcount);
-				ni->size = 0;
-				for(j = 0; j < ni->partcount; j++) {
-					get_pstring(ni->parts[j].mime_type);
-					HN16(&ni->parts[j].size, ptr); ptr += 2;
-					ni->size+=ni->parts[j].size;
-				}
-				ni->group = group;
-			}
-			break;
+	group->post_count = parsed.post_count;
+	if (parsed.post_count) {
+		group->posts = g_new0 (struct news_item, parsed.post_count);
+		for (i = 0; i < parsed.post_count; i++) {
+			news_item_take_from_wire (&group->posts[i], &parsed.posts[i]);
+			group->posts[i].group = group;
 		}
-		
-	} dh_end();
+	} else {
+		group->posts = NULL;
+	}
+	hx_newscat_clear (&parsed);
 
 	gcnews->group = group;
 	gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);

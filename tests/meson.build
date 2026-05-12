@@ -432,6 +432,26 @@ test_news_dirlist = executable('test_news_dirlist',
 test('news_dirlist', test_news_dirlist,
      suite : 'proto')
 
+# newscat — hx_newscat_parse turns an HTLC_DATA_CATLIST chunk (the
+# reply to HTLC_HDR_NEWSCATLIST) into a structured thread list. The
+# original parser in rcv.c had no bounds checks, walked the wire as
+# a raw pointer, and used a get_pstring macro that depended on the
+# server zeroing several "opaque" header bytes. The extracted helper
+# in proto_helpers tightens the bounds checks; this test pins both
+# the happy-path layout (so the rcv.c translation keeps producing
+# the same news_item values) and the malformed-input refusal cases.
+test_newscat = executable('test_newscat',
+  'proto/test_newscat.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('newscat', test_newscat,
+     suite : 'proto')
+
 # chat_event — hx_chat_event_new is the parsed value-object the
 # GtkhxSession::chat signal carries to chat.c and notify.c. Pins
 # the UTF-8 fix-up, "[hx]" info-prefix detect, sender/body split,
