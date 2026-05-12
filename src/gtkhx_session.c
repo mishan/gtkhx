@@ -41,6 +41,12 @@ enum {
 	SIGNAL_CHAT_SUBJECT,
 	SIGNAL_CHAT_INVITATION,
 	SIGNAL_MSG,
+	SIGNAL_AGREEMENT,
+	SIGNAL_NEWS_FILE,
+	SIGNAL_NEWS_POST,
+	SIGNAL_NEWS_FOLDER,
+	SIGNAL_NEWS_CATALOG,
+	SIGNAL_NEWS_THREAD,
 	SIGNAL_LAST
 };
 
@@ -103,6 +109,52 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		G_TYPE_POINTER,          /* sender name */
 		G_TYPE_UINT,             /* uid (guint16 widened) */
 		G_TYPE_POINTER);         /* body */
+
+	/* "agreement" — post-login agreement text from the server.
+	 * (session*, agreement-string, len). */
+	signals[SIGNAL_AGREEMENT] = g_signal_new (
+		"agreement",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_UINT);
+
+	/* News notifications — 1.x flat news (news-file / news-post) +
+	 * 1.5+ threaded news (news-folder / news-catalog / news-thread). */
+	signals[SIGNAL_NEWS_FILE] = g_signal_new (
+		"news-file",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_UINT);
+
+	signals[SIGNAL_NEWS_POST] = g_signal_new (
+		"news-post",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_UINT);
+
+	signals[SIGNAL_NEWS_FOLDER] = g_signal_new (
+		"news-folder",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 1,
+		G_TYPE_POINTER);
+
+	signals[SIGNAL_NEWS_CATALOG] = g_signal_new (
+		"news-catalog",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 1,
+		G_TYPE_POINTER);
+
+	signals[SIGNAL_NEWS_THREAD] = g_signal_new (
+		"news-thread",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 1,
+		G_TYPE_POINTER);
 }
 
 GtkhxSession *
@@ -147,4 +199,52 @@ gtkhx_session_emit_msg (GtkhxSession *self,
 {
 	g_signal_emit (self, signals[SIGNAL_MSG], 0,
 	               name, (guint) uid, body);
+}
+
+void
+gtkhx_session_emit_agreement (GtkhxSession *self,
+                              session *sess,
+                              const char *agreement, guint16 len)
+{
+	g_signal_emit (self, signals[SIGNAL_AGREEMENT], 0,
+	               sess, agreement, (guint) len);
+}
+
+void
+gtkhx_session_emit_news_file (GtkhxSession *self,
+                              struct htlc_conn *htlc,
+                              const char *news, guint16 len)
+{
+	g_signal_emit (self, signals[SIGNAL_NEWS_FILE], 0,
+	               htlc, news, (guint) len);
+}
+
+void
+gtkhx_session_emit_news_post (GtkhxSession *self,
+                              struct htlc_conn *htlc,
+                              const char *news, guint16 len)
+{
+	g_signal_emit (self, signals[SIGNAL_NEWS_POST], 0,
+	               htlc, news, (guint) len);
+}
+
+void
+gtkhx_session_emit_news_folder (GtkhxSession *self,
+                                struct gnews_folder *gfnews)
+{
+	g_signal_emit (self, signals[SIGNAL_NEWS_FOLDER], 0, gfnews);
+}
+
+void
+gtkhx_session_emit_news_catalog (GtkhxSession *self,
+                                 struct gnews_catalog *gcnews)
+{
+	g_signal_emit (self, signals[SIGNAL_NEWS_CATALOG], 0, gcnews);
+}
+
+void
+gtkhx_session_emit_news_thread (GtkhxSession *self,
+                                struct news_post *post)
+{
+	g_signal_emit (self, signals[SIGNAL_NEWS_THREAD], 0, post);
 }

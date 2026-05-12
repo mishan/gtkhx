@@ -998,6 +998,16 @@ static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat,
 		hx_printf(htlc, cid, "%.*s\n", chatlen, chat);
 }
 
+/* Forward declarations for the file-local view functions the
+ * Phase 3 adapter handlers below call. The functions themselves
+ * are defined later in this file; the extern-linkage ones
+ * (output_chat_subject, output_news_*, msg_output, etc.) are
+ * already declared in their respective headers. */
+static void output_chat       (struct htlc_conn *htlc, guint32 cid,
+                               char *chat, guint16 chatlen);
+static void output_agreement  (session *sess, const char *agreement,
+                               guint16 len);
+
 /* Phase 3+ signal adapters — bridge the GObject marshaller signature
  * (instance, signal args (with guint16 widened to guint), user_data)
  * to the legacy view function signatures. Will get cleaned up once
@@ -1038,6 +1048,58 @@ on_msg_signal (GtkhxSession *emitter,
 	msg_output ((char *) name, (guint16) uid, (char *) body);
 }
 
+static void
+on_agreement_signal (GtkhxSession *emitter,
+                     gpointer sess, gpointer agreement, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_agreement ((session *) sess, (const char *) agreement,
+	                  (guint16) len);
+}
+
+static void
+on_news_file_signal (GtkhxSession *emitter,
+                     struct htlc_conn *htlc, gpointer news, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_file (htlc, (char *) news, (guint16) len);
+}
+
+static void
+on_news_post_signal (GtkhxSession *emitter,
+                     struct htlc_conn *htlc, gpointer news, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_post (htlc, (char *) news, (guint16) len);
+}
+
+static void
+on_news_folder_signal (GtkhxSession *emitter,
+                       gpointer gfnews, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_folder ((struct gnews_folder *) gfnews);
+}
+
+static void
+on_news_catalog_signal (GtkhxSession *emitter,
+                        gpointer gcnews, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_catalog ((struct gnews_catalog *) gcnews);
+}
+
+static void
+on_news_thread_signal (GtkhxSession *emitter,
+                       gpointer post, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_thread ((struct news_post *) post);
+}
+
 void gtkhx_connect_signals (GtkhxSession *emitter)
 {
 	g_signal_connect (emitter, "chat",
@@ -1048,6 +1110,18 @@ void gtkhx_connect_signals (GtkhxSession *emitter)
 	                  G_CALLBACK (on_chat_invitation_signal), NULL);
 	g_signal_connect (emitter, "msg",
 	                  G_CALLBACK (on_msg_signal), NULL);
+	g_signal_connect (emitter, "agreement",
+	                  G_CALLBACK (on_agreement_signal), NULL);
+	g_signal_connect (emitter, "news-file",
+	                  G_CALLBACK (on_news_file_signal), NULL);
+	g_signal_connect (emitter, "news-post",
+	                  G_CALLBACK (on_news_post_signal), NULL);
+	g_signal_connect (emitter, "news-folder",
+	                  G_CALLBACK (on_news_folder_signal), NULL);
+	g_signal_connect (emitter, "news-catalog",
+	                  G_CALLBACK (on_news_catalog_signal), NULL);
+	g_signal_connect (emitter, "news-thread",
+	                  G_CALLBACK (on_news_thread_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1185,14 +1259,8 @@ struct output_functions hx_output = {
 	.init                  = init,
 	.loop                  = loop,
 	/* Phase 3 migrated to GtkhxSession signals: chat,
-	 * chat-subject, chat-invitation, msg. Handlers are connected
-	 * in gtkhx_connect_signals below. */
-	.agreement             = output_agreement,
-	.news_file             = output_news_file,
-	.news_post             = output_news_post,
-	.news_folder           = output_news_folder,
-	.news_catalog          = output_news_catalog,
-	.news_thread           = output_news_thread,
+	 * chat-subject, chat-invitation, msg, agreement, news-*.
+	 * Handlers are connected in gtkhx_connect_signals below. */
 	.user_create           = user_create,
 	.user_delete           = user_delete,
 	.user_change           = user_change,

@@ -32,6 +32,23 @@
 
 G_BEGIN_DECLS
 
+/* Forward-declare types whose pointers we accept; the full struct
+ * definitions live in session.h (which transitively pulls in GTK).
+ * Letting model-side callers include gtkhx_session.h without
+ * dragging GTK in via session.h matters for unit tests. */
+typedef struct _session       session;
+struct gnews_folder;
+struct gnews_catalog;
+struct news_post;
+struct htxf_conn;
+struct chat;
+struct hx_user;
+struct cached_filelist;
+struct hl_filelist_hdr;
+
+#include <netinet/in.h>          /* struct in_addr for tracker signal */
+/* struct task already defined in protocol.h (included above). */
+
 #define GTKHX_TYPE_SESSION (gtkhx_session_get_type ())
 G_DECLARE_FINAL_TYPE (GtkhxSession, gtkhx_session, GTKHX, SESSION, GObject)
 
@@ -64,6 +81,25 @@ void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
 void gtkhx_session_emit_msg (GtkhxSession *self,
                              const char *name, guint16 uid,
                              const char *body);
+
+/* Login + news notifications. agreement fires once after the
+ * AGREEMENT chunks arrive post-login; the news-* variants fire
+ * for the four 1.x / 1.5+ news flows. */
+void gtkhx_session_emit_agreement (GtkhxSession *self,
+                                   session *sess,
+                                   const char *agreement, guint16 len);
+void gtkhx_session_emit_news_file (GtkhxSession *self,
+                                   struct htlc_conn *htlc,
+                                   const char *news, guint16 len);
+void gtkhx_session_emit_news_post (GtkhxSession *self,
+                                   struct htlc_conn *htlc,
+                                   const char *news, guint16 len);
+void gtkhx_session_emit_news_folder (GtkhxSession *self,
+                                     struct gnews_folder *gfnews);
+void gtkhx_session_emit_news_catalog (GtkhxSession *self,
+                                      struct gnews_catalog *gcnews);
+void gtkhx_session_emit_news_thread (GtkhxSession *self,
+                                     struct news_post *post);
 
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are

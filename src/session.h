@@ -374,15 +374,9 @@ struct output_functions {
 	 * GtkhxSession in Phase 3: chat, chat-subject, chat-invitation,
 	 * msg. */
 
-	/* Login flow */
-	void (*agreement)(session *sess, const char *agreement, guint16 len);
-
-	/* News (1.x + threaded) */
-	void (*news_file)(struct htlc_conn *htlc, char *news, guint16 len);
-	void (*news_post)(struct htlc_conn *htlc, char *news, guint16 len);
-	void (*news_folder)(struct gnews_folder *gfnews);
-	void (*news_catalog)(struct gnews_catalog *gcnews);
-	void (*news_thread)(struct news_post *post);
+	/* Login flow + news — migrated to GtkhxSession signals in
+	 * Phase 3.3: agreement, news-file, news-post, news-folder,
+	 * news-catalog, news-thread. */
 
 	/* User-list mutations on a chat (per-chat add/remove/change) */
 	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);

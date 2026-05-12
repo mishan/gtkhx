@@ -278,7 +278,7 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 		return;
 	}
 #endif
-	hx_output.agreement (&the_session, buf, (guint16) body_len);
+	gtkhx_session_emit_agreement (gtkhx_session_get_default (), &the_session, buf, (guint16) body_len);
 }
 
 /* Phase 5: rewritten to use hx_news_post_walk in proto_helpers.c.
@@ -291,7 +291,7 @@ static void
 news_post_emit (void *user, const char *bytes, gsize len)
 {
 	struct htlc_conn *htlc = user;
-	hx_output.news_post (htlc, (char *) bytes, (guint16) len);
+	gtkhx_session_emit_news_post (gtkhx_session_get_default (), htlc, (char *) bytes, (guint16) len);
 	play_sound (NEWS_POST);
 }
 
@@ -863,7 +863,7 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 	} dh_end();
 
 	gcnews->group = group;
-	hx_output.news_catalog(gcnews);
+	gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
 }
 
 void rcv_task_newsfolder_list(struct htlc_conn *htlc, 
@@ -895,7 +895,7 @@ void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 	folder->num_entries = num;
 
 	gfnews->news = folder;
-	hx_output.news_folder(gfnews);
+	gtkhx_session_emit_news_folder (gtkhx_session_get_default (), gfnews);
 }
 
 void rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
@@ -922,7 +922,7 @@ void rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
 	} dh_end();
 	
 	post->item = item;
-	hx_output.news_thread(post);
+	gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
 }
 
 
@@ -1359,7 +1359,7 @@ void rcv_task_news_file (struct htlc_conn *htlc)
 		news_len = 0;
 		news_buf[0] = 0;
 	}
-	hx_output.news_file (htlc, (char *) news_buf, news_len);
+	gtkhx_session_emit_news_file (gtkhx_session_get_default (), htlc, (char *) news_buf, news_len);
 }
 
 void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
