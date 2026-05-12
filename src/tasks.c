@@ -781,7 +781,13 @@ void task_error (struct htlc_conn *htlc)
 	 * window's overlay, auto-dismisses after a few seconds,
 	 * doesn't steal focus. The user still sees the message;
 	 * they're just not blocked by it. The ERROR sound still
-	 * fires so the alert isn't fully silent. */
+	 * fires so the alert isn't fully silent.
+	 *
+	 * Phase 5+: errormsg may contain MacRoman bytes (Mac servers
+	 * commonly hand us curly quotes \xd2/\xd3 around filenames).
+	 * toolbar_show_toast sanitises to UTF-8 internally — the
+	 * accessibility announcement layer behind AdwToast aborts on
+	 * non-UTF-8, so the defence has to be at that choke point. */
 	toolbar_show_toast (errormsg);
 	play_sound (ERROR);
 }

@@ -31,6 +31,7 @@
 #include "news15.h"
 #include "xfers.h"
 #include "gtkutil.h"
+#include "text_util.h"
 #include "tracker.h"
 #include "tray.h"
 #include "gtkhx.h"
@@ -264,9 +265,29 @@ static const GActionEntry app_actions[] = {
 void
 toolbar_show_toast (const char *text)
 {
+	char *safe = NULL;
+	const char *body;
+
 	if (!toolbar_toast || !text)
 		return;
-	adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (text));
+
+	/* AdwToast stores the title as a UTF-8 string and the
+	 * accessibility layer behind it (libadwaita →
+	 * gtk_accessible_announce → g_variant_new_string) abort()s
+	 * the process on non-UTF-8 input. Most call sites feed
+	 * server-supplied bytes (task error strings, broadcast
+	 * messages) that can be MacRoman from old Mac servers, so
+	 * defend the choke point: validate, fall back to MacRoman
+	 * conversion, finally U+FFFD substitution. */
+	if (!g_utf8_validate (text, -1, NULL)) {
+		safe = gtkhx_text_to_utf8 (text, strlen (text), NULL);
+		body = safe ? safe : "";
+	} else {
+		body = text;
+	}
+
+	adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (body));
+	g_free (safe);
 }
 
 /* Phase 5: surface "lost connection" with a Reconnect button. The
