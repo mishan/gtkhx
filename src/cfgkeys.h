@@ -43,6 +43,7 @@
 #define CFG_SHOWJOIN        "SHOWJOIN"
 #define CFG_TRACKER_CASE    "TRACKER_CASE"
 #define CFG_OLD_NICKCOMP    "OLD_NICKCOMPLETION"
+#define CFG_TRAY            "TRAY"
 
 /* Chat output */
 #define CFG_TIMESTAMP       "TIMESTAMP"

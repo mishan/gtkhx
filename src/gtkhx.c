@@ -53,6 +53,7 @@
 #include "msg.h"
 #include "gtkhx_session.h"
 #include "tracker.h"
+#include "tray.h"
 #include "xtext.h"
 #include "gtkthreads.h"
 #include "options.h"
@@ -905,6 +906,11 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 		gtk_application_set_accels_for_action (app, "app.quit",
 		                                       quit_accels);
 	}
+
+	/* Phase 5+: StatusNotifierItem tray icon. Reads the TRAY pref at
+	 * register-time; the changed_tray cfgvar callback flips it on/off
+	 * as the user toggles the Setting. */
+	gtkhx_tray_init (app);
 }
 
 static void
@@ -1236,6 +1242,7 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
 		set_disconnect_btn (sess, 0);
 		conn_task_update (sess, 2);
 		changetitlesdisconnected (sess);
+		gtkhx_tray_set_connected (FALSE);
 		break;
 	case GTKHX_CONNECTION_CONNECTING:
 		set_status_bar (-1);
@@ -1245,6 +1252,7 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
 	case GTKHX_CONNECTION_TCP_CONNECTED:
 		set_status_bar (1);
 		conn_task_update (sess, 1);
+		gtkhx_tray_set_connected (TRUE);
 		break;
 	case GTKHX_CONNECTION_HANDSHAKE_DONE:
 		conn_task_update (sess, 2);

@@ -56,6 +56,13 @@ struct gtkhx_prefs {
 	unsigned char queuedl;
 	unsigned char showjoin;
 	unsigned char showback;
+	/* Phase 5+: show a system-tray icon (StatusNotifierItem). When
+	 * on, the toolbar's close button hides all windows instead of
+	 * quitting; click on the tray icon toggles visibility; the
+	 * right-click menu offers Show/Hide, Connect, Disconnect, Quit.
+	 * Settings → General → "Show tray icon" drives this. Default
+	 * ON; the tray module silently no-ops if no SNI host is around. */
+	unsigned char tray;
 	unsigned char auto_reply;
 	unsigned char timestamp;
 	unsigned char word_wrap;

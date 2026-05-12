@@ -41,6 +41,7 @@
 #include "network.h"
 #include "news15.h"
 #include "log.h"
+#include "tray.h"
 #include "gtkutil.h"
 #include "cfgkeys.h"
 #include "prefs_parser.h"
@@ -558,6 +559,16 @@ static void changed_theme (session *sess)
 
 	adw_style_manager_set_color_scheme (sm, scheme);
 }
+/* Settings → General → "Show tray icon" toggle. Drives the
+ * StatusNotifierItem registration on the session bus — switching
+ * ON kicks off tray_activate_register; switching OFF unregisters
+ * but leaves the module reachable for a future flip. */
+static void changed_tray (session *sess)
+{
+	(void) sess;
+	gtkhx_tray_set_enabled (gtkhx_prefs.tray);
+}
+
 static void changed_newssamewin (session *sess)
 {
 	struct gnews_folder *gfnews;
@@ -672,6 +683,7 @@ struct cfgvar
 	{CFG_TRACKER, {&gtkhx_prefs.tracker_str}, STRING, 0, parse_tracker, NULL},
 	{CFG_TRACKER_CASE, {&gtkhx_prefs.track_case}, BOOLEAN, 0,
 	 changed_case, NULL},
+	{CFG_TRAY, {&gtkhx_prefs.tray}, BOOLEAN, 0, changed_tray, NULL},
 	{CFG_USER_XPOS, {&gtkhx_prefs.geo.users.xpos}, INT, 0, NULL, NULL},
 	{CFG_USER_XSIZE, {&gtkhx_prefs.geo.users.xsize}, INT, 0, NULL, NULL},
 	{CFG_USER_YPOS, {&gtkhx_prefs.geo.users.ypos}, INT, 0, NULL, NULL},
@@ -1117,6 +1129,12 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	changed_case(NULL);
 
 	parse_tracker(NULL);
+
+	/* Tray icon defaults to ON. The runtime is a no-op without an SNI
+	 * host (e.g. stock GNOME Wayland minus AppIndicator extension),
+	 * so leaving it on by default doesn't hurt environments that
+	 * can't render it. */
+	gtkhx_prefs.tray = 1;
 
 	start_time = time(NULL);
 }
@@ -2153,6 +2171,25 @@ static void settings_page_general (AdwPreferencesPage *page)
 	adw_preferences_group_add (paths_grp,
 		pref_entry_row (CFG_DOWNLOAD, _("Download directory")));
 	adw_preferences_page_add (page, paths_grp);
+
+	/* System integration. The tray icon needs a StatusNotifierItem
+	 * host in the desktop environment — KDE Plasma, Cinnamon, MATE,
+	 * Budgie and XFCE support it natively; GNOME Shell needs the
+	 * AppIndicator extension. On a desktop without one, this toggle
+	 * is effectively inert (the icon registers but nothing renders
+	 * it). */
+	{
+		AdwPreferencesGroup *system_grp =
+			ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+		adw_preferences_group_set_title (system_grp,
+			_("System Integration"));
+		adw_preferences_group_add (system_grp,
+			pref_switch_row (CFG_TRAY, _("Show tray icon"),
+			    _("Display a status icon in the system tray. "
+			      "Closing the main window hides to tray; click "
+			      "the icon to toggle GtkHx's windows.")));
+		adw_preferences_page_add (page, system_grp);
+	}
 }
 
 /* Helper: build a fresh AdwPreferencesPage with title + icon and run the

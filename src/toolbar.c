@@ -32,6 +32,7 @@
 #include "xfers.h"
 #include "gtkutil.h"
 #include "tracker.h"
+#include "tray.h"
 #include "gtkhx.h"
 #include "users.h"
 #include "chat.h"
@@ -142,12 +143,22 @@ on_action_connect_builtin (GSimpleAction *action, GVariant *param,
 }
 
 /* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
- * returning gboolean. Returning TRUE inhibits the default destroy —
- * we always want to call hx_quit() (which calls exit()), so the
- * return value never actually flows back. */
+ * returning gboolean. Returning TRUE inhibits the default destroy.
+ *
+ * Phase 5+: when the tray icon is enabled AND a tray host is around
+ * to render it, X-button closes hide all windows instead of
+ * quitting — the conventional "minimize-to-tray" pattern. We require
+ * an actual host (not just the pref) so users with the toggle on
+ * but no AppIndicator extension installed don't end up unable to
+ * exit the app. Without an SNI host, fall through to hx_quit() as
+ * before. */
 static gboolean close_toolbar_window (GtkWindow *window, gpointer data)
 {
 	(void) window; (void) data;
+	if (gtkhx_tray_is_enabled () && gtkhx_tray_host_available ()) {
+		gtkhx_tray_hide_all_windows ();
+		return TRUE;     /* inhibit destroy */
+	}
 	hx_quit();
 	return FALSE;
 }
