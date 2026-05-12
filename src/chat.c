@@ -411,6 +411,11 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	const char *display_body = NULL;
 	gsize display_body_len = 0;
 	gboolean is_info = FALSE;	/* INFOPREFIX branch — never highlight */
+	gboolean said_by_self = FALSE;	/* self vs other — controls bracket colour */
+	const char *self_nick =
+		(the_session.htlc.name[0] != '\0')
+			? (const char *) the_session.htlc.name
+			: NULL;
 	{
 		const char *info_prefix = INFOPREFIX;
 		gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
@@ -429,9 +434,29 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 		} else if (hx_chat_split_nick_body (valid, valid_len,
 		                                    &name_off, &name_len,
 		                                    &body_off, &body_len)) {
-			display_nick = g_strdup_printf ("<%.*s>",
-			                                (int) name_len,
-			                                valid + name_off);
+			/* Phase 5+: colour the angle brackets to match
+			 * msg.c::msg_output — mIRC palette 13 (pink) for
+			 * our own lines, 12 (light blue) for everyone
+			 * else'"'"'s. Format:
+			 *
+			 *   "\003<col><\003<name>\003<col>>\003"
+			 *
+			 * \003<col> opens the colour run; bare \003 closes
+			 * it (xtext parses both forms). The brackets get
+			 * the colour; the name itself stays in the default
+			 * foreground so highlight colour codes (when
+			 * applied below) can override cleanly. */
+			if (self_nick && name_len > 0
+			    && strlen (self_nick) == name_len
+			    && memcmp (valid + name_off,
+			               self_nick, name_len) == 0)
+				said_by_self = TRUE;
+			int brack_col = said_by_self ? 13 : 12;
+			display_nick = g_strdup_printf (
+				"\003%d<\003%.*s\003%d>\003",
+				brack_col,
+				(int) name_len, valid + name_off,
+				brack_col);
 			display_body = valid + body_off;
 			display_body_len = body_len;
 		}
@@ -443,24 +468,9 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	 * any match — and this isn't an [hx] info line, and we
 	 * didn't send the line ourselves — wrap nick + body in
 	 * inline mIRC ATTR codes (\002 bold + \003 04 light-red +
-	 * \017 reset) so xtext renders the line bold red.
-	 *
-	 * Self-detection: when the parsed nick matches our local
-	 * htlc->name, this is our own message echoed back — skip
-	 * the highlight so we don'"'"'t flag ourselves for saying our
-	 * own name. */
+	 * \017 reset) so xtext renders the line bold red. */
 	gboolean do_highlight = FALSE;
 	if (display_nick && !is_info && display_body_len > 0) {
-		const char *self_nick =
-			(the_session.htlc.name[0] != '\0')
-				? (const char *) the_session.htlc.name
-				: NULL;
-		gboolean said_by_self = FALSE;
-		if (self_nick && name_len > 0
-		    && strlen (self_nick) == name_len
-		    && memcmp (valid + name_off, self_nick, name_len) == 0)
-			said_by_self = TRUE;
-
 		if (!said_by_self) {
 			/* Build the words[] list: own nick (if known) +
 			 * the comma-split of gtkhx_prefs.highlight_words.
