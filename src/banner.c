@@ -195,29 +195,59 @@ banner_handle_message (struct htlc_conn *htlc,
 
 	gtk_widget_set_visible (banner_root, TRUE);
 
-	if (has_url && url && *url) {
-		/* URL-mode: cache the URL for click-to-open. With libsoup
-		 * present we kick off an inline fetch and swap in the
-		 * decoded image when it lands; without libsoup we leave
-		 * the URL caption in place and rely on the click handler
-		 * to open the URL in the user's browser. */
-		g_free (current_url);
-		current_url = g_strdup (url);
-		gtk_widget_set_tooltip_text (banner_root, url);
-		banner_show_caption (url);
+	/* Dispatch on TYPE per the 1.9 spec, NOT on URL-chunk
+	 * presence. mhxd in file mode still includes the URL chunk
+	 * from its config (its banner-send logic doesn't gate the
+	 * url field on type) — letting "any URL means URL mode" win
+	 * would route us into URL mode even when the server is
+	 * actually streaming bytes over HTXF. TYPE is authoritative:
+	 *   "URL " (or just "URL") — URL mode
+	 *   "GIFf" / "JPEG" / "PICT" / etc. — file mode (HTXF)
+	 *
+	 * Strip any trailing space when comparing — mhxd pads the
+	 * type to 4 bytes with a space ("URL ", "URL\0", etc.). */
+	gboolean is_url_mode = FALSE;
+	if (type) {
+		gchar trimmed[8];
+		gsize n = 0;
+		while (n < sizeof (trimmed) - 1 && type[n]
+		       && type[n] != ' ')
+			trimmed[n] = type[n], n++;
+		trimmed[n] = '\0';
+		is_url_mode = (g_ascii_strcasecmp (trimmed, "URL") == 0);
+	}
+
+	if (is_url_mode) {
+		if (has_url && url && *url) {
+			/* URL-mode: cache the URL for click-to-open. With
+			 * libsoup present we kick off an inline fetch and
+			 * swap in the decoded image when it lands; without
+			 * libsoup we leave the URL caption in place and
+			 * rely on the click handler to open the URL. */
+			g_free (current_url);
+			current_url = g_strdup (url);
+			gtk_widget_set_tooltip_text (banner_root, url);
+			banner_show_caption (url);
 #ifdef HAVE_LIBSOUP
-		banner_start_url_fetch (url);
+			banner_start_url_fetch (url);
 #endif
+		} else {
+			/* URL mode advertised but no URL chunk — server is
+			 * misconfigured. Show a friendly caption and bail. */
+			banner_show_caption (
+				_("Server banner: URL mode without URL"));
+		}
 		return;
 	}
 
-	/* File-mode: no URL chunk. The server holds the banner bytes
-	 * and expects HTLC_HDR_DOWNLOAD_BANNER (212 in the 1.9 spec),
-	 * replies with HTLS_DATA_HTXF_REF + HTLS_DATA_HTXF_SIZE, and
-	 * then we open the HTXF subchannel at server_port+1, send the
-	 * 16-byte header, and read `size` bytes of image data (GIFf,
-	 * JPEG, PICT, ...). banner_handle_htxf_reply (called from
-	 * rcv_task_banner_get) picks up after the reply parse.
+	/* File-mode: TYPE is a binary image-format tag (GIFf, JPEG,
+	 * PICT, ...). The server holds the banner bytes and expects
+	 * HTLC_HDR_DOWNLOAD_BANNER (212 in the 1.9 spec), replies
+	 * with HTLS_DATA_HTXF_REF + HTLS_DATA_HTXF_SIZE, and then we
+	 * open the HTXF subchannel at server_port+1, send the
+	 * 16-byte header, and read `size` bytes of image data.
+	 * banner_handle_htxf_reply (called from rcv_task_banner_get)
+	 * picks up after the reply parse.
 	 *
 	 * Show a "Loading..." caption in the meantime so the user
 	 * sees feedback while the fetch is in flight. */

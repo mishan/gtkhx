@@ -53,9 +53,16 @@ URL="${BANNER_URL:-$URL_DEFAULT}"
 # explicitly set. mhxd cares about the extension only insofar as
 # the type field tells the client what's on the wire — file bytes
 # are served as-is.
+#
+# Also clear the "other" field (FILE in URL mode, URL in file
+# modes) — mhxd'"'"'s banner-send logic in src/hxd/rcv.c doesn'"'"'t
+# gate the optional fields on the type, so without this it would
+# happily include a stale URL chunk inside a JPEG-type banner.
+# Empty string in the config = no chunk on the wire.
 case "$MODE" in
 	JPEG)
 		FILE="${BANNER_FILE:-/opt/mhxd/run/banner.jpg}"
+		URL=""
 		# mhxd's type strings are exactly 4 bytes — the docs note
 		# "GIFf" is the GIF type and "JPEG" is JPEG; URL is the
 		# special pseudo-type. Pass through verbatim.
@@ -63,10 +70,12 @@ case "$MODE" in
 		;;
 	GIFf|GIF)
 		FILE="${BANNER_FILE:-/opt/mhxd/run/banner.gif}"
+		URL=""
 		TYPE="GIFf"
 		;;
 	URL|"URL ")
-		FILE="${BANNER_FILE:-}"
+		FILE=""
+		# URL kept from the BANNER_URL var above.
 		TYPE="URL"
 		;;
 	*)

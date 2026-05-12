@@ -95,6 +95,7 @@ proto_hdr_name (guint32 type)
 	case HTLC_HDR_PING:            return "HTLC/S_HDR_PING";
 	case HTLC_HDR_AGREEMENTAGREE:  return "HTLC_HDR_AGREEMENTAGREE";
 	case HTLC_HDR_KILLDOWNLOAD:    return "HTLC_HDR_KILLDOWNLOAD";
+	case HTLC_HDR_DOWNLOAD_BANNER: return "HTLC_HDR_DOWNLOAD_BANNER";
 
 	/* Server → client */
 	case HTLS_HDR_NEWS_POST:       return "HTLS_HDR_NEWS_POST";
@@ -110,6 +111,7 @@ proto_hdr_name (guint32 type)
 	case HTLS_HDR_USER_SELFINFO:   return "HTLS_HDR_USER_SELFINFO";
 	case HTLS_HDR_TASK:            return "HTLS_HDR_TASK";
 	case HTLS_HDR_QUEUE:           return "HTLS_HDR_QUEUE";
+	case HTLS_HDR_BANNER:          return "HTLS_HDR_BANNER";
 
 	default:                       return hex_hdr (type);
 	}
@@ -137,6 +139,10 @@ proto_data_name (guint16 type)
 	case HTLC_DATA_CHAT_SUBJECT:   return "HTLC/S_DATA_CHAT_SUBJECT";
 	case HTLS_DATA_QUEUE:          return "HTLS_DATA_QUEUE";
 	case HTLS_DATA_VERSION:        return "HTLS_DATA_VERSION";
+	case HTLS_DATA_BANNER_TYPE:    return "HTLS_DATA_BANNER_TYPE";
+	case HTLS_DATA_BANNER_URL:     return "HTLS_DATA_BANNER_URL";
+	/* HTLS_DATA_HTXF_SIZE shares opcode 0x6c with
+	 * HTLC_DATA_HTXF_SIZE — already named above. */
 	case HTLS_DATA_SERVERNAME:     return "HTLS_DATA_SERVERNAME";
 	case HTLS_DATA_NOAGREEMENT:    return "HTLS_DATA_NOAGREEMENT";
 
