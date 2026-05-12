@@ -88,6 +88,13 @@ finish-args:
   - --own-name=org.kde.StatusNotifierItem-*
   - --talk-name=org.kde.StatusNotifierWatcher
 
+  # Desktop notifications (src/notify.c). GApplication routes
+  # g_notification_send to org.freedesktop.Notifications on the
+  # session bus — the standard notification daemon (mako, dunst,
+  # GNOME Shell, KWin, etc.). Without this permission the call
+  # silently no-ops behind xdg-dbus-proxy.
+  - --talk-name=org.freedesktop.Notifications
+
 modules:
   # libcanberra — gsound's audio backend. Last upstream release
   # is 0.30 from 2012; no successor has shipped because the API

@@ -55,6 +55,23 @@
 #define CFG_FILE_SAMEWIN    "FILE_SAMEWINDOW"
 #define CFG_NEWS_SAMEWIN    "NEWS_SAMEWINDOW"
 
+/* Desktop notifications (Phase 5+). One BOOLEAN per event class so
+ * users can toggle each independently. NOTIFY_OMIT_FOCUSED gates
+ * the suppress-when-relevant-window-has-focus behaviour. The
+ * "mention" classes (CHAT_HIGHLIGHT / PCHAT_HIGHLIGHT) match
+ * against the same word list as the chat highlight colouring
+ * (own nick + CFG_HIGHLIGHT_WORDS, comma-separated). */
+#define CFG_NOTIFY_CHAT             "NOTIFYCHAT"
+#define CFG_NOTIFY_CHAT_HIGHLIGHT   "NOTIFYCHATHIGHLIGHT"
+#define CFG_NOTIFY_MSG              "NOTIFYMSG"
+#define CFG_NOTIFY_PCHAT            "NOTIFYPCHAT"
+#define CFG_NOTIFY_PCHAT_HIGHLIGHT  "NOTIFYPCHATHIGHLIGHT"
+#define CFG_NOTIFY_PCHAT_INVITE     "NOTIFYPCHATINVITE"
+#define CFG_NOTIFY_NEWS             "NOTIFYNEWS"
+#define CFG_NOTIFY_XFER             "NOTIFYXFER"
+#define CFG_NOTIFY_BROADCAST        "NOTIFYBROADCAST"
+#define CFG_NOTIFY_OMIT_FOCUSED     "NOTIFYOMITFOCUSED"
+
 /* Sounds */
 #define CFG_SOUNDS_ON       "SOUNDSON"
 #define CFG_SND_INVITE      "SOUNDINVITE"

@@ -93,6 +93,7 @@ struct gtkhx_prefs gtkhx_prefs =
 	1,	/* queuedl */
 	1,	/* showjoin */
 	0,	/* showback */
+	0,	/* tray (init_variables sets default) */
 	0,	/* auto_reply */
 	0,	/* timestamp */
 	0,	/* word_wrap */
@@ -111,6 +112,23 @@ struct gtkhx_prefs gtkhx_prefs =
 	1,	/* autocopy_text */
 	0,	/* autocopy_stamp */
 	0,	/* autocopy_color */
+
+	/* Phase 5+: notification toggles. Zero-initialised here;
+	 * init_variables sets the user-facing defaults (mentions on,
+	 * private messages on, etc.) and prefs_read overrides those
+	 * from gtkhxrc. The static-init defaults are deliberately
+	 * conservative (all-off) so a barebones init path doesn't
+	 * spam notifications. */
+	0,	/* notify_chat */
+	0,	/* notify_chat_highlight */
+	0,	/* notify_msg */
+	0,	/* notify_pchat */
+	0,	/* notify_pchat_highlight */
+	0,	/* notify_pchat_invite */
+	0,	/* notify_news */
+	0,	/* notify_xfer */
+	0,	/* notify_broadcast */
+	0,	/* notify_omit_focused */
 
 	0,	/* out_bps */
 	0	/* in_bps */
@@ -645,6 +663,26 @@ struct cfgvar
 	 changed_newssamewin, NULL},
 	{CFG_NICK, {the_session.htlc.name}, STRING32, 0,
 	 changed_nickoricon, NULL},
+	{CFG_NOTIFY_BROADCAST, {&gtkhx_prefs.notify_broadcast},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_CHAT, {&gtkhx_prefs.notify_chat},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_CHAT_HIGHLIGHT, {&gtkhx_prefs.notify_chat_highlight},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_MSG, {&gtkhx_prefs.notify_msg},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_NEWS, {&gtkhx_prefs.notify_news},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_OMIT_FOCUSED, {&gtkhx_prefs.notify_omit_focused},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_PCHAT, {&gtkhx_prefs.notify_pchat},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_PCHAT_HIGHLIGHT, {&gtkhx_prefs.notify_pchat_highlight},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_PCHAT_INVITE, {&gtkhx_prefs.notify_pchat_invite},
+	 BOOLEAN, 0, NULL, NULL},
+	{CFG_NOTIFY_XFER, {&gtkhx_prefs.notify_xfer},
+	 BOOLEAN, 0, NULL, NULL},
 	{CFG_OLD_NICKCOMP, {&gtkhx_prefs.old_nickcompletion}, BOOLEAN, 0,
 	 NULL, NULL},
 	{CFG_OPEN_CHAT, {&gtkhx_prefs.geo.chat.init}, BOOLEAN, 0, NULL, NULL},
@@ -1135,6 +1173,27 @@ void init_variables(void) /* default settings if prefs file is not found. */
 	 * so leaving it on by default doesn't hurt environments that
 	 * can't render it. */
 	gtkhx_prefs.tray = 1;
+
+	/* Notification defaults match the HexChat convention: the
+	 * high-signal events (mentions, PMs, invites) are on; the
+	 * noisy ones (every chat line, every news post) are off so a
+	 * fresh install doesn't immediately spam the user. They can
+	 * dial each event up or down individually in Settings →
+	 * Notifications.
+	 *
+	 * notify_omit_focused defaults ON so a notification only
+	 * fires when the relevant window doesn't already have the
+	 * user's attention. */
+	gtkhx_prefs.notify_chat            = 0;
+	gtkhx_prefs.notify_chat_highlight  = 1;
+	gtkhx_prefs.notify_msg             = 1;
+	gtkhx_prefs.notify_pchat           = 1;
+	gtkhx_prefs.notify_pchat_highlight = 1;
+	gtkhx_prefs.notify_pchat_invite    = 1;
+	gtkhx_prefs.notify_news            = 0;
+	gtkhx_prefs.notify_xfer            = 1;
+	gtkhx_prefs.notify_broadcast       = 1;
+	gtkhx_prefs.notify_omit_focused    = 1;
 
 	start_time = time(NULL);
 }
@@ -2105,6 +2164,83 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	adw_preferences_page_add (page, picker_grp);
 }
 
+/* Phase 5+: Notifications page. One row per event class that can
+ * fire a desktop notification, plus a global "don't notify when
+ * the relevant window is focused" toggle. Mention matching uses
+ * the same word list as the chat highlight colouring (own nick
+ * + CFG_HIGHLIGHT_WORDS, comma-separated), so what gets
+ * highlighted visually is what triggers a notification. */
+static void settings_page_notifications (AdwPreferencesPage *page)
+{
+	AdwPreferencesGroup *events, *behavior, *mentions;
+
+	events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (events, _("Events"));
+	adw_preferences_group_set_description (events,
+		_("Show a desktop notification when these events happen."));
+
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_MSG,
+		                 _("Private message"),
+		                 _("Someone sends you a 1-to-1 message")));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_PCHAT_INVITE,
+		                 _("Private chat invitation"),
+		                 _("Someone invites you to a private chat")));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_CHAT_HIGHLIGHT,
+		                 _("Mention in public chat"),
+		                 _("Your name or a highlight word appears in a chat message")));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_PCHAT_HIGHLIGHT,
+		                 _("Mention in private chat"),
+		                 _("Your name or a highlight word appears in a private chat")));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_CHAT,
+		                 _("Every public chat message"),
+		                 _("Noisy — only useful on quiet servers")));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_PCHAT,
+		                 _("Every private chat message"),
+		                 NULL));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_NEWS,
+		                 _("New news post"),
+		                 NULL));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_XFER,
+		                 _("File transfer complete"),
+		                 NULL));
+	adw_preferences_group_add (events,
+		pref_switch_row (CFG_NOTIFY_BROADCAST,
+		                 _("Server broadcast"),
+		                 _("Admin-issued announcement to every user")));
+
+	adw_preferences_page_add (page, events);
+
+	behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (behavior, _("Behavior"));
+	adw_preferences_group_add (behavior,
+		pref_switch_row (CFG_NOTIFY_OMIT_FOCUSED,
+		                 _("Don't notify when the relevant window is focused"),
+		                 _("If a chat or private message window is already "
+		                   "active, don't pop a notification on top of it")));
+	adw_preferences_page_add (page, behavior);
+
+	/* Mirror the Chat page's highlight-word entry so users can
+	 * configure it from either place. Edits in either flow
+	 * the same gtkhx_prefs.highlight_words string. */
+	mentions = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+	adw_preferences_group_set_title (mentions, _("Mention Words"));
+	adw_preferences_group_set_description (mentions,
+		_("Comma-separated. Your nickname is always matched in "
+		  "addition to this list. The same list drives chat "
+		  "message highlighting."));
+	adw_preferences_group_add (mentions,
+		pref_entry_row (CFG_HIGHLIGHT_WORDS, _("Highlight words")));
+	adw_preferences_page_add (page, mentions);
+}
+
 /* Phase 5: Misc used to be a catchall for Behavior toggles. Most of
  * those have moved to the page they belong on (showjoin /
  * old_nickcomp → Chat, tracker_case → Trackers); what stays here is
@@ -2258,6 +2394,9 @@ void create_options_window (GtkWidget *widget, gpointer data)
 	                   settings_page_chat);
 	settings_add_page (dlg, _("Sound"),     "audio-speakers-symbolic",
 	                   settings_page_sound);
+	settings_add_page (dlg, _("Notifications"),
+	                   "preferences-system-notifications-symbolic",
+	                   settings_page_notifications);
 	settings_add_page (dlg, _("Interface"), "view-list-symbolic",
 	                   settings_page_interface);
 	settings_add_page (dlg, _("Trackers"),  "network-server-symbolic",

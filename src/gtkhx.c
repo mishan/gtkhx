@@ -52,6 +52,7 @@
 #include "chat.h"
 #include "msg.h"
 #include "gtkhx_session.h"
+#include "notify.h"
 #include "tracker.h"
 #include "tray.h"
 #include "xtext.h"
@@ -911,6 +912,11 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 	 * register-time; the changed_tray cfgvar callback flips it on/off
 	 * as the user toggles the Setting. */
 	gtkhx_tray_init (app);
+
+	/* Phase 5+: desktop notifications. Each event-class entry
+	 * point consults its NOTIFY_* pref + the
+	 * notify_omit_focused gate before posting. */
+	gtkhx_notify_init (app);
 }
 
 static void
@@ -1025,6 +1031,16 @@ on_chat_signal (GtkhxSession *emitter,
 {
 	(void) emitter; (void) user_data;
 	output_chat (htlc, (guint32) cid, (char *) body, (guint16) len);
+
+	/* Phase 5+: notify dispatch. Hand the body verbatim to the
+	 * notifier — it runs the highlight matcher (own nick +
+	 * CFG_HIGHLIGHT_WORDS) against the bytes and decides whether
+	 * the message qualifies. */
+	{
+		char *safe = g_strndup ((const char *) body, (gsize) len);
+		gtkhx_notify_chat ((guint32) cid, safe);
+		g_free (safe);
+	}
 }
 
 static void
@@ -1043,6 +1059,7 @@ on_chat_invitation_signal (GtkhxSession *emitter,
 {
 	(void) emitter; (void) user_data;
 	output_chat_invitation (htlc, (guint32) cid, (char *) name);
+	gtkhx_notify_pchat_invite ((guint32) cid, (const char *) name);
 }
 
 static void
@@ -1052,6 +1069,8 @@ on_msg_signal (GtkhxSession *emitter,
 {
 	(void) emitter; (void) user_data;
 	msg_output ((char *) name, (guint16) uid, (char *) body);
+	gtkhx_notify_msg ((const char *) name, (guint16) uid,
+	                  (const char *) body);
 }
 
 static void
@@ -1080,6 +1099,22 @@ on_news_post_signal (GtkhxSession *emitter,
 {
 	(void) emitter; (void) user_data;
 	output_news_post (htlc, (char *) news, (guint16) len);
+
+	/* News posts can be paragraphs long; pull just the first
+	 * line as the notification preview. */
+	{
+		const char *raw = (const char *) news;
+		const char *nl;
+		char *first_line;
+		gsize use = len;
+		nl = memchr (raw, '\n', len);
+		if (nl) use = nl - raw;
+		nl = memchr (raw, '\r', use);
+		if (nl) use = nl - raw;
+		first_line = g_strndup (raw, use);
+		gtkhx_notify_news (first_line);
+		g_free (first_line);
+	}
 }
 
 static void
@@ -1186,8 +1221,24 @@ on_file_update_signal (GtkhxSession *emitter,
                        gpointer sess, gpointer htxf,
                        gpointer user_data)
 {
+	struct htxf_conn *x = (struct htxf_conn *) htxf;
 	(void) emitter; (void) user_data;
-	file_update ((session *) sess, (struct htxf_conn *) htxf);
+	file_update ((session *) sess, x);
+
+	/* file_update fires repeatedly during a transfer. Detect
+	 * "just finished" by total_pos catching up to total_size and
+	 * notify once. The xfer worker sets total_pos = total_size
+	 * explicitly at end-of-stream and then exits (post_xfer_
+	 * cleanup follows), so this state is reached exactly once
+	 * per htxf in practice. The notification ID is shared
+	 * ("xfer"), so even if it fired twice the second would just
+	 * refresh the popup, not stack. */
+	if (x && x->total_size > 0 && x->total_pos >= x->total_size) {
+		const char *path = x->path;
+		const char *base = path ? strrchr (path, '/') : NULL;
+		gtkhx_notify_xfer_done (base ? base + 1
+		                             : (path ? path : NULL));
+	}
 }
 
 static void

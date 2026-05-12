@@ -1,0 +1,295 @@
+/*
+ * Copyright (C) 2026 Misha Nasledov <misha@nasledov.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ */
+
+/*
+ * notify.c — see notify.h for the design overview.
+ *
+ * For each event class:
+ *
+ *   1. The pref guard runs first (a one-byte check against
+ *      gtkhx_prefs.notify_*). Cheap; no-op if the user disabled
+ *      this event class.
+ *   2. For mention-class events, hx_highlight_match runs against
+ *      the body using the same word list (own nick +
+ *      CFG_HIGHLIGHT_WORDS) that the xtext chat-line highlight
+ *      uses. Reusing the matcher means visual highlight and
+ *      notification trigger always agree.
+ *   3. If notify_omit_focused is on, we look up the relevant
+ *      window (chat for cid, pchat for cid > 0, msg window for
+ *      uid, etc.) and bail if it has keyboard focus.
+ *   4. Survivors build a GNotification with a per-source ID so a
+ *      flood from one chat replaces rather than stacks.
+ *
+ * No threading: every entry point runs on main (callers are the
+ * GtkhxSession signal handlers, which the signal infrastructure
+ * already marshals to main).
+ */
+
+#include "config.h"
+#include <string.h>
+#include <gtk/gtk.h>
+#include "hx.h"
+#include "session.h"
+#include "chat.h"
+#include "msg.h"
+#include "proto_helpers.h"
+#include "toolbar.h"
+#include "notify.h"
+
+/* ---- Module state -------------------------------------------------- */
+
+static GtkApplication *notify_app;
+
+/* ---- Helpers ------------------------------------------------------- */
+
+/* Pull the user's current nick + the highlight-words list and run
+ * hx_highlight_match against `body`. Reuses the same logic chat.c
+ * uses for the inline ATTR_BOLD+ATTR_COLOR highlight so visual
+ * highlight and notification trigger always agree. */
+static gboolean
+body_mentions_us (const char *body)
+{
+	const char *self_nick = the_session.htlc.name;
+	gboolean matched = FALSE;
+	GPtrArray *words;
+	gchar **extras = NULL;
+
+	if (!body || !*body)
+		return FALSE;
+
+	words = g_ptr_array_new ();
+	if (self_nick && *self_nick)
+		g_ptr_array_add (words, (gpointer) self_nick);
+	if (gtkhx_prefs.highlight_words && *gtkhx_prefs.highlight_words) {
+		extras = g_strsplit (gtkhx_prefs.highlight_words, ",", -1);
+		for (gsize i = 0; extras && extras[i]; i++) {
+			gchar *w = g_strstrip (extras[i]);
+			if (*w)
+				g_ptr_array_add (words, w);
+		}
+	}
+	g_ptr_array_add (words, NULL);
+
+	matched = hx_highlight_match (body, strlen (body),
+	                              (const char * const *) words->pdata);
+
+	g_ptr_array_unref (words);
+	if (extras)
+		g_strfreev (extras);
+	return matched;
+}
+
+/* gtk_window_is_active() returns TRUE when the window is the OS-level
+ * active window (focused). NULL-safe. */
+static gboolean
+window_is_active (GtkWidget *w)
+{
+	return w && GTK_IS_WINDOW (w) && gtk_window_is_active (GTK_WINDOW (w));
+}
+
+/* Look up the gtkhx_chat (UI) wrapper for a given cid. cid=0 is the
+ * public chat. Returns NULL if no UI window has been created yet —
+ * which counts as "not focused" for the purposes of omit-focused. */
+static GtkWidget *
+chat_window_for_cid (guint32 cid)
+{
+	struct gtkhx_chat *gc = gchat_with_cid (&the_session, cid);
+	return gc ? gc->window : NULL;
+}
+
+static GtkWidget *
+msg_window_for_uid (guint16 uid)
+{
+	struct msgwin *m = msgwin_with_uid (uid);
+	return m ? m->window : NULL;
+}
+
+/* Truncate a body to a sensible notification length. GNOME / KDE
+ * tend to wrap long notifications anyway, but a 200-char cap keeps
+ * the popup readable and avoids dragging the user's eye through a
+ * paragraph in their peripheral vision. */
+#define NOTIFY_BODY_MAX 200
+
+static char *
+truncated (const char *body)
+{
+	gsize len;
+	const char *cut;
+
+	if (!body)
+		return g_strdup ("");
+	len = strlen (body);
+	if (len <= NOTIFY_BODY_MAX)
+		return g_strdup (body);
+
+	/* g_utf8_find_prev_char-safe truncation: walk back from the
+	 * cap to the previous UTF-8 boundary so we don't slice through
+	 * a multi-byte sequence. */
+	cut = g_utf8_find_prev_char (body, body + NOTIFY_BODY_MAX);
+	if (!cut)
+		cut = body + NOTIFY_BODY_MAX;
+	return g_strdup_printf ("%.*s…", (int) (cut - body), body);
+}
+
+static void
+send_notify (const char *id, const char *title, const char *body)
+{
+	GNotification *n;
+
+	if (!notify_app || !title)
+		return;
+
+	n = g_notification_new (title);
+	if (body && *body) {
+		char *trim = truncated (body);
+		g_notification_set_body (n, trim);
+		g_free (trim);
+	}
+	g_notification_set_priority (n, G_NOTIFICATION_PRIORITY_NORMAL);
+
+	/* The icon is sourced from the app's installed icon (matching
+	 * the GApplication app-id) so we don't have to bundle a
+	 * separate notification glyph. */
+
+	g_application_send_notification (G_APPLICATION (notify_app), id, n);
+	g_object_unref (n);
+}
+
+/* ---- Public API ---------------------------------------------------- */
+
+void
+gtkhx_notify_init (GtkApplication *app)
+{
+	notify_app = app;
+}
+
+void
+gtkhx_notify_chat (guint32 cid, const char *body)
+{
+	gboolean is_mention = body_mentions_us (body);
+	gboolean want;
+	char id[64];
+
+	/* cid > 0 is a private chat; the dedicated pchat entry point
+	 * handles those. This entry point is for the public chat
+	 * (cid == 0). */
+	if (cid != 0) {
+		gtkhx_notify_pchat (cid, body);
+		return;
+	}
+
+	want = is_mention ? gtkhx_prefs.notify_chat_highlight
+	                  : gtkhx_prefs.notify_chat;
+	if (!want)
+		return;
+
+	if (gtkhx_prefs.notify_omit_focused
+	    && window_is_active (chat_window_for_cid (cid)))
+		return;
+
+	g_snprintf (id, sizeof (id), "chat-%u", cid);
+	send_notify (id,
+	             is_mention ? "Mention in public chat"
+	                        : "Public chat",
+	             body);
+}
+
+void
+gtkhx_notify_msg (const char *sender, guint16 uid, const char *body)
+{
+	char *title;
+	char id[64];
+
+	if (!gtkhx_prefs.notify_msg)
+		return;
+
+	if (gtkhx_prefs.notify_omit_focused
+	    && window_is_active (msg_window_for_uid (uid)))
+		return;
+
+	g_snprintf (id, sizeof (id), "msg-%u", uid);
+	title = g_strdup_printf ("%s (private message)",
+	                         sender ? sender : "?");
+	send_notify (id, title, body);
+	g_free (title);
+}
+
+void
+gtkhx_notify_pchat (guint32 cid, const char *body)
+{
+	gboolean is_mention = body_mentions_us (body);
+	gboolean want;
+	char id[64];
+
+	want = is_mention ? gtkhx_prefs.notify_pchat_highlight
+	                  : gtkhx_prefs.notify_pchat;
+	if (!want)
+		return;
+
+	if (gtkhx_prefs.notify_omit_focused
+	    && window_is_active (chat_window_for_cid (cid)))
+		return;
+
+	g_snprintf (id, sizeof (id), "pchat-%u", cid);
+	send_notify (id,
+	             is_mention ? "Mention in private chat"
+	                        : "Private chat",
+	             body);
+}
+
+void
+gtkhx_notify_pchat_invite (guint32 cid, const char *inviter)
+{
+	char *title;
+	char id[64];
+
+	if (!gtkhx_prefs.notify_pchat_invite)
+		return;
+
+	g_snprintf (id, sizeof (id), "pchat-invite-%u", cid);
+	title = g_strdup_printf ("Chat invitation from %s",
+	                         inviter ? inviter : "?");
+	send_notify (id, title, NULL);
+	g_free (title);
+}
+
+void
+gtkhx_notify_news (const char *headline)
+{
+	if (!gtkhx_prefs.notify_news)
+		return;
+
+	/* News notifications are coarse — one ID for all news, so a
+	 * burst of posts only fires the most recent. No focus check
+	 * (news window isn't tracked by uid/cid, and a news post
+	 * arriving while the news window is open is still
+	 * notification-worthy). */
+	send_notify ("news", "New news post",
+	             headline ? headline : NULL);
+}
+
+void
+gtkhx_notify_xfer_done (const char *filename)
+{
+	if (!gtkhx_prefs.notify_xfer)
+		return;
+
+	send_notify ("xfer", "File transfer complete",
+	             filename ? filename : NULL);
+}
+
+void
+gtkhx_notify_broadcast (const char *text)
+{
+	if (!gtkhx_prefs.notify_broadcast)
+		return;
+
+	send_notify ("broadcast", "Server broadcast",
+	             text ? text : NULL);
+}

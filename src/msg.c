@@ -36,6 +36,7 @@
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"
+#include "notify.h"
 #include "toolbar.h"
 #include "users.h"
 #include "cicn.h"
@@ -618,6 +619,12 @@ void broadcastmsg(char *text)
 	GtkWidget *textbox, *scroll;
 	GtkTextBuffer *tbuf;
 	gsize len = text ? strlen (text) : 0;
+
+	/* Phase 5+: notify-dispatch happens before the toast/alert so
+	 * the user sees a system-level alert regardless of whether
+	 * the broadcast renders as a transient toast or a modal
+	 * dialog. */
+	gtkhx_notify_broadcast (text);
 
 	if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
 		toolbar_show_toast (text);

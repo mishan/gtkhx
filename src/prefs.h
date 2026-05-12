@@ -83,6 +83,20 @@ struct gtkhx_prefs {
 	unsigned char autocopy_stamp;
 	unsigned char autocopy_color;
 
+	/* Phase 5+: per-event desktop notification toggles. See the
+	 * CFG_NOTIFY_* keys in cfgkeys.h for the user-facing surface
+	 * and src/notify.c for the dispatch logic. */
+	unsigned char notify_chat;
+	unsigned char notify_chat_highlight;
+	unsigned char notify_msg;
+	unsigned char notify_pchat;
+	unsigned char notify_pchat_highlight;
+	unsigned char notify_pchat_invite;
+	unsigned char notify_news;
+	unsigned char notify_xfer;
+	unsigned char notify_broadcast;
+	unsigned char notify_omit_focused;
+
 	int out_bps;
 	int in_bps;
 };

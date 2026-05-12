@@ -25,6 +25,7 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'news.c',
+  'notify.c',
   'news15.c',
   'options.c',
   'path_util.c',
