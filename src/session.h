@@ -105,8 +105,13 @@ struct ifn {
 
 /* ---- Chat windows ------------------------------------------------- */
 
+/* Phase 5+ (GLib-collections): no more next/prev. Open chat-window
+ * UI lives in session->gchats, a GHashTable<u32 cid, struct
+ * gtkhx_chat*>. cid=0 is the public chat's window (created at
+ * startup by create_chat); pchat windows go in keyed on their
+ * cid. Lookup by cid is O(1) via gchat_with_cid; the value
+ * destroy notify (gchat_free in chat.c) reclaims the struct. */
 struct gtkhx_chat {
-	struct gtkhx_chat *next, *prev;
 	GtkWidget *window;
 	GtkWidget *vscroll;
 	GtkWidget *output;
@@ -245,7 +250,11 @@ typedef struct _session {
 
 	GtkWidget *agreementwin;
 
-	struct gtkhx_chat *gchat_list;
+	/* Phase 5+: open chat-window UI keyed on cid. Replaces the
+	 * doubly-linked gchat_list. The public chat (cid=0) is added
+	 * by create_chat at startup; pchat_new adds private-chat
+	 * windows. */
+	GHashTable *gchats;
 
 	struct gtask *gtask_list;
 	GtkWidget *gtklist, *gtask_scroll;

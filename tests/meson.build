@@ -183,6 +183,19 @@ test_chat_hash = executable('test_chat_hash',
 test('chat_hash', test_chat_hash,
      suite : 'unit')
 
+# gchat_hash — Phase 1.4 replaces session->gchat_list (the doubly-
+# linked list of open chat / pchat UI windows) with
+# GHashTable<u32 cid, struct gtkhx_chat*>. Same layout-stub approach
+# as chat_hash. Focuses on the public-chat-coexists-with-pchats
+# patterns specific to the gchats table.
+test_gchat_hash = executable('test_gchat_hash',
+  'unit/test_gchat_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('gchat_hash', test_gchat_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #

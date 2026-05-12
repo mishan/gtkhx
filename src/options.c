@@ -282,23 +282,27 @@ static void list_icons (void)
 
 void reinit_gtktexts (session *sess)
 {
-	struct gtkhx_chat *gchat;
-
 	if(gtkhx_prefs.geo.news.open) {
 		gtkhx_apply_text_style(sess->news_text);
 	}
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			if(gchat->cid == 0 && !gtkhx_prefs.geo.chat.open)
-				continue;
-			gtk_xtext_set_font(GTK_XTEXT(gchat->output), fontname);
-			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
-			if(gchat->input) {
-				gtkhx_apply_text_style(gchat->input);
-			}
-			if(gchat->subject) {
-				gtkhx_apply_text_style(gchat->subject);
+		if (sess->gchats) {
+			GHashTableIter iter;
+			gpointer key, val;
+			g_hash_table_iter_init (&iter, sess->gchats);
+			while (g_hash_table_iter_next (&iter, &key, &val)) {
+				struct gtkhx_chat *gchat = val;
+				if (GPOINTER_TO_UINT (key) == 0
+				    && !gtkhx_prefs.geo.chat.open)
+					continue;
+				gtk_xtext_set_font (GTK_XTEXT (gchat->output),
+				                    fontname);
+				gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+				if (gchat->input)
+					gtkhx_apply_text_style (gchat->input);
+				if (gchat->subject)
+					gtkhx_apply_text_style (gchat->subject);
 			}
 		}
 		/* Phase 5+: walk the PM-window hashtable. The pre-port
@@ -329,11 +333,18 @@ static void changed_xtext (session *sess)
 {
 	if (sess)
 	{
-		struct gtkhx_chat *gchat;
-		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			GTK_XTEXT(gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
-			GTK_XTEXT(gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
-			gtk_xtext_refresh(GTK_XTEXT(gchat->output));
+		if (sess->gchats) {
+			GHashTableIter iter;
+			gpointer val;
+			g_hash_table_iter_init (&iter, sess->gchats);
+			while (g_hash_table_iter_next (&iter, NULL, &val)) {
+				struct gtkhx_chat *gchat = val;
+				GTK_XTEXT (gchat->output)->wordwrap =
+					gtkhx_prefs.word_wrap;
+				GTK_XTEXT (gchat->output)->max_lines =
+					gtkhx_prefs.xbuf_max;
+				gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+			}
 		}
 		if (sess->msg_windows) {
 			GHashTableIter iter;
@@ -360,11 +371,17 @@ static void changed_timestamp (session *sess)
 {
 	if (!sess)
 		return;
-	struct gtkhx_chat *gchat;
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		gtk_xtext_set_time_stamp (GTK_XTEXT (gchat->output)->buffer,
-		                          gtkhx_prefs.timestamp);
-		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct gtkhx_chat *gchat = val;
+			gtk_xtext_set_time_stamp (
+				GTK_XTEXT (gchat->output)->buffer,
+				gtkhx_prefs.timestamp);
+			gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+		}
 	}
 	if (sess->msg_windows) {
 		GHashTableIter iter;
@@ -463,10 +480,15 @@ static void changed_stampformat (session *sess)
 {
 	if (!sess)
 		return;
-	struct gtkhx_chat *gchat;
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		gtk_xtext_set_stamp_format (GTK_XTEXT (gchat->output),
-		                            gtkhx_prefs.stamp_format);
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct gtkhx_chat *gchat = val;
+			gtk_xtext_set_stamp_format (GTK_XTEXT (gchat->output),
+			                            gtkhx_prefs.stamp_format);
+		}
 	}
 	if (sess->msg_windows) {
 		GHashTableIter iter;

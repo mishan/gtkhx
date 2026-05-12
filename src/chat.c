@@ -356,28 +356,38 @@ struct chat *chat_with_cid (session *sess, guint32 cid)
 	return g_hash_table_lookup (sess->chats, GUINT_TO_POINTER (cid));
 }
 
+/* Phase 5+: gtkhx_chat (UI side) lifecycle on GHashTable.
+ *
+ * The table's destroy notify just g_frees the struct; the widget
+ * subtree (window, output, input, subject, userlist, vscroll) is
+ * owned by the parent window and reclaimed when the window is
+ * destroyed. gchat_delete callers (gtkutil.c teardown, pchat_close)
+ * destroy the window separately. */
+static void gchat_free (gpointer p)
+{
+	g_free (p);
+}
+
+void gchats_init (session *sess)
+{
+	if (!sess->gchats)
+		sess->gchats = g_hash_table_new_full (g_direct_hash,
+		                                      g_direct_equal,
+		                                      NULL, gchat_free);
+}
+
 struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid)
 {
-	struct gtkhx_chat *gchat;
-
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			if (gchat->cid == cid) {
-				return gchat;
-			}
-	}
-
-	return 0;
+	if (!sess->gchats)
+		return NULL;
+	return g_hash_table_lookup (sess->gchats, GUINT_TO_POINTER (cid));
 }
 
 void gchat_delete (session *sess, struct gtkhx_chat *gchat)
 {
-	if (gchat->next)
-		gchat->next->prev = gchat->prev;
-	if (gchat->prev)
-		gchat->prev->next = gchat->next;
-	if (gchat == sess->gchat_list)
-		sess->gchat_list = gchat->prev;
-	g_free(gchat);
+	if (!gchat || !sess->gchats)
+		return;
+	g_hash_table_remove (sess->gchats, GUINT_TO_POINTER (gchat->cid));
 }
 
 void xprintline(GtkWidget *text, char *chat, size_t len)
@@ -1237,14 +1247,14 @@ void create_chat(session *sess)
 	gchat->subject = 0;
 	gchat->output = text;
 	gchat->userlist = 0;
-	gchat->next = 0;
-	gchat->prev = sess->gchat_list;
 	gchat->vscroll = vscroll;
 	gchat->chat = 0;
 	gchat->window = 0;
 	gchat->input = 0;
 
-	sess->gchat_list = gchat;
+	/* Public chat (cid=0) UI gets seeded into the table on the
+	 * single create_chat call at session init. */
+	g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (0u), gchat);
 }
 
 static void change_subject(GtkWidget *widget, gpointer data)
@@ -1411,13 +1421,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GtkWidget *userlist;
 	struct gtkhx_chat *gchat;
 
-	gchat = g_malloc(sizeof(struct gtkhx_chat));
-	gchat->next = 0;
-	gchat->prev = sess->gchat_list;
-
-	if (sess->gchat_list) {
-		sess->gchat_list->next = gchat;
-	}
+	gchat = g_malloc (sizeof (struct gtkhx_chat));
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
@@ -1466,7 +1470,8 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gchat->subject = subject;
 	gchat->userlist = userlist;
 	gchat->chat_history = history_new();
-	sess->gchat_list = gchat;
+	g_hash_table_insert (sess->gchats,
+	                     GUINT_TO_POINTER (gchat->cid), gchat);
 
 	return gchat;
 }

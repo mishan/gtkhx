@@ -385,21 +385,32 @@ void changetitlesdisconnected(session *sess)
 
 void close_connected_windows(session *sess)
 {
-	struct gtkhx_chat *gchat, *prev = NULL;
-
 	if(sess->agreementwin) {
 		gtkhx_widget_destroy(sess->agreementwin);
 		sess->agreementwin = NULL;
 	}
 	destroy_gfl_list();
 
-
-	for(gchat = sess->gchat_list; gchat; gchat = prev) {
-		prev = gchat->prev;
-		if(gchat->cid) {
-			gtkhx_widget_destroy(gchat->window);
-			gchat_delete(sess, gchat);
+	/* Phase 5+: walk the gchats hashtable, destroying every non-public
+	 * pchat window. The public chat (cid=0) UI persists across
+	 * reconnects, like its model-side counterpart in sess->chats.
+	 * Collect cids first then delete in a second pass so we don't
+	 * mutate the table mid-iteration. */
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer key, val;
+		GList *to_close = NULL;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, &val)) {
+			if (GPOINTER_TO_UINT (key) != 0) {
+				struct gtkhx_chat *gchat = val;
+				gtkhx_widget_destroy (gchat->window);
+				to_close = g_list_prepend (to_close, key);
+			}
 		}
+		for (GList *l = to_close; l; l = l->next)
+			g_hash_table_remove (sess->gchats, l->data);
+		g_list_free (to_close);
 	}
 }
 

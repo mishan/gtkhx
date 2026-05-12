@@ -226,15 +226,22 @@ static void
 on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
 	struct UserActionCtx *ctx = user_data;
-	struct gtkhx_chat *gchat;
 	int with_cid = 0;
 	(void) action; (void) param;
 
 	if (!ctx->user) return;
 
-	for (gchat = ctx->sess->gchat_list; gchat; gchat = gchat->prev)
-		if (gchat->cid)
-			with_cid = 1;
+	if (ctx->sess->gchats) {
+		GHashTableIter iter;
+		gpointer key;
+		g_hash_table_iter_init (&iter, ctx->sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, NULL)) {
+			if (GPOINTER_TO_UINT (key) != 0) {
+				with_cid = 1;
+				break;
+			}
+		}
+	}
 
 	if (!with_cid)
 		hx_chat_user (&ctx->sess->htlc, ctx->user->uid);
@@ -763,17 +770,25 @@ static void prompt_chat (session *sess, guint16 _uid)
 	gtkhx_widget_set_child (scroll, list);
 	gtk_widget_set_size_request (scroll, 350, 200);
 
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		gint row;
-		if (!gchat->cid)
-			continue;
-		entry[0] = g_strdup_printf ("0x%08x", gchat->chat->cid);
-		entry[1] = gchat->chat->subject;
-		row = gtk_hlist_append (GTK_HLIST (list), entry);
-		/* Stash the cid as row_data so the response handler can
-		 * recover it without parsing back the display string. */
-		gtk_hlist_set_row_data (GTK_HLIST (list), row,
-		                        GUINT_TO_POINTER (gchat->chat->cid));
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			gint row;
+			gchat = val;
+			if (!gchat->cid)
+				continue;
+			entry[0] = g_strdup_printf ("0x%08x",
+			                            gchat->chat->cid);
+			entry[1] = gchat->chat->subject;
+			row = gtk_hlist_append (GTK_HLIST (list), entry);
+			/* Stash the cid as row_data so the response
+			 * handler can recover it without parsing back
+			 * the display string. */
+			gtk_hlist_set_row_data (GTK_HLIST (list), row,
+			                        GUINT_TO_POINTER (gchat->chat->cid));
+		}
 	}
 	ctx->list = list;
 
@@ -795,7 +810,6 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	int with_cid = 0;
-	struct gtkhx_chat *gchat;
 	GtkWidget *users_list = data;
 	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
@@ -806,9 +820,15 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 
 	if(!user)
 		return;
-	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		if(gchat->cid) {
-			with_cid = 1;
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer key;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, NULL)) {
+			if (GPOINTER_TO_UINT (key) != 0) {
+				with_cid = 1;
+				break;
+			}
 		}
 	}
 	if(!with_cid)
@@ -1137,15 +1157,20 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	if (!losers_list)
 		return;
 
-	if(!chat->cid) {
-		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			if(gchat->cid) {
-				struct hx_user *u;
-				u = hx_user_with_uid(gchat->chat->user_list, user->uid);
-				if(u) {
-					user_change(&sess->htlc, gchat->chat, u, nam, icon, color);
-				}
-			}
+	if (!chat->cid && sess->gchats) {
+		GHashTableIter iter;
+		gpointer key, val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, &val)) {
+			if (GPOINTER_TO_UINT (key) == 0)
+				continue;
+			gchat = val;
+			struct hx_user *u =
+				hx_user_with_uid (gchat->chat->user_list,
+				                  user->uid);
+			if (u)
+				user_change (&sess->htlc, gchat->chat, u,
+				             nam, icon, color);
 		}
 	}
 
