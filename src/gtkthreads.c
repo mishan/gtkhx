@@ -30,58 +30,9 @@ void gtkhx_post_to_main (GSourceFunc fn, gpointer data)
 	g_main_context_invoke (NULL, fn, data);
 }
 
-/* Synchronous worker → main bridge. The condition variable + done
- * flag are the standard idiom for "wait until another thread runs
- * my callback." A small trampoline wraps the user's callback so
- * the user's GSourceFunc keeps its normal contract (called with
- * the user's data, returns G_SOURCE_REMOVE) — the trampoline
- * ignores the return value, sets done, and signals.
- *
- * If we're already on the main thread, just run inline. Otherwise
- * post the trampoline and wait. */
-struct gtkhx_sync_call {
-	GSourceFunc  fn;
-	gpointer     data;
-	GMutex       mu;
-	GCond        cond;
-	gboolean     done;
-};
-
-static gboolean
-gtkhx_sync_trampoline (gpointer p)
-{
-	struct gtkhx_sync_call *c = p;
-	c->fn (c->data);
-	g_mutex_lock (&c->mu);
-	c->done = TRUE;
-	g_cond_signal (&c->cond);
-	g_mutex_unlock (&c->mu);
-	return G_SOURCE_REMOVE;
-}
-
-void gtkhx_invoke_sync (GSourceFunc fn, gpointer data)
-{
-	GMainContext *ctx = g_main_context_default ();
-	struct gtkhx_sync_call c;
-
-	if (g_main_context_is_owner (ctx)) {
-		fn (data);
-		return;
-	}
-
-	c.fn = fn;
-	c.data = data;
-	g_mutex_init (&c.mu);
-	g_cond_init (&c.cond);
-	c.done = FALSE;
-
-	g_main_context_invoke (ctx, gtkhx_sync_trampoline, &c);
-
-	g_mutex_lock (&c.mu);
-	while (!c.done)
-		g_cond_wait (&c.cond, &c.mu);
-	g_mutex_unlock (&c.mu);
-
-	g_cond_clear (&c.cond);
-	g_mutex_clear (&c.mu);
-}
+/* Phase 5+ async connect (network.c): gtkhx_invoke_sync used to live
+ * here to let hx_thread_connect bracket short bits of main-thread
+ * work synchronously from inside its worker. The connect path is
+ * pure-async on the main loop now, so nothing needs sync-invoke.
+ * Tracker fetch is still on a worker but only uses the async
+ * gtkhx_post_to_main path above. */
