@@ -52,6 +52,7 @@
 #include <netinet/in.h>
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
+#include "debug.h"
 #include <sys/time.h>
 #include <time.h>
 #include "macres.h"
@@ -225,13 +226,37 @@ static const RGBColor rgb_1[2] = {
 /* Take RGBColor by value — the alternative was '&ct->ctTable[i].rgb'
  * inside a packed struct, which trips -Waddress-of-packed-member
  * because the resulting pointer might not satisfy RGBColor's natural
- * alignment. RGBColor is only 6 bytes so the by-value copy is cheap. */
+ * alignment. RGBColor is only 6 bytes so the by-value copy is cheap.
+ *
+ * rgb_pack expects values in host byte order — used for the static
+ * default palettes (rgb_1/_2/_4/_8) which are written as host-order
+ * literals in this file. Cicn-file ColorTable entries are network
+ * byte order; for those see rgb_pack_net below. */
 static inline guint32
 rgb_pack (RGBColor c)
 {
 	return ((guint32)(c.red   >> 8) << 16)
 	     | ((guint32)(c.green >> 8) <<  8)
 	     | ((guint32)(c.blue  >> 8) <<  0);
+}
+
+/* Variant for RGBColor values read out of cicn file memory — channels
+ * are big-endian on disk, so on little-endian hosts the high byte
+ * (the meaningful 8-bit value) sits at the LOW end of the guint16 and
+ * the plain ">> 8" in rgb_pack drops it. ntohs first, then extract.
+ *
+ * Symptom this fixes: CT entries like { r=0xff00, g=0xff00, b=0xff00 }
+ * (Mac classic max white as 16-bit-per-channel) decoded to RGB(0,0,0)
+ * = black on every little-endian host. Cicns whose CT happens to use
+ * palindromic 16-bit values (like 0xffff or 0xfcfc) survived by
+ * accident — the high and low bytes are the same so byte-swapping is
+ * a no-op. */
+static inline guint32
+rgb_pack_net (RGBColor c)
+{
+	return ((guint32)(ntohs (c.red)   >> 8) << 16)
+	     | ((guint32)(ntohs (c.green) >> 8) <<  8)
+	     | ((guint32)(ntohs (c.blue)  >> 8) <<  0);
 }
 
 /* Defined further down — declared here so cicn_to_pixbuf can wrap its
@@ -265,7 +290,7 @@ build_palette (guint32 *out, unsigned int bpp, ColorTable *ct)
 	ctsize = ntohs (ct->ctSize) + 1;
 	for (i = 0; i < ctsize; i++) {
 		unsigned int v = ntohs (ct->ctTable[i].value) & (n - 1);
-		out[v] = rgb_pack (ct->ctTable[i].rgb);
+		out[v] = rgb_pack_net (ct->ctTable[i].rgb);
 	}
 }
 
@@ -338,6 +363,77 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 	pixdata = ((unsigned char *)cicn_rsrc + len) - rowBytes * height;
 	maskdata = (unsigned char *)cicn_rsrc + 82;
 	have_mask = (mbm->bounds.right != 0 && mbm->bounds.bottom != 0);
+
+	/* Phase 5: log the parser's understanding under GTKHX_DEBUG=icon
+	 * so wide / non-standard cicn formats (Badmoon banner icons etc.)
+	 * can be diagnosed without staring at hex dumps. Includes byte
+	 * offsets the parser computed for each sub-structure so it's
+	 * obvious when a layout disagrees with our assumptions. Also
+	 * logs packType (cicn pixdata can be PackBits-compressed; we
+	 * don't decode that and would render garbage) and the CT's own
+	 * ctSize header (number of entries actually in the palette). */
+	{
+		gsize ct_off = (gsize) ((const unsigned char *) ct
+		                       - (const unsigned char *) cicn_rsrc);
+		gsize pix_off = (gsize) (pixdata
+		                       - (const unsigned char *) cicn_rsrc);
+		guint16 packType = ntohs (pm->packType);
+		guint32 packSize = ntohl (pm->packSize);
+		guint16 ctSize_raw = 0;
+		guint16 ctFlags_raw = 0;
+		guint32 ctSeed_raw = 0;
+		if (ct_off + 8 <= len) {
+			ctSeed_raw  = ntohl (ct->ctSeed);
+			ctFlags_raw = ntohs (ct->ctFlags);
+			ctSize_raw  = ntohs (ct->ctSize);
+		}
+		debug_log ("icon",
+		           "cicn_to_pixbuf: %ux%u bpp=%u rowBytes=%u "
+		           "mbm=%ux%u rb=%u bm=%ux%u rb=%u datalen=%u "
+		           "mask=%d ct_off=%zu pix_off=%zu "
+		           "packType=%u packSize=%u "
+		           "ctSeed=%08x ctFlags=%04x ctSize=%u",
+		           width, height, bpp, rowBytes,
+		           b_right - b_left, mbm_h, mbm_rb,
+		           b_right - b_left, bm_h,  bm_rb,
+		           len, (int) have_mask,
+		           ct_off, pix_off,
+		           packType, packSize,
+		           ctSeed_raw, ctFlags_raw, ctSize_raw);
+
+		/* Dump the first 4 CT entries so we can see if value is
+		 * sequential (entries map to palette slots 0,1,2,...) or
+		 * sparse (entries each name a specific palette slot via
+		 * the value field — could be all-0, which would explain
+		 * the all-black render). Also one pixdata byte sample so
+		 * we can correlate against the palette. */
+		if (ct_off + 8 + 4 * 8 <= len) {
+			GString *s = g_string_new (NULL);
+			for (unsigned int i = 0; i < 4 && i <= ctSize_raw; i++) {
+				ColorSpec *cs = &ct->ctTable[i];
+				if (i) g_string_append_c (s, ' ');
+				g_string_append_printf (s,
+				    "[v=%u r=%04x g=%04x b=%04x]",
+				    ntohs (cs->value),
+				    ntohs (cs->rgb.red),
+				    ntohs (cs->rgb.green),
+				    ntohs (cs->rgb.blue));
+			}
+			debug_log ("icon", "  CT[0..3]: %s", s->str);
+			g_string_free (s, TRUE);
+		}
+		if (pix_off + 8 <= len) {
+			GString *s = g_string_new (NULL);
+			for (unsigned int i = 0; i < 8; i++) {
+				g_string_append_printf (s, "%s%02x",
+				                        i ? " " : "",
+				                        ((const guint8 *)
+				                         cicn_rsrc)[pix_off + i]);
+			}
+			debug_log ("icon", "  pix[0..7]: %s", s->str);
+			g_string_free (s, TRUE);
+		}
+	}
 
 	build_palette (palette, bpp, ct);
 
@@ -494,6 +590,7 @@ load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
 	macres_res *cicn = NULL;
 	GdkPixbuf *pb;
 	unsigned int i;
+	const char *src_path = NULL;
 
 	(void)widget;
 
@@ -501,15 +598,34 @@ load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
 		if (!ifn->cicns[i])
 			continue;
 		cicn = macres_file_get_resid_of_type (ifn->cicns[i], TYPE_cicn, icon);
-		if (cicn)
+		if (cicn) {
+			src_path = ifn->files[i];
 			break;
+		}
 	}
-	if (!cicn)
+	if (!cicn) {
+		debug_log ("icon",
+		           "load_icon: id=%u not found in any rsrc (n=%u)",
+		           (unsigned) icon, ifn->n);
 		goto failure;
+	}
 
 	pb = cicn_to_pixbuf (cicn->data, cicn->datalen);
-	if (!pb)
+	if (!pb) {
+		debug_log ("icon",
+		           "load_icon: id=%u rsrc='%s' datalen=%u — "
+		           "cicn_to_pixbuf returned NULL (parse failed)",
+		           (unsigned) icon, src_path ? src_path : "?",
+		           (unsigned) cicn->datalen);
 		goto failure;
+	}
+
+	debug_log ("icon",
+	           "load_icon: id=%u rsrc='%s' datalen=%u -> %dx%d pixbuf",
+	           (unsigned) icon, src_path ? src_path : "?",
+	           (unsigned) cicn->datalen,
+	           gdk_pixbuf_get_width  (pb),
+	           gdk_pixbuf_get_height (pb));
 
 	*pixbuf_out = pb;
 	if (mask_out)

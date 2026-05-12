@@ -891,6 +891,18 @@ void create_users_window (GtkWidget *widget, gpointer data)
 	gtk_hlist_set_column_width(GTK_HLIST(users_list), 1, 240);
 	gtk_hlist_set_row_height(GTK_HLIST(users_list), 18);
 	gtk_hlist_set_shadow_type(GTK_HLIST(users_list), GTK_SHADOW_NONE);
+
+	/* Phase 5: column 1 (Name) gets the Mac-classic overlay layout.
+	 * Wide banner-style icons (Badmoon & co.) render as a row
+	 * background and the name draws on top at a fixed offset from
+	 * the cell edge — so names stay column-aligned regardless of
+	 * how wide the user's icon happens to be.
+	 *
+	 * The offset (22 px) clears the typical stock-icon width
+	 * (16-18 px from icons.rsrc) plus a few px of breathing room.
+	 * Wider icons render past the offset as banner backgrounds with
+	 * the name overlaid on top — the Mac-classic look. */
+	gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (users_list), 1, 22);
 	gtk_hlist_set_column_justification(GTK_HLIST(users_list), 1,
 									   GTK_JUSTIFY_LEFT);
 	gtk_hlist_set_compare_func(GTK_HLIST(users_list),

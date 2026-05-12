@@ -1220,6 +1220,11 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gtk_hlist_set_column_width(GTK_HLIST(userlist), 1, 210);
 	gtk_hlist_set_row_height(GTK_HLIST(userlist), 18);
 	gtk_hlist_set_shadow_type(GTK_HLIST(userlist), GTK_SHADOW_NONE);
+	/* Phase 5: Mac-classic overlay layout for the pchat name column —
+	 * wide icons render as row background, name overlays at fixed
+	 * 22-px offset (clears typical 18-px stock icons with breathing
+	 * room). See users.c create_users_window for rationale. */
+	gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (userlist), 1, 22);
 	gtk_hlist_set_column_justification(GTK_HLIST(userlist), 0, 
 									   GTK_JUSTIFY_LEFT);
 	g_object_ref_sink(text);

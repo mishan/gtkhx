@@ -185,6 +185,25 @@ void       gtk_hlist_set_foreground      (GtkHList   *hlist,
                                           gint        row,
                                           GdkRGBA    *color);
 
+/* Phase 5: replace a column's default (pack_start pixbuf + pack_start
+ * text) renderers with a single custom renderer that draws the
+ * pixbuf at the column's left edge at its NATURAL width and draws
+ * the text on top at a fixed `text_x_offset` pixels from the cell
+ * edge. The pixbuf serves as a row background that text overlays —
+ * the Mac-classic Hotline user-list layout where wide banner-style
+ * icons sit behind the user's name without pushing it to the right.
+ *
+ * Without this, the stock GtkTreeView layout sizes the pixbuf
+ * renderer to its natural width and the text renderer starts after
+ * it, so wider icons offset the names. Hotline icon-art sets stored
+ * in icons.rsrc commonly include 100+-px-wide entries, especially
+ * on community / fan-art servers (Badmoon, etc.); without overlay
+ * rendering, those servers render with names spilling off the right
+ * edge of the user-list column. */
+void       gtk_hlist_column_set_overlay_pixtext (GtkHList *hlist,
+                                                 gint      column,
+                                                 gint      text_x_offset);
+
 gint       gtk_hlist_append              (GtkHList   *hlist,
                                           gchar      *text[]);
 gint       gtk_hlist_insert              (GtkHList   *hlist,
