@@ -111,30 +111,62 @@ What's degraded and remaining:
   during widget construction. Most call sites have been audited; remaining cases are
   pre-existing GTK 4 noise.
 
-## Model / view boundary (the `hx_output` vtable)
+## Model / view boundary (GtkhxSession signals)
 
-`struct output_functions hx_output` in `session.h` is the model→view
-dispatch. Model-side files (`rcv.c`, `network.c`, `commands.c`,
-`tasks.c` interior, `banner.c`, `xfers.c`) must reach the view only
-through `hx_output.*`. Direct GTK calls (`gtk_*` / `GTK_*`) in those
-files are bugs — Phase 2 cleared them out, the audit is one grep.
+Model-side files (`rcv.c`, `network.c`, `commands.c`, `tasks.c`
+interior, `banner.c`, `xfers.c`) reach the view by emitting signals
+on `GtkhxSession` — a singleton GObject created lazily by
+`gtkhx_session_get_default()`. Direct GTK calls (`gtk_*` / `GTK_*`)
+in those files are bugs — Phase 2 cleared them out, the audit is
+one grep.
 
-The vtable splits into:
+The signal taxonomy mirrors the old `hx_output` vtable that Phase 3
+replaced:
 
-- **Lifecycle hooks** (`init`, `loop`) — called once from `main()`,
-  not notifications. Phase 3 leaves these as direct calls.
-- **Notification dispatches** (chat / msg / news / user_* /
-  files / xfer / tracker / tasks) — each entry corresponds to a
-  model state change the view needs to know about. Phase 3 turns
-  these into GObject signals emitted by the model.
+| Signal                  | Payload                                      |
+|-------------------------|----------------------------------------------|
+| `chat`                  | htlc, cid, body, len                         |
+| `chat-subject`          | htlc, cid, subj                              |
+| `chat-invitation`       | htlc, cid, inviter-name                      |
+| `msg`                   | sender-name, uid, body                       |
+| `agreement`             | session, agreement-string, len               |
+| `news-file`             | htlc, news, len                              |
+| `news-post`             | htlc, news, len                              |
+| `news-folder`           | gfnews                                       |
+| `news-catalog`          | gcnews                                       |
+| `news-thread`           | post                                         |
+| `user-create`           | htlc, chat, user, nam, icon, color           |
+| `user-delete`           | htlc, chat, user                             |
+| `user-change`           | htlc, chat, user, NEW nam/icon/color         |
+| `users-clear`           | htlc, chat                                   |
+| `user-info`             | uid, nam, info, len                          |
+| `file-info`             | path, name, creator, type, ...               |
+| `file-list`             | cfl, fh, data                                |
+| `file-update`           | session, htxf                                |
+| `xfer-queue`            | session, htxf                                |
+| `tracker-server-create` | addr (s_addr), port, nusers, nam, desc, total|
+| `task-update`           | session, task                                |
 
-Some view-side convenience functions are still called by name from
-model files: `hx_printf` / `hx_printf_prefix` (log a line to chat
-output), `hx_clear_chat`, `tracker_clear`. They aren't routed
-through the vtable today; Phase 3 may move some into signals.
-Worker threads marshal to main via `g_idle_add`, never call GTK
-directly (banner.c HTXF worker, xfers.c progress updates, preview.c
-async parses).
+Model-side emitters live in `gtkhx_session.{c,h}` —
+`gtkhx_session_emit_<name>(self, args...)` is a one-line wrapper
+over `g_signal_emit_by_name`. View-side handlers are static
+adapter functions in `gtkhx.c` (`on_<name>_signal`) that bridge the
+GObject marshaller signature to the legacy `output_*` /
+`user_create` / etc. functions in `chat.c` / `users.c` / `news*.c` /
+`tasks.c`. The connect calls all live in `gtkhx_connect_signals()`,
+fired once from `fe_init` at startup.
+
+The Phase 2 / Phase 3 cleanup also dropped a clutch of dead vtable
+entries (`clear`, `user_list`, `tracker_clear`) whose implementations
+were called directly by name elsewhere and never flowed through the
+dispatch. Some view-side convenience functions remain called by
+name from model files: `hx_printf` / `hx_printf_prefix` (log a line
+to chat output), `hx_clear_chat`, `tracker_clear`. They aren't
+signal-routed today.
+
+Worker threads marshal to main via `g_idle_add`, never call GTK or
+emit signals directly (banner.c HTXF worker, xfers.c progress
+updates, preview.c async parses).
 
 ## Per-session collections (Phase 1 of MVC cleanup)
 

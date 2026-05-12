@@ -1387,22 +1387,10 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	sess->agreementwin = agreementwin;
 }
 
-/* Phase 5+ (MVC boundary): designated initialisers keep this in
- * sync with struct output_functions even if a future Phase 3
- * reorders fields. The dead entries (clear / user_list /
- * tracker_clear) used to live here but were never invoked through
- * the vtable — their named-call sites in chat.c / users.c /
- * tracker.c are unchanged. */
-struct output_functions hx_output = {
-	.init                  = init,
-	.loop                  = loop,
-	/* Phase 3 done — every notification dispatches via signals on
-	 * GtkhxSession (see gtkhx_session.{c,h} + gtkhx_connect_signals
-	 * below). Only the lifecycle hooks above remain on the vtable;
-	 * they aren't notifications. A future Phase 4 may collapse
-	 * struct output_functions into just init/loop or remove it
-	 * altogether in favour of named calls. */
-};
+/* Phase 3.6: hx_output is gone. Every notification it used to
+ * carry is now a signal on GtkhxSession (see gtkhx_session.{c,h}).
+ * The two lifecycle hooks (init, loop) only ever had one
+ * implementation, so they're called by name from fe_init. */
 
 
 char **hxd_environ = 0;
@@ -1776,7 +1764,7 @@ void hotline_client_init (int argc, char **argv)
 
 	last_msg_nick[0] = 0;
 
-	hx_output.init(argc, argv);
+	init (argc, argv);
 
 	if(server) {
 		if(prompt_pass) {
@@ -1794,5 +1782,5 @@ void hotline_client_init (int argc, char **argv)
 		g_free(bookmark);
 	}
 
-	hx_output.loop();
+	loop ();
 }

@@ -342,52 +342,10 @@ struct cached_filelist {
 	char **filter_argv;
 };
 
-/* ---- Output backend vtable (only the GUI implementation is alive) -- */
-
-/* Output (view) backend dispatch.
- *
- * Members fall into two groups:
- *
- *   Lifecycle hooks  — init, loop. Called once from main(). These
- *                      aren't model→view notifications; they're
- *                      "start the view backend / pump its event
- *                      loop". Phase 3's signal migration leaves
- *                      these alone.
- *
- *   Notifications    — everything else. Each entry corresponds to
- *                      a model state change the view needs to know
- *                      about (a chat message arrived, a user joined,
- *                      a task progressed). In Phase 3 these become
- *                      GObject signals emitted by the model.
- *
- * Dead entries dropped during Phase 2: user_list (UI rebuild was
- * called by name directly, not through the vtable), clear (ditto:
- * hx_clear_chat called directly), tracker_clear (ditto). Each had
- * a vtable slot but never actually flowed through it.
- */
-struct output_functions {
-	/* Lifecycle */
-	void (*init)(int argc, char **argv);
-	void (*loop)(void);
-
-	/* Chat output / private messaging — migrated to signals on
-	 * GtkhxSession in Phase 3: chat, chat-subject, chat-invitation,
-	 * msg. */
-
-	/* Login flow + news — migrated to GtkhxSession signals in
-	 * Phase 3.3: agreement, news-file, news-post, news-folder,
-	 * news-catalog, news-thread. */
-
-	/* User-list mutations — migrated to GtkhxSession signals in
-	 * Phase 3.4: user-create, user-delete, user-change,
-	 * users-clear, user-info. */
-
-	/* Files / xfer / tracker / tasks — migrated to GtkhxSession
-	 * signals in Phase 3.5: file-info, file-list, file-update,
-	 * xfer-queue, tracker-server-create, task-update. */
-};
-
-extern struct output_functions hx_output;
+/* The hx_output vtable is gone (Phase 3.6). Every notification it
+ * carried became a GObject signal on GtkhxSession; the lifecycle
+ * hooks (init / loop) had exactly one implementation each and are
+ * now called by name (fe_init / hx_loop) from main(). */
 extern void timer_add_secs (time_t secs, int (*fn)(void *), void *ptr);
 extern void timer_delete_ptr (void *ptr);
 
