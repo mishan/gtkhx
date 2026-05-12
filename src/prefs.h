@@ -33,6 +33,14 @@ struct gtkhx_prefs {
 	 * '[%H:%M:%S] ' includes brackets + trailing space; user can
 	 * use any strftime spec ('%I:%M %p ', '%H:%M ', '<%H%M> ', ...). */
 	char *stamp_format;
+	/* Phase 5: chat-highlight word list — comma-separated string
+	 * persisted as CFG_HIGHLIGHT_WORDS. Each entry matches case-
+	 * insensitive at word boundaries against incoming chat bodies;
+	 * when any matches (or the body mentions our own nick), the
+	 * chat line renders in bold red via inline ATTR_BOLD+ATTR_COLOR
+	 * codes. Empty string disables additional words — own-nick
+	 * detection still happens. */
+	char *highlight_words;
 	char **tracker;
 	char *tracker_str;
 	int xbuf_max;

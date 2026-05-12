@@ -80,6 +80,7 @@ struct gtkhx_prefs gtkhx_prefs =
 	"fixed",	/* font */
 	".",		/* download_path */
 	"[%H:%M:%S] ", /* stamp_format — strftime(3); see CFG_STAMP_FORMAT */
+	"",			/* highlight_words — empty by default; own nick is implicit */
 	NULL,		/* tracker (char **) */
 	"hltracker.com",	/* tracker_str */
 	500,		/* xbuf_max */
@@ -561,6 +562,8 @@ struct cfgvar
 	{CFG_FILE_SAMEWIN, {&gtkhx_prefs.file_samewin}, BOOLEAN, 0,
 	 changed_filesamewin, NULL},
 	{CFG_FONT, {&gtkhx_prefs.font}, STRING, 0, changed_font, NULL},
+	{CFG_HIGHLIGHT_WORDS, {&gtkhx_prefs.highlight_words}, STRING, 0,
+	 NULL, NULL},
 	{CFG_ICON, {&the_session.htlc.icon}, UINT16, 0,
 	 changed_nickoricon, NULL},
 	/* Phase 5: ICONS used to be a comma-separated list of *.rsrc files.
@@ -1838,6 +1841,22 @@ static void settings_page_chat (AdwPreferencesPage *page)
 		adw_preferences_group_add (stamp_grp,
 			pref_entry_row (CFG_STAMP_FORMAT, _("Format")));
 		adw_preferences_page_add (page, stamp_grp);
+	}
+
+	/* Highlight words — comma-separated extras to flag in chat
+	 * (own nick is always implicit so the field stays empty by
+	 * default). Matched lines render bold red. */
+	{
+		AdwPreferencesGroup *hl_grp =
+			ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+		adw_preferences_group_set_title (hl_grp, _("Highlight"));
+		adw_preferences_group_set_description (hl_grp,
+			_("Comma-separated words to highlight in chat (in "
+			  "addition to your own nick). Matches are case-"
+			  "insensitive at word boundaries."));
+		adw_preferences_group_add (hl_grp,
+			pref_entry_row (CFG_HIGHLIGHT_WORDS, _("Words")));
+		adw_preferences_page_add (page, hl_grp);
 	}
 
 	font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());

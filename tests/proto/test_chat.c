@@ -393,6 +393,92 @@ test_chat_split_empty_body (void)
 	g_assert_cmpuint (b_len, ==, 0);
 }
 
+/* ---------- hx_highlight_match ---------- */
+
+static void
+test_highlight_match_simple (void)
+{
+	const char *words[] = { "misha", NULL };
+	const char *body = "hey misha did you see this";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_case_insensitive (void)
+{
+	const char *words[] = { "Misha", NULL };
+	const char *body = "MISHA wake up";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_word_boundary (void)
+{
+	/* "mishap" must NOT match "misha". */
+	const char *words[] = { "misha", NULL };
+	const char *body = "what a mishap that was";
+	g_assert_false (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_at_buffer_start (void)
+{
+	const char *words[] = { "misha", NULL };
+	const char *body = "misha look here";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_at_buffer_end (void)
+{
+	const char *words[] = { "misha", NULL };
+	const char *body = "hey misha";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_punctuation_boundary (void)
+{
+	/* Parens/commas are non-word bytes — should boundary-match. */
+	const char *words[] = { "misha", NULL };
+	const char *body = "(misha), did you?";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_multiple_words (void)
+{
+	const char *words[] = { "alice", "bob", "carol", NULL };
+	const char *body = "carol just signed in";
+	g_assert_true (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_skips_empty_words (void)
+{
+	/* g_strsplit can leave empty entries from "a,,b" — make
+	 * sure those don't false-match anywhere. */
+	const char *words[] = { "", "a", "", NULL };
+	const char *body = "nothing here";
+	g_assert_false (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_no_words_returns_false (void)
+{
+	const char *words[] = { NULL };
+	const char *body = "some text";
+	g_assert_false (hx_highlight_match (body, strlen (body), words));
+}
+
+static void
+test_highlight_match_empty_body (void)
+{
+	const char *words[] = { "misha", NULL };
+	g_assert_false (hx_highlight_match ("", 0, words));
+	g_assert_false (hx_highlight_match (NULL, 0, words));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -446,6 +532,27 @@ main (int argc, char **argv)
 	                 test_chat_split_rejects_empty_nick);
 	g_test_add_func ("/proto/chat/split_empty_body",
 	                 test_chat_split_empty_body);
+
+	g_test_add_func ("/proto/chat/highlight_match_simple",
+	                 test_highlight_match_simple);
+	g_test_add_func ("/proto/chat/highlight_match_case_insensitive",
+	                 test_highlight_match_case_insensitive);
+	g_test_add_func ("/proto/chat/highlight_match_word_boundary",
+	                 test_highlight_match_word_boundary);
+	g_test_add_func ("/proto/chat/highlight_match_at_buffer_start",
+	                 test_highlight_match_at_buffer_start);
+	g_test_add_func ("/proto/chat/highlight_match_at_buffer_end",
+	                 test_highlight_match_at_buffer_end);
+	g_test_add_func ("/proto/chat/highlight_match_punctuation_boundary",
+	                 test_highlight_match_punctuation_boundary);
+	g_test_add_func ("/proto/chat/highlight_match_multiple_words",
+	                 test_highlight_match_multiple_words);
+	g_test_add_func ("/proto/chat/highlight_match_skips_empty_words",
+	                 test_highlight_match_skips_empty_words);
+	g_test_add_func ("/proto/chat/highlight_match_no_words_returns_false",
+	                 test_highlight_match_no_words_returns_false);
+	g_test_add_func ("/proto/chat/highlight_match_empty_body",
+	                 test_highlight_match_empty_body);
 
 	return g_test_run ();
 }

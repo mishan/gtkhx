@@ -397,4 +397,24 @@ extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
                                          gsize *body_offset,
                                          gsize *body_len);
 
+/*
+ * Highlight matcher. Scans `body` for occurrences of any word in
+ * `words[]` (NULL-terminated list of NUL-terminated strings) at
+ * word boundaries, ASCII case-insensitive.
+ *
+ * "Word boundary" means: the character before/after the match (or
+ * the buffer edge) is not an alphanumeric ASCII character. So
+ * `misha` matches in "hello misha!" and "(misha)" but not in
+ * "mishap" or "amisha".
+ *
+ * NULL or empty entries in words[] are skipped. Returns TRUE on
+ * the first match; FALSE if no entry was found anywhere in body.
+ *
+ * Pure ASCII implementation — for non-ASCII nicks the comparison
+ * is still byte-level case-insensitive, which is correct for the
+ * lowercase-letter-by-byte content normal Hotline nicks use.
+ */
+extern gboolean hx_highlight_match (const char *body, gsize body_len,
+                                    const char * const *words);
+
 #endif /* HX_PROTO_HELPERS_H */

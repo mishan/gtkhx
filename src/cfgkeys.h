@@ -97,6 +97,12 @@
  * bracketed form users are used to from GtkHx pre-Phase-5. */
 #define CFG_STAMP_FORMAT    "TIMESTAMPFORMAT"
 
+/* Phase 5: chat-highlight word list (Settings → Chat → Highlight).
+ * Comma-separated; each word matches case-insensitively at word
+ * boundaries against incoming chat bodies. Our own nick is always
+ * implicitly matched so this list is purely additional. */
+#define CFG_HIGHLIGHT_WORDS "HIGHLIGHTWORDS"
+
 /* Timer / startup bookkeeping */
 #define CFG_TIME            "TIME"
 

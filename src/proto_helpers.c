@@ -624,3 +624,55 @@ hx_chat_split_nick_body (const char *line, gsize line_len,
 	if (body_len)    *body_len    = line_len - body_start;
 	return TRUE;
 }
+
+/* ASCII-only "is this byte alphanumeric" — used for the word-
+ * boundary check below. Locale-agnostic on purpose: nick lookup
+ * shouldn't care about the user's LC_CTYPE. */
+static gboolean
+is_word_byte (guchar c)
+{
+	return (c >= '0' && c <= '9')
+	    || (c >= 'A' && c <= 'Z')
+	    || (c >= 'a' && c <= 'z')
+	    || c == '_';
+}
+
+/* See doc-comment in proto_helpers.h. */
+gboolean
+hx_highlight_match (const char *body, gsize body_len,
+                    const char * const *words)
+{
+	if (!body || body_len == 0 || !words)
+		return FALSE;
+
+	for (gsize wi = 0; words[wi] != NULL; wi++) {
+		const char *w = words[wi];
+		gsize wlen;
+
+		if (!w || !*w)
+			continue;
+		wlen = strlen (w);
+		if (wlen > body_len)
+			continue;
+
+		/* Walk every possible match start position. */
+		for (gsize i = 0; i + wlen <= body_len; i++) {
+			/* Before-edge boundary check: position i must
+			 * either be at the buffer start, or follow a
+			 * non-word byte. */
+			if (i > 0 && is_word_byte ((guchar) body[i - 1]))
+				continue;
+			/* After-edge boundary check: position i + wlen
+			 * must either be at the buffer end, or precede
+			 * a non-word byte. */
+			if (i + wlen < body_len
+			    && is_word_byte ((guchar) body[i + wlen]))
+				continue;
+
+			/* ASCII case-insensitive byte compare. */
+			if (g_ascii_strncasecmp (body + i, w, wlen) == 0)
+				return TRUE;
+		}
+	}
+	return FALSE;
+}

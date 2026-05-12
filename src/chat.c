@@ -410,6 +410,7 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	gchar *display_nick = NULL;
 	const char *display_body = NULL;
 	gsize display_body_len = 0;
+	gboolean is_info = FALSE;	/* INFOPREFIX branch — never highlight */
 	{
 		const char *info_prefix = INFOPREFIX;
 		gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
@@ -424,6 +425,7 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 			                          info_prefix_len - 2);
 			display_body = valid + info_prefix_len;
 			display_body_len = valid_len - info_prefix_len;
+			is_info = TRUE;
 		} else if (hx_chat_split_nick_body (valid, valid_len,
 		                                    &name_off, &name_len,
 		                                    &body_off, &body_len)) {
@@ -435,14 +437,89 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 		}
 	}
 
+	/* Phase 5+: highlight-on-mention. Scan the body for
+	 * occurrences of our own nick (always) plus any
+	 * comma-separated words in gtkhx_prefs.highlight_words. If
+	 * any match — and this isn't an [hx] info line, and we
+	 * didn't send the line ourselves — wrap nick + body in
+	 * inline mIRC ATTR codes (\002 bold + \003 04 light-red +
+	 * \017 reset) so xtext renders the line bold red.
+	 *
+	 * Self-detection: when the parsed nick matches our local
+	 * htlc->name, this is our own message echoed back — skip
+	 * the highlight so we don'"'"'t flag ourselves for saying our
+	 * own name. */
+	gboolean do_highlight = FALSE;
+	if (display_nick && !is_info && display_body_len > 0) {
+		const char *self_nick =
+			(the_session.htlc.name[0] != '\0')
+				? (const char *) the_session.htlc.name
+				: NULL;
+		gboolean said_by_self = FALSE;
+		if (self_nick && name_len > 0
+		    && strlen (self_nick) == name_len
+		    && memcmp (valid + name_off, self_nick, name_len) == 0)
+			said_by_self = TRUE;
+
+		if (!said_by_self) {
+			/* Build the words[] list: own nick (if known) +
+			 * the comma-split of gtkhx_prefs.highlight_words.
+			 * NULL-terminated. */
+			GPtrArray *words = g_ptr_array_new ();
+			if (self_nick && *self_nick)
+				g_ptr_array_add (words, (gpointer) self_nick);
+			gchar **extras = NULL;
+			if (gtkhx_prefs.highlight_words
+			    && *gtkhx_prefs.highlight_words) {
+				extras = g_strsplit (
+					gtkhx_prefs.highlight_words, ",", -1);
+				for (gsize ei = 0; extras && extras[ei]; ei++) {
+					gchar *w = g_strstrip (extras[ei]);
+					if (*w)
+						g_ptr_array_add (words, w);
+				}
+			}
+			g_ptr_array_add (words, NULL);
+			do_highlight = hx_highlight_match (
+				display_body, display_body_len,
+				(const char * const *) words->pdata);
+			g_ptr_array_unref (words);
+			if (extras)
+				g_strfreev (extras);
+		}
+	}
+
 	if (display_nick) {
+		gchar *nick_buf = display_nick;
+		gchar *body_buf = NULL;
+		const char *body_ptr = display_body;
+		gsize body_ptr_len = display_body_len;
+
+		if (do_highlight) {
+			/* \002 = ATTR_BOLD, \003 04 = mIRC colour 4
+			 * (light red), \017 = ATTR_RESET. Wrap nick
+			 * with the open codes and body with the close
+			 * code so the reset lands at end-of-line. */
+			nick_buf = g_strdup_printf (
+				"\002\00304%s", display_nick);
+			body_buf = g_strndup (display_body, display_body_len);
+			gchar *with_reset = g_strdup_printf (
+				"%s\017", body_buf);
+			g_free (body_buf);
+			body_buf = with_reset;
+			body_ptr = body_buf;
+			body_ptr_len = strlen (body_buf);
+			g_free (display_nick);
+		}
+
 		gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
-		                         (unsigned char *) display_nick,
-		                         strlen (display_nick),
-		                         (unsigned char *) display_body,
-		                         display_body_len,
+		                         (unsigned char *) nick_buf,
+		                         strlen (nick_buf),
+		                         (unsigned char *) body_ptr,
+		                         body_ptr_len,
 		                         0);
-		g_free (display_nick);
+		g_free (nick_buf);
+		g_free (body_buf);
 	} else {
 		gtk_xtext_append (GTK_XTEXT (text)->buffer,
 		                  (unsigned char *) valid, valid_len, 0);
