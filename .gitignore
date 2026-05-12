@@ -98,9 +98,15 @@ intl/Makefile
 \#*\#
 .\#*
 
-# GtkHx build outputs
+# GtkHx build outputs (the in-tree executable from the legacy
+# autotools build — meson puts everything under /build/, but the
+# rule's harmless to keep).
+#
+# A previous `src/gtkhx_*` glob silently excluded legitimate
+# sources like src/gtkhx_session.{c,h}. Build artifacts under
+# src/ are unusual under meson; add specific names here when /
+# if they appear.
 src/gtkhx
-src/gtkhx_*
 
 # Plugin build outputs
 plugins/*/*.so

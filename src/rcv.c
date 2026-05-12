@@ -35,6 +35,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "network.h"
 #include "xfers.h"
 #include "chat.h"
@@ -185,8 +186,12 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 	}
 #endif
 
-	hx_output.chat(htlc, msg.cid, msg.text, msg.text_len);
-	play_sound(CHAT_POST);
+	/* Phase 3+: hx_output.chat → "chat" signal on the session
+	 * emitter. The existing output_chat handler in chat.c is
+	 * connected at startup in gtkhx.c. */
+	gtkhx_session_emit_chat (gtkhx_session_get_default (),
+	                         htlc, msg.cid, msg.text, msg.text_len);
+	play_sound (CHAT_POST);
 }
 
 void hx_rcv_msg (struct htlc_conn *htlc)

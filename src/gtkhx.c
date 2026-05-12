@@ -51,6 +51,7 @@
 #include "toolbar.h"
 #include "chat.h"
 #include "msg.h"
+#include "gtkhx_session.h"
 #include "tracker.h"
 #include "xtext.h"
 #include "gtkthreads.h"
@@ -794,6 +795,17 @@ static void fe_init (void)
 	tasks_init (&the_session);
 	msg_windows_init (&the_session);
 
+	/* Phase 3+: connect the view-side handlers to the
+	 * GtkhxSession signal emitter. As Phase 3 progresses, each
+	 * vtable notification gets a g_signal_connect line here and
+	 * the corresponding output_functions member goes away. The
+	 * signal-handler signature (instance + signal args + user_data,
+	 * with guint16 widened to guint by the marshaller) doesn't
+	 * match the legacy vtable-function signatures exactly, so we
+	 * route each one through a small static adapter declared
+	 * below — `on_*_signal`. */
+	gtkhx_connect_signals (gtkhx_session_get_default ());
+
 	create_toolbar_window(&the_session);
 	init_colors(toolbar_window);
 
@@ -980,10 +992,29 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 	}
 }
 
-static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat, 
+static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat,
 						 guint16 chatlen)
 {
 		hx_printf(htlc, cid, "%.*s\n", chatlen, chat);
+}
+
+/* Phase 3+ signal adapters — bridge the GObject marshaller signature
+ * (instance, signal args (with guint16 widened to guint), user_data)
+ * to the legacy view function signatures. Will get cleaned up once
+ * Phase 3 finishes and the legacy signatures change to match. */
+static void
+on_chat_signal (GtkhxSession *emitter,
+                struct htlc_conn *htlc, guint cid,
+                gpointer body, guint len, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat (htlc, (guint32) cid, (char *) body, (guint16) len);
+}
+
+void gtkhx_connect_signals (GtkhxSession *emitter)
+{
+	g_signal_connect (emitter, "chat",
+	                  G_CALLBACK (on_chat_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1120,7 +1151,9 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 struct output_functions hx_output = {
 	.init                  = init,
 	.loop                  = loop,
-	.chat                  = output_chat,
+	/* .chat — migrated to the "chat" signal on GtkhxSession.
+	 * See Phase 3 notes; output_chat is connected as the
+	 * handler in fe_init below. */
 	.chat_subject          = output_chat_subject,
 	.chat_invitation       = output_chat_invitation,
 	.msg                   = msg_output,
