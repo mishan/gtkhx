@@ -1054,14 +1054,14 @@ on_chat_invitation_signal (GtkhxSession *emitter,
 }
 
 static void
-on_msg_signal (GtkhxSession *emitter,
-               gpointer name, guint uid, gpointer body,
-               gpointer user_data)
+on_msg_signal (GtkhxSession *emitter, gpointer event_p, gpointer user_data)
 {
+	HxMsgEvent *event = event_p;
 	(void) emitter; (void) user_data;
-	msg_output ((char *) name, (guint16) uid, (char *) body);
-	gtkhx_notify_msg ((const char *) name, (guint16) uid,
-	                  (const char *) body);
+	if (!event)
+		return;
+	msg_output_from_event (event);
+	gtkhx_notify_msg (event);
 }
 
 static void

@@ -755,3 +755,56 @@ hx_chat_event_free (HxChatEvent *e)
 
 G_DEFINE_BOXED_TYPE (HxChatEvent, hx_chat_event,
                      hx_chat_event_copy, hx_chat_event_free)
+
+/* ---- HxMsgEvent ---------------------------------------------------- */
+
+HxMsgEvent *
+hx_msg_event_new (guint16 uid,
+                  const char *name, gsize name_len,
+                  const char *body, gsize body_len,
+                  const char *self_nick)
+{
+	HxMsgEvent *e;
+	gsize nlen = 0, blen = 0;
+
+	e = g_new0 (HxMsgEvent, 1);
+	e->uid          = uid;
+	e->is_broadcast = (uid == 0);
+	e->name         = gtkhx_text_to_utf8 (name, name_len, &nlen);
+	e->name_len     = nlen;
+	e->body         = gtkhx_text_to_utf8 (body, body_len, &blen);
+	e->body_len     = blen;
+
+	if (self_nick && *self_nick && nlen > 0
+	    && strlen (self_nick) == nlen
+	    && memcmp (e->name, self_nick, nlen) == 0)
+		e->is_self = TRUE;
+
+	return e;
+}
+
+HxMsgEvent *
+hx_msg_event_copy (HxMsgEvent *e)
+{
+	HxMsgEvent *c;
+	if (!e)
+		return NULL;
+	c = g_new0 (HxMsgEvent, 1);
+	*c = *e;
+	c->name = g_strndup (e->name, e->name_len);
+	c->body = g_strndup (e->body, e->body_len);
+	return c;
+}
+
+void
+hx_msg_event_free (HxMsgEvent *e)
+{
+	if (!e)
+		return;
+	g_free (e->name);
+	g_free (e->body);
+	g_free (e);
+}
+
+G_DEFINE_BOXED_TYPE (HxMsgEvent, hx_msg_event,
+                     hx_msg_event_copy, hx_msg_event_free)

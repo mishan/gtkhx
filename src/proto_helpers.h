@@ -478,4 +478,54 @@ extern HxChatEvent *hx_chat_event_new  (const char *raw, gsize raw_len,
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
 extern void         hx_chat_event_free (HxChatEvent *e);
 
+/*
+ * HxMsgEvent — a parsed private-message value object.
+ *
+ * Same architectural move as HxChatEvent, applied to HTLS_HDR_MSG.
+ * The wire side gives us uid + name + body as three separate
+ * chunks (no formatted-line parse needed); the constructor just
+ * UTF-8-sanitises the strings and stamps the is_self / is_broadcast
+ * flags so consumers don't redo the work.
+ *
+ * Consumers:
+ *
+ *   - msg.c::msg_output: opens a private-message window keyed on
+ *     uid, prefixes the body with a coloured "<name>" header, and
+ *     hands the line to xtext.
+ *
+ *   - notify.c::gtkhx_notify_msg: posts a notification titled
+ *     "name (private message)" with the body as preview. Skipped
+ *     when is_self (you can't usefully self-PM) or when the msg
+ *     window for that uid is focused.
+ *
+ * `name` and `body` are NUL-terminated and owned by the event.
+ * is_broadcast is true only when uid == 0; the rcv.c path
+ * currently routes those to msg.c::broadcastmsg directly, not
+ * through the msg signal, so consumers will see is_broadcast =
+ * FALSE in practice — the flag stays in the struct for future
+ * uniformity. */
+typedef struct _HxMsgEvent HxMsgEvent;
+struct _HxMsgEvent {
+	guint16  uid;
+	char    *name;
+	gsize    name_len;
+	char    *body;
+	gsize    body_len;
+	gboolean is_self;
+	gboolean is_broadcast;
+};
+
+#define HX_TYPE_MSG_EVENT (hx_msg_event_get_type ())
+extern GType       hx_msg_event_get_type (void) G_GNUC_CONST;
+
+/* Build an HxMsgEvent. `name` / `body` may carry any encoding the
+ * wire delivered (Mac Roman, Latin-1, UTF-8); they get run through
+ * gtkhx_text_to_utf8 once. `self_nick` is NULL-safe. */
+extern HxMsgEvent *hx_msg_event_new  (guint16 uid,
+                                      const char *name, gsize name_len,
+                                      const char *body, gsize body_len,
+                                      const char *self_nick);
+extern HxMsgEvent *hx_msg_event_copy (HxMsgEvent *e);
+extern void        hx_msg_event_free (HxMsgEvent *e);
+
 #endif /* HX_PROTO_HELPERS_H */

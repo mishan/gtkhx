@@ -10,6 +10,13 @@ extern struct msgwin *create_msgwin(guint16 uid, char *name);
 extern struct msgwin *msgwin_with_uid(guint16 uid);
 extern struct msgwin *create_msgwin (guint16 uid, char *name);
 extern void msg_output (char *name, guint16 uid, char *buf);
+
+/* Phase 5+: msg-signal renderer. Same as msg_output but reads from
+ * a pre-parsed HxMsgEvent (uid + UTF-8-validated name/body +
+ * is_self flag from hx_msg_event_new). */
+struct _HxMsgEvent;
+extern void msg_output_from_event (struct _HxMsgEvent *event);
+
 extern void broadcastmsg(char *text);
 /* Re-render the recipient info pane from the cached hx_user. Used
  * at create_msgwin time when the cached struct already reflects

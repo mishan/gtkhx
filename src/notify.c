@@ -239,22 +239,30 @@ out:
 }
 
 void
-gtkhx_notify_msg (const char *sender, guint16 uid, const char *body)
+gtkhx_notify_msg (HxMsgEvent *event)
 {
 	char *title;
 	char id[64];
 
+	if (!event)
+		return;
+
 	if (!gtkhx_prefs.notify_msg)
 		return;
 
-	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (msg_window_for_uid (uid)))
+	/* Don't notify on our own outbound PMs (echoed back by the
+	 * server, or local self-injects). */
+	if (event->is_self)
 		return;
 
-	g_snprintf (id, sizeof (id), "msg-%u", uid);
+	if (gtkhx_prefs.notify_omit_focused
+	    && window_is_active (msg_window_for_uid (event->uid)))
+		return;
+
+	g_snprintf (id, sizeof (id), "msg-%u", event->uid);
 	title = g_strdup_printf ("%s (private message)",
-	                         sender ? sender : "?");
-	send_notify (id, title, body);
+	                         (event->name && *event->name) ? event->name : "?");
+	send_notify (id, title, event->body);
 	g_free (title);
 }
 

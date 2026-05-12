@@ -86,9 +86,11 @@ void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
                                          struct htlc_conn *htlc,
                                          guint32 cid, const char *name);
 
-void gtkhx_session_emit_msg (GtkhxSession *self,
-                             const char *name, guint16 uid,
-                             const char *body);
+/* The "msg" (private message) signal payload is a boxed HxMsgEvent
+ * for the same reason "chat" carries an HxChatEvent: every
+ * subscriber gets the same UTF-8-sanitised, self-classified view
+ * of the message. */
+void gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event);
 
 /* Login + news notifications. agreement fires once after the
  * AGREEMENT chunks arrive post-login; the news-* variants fire

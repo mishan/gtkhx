@@ -112,17 +112,15 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		G_TYPE_NONE, 3,
 		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
 
-	/* "msg" — incoming private message. Replaces hx_output.msg.
-	 * No htlc arg (the original vtable signature was already
-	 * htlc-less); body is NUL-terminated. */
+	/* "msg" — incoming private message. Phase 5+: payload is a
+	 * boxed HxMsgEvent (uid + name + body + is_self/is_broadcast
+	 * flags), same architectural shape as the "chat" signal. */
 	signals[SIGNAL_MSG] = g_signal_new (
 		"msg",
 		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
 		NULL, NULL, NULL,
-		G_TYPE_NONE, 3,
-		G_TYPE_POINTER,          /* sender name */
-		G_TYPE_UINT,             /* uid (guint16 widened) */
-		G_TYPE_POINTER);         /* body */
+		G_TYPE_NONE, 1,
+		HX_TYPE_MSG_EVENT);
 
 	/* "agreement" — post-login agreement text from the server.
 	 * (session*, agreement-string, len). */
@@ -330,11 +328,9 @@ gtkhx_session_emit_chat_invitation (GtkhxSession *self,
 }
 
 void
-gtkhx_session_emit_msg (GtkhxSession *self,
-                        const char *name, guint16 uid, const char *body)
+gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event)
 {
-	g_signal_emit (self, signals[SIGNAL_MSG], 0,
-	               name, (guint) uid, body);
+	g_signal_emit (self, signals[SIGNAL_MSG], 0, event);
 }
 
 void

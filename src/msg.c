@@ -54,6 +54,7 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, 
 }
 
 void msg_output (char *name, guint16 uid, char *buf);
+void msg_output_from_event (HxMsgEvent *event);
 
 /* Phase 5+: msgwin lifecycle on GHashTable.
  *
@@ -552,7 +553,17 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 }
 
 
-void msg_output (char *name, guint16 uid, char *buf)
+/* Render a private message into its msgwin's xtext, with the
+ * "<name>" coloured nick prefix prepended.
+ *
+ * Phase 5+: this is the shared body for both msg_output (legacy
+ * raw-strings call site — kept for plugin / outgoing-msg / xfer-
+ * status code paths that hand-roll a name + body string pair) and
+ * msg_output_from_event (the msg-signal path that has the
+ * pre-parsed HxMsgEvent). */
+static void
+msg_output_render (const char *name, guint16 uid, const char *body,
+                   gboolean is_self)
 {
 	struct msgwin *msg;
 	char *text;
@@ -560,40 +571,51 @@ void msg_output (char *name, guint16 uid, char *buf)
 	char *cr;
 	int brack_col;
 
+	brack_col = is_self ? 13 : 12;
 
-	brack_col = !(strcmp(name, the_session.htlc.name)) ? 13: 12;
+	text = g_strdup_printf ("\003%d<\003%s\003%d>\003 %s",
+	                        brack_col, name ? name : "",
+	                        brack_col, body ? body : "");
 
-
-	text = g_strdup_printf("\003%d<\003%s\003%d>\003 %s", brack_col, name, brack_col, buf);
-
-	msg = msgwin_with_uid(uid);
-	if(!msg) {
-		msg = create_msgwin(uid, name);
-	}
+	msg = msgwin_with_uid (uid);
+	if (!msg)
+		msg = create_msgwin (uid, (char *) name);
 	ptr = text;
 
-	cr = strchr(text, '\n');
-	if(cr) {
-		while(1) {
-			xprintline(msg->outputbuf, text, cr-text);
-
-
+	cr = strchr (text, '\n');
+	if (cr) {
+		while (1) {
+			xprintline (msg->outputbuf, text, cr - text);
 			text = cr + 1;
-			if(*text == 0) {
+			if (*text == 0)
 				break;
-			}
-			cr = strchr(text, '\n');
-			if(!cr) {
-				xprintline(msg->outputbuf, text, -1);
+			cr = strchr (text, '\n');
+			if (!cr) {
+				xprintline (msg->outputbuf, text, -1);
 				break;
 			}
 		}
-	}
-	else {
-		xprintline(msg->outputbuf, text, -1);
+	} else {
+		xprintline (msg->outputbuf, text, -1);
 	}
 
-	g_free(ptr);
+	g_free (ptr);
+}
+
+void msg_output (char *name, guint16 uid, char *buf)
+{
+	gboolean is_self =
+		name && the_session.htlc.name[0]
+		&& strcmp (name, the_session.htlc.name) == 0;
+	msg_output_render (name, uid, buf, is_self);
+}
+
+void msg_output_from_event (HxMsgEvent *event)
+{
+	if (!event)
+		return;
+	msg_output_render (event->name, event->uid,
+	                   event->body, event->is_self);
 }
 
 

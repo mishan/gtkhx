@@ -227,7 +227,16 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 #endif
 
 	if(pm.uid > 0) {
-		gtkhx_session_emit_msg (gtkhx_session_get_default (), pm.name, pm.uid, pm.msg);
+		/* Phase 5+: msg signal payload is a boxed HxMsgEvent
+		 * (parsed once; every subscriber sees the same
+		 * UTF-8-sanitised, self-classified view). */
+		HxMsgEvent *ev = hx_msg_event_new (
+			pm.uid, pm.name, pm.name_len,
+			pm.msg,  pm.msg_len,
+			the_session.htlc.name[0]
+				? the_session.htlc.name : NULL);
+		gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
+		hx_msg_event_free (ev);
 	}
 	else {
 		broadcastmsg(pm.msg);

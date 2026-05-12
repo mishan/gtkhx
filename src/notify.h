@@ -33,9 +33,7 @@ extern void gtkhx_notify_init (GtkApplication *app);
  * event classes still take plain strings — they don't have the
  * sender embedded in a chat-line format. */
 extern void gtkhx_notify_chat        (HxChatEvent *event);
-extern void gtkhx_notify_msg         (const char *sender,
-                                       guint16 uid,
-                                       const char *body);
+extern void gtkhx_notify_msg         (HxMsgEvent *event);
 extern void gtkhx_notify_pchat       (HxChatEvent *event);
 extern void gtkhx_notify_pchat_invite (guint32 cid,
                                         const char *inviter);
