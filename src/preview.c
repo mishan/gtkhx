@@ -54,6 +54,7 @@
 #include <gtksourceview/gtksource.h>
 #endif
 #include "hx.h"
+#include "prefs.h"
 #include "preview.h"
 #include "gtkutil.h"
 
@@ -94,16 +95,20 @@ struct hx_preview {
 	GtkWidget *window;
 	GtkWidget *body;          /* the swappable child of the window */
 	GtkWidget *placeholder;   /* initial "Loading…" stand-in */
+	GtkWidget *save_btn;      /* trailing-edge headerbar button */
 
 	const struct hx_viewer *viewer;   /* NULL until dispatch */
 	void  *viewer_data;
 
-	/* Worker pre-dispatch queue: chunks that arrive before
-	 * set_info is processed sit here so the viewer can replay
-	 * them. Bounded by the FILP header size on the worker side
-	 * (set_info comes before the first data chunk in practice),
-	 * so this is small in the common case. */
-	GByteArray *pre_queue;
+	/* Full byte stream of the file's data fork, accumulated as
+	 * chunks arrive. Always present; outlives the viewer; the
+	 * Save button writes this to disk. Viewers that need to look
+	 * at the whole buffer once (image, PDF) read from this at
+	 * done() time instead of keeping their own copy. The text
+	 * and source viewers don't need the bytes (their content
+	 * lives in a GtkTextBuffer / GtkSourceBuffer) but the bytes
+	 * stay around regardless so Save works for them too. */
+	GByteArray *bytes;
 
 	/* Set when the user closes the window. Both the worker's
 	 * marshal helpers and queued idle callbacks bail before
@@ -285,8 +290,8 @@ image_score (const char *type, const char *creator, const char *filename)
 	return 0;
 }
 
-/* The image viewer accumulates the file's bytes into a GByteArray
- * and decodes once at end-of-stream via gdk_texture_new_from_bytes.
+/* The image viewer reads p->bytes once at end-of-stream and decodes
+ * via gdk_texture_new_from_bytes.
  *
  * We could decode progressively with GdkPixbufLoader but the
  * pixbuf→GdkPaintable handoff used to go through gdk_texture_new_
@@ -298,7 +303,6 @@ image_score (const char *type, const char *creator, const char *filename)
 struct image_state {
 	GtkWidget   *picture;
 	GtkWidget   *status;     /* caption shown while loading / on error */
-	GByteArray  *buf;
 };
 
 static GtkWidget *
@@ -308,7 +312,6 @@ image_create (hx_preview *p)
 	GtkWidget *box, *scroll;
 
 	s = g_new0 (struct image_state, 1);
-	s->buf = g_byte_array_new ();
 
 	box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
@@ -342,10 +345,10 @@ image_create (hx_preview *p)
 static void
 image_chunk (hx_preview *p, const char *buf, gsize len)
 {
-	struct image_state *s = p->viewer_data;
-	if (!s || !s->buf || len == 0)
-		return;
-	g_byte_array_append (s->buf, (const guint8 *) buf, len);
+	/* Bytes already in p->bytes (the dispatcher appends there
+	 * before calling our chunk hook). We're a one-shot decoder —
+	 * everything happens in image_done. */
+	(void) p; (void) buf; (void) len;
 }
 
 static void
@@ -356,17 +359,20 @@ image_done (hx_preview *p)
 	GdkTexture *tex;
 	GBytes *bytes;
 
-	if (!s || !s->buf)
+	if (!s)
 		return;
 
-	if (s->buf->len == 0) {
+	if (!p->bytes || p->bytes->len == 0) {
 		gtk_label_set_text (GTK_LABEL (s->status), "No image data");
 		return;
 	}
 
-	bytes = g_byte_array_free_to_bytes (s->buf);
-	s->buf = NULL;
-
+	/* Borrow the bytes — don't consume p->bytes (the Save button
+	 * still needs them). g_bytes_new_static would let us hand a
+	 * non-owning reference to the texture loader, but GdkTexture's
+	 * decoder may or may not retain the bytes after decode; safer
+	 * to give it a strong-ref GBytes with its own copy. */
+	bytes = g_bytes_new (p->bytes->data, p->bytes->len);
 	tex = gdk_texture_new_from_bytes (bytes, &err);
 	g_bytes_unref (bytes);
 
@@ -392,8 +398,6 @@ image_close (hx_preview *p)
 	struct image_state *s = p->viewer_data;
 	if (!s)
 		return;
-	if (s->buf)
-		g_byte_array_unref (s->buf);
 	g_free (s);
 	p->viewer_data = NULL;
 }
@@ -425,7 +429,6 @@ struct pdf_state {
 	GtkWidget    *body;        /* outer GtkScrolledWindow */
 	GtkWidget    *page_box;    /* GtkBox holding the per-page widgets */
 	GtkWidget    *status;      /* "Loading…" / error label */
-	GByteArray   *buf;
 	PopplerDocument *doc;
 };
 
@@ -482,7 +485,6 @@ pdf_create (hx_preview *p)
 	GtkWidget *scroll;
 
 	s = g_new0 (struct pdf_state, 1);
-	s->buf = g_byte_array_new ();
 
 	scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
@@ -512,10 +514,9 @@ pdf_create (hx_preview *p)
 static void
 pdf_chunk (hx_preview *p, const char *buf, gsize len)
 {
-	struct pdf_state *s = p->viewer_data;
-	if (!s || !s->buf || len == 0)
-		return;
-	g_byte_array_append (s->buf, (const guint8 *) buf, len);
+	/* Bytes are accumulated by the dispatcher in p->bytes; we
+	 * only need to act at end-of-stream. */
+	(void) p; (void) buf; (void) len;
 }
 
 static void
@@ -526,16 +527,16 @@ pdf_done (hx_preview *p)
 	GBytes *bytes;
 	int n_pages, i;
 
-	if (!s || !s->buf)
+	if (!s)
 		return;
-	if (s->buf->len == 0) {
+	if (!p->bytes || p->bytes->len == 0) {
 		gtk_label_set_text (GTK_LABEL (s->status), "No PDF data");
 		return;
 	}
 
-	bytes = g_byte_array_free_to_bytes (s->buf);
-	s->buf = NULL;
-
+	/* g_bytes_new copies; we don't want to surrender ownership
+	 * of p->bytes — the Save button still needs it. */
+	bytes = g_bytes_new (p->bytes->data, p->bytes->len);
 	s->doc = poppler_document_new_from_bytes (bytes, NULL, &err);
 	g_bytes_unref (bytes);
 
@@ -854,8 +855,8 @@ hx_preview_unref (hx_preview *p)
 	if (!g_atomic_int_dec_and_test (&p->refcount))
 		return;
 	g_free (p->name);
-	if (p->pre_queue)
-		g_byte_array_unref (p->pre_queue);
+	if (p->bytes)
+		g_byte_array_unref (p->bytes);
 	g_free (p);
 }
 
@@ -898,17 +899,12 @@ preview_install_viewer (hx_preview *p)
 	p->placeholder = NULL;
 	p->body = body;
 
-	/* Replay any chunks that arrived before set_info was
-	 * processed. Common case: an empty queue (set_info almost
-	 * always lands first because the worker calls it before
-	 * preview_get even reads the data fork). */
-	if (p->pre_queue && p->pre_queue->len > 0 && v->chunk) {
-		v->chunk (p, (const char *) p->pre_queue->data,
-		           p->pre_queue->len);
-	}
-	if (p->pre_queue) {
-		g_byte_array_unref (p->pre_queue);
-		p->pre_queue = NULL;
+	/* Replay any chunks that arrived before the viewer was
+	 * installed. p->bytes always carries the full stream so
+	 * the viewer sees the same bytes the dispatcher saw. */
+	if (p->bytes && p->bytes->len > 0 && v->chunk) {
+		v->chunk (p, (const char *) p->bytes->data,
+		           p->bytes->len);
 	}
 }
 
@@ -945,16 +941,27 @@ chunk_dispatch (gpointer data)
 {
 	struct chunk_job *j = data;
 	if (!j->p->closed) {
+		/* Always append to the shared byte buffer first — the
+		 * Save button reads from there, and viewers that need
+		 * the whole buffer at once (image, PDF) read from there
+		 * at done() time. Streaming-friendly viewers (text,
+		 * source) also get a chunk callback below. */
+		if (!j->p->bytes)
+			j->p->bytes = g_byte_array_new ();
+		g_byte_array_append (j->p->bytes,
+		                      (const guint8 *) j->data, j->len);
+
+		/* Enable the Save button as soon as we have any data —
+		 * the user might want to save a partial transfer if
+		 * something downstream goes sideways. */
+		if (j->p->save_btn)
+			gtk_widget_set_sensitive (j->p->save_btn, TRUE);
+
+		/* If the viewer is installed, hand it the new chunk.
+		 * If not, the bytes will be replayed in
+		 * preview_install_viewer once the viewer arrives. */
 		if (j->p->viewer && j->p->viewer->chunk) {
 			j->p->viewer->chunk (j->p, j->data, j->len);
-		} else {
-			/* Viewer not installed yet — stash the bytes so
-			 * preview_install_viewer can replay them. */
-			if (!j->p->pre_queue)
-				j->p->pre_queue = g_byte_array_new ();
-			g_byte_array_append (j->p->pre_queue,
-			                      (const guint8 *) j->data,
-			                      j->len);
 		}
 	}
 	g_free (j->data);
@@ -973,6 +980,101 @@ done_dispatch (gpointer data)
 	return G_SOURCE_REMOVE;
 }
 
+/* ---- Save dialog --------------------------------------------------- */
+
+/* Phase 5+: Save button on the preview headerbar — writes the
+ * already-downloaded bytes to a user-chosen path. Avoids a
+ * re-download for the common "preview, then keep" flow.
+ *
+ * GtkFileDialog (the modern GTK 4.10+ replacement for GtkFileChooser-
+ * Dialog) would be cleaner, but the project's gtk4 floor is 4.6, so
+ * we use GtkFileChooserDialog inside G_GNUC_BEGIN/END_IGNORE_
+ * DEPRECATIONS — same pattern as files.c's upload dialog. */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
+struct save_dialog_ctx {
+	hx_preview *p;
+};
+
+static void
+save_response (GtkDialog *dialog, gint response_id, gpointer user_data)
+{
+	struct save_dialog_ctx *ctx = user_data;
+	hx_preview *p = ctx->p;
+
+	if (response_id == GTK_RESPONSE_ACCEPT) {
+		GFile *gf = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
+		if (gf && p->bytes && p->bytes->len > 0) {
+			GError *err = NULL;
+			if (!g_file_replace_contents (
+				gf,
+				(const char *) p->bytes->data,
+				p->bytes->len,
+				NULL,            /* etag */
+				FALSE,           /* make_backup */
+				G_FILE_CREATE_NONE,
+				NULL,            /* new_etag */
+				NULL,            /* cancellable */
+				&err))
+			{
+				g_warning ("preview save: %s",
+				           err ? err->message : "(unknown)");
+				g_clear_error (&err);
+			}
+		}
+		if (gf) g_object_unref (gf);
+	}
+	gtkhx_widget_destroy (GTK_WIDGET (dialog));
+	hx_preview_unref (p);
+	g_free (ctx);
+}
+
+static void
+save_clicked (GtkButton *btn, gpointer user_data)
+{
+	hx_preview *p = user_data;
+	GtkWidget *dialog;
+	GtkRoot   *root;
+	struct save_dialog_ctx *ctx;
+
+	(void) btn;
+
+	root = gtk_widget_get_root (p->window);
+	dialog = gtk_file_chooser_dialog_new (
+		"Save File",
+		GTK_IS_WINDOW (root) ? GTK_WINDOW (root) : NULL,
+		GTK_FILE_CHOOSER_ACTION_SAVE,
+		"_Cancel", GTK_RESPONSE_CANCEL,
+		"_Save",   GTK_RESPONSE_ACCEPT,
+		NULL);
+
+	/* Suggest the file's original name as the destination
+	 * filename so the user just clicks Save in the common
+	 * case. */
+	if (p->name && *p->name)
+		gtk_file_chooser_set_current_name (
+			GTK_FILE_CHOOSER (dialog), p->name);
+
+	/* Default folder = the preferences-configured download dir,
+	 * matching what a full Download would do. Falls back to
+	 * GTK's default if the pref is empty / nonexistent. */
+	if (gtkhx_prefs.download_path && *gtkhx_prefs.download_path) {
+		GFile *gd = g_file_new_for_path (gtkhx_prefs.download_path);
+		gtk_file_chooser_set_current_folder (
+			GTK_FILE_CHOOSER (dialog), gd, NULL);
+		g_object_unref (gd);
+	}
+
+	ctx = g_new0 (struct save_dialog_ctx, 1);
+	ctx->p = hx_preview_ref (p);
+	g_signal_connect (dialog, "response",
+	                  G_CALLBACK (save_response), ctx);
+
+	gtk_window_present (GTK_WINDOW (dialog));
+}
+
+G_GNUC_END_IGNORE_DEPRECATIONS
+
 /* ---- Public API --------------------------------------------------- */
 
 hx_preview *
@@ -980,6 +1082,7 @@ hx_preview_new (const char *name)
 {
 	hx_preview *p;
 	GtkWidget *placeholder;
+	GtkWidget *headerbar;
 
 	p = g_new0 (hx_preview, 1);
 	p->refcount = 1;          /* held by the window */
@@ -987,9 +1090,21 @@ hx_preview_new (const char *name)
 
 	p->window = gtk_window_new ();
 	gtk_window_set_title    (GTK_WINDOW (p->window), p->name);
-	gtk_window_set_titlebar (GTK_WINDOW (p->window),
-	                          adw_header_bar_new ());
+	headerbar = adw_header_bar_new ();
+	gtk_window_set_titlebar (GTK_WINDOW (p->window), headerbar);
 	gtk_window_set_default_size (GTK_WINDOW (p->window), 480, 360);
+
+	/* Trailing-edge Save button — writes p->bytes to a
+	 * user-chosen file. Insensitive until the first chunk lands
+	 * (chunk_dispatch flips it on). The document-save-symbolic
+	 * icon is the standard GNOME save glyph; the tooltip carries
+	 * the verb for screen readers. */
+	p->save_btn = gtk_button_new_from_icon_name ("document-save-symbolic");
+	gtk_widget_set_tooltip_text (p->save_btn, "Save file");
+	gtk_widget_set_sensitive    (p->save_btn, FALSE);
+	g_signal_connect (p->save_btn, "clicked",
+	                  G_CALLBACK (save_clicked), p);
+	adw_header_bar_pack_end (ADW_HEADER_BAR (headerbar), p->save_btn);
 
 	placeholder = gtk_label_new ("Loading…");
 	gtk_widget_add_css_class (placeholder, "dim-label");
