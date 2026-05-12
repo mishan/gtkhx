@@ -41,6 +41,7 @@
 #include <stdarg.h>
 
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "rcv.h"
 #include "gtkthreads.h"
 #include "gtkutil.h"
@@ -225,7 +226,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 		g_hash_table_iter_init (&iter, sess->chats);
 		while (g_hash_table_iter_next (&iter, &key, &val)) {
 			struct chat *chat = val;
-			hx_output.users_clear (htlc, chat);
+			gtkhx_session_emit_users_clear (
+				gtkhx_session_get_default (), htlc, chat);
 			if (GPOINTER_TO_UINT (key) != 0) {
 				non_public = g_list_prepend (non_public, key);
 			} else {
@@ -421,7 +423,7 @@ update_task (struct htlc_conn *htlc)
 			if (tsk) {
 				tsk->pos = htlc->in.pos;
 				tsk->len = htlc->in.len;
-				hx_output.task_update(&the_session, tsk);
+				gtkhx_session_emit_task_update (gtkhx_session_get_default (), &the_session, tsk);
 			}
 		}
 	}
@@ -644,8 +646,9 @@ static gboolean
 ts_dispatch (gpointer data)
 {
 	struct ts_job *j = data;
-	hx_output.tracker_server_create (j->addr, j->port, j->nusers,
-	                                 j->name, j->desc, j->total);
+	gtkhx_session_emit_tracker_server_create (
+		gtkhx_session_get_default (),
+		j->addr, j->port, j->nusers, j->name, j->desc, j->total);
 	g_free (j->name);
 	g_free (j->desc);
 	g_free (j);

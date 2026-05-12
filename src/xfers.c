@@ -36,6 +36,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "hfs.h"
 #include "network.h"
 #include "rcv.h"
@@ -104,7 +105,7 @@ fu_dispatch (gpointer data)
 {
 	struct fu_job *j = data;
 	if (!j->htxf->canceled)
-		hx_output.file_update (&the_session, j->htxf);
+		gtkhx_session_emit_file_update (gtkhx_session_get_default (), &the_session, j->htxf);
 	htxf_unref (j->htxf);
 	g_free (j);
 	return G_SOURCE_REMOVE;
@@ -374,7 +375,7 @@ struct htxf_conn *xfer_new (const char *path, const char *remotepath,
 	htxf->htlc = &the_session.htlc;
 	htxf->total_pos = 0;
 	htxf->total_size = 1;
-	hx_output.file_update(&the_session, htxf);
+	gtkhx_session_emit_file_update (gtkhx_session_get_default (), &the_session, htxf);
 
 	if(nxfers == 1 || !gtkhx_prefs.queuedl) {
 		xfer_go(htxf);
@@ -774,7 +775,7 @@ void xfer_tasks_update (struct htlc_conn *htlc)
 
 	for (i = 0; i < nxfers; i++) {
 		if (xfers[i]->htlc == htlc)
-			hx_output.file_update(&the_session, xfers[i]);
+			gtkhx_session_emit_file_update (gtkhx_session_get_default (), &the_session, xfers[i]);
 	}
 }
 

@@ -35,6 +35,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "network.h"
 #include "xfers.h"
 #include "chat.h"
@@ -185,8 +186,12 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 	}
 #endif
 
-	hx_output.chat(htlc, msg.cid, msg.text, msg.text_len);
-	play_sound(CHAT_POST);
+	/* Phase 3+: hx_output.chat → "chat" signal on the session
+	 * emitter. The existing output_chat handler in chat.c is
+	 * connected at startup in gtkhx.c. */
+	gtkhx_session_emit_chat (gtkhx_session_get_default (),
+	                         htlc, msg.cid, msg.text, msg.text_len);
+	play_sound (CHAT_POST);
 }
 
 void hx_rcv_msg (struct htlc_conn *htlc)
@@ -213,7 +218,7 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 #endif
 
 	if(pm.uid > 0) {
-		hx_output.msg(pm.name, pm.uid, pm.msg);
+		gtkhx_session_emit_msg (gtkhx_session_get_default (), pm.name, pm.uid, pm.msg);
 	}
 	else {
 		broadcastmsg(pm.msg);
@@ -273,7 +278,7 @@ void hx_rcv_agreement_file (struct htlc_conn *htlc)
 		return;
 	}
 #endif
-	hx_output.agreement (&the_session, buf, (guint16) body_len);
+	gtkhx_session_emit_agreement (gtkhx_session_get_default (), &the_session, buf, (guint16) body_len);
 }
 
 /* Phase 5: rewritten to use hx_news_post_walk in proto_helpers.c.
@@ -286,7 +291,7 @@ static void
 news_post_emit (void *user, const char *bytes, gsize len)
 {
 	struct htlc_conn *htlc = user;
-	hx_output.news_post (htlc, (char *) bytes, (guint16) len);
+	gtkhx_session_emit_news_post (gtkhx_session_get_default (), htlc, (char *) bytes, (guint16) len);
 	play_sound (NEWS_POST);
 }
 
@@ -381,7 +386,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 		}
 		user = hx_user_new (chat, uid);
 		chat->nusers++;
-		hx_output.user_create(htlc, chat, user, name, icon, color);
+		gtkhx_session_emit_user_create (gtkhx_session_get_default (),
+		                                htlc, chat, user, name, icon, color);
 		play_sound(USER_JOIN);
 		if(gtkhx_prefs.showjoin) {
 			hx_printf_prefix(htlc, cid, INFOPREFIX, _("join: %s\n"), name);
@@ -392,7 +398,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 		if (!got_color) {
 			color = user->color;
 		}
-		hx_output.user_change(htlc, chat, user, name, icon, color);
+		gtkhx_session_emit_user_change (gtkhx_session_get_default (),
+		                                htlc, chat, user, name, icon, color);
 		/* Phase 5: print "X is now known as Y" only when the name
 		 * actually changed AND it isn't us. Suppressing the self
 		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
@@ -464,7 +471,8 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 
 	user = hx_user_with_uid (chat, pm.uid);
 	if (user) {
-		hx_output.user_delete(htlc, chat, user);
+		gtkhx_session_emit_user_delete (gtkhx_session_get_default (),
+		                                htlc, chat, user);
 
 		if(gtkhx_prefs.showjoin) {
 			hx_printf_prefix(htlc, pm.cid, INFOPREFIX, _("parts: %s \n"), user->name);
@@ -500,7 +508,16 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 			return;
 		}
 #endif
-		hx_output.chat_subject(htlc, sm.cid, chat->subject);
+		/* Update the subject widget (pure view), then log the
+		 * change as a chat line. Splitting the two means the
+		 * initial-subject-discovery path (rcv_task_user_list's
+		 * HTLS_DATA_CHAT_SUBJECT chunk) can call only the widget
+		 * update without spamming a "Subject Changed to X" line
+		 * for a subject that, from the user's point of view, was
+		 * already there before they joined. */
+		gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc, sm.cid, chat->subject);
+		hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
+		                  _("Subject Changed to"), chat->subject);
 	}
 }
 
@@ -538,7 +555,7 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 		return;
 	}
 #endif
-	hx_output.chat_invitation(htlc, im.cid, im.name);
+	gtkhx_session_emit_chat_invitation (gtkhx_session_get_default (), htlc, im.cid, im.name);
 	play_sound(CHAT_INVITE);
 }
 
@@ -643,7 +660,7 @@ void hx_rcv_xfer_queue(struct htlc_conn *htlc)
 		return;
 	}
 	htxf->queue = xq.queueid;
-	hx_output.xfer_queue(&the_session, htxf);
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);
@@ -849,7 +866,7 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 	} dh_end();
 
 	gcnews->group = group;
-	hx_output.news_catalog(gcnews);
+	gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
 }
 
 void rcv_task_newsfolder_list(struct htlc_conn *htlc, 
@@ -881,7 +898,7 @@ void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 	folder->num_entries = num;
 
 	gfnews->news = folder;
-	hx_output.news_folder(gfnews);
+	gtkhx_session_emit_news_folder (gtkhx_session_get_default (), gfnews);
 }
 
 void rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
@@ -908,7 +925,7 @@ void rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
 	} dh_end();
 	
 	post->item = item;
-	hx_output.news_thread(post);
+	gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
 }
 
 
@@ -1345,7 +1362,7 @@ void rcv_task_news_file (struct htlc_conn *htlc)
 		news_len = 0;
 		news_buf[0] = 0;
 	}
-	hx_output.news_file (htlc, (char *) news_buf, news_len);
+	gtkhx_session_emit_news_file (gtkhx_session_get_default (), htlc, (char *) news_buf, news_len);
 }
 
 void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
@@ -1354,7 +1371,6 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 	struct hx_user *user;
 	guint16 nlen, uid;
 	int new;
-	struct gtkhx_chat *gchat = gchat_with_cid(&the_session, chat->cid);
 
 	dh_start(htlc) {
 		if (_type == HTLS_DATA_USER_LIST) {
@@ -1397,18 +1413,22 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 				htlc->color = user->color;
 			}
 			if (new) {
-				hx_output.user_create(htlc, chat, user, user->name, user->icon,
-									  user->color);
+				gtkhx_session_emit_user_create (
+					gtkhx_session_get_default (),
+					htlc, chat, user, user->name,
+					user->icon, user->color);
 			}
 		}
 
 		else if (_type == HTLS_DATA_CHAT_SUBJECT) {
 			guint16 slen = (_len > 255) ? 255 : _len;
-			memcpy(chat->subject, dh->data, slen);
+			memcpy (chat->subject, dh->data, slen);
 			chat->subject[slen] = 0;
-			if(gchat && gchat->subject) {
-				gtk_editable_set_text(GTK_EDITABLE(gchat->subject), chat->subject);
-			}
+			/* Phase 5+ (MVC boundary): route through the view
+			 * vtable rather than poking the subject widget
+			 * directly. Initial-subject-discovery path — no
+			 * 'Subject Changed to X' log line. */
+			gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc, chat->cid, chat->subject);
 		}
 	} dh_end();
 }
@@ -1461,7 +1481,8 @@ void rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
 	if (nlen && ilen) {
 		CR2LF(info, ilen);
 		strip_ansi(info, ilen);
-		hx_output.user_info(uid, name, info, ilen);
+		gtkhx_session_emit_user_info (gtkhx_session_get_default (),
+		                              uid, name, info, ilen);
 	}
 }
 
@@ -1659,8 +1680,9 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 	hx_format_hotline_date (date_create, created,  sizeof created);
 	hx_format_hotline_date (date_modify, modified, sizeof modified);
 
-	hx_output.file_info(path, name, crea, type, comment, modified, created,
-						size);
+	gtkhx_session_emit_file_info (gtkhx_session_get_default (),
+	                              path, name, crea, type,
+	                              comment, modified, created, size);
 }
 
 void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
@@ -1743,7 +1765,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(&the_session, htxf); /* we most certainly want
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf); /* we most certainly want
 														 to output its position
 														 in the queue */
 
@@ -1842,7 +1864,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(&the_session, htxf);
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);

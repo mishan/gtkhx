@@ -342,38 +342,10 @@ struct cached_filelist {
 	char **filter_argv;
 };
 
-/* ---- Output backend vtable (only the GUI implementation is alive) -- */
-
-struct output_functions {
-	void (*init)(int argc, char **argv);
-	void (*loop)(void);
-	void (*clear)(struct htlc_conn *htlc, guint32 cid, int subj);
-	void (*chat)(struct htlc_conn *htlc, guint32 cid, char *chat, guint16 len);
-	void (*msg)(char *name, guint16 uid, char *buf);
-	void (*agreement)(session *sess, const char *agreement, guint16 len);
-	void (*news_file)(struct htlc_conn *htlc, char *news, guint16 len);
-	void (*news_post)(struct htlc_conn *htlc, char *news, guint16 len);
-	void (*user_info)(guint16 uid, const char *nam, const char *info, guint16 len);
-	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);
-	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
-	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_list)(session *sess);
-	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
-	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
-	void (*file_update)(session *sess, struct htxf_conn *htxf);
-	void (*tracker_server_create)(struct in_addr addr, guint16 port, guint16 nusers, const char *nam, const char *desc, int total);
-	void (*task_update)(session *sess, struct task *tsk);
-	void (*news_folder)(struct gnews_folder *gfnews);
-	void (*news_catalog)(struct gnews_catalog *gcnews);
-	void (*news_thread)(struct news_post *post);
-	void (*chat_subject)(struct htlc_conn *htlc, guint32 cid, char *buf);
-	void (*chat_invitation)(struct htlc_conn *htlc, guint32 cid, char *name);
-	void (*xfer_queue)(session *sess, struct htxf_conn *htxf);
-	void (*tracker_clear)(void);
-};
-
-extern struct output_functions hx_output;
+/* The hx_output vtable is gone (Phase 3.6). Every notification it
+ * carried became a GObject signal on GtkhxSession; the lifecycle
+ * hooks (init / loop) had exactly one implementation each and are
+ * now called by name (fe_init / hx_loop) from main(). */
 extern void timer_add_secs (time_t secs, int (*fn)(void *), void *ptr);
 extern void timer_delete_ptr (void *ptr);
 

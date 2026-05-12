@@ -111,6 +111,88 @@ What's degraded and remaining:
   during widget construction. Most call sites have been audited; remaining cases are
   pre-existing GTK 4 noise.
 
+## Model / view boundary (GtkhxSession signals)
+
+Model-side files (`rcv.c`, `network.c`, `commands.c`, `tasks.c`
+interior, `banner.c`, `xfers.c`) reach the view by emitting signals
+on `GtkhxSession` — a singleton GObject created lazily by
+`gtkhx_session_get_default()`. Direct GTK calls (`gtk_*` / `GTK_*`)
+in those files are bugs — Phase 2 cleared them out, the audit is
+one grep.
+
+The signal taxonomy mirrors the old `hx_output` vtable that Phase 3
+replaced:
+
+| Signal                  | Payload                                      |
+|-------------------------|----------------------------------------------|
+| `chat`                  | htlc, cid, body, len                         |
+| `chat-subject`          | htlc, cid, subj                              |
+| `chat-invitation`       | htlc, cid, inviter-name                      |
+| `msg`                   | sender-name, uid, body                       |
+| `agreement`             | session, agreement-string, len               |
+| `news-file`             | htlc, news, len                              |
+| `news-post`             | htlc, news, len                              |
+| `news-folder`           | gfnews                                       |
+| `news-catalog`          | gcnews                                       |
+| `news-thread`           | post                                         |
+| `user-create`           | htlc, chat, user, nam, icon, color           |
+| `user-delete`           | htlc, chat, user                             |
+| `user-change`           | htlc, chat, user, NEW nam/icon/color         |
+| `users-clear`           | htlc, chat                                   |
+| `user-info`             | uid, nam, info, len                          |
+| `file-info`             | path, name, creator, type, ...               |
+| `file-list`             | cfl, fh, data                                |
+| `file-update`           | session, htxf                                |
+| `xfer-queue`            | session, htxf                                |
+| `tracker-server-create` | addr (s_addr), port, nusers, nam, desc, total|
+| `task-update`           | session, task                                |
+
+Model-side emitters live in `gtkhx_session.{c,h}` —
+`gtkhx_session_emit_<name>(self, args...)` is a one-line wrapper
+over `g_signal_emit_by_name`. View-side handlers are static
+adapter functions in `gtkhx.c` (`on_<name>_signal`) that bridge the
+GObject marshaller signature to the legacy `output_*` /
+`user_create` / etc. functions in `chat.c` / `users.c` / `news*.c` /
+`tasks.c`. The connect calls all live in `gtkhx_connect_signals()`,
+fired once from `fe_init` at startup.
+
+The Phase 2 / Phase 3 cleanup also dropped a clutch of dead vtable
+entries (`clear`, `user_list`, `tracker_clear`) whose implementations
+were called directly by name elsewhere and never flowed through the
+dispatch. Some view-side convenience functions remain called by
+name from model files: `hx_printf` / `hx_printf_prefix` (log a line
+to chat output), `hx_clear_chat`, `tracker_clear`. They aren't
+signal-routed today.
+
+Worker threads marshal to main via `g_idle_add`, never call GTK or
+emit signals directly (banner.c HTXF worker, xfers.c progress
+updates, preview.c async parses).
+
+## Per-session collections (Phase 1 of MVC cleanup)
+
+Every per-session collection on `struct _session` is a `GHashTable`
+since Phase 1, replacing the intrusive doubly-linked-list patterns
+the original code used. The shape is uniform:
+`g_direct_hash + g_direct_equal + NULL key destroy + g_free-ish
+value destroy`. The lookup APIs (`task_with_trans`,
+`msgwin_with_uid`, `chat_with_cid`, `gchat_with_cid`,
+`hx_user_with_uid`) are now O(1) wrappers; iteration uses
+`GHashTableIter`. The hashtables and their factories live in:
+
+| Session field    | Keyed on    | Factory           | Test                             |
+|------------------|-------------|-------------------|----------------------------------|
+| `tasks`          | `u32 trans` | `tasks_init`      | `tests/unit/test_task_hash.c`    |
+| `msg_windows`    | `u16 uid`   | `msg_windows_init`| `tests/unit/test_msgwin_hash.c`  |
+| `chats`          | `u32 cid`   | `chats_init`      | `tests/unit/test_chat_hash.c`    |
+| `gchats`         | `u32 cid`   | `gchats_init`     | `tests/unit/test_gchat_hash.c`   |
+| per-chat `users` | `u16 uid`   | `chat_new` seeds  | `tests/unit/test_hx_user_hash.c` |
+
+`chats_init` additionally seeds the always-present public chat at
+`cid=0` — `chat_with_cid(sess, 0)` is never NULL while the table
+exists. Same convention for `gchats`. `gfile_list` is a plain
+`GList` (small N + the legacy `file_samewin=false` pref allows
+duplicate paths, so a hashtable can't represent it cleanly).
+
 ## Idioms and pitfalls specific to this codebase
 
 - **Multi-connection scaffolding is a lie.** `hx.h` has `MAX_CONN`/`sessions[]`, but

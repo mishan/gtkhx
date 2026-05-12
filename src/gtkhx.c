@@ -51,6 +51,7 @@
 #include "toolbar.h"
 #include "chat.h"
 #include "msg.h"
+#include "gtkhx_session.h"
 #include "tracker.h"
 #include "xtext.h"
 #include "gtkthreads.h"
@@ -794,6 +795,17 @@ static void fe_init (void)
 	tasks_init (&the_session);
 	msg_windows_init (&the_session);
 
+	/* Phase 3+: connect the view-side handlers to the
+	 * GtkhxSession signal emitter. As Phase 3 progresses, each
+	 * vtable notification gets a g_signal_connect line here and
+	 * the corresponding output_functions member goes away. The
+	 * signal-handler signature (instance + signal args + user_data,
+	 * with guint16 widened to guint by the marshaller) doesn't
+	 * match the legacy vtable-function signatures exactly, so we
+	 * route each one through a small static adapter declared
+	 * below — `on_*_signal`. */
+	gtkhx_connect_signals (gtkhx_session_get_default ());
+
 	create_toolbar_window(&the_session);
 	init_colors(toolbar_window);
 
@@ -980,10 +992,274 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 	}
 }
 
-static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat, 
+static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat,
 						 guint16 chatlen)
 {
 		hx_printf(htlc, cid, "%.*s\n", chatlen, chat);
+}
+
+/* Forward declarations for the file-local view functions the
+ * Phase 3 adapter handlers below call. The functions themselves
+ * are defined later in this file; the extern-linkage ones
+ * (output_chat_subject, output_news_*, msg_output, etc.) are
+ * already declared in their respective headers. */
+static void output_chat       (struct htlc_conn *htlc, guint32 cid,
+                               char *chat, guint16 chatlen);
+static void output_agreement  (session *sess, const char *agreement,
+                               guint16 len);
+
+/* Phase 3+ signal adapters — bridge the GObject marshaller signature
+ * (instance, signal args (with guint16 widened to guint), user_data)
+ * to the legacy view function signatures. Will get cleaned up once
+ * Phase 3 finishes and the legacy signatures change to match. */
+static void
+on_chat_signal (GtkhxSession *emitter,
+                struct htlc_conn *htlc, guint cid,
+                gpointer body, guint len, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat (htlc, (guint32) cid, (char *) body, (guint16) len);
+}
+
+static void
+on_chat_subject_signal (GtkhxSession *emitter,
+                        struct htlc_conn *htlc, guint cid,
+                        gpointer subj, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat_subject (htlc, (guint32) cid, (char *) subj);
+}
+
+static void
+on_chat_invitation_signal (GtkhxSession *emitter,
+                           struct htlc_conn *htlc, guint cid,
+                           gpointer name, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat_invitation (htlc, (guint32) cid, (char *) name);
+}
+
+static void
+on_msg_signal (GtkhxSession *emitter,
+               gpointer name, guint uid, gpointer body,
+               gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	msg_output ((char *) name, (guint16) uid, (char *) body);
+}
+
+static void
+on_agreement_signal (GtkhxSession *emitter,
+                     gpointer sess, gpointer agreement, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_agreement ((session *) sess, (const char *) agreement,
+	                  (guint16) len);
+}
+
+static void
+on_news_file_signal (GtkhxSession *emitter,
+                     struct htlc_conn *htlc, gpointer news, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_file (htlc, (char *) news, (guint16) len);
+}
+
+static void
+on_news_post_signal (GtkhxSession *emitter,
+                     struct htlc_conn *htlc, gpointer news, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_post (htlc, (char *) news, (guint16) len);
+}
+
+static void
+on_news_folder_signal (GtkhxSession *emitter,
+                       gpointer gfnews, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_folder ((struct gnews_folder *) gfnews);
+}
+
+static void
+on_news_catalog_signal (GtkhxSession *emitter,
+                        gpointer gcnews, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_catalog ((struct gnews_catalog *) gcnews);
+}
+
+static void
+on_news_thread_signal (GtkhxSession *emitter,
+                       gpointer post, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_news_thread ((struct news_post *) post);
+}
+
+static void
+on_user_create_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer nam,
+                       guint icon, guint color, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_create (htlc, chat, user, (const char *) nam,
+	             (guint16) icon, (guint16) color);
+}
+
+static void
+on_user_delete_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_delete (htlc, chat, user);
+}
+
+static void
+on_user_change_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer nam,
+                       guint icon, guint color, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_change (htlc, chat, user, (const char *) nam,
+	             (guint16) icon, (guint16) color);
+}
+
+static void
+on_users_clear_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	users_clear (htlc, chat);
+}
+
+static void
+on_user_info_signal (GtkhxSession *emitter,
+                     guint uid, gpointer nam, gpointer info, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_user_info ((guint16) uid, (const char *) nam,
+	                  (const char *) info, (guint16) len);
+}
+
+static void
+on_file_info_signal (GtkhxSession *emitter,
+                     gpointer path, gpointer name,
+                     gpointer creator, gpointer type,
+                     gpointer comments, gpointer modified,
+                     gpointer created, guint size,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_file_info ((char *) path, (char *) name,
+	                  (char *) creator, (char *) type,
+	                  (char *) comments, (char *) modified,
+	                  (char *) created, (guint32) size);
+}
+
+static void
+on_file_list_signal (GtkhxSession *emitter,
+                     gpointer cfl, gpointer fh, gpointer data,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_file_list ((struct cached_filelist *) cfl,
+	                  (struct hl_filelist_hdr *) fh, data);
+}
+
+static void
+on_file_update_signal (GtkhxSession *emitter,
+                       gpointer sess, gpointer htxf,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	file_update ((session *) sess, (struct htxf_conn *) htxf);
+}
+
+static void
+on_xfer_queue_signal (GtkhxSession *emitter,
+                      gpointer sess, gpointer htxf,
+                      gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_xfer_queue ((session *) sess, (struct htxf_conn *) htxf);
+}
+
+static void
+on_tracker_server_create_signal (GtkhxSession *emitter,
+                                 guint addr_u32, guint port,
+                                 guint nusers, gpointer nam,
+                                 gpointer desc, gint total,
+                                 gpointer user_data)
+{
+	struct in_addr addr;
+	(void) emitter; (void) user_data;
+	addr.s_addr = (in_addr_t) addr_u32;
+	tracker_server_create (addr, (guint16) port, (guint16) nusers,
+	                       (const char *) nam, (const char *) desc, total);
+}
+
+static void
+on_task_update_signal (GtkhxSession *emitter,
+                       gpointer sess, gpointer tsk,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	task_update ((session *) sess, (struct task *) tsk);
+}
+
+void gtkhx_connect_signals (GtkhxSession *emitter)
+{
+	g_signal_connect (emitter, "chat",
+	                  G_CALLBACK (on_chat_signal), NULL);
+	g_signal_connect (emitter, "chat-subject",
+	                  G_CALLBACK (on_chat_subject_signal), NULL);
+	g_signal_connect (emitter, "chat-invitation",
+	                  G_CALLBACK (on_chat_invitation_signal), NULL);
+	g_signal_connect (emitter, "msg",
+	                  G_CALLBACK (on_msg_signal), NULL);
+	g_signal_connect (emitter, "agreement",
+	                  G_CALLBACK (on_agreement_signal), NULL);
+	g_signal_connect (emitter, "news-file",
+	                  G_CALLBACK (on_news_file_signal), NULL);
+	g_signal_connect (emitter, "news-post",
+	                  G_CALLBACK (on_news_post_signal), NULL);
+	g_signal_connect (emitter, "news-folder",
+	                  G_CALLBACK (on_news_folder_signal), NULL);
+	g_signal_connect (emitter, "news-catalog",
+	                  G_CALLBACK (on_news_catalog_signal), NULL);
+	g_signal_connect (emitter, "news-thread",
+	                  G_CALLBACK (on_news_thread_signal), NULL);
+	g_signal_connect (emitter, "user-create",
+	                  G_CALLBACK (on_user_create_signal), NULL);
+	g_signal_connect (emitter, "user-delete",
+	                  G_CALLBACK (on_user_delete_signal), NULL);
+	g_signal_connect (emitter, "user-change",
+	                  G_CALLBACK (on_user_change_signal), NULL);
+	g_signal_connect (emitter, "users-clear",
+	                  G_CALLBACK (on_users_clear_signal), NULL);
+	g_signal_connect (emitter, "user-info",
+	                  G_CALLBACK (on_user_info_signal), NULL);
+	g_signal_connect (emitter, "file-info",
+	                  G_CALLBACK (on_file_info_signal), NULL);
+	g_signal_connect (emitter, "file-list",
+	                  G_CALLBACK (on_file_list_signal), NULL);
+	g_signal_connect (emitter, "file-update",
+	                  G_CALLBACK (on_file_update_signal), NULL);
+	g_signal_connect (emitter, "xfer-queue",
+	                  G_CALLBACK (on_xfer_queue_signal), NULL);
+	g_signal_connect (emitter, "tracker-server-create",
+	                  G_CALLBACK (on_tracker_server_create_signal), NULL);
+	g_signal_connect (emitter, "task-update",
+	                  G_CALLBACK (on_task_update_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1111,34 +1387,10 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	sess->agreementwin = agreementwin;
 }
 
-struct output_functions hx_output = {
-	init,
-	loop,
-	hx_clear_chat,
-	output_chat,
-	msg_output,
-	output_agreement,
-	output_news_file,
-	output_news_post,
-	output_user_info,
-	output_file_info,
-	user_create,
-	user_delete,
-	user_change,
-	user_list,
-	users_clear,
-	output_file_list,
-	file_update,
-	tracker_server_create,
-	task_update,
-	output_news_folder,
-	output_news_catalog,
-	output_news_thread,
-	output_chat_subject,
-	output_chat_invitation,
-	output_xfer_queue,
-	tracker_clear
-};
+/* Phase 3.6: hx_output is gone. Every notification it used to
+ * carry is now a signal on GtkhxSession (see gtkhx_session.{c,h}).
+ * The two lifecycle hooks (init, loop) only ever had one
+ * implementation, so they're called by name from fe_init. */
 
 
 char **hxd_environ = 0;
@@ -1512,7 +1764,7 @@ void hotline_client_init (int argc, char **argv)
 
 	last_msg_nick[0] = 0;
 
-	hx_output.init(argc, argv);
+	init (argc, argv);
 
 	if(server) {
 		if(prompt_pass) {
@@ -1530,5 +1782,5 @@ void hotline_client_init (int argc, char **argv)
 		g_free(bookmark);
 	}
 
-	hx_output.loop();
+	loop ();
 }

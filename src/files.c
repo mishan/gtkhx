@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "gtk_hlist.h"
 #include "macres.h"
 #include "xfers.h"
@@ -1301,7 +1302,8 @@ void cfl_print (struct cached_filelist *cfl, void *data)
 	struct hl_filelist_hdr *fh = cfl->fh;
 
 	if(data) {
-		hx_output.file_list(cfl, fh, data);
+		gtkhx_session_emit_file_list (gtkhx_session_get_default (),
+		                              cfl, fh, data);
 	}
 }
 

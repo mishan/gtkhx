@@ -26,6 +26,7 @@
 #include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "hl_access.h"
 #include "gtk_hlist.h"
 #include "cicn.h"
@@ -875,9 +876,10 @@ void user_list (session *sess)
 		g_hash_table_iter_init (&iter, pub->users);
 		while (g_hash_table_iter_next (&iter, NULL, &val)) {
 			struct hx_user *user = val;
-			hx_output.user_create (&sess->htlc, pub, user,
-			                       user->name, user->icon,
-			                       user->color);
+			gtkhx_session_emit_user_create (
+				gtkhx_session_get_default (),
+				&sess->htlc, pub, user,
+				user->name, user->icon, user->color);
 		}
 	}
 	gtk_hlist_thaw (GTK_HLIST (sess->users_list));
