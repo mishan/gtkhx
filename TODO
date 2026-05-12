@@ -1,5 +1,7 @@
 System Notifications:
-- Support system notifications
+- Support system notifications, including configuration of notifications
+  - As a user, I would like to configure what sort of events generate system notifications
+    e.g.: Public chat messages, mentions in public chat, private messages, private chats, mentions in private chats, new news posts, etc.
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
@@ -7,7 +9,7 @@ General:
 - Publish to Flathub
 
 Network:
-- Finish rewrite of any remaining network code
+- Finish rewrite of any remaining network code -- tracker, etc.?
 - SOCKS support -- do we basically get this for free with GSocketClient?
 
 Files:
@@ -15,13 +17,16 @@ Files:
 - Folder uploads/downloads
 - Consider a "commander" type of interface?
 
-Threaded News:
-- Make the UI cleaner
-- Find/create any missing pixmaps
-
 File Previews:
 - Look into using some sort of library that lets us view different file types with some embedded viewer
   e.g. There's an RTF file on some server and it would be nice to preview the rendered version of it
+
+Threaded News:
+- Make the UI cleaner -- expandable tree view?
+- Same window for folders and catalogs, just change buttons out
+
+Icons:
+- Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
 
 Docs:
 - Rewrite README.md to explain this project better
@@ -46,6 +51,9 @@ Code Modernization:
 
 Code Cleanup:
 - Remove #define/#ifdef/#ifndef for things like USE_IPV6 and other things we should just consider a given these days
+
+Plugins:
+- New plugin ABI using GIRepository
 
 Features:
 - Custom color palette
