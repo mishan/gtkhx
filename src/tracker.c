@@ -26,8 +26,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <pthread.h>
-#include <signal.h>
 #include <adwaita.h>
 #include "hx.h"
 #include "gtkhx.h"
@@ -103,105 +101,38 @@ close_tracker_window (GtkWindow *window, gpointer data)
 	return FALSE;
 }
 
-/* Phase 5: track_tid was previously a bare pthread_t set by
- * pthread_create + cleared at various points by main-thread code that
- * called pthread_cancel / pthread_kill on it. The thread was created
- * detached, which auto-reaps the thread struct the moment it returns
- * — so any stale value in track_tid pointed at freed libpthread
- * internal state. tracker_kill_threads() at quit time would walk that
- * stale handle inside __pthread_kill_implementation and segfault.
+/* Phase 5+ (async tracker rewrite): the pthread_t / SIGUSR1 /
+ * pthread_kill / pthread_join dance that used to live here is gone.
+ * The tracker fetch now runs on the main loop via GSocketClient +
+ * GInputStream async; cancellation is a g_cancellable_cancel against
+ * a GCancellable held inside network.c's tracker_run_ctx.
+ * tracker_kill_threads() in network.c trips that cancellation; the
+ * in-flight async callback unwinds cleanly.
  *
- * Fix: create the thread joinable. The pthread_t handle remains valid
- * until pthread_join is called, so we can pthread_kill (signal it to
- * exit) and pthread_join (reap it) without TOCTOU on the handle.
- *
- * track_tid is touched only from the main thread (UI handlers and the
- * quit path), so a plain global without a mutex is fine — the only
- * race would be the worker thread modifying it, which it doesn't. */
-pthread_t track_tid = 0;
-
-void tracker_kill_threads(void)
-{
-	pthread_t tid = track_tid;
-
-	if (!tid)
-		return;
-
-	/* Clear the global before we do anything else so a re-entrant
-	 * caller (or a second Ctrl+Q) doesn't try to kill the same thread
-	 * twice. */
-	track_tid = 0;
-
-	/* SIGUSR1 wakes the worker out of any blocking I/O; the handler
-	 * (tracker_sighandler) calls pthread_exit. pthread_kill on a
-	 * thread that has already returned is permitted on a joinable
-	 * thread that hasn't been joined yet — it returns 0 or ESRCH but
-	 * does not crash. */
-#ifdef USING_DARWIN
-	kill(tid, SIGUSR1);
-#else
-	pthread_kill(tid, SIGUSR1);
-#endif
-
-	/* Reap. If the thread had already returned naturally, this
-	 * unblocks immediately and frees the libpthread internal state.
-	 * If it was still running, this blocks until SIGUSR1 took effect.
-	 * Either way the handle is now safe to discard. */
-	pthread_join(tid, NULL);
-}
-
-static void tracker_sighandler (int signum)
-{
-	pthread_exit(0);
-}
-
-static void *tracker_getlist_thread(void *data)
-{
-	int i;
-	session *sess = data;
-
-	signal(SIGUSR1, &tracker_sighandler);
-
-#ifdef USING_DARWIN
-	track_tid = getpid();
-#endif
-
-
-	for(i = 0; i < gtkhx_prefs.num_tracker; i++) {
-		hx_tracker_list(sess, gtkhx_prefs.tracker[i], HTRK_TCPPORT);
-	}
-	return NULL;
-}
+ * Net effect: no thread to spawn, no signal handler, no joinable
+ * handle to manage, and the UAF that the old (Phase 5) code spent
+ * a paragraph defending against (track_tid pointing at freed
+ * libpthread state) is structurally impossible. */
 
 static void
 tracker_getlist (GtkWidget *widget, gpointer data)
 {
 	session *sess = data;
-	pthread_attr_t attr;
+	(void) widget;
 
+	/* Cancel any in-flight fetch and start fresh. */
+	tracker_kill_threads ();
 
-	/* Phase 5: route through tracker_kill_threads — it does the
-	 * pthread_kill + pthread_join dance correctly. The previous code
-	 * here pthread_cancel'd a possibly-detached possibly-already-
-	 * reaped handle, which is the same UAF pattern that crashed at
-	 * Ctrl+Q. */
-	tracker_kill_threads();
-
-	pthread_attr_init(&attr);
-	/* Phase 5: drop PTHREAD_CREATE_DETACHED — see comment near
-	 * track_tid. Default is joinable, which is what we want. */
-
-	tracker_clear();
+	tracker_clear ();
 	num_found = 0;
 	num_total = 0;
 
-	tracker_list_destroy(tracker_server_tree);
+	tracker_list_destroy (tracker_server_tree);
 
+	gtk_label_set_text (GTK_LABEL (lbl_found), "  0");
+	gtk_label_set_text (GTK_LABEL (lbl_total), " / 0");
 
-	gtk_label_set_text(GTK_LABEL(lbl_found), "  0");
-	gtk_label_set_text(GTK_LABEL(lbl_total), " / 0");
-
-	pthread_create(&track_tid, &attr, tracker_getlist_thread, sess);
+	hx_tracker_list_async (sess);
 }
 
 
