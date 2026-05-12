@@ -414,11 +414,12 @@ test_news_file = executable('test_news_file',
 test('news_file', test_news_file,
      suite : 'proto')
 
-# news_dirlist — hx_dirlist_parse_extended walks one
-# HTLC_DATA_CATEGORYITEM (0x0143) chunk body. The 1.5 threaded-news
-# directory listing reply uses this extended form (carrying GUID +
-# add/delete serial numbers for incremental category sync) on some
-# servers; we used to ignore it and ship empty news directories.
+# news_dirlist — hx_news_dirlist_parse_folderitem and
+# hx_news_dirlist_parse_categoryitem each walk one chunk body from
+# the 1.5 threaded-news directory listing reply (NEWSFOLDERITEM and
+# CATEGORYITEM respectively). Either chunk type can encode either
+# a folder-entry or a category-entry; the CATEGORYITEM encoding adds
+# per-category sync metadata (GUID + add/delete serial numbers).
 # Includes the real Badmoon hex fixtures from the bug report.
 test_news_dirlist = executable('test_news_dirlist',
   'proto/test_news_dirlist.c',

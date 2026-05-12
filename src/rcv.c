@@ -898,43 +898,32 @@ void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 	folder->path = gfnews->path;
 
 	dh_start(htlc) {
+		struct hx_news_dirlist_entry entry;
+		gboolean got = FALSE;
+
+		/* Either chunk type can carry either a folder-entry or a
+		 * category-entry; both parsers normalise to entry.kind. */
 		switch (_type) {
 		case HTLC_DATA_NEWSFOLDERITEM:
-			/* 1.5 plain form: u8 type, u8 name[_len - 1] */
-			if (_len < 1)
-				break;
-			num++;
-			folder->entry = g_realloc(folder->entry,
-									  sizeof(struct folder_item *)*num);
-			item = g_malloc(sizeof(struct folder_item));
-			item->type = dh->data[0];
-			item->name = g_malloc(_len);
-			memcpy(item->name, dh->data+1, _len-1);
-			item->name[_len-1] = 0;
-			folder->entry[num-1] = item;
+			got = hx_news_dirlist_parse_folderitem (dh->data, _len, &entry);
 			break;
+		case HTLC_DATA_CATEGORYITEM:
+			/* Same listing reply but with per-category sync
+			 * metadata (GUID + add/delete SNs). Some servers
+			 * emit this instead of NEWSFOLDERITEM. */
+			got = hx_news_dirlist_parse_categoryitem (dh->data, _len, &entry);
+			break;
+		}
+		if (!got)
+			continue;
 
-		case HTLC_DATA_CATEGORYITEM: {
-			/* 1.5 extended form. Same task reply, just a richer
-			 * per-entry struct (ntype + GUID + add/delete SNs).
-			 * Some servers ship these instead of NEWSFOLDERITEM.
-			 *
-			 * Wire-parse is in proto_helpers (testable without
-			 * GUI deps); we just translate the result to the
-			 * GTK-facing folder_item. */
-			struct hx_dirlist_ext_entry ext;
-			if (!hx_dirlist_parse_extended (dh->data, _len, &ext))
-				break;
-			num++;
-			folder->entry = g_realloc(folder->entry,
-			                          sizeof(struct folder_item *)*num);
-			item = g_malloc (sizeof (struct folder_item));
-			item->type = ext.kind;
-			item->name = g_strndup (ext.name, ext.name_len);
-			folder->entry[num-1] = item;
-			break;
-		}
-		}
+		num++;
+		folder->entry = g_realloc(folder->entry,
+		                          sizeof(struct folder_item *)*num);
+		item = g_malloc (sizeof (struct folder_item));
+		item->type = entry.kind;
+		item->name = g_strndup (entry.name, entry.name_len);
+		folder->entry[num-1] = item;
 	} dh_end();
 
 	folder->num_entries = num;
