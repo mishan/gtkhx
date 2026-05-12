@@ -1055,7 +1055,7 @@ void create_chat(session *sess)
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		text = gtk_xtext_new (colors, 0);
+		text = gtk_xtext_new (colors, 1);
 		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
 		g_free (fontname);
 	}
@@ -1071,6 +1071,14 @@ void create_chat(session *sess)
 	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
 	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
 	                          gtkhx_prefs.timestamp);
+	/* Allow the indent column to grow past its initial
+	 * stamp_width floor when the first message is appended.
+	 * gtk_xtext_append_indent's auto-bump check is gated on
+	 * `buf->indent < max_auto_indent`, so a zero default makes
+	 * the bump impossible and the nick column overlaps the
+	 * timestamp. 256 px is enough room for the stamp + a
+	 * medium-length nick without dominating the chat width. */
+	gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
@@ -1291,7 +1299,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		text = gtk_xtext_new (colors, 0);
+		text = gtk_xtext_new (colors, 1);
 		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
 		g_free (fontname);
 	}
@@ -1303,6 +1311,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
 	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
 	                          gtkhx_prefs.timestamp);
+	gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 

@@ -363,7 +363,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	gtk_window_set_titlebar (GTK_WINDOW (msg->window), adw_header_bar_new ());
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		msg->outputbuf = gtk_xtext_new (colors, 0);
+		msg->outputbuf = gtk_xtext_new (colors, 1);
 		gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
 		g_free (fontname);
 	}
@@ -375,6 +375,7 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
 	gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
 	                          gtkhx_prefs.timestamp);
+	gtk_xtext_set_max_indent (GTK_XTEXT (msg->outputbuf), 256);
 	g_signal_connect (msg->outputbuf, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
