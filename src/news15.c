@@ -1050,11 +1050,10 @@ struct gnews_catalog *create_gcnews_window (char *path)
 		_("Post Thread"), 2,
 		G_CALLBACK (news15_post), gcnews);
 
-	/* Reply has no dedicated XPM yet — keep the "[ R ]" text label. */
-	replybtn = gtk_button_new_with_label ("[ R ]");
-	g_signal_connect (replybtn, "clicked",
-	                  G_CALLBACK (news15_reply), gcnews);
-	gtk_widget_set_tooltip_text (replybtn, _("Reply To Thread"));
+	replybtn = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/news_reply.xpm",
+		_("Reply To Thread"), 2,
+		G_CALLBACK (news15_reply), gcnews);
 
 	deletebtn = gtkhx_pixmap_button (
 		"/com/nasledov/gtkhx/pixmaps/trash.xpm",

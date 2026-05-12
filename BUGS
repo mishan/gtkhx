@@ -1,5 +1,11 @@
 High priority:
 
+- Regression: Threaded news categories are not appearing. Server response indicates there ought to be items:
+
+[proto] ← trans=10 type=HTLS_HDR_TASK (0x010000) flag=0 len=76
+[proto]   chunk type=HTLC_DATA_CATEGORYITEM (0x0143) len=24 00 02 00 04 12 41 64 6d 69 6e 20 42 61 64 4d 6f 6f 6e 20 49 6e 66 6f 4e
+[proto]   chunk type=HTLC_DATA_CATEGORYITEM (0x0143) len=42 00 03 00 03 b2 1d 0c 3c 3b 5b 11 f0 99 7e 00 03 93 bc d5 fe 00 00 00 04 00 00 00 01 0a 47 75 65 73 74 20 42 6f 6f 6b 30 00 00
+
 - Cannot actually select fonts in font chooser. The inputs (keyboard and mouse) are ignored. I cannot even close
   the font chooser dialog until I first close the Settings dialog. So something is going on with Settings holding onto input.
 

@@ -3,9 +3,28 @@ System Notifications:
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
+- System tray support -- can it hide/restore all the GtkHx windows? That would be neat!
+- Publish to Flathub
+
+Network:
+- Finish rewrite of any remaining network code
+- SOCKS support -- do we basically get this for free with GSocketClient?
+
+Files:
+- Make the UI cleaner
+- Folder uploads/downloads
+- Consider a "commander" type of interface?
+
+Threaded News:
+- Make the UI cleaner
+- Find/create any missing pixmaps
+
+File Previews:
+- Look into using some sort of library that lets us view different file types with some embedded viewer
+  e.g. There's an RTF file on some server and it would be nice to preview the rendered version of it
 
 Docs:
-- Rewrite README to explain this project better
+- Rewrite README.md to explain this project better
 - Write a section about migrating from 0.9.4 to modern versions
 
 i18n:
@@ -15,16 +34,8 @@ Security:
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 - Look into what newer Hotline clients/servers support (ties into mhxd epic)
 
-Pulling in any new developments from over the years:
-- Look into rebasing hx-specific code (especially anything protocol related) from mhxd
-- Also look into any fixes from ghx in mhxd -- it does have some stuff taken from GtkHx like news15.c
-
-File Previews:
-- Look into using some sort of library that lets us view different file types with some embedded viewer
-  e.g. There's an RTF file on some server and it would be nice to preview the rendered version of it
-
 Bookmarks
-- Better bookmark management, allowing user to add/edit/delete bookmarks
+- Better bookmark management, allowing user to add/edit/delete bookmarks within GtkHx
 
 Tracker
 - Ship with some more built in trackers configured
@@ -43,4 +54,3 @@ Features:
 
 Old:
 -Full file support (not sure what this means)
--Reimplement SOCKS support (see mhxd source)
