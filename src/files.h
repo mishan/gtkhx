@@ -30,8 +30,13 @@ extern void hx_put_file(struct htlc_conn *htlc, char *lpath, char *rpath);
 extern void hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path);
 extern void hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path);
 
+/* Phase 5+ (GLib-collections): no more next/prev. Open file-browser
+ * windows live in a GList<struct gfile_list*> on `gfile_list`.
+ * (GList rather than GHashTable because the legacy file_samewin=false
+ * path allows multiple windows to share the same remote path, which
+ * a path-keyed hashtable can't represent. N stays small — handful of
+ * open browsers — so linear lookups are fine.) */
 struct gfile_list {
-	struct gfile_list *next, *prev;
 	struct cached_filelist *cfl;
 	struct path_hist *path_list;
 	int row, column;
@@ -39,6 +44,6 @@ struct gfile_list {
 	char in_use;
 };
 
-extern struct gfile_list *gfile_list;
+extern GList *gfile_list;
 
 #endif

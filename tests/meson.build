@@ -140,6 +140,75 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# task_hash — the Phase 1.1 GLib-collections migration replaced the
+# per-session task linked list (the intrusive __task_list / task_list
+# / task_tail trio) with GHashTable<u32 trans, struct task*>. The
+# table factory lives in tasks_table.c specifically so this test can
+# build it without dragging in GTK; pins down the lifecycle contract
+# (insert / lookup / replace / remove / iterate / destroy → value
+# destroy notify reclaims the struct task + its `str` label).
+test_task_hash = executable('test_task_hash',
+  'unit/test_task_hash.c',
+  '../src/tasks_table.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('task_hash', test_task_hash,
+     suite : 'unit')
+
+# msgwin_hash — Phase 1.2 replaces the doubly-linked msg_list (a
+# file-scope global in msg.c) with GHashTable<u16 uid, struct msgwin*>
+# on the session. struct msgwin lives in session.h, which pulls in
+# gtk + adwaita, so this test exercises a layout-compatible stub
+# rather than linking msg.c. The integration suite covers the real
+# msgwin path end-to-end against mhxd.
+test_msgwin_hash = executable('test_msgwin_hash',
+  'unit/test_msgwin_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('msgwin_hash', test_msgwin_hash,
+     suite : 'unit')
+
+# chat_hash — Phase 1.3 replaces the chat_front / chat_tail /
+# chat_list / __chat_list sentinel quartet on the session with
+# GHashTable<u32 cid, struct chat*>. struct chat sits alongside
+# gtk-dependent types in session.h, so the test uses a layout-
+# compatible stub; the integration suite covers the real path.
+test_chat_hash = executable('test_chat_hash',
+  'unit/test_chat_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('chat_hash', test_chat_hash,
+     suite : 'unit')
+
+# gchat_hash — Phase 1.4 replaces session->gchat_list (the doubly-
+# linked list of open chat / pchat UI windows) with
+# GHashTable<u32 cid, struct gtkhx_chat*>. Same layout-stub approach
+# as chat_hash. Focuses on the public-chat-coexists-with-pchats
+# patterns specific to the gchats table.
+test_gchat_hash = executable('test_gchat_hash',
+  'unit/test_gchat_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('gchat_hash', test_gchat_hash,
+     suite : 'unit')
+
+# hx_user_hash — Phase 1.5 replaces the intrusive hx_user linked
+# list per chat (chat->__user_list / user_list / user_tail with
+# next/prev fields on each hx_user) with chat->users, a
+# GHashTable<u16 uid, struct hx_user*>. Layout-stub approach;
+# the integration suite covers the real path against mhxd.
+test_hx_user_hash = executable('test_hx_user_hash',
+  'unit/test_hx_user_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hx_user_hash', test_hx_user_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #

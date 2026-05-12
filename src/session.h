@@ -60,8 +60,13 @@ typedef gpointer  GdkDrawable;
 
 /* ---- Message-window threading ------------------------------------- */
 
+/* Phase 5+ (GLib-collections): no more next/prev. Open PM windows
+ * live in session->msg_windows, a GHashTable<u16 uid, struct
+ * msgwin*>. Lookup by uid is O(1) via msgwin_with_uid (now a thin
+ * g_hash_table_lookup wrapper); the table owns the msgwin and frees
+ * it (name + uid heap pointer + struct itself) via msgwin_free when
+ * the user closes the window. */
 struct msgwin {
-	struct msgwin *next, *prev;
 	guint16 *uid;
 	char *name;
 	GtkWidget *outputbuf;
@@ -100,8 +105,13 @@ struct ifn {
 
 /* ---- Chat windows ------------------------------------------------- */
 
+/* Phase 5+ (GLib-collections): no more next/prev. Open chat-window
+ * UI lives in session->gchats, a GHashTable<u32 cid, struct
+ * gtkhx_chat*>. cid=0 is the public chat's window (created at
+ * startup by create_chat); pchat windows go in keyed on their
+ * cid. Lookup by cid is O(1) via gchat_with_cid; the value
+ * destroy notify (gchat_free in chat.c) reclaims the struct. */
 struct gtkhx_chat {
-	struct gtkhx_chat *next, *prev;
 	GtkWidget *window;
 	GtkWidget *vscroll;
 	GtkWidget *output;
@@ -198,8 +208,11 @@ struct uesp_fn {
 	void (*fn)(void *, const char *, const char *, const char *, const hl_access_bits);
 };
 
+/* Phase 5+ (GLib-collections): no more next/prev. Users live in
+ * chat->users, a GHashTable<u16 uid, struct hx_user*>. Lookup by
+ * uid via hx_user_with_uid is now O(1); name lookup (uncommon)
+ * still walks. */
 struct hx_user {
-	struct hx_user *next, *prev;
 	guint16 uid;
 	guint16 icon;
 	guint16 color;
@@ -213,12 +226,12 @@ struct hx_user {
 };
 
 struct chat {
-	struct chat *next, *prev;
+	/* Phase 5+: no next/prev — chats live in session->chats, a
+	 * GHashTable<u32 cid, struct chat*>. Members likewise live in
+	 * chat->users, a GHashTable<u16 uid, struct hx_user*>. */
 	guint32 cid;
 	guint32 nusers;
-	struct hx_user __user_list;
-	struct hx_user *user_list;
-	struct hx_user *user_tail;
+	GHashTable *users;
 	char subject[256];
 };
 
@@ -239,7 +252,11 @@ typedef struct _session {
 
 	GtkWidget *agreementwin;
 
-	struct gtkhx_chat *gchat_list;
+	/* Phase 5+: open chat-window UI keyed on cid. Replaces the
+	 * doubly-linked gchat_list. The public chat (cid=0) is added
+	 * by create_chat at startup; pchat_new adds private-chat
+	 * windows. */
+	GHashTable *gchats;
 
 	struct gtask *gtask_list;
 	GtkWidget *gtklist, *gtask_scroll;
@@ -248,12 +265,23 @@ typedef struct _session {
 
 	struct gfile_list *gfile_list;
 
-	struct msgwin *msg_list;
+	/* Phase 5+: open PM windows keyed on the recipient's uid.
+	 * Replaces the file-scope `msg_list` global in msg.c and the
+	 * dead `sess->msg_list` field that was declared here but never
+	 * populated (a long-standing bug — options.c font / wordwrap /
+	 * timestamp iterations over the dead session pointer were
+	 * silently no-oping). Lookup is O(1) via msgwin_with_uid;
+	 * iteration uses GHashTableIter. */
+	GHashTable *msg_windows;
 
 	struct gnews_catalog *gcnews_list;
 
-	struct task __task_list;
-	struct task *task_list, *task_tail;
+	/* Phase 5+: tasks keyed on the 32-bit trans id. Replaces the
+	 * intrusive __task_list / task_list / task_tail trio. Lookup
+	 * by trans is O(1); iteration is via GHashTableIter. The
+	 * hashtable owns each task; values get freed via task_free
+	 * (tasks.c) when removed. */
+	GHashTable *tasks;
 
 	/* Phase 5: removed session-level user_list / user_tail / __user_list.
 	 * Those fields were declared but never wired up (network.c only ever
@@ -264,8 +292,16 @@ typedef struct _session {
 	 * first PM open. The canonical "global user list" lookup is the
 	 * public chat at cid=0 — use chat_with_cid(sess, 0)->user_list. */
 
-	struct chat *chat_front, *chat_tail, *chat_list;
-	struct chat __chat_list;
+	/* Phase 5+: chats keyed on the 32-bit chat-id. Replaces the
+	 * chat_front / chat_tail / chat_list trio + the embedded
+	 * __chat_list sentinel. cid=0 is the public/server-wide chat
+	 * and is created at session init by chats_init() — it must
+	 * always exist while the table does. Other chats (private
+	 * pchats) are inserted by chat_new and removed by chat_delete.
+	 * Lookup is O(1) via chat_with_cid; the value-destroy notify
+	 * (chat_free in chat.c) walks chat->user_list and reclaims the
+	 * heap-allocated hx_user nodes before freeing the chat. */
+	GHashTable *chats;
 
 	struct htlc_conn htlc;
 
@@ -293,8 +329,12 @@ extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */
 
+/* Phase 5+ (GLib-collections): cached_filelist had next/prev fields
+ * left over from a long-defunct linked-list design that nothing
+ * ever wired up. Dropped. Each cfl is owned by a gfile_list entry
+ * (gfl->cfl) — the canonical "find a cfl for path P" lookup goes
+ * through gfile_list, not through a cfl-side data structure. */
 struct cached_filelist {
-	struct cached_filelist *next, *prev;
 	char *path;
 	struct hl_filelist_hdr *fh;
 	guint32 fhlen;

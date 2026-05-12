@@ -35,6 +35,7 @@ gtkhx_sources = files(
   'rcv.c',
   'sound.c',
   'tasks.c',
+  'tasks_table.c',
   'text_util.c',
   'toolbar.c',
   'tracker.c',

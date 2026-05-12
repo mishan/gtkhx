@@ -103,7 +103,8 @@ do_post_login_fetches (struct htlc_conn *htlc)
 	 * both — it calls rcv_task_user_list on the USER_GETLIST
 	 * reply and then reload_news, the latter of which is itself
 	 * gated on HL_ACCESS_READ_NEWS. */
-	task_new (htlc, RCV_TASK_FN(rcv_task_news_users), the_session.chat_list, 0, "who");
+	task_new (htlc, RCV_TASK_FN(rcv_task_news_users),
+	          chat_with_cid (&the_session, 0), 0, "who");
 	hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
 }
 
@@ -172,7 +173,7 @@ void hx_rcv_chat (struct htlc_conn *htlc)
 		return;
 
 	if(msg.uid) { /* do ignoring stuff */
-		struct hx_user *user = hx_user_with_uid(hx_chat->user_list, msg.uid);
+		struct hx_user *user = hx_user_with_uid (hx_chat, msg.uid);
 		if(user && user->ignore) {
 			return;
 		}
@@ -200,7 +201,7 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 	if (!hx_msg_extract (htlc, &pm))
 		return;
 
-	user = hx_user_with_uid(chat->user_list, pm.uid);
+	user = hx_user_with_uid (chat, pm.uid);
 	if(user && user->ignore) {
 		return;
 	}
@@ -368,7 +369,7 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 	if (!chat) {
 		chat = chat_new(sess, cid);
 	}
-	user = hx_user_with_uid(chat->user_list, uid);
+	user = hx_user_with_uid (chat, uid);
 	if (!user) {
 		if (is_self) {
 			/* Don't add our own row here. The USER_LIST reply
@@ -378,9 +379,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 			 * spam a "join: <us>" line in chat. */
 			return;
 		}
-		user = hx_user_new(&chat->user_tail);
+		user = hx_user_new (chat, uid);
 		chat->nusers++;
-		user->uid = uid;
 		hx_output.user_create(htlc, chat, user, name, icon, color);
 		play_sound(USER_JOIN);
 		if(gtkhx_prefs.showjoin) {
@@ -462,7 +462,7 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 	if (!chat)
 		return;
 
-	user = hx_user_with_uid(chat->user_list, pm.uid);
+	user = hx_user_with_uid (chat, pm.uid);
 	if (user) {
 		hx_output.user_delete(htlc, chat, user);
 
@@ -470,7 +470,7 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 			hx_printf_prefix(htlc, pm.cid, INFOPREFIX, _("parts: %s \n"), user->name);
 		}
 
-		hx_user_delete(&chat->user_tail, user);
+		hx_user_delete (chat, user);
 		chat->nusers--;
 		play_sound(USER_PART);
 
@@ -529,7 +529,7 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 	if (!hx_chat_invite_extract (htlc, &im))
 		return;
 
-	user = hx_user_with_uid(chat->user_list, im.uid);
+	user = hx_user_with_uid (chat, im.uid);
 	if(user && user->ignore) {
 		return;
 	}
@@ -1360,7 +1360,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 		if (_type == HTLS_DATA_USER_LIST) {
 			uh = (struct hl_userlist_hdr *)dh;
 			HN16(&uid, &uh->uid);
-			user = hx_user_with_uid(chat->user_list, uid);
+			user = hx_user_with_uid (chat, uid);
 			/* Phase 5: reset `new` per chunk. Previously declared
 			 * once at the top of the function and set to 1 inside
 			 * the "user not found" branch, then never reset — so
@@ -1379,7 +1379,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			new = 0;
 			if (!user) {
 				new = 1;
-				user = hx_user_new(&chat->user_tail);
+				user = hx_user_new (chat, uid);
 				chat->nusers++;
 			}
 			HN16(&user->uid, &uh->uid);

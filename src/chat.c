@@ -279,70 +279,109 @@ int word_check (GtkWidget * xtext, char *word)
  * just append the bare message text; the per-entry timestamp is
  * auto-set in gtk_xtext_append_entry. */
 
+/* Phase 5+: chat lifecycle on GHashTable.
+ *
+ * chat_free() is the GDestroyNotify the hashtable invokes when an
+ * entry is replaced, removed, or the table itself is destroyed.
+ * chat->users (a sub-hashtable of struct hx_user* keyed on uid)
+ * is destroyed first — its own value-destroy notify (g_free, via
+ * users_table_new below) reclaims each hx_user — and then the
+ * chat struct itself is freed.
+ *
+ * Pre-Phase-1.5 callers used to be responsible for clearing users
+ * themselves before chat_delete; the migration to per-chat hashtable
+ * means g_hash_table_destroy / g_hash_table_remove Do The Right
+ * Thing — no caller can accidentally leak a chat's users by
+ * skipping the manual walk. */
+static GHashTable *users_table_new (void)
+{
+	return g_hash_table_new_full (g_direct_hash, g_direct_equal,
+	                              NULL, g_free);
+}
+
+static void chat_free (gpointer p)
+{
+	struct chat *chat = p;
+
+	if (!chat)
+		return;
+	if (chat->users)
+		g_hash_table_destroy (chat->users);
+	g_free (chat);
+}
+
+void chats_init (session *sess)
+{
+	if (sess->chats)
+		return;
+	sess->chats = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+	                                     NULL, chat_free);
+	/* Public chat (cid=0) must always exist while the table does —
+	 * it's where the server-wide user list lives and where
+	 * top-level chat messages are routed. Create it eagerly so
+	 * chat_with_cid(sess, 0) is always non-NULL. */
+	chat_new (sess, 0);
+}
+
 struct chat *chat_new (session *sess, guint32 cid)
 {
 	struct chat *chat;
 
-	chat = g_malloc0(sizeof(struct chat));
-	chat->cid = cid;
-	chat->user_list = &chat->__user_list;
-	chat->user_tail = &chat->__user_list;
+	chat = g_malloc0 (sizeof (struct chat));
+	chat->cid   = cid;
+	chat->users = users_table_new ();
 
-	chat->next = 0;
-	chat->prev = sess->chat_tail;
-	sess->chat_tail->next = chat;
-	sess->chat_tail = chat;
-
+	g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
 	return chat;
 }
 
 void
 chat_delete (session *sess, struct chat *chat)
 {
-	if (chat->next)
-		chat->next->prev = chat->prev;
-	if (chat->prev)
-		chat->prev->next = chat->next;
-	if (sess->chat_tail == chat)
-		sess->chat_tail = chat->prev;
-	if (sess->chat_front == chat)
-		sess->chat_front = &sess->__chat_list;
-	g_free(chat);
+	if (!chat || !sess->chats)
+		return;
+	g_hash_table_remove (sess->chats, GUINT_TO_POINTER (chat->cid));
 }
 
 struct chat *chat_with_cid (session *sess, guint32 cid)
 {
-	struct chat *chatp;
+	if (!sess->chats)
+		return NULL;
+	return g_hash_table_lookup (sess->chats, GUINT_TO_POINTER (cid));
+}
 
-	for (chatp = sess->chat_front; chatp; chatp = chatp->next)
-		if (chatp->cid == cid)
-			return chatp;
+/* Phase 5+: gtkhx_chat (UI side) lifecycle on GHashTable.
+ *
+ * The table's destroy notify just g_frees the struct; the widget
+ * subtree (window, output, input, subject, userlist, vscroll) is
+ * owned by the parent window and reclaimed when the window is
+ * destroyed. gchat_delete callers (gtkutil.c teardown, pchat_close)
+ * destroy the window separately. */
+static void gchat_free (gpointer p)
+{
+	g_free (p);
+}
 
-	return 0;
+void gchats_init (session *sess)
+{
+	if (!sess->gchats)
+		sess->gchats = g_hash_table_new_full (g_direct_hash,
+		                                      g_direct_equal,
+		                                      NULL, gchat_free);
 }
 
 struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid)
 {
-	struct gtkhx_chat *gchat;
-
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			if (gchat->cid == cid) {
-				return gchat;
-			}
-	}
-
-	return 0;
+	if (!sess->gchats)
+		return NULL;
+	return g_hash_table_lookup (sess->gchats, GUINT_TO_POINTER (cid));
 }
 
 void gchat_delete (session *sess, struct gtkhx_chat *gchat)
 {
-	if (gchat->next)
-		gchat->next->prev = gchat->prev;
-	if (gchat->prev)
-		gchat->prev->next = gchat->next;
-	if (gchat == sess->gchat_list)
-		sess->gchat_list = gchat->prev;
-	g_free(gchat);
+	if (!gchat || !sess->gchats)
+		return;
+	g_hash_table_remove (sess->gchats, GUINT_TO_POINTER (gchat->cid));
 }
 
 void xprintline(GtkWidget *text, char *chat, size_t len)
@@ -695,78 +734,129 @@ nick_comp_get_nick (char *tx, char *n)
 	return -1;
 }
 
+/* Phase 5+: materialise the public chat's users into a name-sorted
+ * GPtrArray so tab-completion has a deterministic walk order across
+ * calls. Before the GHashTable migration the underlying linked list
+ * happened to be in join order, which was arbitrary anyway — sorting
+ * by name gives the user a more useful experience while we have to
+ * materialise an array. Caller owns the returned array and must
+ * g_ptr_array_free (arr, TRUE); the user pointers are NOT owned. */
+static int hx_user_name_cmp (gconstpointer a, gconstpointer b)
+{
+	const struct hx_user *ua = *(const struct hx_user *const *) a;
+	const struct hx_user *ub = *(const struct hx_user *const *) b;
+	return g_ascii_strcasecmp (ua->name, ub->name);
+}
+
+static GPtrArray *
+public_chat_users_sorted (session *sess)
+{
+	GPtrArray *arr = g_ptr_array_new ();
+	struct chat *pub = chat_with_cid (sess, 0);
+	if (pub && pub->users) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, pub->users);
+		while (g_hash_table_iter_next (&iter, NULL, &val))
+			g_ptr_array_add (arr, val);
+		g_ptr_array_sort (arr, hx_user_name_cmp);
+	}
+	return arr;
+}
+
 static void
 nick_comp_chng (session *sess, char *text, int updown)
 {
-	struct hx_user *user, *last = NULL;
 	char nick[64];
-	size_t len, slen;
+	size_t len;
+	GPtrArray *arr;
 
 	if (nick_comp_get_nick (text, nick) == -1)
 		return;
 	len = strlen (nick);
 
-	for(user = sess->chat_front->user_list->next; user; user = user->next)  {
-		slen = strlen (user->name);
-		if (len != slen) {
-			last = user;
+	arr = public_chat_users_sorted (sess);
+	for (guint i = 0; i < arr->len; i++) {
+		struct hx_user *user = arr->pdata[i];
+		size_t slen = strlen (user->name);
+		if (len != slen)
 			continue;
-		}
 		if (strncasecmp (user->name, nick, len) == 0) {
 			if (updown == 0) {
-				if (user->next == NULL) {
-					return;
+				/* Step forward: pick the next nick in sort order
+				 * whose length differs (matches the original
+				 * length-mismatch skip semantics). Bail at the
+				 * end of the list. */
+				guint j;
+				for (j = i + 1; j < arr->len; j++) {
+					struct hx_user *u = arr->pdata[j];
+					if (strlen (u->name) == len)
+						continue;
+					snprintf (nick, sizeof (nick), "%s%c ",
+					          u->name, ':');
+					goto done;
 				}
-				snprintf (nick, sizeof (nick), "%s%c ", (
-							  (struct hx_user *) user->next)->name, ':');
-			}
-
-			else {
-				if (last == NULL) {
-					return;
+				goto done;
+			} else {
+				/* Step backward: pick the most recent prior nick
+				 * whose length differed from the current
+				 * candidate. */
+				if (i == 0)
+					goto done;
+				for (guint j = i; j-- > 0;) {
+					struct hx_user *u = arr->pdata[j];
+					if (strlen (u->name) == len)
+						continue;
+					snprintf (nick, sizeof (nick), "%s%c ",
+					          u->name, ':');
+					goto done;
 				}
-				snprintf (nick, sizeof (nick), "%s%c ", last->name, ':');
+				goto done;
 			}
-			return;
 		}
-		last = user;
 	}
+done:
+	g_ptr_array_free (arr, TRUE);
 }
 
 static int
 tab_nick_comp_next (session *sess, char *b4, char *nick, char *c5, int shift)
 {
-	struct hx_user *user = 0, *last = NULL;
 	char buf[4096];
+	GPtrArray *arr = public_chat_users_sorted (sess);
+	gboolean handled = FALSE;
 
-	for(user = sess->chat_front->user_list->next; user; user = user->next) {
-		if (strcmp (user->name, nick) == 0)
-			break;
-		last = user;
-	}
-	if (!user)
-		return 0;
-	if (shift) {
-		if (last)
-			snprintf (buf, 4096, "%s %s%s", b4, last->name, c5);
-		else
-			snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
-	}
-
-	else {
-		if (user && user->next) {
-			snprintf (buf, 4096, "%s %s%s", b4, (user->next)->name, c5);
-		}
-		else {
-			if (sess->chat_front->user_list->next) {
-				snprintf (buf, 4096, "%s %s%s", b4, 
-						  (sess->chat_front->user_list->next)->name, c5);
+	for (guint i = 0; i < arr->len; i++) {
+		struct hx_user *user = arr->pdata[i];
+		if (strcmp (user->name, nick) != 0)
+			continue;
+		handled = TRUE;
+		if (shift) {
+			if (i > 0) {
+				struct hx_user *last = arr->pdata[i - 1];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          last->name, c5);
+			} else {
+				snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
 			}
-			else {
+		} else {
+			if (i + 1 < arr->len) {
+				struct hx_user *next = arr->pdata[i + 1];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          next->name, c5);
+			} else if (arr->len > 0) {
+				struct hx_user *first = arr->pdata[0];
+				snprintf (buf, 4096, "%s %s%s", b4,
+				          first->name, c5);
+			} else {
 				snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
 			}
 		}
+		break;
 	}
+	g_ptr_array_free (arr, TRUE);
+	if (!handled)
+		return 0;
 
 	return 1;
 }
@@ -847,14 +937,21 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 	if (text[0] == 0)
 		return 0;
 
-	/* make a list of matches */
-	for(user = sess->chat_front->user_list->next; user; user = user->next) {
-		slen = strlen (user->name);
-		if (len > slen) {
-			continue;
-		}
-		if (strncasecmp (user->name, text, len) == 0) {
-			match_list = g_slist_prepend (match_list, user);
+	/* make a list of matches — walk the public chat's user hashtable. */
+	{
+		struct chat *pub = chat_with_cid (sess, 0);
+		if (pub && pub->users) {
+			GHashTableIter iter;
+			gpointer val;
+			g_hash_table_iter_init (&iter, pub->users);
+			while (g_hash_table_iter_next (&iter, NULL, &val)) {
+				user = val;
+				slen = strlen (user->name);
+				if (len > slen)
+					continue;
+				if (strncasecmp (user->name, text, len) == 0)
+					match_list = g_slist_prepend (match_list, user);
+			}
 		}
 	}
 	match_list = g_slist_reverse (match_list); /* faster then _append */
@@ -1202,14 +1299,14 @@ void create_chat(session *sess)
 	gchat->subject = 0;
 	gchat->output = text;
 	gchat->userlist = 0;
-	gchat->next = 0;
-	gchat->prev = sess->gchat_list;
 	gchat->vscroll = vscroll;
 	gchat->chat = 0;
 	gchat->window = 0;
 	gchat->input = 0;
 
-	sess->gchat_list = gchat;
+	/* Public chat (cid=0) UI gets seeded into the table on the
+	 * single create_chat call at session init. */
+	g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (0u), gchat);
 }
 
 static void change_subject(GtkWidget *widget, gpointer data)
@@ -1253,7 +1350,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	(gtk_widget_set_margin_start(vbox, 5), gtk_widget_set_margin_end(vbox, 5), gtk_widget_set_margin_top(vbox, 5), gtk_widget_set_margin_bottom(vbox, 5));
 
 	gchat->subject = gtk_entry_new();
-	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), sess->chat_front->subject);
+	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), chat_with_cid (sess, 0)->subject);
 	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	subj_frame = gtk_frame_new(0);
 	gtkhx_widget_set_child(subj_frame, subj_hbox);
@@ -1376,13 +1473,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GtkWidget *userlist;
 	struct gtkhx_chat *gchat;
 
-	gchat = g_malloc(sizeof(struct gtkhx_chat));
-	gchat->next = 0;
-	gchat->prev = sess->gchat_list;
-
-	if (sess->gchat_list) {
-		sess->gchat_list->next = gchat;
-	}
+	gchat = g_malloc (sizeof (struct gtkhx_chat));
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
@@ -1431,7 +1522,8 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gchat->subject = subject;
 	gchat->userlist = userlist;
 	gchat->chat_history = history_new();
-	sess->gchat_list = gchat;
+	g_hash_table_insert (sess->gchats,
+	                     GUINT_TO_POINTER (gchat->cid), gchat);
 
 	return gchat;
 }

@@ -265,7 +265,11 @@ typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
 #define RCV_TASK_FN(f) ((rcv_task_fn)(void(*)(void))(f))
 
 struct task {
-	struct task *next, *prev;
+	/* Phase 5+: no next/prev — tasks live in session->tasks, a
+	 * GHashTable<u32 trans, struct task*>. Lookup by trans goes
+	 * through task_with_trans (now an O(1) wrapper around
+	 * g_hash_table_lookup); iteration goes through GHashTableIter
+	 * at the very small number of call sites that need it. */
 	guint32 trans;
 	guint32 pos, len;
 	void *data;

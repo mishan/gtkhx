@@ -17,6 +17,10 @@ extern void task_error (struct htlc_conn *htlc);
 extern void conn_task_update(session *sess, int stat);
 extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data, const char *str);
 extern struct task *task_with_trans (session *sess, guint32 trans);
+/* Phase 5+: lazy-allocate the session's task GHashTable. Safe to
+ * call multiple times — only the first call constructs the table.
+ * gtkhx.c calls it before the first task_new at startup. */
+extern void tasks_init (session *sess);
 extern void track_prog_update (session *sess, char *str, int num, int total);
 extern void trackconn_prog_update (session *sess, char *str, int num, int total);
 

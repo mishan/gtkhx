@@ -87,56 +87,57 @@ void hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
 }
 
 
-struct hx_user * hx_user_new (struct hx_user **utailp)
+/* Phase 5+: per-chat user list lives in chat->users, a
+ * GHashTable<u16 uid, struct hx_user*>. hx_user_new mallocs a fresh
+ * hx_user, stamps its uid, and inserts it; hx_user_delete drops it
+ * from the table (the table's value-destroy notify g_frees the
+ * struct); hx_user_with_uid is an O(1) lookup. */
+struct hx_user *
+hx_user_new (struct chat *chat, guint16 uid)
 {
-	struct hx_user *user, *tail = *utailp;
-
-	user = g_malloc0(sizeof(struct hx_user));
-
-	user->next = 0;
-	user->prev = tail;
-	tail->next = user;
-	tail = user;
-	*utailp = tail;
-
+	struct hx_user *user = g_malloc0 (sizeof (struct hx_user));
+	user->uid = uid;
+	g_hash_table_insert (chat->users,
+	                     GUINT_TO_POINTER ((guint) uid), user);
 	return user;
 }
 
 void
-hx_user_delete (struct hx_user **utailp, struct hx_user *user)
+hx_user_delete (struct chat *chat, struct hx_user *user)
 {
-	if (user->next)
-		user->next->prev = user->prev;
-	if (user->prev)
-		user->prev->next = user->next;
-	if (*utailp == user)
-		*utailp = user->prev;
-	g_free(user);
+	if (!user || !chat || !chat->users)
+		return;
+	g_hash_table_remove (chat->users,
+	                     GUINT_TO_POINTER ((guint) user->uid));
 }
 
-struct hx_user * hx_user_with_uid (struct hx_user *ulist, guint16 uid)
+struct hx_user *
+hx_user_with_uid (struct chat *chat, guint16 uid)
 {
-	struct hx_user *userp;
-
-	for (userp = ulist->next; userp; userp = userp->next)
-		if (userp->uid == uid)
-			return userp;
-
-
-	return 0;
+	if (!chat || !chat->users)
+		return NULL;
+	return g_hash_table_lookup (chat->users,
+	                            GUINT_TO_POINTER ((guint) uid));
 }
 
-struct hx_user *hx_user_with_name(struct hx_user *ulist, char *name)
+/* Name lookup remains a linear scan — only one caller
+ * (commands.c handle_command_msg) uses it, and we expect chat
+ * membership lists to stay small enough for that not to matter. */
+struct hx_user *
+hx_user_with_name (struct chat *chat, const char *name)
 {
-	struct hx_user *user;
+	GHashTableIter iter;
+	gpointer val;
 
-	for(user = ulist; user; user = user->next) {
-		if(strcmp(user->name, name) == 0) {
-			return user;
-		}
+	if (!chat || !chat->users)
+		return NULL;
+	g_hash_table_iter_init (&iter, chat->users);
+	while (g_hash_table_iter_next (&iter, NULL, &val)) {
+		struct hx_user *u = val;
+		if (strcmp (u->name, name) == 0)
+			return u;
 	}
-
-	return 0;
+	return NULL;
 }
 
 /* Phase 4.7: GtkMenu + gtk_menu_popup_at_pointer are gone in GTK 4.
@@ -226,15 +227,22 @@ static void
 on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
 	struct UserActionCtx *ctx = user_data;
-	struct gtkhx_chat *gchat;
 	int with_cid = 0;
 	(void) action; (void) param;
 
 	if (!ctx->user) return;
 
-	for (gchat = ctx->sess->gchat_list; gchat; gchat = gchat->prev)
-		if (gchat->cid)
-			with_cid = 1;
+	if (ctx->sess->gchats) {
+		GHashTableIter iter;
+		gpointer key;
+		g_hash_table_iter_init (&iter, ctx->sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, NULL)) {
+			if (GPOINTER_TO_UINT (key) != 0) {
+				with_cid = 1;
+				break;
+			}
+		}
+	}
 
 	if (!with_cid)
 		hx_chat_user (&ctx->sess->htlc, ctx->user->uid);
@@ -763,17 +771,25 @@ static void prompt_chat (session *sess, guint16 _uid)
 	gtkhx_widget_set_child (scroll, list);
 	gtk_widget_set_size_request (scroll, 350, 200);
 
-	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		gint row;
-		if (!gchat->cid)
-			continue;
-		entry[0] = g_strdup_printf ("0x%08x", gchat->chat->cid);
-		entry[1] = gchat->chat->subject;
-		row = gtk_hlist_append (GTK_HLIST (list), entry);
-		/* Stash the cid as row_data so the response handler can
-		 * recover it without parsing back the display string. */
-		gtk_hlist_set_row_data (GTK_HLIST (list), row,
-		                        GUINT_TO_POINTER (gchat->chat->cid));
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			gint row;
+			gchat = val;
+			if (!gchat->cid)
+				continue;
+			entry[0] = g_strdup_printf ("0x%08x",
+			                            gchat->chat->cid);
+			entry[1] = gchat->chat->subject;
+			row = gtk_hlist_append (GTK_HLIST (list), entry);
+			/* Stash the cid as row_data so the response
+			 * handler can recover it without parsing back
+			 * the display string. */
+			gtk_hlist_set_row_data (GTK_HLIST (list), row,
+			                        GUINT_TO_POINTER (gchat->chat->cid));
+		}
 	}
 	ctx->list = list;
 
@@ -795,7 +811,6 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 {
 	struct hx_user *user;
 	int with_cid = 0;
-	struct gtkhx_chat *gchat;
 	GtkWidget *users_list = data;
 	session *sess = g_object_get_data(G_OBJECT(widget), "sess");
 
@@ -806,9 +821,15 @@ void user_chat_btn(GtkWidget *widget, gpointer data)
 
 	if(!user)
 		return;
-	for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-		if(gchat->cid) {
-			with_cid = 1;
+	if (sess->gchats) {
+		GHashTableIter iter;
+		gpointer key;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, NULL)) {
+			if (GPOINTER_TO_UINT (key) != 0) {
+				with_cid = 1;
+				break;
+			}
 		}
 	}
 	if(!with_cid)
@@ -840,18 +861,26 @@ static gboolean close_users_window (GtkWindow *window, gpointer data)
 
 void user_list (session *sess)
 {
-	struct hx_user *user;
+	struct chat *pub;
 
 	if (!sess->users_window)
 		return;
 
-	gtk_hlist_freeze(GTK_HLIST(sess->users_list));
-	gtk_hlist_clear(GTK_HLIST(sess->users_list));
-	for (user = sess->chat_front->user_list->next; user; user = user->next) {
-		hx_output.user_create(&sess->htlc, sess->chat_front, user, user->name,
-							  user->icon, user->color);
+	pub = chat_with_cid (sess, 0);
+	gtk_hlist_freeze (GTK_HLIST (sess->users_list));
+	gtk_hlist_clear  (GTK_HLIST (sess->users_list));
+	if (pub && pub->users) {
+		GHashTableIter iter;
+		gpointer val;
+		g_hash_table_iter_init (&iter, pub->users);
+		while (g_hash_table_iter_next (&iter, NULL, &val)) {
+			struct hx_user *user = val;
+			hx_output.user_create (&sess->htlc, pub, user,
+			                       user->name, user->icon,
+			                       user->color);
+		}
 	}
-	gtk_hlist_thaw(GTK_HLIST(sess->users_list));
+	gtk_hlist_thaw (GTK_HLIST (sess->users_list));
 }
 
 void create_users_window (GtkWidget *widget, gpointer data)
@@ -1137,15 +1166,19 @@ void user_change (struct htlc_conn *htlc, struct chat *chat,
 	if (!losers_list)
 		return;
 
-	if(!chat->cid) {
-		for(gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
-			if(gchat->cid) {
-				struct hx_user *u;
-				u = hx_user_with_uid(gchat->chat->user_list, user->uid);
-				if(u) {
-					user_change(&sess->htlc, gchat->chat, u, nam, icon, color);
-				}
-			}
+	if (!chat->cid && sess->gchats) {
+		GHashTableIter iter;
+		gpointer key, val;
+		g_hash_table_iter_init (&iter, sess->gchats);
+		while (g_hash_table_iter_next (&iter, &key, &val)) {
+			if (GPOINTER_TO_UINT (key) == 0)
+				continue;
+			gchat = val;
+			struct hx_user *u =
+				hx_user_with_uid (gchat->chat, user->uid);
+			if (u)
+				user_change (&sess->htlc, gchat->chat, u,
+				             nam, icon, color);
 		}
 	}
 
