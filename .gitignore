@@ -120,3 +120,6 @@ setup.log
 /build-flatpak/
 /.flatpak-builder/
 /repo/
+
+# Vendored mhxd clone — local reference per CLAUDE.md, never committed
+/mhxd/

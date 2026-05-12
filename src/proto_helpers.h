@@ -357,4 +357,64 @@ extern gboolean hx_news_file_extract (struct htlc_conn *htlc,
                                       char *out, gsize out_size,
                                       gsize *out_len);
 
+/*
+ * Split a single chat line into a "name" portion and a "body"
+ * portion for HexChat-style indented rendering. Hotline servers
+ * format chat messages as
+ *
+ *     "<padding>name:  body"
+ *
+ * where padding is some number of leading spaces and the
+ * separator is a colon followed by one or more spaces. This
+ * function locates the split point.
+ *
+ * Inputs:
+ *   line, line_len   the un-terminated chat-line bytes (one line —
+ *                    callers split a multi-line buffer on '\n'
+ *                    before calling).
+ *
+ * Outputs (on TRUE return):
+ *   *name_offset     byte index where the name starts inside line
+ *   *name_len        byte length of the name
+ *   *body_offset     byte index where the body starts inside line
+ *   *body_len        byte length of the body (line_len - body_offset)
+ *
+ * Returns FALSE if no plausible "name: body" split exists — empty
+ * name, no colon found, or a name longer than the 31-byte Hotline
+ * nick cap (lines like "Subject Changed to: X" or "https://..."
+ * pass through unsplit). Callers should fall back to passing the
+ * whole line through gtk_xtext_append unchanged.
+ *
+ * The name length cap is intentional: it lets us reliably skip
+ * URLs and other long colon-containing prose that isn't a chat
+ * prefix, at the cost of occasionally missing a chat line whose
+ * server padded the nick with trailing spaces past 31. The
+ * trade-off favours conservative behaviour for non-chat content.
+ */
+extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
+                                         gsize *name_offset,
+                                         gsize *name_len,
+                                         gsize *body_offset,
+                                         gsize *body_len);
+
+/*
+ * Highlight matcher. Scans `body` for occurrences of any word in
+ * `words[]` (NULL-terminated list of NUL-terminated strings) at
+ * word boundaries, ASCII case-insensitive.
+ *
+ * "Word boundary" means: the character before/after the match (or
+ * the buffer edge) is not an alphanumeric ASCII character. So
+ * `misha` matches in "hello misha!" and "(misha)" but not in
+ * "mishap" or "amisha".
+ *
+ * NULL or empty entries in words[] are skipped. Returns TRUE on
+ * the first match; FALSE if no entry was found anywhere in body.
+ *
+ * Pure ASCII implementation — for non-ASCII nicks the comparison
+ * is still byte-level case-insensitive, which is correct for the
+ * lowercase-letter-by-byte content normal Hotline nicks use.
+ */
+extern gboolean hx_highlight_match (const char *body, gsize body_len,
+                                    const char * const *words);
+
 #endif /* HX_PROTO_HELPERS_H */

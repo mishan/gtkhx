@@ -391,8 +391,149 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	 * buf->time_stamp. Both are flipped on per-buffer at creation
 	 * time in chat.c / msg.c, and re-applied to live buffers when
 	 * the user toggles CFG_TIMESTAMP via Settings. */
-	gtk_xtext_append (GTK_XTEXT (text)->buffer,
-	                  (unsigned char *) valid, valid_len, 0);
+
+	/* Phase 5+: HexChat-style nick column. Lines that look like
+	 * "  name:  body" get rewritten into a left part ("<name>",
+	 * including the brackets) and a right part ("body"); xtext's
+	 * gtk_xtext_append_indent draws the left part flush-right
+	 * against the indent column and the right part flush-left
+	 * after it, so all nicks align visually and the bodies start
+	 * at a common left edge. Info messages produced by
+	 * hx_printf_prefix (recognisable by the leading INFOPREFIX
+	 * with its mIRC-coloured "[hx]") get a "[hx]" nick so they
+	 * slot into the same column.
+	 *
+	 * Lines that don't match either pattern (emotes, raw output
+	 * without a colon) fall through to plain append. */
+	gsize name_off = 0, name_len = 0;
+	gsize body_off = 0, body_len = 0;
+	gchar *display_nick = NULL;
+	const char *display_body = NULL;
+	gsize display_body_len = 0;
+	gboolean is_info = FALSE;	/* INFOPREFIX branch — never highlight */
+	gboolean said_by_self = FALSE;	/* self vs other — controls bracket colour */
+	const char *self_nick =
+		(the_session.htlc.name[0] != '\0')
+			? (const char *) the_session.htlc.name
+			: NULL;
+	{
+		const char *info_prefix = INFOPREFIX;
+		gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
+
+		if (info_prefix_len > 0
+		    && valid_len >= info_prefix_len
+		    && memcmp (valid, info_prefix, info_prefix_len) == 0) {
+			/* Preserve the colour codes around "[hx]" so the
+			 * info-prefix renders the same hue it always did,
+			 * just in the nick column now. */
+			display_nick = g_strndup (valid + 1,
+			                          info_prefix_len - 2);
+			display_body = valid + info_prefix_len;
+			display_body_len = valid_len - info_prefix_len;
+			is_info = TRUE;
+		} else if (hx_chat_split_nick_body (valid, valid_len,
+		                                    &name_off, &name_len,
+		                                    &body_off, &body_len)) {
+			/* Phase 5+: colour the angle brackets to match
+			 * msg.c::msg_output — mIRC palette 13 (pink) for
+			 * our own lines, 12 (light blue) for everyone
+			 * else'"'"'s. Format:
+			 *
+			 *   "\003<col><\003<name>\003<col>>\003"
+			 *
+			 * \003<col> opens the colour run; bare \003 closes
+			 * it (xtext parses both forms). The brackets get
+			 * the colour; the name itself stays in the default
+			 * foreground so highlight colour codes (when
+			 * applied below) can override cleanly. */
+			if (self_nick && name_len > 0
+			    && strlen (self_nick) == name_len
+			    && memcmp (valid + name_off,
+			               self_nick, name_len) == 0)
+				said_by_self = TRUE;
+			int brack_col = said_by_self ? 13 : 12;
+			display_nick = g_strdup_printf (
+				"\003%d<\003%.*s\003%d>\003",
+				brack_col,
+				(int) name_len, valid + name_off,
+				brack_col);
+			display_body = valid + body_off;
+			display_body_len = body_len;
+		}
+	}
+
+	/* Phase 5+: highlight-on-mention. Scan the body for
+	 * occurrences of our own nick (always) plus any
+	 * comma-separated words in gtkhx_prefs.highlight_words. If
+	 * any match — and this isn't an [hx] info line, and we
+	 * didn't send the line ourselves — wrap nick + body in
+	 * inline mIRC ATTR codes (\002 bold + \003 04 light-red +
+	 * \017 reset) so xtext renders the line bold red. */
+	gboolean do_highlight = FALSE;
+	if (display_nick && !is_info && display_body_len > 0) {
+		if (!said_by_self) {
+			/* Build the words[] list: own nick (if known) +
+			 * the comma-split of gtkhx_prefs.highlight_words.
+			 * NULL-terminated. */
+			GPtrArray *words = g_ptr_array_new ();
+			if (self_nick && *self_nick)
+				g_ptr_array_add (words, (gpointer) self_nick);
+			gchar **extras = NULL;
+			if (gtkhx_prefs.highlight_words
+			    && *gtkhx_prefs.highlight_words) {
+				extras = g_strsplit (
+					gtkhx_prefs.highlight_words, ",", -1);
+				for (gsize ei = 0; extras && extras[ei]; ei++) {
+					gchar *w = g_strstrip (extras[ei]);
+					if (*w)
+						g_ptr_array_add (words, w);
+				}
+			}
+			g_ptr_array_add (words, NULL);
+			do_highlight = hx_highlight_match (
+				display_body, display_body_len,
+				(const char * const *) words->pdata);
+			g_ptr_array_unref (words);
+			if (extras)
+				g_strfreev (extras);
+		}
+	}
+
+	if (display_nick) {
+		gchar *nick_buf = display_nick;
+		gchar *body_buf = NULL;
+		const char *body_ptr = display_body;
+		gsize body_ptr_len = display_body_len;
+
+		if (do_highlight) {
+			/* \002 = ATTR_BOLD, \003 04 = mIRC colour 4
+			 * (light red), \017 = ATTR_RESET. Wrap nick
+			 * with the open codes and body with the close
+			 * code so the reset lands at end-of-line. */
+			nick_buf = g_strdup_printf (
+				"\002\00304%s", display_nick);
+			body_buf = g_strndup (display_body, display_body_len);
+			gchar *with_reset = g_strdup_printf (
+				"%s\017", body_buf);
+			g_free (body_buf);
+			body_buf = with_reset;
+			body_ptr = body_buf;
+			body_ptr_len = strlen (body_buf);
+			g_free (display_nick);
+		}
+
+		gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
+		                         (unsigned char *) nick_buf,
+		                         strlen (nick_buf),
+		                         (unsigned char *) body_ptr,
+		                         body_ptr_len,
+		                         0);
+		g_free (nick_buf);
+		g_free (body_buf);
+	} else {
+		gtk_xtext_append (GTK_XTEXT (text)->buffer,
+		                  (unsigned char *) valid, valid_len, 0);
+	}
 
 	g_free (valid);
 }
@@ -1001,7 +1142,7 @@ void create_chat(session *sess)
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		text = gtk_xtext_new (colors, 0);
+		text = gtk_xtext_new (colors, 1);
 		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
 		g_free (fontname);
 	}
@@ -1017,6 +1158,14 @@ void create_chat(session *sess)
 	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
 	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
 	                          gtkhx_prefs.timestamp);
+	/* Allow the indent column to grow past its initial
+	 * stamp_width floor when the first message is appended.
+	 * gtk_xtext_append_indent's auto-bump check is gated on
+	 * `buf->indent < max_auto_indent`, so a zero default makes
+	 * the bump impossible and the nick column overlaps the
+	 * timestamp. 256 px is enough room for the stamp + a
+	 * medium-length nick without dominating the chat width. */
+	gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
@@ -1117,13 +1266,29 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	outputframe = gtk_frame_new(0);
 	inputframe = gtk_frame_new(0);
 
-	vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_start_child(GTK_PANED(vpaned), outputframe);
-	gtk_paned_set_end_child(GTK_PANED(vpaned), inputframe);
-	(gtk_widget_set_margin_start(vpaned, 5), gtk_widget_set_margin_end(vpaned, 5), gtk_widget_set_margin_top(vpaned, 5), gtk_widget_set_margin_bottom(vpaned, 5));
+	/* Phase 5+: replace the vertical GtkPaned with a plain box. The
+	 * paned'"'"'s draggable divider was nice but it pinned the input area
+	 * to a fixed height (50px minimum, user-resizable via drag),
+	 * which meant a single-line input took two visible lines'"'"' worth of
+	 * space and a multi-line paste required scrolling inside a
+	 * fixed-height widget. The new layout has the output frame
+	 * vexpand=TRUE eating remaining vertical space, and the input
+	 * scrolled window using min/max-content-height + propagate-
+	 * natural-height to grow with the buffer'"'"'s line count (capped at
+	 * 5 lines; scrolls beyond that). */
+	GtkWidget *vstack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_margin_start (vstack, 5);
+	gtk_widget_set_margin_end   (vstack, 5);
+	gtk_widget_set_margin_top   (vstack, 5);
+	gtk_widget_set_margin_bottom(vstack, 5);
+	gtk_widget_set_vexpand (outputframe, TRUE);
+	gtk_widget_set_vexpand (inputframe,  FALSE);
+	gtk_box_append (GTK_BOX(vstack), outputframe);
+	gtk_box_append (GTK_BOX(vstack), inputframe);
+	(void) vpaned;	/* declared above but no longer used */
 
 	gtkhx_widget_set_child(chat_window, vbox);
-	gtkhx_box_pack(vbox, vpaned, 1, 1, 0);
+	gtkhx_box_pack(vbox, vstack, 1, 1, 0);
 
 	if(wind_tmp) {
 		gtkhx_widget_remove_child(wind_tmp, chat_hbox);
@@ -1135,10 +1300,6 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	/* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 5: keep just the height floor (input area must be at least
-	 * tall enough to type into); width was previously baked from saved
-	 * xsize and prevented the chat window from shrinking horizontally. */
-	gtk_widget_set_size_request(hbox, -1, 50);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
@@ -1162,6 +1323,19 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 		GtkWidget *input_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(input_scroll),
 		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		/* Auto-grow input behaviour: the scrolled window reports a
+		 * natural height that matches the embedded GtkTextView'"'"'s
+		 * content, clamped between a single-line minimum and a
+		 * 5-line maximum. Below the min the input gets the floor;
+		 * above the max the scrollbar takes over. The font size
+		 * varies per theme so we pick generous pixel approximations
+		 * (28px ≈ 1 line of body text, 120px ≈ 5 lines). */
+		gtk_scrolled_window_set_propagate_natural_height(
+			GTK_SCROLLED_WINDOW(input_scroll), TRUE);
+		gtk_scrolled_window_set_min_content_height(
+			GTK_SCROLLED_WINDOW(input_scroll), 28);
+		gtk_scrolled_window_set_max_content_height(
+			GTK_SCROLLED_WINDOW(input_scroll), 120);
 		gtkhx_widget_set_child(input_scroll, gchat->input);
 		gtkhx_box_pack(hbox, input_scroll, 1, 1, 0);
 	}
@@ -1212,7 +1386,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 
 	{
 		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		text = gtk_xtext_new (colors, 0);
+		text = gtk_xtext_new (colors, 1);
 		gtk_xtext_set_font (GTK_XTEXT (text), fontname);
 		g_free (fontname);
 	}
@@ -1224,6 +1398,7 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
 	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
 	                          gtkhx_prefs.timestamp);
+	gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
@@ -1443,18 +1618,19 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	inputframe = gtk_frame_new(0);
 
-	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
-	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
-	/* Output area takes the extra room when the window grows;
-	 * input stays at its natural size. shrink_end=FALSE keeps the
-	 * user from collapsing the input below its 60px floor. */
-	gtk_paned_set_resize_start_child(GTK_PANED(vpane), TRUE);
-	gtk_paned_set_resize_end_child  (GTK_PANED(vpane), FALSE);
-	gtk_paned_set_shrink_end_child  (GTK_PANED(vpane), FALSE);
-	gtk_paned_set_position(GTK_PANED(vpane), 290);
-
-	gtkhx_box_pack(vbox, vpane, 1, 1, 0);
+	/* Phase 5+: drop GtkPaned in favour of a plain box so the input
+	 * area can shrink to a single line by default and auto-grow up
+	 * to a 5-line cap as the user types. See the matching note in
+	 * create_chat_window above for the rationale. */
+	{
+		GtkWidget *vstack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+		gtk_widget_set_vexpand (outputframe, TRUE);
+		gtk_widget_set_vexpand (inputframe,  FALSE);
+		gtk_box_append (GTK_BOX(vstack), outputframe);
+		gtk_box_append (GTK_BOX(vstack), inputframe);
+		gtkhx_box_pack(vbox, vstack, 1, 1, 0);
+	}
+	(void) vpane;
 
 	pchat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -1463,7 +1639,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtkhx_widget_set_child(outputframe, pchat_hbox);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(hbox, -1, 60);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
@@ -1483,6 +1658,12 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 		GtkWidget *pchat_input_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(pchat_input_scroll),
 		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		gtk_scrolled_window_set_propagate_natural_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), TRUE);
+		gtk_scrolled_window_set_min_content_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), 28);
+		gtk_scrolled_window_set_max_content_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), 120);
 		gtkhx_widget_set_child(pchat_input_scroll, gchat->input);
 		gtkhx_box_pack(hbox, pchat_input_scroll, 1, 1, 0);
 	}
