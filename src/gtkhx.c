@@ -1260,6 +1260,8 @@ void gtkhx_connect_signals (GtkhxSession *emitter)
 	                  G_CALLBACK (on_tracker_server_create_signal), NULL);
 	g_signal_connect (emitter, "task-update",
 	                  G_CALLBACK (on_task_update_signal), NULL);
+	g_signal_connect (emitter, "chat-log-line",
+	                  G_CALLBACK (chat_log_line_handler), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)

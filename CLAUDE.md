@@ -164,9 +164,15 @@ name from model files: `hx_printf` / `hx_printf_prefix` (log a line
 to chat output), `hx_clear_chat`, `tracker_clear`. They aren't
 signal-routed today.
 
-Worker threads marshal to main via `g_idle_add`, never call GTK or
-emit signals directly (banner.c HTXF worker, xfers.c progress
-updates, preview.c async parses).
+Worker threads marshal to main via `g_idle_add` (or `gtkhx_post_to_main`,
+xfers.c's wrapper that takes a refcount), never call GTK or emit
+signals directly. The idle callback runs on the main thread; only
+there does it call view functions or emit signals. Workers verified
+clean post-Phase-3: banner.c HTXF worker, xfers.c progress updates,
+preview.c async parses, network.c conn worker, tracker.c list worker
+all marshal correctly. `hx_printf` / `hx_printf_prefix` (which now
+emit through GtkhxSession via `gtkhx_log.c`) are called only from
+main-thread paths.
 
 ## Per-session collections (Phase 1 of MVC cleanup)
 

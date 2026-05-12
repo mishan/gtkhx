@@ -33,6 +33,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "network.h"
 #include "history.h"
 #include "gtkutil.h"
@@ -641,78 +642,19 @@ static void xoutput_chat (session *sess, guint32 cid, char *chat)
 	}
 }
 
-void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid, const char *prefix,
-					   const char *fmt, ...)
+/* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
+ * gtkhx_log.c so the model→view edge (model files calling these
+ * by name to log info lines) now flows through the "chat-log-line"
+ * signal on GtkhxSession, same as every other notification.
+ *
+ * The view-side handler below is what hx_output_chat used to do:
+ * dispatch the buffer to xoutput_chat for the actual xtext write.
+ * Connected in gtkhx_connect_signals at startup. */
+void
+chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
+                       guint cid, gpointer body, gpointer user_data)
 {
-	va_list ap;
-	va_list save;
-	char autobuf[256], *buf;
-	size_t mal_len;
-	size_t plen;
-	session *sess = &the_session;
-
-	if(!sess) {
-		return;
-	}
-
-	__va_copy(save, ap);
-	mal_len = 256;
-	buf = autobuf;
-	plen = strlen(prefix);
-	for (;;) {
-		va_start(ap, fmt);
-		vsnprintf(buf + plen, mal_len - plen, fmt, ap);
-		va_end(ap);
-		if (strlen(buf+plen) != mal_len-plen-1)
-			break;
-		__va_copy(ap, save);
-		mal_len <<= 1;
-		if (buf == autobuf)
-			buf = g_malloc(mal_len);
-		else
-			buf = g_realloc(buf, mal_len);
-	}
-	memcpy(buf, prefix, plen);
-
-	xoutput_chat(sess, cid, buf);
-
-	if (buf != autobuf)
-		g_free(buf);
-}
-
-
-void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt, ...)
-{
-	va_list ap;
-	va_list save;
-	char autobuf[256], *buf;
-	size_t mal_len;
-	session *sess = &the_session;
-
-	if(!sess) {
-		return;
-	}
-
-	__va_copy(save, ap);
-	mal_len = 256;
-	buf = autobuf;
-	for (;;) {
-		va_start(ap, fmt);
-		vsnprintf(buf, mal_len, fmt, ap);
-		va_end(ap);
-		if (strlen(buf) != mal_len-1)
-			break;
-		__va_copy(ap, save);
-		mal_len <<= 1;
-		if (buf == autobuf)
-			buf = g_malloc(mal_len);
-		else
-			buf = g_realloc(buf, mal_len);
-	}
-	xoutput_chat(sess, cid, buf);
-
-	if (buf != autobuf)
-		g_free(buf);
+	xoutput_chat (&the_session, cid, (char *) body);
 }
 
 static int
