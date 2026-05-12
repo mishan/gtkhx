@@ -1216,6 +1216,42 @@ on_task_update_signal (GtkhxSession *emitter,
 	task_update ((session *) sess, (struct task *) tsk);
 }
 
+/* Translates GtkhxConnectionState (high-level FSM) into the per-aspect
+ * UI calls that network.c hx_connect / connect_fail / hx_htlc_close
+ * used to issue by name. setbtns / set_status_bar / set_disconnect_btn
+ * / conn_task_update / changetitlesdisconnected are still view-side
+ * helpers callable on their own; this just routes the state-change
+ * notifications through the same signal mechanism as everything else. */
+static void
+on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
+                                    gpointer user_data)
+{
+	session *sess = &the_session;
+	(void) emitter; (void) user_data;
+
+	switch (state) {
+	case GTKHX_CONNECTION_DISCONNECTED:
+		setbtns (sess, 0);
+		set_status_bar (0);
+		set_disconnect_btn (sess, 0);
+		conn_task_update (sess, 2);
+		changetitlesdisconnected (sess);
+		break;
+	case GTKHX_CONNECTION_CONNECTING:
+		set_status_bar (-1);
+		set_disconnect_btn (sess, 1);
+		conn_task_update (sess, 0);
+		break;
+	case GTKHX_CONNECTION_TCP_CONNECTED:
+		set_status_bar (1);
+		conn_task_update (sess, 1);
+		break;
+	case GTKHX_CONNECTION_HANDSHAKE_DONE:
+		conn_task_update (sess, 2);
+		break;
+	}
+}
+
 void gtkhx_connect_signals (GtkhxSession *emitter)
 {
 	g_signal_connect (emitter, "chat",
@@ -1262,6 +1298,8 @@ void gtkhx_connect_signals (GtkhxSession *emitter)
 	                  G_CALLBACK (on_task_update_signal), NULL);
 	g_signal_connect (emitter, "chat-log-line",
 	                  G_CALLBACK (chat_log_line_handler), NULL);
+	g_signal_connect (emitter, "connection-state-changed",
+	                  G_CALLBACK (on_connection_state_changed_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)

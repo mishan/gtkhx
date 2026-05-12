@@ -212,11 +212,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 		error_dialog("Error", "You have been disconnected.");
 	
 	connected = 0;
-	setbtns(sess, 0);
-	set_disconnect_btn(sess, 0);
-	set_status_bar(0);
+	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+	                                     GTKHX_CONNECTION_DISCONNECTED);
 	close_connected_windows (sess);
-	changetitlesdisconnected(sess);
 	hxd_fd_clr(fd, FDR|FDW);
 
 	/* Phase 5+: GSocketConnection owns the fd; releasing it closes
@@ -803,7 +801,6 @@ connect_fail (struct gtkhx_connect_ctx *ctx, const char *stage,
               GError *err)
 {
 	struct htlc_conn *htlc = ctx->htlc;
-	session *sess = &the_session;
 
 	/* Cancelled by the caller (e.g. user clicked Disconnect or
 	 * a re-connect arrived): don't toast a noisy log. */
@@ -814,10 +811,8 @@ connect_fail (struct gtkhx_connect_ctx *ctx, const char *stage,
 
 	hx_printf_prefix (htlc, 0, INFOPREFIX, "%s: %s\n",
 	                  stage, err ? err->message : _("failed"));
-	setbtns (sess, 0);
-	set_status_bar (0);
-	set_disconnect_btn (sess, 0);
-	conn_task_update (sess, 2);
+	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+	                                     GTKHX_CONNECTION_DISCONNECTED);
 	connect_ctx_free (ctx);
 }
 
@@ -910,8 +905,8 @@ on_async_connected (GObject *source, GAsyncResult *res, gpointer data)
 	ctx->conn = conn;
 	ctx->state = GTKHX_CONNECT_STATE_WRITING_MAGIC;
 
-	conn_task_update (&the_session, 1);
-	set_status_bar (1);
+	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+	                                     GTKHX_CONNECTION_TCP_CONNECTED);
 	hx_printf_prefix (ctx->htlc, 0, INFOPREFIX,
 	                  _("connected to %s\n"), server_addr);
 
@@ -961,7 +956,8 @@ send_login (struct gtkhx_connect_ctx *ctx)
 	htlc->rcv = hx_rcv_hdr;
 	qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
 
-	conn_task_update (&the_session, 2);
+	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+	                                     GTKHX_CONNECTION_HANDSHAKE_DONE);
 
 	set_nonblocking (s);
 	fd_closeonexec (s, 1);
@@ -1105,7 +1101,6 @@ void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 {
 	struct gtkhx_connect_ctx *ctx;
 	GSocketClient *client;
-	session *sess = &the_session;
 
 	/* Cancel any in-flight async connect (user kicked off another
 	 * connect, or the previous one is still resolving). */
@@ -1143,9 +1138,8 @@ void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 	htlc->gdk_input = 0;
 	hx_printf_prefix (htlc, 0, INFOPREFIX,
 	                  _("connecting to %s\n"), server_addr);
-	conn_task_update (sess, 0);
-	set_status_bar (-1);
-	set_disconnect_btn (sess, 1);
+	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+	                                     GTKHX_CONNECTION_CONNECTING);
 
 	client = g_socket_client_new ();
 	/* GSocketClient defaults already prefer IPv4 if both are

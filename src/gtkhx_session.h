@@ -166,6 +166,30 @@ void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
                                        struct htlc_conn *htlc,
                                        guint32 cid, const char *body);
 
+/* High-level connection state. The signal's view-side handler
+ * translates each state into the per-aspect UI updates (toolbar
+ * buttons enabled/disabled, status-bar label, disconnect button
+ * visibility, window titles, connect-task progress ticker) that
+ * model-side code (network.c hx_connect / connect_fail /
+ * hx_htlc_close) used to issue by name. */
+typedef enum {
+	GTKHX_CONNECTION_DISCONNECTED,   /* No connection. UI shows
+	                                  * disconnected chrome. */
+	GTKHX_CONNECTION_CONNECTING,     /* DNS resolve + TCP connect in
+	                                  * flight. Status bar reads
+	                                  * "connecting", disconnect
+	                                  * button is shown. */
+	GTKHX_CONNECTION_TCP_CONNECTED,  /* TCP connected; magic
+	                                  * exchange + login send in
+	                                  * flight. Status bar reads
+	                                  * "connected". */
+	GTKHX_CONNECTION_HANDSHAKE_DONE, /* LOGIN sent. Connect task
+	                                  * progress ticker is done. */
+} GtkhxConnectionState;
+
+void gtkhx_session_emit_connection_state (GtkhxSession *self,
+                                          GtkhxConnectionState state);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature
