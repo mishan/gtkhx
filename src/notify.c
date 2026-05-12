@@ -169,35 +169,73 @@ gtkhx_notify_init (GtkApplication *app)
 	notify_app = app;
 }
 
-void
-gtkhx_notify_chat (guint32 cid, const char *body)
+/* Pull a g_strdup'd sender + body out of an HxChatEvent so the
+ * notification gets a real sender in its title. Both fall back to
+ * empty strings if the parser didn't find a "Nick: body" split
+ * (an emote or raw server prose). Caller g_frees both. */
+static void
+event_slices (HxChatEvent *e, char **sender_out, char **body_out)
 {
-	gboolean is_mention = body_mentions_us (body);
+	*sender_out = (e && e->sender_len > 0)
+		? g_strndup (e->line + e->sender_off, e->sender_len)
+		: g_strdup ("");
+	*body_out = (e && e->body_len > 0)
+		? g_strndup (e->line + e->body_off, e->body_len)
+		: (e ? g_strndup (e->line, e->line_len) : g_strdup (""));
+}
+
+void
+gtkhx_notify_chat (HxChatEvent *event)
+{
+	gboolean is_mention;
 	gboolean want;
+	char *sender = NULL, *body = NULL;
+	char *title;
 	char id[64];
+
+	if (!event)
+		return;
 
 	/* cid > 0 is a private chat; the dedicated pchat entry point
 	 * handles those. This entry point is for the public chat
 	 * (cid == 0). */
-	if (cid != 0) {
-		gtkhx_notify_pchat (cid, body);
+	if (event->cid != 0) {
+		gtkhx_notify_pchat (event);
 		return;
 	}
+
+	event_slices (event, &sender, &body);
+	is_mention = body_mentions_us (body);
 
 	want = is_mention ? gtkhx_prefs.notify_chat_highlight
 	                  : gtkhx_prefs.notify_chat;
 	if (!want)
-		return;
+		goto out;
+
+	if (event->is_self)
+		goto out;          /* never notify on our own line */
 
 	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (chat_window_for_cid (cid)))
-		return;
+	    && window_is_active (chat_window_for_cid (event->cid)))
+		goto out;
 
-	g_snprintf (id, sizeof (id), "chat-%u", cid);
-	send_notify (id,
-	             is_mention ? "Mention in public chat"
-	                        : "Public chat",
-	             body);
+	g_snprintf (id, sizeof (id), "chat-%u", event->cid);
+
+	if (*sender) {
+		title = g_strdup_printf (is_mention
+			? "%s mentioned you"
+			: "%s",
+			sender);
+	} else {
+		title = g_strdup (is_mention ? "Mention in public chat"
+		                             : "Public chat");
+	}
+	send_notify (id, title, body);
+	g_free (title);
+
+out:
+	g_free (sender);
+	g_free (body);
 }
 
 void
@@ -221,26 +259,49 @@ gtkhx_notify_msg (const char *sender, guint16 uid, const char *body)
 }
 
 void
-gtkhx_notify_pchat (guint32 cid, const char *body)
+gtkhx_notify_pchat (HxChatEvent *event)
 {
-	gboolean is_mention = body_mentions_us (body);
+	gboolean is_mention;
 	gboolean want;
+	char *sender = NULL, *body = NULL;
+	char *title;
 	char id[64];
+
+	if (!event)
+		return;
+
+	event_slices (event, &sender, &body);
+	is_mention = body_mentions_us (body);
 
 	want = is_mention ? gtkhx_prefs.notify_pchat_highlight
 	                  : gtkhx_prefs.notify_pchat;
 	if (!want)
-		return;
+		goto out;
+
+	if (event->is_self)
+		goto out;
 
 	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (chat_window_for_cid (cid)))
-		return;
+	    && window_is_active (chat_window_for_cid (event->cid)))
+		goto out;
 
-	g_snprintf (id, sizeof (id), "pchat-%u", cid);
-	send_notify (id,
-	             is_mention ? "Mention in private chat"
-	                        : "Private chat",
-	             body);
+	g_snprintf (id, sizeof (id), "pchat-%u", event->cid);
+
+	if (*sender) {
+		title = g_strdup_printf (is_mention
+			? "%s mentioned you (private chat)"
+			: "%s (private chat)",
+			sender);
+	} else {
+		title = g_strdup (is_mention ? "Mention in private chat"
+		                             : "Private chat");
+	}
+	send_notify (id, title, body);
+	g_free (title);
+
+out:
+	g_free (sender);
+	g_free (body);
 }
 
 void

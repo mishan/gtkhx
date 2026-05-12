@@ -29,6 +29,7 @@
 
 #include <glib-object.h>
 #include "protocol.h"
+#include "proto_helpers.h"     /* HxChatEvent (chat signal payload) */
 
 G_BEGIN_DECLS
 
@@ -66,9 +67,16 @@ GtkhxSession *gtkhx_session_get_default (void);
  * gtkhx_session.c's class_init. When you add a new helper, add the
  * matching signal there too (and connect the existing view-side
  * handler in gtkhx.c's init path). */
+/* The "chat" signal payload was once raw bytes (body + len). It's
+ * now a single boxed HxChatEvent so every subscriber sees the same
+ * UTF-8-validated, sender/body-split, info/self-classified view of
+ * the line. The emitter constructs the event from wire bytes via
+ * hx_chat_event_new; subscribers get a borrowed pointer for the
+ * duration of the signal emission (boxed copy/free run if a
+ * subscriber needs to keep it). */
 void gtkhx_session_emit_chat (GtkhxSession *self,
                               struct htlc_conn *htlc,
-                              guint32 cid, const char *body, guint16 len);
+                              HxChatEvent *event);
 
 void gtkhx_session_emit_chat_subject (GtkhxSession *self,
                                       struct htlc_conn *htlc,

@@ -20,6 +20,14 @@ extern struct chat *chat_with_cid (session *sess, guint32 cid);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
 extern void xprintline(GtkWidget *text, char *chat, size_t len);
+
+/* Phase 5+: chat-signal renderer. Takes a pre-parsed HxChatEvent
+ * (sender/body slices + is_info/is_self flags from
+ * hx_chat_event_new). Bypasses the legacy hx_printf round-trip
+ * the log-line path still uses. */
+struct _HxChatEvent;
+extern void output_chat_from_event (struct htlc_conn *htlc,
+                                     struct _HxChatEvent *event);
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
  * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
  * pull the decls in (chat.h forwards the include for source

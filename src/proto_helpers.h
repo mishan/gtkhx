@@ -20,6 +20,7 @@
  */
 
 #include <glib.h>
+#include <glib-object.h>     /* HxChatEvent is a G_DEFINE_BOXED_TYPE */
 #include <stdarg.h>
 
 struct htlc_conn;
@@ -416,5 +417,65 @@ extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
  */
 extern gboolean hx_highlight_match (const char *body, gsize body_len,
                                     const char * const *words);
+
+/*
+ * HxChatEvent — a parsed chat-message value object.
+ *
+ * The wire side hands us raw bytes from HTLS_HDR_CHAT (already
+ * CR-to-LF'd and strip_ansi'd by hx_chat_extract). Several
+ * consumers downstream want the same set of derived facts about
+ * that line:
+ *
+ *   - chat.c::output_chat: needs the UTF-8-valid line plus the
+ *     sender / body slices to drive xtext's nick column, plus
+ *     is_info to suppress highlighting on info lines, plus
+ *     is_self to colour the brackets.
+ *
+ *   - notify.c::gtkhx_notify_chat: wants the sender as a separate
+ *     string for the notification title, the body for the
+ *     notification preview, plus the is_info / is_self flags to
+ *     decide whether to fire at all.
+ *
+ * Both used to do the parse work themselves on the raw bytes —
+ * UTF-8 fix-up, hx_chat_split_nick_body, INFOPREFIX detect, own-
+ * nick compare. Now hx_chat_event_new runs that work once at
+ * emit time and packages the result. The GtkhxSession::chat
+ * signal carries an HxChatEvent * payload (boxed type — copy /
+ * free hooks make multi-subscriber refcounting work).
+ *
+ * `line` is the UTF-8-valid, NUL-terminated rendering of the
+ * incoming bytes. sender_off / sender_len and body_off /
+ * body_len index into it. sender_len == 0 means the parser
+ * didn't find a "Nick: body" pattern (emotes, raw server
+ * prose) — consumers should render `line` verbatim with no
+ * special handling.
+ */
+typedef struct _HxChatEvent HxChatEvent;
+struct _HxChatEvent {
+	guint32  cid;
+	char    *line;            /* UTF-8-valid; NUL-terminated; owned */
+	gsize    line_len;
+
+	gsize    sender_off, sender_len;
+	gsize    body_off,   body_len;
+
+	gboolean is_info;         /* "[hx]" info-prefix line */
+	gboolean is_self;         /* sender == own nick */
+};
+
+#define HX_TYPE_CHAT_EVENT (hx_chat_event_get_type ())
+extern GType        hx_chat_event_get_type (void) G_GNUC_CONST;
+
+/* Build an HxChatEvent from raw wire bytes. `raw` may carry any
+ * encoding seen on the wire (Mac Roman, Latin-1, UTF-8); the
+ * constructor runs it through gtkhx_text_to_utf8 once. `self_nick`
+ * is NULL-safe — passing NULL means is_self always comes back
+ * FALSE. Returns a freshly-allocated event the caller owns. */
+extern HxChatEvent *hx_chat_event_new  (const char *raw, gsize raw_len,
+                                        guint32 cid,
+                                        const char *self_nick);
+
+extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
+extern void         hx_chat_event_free (HxChatEvent *e);
 
 #endif /* HX_PROTO_HELPERS_H */

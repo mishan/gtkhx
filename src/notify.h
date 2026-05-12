@@ -18,6 +18,7 @@
 #define HX_NOTIFY_H
 
 #include <gtk/gtk.h>
+#include "proto_helpers.h"          /* HxChatEvent */
 
 /* Stash the GApplication pointer and prime the highlight matcher's
  * once-cached state. Call once from gtkhx_activate after the app
@@ -27,19 +28,15 @@ extern void gtkhx_notify_init (GtkApplication *app);
 /* One entry point per event class. Each consults gtkhx_prefs and
  * the focus state of the relevant window before posting.
  *
- * For the chat / pchat / broadcast paths, `body` is whatever bytes
- * came off the wire — typically a self-contained line like
- * " Sender:  text". We don't try to parse out the sender for the
- * notification title (the formatting varies enough that a robust
- * parse would duplicate chat.c); the title is a generic
- * "Public chat" / "Private chat" / "Server broadcast" and the
- * body carries the original line. The highlight matcher runs on
- * the body, so mentions still trigger correctly. */
-extern void gtkhx_notify_chat        (guint32 cid, const char *body);
+ * Chat-side entry points (chat / pchat) take an HxChatEvent so the
+ * notification title can be the actual sender's name. The other
+ * event classes still take plain strings — they don't have the
+ * sender embedded in a chat-line format. */
+extern void gtkhx_notify_chat        (HxChatEvent *event);
 extern void gtkhx_notify_msg         (const char *sender,
                                        guint16 uid,
                                        const char *body);
-extern void gtkhx_notify_pchat       (guint32 cid, const char *body);
+extern void gtkhx_notify_pchat       (HxChatEvent *event);
 extern void gtkhx_notify_pchat_invite (guint32 cid,
                                         const char *inviter);
 extern void gtkhx_notify_news        (const char *headline);

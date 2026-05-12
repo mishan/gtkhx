@@ -1004,19 +1004,16 @@ static void output_user_info (guint16 uid, const char *nam, const char *info,
 	}
 }
 
-static void output_chat (struct htlc_conn *htlc, guint32 cid, char *chat,
-						 guint16 chatlen)
-{
-		hx_printf(htlc, cid, "%.*s\n", chatlen, chat);
-}
-
 /* Forward declarations for the file-local view functions the
  * Phase 3 adapter handlers below call. The functions themselves
  * are defined later in this file; the extern-linkage ones
  * (output_chat_subject, output_news_*, msg_output, etc.) are
- * already declared in their respective headers. */
-static void output_chat       (struct htlc_conn *htlc, guint32 cid,
-                               char *chat, guint16 chatlen);
+ * already declared in their respective headers.
+ *
+ * Phase 5+ (chat-event refactor): the chat-signal path bypasses
+ * the gtkhx.c output_chat stub — the renderer is
+ * chat.c::output_chat_from_event, which takes the pre-parsed
+ * HxChatEvent directly. */
 static void output_agreement  (session *sess, const char *agreement,
                                guint16 len);
 
@@ -1026,21 +1023,15 @@ static void output_agreement  (session *sess, const char *agreement,
  * Phase 3 finishes and the legacy signatures change to match. */
 static void
 on_chat_signal (GtkhxSession *emitter,
-                struct htlc_conn *htlc, guint cid,
-                gpointer body, guint len, gpointer user_data)
+                struct htlc_conn *htlc, gpointer event_p,
+                gpointer user_data)
 {
+	HxChatEvent *event = event_p;
 	(void) emitter; (void) user_data;
-	output_chat (htlc, (guint32) cid, (char *) body, (guint16) len);
-
-	/* Phase 5+: notify dispatch. Hand the body verbatim to the
-	 * notifier — it runs the highlight matcher (own nick +
-	 * CFG_HIGHLIGHT_WORDS) against the bytes and decides whether
-	 * the message qualifies. */
-	{
-		char *safe = g_strndup ((const char *) body, (gsize) len);
-		gtkhx_notify_chat ((guint32) cid, safe);
-		g_free (safe);
-	}
+	if (!event)
+		return;
+	output_chat_from_event (htlc, event);
+	gtkhx_notify_chat (event);
 }
 
 static void
