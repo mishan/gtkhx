@@ -453,12 +453,11 @@ static int rd_wr (int rd_fd, int wr_fd, guint32 data_len,
 }
 
 static int preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf,
-						struct hx_preview *p)
+						hx_preview *p)
 {
 	int len;
 	guint8 *buf;
 	size_t bufsiz;
-
 
 	bufsiz = 0xf000;
 	buf = g_malloc(bufsiz);
@@ -467,29 +466,17 @@ static int preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf,
 	while (data_len) {
 		if ((len = read(rd_fd, buf, (bufsiz < data_len) ? bufsiz : data_len)) < 1)
 			return len ? errno : EIO;
-		/* XXX: we need some kind of plugin schematic where a plugin registers
-		   itself for a given creator/type and the preview function looks for
-		   a plugin to match the file it is about to download and loads a 
-		   session with a plugin, if such a plugin exists, passes it on to here
-		   so that here we can pass the data into that session, otherwise
-		   we tell the user that no plugin exists for such data. we must also
-		   take into consideration that the person may be viewing some large
-		   file. do we want to keep this in memory or save to /tmp? */
-
-		/* XXX: Here is where we should output to some preview widget */
-		/*			g_print("%.*s", len, &(buf[pos])); */
-
-		/* p->output is hx_preview_text_output, which already does
-		 * its own g_idle_add to marshal the gtk_text_buffer_insert
-		 * to the main thread (see preview.c). It is safe to call
-		 * directly from the worker — no GTK lock needed. */
-		p->output(p, (char *) buf, len);
+		/* hx_preview_chunk copies the buffer and marshals to the
+		 * main thread internally — safe to call from the HTXF
+		 * worker, returns immediately. */
+		hx_preview_chunk (p, (char *) buf, len);
 		htxf->total_pos += len;
 		post_file_update(htxf);
 		data_len -= len;
 	}
 	g_free(buf);
 
+	hx_preview_done (p);
 	return 0;
 }
 
@@ -500,7 +487,7 @@ static void *get_thread (void *__arg)
 	int s, f, r, retval = 0;
 	guint8 typecrea[8], buf[1024];
 	struct hfsinfo fi;
-	struct hx_preview *p = NULL;
+	hx_preview *p = NULL;
 
 	s = htxf_connect(htxf);
 	if (s < 0) {
@@ -565,15 +552,28 @@ static void *get_thread (void *__arg)
 	}
 	else {
 		/* The preview window is constructed on the main thread by
-		 * rcv_task_file_get and stashed here as a struct hx_preview *;
+		 * rcv_task_file_get and stashed here as an hx_preview *;
 		 * the worker just streams bytes through it. Constructing
 		 * GtkWindow + AdwHeaderBar and calling gtk_window_present
 		 * from a worker thread caused intermittent lockups — Wayland
 		 * compositor round-trips during window mapping don't play
 		 * nicely from non-main threads. */
-		p = (struct hx_preview *) htxf->preview;
+		p = (hx_preview *) htxf->preview;
 		if (!p) {
 			goto ret;
+		}
+		/* Hand the FILP type/creator over to the preview module
+		 * BEFORE the first chunk lands, so the viewer dispatch
+		 * (text vs. image vs. ...) has the metadata it needs and
+		 * the placeholder body gets replaced before any chunk
+		 * tries to render. typecrea is laid out as type[0..3] +
+		 * creator[4..7]. */
+		{
+			char type_s[5]    = { 0 };
+			char creator_s[5] = { 0 };
+			memcpy (type_s,    &typecrea[0], 4);
+			memcpy (creator_s, &typecrea[4], 4);
+			hx_preview_set_info (p, type_s, creator_s);
 		}
 		retval = preview_get(s, len, htxf, p);
 	}
