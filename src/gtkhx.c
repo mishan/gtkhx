@@ -1011,10 +1011,43 @@ on_chat_signal (GtkhxSession *emitter,
 	output_chat (htlc, (guint32) cid, (char *) body, (guint16) len);
 }
 
+static void
+on_chat_subject_signal (GtkhxSession *emitter,
+                        struct htlc_conn *htlc, guint cid,
+                        gpointer subj, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat_subject (htlc, (guint32) cid, (char *) subj);
+}
+
+static void
+on_chat_invitation_signal (GtkhxSession *emitter,
+                           struct htlc_conn *htlc, guint cid,
+                           gpointer name, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_chat_invitation (htlc, (guint32) cid, (char *) name);
+}
+
+static void
+on_msg_signal (GtkhxSession *emitter,
+               gpointer name, guint uid, gpointer body,
+               gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	msg_output ((char *) name, (guint16) uid, (char *) body);
+}
+
 void gtkhx_connect_signals (GtkhxSession *emitter)
 {
 	g_signal_connect (emitter, "chat",
 	                  G_CALLBACK (on_chat_signal), NULL);
+	g_signal_connect (emitter, "chat-subject",
+	                  G_CALLBACK (on_chat_subject_signal), NULL);
+	g_signal_connect (emitter, "chat-invitation",
+	                  G_CALLBACK (on_chat_invitation_signal), NULL);
+	g_signal_connect (emitter, "msg",
+	                  G_CALLBACK (on_msg_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1151,12 +1184,9 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 struct output_functions hx_output = {
 	.init                  = init,
 	.loop                  = loop,
-	/* .chat — migrated to the "chat" signal on GtkhxSession.
-	 * See Phase 3 notes; output_chat is connected as the
-	 * handler in fe_init below. */
-	.chat_subject          = output_chat_subject,
-	.chat_invitation       = output_chat_invitation,
-	.msg                   = msg_output,
+	/* Phase 3 migrated to GtkhxSession signals: chat,
+	 * chat-subject, chat-invitation, msg. Handlers are connected
+	 * in gtkhx_connect_signals below. */
 	.agreement             = output_agreement,
 	.news_file             = output_news_file,
 	.news_post             = output_news_post,

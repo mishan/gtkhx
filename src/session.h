@@ -370,15 +370,9 @@ struct output_functions {
 	void (*init)(int argc, char **argv);
 	void (*loop)(void);
 
-	/* Chat output */
-	/* Phase 3+: .chat → "chat" signal on GtkhxSession. Other
-	 * chat-side dispatches will follow as Phase 3 progresses;
-	 * the field stays a vtable member until each migrates. */
-	void (*chat_subject)(struct htlc_conn *htlc, guint32 cid, char *buf);
-	void (*chat_invitation)(struct htlc_conn *htlc, guint32 cid, char *name);
-
-	/* Private messaging */
-	void (*msg)(char *name, guint16 uid, char *buf);
+	/* Chat output / private messaging — migrated to signals on
+	 * GtkhxSession in Phase 3: chat, chat-subject, chat-invitation,
+	 * msg. */
 
 	/* Login flow */
 	void (*agreement)(session *sess, const char *agreement, guint16 len);

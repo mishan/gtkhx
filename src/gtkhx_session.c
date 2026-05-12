@@ -38,6 +38,9 @@ G_DEFINE_FINAL_TYPE (GtkhxSession, gtkhx_session, G_TYPE_OBJECT)
 
 enum {
 	SIGNAL_CHAT,
+	SIGNAL_CHAT_SUBJECT,
+	SIGNAL_CHAT_INVITATION,
+	SIGNAL_MSG,
 	SIGNAL_LAST
 };
 
@@ -68,6 +71,38 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		G_TYPE_UINT,             /* cid */
 		G_TYPE_POINTER,          /* body */
 		G_TYPE_UINT);            /* len (guint16 widened) */
+
+	/* "chat-subject" — subject changed in chat `cid`. Replaces
+	 * hx_output.chat_subject. The arg list is (htlc, cid,
+	 * subject-string). */
+	signals[SIGNAL_CHAT_SUBJECT] = g_signal_new (
+		"chat-subject",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
+
+	/* "chat-invitation" — server invited us to chat `cid`. Replaces
+	 * hx_output.chat_invitation. `name` is the inviter's display
+	 * name (server-provided, already sanitised by the rcv path). */
+	signals[SIGNAL_CHAT_INVITATION] = g_signal_new (
+		"chat-invitation",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
+
+	/* "msg" — incoming private message. Replaces hx_output.msg.
+	 * No htlc arg (the original vtable signature was already
+	 * htlc-less); body is NUL-terminated. */
+	signals[SIGNAL_MSG] = g_signal_new (
+		"msg",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER,          /* sender name */
+		G_TYPE_UINT,             /* uid (guint16 widened) */
+		G_TYPE_POINTER);         /* body */
 }
 
 GtkhxSession *
@@ -86,4 +121,30 @@ gtkhx_session_emit_chat (GtkhxSession *self,
 {
 	g_signal_emit (self, signals[SIGNAL_CHAT], 0,
 	               htlc, cid, body, (guint) len);
+}
+
+void
+gtkhx_session_emit_chat_subject (GtkhxSession *self,
+                                 struct htlc_conn *htlc,
+                                 guint32 cid, const char *subj)
+{
+	g_signal_emit (self, signals[SIGNAL_CHAT_SUBJECT], 0,
+	               htlc, cid, subj);
+}
+
+void
+gtkhx_session_emit_chat_invitation (GtkhxSession *self,
+                                    struct htlc_conn *htlc,
+                                    guint32 cid, const char *name)
+{
+	g_signal_emit (self, signals[SIGNAL_CHAT_INVITATION], 0,
+	               htlc, cid, name);
+}
+
+void
+gtkhx_session_emit_msg (GtkhxSession *self,
+                        const char *name, guint16 uid, const char *body)
+{
+	g_signal_emit (self, signals[SIGNAL_MSG], 0,
+	               name, (guint) uid, body);
 }

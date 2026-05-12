@@ -218,7 +218,7 @@ void hx_rcv_msg (struct htlc_conn *htlc)
 #endif
 
 	if(pm.uid > 0) {
-		hx_output.msg(pm.name, pm.uid, pm.msg);
+		gtkhx_session_emit_msg (gtkhx_session_get_default (), pm.name, pm.uid, pm.msg);
 	}
 	else {
 		broadcastmsg(pm.msg);
@@ -512,7 +512,7 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 		 * update without spamming a "Subject Changed to X" line
 		 * for a subject that, from the user's point of view, was
 		 * already there before they joined. */
-		hx_output.chat_subject (htlc, sm.cid, chat->subject);
+		gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc, sm.cid, chat->subject);
 		hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
 		                  _("Subject Changed to"), chat->subject);
 	}
@@ -552,7 +552,7 @@ void hx_rcv_chat_invite (struct htlc_conn *htlc)
 		return;
 	}
 #endif
-	hx_output.chat_invitation(htlc, im.cid, im.name);
+	gtkhx_session_emit_chat_invitation (gtkhx_session_get_default (), htlc, im.cid, im.name);
 	play_sound(CHAT_INVITE);
 }
 
@@ -1423,7 +1423,7 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			 * vtable rather than poking the subject widget
 			 * directly. Initial-subject-discovery path — no
 			 * 'Subject Changed to X' log line. */
-			hx_output.chat_subject (htlc, chat->cid, chat->subject);
+			gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc, chat->cid, chat->subject);
 		}
 	} dh_end();
 }

@@ -53,6 +53,18 @@ void gtkhx_session_emit_chat (GtkhxSession *self,
                               struct htlc_conn *htlc,
                               guint32 cid, const char *body, guint16 len);
 
+void gtkhx_session_emit_chat_subject (GtkhxSession *self,
+                                      struct htlc_conn *htlc,
+                                      guint32 cid, const char *subj);
+
+void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
+                                         struct htlc_conn *htlc,
+                                         guint32 cid, const char *name);
+
+void gtkhx_session_emit_msg (GtkhxSession *self,
+                             const char *name, guint16 uid,
+                             const char *body);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature
