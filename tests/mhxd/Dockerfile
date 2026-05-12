@@ -25,6 +25,7 @@ FROM debian:bookworm-slim AS build
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install --no-install-recommends -y \
         ca-certificates \
+        curl \
         git \
         build-essential \
         autoconf \
@@ -129,19 +130,15 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
 #     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
 #
-# (3b) banner.url → known test fixture
-#     The upstream config advertises
-#     http://vivahx.com/images/vivahx.gif as the post-AGREEMENTAGREE
-#     banner URL. Override to a stable placehold.co URL whose
-#     rendered image carries the text "GtkHx Test Banner" — that
-#     way both the automated test (assert exact URL string) and
-#     manual smoke-testing (connect GtkHx, look at the toolbar)
-#     have a known fixture to verify against. The placehold.co
-#     service produces a 468x60 PNG, the standard web ad banner
-#     size, so the banner widget gets a realistically-shaped
-#     image to render.
-#     Keep this URL in sync with GTKHX_TEST_BANNER_URL_DEFAULT in
-#     tests/integration/test_banner.c.
+# (3b) banner.* config is patched at *runtime*, not build time.
+#     docker-entrypoint.sh reads BANNER_MODE / BANNER_URL /
+#     BANNER_FILE and rewrites the type/file/url fields in
+#     hxd.conf before exec'ing hxd. The URL-mode default points
+#     at placehold.co (stable test fixture matching what
+#     tests/integration/test_banner.c asserts); the file-mode
+#     defaults point at /opt/mhxd/run/banner.{jpg,gif} which we
+#     seed below. See docker-entrypoint.sh for the env-var
+#     reference.
 #
 # (4) Seed files/test.txt and files/integration_seed.txt with
 #     known content. mhxd's run/hxd/ skeleton ships without a
@@ -175,13 +172,25 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
         /opt/mhxd/run/hxd.conf \
-    && sed -i 's|^\([[:space:]]*\)url "[^"]*";|\1url "https://placehold.co/468x60/png?text=GtkHx+Test+Banner";|' \
-        /opt/mhxd/run/hxd.conf \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
     && printf 'tier-3 integration suite test data\n' \
         > /opt/mhxd/run/files/integration_seed.txt \
     && mkdir -p /opt/mhxd/run/files/Uploads
+
+# Seed default banner images for file-mode HTXF tests. Fetched
+# from placehold.co at build time so the running container can
+# serve them without needing internet access at runtime — and so
+# the test fixture is deterministic across container starts.
+# Two formats so BANNER_MODE=GIFf and BANNER_MODE=JPEG both work
+# out of the box; users can override by mounting a custom file
+# and setting BANNER_FILE.
+RUN curl -fsSL --retry 3 \
+        "https://placehold.co/468x60.jpg?text=GtkHx+HTXF+JPEG" \
+        -o /opt/mhxd/run/banner.jpg \
+ && curl -fsSL --retry 3 \
+        "https://placehold.co/468x60.gif?text=GtkHx+HTXF+GIF" \
+        -o /opt/mhxd/run/banner.gif
 
 # (6) Lock down guest's file-mutation bits in the binary UserData
 #
@@ -259,6 +268,14 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY --from=build /opt/mhxd /opt/mhxd
 RUN chown -R mhxd:mhxd /opt/mhxd/run
 
+# Entrypoint script — patches hxd.conf's banner block based on
+# the BANNER_MODE / BANNER_URL / BANNER_FILE env vars at startup,
+# then execs hxd. With no env vars set, behaviour matches the
+# old hard-coded build-time setup (URL mode pointing at the
+# placehold.co fixture).
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+
 # Hotline ports:
 #   5498/tcp — HTRK tracker (only used if you launch hxtrackd)
 #   5500/tcp — HTLS server (clients connect here)
@@ -268,6 +285,10 @@ EXPOSE 5498/tcp 5500/tcp 5501/tcp
 USER mhxd
 WORKDIR /opt/mhxd/run
 
-# Run hxd in foreground (-d would daemonize; we want stdout in
-# `docker logs`). The cwd holds hxd.conf so no -f flag needed.
-CMD ["/opt/mhxd/run/bin/hxd"]
+# The entrypoint script patches hxd.conf in /opt/mhxd/run (which
+# the mhxd user owns from the chown above) and exec's hxd in the
+# foreground. We don't pass `-d` so stdout/stderr stay attached
+# to `docker logs`. The hxd binary itself takes no required
+# args; the cwd holds hxd.conf.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD []
