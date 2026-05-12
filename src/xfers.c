@@ -90,10 +90,6 @@ htxf_unref (struct htxf_conn *htxf)
 		return;
 	if (!g_atomic_int_dec_and_test (&htxf->refcount))
 		return;
-#ifdef USE_IPV6
-	if (htxf->listen_addr)
-		freeaddrinfo (htxf->listen_addr);
-#endif
 	g_free (htxf);
 }
 

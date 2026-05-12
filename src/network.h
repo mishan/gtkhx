@@ -29,6 +29,15 @@ extern void kill_threads(void);
 
 extern int htxf_connect (struct htxf_conn *htxf);
 
+/* Worker-thread connect helper: blocking GSocketClient connect to
+ * host:port, returns a blocking-mode raw fd the caller must close.
+ * On failure returns -1 and writes the GError message to errbuf if
+ * non-NULL. Used by HTXF (file transfer) workers in xfers.c and
+ * banner.c, both of which need a connected fd to do blocking
+ * byte-streaming with read(2) / write(2). */
+extern int hx_sync_connect_to_host (const char *host, guint16 port,
+                                    char *errbuf, gsize errbuf_len);
+
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag,
 					 int hc, ...);
 extern void hl_code (void *__dst, const void *__src, size_t len);

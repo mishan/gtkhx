@@ -30,11 +30,10 @@
 #include "cipher.h"
 #endif
 
-#ifdef USE_IPV6
-#include <netdb.h>		/* struct addrinfo */
-#else
-#include <netinet/in.h>		/* struct sockaddr_in */
-#endif
+/* Phase 5+ (HTXF rewrite): the connection and transfer structs used
+ * to carry addrinfo / sockaddr_in for the network stack. The new
+ * GSocketClient-based connect path stores a plain host + port instead,
+ * so neither header is needed here anymore. */
 
 /* ---- Buffered byte queues ------------------------------------------- */
 
@@ -92,11 +91,12 @@ struct htxf_conn {
 	int fd;
 	pthread_t tid;
 
-#ifdef USE_IPV6
-	struct addrinfo *listen_addr;
-#else
-	struct sockaddr_in listen_addr;
-#endif
+	/* HTXF subchannel target: same hostname as the main control
+	 * channel, port + 1. Stored as plain strings so the worker
+	 * thread can hand them straight to GSocketClient without any
+	 * addrinfo dance. */
+	char     serverhost[HOSTLEN];
+	guint16  serverport;
 	struct htlc_conn *htlc;
 	char path[MAXPATHLEN];
 	char remotepath[MAXPATHLEN];
@@ -123,11 +123,14 @@ struct htlc_conn {
 	void (*real_rcv)(struct htlc_conn *);
 	struct qbuf in, out;
 	struct qbuf read_in;
-#ifdef USE_IPV6
-	struct addrinfo *addr;
-#else
-	struct sockaddr_in addr;
-#endif
+	/* Server endpoint identification, populated at hx_connect time.
+	 * serverhost+serverport drive HTXF subchannel connects (rcv.c
+	 * stamps them onto each htxf_conn). ip_addr is the resolved
+	 * peer address as a printable string, used in connection-event
+	 * log lines (post-connect IP-then-status messages). */
+	char     serverhost[HOSTLEN];
+	guint16  serverport;
+	char     ip_addr[HOSTLEN];
 	int fd;
 	guint32 trans;
 	guint32 chattrans;

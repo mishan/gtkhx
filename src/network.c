@@ -64,30 +64,11 @@ guint16 server_port;
 struct log *server_log = NULL;
 #endif
 
-/* The Hotline file-transfer (HTXF) code in banner.c and rcv.c reads
- * htlc->addr to learn which host:port to open the subchannel against.
- * Under USE_IPV6 that field is `struct addrinfo *` (legacy contract:
- * banner.c reads ai_addr / ai_addrlen / ai_family / ai_canonname).
- * After the async-connect rewrite there's no getaddrinfo() to give
- * us one of those, so we synthesise one over the GSocketConnection's
- * remote address. conn_addr owns the backing storage (sockaddr +
- * canonname) and an addrinfo header pointing into it; clear_conn_addr
- * frees the lot. */
-struct conn_addr {
-#ifdef USE_IPV6
-	struct addrinfo  ai;
-#endif
-	struct sockaddr_storage sa;
-	socklen_t         salen;
-	char              canonname[NI_MAXHOST];
-};
-
 /* Phase 5+ (async connect): pthread_t conn_tid is gone. The connect
  * + magic-exchange flow runs on the main loop via GSocketClient's
  * async API; cancellation goes through current_cancel. */
 static GSocketConnection *current_conn;  /* owns the post-handshake fd */
 static GCancellable      *current_cancel;
-static struct conn_addr  *current_addr;
 
 int connected;
 
@@ -194,23 +175,14 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 		g_cancellable_cancel (current_cancel);
 		g_clear_object (&current_cancel);
 	}
-#ifdef USE_IPV6
-	if (htlc->addr && htlc->addr->ai_addr) {
-		getnameinfo(htlc->addr->ai_addr, htlc->addr->ai_addrlen, buf,
-					sizeof(buf), NULL, 0, NI_NUMERICHOST);
-	} else {
-		g_strlcpy (buf, "?", sizeof (buf));
-	}
-#else
-	inet_ntop(AF_INET, &htlc->addr.sin_addr, buf, sizeof(buf));
-#endif
+	g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
 	hx_printf_prefix(htlc, 0, INFOPREFIX, "%s: %s\n", buf,
 
 					 _("connection closed"));
 
 	if(!expected)
 		error_dialog("Error", "You have been disconnected.");
-	
+
 	connected = 0;
 	gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
 	                                     GTKHX_CONNECTION_DISCONNECTED);
@@ -220,12 +192,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	/* Phase 5+: GSocketConnection owns the fd; releasing it closes
 	 * the socket. Replaces the legacy close(fd) call. */
 	g_clear_object (&current_conn);
-	g_clear_pointer (&current_addr, g_free);
-#ifdef USE_IPV6
-	htlc->addr = NULL;
-#else
-	memset (&htlc->addr, 0, sizeof (htlc->addr));
-#endif
+	htlc->ip_addr[0] = '\0';
 
 	if (htlc->in.buf) {
 		g_free(htlc->in.buf);
@@ -299,12 +266,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	}
 
 
-	/* Phase 5+: htlc->addr is now backed by current_addr (allocated
-	 * fresh by the async-connect finalize step from the
-	 * GSocketConnection's remote address); freed above with
-	 * g_clear_pointer (&current_addr, g_free). The legacy
-	 * freeaddrinfo() call belonged here when getaddrinfo() supplied
-	 * the addrinfo. */
+	/* Phase 5+ (HTXF rewrite): htlc no longer carries an addrinfo —
+	 * the post-connect peer-identification now lives in plain
+	 * htlc->serverhost / serverport / ip_addr fields, none of which
+	 * need explicit teardown. The legacy freeaddrinfo() call (and
+	 * the conn_addr shim that briefly replaced it) belonged here. */
 
 #ifdef CONFIG_CIPHER
 	memset(htlc->cipher_encode_key, 0, sizeof(htlc->cipher_encode_key));
@@ -691,7 +657,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
  *               arm a 30 s magic-timeout cancellable
  *               → on_magic_received
  *                   validate magic, init htlc qbuf state, populate
- *                   htlc->addr from GSocketAddress, install the fd
+ *                   htlc->ip_addr from GSocketAddress, install the fd
  *                   watch, send LOGIN, free the ctx.
  *
  * Cancellation goes through current_cancel — hx_htlc_close
@@ -734,54 +700,35 @@ static void connect_fail     (struct gtkhx_connect_ctx *ctx,
                               const char *stage, GError *err);
 static void send_login       (struct gtkhx_connect_ctx *ctx);
 
-/* Populate htlc->addr from the GSocketConnection's remote endpoint.
- * banner.c / rcv.c read these fields to drive HTXF (file transfer)
- * subchannel connects on server_port+1; their contract is that
- * htlc->addr is a USE_IPV6 addrinfo* (or a sockaddr_in in the legacy
- * build) populated with the same server we just connected to. */
+/* Populate htlc->ip_addr from the GSocketConnection's remote endpoint
+ * — the numeric peer address, used by connection-event log lines
+ * ("<ip>: connection closed", "<ip>:<port>: login successful"). The
+ * post-connect contract is that ip_addr is a NUL-terminated string;
+ * "?" if the address can't be read for some reason. */
 static gboolean
-populate_htlc_addr (struct htlc_conn *htlc, GSocketConnection *conn,
-                    const char *hostname)
+populate_htlc_remote_ip (struct htlc_conn *htlc, GSocketConnection *conn)
 {
 	GSocketAddress *remote;
-	gssize nlen;
-	struct conn_addr *a;
+	GInetSocketAddress *inet_remote;
+	GInetAddress *inet_addr;
+	char *str;
 
 	remote = g_socket_connection_get_remote_address (conn, NULL);
 	if (!remote)
 		return FALSE;
 
-	a = g_new0 (struct conn_addr, 1);
-	nlen = g_socket_address_get_native_size (remote);
-	if (nlen <= 0 || (gsize) nlen > sizeof (a->sa)) {
+	if (!G_IS_INET_SOCKET_ADDRESS (remote)) {
 		g_object_unref (remote);
-		g_free (a);
-		return FALSE;
+		g_strlcpy (htlc->ip_addr, "?", sizeof (htlc->ip_addr));
+		return TRUE;
 	}
-	if (!g_socket_address_to_native (remote, &a->sa, nlen, NULL)) {
-		g_object_unref (remote);
-		g_free (a);
-		return FALSE;
-	}
-	a->salen = (socklen_t) nlen;
-	g_strlcpy (a->canonname, hostname ? hostname : "?",
-	           sizeof (a->canonname));
+
+	inet_remote = G_INET_SOCKET_ADDRESS (remote);
+	inet_addr = g_inet_socket_address_get_address (inet_remote);
+	str = g_inet_address_to_string (inet_addr);
+	g_strlcpy (htlc->ip_addr, str ? str : "?", sizeof (htlc->ip_addr));
+	g_free (str);
 	g_object_unref (remote);
-
-#ifdef USE_IPV6
-	a->ai.ai_family   = ((struct sockaddr *) &a->sa)->sa_family;
-	a->ai.ai_socktype = SOCK_STREAM;
-	a->ai.ai_protocol = IPPROTO_TCP;
-	a->ai.ai_addr     = (struct sockaddr *) &a->sa;
-	a->ai.ai_addrlen  = a->salen;
-	a->ai.ai_canonname = a->canonname;
-	htlc->addr = &a->ai;
-#else
-	memcpy (&htlc->addr, &a->sa, sizeof (htlc->addr));
-#endif
-
-	g_clear_pointer (&current_addr, g_free);
-	current_addr = a;
 	return TRUE;
 }
 
@@ -918,7 +865,7 @@ on_async_connected (GObject *source, GAsyncResult *res, gpointer data)
 
 /* Finalize the connect after the magic round-trip succeeds: stash
  * the GSocketConnection on the current_conn global (it owns the
- * fd; hx_htlc_close unrefs it), populate htlc->addr from the
+ * fd; hx_htlc_close unrefs it), populate htlc->ip_addr from the
  * remote endpoint, initialise the qbuf state, install the fd watch
  * via the existing hxd_files / hxd_fd_set machinery, and send the
  * LOGIN packet.
@@ -935,7 +882,7 @@ send_login (struct gtkhx_connect_ctx *ctx)
 	char enclogin[64], encpass[64];
 	guint16 icon16, llen, plen;
 
-	if (!populate_htlc_addr (htlc, ctx->conn, ctx->serverstr)) {
+	if (!populate_htlc_remote_ip (htlc, ctx->conn)) {
 		connect_fail (ctx, _("remote address"), NULL);
 		return;
 	}
@@ -1120,6 +1067,12 @@ void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 	server_port = port;
 #endif
 
+	/* Stamp the server endpoint onto htlc so the HTXF subchannel
+	 * (port+1) and post-connect log messages don't have to query a
+	 * separate "what server did we connect to" oracle. */
+	g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
+	htlc->serverport = port;
+
 #if 0 /* XXX */
 	server_log = create_log(server_addr);
 #endif
@@ -1152,35 +1105,78 @@ void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 	g_object_unref (client);
 }
 
+/* Synchronous worker-thread connect helper. Used by the HTXF
+ * transfer workers in xfers.c and banner.c — both run on a pthread
+ * whose only excuse for existing is the blocking byte-streaming
+ * loop, so a sync GSocketClient call here keeps them simple.
+ *
+ * Returns a raw fd in blocking mode that the caller owns (must
+ * close(2) when done). On failure returns -1 and writes the
+ * GError's message to errbuf (truncated to errbuf_len) if both are
+ * non-NULL. host/port go straight through to GSocketClient — IPv4/
+ * IPv6 fallback comes for free. */
+int
+hx_sync_connect_to_host (const char *host, guint16 port,
+                         char *errbuf, gsize errbuf_len)
+{
+	GSocketClient *client;
+	GSocketConnection *conn;
+	GSocket *sock;
+	GError *err = NULL;
+	int s = -1;
+	int flags;
+
+	client = g_socket_client_new ();
+	conn = g_socket_client_connect_to_host (client, host, port, NULL, &err);
+	g_object_unref (client);
+	if (!conn) {
+		if (errbuf && errbuf_len && err)
+			g_strlcpy (errbuf, err->message, errbuf_len);
+		g_clear_error (&err);
+		return -1;
+	}
+
+	sock = g_socket_connection_get_socket (conn);
+
+	/* GSocketConnection insists on close()ing its fd at unref —
+	 * there is no close_on_unref toggle on GSocket. Hand the
+	 * worker a dup so the unref below can clean up the GIO
+	 * machinery without taking the fd with it. */
+	s = dup (g_socket_get_fd (sock));
+	g_object_unref (conn);
+	if (s < 0) {
+		if (errbuf && errbuf_len)
+			g_strlcpy (errbuf, g_strerror (errno), errbuf_len);
+		return -1;
+	}
+
+	/* GSocketClient leaves the fd in non-blocking mode (GIO's
+	 * preference). Our transfer workers want blocking semantics for
+	 * their read()/write() loops; clear O_NONBLOCK explicitly. */
+	flags = fcntl (s, F_GETFL, 0);
+	if (flags >= 0)
+		fcntl (s, F_SETFL, flags & ~O_NONBLOCK);
+
+	return s;
+}
+
 int htxf_connect (struct htxf_conn *htxf)
 {
 	struct htxf_hdr h;
 	int s;
+	char errbuf[256];
 
-#ifdef USE_IPV6
-	s = socket(htxf->listen_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
-#else
-	s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#endif
-	if (s < 0) {
+	s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport,
+	                             errbuf, sizeof (errbuf));
+	if (s < 0)
 		return -1;
-	}
-
-#ifdef USE_IPV6
-	if (connect(s, htxf->listen_addr->ai_addr, htxf->listen_addr->ai_addrlen)){
-#else
-	if (connect(s, (struct sockaddr *)&htxf->listen_addr, 
-				sizeof(struct sockaddr))) {
-#endif
-		close(s);
-		return -1;
-	}
 
 	h.magic = htonl(HTXF_MAGIC_INT);
 	h.ref = htonl(htxf->ref);
 	h.unknown = 0;
 	h.len = htonl(htxf->total_size);
 	if (write(s, &h, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
+		close (s);
 		return -1;
 	}
 

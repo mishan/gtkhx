@@ -971,23 +971,14 @@ void rcv_task_login (struct htlc_conn *htlc, char *pass)
 	guint16 compressalglistlen;
 #endif
 	
-#ifdef USE_IPV6
-	getnameinfo(htlc->addr->ai_addr, htlc->addr->ai_addrlen, buf, sizeof(buf),
-				NULL, 0, NI_NUMERICHOST);
-#else
-	inet_ntop(AF_INET, &htlc->addr.sin_addr, buf, sizeof(buf));
-#endif
+	g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
 
 	if(!pass) {
 		hx_printf_prefix(htlc, 0, INFOPREFIX, "%s:%u: %s %s\n",
 						 buf,
-#ifdef USE_IPV6
-						 server_port,
-#else
-						 ntohs(htlc->addr.sin_port),
-#endif
+						 htlc->serverport,
 						 _("login"),
-						 
+
 						 task_inerror(htlc) ? _("failed?") : _("successful"));
 	}
 
@@ -1689,16 +1680,6 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {
 	guint32 ref = 0, size = 0, queue = 0;
 	int i;
-#ifdef USE_IPV6
-	int error;
-	char portstr[HOSTLEN];
-	struct addrinfo hints;
-
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = PF_UNSPEC;
-	hints.ai_flags = AI_NUMERICHOST;
-	hints.ai_socktype = SOCK_STREAM;
-#endif
 
 	for(i = 0; i < nxfers; i++) {
 		if(xfers[i] == htxf) {
@@ -1742,28 +1723,12 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->queue = queue;
 
 	gettimeofday(&htxf->start, 0);
-#ifdef USE_IPV6
-	{
-		char buf[HOSTLEN];
-		g_snprintf(portstr, sizeof(portstr), "%u", server_port+1);
 
-		inet_ntop(htlc->addr->ai_family, &htlc->addr->ai_addr->sa_data[2],
-				  buf, HOSTLEN);
-		if((error = getaddrinfo(buf, portstr, &hints, &htxf->listen_addr)))
-			{
-				hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
-								 "htxf %s:%u failed: %s\n", 
-								 htlc->addr->ai_canonname, server_port+1, 
-								 gai_strerror(error));
-				gtask_delete_htxf(&the_session, htxf);
-				xfer_delete(htxf);
-				return;
-			}
-	}
-#else
-	htxf->listen_addr = htlc->addr;
-	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
-#endif
+	/* Stamp the HTXF subchannel target onto htxf so the worker can
+	 * hand it straight to GSocketClient without re-resolving — the
+	 * subchannel is always (main server hostname, main port + 1). */
+	g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
+	htxf->serverport = htlc->serverport + 1;
 
 	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf); /* we most certainly want
 														 to output its position
@@ -1790,16 +1755,6 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {
 	guint32 ref = 0, data_pos = 0, rsrc_pos = 0, queue = 0;
 	struct stat sb;
-#ifdef USE_IPV6
-	char portstr[HOSTLEN];
-	struct addrinfo hints;
-	int error;
-
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = PF_UNSPEC;
-	hints.ai_flags = AI_NUMERICHOST;
-	hints.ai_socktype = SOCK_STREAM;
-#endif
 
 	if (task_inerror(htlc)) {
 		gtask_delete_htxf(&the_session, htxf);
@@ -1841,28 +1796,10 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->ref = ref;
 	gettimeofday(&htxf->start, 0);
 
-#ifdef USE_IPV6
-	{
-		char buf[HOSTLEN];
-
-		g_snprintf(portstr, sizeof(portstr), "%u", server_port+1);
-		inet_ntop(htlc->addr->ai_family, &htlc->addr->ai_addr->sa_data[2], 
-				  buf, HOSTLEN);
-		if((error = getaddrinfo(buf, portstr, &hints,
-								&htxf->listen_addr))) {
-			hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, 
-							 "htxf %s:%u failed: %s\n", 
-							 htlc->addr->ai_canonname, server_port+1, 
-							 gai_strerror(error));
-			gtask_delete_htxf(&the_session, htxf);
-			xfer_delete(htxf);
-			return;
-		}
-	}
-#else
-	htxf->listen_addr = htlc->addr;
-	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
-#endif
+	/* Stamp the HTXF subchannel target onto htxf. See the file_get
+	 * sibling above for the same idiom. */
+	g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
+	htxf->serverport = htlc->serverport + 1;
 
 	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf);
 
