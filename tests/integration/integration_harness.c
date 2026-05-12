@@ -479,9 +479,33 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 		return -1;
 	}
 
-	/* Parse SELFINFO into htlc->access / uid / icon / name so the
-	 * caller can read its session state directly. */
+	/* Parse SELFINFO into htlc->access / uid / icon so the caller
+	 * can read its session state directly. */
 	hx_selfinfo_parse (htlc);
+
+	/* hx_selfinfo_parse intentionally does NOT write htlc->name
+	 * (Phase 5 policy: server-supplied nick is display-only and
+	 * never persisted into the client's name field, to avoid
+	 * corrupt-bytes-from-cached-server feedback loops). For test
+	 * harness convenience we re-walk the SELFINFO chunks here
+	 * and stuff the server's name into htlc->name so the login
+	 * test can still assert "name we sent round-trips back
+	 * unchanged". This is test-harness-only state poking, not
+	 * production behaviour. */
+	dh_start (htlc) {
+		if (_type == HTLS_DATA_USER_LIST
+		    && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
+			struct hl_userlist_hdr *uh =
+				(struct hl_userlist_hdr *) dh;
+			guint16 nlen;
+			HN16 (&nlen, &uh->nlen);
+			if (nlen > sizeof (htlc->name) - 1)
+				nlen = sizeof (htlc->name) - 1;
+			memcpy (htlc->name, uh->name, nlen);
+			htlc->name[nlen] = '\0';
+			break;
+		}
+	} dh_end ();
 
 	return fd;
 }
