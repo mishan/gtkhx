@@ -285,6 +285,114 @@ test_chat_all_three_chunks_combined (void)
 	wire_fixture_free (&htlc);
 }
 
+/* ---------- hx_chat_split_nick_body ---------- */
+
+static void
+test_chat_split_typical_line (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = " misha:  hello world";
+	g_assert_true (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+	g_assert_cmpuint (n_off, ==, 1);
+	g_assert_cmpuint (n_len, ==, 5);
+	g_assert_cmpuint (b_off, ==, 9);
+	g_assert_cmpuint (b_len, ==, strlen ("hello world"));
+	g_assert_true (memcmp (line + n_off, "misha", n_len) == 0);
+	g_assert_true (memcmp (line + b_off, "hello world", b_len) == 0);
+}
+
+static void
+test_chat_split_no_padding (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = "alice: hi";
+	g_assert_true (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+	g_assert_cmpuint (n_off, ==, 0);
+	g_assert_cmpuint (n_len, ==, 5);
+	g_assert_cmpuint (b_off, ==, 7);
+	g_assert_cmpuint (b_len, ==, 2);
+}
+
+static void
+test_chat_split_name_with_spaces (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = "  Alice Cooper:  rock";
+	g_assert_true (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+	g_assert_cmpuint (n_len, ==, strlen ("Alice Cooper"));
+	g_assert_true (memcmp (line + n_off, "Alice Cooper", n_len) == 0);
+}
+
+static void
+test_chat_split_extra_colons_in_body (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = " bob:  check http://example.com";
+	g_assert_true (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+	g_assert_cmpuint (n_len, ==, 3);
+	g_assert_true (memcmp (line + n_off, "bob", n_len) == 0);
+	g_assert_true (memcmp (line + b_off,
+	                      "check http://example.com",
+	                      b_len) == 0);
+}
+
+static void
+test_chat_split_rejects_long_pre_colon (void)
+{
+	/* Pre-colon portion exceeds the 31-byte Hotline nick cap.
+	 * Lines like a sentence that happens to contain a colon
+	 * deep in the prose ("the part you were curious about:
+	 * here") shouldn't be misread as nick + body — the colon
+	 * is a regular punctuation mark, not the chat separator. */
+	gsize n_off, n_len, b_off, b_len;
+	const char *line =
+		" the long thing I wanted to mention: here is the body";
+	g_assert_false (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+}
+
+static void
+test_chat_split_rejects_no_colon (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = "  *** charlie waves";
+	g_assert_false (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+}
+
+static void
+test_chat_split_rejects_all_whitespace (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = "      ";
+	g_assert_false (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+}
+
+static void
+test_chat_split_rejects_empty_nick (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = " : oops";
+	g_assert_false (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+}
+
+static void
+test_chat_split_empty_body (void)
+{
+	gsize n_off, n_len, b_off, b_len;
+	const char *line = " misha:  ";
+	g_assert_true (hx_chat_split_nick_body (
+		line, strlen (line), &n_off, &n_len, &b_off, &b_len));
+	g_assert_cmpuint (n_len, ==, 5);
+	g_assert_cmpuint (b_len, ==, 0);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -319,6 +427,25 @@ main (int argc, char **argv)
 
 	g_test_add_func ("/proto/chat/all_three_chunks_combined",
 	                 test_chat_all_three_chunks_combined);
+
+	g_test_add_func ("/proto/chat/split_typical_line",
+	                 test_chat_split_typical_line);
+	g_test_add_func ("/proto/chat/split_no_padding",
+	                 test_chat_split_no_padding);
+	g_test_add_func ("/proto/chat/split_name_with_spaces",
+	                 test_chat_split_name_with_spaces);
+	g_test_add_func ("/proto/chat/split_extra_colons_in_body",
+	                 test_chat_split_extra_colons_in_body);
+	g_test_add_func ("/proto/chat/split_rejects_long_pre_colon",
+	                 test_chat_split_rejects_long_pre_colon);
+	g_test_add_func ("/proto/chat/split_rejects_no_colon",
+	                 test_chat_split_rejects_no_colon);
+	g_test_add_func ("/proto/chat/split_rejects_all_whitespace",
+	                 test_chat_split_rejects_all_whitespace);
+	g_test_add_func ("/proto/chat/split_rejects_empty_nick",
+	                 test_chat_split_rejects_empty_nick);
+	g_test_add_func ("/proto/chat/split_empty_body",
+	                 test_chat_split_empty_body);
 
 	return g_test_run ();
 }

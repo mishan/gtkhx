@@ -569,3 +569,58 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
 	                        (SIZEOF_HL_HDR - sizeof (h.hc)));
 	memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }
+
+/* See doc-comment in proto_helpers.h. */
+gboolean
+hx_chat_split_nick_body (const char *line, gsize line_len,
+                         gsize *name_offset, gsize *name_len,
+                         gsize *body_offset, gsize *body_len)
+{
+	gsize ws, colon, body_start;
+
+	if (!line || line_len == 0)
+		return FALSE;
+
+	/* Strip leading horizontal whitespace. Hotline servers
+	 * commonly pad the line with spaces (right-aligning the
+	 * nick) before the actual nick text. */
+	ws = 0;
+	while (ws < line_len
+	       && (line[ws] == ' ' || line[ws] == '\t'))
+		ws++;
+	if (ws == line_len)
+		return FALSE;
+
+	/* Find the first ':' after the whitespace. The
+	 * "nick: body" Hotline format uses a single colon as the
+	 * separator. */
+	colon = ws;
+	while (colon < line_len && line[colon] != ':')
+		colon++;
+	if (colon == line_len)
+		return FALSE;
+	if (colon == ws)
+		return FALSE;	/* empty nick */
+
+	/* Cap nick length at 31 — the Hotline protocol's nick
+	 * field is a 31-byte STRING32. Lines whose pre-colon
+	 * portion exceeds that are almost certainly not chat
+	 * (URLs, "Subject Changed to:", arbitrary system prose);
+	 * pass them through unsplit. */
+	if (colon - ws > 31)
+		return FALSE;
+
+	/* Skip the spaces between ':' and the body. Conventional
+	 * mhxd output pads to two spaces; one-space variants exist;
+	 * a body that's all-whitespace is still a valid (empty)
+	 * message. */
+	body_start = colon + 1;
+	while (body_start < line_len && line[body_start] == ' ')
+		body_start++;
+
+	if (name_offset) *name_offset = ws;
+	if (name_len)    *name_len    = colon - ws;
+	if (body_offset) *body_offset = body_start;
+	if (body_len)    *body_len    = line_len - body_start;
+	return TRUE;
+}

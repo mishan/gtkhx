@@ -391,8 +391,62 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 	 * buf->time_stamp. Both are flipped on per-buffer at creation
 	 * time in chat.c / msg.c, and re-applied to live buffers when
 	 * the user toggles CFG_TIMESTAMP via Settings. */
-	gtk_xtext_append (GTK_XTEXT (text)->buffer,
-	                  (unsigned char *) valid, valid_len, 0);
+
+	/* Phase 5+: HexChat-style nick column. Lines that look like
+	 * "  name:  body" get rewritten into a left part ("<name>",
+	 * including the brackets) and a right part ("body"); xtext's
+	 * gtk_xtext_append_indent draws the left part flush-right
+	 * against the indent column and the right part flush-left
+	 * after it, so all nicks align visually and the bodies start
+	 * at a common left edge. Info messages produced by
+	 * hx_printf_prefix (recognisable by the leading INFOPREFIX
+	 * with its mIRC-coloured "[hx]") get a "[hx]" nick so they
+	 * slot into the same column.
+	 *
+	 * Lines that don't match either pattern (emotes, raw output
+	 * without a colon) fall through to plain append. */
+	gsize name_off = 0, name_len = 0;
+	gsize body_off = 0, body_len = 0;
+	gchar *display_nick = NULL;
+	const char *display_body = NULL;
+	gsize display_body_len = 0;
+	{
+		const char *info_prefix = INFOPREFIX;
+		gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
+
+		if (info_prefix_len > 0
+		    && valid_len >= info_prefix_len
+		    && memcmp (valid, info_prefix, info_prefix_len) == 0) {
+			/* Preserve the colour codes around "[hx]" so the
+			 * info-prefix renders the same hue it always did,
+			 * just in the nick column now. */
+			display_nick = g_strndup (valid + 1,
+			                          info_prefix_len - 2);
+			display_body = valid + info_prefix_len;
+			display_body_len = valid_len - info_prefix_len;
+		} else if (hx_chat_split_nick_body (valid, valid_len,
+		                                    &name_off, &name_len,
+		                                    &body_off, &body_len)) {
+			display_nick = g_strdup_printf ("<%.*s>",
+			                                (int) name_len,
+			                                valid + name_off);
+			display_body = valid + body_off;
+			display_body_len = body_len;
+		}
+	}
+
+	if (display_nick) {
+		gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
+		                         (unsigned char *) display_nick,
+		                         strlen (display_nick),
+		                         (unsigned char *) display_body,
+		                         display_body_len,
+		                         0);
+		g_free (display_nick);
+	} else {
+		gtk_xtext_append (GTK_XTEXT (text)->buffer,
+		                  (unsigned char *) valid, valid_len, 0);
+	}
 
 	g_free (valid);
 }

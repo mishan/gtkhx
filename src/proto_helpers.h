@@ -357,4 +357,44 @@ extern gboolean hx_news_file_extract (struct htlc_conn *htlc,
                                       char *out, gsize out_size,
                                       gsize *out_len);
 
+/*
+ * Split a single chat line into a "name" portion and a "body"
+ * portion for HexChat-style indented rendering. Hotline servers
+ * format chat messages as
+ *
+ *     "<padding>name:  body"
+ *
+ * where padding is some number of leading spaces and the
+ * separator is a colon followed by one or more spaces. This
+ * function locates the split point.
+ *
+ * Inputs:
+ *   line, line_len   the un-terminated chat-line bytes (one line —
+ *                    callers split a multi-line buffer on '\n'
+ *                    before calling).
+ *
+ * Outputs (on TRUE return):
+ *   *name_offset     byte index where the name starts inside line
+ *   *name_len        byte length of the name
+ *   *body_offset     byte index where the body starts inside line
+ *   *body_len        byte length of the body (line_len - body_offset)
+ *
+ * Returns FALSE if no plausible "name: body" split exists — empty
+ * name, no colon found, or a name longer than the 31-byte Hotline
+ * nick cap (lines like "Subject Changed to: X" or "https://..."
+ * pass through unsplit). Callers should fall back to passing the
+ * whole line through gtk_xtext_append unchanged.
+ *
+ * The name length cap is intentional: it lets us reliably skip
+ * URLs and other long colon-containing prose that isn't a chat
+ * prefix, at the cost of occasionally missing a chat line whose
+ * server padded the nick with trailing spaces past 31. The
+ * trade-off favours conservative behaviour for non-chat content.
+ */
+extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
+                                         gsize *name_offset,
+                                         gsize *name_len,
+                                         gsize *body_offset,
+                                         gsize *body_len);
+
 #endif /* HX_PROTO_HELPERS_H */
