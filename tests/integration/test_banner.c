@@ -282,17 +282,18 @@ test_banner_htxf_mode (void)
 			banner_type, banner_url);
 	}
 
-	/* Snapshot the current htlc->trans value so the matching of
-	 * task replies (mhxd echoes our trans id) works regardless
-	 * of how many requests we've sent before this. */
-	guint32 our_trans;
+	/* hlpack (called inside integration_send_message) reads
+	 * htlc->trans for the on-wire value and *then* increments
+	 * it. Capture the pre-send value so we can match the TASK
+	 * reply's trans field against what actually went out — not
+	 * the post-increment value. */
+	guint32 our_trans = htlc.trans;
 	if (!integration_send_message (
 			fd, &htlc,
 			HTLC_HDR_DOWNLOAD_BANNER, /*flag=*/0, /*hc=*/0)) {
 		g_test_fail_printf ("HTLC_HDR_DOWNLOAD_BANNER send failed");
 		goto cleanup;
 	}
-	our_trans = htlc.trans;	/* hlwrite stamped the trans before send */
 
 	/* Drain looking for the TASK reply matching our trans. */
 	guint32 ref = 0, size = 0;
