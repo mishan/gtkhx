@@ -218,7 +218,8 @@ struct hx_user {
 };
 
 struct chat {
-	struct chat *next, *prev;
+	/* Phase 5+: no next/prev — chats live in session->chats, a
+	 * GHashTable<u32 cid, struct chat*>. */
 	guint32 cid;
 	guint32 nusers;
 	struct hx_user __user_list;
@@ -280,8 +281,16 @@ typedef struct _session {
 	 * first PM open. The canonical "global user list" lookup is the
 	 * public chat at cid=0 — use chat_with_cid(sess, 0)->user_list. */
 
-	struct chat *chat_front, *chat_tail, *chat_list;
-	struct chat __chat_list;
+	/* Phase 5+: chats keyed on the 32-bit chat-id. Replaces the
+	 * chat_front / chat_tail / chat_list trio + the embedded
+	 * __chat_list sentinel. cid=0 is the public/server-wide chat
+	 * and is created at session init by chats_init() — it must
+	 * always exist while the table does. Other chats (private
+	 * pchats) are inserted by chat_new and removed by chat_delete.
+	 * Lookup is O(1) via chat_with_cid; the value-destroy notify
+	 * (chat_free in chat.c) walks chat->user_list and reclaims the
+	 * heap-allocated hx_user nodes before freeing the chat. */
+	GHashTable *chats;
 
 	struct htlc_conn htlc;
 

@@ -847,8 +847,8 @@ void user_list (session *sess)
 
 	gtk_hlist_freeze(GTK_HLIST(sess->users_list));
 	gtk_hlist_clear(GTK_HLIST(sess->users_list));
-	for (user = sess->chat_front->user_list->next; user; user = user->next) {
-		hx_output.user_create(&sess->htlc, sess->chat_front, user, user->name,
+	for (user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
+		hx_output.user_create(&sess->htlc, chat_with_cid (sess, 0), user, user->name,
 							  user->icon, user->color);
 	}
 	gtk_hlist_thaw(GTK_HLIST(sess->users_list));

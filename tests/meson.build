@@ -170,6 +170,19 @@ test_msgwin_hash = executable('test_msgwin_hash',
 test('msgwin_hash', test_msgwin_hash,
      suite : 'unit')
 
+# chat_hash — Phase 1.3 replaces the chat_front / chat_tail /
+# chat_list / __chat_list sentinel quartet on the session with
+# GHashTable<u32 cid, struct chat*>. struct chat sits alongside
+# gtk-dependent types in session.h, so the test uses a layout-
+# compatible stub; the integration suite covers the real path.
+test_chat_hash = executable('test_chat_hash',
+  'unit/test_chat_hash.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('chat_hash', test_chat_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #

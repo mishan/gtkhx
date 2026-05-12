@@ -149,8 +149,6 @@ void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
 	int fd = htlc->fd;
-	struct chat *chat, *cnext;
-	struct hx_user *user, *unext;
 	char buf[HOSTLEN];
 
 	session *sess = &the_session;
@@ -209,19 +207,49 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	memset(htlc->login, 0, sizeof(htlc->login));
 
 
-	for (chat = sess->chat_list; chat; chat = cnext) {
-		cnext = chat->next;
-		hx_output.users_clear(htlc, chat);
-		for (user = chat->user_list->next; user; user = unext) {
-			unext = user->next;
-			hx_user_delete(&chat->user_tail, user);
+	/* Phase 5+: chats live in a GHashTable<u32 cid, struct chat*>.
+	 * For each chat:
+	 *   1. Clear the UI's user-list rendering (users_clear is a no-op
+	 *      on cid != 0 since the global user-list widget only shows
+	 *      the public chat's members).
+	 *   2. The hashtable's value-destroy notify (chat_free in chat.c)
+	 *      reclaims the chat's hx_user nodes + the struct chat itself
+	 *      on remove; we do not need to walk + free users by hand.
+	 * The public chat (cid=0) must stay alive across reconnects, so
+	 * we remove all *non-public* chats and then reset the public
+	 * chat's user-list pointers + subject in-place. */
+	if (sess->chats) {
+		GHashTableIter iter;
+		gpointer key, val;
+		GList *non_public = NULL;
+		g_hash_table_iter_init (&iter, sess->chats);
+		while (g_hash_table_iter_next (&iter, &key, &val)) {
+			struct chat *chat = val;
+			hx_output.users_clear (htlc, chat);
+			if (GPOINTER_TO_UINT (key) != 0) {
+				non_public = g_list_prepend (non_public, key);
+			} else {
+				/* Public chat: walk + free users, then reset
+				 * the sentinel pointers. The struct chat
+				 * itself stays in the table. */
+				struct hx_user *user, *unext;
+				for (user = chat->user_list->next; user;
+				     user = unext) {
+					unext = user->next;
+					g_free (user);
+				}
+				memset (&chat->__user_list, 0,
+				        sizeof (struct hx_user));
+				chat->user_list = chat->user_tail =
+					&chat->__user_list;
+				chat->nusers = 0;
+				chat->subject[0] = '\0';
+			}
 		}
-		if (chat != sess->chat_list)
-			chat_delete(sess, chat);
+		for (GList *l = non_public; l; l = l->next)
+			g_hash_table_remove (sess->chats, l->data);
+		g_list_free (non_public);
 	}
-	memset(sess->chat_list, 0, sizeof(struct chat));
-	sess->chat_list->user_list = sess->chat_list->user_tail =
-		&sess->chat_list->__user_list;
 
 	/* Phase 5+: tasks live in a GHashTable<u32 trans, struct task*>.
 	 * Use foreach_remove so we can run the per-task UI cleanup

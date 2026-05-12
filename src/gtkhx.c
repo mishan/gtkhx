@@ -786,11 +786,10 @@ static void fe_init (void)
 	   this will be handled somewhere else in case of
 	   multiconnection support */
 
-	the_session.chat_list = &(the_session.__chat_list);
-	the_session.chat_tail = &(the_session.__chat_list);
-	the_session.chat_front = &(the_session.__chat_list);
-	the_session.__chat_list.user_list = &(the_session.__chat_list.__user_list);
-	the_session.__chat_list.user_tail = &(the_session.__chat_list.__user_list);
+	/* Phase 5+: hashtable-backed session collections. chats_init
+	 * additionally seeds the table with the public chat (cid=0),
+	 * which must always exist while the table does. */
+	chats_init (&the_session);
 	tasks_init (&the_session);
 	msg_windows_init (&the_session);
 

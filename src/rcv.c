@@ -103,7 +103,8 @@ do_post_login_fetches (struct htlc_conn *htlc)
 	 * both — it calls rcv_task_user_list on the USER_GETLIST
 	 * reply and then reload_news, the latter of which is itself
 	 * gated on HL_ACCESS_READ_NEWS. */
-	task_new (htlc, RCV_TASK_FN(rcv_task_news_users), the_session.chat_list, 0, "who");
+	task_new (htlc, RCV_TASK_FN(rcv_task_news_users),
+	          chat_with_cid (&the_session, 0), 0, "who");
 	hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
 }
 

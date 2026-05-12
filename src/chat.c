@@ -279,46 +279,81 @@ int word_check (GtkWidget * xtext, char *word)
  * just append the bare message text; the per-entry timestamp is
  * auto-set in gtk_xtext_append_entry. */
 
+/* Phase 5+: chat lifecycle on GHashTable.
+ *
+ * chat_free() is the GDestroyNotify the hashtable invokes when an
+ * entry is replaced, removed, or the table itself is destroyed. It
+ * walks chat->user_list and reclaims any hx_user nodes left on the
+ * intrusive list (Phase 1.5 will move hx_user to its own hashtable
+ * per chat; until then the linked list lives on inside struct chat)
+ * before freeing the chat struct itself. The embedded __user_list
+ * sentinel is part of struct chat — no separate free for it.
+ *
+ * The callers that previously did chat_delete (rcv.c, network.c
+ * teardown, etc.) used to be responsible for clearing users
+ * themselves before the unhook. Moving that responsibility into the
+ * destroy notify means g_hash_table_destroy and g_hash_table_remove
+ * Do The Right Thing — a future caller can't accidentally leak a
+ * chat's user nodes by skipping the manual user walk. */
+static void chat_free (gpointer p)
+{
+	struct chat *chat = p;
+	struct hx_user *user, *unext;
+
+	if (!chat)
+		return;
+
+	/* Walk the intrusive user list, reclaiming each heap-allocated
+	 * hx_user. The sentinel __user_list lives in the chat struct
+	 * itself and is freed alongside it below. */
+	if (chat->user_list) {
+		for (user = chat->user_list->next; user; user = unext) {
+			unext = user->next;
+			g_free (user);
+		}
+	}
+	g_free (chat);
+}
+
+void chats_init (session *sess)
+{
+	if (sess->chats)
+		return;
+	sess->chats = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+	                                     NULL, chat_free);
+	/* Public chat (cid=0) must always exist while the table does —
+	 * it's where the server-wide user list lives and where
+	 * top-level chat messages are routed. Create it eagerly so
+	 * chat_with_cid(sess, 0) is always non-NULL. */
+	chat_new (sess, 0);
+}
+
 struct chat *chat_new (session *sess, guint32 cid)
 {
 	struct chat *chat;
 
-	chat = g_malloc0(sizeof(struct chat));
+	chat = g_malloc0 (sizeof (struct chat));
 	chat->cid = cid;
 	chat->user_list = &chat->__user_list;
 	chat->user_tail = &chat->__user_list;
 
-	chat->next = 0;
-	chat->prev = sess->chat_tail;
-	sess->chat_tail->next = chat;
-	sess->chat_tail = chat;
-
+	g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
 	return chat;
 }
 
 void
 chat_delete (session *sess, struct chat *chat)
 {
-	if (chat->next)
-		chat->next->prev = chat->prev;
-	if (chat->prev)
-		chat->prev->next = chat->next;
-	if (sess->chat_tail == chat)
-		sess->chat_tail = chat->prev;
-	if (sess->chat_front == chat)
-		sess->chat_front = &sess->__chat_list;
-	g_free(chat);
+	if (!chat || !sess->chats)
+		return;
+	g_hash_table_remove (sess->chats, GUINT_TO_POINTER (chat->cid));
 }
 
 struct chat *chat_with_cid (session *sess, guint32 cid)
 {
-	struct chat *chatp;
-
-	for (chatp = sess->chat_front; chatp; chatp = chatp->next)
-		if (chatp->cid == cid)
-			return chatp;
-
-	return 0;
+	if (!sess->chats)
+		return NULL;
+	return g_hash_table_lookup (sess->chats, GUINT_TO_POINTER (cid));
 }
 
 struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid)
@@ -706,7 +741,7 @@ nick_comp_chng (session *sess, char *text, int updown)
 		return;
 	len = strlen (nick);
 
-	for(user = sess->chat_front->user_list->next; user; user = user->next)  {
+	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next)  {
 		slen = strlen (user->name);
 		if (len != slen) {
 			last = user;
@@ -739,7 +774,7 @@ tab_nick_comp_next (session *sess, char *b4, char *nick, char *c5, int shift)
 	struct hx_user *user = 0, *last = NULL;
 	char buf[4096];
 
-	for(user = sess->chat_front->user_list->next; user; user = user->next) {
+	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
 		if (strcmp (user->name, nick) == 0)
 			break;
 		last = user;
@@ -758,9 +793,9 @@ tab_nick_comp_next (session *sess, char *b4, char *nick, char *c5, int shift)
 			snprintf (buf, 4096, "%s %s%s", b4, (user->next)->name, c5);
 		}
 		else {
-			if (sess->chat_front->user_list->next) {
+			if (chat_with_cid (sess, 0)->user_list->next) {
 				snprintf (buf, 4096, "%s %s%s", b4, 
-						  (sess->chat_front->user_list->next)->name, c5);
+						  (chat_with_cid (sess, 0)->user_list->next)->name, c5);
 			}
 			else {
 				snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
@@ -848,7 +883,7 @@ static int tab_nick_comp (session *sess, char *text, int shift, int pos,
 		return 0;
 
 	/* make a list of matches */
-	for(user = sess->chat_front->user_list->next; user; user = user->next) {
+	for(user = chat_with_cid (sess, 0)->user_list->next; user; user = user->next) {
 		slen = strlen (user->name);
 		if (len > slen) {
 			continue;
@@ -1253,7 +1288,7 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	(gtk_widget_set_margin_start(vbox, 5), gtk_widget_set_margin_end(vbox, 5), gtk_widget_set_margin_top(vbox, 5), gtk_widget_set_margin_bottom(vbox, 5));
 
 	gchat->subject = gtk_entry_new();
-	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), sess->chat_front->subject);
+	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), chat_with_cid (sess, 0)->subject);
 	subj_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	subj_frame = gtk_frame_new(0);
 	gtkhx_widget_set_child(subj_frame, subj_hbox);
