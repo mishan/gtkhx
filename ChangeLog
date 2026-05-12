@@ -26,6 +26,8 @@
 - GtkHx now uses an event driven architecture
 - Leveraged GLib data types
 - Created GtkHx icon and .desktop file
+- SOCKS support is now available via the system's NetworkManager
+- Systray support via libayatana-appindicator
 
 0.9.4
 -----

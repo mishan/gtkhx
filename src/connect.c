@@ -1046,17 +1046,24 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 		_("Enter the server address. If you have an account, fill in your "
 		  "login and password below; otherwise leave them blank."));
 
+	/* AdwEntryRow / AdwPasswordEntryRow implement GtkEditable but
+	 * are NOT GtkEntries — the GTK_ENTRY() cast fails the type
+	 * check and gtk_entry_set_activates_default emits a Gtk-CRITICAL.
+	 * Adwaita provides its own activates-default property for
+	 * exactly this case. */
 	address_entry = adw_entry_row_new ();
 	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (address_entry),
 	                               _("Server"));
-	gtk_entry_set_activates_default (GTK_ENTRY (address_entry), TRUE);
+	adw_entry_row_set_activates_default (ADW_ENTRY_ROW (address_entry),
+	                                     TRUE);
 	adw_preferences_group_add (server_grp, address_entry);
 
 	port_entry = adw_entry_row_new ();
 	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (port_entry),
 	                               _("Port"));
 	gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
-	gtk_entry_set_activates_default (GTK_ENTRY (port_entry), TRUE);
+	adw_entry_row_set_activates_default (ADW_ENTRY_ROW (port_entry),
+	                                     TRUE);
 	adw_preferences_group_add (server_grp, port_entry);
 
 	gtk_box_append (GTK_BOX (content), GTK_WIDGET (server_grp));
@@ -1068,13 +1075,15 @@ void create_connect_window (GtkWidget *btn, gpointer data)
 	login_entry = adw_entry_row_new ();
 	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (login_entry),
 	                               _("Login"));
-	gtk_entry_set_activates_default (GTK_ENTRY (login_entry), TRUE);
+	adw_entry_row_set_activates_default (ADW_ENTRY_ROW (login_entry),
+	                                     TRUE);
 	adw_preferences_group_add (account_grp, login_entry);
 
 	password_entry = adw_password_entry_row_new ();
 	adw_preferences_row_set_title (ADW_PREFERENCES_ROW (password_entry),
 	                               _("Password"));
-	gtk_entry_set_activates_default (GTK_ENTRY (password_entry), TRUE);
+	adw_entry_row_set_activates_default (ADW_ENTRY_ROW (password_entry),
+	                                     TRUE);
 	adw_preferences_group_add (account_grp, password_entry);
 
 	gtk_box_append (GTK_BOX (content), GTK_WIDGET (account_grp));

@@ -59,6 +59,27 @@ finish-args:
   # anywhere outside the app's private $XDG_DATA_HOME.
   - --filesystem=xdg-download
 
+  # Tray icon support (src/tray.c). We implement
+  # StatusNotifierItem + DBusMenu directly over GDBus rather than
+  # depending on libayatana-appindicator, so there's no extra
+  # module in this manifest. The two D-Bus permissions below are
+  # needed because Flatpak's default policy only lets us own
+  # names under our app-id prefix:
+  #
+  #   - own-name: each SNI app registers a unique name shaped
+  #     "org.kde.StatusNotifierItem-<pid>-1". The wildcard covers
+  #     any PID. Without this, g_bus_own_name returns NameLost
+  #     behind xdg-dbus-proxy and the tray icon never appears.
+  #
+  #   - talk-name: we call RegisterStatusNotifierItem on the
+  #     watcher (KDE Plasma's kded, GNOME's AppIndicator
+  #     extension, MATE/Cinnamon/Budgie's panel applet,
+  #     waybar's tray module, etc.). Without it the proxy call
+  #     returns AccessDenied and the icon registers locally but
+  #     never reaches a host.
+  - --own-name=org.kde.StatusNotifierItem-*
+  - --talk-name=org.kde.StatusNotifierWatcher
+
 modules:
   # libcanberra — gsound's audio backend. Last upstream release
   # is 0.30 from 2012; no successor has shipped because the API

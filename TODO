@@ -5,12 +5,7 @@ System Notifications:
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
-- System tray support -- can it hide/restore all the GtkHx windows? That would be neat!
 - Publish to Flathub
-
-Network:
-- Finish rewrite of any remaining network code -- tracker, etc.?
-- SOCKS support -- do we basically get this for free with GSocketClient?
 
 Files:
 - Make the UI cleaner
