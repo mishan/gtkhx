@@ -29,6 +29,7 @@
  */
 
 #include "gtk_hlist_compat.h"
+#include "debug.h"
 
 #include <string.h>
 
@@ -156,6 +157,357 @@ refresh_row_count (GtkHList *hlist)
 	hlist->rows = priv ?
 		gtk_tree_model_iter_n_children (GTK_TREE_MODEL (priv->store), NULL)
 		: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Custom overlay cell renderer                                        */
+/*                                                                     */
+/* GtkCellRenderer subclass that paints the pixbuf at the column's    */
+/* left edge at its NATURAL width and draws the text on top at a       */
+/* fixed x offset. Used by the user list to keep names aligned         */
+/* regardless of icon width — wide icons (Hotline banner icons) act    */
+/* as a row background instead of pushing names rightward.             */
+/*                                                                     */
+/* GtkTreeView's standard pack_start (pixbuf FALSE) + pack_start       */
+/* (text TRUE) layout can't do this — the text renderer's allocation   */
+/* starts where the pixbuf renderer's ends, and pixbufs render only    */
+/* within their allocated cell area. We replace both renderers with    */
+/* a single instance of this class for the affected column.            */
+/* ------------------------------------------------------------------ */
+
+#define GTK_TYPE_HLIST_OVERLAY_CELL (gtk_hlist_overlay_cell_get_type ())
+G_DECLARE_FINAL_TYPE (GtkHListOverlayCell, gtk_hlist_overlay_cell,
+                      GTK, HLIST_OVERLAY_CELL, GtkCellRenderer)
+
+struct _GtkHListOverlayCell {
+	GtkCellRenderer parent_instance;
+	GdkPixbuf *pixbuf;
+	gchar     *text;
+	gchar     *foreground;
+	gboolean   foreground_set;
+	gint       text_x_offset;
+	/* Number of fully-transparent columns at the pixbuf's left edge.
+	 * Mac wide-banner cicns are authored for icon-at-left + name-to-
+	 * right layout, with the visible banner art packed in the right
+	 * half of the image and the left half left transparent for the
+	 * name area. For our overlay layout we shift the pixbuf left by
+	 * this amount so the visible art lines up with the cell's left
+	 * edge (where the name overlays it). Computed when the pixbuf
+	 * property is set. */
+	gint       left_pad;
+};
+
+G_DEFINE_TYPE (GtkHListOverlayCell, gtk_hlist_overlay_cell,
+               GTK_TYPE_CELL_RENDERER)
+
+enum {
+	OV_PROP_0,
+	OV_PROP_PIXBUF,
+	OV_PROP_TEXT,
+	OV_PROP_FOREGROUND,
+	OV_PROP_FOREGROUND_SET,
+	OV_PROP_TEXT_X_OFFSET,
+	OV_N_PROPS
+};
+
+static GParamSpec *ov_props[OV_N_PROPS];
+
+static void
+gtk_hlist_overlay_cell_init (GtkHListOverlayCell *self)
+{
+	self->pixbuf         = NULL;
+	self->text           = NULL;
+	self->foreground     = NULL;
+	self->foreground_set = FALSE;
+	self->text_x_offset  = 4;
+	self->left_pad       = 0;
+}
+
+/* Mac wide-banner cicn icons follow a community convention: the
+ * first ~200 pixels of the bitmap are reserved for the user-name
+ * area (Mac classic drew the user name immediately to the right
+ * of the icon, so for a wide "banner-style" icon the designer
+ * left that left portion blank — either by leaving it
+ * transparent via the mask, or filling it with opaque black) and
+ * the actual banner art lives in the right portion of the
+ * bitmap. The offset is consistent across icon sets because
+ * everyone authored against the same Mac-Hotline reference
+ * layout.
+ *
+ * For our overlay layout (name at fixed x with icon BEHIND it)
+ * we want the banner art to sit behind the name, not floating
+ * off the right edge of the column. Cropping the bitmap's left
+ * ~200 px and drawing the rest from the cell's left edge does
+ * exactly that.
+ *
+ * Empirically a fixed crop matches all the wide-banner icons we
+ * have seen (Badmoon's set: jokki.-style mask-based and
+ * SkAtE!@/Bouncer/heavy_early-style no-mask black-filled both
+ * use the same convention). No-op for narrow icons. */
+#define WIDE_BANNER_THRESHOLD 48     /* px — anything narrower is a normal icon */
+#define WIDE_BANNER_LEFT_PAD  200    /* px to crop off the left of wide banners */
+
+static gint
+compute_left_padding (GdkPixbuf *pb)
+{
+	int w;
+	if (!pb)
+		return 0;
+	w = gdk_pixbuf_get_width (pb);
+	if (w < WIDE_BANNER_THRESHOLD)
+		return 0;
+	return MIN (WIDE_BANNER_LEFT_PAD, w);
+}
+
+static void
+gtk_hlist_overlay_cell_finalize (GObject *object)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) object;
+	g_clear_object (&self->pixbuf);
+	g_clear_pointer (&self->text, g_free);
+	g_clear_pointer (&self->foreground, g_free);
+	G_OBJECT_CLASS (gtk_hlist_overlay_cell_parent_class)->finalize (object);
+}
+
+static void
+gtk_hlist_overlay_cell_get_property (GObject *object, guint prop_id,
+                                     GValue *value, GParamSpec *pspec)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) object;
+	switch (prop_id) {
+	case OV_PROP_PIXBUF:         g_value_set_object  (value, self->pixbuf); break;
+	case OV_PROP_TEXT:           g_value_set_string  (value, self->text); break;
+	case OV_PROP_FOREGROUND:     g_value_set_string  (value, self->foreground); break;
+	case OV_PROP_FOREGROUND_SET: g_value_set_boolean (value, self->foreground_set); break;
+	case OV_PROP_TEXT_X_OFFSET:  g_value_set_int     (value, self->text_x_offset); break;
+	default: G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+	}
+}
+
+static void
+gtk_hlist_overlay_cell_set_property (GObject *object, guint prop_id,
+                                     const GValue *value, GParamSpec *pspec)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) object;
+	switch (prop_id) {
+	case OV_PROP_PIXBUF:
+		g_clear_object (&self->pixbuf);
+		self->pixbuf = (GdkPixbuf *) g_value_dup_object (value);
+		self->left_pad = compute_left_padding (self->pixbuf);
+		break;
+	case OV_PROP_TEXT:
+		g_free (self->text);
+		self->text = g_value_dup_string (value);
+		break;
+	case OV_PROP_FOREGROUND:
+		g_free (self->foreground);
+		self->foreground = g_value_dup_string (value);
+		break;
+	case OV_PROP_FOREGROUND_SET:
+		self->foreground_set = g_value_get_boolean (value);
+		break;
+	case OV_PROP_TEXT_X_OFFSET:
+		self->text_x_offset = g_value_get_int (value);
+		break;
+	default: G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+	}
+}
+
+static PangoLayout *
+gtk_hlist_overlay_cell_make_layout (GtkHListOverlayCell *self,
+                                    GtkWidget           *widget)
+{
+	PangoLayout *layout = gtk_widget_create_pango_layout (widget,
+	                                                      self->text ? self->text : "");
+	pango_layout_set_single_paragraph_mode (layout, TRUE);
+	pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_END);
+	return layout;
+}
+
+static void
+gtk_hlist_overlay_cell_get_preferred_width (GtkCellRenderer *cell,
+                                            GtkWidget       *widget,
+                                            gint            *minimum,
+                                            gint            *natural)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) cell;
+	int txt_w = 0;
+	if (self->text && *self->text) {
+		PangoLayout *layout = gtk_hlist_overlay_cell_make_layout (self, widget);
+		pango_layout_get_pixel_size (layout, &txt_w, NULL);
+		g_object_unref (layout);
+	}
+	/* Deliberately *do not* report the pixbuf width as natural: this
+	 * is an overlay cell, the pixbuf renders inside whatever
+	 * cell_area we are given (and is clipped to it in snapshot).
+	 * If we reported pb_w here, GtkCellArea would expand cell_area
+	 * to the pixbuf's full width — overriding the column's fixed
+	 * width — and the snapshot's push_clip would then be a 400+px
+	 * rectangle that doesn't actually clip the wide-banner pixbuf
+	 * back inside the column. */
+	int natural_w = self->text_x_offset + txt_w;
+	if (minimum) *minimum = self->text_x_offset + 16; /* a reasonable floor */
+	if (natural) *natural = natural_w;
+}
+
+static void
+gtk_hlist_overlay_cell_get_preferred_height (GtkCellRenderer *cell,
+                                             GtkWidget       *widget,
+                                             gint            *minimum,
+                                             gint            *natural)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) cell;
+	int pb_h = self->pixbuf ? gdk_pixbuf_get_height (self->pixbuf) : 0;
+	int txt_h = 0;
+	if (self->text && *self->text) {
+		PangoLayout *layout = gtk_hlist_overlay_cell_make_layout (self, widget);
+		pango_layout_get_pixel_size (layout, NULL, &txt_h);
+		g_object_unref (layout);
+	}
+	int h = MAX (pb_h, txt_h);
+	if (minimum) *minimum = h;
+	if (natural) *natural = h;
+}
+
+static void
+gtk_hlist_overlay_cell_snapshot (GtkCellRenderer      *cell,
+                                 GtkSnapshot          *snapshot,
+                                 GtkWidget            *widget,
+                                 const GdkRectangle   *background_area,
+                                 const GdkRectangle   *cell_area,
+                                 GtkCellRendererState  flags)
+{
+	GtkHListOverlayCell *self = (GtkHListOverlayCell *) cell;
+	GtkTreeViewColumn *col;
+	int col_width;
+	int clip_x, clip_w;
+	(void) flags;
+
+	/* GtkTreeView in GTK 4 passes a cell_area / background_area that
+	 * starts at the column's left edge but extends to the *end of
+	 * the row*, not to the column's right edge. We need the column's
+	 * actual fixed width to clip the wide-banner pixbuf back inside
+	 * the column boundary. Look up the column from the data we
+	 * stashed on the renderer at install time. */
+	col = (GtkTreeViewColumn *) g_object_get_data (G_OBJECT (cell),
+	                                               "hlist-overlay-col");
+	col_width = col ? gtk_tree_view_column_get_width (col) : cell_area->width;
+	clip_x = cell_area->x;
+	clip_w = MIN (cell_area->width, col_width);
+
+	debug_log ("overlay",
+	           "snapshot: cell=(%d,%d %dx%d) bg=(%d,%d %dx%d) "
+	           "col_w=%d clip=(%d,%d) pb=%s pb_w=%d lpad=%d "
+	           "text=\"%s\" xoff=%d",
+	           cell_area->x, cell_area->y,
+	           cell_area->width, cell_area->height,
+	           background_area->x, background_area->y,
+	           background_area->width, background_area->height,
+	           col_width, clip_x, clip_w,
+	           self->pixbuf ? "yes" : "no",
+	           self->pixbuf ? gdk_pixbuf_get_width (self->pixbuf) : 0,
+	           self->left_pad,
+	           self->text ? self->text : "(null)",
+	           self->text_x_offset);
+
+	gtk_snapshot_push_clip (snapshot,
+	                        &GRAPHENE_RECT_INIT ((float) clip_x,
+	                                             (float) cell_area->y,
+	                                             (float) clip_w,
+	                                             (float) cell_area->height));
+
+	if (self->pixbuf) {
+		int pb_w = gdk_pixbuf_get_width  (self->pixbuf);
+		int pb_h = gdk_pixbuf_get_height (self->pixbuf);
+		int draw_x, draw_y;
+		GdkTexture *tex;
+
+		/* Shift the pixbuf left by its transparent left-padding so
+		 * the first column with visible content lands at the cell's
+		 * left edge. Mac wide-banner cicns are authored with the
+		 * art packed in the right half of the bitmap and the left
+		 * half left transparent for the user name (Mac-classic
+		 * icon-then-name layout). Cropping that padding off the
+		 * left and letting the push_clip above trim anything that
+		 * still spills off the right gives us the banner sitting
+		 * behind the name with the name at its fixed offset. */
+		draw_x = clip_x - self->left_pad;
+		draw_y = cell_area->y + (cell_area->height - pb_h) / 2;
+
+		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+		tex = gdk_texture_new_for_pixbuf (self->pixbuf);
+		G_GNUC_END_IGNORE_DEPRECATIONS
+
+		gtk_snapshot_save (snapshot);
+		gtk_snapshot_translate (snapshot,
+		                        &GRAPHENE_POINT_INIT ((float) draw_x,
+		                                              (float) draw_y));
+		gtk_snapshot_append_texture (snapshot,
+		                             tex,
+		                             &GRAPHENE_RECT_INIT (0, 0, pb_w, pb_h));
+		gtk_snapshot_restore (snapshot);
+		g_object_unref (tex);
+	}
+
+	/* Text at fixed x offset on top of the pixbuf. */
+	if (self->text && *self->text) {
+		PangoLayout *layout = gtk_hlist_overlay_cell_make_layout (self, widget);
+		int tw, th;
+		GdkRGBA rgba = { 0, 0, 0, 1 };
+		gboolean have_rgba = FALSE;
+
+		pango_layout_get_pixel_size (layout, &tw, &th);
+		/* Clamp ellipsize width so we don't overflow the column. */
+		pango_layout_set_width (layout,
+		                        (clip_w - self->text_x_offset) * PANGO_SCALE);
+
+		if (self->foreground_set && self->foreground)
+			have_rgba = gdk_rgba_parse (&rgba, self->foreground);
+		if (!have_rgba) {
+			GtkStyleContext *ctx = gtk_widget_get_style_context (widget);
+			G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+			gtk_style_context_get_color (ctx, &rgba);
+			G_GNUC_END_IGNORE_DEPRECATIONS
+		}
+
+		gtk_snapshot_save (snapshot);
+		gtk_snapshot_translate (snapshot,
+		                        &GRAPHENE_POINT_INIT ((float) (cell_area->x + self->text_x_offset),
+		                                              (float) (cell_area->y + (cell_area->height - th) / 2)));
+		gtk_snapshot_append_layout (snapshot, layout, &rgba);
+		gtk_snapshot_restore (snapshot);
+		g_object_unref (layout);
+	}
+
+	gtk_snapshot_pop (snapshot);
+}
+
+static void
+gtk_hlist_overlay_cell_class_init (GtkHListOverlayCellClass *klass)
+{
+	GObjectClass         *object_class = G_OBJECT_CLASS (klass);
+	GtkCellRendererClass *cell_class   = GTK_CELL_RENDERER_CLASS (klass);
+
+	object_class->finalize     = gtk_hlist_overlay_cell_finalize;
+	object_class->get_property = gtk_hlist_overlay_cell_get_property;
+	object_class->set_property = gtk_hlist_overlay_cell_set_property;
+
+	cell_class->snapshot              = gtk_hlist_overlay_cell_snapshot;
+	cell_class->get_preferred_width   = gtk_hlist_overlay_cell_get_preferred_width;
+	cell_class->get_preferred_height  = gtk_hlist_overlay_cell_get_preferred_height;
+
+	ov_props[OV_PROP_PIXBUF] = g_param_spec_object (
+		"pixbuf", NULL, NULL, GDK_TYPE_PIXBUF, G_PARAM_READWRITE);
+	ov_props[OV_PROP_TEXT] = g_param_spec_string (
+		"text", NULL, NULL, NULL, G_PARAM_READWRITE);
+	ov_props[OV_PROP_FOREGROUND] = g_param_spec_string (
+		"foreground", NULL, NULL, NULL, G_PARAM_READWRITE);
+	ov_props[OV_PROP_FOREGROUND_SET] = g_param_spec_boolean (
+		"foreground-set", NULL, NULL, FALSE, G_PARAM_READWRITE);
+	ov_props[OV_PROP_TEXT_X_OFFSET] = g_param_spec_int (
+		"text-x-offset", NULL, NULL, 0, G_MAXINT, 4, G_PARAM_READWRITE);
+
+	g_object_class_install_properties (object_class, OV_N_PROPS, ov_props);
 }
 
 static GdkPixbuf *
@@ -522,6 +874,44 @@ gtk_hlist_set_pixtext (GtkHList *hlist, gint row, gint column,
 	                    -1);
 	if (pb)
 		g_object_unref (pb);
+}
+
+void
+gtk_hlist_column_set_overlay_pixtext (GtkHList *hlist, gint column,
+                                      gint text_x_offset)
+{
+	GtkHListPrivate    *priv;
+	GtkTreeViewColumn  *col;
+	GtkCellRenderer    *cell;
+
+	g_return_if_fail (GTK_IS_HLIST (hlist));
+	priv = get_priv (hlist);
+	if (column < 0 || column >= priv->n_columns)
+		return;
+	col = gtk_tree_view_get_column (GTK_TREE_VIEW (hlist), column);
+	if (!col)
+		return;
+
+	/* Clear the column's existing renderers (pack_start pixbuf +
+	 * pack_start text installed by gtk_hlist constructor) so we can
+	 * replace them with the overlay cell. */
+	gtk_cell_layout_clear (GTK_CELL_LAYOUT (col));
+
+	cell = g_object_new (GTK_TYPE_HLIST_OVERLAY_CELL,
+	                     "text-x-offset", text_x_offset,
+	                     NULL);
+	/* Stash the column so the snapshot vfunc can read its width —
+	 * GtkTreeView's cell_area in GTK 4 extends to the row's right
+	 * edge, not the column's, so we can't derive the column width
+	 * from anything the framework hands the renderer. */
+	g_object_set_data (G_OBJECT (cell), "hlist-overlay-col", col);
+	gtk_tree_view_column_pack_start (col, cell, TRUE);
+	gtk_tree_view_column_set_attributes (col, cell,
+		"pixbuf",         HLIST_COL_PIXBUF (priv->n_columns, column),
+		"text",           HLIST_COL_TEXT (column),
+		"foreground",     HLIST_COL_FG,
+		"foreground-set", HLIST_COL_FG_SET,
+		NULL);
 }
 
 void

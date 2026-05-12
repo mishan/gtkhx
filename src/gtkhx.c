@@ -607,12 +607,30 @@ char *colorstr (guint16 color)
 /* Phase 5: scan a directory for *.rsrc files and append each one to
  * a GPtrArray of full paths. Skips entries whose path is already in
  * the array, so the same file showing up in both $CONFIG/icons and
- * the system data dir doesn't get loaded twice. */
+ * the system data dir doesn't get loaded twice.
+ *
+ * Per-directory entries are sorted by base name (g_utf8_collate)
+ * before being appended, so the load order — and therefore the
+ * lookup precedence in load_icon's first-match-wins walk — is
+ * deterministic and matches what the user sees alphabetically in
+ * the directory. The cross-directory priority order is preserved
+ * by init_icons calling this function in the right sequence
+ * ($CONFIG/icons first, then XDG, then PREFIX). */
+static gint
+collect_rsrc_cmp_basename (gconstpointer a, gconstpointer b)
+{
+	const char *na = *(const char * const *) a;
+	const char *nb = *(const char * const *) b;
+	return g_utf8_collate (na, nb);
+}
+
 static void
 collect_rsrc_files (GPtrArray *out, const char *dir)
 {
 	GDir *d;
 	const char *name;
+	GPtrArray *names;
+	guint i;
 
 	if (!dir || !*dir)
 		return;
@@ -620,17 +638,25 @@ collect_rsrc_files (GPtrArray *out, const char *dir)
 	if (!d)
 		return;
 
+	names = g_ptr_array_new_with_free_func (g_free);
 	while ((name = g_dir_read_name (d))) {
-		char *path;
-		guint i;
-		gboolean dup = FALSE;
-
 		if (!g_str_has_suffix (name, ".rsrc"))
 			continue;
+		g_ptr_array_add (names, g_strdup (name));
+	}
+	g_dir_close (d);
 
-		path = g_build_filename (dir, name, NULL);
-		for (i = 0; i < out->len; i++) {
-			if (g_strcmp0 (g_ptr_array_index (out, i), path) == 0) {
+	g_ptr_array_sort (names, collect_rsrc_cmp_basename);
+
+	for (i = 0; i < names->len; i++) {
+		char *path;
+		guint j;
+		gboolean dup = FALSE;
+
+		path = g_build_filename (dir, g_ptr_array_index (names, i),
+		                         NULL);
+		for (j = 0; j < out->len; j++) {
+			if (g_strcmp0 (g_ptr_array_index (out, j), path) == 0) {
 				dup = TRUE;
 				break;
 			}
@@ -641,7 +667,7 @@ collect_rsrc_files (GPtrArray *out, const char *dir)
 			g_ptr_array_add (out, path);
 	}
 
-	g_dir_close (d);
+	g_ptr_array_free (names, TRUE);
 }
 
 void init_icons (void)

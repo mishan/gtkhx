@@ -119,8 +119,19 @@ static void parse_tracker (session *);
 struct icon_viewer {
 	guint32 icon_high;
 	unsigned int nfound;
-	GtkWidget *icon_list; /* Phase 5: now a GtkFlowBox, not a GtkHList */
+	GtkWidget *icon_list;      /* multi-column flowbox for narrow icons */
+	GtkWidget *wide_list;      /* one-per-row flowbox for wide banners */
 };
+
+/* A wide cicn (Mac banner-style icon) is anything wider than this
+ * before the WIDE_BANNER_LEFT_PAD crop. Same threshold the user-list
+ * overlay uses. Wide entries go into the dedicated single-column
+ * flowbox so the user sees them at their natural aspect ratio
+ * (~432x32 cropped to ~232x32 then scaled to fill the row) rather
+ * than squashed into the 56x56 grid cell used for normal icons. */
+#define ICON_PICKER_WIDE_THRESHOLD 400
+#define ICON_PICKER_WIDE_CROP      198
+#define ICON_PICKER_WIDE_HEIGHT    32  /* match cicn native vertical pixel count */
 
 /* Phase 5: forward declarations for the icon-picker FlowBox helpers.
  * The implementations live further down (after struct cfgvar and
@@ -176,24 +187,33 @@ static void list_icons (void)
 			}
 			width  = gdk_pixbuf_get_width (pb);
 			height = gdk_pixbuf_get_height (pb);
-			off = width > 400 ? 198 : 0;
+			gboolean is_wide = (width > ICON_PICKER_WIDE_THRESHOLD);
+			off = is_wide ? ICON_PICKER_WIDE_CROP : 0;
 			if (off) {
 				cropped = gdk_pixbuf_new_subpixbuf (pb, off, 0,
 				                                   width - off, height);
 				g_object_unref (pb);
 				pb = cropped;
+				width -= off;
 			}
 
-			/* Scale to a uniform display size — the source pixbufs
-			 * vary (16x16, 32x32, sometimes wider) and the picker
-			 * looks sloppy if some entries are tiny next to others.
-			 * Nearest-neighbor preserves the pixel-art look on
-			 * scale-up; 56px is a comfortable middle ground between
-			 * the legacy ~34px (too small) and 96px (too dominant).
-			 * Hits a tidy 3.5x of 16px and 1.75x of 32px sources —
-			 * the slight non-integer scale isn't perfectly crisp but
-			 * is fine for a thumbnail at this size. */
-			scaled = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
+			/* Narrow icons → uniform 56x56 thumbnail for the grid.
+			 * Wide banners → preserve aspect ratio (scale to a row-
+			 * height of 56 and proportional width) so the banner
+			 * art is recognisable instead of being squashed into a
+			 * square cell. */
+			if (is_wide) {
+				int target_h = 56;
+				int target_w = width * target_h / (height > 0 ? height : 1);
+				if (target_w < 1) target_w = 1;
+				scaled = gdk_pixbuf_scale_simple (pb, target_w, target_h,
+				                                  GDK_INTERP_NEAREST);
+			} else {
+				/* Nearest-neighbor preserves pixel-art look at
+				 * 3.5x of 16px / 1.75x of 32px sources. */
+				scaled = gdk_pixbuf_scale_simple (pb, 56, 56,
+				                                  GDK_INTERP_NEAREST);
+			}
 			g_object_unref (pb);
 			pb = scaled ? scaled : pb;
 
@@ -231,7 +251,12 @@ static void list_icons (void)
 			gtk_flow_box_child_set_child (GTK_FLOW_BOX_CHILD (child), vbox);
 			g_object_set_data (G_OBJECT (child), "resid",
 			                   GUINT_TO_POINTER (r->resid));
-			gtk_flow_box_append (GTK_FLOW_BOX (icon_list), child);
+			/* Wide banners go into their own dedicated flowbox so
+			 * they show one-per-row at natural aspect ratio. */
+			if (is_wide && iv->wide_list)
+				gtk_flow_box_append (GTK_FLOW_BOX (iv->wide_list), child);
+			else
+				gtk_flow_box_append (GTK_FLOW_BOX (icon_list), child);
 
 			g_object_unref (pb);
 			g_free (r);
@@ -246,8 +271,11 @@ static void list_icons (void)
 			}
 		}
 	}
-	if (nfound >= 2)
+	if (nfound >= 2) {
 		gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (icon_list));
+		if (iv->wide_list)
+			gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (iv->wide_list));
+	}
 }
 
 
@@ -1827,7 +1855,7 @@ static void settings_page_chat (AdwPreferencesPage *page)
 static void settings_page_identity (AdwPreferencesPage *page)
 {
 	AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
-	GtkWidget *picker_row, *vbox, *scroll, *icon_list;
+	GtkWidget *picker_row, *vbox, *scroll, *icon_list, *wide_list;
 
 	/* Phase 5: g_malloc0 — zero-fill the struct so any read of
 	 * iv->icon_list / nfound / icon_high before they're set later in
@@ -1865,28 +1893,55 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
 	                                GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-	/* Phase 5: picker height tuned to ~3 rows of 56px icons + their
-	 * labels visible at a time. Was 460 at 96px icons (too dominant);
-	 * 320 at 56px keeps the picker present without taking over the
-	 * page. */
-	gtk_widget_set_size_request (scroll, -1, 320);
+	/* Picker height tuned to ~3 rows of 56px icons + their labels
+	 * visible at a time, plus a little extra for the wide-banner
+	 * area below the narrow grid. */
+	gtk_widget_set_size_request (scroll, -1, 380);
 
-	icon_list = gtk_flow_box_new ();
-	gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
-	                                 GTK_SELECTION_SINGLE);
-	gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
-	/* Two columns minimum, four maximum. With 56px icons, four
-	 * columns fits comfortably in the typical settings dialog
-	 * width without horizontal cramming. */
-	gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
-	gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
-	gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (icon_list), 4);
-	gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
-	gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
-	                            icon_picker_sort_cb, NULL, NULL);
-	g_signal_connect (icon_list, "child-activated",
-	                  G_CALLBACK (icon_flow_child_activated), iv);
-	gtkhx_widget_set_child (scroll, icon_list);
+	/* Two flowboxes share one scrolled window so the picker reads
+	 * as a single unified list: the multi-column grid for narrow
+	 * icons sits on top, the one-per-row strip of wide banner
+	 * icons sits directly under it inside the same scroll area. */
+	{
+		GtkWidget *picker_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+
+		icon_list = gtk_flow_box_new ();
+		gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
+		                                 GTK_SELECTION_SINGLE);
+		gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
+		/* Two columns minimum, four maximum. With 56px icons, four
+		 * columns fits comfortably in the typical settings dialog
+		 * width without horizontal cramming. */
+		gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
+		gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
+		gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (icon_list), 4);
+		gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
+		gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
+		                            icon_picker_sort_cb, NULL, NULL);
+		g_signal_connect (icon_list, "child-activated",
+		                  G_CALLBACK (icon_flow_child_activated), iv);
+
+		wide_list = gtk_flow_box_new ();
+		gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (wide_list),
+		                                 GTK_SELECTION_SINGLE);
+		/* homogeneous=FALSE so each child keeps the banner's natural
+		 * scaled width; 1/1 children per line forces one banner per
+		 * row regardless of available width. */
+		gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (wide_list), FALSE);
+		gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (wide_list), 1);
+		gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (wide_list), 1);
+		gtk_flow_box_set_row_spacing    (GTK_FLOW_BOX (wide_list), 4);
+		gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (wide_list), 4);
+		gtk_flow_box_set_sort_func (GTK_FLOW_BOX (wide_list),
+		                            icon_picker_sort_cb, NULL, NULL);
+		g_signal_connect (wide_list, "child-activated",
+		                  G_CALLBACK (icon_flow_child_activated), iv);
+
+		gtk_box_append (GTK_BOX (picker_box), icon_list);
+		gtk_box_append (GTK_BOX (picker_box), wide_list);
+
+		gtkhx_widget_set_child (scroll, picker_box);
+	}
 	gtk_box_append (GTK_BOX (vbox), scroll);
 
 	picker_row = adw_preferences_row_new ();
@@ -1896,6 +1951,7 @@ static void settings_page_identity (AdwPreferencesPage *page)
 	adw_preferences_group_add (picker_grp, picker_row);
 
 	iv->icon_list = icon_list;
+	iv->wide_list = wide_list;
 	iv->nfound = 0;
 	iv->icon_high = 0;
 

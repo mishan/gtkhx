@@ -2,6 +2,16 @@ New Hotline Features:
 - Banner support (integrate into Toolbar?)
   + For the banner feature, let's practice some test driven development. I would like the testing mhxd container to serve a banner, and an integration test to verify that the banner being served is the one that is expected. 
 
+System Notifications:
+- Support system notifications
+
+Chat:
+- Better formatting (use <nick> instead of nick:)
+- Draggable separator between names and text, just like HexChat has
+- Better line/word wrap handling
+- Make input box shorter in height by default. It should expand to multi line input as necessary
+- Highlight name on mention, support additional highlight words in config
+
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 
