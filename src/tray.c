@@ -492,8 +492,14 @@ menu_method_call (GDBusConnection *conn,
 		gint32 id;
 		const char *event_id;
 
-		g_variant_get (params, "(i&sva{sv}u)",
-		               &id, &event_id, NULL, NULL, NULL);
+		/* Spec: Event(IN i id, IN s eventId, IN v data,
+		 * IN u timestamp). The previous '(i&sva{sv}u)' had a
+		 * stray a{sv} between the variant and the timestamp;
+		 * g_variant_get hit the type mismatch and bailed before
+		 * extracting event_id, so every click was silently
+		 * ignored. */
+		g_variant_get (params, "(i&svu)",
+		               &id, &event_id, NULL, NULL);
 		if (g_strcmp0 (event_id, "clicked") == 0) {
 			switch (id) {
 			case MENU_SHOWHIDE:
