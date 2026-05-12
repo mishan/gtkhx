@@ -280,13 +280,15 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 #endif
 #ifdef CONFIG_COMPRESS
 	if (htlc->compress_encode_type != COMPRESS_NONE) {
-		hx_printf_prefix(htlc, 0, INFOPREFIX, "GZIP deflate: in: %u  out: %u\n",
-				 htlc->gzip_deflate_total_in, htlc->gzip_deflate_total_out);
+		hx_printf_prefix(htlc, 0, INFOPREFIX, "GZIP deflate: in: %lu  out: %lu\n",
+				 (unsigned long) htlc->gzip_deflate_total_in,
+				 (unsigned long) htlc->gzip_deflate_total_out);
 		compress_encode_end(htlc);
 	}
 	if (htlc->compress_decode_type != COMPRESS_NONE) {
-		hx_printf_prefix(htlc, 0, INFOPREFIX, "GZIP inflate: in: %u  out: %u\n",
-				 htlc->gzip_inflate_total_in, htlc->gzip_inflate_total_out);
+		hx_printf_prefix(htlc, 0, INFOPREFIX, "GZIP inflate: in: %lu  out: %lu\n",
+				 (unsigned long) htlc->gzip_inflate_total_in,
+				 (unsigned long) htlc->gzip_inflate_total_out);
 		compress_decode_end(htlc);
 	}
 	memset(&htlc->compress_encode_state, 0, sizeof(htlc->compress_encode_state));
@@ -442,7 +444,7 @@ static void htlc_read (int fd)
 	} 
 	r = read(fd, &in->buf[in->pos], READ_BUFSIZE-in->len);
 	if (r == 0 || (r < 0 && errno != EWOULDBLOCK && errno != EINTR)) {
-		hx_printf_prefix(htlc, 0, INFOPREFIX, "htlc_read: %d %s\n", r, strerror(errno));
+		hx_printf_prefix(htlc, 0, INFOPREFIX, "htlc_read: %zd %s\n", (ssize_t) r, strerror(errno));
 		hx_htlc_close(htlc, 0);
 	}
 	else {
@@ -482,7 +484,7 @@ static void htlc_write (int fd)
 
 	r = write(fd, &htlc->out.buf[htlc->out.pos], htlc->out.len);
 	if (r == 0 || (r < 0 && errno != EWOULDBLOCK && errno != EINTR)) {
-		hx_printf_prefix(htlc, 0, INFOPREFIX, "htlc_write: %d %s\n", r, strerror(errno));
+		hx_printf_prefix(htlc, 0, INFOPREFIX, "htlc_write: %zd %s\n", (ssize_t) r, strerror(errno));
 		hx_htlc_close(htlc, 0);
 	}
 	else {

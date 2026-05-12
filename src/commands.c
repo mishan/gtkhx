@@ -618,5 +618,5 @@ void hx_command (char *str, guint32 cid)
 	} while (cmd <= last_command && cmd->name[0] == *str);
 
   notfound:
-	hx_printf_prefix(&the_session.htlc, cid, INFOPREFIX, "%.*s: command not found\n", p - str, str);
+	hx_printf_prefix(&the_session.htlc, cid, INFOPREFIX, "%.*s: command not found\n", (int)(p - str), str);
 }

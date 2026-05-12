@@ -20,8 +20,19 @@ extern struct chat *chat_with_cid (session *sess, guint32 cid);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
 extern void xprintline(GtkWidget *text, char *chat, size_t len);
-extern void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid, const char *prefix, const char *fmt, ...);
-extern void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt, ...);
+/* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
+ * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
+ * pull the decls in (chat.h forwards the include for source
+ * compat with the existing call sites that include chat.h). */
+#include "gtkhx_log.h"
+
+/* The view-side handler for the "chat-log-line" signal. Connected
+ * once in gtkhx_connect_signals at startup; the implementation
+ * (xoutput_chat fan-out) lives in chat.c. */
+struct _GtkhxSession; typedef struct _GtkhxSession GtkhxSession;
+extern void chat_log_line_handler (GtkhxSession *emitter,
+                                   struct htlc_conn *htlc, guint cid,
+                                   gpointer body, gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
 extern void create_chat (session *sess);
 extern void create_chat_window (GtkWidget *widget, gpointer data);

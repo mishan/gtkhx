@@ -58,6 +58,7 @@ enum {
 	SIGNAL_XFER_QUEUE,
 	SIGNAL_TRACKER_SERVER_CREATE,
 	SIGNAL_TASK_UPDATE,
+	SIGNAL_CHAT_LOG_LINE,
 	SIGNAL_LAST
 };
 
@@ -268,6 +269,17 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		NULL, NULL, NULL,
 		G_TYPE_NONE, 2,
 		G_TYPE_POINTER, G_TYPE_POINTER);
+
+	/* "chat-log-line" — show this already-formatted string in
+	 * chat `cid`'s output. The body is owned by the emitter for
+	 * the duration of the emit (so no buffer ownership transfer
+	 * through the signal). */
+	signals[SIGNAL_CHAT_LOG_LINE] = g_signal_new (
+		"chat-log-line",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
 }
 
 GtkhxSession *
@@ -475,4 +487,13 @@ gtkhx_session_emit_task_update (GtkhxSession *self,
                                 struct task *tsk)
 {
 	g_signal_emit (self, signals[SIGNAL_TASK_UPDATE], 0, sess, tsk);
+}
+
+void
+gtkhx_session_emit_chat_log_line (GtkhxSession *self,
+                                  struct htlc_conn *htlc,
+                                  guint32 cid, const char *body)
+{
+	g_signal_emit (self, signals[SIGNAL_CHAT_LOG_LINE], 0,
+	               htlc, cid, body);
 }

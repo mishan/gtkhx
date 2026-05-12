@@ -157,6 +157,15 @@ void gtkhx_session_emit_task_update (GtkhxSession *self,
                                      session *sess,
                                      struct task *tsk);
 
+/* chat-log-line — "show this string in chat `cid`'s output". The
+ * payload is already fully formatted text (post-vsnprintf).
+ * gtkhx_log.{c,h} wraps this in printf-style helpers
+ * (hx_printf / hx_printf_prefix); model-side files keep calling
+ * those, but the model→view edge is now signal-shaped. */
+void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
+                                       struct htlc_conn *htlc,
+                                       guint32 cid, const char *body);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature
