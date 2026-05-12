@@ -616,8 +616,6 @@ pdf_close (hx_preview *p)
 	struct pdf_state *s = p->viewer_data;
 	if (!s)
 		return;
-	if (s->buf)
-		g_byte_array_unref (s->buf);
 	g_clear_object (&s->doc);
 	g_free (s);
 	p->viewer_data = NULL;
