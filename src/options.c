@@ -1740,8 +1740,17 @@ fontsel_response (GtkDialog *dialog, gint response, gpointer user_data)
 
 static void create_fontsel (GtkWidget *btn, GtkWidget *entry)
 {
-	GtkWidget *fontsel = gtk_font_chooser_dialog_new (_("Browse Fonts"), NULL);
+	GtkWindow *parent = gtkhx_active_window ();
+	GtkWidget *fontsel = gtk_font_chooser_dialog_new (_("Browse Fonts"),
+	                                                  parent);
 	(void) btn;
+
+	/* The Settings AdwDialog is presented modal against the main
+	 * window; without transient_for + modal here, GTK keeps the
+	 * input grab on Settings and the font chooser receives no
+	 * keyboard or mouse events until Settings is dismissed. (Also
+	 * silences "GtkDialog mapped without a transient parent".) */
+	gtk_window_set_modal (GTK_WINDOW (fontsel), TRUE);
 
 	if (gtkhx_prefs.font && *gtkhx_prefs.font)
 		gtk_font_chooser_set_font (GTK_FONT_CHOOSER (fontsel),
