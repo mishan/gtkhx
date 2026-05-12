@@ -1742,8 +1742,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	 * widgets and calling gtk_window_present from a worker. */
 	if (htxf->opt.preview && !htxf->preview) {
 		char *name = dirchar_basename (htxf->path);
-		htxf->preview = hx_preview_new ("    ", "    ",
-		                                name ? name : htxf->path);
+		htxf->preview = hx_preview_new (name ? name : htxf->path);
 	}
 
 	if(!htxf->queue) {

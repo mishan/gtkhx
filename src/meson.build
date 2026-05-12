@@ -100,6 +100,16 @@ if soup_dep.found()
   conf.set('HAVE_LIBSOUP', 1)
 endif
 
+# Phase 5+: optional preview viewers. Each define gates a single
+# struct hx_viewer in src/preview.c; without it the corresponding
+# file type falls through to the catch-all text viewer.
+if poppler_dep.found()
+  conf.set('HAVE_POPPLER', 1)
+endif
+if sourceview_dep.found()
+  conf.set('HAVE_GTKSOURCEVIEW', 1)
+endif
+
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,
 # gtk_signal_connect, gtk_widget_set_usize). Per ROADMAP, the dlopen
 # plugin API is slated for removal, so rather than rewrite it for GTK 3

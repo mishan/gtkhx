@@ -17,10 +17,18 @@
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
-# nettle and zlib are present in the runtime; libcanberra and
-# gsound are NOT (gsound stopped being included around the GNOME
-# 47/48 transition, and the runtime never had libcanberra). We
-# build both as inline modules below.
+# nettle, zlib, poppler-glib (PDF preview viewer), and
+# gtksourceview-5 (syntax-highlighted source preview viewer) are
+# present in the runtime; libcanberra and gsound are NOT (gsound
+# stopped being included around the GNOME 47/48 transition, and
+# the runtime never had libcanberra). We build both as inline
+# modules below.
+#
+# poppler-glib and gtksourceview-5 are declared optional in the
+# meson build; both are auto-detected and HAVE_POPPLER /
+# HAVE_GTKSOURCEVIEW config flags gate the corresponding
+# src/preview.c viewers. PDFs and source files fall through to the
+# plain-text viewer if either lib is absent on the build host.
 
 app-id: com.nasledov.gtkhx
 runtime: org.gnome.Platform

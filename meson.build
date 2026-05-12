@@ -96,6 +96,27 @@ gsound_dep = dependency('gsound')
 soup_dep = dependency('libsoup-3.0', version : '>= 3.0',
                       required : false)
 
+# Phase 5+: optional preview viewers driven by the type-aware
+# dispatcher in src/preview.c.
+#
+#   poppler-glib   — PDF preview. Used to decode a PDF byte stream
+#                    into rendered cairo surfaces; we display the
+#                    first few pages as stacked GtkPicture rows.
+#   gtksourceview  — Syntax-highlighted source-code preview for
+#                    Markdown, C, Python, Rust, JavaScript, JSON,
+#                    etc. GtkSourceBuffer drives a GtkSourceView
+#                    (a GtkTextView subclass), language guessed
+#                    from filename via GtkSourceLanguageManager.
+#
+# Both are present in the GNOME 49 Flatpak runtime — no Flatpak
+# module needed. Both optional: if the library isn't on the build
+# host, the corresponding viewer is compiled out and the file
+# would fall through to the plain-text viewer. The HAVE_POPPLER /
+# HAVE_GTKSOURCEVIEW defines below gate the dispatcher entries
+# inside src/preview.c.
+poppler_dep    = dependency('poppler-glib',     required : false)
+sourceview_dep = dependency('gtksourceview-5',  required : false)
+
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -112,6 +133,8 @@ deps = [
   threads_dep,
   gsound_dep,
   soup_dep,
+  poppler_dep,
+  sourceview_dep,
   intl_dep,
   dl_dep,
   math_dep,
@@ -244,12 +267,15 @@ gnome.post_install(
 # -----------------------------------------------------------------------------
 summary(
   {
-    'GTK'        : gtk_dep.version(),
-    'libadwaita' : adw_dep.version(),
-    'GLib'       : glib_dep.version(),
-    'Nettle'     : nettle_dep.version(),
-    'zlib'       : zlib_dep.version(),
-    'GSound'     : gsound_dep.version(),
+    'GTK'           : gtk_dep.version(),
+    'libadwaita'    : adw_dep.version(),
+    'GLib'          : glib_dep.version(),
+    'Nettle'        : nettle_dep.version(),
+    'zlib'          : zlib_dep.version(),
+    'GSound'        : gsound_dep.version(),
+    'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
+    'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
+    'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
   },
   section : 'Dependencies',
 )

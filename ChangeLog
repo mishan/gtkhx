@@ -28,6 +28,8 @@
 - Created GtkHx icon and .desktop file
 - SOCKS support is now available via the system's NetworkManager
 - Systray support via libayatana-appindicator
+- Better file preview support (support common image types, PDF, source code, markdown)
+  - This pulls in libpoppler and libgtksourceview, though they are optional
 
 0.9.4
 -----
