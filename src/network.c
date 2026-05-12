@@ -744,6 +744,7 @@ login_secure_dispatch (gpointer data)
 struct login_args {
 	struct htlc_conn *htlc;
 	guint16 icon16;
+	guint16 cv16;       /* HTLC_DATA_CLIENTVERSION, network byte order */
 	const guint8 *enclogin;
 	guint16 llen;
 	const guint8 *encpass;
@@ -754,15 +755,23 @@ static gboolean
 login_dispatch (gpointer data)
 {
 	struct login_args *a = data;
+	/* Always include HTLC_DATA_CLIENTVERSION. mhxd uses it in
+	 * rcv_login to gate can_ping (>= 150) — without it our
+	 * keepalive HTLC_HDR_PING gets rejected with a task-error
+	 * toast. The chunk is also a noop on Hotline 1.0/1.2 servers
+	 * (they ignore unknown LOGIN data types), so sending it is
+	 * universally safe. */
 	if (a->encpass) {
+		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 4,
+		    HTLC_DATA_ICON, 2, &a->icon16,
+		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
+		    HTLC_DATA_PASSWORD, a->plen, a->encpass,
+		    HTLC_DATA_CLIENTVERSION, 2, &a->cv16);
+	} else {
 		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 3,
 		    HTLC_DATA_ICON, 2, &a->icon16,
 		    HTLC_DATA_LOGIN, a->llen, a->enclogin,
-		    HTLC_DATA_PASSWORD, a->plen, a->encpass);
-	} else {
-		hlwrite (a->htlc, HTLC_HDR_LOGIN, 0, 2,
-		    HTLC_DATA_ICON, 2, &a->icon16,
-		    HTLC_DATA_LOGIN, a->llen, a->enclogin);
+		    HTLC_DATA_CLIENTVERSION, 2, &a->cv16);
 	}
 	return G_SOURCE_REMOVE;
 }
@@ -1175,8 +1184,16 @@ static void hx_thread_connect (void *arg)
 	 * (it's a pure transformation on stack buffers), then we
 	 * sync-invoke the actual hlwrite on the main thread. encpass
 	 * == NULL on the no-password path; login_dispatch picks the
-	 * right packet shape from that. */
-	if (pass) {
+	 * right packet shape from that.
+	 *
+	 * Treat empty-string pass the same as NULL: mhxd interprets
+	 * the *presence* of an HTLC_DATA_PASSWORD chunk as "client is
+	 * doing modern credential validation, skip the agreement
+	 * phase" and so skips sending HTLS_HDR_AGREEMENT — which means
+	 * AGREEMENTAGREE never gets sent and the banner (which mhxd
+	 * sends from inside rcv_agreementagree) never arrives. Empty
+	 * pass = no password = no chunk. */
+	if (pass && *pass) {
 		plen = strlen(pass);
 		if (plen > 64)
 			plen = 64;
@@ -1185,12 +1202,17 @@ static void hx_thread_connect (void *arg)
 		plen = 0;
 	}
 	{
+		/* Advertise ourselves as Hotline 1.8.5 (185). Matches what
+		 * the integration test harness sends; bumps mhxd's
+		 * can_ping bit so HTLC_HDR_PING keepalives are accepted. */
+		guint16 cv16 = htons (185);
 		struct login_args la = {
 			.htlc = htlc,
 			.icon16 = icon16,
+			.cv16 = cv16,
 			.enclogin = (const guint8 *)enclogin,
 			.llen = llen,
-			.encpass = pass ? (const guint8 *)encpass : NULL,
+			.encpass = (pass && *pass) ? (const guint8 *)encpass : NULL,
 			.plen = plen,
 		};
 		gtkhx_invoke_sync (login_dispatch, &la);
