@@ -887,79 +887,6 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 	gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
 }
 
-/* Build a folder_item from a single HTLC_DATA_CATEGORYITEM chunk —
- * the "extended" form of a 1.5 threaded-news directory entry. Both
- * 0x0140 (NEWSFOLDERITEM) and 0x0143 (CATEGORYITEM / DIRLIST_EXTENDED)
- * are 1.5 chunk types; the extended form carries the GUID + addsn /
- * deletesn that threaded-news category sync relies on. Different
- * servers pick different forms.
- *
- * Wire format (see mhxd/src/common/hotline.h: hl_newslist_extended_hdr
- * + bundle_hdr + category_hdr, and mhxd/src/hxd/tnews.c::tnews_send_dirlist
- * for the emitter):
- *
- *   u16  ntype          (2 = bundle/folder, 3 = category)
- *   u16  count          (sub-item count; informational)
- *   if ntype == 3 (category):
- *     u8[16] guid       (6×u16 + u32 — opaque identifier)
- *     u32  addsn        (add-serial-number, for incremental sync)
- *     u32  deletesn     (delete-serial-number)
- *   u8   namelen
- *   u8[namelen] name
- *   trailing bytes      (some servers pad the chunk with junk after
- *                        the name; ignore)
- *
- * Returns NULL on a malformed chunk (truncated header or namelen
- * overruns chunk length). Otherwise the caller owns the result.
- *
- * The 0x0140 form encoded `type` as a single byte where 1 was
- * folder, anything-else was category. We preserve that contract here:
- * ntype 2 → type 1 (folder), ntype 3 → type 2 (category). Downstream
- * UI code in news15.c::output_news_folder switches on `item->type == 1`. */
-static struct folder_item *
-parse_dirlist_extended_chunk (const guint8 *data, guint16 dlen)
-{
-	struct folder_item *item;
-	guint16 ntype;
-	guint16 off;
-	guint8  namelen;
-
-	if (dlen < 4)
-		return NULL;
-
-	HN16 (&ntype, data);
-
-	if (ntype == 2) {           /* bundle / folder */
-		off = 4;                /* skip ntype + count */
-	} else if (ntype == 3) {    /* category */
-		/* ntype(2) + count(2) + guid(16) + addsn(4) + deletesn(4)
-		 * = 28 bytes before namelen */
-		off = 28;
-	} else {
-		/* Unknown subtype — skip silently. Don't error: future
-		 * server versions may add more ntype values and we'd
-		 * rather surface the entries we can than fail the whole
-		 * directory listing. */
-		return NULL;
-	}
-
-	if (dlen < off + 1u)
-		return NULL;
-	namelen = data[off];
-	off++;
-
-	if (dlen < off + namelen)
-		return NULL;
-
-	item = g_malloc (sizeof (struct folder_item));
-	item->type = (ntype == 2) ? 1 : 2;
-	item->name = g_malloc (namelen + 1);
-	memcpy (item->name, data + off, namelen);
-	item->name[namelen] = 0;
-
-	return item;
-}
-
 void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 							  struct gnews_folder *gfnews)
 {
@@ -987,18 +914,26 @@ void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 			folder->entry[num-1] = item;
 			break;
 
-		case HTLC_DATA_CATEGORYITEM:
+		case HTLC_DATA_CATEGORYITEM: {
 			/* 1.5 extended form. Same task reply, just a richer
 			 * per-entry struct (ntype + GUID + add/delete SNs).
-			 * Some servers ship these instead of NEWSFOLDERITEM. */
-			item = parse_dirlist_extended_chunk (dh->data, _len);
-			if (!item)
+			 * Some servers ship these instead of NEWSFOLDERITEM.
+			 *
+			 * Wire-parse is in proto_helpers (testable without
+			 * GUI deps); we just translate the result to the
+			 * GTK-facing folder_item. */
+			struct hx_dirlist_ext_entry ext;
+			if (!hx_dirlist_parse_extended (dh->data, _len, &ext))
 				break;
 			num++;
 			folder->entry = g_realloc(folder->entry,
 			                          sizeof(struct folder_item *)*num);
+			item = g_malloc (sizeof (struct folder_item));
+			item->type = ext.kind;
+			item->name = g_strndup (ext.name, ext.name_len);
 			folder->entry[num-1] = item;
 			break;
+		}
 		}
 	} dh_end();
 
