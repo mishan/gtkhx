@@ -30,6 +30,7 @@
 - Systray support via libayatana-appindicator
 - Better file preview support (support common image types, PDF, source code, markdown)
   - This pulls in libpoppler and libgtksourceview, though they are optional
+- System notification support
 
 0.9.4
 -----

@@ -1,8 +1,3 @@
-System Notifications:
-- Support system notifications, including configuration of notifications
-  - As a user, I would like to configure what sort of events generate system notifications
-    e.g.: Public chat messages, mentions in public chat, private messages, private chats, mentions in private chats, new news posts, etc.
-
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
