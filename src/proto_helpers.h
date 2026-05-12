@@ -307,6 +307,47 @@ extern int hx_news_post_walk (struct htlc_conn *htlc,
                               hx_news_post_cb cb, void *user);
 
 /*
+ * Parse a single HTLC_DATA_CATEGORYITEM (0x0143) chunk body — the
+ * "extended" form of a 1.5 threaded-news directory entry. The plain
+ * form (HTLC_DATA_NEWSFOLDERITEM / 0x0140) carries just `u8 type +
+ * name`; the extended form adds a per-category GUID + add/delete
+ * serial numbers used for incremental sync. Different 1.5+ servers
+ * choose between the two forms.
+ *
+ * Wire format (chunk body, hl_data_hdr already consumed):
+ *
+ *   u16 ntype                (2 = bundle/folder, 3 = category)
+ *   u16 count                (sub-item count; informational)
+ *   if ntype == 3 (category):
+ *     u8[16] guid            (6×u16 + u32 — opaque identifier)
+ *     u32    addsn           (add-serial-number, for incremental sync)
+ *     u32    deletesn        (delete-serial-number)
+ *   u8     namelen
+ *   u8[namelen] name
+ *   trailing bytes           (some servers pad; ignored)
+ *
+ * On success returns TRUE and fills `out`:
+ *   .kind     1 = folder, 2 = category (matches the legacy
+ *             folder_item->type contract used downstream).
+ *   .name[]   NUL-terminated, up to 255 bytes (the wire namelen is
+ *             u8 so 255 is the protocol cap).
+ *   .name_len = strlen(name).
+ *
+ * Returns FALSE on a malformed chunk: truncated header, unknown
+ * ntype, or namelen overruns dlen. The output struct is left
+ * untouched on failure. NULL `out` is a programmer error and
+ * returns FALSE.
+ */
+struct hx_dirlist_ext_entry {
+	int     kind;             /* 1 = folder, 2 = category */
+	char    name[256];        /* NUL-terminated, max 255 */
+	guint16 name_len;         /* strlen(name) */
+};
+
+extern gboolean hx_dirlist_parse_extended (const guint8 *data, gsize dlen,
+                                            struct hx_dirlist_ext_entry *out);
+
+/*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
  *
  * Three outcomes:

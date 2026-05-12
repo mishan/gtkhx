@@ -887,21 +887,24 @@ void rcv_task_newscat_list(struct htlc_conn *htlc,
 	gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
 }
 
-void rcv_task_newsfolder_list(struct htlc_conn *htlc, 
+void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 							  struct gnews_folder *gfnews)
 {
 	struct news_folder *folder = g_malloc(sizeof(struct news_folder));
 	struct folder_item *item;
 	int num = 0;
 
-	folder->entry = g_malloc(sizeof(struct folder_item));
+	folder->entry = g_malloc(sizeof(struct folder_item *));
 	folder->path = gfnews->path;
 
 	dh_start(htlc) {
 		switch (_type) {
 		case HTLC_DATA_NEWSFOLDERITEM:
+			/* 1.5 plain form: u8 type, u8 name[_len - 1] */
+			if (_len < 1)
+				break;
 			num++;
-			folder->entry = g_realloc(folder->entry, 
+			folder->entry = g_realloc(folder->entry,
 									  sizeof(struct folder_item *)*num);
 			item = g_malloc(sizeof(struct folder_item));
 			item->type = dh->data[0];
@@ -910,9 +913,30 @@ void rcv_task_newsfolder_list(struct htlc_conn *htlc,
 			item->name[_len-1] = 0;
 			folder->entry[num-1] = item;
 			break;
+
+		case HTLC_DATA_CATEGORYITEM: {
+			/* 1.5 extended form. Same task reply, just a richer
+			 * per-entry struct (ntype + GUID + add/delete SNs).
+			 * Some servers ship these instead of NEWSFOLDERITEM.
+			 *
+			 * Wire-parse is in proto_helpers (testable without
+			 * GUI deps); we just translate the result to the
+			 * GTK-facing folder_item. */
+			struct hx_dirlist_ext_entry ext;
+			if (!hx_dirlist_parse_extended (dh->data, _len, &ext))
+				break;
+			num++;
+			folder->entry = g_realloc(folder->entry,
+			                          sizeof(struct folder_item *)*num);
+			item = g_malloc (sizeof (struct folder_item));
+			item->type = ext.kind;
+			item->name = g_strndup (ext.name, ext.name_len);
+			folder->entry[num-1] = item;
+			break;
+		}
 		}
 	} dh_end();
-	
+
 	folder->num_entries = num;
 
 	gfnews->news = folder;

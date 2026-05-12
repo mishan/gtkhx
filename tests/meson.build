@@ -397,6 +397,23 @@ test_news_file = executable('test_news_file',
 test('news_file', test_news_file,
      suite : 'proto')
 
+# news_dirlist — hx_dirlist_parse_extended walks one
+# HTLC_DATA_CATEGORYITEM (0x0143) chunk body. The 1.5 threaded-news
+# directory listing reply uses this extended form (carrying GUID +
+# add/delete serial numbers for incremental category sync) on some
+# servers; we used to ignore it and ship empty news directories.
+# Includes the real Badmoon hex fixtures from the bug report.
+test_news_dirlist = executable('test_news_dirlist',
+  'proto/test_news_dirlist.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('news_dirlist', test_news_dirlist,
+     suite : 'proto')
+
 # chat_event — hx_chat_event_new is the parsed value-object the
 # GtkhxSession::chat signal carries to chat.c and notify.c. Pins
 # the UTF-8 fix-up, "[hx]" info-prefix detect, sender/body split,

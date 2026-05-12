@@ -487,6 +487,50 @@ hx_news_file_extract (struct htlc_conn *htlc, char *out,
 	return found;
 }
 
+gboolean
+hx_dirlist_parse_extended (const guint8 *data, gsize dlen,
+                            struct hx_dirlist_ext_entry *out)
+{
+	guint16 ntype;
+	gsize   off;
+	guint8  namelen;
+
+	if (!out)
+		return FALSE;
+	if (!data || dlen < 4)
+		return FALSE;
+
+	HN16 (&ntype, data);
+
+	if (ntype == 2) {
+		/* bundle / folder: ntype(2) + count(2) before namelen */
+		off = 4;
+	} else if (ntype == 3) {
+		/* category: ntype(2) + count(2) + guid(16) + addsn(4) +
+		 * deletesn(4) = 28 bytes before namelen */
+		off = 28;
+	} else {
+		/* Unknown subtype — refuse the entry. Don't fail the
+		 * surrounding dirlist; the caller skips and keeps walking. */
+		return FALSE;
+	}
+
+	if (dlen < off + 1u)
+		return FALSE;
+	namelen = data[off];
+	off++;
+
+	if (dlen < off + namelen)
+		return FALSE;
+
+	out->kind     = (ntype == 2) ? 1 : 2;
+	out->name_len = namelen;
+	if (namelen)
+		memcpy (out->name, data + off, namelen);
+	out->name[namelen] = '\0';
+	return TRUE;
+}
+
 int
 hx_news_post_walk (struct htlc_conn *htlc,
                    hx_news_post_cb cb, void *user)
