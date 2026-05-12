@@ -1,6 +1,9 @@
 High priority:
 
-(none)
+- Cannot actually select fonts in font chooser. The inputs (keyboard and mouse) are ignored. I cannot even close
+  the font chooser dialog until I first close the Settings dialog. So something is going on with Settings holding onto input.
+
+Gtk-Message: 21:05:47.173: GtkDialog mapped without a transient parent. This is discouraged.
 
 Medium priority:
 

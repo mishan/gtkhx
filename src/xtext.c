@@ -83,6 +83,7 @@
 
 #include "config.h"
 #include "xtext.h"
+#include "debug.h"
 
 #define charlen(str) g_utf8_skip[*(guchar *)(str)]
 
@@ -96,6 +97,15 @@
  * and indent behavior.  GtkHx never offered those toggles; defaults
  * here match the historical GtkHx behavior (no autocopy on selection;
  * timestamps render inline, not as a left indent column).
+ *
+ * Phase 5 first tried flipping hex_text_autocopy_text to 1 so a
+ * drag-select would auto-populate the regular and primary
+ * clipboards. That broke visible highlighting in the xtext widget:
+ * drags no longer left a visible mark. Reverted to 0; copy from
+ * chat / PM / news will be wired through a window-level Ctrl+C
+ * shortcut and/or a GdkContentProvider that returns the current
+ * selection on demand, neither of which touches the gesture's
+ * drag-end render path.
  */
 struct hexchat_prefs_subset {
 	int hex_text_autocopy_text;
@@ -104,13 +114,41 @@ struct hexchat_prefs_subset {
 	int hex_stamp_text;
 	int hex_text_indent;
 };
-static const struct hexchat_prefs_subset prefs = {
-	0,	/* hex_text_autocopy_text */
-	0,	/* hex_text_autocopy_color */
-	0,	/* hex_text_autocopy_stamp */
+/* Phase 5: not const — Settings drives autocopy_text / _stamp / _color
+ * via gtk_xtext_set_autocopy_* (declared in xtext.h). The other two
+ * fields stay 0; see comment above for the inline timestamps / no
+ * left-column indent baseline. */
+static struct hexchat_prefs_subset prefs = {
+	0,	/* hex_text_autocopy_text — Settings → "Automatically copy
+	     *   selected text". Default off; the Ctrl-C window shortcut
+	     *   handles copy without going through drag-end's render path,
+	     *   so the user can leave this off without losing clipboard. */
+	0,	/* hex_text_autocopy_color — Settings → "Automatically include
+	     *   color information". */
+	0,	/* hex_text_autocopy_stamp — Settings → "Automatically include
+	     *   timestamps". */
 	0,	/* hex_stamp_text — drawn inline, no left-column timestamps */
 	0,	/* hex_text_indent — corresponds to disabled */
 };
+
+void gtk_xtext_set_autocopy_text  (gboolean enabled)
+{
+	prefs.hex_text_autocopy_text  = enabled ? 1 : 0;
+}
+void gtk_xtext_set_autocopy_stamp (gboolean enabled)
+{
+	prefs.hex_text_autocopy_stamp = enabled ? 1 : 0;
+}
+void gtk_xtext_set_autocopy_color (gboolean enabled)
+{
+	prefs.hex_text_autocopy_color = enabled ? 1 : 0;
+}
+
+/* gtk_xtext_set_stamp_format is defined later (after set_font where
+ * the internal helpers it calls — text_width, fix_indent,
+ * recalc_widths — are in scope). Setting xtext_stamp_format alone
+ * (without a widget handle) is also legal: see the static-store
+ * path used by xtext_get_stamp_str at default-fallback time. */
 
 /* --- HexChat glue: safe_strcpy from common/util.c -------------------- */
 static inline void
@@ -155,17 +193,29 @@ url_last (int *lstart, int *lend)
 }
 
 /* --- HexChat glue: timestamp formatter ----------------------------- *
- * HexChat reads prefs.hex_stamp_text_format ("%H:%M:%S " by default) and
- * applies strftime(3).  We hard-code the same default. */
+ * Phase 5: format string is configurable via Settings → Chat →
+ * Timestamp format, persisted as CFG_STAMP_FORMAT. xtext stores a
+ * private copy of the string here (single per-process, since every
+ * xtext widget shares the same stamp format). gtk_xtext_set_stamp_format
+ * updates it; the static default fires when no Settings value has
+ * been applied yet (matches HexChat's bare-time default plus our
+ * bracketed convention). */
+static char *xtext_stamp_format = NULL;
+
+#define XTEXT_STAMP_FORMAT_DEFAULT "[%H:%M:%S] "
+
 static int
 xtext_get_stamp_str (time_t tim, char **ret)
 {
 	char buf[64];
 	struct tm tmv;
 	int len;
+	const char *fmt = xtext_stamp_format && *xtext_stamp_format
+	                ? xtext_stamp_format
+	                : XTEXT_STAMP_FORMAT_DEFAULT;
 
 	localtime_r (&tim, &tmv);
-	len = strftime (buf, sizeof buf, "%H:%M:%S ", &tmv);
+	len = strftime (buf, sizeof buf, fmt, &tmv);
 	if (len <= 0) {
 		*ret = g_strdup ("");
 		return 0;
@@ -3690,6 +3740,13 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 	start_subline = subline;
 
 	/* draw the timestamp */
+	debug_log ("stamp",
+	           "render_line: auto_indent=%d time_stamp=%d skip_stamp=%d "
+	           "mark_stamp=%d force_stamp=%d ent->indent=%d buf->indent=%d "
+	           "stamp_width=%d",
+	           xtext->auto_indent, xtext->buffer->time_stamp,
+	           xtext->skip_stamp, xtext->mark_stamp, xtext->force_stamp,
+	           ent->indent, xtext->buffer->indent, xtext->stamp_width);
 	if (xtext->auto_indent && xtext->buffer->time_stamp &&
 		 (!xtext->skip_stamp || xtext->mark_stamp || xtext->force_stamp))
 	{
@@ -3697,6 +3754,9 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 		int len;
 
 		len = xtext_get_stamp_str (ent->stamp, &time_str);
+		debug_log ("stamp",
+		           "render_line: drawing stamp '%s' (len=%d) at line=%d",
+		           time_str, len, line);
 		gtk_xtext_render_stamp (xtext, ent, time_str, len, line, win_width);
 		g_free (time_str);
 	}
@@ -3845,6 +3905,47 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 		gtk_xtext_recalc_widths (xtext->buffer, TRUE);
 
 	return TRUE;
+}
+
+/* Phase 5: live update of the timestamp format. Stores a copy in the
+ * module-global xtext_stamp_format (single per-process — every xtext
+ * widget shares the same format). Recomputes xtext->stamp_width
+ * against the new format, since the pixel width depends on what
+ * strftime expanded to. Re-grows buf->indent if the new width is
+ * wider than the old indent (matches the set_time_stamp grow path
+ * so the message body stays right of the stamp column). Queues a
+ * redraw so the new format and column width are picked up
+ * immediately.
+ *
+ * NULL / empty restores the built-in default (XTEXT_STAMP_FORMAT_DEFAULT).
+ * The caller's buffer can be freed afterwards; we keep a g_strdup. */
+void
+gtk_xtext_set_stamp_format (GtkXText *xtext, const char *format)
+{
+	g_free (xtext_stamp_format);
+	xtext_stamp_format = (format && *format) ? g_strdup (format) : NULL;
+
+	if (!xtext || !xtext->font)
+		return;
+
+	{
+		char *time_str;
+		int stamp_size = xtext_get_stamp_str (time (0), &time_str);
+		xtext->stamp_width = gtk_xtext_text_width (xtext, time_str,
+		                                           stamp_size) + MARGIN;
+		g_free (time_str);
+	}
+
+	if (xtext->buffer && xtext->buffer->time_stamp) {
+		int min_indent = xtext->stamp_width + xtext->space_width;
+		if (xtext->buffer->indent < min_indent) {
+			xtext->buffer->indent = min_indent;
+			gtk_xtext_fix_indent (xtext->buffer);
+			gtk_xtext_recalc_widths (xtext->buffer, FALSE);
+		}
+	}
+	if (gtk_widget_get_realized (GTK_WIDGET (xtext)))
+		gtk_widget_queue_draw (GTK_WIDGET (xtext));
 }
 
 /* gtk_xtext_save was dropped from the public API in the GTK 4 port
@@ -4186,7 +4287,15 @@ gtk_xtext_refresh (GtkXText * xtext)
 {
 	if (gtk_widget_get_realized (GTK_WIDGET (xtext)))
 	{
+		/* Phase 5: render_page only paints when xtext->cr is non-NULL
+		 * (i.e. inside the snapshot pass). Calling it from a regular
+		 * callback like changed_xtext / changed_timestamp finds cr
+		 * NULL and silently no-ops — the toggle takes effect on the
+		 * next snapshot the widget happens to get, which may be much
+		 * later. Queue a draw so GTK schedules a snapshot right away;
+		 * the in-snapshot render_page that follows actually paints. */
 		gtk_xtext_render_page (xtext);
+		gtk_widget_queue_draw (GTK_WIDGET (xtext));
 	}
 }
 
@@ -4352,8 +4461,27 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 		/* delete all */
 		if (buf->search_found)
 			gtk_xtext_search_fini (buf);
-		if (buf->xtext->auto_indent)
-			buf->indent = MARGIN;
+		if (buf->xtext->auto_indent) {
+			/* Phase 5: preserve the timestamp-column indent. When
+			 * buf->time_stamp is on, gtk_xtext_set_time_stamp grew
+			 * buf->indent to stamp_width + space_width so the
+			 * message body draws to the right of the bare-HH:MM:SS
+			 * stamp xtext draws on the left margin. Resetting to
+			 * MARGIN here (hx_clear_chat → gtk_xtext_clear, fires
+			 * at the start of every connect) wipes that out, and
+			 * the subsequent appends end up with ent->indent = 2;
+			 * render_stamp paints, render_str repaints the same
+			 * column with the message bytes, and the stamps look
+			 * invisible. Re-grow to the stamp floor when applicable,
+			 * fall back to MARGIN otherwise. */
+			if (buf->time_stamp) {
+				buf->indent = buf->xtext->stamp_width
+				            + buf->xtext->space_width;
+				gtk_xtext_fix_indent (buf);
+			} else {
+				buf->indent = MARGIN;
+			}
+		}
 		buf->scrollbar_down = TRUE;
 		buf->last_ent_start = NULL;
 		buf->last_ent_end = NULL;
@@ -5063,7 +5191,14 @@ gtk_xtext_append (xtext_buffer *buf, unsigned char *text, int len, time_t stamp)
 			ent->str_len = strlen (ent->str);
 		}
 	}
-	ent->indent = 0;
+	/* Phase 5: respect buf->indent so the message text starts to the
+	 * right of the stamp column (gtk_xtext_set_time_stamp grew indent
+	 * to cover stamp_width). Without this the message draws over the
+	 * stamp — append_entry bumps a 0 to MARGIN (2 px), and render_str
+	 * paints message bytes starting at that position. Aligning with
+	 * buf->indent matches gtk_xtext_append_indent's behaviour for the
+	 * left-text-bearing append path. */
+	ent->indent = buf->indent;
 	ent->left_len = -1;
 
 	gtk_xtext_append_entry (buf, ent, stamp);
@@ -5165,10 +5300,34 @@ gtk_xtext_set_thin_separator (GtkXText *xtext, gboolean thin_separator)
 	xtext->thinline = thin_separator;
 }
 
+/* Phase 5: gtk_xtext_set_time_stamp also grows buf->indent so the
+ * message body text starts to the right of the stamp column. Without
+ * this, every entry added via gtk_xtext_append gets ent->indent
+ * bumped to MARGIN (2 px) in append_entry, and the message
+ * overwrites the stamp at draw time — render_stamp draws, then
+ * render_str fills the same area with the message body. The width
+ * is rounded to a multiple of space_width via gtk_xtext_fix_indent.
+ *
+ * Toggling time_stamp off doesn't shrink buf->indent: collapsing
+ * already-rendered entries down to a smaller indent would require
+ * recomputing every ent->indent and re-laying out the text, which
+ * for a long backlog costs more than just leaving a slightly wider
+ * left margin. New entries appended after the toggle keep whatever
+ * indent buf->indent currently has.
+ */
 void
 gtk_xtext_set_time_stamp (xtext_buffer *buf, gboolean time_stamp)
 {
 	buf->time_stamp = time_stamp;
+	if (time_stamp) {
+		int min_indent = buf->xtext->stamp_width
+		               + buf->xtext->space_width;
+		if (buf->indent < min_indent) {
+			buf->indent = min_indent;
+			gtk_xtext_fix_indent (buf);
+			gtk_xtext_recalc_widths (buf, FALSE);
+		}
+	}
 }
 
 void

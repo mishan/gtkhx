@@ -83,6 +83,20 @@
 /* Logging (currently #if-0'd out, kept here for symmetry) */
 #define CFG_LOGGING         "LOGGING"
 
+/* Phase 5: xtext autocopy controls — Settings → Advanced → Auto Copy
+ * Behavior. Three independent toggles for the drag-end clipboard
+ * behaviour. See xtext.h:gtk_xtext_set_autocopy_* for the per-field
+ * semantics. */
+#define CFG_AUTOCOPY_TEXT   "AUTOCOPYTEXT"
+#define CFG_AUTOCOPY_STAMP  "AUTOCOPYSTAMP"
+#define CFG_AUTOCOPY_COLOR  "AUTOCOPYCOLOR"
+
+/* Phase 5: timestamp format. strftime(3) format string used by xtext
+ * for the per-line stamp column and the autocopy_stamp clipboard
+ * prefix. Default '[%H:%M:%S] ' matches HexChat's default and the
+ * bracketed form users are used to from GtkHx pre-Phase-5. */
+#define CFG_STAMP_FORMAT    "TIMESTAMPFORMAT"
+
 /* Timer / startup bookkeeping */
 #define CFG_TIME            "TIME"
 
