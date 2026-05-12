@@ -23,9 +23,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <gtk/gtk.h>
 #ifdef HAVE_LIBSOUP
 # include <libsoup/soup.h>
@@ -80,14 +77,12 @@ struct htxf_fetch {
 	guint8  *bytes;          /* malloc'd, filled by worker */
 	gsize    bytes_len;
 	gboolean ok;
-	/* Captured server address — we copy out of htlc->addr at
-	 * spawn time so the worker doesn'"'"'t race with reconnect. */
-#ifdef USE_IPV6
-	struct sockaddr_storage addr;
-	socklen_t               addrlen;
-#else
-	struct sockaddr_in      addr;
-#endif
+	/* Server endpoint snapshot — captured at spawn time so the
+	 * worker doesn't race with a reconnect (which would mutate
+	 * htlc->serverhost / serverport). serverport here is already
+	 * the subchannel port (main + 1). */
+	char     serverhost[HOSTLEN];
+	guint16  serverport;
 };
 
 static guint htxf_generation = 0;
@@ -520,27 +515,11 @@ banner_handle_htxf_reply (struct htlc_conn *htlc,
 	f->generation = ++htxf_generation;
 	f->bytes      = g_malloc (size);
 
-	/* Copy htlc->addr → sockaddr we own. Bump the port to
-	 * server_port + 1 (the HTXF subchannel). */
-#ifdef USE_IPV6
-	if (htlc->addr && htlc->addr->ai_addr) {
-		gsize n = htlc->addr->ai_addrlen;
-		if (n > sizeof (f->addr))
-			n = sizeof (f->addr);
-		memcpy (&f->addr, htlc->addr->ai_addr, n);
-		f->addrlen = n;
-		if (f->addr.ss_family == AF_INET) {
-			struct sockaddr_in *sa = (struct sockaddr_in *) &f->addr;
-			sa->sin_port = htons (server_port + 1);
-		} else if (f->addr.ss_family == AF_INET6) {
-			struct sockaddr_in6 *sa = (struct sockaddr_in6 *) &f->addr;
-			sa->sin6_port = htons (server_port + 1);
-		}
-	}
-#else
-	f->addr = htlc->addr;
-	f->addr.sin_port = htons (server_port + 1);
-#endif
+	/* Snapshot the subchannel endpoint — same host as the main
+	 * connection, port + 1. Stored as plain strings; the worker
+	 * hands them straight to GSocketClient. */
+	g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
+	f->serverport = htlc->serverport + 1;
 
 	pthread_attr_init  (&attr);
 	pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
@@ -597,30 +576,13 @@ banner_htxf_worker_thread (void *arg)
 	struct htxf_fetch *f = arg;
 	int s;
 	struct htxf_hdr h;
-	int family;
+	char errbuf[256] = { 0 };
 
-#ifdef USE_IPV6
-	family = ((struct sockaddr *) &f->addr)->sa_family;
-#else
-	family = AF_INET;
-#endif
-	s = socket (family, SOCK_STREAM, IPPROTO_TCP);
+	s = hx_sync_connect_to_host (f->serverhost, f->serverport,
+	                             errbuf, sizeof (errbuf));
 	if (s < 0) {
 		debug_log ("banner",
-		           "htxf socket() failed: %s", g_strerror (errno));
-		goto out;
-	}
-
-#ifdef USE_IPV6
-	if (connect (s, (struct sockaddr *) &f->addr, f->addrlen))
-#else
-	if (connect (s, (struct sockaddr *) &f->addr, sizeof (f->addr)))
-#endif
-	{
-		debug_log ("banner",
-		           "htxf connect() failed: %s",
-		           g_strerror (errno));
-		close (s);
+		           "htxf connect failed: %s", errbuf);
 		goto out;
 	}
 
