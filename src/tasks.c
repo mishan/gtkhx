@@ -27,6 +27,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "gtk_hlist.h"
 #include "network.h"
 #include "gtkutil.h"
@@ -529,7 +530,7 @@ static void task_tasks_update (session *sess)
 		return;
 	g_hash_table_iter_init (&iter, sess->tasks);
 	while (g_hash_table_iter_next (&iter, NULL, &val)) {
-		hx_output.task_update (sess, (struct task *) val);
+		gtkhx_session_emit_task_update (gtkhx_session_get_default (), sess, (struct task *) val);
 	}
 }
 
@@ -734,7 +735,7 @@ struct task * task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr,
 
 	g_hash_table_insert (sess->tasks,
 	                     GUINT_TO_POINTER (tsk->trans), tsk);
-	hx_output.task_update (sess, tsk);
+	gtkhx_session_emit_task_update (gtkhx_session_get_default (), sess, tsk);
 	return tsk;
 }
 

@@ -660,7 +660,7 @@ void hx_rcv_xfer_queue(struct htlc_conn *htlc)
 		return;
 	}
 	htxf->queue = xq.queueid;
-	hx_output.xfer_queue(&the_session, htxf);
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);
@@ -1680,8 +1680,9 @@ void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 	hx_format_hotline_date (date_create, created,  sizeof created);
 	hx_format_hotline_date (date_modify, modified, sizeof modified);
 
-	hx_output.file_info(path, name, crea, type, comment, modified, created,
-						size);
+	gtkhx_session_emit_file_info (gtkhx_session_get_default (),
+	                              path, name, crea, type,
+	                              comment, modified, created, size);
 }
 
 void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
@@ -1764,7 +1765,7 @@ void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(&the_session, htxf); /* we most certainly want
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf); /* we most certainly want
 														 to output its position
 														 in the queue */
 
@@ -1863,7 +1864,7 @@ void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	htxf->listen_addr.sin_port = htons(ntohs(htxf->listen_addr.sin_port)+1);
 #endif
 
-	hx_output.xfer_queue(&the_session, htxf);
+	gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session, htxf);
 
 	if(!htxf->queue) {
 		xfer_ready_write(htxf);

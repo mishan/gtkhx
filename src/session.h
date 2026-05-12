@@ -382,19 +382,9 @@ struct output_functions {
 	 * Phase 3.4: user-create, user-delete, user-change,
 	 * users-clear, user-info. */
 
-	/* Files */
-	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);
-	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
-	void (*file_update)(session *sess, struct htxf_conn *htxf);
-
-	/* Transfer queue */
-	void (*xfer_queue)(session *sess, struct htxf_conn *htxf);
-
-	/* Tracker */
-	void (*tracker_server_create)(struct in_addr addr, guint16 port, guint16 nusers, const char *nam, const char *desc, int total);
-
-	/* Tasks (long-running operations) */
-	void (*task_update)(session *sess, struct task *tsk);
+	/* Files / xfer / tracker / tasks — migrated to GtkhxSession
+	 * signals in Phase 3.5: file-info, file-list, file-update,
+	 * xfer-queue, tracker-server-create, task-update. */
 };
 
 extern struct output_functions hx_output;

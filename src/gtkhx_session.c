@@ -52,6 +52,12 @@ enum {
 	SIGNAL_USER_CHANGE,
 	SIGNAL_USERS_CLEAR,
 	SIGNAL_USER_INFO,
+	SIGNAL_FILE_INFO,
+	SIGNAL_FILE_LIST,
+	SIGNAL_FILE_UPDATE,
+	SIGNAL_XFER_QUEUE,
+	SIGNAL_TRACKER_SERVER_CREATE,
+	SIGNAL_TASK_UPDATE,
 	SIGNAL_LAST
 };
 
@@ -207,6 +213,61 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		G_TYPE_POINTER,        /* nam */
 		G_TYPE_POINTER,        /* info body */
 		G_TYPE_UINT);          /* len */
+
+	/* Files / transfers / tracker / tasks. */
+	signals[SIGNAL_FILE_INFO] = g_signal_new (
+		"file-info",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 8,
+		G_TYPE_POINTER, G_TYPE_POINTER,    /* path, name */
+		G_TYPE_POINTER, G_TYPE_POINTER,    /* creator, type */
+		G_TYPE_POINTER,                    /* comments */
+		G_TYPE_POINTER, G_TYPE_POINTER,    /* modified, created */
+		G_TYPE_UINT);                      /* size */
+
+	signals[SIGNAL_FILE_LIST] = g_signal_new (
+		"file-list",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
+
+	signals[SIGNAL_FILE_UPDATE] = g_signal_new (
+		"file-update",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 2,
+		G_TYPE_POINTER, G_TYPE_POINTER);
+
+	signals[SIGNAL_XFER_QUEUE] = g_signal_new (
+		"xfer-queue",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 2,
+		G_TYPE_POINTER, G_TYPE_POINTER);
+
+	/* tracker-server-create — struct in_addr is 32 bits; passed as
+	 * a uint32 to keep the marshaller happy. The handler reconstructs
+	 * an in_addr from it. */
+	signals[SIGNAL_TRACKER_SERVER_CREATE] = g_signal_new (
+		"tracker-server-create",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 6,
+		G_TYPE_UINT,           /* in_addr.s_addr */
+		G_TYPE_UINT,           /* port */
+		G_TYPE_UINT,           /* nusers */
+		G_TYPE_POINTER,        /* nam */
+		G_TYPE_POINTER,        /* desc */
+		G_TYPE_INT);           /* total */
+
+	signals[SIGNAL_TASK_UPDATE] = g_signal_new (
+		"task-update",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 2,
+		G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 GtkhxSession *
@@ -353,4 +414,65 @@ gtkhx_session_emit_user_info (GtkhxSession *self,
 {
 	g_signal_emit (self, signals[SIGNAL_USER_INFO], 0,
 	               (guint) uid, nam, info, (guint) len);
+}
+
+void
+gtkhx_session_emit_file_info (GtkhxSession *self,
+                              const char *path, const char *name,
+                              const char *creator, const char *type,
+                              const char *comments,
+                              const char *modified, const char *created,
+                              guint32 size)
+{
+	g_signal_emit (self, signals[SIGNAL_FILE_INFO], 0,
+	               path, name, creator, type,
+	               comments, modified, created, size);
+}
+
+void
+gtkhx_session_emit_file_list (GtkhxSession *self,
+                              struct cached_filelist *cfl,
+                              struct hl_filelist_hdr *fh,
+                              void *data)
+{
+	g_signal_emit (self, signals[SIGNAL_FILE_LIST], 0,
+	               cfl, fh, data);
+}
+
+void
+gtkhx_session_emit_file_update (GtkhxSession *self,
+                                session *sess,
+                                struct htxf_conn *htxf)
+{
+	g_signal_emit (self, signals[SIGNAL_FILE_UPDATE], 0, sess, htxf);
+}
+
+void
+gtkhx_session_emit_xfer_queue (GtkhxSession *self,
+                               session *sess,
+                               struct htxf_conn *htxf)
+{
+	g_signal_emit (self, signals[SIGNAL_XFER_QUEUE], 0, sess, htxf);
+}
+
+void
+gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
+                                          struct in_addr addr,
+                                          guint16 port,
+                                          guint16 nusers,
+                                          const char *nam,
+                                          const char *desc,
+                                          int total)
+{
+	g_signal_emit (self, signals[SIGNAL_TRACKER_SERVER_CREATE], 0,
+	               (guint) addr.s_addr, (guint) port, (guint) nusers,
+	               nam, desc, total);
+}
+
+void
+gtkhx_session_emit_task_update (GtkhxSession *self,
+                                session *sess,
+                                struct task *tsk)
+{
+	g_signal_emit (self, signals[SIGNAL_TASK_UPDATE], 0, sess, tsk);
 }

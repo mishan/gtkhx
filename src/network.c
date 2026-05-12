@@ -423,7 +423,7 @@ update_task (struct htlc_conn *htlc)
 			if (tsk) {
 				tsk->pos = htlc->in.pos;
 				tsk->len = htlc->in.len;
-				hx_output.task_update(&the_session, tsk);
+				gtkhx_session_emit_task_update (gtkhx_session_get_default (), &the_session, tsk);
 			}
 		}
 	}
@@ -646,8 +646,9 @@ static gboolean
 ts_dispatch (gpointer data)
 {
 	struct ts_job *j = data;
-	hx_output.tracker_server_create (j->addr, j->port, j->nusers,
-	                                 j->name, j->desc, j->total);
+	gtkhx_session_emit_tracker_server_create (
+		gtkhx_session_get_default (),
+		j->addr, j->port, j->nusers, j->name, j->desc, j->total);
 	g_free (j->name);
 	g_free (j->desc);
 	g_free (j);

@@ -128,6 +128,35 @@ void gtkhx_session_emit_user_info (GtkhxSession *self,
                                    guint16 uid, const char *nam,
                                    const char *info, guint16 len);
 
+/* Files / transfers / tracker / tasks. */
+void gtkhx_session_emit_file_info (GtkhxSession *self,
+                                   const char *path, const char *name,
+                                   const char *creator, const char *type,
+                                   const char *comments,
+                                   const char *modified,
+                                   const char *created,
+                                   guint32 size);
+void gtkhx_session_emit_file_list (GtkhxSession *self,
+                                   struct cached_filelist *cfl,
+                                   struct hl_filelist_hdr *fh,
+                                   void *data);
+void gtkhx_session_emit_file_update (GtkhxSession *self,
+                                     session *sess,
+                                     struct htxf_conn *htxf);
+void gtkhx_session_emit_xfer_queue (GtkhxSession *self,
+                                    session *sess,
+                                    struct htxf_conn *htxf);
+void gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
+                                               struct in_addr addr,
+                                               guint16 port,
+                                               guint16 nusers,
+                                               const char *nam,
+                                               const char *desc,
+                                               int total);
+void gtkhx_session_emit_task_update (GtkhxSession *self,
+                                     session *sess,
+                                     struct task *tsk);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature

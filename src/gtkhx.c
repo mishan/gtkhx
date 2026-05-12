@@ -1150,6 +1150,72 @@ on_user_info_signal (GtkhxSession *emitter,
 	                  (const char *) info, (guint16) len);
 }
 
+static void
+on_file_info_signal (GtkhxSession *emitter,
+                     gpointer path, gpointer name,
+                     gpointer creator, gpointer type,
+                     gpointer comments, gpointer modified,
+                     gpointer created, guint size,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_file_info ((char *) path, (char *) name,
+	                  (char *) creator, (char *) type,
+	                  (char *) comments, (char *) modified,
+	                  (char *) created, (guint32) size);
+}
+
+static void
+on_file_list_signal (GtkhxSession *emitter,
+                     gpointer cfl, gpointer fh, gpointer data,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_file_list ((struct cached_filelist *) cfl,
+	                  (struct hl_filelist_hdr *) fh, data);
+}
+
+static void
+on_file_update_signal (GtkhxSession *emitter,
+                       gpointer sess, gpointer htxf,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	file_update ((session *) sess, (struct htxf_conn *) htxf);
+}
+
+static void
+on_xfer_queue_signal (GtkhxSession *emitter,
+                      gpointer sess, gpointer htxf,
+                      gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_xfer_queue ((session *) sess, (struct htxf_conn *) htxf);
+}
+
+static void
+on_tracker_server_create_signal (GtkhxSession *emitter,
+                                 guint addr_u32, guint port,
+                                 guint nusers, gpointer nam,
+                                 gpointer desc, gint total,
+                                 gpointer user_data)
+{
+	struct in_addr addr;
+	(void) emitter; (void) user_data;
+	addr.s_addr = (in_addr_t) addr_u32;
+	tracker_server_create (addr, (guint16) port, (guint16) nusers,
+	                       (const char *) nam, (const char *) desc, total);
+}
+
+static void
+on_task_update_signal (GtkhxSession *emitter,
+                       gpointer sess, gpointer tsk,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	task_update ((session *) sess, (struct task *) tsk);
+}
+
 void gtkhx_connect_signals (GtkhxSession *emitter)
 {
 	g_signal_connect (emitter, "chat",
@@ -1182,6 +1248,18 @@ void gtkhx_connect_signals (GtkhxSession *emitter)
 	                  G_CALLBACK (on_users_clear_signal), NULL);
 	g_signal_connect (emitter, "user-info",
 	                  G_CALLBACK (on_user_info_signal), NULL);
+	g_signal_connect (emitter, "file-info",
+	                  G_CALLBACK (on_file_info_signal), NULL);
+	g_signal_connect (emitter, "file-list",
+	                  G_CALLBACK (on_file_list_signal), NULL);
+	g_signal_connect (emitter, "file-update",
+	                  G_CALLBACK (on_file_update_signal), NULL);
+	g_signal_connect (emitter, "xfer-queue",
+	                  G_CALLBACK (on_xfer_queue_signal), NULL);
+	g_signal_connect (emitter, "tracker-server-create",
+	                  G_CALLBACK (on_tracker_server_create_signal), NULL);
+	g_signal_connect (emitter, "task-update",
+	                  G_CALLBACK (on_task_update_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1318,16 +1396,12 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 struct output_functions hx_output = {
 	.init                  = init,
 	.loop                  = loop,
-	/* Phase 3 migrated to GtkhxSession signals: chat,
-	 * chat-subject, chat-invitation, msg, agreement, news-*,
-	 * user-*, users-clear, user-info. Handlers are connected in
-	 * gtkhx_connect_signals below. */
-	.file_info             = output_file_info,
-	.file_list             = output_file_list,
-	.file_update           = file_update,
-	.xfer_queue            = output_xfer_queue,
-	.tracker_server_create = tracker_server_create,
-	.task_update           = task_update,
+	/* Phase 3 done — every notification dispatches via signals on
+	 * GtkhxSession (see gtkhx_session.{c,h} + gtkhx_connect_signals
+	 * below). Only the lifecycle hooks above remain on the vtable;
+	 * they aren't notifications. A future Phase 4 may collapse
+	 * struct output_functions into just init/loop or remove it
+	 * altogether in favour of named calls. */
 };
 
 
