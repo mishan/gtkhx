@@ -49,18 +49,10 @@
  */
 extern void gtkhx_post_to_main (GSourceFunc fn, gpointer data);
 
-/*
- * Synchronous invoke: run `fn(data)` on the main thread and block
- * the calling worker until it returns. Safe to pass pointers to
- * stack locals as `data` — the worker is suspended for the duration
- * of the call, so the locals stay alive.
- *
- * Footgun: must NOT be called from the main thread itself — it
- * would deadlock waiting for the main loop to run our idle while we
- * hold the main thread. The implementation detects "we're on main"
- * and runs fn(data) inline instead, which is the only defensible
- * degenerate behavior.
- */
-extern void gtkhx_invoke_sync (GSourceFunc fn, gpointer data);
+/* The synchronous worker → main bridge (gtkhx_invoke_sync) used to
+ * live here. Phase 5+'s async-connect rewrite removed its only
+ * caller; the implementation is gone too. If a future worker needs
+ * to block on a main-thread callback again, restore it from
+ * gtkthreads.c history. */
 
 #endif
