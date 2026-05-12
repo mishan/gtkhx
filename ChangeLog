@@ -22,6 +22,10 @@
 - Wide format icon support
 - Fixed issue with file protocol list handling that prevented showing all contents of a directory
 - Server banner support (both URL, which pulls in libsoup, and native HTXF)
+- Networking code rewritten to use GSocketClient
+- GtkHx now uses an event driven architecture
+- Leveraged GLib data types
+- Created GtkHx icon and .desktop file
 
 0.9.4
 -----
