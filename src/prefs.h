@@ -28,6 +28,11 @@ struct gtkhx_prefs {
 	char *auto_reply_msg;
 	char *font;
 	char *download_path;
+	/* Phase 5: strftime(3) format for the xtext per-line timestamp
+	 * column (Settings → Chat → Timestamp format). Default
+	 * '[%H:%M:%S] ' includes brackets + trailing space; user can
+	 * use any strftime spec ('%I:%M %p ', '%H:%M ', '<%H%M> ', ...). */
+	char *stamp_format;
 	char **tracker;
 	char *tracker_str;
 	int xbuf_max;
@@ -53,6 +58,15 @@ struct gtkhx_prefs {
 	unsigned char outrate_limit;
 	unsigned char inrate_limit;
 	unsigned char logging;
+
+	/* Phase 5: HexChat-style xtext autocopy controls — driven by
+	 * Settings → Advanced → Auto Copy Behavior, persisted as the
+	 * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied
+	 * to xtext via gtk_xtext_set_autocopy_*. See the comment on the
+	 * `prefs` struct in xtext.c for the per-field semantics. */
+	unsigned char autocopy_text;
+	unsigned char autocopy_stamp;
+	unsigned char autocopy_color;
 
 	int out_bps;
 	int in_bps;

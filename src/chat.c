@@ -273,16 +273,11 @@ int word_check (GtkWidget * xtext, char *word)
 	return 0;
 }
 
-static void
-timecpy (char *buf)
-{
-	time_t timval = time (0);
-	char *tim = ctime (&timval) + 10;
-	memcpy (buf, tim, 9);
-	buf[0] = '[';
-	buf[9] = ']';
-	buf[10] = ' ';
-}
+/* Phase 5: timecpy is gone. The "[HH:MM:SS] " inline-timestamp prefix
+ * it produced is now drawn by xtext as a left-column stamp via
+ * gtk_xtext_set_time_stamp on each buffer. xprintline / xoutput_chat
+ * just append the bare message text; the per-entry timestamp is
+ * auto-set in gtk_xtext_append_entry. */
 
 struct chat *chat_new (session *sess, guint32 cid)
 {
@@ -352,7 +347,6 @@ void gchat_delete (session *sess, struct gtkhx_chat *gchat)
 
 void xprintline(GtkWidget *text, char *chat, size_t len)
 {
-	char  *new_text;
 	char  *valid;
 	gsize  valid_len;
 
@@ -379,16 +373,26 @@ void xprintline(GtkWidget *text, char *chat, size_t len)
 		return;
 	}
 
-	if(gtkhx_prefs.timestamp) {
-		new_text = g_malloc(valid_len+12);
-		timecpy(new_text);
-		memcpy(new_text +11, valid, valid_len);
-		gtk_xtext_append(GTK_XTEXT(text)->buffer, (unsigned char *)new_text, valid_len+11, 0);
-		g_free(new_text);
-	}
-	else {
-		gtk_xtext_append(GTK_XTEXT(text)->buffer, (unsigned char *)valid, valid_len, 0);
-	}
+	/* Phase 5: timestamps move from inline "[HH:MM:SS] " prefix into
+	 * xtext's native left-column stamp. Two reasons:
+	 *
+	 *   1. HexChat-style drag-select: stamps are visually separate
+	 *      from the message body, so a drag-select on a chat line
+	 *      doesn't accidentally include the time. Settings →
+	 *      "Automatically include timestamps" toggles whether the
+	 *      stamp gets prepended on copy.
+	 *   2. No double-stamp duplication on copy. With the inline
+	 *      prefix, the autocopy_stamp toggle would yield
+	 *      "HH:MM:SS [HH:MM:SS] message" because xtext was
+	 *      prepending its own stamp on top of our inline one.
+	 *
+	 * xtext renders the per-entry stamp (ent->stamp, auto-set in
+	 * gtk_xtext_append_entry) iff xtext->auto_indent &&
+	 * buf->time_stamp. Both are flipped on per-buffer at creation
+	 * time in chat.c / msg.c, and re-applied to live buffers when
+	 * the user toggles CFG_TIMESTAMP via Settings. */
+	gtk_xtext_append (GTK_XTEXT (text)->buffer,
+	                  (unsigned char *) valid, valid_len, 0);
 
 	g_free (valid);
 }
@@ -1005,6 +1009,14 @@ void create_chat(session *sess)
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
+	/* Phase 5: enable xtext's left-column timestamp rendering. The
+	 * stamp draws iff auto_indent && buf->time_stamp; the latter is
+	 * flipped from CFG_TIMESTAMP / gtkhx_prefs.timestamp. See xprintline
+	 * for the rationale (HexChat-style stamps separate from message
+	 * text, no double-stamping on autocopy_stamp). */
+	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
+	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
+	                          gtkhx_prefs.timestamp);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
@@ -1207,6 +1219,11 @@ struct gtkhx_chat *pchat_new (session *sess, struct chat *chat)
 	GTK_XTEXT(text)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(text)->urlcheck_function = word_check;
 	GTK_XTEXT(text)->max_lines = gtkhx_prefs.xbuf_max;
+	/* Phase 5: native xtext timestamps — see the matching call in
+	 * create_chat_window above for the rationale. */
+	gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
+	gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer,
+	                          gtkhx_prefs.timestamp);
 	g_signal_connect (text, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 

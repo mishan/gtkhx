@@ -317,6 +317,35 @@ xtext_buffer *gtk_xtext_buffer_new (GtkXText *xtext);
 void gtk_xtext_buffer_free (xtext_buffer *buf);
 void gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render);
 void gtk_xtext_copy_selection (GtkXText *xtext);
+
+/* Phase 5: HexChat-style autocopy controls. Each toggles a different
+ * facet of the drag-end auto-clipboard behaviour:
+ *
+ *   text  — fire gtk_xtext_set_clip_owner on drag-end (off = drag
+ *           leaves the clipboards untouched and a Ctrl-C window
+ *           shortcut is the way to copy).
+ *   stamp — when on, the copied text includes the per-line timestamp
+ *           (xtext->mark_stamp). Off = bare message text only.
+ *   color — when on, the copied text retains in-band colour codes;
+ *           when off (the default), colours are stripped before the
+ *           clipboard set.
+ *
+ * Settings (options.c) drives these from BOOLEAN cfgvars and persists
+ * them to gtkhxrc. These setters update the xtext-internal `prefs`
+ * struct that the drag-end / set_clip_owner code reads. */
+void gtk_xtext_set_autocopy_text  (gboolean enabled);
+void gtk_xtext_set_autocopy_stamp (gboolean enabled);
+void gtk_xtext_set_autocopy_color (gboolean enabled);
+
+/* Phase 5: strftime(3) format for the per-line timestamp column and
+ * the autocopy_stamp clipboard prefix. NULL or empty restores the
+ * built-in default '[%H:%M:%S] '. The implementation stores a copy of
+ * the string; the caller's buffer can be freed afterwards. Calling
+ * this on a live widget recomputes xtext->stamp_width (since the
+ * pixel width depends on the format) so subsequent renders pick up
+ * the new column width. */
+void gtk_xtext_set_stamp_format (GtkXText *xtext, const char *format);
+
 GType gtk_xtext_get_type (void);
 
 #endif

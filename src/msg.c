@@ -370,6 +370,11 @@ static struct msgwin *create_msg (guint16 _uid, char *name)
 	GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
 	GTK_XTEXT(msg->outputbuf)->urlcheck_function = word_check;
 	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
+	/* Phase 5: native xtext timestamps — see chat.c::create_chat_window
+	 * for the rationale. */
+	gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
+	gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
+	                          gtkhx_prefs.timestamp);
 	g_signal_connect (msg->outputbuf, "word_click",
 	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
 

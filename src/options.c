@@ -77,6 +77,7 @@ struct gtkhx_prefs gtkhx_prefs =
 	"",			/* auto_reply_msg */
 	"fixed",	/* font */
 	".",		/* download_path */
+	"[%H:%M:%S] ", /* stamp_format — strftime(3); see CFG_STAMP_FORMAT */
 	NULL,		/* tracker (char **) */
 	"hltracker.com",	/* tracker_str */
 	500,		/* xbuf_max */
@@ -87,21 +88,30 @@ struct gtkhx_prefs gtkhx_prefs =
 		{300, 250, 442, 480, 0, 1},
 		{300, 400, 442, 50, 0, 1}
 	},
-	1,
-	1,
-	0,
-	0,
-	0,
-	0,
-	0,
-	1,
-	1,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0
+	1,	/* queuedl */
+	1,	/* showjoin */
+	0,	/* showback */
+	0,	/* auto_reply */
+	0,	/* timestamp */
+	0,	/* word_wrap */
+	0,	/* file_samewin */
+	1,	/* news_samewin */
+	1,	/* track_case */
+	0,	/* old_nickcompletion */
+	0,	/* outrate_limit */
+	0,	/* inrate_limit */
+	0,	/* logging */
+
+	/* Phase 5: HexChat-style autocopy controls. Default-on for text
+	 * matches every modern chat client (HexChat, Discord, Slack, etc.)
+	 * and matches the Settings mockup. Stamp / color stay off — most
+	 * users want a clean copy of the message body. */
+	1,	/* autocopy_text */
+	0,	/* autocopy_stamp */
+	0,	/* autocopy_color */
+
+	0,	/* out_bps */
+	0	/* in_bps */
 };
 
 static void parse_tracker (session *);
@@ -292,6 +302,29 @@ static void changed_xtext (session *sess)
 	}
 }
 
+/* Phase 5: apply the CFG_TIMESTAMP toggle to every live xtext buffer
+ * — chat / pchat outputs in gchat_list, plus PM outputs in msg_list.
+ * Native xtext stamps are flipped per-buffer via gtk_xtext_set_time_stamp.
+ * gtk_xtext_refresh forces a full re-render so the new state is visible
+ * without scrolling the buffer first. */
+static void changed_timestamp (session *sess)
+{
+	if (!sess)
+		return;
+	struct gtkhx_chat *gchat;
+	struct msgwin *msg;
+	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
+		gtk_xtext_set_time_stamp (GTK_XTEXT (gchat->output)->buffer,
+		                          gtkhx_prefs.timestamp);
+		gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+	}
+	for (msg = sess->msg_list; msg; msg = msg->prev) {
+		gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
+		                          gtkhx_prefs.timestamp);
+		gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+	}
+}
+
 /* Phase 5: re-enabled. The Settings nick/icon controls used to be
  * inert — changing them updated gtkhx_prefs / the_session.htlc but
  * never told the server, so the user list still showed your old
@@ -342,6 +375,50 @@ static void changed_logging (session *sess)
 	}
 }
 #endif
+
+/* Phase 5: HexChat-style xtext autocopy. Each toggle in Settings →
+ * Advanced → Auto Copy Behavior calls one of the three xtext setters
+ * to flip the corresponding facet of the drag-end clipboard handler.
+ * The cfgvars own the persisted state in gtkhx_prefs.autocopy_* bytes;
+ * the changefunc just propagates that to the xtext-internal `prefs`
+ * struct so the next drag-end picks up the new behaviour without
+ * having to recreate the widget. */
+static void changed_autocopy_text (session *sess)
+{
+	(void) sess;
+	gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
+}
+static void changed_autocopy_stamp (session *sess)
+{
+	(void) sess;
+	gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
+}
+static void changed_autocopy_color (session *sess)
+{
+	(void) sess;
+	gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
+}
+
+/* Phase 5: apply CFG_STAMP_FORMAT to every live xtext widget. The
+ * setter stashes the new format in xtext's module-global, recomputes
+ * stamp_width per widget (font-dependent), and grows the buffer
+ * indent if the new column is wider than before. queue_draw fires
+ * inside the setter so the new column shows up next frame. */
+static void changed_stampformat (session *sess)
+{
+	if (!sess)
+		return;
+	struct gtkhx_chat *gchat;
+	struct msgwin *msg;
+	for (gchat = sess->gchat_list; gchat; gchat = gchat->prev) {
+		gtk_xtext_set_stamp_format (GTK_XTEXT (gchat->output),
+		                            gtkhx_prefs.stamp_format);
+	}
+	for (msg = sess->msg_list; msg; msg = msg->prev) {
+		gtk_xtext_set_stamp_format (GTK_XTEXT (msg->outputbuf),
+		                            gtkhx_prefs.stamp_format);
+	}
+}
 
 static void changed_downloadpath (session *sess)
 {
@@ -437,6 +514,12 @@ struct cfgvar
 	GtkWidget *widget;
 } cfgvars[] =
 {
+	{CFG_AUTOCOPY_COLOR, {&gtkhx_prefs.autocopy_color}, BOOLEAN, 0,
+	 changed_autocopy_color, NULL},
+	{CFG_AUTOCOPY_STAMP, {&gtkhx_prefs.autocopy_stamp}, BOOLEAN, 0,
+	 changed_autocopy_stamp, NULL},
+	{CFG_AUTOCOPY_TEXT, {&gtkhx_prefs.autocopy_text}, BOOLEAN, 0,
+	 changed_autocopy_text, NULL},
 	{CFG_AUTOREPLY_MSG, {&gtkhx_prefs.auto_reply_msg}, STRING, 0, NULL, NULL},
 	{CFG_AUTOREPLY_ON, {&gtkhx_prefs.auto_reply}, BOOLEAN, 0, NULL, NULL},
 	{CFG_CHAT_XPOS, {&gtkhx_prefs.geo.chat.xpos}, INT, 0, NULL, NULL},
@@ -495,7 +578,10 @@ struct cfgvar
 	{CFG_TASK_YSIZE, {&gtkhx_prefs.geo.tasks.ysize}, INT, 0, NULL, NULL},
 	{CFG_THEME, {&gtkhx_prefs.theme}, STRING, 0, changed_theme, NULL},
 	{CFG_TIME, {&total_time}, TIME_T, 0, NULL, NULL},
-	{CFG_TIMESTAMP, {&gtkhx_prefs.timestamp}, BOOLEAN, 0, NULL, NULL},
+	{CFG_TIMESTAMP, {&gtkhx_prefs.timestamp}, BOOLEAN, 0,
+	 changed_timestamp, NULL},
+	{CFG_STAMP_FORMAT, {&gtkhx_prefs.stamp_format}, STRING, 0,
+	 changed_stampformat, NULL},
 	{CFG_TOOL_XPOS, {&gtkhx_prefs.geo.tool.xpos}, INT, 0, NULL, NULL},
 	{CFG_TOOL_YPOS, {&gtkhx_prefs.geo.tool.ypos}, INT, 0, NULL, NULL},
 	{CFG_TRACKER, {&gtkhx_prefs.tracker_str}, STRING, 0, parse_tracker, NULL},
@@ -669,6 +755,80 @@ pref_switch_row (const char *cfgname, const char *title, const char *subtitle)
 	return row;
 }
 
+/* Phase 5: per-row debounce for entry-row apply.
+ *
+ * AdwEntryRow's notify::text fires on every keystroke. For most
+ * STRING / STRING32 prefs that's harmless (font name, download dir,
+ * etc.) — pref_apply just runs changefunc + prefs_write. But CFG_NICK
+ * has changed_nickoricon as its changefunc, which sends an
+ * HTLC_HDR_USER_CHANGE on the wire. Typing a 5-letter name produced
+ * 5 USER_CHANGE packets, with the server faithfully broadcasting each
+ * partial-prefix as the user's name to the rest of the chat.
+ *
+ * Coalesce: schedule pref_apply on a 750 ms one-shot timer per row.
+ * Subsequent keystrokes cancel and re-arm the timer. The user has to
+ * stop typing for 750 ms before the apply runs, by which point the
+ * full intended value is in the buffer and only one wire packet goes
+ * out.
+ *
+ * The timer ID is stashed on the widget via g_object_set_data so we
+ * don't need a parallel hash table — the row's lifetime owns it.
+ *
+ * close_options_bookkeeping flushes pending timers (running
+ * pref_apply once for any cfgvar that still has work queued) so a
+ * window close mid-keystroke doesn't lose the change. Quick toggles
+ * for non-debounced rows still go straight through the regular
+ * pref_apply paths in on_switch_row_active / on_spin_row_value /
+ * on_combo_row_selected.
+ */
+#define ENTRY_APPLY_DEBOUNCE_MS 750
+#define ENTRY_TIMER_KEY "gtkhx-entry-apply-timer"
+
+static gboolean
+entry_apply_timeout_cb (gpointer data)
+{
+	struct cfgvar *v = data;
+	if (v->widget)
+		g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
+		                   GUINT_TO_POINTER (0));
+	pref_apply (v);
+	return G_SOURCE_REMOVE;
+}
+
+static void
+entry_apply_schedule (struct cfgvar *v)
+{
+	guint old;
+	if (!v->widget) {
+		pref_apply (v);
+		return;
+	}
+	old = GPOINTER_TO_UINT (
+		g_object_get_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY));
+	if (old)
+		g_source_remove (old);
+	guint id = g_timeout_add (ENTRY_APPLY_DEBOUNCE_MS,
+	                          entry_apply_timeout_cb, v);
+	g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
+	                   GUINT_TO_POINTER (id));
+}
+
+static void
+entry_apply_flush (struct cfgvar *v)
+{
+	guint id;
+	if (!v->widget)
+		return;
+	id = GPOINTER_TO_UINT (
+		g_object_get_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY));
+	if (!id)
+		return;
+	g_source_remove (id);
+	g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
+	                   GUINT_TO_POINTER (0));
+	pref_apply (v);
+}
+
 static void
 on_entry_row_text (AdwEntryRow *row, GParamSpec *pspec, gpointer data)
 {
@@ -696,7 +856,7 @@ on_entry_row_text (AdwEntryRow *row, GParamSpec *pspec, gpointer data)
 	default:
 		return;
 	}
-	pref_apply (v);
+	entry_apply_schedule (v);
 }
 
 static GtkWidget *
@@ -1080,6 +1240,35 @@ prefs_read_legacy_lines (const char *path)
 	return TRUE;
 }
 
+/* Phase 5: prefs_read intentionally does not run cfgvar changefuncs
+ * (see comment on changed_nickoricon for the reasoning around the
+ * wire-packet path). Most cfgvars don't need application at load —
+ * the changefunc just propagates the value to a derived runtime
+ * structure that's already read directly from gtkhx_prefs.* anyway.
+ *
+ * The xtext autocopy_* knobs are different: xtext keeps its own
+ * static `prefs` struct (xtext.c) that the drag-end code reads, and
+ * we only sync gtkhx_prefs → that struct via the setters. Without an
+ * explicit apply at load, the runtime values would default to 0 even
+ * if the user had set them in gtkhxrc.
+ *
+ * Call the setters once at the end of every prefs_read path. */
+static void
+apply_loaded_xtext_prefs (void)
+{
+	gtk_xtext_set_autocopy_text  (gtkhx_prefs.autocopy_text);
+	gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
+	gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
+	/* Stamp format is widget-aware but the module-global it stashes
+	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
+	 * here — at this point no xtext widgets exist yet (chat windows
+	 * are constructed AFTER prefs_read in fe_init). The recompute-
+	 * stamp_width / re-grow-indent paths inside the setter are
+	 * widget-conditioned, so passing NULL is a clean
+	 * format-only update. */
+	gtk_xtext_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
+}
+
 void prefs_read(void)
 {
 	char *path = prefs_primary_path ();
@@ -1098,6 +1287,7 @@ void prefs_read(void)
 			}
 		}
 		g_free (path);
+		apply_loaded_xtext_prefs ();
 		return;
 	}
 
@@ -1112,6 +1302,7 @@ void prefs_read(void)
 				prefs_read_legacy_lines (legacy);
 				g_free (legacy);
 				g_free (path);
+				apply_loaded_xtext_prefs ();
 				return;
 			}
 			g_free (legacy);
@@ -1120,6 +1311,7 @@ void prefs_read(void)
 
 	/* No prefs anywhere — first run; pop the prefs dialog. */
 	create_options_window (NULL, NULL);
+	apply_loaded_xtext_prefs ();
 	g_free (path);
 }
 
@@ -1267,7 +1459,13 @@ static void close_options_bookkeeping (GtkWidget *widget, gpointer data)
 	 * tears down those rows are freed; any external caller that later
 	 * does `if (v->widget) ...` would dereference garbage. Clear the
 	 * pointers so callers like gtkhx_prefs_set_bool() can safely test
-	 * v->widget for "Settings is open right now". */
+	 * v->widget for "Settings is open right now".
+	 *
+	 * Flush any pending entry-row debounce timers first so a close
+	 * mid-keystroke doesn't lose the change — entry_apply_flush runs
+	 * pref_apply synchronously when there's a pending timer. */
+	for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++)
+		entry_apply_flush (&cfgvars[i]);
 	for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++)
 		cfgvars[i].widget = NULL;
 }
@@ -1539,6 +1737,23 @@ static void settings_page_chat (AdwPreferencesPage *page)
 		                 0, 0xffff, 1));
 	adw_preferences_page_add (page, output_grp);
 
+	/* Phase 5: timestamp format. Separate group so the strftime
+	 * hint can live as a group description without making the
+	 * Chat-output group feel cluttered. */
+	{
+		AdwPreferencesGroup *stamp_grp =
+			ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+		adw_preferences_group_set_title (stamp_grp,
+			_("Timestamp format"));
+		adw_preferences_group_set_description (stamp_grp,
+			_("strftime(3) format string. Default: "
+			  "\"[%H:%M:%S] \". See `man 3 strftime` for the full "
+			  "list of conversion specifiers."));
+		adw_preferences_group_add (stamp_grp,
+			pref_entry_row (CFG_STAMP_FORMAT, _("Format")));
+		adw_preferences_page_add (page, stamp_grp);
+	}
+
 	font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (font_grp, _("Font"));
 	adw_preferences_group_set_description (font_grp,
@@ -1567,6 +1782,35 @@ static void settings_page_chat (AdwPreferencesPage *page)
 		                 _("Old-style nick completion"),
 		                 _("Match against the most recently typed prefix instead of all users")));
 	adw_preferences_page_add (page, behavior_grp);
+
+	/* Phase 5: HexChat-style auto-copy controls. Three independent
+	 * toggles drive xtext's drag-end clipboard behaviour. The three
+	 * gtk_xtext_set_autocopy_* setters take care of propagating the
+	 * value to the widget; the changefunc on each cfgvar calls the
+	 * matching setter. */
+	{
+		AdwPreferencesGroup *autocopy_grp =
+			ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+		adw_preferences_group_set_title (autocopy_grp,
+			_("Auto Copy Behavior"));
+		adw_preferences_group_set_description (autocopy_grp,
+			_("Drag-select in chat / news / private message text "
+			  "to populate the clipboard. Ctrl-V or middle-click "
+			  "pastes the selection elsewhere."));
+		adw_preferences_group_add (autocopy_grp,
+			pref_switch_row (CFG_AUTOCOPY_TEXT,
+			                 _("Automatically copy selected text"),
+			                 NULL));
+		adw_preferences_group_add (autocopy_grp,
+			pref_switch_row (CFG_AUTOCOPY_STAMP,
+			                 _("Automatically include timestamps"),
+			                 NULL));
+		adw_preferences_group_add (autocopy_grp,
+			pref_switch_row (CFG_AUTOCOPY_COLOR,
+			                 _("Automatically include color information"),
+			                 NULL));
+		adw_preferences_page_add (page, autocopy_grp);
+	}
 }
 
 

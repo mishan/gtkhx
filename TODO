@@ -1,5 +1,6 @@
 New Hotline Features:
 - Banner support (integrate into Toolbar?)
+  + For the banner feature, let's practice some test driven development. I would like the testing mhxd container to serve a banner, and an integration test to verify that the banner being served is the one that is expected. 
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
