@@ -19,6 +19,8 @@
 - News now has a text search feature
 - Tracker search case sensitivity can now be toggled in the Tracker window
 - Flatpak package support
+- Wide format icon support
+- Fixed issue with file protocol list handling that prevented showing all contents of a directory
 
 0.9.4
 -----
