@@ -791,8 +791,7 @@ static void fe_init (void)
 	the_session.chat_front = &(the_session.__chat_list);
 	the_session.__chat_list.user_list = &(the_session.__chat_list.__user_list);
 	the_session.__chat_list.user_tail = &(the_session.__chat_list.__user_list);
-	the_session.task_list = &(the_session.__task_list);
-	the_session.task_tail = &(the_session.__task_list);
+	tasks_init (&the_session);
 
 	create_toolbar_window(&the_session);
 	init_colors(toolbar_window);

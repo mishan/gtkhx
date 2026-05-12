@@ -252,8 +252,12 @@ typedef struct _session {
 
 	struct gnews_catalog *gcnews_list;
 
-	struct task __task_list;
-	struct task *task_list, *task_tail;
+	/* Phase 5+: tasks keyed on the 32-bit trans id. Replaces the
+	 * intrusive __task_list / task_list / task_tail trio. Lookup
+	 * by trans is O(1); iteration is via GHashTableIter. The
+	 * hashtable owns each task; values get freed via task_free
+	 * (tasks.c) when removed. */
+	GHashTable *tasks;
 
 	/* Phase 5: removed session-level user_list / user_tail / __user_list.
 	 * Those fields were declared but never wired up (network.c only ever

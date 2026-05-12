@@ -151,7 +151,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	int fd = htlc->fd;
 	struct chat *chat, *cnext;
 	struct hx_user *user, *unext;
-	struct task *tsk, *tsknext;
 	char buf[HOSTLEN];
 
 	session *sess = &the_session;
@@ -224,9 +223,19 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	sess->chat_list->user_list = sess->chat_list->user_tail =
 		&sess->chat_list->__user_list;
 
-	for (tsk = sess->task_list->next; tsk; tsk = tsknext) {
-		tsknext = tsk->next;
-		task_delete(sess, tsk);
+	/* Phase 5+: tasks live in a GHashTable<u32 trans, struct task*>.
+	 * Use foreach_remove so we can run the per-task UI cleanup
+	 * (gtask_delete_tsk) and let the table's value-destroy notify
+	 * (task_free) reclaim the task struct itself. Safe to call on a
+	 * table currently being iterated. */
+	if (sess->tasks) {
+		GHashTableIter iter;
+		gpointer key;
+		g_hash_table_iter_init (&iter, sess->tasks);
+		while (g_hash_table_iter_next (&iter, &key, NULL)) {
+			gtask_delete_tsk (sess, GPOINTER_TO_UINT (key));
+		}
+		g_hash_table_remove_all (sess->tasks);
 	}
 
 

@@ -35,6 +35,7 @@
 #include "sound.h"
 #include "toolbar.h"
 #include "tasks.h"
+#include "tasks_table.h"
 
 
 struct gtask {
@@ -521,10 +522,14 @@ task_go (GtkWidget *widget, gpointer data)
 
 static void task_tasks_update (session *sess)
 {
-	struct task *tsk;
+	GHashTableIter iter;
+	gpointer val;
 
-	for (tsk = sess->task_list->next; tsk; tsk = tsk->next) {
-		hx_output.task_update(sess, tsk);
+	if (!sess->tasks)
+		return;
+	g_hash_table_iter_init (&iter, sess->tasks);
+	while (g_hash_table_iter_next (&iter, NULL, &val)) {
+		hx_output.task_update (sess, (struct task *) val);
 	}
 }
 
@@ -696,58 +701,56 @@ void file_update (session *sess, struct htxf_conn *htxf)
 }
 
 
+/* Phase 5+: task lifecycle on GHashTable.
+ *
+ * The GHashTable factory + value-destroy notify (task_free) live in
+ * tasks_table.c so the unit tests can build the same table the
+ * runtime uses without pulling in GTK. task_delete() below is the
+ * public removal entry point and additionally notifies the UI side
+ * (gtask_delete_tsk peels off the Tasks window's progress row);
+ * g_hash_table_remove then invokes task_free() for the heap
+ * cleanup. */
+
+void tasks_init (session *sess)
+{
+	if (!sess->tasks)
+		sess->tasks = tasks_table_new ();
+}
+
 struct task * task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr,
-						void *data, const char *str)
+                        void *data, const char *str)
 {
 	struct task *tsk;
 	session *sess = &the_session;
 
-	tsk = g_malloc(sizeof(struct task));
+	tsk = g_malloc0 (sizeof (struct task));
 	tsk->trans = htlc->trans;
 	tsk->data = data;
-	if (str)
-		tsk->str = g_strdup(str);
-	else
-		tsk->str = 0;
+	tsk->str = str ? g_strdup (str) : NULL;
 	tsk->ptr = ptr;
 	tsk->rcv = rcv;
-
-	tsk->next = 0;
-	tsk->prev = sess->task_tail;
-	sess->task_tail->next = tsk;
-	sess->task_tail = tsk;
-
 	tsk->pos = 0;
 	tsk->len = 1;
-	hx_output.task_update(sess, tsk);
 
+	g_hash_table_insert (sess->tasks,
+	                     GUINT_TO_POINTER (tsk->trans), tsk);
+	hx_output.task_update (sess, tsk);
 	return tsk;
 }
 
 void task_delete (session *sess, struct task *tsk)
 {
-	gtask_delete_tsk(sess, tsk->trans);
-
-	if (tsk->next)
-		tsk->next->prev = tsk->prev;
-	if (tsk->prev)
-		tsk->prev->next = tsk->next;
-	if (sess->task_tail == tsk)
-		sess->task_tail = tsk->prev;
-	if (tsk->str)
-		g_free(tsk->str);
-	g_free(tsk);
+	if (!tsk)
+		return;
+	gtask_delete_tsk (sess, tsk->trans);
+	g_hash_table_remove (sess->tasks,
+	                     GUINT_TO_POINTER (tsk->trans));
 }
 
 struct task *task_with_trans (session *sess, guint32 trans)
 {
-	struct task *tsk;
-
-	for (tsk = sess->task_list->next; tsk; tsk = tsk->next)
-		if (tsk->trans == trans)
-			return tsk;
-
-	return 0;
+	return g_hash_table_lookup (sess->tasks,
+	                            GUINT_TO_POINTER (trans));
 }
 
 /* task_error_extract lives in proto_helpers.c so the Tier 2 unit

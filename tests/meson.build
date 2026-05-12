@@ -140,6 +140,22 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# task_hash — the Phase 1.1 GLib-collections migration replaced the
+# per-session task linked list (the intrusive __task_list / task_list
+# / task_tail trio) with GHashTable<u32 trans, struct task*>. The
+# table factory lives in tasks_table.c specifically so this test can
+# build it without dragging in GTK; pins down the lifecycle contract
+# (insert / lookup / replace / remove / iterate / destroy → value
+# destroy notify reclaims the struct task + its `str` label).
+test_task_hash = executable('test_task_hash',
+  'unit/test_task_hash.c',
+  '../src/tasks_table.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('task_hash', test_task_hash,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #
