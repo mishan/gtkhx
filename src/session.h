@@ -324,7 +324,7 @@ extern void hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid
 extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 			guint16 port, const char *login, const char *pass,
 			char secure);
-extern void hx_tracker_list (session *sess, char *addrstr, guint16 port);
+extern void hx_tracker_list_async (session *sess);
 extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */

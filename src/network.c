@@ -52,6 +52,7 @@
 #include "inet.h"
 #include "log.h"
 #include "proto_trace.h"
+#include "tracker.h"
 #include "network.h"
 #include "banner.h"
 
@@ -502,121 +503,13 @@ static void htlc_write (int fd)
 	}
 }
 
-/*
- * Worker → main thread marshal helpers.
- *
- * Each post_* allocates a job, deep-copies any caller-owned strings
- * out of the worker's stack, and queues a one-shot idle on the
- * default main context. The dispatcher runs the original UI function
- * on the main thread, frees the job, returns G_SOURCE_REMOVE.
- *
- * Used by hx_tracker_list (tracker fetch flow). The hx_connect path
- * used to share these — that flow is now async on the main loop
- * (see further down), so si_job / i_job / tn_job / login_*_args /
- * htlc_init_args are gone alongside it. See gtkthreads.h for the
- * thread-contract rationale.
- */
-
-/* (session *, char *, int, int) — for trackconn_prog_update,
- * track_prog_update. Used by the tracker worker. */
-struct prog_job {
-	void (*fn)(session *, char *, int, int);
-	session *sess;
-	char *str;
-	int num;
-	int total;
-};
-static gboolean
-prog_dispatch (gpointer data)
-{
-	struct prog_job *j = data;
-	j->fn (j->sess, j->str, j->num, j->total);
-	g_free (j->str);
-	g_free (j);
-	return G_SOURCE_REMOVE;
-}
-static void
-post_prog (void (*fn)(session *, char *, int, int),
-           session *sess, const char *str, int num, int total)
-{
-	struct prog_job *j = g_new0 (struct prog_job, 1);
-	j->fn = fn;
-	j->sess = sess;
-	j->str = g_strdup (str ? str : "");
-	j->num = num;
-	j->total = total;
-	gtkhx_post_to_main (prog_dispatch, j);
-}
-
-/* tracker_server_create(addr, port, nusers, name, desc, total). */
-struct ts_job {
-	struct in_addr addr;
-	guint16 port;
-	guint16 nusers;
-	char *name;
-	char *desc;
-	int total;
-};
-static gboolean
-ts_dispatch (gpointer data)
-{
-	struct ts_job *j = data;
-	gtkhx_session_emit_tracker_server_create (
-		gtkhx_session_get_default (),
-		j->addr, j->port, j->nusers, j->name, j->desc, j->total);
-	g_free (j->name);
-	g_free (j->desc);
-	g_free (j);
-	return G_SOURCE_REMOVE;
-}
-static void
-post_ts (struct in_addr addr, guint16 port, guint16 nusers,
-         const char *name, const char *desc, int total)
-{
-	struct ts_job *j = g_new0 (struct ts_job, 1);
-	j->addr = addr;
-	j->port = port;
-	j->nusers = nusers;
-	j->name = g_strdup (name ? name : "");
-	j->desc = g_strdup (desc ? desc : "");
-	j->total = total;
-	gtkhx_post_to_main (ts_dispatch, j);
-}
-
-/* hx_printf_prefix(htlc, cid, prefix, fmt, ...). Format on the worker,
- * pass the already-formatted text through "%s" so any % in the captured
- * text isn't reinterpreted by hx_printf_prefix's own vsnprintf. */
-struct log_job {
-	struct htlc_conn *htlc;
-	guint32 cid;
-	char *prefix;
-	char *text;
-};
-static gboolean
-log_dispatch (gpointer data)
-{
-	struct log_job *j = data;
-	hx_printf_prefix (j->htlc, j->cid, j->prefix, "%s", j->text);
-	g_free (j->prefix);
-	g_free (j->text);
-	g_free (j);
-	return G_SOURCE_REMOVE;
-}
-static void G_GNUC_PRINTF (4, 5)
-post_log (struct htlc_conn *htlc, guint32 cid,
-          const char *prefix, const char *fmt, ...)
-{
-	struct log_job *j = g_new0 (struct log_job, 1);
-	va_list ap;
-
-	j->htlc = htlc;
-	j->cid = cid;
-	j->prefix = g_strdup (prefix ? prefix : "");
-	va_start (ap, fmt);
-	j->text = g_strdup_vprintf (fmt, ap);
-	va_end (ap);
-	gtkhx_post_to_main (log_dispatch, j);
-}
+/* The post_* marshal helpers (post_prog / post_ts / post_log) lived
+ * here until the tracker fetch went async (see hx_tracker_list_async
+ * below). Their only consumer was the pthread tracker worker, and
+ * the worker is gone now — every callback in the new design runs on
+ * the main loop, so the trackconn_prog_update / track_prog_update /
+ * gtkhx_session_emit_tracker_server_create / hx_printf_prefix calls
+ * happen directly. */
 
 /* Phase 5: HTLC_HDR_AGREEMENTAGREE with NAME + ICON. Sent from
  * gtkhx.c::concurrence (Agree button) once the agreement-window
@@ -1183,203 +1076,460 @@ int htxf_connect (struct htxf_conn *htxf)
 	return s;
 }
 
-static int b_read (int fd, void *bufp, size_t len)
+/*
+ * Tracker fetch — async state machine on the main loop.
+ * ======================================================
+ *
+ * Each "run" walks gtkhx_prefs.tracker[] serially. Each per-tracker
+ * fetch builds its own fetch_ctx, runs through the protocol with
+ * GSocketClient + GInputStream async callbacks, then chains to the
+ * next tracker (or finalises the run if exhausted). Cancellation
+ * goes through the run's GCancellable — tracker_kill_threads()
+ * trips it; the in-flight callbacks see G_IO_ERROR_CANCELLED and
+ * unwind cleanly.
+ *
+ * The legacy version of this code ran on a pthread, woke itself
+ * out of blocking I/O via SIGUSR1, and pumped UI updates through
+ * the post_* marshal helpers above. None of that is needed when
+ * every step runs on the main loop already.
+ *
+ * Protocol shape (per-tracker, after TCP connect):
+ *   write 6 bytes  : HTRK_MAGIC
+ *   read  14 bytes : response header; nservers at offset 10 (u16 BE)
+ *   per server:
+ *     read 8 bytes : IP(4) + port(2) + nusers(2)
+ *                    -- if first byte is 0, this is a padding slot
+ *                       (IPs can't start with 0); skip without
+ *                       decrementing nservers
+ *     read 3 bytes : 2 reserved + name_len(1)
+ *     read name_len bytes : server name (Mac-Roman-ish; CR→LF + strip_ansi)
+ *     read 1 byte  : desc_len
+ *     read desc_len bytes : description
+ */
+
+struct tracker_run_ctx; /* fwd */
+
+struct tracker_fetch_ctx {
+	struct tracker_run_ctx *run;     /* parent run; lifetime-tied */
+	char     *serverstr;
+	guint16   port;
+
+	GSocketConnection *conn;
+	GInputStream  *in;
+	GOutputStream *out;
+
+	/* Parse scratch. buf is sized for the biggest fixed-size read
+	 * (the 14-byte response header). name/desc are sized to the
+	 * 1-byte length field's max. */
+	guint8  buf[16];
+	char    name[256];
+	char    desc[256];
+
+	guint16 nservers;       /* remaining to read */
+	int     server_i;       /* 1-based index of next-completed server,
+	                         * for the progress widget */
+	int     total;          /* set once after the header is read */
+	struct in_addr cur_addr;
+	guint16 cur_port;
+	guint16 cur_nusers;
+	guint8  cur_name_len;
+	guint8  cur_desc_len;
+};
+
+struct tracker_run_ctx {
+	gboolean       aborted;       /* tracker_kill_threads set this */
+	session       *sess;
+	GCancellable  *cancel;
+	char         **trackers;      /* owned strdup of gtkhx_prefs.tracker[] */
+	int            n_trackers;
+	int            current_index;
+	struct tracker_fetch_ctx *cur_ctx;
+};
+
+static struct tracker_run_ctx *current_tracker_run;
+
+/* Forward decls — the protocol is a chain of one-bounce callbacks. */
+static void tracker_fetch_start    (struct tracker_run_ctx *run);
+static void on_tracker_connected   (GObject *src, GAsyncResult *r, gpointer u);
+static void on_tracker_magic_sent  (GObject *src, GAsyncResult *r, gpointer u);
+static void on_tracker_header_read (GObject *src, GAsyncResult *r, gpointer u);
+static void read_next_server_hdr   (struct tracker_fetch_ctx *ctx);
+static void on_server_hdr_read     (GObject *src, GAsyncResult *r, gpointer u);
+static void on_server_rest_read    (GObject *src, GAsyncResult *r, gpointer u);
+static void on_server_name_read    (GObject *src, GAsyncResult *r, gpointer u);
+static void on_server_desc_len_read(GObject *src, GAsyncResult *r, gpointer u);
+static void on_server_desc_read    (GObject *src, GAsyncResult *r, gpointer u);
+static void tracker_emit_server    (struct tracker_fetch_ctx *ctx);
+static void tracker_fetch_done     (struct tracker_fetch_ctx *ctx);
+static void tracker_fetch_free     (struct tracker_fetch_ctx *ctx);
+static void tracker_run_free       (struct tracker_run_ctx *run);
+
+static gboolean
+err_is_cancel (GError *err)
 {
-	register guint8 *buf = (guint8 *)bufp;
-	register int r, pos = 0;
-
-	while (len) {
-		if ((r = read(fd, &(buf[pos]), len)) <= 0)
-			return -1;
-		pos += r;
-		len -= r;
-	}
-
-	return pos;
+	return err && g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
 }
 
-/* The post_* marshal helpers used here (post_prog, post_ts, post_log)
- * are defined further up. The tracker fetch stays on a pthread worker
- * (it does its own blocking IO + dfa regex scan over the server
- * list); the async-connect rewrite for hx_connect didn't touch it. */
-
-void hx_tracker_list(session *sess, char *serverstr, guint16 port)
+void
+hx_tracker_list_async (session *sess)
 {
-	int s;
-	guint16 nusers, nservers;
-	unsigned char buf[HOSTLEN];
-	char name[512], desc[512];
-	struct in_addr a;
-	int total;
+	struct tracker_run_ctx *run;
 	int i;
-#ifdef USE_IPV6
-	struct addrinfo *he;
-	struct addrinfo hints;
-	int error;
-	char portstr[HOSTLEN];
 
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = PF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_protocol = IPPROTO_TCP;
-
-	g_snprintf(portstr, sizeof(portstr), "%u", port);
-#else
-	struct sockaddr_in saddr;
-
-	memset(&saddr, 0, sizeof(struct sockaddr_in));
-	saddr.sin_port = htons(port);
-	saddr.sin_family = AF_INET;
-#endif
-
-	post_prog(trackconn_prog_update, sess, serverstr, 0, 2);
-
-#ifndef USE_IPV6
-	if(!inet_pton(AF_INET, serverstr, &saddr.sin_addr)) {
-		struct hostent *he;
-
-
-		if((he = gethostbyname(serverstr))) {
-			size_t len = (unsigned)he->h_length > sizeof(struct in_addr)
-				? sizeof(struct in_addr) : he->h_length;
-			memcpy(&saddr.sin_addr, he->h_addr, len);
+	/* Cancel any in-flight run. Its in-flight callback (if any) will
+	 * see the cancellation, walk through tracker_fetch_done, and free
+	 * the orphaned run from there. */
+	if (current_tracker_run) {
+		struct tracker_run_ctx *old = current_tracker_run;
+		current_tracker_run = NULL;
+		old->aborted = TRUE;
+		if (old->cur_ctx) {
+			g_cancellable_cancel (old->cancel);
+		} else {
+			/* No in-flight callback to do the cleanup — handle it
+			 * synchronously here. */
+			tracker_run_free (old);
 		}
-		else {
-#else
-			if((error = getaddrinfo(serverstr, portstr, &hints, &he))) {
-#endif
-#ifdef USE_IPV6
-				post_log(&the_session.htlc, 0, INFOPREFIX,
-				         "%s: %s\n", serverstr, gai_strerror(error));
-#else
-# ifdef HAVE_HSTRERROR
-				post_log(&the_session.htlc, 0, INFOPREFIX,
-				         _("DNS lookup for %s failed: %s\n"),
-				         serverstr, hstrerror(h_errno));
-# else
-				post_log(&the_session.htlc, 0, INFOPREFIX,
-				         _("DNS lookup for %s failed\n"), serverstr);
-# endif
-#endif
-				post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
-				return;
-			}
-#ifndef USE_IPV6
-		}
-#endif
-
-		post_prog(trackconn_prog_update, sess, serverstr, 1, 2);
-
-#ifdef USE_IPV6
-	while((s = socket(he->ai_family, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-#else
-	if((s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-#endif
-#ifdef USE_IPV6
-		if(he->ai_next) {
-			he = he->ai_next;
-		}
-		else {
-#endif
-			post_log(&the_session.htlc, 0, INFOPREFIX,
-			         _("tracker: %s\n"), strerror(errno));
-			post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
-			return;
-#ifdef USE_IPV6
-		}
-#endif
 	}
 
-	set_blocking(s);
+	if (gtkhx_prefs.num_tracker <= 0)
+		return;
 
-#ifdef USE_IPV6
-	if((connect(s, he->ai_addr, he->ai_addrlen)) < 0) {
-#else
-	if((connect(s, (struct sockaddr *)&saddr, sizeof(struct sockaddr)))) {
-#endif
-		post_log(&the_session.htlc, 0, INFOPREFIX,
-		         _("tracker: %s: %s"),
-		         serverstr, strerror(errno));
-		post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
+	run = g_new0 (struct tracker_run_ctx, 1);
+	run->sess = sess;
+	run->cancel = g_cancellable_new ();
+	run->n_trackers = gtkhx_prefs.num_tracker;
+	run->trackers = g_new0 (char *, run->n_trackers);
+	for (i = 0; i < run->n_trackers; i++)
+		run->trackers[i] = g_strdup (gtkhx_prefs.tracker[i]);
+	run->current_index = 0;
+
+	current_tracker_run = run;
+	tracker_fetch_start (run);
+}
+
+void
+tracker_kill_threads (void)
+{
+	struct tracker_run_ctx *run = current_tracker_run;
+
+	if (!run)
+		return;
+
+	current_tracker_run = NULL;
+	run->aborted = TRUE;
+	if (run->cur_ctx) {
+		/* In-flight callback will unwind and free. */
+		g_cancellable_cancel (run->cancel);
+	} else {
+		tracker_run_free (run);
+	}
+}
+
+static void
+tracker_run_free (struct tracker_run_ctx *run)
+{
+	int i;
+	if (!run)
+		return;
+	if (current_tracker_run == run)
+		current_tracker_run = NULL;
+	g_clear_object (&run->cancel);
+	for (i = 0; i < run->n_trackers; i++)
+		g_free (run->trackers[i]);
+	g_free (run->trackers);
+	g_free (run);
+}
+
+static void
+tracker_fetch_start (struct tracker_run_ctx *run)
+{
+	struct tracker_fetch_ctx *ctx;
+	GSocketClient *client;
+
+	ctx = g_new0 (struct tracker_fetch_ctx, 1);
+	ctx->run = run;
+	ctx->serverstr = g_strdup (run->trackers[run->current_index]);
+	ctx->port = HTRK_TCPPORT;
+	run->cur_ctx = ctx;
+
+	trackconn_prog_update (run->sess, ctx->serverstr, 0, 2);
+
+	/* GSocketClient honours GProxyResolver by default — SOCKS /
+	 * HTTP CONNECT proxies configured at the desktop level (gsettings
+	 * / libproxy) work transparently here. No explicit enable-proxy
+	 * call needed; the property defaults to TRUE. */
+	client = g_socket_client_new ();
+	g_socket_client_connect_to_host_async (client, ctx->serverstr, ctx->port,
+	                                       run->cancel,
+	                                       on_tracker_connected, ctx);
+	g_object_unref (client);
+}
+
+static void
+on_tracker_connected (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+
+	ctx->conn = g_socket_client_connect_to_host_finish (
+		G_SOCKET_CLIENT (src), res, &err);
+	if (!ctx->conn) {
+		if (!err_is_cancel (err)) {
+			hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+			                  _("tracker: %s: %s\n"),
+			                  ctx->serverstr,
+			                  err ? err->message : _("connect failed"));
+		}
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
+	ctx->in  = g_io_stream_get_input_stream  (G_IO_STREAM (ctx->conn));
+	ctx->out = g_io_stream_get_output_stream (G_IO_STREAM (ctx->conn));
+
+	trackconn_prog_update (ctx->run->sess, ctx->serverstr, 2, 2);
+
+	g_output_stream_write_all_async (ctx->out, HTRK_MAGIC, HTRK_MAGIC_LEN,
+	                                 G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                                 on_tracker_magic_sent, ctx);
+}
+
+static void
+on_tracker_magic_sent (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
+
+	if (!g_output_stream_write_all_finish (G_OUTPUT_STREAM (src), res,
+	                                       &n, &err)) {
+		if (!err_is_cancel (err)) {
+			hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+			                  _("tracker: %s: %s\n"),
+			                  ctx->serverstr,
+			                  err ? err->message : _("magic write failed"));
+		}
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
 		return;
 	}
 
-	post_prog(trackconn_prog_update, sess, serverstr, 2, 2);
+	track_prog_update (ctx->run->sess, ctx->serverstr, 0, 0);
 
-	if (write(s, HTRK_MAGIC, HTRK_MAGIC_LEN) != HTRK_MAGIC_LEN)
-		goto funk_dat;
+	g_input_stream_read_all_async (ctx->in, ctx->buf, 14,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_tracker_header_read, ctx);
+}
 
-	/* Phase 5: this and the (0, total) call below were previously
-	 * called bare — touching GTK widgets from the worker thread
-	 * without even the recursive-mutex shim around them. Marshalled
-	 * now like every other UI call in this function. */
-	post_prog(track_prog_update, sess, serverstr, 0, 0);
+static void
+on_tracker_header_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
 
-	if (b_read(s, buf, 14) != 14) {
-		goto funk_dat;
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != 14) {
+		if (err && !err_is_cancel (err)) {
+			hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+			                  _("tracker: %s: %s\n"),
+			                  ctx->serverstr, err->message);
+		}
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
 	}
 
+	ctx->nservers = ntohs (*((guint16 *)(&ctx->buf[10])));
+	ctx->total    = ctx->nservers;
+	ctx->server_i = 1;
 
-	nservers = ntohs(*((guint16 *)(&(buf[10]))));
-	total = nservers;
-	post_prog(track_prog_update, sess, serverstr, 0, total);
-	for (i = 1; nservers; nservers--, i++) {
-		if (b_read(s, buf, 8) == -1) {
-			break;
-		}
+	track_prog_update (ctx->run->sess, ctx->serverstr, 0, ctx->total);
 
-		if (!buf[0]) {	/* assuming an address does not begin with 0,
-						   we can skip this */
-			nservers++;
-			continue;
-		}
-		if (b_read(s, buf+8, 3) == -1) {
-			break;
-		}
+	read_next_server_hdr (ctx);
+}
 
-		a.s_addr = *((guint32 *)buf);
-		port = ntohs(*((guint16 *)(&(buf[4]))));
-		nusers = ntohs(*((guint16 *)(&(buf[6]))));
-
-
-		if (b_read(s, name, (size_t)buf[10]) == -1) {
-			break;
-		}
-
-
-		name[(size_t)buf[10]] = 0;
-		CR2LF(name, (size_t)buf[10]);
-		strip_ansi(name, (size_t)buf[10]);
-
-
-		if (b_read(s, buf, 1) == -1) {
-			break;
-		}
-
-
-		memset(desc, 0, sizeof(desc));
-
-
-		if (b_read(s, desc, (size_t)buf[0]) == -1) {
-			break;
-		}
-
-
-		desc[(size_t)buf[0]] = 0;
-		CR2LF(desc, (size_t)buf[0]);
-		strip_ansi(desc, (size_t)buf[0]);
-
-		post_ts(a, port, nusers,
-		        (const char *)name, (const char *)desc, total);
-		post_prog(track_prog_update, sess, serverstr, i, total);
+static void
+read_next_server_hdr (struct tracker_fetch_ctx *ctx)
+{
+	if (!ctx->nservers) {
+		tracker_fetch_done (ctx);
+		return;
 	}
-  funk_dat:
+	g_input_stream_read_all_async (ctx->in, ctx->buf, 8,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_server_hdr_read, ctx);
+}
 
+static void
+on_server_hdr_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
 
-	close(s);
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != 8) {
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
 
+	if (!ctx->buf[0]) {
+		/* Padding slot — IPs can't start with 0. Read the next
+		 * server header without advancing the counter. */
+		read_next_server_hdr (ctx);
+		return;
+	}
 
-	return;
+	g_input_stream_read_all_async (ctx->in, ctx->buf + 8, 3,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_server_rest_read, ctx);
+}
+
+static void
+on_server_rest_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
+
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != 3) {
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
+
+	ctx->cur_addr.s_addr = *((guint32 *)ctx->buf);
+	ctx->cur_port     = ntohs (*((guint16 *)(&ctx->buf[4])));
+	ctx->cur_nusers   = ntohs (*((guint16 *)(&ctx->buf[6])));
+	ctx->cur_name_len = ctx->buf[10];
+
+	if (ctx->cur_name_len == 0) {
+		ctx->name[0] = 0;
+		g_input_stream_read_all_async (ctx->in, ctx->buf, 1,
+		                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+		                               on_server_desc_len_read, ctx);
+		return;
+	}
+
+	g_input_stream_read_all_async (ctx->in, ctx->name, ctx->cur_name_len,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_server_name_read, ctx);
+}
+
+static void
+on_server_name_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
+
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != ctx->cur_name_len) {
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
+	ctx->name[ctx->cur_name_len] = 0;
+	CR2LF (ctx->name, ctx->cur_name_len);
+	strip_ansi (ctx->name, ctx->cur_name_len);
+
+	g_input_stream_read_all_async (ctx->in, ctx->buf, 1,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_server_desc_len_read, ctx);
+}
+
+static void
+on_server_desc_len_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
+
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != 1) {
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
+	ctx->cur_desc_len = ctx->buf[0];
+	if (ctx->cur_desc_len == 0) {
+		ctx->desc[0] = 0;
+		tracker_emit_server (ctx);
+		return;
+	}
+	memset (ctx->desc, 0, sizeof (ctx->desc));
+	g_input_stream_read_all_async (ctx->in, ctx->desc, ctx->cur_desc_len,
+	                               G_PRIORITY_DEFAULT, ctx->run->cancel,
+	                               on_server_desc_read, ctx);
+}
+
+static void
+on_server_desc_read (GObject *src, GAsyncResult *res, gpointer u)
+{
+	struct tracker_fetch_ctx *ctx = u;
+	GError *err = NULL;
+	gsize n = 0;
+
+	if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
+	    || n != ctx->cur_desc_len) {
+		g_clear_error (&err);
+		tracker_fetch_done (ctx);
+		return;
+	}
+	ctx->desc[ctx->cur_desc_len] = 0;
+	CR2LF (ctx->desc, ctx->cur_desc_len);
+	strip_ansi (ctx->desc, ctx->cur_desc_len);
+
+	tracker_emit_server (ctx);
+}
+
+static void
+tracker_emit_server (struct tracker_fetch_ctx *ctx)
+{
+	gtkhx_session_emit_tracker_server_create (
+		gtkhx_session_get_default (),
+		ctx->cur_addr, ctx->cur_port, ctx->cur_nusers,
+		ctx->name, ctx->desc, ctx->total);
+	track_prog_update (ctx->run->sess, ctx->serverstr,
+	                   ctx->server_i, ctx->total);
+	ctx->server_i++;
+	ctx->nservers--;
+	read_next_server_hdr (ctx);
+}
+
+static void
+tracker_fetch_done (struct tracker_fetch_ctx *ctx)
+{
+	struct tracker_run_ctx *run = ctx->run;
+
+	run->cur_ctx = NULL;
+	tracker_fetch_free (ctx);
+
+	if (run->aborted) {
+		tracker_run_free (run);
+		return;
+	}
+
+	run->current_index++;
+	if (run->current_index >= run->n_trackers) {
+		tracker_run_free (run);
+		return;
+	}
+	tracker_fetch_start (run);
+}
+
+static void
+tracker_fetch_free (struct tracker_fetch_ctx *ctx)
+{
+	if (!ctx)
+		return;
+	g_clear_object (&ctx->conn);
+	g_free (ctx->serverstr);
+	g_free (ctx);
 }
 
 void kill_threads (void)
@@ -1390,6 +1540,9 @@ void kill_threads (void)
 		g_cancellable_cancel (current_cancel);
 		g_clear_object (&current_cancel);
 	}
+	/* And the async tracker fetch, which has its own GCancellable
+	 * inside current_tracker_run. */
+	tracker_kill_threads ();
 }
 
 void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
