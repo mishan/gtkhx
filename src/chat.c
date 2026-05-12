@@ -1572,17 +1572,25 @@ chat_invite_closed (AdwDialog *dialog, gpointer data)
 	g_free (data);
 }
 
-void output_chat_subject(struct htlc_conn *htlc, guint32 cid, char *buf)
+/* Phase 5+ (MVC boundary): pure view function — just paints the
+ * new subject into the chat-window subject entry. The broadcast
+ * handler in rcv.c (hx_rcv_chat_subject) is responsible for the
+ * 'Subject Changed to X' chat log line; the initial-subject
+ * discovery path in rcv_task_user_list calls this too but without
+ * the announce, since "joined a chat that already had a subject"
+ * isn't a subject change from the user's perspective.
+ *
+ * htlc is unused here — only kept for vtable signature uniformity
+ * with the other output_functions members. */
+void output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
 {
 	session *sess = &the_session;
-	struct gtkhx_chat *gchat = gchat_with_cid(sess, cid);
+	struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
+	(void) htlc;
 
-	if(!gchat)
+	if (!gchat || !gchat->subject)
 		return;
-
-	gtk_editable_set_text(GTK_EDITABLE(gchat->subject), buf);
-	hx_printf_prefix(htlc, cid, INFOPREFIX, "%s: %s", _("Subject Changed to"),
-					 buf);
+	gtk_editable_set_text (GTK_EDITABLE (gchat->subject), buf);
 }
 
 void hx_reject_chat(struct htlc_conn *htlc, guint32 _cid)

@@ -500,7 +500,16 @@ void hx_rcv_chat_subject (struct htlc_conn *htlc)
 			return;
 		}
 #endif
-		hx_output.chat_subject(htlc, sm.cid, chat->subject);
+		/* Update the subject widget (pure view), then log the
+		 * change as a chat line. Splitting the two means the
+		 * initial-subject-discovery path (rcv_task_user_list's
+		 * HTLS_DATA_CHAT_SUBJECT chunk) can call only the widget
+		 * update without spamming a "Subject Changed to X" line
+		 * for a subject that, from the user's point of view, was
+		 * already there before they joined. */
+		hx_output.chat_subject (htlc, sm.cid, chat->subject);
+		hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
+		                  _("Subject Changed to"), chat->subject);
 	}
 }
 
@@ -1354,7 +1363,6 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 	struct hx_user *user;
 	guint16 nlen, uid;
 	int new;
-	struct gtkhx_chat *gchat = gchat_with_cid(&the_session, chat->cid);
 
 	dh_start(htlc) {
 		if (_type == HTLS_DATA_USER_LIST) {
@@ -1404,11 +1412,13 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 
 		else if (_type == HTLS_DATA_CHAT_SUBJECT) {
 			guint16 slen = (_len > 255) ? 255 : _len;
-			memcpy(chat->subject, dh->data, slen);
+			memcpy (chat->subject, dh->data, slen);
 			chat->subject[slen] = 0;
-			if(gchat && gchat->subject) {
-				gtk_editable_set_text(GTK_EDITABLE(gchat->subject), chat->subject);
-			}
+			/* Phase 5+ (MVC boundary): route through the view
+			 * vtable rather than poking the subject widget
+			 * directly. Initial-subject-discovery path — no
+			 * 'Subject Changed to X' log line. */
+			hx_output.chat_subject (htlc, chat->cid, chat->subject);
 		}
 	} dh_end();
 }
