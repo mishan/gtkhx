@@ -12,10 +12,6 @@ Files:
 - Folder uploads/downloads
 - Consider a "commander" type of interface?
 
-File Previews:
-- Look into using some sort of library that lets us view different file types with some embedded viewer
-  e.g. There's an RTF file on some server and it would be nice to preview the rendered version of it
-
 Threaded News:
 - Make the UI cleaner -- expandable tree view?
 - Same window for folders and catalogs, just change buttons out

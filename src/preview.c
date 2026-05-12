@@ -47,6 +47,12 @@
 #include <string.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#ifdef HAVE_POPPLER
+#include <poppler.h>
+#endif
+#ifdef HAVE_GTKSOURCEVIEW
+#include <gtksourceview/gtksource.h>
+#endif
 #include "hx.h"
 #include "preview.h"
 #include "gtkutil.h"
@@ -401,10 +407,418 @@ static const struct hx_viewer image_viewer = {
 	.close  = image_close,
 };
 
+/* ---- PDF viewer (Poppler → GtkDrawingArea per page) ---------------- */
+
+#ifdef HAVE_POPPLER
+
+/* Cap how many pages we render up-front. Hotline PDFs in the wild
+ * tend to be short (manuals, zines, scans), so 20 covers the common
+ * case without spending forever rendering a thesis. */
+#define PDF_PAGE_CAP   20
+
+/* Render at 1.0× nominal DPI. Higher (1.5×, 2×) is sharper on hi-DPI
+ * displays but quadruples the cairo surface memory; the GtkPicture
+ * scaling does a passable job upsampling. */
+#define PDF_RENDER_SCALE 1.0
+
+struct pdf_state {
+	GtkWidget    *body;        /* outer GtkScrolledWindow */
+	GtkWidget    *page_box;    /* GtkBox holding the per-page widgets */
+	GtkWidget    *status;      /* "Loading…" / error label */
+	GByteArray   *buf;
+	PopplerDocument *doc;
+};
+
+static int
+pdf_score (const char *type, const char *creator, const char *filename)
+{
+	(void) creator;
+	if (type && (g_strcmp0 (type, "PDF ") == 0 ||
+	             g_strcmp0 (type, "PDF") == 0))
+		return 20;
+	if (filename && g_str_has_suffix (filename, ".pdf"))
+		return 15;
+	if (filename && g_str_has_suffix (filename, ".PDF"))
+		return 15;
+	return 0;
+}
+
+/* Per-page draw callback. The PopplerPage is held by g_object_set_data
+ * on the GtkDrawingArea so it stays alive as long as the area does;
+ * the doc owns the page. */
+static void
+pdf_draw_page (GtkDrawingArea *area, cairo_t *cr,
+               int width, int height, gpointer user_data)
+{
+	PopplerPage *page = g_object_get_data (G_OBJECT (area), "pdf-page");
+	double pw, ph, scale;
+
+	(void) user_data;
+	if (!page)
+		return;
+
+	poppler_page_get_size (page, &pw, &ph);
+	if (pw <= 0 || ph <= 0)
+		return;
+
+	/* White paper background — most PDFs assume a white canvas
+	 * and look broken without it on dark themes. */
+	cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
+	cairo_paint (cr);
+
+	/* Fit-width scaling: stretch to the widget's current width and
+	 * letterbox the height. The drawing area's content-height
+	 * sizing (set after page load) keeps the proportion right. */
+	scale = (double) width / pw;
+	(void) height;
+	cairo_scale (cr, scale, scale);
+	poppler_page_render (page, cr);
+}
+
+static GtkWidget *
+pdf_create (hx_preview *p)
+{
+	struct pdf_state *s;
+	GtkWidget *scroll;
+
+	s = g_new0 (struct pdf_state, 1);
+	s->buf = g_byte_array_new ();
+
+	scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+	                                GTK_POLICY_AUTOMATIC,
+	                                GTK_POLICY_AUTOMATIC);
+	gtk_widget_set_vexpand (scroll, TRUE);
+	gtk_widget_set_hexpand (scroll, TRUE);
+
+	s->page_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
+	gtk_widget_set_margin_top    (s->page_box, 12);
+	gtk_widget_set_margin_bottom (s->page_box, 12);
+	gtk_widget_set_margin_start  (s->page_box, 12);
+	gtk_widget_set_margin_end    (s->page_box, 12);
+
+	s->status = gtk_label_new ("Loading PDF…");
+	gtk_widget_add_css_class (s->status, "dim-label");
+	gtk_widget_set_margin_top    (s->status, 12);
+	gtk_widget_set_margin_bottom (s->status, 12);
+	gtk_box_append (GTK_BOX (s->page_box), s->status);
+
+	gtkhx_widget_set_child (scroll, s->page_box);
+	s->body = scroll;
+	p->viewer_data = s;
+	return scroll;
+}
+
+static void
+pdf_chunk (hx_preview *p, const char *buf, gsize len)
+{
+	struct pdf_state *s = p->viewer_data;
+	if (!s || !s->buf || len == 0)
+		return;
+	g_byte_array_append (s->buf, (const guint8 *) buf, len);
+}
+
+static void
+pdf_done (hx_preview *p)
+{
+	struct pdf_state *s = p->viewer_data;
+	GError *err = NULL;
+	GBytes *bytes;
+	int n_pages, i;
+
+	if (!s || !s->buf)
+		return;
+	if (s->buf->len == 0) {
+		gtk_label_set_text (GTK_LABEL (s->status), "No PDF data");
+		return;
+	}
+
+	bytes = g_byte_array_free_to_bytes (s->buf);
+	s->buf = NULL;
+
+	s->doc = poppler_document_new_from_bytes (bytes, NULL, &err);
+	g_bytes_unref (bytes);
+
+	if (!s->doc) {
+		gtk_label_set_text (
+			GTK_LABEL (s->status),
+			err ? err->message
+			    : "Failed to decode PDF");
+		g_clear_error (&err);
+		return;
+	}
+
+	/* Hide the loading label; replace with rendered pages. */
+	gtk_widget_set_visible (s->status, FALSE);
+
+	n_pages = poppler_document_get_n_pages (s->doc);
+	for (i = 0; i < n_pages && i < PDF_PAGE_CAP; i++) {
+		PopplerPage *page = poppler_document_get_page (s->doc, i);
+		GtkWidget *area;
+		double pw, ph;
+		int content_h;
+
+		if (!page)
+			continue;
+		poppler_page_get_size (page, &pw, &ph);
+		if (pw <= 0 || ph <= 0) {
+			g_object_unref (page);
+			continue;
+		}
+
+		area = gtk_drawing_area_new ();
+		/* Set a fixed content width (the natural page width at
+		 * PDF_RENDER_SCALE) and a matching content height — the
+		 * draw callback scales to whatever width the layout
+		 * ends up giving us, but content-height keeps the
+		 * vertical proportion correct as the window resizes. */
+		gtk_drawing_area_set_content_width  (
+			GTK_DRAWING_AREA (area),
+			(int) (pw * PDF_RENDER_SCALE));
+		content_h = (int) (ph * PDF_RENDER_SCALE);
+		gtk_drawing_area_set_content_height (
+			GTK_DRAWING_AREA (area), content_h);
+		gtk_widget_set_hexpand (area, TRUE);
+
+		/* Stash the page on the widget for the draw callback.
+		 * g_object_unref runs at widget destroy time, which
+		 * happens before the PopplerDocument is unref'd in
+		 * pdf_close, so the page outlives any redraw. */
+		g_object_set_data_full (G_OBJECT (area), "pdf-page",
+		                        page, g_object_unref);
+
+		gtk_drawing_area_set_draw_func (
+			GTK_DRAWING_AREA (area),
+			pdf_draw_page, NULL, NULL);
+
+		gtk_box_append (GTK_BOX (s->page_box), area);
+	}
+
+	if (n_pages > PDF_PAGE_CAP) {
+		GtkWidget *more = gtk_label_new (NULL);
+		char *txt = g_strdup_printf (
+			"… %d more page%s — save to view fully",
+			n_pages - PDF_PAGE_CAP,
+			(n_pages - PDF_PAGE_CAP) == 1 ? "" : "s");
+		gtk_label_set_text (GTK_LABEL (more), txt);
+		g_free (txt);
+		gtk_widget_add_css_class (more, "dim-label");
+		gtk_widget_set_margin_top    (more, 12);
+		gtk_widget_set_margin_bottom (more, 12);
+		gtk_box_append (GTK_BOX (s->page_box), more);
+	}
+}
+
+static void
+pdf_close (hx_preview *p)
+{
+	struct pdf_state *s = p->viewer_data;
+	if (!s)
+		return;
+	if (s->buf)
+		g_byte_array_unref (s->buf);
+	g_clear_object (&s->doc);
+	g_free (s);
+	p->viewer_data = NULL;
+}
+
+static const struct hx_viewer pdf_viewer = {
+	.name   = "pdf",
+	.score  = pdf_score,
+	.create = pdf_create,
+	.chunk  = pdf_chunk,
+	.done   = pdf_done,
+	.close  = pdf_close,
+};
+
+#endif /* HAVE_POPPLER */
+
+/* ---- Source-code / Markdown viewer (GtkSourceView) ----------------- */
+
+#ifdef HAVE_GTKSOURCEVIEW
+
+/* The list of extensions that bumps source_score to "definitely
+ * code, render with syntax highlighting." We don't enumerate every
+ * language GtkSourceView knows about; just the common-on-Hotline
+ * ones. README files (no extension) and weird-extensioned scripts
+ * fall through to the text viewer, which is fine. */
+static const char *const source_extensions[] = {
+	".md", ".markdown",
+	".c", ".h", ".cpp", ".hpp", ".cc", ".cxx",
+	".py", ".pyw",
+	".js", ".ts", ".jsx", ".tsx",
+	".rs",
+	".go",
+	".java", ".kt",
+	".rb",
+	".pl", ".pm",
+	".php",
+	".sh", ".bash", ".zsh",
+	".sql",
+	".json", ".yaml", ".yml", ".toml",
+	".xml", ".html", ".htm", ".css",
+	".lua",
+	".swift",
+	".scala",
+	".ex", ".exs",
+	".hs",
+	".diff", ".patch",
+	".lisp", ".scm", ".el",
+	".m",       /* Objective-C */
+	NULL,
+};
+
+static int
+source_score (const char *type, const char *creator, const char *filename)
+{
+	const char *dot;
+	char ext_match[16];
+	gsize i;
+
+	(void) type; (void) creator;
+	if (!filename)
+		return 0;
+	dot = strrchr (filename, '.');
+	if (!dot || strlen (dot) >= sizeof (ext_match))
+		return 0;
+	for (i = 0; dot[i]; i++)
+		ext_match[i] = g_ascii_tolower (dot[i]);
+	ext_match[i] = 0;
+
+	for (i = 0; source_extensions[i]; i++) {
+		if (g_strcmp0 (ext_match, source_extensions[i]) == 0) {
+			/* Beat the text fallback but lose to image / PDF
+			 * matches (which score 15+ on extension). */
+			return 10;
+		}
+	}
+	return 0;
+}
+
+struct source_state {
+	GtkWidget        *view;
+	GtkSourceBuffer  *buf;
+};
+
+static GtkWidget *
+source_create (hx_preview *p)
+{
+	struct source_state *s;
+	GtkWidget *scroll;
+	GtkSourceLanguageManager *langs;
+	GtkSourceLanguage        *lang;
+	GtkSourceStyleSchemeManager *schemes;
+	GtkSourceStyleScheme     *scheme;
+	gboolean dark;
+
+	s = g_new0 (struct source_state, 1);
+	s->buf  = gtk_source_buffer_new (NULL);
+	s->view = gtk_source_view_new_with_buffer (s->buf);
+
+	gtk_source_view_set_show_line_numbers (
+		GTK_SOURCE_VIEW (s->view), TRUE);
+	gtk_source_view_set_highlight_current_line (
+		GTK_SOURCE_VIEW (s->view), TRUE);
+	gtk_text_view_set_editable      (GTK_TEXT_VIEW (s->view), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW (s->view), FALSE);
+	gtk_text_view_set_monospace     (GTK_TEXT_VIEW (s->view), TRUE);
+	gtk_text_view_set_wrap_mode     (GTK_TEXT_VIEW (s->view),
+	                                  GTK_WRAP_WORD_CHAR);
+
+	/* Pick a syntax based on the filename. Returns NULL for
+	 * extensions we listed but GtkSourceView doesn't know about;
+	 * the buffer just stays unhighlighted in that case. */
+	langs = gtk_source_language_manager_get_default ();
+	lang  = gtk_source_language_manager_guess_language (langs,
+	                                                    p->name, NULL);
+	if (lang)
+		gtk_source_buffer_set_language (s->buf, lang);
+
+	/* Track the libadwaita color scheme: classic for light,
+	 * classic-dark for dark. Both ship with GtkSourceView. */
+	schemes = gtk_source_style_scheme_manager_get_default ();
+	dark = adw_style_manager_get_dark (
+		adw_style_manager_get_default ());
+	scheme = gtk_source_style_scheme_manager_get_scheme (
+		schemes, dark ? "classic-dark" : "classic");
+	if (scheme)
+		gtk_source_buffer_set_style_scheme (s->buf, scheme);
+
+	scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+	                                GTK_POLICY_AUTOMATIC,
+	                                GTK_POLICY_AUTOMATIC);
+	gtkhx_widget_set_child (scroll, s->view);
+
+	p->viewer_data = s;
+	return scroll;
+}
+
+static void
+source_chunk (hx_preview *p, const char *buf, gsize len)
+{
+	struct source_state *s = p->viewer_data;
+	GtkTextIter end;
+	char *valid;
+	char *fixed;
+	gsize i;
+
+	if (!s || !s->buf || len == 0)
+		return;
+
+	/* Same CR→LF + UTF-8 fix-up as the text viewer — Hotline files
+	 * often arrive with classic-Mac line endings. */
+	fixed = g_memdup2 (buf, len);
+	for (i = 0; i < len; i++)
+		if (fixed[i] == '\r')
+			fixed[i] = '\n';
+	valid = g_utf8_make_valid (fixed, len);
+
+	gtk_text_buffer_get_end_iter (GTK_TEXT_BUFFER (s->buf), &end);
+	gtk_text_buffer_insert (GTK_TEXT_BUFFER (s->buf), &end, valid, -1);
+
+	g_free (valid);
+	g_free (fixed);
+}
+
+static void
+source_done (hx_preview *p)
+{
+	(void) p;
+}
+
+static void
+source_close (hx_preview *p)
+{
+	struct source_state *s = p->viewer_data;
+	if (!s)
+		return;
+	g_clear_object (&s->buf);
+	g_free (s);
+	p->viewer_data = NULL;
+}
+
+static const struct hx_viewer source_viewer = {
+	.name   = "source",
+	.score  = source_score,
+	.create = source_create,
+	.chunk  = source_chunk,
+	.done   = source_done,
+	.close  = source_close,
+};
+
+#endif /* HAVE_GTKSOURCEVIEW */
+
 /* ---- Viewer registry ---------------------------------------------- */
 
 static const struct hx_viewer *const viewers[] = {
+#ifdef HAVE_POPPLER
+	&pdf_viewer,
+#endif
 	&image_viewer,
+#ifdef HAVE_GTKSOURCEVIEW
+	&source_viewer,
+#endif
 	&text_viewer,         /* last: catch-all */
 };
 
