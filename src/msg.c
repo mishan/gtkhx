@@ -449,23 +449,31 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	gtkhx_box_pack(hbox, msg->outputbuf, 1, 1, 0);
 	gtkhx_box_pack(hbox, msg->vscroll, 0, 0, 0);
 
-	inputframe = gtk_frame_new(0);
-	gtkhx_widget_set_child(inputframe, msg->inputbuf);
-	gtk_widget_set_size_request(inputframe, 0, 60);
+	/* Phase 5+: wrap the GtkTextView inputbuf in a scrolled window
+	 * with content-driven natural height (1 line minimum, 5 line
+	 * max). Matches the chat window'"'"'s auto-grow input box. */
+	GtkWidget *input_scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(input_scroll),
+	                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_propagate_natural_height(
+		GTK_SCROLLED_WINDOW(input_scroll), TRUE);
+	gtk_scrolled_window_set_min_content_height(
+		GTK_SCROLLED_WINDOW(input_scroll), 28);
+	gtk_scrolled_window_set_max_content_height(
+		GTK_SCROLLED_WINDOW(input_scroll), 120);
+	gtkhx_widget_set_child(input_scroll, msg->inputbuf);
 
-	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
-	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
-	/* Window grows → output area takes the extra room; input
-	 * stays at whatever size the user picks. shrink_end=FALSE
-	 * keeps the user from collapsing the input below 60px. */
-	gtk_paned_set_resize_start_child(GTK_PANED(vpane), TRUE);
-	gtk_paned_set_resize_end_child  (GTK_PANED(vpane), FALSE);
-	gtk_paned_set_shrink_end_child  (GTK_PANED(vpane), FALSE);
-	/* Initial divider position. With default 340px window and
-	 * ~30px headerbar + 10px margins, the paned area is ~290px;
-	 * 220 puts ~70px below the divider for the input. */
-	gtk_paned_set_position(GTK_PANED(vpane), 220);
+	inputframe = gtk_frame_new(0);
+	gtkhx_widget_set_child(inputframe, input_scroll);
+
+	/* Drop GtkPaned in favour of a plain vertical box. Output
+	 * vexpand=TRUE eats remaining vertical space; input stays at
+	 * its natural (content-sized, capped) height. */
+	vpane = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_vexpand (outputframe, TRUE);
+	gtk_widget_set_vexpand (inputframe,  FALSE);
+	gtk_box_append (GTK_BOX(vpane), outputframe);
+	gtk_box_append (GTK_BOX(vpane), inputframe);
 	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
 
 	/* Recipient info pane: small horizontal strip with icon + name +

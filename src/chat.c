@@ -1171,13 +1171,29 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	outputframe = gtk_frame_new(0);
 	inputframe = gtk_frame_new(0);
 
-	vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_start_child(GTK_PANED(vpaned), outputframe);
-	gtk_paned_set_end_child(GTK_PANED(vpaned), inputframe);
-	(gtk_widget_set_margin_start(vpaned, 5), gtk_widget_set_margin_end(vpaned, 5), gtk_widget_set_margin_top(vpaned, 5), gtk_widget_set_margin_bottom(vpaned, 5));
+	/* Phase 5+: replace the vertical GtkPaned with a plain box. The
+	 * paned'"'"'s draggable divider was nice but it pinned the input area
+	 * to a fixed height (50px minimum, user-resizable via drag),
+	 * which meant a single-line input took two visible lines'"'"' worth of
+	 * space and a multi-line paste required scrolling inside a
+	 * fixed-height widget. The new layout has the output frame
+	 * vexpand=TRUE eating remaining vertical space, and the input
+	 * scrolled window using min/max-content-height + propagate-
+	 * natural-height to grow with the buffer'"'"'s line count (capped at
+	 * 5 lines; scrolls beyond that). */
+	GtkWidget *vstack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_margin_start (vstack, 5);
+	gtk_widget_set_margin_end   (vstack, 5);
+	gtk_widget_set_margin_top   (vstack, 5);
+	gtk_widget_set_margin_bottom(vstack, 5);
+	gtk_widget_set_vexpand (outputframe, TRUE);
+	gtk_widget_set_vexpand (inputframe,  FALSE);
+	gtk_box_append (GTK_BOX(vstack), outputframe);
+	gtk_box_append (GTK_BOX(vstack), inputframe);
+	(void) vpaned;	/* declared above but no longer used */
 
 	gtkhx_widget_set_child(chat_window, vbox);
-	gtkhx_box_pack(vbox, vpaned, 1, 1, 0);
+	gtkhx_box_pack(vbox, vstack, 1, 1, 0);
 
 	if(wind_tmp) {
 		gtkhx_widget_remove_child(wind_tmp, chat_hbox);
@@ -1189,10 +1205,6 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 	/* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	/* Phase 5: keep just the height floor (input area must be at least
-	 * tall enough to type into); width was previously baked from saved
-	 * xsize and prevented the chat window from shrinking horizontally. */
-	gtk_widget_set_size_request(hbox, -1, 50);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
@@ -1216,6 +1228,19 @@ void create_chat_window (GtkWidget *widget, gpointer data)
 		GtkWidget *input_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(input_scroll),
 		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		/* Auto-grow input behaviour: the scrolled window reports a
+		 * natural height that matches the embedded GtkTextView'"'"'s
+		 * content, clamped between a single-line minimum and a
+		 * 5-line maximum. Below the min the input gets the floor;
+		 * above the max the scrollbar takes over. The font size
+		 * varies per theme so we pick generous pixel approximations
+		 * (28px ≈ 1 line of body text, 120px ≈ 5 lines). */
+		gtk_scrolled_window_set_propagate_natural_height(
+			GTK_SCROLLED_WINDOW(input_scroll), TRUE);
+		gtk_scrolled_window_set_min_content_height(
+			GTK_SCROLLED_WINDOW(input_scroll), 28);
+		gtk_scrolled_window_set_max_content_height(
+			GTK_SCROLLED_WINDOW(input_scroll), 120);
 		gtkhx_widget_set_child(input_scroll, gchat->input);
 		gtkhx_box_pack(hbox, input_scroll, 1, 1, 0);
 	}
@@ -1497,18 +1522,19 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 
 	inputframe = gtk_frame_new(0);
 
-	vpane = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_start_child(GTK_PANED(vpane), outputframe);
-	gtk_paned_set_end_child(GTK_PANED(vpane), inputframe);
-	/* Output area takes the extra room when the window grows;
-	 * input stays at its natural size. shrink_end=FALSE keeps the
-	 * user from collapsing the input below its 60px floor. */
-	gtk_paned_set_resize_start_child(GTK_PANED(vpane), TRUE);
-	gtk_paned_set_resize_end_child  (GTK_PANED(vpane), FALSE);
-	gtk_paned_set_shrink_end_child  (GTK_PANED(vpane), FALSE);
-	gtk_paned_set_position(GTK_PANED(vpane), 290);
-
-	gtkhx_box_pack(vbox, vpane, 1, 1, 0);
+	/* Phase 5+: drop GtkPaned in favour of a plain box so the input
+	 * area can shrink to a single line by default and auto-grow up
+	 * to a 5-line cap as the user types. See the matching note in
+	 * create_chat_window above for the rationale. */
+	{
+		GtkWidget *vstack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+		gtk_widget_set_vexpand (outputframe, TRUE);
+		gtk_widget_set_vexpand (inputframe,  FALSE);
+		gtk_box_append (GTK_BOX(vstack), outputframe);
+		gtk_box_append (GTK_BOX(vstack), inputframe);
+		gtkhx_box_pack(vbox, vstack, 1, 1, 0);
+	}
+	(void) vpane;
 
 	pchat_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
@@ -1517,7 +1543,6 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 	gtkhx_widget_set_child(outputframe, pchat_hbox);
 
 	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_widget_set_size_request(hbox, -1, 60);
 	gtkhx_widget_set_child(inputframe, hbox);
 
 	gchat->input = gtk_text_view_new();
@@ -1537,6 +1562,12 @@ struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
 		GtkWidget *pchat_input_scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(pchat_input_scroll),
 		                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+		gtk_scrolled_window_set_propagate_natural_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), TRUE);
+		gtk_scrolled_window_set_min_content_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), 28);
+		gtk_scrolled_window_set_max_content_height(
+			GTK_SCROLLED_WINDOW(pchat_input_scroll), 120);
 		gtkhx_widget_set_child(pchat_input_scroll, gchat->input);
 		gtkhx_box_pack(hbox, pchat_input_scroll, 1, 1, 0);
 	}
