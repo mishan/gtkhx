@@ -1100,6 +1100,56 @@ on_news_thread_signal (GtkhxSession *emitter,
 	output_news_thread ((struct news_post *) post);
 }
 
+static void
+on_user_create_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer nam,
+                       guint icon, guint color, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_create (htlc, chat, user, (const char *) nam,
+	             (guint16) icon, (guint16) color);
+}
+
+static void
+on_user_delete_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_delete (htlc, chat, user);
+}
+
+static void
+on_user_change_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       struct hx_user *user, gpointer nam,
+                       guint icon, guint color, gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	user_change (htlc, chat, user, (const char *) nam,
+	             (guint16) icon, (guint16) color);
+}
+
+static void
+on_users_clear_signal (GtkhxSession *emitter,
+                       struct htlc_conn *htlc, struct chat *chat,
+                       gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	users_clear (htlc, chat);
+}
+
+static void
+on_user_info_signal (GtkhxSession *emitter,
+                     guint uid, gpointer nam, gpointer info, guint len,
+                     gpointer user_data)
+{
+	(void) emitter; (void) user_data;
+	output_user_info ((guint16) uid, (const char *) nam,
+	                  (const char *) info, (guint16) len);
+}
+
 void gtkhx_connect_signals (GtkhxSession *emitter)
 {
 	g_signal_connect (emitter, "chat",
@@ -1122,6 +1172,16 @@ void gtkhx_connect_signals (GtkhxSession *emitter)
 	                  G_CALLBACK (on_news_catalog_signal), NULL);
 	g_signal_connect (emitter, "news-thread",
 	                  G_CALLBACK (on_news_thread_signal), NULL);
+	g_signal_connect (emitter, "user-create",
+	                  G_CALLBACK (on_user_create_signal), NULL);
+	g_signal_connect (emitter, "user-delete",
+	                  G_CALLBACK (on_user_delete_signal), NULL);
+	g_signal_connect (emitter, "user-change",
+	                  G_CALLBACK (on_user_change_signal), NULL);
+	g_signal_connect (emitter, "users-clear",
+	                  G_CALLBACK (on_users_clear_signal), NULL);
+	g_signal_connect (emitter, "user-info",
+	                  G_CALLBACK (on_user_info_signal), NULL);
 }
 
 static void concurrence(GtkWidget *widget, gpointer data)
@@ -1259,13 +1319,9 @@ struct output_functions hx_output = {
 	.init                  = init,
 	.loop                  = loop,
 	/* Phase 3 migrated to GtkhxSession signals: chat,
-	 * chat-subject, chat-invitation, msg, agreement, news-*.
-	 * Handlers are connected in gtkhx_connect_signals below. */
-	.user_create           = user_create,
-	.user_delete           = user_delete,
-	.user_change           = user_change,
-	.users_clear           = users_clear,
-	.user_info             = output_user_info,
+	 * chat-subject, chat-invitation, msg, agreement, news-*,
+	 * user-*, users-clear, user-info. Handlers are connected in
+	 * gtkhx_connect_signals below. */
 	.file_info             = output_file_info,
 	.file_list             = output_file_list,
 	.file_update           = file_update,

@@ -41,6 +41,7 @@
 #include <stdarg.h>
 
 #include "hx.h"
+#include "gtkhx_session.h"
 #include "rcv.h"
 #include "gtkthreads.h"
 #include "gtkutil.h"
@@ -225,7 +226,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 		g_hash_table_iter_init (&iter, sess->chats);
 		while (g_hash_table_iter_next (&iter, &key, &val)) {
 			struct chat *chat = val;
-			hx_output.users_clear (htlc, chat);
+			gtkhx_session_emit_users_clear (
+				gtkhx_session_get_default (), htlc, chat);
 			if (GPOINTER_TO_UINT (key) != 0) {
 				non_public = g_list_prepend (non_public, key);
 			} else {

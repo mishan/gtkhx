@@ -386,7 +386,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 		}
 		user = hx_user_new (chat, uid);
 		chat->nusers++;
-		hx_output.user_create(htlc, chat, user, name, icon, color);
+		gtkhx_session_emit_user_create (gtkhx_session_get_default (),
+		                                htlc, chat, user, name, icon, color);
 		play_sound(USER_JOIN);
 		if(gtkhx_prefs.showjoin) {
 			hx_printf_prefix(htlc, cid, INFOPREFIX, _("join: %s\n"), name);
@@ -397,7 +398,8 @@ void hx_rcv_user_change (struct htlc_conn *htlc)
 		if (!got_color) {
 			color = user->color;
 		}
-		hx_output.user_change(htlc, chat, user, name, icon, color);
+		gtkhx_session_emit_user_change (gtkhx_session_get_default (),
+		                                htlc, chat, user, name, icon, color);
 		/* Phase 5: print "X is now known as Y" only when the name
 		 * actually changed AND it isn't us. Suppressing the self
 		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
@@ -469,7 +471,8 @@ void hx_rcv_user_part (struct htlc_conn *htlc)
 
 	user = hx_user_with_uid (chat, pm.uid);
 	if (user) {
-		hx_output.user_delete(htlc, chat, user);
+		gtkhx_session_emit_user_delete (gtkhx_session_get_default (),
+		                                htlc, chat, user);
 
 		if(gtkhx_prefs.showjoin) {
 			hx_printf_prefix(htlc, pm.cid, INFOPREFIX, _("parts: %s \n"), user->name);
@@ -1410,8 +1413,10 @@ void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 				htlc->color = user->color;
 			}
 			if (new) {
-				hx_output.user_create(htlc, chat, user, user->name, user->icon,
-									  user->color);
+				gtkhx_session_emit_user_create (
+					gtkhx_session_get_default (),
+					htlc, chat, user, user->name,
+					user->icon, user->color);
 			}
 		}
 
@@ -1476,7 +1481,8 @@ void rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
 	if (nlen && ilen) {
 		CR2LF(info, ilen);
 		strip_ansi(info, ilen);
-		hx_output.user_info(uid, name, info, ilen);
+		gtkhx_session_emit_user_info (gtkhx_session_get_default (),
+		                              uid, name, info, ilen);
 	}
 }
 

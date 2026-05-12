@@ -378,12 +378,9 @@ struct output_functions {
 	 * Phase 3.3: agreement, news-file, news-post, news-folder,
 	 * news-catalog, news-thread. */
 
-	/* User-list mutations on a chat (per-chat add/remove/change) */
-	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
-	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
-	void (*user_info)(guint16 uid, const char *nam, const char *info, guint16 len);
+	/* User-list mutations — migrated to GtkhxSession signals in
+	 * Phase 3.4: user-create, user-delete, user-change,
+	 * users-clear, user-info. */
 
 	/* Files */
 	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);

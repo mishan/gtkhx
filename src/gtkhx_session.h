@@ -101,6 +101,33 @@ void gtkhx_session_emit_news_catalog (GtkhxSession *self,
 void gtkhx_session_emit_news_thread (GtkhxSession *self,
                                      struct news_post *post);
 
+/* Per-chat user-list mutations. user-changed carries the NEW values
+ * so a view that wants to highlight a rename / icon change can diff
+ * them against the user's current cached state (which still holds
+ * the OLD values when the signal fires). */
+void gtkhx_session_emit_user_create (GtkhxSession *self,
+                                     struct htlc_conn *htlc,
+                                     struct chat *chat,
+                                     struct hx_user *user,
+                                     const char *nam,
+                                     guint16 icon, guint16 color);
+void gtkhx_session_emit_user_delete (GtkhxSession *self,
+                                     struct htlc_conn *htlc,
+                                     struct chat *chat,
+                                     struct hx_user *user);
+void gtkhx_session_emit_user_change (GtkhxSession *self,
+                                     struct htlc_conn *htlc,
+                                     struct chat *chat,
+                                     struct hx_user *user,
+                                     const char *nam,
+                                     guint16 icon, guint16 color);
+void gtkhx_session_emit_users_clear (GtkhxSession *self,
+                                     struct htlc_conn *htlc,
+                                     struct chat *chat);
+void gtkhx_session_emit_user_info (GtkhxSession *self,
+                                   guint16 uid, const char *nam,
+                                   const char *info, guint16 len);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature

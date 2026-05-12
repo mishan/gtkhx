@@ -47,6 +47,11 @@ enum {
 	SIGNAL_NEWS_FOLDER,
 	SIGNAL_NEWS_CATALOG,
 	SIGNAL_NEWS_THREAD,
+	SIGNAL_USER_CREATE,
+	SIGNAL_USER_DELETE,
+	SIGNAL_USER_CHANGE,
+	SIGNAL_USERS_CLEAR,
+	SIGNAL_USER_INFO,
 	SIGNAL_LAST
 };
 
@@ -155,6 +160,53 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 		NULL, NULL, NULL,
 		G_TYPE_NONE, 1,
 		G_TYPE_POINTER);
+
+	/* Per-chat user-list mutations. user-create / user-change
+	 * carry the NEW (nam, icon, color) so view diffs against the
+	 * still-OLD user->* are possible. */
+	signals[SIGNAL_USER_CREATE] = g_signal_new (
+		"user-create",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 6,
+		G_TYPE_POINTER,        /* htlc */
+		G_TYPE_POINTER,        /* chat */
+		G_TYPE_POINTER,        /* user */
+		G_TYPE_POINTER,        /* nam */
+		G_TYPE_UINT,           /* icon */
+		G_TYPE_UINT);          /* color */
+
+	signals[SIGNAL_USER_DELETE] = g_signal_new (
+		"user-delete",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 3,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
+
+	signals[SIGNAL_USER_CHANGE] = g_signal_new (
+		"user-change",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 6,
+		G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER,
+		G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT);
+
+	signals[SIGNAL_USERS_CLEAR] = g_signal_new (
+		"users-clear",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 2,
+		G_TYPE_POINTER, G_TYPE_POINTER);
+
+	signals[SIGNAL_USER_INFO] = g_signal_new (
+		"user-info",
+		G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+		NULL, NULL, NULL,
+		G_TYPE_NONE, 4,
+		G_TYPE_UINT,           /* uid (guint16 widened) */
+		G_TYPE_POINTER,        /* nam */
+		G_TYPE_POINTER,        /* info body */
+		G_TYPE_UINT);          /* len */
 }
 
 GtkhxSession *
@@ -247,4 +299,58 @@ gtkhx_session_emit_news_thread (GtkhxSession *self,
                                 struct news_post *post)
 {
 	g_signal_emit (self, signals[SIGNAL_NEWS_THREAD], 0, post);
+}
+
+void
+gtkhx_session_emit_user_create (GtkhxSession *self,
+                                struct htlc_conn *htlc,
+                                struct chat *chat,
+                                struct hx_user *user,
+                                const char *nam,
+                                guint16 icon, guint16 color)
+{
+	g_signal_emit (self, signals[SIGNAL_USER_CREATE], 0,
+	               htlc, chat, user, nam,
+	               (guint) icon, (guint) color);
+}
+
+void
+gtkhx_session_emit_user_delete (GtkhxSession *self,
+                                struct htlc_conn *htlc,
+                                struct chat *chat,
+                                struct hx_user *user)
+{
+	g_signal_emit (self, signals[SIGNAL_USER_DELETE], 0,
+	               htlc, chat, user);
+}
+
+void
+gtkhx_session_emit_user_change (GtkhxSession *self,
+                                struct htlc_conn *htlc,
+                                struct chat *chat,
+                                struct hx_user *user,
+                                const char *nam,
+                                guint16 icon, guint16 color)
+{
+	g_signal_emit (self, signals[SIGNAL_USER_CHANGE], 0,
+	               htlc, chat, user, nam,
+	               (guint) icon, (guint) color);
+}
+
+void
+gtkhx_session_emit_users_clear (GtkhxSession *self,
+                                struct htlc_conn *htlc,
+                                struct chat *chat)
+{
+	g_signal_emit (self, signals[SIGNAL_USERS_CLEAR], 0,
+	               htlc, chat);
+}
+
+void
+gtkhx_session_emit_user_info (GtkhxSession *self,
+                              guint16 uid, const char *nam,
+                              const char *info, guint16 len)
+{
+	g_signal_emit (self, signals[SIGNAL_USER_INFO], 0,
+	               (guint) uid, nam, info, (guint) len);
 }
