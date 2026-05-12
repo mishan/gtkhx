@@ -344,33 +344,70 @@ struct cached_filelist {
 
 /* ---- Output backend vtable (only the GUI implementation is alive) -- */
 
+/* Output (view) backend dispatch.
+ *
+ * Members fall into two groups:
+ *
+ *   Lifecycle hooks  — init, loop. Called once from main(). These
+ *                      aren't model→view notifications; they're
+ *                      "start the view backend / pump its event
+ *                      loop". Phase 3's signal migration leaves
+ *                      these alone.
+ *
+ *   Notifications    — everything else. Each entry corresponds to
+ *                      a model state change the view needs to know
+ *                      about (a chat message arrived, a user joined,
+ *                      a task progressed). In Phase 3 these become
+ *                      GObject signals emitted by the model.
+ *
+ * Dead entries dropped during Phase 2: user_list (UI rebuild was
+ * called by name directly, not through the vtable), clear (ditto:
+ * hx_clear_chat called directly), tracker_clear (ditto). Each had
+ * a vtable slot but never actually flowed through it.
+ */
 struct output_functions {
+	/* Lifecycle */
 	void (*init)(int argc, char **argv);
 	void (*loop)(void);
-	void (*clear)(struct htlc_conn *htlc, guint32 cid, int subj);
+
+	/* Chat output */
 	void (*chat)(struct htlc_conn *htlc, guint32 cid, char *chat, guint16 len);
+	void (*chat_subject)(struct htlc_conn *htlc, guint32 cid, char *buf);
+	void (*chat_invitation)(struct htlc_conn *htlc, guint32 cid, char *name);
+
+	/* Private messaging */
 	void (*msg)(char *name, guint16 uid, char *buf);
+
+	/* Login flow */
 	void (*agreement)(session *sess, const char *agreement, guint16 len);
+
+	/* News (1.x + threaded) */
 	void (*news_file)(struct htlc_conn *htlc, char *news, guint16 len);
 	void (*news_post)(struct htlc_conn *htlc, char *news, guint16 len);
-	void (*user_info)(guint16 uid, const char *nam, const char *info, guint16 len);
-	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);
-	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
-	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-	void (*user_list)(session *sess);
-	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
-	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
-	void (*file_update)(session *sess, struct htxf_conn *htxf);
-	void (*tracker_server_create)(struct in_addr addr, guint16 port, guint16 nusers, const char *nam, const char *desc, int total);
-	void (*task_update)(session *sess, struct task *tsk);
 	void (*news_folder)(struct gnews_folder *gfnews);
 	void (*news_catalog)(struct gnews_catalog *gcnews);
 	void (*news_thread)(struct news_post *post);
-	void (*chat_subject)(struct htlc_conn *htlc, guint32 cid, char *buf);
-	void (*chat_invitation)(struct htlc_conn *htlc, guint32 cid, char *name);
+
+	/* User-list mutations on a chat (per-chat add/remove/change) */
+	void (*user_create)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
+	void (*user_delete)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
+	void (*user_change)(struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
+	void (*users_clear)(struct htlc_conn *htlc, struct chat *chat);
+	void (*user_info)(guint16 uid, const char *nam, const char *info, guint16 len);
+
+	/* Files */
+	void (*file_info) (char *path, char *name, char *creator, char *type, char *comments, char *modified, char *created, guint32 size);
+	void (*file_list)(struct cached_filelist *cfl, struct hl_filelist_hdr *fh, void *data);
+	void (*file_update)(session *sess, struct htxf_conn *htxf);
+
+	/* Transfer queue */
 	void (*xfer_queue)(session *sess, struct htxf_conn *htxf);
-	void (*tracker_clear)(void);
+
+	/* Tracker */
+	void (*tracker_server_create)(struct in_addr addr, guint16 port, guint16 nusers, const char *nam, const char *desc, int total);
+
+	/* Tasks (long-running operations) */
+	void (*task_update)(session *sess, struct task *tsk);
 };
 
 extern struct output_functions hx_output;

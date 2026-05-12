@@ -1111,33 +1111,36 @@ static void output_agreement (session *sess, const char *agreement, guint16 len)
 	sess->agreementwin = agreementwin;
 }
 
+/* Phase 5+ (MVC boundary): designated initialisers keep this in
+ * sync with struct output_functions even if a future Phase 3
+ * reorders fields. The dead entries (clear / user_list /
+ * tracker_clear) used to live here but were never invoked through
+ * the vtable — their named-call sites in chat.c / users.c /
+ * tracker.c are unchanged. */
 struct output_functions hx_output = {
-	init,
-	loop,
-	hx_clear_chat,
-	output_chat,
-	msg_output,
-	output_agreement,
-	output_news_file,
-	output_news_post,
-	output_user_info,
-	output_file_info,
-	user_create,
-	user_delete,
-	user_change,
-	user_list,
-	users_clear,
-	output_file_list,
-	file_update,
-	tracker_server_create,
-	task_update,
-	output_news_folder,
-	output_news_catalog,
-	output_news_thread,
-	output_chat_subject,
-	output_chat_invitation,
-	output_xfer_queue,
-	tracker_clear
+	.init                  = init,
+	.loop                  = loop,
+	.chat                  = output_chat,
+	.chat_subject          = output_chat_subject,
+	.chat_invitation       = output_chat_invitation,
+	.msg                   = msg_output,
+	.agreement             = output_agreement,
+	.news_file             = output_news_file,
+	.news_post             = output_news_post,
+	.news_folder           = output_news_folder,
+	.news_catalog          = output_news_catalog,
+	.news_thread           = output_news_thread,
+	.user_create           = user_create,
+	.user_delete           = user_delete,
+	.user_change           = user_change,
+	.users_clear           = users_clear,
+	.user_info             = output_user_info,
+	.file_info             = output_file_info,
+	.file_list             = output_file_list,
+	.file_update           = file_update,
+	.xfer_queue            = output_xfer_queue,
+	.tracker_server_create = tracker_server_create,
+	.task_update           = task_update,
 };
 
 
