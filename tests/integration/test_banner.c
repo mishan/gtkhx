@@ -1,18 +1,24 @@
 /*
  * tests/integration/test_banner.c — verify the server sends an
  * HTLS_HDR_BANNER broadcast after the client agrees to the
- * agreement.
+ * agreement, and verify the URL is the specific one our test
+ * mhxd container is configured to serve.
  *
  * mhxd's rcv_agreementagree (mhxd/src/hxd/rcv.c) sends the banner
- * unconditionally if hxd_cfg.banner.type is non-empty. The shipped
- * config has:
+ * unconditionally if hxd_cfg.banner.type is non-empty. The
+ * gtkhx-mhxd container under tests/mhxd patches hxd.conf to set:
  *   banner {
  *       type "URL";
- *       url  "http://vivahx.com/images/vivahx.gif";
+ *       url  "https://placehold.co/468x60/png?text=GtkHx+Test+Banner";
  *   }
  * so an HTLS_HDR_BANNER should arrive carrying both
  * HTLS_DATA_BANNER_TYPE = "URL " (4 bytes) and
- * HTLS_DATA_BANNER_URL  = the configured URL.
+ * HTLS_DATA_BANNER_URL  = exactly that URL. The test asserts an
+ * exact string match so the container's banner configuration
+ * stays a known test fixture — both for the automated check and
+ * for manual smoke-testing: connecting GtkHx to the container
+ * should display a 468x60 banner image reading "GtkHx Test
+ * Banner".
  *
  * mhxd gates rcv_agreementagree on htlc->access_extra.can_agree,
  * which is only set in rcv_login's `got_name == false` branch
@@ -40,6 +46,13 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "integration_harness.h"
+
+/* The URL the gtkhx-mhxd test container is configured to advertise.
+ * Kept in sync by hand with tests/mhxd/Dockerfile's sed-patch of
+ * hxd.conf. Override at run time via $GTKHX_TEST_BANNER_URL — useful
+ * when pointing the suite at a non-default test server. */
+#define GTKHX_TEST_BANNER_URL_DEFAULT \
+	"https://placehold.co/468x60/png?text=GtkHx+Test+Banner"
 
 static guint32
 hdr_type (const struct htlc_conn *htlc)
@@ -146,14 +159,22 @@ test_banner_arrives_after_agreementagree (void)
 	g_assert_true (got_banner);
 
 	/* Banner type is exactly 4 bytes — "URL " (trailing-space
-	 * padded) per the shipped config. The URL is whatever the
-	 * config says; we just assert it's non-empty. */
+	 * padded) per the container config. */
 	g_assert_nonnull (banner_type);
 	g_assert_cmpuint (strlen (banner_type), ==, 4);
+	g_assert_cmpstr (banner_type, ==, "URL ");
 	g_test_message ("banner type: \"%s\"", banner_type);
 
+	/* URL must match the container's configured banner exactly.
+	 * If they drift, either the Dockerfile or the test was
+	 * updated without the other — and that drift is the bug.
+	 * $GTKHX_TEST_BANNER_URL overrides for ad-hoc runs against
+	 * a different test server. */
+	const char *expected_url = g_getenv ("GTKHX_TEST_BANNER_URL");
+	if (!expected_url || !*expected_url)
+		expected_url = GTKHX_TEST_BANNER_URL_DEFAULT;
 	g_assert_nonnull (banner_url);
-	g_assert_cmpuint (strlen (banner_url), >, 0);
+	g_assert_cmpstr (banner_url, ==, expected_url);
 	g_test_message ("banner url:  \"%s\"", banner_url);
 
 	g_free (banner_type);
