@@ -75,9 +75,15 @@ finish-args:
   # names under our app-id prefix:
   #
   #   - own-name: each SNI app registers a unique name shaped
-  #     "org.kde.StatusNotifierItem-<pid>-1". The wildcard covers
-  #     any PID. Without this, g_bus_own_name returns NameLost
-  #     behind xdg-dbus-proxy and the tray icon never appears.
+  #     "org.kde.StatusNotifierItem-<pid>-1" (hyphens, not dots —
+  #     it's a single bus-name segment). Flatpak's bus-filter
+  #     wildcards only accept ".*" as a complete trailing
+  #     segment, so "org.kde.StatusNotifierItem-*" gets rejected
+  #     by newer flatpak-builder at finalization ("Invalid dbus
+  #     name"). Broaden to "org.kde.*" — any subname under
+  #     org.kde., which our specific name matches. Same
+  #     workaround other tray-using flatpaks (KeePassXC,
+  #     QGIS, ...) use.
   #
   #   - talk-name: we call RegisterStatusNotifierItem on the
   #     watcher (KDE Plasma's kded, GNOME's AppIndicator
@@ -85,7 +91,7 @@ finish-args:
   #     waybar's tray module, etc.). Without it the proxy call
   #     returns AccessDenied and the icon registers locally but
   #     never reaches a host.
-  - --own-name=org.kde.StatusNotifierItem-*
+  - --own-name=org.kde.*
   - --talk-name=org.kde.StatusNotifierWatcher
 
   # Desktop notifications (src/notify.c). GApplication routes
