@@ -488,8 +488,8 @@ hx_news_file_extract (struct htlc_conn *htlc, char *out,
 }
 
 gboolean
-hx_dirlist_parse_extended (const guint8 *data, gsize dlen,
-                            struct hx_dirlist_ext_entry *out)
+hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
+                            struct hx_news_dirlist_entry *out)
 {
 	guint16 ntype;
 	gsize   off;
@@ -528,6 +528,33 @@ hx_dirlist_parse_extended (const guint8 *data, gsize dlen,
 	if (namelen)
 		memcpy (out->name, data + off, namelen);
 	out->name[namelen] = '\0';
+	return TRUE;
+}
+
+gboolean
+hx_news_dirlist_parse_folderitem (const guint8 *data, gsize dlen,
+                        struct hx_news_dirlist_entry *out)
+{
+	guint16 nlen;
+
+	if (!out)
+		return FALSE;
+	if (!data || dlen < 1)
+		return FALSE;
+
+	/* Plain form: u8 ntype, then name[dlen - 1]. The original
+	 * gtkhx parser at rcv_task_newsfolder_list copied dh->data[0]
+	 * straight into item->type and used the rest as the name. We
+	 * preserve that contract exactly: ntype==1 → folder (kind 1),
+	 * anything else → category (kind 2). */
+	nlen = (dlen > sizeof (out->name)) ? (sizeof (out->name) - 1)
+	                                    : (guint16) (dlen - 1);
+
+	out->kind     = (data[0] == 1) ? 1 : 2;
+	out->name_len = nlen;
+	if (nlen)
+		memcpy (out->name, data + 1, nlen);
+	out->name[nlen] = '\0';
 	return TRUE;
 }
 

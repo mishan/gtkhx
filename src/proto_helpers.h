@@ -307,45 +307,75 @@ extern int hx_news_post_walk (struct htlc_conn *htlc,
                               hx_news_post_cb cb, void *user);
 
 /*
- * Parse a single HTLC_DATA_CATEGORYITEM (0x0143) chunk body — the
- * "extended" form of a 1.5 threaded-news directory entry. The plain
- * form (HTLC_DATA_NEWSFOLDERITEM / 0x0140) carries just `u8 type +
- * name`; the extended form adds a per-category GUID + add/delete
- * serial numbers used for incremental sync. Different 1.5+ servers
- * choose between the two forms.
+ * Parse one entry from a 1.5 threaded-news directory listing
+ * (reply to HTLC_HDR_NEWSDIRLIST).
  *
- * Wire format (chunk body, hl_data_hdr already consumed):
+ * Hotline 1.5 introduced two distinct threaded-news containers:
  *
- *   u16 ntype                (2 = bundle/folder, 3 = category)
- *   u16 count                (sub-item count; informational)
- *   if ntype == 3 (category):
- *     u8[16] guid            (6×u16 + u32 — opaque identifier)
- *     u32    addsn           (add-serial-number, for incremental sync)
- *     u32    deletesn        (delete-serial-number)
- *   u8     namelen
- *   u8[namelen] name
- *   trailing bytes           (some servers pad; ignored)
+ *   - news folder:   contains news folders and/or news categories
+ *   - news category: contains news posts
  *
- * On success returns TRUE and fills `out`:
- *   .kind     1 = folder, 2 = category (matches the legacy
- *             folder_item->type contract used downstream).
- *   .name[]   NUL-terminated, up to 255 bytes (the wire namelen is
- *             u8 so 255 is the protocol cap).
- *   .name_len = strlen(name).
+ * A directory-listing reply for a folder enumerates that folder's
+ * contents — a mix of folder-entries and category-entries. One
+ * chunk per entry. The `kind` field on hx_news_dirlist_entry says
+ * whether a given parsed chunk is a folder-entry or a
+ * category-entry.
  *
- * Returns FALSE on a malformed chunk: truncated header, unknown
- * ntype, or namelen overruns dlen. The output struct is left
- * untouched on failure. NULL `out` is a programmer error and
- * returns FALSE.
+ * Two wire chunk types are used to encode an entry. Either chunk
+ * type can encode either kind of entry; the distinction is purely
+ * in the on-the-wire framing and which fields are present:
+ *
+ *   HTLC_DATA_NEWSFOLDERITEM (0x0140):
+ *     u8     ntype             (1 = folder-entry, else category-entry)
+ *     u8[..] name              (rest of chunk body)
+ *
+ *   HTLC_DATA_CATEGORYITEM   (0x0143) — carries extra per-category
+ *                                       sync metadata (GUID + add /
+ *                                       delete serial numbers):
+ *     u16    ntype             (2 = folder-entry, 3 = category-entry)
+ *     u16    count             (number of children; informational)
+ *     if category-entry:
+ *       u8[16] guid            (6×u16 + u32, opaque identifier)
+ *       u32    addsn           (add-serial-number, for incremental sync)
+ *       u32    deletesn        (delete-serial-number)
+ *     u8     namelen
+ *     u8[namelen] name
+ *     trailing bytes           (some servers pad; ignored)
+ *
+ * The chunk-type name "CATEGORYITEM" is a slight misnomer — that
+ * encoding carries folder-entries AND category-entries alike; the
+ * name reflects that the wire-format addition relative to the
+ * NEWSFOLDERITEM encoding is the per-category sync metadata.
+ *
+ * Servers vary on which chunk type they emit; the client has to
+ * accept both. Both parsers normalise their respective wire bytes
+ * to the same output contract:
+ *
+ *   .kind      1 = folder-entry (contains folders / categories)
+ *              2 = category-entry (contains posts)
+ *   .name[]    NUL-terminated, up to 255 bytes (CATEGORYITEM namelen
+ *              is u8 so 255 is the protocol cap; NEWSFOLDERITEM is
+ *              truncated at the same cap for symmetry)
+ *   .name_len  strlen(name)
+ *
+ * Both return FALSE on a malformed chunk (truncated header, name
+ * overruns dlen, unknown ntype for the CATEGORYITEM encoding).
+ * The output struct is left untouched on failure. NULL `out` is a
+ * programmer error and returns FALSE.
  */
-struct hx_dirlist_ext_entry {
-	int     kind;             /* 1 = folder, 2 = category */
+struct hx_news_dirlist_entry {
+	int     kind;             /* 1 = folder-entry, 2 = category-entry */
 	char    name[256];        /* NUL-terminated, max 255 */
 	guint16 name_len;         /* strlen(name) */
 };
 
-extern gboolean hx_dirlist_parse_extended (const guint8 *data, gsize dlen,
-                                            struct hx_dirlist_ext_entry *out);
+/* Parse a HTLC_DATA_NEWSFOLDERITEM (0x0140) chunk body. */
+extern gboolean hx_news_dirlist_parse_folderitem    (const guint8 *data, gsize dlen,
+                                            struct hx_news_dirlist_entry *out);
+
+/* Parse a HTLC_DATA_CATEGORYITEM (0x0143) chunk body. */
+extern gboolean hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
+                                            struct hx_news_dirlist_entry *out);
 
 /*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
