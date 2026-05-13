@@ -19,6 +19,7 @@
 #include "files_panel.h"
 #include "files_browser.h"
 #include "gtkhx_session.h"
+#include "gtkutil.h"
 
 /* gi18n.h after the project headers — the codebase's compat.h has
  * a placeholder _ macro that we want overridden by the proper
@@ -519,6 +520,13 @@ open_files_browser (void)
 		G_CALLBACK (on_close), br);
 
 	the_browser = br;
+
+	/* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
+	 * Ctrl+K connect, Ctrl+T tracker. Same set every other
+	 * window in the app picks up via init_keyaccel. Capture
+	 * phase means the column views' internal focus chain
+	 * doesn't swallow them. */
+	init_keyaccel (br->window);
 
 	/* Initial focus on the left panel so the user has a working
 	 * active selection right away. */
