@@ -198,7 +198,13 @@ do_list (HxLocalFilesProvider *self, const char *path)
 			kind = g_strdup ("");
 		}
 
-		entry = hx_file_entry_new (name, is_dir, size, (gint64) mtime, kind);
+		/* icon_id 0 → hx_file_entry_new picks the generic folder
+		 * vs. file icon based on is_dir. Phase 4 polish item:
+		 * map the GIO content_type to richer icons (image/audio/
+		 * archive) the same way the remote provider does for
+		 * Hotline FourCCs. */
+		entry = hx_file_entry_new (name, is_dir, size, (gint64) mtime,
+		                           kind, 0);
 		g_list_store_append (self->listing, entry);
 		g_object_unref (entry);
 		g_free (kind);

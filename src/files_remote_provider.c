@@ -219,12 +219,19 @@ populate_from_chunks (HxRemoteFilesProvider *self,
 			kindbuf[4] = '\0';
 		}
 
+		/* Classify icon from the 4-byte Hotline file-type code.
+		 * icon_of_ftype_and_name reads the network-byte-order
+		 * bytes directly from the receive buffer — we pass the
+		 * raw FourCC, not the htonl'd local. */
 		entry = hx_file_entry_new (
 			utf8 ? utf8 : namebuf,
 			is_dir,
 			is_dir ? 0 : (guint64) fsize,
 			0,             /* no mtime on the wire */
-			kindbuf);
+			kindbuf,
+			icon_of_ftype_and_name (
+				(const char *) &fh->ftype,
+				namebuf, fnlen));
 		g_list_store_append (self->listing, entry);
 		g_object_unref (entry);
 		g_free (utf8);

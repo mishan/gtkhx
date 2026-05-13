@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n.h>
 
+#include "files.h"           /* ICON_* */
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_panel.h"
@@ -34,23 +35,49 @@ struct _files_panel {
 	gulong navigated_handler;
 	gulong unavailable_handler;
 
-	/* Cached row icons. Loaded once at panel construction and
-	 * paintable-set into each row's GtkImage in name_bind.
-	 * Holding the GdkPaintable refs on the panel sidesteps the
-	 * Adwaita gtk_image_set_from_resource path that renders blank
-	 * for XPMs (same workaround used by news_browser and the
-	 * toolbar buttons). */
-	GdkPaintable *icon_folder;
-	GdkPaintable *icon_file;
+	/* Cached row icons keyed by ICON_* id. Lazy-populated via
+	 * lookup_icon_paintable on first row that needs each icon;
+	 * dropped on panel_free. Holding the GdkPaintable refs on
+	 * the panel sidesteps the Adwaita gtk_image_set_from_resource
+	 * path that renders blank for our small bundled PNGs (the
+	 * same workaround used by news_browser and the toolbar
+	 * buttons). */
+	GHashTable *icons;   /* guint16 icon_id → GdkPaintable (1.5x scaled) */
 };
 
-/* Load an XPM resource and wrap it in a GdkPaintable scaled 1.5x
- * with nearest-neighbor interpolation. Identical treatment to
- * news_browser.c's icon path so the two browsers' row chrome
- * looks consistent. Returns NULL silently on a missing resource —
- * callers null-check. */
+/* Map an ICON_* id to a gresource path. Returns NULL for ids
+ * we don't have a dedicated icon for — caller falls back to
+ * ICON_FILE (or ICON_FOLDER for folders, already resolved at
+ * entry-construction time). */
+static const char *
+icon_resource_for_id (guint16 icon_id)
+{
+	switch (icon_id) {
+	case ICON_FOLDER:     return "/com/nasledov/gtkhx/pixmaps/folder.png";
+	case ICON_FOLDER_IN:  return "/com/nasledov/gtkhx/pixmaps/folder_dropbox.png";
+	case ICON_FILE:       return "/com/nasledov/gtkhx/pixmaps/file.png";
+	case ICON_FILE_HTft:  return "/com/nasledov/gtkhx/pixmaps/file_html.png";
+	case ICON_FILE_SIT:
+	case ICON_FILE_SITP:  return "/com/nasledov/gtkhx/pixmaps/file_sit.png";
+	case ICON_FILE_IMAGE: return "/com/nasledov/gtkhx/pixmaps/file_image.png";
+	case ICON_FILE_APPL:  return "/com/nasledov/gtkhx/pixmaps/file_app.png";
+	case ICON_FILE_alis:  return "/com/nasledov/gtkhx/pixmaps/file_alias.png";
+	case ICON_FILE_DISK:  return "/com/nasledov/gtkhx/pixmaps/file_disk.png";
+	case ICON_FILE_NOTE:  return "/com/nasledov/gtkhx/pixmaps/file_note.png";
+	case ICON_FILE_MOOV:  return "/com/nasledov/gtkhx/pixmaps/file_movie.png";
+	case ICON_FILE_ZIP:   return "/com/nasledov/gtkhx/pixmaps/file_zip.png";
+	default:              return NULL;
+	}
+}
+
+/* Load an icon resource (XPM or PNG) and wrap it in a GdkPaintable
+ * scaled 1.5x with nearest-neighbor interpolation. Same treatment
+ * as news_browser.c so both browsers' row chrome looks consistent;
+ * the cicn-derived PNGs we extract from icons.rsrc are also 16x16,
+ * so they scale the same way the XPMs do. Returns NULL silently
+ * on a missing resource — callers null-check. */
 static GdkPaintable *
-load_xpm_paintable (const char *resource)
+load_icon_paintable (const char *resource)
 {
 	GdkPixbuf  *pb, *scaled;
 	GdkTexture *tex;
@@ -69,6 +96,34 @@ load_xpm_paintable (const char *resource)
 	G_GNUC_END_IGNORE_DEPRECATIONS
 	g_object_unref (scaled);
 	return GDK_PAINTABLE (tex);
+}
+
+/* Lazy-cache lookup. Returns a borrowed GdkPaintable* (panel owns
+ * the ref via p->icons). NULL if neither the requested id nor the
+ * ICON_FILE fallback could be loaded. */
+static GdkPaintable *
+lookup_icon_paintable (files_panel *p, guint16 icon_id)
+{
+	GdkPaintable *cached;
+	const char   *resource;
+
+	if (!p || !p->icons) return NULL;
+
+	cached = g_hash_table_lookup (p->icons, GUINT_TO_POINTER ((guint) icon_id));
+	if (cached) return cached;
+
+	resource = icon_resource_for_id (icon_id);
+	if (!resource) {
+		/* Unknown id → fall back to ICON_FILE (or ICON_FOLDER for
+		 * the not-meaningful case of icon_id==0 sneaking through). */
+		return lookup_icon_paintable (p, ICON_FILE);
+	}
+
+	cached = load_icon_paintable (resource);
+	if (cached)
+		g_hash_table_insert (p->icons,
+			GUINT_TO_POINTER ((guint) icon_id), cached);
+	return cached;
 }
 
 /* ---- Custom sorters ---- */
@@ -178,7 +233,7 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 		return;
 	}
 
-	paintable = hx_file_entry_is_dir (e) ? p->icon_folder : p->icon_file;
+	paintable = lookup_icon_paintable (p, hx_file_entry_get_icon_id (e));
 	if (paintable)
 		gtk_image_set_from_paintable (icon, paintable);
 	else
@@ -416,17 +471,12 @@ files_panel_new (HxFilesProvider *provider)
 
 	p->provider = g_object_ref (provider);
 
-	/* Cached row icons — load once, reuse for every visible row.
-	 * mkdir.xpm is the manila folder we use for directories
-	 * (the file is misnamed: the icon depicts an open folder
-	 * because the toolbar action that uses it is "make a
-	 * directory", but the artwork is a perfectly good folder
-	 * glyph for row display). files.xpm is the document icon
-	 * already on the toolbar Files button. Both XPMs are 16x16;
-	 * the helper scales them 1.5x with nearest-neighbor so the
-	 * pixel-art stays crisp. */
-	p->icon_folder = load_xpm_paintable ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
-	p->icon_file   = load_xpm_paintable ("/com/nasledov/gtkhx/pixmaps/files.xpm");
+	/* Row icons are loaded lazily by lookup_icon_paintable from
+	 * the gresource (pre-extracted from icons.rsrc via
+	 * tools/cicndump). The hashtable owns the GdkPaintable refs
+	 * and drops them when the panel is freed. */
+	p->icons = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+		NULL, (GDestroyNotify) g_object_unref);
 
 	/* ---- Root box ---- */
 	p->root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -605,8 +655,10 @@ files_panel_free (files_panel *p)
 			g_signal_handler_disconnect (p->provider, p->unavailable_handler);
 	}
 	g_clear_object (&p->provider);
-	g_clear_object (&p->icon_folder);
-	g_clear_object (&p->icon_file);
+	if (p->icons) {
+		g_hash_table_destroy (p->icons);
+		p->icons = NULL;
+	}
 	/* p->root is owned by its parent widget and gets unparented
 	 * when the parent is destroyed; we don't free it directly. */
 	g_free (p);

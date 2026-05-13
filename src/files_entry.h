@@ -33,18 +33,24 @@ G_DECLARE_FINAL_TYPE (HxFileEntry, hx_file_entry, HX, FILE_ENTRY, GObject)
  *               type; remote provider passes the Hotline 4-byte
  *               file-type code translated through a name table.
  *               Owned by caller; copied. NULL means "unknown".
+ *   icon_id   — Mac-classic cicn icon ID (see files.h ICON_*).
+ *               The panel uses this to pick a row-icon resource;
+ *               0 falls back to ICON_FILE / ICON_FOLDER based on
+ *               is_dir.
  */
 extern HxFileEntry *hx_file_entry_new (const char *name,
                                        gboolean    is_dir,
                                        guint64     size,
                                        gint64      modified,
-                                       const char *kind);
+                                       const char *kind,
+                                       guint16     icon_id);
 
 extern const char *hx_file_entry_get_name     (HxFileEntry *e);
 extern gboolean    hx_file_entry_is_dir       (HxFileEntry *e);
 extern guint64     hx_file_entry_get_size     (HxFileEntry *e);
 extern gint64      hx_file_entry_get_modified (HxFileEntry *e);
 extern const char *hx_file_entry_get_kind     (HxFileEntry *e);
+extern guint16     hx_file_entry_get_icon_id  (HxFileEntry *e);
 
 /* Formatters used by the panel's column bind callbacks. Each
  * returns a fresh g_malloc'd string (caller frees).

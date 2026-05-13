@@ -58,7 +58,11 @@
 #define ICON_FILE_MOOV 425
 #define ICON_FILE_ZIP 426
 
-guint8 dir_char = '/';
+/* ICON_* constants moved to files.h so the new files browser
+ * (files_remote_provider.c, files_local_provider.c, files_panel.c)
+ * can drive load_icon from the same table. */
+
+guint8 dir_char  = '/';
 
 /* Phase 5+: open file-browser windows kept as a GList of pointers.
  * Replaces the intrusive next/prev fields that used to live on
@@ -1025,47 +1029,50 @@ strcasestr_len (char *haystack, char *needle, size_t len)
     return 0;
 }
 
-static guint16
+
+/* Pick a cicn icon ID for a Hotline file based on its 4-byte
+ * type code (plus filename, for the drop-box heuristic on
+ * folders). Public so the new files browser's remote provider
+ * can drive it directly off the parsed wire chunks. */
+guint16
+icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
+{
+	if (!ftype) return ICON_FILE;
+
+	if (!memcmp (ftype, "fldr", 4)) {
+		if (name && (
+		    strcasestr_len ((char *) name, "DROP BOX", name_len) ||
+		    strcasestr_len ((char *) name, "UPLOAD",   name_len)))
+			return ICON_FOLDER_IN;
+		return ICON_FOLDER;
+	}
+	if (!memcmp (ftype, "JPEG", 4)
+	    || !memcmp (ftype, "PNGf", 4)
+	    || !memcmp (ftype, "GIFf", 4)
+	    || !memcmp (ftype, "PICT", 4))
+		return ICON_FILE_IMAGE;
+	if (!memcmp (ftype, "MPEG", 4)
+	    || !memcmp (ftype, "MPG ", 4)
+	    || !memcmp (ftype, "AVI ", 4)
+	    || !memcmp (ftype, "MooV", 4))
+		return ICON_FILE_MOOV;
+	if (!memcmp (ftype, "MP3 ", 4)) return ICON_FILE_NOTE;
+	if (!memcmp (ftype, "ZIP ", 4)) return ICON_FILE_ZIP;
+	if (!memcmp (ftype, "SIT",  3)) return ICON_FILE_SIT;
+	if (!memcmp (ftype, "APPL", 4)) return ICON_FILE_APPL;
+	if (!memcmp (ftype, "rohd", 4)) return ICON_FILE_DISK;
+	if (!memcmp (ftype, "HTft", 4)) return ICON_FILE_HTft;
+	if (!memcmp (ftype, "alis", 4)) return ICON_FILE_alis;
+	return ICON_FILE;
+}
+
+guint16
 icon_of_fh (struct hl_filelist_hdr *fh)
 {
-    guint16 icon;
-
-    if (!memcmp (&fh->ftype, "fldr", 4)) {
-        if (strcasestr_len ((char *)fh->fname, "DROP BOX", fh->fnlen)
-            || strcasestr_len ((char *)fh->fname, "UPLOAD", fh->fnlen)) {
-            icon = ICON_FOLDER_IN;
-        } else {
-            icon = ICON_FOLDER;
-        }
-    } else if (!memcmp (&fh->ftype, "JPEG", 4)
-               || !memcmp (&fh->ftype, "PNGf", 4)
-               || !memcmp (&fh->ftype, "GIFf", 4)
-               || !memcmp (&fh->ftype, "PICT", 4)) {
-        icon = ICON_FILE_IMAGE;
-    } else if (!memcmp (&fh->ftype, "MPEG", 4)
-               || !memcmp (&fh->ftype, "MPG ", 4)
-               || !memcmp (&fh->ftype, "AVI ", 4)
-               || !memcmp (&fh->ftype, "MooV", 4)) {
-        icon = ICON_FILE_MOOV;
-    } else if (!memcmp (&fh->ftype, "MP3 ", 4)) {
-        icon = ICON_FILE_NOTE;
-    } else if (!memcmp (&fh->ftype, "ZIP ", 4)) {
-        icon = ICON_FILE_ZIP;
-    } else if (!memcmp (&fh->ftype, "SIT", 3)) {
-        icon = ICON_FILE_SIT;
-    } else if (!memcmp (&fh->ftype, "APPL", 4)) {
-        icon = ICON_FILE_APPL;
-    } else if (!memcmp (&fh->ftype, "rohd", 4)) {
-        icon = ICON_FILE_DISK;
-    } else if (!memcmp (&fh->ftype, "HTft", 4)) {
-        icon = ICON_FILE_HTft;
-    } else if (!memcmp (&fh->ftype, "alis", 4)) {
-        icon = ICON_FILE_alis;
-    } else {
-        icon = ICON_FILE;
-    }
-
-    return icon;
+	if (!fh) return ICON_FILE;
+	return icon_of_ftype_and_name ((const char *) &fh->ftype,
+	                                (const char *) fh->fname,
+	                                (gsize) fh->fnlen);
 }
 
 void

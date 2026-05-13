@@ -60,5 +60,24 @@
     <file>pixmaps/ul.xpm</file>
     <file>pixmaps/up.xpm</file>
     <file>pixmaps/users.xpm</file>
+
+    <!-- File-type icons used by the new orthodox files browser.
+         Extracted from the legacy icons.rsrc cicns once via
+         tools/cicndump (see commit ... in this branch) so the
+         new browser doesn't depend on the Mac resource fork
+         being present at runtime. Naming maps cleanly to the
+         ICON_* IDs in files.h via icon_resource_for_id. -->
+    <file>pixmaps/file.png</file>
+    <file>pixmaps/file_alias.png</file>
+    <file>pixmaps/file_app.png</file>
+    <file>pixmaps/file_disk.png</file>
+    <file>pixmaps/file_html.png</file>
+    <file>pixmaps/file_image.png</file>
+    <file>pixmaps/file_movie.png</file>
+    <file>pixmaps/file_note.png</file>
+    <file>pixmaps/file_sit.png</file>
+    <file>pixmaps/file_zip.png</file>
+    <file>pixmaps/folder.png</file>
+    <file>pixmaps/folder_dropbox.png</file>
   </gresource>
 </gresources>

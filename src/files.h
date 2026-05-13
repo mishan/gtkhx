@@ -1,6 +1,35 @@
 #ifndef HX_FILES_H
 #define HX_FILES_H
 
+/* Forward decls so consumers that don't pull in <gtk/gtk.h> or
+ * the protocol headers (e.g. files_entry.c, which only needs the
+ * ICON_* constants) still compile. struct gfile_list and the
+ * hx_file_* externs below reference these. */
+typedef struct _GtkWidget GtkWidget;
+struct htlc_conn;
+struct cached_filelist;
+struct hl_filelist_hdr;
+struct path_hist;
+
+/* Mac-classic cicn icon numbers used across the legacy and new
+ * files UIs. The numeric values are the cicn resource IDs inside
+ * the bundled .rsrc files load_icon walks. */
+#define ICON_FILE       400
+#define ICON_FOLDER     401
+#define ICON_FOLDER_IN  421
+#define ICON_FILE_HTft  402
+#define ICON_FILE_SIT   403
+#define ICON_FILE_TEXT  404
+#define ICON_FILE_IMAGE 406
+#define ICON_FILE_APPL  407
+#define ICON_FILE_HTLC  408
+#define ICON_FILE_SITP  409
+#define ICON_FILE_alis  422
+#define ICON_FILE_DISK  423
+#define ICON_FILE_NOTE  424
+#define ICON_FILE_MOOV  425
+#define ICON_FILE_ZIP   426
+
 extern void destroy_gfl_list (void);
 extern void open_files (void);
 extern char *human_size (char *sizstr, guint32 size);
@@ -11,6 +40,16 @@ extern void output_file_info (char *path, char *name, char *creator, char *type,
                               guint32 size);
 extern void cfl_print (struct cached_filelist *cfl, void *data);
 extern struct cached_filelist *cfl_lookup (const char *path);
+
+/* Pick the cicn icon id for a Hotline file-list entry. `ftype` is
+ * the raw 4-byte FourCC from the wire (NOT byte-swapped); `name`
+ * + `name_len` are the entry's filename (UTF-8 OK, but the
+ * drop-box heuristic only checks ASCII subsequences). Returns
+ * one of the ICON_* constants above. */
+extern guint16 icon_of_ftype_and_name (const char *ftype,
+                                       const char *name,
+                                       gsize       name_len);
+extern guint16 icon_of_fh (struct hl_filelist_hdr *fh);
 
 extern guint8 dir_char;
 

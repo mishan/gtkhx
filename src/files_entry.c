@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "files.h"           /* ICON_* defaults */
 #include "files_entry.h"
 
 struct _HxFileEntry {
@@ -24,6 +25,7 @@ struct _HxFileEntry {
 	guint64  size;
 	gint64   modified;
 	char    *kind;
+	guint16  icon_id;
 };
 
 G_DEFINE_FINAL_TYPE (HxFileEntry, hx_file_entry, G_TYPE_OBJECT)
@@ -54,7 +56,8 @@ hx_file_entry_new (const char *name,
                    gboolean    is_dir,
                    guint64     size,
                    gint64      modified,
-                   const char *kind)
+                   const char *kind,
+                   guint16     icon_id)
 {
 	HxFileEntry *e = g_object_new (HX_TYPE_FILE_ENTRY, NULL);
 	e->name     = g_strdup (name ? name : "");
@@ -62,7 +65,17 @@ hx_file_entry_new (const char *name,
 	e->size     = size;
 	e->modified = modified;
 	e->kind     = g_strdup (kind ? kind : "");
+	/* 0 = "caller didn't classify" — default to the generic icon
+	 * appropriate for the kind. Saves both providers from spelling
+	 * out the same fallback. */
+	e->icon_id  = icon_id ? icon_id : (is_dir ? ICON_FOLDER : ICON_FILE);
 	return e;
+}
+
+guint16
+hx_file_entry_get_icon_id (HxFileEntry *e)
+{
+	return e ? e->icon_id : 0;
 }
 
 const char *
