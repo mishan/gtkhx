@@ -156,11 +156,23 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
 		G_CALLBACK (on_panel_focus_enter), br);
 	gtk_widget_add_controller (root, focus_ctrl);
 
-	/* Capture phase so we observe the click before the children
-	 * consume it for their own selection / activation logic. */
+	/* BUBBLE phase: column view sees the click first and runs
+	 * its built-in click-counting (selection on first press,
+	 * activate on second press of a double-click). We observe
+	 * on the way back up to flip the active panel. The earlier
+	 * CAPTURE-phase version of this gesture broke double-click
+	 * activation on the non-active panel — the column view saw
+	 * the first click of a double-click pair as just a
+	 * selection-with-focus-shift and waited for another pair
+	 * before treating it as a double. Symptom: first double-
+	 * click in the remote panel did nothing, second double-
+	 * click descended. BUBBLE phase keeps the active-flip
+	 * working for all cases except clicks that the column view
+	 * fully consumes — and even then the focus controller
+	 * above catches focus-enter and flips active. */
 	click = gtk_gesture_click_new ();
 	gtk_event_controller_set_propagation_phase (
-		GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+		GTK_EVENT_CONTROLLER (click), GTK_PHASE_BUBBLE);
 	g_signal_connect (click, "pressed",
 		G_CALLBACK (on_panel_clicked), br);
 	gtk_widget_add_controller (root, GTK_EVENT_CONTROLLER (click));
