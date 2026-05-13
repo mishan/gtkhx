@@ -62,11 +62,19 @@ struct _HxNewsNode {
 	int         kind;
 	char       *name;
 	char       *path;        /* full Hotline path (folders / categories);
-	                          * NULL for posts */
+	                          * for posts: the containing category's path */
 	GListStore *children;    /* created lazily on first expansion */
 	gboolean    loaded;      /* TRUE once the RPC reply has populated
 	                          * children — guards against re-fetch on
 	                          * collapse + re-expand */
+
+	/* Post-specific (kind == NB_KIND_POST). Filled at the
+	 * NEWSCATLIST reply when the post tree gets built. Phase 4
+	 * uses these to issue HTLC_HDR_GETTHREAD for the body. */
+	guint32           postid;
+	char             *sender;
+	char             *mime_type;
+	struct date_time  date;
 };
 
 G_DEFINE_FINAL_TYPE (HxNewsNode, hx_news_node, G_TYPE_OBJECT)
@@ -77,6 +85,8 @@ hx_news_node_finalize (GObject *obj)
 	HxNewsNode *n = HX_NEWS_NODE (obj);
 	g_free (n->name);
 	g_free (n->path);
+	g_free (n->sender);
+	g_free (n->mime_type);
 	g_clear_object (&n->children);
 	G_OBJECT_CLASS (hx_news_node_parent_class)->finalize (obj);
 }
@@ -162,18 +172,49 @@ ensure_pending_tables (void)
 
 /* ---------- create_child_model: builds the tree's child stores --------
  *
- * Called by GtkTreeListModel for each row to determine whether it's
- * a leaf or expandable. Returning NULL marks the row as a leaf.
+ * Called by GtkTreeListModel for each row to decide whether it's a
+ * leaf or expandable. Returning NULL marks the row as a leaf.
  * Returning a GListModel (even empty) marks it as expandable; the
  * tree expander will appear next to the row.
  *
- * Phase 2: every node is a leaf. Phase 3 will return a GListStore
- * for folder / category nodes and wire lazy fetch on expand. */
+ *   FOLDER, CATEGORY → always expandable. Children get appended
+ *                      when the NEWSDIRLIST / NEWSCATLIST reply
+ *                      arrives (lazy fetch, see on_row_expanded).
+ *   POST             → expandable only if the post has replies,
+ *                      i.e. node->children is already populated by
+ *                      the NEWSCATLIST threading walker. Post
+ *                      replies don't need a separate fetch — they
+ *                      came in the same task reply as the parent.
+ */
 static GListModel *
 news_node_create_child_model (gpointer item, gpointer user_data)
 {
-	(void) item; (void) user_data;
-	return NULL;
+	HxNewsNode *node = item;
+	(void) user_data;
+
+	if (node->kind == NB_KIND_POST) {
+		if (node->children
+		    && g_list_model_get_n_items (G_LIST_MODEL (node->children)) > 0)
+			return G_LIST_MODEL (g_object_ref (node->children));
+		return NULL;
+	}
+
+	/* Folders + categories: lazy-allocate an empty children store so
+	 * the expander appears. The fetch only fires on first expand. */
+	if (!node->children)
+		node->children = g_list_store_new (HX_TYPE_NEWS_NODE);
+	return G_LIST_MODEL (g_object_ref (node->children));
+}
+
+/* Join a parent path and a child name to form the child's full
+ * Hotline path. The root case ("/") needs special treatment to
+ * avoid producing "//child". */
+static char *
+build_child_path (const char *parent_path, const char *child_name)
+{
+	if (!parent_path || g_strcmp0 (parent_path, "/") == 0)
+		return g_strdup_printf ("/%s", child_name ? child_name : "");
+	return g_strdup_printf ("%s/%s", parent_path, child_name ? child_name : "");
 }
 
 /* ---------- Icon helpers ---------- */
@@ -273,6 +314,35 @@ on_selection_changed (GtkSingleSelection *sel,
 
 /* ---------- Factory: setup + bind for each row widget ---------- */
 
+/* Forward decls — the row-expanded handler fires these. */
+static void fetch_dirlist (gnews_browser *br, HxNewsNode *target);
+static void fetch_catlist (gnews_browser *br, HxNewsNode *target);
+
+static void
+on_row_expanded (GtkTreeListRow *row, GParamSpec *pspec, gpointer user_data)
+{
+	gnews_browser *br   = user_data;
+	HxNewsNode    *node;
+	(void) pspec;
+
+	if (!gtk_tree_list_row_get_expanded (row))
+		return;                /* collapse — nothing to do */
+
+	node = gtk_tree_list_row_get_item (row);
+	if (!node) return;
+
+	if (!node->loaded) {
+		if (node->kind == NB_KIND_FOLDER)
+			fetch_dirlist (br, node);
+		else if (node->kind == NB_KIND_CATEGORY)
+			fetch_catlist (br, node);
+		/* Posts: children are already populated by the catlist
+		 * threading walker, so no fetch needed. */
+	}
+
+	g_object_unref (node);
+}
+
 static void
 on_factory_setup (GtkSignalListItemFactory *factory,
                   GtkListItem *list_item, gpointer user_data)
@@ -327,7 +397,41 @@ on_factory_bind (GtkSignalListItemFactory *factory,
 
 	gtk_label_set_text (label, node->name ? node->name : "");
 
+	/* Lazy-fetch: connect a notify::expanded handler so the first
+	 * time the row's expander flips open we fire the NEWSDIRLIST /
+	 * NEWSCATLIST that populates its children. The connection
+	 * lives for this row binding only — unbind disconnects. */
+	{
+		gulong id = g_signal_connect (row, "notify::expanded",
+		                              G_CALLBACK (on_row_expanded), br);
+		g_object_set_data (G_OBJECT (expander), "expanded-handler",
+		                   GSIZE_TO_POINTER ((gsize) id));
+		g_object_set_data_full (G_OBJECT (expander), "bound-row",
+		                        g_object_ref (row), g_object_unref);
+	}
+
 	g_object_unref (node);   /* gtk_tree_list_row_get_item returned a ref */
+}
+
+static void
+on_factory_unbind (GtkSignalListItemFactory *factory,
+                   GtkListItem *list_item, gpointer user_data)
+{
+	(void) factory; (void) user_data;
+
+	GtkWidget      *expander = gtk_list_item_get_child (list_item);
+	gulong          id;
+	GtkTreeListRow *row;
+
+	id  = (gulong) GPOINTER_TO_SIZE (
+		g_object_get_data (G_OBJECT (expander), "expanded-handler"));
+	row = g_object_get_data (G_OBJECT (expander), "bound-row");
+	if (id && row && g_signal_handler_is_connected (row, id))
+		g_signal_handler_disconnect (row, id);
+	g_object_set_data (G_OBJECT (expander), "expanded-handler", NULL);
+	g_object_set_data (G_OBJECT (expander), "bound-row", NULL);
+
+	gtk_tree_expander_set_list_row (GTK_TREE_EXPANDER (expander), NULL);
 }
 
 /* ---------- RPC dispatch ---------- */
@@ -355,7 +459,37 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
 	g_hash_table_insert (pending_dirlists, stub,
 	                     target ? g_object_ref (target) : NULL);
 
+	/* Set loaded BEFORE the wire call so a quick collapse + reexpand
+	 * sequence doesn't re-fire the fetch. The reply handler appends
+	 * children into the existing store. */
+	if (target)
+		target->loaded = TRUE;
+
 	hx_news15_fldr_list (&the_session.htlc, stub);
+}
+
+/* Fire HTLC_HDR_NEWSCATLIST for a category node. `target` is the
+ * category HxNewsNode whose `children` store should be populated
+ * with the threaded posts. */
+static void
+fetch_catlist (gnews_browser *br, HxNewsNode *target)
+{
+	struct gnews_catalog *stub;
+	(void) br;
+
+	if (!target || !target->path)
+		return;
+
+	ensure_pending_tables ();
+
+	stub = g_malloc0 (sizeof (struct gnews_catalog));
+	stub->path = g_strdup (target->path);
+
+	g_hash_table_insert (pending_catlists, stub, g_object_ref (target));
+
+	target->loaded = TRUE;
+
+	hx_news15_cat_list (&the_session.htlc, stub);
 }
 
 /* ---------- Reply handlers (called from gtkhx.c signal adapters) ---------- */
@@ -391,16 +525,17 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
 
 	if (dest && gfnews->news) {
 		struct news_folder *folder = gfnews->news;
+		const char *parent_path = target ? target->path : "/";
 		for (i = 0; i < folder->num_entries; i++) {
 			struct folder_item *item = folder->entry[i];
 			int kind = (item->type == 1) ? NB_KIND_FOLDER
 			                              : NB_KIND_CATEGORY;
-			HxNewsNode *node = hx_news_node_new (kind, item->name, NULL);
+			char *child_path = build_child_path (parent_path, item->name);
+			HxNewsNode *node = hx_news_node_new (kind, item->name, child_path);
 			g_list_store_append (dest, node);
 			g_object_unref (node);
+			g_free (child_path);
 		}
-		if (target)
-			target->loaded = TRUE;
 	}
 
 	/* Free the stub + its parsed news_folder. */
@@ -420,12 +555,132 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
 	return TRUE;
 }
 
+/* Build the thread tree for one news_group. Walks the flat
+ * posts[] array, links posts by parentid, and appends top-level
+ * posts into `dest` (with replies as their children, recursively
+ * via HxNewsNode->children).
+ *
+ * Posts are visited in array order (server-given chronological).
+ * Parents typically appear before their replies, but we don't
+ * rely on that — a two-pass build (build map, then attach) makes
+ * the order irrelevant. */
+static void
+catlist_thread_into (GListStore *dest, struct news_group *group,
+                     const char *category_path)
+{
+	GHashTable *by_postid;
+	HxNewsNode **nodes;
+	int i;
+
+	if (!group || group->post_count <= 0)
+		return;
+
+	/* Pass 1: build a postid → HxNewsNode map. Each node steals
+	 * the subject / sender / mime_type strings from the news_item
+	 * (we'll NULL them in the source so the freer skips them). */
+	by_postid = g_hash_table_new (g_direct_hash, g_direct_equal);
+	nodes = g_new0 (HxNewsNode *, group->post_count);
+
+	for (i = 0; i < group->post_count; i++) {
+		struct news_item *it = &group->posts[i];
+		HxNewsNode *n = hx_news_node_new (
+			NB_KIND_POST,
+			it->subject && *it->subject ? it->subject : "(no subject)",
+			category_path);
+		n->postid    = it->postid;
+		n->sender    = g_strdup (it->sender ? it->sender : "");
+		n->date      = it->date;
+		n->mime_type = (it->partcount > 0 && it->parts && it->parts[0].mime_type)
+			? g_strdup (it->parts[0].mime_type)
+			: g_strdup ("text/plain");
+		nodes[i] = n;
+		g_hash_table_insert (by_postid,
+		                     GUINT_TO_POINTER (it->postid), n);
+	}
+
+	/* Pass 2: attach each node to its parent (or to dest if
+	 * top-level / dangling parent). We append by ref since the
+	 * GListStore takes its own ref. */
+	for (i = 0; i < group->post_count; i++) {
+		struct news_item *it = &group->posts[i];
+		HxNewsNode       *n  = nodes[i];
+		HxNewsNode       *parent = NULL;
+
+		if (it->parentid != 0)
+			parent = g_hash_table_lookup (
+				by_postid, GUINT_TO_POINTER (it->parentid));
+
+		if (parent && parent != n) {
+			if (!parent->children)
+				parent->children = g_list_store_new (HX_TYPE_NEWS_NODE);
+			g_list_store_append (parent->children, n);
+		} else {
+			g_list_store_append (dest, n);
+		}
+		g_object_unref (n);
+	}
+
+	g_free (nodes);
+	g_hash_table_destroy (by_postid);
+}
+
+/* Free a news_group + its child news_items + their owned strings.
+ * Mirrors the partial-cleanup the existing rcv-task path leaves us
+ * with (the rcv path g_strdup-s subject, sender, mime_type into the
+ * news_item and we never free them anywhere — the legacy
+ * output_news_catalog just holds onto the group for the window's
+ * lifetime). */
+static void
+news_group_free (struct news_group *group)
+{
+	int i;
+	if (!group)
+		return;
+	if (group->posts) {
+		for (i = 0; i < group->post_count; i++) {
+			struct news_item *it = &group->posts[i];
+			g_free (it->subject);
+			g_free (it->sender);
+			if (it->parts) {
+				int j;
+				for (j = 0; j < it->partcount; j++)
+					g_free (it->parts[j].mime_type);
+				g_free (it->parts);
+			}
+		}
+		g_free (group->posts);
+	}
+	g_free (group);
+}
+
 gboolean
 gnews_browser_handle_catlist (gpointer gcnews_p)
 {
-	/* Phase 3 wires this up. */
-	(void) gcnews_p;
-	return FALSE;
+	struct gnews_catalog *gcnews = gcnews_p;
+	HxNewsNode *target = NULL;
+	gnews_browser *br = the_browser;
+
+	if (!pending_catlists)
+		return FALSE;
+	if (!g_hash_table_contains (pending_catlists, gcnews))
+		return FALSE;
+
+	target = g_hash_table_lookup (pending_catlists, gcnews);
+	if (target)
+		g_object_ref (target);
+	g_hash_table_remove (pending_catlists, gcnews);
+
+	if (br && target && target->children && gcnews->group) {
+		catlist_thread_into (target->children, gcnews->group, target->path);
+	}
+
+	/* Free the parsed group + the stub. */
+	news_group_free (gcnews->group);
+	g_free (gcnews->path);
+	g_free (gcnews);
+
+	g_clear_object (&target);
+	return TRUE;
 }
 
 /* ---------- Window lifecycle ---------- */
@@ -503,8 +758,9 @@ build_browser_window (void)
 	gtk_single_selection_set_can_unselect (br->selection, TRUE);
 
 	factory = gtk_signal_list_item_factory_new ();
-	g_signal_connect (factory, "setup", G_CALLBACK (on_factory_setup), br);
-	g_signal_connect (factory, "bind",  G_CALLBACK (on_factory_bind),  br);
+	g_signal_connect (factory, "setup",  G_CALLBACK (on_factory_setup),  br);
+	g_signal_connect (factory, "bind",   G_CALLBACK (on_factory_bind),   br);
+	g_signal_connect (factory, "unbind", G_CALLBACK (on_factory_unbind), br);
 
 	br->list_view = gtk_list_view_new (
 		GTK_SELECTION_MODEL (br->selection),
