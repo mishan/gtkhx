@@ -378,6 +378,81 @@ extern gboolean hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dl
                                             struct hx_news_dirlist_entry *out);
 
 /*
+ * Parse an HTLC_DATA_CATLIST (0x0141) chunk into a structured
+ * thread list — the reply payload of HTLC_HDR_NEWSCATLIST. This
+ * is the 1.5+ threaded-news article listing: per-category, one
+ * struct hx_newscat_post per article (a "thread" in mhxd's terms).
+ *
+ * Wire format (see mhxd's struct hl_news_threadlist_hdr + struct
+ * hl_news_thread_hdr in common/hotline.h, and tnews_send_catlist in
+ * hxd/tnews.c for the emitter):
+ *
+ *   --- chunk body, after the 4-byte hl_data_hdr ---
+ *   u32  __x0           opaque, ignored
+ *   u32  post_count     number of articles that follow
+ *   u16  __x1           opaque (mhxd always zeros this; some
+ *                       legacy parsers depended on it being zero)
+ *
+ *   repeat post_count times:
+ *     u32   postid       article ID
+ *     u16   date.base_year
+ *     u16   date.pad
+ *     u32   date.seconds
+ *     u32   parentid    parent article ID (0 if root)
+ *     u32   __flags     opaque, ignored (mhxd's hl_news_thread_hdr.flags)
+ *     u16   partcount   number of mime parts
+ *     pstring  subject
+ *     pstring  sender
+ *     repeat partcount times:
+ *       pstring   mime_type
+ *       u16       size
+ *
+ * pstrings are length-prefixed (u8 len + bytes; len=0 means an
+ * empty string).
+ *
+ * On success returns TRUE and fills *out with a freshly-allocated
+ * posts array; caller owns the result and MUST call
+ * hx_newscat_clear (or memset *out to zero) to release it.
+ *
+ * Returns FALSE if no CATLIST chunk was found OR if the chunk body
+ * was malformed (truncated before the threadlist header, post_count
+ * overruns dlen, pstring length overruns dlen). On FALSE, *out is
+ * left zero-initialised and no allocation is leaked.
+ *
+ * NULL `out` is a programmer error and returns FALSE.
+ *
+ * The plain form (HTLC_DATA_NEWSFOLDERITEM / 0x0140) is a different
+ * opcode entirely — see hx_dirlist_parse_extended above for that.
+ */
+struct hx_newscat_part {
+	char    *mime_type;        /* NUL-terminated, g_malloc'd; NULL on empty */
+	guint16  size;
+};
+
+struct hx_newscat_post {
+	guint32 postid;
+	guint32 parentid;
+	/* Mac classic 8-byte date split the way news15.c consumes it: */
+	guint16 date_base_year;
+	guint16 date_pad;
+	guint32 date_seconds;
+	char    *subject;          /* NUL-terminated, g_malloc'd; NULL on empty */
+	char    *sender;           /* NUL-terminated, g_malloc'd; NULL on empty */
+	guint16  partcount;
+	guint16  size_total;       /* sum of parts[].size */
+	struct hx_newscat_part *parts;    /* g_malloc'd array, length partcount */
+};
+
+struct hx_newscat {
+	guint32                  post_count;
+	struct hx_newscat_post  *posts;    /* g_malloc'd array, length post_count */
+};
+
+extern gboolean hx_newscat_parse (struct htlc_conn *htlc,
+                                  struct hx_newscat *out);
+extern void     hx_newscat_clear (struct hx_newscat *r);
+
+/*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
  *
  * Three outcomes:
