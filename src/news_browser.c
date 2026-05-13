@@ -153,6 +153,16 @@ struct _gnews_browser {
 	 * thread-reply handler to know whether the fetch we got back
 	 * is for the currently-displayed post. */
 	HxNewsNode   *selected_post;
+
+	/* Header bar action buttons. Visibility is selection-driven
+	 * by sync_action_buttons (folder → New Folder + New Category +
+	 * Delete; category → Delete; post → Reply + Delete; always
+	 * → Refresh). */
+	GtkWidget    *btn_refresh;
+	GtkWidget    *btn_new_folder;
+	GtkWidget    *btn_new_category;
+	GtkWidget    *btn_reply;
+	GtkWidget    *btn_delete;
 };
 
 /* Single open browser. */
@@ -297,9 +307,10 @@ icon_paintable_for_kind (gnews_browser *br, int kind)
 /* Forward decls — selection-changed + the row-expanded handler
  * fire these; the bodies live further down so the file reads
  * lifecycle-first, then RPC, then rendering. */
-static void fetch_dirlist        (gnews_browser *br, HxNewsNode *target);
-static void fetch_catlist        (gnews_browser *br, HxNewsNode *target);
-static void render_selected_post (gnews_browser *br);
+static void fetch_dirlist         (gnews_browser *br, HxNewsNode *target);
+static void fetch_catlist         (gnews_browser *br, HxNewsNode *target);
+static void render_selected_post  (gnews_browser *br);
+static void sync_action_buttons   (gnews_browser *br);
 
 /* ---------- Selection → breadcrumb ---------- */
 
@@ -379,6 +390,7 @@ on_selection_changed (GtkSingleSelection *sel,
 	br->selected_post = (leaf && leaf->kind == NB_KIND_POST) ? leaf : NULL;
 
 	render_selected_post (br);
+	sync_action_buttons (br);
 }
 
 /* ---------- Factory: setup + bind for each row widget ---------- */
@@ -418,6 +430,12 @@ on_factory_setup (GtkSignalListItemFactory *factory,
 	GtkWidget *icon     = gtk_image_new ();
 	GtkWidget *label    = gtk_label_new (NULL);
 	GtkWidget *expander = gtk_tree_expander_new ();
+
+	/* GtkImage clamps paintable size to its `icon-size` (~16px by
+	 * default in Adwaita), so the upscaled-paintable bytes are
+	 * shrunk back down at draw time. Override with pixel_size to
+	 * make the row actually use the 1.5x render. */
+	gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
 
 	gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
 	gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
@@ -915,6 +933,329 @@ gnews_browser_handle_thread (gpointer post_p)
 	return TRUE;
 }
 
+/* ---------- Header-bar action buttons ---------- */
+
+/* Get the leaf node of the current selection, or NULL if nothing
+ * is selected. Caller does NOT own a ref. */
+static HxNewsNode *
+selected_node (gnews_browser *br)
+{
+	guint pos = gtk_single_selection_get_selected (br->selection);
+	GtkTreeListRow *row;
+	HxNewsNode *node;
+
+	if (pos == GTK_INVALID_LIST_POSITION)
+		return NULL;
+	row = g_list_model_get_item (G_LIST_MODEL (br->tree_model), pos);
+	if (!row) return NULL;
+	node = gtk_tree_list_row_get_item (row);
+	g_object_unref (row);
+	if (node)
+		g_object_unref (node);     /* the GListStore still holds a ref */
+	return node;
+}
+
+/* Clear `node`'s children store + reset loaded flag + refire the
+ * appropriate fetch. Used for the Refresh button and as the
+ * "settle" step after a create / delete RPC so the user sees the
+ * updated listing without manually re-clicking. */
+static void
+refresh_node (gnews_browser *br, HxNewsNode *node)
+{
+	if (!node) {
+		/* Root refresh. */
+		g_list_store_remove_all (br->root_store);
+		fetch_dirlist (br, NULL);
+		return;
+	}
+	if (node->children)
+		g_list_store_remove_all (node->children);
+	node->loaded = FALSE;
+	if (node->kind == NB_KIND_FOLDER)
+		fetch_dirlist (br, node);
+	else if (node->kind == NB_KIND_CATEGORY)
+		fetch_catlist (br, node);
+}
+
+static void
+on_refresh_clicked (GtkButton *btn, gpointer user_data)
+{
+	gnews_browser *br = user_data;
+	HxNewsNode *node = selected_node (br);
+	(void) btn;
+
+	/* If a post is selected: refetch the body. Otherwise refresh
+	 * the selected folder / category — or the root, if nothing
+	 * (or only the root level) is selected. */
+	if (node && node->kind == NB_KIND_POST) {
+		g_free (node->body);
+		node->body = NULL;
+		node->body_fetching = FALSE;
+		render_selected_post (br);
+		return;
+	}
+	if (node && (node->kind == NB_KIND_FOLDER || node->kind == NB_KIND_CATEGORY))
+		refresh_node (br, node);
+	else
+		refresh_node (br, NULL);
+}
+
+/* New Folder / New Category — prompt for a name, then fire mkdir /
+ * mkcat against the selected folder's path. */
+
+struct create_ctx {
+	gnews_browser *br;
+	HxNewsNode    *parent;     /* reffed */
+	int            kind;       /* NB_KIND_FOLDER or NB_KIND_CATEGORY */
+	GtkWidget     *entry;
+};
+
+static void
+create_response (AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+	struct create_ctx *ctx = user_data;
+	const char *text;
+	(void) dialog;
+
+	if (g_strcmp0 (response, "create") != 0)
+		return;
+
+	text = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+	if (!text || !*text)
+		return;
+
+	if (ctx->kind == NB_KIND_FOLDER) {
+		char *new_path = build_child_path (
+			ctx->parent ? ctx->parent->path : "/", text);
+		hx_news15_mkdir (&the_session.htlc, new_path);
+		g_free (new_path);
+	} else {
+		char *parent = ctx->parent
+			? g_strdup (ctx->parent->path)
+			: g_strdup ("/");
+		hx_news15_mkcat (&the_session.htlc, parent, text);
+		g_free (parent);
+	}
+
+	/* Settle: re-fetch the parent's listing so the new item
+	 * appears. The server doesn't push notifications for these. */
+	if (the_browser)
+		refresh_node (the_browser, ctx->parent);
+}
+
+static void
+create_closed (AdwAlertDialog *dialog, gpointer user_data)
+{
+	struct create_ctx *ctx = user_data;
+	(void) dialog;
+	g_clear_object (&ctx->parent);
+	g_free (ctx);
+}
+
+static void
+open_create_dialog (gnews_browser *br, HxNewsNode *parent, int kind)
+{
+	AdwDialog *dialog;
+	GtkWidget *entry;
+	struct create_ctx *ctx;
+	const char *title, *body, *create_label;
+
+	if (kind == NB_KIND_FOLDER) {
+		title        = _("New News Folder");
+		body         = _("Enter a name for the new news folder.");
+		create_label = _("C_reate Folder");
+	} else {
+		title        = _("New News Category");
+		body         = _("Enter a name for the new news category.");
+		create_label = _("C_reate Category");
+	}
+
+	dialog = ADW_DIALOG (adw_alert_dialog_new (title, body));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "create", create_label);
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "create",
+	                                          ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+
+	entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+
+	ctx = g_new0 (struct create_ctx, 1);
+	ctx->br     = br;
+	ctx->parent = parent ? g_object_ref (parent) : NULL;
+	ctx->kind   = kind;
+	ctx->entry  = entry;
+
+	g_signal_connect (dialog, "response", G_CALLBACK (create_response), ctx);
+	g_signal_connect (dialog, "closed",   G_CALLBACK (create_closed),   ctx);
+
+	adw_dialog_present (dialog, br->window);
+}
+
+static void
+on_new_folder_clicked (GtkButton *btn, gpointer user_data)
+{
+	gnews_browser *br = user_data;
+	HxNewsNode    *sel = selected_node (br);
+	(void) btn;
+	/* If a folder is selected, create inside it. Otherwise (no
+	 * selection, category, or post selected) create at the root. */
+	open_create_dialog (br,
+		(sel && sel->kind == NB_KIND_FOLDER) ? sel : NULL,
+		NB_KIND_FOLDER);
+}
+
+static void
+on_new_category_clicked (GtkButton *btn, gpointer user_data)
+{
+	gnews_browser *br = user_data;
+	HxNewsNode    *sel = selected_node (br);
+	(void) btn;
+	open_create_dialog (br,
+		(sel && sel->kind == NB_KIND_FOLDER) ? sel : NULL,
+		NB_KIND_CATEGORY);
+}
+
+/* Delete — confirm dialog + RPC + refresh parent. */
+
+struct delete_ctx {
+	gnews_browser *br;
+	HxNewsNode    *node;       /* reffed */
+};
+
+static void
+delete_response (AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+	struct delete_ctx *ctx = user_data;
+	HxNewsNode *parent_node = NULL;
+	(void) dialog;
+
+	if (g_strcmp0 (response, "delete") != 0)
+		return;
+	if (!ctx->node)
+		return;
+
+	if (ctx->node->kind == NB_KIND_POST) {
+		hx_news15_delete_thread (&the_session.htlc,
+		                         ctx->node->path, ctx->node->postid);
+	} else {
+		hx_news15_delete (&the_session.htlc, ctx->node->path);
+	}
+
+	/* Walk the parent path back to a node we already have so we
+	 * can refresh it. For top-level entries this is just the root.
+	 * For deeper entries we'd need a path → node lookup the
+	 * current model doesn't maintain — punt to a full root refresh
+	 * in that case, which is simple and correct. */
+	(void) parent_node;
+	if (the_browser)
+		refresh_node (the_browser, NULL);
+}
+
+static void
+delete_closed (AdwAlertDialog *dialog, gpointer user_data)
+{
+	struct delete_ctx *ctx = user_data;
+	(void) dialog;
+	g_clear_object (&ctx->node);
+	g_free (ctx);
+}
+
+static void
+on_delete_clicked (GtkButton *btn, gpointer user_data)
+{
+	gnews_browser *br = user_data;
+	HxNewsNode *sel = selected_node (br);
+	AdwDialog *dialog;
+	struct delete_ctx *ctx;
+	const char *body_fmt, *delete_label;
+	char *body_text;
+	(void) btn;
+
+	if (!sel)
+		return;
+
+	switch (sel->kind) {
+	case NB_KIND_FOLDER:
+		body_fmt     = _("Delete the folder “%s” and all its contents?");
+		delete_label = _("_Delete Folder");
+		break;
+	case NB_KIND_CATEGORY:
+		body_fmt     = _("Delete the category “%s” and all its posts?");
+		delete_label = _("_Delete Category");
+		break;
+	case NB_KIND_POST:
+		body_fmt     = _("Delete the post “%s”?");
+		delete_label = _("_Delete Post");
+		break;
+	default:
+		return;
+	}
+
+	body_text = g_strdup_printf (body_fmt, sel->name ? sel->name : "");
+	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Delete"), body_text));
+	g_free (body_text);
+
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+	                               "delete", delete_label);
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+	                                          "delete",
+	                                          ADW_RESPONSE_DESTRUCTIVE);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+
+	ctx = g_new0 (struct delete_ctx, 1);
+	ctx->br   = br;
+	ctx->node = g_object_ref (sel);
+	g_signal_connect (dialog, "response", G_CALLBACK (delete_response), ctx);
+	g_signal_connect (dialog, "closed",   G_CALLBACK (delete_closed),   ctx);
+
+	adw_dialog_present (dialog, br->window);
+}
+
+static void
+on_reply_clicked (GtkButton *btn, gpointer user_data)
+{
+	/* Phase 5 follow-up: replying needs the compose-window UI
+	 * (subject + body + post), which is a separate chunk of work.
+	 * For now this is a visible-but-not-yet-wired button so the
+	 * user can see the slot it'll occupy in the layout. */
+	(void) btn; (void) user_data;
+}
+
+/* Toggle button visibility based on what kind of node is selected.
+ * Refresh is always visible; the rest follow the design from the
+ * phase plan:
+ *
+ *   no selection / folder → New Folder, New Category, Delete (if
+ *                           a folder is selected; not if root)
+ *   category              → Delete
+ *   post                  → Reply, Delete
+ */
+static void
+sync_action_buttons (gnews_browser *br)
+{
+	HxNewsNode *node = selected_node (br);
+	int kind = node ? node->kind : 0;
+
+	gtk_widget_set_visible (br->btn_new_folder,
+		kind == 0 || kind == NB_KIND_FOLDER);
+	gtk_widget_set_visible (br->btn_new_category,
+		kind == 0 || kind == NB_KIND_FOLDER);
+	gtk_widget_set_visible (br->btn_delete,
+		kind == NB_KIND_FOLDER || kind == NB_KIND_CATEGORY
+		|| kind == NB_KIND_POST);
+	gtk_widget_set_visible (br->btn_reply,
+		kind == NB_KIND_POST);
+}
+
 /* ---------- Window lifecycle ---------- */
 
 static gboolean
@@ -968,6 +1309,45 @@ build_browser_window (void)
 	gtk_widget_add_css_class (header_title, "heading");
 	br->breadcrumb = GTK_LABEL (header_title);
 	adw_header_bar_set_title_widget (ADW_HEADER_BAR (header), header_title);
+
+	/* Header action buttons.
+	 *
+	 * pack_start: Refresh (always), New Folder + New Category
+	 *             (visible when nothing or a folder is selected).
+	 * pack_end:   Reply (post-only), Delete (folder/category/post).
+	 *
+	 * Visibility is driven by sync_action_buttons on every
+	 * selection-changed; we mark each button gtk_widget_set_visible
+	 * (FALSE) up front so the initial empty-tree state isn't
+	 * cluttered. The buttons render their icons via the same
+	 * gtkhx_pixmap_button helper the toolbar uses. */
+	br->btn_refresh = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+		_("Refresh"), 2,
+		G_CALLBACK (on_refresh_clicked), br);
+	br->btn_new_folder = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/newsfld.xpm",
+		_("New Folder"), 2,
+		G_CALLBACK (on_new_folder_clicked), br);
+	br->btn_new_category = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/newscat.xpm",
+		_("New Category"), 2,
+		G_CALLBACK (on_new_category_clicked), br);
+	br->btn_reply = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/news_reply.xpm",
+		_("Reply"), 2,
+		G_CALLBACK (on_reply_clicked), br);
+	br->btn_delete = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/trash.xpm",
+		_("Delete"), 2,
+		G_CALLBACK (on_delete_clicked), br);
+
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_refresh);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_folder);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_category);
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), br->btn_delete);
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), br->btn_reply);
+
 	gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
 
 	/* ---- Two-pane body ---- */
@@ -1069,6 +1449,10 @@ build_browser_window (void)
 
 	g_signal_connect (br->window, "close-request",
 	                  G_CALLBACK (on_window_close), br);
+
+	/* Initial state: no selection → New Folder + New Category
+	 * visible (operating at the root); Reply + Delete hidden. */
+	sync_action_buttons (br);
 
 	return br;
 }

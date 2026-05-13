@@ -152,7 +152,7 @@ static void hx_news15_post_thread(struct htlc_conn *htlc, char *path, const char
 	g_free(hldir);
 }
 
-static void hx_news15_delete_thread(struct htlc_conn *htlc, char *path,
+void hx_news15_delete_thread(struct htlc_conn *htlc, char *path,
 							 guint32 threadid)
 {
 	guint8 *hldir;
@@ -169,7 +169,7 @@ static void hx_news15_delete_thread(struct htlc_conn *htlc, char *path,
 
 
 
-static void hx_news15_delete(struct htlc_conn *htlc, char *path)
+void hx_news15_delete(struct htlc_conn *htlc, char *path)
 {
 	guint8 *hldir;
 	guint16 hldirlen;
@@ -181,7 +181,7 @@ static void hx_news15_delete(struct htlc_conn *htlc, char *path)
 	g_free(hldir);
 }
 
-static void hx_news15_mkcat(struct htlc_conn *htlc, char *path, const char *name)
+void hx_news15_mkcat(struct htlc_conn *htlc, char *path, const char *name)
 {
 	guint8 *hldir;
 	guint16 hldirlen;
@@ -194,7 +194,7 @@ static void hx_news15_mkcat(struct htlc_conn *htlc, char *path, const char *name
 	g_free(hldir);
 }
 
-static void hx_news15_mkdir(struct htlc_conn *htlc, char *path)
+void hx_news15_mkdir(struct htlc_conn *htlc, char *path)
 {
 	guint8 *hldir;
 	guint16 hldirlen;

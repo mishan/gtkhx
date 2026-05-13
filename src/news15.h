@@ -19,4 +19,15 @@ extern void hx_news15_fldr_list (struct htlc_conn *htlc,
 				 struct gnews_folder *gfnews);
 extern void open_news15 (GtkWidget *widget, session *sess);
 extern struct gnews_folder *gfnews_list;
+
+/* Backend RPC helpers exposed for news_browser.c. The legacy
+ * news15.c keeps its own static callers (gfnews_mkdir_btn etc.)
+ * that call these too — these prototypes are the linkage; the
+ * `static` is dropped at the definitions. */
+extern void hx_news15_delete        (struct htlc_conn *htlc, char *path);
+extern void hx_news15_mkcat         (struct htlc_conn *htlc, char *path,
+                                     const char *name);
+extern void hx_news15_mkdir         (struct htlc_conn *htlc, char *path);
+extern void hx_news15_delete_thread (struct htlc_conn *htlc, char *path,
+                                     guint32 threadid);
 #endif
