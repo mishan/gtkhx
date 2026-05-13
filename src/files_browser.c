@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 
+#include "hx.h"           /* struct htxf_conn — auto-refresh hook */
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
@@ -94,6 +95,11 @@ struct browser {
 	 * provider's "unavailable-changed" so the panel reloads on
 	 * login + paints the not-connected state on disconnect. */
 	gulong conn_state_handler;
+
+	/* GtkhxSession::file-update handler — used to spot
+	 * just-completed transfers and refresh both panels so the
+	 * new file appears without the user needing to hit Reload. */
+	gulong file_update_handler;
 
 	/* CSS provider that paints the .files-panel-active border.
 	 * Lives for the window's lifetime; unrefed in on_close. */
@@ -688,6 +694,12 @@ on_close (GtkWindow *window, gpointer user_data)
 			br->conn_state_handler);
 		br->conn_state_handler = 0;
 	}
+	if (br->file_update_handler) {
+		g_signal_handler_disconnect (
+			gtkhx_session_get_default (),
+			br->file_update_handler);
+		br->file_update_handler = 0;
+	}
 
 	if (br->css) {
 		display = gdk_display_get_default ();
@@ -716,6 +728,32 @@ on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
 	(void) sess; (void) state;
 	if (br->right_provider)
 		g_signal_emit_by_name (br->right_provider, "unavailable-changed");
+}
+
+/* file-update fires repeatedly during a transfer (progress
+ * tick + final "done" tick). Detect just-finished the same
+ * way gtkhx.c does (total_pos catches up to total_size); the
+ * xfer worker sets these explicitly at end-of-stream and the
+ * state is reached exactly once per htxf. Each finish reloads
+ * both panels so the new file appears on the destination side
+ * — cheaper than tracking which panel was the dest, and the
+ * source side's row icons / sizes might have shifted too
+ * (e.g. uploads that triggered a remote rename-on-conflict). */
+static void
+on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
+                gpointer user_data)
+{
+	struct browser *br = user_data;
+	struct htxf_conn *x = htxf_p;
+	(void) sess; (void) sess_p;
+
+	if (!x) return;
+	if (x->total_size == 0 || x->total_pos < x->total_size) return;
+
+	if (br->left_provider)
+		hx_files_provider_reload (br->left_provider);
+	if (br->right_provider)
+		hx_files_provider_reload (br->right_provider);
 }
 
 void
@@ -801,6 +839,14 @@ open_files_browser (void)
 	br->conn_state_handler = g_signal_connect (
 		gtkhx_session_get_default (), "connection-state-changed",
 		G_CALLBACK (on_connection_state), br);
+
+	/* file-update for auto-refresh on transfer completion. The
+	 * same signal already routes through gtkhx.c::on_file_update_signal
+	 * for the legacy progress + toast notifications; we ride
+	 * alongside that with a second listener. */
+	br->file_update_handler = g_signal_connect (
+		gtkhx_session_get_default (), "file-update",
+		G_CALLBACK (on_file_update), br);
 
 	gtk_paned_set_start_child (GTK_PANED (paned),
 		files_panel_get_widget (br->left));

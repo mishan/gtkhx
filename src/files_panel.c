@@ -423,6 +423,13 @@ on_row_activated (GtkColumnView *view, guint pos, gpointer user_data)
 		p->wants_focus_restore = TRUE;
 		hx_files_provider_navigate (p->provider, child);
 		g_free (child);
+	} else {
+		/* Files: ask the provider to do its default action.
+		 * Local launches the OS default app (xdg-open style);
+		 * remote streams into the preview window. Phase 4
+		 * polish item — gates inside each provider's
+		 * activate_entry impl. */
+		hx_files_provider_activate_entry (p->provider, e);
 	}
 	/* Plain files: no-op here in Phase 1. Phase 3 wires F5 / Copy
 	 * to download/upload across panels; Phase 4 wires Enter on a

@@ -30,6 +30,8 @@
 #include <gio/gio.h>
 #include <glib-object.h>
 
+#include "files_entry.h"
+
 G_BEGIN_DECLS
 
 #define HX_TYPE_FILES_PROVIDER (hx_files_provider_get_type ())
@@ -69,6 +71,13 @@ struct _HxFilesProviderInterface {
 	 * remote provider before login). The panel paints this in
 	 * place of the file list. */
 	const char *(*get_unavailable_reason) (HxFilesProvider *self);
+
+	/* Activate a single non-directory entry — fires the
+	 * provider-appropriate default action. Local: launch
+	 * with the desktop's default app via xdg-open. Remote:
+	 * download into the preview pipeline. Optional; NULL
+	 * means "no action on activate". */
+	void (*activate_entry) (HxFilesProvider *self, HxFileEntry *e);
 };
 
 /* Thin wrappers that dispatch through the vtable. Use these from
@@ -91,6 +100,13 @@ extern gboolean    hx_files_provider_rename           (HxFilesProvider *self,
                                                        const char *new_name,
                                                        GError    **err);
 extern const char *hx_files_provider_get_unavailable_reason (HxFilesProvider *self);
+
+/* Default action on a non-directory entry. Provider decides
+ * what that means — local launches xdg-open, remote streams
+ * into the preview window. No-op if the provider didn't
+ * override activate_entry. */
+extern void hx_files_provider_activate_entry (HxFilesProvider *self,
+                                              HxFileEntry     *e);
 
 G_END_DECLS
 

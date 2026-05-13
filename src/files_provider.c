@@ -130,3 +130,17 @@ hx_files_provider_get_unavailable_reason (HxFilesProvider *self)
 		? iface->get_unavailable_reason (self)
 		: NULL;
 }
+
+void
+hx_files_provider_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+	HxFilesProviderInterface *iface;
+	g_return_if_fail (HX_IS_FILES_PROVIDER (self));
+	iface = HX_FILES_PROVIDER_GET_IFACE (self);
+	/* Optional method — providers without an activate action
+	 * just silently no-op (the panel's row-activate handler
+	 * was the caller; user gets no feedback, same as the
+	 * current behaviour pre-feature). */
+	if (iface->activate_entry)
+		iface->activate_entry (self, e);
+}

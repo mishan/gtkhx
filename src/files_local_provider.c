@@ -404,6 +404,44 @@ iface_rename (HxFilesProvider *self,
 		HX_LOCAL_FILES_PROVIDER (self), old_name, new_name, err);
 }
 
+/* Activate a local file: hand it to the desktop's default app
+ * via the standard portal-aware GAppInfo launcher. Folder
+ * activation never reaches here — the panel intercepts and
+ * navigates instead. */
+static void
+iface_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+	HxLocalFilesProvider *r = HX_LOCAL_FILES_PROVIDER (self);
+	const char *dir;
+	char *abspath;
+	GFile *f;
+	char *uri;
+	GError *err = NULL;
+
+	if (!e || hx_file_entry_is_dir (e)) return;
+	dir = hx_local_files_provider_get_current_path (r);
+	abspath = g_build_filename (dir ? dir : "/",
+		hx_file_entry_get_name (e), NULL);
+	f = g_file_new_for_path (abspath);
+	uri = g_file_get_uri (f);
+	g_object_unref (f);
+	g_free (abspath);
+
+	if (!uri) return;
+
+	/* g_app_info_launch_default_for_uri spins up the system's
+	 * registered handler (the same one a "Open" right-click in
+	 * GNOME Files would use). NULL launch context = default
+	 * environment. Errors get logged but not surfaced — the
+	 * panel doesn't have a toast hook reaching down here yet. */
+	if (!g_app_info_launch_default_for_uri (uri, NULL, &err)) {
+		g_warning ("launch %s: %s", uri,
+			err ? err->message : "unknown");
+		g_clear_error (&err);
+	}
+	g_free (uri);
+}
+
 static void
 hx_local_files_provider_iface_init (HxFilesProviderInterface *iface)
 {
@@ -417,4 +455,5 @@ hx_local_files_provider_iface_init (HxFilesProviderInterface *iface)
 	iface->delete_entry           = iface_delete_entry;
 	iface->rename                 = iface_rename;
 	iface->get_unavailable_reason = NULL;     /* local is always ready */
+	iface->activate_entry         = iface_activate_entry;
 }

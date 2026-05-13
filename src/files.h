@@ -51,6 +51,16 @@ extern guint16 icon_of_ftype_and_name (const char *ftype,
                                        gsize       name_len);
 extern guint16 icon_of_fh (struct hl_filelist_hdr *fh);
 
+/* Human-readable type label for a Hotline file-list entry's
+ * 4-byte FourCC. Returns a static localized string for known
+ * codes ("Text Document", "JPEG Image", "MP3 Audio", etc.) or
+ * the raw FourCC as a non-static copy otherwise. The boolean
+ * out-parameter `is_static` tells the caller whether the
+ * returned pointer is owned (must g_free) or borrowed.
+ *
+ * Folder type "fldr" returns _("Folder") as static. */
+extern const char *kind_of_ftype (const char *ftype, gboolean *is_static);
+
 extern guint8 dir_char;
 
 extern guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file);

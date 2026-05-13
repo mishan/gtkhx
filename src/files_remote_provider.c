@@ -21,10 +21,13 @@
 #include <glib/gi18n.h>
 #include "session.h"
 #include "hotline.h"
+#include "hl_access.h"
 #include "network.h"
 #include "tasks.h"
 #include "rcv.h"
 #include "files.h"
+#include "xfers.h"
+#include "prefs.h"
 #include "gtkutil.h"
 #include "files_entry.h"
 #include "files_provider.h"
@@ -160,7 +163,6 @@ populate_from_chunks (HxRemoteFilesProvider *self,
 {
 	struct hl_filelist_hdr *fh;
 	char namebuf[256];
-	char kindbuf[8];
 	char *utf8;
 	gboolean is_dir;
 	guint32 fnlen, fsize, ftype;
@@ -207,17 +209,13 @@ populate_from_chunks (HxRemoteFilesProvider *self,
 
 		is_dir = (ftype == 0x666c6472);   /* 'fldr' */
 
-		/* Render the 4-byte FourCC as kind text for files; the
-		 * legacy single-pane UI did the same. mhxd commonly
-		 * sends "TEXT", "PDF ", "MPG3", etc. */
-		if (is_dir) {
-			g_strlcpy (kindbuf, _("Folder"), sizeof (kindbuf));
-		} else {
-			guint32 ftype_be = ftype;
-			ftype_be = htonl (ftype_be);
-			memcpy (kindbuf, &ftype_be, 4);
-			kindbuf[4] = '\0';
-		}
+		/* Friendly kind label via the shared FourCC table —
+		 * "JPEG Image" / "MP3 Audio" / etc., falling back to
+		 * "<XXXX> file" for unknown codes. is_static tells us
+		 * whether to free the returned pointer. */
+		gboolean kind_static = FALSE;
+		const char *kind = kind_of_ftype (
+			(const char *) &fh->ftype, &kind_static);
 
 		/* Classify icon from the 4-byte Hotline file-type code.
 		 * icon_of_ftype_and_name reads the network-byte-order
@@ -228,13 +226,14 @@ populate_from_chunks (HxRemoteFilesProvider *self,
 			is_dir,
 			is_dir ? 0 : (guint64) fsize,
 			0,             /* no mtime on the wire */
-			kindbuf,
+			kind,
 			icon_of_ftype_and_name (
 				(const char *) &fh->ftype,
 				namebuf, fnlen));
 		g_list_store_append (self->listing, entry);
 		g_object_unref (entry);
 		g_free (utf8);
+		if (!kind_static) g_free ((char *) kind);
 	}
 }
 
@@ -410,6 +409,48 @@ remote_rename (HxFilesProvider *self,
 	return TRUE;
 }
 
+/* Activate a remote file: stream it into the preview pipeline.
+ * xfer_new with preview=1 routes the downloaded bytes through
+ * hx_preview_set_info / _chunk / _done rather than writing to
+ * disk (see preview.c). lpath is required for xfer_new's
+ * bookkeeping even though no on-disk file gets written; we
+ * derive a temp path from XDG cache + the entry name. */
+static void
+remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+	HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+	const char *dir;
+	char *rpath, *lpath;
+	struct htxf_conn *htxf;
+
+	if (!e || hx_file_entry_is_dir (e)) return;
+	if (!the_session.htlc.fd)             return;
+	if (!hl_access_has ((const guint8 *) &the_session.htlc.access,
+	                    HL_ACCESS_DOWNLOAD_FILES))
+		return;
+
+	dir = hx_files_provider_get_current_path (self);
+	rpath = remote_child_path (r, hx_file_entry_get_name (e));
+
+	/* Preview xfer never writes to disk (see opt.preview branch
+	 * in xfer_new). The lpath argument still has to exist
+	 * because the worker references it for logging / tooltip,
+	 * so synthesise something sane in the download dir. */
+	lpath = g_build_filename (
+		gtkhx_prefs.download_path ? gtkhx_prefs.download_path : "/tmp",
+		hx_file_entry_get_name (e), NULL);
+
+	htxf = xfer_new (lpath, rpath, XFER_GET, 1 /* preview */, 0);
+	if (htxf) {
+		htxf->filter_argv = 0;
+		htxf->opt.retry   = 0;
+	}
+
+	g_free (rpath);
+	g_free (lpath);
+	(void) dir;
+}
+
 static void
 hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface)
 {
@@ -423,4 +464,5 @@ hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface)
 	iface->delete_entry           = remote_delete_entry;
 	iface->rename                 = remote_rename;
 	iface->get_unavailable_reason = remote_get_unavailable_reason;
+	iface->activate_entry         = remote_activate_entry;
 }

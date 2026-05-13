@@ -1075,9 +1075,99 @@ icon_of_fh (struct hl_filelist_hdr *fh)
 	                                (gsize) fh->fnlen);
 }
 
-void
-output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
-                  void *data)
+/* FourCC → human label. Table is intentionally small — only the
+ * codes we see often in the wild on Hotline servers. Anything
+ * unknown falls through to "<XXXX> file" with the raw FourCC,
+ * which is still better than the raw 4-byte glyph the old code
+ * showed. Strings here are plain literals; _() runs at lookup
+ * time so any later translation catalog picks them up without
+ * needing N_() / gettext-noop machinery in this TU. */
+const char *
+kind_of_ftype (const char *ftype, gboolean *is_static_out)
+{
+	static const struct {
+		const char *code;
+		const char *label;
+	} table[] = {
+		{ "fldr", "Folder"              },
+		{ "TEXT", "Text Document"       },
+		{ "PDF ", "PDF Document"        },
+		{ "JPEG", "JPEG Image"          },
+		{ "GIFf", "GIF Image"           },
+		{ "GIF ", "GIF Image"           },
+		{ "PNGf", "PNG Image"           },
+		{ "PNG ", "PNG Image"           },
+		{ "PICT", "PICT Image"          },
+		{ "TIFF", "TIFF Image"          },
+		{ "BMP ", "BMP Image"           },
+		{ "MP3 ", "MP3 Audio"           },
+		{ "MPG3", "MP3 Audio"           },
+		{ "AIFF", "AIFF Audio"          },
+		{ "AIFC", "AIFF Audio"          },
+		{ "WAVE", "WAV Audio"           },
+		{ "Mp3 ", "MP3 Audio"           },
+		{ "MooV", "QuickTime Movie"     },
+		{ "MPEG", "MPEG Video"          },
+		{ "MPG ", "MPEG Video"          },
+		{ "M4V ", "MPEG-4 Video"        },
+		{ "AVI ", "AVI Video"           },
+		{ "MKV ", "Matroska Video"      },
+		{ "ZIP ", "ZIP Archive"         },
+		{ "SIT!", "StuffIt Archive"     },
+		{ "SITD", "StuffIt Archive"     },
+		{ "SIT5", "StuffIt Archive"     },
+		{ "BINA", "MacBinary Archive"   },
+		{ "TARF", "TAR Archive"         },
+		{ "Tar ", "TAR Archive"         },
+		{ "GZIP", "Gzip Archive"        },
+		{ "GZip", "Gzip Archive"        },
+		{ "BZIP", "Bzip2 Archive"       },
+		{ "APPL", "Application"         },
+		{ "rohd", "Disk Image"          },
+		{ "IMG ", "Disk Image"          },
+		{ "ISO ", "ISO Disk Image"      },
+		{ "DMG ", "Disk Image"          },
+		{ "HTft", "HTML Document"       },
+		{ "HTML", "HTML Document"       },
+		{ "alis", "Alias"               },
+		{ "SLNK", "Symbolic Link"       },
+	};
+	gsize i;
+
+	if (!ftype) {
+		if (is_static_out) *is_static_out = TRUE;
+		return _("Unknown");
+	}
+
+	for (i = 0; i < G_N_ELEMENTS (table); i++) {
+		if (memcmp (ftype, table[i].code, 4) == 0) {
+			if (is_static_out) *is_static_out = TRUE;
+			return _(table[i].label);
+		}
+	}
+
+	/* Fall-through: format a one-off string with the raw FourCC.
+	 * Caller frees. Avoids embedding non-printable bytes by
+	 * substituting '?' for anything outside printable ASCII —
+	 * some Hotline FourCCs are control bytes (NUL-padded
+	 * short strings, etc.) that would render as boxes. */
+	{
+		char safe[5];
+		gsize k;
+		char *out;
+		for (k = 0; k < 4; k++) {
+			unsigned char c = (unsigned char) ftype[k];
+			safe[k] = (c >= 0x20 && c < 0x7f) ? (char) c : '?';
+		}
+		safe[4] = '\0';
+		out = g_strdup_printf (_("%s file"), safe);
+		if (is_static_out) *is_static_out = FALSE;
+		return out;
+	}
+}
+
+void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
+					   void *data)
 {
     GtkWidget *files_list;
     GdkPixmap *pixmap;
