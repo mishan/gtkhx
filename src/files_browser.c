@@ -413,13 +413,20 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 
 /* ---- CSS for the active-panel highlight ---- */
 
+/* Active-panel marker via inset box-shadow rather than a real
+ * 2px border. The border version reflowed the frame's inner
+ * scrolled-window-and-column-view by 4px when the active class
+ * was toggled, which was enough of a mid-click size change to
+ * make GtkColumnView cancel its in-progress double-click
+ * sequence — symptom: the first double-click into the cold
+ * panel needed a third press to descend. box-shadow paints
+ * over the existing pixels without taking layout space, so
+ * the column view is the same size before and after the
+ * active flip. */
 static const char *active_css =
 	".files-panel-active {\n"
-	"  border: 2px solid @accent_color;\n"
+	"  box-shadow: inset 0 0 0 2px @accent_color;\n"
 	"  border-radius: 8px;\n"
-	"}\n"
-	".files-panel-active > * {\n"
-	"  border-radius: 6px;\n"
 	"}\n";
 
 static void
