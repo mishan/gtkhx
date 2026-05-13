@@ -260,16 +260,14 @@ goes away in Phase 5.
 
 ---
 
-## What I need from you before starting Phase 1
+## Answers locked in (2026-05-13)
 
-1. **Left/right defaults**: remote-on-left + local-on-right OK?
-   Or two-remotes-by-default and local is opt-in?
-2. **Single-window or multi-window**: are you happy collapsing
-   to a single browser window à la news_browser?
-3. **F-key vs button-bar emphasis**: heavy F-key (Norton-style) or
-   buttons-first with F-keys as secondary? The status of F-keys on
-   non-X11 desktops makes me lean toward buttons-first.
-4. **Local panel: which root to default to?** `XDG_DOWNLOAD_DIR`
-   seems sane.
-5. **Anything I'm missing** that you want from an OFM that the
-   current files.c doesn't have?
+1. **Default sides**: left = local, right = remote.
+2. **Single window**, matching news_browser. `file_samewin` becomes
+   obsolete during Phase 5 cleanup.
+3. **Buttons-first**, with keyboard shortcuts as secondary.
+   Ctrl-equivalents for the classic F-keys (Ctrl-D delete,
+   Ctrl-N new folder, Ctrl-R reload, Enter descend, Backspace up).
+4. **Local default root**: `XDG_DOWNLOAD_DIR`.
+5. **List widget**: `GtkColumnView` for sortable / resizable
+   columns.
