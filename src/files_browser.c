@@ -28,6 +28,50 @@
 #undef _
 #include <glib/gi18n.h>
 
+/* ---- DnD payload type ----
+ *
+ * Carries a drag's source-panel pointer plus the snapshot of
+ * selected entries at drag-start time. Boxed so it can ride
+ * inside a GdkContentProvider value; gdk_content_provider_new_for_value
+ * deep-copies via the registered copy func, so the source side
+ * is free to release its locals after building the provider. */
+typedef struct {
+	files_panel *src_panel;     /* weak: still validated at drop time */
+	GPtrArray   *entries;       /* HxFileEntry* with one ref each */
+} HxFilesDrag;
+
+static HxFilesDrag *
+hx_files_drag_copy (HxFilesDrag *src)
+{
+	HxFilesDrag *dst = g_new0 (HxFilesDrag, 1);
+	guint i;
+	if (!src) return dst;
+	dst->src_panel = src->src_panel;
+	if (src->entries) {
+		dst->entries = g_ptr_array_new_with_free_func (g_object_unref);
+		for (i = 0; i < src->entries->len; i++) {
+			HxFileEntry *e = g_ptr_array_index (src->entries, i);
+			g_ptr_array_add (dst->entries, g_object_ref (e));
+		}
+	}
+	return dst;
+}
+
+static void
+hx_files_drag_free (HxFilesDrag *p)
+{
+	if (!p) return;
+	if (p->entries) g_ptr_array_free (p->entries, TRUE);
+	g_free (p);
+}
+
+/* Forward decl — G_DEFINE_BOXED_TYPE generates the body but
+ * doesn't emit a prototype, so -Wmissing-prototypes complains. */
+static GType hx_files_drag_get_type (void);
+#define HX_TYPE_FILES_DRAG (hx_files_drag_get_type ())
+G_DEFINE_BOXED_TYPE (HxFilesDrag, hx_files_drag,
+                     hx_files_drag_copy, hx_files_drag_free)
+
 /* The browser holds two panels + the active-panel marker. The
  * active panel is the one with the column-view focus child; we
  * detect focus changes by hooking each column-view's
@@ -190,28 +234,19 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
 			files_panel_get_provider (br->active));
 }
 
-/* Copy — issue hx_files_ops_copy for each entry in the active
- * panel's selection. The whole batch shares a source-and-dest
- * pair; per-entry errors are tallied and surfaced as one
- * summary toast. */
+/* Copy a GPtrArray of entries from one panel to another and
+ * surface a one-shot summary toast. Shared between the Copy
+ * headerbar button and the DnD drop handler — both ultimately
+ * iterate hx_files_ops_copy and aggregate per-entry results. */
 static void
-on_copy_clicked (GtkButton *btn, gpointer user_data)
+copy_entries_and_toast (struct browser *br,
+                        files_panel *src, files_panel *dst,
+                        GPtrArray   *entries)
 {
-	struct browser *br = user_data;
-	files_panel *src, *dst;
-	GPtrArray *entries;
 	guint i, queued = 0, failed = 0;
 	HxOpsResult last_err = HX_OPS_OK;
-	(void) btn;
 
-	if (!br->active) return;
-	src = br->active;
-	dst = (src == br->left) ? br->right : br->left;
-	if (!dst) return;
-
-	entries = files_panel_get_selected_entries (src);
 	if (!entries || entries->len == 0) {
-		if (entries) g_ptr_array_free (entries, TRUE);
 		show_toast (br, _("Select a file to copy first."));
 		return;
 	}
@@ -225,13 +260,11 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
 		if (r == HX_OPS_OK) queued++;
 		else { failed++; last_err = r; }
 	}
-	g_ptr_array_free (entries, TRUE);
 
-	/* Surface a one-shot summary: if everything queued, just say
-	 * how many; if anything failed, lead with the failure reason
-	 * since that's the actionable bit. last_err alone covers the
-	 * common case where every failure had the same cause (most
-	 * fail-modes are global — no permission, not connected, etc.). */
+	/* Lead with the failure reason when anything failed since
+	 * that's the actionable bit. last_err alone is enough for
+	 * the common case where every failure had the same global
+	 * cause (no permission, not connected, folder unsupported). */
 	if (failed == 0) {
 		char *msg = g_strdup_printf (
 			g_dngettext (NULL,
@@ -251,6 +284,136 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
 		show_toast (br, msg);
 		g_free (msg);
 	}
+}
+
+/* Copy headerbar button — pulls the active panel's selection and
+ * issues a batch copy to the inactive panel. */
+static void
+on_copy_clicked (GtkButton *btn, gpointer user_data)
+{
+	struct browser *br = user_data;
+	files_panel *src, *dst;
+	GPtrArray *entries;
+	(void) btn;
+
+	if (!br->active) return;
+	src = br->active;
+	dst = (src == br->left) ? br->right : br->left;
+	if (!dst) return;
+
+	entries = files_panel_get_selected_entries (src);
+	copy_entries_and_toast (br, src, dst, entries);
+	if (entries) g_ptr_array_free (entries, TRUE);
+}
+
+/* ---- Drag and drop between panels ---------------------------- */
+
+/* Drag-source prepare: pull the current selection from the
+ * source panel, pack into a HxFilesDrag, return a content
+ * provider that wraps the boxed value. NULL means "don't
+ * start a drag" (empty selection) — GtkDragSource handles that
+ * cleanly. */
+static GdkContentProvider *
+on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
+{
+	files_panel *p;
+	GPtrArray   *entries;
+	HxFilesDrag  drag;
+	GValue       val = G_VALUE_INIT;
+	GdkContentProvider *cp;
+	(void) x; (void) y;
+
+	p = g_object_get_data (G_OBJECT (source), "panel");
+	if (!p) return NULL;
+
+	entries = files_panel_get_selected_entries (p);
+	if (!entries || entries->len == 0) {
+		if (entries) g_ptr_array_free (entries, TRUE);
+		(void) user_data;
+		return NULL;
+	}
+
+	/* gdk_content_provider_new_for_value deep-copies the boxed
+	 * payload via hx_files_drag_copy, so freeing our locals
+	 * afterwards is safe. */
+	drag.src_panel = p;
+	drag.entries   = entries;
+
+	g_value_init (&val, HX_TYPE_FILES_DRAG);
+	g_value_set_boxed (&val, &drag);
+	cp = gdk_content_provider_new_for_value (&val);
+	g_value_unset (&val);
+
+	g_ptr_array_free (entries, TRUE);
+	return cp;
+}
+
+/* Drop target callback. Validates the drag's source-panel
+ * pointer still resolves to one of our panels (defensive — the
+ * drag could in theory outlive the source widget, though in
+ * practice both panels are siblings of the drop target inside
+ * the same window) and that it's a CROSS-panel drop. Same-panel
+ * drops short-circuit without firing any transfers — orthodox
+ * FM convention is that intra-panel DnD is a no-op (no "move
+ * within directory" semantic). */
+static gboolean
+on_drop (GtkDropTarget *target, const GValue *value,
+         double x, double y, gpointer user_data)
+{
+	struct browser *br;
+	files_panel    *dst;
+	HxFilesDrag    *drag;
+	(void) x; (void) y; (void) user_data;
+
+	br  = g_object_get_data (G_OBJECT (target), "browser");
+	dst = g_object_get_data (G_OBJECT (target), "panel");
+	if (!br || !dst) return FALSE;
+	if (!G_VALUE_HOLDS (value, HX_TYPE_FILES_DRAG)) return FALSE;
+	drag = g_value_get_boxed (value);
+	if (!drag || !drag->src_panel || !drag->entries) return FALSE;
+
+	/* Drop on the same panel — no-op. GTK still considers the
+	 * drop "accepted" so we return TRUE; otherwise the drag
+	 * animates back to the source with a rejection sting. */
+	if (drag->src_panel == dst) return TRUE;
+
+	/* Source panel must be one of ours (paranoia — if the drag
+	 * came from somewhere else with a matching type, refuse). */
+	if (drag->src_panel != br->left && drag->src_panel != br->right)
+		return FALSE;
+
+	copy_entries_and_toast (br, drag->src_panel, dst, drag->entries);
+	return TRUE;
+}
+
+static void
+attach_panel_dnd (struct browser *br, files_panel *p)
+{
+	GtkWidget        *view = files_panel_get_column_view (p);
+	GtkDragSource    *src;
+	GtkDropTarget    *drop;
+
+	if (!view) return;
+
+	/* Source: drags initiated by clicking a row and pulling
+	 * past GTK's movement threshold. Action is COPY only (no
+	 * MOVE/LINK in Phase 4 — Move comes later, and Link doesn't
+	 * map cleanly onto either side). */
+	src = gtk_drag_source_new ();
+	gtk_drag_source_set_actions (src, GDK_ACTION_COPY);
+	g_object_set_data (G_OBJECT (src), "panel", p);
+	g_signal_connect (src, "prepare", G_CALLBACK (on_drag_prepare), NULL);
+	gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (src));
+
+	/* Target: accepts our boxed type only. GtkDropTarget adds
+	 * a .drop-active CSS class to the widget while a compatible
+	 * drag hovers, which gives a visual cue for free (Adwaita's
+	 * default style for it is fine). */
+	drop = gtk_drop_target_new (HX_TYPE_FILES_DRAG, GDK_ACTION_COPY);
+	g_object_set_data (G_OBJECT (drop), "browser", br);
+	g_object_set_data (G_OBJECT (drop), "panel",   p);
+	g_signal_connect (drop, "drop", G_CALLBACK (on_drop), NULL);
+	gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (drop));
 }
 
 struct mkdir_ctx {
@@ -658,6 +821,12 @@ open_files_browser (void)
 	 * files_panel_get_widget. */
 	attach_panel_focus_tracking (br, br->left);
 	attach_panel_focus_tracking (br, br->right);
+
+	/* DnD between panels: drag a row out of one panel and drop
+	 * on the other to fire the same Copy machinery the headerbar
+	 * button uses. Same-panel drops are a no-op. */
+	attach_panel_dnd (br, br->left);
+	attach_panel_dnd (br, br->right);
 
 	/* Window-level keyboard shortcuts.
 	 *
