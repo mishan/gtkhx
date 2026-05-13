@@ -45,6 +45,7 @@
 #include "news15.h"
 #include "news_browser.h"
 #include "gtkutil.h"
+#include "hl_access.h"
 
 /* ---------- HxNewsNode (one GObject per tree row) ---------- */
 
@@ -154,13 +155,23 @@ struct _gnews_browser {
 	 * is for the currently-displayed post. */
 	HxNewsNode   *selected_post;
 
-	/* Header bar action buttons. Visibility is selection-driven
-	 * by sync_action_buttons (folder → New Folder + New Category +
-	 * Delete; category → Delete; post → Reply + Delete; always
-	 * → Refresh). */
+	/* Header bar action buttons.
+	 *
+	 * Visibility is selection-driven by sync_action_buttons:
+	 *   root / no selection → Refresh, New Folder, New Category
+	 *   folder              → Refresh, New Folder, New Category, Delete
+	 *   category            → Refresh, New Post, Delete
+	 *   post                → Refresh, New Post, Reply, Delete
+	 *
+	 * Sensitivity is access-bit-driven by the same function:
+	 * the per-button access bit must be set in htlc->access for
+	 * the button to be clickable. Buttons stay visible-but-grey
+	 * when the action is forbidden — the user can see the slot is
+	 * there but the server has revoked permission. */
 	GtkWidget    *btn_refresh;
 	GtkWidget    *btn_new_folder;
 	GtkWidget    *btn_new_category;
+	GtkWidget    *btn_new_post;
 	GtkWidget    *btn_reply;
 	GtkWidget    *btn_delete;
 };
@@ -1121,38 +1132,46 @@ on_new_category_clicked (GtkButton *btn, gpointer user_data)
 		NB_KIND_CATEGORY);
 }
 
-/* Delete — confirm dialog + RPC + refresh parent. */
-
+/* Delete — confirm dialog + RPC + refresh parent.
+ *
+ * Snapshot the node's identity (kind, path, postid) at click time
+ * instead of holding an HxNewsNode reference across the dialog.
+ * A held GObject ref keeps the node alive but doesn't protect
+ * against the GListStore dropping its ref during a refresh or
+ * collapse, which clears the node's path pointer in flight and
+ * passes NULL to path_to_hldir (crash). The snapshot approach is
+ * also simpler to reason about — once the user clicks Delete in
+ * the toolbar, the intent is fixed regardless of what happens to
+ * the tree before they confirm. */
 struct delete_ctx {
 	gnews_browser *br;
-	HxNewsNode    *node;       /* reffed */
+	int            kind;
+	char          *path;       /* owned */
+	guint32        postid;
 };
 
 static void
 delete_response (AdwAlertDialog *dialog, const char *response, gpointer user_data)
 {
 	struct delete_ctx *ctx = user_data;
-	HxNewsNode *parent_node = NULL;
 	(void) dialog;
 
 	if (g_strcmp0 (response, "delete") != 0)
 		return;
-	if (!ctx->node)
+	if (!ctx->path)
 		return;
 
-	if (ctx->node->kind == NB_KIND_POST) {
+	if (ctx->kind == NB_KIND_POST) {
 		hx_news15_delete_thread (&the_session.htlc,
-		                         ctx->node->path, ctx->node->postid);
+		                         ctx->path, ctx->postid);
 	} else {
-		hx_news15_delete (&the_session.htlc, ctx->node->path);
+		hx_news15_delete (&the_session.htlc, ctx->path);
 	}
 
-	/* Walk the parent path back to a node we already have so we
-	 * can refresh it. For top-level entries this is just the root.
-	 * For deeper entries we'd need a path → node lookup the
-	 * current model doesn't maintain — punt to a full root refresh
-	 * in that case, which is simple and correct. */
-	(void) parent_node;
+	/* Settle with a root refresh. The model doesn't keep a
+	 * path → node lookup yet, so locating the affected parent
+	 * cheaply isn't doable; a full root refresh is correct,
+	 * just heavier. */
 	if (the_browser)
 		refresh_node (the_browser, NULL);
 }
@@ -1162,7 +1181,7 @@ delete_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
 	struct delete_ctx *ctx = user_data;
 	(void) dialog;
-	g_clear_object (&ctx->node);
+	g_free (ctx->path);
 	g_free (ctx);
 }
 
@@ -1177,7 +1196,7 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 	char *body_text;
 	(void) btn;
 
-	if (!sel)
+	if (!sel || !sel->path)
 		return;
 
 	switch (sel->kind) {
@@ -1212,48 +1231,331 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
 
 	ctx = g_new0 (struct delete_ctx, 1);
-	ctx->br   = br;
-	ctx->node = g_object_ref (sel);
+	ctx->br     = br;
+	ctx->kind   = sel->kind;
+	ctx->path   = g_strdup (sel->path);
+	ctx->postid = sel->postid;
 	g_signal_connect (dialog, "response", G_CALLBACK (delete_response), ctx);
 	g_signal_connect (dialog, "closed",   G_CALLBACK (delete_closed),   ctx);
 
 	adw_dialog_present (dialog, br->window);
 }
 
+/* ---------- Compose window (shared by New Post and Reply) ----------
+ *
+ * The user fires either New Post (parent_postid = 0) or Reply (parent
+ * postid taken from the selected post). Both open the same compose
+ * window — subject entry, body text view, Post + Cancel. On Post:
+ *   1. hx_news15_post_thread on the wire
+ *   2. refresh the containing category so the new post appears
+ *
+ * The category path comes from the selected node (for a post: its
+ * containing-category path, which is what HxNewsNode->path already
+ * holds; for a category: the category's own path). */
+
+struct compose_ctx {
+	gnews_browser *br;
+	char          *category_path;   /* owned */
+	guint32        parent_postid;
+	GtkWidget     *window;
+	GtkWidget     *subject_entry;
+	GtkWidget     *body_view;
+};
+
+static void
+compose_ctx_free (struct compose_ctx *ctx)
+{
+	if (!ctx) return;
+	g_free (ctx->category_path);
+	g_free (ctx);
+}
+
+/* Find the HxNewsNode that owns the category path, walking the
+ * existing tree only — we don't fetch on miss. Returns NULL if the
+ * category isn't currently loaded into the tree (in which case the
+ * caller falls back to a root refresh, which is heavier but always
+ * works). */
+static HxNewsNode *
+find_category_node (GListStore *store, const char *path)
+{
+	guint n, i;
+	if (!store || !path) return NULL;
+	n = g_list_model_get_n_items (G_LIST_MODEL (store));
+	for (i = 0; i < n; i++) {
+		HxNewsNode *node = g_list_model_get_item (G_LIST_MODEL (store), i);
+		HxNewsNode *hit = NULL;
+		if (node->kind == NB_KIND_CATEGORY
+		    && g_strcmp0 (node->path, path) == 0) {
+			hit = node;
+		} else if (node->kind == NB_KIND_FOLDER && node->children) {
+			hit = find_category_node (node->children, path);
+		}
+		if (hit) {
+			g_object_unref (node);
+			return hit;
+		}
+		g_object_unref (node);
+	}
+	return NULL;
+}
+
+static void
+compose_do_post (GtkButton *btn, gpointer user_data)
+{
+	struct compose_ctx *ctx = user_data;
+	const char    *subject;
+	GtkTextBuffer *buf;
+	GtkTextIter    a, b;
+	char          *body;
+	HxNewsNode    *cat;
+	(void) btn;
+
+	subject = gtk_editable_get_text (GTK_EDITABLE (ctx->subject_entry));
+	if (!subject) subject = "";
+
+	buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (ctx->body_view));
+	gtk_text_buffer_get_start_iter (buf, &a);
+	gtk_text_buffer_get_end_iter   (buf, &b);
+	body = gtk_text_buffer_get_text (buf, &a, &b, FALSE);
+
+	hx_news15_post_thread (&the_session.htlc,
+	                       ctx->category_path,
+	                       subject,
+	                       ctx->parent_postid,
+	                       body ? body : (char *) "");
+
+	g_free (body);
+
+	/* Settle: refresh just the affected category if it's still in
+	 * the tree, otherwise the whole root. */
+	if (the_browser) {
+		cat = find_category_node (the_browser->root_store,
+		                          ctx->category_path);
+		if (cat) {
+			refresh_node (the_browser, cat);
+			g_object_unref (cat);
+		} else {
+			refresh_node (the_browser, NULL);
+		}
+	}
+
+	gtk_window_destroy (GTK_WINDOW (ctx->window));
+}
+
+static void
+compose_cancel (GtkButton *btn, gpointer user_data)
+{
+	struct compose_ctx *ctx = user_data;
+	(void) btn;
+	gtk_window_destroy (GTK_WINDOW (ctx->window));
+}
+
+static void
+compose_window_closed (GtkWindow *win, gpointer user_data)
+{
+	struct compose_ctx *ctx = user_data;
+	(void) win;
+	compose_ctx_free (ctx);
+}
+
+/* Open a compose window. `parent_postid` 0 = new post; non-zero =
+ * reply. `prefill_subject` is the initial subject text (typically
+ * "Re: <original>" for a reply, empty for a new post). */
+static void
+open_compose_window (gnews_browser *br,
+                     const char    *category_path,
+                     guint32        parent_postid,
+                     const char    *prefill_subject)
+{
+	struct compose_ctx *ctx;
+	GtkWidget *window, *header, *content, *form, *body_scroll;
+	GtkWidget *subject_row, *subject_lbl;
+	GtkWidget *cancel_btn, *post_btn;
+
+	if (!category_path)
+		return;
+
+	ctx = g_new0 (struct compose_ctx, 1);
+	ctx->br             = br;
+	ctx->category_path  = g_strdup (category_path);
+	ctx->parent_postid  = parent_postid;
+
+	window = gtk_window_new ();
+	gtk_window_set_title (GTK_WINDOW (window),
+		parent_postid ? _("Reply") : _("New Post"));
+	gtk_widget_set_size_request (window, 560, 380);
+	gtk_window_set_transient_for (GTK_WINDOW (window), GTK_WINDOW (br->window));
+	gtk_window_set_modal (GTK_WINDOW (window), TRUE);
+	ctx->window = window;
+
+	/* Header bar with Cancel (left) + Post (right). */
+	header = adw_header_bar_new ();
+	adw_header_bar_set_show_start_title_buttons (ADW_HEADER_BAR (header), FALSE);
+	adw_header_bar_set_show_end_title_buttons   (ADW_HEADER_BAR (header), FALSE);
+
+	cancel_btn = gtk_button_new_with_mnemonic (_("_Cancel"));
+	post_btn   = gtk_button_new_with_mnemonic (_("_Post"));
+	gtk_widget_add_css_class (post_btn, "suggested-action");
+
+	g_signal_connect (cancel_btn, "clicked",
+	                  G_CALLBACK (compose_cancel),    ctx);
+	g_signal_connect (post_btn,   "clicked",
+	                  G_CALLBACK (compose_do_post),   ctx);
+
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), cancel_btn);
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), post_btn);
+	gtk_window_set_titlebar (GTK_WINDOW (window), header);
+
+	/* Body: subject entry row + multi-line body GtkTextView. */
+	content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	form    = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+	gtk_widget_set_margin_start  (form, 12);
+	gtk_widget_set_margin_end    (form, 12);
+	gtk_widget_set_margin_top    (form, 10);
+	gtk_widget_set_margin_bottom (form, 6);
+
+	subject_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+	subject_lbl = gtk_label_new (_("Subject:"));
+	gtk_label_set_xalign (GTK_LABEL (subject_lbl), 0.0f);
+	ctx->subject_entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (ctx->subject_entry), FALSE);
+	gtk_widget_set_hexpand (ctx->subject_entry, TRUE);
+	gtk_editable_set_text (GTK_EDITABLE (ctx->subject_entry),
+		prefill_subject ? prefill_subject : "");
+	gtk_box_append (GTK_BOX (subject_row), subject_lbl);
+	gtk_box_append (GTK_BOX (subject_row), ctx->subject_entry);
+
+	gtk_box_append (GTK_BOX (form), subject_row);
+	gtkhx_box_pack (content, form, FALSE, FALSE, 0);
+
+	body_scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (body_scroll),
+	                                GTK_POLICY_AUTOMATIC,
+	                                GTK_POLICY_AUTOMATIC);
+	ctx->body_view = gtk_text_view_new ();
+	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (ctx->body_view), GTK_WRAP_WORD_CHAR);
+	gtk_widget_set_margin_start  (ctx->body_view, 4);
+	gtk_widget_set_margin_end    (ctx->body_view, 4);
+	gtk_widget_set_margin_top    (ctx->body_view, 4);
+	gtk_widget_set_margin_bottom (ctx->body_view, 4);
+	gtkhx_widget_set_child (body_scroll, ctx->body_view);
+	gtkhx_box_pack (content, body_scroll, TRUE, TRUE, 0);
+
+	gtkhx_widget_set_child (window, content);
+
+	g_signal_connect (window, "destroy",
+	                  G_CALLBACK (compose_window_closed), ctx);
+
+	gtk_window_present (GTK_WINDOW (window));
+	/* Focus the subject for new posts, body for replies (the
+	 * subject is already prefilled "Re: …" — the user usually just
+	 * wants to start typing). */
+	if (parent_postid)
+		gtk_widget_grab_focus (ctx->body_view);
+	else
+		gtk_widget_grab_focus (ctx->subject_entry);
+}
+
+static void
+on_new_post_clicked (GtkButton *btn, gpointer user_data)
+{
+	gnews_browser *br = user_data;
+	HxNewsNode    *sel = selected_node (br);
+	const char    *cat_path = NULL;
+	(void) btn;
+
+	/* Need a category to post into. Selected category → its path.
+	 * Selected post → its containing-category path (already what
+	 * HxNewsNode->path stores for posts). Anything else (folder,
+	 * nothing) → can't post; the button shouldn't have been
+	 * visible, but be defensive. */
+	if (!sel) return;
+	if (sel->kind == NB_KIND_CATEGORY || sel->kind == NB_KIND_POST)
+		cat_path = sel->path;
+	if (!cat_path) return;
+
+	open_compose_window (br, cat_path, 0, "");
+}
+
 static void
 on_reply_clicked (GtkButton *btn, gpointer user_data)
 {
-	/* Phase 5 follow-up: replying needs the compose-window UI
-	 * (subject + body + post), which is a separate chunk of work.
-	 * For now this is a visible-but-not-yet-wired button so the
-	 * user can see the slot it'll occupy in the layout. */
-	(void) btn; (void) user_data;
+	gnews_browser *br = user_data;
+	HxNewsNode    *sel = selected_node (br);
+	char          *subj;
+	(void) btn;
+
+	if (!sel || sel->kind != NB_KIND_POST || !sel->path)
+		return;
+
+	/* Prefill with "Re: <original>", but only if the original
+	 * doesn't already start with "Re:" — avoid Re: Re: Re: chains
+	 * the way every mail client has for decades. */
+	if (sel->name && g_ascii_strncasecmp (sel->name, "Re:", 3) == 0)
+		subj = g_strdup (sel->name);
+	else
+		subj = g_strdup_printf ("Re: %s", sel->name ? sel->name : "");
+
+	open_compose_window (br, sel->path, sel->postid, subj);
+	g_free (subj);
 }
 
-/* Toggle button visibility based on what kind of node is selected.
- * Refresh is always visible; the rest follow the design from the
- * phase plan:
+/* Toggle action-button visibility + sensitivity.
  *
- *   no selection / folder → New Folder, New Category, Delete (if
- *                           a folder is selected; not if root)
- *   category              → Delete
- *   post                  → Reply, Delete
- */
+ * Visibility is selection-driven:
+ *   no selection / root → New Folder, New Category
+ *   folder              → New Folder, New Category, Delete
+ *   category            → New Post, Delete
+ *   post                → New Post, Reply, Delete
+ *   (Refresh is always visible.)
+ *
+ * Sensitivity is access-bit-driven from htlc->access. Buttons stay
+ * visible when the action is forbidden by the server but become
+ * grey + unclickable. This gives the user a clearer signal than
+ * silently hiding ("I know this exists; the server says no") and
+ * avoids the toolbar reshuffling every time selection changes a
+ * permission boundary. */
 static void
 sync_action_buttons (gnews_browser *br)
 {
-	HxNewsNode *node = selected_node (br);
-	int kind = node ? node->kind : 0;
+	HxNewsNode   *node = selected_node (br);
+	int           kind = node ? node->kind : 0;
+	const guint8 *access = (const guint8 *) &the_session.htlc.access;
+	int           delete_bit;
 
+	/* Visibility */
 	gtk_widget_set_visible (br->btn_new_folder,
 		kind == 0 || kind == NB_KIND_FOLDER);
 	gtk_widget_set_visible (br->btn_new_category,
 		kind == 0 || kind == NB_KIND_FOLDER);
+	gtk_widget_set_visible (br->btn_new_post,
+		kind == NB_KIND_CATEGORY || kind == NB_KIND_POST);
+	gtk_widget_set_visible (br->btn_reply,
+		kind == NB_KIND_POST);
 	gtk_widget_set_visible (br->btn_delete,
 		kind == NB_KIND_FOLDER || kind == NB_KIND_CATEGORY
 		|| kind == NB_KIND_POST);
-	gtk_widget_set_visible (br->btn_reply,
-		kind == NB_KIND_POST);
+
+	/* Sensitivity: per-action access bit. The delete bit depends
+	 * on what kind of node is selected — folder vs. category vs.
+	 * post each carry separate bits in the bitmap. */
+	gtk_widget_set_sensitive (br->btn_new_folder,
+		hl_access_has (access, HL_ACCESS_CREATE_NEWS_BUNDLES));
+	gtk_widget_set_sensitive (br->btn_new_category,
+		hl_access_has (access, HL_ACCESS_CREATE_CATEGORIES));
+	gtk_widget_set_sensitive (br->btn_new_post,
+		hl_access_has (access, HL_ACCESS_POST_NEWS));
+	gtk_widget_set_sensitive (br->btn_reply,
+		hl_access_has (access, HL_ACCESS_POST_NEWS));
+
+	switch (kind) {
+	case NB_KIND_FOLDER:   delete_bit = HL_ACCESS_DELETE_NEWS_BUNDLES; break;
+	case NB_KIND_CATEGORY: delete_bit = HL_ACCESS_DELETE_CATEGORIES;   break;
+	case NB_KIND_POST:     delete_bit = HL_ACCESS_DELETE_ARTICLES;     break;
+	default:               delete_bit = -1;                            break;
+	}
+	gtk_widget_set_sensitive (br->btn_delete,
+		delete_bit >= 0 && hl_access_has (access, delete_bit));
 }
 
 /* ---------- Window lifecycle ---------- */
@@ -1333,8 +1635,12 @@ build_browser_window (void)
 		"/com/nasledov/gtkhx/pixmaps/newscat.xpm",
 		_("New Category"), 2,
 		G_CALLBACK (on_new_category_clicked), br);
-	br->btn_reply = gtkhx_pixmap_button (
+	br->btn_new_post = gtkhx_pixmap_button (
 		"/com/nasledov/gtkhx/pixmaps/news_reply.xpm",
+		_("New Post"), 2,
+		G_CALLBACK (on_new_post_clicked), br);
+	br->btn_reply = gtkhx_pixmap_button (
+		"/com/nasledov/gtkhx/pixmaps/postnews.xpm",
 		_("Reply"), 2,
 		G_CALLBACK (on_reply_clicked), br);
 	br->btn_delete = gtkhx_pixmap_button (
@@ -1345,6 +1651,7 @@ build_browser_window (void)
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_refresh);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_folder);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_category);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_post);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), br->btn_delete);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), br->btn_reply);
 

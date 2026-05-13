@@ -132,7 +132,7 @@ void hx_news15_fldr_list(struct htlc_conn *htlc, struct gnews_folder *gfnews)
 	g_free(hldir);
 }
 
-static void hx_news15_post_thread(struct htlc_conn *htlc, char *path, const char *subject,
+void hx_news15_post_thread(struct htlc_conn *htlc, char *path, const char *subject,
 						   guint32 threadid, char *text)
 {
 	guint8 *hldir;

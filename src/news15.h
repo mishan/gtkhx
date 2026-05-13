@@ -30,4 +30,12 @@ extern void hx_news15_mkcat         (struct htlc_conn *htlc, char *path,
 extern void hx_news15_mkdir         (struct htlc_conn *htlc, char *path);
 extern void hx_news15_delete_thread (struct htlc_conn *htlc, char *path,
                                      guint32 threadid);
+/* Post a news article. `parent_postid` is the post being replied to
+ * (in mhxd terms, the value that goes into the post's "References:"
+ * header). Pass 0 for a brand-new top-level post. The legacy
+ * parameter name is `threadid`, mirroring the HTLC_DATA_NEWSTHREADID
+ * wire field. */
+extern void hx_news15_post_thread (struct htlc_conn *htlc, char *path,
+                                   const char *subject, guint32 threadid,
+                                   char *text);
 #endif
