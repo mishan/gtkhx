@@ -51,9 +51,11 @@
 #define CFG_XBUF_MAX        "XBUF_MAX"
 #define CFG_FONT            "FONT"
 
-/* Files / news same-window navigation */
+/* Same-window navigation for the files browser. The matching
+ * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
+ * two-window news UI was removed; an old gtkhxrc that still has
+ * the key just gets ignored. */
 #define CFG_FILE_SAMEWIN    "FILE_SAMEWINDOW"
-#define CFG_NEWS_SAMEWIN    "NEWS_SAMEWINDOW"
 
 /* Desktop notifications (Phase 5+). One BOOLEAN per event class so
  * users can toggle each independently. NOTIFY_OMIT_FOCUSED gates

@@ -17,11 +17,10 @@
  * Categories are enumerated via HTLC_HDR_NEWSCATLIST and contain
  * posts; posts inside a category are threaded by parentid.
  *
- * This is the replacement for the old gnews_folder / gnews_catalog
- * dual-window UI (open_news15 in news15.c). Both UIs coexist in the
- * binary during the migration; the toolbar now points at the unified
- * browser. Once the new UI is fully functional the old code paths
- * will be removed.
+ * This replaced the old gnews_folder / gnews_catalog dual-window UI
+ * (open_news15 in news15.c, retired in Phase 6). news15.c now
+ * contains only the wire-format RPC senders that this browser
+ * drives.
  */
 
 #ifndef HX_NEWS_BROWSER_H
@@ -37,17 +36,18 @@ typedef struct _gnews_browser gnews_browser;
  * toolbar callback for the News (1.5+) button. */
 extern void open_news_browser (GtkWidget *widget, struct _session *sess);
 
-/* Intercept hook called from gtkhx.c::on_news_folder_signal /
- * on_news_catalog_signal. The browser registers in-flight fetches
- * (via stub gnews_folder / gnews_catalog pointers fed to the
- * existing hx_news15_fldr_list / hx_news15_cat_list helpers) and
- * matches them here. Returns TRUE if the browser consumed the
- * reply (the gnews_folder/gnews_catalog pointer was one of ours);
- * FALSE if it's an old-style window's fetch that should fall
- * through to output_news_folder / output_news_catalog.
+/* Reply-routing hooks called from gtkhx.c::on_news_*_signal. The
+ * browser registers in-flight fetches (via stub gnews_folder /
+ * gnews_catalog / news_item pointers fed to the existing
+ * hx_news15_fldr_list / _cat_list / _get_post helpers) and matches
+ * them here. Returns TRUE on a match — the browser owned the stub
+ * and the stub is now freed. FALSE means no match (caller can
+ * safely drop the carrier, but in practice the browser is the
+ * only producer of these stubs since Phase 6, so a FALSE return
+ * just means the reply landed after the browser closed).
  *
- * Both functions free the stub when they return TRUE — the stub
- * isn't a window, it's a one-shot RPC carrier. */
+ * Stub freeing is handled inside the browser on match; the caller
+ * does not free. */
 extern gboolean gnews_browser_handle_dirlist (gpointer gfnews);
 extern gboolean gnews_browser_handle_catlist (gpointer gcnews);
 extern gboolean gnews_browser_handle_thread  (gpointer post);

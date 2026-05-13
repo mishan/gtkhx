@@ -98,7 +98,6 @@ struct gtkhx_prefs gtkhx_prefs =
 	0,	/* timestamp */
 	0,	/* word_wrap */
 	0,	/* file_samewin */
-	1,	/* news_samewin */
 	1,	/* track_case */
 	0,	/* old_nickcompletion */
 	0,	/* outrate_limit */
@@ -587,15 +586,6 @@ static void changed_tray (session *sess)
 	gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
-static void changed_newssamewin (session *sess)
-{
-	struct gnews_folder *gfnews;
-
-	for(gfnews = gfnews_list; gfnews; gfnews = gfnews->prev) {
-		gtk_widget_set_sensitive(gfnews->up_btn, gtkhx_prefs.news_samewin);
-	}
-}
-
 struct cfgvar
 {
 	/* name of variable as it appears in conf file */
@@ -659,8 +649,6 @@ struct cfgvar
 	{CFG_NEWS_XSIZE, {&gtkhx_prefs.geo.news.xsize}, INT, 0, NULL, NULL},
 	{CFG_NEWS_YPOS, {&gtkhx_prefs.geo.news.ypos}, INT, 0, NULL, NULL},
 	{CFG_NEWS_YSIZE, {&gtkhx_prefs.geo.news.ysize}, INT, 0, NULL, NULL},
-	{CFG_NEWS_SAMEWIN, {&gtkhx_prefs.news_samewin}, BOOLEAN, 0,
-	 changed_newssamewin, NULL},
 	{CFG_NICK, {the_session.htlc.name}, STRING32, 0,
 	 changed_nickoricon, NULL},
 	{CFG_NOTIFY_BROADCAST, {&gtkhx_prefs.notify_broadcast},
@@ -1887,7 +1875,7 @@ static void settings_page_tracker (AdwPreferencesPage *page)
  * an "Interface" page with one group per browser. */
 static void settings_page_interface (AdwPreferencesPage *page)
 {
-	AdwPreferencesGroup *files_grp, *news_grp;
+	AdwPreferencesGroup *files_grp;
 
 	files_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
 	adw_preferences_group_set_title (files_grp, _("File Browsing"));
@@ -1897,13 +1885,10 @@ static void settings_page_interface (AdwPreferencesPage *page)
 		                 _("Replace the current window when descending into a folder")));
 	adw_preferences_page_add (page, files_grp);
 
-	news_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-	adw_preferences_group_set_title (news_grp, _("News Folder Browsing"));
-	adw_preferences_group_add (news_grp,
-		pref_switch_row (CFG_NEWS_SAMEWIN,
-		                 _("Browse in Same Window"),
-		                 _("Replace the current window when descending into a folder")));
-	adw_preferences_page_add (page, news_grp);
+	/* The News-folder "Browse in Same Window" pref was retired in
+	 * Phase 6 with the legacy two-window UI; the unified news
+	 * browser is always one window so the toggle has nothing left
+	 * to drive. */
 }
 
 static void settings_page_sound (AdwPreferencesPage *page)
