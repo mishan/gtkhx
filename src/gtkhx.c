@@ -42,6 +42,7 @@
 #include "cicn.h"
 #include "news.h"
 #include "news15.h"
+#include "news_browser.h"
 #include "users.h"
 #include "files.h"
 #include "tasks.h"
@@ -1113,6 +1114,12 @@ on_news_folder_signal (GtkhxSession *emitter,
                        gpointer gfnews, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
+	/* The new unified browser hands its own gnews_folder stubs to
+	 * hx_news15_fldr_list; reply routing happens here first. The
+	 * legacy window's gnews_folder isn't in the browser's pending
+	 * table so the handler returns FALSE and we fall through. */
+	if (gnews_browser_handle_dirlist (gfnews))
+		return;
 	output_news_folder ((struct gnews_folder *) gfnews);
 }
 
@@ -1121,6 +1128,8 @@ on_news_catalog_signal (GtkhxSession *emitter,
                         gpointer gcnews, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
+	if (gnews_browser_handle_catlist (gcnews))
+		return;
 	output_news_catalog ((struct gnews_catalog *) gcnews);
 }
 

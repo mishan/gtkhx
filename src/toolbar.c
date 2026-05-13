@@ -29,6 +29,7 @@
 #include "network.h"
 #include "news.h"
 #include "news15.h"
+#include "news_browser.h"
 #include "xfers.h"
 #include "gtkutil.h"
 #include "text_util.h"
@@ -506,7 +507,7 @@ void create_toolbar_window (session *sess)
 	gtk_box_append (GTK_BOX (hbox), post_btn);
 	news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.xpm",
 	                                 _("News (1.5+)"),
-	                                 G_CALLBACK (open_news15), sess);
+	                                 G_CALLBACK (open_news_browser), sess);
 	gtk_box_append (GTK_BOX (hbox), news15_btn);
 	files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.xpm",
 	                                _("Files"),
