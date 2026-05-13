@@ -416,16 +416,19 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 /* Active-panel marker via inset box-shadow rather than a real
  * 2px border. The border version reflowed the frame's inner
  * scrolled-window-and-column-view by 4px when the active class
- * was toggled, which was enough of a mid-click size change to
- * make GtkColumnView cancel its in-progress double-click
- * sequence — symptom: the first double-click into the cold
- * panel needed a third press to descend. box-shadow paints
- * over the existing pixels without taking layout space, so
- * the column view is the same size before and after the
- * active flip. */
+ * was toggled, which is enough of a layout invalidation to
+ * make GtkColumnView throw away in-progress click sequences.
+ * box-shadow paints over existing pixels without taking
+ * layout space, so the column view is the same size before
+ * and after the active flip.
+ *
+ * Hardcoded hex rather than @accent_color so the rule resolves
+ * unambiguously across libadwaita color-scheme + accent
+ * settings — gtkurl.c does the same thing for its URL tag.
+ * #1c71d8 is libadwaita's default light-theme accent. */
 static const char *active_css =
 	".files-panel-active {\n"
-	"  box-shadow: inset 0 0 0 2px @accent_color;\n"
+	"  box-shadow: inset 0 0 0 2px #1c71d8;\n"
 	"  border-radius: 8px;\n"
 	"}\n";
 

@@ -35,6 +35,17 @@ struct _files_panel {
 	gulong navigated_handler;
 	gulong unavailable_handler;
 
+	/* Set TRUE when the user triggers a navigation FROM this
+	 * panel (double-click row, Up button, path entry Enter).
+	 * On the matching "navigated" reply we grab focus back to
+	 * the column view, since populate_from_chunks (for remote
+	 * providers) ends up destroying the row widgets that may
+	 * have held focus during the descend — GTK's focus-fallback
+	 * normally lands on the window's last-focused widget, which
+	 * is the other panel. Without this nudge, focus shifts to
+	 * the inactive panel on every directory change. */
+	gboolean wants_focus_restore;
+
 	/* Cached row icons keyed by ICON_* id. Lazy-populated via
 	 * lookup_icon_paintable on first row that needs each icon;
 	 * dropped on panel_free. Holding the GdkPaintable refs on
@@ -341,6 +352,20 @@ on_navigated (HxFilesProvider *prov, const char *new_path,
 	gtk_editable_set_text (GTK_EDITABLE (p->path_entry),
 		new_path ? new_path : "");
 	update_status (p);
+
+	/* User just changed this panel's directory — restore focus
+	 * to the column view in case the listing rebuild yanked it
+	 * away. The flag is set by the navigation triggers below
+	 * (on_row_activated, on_up_clicked, on_path_entry_activate)
+	 * and cleared here, so refreshes that aren't user-driven
+	 * (e.g. the auto-reload when the remote provider gains
+	 * availability on connect) don't steal focus from whatever
+	 * the user is currently working in. */
+	if (p->wants_focus_restore) {
+		p->wants_focus_restore = FALSE;
+		if (p->column_view)
+			gtk_widget_grab_focus (p->column_view);
+	}
 }
 
 /* Provider's availability flipped (remote provider on login /
@@ -395,6 +420,7 @@ on_row_activated (GtkColumnView *view, guint pos, gpointer user_data)
 		 * g_build_filename does the right thing on both. */
 		child = g_build_filename (cur ? cur : "/",
 			hx_file_entry_get_name (e), NULL);
+		p->wants_focus_restore = TRUE;
 		hx_files_provider_navigate (p->provider, child);
 		g_free (child);
 	}
@@ -412,6 +438,7 @@ on_path_entry_activate (GtkEntry *entry, gpointer user_data)
 	files_panel *p = user_data;
 	const char *txt = gtk_editable_get_text (GTK_EDITABLE (entry));
 	if (!txt || !*txt) return;
+	p->wants_focus_restore = TRUE;
 	hx_files_provider_navigate (p->provider, txt);
 }
 
@@ -420,6 +447,7 @@ on_up_clicked (GtkButton *btn, gpointer user_data)
 {
 	files_panel *p = user_data;
 	(void) btn;
+	p->wants_focus_restore = TRUE;
 	hx_files_provider_navigate_up (p->provider);
 }
 
