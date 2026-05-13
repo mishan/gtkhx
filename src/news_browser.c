@@ -692,26 +692,51 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
 		                     GUINT_TO_POINTER (it->postid), n);
 	}
 
-	/* Pass 2: attach each node to its parent (or to dest if
-	 * top-level / dangling parent). We append by ref since the
-	 * GListStore takes its own ref. */
-	for (i = 0; i < group->post_count; i++) {
-		struct news_item *it = &group->posts[i];
-		HxNewsNode       *n  = nodes[i];
-		HxNewsNode       *parent = NULL;
+	/* Pass 2: attach replies to their parents' children stores.
+	 * Top-level posts are deferred to pass 3.
+	 *
+	 * Why two passes for the append: GtkTreeListModel decides
+	 * whether a row is expandable on the *first* call to
+	 * create_child_model — which fires the moment we append a
+	 * post to `dest`. If we appended top-level parents in array
+	 * order (mhxd sorts depth-first, so parents come before their
+	 * replies), the parent goes into `dest` while its
+	 * `children` store is still empty → returns NULL →
+	 * permanent leaf, no expander. Replies appended a beat later
+	 * to parent->children are then invisible. Doing all the
+	 * parent.children wiring first means by the time pass 3
+	 * pushes the top-level parent into `dest`, its full reply
+	 * subtree already exists. */
+	{
+		GArray *top_indices = g_array_new (FALSE, FALSE, sizeof (int));
 
-		if (it->parentid != 0)
-			parent = g_hash_table_lookup (
-				by_postid, GUINT_TO_POINTER (it->parentid));
+		for (i = 0; i < group->post_count; i++) {
+			struct news_item *it = &group->posts[i];
+			HxNewsNode       *n  = nodes[i];
+			HxNewsNode       *parent = NULL;
 
-		if (parent && parent != n) {
-			if (!parent->children)
-				parent->children = g_list_store_new (HX_TYPE_NEWS_NODE);
-			g_list_store_append (parent->children, n);
-		} else {
-			g_list_store_append (dest, n);
+			if (it->parentid != 0)
+				parent = g_hash_table_lookup (
+					by_postid, GUINT_TO_POINTER (it->parentid));
+
+			if (parent && parent != n) {
+				if (!parent->children)
+					parent->children = g_list_store_new (HX_TYPE_NEWS_NODE);
+				g_list_store_append (parent->children, n);
+				g_object_unref (n);     /* parent->children owns it */
+			} else {
+				g_array_append_val (top_indices, i);
+			}
 		}
-		g_object_unref (n);
+
+		/* Pass 3: emit top-level posts to dest now that each one's
+		 * reply subtree is wired up. */
+		for (guint k = 0; k < top_indices->len; k++) {
+			int idx = g_array_index (top_indices, int, k);
+			g_list_store_append (dest, nodes[idx]);
+			g_object_unref (nodes[idx]);
+		}
+		g_array_free (top_indices, TRUE);
 	}
 
 	g_free (nodes);
@@ -1271,9 +1296,10 @@ compose_ctx_free (struct compose_ctx *ctx)
 }
 
 /* Find the HxNewsNode that owns the category path, walking the
- * existing tree only — we don't fetch on miss. Returns NULL if the
- * category isn't currently loaded into the tree (in which case the
- * caller falls back to a root refresh, which is heavier but always
+ * existing tree only — we don't fetch on miss. Returns a reffed
+ * pointer (caller must g_object_unref) or NULL if the category
+ * isn't currently loaded into the tree (in which case the caller
+ * falls back to a root refresh, which is heavier but always
  * works). */
 static HxNewsNode *
 find_category_node (GListStore *store, const char *path)
@@ -1283,16 +1309,21 @@ find_category_node (GListStore *store, const char *path)
 	n = g_list_model_get_n_items (G_LIST_MODEL (store));
 	for (i = 0; i < n; i++) {
 		HxNewsNode *node = g_list_model_get_item (G_LIST_MODEL (store), i);
-		HxNewsNode *hit = NULL;
+		/* g_list_model_get_item gave us one ref. The match branch
+		 * transfers that ref to the caller; the recursive branch
+		 * gets its own ref from the inner call and drops the
+		 * outer-folder ref here; the no-match branch just drops
+		 * the ref before continuing. */
 		if (node->kind == NB_KIND_CATEGORY
 		    && g_strcmp0 (node->path, path) == 0) {
-			hit = node;
-		} else if (node->kind == NB_KIND_FOLDER && node->children) {
-			hit = find_category_node (node->children, path);
+			return node;
 		}
-		if (hit) {
-			g_object_unref (node);
-			return hit;
+		if (node->kind == NB_KIND_FOLDER && node->children) {
+			HxNewsNode *hit = find_category_node (node->children, path);
+			if (hit) {
+				g_object_unref (node);
+				return hit;
+			}
 		}
 		g_object_unref (node);
 	}
