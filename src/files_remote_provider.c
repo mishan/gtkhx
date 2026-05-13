@@ -176,9 +176,22 @@ populate_from_chunks (HxRemoteFilesProvider *self,
 	     fh = (struct hl_filelist_hdr *)
 		((char *) fh + fh->len + SIZEOF_HL_DATA_HDR))
 	{
-		/* Field-by-field byteswap. The output_file_list legacy
-		 * code does this in place; we copy into locals so the
-		 * cached_filelist can be freed cleanly afterwards. */
+		/* fh->len drives the for-step pointer advance after the
+		 * loop body, so it MUST be in host byte order before the
+		 * next iteration. Skipping this is the same bug the
+		 * legacy output_file_list path hit in commit ...: the
+		 * network-order u16 (e.g. 0x0031) reads as 0x3100 on
+		 * little-endian, the increment overshoots by orders of
+		 * magnitude, and the loop terminates after one entry no
+		 * matter how many the server sent. Byteswap in place
+		 * mirrors the legacy walker. */
+		fh->len = ntohs (fh->len);
+
+		/* Field-by-field byteswap into locals. We read out of
+		 * the receive buffer and never write back so cfl can be
+		 * freed cleanly afterwards. (fh->len above is the
+		 * exception — but that field's used only by the walker,
+		 * not surfaced to the row.) */
 		HN32 (&fnlen, &fh->fnlen);
 		HN32 (&fsize, &fh->fsize);
 		HN32 (&ftype, &fh->ftype);
