@@ -43,6 +43,7 @@
 #include "news.h"
 #include "news15.h"
 #include "news_browser.h"
+#include "files_remote_provider.h"
 #include "users.h"
 #include "files.h"
 #include "tasks.h"
@@ -1219,10 +1220,14 @@ on_user_create_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                        struct chat *chat, struct hx_user *user, gpointer nam,
                        guint icon, guint color, gpointer user_data)
 {
-    (void)emitter;
-    (void)user_data;
-    user_create (htlc, chat, user, (const char *)nam, (guint16)icon,
-                 (guint16)color);
+	(void) emitter; (void) user_data;
+	/* New unified files browser owns the remote-files-provider
+	 * data carrier; route to it first. Falls through to the
+	 * legacy single-pane UI if the carrier isn't one of ours. */
+	if (hx_remote_files_provider_handle_file_list (cfl, fh, data))
+		return;
+	output_file_list ((struct cached_filelist *) cfl,
+	                  (struct hl_filelist_hdr *) fh, data);
 }
 
 static void

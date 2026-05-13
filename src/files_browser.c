@@ -11,12 +11,20 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <glib/gi18n.h>
 
 #include "files_entry.h"
+#include "files_provider.h"
 #include "files_local_provider.h"
+#include "files_remote_provider.h"
 #include "files_panel.h"
 #include "files_browser.h"
+#include "gtkhx_session.h"
+
+/* gi18n.h after the project headers — the codebase's compat.h has
+ * a placeholder _ macro that we want overridden by the proper
+ * gettext expansion. */
+#undef _
+#include <glib/gi18n.h>
 
 /* The browser holds two panels + the active-panel marker. The
  * active panel is the one with the column-view focus child; we
@@ -28,6 +36,18 @@ struct browser {
 	files_panel *left;
 	files_panel *right;
 	files_panel *active;
+
+	/* Keep refs on the providers separately from the panels so
+	 * the connection-state hook can reach the remote one even if
+	 * the panel pointer ever needs to be swapped (Phase 2.5 side
+	 * selector, future). */
+	HxFilesProvider *left_provider;
+	HxFilesProvider *right_provider;
+
+	/* GtkhxSession::connection-state handler — fires the remote
+	 * provider's "unavailable-changed" so the panel reloads on
+	 * login + paints the not-connected state on disconnect. */
+	gulong conn_state_handler;
 
 	/* CSS provider that paints the .files-panel-active border.
 	 * Lives for the window's lifetime; unrefed in on_close. */
@@ -121,7 +141,7 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
 	struct browser *br = user_data;
 	(void) btn;
 	if (br->active)
-		hx_local_files_provider_reload (
+		hx_files_provider_reload (
 			files_panel_get_provider (br->active));
 }
 
@@ -144,7 +164,7 @@ on_mkdir_response (AdwAlertDialog *dialog, const char *response, gpointer user_d
 	name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
 	if (!name || !*name) return;
 
-	if (!hx_local_files_provider_mkdir (
+	if (!hx_files_provider_mkdir (
 			files_panel_get_provider (ctx->panel), name, &err)) {
 		g_warning ("mkdir failed: %s", err ? err->message : "unknown");
 		g_clear_error (&err);
@@ -220,7 +240,7 @@ on_delete_response (AdwAlertDialog *dialog, const char *response,
 	if (g_strcmp0 (response, "delete") != 0) return;
 	if (!ctx->panel || !ctx->name) return;
 
-	if (!hx_local_files_provider_delete (
+	if (!hx_files_provider_delete (
 			files_panel_get_provider (ctx->panel), ctx->name, &err)) {
 		g_warning ("delete failed: %s", err ? err->message : "unknown");
 		g_clear_error (&err);
@@ -299,7 +319,7 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 	(void) widget; (void) args;
 
 	if (br->active)
-		hx_local_files_provider_navigate_up (
+		hx_files_provider_navigate_up (
 			files_panel_get_provider (br->active));
 	return TRUE;
 }
@@ -340,6 +360,13 @@ on_close (GtkWindow *window, gpointer user_data)
 
 	if (the_browser == br) the_browser = NULL;
 
+	if (br->conn_state_handler) {
+		g_signal_handler_disconnect (
+			gtkhx_session_get_default (),
+			br->conn_state_handler);
+		br->conn_state_handler = 0;
+	}
+
 	if (br->css) {
 		display = gdk_display_get_default ();
 		if (display)
@@ -350,8 +377,23 @@ on_close (GtkWindow *window, gpointer user_data)
 
 	files_panel_free (br->left);
 	files_panel_free (br->right);
+	g_clear_object (&br->left_provider);
+	g_clear_object (&br->right_provider);
 	g_free (br);
 	return FALSE;
+}
+
+/* GtkhxSession fires this when the connection state pivots.
+ * State is a GtkhxConnectionState — we don't differentiate
+ * here; any state change might flip get_unavailable_reason()
+ * from / to NULL, so we just nudge the remote provider. */
+static void
+on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
+{
+	struct browser *br = user_data;
+	(void) sess; (void) state;
+	if (br->right_provider)
+		g_signal_emit_by_name (br->right_provider, "unavailable-changed");
 }
 
 void
@@ -359,7 +401,6 @@ open_files_browser (void)
 {
 	struct browser *br;
 	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *delete_btn;
-	HxLocalFilesProvider *left_prov, *right_prov;
 	GtkEventController *shortcuts;
 	GtkShortcut *sh;
 
@@ -407,12 +448,24 @@ open_files_browser (void)
 	gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
 	gtk_paned_set_shrink_end_child   (GTK_PANED (paned), FALSE);
 
-	left_prov  = hx_local_files_provider_new (NULL);
-	right_prov = hx_local_files_provider_new (NULL);
-	br->left  = files_panel_new (left_prov);
-	br->right = files_panel_new (right_prov);
-	g_object_unref (left_prov);    /* panel holds a ref */
-	g_object_unref (right_prov);
+	/* L = local FS (XDG_DOWNLOAD_DIR by default).
+	 * R = remote Hotline server. The remote provider sits idle
+	 * until the connection is up — the panel paints a
+	 * "Not connected" state until then. */
+	{
+		HxLocalFilesProvider  *local;
+		HxRemoteFilesProvider *remote;
+		local  = hx_local_files_provider_new (NULL);
+		remote = hx_remote_files_provider_new ();
+		br->left_provider  = HX_FILES_PROVIDER (local);
+		br->right_provider = HX_FILES_PROVIDER (remote);
+	}
+	br->left  = files_panel_new (br->left_provider);
+	br->right = files_panel_new (br->right_provider);
+
+	br->conn_state_handler = g_signal_connect (
+		gtkhx_session_get_default (), "connection-state-changed",
+		G_CALLBACK (on_connection_state), br);
 
 	gtk_paned_set_start_child (GTK_PANED (paned),
 		files_panel_get_widget (br->left));

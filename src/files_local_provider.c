@@ -14,6 +14,7 @@
 #include <glib/gi18n.h>
 
 #include "files_entry.h"
+#include "files_provider.h"
 #include "files_local_provider.h"
 
 struct _HxLocalFilesProvider {
@@ -22,14 +23,17 @@ struct _HxLocalFilesProvider {
 	char       *current_path;
 };
 
-enum {
-	SIGNAL_NAVIGATED,        /* (const char *new_path) */
-	SIGNAL_ERROR,            /* (const char *message)  */
-	N_SIGNALS
-};
-static guint signals[N_SIGNALS];
+/* Signals live on the HxFilesProvider GInterface (see
+ * files_provider.c); emission goes through g_signal_emit_by_name
+ * so the dispatch finds the per-instance signal ID via GType
+ * inheritance. */
 
-G_DEFINE_FINAL_TYPE (HxLocalFilesProvider, hx_local_files_provider, G_TYPE_OBJECT)
+static void hx_local_files_provider_iface_init (HxFilesProviderInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (HxLocalFilesProvider, hx_local_files_provider,
+	G_TYPE_OBJECT,
+	G_IMPLEMENT_INTERFACE (HX_TYPE_FILES_PROVIDER,
+	                        hx_local_files_provider_iface_init))
 
 static void
 hx_local_files_provider_finalize (GObject *obj)
@@ -45,22 +49,6 @@ hx_local_files_provider_class_init (HxLocalFilesProviderClass *klass)
 {
 	GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 	gobject_class->finalize = hx_local_files_provider_finalize;
-
-	/* Fired after the listing GListStore has been refreshed with the
-	 * contents of `new_path`. */
-	signals[SIGNAL_NAVIGATED] = g_signal_new (
-		"navigated", G_TYPE_FROM_CLASS (klass),
-		G_SIGNAL_RUN_LAST, 0,
-		NULL, NULL, NULL,
-		G_TYPE_NONE, 1, G_TYPE_STRING);
-
-	/* Operation failed. Carrier of a human-readable, already-
-	 * localised message intended for an AdwToast. */
-	signals[SIGNAL_ERROR] = g_signal_new (
-		"error", G_TYPE_FROM_CLASS (klass),
-		G_SIGNAL_RUN_LAST, 0,
-		NULL, NULL, NULL,
-		G_TYPE_NONE, 1, G_TYPE_STRING);
 }
 
 static void
@@ -143,7 +131,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
 	GError          *err = NULL;
 
 	if (!path || !*path) {
-		g_signal_emit (self, signals[SIGNAL_ERROR], 0,
+		g_signal_emit_by_name (self, "error",
 			_("No path to list"));
 		return;
 	}
@@ -164,7 +152,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
 	if (!enumer) {
 		char *msg = g_strdup_printf (_("Can't read %s: %s"),
 			path, err ? err->message : "unknown error");
-		g_signal_emit (self, signals[SIGNAL_ERROR], 0, msg);
+		g_signal_emit_by_name (self, "error", msg);
 		g_free (msg);
 		g_clear_error (&err);
 		g_object_unref (dir);
@@ -221,7 +209,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
 		/* Partial-read error — keep what we got and tell the user. */
 		char *msg = g_strdup_printf (_("Error reading %s: %s"),
 			path, err->message);
-		g_signal_emit (self, signals[SIGNAL_ERROR], 0, msg);
+		g_signal_emit_by_name (self, "error", msg);
 		g_free (msg);
 		g_clear_error (&err);
 	}
@@ -229,7 +217,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
 	g_object_unref (enumer);
 	g_object_unref (dir);
 
-	g_signal_emit (self, signals[SIGNAL_NAVIGATED], 0, self->current_path);
+	g_signal_emit_by_name (self, "navigated", self->current_path);
 }
 
 void
@@ -346,4 +334,81 @@ hx_local_files_provider_rename (HxLocalFilesProvider *self,
 	if (ok)
 		hx_local_files_provider_reload (self);
 	return ok;
+}
+
+/* ---- HxFilesProvider interface implementation ---- */
+
+/* Forwarders. The concrete typed functions are kept public so
+ * existing callers don't need to change; the interface vtable
+ * goes through these thin shims. */
+
+static GListModel *
+iface_get_listing (HxFilesProvider *self)
+{
+	return hx_local_files_provider_get_listing (HX_LOCAL_FILES_PROVIDER (self));
+}
+
+static const char *
+iface_get_current_path (HxFilesProvider *self)
+{
+	return hx_local_files_provider_get_current_path (HX_LOCAL_FILES_PROVIDER (self));
+}
+
+static const char *
+iface_get_label (HxFilesProvider *self)
+{
+	return hx_local_files_provider_get_label (HX_LOCAL_FILES_PROVIDER (self));
+}
+
+static void
+iface_navigate (HxFilesProvider *self, const char *path)
+{
+	hx_local_files_provider_navigate (HX_LOCAL_FILES_PROVIDER (self), path);
+}
+
+static void
+iface_reload (HxFilesProvider *self)
+{
+	hx_local_files_provider_reload (HX_LOCAL_FILES_PROVIDER (self));
+}
+
+static void
+iface_navigate_up (HxFilesProvider *self)
+{
+	hx_local_files_provider_navigate_up (HX_LOCAL_FILES_PROVIDER (self));
+}
+
+static gboolean
+iface_mkdir (HxFilesProvider *self, const char *name, GError **err)
+{
+	return hx_local_files_provider_mkdir (HX_LOCAL_FILES_PROVIDER (self), name, err);
+}
+
+static gboolean
+iface_delete_entry (HxFilesProvider *self, const char *name, GError **err)
+{
+	return hx_local_files_provider_delete (HX_LOCAL_FILES_PROVIDER (self), name, err);
+}
+
+static gboolean
+iface_rename (HxFilesProvider *self,
+              const char *old_name, const char *new_name, GError **err)
+{
+	return hx_local_files_provider_rename (
+		HX_LOCAL_FILES_PROVIDER (self), old_name, new_name, err);
+}
+
+static void
+hx_local_files_provider_iface_init (HxFilesProviderInterface *iface)
+{
+	iface->get_listing            = iface_get_listing;
+	iface->get_current_path       = iface_get_current_path;
+	iface->get_label              = iface_get_label;
+	iface->navigate               = iface_navigate;
+	iface->reload                 = iface_reload;
+	iface->navigate_up            = iface_navigate_up;
+	iface->mkdir                  = iface_mkdir;
+	iface->delete_entry           = iface_delete_entry;
+	iface->rename                 = iface_rename;
+	iface->get_unavailable_reason = NULL;     /* local is always ready */
 }

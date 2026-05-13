@@ -13,7 +13,7 @@
 #include <glib/gi18n.h>
 
 #include "files_entry.h"
-#include "files_local_provider.h"
+#include "files_provider.h"
 #include "files_panel.h"
 
 struct _files_panel {
@@ -30,8 +30,9 @@ struct _files_panel {
 
 	GtkWidget *status_label;     /* footer: "N items" / "M of N selected" */
 
-	HxLocalFilesProvider *provider;
+	HxFilesProvider *provider;
 	gulong navigated_handler;
+	gulong unavailable_handler;
 
 	/* Cached row icons. Loaded once at panel construction and
 	 * paintable-set into each row's GtkImage in name_bind.
@@ -277,13 +278,26 @@ update_status (files_panel *p)
 /* ---- Event handlers ---- */
 
 static void
-on_navigated (HxLocalFilesProvider *prov, const char *new_path,
+on_navigated (HxFilesProvider *prov, const char *new_path,
               gpointer user_data)
 {
 	files_panel *p = user_data;
 	(void) prov;
 	gtk_editable_set_text (GTK_EDITABLE (p->path_entry),
 		new_path ? new_path : "");
+	update_status (p);
+}
+
+/* Provider's availability flipped (remote provider on login /
+ * disconnect). Re-list when becoming available so the panel
+ * shows real content instead of a stale "Not connected" pane. */
+static void
+on_unavailable_changed (HxFilesProvider *prov, gpointer user_data)
+{
+	files_panel *p = user_data;
+	(void) prov;
+	if (!hx_files_provider_get_unavailable_reason (p->provider))
+		hx_files_provider_reload (p->provider);
 	update_status (p);
 }
 
@@ -319,10 +333,14 @@ on_row_activated (GtkColumnView *view, guint pos, gpointer user_data)
 	if (!e) return;
 
 	if (hx_file_entry_is_dir (e)) {
-		char *child = g_build_filename (
-			hx_local_files_provider_get_current_path (p->provider),
+		const char *cur = hx_files_provider_get_current_path (p->provider);
+		char *child;
+		/* Path join: GIO-style "/" is the universal separator
+		 * for both local (POSIX) and remote (Hotline) paths.
+		 * g_build_filename does the right thing on both. */
+		child = g_build_filename (cur ? cur : "/",
 			hx_file_entry_get_name (e), NULL);
-		hx_local_files_provider_navigate (p->provider, child);
+		hx_files_provider_navigate (p->provider, child);
 		g_free (child);
 	}
 	/* Plain files: no-op here in Phase 1. Phase 3 wires F5 / Copy
@@ -339,7 +357,7 @@ on_path_entry_activate (GtkEntry *entry, gpointer user_data)
 	files_panel *p = user_data;
 	const char *txt = gtk_editable_get_text (GTK_EDITABLE (entry));
 	if (!txt || !*txt) return;
-	hx_local_files_provider_navigate (p->provider, txt);
+	hx_files_provider_navigate (p->provider, txt);
 }
 
 static void
@@ -347,7 +365,7 @@ on_up_clicked (GtkButton *btn, gpointer user_data)
 {
 	files_panel *p = user_data;
 	(void) btn;
-	hx_local_files_provider_navigate_up (p->provider);
+	hx_files_provider_navigate_up (p->provider);
 }
 
 /* ---- Construction ---- */
@@ -391,7 +409,7 @@ add_column (GtkColumnView *view,
 }
 
 files_panel *
-files_panel_new (HxLocalFilesProvider *provider)
+files_panel_new (HxFilesProvider *provider)
 {
 	files_panel *p = g_new0 (files_panel, 1);
 	GtkWidget *path_row, *scrolled, *footer;
@@ -431,7 +449,7 @@ files_panel_new (HxLocalFilesProvider *provider)
 	p->path_entry = gtk_entry_new ();
 	gtk_widget_set_hexpand (p->path_entry, TRUE);
 	gtk_editable_set_text (GTK_EDITABLE (p->path_entry),
-		hx_local_files_provider_get_current_path (provider));
+		hx_files_provider_get_current_path (provider));
 	g_signal_connect (p->path_entry, "activate",
 	                  G_CALLBACK (on_path_entry_activate), p);
 	gtk_box_append (GTK_BOX (path_row), p->path_entry);
@@ -443,7 +461,7 @@ files_panel_new (HxLocalFilesProvider *provider)
 		GtkSorter *header_sorter;
 
 		p->sort_model = gtk_sort_list_model_new (
-			g_object_ref (hx_local_files_provider_get_listing (provider)),
+			g_object_ref (hx_files_provider_get_listing (provider)),
 			NULL);
 
 		p->selection = gtk_single_selection_new (
@@ -482,7 +500,7 @@ files_panel_new (HxLocalFilesProvider *provider)
 		g_signal_connect (p->selection, "selection-changed",
 		                  G_CALLBACK (on_selection_changed), p);
 		g_signal_connect (
-			hx_local_files_provider_get_listing (provider),
+			hx_files_provider_get_listing (provider),
 			"items-changed",
 			G_CALLBACK (on_items_changed), p);
 	}
@@ -518,11 +536,16 @@ files_panel_new (HxLocalFilesProvider *provider)
 	gtk_box_append (GTK_BOX (p->root), footer);
 
 	p->navigated_handler = g_signal_connect (provider, "navigated",
-	                                          G_CALLBACK (on_navigated), p);
+		G_CALLBACK (on_navigated), p);
+	p->unavailable_handler = g_signal_connect (provider, "unavailable-changed",
+		G_CALLBACK (on_unavailable_changed), p);
 
-	/* Initial fetch — guaranteed to fire "navigated" after we
-	 * connected, so the path entry + status footer get filled in. */
-	hx_local_files_provider_reload (provider);
+	/* Initial fetch — fires "navigated" after we connected so the
+	 * path entry + status footer get filled. Remote provider skips
+	 * the actual RPC pre-login (get_unavailable_reason gates it);
+	 * the panel will catch up via on_unavailable_changed when the
+	 * connection comes up. */
+	hx_files_provider_reload (provider);
 
 	return p;
 }
@@ -539,7 +562,7 @@ files_panel_get_column_view (files_panel *p)
 	return p ? p->column_view : NULL;
 }
 
-HxLocalFilesProvider *
+HxFilesProvider *
 files_panel_get_provider (files_panel *p)
 {
 	return p ? p->provider : NULL;
@@ -575,8 +598,11 @@ void
 files_panel_free (files_panel *p)
 {
 	if (!p) return;
-	if (p->provider && p->navigated_handler) {
-		g_signal_handler_disconnect (p->provider, p->navigated_handler);
+	if (p->provider) {
+		if (p->navigated_handler)
+			g_signal_handler_disconnect (p->provider, p->navigated_handler);
+		if (p->unavailable_handler)
+			g_signal_handler_disconnect (p->provider, p->unavailable_handler);
 	}
 	g_clear_object (&p->provider);
 	g_clear_object (&p->icon_folder);

@@ -14,6 +14,8 @@ gtkhx_sources = files(
   'files_entry.c',
   'files_local_provider.c',
   'files_panel.c',
+  'files_provider.c',
+  'files_remote_provider.c',
   'gtk_hlist_compat.c',
   'gtkhx.c',
   'gtkhx_log.c',

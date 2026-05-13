@@ -16,7 +16,7 @@
 #include <gtk/gtk.h>
 
 #include "files_entry.h"
-#include "files_local_provider.h"
+#include "files_provider.h"
 
 G_BEGIN_DECLS
 
@@ -26,7 +26,7 @@ typedef struct _files_panel files_panel;
  * on the provider and releases it on panel_free. Initial list
  * is triggered here so the widget is populated by the time the
  * browser presents it. */
-extern files_panel *files_panel_new (HxLocalFilesProvider *provider);
+extern files_panel *files_panel_new (HxFilesProvider *provider);
 
 /* Returns the root widget for embedding into the browser's
  * GtkPaned / GtkBox. Owned by the panel; do not unref. */
@@ -38,7 +38,7 @@ extern GtkWidget *files_panel_get_column_view (files_panel *p);
 
 /* Provider accessor — the browser's action handlers operate
  * through this. */
-extern HxLocalFilesProvider *files_panel_get_provider (files_panel *p);
+extern HxFilesProvider *files_panel_get_provider (files_panel *p);
 
 /* Mark / unmark the panel as the active one. Toggles the
  * "files-panel-active" CSS class on the panel's outer frame. */
