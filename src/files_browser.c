@@ -190,16 +190,18 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
 			files_panel_get_provider (br->active));
 }
 
-/* Copy — issue an hx_files_ops_copy from the active panel's
- * single selection to the inactive panel's current path. Phase 3
- * is single-select; multi-select iteration is Phase 4. */
+/* Copy — issue hx_files_ops_copy for each entry in the active
+ * panel's selection. The whole batch shares a source-and-dest
+ * pair; per-entry errors are tallied and surfaced as one
+ * summary toast. */
 static void
 on_copy_clicked (GtkButton *btn, gpointer user_data)
 {
 	struct browser *br = user_data;
 	files_panel *src, *dst;
-	HxFileEntry *e;
-	HxOpsResult result;
+	GPtrArray *entries;
+	guint i, queued = 0, failed = 0;
+	HxOpsResult last_err = HX_OPS_OK;
 	(void) btn;
 
 	if (!br->active) return;
@@ -207,29 +209,48 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
 	dst = (src == br->left) ? br->right : br->left;
 	if (!dst) return;
 
-	e = files_panel_get_single_selected (src);
-	if (!e) {
+	entries = files_panel_get_selected_entries (src);
+	if (!entries || entries->len == 0) {
+		if (entries) g_ptr_array_free (entries, TRUE);
 		show_toast (br, _("Select a file to copy first."));
 		return;
 	}
 
-	result = hx_files_ops_copy (
-		files_panel_get_provider (src),
-		files_panel_get_provider (dst),
-		e);
-
-	if (result != HX_OPS_OK) {
-		show_toast (br, hx_files_ops_result_message (result));
-		return;
+	for (i = 0; i < entries->len; i++) {
+		HxFileEntry *e = g_ptr_array_index (entries, i);
+		HxOpsResult r = hx_files_ops_copy (
+			files_panel_get_provider (src),
+			files_panel_get_provider (dst),
+			e);
+		if (r == HX_OPS_OK) queued++;
+		else { failed++; last_err = r; }
 	}
+	g_ptr_array_free (entries, TRUE);
 
-	/* Issued successfully. For local-to-local the copy already
-	 * landed and the dest reload fired inside files_ops; for
-	 * remote-side transfers the tasks window shows progress and
-	 * the dest panel will need a manual refresh when the user
-	 * wants to see the new file. Phase 4 polish item: hook the
-	 * xfer-finished signal to auto-refresh. */
-	show_toast (br, _("Transfer queued."));
+	/* Surface a one-shot summary: if everything queued, just say
+	 * how many; if anything failed, lead with the failure reason
+	 * since that's the actionable bit. last_err alone covers the
+	 * common case where every failure had the same cause (most
+	 * fail-modes are global — no permission, not connected, etc.). */
+	if (failed == 0) {
+		char *msg = g_strdup_printf (
+			g_dngettext (NULL,
+				"Transfer queued (%u item).",
+				"Transfers queued (%u items).",
+				queued),
+			queued);
+		show_toast (br, msg);
+		g_free (msg);
+	} else if (queued == 0) {
+		show_toast (br, hx_files_ops_result_message (last_err));
+	} else {
+		char *msg = g_strdup_printf (
+			_("%u queued, %u failed (%s)."),
+			queued, failed,
+			hx_files_ops_result_message (last_err));
+		show_toast (br, msg);
+		g_free (msg);
+	}
 }
 
 struct mkdir_ctx {
@@ -313,7 +334,7 @@ on_mkdir_clicked (GtkButton *btn, gpointer user_data)
 struct delete_ctx {
 	struct browser *br;
 	files_panel    *panel;
-	char           *name;     /* owned */
+	GPtrArray      *names;    /* owned — array of g_strdup'd names */
 };
 
 static void
@@ -321,16 +342,22 @@ on_delete_response (AdwAlertDialog *dialog, const char *response,
                      gpointer user_data)
 {
 	struct delete_ctx *ctx = user_data;
-	GError *err = NULL;
+	HxFilesProvider *prov;
+	guint i;
 	(void) dialog;
 
 	if (g_strcmp0 (response, "delete") != 0) return;
-	if (!ctx->panel || !ctx->name) return;
+	if (!ctx->panel || !ctx->names) return;
+	prov = files_panel_get_provider (ctx->panel);
 
-	if (!hx_files_provider_delete (
-			files_panel_get_provider (ctx->panel), ctx->name, &err)) {
-		g_warning ("delete failed: %s", err ? err->message : "unknown");
-		g_clear_error (&err);
+	for (i = 0; i < ctx->names->len; i++) {
+		const char *name = g_ptr_array_index (ctx->names, i);
+		GError *err = NULL;
+		if (!hx_files_provider_delete (prov, name, &err)) {
+			g_warning ("delete %s: %s", name,
+				err ? err->message : "unknown");
+			g_clear_error (&err);
+		}
 	}
 }
 
@@ -339,27 +366,53 @@ on_delete_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
 	struct delete_ctx *ctx = user_data;
 	(void) dialog;
-	g_free (ctx->name);
+	if (ctx->names) g_ptr_array_free (ctx->names, TRUE);
 	g_free (ctx);
+}
+
+/* Build the delete-confirmation body text. Singular for one
+ * entry (with the actual name so the user can sanity-check),
+ * plural with a count for multi-select since fitting N names
+ * into one toast line gets unwieldy. */
+static char *
+delete_body_text (GPtrArray *entries)
+{
+	HxFileEntry *e;
+	if (!entries || entries->len == 0)
+		return g_strdup ("");
+	if (entries->len == 1) {
+		e = g_ptr_array_index (entries, 0);
+		return g_strdup_printf (
+			_("Delete “%s”? This cannot be undone."),
+			hx_file_entry_get_name (e));
+	}
+	return g_strdup_printf (
+		g_dngettext (NULL,
+			"Delete %u item? This cannot be undone.",
+			"Delete %u items? This cannot be undone.",
+			entries->len),
+		entries->len);
 }
 
 static void
 on_delete_clicked (GtkButton *btn, gpointer user_data)
 {
 	struct browser *br = user_data;
-	HxFileEntry *e;
+	GPtrArray *entries;
 	AdwDialog *dialog;
 	struct delete_ctx *ctx;
 	char *body;
+	guint i;
 	(void) btn;
 
 	if (!br->active) return;
-	e = files_panel_get_single_selected (br->active);
-	if (!e) return;
+	entries = files_panel_get_selected_entries (br->active);
+	if (!entries || entries->len == 0) {
+		if (entries) g_ptr_array_free (entries, TRUE);
+		return;
+	}
 
-	body = g_strdup_printf (
-		_("Delete “%s”? This cannot be undone."),
-		hx_file_entry_get_name (e));
+	body = delete_body_text (entries);
 	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Delete"), body));
 	g_free (body);
 
@@ -372,10 +425,19 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
 	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
 
+	/* Snapshot just the names — the dialog runs async and the
+	 * selection set could shift in between. Same defensive
+	 * pattern the news_browser delete uses. */
 	ctx = g_new0 (struct delete_ctx, 1);
 	ctx->br    = br;
 	ctx->panel = br->active;
-	ctx->name  = g_strdup (hx_file_entry_get_name (e));
+	ctx->names = g_ptr_array_new_with_free_func (g_free);
+	for (i = 0; i < entries->len; i++) {
+		HxFileEntry *e = g_ptr_array_index (entries, i);
+		g_ptr_array_add (ctx->names,
+			g_strdup (hx_file_entry_get_name (e)));
+	}
+	g_ptr_array_free (entries, TRUE);
 
 	g_signal_connect (dialog, "response", G_CALLBACK (on_delete_response), ctx);
 	g_signal_connect (dialog, "closed",   G_CALLBACK (on_delete_closed),   ctx);

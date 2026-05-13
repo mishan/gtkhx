@@ -26,7 +26,7 @@ struct _files_panel {
 	GtkWidget *up_btn;           /* one-shot up-one-level shortcut */
 
 	GtkWidget *column_view;      /* GtkColumnView */
-	GtkSingleSelection *selection;
+	GtkMultiSelection *selection;
 	GtkSortListModel   *sort_model;
 
 	GtkWidget *status_label;     /* footer: "N items" / "M of N selected" */
@@ -320,15 +320,15 @@ update_status (files_panel *p)
 
 	if (!p->status_label) return;
 
-	n_total = g_list_model_get_n_items (
-		G_LIST_MODEL (gtk_single_selection_get_model (p->selection)));
-	(void) sel;
+	n_total = g_list_model_get_n_items (G_LIST_MODEL (p->selection));
 
-	/* GtkSingleSelection means "0 or 1 selected"; we still surface
-	 * the right label so the user knows. Multi-select becomes
-	 * useful in Phase 4. */
-	n_sel = (gtk_single_selection_get_selected (p->selection)
-	         != GTK_INVALID_LIST_POSITION) ? 1 : 0;
+	/* GtkMultiSelection exposes its selection as a GtkBitset of
+	 * row positions. Sized is the cardinality. The bitset is
+	 * owned by the selection model; we don't need to free it. */
+	sel = gtk_selection_model_get_selection (
+		GTK_SELECTION_MODEL (p->selection));
+	n_sel = sel ? (guint) gtk_bitset_get_size (sel) : 0;
+	if (sel) gtk_bitset_unref (sel);
 
 	if (n_sel == 0)
 		text = g_strdup_printf (
@@ -542,10 +542,19 @@ files_panel_new (HxFilesProvider *provider)
 			g_object_ref (hx_files_provider_get_listing (provider)),
 			NULL);
 
-		p->selection = gtk_single_selection_new (
+		/* MultiSelection: Ctrl-click toggles, Shift-click extends,
+		 * plain click replaces — standard orthodox-FM idiom. We
+		 * pass our sort_model directly; the selection model rides
+		 * on top and the column view's row factory does click
+		 * handling. The earlier GtkSingleSelection bound only
+		 * "0 or 1 row selected"; multi-select lets the user batch
+		 * Copy / Delete the way classic Norton-style file managers
+		 * do. */
+		p->selection = gtk_multi_selection_new (
 			G_LIST_MODEL (p->sort_model));
-		gtk_single_selection_set_autoselect (p->selection, FALSE);
-		gtk_single_selection_set_can_unselect (p->selection, TRUE);
+		/* gtk_multi_selection_new takes ownership of one ref on
+		 * the underlying model. Re-add a ref for ours. */
+		g_object_ref (p->sort_model);
 
 		p->column_view = gtk_column_view_new (
 			GTK_SELECTION_MODEL (p->selection));
@@ -659,17 +668,54 @@ files_panel_set_active (files_panel *p, gboolean active)
 HxFileEntry *
 files_panel_get_single_selected (files_panel *p)
 {
-	guint pos;
-	HxFileEntry *e;
+	GtkBitset *sel;
+	HxFileEntry *e = NULL;
+	guint pos, n_sel;
 
 	if (!p || !p->selection) return NULL;
-	pos = gtk_single_selection_get_selected (p->selection);
-	if (pos == GTK_INVALID_LIST_POSITION) return NULL;
-	e = g_list_model_get_item (
-		G_LIST_MODEL (gtk_single_selection_get_model (p->selection)),
-		pos);
-	if (e) g_object_unref (e);   /* model still holds a ref */
+	sel = gtk_selection_model_get_selection (
+		GTK_SELECTION_MODEL (p->selection));
+	if (!sel) return NULL;
+	n_sel = (guint) gtk_bitset_get_size (sel);
+	if (n_sel == 1) {
+		pos = gtk_bitset_get_minimum (sel);
+		e = g_list_model_get_item (G_LIST_MODEL (p->selection), pos);
+		if (e) g_object_unref (e);   /* model still holds a ref */
+	}
+	gtk_bitset_unref (sel);
 	return e;
+}
+
+GPtrArray *
+files_panel_get_selected_entries (files_panel *p)
+{
+	GtkBitset *sel;
+	GtkBitsetIter iter;
+	GPtrArray *out;
+	guint pos;
+	gboolean ok;
+
+	if (!p || !p->selection) return NULL;
+
+	/* Return value: GPtrArray of HxFileEntry* with one ref per
+	 * entry (steal-the-ref ownership transfer to the caller).
+	 * Caller frees via g_ptr_array_unref — the free_func runs
+	 * g_object_unref on each. */
+	out = g_ptr_array_new_with_free_func (g_object_unref);
+
+	sel = gtk_selection_model_get_selection (
+		GTK_SELECTION_MODEL (p->selection));
+	if (!sel) return out;
+
+	for (ok = gtk_bitset_iter_init_first (&iter, sel, &pos);
+	     ok;
+	     ok = gtk_bitset_iter_next (&iter, &pos)) {
+		HxFileEntry *e = g_list_model_get_item (
+			G_LIST_MODEL (p->selection), pos);
+		if (e) g_ptr_array_add (out, e);   /* steal ref */
+	}
+	gtk_bitset_unref (sel);
+	return out;
 }
 
 void

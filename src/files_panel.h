@@ -44,10 +44,19 @@ extern HxFilesProvider *files_panel_get_provider (files_panel *p);
  * "files-panel-active" CSS class on the panel's outer frame. */
 extern void files_panel_set_active (files_panel *p, gboolean active);
 
-/* If a single entry is selected, return it (caller does NOT own
- * a ref — same lifetime contract as gtk_single_selection_get
- * variants). NULL if nothing or multi-selected. */
+/* If EXACTLY one entry is selected, return it (caller does NOT
+ * own a ref — model still holds it). NULL if nothing or
+ * multi-selected. Convenience over files_panel_get_selected_entries
+ * for callers that only make sense on a singleton (rename in
+ * place, get-info, etc.). */
 extern HxFileEntry *files_panel_get_single_selected (files_panel *p);
+
+/* All currently-selected entries. Returns a fresh GPtrArray of
+ * HxFileEntry* (caller owns the refs — free with
+ * g_ptr_array_unref, which invokes g_object_unref on each).
+ * Empty array when nothing selected. Order is row-position
+ * ascending (i.e. visual order). */
+extern GPtrArray *files_panel_get_selected_entries (files_panel *p);
 
 /* Free a panel built by files_panel_new. The widget tree is
  * destroyed via gtk_widget_unparent if needed. */

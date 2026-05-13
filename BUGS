@@ -1,6 +1,7 @@
 High priority:
 
 - The names in the Private Message xtext widget are not split out into the left column, so the separator does not work
+- Files browser (2-pane): focus still drifts back to the left panel on directory change in the right (remote) panel — the wants_focus_restore + grab_focus(column_view) in on_navigated isn't winning the race. Symptom: double-clicking a remote folder takes an extra click each descend. The capture-on-row-activate version of the flag works in isolation (only descend-from-row sets it) but populate_from_chunks's items-changed propagation still seems to steal focus. Next things to try: (a) capture the focused-widget pointer BEFORE the listing rebuild and restore it after, not just grab the column view by name; (b) g_list_store_splice for one atomic items-changed rather than remove_all + per-entry append; (c) GtkWindow::set_focus override during the rebuild.
 
 Medium priority:
 
