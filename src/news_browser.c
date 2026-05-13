@@ -114,6 +114,17 @@ struct _gnews_browser {
 	GtkSingleSelection *selection;
 	GtkWidget    *list_view;
 
+	/* Cached row icons. GdkTextures wrapped around pixbufs loaded
+	 * from the XPM resources at window-construction time. One ref
+	 * each, dropped on close. The factory bind callback hands the
+	 * paintable to a GtkImage per row — much cheaper than re-loading
+	 * the resource for every visible row, and avoids the XPM-via-
+	 * gtk_image_set_from_resource path which renders blank for us
+	 * (the same reason gtkhx_pixmap_button takes the long way round). */
+	GdkPaintable *icon_folder;
+	GdkPaintable *icon_category;
+	GdkPaintable *icon_post;
+
 	/* Content side */
 	GtkWidget    *post_view;      /* GtkTextView, read-only */
 	GtkLabel     *breadcrumb;
@@ -167,13 +178,37 @@ news_node_create_child_model (gpointer item, gpointer user_data)
 
 /* ---------- Icon helpers ---------- */
 
-static const char *
-icon_resource_for_kind (int kind)
+/* Load one XPM resource and return it as a GdkPaintable (a
+ * GdkTexture wrapping a GdkPixbuf). Returns NULL silently on a
+ * missing resource — callers null-check.
+ *
+ * Goes pixbuf → texture rather than calling gtk_image_set_from_
+ * resource: the latter renders blank for our XPMs (probably an
+ * Adwaita CSS sizing interaction). The pixbuf path is the same
+ * one gtkhx_pixmap_button uses for the toolbar icons. */
+static GdkPaintable *
+load_icon_paintable (const char *resource)
+{
+	GdkPixbuf  *pb;
+	GdkTexture *tex;
+
+	pb = gdk_pixbuf_new_from_resource (resource, NULL);
+	if (!pb)
+		return NULL;
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	tex = gdk_texture_new_for_pixbuf (pb);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+	g_object_unref (pb);
+	return GDK_PAINTABLE (tex);
+}
+
+static GdkPaintable *
+icon_paintable_for_kind (gnews_browser *br, int kind)
 {
 	switch (kind) {
-	case NB_KIND_FOLDER:   return "/com/nasledov/gtkhx/pixmaps/newsfld.xpm";
-	case NB_KIND_CATEGORY: return "/com/nasledov/gtkhx/pixmaps/newscat.xpm";
-	case NB_KIND_POST:     return "/com/nasledov/gtkhx/pixmaps/postnews.xpm";
+	case NB_KIND_FOLDER:   return br->icon_folder;
+	case NB_KIND_CATEGORY: return br->icon_category;
+	case NB_KIND_POST:     return br->icon_post;
 	default:               return NULL;
 	}
 }
@@ -267,7 +302,8 @@ static void
 on_factory_bind (GtkSignalListItemFactory *factory,
                  GtkListItem *list_item, gpointer user_data)
 {
-	(void) factory; (void) user_data;
+	gnews_browser   *br       = user_data;
+	(void) factory;
 
 	GtkWidget       *expander = gtk_list_item_get_child (list_item);
 	GtkTreeListRow  *row      = gtk_list_item_get_item (list_item);
@@ -283,9 +319,9 @@ on_factory_bind (GtkSignalListItemFactory *factory,
 		return;
 	}
 
-	const char *resource = icon_resource_for_kind (node->kind);
-	if (resource)
-		gtk_image_set_from_resource (icon, resource);
+	GdkPaintable *paintable = icon_paintable_for_kind (br, node->kind);
+	if (paintable)
+		gtk_image_set_from_paintable (icon, paintable);
 	else
 		gtk_image_clear (icon);
 
@@ -403,9 +439,14 @@ on_window_close (GtkWindow *window, gpointer user_data)
 	if (the_browser == br)
 		the_browser = NULL;
 
+	g_clear_object (&br->icon_folder);
+	g_clear_object (&br->icon_category);
+	g_clear_object (&br->icon_post);
+
 	/* root_store / tree_model / selection / list_view are widget-
 	 * owned and get freed when the GtkWindow tears down its child
-	 * tree. We only own the gnews_browser struct itself. */
+	 * tree. We only own the gnews_browser struct + the icon
+	 * paintables. */
 	g_free (br);
 	return FALSE;
 }
@@ -420,6 +461,11 @@ build_browser_window (void)
 	GtkWidget *header_title;
 	GtkListItemFactory *factory;
 	GtkTextBuffer *buf;
+
+	/* ---- Icons (cached for the lifetime of the window) ---- */
+	br->icon_folder   = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.xpm");
+	br->icon_category = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.xpm");
+	br->icon_post     = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/postnews.xpm");
 
 	/* ---- Window ---- */
 	br->window = gtk_window_new ();
