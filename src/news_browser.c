@@ -69,12 +69,17 @@ struct _HxNewsNode {
 	                          * collapse + re-expand */
 
 	/* Post-specific (kind == NB_KIND_POST). Filled at the
-	 * NEWSCATLIST reply when the post tree gets built. Phase 4
-	 * uses these to issue HTLC_HDR_GETTHREAD for the body. */
+	 * NEWSCATLIST reply when the post tree gets built. */
 	guint32           postid;
 	char             *sender;
 	char             *mime_type;
 	struct date_time  date;
+
+	/* Cached post body (NULL = not fetched yet; "" = empty
+	 * body the server returned). Populated by HTLC_HDR_GETTHREAD
+	 * reply via gnews_browser_handle_thread. */
+	char             *body;
+	gboolean          body_fetching;
 };
 
 G_DEFINE_FINAL_TYPE (HxNewsNode, hx_news_node, G_TYPE_OBJECT)
@@ -87,6 +92,7 @@ hx_news_node_finalize (GObject *obj)
 	g_free (n->path);
 	g_free (n->sender);
 	g_free (n->mime_type);
+	g_free (n->body);
 	g_clear_object (&n->children);
 	G_OBJECT_CLASS (hx_news_node_parent_class)->finalize (obj);
 }
@@ -137,7 +143,16 @@ struct _gnews_browser {
 
 	/* Content side */
 	GtkWidget    *post_view;      /* GtkTextView, read-only */
+	GtkLabel     *subject_label;  /* subject above the body, "heading" */
+	GtkLabel     *meta_label;     /* "From <sender> on <date>", "dim-label" */
+	GtkWidget    *header_strip;   /* container for subject + meta */
 	GtkLabel     *breadcrumb;
+
+	/* Selected post (weak — the GListStore owns the ref). NULL
+	 * when nothing or a non-post is selected. Used by the
+	 * thread-reply handler to know whether the fetch we got back
+	 * is for the currently-displayed post. */
+	HxNewsNode   *selected_post;
 };
 
 /* Single open browser. */
@@ -157,6 +172,11 @@ static gnews_browser *the_browser = NULL;
 static GHashTable *pending_dirlists = NULL;   /* stub → HxNewsNode* or NULL */
 static GHashTable *pending_catlists = NULL;   /* stub → HxNewsNode* or NULL */
 
+/* Pending HTLC_HDR_GETTHREAD fetches. Keys are throwaway news_item
+ * stubs we hand to hx_news15_get_post; values are reffed HxNewsNodes
+ * whose `body` cache should be populated when the reply arrives. */
+static GHashTable *pending_threads = NULL;    /* stub news_item* → HxNewsNode* */
+
 static void
 ensure_pending_tables (void)
 {
@@ -166,6 +186,10 @@ ensure_pending_tables (void)
 			NULL, g_object_unref);
 	if (!pending_catlists)
 		pending_catlists = g_hash_table_new_full (
+			g_direct_hash, g_direct_equal,
+			NULL, g_object_unref);
+	if (!pending_threads)
+		pending_threads = g_hash_table_new_full (
 			g_direct_hash, g_direct_equal,
 			NULL, g_object_unref);
 }
@@ -228,24 +252,23 @@ build_child_path (const char *parent_path, const char *child_name)
  * Adwaita CSS sizing interaction). The pixbuf path is the same
  * one gtkhx_pixmap_button uses for the toolbar icons.
  *
- * Scales the pixbuf by an integer factor with nearest-neighbor
- * interpolation so the blocky pixel-art XPMs keep their crisp
- * look at modern desktop densities. */
-#define NEWS_BROWSER_ICON_SCALE 2
-
+ * Scales the pixbuf by 1.5x with nearest-neighbor interpolation —
+ * keeps the blocky pixel-art XPMs crisp without going so big that
+ * the rows feel cramped. 2x was too chunky for tree-row use. */
 static GdkPaintable *
 load_icon_paintable (const char *resource)
 {
 	GdkPixbuf  *pb;
 	GdkTexture *tex;
+	int w, h;
 
 	pb = gdk_pixbuf_new_from_resource (resource, NULL);
 	if (!pb)
 		return NULL;
 
-	if (NEWS_BROWSER_ICON_SCALE > 1) {
-		int w = gdk_pixbuf_get_width  (pb) * NEWS_BROWSER_ICON_SCALE;
-		int h = gdk_pixbuf_get_height (pb) * NEWS_BROWSER_ICON_SCALE;
+	w = (gdk_pixbuf_get_width  (pb) * 3) / 2;
+	h = (gdk_pixbuf_get_height (pb) * 3) / 2;
+	{
 		GdkPixbuf *scaled = gdk_pixbuf_scale_simple (pb, w, h, GDK_INTERP_NEAREST);
 		g_object_unref (pb);
 		pb = scaled;
@@ -271,14 +294,26 @@ icon_paintable_for_kind (gnews_browser *br, int kind)
 	}
 }
 
+/* Forward decls — selection-changed + the row-expanded handler
+ * fire these; the bodies live further down so the file reads
+ * lifecycle-first, then RPC, then rendering. */
+static void fetch_dirlist        (gnews_browser *br, HxNewsNode *target);
+static void fetch_catlist        (gnews_browser *br, HxNewsNode *target);
+static void render_selected_post (gnews_browser *br);
+
 /* ---------- Selection → breadcrumb ---------- */
 
+/* Walk up the tree from the currently-selected row collecting names
+ * for the breadcrumb. Also returns the leaf HxNewsNode of the
+ * selection via `*leaf_out` (caller does not own a ref). */
 static void
-update_breadcrumb (gnews_browser *br)
+update_breadcrumb (gnews_browser *br, HxNewsNode **leaf_out)
 {
 	guint pos = gtk_single_selection_get_selected (br->selection);
 	GtkTreeListRow *row;
 	GString *crumb;
+
+	if (leaf_out) *leaf_out = NULL;
 
 	if (pos == GTK_INVALID_LIST_POSITION) {
 		gtk_label_set_text (br->breadcrumb, "/");
@@ -291,15 +326,22 @@ update_breadcrumb (gnews_browser *br)
 		return;
 	}
 
-	/* Walk up the tree collecting names. */
 	{
-		GPtrArray *names = g_ptr_array_new_with_free_func (g_free);
-		GtkTreeListRow *cur = g_object_ref (row);
+		GPtrArray      *names = g_ptr_array_new_with_free_func (g_free);
+		GtkTreeListRow *cur   = g_object_ref (row);
+		gboolean        first = TRUE;
+
 		while (cur) {
 			HxNewsNode *node = gtk_tree_list_row_get_item (cur);
 			if (node) {
+				if (first && leaf_out) {
+					/* The first node we visit IS the selected
+					 * leaf (we walk upward from there). */
+					*leaf_out = node;
+				}
 				g_ptr_array_insert (names, 0, g_strdup (node->name));
 				g_object_unref (node);
+				first = FALSE;
 			}
 			GtkTreeListRow *parent = gtk_tree_list_row_get_parent (cur);
 			g_object_unref (cur);
@@ -325,15 +367,21 @@ on_selection_changed (GtkSingleSelection *sel,
                        guint position, guint n_items,
                        gpointer user_data)
 {
+	gnews_browser *br = user_data;
+	HxNewsNode    *leaf = NULL;
 	(void) sel; (void) position; (void) n_items;
-	update_breadcrumb ((gnews_browser *) user_data);
+
+	update_breadcrumb (br, &leaf);
+
+	/* Track the currently-selected post (NULL for folder /
+	 * category / empty). The reply handler uses this to decide
+	 * whether to push a fetched body into the view. */
+	br->selected_post = (leaf && leaf->kind == NB_KIND_POST) ? leaf : NULL;
+
+	render_selected_post (br);
 }
 
 /* ---------- Factory: setup + bind for each row widget ---------- */
-
-/* Forward decls — the row-expanded handler fires these. */
-static void fetch_dirlist (gnews_browser *br, HxNewsNode *target);
-static void fetch_catlist (gnews_browser *br, HxNewsNode *target);
 
 static void
 on_row_expanded (GtkTreeListRow *row, GParamSpec *pspec, gpointer user_data)
@@ -700,6 +748,173 @@ gnews_browser_handle_catlist (gpointer gcnews_p)
 	return TRUE;
 }
 
+/* ---------- Post body fetch + display ---------- */
+
+/* Format the post date as a human-friendly string. Mirrors the
+ * Mac-classic-or-Unix branch news15.c::date_to_unix uses. */
+static char *
+post_date_format (const struct date_time *dt)
+{
+	time_t t;
+	struct tm tm_buf;
+	char buf[64];
+
+	if (dt->base_year >= 1970) {
+		struct tm timetm;
+		memset (&timetm, 0, sizeof timetm);
+		timetm.tm_sec  = dt->seconds + (24 * 3600);
+		timetm.tm_year = dt->base_year - 1900;
+		if (timetm.tm_year < 0)
+			timetm.tm_year = 1970;
+		t = mktime (&timetm);
+	} else if (dt->base_year == 1904) {
+		t = dt->seconds - 2082844800U;
+	} else {
+		return g_strdup ("");
+	}
+
+	if (!localtime_r (&t, &tm_buf))
+		return g_strdup ("");
+
+	if (strftime (buf, sizeof buf, "%a %b %e %H:%M:%S %Y", &tm_buf) == 0)
+		return g_strdup ("");
+
+	return g_strdup (buf);
+}
+
+/* Issue HTLC_HDR_GETTHREAD for `target`. The legacy hx_news15_get_post
+ * helper takes a struct news_item — build a stub one with just the
+ * fields it dereferences (postid, group->path, parts[0].mime_type)
+ * and register it in pending_threads so the reply routes back to us. */
+static void
+fetch_thread (gnews_browser *br, HxNewsNode *target)
+{
+	struct news_item  *stub_item;
+	struct news_group *stub_group;
+	(void) br;
+
+	if (!target || target->kind != NB_KIND_POST || !target->path)
+		return;
+	if (target->body_fetching)
+		return;             /* already in flight */
+
+	ensure_pending_tables ();
+
+	stub_group = g_malloc0 (sizeof (struct news_group));
+	stub_group->path = g_strdup (target->path);
+
+	stub_item = g_malloc0 (sizeof (struct news_item));
+	stub_item->postid     = target->postid;
+	stub_item->group      = stub_group;
+	stub_item->partcount  = 1;
+	stub_item->parts      = g_malloc0 (sizeof (struct news_parts));
+	stub_item->parts[0].mime_type = g_strdup (
+		target->mime_type ? target->mime_type : "text/plain");
+
+	g_hash_table_insert (pending_threads, stub_item, g_object_ref (target));
+	target->body_fetching = TRUE;
+
+	hx_news15_get_post (&the_session.htlc, stub_item);
+}
+
+/* Render the currently-selected post into the right pane. If the
+ * body hasn't been fetched yet, fires fetch_thread and shows a
+ * "Loading…" placeholder until the reply lands. */
+static void
+render_selected_post (gnews_browser *br)
+{
+	HxNewsNode *node = br->selected_post;
+	GtkTextBuffer *buf;
+
+	if (!node || node->kind != NB_KIND_POST) {
+		gtk_widget_set_visible (br->header_strip, FALSE);
+		buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
+		gtk_text_buffer_set_text (buf,
+			_("Select a post in the tree to view it here."),
+			-1);
+		return;
+	}
+
+	/* Header strip */
+	gtk_label_set_text (br->subject_label,
+	                    node->name && *node->name ? node->name : _("(no subject)"));
+	{
+		char *date_str = post_date_format (&node->date);
+		char *meta = g_strdup_printf (_("%s — %s"),
+			node->sender && *node->sender ? node->sender : "?",
+			date_str);
+		gtk_label_set_text (br->meta_label, meta);
+		g_free (meta);
+		g_free (date_str);
+	}
+	gtk_widget_set_visible (br->header_strip, TRUE);
+
+	/* Body */
+	buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
+	if (node->body) {
+		gtk_text_buffer_set_text (buf, node->body, -1);
+	} else {
+		gtk_text_buffer_set_text (buf, _("Loading…"), -1);
+		fetch_thread (br, node);
+	}
+}
+
+gboolean
+gnews_browser_handle_thread (gpointer post_p)
+{
+	struct news_post *post = post_p;
+	struct news_item *stub_item;
+	HxNewsNode       *target = NULL;
+	gnews_browser    *br = the_browser;
+
+	if (!post || !pending_threads)
+		return FALSE;
+	stub_item = post->item;
+	if (!stub_item)
+		return FALSE;
+	if (!g_hash_table_contains (pending_threads, stub_item))
+		return FALSE;
+
+	target = g_hash_table_lookup (pending_threads, stub_item);
+	if (target)
+		g_object_ref (target);
+	g_hash_table_remove (pending_threads, stub_item);
+
+	if (target) {
+		target->body_fetching = FALSE;
+		g_free (target->body);
+		target->body = g_strdup (post->buf ? post->buf : "");
+
+		/* If the post is still the selected one, push the body
+		 * into the view. (User may have moved on while the fetch
+		 * was in flight — in that case we just keep the cached
+		 * body for when they come back.) */
+		if (br && br->selected_post == target)
+			render_selected_post (br);
+	}
+
+	/* Free the stub news_item + stub group + the news_post. */
+	if (stub_item->parts) {
+		int j;
+		for (j = 0; j < stub_item->partcount; j++)
+			g_free (stub_item->parts[j].mime_type);
+		g_free (stub_item->parts);
+	}
+	g_free (stub_item->subject);
+	g_free (stub_item->sender);
+	if (stub_item->group) {
+		g_free (stub_item->group->path);
+		g_free (stub_item->group);
+	}
+	g_free (stub_item);
+
+	g_free (post->buf);
+	g_free (post);
+
+	g_clear_object (&target);
+	return TRUE;
+}
+
 /* ---------- Window lifecycle ---------- */
 
 static gboolean
@@ -737,7 +952,7 @@ build_browser_window (void)
 	/* ---- Icons (cached for the lifetime of the window) ---- */
 	br->icon_folder   = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.xpm");
 	br->icon_category = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.xpm");
-	br->icon_post     = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/postnews.xpm");
+	br->icon_post     = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.xpm");
 
 	/* ---- Window ---- */
 	br->window = gtk_window_new ();
@@ -794,11 +1009,44 @@ build_browser_window (void)
 	gtkhx_widget_set_child (left_scroll, br->list_view);
 	gtk_paned_set_start_child (GTK_PANED (paned), left_scroll);
 
-	/* ---- Right: post body placeholder ----
+	/* ---- Right: post header strip + body ----
 	 *
-	 * Phase 4 routes HTLC_HDR_GETTHREAD replies into this buffer
-	 * and adds an author / date / subject header strip above it. */
-	right_box    = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	 *   header_strip (hidden until a post is selected)
+	 *     subject_label  — "heading" CSS class
+	 *     meta_label     — "<sender> — <date>", "dim-label" class
+	 *   separator
+	 *   body GtkTextView (scrolled, read-only) */
+	right_box        = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	br->header_strip = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+	gtk_widget_set_margin_start  (br->header_strip, 12);
+	gtk_widget_set_margin_end    (br->header_strip, 12);
+	gtk_widget_set_margin_top    (br->header_strip, 10);
+	gtk_widget_set_margin_bottom (br->header_strip, 8);
+
+	{
+		GtkWidget *subj = gtk_label_new (NULL);
+		GtkWidget *meta = gtk_label_new (NULL);
+
+		gtk_label_set_xalign     (GTK_LABEL (subj), 0.0f);
+		gtk_label_set_wrap       (GTK_LABEL (subj), TRUE);
+		gtk_label_set_wrap_mode  (GTK_LABEL (subj), PANGO_WRAP_WORD_CHAR);
+		gtk_widget_add_css_class (subj, "heading");
+
+		gtk_label_set_xalign     (GTK_LABEL (meta), 0.0f);
+		gtk_label_set_ellipsize  (GTK_LABEL (meta), PANGO_ELLIPSIZE_END);
+		gtk_widget_add_css_class (meta, "dim-label");
+
+		gtk_box_append (GTK_BOX (br->header_strip), subj);
+		gtk_box_append (GTK_BOX (br->header_strip), meta);
+
+		br->subject_label = GTK_LABEL (subj);
+		br->meta_label    = GTK_LABEL (meta);
+	}
+	gtk_widget_set_visible (br->header_strip, FALSE);
+	gtk_box_append (GTK_BOX (right_box), br->header_strip);
+	gtk_box_append (GTK_BOX (right_box),
+	                gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+
 	right_scroll = gtk_scrolled_window_new ();
 	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (right_scroll),
 	                                GTK_POLICY_AUTOMATIC,
@@ -807,10 +1055,10 @@ build_browser_window (void)
 	gtk_text_view_set_editable (GTK_TEXT_VIEW (br->post_view), FALSE);
 	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (br->post_view), FALSE);
 	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (br->post_view), GTK_WRAP_WORD_CHAR);
-	gtk_widget_set_margin_start  (br->post_view, 8);
-	gtk_widget_set_margin_end    (br->post_view, 8);
-	gtk_widget_set_margin_top    (br->post_view, 8);
-	gtk_widget_set_margin_bottom (br->post_view, 8);
+	gtk_widget_set_margin_start  (br->post_view, 12);
+	gtk_widget_set_margin_end    (br->post_view, 12);
+	gtk_widget_set_margin_top    (br->post_view, 10);
+	gtk_widget_set_margin_bottom (br->post_view, 10);
 	buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
 	gtk_text_buffer_set_text (buf,
 		_("Select a post in the tree to view it here."),

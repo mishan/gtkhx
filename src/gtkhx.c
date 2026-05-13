@@ -1138,6 +1138,8 @@ on_news_thread_signal (GtkhxSession *emitter,
                        gpointer post, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
+	if (gnews_browser_handle_thread (post))
+		return;
 	output_news_thread ((struct news_post *) post);
 }
 
