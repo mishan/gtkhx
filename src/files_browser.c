@@ -17,6 +17,7 @@
 #include "files_local_provider.h"
 #include "files_remote_provider.h"
 #include "files_panel.h"
+#include "files_ops.h"
 #include "files_browser.h"
 #include "gtkhx_session.h"
 #include "gtkutil.h"
@@ -53,11 +54,34 @@ struct browser {
 	/* CSS provider that paints the .files-panel-active border.
 	 * Lives for the window's lifetime; unrefed in on_close. */
 	GtkCssProvider *css;
+
+	/* AdwToastOverlay wrapping the window content — used by the
+	 * Copy action to surface "no permission" / "not connected" /
+	 * etc. results without an interrupting dialog. */
+	AdwToastOverlay *toast;
+
+	/* Copy button — re-tooltip'd on active-panel change so the
+	 * arrow direction in the hover text reflects which side is
+	 * source vs. dest. */
+	GtkWidget *btn_copy;
 };
 
 static struct browser *the_browser = NULL;
 
 /* ---- Active-panel tracking ---- */
+
+/* Update Copy's tooltip to reflect which way the transfer goes. */
+static void
+sync_copy_tooltip (struct browser *br)
+{
+	if (!br || !br->btn_copy) return;
+	if (br->active == br->left)
+		gtk_widget_set_tooltip_text (br->btn_copy,
+			_("Copy selection from left to right"));
+	else if (br->active == br->right)
+		gtk_widget_set_tooltip_text (br->btn_copy,
+			_("Copy selection from right to left"));
+}
 
 static void
 set_active (struct browser *br, files_panel *p)
@@ -66,6 +90,14 @@ set_active (struct browser *br, files_panel *p)
 	files_panel_set_active (br->left,  p == br->left);
 	files_panel_set_active (br->right, p == br->right);
 	br->active = p;
+	sync_copy_tooltip (br);
+}
+
+static void
+show_toast (struct browser *br, const char *text)
+{
+	if (!br || !br->toast || !text) return;
+	adw_toast_overlay_add_toast (br->toast, adw_toast_new (text));
 }
 
 /* Wire a focus controller on a panel's root widget. The
@@ -144,6 +176,48 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
 	if (br->active)
 		hx_files_provider_reload (
 			files_panel_get_provider (br->active));
+}
+
+/* Copy — issue an hx_files_ops_copy from the active panel's
+ * single selection to the inactive panel's current path. Phase 3
+ * is single-select; multi-select iteration is Phase 4. */
+static void
+on_copy_clicked (GtkButton *btn, gpointer user_data)
+{
+	struct browser *br = user_data;
+	files_panel *src, *dst;
+	HxFileEntry *e;
+	HxOpsResult result;
+	(void) btn;
+
+	if (!br->active) return;
+	src = br->active;
+	dst = (src == br->left) ? br->right : br->left;
+	if (!dst) return;
+
+	e = files_panel_get_single_selected (src);
+	if (!e) {
+		show_toast (br, _("Select a file to copy first."));
+		return;
+	}
+
+	result = hx_files_ops_copy (
+		files_panel_get_provider (src),
+		files_panel_get_provider (dst),
+		e);
+
+	if (result != HX_OPS_OK) {
+		show_toast (br, hx_files_ops_result_message (result));
+		return;
+	}
+
+	/* Issued successfully. For local-to-local the copy already
+	 * landed and the dest reload fired inside files_ops; for
+	 * remote-side transfers the tasks window shows progress and
+	 * the dest panel will need a manual refresh when the user
+	 * wants to see the new file. Phase 4 polish item: hook the
+	 * xfer-finished signal to auto-refresh. */
+	show_toast (br, _("Transfer queued."));
 }
 
 struct mkdir_ctx {
@@ -418,24 +492,37 @@ open_files_browser (void)
 
 	install_css (br);
 
-	/* Headerbar with cross-panel actions. Phase 3 will add the
-	 * Copy / Move buttons; Phase 1 keeps it to Refresh / New
-	 * Folder / Delete operating on the active panel. */
+	/* Headerbar:
+	 *   pack_start: Refresh, New Folder, Copy →
+	 *   pack_end:   Delete
+	 *
+	 * Copy moves the active panel's selection to the inactive
+	 * panel's current path. The arrow direction in the tooltip
+	 * gets re-set on active-panel changes via sync_copy_tooltip;
+	 * the icon stays generic (edit-copy-symbolic) since flipping
+	 * it on every selection change would just be visual noise.
+	 *
+	 * Phase 3 wires copy + permission gating. Move and folder
+	 * recursion are Phase 4. */
 	header      = adw_header_bar_new ();
 	refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
 	mkdir_btn   = gtk_button_new_from_icon_name ("folder-new-symbolic");
+	br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
 	delete_btn  = gtk_button_new_from_icon_name ("user-trash-symbolic");
 
-	gtk_widget_set_tooltip_text (refresh_btn, _("Reload active panel (Ctrl+R)"));
-	gtk_widget_set_tooltip_text (mkdir_btn,   _("New folder in active panel (Ctrl+N)"));
-	gtk_widget_set_tooltip_text (delete_btn,  _("Delete selection in active panel (Ctrl+D)"));
+	gtk_widget_set_tooltip_text (refresh_btn,  _("Reload active panel (Ctrl+R)"));
+	gtk_widget_set_tooltip_text (mkdir_btn,    _("New folder in active panel (Ctrl+N)"));
+	gtk_widget_set_tooltip_text (br->btn_copy, _("Copy selection to the other panel (F5)"));
+	gtk_widget_set_tooltip_text (delete_btn,   _("Delete selection in active panel (Ctrl+D)"));
 
-	g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked), br);
-	g_signal_connect (mkdir_btn,   "clicked", G_CALLBACK (on_mkdir_clicked),   br);
-	g_signal_connect (delete_btn,  "clicked", G_CALLBACK (on_delete_clicked),  br);
+	g_signal_connect (refresh_btn,  "clicked", G_CALLBACK (on_refresh_clicked), br);
+	g_signal_connect (mkdir_btn,    "clicked", G_CALLBACK (on_mkdir_clicked),   br);
+	g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),    br);
+	g_signal_connect (delete_btn,   "clicked", G_CALLBACK (on_delete_clicked),  br);
 
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), delete_btn);
 	gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
 
@@ -473,7 +560,13 @@ open_files_browser (void)
 	gtk_paned_set_end_child (GTK_PANED (paned),
 		files_panel_get_widget (br->right));
 
-	gtk_window_set_child (GTK_WINDOW (br->window), paned);
+	/* Wrap in a toast overlay so the Copy action (and future
+	 * polish-phase actions) have somewhere to surface transient
+	 * feedback ("Transfer queued.", "You don't have permission
+	 * for that.", etc.) without an interrupting dialog. */
+	br->toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
+	adw_toast_overlay_set_child (br->toast, paned);
+	gtk_window_set_child (GTK_WINDOW (br->window), GTK_WIDGET (br->toast));
 
 	/* Track which panel has focus / was clicked so the headerbar
 	 * actions know who to operate on. Wired AFTER both panels
@@ -531,6 +624,7 @@ open_files_browser (void)
 	/* Initial focus on the left panel so the user has a working
 	 * active selection right away. */
 	set_active (br, br->left);
+	sync_copy_tooltip (br);
 	gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
 	gtk_window_present (GTK_WINDOW (br->window));
