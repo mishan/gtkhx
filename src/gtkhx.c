@@ -42,6 +42,7 @@
 #include "cicn.h"
 #include "news.h"
 #include "news15.h"
+#include "news_browser.h"
 #include "users.h"
 #include "files.h"
 #include "tasks.h"
@@ -1108,12 +1109,20 @@ on_news_post_signal (GtkhxSession *emitter,
 	}
 }
 
+/* 1.5 threaded-news replies. The unified browser is the only
+ * producer of gnews_folder / gnews_catalog / news_post stubs since
+ * the legacy two-window UI was retired, so the browser handlers
+ * always own the reply. If the browser closed in flight (handler
+ * returns FALSE), the stub is leaked — that's the deliberate
+ * trade-off described in news_browser.c's pending-table comment;
+ * one-shot 4 kB allocations on a now-defunct window aren't worth
+ * tracking. */
 static void
 on_news_folder_signal (GtkhxSession *emitter,
                        gpointer gfnews, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
-	output_news_folder ((struct gnews_folder *) gfnews);
+	gnews_browser_handle_dirlist (gfnews);
 }
 
 static void
@@ -1121,7 +1130,7 @@ on_news_catalog_signal (GtkhxSession *emitter,
                         gpointer gcnews, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
-	output_news_catalog ((struct gnews_catalog *) gcnews);
+	gnews_browser_handle_catlist (gcnews);
 }
 
 static void
@@ -1129,7 +1138,7 @@ on_news_thread_signal (GtkhxSession *emitter,
                        gpointer post, gpointer user_data)
 {
 	(void) emitter; (void) user_data;
-	output_news_thread ((struct news_post *) post);
+	gnews_browser_handle_thread (post);
 }
 
 static void
