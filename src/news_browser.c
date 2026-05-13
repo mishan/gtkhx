@@ -1389,19 +1389,112 @@ compose_window_closed (GtkWindow *win, gpointer user_data)
 	compose_ctx_free (ctx);
 }
 
-/* Open a compose window. `parent_postid` 0 = new post; non-zero =
- * reply. `prefill_subject` is the initial subject text (typically
- * "Re: <original>" for a reply, empty for a new post). */
+/* Build the "Replying to ..." context strip — sender + date line,
+ * subject line, then a scrollable preview of the original body.
+ * Returned widget is the container; caller boxes it above the
+ * compose form. `reply_to` must have kind == NB_KIND_POST. */
+static GtkWidget *
+build_reply_context_panel (HxNewsNode *reply_to)
+{
+	GtkWidget *outer, *header_row, *meta_lbl, *subj_lbl;
+	GtkWidget *body_scroll, *body_view;
+	GtkTextBuffer *buf;
+	char *meta;
+	char *date_str;
+	const char *body_text;
+
+	outer = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_add_css_class (outer, "card");
+	gtk_widget_set_margin_start  (outer, 12);
+	gtk_widget_set_margin_end    (outer, 12);
+	gtk_widget_set_margin_top    (outer, 10);
+	gtk_widget_set_margin_bottom (outer, 4);
+
+	/* Header row: pinned mini-label + sender/date.
+	 *
+	 * Compact "From <sender> on <date>" line matches the post-pane
+	 * format in the main browser, so the user reads it the same
+	 * way in both places. */
+	header_row = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_margin_start  (header_row, 8);
+	gtk_widget_set_margin_end    (header_row, 8);
+	gtk_widget_set_margin_top    (header_row, 6);
+
+	date_str = post_date_format (&reply_to->date);
+	meta = g_strdup_printf (_("Replying to %s — %s"),
+		reply_to->sender && *reply_to->sender ? reply_to->sender : "?",
+		date_str);
+	meta_lbl = gtk_label_new (meta);
+	gtk_label_set_xalign (GTK_LABEL (meta_lbl), 0.0f);
+	gtk_label_set_ellipsize (GTK_LABEL (meta_lbl), PANGO_ELLIPSIZE_END);
+	gtk_widget_add_css_class (meta_lbl, "dim-label");
+	gtk_widget_add_css_class (meta_lbl, "caption");
+	g_free (meta);
+	g_free (date_str);
+
+	subj_lbl = gtk_label_new (
+		reply_to->name && *reply_to->name ? reply_to->name : _("(no subject)"));
+	gtk_label_set_xalign (GTK_LABEL (subj_lbl), 0.0f);
+	gtk_label_set_wrap (GTK_LABEL (subj_lbl), TRUE);
+	gtk_label_set_wrap_mode (GTK_LABEL (subj_lbl), PANGO_WRAP_WORD_CHAR);
+	gtk_widget_add_css_class (subj_lbl, "heading");
+
+	gtk_box_append (GTK_BOX (header_row), meta_lbl);
+	gtk_box_append (GTK_BOX (header_row), subj_lbl);
+	gtk_box_append (GTK_BOX (outer), header_row);
+
+	/* Body preview (scrollable, capped height so the panel doesn't
+	 * crowd out the user's reply box on a long original). */
+	body_scroll = gtk_scrolled_window_new ();
+	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (body_scroll),
+	                                GTK_POLICY_NEVER,
+	                                GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_max_content_height (
+		GTK_SCROLLED_WINDOW (body_scroll), 140);
+	gtk_scrolled_window_set_propagate_natural_height (
+		GTK_SCROLLED_WINDOW (body_scroll), TRUE);
+
+	body_view = gtk_text_view_new ();
+	gtk_text_view_set_editable (GTK_TEXT_VIEW (body_view), FALSE);
+	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (body_view), FALSE);
+	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (body_view), GTK_WRAP_WORD_CHAR);
+	gtk_widget_set_margin_start  (body_view, 8);
+	gtk_widget_set_margin_end    (body_view, 8);
+	gtk_widget_set_margin_top    (body_view, 2);
+	gtk_widget_set_margin_bottom (body_view, 6);
+	gtk_widget_add_css_class (body_view, "dim-label");
+
+	buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (body_view));
+	/* If we don't have the body cached, the user just clicked Reply
+	 * before the GETTHREAD reply landed. Rather than block, render
+	 * a placeholder — the reply can still be composed; the user has
+	 * the subject + sender + date for context. */
+	body_text = reply_to->body
+		? reply_to->body
+		: _("(original post body not loaded — open the post first to fetch it)");
+	gtk_text_buffer_set_text (buf, body_text, -1);
+
+	gtkhx_widget_set_child (body_scroll, body_view);
+	gtk_box_append (GTK_BOX (outer), body_scroll);
+
+	return outer;
+}
+
+/* Open a compose window. `reply_to` NULL = new post; non-NULL =
+ * reply (must be kind == NB_KIND_POST; the parent_postid + reply
+ * context panel come from the node). `prefill_subject` is the
+ * initial subject text. */
 static void
 open_compose_window (gnews_browser *br,
                      const char    *category_path,
-                     guint32        parent_postid,
+                     HxNewsNode    *reply_to,
                      const char    *prefill_subject)
 {
 	struct compose_ctx *ctx;
 	GtkWidget *window, *header, *content, *form, *body_scroll;
 	GtkWidget *subject_row, *subject_lbl;
 	GtkWidget *cancel_btn, *post_btn;
+	guint32    parent_postid = reply_to ? reply_to->postid : 0;
 
 	if (!category_path)
 		return;
@@ -1413,8 +1506,8 @@ open_compose_window (gnews_browser *br,
 
 	window = gtk_window_new ();
 	gtk_window_set_title (GTK_WINDOW (window),
-		parent_postid ? _("Reply") : _("New Post"));
-	gtk_widget_set_size_request (window, 560, 380);
+		reply_to ? _("Reply") : _("New Post"));
+	gtk_widget_set_size_request (window, 560, reply_to ? 540 : 380);
 	gtk_window_set_transient_for (GTK_WINDOW (window), GTK_WINDOW (br->window));
 	gtk_window_set_modal (GTK_WINDOW (window), TRUE);
 	ctx->window = window;
@@ -1437,9 +1530,15 @@ open_compose_window (gnews_browser *br,
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), post_btn);
 	gtk_window_set_titlebar (GTK_WINDOW (window), header);
 
-	/* Body: subject entry row + multi-line body GtkTextView. */
+	/* Layout: optional context panel + subject row + reply body. */
 	content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-	form    = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+
+	if (reply_to && reply_to->kind == NB_KIND_POST) {
+		GtkWidget *ctx_panel = build_reply_context_panel (reply_to);
+		gtkhx_box_pack (content, ctx_panel, FALSE, FALSE, 0);
+	}
+
+	form = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
 	gtk_widget_set_margin_start  (form, 12);
 	gtk_widget_set_margin_end    (form, 12);
 	gtk_widget_set_margin_top    (form, 10);
@@ -1481,7 +1580,7 @@ open_compose_window (gnews_browser *br,
 	/* Focus the subject for new posts, body for replies (the
 	 * subject is already prefilled "Re: …" — the user usually just
 	 * wants to start typing). */
-	if (parent_postid)
+	if (reply_to)
 		gtk_widget_grab_focus (ctx->body_view);
 	else
 		gtk_widget_grab_focus (ctx->subject_entry);
@@ -1505,7 +1604,7 @@ on_new_post_clicked (GtkButton *btn, gpointer user_data)
 		cat_path = sel->path;
 	if (!cat_path) return;
 
-	open_compose_window (br, cat_path, 0, "");
+	open_compose_window (br, cat_path, NULL, "");
 }
 
 static void
@@ -1527,7 +1626,15 @@ on_reply_clicked (GtkButton *btn, gpointer user_data)
 	else
 		subj = g_strdup_printf ("Re: %s", sel->name ? sel->name : "");
 
-	open_compose_window (br, sel->path, sel->postid, subj);
+	/* Make sure the original body is loaded before opening compose —
+	 * if the user clicked Reply before the GETTHREAD reply landed,
+	 * the context panel renders a "(not loaded)" placeholder, which
+	 * is fine but ugly. Firing the fetch here costs nothing (the
+	 * helper no-ops if already in flight or cached). */
+	if (!sel->body && !sel->body_fetching)
+		fetch_thread (br, sel);
+
+	open_compose_window (br, sel->path, sel, subj);
 	g_free (subj);
 }
 
