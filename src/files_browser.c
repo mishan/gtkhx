@@ -47,22 +47,70 @@ set_active (struct browser *br, files_panel *p)
 	br->active = p;
 }
 
+/* Wire a focus controller on a panel's root widget. The
+ * controller's "enter" signal fires when focus moves into the
+ * widget OR any descendant — that's the right semantic for the
+ * active-panel marker. Hooking notify::has-focus on the column
+ * view alone didn't work: the column view itself rarely gets
+ * focus directly; its inner row widget does, and has-focus on
+ * the parent doesn't reliably propagate.
+ *
+ * A click gesture in capture phase covers the case where the
+ * user clicks somewhere that's not focusable (the path entry,
+ * empty space below the rows) — we want that to flip the active
+ * panel anyway so the headerbar actions follow the user's
+ * pointer-driven intent. */
 static void
-on_focus_notify (GObject *obj, GParamSpec *pspec, gpointer user_data)
+on_panel_focus_enter (GtkEventControllerFocus *ctrl, gpointer user_data)
 {
 	struct browser *br = user_data;
-	GtkWidget *view = GTK_WIDGET (obj);
-	(void) pspec;
+	GtkWidget *panel_root;
+	(void) ctrl;
 
-	/* Only flip on focus-IN events. focus-OUT during a Tab cycle
-	 * fires before the new panel's focus-IN; if we cleared the
-	 * active state on focus-OUT we'd briefly have no active panel. */
-	if (!gtk_widget_has_focus (view)) return;
-
-	if (br->left  && files_panel_get_column_view (br->left)  == view)
+	panel_root = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (ctrl));
+	if (br->left  && files_panel_get_widget (br->left)  == panel_root)
 		set_active (br, br->left);
-	else if (br->right && files_panel_get_column_view (br->right) == view)
+	else if (br->right && files_panel_get_widget (br->right) == panel_root)
 		set_active (br, br->right);
+}
+
+static void
+on_panel_clicked (GtkGestureClick *gesture, int n_press,
+                   double x, double y, gpointer user_data)
+{
+	struct browser *br = user_data;
+	GtkWidget *panel_root;
+	(void) n_press; (void) x; (void) y;
+
+	panel_root = gtk_event_controller_get_widget (
+		GTK_EVENT_CONTROLLER (gesture));
+	if (br->left  && files_panel_get_widget (br->left)  == panel_root)
+		set_active (br, br->left);
+	else if (br->right && files_panel_get_widget (br->right) == panel_root)
+		set_active (br, br->right);
+}
+
+static void
+attach_panel_focus_tracking (struct browser *br, files_panel *p)
+{
+	GtkEventController *focus_ctrl;
+	GtkGesture         *click;
+	GtkWidget          *root = files_panel_get_widget (p);
+
+	focus_ctrl = gtk_event_controller_focus_new ();
+	g_signal_connect (focus_ctrl, "enter",
+		G_CALLBACK (on_panel_focus_enter), br);
+	gtk_widget_add_controller (root, focus_ctrl);
+
+	/* Capture phase so we observe the click before the children
+	 * consume it for their own selection / activation logic. */
+	click = gtk_gesture_click_new ();
+	gtk_event_controller_set_propagation_phase (
+		GTK_EVENT_CONTROLLER (click), GTK_PHASE_CAPTURE);
+	g_signal_connect (click, "pressed",
+		G_CALLBACK (on_panel_clicked), br);
+	gtk_widget_add_controller (root, GTK_EVENT_CONTROLLER (click));
 }
 
 /* ---- Actions (scoped to active panel) ---- */
@@ -146,6 +194,13 @@ on_mkdir_clicked (GtkButton *btn, gpointer user_data)
 	g_signal_connect (dialog, "closed",   G_CALLBACK (on_mkdir_closed),   ctx);
 
 	adw_dialog_present (dialog, br->window);
+	/* Focus the entry so the user can type immediately + hit
+	 * Enter. activates-default = TRUE on the entry routes that
+	 * Enter to AdwAlertDialog's default response ("create").
+	 * Has to happen AFTER adw_dialog_present — the dialog isn't
+	 * realized before that and grab_focus is a no-op on an
+	 * unmapped widget. */
+	gtk_widget_grab_focus (entry);
 }
 
 struct delete_ctx {
@@ -366,25 +421,26 @@ open_files_browser (void)
 
 	gtk_window_set_child (GTK_WINDOW (br->window), paned);
 
-	/* Track which panel has focus so the headerbar actions know
-	 * who to operate on. Connect AFTER both panels exist. */
-	g_signal_connect (files_panel_get_column_view (br->left),
-		"notify::has-focus", G_CALLBACK (on_focus_notify), br);
-	g_signal_connect (files_panel_get_column_view (br->right),
-		"notify::has-focus", G_CALLBACK (on_focus_notify), br);
+	/* Track which panel has focus / was clicked so the headerbar
+	 * actions know who to operate on. Wired AFTER both panels
+	 * exist so attach_panel_focus_tracking can reach them via
+	 * files_panel_get_widget. */
+	attach_panel_focus_tracking (br, br->left);
+	attach_panel_focus_tracking (br, br->right);
 
 	/* Window-level keyboard shortcuts.
 	 *
 	 *   Tab        — switch active panel
 	 *   Backspace  — up one directory in active panel
-	 *   Ctrl+R     — reload active panel
-	 *   Ctrl+N     — new folder
-	 *   Ctrl+D     — delete selection
 	 *
-	 * The Tab + Backspace bindings are intercepted at the window
-	 * level (rather than per-panel) so they fire regardless of
-	 * which sub-widget happens to have focus. */
+	 * Capture phase is the only way to intercept Tab — without it,
+	 * GtkColumnView's built-in focus chain consumes the keystroke
+	 * for column-to-column navigation before the window-level
+	 * shortcut sees it. Same logic for Backspace though that one
+	 * isn't normally claimed by descendants. */
 	shortcuts = gtk_shortcut_controller_new ();
+	gtk_event_controller_set_propagation_phase (shortcuts,
+		GTK_PHASE_CAPTURE);
 	gtk_shortcut_controller_set_scope (
 		GTK_SHORTCUT_CONTROLLER (shortcuts), GTK_SHORTCUT_SCOPE_GLOBAL);
 	gtk_widget_add_controller (br->window, shortcuts);

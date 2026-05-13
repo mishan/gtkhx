@@ -32,7 +32,43 @@ struct _files_panel {
 
 	HxLocalFilesProvider *provider;
 	gulong navigated_handler;
+
+	/* Cached row icons. Loaded once at panel construction and
+	 * paintable-set into each row's GtkImage in name_bind.
+	 * Holding the GdkPaintable refs on the panel sidesteps the
+	 * Adwaita gtk_image_set_from_resource path that renders blank
+	 * for XPMs (same workaround used by news_browser and the
+	 * toolbar buttons). */
+	GdkPaintable *icon_folder;
+	GdkPaintable *icon_file;
 };
+
+/* Load an XPM resource and wrap it in a GdkPaintable scaled 1.5x
+ * with nearest-neighbor interpolation. Identical treatment to
+ * news_browser.c's icon path so the two browsers' row chrome
+ * looks consistent. Returns NULL silently on a missing resource —
+ * callers null-check. */
+static GdkPaintable *
+load_xpm_paintable (const char *resource)
+{
+	GdkPixbuf  *pb, *scaled;
+	GdkTexture *tex;
+	int w, h;
+
+	pb = gdk_pixbuf_new_from_resource (resource, NULL);
+	if (!pb) return NULL;
+	w = (gdk_pixbuf_get_width  (pb) * 3) / 2;
+	h = (gdk_pixbuf_get_height (pb) * 3) / 2;
+	scaled = gdk_pixbuf_scale_simple (pb, w, h, GDK_INTERP_NEAREST);
+	g_object_unref (pb);
+	if (!scaled) return NULL;
+
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	tex = gdk_texture_new_for_pixbuf (scaled);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+	g_object_unref (scaled);
+	return GDK_PAINTABLE (tex);
+}
 
 /* ---- Custom sorters ---- */
 
@@ -93,9 +129,13 @@ cmp_kind (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 
 /* ---- Column factories ---- */
 
-/* Name column: icon (16 px) + label. The icon comes from GIcon
- * lookup on the entry's `is_dir` flag (Phase 1) — Phase 2 will
- * key off the kind / Hotline type for richer icons. */
+/* Name column: icon + label. Icon comes from the panel-cached
+ * XPM paintables (folder vs. generic file), passed through to
+ * the bind callback via the factory's user_data slot.
+ *
+ * Phase 2 will look at HxFileEntry's `kind` to pick richer icons
+ * for known Hotline file types (text, image, archive) — for now
+ * the folder/file binary is enough. */
 static void
 name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 {
@@ -104,10 +144,9 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 	GtkWidget *lbl  = gtk_label_new (NULL);
 	(void) f; (void) d;
 
-	/* Match the news browser's 1.5x icon treatment — Adwaita's
-	 * GtkImage icon-size enum clamps to ~16 px otherwise, which
-	 * reads as tiny on modern displays. 24 px pairs nicely with
-	 * the default 18 px row height the GtkColumnView lays out. */
+	/* XPMs are 16x16; scaled 1.5x = 24x24. Match that with
+	 * pixel_size so GtkImage's icon-size clamp doesn't shrink
+	 * them back down. */
 	gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
 	gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
 	gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
@@ -124,11 +163,13 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 static void
 name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 {
+	files_panel *p     = d;
 	GtkWidget   *row   = gtk_list_item_get_child (item);
 	HxFileEntry *e     = gtk_list_item_get_item  (item);
 	GtkImage    *icon  = g_object_get_data (G_OBJECT (row), "icon");
 	GtkLabel    *lbl   = g_object_get_data (G_OBJECT (row), "label");
-	(void) f; (void) d;
+	GdkPaintable *paintable;
+	(void) f;
 
 	if (!e) {
 		gtk_image_clear (icon);
@@ -136,11 +177,11 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 		return;
 	}
 
-	/* Adwaita ships these symbolic icons; they tint with the
-	 * theme and look right in both light and dark modes. */
-	gtk_image_set_from_icon_name (icon,
-		hx_file_entry_is_dir (e) ? "folder-symbolic"
-		                          : "text-x-generic-symbolic");
+	paintable = hx_file_entry_is_dir (e) ? p->icon_folder : p->icon_file;
+	if (paintable)
+		gtk_image_set_from_paintable (icon, paintable);
+	else
+		gtk_image_clear (icon);
 	gtk_label_set_text (lbl, hx_file_entry_get_name (e));
 }
 
@@ -316,6 +357,7 @@ add_column (GtkColumnView *view,
             const char *title,
             void (*setup)(GtkSignalListItemFactory *, GtkListItem *, gpointer),
             void (*bind)(GtkSignalListItemFactory *, GtkListItem *, gpointer),
+            gpointer factory_user_data,
             GCompareDataFunc cmp,
             int fixed_width,
             gboolean expand,
@@ -326,8 +368,8 @@ add_column (GtkColumnView *view,
 	GtkSorter *sorter;
 
 	factory = gtk_signal_list_item_factory_new ();
-	g_signal_connect (factory, "setup", G_CALLBACK (setup), NULL);
-	g_signal_connect (factory, "bind",  G_CALLBACK (bind),  NULL);
+	g_signal_connect (factory, "setup", G_CALLBACK (setup), factory_user_data);
+	g_signal_connect (factory, "bind",  G_CALLBACK (bind),  factory_user_data);
 
 	col = gtk_column_view_column_new (title, factory);
 	if (fixed_width > 0)
@@ -355,6 +397,18 @@ files_panel_new (HxLocalFilesProvider *provider)
 	GtkWidget *path_row, *scrolled, *footer;
 
 	p->provider = g_object_ref (provider);
+
+	/* Cached row icons — load once, reuse for every visible row.
+	 * mkdir.xpm is the manila folder we use for directories
+	 * (the file is misnamed: the icon depicts an open folder
+	 * because the toolbar action that uses it is "make a
+	 * directory", but the artwork is a perfectly good folder
+	 * glyph for row display). files.xpm is the document icon
+	 * already on the toolbar Files button. Both XPMs are 16x16;
+	 * the helper scales them 1.5x with nearest-neighbor so the
+	 * pixel-art stays crisp. */
+	p->icon_folder = load_xpm_paintable ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
+	p->icon_file   = load_xpm_paintable ("/com/nasledov/gtkhx/pixmaps/files.xpm");
 
 	/* ---- Root box ---- */
 	p->root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -405,15 +459,15 @@ files_panel_new (HxLocalFilesProvider *provider)
 			(GTK_COLUMN_VIEW (p->column_view), FALSE);
 
 		add_column (GTK_COLUMN_VIEW (p->column_view),
-			_("Name"), name_setup, name_bind, cmp_name, 240, TRUE, TRUE);
+			_("Name"), name_setup, name_bind, p, cmp_name, 240, TRUE, TRUE);
 		add_column (GTK_COLUMN_VIEW (p->column_view),
-			_("Size"), text_setup_right, size_bind, cmp_size, 96,
+			_("Size"), text_setup_right, size_bind, NULL, cmp_size, 96,
 			FALSE, FALSE);
 		add_column (GTK_COLUMN_VIEW (p->column_view),
-			_("Modified"), text_setup_right, modified_bind, cmp_modified,
-			120, FALSE, FALSE);
+			_("Modified"), text_setup_right, modified_bind, NULL,
+			cmp_modified, 120, FALSE, FALSE);
 		add_column (GTK_COLUMN_VIEW (p->column_view),
-			_("Kind"), text_setup_left, kind_bind, cmp_kind, 120,
+			_("Kind"), text_setup_left, kind_bind, NULL, cmp_kind, 120,
 			FALSE, FALSE);
 
 		/* Hand the column view's sort model to our GtkSortListModel
@@ -525,6 +579,8 @@ files_panel_free (files_panel *p)
 		g_signal_handler_disconnect (p->provider, p->navigated_handler);
 	}
 	g_clear_object (&p->provider);
+	g_clear_object (&p->icon_folder);
+	g_clear_object (&p->icon_file);
 	/* p->root is owned by its parent widget and gets unparented
 	 * when the parent is destroyed; we don't free it directly. */
 	g_free (p);
