@@ -226,7 +226,13 @@ build_child_path (const char *parent_path, const char *child_name)
  * Goes pixbuf → texture rather than calling gtk_image_set_from_
  * resource: the latter renders blank for our XPMs (probably an
  * Adwaita CSS sizing interaction). The pixbuf path is the same
- * one gtkhx_pixmap_button uses for the toolbar icons. */
+ * one gtkhx_pixmap_button uses for the toolbar icons.
+ *
+ * Scales the pixbuf by an integer factor with nearest-neighbor
+ * interpolation so the blocky pixel-art XPMs keep their crisp
+ * look at modern desktop densities. */
+#define NEWS_BROWSER_ICON_SCALE 2
+
 static GdkPaintable *
 load_icon_paintable (const char *resource)
 {
@@ -236,6 +242,17 @@ load_icon_paintable (const char *resource)
 	pb = gdk_pixbuf_new_from_resource (resource, NULL);
 	if (!pb)
 		return NULL;
+
+	if (NEWS_BROWSER_ICON_SCALE > 1) {
+		int w = gdk_pixbuf_get_width  (pb) * NEWS_BROWSER_ICON_SCALE;
+		int h = gdk_pixbuf_get_height (pb) * NEWS_BROWSER_ICON_SCALE;
+		GdkPixbuf *scaled = gdk_pixbuf_scale_simple (pb, w, h, GDK_INTERP_NEAREST);
+		g_object_unref (pb);
+		pb = scaled;
+		if (!pb)
+			return NULL;
+	}
+
 	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 	tex = gdk_texture_new_for_pixbuf (pb);
 	G_GNUC_END_IGNORE_DEPRECATIONS
