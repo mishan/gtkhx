@@ -56,6 +56,7 @@
 #include "hx.h"
 #include "prefs.h"
 #include "preview.h"
+#include "pict_embed.h"
 #include "gtkutil.h"
 
 /* ---- Viewer protocol ----------------------------------------------- */
@@ -237,15 +238,22 @@ static const char *const image_type_codes[] = {
     "BMPp", /* BMP (alt) */
     "WBMP", /* WebP — sometimes seen */
     "TIFF", /* TIFF */
-    "PICT", /* QuickDraw PICT — GdkPixbuf doesn't render these
-	          * natively, but we let the loader try; it'll fall
-	          * back to the text path if the loader errors out. */
+    "PICT", /* QuickDraw PICT — GdkPixbuf doesn't decode these
+	          * natively. image_done has a fallback path that sniffs
+	          * the byte stream for an embedded JPEG/PNG/GIF/TIFF
+	          * (typical for PICT v2 files; covers most screenshots
+	          * shared on Hotline). PICT files that use classic
+	          * QuickDraw raster opcodes still fall through with a
+	          * "couldn't decode" message — see pict_embed.h. */
     NULL,
 };
 
 static const char *const image_extensions[] = {
-    ".jpg", ".jpeg", ".jpe", ".png",  ".gif", ".bmp", ".webp",
-    ".tif", ".tiff", ".ico", ".avif", ".svg", NULL,
+    ".jpg",  ".jpeg", ".jpe", ".png", ".gif",  ".bmp",
+    ".webp", ".tif",  ".tiff", ".ico", ".avif", ".svg",
+    /* PICT — embedded-image extraction in image_done; see above. */
+    ".pict", ".pct",
+    NULL,
 };
 
 static gboolean
@@ -375,6 +383,33 @@ image_done (hx_preview *p)
     bytes = g_bytes_new (p->bytes->data, p->bytes->len);
     tex = gdk_texture_new_from_bytes (bytes, &err);
     g_bytes_unref (bytes);
+
+    /* PICT fallback. GdkPixbuf doesn't decode QuickDraw PICT, so the
+	 * direct call above will have failed on PICT input. Try the
+	 * "sniff for an embedded JPEG/PNG/GIF/TIFF" path — the common
+	 * case for PICT files seen on Hotline servers is a thin v2
+	 * wrapper around a real image format. If the sniff finds one,
+	 * re-attempt the texture decode with the trimmed bytes. */
+    if (!tex) {
+        GBytes *embedded;
+        embedded = hx_pict_extract_embedded (p->bytes->data, p->bytes->len);
+        if (embedded) {
+            GError *err2 = NULL;
+            tex = gdk_texture_new_from_bytes (embedded, &err2);
+            g_bytes_unref (embedded);
+            if (tex) {
+                /* Recovered. Drop the first error and proceed. */
+                g_clear_error (&err);
+            } else {
+                /* Sniff found a signature but the data after it
+				 * wasn't actually decodable. Keep the original err
+				 * for the user-visible message (more relevant than
+				 * the "couldn't decode the JPEG we found embedded"
+				 * second error). */
+                g_clear_error (&err2);
+            }
+        }
+    }
 
     if (!tex) {
         gtk_label_set_text (GTK_LABEL (s->status),
