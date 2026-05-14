@@ -1816,7 +1816,10 @@ build_browser_window (void)
 
     /* ---- Window ---- */
     br->window = gtk_window_new ();
-    gtk_window_set_title (GTK_WINDOW (br->window), _ ("Threaded News"));
+    /* Title goes through changetitlespecific so the connected
+	 * server's name lands in parentheses ("Threaded News (Badmoon)"),
+	 * matching the rest of the windows. */
+    changetitlespecific (br->window, _ ("Threaded News"));
     gtk_widget_set_size_request (br->window, 720, 480);
 
     /* ---- AdwHeaderBar with breadcrumb as the title widget ----

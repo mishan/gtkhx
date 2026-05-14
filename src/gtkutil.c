@@ -372,7 +372,19 @@ void
 changetitlespecific (GtkWidget *widget, char *name)
 {
     char *futuretitle;
-    futuretitle = g_strdup_printf ("%s (%s)", name, server_addr);
+    /* When opened pre-connect (or during a brief reconnect window
+	 * where server_addr has been cleared but the window stays up),
+	 * skip the " (server)" suffix rather than printing "(null)" or
+	 * "()". The window will get re-titled by the rcv path's
+	 * changetitlesconnected once SERVERNAME arrives — for managed
+	 * windows; on-demand windows like Threaded News and Files
+	 * Browser get the right title on first open since they call
+	 * this from inside the toolbar action, well after connect. */
+    if (server_addr && *server_addr) {
+        futuretitle = g_strdup_printf ("%s (%s)", name, server_addr);
+    } else {
+        futuretitle = g_strdup (name);
+    }
     gtk_window_set_title (GTK_WINDOW (widget), futuretitle);
     g_free (futuretitle);
 }
