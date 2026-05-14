@@ -63,21 +63,26 @@
 static gboolean
 keyaccel_connect_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	(void) w; (void) args; (void) data;
-	if (connect_btn)
-		g_signal_emit_by_name (connect_btn, "clicked");
-	return TRUE;
+    (void)w;
+    (void)args;
+    (void)data;
+    if (connect_btn) {
+        g_signal_emit_by_name (connect_btn, "clicked");
+    }
+    return TRUE;
 }
 
 static gboolean
 keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	GApplication *app = g_application_get_default ();
-	(void) w; (void) args; (void) data;
-	if (app)
-		g_action_group_activate_action (G_ACTION_GROUP (app),
-		                                "quit", NULL);
-	return TRUE;
+    GApplication *app = g_application_get_default ();
+    (void)w;
+    (void)args;
+    (void)data;
+    if (app) {
+        g_action_group_activate_action (G_ACTION_GROUP (app), "quit", NULL);
+    }
+    return TRUE;
 }
 
 /* Phase 5: Ctrl+W — close the focused window. Skips the toolbar
@@ -91,10 +96,12 @@ keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
 static gboolean
 keyaccel_close_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	(void) args; (void) data;
-	if (GTK_IS_WINDOW (w))
-		gtk_window_close (GTK_WINDOW (w));
-	return TRUE;
+    (void)args;
+    (void)data;
+    if (GTK_IS_WINDOW (w)) {
+        gtk_window_close (GTK_WINDOW (w));
+    }
+    return TRUE;
 }
 
 /* Phase 5: Ctrl+T — open (or focus) the Tracker window. Same
@@ -106,55 +113,55 @@ keyaccel_close_cb (GtkWidget *w, GVariant *args, gpointer data)
 static gboolean
 keyaccel_tracker_cb (GtkWidget *w, GVariant *args, gpointer data)
 {
-	(void) w; (void) args; (void) data;
-	create_tracker_window (NULL, &the_session);
-	return TRUE;
+    (void)w;
+    (void)args;
+    (void)data;
+    create_tracker_window (NULL, &the_session);
+    return TRUE;
 }
 
-void init_keyaccel (GtkWidget *widget)
+void
+init_keyaccel (GtkWidget *widget)
 {
-	GtkEventController *ctrl = gtk_shortcut_controller_new ();
-	GtkShortcut *sc;
+    GtkEventController *ctrl = gtk_shortcut_controller_new ();
+    GtkShortcut *sc;
 
-	gtk_event_controller_set_propagation_phase (ctrl, GTK_PHASE_CAPTURE);
+    gtk_event_controller_set_propagation_phase (ctrl, GTK_PHASE_CAPTURE);
 
-	sc = gtk_shortcut_new (
-		gtk_keyval_trigger_new ('k', GDK_CONTROL_MASK),
-		gtk_callback_action_new (keyaccel_connect_cb, NULL, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+    sc = gtk_shortcut_new (
+        gtk_keyval_trigger_new ('k', GDK_CONTROL_MASK),
+        gtk_callback_action_new (keyaccel_connect_cb, NULL, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
 
-	sc = gtk_shortcut_new (
-		gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
-		gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+    sc = gtk_shortcut_new (
+        gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
+        gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
 
-	/* Ctrl+T → open the Tracker window (or focus it if already up). */
-	sc = gtk_shortcut_new (
-		gtk_keyval_trigger_new ('t', GDK_CONTROL_MASK),
-		gtk_callback_action_new (keyaccel_tracker_cb, NULL, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+    /* Ctrl+T → open the Tracker window (or focus it if already up). */
+    sc = gtk_shortcut_new (
+        gtk_keyval_trigger_new ('t', GDK_CONTROL_MASK),
+        gtk_callback_action_new (keyaccel_tracker_cb, NULL, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
 
-	/* Ctrl+W → close, except on the toolbar (see keyaccel_close_cb).
+    /* Ctrl+W → close, except on the toolbar (see keyaccel_close_cb).
 	 * Compared by pointer equality: at this call site, toolbar.c
 	 * passes the same toolbar_window global that we read here. */
-	if (widget != toolbar_window) {
-		sc = gtk_shortcut_new (
-			gtk_keyval_trigger_new ('w', GDK_CONTROL_MASK),
-			gtk_callback_action_new (keyaccel_close_cb,
-			                         NULL, NULL));
-		gtk_shortcut_controller_add_shortcut (
-			GTK_SHORTCUT_CONTROLLER (ctrl), sc);
-	}
+    if (widget != toolbar_window) {
+        sc = gtk_shortcut_new (
+            gtk_keyval_trigger_new ('w', GDK_CONTROL_MASK),
+            gtk_callback_action_new (keyaccel_close_cb, NULL, NULL));
+        gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl),
+                                              sc);
+    }
 
-	gtk_widget_add_controller (widget, ctrl);
+    gtk_widget_add_controller (widget, ctrl);
 }
 
-void set_disconnect_btn(session *sess, int stat)
+void
+set_disconnect_btn (session *sess, int stat)
 {
-	gtk_widget_set_sensitive(disconnect_btn, stat);
+    gtk_widget_set_sensitive (disconnect_btn, stat);
 }
 
 /* Phase 5: helper to flip a hamburger-menu GAction's enabled state.
@@ -166,24 +173,27 @@ void set_disconnect_btn(session *sess, int stat)
 static void
 set_app_action_enabled (const char *name, gboolean enabled)
 {
-	GApplication *app = g_application_get_default ();
-	GAction *action;
+    GApplication *app = g_application_get_default ();
+    GAction *action;
 
-	if (!app)
-		return;
-	action = g_action_map_lookup_action (G_ACTION_MAP (app), name);
-	if (G_IS_SIMPLE_ACTION (action))
-		g_simple_action_set_enabled (G_SIMPLE_ACTION (action), enabled);
+    if (!app) {
+        return;
+    }
+    action = g_action_map_lookup_action (G_ACTION_MAP (app), name);
+    if (G_IS_SIMPLE_ACTION (action)) {
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action), enabled);
+    }
 }
 
-void setbtns(session *sess, int stat)
+void
+setbtns (session *sess, int stat)
 {
-	if(gtkhx_prefs.geo.users.open) {
-		gtk_widget_set_sensitive(msgbtn, stat);
-		gtk_widget_set_sensitive(infobtn, stat);
-		gtk_widget_set_sensitive(chatbtn, stat);
-		gtk_widget_set_sensitive(ignobtn, stat);
-		/* Phase 5: kick / ban get visibility gating in the Users
+    if (gtkhx_prefs.geo.users.open) {
+        gtk_widget_set_sensitive (msgbtn, stat);
+        gtk_widget_set_sensitive (infobtn, stat);
+        gtk_widget_set_sensitive (chatbtn, stat);
+        gtk_widget_set_sensitive (ignobtn, stat);
+        /* Phase 5: kick / ban get visibility gating in the Users
 		 * window — hide them entirely when the account doesn't
 		 * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
 		 * mhxd's struct.) On disconnect, hide them too: we don't
@@ -194,34 +204,33 @@ void setbtns(session *sess, int stat)
 		 * Same access-bit gate as the right-click popup's Kick/Ban
 		 * section, so the toolbar and the popup agree on what's
 		 * available. */
-		if (stat &&
-		    hl_access_has ((const guint8 *) &sess->htlc.access,
-		                   HL_ACCESS_DISCONNECT_USERS)) {
-			gtk_widget_set_visible   (kickbtn, TRUE);
-			gtk_widget_set_sensitive (kickbtn, TRUE);
-			gtk_widget_set_visible   (banbtn,  TRUE);
-			gtk_widget_set_sensitive (banbtn,  TRUE);
-		} else {
-			gtk_widget_set_visible (kickbtn, FALSE);
-			gtk_widget_set_visible (banbtn,  FALSE);
-		}
-	}
-	if(gtkhx_prefs.geo.news.open) {
-		gtk_widget_set_sensitive(sess->postButton, stat);
+        if (stat
+            && hl_access_has ((const guint8 *)&sess->htlc.access,
+                              HL_ACCESS_DISCONNECT_USERS)) {
+            gtk_widget_set_visible (kickbtn, TRUE);
+            gtk_widget_set_sensitive (kickbtn, TRUE);
+            gtk_widget_set_visible (banbtn, TRUE);
+            gtk_widget_set_sensitive (banbtn, TRUE);
+        } else {
+            gtk_widget_set_visible (kickbtn, FALSE);
+            gtk_widget_set_visible (banbtn, FALSE);
+        }
+    }
+    if (gtkhx_prefs.geo.news.open) {
+        gtk_widget_set_sensitive (sess->postButton, stat);
 
-		gtk_widget_set_sensitive(sess->reloadButton, stat);
+        gtk_widget_set_sensitive (sess->reloadButton, stat);
+    }
 
-	}
+    gtk_widget_set_sensitive (files_btn, stat);
 
-	gtk_widget_set_sensitive(files_btn, stat);
-
-	/* Phase 5: New User / Edit User moved from toolbar buttons to
+    /* Phase 5: New User / Edit User moved from toolbar buttons to
 	 * the hamburger menu's Admin submenu. Flip the corresponding
 	 * GActions instead of the old GtkWidget pointers. */
-	set_app_action_enabled ("user_new",  stat);
-	set_app_action_enabled ("user_edit", stat);
+    set_app_action_enabled ("user_new", stat);
+    set_app_action_enabled ("user_edit", stat);
 
-	/* Phase 5: News-related toolbar buttons get sensitivity-only
+    /* Phase 5: News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape
 	 * doesn't reshape between connections. Three buttons, three
 	 * independent decisions:
@@ -240,20 +249,20 @@ void setbtns(session *sess, int stat)
 	 *               the account has HL_ACCESS_READ_NEWS. mhxd's
 	 *               struct has one read bit gating both legacy and
 	 *               threaded news, so the same access bit applies. */
-	if (!stat) {
-		gtk_widget_set_sensitive (news_btn,   FALSE);
-		gtk_widget_set_sensitive (post_btn,   FALSE);
-		gtk_widget_set_sensitive (news15_btn, FALSE);
-	} else {
-		const guint8 *access = (const guint8 *) &sess->htlc.access;
-		gboolean can_read  = hl_access_has (access, HL_ACCESS_READ_NEWS);
-		gboolean can_post  = hl_access_has (access, HL_ACCESS_POST_NEWS);
-		gboolean is_15plus = sess->htlc.version >= 150;
+    if (!stat) {
+        gtk_widget_set_sensitive (news_btn, FALSE);
+        gtk_widget_set_sensitive (post_btn, FALSE);
+        gtk_widget_set_sensitive (news15_btn, FALSE);
+    } else {
+        const guint8 *access = (const guint8 *)&sess->htlc.access;
+        gboolean can_read = hl_access_has (access, HL_ACCESS_READ_NEWS);
+        gboolean can_post = hl_access_has (access, HL_ACCESS_POST_NEWS);
+        gboolean is_15plus = sess->htlc.version >= 150;
 
-		gtk_widget_set_sensitive (news_btn,   can_read);
-		gtk_widget_set_sensitive (post_btn,   can_post);
-		gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
-	}
+        gtk_widget_set_sensitive (news_btn, can_read);
+        gtk_widget_set_sensitive (post_btn, can_post);
+        gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
+    }
 }
 
 /* Phase 5: status_bar is now a GtkLabel (was GtkStatusbar — deprecated
@@ -272,146 +281,152 @@ void setbtns(session *sess, int stat)
  * label-only because they're either expected (you just clicked
  * Connect) or short-lived (TCP-connected almost always becomes
  * Logged-in within milliseconds). */
-void set_status_bar(int status)
+void
+set_status_bar (int status)
 {
-	static int last_status = 0;
-	const char *fixed = NULL;
-	char *fmt = NULL;
-	char *toast = NULL;
+    static int last_status = 0;
+    const char *fixed = NULL;
+    char *fmt = NULL;
+    char *toast = NULL;
 
-	if (!status_bar) {
-		return;
-	}
+    if (!status_bar) {
+        return;
+    }
 
-	switch (status) {
-	case -1:
-		fmt = g_strdup_printf ("%s %s", _("Connecting to"), server_addr);
-		/* Hide any leftover "lost connection" banner — the user
+    switch (status) {
+    case -1:
+        fmt = g_strdup_printf ("%s %s", _ ("Connecting to"), server_addr);
+        /* Hide any leftover "lost connection" banner — the user
 		 * is actively trying to reconnect. */
-		toolbar_hide_banner ();
-		break;
-	case 0:
-		fixed = _("Not Connected");
-		/* Toast + banner only on a real disconnect — first-launch
+        toolbar_hide_banner ();
+        break;
+    case 0:
+        fixed = _ ("Not Connected");
+        /* Toast + banner only on a real disconnect — first-launch
 		 * state change of 0 -> 0 shouldn't surface a notification,
 		 * and neither should a Connect-canceled (last_status == -1). */
-		if (last_status == 1 || last_status == 2) {
-			toast = g_strdup_printf ("%s %s",
-			                         _("Disconnected from"),
-			                         server_addr);
-			toolbar_show_connection_lost (server_addr);
-		}
-		break;
-	case 1:
-		fmt = g_strdup_printf ("%s %s", _("Connected to"), server_addr);
-		toolbar_hide_banner ();
-		break;
-	case 2:
-		fmt = g_strdup_printf ("%s %s", _("Logged in to"), server_addr);
-		toast = g_strdup (fmt);
-		toolbar_hide_banner ();
-		break;
-	default:
-		return;
-	}
+        if (last_status == 1 || last_status == 2) {
+            toast = g_strdup_printf ("%s %s", _ ("Disconnected from"),
+                                     server_addr);
+            toolbar_show_connection_lost (server_addr);
+        }
+        break;
+    case 1:
+        fmt = g_strdup_printf ("%s %s", _ ("Connected to"), server_addr);
+        toolbar_hide_banner ();
+        break;
+    case 2:
+        fmt = g_strdup_printf ("%s %s", _ ("Logged in to"), server_addr);
+        toast = g_strdup (fmt);
+        toolbar_hide_banner ();
+        break;
+    default:
+        return;
+    }
 
-	gtk_label_set_text (GTK_LABEL (status_bar), fmt ? fmt : fixed);
-	if (toast)
-		toolbar_show_toast (toast);
-	g_free (fmt);
-	g_free (toast);
-	last_status = status;
+    gtk_label_set_text (GTK_LABEL (status_bar), fmt ? fmt : fixed);
+    if (toast) {
+        toolbar_show_toast (toast);
+    }
+    g_free (fmt);
+    g_free (toast);
+    last_status = status;
 }
 
-void changetitlesconnected(session *sess)
+void
+changetitlesconnected (session *sess)
 {
-	char *newstitle;
-	char *taskstitle;
-	char *chattitle;
-	char *userstitle;
-	char *tooltitle;
+    char *newstitle;
+    char *taskstitle;
+    char *chattitle;
+    char *userstitle;
+    char *tooltitle;
 
-	tooltitle = g_strdup_printf("%s (%s)", _("GtkHx"), server_addr);
-	gtk_window_set_title(GTK_WINDOW(sess->toolbar_window), tooltitle);
-	g_free(tooltitle);
+    tooltitle = g_strdup_printf ("%s (%s)", _ ("GtkHx"), server_addr);
+    gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), tooltitle);
+    g_free (tooltitle);
 
-	if(gtkhx_prefs.geo.news.open) {
-			newstitle = g_strdup_printf("%s (%s)", _("News"), server_addr);
-			gtk_window_set_title(GTK_WINDOW(sess->news_window), newstitle);
-			g_free(newstitle);
-		}
-	if(gtkhx_prefs.geo.chat.open) {
-			chattitle = g_strdup_printf("%s (%s)", _("Chat"), server_addr);
-			gtk_window_set_title(GTK_WINDOW(sess->chat_window), chattitle);
-			g_free(chattitle);
-		}
-	if(gtkhx_prefs.geo.users.open) {
-			userstitle = g_strdup_printf("%s (%s)", _("Users"), server_addr);
-			gtk_window_set_title(GTK_WINDOW(sess->users_window), userstitle);
-			g_free(userstitle);
-		}
-	if(gtkhx_prefs.geo.tasks.open) {
-			taskstitle = g_strdup_printf("%s (%s)", _("Tasks"), server_addr);
-			gtk_window_set_title(GTK_WINDOW(sess->tasks_window), taskstitle);
-			g_free(taskstitle);
-		}
+    if (gtkhx_prefs.geo.news.open) {
+        newstitle = g_strdup_printf ("%s (%s)", _ ("News"), server_addr);
+        gtk_window_set_title (GTK_WINDOW (sess->news_window), newstitle);
+        g_free (newstitle);
+    }
+    if (gtkhx_prefs.geo.chat.open) {
+        chattitle = g_strdup_printf ("%s (%s)", _ ("Chat"), server_addr);
+        gtk_window_set_title (GTK_WINDOW (sess->chat_window), chattitle);
+        g_free (chattitle);
+    }
+    if (gtkhx_prefs.geo.users.open) {
+        userstitle = g_strdup_printf ("%s (%s)", _ ("Users"), server_addr);
+        gtk_window_set_title (GTK_WINDOW (sess->users_window), userstitle);
+        g_free (userstitle);
+    }
+    if (gtkhx_prefs.geo.tasks.open) {
+        taskstitle = g_strdup_printf ("%s (%s)", _ ("Tasks"), server_addr);
+        gtk_window_set_title (GTK_WINDOW (sess->tasks_window), taskstitle);
+        g_free (taskstitle);
+    }
 }
 
-void changetitlespecific(GtkWidget *widget, char *name)
+void
+changetitlespecific (GtkWidget *widget, char *name)
 {
-	char *futuretitle;
-	futuretitle = g_strdup_printf("%s (%s)", name, server_addr);
-	gtk_window_set_title(GTK_WINDOW(widget), futuretitle);
-	g_free(futuretitle);
+    char *futuretitle;
+    futuretitle = g_strdup_printf ("%s (%s)", name, server_addr);
+    gtk_window_set_title (GTK_WINDOW (widget), futuretitle);
+    g_free (futuretitle);
 }
 
-void changetitlesdisconnected(session *sess)
+void
+changetitlesdisconnected (session *sess)
 {
-	if(gtkhx_prefs.geo.news.open) {
-		gtk_window_set_title(GTK_WINDOW(sess->news_window), _("News"));
-	}
-	if(gtkhx_prefs.geo.chat.open) {
-		gtk_window_set_title(GTK_WINDOW(sess->chat_window), _("Chat"));
-	}
-	if(gtkhx_prefs.geo.users.open) {
-		gtk_window_set_title(GTK_WINDOW(sess->users_window), _("Users"));
-	}
-	if(gtkhx_prefs.geo.tasks.open) {
-		gtk_window_set_title(GTK_WINDOW(sess->tasks_window), _("Tasks"));
-	}
+    if (gtkhx_prefs.geo.news.open) {
+        gtk_window_set_title (GTK_WINDOW (sess->news_window), _ ("News"));
+    }
+    if (gtkhx_prefs.geo.chat.open) {
+        gtk_window_set_title (GTK_WINDOW (sess->chat_window), _ ("Chat"));
+    }
+    if (gtkhx_prefs.geo.users.open) {
+        gtk_window_set_title (GTK_WINDOW (sess->users_window), _ ("Users"));
+    }
+    if (gtkhx_prefs.geo.tasks.open) {
+        gtk_window_set_title (GTK_WINDOW (sess->tasks_window), _ ("Tasks"));
+    }
 
-	gtk_window_set_title(GTK_WINDOW(sess->toolbar_window), _("GtkHx"));
+    gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), _ ("GtkHx"));
 }
 
-void close_connected_windows(session *sess)
+void
+close_connected_windows (session *sess)
 {
-	if(sess->agreementwin) {
-		gtkhx_widget_destroy(sess->agreementwin);
-		sess->agreementwin = NULL;
-	}
-	destroy_gfl_list();
+    if (sess->agreementwin) {
+        gtkhx_widget_destroy (sess->agreementwin);
+        sess->agreementwin = NULL;
+    }
+    destroy_gfl_list ();
 
-	/* Phase 5+: walk the gchats hashtable, destroying every non-public
+    /* Phase 5+: walk the gchats hashtable, destroying every non-public
 	 * pchat window. The public chat (cid=0) UI persists across
 	 * reconnects, like its model-side counterpart in sess->chats.
 	 * Collect cids first then delete in a second pass so we don't
 	 * mutate the table mid-iteration. */
-	if (sess->gchats) {
-		GHashTableIter iter;
-		gpointer key, val;
-		GList *to_close = NULL;
-		g_hash_table_iter_init (&iter, sess->gchats);
-		while (g_hash_table_iter_next (&iter, &key, &val)) {
-			if (GPOINTER_TO_UINT (key) != 0) {
-				struct gtkhx_chat *gchat = val;
-				gtkhx_widget_destroy (gchat->window);
-				to_close = g_list_prepend (to_close, key);
-			}
-		}
-		for (GList *l = to_close; l; l = l->next)
-			g_hash_table_remove (sess->gchats, l->data);
-		g_list_free (to_close);
-	}
+    if (sess->gchats) {
+        GHashTableIter iter;
+        gpointer key, val;
+        GList *to_close = NULL;
+        g_hash_table_iter_init (&iter, sess->gchats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            if (GPOINTER_TO_UINT (key) != 0) {
+                struct gtkhx_chat *gchat = val;
+                gtkhx_widget_destroy (gchat->window);
+                to_close = g_list_prepend (to_close, key);
+            }
+        }
+        for (GList *l = to_close; l; l = l->next) {
+            g_hash_table_remove (sess->gchats, l->data);
+        }
+        g_list_free (to_close);
+    }
 }
 
 /* Phase 5: gtkhx_text_to_utf8 lives in text_util.c now so the unit
@@ -428,66 +443,69 @@ void close_connected_windows(session *sess)
  * styling matches every other modern GNOME app's error popup. The
  * old add_break() helper that hand-inserted '\n' every 50 chars is
  * gone with it. */
-void error_dialog (char *title, char *msg)
+void
+error_dialog (char *title, char *msg)
 {
-	AdwDialog *dlg;
+    AdwDialog *dlg;
 
-	dlg = adw_alert_dialog_new (title, msg);
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dlg), "ok", _("_OK"));
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dlg), "ok");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dlg), "ok");
+    dlg = adw_alert_dialog_new (title, msg);
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dlg), "ok", _ ("_OK"));
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dlg), "ok");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dlg), "ok");
 
-	adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
+    adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
 }
 
 GtkWidget *
 gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous)
 {
-	GtkWidget *grid = gtk_grid_new ();
-	(void) rows; (void) cols;  /* Grid grows automatically. */
-	if (homogeneous) {
-		gtk_grid_set_row_homogeneous    (GTK_GRID (grid), TRUE);
-		gtk_grid_set_column_homogeneous (GTK_GRID (grid), TRUE);
-	}
-	return grid;
+    GtkWidget *grid = gtk_grid_new ();
+    (void)rows;
+    (void)cols; /* Grid grows automatically. */
+    if (homogeneous) {
+        gtk_grid_set_row_homogeneous (GTK_GRID (grid), TRUE);
+        gtk_grid_set_column_homogeneous (GTK_GRID (grid), TRUE);
+    }
+    return grid;
 }
 
 void
-gtkhx_grid_attach_table (GtkGrid *grid, GtkWidget *child,
-                         int left, int right,
-                         int top,  int bottom,
-                         int xoptions, int yoptions,
+gtkhx_grid_attach_table (GtkGrid *grid, GtkWidget *child, int left, int right,
+                         int top, int bottom, int xoptions, int yoptions,
                          int xpad, int ypad)
 {
-	if (xoptions & GTK_EXPAND) gtk_widget_set_hexpand (child, TRUE);
-	if (yoptions & GTK_EXPAND) gtk_widget_set_vexpand (child, TRUE);
-	gtk_widget_set_halign (child, (xoptions & GTK_FILL)
-	                       ? GTK_ALIGN_FILL : GTK_ALIGN_CENTER);
-	gtk_widget_set_valign (child, (yoptions & GTK_FILL)
-	                       ? GTK_ALIGN_FILL : GTK_ALIGN_CENTER);
-	if (xpad) {
-		gtk_widget_set_margin_start (child, xpad);
-		gtk_widget_set_margin_end   (child, xpad);
-	}
-	if (ypad) {
-		gtk_widget_set_margin_top    (child, ypad);
-		gtk_widget_set_margin_bottom (child, ypad);
-	}
-	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+    if (xoptions & GTK_EXPAND) {
+        gtk_widget_set_hexpand (child, TRUE);
+    }
+    if (yoptions & GTK_EXPAND) {
+        gtk_widget_set_vexpand (child, TRUE);
+    }
+    gtk_widget_set_halign (child, (xoptions & GTK_FILL) ? GTK_ALIGN_FILL
+                                                        : GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (child, (yoptions & GTK_FILL) ? GTK_ALIGN_FILL
+                                                        : GTK_ALIGN_CENTER);
+    if (xpad) {
+        gtk_widget_set_margin_start (child, xpad);
+        gtk_widget_set_margin_end (child, xpad);
+    }
+    if (ypad) {
+        gtk_widget_set_margin_top (child, ypad);
+        gtk_widget_set_margin_bottom (child, ypad);
+    }
+    gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
 }
 
 void
-gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
-                                  int left, int right,
-                                  int top,  int bottom)
+gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child, int left,
+                                  int right, int top, int bottom)
 {
-	/* Mirror gtk_table_attach_defaults: GTK_EXPAND|GTK_FILL on both
+    /* Mirror gtk_table_attach_defaults: GTK_EXPAND|GTK_FILL on both
 	 * axes, no padding. */
-	gtk_widget_set_hexpand (child, TRUE);
-	gtk_widget_set_vexpand (child, TRUE);
-	gtk_widget_set_halign  (child, GTK_ALIGN_FILL);
-	gtk_widget_set_valign  (child, GTK_ALIGN_FILL);
-	gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
+    gtk_widget_set_hexpand (child, TRUE);
+    gtk_widget_set_vexpand (child, TRUE);
+    gtk_widget_set_halign (child, GTK_ALIGN_FILL);
+    gtk_widget_set_valign (child, GTK_ALIGN_FILL);
+    gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
 }
 
 /* Phase 4.2: GtkContainer is gone — dispatch on parent type to the
@@ -498,100 +516,114 @@ gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
 void
 gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child)
 {
-	if (!parent || !child)
-		return;
+    if (!parent || !child) {
+        return;
+    }
 
-	if (GTK_IS_WINDOW (parent))
-		gtk_window_set_child (GTK_WINDOW (parent), child);
-	else if (GTK_IS_SCROLLED_WINDOW (parent))
-		gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), child);
-	else if (GTK_IS_FRAME (parent))
-		gtk_frame_set_child (GTK_FRAME (parent), child);
-	else if (GTK_IS_BUTTON (parent))
-		gtk_button_set_child (GTK_BUTTON (parent), child);
-	else if (GTK_IS_BOX (parent))
-		gtk_box_append (GTK_BOX (parent), child);
-	else if (GTK_IS_VIEWPORT (parent))
-		gtk_viewport_set_child (GTK_VIEWPORT (parent), child);
-	else if (GTK_IS_POPOVER (parent))
-		gtk_popover_set_child (GTK_POPOVER (parent), child);
-	else if (GTK_IS_LIST_BOX_ROW (parent))
-		gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (parent), child);
-	else if (GTK_IS_LIST_BOX (parent))
-		gtk_list_box_append (GTK_LIST_BOX (parent), child);
-	else
-		g_warning ("gtkhx_widget_set_child: unhandled parent type %s",
-		           G_OBJECT_TYPE_NAME (parent));
+    if (GTK_IS_WINDOW (parent)) {
+        gtk_window_set_child (GTK_WINDOW (parent), child);
+    } else if (GTK_IS_SCROLLED_WINDOW (parent)) {
+        gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (parent), child);
+    } else if (GTK_IS_FRAME (parent)) {
+        gtk_frame_set_child (GTK_FRAME (parent), child);
+    } else if (GTK_IS_BUTTON (parent)) {
+        gtk_button_set_child (GTK_BUTTON (parent), child);
+    } else if (GTK_IS_BOX (parent)) {
+        gtk_box_append (GTK_BOX (parent), child);
+    } else if (GTK_IS_VIEWPORT (parent)) {
+        gtk_viewport_set_child (GTK_VIEWPORT (parent), child);
+    } else if (GTK_IS_POPOVER (parent)) {
+        gtk_popover_set_child (GTK_POPOVER (parent), child);
+    } else if (GTK_IS_LIST_BOX_ROW (parent)) {
+        gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (parent), child);
+    } else if (GTK_IS_LIST_BOX (parent)) {
+        gtk_list_box_append (GTK_LIST_BOX (parent), child);
+    } else {
+        g_warning ("gtkhx_widget_set_child: unhandled parent type %s",
+                   G_OBJECT_TYPE_NAME (parent));
+    }
 }
 
 void
 gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child)
 {
-	if (!parent || !child)
-		return;
+    if (!parent || !child) {
+        return;
+    }
 
-	if (GTK_IS_BOX (parent))
-		gtk_box_remove (GTK_BOX (parent), child);
-	else if (GTK_IS_LIST_BOX (parent))
-		gtk_list_box_remove (GTK_LIST_BOX (parent), child);
-	else
-		gtk_widget_unparent (child);
+    if (GTK_IS_BOX (parent)) {
+        gtk_box_remove (GTK_BOX (parent), child);
+    } else if (GTK_IS_LIST_BOX (parent)) {
+        gtk_list_box_remove (GTK_LIST_BOX (parent), child);
+    } else {
+        gtk_widget_unparent (child);
+    }
 }
 
 static void
-gtkhx_box_pack_apply (GtkWidget *child, GtkOrientation orient,
-                      gboolean expand, gboolean fill, guint padding)
+gtkhx_box_pack_apply (GtkWidget *child, GtkOrientation orient, gboolean expand,
+                      gboolean fill, guint padding)
 {
-	gboolean horiz = (orient == GTK_ORIENTATION_HORIZONTAL);
+    gboolean horiz = (orient == GTK_ORIENTATION_HORIZONTAL);
 
-	if (expand) {
-		if (horiz) gtk_widget_set_hexpand (child, TRUE);
-		else       gtk_widget_set_vexpand (child, TRUE);
-	}
-	if (fill) {
-		if (horiz) gtk_widget_set_halign (child, GTK_ALIGN_FILL);
-		else       gtk_widget_set_valign (child, GTK_ALIGN_FILL);
-	}
-	if (padding) {
-		if (horiz) {
-			gtk_widget_set_margin_start (child, padding);
-			gtk_widget_set_margin_end   (child, padding);
-		} else {
-			gtk_widget_set_margin_top    (child, padding);
-			gtk_widget_set_margin_bottom (child, padding);
-		}
-	}
+    if (expand) {
+        if (horiz) {
+            gtk_widget_set_hexpand (child, TRUE);
+        } else {
+            gtk_widget_set_vexpand (child, TRUE);
+        }
+    }
+    if (fill) {
+        if (horiz) {
+            gtk_widget_set_halign (child, GTK_ALIGN_FILL);
+        } else {
+            gtk_widget_set_valign (child, GTK_ALIGN_FILL);
+        }
+    }
+    if (padding) {
+        if (horiz) {
+            gtk_widget_set_margin_start (child, padding);
+            gtk_widget_set_margin_end (child, padding);
+        } else {
+            gtk_widget_set_margin_top (child, padding);
+            gtk_widget_set_margin_bottom (child, padding);
+        }
+    }
 }
 
 void
-gtkhx_box_pack (GtkWidget *box, GtkWidget *child,
-                gboolean expand, gboolean fill, guint padding)
+gtkhx_box_pack (GtkWidget *box, GtkWidget *child, gboolean expand,
+                gboolean fill, guint padding)
 {
-	if (!box || !child)
-		return;
-	g_return_if_fail (GTK_IS_BOX (box));
-	gtkhx_box_pack_apply (child, gtk_orientable_get_orientation (GTK_ORIENTABLE (box)),
-	                      expand, fill, padding);
-	gtk_box_append (GTK_BOX (box), child);
+    if (!box || !child) {
+        return;
+    }
+    g_return_if_fail (GTK_IS_BOX (box));
+    gtkhx_box_pack_apply (child,
+                          gtk_orientable_get_orientation (GTK_ORIENTABLE (box)),
+                          expand, fill, padding);
+    gtk_box_append (GTK_BOX (box), child);
 }
 
 void
-gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
-                    gboolean expand, gboolean fill, guint padding)
+gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child, gboolean expand,
+                    gboolean fill, guint padding)
 {
-	GtkOrientation orient;
+    GtkOrientation orient;
 
-	if (!box || !child)
-		return;
-	g_return_if_fail (GTK_IS_BOX (box));
-	orient = gtk_orientable_get_orientation (GTK_ORIENTABLE (box));
-	gtkhx_box_pack_apply (child, orient, expand, fill, padding);
-	/* Push toward the trailing edge to mimic gtk_box_pack_end. */
-	if (orient == GTK_ORIENTATION_HORIZONTAL)
-		gtk_widget_set_halign (child, GTK_ALIGN_END);
-	else
-		gtk_widget_set_valign (child, GTK_ALIGN_END);
-	gtk_box_append (GTK_BOX (box), child);
+    if (!box || !child) {
+        return;
+    }
+    g_return_if_fail (GTK_IS_BOX (box));
+    orient = gtk_orientable_get_orientation (GTK_ORIENTABLE (box));
+    gtkhx_box_pack_apply (child, orient, expand, fill, padding);
+    /* Push toward the trailing edge to mimic gtk_box_pack_end. */
+    if (orient == GTK_ORIENTATION_HORIZONTAL) {
+        gtk_widget_set_halign (child, GTK_ALIGN_END);
+    } else {
+        gtk_widget_set_valign (child, GTK_ALIGN_END);
+    }
+    gtk_box_append (GTK_BOX (box), child);
 }
 
 /* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
@@ -610,19 +642,20 @@ gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
 GtkWidget *
 gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
 {
-	GtkWidget *image;
-	GdkTexture *tex;
+    GtkWidget *image;
+    GdkTexture *tex;
 
-	if (!pixbuf)
-		return gtk_image_new ();
+    if (!pixbuf) {
+        return gtk_image_new ();
+    }
 
-	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-	tex = gdk_texture_new_for_pixbuf (pixbuf);
-	G_GNUC_END_IGNORE_DEPRECATIONS
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    tex = gdk_texture_new_for_pixbuf (pixbuf);
+    G_GNUC_END_IGNORE_DEPRECATIONS
 
-	image = gtk_image_new_from_paintable (GDK_PAINTABLE (tex));
-	g_object_unref (tex);
-	return image;
+    image = gtk_image_new_from_paintable (GDK_PAINTABLE (tex));
+    g_object_unref (tex);
+    return image;
 }
 
 /* Phase 5: build a button around a GResource pixbuf icon. The
@@ -639,47 +672,46 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
  * those constraints — with set_can_shrink(FALSE) it renders at
  * the paintable's natural size. */
 GtkWidget *
-gtkhx_pixmap_button (const char *resource_name,
-                     const char *tooltip,
-                     int         scale,
-                     GCallback   cb,
-                     gpointer    user_data)
+gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
+                     GCallback cb, gpointer user_data)
 {
-	GtkWidget *btn = gtk_button_new ();
-	GdkPixbuf *src, *use_pb;
-	GdkTexture *tex;
-	GtkWidget *picture;
+    GtkWidget *btn = gtk_button_new ();
+    GdkPixbuf *src, *use_pb;
+    GdkTexture *tex;
+    GtkWidget *picture;
 
-	src = gdk_pixbuf_new_from_resource (resource_name, NULL);
-	if (src && scale > 1) {
-		int w = gdk_pixbuf_get_width  (src) * scale;
-		int h = gdk_pixbuf_get_height (src) * scale;
-		use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
-		g_object_unref (src);
-	} else {
-		use_pb = src;
-	}
+    src = gdk_pixbuf_new_from_resource (resource_name, NULL);
+    if (src && scale > 1) {
+        int w = gdk_pixbuf_get_width (src) * scale;
+        int h = gdk_pixbuf_get_height (src) * scale;
+        use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
+        g_object_unref (src);
+    } else {
+        use_pb = src;
+    }
 
-	if (use_pb) {
-		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-		tex = gdk_texture_new_for_pixbuf (use_pb);
-		G_GNUC_END_IGNORE_DEPRECATIONS
-		picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-		g_object_unref (tex);
-		/* set_can_shrink(FALSE) pins the picture at the paintable's
+    if (use_pb) {
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        tex = gdk_texture_new_for_pixbuf (use_pb);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+        picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+        g_object_unref (tex);
+        /* set_can_shrink(FALSE) pins the picture at the paintable's
 		 * natural size — GtkButton then sizes itself around that. */
-		gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
-	} else {
-		picture = gtk_picture_new ();
-	}
-	gtkhx_widget_set_child (btn, picture);
+        gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    } else {
+        picture = gtk_picture_new ();
+    }
+    gtkhx_widget_set_child (btn, picture);
 
-	if (tooltip)
-		gtk_widget_set_tooltip_text (btn, tooltip);
-	if (cb)
-		g_signal_connect (btn, "clicked", cb, user_data);
-	g_clear_object (&use_pb);
-	return btn;
+    if (tooltip) {
+        gtk_widget_set_tooltip_text (btn, tooltip);
+    }
+    if (cb) {
+        g_signal_connect (btn, "clicked", cb, user_data);
+    }
+    g_clear_object (&use_pb);
+    return btn;
 }
 
 /* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
@@ -689,21 +721,22 @@ gtkhx_pixmap_button (const char *resource_name,
 void
 gtkhx_widget_destroy (GtkWidget *widget)
 {
-	GtkWidget *parent;
+    GtkWidget *parent;
 
-	if (!widget)
-		return;
-	if (GTK_IS_WINDOW (widget)) {
-		gtk_window_destroy (GTK_WINDOW (widget));
-		return;
-	}
-	parent = gtk_widget_get_parent (widget);
-	if (parent) {
-		gtk_widget_unparent (widget);
-	} else if (g_object_is_floating (widget)) {
-		g_object_ref_sink (widget);
-		g_object_unref (widget);
-	} else {
-		g_object_unref (widget);
-	}
+    if (!widget) {
+        return;
+    }
+    if (GTK_IS_WINDOW (widget)) {
+        gtk_window_destroy (GTK_WINDOW (widget));
+        return;
+    }
+    parent = gtk_widget_get_parent (widget);
+    if (parent) {
+        gtk_widget_unparent (widget);
+    } else if (g_object_is_floating (widget)) {
+        g_object_ref_sink (widget);
+        g_object_unref (widget);
+    } else {
+        g_object_unref (widget);
+    }
 }

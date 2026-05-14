@@ -48,10 +48,8 @@ extern GtkWidget *banner_widget_new (void);
  * HTLC_HDR_BANNER_GET to fetch via HTXF. Safe to call before
  * banner_widget_new() (the message is dropped). */
 struct htlc_conn;
-extern void banner_handle_message (struct htlc_conn *htlc,
-                                   const char *type,
-                                   gboolean has_url,
-                                   const char *url);
+extern void banner_handle_message (struct htlc_conn *htlc, const char *type,
+                                   gboolean has_url, const char *url);
 
 /* Hide the banner + cancel any in-flight fetch. Called on
  * hx_htlc_close so a stale banner from one server doesn't linger
@@ -63,15 +61,14 @@ extern void banner_clear (void);
  * size. rcv_task_banner_get extracts them and calls this so
  * banner.c can spin up an HTXF worker to fetch the bytes.
  * Called on the main thread. */
-extern void banner_handle_htxf_reply (struct htlc_conn *htlc,
-                                      guint32 ref, guint32 size);
+extern void banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref,
+                                      guint32 size);
 
 /* Task callback for HTLC_HDR_DOWNLOAD_BANNER replies. Defined in
  * rcv.c (where the other rcv_task_* handlers live) but declared
  * here so banner.c can pass it to RCV_TASK_FN() when registering
  * the task, and so rcv.c itself sees a prior prototype for the
  * function body (avoids -Wmissing-prototypes). */
-extern void rcv_task_banner_get (struct htlc_conn *htlc,
-                                 void *ptr, void *data);
+extern void rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data);
 
 #endif /* HX_BANNER_H */

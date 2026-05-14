@@ -44,13 +44,13 @@
 #include "msg.h"
 
 void
-hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len, void *data)
+hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
+             void *data)
 {
-	uid = htons(uid);
-	task_new(htlc, RCV_TASK_FN(rcv_task_msg), data, 0, data ? data : "msg");
-	hlwrite(htlc, HTLC_HDR_MSG, 0, 2,
-		HTLC_DATA_UID, 2, &uid,
-		HTLC_DATA_MSG, len, msg);
+    uid = htons (uid);
+    task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0, data ? data : "msg");
+    hlwrite (htlc, HTLC_HDR_MSG, 0, 2, HTLC_DATA_UID, 2, &uid, HTLC_DATA_MSG,
+             len, msg);
 }
 
 void msg_output (char *name, guint16 uid, char *buf);
@@ -67,44 +67,50 @@ void msg_output_from_event (HxMsgEvent *event);
  * handler. msg->history is intentionally not freed here — the
  * pre-existing readline-history leak is out of scope for the
  * Phase 1 mechanical migration. */
-static void msgwin_free (gpointer p)
+static void
+msgwin_free (gpointer p)
 {
-	struct msgwin *msg = p;
-	if (!msg)
-		return;
-	g_free (msg->name);
-	g_free (msg->uid);
-	g_free (msg);
+    struct msgwin *msg = p;
+    if (!msg) {
+        return;
+    }
+    g_free (msg->name);
+    g_free (msg->uid);
+    g_free (msg);
 }
 
-void msg_windows_init (session *sess)
+void
+msg_windows_init (session *sess)
 {
-	if (!sess->msg_windows)
-		sess->msg_windows = g_hash_table_new_full (
-			g_direct_hash, g_direct_equal,
-			NULL, msgwin_free);
+    if (!sess->msg_windows) {
+        sess->msg_windows = g_hash_table_new_full (
+            g_direct_hash, g_direct_equal, NULL, msgwin_free);
+    }
 }
 
 /* Unhook the window from the per-session table; the value-destroy
  * notify (msgwin_free) reclaims the msgwin. Called from
  * destroy_msgwin (the close-request handler). */
-static void msgwin_delete (struct msgwin *msg)
+static void
+msgwin_delete (struct msgwin *msg)
 {
-	session *sess = &the_session;
-	if (!msg || !sess->msg_windows)
-		return;
-	g_hash_table_remove (sess->msg_windows,
-	                     GUINT_TO_POINTER ((guint) *msg->uid));
+    session *sess = &the_session;
+    if (!msg || !sess->msg_windows) {
+        return;
+    }
+    g_hash_table_remove (sess->msg_windows,
+                         GUINT_TO_POINTER ((guint)*msg->uid));
 }
 
-
-struct msgwin *msgwin_with_uid (guint16 uid)
+struct msgwin *
+msgwin_with_uid (guint16 uid)
 {
-	session *sess = &the_session;
-	if (!sess->msg_windows)
-		return NULL;
-	return g_hash_table_lookup (sess->msg_windows,
-	                            GUINT_TO_POINTER ((guint) uid));
+    session *sess = &the_session;
+    if (!sess->msg_windows) {
+        return NULL;
+    }
+    return g_hash_table_lookup (sess->msg_windows,
+                                GUINT_TO_POINTER ((guint)uid));
 }
 
 static void msg_input_activate (GtkWidget *widget, gpointer data);
@@ -116,66 +122,64 @@ static void msg_input_activate (GtkWidget *widget, gpointer data);
  * the GtkTextView's default text input proceed (used here for the
  * Shift+Return → newline path and for ordinary typing). */
 static gboolean
-msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
-                       guint keycode, GdkModifierType state, gpointer user_data)
+msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
+                       GdkModifierType state, gpointer user_data)
 {
-	GtkWidget *widget = gtk_event_controller_get_widget (
-		GTK_EVENT_CONTROLLER (ctrl));
-	GtkTextView *text;
-	GtkTextBuffer *buf;
-	HIST_ENTRY *hent = NULL;
-	struct msgwin *msg = g_object_get_data (G_OBJECT (widget), "msg");
-	(void) keycode; (void) user_data;
+    GtkWidget *widget
+        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (ctrl));
+    GtkTextView *text;
+    GtkTextBuffer *buf;
+    HIST_ENTRY *hent = NULL;
+    struct msgwin *msg = g_object_get_data (G_OBJECT (widget), "msg");
+    (void)keycode;
+    (void)user_data;
 
-	if (!msg)
-		return FALSE;
+    if (!msg) {
+        return FALSE;
+    }
 
-	text = GTK_TEXT_VIEW (widget);
-	buf  = gtk_text_view_get_buffer (text);
+    text = GTK_TEXT_VIEW (widget);
+    buf = gtk_text_view_get_buffer (text);
 
-	if (state & GDK_CONTROL_MASK) {
-		switch (keyval) {
-		case 'k':
-		case 'K':
-			create_connect_window (0, &the_session);
-			return TRUE;
-		}
-	}
-	else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
-		/* Insert a linebreak if shift is held — let GtkTextView default. */
-		return FALSE;
-	}
-	else if (keyval == GDK_KEY_Return) {
-		GtkTextIter start, end;
-		char *line;
+    if (state & GDK_CONTROL_MASK) {
+        switch (keyval) {
+        case 'k':
+        case 'K':
+            create_connect_window (0, &the_session);
+            return TRUE;
+        }
+    } else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
+        /* Insert a linebreak if shift is held — let GtkTextView default. */
+        return FALSE;
+    } else if (keyval == GDK_KEY_Return) {
+        GtkTextIter start, end;
+        char *line;
 
-		gtk_text_buffer_get_start_iter (buf, &start);
-		gtk_text_buffer_get_end_iter   (buf, &end);
-		line = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
-		add_history (msg->history, line);
-		using_history (msg->history);
-		g_free (line);
+        gtk_text_buffer_get_start_iter (buf, &start);
+        gtk_text_buffer_get_end_iter (buf, &end);
+        line = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
+        add_history (msg->history, line);
+        using_history (msg->history);
+        g_free (line);
 
-		msg_input_activate (widget, msg->uid);
-		return TRUE;
-	}
-	else if (keyval == GDK_KEY_Up) {
-		hent = previous_history (msg->history);
-	}
-	else if (keyval == GDK_KEY_Down) {
-		hent = next_history (msg->history);
-	}
+        msg_input_activate (widget, msg->uid);
+        return TRUE;
+    } else if (keyval == GDK_KEY_Up) {
+        hent = previous_history (msg->history);
+    } else if (keyval == GDK_KEY_Down) {
+        hent = next_history (msg->history);
+    }
 
-	if (hent) {
-		GtkTextIter end;
+    if (hent) {
+        GtkTextIter end;
 
-		gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
-		gtk_text_buffer_get_end_iter (buf, &end);
-		gtk_text_buffer_place_cursor (buf, &end);
-		return TRUE;
-	}
+        gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
+        gtk_text_buffer_get_end_iter (buf, &end);
+        gtk_text_buffer_place_cursor (buf, &end);
+        return TRUE;
+    }
 
-	return FALSE;
+    return FALSE;
 }
 
 /* Phase 4.5: msg_update_trans was a configure-event handler that
@@ -183,42 +187,43 @@ msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
  * new window position. configure-event is gone in GTK 4, and Wayland
  * doesn't expose true window-relative transparency anyway. */
 
-static void msg_input_activate (GtkWidget *widget, gpointer data)
+static void
+msg_input_activate (GtkWidget *widget, gpointer data)
 {
-	GtkTextView *text;
-	GtkTextBuffer *buf;
-	GtkTextIter start, end;
-	guint len;
-	char *termed_buf = NULL;
-	guint16 *uid = data;
+    GtkTextView *text;
+    GtkTextBuffer *buf;
+    GtkTextIter start, end;
+    guint len;
+    char *termed_buf = NULL;
+    guint16 *uid = data;
 
-	text = GTK_TEXT_VIEW(widget);
-	buf = gtk_text_view_get_buffer(text);
-	gtk_text_buffer_get_start_iter(buf, &start);
-	gtk_text_buffer_get_end_iter(buf, &end);
-	termed_buf = gtk_text_buffer_get_text(buf, &start, &end, FALSE);
+    text = GTK_TEXT_VIEW (widget);
+    buf = gtk_text_view_get_buffer (text);
+    gtk_text_buffer_get_start_iter (buf, &start);
+    gtk_text_buffer_get_end_iter (buf, &end);
+    termed_buf = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
 
-	gtk_text_buffer_delete(buf, &start, &end);
+    gtk_text_buffer_delete (buf, &start, &end);
 
-	if(termed_buf[0] == 0) {
-		g_free(termed_buf);
-		return;
-	}
+    if (termed_buf[0] == 0) {
+        g_free (termed_buf);
+        return;
+    }
 
-	/* send the plugins information that we're sending a private message
+    /* send the plugins information that we're sending a private message
 	   with content termed_buf to uid */
 #ifdef USE_PLUGIN
-	if(EMIT_SIGNAL(XP_SND_MSG, &the_session, termed_buf, &uid, 0, 0, 0) == 1) {
-		return;
-	}
+    if (EMIT_SIGNAL (XP_SND_MSG, &the_session, termed_buf, &uid, 0, 0, 0)
+        == 1) {
+        return;
+    }
 #endif
-	len = strlen(termed_buf);
-	msg_output(the_session.htlc.name, *uid, termed_buf);
-	LF2CR(termed_buf, len);
-	hx_send_msg(&the_session.htlc, *uid, termed_buf, len, 0);
-	g_free(termed_buf);
+    len = strlen (termed_buf);
+    msg_output (the_session.htlc.name, *uid, termed_buf);
+    LF2CR (termed_buf, len);
+    hx_send_msg (&the_session.htlc, *uid, termed_buf, len, 0);
+    g_free (termed_buf);
 }
-
 
 /* Phase 5: header pane above the PM chat that mirrors the bits of
  * the recipient's identity that the global user list shows — icon,
@@ -245,56 +250,54 @@ static void msg_input_activate (GtkWidget *widget, gpointer data)
  * person is" — render the bare uid + fallback name from create_msgwin
  * with no Admin/Guest line. */
 static void
-msg_apply_user_view (struct msgwin *msg,
-                     const char *display_name,
-                     guint16 icon, guint16 color,
-                     gboolean have_status)
+msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
+                     guint16 color, gboolean have_status)
 {
-	GdkRGBA *rgba = user_color_gdk (color);
-	char *name_esc;
-	char *markup;
-	GdkPixbuf *pixbuf = NULL;
-	GdkPixbuf *unused_mask = NULL;
+    GdkRGBA *rgba = user_color_gdk (color);
+    char *name_esc;
+    char *markup;
+    GdkPixbuf *pixbuf = NULL;
+    GdkPixbuf *unused_mask = NULL;
 
-	if (!msg || !msg->info_label || !msg->info_image)
-		return;
-	if (!display_name || !*display_name)
-		display_name = msg->name ? msg->name : "";
+    if (!msg || !msg->info_label || !msg->info_image) {
+        return;
+    }
+    if (!display_name || !*display_name) {
+        display_name = msg->name ? msg->name : "";
+    }
 
-	name_esc = g_markup_escape_text (display_name, -1);
+    name_esc = g_markup_escape_text (display_name, -1);
 
-	if (have_status) {
-		const char *status = (color >= 2) ? _("Admin") : _("Guest");
-		const char *away   = (color % 2)  ? _(" (Away)") : "";
-		if (rgba) {
-			/* gdk_user_colors stores values in [0..1] floats;
+    if (have_status) {
+        const char *status = (color >= 2) ? _ ("Admin") : _ ("Guest");
+        const char *away = (color % 2) ? _ (" (Away)") : "";
+        if (rgba) {
+            /* gdk_user_colors stores values in [0..1] floats;
 			 * convert to the 8-bit hex Pango wants. */
-			char hex[8];
-			g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
-			            (int) (rgba->red   * 255.0 + 0.5),
-			            (int) (rgba->green * 255.0 + 0.5),
-			            (int) (rgba->blue  * 255.0 + 0.5));
-			markup = g_strdup_printf (
-				"<span foreground=\"%s\"><b>%s</b></span>\n"
-				"<small>UID %u · Icon %u · %s%s</small>",
-				hex, name_esc, *msg->uid, icon, status, away);
-		} else {
-			markup = g_strdup_printf (
-				"<b>%s</b>\n"
-				"<small>UID %u · Icon %u · %s%s</small>",
-				name_esc, *msg->uid, icon, status, away);
-		}
-	} else {
-		markup = g_strdup_printf (
-			"<b>%s</b>\n<small>UID %u</small>",
-			name_esc, *msg->uid);
-	}
+            char hex[8];
+            g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
+                        (int)(rgba->red * 255.0 + 0.5),
+                        (int)(rgba->green * 255.0 + 0.5),
+                        (int)(rgba->blue * 255.0 + 0.5));
+            markup = g_strdup_printf (
+                "<span foreground=\"%s\"><b>%s</b></span>\n"
+                "<small>UID %u · Icon %u · %s%s</small>",
+                hex, name_esc, *msg->uid, icon, status, away);
+        } else {
+            markup = g_strdup_printf ("<b>%s</b>\n"
+                                      "<small>UID %u · Icon %u · %s%s</small>",
+                                      name_esc, *msg->uid, icon, status, away);
+        }
+    } else {
+        markup = g_strdup_printf ("<b>%s</b>\n<small>UID %u</small>", name_esc,
+                                  *msg->uid);
+    }
 
-	gtk_label_set_markup (GTK_LABEL (msg->info_label), markup);
-	g_free (markup);
-	g_free (name_esc);
+    gtk_label_set_markup (GTK_LABEL (msg->info_label), markup);
+    g_free (markup);
+    g_free (name_esc);
 
-	/* Always reload — icon ID can change when the user changes their
+    /* Always reload — icon ID can change when the user changes their
 	 * icon mid-conversation. load_icon falls back through the icon
 	 * file chain; pixbuf comes back NULL when nothing matches and we
 	 * just blank the GtkImage in that case. GTK 4 deprecates
@@ -303,45 +306,45 @@ msg_apply_user_view (struct msgwin *msg,
 	 * itself (gdk_texture_new_for_pixbuf) was deprecated in GTK 4.16
 	 * — same migration story as gtkhx_image_new_from_pixbuf in
 	 * gtkutil.c, suppress here until we move icons off GdkPixbuf. */
-	load_icon (msg->info_image, icon, &icon_files, 1,
-	           &pixbuf, &unused_mask);
-	if (pixbuf) {
-		GdkTexture *tex;
-		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-		tex = gdk_texture_new_for_pixbuf (pixbuf);
-		G_GNUC_END_IGNORE_DEPRECATIONS
-		gtk_image_set_from_paintable (GTK_IMAGE (msg->info_image),
-		                              GDK_PAINTABLE (tex));
-		gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
-		g_object_unref (tex);
-	} else {
-		gtk_image_clear (GTK_IMAGE (msg->info_image));
-	}
+    load_icon (msg->info_image, icon, &icon_files, 1, &pixbuf, &unused_mask);
+    if (pixbuf) {
+        GdkTexture *tex;
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        tex = gdk_texture_new_for_pixbuf (pixbuf);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+        gtk_image_set_from_paintable (GTK_IMAGE (msg->info_image),
+                                      GDK_PAINTABLE (tex));
+        gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
+        g_object_unref (tex);
+    } else {
+        gtk_image_clear (GTK_IMAGE (msg->info_image));
+    }
 }
 
 void
 msgwin_refresh_user_info (struct msgwin *msg)
 {
-	struct chat *pubchat;
-	struct hx_user *user = NULL;
+    struct chat *pubchat;
+    struct hx_user *user = NULL;
 
-	if (!msg)
-		return;
+    if (!msg) {
+        return;
+    }
 
-	/* The user list is per-chat; the public chat (cid=0) carries the
+    /* The user list is per-chat; the public chat (cid=0) carries the
 	 * server-wide list we want here. chat_with_cid is the canonical
 	 * "global user list" lookup the rest of the codebase uses
 	 * (rcv.c, commands.c, users.c). hx_user_with_uid is defensive
 	 * against a NULL chat / chat->users so we don't need an extra
 	 * mid-disconnect guard. */
-	pubchat = chat_with_cid (&the_session, 0);
-	user = hx_user_with_uid (pubchat, *msg->uid);
+    pubchat = chat_with_cid (&the_session, 0);
+    user = hx_user_with_uid (pubchat, *msg->uid);
 
-	if (user)
-		msg_apply_user_view (msg, user->name, user->icon, user->color,
-		                     TRUE);
-	else
-		msg_apply_user_view (msg, NULL, 0, 0, FALSE);
+    if (user) {
+        msg_apply_user_view (msg, user->name, user->icon, user->color, TRUE);
+    } else {
+        msg_apply_user_view (msg, NULL, 0, 0, FALSE);
+    }
 }
 
 /* Bypass the cache lookup. Called from users.c::user_change with the
@@ -351,108 +354,109 @@ msgwin_refresh_user_info (struct msgwin *msg)
  * to still be there when user_change returns), so a cache-based
  * refresh would render stale data. Take the new values directly. */
 void
-msgwin_apply_user_change (struct msgwin *msg,
-                          const char *nam,
-                          guint16 icon, guint16 color)
+msgwin_apply_user_change (struct msgwin *msg, const char *nam, guint16 icon,
+                          guint16 color)
 {
-	msg_apply_user_view (msg, nam, icon, color, TRUE);
+    msg_apply_user_view (msg, nam, icon, color, TRUE);
 }
 
-static struct msgwin *create_msg (guint16 _uid, char *name)
+static struct msgwin *
+create_msg (guint16 _uid, char *name)
 {
-	struct msgwin *msg;
-	guint16 *uid = g_malloc(sizeof(guint16));
-	*uid = _uid;
+    struct msgwin *msg;
+    guint16 *uid = g_malloc (sizeof (guint16));
+    *uid = _uid;
 
- 	msg = g_malloc(sizeof(struct msgwin));
+    msg = g_malloc (sizeof (struct msgwin));
 
-	msg->name = g_strdup(name);
-	msg->uid = uid;
-	
-	msg->history = history_new();
+    msg->name = g_strdup (name);
+    msg->uid = uid;
 
-	msg->window = gtk_window_new();
-	/* Phase 5: AdwHeaderBar across all GtkHx secondary windows for
+    msg->history = history_new ();
+
+    msg->window = gtk_window_new ();
+    /* Phase 5: AdwHeaderBar across all GtkHx secondary windows for
 	 * consistent chrome with the toolbar / chat / news / files /
 	 * preview / agreement windows. The msg window had been left as
 	 * a bare GtkWindow with the system default titlebar. */
-	gtk_window_set_titlebar (GTK_WINDOW (msg->window), adw_header_bar_new ());
-	{
-		gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-		msg->outputbuf = gtk_xtext_new (colors, 1);
-		gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
-		g_free (fontname);
-	}
-	GTK_XTEXT(msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
-	GTK_XTEXT(msg->outputbuf)->urlcheck_function = word_check;
-	GTK_XTEXT(msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-	/* Phase 5: native xtext timestamps — see chat.c::create_chat_window
+    gtk_window_set_titlebar (GTK_WINDOW (msg->window), adw_header_bar_new ());
+    {
+        gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+        msg->outputbuf = gtk_xtext_new (colors, 1);
+        gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
+        g_free (fontname);
+    }
+    GTK_XTEXT (msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
+    GTK_XTEXT (msg->outputbuf)->urlcheck_function = word_check;
+    GTK_XTEXT (msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
+    /* Phase 5: native xtext timestamps — see chat.c::create_chat_window
 	 * for the rationale. */
-	gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
-	gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
-	                          gtkhx_prefs.timestamp);
-	gtk_xtext_set_max_indent (GTK_XTEXT (msg->outputbuf), 256);
-	g_signal_connect (msg->outputbuf, "word_click",
-	                  G_CALLBACK (gtkurl_xtext_word_click), NULL);
+    gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
+    gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
+                              gtkhx_prefs.timestamp);
+    gtk_xtext_set_max_indent (GTK_XTEXT (msg->outputbuf), 256);
+    g_signal_connect (msg->outputbuf, "word_click",
+                      G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
-	msg->vscroll = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, GTK_XTEXT(msg->outputbuf)->adj);
-	msg->inputbuf = gtk_text_view_new();
+    msg->vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
+                                      GTK_XTEXT (msg->outputbuf)->adj);
+    msg->inputbuf = gtk_text_view_new ();
 
-	gtkhx_apply_text_style(msg->inputbuf);
-	gtk_text_view_set_editable(GTK_TEXT_VIEW(msg->inputbuf), TRUE);
-	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(msg->inputbuf), GTK_WRAP_WORD);
+    gtkhx_apply_text_style (msg->inputbuf);
+    gtk_text_view_set_editable (GTK_TEXT_VIEW (msg->inputbuf), TRUE);
+    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (msg->inputbuf), GTK_WRAP_WORD);
 
-	g_object_set_data(G_OBJECT(msg->inputbuf), "msg", msg);
-	g_object_set_data(G_OBJECT(msg->inputbuf), "sess", &the_session);
-	/* Note: GtkTextView has no "activate" signal — Return is dispatched
+    g_object_set_data (G_OBJECT (msg->inputbuf), "msg", msg);
+    g_object_set_data (G_OBJECT (msg->inputbuf), "sess", &the_session);
+    /* Note: GtkTextView has no "activate" signal — Return is dispatched
 	 * from msg_input_key_pressed, which calls msg_input_activate().
 	 * Phase 4.5: key-press-event is gone in GTK 4; install a
 	 * GtkEventControllerKey on the input view instead. */
-	{
-		GtkEventController *kctrl = gtk_event_controller_key_new ();
-		g_signal_connect (kctrl, "key-pressed",
-		                  G_CALLBACK (msg_input_key_pressed), uid);
-		gtk_widget_add_controller (msg->inputbuf, kctrl);
-	}
-	
+    {
+        GtkEventController *kctrl = gtk_event_controller_key_new ();
+        g_signal_connect (kctrl, "key-pressed",
+                          G_CALLBACK (msg_input_key_pressed), uid);
+        gtk_widget_add_controller (msg->inputbuf, kctrl);
+    }
 
-	/* Phase 5+: stash the msgwin in the session's PM-windows table
+    /* Phase 5+: stash the msgwin in the session's PM-windows table
 	 * keyed on uid. msg_windows_init() at startup guarantees the
 	 * table exists by the time we land here. */
-	g_hash_table_insert (the_session.msg_windows,
-	                     GUINT_TO_POINTER ((guint) _uid), msg);
-	return msg;
+    g_hash_table_insert (the_session.msg_windows,
+                         GUINT_TO_POINTER ((guint)_uid), msg);
+    return msg;
 }
 
 /* Phase 4.5: GTK 4 fires "close-request" on (GtkWindow *, gpointer)
  * returning TRUE to inhibit close, FALSE to allow default destroy.
  * Just unlink the msg from the list — the framework destroys the
  * widget. */
-static gboolean destroy_msgwin (GtkWindow *window, gpointer data)
+static gboolean
+destroy_msgwin (GtkWindow *window, gpointer data)
 {
-	struct msgwin *msg = g_object_get_data(G_OBJECT(window), "msg");
-	(void) data;
-	msgwin_delete(msg);
-	return FALSE;
+    struct msgwin *msg = g_object_get_data (G_OBJECT (window), "msg");
+    (void)data;
+    msgwin_delete (msg);
+    return FALSE;
 }
 
-
-struct msgwin *create_msgwin (guint16 uid, char *name)
+struct msgwin *
+create_msgwin (guint16 uid, char *name)
 {
-	GtkWidget *hbox;
-	GtkWidget *outputframe, *inputframe;
-	GtkWidget *vpane;
-	GtkWidget *info_box, *outer_vbox;
-	struct msgwin *msg;
-	char *title;
+    GtkWidget *hbox;
+    GtkWidget *outputframe, *inputframe;
+    GtkWidget *vpane;
+    GtkWidget *info_box, *outer_vbox;
+    struct msgwin *msg;
+    char *title;
 
-	msg = create_msg(uid, name);
+    msg = create_msg (uid, name);
 
-	title = g_strdup_printf("%s (%u)", name, uid);
-	gtk_window_set_title(GTK_WINDOW(msg->window), title);
-	g_free(title);
+    title = g_strdup_printf ("%s (%u)", name, uid);
+    gtk_window_set_title (GTK_WINDOW (msg->window), title);
+    g_free (title);
 
-	/* Phase 5: switch from set_size_request (which sets BOTH min
+    /* Phase 5: switch from set_size_request (which sets BOTH min
 	 * AND natural size in GTK 4) to set_default_size for the
 	 * initial window size, and drop the forced 500x400 minimum on
 	 * the inner hbox. The old combination was the cause of the
@@ -460,98 +464,101 @@ struct msgwin *create_msgwin (guint16 uid, char *name)
 	 * inner hbox demanded 400px tall but the paned was giving it
 	 * 230px, so xtext rendered into a 400px-tall surface that got
 	 * clipped to 230px visible. */
-	gtk_window_set_default_size(GTK_WINDOW(msg->window), 460, 340);
-	gtk_window_set_resizable(GTK_WINDOW(msg->window), TRUE);
-	(gtk_widget_set_margin_start(msg->window, 0), gtk_widget_set_margin_end(msg->window, 0), gtk_widget_set_margin_top(msg->window, 0), gtk_widget_set_margin_bottom(msg->window, 0));
-	hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_window_set_default_size (GTK_WINDOW (msg->window), 460, 340);
+    gtk_window_set_resizable (GTK_WINDOW (msg->window), TRUE);
+    (gtk_widget_set_margin_start (msg->window, 0),
+     gtk_widget_set_margin_end (msg->window, 0),
+     gtk_widget_set_margin_top (msg->window, 0),
+     gtk_widget_set_margin_bottom (msg->window, 0));
+    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
 
-	outputframe = gtk_frame_new(0);
-	gtkhx_widget_set_child(outputframe, hbox);
-	gtkhx_box_pack(hbox, msg->outputbuf, 1, 1, 0);
-	gtkhx_box_pack(hbox, msg->vscroll, 0, 0, 0);
+    outputframe = gtk_frame_new (0);
+    gtkhx_widget_set_child (outputframe, hbox);
+    gtkhx_box_pack (hbox, msg->outputbuf, 1, 1, 0);
+    gtkhx_box_pack (hbox, msg->vscroll, 0, 0, 0);
 
-	/* Phase 5+: wrap the GtkTextView inputbuf in a scrolled window
+    /* Phase 5+: wrap the GtkTextView inputbuf in a scrolled window
 	 * with content-driven natural height (1 line minimum, 5 line
 	 * max). Matches the chat window'"'"'s auto-grow input box. */
-	GtkWidget *input_scroll = gtk_scrolled_window_new();
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(input_scroll),
-	                               GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-	gtk_scrolled_window_set_propagate_natural_height(
-		GTK_SCROLLED_WINDOW(input_scroll), TRUE);
-	gtk_scrolled_window_set_min_content_height(
-		GTK_SCROLLED_WINDOW(input_scroll), 28);
-	gtk_scrolled_window_set_max_content_height(
-		GTK_SCROLLED_WINDOW(input_scroll), 120);
-	gtkhx_widget_set_child(input_scroll, msg->inputbuf);
+    GtkWidget *input_scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (input_scroll),
+                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height (
+        GTK_SCROLLED_WINDOW (input_scroll), TRUE);
+    gtk_scrolled_window_set_min_content_height (
+        GTK_SCROLLED_WINDOW (input_scroll), 28);
+    gtk_scrolled_window_set_max_content_height (
+        GTK_SCROLLED_WINDOW (input_scroll), 120);
+    gtkhx_widget_set_child (input_scroll, msg->inputbuf);
 
-	inputframe = gtk_frame_new(0);
-	gtkhx_widget_set_child(inputframe, input_scroll);
+    inputframe = gtk_frame_new (0);
+    gtkhx_widget_set_child (inputframe, input_scroll);
 
-	/* Drop GtkPaned in favour of a plain vertical box. Output
+    /* Drop GtkPaned in favour of a plain vertical box. Output
 	 * vexpand=TRUE eats remaining vertical space; input stays at
 	 * its natural (content-sized, capped) height. */
-	vpane = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-	gtk_widget_set_vexpand (outputframe, TRUE);
-	gtk_widget_set_vexpand (inputframe,  FALSE);
-	gtk_box_append (GTK_BOX(vpane), outputframe);
-	gtk_box_append (GTK_BOX(vpane), inputframe);
-	(gtk_widget_set_margin_start(vpane, 5), gtk_widget_set_margin_end(vpane, 5), gtk_widget_set_margin_top(vpane, 5), gtk_widget_set_margin_bottom(vpane, 5));
+    vpane = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_vexpand (outputframe, TRUE);
+    gtk_widget_set_vexpand (inputframe, FALSE);
+    gtk_box_append (GTK_BOX (vpane), outputframe);
+    gtk_box_append (GTK_BOX (vpane), inputframe);
+    (gtk_widget_set_margin_start (vpane, 5),
+     gtk_widget_set_margin_end (vpane, 5), gtk_widget_set_margin_top (vpane, 5),
+     gtk_widget_set_margin_bottom (vpane, 5));
 
-	/* Recipient info pane: small horizontal strip with icon + name +
+    /* Recipient info pane: small horizontal strip with icon + name +
 	 * status sitting between the headerbar and the chat paned. The
 	 * vbox just below is the new top-level child of the window —
 	 * info pane on top, paned filling the rest. */
-	msg->info_image = gtk_image_new ();
-	gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
-	gtk_widget_set_size_request (msg->info_image, 32, 32);
+    msg->info_image = gtk_image_new ();
+    gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
+    gtk_widget_set_size_request (msg->info_image, 32, 32);
 
-	msg->info_label = gtk_label_new (NULL);
-	gtk_label_set_xalign (GTK_LABEL (msg->info_label), 0.0);
-	gtk_label_set_yalign (GTK_LABEL (msg->info_label), 0.5);
-	gtk_label_set_use_markup (GTK_LABEL (msg->info_label), TRUE);
-	gtk_label_set_ellipsize (GTK_LABEL (msg->info_label), PANGO_ELLIPSIZE_END);
-	gtk_widget_set_hexpand (msg->info_label, TRUE);
+    msg->info_label = gtk_label_new (NULL);
+    gtk_label_set_xalign (GTK_LABEL (msg->info_label), 0.0);
+    gtk_label_set_yalign (GTK_LABEL (msg->info_label), 0.5);
+    gtk_label_set_use_markup (GTK_LABEL (msg->info_label), TRUE);
+    gtk_label_set_ellipsize (GTK_LABEL (msg->info_label), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand (msg->info_label, TRUE);
 
-	info_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
-	gtk_widget_set_margin_start  (info_box, 10);
-	gtk_widget_set_margin_end    (info_box, 10);
-	gtk_widget_set_margin_top    (info_box, 6);
-	gtk_widget_set_margin_bottom (info_box, 4);
-	gtk_box_append (GTK_BOX (info_box), msg->info_image);
-	gtk_box_append (GTK_BOX (info_box), msg->info_label);
+    info_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_margin_start (info_box, 10);
+    gtk_widget_set_margin_end (info_box, 10);
+    gtk_widget_set_margin_top (info_box, 6);
+    gtk_widget_set_margin_bottom (info_box, 4);
+    gtk_box_append (GTK_BOX (info_box), msg->info_image);
+    gtk_box_append (GTK_BOX (info_box), msg->info_label);
 
-	outer_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-	gtk_box_append (GTK_BOX (outer_vbox), info_box);
-	gtk_box_append (GTK_BOX (outer_vbox),
-	                gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
-	gtk_widget_set_vexpand (vpane, TRUE);
-	gtk_box_append (GTK_BOX (outer_vbox), vpane);
+    outer_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (outer_vbox), info_box);
+    gtk_box_append (GTK_BOX (outer_vbox),
+                    gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+    gtk_widget_set_vexpand (vpane, TRUE);
+    gtk_box_append (GTK_BOX (outer_vbox), vpane);
 
-	gtkhx_widget_set_child(msg->window, outer_vbox);
+    gtkhx_widget_set_child (msg->window, outer_vbox);
 
-	/* Populate from the cached user list now that the widgets exist. */
-	msgwin_refresh_user_info (msg);
+    /* Populate from the cached user list now that the widgets exist. */
+    msgwin_refresh_user_info (msg);
 
+    gtk_window_present (GTK_WINDOW (msg->window));
 
-	gtk_window_present(GTK_WINDOW(msg->window));
+    g_object_set_data (G_OBJECT (msg->window), "msg", msg);
+    g_signal_connect (msg->window, "close-request", G_CALLBACK (destroy_msgwin),
+                      0);
+    init_keyaccel (msg->window);
 
-	g_object_set_data(G_OBJECT(msg->window), "msg", msg);
-	g_signal_connect(msg->window, "close-request", G_CALLBACK(destroy_msgwin), 0);
-	init_keyaccel(msg->window);
+    gtk_widget_grab_focus (msg->inputbuf);
 
-	gtk_widget_grab_focus(msg->inputbuf);
-
-
-	/* Phase 4.4: GdkWindow / gdk_window_lower / gtk_widget_get_window
+    /* Phase 4.4: GdkWindow / gdk_window_lower / gtk_widget_get_window
 	 * are gone in GTK 4. The "showback" pref used to lower the new
 	 * message window to the back of the stack so it didn't steal focus.
 	 * Wayland doesn't let clients re-order themselves in the stack, so
 	 * the pref no longer has a meaningful implementation; the window
 	 * comes up at whatever position the compositor picks. */
 
-	return msg;
+    return msg;
 }
-
 
 /* Render a private message into its msgwin's xtext, with the
  * "<name>" coloured nick prefix prepended.
@@ -565,59 +572,60 @@ static void
 msg_output_render (const char *name, guint16 uid, const char *body,
                    gboolean is_self)
 {
-	struct msgwin *msg;
-	char *text;
-	char *ptr;
-	char *cr;
-	int brack_col;
+    struct msgwin *msg;
+    char *text;
+    char *ptr;
+    char *cr;
+    int brack_col;
 
-	brack_col = is_self ? 13 : 12;
+    brack_col = is_self ? 13 : 12;
 
-	text = g_strdup_printf ("\003%d<\003%s\003%d>\003 %s",
-	                        brack_col, name ? name : "",
-	                        brack_col, body ? body : "");
+    text = g_strdup_printf ("\003%d<\003%s\003%d>\003 %s", brack_col,
+                            name ? name : "", brack_col, body ? body : "");
 
-	msg = msgwin_with_uid (uid);
-	if (!msg)
-		msg = create_msgwin (uid, (char *) name);
-	ptr = text;
+    msg = msgwin_with_uid (uid);
+    if (!msg) {
+        msg = create_msgwin (uid, (char *)name);
+    }
+    ptr = text;
 
-	cr = strchr (text, '\n');
-	if (cr) {
-		while (1) {
-			xprintline (msg->outputbuf, text, cr - text);
-			text = cr + 1;
-			if (*text == 0)
-				break;
-			cr = strchr (text, '\n');
-			if (!cr) {
-				xprintline (msg->outputbuf, text, -1);
-				break;
-			}
-		}
-	} else {
-		xprintline (msg->outputbuf, text, -1);
-	}
+    cr = strchr (text, '\n');
+    if (cr) {
+        while (1) {
+            xprintline (msg->outputbuf, text, cr - text);
+            text = cr + 1;
+            if (*text == 0) {
+                break;
+            }
+            cr = strchr (text, '\n');
+            if (!cr) {
+                xprintline (msg->outputbuf, text, -1);
+                break;
+            }
+        }
+    } else {
+        xprintline (msg->outputbuf, text, -1);
+    }
 
-	g_free (ptr);
+    g_free (ptr);
 }
 
-void msg_output (char *name, guint16 uid, char *buf)
+void
+msg_output (char *name, guint16 uid, char *buf)
 {
-	gboolean is_self =
-		name && the_session.htlc.name[0]
-		&& strcmp (name, the_session.htlc.name) == 0;
-	msg_output_render (name, uid, buf, is_self);
+    gboolean is_self = name && the_session.htlc.name[0]
+                       && strcmp (name, the_session.htlc.name) == 0;
+    msg_output_render (name, uid, buf, is_self);
 }
 
-void msg_output_from_event (HxMsgEvent *event)
+void
+msg_output_from_event (HxMsgEvent *event)
 {
-	if (!event)
-		return;
-	msg_output_render (event->name, event->uid,
-	                   event->body, event->is_self);
+    if (!event) {
+        return;
+    }
+    msg_output_render (event->name, event->uid, event->body, event->is_self);
 }
-
 
 /* Phase 5: short broadcasts go through toolbar_show_toast, long ones
  * through an AdwAlertDialog with a scrolled GtkTextView extra child.
@@ -635,45 +643,45 @@ void msg_output_from_event (HxMsgEvent *event)
  * shape of what we've seen in the wild on hlserver.com et al. */
 #define BROADCAST_TOAST_MAX 160
 
-void broadcastmsg(char *text)
+void
+broadcastmsg (char *text)
 {
-	AdwDialog *dialog;
-	GtkWidget *textbox, *scroll;
-	GtkTextBuffer *tbuf;
-	gsize len = text ? strlen (text) : 0;
+    AdwDialog *dialog;
+    GtkWidget *textbox, *scroll;
+    GtkTextBuffer *tbuf;
+    gsize len = text ? strlen (text) : 0;
 
-	/* Phase 5+: notify-dispatch happens before the toast/alert so
+    /* Phase 5+: notify-dispatch happens before the toast/alert so
 	 * the user sees a system-level alert regardless of whether
 	 * the broadcast renders as a transient toast or a modal
 	 * dialog. */
-	gtkhx_notify_broadcast (text);
+    gtkhx_notify_broadcast (text);
 
-	if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
-		toolbar_show_toast (text);
-		return;
-	}
+    if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
+        toolbar_show_toast (text);
+        return;
+    }
 
-	dialog = adw_alert_dialog_new (_("Broadcast"), NULL);
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-	                               "ok", _("_OK"));
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "ok");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "ok");
+    dialog = adw_alert_dialog_new (_ ("Broadcast"), NULL);
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "ok", _ ("_OK"));
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "ok");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "ok");
 
-	textbox = gtk_text_view_new ();
-	gtk_text_view_set_editable (GTK_TEXT_VIEW (textbox), FALSE);
-	gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (textbox), FALSE);
-	gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (textbox), GTK_WRAP_WORD);
-	tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textbox));
-	gtk_text_buffer_set_text (tbuf, text, strlen (text));
+    textbox = gtk_text_view_new ();
+    gtk_text_view_set_editable (GTK_TEXT_VIEW (textbox), FALSE);
+    gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (textbox), FALSE);
+    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (textbox), GTK_WRAP_WORD);
+    tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textbox));
+    gtk_text_buffer_set_text (tbuf, text, strlen (text));
 
-	scroll = gtk_scrolled_window_new ();
-	gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
-	                                GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_widget_set_size_request (scroll, 300, 220);
-	gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), textbox);
+    scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request (scroll, 300, 220);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), textbox);
 
-	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
 
-	adw_dialog_present (dialog,
-	                    toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
+    adw_dialog_present (dialog,
+                        toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }

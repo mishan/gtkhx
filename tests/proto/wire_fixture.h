@@ -33,19 +33,15 @@
  * the message as a task-error reply (which is what task_error()
  * expects).
  */
-extern void wire_fixture_init (struct htlc_conn *htlc,
-                               guint32 type,
-                               guint32 trans,
-                               guint32 flag);
+extern void wire_fixture_init (struct htlc_conn *htlc, guint32 type,
+                               guint32 trans, guint32 flag);
 
 /*
  * Append one hl_data_hdr-prefixed chunk to htlc->in.buf and update
  * the header's hc + len. `data` may be NULL when `len == 0`.
  */
-extern void wire_fixture_add_chunk (struct htlc_conn *htlc,
-                                    guint16 type,
-                                    guint16 len,
-                                    const void *data);
+extern void wire_fixture_add_chunk (struct htlc_conn *htlc, guint16 type,
+                                    guint16 len, const void *data);
 
 /*
  * Free the buffer wire_fixture_init / _add_chunk allocated and zero

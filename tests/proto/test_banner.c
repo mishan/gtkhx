@@ -41,79 +41,78 @@
 static void
 test_banner_url_mode (void)
 {
-	/* The full common case: 4-byte "URL " type plus an explicit
+    /* The full common case: 4-byte "URL " type plus an explicit
 	 * URL. banner.c picks libsoup up and fetches the image. */
-	struct htlc_conn htlc;
-	const char *url = "https://example.com/banner.jpg";
+    struct htlc_conn htlc;
+    const char *url = "https://example.com/banner.jpg";
 
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        strlen (url), url);
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
-	struct hx_banner_msg b;
-	g_assert_true   (hx_banner_extract (&htlc, &b));
-	g_assert_cmpstr (b.type, ==, "URL ");
-	g_assert_true   (b.has_url);
-	g_assert_cmpstr (b.url, ==, url);
-	g_assert_cmpuint (b.url_len, ==, strlen (url));
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpstr (b.type, ==, "URL ");
+    g_assert_true (b.has_url);
+    g_assert_cmpstr (b.url, ==, url);
+    g_assert_cmpuint (b.url_len, ==, strlen (url));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_jpeg_mode (void)
 {
-	/* JPEG file-mode: type is present, URL is absent. The client
+    /* JPEG file-mode: type is present, URL is absent. The client
 	 * then follows up with HTLC_HDR_DOWNLOAD_BANNER on the HTXF
 	 * subchannel; this helper just reports the missing URL. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "JPEG");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "JPEG");
 
-	struct hx_banner_msg b;
-	g_assert_true   (hx_banner_extract (&htlc, &b));
-	g_assert_cmpstr (b.type, ==, "JPEG");
-	g_assert_false  (b.has_url);
-	g_assert_cmpstr (b.url, ==, "");
-	g_assert_cmpuint (b.url_len, ==, 0);
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpstr (b.type, ==, "JPEG");
+    g_assert_false (b.has_url);
+    g_assert_cmpstr (b.url, ==, "");
+    g_assert_cmpuint (b.url_len, ==, 0);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_gif_mode (void)
 {
-	/* GIFf is the other file-mode code mhxd emits — same shape as
+    /* GIFf is the other file-mode code mhxd emits — same shape as
 	 * JPEG, just a different glyph for the banner.c dispatch. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "GIFf");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "GIFf");
 
-	struct hx_banner_msg b;
-	g_assert_true   (hx_banner_extract (&htlc, &b));
-	g_assert_cmpstr (b.type, ==, "GIFf");
-	g_assert_false  (b.has_url);
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpstr (b.type, ==, "GIFf");
+    g_assert_false (b.has_url);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_pict_mode (void)
 {
-	/* PICT is the legacy Mac classic 'PICT' image format. Original
+    /* PICT is the legacy Mac classic 'PICT' image format. Original
 	 * Hotline Communications banners. We don't actually render these
 	 * (no Pict decoder), but the extractor must still report the
 	 * type so the surrounding handler can decide. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "PICT");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "PICT");
 
-	struct hx_banner_msg b;
-	g_assert_true   (hx_banner_extract (&htlc, &b));
-	g_assert_cmpstr (b.type, ==, "PICT");
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpstr (b.type, ==, "PICT");
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Chunk order independence ----------
@@ -124,20 +123,19 @@ test_banner_pict_mode (void)
 static void
 test_banner_chunk_order_url_first (void)
 {
-	struct htlc_conn htlc;
-	const char *url = "http://hotline.example/banner.png";
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        strlen (url), url);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    struct htlc_conn htlc;
+    const char *url = "http://hotline.example/banner.png";
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
 
-	struct hx_banner_msg b;
-	g_assert_true   (hx_banner_extract (&htlc, &b));
-	g_assert_cmpstr (b.type, ==, "URL ");
-	g_assert_true   (b.has_url);
-	g_assert_cmpstr (b.url, ==, url);
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpstr (b.type, ==, "URL ");
+    g_assert_true (b.has_url);
+    g_assert_cmpstr (b.url, ==, url);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Malformed type chunk ----------
@@ -150,40 +148,40 @@ test_banner_chunk_order_url_first (void)
 static void
 test_banner_short_type_rejected (void)
 {
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 3, "URL");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 3, "URL");
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_long_type_rejected (void)
 {
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 5, "JPEG ");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 5, "JPEG ");
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_empty_type_rejected (void)
 {
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 0, NULL);
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 0, NULL);
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* If the type chunk is malformed but a valid URL chunk also appears,
@@ -192,17 +190,16 @@ test_banner_empty_type_rejected (void)
 static void
 test_banner_bad_type_with_valid_url_still_refused (void)
 {
-	struct htlc_conn htlc;
-	const char *url = "https://example.com/x.jpg";
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 2, "OK");
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        strlen (url), url);
+    struct htlc_conn htlc;
+    const char *url = "https://example.com/x.jpg";
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 2, "OK");
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Missing chunks ---------- */
@@ -210,31 +207,30 @@ test_banner_bad_type_with_valid_url_still_refused (void)
 static void
 test_banner_missing_type_rejected (void)
 {
-	/* URL-only message with no TYPE chunk: extract reports FALSE.
+    /* URL-only message with no TYPE chunk: extract reports FALSE.
 	 * Caller's surrounding handler then ignores the broadcast. */
-	struct htlc_conn htlc;
-	const char *url = "https://example.com/x.jpg";
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        strlen (url), url);
+    struct htlc_conn htlc;
+    const char *url = "https://example.com/x.jpg";
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_no_chunks_rejected (void)
 {
-	/* A header-only banner frame: no chunks at all. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    /* A header-only banner frame: no chunks at all. */
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
 
-	struct hx_banner_msg b;
-	g_assert_false (hx_banner_extract (&htlc, &b));
+    struct hx_banner_msg b;
+    g_assert_false (hx_banner_extract (&htlc, &b));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- URL truncation ----------
@@ -247,45 +243,45 @@ test_banner_no_chunks_rejected (void)
 static void
 test_banner_url_truncated_at_buffer_cap (void)
 {
-	struct htlc_conn htlc;
-	/* Wire chunk len is u16, so 2000 fits. Buffer cap is 1024. */
-	guint8 long_url[2000];
-	memset (long_url, 'a', sizeof (long_url));
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        sizeof (long_url), long_url);
+    struct htlc_conn htlc;
+    /* Wire chunk len is u16, so 2000 fits. Buffer cap is 1024. */
+    guint8 long_url[2000];
+    memset (long_url, 'a', sizeof (long_url));
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, sizeof (long_url),
+                            long_url);
 
-	struct hx_banner_msg b;
-	g_assert_true    (hx_banner_extract (&htlc, &b));
-	g_assert_true    (b.has_url);
-	g_assert_cmpuint (b.url_len, ==, 1024);
-	g_assert_cmpuint (strlen (b.url), ==, 1024);
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_true (b.has_url);
+    g_assert_cmpuint (b.url_len, ==, 1024);
+    g_assert_cmpuint (strlen (b.url), ==, 1024);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_banner_url_at_exact_buffer_cap (void)
 {
-	/* Boundary case: URL bytes == buffer cap (1024). Must round-trip
+    /* Boundary case: URL bytes == buffer cap (1024). Must round-trip
 	 * cleanly without losing the last byte to NUL placement. */
-	struct htlc_conn htlc;
-	guint8 url[1024];
-	memset (url, 'b', sizeof (url));
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL,
-	                        sizeof (url), url);
+    struct htlc_conn htlc;
+    guint8 url[1024];
+    memset (url, 'b', sizeof (url));
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, sizeof (url), url);
 
-	struct hx_banner_msg b;
-	g_assert_true    (hx_banner_extract (&htlc, &b));
-	g_assert_cmpuint (b.url_len, ==, 1024);
-	for (gsize i = 0; i < 1024; i++)
-		g_assert_cmpint (b.url[i], ==, 'b');
-	g_assert_cmpint  (b.url[1024], ==, '\0');
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_cmpuint (b.url_len, ==, 1024);
+    for (gsize i = 0; i < 1024; i++) {
+        g_assert_cmpint (b.url[i], ==, 'b');
+    }
+    g_assert_cmpint (b.url[1024], ==, '\0');
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Empty URL chunk ---------- */
@@ -293,20 +289,20 @@ test_banner_url_at_exact_buffer_cap (void)
 static void
 test_banner_empty_url_still_flags_has_url (void)
 {
-	/* Zero-length URL chunk is weird but well-formed. has_url
+    /* Zero-length URL chunk is weird but well-formed. has_url
 	 * should still be TRUE (the chunk was present); url_len is 0. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, 0, NULL);
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, 0, NULL);
 
-	struct hx_banner_msg b;
-	g_assert_true    (hx_banner_extract (&htlc, &b));
-	g_assert_true    (b.has_url);
-	g_assert_cmpstr  (b.url, ==, "");
-	g_assert_cmpuint (b.url_len, ==, 0);
+    struct hx_banner_msg b;
+    g_assert_true (hx_banner_extract (&htlc, &b));
+    g_assert_true (b.has_url);
+    g_assert_cmpstr (b.url, ==, "");
+    g_assert_cmpuint (b.url_len, ==, 0);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- API edge cases ---------- */
@@ -314,56 +310,52 @@ test_banner_empty_url_still_flags_has_url (void)
 static void
 test_banner_null_out_returns_false (void)
 {
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
 
-	g_assert_false (hx_banner_extract (&htlc, NULL));
+    g_assert_false (hx_banner_extract (&htlc, NULL));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/proto/banner/url_mode",
-	                 test_banner_url_mode);
-	g_test_add_func ("/proto/banner/jpeg_mode",
-	                 test_banner_jpeg_mode);
-	g_test_add_func ("/proto/banner/gif_mode",
-	                 test_banner_gif_mode);
-	g_test_add_func ("/proto/banner/pict_mode",
-	                 test_banner_pict_mode);
+    g_test_add_func ("/proto/banner/url_mode", test_banner_url_mode);
+    g_test_add_func ("/proto/banner/jpeg_mode", test_banner_jpeg_mode);
+    g_test_add_func ("/proto/banner/gif_mode", test_banner_gif_mode);
+    g_test_add_func ("/proto/banner/pict_mode", test_banner_pict_mode);
 
-	g_test_add_func ("/proto/banner/chunk_order_url_first",
-	                 test_banner_chunk_order_url_first);
+    g_test_add_func ("/proto/banner/chunk_order_url_first",
+                     test_banner_chunk_order_url_first);
 
-	g_test_add_func ("/proto/banner/short_type_rejected",
-	                 test_banner_short_type_rejected);
-	g_test_add_func ("/proto/banner/long_type_rejected",
-	                 test_banner_long_type_rejected);
-	g_test_add_func ("/proto/banner/empty_type_rejected",
-	                 test_banner_empty_type_rejected);
-	g_test_add_func ("/proto/banner/bad_type_with_valid_url_still_refused",
-	                 test_banner_bad_type_with_valid_url_still_refused);
+    g_test_add_func ("/proto/banner/short_type_rejected",
+                     test_banner_short_type_rejected);
+    g_test_add_func ("/proto/banner/long_type_rejected",
+                     test_banner_long_type_rejected);
+    g_test_add_func ("/proto/banner/empty_type_rejected",
+                     test_banner_empty_type_rejected);
+    g_test_add_func ("/proto/banner/bad_type_with_valid_url_still_refused",
+                     test_banner_bad_type_with_valid_url_still_refused);
 
-	g_test_add_func ("/proto/banner/missing_type_rejected",
-	                 test_banner_missing_type_rejected);
-	g_test_add_func ("/proto/banner/no_chunks_rejected",
-	                 test_banner_no_chunks_rejected);
+    g_test_add_func ("/proto/banner/missing_type_rejected",
+                     test_banner_missing_type_rejected);
+    g_test_add_func ("/proto/banner/no_chunks_rejected",
+                     test_banner_no_chunks_rejected);
 
-	g_test_add_func ("/proto/banner/url_truncated_at_buffer_cap",
-	                 test_banner_url_truncated_at_buffer_cap);
-	g_test_add_func ("/proto/banner/url_at_exact_buffer_cap",
-	                 test_banner_url_at_exact_buffer_cap);
+    g_test_add_func ("/proto/banner/url_truncated_at_buffer_cap",
+                     test_banner_url_truncated_at_buffer_cap);
+    g_test_add_func ("/proto/banner/url_at_exact_buffer_cap",
+                     test_banner_url_at_exact_buffer_cap);
 
-	g_test_add_func ("/proto/banner/empty_url_still_flags_has_url",
-	                 test_banner_empty_url_still_flags_has_url);
+    g_test_add_func ("/proto/banner/empty_url_still_flags_has_url",
+                     test_banner_empty_url_still_flags_has_url);
 
-	g_test_add_func ("/proto/banner/null_out_returns_false",
-	                 test_banner_null_out_returns_false);
+    g_test_add_func ("/proto/banner/null_out_returns_false",
+                     test_banner_null_out_returns_false);
 
-	return g_test_run ();
+    return g_test_run ();
 }

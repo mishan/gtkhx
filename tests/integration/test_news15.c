@@ -43,91 +43,96 @@
  * GtkHx's hotline.h yet (the existing news15 parser uses different
  * chunk types). The constant is borrowed verbatim from
  * mhxd/src/common/hotline.h. */
-#define HTLS_DATA_NEWS_DIRLIST_EXTENDED   ((guint16) 0x0143)
+#define HTLS_DATA_NEWS_DIRLIST_EXTENDED ((guint16)0x0143)
 
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 static void
 test_news15_root_dirlist (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "News15 Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "News15 Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	guint32 our_trans = htlc.trans;
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_NEWSDIRLIST, /*flag=*/0, /*hc=*/0));
+    guint32 our_trans = htlc.trans;
+    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_NEWSDIRLIST,
+                                             /*flag=*/0, /*hc=*/0));
 
-	gboolean got_reply = FALSE;
-	for (int i = 0; i < 64 && !got_reply; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != our_trans)
-			continue;
-		got_reply = TRUE;
-	}
-	g_assert_true (got_reply);
+    gboolean got_reply = FALSE;
+    for (int i = 0; i < 64 && !got_reply; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != our_trans) {
+            continue;
+        }
+        got_reply = TRUE;
+    }
+    g_assert_true (got_reply);
 
-	if (hdr_flag (&htlc) & 1) {
-		char err[256];
-		gsize err_len = 0;
-		if (task_error_extract (&htlc, err, sizeof (err), &err_len))
-			g_test_message ("news15 dirlist refused: \"%s\" "
-			                "(server may have tnews disabled)", err);
-		else
-			g_test_message ("news15 dirlist refused (no error chunk)");
-		integration_release_htlc (&htlc);
-		integration_close (fd);
-		return;
-	}
+    if (hdr_flag (&htlc) & 1) {
+        char err[256];
+        gsize err_len = 0;
+        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+            g_test_message ("news15 dirlist refused: \"%s\" "
+                            "(server may have tnews disabled)",
+                            err);
+        } else {
+            g_test_message ("news15 dirlist refused (no error chunk)");
+        }
+        integration_release_htlc (&htlc);
+        integration_close (fd);
+        return;
+    }
 
-	/* Walk the chunks; we expect at least one
+    /* Walk the chunks; we expect at least one
 	 * HTLS_DATA_NEWS_DIRLIST_EXTENDED. The shipped run/hxd/newsdir
 	 * has cat_irasshaimase pre-seeded as a category. */
-	int dirlist_chunks = 0;
-	dh_start (&htlc) {
-		if (_type == HTLS_DATA_NEWS_DIRLIST_EXTENDED)
-			dirlist_chunks++;
-	} dh_end ();
-	g_test_message ("news15 dirlist returned %d entries",
-	                dirlist_chunks);
-	g_assert_cmpint (dirlist_chunks, >, 0);
+    int dirlist_chunks = 0;
+    dh_start (&htlc)
+    {
+        if (_type == HTLS_DATA_NEWS_DIRLIST_EXTENDED) {
+            dirlist_chunks++;
+        }
+    }
+    dh_end ();
+    g_test_message ("news15 dirlist returned %d entries", dirlist_chunks);
+    g_assert_cmpint (dirlist_chunks, >, 0);
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/news15/root_dirlist",
-	                 test_news15_root_dirlist);
+    g_test_add_func ("/integration/news15/root_dirlist",
+                     test_news15_root_dirlist);
 
-	return g_test_run ();
+    return g_test_run ();
 }

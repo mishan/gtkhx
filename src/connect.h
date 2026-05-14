@@ -1,9 +1,12 @@
 #ifndef HX_CONNECT_H
 #define HX_CONNECT_H
 
-extern void connect_set_entries (const char *address, const char *login, const char *pasword, guint16 port);
-extern void set_the_entries(char *address, char *login, char *password, char *port, char secure, char compress, char cipher);
-extern void connect_bookmark_name(char *name);
+extern void connect_set_entries (const char *address, const char *login,
+                                 const char *pasword, guint16 port);
+extern void set_the_entries (char *address, char *login, char *password,
+                             char *port, char secure, char compress,
+                             char cipher);
+extern void connect_bookmark_name (char *name);
 extern void create_connect_window (GtkWidget *btn, gpointer data);
 
 #ifdef CONFIG_COMPRESS

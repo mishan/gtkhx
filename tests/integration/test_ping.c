@@ -30,75 +30,75 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static void
 test_ping_round_trip (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "Ping Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "Ping Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	/* Capture the trans we'll send PING with. hlpack assigns
+    /* Capture the trans we'll send PING with. hlpack assigns
 	 * htlc->trans's current value to the message and increments
 	 * after, so the sent PING uses whatever htlc.trans is right
 	 * now. */
-	guint32 ping_trans = htlc.trans;
+    guint32 ping_trans = htlc.trans;
 
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_PING, /*flag=*/0, /*hc=*/0));
+    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
+                                             /*flag=*/0, /*hc=*/0));
 
-	/* Read until we see a TASK reply matching our trans ID.
+    /* Read until we see a TASK reply matching our trans ID.
 	 * mhxd may have other unsolicited messages (banners, etc.)
 	 * queued; loop past them. */
-	gboolean got_reply = FALSE;
-	for (int i = 0; i < 8; i++) {
-		if (!integration_recv_message (
-				fd, &htlc, /*timeout_ms=*/3000))
-			break;
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != ping_trans)
-			continue;
+    gboolean got_reply = FALSE;
+    for (int i = 0; i < 8; i++) {
+        if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
+            break;
+        }
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != ping_trans) {
+            continue;
+        }
 
-		/* Found our task reply. Flag bit 1 is the task-error
+        /* Found our task reply. Flag bit 1 is the task-error
 		 * marker — must NOT be set. */
-		g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
-		got_reply = TRUE;
-		break;
-	}
-	g_assert_true (got_reply);
+        g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
+        got_reply = TRUE;
+        break;
+    }
+    g_assert_true (got_reply);
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/ping/round_trip",
-	                 test_ping_round_trip);
+    g_test_add_func ("/integration/ping/round_trip", test_ping_round_trip);
 
-	return g_test_run ();
+    return g_test_run ();
 }

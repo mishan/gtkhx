@@ -33,57 +33,57 @@
 static void
 test_hn32_zero (void)
 {
-	const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x00 };
-	guint32 host = 0xdeadbeef;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0x00000000u);
+    const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x00 };
+    guint32 host = 0xdeadbeef;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0x00000000u);
 }
 
 static void
 test_hn32_one (void)
 {
-	const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x01 };
-	guint32 host = 0;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0x00000001u);
+    const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x01 };
+    guint32 host = 0;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0x00000001u);
 }
 
 static void
 test_hn32_max (void)
 {
-	const guint8 wire[4] = { 0xff, 0xff, 0xff, 0xff };
-	guint32 host = 0;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0xffffffffu);
+    const guint8 wire[4] = { 0xff, 0xff, 0xff, 0xff };
+    guint32 host = 0;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0xffffffffu);
 }
 
 static void
 test_hn32_canonical_pattern (void)
 {
-	/* The classic byte-order test pattern; if this fails on a
+    /* The classic byte-order test pattern; if this fails on a
 	 * little-endian host the swap arithmetic is broken. */
-	const guint8 wire[4] = { 0x12, 0x34, 0x56, 0x78 };
-	guint32 host = 0;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0x12345678u);
+    const guint8 wire[4] = { 0x12, 0x34, 0x56, 0x78 };
+    guint32 host = 0;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0x12345678u);
 }
 
 static void
 test_hn32_high_byte_only (void)
 {
-	const guint8 wire[4] = { 0x80, 0x00, 0x00, 0x00 };
-	guint32 host = 0;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0x80000000u);
+    const guint8 wire[4] = { 0x80, 0x00, 0x00, 0x00 };
+    guint32 host = 0;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0x80000000u);
 }
 
 static void
 test_hn32_low_byte_only (void)
 {
-	const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x80 };
-	guint32 host = 0;
-	HN32 (&host, wire);
-	g_assert_cmphex (host, ==, 0x00000080u);
+    const guint8 wire[4] = { 0x00, 0x00, 0x00, 0x80 };
+    guint32 host = 0;
+    HN32 (&host, wire);
+    g_assert_cmphex (host, ==, 0x00000080u);
 }
 
 /* Real Hotline header values we stare at in proto traces. Byte-for-byte
@@ -92,20 +92,20 @@ test_hn32_low_byte_only (void)
 static void
 test_hn32_real_protocol_constants (void)
 {
-	struct {
-		guint8  wire[4];
-		guint32 expected;
-	} cases[] = {
-		{ { 0x00, 0x00, 0x00, 0x6b }, 0x0000006bu }, /* HTLC_HDR_LOGIN */
-		{ { 0x00, 0x01, 0x00, 0x00 }, 0x00010000u }, /* HTLS_HDR_TASK */
-		{ { 0x00, 0x00, 0x01, 0xf4 }, 0x000001f4u }, /* HTLC_HDR_PING */
-		{ { 0x00, 0x00, 0x00, 0x65 }, 0x00000065u }, /* HTLC_HDR_NEWS_GETFILE */
-	};
-	for (gsize i = 0; i < G_N_ELEMENTS (cases); i++) {
-		guint32 host = 0xa5a5a5a5u;
-		HN32 (&host, cases[i].wire);
-		g_assert_cmphex (host, ==, cases[i].expected);
-	}
+    struct {
+        guint8 wire[4];
+        guint32 expected;
+    } cases[] = {
+        { { 0x00, 0x00, 0x00, 0x6b }, 0x0000006bu }, /* HTLC_HDR_LOGIN */
+        { { 0x00, 0x01, 0x00, 0x00 }, 0x00010000u }, /* HTLS_HDR_TASK */
+        { { 0x00, 0x00, 0x01, 0xf4 }, 0x000001f4u }, /* HTLC_HDR_PING */
+        { { 0x00, 0x00, 0x00, 0x65 }, 0x00000065u }, /* HTLC_HDR_NEWS_GETFILE */
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS (cases); i++) {
+        guint32 host = 0xa5a5a5a5u;
+        HN32 (&host, cases[i].wire);
+        g_assert_cmphex (host, ==, cases[i].expected);
+    }
 }
 
 /* HN32 round-trip: host → wire → host. The macro is symmetric in the
@@ -114,18 +114,17 @@ test_hn32_real_protocol_constants (void)
 static void
 test_hn32_round_trip (void)
 {
-	const guint32 inputs[] = {
-		0x00000000u, 0x00000001u, 0x12345678u,
-		0xa5a5a5a5u, 0xdeadbeefu, 0xffffffffu,
-		0x80000000u, 0x00000080u,
-	};
-	for (gsize i = 0; i < G_N_ELEMENTS (inputs); i++) {
-		guint8  wire[4] = { 0 };
-		guint32 host = 0;
-		HN32 (wire, &inputs[i]);
-		HN32 (&host, wire);
-		g_assert_cmphex (host, ==, inputs[i]);
-	}
+    const guint32 inputs[] = {
+        0x00000000u, 0x00000001u, 0x12345678u, 0xa5a5a5a5u,
+        0xdeadbeefu, 0xffffffffu, 0x80000000u, 0x00000080u,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS (inputs); i++) {
+        guint8 wire[4] = { 0 };
+        guint32 host = 0;
+        HN32 (wire, &inputs[i]);
+        HN32 (&host, wire);
+        g_assert_cmphex (host, ==, inputs[i]);
+    }
 }
 
 /* HN32 always stores big-endian regardless of host order — i.e. the
@@ -134,13 +133,13 @@ test_hn32_round_trip (void)
 static void
 test_hn32_writes_big_endian (void)
 {
-	const guint32 host = 0x12345678u;
-	guint8 wire[4] = { 0 };
-	HN32 (wire, &host);
-	g_assert_cmphex (wire[0], ==, 0x12);
-	g_assert_cmphex (wire[1], ==, 0x34);
-	g_assert_cmphex (wire[2], ==, 0x56);
-	g_assert_cmphex (wire[3], ==, 0x78);
+    const guint32 host = 0x12345678u;
+    guint8 wire[4] = { 0 };
+    HN32 (wire, &host);
+    g_assert_cmphex (wire[0], ==, 0x12);
+    g_assert_cmphex (wire[1], ==, 0x34);
+    g_assert_cmphex (wire[2], ==, 0x56);
+    g_assert_cmphex (wire[3], ==, 0x78);
 }
 
 /* ---------- HN16 ---------- */
@@ -148,111 +147,102 @@ test_hn32_writes_big_endian (void)
 static void
 test_hn16_zero (void)
 {
-	const guint8 wire[2] = { 0x00, 0x00 };
-	guint16 host = 0xbeef;
-	HN16 (&host, wire);
-	g_assert_cmphex (host, ==, 0x0000u);
+    const guint8 wire[2] = { 0x00, 0x00 };
+    guint16 host = 0xbeef;
+    HN16 (&host, wire);
+    g_assert_cmphex (host, ==, 0x0000u);
 }
 
 static void
 test_hn16_canonical_pattern (void)
 {
-	const guint8 wire[2] = { 0x12, 0x34 };
-	guint16 host = 0;
-	HN16 (&host, wire);
-	g_assert_cmphex (host, ==, 0x1234u);
+    const guint8 wire[2] = { 0x12, 0x34 };
+    guint16 host = 0;
+    HN16 (&host, wire);
+    g_assert_cmphex (host, ==, 0x1234u);
 }
 
 static void
 test_hn16_max (void)
 {
-	const guint8 wire[2] = { 0xff, 0xff };
-	guint16 host = 0;
-	HN16 (&host, wire);
-	g_assert_cmphex (host, ==, 0xffffu);
+    const guint8 wire[2] = { 0xff, 0xff };
+    guint16 host = 0;
+    HN16 (&host, wire);
+    g_assert_cmphex (host, ==, 0xffffu);
 }
 
 static void
 test_hn16_real_protocol_constants (void)
 {
-	struct {
-		guint8  wire[2];
-		guint16 expected;
-	} cases[] = {
-		{ { 0x00, 0x6e }, 0x006eu }, /* HTLC/S_DATA_ACCESS */
-		{ { 0x00, 0x64 }, 0x0064u }, /* HTLS_DATA_TASKERROR */
-		{ { 0x00, 0xbe }, 0x00beu }, /* HTLS_DATA_VERSION = 190 (Hotline 1.9) */
-		{ { 0x00, 0x96 }, 0x0096u }, /* HTLS_DATA_VERSION = 150 (Hotline 1.5) */
-	};
-	for (gsize i = 0; i < G_N_ELEMENTS (cases); i++) {
-		guint16 host = 0xa5a5;
-		HN16 (&host, cases[i].wire);
-		g_assert_cmphex (host, ==, cases[i].expected);
-	}
+    struct {
+        guint8 wire[2];
+        guint16 expected;
+    } cases[] = {
+        { { 0x00, 0x6e }, 0x006eu }, /* HTLC/S_DATA_ACCESS */
+        { { 0x00, 0x64 }, 0x0064u }, /* HTLS_DATA_TASKERROR */
+        { { 0x00, 0xbe }, 0x00beu }, /* HTLS_DATA_VERSION = 190 (Hotline 1.9) */
+        { { 0x00, 0x96 }, 0x0096u }, /* HTLS_DATA_VERSION = 150 (Hotline 1.5) */
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS (cases); i++) {
+        guint16 host = 0xa5a5;
+        HN16 (&host, cases[i].wire);
+        g_assert_cmphex (host, ==, cases[i].expected);
+    }
 }
 
 static void
 test_hn16_round_trip (void)
 {
-	const guint16 inputs[] = {
-		0x0000u, 0x0001u, 0x1234u, 0xa5a5u,
-		0xbeefu, 0xffffu, 0x8000u, 0x0080u,
-	};
-	for (gsize i = 0; i < G_N_ELEMENTS (inputs); i++) {
-		guint8  wire[2] = { 0 };
-		guint16 host = 0;
-		HN16 (wire, &inputs[i]);
-		HN16 (&host, wire);
-		g_assert_cmphex (host, ==, inputs[i]);
-	}
+    const guint16 inputs[] = {
+        0x0000u, 0x0001u, 0x1234u, 0xa5a5u, 0xbeefu, 0xffffu, 0x8000u, 0x0080u,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS (inputs); i++) {
+        guint8 wire[2] = { 0 };
+        guint16 host = 0;
+        HN16 (wire, &inputs[i]);
+        HN16 (&host, wire);
+        g_assert_cmphex (host, ==, inputs[i]);
+    }
 }
 
 static void
 test_hn16_writes_big_endian (void)
 {
-	const guint16 host = 0x1234u;
-	guint8 wire[2] = { 0 };
-	HN16 (wire, &host);
-	g_assert_cmphex (wire[0], ==, 0x12);
-	g_assert_cmphex (wire[1], ==, 0x34);
+    const guint16 host = 0x1234u;
+    guint8 wire[2] = { 0 };
+    HN16 (wire, &host);
+    g_assert_cmphex (wire[0], ==, 0x12);
+    g_assert_cmphex (wire[1], ==, 0x34);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/byte_swap/hn32_zero",
-	                 test_hn32_zero);
-	g_test_add_func ("/byte_swap/hn32_one",
-	                 test_hn32_one);
-	g_test_add_func ("/byte_swap/hn32_max",
-	                 test_hn32_max);
-	g_test_add_func ("/byte_swap/hn32_canonical_pattern",
-	                 test_hn32_canonical_pattern);
-	g_test_add_func ("/byte_swap/hn32_high_byte_only",
-	                 test_hn32_high_byte_only);
-	g_test_add_func ("/byte_swap/hn32_low_byte_only",
-	                 test_hn32_low_byte_only);
-	g_test_add_func ("/byte_swap/hn32_real_protocol_constants",
-	                 test_hn32_real_protocol_constants);
-	g_test_add_func ("/byte_swap/hn32_round_trip",
-	                 test_hn32_round_trip);
-	g_test_add_func ("/byte_swap/hn32_writes_big_endian",
-	                 test_hn32_writes_big_endian);
+    g_test_add_func ("/byte_swap/hn32_zero", test_hn32_zero);
+    g_test_add_func ("/byte_swap/hn32_one", test_hn32_one);
+    g_test_add_func ("/byte_swap/hn32_max", test_hn32_max);
+    g_test_add_func ("/byte_swap/hn32_canonical_pattern",
+                     test_hn32_canonical_pattern);
+    g_test_add_func ("/byte_swap/hn32_high_byte_only",
+                     test_hn32_high_byte_only);
+    g_test_add_func ("/byte_swap/hn32_low_byte_only", test_hn32_low_byte_only);
+    g_test_add_func ("/byte_swap/hn32_real_protocol_constants",
+                     test_hn32_real_protocol_constants);
+    g_test_add_func ("/byte_swap/hn32_round_trip", test_hn32_round_trip);
+    g_test_add_func ("/byte_swap/hn32_writes_big_endian",
+                     test_hn32_writes_big_endian);
 
-	g_test_add_func ("/byte_swap/hn16_zero",
-	                 test_hn16_zero);
-	g_test_add_func ("/byte_swap/hn16_canonical_pattern",
-	                 test_hn16_canonical_pattern);
-	g_test_add_func ("/byte_swap/hn16_max",
-	                 test_hn16_max);
-	g_test_add_func ("/byte_swap/hn16_real_protocol_constants",
-	                 test_hn16_real_protocol_constants);
-	g_test_add_func ("/byte_swap/hn16_round_trip",
-	                 test_hn16_round_trip);
-	g_test_add_func ("/byte_swap/hn16_writes_big_endian",
-	                 test_hn16_writes_big_endian);
+    g_test_add_func ("/byte_swap/hn16_zero", test_hn16_zero);
+    g_test_add_func ("/byte_swap/hn16_canonical_pattern",
+                     test_hn16_canonical_pattern);
+    g_test_add_func ("/byte_swap/hn16_max", test_hn16_max);
+    g_test_add_func ("/byte_swap/hn16_real_protocol_constants",
+                     test_hn16_real_protocol_constants);
+    g_test_add_func ("/byte_swap/hn16_round_trip", test_hn16_round_trip);
+    g_test_add_func ("/byte_swap/hn16_writes_big_endian",
+                     test_hn16_writes_big_endian);
 
-	return g_test_run ();
+    return g_test_run ();
 }

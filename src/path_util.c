@@ -25,12 +25,13 @@
 char *
 path_basename (char *path, char sep)
 {
-	size_t len = strlen (path);
+    size_t len = strlen (path);
 
-	while (len--) {
-		if (path[len] == sep)
-			return path + len + 1;
-	}
+    while (len--) {
+        if (path[len] == sep) {
+            return path + len + 1;
+        }
+    }
 
-	return path;
+    return path;
 }

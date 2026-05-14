@@ -1,15 +1,15 @@
 #ifndef HX_GTKUTIL_H
 #define HX_GTKUTIL_H
 
-extern void init_keyaccel(GtkWidget *widget);
-extern void set_disconnect_btn(session *sess, int stat);
-extern void setbtns(session *sess, int stat);
-extern void set_status_bar(int status);
-extern void changetitlesconnected(session *sess);
-extern void changetitlespecific(GtkWidget *widget, char *name);
-extern void changetitlesdisconnected(session *sess);
-extern void close_connected_windows(session *sess);
-extern void error_dialog(char *title, char *msg);
+extern void init_keyaccel (GtkWidget *widget);
+extern void set_disconnect_btn (session *sess, int stat);
+extern void setbtns (session *sess, int stat);
+extern void set_status_bar (int status);
+extern void changetitlesconnected (session *sess);
+extern void changetitlespecific (GtkWidget *widget, char *name);
+extern void changetitlesdisconnected (session *sess);
+extern void close_connected_windows (session *sess);
+extern void error_dialog (char *title, char *msg);
 
 /*
  * Phase 5: gtkhx_text_to_utf8 is declared in text_util.h. The
@@ -41,21 +41,21 @@ extern void error_dialog(char *title, char *msg);
  * already understands so unmodified call sites continue to compile.
  */
 #ifndef GTK_FILL
-#define GTK_FILL    1
+#define GTK_FILL 1
 #endif
 #ifndef GTK_EXPAND
-#define GTK_EXPAND  2
+#define GTK_EXPAND 2
 #endif
 
-extern GtkWidget *gtkhx_grid_new_table (int rows, int cols, gboolean homogeneous);
-extern void gtkhx_grid_attach_table (GtkGrid *grid, GtkWidget *child,
-                                     int left, int right,
-                                     int top,  int bottom,
-                                     int xoptions, int yoptions,
-                                     int xpad, int ypad);
+extern GtkWidget *gtkhx_grid_new_table (int rows, int cols,
+                                        gboolean homogeneous);
+extern void gtkhx_grid_attach_table (GtkGrid *grid, GtkWidget *child, int left,
+                                     int right, int top, int bottom,
+                                     int xoptions, int yoptions, int xpad,
+                                     int ypad);
 extern void gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
-                                              int left, int right,
-                                              int top,  int bottom);
+                                              int left, int right, int top,
+                                              int bottom);
 
 /*
  * Phase 4.2: GtkContainer is gone in GTK 4. Each widget that used to
@@ -91,8 +91,8 @@ extern void gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child);
  * appends and then sets halign/valign to GTK_ALIGN_END so the child
  * is shifted toward the box's trailing edge.
  */
-extern void gtkhx_box_pack (GtkWidget *box, GtkWidget *child,
-                            gboolean expand, gboolean fill, guint padding);
+extern void gtkhx_box_pack (GtkWidget *box, GtkWidget *child, gboolean expand,
+                            gboolean fill, guint padding);
 extern void gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
                                 gboolean expand, gboolean fill, guint padding);
 
@@ -130,9 +130,7 @@ extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
  * an AdwHeaderBar / GtkBox / etc. as needed.
  */
 extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
-                                       const char *tooltip,
-                                       int         scale,
-                                       GCallback   cb,
-                                       gpointer    user_data);
+                                       const char *tooltip, int scale,
+                                       GCallback cb, gpointer user_data);
 
 #endif

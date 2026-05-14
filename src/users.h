@@ -21,12 +21,16 @@ extern GdkRGBA *user_color_gdk (guint16 color);
 
 extern PangoFontDescription *users_font_desc;
 
-
 extern void create_users_window (GtkWidget *widget, gpointer data);
 extern void user_list (session *sess);
-extern void user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
-extern void user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user);
-extern void user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user, const char *nam, guint16 icon, guint16 color);
+extern void user_create (struct htlc_conn *htlc, struct chat *chat,
+                         struct hx_user *user, const char *nam, guint16 icon,
+                         guint16 color);
+extern void user_delete (struct htlc_conn *htlc, struct chat *chat,
+                         struct hx_user *user);
+extern void user_change (struct htlc_conn *htlc, struct chat *chat,
+                         struct hx_user *user, const char *nam, guint16 icon,
+                         guint16 color);
 extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
 /* Phase 4.5/4.7: user_clicked was the GdkEventButton-shaped GtkCList
  * "button_press_event" handler. GTK 4 widgets don't emit
@@ -40,9 +44,7 @@ extern void user_info_btn (GtkWidget *widget, gpointer data);
 extern void user_kick_btn (GtkWidget *widget, gpointer data);
 extern void user_igno_btn (GtkWidget *widget, gpointer data);
 extern void user_ban_btn (GtkWidget *widget, gpointer data);
-extern void user_chat_btn(GtkWidget *widget, gpointer data);
-
-
+extern void user_chat_btn (GtkWidget *widget, gpointer data);
 
 extern struct hx_user *hx_user_new (struct chat *chat, guint16 uid);
 extern void hx_user_delete (struct chat *chat, struct hx_user *user);

@@ -34,7 +34,7 @@ struct htlc_conn;
  * fallback (held in a per-call static buffer; not thread-safe — only
  * call from the trace logger, which is single-threaded by virtue of
  * being on the main thread). */
-extern const char *proto_hdr_name  (guint32 type);
+extern const char *proto_hdr_name (guint32 type);
 extern const char *proto_data_name (guint16 type);
 
 /* Outgoing — called from hlwrite. proto_trace_send_chunk fires once
@@ -42,13 +42,14 @@ extern const char *proto_data_name (guint16 type);
  * the "proto" debug category is disabled, so call sites don't need
  * an explicit gate. */
 extern void proto_trace_send_begin (guint32 type, guint32 trans, guint16 hc);
-extern void proto_trace_send_chunk (guint16 type, guint16 len, const guint8 *data);
-extern void proto_trace_send_end   (void);
+extern void proto_trace_send_chunk (guint16 type, guint16 len,
+                                    const guint8 *data);
+extern void proto_trace_send_end (void);
 
 /* Incoming — called from hx_rcv_hdr after the header is decoded but
  * before dispatch. Logs the header line. */
-extern void proto_trace_recv_hdr   (guint32 type, guint32 trans,
-                                    guint32 flag, guint32 len);
+extern void proto_trace_recv_hdr (guint32 type, guint32 trans, guint32 flag,
+                                  guint32 len);
 
 /* Incoming — walks the data chunks already buffered in htlc->in
  * (between SIZEOF_HL_HDR and htlc->in.pos) and logs each one.

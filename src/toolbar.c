@@ -16,7 +16,6 @@
  * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
@@ -86,10 +85,12 @@ static AdwBanner *toolbar_banner;
 static void
 on_banner_button_clicked (AdwBanner *banner, gpointer user_data)
 {
-	(void) banner; (void) user_data;
-	if (toolbar_banner)
-		adw_banner_set_revealed (toolbar_banner, FALSE);
-	connect_reconnect_last ();
+    (void)banner;
+    (void)user_data;
+    if (toolbar_banner) {
+        adw_banner_set_revealed (toolbar_banner, FALSE);
+    }
+    connect_reconnect_last ();
 }
 
 /* Phase 5: New User / Edit User used to be standalone toolbar
@@ -101,15 +102,19 @@ on_banner_button_clicked (AdwBanner *banner, gpointer user_data)
 static void
 on_action_user_new (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param; (void) user_data;
-	create_useredit_window (0, 1);
+    (void)action;
+    (void)param;
+    (void)user_data;
+    create_useredit_window (0, 1);
 }
 
 static void
 on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param; (void) user_data;
-	useredit_open_dialog ();
+    (void)action;
+    (void)param;
+    (void)user_data;
+    useredit_open_dialog ();
 }
 
 /* Phase 5: app.open_bookmark fires from the AdwSplitButton's
@@ -120,13 +125,15 @@ static void
 on_action_open_bookmark (GSimpleAction *action, GVariant *param,
                          gpointer user_data)
 {
-	const char *name;
-	(void) action; (void) user_data;
+    const char *name;
+    (void)action;
+    (void)user_data;
 
-	if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_STRING))
-		return;
-	name = g_variant_get_string (param, NULL);
-	connect_open_bookmark_by_name (name);
+    if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_STRING)) {
+        return;
+    }
+    name = g_variant_get_string (param, NULL);
+    connect_open_bookmark_by_name (name);
 }
 
 /* Phase 5: app.connect_builtin fires from the SplitButton's
@@ -137,11 +144,13 @@ static void
 on_action_connect_builtin (GSimpleAction *action, GVariant *param,
                            gpointer user_data)
 {
-	(void) action; (void) user_data;
+    (void)action;
+    (void)user_data;
 
-	if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_INT32))
-		return;
-	connect_open_builtin_bookmark (g_variant_get_int32 (param));
+    if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_INT32)) {
+        return;
+    }
+    connect_open_builtin_bookmark (g_variant_get_int32 (param));
 }
 
 /* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
@@ -154,36 +163,40 @@ on_action_connect_builtin (GSimpleAction *action, GVariant *param,
  * but no AppIndicator extension installed don't end up unable to
  * exit the app. Without an SNI host, fall through to hx_quit() as
  * before. */
-static gboolean close_toolbar_window (GtkWindow *window, gpointer data)
+static gboolean
+close_toolbar_window (GtkWindow *window, gpointer data)
 {
-	(void) window; (void) data;
-	if (gtkhx_tray_is_enabled () && gtkhx_tray_host_available ()) {
-		gtkhx_tray_hide_all_windows ();
-		return TRUE;     /* inhibit destroy */
-	}
-	hx_quit();
-	return FALSE;
+    (void)window;
+    (void)data;
+    if (gtkhx_tray_is_enabled () && gtkhx_tray_host_available ()) {
+        gtkhx_tray_hide_all_windows ();
+        return TRUE; /* inhibit destroy */
+    }
+    hx_quit ();
+    return FALSE;
 }
 
-void disconnect_clicked (void)
+void
+disconnect_clicked (void)
 {
-	if(!connected) {
-		kill_threads();
-		setbtns(&the_session, 0);
-		set_status_bar(0);
-		set_disconnect_btn(&the_session, 0);
-		conn_task_update(&the_session, 2);
-		if(the_session.htlc.gdk_input) {
-			hxd_fd_clr(the_session.htlc.fd, FDR|FDW);
-			close(the_session.htlc.fd);
-			the_session.htlc.gdk_input = 0;
-		}
-		hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s: %s\n", server_addr, _("connection closed"));
-	}
+    if (!connected) {
+        kill_threads ();
+        setbtns (&the_session, 0);
+        set_status_bar (0);
+        set_disconnect_btn (&the_session, 0);
+        conn_task_update (&the_session, 2);
+        if (the_session.htlc.gdk_input) {
+            hxd_fd_clr (the_session.htlc.fd, FDR | FDW);
+            close (the_session.htlc.fd);
+            the_session.htlc.gdk_input = 0;
+        }
+        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX, "%s: %s\n",
+                          server_addr, _ ("connection closed"));
+    }
 
-	else if (the_session.htlc.fd) {
-		hx_htlc_close(&the_session.htlc, 1);
-	}
+    else if (the_session.htlc.fd) {
+        hx_htlc_close (&the_session.htlc, 1);
+    }
 }
 
 /* Phase 5: app-level GActions backing the AdwHeaderBar's hamburger
@@ -204,57 +217,64 @@ void disconnect_clicked (void)
 static gboolean
 defer_open_settings (gpointer data)
 {
-	create_options_window (NULL, data);
-	return G_SOURCE_REMOVE;
+    create_options_window (NULL, data);
+    return G_SOURCE_REMOVE;
 }
 
 static gboolean
 defer_open_about (gpointer data)
 {
-	(void) data;
-	create_about_window (NULL, NULL);
-	return G_SOURCE_REMOVE;
+    (void)data;
+    create_about_window (NULL, NULL);
+    return G_SOURCE_REMOVE;
 }
 
 static gboolean
 defer_quit (gpointer data)
 {
-	(void) data;
-	hx_quit ();
-	return G_SOURCE_REMOVE;
+    (void)data;
+    hx_quit ();
+    return G_SOURCE_REMOVE;
 }
 
 static void
 on_action_settings (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param;
-	g_idle_add (defer_open_settings, user_data);
+    (void)action;
+    (void)param;
+    g_idle_add (defer_open_settings, user_data);
 }
 
 static void
 on_action_about (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param; (void) user_data;
-	g_idle_add (defer_open_about, NULL);
+    (void)action;
+    (void)param;
+    (void)user_data;
+    g_idle_add (defer_open_about, NULL);
 }
 
 static void
 on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 {
-	(void) action; (void) param; (void) user_data;
-	g_idle_add (defer_quit, NULL);
+    (void)action;
+    (void)param;
+    (void)user_data;
+    g_idle_add (defer_quit, NULL);
 }
 
 static const GActionEntry app_actions[] = {
-	{ .name = "settings",        .activate = on_action_settings        },
-	{ .name = "about",           .activate = on_action_about           },
-	{ .name = "user_new",        .activate = on_action_user_new        },
-	{ .name = "user_edit",       .activate = on_action_user_edit       },
-	{ .name = "open_bookmark",   .activate = on_action_open_bookmark,
-	  .parameter_type = "s" },
-	{ .name = "connect_builtin", .activate = on_action_connect_builtin,
-	  .parameter_type = "i" },
-	{ .name = "quit",            .activate = on_action_quit            },
+    { .name = "settings", .activate = on_action_settings },
+    { .name = "about", .activate = on_action_about },
+    { .name = "user_new", .activate = on_action_user_new },
+    { .name = "user_edit", .activate = on_action_user_edit },
+    { .name = "open_bookmark",
+      .activate = on_action_open_bookmark,
+      .parameter_type = "s" },
+    { .name = "connect_builtin",
+      .activate = on_action_connect_builtin,
+      .parameter_type = "i" },
+    { .name = "quit", .activate = on_action_quit },
 };
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
@@ -266,13 +286,14 @@ static const GActionEntry app_actions[] = {
 void
 toolbar_show_toast (const char *text)
 {
-	char *safe = NULL;
-	const char *body;
+    char *safe = NULL;
+    const char *body;
 
-	if (!toolbar_toast || !text)
-		return;
+    if (!toolbar_toast || !text) {
+        return;
+    }
 
-	/* AdwToast stores the title as a UTF-8 string and the
+    /* AdwToast stores the title as a UTF-8 string and the
 	 * accessibility layer behind it (libadwaita →
 	 * gtk_accessible_announce → g_variant_new_string) abort()s
 	 * the process on non-UTF-8 input. Most call sites feed
@@ -280,15 +301,15 @@ toolbar_show_toast (const char *text)
 	 * messages) that can be MacRoman from old Mac servers, so
 	 * defend the choke point: validate, fall back to MacRoman
 	 * conversion, finally U+FFFD substitution. */
-	if (!g_utf8_validate (text, -1, NULL)) {
-		safe = gtkhx_text_to_utf8 (text, strlen (text), NULL);
-		body = safe ? safe : "";
-	} else {
-		body = text;
-	}
+    if (!g_utf8_validate (text, -1, NULL)) {
+        safe = gtkhx_text_to_utf8 (text, strlen (text), NULL);
+        body = safe ? safe : "";
+    } else {
+        body = text;
+    }
 
-	adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (body));
-	g_free (safe);
+    adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (body));
+    g_free (safe);
 }
 
 /* Phase 5: surface "lost connection" with a Reconnect button. The
@@ -299,21 +320,23 @@ toolbar_show_toast (const char *text)
 void
 toolbar_show_connection_lost (const char *server)
 {
-	char *title;
+    char *title;
 
-	if (!toolbar_banner)
-		return;
-	title = g_strdup_printf (_("Lost connection to %s"), server ? server : "");
-	adw_banner_set_title    (toolbar_banner, title);
-	adw_banner_set_revealed (toolbar_banner, TRUE);
-	g_free (title);
+    if (!toolbar_banner) {
+        return;
+    }
+    title = g_strdup_printf (_ ("Lost connection to %s"), server ? server : "");
+    adw_banner_set_title (toolbar_banner, title);
+    adw_banner_set_revealed (toolbar_banner, TRUE);
+    g_free (title);
 }
 
 void
 toolbar_hide_banner (void)
 {
-	if (toolbar_banner)
-		adw_banner_set_revealed (toolbar_banner, FALSE);
+    if (toolbar_banner) {
+        adw_banner_set_revealed (toolbar_banner, FALSE);
+    }
 }
 
 /* Phase 5: register the hamburger-menu actions on the application.
@@ -326,23 +349,23 @@ toolbar_hide_banner (void)
 void
 toolbar_register_actions (GApplication *app, session *sess)
 {
-	GAction *act;
+    GAction *act;
 
-	g_return_if_fail (app != NULL);
+    g_return_if_fail (app != NULL);
 
-	g_action_map_add_action_entries (G_ACTION_MAP (app),
-	                                 app_actions,
-	                                 G_N_ELEMENTS (app_actions),
-	                                 sess);
+    g_action_map_add_action_entries (G_ACTION_MAP (app), app_actions,
+                                     G_N_ELEMENTS (app_actions), sess);
 
-	/* Admin actions start disabled until login (gtkutil.c setbtns
+    /* Admin actions start disabled until login (gtkutil.c setbtns
 	 * flips them on with the rest of the connection-gated UI). */
-	act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_new");
-	if (G_IS_SIMPLE_ACTION (act))
-		g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
-	act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_edit");
-	if (G_IS_SIMPLE_ACTION (act))
-		g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
+    act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_new");
+    if (G_IS_SIMPLE_ACTION (act)) {
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
+    }
+    act = g_action_map_lookup_action (G_ACTION_MAP (app), "user_edit");
+    if (G_IS_SIMPLE_ACTION (act)) {
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (act), FALSE);
+    }
 }
 
 /* Phase 5: build the GtkMenuButton + GMenuModel that hangs off the
@@ -365,26 +388,26 @@ toolbar_register_actions (GApplication *app, session *sess)
 static GtkWidget *
 build_hamburger (void)
 {
-	GMenu *menu, *admin_menu;
-	GtkWidget *btn;
+    GMenu *menu, *admin_menu;
+    GtkWidget *btn;
 
-	admin_menu = g_menu_new ();
-	g_menu_append (admin_menu, _("New User…"),  "app.user_new");
-	g_menu_append (admin_menu, _("Edit User…"), "app.user_edit");
+    admin_menu = g_menu_new ();
+    g_menu_append (admin_menu, _ ("New User…"), "app.user_new");
+    g_menu_append (admin_menu, _ ("Edit User…"), "app.user_edit");
 
-	menu = g_menu_new ();
-	g_menu_append (menu, _("Settings"),    "app.settings");
-	g_menu_append (menu, _("About GtkHx"), "app.about");
-	g_menu_append_submenu (menu, _("Admin"), G_MENU_MODEL (admin_menu));
-	g_menu_append (menu, _("Quit"),        "app.quit");
-	g_object_unref (admin_menu);
+    menu = g_menu_new ();
+    g_menu_append (menu, _ ("Settings"), "app.settings");
+    g_menu_append (menu, _ ("About GtkHx"), "app.about");
+    g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));
+    g_menu_append (menu, _ ("Quit"), "app.quit");
+    g_object_unref (admin_menu);
 
-	btn = gtk_menu_button_new ();
-	gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
-	gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (btn), G_MENU_MODEL (menu));
-	gtk_widget_set_tooltip_text (btn, _("Main menu"));
-	g_object_unref (menu);
-	return btn;
+    btn = gtk_menu_button_new ();
+    gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");
+    gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (btn), G_MENU_MODEL (menu));
+    gtk_widget_set_tooltip_text (btn, _ ("Main menu"));
+    g_object_unref (menu);
+    return btn;
 }
 
 /* Phase 5: 2x scale on the toolbar pixmap buttons. The historic
@@ -395,13 +418,11 @@ build_hamburger (void)
 #define TOOLBAR_ICON_SCALE 2
 
 static GtkWidget *
-make_pixmap_button (const char *resource_name,
-                    const char *tooltip,
-                    GCallback   cb,
-                    gpointer    user_data)
+make_pixmap_button (const char *resource_name, const char *tooltip,
+                    GCallback cb, gpointer user_data)
 {
-	return gtkhx_pixmap_button (resource_name, tooltip,
-	                            TOOLBAR_ICON_SCALE, cb, user_data);
+    return gtkhx_pixmap_button (resource_name, tooltip, TOOLBAR_ICON_SCALE, cb,
+                                user_data);
 }
 
 /* Phase 5: rebuild the AdwSplitButton's bookmark menu. Called from
@@ -416,25 +437,27 @@ make_pixmap_button (const char *resource_name,
 void
 toolbar_refresh_bookmarks (void)
 {
-	GMenu *menu;
-	if (!connect_btn || !ADW_IS_SPLIT_BUTTON (connect_btn))
-		return;
-	menu = connect_build_bookmark_menu ();
-	adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
-	                                 G_MENU_MODEL (menu));
-	g_object_unref (menu);
+    GMenu *menu;
+    if (!connect_btn || !ADW_IS_SPLIT_BUTTON (connect_btn)) {
+        return;
+    }
+    menu = connect_build_bookmark_menu ();
+    adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
+                                     G_MENU_MODEL (menu));
+    g_object_unref (menu);
 }
 
 /* Phase 4.5: configure-event is gone in GTK 4 and the toolbar window
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
-void create_toolbar_window (session *sess)
+void
+create_toolbar_window (session *sess)
 {
-	GtkWidget *header;
-	GtkWidget *hbox, *vbox;
+    GtkWidget *header;
+    GtkWidget *hbox, *vbox;
 
-	/* Phase 5: stay on plain GtkWindow rather than AdwApplicationWindow.
+    /* Phase 5: stay on plain GtkWindow rather than AdwApplicationWindow.
 	 * fe_init() runs the toolbar construction BEFORE g_application_run
 	 * (so gtkhx_app is still NULL here — confirmed by an earlier
 	 * AdwApplicationWindow attempt that hit a NULL-app assertion at
@@ -444,156 +467,156 @@ void create_toolbar_window (session *sess)
 	 * the same "no double title bar" appearance AdwApplicationWindow
 	 * would have. The hamburger actions live on the application and
 	 * get registered from gtkhx_activate via toolbar_register_actions. */
-	toolbar_window = gtk_window_new ();
-	gtk_window_set_title (GTK_WINDOW (toolbar_window), "GtkHx");
-	gtk_window_set_resizable (GTK_WINDOW (toolbar_window), FALSE);
+    toolbar_window = gtk_window_new ();
+    gtk_window_set_title (GTK_WINDOW (toolbar_window), "GtkHx");
+    gtk_window_set_resizable (GTK_WINDOW (toolbar_window), FALSE);
 
-	/* ------------- header bar (top) ------------- */
-	header = adw_header_bar_new ();
+    /* ------------- header bar (top) ------------- */
+    header = adw_header_bar_new ();
 
-	/* Phase 5: AdwSplitButton — primary click opens the connect
+    /* Phase 5: AdwSplitButton — primary click opens the connect
 	 * dialog; the dropdown chevron exposes a menu of saved
 	 * bookmarks targeting app.open_bookmark with the bookmark name
 	 * as parameter. Refresh of the menu happens from the bookmark
 	 * save path via toolbar_refresh_bookmarks(). */
-	connect_btn = adw_split_button_new ();
-	adw_split_button_set_icon_name (ADW_SPLIT_BUTTON (connect_btn),
-	                                "network-transmit-receive-symbolic");
-	gtk_widget_add_css_class (connect_btn, "suggested-action");
-	gtk_widget_set_tooltip_text (connect_btn, _("Connect"));
-	g_signal_connect (connect_btn, "clicked",
-	                  G_CALLBACK (create_connect_window), sess);
-	{
-		GMenu *menu = connect_build_bookmark_menu ();
-		adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
-		                                 G_MENU_MODEL (menu));
-		g_object_unref (menu);
-	}
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), connect_btn);
+    connect_btn = adw_split_button_new ();
+    adw_split_button_set_icon_name (ADW_SPLIT_BUTTON (connect_btn),
+                                    "network-transmit-receive-symbolic");
+    gtk_widget_add_css_class (connect_btn, "suggested-action");
+    gtk_widget_set_tooltip_text (connect_btn, _ ("Connect"));
+    g_signal_connect (connect_btn, "clicked",
+                      G_CALLBACK (create_connect_window), sess);
+    {
+        GMenu *menu = connect_build_bookmark_menu ();
+        adw_split_button_set_menu_model (ADW_SPLIT_BUTTON (connect_btn),
+                                         G_MENU_MODEL (menu));
+        g_object_unref (menu);
+    }
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), connect_btn);
 
-	disconnect_btn = gtk_button_new_from_icon_name ("network-offline-symbolic");
-	gtk_widget_set_tooltip_text (disconnect_btn, _("Disconnect"));
-	g_signal_connect (disconnect_btn, "clicked",
-	                  G_CALLBACK (disconnect_clicked), sess);
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), disconnect_btn);
+    disconnect_btn = gtk_button_new_from_icon_name ("network-offline-symbolic");
+    gtk_widget_set_tooltip_text (disconnect_btn, _ ("Disconnect"));
+    g_signal_connect (disconnect_btn, "clicked",
+                      G_CALLBACK (disconnect_clicked), sess);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), disconnect_btn);
 
-	adw_header_bar_pack_end (ADW_HEADER_BAR (header), build_hamburger ());
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), build_hamburger ());
 
-	/* ------------- content (feature button row) ------------- */
-	hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
-	gtk_widget_set_margin_start  (hbox, 6);
-	gtk_widget_set_margin_end    (hbox, 6);
-	gtk_widget_set_margin_top    (hbox, 6);
-	gtk_widget_set_margin_bottom (hbox, 6);
-	/* Phase 5: AdwToolbarView's content slot fills vertically, which
+    /* ------------- content (feature button row) ------------- */
+    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_widget_set_margin_start (hbox, 6);
+    gtk_widget_set_margin_end (hbox, 6);
+    gtk_widget_set_margin_top (hbox, 6);
+    gtk_widget_set_margin_bottom (hbox, 6);
+    /* Phase 5: AdwToolbarView's content slot fills vertically, which
 	 * stretches a single row of icon buttons into uncomfortably tall
 	 * rectangles. Pin the row to its natural height and center it
 	 * vertically so the toolbar reads as a strip of buttons rather
 	 * than a wall of them. */
-	gtk_widget_set_valign (hbox, GTK_ALIGN_CENTER);
-	gtk_widget_set_vexpand (hbox, FALSE);
+    gtk_widget_set_valign (hbox, GTK_ALIGN_CENTER);
+    gtk_widget_set_vexpand (hbox, FALSE);
 
-	gtk_box_append (GTK_BOX (hbox),
-		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.xpm",
-		                    _("Tracker"),
-		                    G_CALLBACK (create_tracker_window), sess));
-	news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.xpm",
-	                               _("News"),
-	                               G_CALLBACK (open_news), sess);
-	gtk_box_append (GTK_BOX (hbox), news_btn);
-	post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.xpm",
-	                               _("Post"),
-	                               G_CALLBACK (create_post_window), sess);
-	gtk_box_append (GTK_BOX (hbox), post_btn);
-	news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.xpm",
-	                                 _("News (1.5+)"),
-	                                 G_CALLBACK (open_news_browser), sess);
-	gtk_box_append (GTK_BOX (hbox), news15_btn);
-	files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.xpm",
-	                                _("Files"),
-	                                G_CALLBACK (open_files), sess);
-	gtk_box_append (GTK_BOX (hbox), files_btn);
-	gtk_box_append (GTK_BOX (hbox),
-		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/users.xpm",
-		                    _("Users"),
-		                    G_CALLBACK (create_users_window), sess));
-	gtk_box_append (GTK_BOX (hbox),
-		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.xpm",
-		                    _("Chat"),
-		                    G_CALLBACK (create_chat_window), sess));
-	gtk_box_append (GTK_BOX (hbox),
-		make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tasks.xpm",
-		                    _("Tasks"),
-		                    G_CALLBACK (create_tasks_window), sess));
-	/* Phase 5: New User / Edit User used to be toolbar buttons.
+    gtk_box_append (
+        GTK_BOX (hbox),
+        make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.xpm",
+                            _ ("Tracker"), G_CALLBACK (create_tracker_window),
+                            sess));
+    news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.xpm",
+                                   _ ("News"), G_CALLBACK (open_news), sess);
+    gtk_box_append (GTK_BOX (hbox), news_btn);
+    post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.xpm",
+                                   _ ("Post"), G_CALLBACK (create_post_window),
+                                   sess);
+    gtk_box_append (GTK_BOX (hbox), post_btn);
+    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.xpm",
+                                     _ ("News (1.5+)"),
+                                     G_CALLBACK (open_news_browser), sess);
+    gtk_box_append (GTK_BOX (hbox), news15_btn);
+    files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.xpm",
+                                    _ ("Files"), G_CALLBACK (open_files), sess);
+    gtk_box_append (GTK_BOX (hbox), files_btn);
+    gtk_box_append (GTK_BOX (hbox),
+                    make_pixmap_button (
+                        "/com/nasledov/gtkhx/pixmaps/users.xpm", _ ("Users"),
+                        G_CALLBACK (create_users_window), sess));
+    gtk_box_append (GTK_BOX (hbox),
+                    make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.xpm",
+                                        _ ("Chat"),
+                                        G_CALLBACK (create_chat_window), sess));
+    gtk_box_append (GTK_BOX (hbox),
+                    make_pixmap_button (
+                        "/com/nasledov/gtkhx/pixmaps/tasks.xpm", _ ("Tasks"),
+                        G_CALLBACK (create_tasks_window), sess));
+    /* Phase 5: New User / Edit User used to be toolbar buttons.
 	 * They've moved into the hamburger menu's Admin submenu — sysop
 	 * actions don't need to occupy primary real estate. */
 
 #ifdef USE_PLUGIN
-	plugin_btn = gtk_button_new_with_label ("[ P ]");
-	gtk_widget_set_tooltip_text (plugin_btn, _("Plugin Manager"));
-	g_signal_connect (plugin_btn, "clicked",
-	                  G_CALLBACK (create_plugin_manager), 0);
-	gtk_box_append (GTK_BOX (hbox), plugin_btn);
+    plugin_btn = gtk_button_new_with_label ("[ P ]");
+    gtk_widget_set_tooltip_text (plugin_btn, _ ("Plugin Manager"));
+    g_signal_connect (plugin_btn, "clicked", G_CALLBACK (create_plugin_manager),
+                      0);
+    gtk_box_append (GTK_BOX (hbox), plugin_btn);
 #endif
 
-	/* ------------- bottom bar (status label) ------------- */
-	status_bar = gtk_label_new (_("Not Connected"));
-	gtk_widget_add_css_class (status_bar, "dim-label");
-	gtk_widget_set_halign (status_bar, GTK_ALIGN_START);
-	gtk_widget_set_margin_start  (status_bar, 8);
-	gtk_widget_set_margin_end    (status_bar, 8);
-	gtk_widget_set_margin_top    (status_bar, 4);
-	gtk_widget_set_margin_bottom (status_bar, 4);
+    /* ------------- bottom bar (status label) ------------- */
+    status_bar = gtk_label_new (_ ("Not Connected"));
+    gtk_widget_add_css_class (status_bar, "dim-label");
+    gtk_widget_set_halign (status_bar, GTK_ALIGN_START);
+    gtk_widget_set_margin_start (status_bar, 8);
+    gtk_widget_set_margin_end (status_bar, 8);
+    gtk_widget_set_margin_top (status_bar, 4);
+    gtk_widget_set_margin_bottom (status_bar, 4);
 
-	/* ------------- compose ------------- */
-	/* Phase 5: gtk_window_set_titlebar installs the AdwHeaderBar AS
+    /* ------------- compose ------------- */
+    /* Phase 5: gtk_window_set_titlebar installs the AdwHeaderBar AS
 	 * the window's title bar (no GTK default chrome on top of it),
 	 * which is what AdwApplicationWindow does implicitly. Content is
 	 * a plain vertical GtkBox holding the button row and status
 	 * label; the window's non-resizable flag collapses it to the
 	 * natural height of those two children. */
-	gtk_window_set_titlebar (GTK_WINDOW (toolbar_window), header);
+    gtk_window_set_titlebar (GTK_WINDOW (toolbar_window), header);
 
-	/* Phase 5: AdwBanner sits above the content row for "lost
+    /* Phase 5: AdwBanner sits above the content row for "lost
 	 * connection" state with an actionable Reconnect button.
 	 * Hidden by default; toolbar_show_connection_lost() reveals
 	 * it from set_status_bar() on the 1/2 -> 0 transition. */
-	toolbar_banner = ADW_BANNER (adw_banner_new (""));
-	adw_banner_set_button_label (toolbar_banner, _("Reconnect"));
-	adw_banner_set_revealed (toolbar_banner, FALSE);
-	g_signal_connect (toolbar_banner, "button-clicked",
-	                  G_CALLBACK (on_banner_button_clicked), sess);
+    toolbar_banner = ADW_BANNER (adw_banner_new (""));
+    adw_banner_set_button_label (toolbar_banner, _ ("Reconnect"));
+    adw_banner_set_revealed (toolbar_banner, FALSE);
+    g_signal_connect (toolbar_banner, "button-clicked",
+                      G_CALLBACK (on_banner_button_clicked), sess);
 
-	vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-	gtk_box_append (GTK_BOX (vbox), GTK_WIDGET (toolbar_banner));
-	gtk_box_append (GTK_BOX (vbox), hbox);
-	/* Phase 5: server banner row (banner.c). Hidden until an
+    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (vbox), GTK_WIDGET (toolbar_banner));
+    gtk_box_append (GTK_BOX (vbox), hbox);
+    /* Phase 5: server banner row (banner.c). Hidden until an
 	 * HTLS_HDR_BANNER message arrives. Sits above the status bar
 	 * so it doesn't push the persistent connection state out of
 	 * sight. */
-	gtk_box_append (GTK_BOX (vbox), banner_widget_new ());
-	gtk_box_append (GTK_BOX (vbox), status_bar);
+    gtk_box_append (GTK_BOX (vbox), banner_widget_new ());
+    gtk_box_append (GTK_BOX (vbox), status_bar);
 
-	/* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()
+    /* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()
 	 * can push transient notifications over the button row. Toasts
 	 * surface as a sliding banner at the bottom of the overlay; the
 	 * persistent status label stays visible underneath for ambient
 	 * connection state. */
-	toolbar_toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
-	adw_toast_overlay_set_child (toolbar_toast, vbox);
-	gtk_window_set_child (GTK_WINDOW (toolbar_window), GTK_WIDGET (toolbar_toast));
+    toolbar_toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
+    adw_toast_overlay_set_child (toolbar_toast, vbox);
+    gtk_window_set_child (GTK_WINDOW (toolbar_window),
+                          GTK_WIDGET (toolbar_toast));
 
-	/* Initial sensitivity: pre-connection, only Connect + the global
+    /* Initial sensitivity: pre-connection, only Connect + the global
 	 * menu items are usable. setbtns() flips the rest on at login,
 	 * including the Admin submenu's app.user_new / app.user_edit
 	 * GActions. */
-	gtk_widget_set_sensitive (disconnect_btn, FALSE);
-	gtk_widget_set_sensitive (files_btn,      FALSE);
-	gtk_widget_set_sensitive (post_btn,       FALSE);
-	gtk_widget_set_sensitive (news15_btn,     FALSE);
+    gtk_widget_set_sensitive (disconnect_btn, FALSE);
+    gtk_widget_set_sensitive (files_btn, FALSE);
+    gtk_widget_set_sensitive (post_btn, FALSE);
+    gtk_widget_set_sensitive (news15_btn, FALSE);
 
-	/* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
+    /* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
 	 * a GtkWidget pointer, not a function. Calling a widget address as
 	 * code did nothing useful (and tripped CFI on hardened builds), so
 	 * closing the toolbar via the WM's X button skipped hx_quit and
@@ -601,20 +624,20 @@ void create_toolbar_window (session *sess)
 	 * because the last GtkApplication window was gone, but no prefs
 	 * survived. Wire this to close_toolbar_window, which calls
 	 * hx_quit() properly. */
-	g_signal_connect (toolbar_window, "close-request",
-	                  G_CALLBACK (close_toolbar_window), 0);
+    g_signal_connect (toolbar_window, "close-request",
+                      G_CALLBACK (close_toolbar_window), 0);
 
-	/* Phase 4.2: gtk_window_move removed (Wayland) */
+    /* Phase 4.2: gtk_window_move removed (Wayland) */
 
-	gtk_window_present (GTK_WINDOW (toolbar_window));
-	init_keyaccel (toolbar_window);
+    gtk_window_present (GTK_WINDOW (toolbar_window));
+    init_keyaccel (toolbar_window);
 
-	if (connected) {
-		gtk_widget_set_sensitive (disconnect_btn, TRUE);
-		gtk_widget_set_sensitive (files_btn,      TRUE);
-		gtk_widget_set_sensitive (post_btn,       TRUE);
-		gtk_widget_set_sensitive (news15_btn,     TRUE);
-		changetitlespecific (toolbar_window, "GtkHx");
-	}
-	sess->toolbar_window = toolbar_window;
+    if (connected) {
+        gtk_widget_set_sensitive (disconnect_btn, TRUE);
+        gtk_widget_set_sensitive (files_btn, TRUE);
+        gtk_widget_set_sensitive (post_btn, TRUE);
+        gtk_widget_set_sensitive (news15_btn, TRUE);
+        changetitlespecific (toolbar_window, "GtkHx");
+    }
+    sess->toolbar_window = toolbar_window;
 }

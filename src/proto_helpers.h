@@ -20,7 +20,7 @@
  */
 
 #include <glib.h>
-#include <glib-object.h>     /* HxChatEvent is a G_DEFINE_BOXED_TYPE */
+#include <glib-object.h> /* HxChatEvent is a G_DEFINE_BOXED_TYPE */
 #include <stdarg.h>
 
 struct htlc_conn;
@@ -37,9 +37,8 @@ struct htlc_conn;
  * Truncates to (out_size - 1) bytes if the message is too big.
  * out_size must be at least 1.
  */
-extern gboolean task_error_extract (struct htlc_conn *htlc,
-                                    char *out, gsize out_size,
-                                    gsize *out_len);
+extern gboolean task_error_extract (struct htlc_conn *htlc, char *out,
+                                    gsize out_size, gsize *out_len);
 
 /*
  * Parse a HTLS_HDR_USER_SELFINFO message from htlc->in into the
@@ -57,8 +56,8 @@ extern gboolean task_error_extract (struct htlc_conn *htlc,
  * chunk" against truncated fixtures.
  */
 enum {
-	HX_SELFINFO_ACCESS    = 1u << 0,
-	HX_SELFINFO_USER_LIST = 1u << 1,
+    HX_SELFINFO_ACCESS = 1u << 0,
+    HX_SELFINFO_USER_LIST = 1u << 1,
 };
 
 extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc);
@@ -87,11 +86,11 @@ extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc);
  * hx_rcv_chat. Larger payloads are silently truncated.
  */
 struct hx_chat_msg {
-	guint32 cid;
-	guint16 uid;
-	char    buf[8192 + 1];   /* NUL-terminated */
-	char   *text;            /* points into buf */
-	guint16 text_len;        /* bytes (no NUL), matches strlen(text) */
+    guint32 cid;
+    guint16 uid;
+    char buf[8192 + 1]; /* NUL-terminated */
+    char *text;         /* points into buf */
+    guint16 text_len;   /* bytes (no NUL), matches strlen(text) */
 };
 
 /*
@@ -119,15 +118,14 @@ extern gboolean hx_chat_extract (struct htlc_conn *htlc,
  * (excluding the NUL).
  */
 struct hx_msg_msg {
-	guint16 uid;
-	char    name[128 + 1];
-	guint16 name_len;
-	char    msg[8192 + 1];
-	guint16 msg_len;
+    guint16 uid;
+    char name[128 + 1];
+    guint16 name_len;
+    char msg[8192 + 1];
+    guint16 msg_len;
 };
 
-extern gboolean hx_msg_extract (struct htlc_conn *htlc,
-                                struct hx_msg_msg *out);
+extern gboolean hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out);
 
 /*
  * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
@@ -154,10 +152,10 @@ extern gboolean hx_msg_extract (struct htlc_conn *htlc,
  * (anything other than exactly 4 bytes — the protocol pins this).
  */
 struct hx_banner_msg {
-	char     type[5];
-	gboolean has_url;
-	char     url[1024 + 1];
-	guint16  url_len;
+    char type[5];
+    gboolean has_url;
+    char url[1024 + 1];
+    guint16 url_len;
 };
 
 extern gboolean hx_banner_extract (struct htlc_conn *htlc,
@@ -190,8 +188,8 @@ extern gboolean hx_banner_extract (struct htlc_conn *htlc,
  * htlc->out (qbuf_set or zeroed via memset) before the first
  * hlpack call.
  */
-extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
-                    int hc, va_list ap);
+extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
+                    va_list ap);
 
 /*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
@@ -214,25 +212,25 @@ extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
  */
 
 struct hx_user_part_msg {
-	guint16 uid;
-	guint32 cid;
+    guint16 uid;
+    guint32 cid;
 };
 extern gboolean hx_user_part_extract (struct htlc_conn *htlc,
                                       struct hx_user_part_msg *out);
 
 struct hx_chat_subject_msg {
-	guint32 cid;
-	char    subject[256];   /* NUL-terminated, max 255 chars */
-	guint16 subject_len;
+    guint32 cid;
+    char subject[256]; /* NUL-terminated, max 255 chars */
+    guint16 subject_len;
 };
 extern gboolean hx_chat_subject_extract (struct htlc_conn *htlc,
                                          struct hx_chat_subject_msg *out);
 
 struct hx_chat_invite_msg {
-	guint16 uid;
-	guint32 cid;
-	char    name[32];       /* NUL-terminated, max 31 chars */
-	guint16 name_len;
+    guint16 uid;
+    guint32 cid;
+    char name[32]; /* NUL-terminated, max 31 chars */
+    guint16 name_len;
 };
 extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
                                         struct hx_chat_invite_msg *out);
@@ -254,13 +252,13 @@ extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
  * / "" / FALSE; NULL out returns FALSE.
  */
 struct hx_user_change_msg {
-	guint16  uid;
-	guint16  icon;
-	guint16  color;
-	gboolean got_color;
-	guint32  cid;
-	char     name[32];        /* NUL-terminated */
-	guint16  name_len;
+    guint16 uid;
+    guint16 icon;
+    guint16 color;
+    gboolean got_color;
+    guint32 cid;
+    char name[32]; /* NUL-terminated */
+    guint16 name_len;
 };
 extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
                                         struct hx_user_change_msg *out);
@@ -276,8 +274,8 @@ extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
  * Both default to 0 if the chunk is missing.
  */
 struct hx_xfer_queue_msg {
-	guint32 ref;
-	guint32 queueid;
+    guint32 ref;
+    guint32 queueid;
 };
 extern gboolean hx_xfer_queue_extract (struct htlc_conn *htlc,
                                        struct hx_xfer_queue_msg *out);
@@ -301,10 +299,9 @@ extern gboolean hx_xfer_queue_extract (struct htlc_conn *htlc,
  * `cb` may be NULL (the walker still iterates and counts chunks).
  * Returns the number of NEWS chunks seen.
  */
-typedef void (*hx_news_post_cb) (void *user, const char *bytes,
-                                 gsize len);
-extern int hx_news_post_walk (struct htlc_conn *htlc,
-                              hx_news_post_cb cb, void *user);
+typedef void (*hx_news_post_cb) (void *user, const char *bytes, gsize len);
+extern int hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb,
+                              void *user);
 
 /*
  * Parse one entry from a 1.5 threaded-news directory listing
@@ -364,18 +361,20 @@ extern int hx_news_post_walk (struct htlc_conn *htlc,
  * programmer error and returns FALSE.
  */
 struct hx_news_dirlist_entry {
-	int     kind;             /* 1 = folder-entry, 2 = category-entry */
-	char    name[256];        /* NUL-terminated, max 255 */
-	guint16 name_len;         /* strlen(name) */
+    int kind;         /* 1 = folder-entry, 2 = category-entry */
+    char name[256];   /* NUL-terminated, max 255 */
+    guint16 name_len; /* strlen(name) */
 };
 
 /* Parse a HTLC_DATA_NEWSFOLDERITEM (0x0140) chunk body. */
-extern gboolean hx_news_dirlist_parse_folderitem    (const guint8 *data, gsize dlen,
-                                            struct hx_news_dirlist_entry *out);
+extern gboolean
+hx_news_dirlist_parse_folderitem (const guint8 *data, gsize dlen,
+                                  struct hx_news_dirlist_entry *out);
 
 /* Parse a HTLC_DATA_CATEGORYITEM (0x0143) chunk body. */
-extern gboolean hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
-                                            struct hx_news_dirlist_entry *out);
+extern gboolean
+hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
+                                    struct hx_news_dirlist_entry *out);
 
 /*
  * Parse an HTLC_DATA_CATLIST (0x0141) chunk into a structured
@@ -425,32 +424,32 @@ extern gboolean hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dl
  * opcode entirely — see hx_dirlist_parse_extended above for that.
  */
 struct hx_newscat_part {
-	char    *mime_type;        /* NUL-terminated, g_malloc'd; NULL on empty */
-	guint16  size;
+    char *mime_type; /* NUL-terminated, g_malloc'd; NULL on empty */
+    guint16 size;
 };
 
 struct hx_newscat_post {
-	guint32 postid;
-	guint32 parentid;
-	/* Mac classic 8-byte date split the way news15.c consumes it: */
-	guint16 date_base_year;
-	guint16 date_pad;
-	guint32 date_seconds;
-	char    *subject;          /* NUL-terminated, g_malloc'd; NULL on empty */
-	char    *sender;           /* NUL-terminated, g_malloc'd; NULL on empty */
-	guint16  partcount;
-	guint16  size_total;       /* sum of parts[].size */
-	struct hx_newscat_part *parts;    /* g_malloc'd array, length partcount */
+    guint32 postid;
+    guint32 parentid;
+    /* Mac classic 8-byte date split the way news15.c consumes it: */
+    guint16 date_base_year;
+    guint16 date_pad;
+    guint32 date_seconds;
+    char *subject; /* NUL-terminated, g_malloc'd; NULL on empty */
+    char *sender;  /* NUL-terminated, g_malloc'd; NULL on empty */
+    guint16 partcount;
+    guint16 size_total;            /* sum of parts[].size */
+    struct hx_newscat_part *parts; /* g_malloc'd array, length partcount */
 };
 
 struct hx_newscat {
-	guint32                  post_count;
-	struct hx_newscat_post  *posts;    /* g_malloc'd array, length post_count */
+    guint32 post_count;
+    struct hx_newscat_post *posts; /* g_malloc'd array, length post_count */
 };
 
 extern gboolean hx_newscat_parse (struct htlc_conn *htlc,
                                   struct hx_newscat *out);
-extern void     hx_newscat_clear (struct hx_newscat *r);
+extern void hx_newscat_clear (struct hx_newscat *r);
 
 /*
  * Extract the body of an HTLS_HDR_AGREEMENT_FILE message.
@@ -476,9 +475,9 @@ extern void     hx_newscat_clear (struct hx_newscat *r);
  * actually need the text.
  */
 typedef enum {
-	HX_AGREEMENT_OK,
-	HX_AGREEMENT_NONE,
-	HX_AGREEMENT_NOT_FOUND,
+    HX_AGREEMENT_OK,
+    HX_AGREEMENT_NONE,
+    HX_AGREEMENT_NOT_FOUND,
 } hx_agreement_result;
 
 extern hx_agreement_result hx_agreement_extract (struct htlc_conn *htlc,
@@ -500,9 +499,8 @@ extern hx_agreement_result hx_agreement_extract (struct htlc_conn *htlc,
  * (which other code paths still reach for) — this extractor exists
  * to make the parsing testable without sharing global state.
  */
-extern gboolean hx_news_file_extract (struct htlc_conn *htlc,
-                                      char *out, gsize out_size,
-                                      gsize *out_len);
+extern gboolean hx_news_file_extract (struct htlc_conn *htlc, char *out,
+                                      gsize out_size, gsize *out_len);
 
 /*
  * Split a single chat line into a "name" portion and a "body"
@@ -539,10 +537,8 @@ extern gboolean hx_news_file_extract (struct htlc_conn *htlc,
  * trade-off favours conservative behaviour for non-chat content.
  */
 extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
-                                         gsize *name_offset,
-                                         gsize *name_len,
-                                         gsize *body_offset,
-                                         gsize *body_len);
+                                         gsize *name_offset, gsize *name_len,
+                                         gsize *body_offset, gsize *body_len);
 
 /*
  * Highlight matcher. Scans `body` for occurrences of any word in
@@ -562,7 +558,7 @@ extern gboolean hx_chat_split_nick_body (const char *line, gsize line_len,
  * lowercase-letter-by-byte content normal Hotline nicks use.
  */
 extern gboolean hx_highlight_match (const char *body, gsize body_len,
-                                    const char * const *words);
+                                    const char *const *words);
 
 /*
  * HxChatEvent — a parsed chat-message value object.
@@ -598,31 +594,30 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
  */
 typedef struct _HxChatEvent HxChatEvent;
 struct _HxChatEvent {
-	guint32  cid;
-	char    *line;            /* UTF-8-valid; NUL-terminated; owned */
-	gsize    line_len;
+    guint32 cid;
+    char *line; /* UTF-8-valid; NUL-terminated; owned */
+    gsize line_len;
 
-	gsize    sender_off, sender_len;
-	gsize    body_off,   body_len;
+    gsize sender_off, sender_len;
+    gsize body_off, body_len;
 
-	gboolean is_info;         /* "[hx]" info-prefix line */
-	gboolean is_self;         /* sender == own nick */
+    gboolean is_info; /* "[hx]" info-prefix line */
+    gboolean is_self; /* sender == own nick */
 };
 
 #define HX_TYPE_CHAT_EVENT (hx_chat_event_get_type ())
-extern GType        hx_chat_event_get_type (void) G_GNUC_CONST;
+extern GType hx_chat_event_get_type (void) G_GNUC_CONST;
 
 /* Build an HxChatEvent from raw wire bytes. `raw` may carry any
  * encoding seen on the wire (Mac Roman, Latin-1, UTF-8); the
  * constructor runs it through gtkhx_text_to_utf8 once. `self_nick`
  * is NULL-safe — passing NULL means is_self always comes back
  * FALSE. Returns a freshly-allocated event the caller owns. */
-extern HxChatEvent *hx_chat_event_new  (const char *raw, gsize raw_len,
-                                        guint32 cid,
-                                        const char *self_nick);
+extern HxChatEvent *hx_chat_event_new (const char *raw, gsize raw_len,
+                                       guint32 cid, const char *self_nick);
 
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
-extern void         hx_chat_event_free (HxChatEvent *e);
+extern void hx_chat_event_free (HxChatEvent *e);
 
 /*
  * HxMsgEvent — a parsed private-message value object.
@@ -652,26 +647,25 @@ extern void         hx_chat_event_free (HxChatEvent *e);
  * uniformity. */
 typedef struct _HxMsgEvent HxMsgEvent;
 struct _HxMsgEvent {
-	guint16  uid;
-	char    *name;
-	gsize    name_len;
-	char    *body;
-	gsize    body_len;
-	gboolean is_self;
-	gboolean is_broadcast;
+    guint16 uid;
+    char *name;
+    gsize name_len;
+    char *body;
+    gsize body_len;
+    gboolean is_self;
+    gboolean is_broadcast;
 };
 
 #define HX_TYPE_MSG_EVENT (hx_msg_event_get_type ())
-extern GType       hx_msg_event_get_type (void) G_GNUC_CONST;
+extern GType hx_msg_event_get_type (void) G_GNUC_CONST;
 
 /* Build an HxMsgEvent. `name` / `body` may carry any encoding the
  * wire delivered (Mac Roman, Latin-1, UTF-8); they get run through
  * gtkhx_text_to_utf8 once. `self_nick` is NULL-safe. */
-extern HxMsgEvent *hx_msg_event_new  (guint16 uid,
-                                      const char *name, gsize name_len,
-                                      const char *body, gsize body_len,
-                                      const char *self_nick);
+extern HxMsgEvent *hx_msg_event_new (guint16 uid, const char *name,
+                                     gsize name_len, const char *body,
+                                     gsize body_len, const char *self_nick);
 extern HxMsgEvent *hx_msg_event_copy (HxMsgEvent *e);
-extern void        hx_msg_event_free (HxMsgEvent *e);
+extern void hx_msg_event_free (HxMsgEvent *e);
 
 #endif /* HX_PROTO_HELPERS_H */

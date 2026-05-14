@@ -26,85 +26,83 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 /* Drain looking for an HTLS_HDR_MSG addressed from `wanted_uid`. */
 static gboolean
-drain_until_msg_from_uid (int fd, struct htlc_conn *htlc,
-                          guint16 wanted_uid,
-                          struct hx_msg_msg *out,
-                          int max_messages)
+drain_until_msg_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
+                          struct hx_msg_msg *out, int max_messages)
 {
-	for (int i = 0; i < max_messages; i++) {
-		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
-			return FALSE;
-		if (hdr_type (htlc) != HTLS_HDR_MSG)
-			continue;
-		if (!hx_msg_extract (htlc, out))
-			continue;
-		if (out->uid == wanted_uid)
-			return TRUE;
-	}
-	return FALSE;
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != HTLS_HDR_MSG) {
+            continue;
+        }
+        if (!hx_msg_extract (htlc, out)) {
+            continue;
+        }
+        if (out->uid == wanted_uid) {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 static gboolean
-send_msg (int fd, struct htlc_conn *htlc, guint16 to_uid,
-          const char *body)
+send_msg (int fd, struct htlc_conn *htlc, guint16 to_uid, const char *body)
 {
-	guint16 uid_be = htons (to_uid);
-	return integration_send_message (
-		fd, htlc,
-		HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2,
-		(int) HTLC_DATA_UID, (int) sizeof (uid_be), &uid_be,
-		(int) HTLC_DATA_MSG, (int) strlen (body), (guint8 *) body);
+    guint16 uid_be = htons (to_uid);
+    return integration_send_message (
+        fd, htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,
+        (int)sizeof (uid_be), &uid_be, (int)HTLC_DATA_MSG, (int)strlen (body),
+        (guint8 *)body);
 }
 
 static void
 test_msg_roundtrip_a_to_b (void)
 {
-	struct htlc_conn htlc_a;
-	int fd_a = integration_open_login_or_skip (
-		&htlc_a, "MsgAlice Tier-3", 412);
-	if (fd_a < 0)
-		return;
+    struct htlc_conn htlc_a;
+    int fd_a = integration_open_login_or_skip (&htlc_a, "MsgAlice Tier-3", 412);
+    if (fd_a < 0) {
+        return;
+    }
 
-	struct htlc_conn htlc_b;
-	int fd_b = integration_open_login_or_skip (
-		&htlc_b, "MsgBob Tier-3", 412);
-	if (fd_b < 0) {
-		integration_release_htlc (&htlc_a);
-		integration_close (fd_a);
-		return;
-	}
+    struct htlc_conn htlc_b;
+    int fd_b = integration_open_login_or_skip (&htlc_b, "MsgBob Tier-3", 412);
+    if (fd_b < 0) {
+        integration_release_htlc (&htlc_a);
+        integration_close (fd_a);
+        return;
+    }
 
-	const char *body = "hi bob — integration suite";
-	g_assert_true (send_msg (fd_a, &htlc_a, htlc_b.uid, body));
+    const char *body = "hi bob — integration suite";
+    g_assert_true (send_msg (fd_a, &htlc_a, htlc_b.uid, body));
 
-	struct hx_msg_msg pm;
-	g_assert_true (drain_until_msg_from_uid (
-		fd_b, &htlc_b, htlc_a.uid, &pm,
-		/*max_messages=*/64));
+    struct hx_msg_msg pm;
+    g_assert_true (drain_until_msg_from_uid (fd_b, &htlc_b, htlc_a.uid, &pm,
+                                             /*max_messages=*/64));
 
-	g_assert_cmphex (pm.uid, ==, htlc_a.uid);
-	g_assert_cmpstr (pm.name, ==, "MsgAlice Tier-3");
-	g_assert_cmpstr (pm.msg, ==, body);
+    g_assert_cmphex (pm.uid, ==, htlc_a.uid);
+    g_assert_cmpstr (pm.name, ==, "MsgAlice Tier-3");
+    g_assert_cmpstr (pm.msg, ==, body);
 
-	integration_release_htlc (&htlc_b);
-	integration_close (fd_b);
-	integration_release_htlc (&htlc_a);
-	integration_close (fd_a);
+    integration_release_htlc (&htlc_b);
+    integration_close (fd_b);
+    integration_release_htlc (&htlc_a);
+    integration_close (fd_a);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/msg/roundtrip_a_to_b",
-	                 test_msg_roundtrip_a_to_b);
+    g_test_add_func ("/integration/msg/roundtrip_a_to_b",
+                     test_msg_roundtrip_a_to_b);
 
-	return g_test_run ();
+    return g_test_run ();
 }

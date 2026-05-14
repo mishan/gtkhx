@@ -25,20 +25,21 @@
 static void
 task_free (gpointer p)
 {
-	struct task *tsk = p;
-	if (!tsk)
-		return;
-	g_free (tsk->str);
-	g_free (tsk);
+    struct task *tsk = p;
+    if (!tsk) {
+        return;
+    }
+    g_free (tsk->str);
+    g_free (tsk);
 }
 
 GHashTable *
 tasks_table_new (void)
 {
-	/* trans is a guint32; we cast it to gpointer via GUINT_TO_POINTER
+    /* trans is a guint32; we cast it to gpointer via GUINT_TO_POINTER
 	 * at insert time, so g_direct_hash / g_direct_equal are the
 	 * correct hash + equality functions. Keys are pointer-sized
 	 * integers, not heap allocations — no key destroy notify. */
-	return g_hash_table_new_full (g_direct_hash, g_direct_equal,
-	                              NULL, task_free);
+    return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
+                                  task_free);
 }

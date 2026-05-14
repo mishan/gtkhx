@@ -8,10 +8,10 @@
 #ifndef __gtkhx_inet_h
 #define __gtkhx_inet_h 1
 
-#define set_blocking(sok)	fcntl(sok, F_SETFL, 0)
-#define set_nonblocking(sok)	fcntl(sok, F_SETFL, O_NONBLOCK)
-#define would_block_again()	(errno == EAGAIN || errno == EWOULDBLOCK)
-#define would_block()		(errno == EWOULDBLOCK)
-#define sock_error()		(errno)
+#define set_blocking(sok) fcntl (sok, F_SETFL, 0)
+#define set_nonblocking(sok) fcntl (sok, F_SETFL, O_NONBLOCK)
+#define would_block_again() (errno == EAGAIN || errno == EWOULDBLOCK)
+#define would_block() (errno == EWOULDBLOCK)
+#define sock_error() (errno)
 
 #endif

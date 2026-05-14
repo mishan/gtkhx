@@ -16,7 +16,6 @@
  * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
@@ -29,11 +28,7 @@
 #include "gtkhx.h"
 #include "sound.h"
 
-struct hx_sounds hxsnd =
-{
-	0,
-	1, 1, 1, 1, 1, 1, 1, 1, 1
-};
+struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
 /* Phase 5: resolve a sound file by name across the layered sound
  * search path:
@@ -45,19 +40,21 @@ struct hx_sounds hxsnd =
 static char *
 sound_resolve (const char *name)
 {
-	char *candidate;
+    char *candidate;
 
-	candidate = g_build_filename (gtkhx_config_dir (), "sounds", name, NULL);
-	if (g_file_test (candidate, G_FILE_TEST_EXISTS))
-		return candidate;
-	g_free (candidate);
+    candidate = g_build_filename (gtkhx_config_dir (), "sounds", name, NULL);
+    if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
+        return candidate;
+    }
+    g_free (candidate);
 
-	candidate = g_build_filename (PREFIX "/share/gtkhx/sounds", name, NULL);
-	if (g_file_test (candidate, G_FILE_TEST_EXISTS))
-		return candidate;
-	g_free (candidate);
+    candidate = g_build_filename (PREFIX "/share/gtkhx/sounds", name, NULL);
+    if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
+        return candidate;
+    }
+    g_free (candidate);
 
-	return NULL;
+    return NULL;
 }
 
 /* Phase 5: GSound (a thin GLib-style wrapper over libcanberra) is the
@@ -72,121 +69,128 @@ static GSoundContext *gtkhx_gsound_ctx = NULL;
 static GSoundContext *
 gtkhx_gsound_get (void)
 {
-	GError *err = NULL;
+    GError *err = NULL;
 
-	if (gtkhx_gsound_ctx)
-		return gtkhx_gsound_ctx;
+    if (gtkhx_gsound_ctx) {
+        return gtkhx_gsound_ctx;
+    }
 
-	gtkhx_gsound_ctx = gsound_context_new (NULL, &err);
-	if (!gtkhx_gsound_ctx) {
-		g_warning ("gsound_context_new failed: %s",
-		           err ? err->message : "(no detail)");
-		g_clear_error (&err);
-		return NULL;
-	}
+    gtkhx_gsound_ctx = gsound_context_new (NULL, &err);
+    if (!gtkhx_gsound_ctx) {
+        g_warning ("gsound_context_new failed: %s",
+                   err ? err->message : "(no detail)");
+        g_clear_error (&err);
+        return NULL;
+    }
 
-	return gtkhx_gsound_ctx;
+    return gtkhx_gsound_ctx;
 }
 
 static void
 gtkhx_gsound_play_done (GObject *source, GAsyncResult *result, gpointer data)
 {
-	GError *err = NULL;
-	char   *path = data;
+    GError *err = NULL;
+    char *path = data;
 
-	if (!gsound_context_play_full_finish (GSOUND_CONTEXT (source), result, &err)) {
-		/* G_IO_ERROR_CANCELLED is the only failure we don't want to
+    if (!gsound_context_play_full_finish (GSOUND_CONTEXT (source), result,
+                                          &err)) {
+        /* G_IO_ERROR_CANCELLED is the only failure we don't want to
 		 * surface — that's the "user already triggered another sound
 		 * or the context is being torn down" path. Everything else
 		 * (file not found, decoder unavailable, audio server
 		 * unreachable) the user wants to know about; otherwise sounds
 		 * just silently never work and the failure mode is
 		 * mysterious. */
-		if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-			g_warning ("gsound: failed to play %s: %s",
-			           path ? path : "(null)",
-			           err ? err->message : "(no detail)");
-		}
-		g_clear_error (&err);
-	}
-	g_free (path);
+        if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_warning ("gsound: failed to play %s: %s", path ? path : "(null)",
+                       err ? err->message : "(no detail)");
+        }
+        g_clear_error (&err);
+    }
+    g_free (path);
 }
 
-static void play (char *name)
+static void
+play (char *name)
 {
-	GSoundContext *ctx;
-	char          *path;
+    GSoundContext *ctx;
+    char *path;
 
-	path = sound_resolve (name);
-	if (!path) {
-		g_message ("sound: '%s' not found in $CONFIG/sounds or "
-		           PREFIX "/share/gtkhx/sounds; skipping",
-		           name);
-		return;
-	}
+    path = sound_resolve (name);
+    if (!path) {
+        g_message ("sound: '%s' not found in $CONFIG/sounds or " PREFIX
+                   "/share/gtkhx/sounds; skipping",
+                   name);
+        return;
+    }
 
-	ctx = gtkhx_gsound_get ();
-	if (!ctx) {
-		g_free (path);
-		return;
-	}
+    ctx = gtkhx_gsound_get ();
+    if (!ctx) {
+        g_free (path);
+        return;
+    }
 
-	/* play_full so we collect errors via the callback. The callback
+    /* play_full so we collect errors via the callback. The callback
 	 * owns `path` (transferred via user_data) and frees it. */
-	gsound_context_play_full (ctx, NULL,
-	                          gtkhx_gsound_play_done, path,
-	                          GSOUND_ATTR_MEDIA_FILENAME, path,
-	                          GSOUND_ATTR_MEDIA_ROLE,     "event",
-	                          NULL);
+    gsound_context_play_full (ctx, NULL, gtkhx_gsound_play_done, path,
+                              GSOUND_ATTR_MEDIA_FILENAME, path,
+                              GSOUND_ATTR_MEDIA_ROLE, "event", NULL);
 }
 
-void play_sound(int sound)
+void
+play_sound (int sound)
 {
-	if(!hxsnd.on) {
-		g_debug ("play_sound: hxsnd.on is false, skipping sound %d", sound);
-		return;
-	}
+    if (!hxsnd.on) {
+        g_debug ("play_sound: hxsnd.on is false, skipping sound %d", sound);
+        return;
+    }
 
-	switch(sound) {
-	case CHAT_INVITE:
-		if (hxsnd.invite)
-			play("chatinvite.wav");
-		break;
-	case CHAT_POST:
-		if (hxsnd.chat)
-			play("chatpost.wav");
-		break;
-	case ERROR:
-		if (hxsnd.error)
-			play("error.wav");
-		break;
-	case FILE_DONE:
-		if (hxsnd.file)
-			play("filedone.wav");
-		break;
-	case USER_JOIN:
-		if (hxsnd.join)
-			play("join.wav");
-		break;
-	case LOGIN:
-		if (hxsnd.login)
-			play("logged-in.wav");
-		break;
-	case MSG:
-		if(hxsnd.msg)
+    switch (sound) {
+    case CHAT_INVITE:
+        if (hxsnd.invite) {
+            play ("chatinvite.wav");
+        }
+        break;
+    case CHAT_POST:
+        if (hxsnd.chat) {
+            play ("chatpost.wav");
+        }
+        break;
+    case ERROR:
+        if (hxsnd.error) {
+            play ("error.wav");
+        }
+        break;
+    case FILE_DONE:
+        if (hxsnd.file) {
+            play ("filedone.wav");
+        }
+        break;
+    case USER_JOIN:
+        if (hxsnd.join) {
+            play ("join.wav");
+        }
+        break;
+    case LOGIN:
+        if (hxsnd.login) {
+            play ("logged-in.wav");
+        }
+        break;
+    case MSG:
+        if (hxsnd.msg) {
+            play ("message.wav");
+        }
 
-			play("message.wav");
-
-		break;
-	case NEWS_POST:
-		if(hxsnd.news)
-			play("newspost.wav");
-		break;
-	case USER_PART:
-		if(hxsnd.part)
-			play("part.wav");
-		break;
-	}
-
+        break;
+    case NEWS_POST:
+        if (hxsnd.news) {
+            play ("newspost.wav");
+        }
+        break;
+    case USER_PART:
+        if (hxsnd.part) {
+            play ("part.wav");
+        }
+        break;
+    }
 }
-

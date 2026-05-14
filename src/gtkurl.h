@@ -33,11 +33,10 @@ extern char *gtkurl_normalize (const char *word);
  * once per detected URL substring. Used by news.c / news15.c to
  * apply the "url" GtkTextTag over the matching ranges after a
  * gtk_text_buffer_insert / set_text. */
-typedef void (*gtkurl_match_cb) (const char *text,
-                                 int start_byte, int end_byte,
+typedef void (*gtkurl_match_cb) (const char *text, int start_byte, int end_byte,
                                  gpointer user);
-extern void gtkurl_scan (const char *text, gssize length,
-                         gtkurl_match_cb cb, gpointer user);
+extern void gtkurl_scan (const char *text, gssize length, gtkurl_match_cb cb,
+                         gpointer user);
 
 /* Pop the right-click context menu for `url' anchored at `widget' /
  * (x, y). Builds: a header showing the URL truncated to fit, "Open
@@ -45,8 +44,8 @@ extern void gtkurl_scan (const char *text, gssize length,
  * Link", plus one row per alternate browser GAppInfo registered for
  * http on this system. Free-floats: the popover destroys itself on
  * close. */
-extern void gtkurl_show_popup (GtkWidget *anchor, const char *url,
-                               double x, double y);
+extern void gtkurl_show_popup (GtkWidget *anchor, const char *url, double x,
+                               double y);
 
 /* WORD_CLICK signal handler for xtext consumers. Connect with
  *
