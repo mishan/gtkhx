@@ -1472,13 +1472,35 @@ open_files_browser (void)
 
     /* Two panels in a horizontal GtkPaned. Phase 1: both local;
 	 * Phase 2 swaps the right panel's provider for a remote one
-	 * (and adds the L/R side selectors). Default split position
-	 * is centered; the user can drag the divider. */
+	 * (and adds the L/R side selectors). The user can drag the
+	 * divider.
+	 *
+	 * NOTE: we set the position explicitly. With no position set,
+	 * GtkPaned recomputes the split during every allocation pass
+	 * based on the children's natural sizes — and the panel
+	 * GtkColumnView's natural size changes when items-changed
+	 * fires on the underlying GListStore (e.g. when a directory
+	 * listing arrives). Each recomputation cascades into another
+	 * allocation pass, which in GTK 4 ends up moving focus back to
+	 * whichever panel has the "default" focus. End result: the
+	 * focus-drift bug logged in BUGS — double-click on a folder in
+	 * the right (remote) panel takes an extra click because the
+	 * first click's focus is stolen mid-population.
+	 *
+	 * The empirical confirmation: the user reported that manually
+	 * dragging the divider once stops the focus drift for the rest
+	 * of the session. That's because a user drag toggles
+	 * `position-set` to TRUE internally, after which GtkPaned no
+	 * longer recomputes. Setting the position here up-front gets
+	 * us into the same state from the start. */
     paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
     gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
+    /* Centered split for the default 980 px window — see
+	 * gtk_widget_set_size_request a few lines up. */
+    gtk_paned_set_position (GTK_PANED (paned), 490);
 
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
 	 * R = remote Hotline server. The remote provider sits idle
