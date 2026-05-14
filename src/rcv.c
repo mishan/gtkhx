@@ -1689,8 +1689,14 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                 }
                 {
                     guint32 fsize;
+                    /* pathbuf is the joined parent + name in `cfl->path`
+					 * space. Pass the structured (dir, name) tuple to
+					 * xfer_new so the filename's bytes (including any
+					 * `/` in the name) survive the wire trip. */
                     HN32 (&fsize, &fh->fsize);
-                    htxf = xfer_new (lpath + 1, pathbuf, XFER_GET, 0, fsize);
+                    htxf = xfer_new (lpath + 1, cfl->path,
+                                     (const char *)fh->fname, (gsize)fnlen,
+                                     XFER_GET, 0, fsize);
                 }
                 htxf->filter_argv = cfl->filter_argv;
                 g_free (lpath);

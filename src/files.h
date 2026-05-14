@@ -28,7 +28,15 @@ extern void hx_list_dir (struct htlc_conn *htlc, const char *path, int reload,
                          int recurs, void *data);
 extern void hx_file_delete (struct htlc_conn *htlc, char *path);
 extern void hx_make_dir (struct htlc_conn *htlc, char *path);
-extern void hx_file_info (struct htlc_conn *htlc, char *path);
+/* Request info on the file located at (dir_path, file_name).
+ * Keeping the directory and filename separate on the API surface —
+ * rather than a single joined `dir/name` string — is what lets
+ * names containing `/` (which is otherwise dir_char) survive intact
+ * on the wire FILE_NAME chunk. Otherwise the embedded slash gets
+ * reinterpreted as a directory boundary on the round-trip through
+ * path_to_hldir. */
+extern void hx_file_info (struct htlc_conn *htlc, const char *dir_path,
+                          const char *file_name, gsize file_name_len);
 extern void hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath);
 extern void hx_file_link (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
