@@ -1,0 +1,11 @@
+# Commits to skip when running `git blame`.
+#
+# Apply automatically with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Future bulk-reformat commits go here, one full hash per line, with a
+# brief comment above. This keeps `git blame` pointing at the commit
+# that introduced the LOGIC, not the one that just shifted whitespace.
+
+# (no reformat commits yet — append the bulk-reformat sha here when
+# it lands)

@@ -1,0 +1,76 @@
+# GtkHx code style.
+#
+# Set up to keep the existing GNU/GLib aesthetic — return type on its
+# own line for function definitions, space before opening paren, brace
+# on next line for function bodies, brace on same line for control
+# flow — but switch the indentation from tabs (8-col) to 4 spaces and
+# enforce always-braces for single-statement bodies.
+#
+# Apply with: clang-format -i <files>
+# See tools/reformat.sh for the curated file list (vendored sources
+# are excluded so we don't churn upstream code we want to track).
+
+---
+Language: Cpp
+BasedOnStyle: GNU
+
+# Indentation: 4 spaces, never tabs.
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# Brace style — Linux is "GNU minus the always-newline-before-brace":
+# functions and struct/union definitions get their opening brace on a
+# new line; control-flow blocks keep theirs on the same line. Matches
+# what GtkHx code already looks like once you mentally swap tabs for
+# spaces.
+BreakBeforeBraces: Linux
+
+# Function return type lives on its own line for DEFINITIONS only
+# (the gtk_widget_show_all style); function declarations in headers
+# stay on one line.
+AlwaysBreakAfterReturnType: AllDefinitions
+
+# Always wrap single-statement bodies in braces. This is the rule you
+# asked for explicitly. Available in clang-format 15+; on older
+# versions clang-tidy's readability-braces-around-statements covers
+# it (.clang-tidy already enables that check).
+InsertBraces: true
+
+# Don't let clang-format collapse short forms — we want consistent
+# multi-line bodies even for trivially short ones.
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+
+# Space rules — keep the GLib idiom of "space before paren on calls
+# AND control statements". ControlStatementsExceptControlMacros also
+# leaves macros like G_DEFINE_TYPE without a space, which matches the
+# existing code.
+SpaceBeforeParens: Always
+DerivePointerAlignment: false
+PointerAlignment: Right
+
+# Width target. 80 is the project convention (lots of existing
+# comments wrap at 80). clang-format treats this as a soft limit.
+ColumnLimit: 80
+
+# Don't reorder #includes — header ordering in this codebase is
+# load-bearing in a few places (compat.h before gi18n.h, etc.).
+SortIncludes: false
+
+# Switch-case indentation: align cases with the switch.
+IndentCaseLabels: false
+
+# Don't strip the blank line right after an opening brace if the
+# author left one there — they often did it deliberately to set off
+# variable declarations.
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# Leave trailing comments alone — the codebase has many "/* ... */"
+# blocks at end-of-line that clang-format would otherwise try to
+# realign.
+ReflowComments: false
