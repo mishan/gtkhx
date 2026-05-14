@@ -1242,6 +1242,42 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 
 /* ---- Keyboard shortcut: Tab switches active panel ---- */
 
+/* The window-level shortcut controller fires at GTK_PHASE_CAPTURE,
+ * so we see Backspace / Tab BEFORE the focused widget does. That's
+ * desirable for keystrokes targeting the column view (where Tab
+ * would otherwise be consumed by the focus chain), but it breaks
+ * editing in the path entry — Backspace turns into "navigate up"
+ * instead of deleting a character, Tab steals focus to the other
+ * panel mid-edit.
+ *
+ * Compromise: if focus is on any GtkEditable (entry, search-entry,
+ * spin button), don't fire — let the keystroke through. The
+ * column view isn't editable in that sense; the panels themselves
+ * are not editable widgets. */
+static gboolean
+focus_is_editable (struct browser *br)
+{
+    GtkRoot *root;
+    GtkWidget *focused;
+
+    if (!br || !br->window) {
+        return FALSE;
+    }
+    root = gtk_widget_get_root (br->window);
+    if (!GTK_IS_WINDOW (root)) {
+        return FALSE;
+    }
+    focused = gtk_window_get_focus (GTK_WINDOW (root));
+    if (!focused) {
+        return FALSE;
+    }
+    /* GtkEntry delegates editing to an internal GtkText, so when
+	 * the path entry has focus gtk_window_get_focus returns the
+	 * GtkText, not the GtkEntry. Both implement GtkEditable, so
+	 * GTK_IS_EDITABLE covers both cases. */
+    return GTK_IS_EDITABLE (focused);
+}
+
 static gboolean
 on_tab_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
@@ -1249,6 +1285,10 @@ on_tab_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
     files_panel *other;
     (void)widget;
     (void)args;
+
+    if (focus_is_editable (br)) {
+        return FALSE;
+    }
 
     if (!br->active) {
         return FALSE;
@@ -1266,6 +1306,10 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
     struct browser *br = user_data;
     (void)widget;
     (void)args;
+
+    if (focus_is_editable (br)) {
+        return FALSE;
+    }
 
     if (br->active) {
         hx_files_provider_navigate_up (files_panel_get_provider (br->active));
