@@ -179,12 +179,22 @@ filter_match (gpointer item, gpointer user_data)
 static int
 cmp_hxstr (gconstpointer a, gconstpointer b, gpointer user_data)
 {
+    /* g_ptr_array_sort_with_data hands the comparator pointers to
+	 * the array slots (HxStr**), not the items themselves. Cast
+	 * and dereference one level. (My earlier `*(HxStr *const *)&a`
+	 * was taking the address of the local arg `a` and reading
+	 * back the arg's value as an HxStr* — wild pointer, crash in
+	 * g_utf8_casefold.) */
+    HxStr *const *pa = a;
+    HxStr *const *pb = b;
+    const char *as = hx_str_value (*pa);
+    const char *bs = hx_str_value (*pb);
+    char *af, *bf;
+    int r;
     (void)user_data;
-    const char *as = hx_str_value (*(HxStr *const *)&a);
-    const char *bs = hx_str_value (*(HxStr *const *)&b);
-    char *af = g_utf8_casefold (as ? as : "", -1);
-    char *bf = g_utf8_casefold (bs ? bs : "", -1);
-    int r = g_strcmp0 (af, bf);
+    af = g_utf8_casefold (as ? as : "", -1);
+    bf = g_utf8_casefold (bs ? bs : "", -1);
+    r = g_strcmp0 (af, bf);
     g_free (af);
     g_free (bf);
     return r;
@@ -296,6 +306,17 @@ update_completions (hx_path_complete *c)
     char *new_prefix;
 
     if (c->updating) {
+        return;
+    }
+
+    /* Don't fire when the entry text changed programmatically — i.e.
+	 * the panel's on_navigated handler doing
+	 * gtk_editable_set_text on every directory change. We only
+	 * want to suggest while the USER is typing. has_focus is the
+	 * cleanest way to tell the two apart; programmatic set_text
+	 * doesn't move focus. */
+    if (!gtk_widget_has_focus (GTK_WIDGET (c->entry))) {
+        hide_popover (c);
         return;
     }
 
