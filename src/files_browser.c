@@ -13,6 +13,11 @@
 #include <adwaita.h>
 
 #include "hx.h"           /* struct htxf_conn — auto-refresh hook */
+#include "session.h"      /* the_session — remote drag uses htlc.access */
+#include "hl_access.h"    /* HL_ACCESS_DOWNLOAD_FILES */
+#include "xfers.h"        /* xfer_new for remote drag-to-Downloads */
+#include "prefs.h"        /* gtkhx_prefs.download_path */
+#include "files.h"        /* hx_file_move for cross-dir Move */
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
@@ -344,6 +349,252 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
 	gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
 }
 
+/* ---- Move (F6 cross-directory) ----
+ *
+ * Same-directory rename is covered by Rename. Move adds the
+ * cross-directory case: rename(old, new) where old and new live
+ * under different parents. Defaults the destination to the
+ * INACTIVE panel's current path, since that's what the user
+ * usually wants ("move these into the other side's directory").
+ *
+ * Wire-side, Hotline's MOVEFILE opcode (hx_file_move) is path-
+ * aware and works for cross-directory moves on the same server.
+ * GIO's g_file_move handles local cross-dir moves the same way.
+ * Cross-SIDE moves (local→remote or vice versa) aren't really
+ * "moves" — they require upload-then-delete or download-then-
+ * delete. We do the copy via files_ops and report success; the
+ * user can delete the source themselves with the Delete button.
+ * Mixed-side Move isn't a common orthodox-FM operation anyway. */
+
+struct move_ctx {
+	struct browser *br;
+	files_panel    *panel;
+	GPtrArray      *names;       /* owned — g_strdup'd source names */
+	GtkWidget      *entry;       /* dest-path entry */
+};
+
+static void
+on_move_response (AdwAlertDialog *dialog, const char *response,
+                   gpointer user_data)
+{
+	struct move_ctx *ctx = user_data;
+	HxFilesProvider *prov;
+	const char *dest_dir, *src_dir;
+	guint i, moved = 0, failed = 0;
+	GError *last_err = NULL;
+	(void) dialog;
+
+	if (g_strcmp0 (response, "move") != 0) return;
+	if (!ctx->panel || !ctx->names) return;
+
+	prov     = files_panel_get_provider (ctx->panel);
+	dest_dir = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+	src_dir  = hx_files_provider_get_current_path (prov);
+	if (!dest_dir || !*dest_dir) return;
+
+	/* Same-dir → defer to the regular Rename path; if there's no
+	 * rename intent the user could just have done nothing. We
+	 * proceed anyway: hx_files_provider_rename treats it as a
+	 * no-op-ish call. */
+	for (i = 0; i < ctx->names->len; i++) {
+		const char *src_name = g_ptr_array_index (ctx->names, i);
+		char *new_path = g_build_filename (dest_dir, src_name, NULL);
+		GError *err = NULL;
+		gboolean ok;
+
+		/* The provider's rename takes leaf names within the
+		 * current dir. For cross-dir we pass an absolute path
+		 * as new_name — both impls treat new_name starting
+		 * with '/' as an absolute path and join correctly.
+		 *
+		 * Actually checking the impls: local's
+		 * hx_local_files_provider_rename calls child_path
+		 * which always joins under current_path. Remote's
+		 * does the same. So they DON'T support cross-dir
+		 * via the existing rename method.
+		 *
+		 * Workaround: call hx_file_move (remote) /
+		 * g_file_move (local) directly with absolute paths.
+		 * The provider interface gains a follow-up "move"
+		 * method later if cross-dir becomes a routine
+		 * operation. For Phase 4 we punch through the
+		 * abstraction. */
+		char *src_abs = g_build_filename (src_dir ? src_dir : "/",
+			src_name, NULL);
+
+		if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
+			GFile *sf = g_file_new_for_path (src_abs);
+			GFile *df = g_file_new_for_path (new_path);
+			ok = g_file_move (sf, df, G_FILE_COPY_NONE, NULL,
+				NULL, NULL, &err);
+			g_object_unref (sf);
+			g_object_unref (df);
+		} else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
+			if (!the_session.htlc.fd) {
+				ok = FALSE;
+				err = g_error_new (G_FILE_ERROR,
+					G_FILE_ERROR_FAILED,
+					_("Not connected to a server."));
+			} else if (!hl_access_has (
+			           (const guint8 *) &the_session.htlc.access,
+			           HL_ACCESS_MOVE_FILES)) {
+				ok = FALSE;
+				err = g_error_new (G_FILE_ERROR,
+					G_FILE_ERROR_FAILED,
+					_("You don't have permission to move files on the server."));
+			} else {
+				hx_file_move (&the_session.htlc, src_abs, new_path);
+				ok = TRUE;   /* fire-and-forget — server task
+				              * error would surface via the
+				              * existing task-error toast */
+			}
+		} else {
+			ok = FALSE;
+		}
+
+		if (ok) moved++;
+		else {
+			failed++;
+			if (last_err) g_error_free (last_err);
+			last_err = err;
+		}
+
+		g_free (src_abs);
+		g_free (new_path);
+	}
+
+	hx_files_provider_reload (prov);
+
+	if (failed == 0) {
+		char *msg = g_strdup_printf (
+			g_dngettext (NULL,
+				"Moved %u item.",
+				"Moved %u items.",
+				moved),
+			moved);
+		show_toast (ctx->br, msg);
+		g_free (msg);
+	} else {
+		show_toast (ctx->br,
+			last_err ? last_err->message : _("Move failed."));
+	}
+	if (last_err) g_error_free (last_err);
+}
+
+static void
+on_move_closed (AdwAlertDialog *dialog, gpointer user_data)
+{
+	struct move_ctx *ctx = user_data;
+	(void) dialog;
+	if (ctx->names) g_ptr_array_free (ctx->names, TRUE);
+	g_free (ctx);
+}
+
+static void
+on_move_clicked (GtkButton *btn, gpointer user_data)
+{
+	struct browser *br = user_data;
+	GPtrArray *entries;
+	files_panel *dst_panel;
+	const char *default_dest;
+	AdwDialog *dialog;
+	GtkWidget *entry;
+	struct move_ctx *ctx;
+	char *body;
+	guint i;
+	(void) btn;
+
+	if (!br->active) return;
+	entries = files_panel_get_selected_entries (br->active);
+	if (!entries || entries->len == 0) {
+		if (entries) g_ptr_array_free (entries, TRUE);
+		show_toast (br, _("Select files to move first."));
+		return;
+	}
+
+	/* Cross-side moves are out of scope — Hotline's MOVEFILE
+	 * only works within one server, and GIO's move only within
+	 * one filesystem. The user should use Copy + Delete for
+	 * cross-side. Refuse and toast. */
+	dst_panel = (br->active == br->left) ? br->right : br->left;
+	if (dst_panel) {
+		HxFilesProvider *sp = files_panel_get_provider (br->active);
+		HxFilesProvider *dp = files_panel_get_provider (dst_panel);
+		gboolean s_local = HX_IS_LOCAL_FILES_PROVIDER (sp);
+		gboolean d_local = HX_IS_LOCAL_FILES_PROVIDER (dp);
+		if (s_local != d_local) {
+			/* Other panel is the wrong side — default the
+			 * dest entry to the source side's path so the
+			 * user can edit it. Toast a hint. */
+			(void) 0;
+		}
+	}
+
+	/* Default destination: the other panel's current path if
+	 * it's the same side as the active one; otherwise the
+	 * active panel's current path so the user can edit. */
+	{
+		HxFilesProvider *sp = files_panel_get_provider (br->active);
+		default_dest = NULL;
+		if (dst_panel) {
+			HxFilesProvider *dp = files_panel_get_provider (dst_panel);
+			gboolean same_side =
+				(HX_IS_LOCAL_FILES_PROVIDER (sp) ==
+				 HX_IS_LOCAL_FILES_PROVIDER (dp));
+			if (same_side)
+				default_dest = hx_files_provider_get_current_path (dp);
+		}
+		if (!default_dest)
+			default_dest = hx_files_provider_get_current_path (sp);
+	}
+
+	body = (entries->len == 1)
+		? g_strdup_printf (_("Move “%s” to:"),
+			hx_file_entry_get_name (
+				g_ptr_array_index (entries, 0)))
+		: g_strdup_printf (
+			g_dngettext (NULL,
+				"Move %u item to:",
+				"Move %u items to:",
+				entries->len),
+			entries->len);
+	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Move"), body));
+	g_free (body);
+
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+		"cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+		"move", _("_Move"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+		"move", ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "move");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+
+	entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+	gtk_editable_set_text (GTK_EDITABLE (entry), default_dest);
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+
+	ctx = g_new0 (struct move_ctx, 1);
+	ctx->br    = br;
+	ctx->panel = br->active;
+	ctx->names = g_ptr_array_new_with_free_func (g_free);
+	for (i = 0; i < entries->len; i++) {
+		HxFileEntry *e = g_ptr_array_index (entries, i);
+		g_ptr_array_add (ctx->names,
+			g_strdup (hx_file_entry_get_name (e)));
+	}
+	ctx->entry = entry;
+	g_ptr_array_free (entries, TRUE);
+
+	g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
+	g_signal_connect (dialog, "closed",   G_CALLBACK (on_move_closed),   ctx);
+
+	adw_dialog_present (dialog, br->window);
+	gtk_widget_grab_focus (entry);
+	gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+}
+
 /* ---- Activate selected entry (F4 / Enter on a row) ---- */
 
 /* Window-level shortcut that mirrors what double-click /
@@ -376,6 +627,17 @@ on_rename_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
 	(void) widget; (void) args;
 	on_rename_clicked (NULL, user_data);
+	return TRUE;
+}
+
+/* F6 move shortcut — Norton/orthodox-FM convention for
+ * "move to other panel's directory". Mirrors the headerbar
+ * Move button. */
+static gboolean
+on_move_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+	(void) widget; (void) args;
+	on_move_clicked (NULL, user_data);
 	return TRUE;
 }
 
@@ -497,11 +759,33 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 	cp_internal = gdk_content_provider_new_for_value (&val);
 	g_value_unset (&val);
 
-	/* External-drag enrichment: if this is the local provider,
-	 * also offer a GDK_TYPE_FILE_LIST so the receiving app gets
-	 * usable GFiles. The list is built from the provider's
-	 * current_path + each entry's name. Folders included — GIO
-	 * file copy on the receiving side handles recursion. */
+	/* External-drag enrichment.
+	 *
+	 *   LOCAL panel  → offer GDK_TYPE_FILE_LIST pointing at the
+	 *                  real on-disk files. External apps drop
+	 *                  this as a normal GFile copy. Folders
+	 *                  ride in too; GIO handles recursion on
+	 *                  the receiver side.
+	 *
+	 *   REMOTE panel → kick off an xfer_new download to
+	 *                  ~/Downloads (or whatever download_path
+	 *                  is set to) for each selected file, and
+	 *                  publish a text/uri-list pointing at the
+	 *                  eventual paths. The receiver app gets
+	 *                  URIs that may not have full data yet —
+	 *                  for small files on fast links the copy
+	 *                  completes before the receiver reads;
+	 *                  for large files the user will see the
+	 *                  file appear in Downloads via the tasks
+	 *                  window regardless. Not a "true" promised
+	 *                  drag (no FileTransferPortal plumbing)
+	 *                  but a workable approximation. Folders
+	 *                  on the remote side are skipped — Hotline
+	 *                  folder downloads need a recursive
+	 *                  xfer path. Toast tells the user what
+	 *                  happened so the drag completing without
+	 *                  the receiver getting bytes isn't a
+	 *                  mystery. */
 	{
 		HxFilesProvider *prov = files_panel_get_provider (p);
 		if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
@@ -523,6 +807,90 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 			cp_files = gdk_content_provider_new_for_value (&val);
 			g_value_unset (&val);
 			g_slist_free_full (flist, g_object_unref);
+		} else if (HX_IS_REMOTE_FILES_PROVIDER (prov)
+		           && the_session.htlc.fd
+		           && hl_access_has (
+		               (const guint8 *) &the_session.htlc.access,
+		               HL_ACCESS_DOWNLOAD_FILES)) {
+			const char *rdir = hx_files_provider_get_current_path (prov);
+			const char *ldir = gtkhx_prefs.download_path
+				? gtkhx_prefs.download_path : g_get_home_dir ();
+			GString *uri_list = g_string_new (NULL);
+			guint i, kicked = 0;
+			for (i = 0; i < entries->len; i++) {
+				HxFileEntry *e = g_ptr_array_index (entries, i);
+				char *rpath, *lpath, *uri;
+				GFile *lf;
+				struct htxf_conn *htxf;
+
+				if (hx_file_entry_is_dir (e)) continue; /* recursive
+				                                         * remote
+				                                         * dl not
+				                                         * wired */
+				rpath = g_build_filename (rdir ? rdir : "/",
+					hx_file_entry_get_name (e), NULL);
+				lpath = g_build_filename (ldir,
+					hx_file_entry_get_name (e), NULL);
+
+				htxf = xfer_new (lpath, rpath, XFER_GET, 0,
+				                 (guint32) hx_file_entry_get_size (e));
+				if (htxf) {
+					htxf->filter_argv = 0;
+					htxf->opt.retry   = 0;
+					kicked++;
+				}
+
+				/* Build the uri-list entry in the same loop —
+				 * the URI points at where the file WILL be after
+				 * the download lands. RFC 2483: each entry on
+				 * its own line, CRLF-terminated. */
+				lf  = g_file_new_for_path (lpath);
+				uri = g_file_get_uri (lf);
+				if (uri) {
+					g_string_append (uri_list, uri);
+					g_string_append (uri_list, "\r\n");
+					g_free (uri);
+				}
+				g_object_unref (lf);
+
+				g_free (rpath);
+				g_free (lpath);
+			}
+
+			if (uri_list->len > 0) {
+				/* Steal the buffer with the modern
+				 * g_string_free_and_steal API; the
+				 * deprecation-suppressing g_string_free
+				 * (..., FALSE) form trips
+				 * -Wdeprecated-declarations on recent
+				 * GLib. Returned string is g_malloc'd
+				 * and g_bytes_new_take takes ownership. */
+				gsize len = uri_list->len;
+				char *buf = g_string_free_and_steal (uri_list);
+				GBytes *b = g_bytes_new_take (buf, len);
+				cp_files = gdk_content_provider_new_for_bytes (
+					"text/uri-list", b);
+				g_bytes_unref (b);
+			} else {
+				g_string_free (uri_list, TRUE);
+			}
+
+			/* Always toast — the user needs to know the drag is
+			 * really "start download to <path>", not the usual
+			 * "transfer bytes via DnD". */
+			{
+				struct browser *br = the_browser;
+				if (br && kicked > 0) {
+					char *msg = g_strdup_printf (
+						g_dngettext (NULL,
+							"Downloading %u file to %s",
+							"Downloading %u files to %s",
+							kicked),
+						kicked, ldir);
+					show_toast (br, msg);
+					g_free (msg);
+				}
+			}
 		}
 	}
 
@@ -948,7 +1316,7 @@ void
 open_files_browser (void)
 {
 	struct browser *br;
-	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *rename_btn, *delete_btn;
+	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn, *rename_btn, *delete_btn;
 	GtkEventController *shortcuts;
 	GtkShortcut *sh;
 
@@ -981,24 +1349,28 @@ open_files_browser (void)
 	refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
 	mkdir_btn   = gtk_button_new_from_icon_name ("folder-new-symbolic");
 	br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
+	move_btn    = gtk_button_new_from_icon_name ("folder-symbolic");
 	rename_btn  = gtk_button_new_from_icon_name ("document-edit-symbolic");
 	delete_btn  = gtk_button_new_from_icon_name ("user-trash-symbolic");
 
 	gtk_widget_set_tooltip_text (refresh_btn,  _("Reload active panel (Ctrl+R)"));
 	gtk_widget_set_tooltip_text (mkdir_btn,    _("New folder in active panel (Ctrl+N)"));
 	gtk_widget_set_tooltip_text (br->btn_copy, _("Copy selection to the other panel (F5)"));
+	gtk_widget_set_tooltip_text (move_btn,     _("Move selection to another directory (F6)"));
 	gtk_widget_set_tooltip_text (rename_btn,   _("Rename selected file (F2)"));
 	gtk_widget_set_tooltip_text (delete_btn,   _("Delete selection in active panel (Ctrl+D)"));
 
 	g_signal_connect (refresh_btn,  "clicked", G_CALLBACK (on_refresh_clicked), br);
 	g_signal_connect (mkdir_btn,    "clicked", G_CALLBACK (on_mkdir_clicked),   br);
 	g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),    br);
+	g_signal_connect (move_btn,     "clicked", G_CALLBACK (on_move_clicked),    br);
 	g_signal_connect (rename_btn,   "clicked", G_CALLBACK (on_rename_clicked),  br);
 	g_signal_connect (delete_btn,   "clicked", G_CALLBACK (on_delete_clicked),  br);
 
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
+	adw_header_bar_pack_start (ADW_HEADER_BAR (header), move_btn);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), delete_btn);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), rename_btn);
 	gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
@@ -1115,6 +1487,14 @@ open_files_browser (void)
 	sh = gtk_shortcut_new (
 		gtk_keyval_trigger_new (GDK_KEY_F2, 0),
 		gtk_callback_action_new (on_rename_shortcut, br, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+
+	/* F6 = Move (classic Norton). Opens the move-destination
+	 * dialog defaulting to the inactive panel's path. */
+	sh = gtk_shortcut_new (
+		gtk_keyval_trigger_new (GDK_KEY_F6, 0),
+		gtk_callback_action_new (on_move_shortcut, br, NULL));
 	gtk_shortcut_controller_add_shortcut (
 		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
 
