@@ -44,22 +44,22 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 /* Build a single-component hldir blob for `name`. Returns g_malloc'd
@@ -67,82 +67,87 @@ hdr_flag (const struct htlc_conn *htlc)
 static guint8 *
 build_hldir_one (const char *name, guint16 *outlen)
 {
-	guint8 nlen = (guint8) strlen (name);
-	guint16 total = 2 + 3 + nlen;
-	guint8 *buf = g_malloc (total);
-	guint16 count = htons (1);
+    guint8 nlen = (guint8)strlen (name);
+    guint16 total = 2 + 3 + nlen;
+    guint8 *buf = g_malloc (total);
+    guint16 count = htons (1);
 
-	memcpy (buf, &count, 2);
-	/* enc = 0 */
-	buf[2] = 0;
-	buf[3] = 0;
-	/* name length */
-	buf[4] = nlen;
-	memcpy (&buf[5], name, nlen);
+    memcpy (buf, &count, 2);
+    /* enc = 0 */
+    buf[2] = 0;
+    buf[3] = 0;
+    /* name length */
+    buf[4] = nlen;
+    memcpy (&buf[5], name, nlen);
 
-	*outlen = total;
-	return buf;
+    *outlen = total;
+    return buf;
 }
 
 static void
 test_file_list_subdir_uploads (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "FileListSub Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "FileListSub Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	guint16 hldirlen = 0;
-	guint8 *hldir = build_hldir_one ("Uploads", &hldirlen);
-	guint32 our_trans = htlc.trans;
+    guint16 hldirlen = 0;
+    guint8 *hldir = build_hldir_one ("Uploads", &hldirlen);
+    guint32 our_trans = htlc.trans;
 
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_FILE_LIST, /*flag=*/0, /*hc=*/1,
-		(int) HTLC_DATA_DIR, (int) hldirlen, hldir));
-	g_free (hldir);
+    g_assert_true (integration_send_message (
+        fd, &htlc, HTLC_HDR_FILE_LIST, /*flag=*/0, /*hc=*/1, (int)HTLC_DATA_DIR,
+        (int)hldirlen, hldir));
+    g_free (hldir);
 
-	gboolean got_reply = FALSE;
-	for (int i = 0; i < 64 && !got_reply; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != our_trans)
-			continue;
-		got_reply = TRUE;
-	}
-	g_assert_true (got_reply);
+    gboolean got_reply = FALSE;
+    for (int i = 0; i < 64 && !got_reply; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != our_trans) {
+            continue;
+        }
+        got_reply = TRUE;
+    }
+    g_assert_true (got_reply);
 
-	guint32 flag = hdr_flag (&htlc);
-	if (flag & 1) {
-		char err[256];
-		gsize err_len = 0;
-		g_assert_true (task_error_extract (
-			&htlc, err, sizeof (err), &err_len));
-		g_test_message ("server returned task-error for "
-		                "FILE_LIST Uploads/: \"%s\" "
-		                "(check Dockerfile creates the dir)", err);
-	} else {
-		int n = 0;
-		dh_start (&htlc) {
-			if (_type == HTLS_DATA_FILE_LIST)
-				n++;
-		} dh_end ();
-		g_test_message ("server returned %d FILE_LIST "
-		                "chunks under Uploads/", n);
-	}
+    guint32 flag = hdr_flag (&htlc);
+    if (flag & 1) {
+        char err[256];
+        gsize err_len = 0;
+        g_assert_true (task_error_extract (&htlc, err, sizeof (err), &err_len));
+        g_test_message ("server returned task-error for "
+                        "FILE_LIST Uploads/: \"%s\" "
+                        "(check Dockerfile creates the dir)",
+                        err);
+    } else {
+        int n = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_FILE_LIST) {
+                n++;
+            }
+        }
+        dh_end ();
+        g_test_message ("server returned %d FILE_LIST "
+                        "chunks under Uploads/",
+                        n);
+    }
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
-	g_test_add_func ("/integration/file_list_subdir/uploads",
-	                 test_file_list_subdir_uploads);
-	return g_test_run ();
+    g_test_init (&argc, &argv, NULL);
+    g_test_add_func ("/integration/file_list_subdir/uploads",
+                     test_file_list_subdir_uploads);
+    return g_test_run ();
 }

@@ -35,20 +35,18 @@
 static void
 test_task_error_extracts_simple_message (void)
 {
-	struct htlc_conn htlc;
-	const char *msg = "Permission denied.";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/42, /*flag=*/1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
+    struct htlc_conn htlc;
+    const char *msg = "Permission denied.";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/42, /*flag=*/1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-	char out[64];
-	gsize out_len = 0;
-	g_assert_true   (task_error_extract (&htlc, out,
-	                                     sizeof (out), &out_len));
-	g_assert_cmpstr (out, ==, "Permission denied.");
-	g_assert_cmpuint (out_len, ==, strlen (msg));
+    char out[64];
+    gsize out_len = 0;
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), &out_len));
+    g_assert_cmpstr (out, ==, "Permission denied.");
+    g_assert_cmpuint (out_len, ==, strlen (msg));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* The hlserver-on-mhxd-style "Uh, no." reply is what kicked off the
@@ -58,20 +56,18 @@ test_task_error_extracts_simple_message (void)
 static void
 test_task_error_hlserver_uh_no (void)
 {
-	struct htlc_conn htlc;
-	const char *msg = "Uh, no.";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 12, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
+    struct htlc_conn htlc;
+    const char *msg = "Uh, no.";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 12, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-	char out[64];
-	gsize out_len = 0;
-	g_assert_true   (task_error_extract (&htlc, out,
-	                                     sizeof (out), &out_len));
-	g_assert_cmpstr (out, ==, "Uh, no.");
-	g_assert_cmpuint (out_len, ==, 7);
+    char out[64];
+    gsize out_len = 0;
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), &out_len));
+    g_assert_cmpstr (out, ==, "Uh, no.");
+    g_assert_cmpuint (out_len, ==, 7);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- CR-line-ending sanitisation ----------
@@ -84,18 +80,16 @@ test_task_error_hlserver_uh_no (void)
 static void
 test_task_error_converts_cr_to_lf (void)
 {
-	struct htlc_conn htlc;
-	const char *msg = "line one\rline two\rline three";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
+    struct htlc_conn htlc;
+    const char *msg = "line one\rline two\rline three";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-	char out[128];
-	g_assert_true (task_error_extract (&htlc, out,
-	                                   sizeof (out), NULL));
-	g_assert_cmpstr (out, ==, "line one\nline two\nline three");
+    char out[128];
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), NULL));
+    g_assert_cmpstr (out, ==, "line one\nline two\nline three");
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- ANSI / control-byte sanitisation ----------
@@ -107,19 +101,18 @@ test_task_error_converts_cr_to_lf (void)
 static void
 test_task_error_strips_ansi (void)
 {
-	struct htlc_conn htlc;
-	const char input[]    = "\x1b[31mforbidden\x1b[0m";
-	const char expected[] = "[[31mforbidden[[0m";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        sizeof (input) - 1, input);
+    struct htlc_conn htlc;
+    const char input[] = "\x1b[31mforbidden\x1b[0m";
+    const char expected[] = "[[31mforbidden[[0m";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, sizeof (input) - 1,
+                            input);
 
-	char out[64];
-	g_assert_true (task_error_extract (&htlc, out,
-	                                   sizeof (out), NULL));
-	g_assert_cmpstr (out, ==, expected);
+    char out[64];
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), NULL));
+    g_assert_cmpstr (out, ==, expected);
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- No TASKERROR chunk → returns FALSE ----------
@@ -131,39 +124,36 @@ test_task_error_strips_ansi (void)
 static void
 test_task_error_no_taskerror_chunk_returns_false (void)
 {
-	struct htlc_conn htlc;
-	const guint16 some_uid = 42;
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_UID,
-	                        sizeof (some_uid), &some_uid);
+    struct htlc_conn htlc;
+    const guint16 some_uid = 42;
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
 
-	char out[64] = "untouched";
-	g_assert_false (task_error_extract (&htlc, out,
-	                                    sizeof (out), NULL));
-	/* The extractor doesn't write to out on FALSE. We can't assert
+    char out[64] = "untouched";
+    g_assert_false (task_error_extract (&htlc, out, sizeof (out), NULL));
+    /* The extractor doesn't write to out on FALSE. We can't assert
 	 * exact contents because the contract says "MUST NOT read out",
 	 * but we can at least confirm we still have a valid C string at
 	 * the start. */
-	g_assert_cmpstr (out, ==, "untouched");
+    g_assert_cmpstr (out, ==, "untouched");
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_task_error_empty_message_returns_false (void)
 {
-	/* No chunks at all. dh_start walks zero iterations, found
+    /* No chunks at all. dh_start walks zero iterations, found
 	 * stays FALSE. */
-	struct htlc_conn htlc;
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
 
-	char out[64];
-	gsize out_len = 99;
-	g_assert_false   (task_error_extract (&htlc, out,
-	                                      sizeof (out), &out_len));
-	g_assert_cmpuint (out_len, ==, 99);  /* unchanged */
+    char out[64];
+    gsize out_len = 99;
+    g_assert_false (task_error_extract (&htlc, out, sizeof (out), &out_len));
+    g_assert_cmpuint (out_len, ==, 99); /* unchanged */
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Truncation: message larger than out buffer ---------- */
@@ -171,26 +161,25 @@ test_task_error_empty_message_returns_false (void)
 static void
 test_task_error_truncates_to_buffer_size (void)
 {
-	struct htlc_conn htlc;
-	/* 100-byte message, but we only give the extractor 16 bytes
+    struct htlc_conn htlc;
+    /* 100-byte message, but we only give the extractor 16 bytes
 	 * (15 + NUL). It should truncate. */
-	char msg[100];
-	memset (msg, 'A', sizeof (msg));
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        sizeof (msg), msg);
+    char msg[100];
+    memset (msg, 'A', sizeof (msg));
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, sizeof (msg), msg);
 
-	char out[16];
-	gsize out_len = 0;
-	g_assert_true    (task_error_extract (&htlc, out,
-	                                      sizeof (out), &out_len));
-	g_assert_cmpuint (out_len, ==, sizeof (out) - 1);
-	g_assert_cmpuint (strlen (out), ==, sizeof (out) - 1);
-	for (gsize i = 0; i < out_len; i++)
-		g_assert_cmphex (out[i], ==, 'A');
-	g_assert_cmphex  (out[sizeof (out) - 1], ==, '\0');
+    char out[16];
+    gsize out_len = 0;
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), &out_len));
+    g_assert_cmpuint (out_len, ==, sizeof (out) - 1);
+    g_assert_cmpuint (strlen (out), ==, sizeof (out) - 1);
+    for (gsize i = 0; i < out_len; i++) {
+        g_assert_cmphex (out[i], ==, 'A');
+    }
+    g_assert_cmphex (out[sizeof (out) - 1], ==, '\0');
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Multiple chunks: the first TASKERROR wins ----------
@@ -202,21 +191,19 @@ test_task_error_truncates_to_buffer_size (void)
 static void
 test_task_error_first_taskerror_wins_when_duplicated (void)
 {
-	struct htlc_conn htlc;
-	const char *first = "first error";
-	const char *second = "ignored";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (first), first);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (second), second);
+    struct htlc_conn htlc;
+    const char *first = "first error";
+    const char *second = "ignored";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (first), first);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (second),
+                            second);
 
-	char out[64];
-	g_assert_true   (task_error_extract (&htlc, out,
-	                                     sizeof (out), NULL));
-	g_assert_cmpstr (out, ==, "first error");
+    char out[64];
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), NULL));
+    g_assert_cmpstr (out, ==, "first error");
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- Other chunks alongside TASKERROR are skipped ---------- */
@@ -224,23 +211,20 @@ test_task_error_first_taskerror_wins_when_duplicated (void)
 static void
 test_task_error_skips_unrelated_chunks (void)
 {
-	struct htlc_conn htlc;
-	const guint16 some_uid = 17;
-	const char *msg = "the real error";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_UID,
-	                        sizeof (some_uid), &some_uid);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID,
-	                        sizeof (some_uid), &some_uid);
+    struct htlc_conn htlc;
+    const guint16 some_uid = 17;
+    const char *msg = "the real error";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (some_uid),
+                            &some_uid);
 
-	char out[64];
-	g_assert_true   (task_error_extract (&htlc, out,
-	                                     sizeof (out), NULL));
-	g_assert_cmpstr (out, ==, "the real error");
+    char out[64];
+    g_assert_true (task_error_extract (&htlc, out, sizeof (out), NULL));
+    g_assert_cmpstr (out, ==, "the real error");
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 /* ---------- API edge cases ---------- */
@@ -248,63 +232,61 @@ test_task_error_skips_unrelated_chunks (void)
 static void
 test_task_error_null_out_returns_false (void)
 {
-	struct htlc_conn htlc;
-	const char *msg = "anything";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
+    struct htlc_conn htlc;
+    const char *msg = "anything";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-	g_assert_false (task_error_extract (&htlc, NULL, 64, NULL));
+    g_assert_false (task_error_extract (&htlc, NULL, 64, NULL));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 static void
 test_task_error_zero_out_size_returns_false (void)
 {
-	struct htlc_conn htlc;
-	const char *msg = "anything";
-	wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
-	wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR,
-	                        strlen (msg), msg);
+    struct htlc_conn htlc;
+    const char *msg = "anything";
+    wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-	char out[64];
-	g_assert_false (task_error_extract (&htlc, out, 0, NULL));
+    char out[64];
+    g_assert_false (task_error_extract (&htlc, out, 0, NULL));
 
-	wire_fixture_free (&htlc);
+    wire_fixture_free (&htlc);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/proto/task_error/extracts_simple_message",
-	                 test_task_error_extracts_simple_message);
-	g_test_add_func ("/proto/task_error/hlserver_uh_no",
-	                 test_task_error_hlserver_uh_no);
+    g_test_add_func ("/proto/task_error/extracts_simple_message",
+                     test_task_error_extracts_simple_message);
+    g_test_add_func ("/proto/task_error/hlserver_uh_no",
+                     test_task_error_hlserver_uh_no);
 
-	g_test_add_func ("/proto/task_error/converts_cr_to_lf",
-	                 test_task_error_converts_cr_to_lf);
-	g_test_add_func ("/proto/task_error/strips_ansi",
-	                 test_task_error_strips_ansi);
+    g_test_add_func ("/proto/task_error/converts_cr_to_lf",
+                     test_task_error_converts_cr_to_lf);
+    g_test_add_func ("/proto/task_error/strips_ansi",
+                     test_task_error_strips_ansi);
 
-	g_test_add_func ("/proto/task_error/no_taskerror_chunk_returns_false",
-	                 test_task_error_no_taskerror_chunk_returns_false);
-	g_test_add_func ("/proto/task_error/empty_message_returns_false",
-	                 test_task_error_empty_message_returns_false);
+    g_test_add_func ("/proto/task_error/no_taskerror_chunk_returns_false",
+                     test_task_error_no_taskerror_chunk_returns_false);
+    g_test_add_func ("/proto/task_error/empty_message_returns_false",
+                     test_task_error_empty_message_returns_false);
 
-	g_test_add_func ("/proto/task_error/truncates_to_buffer_size",
-	                 test_task_error_truncates_to_buffer_size);
-	g_test_add_func ("/proto/task_error/first_taskerror_wins_when_duplicated",
-	                 test_task_error_first_taskerror_wins_when_duplicated);
-	g_test_add_func ("/proto/task_error/skips_unrelated_chunks",
-	                 test_task_error_skips_unrelated_chunks);
+    g_test_add_func ("/proto/task_error/truncates_to_buffer_size",
+                     test_task_error_truncates_to_buffer_size);
+    g_test_add_func ("/proto/task_error/first_taskerror_wins_when_duplicated",
+                     test_task_error_first_taskerror_wins_when_duplicated);
+    g_test_add_func ("/proto/task_error/skips_unrelated_chunks",
+                     test_task_error_skips_unrelated_chunks);
 
-	g_test_add_func ("/proto/task_error/null_out_returns_false",
-	                 test_task_error_null_out_returns_false);
-	g_test_add_func ("/proto/task_error/zero_out_size_returns_false",
-	                 test_task_error_zero_out_size_returns_false);
+    g_test_add_func ("/proto/task_error/null_out_returns_false",
+                     test_task_error_null_out_returns_false);
+    g_test_add_func ("/proto/task_error/zero_out_size_returns_false",
+                     test_task_error_zero_out_size_returns_false);
 
-	return g_test_run ();
+    return g_test_run ();
 }

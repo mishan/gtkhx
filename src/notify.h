@@ -18,7 +18,7 @@
 #define HX_NOTIFY_H
 
 #include <gtk/gtk.h>
-#include "proto_helpers.h"          /* HxChatEvent */
+#include "proto_helpers.h" /* HxChatEvent */
 
 /* Stash the GApplication pointer and prime the highlight matcher's
  * once-cached state. Call once from gtkhx_activate after the app
@@ -32,13 +32,12 @@ extern void gtkhx_notify_init (GtkApplication *app);
  * notification title can be the actual sender's name. The other
  * event classes still take plain strings — they don't have the
  * sender embedded in a chat-line format. */
-extern void gtkhx_notify_chat        (HxChatEvent *event);
-extern void gtkhx_notify_msg         (HxMsgEvent *event);
-extern void gtkhx_notify_pchat       (HxChatEvent *event);
-extern void gtkhx_notify_pchat_invite (guint32 cid,
-                                        const char *inviter);
-extern void gtkhx_notify_news        (const char *headline);
-extern void gtkhx_notify_xfer_done   (const char *filename);
-extern void gtkhx_notify_broadcast   (const char *text);
+extern void gtkhx_notify_chat (HxChatEvent *event);
+extern void gtkhx_notify_msg (HxMsgEvent *event);
+extern void gtkhx_notify_pchat (HxChatEvent *event);
+extern void gtkhx_notify_pchat_invite (guint32 cid, const char *inviter);
+extern void gtkhx_notify_news (const char *headline);
+extern void gtkhx_notify_xfer_done (const char *filename);
+extern void gtkhx_notify_broadcast (const char *text);
 
 #endif /* HX_NOTIFY_H */

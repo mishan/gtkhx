@@ -24,9 +24,8 @@
 
 extern void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid,
                               const char *prefix, const char *fmt, ...)
-	G_GNUC_PRINTF (4, 5);
-extern void hx_printf (struct htlc_conn *htlc, guint32 cid,
-                       const char *fmt, ...)
-	G_GNUC_PRINTF (3, 4);
+    G_GNUC_PRINTF (4, 5);
+extern void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt,
+                       ...) G_GNUC_PRINTF (3, 4);
 
 #endif /* HX_GTKHX_LOG_H */

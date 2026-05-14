@@ -39,53 +39,54 @@
  * notify only walks next/prev and frees, so those extras are
  * irrelevant here. */
 struct hx_user_stub {
-	struct hx_user_stub *next, *prev;
-	guint16 uid;
+    struct hx_user_stub *next, *prev;
+    guint16 uid;
 };
 
 /* Layout-compatible stub of struct chat — exactly the fields the
  * runtime chat_free destroy notify touches. */
 struct chat_stub {
-	guint32 cid;
-	guint32 nusers;
-	struct hx_user_stub  __user_list;
-	struct hx_user_stub *user_list;
-	struct hx_user_stub *user_tail;
-	char    subject[256];
+    guint32 cid;
+    guint32 nusers;
+    struct hx_user_stub __user_list;
+    struct hx_user_stub *user_list;
+    struct hx_user_stub *user_tail;
+    char subject[256];
 };
 
 static void
 chat_stub_free (gpointer p)
 {
-	struct chat_stub *chat = p;
-	struct hx_user_stub *u, *unext;
+    struct chat_stub *chat = p;
+    struct hx_user_stub *u, *unext;
 
-	if (!chat)
-		return;
-	if (chat->user_list) {
-		for (u = chat->user_list->next; u; u = unext) {
-			unext = u->next;
-			g_free (u);
-		}
-	}
-	g_free (chat);
+    if (!chat) {
+        return;
+    }
+    if (chat->user_list) {
+        for (u = chat->user_list->next; u; u = unext) {
+            unext = u->next;
+            g_free (u);
+        }
+    }
+    g_free (chat);
 }
 
 static GHashTable *
 chat_table_new_for_test (void)
 {
-	return g_hash_table_new_full (g_direct_hash, g_direct_equal,
-	                              NULL, chat_stub_free);
+    return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
+                                  chat_stub_free);
 }
 
 static struct chat_stub *
 make_chat (guint32 cid)
 {
-	struct chat_stub *c = g_malloc0 (sizeof (struct chat_stub));
-	c->cid       = cid;
-	c->user_list = &c->__user_list;
-	c->user_tail = &c->__user_list;
-	return c;
+    struct chat_stub *c = g_malloc0 (sizeof (struct chat_stub));
+    c->cid = cid;
+    c->user_list = &c->__user_list;
+    c->user_tail = &c->__user_list;
+    return c;
 }
 
 /* Append a heap-allocated user onto chat->__user_list (mirrors
@@ -95,12 +96,12 @@ make_chat (guint32 cid)
 static void
 add_user (struct chat_stub *c, guint16 uid)
 {
-	struct hx_user_stub *u = g_malloc0 (sizeof (struct hx_user_stub));
-	u->uid  = uid;
-	u->prev = c->user_tail;
-	c->user_tail->next = u;
-	c->user_tail = u;
-	c->nusers++;
+    struct hx_user_stub *u = g_malloc0 (sizeof (struct hx_user_stub));
+    u->uid = uid;
+    u->prev = c->user_tail;
+    c->user_tail->next = u;
+    c->user_tail = u;
+    c->nusers++;
 }
 
 /* ---- 1. Insert + lookup by cid ------------------------------------ */
@@ -108,19 +109,19 @@ add_user (struct chat_stub *c, guint16 uid)
 static void
 test_insert_lookup_by_cid (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	struct chat_stub *pub  = make_chat (0);     /* public chat */
-	struct chat_stub *priv = make_chat (0xA17);
+    GHashTable *t = chat_table_new_for_test ();
+    struct chat_stub *pub = make_chat (0); /* public chat */
+    struct chat_stub *priv = make_chat (0xA17);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u),     pub);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0xA17u), priv);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0xA17u), priv);
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 2);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u))     == pub);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA17u)) == priv);
-	g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (0xBADu)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 2);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA17u)) == priv);
+    g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (0xBADu)));
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 2. cid=0 (public chat) is a real entry, not a sentinel -------- */
@@ -134,23 +135,23 @@ test_insert_lookup_by_cid (void)
 static void
 test_cid_zero_is_a_real_entry (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	struct chat_stub *pub = make_chat (0);
+    GHashTable *t = chat_table_new_for_test ();
+    struct chat_stub *pub = make_chat (0);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
-	g_assert_true   (g_hash_table_contains (t, GUINT_TO_POINTER (0u)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
+    g_assert_true (g_hash_table_contains (t, GUINT_TO_POINTER (0u)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
 
-	/* Iteration must visit it. */
-	GHashTableIter iter;
-	gpointer key, val;
-	g_hash_table_iter_init (&iter, t);
-	g_assert_true (g_hash_table_iter_next (&iter, &key, &val));
-	g_assert_cmpuint (GPOINTER_TO_UINT (key), ==, 0);
-	g_assert_true    (val == pub);
-	g_assert_false   (g_hash_table_iter_next (&iter, &key, &val));
+    /* Iteration must visit it. */
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init (&iter, t);
+    g_assert_true (g_hash_table_iter_next (&iter, &key, &val));
+    g_assert_cmpuint (GPOINTER_TO_UINT (key), ==, 0);
+    g_assert_true (val == pub);
+    g_assert_false (g_hash_table_iter_next (&iter, &key, &val));
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 3. Insert-on-duplicate replaces + frees old ------------------- */
@@ -163,27 +164,26 @@ test_cid_zero_is_a_real_entry (void)
 static void
 test_duplicate_cid_replaces_value (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	struct chat_stub *first  = make_chat (7);
-	struct chat_stub *second = make_chat (7);
+    GHashTable *t = chat_table_new_for_test ();
+    struct chat_stub *first = make_chat (7);
+    struct chat_stub *second = make_chat (7);
 
-	/* `first` carries three users; if we drop the destroy notify
+    /* `first` carries three users; if we drop the destroy notify
 	 * those three g_malloc'd nodes leak. valgrind / ASan catch
 	 * the regression at runtime; the in-test assertions verify
 	 * the visible API stays consistent. */
-	add_user (first, 100);
-	add_user (first, 101);
-	add_user (first, 102);
+    add_user (first, 100);
+    add_user (first, 101);
+    add_user (first, 102);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (7u), first);
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_hash_table_insert (t, GUINT_TO_POINTER (7u), first);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (7u), second);
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (7u))
-	               == second);
+    g_hash_table_insert (t, GUINT_TO_POINTER (7u), second);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (7u)) == second);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 4. Remove runs the destroy notify ---------------------------- */
@@ -191,24 +191,24 @@ test_duplicate_cid_replaces_value (void)
 static void
 test_remove_runs_destroy_notify (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	struct chat_stub *a = make_chat (10);
-	struct chat_stub *b = make_chat (11);
-	add_user (a, 1);
-	add_user (a, 2);
-	add_user (b, 99);
+    GHashTable *t = chat_table_new_for_test ();
+    struct chat_stub *a = make_chat (10);
+    struct chat_stub *b = make_chat (11);
+    add_user (a, 1);
+    add_user (a, 2);
+    add_user (b, 99);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (10u), a);
-	g_hash_table_insert (t, GUINT_TO_POINTER (11u), b);
+    g_hash_table_insert (t, GUINT_TO_POINTER (10u), a);
+    g_hash_table_insert (t, GUINT_TO_POINTER (11u), b);
 
-	g_assert_true   (g_hash_table_remove (t, GUINT_TO_POINTER (10u)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_null   (g_hash_table_lookup (t, GUINT_TO_POINTER (10u)));
-	g_assert_true   (g_hash_table_lookup (t, GUINT_TO_POINTER (11u)) == b);
+    g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (10u)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (10u)));
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (11u)) == b);
 
-	g_assert_false (g_hash_table_remove (t, GUINT_TO_POINTER (999u)));
+    g_assert_false (g_hash_table_remove (t, GUINT_TO_POINTER (999u)));
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 5. Empty user list: destroy notify still works ---------------- */
@@ -221,13 +221,13 @@ test_remove_runs_destroy_notify (void)
 static void
 test_destroy_empty_chat (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	struct chat_stub *c = make_chat (0xBEEF);
-	/* No users added — user_list->next is NULL. */
-	g_hash_table_insert (t, GUINT_TO_POINTER (0xBEEFu), c);
-	g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (0xBEEFu)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 0);
-	g_hash_table_destroy (t);
+    GHashTable *t = chat_table_new_for_test ();
+    struct chat_stub *c = make_chat (0xBEEF);
+    /* No users added — user_list->next is NULL. */
+    g_hash_table_insert (t, GUINT_TO_POINTER (0xBEEFu), c);
+    g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (0xBEEFu)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 0);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 6. Destroying the table reclaims everything ------------------- */
@@ -235,16 +235,16 @@ test_destroy_empty_chat (void)
 static void
 test_destroy_reclaims_all (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	for (guint32 cid = 0; cid < 20; cid++) {
-		struct chat_stub *c = make_chat (cid);
-		add_user (c, cid + 1000);
-		add_user (c, cid + 2000);
-		g_hash_table_insert (t, GUINT_TO_POINTER (cid), c);
-	}
-	g_assert_cmpuint (g_hash_table_size (t), ==, 20);
-	g_hash_table_destroy (t);
-	/* Leaks would show up under ASan / valgrind. */
+    GHashTable *t = chat_table_new_for_test ();
+    for (guint32 cid = 0; cid < 20; cid++) {
+        struct chat_stub *c = make_chat (cid);
+        add_user (c, cid + 1000);
+        add_user (c, cid + 2000);
+        g_hash_table_insert (t, GUINT_TO_POINTER (cid), c);
+    }
+    g_assert_cmpuint (g_hash_table_size (t), ==, 20);
+    g_hash_table_destroy (t);
+    /* Leaks would show up under ASan / valgrind. */
 }
 
 /* ---- 7. The full uint32 range is addressable ----------------------- */
@@ -252,48 +252,45 @@ test_destroy_reclaims_all (void)
 static void
 test_cid_full_range_distinct (void)
 {
-	GHashTable *t = chat_table_new_for_test ();
-	const guint32 ids[] = {
-		0, 1, 0xFFFF, 0x10000,
-		0x7FFFFFFF, 0x80000000,
-		0xFFFFFFFE, 0xFFFFFFFF,
-	};
-	const guint n = G_N_ELEMENTS (ids);
+    GHashTable *t = chat_table_new_for_test ();
+    const guint32 ids[] = {
+        0, 1, 0xFFFF, 0x10000, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFE, 0xFFFFFFFF,
+    };
+    const guint n = G_N_ELEMENTS (ids);
 
-	for (guint i = 0; i < n; i++)
-		g_hash_table_insert (t, GUINT_TO_POINTER (ids[i]),
-		                     make_chat (ids[i]));
+    for (guint i = 0; i < n; i++) {
+        g_hash_table_insert (t, GUINT_TO_POINTER (ids[i]), make_chat (ids[i]));
+    }
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, n);
-	for (guint i = 0; i < n; i++) {
-		struct chat_stub *c =
-			g_hash_table_lookup (t, GUINT_TO_POINTER (ids[i]));
-		g_assert_nonnull (c);
-		g_assert_cmpuint (c->cid, ==, ids[i]);
-	}
+    g_assert_cmpuint (g_hash_table_size (t), ==, n);
+    for (guint i = 0; i < n; i++) {
+        struct chat_stub *c
+            = g_hash_table_lookup (t, GUINT_TO_POINTER (ids[i]));
+        g_assert_nonnull (c);
+        g_assert_cmpuint (c->cid, ==, ids[i]);
+    }
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/chat_hash/insert_lookup_by_cid",
-	                 test_insert_lookup_by_cid);
-	g_test_add_func ("/chat_hash/cid_zero_is_a_real_entry",
-	                 test_cid_zero_is_a_real_entry);
-	g_test_add_func ("/chat_hash/duplicate_cid_replaces_value",
-	                 test_duplicate_cid_replaces_value);
-	g_test_add_func ("/chat_hash/remove_runs_destroy_notify",
-	                 test_remove_runs_destroy_notify);
-	g_test_add_func ("/chat_hash/destroy_empty_chat",
-	                 test_destroy_empty_chat);
-	g_test_add_func ("/chat_hash/destroy_reclaims_all",
-	                 test_destroy_reclaims_all);
-	g_test_add_func ("/chat_hash/cid_full_range_distinct",
-	                 test_cid_full_range_distinct);
+    g_test_add_func ("/chat_hash/insert_lookup_by_cid",
+                     test_insert_lookup_by_cid);
+    g_test_add_func ("/chat_hash/cid_zero_is_a_real_entry",
+                     test_cid_zero_is_a_real_entry);
+    g_test_add_func ("/chat_hash/duplicate_cid_replaces_value",
+                     test_duplicate_cid_replaces_value);
+    g_test_add_func ("/chat_hash/remove_runs_destroy_notify",
+                     test_remove_runs_destroy_notify);
+    g_test_add_func ("/chat_hash/destroy_empty_chat", test_destroy_empty_chat);
+    g_test_add_func ("/chat_hash/destroy_reclaims_all",
+                     test_destroy_reclaims_all);
+    g_test_add_func ("/chat_hash/cid_full_range_distinct",
+                     test_cid_full_range_distinct);
 
-	return g_test_run ();
+    return g_test_run ();
 }

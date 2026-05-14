@@ -37,7 +37,7 @@
  * stay registered and become visible when one shows up). Pulls the
  * initial enabled state from gtkhx_prefs.tray. Call once at app
  * startup, after the GtkApplication has activated. */
-extern void gtkhx_tray_init     (GtkApplication *app);
+extern void gtkhx_tray_init (GtkApplication *app);
 
 /* Unregister and free everything. Safe to call multiple times. */
 extern void gtkhx_tray_shutdown (void);
@@ -63,7 +63,7 @@ extern gboolean gtkhx_tray_host_available (void);
  * best-effort). */
 extern void gtkhx_tray_show_all_windows (void);
 extern void gtkhx_tray_hide_all_windows (void);
-extern void gtkhx_tray_toggle_windows   (void);
+extern void gtkhx_tray_toggle_windows (void);
 extern gboolean gtkhx_tray_any_window_visible (void);
 
 /* Drive the Connect…/Disconnect menu items' sensitivity from the

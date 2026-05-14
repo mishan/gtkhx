@@ -18,14 +18,15 @@
 static void
 test_handshake_smoke (void)
 {
-	int fd = integration_open_or_skip ();
-	if (fd < 0)
-		return;
-	/* integration_open_or_skip already ran the magic handshake; if
+    int fd = integration_open_or_skip ();
+    if (fd < 0) {
+        return;
+    }
+    /* integration_open_or_skip already ran the magic handshake; if
 	 * we got fd >= 0 the exchange succeeded. Closing here exercises
 	 * the disconnect path on the server too — mhxd should accept
 	 * the close cleanly without error logs. */
-	integration_close (fd);
+    integration_close (fd);
 }
 
 /* Sanity check: a second connection on the same fd lifecycle works
@@ -34,26 +35,27 @@ test_handshake_smoke (void)
 static void
 test_handshake_two_connections_in_a_row (void)
 {
-	int fd1 = integration_open_or_skip ();
-	if (fd1 < 0)
-		return;
-	integration_close (fd1);
+    int fd1 = integration_open_or_skip ();
+    if (fd1 < 0) {
+        return;
+    }
+    integration_close (fd1);
 
-	int fd2 = integration_open_or_skip ();
-	if (fd2 < 0)
-		return;
-	integration_close (fd2);
+    int fd2 = integration_open_or_skip ();
+    if (fd2 < 0) {
+        return;
+    }
+    integration_close (fd2);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/handshake/smoke",
-	                 test_handshake_smoke);
-	g_test_add_func ("/integration/handshake/two_connections_in_a_row",
-	                 test_handshake_two_connections_in_a_row);
+    g_test_add_func ("/integration/handshake/smoke", test_handshake_smoke);
+    g_test_add_func ("/integration/handshake/two_connections_in_a_row",
+                     test_handshake_two_connections_in_a_row);
 
-	return g_test_run ();
+    return g_test_run ();
 }

@@ -33,28 +33,35 @@
 char *
 gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
 {
-	char *converted;
-	gsize bytes_written = 0;
+    char *converted;
+    gsize bytes_written = 0;
 
-	if (!bytes) {
-		if (out_len) *out_len = 0;
-		return g_strdup ("");
-	}
+    if (!bytes) {
+        if (out_len) {
+            *out_len = 0;
+        }
+        return g_strdup ("");
+    }
 
-	if (g_utf8_validate (bytes, len, NULL)) {
-		if (out_len) *out_len = len;
-		return g_strndup (bytes, len);
-	}
+    if (g_utf8_validate (bytes, len, NULL)) {
+        if (out_len) {
+            *out_len = len;
+        }
+        return g_strndup (bytes, len);
+    }
 
-	converted = g_convert (bytes, (gssize) len,
-	                       "UTF-8", "MACINTOSH",
-	                       NULL, &bytes_written, NULL);
-	if (converted) {
-		if (out_len) *out_len = bytes_written;
-		return converted;
-	}
+    converted = g_convert (bytes, (gssize)len, "UTF-8", "MACINTOSH", NULL,
+                           &bytes_written, NULL);
+    if (converted) {
+        if (out_len) {
+            *out_len = bytes_written;
+        }
+        return converted;
+    }
 
-	converted = g_utf8_make_valid (bytes, (gssize) len);
-	if (out_len) *out_len = strlen (converted);
-	return converted;
+    converted = g_utf8_make_valid (bytes, (gssize)len);
+    if (out_len) {
+        *out_len = strlen (converted);
+    }
+    return converted;
 }

@@ -48,22 +48,22 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 /* Encode a single-component Hotline directory path. The wire
@@ -77,98 +77,100 @@ hdr_flag (const struct htlc_conn *htlc)
 static gsize
 encode_hldir_one (guint8 *out, const char *name)
 {
-	gsize nlen = strlen (name);
-	guint16 count_be = htons (1);
-	guint16 nlen_be  = htons ((guint16) nlen);
+    gsize nlen = strlen (name);
+    guint16 count_be = htons (1);
+    guint16 nlen_be = htons ((guint16)nlen);
 
-	memcpy (out + 0, &count_be, 2);   /* component count */
-	out[2] = 0;                        /* unknown / reserved */
-	memcpy (out + 3, &nlen_be, 2);    /* name length */
-	memcpy (out + 5, name, nlen);
-	return 5 + nlen;
+    memcpy (out + 0, &count_be, 2); /* component count */
+    out[2] = 0;                     /* unknown / reserved */
+    memcpy (out + 3, &nlen_be, 2);  /* name length */
+    memcpy (out + 5, name, nlen);
+    return 5 + nlen;
 }
 
 static void
 test_file_put_request_reply (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "FilePut Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "FilePut Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	/* Build the DIR chunk: single component "Uploads". */
-	guint8 hldir[64];
-	gsize hldir_len = encode_hldir_one (hldir, "Uploads");
+    /* Build the DIR chunk: single component "Uploads". */
+    guint8 hldir[64];
+    gsize hldir_len = encode_hldir_one (hldir, "Uploads");
 
-	gchar *fname = g_strdup_printf (
-		"tier3_put_%u.txt", (guint) g_random_int ());
-	guint32 size_be = htonl (32);  /* fake "we want to upload 32 bytes" */
-	guint32 our_trans = htlc.trans;
+    gchar *fname = g_strdup_printf ("tier3_put_%u.txt", (guint)g_random_int ());
+    guint32 size_be = htonl (32); /* fake "we want to upload 32 bytes" */
+    guint32 our_trans = htlc.trans;
 
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_FILE_PUT, /*flag=*/0, /*hc=*/3,
-		(int) HTLC_DATA_FILE_NAME, (int) strlen (fname),
-			(guint8 *) fname,
-		(int) HTLC_DATA_DIR,       (int) hldir_len, hldir,
-		(int) HTLC_DATA_HTXF_SIZE, (int) sizeof (size_be), &size_be));
+    g_assert_true (integration_send_message (
+        fd, &htlc, HTLC_HDR_FILE_PUT, /*flag=*/0, /*hc=*/3,
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
+        (int)HTLC_DATA_DIR, (int)hldir_len, hldir, (int)HTLC_DATA_HTXF_SIZE,
+        (int)sizeof (size_be), &size_be));
 
-	/* Drain to TASK reply matching our trans. */
-	gboolean got_reply = FALSE;
-	for (int i = 0; i < 64 && !got_reply; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != our_trans)
-			continue;
-		got_reply = TRUE;
-	}
-	g_assert_true (got_reply);
+    /* Drain to TASK reply matching our trans. */
+    gboolean got_reply = FALSE;
+    for (int i = 0; i < 64 && !got_reply; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != our_trans) {
+            continue;
+        }
+        got_reply = TRUE;
+    }
+    g_assert_true (got_reply);
 
-	if (hdr_flag (&htlc) & 1) {
-		/* Server rejected the request. Surface the message; the
+    if (hdr_flag (&htlc) & 1) {
+        /* Server rejected the request. Surface the message; the
 		 * test still passes because the request/reply round-trip
 		 * itself worked. Common cause: guest lacks
 		 * upload_anywhere and the substring-match permission gate
 		 * declined. */
-		char err[256];
-		gsize err_len = 0;
-		if (task_error_extract (&htlc, err, sizeof (err), &err_len))
-			g_test_message ("file_put refused: \"%s\"", err);
-		else
-			g_test_message ("file_put refused (no error chunk)");
-	} else {
-		/* Successful setup. Pull HTXF_REF out — should be
+        char err[256];
+        gsize err_len = 0;
+        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+            g_test_message ("file_put refused: \"%s\"", err);
+        } else {
+            g_test_message ("file_put refused (no error chunk)");
+        }
+    } else {
+        /* Successful setup. Pull HTXF_REF out — should be
 		 * non-zero. */
-		guint32 xfer_ref = 0;
-		dh_start (&htlc) {
-			if (_type == HTLS_DATA_HTXF_REF)
-				dh_getint (xfer_ref);
-		} dh_end ();
-		g_assert_cmphex (xfer_ref, !=, 0);
-		g_test_message ("file_put accepted; ref=0x%08x",
-		                (unsigned) xfer_ref);
+        guint32 xfer_ref = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_HTXF_REF) {
+                dh_getint (xfer_ref);
+            }
+        }
+        dh_end ();
+        g_assert_cmphex (xfer_ref, !=, 0);
+        g_test_message ("file_put accepted; ref=0x%08x", (unsigned)xfer_ref);
 
-		/* TODO future batch: connect to the HTXF subchannel,
+        /* TODO future batch: connect to the HTXF subchannel,
 		 * send a hand-rolled FILP-wrapped payload, verify mhxd
 		 * writes the file. Skipping the upload phase here keeps
 		 * the test scoped to the request/reply round-trip. */
-	}
+    }
 
-	g_free (fname);
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    g_free (fname);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/file_put/request_reply",
-	                 test_file_put_request_reply);
+    g_test_add_func ("/integration/file_put/request_reply",
+                     test_file_put_request_reply);
 
-	return g_test_run ();
+    return g_test_run ();
 }

@@ -14,7 +14,7 @@
 #define __gtkhx_PROTOCOL_H 1
 
 #include <glib.h>
-#include <sys/types.h>		/* u_int8_t / u_int16_t / u_int32_t */
+#include <sys/types.h> /* u_int8_t / u_int16_t / u_int32_t */
 #include <sys/time.h>
 #include <time.h>
 #include <pthread.h>
@@ -38,8 +38,8 @@
 /* ---- Buffered byte queues ------------------------------------------- */
 
 struct qbuf {
-	guint32 pos, len;
-	guint8 *buf;
+    guint32 pos, len;
+    guint8 *buf;
 };
 
 extern void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
@@ -50,16 +50,16 @@ extern void qbuf_add (struct qbuf *q, void *buf, guint32 len);
 struct htlc_conn;
 
 struct htxf_conn {
-	guint32 data_size, data_pos, rsrc_size, rsrc_pos;
-	guint32 total_size, total_pos;
-	/* Server's data-fork size from the file listing, captured at
+    guint32 data_size, data_pos, rsrc_size, rsrc_pos;
+    guint32 total_size, total_pos;
+    /* Server's data-fork size from the file listing, captured at
 	 * xfer_new time. Used by xfer_go to choose between resume
 	 * (local exists and is strictly smaller than server) and
 	 * rename-on-collision (local is the same size or larger, or
 	 * server size is unknown). 0 == unknown — listing wasn't
 	 * available for this transfer. */
-	guint32 srv_data_size;
-	/* Lifecycle: htxf_conn is reference-counted to handle the
+    guint32 srv_data_size;
+    /* Lifecycle: htxf_conn is reference-counted to handle the
 	 * cross-thread ownership knot between the xfers[] array, the
 	 * per-xfer worker thread, and any pending main-thread idles
 	 * the worker has queued (post_file_update / post_xfer_cleanup).
@@ -82,65 +82,65 @@ struct htxf_conn {
 	 * only on the main thread (so the worker reads a coherent
 	 * value via volatile-equivalent access — gint reads are
 	 * atomic on every architecture we run on). */
-	gint     refcount;
-	gboolean canceled;
-	guint32 ref;	/* xfer id */
-	guint8 gone;
-	guint8 type;
-	guint32 queue;	/* position in server queue */
-	int fd;
-	pthread_t tid;
+    gint refcount;
+    gboolean canceled;
+    guint32 ref; /* xfer id */
+    guint8 gone;
+    guint8 type;
+    guint32 queue; /* position in server queue */
+    int fd;
+    pthread_t tid;
 
-	/* HTXF subchannel target: same hostname as the main control
+    /* HTXF subchannel target: same hostname as the main control
 	 * channel, port + 1. Stored as plain strings so the worker
 	 * thread can hand them straight to GSocketClient without any
 	 * addrinfo dance. */
-	char     serverhost[HOSTLEN];
-	guint16  serverport;
-	struct htlc_conn *htlc;
-	char path[MAXPATHLEN];
-	char remotepath[MAXPATHLEN];
-	struct qbuf in;
-	char **filter_argv;
-	struct timeval start;
+    char serverhost[HOSTLEN];
+    guint16 serverport;
+    struct htlc_conn *htlc;
+    char path[MAXPATHLEN];
+    char remotepath[MAXPATHLEN];
+    struct qbuf in;
+    char **filter_argv;
+    struct timeval start;
 
-	struct {
-		guint32 retry:1, preview:1, reserved:30;
-	} opt;
+    struct {
+        guint32 retry : 1, preview : 1, reserved : 30;
+    } opt;
 
-	/* Phase 5: when opt.preview is set, the preview window is created
+    /* Phase 5: when opt.preview is set, the preview window is created
 	 * on the main thread (in rcv_task_file_get) and stashed here so
 	 * the download worker thread doesn't have to construct GTK widgets
 	 * itself. The worker only feeds bytes through preview->output()
 	 * (which g_idle_add's them onto the main thread's queue). NULL
 	 * for non-preview transfers. */
-	void *preview;
+    void *preview;
 };
 
 struct htlc_conn {
-	struct htlc_conn *next, *prev;
-	void (*rcv)(struct htlc_conn *);
-	void (*real_rcv)(struct htlc_conn *);
-	struct qbuf in, out;
-	struct qbuf read_in;
-	/* Server endpoint identification, populated at hx_connect time.
+    struct htlc_conn *next, *prev;
+    void (*rcv) (struct htlc_conn *);
+    void (*real_rcv) (struct htlc_conn *);
+    struct qbuf in, out;
+    struct qbuf read_in;
+    /* Server endpoint identification, populated at hx_connect time.
 	 * serverhost+serverport drive HTXF subchannel connects (rcv.c
 	 * stamps them onto each htxf_conn). ip_addr is the resolved
 	 * peer address as a printable string, used in connection-event
 	 * log lines (post-connect IP-then-status messages). */
-	char     serverhost[HOSTLEN];
-	guint16  serverport;
-	char     ip_addr[HOSTLEN];
-	int fd;
-	guint32 trans;
-	guint32 chattrans;
-	guint16 icon;
-	guint16 uid;
-	guint16 version;
+    char serverhost[HOSTLEN];
+    guint16 serverport;
+    char ip_addr[HOSTLEN];
+    int fd;
+    guint32 trans;
+    guint32 chattrans;
+    guint16 icon;
+    guint16 uid;
+    guint16 version;
 
-	struct {
-		guint32 visible:1,
-		/* Phase 5: set on the first HTLS_HDR_USER_SELFINFO. Used
+    struct {
+        guint32 visible : 1,
+            /* Phase 5: set on the first HTLS_HDR_USER_SELFINFO. Used
 		 * by the agreement-window Agree button to decide whether
 		 * sending HTLC_HDR_AGREEMENTAGREE is appropriate.
 		 *
@@ -156,50 +156,49 @@ struct htlc_conn {
 		 * see one for an already-logged-in session).
 		 *
 		 * Reset to 0 in hx_htlc_close so reconnect starts fresh. */
-		         logged_in:1,
-		         reserved:30;
-	} flags;
+            logged_in : 1, reserved : 30;
+    } flags;
 
-	hl_access_bits access;
-	/* Name/login on the wire are bytes, but the rest of GtkHx uses
+    hl_access_bits access;
+    /* Name/login on the wire are bytes, but the rest of GtkHx uses
 	 * them as C strings (passed to strcmp/strlen/strcpy throughout
 	 * rcv.c, users.c, network.c). Typing them as char* avoids a wave
 	 * of -Wpointer-sign warnings without changing storage layout —
 	 * char and guint8 are both 1 byte, just signed/unsigned. Same
 	 * reasoning applies to macalg / cipheralg / compressalg below
 	 * (those hold strings like "HMAC-SHA1", "RC4", "GZIP"). */
-	char name[32];
-	char login[32];
+    char name[32];
+    char login[32];
 
-	unsigned int gdk_input:1;
+    unsigned int gdk_input : 1;
 
-	guint16 color;
+    guint16 color;
 
-	char macalg[32];
-	u_int8_t sessionkey[64];
-	u_int16_t sklen;
+    char macalg[32];
+    u_int8_t sessionkey[64];
+    u_int16_t sklen;
 
 #if defined(CONFIG_CIPHER)
-	char cipheralg[32];
-	union cipher_state cipher_encode_state;
-	union cipher_state cipher_decode_state;
-	u_int8_t cipher_encode_key[32];
-	u_int8_t cipher_decode_key[32];
-	/* keylen in bytes */
-	u_int8_t cipher_encode_keylen, cipher_decode_keylen;
-	u_int8_t cipher_encode_type, cipher_decode_type;
+    char cipheralg[32];
+    union cipher_state cipher_encode_state;
+    union cipher_state cipher_decode_state;
+    u_int8_t cipher_encode_key[32];
+    u_int8_t cipher_decode_key[32];
+    /* keylen in bytes */
+    u_int8_t cipher_encode_keylen, cipher_decode_keylen;
+    u_int8_t cipher_encode_type, cipher_decode_type;
 #if defined(CONFIG_COMPRESS)
-	u_int8_t zc_hdrlen;
-	u_int8_t zc_ran;
+    u_int8_t zc_hdrlen;
+    u_int8_t zc_ran;
 #endif
 #endif
 #if defined(CONFIG_COMPRESS)
-	char compressalg[32];
-	union compress_state compress_encode_state;
-	union compress_state compress_decode_state;
-	u_int16_t compress_encode_type, compress_decode_type;
-	unsigned long gzip_inflate_total_in, gzip_inflate_total_out;
-	unsigned long gzip_deflate_total_in, gzip_deflate_total_out;
+    char compressalg[32];
+    union compress_state compress_encode_state;
+    union compress_state compress_decode_state;
+    u_int16_t compress_encode_type, compress_decode_type;
+    unsigned long gzip_inflate_total_in, gzip_inflate_total_out;
+    unsigned long gzip_deflate_total_in, gzip_deflate_total_out;
 #endif
 };
 
@@ -213,25 +212,26 @@ struct htlc_conn {
  * without also adding back the field. */
 
 extern void htlc_close (struct htlc_conn *htlc);
-extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...);
+extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
+                     ...);
 extern void hl_code (void *__dst, const void *__src, size_t len);
 
-#define hl_decode(d,s,l) hl_code(d,s,l)
-#define hl_encode(d,s,l) hl_code(d,s,l)
+#define hl_decode(d, s, l) hl_code (d, s, l)
+#define hl_encode(d, s, l) hl_code (d, s, l)
 
 /* ---- File-descriptor / event-loop plumbing ------------------------- */
 
 struct hxd_file {
-	union {
-		void *ptr;
-		struct htlc_conn *htlc;
-		struct htrk_conn *htrk;
-		struct htxf_conn *htxf;
-	} conn;
-	guint32 cid;
-	int fd;
-	void (*ready_read)(int fd);
-	void (*ready_write)(int fd);
+    union {
+        void *ptr;
+        struct htlc_conn *htlc;
+        struct htrk_conn *htrk;
+        struct htxf_conn *htxf;
+    } conn;
+    guint32 cid;
+    int fd;
+    void (*ready_read) (int fd);
+    void (*ready_write) (int fd);
 };
 
 extern struct hxd_file *hxd_files;
@@ -240,13 +240,13 @@ extern int hxd_open_max;
 extern void hxd_fd_set (int fd, int rw);
 extern void hxd_fd_clr (int fd, int rw);
 
-#define FDR	1
-#define FDW	2
+#define FDR 1
+#define FDW 2
 
 extern char **hxd_environ;
 
-extern int  fd_closeonexec (int fd, int on);
-extern int  fd_lock_write  (int fd);
+extern int fd_closeonexec (int fd, int on);
+extern int fd_lock_write (int fd);
 
 /* ---- Tasks (in-flight protocol transactions) ----------------------- */
 
@@ -265,37 +265,37 @@ typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
  * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is
  * GCC's documented escape hatch for -Wcast-function-type when the
  * type-erasure is intentional (see GCC manual §6.45). */
-#define RCV_TASK_FN(f) ((rcv_task_fn)(void(*)(void))(f))
+#define RCV_TASK_FN(f) ((rcv_task_fn)(void (*) (void)) (f))
 
 struct task {
-	/* Phase 5+: no next/prev — tasks live in session->tasks, a
+    /* Phase 5+: no next/prev — tasks live in session->tasks, a
 	 * GHashTable<u32 trans, struct task*>. Lookup by trans goes
 	 * through task_with_trans (now an O(1) wrapper around
 	 * g_hash_table_lookup); iteration goes through GHashTableIter
 	 * at the very small number of call sites that need it. */
-	guint32 trans;
-	guint32 pos, len;
-	void *data;
+    guint32 trans;
+    guint32 pos, len;
+    void *data;
 
-	char *str;
-	void *ptr;
-	rcv_task_fn rcv;
+    char *str;
+    void *ptr;
+    rcv_task_fn rcv;
 };
 
 extern int task_inerror (struct htlc_conn *htlc);
 
-#define XFER_GET	0
-#define XFER_PUT	1
-#define COMPLETE_NONE	0
-#define COMPLETE_EXPAND	1
-#define COMPLETE_LS_R	2
-#define COMPLETE_GET_R	3
+#define XFER_GET 0
+#define XFER_PUT 1
+#define COMPLETE_NONE 0
+#define COMPLETE_EXPAND 1
+#define COMPLETE_LS_R 2
+#define COMPLETE_GET_R 3
 
 /* ---- Crypto helpers (implementations in hmac.c / rand.c) ----------- */
 
 extern u_int16_t hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
-			   const void *text, u_int32_t textlen,
-			   const char *macalg);
+                           const void *text, u_int32_t textlen,
+                           const char *macalg);
 
 #if defined(CONFIG_CIPHER)
 extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
@@ -303,41 +303,50 @@ extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 
-#if (G_BYTE_ORDER==G_LITTLE_ENDIAN)
-#define HN32(_to,_from)							\
-	do {*((unsigned char*)_to)     = *(((unsigned char*)_from)+3);	\
-		*(((unsigned char*)_to)+1) = *(((unsigned char*)_from)+2); \
-		*(((unsigned char*)_to)+2) = *(((unsigned char*)_from)+1); \
-		*(((unsigned char*)_to)+3) = *((unsigned char* )_from);	\
-	} while (0)
-#define HN16(_to,_from)							\
-	do {*((unsigned char*)_to)     = *(((unsigned char*)_from)+1);	\
-		*(((unsigned char*)_to)+1) = *((unsigned char* )_from);	\
-	} while (0)
+#if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
+#define HN32(_to, _from)                                                       \
+    do {                                                                       \
+        *((unsigned char *)_to) = *(((unsigned char *)_from) + 3);             \
+        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 2);       \
+        *(((unsigned char *)_to) + 2) = *(((unsigned char *)_from) + 1);       \
+        *(((unsigned char *)_to) + 3) = *((unsigned char *)_from);             \
+    } while (0)
+#define HN16(_to, _from)                                                       \
+    do {                                                                       \
+        *((unsigned char *)_to) = *(((unsigned char *)_from) + 1);             \
+        *(((unsigned char *)_to) + 1) = *((unsigned char *)_from);             \
+    } while (0)
 #else
-#define HN32(_to,_from)							\
-	do {*((unsigned char*)_to)     = *((unsigned char* )_from);	\
-		*(((unsigned char*)_to)+1) = *(((unsigned char*)_from)+1); \
-		*(((unsigned char*)_to)+2) = *(((unsigned char*)_from)+2); \
-		*(((unsigned char*)_to)+3) = *(((unsigned char*)_from)+3); \
-	} while (0)
-#define HN16(_to,_from)							\
-	do {*((unsigned char*)_to)     = *((unsigned char* )_from);	\
-		*(((unsigned char*)_to)+1) = *(((unsigned char*)_from)+1); \
-	} while (0)
+#define HN32(_to, _from)                                                       \
+    do {                                                                       \
+        *((unsigned char *)_to) = *((unsigned char *)_from);                   \
+        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 1);       \
+        *(((unsigned char *)_to) + 2) = *(((unsigned char *)_from) + 2);       \
+        *(((unsigned char *)_to) + 3) = *(((unsigned char *)_from) + 3);       \
+    } while (0)
+#define HN16(_to, _from)                                                       \
+    do {                                                                       \
+        *((unsigned char *)_to) = *((unsigned char *)_from);                   \
+        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 1);       \
+    } while (0)
 #endif
 
 static inline void
 memory_copy (void *__dst, void *__src, unsigned int len)
 {
-	u_int8_t *dst = __dst, *src = __src;
+    u_int8_t *dst = __dst, *src = __src;
 
-	for (; len; len--)
-		*dst++ = *src++;
+    for (; len; len--) {
+        *dst++ = *src++;
+    }
 }
 
-#define S32HTON(_word, _addr) \
-	do { u_int32_t _x; _x = htonl(_word); memory_copy((_addr), &_x, 4); } while (0)
+#define S32HTON(_word, _addr)                                                  \
+    do {                                                                       \
+        u_int32_t _x;                                                          \
+        _x = htonl (_word);                                                    \
+        memory_copy ((_addr), &_x, 4);                                         \
+    } while (0)
 
 /* ---- Walking data-header lists in incoming packets ----------------- */
 
@@ -365,30 +374,33 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  * effect and ANDs the bounds checks. Reads dh->len, then bounds-
  * checks; reads dh->type only after we've confirmed the chunk fits.
  */
-#define dh_start(_htlc)								\
-{										\
-	struct hl_data_hdr *dh = (struct hl_data_hdr *)(&((_htlc)->in.buf[SIZEOF_HL_HDR])); \
-	guint32 _pos = SIZEOF_HL_HDR;						\
-	guint32 _max = (_htlc)->in.pos;						\
-	guint16 _len = 0, _type = 0;						\
-	for (;									\
-	     _pos + SIZEOF_HL_DATA_HDR <= _max;					\
-	     _pos += SIZEOF_HL_DATA_HDR + _len,					\
-	     dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR + _len)) { \
-		HN16(&_len, &dh->len);						\
-		if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR) break;		\
-		HN16(&_type, &dh->type);
+#define dh_start(_htlc)                                                        \
+    {                                                                          \
+        struct hl_data_hdr *dh                                                 \
+            = (struct hl_data_hdr *)(&((_htlc)->in.buf[SIZEOF_HL_HDR]));       \
+        guint32 _pos = SIZEOF_HL_HDR;                                          \
+        guint32 _max = (_htlc)->in.pos;                                        \
+        guint16 _len = 0, _type = 0;                                           \
+        for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                              \
+             _pos += SIZEOF_HL_DATA_HDR + _len,                                \
+             dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR   \
+                                         + _len)) {                            \
+            HN16 (&_len, &dh->len);                                            \
+            if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR)                     \
+                break;                                                         \
+            HN16 (&_type, &dh->type);
 
-#define dh_getint(_word)						\
-do {if (_len == 4)							\
-		HN32(&_word, dh->data);					\
-	else /* if (ntohs(dh->len) == 2) */				\
-		HN16(&_word, dh->data);					\
-} while (0)
+#define dh_getint(_word)                                                       \
+    do {                                                                       \
+        if (_len == 4)                                                         \
+            HN32 (&_word, dh->data);                                           \
+        else /* if (ntohs(dh->len) == 2) */                                    \
+            HN16 (&_word, dh->data);                                           \
+    } while (0)
 
-#define dh_end()							\
-	}								\
-}
+#define dh_end()                                                               \
+    }                                                                          \
+    }
 
 /* ---- Output sanitization helpers ---------------------------------- */
 
@@ -397,11 +409,13 @@ extern void chrexpand (char *str, int len);
 static inline void
 strip_ansi (char *buf, int len)
 {
-	register char *p, *end = buf + len;
+    register char *p, *end = buf + len;
 
-	for (p = buf; p < end; p++)
-		if (*p < 31 && *p > 13 && *p != 15 && *p != 22)
-				*p = (*p & 127) | 64;
+    for (p = buf; p < end; p++) {
+        if (*p < 31 && *p > 13 && *p != 15 && *p != 22) {
+            *p = (*p & 127) | 64;
+        }
+    }
 }
 
 #endif /* ndef __gtkhx_PROTOCOL_H */

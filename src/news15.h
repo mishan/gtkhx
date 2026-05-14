@@ -11,12 +11,11 @@
  * and emits the HTLC frame.
  */
 
-extern void hx_news15_get_post   (struct htlc_conn *htlc,
-                                  struct news_item *item);
-extern void hx_news15_cat_list   (struct htlc_conn *htlc,
-                                  struct gnews_catalog *gcnews);
-extern void hx_news15_fldr_list  (struct htlc_conn *htlc,
-                                  struct gnews_folder *gfnews);
+extern void hx_news15_get_post (struct htlc_conn *htlc, struct news_item *item);
+extern void hx_news15_cat_list (struct htlc_conn *htlc,
+                                struct gnews_catalog *gcnews);
+extern void hx_news15_fldr_list (struct htlc_conn *htlc,
+                                 struct gnews_folder *gfnews);
 
 /* Post a news article. `threadid` is the post being replied to
  * (HTLC_DATA_THREADID on the wire — mhxd writes this value into
@@ -26,10 +25,10 @@ extern void hx_news15_post_thread (struct htlc_conn *htlc, char *path,
                                    const char *subject, guint32 threadid,
                                    char *text);
 
-extern void hx_news15_delete        (struct htlc_conn *htlc, char *path);
-extern void hx_news15_mkcat         (struct htlc_conn *htlc, char *path,
-                                     const char *name);
-extern void hx_news15_mkdir         (struct htlc_conn *htlc, char *path);
+extern void hx_news15_delete (struct htlc_conn *htlc, char *path);
+extern void hx_news15_mkcat (struct htlc_conn *htlc, char *path,
+                             const char *name);
+extern void hx_news15_mkdir (struct htlc_conn *htlc, char *path);
 extern void hx_news15_delete_thread (struct htlc_conn *htlc, char *path,
                                      guint32 threadid);
 #endif

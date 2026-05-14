@@ -47,12 +47,12 @@
 static struct task *
 make_task (guint32 trans, const char *label)
 {
-	struct task *tsk = g_malloc0 (sizeof (struct task));
-	tsk->trans = trans;
-	tsk->str   = label ? g_strdup (label) : NULL;
-	tsk->pos   = 0;
-	tsk->len   = 1;
-	return tsk;
+    struct task *tsk = g_malloc0 (sizeof (struct task));
+    tsk->trans = trans;
+    tsk->str = label ? g_strdup (label) : NULL;
+    tsk->pos = 0;
+    tsk->len = 1;
+    return tsk;
 }
 
 /* ---------- 1. Insert + lookup round-trip ---------------------------- */
@@ -60,27 +60,27 @@ make_task (guint32 trans, const char *label)
 static void
 test_insert_lookup_roundtrip (void)
 {
-	GHashTable *t = tasks_table_new ();
-	g_assert_nonnull (t);
+    GHashTable *t = tasks_table_new ();
+    g_assert_nonnull (t);
 
-	struct task *a = make_task (0x1001, "alpha");
-	struct task *b = make_task (0x1002, "beta");
-	struct task *c = make_task (0x1003, "gamma");
+    struct task *a = make_task (0x1001, "alpha");
+    struct task *b = make_task (0x1002, "beta");
+    struct task *c = make_task (0x1003, "gamma");
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (a->trans), a);
-	g_hash_table_insert (t, GUINT_TO_POINTER (b->trans), b);
-	g_hash_table_insert (t, GUINT_TO_POINTER (c->trans), c);
+    g_hash_table_insert (t, GUINT_TO_POINTER (a->trans), a);
+    g_hash_table_insert (t, GUINT_TO_POINTER (b->trans), b);
+    g_hash_table_insert (t, GUINT_TO_POINTER (c->trans), c);
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 3);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 3);
 
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1001)) == a);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1002)) == b);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1003)) == c);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1001)) == a);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1002)) == b);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x1003)) == c);
 
-	/* Unknown trans id returns NULL, not a stale pointer. */
-	g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (0xDEADBEEF)));
+    /* Unknown trans id returns NULL, not a stale pointer. */
+    g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (0xDEADBEEF)));
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- 2. trans=0 is a valid key, not "absent" ------------------ */
@@ -93,16 +93,16 @@ test_insert_lookup_roundtrip (void)
 static void
 test_trans_zero_is_a_real_key (void)
 {
-	GHashTable *t = tasks_table_new ();
+    GHashTable *t = tasks_table_new ();
 
-	struct task *zero = make_task (0, "first");
-	g_hash_table_insert (t, GUINT_TO_POINTER (0), zero);
+    struct task *zero = make_task (0, "first");
+    g_hash_table_insert (t, GUINT_TO_POINTER (0), zero);
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0)) == zero);
-	g_assert_true (g_hash_table_contains (t, GUINT_TO_POINTER (0)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0)) == zero);
+    g_assert_true (g_hash_table_contains (t, GUINT_TO_POINTER (0)));
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- 3. Insert-on-duplicate replaces + frees old -------------- */
@@ -118,22 +118,21 @@ test_trans_zero_is_a_real_key (void)
 static void
 test_duplicate_trans_replaces_value (void)
 {
-	GHashTable *t = tasks_table_new ();
+    GHashTable *t = tasks_table_new ();
 
-	struct task *old = make_task (0x4242, "old");
-	struct task *new = make_task (0x4242, "new");
+    struct task *old = make_task (0x4242, "old");
+    struct task *new = make_task (0x4242, "new");
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (0x4242), old);
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0x4242), old);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
 
-	/* This call must free `old` via task_free; valgrind will catch
+    /* This call must free `old` via task_free; valgrind will catch
 	 * a regression that drops the value destroy notify. */
-	g_hash_table_insert (t, GUINT_TO_POINTER (0x4242), new);
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_true    (g_hash_table_lookup (t, GUINT_TO_POINTER (0x4242))
-	                   == new);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0x4242), new);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0x4242)) == new);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- 4. Remove runs the destroy notify ------------------------ */
@@ -141,28 +140,28 @@ test_duplicate_trans_replaces_value (void)
 static void
 test_remove_runs_destroy_notify (void)
 {
-	GHashTable *t = tasks_table_new ();
-	struct task *a = make_task (1, "a");
-	struct task *b = make_task (2, "b");
+    GHashTable *t = tasks_table_new ();
+    struct task *a = make_task (1, "a");
+    struct task *b = make_task (2, "b");
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (1), a);
-	g_hash_table_insert (t, GUINT_TO_POINTER (2), b);
-	g_assert_cmpuint (g_hash_table_size (t), ==, 2);
+    g_hash_table_insert (t, GUINT_TO_POINTER (1), a);
+    g_hash_table_insert (t, GUINT_TO_POINTER (2), b);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 2);
 
-	/* Removing trans=1 frees `a` via task_free. The valgrind /
+    /* Removing trans=1 frees `a` via task_free. The valgrind /
 	 * ASan run catches a leak here; the in-test check is the
 	 * remaining size + that subsequent lookup returns NULL. */
-	g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (1)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_null    (g_hash_table_lookup (t, GUINT_TO_POINTER (1)));
-	g_assert_true    (g_hash_table_lookup (t, GUINT_TO_POINTER (2)) == b);
+    g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (1)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_null (g_hash_table_lookup (t, GUINT_TO_POINTER (1)));
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (2)) == b);
 
-	/* Removing an unknown trans returns FALSE and doesn't touch
+    /* Removing an unknown trans returns FALSE and doesn't touch
 	 * the surviving entry. */
-	g_assert_false (g_hash_table_remove (t, GUINT_TO_POINTER (99)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_false (g_hash_table_remove (t, GUINT_TO_POINTER (99)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- 5. Iteration covers every entry -------------------------- */
@@ -175,35 +174,35 @@ test_remove_runs_destroy_notify (void)
 static void
 test_iter_visits_every_entry (void)
 {
-	GHashTable *t = tasks_table_new ();
+    GHashTable *t = tasks_table_new ();
 
-	/* Insert 16 tasks with distinct trans ids. */
-	for (guint32 i = 0; i < 16; i++) {
-		struct task *tsk = make_task (i, NULL);
-		g_hash_table_insert (t, GUINT_TO_POINTER (i), tsk);
-	}
-	g_assert_cmpuint (g_hash_table_size (t), ==, 16);
+    /* Insert 16 tasks with distinct trans ids. */
+    for (guint32 i = 0; i < 16; i++) {
+        struct task *tsk = make_task (i, NULL);
+        g_hash_table_insert (t, GUINT_TO_POINTER (i), tsk);
+    }
+    g_assert_cmpuint (g_hash_table_size (t), ==, 16);
 
-	/* Walk the table and tick a bitmask: every key must be hit
+    /* Walk the table and tick a bitmask: every key must be hit
 	 * exactly once, no key outside [0..15] should appear, and
 	 * the iterator's "value" must be the matching task. */
-	guint32 seen = 0;
-	GHashTableIter iter;
-	gpointer key, val;
-	g_hash_table_iter_init (&iter, t);
-	while (g_hash_table_iter_next (&iter, &key, &val)) {
-		guint32 trans = GPOINTER_TO_UINT (key);
-		struct task *tsk = val;
-		g_assert_cmpuint (trans, <, 16);
-		g_assert_cmpuint (tsk->trans, ==, trans);
-		/* Bit must not already be set — duplicate visit would
+    guint32 seen = 0;
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init (&iter, t);
+    while (g_hash_table_iter_next (&iter, &key, &val)) {
+        guint32 trans = GPOINTER_TO_UINT (key);
+        struct task *tsk = val;
+        g_assert_cmpuint (trans, <, 16);
+        g_assert_cmpuint (tsk->trans, ==, trans);
+        /* Bit must not already be set — duplicate visit would
 		 * be a GHashTable bug, but the assertion costs nothing. */
-		g_assert_cmpuint (seen & (1u << trans), ==, 0);
-		seen |= (1u << trans);
-	}
-	g_assert_cmphex (seen, ==, 0xFFFF);
+        g_assert_cmpuint (seen & (1u << trans), ==, 0);
+        seen |= (1u << trans);
+    }
+    g_assert_cmphex (seen, ==, 0xFFFF);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- 6. Destroy frees every surviving value ------------------- */
@@ -215,13 +214,13 @@ test_iter_visits_every_entry (void)
 static void
 test_destroy_frees_all_values (void)
 {
-	GHashTable *t = tasks_table_new ();
-	for (guint32 i = 100; i < 132; i++)
-		g_hash_table_insert (t, GUINT_TO_POINTER (i),
-		                     make_task (i, "x"));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 32);
-	g_hash_table_destroy (t);
-	/* No further assertions — leaks show up under ASan / valgrind. */
+    GHashTable *t = tasks_table_new ();
+    for (guint32 i = 100; i < 132; i++) {
+        g_hash_table_insert (t, GUINT_TO_POINTER (i), make_task (i, "x"));
+    }
+    g_assert_cmpuint (g_hash_table_size (t), ==, 32);
+    g_hash_table_destroy (t);
+    /* No further assertions — leaks show up under ASan / valgrind. */
 }
 
 /* ---------- 7. Hash function preserves trans-id distinctness --------- */
@@ -236,29 +235,27 @@ test_destroy_frees_all_values (void)
 static void
 test_hash_collision_distinctness (void)
 {
-	GHashTable *t = tasks_table_new ();
+    GHashTable *t = tasks_table_new ();
 
-	const guint32 ids[] = {
-		0x00000001, 0x00000002,
-		0x0000FFFF, 0x00010000,
-		0x7FFFFFFF, 0x80000000,
-		0xFFFFFFFE, 0xFFFFFFFF,
-	};
-	const guint n = G_N_ELEMENTS (ids);
+    const guint32 ids[] = {
+        0x00000001, 0x00000002, 0x0000FFFF, 0x00010000,
+        0x7FFFFFFF, 0x80000000, 0xFFFFFFFE, 0xFFFFFFFF,
+    };
+    const guint n = G_N_ELEMENTS (ids);
 
-	for (guint i = 0; i < n; i++)
-		g_hash_table_insert (t, GUINT_TO_POINTER (ids[i]),
-		                     make_task (ids[i], NULL));
+    for (guint i = 0; i < n; i++) {
+        g_hash_table_insert (t, GUINT_TO_POINTER (ids[i]),
+                             make_task (ids[i], NULL));
+    }
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, n);
-	for (guint i = 0; i < n; i++) {
-		struct task *tsk =
-			g_hash_table_lookup (t, GUINT_TO_POINTER (ids[i]));
-		g_assert_nonnull (tsk);
-		g_assert_cmpuint (tsk->trans, ==, ids[i]);
-	}
+    g_assert_cmpuint (g_hash_table_size (t), ==, n);
+    for (guint i = 0; i < n; i++) {
+        struct task *tsk = g_hash_table_lookup (t, GUINT_TO_POINTER (ids[i]));
+        g_assert_nonnull (tsk);
+        g_assert_cmpuint (tsk->trans, ==, ids[i]);
+    }
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---------- main ----------------------------------------------------- */
@@ -266,22 +263,22 @@ test_hash_collision_distinctness (void)
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/task_hash/insert_lookup_roundtrip",
-	                 test_insert_lookup_roundtrip);
-	g_test_add_func ("/task_hash/trans_zero_is_a_real_key",
-	                 test_trans_zero_is_a_real_key);
-	g_test_add_func ("/task_hash/duplicate_trans_replaces_value",
-	                 test_duplicate_trans_replaces_value);
-	g_test_add_func ("/task_hash/remove_runs_destroy_notify",
-	                 test_remove_runs_destroy_notify);
-	g_test_add_func ("/task_hash/iter_visits_every_entry",
-	                 test_iter_visits_every_entry);
-	g_test_add_func ("/task_hash/destroy_frees_all_values",
-	                 test_destroy_frees_all_values);
-	g_test_add_func ("/task_hash/hash_collision_distinctness",
-	                 test_hash_collision_distinctness);
+    g_test_add_func ("/task_hash/insert_lookup_roundtrip",
+                     test_insert_lookup_roundtrip);
+    g_test_add_func ("/task_hash/trans_zero_is_a_real_key",
+                     test_trans_zero_is_a_real_key);
+    g_test_add_func ("/task_hash/duplicate_trans_replaces_value",
+                     test_duplicate_trans_replaces_value);
+    g_test_add_func ("/task_hash/remove_runs_destroy_notify",
+                     test_remove_runs_destroy_notify);
+    g_test_add_func ("/task_hash/iter_visits_every_entry",
+                     test_iter_visits_every_entry);
+    g_test_add_func ("/task_hash/destroy_frees_all_values",
+                     test_destroy_frees_all_values);
+    g_test_add_func ("/task_hash/hash_collision_distinctness",
+                     test_hash_collision_distinctness);
 
-	return g_test_run ();
+    return g_test_run ();
 }

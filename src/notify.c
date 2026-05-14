@@ -55,34 +55,38 @@ static GtkApplication *notify_app;
 static gboolean
 body_mentions_us (const char *body)
 {
-	const char *self_nick = the_session.htlc.name;
-	gboolean matched = FALSE;
-	GPtrArray *words;
-	gchar **extras = NULL;
+    const char *self_nick = the_session.htlc.name;
+    gboolean matched = FALSE;
+    GPtrArray *words;
+    gchar **extras = NULL;
 
-	if (!body || !*body)
-		return FALSE;
+    if (!body || !*body) {
+        return FALSE;
+    }
 
-	words = g_ptr_array_new ();
-	if (self_nick && *self_nick)
-		g_ptr_array_add (words, (gpointer) self_nick);
-	if (gtkhx_prefs.highlight_words && *gtkhx_prefs.highlight_words) {
-		extras = g_strsplit (gtkhx_prefs.highlight_words, ",", -1);
-		for (gsize i = 0; extras && extras[i]; i++) {
-			gchar *w = g_strstrip (extras[i]);
-			if (*w)
-				g_ptr_array_add (words, w);
-		}
-	}
-	g_ptr_array_add (words, NULL);
+    words = g_ptr_array_new ();
+    if (self_nick && *self_nick) {
+        g_ptr_array_add (words, (gpointer)self_nick);
+    }
+    if (gtkhx_prefs.highlight_words && *gtkhx_prefs.highlight_words) {
+        extras = g_strsplit (gtkhx_prefs.highlight_words, ",", -1);
+        for (gsize i = 0; extras && extras[i]; i++) {
+            gchar *w = g_strstrip (extras[i]);
+            if (*w) {
+                g_ptr_array_add (words, w);
+            }
+        }
+    }
+    g_ptr_array_add (words, NULL);
 
-	matched = hx_highlight_match (body, strlen (body),
-	                              (const char * const *) words->pdata);
+    matched = hx_highlight_match (body, strlen (body),
+                                  (const char *const *)words->pdata);
 
-	g_ptr_array_unref (words);
-	if (extras)
-		g_strfreev (extras);
-	return matched;
+    g_ptr_array_unref (words);
+    if (extras) {
+        g_strfreev (extras);
+    }
+    return matched;
 }
 
 /* gtk_window_is_active() returns TRUE when the window is the OS-level
@@ -90,7 +94,7 @@ body_mentions_us (const char *body)
 static gboolean
 window_is_active (GtkWidget *w)
 {
-	return w && GTK_IS_WINDOW (w) && gtk_window_is_active (GTK_WINDOW (w));
+    return w && GTK_IS_WINDOW (w) && gtk_window_is_active (GTK_WINDOW (w));
 }
 
 /* Look up the gtkhx_chat (UI) wrapper for a given cid. cid=0 is the
@@ -99,15 +103,15 @@ window_is_active (GtkWidget *w)
 static GtkWidget *
 chat_window_for_cid (guint32 cid)
 {
-	struct gtkhx_chat *gc = gchat_with_cid (&the_session, cid);
-	return gc ? gc->window : NULL;
+    struct gtkhx_chat *gc = gchat_with_cid (&the_session, cid);
+    return gc ? gc->window : NULL;
 }
 
 static GtkWidget *
 msg_window_for_uid (guint16 uid)
 {
-	struct msgwin *m = msgwin_with_uid (uid);
-	return m ? m->window : NULL;
+    struct msgwin *m = msgwin_with_uid (uid);
+    return m ? m->window : NULL;
 }
 
 /* Truncate a body to a sensible notification length. GNOME / KDE
@@ -119,46 +123,50 @@ msg_window_for_uid (guint16 uid)
 static char *
 truncated (const char *body)
 {
-	gsize len;
-	const char *cut;
+    gsize len;
+    const char *cut;
 
-	if (!body)
-		return g_strdup ("");
-	len = strlen (body);
-	if (len <= NOTIFY_BODY_MAX)
-		return g_strdup (body);
+    if (!body) {
+        return g_strdup ("");
+    }
+    len = strlen (body);
+    if (len <= NOTIFY_BODY_MAX) {
+        return g_strdup (body);
+    }
 
-	/* g_utf8_find_prev_char-safe truncation: walk back from the
+    /* g_utf8_find_prev_char-safe truncation: walk back from the
 	 * cap to the previous UTF-8 boundary so we don't slice through
 	 * a multi-byte sequence. */
-	cut = g_utf8_find_prev_char (body, body + NOTIFY_BODY_MAX);
-	if (!cut)
-		cut = body + NOTIFY_BODY_MAX;
-	return g_strdup_printf ("%.*s…", (int) (cut - body), body);
+    cut = g_utf8_find_prev_char (body, body + NOTIFY_BODY_MAX);
+    if (!cut) {
+        cut = body + NOTIFY_BODY_MAX;
+    }
+    return g_strdup_printf ("%.*s…", (int)(cut - body), body);
 }
 
 static void
 send_notify (const char *id, const char *title, const char *body)
 {
-	GNotification *n;
+    GNotification *n;
 
-	if (!notify_app || !title)
-		return;
+    if (!notify_app || !title) {
+        return;
+    }
 
-	n = g_notification_new (title);
-	if (body && *body) {
-		char *trim = truncated (body);
-		g_notification_set_body (n, trim);
-		g_free (trim);
-	}
-	g_notification_set_priority (n, G_NOTIFICATION_PRIORITY_NORMAL);
+    n = g_notification_new (title);
+    if (body && *body) {
+        char *trim = truncated (body);
+        g_notification_set_body (n, trim);
+        g_free (trim);
+    }
+    g_notification_set_priority (n, G_NOTIFICATION_PRIORITY_NORMAL);
 
-	/* The icon is sourced from the app's installed icon (matching
+    /* The icon is sourced from the app's installed icon (matching
 	 * the GApplication app-id) so we don't have to bundle a
 	 * separate notification glyph. */
 
-	g_application_send_notification (G_APPLICATION (notify_app), id, n);
-	g_object_unref (n);
+    g_application_send_notification (G_APPLICATION (notify_app), id, n);
+    g_object_unref (n);
 }
 
 /* ---- Public API ---------------------------------------------------- */
@@ -166,7 +174,7 @@ send_notify (const char *id, const char *title, const char *body)
 void
 gtkhx_notify_init (GtkApplication *app)
 {
-	notify_app = app;
+    notify_app = app;
 }
 
 /* Pull a g_strdup'd sender + body out of an HxChatEvent so the
@@ -176,189 +184,199 @@ gtkhx_notify_init (GtkApplication *app)
 static void
 event_slices (HxChatEvent *e, char **sender_out, char **body_out)
 {
-	*sender_out = (e && e->sender_len > 0)
-		? g_strndup (e->line + e->sender_off, e->sender_len)
-		: g_strdup ("");
-	*body_out = (e && e->body_len > 0)
-		? g_strndup (e->line + e->body_off, e->body_len)
-		: (e ? g_strndup (e->line, e->line_len) : g_strdup (""));
+    *sender_out = (e && e->sender_len > 0)
+                      ? g_strndup (e->line + e->sender_off, e->sender_len)
+                      : g_strdup ("");
+    *body_out = (e && e->body_len > 0)
+                    ? g_strndup (e->line + e->body_off, e->body_len)
+                    : (e ? g_strndup (e->line, e->line_len) : g_strdup (""));
 }
 
 void
 gtkhx_notify_chat (HxChatEvent *event)
 {
-	gboolean is_mention;
-	gboolean want;
-	char *sender = NULL, *body = NULL;
-	char *title;
-	char id[64];
+    gboolean is_mention;
+    gboolean want;
+    char *sender = NULL, *body = NULL;
+    char *title;
+    char id[64];
 
-	if (!event)
-		return;
+    if (!event) {
+        return;
+    }
 
-	/* cid > 0 is a private chat; the dedicated pchat entry point
+    /* cid > 0 is a private chat; the dedicated pchat entry point
 	 * handles those. This entry point is for the public chat
 	 * (cid == 0). */
-	if (event->cid != 0) {
-		gtkhx_notify_pchat (event);
-		return;
-	}
+    if (event->cid != 0) {
+        gtkhx_notify_pchat (event);
+        return;
+    }
 
-	event_slices (event, &sender, &body);
-	is_mention = body_mentions_us (body);
+    event_slices (event, &sender, &body);
+    is_mention = body_mentions_us (body);
 
-	want = is_mention ? gtkhx_prefs.notify_chat_highlight
-	                  : gtkhx_prefs.notify_chat;
-	if (!want)
-		goto out;
+    want = is_mention ? gtkhx_prefs.notify_chat_highlight
+                      : gtkhx_prefs.notify_chat;
+    if (!want) {
+        goto out;
+    }
 
-	if (event->is_self)
-		goto out;          /* never notify on our own line */
+    if (event->is_self) {
+        goto out; /* never notify on our own line */
+    }
 
-	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (chat_window_for_cid (event->cid)))
-		goto out;
+    if (gtkhx_prefs.notify_omit_focused
+        && window_is_active (chat_window_for_cid (event->cid))) {
+        goto out;
+    }
 
-	g_snprintf (id, sizeof (id), "chat-%u", event->cid);
+    g_snprintf (id, sizeof (id), "chat-%u", event->cid);
 
-	if (*sender) {
-		title = g_strdup_printf (is_mention
-			? "%s mentioned you"
-			: "%s",
-			sender);
-	} else {
-		title = g_strdup (is_mention ? "Mention in public chat"
-		                             : "Public chat");
-	}
-	send_notify (id, title, body);
-	g_free (title);
+    if (*sender) {
+        title
+            = g_strdup_printf (is_mention ? "%s mentioned you" : "%s", sender);
+    } else {
+        title
+            = g_strdup (is_mention ? "Mention in public chat" : "Public chat");
+    }
+    send_notify (id, title, body);
+    g_free (title);
 
 out:
-	g_free (sender);
-	g_free (body);
+    g_free (sender);
+    g_free (body);
 }
 
 void
 gtkhx_notify_msg (HxMsgEvent *event)
 {
-	char *title;
-	char id[64];
+    char *title;
+    char id[64];
 
-	if (!event)
-		return;
+    if (!event) {
+        return;
+    }
 
-	if (!gtkhx_prefs.notify_msg)
-		return;
+    if (!gtkhx_prefs.notify_msg) {
+        return;
+    }
 
-	/* Don't notify on our own outbound PMs (echoed back by the
+    /* Don't notify on our own outbound PMs (echoed back by the
 	 * server, or local self-injects). */
-	if (event->is_self)
-		return;
+    if (event->is_self) {
+        return;
+    }
 
-	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (msg_window_for_uid (event->uid)))
-		return;
+    if (gtkhx_prefs.notify_omit_focused
+        && window_is_active (msg_window_for_uid (event->uid))) {
+        return;
+    }
 
-	g_snprintf (id, sizeof (id), "msg-%u", event->uid);
-	title = g_strdup_printf ("%s (private message)",
-	                         (event->name && *event->name) ? event->name : "?");
-	send_notify (id, title, event->body);
-	g_free (title);
+    g_snprintf (id, sizeof (id), "msg-%u", event->uid);
+    title = g_strdup_printf ("%s (private message)",
+                             (event->name && *event->name) ? event->name : "?");
+    send_notify (id, title, event->body);
+    g_free (title);
 }
 
 void
 gtkhx_notify_pchat (HxChatEvent *event)
 {
-	gboolean is_mention;
-	gboolean want;
-	char *sender = NULL, *body = NULL;
-	char *title;
-	char id[64];
+    gboolean is_mention;
+    gboolean want;
+    char *sender = NULL, *body = NULL;
+    char *title;
+    char id[64];
 
-	if (!event)
-		return;
+    if (!event) {
+        return;
+    }
 
-	event_slices (event, &sender, &body);
-	is_mention = body_mentions_us (body);
+    event_slices (event, &sender, &body);
+    is_mention = body_mentions_us (body);
 
-	want = is_mention ? gtkhx_prefs.notify_pchat_highlight
-	                  : gtkhx_prefs.notify_pchat;
-	if (!want)
-		goto out;
+    want = is_mention ? gtkhx_prefs.notify_pchat_highlight
+                      : gtkhx_prefs.notify_pchat;
+    if (!want) {
+        goto out;
+    }
 
-	if (event->is_self)
-		goto out;
+    if (event->is_self) {
+        goto out;
+    }
 
-	if (gtkhx_prefs.notify_omit_focused
-	    && window_is_active (chat_window_for_cid (event->cid)))
-		goto out;
+    if (gtkhx_prefs.notify_omit_focused
+        && window_is_active (chat_window_for_cid (event->cid))) {
+        goto out;
+    }
 
-	g_snprintf (id, sizeof (id), "pchat-%u", event->cid);
+    g_snprintf (id, sizeof (id), "pchat-%u", event->cid);
 
-	if (*sender) {
-		title = g_strdup_printf (is_mention
-			? "%s mentioned you (private chat)"
-			: "%s (private chat)",
-			sender);
-	} else {
-		title = g_strdup (is_mention ? "Mention in private chat"
-		                             : "Private chat");
-	}
-	send_notify (id, title, body);
-	g_free (title);
+    if (*sender) {
+        title = g_strdup_printf (is_mention ? "%s mentioned you (private chat)"
+                                            : "%s (private chat)",
+                                 sender);
+    } else {
+        title = g_strdup (is_mention ? "Mention in private chat"
+                                     : "Private chat");
+    }
+    send_notify (id, title, body);
+    g_free (title);
 
 out:
-	g_free (sender);
-	g_free (body);
+    g_free (sender);
+    g_free (body);
 }
 
 void
 gtkhx_notify_pchat_invite (guint32 cid, const char *inviter)
 {
-	char *title;
-	char id[64];
+    char *title;
+    char id[64];
 
-	if (!gtkhx_prefs.notify_pchat_invite)
-		return;
+    if (!gtkhx_prefs.notify_pchat_invite) {
+        return;
+    }
 
-	g_snprintf (id, sizeof (id), "pchat-invite-%u", cid);
-	title = g_strdup_printf ("Chat invitation from %s",
-	                         inviter ? inviter : "?");
-	send_notify (id, title, NULL);
-	g_free (title);
+    g_snprintf (id, sizeof (id), "pchat-invite-%u", cid);
+    title
+        = g_strdup_printf ("Chat invitation from %s", inviter ? inviter : "?");
+    send_notify (id, title, NULL);
+    g_free (title);
 }
 
 void
 gtkhx_notify_news (const char *headline)
 {
-	if (!gtkhx_prefs.notify_news)
-		return;
+    if (!gtkhx_prefs.notify_news) {
+        return;
+    }
 
-	/* News notifications are coarse — one ID for all news, so a
+    /* News notifications are coarse — one ID for all news, so a
 	 * burst of posts only fires the most recent. No focus check
 	 * (news window isn't tracked by uid/cid, and a news post
 	 * arriving while the news window is open is still
 	 * notification-worthy). */
-	send_notify ("news", "New news post",
-	             headline ? headline : NULL);
+    send_notify ("news", "New news post", headline ? headline : NULL);
 }
 
 void
 gtkhx_notify_xfer_done (const char *filename)
 {
-	if (!gtkhx_prefs.notify_xfer)
-		return;
+    if (!gtkhx_prefs.notify_xfer) {
+        return;
+    }
 
-	send_notify ("xfer", "File transfer complete",
-	             filename ? filename : NULL);
+    send_notify ("xfer", "File transfer complete", filename ? filename : NULL);
 }
 
 void
 gtkhx_notify_broadcast (const char *text)
 {
-	if (!gtkhx_prefs.notify_broadcast)
-		return;
+    if (!gtkhx_prefs.notify_broadcast) {
+        return;
+    }
 
-	send_notify ("broadcast", "Server broadcast",
-	             text ? text : NULL);
+    send_notify ("broadcast", "Server broadcast", text ? text : NULL);
 }

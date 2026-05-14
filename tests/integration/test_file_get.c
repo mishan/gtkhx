@@ -42,139 +42,140 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 static void
 test_file_get_round_trip (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "FileGet Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "FileGet Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	/* Send HTLC_HDR_FILE_GET asking for files/test.txt at the
+    /* Send HTLC_HDR_FILE_GET asking for files/test.txt at the
 	 * server root. We send only the FILE_NAME chunk; mhxd's
 	 * rcv_file_get accepts that as "from ROOTDIR / FILE_NAME". */
-	const char *fname = "test.txt";
-	guint32 our_trans = htlc.trans;
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
-		(int) HTLC_DATA_FILE_NAME, (int) strlen (fname),
-			(guint8 *) fname));
+    const char *fname = "test.txt";
+    guint32 our_trans = htlc.trans;
+    g_assert_true (integration_send_message (
+        fd, &htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
-	/* Drain to the TASK reply. */
-	gboolean got_reply = FALSE;
-	for (int i = 0; i < 64 && !got_reply; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != our_trans)
-			continue;
-		got_reply = TRUE;
-	}
-	g_assert_true (got_reply);
+    /* Drain to the TASK reply. */
+    gboolean got_reply = FALSE;
+    for (int i = 0; i < 64 && !got_reply; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != our_trans) {
+            continue;
+        }
+        got_reply = TRUE;
+    }
+    g_assert_true (got_reply);
 
-	if (hdr_flag (&htlc) & 1) {
-		char err[256];
-		gsize err_len = 0;
-		if (task_error_extract (&htlc, err, sizeof (err), &err_len))
-			g_test_fail_printf (
-				"file_get refused by server: \"%s\". "
-				"Is files/test.txt seeded in the container?",
-				err);
-		else
-			g_test_fail_printf ("file_get refused (no error chunk)");
-		integration_release_htlc (&htlc);
-		integration_close (fd);
-		return;
-	}
+    if (hdr_flag (&htlc) & 1) {
+        char err[256];
+        gsize err_len = 0;
+        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+            g_test_fail_printf ("file_get refused by server: \"%s\". "
+                                "Is files/test.txt seeded in the container?",
+                                err);
+        } else {
+            g_test_fail_printf ("file_get refused (no error chunk)");
+        }
+        integration_release_htlc (&htlc);
+        integration_close (fd);
+        return;
+    }
 
-	/* Pull HTXF_REF and HTXF_SIZE out of the reply. */
-	guint32 xfer_ref = 0, xfer_size = 0;
-	dh_start (&htlc) {
-		switch (_type) {
-		case HTLS_DATA_HTXF_REF:
-			dh_getint (xfer_ref);
-			break;
-		case HTLS_DATA_HTXF_SIZE:
-			dh_getint (xfer_size);
-			break;
-		}
-	} dh_end ();
-	g_assert_cmphex  (xfer_ref, !=, 0);
-	g_assert_cmpuint (xfer_size, >, 0);
-	g_assert_cmpuint (xfer_size, <, 1024 * 1024);  /* sanity cap */
+    /* Pull HTXF_REF and HTXF_SIZE out of the reply. */
+    guint32 xfer_ref = 0, xfer_size = 0;
+    dh_start (&htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_HTXF_REF:
+            dh_getint (xfer_ref);
+            break;
+        case HTLS_DATA_HTXF_SIZE:
+            dh_getint (xfer_size);
+            break;
+        }
+    }
+    dh_end ();
+    g_assert_cmphex (xfer_ref, !=, 0);
+    g_assert_cmpuint (xfer_size, >, 0);
+    g_assert_cmpuint (xfer_size, <, 1024 * 1024); /* sanity cap */
 
-	/* Open the subchannel (port 5501 by default). The docker run
+    /* Open the subchannel (port 5501 by default). The docker run
 	 * command needs to publish 5501; if it's unreachable, skip
 	 * with a helpful pointer rather than failing the suite. */
-	int xfd = integration_connect_xfer ();
-	if (xfd < 0) {
-		g_test_skip ("HTXF subchannel port (5501 by default) "
-		             "isn't reachable. Make sure your `docker run` "
-		             "publishes it: -p 5501:5501. Or set "
-		             "GTKHX_TEST_XFER_PORT to a different port.");
-		integration_release_htlc (&htlc);
-		integration_close (fd);
-		return;
-	}
+    int xfd = integration_connect_xfer ();
+    if (xfd < 0) {
+        g_test_skip ("HTXF subchannel port (5501 by default) "
+                     "isn't reachable. Make sure your `docker run` "
+                     "publishes it: -p 5501:5501. Or set "
+                     "GTKHX_TEST_XFER_PORT to a different port.");
+        integration_release_htlc (&htlc);
+        integration_close (fd);
+        return;
+    }
 
-	/* Send the HTXF header (magic + ref + size + zero). */
-	g_assert_true (integration_send_xfer_hdr (
-		xfd, xfer_ref, xfer_size));
+    /* Send the HTXF header (magic + ref + size + zero). */
+    g_assert_true (integration_send_xfer_hdr (xfd, xfer_ref, xfer_size));
 
-	/* Read the full payload. */
-	guint8 *payload = g_malloc (xfer_size);
-	g_assert_true (integration_recv (xfd, payload, xfer_size));
+    /* Read the full payload. */
+    guint8 *payload = g_malloc (xfer_size);
+    g_assert_true (integration_recv (xfd, payload, xfer_size));
 
-	/* Find our seed content. mhxd wraps the file in a FILP-style
+    /* Find our seed content. mhxd wraps the file in a FILP-style
 	 * flat-file format with headers and fork records, so the
 	 * actual "hello world" bytes are somewhere after the header
 	 * preamble. Substring-search rather than parsing the format. */
-	const char *needle = "hello world";
-	gsize needle_len = strlen (needle);
-	gboolean found = FALSE;
-	for (gsize i = 0; i + needle_len <= xfer_size; i++) {
-		if (memcmp (payload + i, needle, needle_len) == 0) {
-			found = TRUE;
-			break;
-		}
-	}
-	g_assert_true (found);
+    const char *needle = "hello world";
+    gsize needle_len = strlen (needle);
+    gboolean found = FALSE;
+    for (gsize i = 0; i + needle_len <= xfer_size; i++) {
+        if (memcmp (payload + i, needle, needle_len) == 0) {
+            found = TRUE;
+            break;
+        }
+    }
+    g_assert_true (found);
 
-	g_free (payload);
-	integration_close (xfd);
+    g_free (payload);
+    integration_close (xfd);
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/file_get/round_trip",
-	                 test_file_get_round_trip);
+    g_test_add_func ("/integration/file_get/round_trip",
+                     test_file_get_round_trip);
 
-	return g_test_run ();
+    return g_test_run ();
 }

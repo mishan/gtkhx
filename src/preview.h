@@ -45,8 +45,7 @@ extern hx_preview *hx_preview_new (const char *name);
  * by the dispatcher. Called by the HTXF worker after it parses the
  * FILP wrapper. Triggers the actual viewer selection — by the time
  * the first chunk arrives, the viewer is in place. */
-extern void hx_preview_set_info (hx_preview *p,
-                                 const char *type,
+extern void hx_preview_set_info (hx_preview *p, const char *type,
                                  const char *creator);
 
 /* Worker thread (any thread). Stream a chunk of the file's data

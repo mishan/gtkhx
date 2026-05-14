@@ -25,9 +25,10 @@
 #include <glib.h>
 #include "gtkthreads.h"
 
-void gtkhx_post_to_main (GSourceFunc fn, gpointer data)
+void
+gtkhx_post_to_main (GSourceFunc fn, gpointer data)
 {
-	g_main_context_invoke (NULL, fn, data);
+    g_main_context_invoke (NULL, fn, data);
 }
 
 /* Phase 5+ async connect (network.c): gtkhx_invoke_sync used to live

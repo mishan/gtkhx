@@ -1,0 +1,52 @@
+# EditorConfig — fallback / portability layer for editors that don't
+# read .clang-format directly (kakoune, plain vim without plugins,
+# nano, etc.). The authoritative style is in .clang-format; this file
+# just sets the indent + line-ending basics so non-clang-format saves
+# don't introduce mixed-tabs-and-spaces files.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# C / C++ — 4 spaces, no tabs, per the .clang-format.
+[*.{c,h,cc,cpp,hh,hpp}]
+indent_style = space
+indent_size = 4
+
+# Build files / Python / Meson — 4 spaces (Meson recommends this).
+[*.{py,build}]
+indent_style = space
+indent_size = 4
+
+# YAML / TOML — 2 spaces (industry default; our Flatpak manifest uses
+# this).
+[*.{yml,yaml,toml}]
+indent_style = space
+indent_size = 2
+
+# Makefiles — actual tabs are required by GNU make, can't change.
+[{Makefile,*.mk}]
+indent_style = tab
+
+# Vendored sources we explicitly do NOT want to restyle. Keep
+# EditorConfig out of their way so the upstream-matching whitespace
+# survives editor saves.
+[src/xtext.{c,h}]
+indent_style = tab
+indent_size = 8
+
+[src/dfa.c]
+indent_style = tab
+indent_size = 8
+
+[src/{md5,sha,haval,hmac,rand,cipher,hfs,macres,cicn}.{c,h}]
+indent_style = tab
+indent_size = 8
+
+[mhxd/**]
+indent_style = tab
+indent_size = 8

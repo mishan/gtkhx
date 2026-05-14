@@ -25,26 +25,36 @@
 gboolean
 prefs_parse_boolean (const char *s, unsigned char *out)
 {
-	unsigned char v;
+    unsigned char v;
 
-	if (!s)
-		return FALSE;
+    if (!s) {
+        return FALSE;
+    }
 
-	/* First character drives the decision. Matches the historical
+    /* First character drives the decision. Matches the historical
 	 * options.c parser plus the Phase 5 fix to accept GKeyFile's
 	 * "true" / "false" / "yes" / "no". */
-	switch (*s) {
-	case '0': case 'f': case 'F': case 'n': case 'N':
-		v = 0;
-		break;
-	case '1': case 't': case 'T': case 'y': case 'Y':
-		v = 1;
-		break;
-	default:
-		return FALSE;
-	}
+    switch (*s) {
+    case '0':
+    case 'f':
+    case 'F':
+    case 'n':
+    case 'N':
+        v = 0;
+        break;
+    case '1':
+    case 't':
+    case 'T':
+    case 'y':
+    case 'Y':
+        v = 1;
+        break;
+    default:
+        return FALSE;
+    }
 
-	if (out)
-		*out = v;
-	return TRUE;
+    if (out) {
+        *out = v;
+    }
+    return TRUE;
 }

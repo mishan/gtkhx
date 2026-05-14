@@ -16,7 +16,6 @@
  * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-
 /* This whole file is gated off behind #if 0 — the chat-logging code
  * was never finished. The follow-up is tracked in TODO; revisit when
  * we wire log writing into chat.c / news.c / msg.c output paths. */

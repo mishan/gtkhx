@@ -1,0 +1,68 @@
+# GtkHx lint configuration.
+#
+# Run with: clang-tidy <file.c> -- -I src $(pkg-config --cflags gtk4 libadwaita-1)
+# or via meson: -Db_lundef=false then `ninja clang-tidy` if you add a
+# clang-tidy target to meson.build.
+#
+# Check selection is conservative — turning on every reasonable group
+# from scratch produces thousands of warnings about existing code that
+# nobody's going to fix today. Start with the high-signal ones and
+# expand as the tree gets cleaned up.
+
+Checks: >
+    -*,
+    bugprone-assert-side-effect,
+    bugprone-branch-clone,
+    bugprone-implicit-widening-of-multiplication-result,
+    bugprone-incorrect-roundings,
+    bugprone-integer-division,
+    bugprone-macro-parentheses,
+    bugprone-misplaced-widening-cast,
+    bugprone-not-null-terminated-result,
+    bugprone-posix-return,
+    bugprone-redundant-branch-condition,
+    bugprone-sizeof-expression,
+    bugprone-string-constructor,
+    bugprone-suspicious-include,
+    bugprone-suspicious-memset-usage,
+    bugprone-suspicious-missing-comma,
+    bugprone-suspicious-semicolon,
+    bugprone-suspicious-string-compare,
+    bugprone-undefined-memory-manipulation,
+    bugprone-unused-return-value,
+    bugprone-use-after-move,
+    clang-analyzer-core.*,
+    clang-analyzer-deadcode.*,
+    clang-analyzer-security.*,
+    clang-analyzer-unix.*,
+    misc-redundant-expression,
+    misc-unused-parameters,
+    readability-braces-around-statements,
+    readability-duplicate-include,
+    readability-inconsistent-declaration-parameter-name,
+    readability-misleading-indentation,
+    readability-non-const-parameter,
+    readability-redundant-control-flow,
+    readability-redundant-declaration,
+    readability-redundant-string-cstr,
+    readability-redundant-string-init,
+    readability-simplify-boolean-expr,
+    readability-string-compare,
+
+# Treat brace enforcement as ERROR — it's the always-braces rule we
+# want strictly applied. Everything else is a warning.
+WarningsAsErrors: 'readability-braces-around-statements'
+
+# HeaderFilterRegex limits warnings to OUR headers, not GTK / GLib.
+# Adjust if you add new top-level dirs.
+HeaderFilterRegex: '^(src|tests)/.*'
+
+# Per-check tunings.
+CheckOptions:
+  - key:   readability-braces-around-statements.ShortStatementLines
+    value: '0'                # always brace, even single-line bodies
+  - key:   bugprone-assert-side-effect.AssertMacros
+    value: 'assert,g_assert'  # treat g_assert like assert for the
+                              # side-effect check
+  - key:   misc-unused-parameters.StrictMode
+    value: 'true'

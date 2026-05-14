@@ -11,9 +11,7 @@
 #define NEWS_POST 7
 #define USER_PART 8
 
-
 extern struct hx_sounds hxsnd;
-extern void play_sound(int sound);
-
+extern void play_sound (int sound);
 
 #endif

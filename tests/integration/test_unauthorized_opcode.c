@@ -49,101 +49,100 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 static guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->trans);
 }
 
 static guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->flag);
 }
 
 static void
 test_unauthorized_mkdir_silently_dropped (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "UnauthMkdir T-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "UnauthMkdir T-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	/* MKDIR-trans we'll watch for AND not expect to see. */
-	guint32 mkdir_trans = htlc.trans;
+    /* MKDIR-trans we'll watch for AND not expect to see. */
+    guint32 mkdir_trans = htlc.trans;
 
-	const char *new_dir = "tier3_unauth_test_dir";
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_FILE_MKDIR, /*flag=*/0, /*hc=*/1,
-		(int) HTLC_DATA_FILE_NAME, (int) strlen (new_dir),
-			(guint8 *) new_dir));
+    const char *new_dir = "tier3_unauth_test_dir";
+    g_assert_true (integration_send_message (
+        fd, &htlc, HTLC_HDR_FILE_MKDIR, /*flag=*/0, /*hc=*/1,
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (new_dir), (guint8 *)new_dir));
 
-	/* Drain to the TASK reply matching our trans. With guest's
+    /* Drain to the TASK reply matching our trans. With guest's
 	 * create_folders bit cleared, the dispatcher's post-switch
 	 * tail emits HTLS_HDR_TASK with flag=1 carrying a
 	 * "Transaction rejected" TASKERROR chunk. */
-	gboolean got_reject = FALSE;
-	gboolean got_success = FALSE;
-	for (int i = 0; i < 32 && !got_reject && !got_success; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != mkdir_trans)
-			continue;
-		if (hdr_flag (&htlc) & 1) {
-			got_reject = TRUE;
-			char err[256];
-			gsize err_len = 0;
-			if (task_error_extract (
-				&htlc, err, sizeof (err), &err_len))
-				g_test_message (
-					"server rejected mkdir: \"%s\"", err);
-		} else {
-			got_success = TRUE;
-		}
-	}
-	g_assert_false (got_success);
-	g_assert_true  (got_reject);
+    gboolean got_reject = FALSE;
+    gboolean got_success = FALSE;
+    for (int i = 0; i < 32 && !got_reject && !got_success; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != mkdir_trans) {
+            continue;
+        }
+        if (hdr_flag (&htlc) & 1) {
+            got_reject = TRUE;
+            char err[256];
+            gsize err_len = 0;
+            if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+                g_test_message ("server rejected mkdir: \"%s\"", err);
+            }
+        } else {
+            got_success = TRUE;
+        }
+    }
+    g_assert_false (got_success);
+    g_assert_true (got_reject);
 
-	/* Probe with PING — the dispatcher should still be in a clean
+    /* Probe with PING — the dispatcher should still be in a clean
 	 * state, accepting the next request and replying normally. */
-	guint32 ping_trans = htlc.trans;
-	g_assert_true (integration_send_message (
-		fd, &htlc,
-		HTLC_HDR_PING, /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = htlc.trans;
+    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
+                                             /*flag=*/0, /*hc=*/0));
 
-	gboolean got_pong = FALSE;
-	for (int i = 0; i < 32 && !got_pong; i++) {
-		g_assert_true (integration_recv_message (
-			fd, &htlc, /*timeout_ms=*/3000));
-		if (hdr_type (&htlc) != HTLS_HDR_TASK)
-			continue;
-		if (hdr_trans (&htlc) != ping_trans)
-			continue;
-		got_pong = TRUE;
-		g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
-	}
-	g_assert_true (got_pong);
+    gboolean got_pong = FALSE;
+    for (int i = 0; i < 32 && !got_pong; i++) {
+        g_assert_true (
+            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
+        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (&htlc) != ping_trans) {
+            continue;
+        }
+        got_pong = TRUE;
+        g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
+    }
+    g_assert_true (got_pong);
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
-	g_test_add_func (
-		"/integration/unauthorized_opcode/mkdir_silently_dropped",
-		test_unauthorized_mkdir_silently_dropped);
-	return g_test_run ();
+    g_test_init (&argc, &argv, NULL);
+    g_test_add_func ("/integration/unauthorized_opcode/mkdir_silently_dropped",
+                     test_unauthorized_mkdir_silently_dropped);
+    return g_test_run ();
 }

@@ -30,32 +30,32 @@
 #define __gtkhx_CFGKEYS_H 1
 
 /* Identity */
-#define CFG_NICK            "NICK"
-#define CFG_ICON            "ICON"
+#define CFG_NICK "NICK"
+#define CFG_ICON "ICON"
 
 /* Auto-reply */
-#define CFG_AUTOREPLY_ON    "AUTOREPLYON"
-#define CFG_AUTOREPLY_MSG   "AUTOREPLYMSG"
+#define CFG_AUTOREPLY_ON "AUTOREPLYON"
+#define CFG_AUTOREPLY_MSG "AUTOREPLYMSG"
 
 /* Behavior toggles */
-#define CFG_QUEUEDL         "QUEUEDL"
-#define CFG_SHOWBACK        "SHOWBACK"
-#define CFG_SHOWJOIN        "SHOWJOIN"
-#define CFG_TRACKER_CASE    "TRACKER_CASE"
-#define CFG_OLD_NICKCOMP    "OLD_NICKCOMPLETION"
-#define CFG_TRAY            "TRAY"
+#define CFG_QUEUEDL "QUEUEDL"
+#define CFG_SHOWBACK "SHOWBACK"
+#define CFG_SHOWJOIN "SHOWJOIN"
+#define CFG_TRACKER_CASE "TRACKER_CASE"
+#define CFG_OLD_NICKCOMP "OLD_NICKCOMPLETION"
+#define CFG_TRAY "TRAY"
 
 /* Chat output */
-#define CFG_TIMESTAMP       "TIMESTAMP"
-#define CFG_WORDWRAP        "WORDWRAP"
-#define CFG_XBUF_MAX        "XBUF_MAX"
-#define CFG_FONT            "FONT"
+#define CFG_TIMESTAMP "TIMESTAMP"
+#define CFG_WORDWRAP "WORDWRAP"
+#define CFG_XBUF_MAX "XBUF_MAX"
+#define CFG_FONT "FONT"
 
 /* Same-window navigation for the files browser. The matching
  * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
  * two-window news UI was removed; an old gtkhxrc that still has
  * the key just gets ignored. */
-#define CFG_FILE_SAMEWIN    "FILE_SAMEWINDOW"
+#define CFG_FILE_SAMEWIN "FILE_SAMEWINDOW"
 
 /* Desktop notifications (Phase 5+). One BOOLEAN per event class so
  * users can toggle each independently. NOTIFY_OMIT_FOCUSED gates
@@ -63,59 +63,59 @@
  * "mention" classes (CHAT_HIGHLIGHT / PCHAT_HIGHLIGHT) match
  * against the same word list as the chat highlight colouring
  * (own nick + CFG_HIGHLIGHT_WORDS, comma-separated). */
-#define CFG_NOTIFY_CHAT             "NOTIFYCHAT"
-#define CFG_NOTIFY_CHAT_HIGHLIGHT   "NOTIFYCHATHIGHLIGHT"
-#define CFG_NOTIFY_MSG              "NOTIFYMSG"
-#define CFG_NOTIFY_PCHAT            "NOTIFYPCHAT"
-#define CFG_NOTIFY_PCHAT_HIGHLIGHT  "NOTIFYPCHATHIGHLIGHT"
-#define CFG_NOTIFY_PCHAT_INVITE     "NOTIFYPCHATINVITE"
-#define CFG_NOTIFY_NEWS             "NOTIFYNEWS"
-#define CFG_NOTIFY_XFER             "NOTIFYXFER"
-#define CFG_NOTIFY_BROADCAST        "NOTIFYBROADCAST"
-#define CFG_NOTIFY_OMIT_FOCUSED     "NOTIFYOMITFOCUSED"
+#define CFG_NOTIFY_CHAT "NOTIFYCHAT"
+#define CFG_NOTIFY_CHAT_HIGHLIGHT "NOTIFYCHATHIGHLIGHT"
+#define CFG_NOTIFY_MSG "NOTIFYMSG"
+#define CFG_NOTIFY_PCHAT "NOTIFYPCHAT"
+#define CFG_NOTIFY_PCHAT_HIGHLIGHT "NOTIFYPCHATHIGHLIGHT"
+#define CFG_NOTIFY_PCHAT_INVITE "NOTIFYPCHATINVITE"
+#define CFG_NOTIFY_NEWS "NOTIFYNEWS"
+#define CFG_NOTIFY_XFER "NOTIFYXFER"
+#define CFG_NOTIFY_BROADCAST "NOTIFYBROADCAST"
+#define CFG_NOTIFY_OMIT_FOCUSED "NOTIFYOMITFOCUSED"
 
 /* Sounds */
-#define CFG_SOUNDS_ON       "SOUNDSON"
-#define CFG_SND_INVITE      "SOUNDINVITE"
-#define CFG_SND_CHAT        "SOUNDCHAT"
-#define CFG_SND_ERROR       "SOUNDERROR"
-#define CFG_SND_FILE        "SOUNDFILE"
-#define CFG_SND_JOIN        "SOUNDJOIN"
-#define CFG_SND_LOGIN       "SOUNDLOGIN"
-#define CFG_SND_MSG         "SOUNDMSG"
-#define CFG_SND_NEWS        "SOUNDNEWS"
-#define CFG_SND_PART        "SOUNDPART"
+#define CFG_SOUNDS_ON "SOUNDSON"
+#define CFG_SND_INVITE "SOUNDINVITE"
+#define CFG_SND_CHAT "SOUNDCHAT"
+#define CFG_SND_ERROR "SOUNDERROR"
+#define CFG_SND_FILE "SOUNDFILE"
+#define CFG_SND_JOIN "SOUNDJOIN"
+#define CFG_SND_LOGIN "SOUNDLOGIN"
+#define CFG_SND_MSG "SOUNDMSG"
+#define CFG_SND_NEWS "SOUNDNEWS"
+#define CFG_SND_PART "SOUNDPART"
 
 /* Paths */
-#define CFG_DOWNLOAD        "DOWNLOAD"
+#define CFG_DOWNLOAD "DOWNLOAD"
 
 /* Tracker list (single comma-separated string) */
-#define CFG_TRACKER         "TRACKER"
+#define CFG_TRACKER "TRACKER"
 
 /* Appearance */
-#define CFG_THEME           "THEME"
+#define CFG_THEME "THEME"
 
 /* THEME string values (case-sensitive — must match changed_theme()). */
-#define CFG_THEME_SYSTEM    "system"
-#define CFG_THEME_LIGHT     "light"
-#define CFG_THEME_DARK      "dark"
+#define CFG_THEME_SYSTEM "system"
+#define CFG_THEME_LIGHT "light"
+#define CFG_THEME_DARK "dark"
 
 /* Logging (currently #if-0'd out, kept here for symmetry) */
-#define CFG_LOGGING         "LOGGING"
+#define CFG_LOGGING "LOGGING"
 
 /* Phase 5: xtext autocopy controls — Settings → Advanced → Auto Copy
  * Behavior. Three independent toggles for the drag-end clipboard
  * behaviour. See xtext.h:gtk_xtext_set_autocopy_* for the per-field
  * semantics. */
-#define CFG_AUTOCOPY_TEXT   "AUTOCOPYTEXT"
-#define CFG_AUTOCOPY_STAMP  "AUTOCOPYSTAMP"
-#define CFG_AUTOCOPY_COLOR  "AUTOCOPYCOLOR"
+#define CFG_AUTOCOPY_TEXT "AUTOCOPYTEXT"
+#define CFG_AUTOCOPY_STAMP "AUTOCOPYSTAMP"
+#define CFG_AUTOCOPY_COLOR "AUTOCOPYCOLOR"
 
 /* Phase 5: timestamp format. strftime(3) format string used by xtext
  * for the per-line stamp column and the autocopy_stamp clipboard
  * prefix. Default '[%H:%M:%S] ' matches HexChat's default and the
  * bracketed form users are used to from GtkHx pre-Phase-5. */
-#define CFG_STAMP_FORMAT    "TIMESTAMPFORMAT"
+#define CFG_STAMP_FORMAT "TIMESTAMPFORMAT"
 
 /* Phase 5: chat-highlight word list (Settings → Chat → Highlight).
  * Comma-separated; each word matches case-insensitively at word
@@ -124,39 +124,39 @@
 #define CFG_HIGHLIGHT_WORDS "HIGHLIGHTWORDS"
 
 /* Timer / startup bookkeeping */
-#define CFG_TIME            "TIME"
+#define CFG_TIME "TIME"
 
 /* Window geometry — five windows × four corners + an OPEN flag.
  * Names match the historic gtkhxrc keys; consumers always use these
  * five base names so a global 5x5 sweep still finds every reference. */
-#define CFG_CHAT_XPOS       "CHATXPOS"
-#define CFG_CHAT_YPOS       "CHATYPOS"
-#define CFG_CHAT_XSIZE      "CHATXSIZE"
-#define CFG_CHAT_YSIZE      "CHATYSIZE"
-#define CFG_OPEN_CHAT       "OPENCHAT"
+#define CFG_CHAT_XPOS "CHATXPOS"
+#define CFG_CHAT_YPOS "CHATYPOS"
+#define CFG_CHAT_XSIZE "CHATXSIZE"
+#define CFG_CHAT_YSIZE "CHATYSIZE"
+#define CFG_OPEN_CHAT "OPENCHAT"
 
-#define CFG_NEWS_XPOS       "NEWSXPOS"
-#define CFG_NEWS_YPOS       "NEWSYPOS"
-#define CFG_NEWS_XSIZE      "NEWSXSIZE"
-#define CFG_NEWS_YSIZE      "NEWSYSIZE"
-#define CFG_OPEN_NEWS       "OPENNEWS"
+#define CFG_NEWS_XPOS "NEWSXPOS"
+#define CFG_NEWS_YPOS "NEWSYPOS"
+#define CFG_NEWS_XSIZE "NEWSXSIZE"
+#define CFG_NEWS_YSIZE "NEWSYSIZE"
+#define CFG_OPEN_NEWS "OPENNEWS"
 
-#define CFG_TOOL_XPOS       "TOOLXPOS"
-#define CFG_TOOL_YPOS       "TOOLYPOS"
+#define CFG_TOOL_XPOS "TOOLXPOS"
+#define CFG_TOOL_YPOS "TOOLYPOS"
 
-#define CFG_TASK_XPOS       "TASKXPOS"
-#define CFG_TASK_YPOS       "TASKYPOS"
-#define CFG_TASK_XSIZE      "TASKXSIZE"
-#define CFG_TASK_YSIZE      "TASKYSIZE"
-#define CFG_OPEN_TASKS      "OPENTASKS"
+#define CFG_TASK_XPOS "TASKXPOS"
+#define CFG_TASK_YPOS "TASKYPOS"
+#define CFG_TASK_XSIZE "TASKXSIZE"
+#define CFG_TASK_YSIZE "TASKYSIZE"
+#define CFG_OPEN_TASKS "OPENTASKS"
 
-#define CFG_USER_XPOS       "USERXPOS"
-#define CFG_USER_YPOS       "USERYPOS"
-#define CFG_USER_XSIZE      "USERXSIZE"
-#define CFG_USER_YSIZE      "USERYSIZE"
-#define CFG_OPEN_USERS      "OPENUSERS"
+#define CFG_USER_XPOS "USERXPOS"
+#define CFG_USER_YPOS "USERYPOS"
+#define CFG_USER_XSIZE "USERXSIZE"
+#define CFG_USER_YSIZE "USERYSIZE"
+#define CFG_OPEN_USERS "OPENUSERS"
 
 /* GKeyFile section name for the prefs file. */
-#define CFG_KEYFILE_GROUP   "gtkhx"
+#define CFG_KEYFILE_GROUP "gtkhx"
 
 #endif /* ndef __gtkhx_CFGKEYS_H */

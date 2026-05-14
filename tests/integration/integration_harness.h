@@ -105,8 +105,8 @@ struct htlc_conn;
  * Returns TRUE on full send.
  */
 extern gboolean integration_send_message (int fd, struct htlc_conn *htlc,
-                                          guint32 type, guint32 flag,
-                                          int hc, ...);
+                                          guint32 type, guint32 flag, int hc,
+                                          ...);
 
 /*
  * Read one full Hotline message into htlc->in (overwriting any
@@ -160,8 +160,9 @@ extern gboolean integration_login_guest (int fd, struct htlc_conn *htlc,
  * the SELFINFO or the task-error chunk — and the caller can run
  * extractors against it directly.
  */
-extern guint32 integration_drain_until_selfinfo_or_error (
-		int fd, struct htlc_conn *htlc, int max_messages);
+extern guint32
+integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
+                                           int max_messages);
 
 /*
  * Compose the previous helpers: open the socket, run the magic

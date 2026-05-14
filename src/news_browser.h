@@ -50,6 +50,6 @@ extern void open_news_browser (GtkWidget *widget, struct _session *sess);
  * does not free. */
 extern gboolean gnews_browser_handle_dirlist (gpointer gfnews);
 extern gboolean gnews_browser_handle_catlist (gpointer gcnews);
-extern gboolean gnews_browser_handle_thread  (gpointer post);
+extern gboolean gnews_browser_handle_thread (gpointer post);
 
 #endif /* HX_NEWS_BROWSER_H */

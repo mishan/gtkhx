@@ -30,25 +30,24 @@
 /* Layout-compatible stub of struct gtkhx_chat. The runtime gchat_free
  * just g_frees the struct — none of the widget pointers matter. */
 struct gchat_stub {
-	void   *window;
-	void   *output;
-	void   *input;
-	guint32 cid;
+    void *window;
+    void *output;
+    void *input;
+    guint32 cid;
 };
 
 static GHashTable *
 gchat_table_new_for_test (void)
 {
-	return g_hash_table_new_full (g_direct_hash, g_direct_equal,
-	                              NULL, g_free);
+    return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
 }
 
 static struct gchat_stub *
 make_gchat (guint32 cid)
 {
-	struct gchat_stub *g = g_malloc0 (sizeof (struct gchat_stub));
-	g->cid = cid;
-	return g;
+    struct gchat_stub *g = g_malloc0 (sizeof (struct gchat_stub));
+    g->cid = cid;
+    return g;
 }
 
 /* ---- 1. Public + pchats coexist ----------------------------------- */
@@ -56,21 +55,21 @@ make_gchat (guint32 cid)
 static void
 test_public_and_pchats_coexist (void)
 {
-	GHashTable *t = gchat_table_new_for_test ();
-	struct gchat_stub *pub = make_gchat (0);
-	struct gchat_stub *pa  = make_gchat (0xA01);
-	struct gchat_stub *pb  = make_gchat (0xA02);
+    GHashTable *t = gchat_table_new_for_test ();
+    struct gchat_stub *pub = make_gchat (0);
+    struct gchat_stub *pa = make_gchat (0xA01);
+    struct gchat_stub *pb = make_gchat (0xA02);
 
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u),     pub);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0xA01u), pa);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0xA02u), pb);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0xA01u), pa);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0xA02u), pb);
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 3);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u))     == pub);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA01u)) == pa);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA02u)) == pb);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 3);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA01u)) == pa);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0xA02u)) == pb);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 2. Iteration recognises public vs pchat by key=0 ------------- */
@@ -81,29 +80,29 @@ test_public_and_pchats_coexist (void)
 static void
 test_iter_classifies_by_key (void)
 {
-	GHashTable *t = gchat_table_new_for_test ();
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u),  make_gchat (0));
-	g_hash_table_insert (t, GUINT_TO_POINTER (10u), make_gchat (10));
-	g_hash_table_insert (t, GUINT_TO_POINTER (20u), make_gchat (20));
+    GHashTable *t = gchat_table_new_for_test ();
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), make_gchat (0));
+    g_hash_table_insert (t, GUINT_TO_POINTER (10u), make_gchat (10));
+    g_hash_table_insert (t, GUINT_TO_POINTER (20u), make_gchat (20));
 
-	int public_count = 0, pchat_count = 0;
-	GHashTableIter iter;
-	gpointer key, val;
-	g_hash_table_iter_init (&iter, t);
-	while (g_hash_table_iter_next (&iter, &key, &val)) {
-		struct gchat_stub *g = val;
-		if (GPOINTER_TO_UINT (key) == 0) {
-			public_count++;
-			g_assert_cmpuint (g->cid, ==, 0);
-		} else {
-			pchat_count++;
-			g_assert_cmpuint (g->cid, !=, 0);
-		}
-	}
-	g_assert_cmpint (public_count, ==, 1);
-	g_assert_cmpint (pchat_count,  ==, 2);
+    int public_count = 0, pchat_count = 0;
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init (&iter, t);
+    while (g_hash_table_iter_next (&iter, &key, &val)) {
+        struct gchat_stub *g = val;
+        if (GPOINTER_TO_UINT (key) == 0) {
+            public_count++;
+            g_assert_cmpuint (g->cid, ==, 0);
+        } else {
+            pchat_count++;
+            g_assert_cmpuint (g->cid, !=, 0);
+        }
+    }
+    g_assert_cmpint (public_count, ==, 1);
+    g_assert_cmpint (pchat_count, ==, 2);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 3. Removing a pchat leaves the public alone ------------------ */
@@ -111,16 +110,16 @@ test_iter_classifies_by_key (void)
 static void
 test_remove_pchat_preserves_public (void)
 {
-	GHashTable *t = gchat_table_new_for_test ();
-	struct gchat_stub *pub = make_gchat (0);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u),    pub);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0xC0u), make_gchat (0xC0));
+    GHashTable *t = gchat_table_new_for_test ();
+    struct gchat_stub *pub = make_gchat (0);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0xC0u), make_gchat (0xC0));
 
-	g_assert_true   (g_hash_table_remove (t, GUINT_TO_POINTER (0xC0u)));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_true   (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
+    g_assert_true (g_hash_table_remove (t, GUINT_TO_POINTER (0xC0u)));
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 4. Teardown pattern: collect-then-remove --------------------- */
@@ -134,31 +133,33 @@ test_remove_pchat_preserves_public (void)
 static void
 test_teardown_collect_then_remove (void)
 {
-	GHashTable *t = gchat_table_new_for_test ();
-	struct gchat_stub *pub = make_gchat (0);
-	g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
-	for (guint32 i = 1; i < 6; i++)
-		g_hash_table_insert (t, GUINT_TO_POINTER (i),
-		                     make_gchat (i));
+    GHashTable *t = gchat_table_new_for_test ();
+    struct gchat_stub *pub = make_gchat (0);
+    g_hash_table_insert (t, GUINT_TO_POINTER (0u), pub);
+    for (guint32 i = 1; i < 6; i++) {
+        g_hash_table_insert (t, GUINT_TO_POINTER (i), make_gchat (i));
+    }
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 6);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 6);
 
-	GList *to_close = NULL;
-	GHashTableIter iter;
-	gpointer key, val;
-	g_hash_table_iter_init (&iter, t);
-	while (g_hash_table_iter_next (&iter, &key, &val)) {
-		if (GPOINTER_TO_UINT (key) != 0)
-			to_close = g_list_prepend (to_close, key);
-	}
-	for (GList *l = to_close; l; l = l->next)
-		g_hash_table_remove (t, l->data);
-	g_list_free (to_close);
+    GList *to_close = NULL;
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init (&iter, t);
+    while (g_hash_table_iter_next (&iter, &key, &val)) {
+        if (GPOINTER_TO_UINT (key) != 0) {
+            to_close = g_list_prepend (to_close, key);
+        }
+    }
+    for (GList *l = to_close; l; l = l->next) {
+        g_hash_table_remove (t, l->data);
+    }
+    g_list_free (to_close);
 
-	g_assert_cmpuint (g_hash_table_size (t), ==, 1);
-	g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
+    g_assert_cmpuint (g_hash_table_size (t), ==, 1);
+    g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (0u)) == pub);
 
-	g_hash_table_destroy (t);
+    g_hash_table_destroy (t);
 }
 
 /* ---- 5. Destroying the table reclaims all entries ----------------- */
@@ -166,30 +167,30 @@ test_teardown_collect_then_remove (void)
 static void
 test_destroy_reclaims_all (void)
 {
-	GHashTable *t = gchat_table_new_for_test ();
-	for (guint32 i = 0; i < 10; i++)
-		g_hash_table_insert (t, GUINT_TO_POINTER (i),
-		                     make_gchat (i));
-	g_assert_cmpuint (g_hash_table_size (t), ==, 10);
-	g_hash_table_destroy (t);
-	/* Leaks would show up under ASan / valgrind. */
+    GHashTable *t = gchat_table_new_for_test ();
+    for (guint32 i = 0; i < 10; i++) {
+        g_hash_table_insert (t, GUINT_TO_POINTER (i), make_gchat (i));
+    }
+    g_assert_cmpuint (g_hash_table_size (t), ==, 10);
+    g_hash_table_destroy (t);
+    /* Leaks would show up under ASan / valgrind. */
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/gchat_hash/public_and_pchats_coexist",
-	                 test_public_and_pchats_coexist);
-	g_test_add_func ("/gchat_hash/iter_classifies_by_key",
-	                 test_iter_classifies_by_key);
-	g_test_add_func ("/gchat_hash/remove_pchat_preserves_public",
-	                 test_remove_pchat_preserves_public);
-	g_test_add_func ("/gchat_hash/teardown_collect_then_remove",
-	                 test_teardown_collect_then_remove);
-	g_test_add_func ("/gchat_hash/destroy_reclaims_all",
-	                 test_destroy_reclaims_all);
+    g_test_add_func ("/gchat_hash/public_and_pchats_coexist",
+                     test_public_and_pchats_coexist);
+    g_test_add_func ("/gchat_hash/iter_classifies_by_key",
+                     test_iter_classifies_by_key);
+    g_test_add_func ("/gchat_hash/remove_pchat_preserves_public",
+                     test_remove_pchat_preserves_public);
+    g_test_add_func ("/gchat_hash/teardown_collect_then_remove",
+                     test_teardown_collect_then_remove);
+    g_test_add_func ("/gchat_hash/destroy_reclaims_all",
+                     test_destroy_reclaims_all);
 
-	return g_test_run ();
+    return g_test_run ();
 }

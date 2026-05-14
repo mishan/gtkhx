@@ -33,8 +33,8 @@
 static guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-	const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-	return ntohl (h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
+    return ntohl (h->type);
 }
 
 /* Drain server messages until we see an HTLS_HDR_CHAT broadcast
@@ -48,22 +48,24 @@ hdr_type (const struct htlc_conn *htlc)
  * FALSE on timeout. On success the matching message is in htlc->in
  * and `out` is filled via hx_chat_extract. */
 static gboolean
-drain_until_own_chat (int fd, struct htlc_conn *htlc,
-                      guint16 wanted_uid,
-                      struct hx_chat_msg *out,
-                      int max_messages)
+drain_until_own_chat (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
+                      struct hx_chat_msg *out, int max_messages)
 {
-	for (int i = 0; i < max_messages; i++) {
-		if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000))
-			return FALSE;
-		if (hdr_type (htlc) != HTLS_HDR_CHAT)
-			continue;
-		if (!hx_chat_extract (htlc, out))
-			continue;
-		if (out->uid == wanted_uid)
-			return TRUE;
-	}
-	return FALSE;
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
+            continue;
+        }
+        if (!hx_chat_extract (htlc, out)) {
+            continue;
+        }
+        if (out->uid == wanted_uid) {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 /* Send one chat line. Mirrors the GtkHx commands.c send shape:
@@ -74,12 +76,11 @@ drain_until_own_chat (int fd, struct htlc_conn *htlc,
 static gboolean
 send_chat (int fd, struct htlc_conn *htlc, const char *text)
 {
-	guint16 style = htons (1);
-	return integration_send_message (
-		fd, htlc,
-		HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2,
-		(int) HTLC_DATA_STYLE, (int) sizeof (style), &style,
-		(int) HTLC_DATA_CHAT,  (int) strlen (text), (guint8 *) text);
+    guint16 style = htons (1);
+    return integration_send_message (
+        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_STYLE,
+        (int)sizeof (style), &style, (int)HTLC_DATA_CHAT, (int)strlen (text),
+        (guint8 *)text);
 }
 
 /* ---------- Test cases ---------- */
@@ -96,98 +97,98 @@ send_chat (int fd, struct htlc_conn *htlc, const char *text)
 static void
 test_chat_roundtrip_simple (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "ChatBot Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "ChatBot Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	const char *line = "hello from the integration suite";
-	g_assert_true (send_chat (fd, &htlc, line));
+    const char *line = "hello from the integration suite";
+    g_assert_true (send_chat (fd, &htlc, line));
 
-	struct hx_chat_msg cm;
-	g_assert_true (drain_until_own_chat (
-		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    struct hx_chat_msg cm;
+    g_assert_true (
+        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 
-	/* The server prepends the name and a colon to the body via its
+    /* The server prepends the name and a colon to the body via its
 	 * chat_format template. Pin down the parts that should always
 	 * be present without over-specifying the exact format. */
-	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
-	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "ChatBot Tier-3"));
+    g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
+    g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "ChatBot Tier-3"));
 
-	/* cid 0 = main chat (the only chat we ever joined). */
-	g_assert_cmphex (cm.cid, ==, 0);
+    /* cid 0 = main chat (the only chat we ever joined). */
+    g_assert_cmphex (cm.cid, ==, 0);
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 static void
 test_chat_roundtrip_unicode_payload (void)
 {
-	/* Make sure non-ASCII bytes survive the wire intact (mhxd
+    /* Make sure non-ASCII bytes survive the wire intact (mhxd
 	 * doesn't re-encode the body, just runs strip_ansi-style
 	 * sanitisation). UTF-8 emoji + multi-byte glyphs are the
 	 * typical real-world stress case. */
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "Unicode Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "Unicode Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	const char *line = "\xe2\x98\x83 \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e";
-	/* "☃ 日本語" — snowman + Japanese, both common edge cases. */
+    const char *line = "\xe2\x98\x83 \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e";
+    /* "☃ 日本語" — snowman + Japanese, both common edge cases. */
 
-	g_assert_true (send_chat (fd, &htlc, line));
+    g_assert_true (send_chat (fd, &htlc, line));
 
-	struct hx_chat_msg cm;
-	g_assert_true (drain_until_own_chat (
-		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
-	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
+    struct hx_chat_msg cm;
+    g_assert_true (
+        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 static void
 test_chat_roundtrip_two_messages_in_order (void)
 {
-	struct htlc_conn htlc;
-	int fd = integration_open_login_or_skip (
-		&htlc, "TwoMsg Tier-3", 412);
-	if (fd < 0)
-		return;
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "TwoMsg Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
 
-	g_assert_true (send_chat (fd, &htlc, "first message"));
-	g_assert_true (send_chat (fd, &htlc, "second message"));
+    g_assert_true (send_chat (fd, &htlc, "first message"));
+    g_assert_true (send_chat (fd, &htlc, "second message"));
 
-	struct hx_chat_msg cm;
+    struct hx_chat_msg cm;
 
-	/* Read first broadcast (filtered to our own uid). */
-	g_assert_true (drain_until_own_chat (
-		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
-	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "first message"));
+    /* Read first broadcast (filtered to our own uid). */
+    g_assert_true (
+        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "first message"));
 
-	/* Read second broadcast. */
-	g_assert_true (drain_until_own_chat (
-		fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
-	g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "second message"));
+    /* Read second broadcast. */
+    g_assert_true (
+        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "second message"));
 
-	integration_release_htlc (&htlc);
-	integration_close (fd);
+    integration_release_htlc (&htlc);
+    integration_close (fd);
 }
 
 int
 main (int argc, char **argv)
 {
-	g_test_init (&argc, &argv, NULL);
+    g_test_init (&argc, &argv, NULL);
 
-	g_test_add_func ("/integration/chat/roundtrip_simple",
-	                 test_chat_roundtrip_simple);
-	g_test_add_func ("/integration/chat/roundtrip_unicode_payload",
-	                 test_chat_roundtrip_unicode_payload);
-	g_test_add_func ("/integration/chat/roundtrip_two_messages_in_order",
-	                 test_chat_roundtrip_two_messages_in_order);
+    g_test_add_func ("/integration/chat/roundtrip_simple",
+                     test_chat_roundtrip_simple);
+    g_test_add_func ("/integration/chat/roundtrip_unicode_payload",
+                     test_chat_roundtrip_unicode_payload);
+    g_test_add_func ("/integration/chat/roundtrip_two_messages_in_order",
+                     test_chat_roundtrip_two_messages_in_order);
 
-	return g_test_run ();
+    return g_test_run ();
 }
