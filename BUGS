@@ -1,7 +1,6 @@
 High priority:
 
 - The names in the Private Message xtext widget are not split out into the left column, so the separator does not work
-- Files browser (2-pane): focus drift on directory change — LIKELY FIXED, awaiting confirmation. Root cause turned out to be the GtkPaned divider position not being locked. Without an explicit gtk_paned_set_position, every items-changed on a panel's GListStore (i.e. every directory listing) caused GtkPaned to recompute the split from the children's natural sizes, which cascaded into another allocation pass that moved focus back to the default-focus panel. Empirical evidence: the user reported that manually dragging the divider once made the bug go away for the rest of the session — that's GtkPaned toggling `position-set` to TRUE internally. The fix sets the position to 490 (centered on the default 980 px window) at construction so the paned starts in the same state.
 
 Medium priority:
 
