@@ -1063,6 +1063,7 @@ icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
 	if (!memcmp (ftype, "rohd", 4)) return ICON_FILE_DISK;
 	if (!memcmp (ftype, "HTft", 4)) return ICON_FILE_HTft;
 	if (!memcmp (ftype, "alis", 4)) return ICON_FILE_alis;
+        if (!memcmp (ftype, "TEXT", 4)) return ICON_FILE_TEXT;
 	return ICON_FILE;
 }
 
