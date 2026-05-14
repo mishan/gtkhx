@@ -57,6 +57,7 @@
 #include "prefs.h"
 #include "preview.h"
 #include "pict_embed.h"
+#include "pict_magick.h"
 #include "gtkutil.h"
 
 /* ---- Viewer protocol ----------------------------------------------- */
@@ -249,10 +250,21 @@ static const char *const image_type_codes[] = {
 };
 
 static const char *const image_extensions[] = {
-    ".jpg",  ".jpeg", ".jpe", ".png", ".gif",  ".bmp",
-    ".webp", ".tif",  ".tiff", ".ico", ".avif", ".svg",
+    ".jpg",
+    ".jpeg",
+    ".jpe",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tif",
+    ".tiff",
+    ".ico",
+    ".avif",
+    ".svg",
     /* PICT — embedded-image extraction in image_done; see above. */
-    ".pict", ".pct",
+    ".pict",
+    ".pct",
     NULL,
 };
 
@@ -384,12 +396,28 @@ image_done (hx_preview *p)
     tex = gdk_texture_new_from_bytes (bytes, &err);
     g_bytes_unref (bytes);
 
-    /* PICT fallback. GdkPixbuf doesn't decode QuickDraw PICT, so the
-	 * direct call above will have failed on PICT input. Try the
-	 * "sniff for an embedded JPEG/PNG/GIF/TIFF" path — the common
-	 * case for PICT files seen on Hotline servers is a thin v2
-	 * wrapper around a real image format. If the sniff finds one,
-	 * re-attempt the texture decode with the trimmed bytes. */
+    /* PICT fallback chain. GdkPixbuf doesn't decode QuickDraw PICT,
+	 * so the direct call above will have failed on PICT input. Two
+	 * layers of recovery, cheapest first:
+	 *
+	 *   1. hx_pict_extract_embedded — sniff for an embedded JPEG /
+	 *      PNG / GIF / TIFF inside a v2 PICT. Covers the common
+	 *      case of mid-90s+ tools that wrapped a real image format
+	 *      in QuickDraw opcode 0x8200 / 0x8201. Pure GLib, near
+	 *      zero cost when it succeeds.
+	 *
+	 *   2. hx_pict_magick_decode — ImageMagick's PICT decoder.
+	 *      Handles the long tail of classic QuickDraw raster
+	 *      opcodes (PackBits/DirectBits rect/region pixmaps), which
+	 *      is what original Mac OS screencapture emitted. Heavier
+	 *      dependency but the only way to render those files
+	 *      shy of a custom QuickDraw interpreter. Optional at
+	 *      build time — when ImageMagick isn't available the
+	 *      function is a stub that just sets an error, so the
+	 *      classic-PICT case degrades to "Failed to decode image".
+	 *
+	 * Both are tried only on the no-direct-decode path, so the
+	 * common-case JPEG/PNG/etc. preview is unaffected. */
     if (!tex) {
         GBytes *embedded;
         embedded = hx_pict_extract_embedded (p->bytes->data, p->bytes->len);
@@ -398,14 +426,31 @@ image_done (hx_preview *p)
             tex = gdk_texture_new_from_bytes (embedded, &err2);
             g_bytes_unref (embedded);
             if (tex) {
-                /* Recovered. Drop the first error and proceed. */
+                /* Recovered via the sniff. Drop the first error and
+				 * proceed. */
                 g_clear_error (&err);
             } else {
                 /* Sniff found a signature but the data after it
 				 * wasn't actually decodable. Keep the original err
-				 * for the user-visible message (more relevant than
-				 * the "couldn't decode the JPEG we found embedded"
-				 * second error). */
+				 * for the user-visible message; clear the
+				 * intermediate. */
+                g_clear_error (&err2);
+            }
+        }
+    }
+    if (!tex) {
+        GError *err2 = NULL;
+        GdkTexture *t
+            = hx_pict_magick_decode (p->bytes->data, p->bytes->len, &err2);
+        if (t) {
+            tex = t;
+            g_clear_error (&err);
+        } else {
+            /* Preserve original error if there was one, otherwise
+			 * adopt ImageMagick's. */
+            if (!err) {
+                g_propagate_error (&err, err2);
+            } else {
                 g_clear_error (&err2);
             }
         }
