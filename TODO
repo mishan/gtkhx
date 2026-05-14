@@ -3,13 +3,9 @@ General:
 - Publish to Flathub
 
 Files:
-- Make the UI cleaner
 - Folder uploads/downloads
-- Consider a "commander" type of interface?
-
-Threaded News:
-- Make the UI cleaner -- expandable tree view?
-- Same window for folders and catalogs, just change buttons out
+- Use old icons for the interface?
+- More explicit buttons rather than keyboard shortcuts
 
 Icons:
 - Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
