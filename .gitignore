@@ -126,6 +126,9 @@ setup.log
 /build-flatpak/
 /.flatpak-builder/
 /repo/
+# Bundle output from tools/build-flatpak-bundle.sh — could be any
+# name (-o flag), so ignore the extension wholesale.
+*.flatpak
 
 # Vendored mhxd clone — local reference per CLAUDE.md, never committed
 /mhxd/
