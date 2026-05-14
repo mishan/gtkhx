@@ -240,6 +240,145 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
 			files_panel_get_provider (br->active));
 }
 
+/* ---- Rename (F6 in classic Norton) ---- */
+
+struct rename_ctx {
+	struct browser *br;
+	files_panel    *panel;
+	char           *old_name;     /* owned */
+	GtkWidget      *entry;        /* not owned — held by dialog */
+};
+
+static void
+on_rename_response (AdwAlertDialog *dialog, const char *response,
+                     gpointer user_data)
+{
+	struct rename_ctx *ctx = user_data;
+	const char *new_name;
+	GError *err = NULL;
+	(void) dialog;
+
+	if (g_strcmp0 (response, "rename") != 0) return;
+	if (!ctx->panel || !ctx->old_name) return;
+	new_name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+	if (!new_name || !*new_name) return;
+	if (g_strcmp0 (new_name, ctx->old_name) == 0) return;   /* nothing changed */
+
+	if (!hx_files_provider_rename (
+			files_panel_get_provider (ctx->panel),
+			ctx->old_name, new_name, &err)) {
+		show_toast (ctx->br,
+			err ? err->message : _("Rename failed."));
+		g_clear_error (&err);
+	}
+}
+
+static void
+on_rename_closed (AdwAlertDialog *dialog, gpointer user_data)
+{
+	struct rename_ctx *ctx = user_data;
+	(void) dialog;
+	g_free (ctx->old_name);
+	g_free (ctx);
+}
+
+static void
+on_rename_clicked (GtkButton *btn, gpointer user_data)
+{
+	struct browser *br = user_data;
+	HxFileEntry *e;
+	AdwDialog *dialog;
+	GtkWidget *entry;
+	struct rename_ctx *ctx;
+	char *body;
+	(void) btn;
+
+	if (!br->active) return;
+
+	/* Rename is a singleton operation — only meaningful when
+	 * exactly one row is selected. Multi-rename (mass rename
+	 * with a pattern) is a separate feature; toast a hint
+	 * and bail. */
+	e = files_panel_get_single_selected (br->active);
+	if (!e) {
+		show_toast (br, _("Select a single file to rename."));
+		return;
+	}
+
+	body = g_strdup_printf (
+		_("Rename “%s” to:"), hx_file_entry_get_name (e));
+	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Rename"), body));
+	g_free (body);
+
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+		"cancel", _("_Cancel"));
+	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
+		"rename", _("_Rename"));
+	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+		"rename", ADW_RESPONSE_SUGGESTED);
+	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "rename");
+	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+
+	entry = gtk_entry_new ();
+	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+	gtk_editable_set_text (GTK_EDITABLE (entry),
+		hx_file_entry_get_name (e));
+	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+
+	ctx = g_new0 (struct rename_ctx, 1);
+	ctx->br       = br;
+	ctx->panel    = br->active;
+	ctx->old_name = g_strdup (hx_file_entry_get_name (e));
+	ctx->entry    = entry;
+
+	g_signal_connect (dialog, "response", G_CALLBACK (on_rename_response), ctx);
+	g_signal_connect (dialog, "closed",   G_CALLBACK (on_rename_closed),   ctx);
+
+	adw_dialog_present (dialog, br->window);
+
+	/* Focus + select all → user can either accept the default
+	 * (just hit Enter to confirm same name = no-op safety) or
+	 * start typing immediately to replace. Matches Files
+	 * Manager UX in GNOME / Finder. */
+	gtk_widget_grab_focus (entry);
+	gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+}
+
+/* ---- Activate selected entry (F4 / Enter on a row) ---- */
+
+/* Window-level shortcut that mirrors what double-click /
+ * Enter-on-row already does, but driven from a keypress that
+ * doesn't require the column view to have row focus. Routes
+ * the active panel's single selection through the provider's
+ * activate_entry (preview for remote, xdg-open for local). */
+static gboolean
+on_open_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+	struct browser *br = user_data;
+	HxFileEntry *e;
+	(void) widget; (void) args;
+
+	if (!br->active) return FALSE;
+	e = files_panel_get_single_selected (br->active);
+	if (!e || hx_file_entry_is_dir (e)) return FALSE;
+	hx_files_provider_activate_entry (
+		files_panel_get_provider (br->active), e);
+	return TRUE;
+}
+
+/* F2 rename shortcut — route to the same dialog the headerbar
+ * Rename button uses. Driven from a callback action so the
+ * column view's internal F2 (which would start an in-place
+ * editor on the row, behaviour we don't want for now) doesn't
+ * preempt us. */
+static gboolean
+on_rename_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+	(void) widget; (void) args;
+	on_rename_clicked (NULL, user_data);
+	return TRUE;
+}
+
 /* Copy a GPtrArray of entries from one panel to another and
  * surface a one-shot summary toast. Shared between the Copy
  * headerbar button and the DnD drop handler — both ultimately
@@ -760,7 +899,7 @@ void
 open_files_browser (void)
 {
 	struct browser *br;
-	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *delete_btn;
+	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *rename_btn, *delete_btn;
 	GtkEventController *shortcuts;
 	GtkShortcut *sh;
 
@@ -793,22 +932,26 @@ open_files_browser (void)
 	refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
 	mkdir_btn   = gtk_button_new_from_icon_name ("folder-new-symbolic");
 	br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
+	rename_btn  = gtk_button_new_from_icon_name ("document-edit-symbolic");
 	delete_btn  = gtk_button_new_from_icon_name ("user-trash-symbolic");
 
 	gtk_widget_set_tooltip_text (refresh_btn,  _("Reload active panel (Ctrl+R)"));
 	gtk_widget_set_tooltip_text (mkdir_btn,    _("New folder in active panel (Ctrl+N)"));
 	gtk_widget_set_tooltip_text (br->btn_copy, _("Copy selection to the other panel (F5)"));
+	gtk_widget_set_tooltip_text (rename_btn,   _("Rename selected file (F2)"));
 	gtk_widget_set_tooltip_text (delete_btn,   _("Delete selection in active panel (Ctrl+D)"));
 
 	g_signal_connect (refresh_btn,  "clicked", G_CALLBACK (on_refresh_clicked), br);
 	g_signal_connect (mkdir_btn,    "clicked", G_CALLBACK (on_mkdir_clicked),   br);
 	g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),    br);
+	g_signal_connect (rename_btn,   "clicked", G_CALLBACK (on_rename_clicked),  br);
 	g_signal_connect (delete_btn,   "clicked", G_CALLBACK (on_delete_clicked),  br);
 
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
 	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
 	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), delete_btn);
+	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), rename_btn);
 	gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
 
 	/* Two panels in a horizontal GtkPaned. Phase 1: both local;
@@ -903,10 +1046,28 @@ open_files_browser (void)
 	gtk_shortcut_controller_add_shortcut (
 		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
 
-	/* TODO Phase 4: Ctrl-R / Ctrl-N / Ctrl-D bindings. Skipped in
-	 * Phase 1 since the headerbar buttons are easy to reach and
-	 * the shortcuts are bikeshed-able (some users want F-key parity,
-	 * others want emacs-style Ctrl-X). */
+	/* F4 = "view/edit" (Norton F4 was Edit). Same action as
+	 * Enter-on-row / double-click — routes through the
+	 * provider's activate_entry, which picks preview for
+	 * remote and xdg-open for local. Useful for users whose
+	 * row focus isn't where their selection is (keyboard
+	 * navigation in a multi-select). F3 (classic View)
+	 * doesn't get a dedicated binding; the activation is
+	 * preview-first anyway. */
+	sh = gtk_shortcut_new (
+		gtk_keyval_trigger_new (GDK_KEY_F4, 0),
+		gtk_callback_action_new (on_open_shortcut, br, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+
+	/* F2 = Rename (modern Files-Manager keybinding). Route
+	 * through on_rename_shortcut so the column view's internal
+	 * F2 handling doesn't preempt us. */
+	sh = gtk_shortcut_new (
+		gtk_keyval_trigger_new (GDK_KEY_F2, 0),
+		gtk_callback_action_new (on_rename_shortcut, br, NULL));
+	gtk_shortcut_controller_add_shortcut (
+		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
 
 	g_signal_connect (br->window, "close-request",
 		G_CALLBACK (on_close), br);
