@@ -194,14 +194,48 @@ DELETE_FILES, CREATE_FOLDERS, etc.) — grey out F-keys when the
 account can't do the action.
 
 **Phase 4 — Polish.**
-- F3 → preview window (existing preview.c).
-- F4 → `g_app_info_launch_default_for_uri` on local files.
-- F6 → rename in place if no panel switch needed, move dialog
-  otherwise.
-- Multi-select for all destructive ops.
-- DnD between the two panels.
-- Drag-out from remote to host (refactor of `get_put_data`).
-- Column sort.
+- ✅ F3 → preview window (existing preview.c).
+- ✅ F4 → `g_app_info_launch_default_for_uri` on local files.
+- ✅ F2 rename — single-select dialog. (Move dialog for
+  cross-directory move is deferred — orthodox FM's move-with-
+  rename pattern is rarely used now that DnD covers the common
+  case.)
+- ✅ Multi-select for all destructive ops.
+- ✅ DnD between the two panels.
+- ✅ Drag-out from LOCAL to host (the remote side stays
+  in-app — needs FileTransferPortal plumbing for promise-based
+  external drag; deferred to a Phase 4.x sub-phase or skipped).
+- ✅ Column sort (Phase 1).
+- ✅ Auto-refresh both panels when a transfer finishes.
+- ✅ Friendly Kind column for remote rows.
+
+**Deferred to Phase 4.x / Phase 5 polish:**
+
+- Per-panel side selector (L↔R local/remote swap). Needs the
+  panel to swap providers mid-life — re-build sort model,
+  re-create selection model, re-bind signal handlers. Doable
+  but a real chunk of code, and the L=local R=remote default
+  covers the 95% case. Two-remote-dirs-at-once is the
+  motivating use case, currently workable via the legacy
+  files window in a separate session.
+- Per-row transfer progress overlay (spinner / progress bar
+  on the row mid-transfer). The existing tasks window already
+  shows progress; an in-row overlay is nice-to-have rather
+  than required.
+- Drag-out from REMOTE to host. Needs FileTransferPortal +
+  download-on-promise plumbing.
+- Move dialog (orthodox F6 cross-dir move). Rename covers
+  in-place; cross-dir is download-then-upload right now.
+
+**Known bugs** (see BUGS):
+
+- Focus drift on remote directory change in the right panel.
+  populate_from_chunks's row-widget removal during the
+  items-changed propagation steals focus before on_navigated
+  can grab it back. Workarounds tried so far in commits
+  hand-restore via a wants_focus_restore flag, which fixes
+  the row-activate path in isolation but the symptom still
+  shows on testing. Three followups noted in the bug entry.
 
 **Phase 5 — Retire legacy.** Delete the old `open_files`,
 `gfile_list`, `gfl_*`, and supporting UI helpers from files.c.
