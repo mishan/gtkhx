@@ -139,7 +139,7 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
 {
     const char *src_dir, *dst_dir;
-    char *rpath, *lpath;
+    char *lpath;
     struct htxf_conn *htxf;
     guint64 size;
 
@@ -155,18 +155,24 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
 
     src_dir = hx_files_provider_get_current_path (src);
     dst_dir = hx_files_provider_get_current_path (dst);
-    rpath = join_path (src_dir, hx_file_entry_get_name (e));
     lpath = join_path (dst_dir, hx_file_entry_get_name (e));
 
     size = hx_file_entry_get_size (e);
-    htxf = xfer_new (lpath, rpath, XFER_GET, 0, (guint32)size);
+    /* xfer_new takes the remote location as (dir, name, name_len)
+	 * so the name's bytes (possibly including '/') ride through to
+	 * the wire FILE_NAME chunk untouched. */
+    {
+        const char *nm = hx_file_entry_get_name (e);
+        gsize nm_len = nm ? strlen (nm) : 0;
+        htxf = xfer_new (lpath, src_dir ? src_dir : "", nm, nm_len, XFER_GET, 0,
+                         (guint32)size);
+    }
     if (htxf) {
         htxf->filter_argv = 0;
         htxf->opt.retry = 0;
     }
 
     g_free (lpath);
-    g_free (rpath);
     return htxf ? HX_OPS_OK : HX_OPS_ERR_LOCAL_FAIL;
 }
 

@@ -877,8 +877,19 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
                 lpath
                     = g_build_filename (ldir, hx_file_entry_get_name (e), NULL);
 
-                htxf = xfer_new (lpath, rpath, XFER_GET, 0,
-                                 (guint32)hx_file_entry_get_size (e));
+                /* xfer_new takes the remote location as a
+				 * (dir, name, name_len) triple. The name's bytes
+				 * may include '/' (legal in Hotline names — the
+				 * wire format is per-component, not slash-
+				 * separated); pulling them out of the joined
+				 * rpath is what survives the round-trip. */
+                {
+                    const char *nm = hx_file_entry_get_name (e);
+                    gsize nm_len = nm ? strlen (nm) : 0;
+                    htxf = xfer_new (lpath, rdir ? rdir : "/", nm, nm_len,
+                                     XFER_GET, 0,
+                                     (guint32)hx_file_entry_get_size (e));
+                }
                 if (htxf) {
                     htxf->filter_argv = 0;
                     htxf->opt.retry = 0;

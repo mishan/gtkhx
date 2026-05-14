@@ -440,8 +440,9 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
 {
     HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
     const char *dir;
-    char *rpath, *lpath;
+    char *lpath;
     struct htxf_conn *htxf;
+    (void)r;
 
     if (!e || hx_file_entry_is_dir (e)) {
         return;
@@ -455,7 +456,6 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
     }
 
     dir = hx_files_provider_get_current_path (self);
-    rpath = remote_child_path (r, hx_file_entry_get_name (e));
 
     /* Preview xfer never writes to disk (see opt.preview branch
 	 * in xfer_new). The lpath argument still has to exist
@@ -465,15 +465,23 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
         gtkhx_prefs.download_path ? gtkhx_prefs.download_path : "/tmp",
         hx_file_entry_get_name (e), NULL);
 
-    htxf = xfer_new (lpath, rpath, XFER_GET, 1 /* preview */, 0);
+    /* xfer_new takes the remote location as a (dir, name, name_len)
+	 * triple — keeping the name's bytes (which may legally include
+	 * `/`) out of the joined path so they survive the wire trip
+	 * verbatim. The cached entry's name is already byte-for-byte
+	 * what came off the wire. */
+    {
+        const char *name = hx_file_entry_get_name (e);
+        gsize name_len = name ? strlen (name) : 0;
+        htxf = xfer_new (lpath, dir ? dir : "", name, name_len, XFER_GET,
+                         1 /* preview */, 0);
+    }
     if (htxf) {
         htxf->filter_argv = 0;
         htxf->opt.retry = 0;
     }
 
-    g_free (rpath);
     g_free (lpath);
-    (void)dir;
 }
 
 static void
