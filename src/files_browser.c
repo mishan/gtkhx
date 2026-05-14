@@ -457,7 +457,15 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
  * source panel, pack into a HxFilesDrag, return a content
  * provider that wraps the boxed value. NULL means "don't
  * start a drag" (empty selection) — GtkDragSource handles that
- * cleanly. */
+ * cleanly.
+ *
+ * For LOCAL sources we additionally publish a GDK_TYPE_FILE_LIST
+ * provider in the same drag. That lets external apps (GNOME
+ * Files, Finder-via-Wayland, etc.) accept the drop as a real
+ * GFile transfer. For REMOTE sources we don't — the file
+ * doesn't exist on the host yet, and the FileTransferPortal
+ * protocol that would let us promise a download isn't wired
+ * up. */
 static GdkContentProvider *
 on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 {
@@ -465,8 +473,9 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 	GPtrArray   *entries;
 	HxFilesDrag  drag;
 	GValue       val = G_VALUE_INIT;
-	GdkContentProvider *cp;
-	(void) x; (void) y;
+	GdkContentProvider *cp_internal;
+	GdkContentProvider *cp_files = NULL;
+	(void) x; (void) y; (void) user_data;
 
 	p = g_object_get_data (G_OBJECT (source), "panel");
 	if (!p) return NULL;
@@ -474,7 +483,6 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 	entries = files_panel_get_selected_entries (p);
 	if (!entries || entries->len == 0) {
 		if (entries) g_ptr_array_free (entries, TRUE);
-		(void) user_data;
 		return NULL;
 	}
 
@@ -486,11 +494,52 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 
 	g_value_init (&val, HX_TYPE_FILES_DRAG);
 	g_value_set_boxed (&val, &drag);
-	cp = gdk_content_provider_new_for_value (&val);
+	cp_internal = gdk_content_provider_new_for_value (&val);
 	g_value_unset (&val);
 
+	/* External-drag enrichment: if this is the local provider,
+	 * also offer a GDK_TYPE_FILE_LIST so the receiving app gets
+	 * usable GFiles. The list is built from the provider's
+	 * current_path + each entry's name. Folders included — GIO
+	 * file copy on the receiving side handles recursion. */
+	{
+		HxFilesProvider *prov = files_panel_get_provider (p);
+		if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
+			const char *dir = hx_files_provider_get_current_path (prov);
+			GSList *flist = NULL;
+			guint i;
+			for (i = 0; i < entries->len; i++) {
+				HxFileEntry *e = g_ptr_array_index (entries, i);
+				char *abspath = g_build_filename (dir ? dir : "/",
+					hx_file_entry_get_name (e), NULL);
+				flist = g_slist_prepend (flist,
+					g_file_new_for_path (abspath));
+				g_free (abspath);
+			}
+			flist = g_slist_reverse (flist);
+
+			g_value_init (&val, GDK_TYPE_FILE_LIST);
+			g_value_set_boxed (&val, flist);
+			cp_files = gdk_content_provider_new_for_value (&val);
+			g_value_unset (&val);
+			g_slist_free_full (flist, g_object_unref);
+		}
+	}
+
 	g_ptr_array_free (entries, TRUE);
-	return cp;
+
+	if (cp_files) {
+		/* Union: external apps receive GDK_TYPE_FILE_LIST,
+		 * our internal drop target receives HX_TYPE_FILES_DRAG.
+		 * GDK negotiates whichever the target accepts. */
+		GdkContentProvider *providers[2] = { cp_internal, cp_files };
+		GdkContentProvider *cp_union =
+			gdk_content_provider_new_union (providers, 2);
+		g_object_unref (cp_internal);
+		g_object_unref (cp_files);
+		return cp_union;
+	}
+	return cp_internal;
 }
 
 /* Drop target callback. Validates the drag's source-panel
