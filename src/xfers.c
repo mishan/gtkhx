@@ -238,7 +238,6 @@ uniquify_local_path (char *path, size_t cap)
 void
 xfer_go (struct htxf_conn *htxf)
 {
-    char *rfile;
     guint16 hldirlen;
     guint8 *hldir;
     guint8 rflt[74];
@@ -306,38 +305,63 @@ xfer_go (struct htxf_conn *htxf)
             S32HTON (htxf->rsrc_pos, &rflt[62]);
         }
 
-        rfile = dirchar_basename (htxf->remotepath);
+        /* Use the structured fields: remotename for FILE_NAME
+		 * (byte-for-byte from the listing, so `/` chars in names
+		 * pass through), remotedir for the DIR chunk components.
+		 * The has-parent-dir test is whether remotedir is anything
+		 * other than empty or just `/`. */
         task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_get), htxf, 0,
                   "xfer_go");
-        if (rfile != htxf->remotepath) {
-            hldir = path_to_hldir (htxf->remotepath, &hldirlen, 1);
+        if (htxf->remotedir[0]
+            && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0)) {
+            hldir = path_to_hldir (htxf->remotedir, &hldirlen, 0);
             hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0, resuming ? 3 : 2,
-                     HTLC_DATA_FILE_NAME, strlen (rfile), rfile, HTLC_DATA_DIR,
-                     hldirlen, hldir, HTLC_DATA_RFLT, 74, rflt);
+                     HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                     htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
+                     HTLC_DATA_RFLT, 74, rflt);
             g_free (hldir);
         } else {
             hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0, resuming ? 2 : 1,
-                     HTLC_DATA_FILE_NAME, strlen (rfile), rfile, HTLC_DATA_RFLT,
-                     74, rflt);
+                     HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                     htxf->remotename, HTLC_DATA_RFLT, 74, rflt);
         }
     } else {
         guint32 size = htonl (htxf->total_size);
 
-        rfile = basename (htxf->path);
-        hldir = path_to_hldir (htxf->remotepath, &hldirlen, 1);
         task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_put), htxf, 0,
                   "xfer_go");
+        hldir = (htxf->remotedir[0]
+                 && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0))
+                    ? path_to_hldir (htxf->remotedir, &hldirlen, 0)
+                    : NULL;
         if (exists_remote (htxf->remotepath)) {
-            hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                     HTLC_DATA_FILE_NAME, strlen (rfile), rfile, HTLC_DATA_DIR,
-                     hldirlen, hldir, HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                     HTLC_DATA_HTXF_SIZE, 4, &size);
+            if (hldir) {
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
+                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                         htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
+                         HTLC_DATA_FILE_PREVIEW, 2, "\0\1", HTLC_DATA_HTXF_SIZE,
+                         4, &size);
+            } else {
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
+                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                         htxf->remotename, HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
+                         HTLC_DATA_HTXF_SIZE, 4, &size);
+            }
         } else {
-            hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                     HTLC_DATA_FILE_NAME, strlen (rfile), rfile, HTLC_DATA_DIR,
-                     hldirlen, hldir, HTLC_DATA_HTXF_SIZE, 4, &size);
+            if (hldir) {
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
+                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                         htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
+                         HTLC_DATA_HTXF_SIZE, 4, &size);
+            } else {
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 2,
+                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
+                         htxf->remotename, HTLC_DATA_HTXF_SIZE, 4, &size);
+            }
         }
-        g_free (hldir);
+        if (hldir) {
+            g_free (hldir);
+        }
     }
 }
 
@@ -349,13 +373,62 @@ xfer_go_timer (void *__arg)
 }
 
 struct htxf_conn *
-xfer_new (const char *path, const char *remotepath, guint16 type, int preview,
+xfer_new (const char *path, const char *remotedir, const char *remotename,
+          gsize remotename_len, guint16 type, int preview,
           guint32 srv_data_size)
 {
     struct htxf_conn *htxf;
+    gsize dir_len;
+    gsize sep_len;
+    gsize stash_len;
 
     htxf = g_malloc0 (sizeof (struct htxf_conn));
-    strcpy (htxf->remotepath, remotepath);
+
+    /* Stash the structured fields verbatim. remotename is the wire
+	 * NAME chunk; remotedir is the wire DIR chunk source. Names can
+	 * contain any byte (incl. dir_char) so we never split, ever. */
+    if (remotename_len >= sizeof htxf->remotename) {
+        remotename_len = sizeof htxf->remotename - 1;
+    }
+    htxf->remotename_len = (guint16)remotename_len;
+    memcpy (htxf->remotename, remotename, remotename_len);
+    htxf->remotename[remotename_len] = 0;
+
+    if (remotedir) {
+        g_strlcpy (htxf->remotedir, remotedir, sizeof htxf->remotedir);
+    }
+
+    /* remotepath is kept for display/log purposes only. It's the
+	 * dir-with-trailing-slash-then-name joined string. If a
+	 * downstream consumer tries to split it on dir_char, they'll
+	 * mis-identify slashes-in-name as dir boundaries — that is the
+	 * exact bug we're sidestepping by keeping the structured fields
+	 * alongside. */
+    dir_len = strlen (htxf->remotedir);
+    sep_len = (dir_len > 0 && htxf->remotedir[dir_len - 1] != '/') ? 1 : 0;
+    stash_len = dir_len + sep_len + remotename_len;
+    if (stash_len >= sizeof htxf->remotepath) {
+        /* Truncate; remotepath is for display only. */
+        stash_len = sizeof htxf->remotepath - 1;
+    }
+    {
+        char *p = htxf->remotepath;
+        gsize n = stash_len;
+        gsize d = MIN (n, dir_len);
+        memcpy (p, htxf->remotedir, d);
+        p += d;
+        n -= d;
+        if (sep_len && n > 0) {
+            *p++ = '/';
+            n--;
+        }
+        if (n > 0) {
+            memcpy (p, htxf->remotename, n);
+            p += n;
+        }
+        *p = 0;
+    }
+
     strcpy (htxf->path, path);
     htxf->type = type;
     htxf->queue = -1;

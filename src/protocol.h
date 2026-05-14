@@ -99,7 +99,17 @@ struct htxf_conn {
     guint16 serverport;
     struct htlc_conn *htlc;
     char path[MAXPATHLEN];
-    char remotepath[MAXPATHLEN];
+    char remotepath[MAXPATHLEN]; /* dir + name joined; display only */
+    /* Structured remote location. The wire protocol identifies a
+	 * file by a separate per-component DIR list plus a flat NAME
+	 * chunk — names can contain any byte including `/`, which is
+	 * otherwise dir_char. Storing the dir and name apart from the
+	 * joined remotepath is what lets xfer_go correctly request
+	 * files like "Cheeseman goes 56k/sec.pct" without the `/` in
+	 * the name getting reinterpreted as a directory boundary. */
+    char remotedir[MAXPATHLEN];
+    char remotename[256];
+    guint16 remotename_len;
     struct qbuf in;
     char **filter_argv;
     struct timeval start;

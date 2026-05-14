@@ -161,18 +161,48 @@ open_fldr (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
     hx_list_dir (&the_session.htlc, path, 1, 0, gfl);
 }
 
+/* Replace POSIX-illegal bytes in a leaf-filename buffer with `_`.
+ * Hotline names can contain any byte including `/`; on POSIX that's
+ * the path separator, so we substitute before using the name in a
+ * local-FS path. The wire FILE_NAME chunk still goes out verbatim
+ * via xfer_new's structured (dir, name) arguments — only the local
+ * save target gets sanitized. */
+static void
+sanitize_leaf_for_posix (char *p, gsize n)
+{
+    gsize i;
+    for (i = 0; i < n && p[i]; i++) {
+        if (p[i] == '/') {
+            p[i] = '_';
+        }
+    }
+}
+
 static void
 get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 {
-    char rpath[4096], lpath[4096];
+    char lpath[4096];
     struct htxf_conn *htxf;
     struct stat sb;
     guint32 fsize;
+    int prefix_len;
 
-    snprintf (rpath, sizeof (rpath), "%s/%.*s", cfl->path, (int)fh->fnlen,
-              fh->fname);
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
+    /* Build the local path: download dir + "/" + sanitized name.
+	 * Sanitization replaces any `/` in the Hotline name with `_` so
+	 * names like "Cheeseman goes 56k/sec.pct" land in
+	 * Downloads/Cheeseman goes 56k_sec.pct rather than getting
+	 * POSIX-interpreted as a subdirectory. The remote (dir, name)
+	 * tuple passed to xfer_new keeps the original bytes for the
+	 * wire request. */
+    prefix_len
+        = snprintf (lpath, sizeof (lpath), "%s/", gtkhx_prefs.download_path);
+    if (prefix_len < 0 || (gsize)prefix_len >= sizeof (lpath)) {
+        g_warning (_ ("download path too long; aborting"));
+        return;
+    }
+    snprintf (lpath + prefix_len, sizeof (lpath) - prefix_len, "%.*s",
               (int)fh->fnlen, fh->fname);
+    sanitize_leaf_for_posix (lpath + prefix_len, sizeof (lpath) - prefix_len);
 
     if (stat (gtkhx_prefs.download_path, &sb)) {
         if (mkdir (gtkhx_prefs.download_path, 0770)) {
@@ -184,7 +214,8 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
     }
 
     HN32 (&fsize, &fh->fsize);
-    htxf = xfer_new (lpath, rpath, XFER_GET, 0, fsize);
+    htxf = xfer_new (lpath, cfl->path, (const char *)fh->fname, fh->fnlen,
+                     XFER_GET, 0, fsize);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
 }
@@ -306,15 +337,17 @@ get_file_info (GtkWidget *widget, gpointer data)
 {
     struct gfile_list *gfl;
     struct hl_filelist_hdr *fh;
-    char path[4096];
 
     gfl = gfl_with_hlist ((GtkWidget *)data);
     fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
 
-    g_snprintf (path, sizeof (path), "%s/%.*s", gfl->cfl->path, (int)fh->fnlen,
-                fh->fname);
-
-    hx_file_info (&the_session.htlc, path);
+    /* Pass (dir, name, name_len) separately. Joining + splitting
+	 * via the dir_char-flat representation used to break for files
+	 * whose name contains `/` (the default dir_char) — the slash
+	 * in "Cheeseman goes 56k/sec.pct" would be misread as a
+	 * directory boundary. */
+    hx_file_info (&the_session.htlc, gfl->cfl->path, (const char *)fh->fname,
+                  fh->fnlen);
 }
 
 static void
@@ -355,17 +388,21 @@ file_dl_btn (GtkWidget *widget, gpointer data)
 {
     struct gfile_list *gfl;
     struct hl_filelist_hdr *fh;
-    char rpath[4096], lpath[4096];
+    char lpath[4096];
     struct htxf_conn *htxf;
 
     gfl = gfl_with_hlist ((GtkWidget *)data);
     fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
 
-    snprintf (rpath, sizeof (rpath), "%s/%.*s", gfl->cfl->path, (int)fh->fnlen,
-              fh->fname);
-
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
-              (int)fh->fnlen, fh->fname);
+    {
+        int p = snprintf (lpath, sizeof (lpath), "%s/",
+                          gtkhx_prefs.download_path);
+        if (p > 0 && (gsize)p < sizeof (lpath)) {
+            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
+                      fh->fname);
+            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
+        }
+    }
 
     if (!memcmp (&fh->ftype, "fldr", 4)) {
         return;
@@ -374,7 +411,8 @@ file_dl_btn (GtkWidget *widget, gpointer data)
     {
         guint32 fsize;
         HN32 (&fsize, &fh->fsize);
-        htxf = xfer_new (lpath, rpath, XFER_GET, 0, fsize);
+        htxf = xfer_new (lpath, gfl->cfl->path, (const char *)fh->fname,
+                         fh->fnlen, XFER_GET, 0, fsize);
     }
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
@@ -385,17 +423,21 @@ file_pre_btn (GtkWidget *widget, gpointer data)
 {
     struct gfile_list *gfl;
     struct hl_filelist_hdr *fh;
-    char rpath[4096], lpath[4096];
+    char lpath[4096];
     struct htxf_conn *htxf;
 
     gfl = gfl_with_hlist ((GtkWidget *)data);
     fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
 
-    snprintf (rpath, sizeof (rpath), "%s/%.*s", gfl->cfl->path, (int)fh->fnlen,
-              fh->fname);
-
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
-              (int)fh->fnlen, fh->fname);
+    {
+        int p = snprintf (lpath, sizeof (lpath), "%s/",
+                          gtkhx_prefs.download_path);
+        if (p > 0 && (gsize)p < sizeof (lpath)) {
+            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
+                      fh->fname);
+            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
+        }
+    }
 
     if (!memcmp (&fh->ftype, "fldr", 4)) {
         return;
@@ -406,7 +448,8 @@ file_pre_btn (GtkWidget *widget, gpointer data)
 	 * for previews. Setting it on the returned htxf here would be
 	 * too late. srv_data_size is irrelevant for previews — they
 	 * never resume — so 0 is fine. */
-    htxf = xfer_new (lpath, rpath, XFER_GET, 1, 0);
+    htxf = xfer_new (lpath, gfl->cfl->path, (const char *)fh->fname, fh->fnlen,
+                     XFER_GET, 1, 0);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
 }
@@ -1540,24 +1583,38 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
     }
 }
 void
-hx_file_info (struct htlc_conn *htlc, char *_path)
+hx_file_info (struct htlc_conn *htlc, const char *dir_path,
+              const char *file_name, gsize file_name_len)
 {
-    char *file;
     guint8 *hldir;
     guint16 hldirlen;
-    char *path = g_strdup (_path);
+    char *task_label;
 
-    task_new (htlc, RCV_TASK_FN (rcv_task_file_getinfo), path, 0, "finfo");
-    file = dirchar_basename (path);
+    /* task_new captures a copy of a path-shaped string for display
+	 * in the tasks window; rcv_task_file_getinfo also forwards it
+	 * to the file-info widget. Build a display string from dir +
+	 * name; the display layer just shows it, doesn't split it back. */
+    if (dir_path && *dir_path
+        && !(dir_path[0] == (char)dir_char && dir_path[1] == 0)) {
+        task_label = g_strdup_printf ("%s%c%.*s", dir_path, (char)dir_char,
+                                      (int)file_name_len, file_name);
+    } else {
+        task_label = g_strndup (file_name, file_name_len);
+    }
+    task_new (htlc, RCV_TASK_FN (rcv_task_file_getinfo), task_label, 0,
+              "finfo");
 
-    if (file != path) {
-        hldir = path_to_hldir (path, &hldirlen, 1);
+    /* Wire FILE_NAME is the name verbatim — no split needed because
+	 * we never joined. */
+    if (dir_path && *dir_path
+        && !(dir_path[0] == (char)dir_char && dir_path[1] == 0)) {
+        hldir = path_to_hldir (dir_path, &hldirlen, 0);
         hlwrite (htlc, HTLC_HDR_FILE_GETINFO, 0, 2, HTLC_DATA_FILE_NAME,
-                 strlen (file), file, HTLC_DATA_DIR, hldirlen, hldir);
+                 file_name_len, file_name, HTLC_DATA_DIR, hldirlen, hldir);
         g_free (hldir);
     } else {
         hlwrite (htlc, HTLC_HDR_FILE_GETINFO, 0, 1, HTLC_DATA_FILE_NAME,
-                 strlen (file), file);
+                 file_name_len, file_name);
     }
 }
 
@@ -1565,10 +1622,30 @@ void
 hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
 {
     struct htxf_conn *htxf;
+    const char *base;
+    char rdir[MAXPATHLEN];
+    gsize dir_len;
+
+    /* The caller still passes a flat rpath here — uploads pick
+	 * the upload target via a local file picker, so the filename
+	 * portion is whatever POSIX rules permit (no `/`). Split off
+	 * the last component for the structured xfer_new call. */
+    base = dirchar_basename (rpath);
+    dir_len = (gsize)(base - rpath);
+    if (dir_len >= sizeof rdir) {
+        dir_len = sizeof rdir - 1;
+    }
+    memcpy (rdir, rpath, dir_len);
+    rdir[dir_len] = 0;
+    /* Strip trailing dir_char if present so xfer_go's "is this
+	 * just the root?" test matches the local-path expectation. */
+    if (dir_len > 1 && rdir[dir_len - 1] == (char)dir_char) {
+        rdir[dir_len - 1] = 0;
+    }
 
     /* Uploads don't use srv_data_size — that's a download-side
 	 * heuristic for resume vs rename. */
-    htxf = xfer_new (lpath, rpath, XFER_PUT, 0, 0);
+    htxf = xfer_new (lpath, rdir, base, strlen (base), XFER_PUT, 0, 0);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
 }
