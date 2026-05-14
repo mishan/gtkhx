@@ -13,7 +13,9 @@
 #include <glib/gi18n.h>
 
 #include "files.h" /* ICON_* */
+#include "files_complete.h"
 #include "files_entry.h"
+#include "files_local_provider.h"
 #include "files_provider.h"
 #include "files_panel.h"
 
@@ -54,6 +56,11 @@ struct _files_panel {
 	 * same workaround used by news_browser and the toolbar
 	 * buttons). */
     GHashTable *icons; /* guint16 icon_id → GdkPaintable (1.5x scaled) */
+
+    /* Path-completion popover, local-provider panels only. NULL
+	 * on remote panels (we can't synchronously enumerate without
+	 * an RPC round-trip, so we don't try). See files_complete.c. */
+    hx_path_complete *path_complete;
 };
 
 /* Map an ICON_* id to a gresource path. Returns NULL for ids
@@ -589,6 +596,14 @@ files_panel_new (HxFilesProvider *provider)
                       G_CALLBACK (on_path_entry_activate), p);
     gtk_box_append (GTK_BOX (path_row), p->path_entry);
 
+    /* Path completion (popover with smart-case subdirectory
+	 * suggestions as the user types). Local provider only —
+	 * remote synchronous enumeration would block the UI thread on
+	 * the network. */
+    if (HX_IS_LOCAL_FILES_PROVIDER (provider)) {
+        p->path_complete = hx_path_complete_attach (GTK_ENTRY (p->path_entry));
+    }
+
     gtk_box_append (GTK_BOX (p->root), path_row);
 
     /* ---- Column view ---- */
@@ -791,6 +806,10 @@ files_panel_free (files_panel *p)
 {
     if (!p) {
         return;
+    }
+    if (p->path_complete) {
+        hx_path_complete_free (p->path_complete);
+        p->path_complete = NULL;
     }
     if (p->provider) {
         if (p->navigated_handler) {

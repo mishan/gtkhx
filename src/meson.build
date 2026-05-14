@@ -11,6 +11,7 @@ gtkhx_sources = files(
   'dfa.c',
   'files.c',
   'files_browser.c',
+  'files_complete.c',
   'files_entry.c',
   'files_local_provider.c',
   'files_ops.c',
