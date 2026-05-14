@@ -309,15 +309,35 @@ update_completions (hx_path_complete *c)
         return;
     }
 
-    /* Don't fire when the entry text changed programmatically — i.e.
-	 * the panel's on_navigated handler doing
+    /* Don't fire when the entry text changed programmatically —
+	 * i.e. the panel's on_navigated handler doing
 	 * gtk_editable_set_text on every directory change. We only
-	 * want to suggest while the USER is typing. has_focus is the
-	 * cleanest way to tell the two apart; programmatic set_text
-	 * doesn't move focus. */
-    if (!gtk_widget_has_focus (GTK_WIDGET (c->entry))) {
-        hide_popover (c);
-        return;
+	 * want to suggest while the USER is typing. Walking up from
+	 * the window's focus widget is the reliable way to check —
+	 * gtk_widget_has_focus(entry) does NOT do the right thing,
+	 * because GtkEntry forwards focus to an internal GtkText
+	 * delegate, so when the user is editing, gtk_window_get_focus
+	 * returns the GtkText, not our entry. */
+    {
+        GtkRoot *root;
+        GtkWidget *focused;
+        gboolean effectively_focused = FALSE;
+
+        root = gtk_widget_get_root (GTK_WIDGET (c->entry));
+        focused = GTK_IS_WINDOW (root)
+                      ? gtk_window_get_focus (GTK_WINDOW (root))
+                      : NULL;
+        while (focused) {
+            if (focused == GTK_WIDGET (c->entry)) {
+                effectively_focused = TRUE;
+                break;
+            }
+            focused = gtk_widget_get_parent (focused);
+        }
+        if (!effectively_focused) {
+            hide_popover (c);
+            return;
+        }
     }
 
     txt = gtk_editable_get_text (GTK_EDITABLE (c->entry));
