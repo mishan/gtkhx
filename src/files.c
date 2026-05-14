@@ -161,6 +161,23 @@ open_fldr (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
     hx_list_dir (&the_session.htlc, path, 1, 0, gfl);
 }
 
+/* Replace POSIX-illegal bytes in a leaf-filename buffer with `_`.
+ * Hotline names can contain any byte including `/`; on POSIX that's
+ * the path separator, so we substitute before using the name in a
+ * local-FS path. The wire FILE_NAME chunk still goes out verbatim
+ * via xfer_new's structured (dir, name) arguments — only the local
+ * save target gets sanitized. */
+static void
+sanitize_leaf_for_posix (char *p, gsize n)
+{
+    gsize i;
+    for (i = 0; i < n && p[i]; i++) {
+        if (p[i] == '/') {
+            p[i] = '_';
+        }
+    }
+}
+
 static void
 get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
 {
@@ -168,13 +185,24 @@ get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
     struct htxf_conn *htxf;
     struct stat sb;
     guint32 fsize;
+    int prefix_len;
 
-    /* Local path is fine to join naively — POSIX. The remote
-	 * (dir, name) tuple is passed structured to xfer_new so the
-	 * filename's bytes (including any `/` chars in the name) survive
-	 * verbatim when xfer_go emits the wire FILE_NAME chunk. */
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
+    /* Build the local path: download dir + "/" + sanitized name.
+	 * Sanitization replaces any `/` in the Hotline name with `_` so
+	 * names like "Cheeseman goes 56k/sec.pct" land in
+	 * Downloads/Cheeseman goes 56k_sec.pct rather than getting
+	 * POSIX-interpreted as a subdirectory. The remote (dir, name)
+	 * tuple passed to xfer_new keeps the original bytes for the
+	 * wire request. */
+    prefix_len
+        = snprintf (lpath, sizeof (lpath), "%s/", gtkhx_prefs.download_path);
+    if (prefix_len < 0 || (gsize)prefix_len >= sizeof (lpath)) {
+        g_warning (_ ("download path too long; aborting"));
+        return;
+    }
+    snprintf (lpath + prefix_len, sizeof (lpath) - prefix_len, "%.*s",
               (int)fh->fnlen, fh->fname);
+    sanitize_leaf_for_posix (lpath + prefix_len, sizeof (lpath) - prefix_len);
 
     if (stat (gtkhx_prefs.download_path, &sb)) {
         if (mkdir (gtkhx_prefs.download_path, 0770)) {
@@ -366,8 +394,15 @@ file_dl_btn (GtkWidget *widget, gpointer data)
     gfl = gfl_with_hlist ((GtkWidget *)data);
     fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
 
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
-              (int)fh->fnlen, fh->fname);
+    {
+        int p = snprintf (lpath, sizeof (lpath), "%s/",
+                          gtkhx_prefs.download_path);
+        if (p > 0 && (gsize)p < sizeof (lpath)) {
+            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
+                      fh->fname);
+            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
+        }
+    }
 
     if (!memcmp (&fh->ftype, "fldr", 4)) {
         return;
@@ -394,8 +429,15 @@ file_pre_btn (GtkWidget *widget, gpointer data)
     gfl = gfl_with_hlist ((GtkWidget *)data);
     fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
 
-    snprintf (lpath, sizeof (lpath), "%s/%.*s", gtkhx_prefs.download_path,
-              (int)fh->fnlen, fh->fname);
+    {
+        int p = snprintf (lpath, sizeof (lpath), "%s/",
+                          gtkhx_prefs.download_path);
+        if (p > 0 && (gsize)p < sizeof (lpath)) {
+            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
+                      fh->fname);
+            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
+        }
+    }
 
     if (!memcmp (&fh->ftype, "fldr", 4)) {
         return;

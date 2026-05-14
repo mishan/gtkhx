@@ -344,7 +344,19 @@ hx_rcv_task (struct htlc_conn *htlc)
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
         int fd = htlc->fd;
-        if (tsk->rcv && !error) {
+        /* HTXF transfer tasks (the ones xfer_go fires for FILE_GET /
+		 * FILE_PUT, identified by the "xfer_go" label) own an
+		 * htxf_conn that needs to be reclaimed when the request
+		 * errors — otherwise the orphaned transfer hangs in the
+		 * tasks UI forever with no progress and no way to dismiss
+		 * it. Their rcv functions (rcv_task_file_get /
+		 * rcv_task_file_put) already check task_inerror internally
+		 * and free the htxf on that path, so we run them on error
+		 * too. Non-transfer handlers (login, user-info, news, …)
+		 * don't have per-task state to free; the error toast above
+		 * is enough and we skip them as before. */
+        gboolean is_xfer = tsk->str && !strcmp (tsk->str, "xfer_go");
+        if (tsk->rcv && (!error || is_xfer)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }
         if (hxd_files[fd].conn.htlc) {
