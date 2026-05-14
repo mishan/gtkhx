@@ -34,20 +34,19 @@ G_BEGIN_DECLS
  * (Hotline) or quick-but-blocking (local) — this only reports
  * whether we managed to *issue* it. */
 typedef enum {
-	HX_OPS_OK             = 0,
-	HX_OPS_ERR_NO_SOURCE,           /* src entry NULL / unreadable */
-	HX_OPS_ERR_NO_TARGET,           /* dst provider NULL / no path */
-	HX_OPS_ERR_NOT_CONNECTED,       /* remote provider without
+    HX_OPS_OK = 0,
+    HX_OPS_ERR_NO_SOURCE,          /* src entry NULL / unreadable */
+    HX_OPS_ERR_NO_TARGET,          /* dst provider NULL / no path */
+    HX_OPS_ERR_NOT_CONNECTED,      /* remote provider without
 	                                 * a live connection */
-	HX_OPS_ERR_NO_PERMISSION,       /* access bit not set */
-	HX_OPS_ERR_UNSUPPORTED,         /* remote→remote in Phase 3 */
-	HX_OPS_ERR_FOLDER_UNSUPPORTED,  /* recursive copy: deferred */
-	HX_OPS_ERR_LOCAL_FAIL           /* GIO copy failed */
+    HX_OPS_ERR_NO_PERMISSION,      /* access bit not set */
+    HX_OPS_ERR_UNSUPPORTED,        /* remote→remote in Phase 3 */
+    HX_OPS_ERR_FOLDER_UNSUPPORTED, /* recursive copy: deferred */
+    HX_OPS_ERR_LOCAL_FAIL          /* GIO copy failed */
 } HxOpsResult;
 
 extern HxOpsResult hx_files_ops_copy (HxFilesProvider *src,
-                                      HxFilesProvider *dst,
-                                      HxFileEntry     *entry);
+                                      HxFilesProvider *dst, HxFileEntry *entry);
 
 /* Translates an HxOpsResult into a user-readable, already-
  * localised message suitable for an AdwToast or a g_warning. */

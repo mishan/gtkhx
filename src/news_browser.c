@@ -1985,14 +1985,14 @@ open_news_browser (GtkWidget *widget, struct _session *sess)
         return;
     }
 
-	the_browser = build_browser_window ();
-	/* Wire Ctrl+W (close), Ctrl+Q (quit), Ctrl+K (connect dialog),
+    the_browser = build_browser_window ();
+    /* Wire Ctrl+W (close), Ctrl+Q (quit), Ctrl+K (connect dialog),
 	 * Ctrl+T (tracker) — same accelerators every other window
 	 * picks up via init_keyaccel. The controller attaches in
 	 * capture phase, so the column-view's internal focus chain
 	 * can't swallow them. */
-	init_keyaccel (the_browser->window);
-	gtk_window_present (GTK_WINDOW (the_browser->window));
+    init_keyaccel (the_browser->window);
+    gtk_window_present (GTK_WINDOW (the_browser->window));
 
     /* Phase 2: kick off the root NEWSDIRLIST so the top level
 	 * populates as soon as the window appears. */

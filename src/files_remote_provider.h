@@ -19,8 +19,8 @@
 G_BEGIN_DECLS
 
 #define HX_TYPE_REMOTE_FILES_PROVIDER (hx_remote_files_provider_get_type ())
-G_DECLARE_FINAL_TYPE (HxRemoteFilesProvider, hx_remote_files_provider,
-                      HX, REMOTE_FILES_PROVIDER, GObject)
+G_DECLARE_FINAL_TYPE (HxRemoteFilesProvider, hx_remote_files_provider, HX,
+                      REMOTE_FILES_PROVIDER, GObject)
 
 extern HxRemoteFilesProvider *hx_remote_files_provider_new (void);
 
@@ -29,8 +29,9 @@ extern HxRemoteFilesProvider *hx_remote_files_provider_new (void);
  * `data` carrier matches an in-flight remote-provider request —
  * the provider has parsed the chunks into HxFileEntry rows and
  * emitted "navigated". FALSE leaves it for the legacy handler. */
-extern gboolean hx_remote_files_provider_handle_file_list (
-	gpointer cfl, gpointer fh, gpointer data);
+extern gboolean hx_remote_files_provider_handle_file_list (gpointer cfl,
+                                                           gpointer fh,
+                                                           gpointer data);
 
 G_END_DECLS
 

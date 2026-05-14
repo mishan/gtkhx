@@ -272,29 +272,34 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
 static gboolean
 defer_open_files_browser (gpointer data)
 {
-	(void) data;
-	open_files_browser ();
-	return G_SOURCE_REMOVE;
+    (void)data;
+    open_files_browser ();
+    return G_SOURCE_REMOVE;
 }
 
 static void
-on_action_files_browser (GSimpleAction *action, GVariant *param, gpointer user_data)
+on_action_files_browser (GSimpleAction *action, GVariant *param,
+                         gpointer user_data)
 {
-	(void) action; (void) param; (void) user_data;
-	g_idle_add (defer_open_files_browser, NULL);
+    (void)action;
+    (void)param;
+    (void)user_data;
+    g_idle_add (defer_open_files_browser, NULL);
 }
 
 static const GActionEntry app_actions[] = {
-	{ .name = "settings",        .activate = on_action_settings        },
-	{ .name = "about",           .activate = on_action_about           },
-	{ .name = "user_new",        .activate = on_action_user_new        },
-	{ .name = "user_edit",       .activate = on_action_user_edit       },
-	{ .name = "open_bookmark",   .activate = on_action_open_bookmark,
-	  .parameter_type = "s" },
-	{ .name = "connect_builtin", .activate = on_action_connect_builtin,
-	  .parameter_type = "i" },
-	{ .name = "files_browser",   .activate = on_action_files_browser   },
-	{ .name = "quit",            .activate = on_action_quit            },
+    { .name = "settings", .activate = on_action_settings },
+    { .name = "about", .activate = on_action_about },
+    { .name = "user_new", .activate = on_action_user_new },
+    { .name = "user_edit", .activate = on_action_user_edit },
+    { .name = "open_bookmark",
+      .activate = on_action_open_bookmark,
+      .parameter_type = "s" },
+    { .name = "connect_builtin",
+      .activate = on_action_connect_builtin,
+      .parameter_type = "i" },
+    { .name = "files_browser", .activate = on_action_files_browser },
+    { .name = "quit", .activate = on_action_quit },
 };
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
@@ -415,13 +420,13 @@ build_hamburger (void)
     g_menu_append (admin_menu, _ ("New User…"), "app.user_new");
     g_menu_append (admin_menu, _ ("Edit User…"), "app.user_edit");
 
-	menu = g_menu_new ();
-	g_menu_append (menu, _("Files (2-pane, preview)"), "app.files_browser");
-	g_menu_append (menu, _("Settings"),    "app.settings");
-	g_menu_append (menu, _("About GtkHx"), "app.about");
-	g_menu_append_submenu (menu, _("Admin"), G_MENU_MODEL (admin_menu));
-	g_menu_append (menu, _("Quit"),        "app.quit");
-	g_object_unref (admin_menu);
+    menu = g_menu_new ();
+    g_menu_append (menu, _ ("Files (2-pane, preview)"), "app.files_browser");
+    g_menu_append (menu, _ ("Settings"), "app.settings");
+    g_menu_append (menu, _ ("About GtkHx"), "app.about");
+    g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));
+    g_menu_append (menu, _ ("Quit"), "app.quit");
+    g_object_unref (admin_menu);
 
     btn = gtk_menu_button_new ();
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (btn), "open-menu-symbolic");

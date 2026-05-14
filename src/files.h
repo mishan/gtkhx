@@ -14,21 +14,21 @@ struct path_hist;
 /* Mac-classic cicn icon numbers used across the legacy and new
  * files UIs. The numeric values are the cicn resource IDs inside
  * the bundled .rsrc files load_icon walks. */
-#define ICON_FILE       400
-#define ICON_FOLDER     401
-#define ICON_FOLDER_IN  421
-#define ICON_FILE_HTft  402
-#define ICON_FILE_SIT   403
-#define ICON_FILE_TEXT  404
+#define ICON_FILE 400
+#define ICON_FOLDER 401
+#define ICON_FOLDER_IN 421
+#define ICON_FILE_HTft 402
+#define ICON_FILE_SIT 403
+#define ICON_FILE_TEXT 404
 #define ICON_FILE_IMAGE 406
-#define ICON_FILE_APPL  407
-#define ICON_FILE_HTLC  408
-#define ICON_FILE_SITP  409
-#define ICON_FILE_alis  422
-#define ICON_FILE_DISK  423
-#define ICON_FILE_NOTE  424
-#define ICON_FILE_MOOV  425
-#define ICON_FILE_ZIP   426
+#define ICON_FILE_APPL 407
+#define ICON_FILE_HTLC 408
+#define ICON_FILE_SITP 409
+#define ICON_FILE_alis 422
+#define ICON_FILE_DISK 423
+#define ICON_FILE_NOTE 424
+#define ICON_FILE_MOOV 425
+#define ICON_FILE_ZIP 426
 
 extern void destroy_gfl_list (void);
 extern void open_files (void);
@@ -46,9 +46,8 @@ extern struct cached_filelist *cfl_lookup (const char *path);
  * + `name_len` are the entry's filename (UTF-8 OK, but the
  * drop-box heuristic only checks ASCII subsequences). Returns
  * one of the ICON_* constants above. */
-extern guint16 icon_of_ftype_and_name (const char *ftype,
-                                       const char *name,
-                                       gsize       name_len);
+extern guint16 icon_of_ftype_and_name (const char *ftype, const char *name,
+                                       gsize name_len);
 extern guint16 icon_of_fh (struct hl_filelist_hdr *fh);
 
 /* Human-readable type label for a Hotline file-list entry's

@@ -62,7 +62,7 @@
  * (files_remote_provider.c, files_local_provider.c, files_panel.c)
  * can drive load_icon from the same table. */
 
-guint8 dir_char  = '/';
+guint8 dir_char = '/';
 
 /* Phase 5+: open file-browser windows kept as a GList of pointers.
  * Replaces the intrusive next/prev fields that used to live on
@@ -1029,7 +1029,6 @@ strcasestr_len (char *haystack, char *needle, size_t len)
     return 0;
 }
 
-
 /* Pick a cicn icon ID for a Hotline file based on its 4-byte
  * type code (plus filename, for the drop-box heuristic on
  * folders). Public so the new files browser's remote provider
@@ -1037,43 +1036,61 @@ strcasestr_len (char *haystack, char *needle, size_t len)
 guint16
 icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
 {
-	if (!ftype) return ICON_FILE;
+    if (!ftype) {
+        return ICON_FILE;
+    }
 
-	if (!memcmp (ftype, "fldr", 4)) {
-		if (name && (
-		    strcasestr_len ((char *) name, "DROP BOX", name_len) ||
-		    strcasestr_len ((char *) name, "UPLOAD",   name_len)))
-			return ICON_FOLDER_IN;
-		return ICON_FOLDER;
-	}
-	if (!memcmp (ftype, "JPEG", 4)
-	    || !memcmp (ftype, "PNGf", 4)
-	    || !memcmp (ftype, "GIFf", 4)
-	    || !memcmp (ftype, "PICT", 4))
-		return ICON_FILE_IMAGE;
-	if (!memcmp (ftype, "MPEG", 4)
-	    || !memcmp (ftype, "MPG ", 4)
-	    || !memcmp (ftype, "AVI ", 4)
-	    || !memcmp (ftype, "MooV", 4))
-		return ICON_FILE_MOOV;
-	if (!memcmp (ftype, "MP3 ", 4)) return ICON_FILE_NOTE;
-	if (!memcmp (ftype, "ZIP ", 4)) return ICON_FILE_ZIP;
-	if (!memcmp (ftype, "SIT",  3)) return ICON_FILE_SIT;
-	if (!memcmp (ftype, "APPL", 4)) return ICON_FILE_APPL;
-	if (!memcmp (ftype, "rohd", 4)) return ICON_FILE_DISK;
-	if (!memcmp (ftype, "HTft", 4)) return ICON_FILE_HTft;
-	if (!memcmp (ftype, "alis", 4)) return ICON_FILE_alis;
-        if (!memcmp (ftype, "TEXT", 4)) return ICON_FILE_TEXT;
-	return ICON_FILE;
+    if (!memcmp (ftype, "fldr", 4)) {
+        if (name
+            && (strcasestr_len ((char *)name, "DROP BOX", name_len)
+                || strcasestr_len ((char *)name, "UPLOAD", name_len))) {
+            return ICON_FOLDER_IN;
+        }
+        return ICON_FOLDER;
+    }
+    if (!memcmp (ftype, "JPEG", 4) || !memcmp (ftype, "PNGf", 4)
+        || !memcmp (ftype, "GIFf", 4) || !memcmp (ftype, "PICT", 4)) {
+        return ICON_FILE_IMAGE;
+    }
+    if (!memcmp (ftype, "MPEG", 4) || !memcmp (ftype, "MPG ", 4)
+        || !memcmp (ftype, "AVI ", 4) || !memcmp (ftype, "MooV", 4)) {
+        return ICON_FILE_MOOV;
+    }
+    if (!memcmp (ftype, "MP3 ", 4)) {
+        return ICON_FILE_NOTE;
+    }
+    if (!memcmp (ftype, "ZIP ", 4)) {
+        return ICON_FILE_ZIP;
+    }
+    if (!memcmp (ftype, "SIT", 3)) {
+        return ICON_FILE_SIT;
+    }
+    if (!memcmp (ftype, "APPL", 4)) {
+        return ICON_FILE_APPL;
+    }
+    if (!memcmp (ftype, "rohd", 4)) {
+        return ICON_FILE_DISK;
+    }
+    if (!memcmp (ftype, "HTft", 4)) {
+        return ICON_FILE_HTft;
+    }
+    if (!memcmp (ftype, "alis", 4)) {
+        return ICON_FILE_alis;
+    }
+    if (!memcmp (ftype, "TEXT", 4)) {
+        return ICON_FILE_TEXT;
+    }
+    return ICON_FILE;
 }
 
 guint16
 icon_of_fh (struct hl_filelist_hdr *fh)
 {
-	if (!fh) return ICON_FILE;
-	return icon_of_ftype_and_name ((const char *) &fh->ftype,
-	                                (const char *) fh->fname,
-	                                (gsize) fh->fnlen);
+    if (!fh) {
+        return ICON_FILE;
+    }
+    return icon_of_ftype_and_name ((const char *)&fh->ftype,
+                                   (const char *)fh->fname, (gsize)fh->fnlen);
 }
 
 /* FourCC → human label. Table is intentionally small — only the
@@ -1086,89 +1103,75 @@ icon_of_fh (struct hl_filelist_hdr *fh)
 const char *
 kind_of_ftype (const char *ftype, gboolean *is_static_out)
 {
-	static const struct {
-		const char *code;
-		const char *label;
-	} table[] = {
-		{ "fldr", "Folder"              },
-		{ "TEXT", "Text Document"       },
-		{ "PDF ", "PDF Document"        },
-		{ "JPEG", "JPEG Image"          },
-		{ "GIFf", "GIF Image"           },
-		{ "GIF ", "GIF Image"           },
-		{ "PNGf", "PNG Image"           },
-		{ "PNG ", "PNG Image"           },
-		{ "PICT", "PICT Image"          },
-		{ "TIFF", "TIFF Image"          },
-		{ "BMP ", "BMP Image"           },
-		{ "MP3 ", "MP3 Audio"           },
-		{ "MPG3", "MP3 Audio"           },
-		{ "AIFF", "AIFF Audio"          },
-		{ "AIFC", "AIFF Audio"          },
-		{ "WAVE", "WAV Audio"           },
-		{ "Mp3 ", "MP3 Audio"           },
-		{ "MooV", "QuickTime Movie"     },
-		{ "MPEG", "MPEG Video"          },
-		{ "MPG ", "MPEG Video"          },
-		{ "M4V ", "MPEG-4 Video"        },
-		{ "AVI ", "AVI Video"           },
-		{ "MKV ", "Matroska Video"      },
-		{ "ZIP ", "ZIP Archive"         },
-		{ "SIT!", "StuffIt Archive"     },
-		{ "SITD", "StuffIt Archive"     },
-		{ "SIT5", "StuffIt Archive"     },
-		{ "BINA", "MacBinary Archive"   },
-		{ "TARF", "TAR Archive"         },
-		{ "Tar ", "TAR Archive"         },
-		{ "GZIP", "Gzip Archive"        },
-		{ "GZip", "Gzip Archive"        },
-		{ "BZIP", "Bzip2 Archive"       },
-		{ "APPL", "Application"         },
-		{ "rohd", "Disk Image"          },
-		{ "IMG ", "Disk Image"          },
-		{ "ISO ", "ISO Disk Image"      },
-		{ "DMG ", "Disk Image"          },
-		{ "HTft", "HTML Document"       },
-		{ "HTML", "HTML Document"       },
-		{ "alis", "Alias"               },
-		{ "SLNK", "Symbolic Link"       },
-	};
-	gsize i;
+    static const struct {
+        const char *code;
+        const char *label;
+    } table[] = {
+        { "fldr", "Folder" },          { "TEXT", "Text Document" },
+        { "PDF ", "PDF Document" },    { "JPEG", "JPEG Image" },
+        { "GIFf", "GIF Image" },       { "GIF ", "GIF Image" },
+        { "PNGf", "PNG Image" },       { "PNG ", "PNG Image" },
+        { "PICT", "PICT Image" },      { "TIFF", "TIFF Image" },
+        { "BMP ", "BMP Image" },       { "MP3 ", "MP3 Audio" },
+        { "MPG3", "MP3 Audio" },       { "AIFF", "AIFF Audio" },
+        { "AIFC", "AIFF Audio" },      { "WAVE", "WAV Audio" },
+        { "Mp3 ", "MP3 Audio" },       { "MooV", "QuickTime Movie" },
+        { "MPEG", "MPEG Video" },      { "MPG ", "MPEG Video" },
+        { "M4V ", "MPEG-4 Video" },    { "AVI ", "AVI Video" },
+        { "MKV ", "Matroska Video" },  { "ZIP ", "ZIP Archive" },
+        { "SIT!", "StuffIt Archive" }, { "SITD", "StuffIt Archive" },
+        { "SIT5", "StuffIt Archive" }, { "BINA", "MacBinary Archive" },
+        { "TARF", "TAR Archive" },     { "Tar ", "TAR Archive" },
+        { "GZIP", "Gzip Archive" },    { "GZip", "Gzip Archive" },
+        { "BZIP", "Bzip2 Archive" },   { "APPL", "Application" },
+        { "rohd", "Disk Image" },      { "IMG ", "Disk Image" },
+        { "ISO ", "ISO Disk Image" },  { "DMG ", "Disk Image" },
+        { "HTft", "HTML Document" },   { "HTML", "HTML Document" },
+        { "alis", "Alias" },           { "SLNK", "Symbolic Link" },
+    };
+    gsize i;
 
-	if (!ftype) {
-		if (is_static_out) *is_static_out = TRUE;
-		return _("Unknown");
-	}
+    if (!ftype) {
+        if (is_static_out) {
+            *is_static_out = TRUE;
+        }
+        return _ ("Unknown");
+    }
 
-	for (i = 0; i < G_N_ELEMENTS (table); i++) {
-		if (memcmp (ftype, table[i].code, 4) == 0) {
-			if (is_static_out) *is_static_out = TRUE;
-			return _(table[i].label);
-		}
-	}
+    for (i = 0; i < G_N_ELEMENTS (table); i++) {
+        if (memcmp (ftype, table[i].code, 4) == 0) {
+            if (is_static_out) {
+                *is_static_out = TRUE;
+            }
+            return _ (table[i].label);
+        }
+    }
 
-	/* Fall-through: format a one-off string with the raw FourCC.
+    /* Fall-through: format a one-off string with the raw FourCC.
 	 * Caller frees. Avoids embedding non-printable bytes by
 	 * substituting '?' for anything outside printable ASCII —
 	 * some Hotline FourCCs are control bytes (NUL-padded
 	 * short strings, etc.) that would render as boxes. */
-	{
-		char safe[5];
-		gsize k;
-		char *out;
-		for (k = 0; k < 4; k++) {
-			unsigned char c = (unsigned char) ftype[k];
-			safe[k] = (c >= 0x20 && c < 0x7f) ? (char) c : '?';
-		}
-		safe[4] = '\0';
-		out = g_strdup_printf (_("%s file"), safe);
-		if (is_static_out) *is_static_out = FALSE;
-		return out;
-	}
+    {
+        char safe[5];
+        gsize k;
+        char *out;
+        for (k = 0; k < 4; k++) {
+            unsigned char c = (unsigned char)ftype[k];
+            safe[k] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+        safe[4] = '\0';
+        out = g_strdup_printf (_ ("%s file"), safe);
+        if (is_static_out) {
+            *is_static_out = FALSE;
+        }
+        return out;
+    }
 }
 
-void output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
-					   void *data)
+void
+output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
+                  void *data)
 {
     GtkWidget *files_list;
     GdkPixmap *pixmap;

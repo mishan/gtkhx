@@ -12,12 +12,12 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 
-#include "hx.h"           /* struct htxf_conn — auto-refresh hook */
-#include "session.h"      /* the_session — remote drag uses htlc.access */
-#include "hl_access.h"    /* HL_ACCESS_DOWNLOAD_FILES */
-#include "xfers.h"        /* xfer_new for remote drag-to-Downloads */
-#include "prefs.h"        /* gtkhx_prefs.download_path */
-#include "files.h"        /* hx_file_move for cross-dir Move */
+#include "hx.h"        /* struct htxf_conn — auto-refresh hook */
+#include "session.h"   /* the_session — remote drag uses htlc.access */
+#include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
+#include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
+#include "prefs.h"     /* gtkhx_prefs.download_path */
+#include "files.h"     /* hx_file_move for cross-dir Move */
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
@@ -42,41 +42,47 @@
  * deep-copies via the registered copy func, so the source side
  * is free to release its locals after building the provider. */
 typedef struct {
-	files_panel *src_panel;     /* weak: still validated at drop time */
-	GPtrArray   *entries;       /* HxFileEntry* with one ref each */
+    files_panel *src_panel; /* weak: still validated at drop time */
+    GPtrArray *entries;     /* HxFileEntry* with one ref each */
 } HxFilesDrag;
 
 static HxFilesDrag *
 hx_files_drag_copy (HxFilesDrag *src)
 {
-	HxFilesDrag *dst = g_new0 (HxFilesDrag, 1);
-	guint i;
-	if (!src) return dst;
-	dst->src_panel = src->src_panel;
-	if (src->entries) {
-		dst->entries = g_ptr_array_new_with_free_func (g_object_unref);
-		for (i = 0; i < src->entries->len; i++) {
-			HxFileEntry *e = g_ptr_array_index (src->entries, i);
-			g_ptr_array_add (dst->entries, g_object_ref (e));
-		}
-	}
-	return dst;
+    HxFilesDrag *dst = g_new0 (HxFilesDrag, 1);
+    guint i;
+    if (!src) {
+        return dst;
+    }
+    dst->src_panel = src->src_panel;
+    if (src->entries) {
+        dst->entries = g_ptr_array_new_with_free_func (g_object_unref);
+        for (i = 0; i < src->entries->len; i++) {
+            HxFileEntry *e = g_ptr_array_index (src->entries, i);
+            g_ptr_array_add (dst->entries, g_object_ref (e));
+        }
+    }
+    return dst;
 }
 
 static void
 hx_files_drag_free (HxFilesDrag *p)
 {
-	if (!p) return;
-	if (p->entries) g_ptr_array_free (p->entries, TRUE);
-	g_free (p);
+    if (!p) {
+        return;
+    }
+    if (p->entries) {
+        g_ptr_array_free (p->entries, TRUE);
+    }
+    g_free (p);
 }
 
 /* Forward decl — G_DEFINE_BOXED_TYPE generates the body but
  * doesn't emit a prototype, so -Wmissing-prototypes complains. */
 static GType hx_files_drag_get_type (void);
 #define HX_TYPE_FILES_DRAG (hx_files_drag_get_type ())
-G_DEFINE_BOXED_TYPE (HxFilesDrag, hx_files_drag,
-                     hx_files_drag_copy, hx_files_drag_free)
+G_DEFINE_BOXED_TYPE (HxFilesDrag, hx_files_drag, hx_files_drag_copy,
+                     hx_files_drag_free)
 
 /* The browser holds two panels + the active-panel marker. The
  * active panel is the one with the column-view focus child; we
@@ -84,41 +90,41 @@ G_DEFINE_BOXED_TYPE (HxFilesDrag, hx_files_drag,
  * has-focus notify and update both panels' CSS class +
  * `active_panel` accordingly. */
 struct browser {
-	GtkWidget   *window;
-	files_panel *left;
-	files_panel *right;
-	files_panel *active;
+    GtkWidget *window;
+    files_panel *left;
+    files_panel *right;
+    files_panel *active;
 
-	/* Keep refs on the providers separately from the panels so
+    /* Keep refs on the providers separately from the panels so
 	 * the connection-state hook can reach the remote one even if
 	 * the panel pointer ever needs to be swapped (Phase 2.5 side
 	 * selector, future). */
-	HxFilesProvider *left_provider;
-	HxFilesProvider *right_provider;
+    HxFilesProvider *left_provider;
+    HxFilesProvider *right_provider;
 
-	/* GtkhxSession::connection-state handler — fires the remote
+    /* GtkhxSession::connection-state handler — fires the remote
 	 * provider's "unavailable-changed" so the panel reloads on
 	 * login + paints the not-connected state on disconnect. */
-	gulong conn_state_handler;
+    gulong conn_state_handler;
 
-	/* GtkhxSession::file-update handler — used to spot
+    /* GtkhxSession::file-update handler — used to spot
 	 * just-completed transfers and refresh both panels so the
 	 * new file appears without the user needing to hit Reload. */
-	gulong file_update_handler;
+    gulong file_update_handler;
 
-	/* CSS provider that paints the .files-panel-active border.
+    /* CSS provider that paints the .files-panel-active border.
 	 * Lives for the window's lifetime; unrefed in on_close. */
-	GtkCssProvider *css;
+    GtkCssProvider *css;
 
-	/* AdwToastOverlay wrapping the window content — used by the
+    /* AdwToastOverlay wrapping the window content — used by the
 	 * Copy action to surface "no permission" / "not connected" /
 	 * etc. results without an interrupting dialog. */
-	AdwToastOverlay *toast;
+    AdwToastOverlay *toast;
 
-	/* Copy button — re-tooltip'd on active-panel change so the
+    /* Copy button — re-tooltip'd on active-panel change so the
 	 * arrow direction in the hover text reflects which side is
 	 * source vs. dest. */
-	GtkWidget *btn_copy;
+    GtkWidget *btn_copy;
 };
 
 static struct browser *the_browser = NULL;
@@ -129,30 +135,37 @@ static struct browser *the_browser = NULL;
 static void
 sync_copy_tooltip (struct browser *br)
 {
-	if (!br || !br->btn_copy) return;
-	if (br->active == br->left)
-		gtk_widget_set_tooltip_text (br->btn_copy,
-			_("Copy selection from left to right"));
-	else if (br->active == br->right)
-		gtk_widget_set_tooltip_text (br->btn_copy,
-			_("Copy selection from right to left"));
+    if (!br || !br->btn_copy) {
+        return;
+    }
+    if (br->active == br->left) {
+        gtk_widget_set_tooltip_text (br->btn_copy,
+                                     _ ("Copy selection from left to right"));
+    } else if (br->active == br->right) {
+        gtk_widget_set_tooltip_text (br->btn_copy,
+                                     _ ("Copy selection from right to left"));
+    }
 }
 
 static void
 set_active (struct browser *br, files_panel *p)
 {
-	if (!br || !p || br->active == p) return;
-	files_panel_set_active (br->left,  p == br->left);
-	files_panel_set_active (br->right, p == br->right);
-	br->active = p;
-	sync_copy_tooltip (br);
+    if (!br || !p || br->active == p) {
+        return;
+    }
+    files_panel_set_active (br->left, p == br->left);
+    files_panel_set_active (br->right, p == br->right);
+    br->active = p;
+    sync_copy_tooltip (br);
 }
 
 static void
 show_toast (struct browser *br, const char *text)
 {
-	if (!br || !br->toast || !text) return;
-	adw_toast_overlay_add_toast (br->toast, adw_toast_new (text));
+    if (!br || !br->toast || !text) {
+        return;
+    }
+    adw_toast_overlay_add_toast (br->toast, adw_toast_new (text));
 }
 
 /* Wire a focus controller on a panel's root widget. The
@@ -171,47 +184,50 @@ show_toast (struct browser *br, const char *text)
 static void
 on_panel_focus_enter (GtkEventControllerFocus *ctrl, gpointer user_data)
 {
-	struct browser *br = user_data;
-	GtkWidget *panel_root;
-	(void) ctrl;
+    struct browser *br = user_data;
+    GtkWidget *panel_root;
+    (void)ctrl;
 
-	panel_root = gtk_event_controller_get_widget (
-		GTK_EVENT_CONTROLLER (ctrl));
-	if (br->left  && files_panel_get_widget (br->left)  == panel_root)
-		set_active (br, br->left);
-	else if (br->right && files_panel_get_widget (br->right) == panel_root)
-		set_active (br, br->right);
+    panel_root = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (ctrl));
+    if (br->left && files_panel_get_widget (br->left) == panel_root) {
+        set_active (br, br->left);
+    } else if (br->right && files_panel_get_widget (br->right) == panel_root) {
+        set_active (br, br->right);
+    }
 }
 
 static void
-on_panel_clicked (GtkGestureClick *gesture, int n_press,
-                   double x, double y, gpointer user_data)
+on_panel_clicked (GtkGestureClick *gesture, int n_press, double x, double y,
+                  gpointer user_data)
 {
-	struct browser *br = user_data;
-	GtkWidget *panel_root;
-	(void) n_press; (void) x; (void) y;
+    struct browser *br = user_data;
+    GtkWidget *panel_root;
+    (void)n_press;
+    (void)x;
+    (void)y;
 
-	panel_root = gtk_event_controller_get_widget (
-		GTK_EVENT_CONTROLLER (gesture));
-	if (br->left  && files_panel_get_widget (br->left)  == panel_root)
-		set_active (br, br->left);
-	else if (br->right && files_panel_get_widget (br->right) == panel_root)
-		set_active (br, br->right);
+    panel_root
+        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    if (br->left && files_panel_get_widget (br->left) == panel_root) {
+        set_active (br, br->left);
+    } else if (br->right && files_panel_get_widget (br->right) == panel_root) {
+        set_active (br, br->right);
+    }
 }
 
 static void
 attach_panel_focus_tracking (struct browser *br, files_panel *p)
 {
-	GtkEventController *focus_ctrl;
-	GtkGesture         *click;
-	GtkWidget          *root = files_panel_get_widget (p);
+    GtkEventController *focus_ctrl;
+    GtkGesture *click;
+    GtkWidget *root = files_panel_get_widget (p);
 
-	focus_ctrl = gtk_event_controller_focus_new ();
-	g_signal_connect (focus_ctrl, "enter",
-		G_CALLBACK (on_panel_focus_enter), br);
-	gtk_widget_add_controller (root, focus_ctrl);
+    focus_ctrl = gtk_event_controller_focus_new ();
+    g_signal_connect (focus_ctrl, "enter", G_CALLBACK (on_panel_focus_enter),
+                      br);
+    gtk_widget_add_controller (root, focus_ctrl);
 
-	/* BUBBLE phase: column view sees the click first and runs
+    /* BUBBLE phase: column view sees the click first and runs
 	 * its built-in click-counting (selection on first press,
 	 * activate on second press of a double-click). We observe
 	 * on the way back up to flip the active panel. The earlier
@@ -225,12 +241,11 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
 	 * working for all cases except clicks that the column view
 	 * fully consumes — and even then the focus controller
 	 * above catches focus-enter and flips active. */
-	click = gtk_gesture_click_new ();
-	gtk_event_controller_set_propagation_phase (
-		GTK_EVENT_CONTROLLER (click), GTK_PHASE_BUBBLE);
-	g_signal_connect (click, "pressed",
-		G_CALLBACK (on_panel_clicked), br);
-	gtk_widget_add_controller (root, GTK_EVENT_CONTROLLER (click));
+    click = gtk_gesture_click_new ();
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
+                                                GTK_PHASE_BUBBLE);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_panel_clicked), br);
+    gtk_widget_add_controller (root, GTK_EVENT_CONTROLLER (click));
 }
 
 /* ---- Actions (scoped to active panel) ---- */
@@ -238,115 +253,121 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
 static void
 on_refresh_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	(void) btn;
-	if (br->active)
-		hx_files_provider_reload (
-			files_panel_get_provider (br->active));
+    struct browser *br = user_data;
+    (void)btn;
+    if (br->active) {
+        hx_files_provider_reload (files_panel_get_provider (br->active));
+    }
 }
 
 /* ---- Rename (F6 in classic Norton) ---- */
 
 struct rename_ctx {
-	struct browser *br;
-	files_panel    *panel;
-	char           *old_name;     /* owned */
-	GtkWidget      *entry;        /* not owned — held by dialog */
+    struct browser *br;
+    files_panel *panel;
+    char *old_name;   /* owned */
+    GtkWidget *entry; /* not owned — held by dialog */
 };
 
 static void
 on_rename_response (AdwAlertDialog *dialog, const char *response,
-                     gpointer user_data)
+                    gpointer user_data)
 {
-	struct rename_ctx *ctx = user_data;
-	const char *new_name;
-	GError *err = NULL;
-	(void) dialog;
+    struct rename_ctx *ctx = user_data;
+    const char *new_name;
+    GError *err = NULL;
+    (void)dialog;
 
-	if (g_strcmp0 (response, "rename") != 0) return;
-	if (!ctx->panel || !ctx->old_name) return;
-	new_name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
-	if (!new_name || !*new_name) return;
-	if (g_strcmp0 (new_name, ctx->old_name) == 0) return;   /* nothing changed */
+    if (g_strcmp0 (response, "rename") != 0) {
+        return;
+    }
+    if (!ctx->panel || !ctx->old_name) {
+        return;
+    }
+    new_name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+    if (!new_name || !*new_name) {
+        return;
+    }
+    if (g_strcmp0 (new_name, ctx->old_name) == 0) {
+        return; /* nothing changed */
+    }
 
-	if (!hx_files_provider_rename (
-			files_panel_get_provider (ctx->panel),
-			ctx->old_name, new_name, &err)) {
-		show_toast (ctx->br,
-			err ? err->message : _("Rename failed."));
-		g_clear_error (&err);
-	}
+    if (!hx_files_provider_rename (files_panel_get_provider (ctx->panel),
+                                   ctx->old_name, new_name, &err)) {
+        show_toast (ctx->br, err ? err->message : _ ("Rename failed."));
+        g_clear_error (&err);
+    }
 }
 
 static void
 on_rename_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
-	struct rename_ctx *ctx = user_data;
-	(void) dialog;
-	g_free (ctx->old_name);
-	g_free (ctx);
+    struct rename_ctx *ctx = user_data;
+    (void)dialog;
+    g_free (ctx->old_name);
+    g_free (ctx);
 }
 
 static void
 on_rename_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	HxFileEntry *e;
-	AdwDialog *dialog;
-	GtkWidget *entry;
-	struct rename_ctx *ctx;
-	char *body;
-	(void) btn;
+    struct browser *br = user_data;
+    HxFileEntry *e;
+    AdwDialog *dialog;
+    GtkWidget *entry;
+    struct rename_ctx *ctx;
+    char *body;
+    (void)btn;
 
-	if (!br->active) return;
+    if (!br->active) {
+        return;
+    }
 
-	/* Rename is a singleton operation — only meaningful when
+    /* Rename is a singleton operation — only meaningful when
 	 * exactly one row is selected. Multi-rename (mass rename
 	 * with a pattern) is a separate feature; toast a hint
 	 * and bail. */
-	e = files_panel_get_single_selected (br->active);
-	if (!e) {
-		show_toast (br, _("Select a single file to rename."));
-		return;
-	}
+    e = files_panel_get_single_selected (br->active);
+    if (!e) {
+        show_toast (br, _ ("Select a single file to rename."));
+        return;
+    }
 
-	body = g_strdup_printf (
-		_("Rename “%s” to:"), hx_file_entry_get_name (e));
-	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Rename"), body));
-	g_free (body);
+    body = g_strdup_printf (_ ("Rename “%s” to:"), hx_file_entry_get_name (e));
+    dialog = ADW_DIALOG (adw_alert_dialog_new (_ ("Rename"), body));
+    g_free (body);
 
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"cancel", _("_Cancel"));
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"rename", _("_Rename"));
-	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-		"rename", ADW_RESPONSE_SUGGESTED);
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "rename");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "rename",
+                                   _ ("_Rename"));
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+                                              "rename", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "rename");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
-	entry = gtk_entry_new ();
-	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
-	gtk_editable_set_text (GTK_EDITABLE (entry),
-		hx_file_entry_get_name (e));
-	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+    entry = gtk_entry_new ();
+    gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+    gtk_editable_set_text (GTK_EDITABLE (entry), hx_file_entry_get_name (e));
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
 
-	ctx = g_new0 (struct rename_ctx, 1);
-	ctx->br       = br;
-	ctx->panel    = br->active;
-	ctx->old_name = g_strdup (hx_file_entry_get_name (e));
-	ctx->entry    = entry;
+    ctx = g_new0 (struct rename_ctx, 1);
+    ctx->br = br;
+    ctx->panel = br->active;
+    ctx->old_name = g_strdup (hx_file_entry_get_name (e));
+    ctx->entry = entry;
 
-	g_signal_connect (dialog, "response", G_CALLBACK (on_rename_response), ctx);
-	g_signal_connect (dialog, "closed",   G_CALLBACK (on_rename_closed),   ctx);
+    g_signal_connect (dialog, "response", G_CALLBACK (on_rename_response), ctx);
+    g_signal_connect (dialog, "closed", G_CALLBACK (on_rename_closed), ctx);
 
-	adw_dialog_present (dialog, br->window);
+    adw_dialog_present (dialog, br->window);
 
-	/* Focus + select all → user can either accept the default
+    /* Focus + select all → user can either accept the default
 	 * (just hit Enter to confirm same name = no-op safety) or
 	 * start typing immediately to replace. Matches Files
 	 * Manager UX in GNOME / Finder. */
-	gtk_widget_grab_focus (entry);
-	gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+    gtk_widget_grab_focus (entry);
+    gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
 }
 
 /* ---- Move (F6 cross-directory) ----
@@ -367,42 +388,48 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
  * Mixed-side Move isn't a common orthodox-FM operation anyway. */
 
 struct move_ctx {
-	struct browser *br;
-	files_panel    *panel;
-	GPtrArray      *names;       /* owned — g_strdup'd source names */
-	GtkWidget      *entry;       /* dest-path entry */
+    struct browser *br;
+    files_panel *panel;
+    GPtrArray *names; /* owned — g_strdup'd source names */
+    GtkWidget *entry; /* dest-path entry */
 };
 
 static void
 on_move_response (AdwAlertDialog *dialog, const char *response,
-                   gpointer user_data)
+                  gpointer user_data)
 {
-	struct move_ctx *ctx = user_data;
-	HxFilesProvider *prov;
-	const char *dest_dir, *src_dir;
-	guint i, moved = 0, failed = 0;
-	GError *last_err = NULL;
-	(void) dialog;
+    struct move_ctx *ctx = user_data;
+    HxFilesProvider *prov;
+    const char *dest_dir, *src_dir;
+    guint i, moved = 0, failed = 0;
+    GError *last_err = NULL;
+    (void)dialog;
 
-	if (g_strcmp0 (response, "move") != 0) return;
-	if (!ctx->panel || !ctx->names) return;
+    if (g_strcmp0 (response, "move") != 0) {
+        return;
+    }
+    if (!ctx->panel || !ctx->names) {
+        return;
+    }
 
-	prov     = files_panel_get_provider (ctx->panel);
-	dest_dir = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
-	src_dir  = hx_files_provider_get_current_path (prov);
-	if (!dest_dir || !*dest_dir) return;
+    prov = files_panel_get_provider (ctx->panel);
+    dest_dir = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+    src_dir = hx_files_provider_get_current_path (prov);
+    if (!dest_dir || !*dest_dir) {
+        return;
+    }
 
-	/* Same-dir → defer to the regular Rename path; if there's no
+    /* Same-dir → defer to the regular Rename path; if there's no
 	 * rename intent the user could just have done nothing. We
 	 * proceed anyway: hx_files_provider_rename treats it as a
 	 * no-op-ish call. */
-	for (i = 0; i < ctx->names->len; i++) {
-		const char *src_name = g_ptr_array_index (ctx->names, i);
-		char *new_path = g_build_filename (dest_dir, src_name, NULL);
-		GError *err = NULL;
-		gboolean ok;
+    for (i = 0; i < ctx->names->len; i++) {
+        const char *src_name = g_ptr_array_index (ctx->names, i);
+        char *new_path = g_build_filename (dest_dir, src_name, NULL);
+        GError *err = NULL;
+        gboolean ok;
 
-		/* The provider's rename takes leaf names within the
+        /* The provider's rename takes leaf names within the
 		 * current dir. For cross-dir we pass an absolute path
 		 * as new_name — both impls treat new_name starting
 		 * with '/' as an absolute path and join correctly.
@@ -419,180 +446,182 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
 		 * method later if cross-dir becomes a routine
 		 * operation. For Phase 4 we punch through the
 		 * abstraction. */
-		char *src_abs = g_build_filename (src_dir ? src_dir : "/",
-			src_name, NULL);
+        char *src_abs
+            = g_build_filename (src_dir ? src_dir : "/", src_name, NULL);
 
-		if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
-			GFile *sf = g_file_new_for_path (src_abs);
-			GFile *df = g_file_new_for_path (new_path);
-			ok = g_file_move (sf, df, G_FILE_COPY_NONE, NULL,
-				NULL, NULL, &err);
-			g_object_unref (sf);
-			g_object_unref (df);
-		} else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
-			if (!the_session.htlc.fd) {
-				ok = FALSE;
-				err = g_error_new (G_FILE_ERROR,
-					G_FILE_ERROR_FAILED,
-					_("Not connected to a server."));
-			} else if (!hl_access_has (
-			           (const guint8 *) &the_session.htlc.access,
-			           HL_ACCESS_MOVE_FILES)) {
-				ok = FALSE;
-				err = g_error_new (G_FILE_ERROR,
-					G_FILE_ERROR_FAILED,
-					_("You don't have permission to move files on the server."));
-			} else {
-				hx_file_move (&the_session.htlc, src_abs, new_path);
-				ok = TRUE;   /* fire-and-forget — server task
+        if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
+            GFile *sf = g_file_new_for_path (src_abs);
+            GFile *df = g_file_new_for_path (new_path);
+            ok = g_file_move (sf, df, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+            g_object_unref (sf);
+            g_object_unref (df);
+        } else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
+            if (!the_session.htlc.fd) {
+                ok = FALSE;
+                err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                                   _ ("Not connected to a server."));
+            } else if (!hl_access_has ((const guint8 *)&the_session.htlc.access,
+                                       HL_ACCESS_MOVE_FILES)) {
+                ok = FALSE;
+                err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                                   _ ("You don't have permission to move files "
+                                      "on the server."));
+            } else {
+                hx_file_move (&the_session.htlc, src_abs, new_path);
+                ok = TRUE; /* fire-and-forget — server task
 				              * error would surface via the
 				              * existing task-error toast */
-			}
-		} else {
-			ok = FALSE;
-		}
+            }
+        } else {
+            ok = FALSE;
+        }
 
-		if (ok) moved++;
-		else {
-			failed++;
-			if (last_err) g_error_free (last_err);
-			last_err = err;
-		}
+        if (ok) {
+            moved++;
+        } else {
+            failed++;
+            if (last_err) {
+                g_error_free (last_err);
+            }
+            last_err = err;
+        }
 
-		g_free (src_abs);
-		g_free (new_path);
-	}
+        g_free (src_abs);
+        g_free (new_path);
+    }
 
-	hx_files_provider_reload (prov);
+    hx_files_provider_reload (prov);
 
-	if (failed == 0) {
-		char *msg = g_strdup_printf (
-			g_dngettext (NULL,
-				"Moved %u item.",
-				"Moved %u items.",
-				moved),
-			moved);
-		show_toast (ctx->br, msg);
-		g_free (msg);
-	} else {
-		show_toast (ctx->br,
-			last_err ? last_err->message : _("Move failed."));
-	}
-	if (last_err) g_error_free (last_err);
+    if (failed == 0) {
+        char *msg = g_strdup_printf (
+            g_dngettext (NULL, "Moved %u item.", "Moved %u items.", moved),
+            moved);
+        show_toast (ctx->br, msg);
+        g_free (msg);
+    } else {
+        show_toast (ctx->br, last_err ? last_err->message : _ ("Move failed."));
+    }
+    if (last_err) {
+        g_error_free (last_err);
+    }
 }
 
 static void
 on_move_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
-	struct move_ctx *ctx = user_data;
-	(void) dialog;
-	if (ctx->names) g_ptr_array_free (ctx->names, TRUE);
-	g_free (ctx);
+    struct move_ctx *ctx = user_data;
+    (void)dialog;
+    if (ctx->names) {
+        g_ptr_array_free (ctx->names, TRUE);
+    }
+    g_free (ctx);
 }
 
 static void
 on_move_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	GPtrArray *entries;
-	files_panel *dst_panel;
-	const char *default_dest;
-	AdwDialog *dialog;
-	GtkWidget *entry;
-	struct move_ctx *ctx;
-	char *body;
-	guint i;
-	(void) btn;
+    struct browser *br = user_data;
+    GPtrArray *entries;
+    files_panel *dst_panel;
+    const char *default_dest;
+    AdwDialog *dialog;
+    GtkWidget *entry;
+    struct move_ctx *ctx;
+    char *body;
+    guint i;
+    (void)btn;
 
-	if (!br->active) return;
-	entries = files_panel_get_selected_entries (br->active);
-	if (!entries || entries->len == 0) {
-		if (entries) g_ptr_array_free (entries, TRUE);
-		show_toast (br, _("Select files to move first."));
-		return;
-	}
+    if (!br->active) {
+        return;
+    }
+    entries = files_panel_get_selected_entries (br->active);
+    if (!entries || entries->len == 0) {
+        if (entries) {
+            g_ptr_array_free (entries, TRUE);
+        }
+        show_toast (br, _ ("Select files to move first."));
+        return;
+    }
 
-	/* Cross-side moves are out of scope — Hotline's MOVEFILE
+    /* Cross-side moves are out of scope — Hotline's MOVEFILE
 	 * only works within one server, and GIO's move only within
 	 * one filesystem. The user should use Copy + Delete for
 	 * cross-side. Refuse and toast. */
-	dst_panel = (br->active == br->left) ? br->right : br->left;
-	if (dst_panel) {
-		HxFilesProvider *sp = files_panel_get_provider (br->active);
-		HxFilesProvider *dp = files_panel_get_provider (dst_panel);
-		gboolean s_local = HX_IS_LOCAL_FILES_PROVIDER (sp);
-		gboolean d_local = HX_IS_LOCAL_FILES_PROVIDER (dp);
-		if (s_local != d_local) {
-			/* Other panel is the wrong side — default the
+    dst_panel = (br->active == br->left) ? br->right : br->left;
+    if (dst_panel) {
+        HxFilesProvider *sp = files_panel_get_provider (br->active);
+        HxFilesProvider *dp = files_panel_get_provider (dst_panel);
+        gboolean s_local = HX_IS_LOCAL_FILES_PROVIDER (sp);
+        gboolean d_local = HX_IS_LOCAL_FILES_PROVIDER (dp);
+        if (s_local != d_local) {
+            /* Other panel is the wrong side — default the
 			 * dest entry to the source side's path so the
 			 * user can edit it. Toast a hint. */
-			(void) 0;
-		}
-	}
+            (void)0;
+        }
+    }
 
-	/* Default destination: the other panel's current path if
+    /* Default destination: the other panel's current path if
 	 * it's the same side as the active one; otherwise the
 	 * active panel's current path so the user can edit. */
-	{
-		HxFilesProvider *sp = files_panel_get_provider (br->active);
-		default_dest = NULL;
-		if (dst_panel) {
-			HxFilesProvider *dp = files_panel_get_provider (dst_panel);
-			gboolean same_side =
-				(HX_IS_LOCAL_FILES_PROVIDER (sp) ==
-				 HX_IS_LOCAL_FILES_PROVIDER (dp));
-			if (same_side)
-				default_dest = hx_files_provider_get_current_path (dp);
-		}
-		if (!default_dest)
-			default_dest = hx_files_provider_get_current_path (sp);
-	}
+    {
+        HxFilesProvider *sp = files_panel_get_provider (br->active);
+        default_dest = NULL;
+        if (dst_panel) {
+            HxFilesProvider *dp = files_panel_get_provider (dst_panel);
+            gboolean same_side = (HX_IS_LOCAL_FILES_PROVIDER (sp)
+                                  == HX_IS_LOCAL_FILES_PROVIDER (dp));
+            if (same_side) {
+                default_dest = hx_files_provider_get_current_path (dp);
+            }
+        }
+        if (!default_dest) {
+            default_dest = hx_files_provider_get_current_path (sp);
+        }
+    }
 
-	body = (entries->len == 1)
-		? g_strdup_printf (_("Move “%s” to:"),
-			hx_file_entry_get_name (
-				g_ptr_array_index (entries, 0)))
-		: g_strdup_printf (
-			g_dngettext (NULL,
-				"Move %u item to:",
-				"Move %u items to:",
-				entries->len),
-			entries->len);
-	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Move"), body));
-	g_free (body);
+    body = (entries->len == 1)
+               ? g_strdup_printf (
+                     _ ("Move “%s” to:"),
+                     hx_file_entry_get_name (g_ptr_array_index (entries, 0)))
+               : g_strdup_printf (
+                     g_dngettext (NULL, "Move %u item to:", "Move %u items to:",
+                                  entries->len),
+                     entries->len);
+    dialog = ADW_DIALOG (adw_alert_dialog_new (_ ("Move"), body));
+    g_free (body);
 
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"cancel", _("_Cancel"));
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"move", _("_Move"));
-	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-		"move", ADW_RESPONSE_SUGGESTED);
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "move");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "move",
+                                   _ ("_Move"));
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "move",
+                                              ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "move");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
-	entry = gtk_entry_new ();
-	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
-	gtk_editable_set_text (GTK_EDITABLE (entry), default_dest);
-	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+    entry = gtk_entry_new ();
+    gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+    gtk_editable_set_text (GTK_EDITABLE (entry), default_dest);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
 
-	ctx = g_new0 (struct move_ctx, 1);
-	ctx->br    = br;
-	ctx->panel = br->active;
-	ctx->names = g_ptr_array_new_with_free_func (g_free);
-	for (i = 0; i < entries->len; i++) {
-		HxFileEntry *e = g_ptr_array_index (entries, i);
-		g_ptr_array_add (ctx->names,
-			g_strdup (hx_file_entry_get_name (e)));
-	}
-	ctx->entry = entry;
-	g_ptr_array_free (entries, TRUE);
+    ctx = g_new0 (struct move_ctx, 1);
+    ctx->br = br;
+    ctx->panel = br->active;
+    ctx->names = g_ptr_array_new_with_free_func (g_free);
+    for (i = 0; i < entries->len; i++) {
+        HxFileEntry *e = g_ptr_array_index (entries, i);
+        g_ptr_array_add (ctx->names, g_strdup (hx_file_entry_get_name (e)));
+    }
+    ctx->entry = entry;
+    g_ptr_array_free (entries, TRUE);
 
-	g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
-	g_signal_connect (dialog, "closed",   G_CALLBACK (on_move_closed),   ctx);
+    g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
+    g_signal_connect (dialog, "closed", G_CALLBACK (on_move_closed), ctx);
 
-	adw_dialog_present (dialog, br->window);
-	gtk_widget_grab_focus (entry);
-	gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+    adw_dialog_present (dialog, br->window);
+    gtk_widget_grab_focus (entry);
+    gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
 }
 
 /* ---- Activate selected entry (F4 / Enter on a row) ---- */
@@ -605,16 +634,20 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
 static gboolean
 on_open_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
-	struct browser *br = user_data;
-	HxFileEntry *e;
-	(void) widget; (void) args;
+    struct browser *br = user_data;
+    HxFileEntry *e;
+    (void)widget;
+    (void)args;
 
-	if (!br->active) return FALSE;
-	e = files_panel_get_single_selected (br->active);
-	if (!e || hx_file_entry_is_dir (e)) return FALSE;
-	hx_files_provider_activate_entry (
-		files_panel_get_provider (br->active), e);
-	return TRUE;
+    if (!br->active) {
+        return FALSE;
+    }
+    e = files_panel_get_single_selected (br->active);
+    if (!e || hx_file_entry_is_dir (e)) {
+        return FALSE;
+    }
+    hx_files_provider_activate_entry (files_panel_get_provider (br->active), e);
+    return TRUE;
 }
 
 /* F2 rename shortcut — route to the same dialog the headerbar
@@ -625,9 +658,10 @@ on_open_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 static gboolean
 on_rename_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
-	(void) widget; (void) args;
-	on_rename_clicked (NULL, user_data);
-	return TRUE;
+    (void)widget;
+    (void)args;
+    on_rename_clicked (NULL, user_data);
+    return TRUE;
 }
 
 /* F6 move shortcut — Norton/orthodox-FM convention for
@@ -636,9 +670,10 @@ on_rename_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 static gboolean
 on_move_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
-	(void) widget; (void) args;
-	on_move_clicked (NULL, user_data);
-	return TRUE;
+    (void)widget;
+    (void)args;
+    on_move_clicked (NULL, user_data);
+    return TRUE;
 }
 
 /* Copy a GPtrArray of entries from one panel to another and
@@ -646,51 +681,49 @@ on_move_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
  * headerbar button and the DnD drop handler — both ultimately
  * iterate hx_files_ops_copy and aggregate per-entry results. */
 static void
-copy_entries_and_toast (struct browser *br,
-                        files_panel *src, files_panel *dst,
-                        GPtrArray   *entries)
+copy_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
+                        GPtrArray *entries)
 {
-	guint i, queued = 0, failed = 0;
-	HxOpsResult last_err = HX_OPS_OK;
+    guint i, queued = 0, failed = 0;
+    HxOpsResult last_err = HX_OPS_OK;
 
-	if (!entries || entries->len == 0) {
-		show_toast (br, _("Select a file to copy first."));
-		return;
-	}
+    if (!entries || entries->len == 0) {
+        show_toast (br, _ ("Select a file to copy first."));
+        return;
+    }
 
-	for (i = 0; i < entries->len; i++) {
-		HxFileEntry *e = g_ptr_array_index (entries, i);
-		HxOpsResult r = hx_files_ops_copy (
-			files_panel_get_provider (src),
-			files_panel_get_provider (dst),
-			e);
-		if (r == HX_OPS_OK) queued++;
-		else { failed++; last_err = r; }
-	}
+    for (i = 0; i < entries->len; i++) {
+        HxFileEntry *e = g_ptr_array_index (entries, i);
+        HxOpsResult r = hx_files_ops_copy (files_panel_get_provider (src),
+                                           files_panel_get_provider (dst), e);
+        if (r == HX_OPS_OK) {
+            queued++;
+        } else {
+            failed++;
+            last_err = r;
+        }
+    }
 
-	/* Lead with the failure reason when anything failed since
+    /* Lead with the failure reason when anything failed since
 	 * that's the actionable bit. last_err alone is enough for
 	 * the common case where every failure had the same global
 	 * cause (no permission, not connected, folder unsupported). */
-	if (failed == 0) {
-		char *msg = g_strdup_printf (
-			g_dngettext (NULL,
-				"Transfer queued (%u item).",
-				"Transfers queued (%u items).",
-				queued),
-			queued);
-		show_toast (br, msg);
-		g_free (msg);
-	} else if (queued == 0) {
-		show_toast (br, hx_files_ops_result_message (last_err));
-	} else {
-		char *msg = g_strdup_printf (
-			_("%u queued, %u failed (%s)."),
-			queued, failed,
-			hx_files_ops_result_message (last_err));
-		show_toast (br, msg);
-		g_free (msg);
-	}
+    if (failed == 0) {
+        char *msg = g_strdup_printf (
+            g_dngettext (NULL, "Transfer queued (%u item).",
+                         "Transfers queued (%u items).", queued),
+            queued);
+        show_toast (br, msg);
+        g_free (msg);
+    } else if (queued == 0) {
+        show_toast (br, hx_files_ops_result_message (last_err));
+    } else {
+        char *msg
+            = g_strdup_printf (_ ("%u queued, %u failed (%s)."), queued, failed,
+                               hx_files_ops_result_message (last_err));
+        show_toast (br, msg);
+        g_free (msg);
+    }
 }
 
 /* Copy headerbar button — pulls the active panel's selection and
@@ -698,19 +731,25 @@ copy_entries_and_toast (struct browser *br,
 static void
 on_copy_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	files_panel *src, *dst;
-	GPtrArray *entries;
-	(void) btn;
+    struct browser *br = user_data;
+    files_panel *src, *dst;
+    GPtrArray *entries;
+    (void)btn;
 
-	if (!br->active) return;
-	src = br->active;
-	dst = (src == br->left) ? br->right : br->left;
-	if (!dst) return;
+    if (!br->active) {
+        return;
+    }
+    src = br->active;
+    dst = (src == br->left) ? br->right : br->left;
+    if (!dst) {
+        return;
+    }
 
-	entries = files_panel_get_selected_entries (src);
-	copy_entries_and_toast (br, src, dst, entries);
-	if (entries) g_ptr_array_free (entries, TRUE);
+    entries = files_panel_get_selected_entries (src);
+    copy_entries_and_toast (br, src, dst, entries);
+    if (entries) {
+        g_ptr_array_free (entries, TRUE);
+    }
 }
 
 /* ---- Drag and drop between panels ---------------------------- */
@@ -731,35 +770,41 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
 static GdkContentProvider *
 on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 {
-	files_panel *p;
-	GPtrArray   *entries;
-	HxFilesDrag  drag;
-	GValue       val = G_VALUE_INIT;
-	GdkContentProvider *cp_internal;
-	GdkContentProvider *cp_files = NULL;
-	(void) x; (void) y; (void) user_data;
+    files_panel *p;
+    GPtrArray *entries;
+    HxFilesDrag drag;
+    GValue val = G_VALUE_INIT;
+    GdkContentProvider *cp_internal;
+    GdkContentProvider *cp_files = NULL;
+    (void)x;
+    (void)y;
+    (void)user_data;
 
-	p = g_object_get_data (G_OBJECT (source), "panel");
-	if (!p) return NULL;
+    p = g_object_get_data (G_OBJECT (source), "panel");
+    if (!p) {
+        return NULL;
+    }
 
-	entries = files_panel_get_selected_entries (p);
-	if (!entries || entries->len == 0) {
-		if (entries) g_ptr_array_free (entries, TRUE);
-		return NULL;
-	}
+    entries = files_panel_get_selected_entries (p);
+    if (!entries || entries->len == 0) {
+        if (entries) {
+            g_ptr_array_free (entries, TRUE);
+        }
+        return NULL;
+    }
 
-	/* gdk_content_provider_new_for_value deep-copies the boxed
+    /* gdk_content_provider_new_for_value deep-copies the boxed
 	 * payload via hx_files_drag_copy, so freeing our locals
 	 * afterwards is safe. */
-	drag.src_panel = p;
-	drag.entries   = entries;
+    drag.src_panel = p;
+    drag.entries = entries;
 
-	g_value_init (&val, HX_TYPE_FILES_DRAG);
-	g_value_set_boxed (&val, &drag);
-	cp_internal = gdk_content_provider_new_for_value (&val);
-	g_value_unset (&val);
+    g_value_init (&val, HX_TYPE_FILES_DRAG);
+    g_value_set_boxed (&val, &drag);
+    cp_internal = gdk_content_provider_new_for_value (&val);
+    g_value_unset (&val);
 
-	/* External-drag enrichment.
+    /* External-drag enrichment.
 	 *
 	 *   LOCAL panel  → offer GDK_TYPE_FILE_LIST pointing at the
 	 *                  real on-disk files. External apps drop
@@ -786,128 +831,126 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 	 *                  happened so the drag completing without
 	 *                  the receiver getting bytes isn't a
 	 *                  mystery. */
-	{
-		HxFilesProvider *prov = files_panel_get_provider (p);
-		if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
-			const char *dir = hx_files_provider_get_current_path (prov);
-			GSList *flist = NULL;
-			guint i;
-			for (i = 0; i < entries->len; i++) {
-				HxFileEntry *e = g_ptr_array_index (entries, i);
-				char *abspath = g_build_filename (dir ? dir : "/",
-					hx_file_entry_get_name (e), NULL);
-				flist = g_slist_prepend (flist,
-					g_file_new_for_path (abspath));
-				g_free (abspath);
-			}
-			flist = g_slist_reverse (flist);
+    {
+        HxFilesProvider *prov = files_panel_get_provider (p);
+        if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
+            const char *dir = hx_files_provider_get_current_path (prov);
+            GSList *flist = NULL;
+            guint i;
+            for (i = 0; i < entries->len; i++) {
+                HxFileEntry *e = g_ptr_array_index (entries, i);
+                char *abspath = g_build_filename (
+                    dir ? dir : "/", hx_file_entry_get_name (e), NULL);
+                flist = g_slist_prepend (flist, g_file_new_for_path (abspath));
+                g_free (abspath);
+            }
+            flist = g_slist_reverse (flist);
 
-			g_value_init (&val, GDK_TYPE_FILE_LIST);
-			g_value_set_boxed (&val, flist);
-			cp_files = gdk_content_provider_new_for_value (&val);
-			g_value_unset (&val);
-			g_slist_free_full (flist, g_object_unref);
-		} else if (HX_IS_REMOTE_FILES_PROVIDER (prov)
-		           && the_session.htlc.fd
-		           && hl_access_has (
-		               (const guint8 *) &the_session.htlc.access,
-		               HL_ACCESS_DOWNLOAD_FILES)) {
-			const char *rdir = hx_files_provider_get_current_path (prov);
-			const char *ldir = gtkhx_prefs.download_path
-				? gtkhx_prefs.download_path : g_get_home_dir ();
-			GString *uri_list = g_string_new (NULL);
-			guint i, kicked = 0;
-			for (i = 0; i < entries->len; i++) {
-				HxFileEntry *e = g_ptr_array_index (entries, i);
-				char *rpath, *lpath, *uri;
-				GFile *lf;
-				struct htxf_conn *htxf;
+            g_value_init (&val, GDK_TYPE_FILE_LIST);
+            g_value_set_boxed (&val, flist);
+            cp_files = gdk_content_provider_new_for_value (&val);
+            g_value_unset (&val);
+            g_slist_free_full (flist, g_object_unref);
+        } else if (HX_IS_REMOTE_FILES_PROVIDER (prov) && the_session.htlc.fd
+                   && hl_access_has ((const guint8 *)&the_session.htlc.access,
+                                     HL_ACCESS_DOWNLOAD_FILES)) {
+            const char *rdir = hx_files_provider_get_current_path (prov);
+            const char *ldir = gtkhx_prefs.download_path
+                                   ? gtkhx_prefs.download_path
+                                   : g_get_home_dir ();
+            GString *uri_list = g_string_new (NULL);
+            guint i, kicked = 0;
+            for (i = 0; i < entries->len; i++) {
+                HxFileEntry *e = g_ptr_array_index (entries, i);
+                char *rpath, *lpath, *uri;
+                GFile *lf;
+                struct htxf_conn *htxf;
 
-				if (hx_file_entry_is_dir (e)) continue; /* recursive
+                if (hx_file_entry_is_dir (e)) {
+                    continue; /* recursive
 				                                         * remote
 				                                         * dl not
 				                                         * wired */
-				rpath = g_build_filename (rdir ? rdir : "/",
-					hx_file_entry_get_name (e), NULL);
-				lpath = g_build_filename (ldir,
-					hx_file_entry_get_name (e), NULL);
+                }
+                rpath = g_build_filename (rdir ? rdir : "/",
+                                          hx_file_entry_get_name (e), NULL);
+                lpath
+                    = g_build_filename (ldir, hx_file_entry_get_name (e), NULL);
 
-				htxf = xfer_new (lpath, rpath, XFER_GET, 0,
-				                 (guint32) hx_file_entry_get_size (e));
-				if (htxf) {
-					htxf->filter_argv = 0;
-					htxf->opt.retry   = 0;
-					kicked++;
-				}
+                htxf = xfer_new (lpath, rpath, XFER_GET, 0,
+                                 (guint32)hx_file_entry_get_size (e));
+                if (htxf) {
+                    htxf->filter_argv = 0;
+                    htxf->opt.retry = 0;
+                    kicked++;
+                }
 
-				/* Build the uri-list entry in the same loop —
+                /* Build the uri-list entry in the same loop —
 				 * the URI points at where the file WILL be after
 				 * the download lands. RFC 2483: each entry on
 				 * its own line, CRLF-terminated. */
-				lf  = g_file_new_for_path (lpath);
-				uri = g_file_get_uri (lf);
-				if (uri) {
-					g_string_append (uri_list, uri);
-					g_string_append (uri_list, "\r\n");
-					g_free (uri);
-				}
-				g_object_unref (lf);
+                lf = g_file_new_for_path (lpath);
+                uri = g_file_get_uri (lf);
+                if (uri) {
+                    g_string_append (uri_list, uri);
+                    g_string_append (uri_list, "\r\n");
+                    g_free (uri);
+                }
+                g_object_unref (lf);
 
-				g_free (rpath);
-				g_free (lpath);
-			}
+                g_free (rpath);
+                g_free (lpath);
+            }
 
-			if (uri_list->len > 0) {
-				/* Steal the buffer with the modern
+            if (uri_list->len > 0) {
+                /* Steal the buffer with the modern
 				 * g_string_free_and_steal API; the
 				 * deprecation-suppressing g_string_free
 				 * (..., FALSE) form trips
 				 * -Wdeprecated-declarations on recent
 				 * GLib. Returned string is g_malloc'd
 				 * and g_bytes_new_take takes ownership. */
-				gsize len = uri_list->len;
-				char *buf = g_string_free_and_steal (uri_list);
-				GBytes *b = g_bytes_new_take (buf, len);
-				cp_files = gdk_content_provider_new_for_bytes (
-					"text/uri-list", b);
-				g_bytes_unref (b);
-			} else {
-				g_string_free (uri_list, TRUE);
-			}
+                gsize len = uri_list->len;
+                char *buf = g_string_free_and_steal (uri_list);
+                GBytes *b = g_bytes_new_take (buf, len);
+                cp_files
+                    = gdk_content_provider_new_for_bytes ("text/uri-list", b);
+                g_bytes_unref (b);
+            } else {
+                g_string_free (uri_list, TRUE);
+            }
 
-			/* Always toast — the user needs to know the drag is
+            /* Always toast — the user needs to know the drag is
 			 * really "start download to <path>", not the usual
 			 * "transfer bytes via DnD". */
-			{
-				struct browser *br = the_browser;
-				if (br && kicked > 0) {
-					char *msg = g_strdup_printf (
-						g_dngettext (NULL,
-							"Downloading %u file to %s",
-							"Downloading %u files to %s",
-							kicked),
-						kicked, ldir);
-					show_toast (br, msg);
-					g_free (msg);
-				}
-			}
-		}
-	}
+            {
+                struct browser *br = the_browser;
+                if (br && kicked > 0) {
+                    char *msg = g_strdup_printf (
+                        g_dngettext (NULL, "Downloading %u file to %s",
+                                     "Downloading %u files to %s", kicked),
+                        kicked, ldir);
+                    show_toast (br, msg);
+                    g_free (msg);
+                }
+            }
+        }
+    }
 
-	g_ptr_array_free (entries, TRUE);
+    g_ptr_array_free (entries, TRUE);
 
-	if (cp_files) {
-		/* Union: external apps receive GDK_TYPE_FILE_LIST,
+    if (cp_files) {
+        /* Union: external apps receive GDK_TYPE_FILE_LIST,
 		 * our internal drop target receives HX_TYPE_FILES_DRAG.
 		 * GDK negotiates whichever the target accepts. */
-		GdkContentProvider *providers[2] = { cp_internal, cp_files };
-		GdkContentProvider *cp_union =
-			gdk_content_provider_new_union (providers, 2);
-		g_object_unref (cp_internal);
-		g_object_unref (cp_files);
-		return cp_union;
-	}
-	return cp_internal;
+        GdkContentProvider *providers[2] = { cp_internal, cp_files };
+        GdkContentProvider *cp_union
+            = gdk_content_provider_new_union (providers, 2);
+        g_object_unref (cp_internal);
+        g_object_unref (cp_files);
+        return cp_union;
+    }
+    return cp_internal;
 }
 
 /* Drop target callback. Validates the drag's source-panel
@@ -919,180 +962,206 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
  * FM convention is that intra-panel DnD is a no-op (no "move
  * within directory" semantic). */
 static gboolean
-on_drop (GtkDropTarget *target, const GValue *value,
-         double x, double y, gpointer user_data)
+on_drop (GtkDropTarget *target, const GValue *value, double x, double y,
+         gpointer user_data)
 {
-	struct browser *br;
-	files_panel    *dst;
-	HxFilesDrag    *drag;
-	(void) x; (void) y; (void) user_data;
+    struct browser *br;
+    files_panel *dst;
+    HxFilesDrag *drag;
+    (void)x;
+    (void)y;
+    (void)user_data;
 
-	br  = g_object_get_data (G_OBJECT (target), "browser");
-	dst = g_object_get_data (G_OBJECT (target), "panel");
-	if (!br || !dst) return FALSE;
-	if (!G_VALUE_HOLDS (value, HX_TYPE_FILES_DRAG)) return FALSE;
-	drag = g_value_get_boxed (value);
-	if (!drag || !drag->src_panel || !drag->entries) return FALSE;
+    br = g_object_get_data (G_OBJECT (target), "browser");
+    dst = g_object_get_data (G_OBJECT (target), "panel");
+    if (!br || !dst) {
+        return FALSE;
+    }
+    if (!G_VALUE_HOLDS (value, HX_TYPE_FILES_DRAG)) {
+        return FALSE;
+    }
+    drag = g_value_get_boxed (value);
+    if (!drag || !drag->src_panel || !drag->entries) {
+        return FALSE;
+    }
 
-	/* Drop on the same panel — no-op. GTK still considers the
+    /* Drop on the same panel — no-op. GTK still considers the
 	 * drop "accepted" so we return TRUE; otherwise the drag
 	 * animates back to the source with a rejection sting. */
-	if (drag->src_panel == dst) return TRUE;
+    if (drag->src_panel == dst) {
+        return TRUE;
+    }
 
-	/* Source panel must be one of ours (paranoia — if the drag
+    /* Source panel must be one of ours (paranoia — if the drag
 	 * came from somewhere else with a matching type, refuse). */
-	if (drag->src_panel != br->left && drag->src_panel != br->right)
-		return FALSE;
+    if (drag->src_panel != br->left && drag->src_panel != br->right) {
+        return FALSE;
+    }
 
-	copy_entries_and_toast (br, drag->src_panel, dst, drag->entries);
-	return TRUE;
+    copy_entries_and_toast (br, drag->src_panel, dst, drag->entries);
+    return TRUE;
 }
 
 static void
 attach_panel_dnd (struct browser *br, files_panel *p)
 {
-	GtkWidget        *view = files_panel_get_column_view (p);
-	GtkDragSource    *src;
-	GtkDropTarget    *drop;
+    GtkWidget *view = files_panel_get_column_view (p);
+    GtkDragSource *src;
+    GtkDropTarget *drop;
 
-	if (!view) return;
+    if (!view) {
+        return;
+    }
 
-	/* Source: drags initiated by clicking a row and pulling
+    /* Source: drags initiated by clicking a row and pulling
 	 * past GTK's movement threshold. Action is COPY only (no
 	 * MOVE/LINK in Phase 4 — Move comes later, and Link doesn't
 	 * map cleanly onto either side). */
-	src = gtk_drag_source_new ();
-	gtk_drag_source_set_actions (src, GDK_ACTION_COPY);
-	g_object_set_data (G_OBJECT (src), "panel", p);
-	g_signal_connect (src, "prepare", G_CALLBACK (on_drag_prepare), NULL);
-	gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (src));
+    src = gtk_drag_source_new ();
+    gtk_drag_source_set_actions (src, GDK_ACTION_COPY);
+    g_object_set_data (G_OBJECT (src), "panel", p);
+    g_signal_connect (src, "prepare", G_CALLBACK (on_drag_prepare), NULL);
+    gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (src));
 
-	/* Target: accepts our boxed type only. GtkDropTarget adds
+    /* Target: accepts our boxed type only. GtkDropTarget adds
 	 * a .drop-active CSS class to the widget while a compatible
 	 * drag hovers, which gives a visual cue for free (Adwaita's
 	 * default style for it is fine). */
-	drop = gtk_drop_target_new (HX_TYPE_FILES_DRAG, GDK_ACTION_COPY);
-	g_object_set_data (G_OBJECT (drop), "browser", br);
-	g_object_set_data (G_OBJECT (drop), "panel",   p);
-	g_signal_connect (drop, "drop", G_CALLBACK (on_drop), NULL);
-	gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (drop));
+    drop = gtk_drop_target_new (HX_TYPE_FILES_DRAG, GDK_ACTION_COPY);
+    g_object_set_data (G_OBJECT (drop), "browser", br);
+    g_object_set_data (G_OBJECT (drop), "panel", p);
+    g_signal_connect (drop, "drop", G_CALLBACK (on_drop), NULL);
+    gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (drop));
 }
 
 struct mkdir_ctx {
-	struct browser *br;
-	files_panel    *panel;
-	GtkWidget      *entry;
+    struct browser *br;
+    files_panel *panel;
+    GtkWidget *entry;
 };
 
 static void
-on_mkdir_response (AdwAlertDialog *dialog, const char *response, gpointer user_data)
+on_mkdir_response (AdwAlertDialog *dialog, const char *response,
+                   gpointer user_data)
 {
-	struct mkdir_ctx *ctx = user_data;
-	const char *name;
-	GError *err = NULL;
-	(void) dialog;
+    struct mkdir_ctx *ctx = user_data;
+    const char *name;
+    GError *err = NULL;
+    (void)dialog;
 
-	if (g_strcmp0 (response, "create") != 0) return;
-	if (!ctx->panel) return;
-	name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
-	if (!name || !*name) return;
+    if (g_strcmp0 (response, "create") != 0) {
+        return;
+    }
+    if (!ctx->panel) {
+        return;
+    }
+    name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
+    if (!name || !*name) {
+        return;
+    }
 
-	if (!hx_files_provider_mkdir (
-			files_panel_get_provider (ctx->panel), name, &err)) {
-		g_warning ("mkdir failed: %s", err ? err->message : "unknown");
-		g_clear_error (&err);
-	}
+    if (!hx_files_provider_mkdir (files_panel_get_provider (ctx->panel), name,
+                                  &err)) {
+        g_warning ("mkdir failed: %s", err ? err->message : "unknown");
+        g_clear_error (&err);
+    }
 }
 
 static void
 on_mkdir_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
-	(void) dialog;
-	g_free (user_data);
+    (void)dialog;
+    g_free (user_data);
 }
 
 static void
 on_mkdir_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	AdwDialog *dialog;
-	GtkWidget *entry;
-	struct mkdir_ctx *ctx;
-	(void) btn;
+    struct browser *br = user_data;
+    AdwDialog *dialog;
+    GtkWidget *entry;
+    struct mkdir_ctx *ctx;
+    (void)btn;
 
-	if (!br->active) return;
+    if (!br->active) {
+        return;
+    }
 
-	dialog = ADW_DIALOG (adw_alert_dialog_new (
-		_("New Folder"),
-		_("Enter a name for the new folder.")));
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"cancel", _("_Cancel"));
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"create", _("C_reate"));
-	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-		"create", ADW_RESPONSE_SUGGESTED);
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+    dialog = ADW_DIALOG (adw_alert_dialog_new (
+        _ ("New Folder"), _ ("Enter a name for the new folder.")));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "create",
+                                   _ ("C_reate"));
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
+                                              "create", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
-	entry = gtk_entry_new ();
-	gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
-	adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
+    entry = gtk_entry_new ();
+    gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
 
-	ctx = g_new0 (struct mkdir_ctx, 1);
-	ctx->br    = br;
-	ctx->panel = br->active;
-	ctx->entry = entry;
+    ctx = g_new0 (struct mkdir_ctx, 1);
+    ctx->br = br;
+    ctx->panel = br->active;
+    ctx->entry = entry;
 
-	g_signal_connect (dialog, "response", G_CALLBACK (on_mkdir_response), ctx);
-	g_signal_connect (dialog, "closed",   G_CALLBACK (on_mkdir_closed),   ctx);
+    g_signal_connect (dialog, "response", G_CALLBACK (on_mkdir_response), ctx);
+    g_signal_connect (dialog, "closed", G_CALLBACK (on_mkdir_closed), ctx);
 
-	adw_dialog_present (dialog, br->window);
-	/* Focus the entry so the user can type immediately + hit
+    adw_dialog_present (dialog, br->window);
+    /* Focus the entry so the user can type immediately + hit
 	 * Enter. activates-default = TRUE on the entry routes that
 	 * Enter to AdwAlertDialog's default response ("create").
 	 * Has to happen AFTER adw_dialog_present — the dialog isn't
 	 * realized before that and grab_focus is a no-op on an
 	 * unmapped widget. */
-	gtk_widget_grab_focus (entry);
+    gtk_widget_grab_focus (entry);
 }
 
 struct delete_ctx {
-	struct browser *br;
-	files_panel    *panel;
-	GPtrArray      *names;    /* owned — array of g_strdup'd names */
+    struct browser *br;
+    files_panel *panel;
+    GPtrArray *names; /* owned — array of g_strdup'd names */
 };
 
 static void
 on_delete_response (AdwAlertDialog *dialog, const char *response,
-                     gpointer user_data)
+                    gpointer user_data)
 {
-	struct delete_ctx *ctx = user_data;
-	HxFilesProvider *prov;
-	guint i;
-	(void) dialog;
+    struct delete_ctx *ctx = user_data;
+    HxFilesProvider *prov;
+    guint i;
+    (void)dialog;
 
-	if (g_strcmp0 (response, "delete") != 0) return;
-	if (!ctx->panel || !ctx->names) return;
-	prov = files_panel_get_provider (ctx->panel);
+    if (g_strcmp0 (response, "delete") != 0) {
+        return;
+    }
+    if (!ctx->panel || !ctx->names) {
+        return;
+    }
+    prov = files_panel_get_provider (ctx->panel);
 
-	for (i = 0; i < ctx->names->len; i++) {
-		const char *name = g_ptr_array_index (ctx->names, i);
-		GError *err = NULL;
-		if (!hx_files_provider_delete (prov, name, &err)) {
-			g_warning ("delete %s: %s", name,
-				err ? err->message : "unknown");
-			g_clear_error (&err);
-		}
-	}
+    for (i = 0; i < ctx->names->len; i++) {
+        const char *name = g_ptr_array_index (ctx->names, i);
+        GError *err = NULL;
+        if (!hx_files_provider_delete (prov, name, &err)) {
+            g_warning ("delete %s: %s", name, err ? err->message : "unknown");
+            g_clear_error (&err);
+        }
+    }
 }
 
 static void
 on_delete_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
-	struct delete_ctx *ctx = user_data;
-	(void) dialog;
-	if (ctx->names) g_ptr_array_free (ctx->names, TRUE);
-	g_free (ctx);
+    struct delete_ctx *ctx = user_data;
+    (void)dialog;
+    if (ctx->names) {
+        g_ptr_array_free (ctx->names, TRUE);
+    }
+    g_free (ctx);
 }
 
 /* Build the delete-confirmation body text. Singular for one
@@ -1102,72 +1171,73 @@ on_delete_closed (AdwAlertDialog *dialog, gpointer user_data)
 static char *
 delete_body_text (GPtrArray *entries)
 {
-	HxFileEntry *e;
-	if (!entries || entries->len == 0)
-		return g_strdup ("");
-	if (entries->len == 1) {
-		e = g_ptr_array_index (entries, 0);
-		return g_strdup_printf (
-			_("Delete “%s”? This cannot be undone."),
-			hx_file_entry_get_name (e));
-	}
-	return g_strdup_printf (
-		g_dngettext (NULL,
-			"Delete %u item? This cannot be undone.",
-			"Delete %u items? This cannot be undone.",
-			entries->len),
-		entries->len);
+    HxFileEntry *e;
+    if (!entries || entries->len == 0) {
+        return g_strdup ("");
+    }
+    if (entries->len == 1) {
+        e = g_ptr_array_index (entries, 0);
+        return g_strdup_printf (_ ("Delete “%s”? This cannot be undone."),
+                                hx_file_entry_get_name (e));
+    }
+    return g_strdup_printf (
+        g_dngettext (NULL, "Delete %u item? This cannot be undone.",
+                     "Delete %u items? This cannot be undone.", entries->len),
+        entries->len);
 }
 
 static void
 on_delete_clicked (GtkButton *btn, gpointer user_data)
 {
-	struct browser *br = user_data;
-	GPtrArray *entries;
-	AdwDialog *dialog;
-	struct delete_ctx *ctx;
-	char *body;
-	guint i;
-	(void) btn;
+    struct browser *br = user_data;
+    GPtrArray *entries;
+    AdwDialog *dialog;
+    struct delete_ctx *ctx;
+    char *body;
+    guint i;
+    (void)btn;
 
-	if (!br->active) return;
-	entries = files_panel_get_selected_entries (br->active);
-	if (!entries || entries->len == 0) {
-		if (entries) g_ptr_array_free (entries, TRUE);
-		return;
-	}
+    if (!br->active) {
+        return;
+    }
+    entries = files_panel_get_selected_entries (br->active);
+    if (!entries || entries->len == 0) {
+        if (entries) {
+            g_ptr_array_free (entries, TRUE);
+        }
+        return;
+    }
 
-	body = delete_body_text (entries);
-	dialog = ADW_DIALOG (adw_alert_dialog_new (_("Delete"), body));
-	g_free (body);
+    body = delete_body_text (entries);
+    dialog = ADW_DIALOG (adw_alert_dialog_new (_ ("Delete"), body));
+    g_free (body);
 
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"cancel", _("_Cancel"));
-	adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog),
-		"delete", _("_Delete"));
-	adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-		"delete", ADW_RESPONSE_DESTRUCTIVE);
-	adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
-	adw_alert_dialog_set_close_response   (ADW_ALERT_DIALOG (dialog), "cancel");
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "delete",
+                                   _ ("_Delete"));
+    adw_alert_dialog_set_response_appearance (
+        ADW_ALERT_DIALOG (dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
-	/* Snapshot just the names — the dialog runs async and the
+    /* Snapshot just the names — the dialog runs async and the
 	 * selection set could shift in between. Same defensive
 	 * pattern the news_browser delete uses. */
-	ctx = g_new0 (struct delete_ctx, 1);
-	ctx->br    = br;
-	ctx->panel = br->active;
-	ctx->names = g_ptr_array_new_with_free_func (g_free);
-	for (i = 0; i < entries->len; i++) {
-		HxFileEntry *e = g_ptr_array_index (entries, i);
-		g_ptr_array_add (ctx->names,
-			g_strdup (hx_file_entry_get_name (e)));
-	}
-	g_ptr_array_free (entries, TRUE);
+    ctx = g_new0 (struct delete_ctx, 1);
+    ctx->br = br;
+    ctx->panel = br->active;
+    ctx->names = g_ptr_array_new_with_free_func (g_free);
+    for (i = 0; i < entries->len; i++) {
+        HxFileEntry *e = g_ptr_array_index (entries, i);
+        g_ptr_array_add (ctx->names, g_strdup (hx_file_entry_get_name (e)));
+    }
+    g_ptr_array_free (entries, TRUE);
 
-	g_signal_connect (dialog, "response", G_CALLBACK (on_delete_response), ctx);
-	g_signal_connect (dialog, "closed",   G_CALLBACK (on_delete_closed),   ctx);
+    g_signal_connect (dialog, "response", G_CALLBACK (on_delete_response), ctx);
+    g_signal_connect (dialog, "closed", G_CALLBACK (on_delete_closed), ctx);
 
-	adw_dialog_present (dialog, br->window);
+    adw_dialog_present (dialog, br->window);
 }
 
 /* ---- Keyboard shortcut: Tab switches active panel ---- */
@@ -1175,27 +1245,32 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 static gboolean
 on_tab_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
-	struct browser *br = user_data;
-	files_panel *other;
-	(void) widget; (void) args;
+    struct browser *br = user_data;
+    files_panel *other;
+    (void)widget;
+    (void)args;
 
-	if (!br->active) return FALSE;
-	other = (br->active == br->left) ? br->right : br->left;
-	if (other)
-		gtk_widget_grab_focus (files_panel_get_column_view (other));
-	return TRUE;
+    if (!br->active) {
+        return FALSE;
+    }
+    other = (br->active == br->left) ? br->right : br->left;
+    if (other) {
+        gtk_widget_grab_focus (files_panel_get_column_view (other));
+    }
+    return TRUE;
 }
 
 static gboolean
 on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
-	struct browser *br = user_data;
-	(void) widget; (void) args;
+    struct browser *br = user_data;
+    (void)widget;
+    (void)args;
 
-	if (br->active)
-		hx_files_provider_navigate_up (
-			files_panel_get_provider (br->active));
-	return TRUE;
+    if (br->active) {
+        hx_files_provider_navigate_up (files_panel_get_provider (br->active));
+    }
+    return TRUE;
 }
 
 /* ---- CSS for the active-panel highlight ---- */
@@ -1213,24 +1288,24 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
  * unambiguously across libadwaita color-scheme + accent
  * settings — gtkurl.c does the same thing for its URL tag.
  * #1c71d8 is libadwaita's default light-theme accent. */
-static const char *active_css =
-	".files-panel-active {\n"
-	"  box-shadow: inset 0 0 0 2px #1c71d8;\n"
-	"  border-radius: 8px;\n"
-	"}\n";
+static const char *active_css = ".files-panel-active {\n"
+                                "  box-shadow: inset 0 0 0 2px #1c71d8;\n"
+                                "  border-radius: 8px;\n"
+                                "}\n";
 
 static void
 install_css (struct browser *br)
 {
-	GdkDisplay *display;
+    GdkDisplay *display;
 
-	br->css = gtk_css_provider_new ();
-	gtk_css_provider_load_from_string (br->css, active_css);
-	display = gdk_display_get_default ();
-	if (display)
-		gtk_style_context_add_provider_for_display (
-			display, GTK_STYLE_PROVIDER (br->css),
-			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    br->css = gtk_css_provider_new ();
+    gtk_css_provider_load_from_string (br->css, active_css);
+    display = gdk_display_get_default ();
+    if (display) {
+        gtk_style_context_add_provider_for_display (
+            display, GTK_STYLE_PROVIDER (br->css),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
 }
 
 /* ---- Lifecycle ---- */
@@ -1238,39 +1313,40 @@ install_css (struct browser *br)
 static gboolean
 on_close (GtkWindow *window, gpointer user_data)
 {
-	struct browser *br = user_data;
-	GdkDisplay *display;
-	(void) window;
+    struct browser *br = user_data;
+    GdkDisplay *display;
+    (void)window;
 
-	if (the_browser == br) the_browser = NULL;
+    if (the_browser == br) {
+        the_browser = NULL;
+    }
 
-	if (br->conn_state_handler) {
-		g_signal_handler_disconnect (
-			gtkhx_session_get_default (),
-			br->conn_state_handler);
-		br->conn_state_handler = 0;
-	}
-	if (br->file_update_handler) {
-		g_signal_handler_disconnect (
-			gtkhx_session_get_default (),
-			br->file_update_handler);
-		br->file_update_handler = 0;
-	}
+    if (br->conn_state_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     br->conn_state_handler);
+        br->conn_state_handler = 0;
+    }
+    if (br->file_update_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     br->file_update_handler);
+        br->file_update_handler = 0;
+    }
 
-	if (br->css) {
-		display = gdk_display_get_default ();
-		if (display)
-			gtk_style_context_remove_provider_for_display (
-				display, GTK_STYLE_PROVIDER (br->css));
-		g_clear_object (&br->css);
-	}
+    if (br->css) {
+        display = gdk_display_get_default ();
+        if (display) {
+            gtk_style_context_remove_provider_for_display (
+                display, GTK_STYLE_PROVIDER (br->css));
+        }
+        g_clear_object (&br->css);
+    }
 
-	files_panel_free (br->left);
-	files_panel_free (br->right);
-	g_clear_object (&br->left_provider);
-	g_clear_object (&br->right_provider);
-	g_free (br);
-	return FALSE;
+    files_panel_free (br->left);
+    files_panel_free (br->right);
+    g_clear_object (&br->left_provider);
+    g_clear_object (&br->right_provider);
+    g_free (br);
+    return FALSE;
 }
 
 /* GtkhxSession fires this when the connection state pivots.
@@ -1280,10 +1356,12 @@ on_close (GtkWindow *window, gpointer user_data)
 static void
 on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
 {
-	struct browser *br = user_data;
-	(void) sess; (void) state;
-	if (br->right_provider)
-		g_signal_emit_by_name (br->right_provider, "unavailable-changed");
+    struct browser *br = user_data;
+    (void)sess;
+    (void)state;
+    if (br->right_provider) {
+        g_signal_emit_by_name (br->right_provider, "unavailable-changed");
+    }
 }
 
 /* file-update fires repeatedly during a transfer (progress
@@ -1299,41 +1377,49 @@ static void
 on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
                 gpointer user_data)
 {
-	struct browser *br = user_data;
-	struct htxf_conn *x = htxf_p;
-	(void) sess; (void) sess_p;
+    struct browser *br = user_data;
+    struct htxf_conn *x = htxf_p;
+    (void)sess;
+    (void)sess_p;
 
-	if (!x) return;
-	if (x->total_size == 0 || x->total_pos < x->total_size) return;
+    if (!x) {
+        return;
+    }
+    if (x->total_size == 0 || x->total_pos < x->total_size) {
+        return;
+    }
 
-	if (br->left_provider)
-		hx_files_provider_reload (br->left_provider);
-	if (br->right_provider)
-		hx_files_provider_reload (br->right_provider);
+    if (br->left_provider) {
+        hx_files_provider_reload (br->left_provider);
+    }
+    if (br->right_provider) {
+        hx_files_provider_reload (br->right_provider);
+    }
 }
 
 void
 open_files_browser (void)
 {
-	struct browser *br;
-	GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn, *rename_btn, *delete_btn;
-	GtkEventController *shortcuts;
-	GtkShortcut *sh;
+    struct browser *br;
+    GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn, *rename_btn,
+        *delete_btn;
+    GtkEventController *shortcuts;
+    GtkShortcut *sh;
 
-	if (the_browser) {
-		gtk_window_present (GTK_WINDOW (the_browser->window));
-		return;
-	}
+    if (the_browser) {
+        gtk_window_present (GTK_WINDOW (the_browser->window));
+        return;
+    }
 
-	br = g_new0 (struct browser, 1);
+    br = g_new0 (struct browser, 1);
 
-	br->window = gtk_window_new ();
-	gtk_window_set_title (GTK_WINDOW (br->window), _("Files"));
-	gtk_widget_set_size_request (br->window, 980, 560);
+    br->window = gtk_window_new ();
+    gtk_window_set_title (GTK_WINDOW (br->window), _ ("Files"));
+    gtk_widget_set_size_request (br->window, 980, 560);
 
-	install_css (br);
+    install_css (br);
 
-	/* Headerbar:
+    /* Headerbar:
 	 *   pack_start: Refresh, New Folder, Copy →
 	 *   pack_end:   Delete
 	 *
@@ -1345,100 +1431,109 @@ open_files_browser (void)
 	 *
 	 * Phase 3 wires copy + permission gating. Move and folder
 	 * recursion are Phase 4. */
-	header      = adw_header_bar_new ();
-	refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
-	mkdir_btn   = gtk_button_new_from_icon_name ("folder-new-symbolic");
-	br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
-	move_btn    = gtk_button_new_from_icon_name ("folder-symbolic");
-	rename_btn  = gtk_button_new_from_icon_name ("document-edit-symbolic");
-	delete_btn  = gtk_button_new_from_icon_name ("user-trash-symbolic");
+    header = adw_header_bar_new ();
+    refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
+    mkdir_btn = gtk_button_new_from_icon_name ("folder-new-symbolic");
+    br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
+    move_btn = gtk_button_new_from_icon_name ("folder-symbolic");
+    rename_btn = gtk_button_new_from_icon_name ("document-edit-symbolic");
+    delete_btn = gtk_button_new_from_icon_name ("user-trash-symbolic");
 
-	gtk_widget_set_tooltip_text (refresh_btn,  _("Reload active panel (Ctrl+R)"));
-	gtk_widget_set_tooltip_text (mkdir_btn,    _("New folder in active panel (Ctrl+N)"));
-	gtk_widget_set_tooltip_text (br->btn_copy, _("Copy selection to the other panel (F5)"));
-	gtk_widget_set_tooltip_text (move_btn,     _("Move selection to another directory (F6)"));
-	gtk_widget_set_tooltip_text (rename_btn,   _("Rename selected file (F2)"));
-	gtk_widget_set_tooltip_text (delete_btn,   _("Delete selection in active panel (Ctrl+D)"));
+    gtk_widget_set_tooltip_text (refresh_btn,
+                                 _ ("Reload active panel (Ctrl+R)"));
+    gtk_widget_set_tooltip_text (mkdir_btn,
+                                 _ ("New folder in active panel (Ctrl+N)"));
+    gtk_widget_set_tooltip_text (br->btn_copy,
+                                 _ ("Copy selection to the other panel (F5)"));
+    gtk_widget_set_tooltip_text (
+        move_btn, _ ("Move selection to another directory (F6)"));
+    gtk_widget_set_tooltip_text (rename_btn, _ ("Rename selected file (F2)"));
+    gtk_widget_set_tooltip_text (
+        delete_btn, _ ("Delete selection in active panel (Ctrl+D)"));
 
-	g_signal_connect (refresh_btn,  "clicked", G_CALLBACK (on_refresh_clicked), br);
-	g_signal_connect (mkdir_btn,    "clicked", G_CALLBACK (on_mkdir_clicked),   br);
-	g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),    br);
-	g_signal_connect (move_btn,     "clicked", G_CALLBACK (on_move_clicked),    br);
-	g_signal_connect (rename_btn,   "clicked", G_CALLBACK (on_rename_clicked),  br);
-	g_signal_connect (delete_btn,   "clicked", G_CALLBACK (on_delete_clicked),  br);
+    g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked),
+                      br);
+    g_signal_connect (mkdir_btn, "clicked", G_CALLBACK (on_mkdir_clicked), br);
+    g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),
+                      br);
+    g_signal_connect (move_btn, "clicked", G_CALLBACK (on_move_clicked), br);
+    g_signal_connect (rename_btn, "clicked", G_CALLBACK (on_rename_clicked),
+                      br);
+    g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_clicked),
+                      br);
 
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
-	adw_header_bar_pack_start (ADW_HEADER_BAR (header), move_btn);
-	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), delete_btn);
-	adw_header_bar_pack_end   (ADW_HEADER_BAR (header), rename_btn);
-	gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), move_btn);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), delete_btn);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), rename_btn);
+    gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
 
-	/* Two panels in a horizontal GtkPaned. Phase 1: both local;
+    /* Two panels in a horizontal GtkPaned. Phase 1: both local;
 	 * Phase 2 swaps the right panel's provider for a remote one
 	 * (and adds the L/R side selectors). Default split position
 	 * is centered; the user can drag the divider. */
-	paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
-	gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
-	gtk_paned_set_resize_end_child   (GTK_PANED (paned), TRUE);
-	gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
-	gtk_paned_set_shrink_end_child   (GTK_PANED (paned), FALSE);
+    paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
+    gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
 
-	/* L = local FS (XDG_DOWNLOAD_DIR by default).
+    /* L = local FS (XDG_DOWNLOAD_DIR by default).
 	 * R = remote Hotline server. The remote provider sits idle
 	 * until the connection is up — the panel paints a
 	 * "Not connected" state until then. */
-	{
-		HxLocalFilesProvider  *local;
-		HxRemoteFilesProvider *remote;
-		local  = hx_local_files_provider_new (NULL);
-		remote = hx_remote_files_provider_new ();
-		br->left_provider  = HX_FILES_PROVIDER (local);
-		br->right_provider = HX_FILES_PROVIDER (remote);
-	}
-	br->left  = files_panel_new (br->left_provider);
-	br->right = files_panel_new (br->right_provider);
+    {
+        HxLocalFilesProvider *local;
+        HxRemoteFilesProvider *remote;
+        local = hx_local_files_provider_new (NULL);
+        remote = hx_remote_files_provider_new ();
+        br->left_provider = HX_FILES_PROVIDER (local);
+        br->right_provider = HX_FILES_PROVIDER (remote);
+    }
+    br->left = files_panel_new (br->left_provider);
+    br->right = files_panel_new (br->right_provider);
 
-	br->conn_state_handler = g_signal_connect (
-		gtkhx_session_get_default (), "connection-state-changed",
-		G_CALLBACK (on_connection_state), br);
+    br->conn_state_handler = g_signal_connect (
+        gtkhx_session_get_default (), "connection-state-changed",
+        G_CALLBACK (on_connection_state), br);
 
-	/* file-update for auto-refresh on transfer completion. The
+    /* file-update for auto-refresh on transfer completion. The
 	 * same signal already routes through gtkhx.c::on_file_update_signal
 	 * for the legacy progress + toast notifications; we ride
 	 * alongside that with a second listener. */
-	br->file_update_handler = g_signal_connect (
-		gtkhx_session_get_default (), "file-update",
-		G_CALLBACK (on_file_update), br);
+    br->file_update_handler
+        = g_signal_connect (gtkhx_session_get_default (), "file-update",
+                            G_CALLBACK (on_file_update), br);
 
-	gtk_paned_set_start_child (GTK_PANED (paned),
-		files_panel_get_widget (br->left));
-	gtk_paned_set_end_child (GTK_PANED (paned),
-		files_panel_get_widget (br->right));
+    gtk_paned_set_start_child (GTK_PANED (paned),
+                               files_panel_get_widget (br->left));
+    gtk_paned_set_end_child (GTK_PANED (paned),
+                             files_panel_get_widget (br->right));
 
-	/* Wrap in a toast overlay so the Copy action (and future
+    /* Wrap in a toast overlay so the Copy action (and future
 	 * polish-phase actions) have somewhere to surface transient
 	 * feedback ("Transfer queued.", "You don't have permission
 	 * for that.", etc.) without an interrupting dialog. */
-	br->toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
-	adw_toast_overlay_set_child (br->toast, paned);
-	gtk_window_set_child (GTK_WINDOW (br->window), GTK_WIDGET (br->toast));
+    br->toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
+    adw_toast_overlay_set_child (br->toast, paned);
+    gtk_window_set_child (GTK_WINDOW (br->window), GTK_WIDGET (br->toast));
 
-	/* Track which panel has focus / was clicked so the headerbar
+    /* Track which panel has focus / was clicked so the headerbar
 	 * actions know who to operate on. Wired AFTER both panels
 	 * exist so attach_panel_focus_tracking can reach them via
 	 * files_panel_get_widget. */
-	attach_panel_focus_tracking (br, br->left);
-	attach_panel_focus_tracking (br, br->right);
+    attach_panel_focus_tracking (br, br->left);
+    attach_panel_focus_tracking (br, br->right);
 
-	/* DnD between panels: drag a row out of one panel and drop
+    /* DnD between panels: drag a row out of one panel and drop
 	 * on the other to fire the same Copy machinery the headerbar
 	 * button uses. Same-panel drops are a no-op. */
-	attach_panel_dnd (br, br->left);
-	attach_panel_dnd (br, br->right);
+    attach_panel_dnd (br, br->left);
+    attach_panel_dnd (br, br->right);
 
-	/* Window-level keyboard shortcuts.
+    /* Window-level keyboard shortcuts.
 	 *
 	 *   Tab        — switch active panel
 	 *   Backspace  — up one directory in active panel
@@ -1448,26 +1543,24 @@ open_files_browser (void)
 	 * for column-to-column navigation before the window-level
 	 * shortcut sees it. Same logic for Backspace though that one
 	 * isn't normally claimed by descendants. */
-	shortcuts = gtk_shortcut_controller_new ();
-	gtk_event_controller_set_propagation_phase (shortcuts,
-		GTK_PHASE_CAPTURE);
-	gtk_shortcut_controller_set_scope (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), GTK_SHORTCUT_SCOPE_GLOBAL);
-	gtk_widget_add_controller (br->window, shortcuts);
+    shortcuts = gtk_shortcut_controller_new ();
+    gtk_event_controller_set_propagation_phase (shortcuts, GTK_PHASE_CAPTURE);
+    gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                       GTK_SHORTCUT_SCOPE_GLOBAL);
+    gtk_widget_add_controller (br->window, shortcuts);
 
-	sh = gtk_shortcut_new (
-		gtk_keyval_trigger_new (GDK_KEY_Tab, 0),
-		gtk_callback_action_new (on_tab_shortcut, br, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    sh = gtk_shortcut_new (gtk_keyval_trigger_new (GDK_KEY_Tab, 0),
+                           gtk_callback_action_new (on_tab_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
 
-	sh = gtk_shortcut_new (
-		gtk_keyval_trigger_new (GDK_KEY_BackSpace, 0),
-		gtk_callback_action_new (on_backspace_shortcut, br, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_BackSpace, 0),
+        gtk_callback_action_new (on_backspace_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
 
-	/* F4 = "view/edit" (Norton F4 was Edit). Same action as
+    /* F4 = "view/edit" (Norton F4 was Edit). Same action as
 	 * Enter-on-row / double-click — routes through the
 	 * provider's activate_entry, which picks preview for
 	 * remote and xdg-open for local. Useful for users whose
@@ -1475,46 +1568,45 @@ open_files_browser (void)
 	 * navigation in a multi-select). F3 (classic View)
 	 * doesn't get a dedicated binding; the activation is
 	 * preview-first anyway. */
-	sh = gtk_shortcut_new (
-		gtk_keyval_trigger_new (GDK_KEY_F4, 0),
-		gtk_callback_action_new (on_open_shortcut, br, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F4, 0),
+        gtk_callback_action_new (on_open_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
 
-	/* F2 = Rename (modern Files-Manager keybinding). Route
+    /* F2 = Rename (modern Files-Manager keybinding). Route
 	 * through on_rename_shortcut so the column view's internal
 	 * F2 handling doesn't preempt us. */
-	sh = gtk_shortcut_new (
-		gtk_keyval_trigger_new (GDK_KEY_F2, 0),
-		gtk_callback_action_new (on_rename_shortcut, br, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F2, 0),
+        gtk_callback_action_new (on_rename_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
 
-	/* F6 = Move (classic Norton). Opens the move-destination
+    /* F6 = Move (classic Norton). Opens the move-destination
 	 * dialog defaulting to the inactive panel's path. */
-	sh = gtk_shortcut_new (
-		gtk_keyval_trigger_new (GDK_KEY_F6, 0),
-		gtk_callback_action_new (on_move_shortcut, br, NULL));
-	gtk_shortcut_controller_add_shortcut (
-		GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F6, 0),
+        gtk_callback_action_new (on_move_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
 
-	g_signal_connect (br->window, "close-request",
-		G_CALLBACK (on_close), br);
+    g_signal_connect (br->window, "close-request", G_CALLBACK (on_close), br);
 
-	the_browser = br;
+    the_browser = br;
 
-	/* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
+    /* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
 	 * Ctrl+K connect, Ctrl+T tracker. Same set every other
 	 * window in the app picks up via init_keyaccel. Capture
 	 * phase means the column views' internal focus chain
 	 * doesn't swallow them. */
-	init_keyaccel (br->window);
+    init_keyaccel (br->window);
 
-	/* Initial focus on the left panel so the user has a working
+    /* Initial focus on the left panel so the user has a working
 	 * active selection right away. */
-	set_active (br, br->left);
-	sync_copy_tooltip (br);
-	gtk_widget_grab_focus (files_panel_get_column_view (br->left));
+    set_active (br, br->left);
+    sync_copy_tooltip (br);
+    gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
-	gtk_window_present (GTK_WINDOW (br->window));
+    gtk_window_present (GTK_WINDOW (br->window));
 }
