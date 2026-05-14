@@ -63,22 +63,23 @@ struct _files_panel {
 static const char *
 icon_resource_for_id (guint16 icon_id)
 {
-	switch (icon_id) {
-	case ICON_FOLDER:     return "/com/nasledov/gtkhx/pixmaps/folder.png";
-	case ICON_FOLDER_IN:  return "/com/nasledov/gtkhx/pixmaps/folder_dropbox.png";
-	case ICON_FILE:       return "/com/nasledov/gtkhx/pixmaps/file.png";
-	case ICON_FILE_HTft:  return "/com/nasledov/gtkhx/pixmaps/file_html.png";
-	case ICON_FILE_SIT:
-	case ICON_FILE_SITP:  return "/com/nasledov/gtkhx/pixmaps/file_sit.png";
-	case ICON_FILE_IMAGE: return "/com/nasledov/gtkhx/pixmaps/file_image.png";
-	case ICON_FILE_APPL:  return "/com/nasledov/gtkhx/pixmaps/file_app.png";
-	case ICON_FILE_alis:  return "/com/nasledov/gtkhx/pixmaps/file_alias.png";
-	case ICON_FILE_DISK:  return "/com/nasledov/gtkhx/pixmaps/file_disk.png";
-	case ICON_FILE_NOTE:  return "/com/nasledov/gtkhx/pixmaps/file_note.png";
-	case ICON_FILE_MOOV:  return "/com/nasledov/gtkhx/pixmaps/file_movie.png";
-	case ICON_FILE_ZIP:   return "/com/nasledov/gtkhx/pixmaps/file_zip.png";
-	default:              return NULL;
-	}
+    switch (icon_id) {
+        case ICON_FOLDER:     return "/com/nasledov/gtkhx/pixmaps/folder.png";
+        case ICON_FOLDER_IN:  return "/com/nasledov/gtkhx/pixmaps/folder_dropbox.png";
+        case ICON_FILE:       return "/com/nasledov/gtkhx/pixmaps/file.png";
+        case ICON_FILE_HTft:  return "/com/nasledov/gtkhx/pixmaps/file_html.png";
+        case ICON_FILE_SIT:
+        case ICON_FILE_SITP:  return "/com/nasledov/gtkhx/pixmaps/file_sit.png";
+        case ICON_FILE_IMAGE: return "/com/nasledov/gtkhx/pixmaps/file_image.png";
+        case ICON_FILE_APPL:  return "/com/nasledov/gtkhx/pixmaps/file_app.png";
+        case ICON_FILE_alis:  return "/com/nasledov/gtkhx/pixmaps/file_alias.png";
+        case ICON_FILE_DISK:  return "/com/nasledov/gtkhx/pixmaps/file_disk.png";
+        case ICON_FILE_NOTE:  return "/com/nasledov/gtkhx/pixmaps/file_note.png";
+        case ICON_FILE_MOOV:  return "/com/nasledov/gtkhx/pixmaps/file_movie.png";
+        case ICON_FILE_TEXT:  return "/com/nasledov/gtkhx/pixmaps/file_text.png";
+        case ICON_FILE_ZIP:   return "/com/nasledov/gtkhx/pixmaps/file_zip.png";
+        default:              return NULL;
+    }
 }
 
 /* Load an icon resource (XPM or PNG) and wrap it in a GdkPaintable
