@@ -117,6 +117,24 @@ soup_dep = dependency('libsoup-3.0', version : '>= 3.0',
 poppler_dep    = dependency('poppler-glib',     required : false)
 sourceview_dep = dependency('gtksourceview-5',  required : false)
 
+# Optional: ImageMagick (MagickWand 7) — used by src/pict_magick.c
+# as the heavy fallback for QuickDraw PICT files that the cheap
+# embedded-image sniff in src/pict_embed.c can't handle (i.e.,
+# PICTs that use classic PackBits/DirectBits raster opcodes rather
+# than wrapping a JPEG/PNG/GIF/TIFF). PICT files are still common
+# on Hotline servers — they're what classic Mac OS screencapture
+# produced for ~20 years.
+#
+# When not installed, PICT preview degrades to "Failed to decode
+# image" for non-embedded PICTs; embedded-image PICTs still work
+# via the sniff path. The HAVE_IMAGEMAGICK define gates the
+# pict_magick.c source out of the build entirely.
+#
+# Not in the GNOME 49 Flatpak runtime; the Flatpak manifest builds
+# ImageMagick as a module. Distro packages on Debian/Ubuntu/Fedora
+# are libmagickwand-dev / ImageMagick-devel respectively.
+imagemagick_dep = dependency('MagickWand', required : false)
+
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -135,6 +153,7 @@ deps = [
   soup_dep,
   poppler_dep,
   sourceview_dep,
+  imagemagick_dep,
   intl_dep,
   dl_dep,
   math_dep,
@@ -276,6 +295,7 @@ summary(
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
+    'ImageMagick'   : imagemagick_dep.found() ? imagemagick_dep.version() : 'no',
   },
   section : 'Dependencies',
 )

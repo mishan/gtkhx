@@ -126,6 +126,20 @@ test_path_util = executable('test_path_util',
 test('path_util', test_path_util,
      suite : 'unit')
 
+# pict_embed — sniff-an-embedded-JPEG/PNG/GIF/TIFF helper used by
+# preview.c::image_done as a fallback when GdkPixbuf can't decode a
+# PICT directly. Pure GLib bytes-in / GBytes-out; the test inputs
+# are synthetic PICT-shaped buffers (zero header + opcode bytes +
+# image signature + payload), so no real PICT files are needed.
+test_pict_embed = executable('test_pict_embed',
+  'unit/test_pict_embed.c',
+  '../src/pict_embed.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('pict_embed', test_pict_embed,
+     suite : 'unit')
+
 # prefs_parser — prefs_parse_boolean. The BOOLEAN-pref logic was
 # extracted out of options.c specifically for this test (options.c
 # pulls in GTK + Adwaita + the entire UI tree; prefs_parser.c is

@@ -30,6 +30,8 @@ gtkhx_sources = files(
   'news15.c',
   'options.c',
   'path_util.c',
+  'pict_embed.c',
+  'pict_magick.c',
   'plugin.c',
   'prefs_parser.c',
   'preview.c',
@@ -110,6 +112,9 @@ if poppler_dep.found()
 endif
 if sourceview_dep.found()
   conf.set('HAVE_GTKSOURCEVIEW', 1)
+endif
+if imagemagick_dep.found()
+  conf.set('HAVE_IMAGEMAGICK', 1)
 endif
 
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,

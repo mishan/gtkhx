@@ -120,6 +120,63 @@ modules:
         url: https://download.gnome.org/sources/gsound/1.0/gsound-1.0.3.tar.xz
         sha256: ca2d039e1ebd148647017a7f548862350bc9af01986d39f10cfdc8e95f07881a
 
+  # ImageMagick — used as the heavy fallback for QuickDraw PICT
+  # files. PICTs are still common on Hotline servers (classic Mac
+  # screencapture output); the cheap embedded-image sniff in
+  # src/pict_embed.c handles JPEG/PNG/etc. wrapped in PICT v2, but
+  # the long tail of classic raster-opcode PICTs needs a full
+  # QuickDraw decoder. ImageMagick has carried one for ~25 years.
+  #
+  # We restrict the build to the subset of delegates and coders
+  # actually used by src/pict_magick.c — PICT in, raw RGBA out via
+  # MagickExportImagePixels. That keeps the install footprint
+  # modest. --disable-installed runs the test suite from the build
+  # tree without polluting the prefix.
+  - name: imagemagick
+    config-opts:
+      - --disable-static
+      - --disable-docs
+      - --disable-installed
+      - --without-utilities
+      - --without-magick-plus-plus
+      - --without-perl
+      - --without-x
+      - --without-modules
+      # Delegate libraries we don't need for PICT decoding.
+      - --without-bzlib
+      - --without-djvu
+      - --without-fontconfig
+      - --without-freetype
+      - --without-fpx
+      - --without-gslib
+      - --without-gvc
+      - --without-heic
+      - --without-jbig
+      - --without-lcms
+      - --without-lqr
+      - --without-lzma
+      - --without-openexr
+      - --without-openjp2
+      - --without-pango
+      - --without-raqm
+      - --without-raw
+      - --without-rsvg
+      - --without-tiff
+      - --without-webp
+      - --without-wmf
+      - --without-xml
+      - --without-zip
+      - --without-zstd
+    # NOTE: URL + SHA need to be set to a real release at Flatpak
+    # build time. Available releases are listed at
+    # https://github.com/ImageMagick/ImageMagick/releases
+    # Pin to a known-good 7.1.x point release; the API is stable
+    # across the 7.x series.
+    sources:
+      - type: archive
+        url: PLACEHOLDER_FILL_IN_LATEST_7_1_X_RELEASE_TARBALL
+        sha256: PLACEHOLDER_SHA256_OF_THE_TARBALL_ABOVE
+
   - name: gtkhx
     buildsystem: meson
     config-opts:
