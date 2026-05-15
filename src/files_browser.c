@@ -248,6 +248,61 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
     gtk_widget_add_controller (root, GTK_EVENT_CONTROLLER (click));
 }
 
+/* ---- Side selector: panel swap callback ----
+ *
+ * Each panel's side dropdown calls back here on a selection
+ * change. We build a fresh HxLocalFilesProvider /
+ * HxRemoteFilesProvider, hand it to the requesting panel, and
+ * stash it on br->left_provider or br->right_provider so the
+ * connection-state hook and the close-time cleanup can find it.
+ *
+ * Why fresh providers and not a shared singleton: providers
+ * store current_path internally. Two panels sharing one
+ * provider would have the same current_path, so navigating one
+ * would yank the other. Fresh-per-side keeps them independent.
+ *
+ * Why the cross-side Move/Copy logic stays correct: those
+ * checks use HX_IS_LOCAL_FILES_PROVIDER on
+ * files_panel_get_provider(panel), which returns the current
+ * provider. After a swap, the type check answers the new
+ * reality on the next button click. */
+static void
+on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
+{
+    struct browser *br = user_data;
+    HxFilesProvider *new_prov;
+
+    if (!br || !p) {
+        return;
+    }
+
+    if (want_local) {
+        new_prov = HX_FILES_PROVIDER (hx_local_files_provider_new (NULL));
+    } else {
+        new_prov = HX_FILES_PROVIDER (hx_remote_files_provider_new ());
+    }
+    if (!new_prov) {
+        return;
+    }
+
+    /* Update br's provider-side cache. The browser cleanup path
+	 * (on_close) and the connection-state hook key off these. */
+    if (p == br->left) {
+        g_clear_object (&br->left_provider);
+        br->left_provider = g_object_ref (new_prov);
+    } else if (p == br->right) {
+        g_clear_object (&br->right_provider);
+        br->right_provider = g_object_ref (new_prov);
+    }
+
+    files_panel_set_provider (p, new_prov);
+    g_object_unref (new_prov);
+
+    /* Copy-direction tooltip refresh: the destination kind may
+	 * have changed, which affects the arrow direction we show. */
+    sync_copy_tooltip (br);
+}
+
 /* ---- Actions (scoped to active panel) ---- */
 
 static void
@@ -1529,13 +1584,20 @@ on_close (GtkWindow *window, gpointer user_data)
 /* GtkhxSession fires this when the connection state pivots.
  * State is a GtkhxConnectionState — we don't differentiate
  * here; any state change might flip get_unavailable_reason()
- * from / to NULL, so we just nudge the remote provider. */
+ * from / to NULL, so we just nudge whichever providers are
+ * currently bound to either side. The side selector lets the
+ * user park remote on the left, or have BOTH sides be remote;
+ * the local-provider case is a no-op since its
+ * get_unavailable_reason always returns NULL. */
 static void
 on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
 {
     struct browser *br = user_data;
     (void)sess;
     (void)state;
+    if (br->left_provider) {
+        g_signal_emit_by_name (br->left_provider, "unavailable-changed");
+    }
     if (br->right_provider) {
         g_signal_emit_by_name (br->right_provider, "unavailable-changed");
     }
@@ -1702,7 +1764,15 @@ open_files_browser (void)
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
 	 * R = remote Hotline server. The remote provider sits idle
 	 * until the connection is up — the panel paints a
-	 * "Not connected" state until then. */
+	 * "Not connected" state until then.
+	 *
+	 * Either side can be swapped at runtime via the per-panel
+	 * side selector (see on_panel_swap_request below). When a
+	 * swap fires we build a fresh provider of the requested
+	 * kind — providers store current_path internally, so sharing
+	 * one across both panels wouldn't compose (navigating one
+	 * would yank the other). Fresh instances keep their state
+	 * independent. */
     {
         HxLocalFilesProvider *local;
         HxRemoteFilesProvider *remote;
@@ -1711,8 +1781,8 @@ open_files_browser (void)
         br->left_provider = HX_FILES_PROVIDER (local);
         br->right_provider = HX_FILES_PROVIDER (remote);
     }
-    br->left = files_panel_new (br->left_provider);
-    br->right = files_panel_new (br->right_provider);
+    br->left = files_panel_new (br->left_provider, on_panel_swap_request, br);
+    br->right = files_panel_new (br->right_provider, on_panel_swap_request, br);
 
     br->conn_state_handler = g_signal_connect (
         gtkhx_session_get_default (), "connection-state-changed",

@@ -22,11 +22,44 @@ G_BEGIN_DECLS
 
 typedef struct _files_panel files_panel;
 
+/* Callback fired when the user picks a different side (Local /
+ * Remote) from the panel's side dropdown. The handler is expected
+ * to construct a fresh provider of the requested kind and call
+ * files_panel_set_provider on `p`. The panel doesn't own provider
+ * construction itself — the browser is the single source of truth
+ * for which providers exist, so it handles the create + assign.
+ *
+ * `want_local` is TRUE if the user picked Local, FALSE if Remote.
+ * If the handler ignores the request (e.g. the requested kind is
+ * already the active provider), the dropdown reverts. */
+typedef void (*files_panel_swap_cb) (files_panel *p, gboolean want_local,
+                                     gpointer user_data);
+
 /* Construct a panel bound to `provider`. The panel takes a ref
  * on the provider and releases it on panel_free. Initial list
  * is triggered here so the widget is populated by the time the
- * browser presents it. */
-extern files_panel *files_panel_new (HxFilesProvider *provider);
+ * browser presents it.
+ *
+ * `swap_cb` is invoked when the user picks a different side from
+ * the panel's side dropdown. NULL hides the dropdown — the panel
+ * is then locked to the side its initial provider sets. */
+extern files_panel *files_panel_new (HxFilesProvider *provider,
+                                     files_panel_swap_cb swap_cb,
+                                     gpointer swap_cb_user_data);
+
+/* Replace the panel's provider in place. Used by the side-
+ * selector swap path: the panel disconnects from the old
+ * provider, releases its ref, takes a ref on the new one, and
+ * rewires the model / signals / path-completion popover to
+ * match. The widget tree (root box, path row, frame, column
+ * view, footer) stays put — only the model chain underneath
+ * changes — so the user's scroll position is preserved within
+ * reason though their previous selection is dropped.
+ *
+ * Safe to call with NULL; safe to call with the same provider
+ * the panel already has (no-op). */
+extern void files_panel_set_provider (files_panel *p,
+                                      HxFilesProvider *new_provider);
 
 /* Returns the root widget for embedding into the browser's
  * GtkPaned / GtkBox. Owned by the panel; do not unref. */

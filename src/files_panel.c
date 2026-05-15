@@ -24,8 +24,13 @@ struct _files_panel {
     GtkWidget *frame; /* GtkFrame around the column view —
 	                              * carries the active-panel CSS class */
 
-    GtkWidget *path_entry; /* GtkEntry, current path text input */
-    GtkWidget *up_btn;     /* one-shot up-one-level shortcut */
+    GtkWidget *path_entry;    /* GtkEntry, current path text input */
+    GtkWidget *up_btn;        /* one-shot up-one-level shortcut */
+    GtkWidget *side_dropdown; /* GtkDropDown, Local / Remote.
+	                              * NULL when swap_cb is NULL
+	                              * (panel locked to its initial
+	                              * provider). */
+    gulong side_dropdown_handler;
 
     GtkWidget *column_view; /* GtkColumnView */
     GtkMultiSelection *selection;
@@ -36,6 +41,13 @@ struct _files_panel {
     HxFilesProvider *provider;
     gulong navigated_handler;
     gulong unavailable_handler;
+    gulong items_changed_handler; /* on provider's listing */
+
+    /* User callback for "I want this panel to switch sides".
+	 * Browser-side: creates a fresh provider of the requested
+	 * type and calls files_panel_set_provider. */
+    files_panel_swap_cb swap_cb;
+    gpointer swap_cb_user_data;
 
     /* Set TRUE when the user triggers a navigation FROM this
 	 * panel (double-click row, Up button, path entry Enter).
@@ -556,13 +568,23 @@ add_column (GtkColumnView *view, const char *title,
     g_object_unref (col);
 }
 
+/* Forward decls — these live below files_panel_new so they can
+ * use the file-static helpers (cmp_*, name_*, etc.) without
+ * needing their own forward decls in turn. */
+static void panel_detach_provider (files_panel *p);
+static void panel_attach_provider (files_panel *p, HxFilesProvider *provider);
+static void on_side_dropdown_changed (GObject *obj, GParamSpec *pspec,
+                                      gpointer user_data);
+
 files_panel *
-files_panel_new (HxFilesProvider *provider)
+files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
+                 gpointer swap_cb_user_data)
 {
     files_panel *p = g_new0 (files_panel, 1);
     GtkWidget *path_row, *scrolled, *footer;
 
-    p->provider = g_object_ref (provider);
+    p->swap_cb = swap_cb;
+    p->swap_cb_user_data = swap_cb_user_data;
 
     /* Row icons are loaded lazily by lookup_icon_paintable from
 	 * the gresource (pre-extracted from icons.rsrc via
@@ -576,12 +598,30 @@ files_panel_new (HxFilesProvider *provider)
     gtk_widget_set_hexpand (p->root, TRUE);
     gtk_widget_set_vexpand (p->root, TRUE);
 
-    /* ---- Path row: [Up] [path entry] ---- */
+    /* ---- Path row: [side dropdown] [Up] [path entry] ---- */
     path_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_set_margin_start (path_row, 6);
     gtk_widget_set_margin_end (path_row, 6);
     gtk_widget_set_margin_top (path_row, 6);
     gtk_widget_set_margin_bottom (path_row, 4);
+
+    /* Side selector — only present when the caller wired a swap
+	 * callback. Two fixed options: "Local" (idx 0) and "Remote"
+	 * (idx 1). The initial selection is set by panel_attach_provider
+	 * below from the actual provider type, so this widget tracks
+	 * provider identity rather than driving it. */
+    if (p->swap_cb) {
+        const char *labels[] = { N_ ("Local"), N_ ("Remote"), NULL };
+        p->side_dropdown
+            = gtk_drop_down_new_from_strings ((const char *const *)labels);
+        gtk_widget_set_tooltip_text (p->side_dropdown,
+                                     _ ("Switch this panel between local "
+                                        "filesystem and remote server"));
+        p->side_dropdown_handler
+            = g_signal_connect (p->side_dropdown, "notify::selected",
+                                G_CALLBACK (on_side_dropdown_changed), p);
+        gtk_box_append (GTK_BOX (path_row), p->side_dropdown);
+    }
 
     p->up_btn = gtk_button_new_from_icon_name ("go-up-symbolic");
     gtk_widget_set_tooltip_text (p->up_btn, _ ("Up one level"));
@@ -590,28 +630,23 @@ files_panel_new (HxFilesProvider *provider)
 
     p->path_entry = gtk_entry_new ();
     gtk_widget_set_hexpand (p->path_entry, TRUE);
-    gtk_editable_set_text (GTK_EDITABLE (p->path_entry),
-                           hx_files_provider_get_current_path (provider));
     g_signal_connect (p->path_entry, "activate",
                       G_CALLBACK (on_path_entry_activate), p);
     gtk_box_append (GTK_BOX (path_row), p->path_entry);
 
-    /* Path completion (popover with smart-case subdirectory
-	 * suggestions as the user types). Local provider only —
-	 * remote synchronous enumeration would block the UI thread on
-	 * the network. */
-    if (HX_IS_LOCAL_FILES_PROVIDER (provider)) {
-        p->path_complete = hx_path_complete_attach (GTK_ENTRY (p->path_entry));
-    }
-
     gtk_box_append (GTK_BOX (p->root), path_row);
 
-    /* ---- Column view ---- */
+    /* ---- Column view ----
+	 *
+	 * The model chain is sort_model → selection → column_view.
+	 * sort_model starts wrapping NULL — panel_attach_provider
+	 * (called at the bottom of this function) plugs in the real
+	 * provider's listing. The widget tree below stays put across
+	 * provider swaps; only the underlying GListModel changes. */
     {
         GtkSorter *header_sorter;
 
-        p->sort_model = gtk_sort_list_model_new (
-            g_object_ref (hx_files_provider_get_listing (provider)), NULL);
+        p->sort_model = gtk_sort_list_model_new (NULL, NULL);
 
         /* MultiSelection: Ctrl-click toggles, Shift-click extends,
 		 * plain click replaces — standard orthodox-FM idiom. We
@@ -656,8 +691,6 @@ files_panel_new (HxFilesProvider *provider)
                           G_CALLBACK (on_row_activated), p);
         g_signal_connect (p->selection, "selection-changed",
                           G_CALLBACK (on_selection_changed), p);
-        g_signal_connect (hx_files_provider_get_listing (provider),
-                          "items-changed", G_CALLBACK (on_items_changed), p);
     }
 
     scrolled = gtk_scrolled_window_new ();
@@ -690,6 +723,94 @@ files_panel_new (HxFilesProvider *provider)
     gtk_box_append (GTK_BOX (footer), p->status_label);
     gtk_box_append (GTK_BOX (p->root), footer);
 
+    /* Plug in the initial provider — wires up signal handlers,
+	 * connects the model chain, configures path completion, and
+	 * fires the first reload. */
+    panel_attach_provider (p, provider);
+
+    return p;
+}
+
+/* ---- Provider attach / detach (used by both files_panel_new
+ * and files_panel_set_provider) ----
+ *
+ * panel_attach_provider takes a fresh ref on `provider` and
+ * connects every per-provider signal handler. panel_detach_provider
+ * disconnects them and drops the ref. files_panel_set_provider is
+ * the public detach-then-attach combo. */
+
+static void
+panel_detach_provider (files_panel *p)
+{
+    if (!p || !p->provider) {
+        return;
+    }
+    if (p->navigated_handler) {
+        g_signal_handler_disconnect (p->provider, p->navigated_handler);
+        p->navigated_handler = 0;
+    }
+    if (p->unavailable_handler) {
+        g_signal_handler_disconnect (p->provider, p->unavailable_handler);
+        p->unavailable_handler = 0;
+    }
+    if (p->items_changed_handler) {
+        GListModel *listing = hx_files_provider_get_listing (p->provider);
+        if (listing) {
+            g_signal_handler_disconnect (listing, p->items_changed_handler);
+        }
+        p->items_changed_handler = 0;
+    }
+    g_clear_object (&p->provider);
+}
+
+static void
+panel_attach_provider (files_panel *p, HxFilesProvider *provider)
+{
+    GListModel *listing;
+
+    if (!p || !provider) {
+        return;
+    }
+
+    p->provider = g_object_ref (provider);
+
+    /* Swap the model under sort_model. The column view + selection
+	 * sit on top of sort_model and ride along — items-changed events
+	 * propagate up and the column view redraws. */
+    listing = hx_files_provider_get_listing (provider);
+    gtk_sort_list_model_set_model (p->sort_model, listing);
+
+    p->items_changed_handler = g_signal_connect (
+        listing, "items-changed", G_CALLBACK (on_items_changed), p);
+
+    /* Path entry text reflects the new provider's current path. */
+    gtk_editable_set_text (GTK_EDITABLE (p->path_entry),
+                           hx_files_provider_get_current_path (provider));
+
+    /* Path completion (popover with smart-case subdirectory
+	 * suggestions as the user types). Local provider only —
+	 * remote synchronous enumeration would block the UI thread on
+	 * the network. We rebuild on every attach so a swap from
+	 * remote→local enables completion and the reverse disables it. */
+    if (p->path_complete) {
+        hx_path_complete_free (p->path_complete);
+        p->path_complete = NULL;
+    }
+    if (HX_IS_LOCAL_FILES_PROVIDER (provider)) {
+        p->path_complete = hx_path_complete_attach (GTK_ENTRY (p->path_entry));
+    }
+
+    /* Side-dropdown selection mirrors the actual provider type.
+	 * We block the change handler so the programmatic update
+	 * doesn't fire the swap callback. */
+    if (p->side_dropdown) {
+        g_signal_handler_block (p->side_dropdown, p->side_dropdown_handler);
+        gtk_drop_down_set_selected (GTK_DROP_DOWN (p->side_dropdown),
+                                    HX_IS_LOCAL_FILES_PROVIDER (provider) ? 0
+                                                                          : 1);
+        g_signal_handler_unblock (p->side_dropdown, p->side_dropdown_handler);
+    }
+
     p->navigated_handler = g_signal_connect (provider, "navigated",
                                              G_CALLBACK (on_navigated), p);
     p->unavailable_handler
@@ -702,8 +823,49 @@ files_panel_new (HxFilesProvider *provider)
 	 * the panel will catch up via on_unavailable_changed when the
 	 * connection comes up. */
     hx_files_provider_reload (provider);
+    update_status (p);
+}
 
-    return p;
+void
+files_panel_set_provider (files_panel *p, HxFilesProvider *new_provider)
+{
+    if (!p || !new_provider || p->provider == new_provider) {
+        return;
+    }
+    panel_detach_provider (p);
+    panel_attach_provider (p, new_provider);
+}
+
+/* Side-dropdown callback. The user picked Local (idx 0) or Remote
+ * (idx 1); ask the browser-supplied swap callback to build the
+ * new provider and apply it. If the user picked the side we're
+ * already on, the swap_cb is expected to no-op (and our dropdown
+ * stays as-is). */
+static void
+on_side_dropdown_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
+{
+    files_panel *p = user_data;
+    GtkDropDown *dd = GTK_DROP_DOWN (obj);
+    guint selected;
+    gboolean want_local;
+    (void)pspec;
+
+    if (!p || !p->swap_cb) {
+        return;
+    }
+    selected = gtk_drop_down_get_selected (dd);
+    want_local = (selected == 0);
+
+    /* No-op if the dropdown's claim matches the actual provider —
+	 * panel_attach_provider drives the dropdown from the provider
+	 * type, but this guard makes the early-return explicit. */
+    if (p->provider) {
+        gboolean cur_local = HX_IS_LOCAL_FILES_PROVIDER (p->provider);
+        if (cur_local == want_local) {
+            return;
+        }
+    }
+    p->swap_cb (p, want_local, p->swap_cb_user_data);
 }
 
 GtkWidget *
@@ -811,15 +973,9 @@ files_panel_free (files_panel *p)
         hx_path_complete_free (p->path_complete);
         p->path_complete = NULL;
     }
-    if (p->provider) {
-        if (p->navigated_handler) {
-            g_signal_handler_disconnect (p->provider, p->navigated_handler);
-        }
-        if (p->unavailable_handler) {
-            g_signal_handler_disconnect (p->provider, p->unavailable_handler);
-        }
-    }
-    g_clear_object (&p->provider);
+    /* Drops the items-changed/navigated/unavailable handlers and
+	 * the provider ref. */
+    panel_detach_provider (p);
     if (p->icons) {
         g_hash_table_destroy (p->icons);
         p->icons = NULL;
