@@ -452,17 +452,40 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
  * Wire-side, Hotline's MOVEFILE opcode (hx_file_move) is path-
  * aware and works for cross-directory moves on the same server.
  * GIO's g_file_move handles local cross-dir moves the same way.
+ *
  * Cross-SIDE moves (local→remote or vice versa) aren't really
- * "moves" — they require upload-then-delete or download-then-
- * delete. We do the copy via files_ops and report success; the
- * user can delete the source themselves with the Delete button.
- * Mixed-side Move isn't a common orthodox-FM operation anyway. */
+ * "moves" — there's no atomic primitive that spans filesystems,
+ * Hotline's MOVEFILE doesn't either, and a download-then-upload
+ * compound op silently degrades the cross-dir guarantee the
+ * orthodox-FM convention promises. We refuse them at button-click
+ * with a toast directing the user to Copy + Delete; mixed-side
+ * Move isn't a common orthodox-FM operation anyway.
+ *
+ * Remote-side move feedback: hx_file_move is fire-and-forget on
+ * the wire — the server acks the MOVEFILE task asynchronously
+ * and any rejection (no permission, dest exists, file in use)
+ * surfaces through the generic task_error toast on the toolbar
+ * window. Our success line therefore reads "Move requested for N
+ * items" on the remote side rather than "Moved" — the latter is
+ * reserved for the synchronous local g_file_move path where we
+ * actually know it worked. The two-toast UX (us optimistic +
+ * toolbar pessimistic) is a known wart; a future polish pass
+ * could route task_error toasts to the active files browser's
+ * overlay when one is open. */
 
 struct move_ctx {
     struct browser *br;
     files_panel *panel;
-    GPtrArray *names; /* owned — g_strdup'd source names */
-    GtkWidget *entry; /* dest-path entry */
+    GPtrArray *names;   /* owned — g_strdup'd source names */
+    GtkWidget *entry;   /* dest-path entry */
+    gboolean is_remote; /* TRUE if the source side is the remote
+                         * (HxRemoteFilesProvider). Remote moves
+                         * are async — hx_file_move is fire-and-
+                         * forget and any server-side error
+                         * surfaces later through the generic
+                         * task_error toast. Local moves are
+                         * synchronous via g_file_move and we
+                         * know the outcome at response time. */
 };
 
 static void
@@ -564,9 +587,25 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
     hx_files_provider_reload (prov);
 
     if (failed == 0) {
-        char *msg = g_strdup_printf (
-            g_dngettext (NULL, "Moved %u item.", "Moved %u items.", moved),
-            moved);
+        char *msg;
+        if (ctx->is_remote) {
+            /* Remote move is fire-and-forget over the wire: server
+			 * acks asynchronously, and any rejection (no permission,
+			 * destination exists, etc.) flows through the generic
+			 * task_error toast on the toolbar window. So our success
+			 * line has to read as "request sent" rather than
+			 * "definitely done" — otherwise we cheerfully claim
+			 * success while the toolbar simultaneously announces
+			 * a permission denial. */
+            msg = g_strdup_printf (
+                g_dngettext (NULL, "Move requested for %u item.",
+                             "Move requested for %u items.", moved),
+                moved);
+        } else {
+            msg = g_strdup_printf (
+                g_dngettext (NULL, "Moved %u item.", "Moved %u items.", moved),
+                moved);
+        }
         show_toast (ctx->br, msg);
         g_free (msg);
     } else {
@@ -594,11 +633,13 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     struct browser *br = user_data;
     GPtrArray *entries;
     files_panel *dst_panel;
+    HxFilesProvider *sp;
     const char *default_dest;
     AdwDialog *dialog;
     GtkWidget *entry;
     struct move_ctx *ctx;
     char *body;
+    gboolean src_is_remote;
     guint i;
     (void)btn;
 
@@ -614,41 +655,37 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
         return;
     }
 
-    /* Cross-side moves are out of scope — Hotline's MOVEFILE
-	 * only works within one server, and GIO's move only within
-	 * one filesystem. The user should use Copy + Delete for
-	 * cross-side. Refuse and toast. */
+    sp = files_panel_get_provider (br->active);
+    src_is_remote = HX_IS_REMOTE_FILES_PROVIDER (sp);
     dst_panel = (br->active == br->left) ? br->right : br->left;
+
+    /* Cross-side moves are out of scope — Hotline's MOVEFILE only
+	 * works within one server, and GIO's g_file_move only within
+	 * one filesystem. The user can either drag the items across
+	 * (Copy via the existing DnD path) and Delete the source,
+	 * or invoke Copy + Delete from the toolbar. Refuse here with
+	 * a directed toast so they're not left typing a destination
+	 * path that wouldn't actually move anything. */
     if (dst_panel) {
-        HxFilesProvider *sp = files_panel_get_provider (br->active);
         HxFilesProvider *dp = files_panel_get_provider (dst_panel);
-        gboolean s_local = HX_IS_LOCAL_FILES_PROVIDER (sp);
-        gboolean d_local = HX_IS_LOCAL_FILES_PROVIDER (dp);
-        if (s_local != d_local) {
-            /* Other panel is the wrong side — default the
-			 * dest entry to the source side's path so the
-			 * user can edit it. Toast a hint. */
-            (void)0;
+        if (HX_IS_LOCAL_FILES_PROVIDER (sp)
+            != HX_IS_LOCAL_FILES_PROVIDER (dp)) {
+            g_ptr_array_free (entries, TRUE);
+            show_toast (br, _ ("Move only works within one side. Use Copy then "
+                               "Delete to move between local and remote."));
+            return;
         }
     }
 
-    /* Default destination: the other panel's current path if
-	 * it's the same side as the active one; otherwise the
-	 * active panel's current path so the user can edit. */
-    {
-        HxFilesProvider *sp = files_panel_get_provider (br->active);
-        default_dest = NULL;
-        if (dst_panel) {
-            HxFilesProvider *dp = files_panel_get_provider (dst_panel);
-            gboolean same_side = (HX_IS_LOCAL_FILES_PROVIDER (sp)
-                                  == HX_IS_LOCAL_FILES_PROVIDER (dp));
-            if (same_side) {
-                default_dest = hx_files_provider_get_current_path (dp);
-            }
-        }
-        if (!default_dest) {
-            default_dest = hx_files_provider_get_current_path (sp);
-        }
+    /* Default destination: the other panel's current path
+	 * (guaranteed same-side after the cross-side refusal above). */
+    default_dest = NULL;
+    if (dst_panel) {
+        HxFilesProvider *dp = files_panel_get_provider (dst_panel);
+        default_dest = hx_files_provider_get_current_path (dp);
+    }
+    if (!default_dest) {
+        default_dest = hx_files_provider_get_current_path (sp);
     }
 
     body = (entries->len == 1)
@@ -679,6 +716,7 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     ctx = g_new0 (struct move_ctx, 1);
     ctx->br = br;
     ctx->panel = br->active;
+    ctx->is_remote = src_is_remote;
     ctx->names = g_ptr_array_new_with_free_func (g_free);
     for (i = 0; i < entries->len; i++) {
         HxFileEntry *e = g_ptr_array_index (entries, i);
@@ -1582,7 +1620,7 @@ open_files_browser (void)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.xpm");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
     br->btn_copy = FB_BTN ("/com/nasledov/gtkhx/pixmaps/dl.xpm");
-    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
+    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/move.xpm");
     preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.xpm");
     info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.xpm");
     rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/edituser.xpm");
