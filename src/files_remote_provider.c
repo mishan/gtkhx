@@ -245,15 +245,34 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
     struct cached_filelist *cfl = cfl_p;
     (void)fh;
 
-    if (!pending_listings) {
+    /* The dispatcher in gtkhx.c::on_file_list_signal falls through
+	 * to the legacy output_file_list (which casts `data` to
+	 * struct gfile_list *) when we return FALSE. That's only safe
+	 * if data ISN'T a HxRemoteFilesProvider — otherwise the cast
+	 * misreads a GObject as a gfile_list and crashes inside
+	 * gtk_window_set_title on a bogus window pointer.
+	 *
+	 * Identify by type first. GObject's type check is safe on any
+	 * pointer that could be either flavour. When this provider DOES
+	 * own the response, claim it whether or not it's still in
+	 * pending_listings — a second response for the same provider
+	 * (e.g. when the panel fired multiple FILE_LIST requests in
+	 * quick succession) used to fall through to the legacy path,
+	 * which was the source of the crash. Now we just drop the
+	 * duplicate harmlessly. */
+    if (!data || !G_IS_OBJECT (data) || !HX_IS_REMOTE_FILES_PROVIDER (data)) {
         return FALSE;
     }
-    if (!g_hash_table_contains (pending_listings, data)) {
-        return FALSE;
+    if (!pending_listings || !g_hash_table_contains (pending_listings, data)) {
+        /* Stale response for one of our providers (most recent
+		 * request already handled, or this fired before any
+		 * pending entry existed). Swallow it so the legacy
+		 * output_file_list isn't called on a GObject pointer. */
+        return TRUE;
     }
 
-    /* It's ours. Steal the ref so we don't get dropped mid-parse
-	 * if the table removes us first. */
+    /* It's ours and still tracked. Steal the ref so we don't get
+	 * dropped mid-parse if the table removes us first. */
     self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
     g_hash_table_remove (pending_listings, data);
 
