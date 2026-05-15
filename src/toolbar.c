@@ -264,11 +264,10 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
     g_idle_add (defer_quit, NULL);
 }
 
-/* Phase-1 entry point for the new files browser. Hidden behind
- * the hamburger menu rather than the toolbar Files button so it
- * coexists with the legacy single-pane UI during development. The
- * action will be promoted to the toolbar in Phase 4 of the
- * scoping plan, and the legacy entry removed in Phase 5. */
+/* Entry point for the files browser. Phase 5 retired the legacy
+ * single-pane UI; this is the only Files window now. Reached from
+ * both the toolbar Files button and the hamburger menu's Files
+ * action. */
 static gboolean
 defer_open_files_browser (gpointer data)
 {
@@ -285,6 +284,16 @@ on_action_files_browser (GSimpleAction *action, GVariant *param,
     (void)param;
     (void)user_data;
     g_idle_add (defer_open_files_browser, NULL);
+}
+
+/* Toolbar GtkButton::clicked adapter — the signal hands us
+ * (button, user_data) but open_files_browser() takes no args. */
+static void
+on_files_button_clicked (GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    (void)user_data;
+    open_files_browser ();
 }
 
 static const GActionEntry app_actions[] = {
@@ -559,7 +568,8 @@ create_toolbar_window (session *sess)
                                      G_CALLBACK (open_news_browser), sess);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
     files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.xpm",
-                                    _ ("Files"), G_CALLBACK (open_files), sess);
+                                    _ ("Files"),
+                                    G_CALLBACK (on_files_button_clicked), sess);
     gtk_box_append (GTK_BOX (hbox), files_btn);
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (

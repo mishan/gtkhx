@@ -94,7 +94,6 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* auto_reply */
     0, /* timestamp */
     0, /* word_wrap */
-    0, /* file_samewin */
     1, /* track_case */
     0, /* old_nickcompletion */
     0, /* outrate_limit */
@@ -554,16 +553,6 @@ changed_case (session *sess)
     tracker_search_refresh ();
 }
 
-static void
-changed_filesamewin (session *sess)
-{
-    (void)sess;
-    for (GList *l = gfile_list; l; l = l->next) {
-        struct gfile_list *gfl = l->data;
-        gtk_widget_set_sensitive (gfl->up_btn, gtkhx_prefs.file_samewin);
-    }
-}
-
 /* Phase 5: apply the THEME pref to libadwaita's style manager. The pref
  * is one of "system" / "light" / "dark"; anything else falls back to
  * the system default so a hand-edited gtkhxrc with a typo doesn't lock
@@ -663,12 +652,10 @@ struct cfgvar {
       0,
       changed_downloadpath,
       NULL },
-    { CFG_FILE_SAMEWIN,
-      { &gtkhx_prefs.file_samewin },
-      BOOLEAN,
-      0,
-      changed_filesamewin,
-      NULL },
+    /* file_samewin pref: retired in Phase 5 with the legacy single-pane
+	 * files browser. Loaded values from old gtkhxrc files are silently
+	 * ignored — the cfgvars table just doesn't list the key anymore,
+	 * so prefs_read passes over it. */
     { CFG_FONT, { &gtkhx_prefs.font }, STRING, 0, changed_font, NULL },
     { CFG_HIGHLIGHT_WORDS,
       { &gtkhx_prefs.highlight_words },
@@ -2018,28 +2005,13 @@ settings_page_tracker (AdwPreferencesPage *page)
     }
 }
 
-/* Phase 5: News + Files used to be two separate pages, each with a
- * single Browse-in-Same-Window toggle. They're consolidated here as
- * an "Interface" page with one group per browser. */
-static void
-settings_page_interface (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *files_grp;
-
-    files_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (files_grp, _ ("File Browsing"));
-    adw_preferences_group_add (
-        files_grp,
-        pref_switch_row (
-            CFG_FILE_SAMEWIN, _ ("Browse in Same Window"),
-            _ ("Replace the current window when descending into a folder")));
-    adw_preferences_page_add (page, files_grp);
-
-    /* The News-folder "Browse in Same Window" pref was retired in
-	 * Phase 6 with the legacy two-window UI; the unified news
-	 * browser is always one window so the toggle has nothing left
-	 * to drive. */
-}
+/* Phase 5: the "Interface" page that hosted the legacy
+ * file-browser "Browse in Same Window" toggle is gone — the new
+ * files browser is always a single window (matching the news
+ * browser's Phase 6 cleanup). Page is dropped from
+ * settings_add_page below; the cfgvars table also drops the
+ * entry so any pre-existing FILE_SAMEWINDOW key in old gtkhxrc
+ * files is silently ignored on load. */
 
 static void
 settings_page_sound (AdwPreferencesPage *page)
@@ -2551,8 +2523,6 @@ create_options_window (GtkWidget *widget, gpointer data)
     settings_add_page (dlg, _ ("Notifications"),
                        "preferences-system-notifications-symbolic",
                        settings_page_notifications);
-    settings_add_page (dlg, _ ("Interface"), "view-list-symbolic",
-                       settings_page_interface);
     settings_add_page (dlg, _ ("Trackers"), "network-server-symbolic",
                        settings_page_tracker);
     settings_add_page (dlg, _ ("Misc"), "applications-other-symbolic",

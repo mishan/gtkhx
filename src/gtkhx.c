@@ -1285,14 +1285,13 @@ on_file_list_signal (GtkhxSession *emitter, gpointer cfl, gpointer fh,
 {
     (void)emitter;
     (void)user_data;
-    /* New unified files browser owns the remote-files-provider
-     * data carrier; route to it first. Falls through to the
-     * legacy single-pane UI if the carrier isn't one of ours. */
-    if (hx_remote_files_provider_handle_file_list (cfl, fh, data)) {
-        return;
-    }
-    output_file_list ((struct cached_filelist *)cfl,
-                      (struct hl_filelist_hdr *)fh, data);
+    /* Phase 5: only the new files browser remains; route the
+	 * response to its remote-files-provider. The legacy
+	 * output_file_list fallback is gone with the rest of the
+	 * legacy gfile_list UI. Responses without a recognised
+	 * provider carrier (e.g. stale FILE_LIST tasks from a
+	 * closed window) get harmlessly dropped inside the handler. */
+    (void)hx_remote_files_provider_handle_file_list (cfl, fh, data);
 }
 
 static void

@@ -415,7 +415,10 @@ close_connected_windows (session *sess)
         gtkhx_widget_destroy (sess->agreementwin);
         sess->agreementwin = NULL;
     }
-    destroy_gfl_list ();
+    /* Phase 5: legacy gfile_list cleanup is gone with the legacy
+	 * files browser. The new browser (files_browser.c) is a
+	 * singleton owned by its open_files_browser entry point and
+	 * cleans itself up via the close-request handler. */
 
     /* Phase 5+: walk the gchats hashtable, destroying every non-public
 	 * pchat window. The public chat (cid=0) UI persists across

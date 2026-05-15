@@ -264,7 +264,10 @@ typedef struct _session {
 
     struct gnews_folder *gfnews_list;
 
-    struct gfile_list *gfile_list;
+    /* Phase 5: per-session gfile_list pointer retired with the
+	 * legacy files browser. The new orthodox-FM browser
+	 * (files_browser.c) is a singleton owned by its own static
+	 * `the_browser` variable. */
 
     /* Phase 5+: open PM windows keyed on the recipient's uid.
 	 * Replaces the file-scope `msg_list` global in msg.c and the

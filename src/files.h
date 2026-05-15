@@ -1,19 +1,23 @@
 #ifndef HX_FILES_H
 #define HX_FILES_H
 
-/* Forward decls so consumers that don't pull in <gtk/gtk.h> or
- * the protocol headers (e.g. files_entry.c, which only needs the
- * ICON_* constants) still compile. struct gfile_list and the
- * hx_file_* externs below reference these. */
-typedef struct _GtkWidget GtkWidget;
+/* Phase 5: legacy single-pane GtkHList file browser was retired
+ * with the new orthodox-file-manager browser in files_browser.c /
+ * files_panel.c / files_{local,remote}_provider.c / files_ops.c.
+ * files.c is now just wire helpers + a couple of utilities still
+ * used by the new browser (icon picker, kind formatter, hldir
+ * encoder, the file-info dialog).
+ *
+ * Forward decls so consumers that don't pull in the protocol
+ * headers (e.g. files_entry.c, which only needs the ICON_*
+ * constants) still compile. */
 struct htlc_conn;
 struct cached_filelist;
 struct hl_filelist_hdr;
-struct path_hist;
 
-/* Mac-classic cicn icon numbers used across the legacy and new
- * files UIs. The numeric values are the cicn resource IDs inside
- * the bundled .rsrc files load_icon walks. */
+/* Mac-classic cicn icon numbers used across the files UI. The
+ * numeric values are the cicn resource IDs inside the bundled
+ * .rsrc files load_icon walks. */
 #define ICON_FILE 400
 #define ICON_FOLDER 401
 #define ICON_FOLDER_IN 421
@@ -30,14 +34,20 @@ struct path_hist;
 #define ICON_FILE_MOOV 425
 #define ICON_FILE_ZIP 426
 
-extern void destroy_gfl_list (void);
-extern void open_files (void);
 extern char *human_size (char *sizstr, guint32 size);
-extern void output_file_list (struct cached_filelist *cfl,
-                              struct hl_filelist_hdr *fh, void *data);
+
+/* File-info dialog. Called from gtkhx.c::on_file_info_signal when
+ * a HTLS_HDR_FILE_GETINFO reply arrives. The new files browser's
+ * Get Info button fires the wire request via hx_file_info; this
+ * is the receiving end that builds the dialog. */
 extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, char *modified, char *created,
                               guint32 size);
+
+/* Emit the file-list GtkhxSession signal so the file_list-signal
+ * handler in gtkhx.c (and through it the remote-provider in the
+ * new files browser) can pick up a parsed cfl. Called from
+ * rcv.c::rcv_task_file_list. */
 extern void cfl_print (struct cached_filelist *cfl, void *data);
 extern struct cached_filelist *cfl_lookup (const char *path);
 
@@ -72,8 +82,6 @@ extern void dirchar_fix (char *lpath);
 extern void dirmask (char *dst, char *src, char *mask);
 extern int exists_remote (char *path);
 
-extern void hx_list_dir (struct htlc_conn *htlc, const char *path, int reload,
-                         int recurs, void *data);
 extern void hx_file_delete (struct htlc_conn *htlc, char *path);
 extern void hx_make_dir (struct htlc_conn *htlc, char *path);
 /* Request info on the file located at (dir_path, file_name).
@@ -90,21 +98,5 @@ extern void hx_file_link (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
 extern void hx_file_move (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
-
-/* Phase 5+ (GLib-collections): no more next/prev. Open file-browser
- * windows live in a GList<struct gfile_list*> on `gfile_list`.
- * (GList rather than GHashTable because the legacy file_samewin=false
- * path allows multiple windows to share the same remote path, which
- * a path-keyed hashtable can't represent. N stays small — handful of
- * open browsers — so linear lookups are fine.) */
-struct gfile_list {
-    struct cached_filelist *cfl;
-    struct path_hist *path_list;
-    int row, column;
-    GtkWidget *hlist, *window, *up_btn;
-    char in_use;
-};
-
-extern GList *gfile_list;
 
 #endif

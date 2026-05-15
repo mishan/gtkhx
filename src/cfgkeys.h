@@ -54,8 +54,8 @@
 /* Same-window navigation for the files browser. The matching
  * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
  * two-window news UI was removed; an old gtkhxrc that still has
- * the key just gets ignored. */
-#define CFG_FILE_SAMEWIN "FILE_SAMEWINDOW"
+ * the key just gets ignored. Same applies to FILE_SAMEWINDOW,
+ * retired in Phase 5 with the legacy single-pane files browser. */
 
 /* Desktop notifications (Phase 5+). One BOOLEAN per event class so
  * users can toggle each independently. NOTIFY_OMIT_FOCUSED gates

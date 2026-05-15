@@ -237,10 +237,16 @@ account can't do the action.
   the row-activate path in isolation but the symptom still
   shows on testing. Three followups noted in the bug entry.
 
-**Phase 5 — Retire legacy.** Delete the old `open_files`,
-`gfile_list`, `gfl_*`, and supporting UI helpers from files.c.
-Drop `file_samewin` from prefs (already-loaded values silently
-ignored). files.c shrinks to the wire helpers only.
+**Phase 5 — Retire legacy.** ✅ Done. Deleted `open_files`,
+`gfile_list`, `gfl_*`, `output_file_list`, `hx_list_dir`, and the
+supporting legacy UI helpers from files.c (~1500 LOC → ~750 LOC,
+just wire helpers + file-info dialog + the small lookup shims
+`cfl_lookup`/`exists_remote` that now degenerate to fresh/empty
+since the cache they consulted is gone). Dropped `file_samewin`
+from prefs (`CFG_FILE_SAMEWIN` retired, `prefs->file_samewin`
+removed, the "Interface" settings page that hosted the toggle
+gone). Toolbar Files button now calls `open_files_browser()`
+directly via a thin `on_files_button_clicked` adapter.
 
 Phase boundaries match what worked for news_browser: each phase
 ends on a runnable binary with both old and new available, the
