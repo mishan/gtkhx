@@ -260,6 +260,77 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
     }
 }
 
+/* ---- Preview ----
+ *
+ * Routes through the provider's activate-entry vtable, which is the
+ * same hook that fires on F4 / double-click. On a remote file that
+ * kicks off an HTXF preview transfer (opt.preview=1, no on-disk
+ * write — the preview window decodes bytes as they stream). On a
+ * local file it g_app_info_launch's the OS default app. Folders
+ * are no-ops here; descending happens through normal row-activate. */
+static void
+on_preview_clicked (GtkButton *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+    HxFileEntry *e;
+    (void)btn;
+
+    if (!br->active) {
+        return;
+    }
+    e = files_panel_get_single_selected (br->active);
+    if (!e) {
+        show_toast (br, _ ("Select a single file to preview."));
+        return;
+    }
+    if (hx_file_entry_is_dir (e)) {
+        show_toast (br, _ ("Preview is for files, not folders."));
+        return;
+    }
+    hx_files_provider_activate_entry (files_panel_get_provider (br->active), e);
+}
+
+/* ---- Get Info ----
+ *
+ * Fires HTLC_HDR_FILE_GETINFO for the selected file on the active
+ * panel. The wire request is remote-only; the existing rcv path
+ * (rcv_task_file_getinfo → output_file_info → file-info GtkhxSession
+ * signal → gtkhx.c::on_file_info_signal) opens the existing file-
+ * info dialog. Local files have no analog in the Hotline protocol;
+ * we toast a hint and bail when the active panel is local. */
+static void
+on_get_info_clicked (GtkButton *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+    HxFilesProvider *prov;
+    HxFileEntry *e;
+    const char *dir, *name;
+    (void)btn;
+
+    if (!br->active) {
+        return;
+    }
+    prov = files_panel_get_provider (br->active);
+    if (!HX_IS_REMOTE_FILES_PROVIDER (prov)) {
+        show_toast (br, _ ("Get Info is only available for remote files."));
+        return;
+    }
+    if (!the_session.htlc.fd) {
+        show_toast (br, _ ("Not connected."));
+        return;
+    }
+    e = files_panel_get_single_selected (br->active);
+    if (!e) {
+        show_toast (br, _ ("Select a single file."));
+        return;
+    }
+
+    dir = hx_files_provider_get_current_path (prov);
+    name = hx_file_entry_get_name (e);
+    hx_file_info (&the_session.htlc, dir ? dir : "/", name,
+                  name ? strlen (name) : 0);
+}
+
 /* ---- Rename (F6 in classic Norton) ---- */
 
 struct rename_ctx {
@@ -673,6 +744,19 @@ on_move_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
     (void)widget;
     (void)args;
     on_move_clicked (NULL, user_data);
+    return TRUE;
+}
+
+/* Ctrl+I get-info shortcut — mirrors the headerbar Get Info button.
+ * The classic Mac shortcut was Cmd+I; under Linux the conventional
+ * equivalent is Ctrl+I. Remote-only; the handler toasts a hint when
+ * the active panel is local. */
+static gboolean
+on_get_info_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_get_info_clicked (NULL, user_data);
     return TRUE;
 }
 
@@ -1456,8 +1540,8 @@ void
 open_files_browser (void)
 {
     struct browser *br;
-    GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn, *rename_btn,
-        *delete_btn;
+    GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn,
+        *preview_btn, *info_btn, *rename_btn, *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
@@ -1478,24 +1562,32 @@ open_files_browser (void)
     install_css (br);
 
     /* Headerbar:
-	 *   pack_start: Refresh, New Folder, Copy →
-	 *   pack_end:   Delete
+	 *   pack_start: Refresh, New Folder, Copy, Move, Preview, Get Info
+	 *   pack_end:   Delete, Rename
+	 *
+	 * Icons come from the in-tree pixmap set via gtkhx_pixmap_button,
+	 * mirroring the classic Hotline look the toolbar and users
+	 * windows already use. Scaling at 2x matches the toolbar.
 	 *
 	 * Copy moves the active panel's selection to the inactive
 	 * panel's current path. The arrow direction in the tooltip
-	 * gets re-set on active-panel changes via sync_copy_tooltip;
-	 * the icon stays generic (edit-copy-symbolic) since flipping
-	 * it on every selection change would just be visual noise.
+	 * gets re-set on active-panel changes via sync_copy_tooltip.
 	 *
-	 * Phase 3 wires copy + permission gating. Move and folder
-	 * recursion are Phase 4. */
+	 * Where the classic icon set doesn't have an obvious match
+	 * (Move, Rename), we reuse what's close (mkdir for Move,
+	 * edituser as a generic edit icon for Rename) rather than
+	 * mixing symbolic icons in with the period look. */
     header = adw_header_bar_new ();
-    refresh_btn = gtk_button_new_from_icon_name ("view-refresh-symbolic");
-    mkdir_btn = gtk_button_new_from_icon_name ("folder-new-symbolic");
-    br->btn_copy = gtk_button_new_from_icon_name ("edit-copy-symbolic");
-    move_btn = gtk_button_new_from_icon_name ("folder-symbolic");
-    rename_btn = gtk_button_new_from_icon_name ("document-edit-symbolic");
-    delete_btn = gtk_button_new_from_icon_name ("user-trash-symbolic");
+#define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, 2, NULL, NULL)
+    refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.xpm");
+    mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
+    br->btn_copy = FB_BTN ("/com/nasledov/gtkhx/pixmaps/dl.xpm");
+    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
+    preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.xpm");
+    info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.xpm");
+    rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/edituser.xpm");
+    delete_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/trash.xpm");
+#undef FB_BTN
 
     gtk_widget_set_tooltip_text (refresh_btn,
                                  _ ("Reload active panel (Ctrl+R)"));
@@ -1505,6 +1597,9 @@ open_files_browser (void)
                                  _ ("Copy selection to the other panel (F5)"));
     gtk_widget_set_tooltip_text (
         move_btn, _ ("Move selection to another directory (F6)"));
+    gtk_widget_set_tooltip_text (preview_btn, _ ("Preview selected file (F4)"));
+    gtk_widget_set_tooltip_text (info_btn,
+                                 _ ("Get Info for selected file (Ctrl+I)"));
     gtk_widget_set_tooltip_text (rename_btn, _ ("Rename selected file (F2)"));
     gtk_widget_set_tooltip_text (
         delete_btn, _ ("Delete selection in active panel (Ctrl+D)"));
@@ -1515,6 +1610,10 @@ open_files_browser (void)
     g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),
                       br);
     g_signal_connect (move_btn, "clicked", G_CALLBACK (on_move_clicked), br);
+    g_signal_connect (preview_btn, "clicked", G_CALLBACK (on_preview_clicked),
+                      br);
+    g_signal_connect (info_btn, "clicked", G_CALLBACK (on_get_info_clicked),
+                      br);
     g_signal_connect (rename_btn, "clicked", G_CALLBACK (on_rename_clicked),
                       br);
     g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_clicked),
@@ -1524,6 +1623,8 @@ open_files_browser (void)
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), move_btn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), preview_btn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), info_btn);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header), delete_btn);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header), rename_btn);
     gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
@@ -1668,6 +1769,15 @@ open_files_browser (void)
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F6, 0),
         gtk_callback_action_new (on_move_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* Ctrl+I = Get Info. Classic Mac was Cmd+I; we map to the
+	 * Linux conventional equivalent. Remote-only — see the
+	 * on_get_info_clicked toast for the local-panel hint. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_i, GDK_CONTROL_MASK),
+        gtk_callback_action_new (on_get_info_shortcut, br, NULL));
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
