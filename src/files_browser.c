@@ -1010,6 +1010,19 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 	 *                  mystery. */
     {
         HxFilesProvider *prov = files_panel_get_provider (p);
+        /* "Other panel is local" gate for the remote-source path —
+	 * see the comment on the remote branch below. */
+        files_panel *other_panel = NULL;
+        gboolean other_is_local = FALSE;
+        if (the_browser) {
+            other_panel = (p == the_browser->left) ? the_browser->right
+                                                   : the_browser->left;
+            if (other_panel) {
+                other_is_local = HX_IS_LOCAL_FILES_PROVIDER (
+                    files_panel_get_provider (other_panel));
+            }
+        }
+
         if (HX_IS_LOCAL_FILES_PROVIDER (prov)) {
             const char *dir = hx_files_provider_get_current_path (prov);
             GSList *flist = NULL;
@@ -1030,7 +1043,22 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
             g_slist_free_full (flist, g_object_unref);
         } else if (HX_IS_REMOTE_FILES_PROVIDER (prov) && the_session.htlc.fd
                    && hl_access_has ((const guint8 *)&the_session.htlc.access,
-                                     HL_ACCESS_DOWNLOAD_FILES)) {
+                                     HL_ACCESS_DOWNLOAD_FILES)
+                   && other_is_local) {
+            /* Eager-download path: source is remote and the user
+	     * might drop on our local panel OR on an external app
+	     * on the host filesystem. We start the download to
+	     * ~/Downloads at prepare time so by the drop the bytes
+	     * are already moving, and advertise a text/uri-list
+	     * pointing at the eventual local paths.
+	     *
+	     * Skipped when the OTHER panel is remote (the
+	     * side-selector configuration with both sides remote):
+	     * the user almost certainly intends a remote→remote op,
+	     * which routes through the internal HX_TYPE_FILES_DRAG
+	     * provider in cp_internal and is handled in on_drop.
+	     * Firing xfer_new unconditionally there would yank
+	     * files to ~/Downloads that the user didn't ask for. */
             const char *rdir = hx_files_provider_get_current_path (prov);
             const char *ldir = gtkhx_prefs.download_path
                                    ? gtkhx_prefs.download_path
@@ -1128,15 +1156,21 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
     g_ptr_array_free (entries, TRUE);
 
     if (cp_files) {
-        /* Union: external apps receive GDK_TYPE_FILE_LIST,
-		 * our internal drop target receives HX_TYPE_FILES_DRAG.
-		 * GDK negotiates whichever the target accepts. */
+        /* Union: external apps receive GDK_TYPE_FILE_LIST (or
+		 * text/uri-list), our internal drop target receives
+		 * HX_TYPE_FILES_DRAG. GDK negotiates whichever the
+		 * target accepts.
+		 *
+		 * gdk_content_provider_new_union takes ownership of
+		 * every provider in the array (transfer-full per the
+		 * GIR annotation). DON'T unref cp_internal / cp_files
+		 * after the call — those refs now belong to the union,
+		 * and dropping them double-frees. The crash signature
+		 * is a SIGSEGV inside gdk_content_provider_ref_formats
+		 * later in the drag lifecycle when GDK queries the
+		 * union's now-dangling inner providers. */
         GdkContentProvider *providers[2] = { cp_internal, cp_files };
-        GdkContentProvider *cp_union
-            = gdk_content_provider_new_union (providers, 2);
-        g_object_unref (cp_internal);
-        g_object_unref (cp_files);
-        return cp_union;
+        return gdk_content_provider_new_union (providers, 2);
     }
     return cp_internal;
 }
