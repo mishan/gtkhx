@@ -264,30 +264,11 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
     g_idle_add (defer_quit, NULL);
 }
 
-/* Entry point for the files browser. Phase 5 retired the legacy
- * single-pane UI; this is the only Files window now. Reached from
- * both the toolbar Files button and the hamburger menu's Files
- * action. */
-static gboolean
-defer_open_files_browser (gpointer data)
-{
-    (void)data;
-    open_files_browser ();
-    return G_SOURCE_REMOVE;
-}
-
-static void
-on_action_files_browser (GSimpleAction *action, GVariant *param,
-                         gpointer user_data)
-{
-    (void)action;
-    (void)param;
-    (void)user_data;
-    g_idle_add (defer_open_files_browser, NULL);
-}
-
 /* Toolbar GtkButton::clicked adapter — the signal hands us
- * (button, user_data) but open_files_browser() takes no args. */
+ * (button, user_data) but open_files_browser() takes no args.
+ * Reached from the toolbar Files button; the legacy hamburger
+ * menu entry that fired this through an app.files_browser GAction
+ * was retired with the legacy single-pane UI in Phase 5. */
 static void
 on_files_button_clicked (GtkButton *button, gpointer user_data)
 {
@@ -307,7 +288,6 @@ static const GActionEntry app_actions[] = {
     { .name = "connect_builtin",
       .activate = on_action_connect_builtin,
       .parameter_type = "i" },
-    { .name = "files_browser", .activate = on_action_files_browser },
     { .name = "quit", .activate = on_action_quit },
 };
 
@@ -430,7 +410,6 @@ build_hamburger (void)
     g_menu_append (admin_menu, _ ("Edit User…"), "app.user_edit");
 
     menu = g_menu_new ();
-    g_menu_append (menu, _ ("Files (2-pane, preview)"), "app.files_browser");
     g_menu_append (menu, _ ("Settings"), "app.settings");
     g_menu_append (menu, _ ("About GtkHx"), "app.about");
     g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));

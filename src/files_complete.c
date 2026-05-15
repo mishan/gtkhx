@@ -665,17 +665,29 @@ hx_path_complete_free (hx_path_complete *c)
         gtk_widget_remove_controller (GTK_WIDGET (c->entry), c->key_controller);
         /* gtk_widget_remove_controller takes the ref. */
     }
-    /* Popover is parented to the entry. Unparenting cleans it up;
-     * the entry destroys it on its own teardown if we leave it,
-     * but explicit unparent during panel teardown gives a clean
-     * removal regardless of teardown order. */
+    /* Ownership chain set up in hx_path_complete_new:
+	 *   gtk_filter_list_model_new (store, filter)   — consumes both
+	 *   gtk_single_selection_new (filter_model)     — consumes it
+	 *   gtk_list_view_new (selection, factory)      — consumes both
+	 *   gtk_scrolled_window_set_child (..., listview)
+	 *   gtk_popover_set_child (popover, scrolled)
+	 *   gtk_widget_set_parent (popover, entry)
+	 *
+	 * Every cached pointer in the struct (store, filter,
+	 * filter_model, selection, listview) is held alive only
+	 * transitively through the popover. Unparenting the popover
+	 * disposes the chain top-down and our cached pointers become
+	 * dangling — so we must NOT g_object_unref them. Just NULL
+	 * them and free the wrapper struct. */
     if (c->popover) {
         gtk_widget_unparent (c->popover);
+        c->popover = NULL;
     }
-    g_clear_object (&c->filter_model);
-    g_clear_object (&c->selection);
-    /* filter is owned by filter_model; don't unref separately. */
-    g_clear_object (&c->store);
+    c->filter_model = NULL;
+    c->filter = NULL;
+    c->selection = NULL;
+    c->store = NULL;
+    c->listview = NULL;
     g_clear_pointer (&c->last_dir, g_free);
     g_clear_pointer (&c->prefix, g_free);
     g_free (c);
