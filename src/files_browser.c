@@ -23,6 +23,7 @@
 #include "files_local_provider.h"
 #include "files_remote_provider.h"
 #include "files_panel.h"
+#include "files_complete.h" /* path completion for the Move dialog's dest entry */
 #include "files_ops.h"
 #include "files_browser.h"
 #include "gtkhx_session.h"
@@ -531,9 +532,9 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
 struct move_ctx {
     struct browser *br;
     files_panel *panel;
-    GPtrArray *names;   /* owned — g_strdup'd source names */
-    GtkWidget *entry;   /* dest-path entry */
-    gboolean is_remote; /* TRUE if the source side is the remote
+    GPtrArray *names;           /* owned — g_strdup'd source names */
+    GtkWidget *entry;           /* dest-path entry */
+    gboolean is_remote;         /* TRUE if the source side is the remote
                          * (HxRemoteFilesProvider). Remote moves
                          * are async — hx_file_move is fire-and-
                          * forget and any server-side error
@@ -541,6 +542,14 @@ struct move_ctx {
                          * task_error toast. Local moves are
                          * synchronous via g_file_move and we
                          * know the outcome at response time. */
+    hx_path_complete *complete; /* NULL on the remote-source path
+                                 * (synchronous filesystem
+                                 * enumeration would block on the
+                                 * network), populated for the
+                                 * local-source path. Mirrors the
+                                 * same gate files_panel uses on
+                                 * its own path entries. Freed in
+                                 * on_move_closed. */
 };
 
 static void
@@ -676,6 +685,14 @@ on_move_closed (AdwAlertDialog *dialog, gpointer user_data)
 {
     struct move_ctx *ctx = user_data;
     (void)dialog;
+    /* Tear the path-completion popover down BEFORE the dialog
+	 * destruction drags the entry away — hx_path_complete_free
+	 * disconnects the per-entry signal handler and key controller,
+	 * and needs the entry to still be valid for that. */
+    if (ctx->complete) {
+        hx_path_complete_free (ctx->complete);
+        ctx->complete = NULL;
+    }
     if (ctx->names) {
         g_ptr_array_free (ctx->names, TRUE);
     }
@@ -779,6 +796,17 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     }
     ctx->entry = entry;
     g_ptr_array_free (entries, TRUE);
+
+    /* Attach the same smart-case path-completion popover the
+	 * local panel's path entry uses. Local-source only — the
+	 * completion needs synchronous directory enumeration, which
+	 * isn't viable against a Hotline server (each typed char
+	 * would trigger an RPC round-trip). Stored on ctx so
+	 * on_move_closed can free it before the entry is destroyed
+	 * with the dialog. */
+    if (!ctx->is_remote) {
+        ctx->complete = hx_path_complete_attach (GTK_ENTRY (entry));
+    }
 
     g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
     g_signal_connect (dialog, "closed", G_CALLBACK (on_move_closed), ctx);
