@@ -41,8 +41,7 @@ hx_files_ops_result_message (HxOpsResult r)
     case HX_OPS_ERR_NO_PERMISSION:
         return _ ("You don't have permission for that.");
     case HX_OPS_ERR_UNSUPPORTED:
-        return _ ("Copying directly between two remote locations isn't "
-                  "supported yet.");
+        return _ ("This copy isn't supported.");
     case HX_OPS_ERR_FOLDER_UNSUPPORTED:
         return _ (
             "Folder copies aren't supported yet — pick individual files.");
@@ -176,6 +175,68 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     return htxf ? HX_OPS_OK : HX_OPS_ERR_LOCAL_FAIL;
 }
 
+/* remote → remote via HTLC_HDR_FILE_SYMLINK. Hotline has no
+ * FILE_COPY opcode; SYMLINK is the closest server-side primitive.
+ * On mhxd (and the original Hotline server) this creates a HARD
+ * link: a second filesystem entry pointing at the same inode, so
+ * the bytes aren't duplicated on disk but both paths are
+ * independently usable. From the client's perspective the file
+ * appears at the destination, which is what the user asked for.
+ *
+ * "Hard link" caveats users should know about:
+ *
+ *   • The bytes are shared. Deleting one path leaves the other
+ *     intact (refcount drops by 1); deleting both reclaims the
+ *     space. So "copy then delete the source" via the Files UI
+ *     does the right thing.
+ *   • Editing one path edits the other — there's no separate
+ *     "copy" the user can mutate independently. Most files on a
+ *     Hotline server are static (downloads, archives, news
+ *     bundles), so this is rarely the problem it sounds like.
+ *
+ * Access bit: HL_ACCESS_MAKE_ALIASES (bit 31). Servers that gate
+ * alias creation behind it (mhxd does) will reject the request
+ * via task_error, which surfaces as the existing toolbar toast.
+ *
+ * Async on the wire: hx_file_link queues an "ln" task via
+ * task_new but doesn't await the reply. We return HX_OPS_OK to
+ * mean "request sent" rather than "succeeded" — matches how
+ * copy_local_to_remote handles its async upload kickoff. */
+static HxOpsResult
+copy_remote_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
+                       HxFileEntry *e)
+{
+    const char *src_dir, *dst_dir;
+    char *spath, *dpath;
+
+    if (!the_session.htlc.fd) {
+        return HX_OPS_ERR_NOT_CONNECTED;
+    }
+    if (!has_access (HL_ACCESS_MAKE_ALIASES)) {
+        return HX_OPS_ERR_NO_PERMISSION;
+    }
+    if (hx_file_entry_is_dir (e)) {
+        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
+    }
+
+    src_dir = hx_files_provider_get_current_path (src);
+    dst_dir = hx_files_provider_get_current_path (dst);
+    spath = join_path (src_dir, hx_file_entry_get_name (e));
+    dpath = join_path (dst_dir, hx_file_entry_get_name (e));
+
+    hx_file_link (&the_session.htlc, spath, dpath);
+
+    g_free (spath);
+    g_free (dpath);
+
+    /* Reload after a beat so the new link appears in the dest
+	 * panel. The server's reply is fire-and-forget from our
+	 * point of view; the existing task_error path surfaces any
+	 * rejection via the toolbar toast. */
+    hx_files_provider_reload (dst);
+    return HX_OPS_OK;
+}
+
 /* local → local via GIO. Blocking, but fast enough for the user
  * to not notice unless the file is huge. Async progress UI is a
  * Phase 4 polish item. */
@@ -237,7 +298,9 @@ hx_files_ops_copy (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
     if (provider_is_local (src) && provider_is_local (dst)) {
         return copy_local_to_local (src, dst, e);
     }
+    if (provider_is_remote (src) && provider_is_remote (dst)) {
+        return copy_remote_to_remote (src, dst, e);
+    }
 
-    /* Both remote — unsupported in Phase 3. */
     return HX_OPS_ERR_UNSUPPORTED;
 }

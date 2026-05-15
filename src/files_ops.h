@@ -2,22 +2,17 @@
  * files_ops.h — cross-panel transfer orchestration for the
  * orthodox files browser.
  *
- * Phase 3: a single `Copy` action moves the active panel's
- * selection to the inactive panel's current path. The four
- * cases:
+ * A single `Copy` action moves the active panel's selection to
+ * the inactive panel's current path. Four cases:
  *
  *   local  → remote   upload via hx_put_file (XFER_PUT)
  *   remote → local    download via xfer_new (XFER_GET)
  *   local  → local    GIO copy
- *   remote → remote   not implemented in Phase 3 — toasts
- *                     "not supported yet" (would need a
- *                     server-side HTLC_HDR_FILECOPY plus
- *                     gracefully falling back to download-
- *                     then-upload otherwise)
- *
- * The operation works on a single HxFileEntry — multi-select
- * isn't wired through yet (the panels still use GtkSingleSelection).
- * Phase 4 will switch to multi-select and iterate.
+ *   remote → remote   server-side hard link via hx_file_link
+ *                     (HTLC_HDR_FILE_SYMLINK). Bytes are shared
+ *                     on disk; the file becomes accessible at
+ *                     the destination path without re-uploading.
+ *                     Gated on HL_ACCESS_MAKE_ALIASES.
  */
 
 #ifndef HX_FILES_OPS_H
@@ -40,7 +35,7 @@ typedef enum {
     HX_OPS_ERR_NOT_CONNECTED,      /* remote provider without
 	                                 * a live connection */
     HX_OPS_ERR_NO_PERMISSION,      /* access bit not set */
-    HX_OPS_ERR_UNSUPPORTED,        /* remote→remote in Phase 3 */
+    HX_OPS_ERR_UNSUPPORTED,        /* dispatch fallthrough */
     HX_OPS_ERR_FOLDER_UNSUPPORTED, /* recursive copy: deferred */
     HX_OPS_ERR_LOCAL_FAIL          /* GIO copy failed */
 } HxOpsResult;
