@@ -881,6 +881,67 @@ on_get_info_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
     return TRUE;
 }
 
+/* Forward decls — these handlers live further down the file
+ * (the headerbar buttons that invoke them are constructed late
+ * in create_files_browser) but the shortcut wrappers below need
+ * them callable here. */
+static void on_copy_clicked (GtkButton *btn, gpointer user_data);
+static void on_mkdir_clicked (GtkButton *btn, gpointer user_data);
+static void on_delete_clicked (GtkButton *btn, gpointer user_data);
+
+/* Norton-orthodox F-key bindings + Wayland-friendly Ctrl-
+ * equivalents. The F-keys are the primary affordance (F3=View,
+ * F5=Copy, F7=MkDir, F8=Delete, matching the classic Norton
+ * Commander layout users coming from xx-Commander-style apps
+ * expect); the Ctrl-equivalents are for compositors that grab
+ * F-keys for media controls and for users who never developed
+ * the orthodox F-key reflex. Each just mirrors the matching
+ * headerbar button. */
+static gboolean
+on_preview_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_preview_clicked (NULL, user_data);
+    return TRUE;
+}
+
+static gboolean
+on_copy_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_copy_clicked (NULL, user_data);
+    return TRUE;
+}
+
+static gboolean
+on_mkdir_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_mkdir_clicked (NULL, user_data);
+    return TRUE;
+}
+
+static gboolean
+on_delete_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_delete_clicked (NULL, user_data);
+    return TRUE;
+}
+
+static gboolean
+on_refresh_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    (void)widget;
+    (void)args;
+    on_refresh_clicked (NULL, user_data);
+    return TRUE;
+}
+
 /* Copy a GPtrArray of entries from one panel to another and
  * surface a one-shot summary toast. Shared between the Copy
  * headerbar button and the DnD drop handler — both ultimately
@@ -1843,17 +1904,19 @@ open_files_browser (void)
     gtk_widget_set_tooltip_text (refresh_btn,
                                  _ ("Reload active panel (Ctrl+R)"));
     gtk_widget_set_tooltip_text (mkdir_btn,
-                                 _ ("New folder in active panel (Ctrl+N)"));
+                                 _ ("New folder in active panel (F7, Ctrl+N)"));
     gtk_widget_set_tooltip_text (br->btn_copy,
                                  _ ("Copy selection to the other panel (F5)"));
     gtk_widget_set_tooltip_text (
         move_btn, _ ("Move selection to another directory (F6)"));
-    gtk_widget_set_tooltip_text (preview_btn, _ ("Preview selected file (F4)"));
+    gtk_widget_set_tooltip_text (preview_btn,
+                                 _ ("Preview selected file (F3, Ctrl+P)"));
     gtk_widget_set_tooltip_text (info_btn,
                                  _ ("Get Info for selected file (Ctrl+I)"));
     gtk_widget_set_tooltip_text (rename_btn, _ ("Rename selected file (F2)"));
     gtk_widget_set_tooltip_text (
-        delete_btn, _ ("Delete selection in active panel (Ctrl+D)"));
+        delete_btn,
+        _ ("Delete selection in active panel (F8, Delete, Ctrl+D)"));
 
     g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked),
                       br);
@@ -2037,6 +2100,83 @@ open_files_browser (void)
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_i, GDK_CONTROL_MASK),
         gtk_callback_action_new (on_get_info_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* Norton-orthodox F-key bindings: F3=View (preview), F5=Copy,
+	 * F7=MkDir, F8=Delete. Each is followed by a Wayland-friendly
+	 * Ctrl-equivalent so users on compositors that grab F-keys
+	 * for media controls have a path that works. The Ctrl side
+	 * follows GNOME convention where it overlaps (Ctrl+N new,
+	 * Ctrl+R reload) and is novel-but-reasonable where it doesn't
+	 * (Ctrl+P preview, Ctrl+D delete). Ctrl+M for Move is left
+	 * unmapped — Ctrl+M overlaps with Return in some terminal
+	 * legacies and F6 covers the case; Ctrl+I already maps to
+	 * Get Info so the Move case stays F6-only.
+	 *
+	 * All wrappers route to the matching headerbar button's
+	 * handler so the behaviour is identical whether the user
+	 * pressed the key or clicked the icon. */
+
+    /* F3 / Ctrl+P — Preview. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F3, 0),
+        gtk_callback_action_new (on_preview_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_p, GDK_CONTROL_MASK),
+        gtk_callback_action_new (on_preview_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* F5 — Copy (Norton F5). No Ctrl-equivalent because Ctrl+C
+	 * is universally bound to clipboard-copy and overriding it
+	 * would break the user's mental model for the whole app. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F5, 0),
+        gtk_callback_action_new (on_copy_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* F7 / Ctrl+N — New folder. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F7, 0),
+        gtk_callback_action_new (on_mkdir_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_n, GDK_CONTROL_MASK),
+        gtk_callback_action_new (on_mkdir_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* F8 / Delete / Ctrl+D — Delete. F8 is Norton; Delete is the
+	 * modern Files-Manager convention; Ctrl+D is the Wayland-
+	 * friendly fallback. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_F8, 0),
+        gtk_callback_action_new (on_delete_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_Delete, 0),
+        gtk_callback_action_new (on_delete_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_d, GDK_CONTROL_MASK),
+        gtk_callback_action_new (on_delete_shortcut, br, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                          sh);
+
+    /* Ctrl+R — Reload (the browser convention). No primary F-key
+	 * — Norton's F-keys don't include refresh because their panels
+	 * auto-reloaded on every focus. We do too via the file-update
+	 * signal, but explicit reload is still occasionally useful. */
+    sh = gtk_shortcut_new (
+        gtk_keyval_trigger_new (GDK_KEY_r, GDK_CONTROL_MASK),
+        gtk_callback_action_new (on_refresh_shortcut, br, NULL));
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 

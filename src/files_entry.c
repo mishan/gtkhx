@@ -106,10 +106,13 @@ hx_file_entry_get_kind (HxFileEntry *e)
 
 /* Size column.
  *
- *   - directory  → "—"   (size is opaque on the local side; on
- *                         Hotline it's a child count but rendering
- *                         that here is wrong for the symmetric
- *                         local case, so keep simple)
+ *   - directory with child count → "(N items)"  (Hotline carries
+ *                         the count in HTLC_DATA_FILESIZE for
+ *                         folder rows; the remote provider stores
+ *                         it in the size field)
+ *   - directory without count    → "—"  (local-FS folders, whose
+ *                         byte-count would be a meaningless 4096
+ *                         or similar)
  *   - 0 bytes    → "0 B"  (legitimate empty file, not "unknown")
  *   - everything → "N B" / "N.N KB" / "N.N MB" / etc.
  *
@@ -118,7 +121,16 @@ hx_file_entry_get_kind (HxFileEntry *e)
 char *
 hx_file_entry_format_size (HxFileEntry *e)
 {
-    if (!e || e->is_dir) {
+    if (!e) {
+        return g_strdup ("—");
+    }
+    if (e->is_dir) {
+        if (e->size > 0) {
+            return g_strdup_printf (
+                g_dngettext (NULL, "(%" G_GUINT64_FORMAT " item)",
+                             "(%" G_GUINT64_FORMAT " items)", (gulong)e->size),
+                e->size);
+        }
         return g_strdup ("—");
     }
     return g_format_size_full (e->size, G_FORMAT_SIZE_IEC_UNITS

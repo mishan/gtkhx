@@ -223,8 +223,13 @@ populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
 		 * icon_of_ftype_and_name reads the network-byte-order
 		 * bytes directly from the receive buffer — we pass the
 		 * raw FourCC, not the htonl'd local. */
+        /* For folders, Hotline puts the child count in the size
+		 * field rather than a byte count — we keep it (rather
+		 * than zeroing it out) so the Size column renders
+		 * "(N items)" instead of just "—". hx_file_entry_format_size
+		 * branches on is_dir to pick the right wording. */
         entry = hx_file_entry_new (
-            utf8 ? utf8 : namebuf, is_dir, is_dir ? 0 : (guint64)fsize,
+            utf8 ? utf8 : namebuf, is_dir, (guint64)fsize,
             0, /* no mtime on the wire */
             kind,
             icon_of_ftype_and_name ((const char *)&fh->ftype, namebuf, fnlen));

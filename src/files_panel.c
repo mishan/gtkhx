@@ -203,14 +203,40 @@ cmp_name (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
                            hx_file_entry_get_name (b));
 }
 
+/* Helper: returns non-zero if a and b are different kinds
+ * (folder vs file). Used by the size/modified/kind comparators
+ * below to bubble folders to the top in the same orthodox-FM
+ * way cmp_name does. Doing this consistently across all
+ * columns matters more now that folder size is a child count
+ * rather than a byte count — sorting a 7-item folder against a
+ * 7-byte file otherwise produces a comparison that has no
+ * meaning to the user. */
+static int
+dir_first (HxFileEntry *a, HxFileEntry *b)
+{
+    gboolean ad = hx_file_entry_is_dir (a);
+    gboolean bd = hx_file_entry_is_dir (b);
+    if (ad != bd) {
+        return ad ? -1 : 1;
+    }
+    return 0;
+}
+
 static int
 cmp_size (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 {
     HxFileEntry *a = (HxFileEntry *)a_p;
     HxFileEntry *b = (HxFileEntry *)b_p;
-    guint64 as = hx_file_entry_get_size (a);
-    guint64 bs = hx_file_entry_get_size (b);
+    guint64 as, bs;
+    int dirs;
     (void)user_data;
+
+    dirs = dir_first (a, b);
+    if (dirs) {
+        return dirs;
+    }
+    as = hx_file_entry_get_size (a);
+    bs = hx_file_entry_get_size (b);
     if (as < bs) {
         return -1;
     }
@@ -225,9 +251,16 @@ cmp_modified (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 {
     HxFileEntry *a = (HxFileEntry *)a_p;
     HxFileEntry *b = (HxFileEntry *)b_p;
-    gint64 am = hx_file_entry_get_modified (a);
-    gint64 bm = hx_file_entry_get_modified (b);
+    gint64 am, bm;
+    int dirs;
     (void)user_data;
+
+    dirs = dir_first (a, b);
+    if (dirs) {
+        return dirs;
+    }
+    am = hx_file_entry_get_modified (a);
+    bm = hx_file_entry_get_modified (b);
     if (am < bm) {
         return -1;
     }
@@ -242,7 +275,13 @@ cmp_kind (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 {
     HxFileEntry *a = (HxFileEntry *)a_p;
     HxFileEntry *b = (HxFileEntry *)b_p;
+    int dirs;
     (void)user_data;
+
+    dirs = dir_first (a, b);
+    if (dirs) {
+        return dirs;
+    }
     return g_utf8_collate (hx_file_entry_get_kind (a),
                            hx_file_entry_get_kind (b));
 }
