@@ -931,6 +931,74 @@ copy_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
     }
 }
 
+/* Issue a batch of remote→remote moves from one panel to another
+ * and surface a one-shot summary toast. Used by the DnD drop
+ * handler — orthodox-FM convention is that drag-within-same-
+ * volume is a MOVE, not a copy, and Hotline's only real intra-
+ * server relocation primitive is HTLC_HDR_FILE_MOVE.
+ *
+ * Both panels must be remote and the connection must be live.
+ * Access bit HL_ACCESS_MOVE_FILES is checked once before any
+ * requests fire so a permission failure reads as a single toast
+ * rather than one per file.
+ *
+ * The wire send is fire-and-forget (matches the Move dialog's
+ * remote path): server-side rejections surface via the existing
+ * task_error toast on the toolbar window. Our toast reads "Move
+ * requested" rather than "Moved" so the optimism is honest. */
+static void
+move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
+                        GPtrArray *entries)
+{
+    const char *src_dir, *dst_dir;
+    HxFilesProvider *sp, *dp;
+    guint i;
+    char *msg;
+
+    if (!entries || entries->len == 0) {
+        return;
+    }
+
+    if (!the_session.htlc.fd) {
+        show_toast (br, _ ("Not connected to a server."));
+        return;
+    }
+    if (!hl_access_has ((const guint8 *)&the_session.htlc.access,
+                        HL_ACCESS_MOVE_FILES)) {
+        show_toast (br, _ ("You don't have permission to move files on the "
+                           "server."));
+        return;
+    }
+
+    sp = files_panel_get_provider (src);
+    dp = files_panel_get_provider (dst);
+    src_dir = hx_files_provider_get_current_path (sp);
+    dst_dir = hx_files_provider_get_current_path (dp);
+
+    for (i = 0; i < entries->len; i++) {
+        HxFileEntry *e = g_ptr_array_index (entries, i);
+        const char *name = hx_file_entry_get_name (e);
+        char *src_abs = g_build_filename (src_dir ? src_dir : "/", name, NULL);
+        char *dst_abs = g_build_filename (dst_dir ? dst_dir : "/", name, NULL);
+        hx_file_move (&the_session.htlc, src_abs, dst_abs);
+        g_free (src_abs);
+        g_free (dst_abs);
+    }
+
+    /* Reload both panels so the file appears in the destination
+	 * and disappears from the source once the server's task acks
+	 * come back. */
+    hx_files_provider_reload (sp);
+    hx_files_provider_reload (dp);
+
+    msg = g_strdup_printf (g_dngettext (NULL, "Move requested for %u item.",
+                                        "Move requested for %u items.",
+                                        entries->len),
+                           entries->len);
+    show_toast (br, msg);
+    g_free (msg);
+}
+
 /* Copy headerbar button — pulls the active panel's selection and
  * issues a batch copy to the inactive panel. */
 static void
@@ -1246,6 +1314,27 @@ on_drop (GtkDropTarget *target, const GValue *value, double x, double y,
 	 * came from somewhere else with a matching type, refuse). */
     if (drag->src_panel != br->left && drag->src_panel != br->right) {
         return FALSE;
+    }
+
+    /* Orthodox-FM convention: drag-within-same-volume is a MOVE,
+	 * not a copy. Remote→remote on the same server is the case
+	 * the user hits when both panels are set to Remote via the
+	 * side selector. Route through hx_file_move so the file
+	 * relocates rather than getting symlinked or download-then-
+	 * re-uploaded.
+	 *
+	 * Cross-side (local→remote, remote→local) and local→local
+	 * keep their existing Copy semantics; cross-side because the
+	 * filesystems are distinct, local→local because the user has
+	 * not yet asked for a behaviour change there. */
+    {
+        HxFilesProvider *sp = files_panel_get_provider (drag->src_panel);
+        HxFilesProvider *dp = files_panel_get_provider (dst);
+        if (HX_IS_REMOTE_FILES_PROVIDER (sp)
+            && HX_IS_REMOTE_FILES_PROVIDER (dp)) {
+            move_entries_and_toast (br, drag->src_panel, dst, drag->entries);
+            return TRUE;
+        }
     }
 
     copy_entries_and_toast (br, drag->src_panel, dst, drag->entries);

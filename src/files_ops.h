@@ -2,17 +2,20 @@
  * files_ops.h — cross-panel transfer orchestration for the
  * orthodox files browser.
  *
- * A single `Copy` action moves the active panel's selection to
- * the inactive panel's current path. Four cases:
+ * A single `Copy` action transfers the active panel's selection
+ * to the inactive panel's current path:
  *
  *   local  → remote   upload via hx_put_file (XFER_PUT)
  *   remote → local    download via xfer_new (XFER_GET)
  *   local  → local    GIO copy
- *   remote → remote   server-side hard link via hx_file_link
- *                     (HTLC_HDR_FILE_SYMLINK). Bytes are shared
- *                     on disk; the file becomes accessible at
- *                     the destination path without re-uploading.
- *                     Gated on HL_ACCESS_MAKE_ALIASES.
+ *   remote → remote   not supported — Hotline has no FILE_COPY
+ *                     opcode, and the SYMLINK alternative shares
+ *                     bytes on disk so it isn't a real copy. The
+ *                     orthodox-FM convention of "drag-within-
+ *                     same-volume = move" gives the user the
+ *                     expected behaviour: files_browser.c's
+ *                     on_drop routes remote→remote DnD to
+ *                     hx_file_move directly.
  */
 
 #ifndef HX_FILES_OPS_H
