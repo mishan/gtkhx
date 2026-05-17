@@ -1644,12 +1644,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 #endif
 }
 
-void
-hl_code (void *__dst, const void *__src, size_t len)
-{
-    guint8 *dst = (guint8 *)__dst, *src = (guint8 *)__src;
-
-    for (; len; len--) {
-        *dst++ = ~*src++;
-    }
-}
+/* hl_code lives in src/hl_code.c so the Tier 1 unit test can link
+ * it without dragging in the rest of network.c's deps. The declaration
+ * stays in network.h (extern) for back-compat with existing callers
+ * that didn't include hl_code.h directly. */

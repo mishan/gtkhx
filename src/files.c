@@ -598,52 +598,9 @@ cfl_print (struct cached_filelist *cfl, void *data)
     }
 }
 
-struct x_fhdr {
-    guint16 enc PACKED;
-    guint8 len, name[1];
-};
-
-guint8 *
-path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
-{
-    guint8 *hldir;
-    struct x_fhdr *fh;
-    char const *p, *p2;
-    guint16 pos = 2, dc = 0;
-    guint8 nlen;
-
-    hldir = g_malloc (2);
-    p = path;
-    while ((p2 = strchr (p, dir_char))) {
-        if (!(p2 - p)) {
-            p++;
-            continue;
-        }
-        nlen = (guint8)(p2 - p);
-        pos += 3 + nlen;
-        hldir = g_realloc (hldir, pos);
-        fh = (struct x_fhdr *)(&(hldir[pos - (3 + nlen)]));
-        memset (&fh->enc, 0, 2);
-        fh->len = nlen;
-        memcpy (fh->name, p, nlen);
-        dc++;
-        p = p2 + 1;
-    }
-    if (!is_file && *p) {
-        nlen = (guint8)strlen (p);
-        pos += 3 + nlen;
-        hldir = g_realloc (hldir, pos);
-        fh = (struct x_fhdr *)(&(hldir[pos - (3 + nlen)]));
-        memset (&fh->enc, 0, 2);
-        fh->len = nlen;
-        memcpy (fh->name, p, nlen);
-        dc++;
-    }
-    *((guint16 *)hldir) = htons (dc);
-
-    *hldirlen = pos;
-    return hldir;
-}
+/* path_to_hldir lives in src/path_hldir.c so the Tier 1 unit test
+ * can link it without dragging in this TU's GTK + Adwaita pile.
+ * The dir_char global below is what that extracted code references. */
 
 /* Phase 5: dirchar_basename is now a thin wrapper around the
  * dir_char-free path_basename(path, sep) so the unit tests can
@@ -668,14 +625,8 @@ dirchar_fix (char *lpath)
     }
 }
 
-void
-dirmask (char *dst, char *src, char *mask)
-{
-    while (*mask && *src && *mask++ == *src++)
-        ;
-
-    strcpy (dst, src);
-}
+/* dirmask is in src/path_hldir.c alongside path_to_hldir — see the
+ * comment there. */
 
 int
 exists_remote (char *path)
