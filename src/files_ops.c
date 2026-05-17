@@ -44,12 +44,11 @@ hx_files_ops_result_message (HxOpsResult r)
         return _ ("Hotline has no server-side copy. Use Move (F6) to "
                   "relocate the file, or drag to your local panel first.");
     case HX_OPS_ERR_FOLDER_UNSUPPORTED:
-        /* local→local folder copies work (pure GIO). The wire-side
-		 * folder transfers (local↔remote) need HTLC_HDR_FILE_GETFOLDER
-		 * / PUTFOLDER plus the HTXF_TYPE_FOLDER stream variant in
-		 * xfers.c — a follow-up. */
-        return _ ("Folder transfers to/from the server aren't supported "
-                  "yet — pick individual files.");
+        /* Retained as a safety-net enum value. All four directions
+		 * (local↔remote files, local↔remote folders, local↔local)
+		 * have working implementations now; nothing returns this
+		 * code in tree. If it shows up, it's a regression. */
+        return _ ("Folder transfer not supported here.");
     case HX_OPS_ERR_LOCAL_FAIL:
         return _ ("Local copy failed.");
     }
@@ -102,20 +101,10 @@ has_access (int bit)
 
 /* ---- Per-direction handlers ---- */
 
-/* local → remote upload. The Hotline wire wants an absolute remote
- * path; we synthesise it from the dst provider's current path +
- * the source entry's name. hx_put_file is the existing wrapper
- * for the XFER_PUT side of xfer_new.
- *
- * Folder uploads need to use HTLC_HDR_FILE_PUTFOLDER (0xd5), which
- * streams the whole tree over a single HTXF subchannel with its
- * own folder framing (HTXF_TYPE_FOLDER). That's the Hotline 1.5
- * way and what mhxd's rcv_folder_put expects. A naïve client-side
- * walker firing hx_put_file per file would work in the simple case
- * but loses atomicity, has no aggregate progress, and is racy
- * against the parent mkdir. Until the FOLDER opcodes are wired in
- * (xfers.c needs a folder_send variant for the HTXF subchannel),
- * folder uploads refuse with HX_OPS_ERR_FOLDER_UNSUPPORTED. */
+/* local → remote upload. Files: hx_put_file (XFER_PUT side of
+ * xfer_new). Folders: hx_put_folder, which sends
+ * HTLC_HDR_FILE_PUTFOLDER (0xd5) and streams the whole tree over
+ * a single HTXF subchannel via folder_put_thread in xfers.c. */
 static HxOpsResult
 copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
@@ -161,9 +150,12 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     return HX_OPS_OK;
 }
 
-/* remote → local download. xfer_new wants the server-side file
- * size up front (resume / rename decisions key off it) — we
- * stashed it on HxFileEntry at parse time. */
+/* remote → local download. Files: xfer_new (XFER_GET) — wants
+ * the server-side file size up front (resume / rename decisions
+ * key off it), stashed on HxFileEntry at parse time. Folders:
+ * hx_get_folder, sending HTLC_HDR_FILE_GETFOLDER (0xd2) and
+ * streaming the tree over a single HTXF subchannel via
+ * folder_get_thread. */
 static HxOpsResult
 copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)

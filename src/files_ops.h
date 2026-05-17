@@ -50,7 +50,9 @@ typedef enum {
 	                                 * a live connection */
     HX_OPS_ERR_NO_PERMISSION,      /* access bit not set */
     HX_OPS_ERR_UNSUPPORTED,        /* dispatch fallthrough */
-    HX_OPS_ERR_FOLDER_UNSUPPORTED, /* remote→local recursion: deferred */
+    HX_OPS_ERR_FOLDER_UNSUPPORTED, /* unreachable as of folder
+	                                  * transfer landing; kept as
+	                                  * a safety net */
     HX_OPS_ERR_LOCAL_FAIL          /* GIO copy failed */
 } HxOpsResult;
 
