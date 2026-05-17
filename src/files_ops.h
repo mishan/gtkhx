@@ -5,21 +5,16 @@
  * A single `Copy` action transfers the active panel's selection
  * to the inactive panel's current path:
  *
- *   local  → remote   upload via hx_put_file (XFER_PUT). Folders
- *                     are walked locally with GFileEnumerator;
- *                     each subdir gets an hx_make_dir and each
- *                     file an hx_put_file. Gated on
- *                     HL_ACCESS_UPLOAD_FILES for files plus
- *                     HL_ACCESS_UPLOAD_FOLDERS for folder roots.
- *   remote → local    download via xfer_new (XFER_GET). Folder
- *                     downloads aren't wired yet — the legacy
- *                     rcv.c COMPLETE_GET_R path mkdirs relative
- *                     to cwd, which puts files in the wrong place
- *                     under Flatpak; a follow-up will rewire it
- *                     to honour download_path.
- *   local  → local    GIO. Folders are walked with
- *                     GFileEnumerator and g_file_copy'd file by
- *                     file.
+ *   local  → remote   files: hx_put_file (XFER_PUT). Folders not
+ *                     wired yet — pending HTLC_HDR_FILE_PUTFOLDER
+ *                     (0xd5) plus an HTXF_TYPE_FOLDER stream
+ *                     variant in xfers.c.
+ *   remote → local    files: xfer_new (XFER_GET). Folders not
+ *                     wired yet — pending HTLC_HDR_FILE_GETFOLDER
+ *                     (0xd2) plus a folder_recv HTXF reader.
+ *   local  → local    GIO. Folders walked with GFileEnumerator
+ *                     and g_file_copy'd file by file (no wire
+ *                     involvement so no protocol concerns).
  *   remote → remote   not supported — Hotline has no FILE_COPY
  *                     opcode, and the SYMLINK alternative shares
  *                     bytes on disk so it isn't a real copy. The

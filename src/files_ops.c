@@ -44,12 +44,12 @@ hx_files_ops_result_message (HxOpsResult r)
         return _ ("Hotline has no server-side copy. Use Move (F6) to "
                   "relocate the file, or drag to your local panel first.");
     case HX_OPS_ERR_FOLDER_UNSUPPORTED:
-        /* Local→remote and local→local folder copies work now; only
-		 * the remote→local download direction still falls through
-		 * here. The message stays generic in case future paths add
-		 * back into this enum. */
-        return _ ("Folder downloads aren't supported yet — pick individual "
-                  "files.");
+        /* local→local folder copies work (pure GIO). The wire-side
+		 * folder transfers (local↔remote) need HTLC_HDR_FILE_GETFOLDER
+		 * / PUTFOLDER plus the HTXF_TYPE_FOLDER stream variant in
+		 * xfers.c — a follow-up. */
+        return _ ("Folder transfers to/from the server aren't supported "
+                  "yet — pick individual files.");
     case HX_OPS_ERR_LOCAL_FAIL:
         return _ ("Local copy failed.");
     }
@@ -102,90 +102,26 @@ has_access (int bit)
 
 /* ---- Per-direction handlers ---- */
 
-/* Recursive upload of a local directory tree to the Hotline
- * server. Walks `local_path` with a GFileEnumerator and, for
- * each child, either recurses or fires hx_put_file. The remote
- * directory at `remote_path` is created first via hx_make_dir;
- * the server queues the operations in order so files arriving
- * just after the mkdir land correctly.
+/* local → remote upload. The Hotline wire wants an absolute remote
+ * path; we synthesise it from the dst provider's current path +
+ * the source entry's name. hx_put_file is the existing wrapper
+ * for the XFER_PUT side of xfer_new.
  *
- * Returns TRUE if the walker completed without local-side I/O
- * errors. The wire-side success of each individual mkdir/put is
- * fire-and-forget — failures surface through the toolbar's
- * existing task_error toast. */
-static gboolean
-upload_local_dir_recursive (const char *local_path, const char *remote_path)
-{
-    GFile *src = g_file_new_for_path (local_path);
-    GFileEnumerator *en;
-    GFileInfo *info;
-    GError *err = NULL;
-    gboolean all_ok = TRUE;
-
-    /* Make the remote dir first (server: idempotent — recreating
-	 * an existing dir is a no-op error we don't surface). */
-    {
-        char *tmp = g_strdup (remote_path);
-        hx_make_dir (&the_session.htlc, tmp);
-        g_free (tmp);
-    }
-
-    en = g_file_enumerate_children (
-        src, G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
-        G_FILE_QUERY_INFO_NONE, NULL, &err);
-    if (!en) {
-        g_warning ("upload walk %s: %s", local_path, err ? err->message : "?");
-        g_clear_error (&err);
-        g_object_unref (src);
-        return FALSE;
-    }
-
-    while ((info = g_file_enumerator_next_file (en, NULL, &err))) {
-        const char *name = g_file_info_get_name (info);
-        GFileType type = g_file_info_get_file_type (info);
-        char *child_local = g_build_filename (local_path, name, NULL);
-        char *child_remote = join_path (remote_path, name);
-
-        if (type == G_FILE_TYPE_DIRECTORY) {
-            if (!upload_local_dir_recursive (child_local, child_remote)) {
-                all_ok = FALSE;
-            }
-        } else {
-            hx_put_file (&the_session.htlc, child_local, child_remote);
-        }
-
-        g_free (child_local);
-        g_free (child_remote);
-        g_object_unref (info);
-    }
-
-    if (err) {
-        g_warning ("upload walk %s: %s", local_path, err->message);
-        g_clear_error (&err);
-        all_ok = FALSE;
-    }
-
-    g_object_unref (en);
-    g_object_unref (src);
-    return all_ok;
-}
-
-/* local → remote upload. For files: hx_put_file. For folders:
- * recursive walker that mkdirs the remote target then queues a
- * hx_put_file per file. Hotline servers process operations in
- * arrival order so the per-folder mkdir always lands before its
- * children's uploads.
- *
- * The Hotline wire wants an absolute remote path; we synthesise
- * it from the dst provider's current path + the source entry's
- * name. */
+ * Folder uploads need to use HTLC_HDR_FILE_PUTFOLDER (0xd5), which
+ * streams the whole tree over a single HTXF subchannel with its
+ * own folder framing (HTXF_TYPE_FOLDER). That's the Hotline 1.5
+ * way and what mhxd's rcv_folder_put expects. A naïve client-side
+ * walker firing hx_put_file per file would work in the simple case
+ * but loses atomicity, has no aggregate progress, and is racy
+ * against the parent mkdir. Until the FOLDER opcodes are wired in
+ * (xfers.c needs a folder_send variant for the HTXF subchannel),
+ * folder uploads refuse with HX_OPS_ERR_FOLDER_UNSUPPORTED. */
 static HxOpsResult
 copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
 {
     const char *src_dir, *dst_dir;
     char *lpath, *rpath;
-    gboolean is_dir;
 
     if (!the_session.htlc.fd) {
         return HX_OPS_ERR_NOT_CONNECTED;
@@ -193,22 +129,14 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
-    is_dir = hx_file_entry_is_dir (e);
-    if (is_dir && !has_access (HL_ACCESS_UPLOAD_FOLDERS)) {
-        return HX_OPS_ERR_NO_PERMISSION;
+    if (hx_file_entry_is_dir (e)) {
+        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
     }
 
     src_dir = hx_files_provider_get_current_path (src);
     dst_dir = hx_files_provider_get_current_path (dst);
     lpath = join_path (src_dir, hx_file_entry_get_name (e));
     rpath = join_path (dst_dir, hx_file_entry_get_name (e));
-
-    if (is_dir) {
-        gboolean ok = upload_local_dir_recursive (lpath, rpath);
-        g_free (lpath);
-        g_free (rpath);
-        return ok ? HX_OPS_OK : HX_OPS_ERR_LOCAL_FAIL;
-    }
 
     hx_put_file (&the_session.htlc, lpath, rpath);
 
@@ -236,15 +164,18 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
         return HX_OPS_ERR_NO_PERMISSION;
     }
     if (hx_file_entry_is_dir (e)) {
-        /* Folder downloads need a state-machine that drives
-		 * HTLC_HDR_FILE_LIST recursively and queues xfer_new
-		 * for each file under a local-prefix subtree. The
-		 * legacy infrastructure in rcv.c::rcv_task_file_list's
-		 * COMPLETE_GET_R branch is half-baked for this — it
-		 * mkdirs relative to cwd, which puts files in the
-		 * wrong place under Flatpak. A follow-up commit will
-		 * rewire it to honour the user's download_path pref.
-		 * For now, single files only.*/
+        /* Folder downloads use HTLC_HDR_FILE_GETFOLDER (0xd2),
+		 * which streams the whole tree over an HTXF subchannel
+		 * with HTXF_TYPE_FOLDER framing. That's the Hotline 1.5
+		 * way and what mhxd's rcv_folder_get serves. The
+		 * pre-existing legacy fallback in rcv.c's COMPLETE_GET_R
+		 * branch did a client-driven recursive FILE_LIST with
+		 * one FILE_GET per leaf — wrong-shaped (no aggregate
+		 * progress, no atomicity, mkdir-relative-to-cwd bug
+		 * under Flatpak) and not what we want here. Until the
+		 * proper FOLDER opcode is wired through xfers.c
+		 * (folder_recv variant of the HTXF subchannel reader),
+		 * folder downloads refuse cleanly. */
         return HX_OPS_ERR_FOLDER_UNSUPPORTED;
     }
 
