@@ -176,7 +176,12 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
     && printf 'tier-3 integration suite test data\n' \
         > /opt/mhxd/run/files/integration_seed.txt \
-    && mkdir -p /opt/mhxd/run/files/Uploads
+    && mkdir -p /opt/mhxd/run/files/Uploads \
+    && mkdir -p /opt/mhxd/run/files/test_folder \
+    && printf 'folder-leaf-A\n' \
+        > /opt/mhxd/run/files/test_folder/leaf_a.txt \
+    && printf 'folder-leaf-B\n' \
+        > /opt/mhxd/run/files/test_folder/leaf_b.txt
 
 # Seed default banner images for file-mode HTXF tests. Fetched
 # from placehold.co at build time so the running container can
@@ -249,6 +254,35 @@ RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
  && printf "$fmt" \
       | dd of=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 seek=4 conv=notrunc status=none
+
+# (7) Grant upload_folders (bit 38) and download_folders (bit 39)
+#     on the guest UserData.
+#
+#     hl_access.h numbers bits big-endian-first: bit N lives at
+#     access[N >> 3] & (0x80 >> (N & 7)). So:
+#       bit 38: byte 4 of access bits, mask 0x80 >> 6 = 0x02
+#       bit 39: byte 4 of access bits, mask 0x80 >> 7 = 0x01
+#     => byte 4 of access = byte 8 of UserData (4 bytes magic +
+#        4 bytes preceding access bytes). The upstream seed has
+#        byte 8 = 0x00, so guest cannot GETFOLDER / PUTFOLDER.
+#
+#     mhxd's HTLC dispatcher gates HTLC_HDR_FILE_GETFOLDER on
+#     htlc->access.download_folders and HTLC_HDR_FILE_PUTFOLDER on
+#     htlc->access.upload_folders (mhxd/src/hxd/rcv.c:557-564),
+#     so without these bits the integration tests for both opcodes
+#     bounce with "Unknown or non-authorised".
+#
+#     OR byte 8 with 0x03 to grant both bits without disturbing
+#     anything else. Same double-printf-with-octal pattern as
+#     step (6) above; see its comment for why we can't use \xNN.
+RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 skip=8 status=none \
+          | od -An -vtu1 | tr -d ' ') \
+ && m=$(( b | 0x03 )) \
+ && fmt=$(printf '\\%03o' "$m") \
+ && printf "$fmt" \
+      | dd of=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 seek=8 conv=notrunc status=none
 
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.
