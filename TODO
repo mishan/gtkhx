@@ -3,9 +3,8 @@ General:
 - Publish to Flathub
 
 Files:
-- Folder uploads/downloads
-- Use old icons for the interface?
-- More explicit buttons rather than keyboard shortcuts
+- Bug stomping / fixing
+- Icons -- make sure we are using all the correct ones
 
 Icons:
 - Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
@@ -38,6 +37,7 @@ Plugins:
 - New plugin ABI using GIRepository
 
 Features:
+- Ability to make GtkHx themes. These would allow customization of all the buttons in the UI
 - Custom color palette
 - Log chat history / server, and be able to bring that chat history back up when connecting to a server
 

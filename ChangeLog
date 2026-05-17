@@ -29,8 +29,12 @@
 - SOCKS support is now available via the system's NetworkManager
 - Systray support via libayatana-appindicator
 - Better file preview support (support common image types, PDF, source code, markdown)
-  - This pulls in libpoppler and libgtksourceview, though they are optional
+  - Optional libpoppler dep for PDF file previews
+  - Optional libgtksourceview dep for markdown / source code file previews
+  - Optional ImageMagick dep for QuickDraw PICT previews
 - System notification support
+- Brand new News browser
+- Brand new orthogonal file manager type Files browser
 
 0.9.4
 -----
