@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Phase 3.7: bundle the in-tree pixmaps as a GResource.
-
-  Format is PNG. The source-of-truth pixel art lives in matching .xpm
-  files next to each .png — the XPMs are kept for editability with
-  classic Mac/X11 icon tools and are converted to PNG via
-  tools/regen-pixmap-pngs.sh whenever they change. We ship the PNGs
-  because gdk-pixbuf's XPM loader isn't included in the Flatpak GNOME
-  runtime by default (legacy-format loaders have been getting dropped
-  upstream), so XPM-only resources render as blank squares for Flathub
-  users.
+  Phase 3.7: bundle the in-tree pixmaps as a GResource. Format is PNG.
+  glib-compile-resources turns the listed files into a generated .c
+  whose registered constructor runs at program load — no explicit
+  g_resources_register() needed in main(). Call sites use
+  gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/foo.png").
 -->
 <gresources>
   <gresource prefix="/com/nasledov/gtkhx">
