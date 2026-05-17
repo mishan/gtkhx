@@ -1047,6 +1047,13 @@ folder_get_thread (void *__arg)
         }
     }
 
+    /* Restore the root path BEFORE the completion post_file_update
+	 * so the final task-window label and the xfer-done notification
+	 * both read as the folder, not as whatever per-file path
+	 * file_recv_one left in htxf->path on its way out of the
+	 * last iteration. The ret: label below also restores it (for
+	 * the error paths that jump straight there). */
+    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
     play_sound (FILE_DONE);
     htxf->total_pos = htxf->total_size;
     post_file_update (htxf);
@@ -1057,9 +1064,9 @@ ret:
         close (s);
     }
 
-    /* Restore the root path so the tasks-window display reads
-	 * sensibly post-completion ("download to ~/Downloads/Folder"
-	 * not "to ~/Downloads/Folder/last-file.txt"). */
+    /* Restore the root path on error paths that goto'd here mid-
+	 * loop. The success path above already restored before
+	 * post_file_update; this is the catch-all. */
     g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
 
     post_xfer_cleanup (htxf);

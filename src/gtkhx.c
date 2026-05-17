@@ -1310,11 +1310,27 @@ on_file_update_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
 	 * cleanup follows), so this state is reached exactly once
 	 * per htxf in practice. The notification ID is shared
 	 * ("xfer"), so even if it fired twice the second would just
-	 * refresh the popup, not stack. */
+	 * refresh the popup, not stack.
+	 *
+	 * For folder transfers, prefer the original folder name
+	 * (htxf->remotename, set at xfer_new_folder time and never
+	 * touched again) over htxf->path: the threshold can be
+	 * crossed inside file_recv_one when the LAST file's data
+	 * fork completes, at which point htxf->path is the per-file
+	 * path, not the folder root. folder_get_thread restores
+	 * htxf->path to the folder root before the final
+	 * post_file_update, but the in-flight one beats it. Using
+	 * remotename sidesteps the timing entirely. */
     if (x && x->total_size > 0 && x->total_pos >= x->total_size) {
-        const char *path = x->path;
-        const char *base = path ? strrchr (path, '/') : NULL;
-        gtkhx_notify_xfer_done (base ? base + 1 : (path ? path : NULL));
+        const char *display = NULL;
+        if (x->opt.folder && x->remotename_len > 0) {
+            display = (const char *)x->remotename;
+        } else {
+            const char *path = x->path;
+            const char *base = path ? strrchr (path, '/') : NULL;
+            display = base ? base + 1 : (path ? path : NULL);
+        }
+        gtkhx_notify_xfer_done (display);
     }
 }
 
