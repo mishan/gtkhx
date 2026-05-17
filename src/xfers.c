@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -372,10 +373,16 @@ xfer_go_timer (void *__arg)
     return 0;
 }
 
-struct htxf_conn *
-xfer_new (const char *path, const char *remotedir, const char *remotename,
-          gsize remotename_len, guint16 type, int preview,
-          guint32 srv_data_size)
+/* Shared init for xfer_new / xfer_new_folder — sets up the
+ * structured fields, the xfers[] enqueue, refcount, and the
+ * initial file_update emission. Does NOT call xfer_go; the caller
+ * decides whether to drive the wire request inline (xfer_new →
+ * xfer_go) or to send a different opcode itself (xfer_new_folder
+ * → hx_get_folder / hx_put_folder builds its own task_new +
+ * hlwrite). */
+static struct htxf_conn *
+xfer_init (const char *path, const char *remotedir, const char *remotename,
+           gsize remotename_len, guint16 type)
 {
     struct htxf_conn *htxf;
     gsize dir_len;
@@ -437,14 +444,6 @@ xfer_new (const char *path, const char *remotedir, const char *remotename,
 	 * (in xfer_ready_write). */
     htxf->refcount = 1;
     htxf->canceled = FALSE;
-    /* opt.preview and srv_data_size MUST be set before xfer_go
-	 * runs below — xfer_go gates its resume / rename decision on
-	 * both. Setting these via the returned htxf pointer after this
-	 * function returns is too late: when nxfers == 1 (or queueing
-	 * is off) we call xfer_go inline, and the wire request goes
-	 * out before the caller could flip them. */
-    htxf->opt.preview = preview ? 1 : 0;
-    htxf->srv_data_size = srv_data_size;
 
     xfers = g_realloc (xfers, (nxfers + 1) * sizeof (struct htxf_conn *));
     xfers[nxfers] = htxf;
@@ -456,9 +455,47 @@ xfer_new (const char *path, const char *remotedir, const char *remotename,
     gtkhx_session_emit_file_update (gtkhx_session_get_default (), &the_session,
                                     htxf);
 
+    return htxf;
+}
+
+struct htxf_conn *
+xfer_new (const char *path, const char *remotedir, const char *remotename,
+          gsize remotename_len, guint16 type, int preview,
+          guint32 srv_data_size)
+{
+    struct htxf_conn *htxf;
+
+    htxf = xfer_init (path, remotedir, remotename, remotename_len, type);
+
+    /* opt.preview and srv_data_size MUST be set before xfer_go
+	 * runs below — xfer_go gates its resume / rename decision on
+	 * both. Setting these via the returned htxf pointer after this
+	 * function returns is too late: when nxfers == 1 (or queueing
+	 * is off) we call xfer_go inline, and the wire request goes
+	 * out before the caller could flip them. */
+    htxf->opt.preview = preview ? 1 : 0;
+    htxf->srv_data_size = srv_data_size;
+
     if (nxfers == 1 || !gtkhx_prefs.queuedl) {
         xfer_go (htxf);
     }
+
+    return htxf;
+}
+
+struct htxf_conn *
+xfer_new_folder (const char *path, const char *remotedir,
+                 const char *remotename, gsize remotename_len, guint16 type)
+{
+    struct htxf_conn *htxf;
+
+    htxf = xfer_init (path, remotedir, remotename, remotename_len, type);
+
+    /* Flagged BEFORE the caller fires the wire request so the
+	 * dispatcher in xfer_ready_write picks the folder thread when
+	 * the server's task reply arrives and we hit the
+	 * xfer_ready_write call from rcv_task_folder_get. */
+    htxf->opt.folder = 1;
 
     return htxf;
 }
@@ -569,28 +606,46 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
     return 0;
 }
 
-static void *
-get_thread (void *__arg)
+/* Receive a single file from an HTXF subchannel into htxf->path.
+ *
+ * Used by:
+ *   - get_thread (solo file): file_budget = htxf->total_size
+ *   - folder_get_thread (one file inside a folder stream):
+ *     file_budget = the u32 size header just read off the wire
+ *     for this file
+ *
+ * The wire framing is identical in both cases:
+ *
+ *   1. 40-byte FILP fixed header.
+ *   2. Variable info+comment block (length encoded by FILP
+ *      bytes 38/39: `(buf[38] ? 0x100 : 0) + buf[39]`, plus
+ *      16 bytes of DATA-fork marker at the tail).
+ *   3. Data-fork payload (length = u32 BE at offset pos-4 of
+ *      the info block).
+ *   4. Optional MACR rsrc-fork marker (16 bytes) + rsrc payload,
+ *      gated on whether tot_len has caught up to file_budget.
+ *
+ * Updates htxf->total_pos as bytes arrive so the tasks-window
+ * progress bar advances. Does NOT play the completion sound,
+ * post a final file_update, or close the socket — those are
+ * caller responsibilities (the meaning differs for solo file
+ * vs. final file in a folder).
+ *
+ * Returns 0 on success, errno-like positive code on failure. */
+static int
+file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
     guint32 pos, len, tot_len;
-    int s, f, r, retval = 0;
-    guint8 typecrea[8], buf[1024];
+    int f, r, retval = 0;
+    guint8 typecrea[8];
     struct hfsinfo fi;
     hx_preview *p = NULL;
-
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
-        goto ret;
-    }
 
     len = 40;
     pos = 0;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
@@ -603,13 +658,11 @@ get_thread (void *__arg)
     tot_len = 40 + len;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
         htxf->total_pos += r;
-
         post_file_update (htxf);
     }
     memcpy (typecrea, &buf[4], 8);
@@ -633,8 +686,7 @@ get_thread (void *__arg)
     if (!htxf->opt.preview) {
         if ((f = open (htxf->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR))
             < 0) {
-            retval = errno;
-            goto ret;
+            return errno;
         }
 
         if (htxf->data_pos) {
@@ -653,7 +705,7 @@ get_thread (void *__arg)
 		 * nicely from non-main threads. */
         p = (hx_preview *)htxf->preview;
         if (!p) {
-            goto ret;
+            return 0; /* nothing to write into; quietly stop */
         }
         /* Hand the FILP type/creator over to the preview module
 		 * BEFORE the first chunk lands, so the viewer dispatch
@@ -671,26 +723,85 @@ get_thread (void *__arg)
         retval = preview_get (s, len, htxf, p);
     }
     if (retval) {
-        goto ret;
+        return retval;
     }
 get_rsrc:
+    /* Previews never carry resource forks — the server slices the
+	 * payload at the data fork. */
     if (htxf->opt.preview) {
         goto done;
     }
-    if (tot_len >= htxf->total_size) {
+    /* Folder transfers: skip the rsrc fork. mhxd's
+	 * folder_getpaths populates pf->total_size with a phantom
+	 * rsrc-fork allowance (sizeof(pathbuf) = MAXPATHLEN); file_send
+	 * then writes the 16-byte MACR marker but, on regular text
+	 * files with no AppleDouble sidecar, resource_open
+	 * fails-into-stdin and file_send hangs (or returns -1) without
+	 * actually streaming the claimed rsrc bytes. Following the
+	 * MACR marker into a blocking rd_wr hangs the worker forever
+	 * (issue surfaced on the 'Folder download task hangs' bug
+	 * trace). Folder-stream consumers never persist resource forks
+	 * to disk anyway — they're just plain-file copies of the
+	 * tree — so skipping rsrc here is functionally equivalent.
+	 *
+	 * BUT we still have to consume whatever the server actually
+	 * wrote since FILE_SEND announced file_budget bytes. Anything
+	 * left in the socket buffer (the MACR marker mhxd buffered
+	 * before its resource_open errored) would otherwise be read
+	 * as the next FILE_NEXT response and corrupt the loop. Drain
+	 * up to (file_budget - tot_len) bytes with a short per-read
+	 * timeout — if data is in flight we slurp it; if the server
+	 * gave up after the marker we time out and move on. */
+    if (htxf->opt.folder) {
+        if (tot_len < file_budget) {
+            guint32 remaining = file_budget - tot_len;
+            while (remaining > 0) {
+                fd_set rfds;
+                struct timeval tv;
+                int sr;
+                guint8 sink[2048];
+                size_t want = remaining < sizeof (sink) ? remaining
+                                                        : sizeof (sink);
+                FD_ZERO (&rfds);
+                FD_SET (s, &rfds);
+                /* 200 ms per read — long enough for legitimate
+				 * MACR marker bytes still buffered server-side
+				 * to land; short enough that mhxd's hung
+				 * resource_open path doesn't stall the whole
+				 * tree. */
+                tv.tv_sec = 0;
+                tv.tv_usec = 200 * 1000;
+                sr = select (s + 1, &rfds, NULL, NULL, &tv);
+                if (sr <= 0) {
+                    break;
+                }
+                ssize_t got = read (s, sink, want);
+                if (got <= 0) {
+                    break;
+                }
+                remaining -= (guint32)got;
+                htxf->total_pos += (guint32)got;
+                post_file_update (htxf);
+            }
+        }
+        goto done;
+    }
+    /* The file_budget gate is what makes this helper reusable for
+	 * folder streams: solo mode passes htxf->total_size; folder
+	 * mode passes this one file's size off the FILE_SEND header.
+	 * Either way, "consumed all our budget" means no rsrc fork. */
+    if (tot_len >= file_budget) {
         goto done;
     }
     pos = 0;
     len = 16;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
         htxf->total_pos += r;
-
         post_file_update (htxf);
     }
     HN32 (&len, &buf[12]);
@@ -699,15 +810,14 @@ get_rsrc:
     }
     if ((f = resource_open (htxf->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR))
         < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
     retval = rd_wr (s, f, len, htxf);
     if (retval) {
-        goto ret;
+        return retval;
     }
     close (f);
 
@@ -716,12 +826,36 @@ done:
     if (!htxf->opt.preview) {
         hfsinfo_write (htxf->path, &fi);
     }
+    return 0;
+}
+
+static void *
+get_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval;
+    guint8 buf[1024];
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    retval = file_recv_one (s, htxf, htxf->total_size, buf);
+    if (retval) {
+        goto ret;
+    }
+
     play_sound (FILE_DONE);
     htxf->total_pos = htxf->total_size;
     post_file_update (htxf);
 
 ret:
-    close (s);
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
 
     /* Cleanup is marshaled to the main thread so it runs AFTER
 	 * every file_update idle posted above — GMainContext FIFO
@@ -730,19 +864,243 @@ ret:
     return NULL;
 }
 
+/* Receive a folder tree from an HTXF subchannel into the local
+ * directory htxf->path. Implements the Hotline 1.5 folder
+ * transfer protocol — the same FILE_NEXT/FILE_SEND state machine
+ * that mhxd's folder_recv runs server-side. From the client's
+ * (our) perspective we are the receiver; we drive the loop by
+ * writing FILE_NEXT.
+ *
+ * Wire format per iteration:
+ *
+ *   us → server : FILE_NEXT (u16 BE = 3)
+ *   server → us : next_file_info struct (6 bytes):
+ *                   len:       u16 BE  (7 + nlen across all
+ *                                       path components)
+ *                   type:      u16 BE  (1 = folder, 0 = file)
+ *                   pathcount: u16 BE  (number of name
+ *                                       components that follow;
+ *                                       mhxd always sends 1)
+ *   for each pathcount:
+ *       2 bytes pad, 1 byte nlen, nlen bytes name (joined with
+ *       '/' onto the running relative path)
+ *
+ *   if type == 1 (folder):
+ *       mkdir, loop back
+ *   if type == 0 (file):
+ *       us → server : FILE_SEND (u16 BE = 1)  — fresh download
+ *                                              (resume support
+ *                                              is a follow-up;
+ *                                              the wire shape is
+ *                                              FILE_RESUME = 2
+ *                                              followed by a
+ *                                              74-byte RFLT)
+ *       server → us : u32 BE size, then standard file framing
+ *                     (FILP / INFO / DATA / optional MACR)
+ *       us : file_recv_one(s, htxf, size, buf) to drain
+ *
+ * The server doesn't send a terminator — it just closes the
+ * socket when nfiles is exhausted. Our next FILE_NEXT short-reads
+ * the nfi and we exit cleanly.
+ *
+ * htxf->path holds the local destination root on entry; we
+ * snapshot it and rewrite the path field per-file for the
+ * file_recv_one call. Restored to the root before cleanup so the
+ * tasks-window display has a sensible label. */
 static void *
-put_thread (void *__arg)
+folder_get_thread (void *__arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)__arg;
-    int s, f, retval = 0;
-    guint8 buf[512];
-    struct hfsinfo fi;
+    int s = -1, retval = 0;
+    guint8 buf[1024];
+    char base_path[MAXPATHLEN];
 
     s = htxf_connect (htxf);
     if (s < 0) {
         retval = s;
         goto ret;
     }
+
+    /* Snapshot the destination root. file_recv_one rewrites
+	 * htxf->path per-file; we restore the root on exit. */
+    g_strlcpy (base_path, htxf->path, sizeof (base_path));
+
+    if (g_mkdir_with_parents (base_path, 0755) < 0 && errno != EEXIST) {
+        retval = errno;
+        goto ret;
+    }
+
+    for (;;) {
+        guint16 cmd_n;
+        struct {
+            guint16 len;
+            guint16 type;
+            guint16 pathcount;
+        } __attribute__ ((packed)) nfi;
+        guint16 i;
+        char rel_path[MAXPATHLEN] = { 0 };
+        gsize rel_len = 0;
+        guint32 file_size;
+        ssize_t n;
+
+        cmd_n = htons (3); /* FILE_NEXT */
+        if (write (s, &cmd_n, 2) != 2) {
+            retval = errno ? errno : EIO;
+            goto ret;
+        }
+
+        n = read (s, &nfi, sizeof (nfi));
+        if (n != (ssize_t)sizeof (nfi)) {
+            /* Clean end-of-stream when n == 0 — server has run
+			 * out of files and closed the socket. */
+            if (n == 0) {
+                retval = 0;
+                break;
+            }
+            retval = errno ? errno : EIO;
+            goto ret;
+        }
+        nfi.len = ntohs (nfi.len);
+        nfi.type = ntohs (nfi.type);
+        nfi.pathcount = ntohs (nfi.pathcount);
+
+        /* Read pathcount name components and join with '/' into
+		 * the per-entry relative path. */
+        for (i = 0; i < nfi.pathcount; i++) {
+            guint8 ph[3];
+            guint8 nlen;
+            char name[256];
+            if (read (s, ph, 3) != 3) {
+                retval = errno ? errno : EIO;
+                goto ret;
+            }
+            nlen = ph[2];
+            /* nlen is guint8 (max 255); name is 256 bytes — the
+			 * read can never overflow. The original explicit guard
+			 * triggered a `comparison always false` warning. */
+            if (nlen && read (s, name, nlen) != nlen) {
+                retval = errno ? errno : EIO;
+                goto ret;
+            }
+            name[nlen] = 0;
+            /* Defence in depth — refuse `..` and embedded `/`
+			 * which would escape base_path. */
+            if (!strcmp (name, "..") || memchr (name, '/', nlen)) {
+                retval = EINVAL;
+                goto ret;
+            }
+            if (rel_len + (rel_len ? 1 : 0) + nlen + 1 >= sizeof (rel_path)) {
+                retval = ENAMETOOLONG;
+                goto ret;
+            }
+            if (rel_len > 0) {
+                rel_path[rel_len++] = '/';
+            }
+            memcpy (&rel_path[rel_len], name, nlen);
+            rel_len += nlen;
+            rel_path[rel_len] = 0;
+        }
+
+        /* Build the per-entry full local path. */
+        if (rel_len == 0) {
+            retval = EINVAL;
+            goto ret;
+        }
+        if (snprintf (htxf->path, sizeof (htxf->path), "%s/%s", base_path,
+                      rel_path)
+            >= (int)sizeof (htxf->path)) {
+            retval = ENAMETOOLONG;
+            goto ret;
+        }
+
+        if (nfi.type == 1) {
+            /* Folder marker — mkdir, no payload. */
+            if (g_mkdir_with_parents (htxf->path, 0755) < 0
+                && errno != EEXIST) {
+                retval = errno;
+                goto ret;
+            }
+            continue;
+        }
+
+        /* File entry — request fresh. Resume support is a
+		 * follow-up; FILE_SEND with data_pos/rsrc_pos zeroed
+		 * tells the server to send the whole file. */
+        cmd_n = htons (1); /* FILE_SEND */
+        if (write (s, &cmd_n, 2) != 2) {
+            retval = errno ? errno : EIO;
+            goto ret;
+        }
+
+        if (read (s, &file_size, 4) != 4) {
+            retval = errno ? errno : EIO;
+            goto ret;
+        }
+        file_size = ntohl (file_size);
+
+        htxf->data_pos = 0;
+        htxf->rsrc_pos = 0;
+
+        retval = file_recv_one (s, htxf, file_size, buf);
+        if (retval) {
+            goto ret;
+        }
+    }
+
+    /* Restore the root path BEFORE the completion post_file_update
+	 * so the final task-window label and the xfer-done notification
+	 * both read as the folder, not as whatever per-file path
+	 * file_recv_one left in htxf->path on its way out of the
+	 * last iteration. The ret: label below also restores it (for
+	 * the error paths that jump straight there). */
+    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
+    play_sound (FILE_DONE);
+    htxf->total_pos = htxf->total_size;
+    post_file_update (htxf);
+
+ret:
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
+
+    /* Restore the root path on error paths that goto'd here mid-
+	 * loop. The success path above already restored before
+	 * post_file_update; this is the catch-all. */
+    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
+
+    post_xfer_cleanup (htxf);
+    return NULL;
+}
+
+/* Send a single file out over an HTXF subchannel from
+ * htxf->path. Mirror of file_recv_one — same wire framing, just
+ * the sending end. The header layout is:
+ *
+ *   FILP fixed header (40 bytes)
+ *   INFO/MAC block + TYPECREA + create/modify times + comment
+ *   DATA marker + u32 BE data-fork-remaining length
+ *   data fork bytes
+ *   MACR marker + u32 BE rsrc-fork length
+ *   rsrc fork bytes
+ *
+ * Used by:
+ *   - put_thread (solo file): just call directly.
+ *   - folder_put_thread: writes the per-file u32 size header
+ *     first (over the HTXF socket), then calls this. Hotline's
+ *     folder framing puts the per-file size up front so the
+ *     receiver knows the budget.
+ *
+ * htxf->data_size / data_pos / rsrc_size / rsrc_pos must be set
+ * to the actual local file values before calling. Caller closes
+ * the socket and plays the completion sound.
+ *
+ * Returns 0 on success, errno-like positive code on failure. */
+static int
+file_send_one (int s, struct htxf_conn *htxf, guint8 *buf)
+{
+    int f, retval;
+    struct hfsinfo fi;
 
     memcpy (buf, "\
 FILP\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
@@ -772,23 +1130,22 @@ TYPECREA\
         HN32 (&buf[129 + fi.comlen], &tmp);
     }
     if (write (s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
-        retval = errno;
-        goto ret;
+        return errno ? errno : EIO;
     }
     htxf->total_pos += 133 + fi.comlen;
     if (!(htxf->data_size - htxf->data_pos)) {
         goto put_rsrc;
     }
     if ((f = open (htxf->path, O_RDONLY)) < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->data_pos) {
         lseek (f, htxf->data_pos, SEEK_SET);
     }
     retval = rd_wr (f, s, htxf->data_size, htxf);
     if (retval) {
-        goto ret;
+        close (f);
+        return retval;
     }
     close (f);
 
@@ -796,37 +1153,369 @@ put_rsrc:
     memcpy (buf, "MACR\0\0\0\0\0\0\0\0", 12);
     HN32 (&buf[12], &htxf->rsrc_size);
     if (write (s, buf, 16) != 16) {
-        retval = 0;
-        goto ret;
+        /* Same behaviour as the inlined version: a short write at
+		 * the MACR-marker boundary is treated as a clean stop (the
+		 * server may not want the rsrc fork). Don't surface as an
+		 * error. */
+        return 0;
     }
     htxf->total_pos += 16;
     if (!(htxf->rsrc_size - htxf->rsrc_pos)) {
-        goto done;
+        return 0;
     }
 
     if ((f = resource_open (htxf->path, O_RDONLY, 0)) < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
     retval = rd_wr (f, s, htxf->rsrc_size, htxf);
     if (retval) {
-        goto ret;
+        close (f);
+        return retval;
     }
     close (f);
+    return 0;
+}
 
-done:
+static void *
+put_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval;
+    guint8 buf[512];
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    retval = file_send_one (s, htxf, buf);
+    if (retval) {
+        goto ret;
+    }
+
     play_sound (FILE_DONE);
     post_file_update (htxf);
 
 ret:
-    close (s);
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
 
     /* See get_thread for the cleanup-via-marshal rationale. */
     post_xfer_cleanup (htxf);
 
+    return NULL;
+}
+
+/* Mirror of folder_get_thread for the upload direction. The
+ * server drives the loop by writing FILE_NEXT to us; we walk the
+ * local tree in DFS pre-order (parent dirs before their
+ * contents) and respond to each FILE_NEXT with one entry:
+ *
+ *   us → server : nfi (6 bytes: len, type, pathcount) + per
+ *                 component (2 byte pad + 1 byte nlen + nlen
+ *                 bytes name). type=1 marks a folder (no
+ *                 payload), type=0 marks a file leaf.
+ *   server → us : for a file leaf, a u16 BE cmd:
+ *                   FILE_SEND   (1) — server wants a fresh send
+ *                   FILE_RESUME (2) — server sends a u16 BE len
+ *                                     and then `len` bytes of
+ *                                     RFLT carrying data_pos /
+ *                                     rsrc_pos. We honour the
+ *                                     resume offsets in
+ *                                     file_send_one.
+ *   us → server : u32 BE size (remaining file payload bytes),
+ *                 then the standard FILP/INFO/DATA/MACR framing
+ *                 via file_send_one.
+ *
+ * When the local walk runs out of entries we just close the
+ * socket; the server's next FILE_NEXT write short-reads and its
+ * loop exits cleanly. Same convention mhxd uses on its own
+ * folder_recv exit path.
+ *
+ * htxf->path holds the local source root on entry; we snapshot
+ * it and rewrite per-file for file_send_one. Restored to the
+ * root before cleanup so the tasks-window display reads sanely.
+ *
+ * Components are sent with pathcount equal to the depth of the
+ * entry under the root, so files nested at root/sub/sub2/leaf
+ * become pathcount=3 with components ["sub","sub2","leaf"].
+ * mhxd's folder_recv joins them with '/' on a fresh fpath built
+ * from dirpath, so deep trees land correctly even though
+ * folder_recv itself never advances dirpath. */
+
+struct hx_put_entry {
+    int type;                 /* 1 = folder marker, 0 = file leaf */
+    char *full_local_path;    /* on-disk path; used only for files */
+    GPtrArray *components;    /* (char *) path components from root */
+    guint64 data_size;        /* for files */
+};
+
+static void
+hx_put_entry_free (struct hx_put_entry *e)
+{
+    if (e->components) {
+        g_ptr_array_unref (e->components);
+    }
+    g_free (e->full_local_path);
+    g_free (e);
+}
+
+static void
+hx_collect_put_entries (GPtrArray *entries, const char *dir_path,
+                        GPtrArray *prefix_components)
+{
+    GDir *d;
+    const char *name;
+    GError *err = NULL;
+    GList *names = NULL;
+
+    d = g_dir_open (dir_path, 0, &err);
+    if (!d) {
+        if (err) {
+            g_error_free (err);
+        }
+        return;
+    }
+    while ((name = g_dir_read_name (d))) {
+        names = g_list_prepend (names, g_strdup (name));
+    }
+    g_dir_close (d);
+    /* Sort for deterministic order (helps test reproduction). */
+    names = g_list_sort (names, (GCompareFunc)g_strcmp0);
+
+    for (GList *l = names; l; l = l->next) {
+        const char *n = l->data;
+        char *full;
+        struct stat sb;
+        struct hx_put_entry *e;
+
+        full = g_build_filename (dir_path, n, NULL);
+        if (lstat (full, &sb) < 0) {
+            g_free (full);
+            continue;
+        }
+
+        e = g_new0 (struct hx_put_entry, 1);
+        e->components = g_ptr_array_new_with_free_func (g_free);
+        for (guint i = 0; i < prefix_components->len; i++) {
+            g_ptr_array_add (e->components,
+                             g_strdup (g_ptr_array_index (prefix_components,
+                                                          i)));
+        }
+        g_ptr_array_add (e->components, g_strdup (n));
+
+        if (S_ISDIR (sb.st_mode)) {
+            e->type = 1;
+            e->full_local_path = g_strdup (full);
+            g_ptr_array_add (entries, e);
+            /* DFS pre-order — recurse with this dir prepended to
+			 * the prefix. */
+            g_ptr_array_add (prefix_components, g_strdup (n));
+            hx_collect_put_entries (entries, full, prefix_components);
+            g_ptr_array_remove_index (prefix_components,
+                                      prefix_components->len - 1);
+        } else if (S_ISREG (sb.st_mode)) {
+            e->type = 0;
+            e->full_local_path = g_strdup (full);
+            e->data_size = (guint64)sb.st_size;
+            g_ptr_array_add (entries, e);
+        } else {
+            /* Skip symlinks and special files. */
+            hx_put_entry_free (e);
+        }
+
+        g_free (full);
+    }
+    g_list_free_full (names, g_free);
+}
+
+static void *
+folder_put_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval = 0;
+    guint8 buf[2048];
+    char base_path[MAXPATHLEN];
+    GPtrArray *entries = NULL;
+    GPtrArray *initial_comps = NULL;
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    g_strlcpy (base_path, htxf->path, sizeof (base_path));
+
+    entries
+        = g_ptr_array_new_with_free_func ((GDestroyNotify)hx_put_entry_free);
+    initial_comps = g_ptr_array_new_with_free_func (g_free);
+    hx_collect_put_entries (entries, base_path, initial_comps);
+    g_ptr_array_unref (initial_comps);
+
+    for (guint i = 0; i < entries->len; i++) {
+        struct hx_put_entry *e = g_ptr_array_index (entries, i);
+        guint16 cmd_n;
+        ssize_t n;
+        guint16 wire_len = 4;
+
+        /* Wait for FILE_NEXT from the server. */
+        n = read (s, &cmd_n, 2);
+        if (n != 2) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+        if (ntohs (cmd_n) != 3 /* FILE_NEXT */) {
+            retval = EPROTO;
+            goto cleanup;
+        }
+
+        /* nfi header: len = 4 + sum(3+nlen_i), type, pathcount. */
+        for (guint j = 0; j < e->components->len; j++) {
+            wire_len += 3
+                        + (guint16)strlen (
+                            (const char *)g_ptr_array_index (e->components, j));
+        }
+        {
+            guint16 t;
+            t = htons (wire_len);
+            memcpy (&buf[0], &t, 2);
+            t = htons ((guint16)e->type);
+            memcpy (&buf[2], &t, 2);
+            t = htons ((guint16)e->components->len);
+            memcpy (&buf[4], &t, 2);
+        }
+        if (write (s, buf, 6) != 6) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+
+        for (guint j = 0; j < e->components->len; j++) {
+            const char *c = g_ptr_array_index (e->components, j);
+            gsize cl = strlen (c);
+            guint8 ch[3];
+            if (cl > 255) {
+                retval = ENAMETOOLONG;
+                goto cleanup;
+            }
+            ch[0] = 0;
+            ch[1] = 0;
+            ch[2] = (guint8)cl;
+            if (write (s, ch, 3) != 3) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            if (cl && write (s, c, cl) != (ssize_t)cl) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+        }
+
+        if (e->type == 1) {
+            /* Folder marker — no payload. */
+            continue;
+        }
+
+        /* File leaf — server replies with FILE_SEND (fresh) or
+		 * FILE_RESUME (resume from data_pos/rsrc_pos). */
+        n = read (s, &cmd_n, 2);
+        if (n != 2) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+        cmd_n = ntohs (cmd_n);
+        htxf->data_pos = 0;
+        htxf->rsrc_pos = 0;
+        if (cmd_n == 2 /* FILE_RESUME */) {
+            guint16 rlen;
+            guint8 rflt[128];
+            if (read (s, &rlen, 2) != 2) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            rlen = ntohs (rlen);
+            if (rlen > sizeof (rflt)) {
+                retval = EPROTO;
+                goto cleanup;
+            }
+            if (rlen && read (s, rflt, rlen) != (ssize_t)rlen) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            if (rlen >= 50) {
+                HN32 (&htxf->data_pos, &rflt[46]);
+            }
+            if (rlen >= 66) {
+                HN32 (&htxf->rsrc_pos, &rflt[62]);
+            }
+        } else if (cmd_n != 1 /* FILE_SEND */) {
+            retval = EPROTO;
+            goto cleanup;
+        }
+
+        /* Set up htxf for file_send_one. data_size / rsrc_size
+		 * come from the local file. */
+        {
+            struct stat sb;
+            if (stat (e->full_local_path, &sb) < 0) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            g_strlcpy (htxf->path, e->full_local_path, sizeof (htxf->path));
+            htxf->data_size = (guint32)sb.st_size;
+            htxf->rsrc_size = (guint32)resource_len (e->full_local_path);
+        }
+
+        /* Per-file payload size, matching file_send_one's writes:
+		 * 133 + comment_len + ((rsrc_size - rsrc_pos) ? 16 : 0)
+		 * + (data_size - data_pos) + (rsrc_size - rsrc_pos). */
+        {
+            guint32 file_size;
+            guint32 size_n;
+            guint32 com = (guint32)comment_len (e->full_local_path);
+            file_size = 133 + com + (htxf->data_size - htxf->data_pos);
+            if (htxf->rsrc_size - htxf->rsrc_pos) {
+                file_size += 16 + (htxf->rsrc_size - htxf->rsrc_pos);
+            }
+            size_n = htonl (file_size);
+            if (write (s, &size_n, 4) != 4) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+        }
+
+        retval = file_send_one (s, htxf, buf);
+        if (retval) {
+            goto cleanup;
+        }
+    }
+
+    play_sound (FILE_DONE);
+    htxf->total_pos = htxf->total_size;
+    post_file_update (htxf);
+
+cleanup:
+    if (entries) {
+        g_ptr_array_unref (entries);
+    }
+
+ret:
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
+
+    /* Restore the root path so the tasks-window label stays
+	 * sensible post-completion. */
+    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
+
+    post_xfer_cleanup (htxf);
     return NULL;
 }
 
@@ -852,8 +1541,18 @@ xfer_ready_write (struct htxf_conn *htxf)
 	 * worker's behalf at exit. */
     htxf_ref (htxf);
 
-    err = pthread_create (
-        &tid, 0, ((htxf->type == XFER_GET) ? get_thread : put_thread), htxf);
+    /* Dispatch to the folder thread when opt.folder is set so
+	 * the worker drives the FILE_NEXT state machine and per-leaf
+	 * file_recv_one / file_send_one calls. Plain XFER_GET /
+	 * XFER_PUT fall through to the single-file threads. */
+    void *(*entry) (void *);
+    if (htxf->opt.folder) {
+        entry
+            = (htxf->type == XFER_GET) ? folder_get_thread : folder_put_thread;
+    } else {
+        entry = (htxf->type == XFER_GET) ? get_thread : put_thread;
+    }
+    err = pthread_create (&tid, 0, entry, htxf);
 
     sigaction (SIGTSTP, &tstpact, 0);
     sigaction (SIGCONT, &contact, 0);

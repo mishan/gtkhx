@@ -520,10 +520,10 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     /* Phase 5: action buttons live in the AdwHeaderBar now, not in a
 	 * row beneath. Refresh + Connect on the leading edge, the live
 	 * found-count "N / M" indicator on the trailing edge. */
-    refreshbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+    refreshbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",
                                       _ ("Refresh tracker list"), 2,
                                       G_CALLBACK (tracker_getlist), sess);
-    connbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/connect.xpm",
+    connbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/connect.png",
                                    _ ("Connect to selected server"), 2,
                                    G_CALLBACK (tracker_connect), 0);
 

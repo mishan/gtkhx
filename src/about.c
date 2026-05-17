@@ -130,7 +130,7 @@ create_about_window (GtkWidget *widget, gpointer data)
 	 * dialog's width drives sizing rather than the picture being
 	 * stretched. */
     logo_pb = gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/gtkhx.xpm", NULL);
+        "/com/nasledov/gtkhx/pixmaps/gtkhx.png", NULL);
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     logo_tex = gdk_texture_new_for_pixbuf (logo_pb);
     G_GNUC_END_IGNORE_DEPRECATIONS

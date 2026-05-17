@@ -10,6 +10,14 @@ gtkhx_sources = files(
   'debug.c',
   'dfa.c',
   'files.c',
+  'files_browser.c',
+  'files_complete.c',
+  'files_entry.c',
+  'files_local_provider.c',
+  'files_ops.c',
+  'files_panel.c',
+  'files_provider.c',
+  'files_remote_provider.c',
   'gtk_hlist_compat.c',
   'gtkhx.c',
   'gtkhx_log.c',
@@ -131,10 +139,10 @@ configure_file(
 
 # -----------------------------------------------------------------------------
 # Phase 3.7: bundled pixmaps as a GResource. The XML manifest lists every
-# .xpm under src/pixmaps; glib-compile-resources turns them into a .c file
+# .png under src/pixmaps; glib-compile-resources turns them into a .c file
 # whose registered constructor is run automatically at program load, so no
 # explicit g_resources_register() call is needed in main(). Call sites use
-# gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/foo.xpm", ...).
+# gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/foo.png", ...).
 # -----------------------------------------------------------------------------
 gnome = import('gnome')
 gtkhx_resources = gnome.compile_resources(

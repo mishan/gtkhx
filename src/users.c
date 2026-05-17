@@ -1004,31 +1004,31 @@ create_users_window (GtkWidget *widget, gpointer data)
     /* Phase 5: per-user action buttons via the shared
 	 * gtkhx_pixmap_button helper (2x scale, matches the toolbar). */
     msgbtn
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.xpm", _ ("Msg"),
+        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.png", _ ("Msg"),
                                2, G_CALLBACK (open_message_btn), users_list);
     g_object_set_data (G_OBJECT (msgbtn), "sess", sess);
 
-    kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.xpm",
+    kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
                                    _ ("Kick"), 2, G_CALLBACK (user_kick_btn),
                                    users_list);
     g_object_set_data (G_OBJECT (kickbtn), "sess", sess);
 
-    infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.xpm",
+    infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
                                    _ ("User Info"), 2,
                                    G_CALLBACK (user_info_btn), users_list);
     g_object_set_data (G_OBJECT (infobtn), "sess", sess);
 
     banbtn
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.xpm", _ ("Ban"),
+        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png", _ ("Ban"),
                                2, G_CALLBACK (user_ban_btn), users_list);
     g_object_set_data (G_OBJECT (banbtn), "sess", sess);
 
-    chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.xpm",
+    chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                    _ ("Private Chat"), 2,
                                    G_CALLBACK (user_chat_btn), users_list);
     g_object_set_data (G_OBJECT (chatbtn), "sess", sess);
 
-    ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.xpm",
+    ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
                                    _ ("Ignore"), 2, G_CALLBACK (user_igno_btn),
                                    users_list);
     g_object_set_data (G_OBJECT (ignobtn), "sess", sess);

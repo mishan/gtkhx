@@ -991,3 +991,37 @@ test_integration_chat_long = executable('test_integration_chat_long',
 test('chat_long', test_integration_chat_long,
      suite   : 'integration',
      timeout : 30)
+
+# folder_get — HTLC_HDR_FILE_GETFOLDER (0xd2) full round-trip. The
+# Hotline 1.5 folder-download opcode streams a whole tree over a
+# single HTXF subchannel via the FILE_NEXT state machine. This
+# test drives the state machine end-to-end: sends GETFOLDER for
+# the seeded files/test_folder/, parses each next_file_info
+# entry, sends FILE_SEND for each file leaf, and substring-
+# searches the FILP-wrapped payloads for the seeded content.
+# Fixture: Dockerfile seeds files/test_folder/leaf_{a,b}.txt.
+test_integration_folder_get = executable('test_integration_folder_get',
+  'integration/test_folder_get.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('folder_get', test_integration_folder_get,
+     suite   : 'integration',
+     timeout : 30)
+
+# folder_put — HTLC_HDR_FILE_PUTFOLDER (0xd5) request/reply phase.
+# Mirror of test_file_put's scope: sends the opcode targeted at
+# Uploads/<random>, verifies the TASK reply correlates by trans
+# and either carries an HTXF_REF or a task-error. Full upload
+# (FILP-wrapped data streamed over the subchannel) is a follow-
+# up batch.
+test_integration_folder_put = executable('test_integration_folder_put',
+  'integration/test_folder_put.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('folder_put', test_integration_folder_put,
+     suite   : 'integration',
+     timeout : 30)

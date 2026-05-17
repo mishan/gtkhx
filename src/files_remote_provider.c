@@ -1,0 +1,598 @@
+/*
+ * Copyright (C) 2026 Misha Nasledov <misha@nasledov.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ */
+
+#include "config.h"
+
+#include <glib.h>
+#include <string.h>
+#include <arpa/inet.h>
+
+#include "hx.h"
+/* hx.h pulls compat.h which defines _(s) as a passthrough; undef
+ * before gi18n.h gives us the proper gettext() expansion without
+ * the redefine warning. */
+#undef _
+#include <glib/gi18n.h>
+#include "session.h"
+#include "hotline.h"
+#include "hl_access.h"
+#include "network.h"
+#include "tasks.h"
+#include "rcv.h"
+#include "files.h"
+#include "xfers.h"
+#include "prefs.h"
+#include "gtkutil.h"
+#include "files_entry.h"
+#include "files_provider.h"
+#include "files_remote_provider.h"
+
+struct _HxRemoteFilesProvider {
+    GObject parent_instance;
+    GListStore *listing;
+    char *current_path; /* Hotline-style; "/" at root */
+    /* TRUE if the most recent FILE_LIST RPC came back as a task
+	 * error (server denied the listing). Cleared on the next
+	 * successful listing. Drives the panel's empty-state hint
+	 * ("Folder is upload-only" if the access bits also indicate
+	 * a drop-box, "Can't list this folder" otherwise) — without
+	 * this the user just sees an empty panel and has no idea why
+	 * the navigation didn't produce rows. */
+    gboolean listing_error;
+};
+
+static void
+hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (
+    HxRemoteFilesProvider, hx_remote_files_provider, G_TYPE_OBJECT,
+    G_IMPLEMENT_INTERFACE (HX_TYPE_FILES_PROVIDER,
+                           hx_remote_files_provider_iface_init))
+
+/* Pending fetches keyed on the cached_filelist* we hand to
+ * hx_list_dir's underlying task. The signal carrier (`data` slot
+ * in the file-list signal payload) is a HxRemoteFilesProvider* —
+ * we look it up here to confirm it's still alive and the fetch
+ * was ours.
+ *
+ * Keying on the provider pointer (not the cfl) is enough because
+ * a provider can only have one fetch in flight at a time —
+ * reload during a fetch just supersedes the previous request. */
+static GHashTable *pending_listings = NULL; /* provider* → reffed provider* */
+
+static void
+ensure_pending_table (void)
+{
+    if (!pending_listings) {
+        pending_listings = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+                                                  NULL, g_object_unref);
+    }
+}
+
+static void
+hx_remote_files_provider_finalize (GObject *obj)
+{
+    HxRemoteFilesProvider *self = HX_REMOTE_FILES_PROVIDER (obj);
+    g_clear_object (&self->listing);
+    g_free (self->current_path);
+    /* If we're in pending_listings, the table holds the ref that's
+	 * being dropped now — this finalize was called BECAUSE the
+	 * table released us. So no remove call here. */
+    G_OBJECT_CLASS (hx_remote_files_provider_parent_class)->finalize (obj);
+}
+
+static void
+hx_remote_files_provider_class_init (HxRemoteFilesProviderClass *klass)
+{
+    G_OBJECT_CLASS (klass)->finalize = hx_remote_files_provider_finalize;
+}
+
+static void
+hx_remote_files_provider_init (HxRemoteFilesProvider *self)
+{
+    self->listing = g_list_store_new (HX_TYPE_FILE_ENTRY);
+    self->current_path = g_strdup ("/");
+}
+
+HxRemoteFilesProvider *
+hx_remote_files_provider_new (void)
+{
+    return g_object_new (HX_TYPE_REMOTE_FILES_PROVIDER, NULL);
+}
+
+/* ---- Connection-state hooks ----
+ *
+ * The provider is created up-front (before login) so it can sit
+ * alongside the local one in the browser. While disconnected it
+ * reports an unavailable reason; on login the browser refreshes
+ * and lists the root. */
+
+static const char *
+remote_get_unavailable_reason (HxFilesProvider *self)
+{
+    (void)self;
+    return the_session.htlc.fd ? NULL : _ ("Not connected to a server.");
+}
+
+/* ---- Wire send ----
+ *
+ * Fires HTLC_HDR_FILE_LIST without going through the legacy
+ * hx_list_dir, which is tightly coupled to the gfile_list bookkeeping.
+ * We allocate our own cached_filelist (matches the legacy task
+ * signature: rcv_task_file_list dereferences cfl->path) and pass
+ * the HxRemoteFilesProvider* as the signal data carrier. */
+static void
+remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
+{
+    struct cached_filelist *cfl;
+    guint16 hldirlen;
+    guint8 *hldir;
+
+    if (!the_session.htlc.fd) {
+        return;
+    }
+
+    ensure_pending_table ();
+
+    cfl = g_malloc0 (sizeof (struct cached_filelist));
+    cfl->path = g_strdup (path && *path ? path : "/");
+
+    /* Reffed entry — keeps the provider alive while the RPC is
+	 * in flight even if the browser closes. Drops on remove. */
+    g_hash_table_insert (pending_listings, self, g_object_ref (self));
+
+    hldir = path_to_hldir (cfl->path, &hldirlen, 0);
+    task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl, self,
+              "ls");
+    hlwrite (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1, HTLC_DATA_DIR,
+             hldirlen, hldir);
+    g_free (hldir);
+}
+
+/* ---- Reply: parse hl_filelist_hdr chunks into HxFileEntry ----
+ *
+ * Lifted from output_file_list in files.c — same wire walker,
+ * just dumping into the new model shape. Fields available on
+ * the wire: ftype (4 bytes — "fldr" for folders, FourCC for
+ * files), fcreator, fsize, fnlen, fname. No mtime; the Modified
+ * column stays empty for remote rows (Phase 4 polish: fetch
+ * info lazily on row selection).
+ *
+ * Sub-byte conversions follow the same htonl / packed-struct
+ * dance as the legacy code — file_list field bytes are
+ * big-endian on the wire even though most other Hotline ints
+ * arrive pre-byteswapped by the receive path. */
+static void
+populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
+{
+    struct hl_filelist_hdr *fh;
+    char namebuf[256];
+    char *utf8;
+    gboolean is_dir;
+    guint32 fnlen, fsize, ftype;
+    HxFileEntry *entry;
+
+    g_list_store_remove_all (self->listing);
+
+    if (!cfl || !cfl->fh || !cfl->fhlen) {
+        return;
+    }
+
+    for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
+         fh = (struct hl_filelist_hdr *)((char *)fh + fh->len
+                                         + SIZEOF_HL_DATA_HDR)) {
+        /* fh->len drives the for-step pointer advance after the
+		 * loop body, so it MUST be in host byte order before the
+		 * next iteration. Skipping this is the same bug the
+		 * legacy output_file_list path hit in commit ...: the
+		 * network-order u16 (e.g. 0x0031) reads as 0x3100 on
+		 * little-endian, the increment overshoots by orders of
+		 * magnitude, and the loop terminates after one entry no
+		 * matter how many the server sent. Byteswap in place
+		 * mirrors the legacy walker. */
+        fh->len = ntohs (fh->len);
+
+        /* Field-by-field byteswap into locals. We read out of
+		 * the receive buffer and never write back so cfl can be
+		 * freed cleanly afterwards. (fh->len above is the
+		 * exception — but that field's used only by the walker,
+		 * not surfaced to the row.) */
+        HN32 (&fnlen, &fh->fnlen);
+        HN32 (&fsize, &fh->fsize);
+        HN32 (&ftype, &fh->ftype);
+
+        if (fnlen > sizeof (namebuf) - 1) {
+            fnlen = sizeof (namebuf) - 1;
+        }
+        memcpy (namebuf, fh->fname, fnlen);
+        namebuf[fnlen] = '\0';
+
+        /* Hotline filename bytes can be Mac Roman on older
+		 * servers — sanitise to UTF-8 for display. */
+        utf8 = gtkhx_text_to_utf8 (namebuf, fnlen, NULL);
+
+        is_dir = (ftype == 0x666c6472); /* 'fldr' */
+
+        /* Friendly kind label via the shared FourCC table —
+		 * "JPEG Image" / "MP3 Audio" / etc., falling back to
+		 * "<XXXX> file" for unknown codes. is_static tells us
+		 * whether to free the returned pointer. */
+        gboolean kind_static = FALSE;
+        const char *kind
+            = kind_of_ftype ((const char *)&fh->ftype, &kind_static);
+
+        /* Classify icon from the 4-byte Hotline file-type code.
+		 * icon_of_ftype_and_name reads the network-byte-order
+		 * bytes directly from the receive buffer — we pass the
+		 * raw FourCC, not the htonl'd local. */
+        /* For folders, Hotline puts the child count in the size
+		 * field rather than a byte count — we keep it (rather
+		 * than zeroing it out) so the Size column renders
+		 * "(N items)" instead of just "—". hx_file_entry_format_size
+		 * branches on is_dir to pick the right wording. */
+        entry = hx_file_entry_new (
+            utf8 ? utf8 : namebuf, is_dir, (guint64)fsize,
+            0, /* no mtime on the wire */
+            kind,
+            icon_of_ftype_and_name ((const char *)&fh->ftype, namebuf, fnlen));
+        g_list_store_append (self->listing, entry);
+        g_object_unref (entry);
+        g_free (utf8);
+        if (!kind_static) {
+            g_free ((char *)kind);
+        }
+    }
+}
+
+gboolean
+hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
+                                           gpointer data)
+{
+    HxRemoteFilesProvider *self;
+    struct cached_filelist *cfl = cfl_p;
+    (void)fh;
+
+    /* The dispatcher in gtkhx.c::on_file_list_signal falls through
+	 * to the legacy output_file_list (which casts `data` to
+	 * struct gfile_list *) when we return FALSE. That's only safe
+	 * if data ISN'T a HxRemoteFilesProvider — otherwise the cast
+	 * misreads a GObject as a gfile_list and crashes inside
+	 * gtk_window_set_title on a bogus window pointer.
+	 *
+	 * Identify by type first. GObject's type check is safe on any
+	 * pointer that could be either flavour. When this provider DOES
+	 * own the response, claim it whether or not it's still in
+	 * pending_listings — a second response for the same provider
+	 * (e.g. when the panel fired multiple FILE_LIST requests in
+	 * quick succession) used to fall through to the legacy path,
+	 * which was the source of the crash. Now we just drop the
+	 * duplicate harmlessly. */
+    if (!data || !G_IS_OBJECT (data) || !HX_IS_REMOTE_FILES_PROVIDER (data)) {
+        return FALSE;
+    }
+    if (!pending_listings || !g_hash_table_contains (pending_listings, data)) {
+        /* Stale response for one of our providers (most recent
+		 * request already handled, or this fired before any
+		 * pending entry existed). Swallow it so the legacy
+		 * output_file_list isn't called on a GObject pointer. */
+        return TRUE;
+    }
+
+    /* It's ours and still tracked. Steal the ref so we don't get
+	 * dropped mid-parse if the table removes us first. */
+    self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
+    g_hash_table_remove (pending_listings, data);
+
+    populate_from_chunks (self, cfl);
+
+    /* A successful response clears any sticky listing-error state
+	 * from a previous failed navigation. */
+    self->listing_error = FALSE;
+
+    /* Adopt the new path as the current one (the RPC was fired
+	 * with this path in cfl_path — if a second fetch superseded
+	 * the first, the more-recent one wins via pending_listings's
+	 * single-entry-per-provider invariant). */
+    if (cfl && cfl->path) {
+        g_free (self->current_path);
+        self->current_path = g_strdup (cfl->path);
+    }
+
+    g_signal_emit_by_name (self, "navigated", self->current_path);
+
+    /* The cached_filelist was allocated by us in remote_send_file_list
+	 * and isn't tracked by the legacy cfl_lookup table — free it.
+	 * The fh data inside it points into the receive buffer and is
+	 * owned by the rcv path; we don't free fh. */
+    if (cfl) {
+        g_free (cfl->path);
+        g_free (cfl);
+    }
+
+    g_object_unref (self);
+    return TRUE;
+}
+
+/* Error counterpart to handle_file_list. Called from
+ * rcv.c::rcv_task_file_list's task_inerror short-circuit so the
+ * provider knows its in-flight listing was denied — without this
+ * the panel sat showing nothing with no idea why.
+ *
+ * Behaviour matches the success path's cleanup: remove the
+ * provider from pending_listings (drops the table's ref), clear
+ * the listing rows (so any old content from a previous folder
+ * doesn't linger on the new path), and flip listing_error TRUE so
+ * the panel's status footer can show a contextual message instead
+ * of "0 items". Emits "navigated" with the current path — the
+ * panel's existing on_navigated handler then updates the path
+ * entry and refreshes the footer through update_status. */
+gboolean
+hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
+{
+    HxRemoteFilesProvider *self;
+    struct cached_filelist *cfl = cfl_p;
+
+    if (!data || !G_IS_OBJECT (data) || !HX_IS_REMOTE_FILES_PROVIDER (data)) {
+        return FALSE;
+    }
+    if (!pending_listings || !g_hash_table_contains (pending_listings, data)) {
+        return TRUE;
+    }
+
+    self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
+    g_hash_table_remove (pending_listings, data);
+
+    g_list_store_remove_all (self->listing);
+    self->listing_error = TRUE;
+
+    /* The cfl we allocated in remote_send_file_list carries the
+	 * path the user navigated to. Adopt it as the current path
+	 * even though the listing failed — otherwise the next
+	 * navigate_up has nothing to walk back from. */
+    if (cfl && cfl->path) {
+        g_free (self->current_path);
+        self->current_path = g_strdup (cfl->path);
+    }
+
+    g_signal_emit_by_name (self, "navigated", self->current_path);
+
+    /* cfl is owned by rcv.c's caller; we don't free it here.
+	 * The success path's twin (handle_file_list above) does
+	 * free cfl because rcv_task_file_list's success arm
+	 * surrenders ownership to cfl_print → us. The error arm
+	 * keeps ownership upstream. */
+
+    g_object_unref (self);
+    return TRUE;
+}
+
+/* Getter for the panel to consult when building empty-state
+ * messaging. TRUE iff the most recent FILE_LIST RPC failed. */
+gboolean
+hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self)
+{
+    return self ? self->listing_error : FALSE;
+}
+
+/* ---- Interface implementations ---- */
+
+static GListModel *
+remote_get_listing (HxFilesProvider *self)
+{
+    return G_LIST_MODEL (HX_REMOTE_FILES_PROVIDER (self)->listing);
+}
+
+static const char *
+remote_get_current_path (HxFilesProvider *self)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    return r->current_path ? r->current_path : "/";
+}
+
+static const char *
+remote_get_label (HxFilesProvider *self)
+{
+    (void)self;
+    return _ ("Remote");
+}
+
+static void
+remote_navigate (HxFilesProvider *self, const char *path)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    if (!path || !*path) {
+        return;
+    }
+    remote_send_file_list (r, path);
+}
+
+static void
+remote_reload (HxFilesProvider *self)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    remote_send_file_list (r, r->current_path);
+}
+
+/* Walk one component off the end of current_path. Hotline paths
+ * use '/' as the separator (server-side it's stored as a
+ * length-prefixed array of component pstrings, but the canonical
+ * string form uses '/'). Root is "/". */
+static void
+remote_navigate_up (HxFilesProvider *self)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    char *parent, *slash;
+
+    if (!r->current_path || g_strcmp0 (r->current_path, "/") == 0) {
+        return;
+    }
+
+    parent = g_strdup (r->current_path);
+    slash = strrchr (parent, '/');
+    if (!slash) {
+        g_free (parent);
+        return;
+    }
+    if (slash == parent) {
+        slash[1] = '\0'; /* "/foo" → "/" */
+    } else {
+        *slash = '\0'; /* "/foo/bar" → "/foo" */
+    }
+    remote_send_file_list (r, parent);
+    g_free (parent);
+}
+
+/* Build a server-side child path from current_path + name. */
+static char *
+remote_child_path (HxRemoteFilesProvider *r, const char *name)
+{
+    if (!r->current_path || g_strcmp0 (r->current_path, "/") == 0) {
+        return g_strdup_printf ("/%s", name ? name : "");
+    }
+    return g_strdup_printf ("%s/%s", r->current_path, name ? name : "");
+}
+
+static gboolean
+remote_mkdir (HxFilesProvider *self, const char *name, GError **err)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    char *path;
+    (void)err;
+
+    if (!name || !*name) {
+        return FALSE;
+    }
+    if (!the_session.htlc.fd) {
+        return FALSE;
+    }
+    path = remote_child_path (r, name);
+    hx_make_dir (&the_session.htlc, path);
+    g_free (path);
+
+    /* Settle with a re-list of the current directory. The wire
+	 * response carries success-or-failure as a task error; if it
+	 * failed, the user sees an empty refresh + the existing
+	 * server-error toast machinery already surfaces a message. */
+    remote_send_file_list (r, r->current_path);
+    return TRUE;
+}
+
+static gboolean
+remote_delete_entry (HxFilesProvider *self, const char *name, GError **err)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    char *path;
+    (void)err;
+
+    if (!name || !*name) {
+        return FALSE;
+    }
+    if (!the_session.htlc.fd) {
+        return FALSE;
+    }
+    path = remote_child_path (r, name);
+    hx_file_delete (&the_session.htlc, path);
+    g_free (path);
+    remote_send_file_list (r, r->current_path);
+    return TRUE;
+}
+
+static gboolean
+remote_rename (HxFilesProvider *self, const char *old_name,
+               const char *new_name, GError **err)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    char *src, *dst;
+    (void)err;
+
+    if (!old_name || !new_name) {
+        return FALSE;
+    }
+    if (!the_session.htlc.fd) {
+        return FALSE;
+    }
+    src = remote_child_path (r, old_name);
+    dst = remote_child_path (r, new_name);
+    hx_file_move (&the_session.htlc, src, dst);
+    g_free (src);
+    g_free (dst);
+    remote_send_file_list (r, r->current_path);
+    return TRUE;
+}
+
+/* Activate a remote file: stream it into the preview pipeline.
+ * xfer_new with preview=1 routes the downloaded bytes through
+ * hx_preview_set_info / _chunk / _done rather than writing to
+ * disk (see preview.c). lpath is required for xfer_new's
+ * bookkeeping even though no on-disk file gets written; we
+ * derive a temp path from XDG cache + the entry name. */
+static void
+remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
+    const char *dir;
+    char *lpath;
+    struct htxf_conn *htxf;
+    (void)r;
+
+    if (!e || hx_file_entry_is_dir (e)) {
+        return;
+    }
+    if (!the_session.htlc.fd) {
+        return;
+    }
+    if (!hl_access_has ((const guint8 *)&the_session.htlc.access,
+                        HL_ACCESS_DOWNLOAD_FILES)) {
+        return;
+    }
+
+    dir = hx_files_provider_get_current_path (self);
+
+    /* Preview xfer never writes to disk (see opt.preview branch
+	 * in xfer_new). The lpath argument still has to exist
+	 * because the worker references it for logging / tooltip,
+	 * so synthesise something sane in the download dir. */
+    lpath = g_build_filename (
+        gtkhx_prefs.download_path ? gtkhx_prefs.download_path : "/tmp",
+        hx_file_entry_get_name (e), NULL);
+
+    /* xfer_new takes the remote location as a (dir, name, name_len)
+	 * triple — keeping the name's bytes (which may legally include
+	 * `/`) out of the joined path so they survive the wire trip
+	 * verbatim. The cached entry's name is already byte-for-byte
+	 * what came off the wire. */
+    {
+        const char *name = hx_file_entry_get_name (e);
+        gsize name_len = name ? strlen (name) : 0;
+        htxf = xfer_new (lpath, dir ? dir : "", name, name_len, XFER_GET,
+                         1 /* preview */, 0);
+    }
+    if (htxf) {
+        htxf->filter_argv = 0;
+        htxf->opt.retry = 0;
+    }
+
+    g_free (lpath);
+}
+
+static void
+hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface)
+{
+    iface->get_listing = remote_get_listing;
+    iface->get_current_path = remote_get_current_path;
+    iface->get_label = remote_get_label;
+    iface->navigate = remote_navigate;
+    iface->reload = remote_reload;
+    iface->navigate_up = remote_navigate_up;
+    iface->mkdir = remote_mkdir;
+    iface->delete_entry = remote_delete_entry;
+    iface->rename = remote_rename;
+    iface->get_unavailable_reason = remote_get_unavailable_reason;
+    iface->activate_entry = remote_activate_entry;
+}

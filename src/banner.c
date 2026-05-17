@@ -563,7 +563,12 @@ banner_htxf_worker_thread (void *arg)
     h.magic = htonl (HTXF_MAGIC_INT);
     h.ref = htonl (f->ref);
     h.len = htonl (f->size);
-    h.unknown = 0;
+    /* type=HTXF_TYPE_BANNER in the last 4 bytes (u16 type + u16
+	 * reserved on the wire) so Mac-native servers route this
+	 * subchannel through their banner-send path rather than the
+	 * generic single-file path. See the htxf_connect comment in
+	 * network.c for the full story on the type field. */
+    h.unknown = htonl (((guint32)HTXF_TYPE_BANNER) << 16);
 
     if (!write_n (s, &h, SIZEOF_HTXF_HDR)) {
         debug_log ("banner", "htxf header write failed: %s",

@@ -58,784 +58,11 @@
 #define ICON_FILE_MOOV 425
 #define ICON_FILE_ZIP 426
 
+/* ICON_* constants moved to files.h so the new files browser
+ * (files_remote_provider.c, files_local_provider.c, files_panel.c)
+ * can drive load_icon from the same table. */
+
 guint8 dir_char = '/';
-
-/* Phase 5+: open file-browser windows kept as a GList of pointers.
- * Replaces the intrusive next/prev fields that used to live on
- * struct gfile_list. */
-GList *gfile_list;
-
-static void
-gfl_free (struct gfile_list *gfl)
-{
-    struct path_hist *path, *prev;
-
-    for (path = gfl->path_list; path; path = prev) {
-        prev = path->prev;
-        g_free (path);
-    }
-    g_free (gfl->cfl);
-    g_free (gfl);
-}
-
-static struct gfile_list *
-gfl_new (GtkWidget *window, GtkWidget *hlist, char *path)
-{
-    struct gfile_list *gfl;
-
-    gfl = g_malloc0 (sizeof (struct gfile_list));
-    gfl->window = window;
-    gfl->hlist = hlist;
-    gfl->path_list = g_malloc (sizeof (struct path_hist) + strlen (path));
-    strcpy (gfl->path_list->path, path);
-    gfl->path_list->prev = NULL;
-
-    gfile_list = g_list_prepend (gfile_list, gfl);
-    return gfl;
-}
-
-static void
-gfl_delete (struct gfile_list *gfl)
-{
-    gfile_list = g_list_remove (gfile_list, gfl);
-    gfl_free (gfl);
-}
-
-void
-destroy_gfl_list (void)
-{
-    GList *snapshot = gfile_list;
-    gfile_list = NULL;
-    for (GList *l = snapshot; l; l = l->next) {
-        struct gfile_list *gfl = l->data;
-        gtkhx_widget_destroy (gfl->window);
-        gfl_free (gfl);
-    }
-    g_list_free (snapshot);
-}
-
-static struct gfile_list *
-gfl_with_hlist (GtkWidget *hlist)
-{
-    for (GList *l = gfile_list; l; l = l->next) {
-        struct gfile_list *gfl = l->data;
-        if (gfl->hlist == hlist) {
-            return gfl;
-        }
-    }
-    return NULL;
-}
-
-static struct gfile_list *
-gfl_with_path (char *path)
-{
-    for (GList *l = gfile_list; l; l = l->next) {
-        struct gfile_list *gfl = l->data;
-        if (gfl->cfl && !strcmp (path, gfl->cfl->path)) {
-            return gfl;
-        }
-    }
-    return NULL;
-}
-
-static void
-open_fldr (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
-           struct gfile_list *gfl)
-{
-    char path[4096];
-    char *curr_path = g_strdup_printf ("%.*s", (int)fh->fnlen, fh->fname);
-
-    if (gfl->in_use) {
-        g_free (curr_path);
-        return;
-    }
-
-    if (cfl->path[0] == '/' && cfl->path[1] == 0) {
-        snprintf (path, sizeof (path), "/%s", curr_path);
-    } else {
-        snprintf (path, sizeof (path), "%s/%s", cfl->path, curr_path);
-    }
-    g_free (curr_path);
-
-    gfl->row = 0;
-    hx_list_dir (&the_session.htlc, path, 1, 0, gfl);
-}
-
-/* Replace POSIX-illegal bytes in a leaf-filename buffer with `_`.
- * Hotline names can contain any byte including `/`; on POSIX that's
- * the path separator, so we substitute before using the name in a
- * local-FS path. The wire FILE_NAME chunk still goes out verbatim
- * via xfer_new's structured (dir, name) arguments — only the local
- * save target gets sanitized. */
-static void
-sanitize_leaf_for_posix (char *p, gsize n)
-{
-    gsize i;
-    for (i = 0; i < n && p[i]; i++) {
-        if (p[i] == '/') {
-            p[i] = '_';
-        }
-    }
-}
-
-static void
-get_file (struct cached_filelist *cfl, struct hl_filelist_hdr *fh)
-{
-    char lpath[4096];
-    struct htxf_conn *htxf;
-    struct stat sb;
-    guint32 fsize;
-    int prefix_len;
-
-    /* Build the local path: download dir + "/" + sanitized name.
-	 * Sanitization replaces any `/` in the Hotline name with `_` so
-	 * names like "Cheeseman goes 56k/sec.pct" land in
-	 * Downloads/Cheeseman goes 56k_sec.pct rather than getting
-	 * POSIX-interpreted as a subdirectory. The remote (dir, name)
-	 * tuple passed to xfer_new keeps the original bytes for the
-	 * wire request. */
-    prefix_len
-        = snprintf (lpath, sizeof (lpath), "%s/", gtkhx_prefs.download_path);
-    if (prefix_len < 0 || (gsize)prefix_len >= sizeof (lpath)) {
-        g_warning (_ ("download path too long; aborting"));
-        return;
-    }
-    snprintf (lpath + prefix_len, sizeof (lpath) - prefix_len, "%.*s",
-              (int)fh->fnlen, fh->fname);
-    sanitize_leaf_for_posix (lpath + prefix_len, sizeof (lpath) - prefix_len);
-
-    if (stat (gtkhx_prefs.download_path, &sb)) {
-        if (mkdir (gtkhx_prefs.download_path, 0770)) {
-            g_warning ("%s: %s", _ ("cannot create download directory"),
-                       gtkhx_prefs.download_path);
-            g_warning (_ ("aborting download"));
-            return;
-        }
-    }
-
-    HN32 (&fsize, &fh->fsize);
-    htxf = xfer_new (lpath, cfl->path, (const char *)fh->fname, fh->fnlen,
-                     XFER_GET, 0, fsize);
-    htxf->filter_argv = 0;
-    htxf->opt.retry = 0;
-}
-
-/* Phase 3.2: GtkFileSelection was removed in GTK 3 (deprecated since
- * 2.4).  Replaced wholesale with GtkFileChooserDialog.  The old
- * "ok_button"/"cancel_button" public field-clicked-handler dance becomes
- * a single "response" handler that switches on GTK_RESPONSE_ACCEPT vs.
- * GTK_RESPONSE_CANCEL.  files_list is passed in via user_data instead
- * of being stashed on the OK button. */
-/* Phase 4.13: GtkFileChooserDialog and gtk_file_chooser_get_file are
- * deprecated in GTK 4.10 — replacement is GtkFileDialog with an async
- * open/save callback. Phase 4.7 follow-up tracks the migration. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-static void
-upload_file_response (GtkDialog *dialog, gint response_id, gpointer user_data)
-{
-    GtkWidget *files_list = user_data;
-    struct gfile_list *gfl;
-    char *lpath;
-    char rpath[4096];
-
-    if (response_id == GTK_RESPONSE_ACCEPT) {
-        /* Phase 4.7: gtk_file_chooser_get_filename returned a g_malloc'd
-		 * char* in GTK 3. In GTK 4 the chooser returns a GFile, so we
-		 * grab the path off it and free the GFile afterwards. */
-        GFile *gf = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
-        lpath = gf ? g_file_get_path (gf) : NULL;
-        gfl = gfl_with_hlist (files_list);
-        if (gfl && gfl->cfl && lpath) {
-            snprintf (rpath, sizeof (rpath), "%s/%s", gfl->cfl->path,
-                      basename (lpath));
-            hx_put_file (&the_session.htlc, lpath, rpath);
-        }
-        g_free (lpath);
-        if (gf) {
-            g_object_unref (gf);
-        }
-    }
-    gtkhx_widget_destroy (GTK_WIDGET (dialog));
-}
-
-static void
-get_put_data (GtkWidget *widget, gpointer data)
-{
-    GtkRoot *root = gtk_widget_get_root (widget);
-    GtkWidget *file_dialog = gtk_file_chooser_dialog_new (
-        _ ("Upload..."), GTK_IS_WINDOW (root) ? GTK_WINDOW (root) : NULL,
-        GTK_FILE_CHOOSER_ACTION_OPEN, _ ("_Cancel"), GTK_RESPONSE_CANCEL,
-        _ ("_Open"), GTK_RESPONSE_ACCEPT, NULL);
-
-    g_signal_connect (file_dialog, "response",
-                      G_CALLBACK (upload_file_response), data);
-
-    gtk_window_present (GTK_WINDOW (file_dialog));
-}
-G_GNUC_END_IGNORE_DEPRECATIONS
-
-/* Phase 4.5: button-press-event is gone in GTK 4. Files-list single
- * and double click handling lives on a GtkGestureClick controller
- * now; n_press == 2 gates open-folder / get-file, single-click just
- * remembers the row for the toolbar buttons. */
-static void
-file_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
-              gpointer data)
-{
-    GtkWidget *widget
-        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-    struct gfile_list *gfl;
-    int row, column;
-    (void)data;
-
-    gfl = gfl_with_hlist (widget);
-
-    if (!gfl) {
-        return;
-    }
-
-    gtk_hlist_get_selection_info (GTK_HLIST (widget), (int)x, (int)y, &row,
-                                  &column);
-
-    if (n_press == 2) {
-        struct hl_filelist_hdr *fh;
-
-        fh = gtk_hlist_get_row_data (GTK_HLIST (widget), gfl->row);
-        if (fh) {
-            if (gfl->cfl) {
-                if (!memcmp (&fh->ftype, "fldr", 4)) {
-                    open_fldr (gfl->cfl, fh, gfl);
-                } else {
-                    get_file (gfl->cfl, fh);
-                }
-            }
-        }
-    } else {
-        gfl->row = row;
-        gfl->column = column;
-    }
-}
-
-static void
-delete_file (GtkWidget *widget, gpointer data)
-{
-    struct gfile_list *gfl;
-    struct hl_filelist_hdr *fh;
-    char path[4096];
-
-    gfl = gfl_with_hlist ((GtkWidget *)data);
-    fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
-
-    snprintf (path, sizeof (path), "%s/%.*s", gfl->cfl->path, (int)fh->fnlen,
-              fh->fname);
-    hx_file_delete (&the_session.htlc, path);
-    hx_list_dir (&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
-}
-
-static void
-get_file_info (GtkWidget *widget, gpointer data)
-{
-    struct gfile_list *gfl;
-    struct hl_filelist_hdr *fh;
-
-    gfl = gfl_with_hlist ((GtkWidget *)data);
-    fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
-
-    /* Pass (dir, name, name_len) separately. Joining + splitting
-	 * via the dir_char-flat representation used to break for files
-	 * whose name contains `/` (the default dir_char) — the slash
-	 * in "Cheeseman goes 56k/sec.pct" would be misread as a
-	 * directory boundary. */
-    hx_file_info (&the_session.htlc, gfl->cfl->path, (const char *)fh->fname,
-                  fh->fnlen);
-}
-
-static void
-file_up_btn (GtkWidget *widget, gpointer data)
-{
-    struct gfile_list *gfl;
-    struct path_hist *path;
-
-    if (!gtkhx_prefs.file_samewin) {
-        return;
-    }
-
-    gfl = gfl_with_hlist ((GtkWidget *)data);
-
-    if (!gfl) {
-        return;
-    }
-
-    if (gfl->in_use) {
-        return;
-    }
-
-    if (gfl->path_list->prev) {
-        path = gfl->path_list;
-        gfl->path_list = gfl->path_list->prev;
-        g_free (path);
-    } else {
-        return;
-    }
-
-    gfl->in_use = 1;
-    gfl->row = 0;
-    hx_list_dir (&the_session.htlc, gfl->path_list->path, 1, 0, gfl);
-}
-
-static void
-file_dl_btn (GtkWidget *widget, gpointer data)
-{
-    struct gfile_list *gfl;
-    struct hl_filelist_hdr *fh;
-    char lpath[4096];
-    struct htxf_conn *htxf;
-
-    gfl = gfl_with_hlist ((GtkWidget *)data);
-    fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
-
-    {
-        int p = snprintf (lpath, sizeof (lpath), "%s/",
-                          gtkhx_prefs.download_path);
-        if (p > 0 && (gsize)p < sizeof (lpath)) {
-            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
-                      fh->fname);
-            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
-        }
-    }
-
-    if (!memcmp (&fh->ftype, "fldr", 4)) {
-        return;
-    }
-
-    {
-        guint32 fsize;
-        HN32 (&fsize, &fh->fsize);
-        htxf = xfer_new (lpath, gfl->cfl->path, (const char *)fh->fname,
-                         fh->fnlen, XFER_GET, 0, fsize);
-    }
-    htxf->filter_argv = 0;
-    htxf->opt.retry = 0;
-}
-
-static void
-file_pre_btn (GtkWidget *widget, gpointer data)
-{
-    struct gfile_list *gfl;
-    struct hl_filelist_hdr *fh;
-    char lpath[4096];
-    struct htxf_conn *htxf;
-
-    gfl = gfl_with_hlist ((GtkWidget *)data);
-    fh = gtk_hlist_get_row_data (GTK_HLIST (data), gfl->row);
-
-    {
-        int p = snprintf (lpath, sizeof (lpath), "%s/",
-                          gtkhx_prefs.download_path);
-        if (p > 0 && (gsize)p < sizeof (lpath)) {
-            snprintf (lpath + p, sizeof (lpath) - p, "%.*s", (int)fh->fnlen,
-                      fh->fname);
-            sanitize_leaf_for_posix (lpath + p, sizeof (lpath) - p);
-        }
-    }
-
-    if (!memcmp (&fh->ftype, "fldr", 4)) {
-        return;
-    }
-
-    /* opt.preview is set inside xfer_new (before the inner xfer_go
-	 * call) so the resume / rename decision is correctly skipped
-	 * for previews. Setting it on the returned htxf here would be
-	 * too late. srv_data_size is irrelevant for previews — they
-	 * never resume — so 0 is fine. */
-    htxf = xfer_new (lpath, gfl->cfl->path, (const char *)fh->fname, fh->fnlen,
-                     XFER_GET, 1, 0);
-    htxf->filter_argv = 0;
-    htxf->opt.retry = 0;
-}
-
-static void
-file_reload_btn (GtkWidget *widget, gpointer data)
-{
-    GtkWidget *files_list = (GtkWidget *)data;
-    struct gfile_list *gfl;
-
-    gfl = gfl_with_hlist (files_list);
-
-    if (!gfl->cfl) {
-        return;
-    }
-
-    gtk_hlist_clear (GTK_HLIST (files_list));
-    hx_list_dir (&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
-}
-
-/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
- * (GtkWindow *, gpointer) returning TRUE to inhibit close, FALSE to
- * allow the default destroy. The body just clears the per-window
- * model state — the framework destroys the widget itself. */
-static gboolean
-close_files_window (GtkWindow *window, gpointer data)
-{
-    struct gfile_list *gfl
-        = (struct gfile_list *)g_object_get_data (G_OBJECT (window), "gfl");
-    (void)data;
-
-    gfl_delete (gfl);
-    return FALSE;
-}
-
-/* Phase 5: AdwAlertDialog with a GtkEntry as extra-child replaces
- * the hand-rolled GtkDialog + label + entry + OK/Cancel buttons.
- * The response callback handles both buttons (id-string dispatch);
- * the entry's "activate" signal forwards to the same response so
- * Enter-to-submit works. The dialog auto-dismisses when the
- * response handler returns. */
-
-static void
-makeDir_response (AdwAlertDialog *dialog, const char *response, gpointer data)
-{
-    GtkEditable *entry;
-    GtkWidget *files_list = data;
-    struct gfile_list *gfl;
-    char pathname[MAXPATHLEN];
-
-    if (g_strcmp0 (response, "create") != 0) {
-        return;
-    }
-
-    entry = GTK_EDITABLE (adw_alert_dialog_get_extra_child (dialog));
-    gfl = gfl_with_hlist (files_list);
-    if (!gfl || !entry) {
-        return;
-    }
-
-    snprintf (pathname, MAXPATHLEN, "%s/%s", gfl->cfl->path,
-              gtk_editable_get_text (entry));
-    hx_make_dir (&the_session.htlc, pathname);
-    hx_list_dir (&the_session.htlc, gfl->cfl->path, 1, 0, gfl);
-}
-
-static void
-makeDir_entry_activate (GtkEntry *entry, gpointer data)
-{
-    (void)entry;
-    /* adw_alert_dialog_response (the obvious "activate this response
-	 * id" call) is libadwaita 1.7+; our floor is 1.6. Emitting the
-	 * "response" signal by name does the same thing — handlers run,
-	 * dialog auto-closes. */
-    g_signal_emit_by_name (data, "response", "create");
-}
-
-static void
-makeDirDialog (GtkWidget *widget, gpointer data)
-{
-    AdwDialog *dialog;
-    GtkWidget *entry;
-
-    dialog = adw_alert_dialog_new (_ ("New Folder"),
-                                   _ ("Enter a name for the new folder."));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
-                                   _ ("_Cancel"));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "create",
-                                   _ ("C_reate"));
-    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-                                              "create", ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
-
-    entry = gtk_entry_new ();
-    gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
-    g_signal_connect (entry, "activate", G_CALLBACK (makeDir_entry_activate),
-                      dialog);
-    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
-
-    g_signal_connect (dialog, "response", G_CALLBACK (makeDir_response), data);
-
-    adw_dialog_present (dialog, widget);
-}
-
-/* Phase 4.8: drag-and-drop between file lists.
- *
- * GTK 4 replaces GtkTargetEntry / gtk_drag_source_set / gtk_drag_dest_set
- * (with the "drag_data_get" + "drag_data_received" signal pair) with two
- * event controllers: GtkDragSource on the source widget, advertising a
- * GdkContentProvider; GtkDropTarget on the destination, accepting one or
- * more GTypes. There is no longer a gtk_drag_get_source_widget(context)
- * accessor on the receive side — the source has to actually push data
- * across.
- *
- * The original GTK 3 code cheated: drag_send was a no-op (selection_data
- * empty) and drag_receive used gtk_drag_get_source_widget to fetch the
- * source widget directly. To keep the wire-payload trivial we mirror
- * that intra-app-only design: the content provider holds a GtkWidget*
- * (GTK_TYPE_WIDGET) pointing at the source files_list, and the drop
- * callback derives source/target gfl via gfl_with_hlist on each end.
- *
- * The selected source row was already recorded by file_pressed on the
- * preceding click (gfl->row), so we don't have to capture it at
- * drag-start time. */
-static gboolean
-files_drop_cb (GtkDropTarget *target, const GValue *value, double x, double y,
-               gpointer user_data)
-{
-    GtkWidget *target_widget;
-    GtkWidget *source_widget;
-    struct gfile_list *gfl_source, *gfl_target;
-    struct hl_filelist_hdr *fh;
-    char pathf[4096], patht[4096];
-
-    (void)x;
-    (void)y;
-    (void)user_data;
-
-    target_widget
-        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (target));
-
-    if (!G_VALUE_HOLDS (value, GTK_TYPE_WIDGET)) {
-        return FALSE;
-    }
-    source_widget = g_value_get_object (value);
-    if (!source_widget || source_widget == target_widget) {
-        return FALSE; /* same window — let it be a no-op */
-    }
-
-    gfl_source = gfl_with_hlist (source_widget);
-    gfl_target = gfl_with_hlist (target_widget);
-    if (!gfl_source || !gfl_target) {
-        return FALSE;
-    }
-
-    fh = gtk_hlist_get_row_data (GTK_HLIST (source_widget), gfl_source->row);
-    if (!fh) {
-        return FALSE;
-    }
-
-    if (strcmp (gfl_source->cfl->path, gfl_target->cfl->path) == 0) {
-        return FALSE; /* same directory; nothing to do */
-    }
-
-    g_snprintf (pathf, sizeof pathf, "%s/%.*s", gfl_source->cfl->path,
-                (int)fh->fnlen, fh->fname);
-    g_snprintf (patht, sizeof patht, "%s/", gfl_target->cfl->path);
-
-    hx_file_move (&the_session.htlc, pathf, patht);
-    /*	hx_file_link(&the_session.htlc, pathf, patht);
-	 *
-	 *	XXX: Pop up a dialog and prompt the user whether he wants to
-	 *	move or link the file or cancel — preserved from the GTK 3
-	 *	code so we don't lose the design intent. */
-
-    hx_list_dir (&the_session.htlc, gfl_target->cfl->path, 1, 0, gfl_target);
-    hx_list_dir (&the_session.htlc, gfl_source->cfl->path, 1, 0, gfl_source);
-
-    return TRUE;
-}
-
-static void
-files_attach_dnd (GtkWidget *files_list)
-{
-    GtkDragSource *source;
-    GtkDropTarget *target;
-    GdkContentProvider *provider;
-    GValue widget_value = G_VALUE_INIT;
-
-    g_value_init (&widget_value, GTK_TYPE_WIDGET);
-    g_value_set_object (&widget_value, files_list);
-    provider = gdk_content_provider_new_for_value (&widget_value);
-    g_value_unset (&widget_value);
-
-    source = gtk_drag_source_new ();
-    gtk_drag_source_set_content (source, provider);
-    gtk_drag_source_set_actions (source, GDK_ACTION_MOVE);
-    g_object_unref (provider);
-    gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (source));
-
-    target = gtk_drop_target_new (GTK_TYPE_WIDGET, GDK_ACTION_MOVE);
-    g_signal_connect (target, "drop", G_CALLBACK (files_drop_cb), NULL);
-    gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (target));
-}
-
-static struct gfile_list *
-create_files_window (char *path)
-{
-    GtkWidget *files_window;
-    GtkWidget *files_list;
-    GtkWidget *files_window_scroll;
-    GtkWidget *reloadbtn;
-    GtkWidget *downloadbtn;
-    GtkWidget *crtfldbtn;
-    GtkWidget *filinfobtn;
-    GtkWidget *uploadbtn;
-    GtkWidget *delbtn;
-    GtkWidget *upbtn;
-    GtkWidget *prebtn;
-    GtkWidget *vbox;
-    GtkWidget *hbuttonbox;
-    GtkWidget *topframe;
-    GdkPixmap *icon;
-    GtkWidget *pix;
-    struct gfile_list *gfl;
-    gchar *titles[2];
-
-    titles[0] = _ ("Size");
-    titles[1] = _ ("Name");
-
-    files_list = gtk_hlist_new_with_titles (2, titles);
-    gtk_hlist_set_column_width (GTK_HLIST (files_list), 0, 64);
-    gtk_hlist_set_column_width (GTK_HLIST (files_list), 1, 240);
-    gtk_hlist_set_row_height (GTK_HLIST (files_list), 18);
-    gtk_hlist_set_shadow_type (GTK_HLIST (files_list), GTK_SHADOW_NONE);
-    gtk_hlist_set_column_justification (GTK_HLIST (files_list), 0,
-                                        GTK_JUSTIFY_LEFT);
-    {
-        /* Phase 4.5: button-press-event is gone — gesture controller
-		 * dispatches single-click row tracking and double-click
-		 * open-folder / get-file via file_pressed. */
-        GtkGesture *click = gtk_gesture_click_new ();
-        gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
-                                       GDK_BUTTON_PRIMARY);
-        g_signal_connect (click, "pressed", G_CALLBACK (file_pressed), NULL);
-        gtk_widget_add_controller (files_list, GTK_EVENT_CONTROLLER (click));
-    }
-    /* Phase 4.8: drag-and-drop between file lists. See files_drop_cb /
-	 * files_attach_dnd above. */
-    files_attach_dnd (files_list);
-
-    files_window = gtk_window_new ();
-    /* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-    gtk_window_set_titlebar (GTK_WINDOW (files_window), adw_header_bar_new ());
-    gtk_window_set_resizable (GTK_WINDOW (files_window), TRUE);
-
-    /* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
-    gtk_window_set_title (GTK_WINDOW (files_window), path);
-    gtk_widget_set_size_request (files_window, 264, 400);
-
-    gfl = gfl_new (files_window, files_list, path);
-    g_object_set_data (G_OBJECT (files_window), "gfl", gfl);
-    g_signal_connect (files_window, "close-request",
-                      G_CALLBACK (close_files_window), files_list);
-
-    files_window_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (files_window_scroll),
-                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
-
-    topframe = gtk_frame_new (0);
-    gtk_widget_set_size_request (topframe, -1, 30);
-
-    hbuttonbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-
-    upbtn = gtk_button_new ();
-    gfl->up_btn = upbtn;
-    g_signal_connect (upbtn, "clicked", G_CALLBACK (file_up_btn), files_list);
-    gtk_widget_set_tooltip_text (upbtn, _ ("Parent Directory"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/up.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (upbtn, pix);
-    pix = 0, icon = 0;
-
-    reloadbtn = gtk_button_new ();
-    g_signal_connect (reloadbtn, "clicked", G_CALLBACK (file_reload_btn),
-                      files_list);
-    gtk_widget_set_tooltip_text (reloadbtn, _ ("Reload"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/refresh.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (reloadbtn, pix);
-    pix = 0, icon = 0;
-
-    downloadbtn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (downloadbtn, _ ("Download"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/dl.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    g_signal_connect (downloadbtn, "clicked", G_CALLBACK (file_dl_btn),
-                      files_list);
-    gtkhx_widget_set_child (downloadbtn, pix);
-    pix = 0, icon = 0;
-
-    prebtn = gtk_button_new ();
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/preview.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtk_widget_set_tooltip_text (prebtn, _ ("Preview"));
-    g_signal_connect (prebtn, "clicked", G_CALLBACK (file_pre_btn), files_list);
-    gtkhx_widget_set_child (prebtn, pix);
-    pix = 0, icon = 0;
-
-    uploadbtn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (uploadbtn, _ ("Upload"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/ul.xpm", NULL);
-    g_signal_connect (uploadbtn, "clicked", G_CALLBACK (get_put_data),
-                      files_list);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (uploadbtn, pix);
-    pix = 0, icon = 0;
-
-    crtfldbtn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (crtfldbtn, _ ("New Folder"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/mkdir.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (crtfldbtn, pix);
-    g_signal_connect (crtfldbtn, "clicked", G_CALLBACK (makeDirDialog),
-                      files_list);
-    pix = 0, icon = 0;
-
-    filinfobtn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (filinfobtn, _ ("Info"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/info.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (filinfobtn, pix);
-    g_signal_connect (filinfobtn, "clicked", G_CALLBACK (get_file_info),
-                      files_list);
-    pix = 0, icon = 0;
-
-    delbtn = gtk_button_new ();
-    gtk_widget_set_tooltip_text (delbtn, _ ("Delete"));
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/trash.xpm", NULL);
-    pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
-    gtkhx_widget_set_child (delbtn, pix);
-    g_signal_connect (delbtn, "clicked", G_CALLBACK (delete_file), files_list);
-    pix = 0, icon = 0;
-
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request (vbox, 240, 400);
-    gtkhx_box_pack (hbuttonbox, upbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, reloadbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, downloadbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, uploadbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, crtfldbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, filinfobtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, delbtn, 0, 0, 2);
-    gtkhx_box_pack (hbuttonbox, prebtn, 0, 0, 2);
-
-    gtkhx_widget_set_child (topframe, hbuttonbox);
-    gtkhx_box_pack (vbox, topframe, 0, 0, 0);
-    gtkhx_widget_set_child (files_window_scroll, files_list);
-    gtkhx_box_pack (vbox, files_window_scroll, 1, 1, 0);
-    gtkhx_widget_set_child (files_window, vbox);
-
-    gtk_window_present (GTK_WINDOW (files_window));
-    init_keyaccel (files_window);
-
-    gfl->cfl = NULL;
-
-    return gfl;
-}
-
-void
-open_files (void)
-{
-    struct gfile_list *gfl = create_files_window ("/");
-
-    hx_list_dir (&the_session.htlc, "/", 1, 0, gfl);
-}
 
 /* fileutils-4.0/lib/human.c */
 #define LONGEST_HUMAN_READABLE 32
@@ -1025,132 +252,144 @@ strcasestr_len (char *haystack, char *needle, size_t len)
     return 0;
 }
 
-static guint16
-icon_of_fh (struct hl_filelist_hdr *fh)
+/* Pick a cicn icon ID for a Hotline file based on its 4-byte
+ * type code (plus filename, for the drop-box heuristic on
+ * folders). Public so the new files browser's remote provider
+ * can drive it directly off the parsed wire chunks. */
+guint16
+icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
 {
-    guint16 icon;
-
-    if (!memcmp (&fh->ftype, "fldr", 4)) {
-        if (strcasestr_len ((char *)fh->fname, "DROP BOX", fh->fnlen)
-            || strcasestr_len ((char *)fh->fname, "UPLOAD", fh->fnlen)) {
-            icon = ICON_FOLDER_IN;
-        } else {
-            icon = ICON_FOLDER;
-        }
-    } else if (!memcmp (&fh->ftype, "JPEG", 4)
-               || !memcmp (&fh->ftype, "PNGf", 4)
-               || !memcmp (&fh->ftype, "GIFf", 4)
-               || !memcmp (&fh->ftype, "PICT", 4)) {
-        icon = ICON_FILE_IMAGE;
-    } else if (!memcmp (&fh->ftype, "MPEG", 4)
-               || !memcmp (&fh->ftype, "MPG ", 4)
-               || !memcmp (&fh->ftype, "AVI ", 4)
-               || !memcmp (&fh->ftype, "MooV", 4)) {
-        icon = ICON_FILE_MOOV;
-    } else if (!memcmp (&fh->ftype, "MP3 ", 4)) {
-        icon = ICON_FILE_NOTE;
-    } else if (!memcmp (&fh->ftype, "ZIP ", 4)) {
-        icon = ICON_FILE_ZIP;
-    } else if (!memcmp (&fh->ftype, "SIT", 3)) {
-        icon = ICON_FILE_SIT;
-    } else if (!memcmp (&fh->ftype, "APPL", 4)) {
-        icon = ICON_FILE_APPL;
-    } else if (!memcmp (&fh->ftype, "rohd", 4)) {
-        icon = ICON_FILE_DISK;
-    } else if (!memcmp (&fh->ftype, "HTft", 4)) {
-        icon = ICON_FILE_HTft;
-    } else if (!memcmp (&fh->ftype, "alis", 4)) {
-        icon = ICON_FILE_alis;
-    } else {
-        icon = ICON_FILE;
+    if (!ftype) {
+        return ICON_FILE;
     }
 
-    return icon;
+    if (!memcmp (ftype, "fldr", 4)) {
+        if (name
+            && (strcasestr_len ((char *)name, "DROP BOX", name_len)
+                || strcasestr_len ((char *)name, "UPLOAD", name_len))) {
+            return ICON_FOLDER_IN;
+        }
+        return ICON_FOLDER;
+    }
+    if (!memcmp (ftype, "JPEG", 4) || !memcmp (ftype, "PNGf", 4)
+        || !memcmp (ftype, "GIFf", 4) || !memcmp (ftype, "PICT", 4)) {
+        return ICON_FILE_IMAGE;
+    }
+    if (!memcmp (ftype, "MPEG", 4) || !memcmp (ftype, "MPG ", 4)
+        || !memcmp (ftype, "AVI ", 4) || !memcmp (ftype, "MooV", 4)) {
+        return ICON_FILE_MOOV;
+    }
+    if (!memcmp (ftype, "MP3 ", 4)) {
+        return ICON_FILE_NOTE;
+    }
+    if (!memcmp (ftype, "ZIP ", 4)) {
+        return ICON_FILE_ZIP;
+    }
+    if (!memcmp (ftype, "SIT", 3)) {
+        return ICON_FILE_SIT;
+    }
+    if (!memcmp (ftype, "APPL", 4)) {
+        return ICON_FILE_APPL;
+    }
+    if (!memcmp (ftype, "rohd", 4)) {
+        return ICON_FILE_DISK;
+    }
+    if (!memcmp (ftype, "HTft", 4)) {
+        return ICON_FILE_HTft;
+    }
+    if (!memcmp (ftype, "alis", 4)) {
+        return ICON_FILE_alis;
+    }
+    if (!memcmp (ftype, "TEXT", 4)) {
+        return ICON_FILE_TEXT;
+    }
+    return ICON_FILE;
 }
 
-void
-output_file_list (struct cached_filelist *cfl, struct hl_filelist_hdr *fh,
-                  void *data)
+guint16
+icon_of_fh (struct hl_filelist_hdr *fh)
 {
-    GtkWidget *files_list;
-    GdkPixmap *pixmap;
-    GdkBitmap *mask;
-    guint16 icon;
-    gint row;
-    gchar *nulls[2] = { 0, 0 };
-    char humanbuf[LONGEST_HUMAN_READABLE + 1], *sizstr;
-    char namstr[255];
-    struct gfile_list *gfl = (struct gfile_list *)data;
-    struct path_hist *path = 0;
+    if (!fh) {
+        return ICON_FILE;
+    }
+    return icon_of_ftype_and_name ((const char *)&fh->ftype,
+                                   (const char *)fh->fname, (gsize)fh->fnlen);
+}
 
-    files_list = gfl->hlist;
-    gtk_window_set_title (GTK_WINDOW (gfl->window), cfl->path);
+/* FourCC → human label. Table is intentionally small — only the
+ * codes we see often in the wild on Hotline servers. Anything
+ * unknown falls through to "<XXXX> file" with the raw FourCC,
+ * which is still better than the raw 4-byte glyph the old code
+ * showed. Strings here are plain literals; _() runs at lookup
+ * time so any later translation catalog picks them up without
+ * needing N_() / gettext-noop machinery in this TU. */
+const char *
+kind_of_ftype (const char *ftype, gboolean *is_static_out)
+{
+    static const struct {
+        const char *code;
+        const char *label;
+    } table[] = {
+        { "fldr", "Folder" },          { "TEXT", "Text Document" },
+        { "PDF ", "PDF Document" },    { "JPEG", "JPEG Image" },
+        { "GIFf", "GIF Image" },       { "GIF ", "GIF Image" },
+        { "PNGf", "PNG Image" },       { "PNG ", "PNG Image" },
+        { "PICT", "PICT Image" },      { "TIFF", "TIFF Image" },
+        { "BMP ", "BMP Image" },       { "MP3 ", "MP3 Audio" },
+        { "MPG3", "MP3 Audio" },       { "AIFF", "AIFF Audio" },
+        { "AIFC", "AIFF Audio" },      { "WAVE", "WAV Audio" },
+        { "Mp3 ", "MP3 Audio" },       { "MooV", "QuickTime Movie" },
+        { "MPEG", "MPEG Video" },      { "MPG ", "MPEG Video" },
+        { "M4V ", "MPEG-4 Video" },    { "AVI ", "AVI Video" },
+        { "MKV ", "Matroska Video" },  { "ZIP ", "ZIP Archive" },
+        { "SIT!", "StuffIt Archive" }, { "SITD", "StuffIt Archive" },
+        { "SIT5", "StuffIt Archive" }, { "BINA", "MacBinary Archive" },
+        { "TARF", "TAR Archive" },     { "Tar ", "TAR Archive" },
+        { "GZIP", "Gzip Archive" },    { "GZip", "Gzip Archive" },
+        { "BZIP", "Bzip2 Archive" },   { "APPL", "Application" },
+        { "rohd", "Disk Image" },      { "IMG ", "Disk Image" },
+        { "ISO ", "ISO Disk Image" },  { "DMG ", "Disk Image" },
+        { "HTft", "HTML Document" },   { "HTML", "HTML Document" },
+        { "alis", "Alias" },           { "SLNK", "Symbolic Link" },
+    };
+    gsize i;
 
-    if (strcmp (cfl->path, gfl->path_list->path)) {
-        path = g_malloc (sizeof (struct path_hist) + strlen (cfl->path));
-        strcpy (path->path, cfl->path);
-        path->prev = 0;
-        if (gfl->path_list) {
-            path->prev = gfl->path_list;
+    if (!ftype) {
+        if (is_static_out) {
+            *is_static_out = TRUE;
         }
-        gfl->path_list = path;
+        return _ ("Unknown");
     }
 
-    gtk_widget_set_sensitive (gfl->up_btn, gfl->path_list->prev != NULL
-                                               && gtkhx_prefs.file_samewin);
-
-    gtk_hlist_freeze (GTK_HLIST (files_list));
-    gtk_hlist_clear (GTK_HLIST (files_list));
-
-    /* Phase 5: walk the packed chunk array by BYTES. `fh` is a
-	 * struct hl_filelist_hdr * — bare pointer arithmetic
-	 * (`fh += N`) scales by sizeof(struct hl_filelist_hdr) (24 with
-	 * packed attribute + zero-size flexible array), not by 1. Result:
-	 * the increment overshoots by ~24x and the loop terminated after
-	 * the first chunk, showing only one entry no matter how many the
-	 * server sent. Cast through (char *) for the step. */
-    for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
-         fh = (struct hl_filelist_hdr *)((char *)fh + fh->len
-                                         + SIZEOF_HL_DATA_HDR)) {
-        fh->fnlen = ntohl (fh->fnlen);
-        fh->len = ntohs (fh->len);
-        fh->fsize = ntohl (fh->fsize);
-
-        row = gtk_hlist_append (GTK_HLIST (files_list), nulls);
-        gtk_hlist_set_row_data (GTK_HLIST (files_list), row, fh);
-        icon = icon_of_fh (fh);
-        load_icon (files_list, icon, &icon_files, 1, &pixmap, &mask);
-
-        if (fh->fnlen > 255) {
-            fh->fnlen = 255;
-        }
-        memcpy (namstr, fh->fname, fh->fnlen);
-        namstr[fh->fnlen] = 0;
-        if (!memcmp (&fh->ftype, "fldr", 4)) {
-            sizstr = humanbuf;
-            g_snprintf (sizstr, LONGEST_HUMAN_READABLE + 1, "(%u)", fh->fsize);
-        } else {
-            sizstr = human_size (humanbuf, fh->fsize);
-        }
-        /* Phase 5 dark-theme: no per-row foreground override — theme
-		 * default applies, so file size + name read on both light
-		 * and dark themes. */
-        gtk_hlist_set_text (GTK_HLIST (files_list), row, 0, sizstr);
-
-        if (!pixmap) {
-            gtk_hlist_set_text (GTK_HLIST (files_list), row, 1, namstr);
-        } else {
-            gtk_hlist_set_pixtext (GTK_HLIST (files_list), row, 1, namstr, 34,
-                                   pixmap, mask);
+    for (i = 0; i < G_N_ELEMENTS (table); i++) {
+        if (memcmp (ftype, table[i].code, 4) == 0) {
+            if (is_static_out) {
+                *is_static_out = TRUE;
+            }
+            return _ (table[i].label);
         }
     }
-    gtk_hlist_thaw (GTK_HLIST (files_list));
-    gtk_hlist_select_row (GTK_HLIST (files_list),
-                          (gfl->row - 1) ? (gfl->row - 1) : gfl->row, 0);
-    gtk_hlist_moveto (GTK_HLIST (files_list),
-                      (gfl->row - 1) ? (gfl->row - 1) : gfl->row, 0, .5, 0);
 
-    gfl->in_use = 0;
+    /* Fall-through: format a one-off string with the raw FourCC.
+	 * Caller frees. Avoids embedding non-printable bytes by
+	 * substituting '?' for anything outside printable ASCII —
+	 * some Hotline FourCCs are control bytes (NUL-padded
+	 * short strings, etc.) that would render as boxes. */
+    {
+        char safe[5];
+        gsize k;
+        char *out;
+        for (k = 0; k < 4; k++) {
+            unsigned char c = (unsigned char)ftype[k];
+            safe[k] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+        safe[4] = '\0';
+        out = g_strdup_printf (_ ("%s file"), safe);
+        if (is_static_out) {
+            *is_static_out = FALSE;
+        }
+        return out;
+    }
 }
 
 static void
@@ -1337,16 +576,15 @@ output_file_info (char *path, char *name, char *creator, char *type,
 struct cached_filelist *
 cfl_lookup (const char *path)
 {
-    struct gfile_list *gfl;
-
-    gfl = gfl_with_path ((char *)path);
-    if (!gfl) {
-        struct cached_filelist *cfl
-            = g_malloc0 (sizeof (struct cached_filelist));
-        return cfl;
-    } else {
-        return gfl->cfl;
-    }
+    /* Phase 5: the legacy implementation walked the global
+	 * gfile_list to share a cached_filelist with an open browser
+	 * window for that path. With the legacy browser retired the
+	 * sharing has nothing to share with — every caller now gets a
+	 * fresh zeroed cfl and fills in `path` itself. The single
+	 * remaining caller (rcv.c::rcv_task_file_list, recursive
+	 * folder download path) does exactly that. */
+    (void)path;
+    return g_malloc0 (sizeof (struct cached_filelist));
 }
 
 void
@@ -1442,113 +680,30 @@ dirmask (char *dst, char *src, char *mask)
 int
 exists_remote (char *path)
 {
-    struct gfile_list *gfl;
-    struct cached_filelist *cfl = NULL;
-    struct hl_filelist_hdr *fh;
-    char *p, *ent, buf[MAXPATHLEN];
-    int blen = 0, len;
-
-    len = strlen (path);
-    if (*path != dir_char) {
-        snprintf (buf, MAXPATHLEN, "%s%c%.*s", "/", dir_char, len, path);
-        len = strlen (buf); /* Unfortunately we can't trust snprintf
-							  return value .. */
-        path = buf;
-    }
-    ent = path;
-    for (p = path + len - 1; p >= path; p--) {
-        if (*p == dir_char) {
-            ent = p + 1;
-            while (p > path && *p == dir_char) {
-                p--;
-            }
-            blen = (p + 1) - path;
-            len -= ent - path;
-            break;
-        }
-    }
-    if (!*ent) {
-        return -1;
-    }
-
-    for (GList *l = gfile_list; l; l = l->next) {
-        gfl = l->data;
-        if (gfl->cfl && !strncmp (gfl->cfl->path, path, blen)) {
-            cfl = gfl->cfl;
-            break;
-        }
-    }
-
-    if (!cfl) {
-        guint16 hldirlen;
-        guint8 *hldir;
-
-        snprintf (buf, MAXPATHLEN, "%.*s", blen, path);
-        path = buf;
-        len = strlen (path);
-        while (len > 1 && path[--len] == dir_char) {
-            path[len] = 0;
-        }
-        cfl = g_malloc0 (sizeof (struct cached_filelist));
-        cfl->completing = COMPLETE_EXPAND;
-        cfl->path = g_strdup (path);
-        hldir = path_to_hldir (path, &hldirlen, 0);
-        task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl, 0,
-                  "ls_exists");
-        hlwrite (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1, HTLC_DATA_DIR,
-                 hldirlen, hldir);
-        g_free (hldir);
-        return 0;
-    }
-    if (!cfl->fh) {
-        return 0;
-    }
-
-    /* Phase 5: byte-arithmetic step. See the matching comment in
-	 * output_file_list — `fh` is a struct pointer so bare
-	 * `fh += N` scales by sizeof(struct hl_filelist_hdr). */
-    for (fh = cfl->fh; (guint32)((char *)fh - (char *)cfl->fh) < cfl->fhlen;
-         fh = (struct hl_filelist_hdr *)((char *)fh + fh->len
-                                         + SIZEOF_HL_DATA_HDR)) {
-        if ((int)fh->fnlen == len && !strncmp ((char *)fh->fname, ent, len)) {
-            return 1;
-        }
-    }
-
+    /* Phase 5: the legacy implementation walked the now-deleted
+	 * gfile_list cache to answer "is path present in any open
+	 * browser's last listing?" The new files browser doesn't
+	 * maintain that global cache — its listings live inside the
+	 * provider as a transient GListStore that's rebuilt per
+	 * directory.
+	 *
+	 * The single caller (xfers.c::xfer_go on the upload path)
+	 * uses the answer to decide whether to attach a FILE_PREVIEW
+	 * "is-resume" chunk to HTLC_HDR_FILE_PUT. Returning 0 here
+	 * matches the legacy code's first-call behaviour (cache miss
+	 * → async listing fires → return 0, no FILE_PREVIEW on this
+	 * upload). The server's rename-on-collision behaviour is
+	 * unchanged. */
+    (void)path;
     return 0;
 }
 
-void
-hx_list_dir (struct htlc_conn *htlc, const char *path, int reload, int recurs,
-             void *data)
-{
-    guint16 hldirlen;
-    guint8 *hldir;
-    struct cached_filelist *cfl;
-    struct gfile_list *gfl = data;
-
-    if (gfl->cfl
-        && (strcmp (gfl->cfl->path, path) && !gtkhx_prefs.file_samewin)) {
-        gfl = create_files_window ((char *)path);
-    }
-
-    if (gfl->cfl) {
-        g_free (gfl->cfl);
-    }
-
-    gfl->cfl = g_malloc0 (sizeof (struct cached_filelist));
-    cfl = gfl->cfl;
-    cfl->path = g_strdup (path);
-    gfl->in_use = 1;
-    if (recurs) {
-        cfl->completing = COMPLETE_LS_R;
-    }
-
-    hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, RCV_TASK_FN (rcv_task_file_list), cfl, (void *)gfl, "ls");
-    hlwrite (htlc, HTLC_HDR_FILE_LIST, 0, 1, HTLC_DATA_DIR, hldirlen, hldir);
-    g_free (hldir);
-}
+/* Phase 5: hx_list_dir is gone. The files browser's remote provider
+ * (files_remote_provider.c::remote_send_file_list) emits its own
+ * HTLC_HDR_FILE_LIST with the provider as the signal-data carrier,
+ * which is what lets the response route back through
+ * hx_remote_files_provider_handle_file_list rather than the
+ * deleted legacy gfile_list dispatcher. */
 
 void
 hx_make_dir (struct htlc_conn *htlc, char *path)
@@ -1648,6 +803,164 @@ hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
     htxf = xfer_new (lpath, rdir, base, strlen (base), XFER_PUT, 0, 0);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
+}
+
+void
+hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
+               const char *name, gsize name_len)
+{
+    struct htxf_conn *htxf;
+    char lpath[MAXPATHLEN];
+    char rdir_buf[MAXPATHLEN];
+    guint16 hldirlen = 0;
+    guint8 *hldir = NULL;
+    gsize rdir_len;
+
+    if (!name_len) {
+        return;
+    }
+
+    /* Build the local destination root: lpath_root + '/' + name.
+	 * folder_get_thread snapshots this as base_path and rebuilds
+	 * the full per-file path inside its loop. */
+    {
+        gsize root_len = strlen (lpath_root);
+        gsize sep = (root_len > 0 && lpath_root[root_len - 1] != '/') ? 1 : 0;
+        if (root_len + sep + name_len + 1 > sizeof (lpath)) {
+            return;
+        }
+        memcpy (lpath, lpath_root, root_len);
+        if (sep) {
+            lpath[root_len] = '/';
+        }
+        memcpy (lpath + root_len + sep, name, name_len);
+        lpath[root_len + sep + name_len] = 0;
+    }
+
+    /* The remote directory for the GETFOLDER request is the
+	 * parent — the basename of the folder is the FILE_NAME chunk.
+	 * The wire framing is the same as FILE_GET in that respect. */
+    rdir_len = rdir ? strlen (rdir) : 0;
+    if (rdir_len >= sizeof (rdir_buf)) {
+        rdir_len = sizeof (rdir_buf) - 1;
+    }
+    memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
+    rdir_buf[rdir_len] = 0;
+
+    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_GET);
+    htxf->filter_argv = 0;
+    htxf->opt.retry = 0;
+
+    /* Register the rcv callback BEFORE sending the request — the
+	 * task's trans id is captured by hlwrite and routed back to
+	 * rcv_task_folder_get by hx_rcv_task. */
+    task_new (htlc, RCV_TASK_FN (rcv_task_folder_get), htxf, 0,
+              "xfer_go_folder");
+    if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
+        hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
+        hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 2, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir);
+        g_free (hldir);
+    } else {
+        hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 1, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name);
+    }
+}
+
+/* Walk a local directory tree and sum the on-disk sizes of all
+ * regular files. The aggregate goes into HTLC_DATA_HTXF_SIZE on
+ * the PUTFOLDER request so the server has something sensible to
+ * display while the actual per-file sizes stream in. */
+static void
+hx_folder_aggregate (const char *root, guint64 *total_bytes_out,
+                     guint32 *nfiles_out)
+{
+    GDir *d;
+    const char *name;
+
+    d = g_dir_open (root, 0, NULL);
+    if (!d) {
+        return;
+    }
+    while ((name = g_dir_read_name (d))) {
+        struct stat sb;
+        char *full = g_build_filename (root, name, NULL);
+        if (lstat (full, &sb) == 0) {
+            if (S_ISDIR (sb.st_mode)) {
+                hx_folder_aggregate (full, total_bytes_out, nfiles_out);
+            } else if (S_ISREG (sb.st_mode)) {
+                *total_bytes_out += (guint64)sb.st_size;
+                (*nfiles_out)++;
+            }
+        }
+        g_free (full);
+    }
+    g_dir_close (d);
+}
+
+void
+hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
+               const char *name, gsize name_len)
+{
+    struct htxf_conn *htxf;
+    char rdir_buf[MAXPATHLEN];
+    guint16 hldirlen = 0;
+    guint8 *hldir = NULL;
+    gsize rdir_len;
+    guint64 total_bytes = 0;
+    guint32 nfiles = 0;
+    guint32 size_n;
+    guint32 nfiles_n;
+
+    if (!name_len) {
+        return;
+    }
+
+    /* Pre-walk for the SIZE / NFILES chunks. The server uses
+	 * these for the queue/display, not for framing. */
+    hx_folder_aggregate (lpath, &total_bytes, &nfiles);
+    /* HTLC_DATA_HTXF_SIZE is u32; clamp on overflow. */
+    if (total_bytes > G_MAXUINT32) {
+        size_n = htonl (G_MAXUINT32);
+    } else {
+        size_n = htonl ((guint32)total_bytes);
+    }
+    nfiles_n = htonl (nfiles);
+
+    rdir_len = rdir ? strlen (rdir) : 0;
+    if (rdir_len >= sizeof (rdir_buf)) {
+        rdir_len = sizeof (rdir_buf) - 1;
+    }
+    memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
+    rdir_buf[rdir_len] = 0;
+
+    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_PUT);
+    htxf->filter_argv = 0;
+    htxf->opt.retry = 0;
+    /* Stash the aggregate up front; folder_put_thread fills
+	 * total_pos as the stream progresses. */
+    if (total_bytes > G_MAXUINT32) {
+        htxf->total_size = G_MAXUINT32;
+    } else if (total_bytes > 0) {
+        htxf->total_size = (guint32)total_bytes;
+    } else {
+        htxf->total_size = 1;
+    }
+
+    task_new (htlc, RCV_TASK_FN (rcv_task_folder_put), htxf, 0,
+              "xfer_go_folder");
+    if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
+        hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
+        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 4, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir,
+                 HTLC_DATA_HTXF_SIZE, 4, &size_n, HTLC_DATA_FILE_NFILES, 4,
+                 &nfiles_n);
+        g_free (hldir);
+    } else {
+        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 3, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_HTXF_SIZE, 4, &size_n,
+                 HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
+    }
 }
 
 void

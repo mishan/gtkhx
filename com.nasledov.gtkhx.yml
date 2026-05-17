@@ -17,11 +17,11 @@
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
-# nettle, zlib, poppler-glib (PDF preview viewer), and
-# gtksourceview-5 (syntax-highlighted source preview viewer) are
-# present in the runtime; libcanberra and gsound are NOT (gsound
-# stopped being included around the GNOME 47/48 transition, and
-# the runtime never had libcanberra). We build both as inline
+# nettle, zlib, and gtksourceview-5 (syntax-highlighted source
+# preview viewer) are present in the runtime; libcanberra, gsound,
+# and poppler-glib are NOT (gsound stopped being included around
+# the GNOME 47/48 transition; poppler-glib was dropped in 49; the
+# runtime never had libcanberra). We build all three as inline
 # modules below.
 #
 # poppler-glib and gtksourceview-5 are declared optional in the
@@ -173,15 +173,57 @@ modules:
       - --without-xml
       - --without-zip
       - --without-zstd
-    # NOTE: URL + SHA need to be set to a real release at Flatpak
-    # build time. Available releases are listed at
+    # Pinned to 7.1.2-18 (released 2026-03-22). The 7.x API has been
+    # stable for years; bump to a newer 7.1.x point release whenever
+    # you regenerate the sha256. New releases are at
     # https://github.com/ImageMagick/ImageMagick/releases
-    # Pin to a known-good 7.1.x point release; the API is stable
-    # across the 7.x series.
     sources:
       - type: archive
-        url: PLACEHOLDER_FILL_IN_LATEST_7_1_X_RELEASE_TARBALL
-        sha256: PLACEHOLDER_SHA256_OF_THE_TARBALL_ABOVE
+        url: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-18.tar.gz
+        sha256: 2db8a1f9bac19831c76574e4fd514ecb80a71a49911ee5dc8c1f3fb6d9d550df
+
+  # Poppler — used for the PDF preview viewer in src/preview.c.
+  # GNOME 49 dropped poppler-glib from the runtime; without this
+  # module the meson dependency check returns "poppler-glib: no"
+  # and HAVE_POPPLER stays unset, so PDFs fall through to the
+  # plain-text viewer (i.e. binary noise on screen).
+  #
+  # We only need the GLib bindings and the core PDF parsing —
+  # disable the Qt5/Qt6 frontends, the standalone command-line
+  # utilities (pdfinfo, pdftotext, etc.), the cpp bindings, and
+  # the test/manual builds. Boost, gpgme, libcurl, NSS-based
+  # signature verification, and OpenJPEG are all off too —
+  # rasterising PDF pages to Cairo doesn't touch any of those
+  # code paths, and trimming them keeps the build footprint
+  # small. libpng / libjpeg / libtiff stay enabled (in the
+  # runtime already, and JPEG-in-PDF is common enough that
+  # disabling DCT decoding would be noticeable).
+  - name: poppler
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DENABLE_GLIB=ON
+      - -DENABLE_CPP=OFF
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=OFF
+      - -DENABLE_UTILS=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_GPGME=OFF
+      - -DENABLE_LIBCURL=OFF
+      - -DENABLE_NSS3=OFF
+      - -DENABLE_LIBOPENJPEG=none
+      - -DBUILD_GTK_TESTS=OFF
+      - -DBUILD_QT5_TESTS=OFF
+      - -DBUILD_QT6_TESTS=OFF
+      - -DBUILD_CPP_TESTS=OFF
+      - -DBUILD_MANUAL_TESTS=OFF
+      - -DENABLE_GTK_DOC=OFF
+    # Pinned to 26.05.0 (released 2026-05-03). Bump and regen sha256
+    # from https://poppler.freedesktop.org/releases.html as needed.
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-26.05.0.tar.xz
+        sha256: 6fef27ff04f37db43054c86bcdff6128c9fb1f6af4ef3c8b369a7e9abd68d0bb
 
   - name: gtkhx
     buildsystem: meson

@@ -69,6 +69,21 @@ struct hl_user_data {
 #define HTXF_MAGIC_LEN 4
 #define HTXF_MAGIC_INT 0x48545846
 
+/* HTXF subchannel transfer types. Carried in the last 4 bytes of
+ * the 16-byte HTXF magic header (`unknown` u32 in struct
+ * htxf_hdr, layered as u16 type + u16 reserved on the wire).
+ * mhxd resolves the kind of transfer server-side by matching the
+ * inbound HTXF connection's ref to a pre-created htxf_conn that
+ * already has its ->type set, so for mhxd the wire field is
+ * advisory. Mac-native servers use it to dispatch the subchannel
+ * into the right framing, so sending the wrong value here means
+ * the server interprets a folder transfer as a single-file
+ * transfer and waits forever for FILP framing while we send
+ * FILE_NEXT — looks like a hang from both ends. */
+#define HTXF_TYPE_FILE 0
+#define HTXF_TYPE_FOLDER 1
+#define HTXF_TYPE_BANNER 2
+
 #define HTRK_TCPPORT 5498
 #define HTRK_UDPPORT 5499
 #define HTLS_TCPPORT 5500
@@ -95,6 +110,14 @@ struct hl_user_data {
 #define HTLC_HDR_FILE_SETINFO ((guint32)0x000000cf)
 #define HTLC_HDR_FILE_MOVE ((guint32)0x000000d0)
 #define HTLC_HDR_FILE_SYMLINK ((guint32)0x000000d1)
+/* Folder transfer opcodes — 1.5+. Wire format is a stream of
+ * next_file_info records over an HTXF subchannel driven by the
+ * receiver via FILE_NEXT / FILE_SEND / FILE_RESUME commands; see
+ * src/xfers.c::folder_get_thread for the full state machine and
+ * memory/gtkhx_folder_xfer_protocol.md for cross-references into
+ * mhxd's folder_send / folder_recv. */
+#define HTLC_HDR_FILE_GETFOLDER ((guint32)0x000000d2)
+#define HTLC_HDR_FILE_PUTFOLDER ((guint32)0x000000d5)
 #define HTLC_HDR_USER_GETLIST ((guint32)0x0000012c)
 #define HTLC_HDR_USER_GETINFO ((guint32)0x0000012f)
 #define HTLC_HDR_USER_CHANGE ((guint32)0x00000130)
@@ -149,6 +172,11 @@ struct hl_user_data {
 #define HTLC_DATA_DIR ((guint16)0x00ca)
 #define HTLC_DATA_RFLT ((guint16)0x00cb)
 #define HTLC_DATA_FILE_PREVIEW ((guint16)0x00cc)
+/* Aggregate file count carried in HTLC_HDR_FILE_PUTFOLDER. mhxd
+ * also reads this as HTLS_DATA_FILE_NFILES on the GETFOLDER reply
+ * — same numeric type code (0xdc), different naming convention
+ * for which side is the sender. */
+#define HTLC_DATA_FILE_NFILES ((guint16)0x00dc)
 #define HTLC_DATA_FILE_COMMENT ((guint16)0x00d2)
 #define HTLC_DATA_FILE_RENAME ((guint16)0x00d3)
 #define HTLC_DATA_DIR_RENAME ((guint16)0x00d4)

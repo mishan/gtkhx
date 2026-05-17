@@ -40,6 +40,14 @@ extern void rcv_task_file_list (struct htlc_conn *htlc,
 extern void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path);
 extern void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf);
 extern void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf);
+/* Folder transfer task replies. Mirror rcv_task_file_get /
+ * rcv_task_file_put but also parse HTLS_DATA_FILE_NFILES so the
+ * tasks-window can show the leaf count. The actual stream is
+ * handled by folder_get_thread / folder_put_thread in xfers.c. */
+extern void rcv_task_folder_get (struct htlc_conn *htlc,
+                                 struct htxf_conn *htxf);
+extern void rcv_task_folder_put (struct htlc_conn *htlc,
+                                 struct htxf_conn *htxf);
 
 /* Phase 5: drop any pending post-login fallback timer. Called from
  * hx_htlc_close so we don't fire fetches into a closed connection if

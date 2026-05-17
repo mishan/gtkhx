@@ -66,7 +66,6 @@ struct gtkhx_prefs {
     unsigned char auto_reply;
     unsigned char timestamp;
     unsigned char word_wrap;
-    unsigned char file_samewin;
     unsigned char track_case;
     unsigned char old_nickcompletion;
     unsigned char outrate_limit;

@@ -76,8 +76,55 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 # fully parallel-safe — fall back to single-job if the parallel run
 # stumbled.
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
-    && cd mhxd \
+RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
+
+# Patch mhxd's folder-transfer size formula. Two copy/paste bugs
+# in mhxd: src/hxd/htxf.c::folder_getpaths and src/hxd/files.c::
+# rcv_folder_get use the wrong variables when populating the
+# per-file pf->total_size that goes out as HTLS_DATA_HTXF_SIZE
+# and as the per-file FILE_SEND size header inside the HTXF
+# folder stream.
+#
+#   rsrc_size = sizeof(pathbuf);         <- buffer's static size
+#                                           (MAXPATHLEN), not the
+#                                           file's actual rsrc
+#                                           fork length
+#   ... + strlen(pathbuf);               <- server-side path
+#                                           length, which doesn't
+#                                           appear on the wire
+#
+# Compare to the correct solo-file formula in rcv_file_get
+# (files.c, around line 1576-1584):
+#
+#   rsrc_size = resource_len(path);      <- actual fork size, 0
+#                                           when no rsrc fork
+#   ... + comment_len(path);             <- Mac file comment
+#                                           length, on-wire
+#
+# The result of the typo: pf->total_size is wildly over-claimed
+# (typically by 4 KiB per file). file_send writes the data fork,
+# then the file_send rsrc-fork short-circuit
+#       if (!use_hfs || preview || !(rsrc_size - rsrc_pos))
+#           return 0;
+# fails (rsrc_size is non-zero), so file_send writes the MACR
+# marker and tries to open the rsrc fork. resource_open fails on
+# files without a CAP/.resource sidecar, file_send returns -1,
+# and folder_send terminates the WHOLE multi-file stream after
+# just one file. From the client's perspective: the first file
+# arrives correctly, then the subchannel disconnects mid-tree.
+#
+# Fix both occurrences of the same typo here at build time so
+# the integration tests (and any user pointing GtkHx at this
+# container) see a server that handles multi-file folder
+# transfers cleanly with HFS still enabled. The same fix is
+# worth submitting upstream.
+RUN cd /build/mhxd \
+    && sed -i 's|rsrc_size = sizeof(pathbuf);|rsrc_size = resource_len(pathbuf);|' \
+         src/hxd/htxf.c src/hxd/files.c \
+    && sed -i 's|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + strlen(pathbuf);|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + comment_len(pathbuf);|' \
+         src/hxd/htxf.c src/hxd/files.c
+
+RUN cd /build/mhxd \
     && ./autogen.sh \
     && ./configure \
         --prefix=/opt/mhxd \
@@ -176,7 +223,12 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
     && printf 'tier-3 integration suite test data\n' \
         > /opt/mhxd/run/files/integration_seed.txt \
-    && mkdir -p /opt/mhxd/run/files/Uploads
+    && mkdir -p /opt/mhxd/run/files/Uploads \
+    && mkdir -p /opt/mhxd/run/files/test_folder \
+    && printf 'folder-leaf-A\n' \
+        > /opt/mhxd/run/files/test_folder/leaf_a.txt \
+    && printf 'folder-leaf-B\n' \
+        > /opt/mhxd/run/files/test_folder/leaf_b.txt
 
 # Seed default banner images for file-mode HTXF tests. Fetched
 # from placehold.co at build time so the running container can
@@ -249,6 +301,35 @@ RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
  && printf "$fmt" \
       | dd of=/opt/mhxd/run/accounts/guest/UserData \
             bs=1 count=1 seek=4 conv=notrunc status=none
+
+# (7) Grant upload_folders (bit 38) and download_folders (bit 39)
+#     on the guest UserData.
+#
+#     hl_access.h numbers bits big-endian-first: bit N lives at
+#     access[N >> 3] & (0x80 >> (N & 7)). So:
+#       bit 38: byte 4 of access bits, mask 0x80 >> 6 = 0x02
+#       bit 39: byte 4 of access bits, mask 0x80 >> 7 = 0x01
+#     => byte 4 of access = byte 8 of UserData (4 bytes magic +
+#        4 bytes preceding access bytes). The upstream seed has
+#        byte 8 = 0x00, so guest cannot GETFOLDER / PUTFOLDER.
+#
+#     mhxd's HTLC dispatcher gates HTLC_HDR_FILE_GETFOLDER on
+#     htlc->access.download_folders and HTLC_HDR_FILE_PUTFOLDER on
+#     htlc->access.upload_folders (mhxd/src/hxd/rcv.c:557-564),
+#     so without these bits the integration tests for both opcodes
+#     bounce with "Unknown or non-authorised".
+#
+#     OR byte 8 with 0x03 to grant both bits without disturbing
+#     anything else. Same double-printf-with-octal pattern as
+#     step (6) above; see its comment for why we can't use \xNN.
+RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 skip=8 status=none \
+          | od -An -vtu1 | tr -d ' ') \
+ && m=$(( b | 0x03 )) \
+ && fmt=$(printf '\\%03o' "$m") \
+ && printf "$fmt" \
+      | dd of=/opt/mhxd/run/accounts/guest/UserData \
+            bs=1 count=1 seek=8 conv=notrunc status=none
 
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.

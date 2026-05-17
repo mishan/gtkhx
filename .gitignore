@@ -80,9 +80,12 @@ dkms.conf
 /libtool
 /ltmain.sh
 
-# Per-directory generated Makefiles
+# Per-directory generated Makefiles (autotools-era; the meson tree
+# doesn't produce these). cicndump is a hand-written standalone
+# tool with its own Makefile that we DO want tracked.
 Makefile
 Makefile.in
+!tools/cicndump/Makefile
 
 # gettext / NLS
 /ABOUT-NLS

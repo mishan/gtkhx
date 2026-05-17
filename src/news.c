@@ -578,10 +578,10 @@ create_news_window (session *sess)
 	 * symbolic icon — gtkhx_pixmap_button's XPM-upscale path
 	 * would render it blurry. Use a plain GtkButton instead. */
     postButton
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.xpm",
+        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
                                _ ("Post News"), 2, NULL, NULL);
     reloadButton
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.xpm",
+        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",
                                _ ("Reload News"), 2, NULL, NULL);
     findButton = gtk_button_new_from_icon_name ("system-search-symbolic");
     gtk_widget_set_tooltip_text (findButton, _ ("Find in News (Ctrl+F)"));
