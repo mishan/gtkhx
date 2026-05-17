@@ -396,6 +396,28 @@ struct rename_ctx {
     GtkWidget *entry; /* not owned — held by dialog */
 };
 
+/* AdwAlertDialog signal ordering — every on_*_response handler
+ * in this file owns its own ctx cleanup.
+ *
+ * libadwaita's emit_response() (adw-alert-dialog.c) does:
+ *
+ *     adw_dialog_close (self);              // emits "closed"
+ *     g_signal_emit (self, SIGNAL_RESPONSE);// emits "response"
+ *
+ * The "closed" signal fires BEFORE "response". An older pattern in
+ * this file split work across two handlers — "response" did the
+ * action, "closed" freed the ctx — which gave a use-after-free
+ * once "closed" landed first and the response handler ran on a
+ * freed ctx. The delete dialog crashed concretely on
+ * `ctx->names->len` after the GPtrArray slab got reused.
+ *
+ * Fix: only register "response". The handler does its own
+ * cleanup at the end via a single goto-cleanup tail. "response"
+ * fires for both the affirmative branch AND the close-response
+ * (cancel) branch (see adw_alert_dialog_closed which emits
+ * SIGNAL_RESPONSE with priv->close_response on dismiss), so a
+ * single handler is the sole owner of the ctx lifecycle. */
+
 static void
 on_rename_response (AdwAlertDialog *dialog, const char *response,
                     gpointer user_data)
@@ -406,17 +428,17 @@ on_rename_response (AdwAlertDialog *dialog, const char *response,
     (void)dialog;
 
     if (g_strcmp0 (response, "rename") != 0) {
-        return;
+        goto cleanup;
     }
     if (!ctx->panel || !ctx->old_name) {
-        return;
+        goto cleanup;
     }
     new_name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
     if (!new_name || !*new_name) {
-        return;
+        goto cleanup;
     }
     if (g_strcmp0 (new_name, ctx->old_name) == 0) {
-        return; /* nothing changed */
+        goto cleanup; /* nothing changed */
     }
 
     if (!hx_files_provider_rename (files_panel_get_provider (ctx->panel),
@@ -424,13 +446,8 @@ on_rename_response (AdwAlertDialog *dialog, const char *response,
         show_toast (ctx->br, err ? err->message : _ ("Rename failed."));
         g_clear_error (&err);
     }
-}
 
-static void
-on_rename_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    struct rename_ctx *ctx = user_data;
-    (void)dialog;
+cleanup:
     g_free (ctx->old_name);
     g_free (ctx);
 }
@@ -484,8 +501,9 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
     ctx->old_name = g_strdup (hx_file_entry_get_name (e));
     ctx->entry = entry;
 
+    /* Single-handler ownership — see the libadwaita ordering note
+	 * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_rename_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (on_rename_closed), ctx);
 
     adw_dialog_present (dialog, br->window);
 
@@ -549,7 +567,7 @@ struct move_ctx {
                                  * local-source path. Mirrors the
                                  * same gate files_panel uses on
                                  * its own path entries. Freed in
-                                 * on_move_closed. */
+                                 * on_move_response's cleanup tail. */
 };
 
 static void
@@ -563,18 +581,20 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
     GError *last_err = NULL;
     (void)dialog;
 
+    /* Single-handler ownership of ctx lifecycle — see the
+	 * libadwaita ordering note above on_rename_response. */
     if (g_strcmp0 (response, "move") != 0) {
-        return;
+        goto cleanup;
     }
     if (!ctx->panel || !ctx->names) {
-        return;
+        goto cleanup;
     }
 
     prov = files_panel_get_provider (ctx->panel);
     dest_dir = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
     src_dir = hx_files_provider_get_current_path (prov);
     if (!dest_dir || !*dest_dir) {
-        return;
+        goto cleanup;
     }
 
     /* Same-dir → defer to the regular Rename path; if there's no
@@ -678,17 +698,15 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
     if (last_err) {
         g_error_free (last_err);
     }
-}
 
-static void
-on_move_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    struct move_ctx *ctx = user_data;
-    (void)dialog;
-    /* Tear the path-completion popover down BEFORE the dialog
-	 * destruction drags the entry away — hx_path_complete_free
+cleanup:
+    /* Tear the path-completion popover down BEFORE the dialog's
+	 * own destruction drags the entry away — hx_path_complete_free
 	 * disconnects the per-entry signal handler and key controller,
-	 * and needs the entry to still be valid for that. */
+	 * and needs the entry to still be valid for that. We're inside
+	 * adw_alert_dialog emit_response which holds a strong ref on
+	 * the dialog across both "closed" and "response", so the entry
+	 * is still alive here. */
     if (ctx->complete) {
         hx_path_complete_free (ctx->complete);
         ctx->complete = NULL;
@@ -801,15 +819,16 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
 	 * local panel's path entry uses. Local-source only — the
 	 * completion needs synchronous directory enumeration, which
 	 * isn't viable against a Hotline server (each typed char
-	 * would trigger an RPC round-trip). Stored on ctx so
-	 * on_move_closed can free it before the entry is destroyed
-	 * with the dialog. */
+	 * would trigger an RPC round-trip). Stored on ctx so the
+	 * cleanup tail in on_move_response can free it before the
+	 * entry is destroyed with the dialog. */
     if (!ctx->is_remote) {
         ctx->complete = hx_path_complete_attach (GTK_ENTRY (entry));
     }
 
+    /* Single-handler ownership — see the libadwaita ordering note
+	 * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (on_move_closed), ctx);
 
     adw_dialog_present (dialog, br->window);
     gtk_widget_grab_focus (entry);
@@ -1449,15 +1468,17 @@ on_mkdir_response (AdwAlertDialog *dialog, const char *response,
     GError *err = NULL;
     (void)dialog;
 
+    /* Single-handler ownership of ctx lifecycle — see the
+	 * libadwaita ordering note above on_rename_response. */
     if (g_strcmp0 (response, "create") != 0) {
-        return;
+        goto cleanup;
     }
     if (!ctx->panel) {
-        return;
+        goto cleanup;
     }
     name = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
     if (!name || !*name) {
-        return;
+        goto cleanup;
     }
 
     if (!hx_files_provider_mkdir (files_panel_get_provider (ctx->panel), name,
@@ -1465,13 +1486,9 @@ on_mkdir_response (AdwAlertDialog *dialog, const char *response,
         g_warning ("mkdir failed: %s", err ? err->message : "unknown");
         g_clear_error (&err);
     }
-}
 
-static void
-on_mkdir_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    (void)dialog;
-    g_free (user_data);
+cleanup:
+    g_free (ctx);
 }
 
 static void
@@ -1507,8 +1524,9 @@ on_mkdir_clicked (GtkButton *btn, gpointer user_data)
     ctx->panel = br->active;
     ctx->entry = entry;
 
+    /* Single-handler ownership — see the libadwaita ordering note
+	 * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_mkdir_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (on_mkdir_closed), ctx);
 
     adw_dialog_present (dialog, br->window);
     /* Focus the entry so the user can type immediately + hit
@@ -1535,11 +1553,17 @@ on_delete_response (AdwAlertDialog *dialog, const char *response,
     guint i;
     (void)dialog;
 
+    /* Single-handler ownership of ctx lifecycle — see the
+	 * libadwaita ordering note above on_rename_response. The
+	 * historical split with on_delete_closed crashed concretely
+	 * here: "closed" fired first, freed ctx->names, then
+	 * "response" ran on the freed GPtrArray and SIGSEGV'd at
+	 * ctx->names->len once the slab got reused. */
     if (g_strcmp0 (response, "delete") != 0) {
-        return;
+        goto cleanup;
     }
     if (!ctx->panel || !ctx->names) {
-        return;
+        goto cleanup;
     }
     prov = files_panel_get_provider (ctx->panel);
 
@@ -1551,13 +1575,8 @@ on_delete_response (AdwAlertDialog *dialog, const char *response,
             g_clear_error (&err);
         }
     }
-}
 
-static void
-on_delete_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    struct delete_ctx *ctx = user_data;
-    (void)dialog;
+cleanup:
     if (ctx->names) {
         g_ptr_array_free (ctx->names, TRUE);
     }
@@ -1634,8 +1653,9 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
     }
     g_ptr_array_free (entries, TRUE);
 
+    /* Single-handler ownership — see the libadwaita ordering note
+	 * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_delete_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (on_delete_closed), ctx);
 
     adw_dialog_present (dialog, br->window);
 }
