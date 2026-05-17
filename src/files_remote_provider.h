@@ -33,6 +33,21 @@ extern gboolean hx_remote_files_provider_handle_file_list (gpointer cfl,
                                                            gpointer fh,
                                                            gpointer data);
 
+/* Error counterpart. Called from rcv.c::rcv_task_file_list's
+ * task_inerror short-circuit so the provider can clear its
+ * listing, flip listing_error TRUE, and emit "navigated" — the
+ * panel then picks up the new state via its existing handler and
+ * updates the empty-state messaging. Returns TRUE when claimed,
+ * FALSE when `data` isn't one of ours. */
+extern gboolean hx_remote_files_provider_handle_file_list_error (gpointer cfl,
+                                                                 gpointer data);
+
+/* TRUE iff the provider's most recent FILE_LIST request came back
+ * as a task error. Panel queries this when rendering the empty-
+ * state hint in the status footer. */
+extern gboolean
+hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self);
+
 G_END_DECLS
 
 #endif /* HX_FILES_REMOTE_PROVIDER_H */

@@ -10,14 +10,22 @@
 #include "config.h"
 
 #include <gtk/gtk.h>
-#include <glib/gi18n.h>
 
-#include "files.h" /* ICON_* */
+#include "hx.h"        /* the_session */
+#include "hl_access.h" /* HL_ACCESS_* + hl_access_has */
+#include "files.h"     /* ICON_* */
 #include "files_complete.h"
 #include "files_entry.h"
 #include "files_local_provider.h"
 #include "files_provider.h"
+#include "files_remote_provider.h" /* listing-error query for empty-state */
 #include "files_panel.h"
+
+/* hx.h pulls compat.h which defines _(s) as a passthrough; undef
+ * before gi18n.h gives us the proper gettext() expansion without
+ * the redefine warning. */
+#undef _
+#include <glib/gi18n.h>
 
 struct _files_panel {
     GtkWidget *root;  /* GtkBox, top-level for embedding */
@@ -432,6 +440,44 @@ update_status (files_panel *p)
     if (sel) {
         gtk_bitset_unref (sel);
     }
+
+    /* If the remote provider's most recent FILE_LIST came back as
+	 * a task error, the rows are empty and the user would just see
+	 * "0 items" — which doesn't tell them what went wrong.
+	 * Differentiate between drop-box and other listing failures by
+	 * cross-referencing the user's access bits:
+	 *
+	 *   UPLOAD_FILES set + VIEW_DROP_BOXES unset
+	 *     → almost certainly a drop-box; tell the user they can
+	 *       still upload here.
+	 *   anything else
+	 *     → generic "can't list" message.
+	 *
+	 * Selection count short-circuits both because the user might
+	 * have selected rows on a prior listing before navigating
+	 * into the dropbox — but the listing is empty now so n_sel
+	 * is always 0 on this path anyway. */
+    if (p->provider && HX_IS_REMOTE_FILES_PROVIDER (p->provider)
+        && hx_remote_files_provider_has_listing_error (
+            HX_REMOTE_FILES_PROVIDER (p->provider))) {
+        const guint8 *bits = (const guint8 *)&the_session.htlc.access;
+        gboolean can_upload = hl_access_has (bits, HL_ACCESS_UPLOAD_FILES);
+        gboolean can_view_dropbox
+            = hl_access_has (bits, HL_ACCESS_VIEW_DROP_BOXES);
+        if (the_session.htlc.fd && can_upload && !can_view_dropbox) {
+            text = g_strdup (
+                _ ("Folder is upload-only — drop files here to upload"));
+        } else {
+            text = g_strdup (_ ("Can't list this folder."));
+        }
+        gtk_widget_add_css_class (p->status_label, "warning");
+        gtk_label_set_text (GTK_LABEL (p->status_label), text);
+        g_free (text);
+        return;
+    }
+
+    /* Successful listing — drop any sticky warning style. */
+    gtk_widget_remove_css_class (p->status_label, "warning");
 
     if (n_sel == 0) {
         text = g_strdup_printf (

@@ -40,6 +40,7 @@
 #include "chat.h"
 #include "tasks.h"
 #include "files.h"
+#include "files_remote_provider.h"
 #include "preview.h"
 #include "gtkutil.h"
 #include "msg.h"
@@ -1637,6 +1638,17 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
     guint16 fhlen;
 
     if (task_inerror (htlc)) {
+        /* Phase 5+: give the new-browser remote provider a chance
+		 * to react before we drop the cfl. The helper marks the
+		 * provider's listing_error flag and emits "navigated" so
+		 * the panel can show an empty-state hint ("Folder is
+		 * upload-only — drop files here to upload" if the access
+		 * bits also indicate a drop-box). Returns FALSE silently
+		 * when data isn't a HxRemoteFilesProvider (e.g. the
+		 * recursive-download path uses data=NULL); we just free
+		 * cfl regardless. */
+        (void)hx_remote_files_provider_handle_file_list_error (cfl, data);
+        g_free (cfl->path);
         g_free (cfl);
         return;
     }

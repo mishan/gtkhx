@@ -37,6 +37,14 @@ struct _HxRemoteFilesProvider {
     GObject parent_instance;
     GListStore *listing;
     char *current_path; /* Hotline-style; "/" at root */
+    /* TRUE if the most recent FILE_LIST RPC came back as a task
+	 * error (server denied the listing). Cleared on the next
+	 * successful listing. Drives the panel's empty-state hint
+	 * ("Folder is upload-only" if the access bits also indicate
+	 * a drop-box, "Can't list this folder" otherwise) — without
+	 * this the user just sees an empty panel and has no idea why
+	 * the navigation didn't produce rows. */
+    gboolean listing_error;
 };
 
 static void
@@ -283,6 +291,10 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
 
     populate_from_chunks (self, cfl);
 
+    /* A successful response clears any sticky listing-error state
+	 * from a previous failed navigation. */
+    self->listing_error = FALSE;
+
     /* Adopt the new path as the current one (the RPC was fired
 	 * with this path in cfl_path — if a second fetch superseded
 	 * the first, the more-recent one wins via pending_listings's
@@ -305,6 +317,67 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
 
     g_object_unref (self);
     return TRUE;
+}
+
+/* Error counterpart to handle_file_list. Called from
+ * rcv.c::rcv_task_file_list's task_inerror short-circuit so the
+ * provider knows its in-flight listing was denied — without this
+ * the panel sat showing nothing with no idea why.
+ *
+ * Behaviour matches the success path's cleanup: remove the
+ * provider from pending_listings (drops the table's ref), clear
+ * the listing rows (so any old content from a previous folder
+ * doesn't linger on the new path), and flip listing_error TRUE so
+ * the panel's status footer can show a contextual message instead
+ * of "0 items". Emits "navigated" with the current path — the
+ * panel's existing on_navigated handler then updates the path
+ * entry and refreshes the footer through update_status. */
+gboolean
+hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
+{
+    HxRemoteFilesProvider *self;
+    struct cached_filelist *cfl = cfl_p;
+
+    if (!data || !G_IS_OBJECT (data) || !HX_IS_REMOTE_FILES_PROVIDER (data)) {
+        return FALSE;
+    }
+    if (!pending_listings || !g_hash_table_contains (pending_listings, data)) {
+        return TRUE;
+    }
+
+    self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
+    g_hash_table_remove (pending_listings, data);
+
+    g_list_store_remove_all (self->listing);
+    self->listing_error = TRUE;
+
+    /* The cfl we allocated in remote_send_file_list carries the
+	 * path the user navigated to. Adopt it as the current path
+	 * even though the listing failed — otherwise the next
+	 * navigate_up has nothing to walk back from. */
+    if (cfl && cfl->path) {
+        g_free (self->current_path);
+        self->current_path = g_strdup (cfl->path);
+    }
+
+    g_signal_emit_by_name (self, "navigated", self->current_path);
+
+    /* cfl is owned by rcv.c's caller; we don't free it here.
+	 * The success path's twin (handle_file_list above) does
+	 * free cfl because rcv_task_file_list's success arm
+	 * surrenders ownership to cfl_print → us. The error arm
+	 * keeps ownership upstream. */
+
+    g_object_unref (self);
+    return TRUE;
+}
+
+/* Getter for the panel to consult when building empty-state
+ * messaging. TRUE iff the most recent FILE_LIST RPC failed. */
+gboolean
+hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self)
+{
+    return self ? self->listing_error : FALSE;
 }
 
 /* ---- Interface implementations ---- */
