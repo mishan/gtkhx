@@ -216,6 +216,29 @@ gtask_delete_htxf (session *sess, struct htxf_conn *htxf)
     gtask_delete (sess, gtsk);
 }
 
+/* Disconnect any gtask still referencing this htxf, leaving the
+ * UI row visible but with a NULL htxf pointer. Called from
+ * gtkhx.c's xfer-destroyed signal handler at the moment the htxf
+ * leaves the live xfers[] list and may be freed shortly after by
+ * a cleanup_dispatch unref. Subsequent clicks on the row's Cancel
+ * button see the NULL pointer and skip the xfer_delete call.
+ *
+ * NOT the same as gtask_delete_htxf — that one removes the row
+ * from the UI as well. This one just severs the dangling-pointer
+ * risk while leaving the row in place. For normal-success folder
+ * transfers the row gets removed by file_update's pos>=size path
+ * anyway; this clear runs after that (idempotent — gtask_with_htxf
+ * returns NULL if the row is already gone). */
+void
+gtask_clear_htxf (session *sess, struct htxf_conn *htxf)
+{
+    struct gtask *gtsk = gtask_with_htxf (sess, htxf);
+    if (!gtsk) {
+        return;
+    }
+    gtsk->htxf = NULL;
+}
+
 void
 gtask_delete_tsk (session *sess, guint32 trans)
 {
@@ -388,29 +411,17 @@ task_stop (GtkWidget *widget, gpointer data)
         gtsk = (struct gtask *)g_object_get_data (G_OBJECT (listitem), "gtsk");
 
         if (gtsk->htxf) {
-            /* Validate gtsk->htxf is still alive before
-			 * dereferencing it. The htxf can outlive its
-			 * gtask in the normal-success path (worker exit →
-			 * cleanup_dispatch unrefs to 0 → htxf freed) or
-			 * if a prior Cancel already ran xfer_delete and
-			 * the worker has since drained. The xfers[] array
-			 * is the authoritative liveness list — if the
-			 * pointer isn't in there, it's dangling and any
-			 * deref reads poison (a real crash was reported:
-			 * pthread_cancel called with th=0xFF00FF00FF00FF00
-			 * after a hung folder transfer was canceled from
-			 * this button). */
-            gboolean live = FALSE;
-            int j;
-            for (j = 0; j < nxfers; j++) {
-                if (xfers[j] == gtsk->htxf) {
-                    live = TRUE;
-                    break;
-                }
-            }
-            if (live) {
-                xfer_delete (gtsk->htxf);
-            }
+            /* gtsk->htxf is guaranteed live here — the
+			 * GtkhxSession::xfer-destroyed handler
+			 * (gtask_clear_htxf, wired in gtkhx.c) sets this
+			 * pointer to NULL the moment the htxf leaves the
+			 * live xfers[] list, before any unref that might
+			 * free the slab. A pre-signal cancel-after-hang
+			 * crash (pthread_cancel called with poison tid
+			 * after the worker exited) lives in the git
+			 * history as a defensive xfers[]-scan in this
+			 * spot; the signal-based clear obsoletes it. */
+            xfer_delete (gtsk->htxf);
             gtask_delete (sess, gtsk);
         } else if (gtsk->trans == (guint32)-127) {
             tracker_kill_threads ();

@@ -5,6 +5,11 @@ extern void create_tasks (session *sess);
 extern void output_xfer_queue (session *sess, struct htxf_conn *htxf);
 extern void gtask_delete_tsk (session *sess, guint32 trans);
 extern void gtask_delete_htxf (session *sess, struct htxf_conn *htxf);
+/* Sever the gtask's pointer to htxf without removing the UI row.
+ * Wired to the GtkhxSession::xfer-destroyed signal so the tasks
+ * window can't crash on a dangling htxf pointer after the xfer
+ * leaves the live xfers[] list. */
+extern void gtask_clear_htxf (session *sess, struct htxf_conn *htxf);
 extern void task_update (session *sess, struct task *tsk);
 extern void create_tasks_window (GtkWidget *widget, gpointer data);
 extern void file_update (session *sess, struct htxf_conn *htxf);

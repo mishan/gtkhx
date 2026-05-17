@@ -1343,6 +1343,25 @@ on_xfer_queue_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
     output_xfer_queue ((session *)sess, (struct htxf_conn *)htxf);
 }
 
+/* "xfer-destroyed" — fires from xfer_remove_from_list right before
+ * the xfers[] reference is dropped. The htxf is still alive at
+ * this point (the worker thread or queued dispatchers may still
+ * hold refs), but it can be freed asynchronously by any of those
+ * unrefs once we return. The tasks window's gtask retains a raw
+ * pointer to the htxf, so we sever it here — leaving the UI row
+ * in place (file_update's pos>=size path already removes finished
+ * rows; if we still have a row at this point it's a canceled /
+ * errored transfer where the user would rather see a final state
+ * than have the row vanish). */
+static void
+on_xfer_destroyed_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
+                          gpointer user_data)
+{
+    (void)emitter;
+    (void)user_data;
+    gtask_clear_htxf ((session *)sess, (struct htxf_conn *)htxf);
+}
+
 static void
 on_tracker_server_create_signal (GtkhxSession *emitter, guint addr_u32,
                                  guint port, guint nusers, gpointer nam,
@@ -1443,6 +1462,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_file_update_signal), NULL);
     g_signal_connect (emitter, "xfer-queue", G_CALLBACK (on_xfer_queue_signal),
                       NULL);
+    g_signal_connect (emitter, "xfer-destroyed",
+                      G_CALLBACK (on_xfer_destroyed_signal), NULL);
     g_signal_connect (emitter, "tracker-server-create",
                       G_CALLBACK (on_tracker_server_create_signal), NULL);
     g_signal_connect (emitter, "task-update",

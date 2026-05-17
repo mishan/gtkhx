@@ -56,6 +56,7 @@ enum {
     SIGNAL_FILE_LIST,
     SIGNAL_FILE_UPDATE,
     SIGNAL_XFER_QUEUE,
+    SIGNAL_XFER_DESTROYED,
     SIGNAL_TRACKER_SERVER_CREATE,
     SIGNAL_TASK_UPDATE,
     SIGNAL_CHAT_LOG_LINE,
@@ -196,6 +197,23 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
 
     signals[SIGNAL_XFER_QUEUE] = g_signal_new (
         "xfer-queue", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL,
+        NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+
+    /* "xfer-destroyed" — emitted when an htxf_conn is about to leave
+	 * the xfers[] live-list. Subscribers (specifically the tasks
+	 * window) must NULL out any cached pointers to the htxf because
+	 * a subsequent unref may free it (the worker thread's ref is
+	 * still alive when xfer_delete fires from rcv.c / cancel, but
+	 * the next cleanup_dispatch on the worker exit unrefs to zero
+	 * and the slab is freed). Without this signal the tasks window
+	 * holds a dangling htxf pointer that crashes on the next click.
+	 * Handlers run synchronously; they should clear local pointers
+	 * and not call back into xfer_* APIs.
+	 *
+	 * Payload mirrors xfer-queue / file-update for diffability:
+	 * (session *, struct htxf_conn *). */
+    signals[SIGNAL_XFER_DESTROYED] = g_signal_new (
+        "xfer-destroyed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL,
         NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 
     /* tracker-server-create — struct in_addr is 32 bits; passed as
@@ -379,6 +397,13 @@ gtkhx_session_emit_xfer_queue (GtkhxSession *self, session *sess,
                                struct htxf_conn *htxf)
 {
     g_signal_emit (self, signals[SIGNAL_XFER_QUEUE], 0, sess, htxf);
+}
+
+void
+gtkhx_session_emit_xfer_destroyed (GtkhxSession *self, session *sess,
+                                   struct htxf_conn *htxf)
+{
+    g_signal_emit (self, signals[SIGNAL_XFER_DESTROYED], 0, sess, htxf);
 }
 
 void

@@ -1612,7 +1612,15 @@ xfers_delete_all (void)
 /* Internal: remove htxf from the xfers[] array and drop the
  * array's reference. Idempotent — if the htxf isn't in the array,
  * does nothing. The actual free happens via the unref only when the
- * last owner (worker, queued dispatchers) drops their refs. */
+ * last owner (worker, queued dispatchers) drops their refs.
+ *
+ * Emits "xfer-destroyed" on the GtkhxSession singleton AFTER
+ * removal from xfers[] but BEFORE the unref. Subscribers must
+ * NULL any cached pointers to this htxf at that point — the next
+ * unref (worker exit, dispatcher cleanup) can be the last and free
+ * the slab. The signal is synchronous; handlers run with the htxf
+ * still alive (the unref we're about to do drops only the xfers[]
+ * ref). */
 static void
 xfer_remove_from_list (struct htxf_conn *htxf)
 {
@@ -1628,6 +1636,8 @@ xfer_remove_from_list (struct htxf_conn *htxf)
                     (nxfers - (i + 1)) * sizeof (struct htxf_conn *));
         }
         nxfers--;
+        gtkhx_session_emit_xfer_destroyed (gtkhx_session_get_default (),
+                                           &the_session, htxf);
         htxf_unref (htxf); /* drop the xfers[] ref */
         if (nxfers) {
             xfer_go (xfers[0]);
