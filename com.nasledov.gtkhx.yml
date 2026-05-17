@@ -173,15 +173,14 @@ modules:
       - --without-xml
       - --without-zip
       - --without-zstd
-    # NOTE: URL + SHA need to be set to a real release at Flatpak
-    # build time. Available releases are listed at
+    # Pinned to 7.1.2-18 (released 2026-03-22). The 7.x API has been
+    # stable for years; bump to a newer 7.1.x point release whenever
+    # you regenerate the sha256. New releases are at
     # https://github.com/ImageMagick/ImageMagick/releases
-    # Pin to a known-good 7.1.x point release; the API is stable
-    # across the 7.x series.
     sources:
       - type: archive
-        url: PLACEHOLDER_FILL_IN_LATEST_7_1_X_RELEASE_TARBALL
-        sha256: PLACEHOLDER_SHA256_OF_THE_TARBALL_ABOVE
+        url: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-18.tar.gz
+        sha256: 2db8a1f9bac19831c76574e4fd514ecb80a71a49911ee5dc8c1f3fb6d9d550df
 
   - name: gtkhx
     buildsystem: meson
