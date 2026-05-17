@@ -1891,14 +1891,14 @@ open_files_browser (void)
 	 * mixing symbolic icons in with the period look. */
     header = adw_header_bar_new ();
 #define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, 2, NULL, NULL)
-    refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.xpm");
-    mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.xpm");
-    br->btn_copy = FB_BTN ("/com/nasledov/gtkhx/pixmaps/dl.xpm");
-    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/move.xpm");
-    preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.xpm");
-    info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.xpm");
-    rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/edituser.xpm");
-    delete_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/trash.xpm");
+    refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
+    mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
+    br->btn_copy = FB_BTN ("/com/nasledov/gtkhx/pixmaps/dl.png");
+    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/move.png");
+    preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.png");
+    info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.png");
+    rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/edituser.png");
+    delete_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/trash.png");
 #undef FB_BTN
 
     gtk_widget_set_tooltip_text (refresh_btn,

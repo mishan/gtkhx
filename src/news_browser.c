@@ -1808,11 +1808,11 @@ build_browser_window (void)
 
     /* ---- Icons (cached for the lifetime of the window) ---- */
     br->icon_folder
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.xpm");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.png");
     br->icon_category
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.xpm");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.png");
     br->icon_post
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.xpm");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
 
     /* ---- Window ---- */
     br->window = gtk_window_new ();
@@ -1844,22 +1844,22 @@ build_browser_window (void)
 	 * cluttered. The buttons render their icons via the same
 	 * gtkhx_pixmap_button helper the toolbar uses. */
     br->btn_refresh = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/refresh.xpm", _ ("Refresh"), 2,
+        "/com/nasledov/gtkhx/pixmaps/refresh.png", _ ("Refresh"), 2,
         G_CALLBACK (on_refresh_clicked), br);
     br->btn_new_folder = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newsfld.xpm", _ ("New Folder"), 2,
+        "/com/nasledov/gtkhx/pixmaps/newsfld.png", _ ("New Folder"), 2,
         G_CALLBACK (on_new_folder_clicked), br);
     br->btn_new_category = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newscat.xpm", _ ("New Category"), 2,
+        "/com/nasledov/gtkhx/pixmaps/newscat.png", _ ("New Category"), 2,
         G_CALLBACK (on_new_category_clicked), br);
     br->btn_new_post = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/news_reply.xpm", _ ("New Post"), 2,
+        "/com/nasledov/gtkhx/pixmaps/news_reply.png", _ ("New Post"), 2,
         G_CALLBACK (on_new_post_clicked), br);
     br->btn_reply = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/postnews.xpm", _ ("Reply"), 2,
+        "/com/nasledov/gtkhx/pixmaps/postnews.png", _ ("Reply"), 2,
         G_CALLBACK (on_reply_clicked), br);
     br->btn_delete = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/trash.xpm", _ ("Delete"), 2,
+        "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), 2,
         G_CALLBACK (on_delete_clicked), br);
 
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_refresh);

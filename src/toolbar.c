@@ -532,35 +532,35 @@ create_toolbar_window (session *sess)
 
     gtk_box_append (
         GTK_BOX (hbox),
-        make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.xpm",
+        make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
                             _ ("Tracker"), G_CALLBACK (create_tracker_window),
                             sess));
-    news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.xpm",
+    news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
                                    _ ("News"), G_CALLBACK (open_news), sess);
     gtk_box_append (GTK_BOX (hbox), news_btn);
-    post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.xpm",
+    post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
                                    _ ("Post"), G_CALLBACK (create_post_window),
                                    sess);
     gtk_box_append (GTK_BOX (hbox), post_btn);
-    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.xpm",
+    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.png",
                                      _ ("News (1.5+)"),
                                      G_CALLBACK (open_news_browser), sess);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
-    files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.xpm",
+    files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.png",
                                     _ ("Files"),
                                     G_CALLBACK (on_files_button_clicked), sess);
     gtk_box_append (GTK_BOX (hbox), files_btn);
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
-                        "/com/nasledov/gtkhx/pixmaps/users.xpm", _ ("Users"),
+                        "/com/nasledov/gtkhx/pixmaps/users.png", _ ("Users"),
                         G_CALLBACK (create_users_window), sess));
     gtk_box_append (GTK_BOX (hbox),
-                    make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.xpm",
+                    make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                         _ ("Chat"),
                                         G_CALLBACK (create_chat_window), sess));
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
-                        "/com/nasledov/gtkhx/pixmaps/tasks.xpm", _ ("Tasks"),
+                        "/com/nasledov/gtkhx/pixmaps/tasks.png", _ ("Tasks"),
                         G_CALLBACK (create_tasks_window), sess));
     /* Phase 5: New User / Edit User used to be toolbar buttons.
 	 * They've moved into the hamburger menu's Admin submenu — sysop

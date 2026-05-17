@@ -585,14 +585,14 @@ create_tasks_window (GtkWidget *widget, gpointer data)
     header = adw_header_bar_new ();
 
     stopbtn
-        = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.xpm",
+        = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
                                _ ("Stop Task"), G_CALLBACK (task_stop), sess);
-    gobtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.xpm",
+    gobtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/start.png",
                                  _ ("Start Task"), G_CALLBACK (task_go), sess);
-    upbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/up.xpm",
+    upbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/up.png",
                                  _ ("Move Xfer Up in Queue"),
                                  G_CALLBACK (task_up), sess);
-    dnbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/down.xpm",
+    dnbtn = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/down.png",
                                  _ ("Move Xfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 

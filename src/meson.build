@@ -139,10 +139,17 @@ configure_file(
 
 # -----------------------------------------------------------------------------
 # Phase 3.7: bundled pixmaps as a GResource. The XML manifest lists every
-# .xpm under src/pixmaps; glib-compile-resources turns them into a .c file
+# .png under src/pixmaps; glib-compile-resources turns them into a .c file
 # whose registered constructor is run automatically at program load, so no
 # explicit g_resources_register() call is needed in main(). Call sites use
-# gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/foo.xpm", ...).
+# gdk_pixbuf_new_from_resource("/com/nasledov/gtkhx/pixmaps/foo.png", ...).
+#
+# Source-of-truth pixel art for the toolbar icons lives in matching .xpm
+# files in src/pixmaps; tools/regen-pixmap-pngs.sh regenerates the .png set
+# from the .xpm originals. PNGs are deployed (rather than the XPMs) because
+# gdk-pixbuf's XPM loader isn't included in the Flatpak GNOME runtime by
+# default — legacy-format loaders have been getting dropped upstream — and
+# XPM-only resources render blank for Flathub users.
 # -----------------------------------------------------------------------------
 gnome = import('gnome')
 gtkhx_resources = gnome.compile_resources(

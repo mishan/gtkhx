@@ -2,22 +2,25 @@
 <!--
   Phase 3.7: bundle the in-tree pixmaps as a GResource.
 
-  Format is XPM rather than PNG/SVG so we don't have to redraw any of
-  the icons just to land the resource pipeline. gdk-pixbuf has a
-  built-in XPM loader, so gdk_pixbuf_new_from_resource() reads them
-  natively. Future phases can swap individual files for PNG/SVG without
-  touching call sites.
+  Format is PNG. The source-of-truth pixel art lives in matching .xpm
+  files next to each .png — the XPMs are kept for editability with
+  classic Mac/X11 icon tools and are converted to PNG via
+  tools/regen-pixmap-pngs.sh whenever they change. We ship the PNGs
+  because gdk-pixbuf's XPM loader isn't included in the Flatpak GNOME
+  runtime by default (legacy-format loaders have been getting dropped
+  upstream), so XPM-only resources render as blank squares for Flathub
+  users.
 -->
 <gresources>
   <gresource prefix="/com/nasledov/gtkhx">
-    <file>pixmaps/ban.xpm</file>
-    <file>pixmaps/chat.xpm</file>
-    <file>pixmaps/connect.xpm</file>
-    <file>pixmaps/dl.xpm</file>
-    <file>pixmaps/down.xpm</file>
-    <file>pixmaps/edituser.xpm</file>
-    <file>pixmaps/files.xpm</file>
-    <file>pixmaps/gtkhx.xpm</file>
+    <file>pixmaps/ban.png</file>
+    <file>pixmaps/chat.png</file>
+    <file>pixmaps/connect.png</file>
+    <file>pixmaps/dl.png</file>
+    <file>pixmaps/down.png</file>
+    <file>pixmaps/edituser.png</file>
+    <file>pixmaps/files.png</file>
+    <file>pixmaps/gtkhx.png</file>
     <!-- App icon. Aliased so GtkIconTheme finds them under the
          conventional <theme>/<size>/<context>/<name> layout once we
          register /com/nasledov/gtkhx/icons as a resource icon path
@@ -37,30 +40,30 @@
     <file alias="icons/64x64/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_64.png</file>
     <file alias="icons/128x128/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_128.png</file>
     <file alias="icons/256x256/apps/com.nasledov.gtkhx.png">pixmaps/gtkhx_icon_256.png</file>
-    <file>pixmaps/ignore.xpm</file>
-    <file>pixmaps/info.xpm</file>
-    <file>pixmaps/kick.xpm</file>
-    <file>pixmaps/mkdir.xpm</file>
-    <file>pixmaps/move.xpm</file>
-    <file>pixmaps/msg.xpm</file>
-    <file>pixmaps/news.xpm</file>
-    <file>pixmaps/newscat.xpm</file>
-    <file>pixmaps/newsfld.xpm</file>
-    <file>pixmaps/newspost.xpm</file>
-    <file>pixmaps/news_reply.xpm</file>
-    <file>pixmaps/newuser.xpm</file>
-    <file>pixmaps/options.xpm</file>
-    <file>pixmaps/postnews.xpm</file>
-    <file>pixmaps/preview.xpm</file>
-    <file>pixmaps/quit.xpm</file>
-    <file>pixmaps/refresh.xpm</file>
-    <file>pixmaps/start.xpm</file>
-    <file>pixmaps/tasks.xpm</file>
-    <file>pixmaps/tracker.xpm</file>
-    <file>pixmaps/trash.xpm</file>
-    <file>pixmaps/ul.xpm</file>
-    <file>pixmaps/up.xpm</file>
-    <file>pixmaps/users.xpm</file>
+    <file>pixmaps/ignore.png</file>
+    <file>pixmaps/info.png</file>
+    <file>pixmaps/kick.png</file>
+    <file>pixmaps/mkdir.png</file>
+    <file>pixmaps/move.png</file>
+    <file>pixmaps/msg.png</file>
+    <file>pixmaps/news.png</file>
+    <file>pixmaps/newscat.png</file>
+    <file>pixmaps/newsfld.png</file>
+    <file>pixmaps/newspost.png</file>
+    <file>pixmaps/news_reply.png</file>
+    <file>pixmaps/newuser.png</file>
+    <file>pixmaps/options.png</file>
+    <file>pixmaps/postnews.png</file>
+    <file>pixmaps/preview.png</file>
+    <file>pixmaps/quit.png</file>
+    <file>pixmaps/refresh.png</file>
+    <file>pixmaps/start.png</file>
+    <file>pixmaps/tasks.png</file>
+    <file>pixmaps/tracker.png</file>
+    <file>pixmaps/trash.png</file>
+    <file>pixmaps/ul.png</file>
+    <file>pixmaps/up.png</file>
+    <file>pixmaps/users.png</file>
 
     <!-- File-type icons used by the new orthodox files browser.
          Extracted from the legacy icons.rsrc cicns once via
