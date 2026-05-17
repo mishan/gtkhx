@@ -94,6 +94,14 @@ extern void hx_make_dir (struct htlc_conn *htlc, char *path);
 extern void hx_file_info (struct htlc_conn *htlc, const char *dir_path,
                           const char *file_name, gsize file_name_len);
 extern void hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath);
+/* Download a remote folder tree to lpath_root. The server replies
+ * with HTLS_DATA_HTXF_SIZE / HTLS_DATA_HTXF_REF and the worker
+ * spun up via xfer_ready_write drives the FILE_NEXT/FILE_SEND
+ * state machine in folder_get_thread. lpath_root is the *parent*
+ * directory locally; the folder named `name` will be created
+ * under it as the local root for the tree. */
+extern void hx_get_folder (struct htlc_conn *htlc, const char *lpath_root,
+                           const char *rdir, const char *name, gsize name_len);
 extern void hx_file_link (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
 extern void hx_file_move (struct htlc_conn *htlc, char *src_path,

@@ -7,11 +7,13 @@
  *
  *   local  → remote   files: hx_put_file (XFER_PUT). Folders not
  *                     wired yet — pending HTLC_HDR_FILE_PUTFOLDER
- *                     (0xd5) plus an HTXF_TYPE_FOLDER stream
- *                     variant in xfers.c.
- *   remote → local    files: xfer_new (XFER_GET). Folders not
- *                     wired yet — pending HTLC_HDR_FILE_GETFOLDER
- *                     (0xd2) plus a folder_recv HTXF reader.
+ *                     (0xd5) plus the folder_put_thread side of
+ *                     the HTXF_TYPE_FOLDER stream in xfers.c.
+ *   remote → local    files: xfer_new (XFER_GET). Folders: stream
+ *                     the whole tree over a single HTXF subchannel
+ *                     via HTLC_HDR_FILE_GETFOLDER (0xd2) — the
+ *                     folder_get_thread in xfers.c drives the
+ *                     FILE_NEXT state machine.
  *   local  → local    GIO. Folders walked with GFileEnumerator
  *                     and g_file_copy'd file by file (no wire
  *                     involvement so no protocol concerns).

@@ -163,24 +163,24 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (HL_ACCESS_DOWNLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
+    src_dir = hx_files_provider_get_current_path (src);
+    dst_dir = hx_files_provider_get_current_path (dst);
+
     if (hx_file_entry_is_dir (e)) {
         /* Folder downloads use HTLC_HDR_FILE_GETFOLDER (0xd2),
 		 * which streams the whole tree over an HTXF subchannel
-		 * with HTXF_TYPE_FOLDER framing. That's the Hotline 1.5
-		 * way and what mhxd's rcv_folder_get serves. The
-		 * pre-existing legacy fallback in rcv.c's COMPLETE_GET_R
-		 * branch did a client-driven recursive FILE_LIST with
-		 * one FILE_GET per leaf — wrong-shaped (no aggregate
-		 * progress, no atomicity, mkdir-relative-to-cwd bug
-		 * under Flatpak) and not what we want here. Until the
-		 * proper FOLDER opcode is wired through xfers.c
-		 * (folder_recv variant of the HTXF subchannel reader),
-		 * folder downloads refuse cleanly. */
-        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
+		 * with HTXF_TYPE_FOLDER framing. The folder_get_thread
+		 * in xfers.c drives the FILE_NEXT state machine. */
+        const char *nm = hx_file_entry_get_name (e);
+        gsize nm_len = nm ? strlen (nm) : 0;
+        if (!has_access (HL_ACCESS_DOWNLOAD_FOLDERS)) {
+            return HX_OPS_ERR_NO_PERMISSION;
+        }
+        hx_get_folder (&the_session.htlc, dst_dir ? dst_dir : "",
+                       src_dir ? src_dir : "", nm, nm_len);
+        return HX_OPS_OK;
     }
 
-    src_dir = hx_files_provider_get_current_path (src);
-    dst_dir = hx_files_provider_get_current_path (dst);
     lpath = join_path (dst_dir, hx_file_entry_get_name (e));
 
     size = hx_file_entry_get_size (e);

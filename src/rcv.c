@@ -1943,6 +1943,83 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     }
 }
 
+/* HTLS reply to HTLC_HDR_FILE_GETFOLDER. Mirror of
+ * rcv_task_file_get with the addition of HTLS_DATA_FILE_NFILES
+ * (the server tells us how many file leaves the tree has so we
+ * can display a non-trivial percentage even though the per-file
+ * sizes come in as the stream unfolds). */
+void
+rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
+{
+    guint32 ref = 0, size = 0, queue = 0, nfiles = 0;
+    int i;
+
+    for (i = 0; i < nxfers; i++) {
+        if (xfers[i] == htxf) {
+            break;
+        }
+    }
+
+    if (i == nxfers) {
+        return;
+    }
+    if (task_inerror (htlc)) {
+        if (htxf->opt.retry) {
+            htxf->gone = 0;
+            timer_add_secs (1, xfer_go_timer, htxf);
+        } else {
+            gtask_delete_htxf (&the_session, htxf);
+            xfer_delete (htxf);
+        }
+        return;
+    }
+
+    dh_start (htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_HTXF_SIZE:
+            dh_getint (size);
+            break;
+        case HTLS_DATA_HTXF_REF:
+            dh_getint (ref);
+            break;
+        case HTLS_DATA_QUEUE:
+            dh_getint (queue);
+            break;
+        case HTLS_DATA_FILE_NFILES:
+            dh_getint (nfiles);
+            break;
+        }
+    }
+    dh_end ();
+
+    if (!ref) {
+        return;
+    }
+
+    htxf->ref = ref;
+    /* total_size is the aggregate byte count for the whole tree;
+	 * folder_get_thread's per-file file_recv_one calls bump
+	 * total_pos so progress reads sensibly across the whole
+	 * folder. */
+    htxf->total_size = size ? size : 1;
+    htxf->queue = queue;
+    (void)nfiles; /* count is informational for now — wire it into
+	                 * the tasks-window label in a follow-up. */
+
+    gettimeofday (&htxf->start, 0);
+
+    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
+    htxf->serverport = htlc->serverport + 1;
+
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+                                   htxf);
+
+    if (!htxf->queue) {
+        xfer_ready_write (htxf);
+    }
+}
+
 void
 rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {

@@ -95,6 +95,14 @@ struct hl_user_data {
 #define HTLC_HDR_FILE_SETINFO ((guint32)0x000000cf)
 #define HTLC_HDR_FILE_MOVE ((guint32)0x000000d0)
 #define HTLC_HDR_FILE_SYMLINK ((guint32)0x000000d1)
+/* Folder transfer opcodes — 1.5+. Wire format is a stream of
+ * next_file_info records over an HTXF subchannel driven by the
+ * receiver via FILE_NEXT / FILE_SEND / FILE_RESUME commands; see
+ * src/xfers.c::folder_get_thread for the full state machine and
+ * memory/gtkhx_folder_xfer_protocol.md for cross-references into
+ * mhxd's folder_send / folder_recv. */
+#define HTLC_HDR_FILE_GETFOLDER ((guint32)0x000000d2)
+#define HTLC_HDR_FILE_PUTFOLDER ((guint32)0x000000d5)
 #define HTLC_HDR_USER_GETLIST ((guint32)0x0000012c)
 #define HTLC_HDR_USER_GETINFO ((guint32)0x0000012f)
 #define HTLC_HDR_USER_CHANGE ((guint32)0x00000130)

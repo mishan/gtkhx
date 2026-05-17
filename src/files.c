@@ -806,6 +806,68 @@ hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
 }
 
 void
+hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
+               const char *name, gsize name_len)
+{
+    struct htxf_conn *htxf;
+    char lpath[MAXPATHLEN];
+    char rdir_buf[MAXPATHLEN];
+    guint16 hldirlen = 0;
+    guint8 *hldir = NULL;
+    gsize rdir_len;
+
+    if (!name_len) {
+        return;
+    }
+
+    /* Build the local destination root: lpath_root + '/' + name.
+	 * folder_get_thread snapshots this as base_path and rebuilds
+	 * the full per-file path inside its loop. */
+    {
+        gsize root_len = strlen (lpath_root);
+        gsize sep = (root_len > 0 && lpath_root[root_len - 1] != '/') ? 1 : 0;
+        if (root_len + sep + name_len + 1 > sizeof (lpath)) {
+            return;
+        }
+        memcpy (lpath, lpath_root, root_len);
+        if (sep) {
+            lpath[root_len] = '/';
+        }
+        memcpy (lpath + root_len + sep, name, name_len);
+        lpath[root_len + sep + name_len] = 0;
+    }
+
+    /* The remote directory for the GETFOLDER request is the
+	 * parent — the basename of the folder is the FILE_NAME chunk.
+	 * The wire framing is the same as FILE_GET in that respect. */
+    rdir_len = rdir ? strlen (rdir) : 0;
+    if (rdir_len >= sizeof (rdir_buf)) {
+        rdir_len = sizeof (rdir_buf) - 1;
+    }
+    memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
+    rdir_buf[rdir_len] = 0;
+
+    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_GET);
+    htxf->filter_argv = 0;
+    htxf->opt.retry = 0;
+
+    /* Register the rcv callback BEFORE sending the request — the
+	 * task's trans id is captured by hlwrite and routed back to
+	 * rcv_task_folder_get by hx_rcv_task. */
+    task_new (htlc, RCV_TASK_FN (rcv_task_folder_get), htxf, 0,
+              "xfer_go_folder");
+    if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
+        hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
+        hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 2, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir);
+        g_free (hldir);
+    } else {
+        hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 1, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name);
+    }
+}
+
+void
 hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
 {
     char *src_file, *dst_file;

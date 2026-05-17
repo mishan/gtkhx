@@ -115,7 +115,14 @@ struct htxf_conn {
     struct timeval start;
 
     struct {
-        guint32 retry : 1, preview : 1, reserved : 30;
+        guint32 retry : 1, preview : 1,
+            /* When set, the worker uses folder_{get,put}_thread
+		 * instead of {get,put}_thread, and the wire format is
+		 * the HTXF_TYPE_FOLDER stream (FILE_NEXT/FILE_SEND/
+		 * FILE_RESUME commands, per-file size headers, nested
+		 * file_send_one/file_recv_one calls per leaf). Set on
+		 * htxf right after xfer_new for folder transfers. */
+            folder : 1, reserved : 29;
     } opt;
 
     /* Phase 5: when opt.preview is set, the preview window is created
