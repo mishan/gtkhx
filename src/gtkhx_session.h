@@ -140,6 +140,14 @@ void gtkhx_session_emit_file_update (GtkhxSession *self, session *sess,
                                      struct htxf_conn *htxf);
 void gtkhx_session_emit_xfer_queue (GtkhxSession *self, session *sess,
                                     struct htxf_conn *htxf);
+/* "xfer-destroyed" — fires when an htxf_conn is about to leave the
+ * live xfers[] list. The view (tasks window) must NULL any cached
+ * pointers to this htxf in response, because a subsequent unref may
+ * free the slab. Handlers run synchronously inside
+ * xfer_remove_from_list; they should clear pointers and not call
+ * back into xfer_* APIs. */
+void gtkhx_session_emit_xfer_destroyed (GtkhxSession *self, session *sess,
+                                        struct htxf_conn *htxf);
 void gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
                                                struct in_addr addr,
                                                guint16 port, guint16 nusers,
