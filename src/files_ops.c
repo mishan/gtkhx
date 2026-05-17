@@ -129,12 +129,28 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
-    if (hx_file_entry_is_dir (e)) {
-        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
-    }
 
     src_dir = hx_files_provider_get_current_path (src);
     dst_dir = hx_files_provider_get_current_path (dst);
+
+    if (hx_file_entry_is_dir (e)) {
+        /* Folder uploads use HTLC_HDR_FILE_PUTFOLDER (0xd5) and
+		 * stream the whole tree over a single HTXF subchannel
+		 * via folder_put_thread (driving the FILE_NEXT state
+		 * machine from the client side). */
+        const char *nm = hx_file_entry_get_name (e);
+        gsize nm_len = nm ? strlen (nm) : 0;
+        char *src_full;
+        if (!has_access (HL_ACCESS_UPLOAD_FOLDERS)) {
+            return HX_OPS_ERR_NO_PERMISSION;
+        }
+        src_full = join_path (src_dir, nm);
+        hx_put_folder (&the_session.htlc, src_full, dst_dir ? dst_dir : "", nm,
+                       nm_len);
+        g_free (src_full);
+        return HX_OPS_OK;
+    }
+
     lpath = join_path (src_dir, hx_file_entry_get_name (e));
     rpath = join_path (dst_dir, hx_file_entry_get_name (e));
 

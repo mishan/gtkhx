@@ -867,6 +867,102 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     }
 }
 
+/* Walk a local directory tree and sum the on-disk sizes of all
+ * regular files. The aggregate goes into HTLC_DATA_HTXF_SIZE on
+ * the PUTFOLDER request so the server has something sensible to
+ * display while the actual per-file sizes stream in. */
+static void
+hx_folder_aggregate (const char *root, guint64 *total_bytes_out,
+                     guint32 *nfiles_out)
+{
+    GDir *d;
+    const char *name;
+
+    d = g_dir_open (root, 0, NULL);
+    if (!d) {
+        return;
+    }
+    while ((name = g_dir_read_name (d))) {
+        struct stat sb;
+        char *full = g_build_filename (root, name, NULL);
+        if (lstat (full, &sb) == 0) {
+            if (S_ISDIR (sb.st_mode)) {
+                hx_folder_aggregate (full, total_bytes_out, nfiles_out);
+            } else if (S_ISREG (sb.st_mode)) {
+                *total_bytes_out += (guint64)sb.st_size;
+                (*nfiles_out)++;
+            }
+        }
+        g_free (full);
+    }
+    g_dir_close (d);
+}
+
+void
+hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
+               const char *name, gsize name_len)
+{
+    struct htxf_conn *htxf;
+    char rdir_buf[MAXPATHLEN];
+    guint16 hldirlen = 0;
+    guint8 *hldir = NULL;
+    gsize rdir_len;
+    guint64 total_bytes = 0;
+    guint32 nfiles = 0;
+    guint32 size_n;
+    guint32 nfiles_n;
+
+    if (!name_len) {
+        return;
+    }
+
+    /* Pre-walk for the SIZE / NFILES chunks. The server uses
+	 * these for the queue/display, not for framing. */
+    hx_folder_aggregate (lpath, &total_bytes, &nfiles);
+    /* HTLC_DATA_HTXF_SIZE is u32; clamp on overflow. */
+    if (total_bytes > G_MAXUINT32) {
+        size_n = htonl (G_MAXUINT32);
+    } else {
+        size_n = htonl ((guint32)total_bytes);
+    }
+    nfiles_n = htonl (nfiles);
+
+    rdir_len = rdir ? strlen (rdir) : 0;
+    if (rdir_len >= sizeof (rdir_buf)) {
+        rdir_len = sizeof (rdir_buf) - 1;
+    }
+    memcpy (rdir_buf, rdir ? rdir : "", rdir_len);
+    rdir_buf[rdir_len] = 0;
+
+    htxf = xfer_new_folder (lpath, rdir_buf, name, name_len, XFER_PUT);
+    htxf->filter_argv = 0;
+    htxf->opt.retry = 0;
+    /* Stash the aggregate up front; folder_put_thread fills
+	 * total_pos as the stream progresses. */
+    if (total_bytes > G_MAXUINT32) {
+        htxf->total_size = G_MAXUINT32;
+    } else if (total_bytes > 0) {
+        htxf->total_size = (guint32)total_bytes;
+    } else {
+        htxf->total_size = 1;
+    }
+
+    task_new (htlc, RCV_TASK_FN (rcv_task_folder_put), htxf, 0,
+              "xfer_go_folder");
+    if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
+        hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
+        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 4, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir,
+                 HTLC_DATA_HTXF_SIZE, 4, &size_n, HTLC_DATA_FILE_NFILES, 4,
+                 &nfiles_n);
+        g_free (hldir);
+    } else {
+        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 3, HTLC_DATA_FILE_NAME,
+                 (guint16)name_len, name, HTLC_DATA_HTXF_SIZE, 4, &size_n,
+                 HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
+    }
+}
+
 void
 hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
 {

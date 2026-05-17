@@ -5,10 +5,12 @@
  * A single `Copy` action transfers the active panel's selection
  * to the inactive panel's current path:
  *
- *   local  → remote   files: hx_put_file (XFER_PUT). Folders not
- *                     wired yet — pending HTLC_HDR_FILE_PUTFOLDER
- *                     (0xd5) plus the folder_put_thread side of
- *                     the HTXF_TYPE_FOLDER stream in xfers.c.
+ *   local  → remote   files: hx_put_file (XFER_PUT). Folders:
+ *                     stream the whole tree over a single HTXF
+ *                     subchannel via HTLC_HDR_FILE_PUTFOLDER
+ *                     (0xd5) — the folder_put_thread in xfers.c
+ *                     walks the local tree in DFS pre-order and
+ *                     responds to each server FILE_NEXT.
  *   remote → local    files: xfer_new (XFER_GET). Folders: stream
  *                     the whole tree over a single HTXF subchannel
  *                     via HTLC_HDR_FILE_GETFOLDER (0xd2) — the

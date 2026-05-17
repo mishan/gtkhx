@@ -1149,6 +1149,313 @@ ret:
     return NULL;
 }
 
+/* Mirror of folder_get_thread for the upload direction. The
+ * server drives the loop by writing FILE_NEXT to us; we walk the
+ * local tree in DFS pre-order (parent dirs before their
+ * contents) and respond to each FILE_NEXT with one entry:
+ *
+ *   us → server : nfi (6 bytes: len, type, pathcount) + per
+ *                 component (2 byte pad + 1 byte nlen + nlen
+ *                 bytes name). type=1 marks a folder (no
+ *                 payload), type=0 marks a file leaf.
+ *   server → us : for a file leaf, a u16 BE cmd:
+ *                   FILE_SEND   (1) — server wants a fresh send
+ *                   FILE_RESUME (2) — server sends a u16 BE len
+ *                                     and then `len` bytes of
+ *                                     RFLT carrying data_pos /
+ *                                     rsrc_pos. We honour the
+ *                                     resume offsets in
+ *                                     file_send_one.
+ *   us → server : u32 BE size (remaining file payload bytes),
+ *                 then the standard FILP/INFO/DATA/MACR framing
+ *                 via file_send_one.
+ *
+ * When the local walk runs out of entries we just close the
+ * socket; the server's next FILE_NEXT write short-reads and its
+ * loop exits cleanly. Same convention mhxd uses on its own
+ * folder_recv exit path.
+ *
+ * htxf->path holds the local source root on entry; we snapshot
+ * it and rewrite per-file for file_send_one. Restored to the
+ * root before cleanup so the tasks-window display reads sanely.
+ *
+ * Components are sent with pathcount equal to the depth of the
+ * entry under the root, so files nested at root/sub/sub2/leaf
+ * become pathcount=3 with components ["sub","sub2","leaf"].
+ * mhxd's folder_recv joins them with '/' on a fresh fpath built
+ * from dirpath, so deep trees land correctly even though
+ * folder_recv itself never advances dirpath. */
+
+struct hx_put_entry {
+    int type;                 /* 1 = folder marker, 0 = file leaf */
+    char *full_local_path;    /* on-disk path; used only for files */
+    GPtrArray *components;    /* (char *) path components from root */
+    guint64 data_size;        /* for files */
+};
+
+static void
+hx_put_entry_free (struct hx_put_entry *e)
+{
+    if (e->components) {
+        g_ptr_array_unref (e->components);
+    }
+    g_free (e->full_local_path);
+    g_free (e);
+}
+
+static void
+hx_collect_put_entries (GPtrArray *entries, const char *dir_path,
+                        GPtrArray *prefix_components)
+{
+    GDir *d;
+    const char *name;
+    GError *err = NULL;
+    GList *names = NULL;
+
+    d = g_dir_open (dir_path, 0, &err);
+    if (!d) {
+        if (err) {
+            g_error_free (err);
+        }
+        return;
+    }
+    while ((name = g_dir_read_name (d))) {
+        names = g_list_prepend (names, g_strdup (name));
+    }
+    g_dir_close (d);
+    /* Sort for deterministic order (helps test reproduction). */
+    names = g_list_sort (names, (GCompareFunc)g_strcmp0);
+
+    for (GList *l = names; l; l = l->next) {
+        const char *n = l->data;
+        char *full;
+        struct stat sb;
+        struct hx_put_entry *e;
+
+        full = g_build_filename (dir_path, n, NULL);
+        if (lstat (full, &sb) < 0) {
+            g_free (full);
+            continue;
+        }
+
+        e = g_new0 (struct hx_put_entry, 1);
+        e->components = g_ptr_array_new_with_free_func (g_free);
+        for (guint i = 0; i < prefix_components->len; i++) {
+            g_ptr_array_add (e->components,
+                             g_strdup (g_ptr_array_index (prefix_components,
+                                                          i)));
+        }
+        g_ptr_array_add (e->components, g_strdup (n));
+
+        if (S_ISDIR (sb.st_mode)) {
+            e->type = 1;
+            e->full_local_path = g_strdup (full);
+            g_ptr_array_add (entries, e);
+            /* DFS pre-order — recurse with this dir prepended to
+			 * the prefix. */
+            g_ptr_array_add (prefix_components, g_strdup (n));
+            hx_collect_put_entries (entries, full, prefix_components);
+            g_ptr_array_remove_index (prefix_components,
+                                      prefix_components->len - 1);
+        } else if (S_ISREG (sb.st_mode)) {
+            e->type = 0;
+            e->full_local_path = g_strdup (full);
+            e->data_size = (guint64)sb.st_size;
+            g_ptr_array_add (entries, e);
+        } else {
+            /* Skip symlinks and special files. */
+            hx_put_entry_free (e);
+        }
+
+        g_free (full);
+    }
+    g_list_free_full (names, g_free);
+}
+
+static void *
+folder_put_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval = 0;
+    guint8 buf[2048];
+    char base_path[MAXPATHLEN];
+    GPtrArray *entries = NULL;
+    GPtrArray *initial_comps = NULL;
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    g_strlcpy (base_path, htxf->path, sizeof (base_path));
+
+    entries
+        = g_ptr_array_new_with_free_func ((GDestroyNotify)hx_put_entry_free);
+    initial_comps = g_ptr_array_new_with_free_func (g_free);
+    hx_collect_put_entries (entries, base_path, initial_comps);
+    g_ptr_array_unref (initial_comps);
+
+    for (guint i = 0; i < entries->len; i++) {
+        struct hx_put_entry *e = g_ptr_array_index (entries, i);
+        guint16 cmd_n;
+        ssize_t n;
+        guint16 wire_len = 4;
+
+        /* Wait for FILE_NEXT from the server. */
+        n = read (s, &cmd_n, 2);
+        if (n != 2) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+        if (ntohs (cmd_n) != 3 /* FILE_NEXT */) {
+            retval = EPROTO;
+            goto cleanup;
+        }
+
+        /* nfi header: len = 4 + sum(3+nlen_i), type, pathcount. */
+        for (guint j = 0; j < e->components->len; j++) {
+            wire_len += 3
+                        + (guint16)strlen (
+                            (const char *)g_ptr_array_index (e->components, j));
+        }
+        {
+            guint16 t;
+            t = htons (wire_len);
+            memcpy (&buf[0], &t, 2);
+            t = htons ((guint16)e->type);
+            memcpy (&buf[2], &t, 2);
+            t = htons ((guint16)e->components->len);
+            memcpy (&buf[4], &t, 2);
+        }
+        if (write (s, buf, 6) != 6) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+
+        for (guint j = 0; j < e->components->len; j++) {
+            const char *c = g_ptr_array_index (e->components, j);
+            gsize cl = strlen (c);
+            guint8 ch[3];
+            if (cl > 255) {
+                retval = ENAMETOOLONG;
+                goto cleanup;
+            }
+            ch[0] = 0;
+            ch[1] = 0;
+            ch[2] = (guint8)cl;
+            if (write (s, ch, 3) != 3) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            if (cl && write (s, c, cl) != (ssize_t)cl) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+        }
+
+        if (e->type == 1) {
+            /* Folder marker — no payload. */
+            continue;
+        }
+
+        /* File leaf — server replies with FILE_SEND (fresh) or
+		 * FILE_RESUME (resume from data_pos/rsrc_pos). */
+        n = read (s, &cmd_n, 2);
+        if (n != 2) {
+            retval = errno ? errno : EIO;
+            goto cleanup;
+        }
+        cmd_n = ntohs (cmd_n);
+        htxf->data_pos = 0;
+        htxf->rsrc_pos = 0;
+        if (cmd_n == 2 /* FILE_RESUME */) {
+            guint16 rlen;
+            guint8 rflt[128];
+            if (read (s, &rlen, 2) != 2) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            rlen = ntohs (rlen);
+            if (rlen > sizeof (rflt)) {
+                retval = EPROTO;
+                goto cleanup;
+            }
+            if (rlen && read (s, rflt, rlen) != (ssize_t)rlen) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            if (rlen >= 50) {
+                HN32 (&htxf->data_pos, &rflt[46]);
+            }
+            if (rlen >= 66) {
+                HN32 (&htxf->rsrc_pos, &rflt[62]);
+            }
+        } else if (cmd_n != 1 /* FILE_SEND */) {
+            retval = EPROTO;
+            goto cleanup;
+        }
+
+        /* Set up htxf for file_send_one. data_size / rsrc_size
+		 * come from the local file. */
+        {
+            struct stat sb;
+            if (stat (e->full_local_path, &sb) < 0) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+            g_strlcpy (htxf->path, e->full_local_path, sizeof (htxf->path));
+            htxf->data_size = (guint32)sb.st_size;
+            htxf->rsrc_size = (guint32)resource_len (e->full_local_path);
+        }
+
+        /* Per-file payload size, matching file_send_one's writes:
+		 * 133 + comment_len + ((rsrc_size - rsrc_pos) ? 16 : 0)
+		 * + (data_size - data_pos) + (rsrc_size - rsrc_pos). */
+        {
+            guint32 file_size;
+            guint32 size_n;
+            guint32 com = (guint32)comment_len (e->full_local_path);
+            file_size = 133 + com + (htxf->data_size - htxf->data_pos);
+            if (htxf->rsrc_size - htxf->rsrc_pos) {
+                file_size += 16 + (htxf->rsrc_size - htxf->rsrc_pos);
+            }
+            size_n = htonl (file_size);
+            if (write (s, &size_n, 4) != 4) {
+                retval = errno ? errno : EIO;
+                goto cleanup;
+            }
+        }
+
+        retval = file_send_one (s, htxf, buf);
+        if (retval) {
+            goto cleanup;
+        }
+    }
+
+    play_sound (FILE_DONE);
+    htxf->total_pos = htxf->total_size;
+    post_file_update (htxf);
+
+cleanup:
+    if (entries) {
+        g_ptr_array_unref (entries);
+    }
+
+ret:
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
+
+    /* Restore the root path so the tasks-window label stays
+	 * sensible post-completion. */
+    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
+
+    post_xfer_cleanup (htxf);
+    return NULL;
+}
+
 void
 xfer_ready_write (struct htxf_conn *htxf)
 {
@@ -1171,13 +1478,14 @@ xfer_ready_write (struct htxf_conn *htxf)
 	 * worker's behalf at exit. */
     htxf_ref (htxf);
 
-    /* Dispatch to the folder thread when opt.folder is set so the
-	 * worker drives the FILE_NEXT state machine and per-leaf
-	 * file_recv_one / file_send_one calls. folder_put_thread is
-	 * not implemented yet — commit 3 of the folder plan. */
+    /* Dispatch to the folder thread when opt.folder is set so
+	 * the worker drives the FILE_NEXT state machine and per-leaf
+	 * file_recv_one / file_send_one calls. Plain XFER_GET /
+	 * XFER_PUT fall through to the single-file threads. */
     void *(*entry) (void *);
     if (htxf->opt.folder) {
-        entry = (htxf->type == XFER_GET) ? folder_get_thread : put_thread;
+        entry
+            = (htxf->type == XFER_GET) ? folder_get_thread : folder_put_thread;
     } else {
         entry = (htxf->type == XFER_GET) ? get_thread : put_thread;
     }

@@ -2083,6 +2083,55 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     }
 }
 
+/* HTLS reply to HTLC_HDR_FILE_PUTFOLDER. The server has created
+ * the destination folder root and is waiting for us to open the
+ * HTXF subchannel and walk the local tree. Mirror of
+ * rcv_task_file_put — same chunks, no resume RFLT (per-file
+ * resume happens inside folder_put_thread, not at the task
+ * boundary). */
+void
+rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
+{
+    guint32 ref = 0, queue = 0;
+
+    if (task_inerror (htlc)) {
+        gtask_delete_htxf (&the_session, htxf);
+        xfer_delete (htxf);
+        return;
+    }
+
+    dh_start (htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_HTXF_REF:
+            dh_getint (ref);
+            break;
+        case HTLS_DATA_QUEUE:
+            dh_getint (queue);
+            break;
+        }
+    }
+    dh_end ();
+
+    if (!ref) {
+        return;
+    }
+
+    htxf->ref = ref;
+    htxf->queue = queue;
+    gettimeofday (&htxf->start, 0);
+
+    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
+    htxf->serverport = htlc->serverport + 1;
+
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+                                   htxf);
+
+    if (!htxf->queue) {
+        xfer_ready_write (htxf);
+    }
+}
+
 /* Reply to our HTLC_HDR_DOWNLOAD_BANNER. The server gives us a
  * transfer reference and total byte count; banner.c spins up an
  * HTXF worker thread to actually fetch the bytes off

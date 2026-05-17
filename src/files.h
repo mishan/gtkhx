@@ -102,6 +102,13 @@ extern void hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath);
  * under it as the local root for the tree. */
 extern void hx_get_folder (struct htlc_conn *htlc, const char *lpath_root,
                            const char *rdir, const char *name, gsize name_len);
+/* Upload a local folder tree to the server. lpath is the local
+ * source folder; rdir is the remote parent directory; name is
+ * the folder's basename as it should appear remotely. The server
+ * creates the destination folder root and we stream the contents
+ * over the HTXF subchannel via folder_put_thread. */
+extern void hx_put_folder (struct htlc_conn *htlc, const char *lpath,
+                           const char *rdir, const char *name, gsize name_len);
 extern void hx_file_link (struct htlc_conn *htlc, char *src_path,
                           char *dst_path);
 extern void hx_file_move (struct htlc_conn *htlc, char *src_path,

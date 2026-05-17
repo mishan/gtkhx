@@ -157,6 +157,11 @@ struct hl_user_data {
 #define HTLC_DATA_DIR ((guint16)0x00ca)
 #define HTLC_DATA_RFLT ((guint16)0x00cb)
 #define HTLC_DATA_FILE_PREVIEW ((guint16)0x00cc)
+/* Aggregate file count carried in HTLC_HDR_FILE_PUTFOLDER. mhxd
+ * also reads this as HTLS_DATA_FILE_NFILES on the GETFOLDER reply
+ * — same numeric type code (0xdc), different naming convention
+ * for which side is the sender. */
+#define HTLC_DATA_FILE_NFILES ((guint16)0x00dc)
 #define HTLC_DATA_FILE_COMMENT ((guint16)0x00d2)
 #define HTLC_DATA_FILE_RENAME ((guint16)0x00d3)
 #define HTLC_DATA_DIR_RENAME ((guint16)0x00d4)
