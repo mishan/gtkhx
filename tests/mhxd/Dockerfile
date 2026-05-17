@@ -76,8 +76,55 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 # fully parallel-safe — fall back to single-job if the parallel run
 # stumbled.
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
-    && cd mhxd \
+RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
+
+# Patch mhxd's folder-transfer size formula. Two copy/paste bugs
+# in mhxd: src/hxd/htxf.c::folder_getpaths and src/hxd/files.c::
+# rcv_folder_get use the wrong variables when populating the
+# per-file pf->total_size that goes out as HTLS_DATA_HTXF_SIZE
+# and as the per-file FILE_SEND size header inside the HTXF
+# folder stream.
+#
+#   rsrc_size = sizeof(pathbuf);         <- buffer's static size
+#                                           (MAXPATHLEN), not the
+#                                           file's actual rsrc
+#                                           fork length
+#   ... + strlen(pathbuf);               <- server-side path
+#                                           length, which doesn't
+#                                           appear on the wire
+#
+# Compare to the correct solo-file formula in rcv_file_get
+# (files.c, around line 1576-1584):
+#
+#   rsrc_size = resource_len(path);      <- actual fork size, 0
+#                                           when no rsrc fork
+#   ... + comment_len(path);             <- Mac file comment
+#                                           length, on-wire
+#
+# The result of the typo: pf->total_size is wildly over-claimed
+# (typically by 4 KiB per file). file_send writes the data fork,
+# then the file_send rsrc-fork short-circuit
+#       if (!use_hfs || preview || !(rsrc_size - rsrc_pos))
+#           return 0;
+# fails (rsrc_size is non-zero), so file_send writes the MACR
+# marker and tries to open the rsrc fork. resource_open fails on
+# files without a CAP/.resource sidecar, file_send returns -1,
+# and folder_send terminates the WHOLE multi-file stream after
+# just one file. From the client's perspective: the first file
+# arrives correctly, then the subchannel disconnects mid-tree.
+#
+# Fix both occurrences of the same typo here at build time so
+# the integration tests (and any user pointing GtkHx at this
+# container) see a server that handles multi-file folder
+# transfers cleanly with HFS still enabled. The same fix is
+# worth submitting upstream.
+RUN cd /build/mhxd \
+    && sed -i 's|rsrc_size = sizeof(pathbuf);|rsrc_size = resource_len(pathbuf);|' \
+         src/hxd/htxf.c src/hxd/files.c \
+    && sed -i 's|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + strlen(pathbuf);|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + comment_len(pathbuf);|' \
+         src/hxd/htxf.c src/hxd/files.c
+
+RUN cd /build/mhxd \
     && ./autogen.sh \
     && ./configure \
         --prefix=/opt/mhxd \
@@ -130,24 +177,6 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
 #     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
 #
-# (3a) operation.hfs yes → operation.hfs no
-#     The default config enables HFS metadata support. On the
-#     folder-download path (HTLC_HDR_FILE_GETFOLDER), this turns
-#     into mhxd writing a 16-byte MACR (resource-fork) marker
-#     after each file's data fork — and then mhxd calls
-#     resource_open() to stream the rsrc fork bytes. On regular
-#     text files with no rsrc fork, mhxd's AppleDouble shim
-#     returns fd 0 (stdin), the subsequent read() blocks reading
-#     stdin, eventually returns 0 (EOF), file_send returns -1,
-#     and folder_send terminates the whole multi-file transfer
-#     after just the first file. Disabling HFS removes the MACR
-#     marker entirely (file_send returns 0 immediately after the
-#     data fork on the non-HFS code path), keeping multi-file
-#     GETFOLDER streams from getting cut short mid-tree. Doesn't
-#     affect solo file_get / file_put since those tests
-#     substring-match the data-fork content regardless of where
-#     in the FILP framing it lands.
-#
 # (3b) banner.* config is patched at *runtime*, not build time.
 #     docker-entrypoint.sh reads BANNER_MODE / BANNER_URL /
 #     BANNER_FILE and rewrites the type/file/url fields in
@@ -189,8 +218,6 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
-        /opt/mhxd/run/hxd.conf \
-    && sed -i 's/^\([[:space:]]*\)hfs yes;/\1hfs no;/' \
         /opt/mhxd/run/hxd.conf \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
