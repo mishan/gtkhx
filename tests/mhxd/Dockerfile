@@ -130,6 +130,24 @@ RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd \
 #         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
 #     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
 #
+# (3a) operation.hfs yes → operation.hfs no
+#     The default config enables HFS metadata support. On the
+#     folder-download path (HTLC_HDR_FILE_GETFOLDER), this turns
+#     into mhxd writing a 16-byte MACR (resource-fork) marker
+#     after each file's data fork — and then mhxd calls
+#     resource_open() to stream the rsrc fork bytes. On regular
+#     text files with no rsrc fork, mhxd's AppleDouble shim
+#     returns fd 0 (stdin), the subsequent read() blocks reading
+#     stdin, eventually returns 0 (EOF), file_send returns -1,
+#     and folder_send terminates the whole multi-file transfer
+#     after just the first file. Disabling HFS removes the MACR
+#     marker entirely (file_send returns 0 immediately after the
+#     data fork on the non-HFS code path), keeping multi-file
+#     GETFOLDER streams from getting cut short mid-tree. Doesn't
+#     affect solo file_get / file_put since those tests
+#     substring-match the data-fork content regardless of where
+#     in the FILP framing it lands.
+#
 # (3b) banner.* config is patched at *runtime*, not build time.
 #     docker-entrypoint.sh reads BANNER_MODE / BANNER_URL /
 #     BANNER_FILE and rewrites the type/file/url fields in
@@ -171,6 +189,8 @@ RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
     && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
         /opt/mhxd/run/hxd.conf \
     && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
+        /opt/mhxd/run/hxd.conf \
+    && sed -i 's/^\([[:space:]]*\)hfs yes;/\1hfs no;/' \
         /opt/mhxd/run/hxd.conf \
     && mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \

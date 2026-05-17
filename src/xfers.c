@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -728,6 +729,61 @@ get_rsrc:
     /* Previews never carry resource forks — the server slices the
 	 * payload at the data fork. */
     if (htxf->opt.preview) {
+        goto done;
+    }
+    /* Folder transfers: skip the rsrc fork. mhxd's
+	 * folder_getpaths populates pf->total_size with a phantom
+	 * rsrc-fork allowance (sizeof(pathbuf) = MAXPATHLEN); file_send
+	 * then writes the 16-byte MACR marker but, on regular text
+	 * files with no AppleDouble sidecar, resource_open
+	 * fails-into-stdin and file_send hangs (or returns -1) without
+	 * actually streaming the claimed rsrc bytes. Following the
+	 * MACR marker into a blocking rd_wr hangs the worker forever
+	 * (issue surfaced on the 'Folder download task hangs' bug
+	 * trace). Folder-stream consumers never persist resource forks
+	 * to disk anyway — they're just plain-file copies of the
+	 * tree — so skipping rsrc here is functionally equivalent.
+	 *
+	 * BUT we still have to consume whatever the server actually
+	 * wrote since FILE_SEND announced file_budget bytes. Anything
+	 * left in the socket buffer (the MACR marker mhxd buffered
+	 * before its resource_open errored) would otherwise be read
+	 * as the next FILE_NEXT response and corrupt the loop. Drain
+	 * up to (file_budget - tot_len) bytes with a short per-read
+	 * timeout — if data is in flight we slurp it; if the server
+	 * gave up after the marker we time out and move on. */
+    if (htxf->opt.folder) {
+        if (tot_len < file_budget) {
+            guint32 remaining = file_budget - tot_len;
+            while (remaining > 0) {
+                fd_set rfds;
+                struct timeval tv;
+                int sr;
+                guint8 sink[2048];
+                size_t want = remaining < sizeof (sink) ? remaining
+                                                        : sizeof (sink);
+                FD_ZERO (&rfds);
+                FD_SET (s, &rfds);
+                /* 200 ms per read — long enough for legitimate
+				 * MACR marker bytes still buffered server-side
+				 * to land; short enough that mhxd's hung
+				 * resource_open path doesn't stall the whole
+				 * tree. */
+                tv.tv_sec = 0;
+                tv.tv_usec = 200 * 1000;
+                sr = select (s + 1, &rfds, NULL, NULL, &tv);
+                if (sr <= 0) {
+                    break;
+                }
+                ssize_t got = read (s, sink, want);
+                if (got <= 0) {
+                    break;
+                }
+                remaining -= (guint32)got;
+                htxf->total_pos += (guint32)got;
+                post_file_update (htxf);
+            }
+        }
         goto done;
     }
     /* The file_budget gate is what makes this helper reusable for

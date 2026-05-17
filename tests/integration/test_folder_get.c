@@ -39,6 +39,7 @@
 #include "config.h"
 #include <string.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -46,6 +47,47 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "integration_harness.h"
+
+/* Drain up to `budget` bytes from `fd` with a short per-read
+ * timeout. Returns the number of bytes actually read. Used to
+ * consume the FILP framing's MACR marker + (possibly empty)
+ * rsrc fork bytes after the data fork. mhxd's folder_send
+ * over-claims each file's total_size by including a phantom
+ * resource fork (folder_getpaths sets rsrc_size =
+ * sizeof(pathbuf) = MAXPATHLEN, unconditionally); the actual
+ * file_send may bail after the MACR marker when resource_open
+ * fails on the regular text fixture files. We tolerate either:
+ * read what's available within ~500ms and move on. */
+static gsize
+drain_with_timeout (int fd, gsize budget, int per_read_ms)
+{
+    gsize total = 0;
+    guint8 scratch[2048];
+    while (total < budget) {
+        fd_set rfds;
+        struct timeval tv;
+        int sr;
+        ssize_t n;
+        gsize want = budget - total;
+        if (want > sizeof (scratch)) {
+            want = sizeof (scratch);
+        }
+        FD_ZERO (&rfds);
+        FD_SET (fd, &rfds);
+        tv.tv_sec = per_read_ms / 1000;
+        tv.tv_usec = (per_read_ms % 1000) * 1000;
+        sr = select (fd + 1, &rfds, NULL, NULL, &tv);
+        if (sr <= 0) {
+            break; /* timeout or error — accept partial */
+        }
+        n = read (fd, scratch, want);
+        if (n <= 0) {
+            break;
+        }
+        total += (gsize)n;
+    }
+    return total;
+}
 
 static guint32
 hdr_type (const struct htlc_conn *htlc)
@@ -249,8 +291,26 @@ test_folder_get_round_trip (void)
             continue;
         }
 
-        /* File leaf — send FILE_SEND, then read u32 size + the
-		 * FILP-wrapped payload. */
+        /* File leaf — send FILE_SEND, then drain the FILP framing.
+		 *
+		 * We DON'T just integration_recv the file_size bytes
+		 * straight: mhxd's folder_getpaths over-estimates each
+		 * file's total_size by a phantom resource-fork chunk
+		 * (sizeof(pathbuf) bytes, typically MAXPATHLEN). When
+		 * the server has CONFIG_HFS off — the default for the
+		 * Linux-only test container — file_send NEVER writes
+		 * those rsrc bytes, just 133 header bytes plus the data
+		 * fork. So reading file_size worth of bytes blocks
+		 * forever waiting on data the server isn't sending.
+		 *
+		 * Mirror file_recv_one's framing-parse: read the fixed
+		 * 40-byte FILP preamble, derive the info-block size
+		 * from buf[38..39], read info+16 bytes (the trailing
+		 * 16 is the DATA marker), pull the data-fork length
+		 * from its last 4 bytes, then read exactly the data
+		 * fork. Don't even look for MACR — the over-claimed
+		 * size means the server is fine advancing on our next
+		 * FILE_NEXT without sending the phantom rsrc bytes. */
         cmd_n = htons (1); /* FILE_SEND */
         g_assert_true (integration_send (xfd, &cmd_n, 2));
 
@@ -258,23 +318,65 @@ test_folder_get_round_trip (void)
         g_assert_true (integration_recv (xfd, &file_size_n, 4));
         guint32 file_size = ntohl (file_size_n);
         g_assert_cmpuint (file_size, >, 0);
-        g_assert_cmpuint (file_size, <, 64 * 1024);
+        g_assert_cmpuint (file_size, <, 1024 * 1024);
 
-        guint8 *payload = g_malloc (file_size);
-        g_assert_true (integration_recv (xfd, payload, file_size));
+        /* 40-byte FILP preamble. */
+        guint8 hdr[40];
+        g_assert_true (integration_recv (xfd, hdr, 40));
 
-        g_test_message ("file leaf: %s (%u bytes)", name, (unsigned)file_size);
+        /* info-block + DATA marker. buf[38] flag: 0 = single-byte
+		 * info length at buf[39]; 1 = info length is 256 + buf[39]
+		 * (mhxd never trips this for tiny seed files but the
+		 * client's file_recv_one handles it). */
+        guint32 info_len = (hdr[38] ? 0x100 : 0) + hdr[39];
+        g_assert_cmpuint (info_len, <, 64 * 1024); /* sanity bound */
+        gsize trailer_len = info_len + 16;
+        guint8 *trailer = g_malloc (trailer_len);
+        g_assert_true (integration_recv (xfd, trailer, trailer_len));
+
+        /* DATA fork length: u32 BE at the last 4 bytes of trailer
+		 * (the 16-byte DATA marker = 4 bytes "DATA" + 8 zero
+		 * bytes + 4 bytes BE u32 size). */
+        guint32 data_size = ((guint32)trailer[trailer_len - 4] << 24)
+                            | ((guint32)trailer[trailer_len - 3] << 16)
+                            | ((guint32)trailer[trailer_len - 2] << 8)
+                            | (guint32)trailer[trailer_len - 1];
+        g_assert_cmpuint (data_size, <, 64 * 1024); /* sanity bound */
+        g_free (trailer);
+
+        /* Data fork — the actual file contents. */
+        guint8 *data_fork = g_malloc (data_size);
+        if (data_size) {
+            g_assert_true (integration_recv (xfd, data_fork, data_size));
+        }
+        g_test_message ("file leaf: %s claimed_size=%u data_size=%u", name,
+                        (unsigned)file_size, (unsigned)data_size);
 
         /* Match by name to the seed content we expect. */
         if (strstr (name, "leaf_a")) {
-            g_assert_true (bytes_contain (payload, file_size, "folder-leaf-A"));
+            g_assert_true (
+                bytes_contain (data_fork, data_size, "folder-leaf-A"));
             found_leaf_a = TRUE;
         } else if (strstr (name, "leaf_b")) {
-            g_assert_true (bytes_contain (payload, file_size, "folder-leaf-B"));
+            g_assert_true (
+                bytes_contain (data_fork, data_size, "folder-leaf-B"));
             found_leaf_b = TRUE;
         }
 
-        g_free (payload);
+        g_free (data_fork);
+
+        /* The server's claimed file_size over-counts by an
+		 * unsent phantom rsrc fork — folder_getpaths populates
+		 * pf->total_size with the dir-listing snapshot but
+		 * file_send (with operation.hfs disabled in our
+		 * Dockerfile, step 3a) stops after the data fork.
+		 * Drain anything still in-flight with a short timeout
+		 * so the next FILE_NEXT byte we write doesn't land
+		 * mid-stream against a delayed write. */
+        guint32 consumed = 40 + (guint32)trailer_len + data_size;
+        if (file_size > consumed) {
+            (void)drain_with_timeout (xfd, file_size - consumed, 100);
+        }
     }
 
     g_assert_true (found_leaf_a);
