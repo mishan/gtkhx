@@ -5,9 +5,21 @@
  * A single `Copy` action transfers the active panel's selection
  * to the inactive panel's current path:
  *
- *   local  → remote   upload via hx_put_file (XFER_PUT)
- *   remote → local    download via xfer_new (XFER_GET)
- *   local  → local    GIO copy
+ *   local  → remote   upload via hx_put_file (XFER_PUT). Folders
+ *                     are walked locally with GFileEnumerator;
+ *                     each subdir gets an hx_make_dir and each
+ *                     file an hx_put_file. Gated on
+ *                     HL_ACCESS_UPLOAD_FILES for files plus
+ *                     HL_ACCESS_UPLOAD_FOLDERS for folder roots.
+ *   remote → local    download via xfer_new (XFER_GET). Folder
+ *                     downloads aren't wired yet — the legacy
+ *                     rcv.c COMPLETE_GET_R path mkdirs relative
+ *                     to cwd, which puts files in the wrong place
+ *                     under Flatpak; a follow-up will rewire it
+ *                     to honour download_path.
+ *   local  → local    GIO. Folders are walked with
+ *                     GFileEnumerator and g_file_copy'd file by
+ *                     file.
  *   remote → remote   not supported — Hotline has no FILE_COPY
  *                     opcode, and the SYMLINK alternative shares
  *                     bytes on disk so it isn't a real copy. The
@@ -39,7 +51,7 @@ typedef enum {
 	                                 * a live connection */
     HX_OPS_ERR_NO_PERMISSION,      /* access bit not set */
     HX_OPS_ERR_UNSUPPORTED,        /* dispatch fallthrough */
-    HX_OPS_ERR_FOLDER_UNSUPPORTED, /* recursive copy: deferred */
+    HX_OPS_ERR_FOLDER_UNSUPPORTED, /* remote→local recursion: deferred */
     HX_OPS_ERR_LOCAL_FAIL          /* GIO copy failed */
 } HxOpsResult;
 

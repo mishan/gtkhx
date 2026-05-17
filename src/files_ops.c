@@ -44,8 +44,12 @@ hx_files_ops_result_message (HxOpsResult r)
         return _ ("Hotline has no server-side copy. Use Move (F6) to "
                   "relocate the file, or drag to your local panel first.");
     case HX_OPS_ERR_FOLDER_UNSUPPORTED:
-        return _ (
-            "Folder copies aren't supported yet — pick individual files.");
+        /* Local→remote and local→local folder copies work now; only
+		 * the remote→local download direction still falls through
+		 * here. The message stays generic in case future paths add
+		 * back into this enum. */
+        return _ ("Folder downloads aren't supported yet — pick individual "
+                  "files.");
     case HX_OPS_ERR_LOCAL_FAIL:
         return _ ("Local copy failed.");
     }
@@ -98,16 +102,90 @@ has_access (int bit)
 
 /* ---- Per-direction handlers ---- */
 
-/* local → remote upload. The Hotline wire wants an absolute remote
- * path; we synthesise it from the dst provider's current path +
- * the source entry's name. hx_put_file is the existing wrapper
- * for the XFER_PUT side of xfer_new. */
+/* Recursive upload of a local directory tree to the Hotline
+ * server. Walks `local_path` with a GFileEnumerator and, for
+ * each child, either recurses or fires hx_put_file. The remote
+ * directory at `remote_path` is created first via hx_make_dir;
+ * the server queues the operations in order so files arriving
+ * just after the mkdir land correctly.
+ *
+ * Returns TRUE if the walker completed without local-side I/O
+ * errors. The wire-side success of each individual mkdir/put is
+ * fire-and-forget — failures surface through the toolbar's
+ * existing task_error toast. */
+static gboolean
+upload_local_dir_recursive (const char *local_path, const char *remote_path)
+{
+    GFile *src = g_file_new_for_path (local_path);
+    GFileEnumerator *en;
+    GFileInfo *info;
+    GError *err = NULL;
+    gboolean all_ok = TRUE;
+
+    /* Make the remote dir first (server: idempotent — recreating
+	 * an existing dir is a no-op error we don't surface). */
+    {
+        char *tmp = g_strdup (remote_path);
+        hx_make_dir (&the_session.htlc, tmp);
+        g_free (tmp);
+    }
+
+    en = g_file_enumerate_children (
+        src, G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+        G_FILE_QUERY_INFO_NONE, NULL, &err);
+    if (!en) {
+        g_warning ("upload walk %s: %s", local_path, err ? err->message : "?");
+        g_clear_error (&err);
+        g_object_unref (src);
+        return FALSE;
+    }
+
+    while ((info = g_file_enumerator_next_file (en, NULL, &err))) {
+        const char *name = g_file_info_get_name (info);
+        GFileType type = g_file_info_get_file_type (info);
+        char *child_local = g_build_filename (local_path, name, NULL);
+        char *child_remote = join_path (remote_path, name);
+
+        if (type == G_FILE_TYPE_DIRECTORY) {
+            if (!upload_local_dir_recursive (child_local, child_remote)) {
+                all_ok = FALSE;
+            }
+        } else {
+            hx_put_file (&the_session.htlc, child_local, child_remote);
+        }
+
+        g_free (child_local);
+        g_free (child_remote);
+        g_object_unref (info);
+    }
+
+    if (err) {
+        g_warning ("upload walk %s: %s", local_path, err->message);
+        g_clear_error (&err);
+        all_ok = FALSE;
+    }
+
+    g_object_unref (en);
+    g_object_unref (src);
+    return all_ok;
+}
+
+/* local → remote upload. For files: hx_put_file. For folders:
+ * recursive walker that mkdirs the remote target then queues a
+ * hx_put_file per file. Hotline servers process operations in
+ * arrival order so the per-folder mkdir always lands before its
+ * children's uploads.
+ *
+ * The Hotline wire wants an absolute remote path; we synthesise
+ * it from the dst provider's current path + the source entry's
+ * name. */
 static HxOpsResult
 copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
                       HxFileEntry *e)
 {
     const char *src_dir, *dst_dir;
     char *lpath, *rpath;
+    gboolean is_dir;
 
     if (!the_session.htlc.fd) {
         return HX_OPS_ERR_NOT_CONNECTED;
@@ -115,14 +193,22 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
         return HX_OPS_ERR_NO_PERMISSION;
     }
-    if (hx_file_entry_is_dir (e)) {
-        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
+    is_dir = hx_file_entry_is_dir (e);
+    if (is_dir && !has_access (HL_ACCESS_UPLOAD_FOLDERS)) {
+        return HX_OPS_ERR_NO_PERMISSION;
     }
 
     src_dir = hx_files_provider_get_current_path (src);
     dst_dir = hx_files_provider_get_current_path (dst);
     lpath = join_path (src_dir, hx_file_entry_get_name (e));
     rpath = join_path (dst_dir, hx_file_entry_get_name (e));
+
+    if (is_dir) {
+        gboolean ok = upload_local_dir_recursive (lpath, rpath);
+        g_free (lpath);
+        g_free (rpath);
+        return ok ? HX_OPS_OK : HX_OPS_ERR_LOCAL_FAIL;
+    }
 
     hx_put_file (&the_session.htlc, lpath, rpath);
 
@@ -150,6 +236,15 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
         return HX_OPS_ERR_NO_PERMISSION;
     }
     if (hx_file_entry_is_dir (e)) {
+        /* Folder downloads need a state-machine that drives
+		 * HTLC_HDR_FILE_LIST recursively and queues xfer_new
+		 * for each file under a local-prefix subtree. The
+		 * legacy infrastructure in rcv.c::rcv_task_file_list's
+		 * COMPLETE_GET_R branch is half-baked for this — it
+		 * mkdirs relative to cwd, which puts files in the
+		 * wrong place under Flatpak. A follow-up commit will
+		 * rewire it to honour the user's download_path pref.
+		 * For now, single files only.*/
         return HX_OPS_ERR_FOLDER_UNSUPPORTED;
     }
 
@@ -176,9 +271,101 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     return htxf ? HX_OPS_OK : HX_OPS_ERR_LOCAL_FAIL;
 }
 
-/* local → local via GIO. Blocking, but fast enough for the user
- * to not notice unless the file is huge. Async progress UI is a
- * Phase 4 polish item. */
+/* Recursive copy of a local directory tree via GIO. Walks `src`
+ * with a GFileEnumerator and, for each child, either recurses
+ * into a subdirectory or g_file_copy's the file. Synchronous —
+ * runs on the main thread, fine for the byte sizes Hotline
+ * downloads usually weigh.
+ *
+ * Returns TRUE iff every file copied cleanly. On any failure we
+ * still walk to completion (gives the user partial results
+ * rather than abandoning mid-walk) but the return value is FALSE
+ * so the caller's toast reads as a failure. */
+static gboolean
+copy_local_dir_recursive (GFile *src_dir, GFile *dst_dir, GError **err_out)
+{
+    GFileEnumerator *en;
+    GFileInfo *info;
+    GError *err = NULL;
+    gboolean all_ok = TRUE;
+
+    /* Make the destination directory. Pre-existing is OK — the
+	 * caller may have created it already. */
+    if (!g_file_make_directory_with_parents (dst_dir, NULL, &err)) {
+        if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
+            if (err_out && !*err_out) {
+                *err_out = err;
+            } else {
+                g_error_free (err);
+            }
+            return FALSE;
+        }
+        g_clear_error (&err);
+    }
+
+    en = g_file_enumerate_children (src_dir,
+                                    G_FILE_ATTRIBUTE_STANDARD_NAME
+                                    "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                                    G_FILE_QUERY_INFO_NONE, NULL, &err);
+    if (!en) {
+        if (err_out && !*err_out) {
+            *err_out = err;
+        } else {
+            g_clear_error (&err);
+        }
+        return FALSE;
+    }
+
+    while ((info = g_file_enumerator_next_file (en, NULL, &err))) {
+        const char *name = g_file_info_get_name (info);
+        GFileType type = g_file_info_get_file_type (info);
+        GFile *child_src, *child_dst;
+
+        child_src = g_file_get_child (src_dir, name);
+        child_dst = g_file_get_child (dst_dir, name);
+
+        if (type == G_FILE_TYPE_DIRECTORY) {
+            if (!copy_local_dir_recursive (child_src, child_dst, err_out)) {
+                all_ok = FALSE;
+            }
+        } else {
+            GError *cerr = NULL;
+            if (!g_file_copy (child_src, child_dst, G_FILE_COPY_NONE, NULL,
+                              NULL, NULL, &cerr)) {
+                g_warning ("local copy: %s", cerr ? cerr->message : "?");
+                if (err_out && !*err_out && cerr) {
+                    *err_out = cerr;
+                } else {
+                    g_clear_error (&cerr);
+                }
+                all_ok = FALSE;
+            }
+        }
+
+        g_object_unref (child_src);
+        g_object_unref (child_dst);
+        g_object_unref (info);
+    }
+
+    /* Enumerator EOF — `err` from next_file is NULL on normal
+	 * termination, set on IO failure. */
+    if (err) {
+        if (err_out && !*err_out) {
+            *err_out = err;
+        } else {
+            g_clear_error (&err);
+        }
+        all_ok = FALSE;
+    }
+
+    g_object_unref (en);
+    return all_ok;
+}
+
+/* local → local via GIO. For files: g_file_copy. For folders:
+ * recursive walker that recreates the tree under dst. Blocking,
+ * but fast enough for the user to not notice unless the file is
+ * huge. Async progress UI is a Phase 4 polish item. */
 static HxOpsResult
 copy_local_to_local (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
 {
@@ -188,10 +375,6 @@ copy_local_to_local (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
     GError *err = NULL;
     gboolean ok;
 
-    if (hx_file_entry_is_dir (e)) {
-        return HX_OPS_ERR_FOLDER_UNSUPPORTED;
-    }
-
     src_dir = hx_files_provider_get_current_path (src);
     dst_dir = hx_files_provider_get_current_path (dst);
     spath = join_path (src_dir, hx_file_entry_get_name (e));
@@ -199,7 +382,12 @@ copy_local_to_local (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
 
     sf = g_file_new_for_path (spath);
     df = g_file_new_for_path (dpath);
-    ok = g_file_copy (sf, df, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+
+    if (hx_file_entry_is_dir (e)) {
+        ok = copy_local_dir_recursive (sf, df, &err);
+    } else {
+        ok = g_file_copy (sf, df, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+    }
     if (!ok && err) {
         g_warning ("local copy %s → %s: %s", spath, dpath, err->message);
         g_clear_error (&err);
