@@ -569,28 +569,46 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
     return 0;
 }
 
-static void *
-get_thread (void *__arg)
+/* Receive a single file from an HTXF subchannel into htxf->path.
+ *
+ * Used by:
+ *   - get_thread (solo file): file_budget = htxf->total_size
+ *   - folder_get_thread (one file inside a folder stream):
+ *     file_budget = the u32 size header just read off the wire
+ *     for this file
+ *
+ * The wire framing is identical in both cases:
+ *
+ *   1. 40-byte FILP fixed header.
+ *   2. Variable info+comment block (length encoded by FILP
+ *      bytes 38/39: `(buf[38] ? 0x100 : 0) + buf[39]`, plus
+ *      16 bytes of DATA-fork marker at the tail).
+ *   3. Data-fork payload (length = u32 BE at offset pos-4 of
+ *      the info block).
+ *   4. Optional MACR rsrc-fork marker (16 bytes) + rsrc payload,
+ *      gated on whether tot_len has caught up to file_budget.
+ *
+ * Updates htxf->total_pos as bytes arrive so the tasks-window
+ * progress bar advances. Does NOT play the completion sound,
+ * post a final file_update, or close the socket — those are
+ * caller responsibilities (the meaning differs for solo file
+ * vs. final file in a folder).
+ *
+ * Returns 0 on success, errno-like positive code on failure. */
+static int
+file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
     guint32 pos, len, tot_len;
-    int s, f, r, retval = 0;
-    guint8 typecrea[8], buf[1024];
+    int f, r, retval = 0;
+    guint8 typecrea[8];
     struct hfsinfo fi;
     hx_preview *p = NULL;
-
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
-        goto ret;
-    }
 
     len = 40;
     pos = 0;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
@@ -603,13 +621,11 @@ get_thread (void *__arg)
     tot_len = 40 + len;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
         htxf->total_pos += r;
-
         post_file_update (htxf);
     }
     memcpy (typecrea, &buf[4], 8);
@@ -633,8 +649,7 @@ get_thread (void *__arg)
     if (!htxf->opt.preview) {
         if ((f = open (htxf->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR))
             < 0) {
-            retval = errno;
-            goto ret;
+            return errno;
         }
 
         if (htxf->data_pos) {
@@ -653,7 +668,7 @@ get_thread (void *__arg)
 		 * nicely from non-main threads. */
         p = (hx_preview *)htxf->preview;
         if (!p) {
-            goto ret;
+            return 0; /* nothing to write into; quietly stop */
         }
         /* Hand the FILP type/creator over to the preview module
 		 * BEFORE the first chunk lands, so the viewer dispatch
@@ -671,26 +686,30 @@ get_thread (void *__arg)
         retval = preview_get (s, len, htxf, p);
     }
     if (retval) {
-        goto ret;
+        return retval;
     }
 get_rsrc:
+    /* Previews never carry resource forks — the server slices the
+	 * payload at the data fork. */
     if (htxf->opt.preview) {
         goto done;
     }
-    if (tot_len >= htxf->total_size) {
+    /* The file_budget gate is what makes this helper reusable for
+	 * folder streams: solo mode passes htxf->total_size; folder
+	 * mode passes this one file's size off the FILE_SEND header.
+	 * Either way, "consumed all our budget" means no rsrc fork. */
+    if (tot_len >= file_budget) {
         goto done;
     }
     pos = 0;
     len = 16;
     while (len) {
         if ((r = read (s, &(buf[pos]), len)) < 1) {
-            retval = errno;
-            goto ret;
+            return errno ? errno : EIO;
         }
         pos += r;
         len -= r;
         htxf->total_pos += r;
-
         post_file_update (htxf);
     }
     HN32 (&len, &buf[12]);
@@ -699,15 +718,14 @@ get_rsrc:
     }
     if ((f = resource_open (htxf->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR))
         < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
     retval = rd_wr (s, f, len, htxf);
     if (retval) {
-        goto ret;
+        return retval;
     }
     close (f);
 
@@ -716,12 +734,36 @@ done:
     if (!htxf->opt.preview) {
         hfsinfo_write (htxf->path, &fi);
     }
+    return 0;
+}
+
+static void *
+get_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval;
+    guint8 buf[1024];
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    retval = file_recv_one (s, htxf, htxf->total_size, buf);
+    if (retval) {
+        goto ret;
+    }
+
     play_sound (FILE_DONE);
     htxf->total_pos = htxf->total_size;
     post_file_update (htxf);
 
 ret:
-    close (s);
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
 
     /* Cleanup is marshaled to the main thread so it runs AFTER
 	 * every file_update idle posted above — GMainContext FIFO
@@ -730,19 +772,34 @@ ret:
     return NULL;
 }
 
-static void *
-put_thread (void *__arg)
+/* Send a single file out over an HTXF subchannel from
+ * htxf->path. Mirror of file_recv_one — same wire framing, just
+ * the sending end. The header layout is:
+ *
+ *   FILP fixed header (40 bytes)
+ *   INFO/MAC block + TYPECREA + create/modify times + comment
+ *   DATA marker + u32 BE data-fork-remaining length
+ *   data fork bytes
+ *   MACR marker + u32 BE rsrc-fork length
+ *   rsrc fork bytes
+ *
+ * Used by:
+ *   - put_thread (solo file): just call directly.
+ *   - folder_put_thread: writes the per-file u32 size header
+ *     first (over the HTXF socket), then calls this. Hotline's
+ *     folder framing puts the per-file size up front so the
+ *     receiver knows the budget.
+ *
+ * htxf->data_size / data_pos / rsrc_size / rsrc_pos must be set
+ * to the actual local file values before calling. Caller closes
+ * the socket and plays the completion sound.
+ *
+ * Returns 0 on success, errno-like positive code on failure. */
+static int
+file_send_one (int s, struct htxf_conn *htxf, guint8 *buf)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
-    int s, f, retval = 0;
-    guint8 buf[512];
+    int f, retval;
     struct hfsinfo fi;
-
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
-        goto ret;
-    }
 
     memcpy (buf, "\
 FILP\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
@@ -772,23 +829,22 @@ TYPECREA\
         HN32 (&buf[129 + fi.comlen], &tmp);
     }
     if (write (s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
-        retval = errno;
-        goto ret;
+        return errno ? errno : EIO;
     }
     htxf->total_pos += 133 + fi.comlen;
     if (!(htxf->data_size - htxf->data_pos)) {
         goto put_rsrc;
     }
     if ((f = open (htxf->path, O_RDONLY)) < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->data_pos) {
         lseek (f, htxf->data_pos, SEEK_SET);
     }
     retval = rd_wr (f, s, htxf->data_size, htxf);
     if (retval) {
-        goto ret;
+        close (f);
+        return retval;
     }
     close (f);
 
@@ -796,33 +852,58 @@ put_rsrc:
     memcpy (buf, "MACR\0\0\0\0\0\0\0\0", 12);
     HN32 (&buf[12], &htxf->rsrc_size);
     if (write (s, buf, 16) != 16) {
-        retval = 0;
-        goto ret;
+        /* Same behaviour as the inlined version: a short write at
+		 * the MACR-marker boundary is treated as a clean stop (the
+		 * server may not want the rsrc fork). Don't surface as an
+		 * error. */
+        return 0;
     }
     htxf->total_pos += 16;
     if (!(htxf->rsrc_size - htxf->rsrc_pos)) {
-        goto done;
+        return 0;
     }
 
     if ((f = resource_open (htxf->path, O_RDONLY, 0)) < 0) {
-        retval = errno;
-        goto ret;
+        return errno;
     }
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
     retval = rd_wr (f, s, htxf->rsrc_size, htxf);
     if (retval) {
-        goto ret;
+        close (f);
+        return retval;
     }
     close (f);
+    return 0;
+}
 
-done:
+static void *
+put_thread (void *__arg)
+{
+    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    int s = -1, retval;
+    guint8 buf[512];
+
+    s = htxf_connect (htxf);
+    if (s < 0) {
+        retval = s;
+        goto ret;
+    }
+
+    retval = file_send_one (s, htxf, buf);
+    if (retval) {
+        goto ret;
+    }
+
     play_sound (FILE_DONE);
     post_file_update (htxf);
 
 ret:
-    close (s);
+    (void)retval;
+    if (s >= 0) {
+        close (s);
+    }
 
     /* See get_thread for the cleanup-via-marshal rationale. */
     post_xfer_cleanup (htxf);
