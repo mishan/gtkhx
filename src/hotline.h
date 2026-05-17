@@ -69,6 +69,21 @@ struct hl_user_data {
 #define HTXF_MAGIC_LEN 4
 #define HTXF_MAGIC_INT 0x48545846
 
+/* HTXF subchannel transfer types. Carried in the last 4 bytes of
+ * the 16-byte HTXF magic header (`unknown` u32 in struct
+ * htxf_hdr, layered as u16 type + u16 reserved on the wire).
+ * mhxd resolves the kind of transfer server-side by matching the
+ * inbound HTXF connection's ref to a pre-created htxf_conn that
+ * already has its ->type set, so for mhxd the wire field is
+ * advisory. Mac-native servers use it to dispatch the subchannel
+ * into the right framing, so sending the wrong value here means
+ * the server interprets a folder transfer as a single-file
+ * transfer and waits forever for FILP framing while we send
+ * FILE_NEXT — looks like a hang from both ends. */
+#define HTXF_TYPE_FILE 0
+#define HTXF_TYPE_FOLDER 1
+#define HTXF_TYPE_BANNER 2
+
 #define HTRK_TCPPORT 5498
 #define HTRK_UDPPORT 5499
 #define HTLS_TCPPORT 5500

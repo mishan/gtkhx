@@ -1087,8 +1087,23 @@ htxf_connect (struct htxf_conn *htxf)
 
     h.magic = htonl (HTXF_MAGIC_INT);
     h.ref = htonl (htxf->ref);
-    h.unknown = 0;
     h.len = htonl (htxf->total_size);
+    /* The last 4 bytes of the HTXF magic header — declared as
+	 * `unknown` u32 in struct htxf_hdr for historical reasons —
+	 * are laid out on the wire as `u16 type + u16 reserved`.
+	 * Setting type tells the server which subchannel framing to
+	 * use; for folder transfers it MUST be HTXF_TYPE_FOLDER (=1)
+	 * or Mac-native servers will dispatch this connection into
+	 * the single-file framing path and wait for FILP bytes while
+	 * we're driving the FILE_NEXT state machine (deadlock that
+	 * looks like a hang from both ends). mhxd is more lenient —
+	 * it matches by ref to a pre-typed htxf_conn — but we should
+	 * speak the proper wire format regardless. */
+    {
+        guint16 type
+            = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
+        h.unknown = htonl (((guint32)type) << 16);
+    }
     if (write (s, &h, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
         close (s);
         return -1;
