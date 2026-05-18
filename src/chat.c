@@ -126,16 +126,26 @@ hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
 {
     style = htons (style);
 
+    /* Phase E2/E3: encode to the negotiated wire encoding (UTF-8 if
+	 * the server confirmed CAP_TEXT_ENCODING, else MACINTOSH with
+	 * '?' for unmappables) and normalise LF→CR on legacy servers
+	 * that expect classic Mac line endings. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize wire_len = 0;
+    char *wire = gtkhx_text_for_wire (str, strlen (str), utf8,
+                                      /*is_body=*/TRUE, &wire_len);
+
     if (cid) {
         guint32 cids = htonl (cid);
         hlwrite (htlc, HTLC_HDR_CHAT, 0, 3, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, strlen (str), str, HTLC_DATA_CHAT_ID, 4,
+                 HTLC_DATA_CHAT, (guint16)wire_len, wire, HTLC_DATA_CHAT_ID, 4,
                  &cids);
 
     } else {
         hlwrite (htlc, HTLC_HDR_CHAT, 0, 2, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, strlen (str), str);
+                 HTLC_DATA_CHAT, (guint16)wire_len, wire);
     }
+    g_free (wire);
 }
 
 void

@@ -44,6 +44,7 @@
 #include "rcv.h"
 #include "files.h"
 #include "news15.h"
+#include "text_util.h"
 
 void
 hx_news15_get_post (struct htlc_conn *htlc, struct news_item *item)
@@ -110,12 +111,25 @@ hx_news15_post_thread (struct htlc_conn *htlc, char *path, const char *subject,
     hldir = path_to_hldir (path, &hldirlen, 0);
     task_new (htlc, 0, 0, 0, "news15_post");
     threadid = htonl (threadid);
+
+    /* Phase E2/E3: subject is a single-line name field (no LF→CR);
+	 * the article body is a body field (with LF→CR normalisation
+	 * on legacy servers). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize subj_len = 0, text_len = 0;
+    char *subj_wire = gtkhx_text_for_wire (subject, strlen (subject), utf8,
+                                           /*is_body=*/FALSE, &subj_len);
+    char *text_wire = gtkhx_text_for_wire (text, strlen (text), utf8,
+                                           /*is_body=*/TRUE, &text_len);
+
     hlwrite (htlc, HTLC_HDR_POSTTHREAD, 0, 6, HTLC_DATA_NEWSPATH, hldirlen,
              hldir, HTLC_DATA_PARENTTHREAD, 4, &parent, HTLC_DATA_NEWSTYPE, 11,
-             "text/plain", HTLC_DATA_NEWSSUBJECT, strlen (subject), subject,
-             HTLC_DATA_NEWSDATA, strlen (text), text, HTLC_DATA_THREADID, 4,
-             &threadid);
+             "text/plain", HTLC_DATA_NEWSSUBJECT, (guint16)subj_len, subj_wire,
+             HTLC_DATA_NEWSDATA, (guint16)text_len, text_wire,
+             HTLC_DATA_THREADID, 4, &threadid);
     g_free (hldir);
+    g_free (subj_wire);
+    g_free (text_wire);
 }
 
 void

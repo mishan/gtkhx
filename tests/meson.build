@@ -282,6 +282,20 @@ test_path_hldir = executable('test_path_hldir',
 test('path_hldir', test_path_hldir,
      suite : 'unit')
 
+# hl_date — Hotline 8-byte timestamp decoder. Both wire formats
+# (Mac 1904 epoch and Capabilities.md's "modern" format) are
+# auto-detected via the year field. Tests pin Unix-time decoding
+# for each format, plus the all-zero sentinel and out-of-range
+# year refusals.
+test_hl_date = executable('test_hl_date',
+  'unit/test_hl_date.c',
+  '../src/hl_date.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hl_date', test_hl_date,
+     suite : 'unit')
+
 # hl_code — Hotline's XOR-with-0xff "encryption" of LOGIN / PASSWORD
 # chunks. Extracted to its own translation unit (hl_code.c) so the
 # test can link the real implementation without dragging in
@@ -601,6 +615,25 @@ test_folder_xfer = executable('test_folder_xfer',
   link_with           : wire_fixture_lib,
 )
 test('folder_xfer', test_folder_xfer,
+     suite : 'proto')
+
+# capabilities — DATA_CAPABILITIES (0x01f0) negotiation per the
+# fogWraith/Hotline Capabilities.md spec. Send-side: hlpack a LOGIN
+# with our cap bits and verify the chunk layout. Recv-side: hand-
+# build a LOGIN reply with a CAPABILITIES echo (2-byte and 8-byte
+# variable-width forms) and verify the variable-width decoder
+# extracts the right u64 caps mask. Pins the bit constants so
+# renumbering breaks the test before it breaks the wire.
+test_capabilities = executable('test_capabilities',
+  'proto/test_capabilities.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('capabilities', test_capabilities,
      suite : 'proto')
 
 # msg_event — HxMsgEvent is the private-message counterpart to

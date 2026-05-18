@@ -172,6 +172,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * the legacy flow on the next connect. */
     htlc->flags.logged_in = 0;
 
+    /* Same idea for the DATA_CAPABILITIES bitmask — the next
+	 * connect renegotiates from zero. A stale CAP_TEXT_ENCODING
+	 * bit could otherwise survive a reconnect to a Mac Roman
+	 * server and cause us to skip text transcoding once Phase E2
+	 * lands. */
+    htlc->caps = 0;
+
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
 	 * exchange). Safe to call whether or not one's running. */
     if (current_cancel) {
@@ -554,9 +561,19 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * UI. */
     guint16 options16 = htons (0);
 
+    /* Phase E2: same as hx_change_name_icon — encode the nick to
+	 * the negotiated wire encoding. is_body = FALSE (nicks are
+	 * single-line). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
+                               utf8, /*is_body=*/FALSE, &name_len);
+
     hlwrite (htlc, HTLC_HDR_AGREEMENTAGREE, 0, 3, HTLC_DATA_ICON, 2, &icon16,
-             HTLC_DATA_NAME, strlen ((const char *)htlc->name), htlc->name,
+             HTLC_DATA_NAME, (guint16)name_len, name_wire,
              HTLC_DATA_OPTIONS, 2, &options16);
+    g_free (name_wire);
 }
 
 /* Phase 5+: async connect via GSocketClient.
@@ -971,14 +988,26 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * the integration test harness sends; bumps mhxd's
 		 * can_ping bit so HTLC_HDR_PING keepalives are accepted. */
         cv16 = htons (185);
+
+        /* DATA_CAPABILITIES bitmask. Today we advertise just
+		 * CAP_TEXT_ENCODING (bit 1) — "I speak UTF-8." Servers
+		 * that support the spec will echo bit 1 back in the LOGIN
+		 * reply, after which the session's text-bearing fields are
+		 * UTF-8 in both directions. Servers that don't know the
+		 * chunk silently ignore it (per spec) and the session falls
+		 * back to legacy Mac Roman framing — same as before this
+		 * chunk was added. Phase E1 only advertises; the actual
+		 * UTF-8/Mac-Roman encode/decode work is Phase E2+. */
+        guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
         if (plen) {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 4, HTLC_DATA_ICON, 2, &icon16,
+            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 5, HTLC_DATA_ICON, 2, &icon16,
                      HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_PASSWORD, plen,
-                     encpass, HTLC_DATA_CLIENTVERSION, 2, &cv16);
+                     encpass, HTLC_DATA_CLIENTVERSION, 2, &cv16,
+                     HTLC_DATA_CAPABILITIES, 2, &caps16);
         } else {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 3, HTLC_DATA_ICON, 2, &icon16,
+            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 4, HTLC_DATA_ICON, 2, &icon16,
                      HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_CLIENTVERSION,
-                     2, &cv16);
+                     2, &cv16, HTLC_DATA_CAPABILITIES, 2, &caps16);
         }
     }
 

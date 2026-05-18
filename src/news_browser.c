@@ -46,6 +46,7 @@
 #include "news_browser.h"
 #include "gtkutil.h"
 #include "hl_access.h"
+#include "hl_date.h"
 
 /* ---------- HxNewsNode (one GObject per tree row) ---------- */
 
@@ -838,39 +839,44 @@ gnews_browser_handle_catlist (gpointer gcnews_p)
 
 /* ---------- Post body fetch + display ---------- */
 
-/* Format the post date as a human-friendly string. Mirrors the
- * Mac-classic-or-Unix branch news15.c::date_to_unix uses. */
+/* Format the post date as a human-friendly string. Auto-detects the
+ * Mac 1904 epoch vs. modern wire format via hl_date_decode — same
+ * helper rcv.c uses for file get-info timestamps. See
+ * Capabilities.md "Date Format Selection" for why servers serve
+ * different formats per-client. */
 static char *
 post_date_format (const struct date_time *dt)
 {
-    time_t t;
-    struct tm tm_buf;
-    char buf[64];
+    /* Pack the struct date_time back into the 8-byte wire layout
+	 * hl_date_decode expects (year:2 / pad:2 / seconds:4, big-
+	 * endian). The struct was already parsed off the wire — we're
+	 * round-tripping the bytes here rather than maintaining a
+	 * parallel decoder. */
+    guint8 buf[8];
+    buf[0] = (guint8) (dt->base_year >> 8);
+    buf[1] = (guint8) (dt->base_year & 0xff);
+    buf[2] = (guint8) (dt->pad >> 8);
+    buf[3] = (guint8) (dt->pad & 0xff);
+    buf[4] = (guint8) (dt->seconds >> 24);
+    buf[5] = (guint8) (dt->seconds >> 16);
+    buf[6] = (guint8) (dt->seconds >> 8);
+    buf[7] = (guint8) (dt->seconds & 0xff);
 
-    if (dt->base_year >= 1970) {
-        struct tm timetm;
-        memset (&timetm, 0, sizeof timetm);
-        timetm.tm_sec = dt->seconds + (24 * 3600);
-        timetm.tm_year = dt->base_year - 1900;
-        if (timetm.tm_year < 0) {
-            timetm.tm_year = 1970;
-        }
-        t = mktime (&timetm);
-    } else if (dt->base_year == 1904) {
-        t = dt->seconds - 2082844800U;
-    } else {
+    time_t t;
+    if (!hl_date_decode (buf, &t)) {
         return g_strdup ("");
     }
 
+    struct tm tm_buf;
     if (!localtime_r (&t, &tm_buf)) {
         return g_strdup ("");
     }
 
-    if (strftime (buf, sizeof buf, "%a %b %e %H:%M:%S %Y", &tm_buf) == 0) {
+    char out[64];
+    if (strftime (out, sizeof out, "%a %b %e %H:%M:%S %Y", &tm_buf) == 0) {
         return g_strdup ("");
     }
-
-    return g_strdup (buf);
+    return g_strdup (out);
 }
 
 /* Issue HTLC_HDR_GETTHREAD for `target`. The legacy hx_news15_get_post

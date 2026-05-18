@@ -188,6 +188,39 @@ struct hl_user_data {
  * login path today; the integration test harness sends it so the
  * Tier 3 PING test exercises the modern-client codepath. */
 #define HTLC_DATA_CLIENTVERSION ((guint16)0x00a0)
+
+/* DATA_CAPABILITIES (0x01f0) — session capability bitmask sent in
+ * LOGIN by clients that support modern protocol extensions, and
+ * echoed back in the LOGIN reply by the server for the bits it
+ * agrees to enable for the session.
+ *
+ * The mechanism is bitmask-based so multiple extensions can be
+ * negotiated in one chunk:
+ *
+ *   bit 0  CAP_LARGE_FILES     64-bit file sizes (separate spec)
+ *   bit 1  CAP_TEXT_ENCODING   UTF-8 for all string data
+ *   bit 2  CAP_VOICE           voice chat (WebRTC SFU)
+ *   bit 3  CAP_INLINE_MEDIA    inline image attachments
+ *   bit 4  CAP_CHAT_HISTORY    server-side chat-history retrieval
+ *   bit 5  CAP_EXTENDED_PRIV   128-bit access bitmap
+ *
+ * Wire field is a big-endian unsigned integer; spec says variable
+ * width, "typically 2 bytes, expandable to 8 bytes." We send 2
+ * bytes today (bits 0–5 fit). Servers that don't recognise the
+ * field per-spec ignore it and the session falls back to standard
+ * mode — sending it is safe against legacy servers.
+ *
+ * Source: fogWraith/Hotline Docs/Protocol/Capabilities.md and
+ * Capabilities-Text-Encoding.md. */
+#define HTLC_DATA_CAPABILITIES ((guint16)0x01f0)
+#define HTLS_DATA_CAPABILITIES ((guint16)0x01f0)
+#define HTLC_CAP_LARGE_FILES ((guint16)0x0001)
+#define HTLC_CAP_TEXT_ENCODING ((guint16)0x0002)
+#define HTLC_CAP_VOICE ((guint16)0x0004)
+#define HTLC_CAP_INLINE_MEDIA ((guint16)0x0008)
+#define HTLC_CAP_CHAT_HISTORY ((guint16)0x0010)
+#define HTLC_CAP_EXTENDED_PRIV ((guint16)0x0020)
+
 #define HTLC_DATA_CHAT_SUBJECT ((guint16)0x0073)
 #define HTLC_DATA_FILE_NAME ((guint16)0x00c9)
 #define HTLC_DATA_DIR ((guint16)0x00ca)

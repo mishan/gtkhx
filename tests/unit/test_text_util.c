@@ -216,6 +216,161 @@ test_out_len_optional_on_mac_roman (void)
     g_free (out);
 }
 
+/* ---------- gtkhx_text_for_wire (Phase E2/E3) ---------- */
+
+/* UTF-8 mode: pass-through. The input is already in the wire
+ * encoding, so the function should just g_strndup it. */
+static void
+test_for_wire_utf8_mode_passthrough_ascii (void)
+{
+    const char *in = "hello";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), /*utf8_mode=*/TRUE,
+                                     /*is_body=*/FALSE, &len);
+    g_assert_cmpstr (out, ==, "hello");
+    g_assert_cmpuint (len, ==, 5);
+    g_free (out);
+}
+
+/* UTF-8 mode: multibyte characters pass through verbatim. */
+static void
+test_for_wire_utf8_mode_passthrough_multibyte (void)
+{
+    /* "café" (5 UTF-8 bytes). */
+    const char in[] = "caf\xc3\xa9";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, 5, TRUE, FALSE, &len);
+    g_assert_cmpuint (len, ==, 5);
+    g_assert_cmpmem (out, len, in, 5);
+    g_free (out);
+}
+
+/* UTF-8 mode: LF passes through even when is_body is TRUE — the spec
+ * says UTF-8 clients receive LF as-is. */
+static void
+test_for_wire_utf8_mode_keeps_lf (void)
+{
+    const char in[] = "line1\nline2";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), TRUE, /*is_body=*/TRUE,
+                                     &len);
+    g_assert_cmpstr (out, ==, "line1\nline2");
+    /* No CR anywhere. */
+    g_assert_null (memchr (out, '\r', len));
+    g_free (out);
+}
+
+/* Legacy mode: ASCII passes through unchanged. */
+static void
+test_for_wire_legacy_ascii_passthrough (void)
+{
+    const char *in = "hello";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), /*utf8_mode=*/FALSE,
+                                     /*is_body=*/FALSE, &len);
+    g_assert_cmpstr (out, ==, "hello");
+    g_assert_cmpuint (len, ==, 5);
+    g_free (out);
+}
+
+/* Legacy mode: UTF-8 multibyte transcodes to its Mac Roman code
+ * point. "café" → 0x63 0x61 0x66 0x8e. */
+static void
+test_for_wire_legacy_e_acute_round_trips (void)
+{
+    const char in[] = "caf\xc3\xa9";
+    const guint8 expected[] = { 'c', 'a', 'f', 0x8e };
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, 5, FALSE, FALSE, &len);
+    g_assert_cmpuint (len, ==, 4);
+    g_assert_cmpmem (out, len, expected, 4);
+    g_free (out);
+}
+
+/* Legacy mode: curly quotes — U+201C / U+201D — transcode to Mac
+ * Roman 0xd2 / 0xd3 (the canonical inverse of the inbound test
+ * above). */
+static void
+test_for_wire_legacy_curly_quotes (void)
+{
+    const char in[] = "\xe2\x80\x9chi\xe2\x80\x9d";
+    const guint8 expected[] = { 0xd2, 'h', 'i', 0xd3 };
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, FALSE, &len);
+    g_assert_cmpuint (len, ==, 4);
+    g_assert_cmpmem (out, len, expected, 4);
+    g_free (out);
+}
+
+/* Legacy mode: characters outside the Mac Roman repertoire (e.g.
+ * emoji) get replaced with '?' (0x3F) per the spec. */
+static void
+test_for_wire_legacy_unmappable_substitute (void)
+{
+    /* U+1F60A SMILING FACE WITH SMILING EYES — 4 UTF-8 bytes,
+	 * definitely not in Mac Roman. */
+    const char in[] = "ok\xf0\x9f\x98\x8a";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, FALSE, &len);
+    /* Must be three bytes: "ok?" (or however many "?" the iconv
+	 * picked — at least one substitute character). The important
+	 * invariant is that there are no high bytes left and the ASCII
+	 * prefix survived. */
+    g_assert_cmpint (out[0], ==, 'o');
+    g_assert_cmpint (out[1], ==, 'k');
+    g_assert_cmpint (out[2], ==, '?');
+    g_free (out);
+}
+
+/* Legacy mode + is_body: LF → CR normalisation for classic Mac line
+ * endings. */
+static void
+test_for_wire_legacy_body_lf_to_cr (void)
+{
+    const char in[] = "line1\nline2\nline3";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, /*is_body=*/TRUE,
+                                     &len);
+    g_assert_cmpuint (len, ==, strlen (in));
+    /* No LFs. */
+    g_assert_null (memchr (out, '\n', len));
+    /* Two CRs. */
+    int crs = 0;
+    for (gsize i = 0; i < len; i++) {
+        if (out[i] == '\r') {
+            crs++;
+        }
+    }
+    g_assert_cmpint (crs, ==, 2);
+    g_free (out);
+}
+
+/* Legacy mode + !is_body: LF stays untouched (nicks / subjects
+ * shouldn't have line endings but if they do, don't rewrite). */
+static void
+test_for_wire_legacy_name_keeps_lf (void)
+{
+    const char in[] = "weird\nname";
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, /*is_body=*/FALSE,
+                                     &len);
+    g_assert_nonnull (memchr (out, '\n', len));
+    g_assert_null (memchr (out, '\r', len));
+    g_free (out);
+}
+
+/* NULL input is allowed for caller convenience. */
+static void
+test_for_wire_null_input (void)
+{
+    gsize len = 99;
+    char *out = gtkhx_text_for_wire (NULL, 0, TRUE, TRUE, &len);
+    g_assert_nonnull (out);
+    g_assert_cmpuint (len, ==, 0);
+    g_assert_cmpint (out[0], ==, '\0');
+    g_free (out);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -242,6 +397,27 @@ main (int argc, char **argv)
                      test_out_len_optional_on_valid_input);
     g_test_add_func ("/text_util/out_len_optional_on_mac_roman",
                      test_out_len_optional_on_mac_roman);
+
+    g_test_add_func ("/text_util/for_wire/utf8_mode_passthrough_ascii",
+                     test_for_wire_utf8_mode_passthrough_ascii);
+    g_test_add_func ("/text_util/for_wire/utf8_mode_passthrough_multibyte",
+                     test_for_wire_utf8_mode_passthrough_multibyte);
+    g_test_add_func ("/text_util/for_wire/utf8_mode_keeps_lf",
+                     test_for_wire_utf8_mode_keeps_lf);
+    g_test_add_func ("/text_util/for_wire/legacy_ascii_passthrough",
+                     test_for_wire_legacy_ascii_passthrough);
+    g_test_add_func ("/text_util/for_wire/legacy_e_acute_round_trips",
+                     test_for_wire_legacy_e_acute_round_trips);
+    g_test_add_func ("/text_util/for_wire/legacy_curly_quotes",
+                     test_for_wire_legacy_curly_quotes);
+    g_test_add_func ("/text_util/for_wire/legacy_unmappable_substitute",
+                     test_for_wire_legacy_unmappable_substitute);
+    g_test_add_func ("/text_util/for_wire/legacy_body_lf_to_cr",
+                     test_for_wire_legacy_body_lf_to_cr);
+    g_test_add_func ("/text_util/for_wire/legacy_name_keeps_lf",
+                     test_for_wire_legacy_name_keeps_lf);
+    g_test_add_func ("/text_util/for_wire/null_input",
+                     test_for_wire_null_input);
 
     return g_test_run ();
 }

@@ -30,6 +30,7 @@ gtkhx_sources = files(
   'hfs.c',
   'history.c',
   'hl_code.c',
+  'hl_date.c',
   'human_readable.c',
   'hmac.c',
   'log.c',

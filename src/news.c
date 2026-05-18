@@ -396,7 +396,19 @@ void
 hx_post_news (struct htlc_conn *htlc, const char *news, guint16 len)
 {
     task_new (htlc, 0, 0, 0, "post");
-    hlwrite (htlc, HTLC_HDR_NEWS_POST, 0, 1, HTLC_DATA_NEWS_POST, len, news);
+
+    /* Phase E2/E3: news body — UTF-8 / Mac Roman + LF→CR for
+	 * legacy servers. The flat 1.0 news file is line-oriented,
+	 * so getting line endings right is what makes posts render
+	 * correctly on Mac clients. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize wire_len = 0;
+    char *wire
+        = gtkhx_text_for_wire (news, len, utf8, /*is_body=*/TRUE, &wire_len);
+
+    hlwrite (htlc, HTLC_HDR_NEWS_POST, 0, 1, HTLC_DATA_NEWS_POST,
+             (guint16)wire_len, wire);
+    g_free (wire);
 }
 
 void
