@@ -305,6 +305,16 @@ struct hl_user_data {
 #define HTLS_DATA_ICON_CICN ((guint16)0x0e90)
 
 /* HOPE */
+/* HOPE-Secure-Login identification chunks. App ID/String are the
+ * only mechanism in the Hotline protocol for a client to advertise
+ * its application name and version to the server — without these
+ * we look identical to base hx in server-side stats. App ID is a
+ * 4-byte OSType (we use "GTKx"); App String is free-form (app name
+ * and version). */
+#define HTLC_DATA_HOPE_APP_ID ((guint16)0x0e01)
+#define HTLC_DATA_HOPE_APP_STRING ((guint16)0x0e02)
+#define HTLS_DATA_HOPE_APP_ID ((guint16)0x0e01)
+#define HTLS_DATA_HOPE_APP_STRING ((guint16)0x0e02)
 #define HTLS_DATA_SESSIONKEY ((guint16)0x0e03)
 #define HTLC_DATA_SESSIONKEY ((guint16)0x0e03)
 #define HTLS_DATA_MAC_ALG ((guint16)0x0e04)

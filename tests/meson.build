@@ -210,6 +210,19 @@ test_gchat_hash = executable('test_gchat_hash',
 test('gchat_hash', test_gchat_hash,
      suite : 'unit')
 
+# algo_list — HOPE algorithm-list walker (list_n). Pinned-input
+# crash defenses called out by name in the HOPE-Secure-Login spec —
+# empty list (count=0, listlen=2) used to NULL-deref the legacy
+# implementation, killing gtkhx on Mobius servers.
+test_algo_list = executable('test_algo_list',
+  'unit/test_algo_list.c',
+  '../src/algo_list.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('algo_list', test_algo_list,
+     suite : 'unit')
+
 # uniquify_path — "foo.txt" → "foo (1).txt" collision resolver.
 # Refactored from xfers.c's static uniquify_local_path to take an
 # exists predicate callback (production caller plugs in stat + Apple

@@ -3,16 +3,18 @@
  *
  * Replaces the in-tree md5.c/sha.c with GLib's GChecksum / GHmac so we
  * can drop ~900 lines of vendored hash code. Behavior is preserved
- * byte-for-byte for the four algorithms anyone has ever sent on the
- * wire: SHA1, MD5, HMAC-SHA1, HMAC-MD5.
+ * byte-for-byte for the algorithms anyone has ever sent on the wire:
+ * SHA1, MD5, HMAC-SHA1, HMAC-MD5, plus HMAC-SHA256 / SHA256 (the
+ * preferred-strongest algorithm in the HOPE-Secure-Login spec, and
+ * required for AEAD key derivation in HOPE-ChaCha20-Poly1305).
  *
- * The unprefixed "SHA1"/"MD5" branches compute a plain hash over
- * key||text — this is not RFC 2104 HMAC, but it is what the original
- * client did, and it's the construction some servers expect for the
- * pre-HOPE password challenge. Don't "fix" the construction; we
- * negotiate compatibility, not correctness.
+ * The unprefixed "SHA1"/"MD5"/"SHA256" branches compute a plain hash
+ * over key||text — this is not RFC 2104 HMAC, but it is what the
+ * original client did, and it's the construction some servers expect
+ * for the pre-HOPE password challenge. Don't "fix" the construction;
+ * we negotiate compatibility, not correctness.
  *
- * HAVAL was deleted in the previous commit (advertised by no server,
+ * HAVAL was deleted in a previous commit (advertised by no server,
  * computed by no client).
  */
 
@@ -35,6 +37,9 @@ hmac_xxx(u_int8_t *md, const void *key, u_int32_t keylen,
 	} else if (!strcmp(macalg, "MD5") || !strcmp(macalg, "HMAC-MD5")) {
 		type = G_CHECKSUM_MD5;
 		digest_len = 16;
+	} else if (!strcmp(macalg, "SHA256") || !strcmp(macalg, "HMAC-SHA256")) {
+		type = G_CHECKSUM_SHA256;
+		digest_len = 32;
 	} else {
 		return 0;
 	}

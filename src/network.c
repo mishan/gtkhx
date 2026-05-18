@@ -860,20 +860,41 @@ send_login (struct gtkhx_connect_ctx *ctx)
         task_new (htlc, RCV_TASK_FN (rcv_task_login),
                   ctx->pass ? g_strdup (ctx->pass) : g_strdup (""), 0, "login");
 
-        strcpy (htlc->macalg, "HMAC-SHA1");
+        /* HOPE MAC algorithm preference list, strongest first per
+		 * the HOPE-Secure-Login spec. HMAC-SHA256 is the preferred
+		 * choice (also required for AEAD key derivation in the
+		 * ChaCha20-Poly1305 extension); HMAC-SHA1 and HMAC-MD5 are
+		 * older fallbacks. The server picks the first algorithm it
+		 * also supports; htlc->macalg gets overwritten with the
+		 * server's selection on the Step 2 reply, so the strcpy
+		 * here is only the "we asked for this" default if the
+		 * server's reply is malformed and we have to bail with
+		 * the strongest pre-negotiated guess. */
+        strcpy (htlc->macalg, "HMAC-SHA256");
         {
-            guint16 val = 2;
+            guint16 val = 3;
             HN16 (macalglist, &val);
         }
         macalglistlen = 2;
+        macalglist[macalglistlen++] = 11;
+        memcpy (macalglist + macalglistlen, "HMAC-SHA256", 11);
+        macalglistlen += 11;
         macalglist[macalglistlen++] = 9;
-        memcpy (macalglist + macalglistlen, htlc->macalg, 9);
+        memcpy (macalglist + macalglistlen, "HMAC-SHA1", 9);
         macalglistlen += 9;
         macalglist[macalglistlen++] = 8;
         memcpy (macalglist + macalglistlen, "HMAC-MD5", 8);
         macalglistlen += 8;
 
-        hc = 4;
+        /* HOPE-Secure-Login app identification. Without these, the
+		 * server's logs and stats see us as base hx. AppID is a 4-byte
+		 * OSType; "GTKx" disambiguates GtkHx from other hx-family
+		 * clients. AppString is free-form name + version. */
+        const char *app_id = "GTKx";
+        char app_string[64];
+        g_snprintf (app_string, sizeof app_string, "GtkHx %s", VERSION);
+
+        hc = 6; /* LOGIN + PASSWORD + MAC_ALG + APP_ID + APP_STRING + SESSIONKEY */
 #ifdef CONFIG_COMPRESS
         if (htlc->compressalg[0]) {
             compresslen = strlen (htlc->compressalg);
@@ -910,7 +931,9 @@ send_login (struct gtkhx_connect_ctx *ctx)
 #endif
         hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, 1, &zero,
                  HTLC_DATA_PASSWORD, 1, &zero, HTLC_DATA_MAC_ALG, macalglistlen,
-                 macalglist,
+                 macalglist, HTLC_DATA_HOPE_APP_ID, 4, app_id,
+                 HTLC_DATA_HOPE_APP_STRING, (guint16)strlen (app_string),
+                 app_string,
 #ifdef CONFIG_CIPHER
                  HTLC_DATA_CIPHER_ALG, cipheralglistlen, cipheralglist,
 #endif
