@@ -167,9 +167,20 @@ hx_news15_mkcat (struct htlc_conn *htlc, char *path, const char *name)
 
     hldir = path_to_hldir (path, &hldirlen, 0);
     task_new (htlc, 0, 0, 0, "news15_mkcat");
+
+    /* Phase E (follow-up): encode the category name. The path
+	 * (NEWSPATH chunk) is built byte-verbatim by path_to_hldir;
+	 * DIR-style component encoding is deferred (consistent with
+	 * other DIR chunks). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire (name, strlen (name), utf8, FALSE, &name_len);
+
     hlwrite (htlc, HTLC_HDR_MAKECATEGORY, 0, 2, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir, HTLC_DATA_CATEGORY, strlen (name), name);
+             hldir, HTLC_DATA_CATEGORY, (guint16)name_len, name_wire);
     g_free (hldir);
+    g_free (name_wire);
 }
 
 void

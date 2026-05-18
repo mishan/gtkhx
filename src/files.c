@@ -267,21 +267,43 @@ set_name_comment (GtkWidget *btn, gpointer data)
 
     file = dirchar_basename (path);
     task_new (&the_session.htlc, 0, 0, 0, "set file info");
+
+    /* Phase E (follow-up): encode the user-facing strings to the
+	 * negotiated wire encoding. file (the current basename, which
+	 * we received from the server in Mac Roman bytes and converted
+	 * to UTF-8 for display) round-trips back as Mac Roman; the new
+	 * name typed by the user in the rename dialog and the comment
+	 * also go through the encoder. is_body = FALSE — file/name
+	 * fields are single-line; comment is multi-line but the spec
+	 * lists DATA_FILE_COMMENT as is_body too. */
+    struct htlc_conn *htlc = &the_session.htlc;
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize file_len = 0, name_len = 0, comments_len = 0;
+    char *file_wire = gtkhx_text_for_wire (file, strlen (file), utf8, FALSE,
+                                           &file_len);
+    char *name_wire = gtkhx_text_for_wire (name, strlen (name), utf8, FALSE,
+                                           &name_len);
+    char *comments_wire = gtkhx_text_for_wire (
+        comments, strlen (comments), utf8, /*is_body=*/TRUE, &comments_len);
+
     if (file != path) {
         guint16 hldirlen = 0;
         guint8 *hldir = path_to_hldir (path, &hldirlen, 1);
-        hlwrite (&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 4,
-                 HTLC_DATA_FILE_NAME, strlen (file), file,
-                 HTLC_DATA_FILE_RENAME, strlen (name), name,
-                 HTLC_DATA_FILE_COMMENT, strlen (comments), comments,
-                 HTLC_DATA_DIR, hldirlen, hldir);
+        hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 4, HTLC_DATA_FILE_NAME,
+                 (guint16)file_len, file_wire, HTLC_DATA_FILE_RENAME,
+                 (guint16)name_len, name_wire, HTLC_DATA_FILE_COMMENT,
+                 (guint16)comments_len, comments_wire, HTLC_DATA_DIR,
+                 hldirlen, hldir);
         g_free (hldir);
     } else {
-        hlwrite (&the_session.htlc, HTLC_HDR_FILE_SETINFO, 0, 3,
-                 HTLC_DATA_FILE_NAME, strlen (file), file,
-                 HTLC_DATA_FILE_RENAME, strlen (name), name,
-                 HTLC_DATA_FILE_COMMENT, strlen (comments), comments);
+        hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 3, HTLC_DATA_FILE_NAME,
+                 (guint16)file_len, file_wire, HTLC_DATA_FILE_RENAME,
+                 (guint16)name_len, name_wire, HTLC_DATA_FILE_COMMENT,
+                 (guint16)comments_len, comments_wire);
     }
+    g_free (file_wire);
+    g_free (name_wire);
+    g_free (comments_wire);
 
     g_free (comments);
 }
@@ -517,15 +539,24 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
 
     task_new (htlc, 0, 0, 0, "rm");
     file = dirchar_basename (path);
+
+    /* Phase E (follow-up): encode the filename. is_body = FALSE
+	 * (filenames are single-line). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize file_len = 0;
+    char *file_wire
+        = gtkhx_text_for_wire (file, strlen (file), utf8, FALSE, &file_len);
+
     if (file != path) {
         hldir = path_to_hldir (path, &hldirlen, 1);
         hlwrite (htlc, HTLC_HDR_FILE_DELETE, 0, 2, HTLC_DATA_FILE_NAME,
-                 strlen (file), file, HTLC_DATA_DIR, hldirlen, hldir);
+                 (guint16)file_len, file_wire, HTLC_DATA_DIR, hldirlen, hldir);
         g_free (hldir);
     } else {
         hlwrite (htlc, HTLC_HDR_FILE_DELETE, 0, 1, HTLC_DATA_FILE_NAME,
-                 strlen (file), file);
+                 (guint16)file_len, file_wire);
     }
+    g_free (file_wire);
 }
 void
 hx_file_info (struct htlc_conn *htlc, const char *dir_path,
@@ -549,18 +580,27 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
     task_new (htlc, RCV_TASK_FN (rcv_task_file_getinfo), task_label, 0,
               "finfo");
 
-    /* Wire FILE_NAME is the name verbatim — no split needed because
-	 * we never joined. */
+    /* Phase E (follow-up): encode FILE_NAME for the wire. The
+	 * dir_path portion is built into a DIR chunk by path_to_hldir
+	 * which copies the bytes verbatim — same encoding shape as
+	 * other DIR-chunk sends (deferred for now; ASCII paths are
+	 * the overwhelming common case). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_len = 0;
+    char *name_wire = gtkhx_text_for_wire (file_name, file_name_len, utf8,
+                                           FALSE, &name_len);
+
     if (dir_path && *dir_path
         && !(dir_path[0] == (char)dir_char && dir_path[1] == 0)) {
         hldir = path_to_hldir (dir_path, &hldirlen, 0);
         hlwrite (htlc, HTLC_HDR_FILE_GETINFO, 0, 2, HTLC_DATA_FILE_NAME,
-                 file_name_len, file_name, HTLC_DATA_DIR, hldirlen, hldir);
+                 (guint16)name_len, name_wire, HTLC_DATA_DIR, hldirlen, hldir);
         g_free (hldir);
     } else {
         hlwrite (htlc, HTLC_HDR_FILE_GETINFO, 0, 1, HTLC_DATA_FILE_NAME,
-                 file_name_len, file_name);
+                 (guint16)name_len, name_wire);
     }
+    g_free (name_wire);
 }
 
 void
@@ -646,15 +686,23 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
 	 * rcv_task_folder_get by hx_rcv_task. */
     task_new (htlc, RCV_TASK_FN (rcv_task_folder_get), htxf, 0,
               "xfer_go_folder");
+    /* Phase E (follow-up): encode the folder name for the wire. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_wire_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire (name, name_len, utf8, FALSE, &name_wire_len);
+
     if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
         hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
         hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 2, HTLC_DATA_FILE_NAME,
-                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir);
+                 (guint16)name_wire_len, name_wire, HTLC_DATA_DIR, hldirlen,
+                 hldir);
         g_free (hldir);
     } else {
         hlwrite (htlc, HTLC_HDR_FILE_GETFOLDER, 0, 1, HTLC_DATA_FILE_NAME,
-                 (guint16)name_len, name);
+                 (guint16)name_wire_len, name_wire);
     }
+    g_free (name_wire);
 }
 
 /* Walk a local directory tree and sum the on-disk sizes of all
@@ -739,18 +787,26 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
 
     task_new (htlc, RCV_TASK_FN (rcv_task_folder_put), htxf, 0,
               "xfer_go_folder");
+
+    /* Phase E (follow-up): encode the folder name. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_wire_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire (name, name_len, utf8, FALSE, &name_wire_len);
+
     if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
         hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
         hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 4, HTLC_DATA_FILE_NAME,
-                 (guint16)name_len, name, HTLC_DATA_DIR, hldirlen, hldir,
-                 HTLC_DATA_HTXF_SIZE, 4, &size_n, HTLC_DATA_FILE_NFILES, 4,
-                 &nfiles_n);
+                 (guint16)name_wire_len, name_wire, HTLC_DATA_DIR, hldirlen,
+                 hldir, HTLC_DATA_HTXF_SIZE, 4, &size_n, HTLC_DATA_FILE_NFILES,
+                 4, &nfiles_n);
         g_free (hldir);
     } else {
         hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 3, HTLC_DATA_FILE_NAME,
-                 (guint16)name_len, name, HTLC_DATA_HTXF_SIZE, 4, &size_n,
-                 HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
+                 (guint16)name_wire_len, name_wire, HTLC_DATA_HTXF_SIZE, 4,
+                 &size_n, HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
     }
+    g_free (name_wire);
 }
 
 void
@@ -765,10 +821,21 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
     hldir = path_to_hldir (src_path, &hldirlen, 1);
     rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
     task_new (htlc, 0, 0, 0, "ln");
+
+    /* Phase E (follow-up): encode src + dst basenames. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize src_len = 0, dst_len = 0;
+    char *src_wire = gtkhx_text_for_wire (src_file, strlen (src_file), utf8,
+                                          FALSE, &src_len);
+    char *dst_wire = gtkhx_text_for_wire (dst_file, strlen (dst_file), utf8,
+                                          FALSE, &dst_len);
+
     hlwrite (htlc, HTLC_HDR_FILE_SYMLINK, 0, 4, HTLC_DATA_FILE_NAME,
-             strlen (src_file), src_file, HTLC_DATA_DIR, hldirlen, hldir,
+             (guint16)src_len, src_wire, HTLC_DATA_DIR, hldirlen, hldir,
              HTLC_DATA_DIR_RENAME, rnhldirlen, rnhldir, HTLC_DATA_FILE_RENAME,
-             strlen (dst_file), dst_file);
+             (guint16)dst_len, dst_wire);
+    g_free (src_wire);
+    g_free (dst_wire);
     g_free (rnhldir);
     g_free (hldir);
 }
@@ -786,6 +853,15 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
 
     hldir = path_to_hldir (src_path, &hldirlen, 1);
     len = strlen (dst_path) - (strlen (dst_path) - (dst_file - dst_path));
+
+    /* Phase E (follow-up): encode src + dst basenames. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize src_len = 0, dst_len = 0;
+    char *src_wire = gtkhx_text_for_wire (src_file, strlen (src_file), utf8,
+                                          FALSE, &src_len);
+    char *dst_wire = gtkhx_text_for_wire (dst_file, strlen (dst_file), utf8,
+                                          FALSE, &dst_len);
+
     if (len
         && (len
                 != strlen (src_path)
@@ -794,15 +870,17 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
         rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
         task_new (htlc, 0, 0, 0, "mv");
         hlwrite (htlc, HTLC_HDR_FILE_MOVE, 0, 3, HTLC_DATA_FILE_NAME,
-                 strlen (src_file), src_file, HTLC_DATA_DIR, hldirlen, hldir,
+                 (guint16)src_len, src_wire, HTLC_DATA_DIR, hldirlen, hldir,
                  HTLC_DATA_DIR_RENAME, rnhldirlen, rnhldir);
         g_free (rnhldir);
     }
     if (*dst_file && strcmp (src_file, dst_file)) {
         task_new (htlc, 0, 0, 0, "mv");
         hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 3, HTLC_DATA_FILE_NAME,
-                 strlen (src_file), src_file, HTLC_DATA_FILE_RENAME,
-                 strlen (dst_file), dst_file, HTLC_DATA_DIR, hldirlen, hldir);
+                 (guint16)src_len, src_wire, HTLC_DATA_FILE_RENAME,
+                 (guint16)dst_len, dst_wire, HTLC_DATA_DIR, hldirlen, hldir);
     }
+    g_free (src_wire);
+    g_free (dst_wire);
     g_free (hldir);
 }

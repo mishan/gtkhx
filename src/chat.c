@@ -197,8 +197,17 @@ void
 hx_change_subject (struct htlc_conn *htlc, guint32 cid, char *subject)
 {
     cid = htonl (cid);
+
+    /* Phase E (follow-up): encode the subject string for the wire.
+	 * Single-line field, so is_body = FALSE. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize subj_len = 0;
+    char *subj_wire = gtkhx_text_for_wire (subject, strlen (subject), utf8,
+                                           FALSE, &subj_len);
+
     hlwrite (htlc, HTLC_HDR_CHAT_SUBJECT, 0, 2, HTLC_DATA_CHAT_ID, 4, &cid,
-             HTLC_DATA_CHAT_SUBJECT, strlen (subject), subject);
+             HTLC_DATA_CHAT_SUBJECT, (guint16)subj_len, subj_wire);
+    g_free (subj_wire);
 }
 
 int
