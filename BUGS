@@ -13,4 +13,4 @@ Low priority:
 
 Won't Fix:
 
-- Window position saving does not work on Wayland
+- Window position saving does not work on Wayland. GTK+ 4.24 might have an API for saving sessions
