@@ -1,6 +1,8 @@
 High priority:
 
 - The names in the Private Message xtext widget are not split out into the left column, so the separator does not work
+- Icons wider than "standard" width but narrower than the banner format don't have sufficient spacing between icon and name
+  (note: The fix for this is probably just adding more spacing, regardless of icon type)
 
 Medium priority:
 

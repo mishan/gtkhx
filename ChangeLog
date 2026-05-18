@@ -35,6 +35,9 @@
 - System notification support
 - Brand new News browser
 - Brand new orthogonal file manager type Files browser
+- Addressed issue with GtkHx not identifying client type with HOPE negotiation
+- Support for ZSTD and LZ4 HOPE compression algorithms
+- Support for native UTF-8 with servers that support it
 
 0.9.4
 -----
