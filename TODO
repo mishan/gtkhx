@@ -1,13 +1,20 @@
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
+- Keyboard shortcuts like Ctrl-W and Ctrl-Q ought to work in all windows/dialogs including Settings
 
 Files:
 - Bug stomping / fixing
 - Icons -- make sure we are using all the correct ones
+- Support large file capability https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Large-File.md
+
+News:
+- Remove "Post News" from Toolbar since "News" window already has it
+- Re-work the UI of the "Post News" dialog to look nicer
 
 Icons:
 - Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
+- Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
 
 Docs:
 - Rewrite README.md to explain this project better
@@ -17,14 +24,29 @@ i18n:
 - Translate to other languages
 
 Security:
+- TLS support
+- Newer HOPE ciphers support https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/HOPE-ChaCha20-Poly1305.md
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
-- Look into what newer Hotline clients/servers support (ties into mhxd epic)
 
-Bookmarks
+Bookmarks:
 - Better bookmark management, allowing user to add/edit/delete bookmarks within GtkHx
 
-Tracker
+Tracker:
 - Ship with some more built in trackers configured
+- New Tracker protocol support
+
+Chat History:
+- Support chat history protocol extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Chat-History.md
+- Need to think about how we want it to work from a user's perspective
+
+Voice Chat:
+- Build initial prototype of voice chat extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Voice.md
+
+Inline Media:
+- Research spike to determine how difficult it would be to add to xtext
+
+Name Colorization:
+- Support colored nickname extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Colored-Nicknames.md
 
 Code Modernization:
 - Better modules with more code reuse
