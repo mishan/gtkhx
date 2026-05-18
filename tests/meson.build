@@ -603,6 +603,25 @@ test_folder_xfer = executable('test_folder_xfer',
 test('folder_xfer', test_folder_xfer,
      suite : 'proto')
 
+# capabilities — DATA_CAPABILITIES (0x01f0) negotiation per the
+# fogWraith/Hotline Capabilities.md spec. Send-side: hlpack a LOGIN
+# with our cap bits and verify the chunk layout. Recv-side: hand-
+# build a LOGIN reply with a CAPABILITIES echo (2-byte and 8-byte
+# variable-width forms) and verify the variable-width decoder
+# extracts the right u64 caps mask. Pins the bit constants so
+# renumbering breaks the test before it breaks the wire.
+test_capabilities = executable('test_capabilities',
+  'proto/test_capabilities.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('capabilities', test_capabilities,
+     suite : 'proto')
+
 # msg_event — HxMsgEvent is the private-message counterpart to
 # HxChatEvent, payload of GtkhxSession::msg. The constructor's
 # contract: stash uid + set is_broadcast on uid==0, UTF-8-sanitise

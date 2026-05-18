@@ -1354,6 +1354,12 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     no_cipher:
         hc++;
 #endif
+        /* DATA_CAPABILITIES on the HOPE Step 3 authenticated LOGIN
+		 * — see hotline.h for the wire-format rationale and the
+		 * legacy-LOGIN sibling in network.c for the larger comment.
+		 * One extra chunk per LOGIN, two bytes wire weight. */
+        guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
+        hc++;
         hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, llen, login,
                  HTLC_DATA_PASSWORD, pmaclen, password_mac,
 #ifdef CONFIG_CIPHER
@@ -1363,7 +1369,8 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                  HTLS_DATA_COMPRESS_ALG, compressalglistlen, compressalglist,
 #endif
                  HTLC_DATA_NAME, strlen (htlc->name), htlc->name,
-                 HTLC_DATA_ICON, 2, &icon16);
+                 HTLC_DATA_ICON, 2, &icon16, HTLC_DATA_CAPABILITIES, 2,
+                 &caps16);
         g_free (pass);
 #ifdef CONFIG_COMPRESS
         if (compressalglistlen) {
@@ -1468,6 +1475,30 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                     server_addr = gtkhx_text_to_utf8 (
                         servername, strlen (servername), NULL);
                     changetitlesconnected (sess);
+                    break;
+                case HTLS_DATA_CAPABILITIES:
+                    /* DATA_CAPABILITIES echo from the server — the bits
+					 * the server agreed to enable for this session.
+					 * Per spec the field is a variable-width big-endian
+					 * unsigned integer (typically 2 bytes, extensible
+					 * to 8). Decode whatever width arrived into our 64-
+					 * bit field. Bits we don't recognise are silently
+					 * preserved per the spec's "ignore unknown bits"
+					 * requirement — they don't affect behaviour but
+					 * leave the door open if a server advertises a cap
+					 * we'll start using later. */
+                    {
+                        guint64 caps = 0;
+                        for (guint16 i = 0; i < _len && i < 8; i++) {
+                            caps = (caps << 8) | dh->data[i];
+                        }
+                        htlc->caps = caps;
+                        if (caps & HTLC_CAP_TEXT_ENCODING) {
+                            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                                              "server confirmed UTF-8 text "
+                                              "encoding for this session\n");
+                        }
+                    }
                     break;
                 }
             }

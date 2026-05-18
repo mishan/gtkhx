@@ -217,6 +217,12 @@ struct htlc_conn {
     unsigned long gzip_inflate_total_in, gzip_inflate_total_out;
     unsigned long gzip_deflate_total_in, gzip_deflate_total_out;
 #endif
+    /* DATA_CAPABILITIES bitmask negotiated for this session, as
+	 * confirmed by the server in the LOGIN reply. Zero on legacy
+	 * servers (or on connections where neither side speaks the
+	 * extension). Tested with HTLC_CAP_TEXT_ENCODING and friends
+	 * — see hotline.h. */
+    guint64 caps;
 };
 
 /* Phase 5: LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize

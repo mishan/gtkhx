@@ -172,6 +172,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * the legacy flow on the next connect. */
     htlc->flags.logged_in = 0;
 
+    /* Same idea for the DATA_CAPABILITIES bitmask — the next
+	 * connect renegotiates from zero. A stale CAP_TEXT_ENCODING
+	 * bit could otherwise survive a reconnect to a Mac Roman
+	 * server and cause us to skip text transcoding once Phase E2
+	 * lands. */
+    htlc->caps = 0;
+
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
 	 * exchange). Safe to call whether or not one's running. */
     if (current_cancel) {
@@ -971,14 +978,26 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * the integration test harness sends; bumps mhxd's
 		 * can_ping bit so HTLC_HDR_PING keepalives are accepted. */
         cv16 = htons (185);
+
+        /* DATA_CAPABILITIES bitmask. Today we advertise just
+		 * CAP_TEXT_ENCODING (bit 1) — "I speak UTF-8." Servers
+		 * that support the spec will echo bit 1 back in the LOGIN
+		 * reply, after which the session's text-bearing fields are
+		 * UTF-8 in both directions. Servers that don't know the
+		 * chunk silently ignore it (per spec) and the session falls
+		 * back to legacy Mac Roman framing — same as before this
+		 * chunk was added. Phase E1 only advertises; the actual
+		 * UTF-8/Mac-Roman encode/decode work is Phase E2+. */
+        guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
         if (plen) {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 4, HTLC_DATA_ICON, 2, &icon16,
+            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 5, HTLC_DATA_ICON, 2, &icon16,
                      HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_PASSWORD, plen,
-                     encpass, HTLC_DATA_CLIENTVERSION, 2, &cv16);
+                     encpass, HTLC_DATA_CLIENTVERSION, 2, &cv16,
+                     HTLC_DATA_CAPABILITIES, 2, &caps16);
         } else {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 3, HTLC_DATA_ICON, 2, &icon16,
+            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 4, HTLC_DATA_ICON, 2, &icon16,
                      HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_CLIENTVERSION,
-                     2, &cv16);
+                     2, &cv16, HTLC_DATA_CAPABILITIES, 2, &caps16);
         }
     }
 
