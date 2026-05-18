@@ -636,6 +636,26 @@ test_capabilities = executable('test_capabilities',
 test('capabilities', test_capabilities,
      suite : 'proto')
 
+# large_file — Capabilities-Large-File extension. Pins the 64-bit
+# field IDs (DATA_FILESIZE64 / OFFSET64 / XFERSIZE64 /
+# FOLDER_ITEM_COUNT64), the HTXF handshake flag constants
+# (HTXF_FLAG_LARGE_FILE / HTXF_FLAG_SIZE64), the send/recv byte
+# shapes for the 64-bit XFERSIZE companion, and the three handshake
+# variants (legacy 16-byte, large-file < 4 GiB, large-file > 4 GiB
+# with the 24-byte 8-byte-length appendix). Source:
+# fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md.
+test_large_file = executable('test_large_file',
+  'proto/test_large_file.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('large_file', test_large_file,
+     suite : 'proto')
+
 # msg_event — HxMsgEvent is the private-message counterpart to
 # HxChatEvent, payload of GtkhxSession::msg. The constructor's
 # contract: stash uid + set is_broadcast on uid==0, UTF-8-sanitise

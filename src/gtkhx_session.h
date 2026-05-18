@@ -132,7 +132,7 @@ void gtkhx_session_emit_file_info (GtkhxSession *self, const char *path,
                                    const char *name, const char *creator,
                                    const char *type, const char *comments,
                                    const char *modified, const char *created,
-                                   guint32 size);
+                                   guint64 size);
 void gtkhx_session_emit_file_list (GtkhxSession *self,
                                    struct cached_filelist *cfl,
                                    struct hl_filelist_hdr *fh, void *data);

@@ -69,10 +69,10 @@ const char human_suffixes[] = {
    than -OUTPUT_BLOCK_SIZE aren't modified.  */
 
 char *
-human_readable (guint32 n, char *buf, int from_block_size,
+human_readable (guint64 n, char *buf, int from_block_size,
                 int output_block_size)
 {
-    guint32 amt;
+    guint64 amt;
     uint base;
     int to_block_size;
     uint tenths;
@@ -193,7 +193,7 @@ human_readable (guint32 n, char *buf, int from_block_size,
 }
 
 char *
-human_size (char *sizstr, guint32 size)
+human_size (char *sizstr, guint64 size)
 {
     return human_readable (size, sizstr, 1, -1024);
 }

@@ -331,7 +331,7 @@ hx_file_info_row (const char *title, const char *value)
 
 void
 output_file_info (char *path, char *name, char *creator, char *type,
-                  char *comments, char *modified, char *created, guint32 size)
+                  char *comments, char *modified, char *created, guint64 size)
 {
     GtkWidget *window, *header, *savebtn;
     GtkWidget *vbox;
@@ -374,10 +374,12 @@ output_file_info (char *path, char *name, char *creator, char *type,
     if (size > 0) {
         char *human = human_size (humanbuf, size);
         if (size >= 1024) {
-            g_snprintf (sizestr, sizeof sizestr, "%s (%u %s)", human, size,
-                        _ ("bytes"));
+            g_snprintf (sizestr, sizeof sizestr, "%s (%" G_GUINT64_FORMAT
+                                                 " %s)",
+                        human, (guint64)size, _ ("bytes"));
         } else {
-            g_snprintf (sizestr, sizeof sizestr, "%u %s", size, _ ("bytes"));
+            g_snprintf (sizestr, sizeof sizestr, "%" G_GUINT64_FORMAT " %s",
+                        (guint64)size, _ ("bytes"));
         }
     } else {
         sizestr[0] = '\0';

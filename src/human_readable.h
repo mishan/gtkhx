@@ -26,14 +26,18 @@ extern const char human_suffixes[];
 /* General form. output_block_size < 0 selects abbreviation with
  * powers of |output_block_size| (typically -1024 for binary
  * suffixes). output_block_size > 0 uses raw decimal in those
- * units. */
-extern char *human_readable (guint32 n, char *buf, int from_block_size,
+ * units.
+ *
+ * `n` is guint64 to support the Large-File extension; the
+ * formatter walks the size into binary suffixes (k / M / G / T
+ * / …) so the result remains compact even for >4 GiB values. */
+extern char *human_readable (guint64 n, char *buf, int from_block_size,
                              int output_block_size);
 
 /* The default GtkHx convention: binary suffixes, from-block 1, so
  * `size` is interpreted as raw bytes. Equivalent to
  * human_readable (size, sizstr, 1, -1024). */
-extern char *human_size (char *sizstr, guint32 size);
+extern char *human_size (char *sizstr, guint64 size);
 
 #ifdef __cplusplus
 }

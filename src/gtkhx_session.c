@@ -184,7 +184,8 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
                         G_TYPE_POINTER, G_TYPE_POINTER, /* creator, type */
                         G_TYPE_POINTER,                 /* comments */
                         G_TYPE_POINTER, G_TYPE_POINTER, /* modified, created */
-                        G_TYPE_UINT);                   /* size */
+                        G_TYPE_UINT64);                 /* size — 64-bit for
+														 * large-file support */
 
     signals[SIGNAL_FILE_LIST]
         = g_signal_new ("file-list", G_TYPE_FROM_CLASS (klass),
@@ -372,7 +373,7 @@ gtkhx_session_emit_file_info (GtkhxSession *self, const char *path,
                               const char *name, const char *creator,
                               const char *type, const char *comments,
                               const char *modified, const char *created,
-                              guint32 size)
+                              guint64 size)
 {
     g_signal_emit (self, signals[SIGNAL_FILE_INFO], 0, path, name, creator,
                    type, comments, modified, created, size);

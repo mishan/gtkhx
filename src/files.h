@@ -46,7 +46,7 @@ struct hl_filelist_hdr;
  * is the receiving end that builds the dialog. */
 extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, char *modified, char *created,
-                              guint32 size);
+                              guint64 size);
 
 /* Emit the file-list GtkhxSession signal so the file_list-signal
  * handler in gtkhx.c (and through it the remote-provider in the
