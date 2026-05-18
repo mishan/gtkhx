@@ -264,31 +264,28 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
     hx_agreement_result r
         = hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
 
-    /* Phase 5: legacy login flow (banner support) — the server is
-	 * waiting for HTLC_HDR_AGREEMENTAGREE before it sends SELFINFO
-	 * and any banner. If there's no agreement to display
-	 * (HX_AGREEMENT_NONE — server config has agreement disabled,
-	 * or HX_AGREEMENT_NOT_FOUND — malformed payload), the user
-	 * has nothing to click 'Agree' on, so login would stall. Send
-	 * AGREEMENTAGREE automatically in those cases.
+    /* Phase 5+: no-agreement auto-path — the user has nothing to
+	 * click Agree on, so we send AGREEMENTAGREE ourselves to:
+	 *   - complete login on mhxd-style servers (where finish_login
+	 *     runs inside rcv_agreementagree)
+	 *   - deliver NAME + ICON to the server in both flavours
+	 *   - trigger HTLS_HDR_BANNER emission on banner-configured
+	 *     servers (the banner write is unconditional on banner.type
+	 *     inside rcv_agreementagree, ungated on in_login)
 	 *
-	 * On 1.9-style servers (e.g. MacSecret.com) SELFINFO lands
-	 * BEFORE AGREEMENT — login is already complete and sending
-	 * AGREEMENTAGREE for an already-logged-in session can prompt
-	 * the server to disconnect us. The server still doesn't know
-	 * our NAME though, so send USER_CHANGE (same NAME + ICON
-	 * payload, safe on a logged-in session). Mirrors the gating
-	 * in gtkhx.c::concurrence for the with-agreement path.
-	 *
+	 * HX_AGREEMENT_NONE: server config has agreement disabled.
+	 * HX_AGREEMENT_NOT_FOUND: malformed payload.
 	 * For HX_AGREEMENT_OK, fall through to popping the agreement
-	 * window — concurrence handles the wire op when the user
-	 * clicks Agree. */
+	 * window — concurrence() handles the wire op on Agree click,
+	 * using the same AGREEMENTAGREE message.
+	 *
+	 * Earlier code gated this on !flags.logged_in (to avoid a
+	 * suspected MacSecret disconnect on AGREEMENTAGREE-for-logged-
+	 * in). That gate was almost certainly chasing a misdiagnosed
+	 * symptom — see gtkhx.c::concurrence for the long comment —
+	 * and was suppressing banner delivery on every 1.9 server. */
     if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
-        if (!htlc->flags.logged_in) {
-            hx_send_agreement_agree (htlc);
-        } else {
-            hx_change_name_icon (htlc);
-        }
+        hx_send_agreement_agree (htlc);
         return;
     }
     if (r != HX_AGREEMENT_OK) {
