@@ -134,10 +134,18 @@ banner_setup_or_skip (struct htlc_conn *htlc, gchar **out_type, gchar **out_url)
 
     const char *name = "Banner Tier-3";
     guint16 icon_be = htons (412);
+    /* OPTIONS bitmap (0x0071, same code as HTLC_DATA_BAN in mhxd's
+	 * naming). Mhxd ignores the body; Mobius reads it as a big-
+	 * endian u16 and panics if the chunk is missing. Send 0x0000.
+	 * Matches the production hx_send_agreement_agree shape so an
+	 * eventual Mobius Tier-3 target exercises the same wire bytes
+	 * the real client sends. See [[gtkhx_mobius_options_field]]. */
+    guint16 options_be = htons (0);
     if (!integration_send_message (
-            fd, htlc, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/2,
+            fd, htlc, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/3,
             (int)HTLC_DATA_NAME, (int)strlen (name), (guint8 *)name,
-            (int)HTLC_DATA_ICON, (int)sizeof (icon_be), &icon_be)) {
+            (int)HTLC_DATA_ICON, (int)sizeof (icon_be), &icon_be,
+            (int)HTLC_DATA_OPTIONS, (int)sizeof (options_be), &options_be)) {
         g_test_fail_printf ("AGREEMENTAGREE send failed");
         integration_release_htlc (htlc);
         integration_close (fd);
