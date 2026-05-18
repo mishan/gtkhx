@@ -65,3 +65,61 @@ gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
     }
     return converted;
 }
+
+char *
+gtkhx_text_for_wire (const char *utf8, gsize utf8_len, gboolean utf8_mode,
+                     gboolean is_body, gsize *out_len)
+{
+    char *wire;
+    gsize wire_len = 0;
+
+    if (!utf8) {
+        if (out_len) {
+            *out_len = 0;
+        }
+        return g_strdup ("");
+    }
+
+    if (utf8_mode) {
+        /* UTF-8 negotiated. Pass through verbatim — no encoding
+		 * conversion, no line-ending munging. Modern systems use
+		 * LF and the spec says UTF-8 clients receive LF as-is. */
+        wire = g_strndup (utf8, utf8_len);
+        wire_len = utf8_len;
+    } else {
+        /* Legacy mode: encode to Mac Roman.
+		 * g_convert_with_fallback substitutes the supplied fallback
+		 * string ('?') for any codepoint outside the target
+		 * encoding's repertoire. We pass the empty error sink — a
+		 * NULL return would only happen on iconv-not-available,
+		 * which is essentially impossible on a glibc / musl /
+		 * macOS / Win build. Defend against it anyway and fall back
+		 * to the input bytes (lossy but better than a NULL deref). */
+        wire = g_convert_with_fallback (utf8, (gssize)utf8_len, "MACINTOSH",
+                                        "UTF-8", "?", NULL, &wire_len, NULL);
+        if (!wire) {
+            wire = g_strndup (utf8, utf8_len);
+            wire_len = utf8_len;
+        }
+
+        /* Phase E3: LF → CR normalisation for body fields on
+		 * legacy clients. The spec calls this out: "Outbound
+		 * (server → client): Before encoding to a legacy encoding,
+		 * replace LF (0x0A) with CR (0x0D) for Mac Roman /
+		 * Shift-JIS / Latin-1 clients." Same applies in reverse
+		 * for the client-to-server direction we're in here, since
+		 * legacy servers expect CR-terminated lines on the wire. */
+        if (is_body) {
+            for (gsize i = 0; i < wire_len; i++) {
+                if (wire[i] == 0x0a) {
+                    wire[i] = 0x0d;
+                }
+            }
+        }
+    }
+
+    if (out_len) {
+        *out_len = wire_len;
+    }
+    return wire;
+}

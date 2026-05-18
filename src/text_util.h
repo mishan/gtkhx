@@ -42,4 +42,38 @@
  */
 extern char *gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len);
 
+/*
+ * Outbound counterpart of gtkhx_text_to_utf8: take a UTF-8 string
+ * destined for the wire and return the bytes to actually send.
+ *
+ * utf8_mode = TRUE  → pass-through. The negotiated server speaks
+ *                     UTF-8 (CAP_TEXT_ENCODING confirmed), so the
+ *                     input is already in the wire encoding. Caller
+ *                     gets a g_strndup of the input.
+ * utf8_mode = FALSE → encode to MACINTOSH (Mac Roman) via
+ *                     g_convert_with_fallback, substituting '?'
+ *                     (0x3F) for any UTF-8 codepoint not in the
+ *                     target encoding's repertoire. Matches the
+ *                     fogWraith Capabilities-Text-Encoding spec:
+ *                     "characters that cannot be represented in
+ *                     the target encoding are replaced with `?`
+ *                     (0x3F)."
+ *
+ * is_body  = TRUE   → after encoding, replace LF (0x0A) with CR
+ *                     (0x0D) for line-ending normalisation to
+ *                     classic Mac convention. Only meaningful in
+ *                     legacy mode; UTF-8 mode passes LF through
+ *                     unchanged regardless. Apply only to body
+ *                     fields (chat / msg / news article data); name
+ *                     and subject fields stay one-line.
+ *
+ * Caller g_frees the result. *out_len receives the wire byte length
+ * (excluding any trailing NUL). NULL input returns g_strdup("") with
+ * *out_len = 0 to keep call sites simple — they can pass directly
+ * into hlwrite without a separate NULL check.
+ */
+extern char *gtkhx_text_for_wire (const char *utf8, gsize utf8_len,
+                                  gboolean utf8_mode, gboolean is_body,
+                                  gsize *out_len);
+
 #endif /* HX_TEXT_UTIL_H */

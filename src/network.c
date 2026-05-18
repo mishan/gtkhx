@@ -561,9 +561,19 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * UI. */
     guint16 options16 = htons (0);
 
+    /* Phase E2: same as hx_change_name_icon — encode the nick to
+	 * the negotiated wire encoding. is_body = FALSE (nicks are
+	 * single-line). */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
+                               utf8, /*is_body=*/FALSE, &name_len);
+
     hlwrite (htlc, HTLC_HDR_AGREEMENTAGREE, 0, 3, HTLC_DATA_ICON, 2, &icon16,
-             HTLC_DATA_NAME, strlen ((const char *)htlc->name), htlc->name,
+             HTLC_DATA_NAME, (guint16)name_len, name_wire,
              HTLC_DATA_OPTIONS, 2, &options16);
+    g_free (name_wire);
 }
 
 /* Phase 5+: async connect via GSocketClient.

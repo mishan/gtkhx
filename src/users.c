@@ -57,8 +57,19 @@ hx_change_name_icon (struct htlc_conn *htlc)
 {
     guint16 icon16 = htons (htlc->icon);
 
+    /* Phase E2: encode the nick to the negotiated wire encoding.
+	 * is_body = FALSE — nicks don't have line endings; we want the
+	 * Mac-Roman transcoding (or UTF-8 passthrough) without the
+	 * LF→CR substitution. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize name_len = 0;
+    char *name_wire
+        = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
+                               utf8, /*is_body=*/FALSE, &name_len);
+
     hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 2, HTLC_DATA_ICON, 2, &icon16,
-             HTLC_DATA_NAME, strlen (htlc->name), htlc->name);
+             HTLC_DATA_NAME, (guint16)name_len, name_wire);
+    g_free (name_wire);
 }
 
 void

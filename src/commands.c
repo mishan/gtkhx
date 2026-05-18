@@ -35,6 +35,7 @@
 #include "options.h"
 #include "files.h"
 #include "news.h"
+#include "text_util.h"
 #include "users.h"
 #include "sound.h"
 #include "msg.h"
@@ -335,14 +336,23 @@ COMMAND (me)
         return;
     }
     style = htons (1);
+
+    /* Phase E2/E3: chat body — same encoder as hx_send_chat. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize wire_len = 0;
+    char *wire = gtkhx_text_for_wire (p, strlen (p), utf8,
+                                      /*is_body=*/TRUE, &wire_len);
+
     if (cid) {
         guint32 cidh = htonl (cid);
         hlwrite (htlc, HTLC_HDR_CHAT, 0, 3, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, strlen (p), p, HTLC_DATA_CHAT_ID, 4, &cidh);
+                 HTLC_DATA_CHAT, (guint16)wire_len, wire, HTLC_DATA_CHAT_ID, 4,
+                 &cidh);
     } else {
         hlwrite (htlc, HTLC_HDR_CHAT, 0, 2, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, strlen (p), p);
+                 HTLC_DATA_CHAT, (guint16)wire_len, wire);
     }
+    g_free (wire);
 }
 
 COMMAND (post)

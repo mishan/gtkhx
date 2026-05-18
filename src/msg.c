@@ -49,8 +49,18 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
 {
     uid = htons (uid);
     task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0, data ? data : "msg");
+
+    /* Phase E2/E3: body field — UTF-8 / Mac Roman conversion plus
+	 * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
+	 * src/text_util.c. */
+    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gsize wire_len = 0;
+    char *wire
+        = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
+
     hlwrite (htlc, HTLC_HDR_MSG, 0, 2, HTLC_DATA_UID, 2, &uid, HTLC_DATA_MSG,
-             len, msg);
+             (guint16)wire_len, wire);
+    g_free (wire);
 }
 
 void msg_output (char *name, guint16 uid, char *buf);
