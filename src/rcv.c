@@ -65,23 +65,36 @@ static char *hx_timeformat = "%c";
 extern int xfer_go_timer (void *__arg);
 
 void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text);
-/* Phase 5: forward decl so do_post_login_fetches (defined just below)
+/* Phase 5: forward decl so hx_post_login_fetches (defined just below)
  * can hand it to task_new before the implementation site. */
 void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text);
 
-/* Phase 5: post-login state-machine. The server's reply to
- * HTLC_HDR_LOGIN is split across two messages on most servers — a
- * TASK reply with our UID and (optionally) version + server name,
- * followed by a HTLS_HDR_USER_SELFINFO with our access bits and our
- * own user record. If we fire HTLC_HDR_USER_GETLIST as soon as the
- * TASK arrives (the original behaviour), some servers (hlserver.com
- * is the known case) complain "0 command(s) at a time, please."
- * because they're still mid-conversation about the login.
+/* Phase 5: post-login state-machine. The 1.5 flow per
+ * Capabilities/connect-spec is:
  *
- * Defer the post-login fetches until either:
- *   - HTLS_HDR_USER_SELFINFO arrives (the canonical signal), or
- *   - 2 seconds elapse with no SELFINFO (fallback for old servers
- *     that may not send SELFINFO at all).
+ *   C → S  TranLogin
+ *   S → C  TranLogin reply (version, server name, banner_id, uid)
+ *   S → C  TranUserAccess (HTLS_HDR_USER_SELFINFO, access bits)
+ *   S → C  TranShowAgreement (or "no agreement" indicator)
+ *   C → S  TranAgreed (NAME + ICON + OPTIONS) — identity arrives HERE
+ *   S → C  TranNotifyChangeUser broadcast (others are told we joined)
+ *   S → C  TranServerBanner
+ *   S → C  TranAgreed reply
+ *
+ * Only AFTER our TranAgreed has gone out is the server willing to
+ * treat us as a fully-joined user — that's when USER_GETLIST /
+ * news fetches make sense. fogWraith reported (2026-05) that we
+ * were firing those on SELFINFO receipt, which is too early in
+ * the 1.5 flow: server logs showed "Get user list" / "Get messages"
+ * arriving before "Accept agreement". The fix is to gate the post-
+ * login fetches on the AGREEMENTAGREE-send path (concurrence on
+ * Agree click, or the auto-send in hx_rcv_agreement_file for
+ * HX_AGREEMENT_NONE / NOT_FOUND).
+ *
+ * 1.2 servers don't send AGREEMENTAGREE either way — name + icon
+ * are in the LOGIN packet, agreement (if any) is informational
+ * with no response opcode. For those we rely on the 2-second
+ * fallback timer armed in rcv_task_login.
  *
  * `post_login_fetched` is the single-fire guard: whichever path
  * runs first sets it, the other path becomes a no-op. Reset on
@@ -89,8 +102,11 @@ void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text);
 static gboolean post_login_fetched = FALSE;
 static guint post_login_timer_id = 0;
 
-static void
-do_post_login_fetches (struct htlc_conn *htlc)
+/* Public entry — network.c::hx_send_agreement_agree calls this
+ * right after the hlwrite so post-login fetches fire on the spec-
+ * correct boundary (after AGREEMENTAGREE, not after SELFINFO). */
+void
+hx_post_login_fetches (struct htlc_conn *htlc)
 {
     if (post_login_fetched) {
         return;
@@ -118,9 +134,10 @@ post_login_fallback (gpointer data)
 
     post_login_timer_id = 0;
     if (htlc && htlc->fd && !post_login_fetched) {
-        debug_log ("login",
-                   "SELFINFO didn't arrive after 2s, firing fetches anyway");
-        do_post_login_fetches (htlc);
+        debug_log (
+            "login",
+            "AGREEMENTAGREE didn't fire after 2s, firing fetches anyway");
+        hx_post_login_fetches (htlc);
     }
     return G_SOURCE_REMOVE;
 }
@@ -635,15 +652,17 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 
     setbtns (&the_session, 1);
 
-    /* Phase 5: SELFINFO is the canonical signal that the server has
-	 * finished the post-login conversation. Fire the deferred
-	 * USER_GETLIST + news fetches now — see do_post_login_fetches
-	 * comment in this file for why deferring was necessary. The
-	 * helper is single-fire, so the fallback timer is a no-op if
-	 * SELFINFO beat it (the common case). */
-    do_post_login_fetches (htlc);
-
-    /* Phase 5+: the SELFINFO USE_ANY_NAME auto-push that used to
+    /* Note: SELFINFO is NOT where we fire post-login fetches. In
+	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
+	 * server sends the agreement — firing USER_GETLIST / news here
+	 * would land them at the server before our AGREEMENTAGREE, so
+	 * the server logs the action against the not-yet-joined session.
+	 * fogWraith caught this on Mobius (Classic Macs / MacSecret /
+	 * vespernet) where the server-side log shows "Get user list"
+	 * arriving before "Accept agreement". The fetches now fire from
+	 * hx_send_agreement_agree, after AGREEMENTAGREE is on the wire.
+	 *
+	 * Phase 5+: the SELFINFO USE_ANY_NAME auto-push that used to
 	 * live here is gone. It existed to deliver NAME + ICON to the
 	 * server on flows where AGREEMENTAGREE couldn't be relied on:
 	 *
@@ -1427,16 +1446,13 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             /* Reset post-login fetch state before scheduling so
 			 * a reconnection during this process state starts clean.
 			 *
-			 * BUT — on 1.9-style servers (MacSecret.com, etc.) the
-			 * server fires HTLS_HDR_USER_SELFINFO *before* the
-			 * loginreply TASK arrives. SELFINFO already triggered
-			 * do_post_login_fetches and set post_login_fetched=TRUE,
-			 * so if we reset it here and arm the fallback timer, the
-			 * timer fires 2s later and fetches everything a second
-			 * time. Skip the reset (and the timer arm below) when
-			 * fetches have already gone out. rcv_login_reset() at
-			 * the top of every login attempt handles the across-
-			 * reconnects clean-slate case. */
+			 * The check on already_fetched used to cover a race where
+			 * SELFINFO arrived before the login TASK reply and fired
+			 * the fetches already; that race no longer matters because
+			 * SELFINFO is not a fetch trigger anymore (fetches fire
+			 * from hx_send_agreement_agree). The check is harmless
+			 * to keep — it's a no-op when post_login_fetched is FALSE,
+			 * which is the new common case. */
             gboolean already_fetched = post_login_fetched;
             if (!already_fetched) {
                 post_login_fetched = FALSE;
@@ -1518,18 +1534,35 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 ping_start (htlc);
             }
 
-            /* Phase 5: do NOT fire HTLC_HDR_USER_GETLIST yet — wait
-			 * for HTLS_HDR_USER_SELFINFO to arrive so the server's
-			 * post-login conversation has fully landed. See the
-			 * commentary on do_post_login_fetches above for the
-			 * rationale. The fallback timer covers servers that
-			 * don't send SELFINFO.
+            /* 1.0/1.2 detection: the server did not include an
+			 * HTLS_DATA_VERSION chunk in this LOGIN reply, so it
+			 * doesn't speak the 1.5 agreement / AGREEMENTAGREE
+			 * flow. The LOGIN packet we sent followed the 1.5
+			 * spec (no HTLC_DATA_NAME), so the server has no name
+			 * for us yet — USER_GETLIST replies would return our
+			 * record with an uninitialised name field (fogWraith's
+			 * hlserver.com trace showed exactly this: "00 07 00
+			 * 86 00 00 00 05 f0 d0 73 28 2d"). Deliver NAME + ICON
+			 * via USER_CHANGE now, and fire the post-login fetches
+			 * immediately — no agreement is coming, so there is no
+			 * "after AGREEMENTAGREE" boundary to wait for.
 			 *
-			 * Skip arming the timer if SELFINFO already arrived
-			 * before this TASK reply (1.9-style flow); the fetches
-			 * have already gone out and a second pass would just
-			 * duplicate them. */
-            if (!already_fetched) {
+			 * 1.5+ servers (version >= 150 here) take the AGREEMENT-
+			 * AGREE path: gtkhx.c::concurrence on the Agree click,
+			 * or hx_rcv_agreement_file's HX_AGREEMENT_NONE auto-
+			 * send when the account has AccessNoAgreement. Both
+			 * call hx_post_login_fetches after the wire send. The
+			 * 2s fallback timer below arms as a last resort if the
+			 * agreement opcode doesn't arrive at all. */
+            if (htlc->version == 0 && !already_fetched) {
+                hx_change_name_icon (htlc);
+                hx_post_login_fetches (htlc);
+            } else if (!already_fetched) {
+                /* Phase 5: do NOT fire HTLC_HDR_USER_GETLIST yet —
+				 * wait for AGREEMENTAGREE to go out (or its no-
+				 * agreement auto-send). The fallback timer covers
+				 * 1.5+ servers that misbehave and don't send any
+				 * agreement opcode. */
                 post_login_timer_id
                     = g_timeout_add_seconds (2, post_login_fallback, htlc);
             }

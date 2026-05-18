@@ -51,7 +51,14 @@ extern void rcv_task_folder_put (struct htlc_conn *htlc,
 
 /* Phase 5: drop any pending post-login fallback timer. Called from
  * hx_htlc_close so we don't fire fetches into a closed connection if
- * the user disconnects within the 2-second SELFINFO window. */
+ * the user disconnects within the 2-second AGREEMENTAGREE window. */
 extern void rcv_login_reset (void);
+
+/* Fire deferred USER_GETLIST + news fetch. Idempotent (single-fire
+ * guard). Called from hx_send_agreement_agree (network.c) after
+ * AGREEMENTAGREE goes out — that's the spec-correct join boundary
+ * per the 1.5 flow. Also called from the 2-second fallback timer
+ * for 1.2 servers that never trigger AGREEMENTAGREE. */
+extern void hx_post_login_fetches (struct htlc_conn *htlc);
 
 #endif /* HX_RCV_H */

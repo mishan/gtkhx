@@ -574,6 +574,17 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
              HTLC_DATA_NAME, (guint16)name_len, name_wire,
              HTLC_DATA_OPTIONS, 2, &options16);
     g_free (name_wire);
+
+    /* fogWraith caught us mixing 1.2 + 1.5 conventions: per the
+	 * 1.5 spec, USER_GETLIST and the news/messages fetch must not
+	 * land at the server until AFTER the client sends TranAgreed
+	 * — that's when the server officially treats us as joined.
+	 * Used to fire from hx_rcv_user_selfinfo, which arrives BEFORE
+	 * the agreement in 1.5 — too early. Single-fire guard makes
+	 * the call idempotent: the 2s fallback timer in rcv_task_login
+	 * (which still arms in case a 1.2 server skips the agreement
+	 * step entirely) is harmless once this has run. */
+    hx_post_login_fetches (htlc);
 }
 
 /* Phase 5+: async connect via GSocketClient.
@@ -999,6 +1010,17 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * chunk was added. Phase E1 only advertises; the actual
 		 * UTF-8/Mac-Roman encode/decode work is Phase E2+. */
         guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
+
+        /* LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
+		 * 1.5+ servers will get our nick via AGREEMENTAGREE after
+		 * the user dismisses the agreement window (or via the auto-
+		 * send in hx_rcv_agreement_file's HX_AGREEMENT_NONE branch
+		 * when the account has AccessNoAgreement). 1.0/1.2 servers
+		 * never send agreement and never accept AGREEMENTAGREE; for
+		 * those, rcv_task_login detects the absence of an
+		 * HTLS_DATA_VERSION chunk in the reply and fires
+		 * hx_change_name_icon (USER_CHANGE) directly. The two paths
+		 * stay cleanly separated. */
         if (plen) {
             hlwrite (htlc, HTLC_HDR_LOGIN, 0, 5, HTLC_DATA_ICON, 2, &icon16,
                      HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_PASSWORD, plen,
