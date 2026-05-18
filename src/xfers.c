@@ -42,6 +42,7 @@
 #include "rcv.h"
 #include "chat.h"
 #include "tasks.h"
+#include "uniquify_path.h"
 #include "sound.h"
 #include "files.h"
 #include "preview.h"
@@ -176,64 +177,30 @@ local_path_exists (const char *path)
     return 0;
 }
 
-/* If the local path collides with an existing file, mutate it in
- * place to a non-colliding variant by inserting " (N)" before the
- * last extension:
+/* uniquify_local_path's core lives in src/uniquify_path.c now —
+ * collision-resolving "foo.txt" → "foo (1).txt" logic, parameterised
+ * over an exists predicate so the Tier 1 test can drive it without
+ * touching the filesystem. This wrapper plugs in the real
+ * local_path_exists check.
  *
  *   /dl/foo.txt        with foo.txt present  →  /dl/foo (1).txt
  *   /dl/archive.tar.gz with that present     →  /dl/archive.tar (1).gz
  *   /dl/README         with that present     →  /dl/README (1)
  *
- * N counts up from 1. A leading dot in the basename (".bashrc") is
- * treated as part of the name, not an extension. After ~10000 tries
- * we give up and leave path at its last attempt — the subsequent
- * open() will overwrite at that name, which is the same behavior
- * as before this helper existed; the user has bigger problems if
- * they have ten thousand "foo (N).txt" copies. */
+ * N counts up from 1. After ~10000 tries we give up and leave path
+ * at its last attempt — the subsequent open() will overwrite at
+ * that name, the same behaviour as before this helper existed. */
+static int
+local_path_exists_adapter (const char *path, void *user_data)
+{
+    (void)user_data;
+    return local_path_exists (path);
+}
+
 static void
 uniquify_local_path (char *path, size_t cap)
 {
-    const char *base, *dot;
-    char prefix[MAXPATHLEN];
-    char suffix[MAXPATHLEN];
-    size_t pre_len;
-    int n;
-
-    if (!local_path_exists (path)) {
-        return;
-    }
-
-    base = strrchr (path, '/');
-    base = base ? base + 1 : path;
-    dot = strrchr (base, '.');
-    if (dot == base) { /* leading-dot basename, no extension */
-        dot = NULL;
-    }
-
-    if (dot) {
-        pre_len = dot - path;
-        if (pre_len >= sizeof prefix) {
-            pre_len = sizeof prefix - 1;
-        }
-        memcpy (prefix, path, pre_len);
-        prefix[pre_len] = '\0';
-        g_strlcpy (suffix, dot, sizeof suffix);
-    } else {
-        g_strlcpy (prefix, path, sizeof prefix);
-        suffix[0] = '\0';
-    }
-
-    for (n = 1; n < 10000; n++) {
-        /* The precision specifiers cap each component at slightly under
-		 * half of MAXPATHLEN so GCC can prove the format fits in path's
-		 * cap bytes. snprintf would truncate safely either way; the
-		 * specifiers exist only to satisfy the static analysis. */
-        snprintf (path, cap, "%.*s (%d)%.*s", MAXPATHLEN / 2 - 16, prefix, n,
-                  MAXPATHLEN / 2 - 16, suffix);
-        if (!local_path_exists (path)) {
-            return;
-        }
-    }
+    uniquify_path (path, cap, local_path_exists_adapter, NULL);
 }
 
 void

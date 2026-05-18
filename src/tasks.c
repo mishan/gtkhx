@@ -31,6 +31,7 @@
 #include "gtk_hlist.h"
 #include "network.h"
 #include "gtkutil.h"
+#include "human_readable.h"
 #include "gtkhx.h"
 #include "xfers.h"
 #include "sound.h"
@@ -670,8 +671,8 @@ create_tasks_window (GtkWidget *widget, gpointer data)
     xfer_tasks_update (&sess->htlc);
 }
 
-#define LONGEST_HUMAN_READABLE 32
-extern char *human_size (char *sizstr, guint32 size);
+/* LONGEST_HUMAN_READABLE + human_size come in via human_readable.h
+ * now (transitively via files.h's include chain). */
 
 void
 file_update (session *sess, struct htxf_conn *htxf)

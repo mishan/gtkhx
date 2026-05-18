@@ -210,6 +210,37 @@ test_gchat_hash = executable('test_gchat_hash',
 test('gchat_hash', test_gchat_hash,
      suite : 'unit')
 
+# uniquify_path — "foo.txt" → "foo (1).txt" collision resolver.
+# Refactored from xfers.c's static uniquify_local_path to take an
+# exists predicate callback (production caller plugs in stat + Apple
+# Double resource fork detection; the test plugs in a GHashTable
+# lookup). Pins the extension-insertion vs. trailing-append shapes
+# (foo.txt vs README vs .bashrc) plus the counter advance behaviour.
+test_uniquify_path = executable('test_uniquify_path',
+  'unit/test_uniquify_path.c',
+  '../src/uniquify_path.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('uniquify_path', test_uniquify_path,
+     suite : 'unit')
+
+# human_readable — fileutils-vintage byte-count formatter
+# (human_size / human_readable). Extracted to src/human_readable.c
+# so this test can link without dragging in files.c's GTK pile.
+# Pins the user-visible suffix boundaries (1023 → "1023", 1024 →
+# "1.0k", 8500 → "8.3k", 4294967295u → "4.0G"). Catches any future
+# tidy-up of the .5-rounding state machine that would change what
+# the user sees in the tasks window / file browser size column.
+test_human_readable = executable('test_human_readable',
+  'unit/test_human_readable.c',
+  '../src/human_readable.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('human_readable', test_human_readable,
+     suite : 'unit')
+
 # htxf_hdr — 16-byte HTXF subchannel handshake header. Pure
 # layout test: re-encode the magic + ref + len + (type/reserved)
 # fields and pin the bytes. Catches the "Oni Tracks folder hang"
@@ -523,6 +554,20 @@ test_chat_event = executable('test_chat_event',
   include_directories : proto_test_inc,
 )
 test('chat_event', test_chat_event,
+     suite : 'proto')
+
+# filelist_walker — hl_filelist_walk extracted from
+# files_remote_provider.c::populate_from_chunks. Callback-based
+# iterator over a packed run of hl_filelist_hdr chunks. Pins per-
+# entry stride + ntohl decode of ftype/fsize/fnlen + the
+# truncated-buffer defense the new helper added.
+test_filelist_walker = executable('test_filelist_walker',
+  'proto/test_filelist_walker.c',
+  '../src/filelist_walker.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('filelist_walker', test_filelist_walker,
      suite : 'proto')
 
 # folder_xfer — wire-format lockdown for the 1.5 folder-transfer

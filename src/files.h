@@ -34,7 +34,11 @@ struct hl_filelist_hdr;
 #define ICON_FILE_MOOV 425
 #define ICON_FILE_ZIP 426
 
-extern char *human_size (char *sizstr, guint32 size);
+/* human_size + LONGEST_HUMAN_READABLE moved to human_readable.h so
+ * tasks.c / files.c / progress labels all pick them up from one
+ * place. Re-included here so historical includers of files.h don't
+ * have to chase a second header. */
+#include "human_readable.h"
 
 /* File-info dialog. Called from gtkhx.c::on_file_info_signal when
  * a HTLS_HDR_FILE_GETINFO reply arrives. The new files browser's
