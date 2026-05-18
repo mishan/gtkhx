@@ -135,6 +135,20 @@ sourceview_dep = dependency('gtksourceview-5',  required : false)
 # are libmagickwand-dev / ImageMagick-devel respectively.
 imagemagick_dep = dependency('MagickWand', required : false)
 
+# Optional: LZ4 and Zstandard — HOPE-Secure-Login transport
+# compression algorithms (Janus/Klein hx-family server extension).
+# Negotiated alongside GZIP during the HOPE identification phase;
+# servers that don't speak either fall through to GZIP or none. The
+# HAVE_LZ4 / HAVE_ZSTD defines below gate the dispatcher entries
+# inside src/compress.c and the algorithm entries in
+# src/connect.c::valid_compressors[].
+#
+# Both available as Debian/Ubuntu liblz4-dev / libzstd-dev and
+# Fedora lz4-devel / libzstd-devel. Both shipped in the GNOME 49
+# Flatpak runtime.
+lz4_dep  = dependency('liblz4',  required : false)
+zstd_dep = dependency('libzstd', required : false)
+
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -154,6 +168,8 @@ deps = [
   poppler_dep,
   sourceview_dep,
   imagemagick_dep,
+  lz4_dep,
+  zstd_dep,
   intl_dep,
   dl_dep,
   math_dep,
@@ -296,6 +312,8 @@ summary(
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
     'ImageMagick'   : imagemagick_dep.found() ? imagemagick_dep.version() : 'no',
+    'liblz4'        : lz4_dep.found()         ? lz4_dep.version()         : 'no',
+    'libzstd'       : zstd_dep.found()        ? zstd_dep.version()        : 'no',
   },
   section : 'Dependencies',
 )

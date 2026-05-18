@@ -1370,12 +1370,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "compress: server %s client %s\n", c_compressalg,
                               s_compressalg);
+            /* Replace the legacy hardcoded COMPRESS_GZIP with name-
+			 * dispatched ids so the LZ4 / ZSTD branches negotiated
+			 * via HOPE-Secure-Login land in their own contexts. */
             if (c_compress_al_len) {
-                htlc->compress_encode_type = COMPRESS_GZIP;
+                htlc->compress_encode_type
+                    = compress_id_from_name (c_compressalg);
                 compress_encode_init (htlc);
             }
             if (s_compress_al_len) {
-                htlc->compress_decode_type = COMPRESS_GZIP;
+                htlc->compress_decode_type
+                    = compress_id_from_name (s_compressalg);
                 compress_decode_init (htlc);
             }
         }

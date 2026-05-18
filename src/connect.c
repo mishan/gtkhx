@@ -81,7 +81,21 @@ valid_cipher (const char *cipheralg)
 #if defined(CONFIG_COMPRESS)
 
 #define DEFAULT_COMPRESS "GZIP"
-char *valid_compressors[] = { "GZIP", 0 };
+/* Order matters here — the connect dialog shows these in the
+ * compression picker, and the first-listed is the default. ZSTD
+ * first if available (best ratio per the HOPE-Secure-Login spec),
+ * LZ4 second (fastest), GZIP last (universally supported, the
+ * legacy default). */
+char *valid_compressors[] = {
+#ifdef HAVE_ZSTD
+    "ZSTD",
+#endif
+#ifdef HAVE_LZ4
+    "LZ4",
+#endif
+    "GZIP",
+    0
+};
 
 int
 valid_compress (const char *compressalg)
