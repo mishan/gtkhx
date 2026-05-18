@@ -642,45 +642,28 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * SELFINFO beat it (the common case). */
     do_post_login_fetches (htlc);
 
-    /* Phase 5: push our local nick + icon to the server right after
-	 * login completes — gated on HL_ACCESS_USE_ANY_NAME. Two reasons:
+    /* Phase 5+: the SELFINFO USE_ANY_NAME auto-push that used to
+	 * live here is gone. It existed to deliver NAME + ICON to the
+	 * server on flows where AGREEMENTAGREE couldn't be relied on:
 	 *
-	 *   1. We just switched to the legacy two-stage flow (no NAME in
-	 *      LOGIN). On servers without an agreement gate (hlserver.com),
-	 *      we'd otherwise never tell the server who we are; the
-	 *      server falls back to its IP-keyed cache of our previous
-	 *      session's nick. USER_CHANGE here overwrites that cache
-	 *      with the bytes we actually want.
-	 *   2. Even on agreement-gated servers (mhxd), AGREEMENTAGREE
-	 *      eventually sends NAME — but that's gated on the user
-	 *      clicking Agree. Pushing here covers the case where the
-	 *      agreement window is closed without clicking (or there is
-	 *      no agreement to display).
+	 *   - 1.9-style servers where SELFINFO arrived first and the
+	 *     concurrence() click path was sending USER_CHANGE instead
+	 *     of AGREEMENTAGREE (to dodge a misdiagnosed Mobius
+	 *     disconnect bug). See gtkhx_mobius_options_field memory.
+	 *   - no-agreement servers where the user has nothing to
+	 *     click Agree on.
 	 *
-	 * Sequencing note: sent AFTER do_post_login_fetches (USER_GETLIST)
-	 * so the server returns its user-list response first, with us at
-	 * our natural chronological position (last to join → last in
-	 * list). If we sent USER_CHANGE first, the server's broadcast of
-	 * the change arrived before the GETLIST response and we ended
-	 * up at the TOP of the local user_list instead of the bottom.
-	 * (Servers process inbound packets in order over TCP and reply
-	 * in order, so reordering the sends reorders the receives.)
+	 * Both cases are now handled by AGREEMENTAGREE itself:
+	 *   - concurrence() always sends AGREEMENTAGREE on Agree click
+	 *     (with NAME + ICON + OPTIONS chunks).
+	 *   - hx_rcv_agreement_file's HX_AGREEMENT_NONE / NOT_FOUND
+	 *     branch auto-sends AGREEMENTAGREE when there's no
+	 *     agreement to display.
 	 *
-	 * Access-bit gate: HL_ACCESS_USE_ANY_NAME (bit 26) is the
-	 * permission to override the server-assigned display name. Guests
-	 * on many servers are intentionally pinned to a default like
-	 * "Read the agreement" via the absence of this bit. Sending a
-	 * USER_CHANGE we have no permission for earns a task-error
-	 * "Uh, no." toast and pollutes the log — so just don't.
-	 *
-	 * htlc->name comes from prefs.nick at connect time (CFG_NICK
-	 * cfgvar maps directly to it). The server's view (in user_list)
-	 * may still differ from htlc->name after this — that's the
-	 * design. Chat output reads user_list (server-truthful);
-	 * prefs / Settings read htlc->name (user-chosen). */
-    if (hl_access_has ((const guint8 *)&htlc->access, HL_ACCESS_USE_ANY_NAME)) {
-        hx_change_name_icon (htlc);
-    }
+	 * Keeping the auto-push here would have it fire alongside the
+	 * Agree click on 1.9 servers, producing two redundant NAME +
+	 * ICON deliveries plus a USER_CHANGE broadcast race that nudged
+	 * us to the top of the local user_list. Cleaner without it. */
 }
 
 void
