@@ -282,6 +282,20 @@ test_path_hldir = executable('test_path_hldir',
 test('path_hldir', test_path_hldir,
      suite : 'unit')
 
+# hl_date — Hotline 8-byte timestamp decoder. Both wire formats
+# (Mac 1904 epoch and Capabilities.md's "modern" format) are
+# auto-detected via the year field. Tests pin Unix-time decoding
+# for each format, plus the all-zero sentinel and out-of-range
+# year refusals.
+test_hl_date = executable('test_hl_date',
+  'unit/test_hl_date.c',
+  '../src/hl_date.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hl_date', test_hl_date,
+     suite : 'unit')
+
 # hl_code — Hotline's XOR-with-0xff "encryption" of LOGIN / PASSWORD
 # chunks. Extracted to its own translation unit (hl_code.c) so the
 # test can link the real implementation without dragging in

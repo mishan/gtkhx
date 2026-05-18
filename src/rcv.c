@@ -42,6 +42,7 @@
 #include "files.h"
 #include "files_remote_provider.h"
 #include "preview.h"
+#include "hl_date.h"
 #include "gtkutil.h"
 #include "msg.h"
 #include "news.h"
@@ -1800,22 +1801,26 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 
 /* Format a Hotline 8-byte timestamp into a locale-formatted string.
  *
- * Wire layout (big-endian):
- *   bytes 0-1: year (decorative; usually the Mac epoch base 1904)
- *   bytes 2-3: milliseconds (typically zero, ignored here)
- *   bytes 4-7: seconds since 1904-01-01 00:00:00 UTC
+ * Wire layout / per-format decoding lives in src/hl_date.c so the
+ * Tier 1 test can drive it without GTK. Two wire formats exist:
  *
- * 0x7c25b080 = 2082844800, the offset between the Mac classic
- * epoch (1904) and the Unix epoch (1970), in seconds.
+ *   Mac 1904 epoch     legacy; vintage Mac servers, mhxd, Mobius
+ *                      default. year=1904, secs since 1904-01-01 UTC.
+ *   Modern             Capabilities.md spec adds this; servers that
+ *                      see DATA_CAPABILITIES from us switch to it
+ *                      to avoid the 2040 u32 overflow. year=actual,
+ *                      secs since Jan 1 of that year in local time.
+ *
+ * hl_date_decode auto-detects via the year field, so neither side
+ * needs to know what mode the server is in.
  *
  * Servers commonly send ts=0 to mean "no timestamp set" rather than
- * literally 1904-01-01. Detect that and return an empty string —
- * the dialog renders empty values as an em-dash so we don't show
- * the user a date in the year 1838. */
+ * literally 1904-01-01. hl_date_decode rejects that and returns
+ * FALSE so we leave `out` empty — the dialog renders empty values
+ * as an em-dash so we don't show the user a date in the year 1838. */
 static void
 hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
 {
-    guint32 ts;
     time_t t;
     struct tm tm;
 
@@ -1824,12 +1829,9 @@ hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
     }
     out[0] = '\0';
 
-    HN32 (&ts, (guint8 *)&bytes[4]);
-    if (ts == 0) {
+    if (!hl_date_decode (bytes, &t)) {
         return;
     }
-
-    t = (time_t)ts - (time_t)0x7c25b080;
     if (!localtime_r (&t, &tm)) {
         return;
     }
