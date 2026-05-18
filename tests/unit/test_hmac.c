@@ -237,16 +237,80 @@ test_unknown_algorithm_returns_zero (void)
     guint8 data[8] = { 0 };
 
     /* HAVAL was deleted (advertised by no server, computed by no
-	 * client). Anything we don't know goes to the "return 0" arm. */
+	 * client). Anything we don't know goes to the "return 0" arm.
+	 * SHA256 / HMAC-SHA256 used to be in this list — they're now
+	 * supported (see test_hmac_sha256_*) for the HOPE-Secure-Login
+	 * preferred-strongest path and the AEAD key-derivation
+	 * requirement in HOPE-ChaCha20-Poly1305. */
     g_assert_cmpuint (
         hmac_xxx (md, key, sizeof (key), data, sizeof (data), "HAVAL"), ==, 0);
     g_assert_cmpuint (
         hmac_xxx (md, key, sizeof (key), data, sizeof (data), "HMAC-HAVAL"), ==,
         0);
-    g_assert_cmpuint (
-        hmac_xxx (md, key, sizeof (key), data, sizeof (data), "SHA256"), ==, 0);
     g_assert_cmpuint (hmac_xxx (md, key, sizeof (key), data, sizeof (data), ""),
                       ==, 0);
+}
+
+/* ---------- SHA256 / HMAC-SHA256 ---------- */
+
+/* RFC 4231 test case 1: hmac-sha256(key="0b" x 20, data="Hi There")
+ *   = b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7 */
+static void
+test_hmac_sha256_rfc4231_vector_1 (void)
+{
+    guint8 md[32] = { 0 };
+    guint8 key[20];
+    memset (key, 0x0b, sizeof key);
+    const char *data = "Hi There";
+    const guint8 expected[32] = {
+        0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
+        0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
+        0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
+        0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
+    };
+
+    g_assert_cmpuint (hmac_xxx (md, key, sizeof key, data, strlen (data),
+                                "HMAC-SHA256"),
+                      ==, 32);
+    g_assert_cmpmem (md, 32, expected, 32);
+}
+
+/* RFC 4231 test case 2: hmac-sha256(key="Jefe", data="what do ya...")
+ *   = 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843 */
+static void
+test_hmac_sha256_rfc4231_vector_2 (void)
+{
+    guint8 md[32] = { 0 };
+    const char *key = "Jefe";
+    const char *data = "what do ya want for nothing?";
+    const guint8 expected[32] = {
+        0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
+        0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
+        0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
+        0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43,
+    };
+
+    g_assert_cmpuint (hmac_xxx (md, key, strlen (key), data, strlen (data),
+                                "HMAC-SHA256"),
+                      ==, 32);
+    g_assert_cmpmem (md, 32, expected, 32);
+}
+
+/* Plain SHA-256 of empty input matches the published constant. */
+static void
+test_sha256_empty_input (void)
+{
+    guint8 md[32] = { 0 };
+    const guint8 expected[32] = {
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+        0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+        0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+        0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+    };
+    /* Plain (non-HMAC) SHA256 over key||text. With both empty the
+	 * digest is just SHA-256 of the empty string. */
+    g_assert_cmpuint (hmac_xxx (md, "", 0, "", 0, "SHA256"), ==, 32);
+    g_assert_cmpmem (md, 32, expected, 32);
 }
 
 int
@@ -272,6 +336,12 @@ main (int argc, char **argv)
                      test_unprefixed_md5_concatenates_key_and_text);
     g_test_add_func ("/hmac/unprefixed_sha1_concatenates_key_and_text",
                      test_unprefixed_sha1_concatenates_key_and_text);
+
+    g_test_add_func ("/hmac/sha256_rfc4231_vector_1",
+                     test_hmac_sha256_rfc4231_vector_1);
+    g_test_add_func ("/hmac/sha256_rfc4231_vector_2",
+                     test_hmac_sha256_rfc4231_vector_2);
+    g_test_add_func ("/hmac/sha256_empty_input", test_sha256_empty_input);
 
     g_test_add_func ("/hmac/unknown_algorithm_returns_zero",
                      test_unknown_algorithm_returns_zero);

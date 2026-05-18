@@ -1,5 +1,6 @@
 gtkhx_sources = files(
   'about.c',
+  'algo_list.c',
   'banner.c',
   'chat.c',
   'cicn.c',
@@ -128,6 +129,19 @@ if sourceview_dep.found()
 endif
 if imagemagick_dep.found()
   conf.set('HAVE_IMAGEMAGICK', 1)
+endif
+
+# HOPE-Secure-Login modern compression algorithms (Janus/Klein
+# server extension to the original GZIP). When the library is
+# present we advertise it in the algorithm-negotiation list and
+# dispatch into the corresponding src/compress.c branch; when
+# absent the negotiation list just doesn't include it and the
+# dispatcher entries compile out.
+if lz4_dep.found()
+  conf.set('HAVE_LZ4', 1)
+endif
+if zstd_dep.found()
+  conf.set('HAVE_ZSTD', 1)
 endif
 
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,

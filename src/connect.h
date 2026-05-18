@@ -17,7 +17,10 @@ extern char *valid_compressors[];
 extern int valid_cipher (const char *cipheralg);
 extern char *valid_ciphers[];
 #endif
-extern guint8 *list_n (guint8 *list, guint16 listlen, unsigned int n);
+/* list_n moved to src/algo_list.{c,h} — re-include so historic
+ * connect.h consumers keep finding the declaration without an
+ * extra include. */
+#include "algo_list.h"
 
 /* Phase 5: build a fresh GMenu of saved bookmark names. Entries
  * target the "app.open_bookmark" GAction with the bookmark name as

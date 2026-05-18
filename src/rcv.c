@@ -1162,6 +1162,46 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             return;
         }
 
+        /* HOPE-Secure-Login session-key validation. Per the spec:
+		 *
+		 *   Component         Size  Description
+		 *   Server IP         4     IPv4 (big-endian, network byte order)
+		 *   Server port       2     Port number (big-endian)
+		 *   Random bytes      58    Cryptographically random
+		 *
+		 * The IP:port are what the server saw via getsockname() on the
+		 * accepted socket — i.e. the local address the client connected
+		 * TO. Clients are expected to validate that this matches the
+		 * server they actually connected to; a mismatch suggests NAT,
+		 * a transparent proxy, or a MITM.
+		 *
+		 * shxd-family clients disconnect on mismatch (overridable
+		 * via -f). We warn but continue — friendlier behind home-
+		 * NAT setups, where the embedded IP routinely won't match
+		 * the externally-resolved address. Future work: surface a
+		 * setting / per-bookmark override. */
+        if (sklen >= 6) {
+            guint8 ki[4];
+            guint16 kp_be;
+            memcpy (ki, &htlc->sessionkey[0], 4);
+            memcpy (&kp_be, &htlc->sessionkey[4], 2);
+            guint16 kport = ntohs (kp_be);
+
+            char key_ip[INET_ADDRSTRLEN];
+            g_snprintf (key_ip, sizeof key_ip, "%u.%u.%u.%u", ki[0], ki[1],
+                        ki[2], ki[3]);
+
+            if (strcmp (key_ip, htlc->ip_addr) != 0
+                || kport != htlc->serverport) {
+                hx_printf_prefix (
+                    htlc, 0, INFOPREFIX,
+                    "WARNING: HOPE sessionkey IP:port (%s:%u) doesn't match "
+                    "connected server (%s:%u) — possible NAT or MITM. "
+                    "Continuing anyway.\n",
+                    key_ip, kport, htlc->ip_addr, htlc->serverport);
+            }
+        }
+
         if (task_inerror (htlc)) {
             g_free (pass);
             hx_htlc_close (htlc, 0);
@@ -1330,12 +1370,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "compress: server %s client %s\n", c_compressalg,
                               s_compressalg);
+            /* Replace the legacy hardcoded COMPRESS_GZIP with name-
+			 * dispatched ids so the LZ4 / ZSTD branches negotiated
+			 * via HOPE-Secure-Login land in their own contexts. */
             if (c_compress_al_len) {
-                htlc->compress_encode_type = COMPRESS_GZIP;
+                htlc->compress_encode_type
+                    = compress_id_from_name (c_compressalg);
                 compress_encode_init (htlc);
             }
             if (s_compress_al_len) {
-                htlc->compress_decode_type = COMPRESS_GZIP;
+                htlc->compress_decode_type
+                    = compress_id_from_name (s_compressalg);
                 compress_decode_init (htlc);
             }
         }

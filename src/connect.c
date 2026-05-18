@@ -81,7 +81,21 @@ valid_cipher (const char *cipheralg)
 #if defined(CONFIG_COMPRESS)
 
 #define DEFAULT_COMPRESS "GZIP"
-char *valid_compressors[] = { "GZIP", 0 };
+/* Order matters here — the connect dialog shows these in the
+ * compression picker, and the first-listed is the default. ZSTD
+ * first if available (best ratio per the HOPE-Secure-Login spec),
+ * LZ4 second (fastest), GZIP last (universally supported, the
+ * legacy default). */
+char *valid_compressors[] = {
+#ifdef HAVE_ZSTD
+    "ZSTD",
+#endif
+#ifdef HAVE_LZ4
+    "LZ4",
+#endif
+    "GZIP",
+    0
+};
 
 int
 valid_compress (const char *compressalg)
@@ -98,24 +112,10 @@ valid_compress (const char *compressalg)
 }
 #endif
 
-guint8 *
-list_n (guint8 *list, guint16 listlen, unsigned int n)
-{
-    unsigned int i;
-    guint16 pos = 1;
-    guint8 *p = list + 2;
-
-    for (i = 0;; i++) {
-        if (pos + *p > listlen) {
-            return 0;
-        }
-        if (i == n) {
-            return p;
-        }
-        pos += *p + 1;
-        p += *p + 1;
-    }
-}
+/* list_n lives in src/algo_list.c now — extracted so the Tier 1
+ * test can drive its malformed-input cases (the NULL-deref crash
+ * on an empty list called out by the HOPE-Secure-Login spec) and
+ * the bounds-checks can be tightened without GTK in the way. */
 
 /* Wired to AdwDialog::closed — fires after the dialog has dismissed
  * (close-X, ESC, or our own adw_dialog_close from server_connect).
