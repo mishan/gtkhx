@@ -158,6 +158,27 @@ struct hl_user_data {
 #define HTLC_DATA_STYLE ((guint16)0x006d)
 #define HTLC_DATA_ACCESS ((guint16)0x006e)
 #define HTLC_DATA_BAN ((guint16)0x0071)
+/* HTLC_DATA_OPTIONS — same code point as HTLC_DATA_BAN above;
+ * mhxd named it BAN and ignored it on parse, but the Hotline 1.5+
+ * spec (and Mobius's HandleTranAgreed) treats this chunk as an
+ * OPTIONS bitmap on AGREEMENTAGREE:
+ *
+ *   bit 0  HTLC_OPT_REFUSE_PM        refuse private messages
+ *   bit 1  HTLC_OPT_REFUSE_CHAT      refuse private chat
+ *   bit 2  HTLC_OPT_AUTO_RESPONSE    auto-response (paired with a
+ *                                    follow-on autoresponse chunk)
+ *
+ * Mobius reads the chunk's body as a big-endian u16 and PANICS if
+ * the chunk is missing (binary.BigEndian.Uint16 on a nil slice).
+ * Its dontPanic recover then exits the connection goroutine, so
+ * the client sees a silent drop. Servers running Mobius (Classic
+ * Macs Hotline, MacSecret, vespernet, …) all behave this way.
+ * Defining the alias under both names so existing BAN call sites
+ * stay correct while new code can spell out the OPTIONS semantic. */
+#define HTLC_DATA_OPTIONS ((guint16)0x0071)
+#define HTLC_OPT_REFUSE_PM ((guint16)0x0001)
+#define HTLC_OPT_REFUSE_CHAT ((guint16)0x0002)
+#define HTLC_OPT_AUTO_RESPONSE ((guint16)0x0004)
 #define HTLC_DATA_CHAT_ID ((guint16)0x0072)
 /* mhxd extension. Sent in HTLC_HDR_LOGIN to advertise the client's
  * Hotline-protocol version. mhxd uses values >= 150 as a "modern

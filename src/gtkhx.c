@@ -1480,31 +1480,29 @@ concurrence (GtkWidget *widget, gpointer data)
     session *sess = data;
     (void)widget;
 
-    /* Phase 5: deliver NAME + ICON to the server when the user
-	 * clicks Agree. Two distinct server flavours need different
-	 * messages:
+    /* Phase 5+: deliver NAME + ICON to the server when the user
+	 * clicks Agree. AGREEMENTAGREE carries both — same payload
+	 * regardless of whether login was already auto-completed (1.9-
+	 * style: SELFINFO before AGREEMENT) or gated on this very click
+	 * (mhxd-style: AGREEMENT before SELFINFO).
 	 *
-	 *   - mhxd-style legacy flow: AGREEMENT arrives BEFORE SELFINFO;
-	 *     login is gated on AGREEMENTAGREE. Send AGREEMENTAGREE —
-	 *     this both completes login and tells the server who we
-	 *     are. (logged_in == 0 case.)
-	 *   - 1.9-style auto-accept: SELFINFO arrives BEFORE AGREEMENT;
-	 *     login is already complete by the time we show the
-	 *     dialog. Some 1.9 servers (e.g. MacSecret.com) disconnect
-	 *     when they receive AGREEMENTAGREE for an already-logged-in
-	 *     session, but the server still doesn't know our NAME.
-	 *     Send USER_CHANGE instead — same NAME + ICON payload,
-	 *     no agreement-already-accepted misfire. (logged_in == 1
-	 *     case.)
+	 *   - mhxd-style: the server calls finish_login from inside
+	 *     rcv_agreementagree, completing login here.
+	 *   - 1.9-style: flags.in_login on the server side is already
+	 *     0 by this point, so finish_login is skipped — but the
+	 *     server still reads NAME + ICON from the chunks (sets us
+	 *     under the right nick) AND emits HTLS_HDR_BANNER from the
+	 *     same handler on banner-configured servers.
 	 *
-	 * In either case the dialog closes with the click; the wire op
-	 * is what differs. */
+	 * Earlier code split this into AGREEMENTAGREE vs. USER_CHANGE
+	 * gated on flags.logged_in, on the theory that 1.9 servers
+	 * disconnect on AGREEMENTAGREE for an already-logged-in session.
+	 * Re-reading mhxd's rcv_agreementagree, that diagnosis was almost
+	 * certainly wrong — there's no disconnect path on already-logged-
+	 * in. The split was also breaking banner delivery on every 1.9
+	 * server, because no AGREEMENTAGREE means no banner trigger. */
     if (sess->htlc.fd) {
-        if (!sess->htlc.flags.logged_in) {
-            hx_send_agreement_agree (&sess->htlc);
-        } else {
-            hx_change_name_icon (&sess->htlc);
-        }
+        hx_send_agreement_agree (&sess->htlc);
     }
 
     gtkhx_widget_destroy (sess->agreementwin);
