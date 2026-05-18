@@ -72,14 +72,16 @@ extern const char *kind_of_ftype (const char *ftype, gboolean *is_static);
 
 extern guint8 dir_char;
 
-extern guint8 *path_to_hldir (const char *path, guint16 *hldirlen, int is_file);
+/* path_to_hldir + dirmask now live in src/path_hldir.c, but the
+ * extern declarations stay here so callers don't have to chase a
+ * second header. */
+#include "path_hldir.h"
 /* dirchar_basename is a thin wrapper around path_basename that uses
  * the dir_char global. The unit-testable underlying function lives
  * in path_util.h. */
 #include "path_util.h"
 extern char *dirchar_basename (char *path);
 extern void dirchar_fix (char *lpath);
-extern void dirmask (char *dst, char *src, char *mask);
 extern int exists_remote (char *path);
 
 extern void hx_file_delete (struct htlc_conn *htlc, char *path);

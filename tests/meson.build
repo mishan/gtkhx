@@ -210,6 +210,47 @@ test_gchat_hash = executable('test_gchat_hash',
 test('gchat_hash', test_gchat_hash,
      suite : 'unit')
 
+# htxf_hdr — 16-byte HTXF subchannel handshake header. Pure
+# layout test: re-encode the magic + ref + len + (type/reserved)
+# fields and pin the bytes. Catches the "Oni Tracks folder hang"
+# regression (always-zero type field) and any future struct
+# rearrangement. Pulls in proto_test_deps because hotline.h
+# transitively wants nettle + zlib via protocol.h.
+test_htxf_hdr = executable('test_htxf_hdr',
+  'unit/test_htxf_hdr.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('htxf_hdr', test_htxf_hdr,
+     suite : 'unit')
+
+# path_hldir — path_to_hldir + dirmask. Pure path encoders extracted
+# from files.c so this test can link them without dragging in GTK /
+# Adwaita / files.c's UI globals. path_to_hldir references an extern
+# `dir_char` (set by the server's DIRECTORYCHAR handshake at run
+# time); the test provides its own definition.
+test_path_hldir = executable('test_path_hldir',
+  'unit/test_path_hldir.c',
+  '../src/path_hldir.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('path_hldir', test_path_hldir,
+     suite : 'unit')
+
+# hl_code — Hotline's XOR-with-0xff "encryption" of LOGIN / PASSWORD
+# chunks. Extracted to its own translation unit (hl_code.c) so the
+# test can link the real implementation without dragging in
+# network.c's GSocket / thread / cipher / compress pile.
+test_hl_code = executable('test_hl_code',
+  'unit/test_hl_code.c',
+  '../src/hl_code.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hl_code', test_hl_code,
+     suite : 'unit')
+
 # hx_user_hash — Phase 1.5 replaces the intrusive hx_user linked
 # list per chat (chat->__user_list / user_list / user_tail with
 # next/prev fields on each hx_user) with chat->users, a
@@ -482,6 +523,26 @@ test_chat_event = executable('test_chat_event',
   include_directories : proto_test_inc,
 )
 test('chat_event', test_chat_event,
+     suite : 'proto')
+
+# folder_xfer — wire-format lockdown for the 1.5 folder-transfer
+# opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2, HTLC_HDR_FILE_PUTFOLDER 0xd5)
+# plus the HTLS task-reply chunks (HTXF_REF / HTXF_SIZE / QUEUE /
+# FILE_NFILES) that rcv_task_folder_get / rcv_task_folder_put walk.
+# Two halves in one binary: hlpack the request, dh_start the reply.
+# Pins the magic opcode + chunk IDs and the u32 dh_getint contract
+# for FILE_NFILES (the chunk we added with the folder-transfer
+# feature on this branch).
+test_folder_xfer = executable('test_folder_xfer',
+  'proto/test_folder_xfer.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('folder_xfer', test_folder_xfer,
      suite : 'proto')
 
 # msg_event — HxMsgEvent is the private-message counterpart to
