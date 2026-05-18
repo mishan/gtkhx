@@ -3,6 +3,9 @@ General:
 - Publish to Flathub
 - Keyboard shortcuts like Ctrl-W and Ctrl-Q ought to work in all windows/dialogs including Settings
 
+Protocol:
+- Support "Download Info" (211) notices from server https://github.com/jhalter/mobius/blob/master/docs/PROTOCOL.md
+
 Files:
 - Bug stomping / fixing
 - Icons -- make sure we are using all the correct ones
@@ -24,7 +27,7 @@ i18n:
 - Translate to other languages
 
 Security:
-- TLS support
+- TLS support (see mobius as an example server that supports it; https://github.com/jhalter/mobius/blob/master/docs/tls.md)
 - Newer HOPE ciphers support https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/HOPE-ChaCha20-Poly1305.md
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 
