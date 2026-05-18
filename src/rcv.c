@@ -1773,11 +1773,26 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                     /* pathbuf is the joined parent + name in `cfl->path`
 					 * space. Pass the structured (dir, name) tuple to
 					 * xfer_new so the filename's bytes (including any
-					 * `/` in the name) survive the wire trip. */
+					 * `/` in the name) survive the wire trip.
+					 *
+					 * Phase E (follow-up): store remotename as UTF-8
+					 * in memory so the display side (gtkhx.c folder-
+					 * xfer label) is consistent and xfer_go can
+					 * re-encode to the negotiated wire format. The
+					 * file_list walker converts file entry names to
+					 * UTF-8 in populate_from_chunks_cb; do the same
+					 * here for the recursive-get path so both routes
+					 * agree on the in-memory contract. */
+                    char *nm_utf8;
+                    gsize nm_utf8_len = 0;
                     HN32 (&fsize, &fh->fsize);
+                    nm_utf8 = gtkhx_text_to_utf8 ((const char *)fh->fname,
+                                                  (gsize)fnlen, &nm_utf8_len);
                     htxf = xfer_new (lpath + 1, cfl->path,
-                                     (const char *)fh->fname, (gsize)fnlen,
+                                     nm_utf8 ? nm_utf8 : (const char *)fh->fname,
+                                     nm_utf8 ? nm_utf8_len : (gsize)fnlen,
                                      XFER_GET, 0, fsize);
+                    g_free (nm_utf8);
                 }
                 htxf->filter_argv = cfl->filter_argv;
                 g_free (lpath);

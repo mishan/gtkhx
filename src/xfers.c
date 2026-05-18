@@ -38,6 +38,7 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hfs.h"
+#include "text_util.h"
 #include "network.h"
 #include "rcv.h"
 #include "chat.h"
@@ -280,18 +281,34 @@ xfer_go (struct htxf_conn *htxf)
 		 * other than empty or just `/`. */
         task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_get), htxf, 0,
                   "xfer_go");
-        if (htxf->remotedir[0]
-            && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0)) {
-            hldir = path_to_hldir (htxf->remotedir, &hldirlen, 0);
-            hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0, resuming ? 3 : 2,
-                     HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                     htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
-                     HTLC_DATA_RFLT, 74, rflt);
-            g_free (hldir);
-        } else {
-            hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0, resuming ? 2 : 1,
-                     HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                     htxf->remotename, HTLC_DATA_RFLT, 74, rflt);
+
+        /* Phase E (follow-up): encode remotename to the negotiated
+		 * wire encoding. remotename is stored UTF-8 in memory
+		 * (file_list walker converts on receive; UI sources also
+		 * pass UTF-8); convert back to Mac Roman in legacy mode.
+		 * is_body = FALSE — filenames are single-line. */
+        {
+            gboolean utf8 = (the_session.htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
+            gsize nm_wire_len = 0;
+            char *nm_wire = gtkhx_text_for_wire (
+                htxf->remotename, htxf->remotename_len, utf8, FALSE,
+                &nm_wire_len);
+
+            if (htxf->remotedir[0]
+                && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0)) {
+                hldir = path_to_hldir (htxf->remotedir, &hldirlen, 0);
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0,
+                         resuming ? 3 : 2, HTLC_DATA_FILE_NAME,
+                         (guint16)nm_wire_len, nm_wire, HTLC_DATA_DIR, hldirlen,
+                         hldir, HTLC_DATA_RFLT, 74, rflt);
+                g_free (hldir);
+            } else {
+                hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0,
+                         resuming ? 2 : 1, HTLC_DATA_FILE_NAME,
+                         (guint16)nm_wire_len, nm_wire, HTLC_DATA_RFLT, 74,
+                         rflt);
+            }
+            g_free (nm_wire);
         }
     } else {
         guint32 size = htonl (htxf->total_size);
@@ -302,31 +319,39 @@ xfer_go (struct htxf_conn *htxf)
                  && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0))
                     ? path_to_hldir (htxf->remotedir, &hldirlen, 0)
                     : NULL;
+
+        /* Phase E (follow-up): encode remotename. */
+        gboolean utf8 = (the_session.htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
+        gsize nm_wire_len = 0;
+        char *nm_wire
+            = gtkhx_text_for_wire (htxf->remotename, htxf->remotename_len,
+                                   utf8, FALSE, &nm_wire_len);
+
         if (exists_remote (htxf->remotepath)) {
             if (hldir) {
                 hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                         htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
-                         HTLC_DATA_FILE_PREVIEW, 2, "\0\1", HTLC_DATA_HTXF_SIZE,
-                         4, &size);
+                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                         HTLC_DATA_DIR, hldirlen, hldir, HTLC_DATA_FILE_PREVIEW,
+                         2, "\0\1", HTLC_DATA_HTXF_SIZE, 4, &size);
             } else {
                 hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                         htxf->remotename, HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                         HTLC_DATA_HTXF_SIZE, 4, &size);
+                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                         HTLC_DATA_FILE_PREVIEW, 2, "\0\1", HTLC_DATA_HTXF_SIZE,
+                         4, &size);
             }
         } else {
             if (hldir) {
                 hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                         htxf->remotename, HTLC_DATA_DIR, hldirlen, hldir,
-                         HTLC_DATA_HTXF_SIZE, 4, &size);
+                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                         HTLC_DATA_DIR, hldirlen, hldir, HTLC_DATA_HTXF_SIZE, 4,
+                         &size);
             } else {
                 hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 2,
-                         HTLC_DATA_FILE_NAME, htxf->remotename_len,
-                         htxf->remotename, HTLC_DATA_HTXF_SIZE, 4, &size);
+                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                         HTLC_DATA_HTXF_SIZE, 4, &size);
             }
         }
+        g_free (nm_wire);
         if (hldir) {
             g_free (hldir);
         }
