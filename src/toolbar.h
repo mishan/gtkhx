@@ -4,7 +4,6 @@
 extern GtkWidget *toolbar_window;
 extern GtkWidget *files_btn;
 extern GtkWidget *connect_btn;
-extern GtkWidget *post_btn;
 extern GtkWidget *disconnect_btn;
 extern GtkWidget *news15_btn;
 extern GtkWidget *news_btn;

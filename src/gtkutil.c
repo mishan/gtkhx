@@ -241,26 +241,25 @@ setbtns (session *sess, int stat)
 	 *               version including 1.5+ — Badmoon (1.9) and
 	 *               other modern servers serve both legacy and
 	 *               threaded news side by side, so don't gate this
-	 *               on server version.
-	 *   post_btn   (legacy Post): enabled when the account has
-	 *               HL_ACCESS_POST_NEWS. Same multi-version
-	 *               availability as news_btn.
+	 *               on server version. The legacy "Post" button
+	 *               that used to live on the toolbar was removed
+	 *               in 2026-05; the News window's own headerbar
+	 *               already exposes a Post action gated on
+	 *               HL_ACCESS_POST_NEWS, so the toolbar copy was
+	 *               redundant.
 	 *   news15_btn (threaded News): enabled on 1.5+ servers when
 	 *               the account has HL_ACCESS_READ_NEWS. mhxd's
 	 *               struct has one read bit gating both legacy and
 	 *               threaded news, so the same access bit applies. */
     if (!stat) {
         gtk_widget_set_sensitive (news_btn, FALSE);
-        gtk_widget_set_sensitive (post_btn, FALSE);
         gtk_widget_set_sensitive (news15_btn, FALSE);
     } else {
         const guint8 *access = (const guint8 *)&sess->htlc.access;
         gboolean can_read = hl_access_has (access, HL_ACCESS_READ_NEWS);
-        gboolean can_post = hl_access_has (access, HL_ACCESS_POST_NEWS);
         gboolean is_15plus = sess->htlc.version >= 150;
 
         gtk_widget_set_sensitive (news_btn, can_read);
-        gtk_widget_set_sensitive (post_btn, can_post);
         gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
     }
 }
