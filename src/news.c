@@ -516,50 +516,112 @@ post_news (GtkWidget *widget, gpointer data)
     post_window = 0;
 }
 
+/* Ctrl+Enter on the post body fires the Post action, ESC fires
+ * Cancel. Lifted from the news_browser compose window for parity
+ * with the threaded-news Reply / New Post UI. */
+static gboolean
+post_window_key_pressed (GtkEventControllerKey *ctl, guint keyval, guint keycode,
+                         GdkModifierType state, gpointer data)
+{
+    session *sess = data;
+    (void)ctl;
+    (void)keycode;
+
+    if (keyval == GDK_KEY_Escape) {
+        gtkhx_widget_destroy (post_window);
+        post_window = 0;
+        return TRUE;
+    }
+    if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter)
+        && (state & GDK_CONTROL_MASK)) {
+        post_news (NULL, sess);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 void
 create_post_window (GtkWidget *widget, gpointer data)
 {
-    GtkWidget *okbut;
-    GtkWidget *cancbut;
-    GtkWidget *vbox, *hbox;
+    GtkWidget *header, *cancel_btn, *post_btn;
+    GtkWidget *post_scroll;
+    GtkWidget *content;
+    GtkEventController *kc;
     session *sess = data;
+    (void)widget;
+
+    /* If a Post window is already open, re-present it instead of
+	 * stacking a second one. */
+    if (post_window) {
+        gtk_window_present (GTK_WINDOW (post_window));
+        return;
+    }
 
     post_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (post_window), _ ("Post News"));
-    gtk_widget_set_size_request (post_window, 300, 280);
+    gtk_window_set_default_size (GTK_WINDOW (post_window), 540, 380);
+    gtk_window_set_transient_for (GTK_WINDOW (post_window),
+                                  GTK_WINDOW (sess->news_window));
+    gtk_window_set_modal (GTK_WINDOW (post_window), TRUE);
     g_signal_connect (post_window, "close-request",
                       G_CALLBACK (close_post_window), 0);
 
+    /* Header bar: Cancel on the left (text-only, plain) and Post
+	 * on the right (suggested-action accent). Hide the default
+	 * window control buttons — Cancel does the close. Mirrors the
+	 * threaded-news compose pattern in news_browser.c. */
+    header = adw_header_bar_new ();
+    adw_header_bar_set_show_start_title_buttons (ADW_HEADER_BAR (header),
+                                                 FALSE);
+    adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), FALSE);
+
+    cancel_btn = gtk_button_new_with_mnemonic (_ ("_Cancel"));
+    g_signal_connect_swapped (cancel_btn, "clicked",
+                              G_CALLBACK (gtkhx_widget_destroy), post_window);
+    g_signal_connect_swapped (cancel_btn, "clicked",
+                              G_CALLBACK (g_nullify_pointer), &post_window);
+
+    post_btn = gtk_button_new_with_mnemonic (_ ("_Post"));
+    gtk_widget_add_css_class (post_btn, "suggested-action");
+    g_signal_connect (post_btn, "clicked", G_CALLBACK (post_news), sess);
+
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), cancel_btn);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), post_btn);
+    gtk_window_set_titlebar (GTK_WINDOW (post_window), header);
+
+    /* Body: a single GtkTextView in a framed scroller, generous
+	 * margins. */
     postprompt = gtk_text_view_new ();
     gtk_text_view_set_editable (GTK_TEXT_VIEW (postprompt), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (postprompt), GTK_WRAP_WORD);
+    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (postprompt), 8);
+    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (postprompt), 8);
+    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (postprompt), 8);
+    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (postprompt), 8);
     gtkhx_apply_text_style (postprompt);
 
-    {
-        GtkWidget *post_scroll = gtk_scrolled_window_new ();
-        gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (post_scroll),
-                                        GTK_POLICY_AUTOMATIC,
-                                        GTK_POLICY_AUTOMATIC);
-        gtkhx_widget_set_child (post_scroll, postprompt);
-        gtk_widget_set_size_request (post_scroll, 0, 260);
+    post_scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (post_scroll),
+                                    GTK_POLICY_AUTOMATIC,
+                                    GTK_POLICY_AUTOMATIC);
+    gtkhx_widget_set_child (post_scroll, postprompt);
+    gtk_widget_set_hexpand (post_scroll, TRUE);
+    gtk_widget_set_vexpand (post_scroll, TRUE);
+    gtk_widget_add_css_class (post_scroll, "card");
 
-        vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-        gtkhx_widget_set_child (post_window, vbox);
-        gtkhx_box_pack (vbox, post_scroll, 0, 0, 0);
-    }
+    content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start (content, 12);
+    gtk_widget_set_margin_end (content, 12);
+    gtk_widget_set_margin_top (content, 12);
+    gtk_widget_set_margin_bottom (content, 12);
+    gtk_box_append (GTK_BOX (content), post_scroll);
+    gtkhx_widget_set_child (post_window, content);
 
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtkhx_box_pack (vbox, hbox, 0, 0, 0);
-
-    okbut = gtk_button_new_with_label (_ ("OK"));
-    g_signal_connect (okbut, "clicked", G_CALLBACK (post_news), sess);
-    cancbut = gtk_button_new_with_label (_ ("Cancel"));
-    g_signal_connect (cancbut, "clicked",
-
-                      G_CALLBACK (close_post_window), 0);
-
-    gtkhx_box_pack (hbox, okbut, 0, 0, 0);
-    gtkhx_box_pack (hbox, cancbut, 0, 0, 0);
+    /* ESC = Cancel, Ctrl+Enter = Post. */
+    kc = gtk_event_controller_key_new ();
+    g_signal_connect (kc, "key-pressed", G_CALLBACK (post_window_key_pressed),
+                      sess);
+    gtk_widget_add_controller (post_window, kc);
 
     gtk_window_present (GTK_WINDOW (post_window));
     gtk_widget_grab_focus (postprompt);

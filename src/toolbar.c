@@ -50,7 +50,7 @@
 #include "plugin.h"
 #include "toolbar.h"
 
-GtkWidget *toolbar_window, *files_btn, *connect_btn, *post_btn;
+GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
 
 #ifdef USE_PLUGIN
@@ -538,10 +538,10 @@ create_toolbar_window (session *sess)
     news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
                                    _ ("News"), G_CALLBACK (open_news), sess);
     gtk_box_append (GTK_BOX (hbox), news_btn);
-    post_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
-                                   _ ("Post"), G_CALLBACK (create_post_window),
-                                   sess);
-    gtk_box_append (GTK_BOX (hbox), post_btn);
+    /* The standalone Post-News toolbar button used to live here.
+	 * Removed in 2026-05 — the News window already exposes a
+	 * "Post News" button in its headerbar, so the toolbar entry
+	 * was redundant clutter. */
     news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.png",
                                      _ ("News (1.5+)"),
                                      G_CALLBACK (open_news_browser), sess);
@@ -628,7 +628,6 @@ create_toolbar_window (session *sess)
 	 * GActions. */
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
     gtk_widget_set_sensitive (files_btn, FALSE);
-    gtk_widget_set_sensitive (post_btn, FALSE);
     gtk_widget_set_sensitive (news15_btn, FALSE);
 
     /* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
@@ -650,7 +649,6 @@ create_toolbar_window (session *sess)
     if (connected) {
         gtk_widget_set_sensitive (disconnect_btn, TRUE);
         gtk_widget_set_sensitive (files_btn, TRUE);
-        gtk_widget_set_sensitive (post_btn, TRUE);
         gtk_widget_set_sensitive (news15_btn, TRUE);
         changetitlespecific (toolbar_window, "GtkHx");
     }
