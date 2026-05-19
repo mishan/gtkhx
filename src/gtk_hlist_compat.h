@@ -183,6 +183,26 @@ void gtk_hlist_set_foreground (GtkHList *hlist, gint row, GdkRGBA *color);
 void gtk_hlist_column_set_overlay_pixtext (GtkHList *hlist, gint column,
                                            gint text_x_offset);
 
+/* Tune the overlay cell installed by gtk_hlist_column_set_overlay_pixtext.
+ *
+ *   pixel_scale > 1.0  scales both the pixbuf rendering and the
+ *                      text font on this column. Useful for making
+ *                      a single table read larger without affecting
+ *                      others. 1.0 means native (no scaling).
+ *
+ *   text_outline       when TRUE, the renderer draws a 1 px
+ *                      contrasting outline (black for light fg,
+ *                      white for dark fg) behind the text before
+ *                      drawing the foreground colour on top. Helps
+ *                      readability of light user names rendered on
+ *                      busy banner-icon backgrounds.
+ *
+ * No-op when the column has not had an overlay cell installed yet —
+ * gtk_hlist_column_set_overlay_pixtext must be called first. */
+void gtk_hlist_column_set_overlay_decoration (GtkHList *hlist, gint column,
+                                              gdouble pixel_scale,
+                                              gboolean text_outline);
+
 gint gtk_hlist_append (GtkHList *hlist, gchar *text[]);
 gint gtk_hlist_insert (GtkHList *hlist, gint row, gchar *text[]);
 void gtk_hlist_remove (GtkHList *hlist, gint row);

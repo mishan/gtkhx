@@ -189,6 +189,20 @@ struct _GtkHListOverlayCell {
 	 * edge (where the name overlays it). Computed when the pixbuf
 	 * property is set. */
     gint left_pad;
+    /* Multiplier applied to both the pixbuf rendering and the
+	 * font size. Default 1.0 (native). Bumped above 1.0 to scale
+	 * up the visual without changing the underlying icon source
+	 * or default font. Used by the Users window for a 1.25x
+	 * larger row. */
+    gdouble pixel_scale;
+    /* When TRUE, draw a 1 px contrasting outline around the text
+	 * before drawing it in the foreground colour. Improves
+	 * readability for light names rendered on top of busy banner-
+	 * style icon backgrounds (where, e.g., a pink user name can
+	 * disappear into the banner art). The outline colour is
+	 * computed from the foreground's luminance — dark fg gets a
+	 * white outline, light fg gets a black one. */
+    gboolean text_outline;
 };
 
 G_DEFINE_TYPE (GtkHListOverlayCell, gtk_hlist_overlay_cell,
@@ -201,6 +215,8 @@ enum {
     OV_PROP_FOREGROUND,
     OV_PROP_FOREGROUND_SET,
     OV_PROP_TEXT_X_OFFSET,
+    OV_PROP_PIXEL_SCALE,
+    OV_PROP_TEXT_OUTLINE,
     OV_N_PROPS
 };
 
@@ -215,6 +231,8 @@ gtk_hlist_overlay_cell_init (GtkHListOverlayCell *self)
     self->foreground_set = FALSE;
     self->text_x_offset = 4;
     self->left_pad = 0;
+    self->pixel_scale = 1.0;
+    self->text_outline = FALSE;
 }
 
 /* Mac wide-banner cicn icons follow a community convention: the
@@ -286,6 +304,12 @@ gtk_hlist_overlay_cell_get_property (GObject *object, guint prop_id,
     case OV_PROP_TEXT_X_OFFSET:
         g_value_set_int (value, self->text_x_offset);
         break;
+    case OV_PROP_PIXEL_SCALE:
+        g_value_set_double (value, self->pixel_scale);
+        break;
+    case OV_PROP_TEXT_OUTLINE:
+        g_value_set_boolean (value, self->text_outline);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -316,6 +340,15 @@ gtk_hlist_overlay_cell_set_property (GObject *object, guint prop_id,
     case OV_PROP_TEXT_X_OFFSET:
         self->text_x_offset = g_value_get_int (value);
         break;
+    case OV_PROP_PIXEL_SCALE:
+        self->pixel_scale = g_value_get_double (value);
+        if (self->pixel_scale < 0.1) {
+            self->pixel_scale = 1.0;
+        }
+        break;
+    case OV_PROP_TEXT_OUTLINE:
+        self->text_outline = g_value_get_boolean (value);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
     }
@@ -329,6 +362,15 @@ gtk_hlist_overlay_cell_make_layout (GtkHListOverlayCell *self,
         = gtk_widget_create_pango_layout (widget, self->text ? self->text : "");
     pango_layout_set_single_paragraph_mode (layout, TRUE);
     pango_layout_set_ellipsize (layout, PANGO_ELLIPSIZE_END);
+    /* Apply per-cell font scale via a PangoAttribute. Cheaper than
+	 * cloning the widget's font description and tweaking its size:
+	 * Pango multiplies the effective size by `scale` at layout time. */
+    if (self->pixel_scale != 1.0) {
+        PangoAttrList *attrs = pango_attr_list_new ();
+        pango_attr_list_insert (attrs, pango_attr_scale_new (self->pixel_scale));
+        pango_layout_set_attributes (layout, attrs);
+        pango_attr_list_unref (attrs);
+    }
     return layout;
 }
 
@@ -352,9 +394,11 @@ gtk_hlist_overlay_cell_get_preferred_width (GtkCellRenderer *cell,
 	 * width — and the snapshot's push_clip would then be a 400+px
 	 * rectangle that doesn't actually clip the wide-banner pixbuf
 	 * back inside the column. */
-    int natural_w = self->text_x_offset + txt_w;
+    double scale = self->pixel_scale > 0 ? self->pixel_scale : 1.0;
+    int x_off = (int)(self->text_x_offset * scale + 0.5);
+    int natural_w = x_off + txt_w;
     if (minimum) {
-        *minimum = self->text_x_offset + 16; /* a reasonable floor */
+        *minimum = x_off + 16; /* a reasonable floor */
     }
     if (natural) {
         *natural = natural_w;
@@ -428,20 +472,26 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
     if (self->pixbuf) {
         int pb_w = gdk_pixbuf_get_width (self->pixbuf);
         int pb_h = gdk_pixbuf_get_height (self->pixbuf);
+        double scale = self->pixel_scale > 0 ? self->pixel_scale : 1.0;
+        int draw_w = (int)(pb_w * scale + 0.5);
+        int draw_h = (int)(pb_h * scale + 0.5);
+        int scaled_lpad = (int)(self->left_pad * scale + 0.5);
         int draw_x, draw_y;
         GdkTexture *tex;
 
-        /* Shift the pixbuf left by its transparent left-padding so
-		 * the first column with visible content lands at the cell's
-		 * left edge. Mac wide-banner cicns are authored with the
-		 * art packed in the right half of the bitmap and the left
-		 * half left transparent for the user name (Mac-classic
-		 * icon-then-name layout). Cropping that padding off the
-		 * left and letting the push_clip above trim anything that
-		 * still spills off the right gives us the banner sitting
-		 * behind the name with the name at its fixed offset. */
-        draw_x = clip_x - self->left_pad;
-        draw_y = cell_area->y + (cell_area->height - pb_h) / 2;
+        /* Shift the pixbuf left by its (scaled) transparent left-
+		 * padding so the first column with visible content lands at
+		 * the cell's left edge. Mac wide-banner cicns are authored
+		 * with the art packed in the right half of the bitmap and
+		 * the left half left transparent for the user name (Mac-
+		 * classic icon-then-name layout). Cropping that padding off
+		 * the left and letting the push_clip above trim anything
+		 * that still spills off the right gives us the banner
+		 * sitting behind the name with the name at its fixed
+		 * offset. The destination rectangle's width/height scale
+		 * the texture up — GSK does the upscaling for us. */
+        draw_x = clip_x - scaled_lpad;
+        draw_y = cell_area->y + (cell_area->height - draw_h) / 2;
 
         G_GNUC_BEGIN_IGNORE_DEPRECATIONS
         tex = gdk_texture_new_for_pixbuf (self->pixbuf);
@@ -450,8 +500,9 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
         gtk_snapshot_save (snapshot);
         gtk_snapshot_translate (
             snapshot, &GRAPHENE_POINT_INIT ((float)draw_x, (float)draw_y));
-        gtk_snapshot_append_texture (snapshot, tex,
-                                     &GRAPHENE_RECT_INIT (0, 0, pb_w, pb_h));
+        gtk_snapshot_append_texture (
+            snapshot, tex,
+            &GRAPHENE_RECT_INIT (0, 0, (float)draw_w, (float)draw_h));
         gtk_snapshot_restore (snapshot);
         g_object_unref (tex);
     }
@@ -462,11 +513,17 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
         int tw, th;
         GdkRGBA rgba = { 0, 0, 0, 1 };
         gboolean have_rgba = FALSE;
+        float tx, ty;
+        /* Scale the icon-side spacing alongside the pixel-scale so
+		 * the offset stays proportional to the (also scaled) icon
+		 * width. Configured value (e.g. 36 px) is "px at 1.0×" —
+		 * at 1.25× the larger icon needs ~45 px of clearance. */
+        double scale = self->pixel_scale > 0 ? self->pixel_scale : 1.0;
+        int x_off = (int)(self->text_x_offset * scale + 0.5);
 
         pango_layout_get_pixel_size (layout, &tw, &th);
         /* Clamp ellipsize width so we don't overflow the column. */
-        pango_layout_set_width (layout,
-                                (clip_w - self->text_x_offset) * PANGO_SCALE);
+        pango_layout_set_width (layout, (clip_w - x_off) * PANGO_SCALE);
 
         if (self->foreground_set && self->foreground) {
             have_rgba = gdk_rgba_parse (&rgba, self->foreground);
@@ -478,12 +535,37 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
             G_GNUC_END_IGNORE_DEPRECATIONS
         }
 
+        tx = (float)(cell_area->x + x_off);
+        ty = (float)(cell_area->y + (cell_area->height - th) / 2);
+
+        /* Optional 4-direction outline. Draws the same layout four
+		 * times at ±1 px offsets in pure black before the fg draw
+		 * — black halos add depth without tinting bright nicks.
+		 * Early attempts at "smart" white-on-dark / black-on-light
+		 * outlines made red names look pink (the white halo bled
+		 * into the red fill perceptually); plain black behind every
+		 * colour reads as a uniform pseudo-stroke and keeps the
+		 * fg's hue intact. The Users window's nicks are all bright
+		 * by convention, so the loss of "white-halo-on-dark-text"
+		 * doesn't cost us anything in practice. */
+        if (self->text_outline) {
+            const GdkRGBA outline = { 0.0, 0.0, 0.0, 1.0 };
+            const float offsets[4][2] = {
+                { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 }
+            };
+            for (int i = 0; i < 4; i++) {
+                gtk_snapshot_save (snapshot);
+                gtk_snapshot_translate (
+                    snapshot,
+                    &GRAPHENE_POINT_INIT (tx + offsets[i][0],
+                                          ty + offsets[i][1]));
+                gtk_snapshot_append_layout (snapshot, layout, &outline);
+                gtk_snapshot_restore (snapshot);
+            }
+        }
+
         gtk_snapshot_save (snapshot);
-        gtk_snapshot_translate (
-            snapshot,
-            &GRAPHENE_POINT_INIT (
-                (float)(cell_area->x + self->text_x_offset),
-                (float)(cell_area->y + (cell_area->height - th) / 2)));
+        gtk_snapshot_translate (snapshot, &GRAPHENE_POINT_INIT (tx, ty));
         gtk_snapshot_append_layout (snapshot, layout, &rgba);
         gtk_snapshot_restore (snapshot);
         g_object_unref (layout);
@@ -518,6 +600,10 @@ gtk_hlist_overlay_cell_class_init (GtkHListOverlayCellClass *klass)
         "foreground-set", NULL, NULL, FALSE, G_PARAM_READWRITE);
     ov_props[OV_PROP_TEXT_X_OFFSET] = g_param_spec_int (
         "text-x-offset", NULL, NULL, 0, G_MAXINT, 4, G_PARAM_READWRITE);
+    ov_props[OV_PROP_PIXEL_SCALE] = g_param_spec_double (
+        "pixel-scale", NULL, NULL, 0.1, 8.0, 1.0, G_PARAM_READWRITE);
+    ov_props[OV_PROP_TEXT_OUTLINE] = g_param_spec_boolean (
+        "text-outline", NULL, NULL, FALSE, G_PARAM_READWRITE);
 
     g_object_class_install_properties (object_class, OV_N_PROPS, ov_props);
 }
@@ -932,6 +1018,37 @@ gtk_hlist_column_set_overlay_pixtext (GtkHList *hlist, gint column,
         col, cell, "pixbuf", HLIST_COL_PIXBUF (priv->n_columns, column), "text",
         HLIST_COL_TEXT (column), "foreground", HLIST_COL_FG, "foreground-set",
         HLIST_COL_FG_SET, NULL);
+}
+
+void
+gtk_hlist_column_set_overlay_decoration (GtkHList *hlist, gint column,
+                                         gdouble pixel_scale,
+                                         gboolean text_outline)
+{
+    GtkHListPrivate *priv;
+    GtkTreeViewColumn *col;
+    GList *cells, *l;
+
+    g_return_if_fail (GTK_IS_HLIST (hlist));
+    priv = get_priv (hlist);
+    if (column < 0 || column >= priv->n_columns) {
+        return;
+    }
+    /* File-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS at the top of
+	 * this TU already covers GtkTreeView / GtkCellLayout calls. */
+    col = gtk_tree_view_get_column (GTK_TREE_VIEW (hlist), column);
+    if (!col) {
+        return;
+    }
+    cells = gtk_cell_layout_get_cells (GTK_CELL_LAYOUT (col));
+    for (l = cells; l; l = l->next) {
+        if (GTK_IS_HLIST_OVERLAY_CELL (l->data)) {
+            g_object_set (l->data, "pixel-scale", pixel_scale, "text-outline",
+                          text_outline, NULL);
+            break;
+        }
+    }
+    g_list_free (cells);
 }
 
 void
