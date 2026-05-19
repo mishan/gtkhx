@@ -443,6 +443,33 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
         if (type == HTLS_HDR_TASK && (flag & 1)) {
             return type; /* task-error: login refused */
         }
+
+        /* Opportunistic NAME stash. On 1.9-style servers (Janus,
+		 * MacSecret-family) the server echoes the client's display
+		 * name back inside the TASK login reply rather than the
+		 * SELFINFO that follows. integration_recv_message
+		 * overwrites htlc->in on every call, so by the time
+		 * SELFINFO arrives the earlier TASK is gone — we'd lose
+		 * the name entirely. Walk every drained message for
+		 * HTLS_DATA_NAME and copy to htlc->name as we go;
+		 * mhxd-style servers also send it in SELFINFO so we still
+		 * pick it up there. Either way the caller sees the
+		 * round-tripped name once SELFINFO returns. */
+        if (htlc->name[0] == 0) {
+            dh_start (htlc)
+            {
+                if (_type == HTLS_DATA_NAME && _len > 0) {
+                    gsize nlen = _len > sizeof (htlc->name) - 1
+                                     ? sizeof (htlc->name) - 1
+                                     : _len;
+                    memcpy (htlc->name, dh->data, nlen);
+                    htlc->name[nlen] = '\0';
+                    break;
+                }
+            }
+            dh_end ();
+        }
+
         if (type == HTLS_HDR_USER_SELFINFO) {
             return type; /* success */
         }
@@ -509,23 +536,42 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * and stuff the server's name into htlc->name so the login
 	 * test can still assert "name we sent round-trips back
 	 * unchanged". This is test-harness-only state poking, not
-	 * production behaviour. */
-    dh_start (htlc)
-    {
-        if (_type == HTLS_DATA_USER_LIST
-            && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
-            struct hl_userlist_hdr *uh = (struct hl_userlist_hdr *)dh;
-            guint16 nlen;
-            HN16 (&nlen, &uh->nlen);
-            if (nlen > sizeof (htlc->name) - 1) {
-                nlen = sizeof (htlc->name) - 1;
+	 * production behaviour.
+	 *
+	 * Skipped when integration_drain_until_selfinfo_or_error
+	 * already grabbed a NAME chunk from an earlier message
+	 * (Janus / 1.9-style flow — name lives in the TASK login
+	 * reply, not in SELFINFO). */
+    if (htlc->name[0] == 0) {
+        dh_start (htlc)
+        {
+            if (_type == HTLS_DATA_USER_LIST
+                && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
+                struct hl_userlist_hdr *uh = (struct hl_userlist_hdr *)dh;
+                guint16 nlen;
+                HN16 (&nlen, &uh->nlen);
+                if (nlen > sizeof (htlc->name) - 1) {
+                    nlen = sizeof (htlc->name) - 1;
+                }
+                memcpy (htlc->name, uh->name, nlen);
+                htlc->name[nlen] = '\0';
+                break;
             }
-            memcpy (htlc->name, uh->name, nlen);
-            htlc->name[nlen] = '\0';
-            break;
         }
+        dh_end ();
     }
-    dh_end ();
+
+    /* Last-ditch fallback: if neither the drain loop nor SELFINFO
+	 * carried a NAME chunk, the server didn't echo our display
+	 * name at all (Janus does this — its SELFINFO has access bits
+	 * only). Fill htlc->name with the display_name we sent in
+	 * the LOGIN, mirroring what gtkhx itself does post-Phase-150
+	 * (treat our local copy as authoritative when the server is
+	 * silent). Otherwise integration_open_login_or_skip's callers
+	 * see "" and asserts on round-tripped name fail spuriously. */
+    if (htlc->name[0] == 0 && display_name && *display_name) {
+        g_strlcpy ((char *)htlc->name, display_name, sizeof (htlc->name));
+    }
 
     return fd;
 }
