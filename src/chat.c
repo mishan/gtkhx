@@ -121,6 +121,12 @@ GdkRGBA colors[] = {
     RGB16 (0xcccc, 0xcccc, 0xcccc), /* 34 XTEXT_FG (light) */
     RGB16 (0, 0, 0),                /* 35 XTEXT_BG (black) */
     RGB16 (0xcccc, 0, 0),           /* 36 XTEXT_MARKER (red) */
+    /* 37 XTEXT_HISTORY_MUTED — chat-history secondary text.
+	 * Static default is the dark-theme value (medium grey, visible
+	 * against black bg); gtkhx_apply_theme_palette recomputes it
+	 * for the active light/dark scheme as soon as AdwStyleManager
+	 * has settled. */
+    RGB16 (0x9a9a, 0x9a9a, 0x9a9a),
 };
 
 /* Refresh palette slots that depend on Light / Dark and push the
@@ -128,14 +134,16 @@ GdkRGBA colors[] = {
  * are theme-agnostic — same red is "red" in both modes, server
  * authors expect those exact values. Only the UI roles change:
  *
- *   Light  XTEXT_FG = #1d1d1d   (near-black on white)
- *          XTEXT_BG = #fafafa   (matches Adwaita's view bg)
- *          MARK_FG  = #ffffff   (selection contrast)
- *          MARK_BG  = #3584e4   (Adwaita accent blue)
- *   Dark   XTEXT_FG = #cccccc   (current light-grey on black)
- *          XTEXT_BG = #000000
- *          MARK_FG  = #eeeeee
- *          MARK_BG  = #204a87   (Tango blue, the original here)
+ *   Light  XTEXT_FG            = #1d1d1d  (near-black on white)
+ *          XTEXT_BG            = #fafafa  (matches Adwaita's view bg)
+ *          MARK_FG             = #ffffff  (selection contrast)
+ *          MARK_BG             = #3584e4  (Adwaita accent blue)
+ *          XTEXT_HISTORY_MUTED = #5e5e5e  (~5.7:1 vs #fafafa)
+ *   Dark   XTEXT_FG            = #cccccc  (current light-grey on black)
+ *          XTEXT_BG            = #000000
+ *          MARK_FG             = #eeeeee
+ *          MARK_BG             = #204a87  (Tango blue, the original)
+ *          XTEXT_HISTORY_MUTED = #9a9a9a  (~7:1 vs #000000)
  *
  * Called once at startup from gtkhx_activate after the
  * AdwStyleManager has settled on Light or Dark, and again any
@@ -150,6 +158,12 @@ gtkhx_apply_theme_palette (gboolean dark)
         colors[34]
             = (GdkRGBA){ 0xcc / 255.0, 0xcc / 255.0, 0xcc / 255.0, 1.0 };
         colors[35] = (GdkRGBA){ 0.0, 0.0, 0.0, 1.0 };
+        /* XTEXT_HISTORY_MUTED — chat-history secondary text. On a
+		 * black bg #9a9a9a reads as "noticeably dimmer than the
+		 * live #cccccc fg" (about 30% less luminance) without
+		 * vanishing into the background. */
+        colors[XTEXT_HISTORY_MUTED]
+            = (GdkRGBA){ 0x9a / 255.0, 0x9a / 255.0, 0x9a / 255.0, 1.0 };
     } else {
         colors[32] = (GdkRGBA){ 1.0, 1.0, 1.0, 1.0 };
         colors[33]
@@ -158,6 +172,14 @@ gtkhx_apply_theme_palette (gboolean dark)
             = (GdkRGBA){ 0x1d / 255.0, 0x1d / 255.0, 0x1d / 255.0, 1.0 };
         colors[35]
             = (GdkRGBA){ 0xfa / 255.0, 0xfa / 255.0, 0xfa / 255.0, 1.0 };
+        /* XTEXT_HISTORY_MUTED — chat-history secondary text. On
+		 * #fafafa #5e5e5e gives ~5.7:1 contrast — well above WCAG
+		 * AA's 4.5:1 floor for body text, while still reading as
+		 * "secondary" relative to the near-black #1d1d1d live fg
+		 * (~14:1). The fixed mIRC slot 14 used previously (#777777)
+		 * was only ~4:1 against white — borderline on light bg. */
+        colors[XTEXT_HISTORY_MUTED]
+            = (GdkRGBA){ 0x5e / 255.0, 0x5e / 255.0, 0x5e / 255.0, 1.0 };
     }
 
     /* Push the new palette into every live xtext widget. Chat /
@@ -802,7 +824,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * returns buf->text_last, which is the entry we just appended. */
     if (!prepend_mode) {
         gchar *divider
-            = g_strdup_printf ("\003" "14"
+            = g_strdup_printf ("\003" "37"
                                "─── chat history (%u %s) ───",
                                entries->len,
                                entries->len == 1 ? "message" : "messages");
@@ -847,7 +869,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * insert_indent_before falls back to head-insert. */
     if (has_more) {
         gchar *row = g_strdup_printf (
-            "\003" "14"
+            "\003" "37"
             "─── " HX_LOAD_OLDER_SENTINEL " ───");
         gchat->history_load_older_ent = gtk_xtext_insert_indent_before (xbuf,
             gchat->history_anchor_ent,
@@ -868,7 +890,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
         if (e->flags & HX_HISTORY_FLAG_DELETED) {
             /* Tombstone — placeholder text, no nick column. */
-            const char *line = "\003" "14" "[message removed]";
+            const char *line = "\003" "37" "[message removed]";
             HX_RENDER ("", 0, line, (int) strlen (line), stamp);
             continue;
         }
@@ -877,7 +899,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             /* Server / admin broadcast. Render as info-line with
 			 * no nick column. */
             gchar *line = g_strdup_printf (
-                "\003" "14"
+                "\003" "37"
                 "*** %s",
                 e->message ? e->message : "");
             HX_RENDER ("", 0, line, (int) strlen (line), stamp);
@@ -888,7 +910,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         if (e->flags & HX_HISTORY_FLAG_ACTION) {
             /* /me emote. Render as "* nick body" — mIRC convention. */
             gchar *line = g_strdup_printf (
-                "\003" "14"
+                "\003" "37"
                 "* %s %s",
                 e->nick    ? e->nick    : "",
                 e->message ? e->message : "");
@@ -898,14 +920,16 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         }
 
         /* Standard message: two-column layout matching the live
-		 * chat path, but the whole thing rendered in grey (colour
-		 * 14) instead of the live palette. */
+		 * chat path, but the whole thing rendered in the muted
+		 * theme-aware palette slot (XTEXT_HISTORY_MUTED = 37,
+		 * see chat.c::gtkhx_apply_theme_palette) instead of the
+		 * live palette. */
         gchar *nick_wrapped = g_strdup_printf (
-            "\003" "14"
+            "\003" "37"
             "<%s>",
             e->nick ? e->nick : "");
         gchar *body_coloured = g_strdup_printf (
-            "\003" "14"
+            "\003" "37"
             "%s",
             e->message ? e->message : "");
         HX_RENDER (nick_wrapped, (int) strlen (nick_wrapped),
@@ -920,7 +944,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * divider from the initial batch is still in place further
 	 * down. */
     if (!prepend_mode) {
-        const char *divider = "\003" "14" "─── live messages ───";
+        const char *divider = "\003" "37" "─── live messages ───";
         gtk_xtext_append_indent (xbuf,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
@@ -1080,7 +1104,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     if (gchat->history_load_older_ent) {
         xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
         const char *loading_row
-            = "\003" "14"
+            = "\003" "37"
               "─── \xe2\x86\x91"
               "\xc2\xa0" "Loading"
               "\xc2\xa0" "older"
