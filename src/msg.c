@@ -415,6 +415,12 @@ create_msg (guint16 _uid, char *name)
     gtkhx_apply_text_style (msg->inputbuf);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (msg->inputbuf), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (msg->inputbuf), GTK_WRAP_WORD);
+    /* Inner margins so the text isn't clipped by the input frame's
+	 * rounded corners — same fix as the chat inputs. */
+    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (msg->inputbuf), 6);
+    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (msg->inputbuf), 6);
+    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (msg->inputbuf), 4);
+    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (msg->inputbuf), 4);
 
     g_object_set_data (G_OBJECT (msg->inputbuf), "msg", msg);
     g_object_set_data (G_OBJECT (msg->inputbuf), "sess", &the_session);
