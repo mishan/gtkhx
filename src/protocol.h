@@ -249,6 +249,27 @@ struct htlc_conn {
 	 * Populated only when the server echoes CAP_CHAT_HISTORY. */
     guint32 history_max_msgs;
     guint32 history_max_days;
+    /* Chat-history extension Phase 4 (in-session reconnect
+	 * catch-up): newest message_id we've ever rendered for this
+	 * htlc — across all chats and all history batches received
+	 * during this gtkhx run. The post-login fetch in
+	 * hx_post_login_fetches uses this as an AFTER= cursor on
+	 * reconnect, so the server only sends entries that arrived
+	 * (or were stored) after our last view of the chat. Zero on
+	 * first-ever connect to a server, after which the first
+	 * batch's newest entry seeds it. Reset to zero when the user
+	 * connects to a DIFFERENT server (different host:port).
+	 *
+	 * KNOWN LIMITATION: this cursor only advances on entries
+	 * we receive through the chat-history extension (which carry
+	 * message_ids). Live TRAN_CHAT_MSG broadcasts don't carry a
+	 * message_id, so the cursor doesn't advance on them. Net
+	 * effect: reconnecting via AFTER=cursor will replay live
+	 * messages received during the previous session (between
+	 * the initial history fetch and disconnect). Acceptable
+	 * per the locked UX decisions — duplicates are preferable
+	 * to silent gaps. */
+    guint64 chat_history_last_msgid;
 };
 
 /* Phase 5: LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize
