@@ -2154,7 +2154,8 @@ gtk_xtext_motion_cb (GtkEventControllerMotion *controller,
 	if (xtext->separator && xtext->buffer->indent)
 	{
 		line_x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
-		if (line_x == x || line_x == x + 1 || line_x == x - 1)
+		/* Same ±4 px hit zone as gtk_xtext_drag_begin_cb. */
+		if (x >= line_x - 4 && x <= line_x + 4)
 		{
 			if (!xtext->cursor_resize)
 			{
@@ -2370,11 +2371,14 @@ gtk_xtext_drag_begin_cb (GtkGestureDrag *drag, gdouble x, gdouble y,
 
 	(void) drag;
 
-	/* check if the press landed on the separator bar */
+	/* check if the press landed on the separator bar — give a
+	 * generous ±4 px tolerance. The original HexChat code only
+	 * matched ±1 px which is hard to hit precisely on modern
+	 * fractional-scale displays. */
 	if (xtext->separator && xtext->buffer->indent)
 	{
 		line_x = xtext->buffer->indent - ((xtext->space_width + 1) / 2);
-		if (line_x == ix || line_x == ix + 1 || line_x == ix - 1)
+		if (ix >= line_x - 4 && ix <= line_x + 4)
 		{
 			xtext->moving_separator = TRUE;
 			gtk_xtext_draw_sep (xtext, -1);
@@ -2421,6 +2425,16 @@ gtk_xtext_drag_update_cb (GtkGestureDrag *drag, gdouble offset_x,
 				if (!xtext->io_tag)
 					xtext->io_tag = g_timeout_add (REFRESH_TIMEOUT,
 						(GSourceFunc) gtk_xtext_adjustment_timeout, xtext);
+				/* Phase 4.9 follow-up: render_page (called from the
+				 * adjustment timeout) is a no-op outside the snapshot
+				 * pass because xtext->cr is NULL. Without queueing a
+				 * draw here the per-entry ent->indent updates that
+				 * recalc_widths just made never get repainted — the
+				 * separator ghost moves with the pointer but the
+				 * nick column stays put. queue_draw schedules a
+				 * snapshot which re-enters render_page WITH cr set
+				 * and the text column finally reflows. */
+				gtk_widget_queue_draw (widget);
 			}
 		}
 		return;
@@ -2474,6 +2488,10 @@ gtk_xtext_drag_end_cb (GtkGestureDrag *drag, gdouble offset_x,
 			gtk_xtext_recalc_widths (xtext->buffer, FALSE);
 			gtk_xtext_adjustment_set (xtext->buffer, TRUE);
 			gtk_xtext_render_page (xtext);
+			/* Phase 4.9 follow-up: see drag-update for why this is
+			 * needed — render_page outside a snapshot pass is a
+			 * no-op, so we must queue_draw to schedule one. */
+			gtk_widget_queue_draw (widget);
 		} else
 			gtk_xtext_draw_sep (xtext, -1);
 		return;
