@@ -51,6 +51,15 @@
 #define CFG_XBUF_MAX "XBUF_MAX"
 #define CFG_FONT "FONT"
 
+/* Phase 5+: fogWraith chat-history extension — number of entries to
+ * pull on the initial post-login fetch. 0 disables the initial pull
+ * (server still advertises CAP_CHAT_HISTORY; user has to click Load
+ * older to see anything). Subsequent Load-older clicks each request
+ * the same count. Default 50 — matches the recommended default in
+ * the spec, and is what Phase 1/2/3 shipped with the value
+ * hard-coded. */
+#define CFG_CHAT_HISTORY_INITIAL "CHATHISTORYINITIAL"
+
 /* Same-window navigation for the files browser. The matching
  * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
  * two-window news UI was removed; an old gtkhxrc that still has

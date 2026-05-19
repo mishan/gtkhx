@@ -85,6 +85,18 @@ extern void integration_close (int fd);
  */
 extern int integration_open_or_skip (void);
 
+/*
+ * Connect with a short timeout to an explicit host:port pair —
+ * used by server_matrix.c so the matrix walker doesn't have to
+ * duplicate the addrinfo + non-blocking-connect dance. Returns
+ * the socket fd on success, -1 on resolve failure, connection
+ * refused, or timeout. The legacy integration_connect() above
+ * is a thin wrapper that reads GTKHX_TEST_HOST / GTKHX_TEST_PORT
+ * and routes through this. Phase A multi-server work.
+ */
+extern int hx_integration_connect_to (const char *host, int port,
+                                      int timeout_ms);
+
 /* ---- Higher-level helpers built on send / recv ----------------- */
 
 struct htlc_conn;

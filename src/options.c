@@ -126,7 +126,12 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* notify_omit_focused */
 
     0, /* out_bps */
-    0  /* in_bps */
+    0, /* in_bps */
+
+    /* Phase 5+: chat-history initial fetch count. 50 matches the
+	 * fogWraith spec's recommended default and what Phase 1/2/3
+	 * shipped with hard-coded. */
+    50 /* chat_history_initial */
 };
 
 static void parse_tracker (session *);
@@ -658,6 +663,12 @@ struct cfgvar {
       NULL,
       NULL },
     { CFG_AUTOREPLY_ON, { &gtkhx_prefs.auto_reply }, BOOLEAN, 0, NULL, NULL },
+    { CFG_CHAT_HISTORY_INITIAL,
+      { &gtkhx_prefs.chat_history_initial },
+      INT,
+      0,
+      NULL,
+      NULL },
     { CFG_CHAT_XPOS, { &gtkhx_prefs.geo.chat.xpos }, INT, 0, NULL, NULL },
     { CFG_CHAT_XSIZE, { &gtkhx_prefs.geo.chat.xsize }, INT, 0, NULL, NULL },
     { CFG_CHAT_YPOS, { &gtkhx_prefs.geo.chat.ypos }, INT, 0, NULL, NULL },
@@ -2119,6 +2130,32 @@ settings_page_chat (AdwPreferencesPage *page)
         adw_preferences_group_add (
             hl_grp, pref_entry_row (CFG_HIGHLIGHT_WORDS, _ ("Words")));
         adw_preferences_page_add (page, hl_grp);
+    }
+
+    /* Phase 5+: fogWraith chat-history extension (Janus and any
+	 * future server that implements Capabilities-Chat-History.md).
+	 * Single spin row for the initial pull count — also used as
+	 * the per-click Load-older count, with a 50-floor in the
+	 * click handler so the affordance still works when initial
+	 * is set to 0. */
+    {
+        AdwPreferencesGroup *hist_grp
+            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (hist_grp, _ ("Chat history"));
+        adw_preferences_group_set_description (
+            hist_grp, _ ("Servers that implement the chat-history "
+                         "extension (e.g. Janus) replay recent chat "
+                         "to you on login. 0 disables the initial "
+                         "pull; the \"Load older messages\" link in "
+                         "chat still works to fetch on demand."));
+        adw_preferences_group_add (
+            hist_grp,
+            pref_spin_row (CFG_CHAT_HISTORY_INITIAL,
+                           _ ("Initial messages to fetch"),
+                           _ ("Also used as the page size for "
+                              "\"Load older messages\""),
+                           0, 0xffff, 1));
+        adw_preferences_page_add (page, hist_grp);
     }
 
     font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
