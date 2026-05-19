@@ -706,6 +706,17 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         return;
     }
 
+    /* Phase 3.4: if history_loading was TRUE on entry, this batch
+	 * is the response to a "Load older" click — render with the
+	 * prepend path so the older entries land ABOVE the existing
+	 * buffer content. Otherwise this is the initial post-login
+	 * batch and we use the original append path.
+	 *
+	 * Capture the latch first because gchat->history_loading gets
+	 * cleared just below as part of the cursor-tracking bookkeeping
+	 * (Phase 3.1). */
+    gboolean prepend_mode = gchat->history_loading;
+
     /* Phase 3.1: maintain the "oldest msgid we have rendered" anchor
 	 * and the has_more flag on the gtkhx_chat. A "Load older" click
 	 * uses oldest as BEFORE= cursor; rendering the Load-older row is
@@ -730,48 +741,60 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
     xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
 
+    /* Phase 3.4: in prepend_mode, the topmost entry in the buffer
+	 * is the existing Load-older sentinel (we put it there on the
+	 * previous batch). Evict it now — we'll re-add a fresh one on
+	 * top after prepending the new entries, gated on the
+	 * post-update has_more. */
+    if (prepend_mode && gchat->history_load_older_at_top) {
+        gtk_xtext_remove_first (xbuf);
+        gchat->history_load_older_at_top = FALSE;
+    }
+
     /* Empty batch — server confirmed CAP_CHAT_HISTORY but has no
-	 * messages stored (yet). Stay silent: a "── chat history (0
-	 * messages) ──" divider would be more noise than signal. */
+	 * messages stored (yet). Stay silent on the initial pull, and
+	 * on a Load-older request that returned nothing the eviction
+	 * above already pulled the (now-stale) Load-older row off the
+	 * top. has_more is FALSE here by definition (server has
+	 * nothing to point at), so we don't re-add one. */
     if (entries->len == 0) {
         return;
     }
 
-    /* Phase 3.2: "Load older" clickable row, rendered above the
-	 * opening divider when the server says there's more history to
-	 * fetch. Uses NBSP (U+00A0) as the internal joiner so xtext's
-	 * word tokenizer (delimited by ASCII space / newline / '<' /
-	 * '>' / NUL — see is_del in xtext.c) treats the whole sentinel
-	 * as one clickable token. Click anywhere on the visible label
-	 * and the word_click handler receives the full sentinel string
-	 * regardless of where in it the cursor landed.
+    /* ---- Render each entry through a single closure --------------- *
 	 *
-	 * The literal HX_LOAD_OLDER_SENTINEL is matched verbatim in the
-	 * chat-history click handler (chat_history_word_click) — the
-	 * U+2191 prefix is also there as a defensive belt-and-braces in
-	 * case the user clicks a partial word, but normally the NBSP
-	 * joining keeps the whole sentinel intact. */
-    if (has_more) {
-        gchar *row = g_strdup_printf (
-            "\003" "14"
-            "─── " HX_LOAD_OLDER_SENTINEL " ───");
-        gtk_xtext_append_indent (xbuf,
-                                 (unsigned char *) "", 0,
-                                 (unsigned char *) row,
-                                 (int) strlen (row), 0);
-        g_free (row);
-    }
+	 * Build the (left, right) text for an entry once and dispatch
+	 * to either gtk_xtext_append_indent (initial-batch path) or
+	 * gtk_xtext_prepend_indent (Load-older path). The textual
+	 * shape is identical in both modes — only the buffer-insertion
+	 * direction differs. */
+#define HX_RENDER(LEFT, LEFT_LEN, RIGHT, RIGHT_LEN, STAMP)                    \
+    do {                                                                      \
+        if (prepend_mode) {                                                   \
+            gtk_xtext_prepend_indent (xbuf,                                   \
+                                      (unsigned char *) (LEFT), (LEFT_LEN),   \
+                                      (unsigned char *) (RIGHT), (RIGHT_LEN), \
+                                      (STAMP));                               \
+        } else {                                                              \
+            gtk_xtext_append_indent (xbuf,                                    \
+                                     (unsigned char *) (LEFT), (LEFT_LEN),    \
+                                     (unsigned char *) (RIGHT), (RIGHT_LEN),  \
+                                     (STAMP));                                \
+        }                                                                     \
+    } while (0)
 
-    /* Opening divider, colour 14 (grey). Rendered via
-	 * gtk_xtext_append_indent with EMPTY left text — that sets
-	 * ent->left_len = 0 (not -1), which is what
-	 * gtk_xtext_recalc_widths gates on. Result: when the user
-	 * drags the separator, the divider reflows alongside the
-	 * message entries. (Plain gtk_xtext_append would set
-	 * left_len = -1 and the divider would stay frozen at its
-	 * original column while messages move — visually misaligned
-	 * after any drag.) */
-    {
+    /* Opening "── chat history (N) ──" divider, colour 14 (grey).
+	 * Initial batch only — Load-older batches don't add a divider
+	 * because the existing divider further down already marks the
+	 * top of the original block. The new entries land between the
+	 * (about-to-be-prepended) Load-older sentinel and the original
+	 * opening divider, which reads naturally as "this batch sits
+	 * above the previously-rendered block".
+	 *
+	 * Rendered via append_indent with EMPTY left text — left_len=0
+	 * (not -1) is what gtk_xtext_recalc_widths gates on for
+	 * separator-drag reflow. */
+    if (!prepend_mode) {
         gchar *divider
             = g_strdup_printf ("\003" "14"
                                "─── chat history (%u %s) ───",
@@ -784,7 +807,12 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         g_free (divider);
     }
 
-    for (guint i = 0; i < entries->len; i++) {
+    /* Iterate entries — forward for append (chronological order),
+	 * reverse for prepend (so the oldest entry of the batch ends
+	 * up at the top of the prepended block, with the newest
+	 * directly above the existing chat-history block). */
+    for (guint k = 0; k < entries->len; k++) {
+        guint i = prepend_mode ? (entries->len - 1 - k) : k;
         HxHistoryEntry *e = g_ptr_array_index (entries, i);
         if (!e) {
             continue;
@@ -793,17 +821,9 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         time_t stamp = (time_t) e->timestamp;
 
         if (e->flags & HX_HISTORY_FLAG_DELETED) {
-            /* Tombstone — placeholder text, no nick column. The
-			 * spec preserves message_id + timestamp for cursor
-			 * stability but nick/message MAY be empty.
-			 * gtk_xtext_append_indent with empty left so the
-			 * entry reflows on separator drag (see opening
-			 * divider comment above). */
+            /* Tombstone — placeholder text, no nick column. */
             const char *line = "\003" "14" "[message removed]";
-            gtk_xtext_append_indent (xbuf,
-                                     (unsigned char *) "", 0,
-                                     (unsigned char *) line,
-                                     (int) strlen (line), stamp);
+            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
             continue;
         }
 
@@ -814,10 +834,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                 "\003" "14"
                 "*** %s",
                 e->message ? e->message : "");
-            gtk_xtext_append_indent (xbuf,
-                                     (unsigned char *) "", 0,
-                                     (unsigned char *) line,
-                                     (int) strlen (line), stamp);
+            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
             g_free (line);
             continue;
         }
@@ -829,10 +846,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                 "* %s %s",
                 e->nick    ? e->nick    : "",
                 e->message ? e->message : "");
-            gtk_xtext_append_indent (xbuf,
-                                     (unsigned char *) "", 0,
-                                     (unsigned char *) line,
-                                     (int) strlen (line), stamp);
+            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
             g_free (line);
             continue;
         }
@@ -848,26 +862,48 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             "\003" "14"
             "%s",
             e->message ? e->message : "");
-        gtk_xtext_append_indent (xbuf,
-                                 (unsigned char *) nick_wrapped,
-                                 (int) strlen (nick_wrapped),
-                                 (unsigned char *) body_coloured,
-                                 (int) strlen (body_coloured),
-                                 stamp);
+        HX_RENDER (nick_wrapped, (int) strlen (nick_wrapped),
+                   body_coloured, (int) strlen (body_coloured),
+                   stamp);
         g_free (nick_wrapped);
         g_free (body_coloured);
     }
 
-    /* Closing divider — live messages follow below. Same
-	 * append-indent-with-empty-left trick as the opening divider
-	 * so it reflows on separator drag. */
-    {
+    /* Closing "── live messages ──" divider follows the initial
+	 * batch only. Load-older batches don't add one — the closing
+	 * divider from the initial batch is still in place further
+	 * down. */
+    if (!prepend_mode) {
         const char *divider = "\003" "14" "─── live messages ───";
         gtk_xtext_append_indent (xbuf,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
                                  (int) strlen (divider), 0);
     }
+
+    /* Phase 3.2/3.4: refresh the "Load older messages" sentinel
+	 * row at the very top of the buffer if the server says there
+	 * are still older entries available. Prepend it last so it
+	 * lands ABOVE the entries we just inserted. Initial-batch path
+	 * appends it after the closing divider above — wait, no: it
+	 * needs to be at the TOP. Use prepend_indent in both modes;
+	 * the result is the same (head of list).
+	 *
+	 * has_more was already mirrored into gchat->history_has_more
+	 * up top. */
+    if (has_more) {
+        gchar *row = g_strdup_printf (
+            "\003" "14"
+            "─── " HX_LOAD_OLDER_SENTINEL " ───");
+        gtk_xtext_prepend_indent (xbuf,
+                                  (unsigned char *) "", 0,
+                                  (unsigned char *) row,
+                                  (int) strlen (row), 0);
+        g_free (row);
+        gchat->history_load_older_at_top = TRUE;
+    }
+
+#undef HX_RENDER
 }
 
 /* ----- Phase 3.3 — Load Older click handler --------------------- *
@@ -1753,9 +1789,10 @@ create_chat (session *sess)
     gchat->chat = 0;
     gchat->window = 0;
     gchat->input = 0;
-    gchat->history_oldest_msgid = 0;
-    gchat->history_has_more     = FALSE;
-    gchat->history_loading      = FALSE;
+    gchat->history_oldest_msgid       = 0;
+    gchat->history_has_more           = FALSE;
+    gchat->history_loading            = FALSE;
+    gchat->history_load_older_at_top  = FALSE;
 
     /* Public chat (cid=0) UI gets seeded into the table on the
 	 * single create_chat call at session init. */
@@ -1997,9 +2034,10 @@ pchat_new (session *sess, struct chat *chat)
     gchat->subject = subject;
     gchat->userlist = userlist;
     gchat->chat_history = history_new ();
-    gchat->history_oldest_msgid = 0;
-    gchat->history_has_more     = FALSE;
-    gchat->history_loading      = FALSE;
+    gchat->history_oldest_msgid       = 0;
+    gchat->history_has_more           = FALSE;
+    gchat->history_loading            = FALSE;
+    gchat->history_load_older_at_top  = FALSE;
     g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (gchat->cid), gchat);
 
     return gchat;

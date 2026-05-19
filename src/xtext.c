@@ -5101,6 +5101,118 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	}
 }
 
+/* Public wrapper: remove the topmost (first / oldest) entry from
+ * the buffer. Internal callers use gtk_xtext_remove_top directly;
+ * this thin wrapper exposes the same operation to chat.c for the
+ * chat-history Load-Older render path, which needs to evict the
+ * existing "── load older ──" sentinel row before prepending a
+ * fresh batch + a refreshed sentinel.
+ *
+ * Intentionally a one-liner — duplicating the bookkeeping would
+ * just be a maintenance hazard. */
+void
+gtk_xtext_remove_first (xtext_buffer *buf)
+{
+	if (buf) {
+		gtk_xtext_remove_top (buf);
+	}
+}
+
+/* prepend a textentry to the head of our linked list. Mirror of
+ * gtk_xtext_append_entry; called via gtk_xtext_prepend_indent
+ * when rendering a "Load older" chat-history batch on top of an
+ * already-populated buffer. The scroll-anchoring logic mirrors
+ * gtk_xtext_remove_top exactly: incrementing pagetop_line /
+ * last_pixel_pos / old_value / adj_value by the new entry's
+ * subline count is what keeps the user's viewport pinned to the
+ * SAME content that was on-screen before the prepend.
+ *
+ * Deliberately omitted vs. append_entry:
+ *   - marker_pos update (inserting OLD content shouldn't bump
+ *     the "last seen" marker)
+ *   - max_lines auto-trim (would re-evict the entry we just
+ *     prepended)
+ *   - scrollbar_down "snap-to-bottom" path (this entry is at
+ *     the top, not the bottom — don't snap)
+ *   - search rescan (chat-history older fetches aren't part of
+ *     the search session)
+ */
+static void
+gtk_xtext_prepend_entry (xtext_buffer *buf, textentry *ent, time_t stamp)
+{
+	int i;
+	int sublines;
+
+	/* we don't like tabs */
+	i = 0;
+	while (i < ent->str_len)
+	{
+		if (ent->str[i] == '\t')
+			ent->str[i] = ' ';
+		i++;
+	}
+
+	ent->stamp = stamp;
+	if (stamp == 0)
+		ent->stamp = time (0);
+	ent->slp = NULL;
+	ent->str_width = gtk_xtext_text_width_ent (buf->xtext, ent);
+	ent->mark_start = -1;
+	ent->mark_end = -1;
+	ent->marks = NULL;
+
+	if (ent->indent < MARGIN)
+		ent->indent = MARGIN;	  /* 2 pixels is the left margin */
+
+	/* prepend to our linked list — opposite of the append path */
+	if (buf->text_first)
+		buf->text_first->prev = ent;
+	else
+		buf->text_last = ent;
+	ent->next = buf->text_first;
+	ent->prev = NULL;
+	buf->text_first = ent;
+
+	ent->sublines = NULL;
+	sublines = gtk_xtext_lines_taken (buf, ent);
+	buf->num_lines += sublines;
+
+	/* Scroll anchoring: every subline we just prepended pushed
+	 * the previously-visible content down by one line. Bump the
+	 * positional anchors by the same amount so what the user is
+	 * looking at stays put. The remove_top mirror does the
+	 * inverse decrement. */
+	buf->pagetop_line   += sublines;
+	buf->last_pixel_pos += sublines * buf->xtext->fontsize;
+	buf->old_value      += sublines;
+
+	if (buf->xtext->buffer == buf)
+	{
+		GtkAdjustment *adj = buf->xtext->adj;
+		gtk_adjustment_set_value (adj,
+		                          gtk_adjustment_get_value (adj) + sublines);
+		buf->xtext->select_start_adj += sublines;
+	}
+
+	/* Schedule a re-render the same way append does. */
+	if (buf->xtext->buffer == buf)
+	{
+		if (!buf->xtext->add_io_tag)
+		{
+			if (buf->xtext->io_tag)
+			{
+				g_source_remove (buf->xtext->io_tag);
+				buf->xtext->io_tag = 0;
+			}
+			buf->xtext->force_render = TRUE;
+			buf->xtext->add_io_tag = g_timeout_add (REFRESH_TIMEOUT * 2,
+			                                       (GSourceFunc)
+			                                       gtk_xtext_render_page_timeout,
+			                                       buf->xtext);
+		}
+	}
+}
+
 /* the main two public functions */
 
 void
@@ -5173,6 +5285,88 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	}
 
 	gtk_xtext_append_entry (buf, ent, stamp);
+}
+
+/* Phase 5 (chat-history extension): prepend version of
+ * gtk_xtext_append_indent. Identical to its append sibling except
+ * the final list-insertion call goes through gtk_xtext_prepend_entry
+ * — same textentry layout, same width / indent calculation, same
+ * empty-left handling for info-line rows. Callers that want to
+ * insert a multi-entry batch above existing buffer content should
+ * invoke this once per entry IN REVERSE ORDER (entry N first, then
+ * N-1, ..., 1) so the prepended sequence ends up oldest-to-newest
+ * at the top of the list. */
+void
+gtk_xtext_prepend_indent (xtext_buffer *buf,
+                          unsigned char *left_text, int left_len,
+                          unsigned char *right_text, int right_len,
+                          time_t stamp)
+{
+	textentry *ent;
+	unsigned char *str;
+	int space;
+	int tempindent;
+	int left_width;
+
+	if (left_len == -1)
+		left_len = strlen (left_text);
+
+	if (right_len == -1)
+		right_len = strlen (right_text);
+
+	if (left_len + right_len + 2 >= sizeof (buf->xtext->scratch_buffer))
+		right_len = sizeof (buf->xtext->scratch_buffer) - left_len - 2;
+
+	if (right_text[right_len-1] == '\n')
+		right_len--;
+
+	ent = g_malloc (left_len + right_len + 2 + sizeof (textentry));
+	str = (unsigned char *) ent + sizeof (textentry);
+
+	if (left_len)
+		memcpy (str, left_text, left_len);
+	str[left_len] = ' ';
+	if (right_len)
+		memcpy (str + left_len + 1, right_text, right_len);
+	str[left_len + 1 + right_len] = 0;
+
+	left_width = gtk_xtext_text_width (buf->xtext, left_text, left_len);
+
+	ent->left_len = left_len;
+	ent->str = str;
+	ent->str_len = left_len + 1 + right_len;
+	ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+
+	g_assert (ent->str_len < sizeof (buf->xtext->scratch_buffer));
+
+	if (buf->time_stamp)
+		space = buf->xtext->stamp_width;
+	else
+		space = 0;
+
+	/* Same auto-indent grow-into-larger-nick logic as
+	 * gtk_xtext_append_indent. Prepended chat-history nicks can
+	 * widen the indent column the same as live messages can. */
+	if (buf->xtext->auto_indent &&
+	    buf->indent < buf->xtext->max_auto_indent &&
+	    ent->indent < MARGIN + space)
+	{
+		tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+
+		if (tempindent > buf->indent)
+			buf->indent = tempindent;
+
+		if (buf->indent > buf->xtext->max_auto_indent)
+			buf->indent = buf->xtext->max_auto_indent;
+
+		gtk_xtext_fix_indent (buf);
+		gtk_xtext_recalc_widths (buf, FALSE);
+
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		buf->xtext->force_render = TRUE;
+	}
+
+	gtk_xtext_prepend_entry (buf, ent, stamp);
 }
 
 void

@@ -288,6 +288,23 @@ void gtk_xtext_append_indent (xtext_buffer *buf,
 										unsigned char *left_text, int left_len,
 										unsigned char *right_text, int right_len,
 										time_t stamp);
+/* Phase 5 (chat-history extension): inserts a textentry at the
+ * HEAD of the buffer. Scroll anchoring is preserved — the user's
+ * current viewport stays pinned to the same content. Use for
+ * rendering "Load older messages" batches above existing content.
+ * Call in REVERSE order (newest entry first, oldest last) so the
+ * prepended sequence ends up chronologically ordered. */
+void gtk_xtext_prepend_indent (xtext_buffer *buf,
+										 unsigned char *left_text, int left_len,
+										 unsigned char *right_text, int right_len,
+										 time_t stamp);
+/* Phase 5 (chat-history extension): remove the topmost (first /
+ * oldest) entry from the buffer. Used by chat.c to evict the
+ * "── load older ──" sentinel row before prepending a new
+ * Load-older batch + a refreshed sentinel. The bookkeeping
+ * (num_lines, pagetop_line, last_pixel_pos, scrollbar adjustment)
+ * mirrors the internal max-lines auto-trim path. */
+void gtk_xtext_remove_first (xtext_buffer *buf);
 int gtk_xtext_set_font (GtkXText *xtext, char *name);
 void gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[]);
 void gtk_xtext_clear (xtext_buffer *buf, int lines);

@@ -138,10 +138,20 @@ struct gtkhx_chat {
      * history_loading — TRUE while a "Load older" fetch is
      *   in-flight. Click handler refuses to fire a second
      *   request until the first completes (the receive path
-     *   clears the flag). */
+     *   clears the flag).
+     *
+     * history_load_older_at_top — TRUE iff the topmost entry
+     *   in the xtext buffer is currently the Load-older
+     *   sentinel row (Phase 3.2). Before prepending an older
+     *   batch the renderer evicts the existing sentinel via
+     *   gtk_xtext_remove_first, then re-prepends a fresh one
+     *   on top after the batch lands if has_more still true.
+     *   The flag is the bookkeeping; the actual position in
+     *   the buffer is the source of truth. */
     guint64  history_oldest_msgid;
     gboolean history_has_more;
     gboolean history_loading;
+    gboolean history_load_older_at_top;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */
