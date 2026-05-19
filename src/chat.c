@@ -814,6 +814,49 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         gchat->history_anchor_ent = gtk_xtext_get_last_entry (xbuf);
     }
 
+    /* Phase 3.6: insert the "Load older messages" sentinel BEFORE
+	 * the entry loop runs. This keeps the sentinel pinned at the
+	 * TOP of the chat-history block in both modes:
+	 *
+	 *   initial mode: list state before this insert is
+	 *       [... server notices ..., anchor].
+	 *     Sentinel inserts before anchor → [..., sentinel, anchor].
+	 *     Then the entry loop APPENDS each entry to the tail, so
+	 *     entries land AFTER anchor: [..., sentinel, anchor,
+	 *     entry1, ..., entryN]. Sentinel ends up just above the
+	 *     opening divider, which is exactly what we want.
+	 *
+	 *   load-older mode: list state before this insert is
+	 *       [..., anchor, entry1, ..., entry50, live-divider].
+	 *     Sentinel inserts before anchor → [..., sentinel, anchor,
+	 *     entry1, ...]. Then the entry loop inserts each NEW older
+	 *     entry before anchor, which means they land BETWEEN
+	 *     sentinel and anchor (insert-before-anchor places the new
+	 *     entry directly above the anchor, pushing older inserts
+	 *     further from it): [..., sentinel, new1, new2, ..., newN,
+	 *     anchor, entry1, ...]. Sentinel STAYS at the top of the
+	 *     cumulative chat-history block.
+	 *
+	 * Earlier code did this AFTER the entry loop, which in
+	 * load-older mode meant the sentinel ended up between the
+	 * just-inserted new entries and the anchor — the bug Misha
+	 * noticed and asked us to fix.
+	 *
+	 * If we don't have an anchor (shouldn't happen in practice —
+	 * Load-older clicks can only fire after an initial render),
+	 * insert_indent_before falls back to head-insert. */
+    if (has_more) {
+        gchar *row = g_strdup_printf (
+            "\003" "14"
+            "─── " HX_LOAD_OLDER_SENTINEL " ───");
+        gchat->history_load_older_ent = gtk_xtext_insert_indent_before (xbuf,
+            gchat->history_anchor_ent,
+            (unsigned char *) "", 0,
+            (unsigned char *) row,
+            (int) strlen (row), 0);
+        g_free (row);
+    }
+
     /* Walk entries forward (chronological) in both modes. */
     for (guint i = 0; i < entries->len; i++) {
         HxHistoryEntry *e = g_ptr_array_index (entries, i);
@@ -882,28 +925,6 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
                                  (int) strlen (divider), 0);
-    }
-
-    /* Phase 3.5: insert a fresh "Load older messages" sentinel
-	 * just BEFORE the anchor divider, IFF the server says there
-	 * are still older entries available. Save its textentry
-	 * pointer so the NEXT batch can evict this same row.
-	 *
-	 * If we don't have an anchor (something went wrong, or we
-	 * got a Load-older response without ever doing an initial
-	 * render), fall back to inserting at head — better than
-	 * nothing, and easier to diagnose visually than silently
-	 * dropping the affordance. */
-    if (has_more) {
-        gchar *row = g_strdup_printf (
-            "\003" "14"
-            "─── " HX_LOAD_OLDER_SENTINEL " ───");
-        gchat->history_load_older_ent = gtk_xtext_insert_indent_before (xbuf,
-            gchat->history_anchor_ent,
-            (unsigned char *) "", 0,
-            (unsigned char *) row,
-            (int) strlen (row), 0);
-        g_free (row);
     }
 
 #undef HX_RENDER
