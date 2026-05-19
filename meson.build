@@ -144,8 +144,9 @@ imagemagick_dep = dependency('MagickWand', required : false)
 # src/connect.c::valid_compressors[].
 #
 # Both available as Debian/Ubuntu liblz4-dev / libzstd-dev and
-# Fedora lz4-devel / libzstd-devel. Both shipped in the GNOME 49
-# Flatpak runtime.
+# Fedora lz4-devel / libzstd-devel. Neither ships in the GNOME 49
+# Flatpak runtime / SDK — com.nasledov.gtkhx.yml builds both as
+# inline modules so the Flatpak binary speaks LZ4 and ZSTD too.
 lz4_dep  = dependency('liblz4',  required : false)
 zstd_dep = dependency('libzstd', required : false)
 

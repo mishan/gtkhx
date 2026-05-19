@@ -19,10 +19,13 @@
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
 # nettle, zlib, and gtksourceview-5 (syntax-highlighted source
 # preview viewer) are present in the runtime; libcanberra, gsound,
-# and poppler-glib are NOT (gsound stopped being included around
-# the GNOME 47/48 transition; poppler-glib was dropped in 49; the
-# runtime never had libcanberra). We build all three as inline
-# modules below.
+# poppler-glib, liblz4, and libzstd are NOT (gsound stopped being
+# included around the GNOME 47/48 transition; poppler-glib was
+# dropped in 49; the runtime never had libcanberra; the lz4/zstd
+# pkg-config files needed by meson's `dependency('liblz4')` and
+# `dependency('libzstd')` aren't present even though zstd may be
+# linked in by other runtime components). We build all five as
+# inline modules below.
 #
 # poppler-glib and gtksourceview-5 are declared optional in the
 # meson build; both are auto-detected and HAVE_POPPLER /
@@ -224,6 +227,43 @@ modules:
       - type: archive
         url: https://poppler.freedesktop.org/poppler-26.05.0.tar.xz
         sha256: 6fef27ff04f37db43054c86bcdff6128c9fb1f6af4ef3c8b369a7e9abd68d0bb
+
+  # LZ4 + ZSTD — HOPE compression negotiation (Phase C).
+  # gtkhx's meson detects both via pkg-config and gates the
+  # algorithm entries in src/connect.c::valid_compressors[] on
+  # HAVE_LZ4 / HAVE_ZSTD; without them the binary falls back to
+  # GZIP or no compression. Neither library ships in the GNOME 49
+  # Platform/Sdk (the runtime carries zlib and that's it for the
+  # compression family), so we build them inline.
+  #
+  # Both libraries have a `lib/` subdir Makefile that builds and
+  # installs only the shared library + headers + pkg-config —
+  # which is all gtkhx links against. Skipping the top-level
+  # build avoids dragging in the CLI utilities (lz4, zstd,
+  # zstdgrep, ...) we don't ship.
+  - name: liblz4
+    buildsystem: simple
+    build-commands:
+      - make -j${FLATPAK_BUILDER_N_JOBS} -C lib
+      - make -C lib install PREFIX=/app
+    # Pinned to 1.10.0 (released 2024-07-22). Bump and regen sha256
+    # from https://github.com/lz4/lz4/releases as needed.
+    sources:
+      - type: archive
+        url: https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.tar.gz
+        sha256: 537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b
+
+  - name: libzstd
+    buildsystem: simple
+    build-commands:
+      - make -j${FLATPAK_BUILDER_N_JOBS} -C lib
+      - make -C lib install PREFIX=/app
+    # Pinned to 1.5.7 (released 2025-02-19). Bump and regen sha256
+    # from https://github.com/facebook/zstd/releases as needed.
+    sources:
+      - type: archive
+        url: https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+        sha256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
 
   - name: gtkhx
     buildsystem: meson
