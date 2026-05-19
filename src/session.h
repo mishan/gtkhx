@@ -103,6 +103,13 @@ struct ifn {
     unsigned int n;
 };
 
+/* Forward declaration so the chat-history bookkeeping below can
+ * carry textentry pointers without dragging in xtext.h (which
+ * itself #include "session.h" — including it back here would be a
+ * circular include). The full typedef lives in xtext.h; C11
+ * allows redundant typedefs of the same struct. */
+typedef struct textentry textentry;
+
 /* ---- Chat windows ------------------------------------------------- */
 
 /* Phase 5+ (GLib-collections): no more next/prev. Open chat-window
@@ -120,7 +127,46 @@ struct gtkhx_chat {
     GtkWidget *userlist;
     guint32 cid;
     struct chat *chat;
-    void *chat_history;
+    void *chat_history;   /* GNU readline command-line history. */
+
+    /* fogWraith chat-history extension state (Phase 3+).
+     *
+     * history_oldest_msgid — smallest message_id we've already
+     *   rendered for this chat. Used as the BEFORE= cursor on
+     *   "Load older" fetches so the server returns strictly
+     *   older entries. 0 means we have no anchor yet (no
+     *   history batch arrived) and a "Load older" click would
+     *   be a bare-cursor request (server's default window).
+     *
+     * history_has_more — last batch's has_more flag, mirrored
+     *   here so the renderer + click handler can both consult
+     *   it without re-walking the xtext buffer.
+     *
+     * history_loading — TRUE while a "Load older" fetch is
+     *   in-flight. Click handler refuses to fire a second
+     *   request until the first completes (the receive path
+     *   clears the flag).
+     *
+     * history_anchor_ent — pointer to the xtext textentry of
+     *   the opening "── chat history (N) ──" divider, saved
+     *   on initial render. Acts as the insert-point for all
+     *   subsequent Load-Older inserts: new older entries +
+     *   the refreshed sentinel land just BEFORE this anchor,
+     *   so older content stays inside the chat-history block
+     *   instead of jumping above the server-notice preamble
+     *   ("[hx] connecting to ...") that hx_printf wrote first.
+     *
+     * history_load_older_ent — pointer to the textentry of
+     *   the currently-rendered "↑ Load older" sentinel row,
+     *   or NULL when no sentinel is rendered. Refreshed on
+     *   every batch: removed via gtk_xtext_remove_entry, then
+     *   re-inserted before the anchor if has_more is still
+     *   true on the new batch. */
+    guint64    history_oldest_msgid;
+    gboolean   history_has_more;
+    gboolean   history_loading;
+    textentry *history_anchor_ent;
+    textentry *history_load_older_ent;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */

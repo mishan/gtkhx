@@ -288,6 +288,43 @@ void gtk_xtext_append_indent (xtext_buffer *buf,
 										unsigned char *left_text, int left_len,
 										unsigned char *right_text, int right_len,
 										time_t stamp);
+/* Phase 5 (chat-history extension): insert a textentry just
+ * BEFORE the `anchor` entry. anchor==NULL falls back to
+ * head-prepend (insert at text_first). Returns a pointer to the
+ * inserted entry so callers can save it for future use as an
+ * anchor of its own.
+ *
+ * Used by the chat-history Load-Older render path to insert
+ * older entries + the "↑ Load older" sentinel row immediately
+ * above the saved opening-divider anchor, keeping older content
+ * inside the chat-history block rather than above the server-
+ * notice preamble. Call once per entry in CHRONOLOGICAL forward
+ * order — each insert lands directly before the anchor, so the
+ * last-inserted entry sits closest to it.
+ *
+ * Scroll anchoring is preserved when the insert lands above the
+ * pagetop: pagetop_line / last_pixel_pos / old_value / adjustment
+ * value all bump by the new entry's subline count, keeping the
+ * user's viewport pinned to the same content. */
+textentry *gtk_xtext_insert_indent_before (xtext_buffer *buf,
+                                           textentry *anchor,
+                                           unsigned char *left_text,
+                                           int left_len,
+                                           unsigned char *right_text,
+                                           int right_len,
+                                           time_t stamp);
+/* Phase 5 (chat-history extension): remove a specific entry
+ * from the buffer. Returns TRUE if the entry was found and
+ * unlinked + freed, FALSE if not (caller's pointer was stale).
+ * The bookkeeping (num_lines / pagetop_line / last_pixel_pos /
+ * scrollbar adjustment) mirrors the internal max-lines auto-
+ * trim path; if the removed entry was above the pagetop the
+ * viewport's logical anchors are decremented to keep visible
+ * content stable. */
+gboolean gtk_xtext_remove_entry (xtext_buffer *buf, textentry *ent);
+/* Accessor: pointer to the tail (last-appended) entry. Useful
+ * for saving an anchor right after gtk_xtext_append_indent. */
+textentry *gtk_xtext_get_last_entry (xtext_buffer *buf);
 int gtk_xtext_set_font (GtkXText *xtext, char *name);
 void gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[]);
 void gtk_xtext_clear (xtext_buffer *buf, int lines);

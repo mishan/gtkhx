@@ -38,7 +38,8 @@
 - Addressed issue with GtkHx not identifying client type with HOPE negotiation
 - Support for ZSTD and LZ4 HOPE compression algorithms
 - Support for native UTF-8 with servers that support it
-- Support for large file transfers (>4GB)
+- Support for large file transfers (>4GB) on servers that support it
+- Support for chat history on servers that support it
 - Light/Dark theme support
 
 0.9.4

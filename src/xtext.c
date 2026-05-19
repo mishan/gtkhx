@@ -5101,6 +5101,153 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	}
 }
 
+/* Insert a textentry at a specific position in the linked list:
+ * just BEFORE the `anchor` entry. If anchor is NULL, falls back
+ * to head-of-list (= gtk_xtext_append_entry's prepend cousin).
+ *
+ * The scroll-anchoring rule is the same as the head-prepend case
+ * the original Phase 3.4 work shipped: every subline this new
+ * entry contributes shifts already-rendered content down by one
+ * line if it lands above the user's current viewport. We bump
+ * pagetop_line / last_pixel_pos / old_value / adjustment value
+ * by sublines IFF the insert point is at or above the pagetop —
+ * inserting below it doesn't move anything the user can see, so
+ * we don't bump.
+ *
+ * Deliberately omitted vs. append_entry: marker_pos update,
+ * max_lines auto-trim, snap-to-bottom scroll. See the
+ * gtk_xtext_append_entry comment for the rationale of each.
+ *
+ * NOTE: this is the only "insert at arbitrary position" entry in
+ * xtext today; the existing append/prepend paths are O(1) tail
+ * and head specialisations. Used by the chat-history Load-Older
+ * path to insert older entries just above the saved
+ * "── chat history (N) ──" anchor divider. */
+static void
+gtk_xtext_insert_before_entry (xtext_buffer *buf, textentry *anchor,
+                               textentry *ent, time_t stamp)
+{
+	int i;
+	int sublines;
+	gboolean inserted_above_pagetop;
+
+	/* we don't like tabs */
+	i = 0;
+	while (i < ent->str_len)
+	{
+		if (ent->str[i] == '\t')
+			ent->str[i] = ' ';
+		i++;
+	}
+
+	ent->stamp = stamp;
+	if (stamp == 0)
+		ent->stamp = time (0);
+	ent->slp = NULL;
+	ent->str_width = gtk_xtext_text_width_ent (buf->xtext, ent);
+	ent->mark_start = -1;
+	ent->mark_end = -1;
+	ent->marks = NULL;
+
+	if (ent->indent < MARGIN)
+		ent->indent = MARGIN;	  /* 2 pixels is the left margin */
+
+	/* Linked-list splice. Four cases collapse cleanly:
+	 *    anchor == NULL              → empty list or head-prepend
+	 *    anchor == buf->text_first   → new entry becomes head
+	 *    anchor mid-list             → splice between anchor->prev
+	 *                                  and anchor
+	 *    anchor == buf->text_last    → caller would call append
+	 *                                  instead; we still cope here */
+	if (!anchor)
+	{
+		/* head-prepend (anchor=NULL means "insert at head") */
+		if (buf->text_first)
+			buf->text_first->prev = ent;
+		else
+			buf->text_last = ent;
+		ent->next = buf->text_first;
+		ent->prev = NULL;
+		buf->text_first = ent;
+	}
+	else
+	{
+		ent->next = anchor;
+		ent->prev = anchor->prev;
+		if (anchor->prev)
+			anchor->prev->next = ent;
+		else
+			buf->text_first = ent;
+		anchor->prev = ent;
+	}
+
+	ent->sublines = NULL;
+	sublines = gtk_xtext_lines_taken (buf, ent);
+	buf->num_lines += sublines;
+
+	/* Scroll anchoring: only adjust the viewport if the new entry
+	 * lands at or above the current pagetop_ent. Inserting below
+	 * the visible top wouldn't move what's on screen, so don't
+	 * touch the adjustment. We walk pagetop_ent.prev → text_first
+	 * to make that determination; if the new ent is reached
+	 * before we run out, it's above the pagetop. Cheap walk: the
+	 * pagetop is typically a screenful from text_first. */
+	inserted_above_pagetop = FALSE;
+	if (buf->pagetop_ent)
+	{
+		textentry *w;
+		for (w = buf->pagetop_ent; w; w = w->prev)
+		{
+			if (w == ent)
+			{
+				inserted_above_pagetop = TRUE;
+				break;
+			}
+		}
+	}
+	else
+	{
+		/* No pagetop yet (initial render) — any insert counts as
+		 * "above pagetop" because pagetop will be set during the
+		 * next render pass and our insertion should be reflected
+		 * in the initial pagetop. */
+		inserted_above_pagetop = TRUE;
+	}
+
+	if (inserted_above_pagetop)
+	{
+		buf->pagetop_line   += sublines;
+		buf->last_pixel_pos += sublines * buf->xtext->fontsize;
+		buf->old_value      += sublines;
+
+		if (buf->xtext->buffer == buf)
+		{
+			GtkAdjustment *adj = buf->xtext->adj;
+			gtk_adjustment_set_value (adj,
+			                          gtk_adjustment_get_value (adj) + sublines);
+			buf->xtext->select_start_adj += sublines;
+		}
+	}
+
+	/* Schedule a re-render the same way append does. */
+	if (buf->xtext->buffer == buf)
+	{
+		if (!buf->xtext->add_io_tag)
+		{
+			if (buf->xtext->io_tag)
+			{
+				g_source_remove (buf->xtext->io_tag);
+				buf->xtext->io_tag = 0;
+			}
+			buf->xtext->force_render = TRUE;
+			buf->xtext->add_io_tag = g_timeout_add (REFRESH_TIMEOUT * 2,
+			                                       (GSourceFunc)
+			                                       gtk_xtext_render_page_timeout,
+			                                       buf->xtext);
+		}
+	}
+}
+
 /* the main two public functions */
 
 void
@@ -5173,6 +5320,194 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	}
 
 	gtk_xtext_append_entry (buf, ent, stamp);
+}
+
+/* Phase 5 (chat-history extension): insert a textentry just
+ * before the `anchor` entry. anchor==NULL falls back to
+ * head-prepend. Identical to gtk_xtext_append_indent's struct
+ * setup + auto-indent grow logic — only the linked-list splice
+ * differs. Returns a pointer to the inserted textentry so callers
+ * can save it as an anchor for future inserts (e.g. the
+ * chat-history opening divider). */
+textentry *
+gtk_xtext_insert_indent_before (xtext_buffer *buf, textentry *anchor,
+                                unsigned char *left_text, int left_len,
+                                unsigned char *right_text, int right_len,
+                                time_t stamp)
+{
+	textentry *ent;
+	unsigned char *str;
+	int space;
+	int tempindent;
+	int left_width;
+
+	if (left_len == -1)
+		left_len = strlen (left_text);
+
+	if (right_len == -1)
+		right_len = strlen (right_text);
+
+	if (left_len + right_len + 2 >= sizeof (buf->xtext->scratch_buffer))
+		right_len = sizeof (buf->xtext->scratch_buffer) - left_len - 2;
+
+	if (right_text[right_len-1] == '\n')
+		right_len--;
+
+	ent = g_malloc (left_len + right_len + 2 + sizeof (textentry));
+	str = (unsigned char *) ent + sizeof (textentry);
+
+	if (left_len)
+		memcpy (str, left_text, left_len);
+	str[left_len] = ' ';
+	if (right_len)
+		memcpy (str + left_len + 1, right_text, right_len);
+	str[left_len + 1 + right_len] = 0;
+
+	left_width = gtk_xtext_text_width (buf->xtext, left_text, left_len);
+
+	ent->left_len = left_len;
+	ent->str = str;
+	ent->str_len = left_len + 1 + right_len;
+	ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+
+	g_assert (ent->str_len < sizeof (buf->xtext->scratch_buffer));
+
+	if (buf->time_stamp)
+		space = buf->xtext->stamp_width;
+	else
+		space = 0;
+
+	/* Same auto-indent grow-into-larger-nick logic as
+	 * gtk_xtext_append_indent. Inserted chat-history nicks can
+	 * widen the indent column the same as live messages can. */
+	if (buf->xtext->auto_indent &&
+	    buf->indent < buf->xtext->max_auto_indent &&
+	    ent->indent < MARGIN + space)
+	{
+		tempindent = MARGIN + space + buf->xtext->space_width + left_width;
+
+		if (tempindent > buf->indent)
+			buf->indent = tempindent;
+
+		if (buf->indent > buf->xtext->max_auto_indent)
+			buf->indent = buf->xtext->max_auto_indent;
+
+		gtk_xtext_fix_indent (buf);
+		gtk_xtext_recalc_widths (buf, FALSE);
+
+		ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
+		buf->xtext->force_render = TRUE;
+	}
+
+	gtk_xtext_insert_before_entry (buf, anchor, ent, stamp);
+	return ent;
+}
+
+/* Remove a specific entry from the buffer. Returns TRUE if the
+ * entry was found in the list and unlinked + freed, FALSE if it
+ * wasn't there (caller's pointer was stale).
+ *
+ * Bookkeeping mirrors gtk_xtext_remove_top: subtract sublines
+ * from num_lines, pagetop_line, last_pixel_pos, old_value, and
+ * the GtkAdjustment value when the entry was above the pagetop.
+ * Below-pagetop removal doesn't touch the viewport.
+ *
+ * Used by the chat-history Load-Older path to evict the
+ * (possibly-stale) Load-older sentinel entry before re-inserting
+ * a fresh one. */
+gboolean
+gtk_xtext_remove_entry (xtext_buffer *buf, textentry *ent)
+{
+	int sublines;
+	gboolean removed_above_pagetop;
+
+	if (!buf || !ent)
+		return FALSE;
+
+	/* Linked-list unlink. Mirror of remove_top + remove_bottom. */
+	if (ent->prev)
+		ent->prev->next = ent->next;
+	else if (buf->text_first == ent)
+		buf->text_first = ent->next;
+	else
+		return FALSE;  /* not in this list */
+
+	if (ent->next)
+		ent->next->prev = ent->prev;
+	else if (buf->text_last == ent)
+		buf->text_last = ent->prev;
+
+	sublines = g_slist_length (ent->sublines);
+	buf->num_lines -= sublines;
+
+	/* Determine whether the removed entry was above the pagetop
+	 * (so its removal moves the visible content up). pagetop_ent
+	 * == ent itself means the pagetop was on this entry; for
+	 * safety we treat that as "above" — the rendering will
+	 * advance to ent->next on the next pass. */
+	removed_above_pagetop = FALSE;
+	if (buf->pagetop_ent)
+	{
+		textentry *w;
+		/* Walk pagetop_ent backwards to text_first; if we hit
+		 * ent->prev (the entry that used to be just before the
+		 * removed one), removed entry was at-or-above pagetop. */
+		for (w = buf->pagetop_ent; w; w = w->prev)
+		{
+			if (w == ent->prev || w == ent)
+			{
+				removed_above_pagetop = TRUE;
+				break;
+			}
+		}
+	}
+	else
+	{
+		removed_above_pagetop = TRUE;
+	}
+
+	if (removed_above_pagetop)
+	{
+		buf->pagetop_line   -= sublines;
+		buf->last_pixel_pos -= sublines * buf->xtext->fontsize;
+		buf->old_value      -= sublines;
+		if (buf->xtext->buffer == buf)
+		{
+			gtk_adjustment_set_value (buf->xtext->adj,
+			                          gtk_adjustment_get_value (buf->xtext->adj)
+			                          - sublines);
+			buf->xtext->select_start_adj -= sublines;
+		}
+	}
+
+	if (gtk_xtext_kill_ent (buf, ent))
+	{
+		if (!buf->xtext->add_io_tag)
+		{
+			if (buf->xtext->io_tag)
+			{
+				g_source_remove (buf->xtext->io_tag);
+				buf->xtext->io_tag = 0;
+			}
+			buf->xtext->force_render = TRUE;
+			buf->xtext->add_io_tag = g_timeout_add (REFRESH_TIMEOUT * 2,
+			                                       (GSourceFunc)
+			                                       gtk_xtext_render_page_timeout,
+			                                       buf->xtext);
+		}
+	}
+
+	return TRUE;
+}
+
+/* Accessor for the last (tail) entry in the buffer. Callers use
+ * it to save the textentry pointer of an entry they just
+ * gtk_xtext_append_indent'd, so they can later use that entry as
+ * an anchor for gtk_xtext_insert_indent_before. */
+textentry *
+gtk_xtext_get_last_entry (xtext_buffer *buf)
+{
+	return buf ? buf->text_last : NULL;
 }
 
 void
