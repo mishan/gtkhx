@@ -92,13 +92,6 @@ static GtkCssProvider *gtkhx_css_provider = NULL;
 static GtkCssProvider *gtkhx_userlist_css_provider = NULL;
 
 static void
-gdkrgba_to_css (const GdkRGBA *c, char *out, size_t outsz)
-{
-    g_snprintf (out, outsz, "rgb(%u,%u,%u)", (unsigned)(c->red * 255),
-                (unsigned)(c->green * 255), (unsigned)(c->blue * 255));
-}
-
-static void
 ensure_provider_attached (GtkCssProvider *prov)
 {
     /* Phase 4.4: GdkScreen / add_provider_for_screen are gone in GTK 4.
@@ -219,7 +212,6 @@ void
 gtkhx_refresh_css (void)
 {
     gchar *fontprops;
-    char fg_buf[32], bg_buf[32];
     gchar *css;
 
     if (!gtkhx_css_provider) {
@@ -228,23 +220,25 @@ gtkhx_refresh_css (void)
     }
 
     fontprops = pango_to_css_props (gtkhx_font_desc);
-    gdkrgba_to_css (&fg_col, fg_buf, sizeof fg_buf);
-    gdkrgba_to_css (&bg_col, bg_buf, sizeof bg_buf);
 
     /* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
 	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
-	 * inner "text" CSS node so the input area picks up the same look. */
+	 * inner "text" CSS node so the input area picks up the same font.
+	 *
+	 * We deliberately do NOT set color / background-color / caret-color
+	 * here. The early Phase-5 version did, copying fg_col / bg_col from
+	 * the xtext output styling onto the chat input, subject entry,
+	 * private-message editor, and news viewer — which forced light-grey-
+	 * on-black on those widgets regardless of the user's Light / Dark
+	 * theme choice. xtext's chat-output area still uses fg_col / bg_col
+	 * directly (it draws its own contents with cairo), so the in-chat
+	 * line styling is unaffected; only the surrounding input / subject /
+	 * news widgets follow the system theme now, which is what the user
+	 * expects. */
     css = g_strdup_printf (".gtkhx-text, .gtkhx-text text {"
                            "  %s"
-                           "  color: %s;"
-                           "  background-color: %s;"
-                           "  caret-color: %s;"
-                           "}"
-                           ".gtkhx-text text selection {"
-                           "  background-color: %s;"
-                           "  color: %s;"
                            "}",
-                           fontprops, fg_buf, bg_buf, fg_buf, fg_buf, bg_buf);
+                           fontprops);
 
     /* Phase 4.13: gtk_css_provider_load_from_data is deprecated in
 	 * GTK 4.12 in favor of gtk_css_provider_load_from_string (which
