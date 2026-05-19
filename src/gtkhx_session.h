@@ -85,6 +85,26 @@ void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
                                          struct htlc_conn *htlc, guint32 cid,
                                          const char *name);
 
+/* "chat-history-batch" — reply from a TRAN_GET_CHAT_HISTORY (700)
+ * request landed. Payload: (htlc, cid, GPtrArray<HxHistoryEntry*>,
+ * has_more).
+ *
+ * The GPtrArray is owned by the emitter for the duration of the
+ * signal emission; entries are freed automatically (the array's
+ * free_func is hx_history_entry_free) after the last subscriber
+ * returns. Subscribers that need to keep entry data past the emit
+ * must copy what they need (timestamp, nick, message bytes) before
+ * returning — pointers into the array are invalid after.
+ *
+ * cid is the channel id requested. Today the only meaningful
+ * channel is 0 (public chat); the spec reserves 1+ for future
+ * named channels. */
+void gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
+                                            struct htlc_conn *htlc,
+                                            guint32           cid,
+                                            GPtrArray        *entries,
+                                            gboolean          has_more);
+
 /* The "msg" (private message) signal payload is a boxed HxMsgEvent
  * for the same reason "chat" carries an HxChatEvent: every
  * subscriber gets the same UTF-8-sanitised, self-classified view

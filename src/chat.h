@@ -28,6 +28,21 @@ extern void xprintline (GtkWidget *text, char *chat, size_t len);
 struct _HxChatEvent;
 extern void output_chat_from_event (struct htlc_conn *htlc,
                                     struct _HxChatEvent *event);
+
+/* Chat-history extension (fogWraith Capabilities-Chat-History.md).
+ * Render a batch of historical entries received from the server
+ * into chat `cid`'s output buffer. Each entry is rendered in a
+ * muted (mIRC 14 grey) colour to visually distinguish from live
+ * chat. The first batch since reconnect prepends a
+ * "─── chat history ───" divider; subsequent batches (from
+ * "Load older" — Phase 3) prepend a thinner separator.
+ *
+ * `entries` is a GPtrArray<HxHistoryEntry*> borrowed for the
+ * duration of the call. has_more is informational — Phase 2
+ * doesn't render anything different based on it, but Phase 3
+ * uses it to decide whether to show the "Load older" row. */
+extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
+                                       GPtrArray *entries, gboolean has_more);
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
  * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
  * pull the decls in (chat.h forwards the include for source
