@@ -1217,116 +1217,27 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
             cp_files = gdk_content_provider_new_for_value (&val);
             g_value_unset (&val);
             g_slist_free_full (flist, g_object_unref);
-        } else if (HX_IS_REMOTE_FILES_PROVIDER (prov) && the_session.htlc.fd
-                   && hl_access_has ((const guint8 *)&the_session.htlc.access,
-                                     HL_ACCESS_DOWNLOAD_FILES)
-                   && other_is_local) {
-            /* Eager-download path: source is remote and the user
-	     * might drop on our local panel OR on an external app
-	     * on the host filesystem. We start the download to
-	     * ~/Downloads at prepare time so by the drop the bytes
-	     * are already moving, and advertise a text/uri-list
-	     * pointing at the eventual local paths.
-	     *
-	     * Skipped when the OTHER panel is remote (the
-	     * side-selector configuration with both sides remote):
-	     * the user almost certainly intends a remote→remote op,
-	     * which routes through the internal HX_TYPE_FILES_DRAG
-	     * provider in cp_internal and is handled in on_drop.
-	     * Firing xfer_new unconditionally there would yank
-	     * files to ~/Downloads that the user didn't ask for. */
-            const char *rdir = hx_files_provider_get_current_path (prov);
-            const char *ldir = gtkhx_prefs.download_path
-                                   ? gtkhx_prefs.download_path
-                                   : g_get_home_dir ();
-            GString *uri_list = g_string_new (NULL);
-            guint i, kicked = 0;
-            for (i = 0; i < entries->len; i++) {
-                HxFileEntry *e = g_ptr_array_index (entries, i);
-                char *rpath, *lpath, *uri;
-                GFile *lf;
-                struct htxf_conn *htxf;
-
-                if (hx_file_entry_is_dir (e)) {
-                    continue; /* recursive
-				                                         * remote
-				                                         * dl not
-				                                         * wired */
-                }
-                rpath = g_build_filename (rdir ? rdir : "/",
-                                          hx_file_entry_get_name (e), NULL);
-                lpath
-                    = g_build_filename (ldir, hx_file_entry_get_name (e), NULL);
-
-                /* xfer_new takes the remote location as a
-				 * (dir, name, name_len) triple. The name's bytes
-				 * may include '/' (legal in Hotline names — the
-				 * wire format is per-component, not slash-
-				 * separated); pulling them out of the joined
-				 * rpath is what survives the round-trip. */
-                {
-                    const char *nm = hx_file_entry_get_name (e);
-                    gsize nm_len = nm ? strlen (nm) : 0;
-                    htxf = xfer_new (lpath, rdir ? rdir : "/", nm, nm_len,
-                                     XFER_GET, 0,
-                                     (guint32)hx_file_entry_get_size (e));
-                }
-                if (htxf) {
-                    htxf->filter_argv = 0;
-                    htxf->opt.retry = 0;
-                    kicked++;
-                }
-
-                /* Build the uri-list entry in the same loop —
-				 * the URI points at where the file WILL be after
-				 * the download lands. RFC 2483: each entry on
-				 * its own line, CRLF-terminated. */
-                lf = g_file_new_for_path (lpath);
-                uri = g_file_get_uri (lf);
-                if (uri) {
-                    g_string_append (uri_list, uri);
-                    g_string_append (uri_list, "\r\n");
-                    g_free (uri);
-                }
-                g_object_unref (lf);
-
-                g_free (rpath);
-                g_free (lpath);
-            }
-
-            if (uri_list->len > 0) {
-                /* Steal the buffer with the modern
-				 * g_string_free_and_steal API; the
-				 * deprecation-suppressing g_string_free
-				 * (..., FALSE) form trips
-				 * -Wdeprecated-declarations on recent
-				 * GLib. Returned string is g_malloc'd
-				 * and g_bytes_new_take takes ownership. */
-                gsize len = uri_list->len;
-                char *buf = g_string_free_and_steal (uri_list);
-                GBytes *b = g_bytes_new_take (buf, len);
-                cp_files
-                    = gdk_content_provider_new_for_bytes ("text/uri-list", b);
-                g_bytes_unref (b);
-            } else {
-                g_string_free (uri_list, TRUE);
-            }
-
-            /* Always toast — the user needs to know the drag is
-			 * really "start download to <path>", not the usual
-			 * "transfer bytes via DnD". */
-            {
-                struct browser *br = the_browser;
-                if (br && kicked > 0) {
-                    char *msg = g_strdup_printf (
-                        g_dngettext (NULL, "Downloading %u file to %s",
-                                     "Downloading %u files to %s", kicked),
-                        kicked, ldir);
-                    show_toast (br, msg);
-                    g_free (msg);
-                }
-            }
         }
+        /* Remote-source drags used to take an "eager download"
+		 * path here: at drag-prepare time we'd kick xfer_new for
+		 * every selected file (to the configured download dir)
+		 * and publish a text/uri-list pointing at the eventual
+		 * local paths. The idea was to make remote-to-external-
+		 * app drops "just work" — but it fired on every drag
+		 * start, even ones the user immediately cancelled, so
+		 * picking up a file in the remote panel to look at it
+		 * downloaded the whole thing unconditionally. We hit
+		 * that as a real bug in 2026-05 testing.
+		 *
+		 * The eager path is gone. Remote-to-local-panel drops
+		 * still work — on_drop routes them through
+		 * copy_entries_and_toast, which does the right thing
+		 * at the actual drop time. Remote-to-external-app
+		 * drops on the host filesystem don't carry a uri-list
+		 * anymore; supporting those properly needs
+		 * FileTransferPortal (promise-style transfers) which
+		 * isn't wired up yet. */
+        (void)other_is_local;
     }
 
     g_ptr_array_free (entries, TRUE);
