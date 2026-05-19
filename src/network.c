@@ -1169,15 +1169,29 @@ htxf_connect (struct htxf_conn *htxf)
     int s;
     char errbuf[256];
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
-	 * caps include the bit, advertise HTXF_FLAG_LARGE_FILE in
-	 * the handshake flags. If the transfer size also exceeds
-	 * 0xFFFFFFFF, set HTXF_FLAG_SIZE64 and append the 8-byte
-	 * length in a 24-byte handshake variant (with the legacy
-	 * 32-bit length zeroed per spec to prevent a misbehaving
-	 * legacy peer from treating it as a partial read). */
+	 * caps include the bit AND the transfer actually needs 64-bit
+	 * sizing (total_size > 0xFFFFFFFF), advertise both flags and
+	 * use the 24-byte handshake variant. Stamp htxf->opt.large
+	 * so file_send_one / file_recv_one know to use the split-
+	 * encoded fork headers (and raw-data uploads).
+	 *
+	 * Why we DON'T set LARGE_FILE for sub-4-GiB transfers even
+	 * when caps include it: spec says large-file uploads send
+	 * raw data only, no FFO. If we set the flag for every
+	 * transfer on a large-file-capable server, we lose the
+	 * INFO fork on small uploads — type/creator/comment go
+	 * missing server-side. Keeping LARGE_FILE off for fits-in-
+	 * 32-bit transfers preserves the legacy FFO behaviour for
+	 * the common case. The cap negotiation still works — both
+	 * peers KNOW they can speak large-file, they just don't have
+	 * to use the wire shape for this particular transfer. */
     gboolean large = htxf->htlc
-                     && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0;
-    gboolean size64 = large && htxf->total_size > 0xFFFFFFFFULL;
+                     && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0
+                     && htxf->total_size > 0xFFFFFFFFULL;
+    gboolean size64 = large; /* same condition; left as a name for clarity */
+    if (htxf) {
+        htxf->opt.large = large ? 1 : 0;
+    }
 
     s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport, errbuf,
                                  sizeof (errbuf));

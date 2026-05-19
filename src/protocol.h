@@ -129,7 +129,17 @@ struct htxf_conn {
 		 * FILE_RESUME commands, per-file size headers, nested
 		 * file_send_one/file_recv_one calls per leaf). Set on
 		 * htxf right after xfer_new for folder transfers. */
-            folder : 1, reserved : 29;
+            folder : 1,
+            /* When set, this transfer uses the Large-File extension
+		 * wire shape: HTXF_FLAG_LARGE_FILE in the handshake; FFO
+		 * fork headers use the high/low 32-bit split encoding on
+		 * the wire (the Compression field at offset 4-7 carries
+		 * the high 32 bits of the fork length, DataSize at 12-15
+		 * carries the low 32 bits); large-file uploads (>4 GiB)
+		 * send raw data only, no FFO wrapper.
+		 * Decided once by htxf_connect based on CAP_LARGE_FILES
+		 * plus the actual transfer size. */
+            large : 1, reserved : 28;
     } opt;
 
     /* Phase 5: when opt.preview is set, the preview window is created

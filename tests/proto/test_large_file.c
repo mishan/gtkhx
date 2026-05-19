@@ -273,6 +273,165 @@ test_htxf_handshake_large_file_over_4gib (void)
     g_assert_cmphex (buf[23], ==, 0x66);
 }
 
+/* ---------- FFO fork-header split encoding ---------- */
+
+/* Helper: emit a 16-byte fork header using the legacy or large-file
+ * encoding. Matches what file_send_one writes for DATA / MACR. */
+static void
+pack_fork_header (guint8 buf[16], const char *type4, guint64 length,
+                  gboolean large)
+{
+    memset (buf, 0, 16);
+    memcpy (buf, type4, 4);
+    if (large) {
+        /* Compression field at offset 4-7 carries the HIGH 32 bits;
+		 * DataSize at offset 12-15 carries the LOW 32 bits. */
+        guint32 hi = (guint32)(length >> 32);
+        guint32 lo = (guint32)(length & 0xFFFFFFFFu);
+        buf[4] = (hi >> 24) & 0xff;
+        buf[5] = (hi >> 16) & 0xff;
+        buf[6] = (hi >> 8) & 0xff;
+        buf[7] = hi & 0xff;
+        buf[12] = (lo >> 24) & 0xff;
+        buf[13] = (lo >> 16) & 0xff;
+        buf[14] = (lo >> 8) & 0xff;
+        buf[15] = lo & 0xff;
+    } else {
+        g_assert_cmpuint (length, <=, (guint64)0xFFFFFFFFu);
+        guint32 lo = (guint32)length;
+        buf[12] = (lo >> 24) & 0xff;
+        buf[13] = (lo >> 16) & 0xff;
+        buf[14] = (lo >> 8) & 0xff;
+        buf[15] = lo & 0xff;
+    }
+}
+
+/* Helper: decode a 16-byte fork header. The 'large' branch combines
+ * the high (offset 4-7) and low (offset 12-15) into a u64; legacy
+ * just reads the 32-bit low half. */
+static guint64
+unpack_fork_length (const guint8 buf[16], gboolean large)
+{
+    guint32 lo = ((guint32)buf[12] << 24) | ((guint32)buf[13] << 16)
+                 | ((guint32)buf[14] << 8) | (guint32)buf[15];
+    if (large) {
+        guint32 hi = ((guint32)buf[4] << 24) | ((guint32)buf[5] << 16)
+                     | ((guint32)buf[6] << 8) | (guint32)buf[7];
+        return ((guint64)hi << 32) | (guint64)lo;
+    }
+    return lo;
+}
+
+/* Pin the legacy fork header: bytes 4-7 (Compression) zero, length
+ * lives wholly in the last 4 bytes. */
+static void
+test_ffo_fork_header_legacy_32bit (void)
+{
+    guint8 buf[16];
+    pack_fork_header (buf, "DATA", 0x12345678ULL, /*large=*/FALSE);
+
+    /* "DATA" tag. */
+    g_assert_cmphex (buf[0], ==, 'D');
+    g_assert_cmphex (buf[1], ==, 'A');
+    g_assert_cmphex (buf[2], ==, 'T');
+    g_assert_cmphex (buf[3], ==, 'A');
+    /* Compression slot zero. */
+    g_assert_cmphex (buf[4], ==, 0x00);
+    g_assert_cmphex (buf[5], ==, 0x00);
+    g_assert_cmphex (buf[6], ==, 0x00);
+    g_assert_cmphex (buf[7], ==, 0x00);
+    /* Reserved zero. */
+    g_assert_cmphex (buf[8], ==, 0x00);
+    g_assert_cmphex (buf[9], ==, 0x00);
+    g_assert_cmphex (buf[10], ==, 0x00);
+    g_assert_cmphex (buf[11], ==, 0x00);
+    /* DataSize: 0x12345678. */
+    g_assert_cmphex (buf[12], ==, 0x12);
+    g_assert_cmphex (buf[13], ==, 0x34);
+    g_assert_cmphex (buf[14], ==, 0x56);
+    g_assert_cmphex (buf[15], ==, 0x78);
+
+    /* Decoder must produce the same value via the legacy path. */
+    g_assert_cmpuint (unpack_fork_length (buf, FALSE), ==, 0x12345678ULL);
+}
+
+/* Large-file mode with a fork that fits in 32 bits: high half is
+ * zero, low half is the size. Same on-wire shape as legacy when
+ * the size is small; the only difference is the receiver's
+ * interpretation. */
+static void
+test_ffo_fork_header_large_mode_under_4gib (void)
+{
+    guint8 buf[16];
+    pack_fork_header (buf, "DATA", 0x12345678ULL, /*large=*/TRUE);
+
+    /* Compression slot (now: high32) is zero. */
+    g_assert_cmphex (buf[4], ==, 0x00);
+    g_assert_cmphex (buf[5], ==, 0x00);
+    g_assert_cmphex (buf[6], ==, 0x00);
+    g_assert_cmphex (buf[7], ==, 0x00);
+    /* Low half carries the value. */
+    g_assert_cmphex (buf[12], ==, 0x12);
+    g_assert_cmphex (buf[13], ==, 0x34);
+    g_assert_cmphex (buf[14], ==, 0x56);
+    g_assert_cmphex (buf[15], ==, 0x78);
+
+    g_assert_cmpuint (unpack_fork_length (buf, TRUE), ==, 0x12345678ULL);
+}
+
+/* Large-file mode with a fork > 4 GiB: high half is non-zero, low
+ * half holds the lower 32 bits. */
+static void
+test_ffo_fork_header_large_mode_over_4gib (void)
+{
+    /* 5 GiB = 0x140000000. high=1, low=0x40000000. */
+    guint64 size = 0x140000000ULL;
+    guint8 buf[16];
+    pack_fork_header (buf, "DATA", size, /*large=*/TRUE);
+
+    /* high32 = 0x00000001. */
+    g_assert_cmphex (buf[4], ==, 0x00);
+    g_assert_cmphex (buf[5], ==, 0x00);
+    g_assert_cmphex (buf[6], ==, 0x00);
+    g_assert_cmphex (buf[7], ==, 0x01);
+    /* low32 = 0x40000000. */
+    g_assert_cmphex (buf[12], ==, 0x40);
+    g_assert_cmphex (buf[13], ==, 0x00);
+    g_assert_cmphex (buf[14], ==, 0x00);
+    g_assert_cmphex (buf[15], ==, 0x00);
+
+    g_assert_cmpuint (unpack_fork_length (buf, TRUE), ==, size);
+}
+
+/* Reading a large-file-encoded header with the legacy decoder
+ * truncates: the high 32 bits get dropped, leaving just the low
+ * half. Pin the legacy-reader-on-large-payload behaviour so the
+ * spec's "Legacy readers ... should not enable large-file mode"
+ * note is enforced by code. */
+static void
+test_ffo_fork_header_legacy_decoder_truncates (void)
+{
+    guint64 size = 0x140000000ULL;
+    guint8 buf[16];
+    pack_fork_header (buf, "DATA", size, /*large=*/TRUE);
+
+    g_assert_cmpuint (unpack_fork_length (buf, FALSE), ==, 0x40000000ULL);
+}
+
+/* MACR / INFO forks follow the same split convention as DATA. The
+ * type field is the only thing that varies. */
+static void
+test_ffo_fork_header_macr_and_info_use_same_layout (void)
+{
+    guint8 macr[16], info[16];
+    pack_fork_header (macr, "MACR", 0x100ULL, TRUE);
+    pack_fork_header (info, "INFO", 0x200ULL, TRUE);
+    g_assert_cmpmem (macr, 4, "MACR", 4);
+    g_assert_cmpmem (info, 4, "INFO", 4);
+    g_assert_cmpuint (unpack_fork_length (macr, TRUE), ==, 0x100ULL);
+    g_assert_cmpuint (unpack_fork_length (info, TRUE), ==, 0x200ULL);
+}
+
 /* Folder transfers use HTXF_TYPE_FOLDER (=1) in the high u16 of the
  * flags field. With LARGE_FILE set we should see both: type=1 in
  * the high half, LARGE_FILE in the low byte. */
@@ -318,6 +477,17 @@ main (int argc, char **argv)
                      test_htxf_handshake_large_file_over_4gib);
     g_test_add_func ("/large_file/htxf/handshake_folder_with_large_file",
                      test_htxf_handshake_folder_with_large_file);
+
+    g_test_add_func ("/large_file/ffo/fork_header_legacy_32bit",
+                     test_ffo_fork_header_legacy_32bit);
+    g_test_add_func ("/large_file/ffo/fork_header_large_mode_under_4gib",
+                     test_ffo_fork_header_large_mode_under_4gib);
+    g_test_add_func ("/large_file/ffo/fork_header_large_mode_over_4gib",
+                     test_ffo_fork_header_large_mode_over_4gib);
+    g_test_add_func ("/large_file/ffo/fork_header_legacy_decoder_truncates",
+                     test_ffo_fork_header_legacy_decoder_truncates);
+    g_test_add_func ("/large_file/ffo/fork_header_macr_and_info_use_same_layout",
+                     test_ffo_fork_header_macr_and_info_use_same_layout);
 
     return g_test_run ();
 }
