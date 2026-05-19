@@ -1217,6 +1217,25 @@ test('folder_get', test_integration_folder_get,
      suite   : 'integration',
      timeout : 30)
 
+# chat_history — Tier 3 coverage for the fogWraith chat-history
+# extension (TRAN 700 + DATA_HISTORY_*). Filters the matrix for
+# HX_TEST_CAP_CHAT_HISTORY; today only Janus advertises the bit.
+# Compiles src/chat_history.c in directly so the test can reuse
+# the production HxHistoryEntry parser (the harness lib stays
+# chat-history-free — only this binary needs the parser).
+# Skips silently when no chat-history-capable server is configured
+# in the matrix (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd).
+test_integration_chat_history = executable('test_integration_chat_history',
+  'integration/test_chat_history.c',
+  '../src/chat_history.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('chat_history', test_integration_chat_history,
+     suite   : 'integration',
+     timeout : 60)
+
 # folder_put — HTLC_HDR_FILE_PUTFOLDER (0xd5) request/reply phase.
 # Mirror of test_file_put's scope: sends the opcode targeted at
 # Uploads/<random>, verifies the TASK reply correlates by trans

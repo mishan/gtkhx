@@ -344,6 +344,109 @@ integration_login_guest (int fd, struct htlc_conn *htlc,
         &clientversion_be);
 }
 
+gboolean
+integration_login_guest_caps (int fd, struct htlc_conn *htlc,
+                              const char *display_name, guint16 icon,
+                              guint16 caps)
+{
+    const char *login = "guest";
+    gsize llen = strlen (login);
+    guint8 enclogin[64];
+    g_assert_cmpuint (llen, <=, sizeof (enclogin));
+    hl_code_inline (enclogin, login, llen);
+
+    guint16 icon_be = htons (icon);
+    gsize nlen = strlen (display_name);
+    guint16 clientversion_be = htons (185);
+    /* DATA_CAPABILITIES is "variable-width big-endian" per spec; two
+	 * bytes covers bits 0..15 which is everything we have today
+	 * (CHAT_HISTORY is bit 4). This matches the wire layout produced
+	 * by src/network.c's production LOGIN path. */
+    guint16 caps_be = htons (caps);
+
+    return integration_send_message (
+        fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/5, (int)HTLC_DATA_ICON,
+        (int)sizeof (icon_be), &icon_be, (int)HTLC_DATA_LOGIN, (int)llen,
+        enclogin, (int)HTLC_DATA_NAME, (int)nlen, (guint8 *)display_name,
+        (int)HTLC_DATA_CLIENTVERSION, (int)sizeof (clientversion_be),
+        &clientversion_be, (int)HTLC_DATA_CAPABILITIES,
+        (int)sizeof (caps_be), &caps_be);
+}
+
+guint32
+integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
+                                   guint32 channel_id, guint64 before,
+                                   guint64 after, guint16 limit)
+{
+    guint32 trans = htlc->trans;
+
+    guint32 channel_be = GUINT32_TO_BE (channel_id);
+    guint64 before_be = GUINT64_TO_BE (before);
+    guint64 after_be = GUINT64_TO_BE (after);
+    guint16 limit_be = GUINT16_TO_BE (limit);
+
+    int hc = 1;
+    if (before)
+        hc++;
+    if (after)
+        hc++;
+    if (limit)
+        hc++;
+
+    /* Mirror src/chat_history.c's "0 = omit chunk" semantics. The
+	 * variadic dispatch below enumerates the 2^3 = 8 combinations
+	 * of (before, after, limit) to dodge the no-clean-portable-
+	 * va_list-build problem inside the harness. */
+    gboolean ok;
+    if (before && after && limit) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
+            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be,
+            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
+    } else if (before && after) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
+            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be);
+    } else if (before && limit) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
+            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
+    } else if (after && limit) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be,
+            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
+    } else if (before) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be);
+    } else if (after) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be);
+    } else if (limit) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
+            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
+    } else {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
+            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be);
+    }
+
+    return ok ? trans : 0;
+}
+
 /* ---- HTXF subchannel helpers ----------------------------------- */
 
 int
@@ -444,27 +547,35 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
             return type; /* task-error: login refused */
         }
 
-        /* Opportunistic NAME stash. On 1.9-style servers (Janus,
-		 * MacSecret-family) the server echoes the client's display
-		 * name back inside the TASK login reply rather than the
-		 * SELFINFO that follows. integration_recv_message
-		 * overwrites htlc->in on every call, so by the time
-		 * SELFINFO arrives the earlier TASK is gone — we'd lose
-		 * the name entirely. Walk every drained message for
-		 * HTLS_DATA_NAME and copy to htlc->name as we go;
-		 * mhxd-style servers also send it in SELFINFO so we still
-		 * pick it up there. Either way the caller sees the
-		 * round-tripped name once SELFINFO returns. */
-        if (htlc->name[0] == 0) {
+        /* Opportunistic NAME + CAPABILITIES stash. On 1.9-style
+		 * servers (Janus, MacSecret-family) the server echoes the
+		 * client's display name back inside the TASK login reply
+		 * rather than the SELFINFO that follows. The CAPABILITIES
+		 * echo also lives in the TASK reply on every cap-aware
+		 * server. integration_recv_message overwrites htlc->in
+		 * on every call, so by the time SELFINFO arrives the
+		 * earlier TASK is gone — we'd lose both chunks entirely.
+		 * Walk every drained message and stash the bits we care
+		 * about as we go; mhxd-style servers also send NAME in
+		 * SELFINFO so we still pick it up there. The CAPABILITIES
+		 * stash mirrors src/rcv.c::rcv_task_login's variable-width
+		 * big-endian decode (1..8 bytes) into htlc->caps. */
+        {
             dh_start (htlc)
             {
-                if (_type == HTLS_DATA_NAME && _len > 0) {
+                if (_type == HTLS_DATA_NAME && _len > 0
+                    && htlc->name[0] == 0) {
                     gsize nlen = _len > sizeof (htlc->name) - 1
                                      ? sizeof (htlc->name) - 1
                                      : _len;
                     memcpy (htlc->name, dh->data, nlen);
                     htlc->name[nlen] = '\0';
-                    break;
+                } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
+                    guint64 caps = 0;
+                    for (guint16 ci = 0; ci < _len && ci < 8; ci++) {
+                        caps = (caps << 8) | dh->data[ci];
+                    }
+                    htlc->caps = caps;
                 }
             }
             dh_end ();
@@ -571,6 +682,97 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * see "" and asserts on round-tripped name fail spuriously. */
     if (htlc->name[0] == 0 && display_name && *display_name) {
         g_strlcpy ((char *)htlc->name, display_name, sizeof (htlc->name));
+    }
+
+    return fd;
+}
+
+int
+integration_open_login_to_caps_or_skip (const hx_test_server *srv,
+                                        struct htlc_conn *htlc,
+                                        const char *display_name, guint16 icon,
+                                        guint16 caps)
+{
+    g_return_val_if_fail (srv != NULL, -1);
+    memset (htlc, 0, sizeof (*htlc));
+
+    int fd = hx_test_server_connect (srv);
+    if (fd < 0) {
+        gchar *msg = g_strdup_printf (
+            "integration server %s not reachable at %s:%d — start the "
+            "container first (see tests/%s/README.md).",
+            srv->name, srv->host, (int) srv->port, srv->name);
+        g_test_skip (msg);
+        g_free (msg);
+        return -1;
+    }
+    if (!integration_handshake (fd)) {
+        integration_close (fd);
+        g_test_fail_printf (
+            "connected to %s (%s:%d) but the magic-handshake "
+            "exchange failed — is this actually a Hotline server?",
+            srv->name, srv->host, (int) srv->port);
+        return -1;
+    }
+
+    if (!integration_login_guest_caps (fd, htlc, display_name, icon, caps)) {
+        integration_release_htlc (htlc);
+        integration_close (fd);
+        g_test_fail_printf ("integration_login_guest_caps failed");
+        return -1;
+    }
+
+    guint32 type = integration_drain_until_selfinfo_or_error (fd, htlc, 12);
+
+    if (type == HTLS_HDR_TASK) {
+        char err[256];
+        gsize err_len = 0;
+        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+            g_test_fail_printf ("%s rejected guest login: \"%s\"", srv->name,
+                                err);
+        } else {
+            g_test_fail_printf ("%s rejected guest login (no error chunk).",
+                                srv->name);
+        }
+        integration_release_htlc (htlc);
+        integration_close (fd);
+        return -1;
+    }
+    if (type != HTLS_HDR_USER_SELFINFO) {
+        g_test_fail_printf ("%s: timed out waiting for SELFINFO after "
+                            "guest login.",
+                            srv->name);
+        integration_release_htlc (htlc);
+        integration_close (fd);
+        return -1;
+    }
+
+    hx_selfinfo_parse (htlc);
+
+    /* Same NAME-recovery cascade as integration_open_login_or_skip:
+	 * drain captured a HTLS_DATA_NAME if present; else SELFINFO's
+	 * USER_LIST chunk; else fall back to the display_name we sent.
+	 * Janus skips both server-side paths so the fallback fires. */
+    if (htlc->name[0] == 0) {
+        dh_start (htlc)
+        {
+            if (_type == HTLS_DATA_USER_LIST
+                && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
+                struct hl_userlist_hdr *uh = (struct hl_userlist_hdr *) dh;
+                guint16 nlen;
+                HN16 (&nlen, &uh->nlen);
+                if (nlen > sizeof (htlc->name) - 1) {
+                    nlen = sizeof (htlc->name) - 1;
+                }
+                memcpy (htlc->name, uh->name, nlen);
+                htlc->name[nlen] = '\0';
+                break;
+            }
+        }
+        dh_end ();
+    }
+    if (htlc->name[0] == 0 && display_name && *display_name) {
+        g_strlcpy ((char *) htlc->name, display_name, sizeof (htlc->name));
     }
 
     return fd;
