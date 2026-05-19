@@ -40,6 +40,7 @@ enum {
     SIGNAL_CHAT,
     SIGNAL_CHAT_SUBJECT,
     SIGNAL_CHAT_INVITATION,
+    SIGNAL_CHAT_HISTORY_BATCH,
     SIGNAL_MSG,
     SIGNAL_AGREEMENT,
     SIGNAL_NEWS_FILE,
@@ -104,6 +105,21 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
         = g_signal_new ("chat-invitation", G_TYPE_FROM_CLASS (klass),
                         G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 3,
                         G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_POINTER);
+
+    /* "chat-history-batch" — fogWraith Chat History extension.
+	 * Payload: (htlc *, cid, GPtrArray<HxHistoryEntry*> *, has_more).
+	 * Emitter (rcv_task_chat_history in rcv.c) owns the GPtrArray
+	 * for the duration of the emission; entries are freed by the
+	 * array's free_func (hx_history_entry_free) right after.
+	 * Subscribers that need to keep entry data past the emit MUST
+	 * copy the bytes they want — the pointers go invalid. */
+    signals[SIGNAL_CHAT_HISTORY_BATCH]
+        = g_signal_new ("chat-history-batch", G_TYPE_FROM_CLASS (klass),
+                        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 4,
+                        G_TYPE_POINTER, /* struct htlc_conn *       */
+                        G_TYPE_UINT,    /* cid (guint32)            */
+                        G_TYPE_POINTER, /* GPtrArray<HxHistoryEntry*>* */
+                        G_TYPE_BOOLEAN); /* has_more                */
 
     /* "msg" — incoming private message. Phase 5+: payload is a
 	 * boxed HxMsgEvent (uid + name + body + is_self/is_broadcast
@@ -279,6 +295,17 @@ gtkhx_session_emit_chat_invitation (GtkhxSession *self, struct htlc_conn *htlc,
                                     guint32 cid, const char *name)
 {
     g_signal_emit (self, signals[SIGNAL_CHAT_INVITATION], 0, htlc, cid, name);
+}
+
+void
+gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
+                                       struct htlc_conn *htlc,
+                                       guint32           cid,
+                                       GPtrArray        *entries,
+                                       gboolean          has_more)
+{
+    g_signal_emit (self, signals[SIGNAL_CHAT_HISTORY_BATCH], 0, htlc, cid,
+                   entries, has_more);
 }
 
 void

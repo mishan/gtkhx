@@ -1135,6 +1135,17 @@ on_chat_subject_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 }
 
 static void
+on_chat_history_batch_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                              guint cid, gpointer entries_p,
+                              gboolean has_more, gpointer user_data)
+{
+    GPtrArray *entries = entries_p;
+    (void) emitter;
+    (void) user_data;
+    output_chat_history_batch (htlc, (guint32) cid, entries, has_more);
+}
+
+static void
 on_chat_invitation_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                            guint cid, gpointer name, gpointer user_data)
 {
@@ -1454,6 +1465,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_chat_subject_signal), NULL);
     g_signal_connect (emitter, "chat-invitation",
                       G_CALLBACK (on_chat_invitation_signal), NULL);
+    g_signal_connect (emitter, "chat-history-batch",
+                      G_CALLBACK (on_chat_history_batch_signal), NULL);
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
     g_signal_connect (emitter, "agreement", G_CALLBACK (on_agreement_signal),
                       NULL);

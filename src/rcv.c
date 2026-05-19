@@ -57,6 +57,7 @@
 #include "debug.h"
 #include "connect.h"
 #include "banner.h"
+#include "chat_history.h"
 #include "hl_access.h"
 
 static size_t news_len = 0;
@@ -125,6 +126,24 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     task_new (htlc, RCV_TASK_FN (rcv_task_news_users),
               chat_with_cid (&the_session, 0), 0, "who");
     hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
+
+    /* Chat-history extension: if the server echoed our cap bit in
+	 * the LOGIN reply, request the most recent batch for public
+	 * chat (channel 0). hx_get_chat_history is a no-op when the
+	 * cap wasn't negotiated, so this is safe to gate on caps
+	 * here too — task_new only fires when we'll actually send.
+	 *
+	 * Limit 50 is the spec's recommended default. A
+	 * user-controllable knob arrives in a Phase 2 follow-up;
+	 * shipping the fix for the "Janus no longer replays history
+	 * to us" regression sooner is worth the missing pref. */
+    if (htlc->caps & HTLC_CAP_CHAT_HISTORY) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
+                  GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
+                  "chat-history");
+        hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
+                             /*before=*/0, /*after=*/0, /*limit=*/50);
+    }
 }
 
 static gboolean
@@ -1618,6 +1637,69 @@ rcv_task_news_file (struct htlc_conn *htlc)
     }
     gtkhx_session_emit_news_file (gtkhx_session_get_default (), htlc,
                                   (char *)news_buf, news_len);
+}
+
+/* TRAN_GET_CHAT_HISTORY (700) reply walker. The reply carries:
+ *   - 0..N HTLS_DATA_HISTORY_ENTRY (0x0F05) packed-binary chunks
+ *   - 1 HTLS_DATA_HISTORY_HAS_MORE (0x0F06) u8 flag
+ *
+ * Channel id isn't repeated in the reply per the spec — we passed
+ * it to task_new via GUINT_TO_POINTER and recover it here.
+ *
+ * Entries are parsed via hx_history_entry_parse, accumulated into
+ * a GPtrArray with hx_history_entry_free as the free_func, and the
+ * array (plus has_more) is handed to the chat-history-batch signal
+ * subscribers. After every subscriber returns, the array is
+ * unref'd and entries free along with it. */
+void
+rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
+{
+    guint32 cid = GPOINTER_TO_UINT (channel_ptr);
+    GPtrArray *entries
+        = g_ptr_array_new_with_free_func ((GDestroyNotify) hx_history_entry_free);
+    gboolean has_more = FALSE;
+
+    dh_start (htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_HISTORY_ENTRY: {
+            HxHistoryEntry *e = hx_history_entry_parse (dh->data, _len);
+            if (e) {
+                g_ptr_array_add (entries, e);
+            } else {
+                debug_log ("chat-history",
+                           "skipping malformed entry, len=%u", _len);
+            }
+            break;
+        }
+        case HTLS_DATA_HISTORY_HAS_MORE:
+            if (_len >= 1) {
+                has_more = (dh->data[0] != 0);
+            }
+            break;
+        case HTLS_DATA_TASKERROR:
+            /* Server refused the request — log and stop. The
+			 * subscriber gets zero entries + has_more=FALSE, which
+			 * is the same shape as "no history to return," and
+			 * shouldn't make the UI do anything dramatic. */
+            debug_log ("chat-history",
+                       "server returned task error for GET_CHAT_HISTORY "
+                       "(cid=%u, len=%u)", cid, _len);
+            break;
+        }
+    }
+    dh_end ();
+
+    debug_log ("chat-history",
+               "received batch: cid=%u entries=%u has_more=%d",
+               cid, entries->len, (int) has_more);
+
+    gtkhx_session_emit_chat_history_batch (gtkhx_session_get_default (), htlc,
+                                           cid, entries, has_more);
+
+    /* Free the array (and via free_func, every entry inside) now
+	 * that subscribers have had their pass. */
+    g_ptr_array_unref (entries);
 }
 
 void

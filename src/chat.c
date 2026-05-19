@@ -36,6 +36,7 @@
 #include "gtkhx_session.h"
 #include "network.h"
 #include "history.h"
+#include "chat_history.h"
 #include "gtkutil.h"
 #include "xtext.h"
 #include "users.h"
@@ -671,6 +672,134 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             }
             cur = next_nl + 1;
         }
+    }
+}
+
+/* Chat-history extension: render a batch of historical entries
+ * received from the server into chat `cid`'s output. Entries are
+ * styled in mIRC colour 14 (grey) so they visually fade behind
+ * live chat. Spec flags get specific treatment:
+ *
+ *   ACTION      → "* nick body" (mIRC /me-style)
+ *   SERVER_MSG  → "*** body" with no nick column (info-line)
+ *   DELETED     → "[message removed]" placeholder; nick + body
+ *                 may be empty on the wire per spec
+ *
+ * Each batch is bracketed by "── chat history ──" and "── live
+ * messages ──" info-line dividers so the boundary between
+ * scrollback and the live stream is obvious. has_more is
+ * accepted for API symmetry — Phase 2 doesn't use it (no "Load
+ * older" row yet); Phase 3 will. */
+void
+output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
+                           GPtrArray *entries, gboolean has_more)
+{
+    struct gtkhx_chat *gchat;
+    (void) htlc;
+    (void) has_more;
+
+    if (!entries) {
+        return;
+    }
+    gchat = gchat_with_cid (&the_session, cid);
+    if (!gchat) {
+        return;
+    }
+
+    xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
+
+    /* Empty batch — server confirmed CAP_CHAT_HISTORY but has no
+	 * messages stored (yet). Stay silent: a "── chat history (0
+	 * messages) ──" divider would be more noise than signal. */
+    if (entries->len == 0) {
+        return;
+    }
+
+    /* Opening divider, colour 14 (grey), info-line styled. */
+    {
+        gchar *divider
+            = g_strdup_printf ("\003" "14"
+                               "─── chat history (%u %s) ───",
+                               entries->len,
+                               entries->len == 1 ? "message" : "messages");
+        gtk_xtext_append (xbuf, (unsigned char *) divider,
+                          (int) strlen (divider), 0);
+        g_free (divider);
+    }
+
+    for (guint i = 0; i < entries->len; i++) {
+        HxHistoryEntry *e = g_ptr_array_index (entries, i);
+        if (!e) {
+            continue;
+        }
+
+        time_t stamp = (time_t) e->timestamp;
+
+        if (e->flags & HX_HISTORY_FLAG_DELETED) {
+            /* Tombstone — placeholder text, no nick column. The
+			 * spec preserves message_id + timestamp for cursor
+			 * stability but nick/message MAY be empty. */
+            gchar *line = g_strdup_printf (
+                "\003" "14"
+                "[message removed]");
+            gtk_xtext_append (xbuf, (unsigned char *) line,
+                              (int) strlen (line), stamp);
+            g_free (line);
+            continue;
+        }
+
+        if (e->flags & HX_HISTORY_FLAG_SERVER_MSG) {
+            /* Server / admin broadcast. Render as info-line with
+			 * no nick column. */
+            gchar *line = g_strdup_printf (
+                "\003" "14"
+                "*** %s",
+                e->message ? e->message : "");
+            gtk_xtext_append (xbuf, (unsigned char *) line,
+                              (int) strlen (line), stamp);
+            g_free (line);
+            continue;
+        }
+
+        if (e->flags & HX_HISTORY_FLAG_ACTION) {
+            /* /me emote. Render as "* nick body" — mIRC convention. */
+            gchar *line = g_strdup_printf (
+                "\003" "14"
+                "* %s %s",
+                e->nick    ? e->nick    : "",
+                e->message ? e->message : "");
+            gtk_xtext_append (xbuf, (unsigned char *) line,
+                              (int) strlen (line), stamp);
+            g_free (line);
+            continue;
+        }
+
+        /* Standard message: two-column layout matching the live
+		 * chat path, but the whole thing rendered in grey (colour
+		 * 14) instead of the live palette. */
+        gchar *nick_wrapped = g_strdup_printf (
+            "\003" "14"
+            "<%s>",
+            e->nick ? e->nick : "");
+        gchar *body_coloured = g_strdup_printf (
+            "\003" "14"
+            "%s",
+            e->message ? e->message : "");
+        gtk_xtext_append_indent (xbuf,
+                                 (unsigned char *) nick_wrapped,
+                                 (int) strlen (nick_wrapped),
+                                 (unsigned char *) body_coloured,
+                                 (int) strlen (body_coloured),
+                                 stamp);
+        g_free (nick_wrapped);
+        g_free (body_coloured);
+    }
+
+    /* Closing divider — live messages follow below. */
+    {
+        const char *divider = "\003" "14" "─── live messages ───";
+        gtk_xtext_append (xbuf, (unsigned char *) divider,
+                          (int) strlen (divider), 0);
     }
 }
 

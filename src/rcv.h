@@ -28,6 +28,15 @@ extern void rcv_task_login (struct htlc_conn *htlc, char *pass);
 extern void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat,
                                  int text);
 extern void rcv_task_news_file (struct htlc_conn *htlc);
+
+/* TRAN_GET_CHAT_HISTORY (700) reply walker. Parses 0..N
+ * HTLS_DATA_HISTORY_ENTRY packed-binary chunks and the
+ * HTLS_DATA_HISTORY_HAS_MORE u8 flag out of htlc->in, then emits
+ * GtkhxSession::chat-history-batch. The channel id is carried via
+ * the task ptr (GUINT_TO_POINTER) since the reply itself doesn't
+ * repeat it. */
+extern void rcv_task_chat_history (struct htlc_conn *htlc,
+                                   void             *channel_ptr);
 extern void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat,
                                 int text);
 extern void rcv_task_user_list_switch (struct htlc_conn *htlc,

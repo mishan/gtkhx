@@ -142,6 +142,14 @@ hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
         return FALSE;
     }
 
+    /* Note: callers are responsible for task_new()-registering
+     * rcv_task_chat_history BEFORE invoking this function — the
+     * task is keyed on htlc->trans which hlwrite is about to
+     * consume. chat_history.c stays free of tasks.h / rcv.h
+     * (which need the full hx.h context) so the Tier 2 fixture
+     * tests can build the parser + sender without dragging in
+     * the GTK pile. */
+
     /* All numeric fields are sent big-endian. hlwrite takes raw
      * bytes; convert host → network order in stack-local buffers. */
     guint32 channel_be = GUINT32_TO_BE (channel_id);
