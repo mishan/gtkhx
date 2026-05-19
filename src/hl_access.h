@@ -86,7 +86,28 @@
 /* Private messages (40) */
 #define HL_ACCESS_SEND_MSGS 40
 
-/* Bits 41-63: reserved by mhxd struct (__reserved2/3/4). */
+/* Bits 41-55: reserved by mhxd struct (__reserved2/3). */
+
+/* Chat-history extension (fogWraith
+ * Capabilities-Chat-History.md). Bit 56 is the next allocation
+ * after Janus's voice-chat bit (55) and is the canonical home
+ * for "may query chat history via HTLC_HDR_GET_CHAT_HISTORY".
+ *
+ * Spec note: servers without an explicit bit-56 assignment in
+ * their access schema (e.g. older codebases extended with the
+ * chat-history extension) SHOULD fall back to checking bit 9
+ * (HL_ACCESS_READ_CHAT) to gate history reads. Janus follows
+ * that fallback. We don't need to do anything here — the helper
+ * `hl_access_has(access, 56)` returns FALSE in that case and
+ * the chat-history UI can choose to retry against
+ * HL_ACCESS_READ_CHAT, or just trust the server's task-error
+ * reply if any.
+ *
+ * Source: fogWraith Capabilities-Chat-History.md
+ *         "Access Privileges" section. */
+#define HL_ACCESS_READ_CHAT_HISTORY 56
+
+/* Bits 57-63: reserved. */
 
 /* ---- Accessor -------------------------------------------------- */
 

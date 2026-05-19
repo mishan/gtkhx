@@ -178,6 +178,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * server and cause us to skip text transcoding once Phase E2
 	 * lands. */
     htlc->caps = 0;
+    /* Chat-history retention hints from the LOGIN reply — wiped
+	 * on disconnect so a reconnect to a server with different
+	 * retention doesn't carry stale numbers into the UI. */
+    htlc->history_max_msgs = 0;
+    htlc->history_max_days = 0;
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
 	 * exchange). Safe to call whether or not one's running. */
@@ -1003,6 +1008,8 @@ send_login (struct gtkhx_connect_ctx *ctx)
         /* DATA_CAPABILITIES bitmask. We advertise:
 		 *   bit 0  CAP_LARGE_FILES    "I can handle 64-bit sizes."
 		 *   bit 1  CAP_TEXT_ENCODING  "I speak UTF-8."
+		 *   bit 4  CAP_CHAT_HISTORY   "I can request server-stored
+		 *                             chat history via TRAN 700."
 		 *
 		 * Servers that support the spec echo the bits they
 		 * accept back in the LOGIN reply. Unknown bits are
@@ -1013,8 +1020,9 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * Per the Large-File spec the chunk is "typically 2 bytes,
 		 * expandable to 8." Two bytes covers bits 0-5; we send
 		 * those today. */
-        guint16 caps16
-            = htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
+        guint16 caps16 = htons (HTLC_CAP_LARGE_FILES
+                              | HTLC_CAP_TEXT_ENCODING
+                              | HTLC_CAP_CHAT_HISTORY);
 
         /* LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
 		 * 1.5+ servers will get our nick via AGREEMENTAGREE after

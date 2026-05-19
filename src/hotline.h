@@ -238,6 +238,35 @@ struct hl_user_data {
 #define HTLC_DATA_FOLDER_ITEM_COUNT64 ((guint16)0x01f4)
 #define HTLS_DATA_FOLDER_ITEM_COUNT64 ((guint16)0x01f4)
 
+/* Chat-history extension (fogWraith
+ * Capabilities-Chat-History.md). Wire-side gated by
+ * HTLC_CAP_CHAT_HISTORY (bit 4) in DATA_CAPABILITIES.
+ *
+ * Fields in the 0x0F01–0x0F1F range follow the HOPE/extension
+ * convention of placing protocol extensions in the high field-ID
+ * space; gaps after 0x0F08 are reserved for future channel-
+ * management opcodes (channel name, topic, listing). */
+#define HTLC_DATA_CHANNEL_ID ((guint16)0x0f01)
+#define HTLS_DATA_CHANNEL_ID ((guint16)0x0f01)
+#define HTLC_DATA_HISTORY_BEFORE ((guint16)0x0f02)
+#define HTLS_DATA_HISTORY_BEFORE ((guint16)0x0f02)
+#define HTLC_DATA_HISTORY_AFTER ((guint16)0x0f03)
+#define HTLS_DATA_HISTORY_AFTER ((guint16)0x0f03)
+#define HTLC_DATA_HISTORY_LIMIT ((guint16)0x0f04)
+#define HTLS_DATA_HISTORY_LIMIT ((guint16)0x0f04)
+/* DATA_HISTORY_ENTRY: a single chat history entry, packed binary.
+ * Repeated 0..N times in a GET_CHAT_HISTORY reply. Layout in
+ * src/history.{c,h}. */
+#define HTLS_DATA_HISTORY_ENTRY ((guint16)0x0f05)
+/* DATA_HISTORY_HAS_MORE: uint8, 1 = more results exist beyond the
+ * returned batch in the cursor's direction. */
+#define HTLS_DATA_HISTORY_HAS_MORE ((guint16)0x0f06)
+/* DATA_HISTORY_MAX_MSGS / _MAX_DAYS: server retention hints sent in
+ * the LOGIN reply alongside the echoed DATA_CAPABILITIES. 0 means
+ * unlimited; absent means the server didn't disclose. */
+#define HTLS_DATA_HISTORY_MAX_MSGS ((guint16)0x0f07)
+#define HTLS_DATA_HISTORY_MAX_DAYS ((guint16)0x0f08)
+
 /* HTXF handshake flags. Default (0x00) is the 16-byte legacy
  * handshake. In large-file mode the handshake grows to 24 bytes
  * with an 8-byte big-endian length field appended.
@@ -361,6 +390,14 @@ struct hl_user_data {
 
 #define HTLC_HDR_ICON_GET ((guint32)0x00000e90)
 #define HTLC_HDR_FILE_HASH ((guint32)0x00000ee0)
+
+/* HTLC_HDR_GET_CHAT_HISTORY = 700: chat-history extension request.
+ * Request fields (all DATA_CHANNEL_ID, DATA_HISTORY_BEFORE,
+ * DATA_HISTORY_AFTER, DATA_HISTORY_LIMIT). Reply contains
+ * 0..N DATA_HISTORY_ENTRY chunks plus DATA_HISTORY_HAS_MORE.
+ * See fogWraith Capabilities-Chat-History.md and src/history.h. */
+#define HTLC_HDR_GET_CHAT_HISTORY ((guint32)0x000002bc) /* 700 */
+#define HTLS_HDR_GET_CHAT_HISTORY ((guint32)0x000002bc)
 
 #define HTLC_DATA_HASH_MD5 ((guint16)0x0e80)
 #define HTLC_DATA_HASH_HAVAL ((guint16)0x0e81)

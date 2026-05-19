@@ -636,6 +636,25 @@ test_capabilities = executable('test_capabilities',
 test('capabilities', test_capabilities,
      suite : 'proto')
 
+# chat_history — fogWraith Capabilities-Chat-History.md extension.
+# Pins the field-ID and flag-bit numeric constants, exercises the
+# packed-binary HxHistoryEntry parser (typical / minimum / flag /
+# sub-field-skip / malformed inputs) and the request-sender
+# hx_get_chat_history (cap-gate refusal, bare request, before /
+# after / range cursors, header type).
+test_chat_history = executable('test_chat_history',
+  'proto/test_chat_history.c',
+  '../src/chat_history.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('chat_history', test_chat_history,
+     suite : 'proto')
+
 # large_file — Capabilities-Large-File extension. Pins the 64-bit
 # field IDs (DATA_FILESIZE64 / OFFSET64 / XFERSIZE64 /
 # FOLDER_ITEM_COUNT64), the HTXF handshake flag constants
