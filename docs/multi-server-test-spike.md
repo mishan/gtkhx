@@ -1,6 +1,7 @@
 # Multi-Server Test Harness — Research Spike
 
-Spike notes drafted 2026-05-18. Two questions to answer:
+Spike notes drafted 2026-05-18, revised same day after the
+vespernet fingerprinting question was answered. Two questions:
 
 1. Does Mobius support the Capabilities-Chat-History extension yet?
 2. How would we structure a multi-server test setup so we can run
@@ -8,10 +9,13 @@ Spike notes drafted 2026-05-18. Two questions to answer:
 
 Conclusion preview:
 
-- Mobius does **not** support chat-history yet. No public server does.
+- Mobius does **not** support chat-history yet. The server that
+  does is **Janus** (closed-source, runs on hotline.vespernet.net,
+  publicly-downloadable Linux amd64 binary at get.vespernet.net).
 - We should build a Docker-Compose-based multi-server harness with
-  capability-aware test selection, and add a small mock server we
-  control for chat-history coverage until real-server support exists.
+  capability-aware test selection, with Janus packaged as our
+  chat-history test target. The mock-server option from the original
+  draft is no longer needed.
 
 ---
 
@@ -19,36 +23,44 @@ Conclusion preview:
 
 ### What we found
 
-**A live server already implements the extension: hotline.vespernet.net.**
-Misha confirmed they've been connecting to it for chat-history testing.
-We don't yet know what server software it runs — figuring that out is
-a follow-up task. The vespernet.org/.net web presence describes them as
-the authors of Hotline Tracker v3.0; they may have their own server
-binary, or be running a private fork of Mobius / mhxd, or something
-else entirely. Next-session task: capture a `GTKHX_DEBUG=proto` trace
-of a login against hotline.vespernet.net and compare the login-reply
-fingerprint (chunk ordering, `HTLS_DATA_VERSION`, banner-block shape)
-against known families — see memory note
-[[gtkhx-servers]] for the existing Mobius / mhxd / Badmoon
-fingerprints we use to disambiguate.
+**The chat-history-capable server is Janus, VesperNet's own
+closed-source Hotline server, running on `hotline.vespernet.net`.**
 
-Looking at the canonical *open-source* Mobius repo (`jhalter/mobius`),
-latest release v0.21.0 (Mar 16, 2026):
+Janus is part of VesperNet's broader Hotline stack:
+
+- **janus** — server (v2.0.7 as of May 2026)
+- **argus** — tracker (v1.0.2)
+- **hermes** — client (v0.1.6, Mac arm64 + Windows only)
+- **Mnemosyne** — content-sync / indexing service
+- **agora.vespernet.net** — directory site + downloads
+
+Source is closed, but every binary is publicly downloadable at
+`get.vespernet.net`. Linux amd64 archive is ~9.5 MB. The release
+page at `agora.vespernet.net/janus` lists SQLite-backed chat
+persistence implementing the fogWraith spec — Janus is the only
+public server we know of that ships this extension today.
+
+Other Janus features that matter to GtkHx tests: full Hotline
+protocol, HOPE ChaCha20-Poly1305, native TLS on a separate port,
+large-file support, Lua plugin system, IRC bridge, NewsBridge
+(NNTP ↔ Hotline), tracker v3 registration. Voice chat via WebRTC
+SFU is out of scope for GtkHx.
+
+For comparison, the canonical *open-source* Mobius
+(`jhalter/mobius`) v0.21.0 (Mar 2026) has:
 
 - **No protocol constants** for `DATA_HISTORY_ENTRY` (0x0F05),
-  `TRAN_GET_CHAT_HISTORY` (700), or `CAPABILITY_CHAT_HISTORY` (bit 4)
-  in the source.
+  `TRAN_GET_CHAT_HISTORY` (700), or `CAPABILITY_CHAT_HISTORY`
+  (bit 4) in the source.
 - **Issue #105** — "Send the last X lines of chat when connecting"
-  (Knezzen, opened 2023-09-30) is the closest prior art. It's still
+  (Knezzen, opened 2023-09-30) is the closest prior art. Still
   *open*. jhalter's response: "I'll consider this as an option for
-  the server config." This isn't even the full extension — it's the
-  simpler "legacy broadcast" path that the spec describes as a
-  pragmatic bridge for non-history clients.
+  the server config." This isn't even the full extension — it's
+  the simpler "legacy broadcast" path that the spec describes as
+  a pragmatic bridge for non-history clients.
 
-So *public* Mobius doesn't ship chat-history yet. If vespernet turns
-out to be running Mobius, it's a private branch or fork. If they're
-running something else, that something else is the canonical
-chat-history-capable server today.
+So Mobius will likely add chat-history *eventually*, but Janus is
+the only target available today.
 
 ### Who's likely to ship it first
 
@@ -81,17 +93,30 @@ Phase 1 (wire layer + parser): land on hand-rolled wire fixtures.
 Tier 2 only, no Tier 3. This is fine — we already have wire-fixture
 infrastructure for `hx_chat_event_new`, `hx_rcv_news_post`, etc.
 
-Phase 2–4 (render + scrollback + catch-up): once we've fingerprinted
-vespernet and know what software they're running, use **that** for
-Tier 3 instead of building a mock. If the software is open-source
-and Docker-packageable, add a container to the matrix the same way
-we plan to add Mobius (Phase B below). If it's a private binary, we
-can either ask the vespernet operators if they'd run a pinned test
-instance for us, or fall back to a mock in the meantime.
+Phase 2–4 (render + scrollback + catch-up): use Janus for Tier 3.
+The Janus Linux amd64 binary is publicly downloadable from
+`get.vespernet.net` — we wrap it in a Docker container the same way
+we already wrap mhxd, and add a row to the test-server matrix with
+the chat-history cap bit set. Mock-server option (originally Phase C
+of this plan) is no longer needed.
 
-Mock-server option is officially deprioritised — we'd rather find
-out what the real-world chat-history-capable server is. The
-research task is queued as #322 in the task list.
+Janus container shape (Phase C below):
+
+- Base image: `debian:bookworm-slim` (the closed-source binary is
+  a statically-linked Go-like single binary — minimal runtime deps).
+- Build step: `curl -fsSL https://get.vespernet.net/janus-linux-amd64.tar.gz`
+  + sha256 verify against a checked-in expected digest, untar to
+  `/opt/janus`.
+- Config: checked-in `tests/janus/conf/` directory copied into the
+  container — exact format TBD on first build but should mirror the
+  `tests/mhxd/conf/` layout (server config + accounts + initial
+  files).
+- We are NOT redistributing — Docker pull happens at image-build
+  time, same legal posture as the placehold.co banner fetches in
+  tests/mhxd/.
+- Pin the upstream URL by sha256, not by version string. If a new
+  Janus release breaks our config, we'll see it as a checksum
+  mismatch at build time and bump deliberately.
 
 ---
 
@@ -127,22 +152,27 @@ regression has historically taken weeks to show up.
 
 A new `tests/integration/docker-compose.yml` brings up the matrix:
 
-| Service             | Image                                              | Port  | Notes                                       |
-| ------------------- | -------------------------------------------------- | ----- | ------------------------------------------- |
-| `mhxd`              | (built from vendored `mhxd/`)                      | 5500  | Current target — keep as-is.                |
-| `mobius`            | `ghcr.io/jhalter/mobius-hotline-server:v0.21.0`    | 5510  | 1.9-style server, pinned tag for stability. |
-| `mock-chat-history` | (built from `tests/integration/mock-server/`, Go) | 5520  | Implements just enough for chat-history.    |
+| Service  | Image                                            | Port | Notes                                                 |
+| -------- | ------------------------------------------------ | ---- | ----------------------------------------------------- |
+| `mhxd`   | (built from vendored `mhxd/`)                    | 5500 | Current target — keep as-is.                          |
+| `mobius` | `ghcr.io/jhalter/mobius-hotline-server:v0.21.0`  | 5510 | 1.9-style server, pinned tag for stability.           |
+| `janus`  | (built from `tests/janus/`, fetches at build)    | 5520 | Closed-source. Chat-history capable. Sha256-pinned.   |
 
 Pinning tags is important — Mobius makes silent wire-format-affecting
 changes between minor releases. We bump the pin deliberately, with
-a test run, when we want to move forward.
+a test run, when we want to move forward. Janus is sha256-pinned
+rather than version-pinned because the upstream URL doesn't carry
+a version suffix (the `get.vespernet.net/janus-linux-amd64.tar.gz`
+URL always points at "current"); the checksum in our Dockerfile
+both prevents silent updates and gives us a clear "bump required"
+signal when VesperNet ships a new build.
 
 Future slots:
 
-- `mobius-history` — once Mobius merges chat-history, pinned to that
-  tag, replaces the mock for the relevant test suite.
 - `badmoon` if a binary becomes available.
-- `fogWraith-server` if/when that surfaces.
+- A second `mobius` row pinned to a hypothetical chat-history-
+  capable release, once Mobius merges issue #105 and the extension
+  on top of it.
 
 #### Capability matrix
 
@@ -266,17 +296,18 @@ current Tier 3 wall time when all three are in. Worth it.
 
 ### Phasing
 
-| Phase | Scope                                                                                   |
-| ----- | --------------------------------------------------------------------------------------- |
+| Phase | Scope                                                                                                                              |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | A     | Add `hx_test_server` matrix struct + helper + env-var filter; current mhxd-only target acts as the only entry. No behavior change. |
-| B     | Add Mobius to the matrix. Audit failures — expect a handful of mobius-quirk surprises. Fix or skip-flag.                            |
-| C     | Build mock-chat-history server. Add to matrix with `CAP_CHAT_HISTORY` set.              |
-| D     | Wire chat-history tests against the mock (Phase 2/3 of the chat-history plan).         |
-| E     | When a real chat-history server ships, add it to the matrix with the same caps; same tests light up against it.                     |
+| B     | Add Mobius to the matrix. Audit failures — expect a handful of Mobius-quirk surprises. Fix or skip-flag.                           |
+| C     | Build Janus test container (`tests/janus/`), add to matrix with `CAP_CHAT_HISTORY` set.                                            |
+| D     | Wire chat-history tests against Janus (Phase 2/3 of the chat-history plan).                                                        |
+| E     | When Mobius merges chat-history, add a second Mobius row to the matrix with that cap bit; the existing tests light up against it.  |
 
 Phases A–B are independent of the chat-history work and pay off
-immediately (catch Mobius regressions in CI). Phase C is only worth
-doing once we're actively building chat-history support.
+immediately (catch Mobius regressions in CI). Phase C is gated on
+chat-history Phase 2 starting — no point packaging Janus before
+we're ready to write tests against it.
 
 ### Open questions
 
@@ -294,9 +325,16 @@ doing once we're actively building chat-history support.
 4. **Versioned pinning policy.** When does the Mobius pin move? Probably
    "bump explicitly when we want to validate against a newer Mobius;
    never bump silently." Same policy as the GTK 4 dependency.
-5. ~~**Cost of the mock.**~~ Mock punted in favour of using
-   vespernet's real server as the chat-history test target. See the
-   "What this means for our chat-history work" section above.
+5. ~~**Cost of the mock.**~~ Mock cancelled in favour of packaging
+   Janus (the closed-source server vespernet runs). See Part 1's
+   "What this means for our chat-history work" section for the
+   build approach.
+6. **Janus binary stability.** The Linux amd64 binary at
+   `get.vespernet.net/janus-linux-amd64.tar.gz` is unversioned —
+   the URL always points at "current". A new VesperNet release
+   could change behavior overnight. Sha256-pinning the tarball in
+   our Dockerfile gives us a deliberate-bump signal at image-build
+   time when the upstream churns. Acceptable.
 
 ---
 
