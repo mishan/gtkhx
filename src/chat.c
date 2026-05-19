@@ -121,6 +121,75 @@ GdkRGBA colors[] = {
     RGB16 (0xcccc, 0, 0),           /* 36 XTEXT_MARKER (red) */
 };
 
+/* Refresh palette slots that depend on Light / Dark and push the
+ * new palette into every live xtext widget. The mIRC slots (0..31)
+ * are theme-agnostic — same red is "red" in both modes, server
+ * authors expect those exact values. Only the UI roles change:
+ *
+ *   Light  XTEXT_FG = #1d1d1d   (near-black on white)
+ *          XTEXT_BG = #fafafa   (matches Adwaita's view bg)
+ *          MARK_FG  = #ffffff   (selection contrast)
+ *          MARK_BG  = #3584e4   (Adwaita accent blue)
+ *   Dark   XTEXT_FG = #cccccc   (current light-grey on black)
+ *          XTEXT_BG = #000000
+ *          MARK_FG  = #eeeeee
+ *          MARK_BG  = #204a87   (Tango blue, the original here)
+ *
+ * Called once at startup from gtkhx_activate after the
+ * AdwStyleManager has settled on Light or Dark, and again any
+ * time the manager's `dark` property flips. */
+void
+gtkhx_apply_theme_palette (gboolean dark)
+{
+    if (dark) {
+        colors[32] = (GdkRGBA){ 0xee / 255.0, 0xee / 255.0, 0xee / 255.0, 1.0 };
+        colors[33]
+            = (GdkRGBA){ 0x20 / 255.0, 0x4a / 255.0, 0x87 / 255.0, 1.0 };
+        colors[34]
+            = (GdkRGBA){ 0xcc / 255.0, 0xcc / 255.0, 0xcc / 255.0, 1.0 };
+        colors[35] = (GdkRGBA){ 0.0, 0.0, 0.0, 1.0 };
+    } else {
+        colors[32] = (GdkRGBA){ 1.0, 1.0, 1.0, 1.0 };
+        colors[33]
+            = (GdkRGBA){ 0x35 / 255.0, 0x84 / 255.0, 0xe4 / 255.0, 1.0 };
+        colors[34]
+            = (GdkRGBA){ 0x1d / 255.0, 0x1d / 255.0, 0x1d / 255.0, 1.0 };
+        colors[35]
+            = (GdkRGBA){ 0xfa / 255.0, 0xfa / 255.0, 0xfa / 255.0, 1.0 };
+    }
+
+    /* Push the new palette into every live xtext widget. Chat /
+	 * private-chat outputs hang off gtkhx_chat in sess->gchats;
+	 * private-message outputs hang off msgwin in sess->msg_windows.
+	 * News uses a plain GtkTextView (theme-driven CSS), not an
+	 * xtext, so it picks up the system theme without help. */
+    session *sess = &the_session;
+    if (sess->gchats) {
+        GHashTableIter iter;
+        gpointer val;
+        g_hash_table_iter_init (&iter, sess->gchats);
+        while (g_hash_table_iter_next (&iter, NULL, &val)) {
+            struct gtkhx_chat *gchat = val;
+            if (gchat->output) {
+                gtk_xtext_set_palette (GTK_XTEXT (gchat->output), colors);
+                gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+            }
+        }
+    }
+    if (sess->msg_windows) {
+        GHashTableIter iter;
+        gpointer val;
+        g_hash_table_iter_init (&iter, sess->msg_windows);
+        while (g_hash_table_iter_next (&iter, NULL, &val)) {
+            struct msgwin *msg = val;
+            if (msg->outputbuf) {
+                gtk_xtext_set_palette (GTK_XTEXT (msg->outputbuf), colors);
+                gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+            }
+        }
+    }
+}
+
 void
 hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
 {

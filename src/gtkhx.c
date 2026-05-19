@@ -92,13 +92,6 @@ static GtkCssProvider *gtkhx_css_provider = NULL;
 static GtkCssProvider *gtkhx_userlist_css_provider = NULL;
 
 static void
-gdkrgba_to_css (const GdkRGBA *c, char *out, size_t outsz)
-{
-    g_snprintf (out, outsz, "rgb(%u,%u,%u)", (unsigned)(c->red * 255),
-                (unsigned)(c->green * 255), (unsigned)(c->blue * 255));
-}
-
-static void
 ensure_provider_attached (GtkCssProvider *prov)
 {
     /* Phase 4.4: GdkScreen / add_provider_for_screen are gone in GTK 4.
@@ -219,7 +212,6 @@ void
 gtkhx_refresh_css (void)
 {
     gchar *fontprops;
-    char fg_buf[32], bg_buf[32];
     gchar *css;
 
     if (!gtkhx_css_provider) {
@@ -228,23 +220,25 @@ gtkhx_refresh_css (void)
     }
 
     fontprops = pango_to_css_props (gtkhx_font_desc);
-    gdkrgba_to_css (&fg_col, fg_buf, sizeof fg_buf);
-    gdkrgba_to_css (&bg_col, bg_buf, sizeof bg_buf);
 
     /* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
 	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
-	 * inner "text" CSS node so the input area picks up the same look. */
+	 * inner "text" CSS node so the input area picks up the same font.
+	 *
+	 * We deliberately do NOT set color / background-color / caret-color
+	 * here. The early Phase-5 version did, copying fg_col / bg_col from
+	 * the xtext output styling onto the chat input, subject entry,
+	 * private-message editor, and news viewer — which forced light-grey-
+	 * on-black on those widgets regardless of the user's Light / Dark
+	 * theme choice. xtext's chat-output area still uses fg_col / bg_col
+	 * directly (it draws its own contents with cairo), so the in-chat
+	 * line styling is unaffected; only the surrounding input / subject /
+	 * news widgets follow the system theme now, which is what the user
+	 * expects. */
     css = g_strdup_printf (".gtkhx-text, .gtkhx-text text {"
                            "  %s"
-                           "  color: %s;"
-                           "  background-color: %s;"
-                           "  caret-color: %s;"
-                           "}"
-                           ".gtkhx-text text selection {"
-                           "  background-color: %s;"
-                           "  color: %s;"
                            "}",
-                           fontprops, fg_buf, bg_buf, fg_buf, fg_buf, bg_buf);
+                           fontprops);
 
     /* Phase 4.13: gtk_css_provider_load_from_data is deprecated in
 	 * GTK 4.12 in favor of gtk_css_provider_load_from_string (which
@@ -904,6 +898,20 @@ fe_init (void)
  * window already exists. The activate handler just registers it with
  * the app so closing it terminates g_application_run cleanly.
  */
+/* AdwStyleManager::notify::dark trampoline — reads the new dark
+ * state off the manager and pushes it into the xtext palette plus
+ * every live chat-output widget. Connected once from
+ * gtkhx_activate. */
+static void
+on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
+                               gpointer user_data)
+{
+    AdwStyleManager *sm = ADW_STYLE_MANAGER (object);
+    (void)pspec;
+    (void)user_data;
+    gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+}
+
 static void
 gtkhx_activate (GtkApplication *app, gpointer user_data)
 {
@@ -982,6 +990,21 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 	 * point consults its NOTIFY_* pref + the
 	 * notify_omit_focused gate before posting. */
     gtkhx_notify_init (app);
+
+    /* Seed and track the xtext chat-output palette against the
+	 * AdwStyleManager's dark state. The static colors[] array in
+	 * chat.c starts with dark-mode XTEXT_FG/XTEXT_BG values, which
+	 * we'll either keep (manager says dark) or rewrite to the
+	 * light-mode set (manager says light) before any window opens.
+	 * Subsequent `notify::dark` fires (e.g. user flips THEME in
+	 * Settings, or follows-system and system goes dark) re-run
+	 * gtkhx_apply_theme_palette to refresh every open xtext. */
+    {
+        AdwStyleManager *sm = adw_style_manager_get_default ();
+        gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+        g_signal_connect (sm, "notify::dark",
+                          G_CALLBACK (on_style_manager_dark_changed), NULL);
+    }
 }
 
 static void
