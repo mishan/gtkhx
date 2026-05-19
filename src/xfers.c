@@ -576,7 +576,7 @@ xfer_num (struct htxf_conn *htxf)
 }
 /* XXX: restore gtk_threads */
 static int
-rd_wr (int rd_fd, int wr_fd, guint32 data_len, struct htxf_conn *htxf)
+rd_wr (int rd_fd, int wr_fd, guint64 data_len, struct htxf_conn *htxf)
 {
     int r, pos, len;
     guint8 *buf;
@@ -588,13 +588,15 @@ rd_wr (int rd_fd, int wr_fd, guint32 data_len, struct htxf_conn *htxf)
         return 111;
     }
     while (data_len) {
-        if ((len = read (rd_fd, buf, (bufsiz < data_len) ? bufsiz : data_len))
-            < 1) {
+        size_t want = (bufsiz < data_len) ? bufsiz : (size_t)data_len;
+        if ((len = read (rd_fd, buf, want)) < 1) {
+            g_free (buf);
             return len ? errno : EIO;
         }
         pos = 0;
         while (len) {
             if ((r = write (wr_fd, &(buf[pos]), len)) < 1) {
+                g_free (buf);
                 return errno;
             }
             pos += r;
@@ -668,9 +670,11 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
  *
  * Returns 0 on success, errno-like positive code on failure. */
 static int
-file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
+file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
 {
-    guint32 pos, len, tot_len;
+    guint32 pos, len;
+    guint64 fork_len = 0;
+    guint64 tot_len;
     int f, r, retval = 0;
     guint8 typecrea[8];
     struct hfsinfo fi;
@@ -713,9 +717,28 @@ file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
         hfsinfo_write (htxf->path, &fi);
     }
 
-    HN32 (&len, &buf[pos - 4]);
-    tot_len += len;
-    if (!len) {
+    /* DATA fork length. The 16-byte fork header lives at buf[pos-16
+	 * .. pos]: "DATA" + Compression(4) + Reserved(4) + DataSize(4).
+	 *
+	 * Legacy mode: DataSize at pos-4 is the 32-bit fork length;
+	 * Compression must be zero.
+	 *
+	 * Large-file mode (htxf->opt.large): the same 16-byte header is
+	 * reinterpreted — Compression (at pos-12) holds the HIGH 32
+	 * bits, DataSize (at pos-4) holds the LOW 32 bits. Combine into
+	 * the full 64-bit length. Source:
+	 * fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md
+	 * section "Flattened File Object Fork Headers". */
+    {
+        guint32 lo, hi = 0;
+        HN32 (&lo, &buf[pos - 4]);
+        if (htxf->opt.large) {
+            HN32 (&hi, &buf[pos - 12]);
+        }
+        fork_len = ((guint64)hi << 32) | (guint64)lo;
+    }
+    tot_len += fork_len;
+    if (!fork_len) {
         goto get_rsrc;
     }
     if (!htxf->opt.preview) {
@@ -727,7 +750,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
         if (htxf->data_pos) {
             lseek (f, htxf->data_pos, SEEK_SET);
         }
-        retval = rd_wr (s, f, len, htxf);
+        retval = rd_wr (s, f, fork_len, htxf);
         fsync (f);
         close (f);
     } else {
@@ -755,7 +778,11 @@ file_recv_one (int s, struct htxf_conn *htxf, guint32 file_budget, guint8 *buf)
             memcpy (creator_s, &typecrea[4], 4);
             hx_preview_set_info (p, type_s, creator_s);
         }
-        retval = preview_get (s, len, htxf, p);
+        /* preview_get still takes 32-bit length; previews are small
+		 * files (the preview window's whole point), so a >4 GiB
+		 * preview is implausible. Clamp on the way through. */
+        retval = preview_get (s, (guint32)MIN (fork_len, (guint64)0xFFFFFFFFu),
+                              htxf, p);
     }
     if (retval) {
         return retval;
@@ -789,7 +816,7 @@ get_rsrc:
 	 * gave up after the marker we time out and move on. */
     if (htxf->opt.folder) {
         if (tot_len < file_budget) {
-            guint32 remaining = file_budget - tot_len;
+            guint64 remaining = file_budget - tot_len;
             while (remaining > 0) {
                 fd_set rfds;
                 struct timeval tv;
@@ -814,7 +841,7 @@ get_rsrc:
                 if (got <= 0) {
                     break;
                 }
-                remaining -= (guint32)got;
+                remaining -= (guint64)got;
                 htxf->total_pos += (guint32)got;
                 post_file_update (htxf);
             }
@@ -839,8 +866,18 @@ get_rsrc:
         htxf->total_pos += r;
         post_file_update (htxf);
     }
-    HN32 (&len, &buf[12]);
-    if (!len) {
+    /* MACR fork header — same split encoding as DATA: in large-
+	 * file mode the Compression field at offset 4-7 holds the
+	 * high 32 bits, DataSize at 12-15 holds the low 32 bits. */
+    {
+        guint32 lo, hi = 0;
+        HN32 (&lo, &buf[12]);
+        if (htxf->opt.large) {
+            HN32 (&hi, &buf[4]);
+        }
+        fork_len = ((guint64)hi << 32) | (guint64)lo;
+    }
+    if (!fork_len) {
         goto done;
     }
     if ((f = resource_open (htxf->path, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR))
@@ -850,7 +887,7 @@ get_rsrc:
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
-    retval = rd_wr (s, f, len, htxf);
+    retval = rd_wr (s, f, fork_len, htxf);
     if (retval) {
         return retval;
     }
@@ -1137,6 +1174,26 @@ file_send_one (int s, struct htxf_conn *htxf, guint8 *buf)
     int f, retval;
     struct hfsinfo fi;
 
+    /* Large-file solo upload: spec says "uploads send raw file data
+	 * only — no FFO wrapper." The server reconstructs metadata from
+	 * the filesystem. Per-file framing inside folder uploads still
+	 * uses FFO (folder spec requires it), so this raw-data shortcut
+	 * is gated on !opt.folder. The handshake's HTXF_FLAG_LARGE_FILE
+	 * tells the server which shape to expect.
+	 *
+	 * Note: large-file uploads do NOT support resume — the FFO
+	 * framing's INFO fork carries the resume offset, and we are
+	 * omitting it. The spec says "If a partial upload exists,
+	 * implementations SHOULD overwrite it." */
+    if (htxf->opt.large && !htxf->opt.folder) {
+        if ((f = open (htxf->path, O_RDONLY)) < 0) {
+            return errno;
+        }
+        retval = rd_wr (f, s, htxf->data_size, htxf);
+        close (f);
+        return retval;
+    }
+
     memcpy (buf, "\
 FILP\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\
 \2INFO\0\0\0\0\0\0\0\0\0\0\0^AMAC\
@@ -1159,10 +1216,19 @@ TYPECREA\
         = hfs_h_to_mtime (*((guint32 *)(&fi.modify_time)));
     buf[116] = fi.comlen;
     memcpy (&buf[117], fi.comment, fi.comlen);
+    /* DATA fork header. Legacy mode: 16 bytes of "DATA" + zeros +
+	 * 32-bit length. Large-file mode (folder per-file in large-
+	 * file mode): split encoding — high 32 bits in the Compression
+	 * slot at offset 4-7, low 32 bits in DataSize at offset 12-15. */
     memcpy (&buf[117 + fi.comlen], "DATA\0\0\0\0\0\0\0\0", 12);
     {
-        guint32 tmp = htxf->data_size - htxf->data_pos;
-        HN32 (&buf[129 + fi.comlen], &tmp);
+        guint64 fork_len = htxf->data_size - htxf->data_pos;
+        guint32 lo = (guint32)(fork_len & 0xFFFFFFFFu);
+        HN32 (&buf[129 + fi.comlen], &lo);
+        if (htxf->opt.large) {
+            guint32 hi = (guint32)(fork_len >> 32);
+            HN32 (&buf[121 + fi.comlen], &hi);
+        }
     }
     if (write (s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
         return errno ? errno : EIO;
@@ -1185,8 +1251,17 @@ TYPECREA\
     close (f);
 
 put_rsrc:
+    /* MACR fork header — same legacy / split-encoding choice as
+	 * the DATA fork above. */
     memcpy (buf, "MACR\0\0\0\0\0\0\0\0", 12);
-    HN32 (&buf[12], &htxf->rsrc_size);
+    {
+        guint32 lo = (guint32)(htxf->rsrc_size & 0xFFFFFFFFu);
+        HN32 (&buf[12], &lo);
+        if (htxf->opt.large) {
+            guint32 hi = (guint32)(htxf->rsrc_size >> 32);
+            HN32 (&buf[4], &hi);
+        }
+    }
     if (write (s, buf, 16) != 16) {
         /* Same behaviour as the inlined version: a short write at
 		 * the MACR-marker boundary is treated as a clean stop (the
