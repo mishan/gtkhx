@@ -221,6 +221,13 @@ struct htlc_conn {
     /* keylen in bytes */
     u_int8_t cipher_encode_keylen, cipher_decode_keylen;
     u_int8_t cipher_encode_type, cipher_decode_type;
+    /* HOPE cipher mode (CIPHER_MODE_STREAM | CIPHER_MODE_AEAD).
+	 * Defaults to STREAM. The server's HTLS_DATA_CIPHER_MODE chunk
+	 * in the HOPE Step-2 reply sets this — "AEAD" → AEAD, anything
+	 * else (or chunk absent) → STREAM. cipher_encode/decode dispatch
+	 * on this to pick between the byte-stream XOR path (RC4/
+	 * Blowfish) and the framed Seal/Open path (ChaCha20-Poly1305). */
+    u_int8_t cipher_mode;
 #if defined(CONFIG_COMPRESS)
     u_int8_t zc_hdrlen;
     u_int8_t zc_ran;
