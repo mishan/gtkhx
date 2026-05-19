@@ -64,4 +64,12 @@ extern void hx_change_subject (struct htlc_conn *htlc, guint32 cid,
 extern void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid,
                           guint16 style);
 
+/* Refresh xtext palette slots that depend on Light / Dark theme
+ * (XTEXT_FG / XTEXT_BG plus the selection colours) and push the
+ * new palette into every live xtext widget. Called once at startup
+ * after AdwStyleManager comes up, and again whenever the manager's
+ * `dark` property flips. The mIRC palette slots (0..31) are theme-
+ * agnostic and stay put. */
+extern void gtkhx_apply_theme_palette (gboolean dark);
+
 #endif

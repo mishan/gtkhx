@@ -898,6 +898,20 @@ fe_init (void)
  * window already exists. The activate handler just registers it with
  * the app so closing it terminates g_application_run cleanly.
  */
+/* AdwStyleManager::notify::dark trampoline — reads the new dark
+ * state off the manager and pushes it into the xtext palette plus
+ * every live chat-output widget. Connected once from
+ * gtkhx_activate. */
+static void
+on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
+                               gpointer user_data)
+{
+    AdwStyleManager *sm = ADW_STYLE_MANAGER (object);
+    (void)pspec;
+    (void)user_data;
+    gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+}
+
 static void
 gtkhx_activate (GtkApplication *app, gpointer user_data)
 {
@@ -976,6 +990,21 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 	 * point consults its NOTIFY_* pref + the
 	 * notify_omit_focused gate before posting. */
     gtkhx_notify_init (app);
+
+    /* Seed and track the xtext chat-output palette against the
+	 * AdwStyleManager's dark state. The static colors[] array in
+	 * chat.c starts with dark-mode XTEXT_FG/XTEXT_BG values, which
+	 * we'll either keep (manager says dark) or rewrite to the
+	 * light-mode set (manager says light) before any window opens.
+	 * Subsequent `notify::dark` fires (e.g. user flips THEME in
+	 * Settings, or follows-system and system goes dark) re-run
+	 * gtkhx_apply_theme_palette to refresh every open xtext. */
+    {
+        AdwStyleManager *sm = adw_style_manager_get_default ();
+        gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+        g_signal_connect (sm, "notify::dark",
+                          G_CALLBACK (on_style_manager_dark_changed), NULL);
+    }
 }
 
 static void
