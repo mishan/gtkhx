@@ -971,7 +971,11 @@ create_users_window (GtkWidget *widget, gpointer data)
     users_list = gtk_hlist_new_with_titles (2, titles);
     gtk_hlist_set_column_width (GTK_HLIST (users_list), 0, 35);
     gtk_hlist_set_column_width (GTK_HLIST (users_list), 1, 240);
-    gtk_hlist_set_row_height (GTK_HLIST (users_list), 18);
+    /* Row height bumped from 18 to 24 in 2026-05 alongside the
+	 * 1.25x pixel-scale on the Name column (see below). Both
+	 * combine to give the list ~25% larger entries — easier to
+	 * read at typical desktop scales. */
+    gtk_hlist_set_row_height (GTK_HLIST (users_list), 24);
     gtk_hlist_set_shadow_type (GTK_HLIST (users_list), GTK_SHADOW_NONE);
 
     /* Phase 5: column 1 (Name) gets the Mac-classic overlay layout.
@@ -980,11 +984,25 @@ create_users_window (GtkWidget *widget, gpointer data)
 	 * the cell edge — so names stay column-aligned regardless of
 	 * how wide the user's icon happens to be.
 	 *
-	 * The offset (22 px) clears the typical stock-icon width
-	 * (16-18 px from icons.rsrc) plus a few px of breathing room.
-	 * Wider icons render past the offset as banner backgrounds with
-	 * the name overlaid on top — the Mac-classic look. */
-    gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (users_list), 1, 22);
+	 * The offset clears the icon width plus a few px of breathing
+	 * room. We bumped this from 22 to 36 in 2026-05 — the original
+	 * value just cleared 16-18 px stock-icon widths, but the
+	 * medium-wide "non-banner" tiles (UNIX = 500, a handful of
+	 * others) are 24-32 px and were overlapping the name. 36 gives
+	 * those room and still keeps banner-format icons (60+ px wide)
+	 * rendering as backgrounds with the name overlaid on top —
+	 * the Mac-classic look. */
+    gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (users_list), 1, 36);
+    /* Pixel scale 1.25x on the Name column — multiplies both the
+	 * icon dimensions and the font size. Combined with the 24 px
+	 * row height above, the user list reads ~25% larger without
+	 * affecting other tables (Tracker, Tasks, Files browser).
+	 * Text outline draws a 1 px contrasting halo behind each name
+	 * so light user colours (the pink default in particular) stay
+	 * readable on busy banner-icon backgrounds. */
+    gtk_hlist_column_set_overlay_decoration (GTK_HLIST (users_list), 1,
+                                             /*pixel_scale=*/1.25,
+                                             /*text_outline=*/TRUE);
     gtk_hlist_set_column_justification (GTK_HLIST (users_list), 1,
                                         GTK_JUSTIFY_LEFT);
     gtk_hlist_set_compare_func (GTK_HLIST (users_list),
