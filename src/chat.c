@@ -1552,6 +1552,13 @@ create_chat_window (GtkWidget *widget, gpointer data)
     }
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
+    /* Inner margins so the text doesn't sit flush against the
+	 * rounded-corner frame (the left+top corner used to clip the
+	 * leading character + first line of the input). */
+    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
+    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
+    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
+    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
 
     {
         GtkWidget *input_scroll = gtk_scrolled_window_new ();
@@ -1896,6 +1903,12 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     }
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
+    /* Inner margins — see the matching block in the main-chat
+	 * input setup for the rationale (rounded-frame clip). */
+    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
+    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
+    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
+    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
     {
         GtkWidget *pchat_input_scroll = gtk_scrolled_window_new ();
         gtk_scrolled_window_set_policy (
