@@ -7,10 +7,6 @@ Files:
 - Bug stomping / fixing
 - Icons -- make sure we are using all the correct ones
 
-News:
-- Remove "Post News" from Toolbar since "News" window already has it
-- Re-work the UI of the "Post News" dialog to look nicer
-
 Icons:
 - Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
 - Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
@@ -33,10 +29,6 @@ Bookmarks:
 Tracker:
 - Ship with some more built in trackers configured
 - New Tracker protocol support
-
-Chat History:
-- Support chat history protocol extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Chat-History.md
-- Need to think about how we want it to work from a user's perspective
 
 Voice Chat:
 - Build initial prototype of voice chat extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Voice.md
