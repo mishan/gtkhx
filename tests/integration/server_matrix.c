@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include "integration_harness.h" /* hx_integration_connect_to prototype */
 #include "server_matrix.h"
 
 /* ---- The matrix --------------------------------------------------- */
@@ -189,16 +190,10 @@ hx_test_server_default (void)
     return &overridden;
 }
 
-/* connect-with-timeout lives in integration_harness.c — we expose
- * it via an internal entry point declared in server_matrix.h's
- * implementation pair so we don't duplicate the addrinfo dance.
- *
- * The actual function `hx_integration_connect_to` is defined in
- * integration_harness.c (it's the same body as the existing
- * connect_with_timeout, just made non-static and given the
- * hx_integration_ prefix). server_matrix.c calls it. */
-extern int hx_integration_connect_to (const char *host, int port,
-                                      int timeout_ms);
+/* connect-with-timeout lives in integration_harness.c — we call
+ * its hx_integration_connect_to() entry point so we don't
+ * duplicate the addrinfo + non-blocking-connect dance. The
+ * prototype lives in integration_harness.h, included above. */
 
 int
 hx_test_server_connect (const hx_test_server *srv)

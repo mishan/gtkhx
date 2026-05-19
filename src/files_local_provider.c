@@ -11,12 +11,18 @@
 
 #include <gio/gio.h>
 #include <glib.h>
-#include <glib/gi18n.h>
 
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
 #include "prefs.h" /* gtkhx_prefs.download_path */
+
+/* gi18n.h after the project headers — compat.h (pulled in via
+ * prefs.h above) ships an identity-macro `_` for the no-gettext
+ * case, and we want the real gettext expansion here. Same dance
+ * as files_browser.c. */
+#undef _
+#include <glib/gi18n.h>
 
 struct _HxLocalFilesProvider {
     GObject parent_instance;
