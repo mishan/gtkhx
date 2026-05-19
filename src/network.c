@@ -1000,16 +1000,21 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * can_ping bit so HTLC_HDR_PING keepalives are accepted. */
         cv16 = htons (185);
 
-        /* DATA_CAPABILITIES bitmask. Today we advertise just
-		 * CAP_TEXT_ENCODING (bit 1) — "I speak UTF-8." Servers
-		 * that support the spec will echo bit 1 back in the LOGIN
-		 * reply, after which the session's text-bearing fields are
-		 * UTF-8 in both directions. Servers that don't know the
-		 * chunk silently ignore it (per spec) and the session falls
-		 * back to legacy Mac Roman framing — same as before this
-		 * chunk was added. Phase E1 only advertises; the actual
-		 * UTF-8/Mac-Roman encode/decode work is Phase E2+. */
-        guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
+        /* DATA_CAPABILITIES bitmask. We advertise:
+		 *   bit 0  CAP_LARGE_FILES    "I can handle 64-bit sizes."
+		 *   bit 1  CAP_TEXT_ENCODING  "I speak UTF-8."
+		 *
+		 * Servers that support the spec echo the bits they
+		 * accept back in the LOGIN reply. Unknown bits are
+		 * ignored per spec; servers that don't recognise the
+		 * chunk silently fall back to legacy 32-bit Mac Roman
+		 * framing — same behaviour as without this chunk.
+		 *
+		 * Per the Large-File spec the chunk is "typically 2 bytes,
+		 * expandable to 8." Two bytes covers bits 0-5; we send
+		 * those today. */
+        guint16 caps16
+            = htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
 
         /* LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
 		 * 1.5+ servers will get our nick via AGREEMENTAGREE after
@@ -1163,6 +1168,16 @@ htxf_connect (struct htxf_conn *htxf)
     struct htxf_hdr h;
     int s;
     char errbuf[256];
+    /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
+	 * caps include the bit, advertise HTXF_FLAG_LARGE_FILE in
+	 * the handshake flags. If the transfer size also exceeds
+	 * 0xFFFFFFFF, set HTXF_FLAG_SIZE64 and append the 8-byte
+	 * length in a 24-byte handshake variant (with the legacy
+	 * 32-bit length zeroed per spec to prevent a misbehaving
+	 * legacy peer from treating it as a partial read). */
+    gboolean large = htxf->htlc
+                     && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0;
+    gboolean size64 = large && htxf->total_size > 0xFFFFFFFFULL;
 
     s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport, errbuf,
                                  sizeof (errbuf));
@@ -1172,26 +1187,43 @@ htxf_connect (struct htxf_conn *htxf)
 
     h.magic = htonl (HTXF_MAGIC_INT);
     h.ref = htonl (htxf->ref);
-    h.len = htonl (htxf->total_size);
+    /* Spec: when SIZE64 is set, zero the legacy 32-bit field
+	 * (otherwise a non-large-file peer might attempt a partial
+	 * read and treat it as complete). Otherwise carry the size
+	 * in the legacy field as before. */
+    h.len = size64 ? 0 : htonl ((guint32)htxf->total_size);
     /* The last 4 bytes of the HTXF magic header — declared as
 	 * `unknown` u32 in struct htxf_hdr for historical reasons —
-	 * are laid out on the wire as `u16 type + u16 reserved`.
-	 * Setting type tells the server which subchannel framing to
-	 * use; for folder transfers it MUST be HTXF_TYPE_FOLDER (=1)
-	 * or Mac-native servers will dispatch this connection into
-	 * the single-file framing path and wait for FILP bytes while
-	 * we're driving the FILE_NEXT state machine (deadlock that
-	 * looks like a hang from both ends). mhxd is more lenient —
-	 * it matches by ref to a pre-typed htxf_conn — but we should
-	 * speak the proper wire format regardless. */
+	 * are laid out on the wire as `u16 type + u16 reserved` in
+	 * the legacy interpretation, OR as a flags bitmask under
+	 * the Large-File spec. The two interpretations share the
+	 * same 4 bytes: the type lives in the high u16, the flags
+	 * in the low u16. We OR both in so each reader sees the
+	 * field it expects. */
     {
         guint16 type
             = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-        h.unknown = htonl (((guint32)type) << 16);
+        guint32 flags = 0;
+        if (large) {
+            flags |= HTXF_FLAG_LARGE_FILE;
+        }
+        if (size64) {
+            flags |= HTXF_FLAG_SIZE64;
+        }
+        h.unknown = htonl ((((guint32)type) << 16) | flags);
     }
     if (write (s, &h, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
         close (s);
         return -1;
+    }
+    /* 24-byte variant: append the 8-byte big-endian length after
+	 * the 16-byte header. Only present when SIZE64 is set. */
+    if (size64) {
+        guint64 be = GUINT64_TO_BE (htxf->total_size);
+        if (write (s, &be, sizeof be) != (ssize_t)sizeof be) {
+            close (s);
+            return -1;
+        }
     }
 
     return s;

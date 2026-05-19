@@ -1510,6 +1510,12 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                             caps = (caps << 8) | dh->data[i];
                         }
                         htlc->caps = caps;
+                        if (caps & HTLC_CAP_LARGE_FILES) {
+                            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                                              "server confirmed large-file "
+                                              "(64-bit) mode for this "
+                                              "session\n");
+                        }
                         if (caps & HTLC_CAP_TEXT_ENCODING) {
                             hx_printf_prefix (htlc, 0, INFOPREFIX,
                                               "server confirmed UTF-8 text "
@@ -1894,6 +1900,10 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
     char name[256], comment[256];
     guint16 nlen, clen, tlen;
     guint32 size = 0;
+    /* Large-file (CAP_LARGE_FILES) companion: when present, prefer
+	 * the 64-bit size over the clamped 32-bit one. */
+    guint64 size64 = 0;
+    gboolean size64_seen = FALSE;
     char created[32], modified[32];
 
     if (task_inerror (htlc)) {
@@ -1928,6 +1938,17 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
             size = 0;
             for (guint16 i = 0; i < _len && i < 4; i++) {
                 size = (size << 8) | dh->data[i];
+            }
+            break;
+        case HTLS_DATA_FILESIZE64:
+            /* Companion to FILE_SIZE; sent by large-file-mode
+			 * servers. 8-byte big-endian unsigned. */
+            if (_len >= 8) {
+                size64 = 0;
+                for (guint16 _i = 0; _i < 8; _i++) {
+                    size64 = (size64 << 8) | dh->data[_i];
+                }
+                size64_seen = TRUE;
             }
             break;
         case HTLS_DATA_FILE_NAME:
@@ -1967,13 +1988,20 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
     hx_format_hotline_date (date_modify, modified, sizeof modified);
 
     gtkhx_session_emit_file_info (gtkhx_session_get_default (), path, name,
-                                  crea, type, comment, modified, created, size);
+                                  crea, type, comment, modified, created,
+                                  size64_seen ? size64 : (guint64)size);
 }
 
 void
 rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {
     guint32 ref = 0, size = 0, queue = 0;
+    /* Large-file (CAP_LARGE_FILES) companion: when present, the
+	 * server sends DATA_XFERSIZE64 alongside the legacy 32-bit
+	 * DATA_HTXF_SIZE. We prefer the 64-bit value when set; the
+	 * legacy field is clamped to 0xFFFFFFFF in that case. */
+    guint64 size64 = 0;
+    gboolean size64_seen = FALSE;
     int i;
 
     for (i = 0; i < nxfers; i++) {
@@ -2002,6 +2030,16 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         case HTLS_DATA_HTXF_SIZE:
             dh_getint (size);
             break;
+        case HTLS_DATA_XFERSIZE64:
+            /* 8-byte big-endian unsigned. */
+            if (_len >= 8) {
+                size64 = 0;
+                for (guint16 _i = 0; _i < 8; _i++) {
+                    size64 = (size64 << 8) | dh->data[_i];
+                }
+                size64_seen = TRUE;
+            }
+            break;
         case HTLS_DATA_HTXF_REF:
             dh_getint (ref);
             break;
@@ -2012,12 +2050,12 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     }
     dh_end ();
 
-    if (!size || !ref) {
+    if ((!size && !size64_seen) || !ref) {
         return;
     }
 
     htxf->ref = ref;
-    htxf->total_size = size;
+    htxf->total_size = size64_seen ? size64 : (guint64)size;
     htxf->queue = queue;
 
     gettimeofday (&htxf->start, 0);
@@ -2058,6 +2096,10 @@ void
 rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {
     guint32 ref = 0, size = 0, queue = 0, nfiles = 0;
+    /* Large-file (CAP_LARGE_FILES) companion field — see
+	 * rcv_task_file_get above for the rationale. */
+    guint64 size64 = 0;
+    gboolean size64_seen = FALSE;
     int i;
 
     for (i = 0; i < nxfers; i++) {
@@ -2086,6 +2128,15 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         case HTLS_DATA_HTXF_SIZE:
             dh_getint (size);
             break;
+        case HTLS_DATA_XFERSIZE64:
+            if (_len >= 8) {
+                size64 = 0;
+                for (guint16 _i = 0; _i < 8; _i++) {
+                    size64 = (size64 << 8) | dh->data[_i];
+                }
+                size64_seen = TRUE;
+            }
+            break;
         case HTLS_DATA_HTXF_REF:
             dh_getint (ref);
             break;
@@ -2108,7 +2159,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 	 * folder_get_thread's per-file file_recv_one calls bump
 	 * total_pos so progress reads sensibly across the whole
 	 * folder. */
-    htxf->total_size = size ? size : 1;
+    htxf->total_size = size64_seen ? size64 : (size ? (guint64)size : 1);
     htxf->queue = queue;
     (void)nfiles; /* count is informational for now — wire it into
 	                 * the tasks-window label in a follow-up. */

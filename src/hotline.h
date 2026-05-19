@@ -221,6 +221,41 @@ struct hl_user_data {
 #define HTLC_CAP_CHAT_HISTORY ((guint16)0x0010)
 #define HTLC_CAP_EXTENDED_PRIV ((guint16)0x0020)
 
+/* 64-bit companion fields for the Large-File extension. Sent
+ * alongside the legacy 32-bit chunks in large-file mode; legacy
+ * field is clamped to 0xFFFFFFFF when the real value overflows
+ * 32 bits. Receivers should prefer the 64-bit value when both
+ * are present.
+ *
+ * Source: fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md.
+ */
+#define HTLC_DATA_FILESIZE64 ((guint16)0x01f1)
+#define HTLS_DATA_FILESIZE64 ((guint16)0x01f1)
+#define HTLC_DATA_OFFSET64 ((guint16)0x01f2)
+#define HTLS_DATA_OFFSET64 ((guint16)0x01f2)
+#define HTLC_DATA_XFERSIZE64 ((guint16)0x01f3)
+#define HTLS_DATA_XFERSIZE64 ((guint16)0x01f3)
+#define HTLC_DATA_FOLDER_ITEM_COUNT64 ((guint16)0x01f4)
+#define HTLS_DATA_FOLDER_ITEM_COUNT64 ((guint16)0x01f4)
+
+/* HTXF handshake flags. Default (0x00) is the 16-byte legacy
+ * handshake. In large-file mode the handshake grows to 24 bytes
+ * with an 8-byte big-endian length field appended.
+ *
+ *   HTXF_FLAG_LARGE_FILE   large-file mode active for this xfer
+ *   HTXF_FLAG_SIZE64       8-byte length follows the 16-byte hdr;
+ *                          only set when LARGE_FILE is set AND
+ *                          the transfer size exceeds 32 bits.
+ *                          When set, the legacy 32-bit length
+ *                          (bytes 8-11) is zeroed to prevent a
+ *                          legacy peer from mis-reading the
+ *                          transfer.
+ *
+ * Source: fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md
+ * section "Handshake Flags and Length". */
+#define HTXF_FLAG_LARGE_FILE ((guint32)0x00000001)
+#define HTXF_FLAG_SIZE64 ((guint32)0x00000002)
+
 #define HTLC_DATA_CHAT_SUBJECT ((guint16)0x0073)
 #define HTLC_DATA_FILE_NAME ((guint16)0x00c9)
 #define HTLC_DATA_DIR ((guint16)0x00ca)

@@ -3,9 +3,6 @@ General:
 - Publish to Flathub
 - Keyboard shortcuts like Ctrl-W and Ctrl-Q ought to work in all windows/dialogs including Settings
 
-Protocol:
-- Support "Download Info" (211) notices from server https://github.com/jhalter/mobius/blob/master/docs/PROTOCOL.md
-
 Files:
 - Bug stomping / fixing
 - Icons -- make sure we are using all the correct ones

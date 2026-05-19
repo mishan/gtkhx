@@ -311,7 +311,17 @@ xfer_go (struct htxf_conn *htxf)
             g_free (nm_wire);
         }
     } else {
-        guint32 size = htonl (htxf->total_size);
+        /* Legacy 32-bit field. Per the Large-File spec, "MUST be
+		 * clamped to 0xFFFFFFFF when the true size exceeds 32
+		 * bits" — receivers in large-file mode prefer the 64-bit
+		 * companion below. */
+        guint32 size = htonl ((guint32)MIN (htxf->total_size,
+                                            (guint64)0xFFFFFFFFUL));
+        /* 64-bit XFERSIZE companion, sent alongside the legacy
+		 * chunk when CAP_LARGE_FILES is active for the session.
+		 * Endianness: GUINT64_TO_BE (big-endian on the wire). */
+        gboolean large = (the_session.htlc.caps & HTLC_CAP_LARGE_FILES) != 0;
+        guint64 size64 = GUINT64_TO_BE (htxf->total_size);
 
         task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_put), htxf, 0,
                   "xfer_go");
@@ -329,26 +339,59 @@ xfer_go (struct htxf_conn *htxf)
 
         if (exists_remote (htxf->remotepath)) {
             if (hldir) {
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                         HTLC_DATA_DIR, hldirlen, hldir, HTLC_DATA_FILE_PREVIEW,
-                         2, "\0\1", HTLC_DATA_HTXF_SIZE, 4, &size);
+                if (large) {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 5,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_DIR, hldirlen, hldir,
+                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
+                             HTLC_DATA_HTXF_SIZE, 4, &size,
+                             HTLC_DATA_XFERSIZE64, 8, &size64);
+                } else {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_DIR, hldirlen, hldir,
+                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
+                             HTLC_DATA_HTXF_SIZE, 4, &size);
+                }
             } else {
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                         HTLC_DATA_FILE_PREVIEW, 2, "\0\1", HTLC_DATA_HTXF_SIZE,
-                         4, &size);
+                if (large) {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
+                             HTLC_DATA_HTXF_SIZE, 4, &size,
+                             HTLC_DATA_XFERSIZE64, 8, &size64);
+                } else {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
+                             HTLC_DATA_HTXF_SIZE, 4, &size);
+                }
             }
         } else {
             if (hldir) {
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                         HTLC_DATA_DIR, hldirlen, hldir, HTLC_DATA_HTXF_SIZE, 4,
-                         &size);
+                if (large) {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_DIR, hldirlen, hldir,
+                             HTLC_DATA_HTXF_SIZE, 4, &size,
+                             HTLC_DATA_XFERSIZE64, 8, &size64);
+                } else {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_DIR, hldirlen, hldir,
+                             HTLC_DATA_HTXF_SIZE, 4, &size);
+                }
             } else {
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 2,
-                         HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                         HTLC_DATA_HTXF_SIZE, 4, &size);
+                if (large) {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_HTXF_SIZE, 4, &size,
+                             HTLC_DATA_XFERSIZE64, 8, &size64);
+                } else {
+                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 2,
+                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
+                             HTLC_DATA_HTXF_SIZE, 4, &size);
+                }
             }
         }
         g_free (nm_wire);
