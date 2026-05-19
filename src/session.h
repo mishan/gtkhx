@@ -103,6 +103,13 @@ struct ifn {
     unsigned int n;
 };
 
+/* Forward declaration so the chat-history bookkeeping below can
+ * carry textentry pointers without dragging in xtext.h (which
+ * itself #include "session.h" — including it back here would be a
+ * circular include). The full typedef lives in xtext.h; C11
+ * allows redundant typedefs of the same struct. */
+typedef struct textentry textentry;
+
 /* ---- Chat windows ------------------------------------------------- */
 
 /* Phase 5+ (GLib-collections): no more next/prev. Open chat-window
@@ -140,18 +147,26 @@ struct gtkhx_chat {
      *   request until the first completes (the receive path
      *   clears the flag).
      *
-     * history_load_older_at_top — TRUE iff the topmost entry
-     *   in the xtext buffer is currently the Load-older
-     *   sentinel row (Phase 3.2). Before prepending an older
-     *   batch the renderer evicts the existing sentinel via
-     *   gtk_xtext_remove_first, then re-prepends a fresh one
-     *   on top after the batch lands if has_more still true.
-     *   The flag is the bookkeeping; the actual position in
-     *   the buffer is the source of truth. */
-    guint64  history_oldest_msgid;
-    gboolean history_has_more;
-    gboolean history_loading;
-    gboolean history_load_older_at_top;
+     * history_anchor_ent — pointer to the xtext textentry of
+     *   the opening "── chat history (N) ──" divider, saved
+     *   on initial render. Acts as the insert-point for all
+     *   subsequent Load-Older inserts: new older entries +
+     *   the refreshed sentinel land just BEFORE this anchor,
+     *   so older content stays inside the chat-history block
+     *   instead of jumping above the server-notice preamble
+     *   ("[hx] connecting to ...") that hx_printf wrote first.
+     *
+     * history_load_older_ent — pointer to the textentry of
+     *   the currently-rendered "↑ Load older" sentinel row,
+     *   or NULL when no sentinel is rendered. Refreshed on
+     *   every batch: removed via gtk_xtext_remove_entry, then
+     *   re-inserted before the anchor if has_more is still
+     *   true on the new batch. */
+    guint64    history_oldest_msgid;
+    gboolean   history_has_more;
+    gboolean   history_loading;
+    textentry *history_anchor_ent;
+    textentry *history_load_older_ent;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */
