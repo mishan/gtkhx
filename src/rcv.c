@@ -133,16 +133,28 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 * cap wasn't negotiated, so this is safe to gate on caps
 	 * here too — task_new only fires when we'll actually send.
 	 *
-	 * Limit 50 is the spec's recommended default. A
-	 * user-controllable knob arrives in a Phase 2 follow-up;
-	 * shipping the fix for the "Janus no longer replays history
-	 * to us" regression sooner is worth the missing pref. */
+	 * Limit comes from gtkhx_prefs.chat_history_initial (default 50,
+	 * matches the spec's recommended default). 0 disables the
+	 * initial pull entirely — the server still advertises
+	 * CAP_CHAT_HISTORY, but the user has to click Load older to see
+	 * anything. Clamp negative values defensively (the cfgvars INT
+	 * parser doesn't enforce a floor). */
     if (htlc->caps & HTLC_CAP_CHAT_HISTORY) {
-        task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
-                  GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
-                  "chat-history");
-        hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
-                             /*before=*/0, /*after=*/0, /*limit=*/50);
+        int limit = gtkhx_prefs.chat_history_initial;
+        if (limit < 0) {
+            limit = 0;
+        }
+        if (limit > 0xffff) {
+            limit = 0xffff;
+        }
+        if (limit > 0) {
+            task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
+                      GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
+                      "chat-history");
+            hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
+                                 /*before=*/0, /*after=*/0,
+                                 (guint16) limit);
+        }
     }
 }
 

@@ -1028,14 +1028,27 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
                "Load-older click: cid=%u, before=%" G_GUINT64_FORMAT,
                gchat->cid, gchat->history_oldest_msgid);
 
-    /* Same fetch limit as the initial post-login pull (50). When
-	 * the v1 pref lands this becomes prefs.chat_history_initial. */
+    /* Use the same per-batch count as the initial post-login pull
+	 * (gtkhx_prefs.chat_history_initial, default 50). If the user
+	 * has set initial=0 to suppress the auto-pull, fall back to a
+	 * 50-message floor here — the user explicitly engaged the
+	 * affordance, so they want a meaningful number of messages
+	 * back, not zero. Clamp positive values to uint16 range
+	 * (matches the spec's LIMIT field width). */
+    int limit = gtkhx_prefs.chat_history_initial;
+    if (limit <= 0) {
+        limit = 50;
+    }
+    if (limit > 0xffff) {
+        limit = 0xffff;
+    }
+
     gchat->history_loading = TRUE;
     task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
               GUINT_TO_POINTER (gchat->cid), 0, "chat-history-older");
     if (!hx_get_chat_history (htlc, gchat->cid,
                               gchat->history_oldest_msgid,
-                              /*after=*/0, /*limit=*/50)) {
+                              /*after=*/0, (guint16) limit)) {
         /* Sender refused (e.g. cap dropped mid-session). Roll back
 		 * the loading flag — the task we just registered will sit
 		 * unmatched but a future cap-bearing reply on that trans
@@ -1043,6 +1056,43 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
         gchat->history_loading = FALSE;
         debug_log ("chat-history",
                    "Load-older click: hx_get_chat_history refused");
+        return;
+    }
+
+    /* Phase 3 follow-up B: swap the clickable sentinel for a
+	 * non-clickable "Loading..." row so the user gets immediate
+	 * feedback that the click registered, and a second click
+	 * before the response lands is silently a no-op (the loading
+	 * row's text doesn't match HX_LOAD_OLDER_SENTINEL, so this
+	 * handler bails on word-mismatch).
+	 *
+	 * The eviction-and-reinsert at the top of
+	 * output_chat_history_batch handles cleanup: it removes
+	 * whatever entry history_load_older_ent points at — clickable
+	 * or loading row — and then renders a fresh clickable
+	 * sentinel above the (now expanded) chat-history block if
+	 * the new batch still says has_more. So we just update the
+	 * pointer here, no extra teardown wiring needed.
+	 *
+	 * Text uses the same mIRC palette colour 14 (grey) and the
+	 * same divider framing as the clickable row, so visually
+	 * only the body text changes between the two states. */
+    if (gchat->history_load_older_ent) {
+        xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
+        const char *loading_row
+            = "\003" "14"
+              "─── \xe2\x86\x91"
+              "\xc2\xa0" "Loading"
+              "\xc2\xa0" "older"
+              "\xc2\xa0" "messages..."
+              " ───";
+
+        gtk_xtext_remove_entry (xbuf, gchat->history_load_older_ent);
+        gchat->history_load_older_ent = gtk_xtext_insert_indent_before (
+            xbuf, gchat->history_anchor_ent,
+            (unsigned char *) "", 0,
+            (unsigned char *) loading_row,
+            (int) strlen (loading_row), 0);
     }
 }
 
