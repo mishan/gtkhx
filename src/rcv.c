@@ -128,32 +128,57 @@ hx_post_login_fetches (struct htlc_conn *htlc)
     hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
 
     /* Chat-history extension: if the server echoed our cap bit in
-	 * the LOGIN reply, request the most recent batch for public
-	 * chat (channel 0). hx_get_chat_history is a no-op when the
-	 * cap wasn't negotiated, so this is safe to gate on caps
-	 * here too — task_new only fires when we'll actually send.
+	 * the LOGIN reply, request a batch for public chat (channel 0).
+	 * hx_get_chat_history is a no-op when the cap wasn't negotiated,
+	 * so this is safe to gate on caps here too — task_new only
+	 * fires when we'll actually send.
 	 *
-	 * Limit comes from gtkhx_prefs.chat_history_initial (default 50,
-	 * matches the spec's recommended default). 0 disables the
-	 * initial pull entirely — the server still advertises
-	 * CAP_CHAT_HISTORY, but the user has to click Load older to see
-	 * anything. Clamp negative values defensively (the cfgvars INT
+	 * Two modes:
+	 *   * Initial connect (htlc->chat_history_last_msgid == 0):
+	 *     limit-based fetch sized by gtkhx_prefs.chat_history_initial
+	 *     (default 50). 0 disables the initial pull entirely.
+	 *   * Reconnect (last_msgid > 0): AFTER=last_msgid catch-up
+	 *     fetch — the server returns everything stored since our
+	 *     last view of the chat. No client-side limit; the server
+	 *     applies its own (history_max_msgs).
+	 *
+	 * The cursor is reset in network.c when the user dials a
+	 * different host:port, so initial-mode is what happens when
+	 * the user switches servers, and reconnect-mode is what
+	 * happens when the user clicks Reconnect to the same one.
+	 *
+	 * Clamp negative limit values defensively (cfgvars INT
 	 * parser doesn't enforce a floor). */
     if (htlc->caps & HTLC_CAP_CHAT_HISTORY) {
-        int limit = gtkhx_prefs.chat_history_initial;
-        if (limit < 0) {
-            limit = 0;
-        }
-        if (limit > 0xffff) {
-            limit = 0xffff;
-        }
-        if (limit > 0) {
+        if (htlc->chat_history_last_msgid > 0) {
+            /* Reconnect catch-up — AFTER=last_msgid, no limit. */
+            debug_log ("chat-history",
+                       "reconnect catch-up: AFTER=%" G_GUINT64_FORMAT,
+                       htlc->chat_history_last_msgid);
             task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
                       GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
-                      "chat-history");
+                      "chat-history-catchup");
             hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
-                                 /*before=*/0, /*after=*/0,
-                                 (guint16) limit);
+                                 /*before=*/0,
+                                 /*after=*/htlc->chat_history_last_msgid,
+                                 /*limit=*/0);
+        } else {
+            /* Initial connect — limit-based fetch. */
+            int limit = gtkhx_prefs.chat_history_initial;
+            if (limit < 0) {
+                limit = 0;
+            }
+            if (limit > 0xffff) {
+                limit = 0xffff;
+            }
+            if (limit > 0) {
+                task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
+                          GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
+                          "chat-history");
+                hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
+                                     /*before=*/0, /*after=*/0,
+                                     (guint16) limit);
+            }
         }
     }
 }
@@ -1702,9 +1727,24 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
     }
     dh_end ();
 
+    /* Phase 4: advance the session-wide newest-msgid cursor used
+	 * for AFTER= reconnect catch-up. This is independent of the
+	 * per-chat oldest-msgid (gtkhx_chat::history_oldest_msgid) the
+	 * Load-older flow uses — the cursor we maintain here grows
+	 * monotonically over the htlc's lifetime, while the per-chat
+	 * oldest shrinks as new older batches arrive. */
+    for (guint i = 0; i < entries->len; i++) {
+        HxHistoryEntry *e = g_ptr_array_index (entries, i);
+        if (e && e->message_id > htlc->chat_history_last_msgid) {
+            htlc->chat_history_last_msgid = e->message_id;
+        }
+    }
+
     debug_log ("chat-history",
-               "received batch: cid=%u entries=%u has_more=%d",
-               cid, entries->len, (int) has_more);
+               "received batch: cid=%u entries=%u has_more=%d last_msgid=%"
+               G_GUINT64_FORMAT,
+               cid, entries->len, (int) has_more,
+               htlc->chat_history_last_msgid);
 
     gtkhx_session_emit_chat_history_batch (gtkhx_session_get_default (), htlc,
                                            cid, entries, has_more);

@@ -55,6 +55,7 @@
 #include "tracker.h"
 #include "network.h"
 #include "banner.h"
+#include "debug.h"
 
 char *server_addr;
 #ifdef USE_IPV6
@@ -1074,6 +1075,28 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 #ifdef USE_IPV6
     server_port = port;
 #endif
+
+    /* Phase 4 (chat-history reconnect catch-up): the AFTER= cursor
+	 * is per-server. Reset it when the user switches to a
+	 * different (host, port) so we don't ask the new server about
+	 * a message_id that exists only in the old server's database
+	 * — same numeric id would either miss or, worse, match the
+	 * wrong content. Compare against the previous serverhost /
+	 * serverport BEFORE we overwrite them just below. First-ever
+	 * connect: serverhost is "" and the cursor is already 0, so
+	 * the reset is a harmless no-op. */
+    if (strcmp (htlc->serverhost, serverstr) != 0
+        || htlc->serverport != port) {
+        if (htlc->chat_history_last_msgid != 0) {
+            debug_log ("chat-history",
+                       "switching servers (%s:%u → %s:%u); "
+                       "resetting AFTER cursor from %" G_GUINT64_FORMAT,
+                       htlc->serverhost[0] ? htlc->serverhost : "(none)",
+                       htlc->serverport, serverstr, port,
+                       htlc->chat_history_last_msgid);
+        }
+        htlc->chat_history_last_msgid = 0;
+    }
 
     /* Stamp the server endpoint onto htlc so the HTXF subchannel
 	 * (port+1) and post-connect log messages don't have to query a
