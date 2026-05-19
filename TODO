@@ -6,7 +6,6 @@ General:
 Files:
 - Bug stomping / fixing
 - Icons -- make sure we are using all the correct ones
-- Support large file capability https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Large-File.md
 
 News:
 - Remove "Post News" from Toolbar since "News" window already has it
