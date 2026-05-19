@@ -1,18 +1,21 @@
 # mhxd test server for GtkHx integration / smoke testing.
 #
-# Builds a fresh mhxd from upstream master at image-build time, sets up
-# a minimal account file that the GtkHx test paths can connect to
-# (guest, no password; admin, well-known password), and runs hxd in
-# the foreground on port 5500.
+# Builds a fresh mhxd from upstream master at image-build time, then
+# overlays our checked-in config + patched user accounts so the
+# container comes up in a known-good state. The set of customisations
+# used to live as a sed/dd shell pipeline in this file (~200 LOC of
+# shell and commentary); replacing those with concrete files in
+# tests/mhxd/conf/ and tests/mhxd/patches/ keeps the source-of-truth
+# auditable in git.
 #
 # Build:    docker build -t gtkhx-mhxd tests/mhxd
 # Run:      docker run --rm -p 5500:5500 -p 5501:5501 gtkhx-mhxd
 # Connect:  point GtkHx at localhost:5500
 #
-# The container is intentionally rebuildable from upstream every time
-# (no pinned commit) so this same Dockerfile gives us whatever mhxd's
-# main branch offers today. If mhxd ever ships a release tag we want
-# to pin to, swap the `git clone` for `git clone --branch <tag>`.
+# The mhxd clone is unpinned (`--depth 1` master). If a future mhxd
+# rev breaks our checked-in config (e.g. by adding a required section
+# to hxd.conf), pin the clone to a specific commit here and bump
+# deliberately.
 
 FROM debian:bookworm-slim AS build
 
@@ -38,7 +41,19 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pull mhxd master and build with the feature set GtkHx exercises:
+# Pull mhxd master and apply our local fixes.
+#
+# patches/folder-xfer-size.patch — fixes two copy/paste typos in
+# folder_getpaths (htxf.c) and rcv_folder_get (files.c) that compute
+# the per-file size formula incorrectly, breaking multi-file folder
+# transfers when files have no resource fork. See the patch's commit
+# message for the full root-cause writeup.
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
+COPY patches/folder-xfer-size.patch /build/patches/folder-xfer-size.patch
+RUN cd /build/mhxd && git apply /build/patches/folder-xfer-size.patch
+
+# Configure with the feature set GtkHx exercises:
 #
 #   --enable-hxd          — the actual server binary. Despite the help
 #                           text saying --disable-hxd, the default is
@@ -49,81 +64,25 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 #                           ALSO trips the configure.in:779 guard that
 #                           adds -I../cipher to COMMONINCLUDES, which
 #                           is what src/common needs to find cipher.h.
-#                           (--enable-hx would trip the same guard but
-#                           pulls in a libreadline build dep we don't
-#                           need; we only want the server here.)
 #   --with-pthreads       — thread model (mhxd's default is fork/clone)
 #   --enable-hope         — secure login handshake; GtkHx negotiates this
 #   --enable-cipher       — Blowfish/RC4 link encryption
 #   --enable-compress     — zlib link compression
-#   --enable-ipv6         — getaddrinfo path; GtkHx is built with this
-#   --enable-hxtrackd     — tracker server (port 5498); skip exposing
-#                           by default but compile so it's available
-#   --enable-hldump       — wire-protocol dump for debugging on the
-#                           server side, mirrors what GtkHx's
-#                           GTKHX_DEBUG=proto does on the client.
-#
-# Without --enable-hxd, configure leaves the `-I../cipher`
-# substitution out of COMMONINCLUDES, and src/common fails to compile
-# with `cipher.h: No such file or directory`. The guard at
-# configure.in:779 reads
-#   if test $enable_hxd = yes -o $enable_hx = yes; then
-#     ... COMMONINCLUDES="$COMMONINCLUDES -I../cipher"
-# Either alone is sufficient; --enable-hxd is what we actually want
-# anyway since it builds the server we run as the test target.
+#   --enable-hxtrackd     — tracker server (port 5498); compile but
+#                           skip exposing by default
+#   --enable-hldump       — server-side wire-protocol dump for
+#                           debugging; mirrors GTKHX_DEBUG=proto.
+#   --disable-exec        — compile out CONFIG_EXEC entirely.
+#                           Otherwise mhxd's cmd_exec forks
+#                           unconditionally on login and on certain
+#                           chat commands, producing [hxd] <defunct>
+#                           zombies. (Setting paths.luser="" in the
+#                           config does NOT work — the fork happens
+#                           before the empty-path guard.)
 #
 # `make -j$(nproc) || make` because mhxd's autotools graph isn't
 # fully parallel-safe — fall back to single-job if the parallel run
 # stumbled.
-WORKDIR /build
-RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
-
-# Patch mhxd's folder-transfer size formula. Two copy/paste bugs
-# in mhxd: src/hxd/htxf.c::folder_getpaths and src/hxd/files.c::
-# rcv_folder_get use the wrong variables when populating the
-# per-file pf->total_size that goes out as HTLS_DATA_HTXF_SIZE
-# and as the per-file FILE_SEND size header inside the HTXF
-# folder stream.
-#
-#   rsrc_size = sizeof(pathbuf);         <- buffer's static size
-#                                           (MAXPATHLEN), not the
-#                                           file's actual rsrc
-#                                           fork length
-#   ... + strlen(pathbuf);               <- server-side path
-#                                           length, which doesn't
-#                                           appear on the wire
-#
-# Compare to the correct solo-file formula in rcv_file_get
-# (files.c, around line 1576-1584):
-#
-#   rsrc_size = resource_len(path);      <- actual fork size, 0
-#                                           when no rsrc fork
-#   ... + comment_len(path);             <- Mac file comment
-#                                           length, on-wire
-#
-# The result of the typo: pf->total_size is wildly over-claimed
-# (typically by 4 KiB per file). file_send writes the data fork,
-# then the file_send rsrc-fork short-circuit
-#       if (!use_hfs || preview || !(rsrc_size - rsrc_pos))
-#           return 0;
-# fails (rsrc_size is non-zero), so file_send writes the MACR
-# marker and tries to open the rsrc fork. resource_open fails on
-# files without a CAP/.resource sidecar, file_send returns -1,
-# and folder_send terminates the WHOLE multi-file stream after
-# just one file. From the client's perspective: the first file
-# arrives correctly, then the subchannel disconnects mid-tree.
-#
-# Fix both occurrences of the same typo here at build time so
-# the integration tests (and any user pointing GtkHx at this
-# container) see a server that handles multi-file folder
-# transfers cleanly with HFS still enabled. The same fix is
-# worth submitting upstream.
-RUN cd /build/mhxd \
-    && sed -i 's|rsrc_size = sizeof(pathbuf);|rsrc_size = resource_len(pathbuf);|' \
-         src/hxd/htxf.c src/hxd/files.c \
-    && sed -i 's|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + strlen(pathbuf);|size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + comment_len(pathbuf);|' \
-         src/hxd/htxf.c src/hxd/files.c
-
 RUN cd /build/mhxd \
     && ./autogen.sh \
     && ./configure \
@@ -133,7 +92,6 @@ RUN cd /build/mhxd \
         --enable-hope \
         --enable-cipher \
         --enable-compress \
-#        --enable-ipv6 \
         --enable-hxtrackd \
         --enable-hldump \
         --disable-exec \
@@ -141,85 +99,37 @@ RUN cd /build/mhxd \
     && mkdir -p /opt/mhxd \
     && make install
 
-# Runtime config skeleton. mhxd wants a directory with hxd.conf,
-# accounts/, news/, banlist, etc. Copy the upstream `run/hxd/` tree
-# into /opt/mhxd/run as the seed, then patch the bits that bite a
-# containerised test environment:
+# Lay down the runtime config tree.
 #
-# (1) ident 1 → ident 0
-#     mhxd's default config does an identd lookup against every
-#     connecting client BEFORE sending HTLS_MAGIC (see
-#     src/hxd/hlserver.c:312, `if (hxd_cfg.options.ident) start_ident
-#     (htlc); else hxd_fd_set(s, FDR);`). In a Docker container
-#     with no ident server reachable, this hangs the handshake
-#     until the ident query times out (several seconds), and even
-#     then subsequent connections behave non-deterministically.
-#     The conf file itself acknowledges this: `# disable if you
-#     have problems with firewalls`. Turn it off.
-#
-# (2) version 0 → version 185
-#     The version=0 path in mhxd's rcv_login suppresses
-#     HTLS_HDR_USER_SELFINFO entirely (see src/hxd/rcv.c:133,
-#     gated on `if (hxd_cfg.options.version != 0)`), and the
-#     loginreply degenerates to a single-chunk TASK with just our
-#     UID. GtkHx — and our Tier 3 integration tests — expect the
-#     modern flow: loginreply with uid+version+banner+name, then
-#     AGREEMENT, then SELFINFO. Switching to 185 (act as Hotline
-#     1.8.5) makes mhxd take that path and lets the
-#     test_login.c assertions actually fire.
-#
-# (3) operation.nospam yes → operation.nospam no
-#     The default config enables nospam, whose check_connections()
-#     in src/hxd/spam.c rejects any connection from an IP that
-#     already has an entry in the recent-connections table.
-#     reconn_time was the obvious knob to adjust, but the
-#     implementation has a quirk:
-#         while (tv_secdiff(&ct[i].tv, &now) > reconn_time) i++;
-#     With reconn_time=0 the cleanup never runs (`0 > 0` is false),
-#
-# (3b) banner.* config is patched at *runtime*, not build time.
-#     docker-entrypoint.sh reads BANNER_MODE / BANNER_URL /
-#     BANNER_FILE and rewrites the type/file/url fields in
-#     hxd.conf before exec'ing hxd. The URL-mode default points
-#     at placehold.co (stable test fixture matching what
-#     tests/integration/test_banner.c asserts); the file-mode
-#     defaults point at /opt/mhxd/run/banner.{jpg,gif} which we
-#     seed below. See docker-entrypoint.sh for the env-var
-#     reference.
-#
-# (4) Seed files/test.txt and files/integration_seed.txt with
-#     known content. mhxd's run/hxd/ skeleton ships without a
-#     files/ directory, so the file_list test sees a task-error
-#     (ENOENT) and the file_get test wouldn't have any target.
-#     Two tiny text files cover both flows.
-#     so the table holds onto every connection forever and every
-#     second connection from the same IP gets rejected.
-#     The integration suite fires several connections per second
-#     from 127.0.0.1, which trips this on every test after the
-#     first. Disable nospam outright via the operation section —
-#     the check at hlserver.c:401 short-circuits when nospam=no
-#     and the spam.* settings stop mattering.
-#
-# (5) NOTE: --disable-exec at configure time (above) removes mhxd's
-#     CONFIG_EXEC code path entirely — both the rcv_login luser
-#     hook (mhxd/src/hxd/rcv.c:161) and the chat-driven shell
-#     command paths (commands.c:915, 984). An earlier attempt
-#     (commit 34803b1) at fixing this from the config side by
-#     sed-ing paths.luser to "" did NOT work, because mhxd's
-#     cmd_exec function forks unconditionally — its strlen(cmdpath)
-#     > 0 guard only gates the LOGGING block, not the fork+execve
-#     itself. So passing an empty path still forked, the execve
-#     resolved to "./exec/(null)", failed, child _exit(1)'d, and
-#     [hxd] <defunct> piled up exactly like before. Compiling out
-#     CONFIG_EXEC is the only way to actually skip the fork.
-RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run \
-    && sed -i 's/^\([[:space:]]*\)ident 1;/\1ident 0;/' \
-        /opt/mhxd/run/hxd.conf \
-    && sed -i 's/^\([[:space:]]*\)version 0;/\1version 185;/' \
-        /opt/mhxd/run/hxd.conf \
-    && sed -i 's/^\([[:space:]]*\)nospam yes;/\1nospam no;/' \
-        /opt/mhxd/run/hxd.conf \
-    && mkdir -p /opt/mhxd/run/files \
+# 1. Copy the upstream `run/hxd/` skeleton as the base — gives us
+#    accounts/, news/, banlist, MOTD, etc.
+# 2. Overlay our checked-in conf/ tree on top:
+#      - hxd.conf            — same as upstream except ident=0
+#                              (no identd reachable in containers),
+#                              version=185 (modern login-reply flow
+#                              with SELFINFO, instead of the
+#                              version=0 degraded path), and
+#                              nospam=no (defeat reconn_time spam
+#                              protection that rejects 2nd+
+#                              connections from 127.0.0.1).
+#      - accounts/guest/UserData — pre-modified binary blob with
+#                              the right access bits: clears
+#                              rename/delete/move/create/etc bits
+#                              on byte 4 (only download + upload),
+#                              sets UPLOAD_FOLDERS + DOWNLOAD_FOLDERS
+#                              on byte 8. mhxd's HTLC dispatcher
+#                              gates GETFOLDER/PUTFOLDER on those.
+# 3. Seed files/test.txt and files/integration_seed.txt with known
+#    content so file_list / file_get / folder_get have something
+#    to find. Upstream `run/hxd/` ships without a files/ directory.
+# 4. The banner-block fields (type/file/url) are still patched at
+#    runtime via docker-entrypoint.sh so BANNER_MODE / BANNER_URL /
+#    BANNER_FILE env vars remain configurable across container
+#    starts.
+RUN cp -a /build/mhxd/run/hxd /opt/mhxd/run
+COPY conf/hxd.conf /opt/mhxd/run/hxd.conf
+COPY conf/accounts/guest/UserData /opt/mhxd/run/accounts/guest/UserData
+RUN mkdir -p /opt/mhxd/run/files \
     && printf 'hello world\n' > /opt/mhxd/run/files/test.txt \
     && printf 'tier-3 integration suite test data\n' \
         > /opt/mhxd/run/files/integration_seed.txt \
@@ -244,93 +154,6 @@ RUN curl -fsSL --retry 3 \
         "https://placehold.co/468x60.gif?text=GtkHx+HTXF+GIF" \
         -o /opt/mhxd/run/banner.gif
 
-# (6) Lock down guest's file-mutation bits in the binary UserData
-#
-#     mhxd's struct hl_user_data starts with a 4-byte magic followed
-#     by struct hl_access_bits (8 bytes of bitfields). On little-
-#     endian hosts (mhxd's only target in practice), byte 4 of
-#     UserData is the first 8 access bits in this order:
-#
-#       bit 0: rename_folders
-#       bit 1: delete_folders
-#       bit 2: create_folders
-#       bit 3: move_files
-#       bit 4: rename_files
-#       bit 5: download_files
-#       bit 6: upload_files
-#       bit 7: delete_files
-#
-#     The upstream guest UserData has all of these set, which lets
-#     a logged-in guest run HTLC_HDR_FILE_MKDIR / FILE_DELETE /
-#     FILE_MOVE etc. — that's not the security posture a real
-#     server would ship, and it lets a privileged-opcode test pass
-#     for the wrong reason ('mkdir succeeded for guest' instead of
-#     'mkdir was rejected because guest lacks the bit').
-#
-#     Mask byte 4 with 0x60 = 0b01100000: keep only download_files
-#     (bit 5) and upload_files (bit 6). file_get and file_put need
-#     those for their existing tests; everything else gets cleared.
-#
-#     Done with dd + a tiny shell pipeline so we don't need to
-#     install python or perl into the build stage. Read byte 4 via
-#     `dd | od`, mask in shell arithmetic, format the masked result
-#     as a printf octal escape (\NNN) and write back via dd
-#     seek+notrunc.
-#
-#     Why octal not hex: dash's printf (the /bin/sh on Debian) does
-#     NOT interpret '\xHH' escapes — it writes the literal text
-#     '\x20' instead of the byte 0x20. POSIX printf is only
-#     guaranteed to handle '\NNN' octal. The double-printf trick
-#     below builds a format string '\NNN' from the masked decimal
-#     byte and feeds it to a second printf that emits the actual
-#     byte.
-#
-#     Backslash count matters: the inner printf format is in
-#     SINGLE quotes (preserves literally), so we want exactly two
-#     backslashes — '\\' — feeding into printf, which collapses to
-#     a single backslash on output, giving '\NNN'. Four backslashes
-#     would output '\\NNN' instead, and the outer printf would
-#     then emit a literal '\' followed by digits. (Spent a build
-#     fighting that.) Verified against both the upstream guest
-#     seed and an all-bits-set synthetic input.
-RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
-            bs=1 count=1 skip=4 status=none \
-          | od -An -vtu1 | tr -d ' ') \
- && m=$(( b & 0x60 )) \
- && fmt=$(printf '\\%03o' "$m") \
- && printf "$fmt" \
-      | dd of=/opt/mhxd/run/accounts/guest/UserData \
-            bs=1 count=1 seek=4 conv=notrunc status=none
-
-# (7) Grant upload_folders (bit 38) and download_folders (bit 39)
-#     on the guest UserData.
-#
-#     hl_access.h numbers bits big-endian-first: bit N lives at
-#     access[N >> 3] & (0x80 >> (N & 7)). So:
-#       bit 38: byte 4 of access bits, mask 0x80 >> 6 = 0x02
-#       bit 39: byte 4 of access bits, mask 0x80 >> 7 = 0x01
-#     => byte 4 of access = byte 8 of UserData (4 bytes magic +
-#        4 bytes preceding access bytes). The upstream seed has
-#        byte 8 = 0x00, so guest cannot GETFOLDER / PUTFOLDER.
-#
-#     mhxd's HTLC dispatcher gates HTLC_HDR_FILE_GETFOLDER on
-#     htlc->access.download_folders and HTLC_HDR_FILE_PUTFOLDER on
-#     htlc->access.upload_folders (mhxd/src/hxd/rcv.c:557-564),
-#     so without these bits the integration tests for both opcodes
-#     bounce with "Unknown or non-authorised".
-#
-#     OR byte 8 with 0x03 to grant both bits without disturbing
-#     anything else. Same double-printf-with-octal pattern as
-#     step (6) above; see its comment for why we can't use \xNN.
-RUN b=$(dd if=/opt/mhxd/run/accounts/guest/UserData \
-            bs=1 count=1 skip=8 status=none \
-          | od -An -vtu1 | tr -d ' ') \
- && m=$(( b | 0x03 )) \
- && fmt=$(printf '\\%03o' "$m") \
- && printf "$fmt" \
-      | dd of=/opt/mhxd/run/accounts/guest/UserData \
-            bs=1 count=1 seek=8 conv=notrunc status=none
-
 # -----------------------------------------------------------------------------
 # Runtime stage. Slim down to just the binary + runtime libs + config tree.
 # -----------------------------------------------------------------------------
@@ -352,8 +175,7 @@ RUN chown -R mhxd:mhxd /opt/mhxd/run
 # Entrypoint script — patches hxd.conf's banner block based on
 # the BANNER_MODE / BANNER_URL / BANNER_FILE env vars at startup,
 # then execs hxd. With no env vars set, behaviour matches the
-# old hard-coded build-time setup (URL mode pointing at the
-# placehold.co fixture).
+# URL-mode default committed in conf/hxd.conf.
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
@@ -369,7 +191,6 @@ WORKDIR /opt/mhxd/run
 # The entrypoint script patches hxd.conf in /opt/mhxd/run (which
 # the mhxd user owns from the chown above) and exec's hxd in the
 # foreground. We don't pass `-d` so stdout/stderr stay attached
-# to `docker logs`. The hxd binary itself takes no required
-# args; the cwd holds hxd.conf.
+# to `docker logs`.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD []
