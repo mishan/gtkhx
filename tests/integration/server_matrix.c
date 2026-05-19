@@ -16,28 +16,53 @@
 
 /* ---- The matrix --------------------------------------------------- */
 /*
- * Phase A starting state: just the existing mhxd target, but
- * described as a row in the table instead of hard-coded throughout
- * the harness. Phase B adds Mobius; later phases add a chat-history
- * target.
+ * Phase A added mhxd as a row in the table rather than hardcoded
+ * throughout the harness. Phase C (this revision) adds Janus, the
+ * closed-source VesperNet server we use as the chat-history test
+ * target. Phase B (Mobius) is still pending and can be slotted in
+ * between when it lands.
  *
  * Caps are conservative — only bits the server reliably handles for
  * tests we already run get set. Adding a bit later (e.g. when we
- * confirm Mobius advertises CAP_LARGE_FILES in its login echo) is
- * a one-line change.
+ * audit Janus's HOPE flow and turn it on in the container) is a
+ * one-line change.
  *
- * The mhxd Docker container we ship under tests/mhxd/ is configured
- * with version=185 (1.8.5), HOPE, cipher, compress, hxd file
- * transfers, and threaded news.
+ * Container ports: mhxd answers on the conventional 5500/5501; Janus
+ * is mapped to 5510/5511 in the test Compose setup so both can run
+ * side-by-side. The matrix records the *host-side* port the
+ * container is published on.
  */
 const hx_test_server hx_test_server_matrix[] = {
     {
+        /* mhxd: the controlled-codebase reference server. Built
+         * from the vendored mhxd/ source in tests/mhxd/. Hotline
+         * 1.8.5-style flow, HOPE, file-mode banner, threaded
+         * news. No chat-history. */
         .name       = "mhxd",
         .host       = "127.0.0.1",
         .port       = 5500,
         .xfer_port  = 5501,
         .hl_version = 185,
         .caps       = HX_TEST_CAP_HOPE
+                    | HX_TEST_CAP_BANNER_HTXF
+                    | HX_TEST_CAP_NEWS_15,
+    },
+    {
+        /* Janus: VesperNet's closed-source server, pulled from
+         * get.vespernet.net at image-build time. The only target
+         * that ships the fogWraith chat-history extension. Also
+         * supports large files, text-encoding negotiation, and
+         * file-mode banner. HOPE and TLS are present in Janus but
+         * intentionally NOT enabled in our v1 container — see
+         * tests/janus/README.md for the rationale. */
+        .name       = "janus",
+        .host       = "127.0.0.1",
+        .port       = 5510,
+        .xfer_port  = 5511,
+        .hl_version = 190,
+        .caps       = HX_TEST_CAP_LARGE_FILES
+                    | HX_TEST_CAP_TEXT_ENCODING
+                    | HX_TEST_CAP_CHAT_HISTORY
                     | HX_TEST_CAP_BANNER_HTXF
                     | HX_TEST_CAP_NEWS_15,
     },

@@ -62,12 +62,38 @@ test_servers_with_unknown_cap_returns_empty (void)
 {
     if (g_test_subprocess ()) {
         g_unsetenv ("GTKHX_TEST_SERVERS");
-        /* No matrix entry today advertises chat-history; once a
-         * real chat-history-capable target lands this will need
-         * updating, which is the test's whole point. */
-        GPtrArray *r = hx_test_servers_with (HX_TEST_CAP_CHAT_HISTORY);
+        /* Use the top bit of the cap bitmask as a synthetic
+         * "no entry will ever advertise this" sentinel. The
+         * earlier version of this test used CAP_CHAT_HISTORY,
+         * which was a fine sentinel until Phase C landed Janus
+         * in the matrix advertising exactly that bit. Filtering
+         * by a never-allocated bit gives a stable empty-result
+         * assertion that doesn't move when real caps appear. */
+        GPtrArray *r = hx_test_servers_with (0x80000000u);
         g_assert_nonnull (r);
         g_assert_cmpuint (r->len, ==, 0);
+        g_ptr_array_unref (r);
+        return;
+    }
+    g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_INHERIT_STDOUT);
+    g_test_trap_assert_passed ();
+}
+
+static void
+test_servers_with_chat_history_cap (void)
+{
+    if (g_test_subprocess ()) {
+        g_unsetenv ("GTKHX_TEST_SERVERS");
+        /* Phase C: Janus advertises HX_TEST_CAP_CHAT_HISTORY.
+         * The filter should find exactly that one entry; mhxd
+         * does not claim chat-history. When Mobius eventually
+         * adds the extension this assertion's expected count
+         * goes up — that's the whole point of the matrix. */
+        GPtrArray *r = hx_test_servers_with (HX_TEST_CAP_CHAT_HISTORY);
+        g_assert_nonnull (r);
+        g_assert_cmpuint (r->len, ==, 1);
+        const hx_test_server *s = g_ptr_array_index (r, 0);
+        g_assert_cmpstr (s->name, ==, "janus");
         g_ptr_array_unref (r);
         return;
     }
@@ -196,6 +222,8 @@ main (int argc, char **argv)
                      test_servers_with_zero_caps_returns_all);
     g_test_add_func ("/integration/server-matrix/unknown-cap-empty",
                      test_servers_with_unknown_cap_returns_empty);
+    g_test_add_func ("/integration/server-matrix/chat-history-cap",
+                     test_servers_with_chat_history_cap);
     g_test_add_func ("/integration/server-matrix/env-named-match",
                      test_env_filter_named_match);
     g_test_add_func ("/integration/server-matrix/env-named-no-match",
