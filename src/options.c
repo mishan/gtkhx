@@ -532,9 +532,25 @@ changed_stampformat (session *sess)
 static void
 changed_downloadpath (session *sess)
 {
-    if (!*gtkhx_prefs.download_path) {
-        /*		g_free (gtkhx_prefs.download_path); */
-        gtkhx_prefs.download_path = g_strdup (".");
+    (void)sess;
+    /* Empty pref value → use the user's XDG Downloads dir as
+	 * the natural default. Falls back further to $HOME if
+	 * XDG_DOWNLOAD_DIR isn't set / not a directory, then to "."
+	 * as a last resort. This is the value the Files browser
+	 * also consults for its initial local panel path, so the
+	 * two stay in sync. */
+    if (!gtkhx_prefs.download_path || !*gtkhx_prefs.download_path) {
+        const char *xdg = g_get_user_special_dir (G_USER_DIRECTORY_DOWNLOAD);
+        if (xdg && g_file_test (xdg, G_FILE_TEST_IS_DIR)) {
+            gtkhx_prefs.download_path = g_strdup (xdg);
+        } else {
+            const char *home = g_get_home_dir ();
+            if (home && g_file_test (home, G_FILE_TEST_IS_DIR)) {
+                gtkhx_prefs.download_path = g_strdup (home);
+            } else {
+                gtkhx_prefs.download_path = g_strdup (".");
+            }
+        }
     }
 }
 

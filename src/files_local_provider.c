@@ -16,6 +16,7 @@
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
+#include "prefs.h" /* gtkhx_prefs.download_path */
 
 struct _HxLocalFilesProvider {
     GObject parent_instance;
@@ -58,14 +59,27 @@ hx_local_files_provider_init (HxLocalFilesProvider *self)
     self->listing = g_list_store_new (HX_TYPE_FILE_ENTRY);
 }
 
-/* Sensible default starting directory. XDG_DOWNLOAD_DIR is the user
- * preference; if it isn't set (or isn't a directory we can list),
- * fall back to $HOME. As a last resort use "/" — we never want to
- * return NULL because the panel widget would deref it. */
+/* Sensible default starting directory. Prefer gtkhx_prefs.download_path
+ * — that's where DnD downloads (and other transfer paths) land, so
+ * having the Files browser start there means the user's drag-out
+ * destination and the panel's current view agree by default. The
+ * pref itself defaults to XDG_DOWNLOAD_DIR via changed_downloadpath
+ * in options.c, so we get the XDG path as the effective initial
+ * value without re-reading XDG here.
+ *
+ * Fall back to XDG → $HOME → "/" if the pref is unset / not a
+ * directory (paranoia — changed_downloadpath should have set it by
+ * the time we're called, but the first-run path has us building
+ * widgets before options_apply runs, so the pref can be NULL or
+ * "."). */
 static char *
 default_root (void)
 {
     const char *dir;
+    if (gtkhx_prefs.download_path && *gtkhx_prefs.download_path
+        && g_file_test (gtkhx_prefs.download_path, G_FILE_TEST_IS_DIR)) {
+        return g_strdup (gtkhx_prefs.download_path);
+    }
     dir = g_get_user_special_dir (G_USER_DIRECTORY_DOWNLOAD);
     if (dir && g_file_test (dir, G_FILE_TEST_IS_DIR)) {
         return g_strdup (dir);
