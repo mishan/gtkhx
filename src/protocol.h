@@ -240,6 +240,15 @@ struct htlc_conn {
 	 * extension). Tested with HTLC_CAP_TEXT_ENCODING and friends
 	 * — see hotline.h. */
     guint64 caps;
+    /* Chat-history extension: server retention hints from the
+	 * LOGIN reply (DATA_HISTORY_MAX_MSGS / _DAYS, fogWraith
+	 * Capabilities-Chat-History.md). 0 means unlimited or
+	 * undisclosed — the spec says the authoritative signal for
+	 * "no more messages" is DATA_HISTORY_HAS_MORE = 0 in the
+	 * GET_CHAT_HISTORY reply, so these are UI hints only.
+	 * Populated only when the server echoes CAP_CHAT_HISTORY. */
+    guint32 history_max_msgs;
+    guint32 history_max_days;
 };
 
 /* Phase 5: LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize

@@ -1521,6 +1521,30 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                                               "server confirmed UTF-8 text "
                                               "encoding for this session\n");
                         }
+                        if (caps & HTLC_CAP_CHAT_HISTORY) {
+                            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                                              "server confirmed chat-history "
+                                              "extension for this session\n");
+                        }
+                    }
+                    break;
+                case HTLS_DATA_HISTORY_MAX_MSGS:
+                    /* Chat-history retention hint — server's max
+					 * message count. uint32 big-endian; 0 means
+					 * unlimited. Spec note: hints only, the
+					 * authoritative end-of-history signal is
+					 * DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->history_max_msgs = v;
+                    }
+                    break;
+                case HTLS_DATA_HISTORY_MAX_DAYS:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->history_max_days = v;
                     }
                     break;
                 }
