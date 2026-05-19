@@ -703,6 +703,7 @@ integration_test_inc = include_directories('integration', '../src')
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
+  'integration/server_matrix.c',
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
@@ -726,6 +727,21 @@ test_integration_handshake = executable('test_integration_handshake',
 test('handshake', test_integration_handshake,
      suite   : 'integration',
      timeout : 30)
+
+# server_matrix — in-process unit coverage for the multi-server
+# matrix helpers (hx_test_servers_with, hx_test_server_default,
+# GTKHX_TEST_SERVERS env filter). Doesn't talk to a Hotline server,
+# but lives in the integration suite because it exercises
+# integration-harness code.
+test_integration_server_matrix = executable('test_integration_server_matrix',
+  'integration/test_server_matrix.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('server_matrix', test_integration_server_matrix,
+     suite   : 'integration',
+     timeout : 10)
 
 # login — guest login + post-login state-machine round-trip. Sends
 # HTLC_HDR_LOGIN, drains pre-SELFINFO chatter, verifies SELFINFO

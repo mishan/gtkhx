@@ -28,31 +28,21 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "integration_harness.h"
-
-static const char *
-test_host (void)
-{
-    const char *h = g_getenv ("GTKHX_TEST_HOST");
-    return h && *h ? h : "127.0.0.1";
-}
-
-static int
-test_port (void)
-{
-    const char *p = g_getenv ("GTKHX_TEST_PORT");
-    if (!p || !*p) {
-        return 5500;
-    }
-    int v = atoi (p);
-    return (v > 0 && v < 65536) ? v : 5500;
-}
+#include "server_matrix.h"
 
 /* Connect with a short timeout. The naive blocking connect()
  * doesn't take a timeout argument, so we set the socket to non-
  * blocking, kick off the connect, select() on writability with
- * the timeout, then check SO_ERROR. */
-static int
-connect_with_timeout (const char *host, int port, int timeout_ms)
+ * the timeout, then check SO_ERROR.
+ *
+ * Phase A multi-server work: this used to be `static` and called
+ * only from integration_connect, but server_matrix.c also wants
+ * to dial arbitrary host:port pairs (one per matrix entry). Made
+ * non-static with the hx_integration_ prefix so server_matrix
+ * doesn't have to duplicate the addrinfo dance. The legacy
+ * integration_connect() still routes through here. */
+int
+hx_integration_connect_to (const char *host, int port, int timeout_ms)
 {
     struct addrinfo hints = { 0 };
     hints.ai_family = AF_UNSPEC;
@@ -122,8 +112,17 @@ connect_with_timeout (const char *host, int port, int timeout_ms)
 int
 integration_connect (void)
 {
-    return connect_with_timeout (test_host (), test_port (),
-                                 /*timeout_ms=*/2000);
+    /* Phase A multi-server work: route through the matrix so that
+     * GTKHX_TEST_SERVERS env filtering applies to the legacy
+     * harness entry points too. hx_test_server_default() honours
+     * GTKHX_TEST_HOST / GTKHX_TEST_PORT for backwards compat with
+     * pre-matrix CI configs. */
+    const hx_test_server *srv = hx_test_server_default ();
+    if (!srv) {
+        return -1;
+    }
+    return hx_integration_connect_to (srv->host, srv->port,
+                                      /*timeout_ms=*/2000);
 }
 
 gboolean
@@ -347,24 +346,19 @@ integration_login_guest (int fd, struct htlc_conn *htlc,
 
 /* ---- HTXF subchannel helpers ----------------------------------- */
 
-static int
-test_xfer_port (void)
-{
-    const char *p = g_getenv ("GTKHX_TEST_XFER_PORT");
-    if (p && *p) {
-        int v = atoi (p);
-        if (v > 0 && v < 65536) {
-            return v;
-        }
-    }
-    return test_port () + 1;
-}
-
 int
 integration_connect_xfer (void)
 {
-    return connect_with_timeout (test_host (), test_xfer_port (),
-                                 /*timeout_ms=*/2000);
+    /* Phase A multi-server: route through the matrix. The default
+     * server's xfer_port is HTLS port + 1 in the static table;
+     * GTKHX_TEST_XFER_PORT override is handled by
+     * hx_test_server_default(). */
+    const hx_test_server *srv = hx_test_server_default ();
+    if (!srv) {
+        return -1;
+    }
+    return hx_integration_connect_to (srv->host, srv->xfer_port,
+                                      /*timeout_ms=*/2000);
 }
 
 gboolean
@@ -382,14 +376,22 @@ integration_send_xfer_hdr (int fd, guint32 ref, guint32 total_size)
 int
 integration_open_or_skip (void)
 {
+    const hx_test_server *srv = hx_test_server_default ();
+    if (!srv) {
+        g_test_skip ("GTKHX_TEST_SERVERS env filter excluded every "
+                     "entry in the test-server matrix — no target "
+                     "to connect to.");
+        return -1;
+    }
+
     int fd = integration_connect ();
     if (fd < 0) {
         gchar *msg = g_strdup_printf (
-            "integration server not reachable at %s:%d "
+            "integration server %s not reachable at %s:%d "
             "(set GTKHX_TEST_HOST / GTKHX_TEST_PORT to change). "
             "Run `docker run -p 5500:5500 gtkhx-mhxd` from "
             "tests/mhxd/ to bring up a server.",
-            test_host (), test_port ());
+            srv->name, srv->host, (int) srv->port);
         g_test_skip (msg);
         g_free (msg);
         return -1;
@@ -398,9 +400,9 @@ integration_open_or_skip (void)
     if (!integration_handshake (fd)) {
         integration_close (fd);
         g_test_fail_printf (
-            "connected to %s:%d but the magic-handshake "
+            "connected to %s (%s:%d) but the magic-handshake "
             "exchange failed — is this actually a Hotline server?",
-            test_host (), test_port ());
+            srv->name, srv->host, (int) srv->port);
         return -1;
     }
 
