@@ -101,6 +101,35 @@ docker run --rm -p 5500:5500 -p 5501:5501 \
     gtkhx-mhxd
 ```
 
+## Layout
+
+```
+tests/mhxd/
+├── Dockerfile              build recipe
+├── docker-entrypoint.sh    runtime banner-block patcher
+├── README.md               this file
+├── conf/
+│   ├── hxd.conf            server config (ident=0, version=185, nospam=no)
+│   └── accounts/
+│       └── guest/
+│           └── UserData    binary blob with the access bits we need
+└── patches/
+    └── folder-xfer-size.patch  fix for an upstream copy/paste typo in
+                                folder transfers
+```
+
+The Dockerfile pulls fresh mhxd master, applies the patch, then
+overlays `conf/` onto the upstream `run/hxd/` skeleton. This is
+deliberately layered so:
+
+- Configuration changes are one-file edits to `conf/hxd.conf`
+  (no sed pipelines).
+- The binary `UserData` blob is regeneratable by running the
+  bytewise edits inline (see comments in the Dockerfile's earlier
+  history), but it's checked in so it's auditable in git.
+- The upstream-source bugfix is a real patch file we can submit
+  upstream when convenient.
+
 ## Iterate
 
 If you want to test a different branch / fork / patched mhxd, edit

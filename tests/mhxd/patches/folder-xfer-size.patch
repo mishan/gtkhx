@@ -1,0 +1,89 @@
+From 168d483586502bd673d836adeaee5a6cd7ecfabb Mon Sep 17 00:00:00 2001
+From: Misha Nasledov <misha@nasledov.com>
+Date: Sat, 16 May 2026 22:58:08 -0700
+Subject: [PATCH] folder transfers: fix per-file size formula copy/paste typo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+folder_getpaths (htxf.c) and rcv_folder_get (files.c) both
+populate pf->total_size with the wrong variables:
+
+    rsrc_size = sizeof(pathbuf);
+    size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0)
+          + strlen(pathbuf);
+
+sizeof(pathbuf) is the buffer's static size (MAXPATHLEN), not
+the file's actual resource-fork length. strlen(pathbuf) is the
+server-side filesystem path, which never appears on the wire.
+
+The correct formula is in rcv_file_get (files.c, around line
+1576-1584), where the solo file_get path computes:
+
+    rsrc_size = resource_len(path);     // actual fork size,
+                                        // 0 when no fork exists
+    size += ((rsrc_size - rsrc_pos) ? 16 : 0)
+          + comment_len(path);          // Mac comment bytes,
+                                        // which DO go on the wire
+
+The typo makes pf->total_size 4 KiB+ larger than what file_send
+actually writes when files have no resource fork. Consequence:
+file_send's rsrc-fork short-circuit
+
+    if (!use_hfs || preview || !(rsrc_size - rsrc_pos))
+        return 0;
+
+doesn't fire — rsrc_size is the buffer's static size, not zero
+— so file_send writes the MACR marker and tries to open the
+resource fork. resource_open returns -1 on files without a
+CAP-style .resource/<name> sidecar, file_send returns -1, and
+folder_send terminates the whole multi-file stream after a
+single file. From the client's perspective: the first file in
+the requested folder arrives correctly, then the HTXF subchannel
+disconnects mid-tree.
+
+Replace both occurrences in folder_getpaths and rcv_folder_get
+with resource_len / comment_len to match the working solo-file
+formula. With this fix, the rsrc-fork short-circuit fires
+cleanly when files have no fork, file_send returns 0, and
+folder_send advances to the next file.
+---
+ src/hxd/files.c | 4 ++--
+ src/hxd/htxf.c  | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/hxd/files.c b/src/hxd/files.c
+index 674c5ed..4f911c3 100644
+--- a/src/hxd/files.c
++++ b/src/hxd/files.c
+@@ -1891,9 +1891,9 @@ rcv_folder_get (struct htlc_conn *htlc)
+ 		if (S_ISDIR(sb.st_mode))
+ 			continue;
+ 		data_size = sb.st_size;
+-		rsrc_size = sizeof(pathbuf);
++		rsrc_size = resource_len(pathbuf);
+ 		size += (data_size - data_pos) + (preview ? 0 : (rsrc_size - rsrc_pos));
+-		size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + strlen(pathbuf);
++		size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + comment_len(pathbuf);
+ 	}
+ 	closedir(dirp);
+ 
+diff --git a/src/hxd/htxf.c b/src/hxd/htxf.c
+index 52db133..4aa5dc1 100644
+--- a/src/hxd/htxf.c
++++ b/src/hxd/htxf.c
+@@ -442,9 +442,9 @@ folder_getpaths (u_int32_t *npathsp, char *path)
+ 			pf->total_size = 0;
+ 		} else {
+ 			data_size = sb.st_size;
+-			rsrc_size = sizeof(pathbuf);
++			rsrc_size = resource_len(pathbuf);
+ 			size = (data_size - data_pos) + (preview ? 0 : (rsrc_size - rsrc_pos));
+-			size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + strlen(pathbuf);
++			size += 133 + ((rsrc_size - rsrc_pos) ? 16 : 0) + comment_len(pathbuf);
+ 			pf->type = 0;
+ 			pf->data_size = data_size;
+ 			pf->rsrc_size = rsrc_size;
+-- 
+2.53.0
+
