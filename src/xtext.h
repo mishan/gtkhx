@@ -57,12 +57,19 @@
 
 /* these match palette.h */
 #define XTEXT_MIRC_COLS 32
-#define XTEXT_COLS 37		/* 32 plus 5 for extra stuff below */
+#define XTEXT_COLS 38		/* 32 mIRC + 6 UI roles below */
 #define XTEXT_MARK_FG 32	/* for marking text */
 #define XTEXT_MARK_BG 33
 #define XTEXT_FG 34
 #define XTEXT_BG 35
 #define XTEXT_MARKER 36		/* for marker line */
+/* Phase 5+ (chat-history extension): muted secondary text colour
+ * for rendered history rows. Recomputed alongside XTEXT_FG /
+ * XTEXT_BG by gtkhx_apply_theme_palette so contrast against the
+ * theme background is appropriate in both light and dark mode.
+ * Used via the inline escape "\003" "37" in chat.c::
+ * output_chat_history_batch. */
+#define XTEXT_HISTORY_MUTED 37
 #define XTEXT_MAX_COLOR 41
 
 typedef struct _GtkXText GtkXText;
