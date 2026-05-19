@@ -715,15 +715,25 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         return;
     }
 
-    /* Opening divider, colour 14 (grey), info-line styled. */
+    /* Opening divider, colour 14 (grey). Rendered via
+	 * gtk_xtext_append_indent with EMPTY left text — that sets
+	 * ent->left_len = 0 (not -1), which is what
+	 * gtk_xtext_recalc_widths gates on. Result: when the user
+	 * drags the separator, the divider reflows alongside the
+	 * message entries. (Plain gtk_xtext_append would set
+	 * left_len = -1 and the divider would stay frozen at its
+	 * original column while messages move — visually misaligned
+	 * after any drag.) */
     {
         gchar *divider
             = g_strdup_printf ("\003" "14"
                                "─── chat history (%u %s) ───",
                                entries->len,
                                entries->len == 1 ? "message" : "messages");
-        gtk_xtext_append (xbuf, (unsigned char *) divider,
-                          (int) strlen (divider), 0);
+        gtk_xtext_append_indent (xbuf,
+                                 (unsigned char *) "", 0,
+                                 (unsigned char *) divider,
+                                 (int) strlen (divider), 0);
         g_free (divider);
     }
 
@@ -738,13 +748,15 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         if (e->flags & HX_HISTORY_FLAG_DELETED) {
             /* Tombstone — placeholder text, no nick column. The
 			 * spec preserves message_id + timestamp for cursor
-			 * stability but nick/message MAY be empty. */
-            gchar *line = g_strdup_printf (
-                "\003" "14"
-                "[message removed]");
-            gtk_xtext_append (xbuf, (unsigned char *) line,
-                              (int) strlen (line), stamp);
-            g_free (line);
+			 * stability but nick/message MAY be empty.
+			 * gtk_xtext_append_indent with empty left so the
+			 * entry reflows on separator drag (see opening
+			 * divider comment above). */
+            const char *line = "\003" "14" "[message removed]";
+            gtk_xtext_append_indent (xbuf,
+                                     (unsigned char *) "", 0,
+                                     (unsigned char *) line,
+                                     (int) strlen (line), stamp);
             continue;
         }
 
@@ -755,8 +767,10 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                 "\003" "14"
                 "*** %s",
                 e->message ? e->message : "");
-            gtk_xtext_append (xbuf, (unsigned char *) line,
-                              (int) strlen (line), stamp);
+            gtk_xtext_append_indent (xbuf,
+                                     (unsigned char *) "", 0,
+                                     (unsigned char *) line,
+                                     (int) strlen (line), stamp);
             g_free (line);
             continue;
         }
@@ -768,8 +782,10 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                 "* %s %s",
                 e->nick    ? e->nick    : "",
                 e->message ? e->message : "");
-            gtk_xtext_append (xbuf, (unsigned char *) line,
-                              (int) strlen (line), stamp);
+            gtk_xtext_append_indent (xbuf,
+                                     (unsigned char *) "", 0,
+                                     (unsigned char *) line,
+                                     (int) strlen (line), stamp);
             g_free (line);
             continue;
         }
@@ -795,11 +811,15 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         g_free (body_coloured);
     }
 
-    /* Closing divider — live messages follow below. */
+    /* Closing divider — live messages follow below. Same
+	 * append-indent-with-empty-left trick as the opening divider
+	 * so it reflows on separator drag. */
     {
         const char *divider = "\003" "14" "─── live messages ───";
-        gtk_xtext_append (xbuf, (unsigned char *) divider,
-                          (int) strlen (divider), 0);
+        gtk_xtext_append_indent (xbuf,
+                                 (unsigned char *) "", 0,
+                                 (unsigned char *) divider,
+                                 (int) strlen (divider), 0);
     }
 }
 
