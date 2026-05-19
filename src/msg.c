@@ -589,41 +589,66 @@ msg_output_render (const char *name, guint16 uid, const char *body,
                    gboolean is_self)
 {
     struct msgwin *msg;
-    char *text;
-    char *ptr;
-    char *cr;
     int brack_col;
-
-    brack_col = is_self ? 13 : 12;
-
-    text = g_strdup_printf ("\003%d<\003%s\003%d>\003 %s", brack_col,
-                            name ? name : "", brack_col, body ? body : "");
+    gchar *nick_wrapped;
+    gchar *valid_body;
+    gsize valid_body_len;
+    const char *cur;
+    const char *end;
 
     msg = msgwin_with_uid (uid);
     if (!msg) {
         msg = create_msgwin (uid, (char *)name);
     }
-    ptr = text;
 
-    cr = strchr (text, '\n');
-    if (cr) {
-        while (1) {
-            xprintline (msg->outputbuf, text, cr - text);
-            text = cr + 1;
-            if (*text == 0) {
-                break;
-            }
-            cr = strchr (text, '\n');
-            if (!cr) {
-                xprintline (msg->outputbuf, text, -1);
-                break;
-            }
-        }
-    } else {
-        xprintline (msg->outputbuf, text, -1);
+    /* mIRC colour 13 (pink) for our own messages, 12 (light blue)
+	 * for incoming. */
+    brack_col = is_self ? 13 : 12;
+
+    nick_wrapped = g_strdup_printf ("\003%d<\003%s\003%d>\003", brack_col,
+                                    name ? name : "", brack_col);
+
+    /* Validate the body bytes once. xtext hands content to Pango,
+	 * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
+	 * from vintage servers. */
+    valid_body = gtkhx_text_to_utf8 (body ? body : "", body ? strlen (body) : 0,
+                                     &valid_body_len);
+    if (!valid_body) {
+        g_free (nick_wrapped);
+        return;
     }
 
-    g_free (ptr);
+    /* Each newline-separated line in the body becomes its own
+	 * xtext entry. The first one carries the nick column via
+	 * gtk_xtext_append_indent (HexChat two-column layout — names
+	 * on the left, message on the right, with the auto-aligned
+	 * separator the chat output uses); subsequent lines append
+	 * as plain continuation rows so multi-line messages don't
+	 * repeat the nick column on every line. */
+    cur = valid_body;
+    end = valid_body + valid_body_len;
+    gboolean first = TRUE;
+    while (cur <= end) {
+        const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
+        gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
+        if (first) {
+            gtk_xtext_append_indent (GTK_XTEXT (msg->outputbuf)->buffer,
+                                     (unsigned char *)nick_wrapped,
+                                     strlen (nick_wrapped),
+                                     (unsigned char *)cur, seg_len, 0);
+            first = FALSE;
+        } else {
+            gtk_xtext_append (GTK_XTEXT (msg->outputbuf)->buffer,
+                              (unsigned char *)cur, seg_len, 0);
+        }
+        if (!nl) {
+            break;
+        }
+        cur = nl + 1;
+    }
+
+    g_free (nick_wrapped);
+    g_free (valid_body);
 }
 
 void
