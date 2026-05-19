@@ -43,6 +43,30 @@ extern void output_chat_from_event (struct htlc_conn *htlc,
  * uses it to decide whether to show the "Load older" row. */
 extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                        GPtrArray *entries, gboolean has_more);
+
+/* Phase 3.2: clickable "Load older messages" sentinel rendered when
+ * the server says has_more=TRUE. The internal joiners are NBSP
+ * (U+00A0 = "\xc2\xa0") so xtext's word tokenizer (is_del checks for
+ * ASCII space / '\n' / '<' / '>' / NUL) treats the whole string as
+ * one clickable token. The leading U+2191 (up-arrow, "\xe2\x86\x91")
+ * also acts as a secondary signature on the off chance the user's
+ * click lands on a "word" that doesn't include the full sentinel.
+ *
+ * The literal value matters: chat_history_word_click compares the
+ * received word string against this exact sentinel. Keep the two in
+ * sync if you change it. */
+#define HX_LOAD_OLDER_SENTINEL \
+    "\xe2\x86\x91" "\xc2\xa0" "Load" "\xc2\xa0" "older" "\xc2\xa0" "messages"
+
+/* word_click handler that recognises the Load-older sentinel and
+ * fires a BEFORE= chat-history fetch. Connected on every xtext that
+ * renders chat history (the main chat output plus pchat outputs)
+ * alongside gtkurl_xtext_word_click — both handlers run, each self-
+ * filters on its own pattern. The session pointer is the user_data;
+ * the cid the click belongs to is recovered by walking session
+ * gchats and matching the xtext widget. */
+extern void chat_history_word_click (GtkWidget *xtext, char *word,
+                                     GdkEvent *event, gpointer data);
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
  * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
  * pull the decls in (chat.h forwards the include for source

@@ -120,7 +120,28 @@ struct gtkhx_chat {
     GtkWidget *userlist;
     guint32 cid;
     struct chat *chat;
-    void *chat_history;
+    void *chat_history;   /* GNU readline command-line history. */
+
+    /* fogWraith chat-history extension state (Phase 3+).
+     *
+     * history_oldest_msgid — smallest message_id we've already
+     *   rendered for this chat. Used as the BEFORE= cursor on
+     *   "Load older" fetches so the server returns strictly
+     *   older entries. 0 means we have no anchor yet (no
+     *   history batch arrived) and a "Load older" click would
+     *   be a bare-cursor request (server's default window).
+     *
+     * history_has_more — last batch's has_more flag, mirrored
+     *   here so the renderer + click handler can both consult
+     *   it without re-walking the xtext buffer.
+     *
+     * history_loading — TRUE while a "Load older" fetch is
+     *   in-flight. Click handler refuses to fire a second
+     *   request until the first completes (the receive path
+     *   clears the flag). */
+    guint64  history_oldest_msgid;
+    gboolean history_has_more;
+    gboolean history_loading;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */

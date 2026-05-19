@@ -49,6 +49,7 @@
 #include "rcv.h"
 #include "connect.h"
 #include "log.h"
+#include "debug.h"
 
 static char *termed_buf = 0;
 extern PangoFontDescription *gtkhx_font_desc;
@@ -696,7 +697,6 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 {
     struct gtkhx_chat *gchat;
     (void) htlc;
-    (void) has_more;
 
     if (!entries) {
         return;
@@ -706,6 +706,28 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         return;
     }
 
+    /* Phase 3.1: maintain the "oldest msgid we have rendered" anchor
+	 * and the has_more flag on the gtkhx_chat. A "Load older" click
+	 * uses oldest as BEFORE= cursor; rendering the Load-older row is
+	 * gated on has_more. We update both BEFORE bailing on the
+	 * empty-batch path so a server response of "no more entries"
+	 * (entries->len == 0, has_more == FALSE) reliably clears the
+	 * loading flag. */
+    gchat->history_loading = FALSE;
+    if (entries->len > 0) {
+        for (guint i = 0; i < entries->len; i++) {
+            HxHistoryEntry *e = g_ptr_array_index (entries, i);
+            if (!e || e->message_id == 0) {
+                continue;
+            }
+            if (gchat->history_oldest_msgid == 0
+                || e->message_id < gchat->history_oldest_msgid) {
+                gchat->history_oldest_msgid = e->message_id;
+            }
+        }
+    }
+    gchat->history_has_more = has_more;
+
     xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
 
     /* Empty batch — server confirmed CAP_CHAT_HISTORY but has no
@@ -713,6 +735,31 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * messages) ──" divider would be more noise than signal. */
     if (entries->len == 0) {
         return;
+    }
+
+    /* Phase 3.2: "Load older" clickable row, rendered above the
+	 * opening divider when the server says there's more history to
+	 * fetch. Uses NBSP (U+00A0) as the internal joiner so xtext's
+	 * word tokenizer (delimited by ASCII space / newline / '<' /
+	 * '>' / NUL — see is_del in xtext.c) treats the whole sentinel
+	 * as one clickable token. Click anywhere on the visible label
+	 * and the word_click handler receives the full sentinel string
+	 * regardless of where in it the cursor landed.
+	 *
+	 * The literal HX_LOAD_OLDER_SENTINEL is matched verbatim in the
+	 * chat-history click handler (chat_history_word_click) — the
+	 * U+2191 prefix is also there as a defensive belt-and-braces in
+	 * case the user clicks a partial word, but normally the NBSP
+	 * joining keeps the whole sentinel intact. */
+    if (has_more) {
+        gchar *row = g_strdup_printf (
+            "\003" "14"
+            "─── " HX_LOAD_OLDER_SENTINEL " ───");
+        gtk_xtext_append_indent (xbuf,
+                                 (unsigned char *) "", 0,
+                                 (unsigned char *) row,
+                                 (int) strlen (row), 0);
+        g_free (row);
     }
 
     /* Opening divider, colour 14 (grey). Rendered via
@@ -820,6 +867,122 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
                                  (int) strlen (divider), 0);
+    }
+}
+
+/* ----- Phase 3.3 — Load Older click handler --------------------- *
+ *
+ * The chat output xtext connects two word_click handlers:
+ *   1. chat_history_word_click (this function) — filters on our
+ *      HX_LOAD_OLDER_SENTINEL and fires the BEFORE= chat-history
+ *      fetch.
+ *   2. gtkurl_xtext_word_click — filters on URL-shaped words and
+ *      pops the URL action menu on right/middle-click.
+ *
+ * Both run for every word_click. Each ignores words that aren't
+ * theirs. gtkurl handles SECONDARY+MIDDLE only and we handle
+ * PRIMARY only, so the two never collide on click semantics
+ * either.
+ *
+ * The xtext widget that emitted the signal is passed in as
+ * `xtext`; we walk the_session.gchats to find which gchat owns
+ * it (chat output, not pchat output userlist). */
+
+static struct gtkhx_chat *
+find_gchat_by_output (GtkWidget *xtext)
+{
+    GHashTableIter it;
+    gpointer key, val;
+
+    if (!the_session.gchats) {
+        return NULL;
+    }
+    g_hash_table_iter_init (&it, the_session.gchats);
+    while (g_hash_table_iter_next (&it, &key, &val)) {
+        struct gtkhx_chat *g = val;
+        if (g && g->output == xtext) {
+            return g;
+        }
+    }
+    return NULL;
+}
+
+void
+chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
+                         gpointer data)
+{
+    guint button;
+    GdkEventType evtype;
+    struct gtkhx_chat *gchat;
+    struct htlc_conn *htlc;
+    (void) data;
+
+    if (!event || !word || !*word) {
+        return;
+    }
+    evtype = gdk_event_get_event_type (event);
+    if (evtype != GDK_BUTTON_PRESS && evtype != GDK_BUTTON_RELEASE) {
+        return;
+    }
+    button = gdk_button_event_get_button (event);
+    /* Primary-button only. SECONDARY/MIDDLE flow through the URL
+	 * handler. */
+    if (button != GDK_BUTTON_PRIMARY) {
+        return;
+    }
+    if (strcmp (word, HX_LOAD_OLDER_SENTINEL) != 0) {
+        return;
+    }
+
+    gchat = find_gchat_by_output (xtext);
+    if (!gchat) {
+        debug_log ("chat-history",
+                   "Load-older click: no gchat matches the xtext widget");
+        return;
+    }
+    htlc = &the_session.htlc;
+
+    /* Guard: don't fire a second request while the first is
+	 * still in flight. The receive path (output_chat_history_batch)
+	 * clears history_loading on every batch — including empty ones,
+	 * so a "no more history" reply unsticks us. */
+    if (gchat->history_loading) {
+        debug_log ("chat-history",
+                   "Load-older click: fetch already in flight for cid=%u",
+                   gchat->cid);
+        return;
+    }
+
+    /* CAP_CHAT_HISTORY is a hard prerequisite. hx_get_chat_history
+	 * already gates on this and returns FALSE, but check up front
+	 * so we don't even try to register the task. */
+    if (!(htlc->caps & HTLC_CAP_CHAT_HISTORY)) {
+        debug_log ("chat-history",
+                   "Load-older click: server didn't negotiate "
+                   "CAP_CHAT_HISTORY (caps=0x%" G_GINT64_MODIFIER "x)",
+                   htlc->caps);
+        return;
+    }
+
+    debug_log ("chat-history",
+               "Load-older click: cid=%u, before=%" G_GUINT64_FORMAT,
+               gchat->cid, gchat->history_oldest_msgid);
+
+    /* Same fetch limit as the initial post-login pull (50). When
+	 * the v1 pref lands this becomes prefs.chat_history_initial. */
+    gchat->history_loading = TRUE;
+    task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
+              GUINT_TO_POINTER (gchat->cid), 0, "chat-history-older");
+    if (!hx_get_chat_history (htlc, gchat->cid,
+                              gchat->history_oldest_msgid,
+                              /*after=*/0, /*limit=*/50)) {
+        /* Sender refused (e.g. cap dropped mid-session). Roll back
+		 * the loading flag — the task we just registered will sit
+		 * unmatched but a future cap-bearing reply on that trans
+		 * id is extremely unlikely; tasks expire harmlessly. */
+        gchat->history_loading = FALSE;
+        debug_log ("chat-history",
+                   "Load-older click: hx_get_chat_history refused");
     }
 }
 
@@ -1544,6 +1707,13 @@ create_chat (session *sess)
     gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
+    /* Phase 3.3: chat-history "Load older" sentinel handler runs
+	 * alongside the URL handler — each self-filters on its own
+	 * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
+	 * and on a different button (URL = SECONDARY/MIDDLE,
+	 * load-older = PRIMARY) so they never collide. */
+    g_signal_connect (text, "word_click",
+                      G_CALLBACK (chat_history_word_click), NULL);
 
     vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
@@ -1583,6 +1753,9 @@ create_chat (session *sess)
     gchat->chat = 0;
     gchat->window = 0;
     gchat->input = 0;
+    gchat->history_oldest_msgid = 0;
+    gchat->history_has_more     = FALSE;
+    gchat->history_loading      = FALSE;
 
     /* Public chat (cid=0) UI gets seeded into the table on the
 	 * single create_chat call at session init. */
@@ -1786,6 +1959,13 @@ pchat_new (session *sess, struct chat *chat)
     gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
+    /* Phase 3.3: chat-history "Load older" sentinel handler runs
+	 * alongside the URL handler — each self-filters on its own
+	 * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
+	 * and on a different button (URL = SECONDARY/MIDDLE,
+	 * load-older = PRIMARY) so they never collide. */
+    g_signal_connect (text, "word_click",
+                      G_CALLBACK (chat_history_word_click), NULL);
 
     vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
@@ -1817,6 +1997,9 @@ pchat_new (session *sess, struct chat *chat)
     gchat->subject = subject;
     gchat->userlist = userlist;
     gchat->chat_history = history_new ();
+    gchat->history_oldest_msgid = 0;
+    gchat->history_has_more     = FALSE;
+    gchat->history_loading      = FALSE;
     g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (gchat->cid), gchat);
 
     return gchat;
