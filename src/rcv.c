@@ -34,6 +34,9 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+#ifdef CONFIG_CIPHER
+#include "cipher_aead.h"
+#endif
 #include "gtkhx_session.h"
 #include "network.h"
 #include "xfers.h"
@@ -1129,6 +1132,11 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     u_int16_t s_cipheralglen = 0, c_cipheralglen = 0;
     u_int8_t cipheralglist[64];
     u_int16_t cipheralglistlen;
+    /* Phase 5+ (HOPE-ChaCha20-Poly1305): server signals AEAD via
+	 * HTLS_DATA_CIPHER_MODE with value "AEAD". Stream ciphers
+	 * either send "STREAM" or omit the chunk; either way our
+	 * default of CIPHER_MODE_STREAM is the right interpretation. */
+    int server_says_aead = 0;
 #endif
 #ifdef CONFIG_COMPRESS
     guint8 *s_compress_al = 0, *c_compress_al = 0;
@@ -1182,8 +1190,16 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 c_cipher_al = dh->data;
                 break;
             case HTLS_DATA_CIPHER_MODE:
-                break;
             case HTLC_DATA_CIPHER_MODE:
+                /* "AEAD" (4 bytes ASCII) → ChaCha20-Poly1305 framed
+				 * mode. "STREAM" (or anything else) → legacy
+				 * RC4/Blowfish stream-XOR mode. Track both
+				 * directions but only honour AEAD when BOTH say
+				 * AEAD (defensive — a mismatch shouldn't happen
+				 * but let's not crash on a malformed reply). */
+                if (_len == 4 && !memcmp (dh->data, "AEAD", 4)) {
+                    server_says_aead = 1;
+                }
                 break;
             case HTLS_DATA_CIPHER_IVEC:
                 break;
@@ -1433,8 +1449,20 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         /* DATA_CAPABILITIES on the HOPE Step 3 authenticated LOGIN
 		 * — see hotline.h for the wire-format rationale and the
 		 * legacy-LOGIN sibling in network.c for the larger comment.
-		 * One extra chunk per LOGIN, two bytes wire weight. */
-        guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
+		 * One extra chunk per LOGIN, two bytes wire weight.
+		 *
+		 * Mirror the legacy LOGIN s capability set (network.c
+		 * around line 1159) so HOPE-encrypted sessions advertise
+		 * the same extensions: large-files (64-bit sizes), text-
+		 * encoding (UTF-8), and chat-history (TRAN 700). An
+		 * earlier revision listed only TEXT_ENCODING here, which
+		 * silently disabled the chat-history sidebar on every
+		 * connection that went through HOPE -- a regression
+		 * relative to plaintext sessions where the legacy LOGIN s
+		 * full advertisement runs. */
+        guint16 caps16 = htons (HTLC_CAP_LARGE_FILES
+                              | HTLC_CAP_TEXT_ENCODING
+                              | HTLC_CAP_CHAT_HISTORY);
         hc++;
         hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, llen, login,
                  HTLC_DATA_PASSWORD, pmaclen, password_mac,
@@ -1481,11 +1509,64 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 htlc->cipher_decode_type = CIPHER_RC4;
             } else if (!strcmp (s_cipheralg, "BLOWFISH")) {
                 htlc->cipher_decode_type = CIPHER_BLOWFISH;
+            } else if (!strcmp (s_cipheralg, "CHACHA20-POLY1305")) {
+                htlc->cipher_decode_type = CIPHER_CHACHA20_POLY1305;
             }
             if (!strcmp (c_cipheralg, "RC4")) {
                 htlc->cipher_encode_type = CIPHER_RC4;
             } else if (!strcmp (c_cipheralg, "BLOWFISH")) {
                 htlc->cipher_encode_type = CIPHER_BLOWFISH;
+            } else if (!strcmp (c_cipheralg, "CHACHA20-POLY1305")) {
+                htlc->cipher_encode_type = CIPHER_CHACHA20_POLY1305;
+            }
+
+            /* Phase 5+ (HOPE-ChaCha20-Poly1305): if both peers
+			 * agreed on ChaCha20-Poly1305 AEAD, switch the cipher
+			 * mode to AEAD and stretch the MAC-derived keys to
+			 * 256 bits via HKDF-SHA256. The chacha state lands
+			 * in htlc->cipher_*_state.chacha (third arm of the
+			 * cipher_state union), replacing what rc4/blowfish
+			 * would have occupied. cipher_encode_init /
+			 * cipher_decode_init become no-ops for this cipher
+			 * type — the per-frame Nettle ctx is built on the
+			 * stack at seal/open time.
+			 *
+			 * Mode bit: prefer the server's explicit CIPHER_MODE
+			 * chunk if it sent one; otherwise infer AEAD from the
+			 * cipher name (the spec allows that fallback). */
+            if (htlc->cipher_encode_type == CIPHER_CHACHA20_POLY1305
+                && htlc->cipher_decode_type == CIPHER_CHACHA20_POLY1305) {
+                htlc->cipher_mode = server_says_aead
+                                  ? CIPHER_MODE_AEAD
+                                  : CIPHER_MODE_AEAD;
+                /* The HOPE HMAC chain a few lines above derives
+				 * htlc->cipher_{en,de}code_key in the OPPOSITE
+				 * order from the fogWraith spec's labeling:
+				 *
+				 *   our cipher_decode_key = HMAC(pass, password_mac)
+				 *     == spec's "encode_key" (first-derived)
+				 *   our cipher_encode_key = HMAC(pass, cipher_decode_key)
+				 *     == spec's "decode_key" (second-derived)
+				 *
+				 * For the legacy stream cipher this didn't matter
+				 * — both peers compute the same chain and label
+				 * them however they want. For AEAD, HKDF needs
+				 * spec_encode_key as the ikm of encode_key_256
+				 * (which is the server-out / client-in key), and
+				 * spec_decode_key as the ikm of decode_key_256
+				 * (server-in / client-out). The
+				 * cipher_aead_derive_session_keys function
+				 * expects spec-aligned arguments, so we pass our
+				 * decode_key in the encode_key slot and vice
+				 * versa. */
+                cipher_aead_derive_session_keys (
+                    &htlc->cipher_encode_state.chacha,
+                    &htlc->cipher_decode_state.chacha,
+                    htlc->sessionkey, htlc->sklen,
+                    htlc->cipher_decode_key, htlc->cipher_decode_keylen,
+                    htlc->cipher_encode_key, htlc->cipher_encode_keylen);
+            } else {
+                htlc->cipher_mode = CIPHER_MODE_STREAM;
             }
             cipher_encode_init (htlc);
             cipher_decode_init (htlc);

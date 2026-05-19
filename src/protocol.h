@@ -228,6 +228,20 @@ struct htlc_conn {
 	 * on this to pick between the byte-stream XOR path (RC4/
 	 * Blowfish) and the framed Seal/Open path (ChaCha20-Poly1305). */
     u_int8_t cipher_mode;
+    /* AEAD decoded-plaintext accumulator. network.c::decode() in
+	 * AEAD mode opens complete length-prefixed frames out of
+	 * read_in and stores their plaintext here. The same decode()
+	 * call then memcpy's bytes from here into htlc->in as the
+	 * existing rcv loop (which works in header → body chunks)
+	 * consumes them.
+	 *
+	 * Two-stage buffering (read_in → aead_plain → in) is needed
+	 * because AEAD requires a complete frame before Open can
+	 * verify the Poly1305 tag, while the rcv loop streams in
+	 * header-then-body pieces. The intermediate plain buffer
+	 * bridges the granularity mismatch. Only used in AEAD mode;
+	 * stream-cipher mode leaves it untouched. */
+    struct qbuf aead_plain;
 #if defined(CONFIG_COMPRESS)
     u_int8_t zc_hdrlen;
     u_int8_t zc_ran;
