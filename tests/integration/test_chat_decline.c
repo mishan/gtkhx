@@ -65,17 +65,8 @@ test_chat_decline_silent (void)
     /* Bob drains for the CHAT_INVITE so we know he's actually been
 	 * invited at the protocol level (and hasn't seen anything stale
 	 * left over from a previous test run). */
-    gboolean bob_got_invite = FALSE;
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_CHAT_INVITE) {
-            continue;
-        }
-        bob_got_invite = TRUE;
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (integration_drain_until_chat_invite (
+        fd_b, &htlc_b, 64));
 
     /* Bob declines. Server should accept silently. */
     guint32 cid_be = htonl (chat_id);

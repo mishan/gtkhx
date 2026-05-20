@@ -61,21 +61,9 @@ test_chat_join_member_visible (void)
     g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* Step 3: Bob drains for the CHAT_INVITE. */
-    gboolean bob_got_invite = FALSE;
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_CHAT_INVITE) {
-            continue;
-        }
-        if (!hx_chat_invite_extract (&htlc_b, &im)) {
-            continue;
-        }
-        bob_got_invite = TRUE;
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (hx_chat_invite_extract (&htlc_b, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
     /* Step 4: Bob CHAT_JOIN. */

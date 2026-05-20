@@ -485,6 +485,21 @@ integration_send_ping (int fd, struct htlc_conn *htlc)
 }
 
 gboolean
+integration_drain_until_chat_invite (int fd, struct htlc_conn *htlc,
+                                     int max_messages)
+{
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) == HTLS_HDR_CHAT_INVITE) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+gboolean
 integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
                                   guint16 target_uid, guint32 *chat_id_out,
                                   int max_messages)

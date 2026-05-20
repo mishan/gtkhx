@@ -350,6 +350,21 @@ extern gboolean integration_create_chat_with_uid (int fd,
                                                   int max_messages);
 
 /*
+ * Drain server messages on `fd` until HTLS_HDR_CHAT_INVITE arrives.
+ * Used by the chat-invite-receiver side of CHAT_CREATE tests
+ * (test_chat_create, _decline, _in_pchat, _join, _part). On success
+ * htlc->in holds the invite frame; caller can run
+ * hx_chat_invite_extract for chat_id / inviter uid+name.
+ *
+ * Pre-refactor each of those tests open-coded the same 6-line
+ * loop; centralised here so the bound (64 messages — sized for
+ * parallel-test broadcast cross-talk) lives in one place.
+ */
+extern gboolean integration_drain_until_chat_invite (int fd,
+                                                     struct htlc_conn *htlc,
+                                                     int max_messages);
+
+/*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
  * return the byte count written. Layout:
  *

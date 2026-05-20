@@ -59,16 +59,8 @@ test_chat_in_pchat_routes_to_member (void)
                                                      &chat_id, 64));
 
     /* Bob drains for the invite. */
-    gboolean bob_got_invite = FALSE;
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) == HTLS_HDR_CHAT_INVITE) {
-            bob_got_invite = TRUE;
-        }
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (integration_drain_until_chat_invite (
+        fd_b, &htlc_b, 64));
 
     /* Bob joins. */
     guint32 cid_be = htonl (chat_id);

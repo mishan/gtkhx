@@ -20,7 +20,7 @@ i18n:
 
 Security:
 - TLS support (see mobius as an example server that supports it; https://github.com/jhalter/mobius/blob/master/docs/tls.md)
-- Newer HOPE ciphers support https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/HOPE-ChaCha20-Poly1305.md
+  Also I think Janus supports it?
 - Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 
 Bookmarks:
