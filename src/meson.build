@@ -31,6 +31,7 @@ gtkhx_sources = files(
   'gtkutil.c',
   'hfs.c',
   'history.c',
+  'htxf_io.c',
   'hl_code.c',
   'hl_date.c',
   'human_readable.c',
