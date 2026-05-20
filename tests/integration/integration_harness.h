@@ -292,6 +292,23 @@ extern guint32 integration_send_get_chat_history (int fd,
                                                   guint64 before, guint64 after,
                                                   guint16 limit);
 
+/*
+ * Send HTLC_HDR_CHAT with HTLC_DATA_STYLE=1 + HTLC_DATA_CHAT=text.
+ * The 2-chunk shape every chat-using test exercises:
+ *
+ *   test_chat_roundtrip      one chat, expect the broadcast echo
+ *   test_two_client_chat     A sends, B receives
+ *   test_chat_in_pchat       same but with a HTLC_DATA_CHAT_ID chunk
+ *                            in the same call site shape — that test
+ *                            uses integration_send_message directly
+ *                            (cid is per-chat). This primitive is
+ *                            for the public-chat case.
+ *
+ * Returns TRUE on a full send.
+ */
+extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
+                                       const char *text);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*

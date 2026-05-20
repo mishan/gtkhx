@@ -50,16 +50,6 @@ drain_until_chat_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
     return FALSE;
 }
 
-static gboolean
-send_chat (int fd, struct htlc_conn *htlc, const char *text)
-{
-    guint16 style = htons (1);
-    return integration_send_message (
-        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_STYLE,
-        (int)sizeof (style), &style, (int)HTLC_DATA_CHAT, (int)strlen (text),
-        (guint8 *)text);
-}
-
 static void
 test_two_client_chat_a_to_b (void)
 {
@@ -83,7 +73,7 @@ test_two_client_chat_a_to_b (void)
     /* A sends a unique line. B should see it as a CHAT broadcast
 	 * with A's uid and A's name in the body. */
     const char *line = "two-client integration ping";
-    g_assert_true (send_chat (fd_a, &htlc_a, line));
+    g_assert_true (integration_send_chat (fd_a, &htlc_a, line));
 
     struct hx_chat_msg cm;
     g_assert_true (drain_until_chat_from_uid (fd_b, &htlc_b, htlc_a.uid, &cm,

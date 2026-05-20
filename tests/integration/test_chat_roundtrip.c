@@ -61,21 +61,6 @@ drain_until_own_chat (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
     return FALSE;
 }
 
-/* Send one chat line. Mirrors the GtkHx commands.c send shape:
- *   HTLC_HDR_CHAT
- *   HTLC_DATA_STYLE = htons(1)
- *   HTLC_DATA_CHAT  = the bytes
- */
-static gboolean
-send_chat (int fd, struct htlc_conn *htlc, const char *text)
-{
-    guint16 style = htons (1);
-    return integration_send_message (
-        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_STYLE,
-        (int)sizeof (style), &style, (int)HTLC_DATA_CHAT, (int)strlen (text),
-        (guint8 *)text);
-}
-
 /* ---------- Test cases ---------- */
 
 /* Drain budget: bumped from 4 to 16 to 64 in successive batches as
@@ -97,7 +82,7 @@ test_chat_roundtrip_simple (void)
     }
 
     const char *line = "hello from the integration suite";
-    g_assert_true (send_chat (fd, &htlc, line));
+    g_assert_true (integration_send_chat (fd, &htlc, line));
 
     struct hx_chat_msg cm;
     g_assert_true (
@@ -132,7 +117,7 @@ test_chat_roundtrip_unicode_payload (void)
     const char *line = "\xe2\x98\x83 \xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e";
     /* "☃ 日本語" — snowman + Japanese, both common edge cases. */
 
-    g_assert_true (send_chat (fd, &htlc, line));
+    g_assert_true (integration_send_chat (fd, &htlc, line));
 
     struct hx_chat_msg cm;
     g_assert_true (
@@ -152,8 +137,8 @@ test_chat_roundtrip_two_messages_in_order (void)
         return;
     }
 
-    g_assert_true (send_chat (fd, &htlc, "first message"));
-    g_assert_true (send_chat (fd, &htlc, "second message"));
+    g_assert_true (integration_send_chat (fd, &htlc, "first message"));
+    g_assert_true (integration_send_chat (fd, &htlc, "second message"));
 
     struct hx_chat_msg cm;
 

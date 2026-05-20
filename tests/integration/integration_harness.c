@@ -414,6 +414,20 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
     return send_login_packet (fd, htlc, &req);
 }
 
+gboolean
+integration_send_chat (int fd, struct htlc_conn *htlc, const char *text)
+{
+    /* HTLC_DATA_STYLE = 1 is the only value GtkHx + mhxd recognise:
+	 * "plain text" (vs. the unused "0 = sub-room" variant in the
+	 * original spec). Every chat-sending test in the suite uses
+	 * style=1, so we hardcode it here. */
+    guint16 style = htons (1);
+    return integration_send_message (
+        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int) HTLC_DATA_STYLE,
+        (int) sizeof (style), &style, (int) HTLC_DATA_CHAT,
+        (int) strlen (text), (guint8 *) text);
+}
+
 guint32
 integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
                                    guint32 channel_id, guint64 before,
