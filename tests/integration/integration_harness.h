@@ -323,6 +323,33 @@ extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
 extern guint32 integration_send_ping (int fd, struct htlc_conn *htlc);
 
 /*
+ * Create a private chat naming `target_uid` and read back the
+ * server's chat_id. Steps:
+ *
+ *   1. Send HTLC_HDR_CHAT_CREATE with HTLC_DATA_UID = target_uid.
+ *   2. integration_drain_until_task_trans on the just-sent trans.
+ *   3. Walk the TASK reply via dh_start for HTLS_DATA_CHAT_ID and
+ *      extract the chat_id into *chat_id_out.
+ *
+ * Returns TRUE on full success (got the TASK reply AND it carried a
+ * non-zero chat_id). On FALSE the test should fail; on TRUE
+ * *chat_id_out holds the chat the caller can now invite, join, set
+ * subject, send to, etc. against.
+ *
+ * The 6 Tier-3 tests that pre-refactor opened-coded this dance:
+ *   test_chat_create, test_chat_decline, test_chat_in_pchat,
+ *   test_chat_join, test_chat_part, test_chat_subject.
+ *
+ * `max_messages` bounds the drain. 64 is the value those tests
+ * have settled on after parallel-test-suite tuning.
+ */
+extern gboolean integration_create_chat_with_uid (int fd,
+                                                  struct htlc_conn *htlc,
+                                                  guint16 target_uid,
+                                                  guint32 *chat_id_out,
+                                                  int max_messages);
+
+/*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
  * return the byte count written. Layout:
  *

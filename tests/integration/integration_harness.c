@@ -485,6 +485,37 @@ integration_send_ping (int fd, struct htlc_conn *htlc)
 }
 
 gboolean
+integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
+                                  guint16 target_uid, guint32 *chat_id_out,
+                                  int max_messages)
+{
+    if (!chat_id_out) {
+        return FALSE;
+    }
+    *chat_id_out = 0;
+    guint16 uid_be = htons (target_uid);
+    guint32 create_trans = htlc->trans;
+    if (!integration_send_message (fd, htlc, HTLC_HDR_CHAT_CREATE,
+                                   /*flag=*/0, /*hc=*/1, (int) HTLC_DATA_UID,
+                                   (int) sizeof (uid_be), &uid_be)) {
+        return FALSE;
+    }
+    if (!integration_drain_until_task_trans (fd, htlc, create_trans,
+                                             max_messages)) {
+        return FALSE;
+    }
+    /* Server's TASK reply carries HTLS_DATA_CHAT_ID. Walk it out. */
+    dh_start (htlc)
+    {
+        if (_type == HTLS_DATA_CHAT_ID) {
+            dh_getint (*chat_id_out);
+        }
+    }
+    dh_end ();
+    return *chat_id_out != 0;
+}
+
+gboolean
 integration_send_chat (int fd, struct htlc_conn *htlc, const char *text)
 {
     /* HTLC_DATA_STYLE = 1 is the only value GtkHx + mhxd recognise:
