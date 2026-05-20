@@ -33,6 +33,7 @@
 #include <nettle/blowfish.h>
 #include "hx.h"
 #include "cipher.h"
+#include "cipher_aead.h"
 
 #ifdef CONFIG_CIPHER
 
@@ -183,43 +184,93 @@ do_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 void
 cipher_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 {
-	if (htlc->cipher_encode_type != CIPHER_NONE) {
-#if defined(CONFIG_COMPRESS)
-		if (htlc->compress_encode_type == COMPRESS_NONE) {
-#endif
-			unsigned char ran;
-
-			random_bytes(&ran, 1);
-			ran >>= 4;
-			if (ran == 2 || ran == 7 || ran == 13) {
-				u_int32_t type = 0;
-
-				random_bytes(&ran, 1);
-				ran >>= 2;
-				if (!ran) {
-					random_bytes(&ran, 1);
-					ran = (ran >> 3) + 1;
-				}
-				HN32(&type, &htlc->out.buf[pos]);
-				type |= (((u_int32_t)ran << 24) & 0xff000000);
-				HN32(&htlc->out.buf[pos], &type);
-				do_encode(htlc, pos, SIZEOF_HL_HDR);
-				cipher_change_encode_key(htlc, ran);
-				pos += SIZEOF_HL_HDR;
-				len -= SIZEOF_HL_HDR;
-			}
-#if defined(CONFIG_COMPRESS)
-		} else if (htlc->zc_ran) {
-			do_encode(htlc, pos, htlc->zc_hdrlen);
-			cipher_change_encode_key(htlc, htlc->zc_ran);
-			pos += htlc->zc_hdrlen;
-			len -= htlc->zc_hdrlen;
-			htlc->zc_ran = 0;
-		}
-#endif
-	} else {
+	if (htlc->cipher_encode_type == CIPHER_NONE) {
 		return;
 	}
+
+	/* AEAD path: replace the in-place stream XOR with a framed
+	 * Seal that grows the on-wire bytes by
+	 *     CIPHER_AEAD_LENGTH_PREFIX (4) + CIPHER_AEAD_TAG_SIZE (16)
+	 * per transaction. The plaintext at [pos, pos+len) gets
+	 * copied out, the slot is shrunk away from the accounting,
+	 * the buffer is grown to fit the framed payload, and the
+	 * seal output is written back at the same start position.
+	 * Compression is NOT used in AEAD mode (spec — the framing
+	 * already wraps the transaction), so we don't have to worry
+	 * about the zc_ran rekey path here. The rekey-on-random
+	 * nibble trick is also moot: ChaCha20-Poly1305 uses counter-
+	 * based nonces, no per-packet rotation needed. */
+	if (htlc->cipher_mode == CIPHER_MODE_AEAD) {
+		uint8_t *plaintext = g_memdup2 (&htlc->out.buf[pos], len);
+		size_t framed_len = CIPHER_AEAD_LENGTH_PREFIX + len
+		                  + CIPHER_AEAD_TAG_SIZE;
+
+		/* Rewind out.len to remove the plaintext bytes from the
+		 * in-flight range, grow the BUFFER to fit framed_len bytes
+		 * (without bumping out.len — qbuf_set would, so we realloc
+		 * directly), then seal into the freed-up slot and add the
+		 * framed length back to out.len.
+		 *
+		 * Earlier revisions used qbuf_set here, which sets out.len
+		 * AS A SIDE EFFECT of the realloc. Combined with the
+		 * out.len += written below, that double-counted framed_len
+		 * worth of bytes on the wire — the socket-write loop sent
+		 * the valid sealed frame followed by framed_len bytes of
+		 * uninitialised buffer tail. Server saw a valid frame
+		 * followed by garbage that wasn't a length prefix and
+		 * either tore down or replied in a way we couldn't open. */
+		htlc->out.len -= len;
+		guint32 need = htlc->out.pos + htlc->out.len + framed_len;
+		if (need > htlc->out.pos + htlc->out.len) {
+			htlc->out.buf = g_realloc (htlc->out.buf, need);
+		}
+		size_t written = cipher_aead_seal (
+		    &htlc->cipher_encode_state.chacha,
+		    plaintext, len,
+		    &htlc->out.buf[pos], framed_len);
+		htlc->out.len += written;
+		g_free (plaintext);
+		return;
+	}
+
+	/* Stream-cipher path (RC4 / Blowfish OFB). The rekey-on-
+	 * random-nibble trick is the legacy HOPE behaviour: with
+	 * probability 3/16, mark the header type byte and the next
+	 * N rounds of HMAC-stretching for the cipher key (see
+	 * cipher_change_encode_key). */
+#if defined(CONFIG_COMPRESS)
+	if (htlc->compress_encode_type == COMPRESS_NONE) {
+#endif
+		unsigned char ran;
+
+		random_bytes(&ran, 1);
+		ran >>= 4;
+		if (ran == 2 || ran == 7 || ran == 13) {
+			u_int32_t type = 0;
+
+			random_bytes(&ran, 1);
+			ran >>= 2;
+			if (!ran) {
+				random_bytes(&ran, 1);
+				ran = (ran >> 3) + 1;
+			}
+			HN32(&type, &htlc->out.buf[pos]);
+			type |= (((u_int32_t)ran << 24) & 0xff000000);
+			HN32(&htlc->out.buf[pos], &type);
+			do_encode(htlc, pos, SIZEOF_HL_HDR);
+			cipher_change_encode_key(htlc, ran);
+			pos += SIZEOF_HL_HDR;
+			len -= SIZEOF_HL_HDR;
+		}
+#if defined(CONFIG_COMPRESS)
+	} else if (htlc->zc_ran) {
+		do_encode(htlc, pos, htlc->zc_hdrlen);
+		cipher_change_encode_key(htlc, htlc->zc_ran);
+		pos += htlc->zc_hdrlen;
+		len -= htlc->zc_hdrlen;
+		htlc->zc_ran = 0;
+	}
+#endif
 	do_encode(htlc, pos, len);
 }
 

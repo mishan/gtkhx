@@ -35,13 +35,16 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pinned Janus 2.0.7 (commit a4046cf, May 13 2026). The upstream URL
-# carries no version suffix — agora.vespernet.net always serves the
-# current build — so we pin by sha256 instead of version string. Any
-# change at the URL produces a checksum mismatch here and we bump
-# deliberately.
-ARG JANUS_URL=https://get.vespernet.net/janus-linux-amd64.tar.gz
-ARG JANUS_SHA256=2a2a2aedf98ea941b1f26ea190bec3eb4c5213aeecdb794fa3dc543d0103373f
+# Pinned Janus build (current as of May 2026). Upstream's public
+# URL (https://get.vespernet.net/janus-linux-amd64.tar.gz, sha
+# 2a2a2aedf98ea941b1f26ea190bec3eb4c5213aeecdb794fa3dc543d0103373f)
+# rate-limits incoming connections aggressively, which the Tier 3
+# suite trips. fogWraith provided a build with the rate limit
+# disabled; Misha hosts it under misha.nasledov.com until upstream
+# updates the public binary. Same sha256-pin model — any change at
+# the URL produces a checksum mismatch here and we bump deliberately.
+ARG JANUS_URL=https://misha.nasledov.com/janus-linux-amd64.tar.gz
+ARG JANUS_SHA256=0a79f8c6fc724229a7f013ad227c285698027c1eb0eb569226012ba5b50670d4
 
 WORKDIR /build
 RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
@@ -70,6 +73,47 @@ RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
 RUN sed -i 's|^ChatHistoryEnabled: false|ChatHistoryEnabled: true|' \
         /opt/janus/Server/config.yaml \
  && grep -n -E '^ChatHistoryEnabled|^EnableHOPE|^TLSCert' \
+        /opt/janus/Server/config.yaml
+
+# Disable Janus's three per-IP throttles. The default config caps
+# concurrent connections at 5 and bans IPs that reconnect faster
+# than the rate limit. Tier 3 routinely hammers a single
+# host:port from the test harness (open, login, exercise, close,
+# repeat) at a rate that trips all three, which manifests as
+# either an immediate disconnect during integration_handshake
+# OR a "Max connections per IP exceeded" rejection. The custom
+# rate-limit-disabled build already zeroes the first two, but
+# MaxConnectionsPerIP defaults to 5 in the binary regardless of
+# build, so we still have to override here.
+#
+# The three keys split into two cases against upstream's shipped
+# config.yaml:
+#
+#   - MaxConnectionsPerIP is already present (default 5). Appending
+#     a second copy panics Janus's YAML unmarshal with "mapping key
+#     already defined" — so we sed -E -i it in place. Pattern
+#     anchored at start-of-line so nested keys can't accidentally
+#     match.
+#
+#   - ConnectionRateLimit + ConnectionRateBanThreshold are NOT in
+#     the shipped config; the rate-limit-disabled build reads
+#     them only if present, defaults are 0 (disabled) when absent.
+#     Appending the explicit zeros makes the intent visible and
+#     belt-and-braces against a future upstream binary that changes
+#     the default. printf rather than `echo -e` — POSIX echo
+#     doesn't honour -e, Debian bash's builtin only does with
+#     xpg_echo set, so printf is portable.
+#
+# Closing grep prints the rewritten lines at build time so a
+# future config-format divergence is visible in `docker build`
+# output rather than only surfacing as a runtime "Rate limit
+# exceeded" message.
+RUN sed -i -E \
+        -e 's|^MaxConnectionsPerIP:.*$|MaxConnectionsPerIP: 0|' \
+        /opt/janus/Server/config.yaml \
+ && printf '\nConnectionRateLimit: 0\nConnectionRateBanThreshold: 0\n' \
+        >> /opt/janus/Server/config.yaml \
+ && grep -E '^(ConnectionRateLimit|ConnectionRateBanThreshold|MaxConnectionsPerIP):' \
         /opt/janus/Server/config.yaml
 
 # Seed a deterministic content tree so integration tests don't have

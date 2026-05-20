@@ -28,6 +28,7 @@
  */
 
 #include <glib.h>
+#include "server_matrix.h"
 
 /*
  * Open a TCP connection to the configured host:port.
@@ -158,6 +159,26 @@ extern gboolean integration_login_guest (int fd, struct htlc_conn *htlc,
                                          guint16 icon);
 
 /*
+ * Capability-aware guest login. Same wire shape as
+ * integration_login_guest plus an HTLC_DATA_CAPABILITIES chunk
+ * advertising `caps` (a bitmask of HTLC_CAP_* values from
+ * hotline.h — typically HTLC_CAP_CHAT_HISTORY for the chat-history
+ * extension test set, or 0 to advertise no capabilities).
+ *
+ * Cap-aware servers (Janus) echo the agreed-on bits in the TASK
+ * login reply via HTLS_DATA_CAPABILITIES;
+ * integration_drain_until_selfinfo_or_error stashes that echo
+ * into htlc->caps so the caller can gate behaviour on the
+ * negotiated bits the same way production gtkhx does in
+ * src/rcv.c::rcv_task_login.
+ *
+ * Cap-unaware servers (mhxd) silently ignore the chunk per spec.
+ */
+extern gboolean integration_login_guest_caps (int fd, struct htlc_conn *htlc,
+                                              const char *display_name,
+                                              guint16 icon, guint16 caps);
+
+/*
  * Drain server messages until we either see HTLS_HDR_USER_SELFINFO
  * (login fully accepted, server has sent us our session state) or
  * a task-error reply (login refused). Returns the wire type that
@@ -195,6 +216,48 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
 extern int integration_open_login_or_skip (struct htlc_conn *htlc,
                                            const char *display_name,
                                            guint16 icon);
+
+/*
+ * Variant of integration_open_login_or_skip that targets a specific
+ * matrix entry and advertises `caps` to the server. Used by the
+ * chat-history tests which need to talk to a chat-history-capable
+ * server (Janus) regardless of which entry is the default.
+ *
+ * Picks `srv` (must be non-NULL — typically from
+ * hx_test_servers_with), opens a TCP connection to its
+ * host:port with a 2 s connect timeout, runs the magic handshake,
+ * sends a guest LOGIN with the requested capability advertisement,
+ * and drains to SELFINFO. Returns the connected fd, or -1 with
+ * g_test_skip / g_test_fail already called.
+ *
+ * On return htlc is in the state the harness left it, including
+ * htlc->caps populated with whatever bits the server echoed back
+ * in HTLS_DATA_CAPABILITIES during the drain.
+ */
+extern int
+integration_open_login_to_caps_or_skip (const hx_test_server *srv,
+                                        struct htlc_conn *htlc,
+                                        const char *display_name,
+                                        guint16 icon, guint16 caps);
+
+/*
+ * Send HTLC_HDR_GET_CHAT_HISTORY (TRAN 700) for `channel_id`
+ * with the same "0 means omit" cursor / limit semantics as
+ * src/chat_history.c::hx_get_chat_history. Returns the trans
+ * id assigned by hlpack (or 0 on send failure) — the caller
+ * filters the TASK reply by matching trans against this value.
+ *
+ * The harness does NOT cap-gate this call: tests can issue it
+ * even against a server that didn't echo CAP_CHAT_HISTORY, in
+ * order to verify the server's task-error response. Production
+ * gtkhx gates the send (src/chat_history.c:137) and won't
+ * exercise that path.
+ */
+extern guint32 integration_send_get_chat_history (int fd,
+                                                  struct htlc_conn *htlc,
+                                                  guint32 channel_id,
+                                                  guint64 before, guint64 after,
+                                                  guint16 limit);
 
 /* ---- HTXF subchannel helpers ---------------------------------- */
 

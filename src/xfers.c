@@ -46,6 +46,7 @@
 #include "uniquify_path.h"
 #include "sound.h"
 #include "files.h"
+#include "htxf_io.h"
 #include "preview.h"
 #include "gtkthreads.h"
 #include "xfers.h"
@@ -95,6 +96,10 @@ htxf_unref (struct htxf_conn *htxf)
     if (!g_atomic_int_dec_and_test (&htxf->refcount)) {
         return;
     }
+    /* Release any AEAD read-side accumulator buffers the HTXF
+	 * subchannel Phase E wrappers might have allocated. No-op
+	 * on a transfer that ran in plaintext mode. */
+    htxf_io_release (htxf);
     g_free (htxf);
 }
 
@@ -683,7 +688,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
     len = 40;
     pos = 0;
     while (len) {
-        if ((r = read (s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -696,7 +701,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
     len += 16;
     tot_len = 40 + len;
     while (len) {
-        if ((r = read (s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -837,7 +842,7 @@ get_rsrc:
                 if (sr <= 0) {
                     break;
                 }
-                ssize_t got = read (s, sink, want);
+                ssize_t got = htxf_io_read (htxf, s, sink, want);
                 if (got <= 0) {
                     break;
                 }
@@ -858,7 +863,7 @@ get_rsrc:
     pos = 0;
     len = 16;
     while (len) {
-        if ((r = read (s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -1016,12 +1021,12 @@ folder_get_thread (void *__arg)
         ssize_t n;
 
         cmd_n = htons (3); /* FILE_NEXT */
-        if (write (s, &cmd_n, 2) != 2) {
+        if (htxf_io_write (htxf, s, &cmd_n, 2) != 2) {
             retval = errno ? errno : EIO;
             goto ret;
         }
 
-        n = read (s, &nfi, sizeof (nfi));
+        n = htxf_io_read (htxf, s, &nfi, sizeof (nfi));
         if (n != (ssize_t)sizeof (nfi)) {
             /* Clean end-of-stream when n == 0 — server has run
 			 * out of files and closed the socket. */
@@ -1042,7 +1047,7 @@ folder_get_thread (void *__arg)
             guint8 ph[3];
             guint8 nlen;
             char name[256];
-            if (read (s, ph, 3) != 3) {
+            if (htxf_io_read (htxf, s, ph, 3) != 3) {
                 retval = errno ? errno : EIO;
                 goto ret;
             }
@@ -1050,7 +1055,7 @@ folder_get_thread (void *__arg)
             /* nlen is guint8 (max 255); name is 256 bytes — the
 			 * read can never overflow. The original explicit guard
 			 * triggered a `comparison always false` warning. */
-            if (nlen && read (s, name, nlen) != nlen) {
+            if (nlen && htxf_io_read (htxf, s, name, nlen) != nlen) {
                 retval = errno ? errno : EIO;
                 goto ret;
             }
@@ -1099,12 +1104,12 @@ folder_get_thread (void *__arg)
 		 * follow-up; FILE_SEND with data_pos/rsrc_pos zeroed
 		 * tells the server to send the whole file. */
         cmd_n = htons (1); /* FILE_SEND */
-        if (write (s, &cmd_n, 2) != 2) {
+        if (htxf_io_write (htxf, s, &cmd_n, 2) != 2) {
             retval = errno ? errno : EIO;
             goto ret;
         }
 
-        if (read (s, &file_size, 4) != 4) {
+        if (htxf_io_read (htxf, s, &file_size, 4) != 4) {
             retval = errno ? errno : EIO;
             goto ret;
         }
@@ -1230,7 +1235,7 @@ TYPECREA\
             HN32 (&buf[121 + fi.comlen], &hi);
         }
     }
-    if (write (s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
+    if (htxf_io_write (htxf, s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
         return errno ? errno : EIO;
     }
     htxf->total_pos += 133 + fi.comlen;
@@ -1262,7 +1267,7 @@ put_rsrc:
             HN32 (&buf[4], &hi);
         }
     }
-    if (write (s, buf, 16) != 16) {
+    if (htxf_io_write (htxf, s, buf, 16) != 16) {
         /* Same behaviour as the inlined version: a short write at
 		 * the MACR-marker boundary is treated as a clean stop (the
 		 * server may not want the rsrc fork). Don't surface as an
@@ -1476,7 +1481,7 @@ folder_put_thread (void *__arg)
         guint16 wire_len = 4;
 
         /* Wait for FILE_NEXT from the server. */
-        n = read (s, &cmd_n, 2);
+        n = htxf_io_read (htxf, s, &cmd_n, 2);
         if (n != 2) {
             retval = errno ? errno : EIO;
             goto cleanup;
@@ -1501,7 +1506,7 @@ folder_put_thread (void *__arg)
             t = htons ((guint16)e->components->len);
             memcpy (&buf[4], &t, 2);
         }
-        if (write (s, buf, 6) != 6) {
+        if (htxf_io_write (htxf, s, buf, 6) != 6) {
             retval = errno ? errno : EIO;
             goto cleanup;
         }
@@ -1517,11 +1522,11 @@ folder_put_thread (void *__arg)
             ch[0] = 0;
             ch[1] = 0;
             ch[2] = (guint8)cl;
-            if (write (s, ch, 3) != 3) {
+            if (htxf_io_write (htxf, s, ch, 3) != 3) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
-            if (cl && write (s, c, cl) != (ssize_t)cl) {
+            if (cl && htxf_io_write (htxf, s, c, cl) != (ssize_t)cl) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1534,7 +1539,7 @@ folder_put_thread (void *__arg)
 
         /* File leaf — server replies with FILE_SEND (fresh) or
 		 * FILE_RESUME (resume from data_pos/rsrc_pos). */
-        n = read (s, &cmd_n, 2);
+        n = htxf_io_read (htxf, s, &cmd_n, 2);
         if (n != 2) {
             retval = errno ? errno : EIO;
             goto cleanup;
@@ -1545,7 +1550,7 @@ folder_put_thread (void *__arg)
         if (cmd_n == 2 /* FILE_RESUME */) {
             guint16 rlen;
             guint8 rflt[128];
-            if (read (s, &rlen, 2) != 2) {
+            if (htxf_io_read (htxf, s, &rlen, 2) != 2) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1554,7 +1559,7 @@ folder_put_thread (void *__arg)
                 retval = EPROTO;
                 goto cleanup;
             }
-            if (rlen && read (s, rflt, rlen) != (ssize_t)rlen) {
+            if (rlen && htxf_io_read (htxf, s, rflt, rlen) != (ssize_t)rlen) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1594,7 +1599,7 @@ folder_put_thread (void *__arg)
                 file_size += 16 + (htxf->rsrc_size - htxf->rsrc_pos);
             }
             size_n = htonl (file_size);
-            if (write (s, &size_n, 4) != 4) {
+            if (htxf_io_write (htxf, s, &size_n, 4) != 4) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }

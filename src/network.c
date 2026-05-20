@@ -56,6 +56,7 @@
 #include "network.h"
 #include "banner.h"
 #include "debug.h"
+#include "cipher_aead.h"
 
 char *server_addr;
 #ifdef USE_IPV6
@@ -298,6 +299,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->cipher_decode_type = 0;
     htlc->cipher_encode_keylen = 0;
     htlc->cipher_decode_keylen = 0;
+    htlc->cipher_mode = CIPHER_MODE_STREAM;
+    /* Free the AEAD plaintext accumulator buffer if it grew. The
+	 * struct itself stays zeroed for the next connection. */
+    if (htlc->aead_plain.buf) {
+        g_free (htlc->aead_plain.buf);
+        memset (&htlc->aead_plain, 0, sizeof (htlc->aead_plain));
+    }
 #endif
 #ifdef CONFIG_COMPRESS
     if (htlc->compress_encode_type != COMPRESS_NONE) {
@@ -336,6 +344,95 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     g_free (server_addr);
     server_addr = NULL;
 }
+/* Phase 5+ (HOPE ChaCha20-Poly1305): pump complete AEAD frames
+ * from htlc->read_in into htlc->aead_plain. Returns the number
+ * of plaintext bytes newly available in aead_plain (relative to
+ * its pos). Authentication failure or oversized frame returns 0
+ * and disconnects htlc (via hx_htlc_close); the caller treats
+ * htlc->fd == 0 as "stop processing". */
+#ifdef CONFIG_CIPHER
+static u_int32_t
+aead_pump_frames (struct htlc_conn *htlc)
+{
+    struct qbuf *src = &htlc->read_in;
+    struct qbuf *dst = &htlc->aead_plain;
+
+    while (src->len >= CIPHER_AEAD_LENGTH_PREFIX) {
+        size_t frame_size = cipher_aead_peek_frame_size (
+            &src->buf[src->pos], src->len);
+        if (frame_size == 0) {
+            /* Oversized or malformed length prefix — non-recoverable.
+			 * The server's framing is corrupted (or, more likely, we
+			 * lost cipher sync / disagree on frame layout). Tear
+			 * down. Log the first up-to-16 bytes the wire actually
+			 * delivered, so a layout mismatch (LE vs BE prefix,
+			 * prefix elsewhere in the frame, no prefix at all,
+			 * ...) is visible to GTKHX_DEBUG=xfer-aead. */
+            {
+                gsize dump = src->len < 16 ? src->len : 16;
+                gchar hex[64];
+                gchar *p = hex;
+                for (gsize i = 0; i < dump && p + 3 < hex + sizeof (hex);
+                     i++) {
+                    p += g_snprintf (p, hex + sizeof (hex) - p, "%02x ",
+                                     src->buf[src->pos + i]);
+                }
+                debug_log ("xfer-aead",
+                           "frame-size-out-of-range: src->len=%u "
+                           "first %zu bytes: %s",
+                           src->len, dump, hex);
+            }
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "AEAD frame size out of range; "
+                              "disconnecting\n");
+            hx_htlc_close (htlc, 0);
+            return 0;
+        }
+        if (src->len < frame_size) {
+            /* Frame not fully buffered yet — wait for more bytes. */
+            break;
+        }
+
+        /* Reserve aead_plain capacity for the frame's plaintext
+		 * (frame_size - prefix - tag). qbuf_set is idempotent on
+		 * existing buffer storage and only g_realloc's when we
+		 * need more. */
+        size_t pt_max = frame_size - CIPHER_AEAD_LENGTH_PREFIX
+                                   - CIPHER_AEAD_TAG_SIZE;
+        guint32 dst_off = dst->pos + dst->len;
+        qbuf_set (dst, dst->pos, dst->len + pt_max);
+
+        size_t pt_len = cipher_aead_open (
+            &htlc->cipher_decode_state.chacha,
+            &src->buf[src->pos], frame_size,
+            &dst->buf[dst_off], pt_max);
+        if (pt_len == 0) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "AEAD authentication failure; "
+                              "disconnecting\n");
+            /* Rewind the reservation we made above — no plaintext
+			 * was actually written. */
+            qbuf_set (dst, dst->pos, dst->len - pt_max);
+            hx_htlc_close (htlc, 0);
+            return 0;
+        }
+        /* aead_plain.len is now (dst_off - dst->pos) + pt_len; correct
+		 * for the reservation vs. the actual pt_len. */
+        dst->len -= pt_max;
+        dst->len += pt_len;
+
+        /* Consume the frame from read_in. */
+        if (src->len > frame_size) {
+            memmove (&src->buf[src->pos],
+                     &src->buf[src->pos + frame_size],
+                     src->len - frame_size);
+        }
+        src->len -= frame_size;
+    }
+    return dst->len;
+}
+#endif
+
 static unsigned int
 decode (struct htlc_conn *htlc)
 {
@@ -357,9 +454,68 @@ decode (struct htlc_conn *htlc)
     memset (&compress_out, 0, sizeof (struct qbuf));
 #endif
 
+#ifdef CONFIG_CIPHER
+    /* Phase 5+ (HOPE-ChaCha20-Poly1305): AEAD-framed path. Pump
+	 * complete frames from read_in into aead_plain, then bulk
+	 * memcpy from aead_plain into htlc->in based on how many
+	 * bytes the rcv parser is waiting for (htlc->in.len).
+	 * Compression is not used in AEAD mode (spec), so we don't
+	 * touch the compress branch here.
+	 *
+	 * This path completely bypasses the byte-stream cipher_decode
+	 * + compress_decode plumbing below — those still operate on
+	 * the legacy stream-cipher RC4/Blowfish path.
+	 *
+	 * IMPORTANT: this branch is checked BEFORE the `if (!r)` early
+	 * return below, because the AEAD path's plaintext accumulator
+	 * (htlc->aead_plain) can hold data even when read_in is
+	 * empty. The htlc_read while-loop drives multiple decode()
+	 * calls per Hotline transaction (one for the 22-byte header,
+	 * one for the body) — read_in is typically drained in full
+	 * during the first call's aead_pump, so iter 2 must be able
+	 * to serve from aead_plain alone. Bypassing the early return
+	 * here is what makes that drain-across-iterations work; an
+	 * earlier revision had the early return first and trans=2
+	 * replies hung indefinitely after their header iter. */
+    if (htlc->cipher_mode == CIPHER_MODE_AEAD
+        && htlc->cipher_decode_type == CIPHER_CHACHA20_POLY1305) {
+        aead_pump_frames (htlc);
+        /* hx_htlc_close zeroes htlc->fd; bail if pump tore us down. */
+        if (!htlc->fd) {
+            return 0;
+        }
+        struct qbuf *plain = &htlc->aead_plain;
+        if (plain->len == 0) {
+            return 0;
+        }
+        u_int32_t want = htlc->in.len;
+        u_int32_t avail = plain->len;
+        u_int32_t take = want < avail ? want : avail;
+        memcpy (&htlc->in.buf[htlc->in.pos],
+                &plain->buf[plain->pos], take);
+        htlc->in.pos += take;
+        htlc->in.len -= take;
+        if (take == plain->len) {
+            plain->pos = 0;
+            plain->len = 0;
+        } else {
+            memmove (&plain->buf[plain->pos],
+                     &plain->buf[plain->pos + take],
+                     plain->len - take);
+            plain->len -= take;
+        }
+        return (htlc->in.len == 0);
+    }
+#endif
+
+    /* Below here the legacy stream/plaintext path needs at least
+	 * one byte buffered in read_in to do anything; bail otherwise.
+	 * The AEAD branch above has its own data-availability check
+	 * against aead_plain. */
     if (!r) {
         return 0;
     }
+
     inused = 0;
     len = r;
     in->pos = 0;
@@ -948,11 +1104,24 @@ send_login (struct gtkhx_connect_ctx *ctx)
 #endif
 #ifdef CONFIG_CIPHER
         if (htlc->cipheralg[0]) {
+            /* HOPE cipher advertisement. Single-entry list of the
+			 * user's configured algorithm (BLOWFISH / RC4 / or
+			 * CHACHA20-POLY1305 if they pinned the AEAD path
+			 * explicitly via the bookmark cipher selector).
+			 *
+			 * Phase 5+ NOTE: this could grow into a strongest-
+			 * first multi-entry list once HTXF subchannel AEAD
+			 * (Phase E) lands. Until then, auto-advertising
+			 * CHACHA20-POLY1305 alongside BLOWFISH would break
+			 * file transfers when the server picks ChaCha20
+			 * (control channel runs framed AEAD but our HTXF
+			 * code still does plaintext I/O). Single-entry is
+			 * the safe interim — users who want AEAD can pin
+			 * it via the bookmark; the rest get unchanged
+			 * stream-cipher behaviour. */
             cipherlen = strlen (htlc->cipheralg);
-            {
-                guint16 val = 1;
-                HN16 (cipheralglist, &val);
-            }
+            guint16 cnt = 1;
+            HN16 (cipheralglist, &cnt);
             cipheralglistlen = 2;
             cipheralglist[cipheralglistlen++] = cipherlen;
             memcpy (cipheralglist + cipheralglistlen, htlc->cipheralg,
@@ -1270,6 +1439,48 @@ htxf_connect (struct htxf_conn *htxf)
             return -1;
         }
     }
+
+#ifdef CONFIG_CIPHER
+    /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
+	 *
+	 * Once the plaintext handshake has been sent, derive a
+	 * per-transfer ChaCha20 key pair off the control channel's
+	 * session_key plus our HTXF ref number and flip the htxf_io
+	 * wrappers (Phase E1) into framed-AEAD mode. The handshake
+	 * itself stays plaintext per spec — only the body bytes
+	 * (FILP forks, folder commands, file data, etc.) flow
+	 * through AEAD frames.
+	 *
+	 * Derivation mixes ref into the salt so two transfers within
+	 * the same control-channel session can never share a nonce
+	 * even if their plaintext byte streams happen to match.
+	 * Counters start at 0 per transfer (the derive helper zeros
+	 * them).
+	 *
+	 * Only fires when:
+	 *   - the htxf is bound to a control channel (htlc non-NULL),
+	 *   - that control channel negotiated CIPHER_MODE_AEAD (the
+	 *     server picked CHACHA20-POLY1305 in the HOPE Step 2
+	 *     reply — see rcv_task_login),
+	 *   - cipher support is compiled in.
+	 *
+	 * Other transfers (no HOPE, or HOPE with a stream cipher)
+	 * leave aead_active = FALSE and the wrappers behave exactly
+	 * like read()/write(). */
+    if (htxf && htxf->htlc
+        && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
+        cipher_aead_derive_transfer_keys (
+            &htxf->xfer_encode, &htxf->xfer_decode,
+            htxf->htlc->sessionkey, htxf->htlc->sklen,
+            &htxf->htlc->cipher_encode_state.chacha,
+            &htxf->htlc->cipher_decode_state.chacha,
+            htxf->ref);
+        htxf->aead_active = TRUE;
+        debug_log ("xfer-aead",
+                   "ref=%u: AEAD active (control session_key=%u bytes)",
+                   htxf->ref, htxf->htlc->sklen);
+    }
+#endif
 
     return s;
 }

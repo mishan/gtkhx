@@ -30,6 +30,13 @@
 #include "cipher.h"
 #endif
 
+/* htxf_io.h defines struct htxf_aead_io, which is embedded as a
+ * value field on struct htxf_conn below for the HOPE-ChaCha20-
+ * Poly1305 HTXF subchannel (Phase E). The header has no
+ * dependencies on protocol.h types itself — pulls in glib +
+ * sys/types only — so the include is safe here. */
+#include "htxf_io.h"
+
 /* Phase 5+ (HTXF rewrite): the connection and transfer structs used
  * to carry addrinfo / sockaddr_in for the network stack. The new
  * GSocketClient-based connect path stores a plain host + port instead,
@@ -149,6 +156,31 @@ struct htxf_conn {
 	 * (which g_idle_add's them onto the main thread's queue). NULL
 	 * for non-preview transfers. */
     void *preview;
+
+#ifdef CONFIG_CIPHER
+    /* HOPE ChaCha20-Poly1305 HTXF subchannel state (Phase E).
+	 *
+	 * aead_active gates whether xfers.c's per-transfer
+	 * htxf_io_read / htxf_io_write wrappers route through the
+	 * AEAD path or fall through to plain read()/write(). Set by
+	 * htxf_connect on connections whose control channel
+	 * negotiated CIPHER_MODE_AEAD after calling
+	 * cipher_aead_derive_transfer_keys to populate
+	 * xfer_encode / xfer_decode (counters start at 0, never
+	 * reused across transfers — derivation mixes the HTXF ref
+	 * number into the per-transfer key).
+	 *
+	 * aead_io owns the receive-side ciphertext + plaintext
+	 * accumulators the wrapper needs to assemble one frame at
+	 * a time before calling cipher_aead_open. Sender-side
+	 * doesn't need an accumulator: each htxf_io_write produces
+	 * exactly one frame on the wire. Reclaimed by
+	 * htxf_io_release at xfer worker teardown. */
+    chacha_aead_state xfer_encode;
+    chacha_aead_state xfer_decode;
+    gboolean aead_active;
+    struct htxf_aead_io aead_io;
+#endif
 };
 
 struct htlc_conn {
@@ -221,6 +253,27 @@ struct htlc_conn {
     /* keylen in bytes */
     u_int8_t cipher_encode_keylen, cipher_decode_keylen;
     u_int8_t cipher_encode_type, cipher_decode_type;
+    /* HOPE cipher mode (CIPHER_MODE_STREAM | CIPHER_MODE_AEAD).
+	 * Defaults to STREAM. The server's HTLS_DATA_CIPHER_MODE chunk
+	 * in the HOPE Step-2 reply sets this — "AEAD" → AEAD, anything
+	 * else (or chunk absent) → STREAM. cipher_encode/decode dispatch
+	 * on this to pick between the byte-stream XOR path (RC4/
+	 * Blowfish) and the framed Seal/Open path (ChaCha20-Poly1305). */
+    u_int8_t cipher_mode;
+    /* AEAD decoded-plaintext accumulator. network.c::decode() in
+	 * AEAD mode opens complete length-prefixed frames out of
+	 * read_in and stores their plaintext here. The same decode()
+	 * call then memcpy's bytes from here into htlc->in as the
+	 * existing rcv loop (which works in header → body chunks)
+	 * consumes them.
+	 *
+	 * Two-stage buffering (read_in → aead_plain → in) is needed
+	 * because AEAD requires a complete frame before Open can
+	 * verify the Poly1305 tag, while the rcv loop streams in
+	 * header-then-body pieces. The intermediate plain buffer
+	 * bridges the granularity mismatch. Only used in AEAD mode;
+	 * stream-cipher mode leaves it untouched. */
+    struct qbuf aead_plain;
 #if defined(CONFIG_COMPRESS)
     u_int8_t zc_hdrlen;
     u_int8_t zc_ran;

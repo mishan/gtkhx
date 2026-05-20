@@ -61,6 +61,12 @@ char *valid_ciphers[] = { "RC4", "BLOWFISH",
 #ifndef CONFIG_NO_IDEA
                           "IDEA",
 #endif
+                          /* Phase 5+ (fogWraith HOPE-ChaCha20-Poly1305.md):
+						   * preferred AEAD cipher, advertised when the
+						   * connection is encrypted. The negotiation sends
+						   * a multi-entry list strongest-first; server
+						   * picks whichever it supports. */
+                          "CHACHA20-POLY1305",
                           0 };
 
 int
