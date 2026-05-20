@@ -64,7 +64,9 @@ const hx_test_server hx_test_server_matrix[] = {
                     | HX_TEST_CAP_TEXT_ENCODING
                     | HX_TEST_CAP_CHAT_HISTORY
                     | HX_TEST_CAP_BANNER_HTXF
-                    | HX_TEST_CAP_NEWS_15,
+                    | HX_TEST_CAP_NEWS_15
+                    | HX_TEST_CAP_HOPE
+                    | HX_TEST_CAP_CHACHA20,
     },
 };
 

@@ -760,6 +760,17 @@ integration_harness_lib = static_library(
   '../src/hl_code.c',
   '../src/login_packet.c',
   '../src/chat_history.c',
+  # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
+  # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; hope.c brings
+  # the HMAC chain + chunk walker; algo_list.c / hmac.c are their
+  # transitive deps. All four are pure functions (Nettle + glib only,
+  # no GTK), so pulling them in costs the harness nothing in link
+  # surface — and lets future integration_login_hope_* primitives
+  # drive the same secure-login state machine production uses.
+  '../src/cipher_aead.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )
@@ -1258,6 +1269,25 @@ test_integration_chat_history = executable('test_integration_chat_history',
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
+
+# hope_chacha20 — Tier 3 coverage for the HOPE-Secure-Login +
+# ChaCha20-Poly1305 AEAD path against a server that supports it
+# (Janus today; filtered via HX_TEST_CAP_CHACHA20). Skips silently
+# when no chacha20-capable server is in the matrix.
+#
+# The whole rest of the test-vs-prod dedup work on this branch (the
+# src/login_packet.{c,h} module, the harness AEAD wrappers,
+# integration_open_login_hope_or_skip) exists to make this test
+# possible.
+test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
+  'integration/test_hope_chacha20.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_chacha20', test_integration_hope_chacha20,
+     suite   : 'integration',
+     timeout : 60)
 test('chat_history', test_integration_chat_history,
      suite   : 'integration',
      timeout : 60)

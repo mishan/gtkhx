@@ -387,6 +387,107 @@ extern gboolean integration_drain_until_task_trans (int fd,
                                                     guint32 wanted_trans,
                                                     int max_messages);
 
+/* ---- HOPE-Secure-Login + ChaCha20-Poly1305 ----------------------
+ *
+ * The harness's HOPE flow uses the same pure helpers production
+ * uses (src/hope.c + src/cipher_aead.c). The only test-only piece
+ * is the synchronous driver below: it talks Step 1 → server reply →
+ * Step 2 against a real connection, and on success swaps the
+ * harness's send/recv path over to AEAD framing for the remainder
+ * of the session.
+ *
+ * The integration_hope_session struct holds the per-connection AEAD
+ * state. It lives alongside (not on) struct htlc_conn because the
+ * production htlc_conn carries this state via cipher_state.chacha
+ * but the harness wants it independent so tests don't have to drag
+ * in the full cipher_state union.
+ */
+
+#ifdef CONFIG_CIPHER
+#include "cipher.h" /* chacha_aead_state */
+typedef struct {
+    /* AEAD framing state. Active only after a successful
+     * HOPE-ChaCha20 negotiation. */
+    int aead_active;
+    chacha_aead_state encode_state;  /* client → server */
+    chacha_aead_state decode_state;  /* server → client */
+
+    /* Decode-side accumulator for the next inbound frame: AEAD frames
+     * are length-prefixed and arrive in chunks of arbitrary boundary
+     * over TCP. We accumulate until cipher_aead_peek_frame_size says
+     * we have a full frame, then call cipher_aead_open. */
+    guint8 *rx_accum;
+    gsize rx_accum_len;
+    gsize rx_accum_cap;
+} integration_hope_session;
+#else
+typedef struct {
+    int aead_active; /* always 0; AEAD disabled at build time. */
+} integration_hope_session;
+#endif
+
+/*
+ * Run the full HOPE-Secure-Login handshake against `srv`:
+ *
+ *   1. Open TCP + magic handshake.
+ *   2. Send HOPE Step 1 LOGIN (algorithm negotiation, empty creds).
+ *   3. Drain to the TASK reply; parse via hope_parse_step1_reply.
+ *   4. Compute HMAC chain via hope_compute_chain.
+ *   5. Send Step 2 LOGIN with login HMAC + password MAC + cipher /
+ *      compress confirmations + display_name + capabilities.
+ *   6. If the negotiated cipher is CHACHA20-POLY1305, derive AEAD
+ *      session keys and arm hope->aead_active.
+ *   7. Drain to SELFINFO or task-error.
+ *
+ * On success returns the fd and leaves htlc + hope ready for AEAD-
+ * aware send/recv (when aead_active is set). On failure calls
+ * g_test_skip or g_test_fail_printf with diagnostics and returns -1.
+ *
+ * `password` is the cleartext password (raw bytes — not pre-hashed);
+ * the harness drives the HMAC chain. Pass "" for accounts with no
+ * password (Janus's `guest` is set up that way for these tests).
+ *
+ * `cipheralg` and `compressalg` are advertised by name (e.g.
+ * "CHACHA20-POLY1305", "ZSTD", or NULL for none). Server picks
+ * whether to honour them.
+ */
+extern int integration_open_login_hope_or_skip (
+    const hx_test_server *srv,
+    struct htlc_conn *htlc,
+    integration_hope_session *hope,
+    const char *username, const char *password,
+    const char *display_name, guint16 icon,
+    const char *cipheralg, const char *compressalg);
+
+/*
+ * Release any malloc'd state inside `hope`. Safe to call on a
+ * zeroed struct.
+ */
+extern void integration_hope_session_release (integration_hope_session *hope);
+
+/*
+ * AEAD-aware send. If hope->aead_active, frames the message through
+ * cipher_aead_seal and writes the framed bytes; otherwise plain
+ * passthrough to integration_send. Same hlpack-driven message
+ * assembly as integration_send_message.
+ */
+extern gboolean integration_send_message_hope (int fd,
+                                               struct htlc_conn *htlc,
+                                               integration_hope_session *hope,
+                                               guint32 type, guint32 flag,
+                                               int hc, ...);
+
+/*
+ * AEAD-aware recv. If hope->aead_active, accumulates bytes into
+ * hope->rx_accum until a full AEAD frame is buffered, then opens it
+ * and copies the plaintext into htlc->in. Otherwise passthrough to
+ * integration_recv_message.
+ */
+extern gboolean integration_recv_message_hope (int fd,
+                                               struct htlc_conn *htlc,
+                                               integration_hope_session *hope,
+                                               int timeout_ms);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*
