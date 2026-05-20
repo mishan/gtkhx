@@ -29,6 +29,7 @@
 #include "proto_helpers.h"
 #include "hl_code.h"
 #include "login_packet.h"
+#include "chat_history.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -43,6 +44,30 @@
  * non-static with the hx_integration_ prefix so server_matrix
  * doesn't have to duplicate the addrinfo dance. The legacy
  * integration_connect() still routes through here. */
+/* Stub for the production hlwrite_chunks defined in network.c.
+ * chat_history.c references it for hx_get_chat_history's production
+ * send path, but Tier 3 binaries don't link network.c (it would
+ * drag in the whole GIOChannel / cipher / compress / signal stack).
+ *
+ * The harness's own send path uses hlpack_chunks + integration_send
+ * directly (see integration_send_get_chat_history); production-only
+ * code paths that go through hlwrite_chunks shouldn't be reachable
+ * here. If a test ever hits this, we want a loud failure rather
+ * than a silent empty send. */
+void
+hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                const struct hx_chunk *chunks, int hc)
+{
+    (void) htlc;
+    (void) type;
+    (void) flag;
+    (void) chunks;
+    (void) hc;
+    g_critical ("hlwrite_chunks called from a Tier 3 binary — production-"
+                "only code path leaked into the harness. Use the equivalent "
+                "integration_send_* helper instead.");
+}
+
 int
 hx_integration_connect_to (const char *host, int port, int timeout_ms)
 {
@@ -391,71 +416,38 @@ integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
                                    guint32 channel_id, guint64 before,
                                    guint64 after, guint16 limit)
 {
+    /* Drive the same chunk builder production uses (src/chat_history.c
+	 * via hx_get_chat_history_build_chunks). The harness skips the
+	 * cap-gate (so tests can deliberately exercise a server's task-
+	 * error response when the extension isn't negotiated) and uses
+	 * hlpack_chunks + integration_send instead of hlwrite_chunks
+	 * — the former is fire-and-forget against htlc->out, the latter
+	 * is production's queue-via-FDW path. */
     guint32 trans = htlc->trans;
 
-    guint32 channel_be = GUINT32_TO_BE (channel_id);
-    guint64 before_be = GUINT64_TO_BE (before);
-    guint64 after_be = GUINT64_TO_BE (after);
-    guint16 limit_be = GUINT16_TO_BE (limit);
+    /* Reset htlc->out so the pack starts at offset 0; otherwise
+	 * hlpack_chunks would append to whatever an earlier
+	 * integration_send_message left behind. */
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
 
-    int hc = 1;
-    if (before)
-        hc++;
-    if (after)
-        hc++;
-    if (limit)
-        hc++;
-
-    /* Mirror src/chat_history.c's "0 = omit chunk" semantics. The
-	 * variadic dispatch below enumerates the 2^3 = 8 combinations
-	 * of (before, after, limit) to dodge the no-clean-portable-
-	 * va_list-build problem inside the harness. */
-    gboolean ok;
-    if (before && after && limit) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be,
-            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
-    } else if (before && after) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be);
-    } else if (before && limit) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
-    } else if (after && limit) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be,
-            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
-    } else if (before) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_BEFORE, 8, &before_be);
-    } else if (after) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_AFTER, 8, &after_be);
-    } else if (limit) {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be,
-            (int) HTLC_DATA_HISTORY_LIMIT, 2, &limit_be);
-    } else {
-        ok = integration_send_message (
-            fd, htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-            (int) HTLC_DATA_CHANNEL_ID, 4, &channel_be);
+    struct hx_chunk chunks[4];
+    struct hx_get_chat_history_scratch scratch;
+    int hc = hx_get_chat_history_build_chunks (channel_id, before, after,
+                                               limit, chunks, 4, &scratch);
+    if (hc <= 0) {
+        return 0;
     }
+    hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
+
+    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
 
     return ok ? trans : 0;
 }

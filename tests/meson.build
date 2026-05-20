@@ -756,6 +756,7 @@ integration_harness_lib = static_library(
   '../src/debug.c',
   '../src/hl_code.c',
   '../src/login_packet.c',
+  '../src/chat_history.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )
@@ -1250,7 +1251,6 @@ test('folder_get', test_integration_folder_get,
 # in the matrix (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd).
 test_integration_chat_history = executable('test_integration_chat_history',
   'integration/test_chat_history.c',
-  '../src/chat_history.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,

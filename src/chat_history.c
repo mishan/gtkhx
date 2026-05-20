@@ -14,6 +14,8 @@
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
+#include "proto_helpers.h" /* struct hx_chunk */
+#include "network.h"       /* hlwrite_chunks */
 #include "chat_history.h"
 #include "debug.h"
 
@@ -123,6 +125,52 @@ hx_history_entry_free (HxHistoryEntry *entry)
 
 /* ---- Request sender -------------------------------------------- */
 
+int
+hx_get_chat_history_build_chunks (guint32 channel_id, guint64 before,
+                                  guint64 after, guint16 limit,
+                                  struct hx_chunk *chunks, int chunks_cap,
+                                  struct hx_get_chat_history_scratch *scratch)
+{
+    if (!chunks || chunks_cap < 4 || !scratch) {
+        return 0;
+    }
+
+    /* All numeric fields are sent big-endian. Stash host→network
+     * conversions into caller-owned scratch storage so the
+     * struct hx_chunk data pointers below remain valid past
+     * function return — the eventual hlpack_chunks/hlwrite_chunks
+     * call memcpys out of them, but the harness path may delay
+     * the pack briefly past the build. */
+    scratch->channel_be = GUINT32_TO_BE (channel_id);
+    scratch->before_be  = GUINT64_TO_BE (before);
+    scratch->after_be   = GUINT64_TO_BE (after);
+    scratch->limit_be   = GUINT16_TO_BE (limit);
+
+    /* Build the chunk list dynamically — only include optional
+     * cursor / limit chunks when their host-side value is non-zero.
+     * channel_id is always sent (the spec mandates it). The
+     * hlwrite_chunks array-style packer collapses the 2^3 = 8
+     * combinations of (before, after, limit) into one call site
+     * — no variadic-dispatch enumeration. */
+    int hc = 0;
+    chunks[hc++] = (struct hx_chunk) { HTLC_DATA_CHANNEL_ID, 4,
+                                       &scratch->channel_be };
+    if (before) {
+        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_BEFORE, 8,
+                                           &scratch->before_be };
+    }
+    if (after) {
+        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_AFTER, 8,
+                                           &scratch->after_be };
+    }
+    if (limit) {
+        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_LIMIT, 2,
+                                           &scratch->limit_be };
+    }
+
+    return hc;
+}
+
 gboolean
 hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
                      guint64 before, guint64 after, guint16 limit)
@@ -144,69 +192,15 @@ hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
 
     /* Note: callers are responsible for task_new()-registering
      * rcv_task_chat_history BEFORE invoking this function — the
-     * task is keyed on htlc->trans which hlwrite is about to
-     * consume. chat_history.c stays free of tasks.h / rcv.h
+     * task is keyed on htlc->trans which hlwrite_chunks is about
+     * to consume. chat_history.c stays free of tasks.h / rcv.h
      * (which need the full hx.h context) so the Tier 2 fixture
      * tests can build the parser + sender without dragging in
      * the GTK pile. */
-
-    /* All numeric fields are sent big-endian. hlwrite takes raw
-     * bytes; convert host → network order in stack-local buffers. */
-    guint32 channel_be = GUINT32_TO_BE (channel_id);
-    guint64 before_be  = GUINT64_TO_BE (before);
-    guint64 after_be   = GUINT64_TO_BE (after);
-    guint16 limit_be   = GUINT16_TO_BE (limit);
-
-    /* Build the chunk list dynamically — only include optional
-     * cursor/limit chunks when their host-side value is non-zero.
-     * channel_id is always sent (the spec mandates it). */
-    int hc = 1;
-    if (before) hc++;
-    if (after)  hc++;
-    if (limit)  hc++;
-
-    /* hlwrite is variadic; we have to enumerate all the branches
-     * because there's no clean way to build a va_list portably.
-     * Five branches cover the 2^3 = 8 combinations of
-     * (before, after, limit) collapsed by symmetry — only the bits
-     * we actually need. */
-    if (before && after && limit) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-                 HTLC_DATA_HISTORY_AFTER,  8, &after_be,
-                 HTLC_DATA_HISTORY_LIMIT,  2, &limit_be);
-    } else if (before && after) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-                 HTLC_DATA_HISTORY_AFTER,  8, &after_be);
-    } else if (before && limit) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_BEFORE, 8, &before_be,
-                 HTLC_DATA_HISTORY_LIMIT,  2, &limit_be);
-    } else if (after && limit) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_AFTER,  8, &after_be,
-                 HTLC_DATA_HISTORY_LIMIT,  2, &limit_be);
-    } else if (before) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_BEFORE, 8, &before_be);
-    } else if (after) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_AFTER,  8, &after_be);
-    } else if (limit) {
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID,     4, &channel_be,
-                 HTLC_DATA_HISTORY_LIMIT,  2, &limit_be);
-    } else {
-        /* Bare request — server applies its default limit (50). */
-        hlwrite (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, hc,
-                 HTLC_DATA_CHANNEL_ID, 4, &channel_be);
-    }
+    struct hx_chunk chunks[4];
+    struct hx_get_chat_history_scratch scratch;
+    int hc = hx_get_chat_history_build_chunks (channel_id, before, after,
+                                               limit, chunks, 4, &scratch);
+    hlwrite_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
     return TRUE;
 }

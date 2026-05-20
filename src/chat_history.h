@@ -124,4 +124,34 @@ extern gboolean hx_get_chat_history (struct htlc_conn *htlc,
                                      guint32 channel_id, guint64 before,
                                      guint64 after, guint16 limit);
 
+/* Caller-owned backing storage for hx_get_chat_history_build_chunks.
+ * The struct hx_chunk array it fills points into these fields, so the
+ * scratch must outlive the eventual hlpack_chunks call. */
+struct hx_get_chat_history_scratch {
+    guint32 channel_be;
+    guint64 before_be;
+    guint64 after_be;
+    guint16 limit_be;
+};
+
+struct hx_chunk;
+
+/*
+ * Build the HTLC_DATA_* chunk array for a GET_CHAT_HISTORY request
+ * (TRAN 700). Same "0 means omit" semantics as hx_get_chat_history:
+ * channel_id is mandatory, before/after/limit are emitted only when
+ * non-zero. Returns the chunk count (always <= 4), or 0 on bad args.
+ *
+ * Used by both production (via hx_get_chat_history which wraps it
+ * with cap-gate + hlwrite_chunks) and the integration test harness
+ * (which packs the chunks via hlpack_chunks and sends them
+ * synchronously over its blocking fd). Pre-refactor, the two had
+ * independent 8-way variadic dispatches that drifted easily.
+ */
+extern int
+hx_get_chat_history_build_chunks (guint32 channel_id, guint64 before,
+                                  guint64 after, guint16 limit,
+                                  struct hx_chunk *chunks, int chunks_cap,
+                                  struct hx_get_chat_history_scratch *scratch);
+
 #endif /* HX_CHAT_HISTORY_H */
