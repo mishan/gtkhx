@@ -1185,7 +1185,16 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             htlc->login, sel.secure_login,
             htlc->sessionkey, htlc->sklen, htlc->macalg,
             login, sizeof (login));
-        if (!llen) {
+        /* llen==0 is legitimate in the XOR variant when htlc->login
+		 * is empty (e.g. anonymous-guest bookmarks against Janus,
+		 * which echoes an empty HTLS_DATA_LOGIN chunk so the
+		 * sel.secure_login probe stays 0). Only treat 0 as a bad-
+		 * macalg failure in the HMAC variant — HMAC-of-anything
+		 * always emits 16/20/32 bytes for a valid algorithm. The
+		 * pre-refactor inline code didn't trip this either; the
+		 * regression came in when the size_t return value started
+		 * conflating "failure" with "empty XOR output". */
+        if (sel.secure_login && !llen) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "bad HMAC algorithm %s\n", htlc->macalg);
             hx_htlc_close (htlc, 0);

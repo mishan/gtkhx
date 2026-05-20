@@ -319,6 +319,30 @@ test_login_field_xor_variant (void)
 }
 
 static void
+test_login_field_xor_empty_login_is_legal (void)
+{
+    /* Empty login_name in the XOR variant is a legal wire shape —
+	 * Janus's HOPE-Secure-Login flow echoes an empty HTLS_DATA_LOGIN
+	 * chunk, which keeps sel.secure_login=0, and a guest bookmark
+	 * with an empty username then has nothing to XOR. Pre-refactor
+	 * production handled this fine; the refactored
+	 * hope_build_login_field used to return 0 here, and the caller
+	 * mis-classified that as "bad HMAC algorithm".
+	 *
+	 * Pin the contract: empty XOR output is success (return value
+	 * 0, but it's a "0 bytes written" not "failure"). The caller
+	 * gates the bad-macalg error on secure_login=1, so this case
+	 * no longer breaks the handshake. */
+    guint8 buf[32];
+    size_t n = hope_build_login_field ("",
+                                       /*secure_login=*/0,
+                                       NULL, 0,
+                                       "HMAC-SHA256",
+                                       buf, sizeof (buf));
+    g_assert_cmpuint (n, ==, 0);
+}
+
+static void
 test_login_field_hmac_variant (void)
 {
     /* secure_login = 1 → HMAC of the login name with session key. */
@@ -430,6 +454,8 @@ main (int argc, char **argv)
                      test_chain_hmac_sha256_known_answer);
 
     g_test_add_func ("/proto/hope/login_field/xor", test_login_field_xor_variant);
+    g_test_add_func ("/proto/hope/login_field/xor_empty_is_legal",
+                     test_login_field_xor_empty_login_is_legal);
     g_test_add_func ("/proto/hope/login_field/hmac",
                      test_login_field_hmac_variant);
 

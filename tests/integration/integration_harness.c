@@ -895,7 +895,10 @@ send_hope_step2 (int fd, struct htlc_conn *htlc, const char *username,
                                           htlc->sessionkey, htlc->sklen,
                                           htlc->macalg, login_field,
                                           sizeof (login_field));
-    if (!llen) {
+    /* Mirror the production fix in rcv.c::rcv_task_login: a 0-byte
+	 * return is only a failure for the HMAC variant. Empty XOR
+	 * output is the legitimate "anonymous guest" shape. */
+    if (secure_login && !llen) {
         return FALSE;
     }
 
