@@ -84,45 +84,10 @@ test_chat_join_member_visible (void)
 	 * vary; insist on >= 1 to leave room for differing flushes. */
     g_assert_cmpint (n_user_list, >=, 1);
 
-    /* Step 6: Alice receives CHAT_USER_CHANGE for Bob. */
-    gboolean alice_got_change = FALSE;
-    for (int i = 0; i < 64 && !alice_got_change; i++) {
-        if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_a) != HTLS_HDR_CHAT_USER_CHANGE) {
-            continue;
-        }
-
-        guint32 got_cid = 0;
-        guint16 got_uid = 0;
-        gboolean got_uid_chunk = FALSE;
-        dh_start (&htlc_a)
-        {
-            switch (_type) {
-            case HTLS_DATA_CHAT_ID:
-                dh_getint (got_cid);
-                break;
-            case HTLS_DATA_UID:
-                if (_len == sizeof (guint16)) {
-                    guint16 v;
-                    memcpy (&v, dh->data, sizeof v);
-                    got_uid = ntohs (v);
-                    got_uid_chunk = TRUE;
-                }
-                break;
-            }
-        }
-        dh_end ();
-        if (got_cid != chat_id || !got_uid_chunk) {
-            continue;
-        }
-        if (got_uid != htlc_b.uid) {
-            continue;
-        }
-        alice_got_change = TRUE;
-    }
-    g_assert_true (alice_got_change);
+    /* Step 6: Alice receives CHAT_USER_CHANGE for Bob — same cid,
+	 * Bob's uid. */
+    g_assert_true (integration_drain_until_chat_user_event (
+        fd_a, &htlc_a, HTLS_HDR_CHAT_USER_CHANGE, chat_id, htlc_b.uid, 64));
 
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);

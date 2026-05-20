@@ -379,6 +379,25 @@ extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
                                        guint32 chat_id, int max_messages);
 
 /*
+ * Drain server messages on `fd` until a chat user-event broadcast of
+ * type `wanted_type` arrives carrying HTLS_DATA_CHAT_ID == wanted_cid
+ * AND HTLS_DATA_UID == wanted_uid. Used for verifying mhxd's join /
+ * part fan-out to other chat members:
+ *
+ *   - HTLS_HDR_CHAT_USER_CHANGE: emitted when a user joins (or
+ *     changes nick/icon/color while in the chat). test_chat_join.c
+ *     uses this to confirm Alice sees Bob's join.
+ *   - HTLS_HDR_CHAT_USER_PART: emitted when a user parts.
+ *     test_chat_part.c uses this to confirm Alice sees Bob's part.
+ *
+ * Both call sites pre-refactor open-coded the same ~30-line dh_start
+ * walk; the only difference between them was the type sentinel.
+ */
+extern gboolean integration_drain_until_chat_user_event (
+    int fd, struct htlc_conn *htlc, guint16 wanted_type,
+    guint32 wanted_cid, guint16 wanted_uid, int max_messages);
+
+/*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
  * return the byte count written. Layout:
  *

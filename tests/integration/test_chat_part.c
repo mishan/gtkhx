@@ -83,45 +83,10 @@ test_chat_part_broadcasts (void)
         fd_b, &htlc_b, HTLC_HDR_CHAT_PART, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
 
-    /* Alice receives HTLS_HDR_CHAT_USER_PART for Bob. */
-    gboolean alice_saw_part = FALSE;
-    for (int i = 0; i < 64 && !alice_saw_part; i++) {
-        if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_a) != HTLS_HDR_CHAT_USER_PART) {
-            continue;
-        }
-
-        guint32 got_cid = 0;
-        guint16 got_uid = 0;
-        gboolean got_uid_chunk = FALSE;
-        dh_start (&htlc_a)
-        {
-            switch (_type) {
-            case HTLS_DATA_CHAT_ID:
-                dh_getint (got_cid);
-                break;
-            case HTLS_DATA_UID:
-                if (_len == sizeof (guint16)) {
-                    guint16 v;
-                    memcpy (&v, dh->data, sizeof v);
-                    got_uid = ntohs (v);
-                    got_uid_chunk = TRUE;
-                }
-                break;
-            }
-        }
-        dh_end ();
-        if (got_cid != chat_id || !got_uid_chunk) {
-            continue;
-        }
-        if (got_uid != htlc_b.uid) {
-            continue;
-        }
-        alice_saw_part = TRUE;
-    }
-    g_assert_true (alice_saw_part);
+    /* Alice receives HTLS_HDR_CHAT_USER_PART for Bob — same cid,
+	 * Bob's uid. */
+    g_assert_true (integration_drain_until_chat_user_event (
+        fd_a, &htlc_a, HTLS_HDR_CHAT_USER_PART, chat_id, htlc_b.uid, 64));
 
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);

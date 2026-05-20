@@ -520,6 +520,51 @@ integration_join_chat (int fd, struct htlc_conn *htlc, guint32 chat_id,
 }
 
 gboolean
+integration_drain_until_chat_user_event (int fd, struct htlc_conn *htlc,
+                                         guint16 wanted_type,
+                                         guint32 wanted_cid,
+                                         guint16 wanted_uid, int max_messages)
+{
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != wanted_type) {
+            continue;
+        }
+
+        guint32 got_cid = 0;
+        guint16 got_uid = 0;
+        gboolean got_uid_chunk = FALSE;
+        dh_start (htlc)
+        {
+            switch (_type) {
+            case HTLS_DATA_CHAT_ID:
+                dh_getint (got_cid);
+                break;
+            case HTLS_DATA_UID:
+                if (_len == sizeof (guint16)) {
+                    guint16 v;
+                    memcpy (&v, dh->data, sizeof v);
+                    got_uid = ntohs (v);
+                    got_uid_chunk = TRUE;
+                }
+                break;
+            }
+        }
+        dh_end ();
+        if (!got_uid_chunk) {
+            continue;
+        }
+        if (got_cid != wanted_cid || got_uid != wanted_uid) {
+            continue;
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+gboolean
 integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
                                   guint16 target_uid, guint32 *chat_id_out,
                                   int max_messages)
