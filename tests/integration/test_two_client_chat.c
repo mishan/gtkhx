@@ -24,13 +24,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 /* Drain looking for a HTLS_HDR_CHAT broadcast whose uid matches
  * `wanted_uid`. Same pattern as test_chat_roundtrip's filter; we
  * filter here because each test connection sees broadcasts from

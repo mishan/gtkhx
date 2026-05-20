@@ -30,13 +30,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 /* Drain server messages until we see an HTLS_HDR_CHAT broadcast
  * whose uid matches `wanted_uid`. We have to filter by uid because
  * meson runs integration test binaries in parallel: chat broadcasts

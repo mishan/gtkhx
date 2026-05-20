@@ -53,7 +53,13 @@
  * directly (see integration_send_get_chat_history); production-only
  * code paths that go through hlwrite_chunks shouldn't be reachable
  * here. If a test ever hits this, we want a loud failure rather
- * than a silent empty send. */
+ * than a silent empty send.
+ *
+ * Re-declare the extern locally rather than include network.h —
+ * that header pulls in pthread + GTK-side state we don't want
+ * leaking into the harness link surface. */
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                            const struct hx_chunk *chunks, int hc);
 void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
@@ -515,20 +521,9 @@ integration_open_or_skip (void)
     return fd;
 }
 
-/* Pull the message type field out of the just-received header. */
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
+/* hdr_type / hdr_flag / hdr_trans live as static inlines in
+ * integration_harness.h so every Tier 3 test sees them without a
+ * link symbol. The harness uses them via the header too. */
 
 guint32
 integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,

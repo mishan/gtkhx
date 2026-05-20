@@ -89,27 +89,6 @@ drain_with_timeout (int fd, gsize budget, int per_read_ms)
     return total;
 }
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* memmem-like substring search over raw bytes. The FILP wrapper
  * around each file's data fork puts the actual content somewhere
  * after a 133-byte preamble, so we want to find the seed content

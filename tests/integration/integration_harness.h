@@ -28,7 +28,40 @@
  */
 
 #include <glib.h>
+#include <netinet/in.h>
+#include "compat.h" /* PACKED — required before hotline.h */
+#include "hotline.h"
+#include "protocol.h" /* struct htlc_conn — referenced by the inline hdr_* below */
 #include "server_matrix.h"
+
+/*
+ * Convenience accessors over the wire header that integration_recv_message
+ * just dropped into htlc->in.buf. Every Tier 3 test wants type / flag /
+ * trans to filter incoming messages — pre-refactor each test had its own
+ * static guint32 hdr_type / hdr_flag / hdr_trans copies (34 binaries,
+ * dozens of duplicate 4-line wrappers). Inline static here keeps the
+ * call shape unchanged at every site (hdr_type(&htlc)) while removing
+ * the dupe. No new linker symbols — each .c just inlines the ntohl. */
+static inline guint32
+hdr_type (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->type);
+}
+
+static inline guint32
+hdr_flag (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->flag);
+}
+
+static inline guint32
+hdr_trans (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->trans);
+}
 
 /*
  * Open a TCP connection to the configured host:port.

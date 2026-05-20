@@ -87,19 +87,8 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 /* Small helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-    return ntohl (h->trans);
-}
+/* hdr_type / hdr_trans now live as inline statics in
+ * integration_harness.h. */
 
 /* Pick the first chat-history-capable server in the matrix, or NULL
  * if none survived the GTKHX_TEST_SERVERS env filter. Caller skips

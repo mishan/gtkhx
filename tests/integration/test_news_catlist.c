@@ -61,27 +61,6 @@
 #define HTLC_DATA_NEWS_DIR ((guint16)0x0145)
 #define HTLS_DATA_NEWS_CATLIST ((guint16)0x0141)
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* Build a single-component HTLC_DATA_NEWS_DIR blob for `name`.
  * Returns g_malloc'd bytes; caller frees. *outlen receives the
  * total size. */

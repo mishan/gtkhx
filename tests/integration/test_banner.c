@@ -52,20 +52,6 @@
 #define GTKHX_TEST_BANNER_URL_DEFAULT                                          \
     "https://placehold.co/468x60/png?text=GtkHx+Test+Banner"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
 /* hl_code: XOR-with-0xff cipher used by the LOGIN chunk encoding. */
 static void
 hl_code_inline (void *dst, const void *src, gsize len)
