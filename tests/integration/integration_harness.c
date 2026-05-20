@@ -573,11 +573,7 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                     memcpy (htlc->name, dh->data, nlen);
                     htlc->name[nlen] = '\0';
                 } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
-                    guint64 caps = 0;
-                    for (guint16 ci = 0; ci < _len && ci < 8; ci++) {
-                        caps = (caps << 8) | dh->data[ci];
-                    }
-                    htlc->caps = caps;
+                    htlc->caps = hl_capabilities_decode (dh->data, _len);
                 }
             }
             dh_end ();

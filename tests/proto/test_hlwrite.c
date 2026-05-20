@@ -566,6 +566,52 @@ test_hl_hdr_decode_null_in (void)
     g_assert_false (hl_hdr_decode (NULL, NULL, NULL, NULL, NULL, NULL, NULL));
 }
 
+/* ---------- hl_capabilities_decode ----------
+ *
+ * Variable-width unsigned big-endian: 1..8 bytes carry caps from
+ * HTLS_DATA_CAPABILITIES. Pin every width plus the malformed paths.
+ */
+
+static void
+test_hl_capabilities_decode_widths (void)
+{
+    /* Empty length → 0 (the bare CAPABILITIES chunk advertisement
+	 * some pre-spec servers use). */
+    g_assert_cmphex (hl_capabilities_decode ((guint8 *) "", 0), ==, 0);
+
+    /* Single byte: just that byte. */
+    guint8 one = 0x42;
+    g_assert_cmphex (hl_capabilities_decode (&one, 1), ==, 0x42);
+
+    /* Two bytes (the production-typical width — CHAT_HISTORY +
+	 * LARGE_FILES + TEXT_ENCODING all fit). */
+    guint8 two[2] = { 0x00, 0x13 }; /* bits 0, 1, 4 */
+    g_assert_cmphex (hl_capabilities_decode (two, 2), ==, 0x0013);
+
+    /* Eight bytes (the spec's upper bound — saturating the field). */
+    guint8 eight[8] = { 0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe };
+    g_assert_cmphex (hl_capabilities_decode (eight, 8), ==,
+                     G_GUINT64_CONSTANT (0xdeadbeefcafebabe));
+}
+
+static void
+test_hl_capabilities_decode_oversize_truncates (void)
+{
+    /* A hypothetical future >64-bit advertisement: only the leading
+	 * 8 bytes fit in u64 anyway, so we truncate (the spec lets us). */
+    guint8 nine[9] = { 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+                       0xff };
+    g_assert_cmphex (hl_capabilities_decode (nine, 9), ==,
+                     G_GUINT64_CONSTANT (0x123456789abcdef0));
+}
+
+static void
+test_hl_capabilities_decode_null_input (void)
+{
+    g_assert_cmphex (hl_capabilities_decode (NULL, 4), ==, 0);
+    g_assert_cmphex (hl_capabilities_decode ((guint8 *) "x", 0), ==, 0);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -606,6 +652,13 @@ main (int argc, char **argv)
                      test_hl_hdr_decode_zero_len);
     g_test_add_func ("/proto/hlwrite/hl_hdr_decode/null_in",
                      test_hl_hdr_decode_null_in);
+
+    g_test_add_func ("/proto/hlwrite/hl_capabilities_decode/widths",
+                     test_hl_capabilities_decode_widths);
+    g_test_add_func ("/proto/hlwrite/hl_capabilities_decode/oversize",
+                     test_hl_capabilities_decode_oversize_truncates);
+    g_test_add_func ("/proto/hlwrite/hl_capabilities_decode/null_input",
+                     test_hl_capabilities_decode_null_input);
 
     return g_test_run ();
 }

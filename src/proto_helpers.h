@@ -262,6 +262,24 @@ extern gboolean hl_hdr_decode (const void *hdr_bytes,
                                guint32 *body_len_out);
 
 /*
+ * Decode the variable-width unsigned big-endian integer the
+ * HTLS_DATA_CAPABILITIES chunk carries. The spec says the field is
+ * "typically 2 bytes, extensible to 8" — chunks of width 1..8 are
+ * decoded into the host-order u64 return value with the leading byte
+ * weighing most. Excess bytes past 8 are silently ignored (leading
+ * bits of a hypothetical >64-bit advertisement would already be in
+ * the lower 64 we kept). Width 0 returns 0.
+ *
+ * Used by both src/rcv.c::rcv_task_login (production echo decode)
+ * and tests/integration/integration_harness.c::integration_drain_
+ * until_selfinfo_or_error (opportunistic stash). Pre-refactor, the
+ * two had identical for-loop copies that would have to be touched
+ * in two places if the wire encoding ever grew (e.g. variable-
+ * length-encoded > 8 bytes per a future spec revision).
+ */
+extern guint64 hl_capabilities_decode (const guint8 *bytes, guint16 len);
+
+/*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
  * from a fixed set of chunks":
  *

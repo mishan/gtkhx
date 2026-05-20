@@ -1415,17 +1415,16 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 					 * the server agreed to enable for this session.
 					 * Per spec the field is a variable-width big-endian
 					 * unsigned integer (typically 2 bytes, extensible
-					 * to 8). Decode whatever width arrived into our 64-
+					 * to 8). hl_capabilities_decode (proto_helpers)
+					 * normalises whatever width arrived into our 64-
 					 * bit field. Bits we don't recognise are silently
 					 * preserved per the spec's "ignore unknown bits"
 					 * requirement — they don't affect behaviour but
 					 * leave the door open if a server advertises a cap
 					 * we'll start using later. */
                     {
-                        guint64 caps = 0;
-                        for (guint16 i = 0; i < _len && i < 8; i++) {
-                            caps = (caps << 8) | dh->data[i];
-                        }
+                        guint64 caps
+                            = hl_capabilities_decode (dh->data, _len);
                         htlc->caps = caps;
                         if (caps & HTLC_CAP_LARGE_FILES) {
                             hx_printf_prefix (htlc, 0, INFOPREFIX,

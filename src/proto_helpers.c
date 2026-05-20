@@ -911,6 +911,24 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
     memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }
 
+guint64
+hl_capabilities_decode (const guint8 *bytes, guint16 len)
+{
+    if (!bytes || !len) {
+        return 0;
+    }
+    guint64 caps = 0;
+    /* Cap at 8 bytes — anything past that is more than u64 can hold
+     * and the spec lets us truncate cleanly (unknown bits are
+     * silently preserved by the wire format on round-trip; we just
+     * can't store them). */
+    guint16 n = len > 8 ? 8 : len;
+    for (guint16 i = 0; i < n; i++) {
+        caps = (caps << 8) | bytes[i];
+    }
+    return caps;
+}
+
 gboolean
 hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
                guint32 *flag_out, guint16 *hc_out, guint32 *wire_len_out,
