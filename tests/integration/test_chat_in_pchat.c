@@ -67,15 +67,11 @@ test_chat_in_pchat_routes_to_member (void)
     guint32 cid_be = htonl (chat_id);
 
     /* Drain Alice's CHAT_USER_CHANGE so the next-event-on-Alice
-	 * search isn't fooled by the stale join broadcast. */
-    for (int i = 0; i < 64; i++) {
-        if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/2000)) {
-            break;
-        }
-        if (hdr_type (&htlc_a) == HTLS_HDR_CHAT_USER_CHANGE) {
-            break;
-        }
-    }
+	 * search isn't fooled by the stale join broadcast. We don't
+	 * fail the test if it never arrives — at worst the chat-message
+	 * assertion below catches a real bug. */
+    (void)integration_drain_until_type (fd_a, &htlc_a,
+                                        HTLS_HDR_CHAT_USER_CHANGE, 64);
 
     /* Alice sends a chat message addressed to the private chat. */
     const char *body = "tier-3 pchat hello";

@@ -485,18 +485,26 @@ integration_send_ping (int fd, struct htlc_conn *htlc)
 }
 
 gboolean
-integration_drain_until_chat_invite (int fd, struct htlc_conn *htlc,
-                                     int max_messages)
+integration_drain_until_type (int fd, struct htlc_conn *htlc,
+                              guint16 wanted_type, int max_messages)
 {
     for (int i = 0; i < max_messages; i++) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return FALSE;
         }
-        if (hdr_type (htlc) == HTLS_HDR_CHAT_INVITE) {
+        if (hdr_type (htlc) == wanted_type) {
             return TRUE;
         }
     }
     return FALSE;
+}
+
+gboolean
+integration_drain_until_chat_invite (int fd, struct htlc_conn *htlc,
+                                     int max_messages)
+{
+    return integration_drain_until_type (fd, htlc, HTLS_HDR_CHAT_INVITE,
+                                         max_messages);
 }
 
 gboolean

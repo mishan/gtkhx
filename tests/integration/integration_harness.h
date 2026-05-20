@@ -350,15 +350,30 @@ extern gboolean integration_create_chat_with_uid (int fd,
                                                   int max_messages);
 
 /*
+ * Drain server messages on `fd` until one of header type
+ * `wanted_type` arrives. Returns TRUE if seen within
+ * `max_messages` (each recv has a 3-second timeout); FALSE on
+ * timeout / recv failure or budget exhaustion. On success htlc->in
+ * still holds the matched frame.
+ *
+ * This is the generic primitive — most "drain until X arrives"
+ * loops in Tier 3 tests collapse to a single call. Used directly
+ * for one-shot drains where the caller doesn't need to inspect
+ * chunks (test_news_post, test_chat_part consuming CHAT_USER_CHANGE
+ * before the part broadcast).
+ */
+extern gboolean integration_drain_until_type (int fd, struct htlc_conn *htlc,
+                                              guint16 wanted_type,
+                                              int max_messages);
+
+/*
  * Drain server messages on `fd` until HTLS_HDR_CHAT_INVITE arrives.
  * Used by the chat-invite-receiver side of CHAT_CREATE tests
  * (test_chat_create, _decline, _in_pchat, _join, _part). On success
  * htlc->in holds the invite frame; caller can run
- * hx_chat_invite_extract for chat_id / inviter uid+name.
- *
- * Pre-refactor each of those tests open-coded the same 6-line
- * loop; centralised here so the bound (64 messages — sized for
- * parallel-test broadcast cross-talk) lives in one place.
+ * hx_chat_invite_extract for chat_id / inviter uid+name. Thin
+ * wrapper around integration_drain_until_type — exists for the
+ * meaningful name at the call site.
  */
 extern gboolean integration_drain_until_chat_invite (int fd,
                                                      struct htlc_conn *htlc,

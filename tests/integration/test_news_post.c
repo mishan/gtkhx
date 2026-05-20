@@ -109,17 +109,8 @@ test_news_post_broadcasts_to_other_clients (void)
         (int)HTLC_DATA_NEWS_POST, (int)strlen (marker), (guint8 *)marker));
 
     /* On B's connection, drain looking for HTLS_HDR_NEWS_POST. */
-    gboolean got_post = FALSE;
-    for (int i = 0; i < 64 && !got_post; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_NEWS_POST) {
-            continue;
-        }
-        got_post = TRUE;
-    }
-    g_assert_true (got_post);
+    g_assert_true (integration_drain_until_type (fd_b, &htlc_b,
+                                                 HTLS_HDR_NEWS_POST, 64));
 
     /* Walk the chunks via dh_start to find the NEWS body. */
     gboolean found_marker = FALSE;

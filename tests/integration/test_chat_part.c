@@ -66,16 +66,8 @@ test_chat_part_broadcasts (void)
 
     /* Drain Alice's CHAT_USER_CHANGE for Bob (the join broadcast)
 	 * so the remaining test only sees the part broadcast. */
-    gboolean alice_saw_join = FALSE;
-    for (int i = 0; i < 64 && !alice_saw_join; i++) {
-        if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_a) == HTLS_HDR_CHAT_USER_CHANGE) {
-            alice_saw_join = TRUE;
-        }
-    }
-    g_assert_true (alice_saw_join);
+    g_assert_true (integration_drain_until_type (
+        fd_a, &htlc_a, HTLS_HDR_CHAT_USER_CHANGE, 64));
 
     /* Bob parts. mhxd doesn't reply directly to the parter — the
 	 * broadcast goes only to OTHER joined members. */
