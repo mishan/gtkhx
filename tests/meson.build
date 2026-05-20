@@ -691,6 +691,28 @@ test_msg_event = executable('test_msg_event',
 test('msg_event', test_msg_event,
      suite : 'proto')
 
+# hope — Tier 2 known-answer tests for the HOPE-Secure-Login state
+# machine (src/hope.c). Covers the pure helpers extracted out of
+# rcv_task_login during the claude/hope-state-machine refactor:
+# algorithm-list reply builder, cipher-name lookups, the HMAC
+# chain (password_mac → encode_key → decode_key) with SHA-256
+# KAT vectors, LOGIN field encoding (XOR vs. HMAC variants),
+# session-key IP:port validation. Compiles hope.c, algo_list.c,
+# hmac.c, and hl_code.c in directly — none of which need GTK or
+# Adwaita, so the test binary stays self-contained the way the
+# rest of Tier 2 does.
+test_hope = executable('test_hope',
+  'proto/test_hope.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
+  '../src/hl_code.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('hope', test_hope,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #
