@@ -797,22 +797,15 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
 {
-    struct hl_hdr *h = (struct hl_hdr *)htlc->in.buf;
-    guint32 len;
-    guint32 type;
-    guint32 trace_trans, trace_flag;
-
-    HN32 (&len, &h->len);
-    HN32 (&type, &h->type);
-    HN32 (&trace_trans, &h->trans);
-    HN32 (&trace_flag, &h->flag);
-    proto_trace_recv_hdr (type, trace_trans, trace_flag, len);
-    if (len < 2) {
-        len = 0;
-    } else {
-        len = ((len > MAX_HOTLINE_PACKET_LEN) ? MAX_HOTLINE_PACKET_LEN : len)
-              - 2;
-    }
+    /* Shared header decoder in proto_helpers — same math the
+	 * integration harness's integration_recv_message uses. Returns
+	 * the raw wire_len (for the proto trace) plus the clamped body
+	 * payload size (what the receive state machine needs to read
+	 * next). */
+    guint32 wire_len, len, type, trace_trans, trace_flag;
+    hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
+                   &wire_len, &len);
+    proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 
     /* htlc->trans = ntohl(h->trans); */
     htlc->rcv = 0;

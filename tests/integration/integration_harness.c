@@ -282,25 +282,22 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
         return FALSE;
     }
 
-    const struct hl_hdr *h = (const struct hl_hdr *)hdr_bytes;
-    guint32 wire_len = ntohl (h->len);
-    guint16 hc = ntohs (h->hc);
-
-    /* h->len is "data section bytes minus (SIZEOF_HL_HDR -
-	 * sizeof(hc))"; back it out to the body byte count.
-	 *
-	 * Cap at 1 MiB — same MAX_HOTLINE_PACKET_LEN that network.c
-	 * enforces — to avoid accidental DoS against the harness when
-	 * pointed at a misbehaving server. */
+    /* Production and the harness used to have separate wire-length-
+	 * to-body-length math (equivalent formulas, written differently);
+	 * hl_hdr_decode centralises it in proto_helpers. The harness
+	 * additionally treats oversize input (raw wire_len past
+	 * MAX_HOTLINE_PACKET_LEN) as a fatal protocol error and bails —
+	 * accidental DoS guard against a misbehaving server. Production
+	 * clamps and continues, which is the right behaviour for the
+	 * end-user client. */
+    guint32 wire_len = 0, body_len = 0;
+    if (!hl_hdr_decode (hdr_bytes, NULL, NULL, NULL, NULL, &wire_len,
+                        &body_len)) {
+        return FALSE;
+    }
     if (wire_len > MAX_HOTLINE_PACKET_LEN) {
         return FALSE;
     }
-
-    guint32 body_len = 0;
-    if (wire_len + (SIZEOF_HL_HDR - sizeof (h->hc)) >= SIZEOF_HL_HDR) {
-        body_len = wire_len + (SIZEOF_HL_HDR - sizeof (h->hc)) - SIZEOF_HL_HDR;
-    }
-    (void)hc; /* hc is read by dh_start via the header bytes. */
 
     /* Allocate the full message buffer, copy the header in, read
 	 * the rest. */

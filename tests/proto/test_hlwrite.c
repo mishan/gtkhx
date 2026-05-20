@@ -491,6 +491,81 @@ test_hlpack_chunks_zero_length_chunk (void)
     htlc_free (&h2);
 }
 
+/* ---------- hl_hdr_decode ----------
+ *
+ * Shared 22-byte header decoder added to dedup the wire_len math
+ * that production (src/rcv.c::hx_rcv_hdr) and the integration test
+ * harness (integration_recv_message) used to have separately.
+ */
+
+static void
+test_hl_hdr_decode_basic (void)
+{
+    /* Pack a real message via hlpack, then decode its header. */
+    struct htlc_conn htlc;
+    htlc_init (&htlc, /*starting_trans=*/77);
+
+    const char *body = "hello world!";
+    hlpack_v (&htlc, HTLC_HDR_CHAT, 0, /*hc=*/1, (int) HTLC_DATA_CHAT, 12,
+              (guint8 *) body);
+
+    guint32 type, trans, flag, wire_len, body_len;
+    guint16 hc;
+    g_assert_true (hl_hdr_decode (htlc.out.buf, &type, &trans, &flag, &hc,
+                                  &wire_len, &body_len));
+    g_assert_cmphex (type, ==, HTLC_HDR_CHAT);
+    g_assert_cmphex (trans, ==, 77);
+    g_assert_cmpuint (flag, ==, 0);
+    g_assert_cmpuint (hc, ==, 1);
+
+    /* hlpack-built message body = 1 chat chunk = HL_DATA_HDR(4) + 12 = 16 bytes.
+	 * wire_len = body + sizeof(hc) = 16 + 2 = 18. body_len = wire_len - 2 = 16. */
+    g_assert_cmpuint (wire_len, ==, 18);
+    g_assert_cmpuint (body_len, ==, 16);
+
+    htlc_free (&htlc);
+}
+
+static void
+test_hl_hdr_decode_oversize_clamps_body_len (void)
+{
+    /* Hand-build a header with wire_len > MAX_HOTLINE_PACKET_LEN.
+	 * hl_hdr_decode must still succeed (returning the raw wire_len
+	 * so production's trace shows the server's claim) and clamp
+	 * body_len at MAX_HOTLINE_PACKET_LEN - 2. */
+    struct hl_hdr h;
+    h.type = htonl (HTLS_HDR_TASK);
+    h.trans = htonl (1);
+    h.flag = 0;
+    h.len = h.len2 = htonl (MAX_HOTLINE_PACKET_LEN * 2);
+    h.hc = 0;
+
+    guint32 wire_len, body_len;
+    g_assert_true (hl_hdr_decode (&h, NULL, NULL, NULL, NULL, &wire_len,
+                                  &body_len));
+    g_assert_cmpuint (wire_len, ==, MAX_HOTLINE_PACKET_LEN * 2);
+    g_assert_cmpuint (body_len, ==, MAX_HOTLINE_PACKET_LEN - 2);
+}
+
+static void
+test_hl_hdr_decode_zero_len (void)
+{
+    /* wire_len < sizeof(hc) → body_len = 0, no underflow. */
+    struct hl_hdr h = { 0 };
+    h.type = htonl (HTLS_HDR_TASK);
+    h.len = h.len2 = htonl (1);
+
+    guint32 body_len = 0xdead;
+    g_assert_true (hl_hdr_decode (&h, NULL, NULL, NULL, NULL, NULL, &body_len));
+    g_assert_cmpuint (body_len, ==, 0);
+}
+
+static void
+test_hl_hdr_decode_null_in (void)
+{
+    g_assert_false (hl_hdr_decode (NULL, NULL, NULL, NULL, NULL, NULL, NULL));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -522,6 +597,15 @@ main (int argc, char **argv)
                      test_hlpack_chunks_empty);
     g_test_add_func ("/proto/hlwrite/hlpack_chunks_zero_length_chunk",
                      test_hlpack_chunks_zero_length_chunk);
+
+    g_test_add_func ("/proto/hlwrite/hl_hdr_decode/basic",
+                     test_hl_hdr_decode_basic);
+    g_test_add_func ("/proto/hlwrite/hl_hdr_decode/oversize_clamps_body_len",
+                     test_hl_hdr_decode_oversize_clamps_body_len);
+    g_test_add_func ("/proto/hlwrite/hl_hdr_decode/zero_len",
+                     test_hl_hdr_decode_zero_len);
+    g_test_add_func ("/proto/hlwrite/hl_hdr_decode/null_in",
+                     test_hl_hdr_decode_null_in);
 
     return g_test_run ();
 }

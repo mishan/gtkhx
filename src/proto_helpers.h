@@ -220,6 +220,48 @@ extern void hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                            const struct hx_chunk *chunks, int hc);
 
 /*
+ * Decode the 22-byte Hotline message header into host-order fields.
+ *
+ * `hdr_bytes` points at a buffer of at least SIZEOF_HL_HDR bytes
+ * already read from the wire (production's hx_rcv_hdr / the test
+ * harness's integration_recv_message both call this with the just-
+ * read header). Fills any non-NULL out-parameter with the host-
+ * order field and returns the raw wire `len` field (host order).
+ *
+ *   wire_len_out:  the unchanged host-order `len` field, used by
+ *                  proto_trace_recv_hdr so the trace shows the
+ *                  server's claimed length even on oversize input.
+ *
+ *   body_len_out:  the number of payload bytes after the 22-byte
+ *                  header — i.e., the count the caller still needs
+ *                  to read off the fd. Computed as
+ *                  min(wire_len, MAX_HOTLINE_PACKET_LEN) - 2
+ *                  (the wire `len` encodes "body bytes plus the 2-
+ *                  byte hc field"; hc lives at the tail of the
+ *                  22-byte hdr struct but counts as data section
+ *                  per the protocol). Production uses this verbatim;
+ *                  the harness compares wire_len_out against
+ *                  MAX_HOTLINE_PACKET_LEN and rejects oversize input
+ *                  entirely.
+ *
+ * Returns FALSE only for NULL input. (Bounds enforcement is per-
+ * caller: production clamps and continues, the harness rejects.)
+ *
+ * Pre-refactor, this math was implemented twice — once in
+ * src/rcv.c::hx_rcv_hdr (production) and once in the integration
+ * harness's integration_recv_message. The two formulas were
+ * equivalent but written differently; centralising the decode
+ * here prevents drift.
+ */
+extern gboolean hl_hdr_decode (const void *hdr_bytes,
+                               guint32 *type_out,
+                               guint32 *trans_out,
+                               guint32 *flag_out,
+                               guint16 *hc_out,
+                               guint32 *wire_len_out,
+                               guint32 *body_len_out);
+
+/*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
  * from a fixed set of chunks":
  *
