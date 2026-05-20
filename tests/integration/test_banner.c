@@ -138,35 +138,24 @@ banner_setup_or_skip (struct htlc_conn *htlc, gchar **out_type, gchar **out_url)
         return -1;
     }
 
-    gboolean got_banner = FALSE;
-    for (int i = 0; i < 64 && !got_banner; i++) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_BANNER) {
-            continue;
-        }
-        got_banner = TRUE;
-
-        dh_start (htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_BANNER_TYPE:
-                *out_type = g_strndup ((const char *)dh->data, _len);
-                break;
-            case HTLS_DATA_BANNER_URL:
-                *out_url = g_strndup ((const char *)dh->data, _len);
-                break;
-            }
-        }
-        dh_end ();
-    }
-    if (!got_banner) {
+    if (!integration_drain_until_type (fd, htlc, HTLS_HDR_BANNER, 64)) {
         g_test_fail_printf ("no HTLS_HDR_BANNER received");
         integration_release_htlc (htlc);
         integration_close (fd);
         return -1;
     }
+    dh_start (htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_BANNER_TYPE:
+            *out_type = g_strndup ((const char *)dh->data, _len);
+            break;
+        case HTLS_DATA_BANNER_URL:
+            *out_url = g_strndup ((const char *)dh->data, _len);
+            break;
+        }
+    }
+    dh_end ();
     g_test_message ("banner type=\"%s\" url=\"%s\"",
                     *out_type ? *out_type : "(null)",
                     *out_url ? *out_url : "(null)");
