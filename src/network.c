@@ -1440,6 +1440,48 @@ htxf_connect (struct htxf_conn *htxf)
         }
     }
 
+#ifdef CONFIG_CIPHER
+    /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
+	 *
+	 * Once the plaintext handshake has been sent, derive a
+	 * per-transfer ChaCha20 key pair off the control channel's
+	 * session_key plus our HTXF ref number and flip the htxf_io
+	 * wrappers (Phase E1) into framed-AEAD mode. The handshake
+	 * itself stays plaintext per spec — only the body bytes
+	 * (FILP forks, folder commands, file data, etc.) flow
+	 * through AEAD frames.
+	 *
+	 * Derivation mixes ref into the salt so two transfers within
+	 * the same control-channel session can never share a nonce
+	 * even if their plaintext byte streams happen to match.
+	 * Counters start at 0 per transfer (the derive helper zeros
+	 * them).
+	 *
+	 * Only fires when:
+	 *   - the htxf is bound to a control channel (htlc non-NULL),
+	 *   - that control channel negotiated CIPHER_MODE_AEAD (the
+	 *     server picked CHACHA20-POLY1305 in the HOPE Step 2
+	 *     reply — see rcv_task_login),
+	 *   - cipher support is compiled in.
+	 *
+	 * Other transfers (no HOPE, or HOPE with a stream cipher)
+	 * leave aead_active = FALSE and the wrappers behave exactly
+	 * like read()/write(). */
+    if (htxf && htxf->htlc
+        && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
+        cipher_aead_derive_transfer_keys (
+            &htxf->xfer_encode, &htxf->xfer_decode,
+            htxf->htlc->sessionkey, htxf->htlc->sklen,
+            &htxf->htlc->cipher_encode_state.chacha,
+            &htxf->htlc->cipher_decode_state.chacha,
+            htxf->ref);
+        htxf->aead_active = TRUE;
+        debug_log ("xfer-aead",
+                   "ref=%u: AEAD active (control session_key=%u bytes)",
+                   htxf->ref, htxf->htlc->sklen);
+    }
+#endif
+
     return s;
 }
 
