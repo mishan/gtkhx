@@ -30,42 +30,13 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-/* Drain server messages until we see an HTLS_HDR_CHAT broadcast
- * whose uid matches `wanted_uid`. We have to filter by uid because
- * meson runs integration test binaries in parallel: chat broadcasts
- * from other concurrent test processes (logged in under different
- * names) hit our connection too, and they'd otherwise be the first
- * HTLS_HDR_CHAT we see and trick our assertion.
- *
- * Returns TRUE if our own chat is found within `max_messages`,
- * FALSE on timeout. On success the matching message is in htlc->in
- * and `out` is filled via hx_chat_extract. */
-static gboolean
-drain_until_own_chat (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
-                      struct hx_chat_msg *out, int max_messages)
-{
-    for (int i = 0; i < max_messages; i++) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            return FALSE;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
-            continue;
-        }
-        if (!hx_chat_extract (htlc, out)) {
-            continue;
-        }
-        if (out->uid == wanted_uid) {
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
+/* The chat-drain helper lives on the harness now. */
 
 /* ---------- Test cases ---------- */
 
 /* Drain budget: bumped from 4 to 16 to 64 in successive batches as
  * the parallel test suite grew. We filter by uid in
- * drain_until_own_chat, so the budget only controls how patient we
+ * integration_drain_until_chat, so the budget only controls how patient we
  * are before declaring the server didn't echo our chat. With 15+
  * parallel integration tests each broadcasting login/logout
  * USER_CHANGEs to every connection, sub-second cross-talk volumes
@@ -86,7 +57,7 @@ test_chat_roundtrip_simple (void)
 
     struct hx_chat_msg cm;
     g_assert_true (
-        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
 
     /* The server prepends the name and a colon to the body via its
 	 * chat_format template. Pin down the parts that should always
@@ -121,7 +92,7 @@ test_chat_roundtrip_unicode_payload (void)
 
     struct hx_chat_msg cm;
     g_assert_true (
-        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
 
     integration_release_htlc (&htlc);
@@ -144,12 +115,12 @@ test_chat_roundtrip_two_messages_in_order (void)
 
     /* Read first broadcast (filtered to our own uid). */
     g_assert_true (
-        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "first message"));
 
     /* Read second broadcast. */
     g_assert_true (
-        drain_until_own_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "second message"));
 
     integration_release_htlc (&htlc);

@@ -24,31 +24,8 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-/* Drain looking for a HTLS_HDR_CHAT broadcast whose uid matches
- * `wanted_uid`. Same pattern as test_chat_roundtrip's filter; we
- * filter here because each test connection sees broadcasts from
- * its peer AND from any other concurrent integration test
- * binaries running in parallel. */
-static gboolean
-drain_until_chat_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
-                           struct hx_chat_msg *out, int max_messages)
-{
-    for (int i = 0; i < max_messages; i++) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            return FALSE;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
-            continue;
-        }
-        if (!hx_chat_extract (htlc, out)) {
-            continue;
-        }
-        if (out->uid == wanted_uid) {
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
+/* The chat-drain helper lives on the harness now —
+ * integration_drain_until_chat. */
 
 static void
 test_two_client_chat_a_to_b (void)
@@ -76,7 +53,7 @@ test_two_client_chat_a_to_b (void)
     g_assert_true (integration_send_chat (fd_a, &htlc_a, line));
 
     struct hx_chat_msg cm;
-    g_assert_true (drain_until_chat_from_uid (fd_b, &htlc_b, htlc_a.uid, &cm,
+    g_assert_true (integration_drain_until_chat (fd_b, &htlc_b, htlc_a.uid, &cm,
                                               /*max_messages=*/64));
 
     /* B's view of the broadcast: A's uid, A's name in the

@@ -414,6 +414,28 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
     return send_login_packet (fd, htlc, &req);
 }
 
+gboolean
+integration_drain_until_chat (int fd, struct htlc_conn *htlc,
+                              guint16 wanted_uid, struct hx_chat_msg *out,
+                              int max_messages)
+{
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
+            continue;
+        }
+        if (!hx_chat_extract (htlc, out)) {
+            continue;
+        }
+        if (out->uid == wanted_uid) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 gsize
 integration_encode_hldir_one (guint8 *out, const char *name)
 {

@@ -330,6 +330,32 @@ extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
  */
 extern gsize integration_encode_hldir_one (guint8 *out, const char *name);
 
+struct hx_chat_msg;
+
+/*
+ * Drain server messages on `fd` until we see an HTLS_HDR_CHAT
+ * broadcast whose uid matches `wanted_uid`. On success returns
+ * TRUE and fills `out` via hx_chat_extract; on timeout / overflow
+ * of `max_messages` returns FALSE.
+ *
+ * The uid filter is load-bearing: meson runs Tier 3 binaries in
+ * parallel, so chat broadcasts from concurrent test processes
+ * (logged in under different names) hit our connection too and
+ * would otherwise be the first HTLS_HDR_CHAT we see. Filtering
+ * by uid scopes the drain to OUR own session.
+ *
+ * Pre-refactor each chat-using test had its own copy of this
+ * function (drain_until_own_chat in test_chat_roundtrip,
+ * drain_until_chat_from_uid in test_two_client_chat) — byte-
+ * identical except for the function name. Centralised here so
+ * future tweaks (e.g. timeout policy, broadcast filter rules)
+ * land once.
+ */
+extern gboolean integration_drain_until_chat (int fd, struct htlc_conn *htlc,
+                                              guint16 wanted_uid,
+                                              struct hx_chat_msg *out,
+                                              int max_messages);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*
