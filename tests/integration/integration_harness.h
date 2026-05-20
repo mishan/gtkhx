@@ -309,6 +309,27 @@ extern guint32 integration_send_get_chat_history (int fd,
 extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
                                        const char *text);
 
+/*
+ * Encode a single-component HTLC_DATA_DIR chunk into `out` and
+ * return the byte count written. Layout:
+ *
+ *   u16 component_count (BE) = 1
+ *   u8  unknown (always 0)
+ *   u16 name_len (BE)
+ *   bytes[name_len] name
+ *
+ * The full production encoder (src/path_hldir.c::path_to_hldir)
+ * handles multi-component paths via a runtime-configured directory
+ * separator (`dir_char`), set from the server's DIRECTORYCHAR
+ * handshake. Tier 3 tests don't need the splitting — they target
+ * top-level files / folders — so this single-component shortcut
+ * stays here in the harness rather than depending on the global
+ * `dir_char` extern.
+ *
+ * `out` must point to at least 5 + strlen(name) bytes.
+ */
+extern gsize integration_encode_hldir_one (guint8 *out, const char *name);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*

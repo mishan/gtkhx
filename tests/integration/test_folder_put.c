@@ -49,23 +49,8 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-/* Encode a single-component Hotline directory path. Same shape
- * as the helper in test_file_put.c — a wire DIR chunk is a
- * 2-byte component count + per-component (1 byte unknown + 2 byte
- * name-len + name bytes) records. */
-static gsize
-encode_hldir_one (guint8 *out, const char *name)
-{
-    gsize nlen = strlen (name);
-    guint16 count_be = htons (1);
-    guint16 nlen_be = htons ((guint16)nlen);
-
-    memcpy (out + 0, &count_be, 2);
-    out[2] = 0;
-    memcpy (out + 3, &nlen_be, 2);
-    memcpy (out + 5, name, nlen);
-    return 5 + nlen;
-}
+/* Single-component HTLC_DATA_DIR encoder lives in the harness as
+ * integration_encode_hldir_one (shared with test_file_put.c). */
 
 static void
 test_folder_put_request_reply (void)
@@ -82,7 +67,7 @@ test_folder_put_request_reply (void)
 	 * (or some parent's name) contain 'UPLOAD' or 'DROP BOX' are
 	 * acceptable destinations for guest. We anchor at Uploads/. */
     guint8 hldir[64];
-    gsize hldir_len = encode_hldir_one (hldir, "Uploads");
+    gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
 
     gchar *fname
         = g_strdup_printf ("tier3_putfolder_%u", (guint)g_random_int ());

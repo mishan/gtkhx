@@ -45,27 +45,8 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-/* Encode a single-component Hotline directory path. The wire
- * format is a 2-byte count + N (1-byte unknown + 2-byte name-len
- * + name) records. We encode just one component here. The output
- * format mirrors what mhxd's hldir_to_path expects on the receive
- * side.
- *
- * Returns the encoded length. The caller's `out` buffer must hold
- * at least 5 + strlen(name) bytes. */
-static gsize
-encode_hldir_one (guint8 *out, const char *name)
-{
-    gsize nlen = strlen (name);
-    guint16 count_be = htons (1);
-    guint16 nlen_be = htons ((guint16)nlen);
-
-    memcpy (out + 0, &count_be, 2); /* component count */
-    out[2] = 0;                     /* unknown / reserved */
-    memcpy (out + 3, &nlen_be, 2);  /* name length */
-    memcpy (out + 5, name, nlen);
-    return 5 + nlen;
-}
+/* Single-component HTLC_DATA_DIR encoder lives in the harness as
+ * integration_encode_hldir_one. */
 
 static void
 test_file_put_request_reply (void)
@@ -78,7 +59,7 @@ test_file_put_request_reply (void)
 
     /* Build the DIR chunk: single component "Uploads". */
     guint8 hldir[64];
-    gsize hldir_len = encode_hldir_one (hldir, "Uploads");
+    gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
 
     gchar *fname = g_strdup_printf ("tier3_put_%u.txt", (guint)g_random_int ());
     guint32 size_be = htonl (32); /* fake "we want to upload 32 bytes" */

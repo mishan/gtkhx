@@ -414,6 +414,20 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
     return send_login_packet (fd, htlc, &req);
 }
 
+gsize
+integration_encode_hldir_one (guint8 *out, const char *name)
+{
+    gsize nlen = strlen (name);
+    guint16 count_be = htons (1);
+    guint16 nlen_be = htons ((guint16) nlen);
+
+    memcpy (out + 0, &count_be, 2); /* component count */
+    out[2] = 0;                     /* unknown / reserved */
+    memcpy (out + 3, &nlen_be, 2);  /* name length */
+    memcpy (out + 5, name, nlen);
+    return 5 + nlen;
+}
+
 gboolean
 integration_send_chat (int fd, struct htlc_conn *htlc, const char *text)
 {
