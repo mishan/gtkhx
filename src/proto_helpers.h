@@ -192,6 +192,34 @@ extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                     va_list ap);
 
 /*
+ * Chunk-array variant of hlpack.
+ *
+ * Same wire format and same effect on htlc->out as hlpack, but the
+ * chunks come from a caller-built array rather than a va_list. This
+ * lets shared message builders (e.g. login_packet.c::hx_login_pack)
+ * assemble their chunks programmatically and hand them to a single
+ * packer — no need for each builder to wrap its own variadic
+ * dispatch.
+ *
+ * The struct hx_chunk type is a thin (type, len, data) triple; the
+ * caller owns the backing storage for the data pointers (they must
+ * outlive the hlpack_chunks call, which copies bytes into
+ * htlc->out). hc is the number of chunks in the array.
+ *
+ * No fd write, no cipher / compression, no proto_trace logging —
+ * those layers stay in hlwrite() and the harness's
+ * integration_send_chunks() wrapper.
+ */
+struct hx_chunk {
+    guint16 type;
+    guint16 len;
+    const void *data;
+};
+
+extern void hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                           const struct hx_chunk *chunks, int hc);
+
+/*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
  * from a fixed set of chunks":
  *

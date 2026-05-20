@@ -27,6 +27,8 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
+#include "hl_code.h"
+#include "login_packet.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -301,47 +303,65 @@ integration_release_htlc (struct htlc_conn *htlc)
     htlc->out.buf = NULL;
 }
 
-/* hl_code is an XOR-with-0xff cipher used by Hotline for the
- * obfuscated login / password fields. Inline copy here so the
- * harness doesn't have to link network.c. */
-static void
-hl_code_inline (void *dst, const void *src, gsize len)
+/* Pack + synchronously send one LOGIN packet built by the shared
+ * login_packet.c module. Used by both integration_login_guest and
+ * integration_login_guest_caps so the wire-format details stay in
+ * one place — the same place production uses (src/network.c calls
+ * hx_login_build_chunks too, via hlwrite_chunks). */
+static gboolean
+send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
 {
-    const guint8 *s = src;
-    guint8 *d = dst;
-    for (gsize i = 0; i < len; i++) {
-        d[i] = ~s[i];
+    /* Reset the out buffer so successive calls each pack into a
+	 * fresh buffer (otherwise hlpack_chunks would append to whatever
+	 * the previous integration_send_message left behind). */
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+
+    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
+    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
+    int hc = hx_login_build_chunks (req, chunks, HX_LOGIN_MAX_CHUNKS,
+                                    scratch, sizeof (scratch));
+    if (hc <= 0) {
+        return FALSE;
     }
+    hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc);
+
+    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    return ok;
 }
 
 gboolean
 integration_login_guest (int fd, struct htlc_conn *htlc,
                          const char *display_name, guint16 icon)
 {
-    const char *login = "guest";
-    gsize llen = strlen (login);
-    guint8 enclogin[64];
-    g_assert_cmpuint (llen, <=, sizeof (enclogin));
-    hl_code_inline (enclogin, login, llen);
-
-    guint16 icon_be = htons (icon);
-    gsize nlen = strlen (display_name);
-    /* Advertise ourselves as Hotline 1.8.5. mhxd uses this in
-	 * rcv_login to decide whether to set htlc->access_extra.can_ping
-	 * (gated on clientversion >= 150 at src/hxd/rcv.c:1600). Without
-	 * this chunk, mhxd silently rejects HTLC_HDR_PING with a task-
-	 * error. GtkHx's own login path doesn't send it today, but
-	 * sending it here makes the integration suite cover the modern
-	 * client behaviour mhxd was designed against — and lets the
-	 * ping test exercise its actual contract. */
-    guint16 clientversion_be = htons (185);
-
-    return integration_send_message (
-        fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/4, (int)HTLC_DATA_ICON,
-        (int)sizeof (icon_be), &icon_be, (int)HTLC_DATA_LOGIN, (int)llen,
-        enclogin, (int)HTLC_DATA_NAME, (int)nlen, (guint8 *)display_name,
-        (int)HTLC_DATA_CLIENTVERSION, (int)sizeof (clientversion_be),
-        &clientversion_be);
+    /* The harness sends HTLC_DATA_NAME inline so test assertions can
+	 * check "the name we asserted round-trips back unchanged" without
+	 * driving the full AGREEMENTAGREE flow. Production deliberately
+	 * does NOT send NAME at LOGIN time; the shared builder gates the
+	 * chunk on display_name being non-empty so both paths share the
+	 * same module. */
+    const hx_login_request req = {
+        .mode = HX_LOGIN_MODE_LEGACY,
+        .icon = icon,
+        .login_name = "guest",
+        .password = NULL,
+        .display_name = display_name,
+        /* Advertise ourselves as Hotline 1.8.5. mhxd uses this in
+		 * rcv_login to decide whether to set
+		 * htlc->access_extra.can_ping (gated on clientversion >= 150
+		 * at src/hxd/rcv.c:1600). Without this chunk, mhxd silently
+		 * rejects HTLC_HDR_PING with a task-error. */
+        .client_version = 185,
+        .send_caps = 0,
+    };
+    return send_login_packet (fd, htlc, &req);
 }
 
 gboolean
@@ -349,28 +369,21 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
                               const char *display_name, guint16 icon,
                               guint16 caps)
 {
-    const char *login = "guest";
-    gsize llen = strlen (login);
-    guint8 enclogin[64];
-    g_assert_cmpuint (llen, <=, sizeof (enclogin));
-    hl_code_inline (enclogin, login, llen);
-
-    guint16 icon_be = htons (icon);
-    gsize nlen = strlen (display_name);
-    guint16 clientversion_be = htons (185);
     /* DATA_CAPABILITIES is "variable-width big-endian" per spec; two
 	 * bytes covers bits 0..15 which is everything we have today
-	 * (CHAT_HISTORY is bit 4). This matches the wire layout produced
-	 * by src/network.c's production LOGIN path. */
-    guint16 caps_be = htons (caps);
-
-    return integration_send_message (
-        fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/5, (int)HTLC_DATA_ICON,
-        (int)sizeof (icon_be), &icon_be, (int)HTLC_DATA_LOGIN, (int)llen,
-        enclogin, (int)HTLC_DATA_NAME, (int)nlen, (guint8 *)display_name,
-        (int)HTLC_DATA_CLIENTVERSION, (int)sizeof (clientversion_be),
-        &clientversion_be, (int)HTLC_DATA_CAPABILITIES,
-        (int)sizeof (caps_be), &caps_be);
+	 * (CHAT_HISTORY is bit 4). Matches the wire layout produced by
+	 * src/network.c's production LOGIN path. */
+    const hx_login_request req = {
+        .mode = HX_LOGIN_MODE_LEGACY,
+        .icon = icon,
+        .login_name = "guest",
+        .password = NULL,
+        .display_name = display_name,
+        .client_version = 185,
+        .caps = caps,
+        .send_caps = 1,
+    };
+    return send_login_packet (fd, htlc, &req);
 }
 
 guint32

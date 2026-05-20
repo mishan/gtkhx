@@ -40,6 +40,15 @@ extern int hx_sync_connect_to_host (const char *host, guint16 port,
 
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                      ...);
+
+/* Chunk-array variant of hlwrite. Same trace + write + cipher +
+ * compress side-effects, but the chunks come from a caller-built
+ * array (typically populated via login_packet.c::hx_login_build_chunks
+ * or another shared message builder). Defined in network.c. */
+struct hx_chunk;
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                            const struct hx_chunk *chunks, int hc);
+
 extern void hl_code (void *__dst, const void *__src, size_t len);
 
 /* Phase 5: PING keepalive — start the periodic timer once login has

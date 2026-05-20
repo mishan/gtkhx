@@ -741,6 +741,12 @@ integration_test_inc = include_directories('integration', '../src')
 # bundled in) packs / parses Hotline messages on top of the wire.
 # Tests link this lib and layer login / chat / file-list flows on
 # top.
+#
+# Production C files compiled in (rather than re-implemented in
+# harness translation units) so the test path drives the same wire
+# encoders the production binary does — no test-only forks. Today
+# that's hl_code.c (XOR encoder for LOGIN/PASSWORD chunks); other
+# extractions are tracked in the post-merge follow-up.
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
@@ -748,13 +754,8 @@ integration_harness_lib = static_library(
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
-  # Phase 5: proto_helpers' SELFINFO USER_LIST parse now sanitises
-  # server-supplied name bytes via gtkhx_text_to_utf8 (defined in
-  # text_util.c) to defend htlc->name against corrupt feedback
-  # loops. Pull text_util.c into the harness so the integration
-  # tests still link.
-  '../src/text_util.c',
-  '../src/debug.c',
+  '../src/hl_code.c',
+  '../src/login_packet.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )

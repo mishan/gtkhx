@@ -401,6 +401,96 @@ test_hlwrite_round_trip_stress (void)
     htlc_free (&htlc);
 }
 
+/* ---------- hlpack_chunks equivalence ----------
+ *
+ * hlpack_chunks (added so shared message builders like
+ * src/login_packet.c::hx_login_build_chunks can pack from a
+ * pre-assembled struct hx_chunk[] without each builder needing
+ * its own variadic dispatch) must produce byte-for-byte identical
+ * output to hlpack for the same chunk set. If a future tweak to
+ * either function drifts from the other, the production binary
+ * and the integration test harness would silently emit different
+ * LOGIN packets — exactly the kind of test-vs-prod fork this
+ * refactor is meant to prevent.
+ */
+
+static void
+test_hlpack_chunks_matches_hlpack (void)
+{
+    /* Pack the same login-shaped message two ways: once via the
+	 * va_list-style hlpack, once via the array-style hlpack_chunks.
+	 * The htlc->out bytes should be identical. */
+    const char *login = "guest";
+    guint16 icon_be = htons (412);
+    guint16 cv_be = htons (185);
+
+    struct htlc_conn h1, h2;
+    htlc_init (&h1, /*starting_trans=*/42);
+    htlc_init (&h2, /*starting_trans=*/42);
+
+    hlpack_v (&h1, HTLC_HDR_LOGIN, 0, /*hc=*/3,
+              (int) HTLC_DATA_ICON, 2, &icon_be,
+              (int) HTLC_DATA_LOGIN, (int) strlen (login), (guint8 *) login,
+              (int) HTLC_DATA_CLIENTVERSION, 2, &cv_be);
+
+    struct hx_chunk chunks[3] = {
+        { HTLC_DATA_ICON,           2, &icon_be },
+        { HTLC_DATA_LOGIN,          (guint16) strlen (login), login },
+        { HTLC_DATA_CLIENTVERSION,  2, &cv_be }
+    };
+    hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 3);
+
+    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
+    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+    /* And the trans counter advanced by the same amount in both. */
+    g_assert_cmphex (h1.trans, ==, h2.trans);
+
+    htlc_free (&h1);
+    htlc_free (&h2);
+}
+
+static void
+test_hlpack_chunks_empty (void)
+{
+    /* hc=0 — header only, no chunks. */
+    struct htlc_conn h1, h2;
+    htlc_init (&h1, 1);
+    htlc_init (&h2, 1);
+
+    hlpack_v (&h1, HTLC_HDR_PING, 0, 0);
+    hlpack_chunks (&h2, HTLC_HDR_PING, 0, NULL, 0);
+
+    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
+    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+
+    htlc_free (&h1);
+    htlc_free (&h2);
+}
+
+static void
+test_hlpack_chunks_zero_length_chunk (void)
+{
+    /* A chunk whose len=0 (e.g. the HOPE Step 1 empty SESSIONKEY
+	 * placeholder). data=NULL is allowed when len=0. */
+    struct htlc_conn h1, h2;
+    htlc_init (&h1, 1);
+    htlc_init (&h2, 1);
+
+    hlpack_v (&h1, HTLC_HDR_LOGIN, 0, /*hc=*/1,
+              (int) HTLC_DATA_SESSIONKEY, 0, (guint8 *) NULL);
+
+    struct hx_chunk chunks[1] = {
+        { HTLC_DATA_SESSIONKEY, 0, NULL }
+    };
+    hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 1);
+
+    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
+    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+
+    htlc_free (&h1);
+    htlc_free (&h2);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -425,6 +515,13 @@ main (int argc, char **argv)
                      test_hlwrite_header_len_field_matches_wire_format);
     g_test_add_func ("/proto/hlwrite/round_trip_stress",
                      test_hlwrite_round_trip_stress);
+
+    g_test_add_func ("/proto/hlwrite/hlpack_chunks_matches_hlpack",
+                     test_hlpack_chunks_matches_hlpack);
+    g_test_add_func ("/proto/hlwrite/hlpack_chunks_empty",
+                     test_hlpack_chunks_empty);
+    g_test_add_func ("/proto/hlwrite/hlpack_chunks_zero_length_chunk",
+                     test_hlpack_chunks_zero_length_chunk);
 
     return g_test_run ();
 }

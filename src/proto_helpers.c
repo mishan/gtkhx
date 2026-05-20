@@ -911,6 +911,56 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
     memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }
 
+void
+hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+               const struct hx_chunk *chunks, int hc)
+{
+    /* Mirror hlpack's wire layout exactly — same header math, same
+     * length encoding, same trans++ side effect. We re-implement
+     * the body here rather than build a fake va_list (which is
+     * unportable) or call hlpack in a loop (which would emit one
+     * packet per chunk). */
+    struct hl_hdr h;
+    struct hl_data_hdr dhs;
+    struct qbuf *q = &htlc->out;
+    guint32 this_off, pos;
+    guint32 my_trans;
+
+    this_off = q->pos + q->len;
+    pos = this_off + SIZEOF_HL_HDR;
+    q->len += SIZEOF_HL_HDR;
+    q->buf = g_realloc (q->buf, q->pos + q->len);
+
+    h.type = htonl (type);
+    my_trans = htlc->trans;
+    h.trans = htonl (my_trans);
+    htlc->trans++;
+    h.flag = htonl (flag);
+    h.hc = htons ((guint16) hc);
+
+    for (int i = 0; i < hc; i++) {
+        guint16 t = chunks[i].type;
+        guint16 l = chunks[i].len;
+
+        dhs.type = htons (t);
+        dhs.len = htons (l);
+
+        q->len += SIZEOF_HL_DATA_HDR + l;
+        q->buf = g_realloc (q->buf, q->pos + q->len);
+        memcpy (&q->buf[pos], (guint8 *) &dhs, SIZEOF_HL_DATA_HDR);
+        pos += SIZEOF_HL_DATA_HDR;
+
+        if (l) {
+            memcpy (&q->buf[pos], chunks[i].data, l);
+            pos += l;
+        }
+    }
+
+    guint32 packed_len = pos - this_off;
+    h.len = h.len2 = htonl (packed_len - (SIZEOF_HL_HDR - sizeof (h.hc)));
+    memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
+}
+
 /* See doc-comment in proto_helpers.h. */
 gboolean
 hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,

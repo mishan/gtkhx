@@ -38,6 +38,7 @@ gtkhx_sources = files(
   'human_readable.c',
   'hmac.c',
   'log.c',
+  'login_packet.c',
   'macres.c',
   'msg.c',
   'network.c',
