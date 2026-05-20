@@ -94,9 +94,8 @@ test_unauthorized_mkdir_silently_dropped (void)
 
     /* Probe with PING — the dispatcher should still be in a clean
 	 * state, accepting the next request and replying normally. */
-    guint32 ping_trans = htlc.trans;
-    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, ping_trans, 32));

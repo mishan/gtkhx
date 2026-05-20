@@ -36,14 +36,11 @@ test_ping_round_trip (void)
         return;
     }
 
-    /* Capture the trans we'll send PING with. hlpack assigns
-	 * htlc->trans's current value to the message and increments
-	 * after, so the sent PING uses whatever htlc.trans is right
-	 * now. */
-    guint32 ping_trans = htlc.trans;
-
-    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    /* integration_send_ping captures + returns the trans hlpack
+	 * stamps onto the PING frame, so the caller can match it
+	 * against the TASK reply below. */
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
     /* Drain past unsolicited server messages (banners, USER_CHANGE
 	 * broadcasts from parallel test connections, etc.) until the

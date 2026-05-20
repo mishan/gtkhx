@@ -469,6 +469,17 @@ integration_encode_hldir_one (guint8 *out, const char *name)
     return 5 + nlen;
 }
 
+guint32
+integration_send_ping (int fd, struct htlc_conn *htlc)
+{
+    guint32 trans = htlc->trans;
+    if (!integration_send_message (fd, htlc, HTLC_HDR_PING, /*flag=*/0,
+                                   /*hc=*/0)) {
+        return 0;
+    }
+    return trans;
+}
+
 gboolean
 integration_send_chat (int fd, struct htlc_conn *htlc, const char *text)
 {

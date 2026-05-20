@@ -112,9 +112,8 @@ test_chat_decline_silent (void)
 	 * reply must correlate by trans; if the server slipped in a
 	 * decline-broadcast (shouldn't happen) we'd see an unrelated
 	 * frame first and the trans match would fail. */
-    guint32 ping_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (fd_a, &htlc_a, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = integration_send_ping (fd_a, &htlc_a);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
     g_assert_true (integration_drain_until_task_trans (
         fd_a, &htlc_a, ping_trans, 64));
@@ -123,24 +122,12 @@ test_chat_decline_silent (void)
 
     /* Same shape on Bob's connection: we expect his stream to be
 	 * idle after the DECLINE, so a ping round-trip works cleanly. */
-    guint32 bob_ping_trans = htlc_b.trans;
-    g_assert_true (integration_send_message (fd_b, &htlc_b, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 bob_ping_trans = integration_send_ping (fd_b, &htlc_b);
+    g_assert_cmpuint (bob_ping_trans, !=, 0);
 
-    gboolean bob_pong = FALSE;
-    for (int i = 0; i < 64 && !bob_pong; i++) {
-        g_assert_true (
-            integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_b) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_b) != bob_ping_trans) {
-            continue;
-        }
-        bob_pong = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
-    }
-    g_assert_true (bob_pong);
+    g_assert_true (integration_drain_until_task_trans (
+        fd_b, &htlc_b, bob_ping_trans, 64));
+    g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
 
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);

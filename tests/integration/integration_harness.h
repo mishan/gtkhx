@@ -310,6 +310,19 @@ extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
                                        const char *text);
 
 /*
+ * Send HTLC_HDR_PING and return the trans id that hlpack will write
+ * into the header (the value of htlc->trans at call time — hlpack
+ * increments after stamping). Returns 0 on send failure.
+ *
+ * Several tests use PING as a "stream still healthy?" probe after
+ * driving an opcode that the server might silently drop (e.g.
+ * unauthorized mkdir, msg to unknown uid). Caller matches the
+ * returned trans against the TASK reply via
+ * integration_drain_until_task_trans.
+ */
+extern guint32 integration_send_ping (int fd, struct htlc_conn *htlc);
+
+/*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
  * return the byte count written. Layout:
  *

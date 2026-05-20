@@ -80,9 +80,8 @@ test_msg_self_doesnt_break_stream (void)
     /* Probe the stream — a PING should still round-trip cleanly.
 	 * A protocol-framing slip caused by the self-msg would surface
 	 * as either no pong arriving (timeout) or a wrong-trans frame. */
-    guint32 ping_trans = htlc.trans;
-    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, ping_trans, 16));

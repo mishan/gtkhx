@@ -69,9 +69,8 @@ test_msg_to_unknown_uid_doesnt_break_stream (void)
                     saw_task_error ? "yes" : "no");
 
     /* Probe the dispatcher with a PING. */
-    guint32 ping_trans = htlc.trans;
-    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, ping_trans, 32));
