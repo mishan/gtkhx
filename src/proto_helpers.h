@@ -280,6 +280,29 @@ extern gboolean hl_hdr_decode (const void *hdr_bytes,
 extern guint64 hl_capabilities_decode (const guint8 *bytes, guint16 len);
 
 /*
+ * Pack the 16-byte HTXF subchannel handshake header into a caller-
+ * provided buffer (must be at least SIZEOF_HTXF_HDR bytes).
+ *
+ *   ref:    matches the HTXF_REF the main-port TASK reply carried.
+ *   len:    total payload size estimate (legacy 32-bit field;
+ *           callers in 64-bit mode pass 0 here and append an
+ *           explicit 8-byte big-endian size after the 16-byte
+ *           header — see network.c::htxf_connect).
+ *   type:   HTXF_TYPE_FILE / FOLDER / BANNER — high u16 of the
+ *           last field, dispatches Mac-native servers' subchannel
+ *           routing.
+ *   flags:  low u16 of the last field. HTXF_FLAG_LARGE_FILE,
+ *           HTXF_FLAG_SIZE64 per Large-File spec. Pass 0 for the
+ *           legacy 16-byte handshake.
+ *
+ * All fields are big-endian on the wire. Production htxf_connect
+ * and banner.c, the integration harness, and the Tier 1 layout
+ * test all funnel through this helper — no fork.
+ */
+extern void hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len,
+                              guint16 type, guint16 flags);
+
+/*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
  * from a fixed set of chunks":
  *

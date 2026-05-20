@@ -469,13 +469,14 @@ integration_connect_xfer (void)
 gboolean
 integration_send_xfer_hdr (int fd, guint32 ref, guint32 total_size)
 {
-    guint32 wire[4] = {
-        htonl (HTXF_MAGIC_INT),
-        htonl (ref),
-        htonl (total_size),
-        0, /* unknown — always zero */
-    };
-    return integration_send (fd, wire, sizeof (wire));
+    /* Default to type=0 (HTXF_TYPE_FILE), flags=0 — the legacy
+	 * single-file 16-byte handshake that mhxd's integration tests
+	 * have always exercised. Routes through the same packer
+	 * production uses (proto_helpers.c::hl_htxf_hdr_pack), so a
+	 * future tweak to the wire layout shows up everywhere at once. */
+    guint8 hdr_buf[SIZEOF_HTXF_HDR];
+    hl_htxf_hdr_pack (hdr_buf, ref, total_size, HTXF_TYPE_FILE, 0);
+    return integration_send (fd, hdr_buf, sizeof (hdr_buf));
 }
 
 int

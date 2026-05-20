@@ -1265,7 +1265,7 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
 int
 htxf_connect (struct htxf_conn *htxf)
 {
-    struct htxf_hdr h;
+    guint8 hdr_buf[SIZEOF_HTXF_HDR];
     int s;
     char errbuf[256];
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
@@ -1299,34 +1299,24 @@ htxf_connect (struct htxf_conn *htxf)
         return -1;
     }
 
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (htxf->ref);
     /* Spec: when SIZE64 is set, zero the legacy 32-bit field
 	 * (otherwise a non-large-file peer might attempt a partial
 	 * read and treat it as complete). Otherwise carry the size
 	 * in the legacy field as before. */
-    h.len = size64 ? 0 : htonl ((guint32)htxf->total_size);
-    /* The last 4 bytes of the HTXF magic header — declared as
-	 * `unknown` u32 in struct htxf_hdr for historical reasons —
-	 * are laid out on the wire as `u16 type + u16 reserved` in
-	 * the legacy interpretation, OR as a flags bitmask under
-	 * the Large-File spec. The two interpretations share the
-	 * same 4 bytes: the type lives in the high u16, the flags
-	 * in the low u16. We OR both in so each reader sees the
-	 * field it expects. */
     {
         guint16 type
             = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-        guint32 flags = 0;
+        guint16 flags = 0;
         if (large) {
             flags |= HTXF_FLAG_LARGE_FILE;
         }
         if (size64) {
             flags |= HTXF_FLAG_SIZE64;
         }
-        h.unknown = htonl ((((guint32)type) << 16) | flags);
+        guint32 wire_len = size64 ? 0 : (guint32) htxf->total_size;
+        hl_htxf_hdr_pack (hdr_buf, htxf->ref, wire_len, type, flags);
     }
-    if (write (s, &h, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
+    if (write (s, hdr_buf, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
         close (s);
         return -1;
     }

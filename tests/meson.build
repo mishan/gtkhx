@@ -262,6 +262,9 @@ test('human_readable', test_human_readable,
 # transitively wants nettle + zlib via protocol.h.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
 )

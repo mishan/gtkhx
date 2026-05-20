@@ -911,6 +911,25 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
     memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }
 
+void
+hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
+                  guint16 flags)
+{
+    struct htxf_hdr h;
+    h.magic = htonl (HTXF_MAGIC_INT);
+    h.ref = htonl (ref);
+    h.len = htonl (len);
+    /* Last 4 bytes are `unknown u32` in the struct; on the wire
+     * they're (u16 type) (u16 flags). Mac-native servers read the
+     * type to dispatch the subchannel; cap-aware peers read the
+     * flags to know whether to expect the 24-byte large-file
+     * variant. Both interpretations share the same word — the type
+     * lives in the high u16 and is non-zero, the flags in the low
+     * u16. */
+    h.unknown = htonl ((((guint32) type) << 16) | flags);
+    memcpy (buf, &h, SIZEOF_HTXF_HDR);
+}
+
 guint64
 hl_capabilities_decode (const guint8 *bytes, guint16 len)
 {
