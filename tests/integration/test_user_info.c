@@ -41,19 +41,8 @@ test_user_info_self (void)
         (int)HTLC_DATA_UID, (int)sizeof (self_uid_be), &self_uid_be));
 
     /* Drain to TASK reply matching our trans. */
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 64 && !got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != our_trans) {
-            continue;
-        }
-        got_reply = TRUE;
-    }
-    g_assert_true (got_reply);
+    g_assert_true (integration_drain_until_task_trans (
+        fd, &htlc, our_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     /* Walk the chunks; expect HTLS_DATA_USER_INFO + HTLS_DATA_NAME. */

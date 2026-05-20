@@ -37,19 +37,8 @@ test_news_fetch_round_trip (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_NEWS_GETFILE,
                                              /*flag=*/0, /*hc=*/0));
 
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 64 && !got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != our_trans) {
-            continue;
-        }
-        got_reply = TRUE;
-    }
-    g_assert_true (got_reply);
+    g_assert_true (integration_drain_until_task_trans (
+        fd, &htlc, our_trans, 64));
 
     guint32 flag = hdr_flag (&htlc);
     if (flag & 1) {

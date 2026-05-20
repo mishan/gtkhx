@@ -84,20 +84,9 @@ test_msg_self_doesnt_break_stream (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
                                              /*flag=*/0, /*hc=*/0));
 
-    gboolean got_pong = FALSE;
-    for (int i = 0; i < 16 && !got_pong; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != ping_trans) {
-            continue;
-        }
-        got_pong = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
-    }
-    g_assert_true (got_pong);
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, ping_trans, 16));
+    g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     integration_release_htlc (&htlc);
     integration_close (fd);

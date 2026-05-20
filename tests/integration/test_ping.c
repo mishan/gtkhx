@@ -45,28 +45,14 @@ test_ping_round_trip (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
                                              /*flag=*/0, /*hc=*/0));
 
-    /* Read until we see a TASK reply matching our trans ID.
-	 * mhxd may have other unsolicited messages (banners, etc.)
-	 * queued; loop past them. */
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 8; i++) {
-        if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != ping_trans) {
-            continue;
-        }
+    /* Drain past unsolicited server messages (banners, USER_CHANGE
+	 * broadcasts from parallel test connections, etc.) until the
+	 * TASK matching our PING trans lands. */
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, ping_trans, 8));
 
-        /* Found our task reply. Flag bit 1 is the task-error
-		 * marker — must NOT be set. */
-        g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
-        got_reply = TRUE;
-        break;
-    }
-    g_assert_true (got_reply);
+    /* Flag bit 1 is the task-error marker — must NOT be set. */
+    g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     integration_release_htlc (&htlc);
     integration_close (fd);

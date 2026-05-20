@@ -116,21 +116,10 @@ test_chat_decline_silent (void)
     g_assert_true (integration_send_message (fd_a, &htlc_a, HTLC_HDR_PING,
                                              /*flag=*/0, /*hc=*/0));
 
-    gboolean alice_pong = FALSE;
-    for (int i = 0; i < 64 && !alice_pong; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != ping_trans) {
-            continue;
-        }
-        alice_pong = TRUE;
-        /* Ping mustn't error out either. */
-        g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
-    }
-    g_assert_true (alice_pong);
+    g_assert_true (integration_drain_until_task_trans (
+        fd_a, &htlc_a, ping_trans, 64));
+    /* Ping mustn't error out either. */
+    g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* Same shape on Bob's connection: we expect his stream to be
 	 * idle after the DECLINE, so a ping round-trip works cleanly. */

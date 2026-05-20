@@ -356,6 +356,24 @@ extern gboolean integration_drain_until_chat (int fd, struct htlc_conn *htlc,
                                               struct hx_chat_msg *out,
                                               int max_messages);
 
+/*
+ * Drain server messages on `fd` until we see an HTLS_HDR_TASK whose
+ * trans field matches `wanted_trans`. The matched message lives in
+ * htlc->in afterwards; caller can read hdr_flag (error bit) and walk
+ * dh_start for any reply chunks. Returns TRUE on match, FALSE on
+ * timeout / overflow of max_messages.
+ *
+ * This was the second-most-duplicated drain pattern across Tier 3
+ * (after the chat broadcast filter — see integration_drain_until_chat).
+ * 10+ tests open-coded the same "for (i ... max) recv; type? trans?"
+ * loop. Centralised here so future tweaks (longer timeout, opcode
+ * dispatch table) land once.
+ */
+extern gboolean integration_drain_until_task_trans (int fd,
+                                                    struct htlc_conn *htlc,
+                                                    guint32 wanted_trans,
+                                                    int max_messages);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*

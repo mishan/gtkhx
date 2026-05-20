@@ -415,6 +415,25 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
 }
 
 gboolean
+integration_drain_until_task_trans (int fd, struct htlc_conn *htlc,
+                                    guint32 wanted_trans, int max_messages)
+{
+    for (int i = 0; i < max_messages; i++) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != HTLS_HDR_TASK) {
+            continue;
+        }
+        if (hdr_trans (htlc) != wanted_trans) {
+            continue;
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+gboolean
 integration_drain_until_chat (int fd, struct htlc_conn *htlc,
                               guint16 wanted_uid, struct hx_chat_msg *out,
                               int max_messages)
