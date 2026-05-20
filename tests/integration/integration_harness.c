@@ -500,6 +500,26 @@ integration_drain_until_chat_invite (int fd, struct htlc_conn *htlc,
 }
 
 gboolean
+integration_join_chat (int fd, struct htlc_conn *htlc, guint32 chat_id,
+                       int max_messages)
+{
+    guint32 cid_be = htonl (chat_id);
+    guint32 join_trans = htlc->trans;
+    if (!integration_send_message (fd, htlc, HTLC_HDR_CHAT_JOIN, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
+        return FALSE;
+    }
+    if (!integration_drain_until_task_trans (fd, htlc, join_trans,
+                                             max_messages)) {
+        return FALSE;
+    }
+    /* Reject task-error replies — a JOIN that errored out is never
+	 * what the caller wanted (we'd be exercising the wrong path). */
+    return (hdr_flag (htlc) & 1) == 0;
+}
+
+gboolean
 integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
                                   guint16 target_uid, guint32 *chat_id_out,
                                   int max_messages)

@@ -365,6 +365,20 @@ extern gboolean integration_drain_until_chat_invite (int fd,
                                                      int max_messages);
 
 /*
+ * Join an existing private chat by sending HTLC_HDR_CHAT_JOIN with
+ * HTLC_DATA_CHAT_ID = `chat_id`, then drain to the TASK reply that
+ * correlates by trans. Returns TRUE iff the reply arrived AND its
+ * flag&1 (error bit) was clear. On success htlc->in still holds the
+ * TASK reply so the caller can run dh_start/dh_end to walk the
+ * HTLS_DATA_USER_LIST chunks mhxd emits (test_chat_join.c relies on
+ * that). Used by test_chat_join, test_chat_part, test_chat_in_pchat
+ * — the latter two only care about the side effect (Bob is now in
+ * the chat) and pre-refactor open-coded the same drain loop.
+ */
+extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
+                                       guint32 chat_id, int max_messages);
+
+/*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
  * return the byte count written. Layout:
  *

@@ -63,26 +63,8 @@ test_chat_in_pchat_routes_to_member (void)
         fd_b, &htlc_b, 64));
 
     /* Bob joins. */
+    g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
     guint32 cid_be = htonl (chat_id);
-    guint32 bob_join_trans = htlc_b.trans;
-    g_assert_true (integration_send_message (
-        fd_b, &htlc_b, HTLC_HDR_CHAT_JOIN, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
-
-    gboolean bob_join_reply = FALSE;
-    for (int i = 0; i < 64 && !bob_join_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_b) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_b) != bob_join_trans) {
-            continue;
-        }
-        bob_join_reply = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
-    }
-    g_assert_true (bob_join_reply);
 
     /* Drain Alice's CHAT_USER_CHANGE so the next-event-on-Alice
 	 * search isn't fooled by the stale join broadcast. */

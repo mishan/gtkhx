@@ -66,36 +66,20 @@ test_chat_join_member_visible (void)
     g_assert_true (hx_chat_invite_extract (&htlc_b, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
-    /* Step 4: Bob CHAT_JOIN. */
-    guint32 cid_be = htonl (chat_id);
-    guint32 bob_join_trans = htlc_b.trans;
-    g_assert_true (integration_send_message (
-        fd_b, &htlc_b, HTLC_HDR_CHAT_JOIN, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
+    /* Steps 4 + 5: Bob CHAT_JOIN; harness drains to the TASK reply
+	 * (correlated by trans) and asserts flag & 1 == 0. Reply frame
+	 * is still in htlc_b.in afterward so we can walk the USER_LIST
+	 * chunks below. */
+    g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
 
-    /* Step 5: Bob's TASK reply with USER_LIST chunks. */
-    gboolean bob_join_reply = FALSE;
     int n_user_list = 0;
-    for (int i = 0; i < 64 && !bob_join_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_b) != HTLS_HDR_TASK) {
-            continue;
+    dh_start (&htlc_b)
+    {
+        if (_type == HTLS_DATA_USER_LIST) {
+            n_user_list++;
         }
-        if (hdr_trans (&htlc_b) != bob_join_trans) {
-            continue;
-        }
-        bob_join_reply = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
-        dh_start (&htlc_b)
-        {
-            if (_type == HTLS_DATA_USER_LIST) {
-                n_user_list++;
-            }
-        }
-        dh_end ();
     }
-    g_assert_true (bob_join_reply);
+    dh_end ();
     /* Alice and Bob both joined → 2 entries. Some servers may
 	 * vary; insist on >= 1 to leave room for differing flushes. */
     g_assert_cmpint (n_user_list, >=, 1);
