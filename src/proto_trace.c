@@ -93,6 +93,10 @@ proto_hdr_name (guint32 type)
         return "HTLC_HDR_FILE_MOVE";
     case HTLC_HDR_FILE_SYMLINK:
         return "HTLC_HDR_FILE_SYMLINK";
+    case HTLC_HDR_FILE_GETFOLDER:
+        return "HTLC_HDR_FILE_GETFOLDER";
+    case HTLC_HDR_FILE_PUTFOLDER:
+        return "HTLC_HDR_FILE_PUTFOLDER";
     case HTLC_HDR_USER_GETLIST:
         return "HTLC_HDR_USER_GETLIST";
     case HTLC_HDR_USER_GETINFO:
@@ -139,6 +143,11 @@ proto_hdr_name (guint32 type)
         return "HTLC_HDR_KILLDOWNLOAD";
     case HTLC_HDR_DOWNLOAD_BANNER:
         return "HTLC_HDR_DOWNLOAD_BANNER";
+
+    /* fogWraith chat-history extension — request and reply share
+     * opcode 0x2bc (700). */
+    case HTLC_HDR_GET_CHAT_HISTORY:
+        return "HTLC/S_HDR_GET_CHAT_HISTORY";
 
     /* Server → client */
     case HTLS_HDR_NEWS_POST:
@@ -266,10 +275,70 @@ proto_data_name (guint16 type)
         return "HTLS_DATA_CIPHER_ALG";
     case HTLC_DATA_CIPHER_ALG:
         return "HTLC_DATA_CIPHER_ALG";
+    case HTLS_DATA_CIPHER_MODE:
+        return "HTLS_DATA_CIPHER_MODE";
+    case HTLC_DATA_CIPHER_MODE:
+        return "HTLC_DATA_CIPHER_MODE";
+    case HTLS_DATA_CIPHER_IVEC:
+        return "HTLS_DATA_CIPHER_IVEC";
+    case HTLC_DATA_CIPHER_IVEC:
+        return "HTLC_DATA_CIPHER_IVEC";
+    case HTLS_DATA_CHECKSUM_ALG:
+        return "HTLS_DATA_CHECKSUM_ALG";
+    case HTLC_DATA_CHECKSUM_ALG:
+        return "HTLC_DATA_CHECKSUM_ALG";
     case HTLS_DATA_COMPRESS_ALG:
         return "HTLS_DATA_COMPRESS_ALG";
     case HTLC_DATA_COMPRESS_ALG:
         return "HTLC_DATA_COMPRESS_ALG";
+
+    /* Phase B (fogWraith HOPE-Secure-Login.md): client / server
+     * identification chunks sent in the HOPE Step 1 LOGIN. The
+     * server echoes its own values in the Step 1 reply. Both
+     * directions share opcodes. */
+    case HTLC_DATA_HOPE_APP_ID:
+        return "HTLC/S_DATA_HOPE_APP_ID";
+    case HTLC_DATA_HOPE_APP_STRING:
+        return "HTLC/S_DATA_HOPE_APP_STRING";
+
+    /* Phase 5+ (Capabilities.md): post-login feature-flag exchange.
+     * Both directions share opcode 0x01f0. The 64-bit large-file
+     * companion fields (FILESIZE64, OFFSET64, XFERSIZE64,
+     * FOLDER_ITEM_COUNT64) ride alongside the legacy 32-bit
+     * counterparts on the same messages once CAP_LARGE_FILES is
+     * negotiated. */
+    case HTLC_DATA_CAPABILITIES:
+        return "HTLC/S_DATA_CAPABILITIES";
+    case HTLC_DATA_FILESIZE64:
+        return "HTLC/S_DATA_FILESIZE64";
+    case HTLC_DATA_OFFSET64:
+        return "HTLC/S_DATA_OFFSET64";
+    case HTLC_DATA_XFERSIZE64:
+        return "HTLC/S_DATA_XFERSIZE64";
+    case HTLC_DATA_FOLDER_ITEM_COUNT64:
+        return "HTLC/S_DATA_FOLDER_ITEM_COUNT64";
+
+    /* Phase 5+ (Capabilities-Chat-History.md): chat-history
+     * extension. Request side carries channel + cursor + limit;
+     * reply side carries an array of HISTORY_ENTRY records plus an
+     * end-of-batch HAS_MORE flag and server-advertised retention
+     * caps. */
+    case HTLC_DATA_CHANNEL_ID:
+        return "HTLC/S_DATA_CHANNEL_ID";
+    case HTLC_DATA_HISTORY_BEFORE:
+        return "HTLC/S_DATA_HISTORY_BEFORE";
+    case HTLC_DATA_HISTORY_AFTER:
+        return "HTLC/S_DATA_HISTORY_AFTER";
+    case HTLC_DATA_HISTORY_LIMIT:
+        return "HTLC/S_DATA_HISTORY_LIMIT";
+    case HTLS_DATA_HISTORY_ENTRY:
+        return "HTLS_DATA_HISTORY_ENTRY";
+    case HTLS_DATA_HISTORY_HAS_MORE:
+        return "HTLS_DATA_HISTORY_HAS_MORE";
+    case HTLS_DATA_HISTORY_MAX_MSGS:
+        return "HTLS_DATA_HISTORY_MAX_MSGS";
+    case HTLS_DATA_HISTORY_MAX_DAYS:
+        return "HTLS_DATA_HISTORY_MAX_DAYS";
 
     case HTLC_DATA_NEWSFOLDERITEM:
         return "HTLC_DATA_NEWSFOLDERITEM";
