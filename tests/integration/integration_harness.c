@@ -1073,6 +1073,12 @@ send_hope_step2 (int fd, struct htlc_conn *htlc, const char *username,
         .mode = HX_LOGIN_MODE_HOPE_STEP2,
         .icon = icon,
         .display_name = display_name,
+        /* Match production rcv.c::rcv_task_login: advertise 185
+		 * so mhxd flips on can_ping, unblocking post-handshake
+		 * PING round-trips. Without this the test would have to
+		 * skip the PING (which is exactly what test_hope_hmac
+		 * had to do before this CLIENTVERSION threading landed). */
+        .client_version = 185,
         .caps = caps,
         .login_field = login_field,
         .login_field_len = (guint16) llen,

@@ -1314,6 +1314,12 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             .mode = HX_LOGIN_MODE_HOPE_STEP2,
             .icon = htlc->icon,
             .display_name = htlc->name,
+            /* Advertise ourselves as Hotline 1.8.5 (185) so mhxd's
+			 * rcv_login sets can_ping; without this the HOPE
+			 * post-login PING timer would fire task-errors on the
+			 * server side every 60 s. Same value the legacy LOGIN
+			 * advertises (network.c::send_login). */
+            .client_version = 185,
             .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
                   | HTLC_CAP_CHAT_HISTORY,
             .login_field = login,

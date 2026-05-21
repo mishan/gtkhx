@@ -13,20 +13,25 @@
  *
  * Coverage:
  *
- *   integration_open_login_hope_or_skip drives the full HOPE
- *   Step 1 / Step 2 dance against any server advertising
- *   HX_TEST_CAP_HOPE — but with cipheralg=NULL, so the cipher
- *   negotiation falls back to "NONE" and no AEAD framing is
- *   activated. This exercises everything ChaCha20 needs minus
- *   the AEAD path: algorithm advertisement, Step 1 reply
- *   parsing, HMAC chain, Step 2 authenticated LOGIN, post-
- *   login drain to SELFINFO. A clean return from the harness
- *   means every chunk in the Step 1 reply parsed, the HMAC chain
- *   produced output, the Step 2 LOGIN landed without a server-
- *   side task-error, and SELFINFO arrived. That's the bug-class
- *   2cce1f9 surfaced (chunk-shape drift), so the test catches
- *   the regression without needing to send any post-login
- *   traffic.
+ *   1. integration_open_login_hope_or_skip drives the full HOPE
+ *      Step 1 / Step 2 dance against any server advertising
+ *      HX_TEST_CAP_HOPE — but with cipheralg=NULL, so the cipher
+ *      negotiation falls back to "NONE" and no AEAD framing is
+ *      activated. This exercises everything ChaCha20 needs minus
+ *      the AEAD path: algorithm advertisement, Step 1 reply
+ *      parsing, HMAC chain, Step 2 authenticated LOGIN
+ *      (including the HTLC_DATA_CLIENTVERSION advertisement
+ *      that flips on mhxd's can_ping access bit), post-login
+ *      drain to SELFINFO. A clean return from the harness means
+ *      every chunk in the Step 1 reply parsed, the HMAC chain
+ *      produced output, the Step 2 LOGIN landed without a
+ *      server-side task-error, and SELFINFO arrived.
+ *   2. A plain-framing PING round-trip after the handshake
+ *      confirms the post-HOPE connection is usable for normal
+ *      traffic — and validates that CLIENTVERSION made it into
+ *      STEP2 (without it, mhxd would task-error the PING; the
+ *      pre-CLIENTVERSION version of this test had to skip the
+ *      PING entirely for that reason).
  *
  * Why this exists separately from test_hope_chacha20:
  *
@@ -43,20 +48,6 @@
  *   hashes, test_hope_chacha20 will start running and pick up the
  *   AEAD-framed superset; this test stays useful as the
  *   "without-AEAD" sibling.
- *
- * Why we don't send a post-handshake PING:
- *
- *   mhxd gates HTLC_HDR_PING acceptance on the `can_ping` access
- *   bit, which it sets only when the LOGIN packet included
- *   HTLC_DATA_CLIENTVERSION >= 150. The harness's HOPE Step 2
- *   builder (login_packet.c's HX_LOGIN_MODE_HOPE_STEP2) doesn't
- *   currently emit CLIENTVERSION — production has the same gap;
- *   see memory note gtkhx_missing_clientversion for the
- *   follow-up. A post-handshake PING would land as task-error
- *   here and red-flag CI for a known production miss rather than
- *   a real handshake regression. Once CLIENTVERSION is added to
- *   the STEP2 chunk shape, this test should grow the PING round-
- *   trip back.
  */
 
 #include "config.h"
@@ -139,6 +130,20 @@ test_hope_hmac_login_and_ping (void)
 	 * catches the (hypothetical) drift where the harness silently
 	 * returns success on an empty SELFINFO chunk. */
     g_assert_cmphex (htlc.uid, !=, 0);
+
+    /* Confirm the post-HOPE channel is usable: send a plain
+	 * (non-AEAD) PING, drain to the matching TASK reply. mhxd
+	 * gates HTLC_HDR_PING on the `can_ping` access bit, which
+	 * it sets when the LOGIN included HTLC_DATA_CLIENTVERSION
+	 * >= 150. STEP2 now emits that chunk (login_packet.c +
+	 * harness send_hope_step2 + production rcv.c all set
+	 * client_version=185), so this PING round-trip works.
+	 * Drops to task-error if any of those three sites regresses. */
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
+    g_assert_true (integration_drain_until_task_trans (fd, &htlc, ping_trans,
+                                                       64));
+    g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);

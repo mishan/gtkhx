@@ -71,12 +71,15 @@
  *         HTLS_DATA_COMPRESS_ALG   (if compress_alg_reply_len > 0)
  *         HTLC_DATA_NAME           (display_name, may be empty)
  *         HTLC_DATA_ICON           (always)
+ *         HTLC_DATA_CLIENTVERSION  (if client_version != 0)
  *         HTLC_DATA_CAPABILITIES   (always)
  *
  *     NAME in this mode always emits (production sends an empty NAME
  *     when htlc->name is unset; an empty chunk is the same shape).
  *     The send_caps gate is ignored — STEP2 always advertises caps
  *     because the server requires them for AEAD activation.
+ *     CLIENTVERSION uses the same gate as legacy (emit iff non-
+ *     zero); mhxd needs >= 150 to set the can_ping access bit.
  */
 
 #ifndef HX_LOGIN_PACKET_H
