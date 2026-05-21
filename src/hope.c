@@ -145,6 +145,12 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
     }
     dh_end ();
 
+    /* Report the observed sessionkey length back to the caller via
+	 * the reply struct, even on the error paths below — that way
+	 * a SHORT_SESSIONKEY caller can log the actual short value
+	 * instead of htlc->sklen (which we only set on success). */
+    reply->observed_sklen = sklen_out;
+
     /* MAC algorithm is mandatory — without it we can't compute the
 	 * password chain or any HOPE auth. */
     if (!mal_len) {

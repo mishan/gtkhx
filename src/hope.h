@@ -104,11 +104,19 @@ struct htlc_conn;
  * the reply. Used by the ChaCha20-Poly1305 path to confirm AEAD
  * framing.
  *
- * `secure_login` is set when the server's HTLS_DATA_LOGIN chunk
- * names a MAC algorithm matching `expected_macalg` (the value the
- * caller passed in). This signals the server is offering an
- * HMAC-based login challenge — caller should HMAC the login name
- * with the session key rather than XOR-encoding it. */
+ * `secure_login` is set when the server's HTLS_DATA_LOGIN echo
+ * names the server-selected MAC algorithm (resolved from
+ * HTLS_DATA_MAC_ALG into `macalg` above). This catches the
+ * fallback case where the server picks a non-preferred MAC from
+ * the client's advertised list. When set, the caller should HMAC
+ * the login name with the session key rather than XOR-encoding
+ * it.
+ *
+ * `observed_sklen` records the length of HTLS_DATA_SESSIONKEY as
+ * received from the server, even on failure paths. Useful for
+ * error messages — on HOPE_ERR_SHORT_SESSIONKEY, callers can
+ * report the actual short length rather than the htlc->sklen
+ * value that hope_parse_step1_reply only updates on success. */
 struct hope_step1_reply {
     char macalg[HOPE_ALG_NAME_MAX];
     char s_cipheralg[HOPE_ALG_NAME_MAX];
@@ -117,6 +125,7 @@ struct hope_step1_reply {
     char c_compressalg[HOPE_ALG_NAME_MAX];
     int server_says_aead;
     int secure_login;
+    guint16 observed_sklen;
 };
 
 enum hope_step1_err {

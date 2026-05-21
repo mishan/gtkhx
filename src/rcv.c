@@ -1145,15 +1145,25 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         enum hope_step1_err herr
             = hope_parse_step1_reply (htlc, htlc->macalg, &sel);
 
-        if (herr == HOPE_ERR_NO_MAC_ALG || herr == HOPE_ERR_BAD_MAC_ALG) {
+        if (herr == HOPE_ERR_NO_MAC_ALG) {
             hx_printf_prefix (htlc, 0, INFOPREFIX, "No macalg from server\n");
             hx_htlc_close (htlc, 0);
             return;
         }
+        if (herr == HOPE_ERR_BAD_MAC_ALG) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "Malformed macalg list from server\n");
+            hx_htlc_close (htlc, 0);
+            return;
+        }
         if (herr == HOPE_ERR_SHORT_SESSIONKEY) {
+            /* hope_parse_step1_reply intentionally only updates
+			 * htlc->sklen on success; pull the actual observed
+			 * length out of the reply struct so the message
+			 * reflects what the server sent. */
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "sessionkey length (%u) not big enough\n",
-                              htlc->sklen);
+                              (unsigned) sel.observed_sklen);
             hx_htlc_close (htlc, 0);
             return;
         }
@@ -1373,9 +1383,11 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * argument order. */
             if (hope_cipher_is_aead (sel.s_cipheralg)
                 && hope_cipher_is_aead (sel.c_cipheralg)) {
-                htlc->cipher_mode = sel.server_says_aead
-                                      ? CIPHER_MODE_AEAD
-                                      : CIPHER_MODE_AEAD;
+                /* AEAD ciphers (ChaCha20-Poly1305 today) always
+				 * use AEAD framing — server_says_aead is just the
+				 * server's confirmation; the cipher name alone
+				 * determines the mode. */
+                htlc->cipher_mode = CIPHER_MODE_AEAD;
                 cipher_aead_derive_session_keys (
                     &htlc->cipher_encode_state.chacha,
                     &htlc->cipher_decode_state.chacha,

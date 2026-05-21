@@ -52,9 +52,19 @@ const hx_test_server hx_test_server_matrix[] = {
          * get.vespernet.net at image-build time. The only target
          * that ships the fogWraith chat-history extension. Also
          * supports large files, text-encoding negotiation, and
-         * file-mode banner. HOPE and TLS are present in Janus but
-         * intentionally NOT enabled in our v1 container — see
-         * tests/janus/README.md for the rationale. */
+         * file-mode banner. HOPE and TLS are present in the Janus
+         * binary but intentionally NOT enabled in our v1 container
+         * — the bundled guest/admin account YAMLs don't ship with
+         * HOPE-compatible password hashes (see the comment block
+         * in tests/janus/Dockerfile that calls this out as a
+         * follow-up), so a HOPE Step 1 attempt lands as
+         * "Incorrect login" task-error rather than a real
+         * handshake. Don't advertise HX_TEST_CAP_HOPE or
+         * HX_TEST_CAP_CHACHA20 until the container ships
+         * HOPE-compatible hashes — picker code in tests like
+         * test_hope_chacha20.c would otherwise select Janus and
+         * record a real failure for what is actually a server-
+         * side configuration gap. */
         .name       = "janus",
         .host       = "127.0.0.1",
         .port       = 5510,
@@ -64,9 +74,7 @@ const hx_test_server hx_test_server_matrix[] = {
                     | HX_TEST_CAP_TEXT_ENCODING
                     | HX_TEST_CAP_CHAT_HISTORY
                     | HX_TEST_CAP_BANNER_HTXF
-                    | HX_TEST_CAP_NEWS_15
-                    | HX_TEST_CAP_HOPE
-                    | HX_TEST_CAP_CHACHA20,
+                    | HX_TEST_CAP_NEWS_15,
     },
 };
 
