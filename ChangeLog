@@ -41,6 +41,7 @@
 - Support for large file transfers (>4GB) on servers that support it
 - Support for chat history on servers that support it
 - Light/Dark theme support
+- Emoji picker next to Chat and Message input fields
 
 0.9.4
 -----
