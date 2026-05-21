@@ -163,13 +163,27 @@ static void
 last_conn_set (const char *server, guint16 port, const char *login,
                const char *pass, char secure, char compress, char cipher)
 {
+    /* Strdup the inputs *before* freeing the old slots — the caller
+     * may have passed pointers that alias our existing fields. The
+     * reconnect-banner path goes through connect_reconnect_last,
+     * which passes last_conn.server straight through to
+     * connect_with_args, which calls us with server == last_conn
+     * .server. Free-then-strdup would read from the just-freed slot
+     * and either crash or land garbage in the cache (visible to the
+     * user as "connecting to v灡SU" / "Invalid URI" on the second
+     * reconnect attempt). */
+    char *new_server = g_strdup (server ? server : "");
+    char *new_login  = g_strdup (login  ? login  : "");
+    char *new_pass   = g_strdup (pass   ? pass   : "");
+
     g_free (last_conn.server);
     g_free (last_conn.login);
     g_free (last_conn.pass);
-    last_conn.server = g_strdup (server ? server : "");
+
+    last_conn.server = new_server;
+    last_conn.login  = new_login;
+    last_conn.pass   = new_pass;
     last_conn.port = port;
-    last_conn.login = g_strdup (login ? login : "");
-    last_conn.pass = g_strdup (pass ? pass : "");
     last_conn.secure = secure;
     last_conn.compress = compress;
     last_conn.cipher = cipher;
@@ -245,7 +259,15 @@ connect_with_args (session *sess, const char *server, guint16 port,
 
     last_conn_set (server, port, login, pass, secure, compress, cipher);
 
-    hx_connect (&sess->htlc, server, port, login, pass, secure);
+    /* From here on use last_conn.{server,login,pass} rather than the
+     * incoming parameters: when this function is called from
+     * connect_reconnect_last, those parameters aliased last_conn's
+     * fields, which last_conn_set just freed-and-replaced. The fresh
+     * cache copies hold the same data with guaranteed-valid lifetime
+     * for the synchronous portion of hx_connect (which g_strdup's
+     * what it needs before going async via GSocketClient). */
+    hx_connect (&sess->htlc, last_conn.server, port,
+                last_conn.login, last_conn.pass, secure);
 }
 
 /* Reconnect to the most-recently-used server, no dialog. Wired to
