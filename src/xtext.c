@@ -5424,13 +5424,48 @@ gtk_xtext_remove_entry (xtext_buffer *buf, textentry *ent)
 	if (!buf || !ent)
 		return FALSE;
 
-	/* Linked-list unlink. Mirror of remove_top + remove_bottom. */
+	/* Defensive membership walk before dereferencing ent->prev.
+	 *
+	 * Background: external code (chat.c's Load-Older sentinel
+	 * tracking in gchat->history_load_older_ent) holds raw
+	 * textentry pointers across xtext operations. xtext's
+	 * max_lines pruning silently frees the oldest entries, so a
+	 * cached pointer can outlive the entry it names. Without this
+	 * walk, dereferencing ent->prev reads from freed memory and
+	 * either crashes immediately ("ent->prev->next = ..." with
+	 * ent->prev = garbage) or — worse — corrupts an unrelated
+	 * allocation that happens to live where ent used to.
+	 *
+	 * The walk is O(N) in buffer length, but remove_entry is
+	 * called only on a handful of sentinel paths; max_lines caps
+	 * N at the user's scrollback setting (~5000 by default), so
+	 * each call is microseconds. Cheap insurance against the
+	 * stale-pointer footgun.
+	 *
+	 * Returns FALSE on stale ent so the chat.c side's "stale
+	 * pointer means the entry was already gone, dropping our
+	 * reference is the right thing either way" comment holds.
+	 */
+	{
+		textentry *w;
+		for (w = buf->text_first; w; w = w->next) {
+			if (w == ent)
+				break;
+		}
+		if (!w)
+			return FALSE;  /* ent not in this buffer (pruned, freed, or never inserted) */
+	}
+
+	/* Linked-list unlink. Mirror of remove_top + remove_bottom.
+	 * After the membership walk above, ent->prev / ent->next are
+	 * known to be valid (either NULL at the head/tail or
+	 * pointing at the verified neighbours). */
 	if (ent->prev)
 		ent->prev->next = ent->next;
 	else if (buf->text_first == ent)
 		buf->text_first = ent->next;
 	else
-		return FALSE;  /* not in this list */
+		return FALSE;  /* defensive: should be unreachable after the walk */
 
 	if (ent->next)
 		ent->next->prev = ent->prev;
