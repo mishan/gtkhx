@@ -652,6 +652,7 @@ test_login_build_hope_step2_full (void)
         .mode             = HX_LOGIN_MODE_HOPE_STEP2,
         .icon             = 412,
         .display_name     = "Tier-2 KAT",
+        .client_version   = 185,
         .caps             = 0x0013,           /* bits 0,1,4 */
         .login_field      = login_field,
         .login_field_len  = (guint16) sizeof (login_field),
@@ -668,9 +669,10 @@ test_login_build_hope_step2_full (void)
     int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
                                     scratch, sizeof (scratch));
 
-    /* LOGIN, PASSWORD, CIPHER_ALG, COMPRESS_ALG, NAME, ICON, CAPS = 7
-	 * chunks (with both cipher and compress configured). */
-    g_assert_cmpint (hc, ==, 7);
+    /* LOGIN, PASSWORD, CIPHER_ALG, COMPRESS_ALG, NAME, ICON,
+	 * CLIENTVERSION, CAPS = 8 chunks (with both cipher and compress
+	 * configured and client_version != 0). */
+    g_assert_cmpint (hc, ==, 8);
 
     /* Verify order + content matches what production used to emit
 	 * inline. */
@@ -701,10 +703,54 @@ test_login_build_hope_step2_full (void)
     g_assert_cmphex (((guint8 *)chunks[5].data)[0], ==, 0x01);
     g_assert_cmphex (((guint8 *)chunks[5].data)[1], ==, 0x9C);
 
-    g_assert_cmpuint (chunks[6].type, ==, HTLC_DATA_CAPABILITIES);
+    g_assert_cmpuint (chunks[6].type, ==, HTLC_DATA_CLIENTVERSION);
     g_assert_cmpuint (chunks[6].len,  ==, 2);
+    /* 185 = 0x00B9, big-endian */
     g_assert_cmphex (((guint8 *)chunks[6].data)[0], ==, 0x00);
-    g_assert_cmphex (((guint8 *)chunks[6].data)[1], ==, 0x13);
+    g_assert_cmphex (((guint8 *)chunks[6].data)[1], ==, 0xB9);
+
+    g_assert_cmpuint (chunks[7].type, ==, HTLC_DATA_CAPABILITIES);
+    g_assert_cmpuint (chunks[7].len,  ==, 2);
+    g_assert_cmphex (((guint8 *)chunks[7].data)[0], ==, 0x00);
+    g_assert_cmphex (((guint8 *)chunks[7].data)[1], ==, 0x13);
+}
+
+/* CLIENTVERSION gate: explicitly verifies the chunk is omitted
+ * when client_version == 0 (legacy mode and STEP2 share the same
+ * "0 means don't emit" convention). Pins the behaviour so a
+ * future change can't silently always-emit; the gating preserves
+ * the option of identifying as a pre-1.5 client when needed. */
+static void
+test_login_build_hope_step2_omits_clientversion_when_zero (void)
+{
+    static const guint8 login_field[]  = { 0x11, 0x22, 0x33, 0x44 };
+    static const guint8 password_mac[] = {
+        0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+        0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44
+    };
+
+    const hx_login_request req = {
+        .mode             = HX_LOGIN_MODE_HOPE_STEP2,
+        .icon             = 1,
+        .display_name     = "no-clientver",
+        /* client_version = 0 by default */
+        .login_field      = login_field,
+        .login_field_len  = (guint16) sizeof (login_field),
+        .password_mac     = password_mac,
+        .password_mac_len = (guint16) sizeof (password_mac),
+    };
+
+    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
+    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
+    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
+                                    scratch, sizeof (scratch));
+    /* LOGIN, PASSWORD, NAME, ICON, CAPS = 5. No CLIENTVERSION
+	 * (gated off by client_version == 0), no CIPHER_ALG /
+	 * COMPRESS_ALG (not negotiated). */
+    g_assert_cmpint (hc, ==, 5);
+    for (int i = 0; i < hc; i++) {
+        g_assert_cmpuint (chunks[i].type, !=, HTLC_DATA_CLIENTVERSION);
+    }
 }
 
 static void
@@ -832,6 +878,8 @@ main (int argc, char **argv)
                      test_login_build_hope_step2_no_cipher_no_compress);
     g_test_add_func ("/proto/hlwrite/login_build_hope_step2/empty_login_field",
                      test_login_build_hope_step2_empty_login_field);
+    g_test_add_func ("/proto/hlwrite/login_build_hope_step2/omits_clientversion_when_zero",
+                     test_login_build_hope_step2_omits_clientversion_when_zero);
 
     return g_test_run ();
 }

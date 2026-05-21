@@ -155,6 +155,24 @@ hx_login_build_chunks (const hx_login_request *req,
             HTLC_DATA_ICON, 2, scratch + icon_off
         };
 
+        /* CLIENTVERSION — emit only if explicitly set (same gate
+         * legacy uses). mhxd reads this in rcv_login to set the
+         * `can_ping` access bit: clientversion >= 150 → PING
+         * keepalive accepted; missing or below → server rejects
+         * HTLC_HDR_PING with a task-error. Without this chunk a
+         * HOPE-Secure-Login client looks pre-1.5 to mhxd and the
+         * post-login PING timer fires task-errors every 60 s. */
+        if (req->client_version) {
+            size_t cv_off = soff;
+            guint16 cv_be = htons (req->client_version);
+            g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
+            memcpy (scratch + soff, &cv_be, 2);
+            soff += 2;
+            chunks[hc++] = (struct hx_chunk) {
+                HTLC_DATA_CLIENTVERSION, 2, scratch + cv_off
+            };
+        }
+
         /* CAPABILITIES — always emit. STEP2 ignores the send_caps
          * gate because the server needs the caps echo to finalise
          * AEAD activation. caps=0 stays meaningful ("I support the
