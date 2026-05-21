@@ -322,6 +322,72 @@ server_connect (GtkWidget *widget, gpointer data)
     }
 }
 
+/* ---- HOPE / cipher / compress coupling -------------------------------
+ *
+ * The cipher and compress combo rows are meaningless unless HOPE is
+ * enabled — neither side of the connection sets them up otherwise.
+ * Two pieces of UX:
+ *
+ *  1. Grey out (set insensitive) the cipher and compress combos when
+ *     HOPE is off, so the dependency is visible at a glance. Doing
+ *     this in a notify::active handler so it tracks the switch live.
+ *
+ *  2. If the user (or a loaded bookmark) ends up with a non-NONE
+ *     cipher or compress but HOPE off — silent plaintext-with-a-
+ *     selected-cipher is the wrong failure mode for a security
+ *     feature — flip HOPE on. Belt-and-suspenders against the
+ *     greying-out approach (which prevents the situation from ever
+ *     arising via the UI, but a legacy bookmark could still load
+ *     that state).
+ */
+
+static void
+hope_coupling_sync_sensitivity (void)
+{
+    gboolean on;
+    if (!hope) {
+        return;
+    }
+    on = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
+#ifdef CONFIG_COMPRESS
+    if (compress_menu) {
+        gtk_widget_set_sensitive (compress_menu, on);
+    }
+#endif
+#ifdef CONFIG_CIPHER
+    if (cipher_menu) {
+        gtk_widget_set_sensitive (cipher_menu, on);
+    }
+#endif
+}
+
+static void
+on_hope_active_notify (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+    (void)obj;
+    (void)pspec;
+    (void)data;
+    hope_coupling_sync_sensitivity ();
+}
+
+static void
+on_secure_combo_selected_notify (GObject *obj, GParamSpec *pspec,
+                                 gpointer data)
+{
+    (void)pspec;
+    (void)data;
+    if (!hope || !ADW_IS_COMBO_ROW (obj)) {
+        return;
+    }
+    /* Item 0 in both combo models is "NONE". A non-zero selection
+     * means the user picked a real algorithm — force HOPE on so the
+     * choice actually takes effect. Idempotent if HOPE is already on. */
+    if (adw_combo_row_get_selected (ADW_COMBO_ROW (obj)) != 0
+        && !adw_switch_row_get_active (ADW_SWITCH_ROW (hope))) {
+        adw_switch_row_set_active (ADW_SWITCH_ROW (hope), TRUE);
+    }
+}
+
 void
 set_the_entries (char *address, char *login, char *password, char *port,
                  char secure, char compress, char cipher)
@@ -347,6 +413,17 @@ set_the_entries (char *address, char *login, char *password, char *port,
         gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
     }
 
+    /* Repair legacy bookmarks where a user picked a cipher or
+     * compression algorithm but forgot to flick the HOPE switch
+     * before saving. Pre-coupling-fix UI let that state through and
+     * the connection silently went plaintext. After this point the
+     * UI prevents it (the combos go insensitive when HOPE is off);
+     * normalise here so the bookmark-loaded state matches the new
+     * UI invariant. */
+    if (!secure && (compress != 0 || cipher != 0)) {
+        secure = 1;
+    }
+
     if (hope) {
         adw_switch_row_set_active (ADW_SWITCH_ROW (hope),
                                    secure ? TRUE : FALSE);
@@ -361,6 +438,12 @@ set_the_entries (char *address, char *login, char *password, char *port,
         adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), cipher);
     }
 #endif
+
+    /* Either set_the_entries was called with a bookmark before the
+     * coupling notify handlers fired (preload path) or it's
+     * mid-session via Connect dialog reuse — sync sensitivity
+     * unconditionally so the combos match the new HOPE state. */
+    hope_coupling_sync_sensitivity ();
 }
 
 static void open_bookmark (GtkWidget *widget, gpointer data);
@@ -1173,6 +1256,10 @@ create_connect_window (GtkWidget *btn, gpointer data)
         ADW_ACTION_ROW (hope),
         _ ("Encrypt and optionally compress the connection"));
     adw_switch_row_set_active (ADW_SWITCH_ROW (hope), FALSE);
+    /* Live-track HOPE on/off to grey out the cipher/compress combos
+     * when HOPE is off — see the helper for the rationale. */
+    g_signal_connect (hope, "notify::active",
+                      G_CALLBACK (on_hope_active_notify), NULL);
     adw_preferences_group_add (conn_grp, hope);
 
 #ifdef CONFIG_COMPRESS
@@ -1190,6 +1277,10 @@ create_connect_window (GtkWidget *btn, gpointer data)
                                  G_LIST_MODEL (list));
         adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), 0);
         g_object_unref (list);
+        /* If the user (or a programmatic loader) picks a non-NONE
+         * compress while HOPE is off, flip HOPE on. */
+        g_signal_connect (compress_menu, "notify::selected",
+                          G_CALLBACK (on_secure_combo_selected_notify), NULL);
         adw_preferences_group_add (conn_grp, compress_menu);
     }
 #endif
@@ -1209,9 +1300,19 @@ create_connect_window (GtkWidget *btn, gpointer data)
                                  G_LIST_MODEL (list));
         adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), 0);
         g_object_unref (list);
+        /* Same auto-on-HOPE rule as compress_menu. */
+        g_signal_connect (cipher_menu, "notify::selected",
+                          G_CALLBACK (on_secure_combo_selected_notify), NULL);
         adw_preferences_group_add (conn_grp, cipher_menu);
     }
 #endif
+
+    /* Apply initial sensitivity now that all three widgets exist —
+     * fresh dialog with HOPE off greys the combos. The
+     * last_conn-preload block below resets HOPE/cipher/compress and
+     * relies on the same notify handlers + the explicit re-sync
+     * below to land at a coherent state. */
+    hope_coupling_sync_sensitivity ();
 
     gtk_box_append (GTK_BOX (content), GTK_WIDGET (conn_grp));
 
@@ -1238,30 +1339,15 @@ create_connect_window (GtkWidget *btn, gpointer data)
     /* If we connected during this run, pre-populate the form with
 	 * those values. Reconnect-after-disconnect is the obvious case
 	 * — the user expects the dialog to show the server they were
-	 * just on, not a blank form. */
+	 * just on, not a blank form. Route through set_the_entries so
+	 * the legacy-bookmark normalization (cipher/compress non-NONE
+	 * forces secure on) applies here too. */
     if (last_conn.valid && last_conn.server && last_conn.server[0]) {
         char portbuf[16];
         g_snprintf (portbuf, sizeof (portbuf), "%u", last_conn.port);
-        gtk_editable_set_text (GTK_EDITABLE (address_entry), last_conn.server);
-        gtk_editable_set_text (GTK_EDITABLE (login_entry),
-                               last_conn.login ? last_conn.login : "");
-        gtk_editable_set_text (GTK_EDITABLE (password_entry),
-                               last_conn.pass ? last_conn.pass : "");
-        gtk_editable_set_text (GTK_EDITABLE (port_entry), portbuf);
-        adw_switch_row_set_active (ADW_SWITCH_ROW (hope),
-                                   last_conn.secure ? TRUE : FALSE);
-#ifdef CONFIG_COMPRESS
-        if (compress_menu) {
-            adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu),
-                                        last_conn.compress);
-        }
-#endif
-#ifdef CONFIG_CIPHER
-        if (cipher_menu) {
-            adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu),
-                                        last_conn.cipher);
-        }
-#endif
+        set_the_entries (last_conn.server, last_conn.login, last_conn.pass,
+                         portbuf, last_conn.secure, last_conn.compress,
+                         last_conn.cipher);
     }
 
     adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
