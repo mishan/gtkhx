@@ -96,7 +96,24 @@ hx_login_build_chunks (const hx_login_request *req,
          * the chunk array in the order rcv.c::rcv_task_login has
          * always emitted them. The harness send_hope_step2 used to
          * duplicate this chunk-ordering logic — they're unified
-         * now. */
+         * now.
+         *
+         * Validate the pre-computed pointers eagerly so a builder
+         * bug fails here with a clear contract violation rather
+         * than tripping the g_return_if_fail inside hlpack_chunks
+         * (or worse, NULL-deref'ing in a different packer). len > 0
+         * with NULL data is a programming error in every case. */
+        g_return_val_if_fail (
+            req->login_field_len == 0 || req->login_field != NULL, 0);
+        g_return_val_if_fail (
+            req->password_mac_len == 0 || req->password_mac != NULL, 0);
+        g_return_val_if_fail (
+            req->cipher_alg_reply_len == 0
+                || req->cipher_alg_reply != NULL, 0);
+        g_return_val_if_fail (
+            req->compress_alg_reply_len == 0
+                || req->compress_alg_reply != NULL, 0);
+
         chunks[hc++] = (struct hx_chunk) {
             HTLC_DATA_LOGIN, req->login_field_len, req->login_field
         };

@@ -67,20 +67,25 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
     const guint8 *s_compl = NULL, *c_compl = NULL;
     guint16 s_compl_len = 0, c_compl_len = 0;
     guint16 sklen_out = 0;
-    size_t expected_macalg_len
-        = expected_macalg ? strlen (expected_macalg) : 0;
+    /* Capture the HTLS_DATA_LOGIN echo and decide secure_login AFTER
+	 * the walk, once we've resolved the server's actual macalg pick
+	 * from HTLS_DATA_MAC_ALG. Comparing against the caller's
+	 * expected_macalg at chunk-walk time would silently miss the
+	 * "server picked a fallback from our advertised preference
+	 * list" case — e.g. we send {SHA256, SHA1, MD5}, server picks
+	 * HMAC-SHA1, echoes HMAC-SHA1 in LOGIN: the old check would
+	 * leave secure_login=0 and we'd XOR-encode the Step 2 LOGIN
+	 * field instead of HMACing it, breaking the handshake. */
+    const guint8 *login_echo = NULL;
+    guint16 login_echo_len = 0;
+    (void) expected_macalg;
 
     dh_start (htlc)
     {
         switch (_type) {
         case HTLS_DATA_LOGIN:
-            /* Server probes for secure-login by echoing our MAC
-			 * algorithm name in the LOGIN chunk of its reply. We
-			 * match against the caller's expected macalg. */
-            if (expected_macalg_len && _len == expected_macalg_len
-                && !memcmp (expected_macalg, dh->data, _len)) {
-                reply->secure_login = 1;
-            }
+            login_echo = dh->data;
+            login_echo_len = _len;
             break;
         case HTLS_DATA_PASSWORD:
             /* Detection hook for future "server proposes a different
@@ -147,6 +152,18 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
     }
     if (!pick_first_alg (mal, mal_len, reply->macalg, sizeof (reply->macalg))) {
         return HOPE_ERR_BAD_MAC_ALG;
+    }
+
+    /* Now that we know the server's actual macalg pick, resolve
+	 * secure_login by matching the HTLS_DATA_LOGIN echo against it.
+	 * This catches the fallback-MAC case the chunk-walk-time
+	 * comparison would have missed. */
+    if (login_echo_len) {
+        size_t macalg_len = strlen (reply->macalg);
+        if (login_echo_len == macalg_len
+            && !memcmp (login_echo, reply->macalg, macalg_len)) {
+            reply->secure_login = 1;
+        }
     }
 
     /* Session key must be at least 20 bytes to give the HMAC-SHA1
@@ -364,5 +381,11 @@ hope_cipher_id_from_name (const char *name)
 int
 hope_cipher_is_aead (const char *name)
 {
+    /* Pure name predicate — independent of CONFIG_CIPHER. Callers
+	 * that need to know whether a cipher is actually available in
+	 * the build should pair this with hope_cipher_id_from_name(),
+	 * which returns CIPHER_NONE outside CONFIG_CIPHER. Tests rely
+	 * on the name-only semantic to verify the AEAD classification
+	 * without dragging cipher_aead.c into their link surface. */
     return name && !strcmp (name, "CHACHA20-POLY1305");
 }

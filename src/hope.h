@@ -282,6 +282,13 @@ extern int hope_cipher_id_from_name (const char *name);
  * Currently true only for "CHACHA20-POLY1305". Stream ciphers
  * (RC4, Blowfish OFB) return 0.
  */
+/* Pure name predicate: does this cipher name use AEAD framing?
+ * Returns 1 for "CHACHA20-POLY1305", 0 for anything else
+ * (including NULL). Independent of CONFIG_CIPHER — the function
+ * answers "is this name an AEAD cipher?", not "is this cipher
+ * available in this build?". For the latter, pair with
+ * hope_cipher_id_from_name(), which returns CIPHER_NONE when
+ * CONFIG_CIPHER is undefined. */
 extern int hope_cipher_is_aead (const char *name);
 
 #endif /* __hope_h */

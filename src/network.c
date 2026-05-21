@@ -1114,6 +1114,15 @@ send_login (struct gtkhx_connect_ctx *ctx)
 
     hc = hx_login_build_chunks (&req, login_chunks, HX_LOGIN_MAX_CHUNKS,
                                 login_scratch, sizeof (login_scratch));
+    /* Builder returns 0 on argument / overflow validation failure.
+	 * Sending hc=0 would produce a header-only frame the server
+	 * would reject (or trip hlpack_chunks's g_return_if_fail
+	 * guardrails). Route through connect_fail so the user sees a
+	 * sensible toast instead of a silent hang. */
+    if (hc <= 0) {
+        connect_fail (ctx, _ ("building LOGIN packet"), NULL);
+        return;
+    }
     hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, login_chunks, hc);
 
     ctx->state = GTKHX_CONNECT_STATE_DONE;
@@ -1922,6 +1931,16 @@ void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
 {
+    /* Public-API guardrails. Mirror hlpack_chunks's checks here too
+	 * so a caller bug fails before we open a proto trace block (a
+	 * pack-guard trip would leave an unmatched send_begin → noisy
+	 * trace output and an FDW write of zero bytes). Per-chunk
+	 * data-pointer validity is checked again inside hlpack_chunks;
+	 * we just gate the top-level ones. */
+    g_return_if_fail (htlc != NULL);
+    g_return_if_fail (hc >= 0);
+    g_return_if_fail (hc == 0 || chunks != NULL);
+
     guint32 this_off, len;
 
     if (!htlc->fd) {
@@ -1930,11 +1949,14 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 
     this_off = htlc->out.pos + htlc->out.len;
 
+    /* Pack first, trace after — that way a g_return_if_fail trip
+	 * inside hlpack_chunks (per-chunk NULL data with len > 0)
+	 * doesn't leave an open trace block. Capture trans BEFORE the
+	 * pack call since hlpack_chunks bumps htlc->trans. */
     guint32 my_trans = htlc->trans;
-    proto_trace_send_begin (type, my_trans, hc);
-
     hlpack_chunks (htlc, type, flag, chunks, hc);
 
+    proto_trace_send_begin (type, my_trans, hc);
     for (int i = 0; i < hc; i++) {
         proto_trace_send_chunk (chunks[i].type, chunks[i].len,
                                 chunks[i].data);

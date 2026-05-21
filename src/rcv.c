@@ -1324,7 +1324,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         int hc = hx_login_build_chunks (&req, step2_chunks,
                                         HX_LOGIN_MAX_CHUNKS, step2_scratch,
                                         sizeof (step2_scratch));
-        g_assert (hc > 0);
+        /* Builder returns 0 on argument / overflow validation
+		 * failures. Treat as a handshake failure rather than
+		 * assert-trap (assertions can be disabled with
+		 * G_DISABLE_ASSERT) and avoid sending a malformed LOGIN. */
+        if (hc <= 0) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "HOPE Step 2 LOGIN builder failed\n");
+            g_free (pass);
+            hx_htlc_close (htlc, 0);
+            return;
+        }
         hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, step2_chunks, hc);
         g_free (pass);
 
