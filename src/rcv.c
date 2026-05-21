@@ -34,10 +34,18 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
-#ifdef CONFIG_CIPHER
-#include "cipher_aead.h"
+/* hope.h + login_packet.h are referenced from rcv_task_login()
+ * outside any CONFIG_CIPHER guard — hope_parse_step1_reply, the
+ * hx_login_request struct + HX_LOGIN_MODE_HOPE_STEP2 enum, and the
+ * HMAC chain helpers all live in those headers and have no
+ * CONFIG_CIPHER gating themselves. Include them unconditionally
+ * so the file compiles without CONFIG_CIPHER. The cipher_aead.h
+ * include can stay gated — its contents are CONFIG_CIPHER-only
+ * and only used inside the cipher-gated AEAD-init block below. */
 #include "hope.h"
 #include "login_packet.h"
+#ifdef CONFIG_CIPHER
+#include "cipher_aead.h"
 #endif
 #include "gtkhx_session.h"
 #include "network.h"

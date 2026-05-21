@@ -174,10 +174,24 @@ hx_login_build_chunks (const hx_login_request *req,
             HTLC_DATA_MAC_ALG, (guint16) mac_n, scratch + mac_off
         };
 
-        /* HOPE app identification. */
+        /* HOPE app identification. The wire format is a fixed
+		 * 4-byte OSType (not a length-prefixed string), so we must
+		 * always emit exactly 4 bytes. Copy the caller's app_id
+		 * into scratch with NUL padding so a short string (anything
+		 * < 4 bytes) doesn't make hlpack_chunks read past the end
+		 * of the caller's string literal. */
         const char *app_id = req->hope_app_id ? req->hope_app_id : "GTKx";
+        size_t app_id_off = soff;
+        g_return_val_if_fail (soff + 4 <= scratch_cap, 0);
+        memset (scratch + soff, 0, 4);
+        size_t app_id_len = strlen (app_id);
+        if (app_id_len > 4) {
+            app_id_len = 4;
+        }
+        memcpy (scratch + soff, app_id, app_id_len);
+        soff += 4;
         chunks[hc++] = (struct hx_chunk) {
-            HTLC_DATA_HOPE_APP_ID, 4, app_id
+            HTLC_DATA_HOPE_APP_ID, 4, scratch + app_id_off
         };
 
         const char *app_string = req->hope_app_string ? req->hope_app_string

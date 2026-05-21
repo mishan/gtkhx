@@ -124,7 +124,8 @@ enum hope_step1_err {
     HOPE_ERR_NO_MAC_ALG,
     HOPE_ERR_BAD_MAC_ALG,       /* zero-length name in list */
     HOPE_ERR_SHORT_SESSIONKEY,  /* < 20 bytes; HOPE spec mandates 64 */
-    HOPE_ERR_OVERSIZED          /* malformed length-prefixed lists */
+    HOPE_ERR_OVERSIZED,         /* malformed length-prefixed lists */
+    HOPE_ERR_NULL_ARG           /* caller passed NULL htlc or reply */
 };
 
 /*

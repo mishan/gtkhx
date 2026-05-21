@@ -50,6 +50,8 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
                         const char *expected_macalg,
                         struct hope_step1_reply *reply)
 {
+    g_return_val_if_fail (htlc != NULL, HOPE_ERR_NULL_ARG);
+    g_return_val_if_fail (reply != NULL, HOPE_ERR_NULL_ARG);
     memset (reply, 0, sizeof (*reply));
 
     /* These hold pointers + lengths into the in-buffer chunks; we
@@ -246,7 +248,18 @@ hope_build_login_field (const char *login_name,
     if (secure_login) {
         /* HMAC variant: HMAC(login_name, sessionkey) under macalg.
 		 * Output width is the MAC digest size; clip against out_cap
-		 * so a misconfigured caller can't overflow. */
+		 * so a misconfigured caller can't overflow.
+		 *
+		 * Reject the call rather than crash if the HMAC inputs are
+		 * missing — hmac_xxx would dereference sessionkey/macalg
+		 * without checking. 0-byte sklen is treated as missing too;
+		 * an empty session key can't produce a meaningful MAC even
+		 * for the legal "0-byte key" HMAC edge case (the server
+		 * always sends a real sessionkey when secure_login is in
+		 * play). */
+        if (!sessionkey || !sklen || !macalg) {
+            return 0;
+        }
         guint8 mac[HOPE_MAC_MAX];
         guint16 n = hmac_xxx (mac, login_name, login_len,
                               sessionkey, (guint32) sklen, macalg);

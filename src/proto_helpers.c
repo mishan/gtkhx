@@ -999,7 +999,17 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
      * length encoding, same trans++ side effect. We re-implement
      * the body here rather than build a fake va_list (which is
      * unportable) or call hlpack in a loop (which would emit one
-     * packet per chunk). */
+     * packet per chunk).
+     *
+     * Public-API guardrails: this function is the entry point for
+     * every shared chunk-array builder (login_packet,
+     * chat_history, future modules) plus the integration harness,
+     * so a NULL htlc or a chunks=NULL+hc>0 caller is a programming
+     * bug we want loud — not a silent NULL deref inside memcpy. */
+    g_return_if_fail (htlc != NULL);
+    g_return_if_fail (hc >= 0);
+    g_return_if_fail (hc == 0 || chunks != NULL);
+
     struct hl_hdr h;
     struct hl_data_hdr dhs;
     struct qbuf *q = &htlc->out;
@@ -1021,6 +1031,11 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     for (int i = 0; i < hc; i++) {
         guint16 t = chunks[i].type;
         guint16 l = chunks[i].len;
+
+        /* len==0 with data==NULL is a legitimate empty-chunk shape
+		 * (HOPE Step 1 sends an empty HTLC_DATA_SESSIONKEY this
+		 * way); a non-zero length with NULL data is a caller bug. */
+        g_return_if_fail (l == 0 || chunks[i].data != NULL);
 
         dhs.type = htons (t);
         dhs.len = htons (l);
