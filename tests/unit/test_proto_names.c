@@ -144,6 +144,97 @@ test_data_unknown_falls_back_to_hex (void)
     g_assert_cmpstr (out, ==, "0xbeef");
 }
 
+/* Phase B HOPE-Secure-Login chunks. Both directions share opcode so
+ * proto_trace.c emits the combined "HTLC/S_" label. */
+static void
+test_data_hope_app_id (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_HOPE_APP_ID), ==,
+                     "HTLC/S_DATA_HOPE_APP_ID");
+}
+
+static void
+test_data_hope_app_string (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_HOPE_APP_STRING), ==,
+                     "HTLC/S_DATA_HOPE_APP_STRING");
+}
+
+/* HOPE ChaCha20 extension cipher-negotiation chunks (Phase B/C). The
+ * server-direction (0xec1/3/5/7) and client-direction (0xec2/4/6/8)
+ * opcodes alternate, so we get distinct names per direction. */
+static void
+test_data_cipher_mode (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_CIPHER_MODE), ==,
+                     "HTLS_DATA_CIPHER_MODE");
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_CIPHER_MODE), ==,
+                     "HTLC_DATA_CIPHER_MODE");
+}
+
+static void
+test_data_cipher_ivec (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_CIPHER_IVEC), ==,
+                     "HTLS_DATA_CIPHER_IVEC");
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_CIPHER_IVEC), ==,
+                     "HTLC_DATA_CIPHER_IVEC");
+}
+
+static void
+test_data_checksum_alg (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_CHECKSUM_ALG), ==,
+                     "HTLS_DATA_CHECKSUM_ALG");
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_CHECKSUM_ALG), ==,
+                     "HTLC_DATA_CHECKSUM_ALG");
+}
+
+static void
+test_data_capabilities (void)
+{
+    /* Post-login feature-flag bitmask. Both directions share 0x01f0. */
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_CAPABILITIES), ==,
+                     "HTLC/S_DATA_CAPABILITIES");
+}
+
+static void
+test_data_history_entry (void)
+{
+    /* Server-only opcode — array element in a GET_CHAT_HISTORY reply. */
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_HISTORY_ENTRY), ==,
+                     "HTLS_DATA_HISTORY_ENTRY");
+}
+
+static void
+test_data_history_has_more (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_HISTORY_HAS_MORE), ==,
+                     "HTLS_DATA_HISTORY_HAS_MORE");
+}
+
+static void
+test_hdr_get_chat_history (void)
+{
+    /* Request and reply share opcode 0x2bc (700) — combined label. */
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_GET_CHAT_HISTORY), ==,
+                     "HTLC/S_HDR_GET_CHAT_HISTORY");
+}
+
+static void
+test_hdr_file_getfolder (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_FILE_GETFOLDER), ==,
+                     "HTLC_HDR_FILE_GETFOLDER");
+}
+
+static void
+test_hdr_file_putfolder (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_FILE_PUTFOLDER), ==,
+                     "HTLC_HDR_FILE_PUTFOLDER");
+}
+
 static void
 test_data_unknown_zero_falls_back (void)
 {
@@ -204,6 +295,24 @@ main (int argc, char **argv)
     g_test_add_func (
         "/proto_names/hdr_unknown_buffer_is_overwritten_on_next_call",
         test_hdr_unknown_buffer_is_overwritten_on_next_call);
+
+    /* Phase B / HOPE ChaCha20 / chat-history / folder-xfer additions. */
+    g_test_add_func ("/proto_names/data_hope_app_id", test_data_hope_app_id);
+    g_test_add_func ("/proto_names/data_hope_app_string",
+                     test_data_hope_app_string);
+    g_test_add_func ("/proto_names/data_cipher_mode", test_data_cipher_mode);
+    g_test_add_func ("/proto_names/data_cipher_ivec", test_data_cipher_ivec);
+    g_test_add_func ("/proto_names/data_checksum_alg", test_data_checksum_alg);
+    g_test_add_func ("/proto_names/data_capabilities", test_data_capabilities);
+    g_test_add_func ("/proto_names/data_history_entry", test_data_history_entry);
+    g_test_add_func ("/proto_names/data_history_has_more",
+                     test_data_history_has_more);
+    g_test_add_func ("/proto_names/hdr_get_chat_history",
+                     test_hdr_get_chat_history);
+    g_test_add_func ("/proto_names/hdr_file_getfolder",
+                     test_hdr_file_getfolder);
+    g_test_add_func ("/proto_names/hdr_file_putfolder",
+                     test_hdr_file_putfolder);
 
     return g_test_run ();
 }
