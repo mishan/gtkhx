@@ -12,6 +12,7 @@ gtkhx_sources = files(
   'connect.c',
   'debug.c',
   'dfa.c',
+  'emoji.c',
   'filelist_walker.c',
   'files.c',
   'files_browser.c',

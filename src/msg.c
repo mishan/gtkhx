@@ -28,6 +28,7 @@
 #include <netinet/in.h>
 #include "hx.h"
 #include "chat.h"
+#include "emoji.h"
 #include "gtkhx.h"
 #include "gtkutil.h"
 #include "history.h"
@@ -507,8 +508,22 @@ create_msgwin (guint16 uid, char *name)
         GTK_SCROLLED_WINDOW (input_scroll), 120);
     gtkhx_widget_set_child (input_scroll, msg->inputbuf);
 
+    /* Wrap the scrolled input in an hbox so the emoji-picker button
+	 * has somewhere to sit alongside it. The chat windows already
+	 * had an hbox here for layout reasons; PM previously didn'"'"'t need
+	 * one because nothing sat next to the input. */
+    GtkWidget *input_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand (input_scroll, TRUE);
+    gtk_box_append (GTK_BOX (input_hbox), input_scroll);
+
+    /* Bottom-aligned so the button stays next to the last visible
+	 * line as the input auto-grows. Same convention as chat.c. */
+    GtkWidget *emoji_btn = hx_emoji_button_new (msg->inputbuf);
+    gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
+    gtk_box_append (GTK_BOX (input_hbox), emoji_btn);
+
     inputframe = gtk_frame_new (0);
-    gtkhx_widget_set_child (inputframe, input_scroll);
+    gtkhx_widget_set_child (inputframe, input_hbox);
 
     /* Drop GtkPaned in favour of a plain vertical box. Output
 	 * vexpand=TRUE eats remaining vertical space; input stays at

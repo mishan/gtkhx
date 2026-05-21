@@ -44,6 +44,7 @@
 #include "gtkhx.h"
 #include "chat.h"
 #include "gtkurl.h"
+#include "emoji.h"
 #include "plugin.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -2037,6 +2038,14 @@ create_chat_window (GtkWidget *widget, gpointer data)
             GTK_SCROLLED_WINDOW (input_scroll), 120);
         gtkhx_widget_set_child (input_scroll, gchat->input);
         gtkhx_box_pack (hbox, input_scroll, 1, 1, 0);
+
+        /* Emoji-picker button sits to the right of the input, bottom-
+         * aligned so it stays next to the last visible line as the
+         * input auto-grows (28→120 px). hx_emoji_button_new wires up
+         * the GtkEmojiChooser popover + insert-at-cursor handler. */
+        GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
+        gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
+        gtk_box_append (GTK_BOX (hbox), emoji_btn);
     }
 
     g_object_set_data (G_OBJECT (chat_window), "sess", sess);
@@ -2392,6 +2401,12 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
             GTK_SCROLLED_WINDOW (pchat_input_scroll), 120);
         gtkhx_widget_set_child (pchat_input_scroll, gchat->input);
         gtkhx_box_pack (hbox, pchat_input_scroll, 1, 1, 0);
+
+        /* Emoji picker — see create_chat_window for the rationale.
+         * Identical wiring on the private-chat path. */
+        GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
+        gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
+        gtk_box_append (GTK_BOX (hbox), emoji_btn);
     }
 
     gchat->userlist = gtk_hlist_new_with_titles (2, titles);
