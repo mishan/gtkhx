@@ -58,7 +58,16 @@ side-by-side use via the multi-server Compose setup. Connect with:
 ```
 Server:  localhost:5510
 Login:   guest
-Pass:    (empty)
+Pass:    (empty)        (upstream default — empty password works
+                         for HOPE login too; Janus computes
+                         HMAC(key="", session_key) server-side)
+```
+
+Or as admin (full access):
+
+```
+Login:   admin
+Pass:    adminpass      (set by the Dockerfile HOPE-seed step)
 ```
 
 Janus's default `guest` account has `ReadChatHistory: true` already
@@ -81,18 +90,31 @@ Out of the box:
 - Full Hotline protocol (chat, PM, news, files, agreement, banner).
 - **Chat history extension** (`ChatHistoryEnabled: true`,
   SQLite-backed, default retention = unlimited).
+- **HOPE-Secure-Login + ChaCha20-Poly1305 AEAD**
+  (`EnableHOPE: true`). Two paths land at a server that
+  accepts HOPE login:
+    1. *Empty password* (guest's upstream default). bcrypt-of-
+       empty in the YAML, no `HOPEPassword:` field. Janus's
+       HOPE login handler computes `HMAC(key="", session_key)`
+       server-side and compares. Works out of the box —
+       `test_hope_chacha20` uses this path, matching
+       hotline.vespernet.net's guest configuration.
+    2. *Non-empty password* via the admin REST API. The
+       Dockerfile exposes the API on `:8973` and PATCHes
+       `admin` to `"adminpass"`. Janus writes a `HOPEPassword:`
+       blob into `Server/Users/admin.yaml`, but empirically
+       the blob doesn't validate at HOPE login (likely a Janus
+       issue). We seed it anyway in case future tests need
+       a non-empty HOPE password and the path gets fixed.
+  The master key Janus generated for the encryption sits in
+  `Server/Data/` and ships in the image.
 - Large-file (>4 GiB) transfers.
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).
 - Threaded news (Hotline 1.5+).
 
-Not enabled in v1 (separate follow-ups):
+Not enabled in v1 (separate follow-up):
 
-- **HOPE secure login.** Janus's HOPE path requires re-setting
-  account passwords so the server can derive the HOPE-compatible
-  hash. The upstream guest/admin yaml files don't ship with such
-  hashes. Worth enabling once we have a clear story for seeding
-  HOPE-friendly accounts at image-build time.
 - **TLS.** `Extras/generate_cert.sh` + `Extras/openssl.cnf` would
   generate a self-signed cert at build time; we haven't audited
   that flow yet. Pencilled in alongside the GtkHx-side TLS work.
@@ -161,12 +183,26 @@ are deliberate v1 omissions, not bugs.
 
 ```
 tests/janus/
-├── Dockerfile   build recipe (curl + sha256 + sed + seed)
-└── README.md    this file
+├── Dockerfile               build recipe (curl + sha256 + copy + seed)
+├── conf/
+│   └── config.yaml          full server config (replaces upstream)
+├── seed-hope-passwords.sh   build-time HOPE password seeder
+└── README.md                this file
 ```
 
-No checked-in config tree (yet) — the Dockerfile relies on the
-upstream config.yaml from the pinned tarball, with one `sed` line
-for the chat-history toggle. If we end up needing more than a few
-config tweaks we can extract a `conf/` directory the same way
-`tests/mhxd/conf/` is structured.
+`conf/config.yaml` is the upstream Janus 2.0.8-dev `config.yaml`
+with the test-targeted edits baked in (HOPE on, chat-history on,
+per-IP throttles disabled, admin API exposed for the build-time
+HOPE seeding). It's checked in whole rather than `sed`-applied
+in the Dockerfile so the diff against upstream is auditable and
+robust to upstream re-wording. Mirrors how `tests/mhxd/conf/`
+ships its full `hxd.conf`.
+
+`seed-hope-passwords.sh` is a standalone script the Dockerfile
+invokes during the build stage. It starts Janus once, PATCHes
+the bundled guest/admin passwords via the admin REST API to
+generate HOPE-compatible hashes, then shuts Janus down. Lives
+in its own file because Dockerfile `RUN` steps mixing `&`
+(background) with `&&` (conditional) silently misparse; a
+standalone `set -euo pipefail` script keeps the control flow
+auditable.

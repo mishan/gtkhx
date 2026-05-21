@@ -8,6 +8,10 @@
 #   - **Only public server that ships the chat-history extension.**
 #     SQLite-backed, cursor pagination, exactly the fogWraith spec
 #     GtkHx Phase 5 will implement.
+#   - **HOPE-Secure-Login + ChaCha20-Poly1305 AEAD.** The Dockerfile
+#     seeds HOPE-compatible password hashes into the bundled
+#     accounts at build time (see seed-hope-passwords.sh) — see
+#     `What's enabled` in README.md for the gating details.
 #   - Implements native TLS on a separate port (cert-pinning tests
 #     once we land TLS support).
 #   - Implements large-file (>4 GiB) transfers with capability
@@ -52,69 +56,50 @@ RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
  && tar xzf janus.tar.gz \
  && mv janus-linux-amd64 /opt/janus
 
-# Tweaks to the upstream config. We keep most defaults — Janus's
-# config.yaml is well-commented and the defaults are sensible for a
-# fresh install — and only flip the bits the integration tests need:
+# Replace the upstream config wholesale with our checked-in copy.
+# The checked-in conf/config.yaml encodes every test-targeted edit
+# in one auditable place (vs. a stack of brittle in-place seds in
+# previous revisions of this Dockerfile). What we changed from
+# upstream and why:
 #
-#   - ChatHistoryEnabled: enable the SQLite-backed chat history that
-#     is the headline reason we're using Janus as a test target.
-#   - Bind to all interfaces (Interface: "") is already the default;
-#     no change.
-#   - Tracker registration stays off so this container doesn't
-#     accidentally announce itself.
-#
-# HOPE and TLS are intentionally LEFT OFF for the first revision:
-#   - HOPE requires re-setting account passwords so Janus can derive
-#     the HOPE hash; the upstream guest/admin yamls don't ship with
-#     HOPE-compatible hashes. Worth doing in a follow-up.
-#   - TLS needs a generated cert + key; the Extras/generate_cert.sh
-#     dance is straightforward but adds runtime config we haven't
-#     audited yet.
-RUN sed -i 's|^ChatHistoryEnabled: false|ChatHistoryEnabled: true|' \
-        /opt/janus/Server/config.yaml \
- && grep -n -E '^ChatHistoryEnabled|^EnableHOPE|^TLSCert' \
-        /opt/janus/Server/config.yaml
+#   ChatHistoryEnabled: true       — Janus is the chat-history
+#                                    target.
+#   EnableHOPE: true               — HOPE-Secure-Login on; the
+#                                    seed script below populates
+#                                    HOPEPassword fields onto the
+#                                    bundled YAMLs so Step 2
+#                                    actually validates.
+#   APIAddr: ":8973"               — temporarily exposes the
+#                                    admin REST API. Needed by
+#                                    the seed step; left enabled
+#                                    at runtime because this is
+#                                    a localhost test container
+#                                    and the key is in git
+#                                    anyway.
+#   APIKeys[0].Key: "build-seed-key"
+#   MaxConnectionsPerIP: 0         — disable per-IP throttle (Tier
+#                                    3 hammers 127.0.0.1 with many
+#                                    short-lived connections).
+#   ConnectionRateLimit: 0,
+#   ConnectionRateBanThreshold: 0  — same, the other two limiter
+#                                    knobs that aren't in upstream
+#                                    config; the rate-limit-
+#                                    disabled binary reads them
+#                                    when present.
+COPY conf/config.yaml /opt/janus/Server/config.yaml
 
-# Disable Janus's three per-IP throttles. The default config caps
-# concurrent connections at 5 and bans IPs that reconnect faster
-# than the rate limit. Tier 3 routinely hammers a single
-# host:port from the test harness (open, login, exercise, close,
-# repeat) at a rate that trips all three, which manifests as
-# either an immediate disconnect during integration_handshake
-# OR a "Max connections per IP exceeded" rejection. The custom
-# rate-limit-disabled build already zeroes the first two, but
-# MaxConnectionsPerIP defaults to 5 in the binary regardless of
-# build, so we still have to override here.
-#
-# The three keys split into two cases against upstream's shipped
-# config.yaml:
-#
-#   - MaxConnectionsPerIP is already present (default 5). Appending
-#     a second copy panics Janus's YAML unmarshal with "mapping key
-#     already defined" — so we sed -E -i it in place. Pattern
-#     anchored at start-of-line so nested keys can't accidentally
-#     match.
-#
-#   - ConnectionRateLimit + ConnectionRateBanThreshold are NOT in
-#     the shipped config; the rate-limit-disabled build reads
-#     them only if present, defaults are 0 (disabled) when absent.
-#     Appending the explicit zeros makes the intent visible and
-#     belt-and-braces against a future upstream binary that changes
-#     the default. printf rather than `echo -e` — POSIX echo
-#     doesn't honour -e, Debian bash's builtin only does with
-#     xpg_echo set, so printf is portable.
-#
-# Closing grep prints the rewritten lines at build time so a
-# future config-format divergence is visible in `docker build`
-# output rather than only surfacing as a runtime "Rate limit
-# exceeded" message.
-RUN sed -i -E \
-        -e 's|^MaxConnectionsPerIP:.*$|MaxConnectionsPerIP: 0|' \
-        /opt/janus/Server/config.yaml \
- && printf '\nConnectionRateLimit: 0\nConnectionRateBanThreshold: 0\n' \
-        >> /opt/janus/Server/config.yaml \
- && grep -E '^(ConnectionRateLimit|ConnectionRateBanThreshold|MaxConnectionsPerIP):' \
-        /opt/janus/Server/config.yaml
+# Seed HOPE-compatible password hashes onto the bundled accounts.
+# Standalone script — see its preamble for the full background;
+# short version: Janus stores bcrypt + a separately-encrypted
+# HOPEPassword blob per account, and the only documented way to
+# generate the HOPE half is by PATCH-ing the password through the
+# admin API after the master key has been generated on first
+# startup. The script launches Janus, PATCHes the passwords, and
+# sanity-checks that HOPEPassword: ends up in both YAMLs before
+# letting the build succeed.
+COPY seed-hope-passwords.sh /usr/local/bin/seed-hope-passwords
+RUN chmod +x /usr/local/bin/seed-hope-passwords \
+ && /usr/local/bin/seed-hope-passwords
 
 # Seed a deterministic content tree so integration tests don't have
 # to assume what's in Files/. Mirrors the mhxd container seeding.
