@@ -1219,6 +1219,18 @@ TYPECREA\
     *((guint32 *)(&buf[96])) = hfs_h_to_mtime (*((guint32 *)(&fi.create_time)));
     *((guint32 *)(&buf[104]))
         = hfs_h_to_mtime (*((guint32 *)(&fi.modify_time)));
+    /* The 115-byte FILP-header template above ends at offset 114
+     * (filled by the memcpy). The comment block starts at offset
+     * 116 (comlen) + 117 (body). Offset 115 is structurally the
+     * high byte of a u16 comment-length prefix (or padding,
+     * depending on which FFO variant you read) and the original
+     * code never wrote it — leaving the stack-allocated buf with
+     * one uninitialised byte that went straight onto the wire when
+     * htxf_io_write was called with length 133+comlen.
+     *
+     * Valgrind caught this as "Syscall param write(buf) points to
+     * uninitialised byte(s)". Zero it. */
+    buf[115] = 0;
     buf[116] = fi.comlen;
     memcpy (&buf[117], fi.comment, fi.comlen);
     /* DATA fork header. Legacy mode: 16 bytes of "DATA" + zeros +

@@ -2189,13 +2189,16 @@ chat_invite_response (AdwAlertDialog *dialog, const char *response,
     } else {
         hx_reject_chat (ctx->htlc, ctx->cid);
     }
-}
 
-static void
-chat_invite_closed (AdwDialog *dialog, gpointer data)
-{
-    (void)dialog;
-    g_free (data);
+    /* Free ctx here rather than in a separate "closed" handler.
+     * adw_alert_dialog_set_close_response below guarantees that the
+     * response signal fires exactly once per dialog (with the close
+     * response on Escape / dismiss), so this is the canonical
+     * single-owner free site. The previous two-handler design
+     * (response + closed) raced under valgrind — the closed handler
+     * could free ctx while the response handler was still about to
+     * dereference it. */
+    g_free (ctx);
 }
 
 /* Phase 5+ (MVC boundary): pure view function — just paints the
@@ -2259,7 +2262,6 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
     ctx->cid = cid;
     g_signal_connect (dialog, "response", G_CALLBACK (chat_invite_response),
                       ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (chat_invite_closed), ctx);
 
     adw_dialog_present (dialog, GTK_WIDGET (the_session.chat_window));
     g_free (body);

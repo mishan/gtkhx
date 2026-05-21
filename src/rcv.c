@@ -1922,8 +1922,17 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
     }
     dh_end ();
 
-    cfl_print (cfl, data);
+    /* Reset completing BEFORE cfl_print: cfl_print emits the
+     * file_list signal, and the remote-files-provider handler that
+     * subscribes to it takes ownership of cfl and frees it
+     * (files_remote_provider.c:290 — g_free (cfl)). Touching cfl
+     * after the emit is a use-after-free; valgrind caught it on
+     * the Open Files / navigate path. The recursive folder-download
+     * path goes through cfl_print with data==NULL and isn't freed
+     * by the handler — for that path this reorder is a harmless
+     * no-op since completing is the next field we'd read anyway. */
     cfl->completing = COMPLETE_NONE;
+    cfl_print (cfl, data);
 }
 
 /* Format a Hotline 8-byte timestamp into a locale-formatted string.
