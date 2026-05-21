@@ -718,6 +718,21 @@ test_hope = executable('test_hope',
 test('hope', test_hope,
      suite : 'proto')
 
+# ChaCha20-Poly1305 AEAD frame codec. Tier 2 KAT: seal/open round-
+# trip, counter advance, tamper rejection, peek behaviour. Pins the
+# wire-format invariants that the (currently-skipped) Tier 3
+# test_hope_chacha20 would exercise against a live server. See
+# tests/proto/test_aead.c's preamble for the gating context.
+test_aead = executable('test_aead',
+  'proto/test_aead.c',
+  '../src/cipher_aead.c',
+  '../src/debug.c', # cipher_aead's debug_log() trace hooks
+  dependencies        : proto_test_deps + [dependency('nettle')],
+  include_directories : proto_test_inc,
+)
+test('aead', test_aead,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #
@@ -1290,6 +1305,24 @@ test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
 test('hope_chacha20', test_integration_hope_chacha20,
      suite   : 'integration',
      timeout : 60)
+
+# hope_hmac — Tier 3 coverage for the HOPE handshake against an
+# HMAC-only HOPE server (no AEAD). Filters on HX_TEST_CAP_HOPE so
+# it picks up mhxd (built with --enable-hope). Sister test to
+# hope_chacha20: same handshake state machine, no AEAD framing.
+# Exists because Janus's HOPE container isn't shippable yet, so
+# hope_chacha20 skips silently — this one keeps the live HOPE
+# handshake exercised against mhxd until that gap closes.
+test_integration_hope_hmac = executable('test_integration_hope_hmac',
+  'integration/test_hope_hmac.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_hmac', test_integration_hope_hmac,
+     suite   : 'integration',
+     timeout : 60)
+
 test('chat_history', test_integration_chat_history,
      suite   : 'integration',
      timeout : 60)

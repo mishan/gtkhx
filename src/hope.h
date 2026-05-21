@@ -144,10 +144,16 @@ enum hope_step1_err {
  * storage; matches the legacy in-place population that rcv_task_login
  * has always done).
  *
- * `expected_macalg` is the client's preferred MAC algorithm
- * (typically what was advertised in the Step 1 outbound LOGIN).
- * Used to gate the secure_login probe. Pass NULL or "" to skip
- * the probe; reply->secure_login will be 0.
+ * `expected_macalg` is currently unused — kept in the signature
+ * for ABI compat with callers that still pass it. Pre-refactor
+ * this was the client's preferred MAC algorithm and the function
+ * matched the server's HTLS_DATA_LOGIN echo against it to set
+ * reply->secure_login. That check missed the fallback case where
+ * the server picks a non-preferred MAC from the advertised list,
+ * so secure_login is now resolved post-walk by comparing the
+ * LOGIN echo against the server-selected reply->macalg. Future
+ * change may drop the parameter entirely; for now callers should
+ * pass htlc->macalg or NULL — either works.
  *
  * Returns HOPE_OK on a clean parse, or an error code on validation
  * failure. On error, *reply may be partially populated (algos

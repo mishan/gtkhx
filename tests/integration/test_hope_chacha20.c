@@ -73,9 +73,15 @@ test_hope_chacha20_login_and_ping (void)
 #else
     const hx_test_server *srv = pick_chacha20_server ();
     if (!srv) {
-        g_test_skip ("no HX_TEST_CAP_CHACHA20 server in the matrix "
-                     "(set GTKHX_TEST_SERVERS to include janus, and ensure "
-                     "the container at tests/janus is running)");
+        g_test_skip ("no HX_TEST_CAP_CHACHA20 server in the matrix. "
+                     "The Janus container at tests/janus/ has the server-"
+                     "side code but its bundled guest/admin YAMLs don't "
+                     "ship with HOPE-compatible password hashes — see the "
+                     "Dockerfile comment block + the Janus entry in "
+                     "tests/integration/server_matrix.c for the gating "
+                     "contract. To re-enable this test once that follow-"
+                     "up lands, restore HX_TEST_CAP_HOPE | "
+                     "HX_TEST_CAP_CHACHA20 on the Janus matrix entry.");
         return;
     }
 
