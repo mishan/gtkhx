@@ -434,6 +434,8 @@ test_hlwrite = executable('test_hlwrite',
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
+  '../src/login_packet.c',
+  '../src/hl_code.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
 )

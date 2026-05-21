@@ -29,11 +29,10 @@
  * trace-aware hlwrite_chunks in network.c) for the actual wire
  * encoding.
  *
- * Two modes are supported:
+ * Three modes are supported:
  *
- *   HX_LOGIN_MODE_LEGACY — the cleartext LOGIN sent on both HOPE
- *     Step 2 (after the algorithm-negotiation reply lands) and the
- *     non-HOPE bookmark. Chunks emitted:
+ *   HX_LOGIN_MODE_LEGACY — the cleartext LOGIN sent against non-HOPE
+ *     servers (the older Hotline 1.2/1.5 path). Chunks emitted:
  *
  *         HTLC_DATA_ICON          (always)
  *         HTLC_DATA_LOGIN         (XOR-encoded login_name)
@@ -57,6 +56,27 @@
  *     Caller-supplied algorithm lists are 1-entry; multi-entry MAC
  *     preference list is hardcoded inside the builder per the spec
  *     (HMAC-SHA256, HMAC-SHA1, HMAC-MD5).
+ *
+ *   HX_LOGIN_MODE_HOPE_STEP2 — the authenticated LOGIN sent after a
+ *     successful Step 1 reply. Caller pre-computes the HMAC-derived
+ *     fields with hope_build_login_field / hope_compute_chain /
+ *     hope_build_alg_reply (those live in hope.h — login_packet doesn't
+ *     depend on hope.h, it just splices the pre-computed bytes into
+ *     the chunk array). Chunks emitted:
+ *
+ *         HTLC_DATA_LOGIN          (HMAC of login_name, or XOR
+ *                                   if Step 1 didn't echo MAC_ALG)
+ *         HTLC_DATA_PASSWORD       (HMAC of password)
+ *         HTLS_DATA_CIPHER_ALG     (if cipher_alg_reply_len > 0)
+ *         HTLS_DATA_COMPRESS_ALG   (if compress_alg_reply_len > 0)
+ *         HTLC_DATA_NAME           (display_name, may be empty)
+ *         HTLC_DATA_ICON           (always)
+ *         HTLC_DATA_CAPABILITIES   (always)
+ *
+ *     NAME in this mode always emits (production sends an empty NAME
+ *     when htlc->name is unset; an empty chunk is the same shape).
+ *     The send_caps gate is ignored — STEP2 always advertises caps
+ *     because the server requires them for AEAD activation.
  */
 
 #ifndef HX_LOGIN_PACKET_H
@@ -72,7 +92,8 @@ struct hx_chunk;
 
 typedef enum {
     HX_LOGIN_MODE_LEGACY = 0,
-    HX_LOGIN_MODE_HOPE_STEP1 = 1
+    HX_LOGIN_MODE_HOPE_STEP1 = 1,
+    HX_LOGIN_MODE_HOPE_STEP2 = 2
 } hx_login_mode;
 
 typedef struct {
@@ -125,6 +146,37 @@ typedef struct {
     /* HTLC_DATA_COMPRESS_ALG. NULL or "" = don't advertise. Single
      * entry, same shape as cipheralg. */
     const char *compressalg;
+
+    /* --- HOPE Step 2 mode fields -------------------------------- */
+
+    /* Pre-computed HTLC_DATA_LOGIN field. Caller produces this via
+     * hope_build_login_field() — HMAC under sessionkey/macalg if
+     * secure_login was negotiated, otherwise hl_code XOR of the
+     * login name. May be 0-length (legitimate XOR-of-empty-string
+     * shape for anonymous-guest bookmarks).
+     *
+     * The pointer must outlive the eventual hlpack_chunks call —
+     * same contract as how chunks[].data points into caller-owned
+     * memory. */
+    const guint8 *login_field;
+    guint16 login_field_len;
+
+    /* Pre-computed HTLC_DATA_PASSWORD HMAC chain output. Produced
+     * by hope_compute_chain(); 16/20/32 bytes depending on macalg
+     * (MD5/SHA1/SHA256). 0-length isn't valid here — the chain
+     * always produces an output if the algorithm is valid. */
+    const guint8 *password_mac;
+    guint16 password_mac_len;
+
+    /* Pre-computed HTLS_DATA_CIPHER_ALG reply list. Produced by
+     * hope_build_alg_reply(); 0-length means "don't emit the
+     * chunk" (caller declined to negotiate a cipher). */
+    const guint8 *cipher_alg_reply;
+    guint16 cipher_alg_reply_len;
+
+    /* Same shape for HTLS_DATA_COMPRESS_ALG. */
+    const guint8 *compress_alg_reply;
+    guint16 compress_alg_reply_len;
 } hx_login_request;
 
 /* Scratch buffer the caller must provide for hx_login_build_chunks

@@ -37,6 +37,7 @@
 #ifdef CONFIG_CIPHER
 #include "cipher_aead.h"
 #include "hope.h"
+#include "login_packet.h"
 #endif
 #include "gtkhx_session.h"
 #include "network.h"
@@ -1176,7 +1177,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             return;
         }
         task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-        guint16 icon16 = htons (htlc->icon);
 
         /* HTLC_DATA_LOGIN field encoding (HMAC variant for
 		 * secure_login, hl_code XOR otherwise). */
@@ -1218,8 +1218,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             return;
         }
 
-        guint16 hc = 4;
-
 #ifdef CONFIG_COMPRESS
         guint8 compressalglist[64];
         size_t compressalglistlen = 0;
@@ -1247,7 +1245,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             compressalglistlen = hope_build_alg_reply (
                 sel.s_compressalg, compressalglist, sizeof (compressalglist));
         }
-        hc++;
 #endif
 
 #ifdef CONFIG_CIPHER
@@ -1286,28 +1283,41 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             memcpy (htlc->cipher_encode_key, spec_decode_key, pmaclen);
             htlc->cipher_encode_keylen = pmaclen;
         }
-        hc++;
 #endif
 
-        /* DATA_CAPABILITIES on the HOPE Step 2 authenticated LOGIN
-		 * — mirror the legacy LOGIN's set (network.c around line
-		 * 1159): large-files, text-encoding, chat-history. */
-        guint16 caps16 = htons (HTLC_CAP_LARGE_FILES
-                              | HTLC_CAP_TEXT_ENCODING
-                              | HTLC_CAP_CHAT_HISTORY);
-        hc++;
-        hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, (int) llen,
-                 login, HTLC_DATA_PASSWORD, (int) pmaclen, password_mac,
+        /* Hand the pre-computed HOPE fields to the shared chunk
+		 * builder. Same chunk ordering / gating as before; the
+		 * harness uses the same builder via send_hope_step2, so
+		 * any future Step 2 protocol tweak only edits login_packet.c.
+		 * DATA_CAPABILITIES set mirrors the legacy LOGIN's set
+		 * (network.c around line 1159): large-files, text-encoding,
+		 * chat-history. */
+        hx_login_request req = {
+            .mode = HX_LOGIN_MODE_HOPE_STEP2,
+            .icon = htlc->icon,
+            .display_name = htlc->name,
+            .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                  | HTLC_CAP_CHAT_HISTORY,
+            .login_field = login,
+            .login_field_len = (guint16) llen,
+            .password_mac = password_mac,
+            .password_mac_len = (guint16) pmaclen,
 #ifdef CONFIG_CIPHER
-                 HTLS_DATA_CIPHER_ALG, (int) cipheralglistlen, cipheralglist,
+            .cipher_alg_reply = cipheralglist,
+            .cipher_alg_reply_len = (guint16) cipheralglistlen,
 #endif
 #ifdef CONFIG_COMPRESS
-                 HTLS_DATA_COMPRESS_ALG, (int) compressalglistlen,
-                 compressalglist,
+            .compress_alg_reply = compressalglist,
+            .compress_alg_reply_len = (guint16) compressalglistlen,
 #endif
-                 HTLC_DATA_NAME, strlen (htlc->name), htlc->name,
-                 HTLC_DATA_ICON, 2, &icon16, HTLC_DATA_CAPABILITIES, 2,
-                 &caps16);
+        };
+        struct hx_chunk step2_chunks[HX_LOGIN_MAX_CHUNKS];
+        guint8 step2_scratch[HX_LOGIN_SCRATCH_SIZE];
+        int hc = hx_login_build_chunks (&req, step2_chunks,
+                                        HX_LOGIN_MAX_CHUNKS, step2_scratch,
+                                        sizeof (step2_scratch));
+        g_assert (hc > 0);
+        hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, step2_chunks, hc);
         g_free (pass);
 
 #ifdef CONFIG_COMPRESS

@@ -89,7 +89,68 @@ hx_login_build_chunks (const hx_login_request *req,
     g_return_val_if_fail (scratch != NULL, 0);
     g_return_val_if_fail (scratch_cap >= HX_LOGIN_SCRATCH_SIZE, 0);
 
-    if (req->mode == HX_LOGIN_MODE_HOPE_STEP1) {
+    if (req->mode == HX_LOGIN_MODE_HOPE_STEP2) {
+        /* HOPE Step 2 authenticated LOGIN. All HMAC-derived fields
+         * are pre-computed by the caller (see hope.h) and passed in
+         * as already-encoded byte buffers; we just splice them into
+         * the chunk array in the order rcv.c::rcv_task_login has
+         * always emitted them. The harness send_hope_step2 used to
+         * duplicate this chunk-ordering logic — they're unified
+         * now. */
+        chunks[hc++] = (struct hx_chunk) {
+            HTLC_DATA_LOGIN, req->login_field_len, req->login_field
+        };
+        chunks[hc++] = (struct hx_chunk) {
+            HTLC_DATA_PASSWORD, req->password_mac_len, req->password_mac
+        };
+#ifdef CONFIG_CIPHER
+        if (req->cipher_alg_reply_len) {
+            chunks[hc++] = (struct hx_chunk) {
+                HTLS_DATA_CIPHER_ALG, req->cipher_alg_reply_len,
+                req->cipher_alg_reply
+            };
+        }
+#endif
+#ifdef CONFIG_COMPRESS
+        if (req->compress_alg_reply_len) {
+            chunks[hc++] = (struct hx_chunk) {
+                HTLS_DATA_COMPRESS_ALG, req->compress_alg_reply_len,
+                req->compress_alg_reply
+            };
+        }
+#endif
+        /* NAME — always emit. Production passes htlc->name (may be
+         * empty when unset). Empty-string chunk has length 0; an
+         * empty NAME chunk is the same shape the server expects. */
+        chunks[hc++] = (struct hx_chunk) {
+            HTLC_DATA_NAME,
+            (guint16) (req->display_name ? strlen (req->display_name) : 0),
+            req->display_name ? (const void *) req->display_name : NULL
+        };
+
+        /* ICON — always emit. */
+        size_t icon_off = soff;
+        guint16 icon_be = htons (req->icon);
+        g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
+        memcpy (scratch + soff, &icon_be, 2);
+        soff += 2;
+        chunks[hc++] = (struct hx_chunk) {
+            HTLC_DATA_ICON, 2, scratch + icon_off
+        };
+
+        /* CAPABILITIES — always emit. STEP2 ignores the send_caps
+         * gate because the server needs the caps echo to finalise
+         * AEAD activation. caps=0 stays meaningful ("I support the
+         * spec but no optional bits"). */
+        size_t caps_off = soff;
+        guint16 caps_be = htons (req->caps);
+        g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
+        memcpy (scratch + soff, &caps_be, 2);
+        soff += 2;
+        chunks[hc++] = (struct hx_chunk) {
+            HTLC_DATA_CAPABILITIES, 2, scratch + caps_off
+        };
+    } else if (req->mode == HX_LOGIN_MODE_HOPE_STEP1) {
         /* The HOPE Step 1 LOGIN and PASSWORD chunks carry a single
          * 0 byte (the spec says zero-length but every server
          * implementation we've seen tolerates / expects the 1-byte

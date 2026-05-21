@@ -1059,57 +1059,37 @@ send_hope_step2 (int fd, struct htlc_conn *htlc, const char *username,
                                                 sizeof (compressreply));
     }
 
-    guint16 icon_be = htons (icon);
-    guint16 caps_be = htons (caps);
-
     /* Reset out buffer for the synchronous send below. */
     g_free (htlc->out.buf);
     htlc->out.buf = NULL;
     htlc->out.pos = 0;
     htlc->out.len = 0;
 
-    /* Mirror the chunk order production sends in rcv.c. */
-    int hc = 4; /* LOGIN, PASSWORD, NAME, ICON, CAPABILITIES — caps
-                 * always sent; counts below adjust. */
-    hc++;       /* CAPABILITIES */
-    if (cipherreply_n) {
-        hc++;
-    }
-    if (compressreply_n) {
-        hc++;
-    }
-
+    /* Hand the pre-computed HOPE fields to the shared chunk builder
+	 * — same one rcv.c::rcv_task_login uses for the production
+	 * Step 2 send. The "what chunks, in what order" decision lives
+	 * in one place now. */
+    const hx_login_request req = {
+        .mode = HX_LOGIN_MODE_HOPE_STEP2,
+        .icon = icon,
+        .display_name = display_name,
+        .caps = caps,
+        .login_field = login_field,
+        .login_field_len = (guint16) llen,
+        .password_mac = password_mac,
+        .password_mac_len = (guint16) pmaclen,
+        .cipher_alg_reply = cipherreply,
+        .cipher_alg_reply_len = (guint16) cipherreply_n,
+        .compress_alg_reply = compressreply,
+        .compress_alg_reply_len = (guint16) compressreply_n,
+    };
     struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    int n = 0;
-    chunks[n++] = (struct hx_chunk) {
-        HTLC_DATA_LOGIN, (guint16) llen, login_field
-    };
-    chunks[n++] = (struct hx_chunk) {
-        HTLC_DATA_PASSWORD, (guint16) pmaclen, password_mac
-    };
-    if (cipherreply_n) {
-        chunks[n++] = (struct hx_chunk) {
-            HTLS_DATA_CIPHER_ALG, (guint16) cipherreply_n, cipherreply
-        };
+    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
+    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
+                                    scratch, sizeof (scratch));
+    if (hc <= 0) {
+        return FALSE;
     }
-    if (compressreply_n) {
-        chunks[n++] = (struct hx_chunk) {
-            HTLS_DATA_COMPRESS_ALG, (guint16) compressreply_n, compressreply
-        };
-    }
-    chunks[n++] = (struct hx_chunk) {
-        HTLC_DATA_NAME,
-        (guint16) (display_name ? strlen (display_name) : 0),
-        display_name ? (const void *) display_name : NULL
-    };
-    chunks[n++] = (struct hx_chunk) {
-        HTLC_DATA_ICON, 2, &icon_be
-    };
-    chunks[n++] = (struct hx_chunk) {
-        HTLC_DATA_CAPABILITIES, 2, &caps_be
-    };
-    g_assert (n == hc);
-
     hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc);
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
