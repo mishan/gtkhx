@@ -1,0 +1,759 @@
+# ─── Network ────────────────────────────────────────────────────────────────
+# IP address of interface to listen on. Empty string listens on all interfaces.
+Interface: ""
+
+# Base Hotline server port. File transfer port is Port + 1.
+Port: 5500
+
+# ─── Network: TLS ───────────────────────────────────────────────────────────
+# Path to TLS certificate and key files. Leave empty to disable TLS.
+TLSCert: ""
+TLSKey: ""
+
+# Base TLS port. TLS file transfer port is TLSPort + 1.
+TLSPort: 5600
+
+# ─── Directories ────────────────────────────────────────────────────────────
+# Path to the Files directory, by default in a subdirectory of the config root named Files
+# This is where downloadable files are stored.
+# It is recommended to keep this separate from the DataRoot for better organization and security.
+FileRoot: Files
+
+# Path to the Data directory, by default in a subdirectory of the config root named Data
+# This is where metadata and fork files are stored.
+# It is recommended to keep this separate from the FileRoot for better organization and security.
+DataRoot: Data
+
+# Path to the Plugins directory, by default in a subdirectory of the config root named Plugins
+# This is where Lua plugin scripts are stored.
+PluginsDir: Plugins
+
+# ─── Server Identity ────────────────────────────────────────────────────────
+# Name of the server as it appears on the Tracker
+Name: Another Janus Hotline Server
+
+# Description of the server as it appears on the tracker
+Description: A default configured Janus Hotline server
+
+# Public hostname for this server. When set, v3 trackers will advertise this
+# hostname to clients instead of the IP address from the UDP packet. Clients
+# with v3 tracker support will connect using this hostname, enabling TLS
+# certificate verification and DNS-based failover.
+# Leave empty to use the IP address detected by the tracker.
+Hostname: ""
+
+# URL to a server rules / acceptable-use page that clients can open from the
+# tracker listing. Leave empty to omit.
+RulesURL: ""
+
+# Operator contact URL — `mailto:`, `https://`, `matrix:`, `xmpp:`, etc.
+# Surfaced as a "Contact" link in capable clients. Leave empty to omit.
+ContactURL: ""
+
+# IconURL points at a small server icon image
+IconURL: ""
+
+# LinkUpMbit and LinkDownMbit are optional numeric fields that, when set,
+# are advertised to v3 trackers as the server's upload and download bandwidth
+# in megabits per second. These values can help clients make informed decisions
+# about which servers to connect to based on their network capabilities.
+# If left at 0 or unset, the server will not advertise specific bandwidth information.
+LinkUpMbit: 0
+LinkDownMbit: 0
+
+# Operator timezone offset from UTC, in minutes.
+# Examples: -300 = UTC-5 (US Eastern), 330 = UTC+5:30 (India), 0 = UTC/unset.
+# When 0 the TLV is omitted (UTC operators who want the field emitted should
+# use a non-zero region/language signal instead, or set this explicitly).
+TimezoneOffsetMin: 0
+
+# Operator-confirmed reachability over IPv6 (dual-stack listener verified).
+# Set to true ONLY if Hotline traffic is actually accepted on an IPv6
+# address — this is a promise to clients, not a wish.
+AdvertiseIPv6: false
+
+# Operator-declared minimum client Hotline protocol version. Clients
+# connecting with a lower FieldVersion are rejected at login with an
+# error message. 0 = no floor (default; accept any version).
+# Common values: 151 (Hotline 1.5+), 184 (Hotline 1.8.4+), 190 (Hotline 1.9+).
+MinProtocolVersion: 0
+
+# Listing category. Trackers may filter or visually flag servers based
+# on this value. Vocabulary:
+#   0 = unspecified (TLV omitted; default)
+#   1 = general, 2 = development, 3 = archive, 4 = warez
+#   5 = gaming, 6 = media, 7 = education, 8 = research
+#   9 = file-sharing, 10 = social, 11 = security, 12 = creative
+ListingCategory: 0
+
+# When true, declares that public chat is moderated to the announced
+# LANGUAGE. This is informational only — Janus does not enforce
+# language at the protocol layer.
+ListingLanguageStrict: false
+
+# ─── Tracker Registration ───────────────────────────────────────────────────
+# Enable tracker registration. Must be "true" or "false".
+# Note: If you enable tracker registration, you must set a Name and Description 
+#for your server above.
+EnableTrackerRegistration: false
+
+# List of trackers to register with in colon delimited form of
+# hostname/port/password (password being optional and only for private trackers).
+Trackers:
+  - hltracker.com:5499
+# - private.hltracker.com:5499:mypassword
+
+# Extended tracker configuration for v2/v3 protocol support.
+# Entries here are merged with the Trackers list above.
+# Use this for trackers that require authentication (v2) or support
+# metadata extensions, HMAC signing, and acknowledgments (v3).
+#
+# TrackerConfig:
+#   # v2 tracker with account-based authentication
+#   - address: "private.tracker.com:5499"
+#     version: v2
+#     login: "myaccount"
+#     auth_password: "mypassword"
+#
+#   # v3 tracker with full metadata and HMAC signing
+#   - address: "argus.tracker.com:5499"
+#     version: v3
+#     hmac_secret: "shared-secret-between-server-and-tracker"
+#     tags: "retro,chat,files"
+#     country_code: "US"            # ISO 3166-1 alpha-2
+#     region: "US-CA"               # ISO 3166-2 region/state
+#     language: "en"                # ISO 639-1
+#     maturity: 0                   # 0=general, 1=teen, 2=mature, 3=adult
+#     private_listing: false        # true = ask tracker to hide this listing
+#
+#   # v3 tracker with password (legacy compat) + HMAC
+#   - address: "secure.tracker.com:5499"
+#     version: v3
+#     password: "trackerpassword"
+#     hmac_secret: "another-secret"
+TrackerConfig: []
+
+# ─── Server Banner ──────────────────────────────────────────────────────────
+# Banner mode: "local" to serve a file from disk, "remote" for a URL banner,
+# or leave empty to disable banners entirely.
+BannerMode: local
+
+# Remote banner image URL. Used in two distinct ways:
+#   1. Server banner (when BannerMode is "remote"): clients fetch the
+#      image directly from this URL instead of downloading from the
+#      server. Legacy clients that do not understand URL banners will
+#      silently ignore the announcement.
+#   2. v3 enabled trackers: when set, the URL is advertised to v3
+#      trackers regardless of BannerMode, so tracker UIs can display
+#      a thumbnail for your listing. If BannerMode is "local", this
+#      URL is ignored for the server banner itself but still used
+#      for tracker enrichment.
+BannerURL: ""
+
+# Path to local banner image (used when BannerMode is "local").
+#  * The banner must be under 256K (262,140 bytes specifically)
+#  * The standard size for a banner is 468 pixels wide and 60 pixels tall.
+#  * The banner must be saved in the same folder as this file.
+#  * Supported formats: jpg, jpeg, gif, bmp.
+#  * For legacy authenticity and compatibility, jpg or gif is recommended.
+BannerFile: "banner.gif"
+
+# Click-through URL for local banners. When a user clicks a file-backed
+# banner, the client opens this URL. Ignored in remote mode.
+BannerClickURL: "http://bigredh.com/"
+
+# ─── Limits ─────────────────────────────────────────────────────────────────
+# Maximum total connected clients (0 = unlimited).
+# Reported to v3 trackers as MAX_USERS.
+MaxClients: 0
+
+# Maximum simultaneous downloads
+MaxDownloads: 100
+
+# Maximum simultaneous downloads per client
+MaxDownloadsPerClient: 10
+
+# Maximum simultaneous connections/IP
+MaxConnectionsPerIP: 0
+
+# Maximum total server download bandwidth in bytes per second.
+# 0 = unlimited. Examples: 1048576 (1 MB/s), 10485760 (10 MB/s)
+MaxBandwidth: 0
+
+# Maximum download bandwidth per client in bytes per second.
+# 0 = unlimited.
+MaxBandwidthPerClient: 0
+
+# The MaxBandwidth setting is a global cap on total download bandwidth across all clients.
+# The MaxBandwidthPerClient setting is a per-client cap.
+# If you want to limit the server to, say, 10 MB/s total and 1 MB/s per client, 
+# you would set MaxBandwidth to 10485760 and MaxBandwidthPerClient to 1048576.
+# This means that no single client can use more than 1 MB/s,
+# and the server will not exceed 10 MB/s in total across all clients.
+
+# Different bandwidth calculation, for 500 KB/s per client, with a global cap of 20 MB/s:
+# MaxBandwidth: 20971520
+# MaxBandwidthPerClient: 524288
+#
+# The formula for calculating the bandwidth limits using 1 MB/s as the base unit is:
+# 1048576 * desired_MBps
+# For example 256 KB/s would be:
+# 1048576 * 0.25 = 262144
+
+# Maximum disk space for the fileserver to use, in bytes.
+# 0 = unlimited (default)
+# 10 GB limit would be 10737418240 (10 * 1024 * 1024 * 1024)
+DiskQuota: 0
+
+# ─── Files ──────────────────────────────────────────────────────────────────
+# List of Regular Expression filters for the Files list
+IgnoreFiles:
+  - '^\.'      # Ignore all files starting with "."
+  - '^@'       # Ignore all files starting with "@"
+
+# ─── Extensions ─────────────────────────────────────────────────────────────
+# Enable or disable support for plugins.
+# When enabled, the server will look for Lua plugin scripts in the PluginsDir directory.
+EnablePlugins: false
+
+# Enable HOPE secure login support
+EnableHOPE: true
+
+# Enable HOPE transport compression (GZIP, LZ4, ZSTD).
+# Requires EnableHOPE and a negotiated transport cipher.
+# The server and client negotiate the best mutual algorithm automatically.
+EnableCompression: false
+
+# ─── Voice Chat ─────────────────────────────────────────────────────────────
+# Enable WebRTC voice chat support. Requires clients that negotiate the
+# voice capability.
+EnableVoice: false
+
+# UDP port for WebRTC ICE/DTLS/RTP traffic. Defaults to Port + 4 if not set.
+# All voice PeerConnections are multiplexed over this single port.
+# VoiceUDPPort: 5504
+
+# Maximum participants per voice room (default: 16).
+# VoiceMaxPerRoom: 16
+
+# ─── Inline Media (Images in Chat) ──────────────────────────────────────────
+# Capability extension that lets capable clients exchange small images
+# inline in public and private chat. Disabled by default. Sending
+# additionally requires the per-account `SendMedia` privilege bit.
+InlineMedia:
+  Enabled: false
+
+  # Per-image ceilings. Defaults match the spec; tighten on smaller hosts.
+  # MaxEncodedBytes: 262144     # 256 KiB hard cap on encoded image size.
+  # MaxDimension:    2048       # Max width OR height in pixels.
+  # MaxPixels:       4194304    # Max width*height (4 MP).
+  # MaxAnimFrames:   150        # Max animated-GIF/WebP frames.
+  # MaxAnimDuration: 15s        # Max animation playtime.
+
+  # Lifetime of a media handle in the server cache. Hard ceiling: 168h (7d).
+  # HandleLifetime: 24h
+
+  # Canonical-bytes store. Disk = persistent across restarts; memory =
+  # session-only and bounded only by MaxTotalBytes.
+  Store:
+    Backend:       disk         # "disk" | "memory"
+    MediaRoot:     Media        # Relative to the config root.
+    MaxTotalBytes: 268435456    # 256 MiB total cache budget.
+    MaxHandles:    10000        # Hard cap on live handles.
+
+  # Decoder safety guards.
+  # DecodeTimeout:   2s
+  # DecodeMemBudget: 67108864    # 64 MiB per-decode peak memory.
+  # JPEGQuality:     85          # 1-100. Used when re-encoding to JPEG.
+
+  # Upload rate limits. Tune down on busy public servers.
+  RateLimit:
+    PerAccountInterval: 10s     # Min gap between two uploads per account.
+    PerAccountHourly:   30      # Per-account uploads per rolling hour.
+    PerIPHourly:        100     # Per-source-IP uploads per rolling hour.
+
+  # Optional public-chat fallback gateway. Strictly opt-in. When enabled
+  # the server forwards inline images to an external HTTPS endpoint so
+  # legacy (non-capable) clients in public chat can render them as a
+  # plain URL. PRIVACY: image bytes leave your server. Off by default.
+  Gateway:
+    Enabled:    false
+    BaseURL:    ""               # Required when Enabled. MUST be https://.
+    UploadPath: /upload.php     # Path appended to BaseURL.
+    ClientID:   ""               # Optional shared secret / API token.
+    Timeout:    10s
+    # MultipartField: name of the multipart form field used when
+    # POSTing to the gateway. Defaults to "file" — matches the
+    # dominant PHP `$_FILES['file']` convention used by BigRedH
+    # and most generic image hosts. Override only if your gateway
+    # expects a different field name.
+    # MultipartField: file
+    # AllowInsecureURL: allow the gateway to return http:// URLs
+    # to recipients. Off by default. Enable for servers hosting
+    # vintage clients (Mac System 7, Windows 3.11) without HTTPS.
+    # AllowInsecureURL: false
+
+# ─── Large Files ────────────────────────────────────────────────────────────
+# This is a global override that allows large files to be offered to clients
+# that may not explicitly support them.
+AllowLargeFiles: false
+
+# Whitelist of client versions that are allowed to download large files.
+# Only applicable if AllowLargeFiles is false.
+#LargeFileClients:
+#  - "200" # HotStuff sends version 2.0.0 (200) - (not working properly yet)
+
+# Default text encoding for clients that do not negotiate encoding.
+# Options: macintosh, utf-8, shift-jis, latin-1.
+# Default is macintosh and is recommended for compatibility with legacy clients.
+DefaultTextEncoding: macintosh
+
+# Plugin security configuration. Controls which URLs plugins can access via http_get/http_post.
+# PluginConfig:
+#   HTTPAllowlist:             # Regex patterns for allowed URLs (empty = allow all HTTP/HTTPS)
+#     - "^https://api\.example\.com/"
+#   HTTPBlocklist:             # Regex patterns for blocked URLs (checked after allowlist)
+#     - "^https?://169\.254\."
+
+# ─── API ────────────────────────────────────────────────────────────────────
+# HTTP API listen address (e.g. ":8973"). Leave empty to disable the API.
+APIAddr: ":8973"
+
+# List of API keys for authenticating API requests.
+# Each key has an associated role and description.
+# Available roles: viewer, operator, admin
+APIKeys:
+  - Key: "build-seed-key"
+    Role: admin
+    Description: "Primary API key with full permissions"
+
+# ─── Logging ────────────────────────────────────────────────────────────────
+# Log level: debug, info, warn, error
+LogLevel: info
+
+# Path to log file, resolved relative to config directory.
+# Default: Logs/janus.log
+LogFile: Logs/janus.log
+
+# Maximum size of a log file in megabytes before rotation (default: 100)
+LogMaxSize: 100
+
+# Maximum number of days to retain old log files (default: 365)
+LogMaxAge: 365
+
+# Maximum number of old log files to keep (default: 3)
+LogMaxBackup: 3
+
+# Compress rotated log files with gzip (default: true)
+LogCompress: true
+
+# ─── Chat Logging ───────────────────────────────────────────────────────────
+# Janus has two chat persistence systems that serve different purposes:
+#
+#   1. CHAT LOGGING (EnableChatLog)
+#      Writes chat events to JSONL flat files in ChatLogs/, partitioned by date.
+#      Designed for auditing and administrative review via the v2 API.
+#      Clients never see these logs — they are server-side records only.
+#
+#   2. CHAT HISTORY (ChatHistoryEnabled)
+#      Stores chat in a SQLite database (chat_history.db) and exposes it to
+#      clients via the Chat History protocol extension.
+#      Clients that support the extension can scroll back through history,
+#      catch up after reconnecting, and paginate through past conversations —
+#      similar to Discord.
+#
+# You can enable either, both, or neither:
+#
+#   - Chat logging only:   EnableChatLog: true,  ChatHistoryEnabled: false
+#     → JSONL files for auditing, no client-facing history.
+#
+#   - Chat history only:   EnableChatLog: false, ChatHistoryEnabled: true
+#     → SQLite persistence, clients can query history. The SQLite database
+#       also serves as the chat log (replaces JSONL).
+#
+#   - Both enabled:         EnableChatLog: true,  ChatHistoryEnabled: true
+#     → Not recommended. When ChatHistoryEnabled is true, the SQLite database
+#       is used for everything (logging, replay, and history). EnableChatLog
+#       is effectively ignored — no JSONL files are written.
+#
+#   - Neither:              Both false
+#     → Chat is ephemeral. Messages are broadcast live and then forgotten.
+
+# Enable chat logging to disk (JSONL format, date-partitioned files in ChatLogs/).
+# Only used when ChatHistoryEnabled is false.
+EnableChatLog: false
+
+# Include private chat room messages in chat logs.
+# Applies to both JSONL logging and SQLite history.
+ChatLogPrivate: false
+
+# ─── Chat Replay ────────────────────────────────────────────────────────────
+# Replay sends recent public chat messages to newly connected clients as
+# standard transactions. To the client, these look like live messages — there
+# is no special "replay" indicator in the protocol.
+#
+# This is a server-side convenience for legacy clients that do not support
+# the Chat History extension. When a client *does* negotiate chat history
+# replay is automatically skipped — that client will fetch history at its
+# own pace.
+#
+# Requires either EnableChatLog or ChatHistoryEnabled to be true (the
+# server needs stored messages to replay).
+EnableChatReplay: false
+
+# Number of chat lines to replay (default: 30, max: 200).
+ChatReplayLines: 30
+
+# Delay in seconds between each replayed chat line.
+# 0 = no delay (all lines sent immediately), 0.5 = one line every half second.
+ChatReplayDelay: 0
+
+# ─── Chat History ───────────────────────────────────────────────────────────
+# Enable the Chat History protocol extension. When enabled, the server stores
+# public chat messages in a SQLite database (chat_history.db in the config
+# directory).
+#
+# Clients that support the extension can request history with cursor-based
+# pagination. Clients that do not support it are unaffected — they see live
+# chat as usual, plus optional replay (see EnableChatReplay above).
+#
+# Access control: users need access bit 56 (ReadChatHistory) to query
+# history. If bit 56 is not configured, the server falls back to bit 9
+# (ReadChat) — so existing accounts work without changes.
+ChatHistoryEnabled: true
+
+# Maximum number of messages the server retains. Oldest messages beyond
+# this count are pruned hourly. 0 = unlimited.
+ChatHistoryMaxMsgs: 0
+
+# Maximum retention period in days. Messages older than this are pruned
+# hourly. 0 = unlimited. Both limits can be set — whichever is hit first
+# triggers pruning.
+ChatHistoryMaxDays: 0
+
+# ─── Disk Catalog ───────────────────────────────────────────────────────────
+# The disk catalog caches file system metadata in a SQLite database so that
+# directory listings, file stats, and plugin/API queries can be served from
+# the index instead of walking the filesystem on every request.
+#
+# How it works:
+#   - On startup, a background reconciliation scans FileRoot and populates
+#     the catalog. All read paths (client file listings, API /files, plugin
+#     server.list_files / server.file_info) are served from the catalog.
+#   - File mutations (upload, delete, move, rename, new folder) update the
+#     catalog immediately via write-through, so the index stays current
+#     between reconciliation passes.
+#   - A periodic reconciliation (see DiskCatalog.Reconcile below) catches
+#     any out-of-band changes made directly on disk.
+#
+# The catalog database (disk_catalog.db) is stored in the config directory.
+# If you want to reset the catalog, simply stop the server, delete the file,
+# and restart — it will be rebuilt from scratch.
+
+# How often (in minutes) to run a full reconciliation pass. Set to 0 to
+# only reconcile at startup. A value of 60 is a good default for most
+# servers; lower values increase disk I/O, higher values mean out-of-band
+# changes take longer to appear.
+DiskCatalog:
+  Reconcile: 60
+
+# ─── Mnemosyne ──────────────────────────────────────────────────────────────
+# Mnemosyne is Janus's in-core content synchronization subsystem.
+#
+Mnemosyne:
+  # Master switch. Leave false to keep the subsystem completely dormant.
+  Enabled: false
+
+  # Mnemosyne server URL (no trailing slash). Required when Enabled.
+  URL: ""
+
+  # Mnemosyne server API key (typically starts with "msv_"). Required when Enabled.
+  APIKey: ""
+
+  # Per-content-type indexing (all default to true).
+  Index:
+    Files: true
+    News: true
+    Msgboard: true
+
+  # Sync scheduling. All values are Go duration strings ("30s", "5m", "15m").
+  Schedule:
+    StartupDelay: 30s        # wait after server start before first sync
+    HeartbeatInterval: 5m    # how often to send heartbeats
+    PeriodicInterval: 15m    # how often to run incremental/full sync
+    ChunkTick: 2s            # delay between chunked sync pages
+
+  # Per-page limits and internal buffer sizes.
+  Limits:
+    FileChunkItems: 250      # files per catalog chunk
+    FileChunkBytes: 524288   # max request body size (512 KiB)
+    MsgboardChunkItems: 500  # posts per msgboard chunk
+    NewsArticlesPerTick: 500 # news articles per page
+    EventQueueSize: 1024     # bounded event channel — events drop past this
+
+  # HTTP behaviour.
+  HTTP:
+    RequestTimeout: 30s
+    MaxRetries: 3
+    RetryBackoff: 5s
+
+  # Persistence. Empty path defaults to <configDir>/mnemosyne/cursor.db.
+  Storage:
+    CursorDBPath: ""
+
+# ─── Colored Nicknames ──────────────────────────────────────────────────────
+# Supported clients on may advertise a 4-byte RGB color (0x00RRGGBB) for
+# their nickname via the FieldColor login field.
+#
+# Admins always appear in red (UserFlagAdmin). This policy prevents non-admin
+# users from impersonating the admin appearance by picking a red or near-red
+# color.
+#
+# When a client sends a disallowed color, the server silently strips it —
+# the user's session proceeds normally but without a colored nickname.
+# Admins bypass this check (they can deliberately adopt any color).
+ColoredNicknames:
+  # Enable server-side support for the extension. When false, all
+  # client-sent colors are ignored and no user gets a colored nickname.
+  Enabled: false
+
+  # List of 24-bit RGB hex colors that non-admins cannot use.
+  # Accepted forms: "#RRGGBB", "RRGGBB", or "0xRRGGBB".
+  #
+  # If this key is absent/null, the default admin-red family applies:
+  #   #FF0000 #CC0000 #B22222 #8B0000 #FF4444 #E53935
+  # Pass an explicit empty list [] to allow every color.
+  # DisallowedColors:
+  #   - "#FF0000"
+  #   - "#CC0000"
+
+  # Max per-channel distance (0-255) from a disallowed color that still
+  # counts as a match. 0 = exact match only. Default: 32 when the default
+  # list is in use, 0 when a custom list is specified.
+  # DisallowedTolerance: 32
+
+# ─── New-User Defaults ──────────────────────────────────────────────────────
+# Server-side template applied when a new account is created without an
+# explicit access bitmap (e.g. an admin client that ticks no boxes, or an
+# API call that omits the "access" field). The standard "creator cannot
+# grant more access than themselves" check still applies, so an operator
+# with limited privileges will be rejected if the template includes bits
+# they don't hold.
+#
+# Existing accounts are NEVER affected — this only governs new ones.
+# Omitted keys default to false. To use, uncomment the block below and
+# set the bits you want enabled by default.
+#
+NewUserDefaults:
+  # ── File system ─────────────────────────────────────────────────
+  DownloadFile:         true   # Download files
+  DownloadFolder:       true   # Download folders
+  UploadFile:           true   # Upload files
+  UploadFolder:         true   # Upload folders
+  UploadAnywhere:       false  # Upload outside the user's drop box
+  DeleteFile:           false  # Delete files
+  RenameFile:           false  # Rename files
+  MoveFile:             false  # Move files
+  CreateFolder:         false  # Create folders
+  DeleteFolder:         false  # Delete folders
+  RenameFolder:         false  # Rename folders
+  MoveFolder:           false  # Move folders
+  SetFileComment:       false  # Set file comments
+  SetFolderComment:     false  # Set folder comments
+  ViewDropBoxes:        false  # See others' drop boxes
+  ViewOwnDropBox:       false  # See own drop box (GLoarbLine)
+  MakeAlias:            false  # Create file aliases
+  BlockDownload:        false  # Block another user's downloads (GLoarbLine)
+  QueueExempt:          false  # Skip the download queue (GLoarbLine)
+
+  # ── Chat ────────────────────────────────────────────────────────
+  ReadChat:             true   # Read public chat
+  SendChat:             true   # Send public chat
+  OpenChat:             true   # Initiate private chat rooms
+  CloseChat:            false  # (1.9 spec, unused)
+  SpeakBeforeExempt:    true   # Bypass speak-before-download policy (GLoarbLine)
+  AllowRefuseChat:      false  # Refuse private-message invites (GLoarbLine)
+
+  # ── Messaging ───────────────────────────────────────────────────
+  SendPrivMsg:          false  # (1.9 bit spec, unused)
+  SendMessage:          true   # Send instant messages
+  Broadcast:            false  # Broadcast to all users
+
+  # ── News ────────────────────────────────────────────────────────
+  NewsReadArt:          true   # Read news articles
+  NewsPostArt:          true   # Post news articles
+  NewsDeleteArt:        false  # Delete news articles
+  NewsCreateCat:        false  # Create news categories
+  NewsDeleteCat:        false  # Delete news categories
+  NewsCreateFldr:       false  # Create news bundles
+  NewsDeleteFldr:       false  # Delete news bundles
+
+  # ── User maintenance ────────────────────────────────────────────
+  CreateUser:           false  # Create accounts
+  DeleteUser:           false  # Delete accounts
+  OpenUser:             false  # Read accounts
+  ModifyUser:           false  # Modify accounts
+  ChangeOwnPass:        false  # (1.9 spec, unused)
+  GetClientInfo:        false  # View user info / IP
+  DisconnectUser:       false  # Disconnect users (also turns name red)
+  CannotBeDisconnected: false  # Immune to disconnect
+
+  # ── Identity / appearance ───────────────────────────────────────
+  AnyName:              true   # Use any nickname (override agreement)
+  NoAgreement:          false  # Skip server agreement screen
+  ShowInList:           false  # (1.9 spec, unused)
+  SetUserRed:           false  # Mark user as red (GLoarbLine)
+  SetUserAway:          true   # Toggle own away state (GLoarbLine)
+  ChangeOtherNick:      false  # Rename another user (GLoarbLine)
+  ChangeOtherIcon:      false  # Change another user's icon (GLoarbLine)
+  SetUserVisible:       false  # Toggle user visibility (GLoarbLine)
+  ViewInvisible:        false  # See invisible users (GLoarbLine)
+
+  # ── Operational ─────────────────────────────────────────────────
+  FloodExempt:          false  # Exempt from spam auto-ban (GLoarbLine)
+  PostBeforeExempt:     true   # Exempt from post-before-download (GLoarbLine)
+  AdminInspector:       false  # Use the admin inspector (GLoarbLine)
+
+  # ── Extensions (capability-gated) ───────────────────────────────
+  VoiceChat:            false   # Join voice chat rooms
+  ReadChatHistory:      false   # Request chat history (replay on demand)
+  SendMedia:            false   # Attach inline images in chat
+
+# ─── IRC Bridge ─────────────────────────────────────────────────────────────
+# IRC bridge configuration. This is optional and can be left disabled.
+IRCBridge:
+  Enabled: false
+  Server: irc.server.com
+  Port: 6667
+  Channel: "#channel"
+  BotNick: Janus
+  RelayJoinPart: true
+  RelayConnects: true
+  NickPrefix: "[HL]"
+
+# ─── NewsBridge ─────────────────────────────────────────────────────────────
+# NewsBridge is Janus's in-core NNTP <-> Hotline news gateway. It pulls
+# articles from upstream Usenet servers into Hotline news bundles
+# (inbound) and forwards Hotline posts to those groups (outbound). When
+# disabled, the subsystem is completely inert.
+#
+# Quick start:
+#   1. Set Enabled: true.
+#   2. Add at least one entry under Servers with an Address and Groups.
+#   3. For outbound (Direction: out | both) also set MessageIDDomain
+#      and Outbound.FromDomain.
+#
+# State lives in <configDir>/newsbridge/cursor.db (created on first run).
+# News content lives in <configDir>/news.db (shared with native Hotline news).
+NewsBridge:
+  # Master switch. Leave false to keep the subsystem dormant.
+  Enabled: false
+
+  # Stable identity used in synthesized outbound Message-IDs. Auto-
+  # generated and persisted on first start when empty.
+  InstanceID: ""
+
+  # Domain used in synthesized outbound Message-IDs. Required when any
+  # mapping uses Direction: out | both.
+  # MessageIDDomain: "news.example.org"
+
+  # Behavior when an inbound article maps to a bundle that does not
+  # yet exist: "lazy" (create the path) or "error" (skip + log).
+  BundleAutoCreate: lazy
+
+  # Cursor state location. Empty = <configDir>/newsbridge/cursor.db.
+  Storage:
+    CursorDBPath: ""
+
+  # Bounded queues and per-article caps.
+  Limits:
+    InboundQueueSize: 4096
+    OutboundQueueSize: 1024
+    FetchBatchSize: 200       # XOVER chunk size
+    MaxArticleBytes: 1048576  # 1 MiB
+    MaxGroups: 100            # pattern/all-groups expansion cap
+
+  # Fetch + retry cadence (Go duration strings).
+  Schedule:
+    StartupDelay: 30s
+    PollInterval: 15m
+    BackoffInitial: 30s
+    BackoffMax: 30m
+
+  # NNTP network defaults. Per-server overrides are not yet supported.
+  Network:
+    DialTimeout: 10s
+    ReadTimeout: 30s
+    WriteTimeout: 30s
+    MinTLSVersion: "1.2"      # "1.2" | "1.3"
+
+  # Outbound posting policy (only consulted when a mapping has
+  # Direction: out | both).
+  Outbound:
+    # FromDomain: "news.example.org"
+    FromLocalPart: account    # "account" | "fixed"
+    # FromFixed: "hotline-news"
+    MaxAttempts: 12
+    MaxArticleBytes: 1048576
+
+  # Per-bundle retention. Applies to inbound articles unless overridden
+  # per server or per group. 0 = unlimited.
+  Retention:
+    MaxArticles: 800
+    MaxAgeDays: 90
+
+  # Days to retain the loop-suppression seen-table and audit log.
+  SeenRetentionDays: 30
+  AuditRetentionDays: 30
+
+  # Upstream NNTP servers. Empty list while disabled is fine; populate
+  # before flipping Enabled to true.
+  Servers: []
+  # Example explicit-groups configuration (commented out):
+  # Servers:
+  #   - Name: example
+  #     Address: "news.example.org:119"
+  #     TLS: none               # "none" | "starttls" | "implicit" (NNTPS:563)
+  #     InsecureSkipVerify: false
+  #     Auth:
+  #       User: ""
+  #       Pass: ""
+  #       # ClientCertFile: ""
+  #       # ClientKeyFile:  ""
+  #     Groups:
+  #       - Name: local.hotline.general
+  #         Bundle: News/Hotline/General
+  #         Direction: in       # "in" | "out" | "both"
+  #         InitialBackfill:
+  #           Mode: last_n      # "none" | "last_n" | "all"
+  #           Count: 200
+  #         Retention:
+  #           MaxArticles: 800
+  #           MaxAgeDays: 90
+  #         # Per-group sync mode.
+  #         #   full    - download headers + body together (default).
+  #         #   headers - XOVER only; body fetched lazily on next poll.
+  #         SyncMode: full
+  #         # HeaderArticleStub: "(Body not yet fetched — will appear after the next poll.)"
+  #         # Per-group outbound override (otherwise inherits from
+  #         # NewsBridge.Outbound).
+  #         # Outbound:
+  #         #   FromLocalPart: fixed
+  #         #   FromFixed: hotline-news
+  #     # Pattern-based selection (mutually exclusive with Groups):
+  #     # GroupPatterns:
+  #     #   Allow: ["local.hotline.*"]
+  #     #   Deny:  ["local.hotline.test"]
+  #     #   BundlePrefix: News/Hotline
+  #     #   Direction: in
+  #     # Or "every group the server advertises":
+  #     # AllGroups:
+  #     #   BundlePrefix: News/Usenet
+  #     #   Direction: in
+
+# ─── GtkHx test container additions ─────────────────────────────────────────
+# Disable per-IP throttles. The test harness opens many short-lived
+# connections from 127.0.0.1 in rapid succession; without these
+# Janus rejects later connects with "Rate limit exceeded".
+ConnectionRateLimit: 0
+ConnectionRateBanThreshold: 0

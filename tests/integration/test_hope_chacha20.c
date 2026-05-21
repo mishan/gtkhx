@@ -74,19 +74,27 @@ test_hope_chacha20_login_and_ping (void)
     const hx_test_server *srv = pick_chacha20_server ();
     if (!srv) {
         g_test_skip ("no HX_TEST_CAP_CHACHA20 server in the matrix. "
-                     "The Janus container at tests/janus/ has the server-"
-                     "side code but its bundled guest/admin YAMLs don't "
-                     "ship with HOPE-compatible password hashes — see the "
-                     "Dockerfile comment block + the Janus entry in "
-                     "tests/integration/server_matrix.c for the gating "
-                     "contract. To re-enable this test once that follow-"
-                     "up lands, restore HX_TEST_CAP_HOPE | "
-                     "HX_TEST_CAP_CHACHA20 on the Janus matrix entry.");
+                     "The Janus container at tests/janus/ advertises this "
+                     "cap by default — bring it up with "
+                     "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`. "
+                     "If GTKHX_TEST_SERVERS is filtering Janus out, "
+                     "include it in the list.");
         return;
     }
 
     struct htlc_conn htlc;
     integration_hope_session hope;
+    /* Janus's bundled guest account ships with an empty password
+	 * (bcrypt-of-empty in the YAML, no HOPEPassword: field). At
+	 * HOPE login time the server computes HMAC(key="", session_key)
+	 * directly and compares — no stored HOPEPassword needed. This
+	 * is the path production GtkHx uses against hotline.vespernet
+	 * .net's guest account with cipher=CHACHA20-POLY1305, verified
+	 * by tracing a live connection. The PATCH-the-password path
+	 * via Janus's admin API writes a HOPEPassword: field but
+	 * doesn't validate at login (likely a Janus issue) — see the
+	 * preamble of tests/janus/seed-hope-passwords.sh for the full
+	 * write-up. */
     int fd = integration_open_login_hope_or_skip (
         srv, &htlc, &hope,
         /*username=*/"guest",
@@ -96,17 +104,12 @@ test_hope_chacha20_login_and_ping (void)
         /*cipheralg=*/"CHACHA20-POLY1305",
         /*compressalg=*/NULL);
     if (fd < 0) {
-        /* Janus's bundled guest/admin account YAMLs don't ship with
-		 * HOPE-compatible password hashes (see the comment block in
-		 * tests/janus/Dockerfile that calls this out as a follow-up).
-		 * Step 1 reply lands as a task-error with "Incorrect login"
-		 * — not a wire-format bug, a Janus container limitation. We
-		 * already converted the failure to g_test_fail inside the
-		 * harness, so reaching this branch means the harness gave
-		 * up. Re-emit as g_test_skip if the reason was the known
-		 * Janus limitation, so CI doesn't tally a real failure for
-		 * a server-side configuration. The g_test_fail already
-		 * recorded a message we can read out. */
+        /* Harness already called g_test_fail_printf with a
+		 * diagnostic. Anything we'd want to special-case here
+		 * (e.g. a known container limitation) would deserve a
+		 * skip-instead-of-fail conversion, but with the
+		 * Dockerfile-side HOPE seeding in place there's no such
+		 * known limitation left. Just return. */
         return;
     }
 
