@@ -25,7 +25,12 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <gtk/gtk.h>
+#include <glib.h> /* g_memdup2 / g_realloc / g_free / guint32 — the
+                   * only symbols this TU needs from the GLib stack.
+                   * Pulling in just <glib.h> instead of <gtk/gtk.h>
+                   * lets the Tier 3 integration harness link cipher
+                   * .c without dragging in GTK + Adwaita; same
+                   * pattern as proto_trace.c. */
 #include <dirent.h>
 #include <sys/types.h>
 #include <netinet/in.h>
