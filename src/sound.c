@@ -137,12 +137,22 @@ play (char *name)
                               GSOUND_ATTR_MEDIA_ROLE, "event", NULL);
 }
 
-void
-play_sound (int sound)
+/* Dispatch the play() side of play_sound on the main thread. All
+ * GSound and GLib state — the lazy-initialised gtkhx_gsound_ctx
+ * singleton in gtkhx_gsound_get, the play_full async machinery, the
+ * play_done callback that frees `path` — is single-threaded by
+ * design. Without this marshal, two file-transfer workers finishing
+ * within microseconds of each other both raced into gtkhx_gsound_get
+ * (helgrind flagged the play↔gtkhx_gsound_get conflict), and even
+ * after init the play_full call isn't documented thread-safe. */
+static gboolean
+play_sound_idle_cb (gpointer data)
 {
+    int sound = GPOINTER_TO_INT (data);
+
     if (!hxsnd.on) {
         g_debug ("play_sound: hxsnd.on is false, skipping sound %d", sound);
-        return;
+        return G_SOURCE_REMOVE;
     }
 
     switch (sound) {
@@ -193,4 +203,21 @@ play_sound (int sound)
         }
         break;
     }
+
+    return G_SOURCE_REMOVE;
+}
+
+void
+play_sound (int sound)
+{
+    /* Safe-from-any-thread entry point. Most callers (rcv.c, tasks.c)
+     * are on the main thread already; xfers.c's FILE_DONE hits run on
+     * the file-transfer worker threads (get_thread / put_thread /
+     * folder_get_thread / folder_put_thread) and these MUST marshal
+     * to avoid the GSound/GLib races above.
+     *
+     * g_idle_add is thread-safe at the call site and the callback
+     * runs on the main loop's owner thread, which is where every
+     * other GTK/GLib call in this process already runs. */
+    g_idle_add (play_sound_idle_cb, GINT_TO_POINTER (sound));
 }
