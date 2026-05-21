@@ -27,20 +27,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
 static void
 test_user_list_contains_self (void)
 {
@@ -66,34 +52,30 @@ test_user_list_contains_self (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_USER_GETLIST,
                                              /*flag=*/0, /*hc=*/0));
 
-    /* Drain looking for the TASK reply matching our trans. We
-	 * filter by trans because meson runs integration test
+    /* Drain looking for the TASK reply matching our trans. The
+	 * trans-filter matters because meson runs integration test
 	 * binaries in parallel: USER_CHANGE / CHAT broadcasts from
-	 * other concurrent test processes (each logged in as a
-	 * different user) hit our connection too, and we need to
-	 * walk past them.
+	 * concurrent test processes hit our connection too and we
+	 * need to walk past them.
 	 *
-	 * Budget: 16 messages × 3 s timeout. The matching TASK
+	 * Budget: 64 messages × 3 s timeout. The matching TASK
 	 * normally arrives within 1-2 messages even under contention. */
-    gboolean got_user_list = FALSE;
-    for (int i = 0; i < 64 && !got_user_list; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != our_trans) {
-            continue;
-        }
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
+    g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
-        dh_start (&htlc)
-        {
-            if (_type == HTLS_DATA_USER_LIST) {
-                got_user_list = TRUE;
-            }
+    /* The TASK reply must carry at least one HTLS_DATA_USER_LIST
+	 * chunk (mhxd writes one per logged-in user). The walk below
+	 * inspects every entry; this peek just confirms the reply
+	 * isn't empty before we start parsing. */
+    gboolean got_user_list = FALSE;
+    dh_start (&htlc)
+    {
+        if (_type == HTLS_DATA_USER_LIST) {
+            got_user_list = TRUE;
         }
-        dh_end ();
     }
+    dh_end ();
     g_assert_true (got_user_list);
 
     /* Walk every USER_LIST chunk, find the one whose uid matches

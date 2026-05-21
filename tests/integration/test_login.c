@@ -29,14 +29,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-/* Pull the message type field out of the just-received header. */
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 static void
 test_login_guest_succeeds (void)
 {

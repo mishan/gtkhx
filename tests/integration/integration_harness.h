@@ -28,7 +28,40 @@
  */
 
 #include <glib.h>
+#include <netinet/in.h>
+#include "compat.h" /* PACKED — required before hotline.h */
+#include "hotline.h"
+#include "protocol.h" /* struct htlc_conn — referenced by the inline hdr_* below */
 #include "server_matrix.h"
+
+/*
+ * Convenience accessors over the wire header that integration_recv_message
+ * just dropped into htlc->in.buf. Every Tier 3 test wants type / flag /
+ * trans to filter incoming messages — pre-refactor each test had its own
+ * static guint32 hdr_type / hdr_flag / hdr_trans copies (34 binaries,
+ * dozens of duplicate 4-line wrappers). Inline static here keeps the
+ * call shape unchanged at every site (hdr_type(&htlc)) while removing
+ * the dupe. No new linker symbols — each .c just inlines the ntohl. */
+static inline guint32
+hdr_type (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->type);
+}
+
+static inline guint32
+hdr_flag (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->flag);
+}
+
+static inline guint32
+hdr_trans (const struct htlc_conn *htlc)
+{
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    return ntohl (h->trans);
+}
 
 /*
  * Open a TCP connection to the configured host:port.
@@ -258,6 +291,292 @@ extern guint32 integration_send_get_chat_history (int fd,
                                                   guint32 channel_id,
                                                   guint64 before, guint64 after,
                                                   guint16 limit);
+
+/*
+ * Send HTLC_HDR_CHAT with HTLC_DATA_STYLE=1 + HTLC_DATA_CHAT=text.
+ * The 2-chunk shape every chat-using test exercises:
+ *
+ *   test_chat_roundtrip      one chat, expect the broadcast echo
+ *   test_two_client_chat     A sends, B receives
+ *   test_chat_in_pchat       same but with a HTLC_DATA_CHAT_ID chunk
+ *                            in the same call site shape — that test
+ *                            uses integration_send_message directly
+ *                            (cid is per-chat). This primitive is
+ *                            for the public-chat case.
+ *
+ * Returns TRUE on a full send.
+ */
+extern gboolean integration_send_chat (int fd, struct htlc_conn *htlc,
+                                       const char *text);
+
+/*
+ * Send HTLC_HDR_PING and return the trans id that hlpack will write
+ * into the header (the value of htlc->trans at call time — hlpack
+ * increments after stamping). Returns 0 on send failure.
+ *
+ * Several tests use PING as a "stream still healthy?" probe after
+ * driving an opcode that the server might silently drop (e.g.
+ * unauthorized mkdir, msg to unknown uid). Caller matches the
+ * returned trans against the TASK reply via
+ * integration_drain_until_task_trans.
+ */
+extern guint32 integration_send_ping (int fd, struct htlc_conn *htlc);
+
+/*
+ * Create a private chat naming `target_uid` and read back the
+ * server's chat_id. Steps:
+ *
+ *   1. Send HTLC_HDR_CHAT_CREATE with HTLC_DATA_UID = target_uid.
+ *   2. integration_drain_until_task_trans on the just-sent trans.
+ *   3. Walk the TASK reply via dh_start for HTLS_DATA_CHAT_ID and
+ *      extract the chat_id into *chat_id_out.
+ *
+ * Returns TRUE on full success (got the TASK reply AND it carried a
+ * non-zero chat_id). On FALSE the test should fail; on TRUE
+ * *chat_id_out holds the chat the caller can now invite, join, set
+ * subject, send to, etc. against.
+ *
+ * The 6 Tier-3 tests that pre-refactor opened-coded this dance:
+ *   test_chat_create, test_chat_decline, test_chat_in_pchat,
+ *   test_chat_join, test_chat_part, test_chat_subject.
+ *
+ * `max_messages` bounds the drain. 64 is the value those tests
+ * have settled on after parallel-test-suite tuning.
+ */
+extern gboolean integration_create_chat_with_uid (int fd,
+                                                  struct htlc_conn *htlc,
+                                                  guint16 target_uid,
+                                                  guint32 *chat_id_out,
+                                                  int max_messages);
+
+/*
+ * Drain server messages on `fd` until one of header type
+ * `wanted_type` arrives. Returns TRUE if seen within
+ * `max_messages` (each recv has a 3-second timeout); FALSE on
+ * timeout / recv failure or budget exhaustion. On success htlc->in
+ * still holds the matched frame.
+ *
+ * This is the generic primitive — most "drain until X arrives"
+ * loops in Tier 3 tests collapse to a single call. Used directly
+ * for one-shot drains where the caller doesn't need to inspect
+ * chunks (test_news_post, test_chat_part consuming CHAT_USER_CHANGE
+ * before the part broadcast).
+ */
+extern gboolean integration_drain_until_type (int fd, struct htlc_conn *htlc,
+                                              guint16 wanted_type,
+                                              int max_messages);
+
+/*
+ * Drain server messages on `fd` until HTLS_HDR_CHAT_INVITE arrives.
+ * Used by the chat-invite-receiver side of CHAT_CREATE tests
+ * (test_chat_create, _decline, _in_pchat, _join, _part). On success
+ * htlc->in holds the invite frame; caller can run
+ * hx_chat_invite_extract for chat_id / inviter uid+name. Thin
+ * wrapper around integration_drain_until_type — exists for the
+ * meaningful name at the call site.
+ */
+extern gboolean integration_drain_until_chat_invite (int fd,
+                                                     struct htlc_conn *htlc,
+                                                     int max_messages);
+
+/*
+ * Join an existing private chat by sending HTLC_HDR_CHAT_JOIN with
+ * HTLC_DATA_CHAT_ID = `chat_id`, then drain to the TASK reply that
+ * correlates by trans. Returns TRUE iff the reply arrived AND its
+ * flag&1 (error bit) was clear. On success htlc->in still holds the
+ * TASK reply so the caller can run dh_start/dh_end to walk the
+ * HTLS_DATA_USER_LIST chunks mhxd emits (test_chat_join.c relies on
+ * that). Used by test_chat_join, test_chat_part, test_chat_in_pchat
+ * — the latter two only care about the side effect (Bob is now in
+ * the chat) and pre-refactor open-coded the same drain loop.
+ */
+extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
+                                       guint32 chat_id, int max_messages);
+
+/*
+ * Drain server messages on `fd` until a chat user-event broadcast of
+ * type `wanted_type` arrives carrying HTLS_DATA_CHAT_ID == wanted_cid
+ * AND HTLS_DATA_UID == wanted_uid. Used for verifying mhxd's join /
+ * part fan-out to other chat members:
+ *
+ *   - HTLS_HDR_CHAT_USER_CHANGE: emitted when a user joins (or
+ *     changes nick/icon/color while in the chat). test_chat_join.c
+ *     uses this to confirm Alice sees Bob's join.
+ *   - HTLS_HDR_CHAT_USER_PART: emitted when a user parts.
+ *     test_chat_part.c uses this to confirm Alice sees Bob's part.
+ *
+ * Both call sites pre-refactor open-coded the same ~30-line dh_start
+ * walk; the only difference between them was the type sentinel.
+ */
+extern gboolean integration_drain_until_chat_user_event (
+    int fd, struct htlc_conn *htlc, guint16 wanted_type,
+    guint32 wanted_cid, guint16 wanted_uid, int max_messages);
+
+/*
+ * Encode a single-component HTLC_DATA_DIR chunk into `out` and
+ * return the byte count written. Layout:
+ *
+ *   u16 component_count (BE) = 1
+ *   u8  unknown (always 0)
+ *   u16 name_len (BE)
+ *   bytes[name_len] name
+ *
+ * The full production encoder (src/path_hldir.c::path_to_hldir)
+ * handles multi-component paths via a runtime-configured directory
+ * separator (`dir_char`), set from the server's DIRECTORYCHAR
+ * handshake. Tier 3 tests don't need the splitting — they target
+ * top-level files / folders — so this single-component shortcut
+ * stays here in the harness rather than depending on the global
+ * `dir_char` extern.
+ *
+ * `out` must point to at least 5 + strlen(name) bytes.
+ */
+extern gsize integration_encode_hldir_one (guint8 *out, const char *name);
+
+struct hx_chat_msg;
+
+/*
+ * Drain server messages on `fd` until we see an HTLS_HDR_CHAT
+ * broadcast whose uid matches `wanted_uid`. On success returns
+ * TRUE and fills `out` via hx_chat_extract; on timeout / overflow
+ * of `max_messages` returns FALSE.
+ *
+ * The uid filter is load-bearing: meson runs Tier 3 binaries in
+ * parallel, so chat broadcasts from concurrent test processes
+ * (logged in under different names) hit our connection too and
+ * would otherwise be the first HTLS_HDR_CHAT we see. Filtering
+ * by uid scopes the drain to OUR own session.
+ *
+ * Pre-refactor each chat-using test had its own copy of this
+ * function (drain_until_own_chat in test_chat_roundtrip,
+ * drain_until_chat_from_uid in test_two_client_chat) — byte-
+ * identical except for the function name. Centralised here so
+ * future tweaks (e.g. timeout policy, broadcast filter rules)
+ * land once.
+ */
+extern gboolean integration_drain_until_chat (int fd, struct htlc_conn *htlc,
+                                              guint16 wanted_uid,
+                                              struct hx_chat_msg *out,
+                                              int max_messages);
+
+/*
+ * Drain server messages on `fd` until we see an HTLS_HDR_TASK whose
+ * trans field matches `wanted_trans`. The matched message lives in
+ * htlc->in afterwards; caller can read hdr_flag (error bit) and walk
+ * dh_start for any reply chunks. Returns TRUE on match, FALSE on
+ * timeout / overflow of max_messages.
+ *
+ * This was the second-most-duplicated drain pattern across Tier 3
+ * (after the chat broadcast filter — see integration_drain_until_chat).
+ * 10+ tests open-coded the same "for (i ... max) recv; type? trans?"
+ * loop. Centralised here so future tweaks (longer timeout, opcode
+ * dispatch table) land once.
+ */
+extern gboolean integration_drain_until_task_trans (int fd,
+                                                    struct htlc_conn *htlc,
+                                                    guint32 wanted_trans,
+                                                    int max_messages);
+
+/* ---- HOPE-Secure-Login + ChaCha20-Poly1305 ----------------------
+ *
+ * The harness's HOPE flow uses the same pure helpers production
+ * uses (src/hope.c + src/cipher_aead.c). The only test-only piece
+ * is the synchronous driver below: it talks Step 1 → server reply →
+ * Step 2 against a real connection, and on success swaps the
+ * harness's send/recv path over to AEAD framing for the remainder
+ * of the session.
+ *
+ * The integration_hope_session struct holds the per-connection AEAD
+ * state. It lives alongside (not on) struct htlc_conn because the
+ * production htlc_conn carries this state via cipher_state.chacha
+ * but the harness wants it independent so tests don't have to drag
+ * in the full cipher_state union.
+ */
+
+#ifdef CONFIG_CIPHER
+#include "cipher.h" /* chacha_aead_state */
+typedef struct {
+    /* AEAD framing state. Active only after a successful
+     * HOPE-ChaCha20 negotiation. */
+    int aead_active;
+    chacha_aead_state encode_state;  /* client → server */
+    chacha_aead_state decode_state;  /* server → client */
+
+    /* Decode-side accumulator for the next inbound frame: AEAD frames
+     * are length-prefixed and arrive in chunks of arbitrary boundary
+     * over TCP. We accumulate until cipher_aead_peek_frame_size says
+     * we have a full frame, then call cipher_aead_open. */
+    guint8 *rx_accum;
+    gsize rx_accum_len;
+    gsize rx_accum_cap;
+} integration_hope_session;
+#else
+typedef struct {
+    int aead_active; /* always 0; AEAD disabled at build time. */
+} integration_hope_session;
+#endif
+
+/*
+ * Run the full HOPE-Secure-Login handshake against `srv`:
+ *
+ *   1. Open TCP + magic handshake.
+ *   2. Send HOPE Step 1 LOGIN (algorithm negotiation, empty creds).
+ *   3. Drain to the TASK reply; parse via hope_parse_step1_reply.
+ *   4. Compute HMAC chain via hope_compute_chain.
+ *   5. Send Step 2 LOGIN with login HMAC + password MAC + cipher /
+ *      compress confirmations + display_name + capabilities.
+ *   6. If the negotiated cipher is CHACHA20-POLY1305, derive AEAD
+ *      session keys and arm hope->aead_active.
+ *   7. Drain to SELFINFO or task-error.
+ *
+ * On success returns the fd and leaves htlc + hope ready for AEAD-
+ * aware send/recv (when aead_active is set). On failure calls
+ * g_test_skip or g_test_fail_printf with diagnostics and returns -1.
+ *
+ * `password` is the cleartext password (raw bytes — not pre-hashed);
+ * the harness drives the HMAC chain. Pass "" for accounts with no
+ * password (Janus's `guest` is set up that way for these tests).
+ *
+ * `cipheralg` and `compressalg` are advertised by name (e.g.
+ * "CHACHA20-POLY1305", "ZSTD", or NULL for none). Server picks
+ * whether to honour them.
+ */
+extern int integration_open_login_hope_or_skip (
+    const hx_test_server *srv,
+    struct htlc_conn *htlc,
+    integration_hope_session *hope,
+    const char *username, const char *password,
+    const char *display_name, guint16 icon,
+    const char *cipheralg, const char *compressalg);
+
+/*
+ * Release any malloc'd state inside `hope`. Safe to call on a
+ * zeroed struct.
+ */
+extern void integration_hope_session_release (integration_hope_session *hope);
+
+/*
+ * AEAD-aware send. If hope->aead_active, frames the message through
+ * cipher_aead_seal and writes the framed bytes; otherwise plain
+ * passthrough to integration_send. Same hlpack-driven message
+ * assembly as integration_send_message.
+ */
+extern gboolean integration_send_message_hope (int fd,
+                                               struct htlc_conn *htlc,
+                                               integration_hope_session *hope,
+                                               guint32 type, guint32 flag,
+                                               int hc, ...);
+
+/*
+ * AEAD-aware recv. If hope->aead_active, accumulates bytes into
+ * hope->rx_accum until a full AEAD frame is buffered, then opens it
+ * and copies the plaintext into htlc->in. Otherwise passthrough to
+ * integration_recv_message.
+ */
+extern gboolean integration_recv_message_hope (int fd,
+                                               struct htlc_conn *htlc,
+                                               integration_hope_session *hope,
+                                               int timeout_ms);
 
 /* ---- HTXF subchannel helpers ---------------------------------- */
 

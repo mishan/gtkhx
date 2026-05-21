@@ -43,7 +43,13 @@
  * minimal in-test stub that does exactly what the production
  * function does for the buffer side — call hlpack — and skip
  * everything else. Linker picks this stub because we don't link
- * network.c. */
+ * network.c.
+ *
+ * Same trick for hlwrite_chunks (the array-style variant chat_history
+ * now uses after the LOGIN-fork removal — see commit message
+ * "tests: end the LOGIN-packet fork between production and the
+ * harness"). hlpack_chunks does the buffer side; everything else is
+ * stubbed out. */
 void
 hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
@@ -51,6 +57,13 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     va_start (ap, hc);
     hlpack (htlc, type, flag, hc, ap);
     va_end (ap);
+}
+
+void
+hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                const struct hx_chunk *chunks, int hc)
+{
+    hlpack_chunks (htlc, type, flag, chunks, hc);
 }
 
 /* ---------- field constants ---------- */

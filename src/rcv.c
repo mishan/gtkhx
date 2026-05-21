@@ -34,6 +34,16 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+/* hope.h + login_packet.h are referenced from rcv_task_login()
+ * outside any CONFIG_CIPHER guard — hope_parse_step1_reply, the
+ * hx_login_request struct + HX_LOGIN_MODE_HOPE_STEP2 enum, and the
+ * HMAC chain helpers all live in those headers and have no
+ * CONFIG_CIPHER gating themselves. Include them unconditionally
+ * so the file compiles without CONFIG_CIPHER. The cipher_aead.h
+ * include can stay gated — its contents are CONFIG_CIPHER-only
+ * and only used inside the cipher-gated AEAD-init block below. */
+#include "hope.h"
+#include "login_packet.h"
 #ifdef CONFIG_CIPHER
 #include "cipher_aead.h"
 #endif
@@ -796,22 +806,15 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
 {
-    struct hl_hdr *h = (struct hl_hdr *)htlc->in.buf;
-    guint32 len;
-    guint32 type;
-    guint32 trace_trans, trace_flag;
-
-    HN32 (&len, &h->len);
-    HN32 (&type, &h->type);
-    HN32 (&trace_trans, &h->trans);
-    HN32 (&trace_flag, &h->flag);
-    proto_trace_recv_hdr (type, trace_trans, trace_flag, len);
-    if (len < 2) {
-        len = 0;
-    } else {
-        len = ((len > MAX_HOTLINE_PACKET_LEN) ? MAX_HOTLINE_PACKET_LEN : len)
-              - 2;
-    }
+    /* Shared header decoder in proto_helpers — same math the
+	 * integration harness's integration_recv_message uses. Returns
+	 * the raw wire_len (for the proto trace) plus the clamped body
+	 * payload size (what the receive state machine needs to read
+	 * next). */
+    guint32 wire_len, len, type, trace_trans, trace_flag;
+    hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
+                   &wire_len, &len);
+    proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 
     /* htlc->trans = ntohl(h->trans); */
     htlc->rcv = 0;
@@ -1117,35 +1120,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     guint16 len;
     char servername[8192 + 1];
     session *sess = &the_session;
-    guint16 hc;
-    guint16 icon16;
-    guint8 *p, *mal = 0;
-    guint16 mal_len = 0;
-    guint16 sklen = 0, macalglen = 0, secure_login = 0;
-    guint8 password_mac[20];
-    guint8 login[32];
-    guint16 llen, pmaclen;
-#ifdef CONFIG_CIPHER
-    u_int8_t *s_cipher_al = 0, *c_cipher_al = 0;
-    u_int16_t s_cipher_al_len = 0, c_cipher_al_len = 0;
-    char s_cipheralg[32], c_cipheralg[32];
-    u_int16_t s_cipheralglen = 0, c_cipheralglen = 0;
-    u_int8_t cipheralglist[64];
-    u_int16_t cipheralglistlen;
-    /* Phase 5+ (HOPE-ChaCha20-Poly1305): server signals AEAD via
-	 * HTLS_DATA_CIPHER_MODE with value "AEAD". Stream ciphers
-	 * either send "STREAM" or omit the chunk; either way our
-	 * default of CIPHER_MODE_STREAM is the right interpretation. */
-    int server_says_aead = 0;
-#endif
-#ifdef CONFIG_COMPRESS
-    guint8 *s_compress_al = 0, *c_compress_al = 0;
-    guint16 s_compress_al_len = 0, c_compress_al_len = 0;
-    char s_compressalg[32], c_compressalg[32];
-    guint16 s_compressalglen = 0, c_compressalglen = 0;
-    guint8 compressalglist[64];
-    guint16 compressalglistlen;
-#endif
 
     g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
 
@@ -1158,140 +1132,61 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     }
 
     if (pass) {
-        dh_start (htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_LOGIN:
-                if (_len && _len == strlen (htlc->macalg)
-                    && !memcmp (htlc->macalg, dh->data, _len)) {
-                    secure_login = 1;
-                }
-                break;
-            case HTLS_DATA_PASSWORD:
-                /* Server is offering a secure-password handshake by
-				 * naming our advertised MAC algorithm. We currently
-				 * don't act on this signal — we always send a fresh
-				 * HMAC if we have a sessionkey, regardless. The
-				 * detection is left in place commented out as a hook
-				 * for future password-only HOPE work. */
-                (void)htlc;
-                break;
-            case HTLS_DATA_MAC_ALG:
-                mal_len = _len;
-                mal = dh->data;
-                break;
-#ifdef CONFIG_CIPHER
-            case HTLS_DATA_CIPHER_ALG:
-                s_cipher_al_len = _len;
-                s_cipher_al = dh->data;
-                break;
-            case HTLC_DATA_CIPHER_ALG:
-                c_cipher_al_len = _len;
-                c_cipher_al = dh->data;
-                break;
-            case HTLS_DATA_CIPHER_MODE:
-            case HTLC_DATA_CIPHER_MODE:
-                /* "AEAD" (4 bytes ASCII) → ChaCha20-Poly1305 framed
-				 * mode. "STREAM" (or anything else) → legacy
-				 * RC4/Blowfish stream-XOR mode. Track both
-				 * directions but only honour AEAD when BOTH say
-				 * AEAD (defensive — a mismatch shouldn't happen
-				 * but let's not crash on a malformed reply). */
-                if (_len == 4 && !memcmp (dh->data, "AEAD", 4)) {
-                    server_says_aead = 1;
-                }
-                break;
-            case HTLS_DATA_CIPHER_IVEC:
-                break;
-            case HTLC_DATA_CIPHER_IVEC:
-                break;
-#endif
-#if defined(CONFIG_COMPRESS)
-            case HTLS_DATA_COMPRESS_ALG:
-                s_compress_al_len = _len;
-                s_compress_al = dh->data;
-                break;
-            case HTLC_DATA_COMPRESS_ALG:
-                c_compress_al_len = _len;
-                c_compress_al = dh->data;
-                break;
-#endif
-            case HTLS_DATA_CHECKSUM_ALG:
-                break;
-            case HTLC_DATA_CHECKSUM_ALG:
-                break;
-            case HTLS_DATA_SESSIONKEY:
-                sklen = _len > sizeof (htlc->sessionkey)
-                            ? sizeof (htlc->sessionkey)
-                            : _len;
-                memcpy (htlc->sessionkey, dh->data, sklen);
-                htlc->sklen = sklen;
-                break;
-            }
-        }
-        dh_end ();
+        /* HOPE Step 1 reply handling.
+		 *
+		 * The data layer (chunk walking, algorithm-name extraction,
+		 * MAC-chain crypto, session-key validation, login-field
+		 * encoding, reply-alg-list packing) lives in src/hope.c —
+		 * we hand it the htlc + a few client-side knobs and it
+		 * returns parsed data. Side effects (UI logging, error
+		 * tear-down, hlwrite, cipher/compress init) stay here in
+		 * the orchestrator. */
+        struct hope_step1_reply sel;
+        enum hope_step1_err herr
+            = hope_parse_step1_reply (htlc, htlc->macalg, &sel);
 
-        if (!mal_len) {
-        no_mal:
+        if (herr == HOPE_ERR_NO_MAC_ALG) {
             hx_printf_prefix (htlc, 0, INFOPREFIX, "No macalg from server\n");
             hx_htlc_close (htlc, 0);
             return;
         }
-
-        p = list_n (mal, mal_len, 0);
-        if (!p || !*p) {
-            goto no_mal;
-        }
-        macalglen
-            = *p >= sizeof (htlc->macalg) ? sizeof (htlc->macalg) - 1 : *p;
-        memcpy (htlc->macalg, p + 1, macalglen);
-        htlc->macalg[macalglen] = 0;
-
-        if (sklen < 20) {
+        if (herr == HOPE_ERR_BAD_MAC_ALG) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "sessionkey length (%u) not big enough\n", sklen);
+                              "Malformed macalg list from server\n");
             hx_htlc_close (htlc, 0);
             return;
         }
+        if (herr == HOPE_ERR_SHORT_SESSIONKEY) {
+            /* hope_parse_step1_reply intentionally only updates
+			 * htlc->sklen on success; pull the actual observed
+			 * length out of the reply struct so the message
+			 * reflects what the server sent. */
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "sessionkey length (%u) not big enough\n",
+                              (unsigned) sel.observed_sklen);
+            hx_htlc_close (htlc, 0);
+            return;
+        }
+        if (herr != HOPE_OK) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "HOPE Step 1 parse error %d\n", (int) herr);
+            hx_htlc_close (htlc, 0);
+            return;
+        }
+        /* hope_parse_step1_reply outputs the server-picked macalg
+		 * in sel.macalg; copy back into htlc->macalg so the rest
+		 * of the code (and downstream messages) sees the agreed
+		 * value rather than our pre-negotiation preference. */
+        g_strlcpy (htlc->macalg, sel.macalg, sizeof (htlc->macalg));
 
-        /* HOPE-Secure-Login session-key validation. Per the spec:
-		 *
-		 *   Component         Size  Description
-		 *   Server IP         4     IPv4 (big-endian, network byte order)
-		 *   Server port       2     Port number (big-endian)
-		 *   Random bytes      58    Cryptographically random
-		 *
-		 * The IP:port are what the server saw via getsockname() on the
-		 * accepted socket — i.e. the local address the client connected
-		 * TO. Clients are expected to validate that this matches the
-		 * server they actually connected to; a mismatch suggests NAT,
-		 * a transparent proxy, or a MITM.
-		 *
-		 * shxd-family clients disconnect on mismatch (overridable
-		 * via -f). We warn but continue — friendlier behind home-
-		 * NAT setups, where the embedded IP routinely won't match
-		 * the externally-resolved address. Future work: surface a
-		 * setting / per-bookmark override. */
-        if (sklen >= 6) {
-            guint8 ki[4];
-            guint16 kp_be;
-            memcpy (ki, &htlc->sessionkey[0], 4);
-            memcpy (&kp_be, &htlc->sessionkey[4], 2);
-            guint16 kport = ntohs (kp_be);
-
-            char key_ip[INET_ADDRSTRLEN];
-            g_snprintf (key_ip, sizeof key_ip, "%u.%u.%u.%u", ki[0], ki[1],
-                        ki[2], ki[3]);
-
-            if (strcmp (key_ip, htlc->ip_addr) != 0
-                || kport != htlc->serverport) {
-                hx_printf_prefix (
-                    htlc, 0, INFOPREFIX,
-                    "WARNING: HOPE sessionkey IP:port (%s:%u) doesn't match "
-                    "connected server (%s:%u) — possible NAT or MITM. "
-                    "Continuing anyway.\n",
-                    key_ip, kport, htlc->ip_addr, htlc->serverport);
-            }
+        /* Session-key IP:port advisory check. NAT or MITM produces a
+		 * mismatch; warn but continue (shxd-family clients disconnect
+		 * — friendlier behind home-NAT). */
+        char ip_warn[256];
+        if (hope_validate_sessionkey_ip (htlc->sessionkey, htlc->sklen,
+                                         htlc->ip_addr, htlc->serverport,
+                                         ip_warn, sizeof (ip_warn))) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX, "%s", ip_warn);
         }
 
         if (task_inerror (htlc)) {
@@ -1300,265 +1195,199 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             return;
         }
         task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-        icon16 = htons (htlc->icon);
-        if (secure_login) {
-            llen = hmac_xxx (login, htlc->login, strlen (htlc->login),
-                             htlc->sessionkey, sklen, htlc->macalg);
-            if (!llen) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  "bad HMAC algorithm %s\n", htlc->macalg);
-                hx_htlc_close (htlc, 0);
-                return;
-            }
-        } else {
-            llen = strlen (htlc->login);
-            hl_encode (login, htlc->login, llen);
-            login[llen] = 0;
-        }
-        pmaclen = hmac_xxx (password_mac, pass, strlen (pass), htlc->sessionkey,
-                            sklen, htlc->macalg);
-        if (!pmaclen) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX, "bad HMAC algorithm %s\n",
-                              htlc->macalg);
+
+        /* HTLC_DATA_LOGIN field encoding (HMAC variant for
+		 * secure_login, hl_code XOR otherwise). */
+        guint8 login[32];
+        size_t llen = hope_build_login_field (
+            htlc->login, sel.secure_login,
+            htlc->sessionkey, htlc->sklen, htlc->macalg,
+            login, sizeof (login));
+        /* llen==0 is legitimate in the XOR variant when htlc->login
+		 * is empty (e.g. anonymous-guest bookmarks against Janus,
+		 * which echoes an empty HTLS_DATA_LOGIN chunk so the
+		 * sel.secure_login probe stays 0). Only treat 0 as a bad-
+		 * macalg failure in the HMAC variant — HMAC-of-anything
+		 * always emits 16/20/32 bytes for a valid algorithm. The
+		 * pre-refactor inline code didn't trip this either; the
+		 * regression came in when the size_t return value started
+		 * conflating "failure" with "empty XOR output". */
+        if (sel.secure_login && !llen) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "bad HMAC algorithm %s\n", htlc->macalg);
             hx_htlc_close (htlc, 0);
             return;
         }
-        hc = 4;
+
+        /* HMAC chain: password_mac + spec encode_key + spec decode_key.
+		 * Spec-aligned outputs; we map into htlc->cipher_{en,de}code_key
+		 * with the legacy-storage swap below (encode_key → decode slot,
+		 * decode_key → encode slot — see hope.h's docstring). */
+        uint8_t password_mac[HOPE_MAC_MAX];
+        uint8_t spec_encode_key[HOPE_MAC_MAX];
+        uint8_t spec_decode_key[HOPE_MAC_MAX];
+        size_t pmaclen = hope_compute_chain (
+            pass, htlc->sessionkey, htlc->sklen, htlc->macalg,
+            password_mac, spec_encode_key, spec_decode_key);
+        if (!pmaclen) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "bad HMAC algorithm %s\n", htlc->macalg);
+            hx_htlc_close (htlc, 0);
+            return;
+        }
+
 #ifdef CONFIG_COMPRESS
+        guint8 compressalglist[64];
+        size_t compressalglistlen = 0;
         if (!htlc->compressalg[0] || !strcmp (htlc->compressalg, "NONE")) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "WARNING: this connection is not compressed\n");
-            compressalglistlen = 0;
-            goto no_compress;
-        }
-        if (!c_compress_al_len || !s_compress_al_len) {
-        no_compress_al:
+        } else if (!sel.s_compressalg[0] || !sel.c_compressalg[0]) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "No compress algorithm from server\n");
             hx_htlc_close (htlc, 0);
             return;
-        }
-        p = list_n (s_compress_al, s_compress_al_len, 0);
-        if (!p || !*p) {
-            goto no_compress_al;
-        }
-        s_compressalglen
-            = *p >= sizeof (s_compressalg) ? sizeof (s_compressalg) - 1 : *p;
-        memcpy (s_compressalg, p + 1, s_compressalglen);
-        s_compressalg[s_compressalglen] = 0;
-        p = list_n (c_compress_al, c_compress_al_len, 0);
-        if (!p || !*p) {
-            goto no_compress_al;
-        }
-        c_compressalglen
-            = *p >= sizeof (c_compressalg) ? sizeof (c_compressalg) - 1 : *p;
-        memcpy (c_compressalg, p + 1, c_compressalglen);
-        c_compressalg[c_compressalglen] = 0;
-        if (!valid_compress (c_compressalg)) {
+        } else if (!valid_compress (sel.c_compressalg)) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "Bad client compress algorithm %s\n",
-                              c_compressalg);
-            goto ret_badcompress_a;
-        } else if (!valid_compress (s_compressalg)) {
+                              sel.c_compressalg);
+            hx_htlc_close (htlc, 0);
+            return;
+        } else if (!valid_compress (sel.s_compressalg)) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "Bad server compress algorithm %s\n",
-                              s_compressalg);
-        ret_badcompress_a:
-            compressalglistlen = 0;
+                              sel.s_compressalg);
             hx_htlc_close (htlc, 0);
             return;
         } else {
-            {
-                guint16 val = 1;
-                HN16 (compressalglist, &val);
-            }
-            compressalglistlen = 2;
-            compressalglist[compressalglistlen] = s_compressalglen;
-            compressalglistlen++;
-            memcpy (compressalglist + compressalglistlen, s_compressalg,
-                    s_compressalglen);
-            compressalglistlen += s_compressalglen;
+            compressalglistlen = hope_build_alg_reply (
+                sel.s_compressalg, compressalglist, sizeof (compressalglist));
         }
-    no_compress:
-        hc++;
 #endif
+
 #ifdef CONFIG_CIPHER
+        guint8 cipheralglist[64];
+        size_t cipheralglistlen = 0;
         if (!htlc->cipheralg[0] || !strcmp (htlc->cipheralg, "NONE")) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "WARNING: this connection is not encrypted\n");
-            cipheralglistlen = 0;
-            goto no_cipher;
-        }
-        if (!c_cipher_al_len || !s_cipher_al_len) {
-        no_cal:
+        } else if (!sel.s_cipheralg[0] || !sel.c_cipheralg[0]) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "No cipher algorithm from server\n");
             hx_htlc_close (htlc, 0);
             return;
-        }
-        p = list_n (s_cipher_al, s_cipher_al_len, 0);
-        if (!p || !*p) {
-            goto no_cal;
-        }
-        s_cipheralglen
-            = *p >= sizeof (s_cipheralg) ? sizeof (s_cipheralg) - 1 : *p;
-        memcpy (s_cipheralg, p + 1, s_cipheralglen);
-        s_cipheralg[s_cipheralglen] = 0;
-        p = list_n (c_cipher_al, c_cipher_al_len, 0);
-        if (!p || !*p) {
-            goto no_cal;
-        }
-        c_cipheralglen
-            = *p >= sizeof (c_cipheralg) ? sizeof (c_cipheralg) - 1 : *p;
-        memcpy (c_cipheralg, p + 1, c_cipheralglen);
-        c_cipheralg[c_cipheralglen] = 0;
-        if (!valid_cipher (c_cipheralg)) {
+        } else if (!valid_cipher (sel.c_cipheralg)) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad client cipher algorithm %s\n", c_cipheralg);
-            goto ret_badca;
-        } else if (!valid_cipher (s_cipheralg)) {
+                              "Bad client cipher algorithm %s\n",
+                              sel.c_cipheralg);
+            hx_htlc_close (htlc, 0);
+            return;
+        } else if (!valid_cipher (sel.s_cipheralg)) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad server cipher algorithm %s\n", s_cipheralg);
-        ret_badca:
-            cipheralglistlen = 0;
+                              "Bad server cipher algorithm %s\n",
+                              sel.s_cipheralg);
             hx_htlc_close (htlc, 0);
             return;
         } else {
-            {
-                guint16 val = 1;
-
-                HN16 (cipheralglist, &val);
-            }
-            cipheralglistlen = 2;
-            cipheralglist[cipheralglistlen] = s_cipheralglen;
-            cipheralglistlen++;
-            memcpy (cipheralglist + cipheralglistlen, s_cipheralg,
-                    s_cipheralglen);
-            cipheralglistlen += s_cipheralglen;
+            cipheralglistlen = hope_build_alg_reply (
+                sel.s_cipheralg, cipheralglist, sizeof (cipheralglist));
+            /* Map spec-aligned chain outputs into GtkHx's legacy
+			 * storage convention. The labels are intentionally
+			 * swapped — see hope.h's hope_compute_chain docstring
+			 * for why this isn't symmetric with the function's
+			 * output naming. */
+            memcpy (htlc->cipher_decode_key, spec_encode_key, pmaclen);
+            htlc->cipher_decode_keylen = pmaclen;
+            memcpy (htlc->cipher_encode_key, spec_decode_key, pmaclen);
+            htlc->cipher_encode_keylen = pmaclen;
         }
-
-        pmaclen = hmac_xxx (htlc->cipher_decode_key, pass, strlen (pass),
-                            password_mac, pmaclen, htlc->macalg);
-        htlc->cipher_decode_keylen = pmaclen;
-        pmaclen = hmac_xxx (htlc->cipher_encode_key, pass, strlen (pass),
-                            htlc->cipher_decode_key, pmaclen, htlc->macalg);
-        htlc->cipher_encode_keylen = pmaclen;
-    no_cipher:
-        hc++;
 #endif
-        /* DATA_CAPABILITIES on the HOPE Step 3 authenticated LOGIN
-		 * — see hotline.h for the wire-format rationale and the
-		 * legacy-LOGIN sibling in network.c for the larger comment.
-		 * One extra chunk per LOGIN, two bytes wire weight.
-		 *
-		 * Mirror the legacy LOGIN s capability set (network.c
-		 * around line 1159) so HOPE-encrypted sessions advertise
-		 * the same extensions: large-files (64-bit sizes), text-
-		 * encoding (UTF-8), and chat-history (TRAN 700). An
-		 * earlier revision listed only TEXT_ENCODING here, which
-		 * silently disabled the chat-history sidebar on every
-		 * connection that went through HOPE -- a regression
-		 * relative to plaintext sessions where the legacy LOGIN s
-		 * full advertisement runs. */
-        guint16 caps16 = htons (HTLC_CAP_LARGE_FILES
-                              | HTLC_CAP_TEXT_ENCODING
-                              | HTLC_CAP_CHAT_HISTORY);
-        hc++;
-        hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, llen, login,
-                 HTLC_DATA_PASSWORD, pmaclen, password_mac,
+
+        /* Hand the pre-computed HOPE fields to the shared chunk
+		 * builder. Same chunk ordering / gating as before; the
+		 * harness uses the same builder via send_hope_step2, so
+		 * any future Step 2 protocol tweak only edits login_packet.c.
+		 * DATA_CAPABILITIES set mirrors the legacy LOGIN's set
+		 * (network.c around line 1159): large-files, text-encoding,
+		 * chat-history. */
+        hx_login_request req = {
+            .mode = HX_LOGIN_MODE_HOPE_STEP2,
+            .icon = htlc->icon,
+            .display_name = htlc->name,
+            .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                  | HTLC_CAP_CHAT_HISTORY,
+            .login_field = login,
+            .login_field_len = (guint16) llen,
+            .password_mac = password_mac,
+            .password_mac_len = (guint16) pmaclen,
 #ifdef CONFIG_CIPHER
-                 HTLS_DATA_CIPHER_ALG, cipheralglistlen, cipheralglist,
+            .cipher_alg_reply = cipheralglist,
+            .cipher_alg_reply_len = (guint16) cipheralglistlen,
 #endif
 #ifdef CONFIG_COMPRESS
-                 HTLS_DATA_COMPRESS_ALG, compressalglistlen, compressalglist,
+            .compress_alg_reply = compressalglist,
+            .compress_alg_reply_len = (guint16) compressalglistlen,
 #endif
-                 HTLC_DATA_NAME, strlen (htlc->name), htlc->name,
-                 HTLC_DATA_ICON, 2, &icon16, HTLC_DATA_CAPABILITIES, 2,
-                 &caps16);
+        };
+        struct hx_chunk step2_chunks[HX_LOGIN_MAX_CHUNKS];
+        guint8 step2_scratch[HX_LOGIN_SCRATCH_SIZE];
+        int hc = hx_login_build_chunks (&req, step2_chunks,
+                                        HX_LOGIN_MAX_CHUNKS, step2_scratch,
+                                        sizeof (step2_scratch));
+        /* Builder returns 0 on argument / overflow validation
+		 * failures. Treat as a handshake failure rather than
+		 * assert-trap (assertions can be disabled with
+		 * G_DISABLE_ASSERT) and avoid sending a malformed LOGIN. */
+        if (hc <= 0) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "HOPE Step 2 LOGIN builder failed\n");
+            g_free (pass);
+            hx_htlc_close (htlc, 0);
+            return;
+        }
+        hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, step2_chunks, hc);
         g_free (pass);
+
 #ifdef CONFIG_COMPRESS
         if (compressalglistlen) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "compress: server %s client %s\n", c_compressalg,
-                              s_compressalg);
-            /* Replace the legacy hardcoded COMPRESS_GZIP with name-
-			 * dispatched ids so the LZ4 / ZSTD branches negotiated
-			 * via HOPE-Secure-Login land in their own contexts. */
-            if (c_compress_al_len) {
-                htlc->compress_encode_type
-                    = compress_id_from_name (c_compressalg);
-                compress_encode_init (htlc);
-            }
-            if (s_compress_al_len) {
-                htlc->compress_decode_type
-                    = compress_id_from_name (s_compressalg);
-                compress_decode_init (htlc);
-            }
+                              "compress: server %s client %s\n",
+                              sel.c_compressalg, sel.s_compressalg);
+            htlc->compress_encode_type
+                = compress_id_from_name (sel.c_compressalg);
+            compress_encode_init (htlc);
+            htlc->compress_decode_type
+                = compress_id_from_name (sel.s_compressalg);
+            compress_decode_init (htlc);
         }
 #endif
+
 #ifdef CONFIG_CIPHER
         if (cipheralglistlen) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "cipher: server %s client %s\n", c_cipheralg,
-                              s_cipheralg);
-            /* IDEA is no longer advertised or implemented; if a
-			 * misbehaving server still selects it, we fall through
-			 * to the default cipher_(en|de)code_init no-op, which
-			 * is no worse than the legacy behavior was. */
-            if (!strcmp (s_cipheralg, "RC4")) {
-                htlc->cipher_decode_type = CIPHER_RC4;
-            } else if (!strcmp (s_cipheralg, "BLOWFISH")) {
-                htlc->cipher_decode_type = CIPHER_BLOWFISH;
-            } else if (!strcmp (s_cipheralg, "CHACHA20-POLY1305")) {
-                htlc->cipher_decode_type = CIPHER_CHACHA20_POLY1305;
-            }
-            if (!strcmp (c_cipheralg, "RC4")) {
-                htlc->cipher_encode_type = CIPHER_RC4;
-            } else if (!strcmp (c_cipheralg, "BLOWFISH")) {
-                htlc->cipher_encode_type = CIPHER_BLOWFISH;
-            } else if (!strcmp (c_cipheralg, "CHACHA20-POLY1305")) {
-                htlc->cipher_encode_type = CIPHER_CHACHA20_POLY1305;
-            }
+                              "cipher: server %s client %s\n",
+                              sel.c_cipheralg, sel.s_cipheralg);
+            htlc->cipher_decode_type
+                = hope_cipher_id_from_name (sel.s_cipheralg);
+            htlc->cipher_encode_type
+                = hope_cipher_id_from_name (sel.c_cipheralg);
 
-            /* Phase 5+ (HOPE-ChaCha20-Poly1305): if both peers
-			 * agreed on ChaCha20-Poly1305 AEAD, switch the cipher
-			 * mode to AEAD and stretch the MAC-derived keys to
-			 * 256 bits via HKDF-SHA256. The chacha state lands
-			 * in htlc->cipher_*_state.chacha (third arm of the
-			 * cipher_state union), replacing what rc4/blowfish
-			 * would have occupied. cipher_encode_init /
-			 * cipher_decode_init become no-ops for this cipher
-			 * type — the per-frame Nettle ctx is built on the
-			 * stack at seal/open time.
-			 *
-			 * Mode bit: prefer the server's explicit CIPHER_MODE
-			 * chunk if it sent one; otherwise infer AEAD from the
-			 * cipher name (the spec allows that fallback). */
-            if (htlc->cipher_encode_type == CIPHER_CHACHA20_POLY1305
-                && htlc->cipher_decode_type == CIPHER_CHACHA20_POLY1305) {
-                htlc->cipher_mode = server_says_aead
-                                  ? CIPHER_MODE_AEAD
-                                  : CIPHER_MODE_AEAD;
-                /* The HOPE HMAC chain a few lines above derives
-				 * htlc->cipher_{en,de}code_key in the OPPOSITE
-				 * order from the fogWraith spec's labeling:
-				 *
-				 *   our cipher_decode_key = HMAC(pass, password_mac)
-				 *     == spec's "encode_key" (first-derived)
-				 *   our cipher_encode_key = HMAC(pass, cipher_decode_key)
-				 *     == spec's "decode_key" (second-derived)
-				 *
-				 * For the legacy stream cipher this didn't matter
-				 * — both peers compute the same chain and label
-				 * them however they want. For AEAD, HKDF needs
-				 * spec_encode_key as the ikm of encode_key_256
-				 * (which is the server-out / client-in key), and
-				 * spec_decode_key as the ikm of decode_key_256
-				 * (server-in / client-out). The
-				 * cipher_aead_derive_session_keys function
-				 * expects spec-aligned arguments, so we pass our
-				 * decode_key in the encode_key slot and vice
-				 * versa. */
+            /* HOPE-ChaCha20-Poly1305: when both directions resolve
+			 * to CHACHA20, flip cipher_mode to AEAD and stretch
+			 * the MAC-derived keys to 256 bits via HKDF-SHA256.
+			 * The spec's "encode_key" goes into our DECODE slot
+			 * and vice versa — server's outbound key is what we
+			 * use to read; see cipher_aead_derive_session_keys'
+			 * docstring for the full rationale. We pass our
+			 * (already mapped) storage slots in the spec-aligned
+			 * argument order. */
+            if (hope_cipher_is_aead (sel.s_cipheralg)
+                && hope_cipher_is_aead (sel.c_cipheralg)) {
+                /* AEAD ciphers (ChaCha20-Poly1305 today) always
+				 * use AEAD framing — server_says_aead is just the
+				 * server's confirmation; the cipher name alone
+				 * determines the mode. */
+                htlc->cipher_mode = CIPHER_MODE_AEAD;
                 cipher_aead_derive_session_keys (
                     &htlc->cipher_encode_state.chacha,
                     &htlc->cipher_decode_state.chacha,
@@ -1635,17 +1464,16 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 					 * the server agreed to enable for this session.
 					 * Per spec the field is a variable-width big-endian
 					 * unsigned integer (typically 2 bytes, extensible
-					 * to 8). Decode whatever width arrived into our 64-
+					 * to 8). hl_capabilities_decode (proto_helpers)
+					 * normalises whatever width arrived into our 64-
 					 * bit field. Bits we don't recognise are silently
 					 * preserved per the spec's "ignore unknown bits"
 					 * requirement — they don't affect behaviour but
 					 * leave the door open if a server advertises a cap
 					 * we'll start using later. */
                     {
-                        guint64 caps = 0;
-                        for (guint16 i = 0; i < _len && i < 8; i++) {
-                            caps = (caps << 8) | dh->data[i];
-                        }
+                        guint64 caps
+                            = hl_capabilities_decode (dh->data, _len);
                         htlc->caps = caps;
                         if (caps & HTLC_CAP_LARGE_FILES) {
                             hx_printf_prefix (htlc, 0, INFOPREFIX,

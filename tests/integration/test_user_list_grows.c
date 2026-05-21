@@ -37,27 +37,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* Run a USER_GETLIST round-trip and return TRUE if any
  * HTLS_DATA_USER_LIST chunk in the reply has a name matching
  * `wanted_name`. The user-list entry layout (per
@@ -77,45 +56,36 @@ user_list_contains (int fd, struct htlc_conn *htlc, const char *wanted_name)
         return FALSE;
     }
 
-    gsize wlen = strlen (wanted_name);
-    for (int i = 0; i < 64; i++) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            return FALSE;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (htlc) != our_trans) {
-            continue;
-        }
-        if (hdr_flag (htlc) & 1) {
-            return FALSE;
-        }
-
-        gboolean found = FALSE;
-        dh_start (htlc)
-        {
-            if (_type != HTLS_DATA_USER_LIST) {
-                continue;
-            }
-            if (_len < 8) {
-                continue;
-            }
-            guint16 nlen;
-            memcpy (&nlen, dh->data + 6, 2);
-            nlen = ntohs (nlen);
-            if (8 + (gsize)nlen > _len) {
-                continue;
-            }
-            if (nlen == wlen && memcmp (dh->data + 8, wanted_name, wlen) == 0) {
-                found = TRUE;
-                break;
-            }
-        }
-        dh_end ();
-        return found;
+    if (!integration_drain_until_task_trans (fd, htlc, our_trans, 64)) {
+        return FALSE;
     }
-    return FALSE;
+    if (hdr_flag (htlc) & 1) {
+        return FALSE;
+    }
+
+    gsize wlen = strlen (wanted_name);
+    gboolean found = FALSE;
+    dh_start (htlc)
+    {
+        if (_type != HTLS_DATA_USER_LIST) {
+            continue;
+        }
+        if (_len < 8) {
+            continue;
+        }
+        guint16 nlen;
+        memcpy (&nlen, dh->data + 6, 2);
+        nlen = ntohs (nlen);
+        if (8 + (gsize)nlen > _len) {
+            continue;
+        }
+        if (nlen == wlen && memcmp (dh->data + 8, wanted_name, wlen) == 0) {
+            found = TRUE;
+            break;
+        }
+    }
+    dh_end ();
+    return found;
 }
 
 static void

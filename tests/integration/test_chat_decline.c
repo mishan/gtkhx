@@ -38,27 +38,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 static void
 test_chat_decline_silent (void)
 {
@@ -79,49 +58,15 @@ test_chat_decline_silent (void)
     }
 
     /* Alice creates a private chat naming Bob. */
-    guint16 bob_uid_be = htons (htlc_b.uid);
-    guint32 alice_create_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (
-        fd_a, &htlc_a, HTLC_HDR_CHAT_CREATE, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_UID, (int)sizeof (bob_uid_be), &bob_uid_be));
-
     guint32 chat_id = 0;
-    gboolean alice_got = FALSE;
-    for (int i = 0; i < 64 && !alice_got; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != alice_create_trans) {
-            continue;
-        }
-        alice_got = TRUE;
-        dh_start (&htlc_a)
-        {
-            if (_type == HTLS_DATA_CHAT_ID) {
-                dh_getint (chat_id);
-            }
-        }
-        dh_end ();
-    }
-    g_assert_true (alice_got);
-    g_assert_cmphex (chat_id, !=, 0);
+    g_assert_true (integration_create_chat_with_uid (fd_a, &htlc_a, htlc_b.uid,
+                                                     &chat_id, 64));
 
     /* Bob drains for the CHAT_INVITE so we know he's actually been
 	 * invited at the protocol level (and hasn't seen anything stale
 	 * left over from a previous test run). */
-    gboolean bob_got_invite = FALSE;
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_CHAT_INVITE) {
-            continue;
-        }
-        bob_got_invite = TRUE;
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (integration_drain_until_chat_invite (
+        fd_b, &htlc_b, 64));
 
     /* Bob declines. Server should accept silently. */
     guint32 cid_be = htonl (chat_id);
@@ -133,46 +78,22 @@ test_chat_decline_silent (void)
 	 * reply must correlate by trans; if the server slipped in a
 	 * decline-broadcast (shouldn't happen) we'd see an unrelated
 	 * frame first and the trans match would fail. */
-    guint32 ping_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (fd_a, &htlc_a, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 ping_trans = integration_send_ping (fd_a, &htlc_a);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
-    gboolean alice_pong = FALSE;
-    for (int i = 0; i < 64 && !alice_pong; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != ping_trans) {
-            continue;
-        }
-        alice_pong = TRUE;
-        /* Ping mustn't error out either. */
-        g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
-    }
-    g_assert_true (alice_pong);
+    g_assert_true (integration_drain_until_task_trans (
+        fd_a, &htlc_a, ping_trans, 64));
+    /* Ping mustn't error out either. */
+    g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* Same shape on Bob's connection: we expect his stream to be
 	 * idle after the DECLINE, so a ping round-trip works cleanly. */
-    guint32 bob_ping_trans = htlc_b.trans;
-    g_assert_true (integration_send_message (fd_b, &htlc_b, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    guint32 bob_ping_trans = integration_send_ping (fd_b, &htlc_b);
+    g_assert_cmpuint (bob_ping_trans, !=, 0);
 
-    gboolean bob_pong = FALSE;
-    for (int i = 0; i < 64 && !bob_pong; i++) {
-        g_assert_true (
-            integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_b) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_b) != bob_ping_trans) {
-            continue;
-        }
-        bob_pong = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
-    }
-    g_assert_true (bob_pong);
+    g_assert_true (integration_drain_until_task_trans (
+        fd_b, &htlc_b, bob_ping_trans, 64));
+    g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
 
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);

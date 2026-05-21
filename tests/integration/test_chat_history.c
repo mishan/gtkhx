@@ -63,19 +63,16 @@
 #include "integration_harness.h"
 #include "server_matrix.h"
 
-/* chat_history.c references hlwrite (defined in network.c) for its
- * production hx_get_chat_history sender. Linking network.c into a
- * Tier 3 binary would pull in the entire client stack — GIOChannel,
- * cipher, compress, GtkhxSession signal emission, you name it. We
- * don't need any of that: this test uses
- * integration_send_get_chat_history (defined in the harness) for
- * sending, and only links chat_history.c for HxHistoryEntry plus its
- * parser. A no-op stub satisfies the linker without dragging in the
- * full stack. Same shape as tests/proto/test_chat_history.c.
+/* chat_history.c is bundled into the integration_harness lib (which
+ * gives this test the new hx_get_chat_history_build_chunks builder
+ * for free, used by integration_send_get_chat_history). The harness
+ * also provides a stubbed hlwrite_chunks (production's send path
+ * needs network.c which we deliberately don't link). No per-test
+ * stubs needed here anymore.
  *
- * If a future revision makes the integration tests actually call
- * hx_get_chat_history, swap this stub for the hlpack-forwarding
- * version the proto test uses. */
+ * hlwrite stays stubbed here in case any non-chat-history code path
+ * pulls it transitively — it's the production async-write entry that
+ * never makes sense in a Tier 3 binary. */
 void
 hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
@@ -90,19 +87,8 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 /* Small helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-    return ntohl (h->trans);
-}
+/* hdr_type / hdr_trans now live as inline statics in
+ * integration_harness.h. */
 
 /* Pick the first chat-history-capable server in the matrix, or NULL
  * if none survived the GTKHX_TEST_SERVERS env filter. Caller skips

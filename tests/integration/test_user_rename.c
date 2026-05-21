@@ -25,13 +25,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 /* Drain looking for an HTLS_HDR_USER_CHANGE matching `wanted_uid`
  * AND with the matching name (so we ignore Alice's join broadcast
  * which arrived earlier with her old name). */

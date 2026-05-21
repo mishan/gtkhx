@@ -262,6 +262,9 @@ test('human_readable', test_human_readable,
 # transitively wants nettle + zlib via protocol.h.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : test_inc,
 )
@@ -431,6 +434,8 @@ test_hlwrite = executable('test_hlwrite',
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
+  '../src/login_packet.c',
+  '../src/hl_code.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
 )
@@ -691,6 +696,43 @@ test_msg_event = executable('test_msg_event',
 test('msg_event', test_msg_event,
      suite : 'proto')
 
+# hope — Tier 2 known-answer tests for the HOPE-Secure-Login state
+# machine (src/hope.c). Covers the pure helpers extracted out of
+# rcv_task_login during the claude/hope-state-machine refactor:
+# algorithm-list reply builder, cipher-name lookups, the HMAC
+# chain (password_mac → encode_key → decode_key) with SHA-256
+# KAT vectors, LOGIN field encoding (XOR vs. HMAC variants),
+# session-key IP:port validation. Compiles hope.c, algo_list.c,
+# hmac.c, and hl_code.c in directly — none of which need GTK or
+# Adwaita, so the test binary stays self-contained the way the
+# rest of Tier 2 does.
+test_hope = executable('test_hope',
+  'proto/test_hope.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
+  '../src/hl_code.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+)
+test('hope', test_hope,
+     suite : 'proto')
+
+# ChaCha20-Poly1305 AEAD frame codec. Tier 2 KAT: seal/open round-
+# trip, counter advance, tamper rejection, peek behaviour. Pins the
+# wire-format invariants that the (currently-skipped) Tier 3
+# test_hope_chacha20 would exercise against a live server. See
+# tests/proto/test_aead.c's preamble for the gating context.
+test_aead = executable('test_aead',
+  'proto/test_aead.c',
+  '../src/cipher_aead.c',
+  '../src/debug.c', # cipher_aead's debug_log() trace hooks
+  dependencies        : proto_test_deps + [dependency('nettle')],
+  include_directories : proto_test_inc,
+)
+test('aead', test_aead,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #
@@ -719,6 +761,12 @@ integration_test_inc = include_directories('integration', '../src')
 # bundled in) packs / parses Hotline messages on top of the wire.
 # Tests link this lib and layer login / chat / file-list flows on
 # top.
+#
+# Production C files compiled in (rather than re-implemented in
+# harness translation units) so the test path drives the same wire
+# encoders the production binary does — no test-only forks. Today
+# that's hl_code.c (XOR encoder for LOGIN/PASSWORD chunks); other
+# extractions are tracked in the post-merge follow-up.
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
@@ -726,13 +774,20 @@ integration_harness_lib = static_library(
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
-  # Phase 5: proto_helpers' SELFINFO USER_LIST parse now sanitises
-  # server-supplied name bytes via gtkhx_text_to_utf8 (defined in
-  # text_util.c) to defend htlc->name against corrupt feedback
-  # loops. Pull text_util.c into the harness so the integration
-  # tests still link.
-  '../src/text_util.c',
-  '../src/debug.c',
+  '../src/hl_code.c',
+  '../src/login_packet.c',
+  '../src/chat_history.c',
+  # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
+  # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; hope.c brings
+  # the HMAC chain + chunk walker; algo_list.c / hmac.c are their
+  # transitive deps. All four are pure functions (Nettle + glib only,
+  # no GTK), so pulling them in costs the harness nothing in link
+  # surface — and lets future integration_login_hope_* primitives
+  # drive the same secure-login state machine production uses.
+  '../src/cipher_aead.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )
@@ -1227,11 +1282,47 @@ test('folder_get', test_integration_folder_get,
 # in the matrix (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd).
 test_integration_chat_history = executable('test_integration_chat_history',
   'integration/test_chat_history.c',
-  '../src/chat_history.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
+
+# hope_chacha20 — Tier 3 coverage for the HOPE-Secure-Login +
+# ChaCha20-Poly1305 AEAD path against a server that supports it
+# (Janus today; filtered via HX_TEST_CAP_CHACHA20). Skips silently
+# when no chacha20-capable server is in the matrix.
+#
+# The whole rest of the test-vs-prod dedup work on this branch (the
+# src/login_packet.{c,h} module, the harness AEAD wrappers,
+# integration_open_login_hope_or_skip) exists to make this test
+# possible.
+test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
+  'integration/test_hope_chacha20.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_chacha20', test_integration_hope_chacha20,
+     suite   : 'integration',
+     timeout : 60)
+
+# hope_hmac — Tier 3 coverage for the HOPE handshake against an
+# HMAC-only HOPE server (no AEAD). Filters on HX_TEST_CAP_HOPE so
+# it picks up mhxd (built with --enable-hope). Sister test to
+# hope_chacha20: same handshake state machine, no AEAD framing.
+# Exists because Janus's HOPE container isn't shippable yet, so
+# hope_chacha20 skips silently — this one keeps the live HOPE
+# handshake exercised against mhxd until that gap closes.
+test_integration_hope_hmac = executable('test_integration_hope_hmac',
+  'integration/test_hope_hmac.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_hmac', test_integration_hope_hmac,
+     suite   : 'integration',
+     timeout : 60)
+
 test('chat_history', test_integration_chat_history,
      suite   : 'integration',
      timeout : 60)

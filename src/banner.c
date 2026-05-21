@@ -31,6 +31,7 @@
 #include "debug.h"
 #include "hotline.h"
 #include "protocol.h"
+#include "proto_helpers.h" /* hl_htxf_hdr_pack */
 #include "network.h"
 #include "banner.h"
 
@@ -549,7 +550,7 @@ banner_htxf_worker_thread (void *arg)
 {
     struct htxf_fetch *f = arg;
     int s;
-    struct htxf_hdr h;
+    guint8 hdr_buf[SIZEOF_HTXF_HDR];
     char errbuf[256] = { 0 };
 
     s = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
@@ -559,18 +560,14 @@ banner_htxf_worker_thread (void *arg)
         goto out;
     }
 
-    memset (&h, 0, sizeof (h));
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (f->ref);
-    h.len = htonl (f->size);
-    /* type=HTXF_TYPE_BANNER in the last 4 bytes (u16 type + u16
-	 * reserved on the wire) so Mac-native servers route this
+    /* type=HTXF_TYPE_BANNER so Mac-native servers route this
 	 * subchannel through their banner-send path rather than the
-	 * generic single-file path. See the htxf_connect comment in
-	 * network.c for the full story on the type field. */
-    h.unknown = htonl (((guint32)HTXF_TYPE_BANNER) << 16);
+	 * generic single-file path. Shared packer in proto_helpers —
+	 * see the htxf_connect comment in network.c for the full story
+	 * on the type field. */
+    hl_htxf_hdr_pack (hdr_buf, f->ref, f->size, HTXF_TYPE_BANNER, 0);
 
-    if (!write_n (s, &h, SIZEOF_HTXF_HDR)) {
+    if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
         debug_log ("banner", "htxf header write failed: %s",
                    g_strerror (errno));
         close (s);

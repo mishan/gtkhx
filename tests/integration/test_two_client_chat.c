@@ -24,48 +24,8 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-/* Drain looking for a HTLS_HDR_CHAT broadcast whose uid matches
- * `wanted_uid`. Same pattern as test_chat_roundtrip's filter; we
- * filter here because each test connection sees broadcasts from
- * its peer AND from any other concurrent integration test
- * binaries running in parallel. */
-static gboolean
-drain_until_chat_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
-                           struct hx_chat_msg *out, int max_messages)
-{
-    for (int i = 0; i < max_messages; i++) {
-        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
-            return FALSE;
-        }
-        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
-            continue;
-        }
-        if (!hx_chat_extract (htlc, out)) {
-            continue;
-        }
-        if (out->uid == wanted_uid) {
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-static gboolean
-send_chat (int fd, struct htlc_conn *htlc, const char *text)
-{
-    guint16 style = htons (1);
-    return integration_send_message (
-        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_STYLE,
-        (int)sizeof (style), &style, (int)HTLC_DATA_CHAT, (int)strlen (text),
-        (guint8 *)text);
-}
+/* The chat-drain helper lives on the harness now —
+ * integration_drain_until_chat. */
 
 static void
 test_two_client_chat_a_to_b (void)
@@ -90,10 +50,10 @@ test_two_client_chat_a_to_b (void)
     /* A sends a unique line. B should see it as a CHAT broadcast
 	 * with A's uid and A's name in the body. */
     const char *line = "two-client integration ping";
-    g_assert_true (send_chat (fd_a, &htlc_a, line));
+    g_assert_true (integration_send_chat (fd_a, &htlc_a, line));
 
     struct hx_chat_msg cm;
-    g_assert_true (drain_until_chat_from_uid (fd_b, &htlc_b, htlc_a.uid, &cm,
+    g_assert_true (integration_drain_until_chat (fd_b, &htlc_b, htlc_a.uid, &cm,
                                               /*max_messages=*/64));
 
     /* B's view of the broadcast: A's uid, A's name in the

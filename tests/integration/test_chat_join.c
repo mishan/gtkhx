@@ -36,27 +36,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 static void
 test_chat_join_member_visible (void)
 {
@@ -76,127 +55,39 @@ test_chat_join_member_visible (void)
     }
 
     /* Step 2: Alice CHAT_CREATE → chat_id. */
-    guint16 bob_uid_be = htons (htlc_b.uid);
-    guint32 alice_create_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (
-        fd_a, &htlc_a, HTLC_HDR_CHAT_CREATE, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_UID, (int)sizeof (bob_uid_be), &bob_uid_be));
-
     guint32 chat_id = 0;
-    gboolean alice_got = FALSE;
-    for (int i = 0; i < 64 && !alice_got; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != alice_create_trans) {
-            continue;
-        }
-        alice_got = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
-        dh_start (&htlc_a)
-        {
-            if (_type == HTLS_DATA_CHAT_ID) {
-                dh_getint (chat_id);
-            }
-        }
-        dh_end ();
-    }
-    g_assert_true (alice_got);
-    g_assert_cmphex (chat_id, !=, 0);
+    g_assert_true (integration_create_chat_with_uid (fd_a, &htlc_a, htlc_b.uid,
+                                                     &chat_id, 64));
+    g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* Step 3: Bob drains for the CHAT_INVITE. */
-    gboolean bob_got_invite = FALSE;
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_CHAT_INVITE) {
-            continue;
-        }
-        if (!hx_chat_invite_extract (&htlc_b, &im)) {
-            continue;
-        }
-        bob_got_invite = TRUE;
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (hx_chat_invite_extract (&htlc_b, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
-    /* Step 4: Bob CHAT_JOIN. */
-    guint32 cid_be = htonl (chat_id);
-    guint32 bob_join_trans = htlc_b.trans;
-    g_assert_true (integration_send_message (
-        fd_b, &htlc_b, HTLC_HDR_CHAT_JOIN, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
+    /* Steps 4 + 5: Bob CHAT_JOIN; harness drains to the TASK reply
+	 * (correlated by trans) and asserts flag & 1 == 0. Reply frame
+	 * is still in htlc_b.in afterward so we can walk the USER_LIST
+	 * chunks below. */
+    g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
 
-    /* Step 5: Bob's TASK reply with USER_LIST chunks. */
-    gboolean bob_join_reply = FALSE;
     int n_user_list = 0;
-    for (int i = 0; i < 64 && !bob_join_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_b) != HTLS_HDR_TASK) {
-            continue;
+    dh_start (&htlc_b)
+    {
+        if (_type == HTLS_DATA_USER_LIST) {
+            n_user_list++;
         }
-        if (hdr_trans (&htlc_b) != bob_join_trans) {
-            continue;
-        }
-        bob_join_reply = TRUE;
-        g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
-        dh_start (&htlc_b)
-        {
-            if (_type == HTLS_DATA_USER_LIST) {
-                n_user_list++;
-            }
-        }
-        dh_end ();
     }
-    g_assert_true (bob_join_reply);
+    dh_end ();
     /* Alice and Bob both joined → 2 entries. Some servers may
 	 * vary; insist on >= 1 to leave room for differing flushes. */
     g_assert_cmpint (n_user_list, >=, 1);
 
-    /* Step 6: Alice receives CHAT_USER_CHANGE for Bob. */
-    gboolean alice_got_change = FALSE;
-    for (int i = 0; i < 64 && !alice_got_change; i++) {
-        if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_a) != HTLS_HDR_CHAT_USER_CHANGE) {
-            continue;
-        }
-
-        guint32 got_cid = 0;
-        guint16 got_uid = 0;
-        gboolean got_uid_chunk = FALSE;
-        dh_start (&htlc_a)
-        {
-            switch (_type) {
-            case HTLS_DATA_CHAT_ID:
-                dh_getint (got_cid);
-                break;
-            case HTLS_DATA_UID:
-                if (_len == sizeof (guint16)) {
-                    guint16 v;
-                    memcpy (&v, dh->data, sizeof v);
-                    got_uid = ntohs (v);
-                    got_uid_chunk = TRUE;
-                }
-                break;
-            }
-        }
-        dh_end ();
-        if (got_cid != chat_id || !got_uid_chunk) {
-            continue;
-        }
-        if (got_uid != htlc_b.uid) {
-            continue;
-        }
-        alice_got_change = TRUE;
-    }
-    g_assert_true (alice_got_change);
+    /* Step 6: Alice receives CHAT_USER_CHANGE for Bob — same cid,
+	 * Bob's uid. */
+    g_assert_true (integration_drain_until_chat_user_event (
+        fd_a, &htlc_a, HTLS_HDR_CHAT_USER_CHANGE, chat_id, htlc_b.uid, 64));
 
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);

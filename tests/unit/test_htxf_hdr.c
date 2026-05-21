@@ -34,20 +34,18 @@
 #include <arpa/inet.h>          /* htonl */
 #include "compat.h"             /* PACKED — used inside hotline.h */
 #include "hotline.h"
+#include "proto_helpers.h"      /* hl_htxf_hdr_pack — the shared packer */
 
-/* Encode the same way htxf_connect (src/network.c) and the banner
- * sender (src/banner.c) do. Kept here as the test's reference
- * implementation so we can pin the bytes without linking either
- * production caller (both drag in GSocket + threads). */
+/* Wrap the production packer so each test stays focused on the
+ * field values rather than the packer signature. Production
+ * htxf_connect (src/network.c), the banner sender (src/banner.c),
+ * and the integration test harness all funnel through
+ * hl_htxf_hdr_pack — so pinning the bytes here pins all four
+ * call sites at once. */
 static void
 encode_htxf_hdr (guint8 out[16], guint32 ref, guint32 len, guint16 type)
 {
-    struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (ref);
-    h.len = htonl (len);
-    h.unknown = htonl (((guint32)type) << 16);
-    memcpy (out, &h, SIZEOF_HTXF_HDR);
+    hl_htxf_hdr_pack (out, ref, len, type, /*flags=*/0);
 }
 
 /* The header is exactly 16 bytes — the figure baked into every

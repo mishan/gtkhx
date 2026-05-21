@@ -27,27 +27,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
 static void
 test_ping_round_trip (void)
 {
@@ -57,37 +36,20 @@ test_ping_round_trip (void)
         return;
     }
 
-    /* Capture the trans we'll send PING with. hlpack assigns
-	 * htlc->trans's current value to the message and increments
-	 * after, so the sent PING uses whatever htlc.trans is right
-	 * now. */
-    guint32 ping_trans = htlc.trans;
+    /* integration_send_ping captures + returns the trans hlpack
+	 * stamps onto the PING frame, so the caller can match it
+	 * against the TASK reply below. */
+    guint32 ping_trans = integration_send_ping (fd, &htlc);
+    g_assert_cmpuint (ping_trans, !=, 0);
 
-    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_PING,
-                                             /*flag=*/0, /*hc=*/0));
+    /* Drain past unsolicited server messages (banners, USER_CHANGE
+	 * broadcasts from parallel test connections, etc.) until the
+	 * TASK matching our PING trans lands. */
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, ping_trans, 8));
 
-    /* Read until we see a TASK reply matching our trans ID.
-	 * mhxd may have other unsolicited messages (banners, etc.)
-	 * queued; loop past them. */
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 8; i++) {
-        if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != ping_trans) {
-            continue;
-        }
-
-        /* Found our task reply. Flag bit 1 is the task-error
-		 * marker — must NOT be set. */
-        g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
-        got_reply = TRUE;
-        break;
-    }
-    g_assert_true (got_reply);
+    /* Flag bit 1 is the task-error marker — must NOT be set. */
+    g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     integration_release_htlc (&htlc);
     integration_close (fd);

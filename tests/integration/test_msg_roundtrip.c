@@ -23,13 +23,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 /* Drain looking for an HTLS_HDR_MSG addressed from `wanted_uid`. */
 static gboolean
 drain_until_msg_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,

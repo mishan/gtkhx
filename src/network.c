@@ -57,6 +57,9 @@
 #include "banner.h"
 #include "debug.h"
 #include "cipher_aead.h"
+#include "login_packet.h"
+#include "hl_code.h"
+#include "proto_helpers.h"
 
 char *server_addr;
 #ifdef USE_IPV6
@@ -988,8 +991,6 @@ send_login (struct gtkhx_connect_ctx *ctx)
     struct htlc_conn *htlc = ctx->htlc;
     GSocket *sock;
     int s;
-    char enclogin[64], encpass[64];
-    guint16 icon16, llen, plen;
 
     if (!populate_htlc_remote_ip (htlc, ctx->conn)) {
         connect_fail (ctx, _ ("remote address"), NULL);
@@ -1031,149 +1032,49 @@ send_login (struct gtkhx_connect_ctx *ctx)
         strcpy (htlc->login, ctx->login);
     }
 
-    if (ctx->secure) {
-#ifdef CONFIG_CIPHER
-        guint8 cipheralglist[64];
-        guint16 cipheralglistlen;
-        guint8 cipherlen;
-#endif
-#ifdef CONFIG_COMPRESS
-        guint8 compressalglist[64];
-        guint16 compressalglistlen;
-        guint8 compresslen;
-#endif
-        guint16 hc;
-        guint8 macalglist[64];
-        guint16 macalglistlen;
-        const guint8 zero = 0;
+    /* All the chunk-assembly logic for both HOPE Step 1 and legacy
+	 * LOGIN now lives in src/login_packet.c so the integration test
+	 * harness drives the same wire encoder. The thin per-mode setup
+	 * here (rcv_task_login registration, htlc->macalg seed, app_string
+	 * formatting, capability bitmask) stays — that's all production-
+	 * specific glue. */
+    struct hx_chunk login_chunks[HX_LOGIN_MAX_CHUNKS];
+    guint8 login_scratch[HX_LOGIN_SCRATCH_SIZE];
+    hx_login_request req = { 0 };
+    int hc;
 
+    if (ctx->secure) {
         task_new (htlc, RCV_TASK_FN (rcv_task_login),
                   ctx->pass ? g_strdup (ctx->pass) : g_strdup (""), 0, "login");
 
-        /* HOPE MAC algorithm preference list, strongest first per
-		 * the HOPE-Secure-Login spec. HMAC-SHA256 is the preferred
-		 * choice (also required for AEAD key derivation in the
-		 * ChaCha20-Poly1305 extension); HMAC-SHA1 and HMAC-MD5 are
-		 * older fallbacks. The server picks the first algorithm it
-		 * also supports; htlc->macalg gets overwritten with the
-		 * server's selection on the Step 2 reply, so the strcpy
-		 * here is only the "we asked for this" default if the
-		 * server's reply is malformed and we have to bail with
-		 * the strongest pre-negotiated guess. */
+        /* HOPE-Secure-Login: seed htlc->macalg with the strongest
+		 * preference so a malformed Step 1 reply still leaves us in
+		 * a known state. login_packet.c hardcodes the full
+		 * preference list (SHA256 → SHA1 → MD5) per the spec. */
         strcpy (htlc->macalg, "HMAC-SHA256");
-        {
-            guint16 val = 3;
-            HN16 (macalglist, &val);
-        }
-        macalglistlen = 2;
-        macalglist[macalglistlen++] = 11;
-        memcpy (macalglist + macalglistlen, "HMAC-SHA256", 11);
-        macalglistlen += 11;
-        macalglist[macalglistlen++] = 9;
-        memcpy (macalglist + macalglistlen, "HMAC-SHA1", 9);
-        macalglistlen += 9;
-        macalglist[macalglistlen++] = 8;
-        memcpy (macalglist + macalglistlen, "HMAC-MD5", 8);
-        macalglistlen += 8;
 
-        /* HOPE-Secure-Login app identification. Without these, the
-		 * server's logs and stats see us as base hx. AppID is a 4-byte
-		 * OSType; "GTKx" disambiguates GtkHx from other hx-family
-		 * clients. AppString is free-form name + version. */
-        const char *app_id = "GTKx";
         char app_string[64];
         g_snprintf (app_string, sizeof app_string, "GtkHx %s", VERSION);
 
-        hc = 6; /* LOGIN + PASSWORD + MAC_ALG + APP_ID + APP_STRING + SESSIONKEY */
+        req.mode = HX_LOGIN_MODE_HOPE_STEP1;
+        req.hope_app_id = "GTKx";
+        req.hope_app_string = app_string;
+#ifdef CONFIG_CIPHER
+        /* HOPE cipher advertisement. Single-entry list of the user's
+		 * configured algorithm. Phase 5+ NOTE: this could grow into a
+		 * strongest-first multi-entry list once HTXF subchannel AEAD
+		 * (Phase E) lands. */
+        if (htlc->cipheralg[0]) {
+            req.cipheralg = htlc->cipheralg;
+        }
+#endif
 #ifdef CONFIG_COMPRESS
         if (htlc->compressalg[0]) {
-            compresslen = strlen (htlc->compressalg);
-            {
-                guint16 val = 1;
-                HN16 (compressalglist, &val);
-            }
-            compressalglistlen = 2;
-            compressalglist[compressalglistlen++] = compresslen;
-            memcpy (compressalglist + compressalglistlen, htlc->compressalg,
-                    compresslen);
-            compressalglistlen += compresslen;
-            hc++;
-        } else {
-            compressalglistlen = 0;
+            req.compressalg = htlc->compressalg;
         }
 #endif
-#ifdef CONFIG_CIPHER
-        if (htlc->cipheralg[0]) {
-            /* HOPE cipher advertisement. Single-entry list of the
-			 * user's configured algorithm (BLOWFISH / RC4 / or
-			 * CHACHA20-POLY1305 if they pinned the AEAD path
-			 * explicitly via the bookmark cipher selector).
-			 *
-			 * Phase 5+ NOTE: this could grow into a strongest-
-			 * first multi-entry list once HTXF subchannel AEAD
-			 * (Phase E) lands. Until then, auto-advertising
-			 * CHACHA20-POLY1305 alongside BLOWFISH would break
-			 * file transfers when the server picks ChaCha20
-			 * (control channel runs framed AEAD but our HTXF
-			 * code still does plaintext I/O). Single-entry is
-			 * the safe interim — users who want AEAD can pin
-			 * it via the bookmark; the rest get unchanged
-			 * stream-cipher behaviour. */
-            cipherlen = strlen (htlc->cipheralg);
-            guint16 cnt = 1;
-            HN16 (cipheralglist, &cnt);
-            cipheralglistlen = 2;
-            cipheralglist[cipheralglistlen++] = cipherlen;
-            memcpy (cipheralglist + cipheralglistlen, htlc->cipheralg,
-                    cipherlen);
-            cipheralglistlen += cipherlen;
-            hc++;
-        } else {
-            cipheralglistlen = 0;
-        }
-#endif
-        hlwrite (htlc, HTLC_HDR_LOGIN, 0, hc, HTLC_DATA_LOGIN, 1, &zero,
-                 HTLC_DATA_PASSWORD, 1, &zero, HTLC_DATA_MAC_ALG, macalglistlen,
-                 macalglist, HTLC_DATA_HOPE_APP_ID, 4, app_id,
-                 HTLC_DATA_HOPE_APP_STRING, (guint16)strlen (app_string),
-                 app_string,
-#ifdef CONFIG_CIPHER
-                 HTLC_DATA_CIPHER_ALG, cipheralglistlen, cipheralglist,
-#endif
-#ifdef CONFIG_COMPRESS
-                 HTLC_DATA_COMPRESS_ALG, compressalglistlen, compressalglist,
-#endif
-                 HTLC_DATA_SESSIONKEY, 0, 0);
     } else {
-        guint16 cv16;
-
         task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-
-        icon16 = htons (htlc->icon);
-        if (ctx->login) {
-            llen = strlen (ctx->login);
-            if (llen > 64) {
-                llen = 64;
-            }
-            hl_encode (enclogin, ctx->login, llen);
-        } else {
-            llen = 0;
-        }
-
-        if (ctx->pass && *ctx->pass) {
-            plen = strlen (ctx->pass);
-            if (plen > 64) {
-                plen = 64;
-            }
-            hl_encode (encpass, ctx->pass, plen);
-        } else {
-            plen = 0;
-        }
-
-        /* Advertise ourselves as Hotline 1.8.5 (185). Matches what
-		 * the integration test harness sends; bumps mhxd's
-		 * can_ping bit so HTLC_HDR_PING keepalives are accepted. */
-        cv16 = htons (185);
 
         /* DATA_CAPABILITIES bitmask. We advertise:
 		 *   bit 0  CAP_LARGE_FILES    "I can handle 64-bit sizes."
@@ -1181,20 +1082,17 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 *   bit 4  CAP_CHAT_HISTORY   "I can request server-stored
 		 *                             chat history via TRAN 700."
 		 *
-		 * Servers that support the spec echo the bits they
-		 * accept back in the LOGIN reply. Unknown bits are
-		 * ignored per spec; servers that don't recognise the
-		 * chunk silently fall back to legacy 32-bit Mac Roman
-		 * framing — same behaviour as without this chunk.
+		 * Servers that support the spec echo the bits they accept
+		 * back in the LOGIN reply. Unknown bits are ignored per
+		 * spec; servers that don't recognise the chunk silently
+		 * fall back to legacy 32-bit Mac Roman framing — same
+		 * behaviour as without this chunk.
 		 *
-		 * Per the Large-File spec the chunk is "typically 2 bytes,
-		 * expandable to 8." Two bytes covers bits 0-5; we send
-		 * those today. */
-        guint16 caps16 = htons (HTLC_CAP_LARGE_FILES
-                              | HTLC_CAP_TEXT_ENCODING
-                              | HTLC_CAP_CHAT_HISTORY);
-
-        /* LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
+		 * Advertise ourselves as Hotline 1.8.5 (185). Matches what
+		 * the integration test harness sends; bumps mhxd's
+		 * can_ping bit so HTLC_HDR_PING keepalives are accepted.
+		 *
+		 * LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
 		 * 1.5+ servers will get our nick via AGREEMENTAGREE after
 		 * the user dismisses the agreement window (or via the auto-
 		 * send in hx_rcv_agreement_file's HX_AGREEMENT_NONE branch
@@ -1202,19 +1100,30 @@ send_login (struct gtkhx_connect_ctx *ctx)
 		 * never send agreement and never accept AGREEMENTAGREE; for
 		 * those, rcv_task_login detects the absence of an
 		 * HTLS_DATA_VERSION chunk in the reply and fires
-		 * hx_change_name_icon (USER_CHANGE) directly. The two paths
-		 * stay cleanly separated. */
-        if (plen) {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 5, HTLC_DATA_ICON, 2, &icon16,
-                     HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_PASSWORD, plen,
-                     encpass, HTLC_DATA_CLIENTVERSION, 2, &cv16,
-                     HTLC_DATA_CAPABILITIES, 2, &caps16);
-        } else {
-            hlwrite (htlc, HTLC_HDR_LOGIN, 0, 4, HTLC_DATA_ICON, 2, &icon16,
-                     HTLC_DATA_LOGIN, llen, enclogin, HTLC_DATA_CLIENTVERSION,
-                     2, &cv16, HTLC_DATA_CAPABILITIES, 2, &caps16);
-        }
+		 * hx_change_name_icon (USER_CHANGE) directly. */
+        req.mode = HX_LOGIN_MODE_LEGACY;
+        req.icon = htlc->icon;
+        req.login_name = ctx->login; /* NULL = anonymous */
+        req.password = (ctx->pass && *ctx->pass) ? ctx->pass : NULL;
+        req.display_name = NULL; /* production sends NAME via USER_CHANGE later */
+        req.client_version = 185;
+        req.caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                 | HTLC_CAP_CHAT_HISTORY;
+        req.send_caps = 1;
     }
+
+    hc = hx_login_build_chunks (&req, login_chunks, HX_LOGIN_MAX_CHUNKS,
+                                login_scratch, sizeof (login_scratch));
+    /* Builder returns 0 on argument / overflow validation failure.
+	 * Sending hc=0 would produce a header-only frame the server
+	 * would reject (or trip hlpack_chunks's g_return_if_fail
+	 * guardrails). Route through connect_fail so the user sees a
+	 * sensible toast instead of a silent hang. */
+    if (hc <= 0) {
+        connect_fail (ctx, _ ("building LOGIN packet"), NULL);
+        return;
+    }
+    hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, login_chunks, hc);
 
     ctx->state = GTKHX_CONNECT_STATE_DONE;
     connect_ctx_free (ctx);
@@ -1365,7 +1274,7 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
 int
 htxf_connect (struct htxf_conn *htxf)
 {
-    struct htxf_hdr h;
+    guint8 hdr_buf[SIZEOF_HTXF_HDR];
     int s;
     char errbuf[256];
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
@@ -1399,34 +1308,24 @@ htxf_connect (struct htxf_conn *htxf)
         return -1;
     }
 
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (htxf->ref);
     /* Spec: when SIZE64 is set, zero the legacy 32-bit field
 	 * (otherwise a non-large-file peer might attempt a partial
 	 * read and treat it as complete). Otherwise carry the size
 	 * in the legacy field as before. */
-    h.len = size64 ? 0 : htonl ((guint32)htxf->total_size);
-    /* The last 4 bytes of the HTXF magic header — declared as
-	 * `unknown` u32 in struct htxf_hdr for historical reasons —
-	 * are laid out on the wire as `u16 type + u16 reserved` in
-	 * the legacy interpretation, OR as a flags bitmask under
-	 * the Large-File spec. The two interpretations share the
-	 * same 4 bytes: the type lives in the high u16, the flags
-	 * in the low u16. We OR both in so each reader sees the
-	 * field it expects. */
     {
         guint16 type
             = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-        guint32 flags = 0;
+        guint16 flags = 0;
         if (large) {
             flags |= HTXF_FLAG_LARGE_FILE;
         }
         if (size64) {
             flags |= HTXF_FLAG_SIZE64;
         }
-        h.unknown = htonl ((((guint32)type) << 16) | flags);
+        guint32 wire_len = size64 ? 0 : (guint32) htxf->total_size;
+        hl_htxf_hdr_pack (hdr_buf, htxf->ref, wire_len, type, flags);
     }
-    if (write (s, &h, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
+    if (write (s, hdr_buf, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
         close (s);
         return -1;
     }
@@ -2002,6 +1901,68 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 
     /* Length of the packed message (header + chunks), used by the
 	 * cipher / compress hooks below. */
+    len = (htlc->out.pos + htlc->out.len) - this_off;
+
+    hxd_fd_set (htlc->fd, FDW);
+#ifdef CONFIG_COMPRESS
+    if (htlc->compress_encode_type != COMPRESS_NONE) {
+        len = compress_encode (htlc, this_off, len);
+    }
+#endif
+#ifdef CONFIG_CIPHER
+    if (htlc->cipher_encode_type != CIPHER_NONE) {
+        cipher_encode (htlc, this_off, len);
+    }
+#endif
+}
+
+/* Chunk-array variant of hlwrite. Same trace + write + cipher +
+ * compress side-effects, but the chunks come from a caller-built
+ * array (via login_packet.c::hx_login_build_chunks, or whatever
+ * future shared message builder lands). Pure delivery side: no
+ * idea what HTLC_HDR_* type the chunks belong to, that's caller-
+ * supplied.
+ *
+ * Mirrors hlwrite's structure so any future per-chunk hook we add
+ * (e.g. AEAD framing on a per-message basis) only has to land in
+ * two adjacent functions instead of N callers.
+ */
+void
+hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                const struct hx_chunk *chunks, int hc)
+{
+    /* Public-API guardrails. Mirror hlpack_chunks's checks here too
+	 * so a caller bug fails before we open a proto trace block (a
+	 * pack-guard trip would leave an unmatched send_begin → noisy
+	 * trace output and an FDW write of zero bytes). Per-chunk
+	 * data-pointer validity is checked again inside hlpack_chunks;
+	 * we just gate the top-level ones. */
+    g_return_if_fail (htlc != NULL);
+    g_return_if_fail (hc >= 0);
+    g_return_if_fail (hc == 0 || chunks != NULL);
+
+    guint32 this_off, len;
+
+    if (!htlc->fd) {
+        return;
+    }
+
+    this_off = htlc->out.pos + htlc->out.len;
+
+    /* Pack first, trace after — that way a g_return_if_fail trip
+	 * inside hlpack_chunks (per-chunk NULL data with len > 0)
+	 * doesn't leave an open trace block. Capture trans BEFORE the
+	 * pack call since hlpack_chunks bumps htlc->trans. */
+    guint32 my_trans = htlc->trans;
+    hlpack_chunks (htlc, type, flag, chunks, hc);
+
+    proto_trace_send_begin (type, my_trans, hc);
+    for (int i = 0; i < hc; i++) {
+        proto_trace_send_chunk (chunks[i].type, chunks[i].len,
+                                chunks[i].data);
+    }
+    proto_trace_send_end ();
+
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
     hxd_fd_set (htlc->fd, FDW);

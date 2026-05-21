@@ -35,20 +35,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
 static void
 test_news_post_then_fetch (void)
 {
@@ -76,19 +62,8 @@ test_news_post_then_fetch (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_NEWS_GETFILE,
                                              /*flag=*/0, /*hc=*/0));
 
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 64 && !got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != fetch_trans) {
-            continue;
-        }
-        got_reply = TRUE;
-    }
-    g_assert_true (got_reply);
+    g_assert_true (integration_drain_until_task_trans (
+        fd, &htlc, fetch_trans, 64));
 
     char body[8192 + 1];
     gsize body_len = 0;
@@ -134,17 +109,8 @@ test_news_post_broadcasts_to_other_clients (void)
         (int)HTLC_DATA_NEWS_POST, (int)strlen (marker), (guint8 *)marker));
 
     /* On B's connection, drain looking for HTLS_HDR_NEWS_POST. */
-    gboolean got_post = FALSE;
-    for (int i = 0; i < 64 && !got_post; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_NEWS_POST) {
-            continue;
-        }
-        got_post = TRUE;
-    }
-    g_assert_true (got_post);
+    g_assert_true (integration_drain_until_type (fd_b, &htlc_b,
+                                                 HTLS_HDR_NEWS_POST, 64));
 
     /* Walk the chunks via dh_start to find the NEWS body. */
     gboolean found_marker = FALSE;

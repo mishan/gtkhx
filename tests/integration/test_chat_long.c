@@ -34,13 +34,6 @@
 
 #define LONG_BODY_LEN 1500
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
 static void
 test_chat_long_message_roundtrips (void)
 {

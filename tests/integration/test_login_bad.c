@@ -32,20 +32,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* hl_code is bitwise NOT — duplicate it locally rather than dragging
  * the helper out of integration_harness.c. The encode is trivial so
  * a 4-line inline version isn't worth a header export. */

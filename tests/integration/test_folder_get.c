@@ -89,27 +89,6 @@ drain_with_timeout (int fd, gsize budget, int per_read_ms)
     return total;
 }
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* memmem-like substring search over raw bytes. The FILP wrapper
  * around each file's data fork puts the actual content somewhere
  * after a 133-byte preamble, so we want to find the seed content
@@ -147,19 +126,8 @@ test_folder_get_round_trip (void)
         (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
     /* Drain to the TASK reply matching our trans. */
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 64 && !got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != our_trans) {
-            continue;
-        }
-        got_reply = TRUE;
-    }
-    g_assert_true (got_reply);
+    g_assert_true (integration_drain_until_task_trans (
+        fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         /* Task-error. The most likely cause on a fresh container

@@ -32,20 +32,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
 static void
 test_chat_subject_broadcasts (void)
 {
@@ -64,37 +50,10 @@ test_chat_subject_broadcasts (void)
         return;
     }
 
-    /* Alice creates a private chat naming Bob. */
-    guint16 bob_uid_be = htons (htlc_b.uid);
-    guint32 create_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (
-        fd_a, &htlc_a, HTLC_HDR_CHAT_CREATE, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_UID, (int)sizeof (bob_uid_be), &bob_uid_be));
-
-    /* Drain Alice's connection for the TASK reply with the new
-	 * chat_id. */
+    /* Alice creates a private chat naming Bob → chat_id. */
     guint32 chat_id = 0;
-    gboolean got_create_reply = FALSE;
-    for (int i = 0; i < 64 && !got_create_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != create_trans) {
-            continue;
-        }
-        got_create_reply = TRUE;
-        dh_start (&htlc_a)
-        {
-            if (_type == HTLS_DATA_CHAT_ID) {
-                dh_getint (chat_id);
-            }
-        }
-        dh_end ();
-    }
-    g_assert_true (got_create_reply);
-    g_assert_cmphex (chat_id, !=, 0);
+    g_assert_true (integration_create_chat_with_uid (fd_a, &htlc_a, htlc_b.uid,
+                                                     &chat_id, 64));
 
     /* Alice sets the subject. */
     const char *subject = "Tier-3 chat subject smoke test";

@@ -911,6 +911,151 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
     memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
 }
 
+void
+hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
+                  guint16 flags)
+{
+    struct htxf_hdr h;
+    h.magic = htonl (HTXF_MAGIC_INT);
+    h.ref = htonl (ref);
+    h.len = htonl (len);
+    /* Last 4 bytes are `unknown u32` in the struct; on the wire
+     * they're (u16 type) (u16 flags). Mac-native servers read the
+     * type to dispatch the subchannel; cap-aware peers read the
+     * flags to know whether to expect the 24-byte large-file
+     * variant. Both interpretations share the same word — the type
+     * lives in the high u16 and is non-zero, the flags in the low
+     * u16. */
+    h.unknown = htonl ((((guint32) type) << 16) | flags);
+    memcpy (buf, &h, SIZEOF_HTXF_HDR);
+}
+
+guint64
+hl_capabilities_decode (const guint8 *bytes, guint16 len)
+{
+    if (!bytes || !len) {
+        return 0;
+    }
+    guint64 caps = 0;
+    /* Cap at 8 bytes — anything past that is more than u64 can hold
+     * and the spec lets us truncate cleanly (unknown bits are
+     * silently preserved by the wire format on round-trip; we just
+     * can't store them). */
+    guint16 n = len > 8 ? 8 : len;
+    for (guint16 i = 0; i < n; i++) {
+        caps = (caps << 8) | bytes[i];
+    }
+    return caps;
+}
+
+gboolean
+hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
+               guint32 *flag_out, guint16 *hc_out, guint32 *wire_len_out,
+               guint32 *body_len_out)
+{
+    if (!hdr_bytes) {
+        return FALSE;
+    }
+    const struct hl_hdr *h = (const struct hl_hdr *) hdr_bytes;
+    guint32 wire_len = ntohl (h->len);
+
+    if (type_out) {
+        *type_out = ntohl (h->type);
+    }
+    if (trans_out) {
+        *trans_out = ntohl (h->trans);
+    }
+    if (flag_out) {
+        *flag_out = ntohl (h->flag);
+    }
+    if (hc_out) {
+        *hc_out = ntohs (h->hc);
+    }
+    if (wire_len_out) {
+        *wire_len_out = wire_len;
+    }
+    if (body_len_out) {
+        /* The wire `len` field encodes "body bytes plus the
+         * 2-byte hc field" — hc lives at the tail of the 22-byte
+         * header struct but counts as the start of the data
+         * section per the protocol spec. Back out to body byte
+         * count, clamping wire_len at MAX_HOTLINE_PACKET_LEN and
+         * guarding against wire_len < 2 to dodge underflow. */
+        guint32 capped = wire_len > MAX_HOTLINE_PACKET_LEN
+                             ? MAX_HOTLINE_PACKET_LEN
+                             : wire_len;
+        *body_len_out = capped < sizeof (h->hc)
+                            ? 0
+                            : capped - (guint32) sizeof (h->hc);
+    }
+    return TRUE;
+}
+
+void
+hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+               const struct hx_chunk *chunks, int hc)
+{
+    /* Mirror hlpack's wire layout exactly — same header math, same
+     * length encoding, same trans++ side effect. We re-implement
+     * the body here rather than build a fake va_list (which is
+     * unportable) or call hlpack in a loop (which would emit one
+     * packet per chunk).
+     *
+     * Public-API guardrails: this function is the entry point for
+     * every shared chunk-array builder (login_packet,
+     * chat_history, future modules) plus the integration harness,
+     * so a NULL htlc or a chunks=NULL+hc>0 caller is a programming
+     * bug we want loud — not a silent NULL deref inside memcpy. */
+    g_return_if_fail (htlc != NULL);
+    g_return_if_fail (hc >= 0);
+    g_return_if_fail (hc == 0 || chunks != NULL);
+
+    struct hl_hdr h;
+    struct hl_data_hdr dhs;
+    struct qbuf *q = &htlc->out;
+    guint32 this_off, pos;
+    guint32 my_trans;
+
+    this_off = q->pos + q->len;
+    pos = this_off + SIZEOF_HL_HDR;
+    q->len += SIZEOF_HL_HDR;
+    q->buf = g_realloc (q->buf, q->pos + q->len);
+
+    h.type = htonl (type);
+    my_trans = htlc->trans;
+    h.trans = htonl (my_trans);
+    htlc->trans++;
+    h.flag = htonl (flag);
+    h.hc = htons ((guint16) hc);
+
+    for (int i = 0; i < hc; i++) {
+        guint16 t = chunks[i].type;
+        guint16 l = chunks[i].len;
+
+        /* len==0 with data==NULL is a legitimate empty-chunk shape
+		 * (HOPE Step 1 sends an empty HTLC_DATA_SESSIONKEY this
+		 * way); a non-zero length with NULL data is a caller bug. */
+        g_return_if_fail (l == 0 || chunks[i].data != NULL);
+
+        dhs.type = htons (t);
+        dhs.len = htons (l);
+
+        q->len += SIZEOF_HL_DATA_HDR + l;
+        q->buf = g_realloc (q->buf, q->pos + q->len);
+        memcpy (&q->buf[pos], (guint8 *) &dhs, SIZEOF_HL_DATA_HDR);
+        pos += SIZEOF_HL_DATA_HDR;
+
+        if (l) {
+            memcpy (&q->buf[pos], chunks[i].data, l);
+            pos += l;
+        }
+    }
+
+    guint32 packed_len = pos - this_off;
+    h.len = h.len2 = htonl (packed_len - (SIZEOF_HL_HDR - sizeof (h.hc)));
+    memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
+}
+
 /* See doc-comment in proto_helpers.h. */
 gboolean
 hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,

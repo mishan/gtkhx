@@ -61,27 +61,6 @@
 #define HTLC_DATA_NEWS_DIR ((guint16)0x0145)
 #define HTLS_DATA_NEWS_CATLIST ((guint16)0x0141)
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 /* Build a single-component HTLC_DATA_NEWS_DIR blob for `name`.
  * Returns g_malloc'd bytes; caller frees. *outlen receives the
  * total size. */
@@ -122,19 +101,8 @@ test_news_catlist_seeded_irasshaimase (void)
         (int)HTLC_DATA_NEWS_DIR, (int)dirlen, dir));
     g_free (dir);
 
-    gboolean got_reply = FALSE;
-    for (int i = 0; i < 64 && !got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd, &htlc, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc) != our_trans) {
-            continue;
-        }
-        got_reply = TRUE;
-    }
-    g_assert_true (got_reply);
+    g_assert_true (integration_drain_until_task_trans (
+        fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];

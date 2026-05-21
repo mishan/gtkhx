@@ -147,11 +147,17 @@ test_send_multiple_caps_bits (void)
     htlc_free (&htlc);
 }
 
-/* ---------- recv side: mimic the rcv.c parser ---------- */
-
-/* Replicate the variable-width big-endian decode the rcv.c parser
- * uses for HTLS_DATA_CAPABILITIES. Walk the chunk via dh_start and
- * decode the body into a u64. */
+/* ---------- recv side: drive the real production decoder ----------
+ *
+ * Pre-refactor this test had its own copy of the variable-width
+ * big-endian decoder that rcv.c::rcv_task_login uses. The whole
+ * point of this test is to PIN the production behaviour, so calling
+ * the production helper (hl_capabilities_decode in proto_helpers)
+ * is strictly better than mimicking it — a future change to the
+ * decoder shows up here as either a test pass with the new
+ * semantics or a test-vector-and-decoder simultaneous drift, but
+ * never a silent divergence where the test mimics out-of-date
+ * behaviour. */
 static guint64
 decode_caps_from_reply (struct htlc_conn *htlc)
 {
@@ -161,9 +167,7 @@ decode_caps_from_reply (struct htlc_conn *htlc)
         if (_type != HTLS_DATA_CAPABILITIES) {
             continue;
         }
-        for (guint16 i = 0; i < _len && i < 8; i++) {
-            caps = (caps << 8) | dh->data[i];
-        }
+        caps = hl_capabilities_decode (dh->data, _len);
     }
     dh_end ();
     return caps;

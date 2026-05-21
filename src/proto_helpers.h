@@ -192,6 +192,117 @@ extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                     va_list ap);
 
 /*
+ * Chunk-array variant of hlpack.
+ *
+ * Same wire format and same effect on htlc->out as hlpack, but the
+ * chunks come from a caller-built array rather than a va_list. This
+ * lets shared message builders (e.g. login_packet.c::hx_login_pack)
+ * assemble their chunks programmatically and hand them to a single
+ * packer — no need for each builder to wrap its own variadic
+ * dispatch.
+ *
+ * The struct hx_chunk type is a thin (type, len, data) triple; the
+ * caller owns the backing storage for the data pointers (they must
+ * outlive the hlpack_chunks call, which copies bytes into
+ * htlc->out). hc is the number of chunks in the array.
+ *
+ * No fd write, no cipher / compression, no proto_trace logging —
+ * those layers stay in hlwrite() and the harness's
+ * integration_send_chunks() wrapper.
+ */
+struct hx_chunk {
+    guint16 type;
+    guint16 len;
+    const void *data;
+};
+
+extern void hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                           const struct hx_chunk *chunks, int hc);
+
+/*
+ * Decode the 22-byte Hotline message header into host-order fields.
+ *
+ * `hdr_bytes` points at a buffer of at least SIZEOF_HL_HDR bytes
+ * already read from the wire (production's hx_rcv_hdr / the test
+ * harness's integration_recv_message both call this with the just-
+ * read header). Fills any non-NULL out-parameter with the host-
+ * order field and returns the raw wire `len` field (host order).
+ *
+ *   wire_len_out:  the unchanged host-order `len` field, used by
+ *                  proto_trace_recv_hdr so the trace shows the
+ *                  server's claimed length even on oversize input.
+ *
+ *   body_len_out:  the number of payload bytes after the 22-byte
+ *                  header — i.e., the count the caller still needs
+ *                  to read off the fd. Computed as
+ *                  min(wire_len, MAX_HOTLINE_PACKET_LEN) - 2
+ *                  (the wire `len` encodes "body bytes plus the 2-
+ *                  byte hc field"; hc lives at the tail of the
+ *                  22-byte hdr struct but counts as data section
+ *                  per the protocol). Production uses this verbatim;
+ *                  the harness compares wire_len_out against
+ *                  MAX_HOTLINE_PACKET_LEN and rejects oversize input
+ *                  entirely.
+ *
+ * Returns FALSE only for NULL input. (Bounds enforcement is per-
+ * caller: production clamps and continues, the harness rejects.)
+ *
+ * Pre-refactor, this math was implemented twice — once in
+ * src/rcv.c::hx_rcv_hdr (production) and once in the integration
+ * harness's integration_recv_message. The two formulas were
+ * equivalent but written differently; centralising the decode
+ * here prevents drift.
+ */
+extern gboolean hl_hdr_decode (const void *hdr_bytes,
+                               guint32 *type_out,
+                               guint32 *trans_out,
+                               guint32 *flag_out,
+                               guint16 *hc_out,
+                               guint32 *wire_len_out,
+                               guint32 *body_len_out);
+
+/*
+ * Decode the variable-width unsigned big-endian integer the
+ * HTLS_DATA_CAPABILITIES chunk carries. The spec says the field is
+ * "typically 2 bytes, extensible to 8" — chunks of width 1..8 are
+ * decoded into the host-order u64 return value with the leading byte
+ * weighing most. Excess bytes past 8 are silently ignored (leading
+ * bits of a hypothetical >64-bit advertisement would already be in
+ * the lower 64 we kept). Width 0 returns 0.
+ *
+ * Used by both src/rcv.c::rcv_task_login (production echo decode)
+ * and tests/integration/integration_harness.c::integration_drain_
+ * until_selfinfo_or_error (opportunistic stash). Pre-refactor, the
+ * two had identical for-loop copies that would have to be touched
+ * in two places if the wire encoding ever grew (e.g. variable-
+ * length-encoded > 8 bytes per a future spec revision).
+ */
+extern guint64 hl_capabilities_decode (const guint8 *bytes, guint16 len);
+
+/*
+ * Pack the 16-byte HTXF subchannel handshake header into a caller-
+ * provided buffer (must be at least SIZEOF_HTXF_HDR bytes).
+ *
+ *   ref:    matches the HTXF_REF the main-port TASK reply carried.
+ *   len:    total payload size estimate (legacy 32-bit field;
+ *           callers in 64-bit mode pass 0 here and append an
+ *           explicit 8-byte big-endian size after the 16-byte
+ *           header — see network.c::htxf_connect).
+ *   type:   HTXF_TYPE_FILE / FOLDER / BANNER — high u16 of the
+ *           last field, dispatches Mac-native servers' subchannel
+ *           routing.
+ *   flags:  low u16 of the last field. HTXF_FLAG_LARGE_FILE,
+ *           HTXF_FLAG_SIZE64 per Large-File spec. Pass 0 for the
+ *           legacy 16-byte handshake.
+ *
+ * All fields are big-endian on the wire. Production htxf_connect
+ * and banner.c, the integration harness, and the Tier 1 layout
+ * test all funnel through this helper — no fork.
+ */
+extern void hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len,
+                              guint16 type, guint16 flags);
+
+/*
  * Smaller chunk-walkers, all sharing the shape "extract uid/cid/name
  * from a fixed set of chunks":
  *

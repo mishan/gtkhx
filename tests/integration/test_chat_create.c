@@ -27,27 +27,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 
-static guint32
-hdr_type (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->type);
-}
-
-static guint32
-hdr_trans (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->trans);
-}
-
-static guint32
-hdr_flag (const struct htlc_conn *htlc)
-{
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
-    return ntohl (h->flag);
-}
-
 static void
 test_chat_create_invites_target (void)
 {
@@ -69,57 +48,16 @@ test_chat_create_invites_target (void)
     }
 
     /* Alice creates a private chat, inviting Bob. */
-    guint16 bob_uid_be = htons (htlc_b.uid);
-    guint32 our_trans = htlc_a.trans;
-    g_assert_true (integration_send_message (
-        fd_a, &htlc_a, HTLC_HDR_CHAT_CREATE, /*flag=*/0, /*hc=*/1,
-        (int)HTLC_DATA_UID, (int)sizeof (bob_uid_be), &bob_uid_be));
-
-    /* Drain Alice's connection for the TASK reply. */
-    gboolean alice_got_reply = FALSE;
     guint32 chat_id = 0;
-    for (int i = 0; i < 64 && !alice_got_reply; i++) {
-        g_assert_true (
-            integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/3000));
-        if (hdr_type (&htlc_a) != HTLS_HDR_TASK) {
-            continue;
-        }
-        if (hdr_trans (&htlc_a) != our_trans) {
-            continue;
-        }
-        alice_got_reply = TRUE;
-
-        /* Reply must not be a task-error. */
-        g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
-
-        /* Walk the chunks; HTLS_DATA_CHAT_ID is what matters. */
-        dh_start (&htlc_a)
-        {
-            if (_type == HTLS_DATA_CHAT_ID) {
-                dh_getint (chat_id);
-            }
-        }
-        dh_end ();
-    }
-    g_assert_true (alice_got_reply);
-    g_assert_cmphex (chat_id, !=, 0);
+    g_assert_true (integration_create_chat_with_uid (fd_a, &htlc_a, htlc_b.uid,
+                                                     &chat_id, 64));
+    /* Reply must not be a task-error. */
+    g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* On Bob's connection, drain looking for HTLS_HDR_CHAT_INVITE. */
-    gboolean bob_got_invite = FALSE;
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    for (int i = 0; i < 64 && !bob_got_invite; i++) {
-        if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
-            break;
-        }
-        if (hdr_type (&htlc_b) != HTLS_HDR_CHAT_INVITE) {
-            continue;
-        }
-        if (!hx_chat_invite_extract (&htlc_b, &im)) {
-            continue;
-        }
-        bob_got_invite = TRUE;
-    }
-    g_assert_true (bob_got_invite);
+    g_assert_true (hx_chat_invite_extract (&htlc_b, &im));
 
     /* Bob's invite carries Alice's uid, the chat_id, and Alice's
 	 * name. */
