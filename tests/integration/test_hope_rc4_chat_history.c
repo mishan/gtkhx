@@ -13,10 +13,14 @@
  * stream-cipher framing.
  *
  * Sister to test_hope_chacha20_chat_history (AEAD-framed) and
- * test_hope_rc4 (stream login + PING). Combines both: exercises the
- * chat-history TRAN 700 round-trip with every byte on the wire going
- * through the stream cipher (cipher_encode on send, cipher_decode on
- * recv, plus the legacy 3/16-probability rekey-marker rotation).
+ * test_hope_rc4 (stream login + PING). What this one proves:
+ * cipher_encode on the outgoing TRAN 700 plus cipher_decode on the
+ * incoming HISTORY_ENTRY frames stay in sync with a stream cipher in
+ * play. The legacy 3/16-probability rekey-marker rotation is exercised
+ * separately by test_hope_rc4.c (32 pings under the same cipher
+ * dispatcher, with decode_rekey_count > 0 asserted) — this test
+ * deliberately keeps a minimal send sequence and does not assert on
+ * the rekey path.
  *
  * Matrix filter requires HX_TEST_CAP_CHAT_HISTORY AND HX_TEST_CAP_RC4.
  * No matrix entry today advertises both — Janus has chat-history but

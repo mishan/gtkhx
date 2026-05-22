@@ -13,7 +13,9 @@
  * HOPE+Blowfish-OFB-64 stream-cipher framing.
  *
  * Sister to test_hope_rc4_chat_history; see that file for the full
- * preamble. Only differences here:
+ * preamble — same scope (cipher_encode/_decode parity around the
+ * TRAN 700 round-trip; rekey-marker rotation is left to
+ * test_hope_blowfish.c). Only differences here:
  *
  *   - cipheralg = "BLOWFISH"
  *   - HX_TEST_CAP_BLOWFISH cap filter

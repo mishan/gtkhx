@@ -189,7 +189,9 @@ test_hope_rc4_banner_htxf (void)
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (ref, >, 0);
-    g_assert_cmpuint (size, >, 0);
+    /* >= 4 so the 4-byte magic log + matcher below can't run off the
+     * end of the buffer if a misbehaving server reports a tiny size. */
+    g_assert_cmpuint (size, >=, 4);
     g_assert_cmpuint (size, <, 1u << 20);
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
