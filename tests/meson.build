@@ -1397,6 +1397,57 @@ test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
      suite   : 'integration',
      timeout : 60)
 
+# Stream-cipher variants of the chat-history + banner coverage. Same
+# shape as the chacha20 sisters above; the cap filters route each
+# test to whichever matrix entry advertises both the cipher and the
+# feature. mhxd advertises BLOWFISH+RC4+BANNER_HTXF but no chat-
+# history; Janus has chat-history+CHACHA20 but no stream ciphers, so
+# the chat-history stream tests skip cleanly until a matrix entry
+# combining stream-cipher + chat-history shows up.
+test_integration_hope_rc4_chat_history = executable(
+  'test_integration_hope_rc4_chat_history',
+  'integration/test_hope_rc4_chat_history.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_rc4_chat_history', test_integration_hope_rc4_chat_history,
+     suite   : 'integration',
+     timeout : 60)
+
+test_integration_hope_blowfish_chat_history = executable(
+  'test_integration_hope_blowfish_chat_history',
+  'integration/test_hope_blowfish_chat_history.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_blowfish_chat_history', test_integration_hope_blowfish_chat_history,
+     suite   : 'integration',
+     timeout : 60)
+
+test_integration_hope_rc4_banner = executable(
+  'test_integration_hope_rc4_banner',
+  'integration/test_hope_rc4_banner.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_rc4_banner', test_integration_hope_rc4_banner,
+     suite   : 'integration',
+     timeout : 60)
+
+test_integration_hope_blowfish_banner = executable(
+  'test_integration_hope_blowfish_banner',
+  'integration/test_hope_blowfish_banner.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
+     suite   : 'integration',
+     timeout : 60)
+
 test('chat_history', test_integration_chat_history,
      suite   : 'integration',
      timeout : 60)
