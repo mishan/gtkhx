@@ -602,6 +602,21 @@ extern gboolean integration_recv_message_hope (int fd,
                                                integration_hope_session *hope,
                                                int timeout_ms);
 
+/*
+ * HOPE-aware variant of integration_send_get_chat_history. Routes the
+ * GET_CHAT_HISTORY packet through integration_send_message_hope so
+ * AEAD (or future stream-cipher) framing applies. Same return shape
+ * as the plain version: trans id on success, 0 on failure.
+ *
+ * Tests that exercise the chat-history extension under HOPE must use
+ * this variant; the plain integration_send_get_chat_history writes
+ * cleartext bytes which the server cannot decrypt after HOPE
+ * negotiation lands.
+ */
+extern guint32 integration_send_get_chat_history_hope (
+    int fd, struct htlc_conn *htlc, integration_hope_session *hope,
+    guint32 channel_id, guint64 before, guint64 after, guint16 limit);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*

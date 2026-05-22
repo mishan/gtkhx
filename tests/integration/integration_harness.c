@@ -658,6 +658,82 @@ integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
     return ok ? trans : 0;
 }
 
+guint32
+integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
+                                        integration_hope_session *hope,
+                                        guint32 channel_id, guint64 before,
+                                        guint64 after, guint16 limit)
+{
+    /* HOPE-aware send. Same chunk-building path as the plain
+     * variant — hx_get_chat_history_build_chunks → hlpack_chunks —
+     * but routed through cipher_aead_seal (AEAD) / cipher_encode
+     * (stream) via integration_send_message_hope so the bytes are
+     * framed correctly for whatever cipher_mode the session
+     * negotiated. */
+    guint32 trans = htlc->trans;
+
+    /* Build the chunks first so we can hand them to hlpack_chunks
+     * inside integration_send_message_hope. The hope variant
+     * doesn't take pre-packed buffers — it does its own hlpack via
+     * the va_list integration_send_message uses. So we have to
+     * carry the chunks through that interface. Simplest path: pack
+     * via hlpack_chunks, then re-frame from htlc->out via cipher_
+     * encode/seal, matching what integration_send_message_hope's
+     * stream/aead branches do internally. We mirror that here so
+     * the trans-id accounting stays identical to production. */
+    struct hx_chunk chunks[4];
+    struct hx_get_chat_history_scratch scratch;
+    int hc = hx_get_chat_history_build_chunks (channel_id, before, after,
+                                               limit, chunks, 4, &scratch);
+    if (hc <= 0) {
+        return 0;
+    }
+
+    /* hlpack_chunks bumps htlc->trans after writing the header, so
+     * snapshot before. */
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
+
+#ifdef CONFIG_CIPHER
+    if (hope && hope->aead_active) {
+        gsize pt_len = htlc->out.len;
+        gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
+                        + CIPHER_AEAD_TAG_SIZE;
+        guint8 *framed = g_malloc (out_cap);
+        size_t n = cipher_aead_seal (&hope->encode_state, htlc->out.buf,
+                                     pt_len, framed, out_cap);
+        gboolean ok = n && integration_send (fd, framed, n);
+        g_free (framed);
+        g_free (htlc->out.buf);
+        htlc->out.buf = NULL;
+        htlc->out.pos = 0;
+        htlc->out.len = 0;
+        return ok ? trans : 0;
+    }
+    if (hope && hope->stream_active) {
+        cipher_encode (htlc, 0, htlc->out.len);
+        gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+        g_free (htlc->out.buf);
+        htlc->out.buf = NULL;
+        htlc->out.pos = 0;
+        htlc->out.len = 0;
+        return ok ? trans : 0;
+    }
+#else
+    (void) hope;
+#endif
+
+    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    return ok ? trans : 0;
+}
+
 /* ---- HTXF subchannel helpers ----------------------------------- */
 
 int

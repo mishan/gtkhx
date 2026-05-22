@@ -791,11 +791,13 @@ integration_harness_lib = static_library(
   # state machine production uses.
   '../src/cipher.c',
   '../src/cipher_aead.c',
+  '../src/htxf_io.c',
   '../src/qbuf.c',
   '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/hmac.c',
+  '../src/debug.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
 )
@@ -1356,6 +1358,42 @@ test_integration_hope_rc4 = executable('test_integration_hope_rc4',
   link_with           : integration_harness_lib,
 )
 test('hope_rc4', test_integration_hope_rc4,
+     suite   : 'integration',
+     timeout : 60)
+
+# hope_chacha20_chat_history — Tier 3 for the fogWraith chat-history
+# extension under HOPE+ChaCha20-Poly1305 AEAD framing. Janus is the
+# only matrix entry advertising both bits; the test skips cleanly
+# when neither is in scope. Exists because the user observed
+# regressions with chat history + cipher enabled — the harness
+# previously had no HOPE-aware chat-history send helper, so this
+# code path was uncovered.
+test_integration_hope_chacha20_chat_history = executable(
+  'test_integration_hope_chacha20_chat_history',
+  'integration/test_hope_chacha20_chat_history.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_chacha20_chat_history', test_integration_hope_chacha20_chat_history,
+     suite   : 'integration',
+     timeout : 60)
+
+# hope_chacha20_banner — Tier 3 for the file-mode banner HTXF
+# subchannel under HOPE+ChaCha20-Poly1305. Drives the production
+# htxf_io.c AEAD wrappers (htxf_io_read / htxf_io_write) plus the
+# per-transfer cipher_aead_derive_transfer_keys derivation, so the
+# test exercises exactly the path production xfers.c follows for
+# regular file downloads. Requires a server in BANNER_MODE=binary
+# (e.g. Janus with a JPEG/GIF banner).
+test_integration_hope_chacha20_banner = executable(
+  'test_integration_hope_chacha20_banner',
+  'integration/test_hope_chacha20_banner.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
      suite   : 'integration',
      timeout : 60)
 
