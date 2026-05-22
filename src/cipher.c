@@ -36,7 +36,14 @@
 #include <netinet/in.h>
 #include <nettle/arcfour.h>
 #include <nettle/blowfish.h>
-#include "hx.h"
+/* Deliberately avoid pulling in hx.h: hx.h transitively includes
+ * session.h, which #includes <gtk/gtk.h>. cipher.c only needs the
+ * wire-protocol types and helpers (struct htlc_conn, qbuf, hmac_xxx,
+ * random_bytes) — all of which live in protocol.h directly. Skipping
+ * hx.h lets the Tier 3 integration harness link cipher.c without
+ * dragging GTK + Adwaita into the test binaries. Same pattern
+ * proto_trace.c follows. */
+#include "protocol.h"
 #include "cipher.h"
 #include "cipher_aead.h"
 
@@ -289,10 +296,22 @@ cipher_encode_init (struct htlc_conn *htlc)
 			                htlc->cipher_encode_key);
 			break;
 		case CIPHER_BLOWFISH:
-			/* Re-init wipes ivec/num so a fresh key starts at OFB
-			 * block boundary, which matches the wire contract. */
-			memset(&htlc->cipher_encode_state.blowfish, 0,
-			       sizeof(htlc->cipher_encode_state.blowfish));
+			/* DO NOT reset ivec/num here. cipher_encode_init is
+			 * called twice in a connection's lifetime: at post-
+			 * Step-2 setup (where the blowfish_state union was
+			 * already zero-initialised when htlc was allocated,
+			 * so ivec/num start at the OFB block boundary
+			 * naturally), and again from cipher_change_encode_key
+			 * every time the legacy HOPE per-message rekey marker
+			 * fires (~3/16 of outgoing messages). The wire
+			 * contract for the rekey case is "rotate the key
+			 * schedule, KEEP the OFB ivec/num where they are" —
+			 * mhxd's cipher_encode_init does the same (just
+			 * BF_set_key, no memset). The early Nettle-port
+			 * revision of this file added a memset here as
+			 * defensive scrubbing; it desynced the cipher state
+			 * every rekey, which the new Tier 3 test_hope_
+			 * blowfish caught against mhxd. */
 			blowfish_set_key(&htlc->cipher_encode_state.blowfish.ctx,
 			                 htlc->cipher_encode_keylen,
 			                 htlc->cipher_encode_key);
@@ -312,8 +331,8 @@ cipher_decode_init (struct htlc_conn *htlc)
 			                htlc->cipher_decode_key);
 			break;
 		case CIPHER_BLOWFISH:
-			memset(&htlc->cipher_decode_state.blowfish, 0,
-			       sizeof(htlc->cipher_decode_state.blowfish));
+			/* See cipher_encode_init above for why we don't
+			 * memset ivec/num here. */
 			blowfish_set_key(&htlc->cipher_decode_state.blowfish.ctx,
 			                 htlc->cipher_decode_keylen,
 			                 htlc->cipher_decode_key);

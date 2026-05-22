@@ -509,10 +509,34 @@ typedef struct {
     guint8 *rx_accum;
     gsize rx_accum_len;
     gsize rx_accum_cap;
+
+    /* Stream-cipher framing flag. Active only after a successful HOPE
+     * negotiation with a non-AEAD cipher (RC4 or Blowfish today).
+     * Mutually exclusive with aead_active. The actual cipher state
+     * lives on htlc->cipher_{encode,decode}_state / _key / _keylen /
+     * _type / cipher_mode — same fields production reads in
+     * src/cipher.c and src/network.c::htlc_read. Linking ../src/
+     * cipher.c into the harness lib (see tests/meson.build) means
+     * the harness's send and recv paths call the exact same
+     * cipher_encode / cipher_decode that production does, so any
+     * wire-format desync would be a wire-format desync in production
+     * too. */
+    int stream_active;
+
+    /* Count of inbound messages that carried the legacy HOPE rekey
+     * marker (type's high byte non-zero in stream-cipher mode).
+     * integration_recv_message_hope's stream branch increments this
+     * each time it calls cipher_change_decode_key. Tests assert this
+     * is > 0 so a regression that broke marker stamping (server side)
+     * or detection (our side) fails loudly instead of passing
+     * silently when the random 3/16 dice never come up. */
+    guint decode_rekey_count;
 } integration_hope_session;
 #else
 typedef struct {
-    int aead_active; /* always 0; AEAD disabled at build time. */
+    int aead_active;          /* always 0; AEAD disabled at build time. */
+    int stream_active;        /* always 0; stream-cipher path disabled too. */
+    guint decode_rekey_count; /* unused without CONFIG_CIPHER. */
 } integration_hope_session;
 #endif
 

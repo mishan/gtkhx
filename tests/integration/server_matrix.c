@@ -45,7 +45,9 @@ const hx_test_server hx_test_server_matrix[] = {
         .hl_version = 185,
         .caps       = HX_TEST_CAP_HOPE
                     | HX_TEST_CAP_BANNER_HTXF
-                    | HX_TEST_CAP_NEWS_15,
+                    | HX_TEST_CAP_NEWS_15
+                    | HX_TEST_CAP_BLOWFISH
+                    | HX_TEST_CAP_RC4,
     },
     {
         /* Janus: VesperNet's closed-source server, pulled from

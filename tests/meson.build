@@ -778,13 +778,21 @@ integration_harness_lib = static_library(
   '../src/login_packet.c',
   '../src/chat_history.c',
   # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
-  # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; hope.c brings
-  # the HMAC chain + chunk walker; algo_list.c / hmac.c are their
-  # transitive deps. All four are pure functions (Nettle + glib only,
-  # no GTK), so pulling them in costs the harness nothing in link
-  # surface — and lets future integration_login_hope_* primitives
-  # drive the same secure-login state machine production uses.
+  # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
+  # brings the stream-cipher (RC4 / Blowfish OFB-64) seal/open + the
+  # HMAC-chained rekey rotation that mirrors production's
+  # rcv.c::hx_rcv_hdr behaviour; rand.c is cipher.c's random_bytes
+  # source for the per-message rekey decision; hope.c brings the HMAC
+  # chain + chunk walker; algo_list.c / hmac.c are their transitive
+  # deps. All are pure functions (Nettle + glib only — cipher.c's
+  # hx.h → protocol.h swap landed alongside this), so pulling them in
+  # costs the harness nothing in link surface — and lets the
+  # HOPE+stream Tier 3 tests drive the same secure-login + cipher
+  # state machine production uses.
+  '../src/cipher.c',
   '../src/cipher_aead.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/hmac.c',
@@ -1320,6 +1328,34 @@ test_integration_hope_hmac = executable('test_integration_hope_hmac',
   link_with           : integration_harness_lib,
 )
 test('hope_hmac', test_integration_hope_hmac,
+     suite   : 'integration',
+     timeout : 60)
+
+# hope_blowfish / hope_rc4 — Tier 3 coverage for the legacy HOPE
+# stream-cipher paths. Same handshake state machine as hope_chacha20
+# but with the per-message 3/16-probability rekey marker exercised
+# end-to-end. Each test sends 12 PINGs in a row against an mhxd-style
+# server, which gives ~90% odds of hitting at least one rekey-marker
+# round-trip — far better coverage of the cipher state machine than
+# hand-driven GUI testing produced (where the bug landed back-and-
+# forth for half a day before pivoting to this test infrastructure).
+test_integration_hope_blowfish = executable('test_integration_hope_blowfish',
+  'integration/test_hope_blowfish.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_blowfish', test_integration_hope_blowfish,
+     suite   : 'integration',
+     timeout : 60)
+
+test_integration_hope_rc4 = executable('test_integration_hope_rc4',
+  'integration/test_hope_rc4.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('hope_rc4', test_integration_hope_rc4,
      suite   : 'integration',
      timeout : 60)
 
