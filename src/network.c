@@ -1155,26 +1155,47 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 #endif
 
     /* Phase 4 (chat-history reconnect catch-up): the AFTER= cursor
-	 * is per-server. Reset it when the user switches to a
-	 * different (host, port) so we don't ask the new server about
-	 * a message_id that exists only in the old server's database
-	 * — same numeric id would either miss or, worse, match the
-	 * wrong content. Compare against the previous serverhost /
-	 * serverport BEFORE we overwrite them just below. First-ever
-	 * connect: serverhost is "" and the cursor is already 0, so
-	 * the reset is a harmless no-op. */
-    if (strcmp (htlc->serverhost, serverstr) != 0
-        || htlc->serverport != port) {
-        if (htlc->chat_history_last_msgid != 0) {
-            debug_log ("chat-history",
-                       "switching servers (%s:%u → %s:%u); "
-                       "resetting AFTER cursor from %" G_GUINT64_FORMAT,
-                       htlc->serverhost[0] ? htlc->serverhost : "(none)",
-                       htlc->serverport, serverstr, port,
-                       htlc->chat_history_last_msgid);
-        }
-        htlc->chat_history_last_msgid = 0;
+	 * is per-server, but the xtext scrollback we just wiped via
+	 * hx_clear_chat is per-connect. Reset the cursor every time we
+	 * connect (or reconnect) — the catch-up's invariant is "the
+	 * messages newer than this cursor are not yet on screen", and
+	 * since we just cleared the screen, NO messages are on screen,
+	 * so the cursor should be 0. Otherwise:
+	 *
+	 *   1. First connect: server returns 50 history entries with
+	 *      msgids up to N. Cursor becomes N. xtext shows them.
+	 *   2. User clicks Reconnect (same host:port).
+	 *   3. hx_clear_chat wipes xtext above.
+	 *   4. If we'd kept the cursor at N, post-login catch-up sends
+	 *      AFTER=N and the server correctly returns zero new
+	 *      entries — and the chat window stays blank.
+	 *
+	 * The "per-server" distinction below is now only about logging
+	 * server switches; the reset itself is unconditional. (Server-
+	 * switch logging still useful for the "did the cursor really
+	 * get reset?" debug case.)
+	 *
+	 * Compare against the previous serverhost / serverport BEFORE
+	 * we overwrite them just below. First-ever connect: serverhost
+	 * is "" and the cursor is already 0, so the reset is a harmless
+	 * no-op. */
+    if ((strcmp (htlc->serverhost, serverstr) != 0
+         || htlc->serverport != port)
+        && htlc->chat_history_last_msgid != 0) {
+        debug_log ("chat-history",
+                   "switching servers (%s:%u → %s:%u); "
+                   "resetting AFTER cursor from %" G_GUINT64_FORMAT,
+                   htlc->serverhost[0] ? htlc->serverhost : "(none)",
+                   htlc->serverport, serverstr, port,
+                   htlc->chat_history_last_msgid);
+    } else if (htlc->chat_history_last_msgid != 0) {
+        debug_log ("chat-history",
+                   "same-server reconnect (%s:%u); "
+                   "resetting AFTER cursor from %" G_GUINT64_FORMAT
+                   " (xtext was wiped, initial-load path will fire)",
+                   serverstr, port, htlc->chat_history_last_msgid);
     }
+    htlc->chat_history_last_msgid = 0;
 
     /* Stamp the server endpoint onto htlc so the HTXF subchannel
 	 * (port+1) and post-connect log messages don't have to query a
