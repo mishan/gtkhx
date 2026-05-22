@@ -1646,26 +1646,8 @@ char **hxd_environ = 0;
 int hxd_open_max = 0;
 struct hxd_file *hxd_files = 0;
 
-void
-qbuf_set (struct qbuf *q, guint32 pos, guint32 len)
-{
-    int need_more = q->pos + q->len < pos + len;
-
-    q->pos = pos;
-    q->len = len;
-    if (need_more) {
-        q->buf = g_realloc (q->buf, q->pos + q->len);
-    }
-}
-
-void
-qbuf_add (struct qbuf *q, void *buf, guint32 len)
-{
-    size_t pos = q->pos + q->len;
-
-    qbuf_set (q, q->pos, q->len + len);
-    memcpy (&q->buf[pos], buf, len);
-}
+/* qbuf_set / qbuf_add moved to src/qbuf.c so both the GUI binary and
+ * the Tier 3 integration harness link the same implementation. */
 
 extern void hlclient_reap_pid (pid_t pid, int status);
 

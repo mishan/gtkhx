@@ -57,6 +57,7 @@ gtkhx_sources = files(
   'preview.c',
   'proto_helpers.c',
   'proto_trace.c',
+  'qbuf.c',
   'rand.c',
   'rcv.c',
   'sound.c',
