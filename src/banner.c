@@ -33,6 +33,11 @@
 #include "protocol.h"
 #include "proto_helpers.h" /* hl_htxf_hdr_pack */
 #include "network.h"
+#ifdef CONFIG_CIPHER
+#include "cipher.h"
+#include "cipher_aead.h"
+#include "htxf_io.h"
+#endif
 #include "banner.h"
 
 /* Inline forward decl so we don't have to pull in hx.h (which
@@ -84,6 +89,28 @@ struct htxf_fetch {
 	 * the subchannel port (main + 1). */
     char serverhost[HOSTLEN];
     guint16 serverport;
+#ifdef CONFIG_CIPHER
+    /* HOPE+ChaCha20 AEAD state, snapshot at spawn time. When the
+	 * control channel negotiated CIPHER_MODE_AEAD, the HTXF
+	 * subchannel for the banner fetch needs the same per-transfer
+	 * AEAD framing the regular file path (network.c::htxf_connect)
+	 * sets up — the server seals every byte after the initial
+	 * connect, including the 16-byte HTXF preamble. Production used
+	 * to drive the worker with raw read()/write(), which worked
+	 * only against servers that didn't use the AEAD subchannel
+	 * (mhxd today); against Janus the JPEG body came through
+	 * AEAD-framed and the magic-byte check downstream saw the
+	 * 4-byte length prefix instead of "ffd8...".
+	 *
+	 * aead_active gates whether the worker builds a struct
+	 * htxf_conn and uses htxf_io_read / htxf_io_write or falls
+	 * back to the legacy raw path. */
+    gboolean aead_active;
+    chacha_aead_state ctrl_encode;
+    chacha_aead_state ctrl_decode;
+    uint8_t sessionkey[64];
+    guint16 sklen;
+#endif
 };
 
 static guint htxf_generation = 0;
@@ -499,6 +526,23 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
     g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
     f->serverport = htlc->serverport + 1;
 
+#ifdef CONFIG_CIPHER
+    /* Snapshot the HOPE AEAD context so the worker can derive its
+	 * per-transfer keys (cipher_aead_derive_transfer_keys mixes the
+	 * ref in) and run htxf_io_read/_write the same way regular file
+	 * transfers do. Only valid when the control channel actually
+	 * negotiated CHACHA20-POLY1305 — leaves aead_active=FALSE
+	 * otherwise and the worker keeps the legacy raw read/write
+	 * path. */
+    if (htlc->cipher_mode == CIPHER_MODE_AEAD) {
+        f->aead_active = TRUE;
+        f->ctrl_encode = htlc->cipher_encode_state.chacha;
+        f->ctrl_decode = htlc->cipher_decode_state.chacha;
+        memcpy (f->sessionkey, htlc->sessionkey, sizeof (htlc->sessionkey));
+        f->sklen = htlc->sklen;
+    }
+#endif
+
     pthread_attr_init (&attr);
     pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
     err = pthread_create (&tid, &attr, banner_htxf_worker_thread, f);
@@ -567,18 +611,73 @@ banner_htxf_worker_thread (void *arg)
 	 * on the type field. */
     hl_htxf_hdr_pack (hdr_buf, f->ref, f->size, HTXF_TYPE_BANNER, 0);
 
-    if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
-        debug_log ("banner", "htxf header write failed: %s",
-                   g_strerror (errno));
-        close (s);
-        goto out;
-    }
+#ifdef CONFIG_CIPHER
+    /* AEAD path: under HOPE+ChaCha20 every byte on the subchannel
+	 * (including the 16-byte HTXF preamble) goes through Seal/
+	 * Open. Build a transient struct htxf_conn that mirrors what
+	 * network.c::htxf_connect would have set up for a regular
+	 * transfer — populate the per-transfer keys via
+	 * cipher_aead_derive_transfer_keys (mixing in the ref) and
+	 * flip aead_active. htxf_io_write / htxf_io_read then do the
+	 * right thing.
+	 *
+	 * Stack-allocate the htxf_conn since the worker owns it for
+	 * its entire lifetime and we don't need it on a list. */
+    if (f->aead_active) {
+        struct htxf_conn xfer;
+        memset (&xfer, 0, sizeof (xfer));
+        xfer.ref = f->ref;
+        htxf_io_init (&xfer);
+        cipher_aead_derive_transfer_keys (
+            &xfer.xfer_encode, &xfer.xfer_decode,
+            f->sessionkey, f->sklen,
+            &f->ctrl_encode, &f->ctrl_decode,
+            f->ref);
+        xfer.aead_active = TRUE;
 
-    if (!read_n (s, f->bytes, f->size)) {
-        debug_log ("banner", "htxf body read failed at < %u bytes: %s", f->size,
-                   g_strerror (errno));
-        close (s);
-        goto out;
+        if (htxf_io_write (&xfer, s, hdr_buf, SIZEOF_HTXF_HDR)
+            != (ssize_t) SIZEOF_HTXF_HDR) {
+            debug_log ("banner", "htxf header write failed (AEAD): %s",
+                       g_strerror (errno));
+            htxf_io_release (&xfer);
+            close (s);
+            goto out;
+        }
+
+        guint8 *p = f->bytes;
+        gsize remain = f->size;
+        while (remain) {
+            ssize_t r = htxf_io_read (&xfer, s, p, remain);
+            if (r <= 0) {
+                debug_log ("banner",
+                           "htxf body read failed (AEAD) at < %zu bytes: %s",
+                           (size_t) remain, g_strerror (errno));
+                htxf_io_release (&xfer);
+                close (s);
+                goto out;
+            }
+            p += r;
+            remain -= (gsize) r;
+        }
+
+        htxf_io_release (&xfer);
+    } else
+#endif
+    {
+        if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
+            debug_log ("banner", "htxf header write failed: %s",
+                       g_strerror (errno));
+            close (s);
+            goto out;
+        }
+
+        if (!read_n (s, f->bytes, f->size)) {
+            debug_log ("banner",
+                       "htxf body read failed at < %u bytes: %s",
+                       f->size, g_strerror (errno));
+            close (s);
+            goto out;
+        }
     }
 
     close (s);
