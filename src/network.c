@@ -58,6 +58,7 @@
 #include "debug.h"
 #include "cipher_aead.h"
 #include "login_packet.h"
+#include "agreement_packet.h"
 #include "hl_code.h"
 #include "proto_helpers.h"
 
@@ -684,30 +685,36 @@ htlc_write (int fd)
 void
 hx_send_agreement_agree (struct htlc_conn *htlc)
 {
-    guint16 icon16 = htons (htlc->icon);
-    /* OPTIONS bitmap. Zero = none of "refuse PM" / "refuse chat" /
-	 * "auto-response" set. Required by Mobius (the Go Hotline server
-	 * behind Classic Macs Hotline / MacSecret / vespernet) — its
-	 * HandleTranAgreed reads this chunk's body as a big-endian u16
-	 * and panics if missing, which trips its dontPanic recover and
-	 * exits the connection goroutine silently. Older servers (mhxd)
-	 * ignore the chunk entirely. Wire a real pref through here in
-	 * a follow-up if we ever expose refuse-PM / refuse-chat in the
-	 * UI. */
-    guint16 options16 = htons (0);
-
     /* Phase E2: same as hx_change_name_icon — encode the nick to
 	 * the negotiated wire encoding. is_body = FALSE (nicks are
-	 * single-line). */
+	 * single-line). Encoding happens here (not inside the shared
+	 * builder) so agreement_packet.c stays free of the iconv
+	 * dependency that text_util.c brings in. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     gsize name_len = 0;
     char *name_wire
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
                                utf8, /*is_body=*/FALSE, &name_len);
 
-    hlwrite (htlc, HTLC_HDR_AGREEMENTAGREE, 0, 3, HTLC_DATA_ICON, 2, &icon16,
-             HTLC_DATA_NAME, (guint16)name_len, name_wire,
-             HTLC_DATA_OPTIONS, 2, &options16);
+    /* Build the AGREEMENTAGREE chunk array through the shared
+	 * builder so the test harness (integration_send_agreementagree
+	 * _hope) and production stay locked to the same wire shape. The
+	 * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
+	 * see commit history) is enforced by the builder, not here. */
+    const hx_agreement_agree_request req = {
+        .icon             = htlc->icon,
+        .display_name     = name_wire,
+        .display_name_len = (guint16) name_len,
+        .options          = 0,
+    };
+    struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
+    guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
+    int hc = hx_agreement_agree_build_chunks (&req, chunks,
+                                              HX_AGREEMENT_AGREE_MAX_CHUNKS,
+                                              scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
+    }
     g_free (name_wire);
 
     /* fogWraith caught us mixing 1.2 + 1.5 conventions: per the

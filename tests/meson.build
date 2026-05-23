@@ -776,6 +776,7 @@ integration_harness_lib = static_library(
   '../src/debug.c',
   '../src/hl_code.c',
   '../src/login_packet.c',
+  '../src/agreement_packet.c',
   '../src/chat_history.c',
   # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
   # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
