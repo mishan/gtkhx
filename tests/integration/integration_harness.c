@@ -697,13 +697,13 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
     hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
 
     if (hope && hope->aead_active) {
-        gsize pt_len = htlc->out.len;
-        gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
-                        + CIPHER_AEAD_TAG_SIZE;
-        guint8 *framed = g_malloc (out_cap);
-        size_t n = cipher_aead_seal (&hope->encode_state, htlc->out.buf,
-                                     pt_len, framed, out_cap);
-        gboolean ok = n && integration_send (fd, framed, n);
+        /* Shared seal-and-alloc helper — same cap math as the rest
+         * of the AEAD send paths. */
+        gsize framed_n = 0;
+        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
+                                                 htlc->out.buf, htlc->out.len,
+                                                 &framed_n);
+        gboolean ok = framed && integration_send (fd, framed, framed_n);
         g_free (framed);
         g_free (htlc->out.buf);
         htlc->out.buf = NULL;
@@ -1428,17 +1428,14 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
 
     if (hope && hope->aead_active) {
         /* Frame the just-packed message: 4-byte BE length prefix +
-         * ciphertext + 16-byte Poly1305 tag. */
-        gsize pt_len = htlc->out.len;
-        gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
-                        + CIPHER_AEAD_TAG_SIZE;
-        guint8 *framed = g_malloc (out_cap);
-        size_t n = cipher_aead_seal (&hope->encode_state, htlc->out.buf,
-                                     pt_len, framed, out_cap);
-        gboolean ok = FALSE;
-        if (n) {
-            ok = integration_send (fd, framed, n);
-        }
+         * ciphertext + 16-byte Poly1305 tag. Shared seal-and-alloc
+         * helper keeps the cap math (LENGTH_PREFIX + pt_len + TAG)
+         * in one place — see cipher_aead.h. */
+        gsize framed_n = 0;
+        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
+                                                 htlc->out.buf, htlc->out.len,
+                                                 &framed_n);
+        gboolean ok = framed && integration_send (fd, framed, framed_n);
         g_free (framed);
         g_free (htlc->out.buf);
         htlc->out.buf = NULL;
@@ -1520,13 +1517,13 @@ integration_send_agreementagree_hope (int                       fd,
     hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
 
     if (hope && hope->aead_active) {
-        gsize pt_len = htlc->out.len;
-        gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
-                        + CIPHER_AEAD_TAG_SIZE;
-        guint8 *framed = g_malloc (out_cap);
-        size_t n = cipher_aead_seal (&hope->encode_state, htlc->out.buf,
-                                     pt_len, framed, out_cap);
-        gboolean ok = n && integration_send (fd, framed, n);
+        /* Shared seal-and-alloc helper — same cap math as the rest
+         * of the AEAD send paths. */
+        gsize framed_n = 0;
+        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
+                                                 htlc->out.buf, htlc->out.len,
+                                                 &framed_n);
+        gboolean ok = framed && integration_send (fd, framed, framed_n);
         g_free (framed);
         g_free (htlc->out.buf);
         htlc->out.buf = NULL;
