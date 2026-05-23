@@ -79,9 +79,15 @@ struct htxf_conn;
 /*
  * Pack the HTXF subchannel preamble into a caller-provided buffer.
  *
- *   buf, cap       — caller's scratch. Must be >= HX_HTXF_PREAMBLE
- *                    _MAX_BYTES; cap is checked so a too-small
- *                    buffer fails closed instead of stomping.
+ *   buf, cap       — caller's scratch. Required size depends on
+ *                    `size64`: 16 bytes (SIZEOF_HTXF_HDR) for the
+ *                    legacy variant, 24 bytes (SIZEOF_HTXF_HDR + 8)
+ *                    when `size64` is TRUE. Sizing the buffer to
+ *                    HX_HTXF_PREAMBLE_MAX_BYTES always works and
+ *                    keeps callers from having to branch on the
+ *                    variant. cap is checked against the actual
+ *                    required size, so a too-small buffer fails
+ *                    closed (returns 0) instead of stomping.
  *   ref            — 32-bit HTXF reference, returned by the server
  *                    in the prior control-channel TASK reply
  *                    (DATA_HTXF_REF).

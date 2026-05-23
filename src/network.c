@@ -1269,6 +1269,14 @@ htxf_connect (struct htxf_conn *htxf)
 {
     int s;
     char errbuf[256];
+    /* htxf is required — every caller in the codebase (xfers.c,
+	 * news worker, banner worker, xfer_go) allocates the struct
+	 * before calling. The original code had a vestigial NULL guard
+	 * inside the body, but the preceding lines unconditionally
+	 * dereferenced htxf, so the guard was dead anyway. Assert and
+	 * fail loud rather than papering over a programmer error. */
+    g_return_val_if_fail (htxf != NULL, -1);
+
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
 	 * caps include the bit AND the transfer actually needs 64-bit
 	 * sizing (total_size > 0xFFFFFFFF), advertise both flags and
@@ -1289,9 +1297,7 @@ htxf_connect (struct htxf_conn *htxf)
     gboolean size64 = htxf->htlc
                       && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0
                       && htxf->total_size > 0xFFFFFFFFULL;
-    if (htxf) {
-        htxf->opt.large = size64 ? 1 : 0;
-    }
+    htxf->opt.large = size64 ? 1 : 0;
 
     s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport, errbuf,
                                  sizeof (errbuf));
@@ -1345,8 +1351,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * Other transfers (no HOPE, or HOPE with a stream cipher)
 	 * leave aead_active = FALSE and the wrappers behave exactly
 	 * like read()/write(). */
-    if (htxf && htxf->htlc
-        && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
+    if (htxf->htlc && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
         hx_htxf_subchannel_arm_aead (
             htxf,
             htxf->htlc->sessionkey, htxf->htlc->sklen,
