@@ -72,6 +72,16 @@ GtkWidget *status_bar;
  * external callers go through toolbar_show_toast(). */
 static AdwToastOverlay *toolbar_toast;
 
+/* Borrowed pointers to AdwToast instances we've handed to
+ * toolbar_toast that haven't been dismissed yet. The overlay owns
+ * the refs; we just need to know which toasts are still on screen
+ * so toolbar_clear_toasts can dismiss them when the user moves to
+ * a new server. Entries are removed from the list by each toast's
+ * "dismissed" handler, which fires whether the toast timed out,
+ * was swiped away, or was programmatically dismissed — so the list
+ * stays accurate without explicit cleanup. */
+static GList *live_toasts = NULL;
+
 /* Phase 5: AdwBanner sits above the content row and surfaces
  * connection-issue state that needs user action — typically "Lost
  * connection — Reconnect" after an unexpected disconnect. Hidden by
@@ -291,6 +301,19 @@ static const GActionEntry app_actions[] = {
     { .name = "quit", .activate = on_action_quit },
 };
 
+/* live_toasts bookkeeping — remove the dismissed toast from the
+ * list so toolbar_clear_toasts doesn't try to dismiss something
+ * the user (or the auto-timeout) already cleaned up. Fires
+ * synchronously from the overlay before the overlay drops its
+ * own ref, so the borrowed pointer in our list is still valid
+ * here. */
+static void
+on_toast_dismissed (AdwToast *toast, gpointer user_data)
+{
+    (void)user_data;
+    live_toasts = g_list_remove (live_toasts, toast);
+}
+
 /* Phase 5: push a transient AdwToast onto the toolbar window's
  * AdwToastOverlay. No-op until the toolbar is built (toolbar_toast
  * starts NULL), so callers can safely fire toasts during early
@@ -302,6 +325,7 @@ toolbar_show_toast (const char *text)
 {
     char *safe = NULL;
     const char *body;
+    AdwToast *toast;
 
     if (!toolbar_toast || !text) {
         return;
@@ -322,8 +346,37 @@ toolbar_show_toast (const char *text)
         body = text;
     }
 
-    adw_toast_overlay_add_toast (toolbar_toast, adw_toast_new (body));
+    toast = adw_toast_new (body);
+    g_signal_connect (toast, "dismissed", G_CALLBACK (on_toast_dismissed),
+                      NULL);
+    /* Append before handing to the overlay so a synchronous
+	 * "dismissed" emit (libadwaita doesn't currently do this, but
+	 * the contract doesn't forbid it either) finds the entry to
+	 * remove. */
+    live_toasts = g_list_append (live_toasts, toast);
+    adw_toast_overlay_add_toast (toolbar_toast, toast);
+
     g_free (safe);
+}
+
+/* Dismiss every toast still on screen so the next connection starts
+ * with a clean overlay. Wired into the connection-state hook on the
+ * CONNECTING transition (see gtkhx.c). Iterates a snapshot of the
+ * live list because adw_toast_dismiss fires "dismissed"
+ * synchronously, which mutates the original list under us. */
+void
+toolbar_clear_toasts (void)
+{
+    GList *snapshot;
+
+    if (!live_toasts) {
+        return;
+    }
+    snapshot = g_list_copy (live_toasts);
+    for (GList *l = snapshot; l; l = l->next) {
+        adw_toast_dismiss (ADW_TOAST (l->data));
+    }
+    g_list_free (snapshot);
 }
 
 /* Phase 5: surface "lost connection" with a Reconnect button. The
