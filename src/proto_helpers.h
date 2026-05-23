@@ -392,6 +392,36 @@ extern gboolean hx_xfer_queue_extract (struct htlc_conn *htlc,
                                        struct hx_xfer_queue_msg *out);
 
 /*
+ * Result of parsing the HTLS_HDR_TASK reply that follows any
+ * transfer-initiating client message: HTLC_HDR_FILE_GET,
+ * HTLC_HDR_FILE_PUT, HTLC_HDR_FILE_GETFOLDER, HTLC_HDR_FILE
+ * _PUTFOLDER, HTLC_HDR_DOWNLOAD_BANNER.
+ *
+ *   HTLS_DATA_HTXF_REF   — 32-bit subchannel reference the client
+ *                          must echo back in the HTXF preamble
+ *                          (always present on a non-error reply).
+ *   HTLS_DATA_HTXF_SIZE  — 32-bit total body byte count the server
+ *                          will stream. Absent on uploads (the
+ *                          client owns the size); 0 if absent.
+ *
+ * Returns TRUE if the REF chunk was present, FALSE otherwise (in
+ * which case the caller has either an error TASK reply or a
+ * malformed one — both deserve the same "bail" treatment).
+ *
+ * Production sites in rcv.c parse the same chunks plus additional
+ * context-specific ones (QUEUE / SIZE64 / NFILES / RFLT) inline;
+ * this helper exists for the Tier 3 test harness, which uniformly
+ * wants just the two fields and was open-coding the same dh_start
+ * walker at 7+ sites.
+ */
+struct hx_htxf_reply {
+    guint32 ref;
+    guint32 size;
+};
+extern gboolean hx_htxf_reply_extract (struct htlc_conn *htlc,
+                                       struct hx_htxf_reply *out);
+
+/*
  * Walk every HTLS_DATA_NEWS chunk in an HTLS_HDR_NEWS_POST message,
  * sanitise each one (CR2LF + strip_ansi), and invoke `cb` with the
  * sanitised bytes. `bytes` is NUL-terminated for caller convenience;

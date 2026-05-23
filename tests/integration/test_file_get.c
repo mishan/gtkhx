@@ -76,23 +76,14 @@ test_file_get_round_trip (void)
         return;
     }
 
-    /* Pull HTXF_REF and HTXF_SIZE out of the reply. */
-    guint32 xfer_ref = 0, xfer_size = 0;
-    dh_start (&htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (xfer_ref);
-            break;
-        case HTLS_DATA_HTXF_SIZE:
-            dh_getint (xfer_size);
-            break;
-        }
-    }
-    dh_end ();
-    g_assert_cmphex (xfer_ref, !=, 0);
-    g_assert_cmpuint (xfer_size, >, 0);
-    g_assert_cmpuint (xfer_size, <, 1024 * 1024); /* sanity cap */
+    /* Pull HTXF_REF and HTXF_SIZE out of the reply via the shared
+     * chunk-walker. */
+    struct hx_htxf_reply reply = { 0 };
+    hx_htxf_reply_extract (&htlc, &reply);
+    g_assert_cmphex (reply.ref, !=, 0);
+    g_assert_cmpuint (reply.size, >, 0);
+    g_assert_cmpuint (reply.size, <, 1024 * 1024); /* sanity cap */
+    guint32 xfer_ref = reply.ref, xfer_size = reply.size;
 
     /* Open the subchannel (port 5501 by default). The docker run
 	 * command needs to publish 5501; if it's unreachable, skip
