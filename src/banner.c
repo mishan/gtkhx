@@ -605,14 +605,30 @@ banner_htxf_worker_thread (void *arg)
 	 * on the type field. */
     hl_htxf_hdr_pack (hdr_buf, f->ref, f->size, HTXF_TYPE_BANNER, 0);
 
-    /* AEAD path: under HOPE+ChaCha20 every byte on the subchannel
-	 * (including the 16-byte HTXF preamble) goes through Seal/
-	 * Open. Build a transient struct htxf_conn that mirrors what
-	 * network.c::htxf_connect would have set up for a regular
-	 * transfer — populate the per-transfer keys via
-	 * cipher_aead_derive_transfer_keys (mixing in the ref) and
-	 * flip aead_active. htxf_io_write / htxf_io_read then do the
-	 * right thing.
+    /* Preamble is ALWAYS plaintext on the wire, regardless of cipher
+	 * mode. The server uses the ref number in the preamble to match
+	 * this subchannel TCP connection against the queued transfer
+	 * announced on the control channel; AEAD-framing the preamble
+	 * makes the server read garbage and slam the connection shut. The
+	 * spec is consistent with what network.c::htxf_connect does for
+	 * file transfers — only the body bytes (image data here) flow
+	 * through AEAD frames once the handshake has identified the
+	 * transfer. */
+    if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
+        debug_log ("banner", "htxf header write failed: %s",
+                   g_strerror (errno));
+        close (s);
+        goto out;
+    }
+
+    /* Body path. Under HOPE+ChaCha20 the bytes following the
+	 * plaintext preamble are framed AEAD packets; otherwise raw
+	 * stream. Build a transient struct htxf_conn that mirrors what
+	 * network.c::htxf_connect sets up for a regular transfer —
+	 * populate the per-transfer keys via
+	 * cipher_aead_derive_transfer_keys (mixing in the ref so each
+	 * subchannel gets its own key) and flip aead_active. htxf_io
+	 * _read does the right thing.
 	 *
 	 * Stack-allocate the htxf_conn since the worker owns it for
 	 * its entire lifetime and we don't need it on a list. */
@@ -627,15 +643,6 @@ banner_htxf_worker_thread (void *arg)
             &f->ctrl_encode, &f->ctrl_decode,
             f->ref);
         xfer.aead_active = TRUE;
-
-        if (htxf_io_write (&xfer, s, hdr_buf, SIZEOF_HTXF_HDR)
-            != (ssize_t) SIZEOF_HTXF_HDR) {
-            debug_log ("banner", "htxf header write failed (AEAD): %s",
-                       g_strerror (errno));
-            htxf_io_release (&xfer);
-            close (s);
-            goto out;
-        }
 
         guint8 *p = f->bytes;
         gsize remain = f->size;
@@ -656,13 +663,6 @@ banner_htxf_worker_thread (void *arg)
         htxf_io_release (&xfer);
     } else
     {
-        if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
-            debug_log ("banner", "htxf header write failed: %s",
-                       g_strerror (errno));
-            close (s);
-            goto out;
-        }
-
         if (!read_n (s, f->bytes, f->size)) {
             debug_log ("banner",
                        "htxf body read failed at < %u bytes: %s",

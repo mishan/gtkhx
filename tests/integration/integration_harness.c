@@ -1473,6 +1473,30 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     return ok;
 }
 
+gboolean
+integration_send_agreementagree_hope (int                       fd,
+                                      struct htlc_conn         *htlc,
+                                      integration_hope_session *hope,
+                                      const char               *display_name,
+                                      guint16                   icon)
+{
+    /* Wire shape mirrors production's hx_send_agreement_agree
+     * (src/network.c): icon as u16 BE, display name as raw bytes,
+     * options as u16 BE zero. Janus only fires HTLS_HDR_BANNER
+     * after seeing this message — without it the post-login push
+     * sequence never starts, and any test that drains for the
+     * banner times out into a skip. */
+    guint16 icon_be    = htons (icon);
+    guint16 options_be = htons (0);
+    gsize   name_len   = display_name ? strlen (display_name) : 0;
+
+    return integration_send_message_hope (
+        fd, htlc, hope, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/3,
+        (int) HTLC_DATA_ICON,    (int) sizeof (icon_be),    &icon_be,
+        (int) HTLC_DATA_NAME,    (int) name_len,            display_name,
+        (int) HTLC_DATA_OPTIONS, (int) sizeof (options_be), &options_be);
+}
+
 
 /* Apply htlc's stream cipher (RC4 / Blowfish OFB-64) to `n` raw
  * bytes in place. Used for both the encrypted header and the

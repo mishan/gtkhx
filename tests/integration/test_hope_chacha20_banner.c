@@ -61,6 +61,7 @@
 #include "server_matrix.h"
 #include "cipher_aead.h"
 #include "htxf_io.h"
+#include "debug.h"
 
 static const hx_test_server *
 pick_banner_chacha20_server (void)
@@ -134,10 +135,19 @@ test_hope_chacha20_banner_htxf (void)
     }
     g_assert_true (hope.aead_active);
 
-    /* integration_open_login_hope_or_skip drains until SELFINFO,
-     * which on Janus comes AFTER the banner announcement. Look at
-     * the raw recv buffer — but we've already overwritten it.
-     * Drain a few more messages waiting for HTLS_HDR_BANNER. */
+    /* Janus (and any 1.5-spec-compliant server) only fires
+     * HTLS_HDR_BANNER after the client sends AGREEMENTAGREE — the
+     * post-login push sequence is gated on the "we're fully
+     * joined" boundary. integration_open_login_hope_or_skip stops
+     * at SELFINFO, so we have to drive the AGREE step ourselves
+     * before the drain loop below. Mirrors production's
+     * gtkhx.c::concurrence path that calls hx_send_agreement_agree
+     * when the user clicks Agree on the agreement window. */
+    g_assert_true (integration_send_agreementagree_hope (
+        fd, &htlc, &hope, /*display_name=*/"HopeChaChaBanner Tier-3",
+        /*icon=*/412));
+
+    /* Drain a few messages waiting for HTLS_HDR_BANNER. */
     gchar *banner_type = NULL;
     for (int i = 0; i < 8 && !banner_type; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,
@@ -208,13 +218,27 @@ test_hope_chacha20_banner_htxf (void)
     g_assert_cmpuint (size, <, 1u << 20);
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
-    /* Open HTXF subchannel and wire it for AEAD just like
-     * production's network.c::htxf_connect_async does for regular
-     * file transfers — derive per-transfer keys from the control
-     * channel's AEAD state plus the ref, then flip aead_active. */
-    int xfer_fd = integration_connect_xfer ();
+    /* Open HTXF subchannel. The 16-byte preamble travels PLAINTEXT
+     * on the wire so the server can match this subchannel against
+     * the queued transfer by ref before any cipher state is
+     * available (matches production network.c::htxf_connect).
+     *
+     * Connect to THIS test's chosen server (`srv`) rather than the
+     * matrix default — when both mhxd and janus are in the matrix
+     * the chacha20 banner test routes to janus for login but the
+     * default xfer port can still be mhxd's, opening the subchannel
+     * against the wrong server. */
+    int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
+                                              /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
 
+    guint8 hdr_buf[SIZEOF_HTXF_HDR];
+    hl_htxf_hdr_pack (hdr_buf, ref, size, HTXF_TYPE_BANNER, 0);
+    g_assert_true (integration_send (xfer_fd, hdr_buf, sizeof (hdr_buf)));
+
+    /* Now arm the per-transfer AEAD state for the body. Derivation
+     * mixes the ref into the salt so each subchannel gets its own
+     * key pair. */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
@@ -226,14 +250,6 @@ test_hope_chacha20_banner_htxf (void)
         ref);
     xfer.aead_active = TRUE;
 
-    /* Pack + send the 16-byte HTXF preamble through htxf_io_write.
-     * Under aead_active, htxf_io_write seals this as one frame. */
-    guint8 hdr_buf[SIZEOF_HTXF_HDR];
-    hl_htxf_hdr_pack (hdr_buf, ref, size, HTXF_TYPE_BANNER, 0);
-    g_assert_cmpint (htxf_io_write (&xfer, xfer_fd, hdr_buf,
-                                    sizeof (hdr_buf)),
-                     ==, (ssize_t) sizeof (hdr_buf));
-
     /* Read `size` body bytes through htxf_io_read — consumes AEAD
      * frames off the socket and reassembles the plaintext payload. */
     guint8 *bytes = g_malloc (size);
@@ -241,6 +257,9 @@ test_hope_chacha20_banner_htxf (void)
     while (got < size) {
         ssize_t r = htxf_io_read (&xfer, xfer_fd, bytes + got, size - got);
         if (r <= 0) {
+            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
+                            "(%s)",
+                            r, got, errno, g_strerror (errno));
             break;
         }
         got += (gsize) r;
@@ -266,6 +285,11 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
+    /* Wire up the production debug logger so GTKHX_DEBUG=xfer-aead
+     * (etc) surfaces internal AEAD framing diagnostics during test
+     * runs. Production calls this from gtkhx.c::main; the test main
+     * has to call it itself. */
+    debug_init ();
     g_test_add_func ("/integration/hope_chacha20/banner/htxf",
                      test_hope_chacha20_banner_htxf);
     return g_test_run ();

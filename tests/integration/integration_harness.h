@@ -609,6 +609,29 @@ extern guint32 integration_send_get_chat_history_hope (
     int fd, struct htlc_conn *htlc, integration_hope_session *hope,
     guint32 channel_id, guint64 before, guint64 after, guint16 limit);
 
+/*
+ * HOPE-aware AGREEMENTAGREE. Production sends this after the user
+ * dismisses the agreement window; the server treats AGREEMENTAGREE
+ * as the "we're fully joined" boundary and only after seeing it
+ * will Janus (and Mobius, and any 1.5-spec-compliant server) fire
+ * post-login pushes like HTLS_HDR_BANNER. Tests that need a banner
+ * (or any post-AGREE state) MUST call this between login and the
+ * post-login drain.
+ *
+ * Chunks sent (mirrors production's hx_send_agreement_agree):
+ *   HTLC_DATA_ICON     u16 BE  — icon resource id
+ *   HTLC_DATA_NAME     bytes   — display name
+ *   HTLC_DATA_OPTIONS  u16 BE  — 0; Mobius panics without it,
+ *                                Janus accepts it harmlessly.
+ *
+ * Routed through integration_send_message_hope so AEAD / stream
+ * framing applies the same way as any other client→server message.
+ * Returns TRUE on success, FALSE on send failure.
+ */
+extern gboolean integration_send_agreementagree_hope (
+    int fd, struct htlc_conn *htlc, integration_hope_session *hope,
+    const char *display_name, guint16 icon);
+
 /* ---- HTXF subchannel helpers ---------------------------------- */
 
 /*

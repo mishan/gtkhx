@@ -45,6 +45,23 @@ htxf_io_release (struct htxf_conn *htxf)
 }
 
 
+/* Hex-dump up to 32 bytes through debug_log. Cheap; only fires when
+ * GTKHX_DEBUG includes xfer-aead. Used to bisect AEAD-HTXF interop
+ * bugs by showing the raw bytes on the wire alongside the framing
+ * decisions we make over them. */
+static void
+hexdump_for_debug (const char *label, const uint8_t *p, gsize n, guint32 ref)
+{
+    gsize dump = n < 32 ? n : 32;
+    gchar hex[3 * 32 + 4];
+    gchar *q = hex;
+    for (gsize i = 0; i < dump; i++) {
+        q += g_snprintf (q, hex + sizeof (hex) - q, "%02x ", p[i]);
+    }
+    debug_log ("xfer-aead", "ref=%u %s len=%zu first %zu: %s",
+               ref, label, n, dump, hex);
+}
+
 /* AEAD read path: serve from the plaintext accumulator first;
  * refill from socket as needed. Returns bytes copied, or 0/-1
  * for EOF / error matching read() semantics.
@@ -110,6 +127,9 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
             /* Clean EOF mid-frame — surface as EOF only if we
 			 * had nothing buffered yet. Otherwise the peer
 			 * truncated a frame; surface as I/O error. */
+            debug_log ("xfer-aead",
+                       "ref=%u read() EOF: cipher_len=%zu need=%zu",
+                       htxf->ref, io->cipher_len, need);
             if (io->cipher_len == 0) {
                 return 0;
             }
@@ -120,10 +140,20 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
             if (errno == EINTR) {
                 continue;
             }
+            debug_log ("xfer-aead", "ref=%u read() errno=%d (%s)",
+                       htxf->ref, errno, g_strerror (errno));
             return -1;
         }
         io->cipher_len += (gsize) r;
+        hexdump_for_debug ("read", io->cipher_buf + io->cipher_len - (gsize) r,
+                           (gsize) r, htxf->ref);
     }
+    debug_log ("xfer-aead",
+               "ref=%u frame ready: total=%zu cipher_len=%zu decode_counter=%"
+               G_GUINT64_FORMAT,
+               htxf->ref,
+               cipher_aead_peek_frame_size (io->cipher_buf, io->cipher_len),
+               io->cipher_len, htxf->xfer_decode.counter);
 
     /* We have a full frame at the head of io->cipher_buf. Open it
 	 * into a fresh slot in io->plain_buf. */
@@ -210,6 +240,10 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
     } else {
         out = stack_buf;
     }
+    /* Snapshot the encode counter BEFORE seal advances it — useful
+     * for matching this frame to a corresponding server-side decode
+     * failure in protocol traces. */
+    guint64 enc_counter_before = htxf->xfer_encode.counter;
     gsize n = cipher_aead_seal (&htxf->xfer_encode, buf, len, out, framed_cap);
     if (n == 0) {
         if (heap)
@@ -219,6 +253,14 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
         errno = EIO;
         return -1;
     }
+    debug_log ("xfer-aead",
+               "ref=%u seal: pt_len=%zu framed=%zu counter=%" G_GUINT64_FORMAT
+               " key[0..3]=%02x%02x%02x%02x dir=%u",
+               htxf->ref, len, n, enc_counter_before,
+               htxf->xfer_encode.key[0], htxf->xfer_encode.key[1],
+               htxf->xfer_encode.key[2], htxf->xfer_encode.key[3],
+               (unsigned) htxf->xfer_encode.dir);
+    hexdump_for_debug ("write", out, n, htxf->ref);
     /* Atomic-on-success write loop. */
     gsize wrote = 0;
     while (wrote < n) {
