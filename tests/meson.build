@@ -1005,6 +1005,30 @@ test('user_rename', test_integration_user_rename,
      suite   : 'integration',
      timeout : 30)
 
+# nick_colors — Tier 3 coverage for the Colored-Nicknames extension.
+# Two subtests:
+#   user_change_round_trip — outbound USER_CHANGE with DATA_COLOR is
+#     echoed back as a HTLS_HDR_USER_CHANGE broadcast carrying the
+#     same chunk (the spec's auto-opt-in path).
+#   user_list_trailer      — USER_LIST records carry the per-user
+#     color as a 4-byte trailer after the name (Janus's extension
+#     to hl_userlist_hdr; the production parser in rcv.c reads it
+#     gated on _len >= 8 + nlen + 4).
+# Filters the matrix for HX_TEST_CAP_NICK_COLORS; today only Janus
+# advertises the bit (mhxd would silently drop the DATA_COLOR chunk).
+# Janus-only → is_parallel: false per the per-IP connect-rate
+# limit caveat documented on the other Janus tests.
+test_integration_nick_colors = executable('test_integration_nick_colors',
+  'integration/test_nick_colors.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('nick_colors', test_integration_nick_colors,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 30)
+
 # file_get — full HTXF subchannel exchange. Sends FILE_GET on the
 # main port (5500), receives the TASK reply with HTXF_REF +
 # HTXF_SIZE, opens a fresh TCP connection to the subchannel

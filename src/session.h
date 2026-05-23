@@ -263,6 +263,23 @@ struct hx_user {
     guint16 uid;
     guint16 icon;
     guint16 color;
+    /* Colored-Nicknames extension — per-user 32-bit
+	 * 0x00RRGGBB nickname color. HX_NICK_COLOR_NONE (0xFFFFFFFF) is
+	 * the sentinel for "no color set"; the renderer falls back to
+	 * the legacy `color` status bitmap (Admin/Guest/Away) in that
+	 * case. Populated from:
+	 *   - HTLS_DATA_COLOR (0x0500) chunk on USER_CHANGE /
+	 *     CHAT_USER_CHANGE broadcasts (per-user updates).
+	 *   - Same chunk on SELFINFO (server's view of our color, mirrors
+	 *     onto htlc->nick_color).
+	 *   - USER_LIST record-trailer extension: 4 BE bytes appended
+	 *     after the name in every hl_userlist_hdr, so the initial
+	 *     post-login user-list paints colors directly without
+	 *     waiting for a follow-up USER_CHANGE broadcast for each
+	 *     existing user. Servers implement this opportunistically
+	 *     (Janus confirmed in the wild); read in rcv_task_user_list
+	 *     gated on _len >= 8 + nlen + 4. */
+    guint32 nick_color;
     /* Display name. Stored as char[] (rather than unsigned char[]) so
 	 * the rest of the codebase can pass it to strcmp/strlen/strcpy
 	 * without -Wpointer-sign casts. The Hotline wire is byte-oriented

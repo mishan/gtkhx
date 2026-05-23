@@ -32,6 +32,10 @@
 /* Identity */
 #define CFG_NICK "NICK"
 #define CFG_ICON "ICON"
+/* Colored-Nicknames extension — 32-bit 0x00RRGGBB stored
+ * as int (-1 = HX_NICK_COLOR_NONE = "no color, use theme default").
+ * Persisted as a plain decimal integer in gtkhxrc. */
+#define CFG_NICK_COLOR "NICKCOLOR"
 
 /* Auto-reply */
 #define CFG_AUTOREPLY_ON "AUTOREPLYON"

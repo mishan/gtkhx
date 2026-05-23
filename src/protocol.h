@@ -246,6 +246,16 @@ struct htlc_conn {
 
     guint16 color;
 
+    /* Colored-Nicknames extension — our own 32-bit
+	 * 0x00RRGGBB nickname color. HX_NICK_COLOR_NONE means "no
+	 * color set"; in that case hx_change_name_icon omits the
+	 * HTLC_DATA_COLOR chunk entirely and the spec's auto-opt-in
+	 * doesn't fire (server keeps us in "no-color" mode and won't
+	 * decorate USER_CHANGE pushes with DATA_COLOR for us). Set
+	 * from gtkhx_prefs.nick_color at startup and on Settings
+	 * apply; sent on USER_CHANGE via hx_change_name_icon. */
+    guint32 nick_color;
+
     char macalg[32];
     u_int8_t sessionkey[64];
     u_int16_t sklen;

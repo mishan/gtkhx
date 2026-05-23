@@ -515,7 +515,7 @@ Mnemosyne:
 ColoredNicknames:
   # Enable server-side support for the extension. When false, all
   # client-sent colors are ignored and no user gets a colored nickname.
-  Enabled: false
+  Enabled: true
 
   # List of 24-bit RGB hex colors that non-admins cannot use.
   # Accepted forms: "#RRGGBB", "RRGGBB", or "0xRRGGBB".

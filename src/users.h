@@ -19,6 +19,27 @@ extern GdkRGBA gdk_user_colors[4];
  * (hard-coding black would be invisible on dark themes). */
 extern GdkRGBA *user_color_gdk (guint16 color);
 
+/* Colored-Nicknames preference. Prefers user->nick_color
+ * (RGB) when set, else falls back to user_color_gdk's status palette
+ * (Admin/Guest/Away). `status` is the user's 2-bit status field
+ * (idle/admin) passed explicitly rather than read off user->color so
+ * the caller in users.c::user_change can render the freshly-parsed
+ * status — rcv.c stamps user->color AFTER emitting the signal, so
+ * the field would still hold the previous value if read here.
+ * `out` is a caller-provided GdkRGBA used to hold the unpacked RGB
+ * result.
+ *
+ * Return: caller-owned pointer that's either &`out` (filled with the
+ * unpacked nick_color, possibly idle-dimmed) or the static GdkRGBA
+ * for the user's status slot — OR NULL when neither applies (the
+ * regular-user slot in user_color_gdk returns NULL so callers fall
+ * through to the GTK theme's default foreground, which is what reads
+ * correctly under both light and dark themes).
+ * gtk_hlist_set_foreground accepts NULL as "use theme default", so
+ * callers can pass the result through unconditionally. */
+extern GdkRGBA *user_nick_color_gdk (const struct hx_user *user, guint16 status,
+                                     GdkRGBA *out);
+
 extern PangoFontDescription *users_font_desc;
 
 extern void create_users_window (GtkWidget *widget, gpointer data);

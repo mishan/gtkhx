@@ -302,6 +302,110 @@ test_selfinfo_empty_message_returns_zero (void)
     wire_fixture_free (&htlc);
 }
 
+/* ---------- Colored-Nicknames extension ----------
+ *
+ * SELFINFO may carry HTLS_DATA_COLOR (0x0500) — the server's view of
+ * our RGB nick color, either the per-account override from server
+ * config or the default the server assigned us at login. Parser
+ * contract: 4 bytes BE → htlc->nick_color + HX_SELFINFO_NICK_COLOR
+ * bit set; any other length is silently skipped (no mutation of
+ * htlc->nick_color). HX_NICK_COLOR_NONE round-trips verbatim. */
+
+static void
+test_selfinfo_decodes_nick_color (void)
+{
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
+    /* Pre-set htlc->nick_color to a sentinel so we can prove the
+	 * parse overwrote it (not just left a zero in place). */
+    htlc.nick_color = 0xdeadbeefu;
+
+    const guint32 color_wire = htonl (0x00abcdefu);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
+                            &color_wire);
+
+    unsigned seen = hx_selfinfo_parse (&htlc);
+    g_assert_true (seen & HX_SELFINFO_NICK_COLOR);
+    g_assert_cmphex (htlc.nick_color, ==, 0x00abcdefu);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_selfinfo_nick_color_none_round_trips (void)
+{
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
+
+    const guint32 color_wire = htonl (HX_NICK_COLOR_NONE);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
+                            &color_wire);
+
+    unsigned seen = hx_selfinfo_parse (&htlc);
+    g_assert_true (seen & HX_SELFINFO_NICK_COLOR);
+    g_assert_cmphex (htlc.nick_color, ==, HX_NICK_COLOR_NONE);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_selfinfo_nick_color_absent_leaves_seen_clear (void)
+{
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
+    /* Pre-set the field to prove the parser doesn't touch it when
+	 * the chunk isn't there. */
+    htlc.nick_color = 0x11223344u;
+
+    /* Unrelated chunk so the message isn't empty. */
+    const guint16 some_uid = htons (1);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
+
+    unsigned seen = hx_selfinfo_parse (&htlc);
+    g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
+    g_assert_cmphex (htlc.nick_color, ==, 0x11223344u);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_selfinfo_nick_color_too_short_is_skipped (void)
+{
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
+    htlc.nick_color = 0xfeedfaceu;
+
+    const guint8 too_short[3] = { 0x11, 0x22, 0x33 };
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_short),
+                            too_short);
+
+    unsigned seen = hx_selfinfo_parse (&htlc);
+    g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
+    /* Crucial: the parser must not have partial-read or zero-filled
+	 * htlc->nick_color from a malformed-length chunk. */
+    g_assert_cmphex (htlc.nick_color, ==, 0xfeedfaceu);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_selfinfo_nick_color_too_long_is_skipped (void)
+{
+    struct htlc_conn htlc;
+    wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
+    htlc.nick_color = 0xfeedfaceu;
+
+    const guint8 too_long[8]
+        = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_long), too_long);
+
+    unsigned seen = hx_selfinfo_parse (&htlc);
+    g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
+    g_assert_cmphex (htlc.nick_color, ==, 0xfeedfaceu);
+
+    wire_fixture_free (&htlc);
+}
+
 static void
 test_selfinfo_unrelated_chunks_are_ignored (void)
 {
@@ -346,6 +450,17 @@ main (int argc, char **argv)
                      test_selfinfo_empty_message_returns_zero);
     g_test_add_func ("/proto/selfinfo/unrelated_chunks_are_ignored",
                      test_selfinfo_unrelated_chunks_are_ignored);
+
+    g_test_add_func ("/proto/selfinfo/decodes_nick_color",
+                     test_selfinfo_decodes_nick_color);
+    g_test_add_func ("/proto/selfinfo/nick_color_none_round_trips",
+                     test_selfinfo_nick_color_none_round_trips);
+    g_test_add_func ("/proto/selfinfo/nick_color_absent_leaves_seen_clear",
+                     test_selfinfo_nick_color_absent_leaves_seen_clear);
+    g_test_add_func ("/proto/selfinfo/nick_color_too_short_is_skipped",
+                     test_selfinfo_nick_color_too_short_is_skipped);
+    g_test_add_func ("/proto/selfinfo/nick_color_too_long_is_skipped",
+                     test_selfinfo_nick_color_too_long_is_skipped);
 
     return g_test_run ();
 }
