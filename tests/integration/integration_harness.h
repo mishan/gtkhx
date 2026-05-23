@@ -493,7 +493,6 @@ extern gboolean integration_drain_until_task_trans (int fd,
  * in the full cipher_state union.
  */
 
-#ifdef CONFIG_CIPHER
 #include "cipher.h" /* chacha_aead_state */
 typedef struct {
     /* AEAD framing state. Active only after a successful
@@ -532,13 +531,6 @@ typedef struct {
      * silently when the random 3/16 dice never come up. */
     guint decode_rekey_count;
 } integration_hope_session;
-#else
-typedef struct {
-    int aead_active;          /* always 0; AEAD disabled at build time. */
-    int stream_active;        /* always 0; stream-cipher path disabled too. */
-    guint decode_rekey_count; /* unused without CONFIG_CIPHER. */
-} integration_hope_session;
-#endif
 
 /*
  * Run the full HOPE-Secure-Login handshake against `srv`:

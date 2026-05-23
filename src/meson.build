@@ -99,10 +99,6 @@ conf.set('HAVE_STDLIB_H',   1)
 conf.set('HAVE_LIMITS_H',   1)
 conf.set('HAVE_LIBINTL_H',  1)
 
-# Compression and cipher were configure-time toggles; both are required now.
-conf.set('CONFIG_COMPRESS', 1)
-conf.set('CONFIG_CIPHER',   1)
-
 # libsoup-3 is optional. When found, banner.c builds the URL-mode
 # fetcher that decodes server banners inline; without it, URL-mode
 # banners render as a clickable line that opens in the user's

@@ -34,19 +34,9 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
-/* hope.h + login_packet.h are referenced from rcv_task_login()
- * outside any CONFIG_CIPHER guard — hope_parse_step1_reply, the
- * hx_login_request struct + HX_LOGIN_MODE_HOPE_STEP2 enum, and the
- * HMAC chain helpers all live in those headers and have no
- * CONFIG_CIPHER gating themselves. Include them unconditionally
- * so the file compiles without CONFIG_CIPHER. The cipher_aead.h
- * include can stay gated — its contents are CONFIG_CIPHER-only
- * and only used inside the cipher-gated AEAD-init block below. */
 #include "hope.h"
 #include "login_packet.h"
-#ifdef CONFIG_CIPHER
 #include "cipher_aead.h"
-#endif
 #include "gtkhx_session.h"
 #include "network.h"
 #include "xfers.h"
@@ -815,7 +805,6 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
                    &wire_len, &len);
 
-#ifdef CONFIG_CIPHER
     /* Stream-cipher rekey marker. cipher_encode at src/cipher.c:241
 	 * randomly (~3/16 per outgoing message) stamps a 1-63 byte count
 	 * into the type field's high byte and rotates the encode key by
@@ -837,7 +826,6 @@ hx_rcv_hdr (struct htlc_conn *htlc)
         cipher_change_decode_key (htlc, type);
         type &= 0x00ffffff;
     }
-#endif
 
     proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 
@@ -1261,7 +1249,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             return;
         }
 
-#ifdef CONFIG_COMPRESS
         guint8 compressalglist[64];
         size_t compressalglistlen = 0;
         if (!htlc->compressalg[0] || !strcmp (htlc->compressalg, "NONE")) {
@@ -1288,9 +1275,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             compressalglistlen = hope_build_alg_reply (
                 sel.s_compressalg, compressalglist, sizeof (compressalglist));
         }
-#endif
 
-#ifdef CONFIG_CIPHER
         guint8 cipheralglist[64];
         size_t cipheralglistlen = 0;
         if (!htlc->cipheralg[0] || !strcmp (htlc->cipheralg, "NONE")) {
@@ -1326,7 +1311,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             memcpy (htlc->cipher_encode_key, spec_decode_key, pmaclen);
             htlc->cipher_encode_keylen = pmaclen;
         }
-#endif
 
         /* Hand the pre-computed HOPE fields to the shared chunk
 		 * builder. Same chunk ordering / gating as before; the
@@ -1351,14 +1335,10 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             .login_field_len = (guint16) llen,
             .password_mac = password_mac,
             .password_mac_len = (guint16) pmaclen,
-#ifdef CONFIG_CIPHER
             .cipher_alg_reply = cipheralglist,
             .cipher_alg_reply_len = (guint16) cipheralglistlen,
-#endif
-#ifdef CONFIG_COMPRESS
             .compress_alg_reply = compressalglist,
             .compress_alg_reply_len = (guint16) compressalglistlen,
-#endif
         };
         struct hx_chunk step2_chunks[HX_LOGIN_MAX_CHUNKS];
         guint8 step2_scratch[HX_LOGIN_SCRATCH_SIZE];
@@ -1379,7 +1359,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, step2_chunks, hc);
         g_free (pass);
 
-#ifdef CONFIG_COMPRESS
         if (compressalglistlen) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "compress: server %s client %s\n",
@@ -1391,9 +1370,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 = compress_id_from_name (sel.s_compressalg);
             compress_decode_init (htlc);
         }
-#endif
 
-#ifdef CONFIG_CIPHER
         if (cipheralglistlen) {
             hx_printf_prefix (htlc, 0, INFOPREFIX,
                               "cipher: server %s client %s\n",
@@ -1431,7 +1408,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             cipher_encode_init (htlc);
             cipher_decode_init (htlc);
         }
-#endif
     } else {
         if (!task_inerror (htlc)) {
             play_sound (LOGIN);

@@ -57,10 +57,6 @@ pick_rc4_server (void)
 static void
 test_hope_rc4_login_and_ping (void)
 {
-#ifndef CONFIG_CIPHER
-    g_test_skip ("built without CONFIG_CIPHER");
-    return;
-#else
     const hx_test_server *srv = pick_rc4_server ();
     if (!srv) {
         g_test_skip ("no HX_TEST_CAP_RC4 server in the matrix. "
@@ -119,7 +115,6 @@ test_hope_rc4_login_and_ping (void)
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);
     integration_close (fd);
-#endif /* CONFIG_CIPHER */
 }
 
 int

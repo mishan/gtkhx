@@ -39,16 +39,6 @@
 
 #include "config.h"
 
-#ifndef CONFIG_CIPHER
-
-#include <glib.h>
-int main (int argc, char **argv) {
-    g_test_init (&argc, &argv, NULL);
-    g_test_message ("built without CONFIG_CIPHER — AEAD not compiled in");
-    return 0;
-}
-
-#else
 
 #include <stdio.h>
 #include <string.h>
@@ -383,4 +373,3 @@ main (int argc, char **argv)
     return g_test_run ();
 }
 
-#endif /* CONFIG_CIPHER */

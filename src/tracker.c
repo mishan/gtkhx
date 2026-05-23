@@ -403,14 +403,10 @@ tracker_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
             return;
         }
         inet_ntop (AF_INET, &server->addr, buf, HOSTLEN);
-#ifdef CONFIG_COMPRESS
         memset (the_session.htlc.compressalg, 0,
                 sizeof (the_session.htlc.compressalg));
-#endif
-#ifdef CONFIG_CIPHER
         memset (the_session.htlc.cipheralg, 0,
                 sizeof (the_session.htlc.cipheralg));
-#endif
         hx_connect (&the_session.htlc, buf, server->port, "", "", 0);
     }
 }

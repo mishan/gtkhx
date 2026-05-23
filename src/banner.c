@@ -33,11 +33,9 @@
 #include "protocol.h"
 #include "proto_helpers.h" /* hl_htxf_hdr_pack */
 #include "network.h"
-#ifdef CONFIG_CIPHER
 #include "cipher.h"
 #include "cipher_aead.h"
 #include "htxf_io.h"
-#endif
 #include "banner.h"
 
 /* Inline forward decl so we don't have to pull in hx.h (which
@@ -89,7 +87,6 @@ struct htxf_fetch {
 	 * the subchannel port (main + 1). */
     char serverhost[HOSTLEN];
     guint16 serverport;
-#ifdef CONFIG_CIPHER
     /* HOPE+ChaCha20 AEAD state, snapshot at spawn time. When the
 	 * control channel negotiated CIPHER_MODE_AEAD, the HTXF
 	 * subchannel for the banner fetch needs the same per-transfer
@@ -110,7 +107,6 @@ struct htxf_fetch {
     chacha_aead_state ctrl_decode;
     uint8_t sessionkey[64];
     guint16 sklen;
-#endif
 };
 
 static guint htxf_generation = 0;
@@ -526,7 +522,6 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
     g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
     f->serverport = htlc->serverport + 1;
 
-#ifdef CONFIG_CIPHER
     /* Snapshot the HOPE AEAD context so the worker can derive its
 	 * per-transfer keys (cipher_aead_derive_transfer_keys mixes the
 	 * ref in) and run htxf_io_read/_write the same way regular file
@@ -541,7 +536,6 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
         memcpy (f->sessionkey, htlc->sessionkey, sizeof (htlc->sessionkey));
         f->sklen = htlc->sklen;
     }
-#endif
 
     pthread_attr_init (&attr);
     pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
@@ -611,7 +605,6 @@ banner_htxf_worker_thread (void *arg)
 	 * on the type field. */
     hl_htxf_hdr_pack (hdr_buf, f->ref, f->size, HTXF_TYPE_BANNER, 0);
 
-#ifdef CONFIG_CIPHER
     /* AEAD path: under HOPE+ChaCha20 every byte on the subchannel
 	 * (including the 16-byte HTXF preamble) goes through Seal/
 	 * Open. Build a transient struct htxf_conn that mirrors what
@@ -662,7 +655,6 @@ banner_htxf_worker_thread (void *arg)
 
         htxf_io_release (&xfer);
     } else
-#endif
     {
         if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
             debug_log ("banner", "htxf header write failed: %s",

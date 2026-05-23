@@ -47,7 +47,6 @@
 #include "cipher.h"
 #include "cipher_aead.h"
 
-#ifdef CONFIG_CIPHER
 
 #define CIPHER_DEBUG	0
 
@@ -250,9 +249,7 @@ cipher_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 	 * probability 3/16, mark the header type byte and the next
 	 * N rounds of HMAC-stretching for the cipher key (see
 	 * cipher_change_encode_key). */
-#if defined(CONFIG_COMPRESS)
 	if (htlc->compress_encode_type == COMPRESS_NONE) {
-#endif
 		unsigned char ran;
 
 		random_bytes(&ran, 1);
@@ -274,7 +271,6 @@ cipher_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 			pos += SIZEOF_HL_HDR;
 			len -= SIZEOF_HL_HDR;
 		}
-#if defined(CONFIG_COMPRESS)
 	} else if (htlc->zc_ran) {
 		do_encode(htlc, pos, htlc->zc_hdrlen);
 		cipher_change_encode_key(htlc, htlc->zc_ran);
@@ -282,7 +278,6 @@ cipher_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 		len -= htlc->zc_hdrlen;
 		htlc->zc_ran = 0;
 	}
-#endif
 	do_encode(htlc, pos, len);
 }
 
@@ -342,4 +337,3 @@ cipher_decode_init (struct htlc_conn *htlc)
 	}
 }
 
-#endif /* CONFIG_CIPHER */
