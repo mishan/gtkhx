@@ -106,6 +106,15 @@ struct gtkhx_prefs {
 	 * the user manually engages it). Persisted as
 	 * CFG_CHAT_HISTORY_INITIAL. */
     int chat_history_initial;
+
+    /* Colored-Nicknames extension — our own 32-bit
+	 * 0x00RRGGBB nickname color. -1 (== HX_NICK_COLOR_NONE cast to
+	 * signed int) is the "no color set" sentinel and means
+	 * hx_change_name_icon omits the HTLC_DATA_COLOR chunk entirely
+	 * (the spec's auto-opt-in then doesn't fire). Stored as `int`
+	 * to fit the cfgvars INT slot; reinterpreted as guint32 when
+	 * stamped onto htlc->nick_color. Persisted as CFG_NICK_COLOR. */
+    int nick_color;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;

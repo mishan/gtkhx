@@ -213,6 +213,114 @@ test_user_change_chunk_order_does_not_matter (void)
     wire_fixture_free (&htlc);
 }
 
+/* ---------- Colored-Nicknames extension ----------
+ *
+ * HTLS_DATA_COLOR (0x0500) is an optional u32 BE chunk carrying the
+ * user's 0x00RRGGBB nick color. The parser MUST: accept exactly
+ * 4 bytes and decode it big-endian into uc.nick_color + set
+ * uc.got_nick_color=TRUE; ignore any other length (got_nick_color
+ * stays FALSE, nick_color stays at hx_user_change_extract's
+ * initialization default of HX_NICK_COLOR_NONE — NOT zero — so
+ * "absent" semantically means "no color set" without aliasing
+ * pure black). HX_NICK_COLOR_NONE (0xFFFFFFFF) round-trips
+ * verbatim through the wire. */
+
+static void
+test_user_change_decodes_nick_color (void)
+{
+    struct htlc_conn htlc;
+    /* 0x11223344 wire-side. Big-endian on the wire → htonl. */
+    const guint32 color_wire = htonl (0x11223344u);
+    wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
+                            &color_wire);
+
+    struct hx_user_change_msg uc;
+    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (uc.got_nick_color);
+    g_assert_cmphex (uc.nick_color, ==, 0x11223344u);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_user_change_nick_color_none_round_trips (void)
+{
+    struct htlc_conn htlc;
+    const guint32 color_wire = htonl (HX_NICK_COLOR_NONE);
+    wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
+                            &color_wire);
+
+    struct hx_user_change_msg uc;
+    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (uc.got_nick_color);
+    g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_user_change_nick_color_absent_clears_got_flag (void)
+{
+    struct htlc_conn htlc;
+    const guint16 uid_wire = htons (7);
+    wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
+    /* No COLOR chunk. */
+
+    struct hx_user_change_msg uc;
+    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_false (uc.got_nick_color);
+    /* Parser defaults to HX_NICK_COLOR_NONE rather than 0 — "absent"
+	 * means "no color set", not "pure black". Callers gate on
+	 * got_nick_color before reading, so this default is only a
+	 * defence-in-depth value, but pin it down to catch a future
+	 * regression that zero-fills it. */
+    g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
+
+    wire_fixture_free (&htlc);
+}
+
+/* Malformed-length cases: spec pins COLOR at 4 bytes. Anything else
+ * must be skipped silently — not partial-read, not zero-fill, just
+ * dropped. Pin both shorter and longer lengths. */
+static void
+test_user_change_nick_color_too_short_is_skipped (void)
+{
+    struct htlc_conn htlc;
+    const guint8 too_short[3] = { 0xaa, 0xbb, 0xcc };
+    wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_short),
+                            too_short);
+
+    struct hx_user_change_msg uc;
+    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_false (uc.got_nick_color);
+    /* Malformed length must not partial-read into nick_color — it
+	 * must stay at the parser's default (HX_NICK_COLOR_NONE). */
+    g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
+
+    wire_fixture_free (&htlc);
+}
+
+static void
+test_user_change_nick_color_too_long_is_skipped (void)
+{
+    struct htlc_conn htlc;
+    const guint8 too_long[8]
+        = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
+    wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_long), too_long);
+
+    struct hx_user_change_msg uc;
+    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_false (uc.got_nick_color);
+    g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
+
+    wire_fixture_free (&htlc);
+}
+
 static void
 test_user_change_null_out_returns_false (void)
 {
@@ -250,6 +358,17 @@ main (int argc, char **argv)
 
     g_test_add_func ("/proto/user_change/chunk_order_does_not_matter",
                      test_user_change_chunk_order_does_not_matter);
+
+    g_test_add_func ("/proto/user_change/decodes_nick_color",
+                     test_user_change_decodes_nick_color);
+    g_test_add_func ("/proto/user_change/nick_color_none_round_trips",
+                     test_user_change_nick_color_none_round_trips);
+    g_test_add_func ("/proto/user_change/nick_color_absent_clears_got_flag",
+                     test_user_change_nick_color_absent_clears_got_flag);
+    g_test_add_func ("/proto/user_change/nick_color_too_short_is_skipped",
+                     test_user_change_nick_color_too_short_is_skipped);
+    g_test_add_func ("/proto/user_change/nick_color_too_long_is_skipped",
+                     test_user_change_nick_color_too_long_is_skipped);
 
     g_test_add_func ("/proto/user_change/null_out_returns_false",
                      test_user_change_null_out_returns_false);

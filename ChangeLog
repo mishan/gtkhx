@@ -40,6 +40,7 @@
 - Support for native UTF-8 with servers that support it
 - Support for large file transfers (>4GB) on servers that support it
 - Support for chat history on servers that support it
+- Support for colored names on servers that support it
 - Light/Dark theme support
 - Emoji picker next to Chat and Message input fields
 

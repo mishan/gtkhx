@@ -476,6 +476,8 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     guint16 icon = uc.icon;
     guint16 color = uc.color;
     gboolean got_color = uc.got_color;
+    guint32 nick_color = uc.nick_color;
+    gboolean got_nick_color = uc.got_nick_color;
     guint32 cid = uc.cid;
     char *name = uc.name;
     guint16 nlen = uc.name_len;
@@ -518,6 +520,16 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         }
         user = hx_user_new (chat, uid);
         chat->nusers++;
+        /* Colored-Nicknames: stamp the per-user nick_color
+		 * onto the user struct BEFORE emitting user-create. The render
+		 * path reads user->nick_color directly (the signal payload
+		 * doesn't carry it, unlike the legacy `color` status byte),
+		 * so emitting first leaves the row painted from a stale
+		 * HX_NICK_COLOR_NONE — the user appears uncoloured until the
+		 * next USER_CHANGE for an unrelated reason rebuilds the row. */
+        if (got_nick_color) {
+            user->nick_color = nick_color;
+        }
         gtkhx_session_emit_user_create (gtkhx_session_get_default (), htlc,
                                         chat, user, name, icon, color);
         play_sound (USER_JOIN);
@@ -529,6 +541,18 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     else {
         if (!got_color) {
             color = user->color;
+        }
+        /* Colored-Nicknames: stamp the per-user nick_color
+		 * onto the user struct BEFORE emitting user-change. The render
+		 * path (users.c::user_change → user_nick_color_gdk) reads
+		 * user->nick_color directly because the signal payload doesn't
+		 * carry it (unlike the legacy `color` status byte, which is
+		 * passed as an arg). Emitting before this assignment leaves
+		 * the row painted from a stale value — that's why a color
+		 * change from another client (or our own echoed back from a
+		 * server that supports the extension) wasn't visible. */
+        if (got_nick_color) {
+            user->nick_color = nick_color;
         }
         gtkhx_session_emit_user_change (gtkhx_session_get_default (), htlc,
                                         chat, user, name, icon, color);
@@ -556,9 +580,18 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     if (got_color) {
         user->color = color;
     }
+    /* Colored-Nicknames: the per-user nick_color was
+	 * stamped onto the user struct above, BEFORE emitting the
+	 * user-create / user-change signal — the render path reads it
+	 * directly from user->nick_color, so the assignment has to
+	 * precede the emit. See the comments at the emit sites for
+	 * the full rationale. */
     if ((uid) && (uid == htlc->uid)) {
         htlc->icon = user->icon;
         htlc->color = user->color;
+        if (got_nick_color) {
+            htlc->nick_color = nick_color;
+        }
         /* Phase 5: deliberately do NOT copy user->name into
 		 * htlc->name. Servers can legitimately override a user's
 		 * display name — guests get pinned to things like "Read
@@ -1685,6 +1718,17 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
     dh_start (htlc)
     {
         if (_type == HTLS_DATA_USER_LIST) {
+            /* Body layout (`_len` bytes total, after the 4-byte
+			 * hl_data_hdr that dh_start already consumed):
+			 *   u16 uid, u16 icon, u16 color, u16 nlen, u8 name[],
+			 *   [optional u32 nick_color trailer per Colored-
+			 *   Nicknames extension]
+			 * Minimum legal body = 8 bytes (header tail + zero-len
+			 * name). Anything shorter is malformed; skip rather
+			 * than risk an out-of-bounds read. */
+            if (_len < 8) {
+                continue;
+            }
             uh = (struct hl_userlist_hdr *)dh;
             HN16 (&uid, &uh->uid);
             user = hx_user_with_uid (chat, uid);
@@ -1713,10 +1757,45 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             HN16 (&user->icon, &uh->icon);
             HN16 (&user->color, &uh->color);
             HN16 (&nlen, &uh->nlen);
-            nlen = (nlen > 31) ? 31 : nlen;
+            /* Two-stage clamp: first against bytes actually
+			 * available in the chunk body (defends against a
+			 * malicious or buggy server lying about nlen vs. the
+			 * chunk length); then against user->name's 31-byte
+			 * cap. The body-available clamp is load-bearing for
+			 * the memcpy below and for the trailer offset math. */
+            const gsize avail = _len - 8;
+            if (nlen > avail) {
+                nlen = (guint16) avail;
+            }
+            if (nlen > 31) {
+                nlen = 31;
+            }
             memcpy (user->name, uh->name, nlen);
             strip_ansi (user->name, nlen);
             user->name[nlen] = 0;
+            /* Colored-Nicknames extension. Servers that
+			 * implement the spec append 4 trailing bytes to
+			 * every hl_userlist_hdr in USER_LIST replies: the
+			 * per-user 0x00RRGGBB nick color, big-endian.
+			 * HX_NICK_COLOR_NONE (0xffffffff) means "no color
+			 * set, fall back to status palette". Confirmed
+			 * against Janus in the wild; other implementations
+			 * are likely to vary in whether they emit the
+			 * trailer at all. Standard pre-extension entry has
+			 * _len == 8 + nlen (uid/icon/color/nlen tail +
+			 * name); the extension pushes that to 8 + nlen + 4.
+			 * Read only when present so we stay compatible with
+			 * servers that don't emit it. The trailer lives at
+			 * &uh->name[nlen]. */
+            const gsize body_required = 8 + nlen + 4;
+            if (_len >= body_required) {
+                guint32 col_be;
+                memcpy (&col_be, &uh->name[nlen], 4);
+                user->nick_color = g_ntohl (col_be);
+                if (uid == htlc->uid) {
+                    htlc->nick_color = user->nick_color;
+                }
+            }
             if (!htlc->uid && !strcmp (user->name, htlc->name) &&
 
                 user->icon == htlc->icon) {

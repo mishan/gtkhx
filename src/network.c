@@ -233,6 +233,20 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->fd = 0;
     htlc->uid = 0;
     htlc->color = 0;
+    /* Colored-Nicknames: nick_color is a per-session pref
+	 * echo, not per-connection state. On connection teardown we
+	 * deliberately re-seed (not reset) from gtkhx_prefs.nick_color so
+	 * the next login's USER_CHANGE carries the user's preferred color
+	 * out of the gate. Resetting to HX_NICK_COLOR_NONE here used to
+	 * leave the value stuck — apply_loaded_xtext_prefs only fires at
+	 * startup from prefs_read, so on Disconnect → Connect the htlc
+	 * lost the color and only re-gained it when the user touched the
+	 * Settings picker (which fires changed_nick_color). Re-seeding
+	 * here both (a) avoids leaking a previous connection's
+	 * server-side admin override into the next one (we overwrite with
+	 * the local pref, which is independent of the prior server state)
+	 * and (b) fixes the reconnect-loses-color bug. */
+    htlc->nick_color = (guint32)gtkhx_prefs.nick_color;
     htlc->gdk_input = 0;
     htlc->version = 0;
     memset (htlc->login, 0, sizeof (htlc->login));
@@ -717,6 +731,22 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
         hlwrite_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
     }
     g_free (name_wire);
+
+    /* Colored-Nicknames: AGREEMENTAGREE carries NAME + ICON
+	 * + OPTIONS but not DATA_COLOR — the spec only lists USER_CHANGE
+	 * / CHAT_USER_CHANGE / SELFINFO as color-carrying opcodes, so
+	 * extending AGREEMENTAGREE unilaterally would be off-spec. Instead
+	 * push a follow-up USER_CHANGE that carries our preferred color,
+	 * which doubles as the spec's auto-opt-in trigger ("once the
+	 * server sees DATA_COLOR from us, decorate other users' USER_
+	 * CHANGE broadcasts to us with their colors"). The 1.0/1.2 login
+	 * path calls hx_change_name_icon directly (rcv.c, version==0
+	 * branch) so this only matters for the 1.5+/AGREEMENTAGREE path.
+	 * Gate on nick_color != NONE so a no-color client doesn't ride
+	 * the auto-opt-in train it doesn't want. */
+    if (htlc->nick_color != HX_NICK_COLOR_NONE) {
+        hx_change_name_icon (htlc);
+    }
 
     /* fogWraith caught us mixing 1.2 + 1.5 conventions: per the
 	 * 1.5 spec, USER_GETLIST and the news/messages fetch must not

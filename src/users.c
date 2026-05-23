@@ -67,8 +67,24 @@ hx_change_name_icon (struct htlc_conn *htlc)
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
                                utf8, /*is_body=*/FALSE, &name_len);
 
-    hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 2, HTLC_DATA_ICON, 2, &icon16,
-             HTLC_DATA_NAME, (guint16)name_len, name_wire);
+    /* Colored-Nicknames extension. Include HTLC_DATA_COLOR
+	 * (BE u32, 0x00RRGGBB) ONLY when the local pref has set a real
+	 * color — we deliberately don't send HX_NICK_COLOR_NONE because
+	 * the spec's auto-opt-in marks the session as color-aware on
+	 * first DATA_COLOR receipt regardless of the value, and a
+	 * "no color" client shouldn't opt in. Servers that don't know
+	 * the extension ignore the trailing chunk; supporting servers
+	 * mark us color-aware and start decorating other users'
+	 * USER_CHANGE pushes for us. */
+    if (htlc->nick_color != HX_NICK_COLOR_NONE) {
+        guint32 color32 = htonl (htlc->nick_color);
+        hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 3, HTLC_DATA_ICON, 2, &icon16,
+                 HTLC_DATA_NAME, (guint16)name_len, name_wire,
+                 HTLC_DATA_COLOR, 4, &color32);
+    } else {
+        hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 2, HTLC_DATA_ICON, 2, &icon16,
+                 HTLC_DATA_NAME, (guint16)name_len, name_wire);
+    }
     g_free (name_wire);
 }
 
@@ -107,6 +123,15 @@ hx_user_new (struct chat *chat, guint16 uid)
 {
     struct hx_user *user = g_malloc0 (sizeof (struct hx_user));
     user->uid = uid;
+    /* Colored-Nicknames extension. Default to "no color"
+	 * — the renderer falls back to the legacy status palette
+	 * (Admin/Guest/Away from user->color) unless a server-pushed
+	 * DATA_COLOR chunk overrides this. g_malloc0 has already
+	 * zeroed the struct so the explicit assignment is just to
+	 * avoid a "what does zero mean here?" question on the read
+	 * side — HX_NICK_COLOR_NONE = 0xFFFFFFFF is the canonical
+	 * sentinel. */
+    user->nick_color = HX_NICK_COLOR_NONE;
     g_hash_table_insert (chat->users, GUINT_TO_POINTER ((guint)uid), user);
     return user;
 }
@@ -1156,6 +1181,63 @@ user_color_gdk (guint16 color)
     return &gdk_user_colors[color % 4];
 }
 
+/* Colored-Nicknames extension. When the user has a
+ * server-supplied RGB nick color, fill the caller's GdkRGBA from
+ * the 0x00RRGGBB value and return a pointer to it; otherwise
+ * fall through to user_color_gdk's legacy status palette
+ * (Admin/Guest/Away). gtk_hlist_set_foreground reads the channels
+ * synchronously and formats them into a hex string for the cell
+ * renderer, so a stack-allocated GdkRGBA is fine for the caller's
+ * lifetime.
+ *
+ * `status` is the 2-bit status field that user_color_gdk reads —
+ * passed explicitly rather than read off user->color because at
+ * the call sites (users.c::user_create / user_change) the new
+ * status from the wire hasn't been stamped onto user->color yet.
+ * Reading user->color here would have rendered the row from the
+ * OLD status (stale idle-dim, stale palette slot) until a later
+ * unrelated USER_CHANGE rebuilt the row.
+ *
+ * Lookup priority: explicit nick_color > status palette > theme
+ * default. The status palette still applies to away/admin
+ * decoration when the user hasn't set their own color, matching
+ * what users would expect from a colored-nicknames-unaware client.
+ *
+ * Returns NULL when nick_color is unset AND the status palette
+ * resolves to the regular-user slot — user_color_gdk explicitly
+ * returns NULL there so the caller falls through to the GTK
+ * theme's default foreground (hard-coding black would be
+ * invisible on dark themes). gtk_hlist_set_foreground treats NULL
+ * as "use theme default", so call sites can pass the result
+ * through unconditionally. */
+GdkRGBA *
+user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
+{
+    if (user && user->nick_color != HX_NICK_COLOR_NONE && out) {
+        double r = ((user->nick_color >> 16) & 0xff) / 255.0;
+        double g = ((user->nick_color >> 8) & 0xff) / 255.0;
+        double b = (user->nick_color & 0xff) / 255.0;
+        /* status bit 0 = idle/away, bit 1 = admin. When the user
+		 * is idle, dim their custom color so the idle indication
+		 * still reads visually — without this an away user with a
+		 * vibrant nick_color would look just as "alive" as an
+		 * active user. 0.55 is roughly what the legacy
+		 * gdk_user_colors[1] (idle) and [3] (admin-idle) slots use
+		 * relative to their non-idle siblings. */
+        if (status & 1) {
+            r *= 0.55;
+            g *= 0.55;
+            b *= 0.55;
+        }
+        out->red = r;
+        out->green = g;
+        out->blue = b;
+        out->alpha = 1.0;
+        return out;
+    }
+    return user_color_gdk (status);
+}
+
 void
 user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
              const char *nam, guint16 icon, guint16 color)
@@ -1164,7 +1246,7 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     GdkBitmap *mask;
     gint row;
     session *sess = &the_session;
-    GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
+    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
     gchar *nulls[2];
     struct gtkhx_chat *gchat;
 
@@ -1173,25 +1255,34 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         if (!gchat) {
             gchat = create_pchat_window (htlc, chat);
         }
-        losers_list = gchat->userlist;
+        list_widget = gchat->userlist;
     }
 
-    if (!losers_list) {
+    if (!list_widget) {
         return;
     }
 
     nulls[0] = g_strdup_printf ("%u", user->uid);
     nulls[1] = 0;
-    row = gtk_hlist_append (GTK_HLIST (losers_list), nulls);
-    gtk_hlist_set_row_data (GTK_HLIST (losers_list), row, user);
+    row = gtk_hlist_append (GTK_HLIST (list_widget), nulls);
+    gtk_hlist_set_row_data (GTK_HLIST (list_widget), row, user);
     g_free (nulls[0]);
-    gtk_hlist_set_foreground (GTK_HLIST (losers_list), row,
-                              user_color_gdk (color));
-    load_icon (losers_list, icon, &icon_files, 1, &pixmap, &mask);
+    /* Colored-Nicknames: prefer the per-user RGB
+	 * nick_color, fall back to the status palette via the helper.
+	 * Pass the caller's `color` arg as the status bitmap rather
+	 * than reading user->color — at this point we're rendering the
+	 * NEW state, but rcv.c stamps user->color AFTER emitting the
+	 * signal, so user->color would still hold the previous value.
+	 * Stack-allocated GdkRGBA is fine — gtk_hlist_set_foreground
+	 * reads the channels synchronously into a hex string. */
+    GdkRGBA fg_buf;
+    GdkRGBA *fg = user_nick_color_gdk (user, color, &fg_buf);
+    gtk_hlist_set_foreground (GTK_HLIST (list_widget), row, fg);
+    load_icon (list_widget, icon, &icon_files, 1, &pixmap, &mask);
     if (!pixmap) {
-        gtk_hlist_set_text (GTK_HLIST (losers_list), row, 1, nam);
+        gtk_hlist_set_text (GTK_HLIST (list_widget), row, 1, nam);
     } else {
-        gtk_hlist_set_pixtext (GTK_HLIST (losers_list), row, 1, nam, 34, pixmap,
+        gtk_hlist_set_pixtext (GTK_HLIST (list_widget), row, 1, nam, 34, pixmap,
                                mask);
     }
 }
@@ -1202,22 +1293,22 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     gint row;
     struct gtkhx_chat *gchat;
     session *sess = &the_session;
-    GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
+    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
 
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);
         if (!gchat) {
             return;
         }
-        losers_list = gchat->userlist;
+        list_widget = gchat->userlist;
     }
 
-    if (!losers_list) {
+    if (!list_widget) {
         return;
     }
 
-    row = gtk_hlist_find_row_from_data (GTK_HLIST (losers_list), user);
-    gtk_hlist_remove (GTK_HLIST (losers_list), row);
+    row = gtk_hlist_find_row_from_data (GTK_HLIST (list_widget), user);
+    gtk_hlist_remove (GTK_HLIST (list_widget), row);
 }
 
 void
@@ -1230,17 +1321,17 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     gchar *rowdat[2];
     struct gtkhx_chat *gchat;
     session *sess = &the_session;
-    GtkWidget *losers_list = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
+    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
 
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);
         if (!gchat) {
             gchat = create_pchat_window (&sess->htlc, chat);
         }
-        losers_list = gchat->userlist;
+        list_widget = gchat->userlist;
     }
 
-    if (!losers_list) {
+    if (!list_widget) {
         return;
     }
 
@@ -1262,18 +1353,22 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 
     rowdat[0] = g_strdup_printf ("%u", user->uid);
     rowdat[1] = 0;
-    row = gtk_hlist_find_row_from_data (GTK_HLIST (losers_list), user);
-    gtk_hlist_remove (GTK_HLIST (losers_list), row);
-    gtk_hlist_insert (GTK_HLIST (losers_list), row, rowdat);
+    row = gtk_hlist_find_row_from_data (GTK_HLIST (list_widget), user);
+    gtk_hlist_remove (GTK_HLIST (list_widget), row);
+    gtk_hlist_insert (GTK_HLIST (list_widget), row, rowdat);
     g_free (rowdat[0]);
-    gtk_hlist_set_row_data (GTK_HLIST (losers_list), row, user);
-    gtk_hlist_set_foreground (GTK_HLIST (losers_list), row,
-                              user_color_gdk (color));
+    gtk_hlist_set_row_data (GTK_HLIST (list_widget), row, user);
+    /* See user_create — same nick_color-prefer-status-fallback,
+	 * same reason to pass `color` (the freshly-parsed status) rather
+	 * than rely on user->color (which rcv.c stamps later). */
+    GdkRGBA fg_buf;
+    GdkRGBA *fg = user_nick_color_gdk (user, color, &fg_buf);
+    gtk_hlist_set_foreground (GTK_HLIST (list_widget), row, fg);
     load_icon (sess->users_window, icon, &icon_files, 1, &pixmap, &mask);
     if (!pixmap) {
-        gtk_hlist_set_text (GTK_HLIST (losers_list), row, 1, nam);
+        gtk_hlist_set_text (GTK_HLIST (list_widget), row, 1, nam);
     } else {
-        gtk_hlist_set_pixtext (GTK_HLIST (losers_list), row, 1, nam, 34, pixmap,
+        gtk_hlist_set_pixtext (GTK_HLIST (list_widget), row, 1, nam, 34, pixmap,
                                mask);
     }
 

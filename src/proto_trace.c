@@ -213,6 +213,10 @@ proto_data_name (guint16 type)
         return "HTLC/S_DATA_ACCESS";
     case HTLS_DATA_COLOUR:
         return "HTLS_DATA_COLOUR";
+    case HTLC_DATA_COLOR:
+        /* Colored-Nicknames extension. Same code point
+		 * (0x0500) in both directions. */
+        return "HTLC/S_DATA_COLOR";
     case HTLC_DATA_BAN:
         return "HTLC_DATA_BAN";
     case HTLC_DATA_CHAT_ID:

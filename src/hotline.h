@@ -368,6 +368,26 @@ struct hl_user_data {
 #define HTLS_DATA_ACCESS ((guint16)0x006e)
 #define HTLS_DATA_COLOUR ((guint16)0x0070)
 #define HTLS_DATA_CHAT_ID ((guint16)0x0072)
+
+/* Colored-Nicknames extension. 32-bit unsigned, big-endian
+ * on the wire, packed as 0x00RRGGBB (high byte reserved for future
+ * use, should be zero). 0xFFFFFFFF or absence = "no color, use the
+ * client's default rendering".
+ *
+ * Appears in HTLS_HDR_USER_CHANGE (301), HTLS_HDR_CHAT_USER_CHANGE
+ * (117), HTLS_HDR_USER_SELFINFO (server → client), and in HTLC_HDR
+ * _USER_CHANGE (304, client → server) when the client sets its own
+ * color. No explicit capability bit — auto-opt-in: the server marks
+ * a session as color-aware the first time it receives a DATA_COLOR
+ * from that client. See Docs/Protocol/Colored-Nicknames.md in the
+ * fogWraith Hotline repo for the full spec.
+ *
+ * Same code point for both directions, distinct from the legacy
+ * HTLS_DATA_COLOUR (0x0070) which encodes the u16 status bitmap
+ * (Admin/Guest/Away). */
+#define HTLC_DATA_COLOR ((guint16)0x0500)
+#define HTLS_DATA_COLOR ((guint16)0x0500)
+#define HX_NICK_COLOR_NONE ((guint32)0xffffffff)
 #define HTLS_DATA_CHAT_SUBJECT ((guint16)0x0073)
 #define HTLS_DATA_FILE_LIST ((guint16)0x00c8)
 #define HTLS_DATA_FILE_NAME ((guint16)0x00c9)

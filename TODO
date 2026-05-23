@@ -36,9 +36,6 @@ Voice Chat:
 Inline Media:
 - Research spike to determine how difficult it would be to add to xtext
 
-Name Colorization:
-- Support colored nickname extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Colored-Nicknames.md
-
 Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them (or having them littered throughout the code)

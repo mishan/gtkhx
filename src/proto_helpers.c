@@ -286,6 +286,27 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
             }
             seen |= HX_SELFINFO_USER_LIST;
             break;
+        case HTLS_DATA_COLOR:
+            /* Colored-Nicknames extension. Spec pins the field at
+             * exactly 4 bytes (BE u32). Mirror onto htlc->nick_color
+             * so we capture the server's view of our color (which
+             * may be a per-account override the server persists).
+             * The local pref still wins: network.c re-seeds
+             * htlc->nick_color from gtkhx_prefs on each connection
+             * teardown, and the follow-up USER_CHANGE-with-
+             * DATA_COLOR that network.c::hx_send_agreement_agree
+             * pushes after AGREEMENTAGREE (gated on nick_color !=
+             * HX_NICK_COLOR_NONE) overrides the server-cached
+             * value. Wire-side HX_NICK_COLOR_NONE preserves through
+             * verbatim — the renderer treats it as "no color, fall
+             * back to status palette". */
+            if (_len == 4) {
+                guint32 wire;
+                dh_getint (wire);
+                htlc->nick_color = wire;
+                seen |= HX_SELFINFO_NICK_COLOR;
+            }
+            break;
         }
     }
     dh_end ();
@@ -402,6 +423,8 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
     out->icon = 0;
     out->color = 0;
     out->got_color = FALSE;
+    out->nick_color = HX_NICK_COLOR_NONE;
+    out->got_nick_color = FALSE;
     out->cid = 0;
     out->name[0] = '\0';
     out->name_len = 0;
@@ -425,6 +448,15 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
         case HTLS_DATA_COLOUR:
             dh_getint (out->color);
             out->got_color = TRUE;
+            break;
+        case HTLS_DATA_COLOR:
+            /* Colored-Nicknames extension. Spec pins the
+             * field at exactly 4 bytes (BE u32); reject any other
+             * width as malformed rather than misread it. */
+            if (_len == 4) {
+                dh_getint (out->nick_color);
+                out->got_nick_color = TRUE;
+            }
             break;
         case HTLS_DATA_CHAT_ID:
             dh_getint (out->cid);

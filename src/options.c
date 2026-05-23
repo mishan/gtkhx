@@ -36,6 +36,7 @@
 #include "cicn.h"
 #include "sound.h"
 #include "users.h"
+#include "chat.h"
 #include "dfa.h"
 #include "files.h"
 #include "network.h"
@@ -131,7 +132,13 @@ struct gtkhx_prefs gtkhx_prefs = {
     /* Phase 5+: chat-history initial fetch count. 50 matches the
 	 * fogWraith spec's recommended default and what Phase 1/2/3
 	 * shipped with hard-coded. */
-    50 /* chat_history_initial */
+    50, /* chat_history_initial */
+
+    /* Colored-Nicknames extension. Default -1 ==
+	 * HX_NICK_COLOR_NONE (cast to signed int) so a fresh prefs file
+	 * means "no color, use theme default" and hx_change_name_icon
+	 * skips the optional HTLC_DATA_COLOR chunk. */
+    -1, /* nick_color */
 };
 
 static void parse_tracker (session *);
@@ -472,6 +479,42 @@ changed_nickoricon (session *sess)
     hx_change_name_icon (&the_session.htlc);
 }
 
+/* Colored-Nicknames extension — mirror the pref onto the
+ * live htlc and re-broadcast via USER_CHANGE. Prefs store the color
+ * as int (-1 = "no color"); reinterpret as guint32 so HX_NICK_COLOR
+ * _NONE round-trips bit-identically.
+ *
+ * We don't wait for the server to echo USER_CHANGE back to us before
+ * repainting our own row: servers vary on whether they echo a user's
+ * own broadcast to that user, and even when they do, the round-trip
+ * is enough of a lag that the user perceives the picker as broken.
+ * Update self's hx_user.nick_color directly and re-render. The
+ * inbound echo (if any) lands on top with the same value — no
+ * flicker, just an idempotent rewrite. */
+static void
+changed_nick_color (session *sess)
+{
+    (void)sess;
+    guint32 nc = (guint32)gtkhx_prefs.nick_color;
+    the_session.htlc.nick_color = nc;
+    hx_change_name_icon (&the_session.htlc);
+
+    /* Locally re-render our own row in the public chat user list.
+	 * Pre-login (no uid yet, or no chat container yet) just no-ops —
+	 * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
+	 * the SELFINFO-driven hx_user_new for self picks it up the same
+	 * way it picks up the loaded nick. */
+    struct chat *pub = chat_with_cid (&the_session, 0);
+    if (pub && the_session.htlc.uid) {
+        struct hx_user *self = hx_user_with_uid (pub, the_session.htlc.uid);
+        if (self) {
+            self->nick_color = nc;
+            user_change (&the_session.htlc, pub, self, self->name, self->icon,
+                         self->color);
+        }
+    }
+}
+
 static void
 changed_font (session *sess)
 {
@@ -750,6 +793,12 @@ struct cfgvar {
       STRING32,
       0,
       changed_nickoricon,
+      NULL },
+    { CFG_NICK_COLOR,
+      { &gtkhx_prefs.nick_color },
+      INT,
+      0,
+      changed_nick_color,
       NULL },
     { CFG_NOTIFY_BROADCAST,
       { &gtkhx_prefs.notify_broadcast },
@@ -1224,6 +1273,111 @@ pref_spin_row (const char *cfgname, const char *title, const char *subtitle,
     return row;
 }
 
+/* Colored-Nicknames Settings row. Adds an AdwActionRow
+ * with a GtkColorButton suffix (the picker itself) and a Clear
+ * button that resets to HX_NICK_COLOR_NONE / theme default. */
+
+static void
+on_nick_color_set (GtkColorButton *btn, gpointer user_data)
+{
+    struct cfgvar *v = user_data;
+    GdkRGBA rgba;
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    gtk_color_chooser_get_rgba (GTK_COLOR_CHOOSER (btn), &rgba);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    /* Pack as 0x00RRGGBB per fogWraith spec — high byte reserved. */
+    guint8 r = (guint8) (rgba.red * 255.0 + 0.5);
+    guint8 g = (guint8) (rgba.green * 255.0 + 0.5);
+    guint8 b = (guint8) (rgba.blue * 255.0 + 0.5);
+    int packed = (int) (((guint32) r << 16) | ((guint32) g << 8) | (guint32) b);
+    if (v && v->type == INT && *v->variable.integer != packed) {
+        *v->variable.integer = packed;
+        /* Route through pref_apply so the changefunc receives the
+		 * session pointer the other rows pass and prefs_write lands
+		 * on the same code path. Without this the changefunc gets
+		 * NULL — currently changed_nick_color ignores its arg, but
+		 * future logic could need the session. */
+        pref_apply (v);
+    }
+}
+
+static void
+on_nick_color_clear (GtkButton *btn, gpointer user_data)
+{
+    struct cfgvar *v = user_data;
+    GtkColorButton *picker
+        = g_object_get_data (G_OBJECT (btn), "pref-color-picker");
+    (void)btn;
+    if (!v || v->type != INT) {
+        return;
+    }
+    if (*v->variable.integer == -1) {
+        return;
+    }
+    *v->variable.integer = -1;
+    /* Reset the picker swatch to black so the user gets a clear
+	 * "no color is set" visual cue. We block the color-set signal
+	 * around the call so the synthetic set doesn't fight the clear
+	 * (it would otherwise pack 0x000000 back into the pref). */
+    if (picker) {
+        GdkRGBA black = { 0, 0, 0, 1.0 };
+        g_signal_handlers_block_by_func (picker, on_nick_color_set, v);
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        gtk_color_chooser_set_rgba (GTK_COLOR_CHOOSER (picker), &black);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+        g_signal_handlers_unblock_by_func (picker, on_nick_color_set, v);
+    }
+    /* Same pref_apply routing as on_nick_color_set, for the same
+	 * reasons (consistent session-arg + persistence path). */
+    pref_apply (v);
+}
+
+static GtkWidget *
+pref_nick_color_row (void)
+{
+    struct cfgvar *v = cfgvar_for_name (CFG_NICK_COLOR);
+    GtkWidget *row = adw_action_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row),
+                                   _ ("Nickname color"));
+    adw_action_row_set_subtitle (
+        ADW_ACTION_ROW (row),
+        _ ("Optional RGB color shown on servers that support the "
+           "Colored-Nicknames extension"));
+
+    if (!v || v->type != INT) {
+        gtk_widget_set_sensitive (row, FALSE);
+        return row;
+    }
+
+    /* Picker. GtkColorButton is deprecated in GTK 4.10 in favour of
+	 * GtkColorDialogButton but the project floor is 4.6, so we use
+	 * the older widget and silence the warning at the call sites —
+	 * same convention banner.c uses for gtk_picture_set_keep
+	 * _aspect_ratio. */
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GtkWidget *picker = gtk_color_button_new ();
+    if (*v->variable.integer != -1) {
+        guint32 packed = (guint32) *v->variable.integer;
+        GdkRGBA rgba = { ((packed >> 16) & 0xff) / 255.0,
+                         ((packed >> 8) & 0xff) / 255.0,
+                         (packed & 0xff) / 255.0, 1.0 };
+        gtk_color_chooser_set_rgba (GTK_COLOR_CHOOSER (picker), &rgba);
+    }
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    gtk_widget_set_valign (picker, GTK_ALIGN_CENTER);
+    g_signal_connect (picker, "color-set", G_CALLBACK (on_nick_color_set), v);
+
+    GtkWidget *clear = gtk_button_new_with_label (_ ("Clear"));
+    gtk_widget_set_valign (clear, GTK_ALIGN_CENTER);
+    g_object_set_data (G_OBJECT (clear), "pref-color-picker", picker);
+    g_signal_connect (clear, "clicked", G_CALLBACK (on_nick_color_clear), v);
+
+    adw_action_row_add_suffix (ADW_ACTION_ROW (row), picker);
+    adw_action_row_add_suffix (ADW_ACTION_ROW (row), clear);
+    v->widget = picker;
+    return row;
+}
+
 static void
 on_combo_row_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
 {
@@ -1625,6 +1779,15 @@ prefs_read_legacy_lines (const char *path)
 static void
 apply_loaded_xtext_prefs (void)
 {
+    /* Colored-Nicknames extension. Stamp htlc->nick_color
+	 * from the loaded pref so the first hx_change_name_icon (fired
+	 * at login) carries our color. Same load-vs-changefunc concern
+	 * as the xtext autocopy_* knobs below: the cfgvars changefunc
+	 * doesn't fire on prefs_read, so without an explicit copy here
+	 * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
+	 * default and we'd silently never advertise. */
+    the_session.htlc.nick_color = (guint32)gtkhx_prefs.nick_color;
+
     gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
     gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
     gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
@@ -2284,6 +2447,7 @@ settings_page_identity (AdwPreferencesPage *page)
     adw_preferences_group_set_title (name_grp, _ ("Display name"));
     adw_preferences_group_add (name_grp,
                                pref_entry_row (CFG_NICK, _ ("Your name")));
+    adw_preferences_group_add (name_grp, pref_nick_color_row ());
     adw_preferences_page_add (page, name_grp);
 
     id_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());

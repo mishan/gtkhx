@@ -57,6 +57,7 @@
 #define HX_TEST_CAP_CHACHA20      (1u << 19) /* HOPE ChaCha20-Poly1305*/
 #define HX_TEST_CAP_BLOWFISH      (1u << 20) /* HOPE Blowfish OFB-64  */
 #define HX_TEST_CAP_RC4           (1u << 21) /* HOPE RC4 stream       */
+#define HX_TEST_CAP_NICK_COLORS   (1u << 22) /* Colored-Nicknames     */
 
 /* ---- The matrix struct ------------------------------------------ */
 

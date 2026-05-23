@@ -58,6 +58,13 @@ extern gboolean task_error_extract (struct htlc_conn *htlc, char *out,
 enum {
     HX_SELFINFO_ACCESS = 1u << 0,
     HX_SELFINFO_USER_LIST = 1u << 1,
+    /* Colored-Nicknames extension. The optional HTLS_DATA
+     * _COLOR (0x0500) chunk on SELFINFO carries the server's record
+     * of our own RGB nick color — either the per-account override
+     * from server config, or the default the server assigned us at
+     * login. Caller mirrors it onto htlc->nick_color so subsequent
+     * USER_CHANGE pushes can preserve / override it. */
+    HX_SELFINFO_NICK_COLOR = 1u << 2,
 };
 
 extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc);
@@ -349,14 +356,21 @@ extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
 /*
  * Result of parsing a HTLS_HDR_USER_CHANGE message.
  *
- * The handler walks five chunks:
+ * The handler walks six chunks:
  *   HTLS_DATA_UID     — affected user's UID
  *   HTLS_DATA_ICON    — new icon
  *   HTLS_DATA_NAME    — new display name (max 31, strip_ansi-sanitised,
  *                       NUL-terminated)
- *   HTLS_DATA_COLOUR  — new colour. Optional — set `got_color` only
- *                       when the chunk was present, since "no change"
- *                       is the default.
+ *   HTLS_DATA_COLOUR  — new status colour (Admin/Guest/Away u16
+ *                       bitmap). Optional — set `got_color` only
+ *                       when the chunk was present.
+ *   HTLS_DATA_COLOR   — Colored-Nicknames extension RGB
+ *                       u32 (0x00RRGGBB). Optional — set
+ *                       `got_nick_color` only when present. A wire
+ *                       value of HX_NICK_COLOR_NONE means "client
+ *                       explicitly cleared its color" and should
+ *                       be propagated as-is so the renderer drops
+ *                       back to the legacy `color` palette.
  *   HTLS_DATA_CHAT_ID — which chat (cid 0 = main chat)
  *
  * Same shape as the other extractors: missing chunks default to zero
@@ -367,6 +381,8 @@ struct hx_user_change_msg {
     guint16 icon;
     guint16 color;
     gboolean got_color;
+    guint32 nick_color;
+    gboolean got_nick_color;
     guint32 cid;
     char name[32]; /* NUL-terminated */
     guint16 name_len;
