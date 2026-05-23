@@ -151,6 +151,23 @@ cipher_change_decode_key (struct htlc_conn *htlc, u_int32_t type)
 	cipher_decode_init(htlc);
 }
 
+int
+cipher_check_rekey_marker (struct htlc_conn *htlc, u_int32_t *type_inout)
+{
+	if (!htlc || !type_inout) {
+		return 0;
+	}
+	if (htlc->cipher_mode != CIPHER_MODE_STREAM
+	    || htlc->cipher_decode_type == CIPHER_NONE
+	    || (*type_inout >> 24) == 0) {
+		return 0;
+	}
+
+	cipher_change_decode_key (htlc, *type_inout);
+	*type_inout &= 0x00ffffff;
+	return 1;
+}
+
 static void
 cipher_change_encode_key (struct htlc_conn *htlc, unsigned int num)
 {

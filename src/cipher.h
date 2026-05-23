@@ -108,5 +108,39 @@ extern void cipher_encode_init (struct htlc_conn *htlc);
 extern void cipher_decode_init (struct htlc_conn *htlc);
 extern void cipher_change_decode_key (struct htlc_conn *htlc, u_int32_t type);
 
+/*
+ * Stream-cipher rekey-marker detection on receive. cipher_encode at
+ * src/cipher.c randomly (~3/16 per outgoing message) stamps a 1-63
+ * iteration count into the type field's high byte and rotates the
+ * encode key by that many HMAC iterations. The receiver must do the
+ * matching rotation BEFORE the next bytes are fed to cipher_decode,
+ * or the cipher state desyncs and every subsequent header decodes
+ * to garbage. User-visible symptom of the missing call: "unknown
+ * header type 0x3d000162" / "0x2f010000" from servers that exercise
+ * the legacy HOPE stream-cipher rekey trick (Janus/vespernet observed;
+ * mhxd does it too).
+ *
+ * Pass the freshly-decoded 32-bit type by reference. On return:
+ *   - if a marker was present (returns TRUE), the rotation has run
+ *     and the high byte has been cleared in *type_inout so the
+ *     caller sees the real opcode in the low 24 bits;
+ *   - if no marker was present (returns FALSE), *type_inout is
+ *     unchanged.
+ *
+ * Internally gated: only fires when cipher_mode == CIPHER_MODE_STREAM
+ * and cipher_decode_type != CIPHER_NONE. AEAD mode uses counter-based
+ * nonces and has no per-packet rotation; CIPHER_NONE means HMAC-only
+ * HOPE which also shouldn't see this marker.
+ *
+ * Note: this only touches the cipher state and *type_inout. Callers
+ * that also need to keep htlc->in.buf clean for downstream macros
+ * (e.g. the integration harness's hdr_type()) must additionally zero
+ * the high byte of the on-buffer type field themselves — the
+ * production receive path doesn't need this because it dispatches off
+ * the local type variable directly.
+ */
+extern int cipher_check_rekey_marker (struct htlc_conn *htlc,
+                                      u_int32_t *type_inout);
+
 
 #endif /* __cipher_h */
