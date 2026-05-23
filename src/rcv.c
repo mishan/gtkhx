@@ -818,27 +818,16 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
                    &wire_len, &len);
 
-    /* Stream-cipher rekey marker. cipher_encode at src/cipher.c:241
-	 * randomly (~3/16 per outgoing message) stamps a 1-63 byte count
-	 * into the type field's high byte and rotates the encode key by
-	 * that many HMAC iterations. The receiver must do the matching
-	 * rotation here — before the next bytes are fed to cipher_decode
-	 * — or the cipher state desyncs and every subsequent header
-	 * decodes to garbage. User-visible symptom of the missing call:
-	 * "unknown header type 0x3d000162" / "0x2f010000" from servers
-	 * that exercise the legacy HOPE stream-cipher rekey trick
-	 * (Janus/vespernet observed; mhxd does it too).
-	 *
-	 * AEAD mode uses counter-based nonces and doesn't need per-
-	 * packet rotation — gated accordingly. CIPHER_NONE means the
-	 * negotiation landed on no cipher (HMAC-only HOPE), which also
-	 * shouldn't see this marker. */
-    if (htlc->cipher_mode == CIPHER_MODE_STREAM
-        && htlc->cipher_decode_type != CIPHER_NONE
-        && (type >> 24) != 0) {
-        cipher_change_decode_key (htlc, type);
-        type &= 0x00ffffff;
-    }
+    /* Stream-cipher rekey marker — shared detection in cipher.c.
+	 * Production and the Tier 3 harness now route through the same
+	 * helper; see cipher_check_rekey_marker's doc for the spec
+	 * background and the user-visible failure mode it gates against
+	 * ("unknown header type 0x3d000162" / "0x2f010000" from servers
+	 * that exercise the legacy HOPE stream-cipher rekey trick). On
+	 * a hit the helper rotates the per-connection decode key and
+	 * clears the marker byte from `type` so the dispatch switch
+	 * below sees the real opcode. */
+    cipher_check_rekey_marker (htlc, &type);
 
     proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 

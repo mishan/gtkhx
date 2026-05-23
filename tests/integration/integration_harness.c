@@ -1722,16 +1722,20 @@ integration_recv_message_hope (int fd, struct htlc_conn *htlc,
         }
         stream_cipher_decode_inplace (htlc, hdr_bytes, SIZEOF_HL_HDR);
 
+        /* Shared rekey-marker detection in cipher.c — same function
+         * production's rcv.c::hx_rcv_hdr calls. On a hit the helper
+         * rotates the per-connection decode key and clears the high
+         * byte from `type`; we additionally zero hdr_bytes[0] so the
+         * subsequent memcpy into htlc->in.buf leaves the test's
+         * hdr_type() macro reading the real opcode (production
+         * dispatches off the local type variable and doesn't need
+         * to clean the buffer). */
         guint32 type = ((guint32) hdr_bytes[0] << 24)
                        | ((guint32) hdr_bytes[1] << 16)
                        | ((guint32) hdr_bytes[2] << 8)
                        | ((guint32) hdr_bytes[3]);
-        if ((type >> 24) != 0
-            && htlc->cipher_decode_type != CIPHER_NONE) {
-            cipher_change_decode_key (htlc, type);
+        if (cipher_check_rekey_marker (htlc, &type)) {
             hope->decode_rekey_count++;
-            /* Strip the rekey marker from the header bytes so
-             * hdr_type() returns the real opcode. */
             hdr_bytes[0] = 0;
         }
 
