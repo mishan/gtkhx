@@ -29,6 +29,7 @@
 #include "proto_helpers.h"
 #include "hl_code.h"
 #include "login_packet.h"
+#include "agreement_packet.h"
 #include "chat_history.h"
 #include "hope.h"
 #include "cipher_aead.h"
@@ -1480,21 +1481,75 @@ integration_send_agreementagree_hope (int                       fd,
                                       const char               *display_name,
                                       guint16                   icon)
 {
-    /* Wire shape mirrors production's hx_send_agreement_agree
-     * (src/network.c): icon as u16 BE, display name as raw bytes,
-     * options as u16 BE zero. Janus only fires HTLS_HDR_BANNER
-     * after seeing this message — without it the post-login push
-     * sequence never starts, and any test that drains for the
-     * banner times out into a skip. */
-    guint16 icon_be    = htons (icon);
-    guint16 options_be = htons (0);
-    gsize   name_len   = display_name ? strlen (display_name) : 0;
+    /* Drive the same chunk builder production uses
+     * (src/agreement_packet.c via hx_agreement_agree_build_chunks).
+     * Wire shape: icon as u16 BE, display name as raw bytes, options
+     * as u16 BE (zero from production; the chunk is mandatory or
+     * Mobius panics — see hx_send_agreement_agree's comment). Janus
+     * only fires HTLS_HDR_BANNER after seeing this message — without
+     * it the post-login push sequence never starts, and any test
+     * that drains for the banner times out into a skip.
+     *
+     * Framing path mirrors integration_send_get_chat_history_hope:
+     * hlpack_chunks → cipher_aead_seal / cipher_encode / plain send,
+     * matching the cipher_mode the session negotiated. The harness
+     * passes display_name verbatim (typically ASCII for tests);
+     * production calls gtkhx_text_for_wire at the caller for UTF-8
+     * vs Mac Roman, which is identical to ASCII for the test
+     * names. */
+    gsize name_len = display_name ? strlen (display_name) : 0;
+    const hx_agreement_agree_request req = {
+        .icon             = icon,
+        .display_name     = display_name,
+        .display_name_len = (guint16) name_len,
+        .options          = 0,
+    };
+    struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
+    guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
+    int hc = hx_agreement_agree_build_chunks (&req, chunks,
+                                              HX_AGREEMENT_AGREE_MAX_CHUNKS,
+                                              scratch, sizeof (scratch));
+    if (hc <= 0) {
+        return FALSE;
+    }
 
-    return integration_send_message_hope (
-        fd, htlc, hope, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/3,
-        (int) HTLC_DATA_ICON,    (int) sizeof (icon_be),    &icon_be,
-        (int) HTLC_DATA_NAME,    (int) name_len,            display_name,
-        (int) HTLC_DATA_OPTIONS, (int) sizeof (options_be), &options_be);
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
+
+    if (hope && hope->aead_active) {
+        gsize pt_len = htlc->out.len;
+        gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
+                        + CIPHER_AEAD_TAG_SIZE;
+        guint8 *framed = g_malloc (out_cap);
+        size_t n = cipher_aead_seal (&hope->encode_state, htlc->out.buf,
+                                     pt_len, framed, out_cap);
+        gboolean ok = n && integration_send (fd, framed, n);
+        g_free (framed);
+        g_free (htlc->out.buf);
+        htlc->out.buf = NULL;
+        htlc->out.pos = 0;
+        htlc->out.len = 0;
+        return ok;
+    }
+    if (hope && hope->stream_active) {
+        cipher_encode (htlc, 0, htlc->out.len);
+        gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+        g_free (htlc->out.buf);
+        htlc->out.buf = NULL;
+        htlc->out.pos = 0;
+        htlc->out.len = 0;
+        return ok;
+    }
+
+    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    return ok;
 }
 
 

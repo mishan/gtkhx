@@ -40,6 +40,7 @@ gtkhx_sources = files(
   'hmac.c',
   'log.c',
   'login_packet.c',
+  'agreement_packet.c',
   'macres.c',
   'msg.c',
   'network.c',
