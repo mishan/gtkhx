@@ -178,12 +178,26 @@ list_icons (void)
 	 * Mac classic mask folded into the alpha channel. Wide icons
 	 * (the 32x32 family bundles four variants in a 4*32-pixel row)
 	 * are clipped to the rightmost 32 px to mirror the historical
-	 * "off = width > 400 ? 198 : 0" hack. */
+	 * "off = width > 400 ? 198 : 0" hack.
+	 *
+	 * Two passes: first walk every rsrc file in icon_files priority
+	 * order (user $CONFIG/icons → XDG → $PREFIX per init_icons) and
+	 * pick a single winning resource per resid, keeping the FIRST
+	 * occurrence so user customizations override system defaults
+	 * instead of both showing up as duplicates in the picker.
+	 * Second pass renders the winners. */
     GtkWidget *icon_list = iv->icon_list;
     guint16 nres;
     guint32 icon;
     unsigned int nfound = 0;
     unsigned int i;
+    unsigned int rendered;
+    GHashTable *winners;
+    GHashTableIter iter;
+    gpointer iter_key, iter_val;
+
+    winners = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
+                                     g_free);
 
     for (i = 0; i < icon_files.n; ++i) {
         if (!icon_files.cicns[i]) {
@@ -192,113 +206,136 @@ list_icons (void)
         nres = macres_file_num_res_of_type (icon_files.cicns[i], TYPE_cicn);
         for (icon = 0; icon < nres; icon++) {
             macres_res *r;
-            GdkPixbuf *pb, *cropped, *scaled;
-            GtkWidget *child, *vbox, *image, *label;
-            int width, height, off;
-            char buf[16];
+            gpointer key;
 
             r = macres_file_get_nth_res_of_type (icon_files.cicns[i], TYPE_cicn,
                                                  icon);
             if (!r) {
                 continue;
             }
-
-            pb = cicn_to_pixbuf (r->data, r->datalen);
-            if (!pb) {
+            key = GUINT_TO_POINTER ((guint) r->resid);
+            if (g_hash_table_contains (winners, key)) {
+                /* A higher-priority file already claimed this
+				 * resid — discard the duplicate so it doesn't
+				 * show up alongside the user's version in the
+				 * picker. */
                 g_free (r);
                 continue;
             }
-            width = gdk_pixbuf_get_width (pb);
-            height = gdk_pixbuf_get_height (pb);
-            gboolean is_wide = (width > ICON_PICKER_WIDE_THRESHOLD);
-            off = is_wide ? ICON_PICKER_WIDE_CROP : 0;
-            if (off) {
-                cropped = gdk_pixbuf_new_subpixbuf (pb, off, 0, width - off,
-                                                    height);
-                g_object_unref (pb);
-                pb = cropped;
-                width -= off;
-            }
+            g_hash_table_insert (winners, key, r);
+        }
+    }
 
-            /* Narrow icons → uniform 56x56 thumbnail for the grid.
-			 * Wide banners → preserve aspect ratio (scale to a row-
-			 * height of 56 and proportional width) so the banner
-			 * art is recognisable instead of being squashed into a
-			 * square cell. */
-            if (is_wide) {
-                int target_h = 56;
-                int target_w = width * target_h / (height > 0 ? height : 1);
-                if (target_w < 1) {
-                    target_w = 1;
-                }
-                scaled = gdk_pixbuf_scale_simple (pb, target_w, target_h,
-                                                  GDK_INTERP_NEAREST);
-            } else {
-                /* Nearest-neighbor preserves pixel-art look at
-				 * 3.5x of 16px / 1.75x of 32px sources. */
-                scaled
-                    = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
-            }
+    rendered = 0;
+    g_hash_table_iter_init (&iter, winners);
+    while (g_hash_table_iter_next (&iter, &iter_key, &iter_val)) {
+        macres_res *r = iter_val;
+        GdkPixbuf *pb, *cropped, *scaled;
+        GtkWidget *child, *vbox, *image, *label;
+        int width, height, off;
+        char buf[16];
+        gboolean is_wide;
+
+        pb = cicn_to_pixbuf (r->data, r->datalen);
+        if (!pb) {
+            continue;
+        }
+        width = gdk_pixbuf_get_width (pb);
+        height = gdk_pixbuf_get_height (pb);
+        is_wide = (width > ICON_PICKER_WIDE_THRESHOLD);
+        off = is_wide ? ICON_PICKER_WIDE_CROP : 0;
+        if (off) {
+            cropped
+                = gdk_pixbuf_new_subpixbuf (pb, off, 0, width - off, height);
             g_object_unref (pb);
-            pb = scaled ? scaled : pb;
+            pb = cropped;
+            width -= off;
+        }
 
-            nfound++;
-            g_snprintf (buf, sizeof (buf), "%u", r->resid);
-
-            vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-            /* Phase 5: GtkPicture, not GtkImage. Adwaita's
-			 * stylesheet sizes GtkImage to icon-button dimensions
-			 * (~16-24px) regardless of the paintable's natural
-			 * size, so set_size_request on a wrapper grew the cell
-			 * but kept the icon clamped tiny inside it. GtkPicture
-			 * with can_shrink=FALSE pins to the paintable's natural
-			 * size — same fix gtkhx_pixmap_button uses for the
-			 * toolbar buttons. */
-            {
-                GdkTexture *tex;
-                G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-                tex = gdk_texture_new_for_pixbuf (pb);
-                G_GNUC_END_IGNORE_DEPRECATIONS
-                image = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-                g_object_unref (tex);
-                gtk_picture_set_can_shrink (GTK_PICTURE (image), FALSE);
+        /* Narrow icons → uniform 56x56 thumbnail for the grid.
+		 * Wide banners → preserve aspect ratio (scale to a row-
+		 * height of 56 and proportional width) so the banner
+		 * art is recognisable instead of being squashed into a
+		 * square cell. */
+        if (is_wide) {
+            int target_h = 56;
+            int target_w = width * target_h / (height > 0 ? height : 1);
+            if (target_w < 1) {
+                target_w = 1;
             }
-            label = gtk_label_new (buf);
-            gtk_widget_add_css_class (label, "caption");
-            gtk_box_append (GTK_BOX (vbox), image);
-            gtk_box_append (GTK_BOX (vbox), label);
-            gtk_widget_set_margin_start (vbox, 6);
-            gtk_widget_set_margin_end (vbox, 6);
-            gtk_widget_set_margin_top (vbox, 6);
-            gtk_widget_set_margin_bottom (vbox, 6);
+            scaled = gdk_pixbuf_scale_simple (pb, target_w, target_h,
+                                              GDK_INTERP_NEAREST);
+        } else {
+            /* Nearest-neighbor preserves pixel-art look at
+			 * 3.5x of 16px / 1.75x of 32px sources. */
+            scaled = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
+        }
+        g_object_unref (pb);
+        pb = scaled ? scaled : pb;
 
-            child = gtk_flow_box_child_new ();
-            gtk_flow_box_child_set_child (GTK_FLOW_BOX_CHILD (child), vbox);
-            g_object_set_data (G_OBJECT (child), "resid",
-                               GUINT_TO_POINTER (r->resid));
-            /* Wide banners go into their own dedicated flowbox so
-			 * they show one-per-row at natural aspect ratio. */
-            if (is_wide && iv->wide_list) {
-                gtk_flow_box_append (GTK_FLOW_BOX (iv->wide_list), child);
-            } else {
-                gtk_flow_box_append (GTK_FLOW_BOX (icon_list), child);
+        nfound++;
+        g_snprintf (buf, sizeof (buf), "%u", r->resid);
+
+        vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+        /* Phase 5: GtkPicture, not GtkImage. Adwaita's
+		 * stylesheet sizes GtkImage to icon-button dimensions
+		 * (~16-24px) regardless of the paintable's natural
+		 * size, so set_size_request on a wrapper grew the cell
+		 * but kept the icon clamped tiny inside it. GtkPicture
+		 * with can_shrink=FALSE pins to the paintable's natural
+		 * size — same fix gtkhx_pixmap_button uses for the
+		 * toolbar buttons. */
+        {
+            GdkTexture *tex;
+            G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+            tex = gdk_texture_new_for_pixbuf (pb);
+            G_GNUC_END_IGNORE_DEPRECATIONS
+            image = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+            g_object_unref (tex);
+            gtk_picture_set_can_shrink (GTK_PICTURE (image), FALSE);
+        }
+        label = gtk_label_new (buf);
+        gtk_widget_add_css_class (label, "caption");
+        gtk_box_append (GTK_BOX (vbox), image);
+        gtk_box_append (GTK_BOX (vbox), label);
+        gtk_widget_set_margin_start (vbox, 6);
+        gtk_widget_set_margin_end (vbox, 6);
+        gtk_widget_set_margin_top (vbox, 6);
+        gtk_widget_set_margin_bottom (vbox, 6);
+
+        child = gtk_flow_box_child_new ();
+        gtk_flow_box_child_set_child (GTK_FLOW_BOX_CHILD (child), vbox);
+        g_object_set_data (G_OBJECT (child), "resid",
+                           GUINT_TO_POINTER (r->resid));
+        /* Wide banners go into their own dedicated flowbox so
+		 * they show one-per-row at natural aspect ratio. */
+        if (is_wide && iv->wide_list) {
+            gtk_flow_box_append (GTK_FLOW_BOX (iv->wide_list), child);
+        } else {
+            gtk_flow_box_append (GTK_FLOW_BOX (icon_list), child);
+        }
+
+        g_object_unref (pb);
+
+        /* Cooperative multitasking — keep the dialog responsive while
+		 * paging through hundreds of resource entries. */
+        rendered++;
+        if (rendered % 10 == 0) {
+            while (g_main_context_pending (NULL)) {
+                g_main_context_iteration (NULL, TRUE);
             }
-
-            g_object_unref (pb);
-            g_free (r);
-
-            /* Cooperative multitasking — keep the dialog responsive while
-			 * paging through hundreds of resource entries. */
-            if (icon % 10 == 0) {
-                while (g_main_context_pending (NULL)) {
-                    g_main_context_iteration (NULL, TRUE);
-                }
-                if (!options_window) {
-                    return;
-                }
+            if (!options_window) {
+                /* Dialog closed mid-render. winners owns the
+				 * remaining macres_res entries; destroying the
+				 * table frees them via the destroy_func. */
+                g_hash_table_destroy (winners);
+                return;
             }
         }
     }
+
+    g_hash_table_destroy (winners);
+
     if (nfound >= 2) {
         gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (icon_list));
         if (iv->wide_list) {
