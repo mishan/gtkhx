@@ -115,6 +115,21 @@ RUN mkdir -p /opt/janus/Server/Files \
  && printf 'folder-leaf-B\n' \
         > /opt/janus/Server/Files/test_folder/leaf_b.txt
 
+# Seed a banner image so HTLS_HDR_BANNER actually fires post-login.
+# The checked-in conf/config.yaml has BannerMode=local + BannerFile=
+# "banner.gif", but the upstream Janus tarball doesn't ship a default
+# banner, so without this Janus would silently omit the banner
+# announcement and the test_hope_chacha20_banner Tier 3 test would
+# skip on the "server did not send HTLS_HDR_BANNER" branch — masking
+# real bugs in the AEAD HTXF subchannel path. Same source + sizing as
+# the mhxd container so both file-mode banner tests exercise an
+# identical image. Banner.gif must live next to Server/config.yaml
+# per the YAML doc string ("must be saved in the same folder as this
+# file").
+RUN curl -fsSL --retry 3 \
+        "https://placehold.co/468x60.gif?text=GtkHx+HTXF+GIF" \
+        -o /opt/janus/Server/banner.gif
+
 # -----------------------------------------------------------------------------
 # Runtime stage. The Janus binary is statically linked Go (verified
 # with `file`: "statically linked"), so we don't need any runtime
