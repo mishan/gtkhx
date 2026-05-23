@@ -305,6 +305,25 @@ cipher_aead_seal (chacha_aead_state *state,
     return framed_len;
 }
 
+uint8_t *
+cipher_aead_seal_alloc (chacha_aead_state *state,
+                        const uint8_t *plaintext, size_t pt_len,
+                        size_t *out_len)
+{
+    size_t framed_cap
+        = CIPHER_AEAD_LENGTH_PREFIX + pt_len + CIPHER_AEAD_TAG_SIZE;
+    uint8_t *framed = g_malloc (framed_cap);
+    size_t n = cipher_aead_seal (state, plaintext, pt_len, framed, framed_cap);
+    if (!n) {
+        g_free (framed);
+        return NULL;
+    }
+    if (out_len) {
+        *out_len = n;
+    }
+    return framed;
+}
+
 size_t
 cipher_aead_peek_frame_size (const uint8_t *framed, size_t framed_len)
 {

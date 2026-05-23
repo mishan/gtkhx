@@ -130,6 +130,23 @@ size_t cipher_aead_seal (chacha_aead_state *state,
                          const uint8_t *plaintext, size_t pt_len,
                          uint8_t *out, size_t out_cap);
 
+/* Convenience wrapper for callers that want a fresh framed buffer
+ * sized to fit the seal output. Allocates
+ *     CIPHER_AEAD_LENGTH_PREFIX + pt_len + CIPHER_AEAD_TAG_SIZE
+ * bytes via g_malloc, runs cipher_aead_seal into it, and on success
+ * writes the framed byte count to *out_len and returns the buffer
+ * (caller owns it and must g_free it). Returns NULL on seal failure
+ * (and frees the buffer for you). *out_len may be NULL if the caller
+ * doesn't need the count — the framed size is always the formula
+ * above on success.
+ *
+ * The cap-formula has previously been a fork-prone copy across
+ * cipher.c / htxf_io.c / the harness's three HOPE send helpers;
+ * funnelling through this helper keeps the math in one place. */
+uint8_t *cipher_aead_seal_alloc (chacha_aead_state *state,
+                                 const uint8_t *plaintext, size_t pt_len,
+                                 size_t *out_len);
+
 /* Open: given a candidate framed buffer, verify its Poly1305 tag
  * and emit the plaintext.
  *
