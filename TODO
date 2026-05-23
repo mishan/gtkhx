@@ -43,9 +43,6 @@ Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them (or having them littered throughout the code)
 
-Code Cleanup:
-- Continue stripping #define/#ifdef/#ifndef for things we should just consider a given these days (USE_IPV6 done)
-
 Plugins:
 - New plugin ABI using GIRepository
 
