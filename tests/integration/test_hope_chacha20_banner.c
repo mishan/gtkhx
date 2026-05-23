@@ -61,6 +61,7 @@
 #include "server_matrix.h"
 #include "cipher_aead.h"
 #include "htxf_io.h"
+#include "htxf_subchannel.h"
 #include "debug.h"
 
 static const hx_test_server *
@@ -232,23 +233,29 @@ test_hope_chacha20_banner_htxf (void)
                                               /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
 
-    guint8 hdr_buf[SIZEOF_HTXF_HDR];
-    hl_htxf_hdr_pack (hdr_buf, ref, size, HTXF_TYPE_BANNER, 0);
-    g_assert_true (integration_send (xfer_fd, hdr_buf, sizeof (hdr_buf)));
+    /* Shared preamble packer mirrors production banner.c +
+     * network.c::htxf_connect. Banners are never >4 GiB so size64
+     * stays FALSE; the 16-byte legacy variant comes out. */
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf),
+        ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
+        /*size64=*/FALSE);
+    g_assert_cmpuint (hdr_len, >, 0);
+    g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
-    /* Now arm the per-transfer AEAD state for the body. Derivation
-     * mixes the ref into the salt so each subchannel gets its own
-     * key pair. */
+    /* Now arm the per-transfer AEAD state for the body. Shared
+     * builder does htxf_io_init + cipher_aead_derive_transfer_keys
+     * (mixing the ref into the salt so each subchannel gets its
+     * own key pair) + aead_active=TRUE — same call production uses. */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
-    htxf_io_init (&xfer);
-    cipher_aead_derive_transfer_keys (
-        &xfer.xfer_encode, &xfer.xfer_decode,
+    hx_htxf_subchannel_arm_aead (
+        &xfer,
         htlc.sessionkey, htlc.sklen,
         &hope.encode_state, &hope.decode_state,
         ref);
-    xfer.aead_active = TRUE;
 
     /* Read `size` body bytes through htxf_io_read — consumes AEAD
      * frames off the socket and reassembles the plaintext payload. */

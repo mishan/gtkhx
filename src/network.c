@@ -61,6 +61,7 @@
 #include "agreement_packet.h"
 #include "hl_code.h"
 #include "proto_helpers.h"
+#include "htxf_subchannel.h"
 
 char *server_addr;
 guint16 server_port;
@@ -1266,7 +1267,6 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
 int
 htxf_connect (struct htxf_conn *htxf)
 {
-    guint8 hdr_buf[SIZEOF_HTXF_HDR];
     int s;
     char errbuf[256];
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
@@ -1286,12 +1286,11 @@ htxf_connect (struct htxf_conn *htxf)
 	 * the common case. The cap negotiation still works — both
 	 * peers KNOW they can speak large-file, they just don't have
 	 * to use the wire shape for this particular transfer. */
-    gboolean large = htxf->htlc
-                     && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0
-                     && htxf->total_size > 0xFFFFFFFFULL;
-    gboolean size64 = large; /* same condition; left as a name for clarity */
+    gboolean size64 = htxf->htlc
+                      && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0
+                      && htxf->total_size > 0xFFFFFFFFULL;
     if (htxf) {
-        htxf->opt.large = large ? 1 : 0;
+        htxf->opt.large = size64 ? 1 : 0;
     }
 
     s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport, errbuf,
@@ -1300,35 +1299,24 @@ htxf_connect (struct htxf_conn *htxf)
         return -1;
     }
 
-    /* Spec: when SIZE64 is set, zero the legacy 32-bit field
-	 * (otherwise a non-large-file peer might attempt a partial
-	 * read and treat it as complete). Otherwise carry the size
-	 * in the legacy field as before. */
-    {
-        guint16 type
-            = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-        guint16 flags = 0;
-        if (large) {
-            flags |= HTXF_FLAG_LARGE_FILE;
-        }
-        if (size64) {
-            flags |= HTXF_FLAG_SIZE64;
-        }
-        guint32 wire_len = size64 ? 0 : (guint32) htxf->total_size;
-        hl_htxf_hdr_pack (hdr_buf, htxf->ref, wire_len, type, flags);
-    }
-    if (write (s, hdr_buf, SIZEOF_HTXF_HDR) != SIZEOF_HTXF_HDR) {
+    /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
+	 * is set). hx_htxf_subchannel_pack_preamble handles the
+	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
+	 * zeroing for the 24-byte variant. */
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
+    guint16 type
+        = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf),
+        htxf->ref, htxf->total_size,
+        type, /*flags=*/0, size64);
+    if (hdr_len == 0) {
         close (s);
         return -1;
     }
-    /* 24-byte variant: append the 8-byte big-endian length after
-	 * the 16-byte header. Only present when SIZE64 is set. */
-    if (size64) {
-        guint64 be = GUINT64_TO_BE (htxf->total_size);
-        if (write (s, &be, sizeof be) != (ssize_t)sizeof be) {
-            close (s);
-            return -1;
-        }
+    if (write (s, hdr_buf, hdr_len) != (ssize_t) hdr_len) {
+        close (s);
+        return -1;
     }
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
@@ -1359,13 +1347,12 @@ htxf_connect (struct htxf_conn *htxf)
 	 * like read()/write(). */
     if (htxf && htxf->htlc
         && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
-        cipher_aead_derive_transfer_keys (
-            &htxf->xfer_encode, &htxf->xfer_decode,
+        hx_htxf_subchannel_arm_aead (
+            htxf,
             htxf->htlc->sessionkey, htxf->htlc->sklen,
             &htxf->htlc->cipher_encode_state.chacha,
             &htxf->htlc->cipher_decode_state.chacha,
             htxf->ref);
-        htxf->aead_active = TRUE;
         debug_log ("xfer-aead",
                    "ref=%u: AEAD active (control session_key=%u bytes)",
                    htxf->ref, htxf->htlc->sklen);
