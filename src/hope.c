@@ -236,6 +236,30 @@ hope_compute_chain (const char *pass,
     return n;
 }
 
+void
+hope_store_chain_keys (struct htlc_conn *htlc,
+                       const uint8_t *spec_encode_key,
+                       const uint8_t *spec_decode_key,
+                       size_t maclen)
+{
+    if (!htlc || !spec_encode_key || !spec_decode_key || !maclen) {
+        return;
+    }
+    if (maclen > sizeof (htlc->cipher_decode_key)
+        || maclen > sizeof (htlc->cipher_encode_key)) {
+        return;
+    }
+
+    /* GtkHx labels its cipher_*_key storage REVERSED from the spec
+     * (see hope_compute_chain's docstring for the historical reason).
+     * The spec's encode_key lands in the DECODE slot and vice versa.
+     * The cross is intentional and isn't a typo. */
+    memcpy (htlc->cipher_decode_key, spec_encode_key, maclen);
+    htlc->cipher_decode_keylen = (guint16) maclen;
+    memcpy (htlc->cipher_encode_key, spec_decode_key, maclen);
+    htlc->cipher_encode_keylen = (guint16) maclen;
+}
+
 /* ---- LOGIN field encoding -------------------------------------- */
 
 size_t
