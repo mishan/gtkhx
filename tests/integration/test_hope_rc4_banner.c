@@ -158,7 +158,7 @@ test_hope_rc4_banner_htxf (void)
     g_assert_true (integration_send_message_hope (
         fd, &htlc, &hope, HTLC_HDR_DOWNLOAD_BANNER, /*flag=*/0, /*hc=*/0));
 
-    guint32 ref = 0, size = 0;
+    struct hx_htxf_reply reply = { 0 };
     gboolean got_reply = FALSE;
     for (int i = 0; i < 16 && !got_reply; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,
@@ -170,26 +170,16 @@ test_hope_rc4_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        dh_start (&htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_HTXF_REF:
-                dh_getint (ref);
-                break;
-            case HTLS_DATA_HTXF_SIZE:
-                dh_getint (size);
-                break;
-            }
-        }
-        dh_end ();
+        hx_htxf_reply_extract (&htlc, &reply);
     }
     g_assert_true (got_reply);
-    g_assert_cmpuint (ref, >, 0);
+    g_assert_cmpuint (reply.ref, >, 0);
     /* >= 4 so the 4-byte magic log + matcher below can't run off the
      * end of the buffer if a misbehaving server reports a tiny size. */
-    g_assert_cmpuint (size, >=, 4);
-    g_assert_cmpuint (size, <, 1u << 20);
-    g_test_message ("HTXF ref=%u size=%u", ref, size);
+    g_assert_cmpuint (reply.size, >=, 4);
+    g_assert_cmpuint (reply.size, <, 1u << 20);
+    g_test_message ("HTXF ref=%u size=%u", reply.ref, reply.size);
+    guint32 ref = reply.ref, size = reply.size;
 
     /* Subchannel is plaintext under stream ciphers — both sides
      * leave aead_active=FALSE and htxf_io_read/_write fall through

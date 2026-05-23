@@ -465,6 +465,32 @@ hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
     return TRUE;
 }
 
+gboolean
+hx_htxf_reply_extract (struct htlc_conn *htlc, struct hx_htxf_reply *out)
+{
+    if (!out) {
+        return FALSE;
+    }
+
+    out->ref = 0;
+    out->size = 0;
+
+    dh_start (htlc)
+    {
+        switch (_type) {
+        case HTLS_DATA_HTXF_REF:
+            dh_getint (out->ref);
+            break;
+        case HTLS_DATA_HTXF_SIZE:
+            dh_getint (out->size);
+            break;
+        }
+    }
+    dh_end ();
+
+    return out->ref != 0;
+}
+
 hx_agreement_result
 hx_agreement_extract (struct htlc_conn *htlc, char *out, gsize out_size,
                       gsize *out_len)

@@ -287,7 +287,7 @@ test_banner_htxf_mode (void)
     }
 
     /* Drain looking for the TASK reply matching our trans. */
-    guint32 ref = 0, size = 0;
+    struct hx_htxf_reply reply = { 0 };
     gboolean got_reply = FALSE;
     for (int i = 0; i < 16 && !got_reply; i++) {
         if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
@@ -300,23 +300,13 @@ test_banner_htxf_mode (void)
             continue;
         }
         got_reply = TRUE;
-        dh_start (&htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_HTXF_REF:
-                dh_getint (ref);
-                break;
-            case HTLS_DATA_HTXF_SIZE:
-                dh_getint (size);
-                break;
-            }
-        }
-        dh_end ();
+        hx_htxf_reply_extract (&htlc, &reply);
     }
     g_assert_true (got_reply);
-    g_assert_cmpuint (ref, >, 0);
-    g_assert_cmpuint (size, >, 0);
-    g_assert_cmpuint (size, <, 1u << 20); /* sanity cap: <1 MB */
+    g_assert_cmpuint (reply.ref, >, 0);
+    g_assert_cmpuint (reply.size, >, 0);
+    g_assert_cmpuint (reply.size, <, 1u << 20); /* sanity cap: <1 MB */
+    guint32 ref = reply.ref, size = reply.size;
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
     /* Open the HTXF subchannel and pull the bytes. */

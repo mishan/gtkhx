@@ -187,8 +187,9 @@ test_hope_chacha20_banner_htxf (void)
     g_assert_true (integration_send_message_hope (
         fd, &htlc, &hope, HTLC_HDR_DOWNLOAD_BANNER, /*flag=*/0, /*hc=*/0));
 
-    /* Drain to the TASK reply for our trans. */
-    guint32 ref = 0, size = 0;
+    /* Drain to the TASK reply for our trans. Shared chunk-walker
+     * in proto_helpers pulls HTXF_REF + HTXF_SIZE. */
+    struct hx_htxf_reply reply = { 0 };
     gboolean got_reply = FALSE;
     for (int i = 0; i < 16 && !got_reply; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,
@@ -200,24 +201,14 @@ test_hope_chacha20_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        dh_start (&htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_HTXF_REF:
-                dh_getint (ref);
-                break;
-            case HTLS_DATA_HTXF_SIZE:
-                dh_getint (size);
-                break;
-            }
-        }
-        dh_end ();
+        hx_htxf_reply_extract (&htlc, &reply);
     }
     g_assert_true (got_reply);
-    g_assert_cmpuint (ref, >, 0);
-    g_assert_cmpuint (size, >, 0);
-    g_assert_cmpuint (size, <, 1u << 20);
-    g_test_message ("HTXF ref=%u size=%u", ref, size);
+    g_assert_cmpuint (reply.ref, >, 0);
+    g_assert_cmpuint (reply.size, >, 0);
+    g_assert_cmpuint (reply.size, <, 1u << 20);
+    g_test_message ("HTXF ref=%u size=%u", reply.ref, reply.size);
+    guint32 ref = reply.ref, size = reply.size;
 
     /* Open HTXF subchannel. The 16-byte preamble travels PLAINTEXT
      * on the wire so the server can match this subchannel against
