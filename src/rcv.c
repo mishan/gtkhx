@@ -1315,14 +1315,13 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             cipheralglistlen = hope_build_alg_reply (
                 sel.s_cipheralg, cipheralglist, sizeof (cipheralglist));
             /* Map spec-aligned chain outputs into GtkHx's legacy
-			 * storage convention. The labels are intentionally
-			 * swapped — see hope.h's hope_compute_chain docstring
-			 * for why this isn't symmetric with the function's
-			 * output naming. */
-            memcpy (htlc->cipher_decode_key, spec_encode_key, pmaclen);
-            htlc->cipher_decode_keylen = pmaclen;
-            memcpy (htlc->cipher_encode_key, spec_decode_key, pmaclen);
-            htlc->cipher_encode_keylen = pmaclen;
+			 * storage convention via the shared helper. The slot
+			 * swap (encode_key → decode slot, decode_key → encode
+			 * slot) is the same one the Tier 3 harness applies in
+			 * send_hope_step2; sharing keeps the convention single-
+			 * sourced. See hope.h. */
+            hope_store_chain_keys (htlc, spec_encode_key, spec_decode_key,
+                                   pmaclen);
         }
 
         /* Hand the pre-computed HOPE fields to the shared chunk

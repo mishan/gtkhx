@@ -212,6 +212,32 @@ hope_compute_chain (const char *pass,
                     uint8_t encode_key[HOPE_MAC_MAX],
                     uint8_t decode_key[HOPE_MAC_MAX]);
 
+/*
+ * Stash the spec-aligned encode/decode keys (typically the output
+ * of hope_compute_chain) into htlc->cipher_{encode,decode}_key with
+ * the GtkHx legacy-storage slot swap applied:
+ *
+ *     htlc->cipher_decode_key  ←  spec_encode_key
+ *     htlc->cipher_encode_key  ←  spec_decode_key
+ *
+ * The cross is intentional and isn't a typo — see hope_compute
+ * _chain's docstring (above) for the historical reason. Production
+ * and the Tier 3 harness both must apply this slot swap after the
+ * HMAC chain runs; both used to inline the four memcpy+keylen lines,
+ * which made the "which slot gets which spec key" decision impossible
+ * to verify by reading either side in isolation. This helper makes
+ * the convention single-sourced.
+ *
+ * `maclen` is one MAC output width (16 / 20 / 32) — the same value
+ * hope_compute_chain returned. Silently truncates against the
+ * cipher_*_keylen storage type (u16). NOOP on NULL args or maclen=0.
+ */
+extern void
+hope_store_chain_keys (struct htlc_conn *htlc,
+                       const uint8_t *spec_encode_key,
+                       const uint8_t *spec_decode_key,
+                       size_t maclen);
+
 /* ---- LOGIN field encoding -------------------------------------- */
 
 /*

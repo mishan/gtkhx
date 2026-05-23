@@ -1100,14 +1100,11 @@ send_hope_step2 (int fd, struct htlc_conn *htlc, const char *username,
         return FALSE;
     }
 
-    /* Stash the spec-aligned encode/decode keys onto htlc — the
-     * caller derives AEAD session keys from them after the Step 2
-     * send. Mirrors production's legacy-storage convention (encode
-     * spec-key → decode slot, decode spec-key → encode slot). */
-    memcpy (htlc->cipher_decode_key, spec_encode_key, pmaclen);
-    htlc->cipher_decode_keylen = (uint16_t) pmaclen;
-    memcpy (htlc->cipher_encode_key, spec_decode_key, pmaclen);
-    htlc->cipher_encode_keylen = (uint16_t) pmaclen;
+    /* Stash the spec-aligned encode/decode keys onto htlc via the
+     * shared helper — same call production's rcv.c::rcv_task_login
+     * uses, so the slot-swap convention (encode spec-key → decode
+     * slot, decode spec-key → encode slot) lives in one place. */
+    hope_store_chain_keys (htlc, spec_encode_key, spec_decode_key, pmaclen);
 
     /* Reply-list chunks for cipher / compress confirmation. */
     guint8 cipherreply[64];
