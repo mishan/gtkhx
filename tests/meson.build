@@ -1313,9 +1313,22 @@ test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
+# is_parallel: false on every Janus-only test. Janus has an internal
+# per-IP cap on simultaneous connections that we can't fully disable
+# from config (the binary's MaxConnectionsPerIP only covers the
+# top-level accept-rate path; the HTXF subchannel + HOPE handshake
+# share a different counter). Under meson's default parallelism the
+# 4 Janus-targeting tests fire concurrent connections from 127.0.0.1
+# and trip a 5s drain timeout on whichever one loses the race —
+# usually hope_chacha20_banner since it opens *two* connections
+# (control + HTXF subchannel). Each test still has plenty of work
+# under serial: hope_chacha20_banner takes ~250 ms when alone, so
+# the four added together cost ~1 s on top of the rest of the
+# integration suite, which runs at full parallelism.
 test('hope_chacha20', test_integration_hope_chacha20,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # hope_hmac — Tier 3 coverage for the HOPE handshake against an
 # HMAC-only HOPE server (no AEAD). Filters on HX_TEST_CAP_HOPE so
@@ -1377,8 +1390,9 @@ test_integration_hope_chacha20_chat_history = executable(
   link_with           : integration_harness_lib,
 )
 test('hope_chacha20_chat_history', test_integration_hope_chacha20_chat_history,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # hope_chacha20_banner — Tier 3 for the file-mode banner HTXF
 # subchannel under HOPE+ChaCha20-Poly1305. Drives the production
@@ -1395,8 +1409,9 @@ test_integration_hope_chacha20_banner = executable(
   link_with           : integration_harness_lib,
 )
 test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # Stream-cipher variants of the chat-history + banner coverage. Same
 # shape as the chacha20 sisters above; the cap filters route each
@@ -1450,8 +1465,9 @@ test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
      timeout : 60)
 
 test('chat_history', test_integration_chat_history,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # folder_put — HTLC_HDR_FILE_PUTFOLDER (0xd5) request/reply phase.
 # Mirror of test_file_put's scope: sends the opcode targeted at
