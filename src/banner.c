@@ -31,11 +31,12 @@
 #include "debug.h"
 #include "hotline.h"
 #include "protocol.h"
-#include "proto_helpers.h" /* hl_htxf_hdr_pack */
+#include "proto_helpers.h"
 #include "network.h"
 #include "cipher.h"
 #include "cipher_aead.h"
 #include "htxf_io.h"
+#include "htxf_subchannel.h"
 #include "banner.h"
 
 /* Inline forward decl so we don't have to pull in hx.h (which
@@ -588,7 +589,7 @@ banner_htxf_worker_thread (void *arg)
 {
     struct htxf_fetch *f = arg;
     int s;
-    guint8 hdr_buf[SIZEOF_HTXF_HDR];
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     char errbuf[256] = { 0 };
 
     s = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
@@ -600,21 +601,17 @@ banner_htxf_worker_thread (void *arg)
 
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this
 	 * subchannel through their banner-send path rather than the
-	 * generic single-file path. Shared packer in proto_helpers —
-	 * see the htxf_connect comment in network.c for the full story
-	 * on the type field. */
-    hl_htxf_hdr_pack (hdr_buf, f->ref, f->size, HTXF_TYPE_BANNER, 0);
-
-    /* Preamble is ALWAYS plaintext on the wire, regardless of cipher
-	 * mode. The server uses the ref number in the preamble to match
-	 * this subchannel TCP connection against the queued transfer
-	 * announced on the control channel; AEAD-framing the preamble
-	 * makes the server read garbage and slam the connection shut. The
-	 * spec is consistent with what network.c::htxf_connect does for
-	 * file transfers — only the body bytes (image data here) flow
-	 * through AEAD frames once the handshake has identified the
-	 * transfer. */
-    if (!write_n (s, hdr_buf, SIZEOF_HTXF_HDR)) {
+	 * generic single-file path. Shared builder packs the 16-byte
+	 * preamble — see htxf_subchannel.h for the full rationale
+	 * (notably: the preamble is ALWAYS plaintext on the wire so
+	 * the server can match this subchannel to the queued transfer
+	 * by ref before any cipher state is available). Banner transfers
+	 * are never large enough to need the 24-byte SIZE64 variant. */
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf),
+        f->ref, f->size, HTXF_TYPE_BANNER, /*flags=*/0,
+        /*size64=*/FALSE);
+    if (hdr_len == 0 || !write_n (s, hdr_buf, hdr_len)) {
         debug_log ("banner", "htxf header write failed: %s",
                    g_strerror (errno));
         close (s);
@@ -625,10 +622,9 @@ banner_htxf_worker_thread (void *arg)
 	 * plaintext preamble are framed AEAD packets; otherwise raw
 	 * stream. Build a transient struct htxf_conn that mirrors what
 	 * network.c::htxf_connect sets up for a regular transfer —
-	 * populate the per-transfer keys via
-	 * cipher_aead_derive_transfer_keys (mixing in the ref so each
-	 * subchannel gets its own key) and flip aead_active. htxf_io
-	 * _read does the right thing.
+	 * shared hx_htxf_subchannel_arm_aead does the per-transfer key
+	 * derivation (mixing in the ref so each subchannel gets its
+	 * own key) and flips aead_active. htxf_io_read does the rest.
 	 *
 	 * Stack-allocate the htxf_conn since the worker owns it for
 	 * its entire lifetime and we don't need it on a list. */
@@ -636,13 +632,11 @@ banner_htxf_worker_thread (void *arg)
         struct htxf_conn xfer;
         memset (&xfer, 0, sizeof (xfer));
         xfer.ref = f->ref;
-        htxf_io_init (&xfer);
-        cipher_aead_derive_transfer_keys (
-            &xfer.xfer_encode, &xfer.xfer_decode,
+        hx_htxf_subchannel_arm_aead (
+            &xfer,
             f->sessionkey, f->sklen,
             &f->ctrl_encode, &f->ctrl_decode,
             f->ref);
-        xfer.aead_active = TRUE;
 
         guint8 *p = f->bytes;
         gsize remain = f->size;

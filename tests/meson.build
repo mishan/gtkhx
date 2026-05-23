@@ -793,6 +793,7 @@ integration_harness_lib = static_library(
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
   '../src/qbuf.c',
   '../src/rand.c',
   '../src/hope.c',

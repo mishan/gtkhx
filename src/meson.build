@@ -34,6 +34,7 @@ gtkhx_sources = files(
   'history.c',
   'hope.c',
   'htxf_io.c',
+  'htxf_subchannel.c',
   'hl_code.c',
   'hl_date.c',
   'human_readable.c',
