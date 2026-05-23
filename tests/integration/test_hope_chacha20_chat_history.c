@@ -159,10 +159,6 @@ drain_until_task_hope (int fd, struct htlc_conn *htlc,
 static void
 test_hope_chacha20_chat_history_round_trip (void)
 {
-#ifndef CONFIG_CIPHER
-    g_test_skip ("built without CONFIG_CIPHER");
-    return;
-#else
     const hx_test_server *srv = pick_chat_history_chacha20_server ();
     if (!srv) {
         g_test_skip ("no server in matrix advertising both "
@@ -227,7 +223,6 @@ test_hope_chacha20_chat_history_round_trip (void)
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);
     integration_close (fd);
-#endif /* CONFIG_CIPHER */
 }
 
 int

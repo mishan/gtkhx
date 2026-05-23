@@ -28,7 +28,6 @@
 
 #include "config.h"
 
-#ifdef CONFIG_CIPHER
 
 #include <stdint.h>
 #include <stddef.h>
@@ -168,6 +167,5 @@ size_t cipher_aead_open (chacha_aead_state *state,
 size_t cipher_aead_peek_frame_size (const uint8_t *framed,
                                     size_t framed_len);
 
-#endif /* CONFIG_CIPHER */
 
 #endif /* __cipher_aead_h */

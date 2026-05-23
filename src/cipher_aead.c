@@ -22,7 +22,6 @@
 
 #include "config.h"
 
-#ifdef CONFIG_CIPHER
 
 #include <string.h>
 #include <nettle/hmac.h>
@@ -390,4 +389,3 @@ cipher_aead_open (chacha_aead_state *state,
     return pt_len;
 }
 
-#endif /* CONFIG_CIPHER */

@@ -9,10 +9,7 @@ extern pthread_t conn_tid;
 #endif
 
 extern char *server_addr;
-
-#ifdef USE_IPV6
 extern guint16 server_port;
-#endif
 extern struct log *server_log;
 
 extern int connected;

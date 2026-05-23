@@ -47,20 +47,12 @@ static GtkWidget *login_entry;
 static GtkWidget *password_entry;
 static GtkWidget *port_entry;
 static GtkWidget *hope;
-#ifdef CONFIG_COMPRESS
 static GtkWidget *compress_menu;
-#endif
-#ifdef CONFIG_CIPHER
 static GtkWidget *cipher_menu;
-#endif
 
-#if defined(CONFIG_CIPHER)
 
 #define DEFAULT_CIPHER "BLOWFISH"
 char *valid_ciphers[] = { "RC4", "BLOWFISH",
-#ifndef CONFIG_NO_IDEA
-                          "IDEA",
-#endif
                           /* Phase 5+ (fogWraith HOPE-ChaCha20-Poly1305.md):
 						   * preferred AEAD cipher, advertised when the
 						   * connection is encrypted. The negotiation sends
@@ -82,9 +74,7 @@ valid_cipher (const char *cipheralg)
 
     return 0;
 }
-#endif
 
-#if defined(CONFIG_COMPRESS)
 
 #define DEFAULT_COMPRESS "GZIP"
 /* Order matters here — the connect dialog shows these in the
@@ -116,7 +106,6 @@ valid_compress (const char *compressalg)
 
     return 0;
 }
-#endif
 
 /* list_n lives in src/algo_list.c now — extracted so the Tier 1
  * test can drive its malformed-input cases (the NULL-deref crash
@@ -228,7 +217,6 @@ connect_with_args (session *sess, const char *server, guint16 port,
     (void)compress;
     (void)cipher;
 
-#ifdef CONFIG_COMPRESS
     memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
     if (secure && compress) {
         const char *compress_algo = valid_compressors[compress - 1];
@@ -241,8 +229,6 @@ connect_with_args (session *sess, const char *server, guint16 port,
             sess->htlc.compressalg[colen] = 0;
         }
     }
-#endif
-#ifdef CONFIG_CIPHER
     memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
     if (secure && cipher) {
         const char *cipher_algo = valid_ciphers[cipher - 1];
@@ -255,7 +241,6 @@ connect_with_args (session *sess, const char *server, guint16 port,
             sess->htlc.cipheralg[cilen] = 0;
         }
     }
-#endif
 
     last_conn_set (server, port, login, pass, secure, compress, cipher);
 
@@ -302,12 +287,8 @@ server_connect (GtkWidget *widget, gpointer data)
     pass = gtk_editable_get_text (GTK_EDITABLE (password_entry));
     portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
-#ifdef CONFIG_COMPRESS
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
-#endif
-#ifdef CONFIG_CIPHER
     cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
-#endif
 
     if (portstr && portstr[0]) {
         port = atoi (portstr);
@@ -349,16 +330,12 @@ hope_coupling_sync_sensitivity (void)
         return;
     }
     on = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
-#ifdef CONFIG_COMPRESS
     if (compress_menu) {
         gtk_widget_set_sensitive (compress_menu, on);
     }
-#endif
-#ifdef CONFIG_CIPHER
     if (cipher_menu) {
         gtk_widget_set_sensitive (cipher_menu, on);
     }
-#endif
 }
 
 static void
@@ -428,16 +405,12 @@ set_the_entries (char *address, char *login, char *password, char *port,
         adw_switch_row_set_active (ADW_SWITCH_ROW (hope),
                                    secure ? TRUE : FALSE);
     }
-#ifdef CONFIG_COMPRESS
     if (compress_menu) {
         adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), compress);
     }
-#endif
-#ifdef CONFIG_CIPHER
     if (cipher_menu) {
         adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), cipher);
     }
-#endif
 
     /* Either set_the_entries was called with a bookmark before the
      * coupling notify handlers fired (preload path) or it's
@@ -1016,12 +989,8 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     pass = gtk_editable_get_text (GTK_EDITABLE (password_entry));
     port = gtk_editable_get_text (GTK_EDITABLE (port_entry));
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
-#ifdef CONFIG_COMPRESS
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
-#endif
-#ifdef CONFIG_CIPHER
     cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
-#endif
 
     dir = bookmarks_dir_primary ();
     server_str = g_strdup_printf ("%s:%s", server, port);
@@ -1141,8 +1110,7 @@ save_dialog (GtkWidget *widget, gpointer data)
  *     AdwEntryRow Login, AdwPasswordEntryRow Password
  *   AdwPreferencesGroup "Connection"
  *     AdwSwitchRow Secure (HOPE)
- *   #ifdef CONFIG_COMPRESS / CIPHER: AdwComboRow Compress / Cipher
- *     in the same Connection group
+ *     AdwComboRow Compress / Cipher
  *
  * Cancel is the close-X on the headerbar; ESC dismisses. The header's
  * Connect button is the default response so Enter from any of the
@@ -1262,7 +1230,6 @@ create_connect_window (GtkWidget *btn, gpointer data)
                       G_CALLBACK (on_hope_active_notify), NULL);
     adw_preferences_group_add (conn_grp, hope);
 
-#ifdef CONFIG_COMPRESS
     {
         GtkStringList *list = gtk_string_list_new (NULL);
         int i;
@@ -1283,9 +1250,7 @@ create_connect_window (GtkWidget *btn, gpointer data)
                           G_CALLBACK (on_secure_combo_selected_notify), NULL);
         adw_preferences_group_add (conn_grp, compress_menu);
     }
-#endif
 
-#ifdef CONFIG_CIPHER
     {
         GtkStringList *list = gtk_string_list_new (NULL);
         int i;
@@ -1305,7 +1270,6 @@ create_connect_window (GtkWidget *btn, gpointer data)
                           G_CALLBACK (on_secure_combo_selected_notify), NULL);
         adw_preferences_group_add (conn_grp, cipher_menu);
     }
-#endif
 
     /* Apply initial sensitivity now that all three widgets exist —
      * fresh dialog with HOPE off greys the combos. The

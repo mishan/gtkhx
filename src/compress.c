@@ -10,7 +10,6 @@
 #include "hx.h"
 #include "compress.h"
 
-#ifdef CONFIG_COMPRESS
 
 #define COMPRESS_DEBUG 0
 
@@ -501,4 +500,3 @@ compress_decode_end (struct htlc_conn *htlc)
     }
 }
 
-#endif /* CONFIG_COMPRESS */

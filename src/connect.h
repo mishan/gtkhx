@@ -9,14 +9,10 @@ extern void set_the_entries (char *address, char *login, char *password,
 extern void connect_bookmark_name (char *name);
 extern void create_connect_window (GtkWidget *btn, gpointer data);
 
-#ifdef CONFIG_COMPRESS
 extern int valid_compress (const char *compressalg);
 extern char *valid_compressors[];
-#endif
-#ifdef CONFIG_CIPHER
 extern int valid_cipher (const char *cipheralg);
 extern char *valid_ciphers[];
-#endif
 /* list_n moved to src/algo_list.{c,h} — re-include so historic
  * connect.h consumers keep finding the declaration without an
  * extra include. */

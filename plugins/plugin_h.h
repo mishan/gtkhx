@@ -175,11 +175,7 @@ struct htlc_conn {
 	void (*rcv)(struct htlc_conn *);
 	void (*real_rcv)(struct htlc_conn *);
 	struct qbuf in, out;
-#ifdef USE_IPV6
 	struct addrinfo *addr;
-#else
-	struct sockaddr_in addr;
-#endif
 	int fd;
 	u_int32_t trans;
 	u_int32_t chattrans;
@@ -216,9 +212,7 @@ struct gtkhx_prefs {
 	int num_tracker;
 	int num_icons;
 	int trans_xtext;
-#ifdef USE_GDK_PIXBUF
 	int tint_red, tint_blue, tint_green;
-#endif
 	char *sound_path;
 	char *auto_reply_msg;
 	char *font;

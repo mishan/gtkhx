@@ -62,9 +62,7 @@
 #include "proto_helpers.h"
 
 char *server_addr;
-#ifdef USE_IPV6
 guint16 server_port;
-#endif
 
 #if 0 /* XXX */
 struct log *server_log = NULL;
@@ -299,7 +297,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * need explicit teardown. The legacy freeaddrinfo() call (and
 	 * the conn_addr shim that briefly replaced it) belonged here. */
 
-#ifdef CONFIG_CIPHER
     memset (htlc->cipher_encode_key, 0, sizeof (htlc->cipher_encode_key));
     memset (htlc->cipher_decode_key, 0, sizeof (htlc->cipher_decode_key));
     memset (&htlc->cipher_encode_state, 0, sizeof (htlc->cipher_encode_state));
@@ -315,8 +312,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_free (htlc->aead_plain.buf);
         memset (&htlc->aead_plain, 0, sizeof (htlc->aead_plain));
     }
-#endif
-#ifdef CONFIG_COMPRESS
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           "GZIP deflate: in: %lu  out: %lu\n",
@@ -341,7 +336,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->gzip_deflate_total_out = 0;
     htlc->gzip_inflate_total_in = 0;
     htlc->gzip_inflate_total_out = 0;
-#endif
     memset (htlc->sessionkey, 0, sizeof (htlc->sessionkey));
     htlc->sklen = 0;
 
@@ -359,7 +353,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  * its pos). Authentication failure or oversized frame returns 0
  * and disconnects htlc (via hx_htlc_close); the caller treats
  * htlc->fd == 0 as "stop processing". */
-#ifdef CONFIG_CIPHER
 static u_int32_t
 aead_pump_frames (struct htlc_conn *htlc)
 {
@@ -440,7 +433,6 @@ aead_pump_frames (struct htlc_conn *htlc)
     }
     return dst->len;
 }
-#endif
 
 static unsigned int
 decode (struct htlc_conn *htlc)
@@ -448,22 +440,13 @@ decode (struct htlc_conn *htlc)
     struct qbuf *in = &htlc->read_in;
     struct qbuf *out = in;
     u_int32_t len, max, inused, r = in->len;
-#ifdef CONFIG_CIPHER
     union cipher_state cipher_state;
     struct qbuf cipher_out;
-#endif
-#ifdef CONFIG_COMPRESS
     struct qbuf compress_out;
-#endif
 
-#ifdef CONFIG_CIPHER
     memset (&cipher_out, 0, sizeof (struct qbuf));
-#endif
-#ifdef CONFIG_COMPRESS
     memset (&compress_out, 0, sizeof (struct qbuf));
-#endif
 
-#ifdef CONFIG_CIPHER
     /* Phase 5+ (HOPE-ChaCha20-Poly1305): AEAD-framed path. Pump
 	 * complete frames from read_in into aead_plain, then bulk
 	 * memcpy from aead_plain into htlc->in based on how many
@@ -515,7 +498,6 @@ decode (struct htlc_conn *htlc)
         }
         return (htlc->in.len == 0);
     }
-#endif
 
     /* Below here the legacy stream/plaintext path needs at least
 	 * one byte buffered in read_in to do anything; bail otherwise.
@@ -529,12 +511,9 @@ decode (struct htlc_conn *htlc)
     len = r;
     in->pos = 0;
 
-#ifdef CONFIG_CIPHER
-#ifdef CONFIG_COMPRESS
     if (htlc->compressalg[0] && htlc->compress_decode_type != COMPRESS_NONE) {
         max = 0xffffffff;
     } else
-#endif
         max = htlc->in.len;
     if (htlc->cipheralg[0] && htlc->cipher_decode_type != CIPHER_NONE) {
         memcpy (&cipher_state, &htlc->cipher_decode_state,
@@ -542,10 +521,7 @@ decode (struct htlc_conn *htlc)
         out = &cipher_out;
         len = cipher_decode (htlc, out, in, max, &inused);
     } else
-#endif
-#ifdef CONFIG_COMPRESS
         if (htlc->compress_decode_type == COMPRESS_NONE)
-#endif
     {
         max = htlc->in.len;
         out = in;
@@ -557,29 +533,21 @@ decode (struct htlc_conn *htlc)
             len = r;
         }
     }
-#ifdef CONFIG_COMPRESS
     if (htlc->compress_decode_type != COMPRESS_NONE) {
         max = htlc->in.len;
         out = &compress_out;
         len = compress_decode (
             htlc, out,
-#ifdef CONFIG_CIPHER
             htlc->cipher_decode_type == CIPHER_NONE ? in : &cipher_out,
-#else
-            in,
-#endif
             max, &inused);
     }
-#endif
     memcpy (&htlc->in.buf[htlc->in.pos], &out->buf[out->pos], len);
     if (r != inused) {
-#ifdef CONFIG_CIPHER
         if (htlc->cipher_decode_type != CIPHER_NONE) {
             memcpy (&htlc->cipher_decode_state, &cipher_state,
                     sizeof (cipher_state));
             cipher_decode (htlc, &cipher_out, in, inused, &inused);
         }
-#endif
         memmove (&in->buf[0], &in->buf[inused], r - inused);
     }
     in->pos = r - inused;
@@ -587,16 +555,12 @@ decode (struct htlc_conn *htlc)
     htlc->in.pos += len;
     htlc->in.len -= len;
 
-#if defined(CONFIG_COMPRESS)
     if (compress_out.buf) {
         g_free (compress_out.buf);
     }
-#endif
-#if defined(CONFIG_CIPHER)
     if (cipher_out.buf) {
         g_free (cipher_out.buf);
     }
-#endif
 
     return (htlc->in.len == 0);
 }
@@ -1065,7 +1029,6 @@ send_login (struct gtkhx_connect_ctx *ctx)
         req.mode = HX_LOGIN_MODE_HOPE_STEP1;
         req.hope_app_id = "GTKx";
         req.hope_app_string = app_string;
-#ifdef CONFIG_CIPHER
         /* HOPE cipher advertisement. Single-entry list of the user's
 		 * configured algorithm. Phase 5+ NOTE: this could grow into a
 		 * strongest-first multi-entry list once HTXF subchannel AEAD
@@ -1073,12 +1036,9 @@ send_login (struct gtkhx_connect_ctx *ctx)
         if (htlc->cipheralg[0]) {
             req.cipheralg = htlc->cipheralg;
         }
-#endif
-#ifdef CONFIG_COMPRESS
         if (htlc->compressalg[0]) {
             req.compressalg = htlc->compressalg;
         }
-#endif
     } else {
         task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
 
@@ -1156,9 +1116,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 
     g_free (server_addr);
     server_addr = g_strdup_printf ("%s:%u", serverstr, port);
-#ifdef USE_IPV6
     server_port = port;
-#endif
 
     /* Phase 4 (chat-history reconnect catch-up): the AFTER= cursor
 	 * is per-server, but the xtext scrollback we just wiped via
@@ -1366,7 +1324,6 @@ htxf_connect (struct htxf_conn *htxf)
         }
     }
 
-#ifdef CONFIG_CIPHER
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
 	 *
 	 * Once the plaintext handshake has been sent, derive a
@@ -1406,7 +1363,6 @@ htxf_connect (struct htxf_conn *htxf)
                    "ref=%u: AEAD active (control session_key=%u bytes)",
                    htxf->ref, htxf->htlc->sklen);
     }
-#endif
 
     return s;
 }
@@ -1931,16 +1887,12 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
     hxd_fd_set (htlc->fd, FDW);
-#ifdef CONFIG_COMPRESS
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
     }
-#endif
-#ifdef CONFIG_CIPHER
     if (htlc->cipher_encode_type != CIPHER_NONE) {
         cipher_encode (htlc, this_off, len);
     }
-#endif
 }
 
 /* Chunk-array variant of hlwrite. Same trace + write + cipher +
@@ -1993,16 +1945,12 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
     hxd_fd_set (htlc->fd, FDW);
-#ifdef CONFIG_COMPRESS
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
     }
-#endif
-#ifdef CONFIG_CIPHER
     if (htlc->cipher_encode_type != CIPHER_NONE) {
         cipher_encode (htlc, this_off, len);
     }
-#endif
 }
 
 /* hl_code lives in src/hl_code.c so the Tier 1 unit test can link

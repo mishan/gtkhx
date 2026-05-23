@@ -31,9 +31,7 @@
 #include "login_packet.h"
 #include "chat_history.h"
 #include "hope.h"
-#ifdef CONFIG_CIPHER
 #include "cipher_aead.h"
-#endif
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -697,7 +695,6 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
     htlc->out.len = 0;
     hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
 
-#ifdef CONFIG_CIPHER
     if (hope && hope->aead_active) {
         gsize pt_len = htlc->out.len;
         gsize out_cap = CIPHER_AEAD_LENGTH_PREFIX + pt_len
@@ -722,9 +719,6 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
         htlc->out.len = 0;
         return ok ? trans : 0;
     }
-#else
-    (void) hope;
-#endif
 
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
@@ -1061,18 +1055,13 @@ integration_hope_session_release (integration_hope_session *hope)
     if (!hope) {
         return;
     }
-#ifdef CONFIG_CIPHER
     g_free (hope->rx_accum);
     hope->rx_accum = NULL;
     hope->rx_accum_len = 0;
     hope->rx_accum_cap = 0;
     hope->aead_active = 0;
-#else
-    hope->aead_active = 0;
-#endif
 }
 
-#ifdef CONFIG_CIPHER
 
 /* Build the HOPE Step 2 LOGIN packet and send it over `fd`. Returns
  * TRUE on a full send. Same chunk shape as production's
@@ -1181,7 +1170,6 @@ send_hope_step2 (int fd, struct htlc_conn *htlc, const char *username,
     return ok;
 }
 
-#endif /* CONFIG_CIPHER */
 
 int
 integration_open_login_hope_or_skip (
@@ -1190,20 +1178,6 @@ integration_open_login_hope_or_skip (
     const char *password, const char *display_name, guint16 icon,
     const char *cipheralg, const char *compressalg)
 {
-#ifndef CONFIG_CIPHER
-    (void) srv;
-    (void) htlc;
-    (void) hope;
-    (void) username;
-    (void) password;
-    (void) display_name;
-    (void) icon;
-    (void) cipheralg;
-    (void) compressalg;
-    g_test_skip ("CONFIG_CIPHER not defined — HOPE-Secure-Login disabled "
-                 "at build time.");
-    return -1;
-#else
     g_return_val_if_fail (srv != NULL, -1);
     g_return_val_if_fail (htlc != NULL, -1);
     g_return_val_if_fail (hope != NULL, -1);
@@ -1433,7 +1407,6 @@ integration_open_login_hope_or_skip (
     integration_hope_session_release (hope);
     integration_close (fd);
     return -1;
-#endif /* CONFIG_CIPHER */
 }
 
 gboolean
@@ -1452,7 +1425,6 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     hlpack (htlc, type, flag, hc, ap);
     va_end (ap);
 
-#ifdef CONFIG_CIPHER
     if (hope && hope->aead_active) {
         /* Frame the just-packed message: 4-byte BE length prefix +
          * ciphertext + 16-byte Poly1305 tag. */
@@ -1492,9 +1464,6 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
         htlc->out.len = 0;
         return ok;
     }
-#else
-    (void) hope;
-#endif
 
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
@@ -1504,7 +1473,6 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     return ok;
 }
 
-#ifdef CONFIG_CIPHER
 
 /* Apply htlc's stream cipher (RC4 / Blowfish OFB-64) to `n` raw
  * bytes in place. Used for both the encrypted header and the
@@ -1588,13 +1556,11 @@ try_consume_aead_frame (struct htlc_conn *htlc,
     return (gssize) pt_len;
 }
 
-#endif /* CONFIG_CIPHER */
 
 gboolean
 integration_recv_message_hope (int fd, struct htlc_conn *htlc,
                               integration_hope_session *hope, int timeout_ms)
 {
-#ifdef CONFIG_CIPHER
     if (hope && hope->aead_active) {
         /* First check whether we already have a buffered frame. */
         gssize n = try_consume_aead_frame (htlc, hope);
@@ -1720,8 +1686,5 @@ integration_recv_message_hope (int fd, struct htlc_conn *htlc,
         htlc->in.len = total;
         return TRUE;
     }
-#else
-    (void) hope;
-#endif
     return integration_recv_message (fd, htlc, timeout_ms);
 }

@@ -22,13 +22,9 @@
 #include "compat.h"
 #include "hotline.h"
 
-#ifdef CONFIG_COMPRESS
 #include "compress.h"
-#endif
 
-#ifdef CONFIG_CIPHER
 #include "cipher.h"
-#endif
 
 /* htxf_io.h defines struct htxf_aead_io, which is embedded as a
  * value field on struct htxf_conn below for the HOPE-ChaCha20-
@@ -157,7 +153,6 @@ struct htxf_conn {
 	 * for non-preview transfers. */
     void *preview;
 
-#ifdef CONFIG_CIPHER
     /* HOPE ChaCha20-Poly1305 HTXF subchannel state (Phase E).
 	 *
 	 * aead_active gates whether xfers.c's per-transfer
@@ -180,7 +175,6 @@ struct htxf_conn {
     chacha_aead_state xfer_decode;
     gboolean aead_active;
     struct htxf_aead_io aead_io;
-#endif
 };
 
 struct htlc_conn {
@@ -256,7 +250,6 @@ struct htlc_conn {
     u_int8_t sessionkey[64];
     u_int16_t sklen;
 
-#if defined(CONFIG_CIPHER)
     char cipheralg[32];
     union cipher_state cipher_encode_state;
     union cipher_state cipher_decode_state;
@@ -286,19 +279,14 @@ struct htlc_conn {
 	 * bridges the granularity mismatch. Only used in AEAD mode;
 	 * stream-cipher mode leaves it untouched. */
     struct qbuf aead_plain;
-#if defined(CONFIG_COMPRESS)
     u_int8_t zc_hdrlen;
     u_int8_t zc_ran;
-#endif
-#endif
-#if defined(CONFIG_COMPRESS)
     char compressalg[32];
     union compress_state compress_encode_state;
     union compress_state compress_decode_state;
     u_int16_t compress_encode_type, compress_decode_type;
     unsigned long gzip_inflate_total_in, gzip_inflate_total_out;
     unsigned long gzip_deflate_total_in, gzip_deflate_total_out;
-#endif
     /* DATA_CAPABILITIES bitmask negotiated for this session, as
 	 * confirmed by the server in the LOGIN reply. Zero on legacy
 	 * servers (or on connections where neither side speaks the
@@ -432,9 +420,7 @@ extern u_int16_t hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
                            const void *text, u_int32_t textlen,
                            const char *macalg);
 
-#if defined(CONFIG_CIPHER)
 extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
-#endif
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 

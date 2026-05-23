@@ -95,7 +95,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
             mal = dh->data;
             mal_len = _len;
             break;
-#ifdef CONFIG_CIPHER
         case HTLS_DATA_CIPHER_ALG:
             s_cal = dh->data;
             s_cal_len = _len;
@@ -115,8 +114,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
             /* Reserved for explicit-IV cipher modes; HOPE doesn't
 			 * use them today. */
             break;
-#endif
-#ifdef CONFIG_COMPRESS
         case HTLS_DATA_COMPRESS_ALG:
             s_compl = dh->data;
             s_compl_len = _len;
@@ -125,7 +122,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
             c_compl = dh->data;
             c_compl_len = _len;
             break;
-#endif
         case HTLS_DATA_CHECKSUM_ALG:
         case HTLC_DATA_CHECKSUM_ALG:
             /* HOPE pre-defined for future checksum-only modes;
@@ -184,7 +180,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
     /* Cipher / compress algorithm name extraction is best-effort —
 	 * server may have negotiated "no cipher" by omitting the
 	 * chunks. Leave the corresponding reply field empty if so. */
-#ifdef CONFIG_CIPHER
     if (s_cal_len) {
         pick_first_alg (s_cal, s_cal_len, reply->s_cipheralg,
                         sizeof (reply->s_cipheralg));
@@ -193,13 +188,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
         pick_first_alg (c_cal, c_cal_len, reply->c_cipheralg,
                         sizeof (reply->c_cipheralg));
     }
-#else
-    (void) s_cal;
-    (void) c_cal;
-    (void) s_cal_len;
-    (void) c_cal_len;
-#endif
-#ifdef CONFIG_COMPRESS
     if (s_compl_len) {
         pick_first_alg (s_compl, s_compl_len, reply->s_compressalg,
                         sizeof (reply->s_compressalg));
@@ -208,12 +196,6 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
         pick_first_alg (c_compl, c_compl_len, reply->c_compressalg,
                         sizeof (reply->c_compressalg));
     }
-#else
-    (void) s_compl;
-    (void) c_compl;
-    (void) s_compl_len;
-    (void) c_compl_len;
-#endif
 
     return HOPE_OK;
 }
@@ -364,7 +346,6 @@ hope_build_alg_reply (const char *alg, uint8_t *out_buf, size_t out_cap)
 int
 hope_cipher_id_from_name (const char *name)
 {
-#ifdef CONFIG_CIPHER
     if (!name || !*name) {
         return CIPHER_NONE;
     }
@@ -378,20 +359,13 @@ hope_cipher_id_from_name (const char *name)
         return CIPHER_CHACHA20_POLY1305;
     }
     return CIPHER_NONE;
-#else
-    (void) name;
-    return 0;
-#endif
 }
 
 int
 hope_cipher_is_aead (const char *name)
 {
-    /* Pure name predicate — independent of CONFIG_CIPHER. Callers
-	 * that need to know whether a cipher is actually available in
-	 * the build should pair this with hope_cipher_id_from_name(),
-	 * which returns CIPHER_NONE outside CONFIG_CIPHER. Tests rely
-	 * on the name-only semantic to verify the AEAD classification
-	 * without dragging cipher_aead.c into their link surface. */
+    /* Pure name predicate. Tests rely on the name-only semantic to
+	 * verify the AEAD classification without dragging cipher_aead.c
+	 * into their link surface. */
     return name && !strcmp (name, "CHACHA20-POLY1305");
 }

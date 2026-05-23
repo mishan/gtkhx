@@ -120,22 +120,18 @@ hx_login_build_chunks (const hx_login_request *req,
         chunks[hc++] = (struct hx_chunk) {
             HTLC_DATA_PASSWORD, req->password_mac_len, req->password_mac
         };
-#ifdef CONFIG_CIPHER
         if (req->cipher_alg_reply_len) {
             chunks[hc++] = (struct hx_chunk) {
                 HTLS_DATA_CIPHER_ALG, req->cipher_alg_reply_len,
                 req->cipher_alg_reply
             };
         }
-#endif
-#ifdef CONFIG_COMPRESS
         if (req->compress_alg_reply_len) {
             chunks[hc++] = (struct hx_chunk) {
                 HTLS_DATA_COMPRESS_ALG, req->compress_alg_reply_len,
                 req->compress_alg_reply
             };
         }
-#endif
         /* NAME — always emit. Production passes htlc->name (may be
          * empty when unset). Empty-string chunk has length 0; an
          * empty NAME chunk is the same shape the server expects. */
@@ -237,7 +233,6 @@ hx_login_build_chunks (const hx_login_request *req,
             app_string
         };
 
-#ifdef CONFIG_CIPHER
         if (req->cipheralg && *req->cipheralg) {
             size_t cip_off = soff;
             size_t cip_n = build_single_alg_list (
@@ -249,8 +244,6 @@ hx_login_build_chunks (const hx_login_request *req,
                 };
             }
         }
-#endif
-#ifdef CONFIG_COMPRESS
         if (req->compressalg && *req->compressalg) {
             size_t comp_off = soff;
             size_t comp_n = build_single_alg_list (
@@ -262,7 +255,6 @@ hx_login_build_chunks (const hx_login_request *req,
                 };
             }
         }
-#endif
 
         /* Empty SESSIONKEY — server fills it in the Step 1 reply. */
         chunks[hc++] = (struct hx_chunk) {

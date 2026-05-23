@@ -193,7 +193,6 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 - The `gtkthreads.c` recursive-mutex + custom poll function from Phase 3.3 is GTK-version-agnostic — it should survive Phase 4 unchanged. The cleaner long-term answer is `g_main_context_invoke()` at every worker→UI boundary, but that's a per-call-site refactor (~56 sites in `network.c` and `xfers.c`) and is also Phase 5 territory.
 - File dialogs change: `GtkFileChooserDialog` → `GtkFileDialog` is async (callback-based, no `gtk_dialog_run`). Existing dialog use sites become a request + a response handler.
 - `gtk_widget_set_size_request` still exists in GTK 4 with the same semantics — the Phase 3.x `-2` → `-1` cleanup carries over.
-- Wayland is the only backend that matters in GTK 4 (the X11 backend exists but you can't assume it). The `USE_XLIB` define in `config.h` becomes a no-op; remove it.
 - `GdkPixmap`/`GdkBitmap` typedef aliases (in `session.h` and `gtk_hlist_compat.h`) survive Phase 4 — they're our own types, not GTK's. Keep until the consumers can be unwound (Phase 5 cleanup).
 
 **Exit criteria:** Runs natively on Wayland. Connects to mhxd / hlserver.com, joins chat, browses files, lists tracker servers. Builds with `-Werror=deprecated-declarations` against current GTK 4. UX is no worse than the Phase 3 binary; HeaderBar and other GTK-4-native UX touches are explicitly Phase 5 work.
@@ -227,7 +226,6 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 
 - **Full backward compat with Hotline 1.2 and 1.5 is a hard requirement.** Don't break it. The wire-format code in `rcv.c`, `commands.c`, `hotline.h`, and the cipher/compress negotiation in `cipher.c`/`compress.c` should not change shape during the GTK ports — only the surrounding C and the libraries it leans on. If a refactor accidentally drops 1.2 compatibility, that's a regression.
 - **Reimplement SOCKS support** (TODO item from 2003). mhxd has SOCKS5 client support too — worth seeing how they did it.
-- **IPv6 cleanup.** Code already supports it via `getaddrinfo` but with `#ifdef USE_IPV6` everywhere — make it unconditional.
 - **Audit the wire-level int handling.** The `HN16`/`HN32` byte-swap macros and `PACKED` structs in `hotline.h` work but should be replaced with explicit `g_ntohl` / `GUINT32_FROM_BE` and proper buffer-cursor reads. Reduces the chance of strict-aliasing or alignment bugs on ARM64.
 
 **Plugin system**

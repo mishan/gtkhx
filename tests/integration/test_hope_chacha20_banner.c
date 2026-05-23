@@ -59,10 +59,8 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
-#ifdef CONFIG_CIPHER
 #include "cipher_aead.h"
 #include "htxf_io.h"
-#endif
 
 static const hx_test_server *
 pick_banner_chacha20_server (void)
@@ -113,10 +111,6 @@ banner_bytes_match_type (const char *type, const guint8 *bytes, gsize len)
 static void
 test_hope_chacha20_banner_htxf (void)
 {
-#ifndef CONFIG_CIPHER
-    g_test_skip ("built without CONFIG_CIPHER");
-    return;
-#else
     const hx_test_server *srv = pick_banner_chacha20_server ();
     if (!srv) {
         g_test_skip ("no server in matrix advertising both "
@@ -266,7 +260,6 @@ cleanup:
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);
     integration_close (fd);
-#endif /* CONFIG_CIPHER */
 }
 
 int

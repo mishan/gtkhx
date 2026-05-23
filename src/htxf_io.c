@@ -16,10 +16,8 @@
 #include "compat.h" /* PACKED — required before hotline.h / protocol.h */
 #include "hotline.h"
 #include "protocol.h"
-#ifdef CONFIG_CIPHER
 #include "cipher.h"
 #include "cipher_aead.h"
-#endif
 #include "htxf_io.h"
 #include "debug.h"
 
@@ -46,7 +44,6 @@ htxf_io_release (struct htxf_conn *htxf)
     memset (&htxf->aead_io, 0, sizeof (htxf->aead_io));
 }
 
-#ifdef CONFIG_CIPHER
 
 /* AEAD read path: serve from the plaintext accumulator first;
  * refill from socket as needed. Returns bytes copied, or 0/-1
@@ -251,30 +248,21 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
     return (ssize_t) len;
 }
 
-#endif /* CONFIG_CIPHER */
 
 ssize_t
 htxf_io_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
 {
-#ifdef CONFIG_CIPHER
     if (htxf && htxf->aead_active) {
         return aead_read (htxf, fd, buf, len);
     }
-#else
-    (void) htxf;
-#endif
     return read (fd, buf, len);
 }
 
 ssize_t
 htxf_io_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
 {
-#ifdef CONFIG_CIPHER
     if (htxf && htxf->aead_active) {
         return aead_write (htxf, fd, buf, len);
     }
-#else
-    (void) htxf;
-#endif
     return write (fd, buf, len);
 }

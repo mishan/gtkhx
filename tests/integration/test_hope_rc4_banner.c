@@ -95,10 +95,6 @@ banner_bytes_match_type (const char *type, const guint8 *bytes, gsize len)
 static void
 test_hope_rc4_banner_htxf (void)
 {
-#ifndef CONFIG_CIPHER
-    g_test_skip ("built without CONFIG_CIPHER");
-    return;
-#else
     const hx_test_server *srv = pick_banner_rc4_server ();
     if (!srv) {
         g_test_skip ("no server in matrix advertising both "
@@ -218,7 +214,6 @@ cleanup:
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);
     integration_close (fd);
-#endif
 }
 
 int

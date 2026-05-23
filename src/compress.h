@@ -1,7 +1,6 @@
 #ifndef __compress_h
 #define __compress_h
 
-#ifdef CONFIG_COMPRESS
 
 #include "config.h"
 
@@ -70,6 +69,5 @@ extern void compress_decode_end (struct htlc_conn *htlc);
  * the HOPE Step 2 reply. */
 extern u_int16_t compress_id_from_name (const char *name);
 
-#endif /* CONFIG_COMPRESS */
 
 #endif

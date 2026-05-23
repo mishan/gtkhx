@@ -13,7 +13,6 @@
 
 #include "config.h"
 
-#ifdef CONFIG_CIPHER
 
 #include <stdint.h>
 #include <sys/types.h> /* u_int8_t / u_int32_t */
@@ -109,6 +108,5 @@ extern void cipher_encode_init (struct htlc_conn *htlc);
 extern void cipher_decode_init (struct htlc_conn *htlc);
 extern void cipher_change_decode_key (struct htlc_conn *htlc, u_int32_t type);
 
-#endif /* CONFIG_CIPHER */
 
 #endif /* __cipher_h */
