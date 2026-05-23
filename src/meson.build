@@ -103,17 +103,6 @@ conf.set('HAVE_LIBINTL_H',  1)
 conf.set('CONFIG_COMPRESS', 1)
 conf.set('CONFIG_CIPHER',   1)
 
-# IDEA cipher was always disabled in the old build (patent encumbered at the
-# time, never wired in to HOPE negotiation in the wild).
-conf.set('CONFIG_NO_IDEA',  1)
-
-# X11 assumptions baked into gtkhx.c colormap code etc. GTK 2/3 are X11;
-# Phase 4 (GTK 4 / Wayland) revisits this define.
-conf.set('USE_XLIB',        1)
-
-# gdk-pixbuf was conditional in 1.2 era; required for any GTK >= 2.
-conf.set('USE_GDK_PIXBUF',  1)
-
 # libsoup-3 is optional. When found, banner.c builds the URL-mode
 # fetcher that decodes server banners inline; without it, URL-mode
 # banners render as a clickable line that opens in the user's

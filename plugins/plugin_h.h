@@ -212,9 +212,7 @@ struct gtkhx_prefs {
 	int num_tracker;
 	int num_icons;
 	int trans_xtext;
-#ifdef USE_GDK_PIXBUF
 	int tint_red, tint_blue, tint_green;
-#endif
 	char *sound_path;
 	char *auto_reply_msg;
 	char *font;

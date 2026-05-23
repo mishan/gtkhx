@@ -58,9 +58,6 @@ static GtkWidget *cipher_menu;
 
 #define DEFAULT_CIPHER "BLOWFISH"
 char *valid_ciphers[] = { "RC4", "BLOWFISH",
-#ifndef CONFIG_NO_IDEA
-                          "IDEA",
-#endif
                           /* Phase 5+ (fogWraith HOPE-ChaCha20-Poly1305.md):
 						   * preferred AEAD cipher, advertised when the
 						   * connection is encrypted. The negotiation sends
