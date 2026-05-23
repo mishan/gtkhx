@@ -59,6 +59,13 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     va_end (ap);
 }
 
+/* Production declaration lives in network.h, which we deliberately
+ * don't include (it would drag in GIOChannel + proto_trace + cipher
+ * + compress). Forward-declare here so -Wmissing-prototypes is
+ * happy — same pattern integration_harness.c uses. */
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type,
+                            guint32 flag, const struct hx_chunk *chunks,
+                            int hc);
 void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
