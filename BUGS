@@ -1,6 +1,27 @@
 High priority:
 
-(none)
+- File Preview crash if closing preview before it's done xfer'ing
+
+(gdb) bt
+#0  __pthread_kill_implementation (threadid=<optimized out>, signo=signo@entry=6, no_tid=no_tid@entry=0)
+    at ./nptl/pthread_kill.c:44
+#1  0x00007ffff634fdbf in __pthread_kill_internal (threadid=<optimized out>, signo=6) at ./nptl/pthread_kill.c:89
+#2  0x00007ffff62f8d02 in __GI_raise (sig=sig@entry=6) at ../sysdeps/posix/raise.c:26
+#3  0x00007ffff62e04b2 in __GI_abort () at ./stdlib/abort.c:77
+#4  0x00007ffff62e14eb in __libc_message_impl (fmt=fmt@entry=0x7ffff646834b "%s\n") at ../sysdeps/posix/libc_fatal.c:138
+#5  0x00007ffff6359c57 in malloc_printerr (str=<optimized out>) at ./malloc/malloc.c:5895
+#6  0x00007ffff6359c71 in malloc_printerr_tail (str=<optimized out>) at ./malloc/malloc.c:5912
+#7  0x00005555555a4429 in hx_preview_unref (p=0x555557c1bb80) at ../src/preview.c:927
+#8  hx_preview_unref (p=0x555557c1bb80) at ../src/preview.c:922
+#9  chunk_dispatch (data=0x7fff04000e70) at ../src/preview.c:1042
+#10 0x00007ffff6db668e in ??? () at /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#11 0x00007ffff6db9a1f in ??? () at /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#12 0x00007ffff6dba1b0 in g_main_context_iteration () at /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#13 0x00007ffff6fa4b1d in g_application_run () at /usr/lib/x86_64-linux-gnu/libgio-2.0.so.0
+#14 0x000055555558e253 in loop () at ../src/gtkhx.c:1025
+#15 hotline_client_init (argc=argc@entry=1, argv=argv@entry=0x7fffffffe128) at ../src/gtkhx.c:2013
+#16 0x000055555556f400 in main (argc=1, argv=0x7fffffffe128, envp=0x7fffffffe138) at ../src/gtkhx.c:1777
+
 
 Medium priority:
 

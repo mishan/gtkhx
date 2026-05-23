@@ -1,14 +1,13 @@
+High Priority for 1.0.0 Release:
+- Fix button icons in Files browser
+- Bug stomping / fixing in Files browser
+
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
 - Keyboard shortcuts like Ctrl-W and Ctrl-Q ought to work in all windows/dialogs including Settings
 
-Files:
-- Bug stomping / fixing
-- Icons -- make sure we are using all the correct ones
-
 Icons:
-- Compile new icons.rsrc with all Hotline 1.5 + 1.8 icons
 - Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
 
 Docs:
@@ -34,7 +33,7 @@ Voice Chat:
 - Build initial prototype of voice chat extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Voice.md
 
 Inline Media:
-- Research spike to determine how difficult it would be to add to xtext
+- Research spike to determine how difficult it would be to add to xtext (see spec https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Inline-Media.md)
 
 Code Modernization:
 - Better modules with more code reuse
@@ -46,4 +45,4 @@ Plugins:
 Features:
 - Ability to make GtkHx themes. These would allow customization of all the buttons in the UI
 - Custom color palette
-- Log chat history / server, and be able to bring that chat history back up when connecting to a server
+- Log chat history / server, and be able to bring that chat history back up when connecting to a server (separate from chat history extension, could be tricky to handle both of these)

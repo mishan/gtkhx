@@ -43,6 +43,7 @@
 - Support for colored names on servers that support it
 - Light/Dark theme support
 - Emoji picker next to Chat and Message input fields
+- Updated icons.rsrc to include icons from HLC 1.9
 
 0.9.4
 -----
