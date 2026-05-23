@@ -204,6 +204,17 @@ typedef enum {
 	                                  * "connected". */
     GTKHX_CONNECTION_HANDSHAKE_DONE, /* LOGIN sent. Connect task
 	                                  * progress ticker is done. */
+    GTKHX_CONNECTION_LOGIN_READY,    /* hx_post_login_fetches has
+	                                  * fired — the server has accepted
+	                                  * us as a fully-joined user
+	                                  * (either AGREEMENTAGREE went out
+	                                  * for 1.5+ servers, or the 1.0/
+	                                  * 1.2 fallback timer fired). This
+	                                  * is the boundary at which post-
+	                                  * login RPCs (USER_GETLIST,
+	                                  * FILE_LIST for the files
+	                                  * browser, chat history catch-up)
+	                                  * are spec-safe to send. */
 } GtkhxConnectionState;
 
 void gtkhx_session_emit_connection_state (GtkhxSession *self,

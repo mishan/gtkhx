@@ -105,7 +105,14 @@ struct browser {
 
     /* GtkhxSession::connection-state handler — fires the remote
 	 * provider's "unavailable-changed" so the panel reloads on
-	 * login + paints the not-connected state on disconnect. */
+	 * the LOGIN_READY transition + paints the not-connected
+	 * state on DISCONNECTED. Intermediate states (CONNECTING /
+	 * TCP_CONNECTED / HANDSHAKE_DONE) are ignored — the remote
+	 * provider reports as unavailable until login is fully
+	 * established, so a reload at any of those points would
+	 * either no-op (good) or fire HTLC_HDR_FILE_LIST before the
+	 * server has accepted our AGREEMENTAGREE (bad — strict 1.5+
+	 * servers disconnect on that). */
     gulong conn_state_handler;
 
     /* GtkhxSession::file-update handler — used to spot
@@ -1737,7 +1744,20 @@ on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
 {
     struct browser *br = user_data;
     (void)sess;
-    (void)state;
+
+    /* Only DISCONNECTED (panel needs to paint the not-connected
+     * state) and LOGIN_READY (panel can safely fire its initial
+     * FILE_LIST now) flip remote-provider availability. The
+     * intermediate states (CONNECTING / TCP_CONNECTED /
+     * HANDSHAKE_DONE) leave the remote provider's
+     * get_unavailable_reason returning non-NULL anyway, so a
+     * reload at those points would no-op even without this gate
+     * — but keeping the handler tight saves a few signal hops
+     * per connect and documents intent. */
+    if (state != GTKHX_CONNECTION_DISCONNECTED
+        && state != GTKHX_CONNECTION_LOGIN_READY) {
+        return;
+    }
     if (br->left_provider) {
         g_signal_emit_by_name (br->left_provider, "unavailable-changed");
     }

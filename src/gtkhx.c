@@ -1445,6 +1445,11 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
         set_status_bar (-1);
         set_disconnect_btn (sess, 1);
         conn_task_update (sess, 0);
+        /* Wipe any toasts left over from the previous server (task
+         * errors, broadcasts, "Logged in"). Without this the user
+         * can be looking at a stale toast from server A while
+         * already connecting to server B. */
+        toolbar_clear_toasts ();
         break;
     case GTKHX_CONNECTION_TCP_CONNECTED:
         set_status_bar (1);
@@ -1453,6 +1458,13 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
         break;
     case GTKHX_CONNECTION_HANDSHAKE_DONE:
         conn_task_update (sess, 2);
+        break;
+    case GTKHX_CONNECTION_LOGIN_READY:
+        /* Per-aspect UI (status bar / toolbar / tray) already
+         * settled at HANDSHAKE_DONE; LOGIN_READY exists purely as
+         * the boundary for late post-login RPCs (the files browser's
+         * remote provider is the first consumer). Nothing to do
+         * here. */
         break;
     }
 }
