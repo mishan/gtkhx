@@ -110,10 +110,12 @@ void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text);
  * with no response opcode. For those we rely on the 2-second
  * fallback timer armed in rcv_task_login.
  *
- * `post_login_fetched` is the single-fire guard: whichever path
- * runs first sets it, the other path becomes a no-op. Reset on
- * each login attempt at the top of rcv_task_login's else branch. */
-static gboolean post_login_fetched = FALSE;
+ * `htlc->flags.post_login_fetched` is the single-fire guard:
+ * whichever path runs first sets it, the other path becomes a
+ * no-op. Reset in hx_htlc_close so the next connect starts
+ * fresh. Stored on the htlc rather than as a file-local static
+ * so the files-browser's remote provider (and other consumers
+ * that need the "fully joined" gate) can read it directly. */
 static guint post_login_timer_id = 0;
 
 /* Public entry — network.c::hx_send_agreement_agree calls this
@@ -122,10 +124,10 @@ static guint post_login_timer_id = 0;
 void
 hx_post_login_fetches (struct htlc_conn *htlc)
 {
-    if (post_login_fetched) {
+    if (htlc->flags.post_login_fetched) {
         return;
     }
-    post_login_fetched = TRUE;
+    htlc->flags.post_login_fetched = 1;
 
     if (post_login_timer_id) {
         g_source_remove (post_login_timer_id);
@@ -194,6 +196,15 @@ hx_post_login_fetches (struct htlc_conn *htlc)
             }
         }
     }
+
+    /* Announce the spec-correct "fully joined" boundary to the UI.
+     * Consumers (e.g. the files browser's remote provider) use this
+     * to defer post-login RPCs like FILE_LIST until after the server
+     * has accepted our AGREEMENTAGREE — sending one before that
+     * trips "action attributed to not-yet-joined session" errors on
+     * 1.5+ servers and outright disconnects on the stricter ones. */
+    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+                                         GTKHX_CONNECTION_LOGIN_READY);
 }
 
 static gboolean
@@ -202,7 +213,7 @@ post_login_fallback (gpointer data)
     struct htlc_conn *htlc = data;
 
     post_login_timer_id = 0;
-    if (htlc && htlc->fd && !post_login_fetched) {
+    if (htlc && htlc->fd && !htlc->flags.post_login_fetched) {
         debug_log (
             "login",
             "AGREEMENTAGREE didn't fire after 2s, firing fetches anyway");
@@ -218,7 +229,9 @@ rcv_login_reset (void)
         g_source_remove (post_login_timer_id);
         post_login_timer_id = 0;
     }
-    post_login_fetched = FALSE;
+    /* The post_login_fetched bit on htlc->flags is reset alongside
+     * the other flags in hx_htlc_close — same reset point as
+     * flags.logged_in. */
 }
 
 /*
@@ -1448,11 +1461,14 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * the fetches already; that race no longer matters because
 			 * SELFINFO is not a fetch trigger anymore (fetches fire
 			 * from hx_send_agreement_agree). The check is harmless
-			 * to keep — it's a no-op when post_login_fetched is FALSE,
-			 * which is the new common case. */
-            gboolean already_fetched = post_login_fetched;
+			 * to keep — it's a no-op when the flag is FALSE, which is
+			 * the new common case. The fetched-bit itself lives on
+			 * htlc->flags.post_login_fetched now (so the files browser
+			 * can read it); the running timer id is still our local
+			 * static. */
+            gboolean already_fetched = htlc->flags.post_login_fetched;
             if (!already_fetched) {
-                post_login_fetched = FALSE;
+                htlc->flags.post_login_fetched = 0;
                 if (post_login_timer_id) {
                     g_source_remove (post_login_timer_id);
                     post_login_timer_id = 0;

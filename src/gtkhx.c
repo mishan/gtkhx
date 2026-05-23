@@ -1454,6 +1454,13 @@ on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
     case GTKHX_CONNECTION_HANDSHAKE_DONE:
         conn_task_update (sess, 2);
         break;
+    case GTKHX_CONNECTION_LOGIN_READY:
+        /* Per-aspect UI (status bar / toolbar / tray) already
+         * settled at HANDSHAKE_DONE; LOGIN_READY exists purely as
+         * the boundary for late post-login RPCs (the files browser's
+         * remote provider is the first consumer). Nothing to do
+         * here. */
+        break;
     }
 }
 

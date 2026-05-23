@@ -176,6 +176,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * AGREEMENTAGREE; a stale 1 from a previous session would skip
 	 * the legacy flow on the next connect. */
     htlc->flags.logged_in = 0;
+    /* Same reset for the "we've reached the spec-correct fully-
+	 * joined boundary" flag — see hx_post_login_fetches in rcv.c
+	 * and the comment on the flag in protocol.h. The files browser's
+	 * remote provider reads this to know when FILE_LIST is safe to
+	 * send. */
+    htlc->flags.post_login_fetched = 0;
 
     /* Same idea for the DATA_CAPABILITIES bitmask — the next
 	 * connect renegotiates from zero. A stale CAP_TEXT_ENCODING

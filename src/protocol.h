@@ -222,7 +222,19 @@ struct htlc_conn {
 		 * see one for an already-logged-in session).
 		 *
 		 * Reset to 0 in hx_htlc_close so reconnect starts fresh. */
-            logged_in : 1, reserved : 30;
+            logged_in : 1,
+            /* Phase 5+: set when hx_post_login_fetches runs (either
+		 * via AGREEMENTAGREE-send for 1.5+ servers or the 1.0/1.2
+		 * fallback timer). This is the spec-correct "we're a fully
+		 * joined user" boundary — earlier than this, sending RPCs
+		 * like USER_GETLIST or FILE_LIST can land at the server
+		 * before our AGREEMENTAGREE and trip "action attributed
+		 * to not-yet-joined session" errors. The files browser's
+		 * remote provider gates on this flag so its initial
+		 * directory listing doesn't fire too early. Reset in
+		 * hx_htlc_close so reconnect starts fresh. */
+            post_login_fetched : 1,
+            reserved : 29;
     } flags;
 
     hl_access_bits access;

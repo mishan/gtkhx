@@ -118,7 +118,22 @@ static const char *
 remote_get_unavailable_reason (HxFilesProvider *self)
 {
     (void)self;
-    return the_session.htlc.fd ? NULL : _ ("Not connected to a server.");
+    if (!the_session.htlc.fd) {
+        return _ ("Not connected to a server.");
+    }
+    /* htlc->fd is set as soon as the TCP socket comes up — well
+     * before the spec-correct "fully joined" boundary the server
+     * uses to gate post-login RPCs (USER_GETLIST, FILE_LIST,
+     * chat-history catch-up). If we let the panel reload between
+     * those two points, the resulting HTLC_HDR_FILE_LIST lands at
+     * the server before our AGREEMENTAGREE and trips a "not yet
+     * joined" disconnect on stricter 1.5+ servers. The flag is
+     * raised in rcv.c::hx_post_login_fetches and reset in
+     * hx_htlc_close. */
+    if (!the_session.htlc.flags.post_login_fetched) {
+        return _ ("Logging in…");
+    }
+    return NULL;
 }
 
 /* ---- Wire send ----
