@@ -175,11 +175,7 @@ struct htlc_conn {
 	void (*rcv)(struct htlc_conn *);
 	void (*real_rcv)(struct htlc_conn *);
 	struct qbuf in, out;
-#ifdef USE_IPV6
 	struct addrinfo *addr;
-#else
-	struct sockaddr_in addr;
-#endif
 	int fd;
 	u_int32_t trans;
 	u_int32_t chattrans;

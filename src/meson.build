@@ -99,9 +99,6 @@ conf.set('HAVE_STDLIB_H',   1)
 conf.set('HAVE_LIMITS_H',   1)
 conf.set('HAVE_LIBINTL_H',  1)
 
-# IPv6 was conditional via --disable-ipv6; getaddrinfo is universal now.
-conf.set('USE_IPV6',       1)
-
 # Compression and cipher were configure-time toggles; both are required now.
 conf.set('CONFIG_COMPRESS', 1)
 conf.set('CONFIG_CIPHER',   1)

@@ -62,9 +62,7 @@
 #include "proto_helpers.h"
 
 char *server_addr;
-#ifdef USE_IPV6
 guint16 server_port;
-#endif
 
 #if 0 /* XXX */
 struct log *server_log = NULL;
@@ -1150,9 +1148,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 
     g_free (server_addr);
     server_addr = g_strdup_printf ("%s:%u", serverstr, port);
-#ifdef USE_IPV6
     server_port = port;
-#endif
 
     /* Phase 4 (chat-history reconnect catch-up): the AFTER= cursor
 	 * is per-server, but the xtext scrollback we just wiped via
