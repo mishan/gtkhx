@@ -120,6 +120,18 @@ test_hope_rc4_banner_htxf (void)
     g_assert_true (hope.stream_active);
     g_assert_false (hope.aead_active);
 
+    /* Janus (and any 1.5-spec-compliant server) only fires
+     * HTLS_HDR_BANNER after the client sends AGREEMENTAGREE — the
+     * post-login push sequence is gated on the "we're fully
+     * joined" boundary. integration_open_login_hope_or_skip stops
+     * at SELFINFO, so we have to drive the AGREE step ourselves
+     * before the drain loop below. Mirrors the chacha20 banner
+     * test exactly; without this the test drains for 16 seconds
+     * and skips with "no banner received". */
+    g_assert_true (integration_send_agreementagree_hope (
+        fd, &htlc, &hope, /*display_name=*/"HopeRC4Banner Tier-3",
+        /*icon=*/412));
+
     /* Drain a few more messages waiting for HTLS_HDR_BANNER. Same
      * shape as the chacha20 banner test — integration_open_login
      * _hope_or_skip stops at SELFINFO and the banner can arrive

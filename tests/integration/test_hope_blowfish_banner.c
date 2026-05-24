@@ -101,6 +101,17 @@ test_hope_blowfish_banner_htxf (void)
     g_assert_true (hope.stream_active);
     g_assert_false (hope.aead_active);
 
+    /* Janus only fires HTLS_HDR_BANNER after the client sends
+     * AGREEMENTAGREE — the post-login push sequence is gated on
+     * the "we're fully joined" boundary. integration_open_login
+     * _hope_or_skip stops at SELFINFO, so we have to drive the
+     * AGREE step ourselves before the drain loop. Mirrors the
+     * chacha20 banner test exactly; without this the test drains
+     * for 16 seconds and skips with "no banner received". */
+    g_assert_true (integration_send_agreementagree_hope (
+        fd, &htlc, &hope, /*display_name=*/"HopeBlowfishBanner Tier-3",
+        /*icon=*/412));
+
     gchar *banner_type = NULL;
     for (int i = 0; i < 8 && !banner_type; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,
