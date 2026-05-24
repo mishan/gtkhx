@@ -233,6 +233,16 @@ duplicate paths, so a hashtable can't represent it cleanly).
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.
 
+## Coverage
+
+`tools/coverage.sh` builds with `-Db_coverage=true`, runs the test suite,
+and emits an HTML report at `coverage/index.html` via `gcovr` (or `lcov`
+fallback). Default is all tiers including Tier 3 against the Docker matrix;
+`--quick` skips Tier 3. Exclusions for vendored / soon-deleted code
+(`xtext.c`, `dfa.c`, `rand.c`) live in `.gcovr.cfg`. Use it to pick the
+heaviest-uncovered file when planning what to test next. Full notes in
+`docs/coverage.md`.
+
 ## Debug infrastructure
 
 Set `GTKHX_DEBUG` to a comma-separated list of categories before launch:
