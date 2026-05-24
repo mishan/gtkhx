@@ -1560,6 +1560,18 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             }
             dh_end ();
 
+            /* Re-run setbtns now that HTLS_DATA_VERSION has been
+			 * parsed out of this same LOGIN reply. The earlier
+			 * setbtns at the top of this branch fires before the
+			 * chunk walker, so htlc->version is still 0 there —
+			 * which leaves news15_btn (the 1.5+ threaded-News
+			 * toolbar button) stuck disabled on every 1.5+ server
+			 * since its gate is is_15plus = (version >= 150).
+			 * The other buttons setbtns touches don't depend on
+			 * version, so running it twice is just an idempotent
+			 * refresh. */
+            setbtns (sess, 1);
+
             /* Phase 5: PING keepalive only on confirmed 1.5+ servers.
 			 * htlc->version is populated by the HTLS_DATA_VERSION
 			 * chunk just parsed above; servers that don't advertise
