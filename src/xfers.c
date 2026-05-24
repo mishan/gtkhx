@@ -96,6 +96,15 @@ htxf_unref (struct htxf_conn *htxf)
     if (!g_atomic_int_dec_and_test (&htxf->refcount)) {
         return;
     }
+    /* Drop the per-htxf ref on the preview window if this transfer
+	 * was a preview. The window holds its own ref independently;
+	 * if the user has already closed the preview, this is the ref
+	 * that keeps the struct alive long enough for the worker to
+	 * stop touching it — see hx_preview_new's docstring. The
+	 * field is NULL on a download/upload (non-preview) htxf,
+	 * which hx_preview_unref handles with an early return. */
+    hx_preview_unref ((hx_preview *)htxf->preview);
+    htxf->preview = NULL;
     /* Release any AEAD read-side accumulator buffers the HTXF
 	 * subchannel Phase E wrappers might have allocated. No-op
 	 * on a transfer that ran in plaintext mode. */
