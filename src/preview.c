@@ -120,10 +120,34 @@ struct hx_preview {
 	 * holds one ref, each queued job holds one. Last unref frees
 	 * the hx_preview. */
     gint refcount;
+
+    /* Set TRUE (atomically) the moment the worker calls
+	 * hx_preview_done — *not* in the main-thread done_dispatch.
+	 * preview_close_request uses this to decide whether to fire
+	 * cancel_cb. If we keyed off the main-thread idle landing,
+	 * there would be a race window where the worker has finished
+	 * streaming + queued done_dispatch but the idle hasn't run
+	 * yet — closing the window in that window would invoke
+	 * xfer_delete on an htxf whose worker has already exited,
+	 * causing pthread_cancel on a stale tid.
+	 *
+	 * Accessed across threads (worker writes, main reads), hence
+	 * the atomic. */
+    gint stream_finished;
+
+    /* User-close-window cancel hook. Registered by the caller of
+	 * hx_preview_new (rcv.c::rcv_task_file_get hands in xfer_delete
+	 * + the matching htxf pointer). Fired at most once, on the
+	 * main thread, from preview_close_request when !done. NULL =
+	 * no cancel hook installed (legitimate for callers that don't
+	 * back the preview with an HTXF transfer). */
+    hx_preview_cancel_fn cancel_cb;
+    void *cancel_data;
 };
 
 static hx_preview *hx_preview_ref (hx_preview *p);
-static void hx_preview_unref (hx_preview *p);
+/* hx_preview_unref is declared in preview.h — the HTXF worker side
+ * (xfers.c::htxf_unref) needs it to release the per-htxf ref. */
 
 /* ---- Text viewer --------------------------------------------------- */
 
@@ -918,9 +942,15 @@ hx_preview_ref (hx_preview *p)
     return p;
 }
 
-static void
+/* Public — declared in preview.h. The HTXF worker side calls this
+ * from htxf_unref when the transfer connection is torn down, to
+ * release the ref hx_preview_new handed out for htxf->preview. */
+void
 hx_preview_unref (hx_preview *p)
 {
+    if (!p) {
+        return;
+    }
     if (!g_atomic_int_dec_and_test (&p->refcount)) {
         return;
     }
@@ -943,8 +973,28 @@ preview_close_request (GtkWindow *window, gpointer user_data)
     if (p->viewer && p->viewer->close) {
         p->viewer->close (p);
     }
-    /* Drop the window's ref. Worker-queued jobs hold their own
-	 * refs and keep the struct alive until they drain. */
+    /* Cancel the underlying transfer if it's still in flight.
+	 * After Cancel runs, the worker stops sending chunks our way
+	 * and the htxf eventually unref's its preview reference via
+	 * htxf_unref. Skipped when the worker has already signalled
+	 * end-of-stream via hx_preview_done (atomic flag, set on the
+	 * worker side at call time — not at idle-dispatch time, so
+	 * there's no race window where the worker has finished but
+	 * the main thread hasn't seen the done_dispatch yet). Clear
+	 * the cb pointer first so a re-entrant close (e.g. cancel_cb
+	 * synchronously tearing down something that calls close again)
+	 * can't double-fire. */
+    if (!g_atomic_int_get (&p->stream_finished) && p->cancel_cb) {
+        hx_preview_cancel_fn cb = p->cancel_cb;
+        void *data = p->cancel_data;
+        p->cancel_cb = NULL;
+        p->cancel_data = NULL;
+        cb (data);
+    }
+    /* Drop the window's ref. The htxf side still holds the second
+	 * ref (see hx_preview_new); the struct survives until both
+	 * the window ref and the htxf ref are gone, and any in-flight
+	 * worker→main marshal jobs each carry their own ref on top. */
     hx_preview_unref (p);
     return FALSE; /* let default destroy proceed */
 }
@@ -1048,6 +1098,9 @@ static gboolean
 done_dispatch (gpointer data)
 {
     hx_preview *p = data;
+    /* stream_finished is already TRUE (set by hx_preview_done on
+	 * the worker side before this idle was queued). All we do here
+	 * is the main-thread viewer commit step. */
     if (!p->closed && p->viewer && p->viewer->done) {
         p->viewer->done (p);
     }
@@ -1154,7 +1207,21 @@ hx_preview_new (const char *name)
     GtkWidget *headerbar;
 
     p = g_new0 (hx_preview, 1);
-    p->refcount = 1; /* held by the window */
+    /* Two initial refs:
+	 *   - one held by the preview window (dropped in
+	 *     preview_close_request when the user closes the window);
+	 *   - one transferred to the caller, who stashes the pointer
+	 *     on htxf->preview and drops the ref in htxf_unref when the
+	 *     HTXF worker connection is torn down.
+	 *
+	 * The second ref closes a use-after-free window: without it,
+	 * closing the preview window mid-transfer would free the struct
+	 * while the worker was still reading htxf->preview, and the next
+	 * hx_preview_chunk call would atomically-increment freed memory
+	 * and queue a chunk_job with a stale pointer. The job's
+	 * eventual hx_preview_unref decrement would then re-enter the
+	 * free path and abort in malloc on the already-freed name. */
+    p->refcount = 2;
     p->name = g_strdup (name ? name : "");
 
     p->window = gtk_window_new ();
@@ -1188,6 +1255,17 @@ hx_preview_new (const char *name)
 
     gtk_window_present (GTK_WINDOW (p->window));
     return p;
+}
+
+void
+hx_preview_set_cancel_cb (hx_preview *p, hx_preview_cancel_fn fn,
+                          void *user_data)
+{
+    if (!p) {
+        return;
+    }
+    p->cancel_cb = fn;
+    p->cancel_data = user_data;
 }
 
 void
@@ -1230,6 +1308,15 @@ hx_preview_done (hx_preview *p)
     if (!p) {
         return;
     }
+    /* Signal end-of-stream to preview_close_request before queuing
+	 * the main-thread done_dispatch. Setting this here (on the
+	 * worker, at hx_preview_done call time) instead of inside
+	 * done_dispatch closes a race: without it, a close-window
+	 * arriving after the worker finished but before the idle ran
+	 * would see stream_finished=FALSE and incorrectly fire the
+	 * cancel hook on a transfer that's already done. Atomic store
+	 * is paired with an atomic load in preview_close_request. */
+    g_atomic_int_set (&p->stream_finished, 1);
     hx_preview_ref (p);
     g_idle_add (done_dispatch, p);
 }

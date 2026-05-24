@@ -2170,6 +2170,19 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
                                   size64_seen ? size64 : (guint64)size);
 }
 
+/* Adapter matching hx_preview_cancel_fn (void (*)(void *)).
+ * Registered with hx_preview_set_cancel_cb on the preview's HTXF
+ * pointer so closing the preview window mid-transfer fires
+ * xfer_delete on the right struct. A free-standing adapter is
+ * required because xfer_delete takes a struct htxf_conn *: calling
+ * it through a void* function-pointer type would be UB even though
+ * the args are pointer-sized in practice. */
+static void
+preview_cancel_xfer_cb (void *user_data)
+{
+    xfer_delete ((struct htxf_conn *) user_data);
+}
+
 void
 rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 {
@@ -2258,6 +2271,17 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     if (htxf->opt.preview && !htxf->preview) {
         char *name = dirchar_basename (htxf->path);
         htxf->preview = hx_preview_new (name ? name : htxf->path);
+        /* Wire the close-window-cancels-transfer hook. Without
+		 * this, closing the preview mid-download silently leaves
+		 * the worker streaming bytes into the (still-ref-held but
+		 * invisible) byte buffer — wasted bandwidth with nowhere
+		 * to render or save the result. preview_cancel_xfer_cb
+		 * is the typed adapter that matches hx_preview_cancel_fn;
+		 * casting xfer_delete directly would be calling a
+		 * function through a mismatched pointer type (UB in C,
+		 * even though both args are pointer-sized). */
+        hx_preview_set_cancel_cb (htxf->preview, preview_cancel_xfer_cb,
+                                  htxf);
     }
 
     if (!htxf->queue) {

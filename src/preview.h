@@ -38,8 +38,24 @@ typedef struct hx_preview hx_preview;
 
 /* Main thread. Creates the preview window with a "Loading…"
  * placeholder. The chosen viewer is installed once
- * hx_preview_set_info() arrives. */
+ * hx_preview_set_info() arrives.
+ *
+ * Returns a struct at refcount=2: one ref is held internally by
+ * the preview window (dropped in its close-request handler); the
+ * other belongs to the caller and must be released with
+ * hx_preview_unref() when the caller is done with the pointer.
+ * (The HTXF worker stashes the returned pointer on htxf->preview
+ * and drops the ref in htxf_unref.) */
 extern hx_preview *hx_preview_new (const char *name);
+
+/* Drop one ref. The struct is freed when the last ref goes away.
+ * Safe to call with NULL. May be called from any thread (the
+ * underlying refcount is atomic) but the final g_free path runs
+ * synchronously on the calling thread, so callers should be on a
+ * thread that's safe to do GLib free work on (worker or main are
+ * both fine — the freed fields are plain heap blocks, no widget
+ * teardown). */
+extern void hx_preview_unref (hx_preview *p);
 
 /* Worker thread (any thread). Sets the type/creator metadata used
  * by the dispatcher. Called by the HTXF worker after it parses the
@@ -55,5 +71,32 @@ extern void hx_preview_chunk (hx_preview *p, const char *buf, gsize len);
 /* Worker thread (any thread). End-of-stream signal — the viewer
  * commits any pending state (close the pixbuf loader, etc). */
 extern void hx_preview_done (hx_preview *p);
+
+/* Main thread. Register a "user closed the preview window" hook.
+ * Called once from the window's close-request handler, *before*
+ * the window's ref is dropped, but only if hx_preview_done has
+ * not been called yet — i.e. the worker still considers the
+ * transfer in-flight. The check is via an atomic flag the worker
+ * sets at the entry of hx_preview_done (not at done_dispatch idle-
+ * landing time), so there's no race window where the worker has
+ * finished but the main thread hasn't seen the done_dispatch.
+ *
+ * The callback is intended to cancel the underlying HTXF transfer
+ * — there's no point downloading bytes the user can no longer
+ * see, and with the window gone there's nowhere to render or save
+ * them.
+ *
+ * Without this, closing the preview mid-transfer leaves the worker
+ * happily streaming the rest of the file into a closed window's
+ * (still ref-held, just invisible) byte buffer until the server
+ * runs out of bytes — wasted bandwidth, with the bytes silently
+ * discarded because they had no destination.
+ *
+ * The callback runs on the main thread. user_data is opaque to
+ * the preview module. */
+typedef void (*hx_preview_cancel_fn) (void *user_data);
+extern void hx_preview_set_cancel_cb (hx_preview *p,
+                                      hx_preview_cancel_fn fn,
+                                      void *user_data);
 
 #endif /* HX_PREVIEW_H */
