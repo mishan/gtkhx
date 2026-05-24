@@ -36,15 +36,28 @@ const hx_test_server hx_test_server_matrix[] = {
     {
         /* mhxd: the controlled-codebase reference server. Built
          * from the vendored mhxd/ source in tests/mhxd/. Hotline
-         * 1.8.5-style flow, HOPE, file-mode banner, threaded
-         * news. No chat-history. */
+         * 1.8.5-style flow, HOPE, threaded news. No chat-history.
+         *
+         * BANNER_HTXF intentionally NOT asserted here even though
+         * mhxd can serve an HTXF banner when started with
+         * BANNER_MODE=JPEG (see tests/mhxd/docker-entrypoint.sh).
+         * The default container starts in URL mode and an HTXF-
+         * picker matching mhxd in that state would correctly
+         * time out — Janus is the canonical HTXF-banner server
+         * in the matrix (always serves HTXF, no env knob). The
+         * basic banner test (test_banner.c) opens the default
+         * server irrespective of caps and asserts on whichever
+         * mode the container is in, so URL-mode mhxd still
+         * exercises that subtest. The HOPE+stream banner tests
+         * (test_hope_{rc4,blowfish}_banner) need a server that
+         * actually serves HTXF banner under HOPE+stream — only
+         * Janus today. */
         .name       = "mhxd",
         .host       = "127.0.0.1",
         .port       = 5500,
         .xfer_port  = 5501,
         .hl_version = 185,
         .caps       = HX_TEST_CAP_HOPE
-                    | HX_TEST_CAP_BANNER_HTXF
                     | HX_TEST_CAP_NEWS_15
                     | HX_TEST_CAP_BLOWFISH
                     | HX_TEST_CAP_RC4,
