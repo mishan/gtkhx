@@ -79,6 +79,18 @@ const hx_test_server hx_test_server_matrix[] = {
                     | HX_TEST_CAP_NEWS_15
                     | HX_TEST_CAP_HOPE
                     | HX_TEST_CAP_CHACHA20
+                    /* Janus also accepts RC4 and Blowfish under
+				     * HOPE Step 2 in addition to ChaCha20 AEAD.
+				     * Asserting the caps here lets the
+				     * test_hope_rc4_chat_history and
+				     * test_hope_blowfish_chat_history matrix
+				     * picks land on Janus — without these,
+				     * neither row in the matrix had both
+				     * CHAT_HISTORY and a stream cipher, and the
+				     * tests failed with "no server has both" at
+				     * pick time. Confirmed by Misha 2026-05-24. */
+                    | HX_TEST_CAP_RC4
+                    | HX_TEST_CAP_BLOWFISH
                     | HX_TEST_CAP_NICK_COLORS,
     },
 };
