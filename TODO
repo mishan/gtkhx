@@ -1,6 +1,10 @@
 High Priority for 1.0.0 Release:
 - Fix button icons in Files browser
 - Bug stomping / fixing in Files browser
+- Add missing actions to News browser
+
+User Editor:
+- Need to check that it works, and polish the UI
 
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
