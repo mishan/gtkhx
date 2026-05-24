@@ -83,6 +83,57 @@ fi
 
 cd "$PROJECT_ROOT"
 
+# Detect a stale build-cov/ dir whose recorded source path no
+# longer matches this project root. This can happen if the dir
+# was created in a different checkout, a chroot, a container, or
+# a sandbox where the project was mounted at a different path —
+# typical case is running an LLM-assisted setup that recorded a
+# sandbox path, then trying to use the dir from the host. Meson
+# `configure` accepts the options-only change but ninja later
+# aborts with a confusing "Permission denied: /sessions" or
+# similar when it tries to regenerate from the baked-in path.
+#
+# Two probes, cheapest first:
+#   1. meson-info/meson-info.json — refreshed by `meson configure`
+#      so this catches drift between options-update runs.
+#   2. build.ninja — the regen path is baked in here at setup
+#      time and is what ninja actually uses; this catches the case
+#      where meson-info has been refreshed but build.ninja hasn't.
+#
+# If either disagrees with $PROJECT_ROOT, force a clean reset.
+if [[ -d "$BUILD_DIR" ]] && [[ "$RESET" -eq 0 ]]; then
+    stale_reason=""
+
+    if [[ -f "$BUILD_DIR/meson-info/meson-info.json" ]]; then
+        recorded_src=$(grep -o '"source"[[:space:]]*:[[:space:]]*"[^"]*"' \
+            "$BUILD_DIR/meson-info/meson-info.json" 2>/dev/null \
+            | head -n1 \
+            | sed 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+        if [[ -n "$recorded_src" ]] && [[ "$recorded_src" != "$PROJECT_ROOT" ]]; then
+            stale_reason="meson-info source dir $recorded_src"
+        fi
+    fi
+
+    if [[ -z "$stale_reason" ]] && [[ -f "$BUILD_DIR/build.ninja" ]]; then
+        # The regenerate command embedded in build.ninja looks like:
+        #   command = /usr/bin/meson --internal regenerate /SRC /BUILD
+        # Pull out the SRC arg and compare. Falls back to silently
+        # accepting if the line isn't found (don't be too clever).
+        ninja_src=$(grep -m1 -oE '\-\-internal regenerate [^ ]+ ' \
+            "$BUILD_DIR/build.ninja" 2>/dev/null \
+            | awk '{print $3}')
+        if [[ -n "$ninja_src" ]] && [[ "$ninja_src" != "$PROJECT_ROOT" ]]; then
+            stale_reason="build.ninja regen source dir $ninja_src"
+        fi
+    fi
+
+    if [[ -n "$stale_reason" ]]; then
+        echo "==> $BUILD_DIR is stale ($stale_reason)"
+        echo "    project root is $PROJECT_ROOT — wiping and reconfiguring"
+        RESET=1
+    fi
+fi
+
 # (Re)configure if needed.
 if [[ "$RESET" -eq 1 ]] || [[ ! -d "$BUILD_DIR" ]]; then
     rm -rf "$BUILD_DIR"
