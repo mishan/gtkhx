@@ -48,7 +48,7 @@ test_login_bad_account_rejected (void)
 {
     int fd = integration_connect ();
     if (fd < 0) {
-        g_test_skip ("server unreachable");
+        g_test_fail_printf ("server unreachable");
         return;
     }
     g_assert_true (integration_handshake (fd));

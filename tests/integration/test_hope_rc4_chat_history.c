@@ -147,7 +147,7 @@ test_hope_rc4_chat_history_round_trip (void)
 {
     const hx_test_server *srv = pick_chat_history_rc4_server ();
     if (!srv) {
-        g_test_skip ("no server in matrix advertising both "
+        g_test_fail_printf ("no server in matrix advertising both "
                      "HX_TEST_CAP_CHAT_HISTORY and HX_TEST_CAP_RC4. "
                      "Janus has chat-history but only ChaCha20; mhxd "
                      "has RC4 but no chat-history. Add a matrix entry "

@@ -85,7 +85,7 @@ test_hope_hmac_login_and_ping (void)
 {
     const hx_test_server *srv = pick_hope_server ();
     if (!srv) {
-        g_test_skip ("no HX_TEST_CAP_HOPE server in the matrix. "
+        g_test_fail_printf ("no HX_TEST_CAP_HOPE server in the matrix. "
                      "Default mhxd container at tests/mhxd/ advertises "
                      "this cap; check GTKHX_TEST_SERVERS env if you've "
                      "filtered it out.");

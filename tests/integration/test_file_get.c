@@ -90,7 +90,7 @@ test_file_get_round_trip (void)
 	 * with a helpful pointer rather than failing the suite. */
     int xfd = integration_connect_xfer ();
     if (xfd < 0) {
-        g_test_skip ("HTXF subchannel port (5501 by default) "
+        g_test_fail_printf ("HTXF subchannel port (5501 by default) "
                      "isn't reachable. Make sure your `docker run` "
                      "publishes it: -p 5501:5501. Or set "
                      "GTKHX_TEST_XFER_PORT to a different port.");

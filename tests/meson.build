@@ -741,11 +741,14 @@ test('aead', test_aead,
 # localhost:5500 by default; override with GTKHX_TEST_HOST /
 # GTKHX_TEST_PORT) and drives the wire protocol end-to-end.
 #
-# Skip-if-unavailable: if the server isn't reachable within the
-# connect timeout, the test calls g_test_skip and exits cleanly.
-# That lets the integration suite live alongside unit + proto in
-# the default `meson test` invocation without requiring everyone to
-# run Docker.
+# Server-unreachable is a hard failure: the test calls
+# g_test_fail_printf with a diagnostic message and returns -1.
+# (Earlier revisions called g_test_skip here for the
+# no-Docker-installed case; silent skips masked real bugs that
+# only showed up later in coverage reports, so they were removed.
+# Bring the Docker matrix up before running the integration suite,
+# or pass `--no-suite integration` to meson test to skip the
+# whole tier if you don't have Docker available.)
 #
 # Bring up a server for these tests with:
 #   cd tests/mhxd && docker build -t gtkhx-mhxd .

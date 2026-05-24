@@ -118,7 +118,7 @@ test_nick_color_user_list_trailer (void)
 {
     const hx_test_server *srv = pick_nick_color_server ();
     if (!srv) {
-        g_test_skip ("no Colored-Nicknames-capable server in matrix "
+        g_test_fail_printf ("no Colored-Nicknames-capable server in matrix "
                      "(GTKHX_TEST_SERVERS filter excluded all).");
         return;
     }
@@ -230,7 +230,7 @@ test_nick_color_user_list_trailer (void)
     g_assert_true (found_us_at_all);
 
     if (!any_record_had_trailer) {
-        g_test_skip ("server didn't include the Colored-Nicknames trailer "
+        g_test_fail_printf ("server didn't include the Colored-Nicknames trailer "
                      "in any USER_LIST record — server-side extension is "
                      "disabled (Janus: ColoredNicknames.Enabled in "
                      "config.yaml).");

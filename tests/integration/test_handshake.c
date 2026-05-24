@@ -4,10 +4,11 @@
  * (mhxd Docker container on localhost:5500 by default), run the
  * 12-byte / 8-byte magic handshake, close the connection.
  *
- * Skip behaviour: if no server is reachable within the connect
- * timeout, the test calls g_test_skip and exits cleanly. That way
- * the suite is useful on dev machines with mhxd running and stays
- * silent on machines without Docker.
+ * Reachability: if no server is reachable within the connect
+ * timeout, the test fails (g_test_fail_printf) with a diagnostic
+ * pointing at the missing container. The integration tier is a
+ * hard requirement now; if you don't want to run it, exclude the
+ * suite at meson-test time (`--no-suite integration`).
  */
 
 #include "config.h"

@@ -161,7 +161,7 @@ test_hope_chacha20_chat_history_round_trip (void)
 {
     const hx_test_server *srv = pick_chat_history_chacha20_server ();
     if (!srv) {
-        g_test_skip ("no server in matrix advertising both "
+        g_test_fail_printf ("no server in matrix advertising both "
                      "HX_TEST_CAP_CHAT_HISTORY and HX_TEST_CAP_CHACHA20. "
                      "Janus (tests/janus/) advertises both — bring it up "
                      "with `docker run -p 5510:5500 -p 5511:5501 "

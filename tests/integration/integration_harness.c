@@ -764,7 +764,7 @@ integration_open_or_skip (void)
 {
     const hx_test_server *srv = hx_test_server_default ();
     if (!srv) {
-        g_test_skip ("GTKHX_TEST_SERVERS env filter excluded every "
+        g_test_fail_printf ("GTKHX_TEST_SERVERS env filter excluded every "
                      "entry in the test-server matrix — no target "
                      "to connect to.");
         return -1;
@@ -778,7 +778,7 @@ integration_open_or_skip (void)
             "Run `docker run -p 5500:5500 gtkhx-mhxd` from "
             "tests/mhxd/ to bring up a server.",
             srv->name, srv->host, (int) srv->port);
-        g_test_skip (msg);
+        g_test_fail_printf (msg);
         g_free (msg);
         return -1;
     }
@@ -970,7 +970,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
             "integration server %s not reachable at %s:%d — start the "
             "container first (see tests/%s/README.md).",
             srv->name, srv->host, (int) srv->port, srv->name);
-        g_test_skip (msg);
+        g_test_fail_printf (msg);
         g_free (msg);
         return -1;
     }
@@ -1189,7 +1189,7 @@ integration_open_login_hope_or_skip (
             "integration server %s not reachable at %s:%d — start the "
             "container first (see tests/%s/README.md).",
             srv->name, srv->host, (int) srv->port, srv->name);
-        g_test_skip (msg);
+        g_test_fail_printf (msg);
         g_free (msg);
         return -1;
     }

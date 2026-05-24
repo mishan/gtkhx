@@ -31,8 +31,10 @@
  *
  * The test filters the matrix for HX_TEST_CAP_BLOWFISH. mhxd
  * advertises the cap today. If no Blowfish-capable server is
- * configured (e.g. CI runs with GTKHX_TEST_SERVERS filtering it out),
- * the test calls g_test_skip and exits cleanly.
+ * configured (e.g. CI runs with GTKHX_TEST_SERVERS filtering it
+ * out), the test fails (g_test_fail_printf) with a message
+ * pointing at the matrix configuration — fix the filter or add a
+ * Blowfish-capable row.
  *
  * This test exists because HOPE+stream-cipher bugs were repeatedly
  * found by hand against live servers (Janus, mhxd). The harness was
@@ -71,7 +73,7 @@ test_hope_blowfish_login_and_ping (void)
 {
     const hx_test_server *srv = pick_blowfish_server ();
     if (!srv) {
-        g_test_skip ("no HX_TEST_CAP_BLOWFISH server in the matrix. "
+        g_test_fail_printf ("no HX_TEST_CAP_BLOWFISH server in the matrix. "
                      "mhxd advertises this cap; bring it up with "
                      "`docker run -p 5500:5500 -p 5501:5501 "
                      "gtkhx-mhxd-test`.");

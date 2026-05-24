@@ -16,9 +16,13 @@
  *
  * The gtkhx-mhxd container is runtime-configurable via BANNER_MODE
  * (see tests/mhxd/docker-entrypoint.sh). Each test below is
- * mode-aware: it inspects HTLS_HDR_BANNER's TYPE field and skips
- * with g_test_skip if the server is serving the other mode. That
- * way:
+ * mode-aware: it inspects HTLS_HDR_BANNER's TYPE field and fails
+ * (g_test_fail_printf) if the server is serving the other mode.
+ * That way the matching test for the container's current mode
+ * passes; the non-matching test loudly indicates a mode mismatch
+ * (which is real signal that the container isn't configured for
+ * the test you wanted). To run both modes you currently need two
+ * container instances or a re-run with the env var flipped.
  *
  *   docker run gtkhx-mhxd                        → URL test fires
  *   docker run -e BANNER_MODE=JPEG gtkhx-mhxd    → HTXF test fires
@@ -189,7 +193,7 @@ test_banner_url_mode (void)
     }
 
     if (!banner_type_is_url (banner_type)) {
-        g_test_skip ("server is not in URL banner mode");
+        g_test_fail_printf ("server is not in URL banner mode");
         goto cleanup;
     }
 
@@ -261,7 +265,7 @@ test_banner_htxf_mode (void)
     }
 
     if (banner_type_is_url (banner_type)) {
-        g_test_skip ("server is in URL banner mode");
+        g_test_fail_printf ("server is in URL banner mode");
         goto cleanup;
     }
     if (banner_url && *banner_url) {
