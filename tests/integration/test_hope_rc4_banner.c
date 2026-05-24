@@ -53,6 +53,7 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
+#include "htxf_subchannel.h"
 
 static const hx_test_server *
 pick_banner_rc4_server (void)
@@ -195,11 +196,23 @@ test_hope_rc4_banner_htxf (void)
 
     /* Subchannel is plaintext under stream ciphers — both sides
      * leave aead_active=FALSE and htxf_io_read/_write fall through
-     * to raw read()/write(). The test mirrors that with
-     * integration_send_xfer_hdr + integration_recv. */
-    int xfer_fd = integration_connect_xfer ();
+     * to raw read()/write(). Use srv->xfer_port (not the harness's
+     * default-server xfer helper) so we land on Janus 5511 / mhxd
+     * 5501 depending on what the matrix picked, and use the shared
+     * production preamble packer with HTXF_TYPE_BANNER (not
+     * integration_send_xfer_hdr's default FILE type — Janus will
+     * RST a banner-port connection that announces itself as a
+     * FILE transfer). */
+    int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
+                                             /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
-    g_assert_true (integration_send_xfer_hdr (xfer_fd, ref, size));
+
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
+        /*flags=*/0, /*size64=*/FALSE);
+    g_assert_cmpuint (hdr_len, >, 0);
+    g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
     guint8 *bytes = g_malloc (size);
     g_assert_true (integration_recv (xfer_fd, bytes, size));
