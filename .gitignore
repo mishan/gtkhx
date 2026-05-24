@@ -125,6 +125,19 @@ plugins/eliza/eliza
 build.log
 setup.log
 
+# Coverage build dir + HTML report. See tools/coverage.sh and
+# docs/coverage.md. build-cov/ is a parallel meson build tree
+# configured with -Db_coverage=true; coverage/ is the gcovr /
+# genhtml output the script emits at the project root.
+/build-cov/
+/coverage/
+# gcov sidecar files — they live inside build-cov/ normally, but
+# the bare-pattern entries here catch any that get generated
+# outside (e.g. from an ad-hoc gcc --coverage invocation).
+*.gcno
+*.gcda
+*.gcov
+
 # Flatpak (flatpak-builder)
 /build-flatpak/
 /.flatpak-builder/
