@@ -37,6 +37,7 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
+#include "htxf_subchannel.h"
 
 static const hx_test_server *
 pick_banner_blowfish_server (void)
@@ -101,6 +102,17 @@ test_hope_blowfish_banner_htxf (void)
     g_assert_true (hope.stream_active);
     g_assert_false (hope.aead_active);
 
+    /* Janus only fires HTLS_HDR_BANNER after the client sends
+     * AGREEMENTAGREE — the post-login push sequence is gated on
+     * the "we're fully joined" boundary. integration_open_login
+     * _hope_or_skip stops at SELFINFO, so we have to drive the
+     * AGREE step ourselves before the drain loop. Mirrors the
+     * chacha20 banner test exactly; without this the test drains
+     * for 16 seconds and skips with "no banner received". */
+    g_assert_true (integration_send_agreementagree_hope (
+        fd, &htlc, &hope, /*display_name=*/"HopeBlowfishBanner Tier-3",
+        /*icon=*/412));
+
     gchar *banner_type = NULL;
     for (int i = 0; i < 8 && !banner_type; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,
@@ -158,9 +170,24 @@ test_hope_blowfish_banner_htxf (void)
     g_test_message ("HTXF ref=%u size=%u", reply.ref, reply.size);
     guint32 ref = reply.ref, size = reply.size;
 
-    int xfer_fd = integration_connect_xfer ();
+    /* Use srv->xfer_port directly so the connection lands on the
+     * SAME server we drove the control channel against (Janus 5511
+     * if the picker chose Janus). integration_connect_xfer routes
+     * through hx_test_server_default and would return mhxd's 5501,
+     * which knows nothing about the ref Janus issued. Also use the
+     * shared production preamble packer with HTXF_TYPE_BANNER —
+     * integration_send_xfer_hdr defaults to FILE which Janus
+     * refuses on a banner-issued ref. */
+    int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
+                                             /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
-    g_assert_true (integration_send_xfer_hdr (xfer_fd, ref, size));
+
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
+        /*flags=*/0, /*size64=*/FALSE);
+    g_assert_cmpuint (hdr_len, >, 0);
+    g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
     guint8 *bytes = g_malloc (size);
     g_assert_true (integration_recv (xfer_fd, bytes, size));
