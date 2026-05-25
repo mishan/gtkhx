@@ -914,6 +914,58 @@ test('fake_connect', test_integration_fake_connect,
      suite   : 'integration',
      timeout : 30)
 
+# real_connect — successor to fake_connect that links the actual
+# production src/network.c into the binary and calls hx_connect
+# end-to-end against the same fake-server harness. The earlier
+# fake_connect drives a hand-rolled MIRROR of the connect state
+# machine; this one drives the real symbol so the assertions pin
+# the literal production code path (including all the global-state
+# bookkeeping, hxd_files setup, hlwrite_chunks build of the LOGIN
+# packet — the bits the mirror left uncovered).
+#
+# connect_test_stubs.c provides minimal no-op stand-ins for the
+# half-dozen UI / fd-table / task / rcv symbols network.c
+# references but that aren't on the connect path (hxd_fd_set,
+# hx_clear_chat, task_new, hx_rcv_hdr, etc). See the file's
+# preamble for the per-symbol rationale. The boundary is "after
+# send_login emits HANDSHAKE_DONE and writes the LOGIN bytes"
+# — downstream receive coverage stays in the live Tier 3 tests
+# against mhxd/Janus.
+test_integration_real_connect = executable('test_integration_real_connect',
+  'integration/test_real_connect.c',
+  'integration/fake_server.c',
+  'integration/connect_test_stubs.c',
+  '../src/network.c',
+  '../src/network_decode.c',
+  '../src/connect_magic.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/compress.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_session.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
+  '../src/tracker_parser.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep],
+  include_directories : integration_test_inc,
+)
+test('real_connect', test_integration_real_connect,
+     suite   : 'integration',
+     timeout : 30)
+
 # server_matrix — in-process unit coverage for the multi-server
 # matrix helpers (hx_test_servers_with, hx_test_server_default,
 # GTKHX_TEST_SERVERS env filter). Doesn't talk to a Hotline server,
