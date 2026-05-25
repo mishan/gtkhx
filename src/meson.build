@@ -10,6 +10,7 @@ gtkhx_sources = files(
   'cipher_aead.c',
   'commands.c',
   'compress.c',
+  'connect_magic.c',
   'connect.c',
   'debug.c',
   'dfa.c',

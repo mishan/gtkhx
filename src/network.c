@@ -64,6 +64,7 @@
 #include "htxf_subchannel.h"
 #include "network_decode.h"
 #include "tracker_parser.h"
+#include "connect_magic.h"
 
 char *server_addr;
 guint16 server_port;
@@ -717,8 +718,12 @@ on_magic_received (GObject *source, GAsyncResult *res, gpointer data)
         g_clear_error (&err);
         return;
     }
-    if (got != HTLS_MAGIC_LEN
-        || strncmp (HTLS_MAGIC, ctx->magic, HTLS_MAGIC_LEN) != 0) {
+    /* Validator is in connect_magic.c — see its docstring for why
+	 * we use memcmp instead of strncmp. The pre-extraction strncmp
+	 * had a NUL-terminator bug: HTLS_MAGIC contains embedded NULs
+	 * so strncmp would accept the 8-byte sequence "TRTP\0XYZ" as
+	 * valid (X/Y/Z never compared). memcmp doesn't stop early. */
+    if (!hx_connect_validate_server_magic ((const guint8 *)ctx->magic, got)) {
         connect_fail (ctx, _ ("invalid hotline server"), NULL);
         return;
     }
