@@ -38,6 +38,7 @@
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
 #include "banner.h"
+#include "banner_dispatch.h"
 
 /* Inline forward decl so we don't have to pull in hx.h (which
  * brings session + a transitive zoo of UI deps). task_new's real
@@ -209,28 +210,10 @@ banner_handle_message (struct htlc_conn *htlc, const char *type,
     gtk_widget_set_visible (banner_root, TRUE);
 
     /* Dispatch on TYPE per the 1.9 spec, NOT on URL-chunk
-	 * presence. mhxd in file mode still includes the URL chunk
-	 * from its config (its banner-send logic doesn't gate the
-	 * url field on type) — letting "any URL means URL mode" win
-	 * would route us into URL mode even when the server is
-	 * actually streaming bytes over HTXF. TYPE is authoritative:
-	 *   "URL " (or just "URL") — URL mode
-	 *   "GIFf" / "JPEG" / "PICT" / etc. — file mode (HTXF)
-	 *
-	 * Strip any trailing space when comparing — mhxd pads the
-	 * type to 4 bytes with a space ("URL ", "URL\0", etc.). */
-    gboolean is_url_mode = FALSE;
-    if (type) {
-        gchar trimmed[8];
-        gsize n = 0;
-        while (n < sizeof (trimmed) - 1 && type[n] && type[n] != ' ') {
-            trimmed[n] = type[n], n++;
-        }
-        trimmed[n] = '\0';
-        is_url_mode = (g_ascii_strcasecmp (trimmed, "URL") == 0);
-    }
-
-    if (is_url_mode) {
+	 * presence. See hx_banner_type_is_url's docstring in
+	 * banner_dispatch.h for the full rationale and the wire-shape
+	 * normalisation. */
+    if (hx_banner_type_is_url (type)) {
         if (has_url && url && *url) {
             /* URL-mode: cache the URL for click-to-open. With
 			 * libsoup present we kick off an inline fetch and
@@ -495,18 +478,22 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
         debug_log ("banner", "htxf reply ignored: no widget / no htlc");
         return;
     }
-    if (size == 0 || ref == 0) {
+    /* Validation lives in banner_dispatch.c so the Tier 2 test
+	 * suite can pin the contract without dragging in the rest of
+	 * banner.c. The reject branches share a generic caption today
+	 * but stay distinct in the enum so a future logging layer can
+	 * attribute drops to the right cause. */
+    switch (hx_banner_validate_htxf_reply (ref, size)) {
+    case HX_BANNER_HTXF_OK:
+        break;
+    case HX_BANNER_HTXF_ZERO_REF:
+    case HX_BANNER_HTXF_ZERO_SIZE:
         debug_log ("banner", "htxf reply rejected: ref=%u size=%u", ref, size);
         banner_show_caption (_ ("Server banner: empty transfer"));
         return;
-    }
-    /* Sanity cap. Largest banner we'"'"'ve seen in the wild is ~30
-	 * KB; legitimate banners stay below 100 KB. Anything above
-	 * 1 MB is almost certainly a hostile or misconfigured server
-	 * and we don'"'"'t want to allocate that much for a toolbar
-	 * decoration. */
-    if (size > 1024 * 1024) {
-        debug_log ("banner", "htxf reply rejected: size %u > 1 MB", size);
+    case HX_BANNER_HTXF_TOO_LARGE:
+        debug_log ("banner", "htxf reply rejected: size %u > %u", size,
+                   HX_BANNER_MAX_HTXF_SIZE);
         banner_show_caption (_ ("Server banner: image too large"));
         return;
     }

@@ -425,6 +425,21 @@ test_banner = executable('test_banner',
 test('banner', test_banner,
      suite : 'proto')
 
+# banner_dispatch — pure URL-vs-file mode classifier + HTXF reply
+# sanity checker carved out of banner.c so this test can drive the
+# dispatch decisions without dragging in GTK / libsoup / pthread.
+# Two helpers, ~30 lines each, both load-bearing in the wire-mode
+# routing path that the live Tier 3 banner tests exercise
+# downstream.
+test_banner_dispatch = executable('test_banner_dispatch',
+  'proto/test_banner_dispatch.c',
+  '../src/banner_dispatch.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('banner_dispatch', test_banner_dispatch,
+     suite : 'proto')
+
 # hlwrite — round-trip the wire packer (hlpack, extracted from
 # hlwrite() in network.c) through the dh_start walker. Proves the
 # send-side encoder and the receive-side decoder agree on the wire

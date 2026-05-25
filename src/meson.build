@@ -2,6 +2,7 @@ gtkhx_sources = files(
   'about.c',
   'algo_list.c',
   'banner.c',
+  'banner_dispatch.c',
   'chat.c',
   'chat_history.c',
   'cicn.c',
