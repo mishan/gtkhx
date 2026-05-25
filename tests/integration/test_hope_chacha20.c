@@ -23,10 +23,11 @@
  *      seal/open codec round-trips against a real server, not just
  *      our own decoder.
  *
- * The test filters the matrix for HX_TEST_CAP_CHACHA20. Today only
- * Janus advertises that capability; when no chacha20-capable server
- * is configured (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd), the
- * test calls g_test_skip and exits cleanly.
+ * The test filters the matrix for HX_TEST_CAP_CHACHA20. Today
+ * only Janus advertises that capability; when no chacha20-capable
+ * server is configured (e.g. CI runs with GTKHX_TEST_SERVERS=mhxd),
+ * the test fails (g_test_fail_printf) — fix the matrix filter or
+ * add Janus to the configured server set.
  *
  * Pre-refactor this test was infeasible: the harness had no HOPE
  * primitives and the production HOPE flow was wedged inside
@@ -69,7 +70,7 @@ test_hope_chacha20_login_and_ping (void)
 {
     const hx_test_server *srv = pick_chacha20_server ();
     if (!srv) {
-        g_test_skip ("no HX_TEST_CAP_CHACHA20 server in the matrix. "
+        g_test_fail_printf ("no HX_TEST_CAP_CHACHA20 server in the matrix. "
                      "The Janus container at tests/janus/ advertises this "
                      "cap by default — bring it up with "
                      "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`. "

@@ -14,8 +14,10 @@
  *      reading until we either see a SELFINFO (success) or hit a
  *      task-error / timeout (failure).
  *
- * Skip-if-unavailable: if no server is reachable at the configured
- * host:port, the test calls g_test_skip and exits cleanly.
+ * Reachability: if no server is reachable at the configured
+ * host:port, the test fails (g_test_fail_printf) with a
+ * diagnostic. Bring the container up before running, or exclude
+ * the integration suite at meson-test time.
  */
 
 #include "config.h"

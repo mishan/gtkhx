@@ -115,7 +115,7 @@ test_hope_chacha20_banner_htxf (void)
 {
     const hx_test_server *srv = pick_banner_chacha20_server ();
     if (!srv) {
-        g_test_skip ("no server in matrix advertising both "
+        g_test_fail_printf ("no server in matrix advertising both "
                      "HX_TEST_CAP_CHACHA20 and HX_TEST_CAP_BANNER_HTXF. "
                      "Janus advertises both — bring it up with "
                      "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`.");
@@ -167,7 +167,7 @@ test_hope_chacha20_banner_htxf (void)
         dh_end ();
     }
     if (!banner_type) {
-        g_test_skip ("server did not send HTLS_HDR_BANNER in the "
+        g_test_fail_printf ("server did not send HTLS_HDR_BANNER in the "
                      "post-login window — this target may not advertise "
                      "a banner under HOPE.");
         goto cleanup;
@@ -177,7 +177,7 @@ test_hope_chacha20_banner_htxf (void)
     /* If the server is in URL mode (TYPE=\"URL \"), there's nothing
      * to fetch over HTXF — that test is covered by URL-mode tests. */
     if (strncmp (banner_type, "URL", 3) == 0) {
-        g_test_skip ("server is in URL banner mode — HTXF fetch path "
+        g_test_fail_printf ("server is in URL banner mode — HTXF fetch path "
                      "doesn't apply.");
         goto cleanup;
     }

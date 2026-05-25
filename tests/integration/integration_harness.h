@@ -12,11 +12,15 @@
  * libadwaita — the test binary links against proto_helpers and
  * the system socket APIs and that's it.
  *
- * Skip-if-unavailable contract: if the server isn't reachable
- * within a short timeout, integration_connect returns -1 and the
- * test is expected to call g_test_skip and return. That way the
- * tests run on machines with mhxd running and skip silently
- * elsewhere.
+ * Hard-fail contract: if the server isn't reachable within a
+ * short timeout, integration_connect returns -1 after calling
+ * g_test_fail_printf with a diagnostic. The test should then
+ * return immediately. Earlier revisions used g_test_skip here so
+ * the integration tier could no-op gracefully on machines without
+ * Docker — but silent skips masked real bugs, so they were
+ * removed. If you can't run the Docker matrix, exclude the whole
+ * integration suite at meson-test time (`--no-suite integration`)
+ * rather than letting tests skip themselves.
  *
  * Configuration via env vars:
  *
@@ -106,9 +110,9 @@ extern void integration_close (int fd);
 
 /*
  * Helper: combine integration_connect + integration_handshake. If
- * the connect fails, calls g_test_skip with an explanatory message
- * and returns -1. If the handshake fails after the connect,
- * g_test_fail and returns -1. On success returns the fd.
+ * the connect or handshake fails, calls g_test_fail_printf with
+ * an explanatory message and returns -1. On success returns the
+ * fd.
  *
  * The most common open of an integration test:
  *
@@ -234,8 +238,8 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
  * Compose the previous helpers: open the socket, run the magic
  * handshake, send a guest login, drain to SELFINFO. Returns the
  * fd on full success, or -1 if any step failed (with the
- * appropriate g_test_skip / g_test_fail already called). The
- * caller closes the fd when done via integration_close.
+ * appropriate g_test_fail_printf already called). The caller
+ * closes the fd when done via integration_close.
  *
  * `display_name` is the string the server sees for our chat /
  * user-list entry. `icon` is the small-icon id (412 is a sensible
@@ -261,7 +265,7 @@ extern int integration_open_login_or_skip (struct htlc_conn *htlc,
  * host:port with a 2 s connect timeout, runs the magic handshake,
  * sends a guest LOGIN with the requested capability advertisement,
  * and drains to SELFINFO. Returns the connected fd, or -1 with
- * g_test_skip / g_test_fail already called.
+ * g_test_fail_printf already called.
  *
  * On return htlc is in the state the harness left it, including
  * htlc->caps populated with whatever bits the server echoed back
@@ -547,7 +551,7 @@ typedef struct {
  *
  * On success returns the fd and leaves htlc + hope ready for AEAD-
  * aware send/recv (when aead_active is set). On failure calls
- * g_test_skip or g_test_fail_printf with diagnostics and returns -1.
+ * g_test_fail_printf with diagnostics and returns -1.
  *
  * `password` is the cleartext password (raw bytes — not pre-hashed);
  * the harness drives the HMAC chain. Pass "" for accounts with no

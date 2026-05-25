@@ -257,7 +257,7 @@ test_chat_history_cap_negotiation (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix "
+        g_test_fail_printf ("no chat-history-capable server in matrix "
                      "(GTKHX_TEST_SERVERS filter excluded all).");
         return;
     }
@@ -287,7 +287,7 @@ test_chat_history_round_trip (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix.");
+        g_test_fail_printf ("no chat-history-capable server in matrix.");
         return;
     }
 
@@ -351,7 +351,7 @@ test_chat_history_limit (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix.");
+        g_test_fail_printf ("no chat-history-capable server in matrix.");
         return;
     }
 
@@ -403,7 +403,7 @@ test_chat_history_has_more (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix.");
+        g_test_fail_printf ("no chat-history-capable server in matrix.");
         return;
     }
 
@@ -447,7 +447,7 @@ test_chat_history_before_pagination (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix.");
+        g_test_fail_printf ("no chat-history-capable server in matrix.");
         return;
     }
 
@@ -473,7 +473,7 @@ test_chat_history_before_pagination (void)
 		 * meaningfully exercise pagination. Skip silently rather
 		 * than asserting; the round_trip / limit tests already
 		 * cover the populated-channel happy path. */
-        g_test_skip ("channel has too few persisted messages for "
+        g_test_fail_printf ("channel has too few persisted messages for "
                      "BEFORE-cursor pagination.");
         g_ptr_array_unref (first);
         close_session (fd, &htlc);
@@ -518,7 +518,7 @@ test_chat_history_after_catchup (void)
 {
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
-        g_test_skip ("no chat-history-capable server in matrix.");
+        g_test_fail_printf ("no chat-history-capable server in matrix.");
         return;
     }
 
@@ -547,7 +547,7 @@ test_chat_history_after_catchup (void)
 		 * trip the "give me everything" path. Skip gracefully; the
 		 * round_trip / limit tests cover the empty-channel happy
 		 * path well enough. */
-        g_test_skip ("channel has no persisted messages to anchor "
+        g_test_fail_printf ("channel has no persisted messages to anchor "
                      "an AFTER cursor against.");
         close_session (fd, &htlc);
         return;

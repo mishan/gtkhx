@@ -4,10 +4,10 @@
 #
 #   unit         — pure-function tests, no GTK / network. Fast.
 #   proto        — wire-format parsers driven from canned fixtures.
-#   integration  — end-to-end against the mhxd Docker container in
-#                  tests/mhxd/Dockerfile. Slower (rebuilds the
-#                  container on every run unless the layer cache is
-#                  warm).
+#   integration  — end-to-end against the mhxd + Janus Docker
+#                  containers in tests/mhxd/ and tests/janus/.
+#                  Slower (rebuilds both containers on every run
+#                  unless the layer cache is warm).
 #
 # Two jobs:
 #
@@ -17,11 +17,16 @@
 #                     needs libadwaita >= 1.6, which Ubuntu's stable
 #                     LTS images don't ship.
 #
-#   integration     — Same Fedora image, plus a sibling step that
-#                     builds the mhxd container and starts it on
-#                     localhost:5500 / 5501. The integration suite
-#                     defaults to those ports (see tests/integration/
-#                     integration_harness.h).
+#   integration     — Same Fedora image, plus sibling steps that
+#                     build the mhxd + Janus containers and start
+#                     them on localhost:5500/5501 + 5510/5511. The
+#                     server matrix in tests/integration/server_
+#                     matrix.c records those host ports per server.
+#                     Both containers must be reachable: tests that
+#                     pick Janus via HX_TEST_CAP_* filters (chat-
+#                     history, banner-HTXF, Janus-only ciphers) fail
+#                     loudly when the server isn't up — no silent
+#                     skips, per [[feedback_no_test_skips]].
 #
 # Branch protection on `main` should require both jobs green before
 # merge. That setup is in the GitHub repository UI — Settings →
@@ -95,7 +100,7 @@ jobs:
           path: build/meson-logs/
 
   integration:
-    name: integration vs mhxd
+    name: integration vs mhxd + janus
     runs-on: ubuntu-latest
     needs: build-and-test
     steps:
@@ -105,6 +110,16 @@ jobs:
       - name: build mhxd test container
         run: |
           docker build -t gtkhx-mhxd tests/mhxd
+
+      - name: build janus test container
+        # Janus build pulls a sha256-pinned tarball from
+        # misha.nasledov.com (rate-limit-disabled rebuild of
+        # VesperNet's binary — see tests/janus/Dockerfile preamble
+        # for the full story). Network failure here surfaces as a
+        # red CI step rather than silently disappearing into a
+        # later "janus not reachable" test failure.
+        run: |
+          docker build -t gtkhx-janus tests/janus
 
       - name: start mhxd
         run: |
@@ -121,9 +136,28 @@ jobs:
             sleep 1
           done
 
+      - name: start janus
+        # Janus's own Dockerfile maps its internal 5500/5501 to host
+        # 5510/5511 — see tests/janus/README.md for why (mhxd keeps
+        # the conventional 5500/5501 free). The server matrix entry
+        # for janus hard-codes 127.0.0.1:5510 / 5511, matching this.
+        # Wait loop mirrors mhxd's above; Janus is statically-linked
+        # Go and listens within ~1 s on a warm runner.
+        run: |
+          docker run -d --name gtkhx-janus \
+            -p 5510:5500 -p 5511:5501 \
+            gtkhx-janus
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if (echo > /dev/tcp/127.0.0.1/5510) 2>/dev/null; then
+              echo "janus is up"; break
+            fi
+            sleep 1
+          done
+
       # The build itself runs in a Fedora container so we have the
-      # right libadwaita; the test binaries then talk to mhxd on the
-      # runner's localhost via the docker port mappings.
+      # right libadwaita; the test binaries then talk to mhxd +
+      # janus on the runner's localhost via the docker port
+      # mappings.
       - name: install build deps + build + test (integration)
         run: |
           docker run --rm --network host \
@@ -150,6 +184,10 @@ jobs:
         if: failure()
         run: docker logs gtkhx-mhxd || true
 
+      - name: dump janus logs on failure
+        if: failure()
+        run: docker logs gtkhx-janus || true
+
       - name: upload meson test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -160,3 +198,7 @@ jobs:
       - name: stop mhxd
         if: always()
         run: docker rm -f gtkhx-mhxd || true
+
+      - name: stop janus
+        if: always()
+        run: docker rm -f gtkhx-janus || true

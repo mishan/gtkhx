@@ -59,7 +59,7 @@ test_hope_rc4_login_and_ping (void)
 {
     const hx_test_server *srv = pick_rc4_server ();
     if (!srv) {
-        g_test_skip ("no HX_TEST_CAP_RC4 server in the matrix. "
+        g_test_fail_printf ("no HX_TEST_CAP_RC4 server in the matrix. "
                      "mhxd advertises this cap; bring it up with "
                      "`docker run -p 5500:5500 -p 5501:5501 "
                      "gtkhx-mhxd-test`.");

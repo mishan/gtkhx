@@ -16,9 +16,13 @@
  *
  * The gtkhx-mhxd container is runtime-configurable via BANNER_MODE
  * (see tests/mhxd/docker-entrypoint.sh). Each test below is
- * mode-aware: it inspects HTLS_HDR_BANNER's TYPE field and skips
- * with g_test_skip if the server is serving the other mode. That
- * way:
+ * mode-aware: it inspects HTLS_HDR_BANNER's TYPE field and fails
+ * (g_test_fail_printf) if the server is serving the other mode.
+ * That way the matching test for the container's current mode
+ * passes; the non-matching test loudly indicates a mode mismatch
+ * (which is real signal that the container isn't configured for
+ * the test you wanted). To run both modes you currently need two
+ * container instances or a re-run with the env var flipped.
  *
  *   docker run gtkhx-mhxd                        → URL test fires
  *   docker run -e BANNER_MODE=JPEG gtkhx-mhxd    → HTXF test fires
@@ -43,6 +47,8 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "integration_harness.h"
+#include "server_matrix.h"
+#include "htxf_subchannel.h"
 
 /* The URL the gtkhx-mhxd test container is configured to advertise
  * when BANNER_MODE=URL (the default). Kept in sync by hand with
@@ -88,17 +94,37 @@ send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
  * populates out_type / out_url with the banner's chunks (g_strndup'd;
  * nullable on absent), and leaves htlc->in holding the
  * HTLS_HDR_BANNER frame so the caller can match on type without
- * reparsing. Returns -1 on any failure path (test_skip or test_fail
- * already called). */
+ * reparsing. Returns -1 on any failure path (test_fail already
+ * called).
+ *
+ * `srv` selects which container to drive — the two banner subtests
+ * use different ones (url_mode → mhxd in URL mode; htxf_mode → Janus
+ * which serves HTXF banner unconditionally). Routing per-subtest
+ * keeps each assertion exercising the matching server-side
+ * configuration. */
 static int
-banner_setup_or_skip (struct htlc_conn *htlc, gchar **out_type, gchar **out_url)
+banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
+                      gchar **out_type, gchar **out_url)
 {
     memset (htlc, 0, sizeof (*htlc));
     *out_type = NULL;
     *out_url = NULL;
 
-    int fd = integration_open_or_skip ();
+    if (!srv) {
+        g_test_fail_printf ("no matching server in matrix for this subtest");
+        return -1;
+    }
+
+    int fd = hx_integration_connect_to (srv->host, srv->port,
+                                        /*timeout_ms=*/2000);
     if (fd < 0) {
+        g_test_fail_printf ("connect to %s (%s:%d) failed", srv->name,
+                            srv->host, (int) srv->port);
+        return -1;
+    }
+    if (!integration_handshake (fd)) {
+        g_test_fail_printf ("handshake against %s failed", srv->name);
+        integration_close (fd);
         return -1;
     }
 
@@ -177,19 +203,23 @@ banner_type_is_url (const char *t)
 }
 
 /* URL mode: server's HTLS_HDR_BANNER carried TYPE="URL " plus the
- * expected URL string. Skips if the container is in HTXF mode. */
+ * expected URL string. Runs against the default matrix server
+ * (mhxd) — the asserted URL is mhxd-specific (set by
+ * tests/mhxd/docker-entrypoint.sh) so this subtest is intentionally
+ * scoped to that container. */
 static void
 test_banner_url_mode (void)
 {
     struct htlc_conn htlc;
     gchar *banner_type = NULL, *banner_url = NULL;
-    int fd = banner_setup_or_skip (&htlc, &banner_type, &banner_url);
+    const hx_test_server *srv = hx_test_server_default ();
+    int fd = banner_setup_or_skip (srv, &htlc, &banner_type, &banner_url);
     if (fd < 0) {
         return;
     }
 
     if (!banner_type_is_url (banner_type)) {
-        g_test_skip ("server is not in URL banner mode");
+        g_test_fail_printf ("server is not in URL banner mode");
         goto cleanup;
     }
 
@@ -245,23 +275,52 @@ banner_bytes_match_type (const char *type, const guint8 *bytes, gsize len)
     return TRUE;
 }
 
+/* Pick the first server in the matrix advertising the file-mode
+ * banner cap. Today that's Janus — mhxd's container defaults to
+ * URL mode and had BANNER_HTXF stripped from its caps in the
+ * matrix-fix branch. Returns NULL (→ test_fail) if no server in
+ * scope can serve the HTXF banner path. */
+static const hx_test_server *
+pick_banner_htxf_server (void)
+{
+    GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_BANNER_HTXF);
+    if (!servers) {
+        return NULL;
+    }
+    const hx_test_server *srv = NULL;
+    if (servers->len > 0) {
+        srv = g_ptr_array_index (servers, 0);
+    }
+    g_ptr_array_unref (servers);
+    return srv;
+}
+
 /* HTXF (file) mode: server announced a binary TYPE without a URL.
  * Exercise the full follow-up — HTLC_HDR_DOWNLOAD_BANNER → TASK
  * reply with REF+SIZE → HTXF subchannel → bytes — and verify the
  * downloaded data starts with the correct magic for the declared
- * type. Skips if the container is in URL mode. */
+ * type. Drives the first server in the matrix that advertises
+ * HX_TEST_CAP_BANNER_HTXF (Janus today). */
 static void
 test_banner_htxf_mode (void)
 {
     struct htlc_conn htlc;
     gchar *banner_type = NULL, *banner_url = NULL;
-    int fd = banner_setup_or_skip (&htlc, &banner_type, &banner_url);
+    const hx_test_server *srv = pick_banner_htxf_server ();
+    if (!srv) {
+        g_test_fail_printf ("no server in matrix advertising "
+                            "HX_TEST_CAP_BANNER_HTXF. Bring Janus up "
+                            "(or mhxd with BANNER_MODE=JPEG and the "
+                            "cap restored).");
+        return;
+    }
+    int fd = banner_setup_or_skip (srv, &htlc, &banner_type, &banner_url);
     if (fd < 0) {
         return;
     }
 
     if (banner_type_is_url (banner_type)) {
-        g_test_skip ("server is in URL banner mode");
+        g_test_fail_printf ("server %s is in URL banner mode", srv->name);
         goto cleanup;
     }
     if (banner_url && *banner_url) {
@@ -309,10 +368,24 @@ test_banner_htxf_mode (void)
     guint32 ref = reply.ref, size = reply.size;
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
-    /* Open the HTXF subchannel and pull the bytes. */
-    int xfer_fd = integration_connect_xfer ();
+    /* Open the HTXF subchannel on the SAME server we drove the
+	 * control channel against — integration_connect_xfer routes
+	 * through hx_test_server_default and would return mhxd's xfer
+	 * port (5501), which knows nothing about the ref Janus issued.
+	 * Same fix-pattern as the HOPE+stream banner tests. Also use
+	 * the production preamble packer with HTXF_TYPE_BANNER (not
+	 * integration_send_xfer_hdr's default FILE — Janus refuses a
+	 * banner ref on a FILE-typed connection). */
+    int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
+                                             /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
-    g_assert_true (integration_send_xfer_hdr (xfer_fd, ref, size));
+
+    guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
+    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
+        /*flags=*/0, /*size64=*/FALSE);
+    g_assert_cmpuint (hdr_len, >, 0);
+    g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
     guint8 *bytes = g_malloc (size);
     g_assert_true (integration_recv (xfer_fd, bytes, size));

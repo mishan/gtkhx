@@ -144,10 +144,10 @@ test_folder_get_round_trip (void)
                 "effect on a fresh image. Rebuild with `docker build "
                 "-t gtkhx-mhxd tests/mhxd`.",
                 err);
-            g_test_skip (msg);
+            g_test_fail_printf (msg);
             g_free (msg);
         } else {
-            g_test_skip ("GETFOLDER refused (no error chunk); rebuild "
+            g_test_fail_printf ("GETFOLDER refused (no error chunk); rebuild "
                          "the mhxd container with the new Dockerfile.");
         }
         integration_release_htlc (&htlc);
@@ -184,7 +184,7 @@ test_folder_get_round_trip (void)
 	 * behaviour. */
     int xfd = integration_connect_xfer ();
     if (xfd < 0) {
-        g_test_skip ("HTXF subchannel port (5501 by default) is not "
+        g_test_fail_printf ("HTXF subchannel port (5501 by default) is not "
                      "reachable. Make sure your `docker run` publishes "
                      "it: -p 5501:5501.");
         integration_release_htlc (&htlc);

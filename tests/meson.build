@@ -741,11 +741,14 @@ test('aead', test_aead,
 # localhost:5500 by default; override with GTKHX_TEST_HOST /
 # GTKHX_TEST_PORT) and drives the wire protocol end-to-end.
 #
-# Skip-if-unavailable: if the server isn't reachable within the
-# connect timeout, the test calls g_test_skip and exits cleanly.
-# That lets the integration suite live alongside unit + proto in
-# the default `meson test` invocation without requiring everyone to
-# run Docker.
+# Server-unreachable is a hard failure: the test calls
+# g_test_fail_printf with a diagnostic message and returns -1.
+# (Earlier revisions called g_test_skip here for the
+# no-Docker-installed case; silent skips masked real bugs that
+# only showed up later in coverage reports, so they were removed.
+# Bring the Docker matrix up before running the integration suite,
+# or pass `--no-suite integration` to meson test to skip the
+# whole tier if you don't have Docker available.)
 #
 # Bring up a server for these tests with:
 #   cd tests/mhxd && docker build -t gtkhx-mhxd .
@@ -1047,6 +1050,10 @@ test('file_get', test_integration_file_get,
      timeout : 30)
 
 # banner — verify the post-AGREEMENTAGREE banner broadcast.
+# is_parallel: false because the htxf_mode subtest picks the first
+# matrix server advertising HX_TEST_CAP_BANNER_HTXF — today Janus,
+# which shares the per-IP connect-rate caveat called out on the
+# chacha20 sister tests.
 test_integration_banner = executable('test_integration_banner',
   'integration/test_banner.c',
   dependencies        : proto_test_deps,
@@ -1054,8 +1061,9 @@ test_integration_banner = executable('test_integration_banner',
   link_with           : integration_harness_lib,
 )
 test('banner', test_integration_banner,
-     suite   : 'integration',
-     timeout : 30)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 30)
 
 # chat_subject — Alice creates a private chat naming Bob, then sets
 # the chat subject; verifies HTLS_HDR_CHAT_SUBJECT broadcasts to
@@ -1452,9 +1460,15 @@ test_integration_hope_rc4_chat_history = executable(
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
+# All four stream-cipher × {chat_history, banner} matrices route to
+# Janus (mhxd advertises neither CHAT_HISTORY nor — since the matrix-
+# fix branch — BANNER_HTXF), so they're subject to the same per-IP
+# connect-rate caveat as the chacha20 sisters above. is_parallel:false
+# keeps them from racing each other in meson's default parallel run.
 test('hope_rc4_chat_history', test_integration_hope_rc4_chat_history,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 test_integration_hope_blowfish_chat_history = executable(
   'test_integration_hope_blowfish_chat_history',
@@ -1464,8 +1478,9 @@ test_integration_hope_blowfish_chat_history = executable(
   link_with           : integration_harness_lib,
 )
 test('hope_blowfish_chat_history', test_integration_hope_blowfish_chat_history,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 test_integration_hope_rc4_banner = executable(
   'test_integration_hope_rc4_banner',
@@ -1475,8 +1490,9 @@ test_integration_hope_rc4_banner = executable(
   link_with           : integration_harness_lib,
 )
 test('hope_rc4_banner', test_integration_hope_rc4_banner,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 test_integration_hope_blowfish_banner = executable(
   'test_integration_hope_blowfish_banner',
@@ -1486,8 +1502,9 @@ test_integration_hope_blowfish_banner = executable(
   link_with           : integration_harness_lib,
 )
 test('hope_blowfish_banner', test_integration_hope_blowfish_banner,
-     suite   : 'integration',
-     timeout : 60)
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 test('chat_history', test_integration_chat_history,
      suite       : 'integration',

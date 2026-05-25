@@ -80,7 +80,7 @@ test_hope_blowfish_banner_htxf (void)
 {
     const hx_test_server *srv = pick_banner_blowfish_server ();
     if (!srv) {
-        g_test_skip ("no server in matrix advertising both "
+        g_test_fail_printf ("no server in matrix advertising both "
                      "HX_TEST_CAP_BLOWFISH and HX_TEST_CAP_BANNER_HTXF. "
                      "mhxd advertises both — bring it up with "
                      "BANNER_MODE=JPEG (or GIFf / PNG).");
@@ -131,14 +131,14 @@ test_hope_blowfish_banner_htxf (void)
         dh_end ();
     }
     if (!banner_type) {
-        g_test_skip ("server did not send HTLS_HDR_BANNER in the "
+        g_test_fail_printf ("server did not send HTLS_HDR_BANNER in the "
                      "post-login window.");
         goto cleanup;
     }
     g_test_message ("banner type=\"%s\"", banner_type);
 
     if (strncmp (banner_type, "URL", 3) == 0) {
-        g_test_skip ("server is in URL banner mode — HTXF fetch path "
+        g_test_fail_printf ("server is in URL banner mode — HTXF fetch path "
                      "doesn't apply.");
         goto cleanup;
     }
