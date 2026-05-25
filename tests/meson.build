@@ -440,6 +440,21 @@ test_banner_dispatch = executable('test_banner_dispatch',
 test('banner_dispatch', test_banner_dispatch,
      suite : 'proto')
 
+# tracker_parser — pure HTRK reply parsers carved out of
+# network.c's async tracker fetch state machine. Four small
+# helpers (reply header / padding sentinel / fixed record / text
+# normalize), each pinned against canned byte fixtures. The
+# byte ordering invariants and the reserved-bytes-ignored
+# contract are the bits most worth a regression net.
+test_tracker_parser = executable('test_tracker_parser',
+  'proto/test_tracker_parser.c',
+  '../src/tracker_parser.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('tracker_parser', test_tracker_parser,
+     suite : 'proto')
+
 # hlwrite — round-trip the wire packer (hlpack, extracted from
 # hlwrite() in network.c) through the dh_start walker. Proves the
 # send-side encoder and the receive-side decoder agree on the wire
