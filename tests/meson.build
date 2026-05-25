@@ -733,6 +733,30 @@ test_aead = executable('test_aead',
 test('aead', test_aead,
      suite : 'proto')
 
+# network_decode — receive-side qbuf-to-qbuf decoder split out of
+# network.c specifically so this test can drive its three branches
+# (plaintext / stream cipher / AEAD framing) against canned bytes.
+# Pulls in the full cipher stack (cipher.c + cipher_aead.c + qbuf.c
+# + rand.c — the same set the Tier 3 harness linked in for HOPE
+# coverage) plus a couple of stub symbols for hx_htlc_close +
+# hx_printf_prefix that the test binary provides inline. The
+# AEAD failure subtests exercise the close-on-error path; the
+# stubs zero htlc->fd to mirror hx_htlc_close's one observable
+# side effect from hx_decode's perspective.
+test_network_decode = executable('test_network_decode',
+  'proto/test_network_decode.c',
+  '../src/network_decode.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps + [dependency('nettle')],
+  include_directories : proto_test_inc,
+)
+test('network_decode', test_network_decode,
+     suite : 'proto')
+
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
 #

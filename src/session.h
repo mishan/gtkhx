@@ -381,7 +381,9 @@ typedef struct _session {
 extern session the_session;
 
 extern char last_msg_nick[32];
-extern const char *INFOPREFIX;
+/* INFOPREFIX's extern decl moved to gtkhx_log.h so non-widget
+ * callers (network_decode.c, Tier 2 test stubs) can resolve it
+ * without dragging in this header's GTK surface. */
 extern char *g_user_colors[4];
 
 extern char *colorstr (guint16 color);
