@@ -70,6 +70,7 @@ gtkhx_sources = files(
   'text_util.c',
   'toolbar.c',
   'tracker.c',
+  'tracker_parser.c',
   'tray.c',
   'uniquify_path.c',
   'usermod.c',

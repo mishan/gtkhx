@@ -63,6 +63,7 @@
 #include "proto_helpers.h"
 #include "htxf_subchannel.h"
 #include "network_decode.h"
+#include "tracker_parser.h"
 
 char *server_addr;
 guint16 server_port;
@@ -1460,7 +1461,11 @@ on_tracker_header_read (GObject *src, GAsyncResult *res, gpointer u)
         return;
     }
 
-    ctx->nservers = ntohs (*((guint16 *)(&ctx->buf[10])));
+    /* tracker_parser.c::hx_tracker_reply_parse_header pulls the
+	 * u16 BE at offset [10..11]. Pure helper so
+	 * test_tracker_parser pins the wire shape; see
+	 * tracker_parser.h for the full HTRK reply layout. */
+    hx_tracker_reply_parse_header (ctx->buf, 14, &ctx->nservers);
     ctx->total = ctx->nservers;
     ctx->server_i = 1;
 
@@ -1494,7 +1499,7 @@ on_server_hdr_read (GObject *src, GAsyncResult *res, gpointer u)
         return;
     }
 
-    if (!ctx->buf[0]) {
+    if (hx_tracker_record_is_padding (ctx->buf, 1)) {
         /* Padding slot — IPs can't start with 0. Read the next
 		 * server header without advancing the counter. */
         read_next_server_hdr (ctx);
@@ -1519,10 +1524,17 @@ on_server_rest_read (GObject *src, GAsyncResult *res, gpointer u)
         return;
     }
 
-    ctx->cur_addr.s_addr = *((guint32 *)ctx->buf);
-    ctx->cur_port = ntohs (*((guint16 *)(&ctx->buf[4])));
-    ctx->cur_nusers = ntohs (*((guint16 *)(&ctx->buf[6])));
-    ctx->cur_name_len = ctx->buf[10];
+    /* Pure parse of the 11-byte fixed record prefix. See
+	 * tracker_parser.h for the byte layout — addr / port /
+	 * nusers / reserved[2] / name_len. */
+    {
+        hx_tracker_record_fixed rec;
+        hx_tracker_record_parse_fixed (ctx->buf, 11, &rec);
+        ctx->cur_addr     = rec.addr;
+        ctx->cur_port     = rec.port;
+        ctx->cur_nusers   = rec.nusers;
+        ctx->cur_name_len = rec.name_len;
+    }
 
     if (ctx->cur_name_len == 0) {
         ctx->name[0] = 0;
@@ -1551,8 +1563,7 @@ on_server_name_read (GObject *src, GAsyncResult *res, gpointer u)
         return;
     }
     ctx->name[ctx->cur_name_len] = 0;
-    CR2LF (ctx->name, ctx->cur_name_len);
-    strip_ansi (ctx->name, ctx->cur_name_len);
+    hx_tracker_normalize_text (ctx->name, ctx->cur_name_len);
 
     g_input_stream_read_all_async (ctx->in, ctx->buf, 1, G_PRIORITY_DEFAULT,
                                    ctx->run->cancel, on_server_desc_len_read,
@@ -1598,8 +1609,7 @@ on_server_desc_read (GObject *src, GAsyncResult *res, gpointer u)
         return;
     }
     ctx->desc[ctx->cur_desc_len] = 0;
-    CR2LF (ctx->desc, ctx->cur_desc_len);
-    strip_ansi (ctx->desc, ctx->cur_desc_len);
+    hx_tracker_normalize_text (ctx->desc, ctx->cur_desc_len);
 
     tracker_emit_server (ctx);
 }
