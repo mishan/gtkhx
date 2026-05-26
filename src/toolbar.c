@@ -47,6 +47,7 @@
 #include "usermod.h"
 #include "about.h"
 #include "banner.h"
+#include "bookmarks.h"
 #include "options.h"
 #include "gtkthreads.h"
 #include "plugin.h"
@@ -343,6 +344,14 @@ defer_open_about (gpointer data)
 }
 
 static gboolean
+defer_open_bookmarks (gpointer data)
+{
+    (void)data;
+    create_bookmarks_window ();
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
 defer_quit (gpointer data)
 {
     (void)data;
@@ -365,6 +374,15 @@ on_action_about (GSimpleAction *action, GVariant *param, gpointer user_data)
     (void)param;
     (void)user_data;
     g_idle_add (defer_open_about, NULL);
+}
+
+static void
+on_action_bookmarks (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+    (void)action;
+    (void)param;
+    (void)user_data;
+    g_idle_add (defer_open_bookmarks, NULL);
 }
 
 static void
@@ -391,6 +409,7 @@ on_files_button_clicked (GtkButton *button, gpointer user_data)
 
 static const GActionEntry app_actions[] = {
     { .name = "settings", .activate = on_action_settings },
+    { .name = "bookmarks", .activate = on_action_bookmarks },
     { .name = "about", .activate = on_action_about },
     { .name = "user_new", .activate = on_action_user_new },
     { .name = "user_edit", .activate = on_action_user_edit },
@@ -566,6 +585,7 @@ build_hamburger (void)
 
     menu = g_menu_new ();
     g_menu_append (menu, _ ("Settings"), "app.settings");
+    g_menu_append (menu, _ ("Bookmarks…"), "app.bookmarks");
     g_menu_append (menu, _ ("About GtkHx"), "app.about");
     g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));
     g_menu_append (menu, _ ("Quit"), "app.quit");
