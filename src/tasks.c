@@ -424,7 +424,10 @@ task_stop (GtkWidget *widget, gpointer data)
 			 * spot; the signal-based clear obsoletes it. */
             xfer_delete (gtsk->htxf);
             gtask_delete (sess, gtsk);
-        } else if (gtsk->trans == (guint32)-127) {
+        } else if (gtsk->trans == (guint32)-127
+                   || gtsk->trans == (guint32)-129) {
+            /* Tracker cancel (-127) and tracker-quit (-129) both
+             * tear down the tracker worker pool. */
             tracker_kill_threads ();
             gtask_delete (sess, gtsk);
         } else if (gtsk->trans == (guint32)-128) {
@@ -432,9 +435,6 @@ task_stop (GtkWidget *widget, gpointer data)
             /* disconnect_clicked updates connection task, so it should already
 			   handle deleting the task */
             /*			gtask_delete(sess, gtsk); */
-        } else if (gtsk->trans == (guint32)-129) {
-            tracker_kill_threads ();
-            gtask_delete (sess, gtsk);
         } else {
             /* task_delete should handle deleting the gtask */
             task_delete (sess, task_with_trans (sess, gtsk->trans));

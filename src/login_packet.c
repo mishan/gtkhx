@@ -32,6 +32,8 @@ alg_list_append (guint8 *list, size_t offset, size_t cap, const char *name)
         return 0;
     }
     list[offset++] = (guint8) name_len;
+    /* Length-prefixed binary entry on the wire — no NUL terminator. */
+    /* NOLINTNEXTLINE(bugprone-not-null-terminated-result) */
     memcpy (list + offset, name, name_len);
     return offset + name_len;
 }
@@ -219,6 +221,9 @@ hx_login_build_chunks (const hx_login_request *req,
         if (app_id_len > 4) {
             app_id_len = 4;
         }
+        /* AppID is a fixed 4-byte field on the wire — write
+         * the leading bytes of app_id without a NUL terminator. */
+        /* NOLINTNEXTLINE(bugprone-not-null-terminated-result) */
         memcpy (scratch + soff, app_id, app_id_len);
         soff += 4;
         chunks[hc++] = (struct hx_chunk) {
@@ -346,6 +351,9 @@ hx_login_build_chunks (const hx_login_request *req,
         }
     }
 
+    /* hc is a local size_t and HX_LOGIN_MAX_CHUNKS a compile-time
+     * constant — no side effects. clang-tidy is over-eager. */
+    /* NOLINTNEXTLINE(bugprone-assert-side-effect) */
     g_assert (hc <= HX_LOGIN_MAX_CHUNKS);
     return hc;
 }

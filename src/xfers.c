@@ -230,11 +230,10 @@ xfer_go (struct htxf_conn *htxf)
 
     htxf->gone = 1;
 
-    if (htxf->type == XFER_GET) {
-        /*		hx_htlc.nr_gets++; */
-    } else if (htxf->type == XFER_PUT) {
-        /*		hx_htlc.nr_puts++; */
-    }
+    /* (Pre-stats hook that used to increment nr_gets / nr_puts has
+     * been gone for years; the dispatch below is the live use of
+     * htxf->type.) */
+
     if (htxf->type == XFER_GET) {
         /* Resume vs rename decision for downloads (skipped for
 		 * previews, which don't write to disk):
@@ -414,9 +413,9 @@ xfer_go (struct htxf_conn *htxf)
 }
 
 int
-xfer_go_timer (void *__arg)
+xfer_go_timer (void *arg)
 {
-    xfer_go ((struct htxf_conn *)__arg);
+    xfer_go ((struct htxf_conn *)arg);
     return 0;
 }
 
@@ -914,9 +913,9 @@ done:
 }
 
 static void *
-get_thread (void *__arg)
+get_thread (void *arg)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int s = -1, retval;
     guint8 buf[1024];
 
@@ -992,9 +991,9 @@ ret:
  * file_recv_one call. Restored to the root before cleanup so the
  * tasks-window display has a sensible label. */
 static void *
-folder_get_thread (void *__arg)
+folder_get_thread (void *arg)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int s = -1, retval = 0;
     guint8 buf[1024];
     char base_path[MAXPATHLEN];
@@ -1254,7 +1253,7 @@ TYPECREA\
             HN32 (&buf[121 + fi.comlen], &hi);
         }
     }
-    if (htxf_io_write (htxf, s, buf, 133 + fi.comlen) != (ssize_t)(133 + fi.comlen)) {
+    if (htxf_io_write (htxf, s, buf, 133 + fi.comlen) != 133 + (ssize_t)fi.comlen) {
         return errno ? errno : EIO;
     }
     htxf->total_pos += 133 + fi.comlen;
@@ -1314,9 +1313,9 @@ put_rsrc:
 }
 
 static void *
-put_thread (void *__arg)
+put_thread (void *arg)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int s = -1, retval;
     guint8 buf[512];
 
@@ -1470,9 +1469,9 @@ hx_collect_put_entries (GPtrArray *entries, const char *dir_path,
 }
 
 static void *
-folder_put_thread (void *__arg)
+folder_put_thread (void *arg)
 {
-    struct htxf_conn *htxf = (struct htxf_conn *)__arg;
+    struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int s = -1, retval = 0;
     guint8 buf[2048];
     char base_path[MAXPATHLEN];

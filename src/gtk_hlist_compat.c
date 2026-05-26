@@ -536,7 +536,9 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
         }
 
         tx = (float)(cell_area->x + x_off);
-        ty = (float)(cell_area->y + (cell_area->height - th) / 2);
+        /* Vertical-center the text in the cell; keep the divide in
+         * floating point so subpixel positions survive to the snapshot. */
+        ty = (float)cell_area->y + (float)(cell_area->height - th) / 2.0f;
 
         /* Optional 4-direction outline. Draws the same layout four
 		 * times at ±1 px offsets in pure black before the fg draw

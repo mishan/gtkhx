@@ -1015,7 +1015,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     ctx->port = port;
     ctx->login = g_strdup (login);
     ctx->pass = g_strdup (pass);
-    ctx->secure = secure;
+    ctx->secure = (unsigned char) secure;
     ctx->cancel = g_cancellable_new ();
     current_cancel = g_object_ref (ctx->cancel);
     ctx->state = GTKHX_CONNECT_STATE_RESOLVING;

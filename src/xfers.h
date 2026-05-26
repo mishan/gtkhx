@@ -6,7 +6,7 @@ extern struct htxf_conn **xfers;
 
 //extern size_t resource_len (const char *path);
 extern void xfer_go (struct htxf_conn *htxf);
-extern int xfer_go_timer (void *__arg);
+extern int xfer_go_timer (void *arg);
 /* Construct a transfer. The remote location is given as a (dir,
  * name, name_len) triple rather than a single joined path so that
  * names containing `/` (the default dir_char) survive untouched on

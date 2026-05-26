@@ -260,10 +260,30 @@ If we're going to chip away at this:
    (narrowing-conversions, casting-through-void,
    easily-swappable-parameters, switch-missing-default-case)
    are stylistic / GObject-idiom noise; intentionally skipped.
-7. **Address the remaining `bugprone-*` clusters in core code**
-   — assert-side-effect, integer-division, not-null-terminated-
-   result, branch-clone. Each is small and surfaces a real
-   concern even when benign.
+7. ✅ **Address the remaining `bugprone-*` clusters in core code.**
+   Shipped on `claude/analyzer-step7-bugprone-core`. Cleared every
+   real-concern finding in the non-step-6 source files:
+   `assert-side-effect` (chat.c, login_packet.c — NOLINT, false
+   positives on -> chains inside g_assert), `integer-division`
+   (gtk_hlist_compat.c — cell-row y-centring done in float),
+   `not-null-terminated-result` (login_packet.c x2 — NOLINT, both
+   memcpys write length-prefixed / fixed-width wire fields not
+   C strings), `branch-clone` (tasks.c — merged -127 and -129
+   tracker-teardown branches; xfers.c — removed leftover dead
+   nr_gets/nr_puts hook from the xfer type dispatch),
+   `redundant-branch-condition` (rcv.c — dropped inner if that
+   restated the outer condition), `misplaced-widening-cast`
+   (xfers.c — widen `fi.comlen` before adding the constant),
+   `suspicious-string-compare` (files.c x2, options.c — explicit
+   `!= 0`), `signed-char-misuse` (connect.c — len_addr typed
+   unsigned char; network.c — secure-flag cast through unsigned
+   char; rcv.c — dir_char compare cast through guint8;
+   usermod.c — bitno cast through unsigned char),
+   `reserved-identifier` (commands.c `__commands` → `commands_tbl`;
+   usermod.c `__uesp` → `uesp`; xfers.c `__arg` → `arg` x5).
+   Remaining 67 reserved-identifier in gtk_hlist_compat.c are
+   GLib macro-expansion noise (`__inst`, `__r`, `__t` from
+   `g_return_if_fail` / `GTK_IS_*`).
 
 After steps 1–3 (now complete), the per-PR signal-to-noise should
 be good enough to flip the CI jobs from `continue-on-error: true`

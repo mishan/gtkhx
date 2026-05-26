@@ -549,7 +549,7 @@ struct hx_command {
 
 static struct hx_command *commands, *last_command;
 
-static struct hx_command __commands[] = {
+static struct hx_command commands_tbl[] = {
     { "clear", cmd_clear }, { "close", cmd_close },    { "exec", cmd_exec },
     { "help", cmd_help },   { "icon", cmd_icon },      { "ignore", cmd_ignore },
     { "me", cmd_me },       { "msg", cmd_msg },        { "nick", cmd_nick },
@@ -558,9 +558,9 @@ static struct hx_command __commands[] = {
 };
 
 static struct hx_command *commands
-    = __commands,
+    = commands_tbl,
     *last_command
-    = __commands + sizeof (__commands) / sizeof (struct hx_command) - 1;
+    = commands_tbl + sizeof (commands_tbl) / sizeof (struct hx_command) - 1;
 
 static short command_hash[26];
 
