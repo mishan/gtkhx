@@ -1,0 +1,231 @@
+# GtkHx code analysis — sanitizers + static analyzers.
+#
+# Three jobs that complement the tests.yml functional suite:
+#
+#   sanitize       — ASan + UBSan over unit + proto tests. Catches
+#                    use-after-free, OOB reads/writes, undefined
+#                    integer overflow, NULL dereferences, etc. Runs
+#                    the same test binaries the normal CI runs, just
+#                    instrumented.
+#
+#   gcc-analyzer   — GCC's static analyzer (-fanalyzer) over the
+#                    whole tree. Finds NULL derefs, leaks, double-
+#                    frees, out-of-bounds writes statically.
+#
+#   clang-tidy     — Runs the .clang-tidy config in the repo root
+#                    across src/. Catches portability issues, code-
+#                    style consistency violations, modernization
+#                    opportunities.
+#
+# All three are continue-on-error for now. The first run will surface
+# ~50+ -fanalyzer warnings in vintage C paths (xtext, dfa, cipher,
+# etc.) that we don't intend to fix in one go — these jobs exist as
+# a "what's new vs. baseline" signal, with uploaded artifacts for the
+# triage queue. Once a category gets cleaned up, flip its job to
+# mandatory.
+#
+# The full sanitize run on unit+proto adds ~1 min on top of the
+# normal build, gcc-analyzer adds ~2 min, clang-tidy ~3 min. None of
+# them blocks tests.yml — they run in parallel with it.
+
+name: analyze
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ASan + UBSan (unit + proto)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install build deps
+        run: |
+          dnf -y install \
+            meson ninja-build pkgconf-pkg-config gcc \
+            libasan libubsan \
+            gtk4-devel libadwaita-devel \
+            glib2-devel gobject-introspection-devel \
+            nettle-devel zlib-devel \
+            gsound-devel \
+            libsoup3-devel \
+            gettext-devel \
+            desktop-file-utils appstream \
+            git
+
+      - name: meson setup (sanitizers)
+        # b_sanitize: combines AddressSanitizer + UndefinedBehavior
+        #   Sanitizer flags on every compile and link.
+        # b_lundef=false: ASan injects undefined symbols at link time
+        #   that meson would otherwise reject under -Wl,-z,defs.
+        # buildtype=debug: keep frame pointers + line info so ASan
+        #   reports are readable.
+        run: |
+          meson setup build-asan \
+            -Db_sanitize=address,undefined \
+            -Db_lundef=false \
+            -Dbuildtype=debug
+
+      - name: meson compile
+        run: meson compile -C build-asan
+
+      - name: meson test (unit + proto under ASan/UBSan)
+        # detect_leaks=0: GtkHx doesn't tear down every malloc on
+        #   shutdown (and we don't need it to). Disabling leak
+        #   detection focuses ASan on the real bugs — use-after-free,
+        #   OOB, double-free.
+        # halt_on_error=0: keep going past the first UBSan finding so
+        #   we get the full set in one CI run.
+        # print_stacktrace=1: UBSan stack traces by default are
+        #   address-only; this enables symbolised frames.
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=0:print_summary=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
+        run: |
+          meson test -C build-asan --suite unit --suite proto \
+            --print-errorlogs
+
+      - name: upload meson test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-sanitize
+          path: build-asan/meson-logs/
+
+  gcc-analyzer:
+    # GCC's -fanalyzer is a path-sensitive symbolic-execution checker
+    # that runs alongside the normal compile. Finds NULL derefs, OOB,
+    # double-free, leaks, use-after-free. Much slower than a plain
+    # build — pin the runner to a hot cache when iterating.
+    name: GCC -fanalyzer
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
+    continue-on-error: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install build deps
+        run: |
+          dnf -y install \
+            meson ninja-build pkgconf-pkg-config gcc \
+            gtk4-devel libadwaita-devel \
+            glib2-devel gobject-introspection-devel \
+            nettle-devel zlib-devel \
+            gsound-devel \
+            libsoup3-devel \
+            gettext-devel \
+            desktop-file-utils appstream \
+            git
+
+      - name: meson setup (-fanalyzer)
+        # Wno-analyzer-too-complex: gives up on the analysis early
+        #   for big functions instead of crashing the compile. We'd
+        #   rather lose coverage on the heaviest few than red CI.
+        run: |
+          meson setup build-analyzer \
+            -Dc_args='-fanalyzer -Wno-analyzer-too-complex'
+
+      - name: compile + capture warnings
+        # Tee the full output for the artifact, and produce a
+        # categorised summary that's easy to skim in the CI log.
+        run: |
+          set -o pipefail
+          meson compile -C build-analyzer 2>&1 \
+            | tee build-analyzer/analyzer.log
+
+          echo "=== -fanalyzer warning summary ===" \
+            > build-analyzer/analyzer-summary.txt
+          grep -oE '\[-W[a-z-]+\]' build-analyzer/analyzer.log \
+            | sort | uniq -c | sort -rn \
+            >> build-analyzer/analyzer-summary.txt || true
+          cat build-analyzer/analyzer-summary.txt
+
+      - name: upload analyzer logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcc-analyzer-output
+          path: |
+            build-analyzer/analyzer.log
+            build-analyzer/analyzer-summary.txt
+
+  clang-tidy:
+    # Runs the .clang-tidy config at the repo root across every
+    # entry in compile_commands.json. The config is conservative —
+    # see .clang-tidy for which check groups are enabled.
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
+    continue-on-error: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install build deps + clang-tools-extra
+        # clang-tools-extra ships clang-tidy + run-clang-tidy. We
+        # still build with gcc — clang-tidy only needs the compile-
+        # commands database to know how to invoke its frontend per
+        # translation unit.
+        run: |
+          dnf -y install \
+            meson ninja-build pkgconf-pkg-config gcc \
+            clang-tools-extra \
+            gtk4-devel libadwaita-devel \
+            glib2-devel gobject-introspection-devel \
+            nettle-devel zlib-devel \
+            gsound-devel \
+            libsoup3-devel \
+            gettext-devel \
+            desktop-file-utils appstream \
+            git
+
+      - name: meson setup (export compile_commands.json)
+        run: meson setup build-tidy
+
+      - name: run clang-tidy across src/
+        # run-clang-tidy parallelises across cores and respects the
+        # repo's .clang-tidy. -p points it at the compile-commands.
+        # The .c-only filter avoids dragging in the system headers
+        # we ignore via HeaderFilterRegex anyway.
+        # ALWAYS exit 0 so the artifact upload still runs.
+        run: |
+          set +e
+          run-clang-tidy -p build-tidy -j "$(nproc)" \
+            -extra-arg=-Wno-unknown-warning-option \
+            'src/.*\.c$' 2>&1 \
+            | tee build-tidy/clang-tidy.log
+          exit 0
+
+      - name: summarise findings
+        run: |
+          echo "=== clang-tidy findings summary ===" \
+            > build-tidy/clang-tidy-summary.txt
+          grep -oE '\[[a-z-]+-[a-z][a-z0-9-]*\]$' \
+            build-tidy/clang-tidy.log \
+            | sort | uniq -c | sort -rn \
+            >> build-tidy/clang-tidy-summary.txt || true
+          cat build-tidy/clang-tidy-summary.txt
+
+      - name: upload clang-tidy logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-tidy-output
+          path: |
+            build-tidy/clang-tidy.log
+            build-tidy/clang-tidy-summary.txt

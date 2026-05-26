@@ -243,8 +243,8 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 **Quality / process**
 
 - ✅ **Test suite.** Three tiers under `tests/`: Tier 1 unit tests for pure-glib modules (~20 covering text utilities, byte-swap, hash collections, prefs parser, HMAC, HTsc bookmark format, etc.), Tier 2 wire-fixture tests for protocol parsers / encoders (HOPE handshake KATs, FILELIST walkers, opcode round-trips), Tier 3 integration tests run end-to-end against Dockerized mhxd / Mobius / Janus servers. Coverage reporting via `tools/coverage.sh` → `coverage/index.html`. CI runs every push, full Tier 3 matrix included.
-- **Static analysis.** clang-tidy + scan-build + `-fanalyzer`. Still pending — coverage tooling is in place but no scanner runs in CI yet.
-- **AddressSanitizer / UBSan** in CI for the test runs. Still pending; would catch a class of bugs that the test suite alone misses.
+- ✅ **Static analysis.** `.github/workflows/analyze.yml` runs GCC `-fanalyzer` and `clang-tidy` (against the existing `.clang-tidy` config) on every push and PR. Both `continue-on-error` for now — they upload findings as CI artifacts and produce a categorised summary in the build log, but don't block merges. Flip individual categories to mandatory as the tree gets cleaned up. `tools/analyze.sh` runs the same pipeline locally.
+- ✅ **AddressSanitizer / UBSan in CI.** Same workflow runs a `meson -Db_sanitize=address,undefined` build and exercises the full unit + proto test suite under instrumentation. Real run with detect_leaks=0 (GtkHx doesn't tear every alloc down on shutdown), halt_on_error=0 to surface multiple findings per run. Catches use-after-free, OOB, double-free, undefined integer overflow, NULL deref before they reach the legacy GTK paths.
 - **Use `g_autoptr` / `g_autofree` aggressively.** Adopted ad-hoc in newer code (bookmarks, files browser, banner); legacy paths still mostly use explicit g_free. Not worth a sweep — convert opportunistically when touching a function.
 
 **UX features the original always wanted**
