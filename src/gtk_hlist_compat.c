@@ -736,6 +736,21 @@ gtk_hlist_construct (gint n_columns, gchar **titles)
     gtk_tree_view_set_model (GTK_TREE_VIEW (self),
                              GTK_TREE_MODEL (priv->store));
 
+    /* GtkTreeView's "interactive search" feature is on by default —
+	 * any keystroke while the tree has focus pops up a small search
+	 * entry. None of our lists (users, tracker, tasks, files,
+	 * options icon list) want that UX, but more importantly the
+	 * lazy popover construction inside
+	 * gtk_tree_view_ensure_interactive_directory has a GTK 4 bug:
+	 * it fires
+	 *   Gtk-CRITICAL: gtk_css_node_insert_after: assertion
+	 *   'previous_sibling == NULL || previous_sibling->parent == parent'
+	 * the first time a key (including modifier keys like Alt) arrives
+	 * at the tree view. The popover is parented under the tree view
+	 * and the CSS node hierarchy is set up in the wrong order
+	 * internally. Disabling search side-steps the whole code path. */
+    gtk_tree_view_set_enable_search (GTK_TREE_VIEW (self), FALSE);
+
     for (i = 0; i < n_columns; i++) {
         GtkTreeViewColumn *col;
         GtkCellRenderer *pixr;
@@ -751,23 +766,6 @@ gtk_hlist_construct (gint n_columns, gchar **titles)
                            GINT_TO_POINTER (i));
         g_signal_connect (col, "clicked", G_CALLBACK (on_column_clicked), self);
 
-        /* Phase 5: register a sort function for this text column on
-		 * the model and link the column header to it via
-		 * sort_column_id, but only when the list will actually have
-		 * a visible header to click — set_sort_column_id installs an
-		 * indicator-arrow widget hierarchy that asserts during
-		 * mapping if the column header isn't present (the
-		 * gtk_css_node_insert_after assertion). gtk_hlist_new() lists
-		 * (no titles) keep the legacy gtk_hlist_set_compare_func +
-		 * gtk_hlist_sort path and don't get auto-sort. */
-        if (titles != NULL) {
-            gtk_tree_sortable_set_sort_func (
-                GTK_TREE_SORTABLE (priv->store), HLIST_COL_TEXT (i),
-                hlist_text_column_compare, GINT_TO_POINTER (HLIST_COL_TEXT (i)),
-                NULL);
-            gtk_tree_view_column_set_sort_column_id (col, HLIST_COL_TEXT (i));
-        }
-
         pixr = gtk_cell_renderer_pixbuf_new ();
         gtk_tree_view_column_pack_start (col, pixr, FALSE);
         gtk_tree_view_column_set_attributes (
@@ -780,6 +778,34 @@ gtk_hlist_construct (gint n_columns, gchar **titles)
             "foreground-set", HLIST_COL_FG_SET, NULL);
 
         gtk_tree_view_append_column (GTK_TREE_VIEW (self), col);
+
+        /* Phase 5: register a sort function for this text column on
+		 * the model and link the column header to it via
+		 * sort_column_id, but only when the list will actually have
+		 * a visible header to click — set_sort_column_id installs an
+		 * indicator-arrow widget hierarchy that asserts during
+		 * mapping if the column header isn't present (the
+		 * gtk_css_node_insert_after assertion). gtk_hlist_new() lists
+		 * (no titles) keep the legacy gtk_hlist_set_compare_func +
+		 * gtk_hlist_sort path and don't get auto-sort.
+		 *
+		 * MUST be called AFTER append_column, not before. Otherwise
+		 * the indicator-arrow's CSS node is inserted into a column
+		 * header whose own CSS node hasn't been parented to the
+		 * tree view yet, and GTK 4 fires
+		 * "gtk_css_node_insert_after: assertion
+		 *  'previous_sibling == NULL ||
+		 *   previous_sibling->parent == parent' failed"
+		 * once per titled column on every list construction. (Showed
+		 * up as two CRITICALs on every Users window open, two on every
+		 * Tracker / Tasks / Files list, etc.) */
+        if (titles != NULL) {
+            gtk_tree_sortable_set_sort_func (
+                GTK_TREE_SORTABLE (priv->store), HLIST_COL_TEXT (i),
+                hlist_text_column_compare, GINT_TO_POINTER (HLIST_COL_TEXT (i)),
+                NULL);
+            gtk_tree_view_column_set_sort_column_id (col, HLIST_COL_TEXT (i));
+        }
     }
 
     gtk_tree_view_set_headers_visible (GTK_TREE_VIEW (self), titles != NULL);
