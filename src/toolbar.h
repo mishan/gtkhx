@@ -7,6 +7,7 @@ extern GtkWidget *connect_btn;
 extern GtkWidget *disconnect_btn;
 extern GtkWidget *news15_btn;
 extern GtkWidget *news_btn;
+extern GtkWidget *broadcast_btn;
 
 /* Phase 5: status_bar is a GtkLabel now (was GtkStatusbar — deprecated
  * in GTK 4.10 and we never used its message-stack model). The

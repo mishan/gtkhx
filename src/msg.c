@@ -30,6 +30,7 @@
 #include "chat.h"
 #include "emoji.h"
 #include "gtkhx.h"
+#include "gtkhx_log.h"
 #include "gtkutil.h"
 #include "history.h"
 #include "xtext.h"
@@ -60,6 +61,52 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
 
     hlwrite (htlc, HTLC_HDR_MSG, 0, 2, HTLC_DATA_UID, 2, &uid, HTLC_DATA_MSG,
+             (guint16)wire_len, wire);
+    g_free (wire);
+}
+
+/* Send an admin broadcast — HTLC_HDR_MSG_BROADCAST opcode with a
+ * single HTLC_DATA_MSG body chunk. No UID (the server routes to
+ * every connected user). Server-side gating: HL_ACCESS_CAN_BROADCAST
+ * is required; the toolbar button is hidden when the account lacks
+ * the bit so we don't even let the user try, but the server still
+ * enforces it.
+ *
+ * Body goes through gtkhx_text_for_wire so UTF-8 ↔ Mac Roman and
+ * LF→CR happen the same way they do for normal messages. */
+void
+hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
+{
+    gboolean utf8;
+    gsize wire_len = 0;
+    char *wire;
+    const char *valid_end = NULL;
+    gsize safe_len = len;
+
+    if (!msg || len == 0) {
+        return;
+    }
+
+    /* Callers clamp by byte count (e.g. 0xfffe in on_broadcast_response)
+	 * which can split a multi-byte UTF-8 sequence at the tail. Walk
+	 * back to the last complete codepoint so we never hand
+	 * gtkhx_text_for_wire malformed UTF-8 — the legacy (Mac Roman)
+	 * branch of that helper uses g_convert_with_fallback() and
+	 * silently emits raw input bytes on conversion failure, which
+	 * would put garbled multibyte fragments on the wire. */
+    if (!g_utf8_validate_len (msg, len, &valid_end) && valid_end) {
+        safe_len = (gsize)(valid_end - msg);
+    }
+    if (safe_len == 0) {
+        return;
+    }
+
+    task_new (htlc, 0, 0, 0, "broadcast");
+
+    utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    wire = gtkhx_text_for_wire (msg, safe_len, utf8, /*is_body=*/TRUE,
+                                &wire_len);
+    hlwrite (htlc, HTLC_HDR_MSG_BROADCAST, 0, 1, HTLC_DATA_MSG,
              (guint16)wire_len, wire);
     g_free (wire);
 }
@@ -699,8 +746,73 @@ msg_output_from_event (HxMsgEvent *event)
  * shape of what we've seen in the wild on hlserver.com et al. */
 #define BROADCAST_TOAST_MAX 160
 
+/* Map the legacy user->color (16-bit, % 4 status field) to a mIRC
+ * palette index so we can wrap a name in `\003NN…\003` for xtext.
+ * Aligned with gdk_user_colors[]:
+ *   0 (regular) → no escape; let xtext use XTEXT_FG so the name
+ *                 stays legible against both light and dark bgs
+ *                 (black on a black bg would be invisible).
+ *   1 (idle)    → mIRC 14, grey
+ *   2 (admin)   → mIRC  4, red
+ *   3 (idle adm)→ mIRC 13, pink */
+static const char *
+broadcast_name_mirc_color (guint16 color)
+{
+    switch (color % 4) {
+    case 2:
+        return "04";
+    case 3:
+        return "13";
+    case 1:
+        return "14";
+    case 0:
+    default:
+        return NULL;
+    }
+}
+
+/* Defang a sender name before embedding it in the mIRC-coded
+ * broadcast prefix. The wrapper structure is
+ *
+ *     " \00310[\003<col><name>\00310]\003 "
+ *
+ * and the chat-side detector in xprintline scans for the closing
+ * "\00310]\003 " sequence to find where the name ends. A name
+ * containing raw \003 (or any other xtext control byte from the
+ * ATTR_* family — \002, \007, \017, \026, \031) could prematurely
+ * terminate the wrapper, break info-prefix detection, or smuggle
+ * its own colour escapes into the chat log.
+ *
+ * The wire-parse helpers (hx_msg_extract → strip_ansi) translate
+ * any low-control bytes in the body but NOT in the name, so a
+ * hostile server could ship `name = "\003foo"` and have us
+ * render escape codes inside the brackets. Strip every ASCII
+ * control byte (< 0x20) defensively here. Legitimate Hotline
+ * nicks are printable ASCII / UTF-8 — control bytes have no
+ * business in one. */
+static char *
+broadcast_sanitise_name (const char *raw)
+{
+    GString *out;
+    const char *p;
+
+    if (!raw) {
+        return NULL;
+    }
+    out = g_string_new (NULL);
+    for (p = raw; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7f) {
+            g_string_append_c (out, '?');
+        } else {
+            g_string_append_c (out, *p);
+        }
+    }
+    return g_string_free (out, FALSE);
+}
+
 void
-broadcastmsg (char *text)
+broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 {
     AdwDialog *dialog;
     GtkWidget *textbox, *scroll;
@@ -712,6 +824,37 @@ broadcastmsg (char *text)
 	 * the broadcast renders as a transient toast or a modal
 	 * dialog. */
     gtkhx_notify_broadcast (text);
+
+    /* Log the broadcast to chat output. When the wire carried a
+	 * sender name (mhxd-family servers echo broadcasts back with
+	 * UID + NAME chunks), render as " [name] body" with the same
+	 * blue brackets the INFOPREFIX uses and the name in the
+	 * sender's user-color slot. When the sender is unknown (older
+	 * servers, anonymous rate-limit nags), fall back to the
+	 * legacy "[hx] broadcast: …" form so something still shows up
+	 * in scrollback. Task errors come through task_error() →
+	 * toolbar_show_toast directly and never reach this function,
+	 * so they won't be logged as broadcasts here. */
+    if (text && *text) {
+        if (sender_name && *sender_name) {
+            const char *col = broadcast_name_mirc_color (sender_color);
+            char *safe_name = broadcast_sanitise_name (sender_name);
+            char *prefix;
+            if (col) {
+                prefix = g_strdup_printf (" \00310[\003%s%s\00310]\003 ",
+                                          col, safe_name);
+            } else {
+                prefix = g_strdup_printf (" \00310[\003%s\00310]\003 ",
+                                          safe_name);
+            }
+            hx_printf_prefix (&the_session.htlc, 0, prefix, "%s\n", text);
+            g_free (prefix);
+            g_free (safe_name);
+        } else {
+            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+                              _ ("broadcast: %s\n"), text);
+        }
+    }
 
     if (len <= BROADCAST_TOAST_MAX && !strchr (text, '\n')) {
         toolbar_show_toast (text);

@@ -1182,26 +1182,50 @@ xprintline (GtkWidget *text, char *chat, size_t len)
                                 ? (const char *)the_session.htlc.name
                                 : NULL;
 
-    const char *info_prefix = INFOPREFIX;
-    gsize info_prefix_len = info_prefix ? strlen (info_prefix) : 0;
+    /* Recognise any line that opens with the INFOPREFIX-style
+	 * " \00310[…\00310]\003 " wrapper, not just the literal
+	 * INFOPREFIX bytes. The original detection was a strict
+	 * byte-for-byte memcmp on INFOPREFIX, which worked for
+	 * "[hx] …" log lines but not for broadcastmsg's per-sender
+	 * variant "[name] …" where the embedded color and name vary
+	 * per-call. Searching for the closing "\00310]\003 " keeps
+	 * the same name-on-the-left-of-the-xtext-separator render
+	 * for both cases. */
+    {
+        static const char wrap_open[] = " \00310[";        /* 5 bytes */
+        static const char wrap_close[] = "\00310]\003 ";   /* 6 bytes */
+        const gsize open_len = sizeof (wrap_open) - 1;
+        const gsize close_len = sizeof (wrap_close) - 1;
 
-    if (info_prefix_len > 0 && valid_len >= info_prefix_len
-        && memcmp (valid, info_prefix, info_prefix_len) == 0) {
-        /* INFOPREFIX branch: nick = the "[hx]" inside the wrapper
-		 * bytes (skip the leading space, drop the trailing). */
-        name_off = 1;
-        name_len = info_prefix_len - 2;
-        body_off = info_prefix_len;
-        body_len = valid_len - info_prefix_len;
-        is_info = TRUE;
-    } else if (hx_chat_split_nick_body (valid, valid_len, &name_off, &name_len,
-                                        &body_off, &body_len)) {
-        if (self_nick && name_len > 0 && strlen (self_nick) == name_len
-            && memcmp (valid + name_off, self_nick, name_len) == 0) {
-            said_by_self = TRUE;
+        if (valid_len >= open_len + close_len
+            && memcmp (valid, wrap_open, open_len) == 0) {
+            const char *close
+                = g_strstr_len (valid + open_len, valid_len - open_len,
+                                wrap_close);
+            if (close) {
+                gsize close_pos = (gsize)(close - valid);
+                name_off = 1;
+                /* End of name = last byte before the trailing space
+				 * in wrap_close. Inclusive index = close_pos + close_len
+				 * - 2; length = end - start + 1. */
+                name_len = (close_pos + close_len - 2) - name_off + 1;
+                body_off = close_pos + close_len;
+                body_len = valid_len - body_off;
+                is_info = TRUE;
+            }
         }
-    } else {
-        name_len = 0;
+    }
+
+    if (!is_info) {
+        if (hx_chat_split_nick_body (valid, valid_len, &name_off, &name_len,
+                                     &body_off, &body_len)) {
+            if (self_nick && name_len > 0 && strlen (self_nick) == name_len
+                && memcmp (valid + name_off, self_nick, name_len) == 0) {
+                said_by_self = TRUE;
+            }
+        } else {
+            name_len = 0;
+        }
     }
 
     xprintline_render (text, valid, valid_len, name_off, name_len, body_off,

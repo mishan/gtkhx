@@ -224,6 +224,18 @@ setbtns (session *sess, int stat)
 
     gtk_widget_set_sensitive (files_btn, stat);
 
+    /* Broadcast button visibility: only shown when the connection
+	 * is live AND the account has HL_ACCESS_CAN_BROADCAST. Most
+	 * accounts don't, so hiding the button entirely is friendlier
+	 * than greying it out — matches how Kick/Ban behave above. */
+    if (broadcast_btn) {
+        gboolean can_broadcast
+            = stat
+              && hl_access_has ((const guint8 *)&sess->htlc.access,
+                                HL_ACCESS_CAN_BROADCAST);
+        gtk_widget_set_visible (broadcast_btn, can_broadcast);
+    }
+
     /* Phase 5: New User / Edit User moved from toolbar buttons to
 	 * the hamburger menu's Admin submenu. Flip the corresponding
 	 * GActions instead of the old GtkWidget pointers. */
