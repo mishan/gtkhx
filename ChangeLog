@@ -45,6 +45,7 @@
 - Emoji picker next to Chat and Message input fields
 - Updated icons.rsrc to include icons from HLC 1.9
 - Implement Broadcast command
+- New Bookmark manager dialog allows for in-app management of Hotline bookmarks
 
 0.9.4
 -----
