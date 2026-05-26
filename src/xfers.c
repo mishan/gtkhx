@@ -34,7 +34,6 @@
 #include <sys/ioctl.h>
 #include <gtk/gtk.h>
 #include <time.h>
-#include <netinet/in.h>
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hfs.h"
@@ -53,7 +52,6 @@
 
 int nxfers = 0;
 struct htxf_conn **xfers = 0;
-void xfer_delete (struct htxf_conn *htxf);
 static void xfer_remove_from_list (struct htxf_conn *htxf);
 
 /*

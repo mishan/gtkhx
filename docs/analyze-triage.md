@@ -231,10 +231,16 @@ If we're going to chip away at this:
    filter). Shipped on `claude/analyzer-noise-reduction`. 586
    clang-tidy + 37 -fanalyzer noise findings gone. Track the
    GRegex/PCRE2 replacement as the long-term fix.
-4. **Tackle `protocol.h` macro-parentheses** (~15-20 fixes,
-   mechanical).
-5. **Duplicate-include + redundant-declaration cleanups** —
-   trivial, file-at-a-time.
+4. ✅ **Tackle `protocol.h` macro-parentheses**. Shipped on
+   `claude/analyzer-protocol-cleanup`. Fixed HN16/HN32/dh_getint in
+   protocol.h, plus stragglers in compat.h (X2X/atou{16,32}),
+   xtext.c (is_del), macres.c (e_int{16,24,32}), and usermod.c
+   (ENTRY + test/set/unset_bit). 28 warnings → 0.
+5. ✅ **Duplicate-include + redundant-declaration cleanups**.
+   Shipped on `claude/analyzer-protocol-cleanup`. Dropped 9
+   duplicate `#include` lines and 13 redundant in-file extern
+   prototypes whose declarations already live in the matching
+   header.
 6. **Walk xtext.c, hfs.c, cicn.c, macres.c findings** — these
    are ours; chip away at the bugprone-* clusters in batches
    when touching the files.

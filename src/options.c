@@ -971,8 +971,8 @@ cfgnamecmp_const (const void *key, const void *mem)
     return strcmp ((const char *)key, ((const struct cfgvar *)mem)->name);
 }
 
-/* prefs_write is defined after the row helpers but called by them. */
-void prefs_write (void);
+/* prefs_write is defined after the row helpers but called by them
+ * — the prototype lives in options.h. */
 
 /* Phase 5: helper to compare two flowbox children by their stored
  * resource ID so the icon picker stays sorted by ID. Forward-declared
@@ -1666,8 +1666,6 @@ read_line (FILE *prefs, char **line, size_t *len)
     }
     return 0;
 }
-
-void create_options_window (GtkWidget *widget, gpointer data);
 
 /* Phase 5: prefs path resolution. Primary location is
  *   $CONFIG/gtkhxrc

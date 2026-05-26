@@ -226,7 +226,7 @@ xtext_get_stamp_str (time_t tim, char **ret)
 
 /* is delimiter */
 #define is_del(c) \
-	(c == ' ' || c == '\n' || c == '>' || c == '<' || c == 0)
+	((c) == ' ' || (c) == '\n' || (c) == '>' || (c) == '<' || (c) == 0)
 
 /* force scrolling off */
 #define dontscroll(buf) (buf)->last_pixel_pos = 0x7fffffff

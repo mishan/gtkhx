@@ -62,9 +62,9 @@ static inline guint16 _e_int16(unsigned char **base)
 	return ret;
 }
 
-#define e_int32(foo) _e_int32(&foo)
-#define e_int24(foo) _e_int24(&foo)
-#define e_int16(foo) _e_int16(&foo)
+#define e_int32(foo) _e_int32(&(foo))
+#define e_int24(foo) _e_int24(&(foo))
+#define e_int16(foo) _e_int16(&(foo))
 
 static macres_res_type_list *
 macres_res_type_list_get (macres_res_type_list *typelist, guint32 ntypes, guint32 type)
