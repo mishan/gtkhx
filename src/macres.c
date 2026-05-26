@@ -32,7 +32,10 @@
 #include "macres.h"
 
 
-static inline guint32 _e_int32(unsigned char **base)
+/* Identifier names with a leading underscore are technically OK at
+ * file scope with internal linkage, but clang-tidy's reserved-
+ * identifier check still flags them. Rename to mr_extract_*. */
+static inline guint32 mr_extract_int32(unsigned char **base)
 {
 	unsigned char *b = *base;
 	guint32 ret = (*b++) << 24;
@@ -43,7 +46,7 @@ static inline guint32 _e_int32(unsigned char **base)
 	return ret;
 }
 
-static inline guint32 _e_int24(unsigned char **base)
+static inline guint32 mr_extract_int24(unsigned char **base)
 {
 	unsigned char *b = *base;
 	guint32 ret = (*b++) << 16;
@@ -53,7 +56,7 @@ static inline guint32 _e_int24(unsigned char **base)
 	return ret;
 }
 
-static inline guint16 _e_int16(unsigned char **base)
+static inline guint16 mr_extract_int16(unsigned char **base)
 {
 	unsigned char *b = *base;
 	guint16 ret = (*b++) << 8;
@@ -62,9 +65,9 @@ static inline guint16 _e_int16(unsigned char **base)
 	return ret;
 }
 
-#define e_int32(foo) _e_int32(&(foo))
-#define e_int24(foo) _e_int24(&(foo))
-#define e_int16(foo) _e_int16(&(foo))
+#define e_int32(foo) mr_extract_int32(&(foo))
+#define e_int24(foo) mr_extract_int24(&(foo))
+#define e_int16(foo) mr_extract_int16(&(foo))
 
 static macres_res_type_list *
 macres_res_type_list_get (macres_res_type_list *typelist, guint32 ntypes, guint32 type)

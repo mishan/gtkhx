@@ -78,7 +78,7 @@ finderinfo_path (char *infopath, const char *path, struct stat *statbuf)
 		return ENAMETOOLONG;
 	strcpy(pathbuf, path);
 	for (i = len - 1; i > 0; i--)
-		if (pathbuf[i] == dir_char) {
+		if ((guint8)pathbuf[i] == dir_char) {
 			pathbuf[i++] = 0;
 			break;
 		}
@@ -104,7 +104,7 @@ int resource_path (char *rsrcpath, const char *path, struct stat *statbuf)
 		return ENAMETOOLONG;
 	strcpy(pathbuf, path);
 	for (i = len - 1; i > 0; i--)
-		if (pathbuf[i] == dir_char) {
+		if ((guint8)pathbuf[i] == dir_char) {
 			pathbuf[i++] = 0;
 			break;
 		}
@@ -149,7 +149,7 @@ resource_open (const char *path, int mode, int perm)
 				dbl.entries = htons(HFS_HDR_MAX);
 			r = read(f, &dbl.descrs, SIZEOF_HFS_HDR_DESCR * 
 					 ntohs(dbl.entries));
-			if (r != SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries))
+			if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries)))
 				goto funkdat;
 			for (i = 0; i < ntohs(dbl.entries); i++) {
 				struct hfs_hdr_descr *descr = (struct hfs_hdr_descr *)
@@ -200,7 +200,7 @@ resource_len (const char *path)
 				dbl.entries = htons(HFS_HDR_MAX);
 			r = read(f, &dbl.descrs, SIZEOF_HFS_HDR_DESCR * 
 					 ntohs(dbl.entries));
-			if (r != SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries))
+			if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries)))
 				goto funkdat;
 			for (i = 0; i < ntohs(dbl.entries); i++) {
 				struct hfs_hdr_descr *descr = (struct hfs_hdr_descr *)
@@ -235,7 +235,8 @@ suffix_type_creator (char *buf, const char *path)
 	const char *tc = UNKNOWN_TYPECREA;
 	char *suff;
 
-	if (!(suff = suffix(path)))
+	suff = suffix(path);
+	if (!suff)
 		goto cpy;
 
 	if (!strcmp(suff, "jpg") || !strcmp(suff, "jpeg"))
@@ -262,6 +263,11 @@ suffix_type_creator (char *buf, const char *path)
 		tc = "PICTGKON";
 
 cpy:
+	/* tc is 8 raw bytes (4-char Mac type + 4-char creator), not a
+	 * C string — the trailing NUL on the literals is irrelevant.
+	 * Suppress bugprone-not-null-terminated-result; buf is a binary
+	 * 8-byte field that gets written to disk as-is. */
+	/* NOLINTNEXTLINE(bugprone-not-null-terminated-result) */
 	memcpy(buf, tc, 8);
 }
 
@@ -300,7 +306,7 @@ type_creator (u_int8_t *buf, const char *path)
 						dbl.entries = htons(HFS_HDR_MAX);
 					r = read(f, &dbl.descrs, SIZEOF_HFS_HDR_DESCR * 
 							 ntohs(dbl.entries));
-					if (r != SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries)) {
+					if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(dbl.entries))) {
 						r = -1;
 						break;
 					}
@@ -370,7 +376,7 @@ hfsinfo_read (const char *path, struct hfsinfo *fi)
 						hdr.dbl.entries = htons(HFS_HDR_MAX);
 					r = read(f, &hdr.dbl.descrs, SIZEOF_HFS_HDR_DESCR * 
 							 ntohs(hdr.dbl.entries));
-					if (r != SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries))
+					if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries)))
 						break;
 					for (i = 0; i < ntohs(hdr.dbl.entries); i++) {
 						struct hfs_hdr_descr *descr = (struct hfs_hdr_descr *)
@@ -515,7 +521,7 @@ hfsinfo_write (const char *path, struct hfsinfo *fi)
 							hdr.dbl.entries = htons(HFS_HDR_MAX);
 						r = read(f, &hdr.dbl.descrs, SIZEOF_HFS_HDR_DESCR *
 								 ntohs(hdr.dbl.entries));
-						if (r != SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries))
+						if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries)))
 							break;
 					}
 					for (i = 0; i < ntohs(hdr.dbl.entries); i++) {
@@ -604,7 +610,7 @@ size_t comment_len (const char *path)
 						hdr.dbl.entries = htons(HFS_HDR_MAX);
 					r = read(f, &hdr.dbl.descrs, SIZEOF_HFS_HDR_DESCR * 
 							 ntohs(hdr.dbl.entries));
-					if (r != SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries))
+					if (r != (ssize_t)(SIZEOF_HFS_HDR_DESCR * ntohs(hdr.dbl.entries)))
 						break;
 					for (i = 0; i < ntohs(hdr.dbl.entries); i++) {
 						struct hfs_hdr_descr *descr = (struct hfs_hdr_descr *)

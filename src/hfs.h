@@ -60,7 +60,13 @@ struct hfs_hdr_descr {
 	u_int32_t	length PACKED;	/* The length of the entry */
 };
 
-#define SIZEOF_HFS_HDR_DESCR	12
+/* Cast to size_t so the 18 sites that compute
+ *   SIZEOF_HFS_HDR_DESCR * <int-or-uint16>
+ * do the multiplication in size_t rather than int. Values stay
+ * tiny (12 * HFS_HDR_MAX = 192) so the cast is purely about
+ * silencing bugprone-implicit-widening-of-multiplication-result
+ * — there's no real overflow risk. */
+#define SIZEOF_HFS_HDR_DESCR	((size_t)12)
 
 /* 
  * Default header layout for Netatalk and AppleDouble
