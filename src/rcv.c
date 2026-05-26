@@ -1166,6 +1166,17 @@ rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
     }
     dh_end ();
 
+    /* A well-formed reply carries HTLC_DATA_NEWSDATA. If the server
+	 * sent a reply without it — protocol corruption, future revision,
+	 * or chunks in an order we don't expect — fall through to here
+	 * with post still NULL. Bail rather than dereferencing a NULL
+	 * pointer and segfaulting. */
+    if (!post) {
+        debug_log ("news",
+                   "rcv_task_news_post: reply missing HTLC_DATA_NEWSDATA");
+        return;
+    }
+
     post->item = item;
     gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
 }

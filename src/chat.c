@@ -283,6 +283,13 @@ hx_part_chat (struct htlc_conn *htlc, guint32 cid)
     struct chat *chat;
 
     chat = chat_with_cid (&the_session, cid);
+    /* chat_with_cid is a hashtable lookup that returns NULL on miss.
+	 * The caller passes in a cid we expect to know about, but a
+	 * race between the UI close and a server-side chat-delete could
+	 * leave us with a stale cid. Bail rather than NULL-deref. */
+    if (!chat) {
+        return;
+    }
     cid = htonl (chat->cid);
     hlwrite (htlc, HTLC_HDR_CHAT_PART, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
 }
@@ -1628,7 +1635,7 @@ tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
         match_user = (struct hx_user *)match_list->data;
     }
 
-    /* no match, if we found more common chars among matches, display 
+    /* no match, if we found more common chars among matches, display
 	   them in entry */
     if (match_user == NULL) {
         size_t nb_off = 0;
@@ -1644,6 +1651,11 @@ tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
             match_list = g_slist_next (match_list);
         }
         hx_printf (&sess->htlc, 0, "%s", nick_buf);
+        /* Reaching here implies the while(1) above broke via the
+		 * match_pos = -1 path, which only fires after match_text
+		 * was g_malloc'd. The analyzer can't prove the cross-loop
+		 * dependency — document with an assert. */
+        g_assert (match_text != NULL);
         if (first) {
             snprintf (buf, sizeof (buf), "%s", match_text);
         } else {
@@ -1950,6 +1962,15 @@ create_chat_window (GtkWidget *widget, gpointer data)
     }
 
     gchat = gchat_with_cid (sess, 0);
+    /* gchats_init seeds cid=0 (public chat) on session bring-up;
+	 * gchat_with_cid(sess, 0) is invariant non-NULL on every path
+	 * that reaches create_chat_window (which only fires post-login).
+	 * Bail loudly on the invariant break — we can't build a chat
+	 * window without a backing gtkhx_chat struct. */
+    if (!gchat) {
+        g_warning ("create_chat_window: no public-chat gchat — skipping");
+        return;
+    }
     chat_window = gtk_window_new ();
     /* Phase 5: AdwHeaderBar replaces the default GtkWindow title bar
 	 * for the unified Adwaita look across all GtkHx windows. */
@@ -1971,8 +1992,17 @@ create_chat_window (GtkWidget *widget, gpointer data)
      gtk_widget_set_margin_bottom (vbox, 5));
 
     gchat->subject = gtk_entry_new ();
-    gtk_editable_set_text (GTK_EDITABLE (gchat->subject),
-                           chat_with_cid (sess, 0)->subject);
+    /* chats_init seeds cid=0 (public chat) before the table is
+	 * usable; chat_with_cid(sess, 0) is invariant non-NULL on this
+	 * path (we're inside create_chat_window, post-login).
+	 * Defensive ?: anyway — costs nothing, makes the analyzer
+	 * happy, and survives a hypothetical refactor that breaks the
+	 * invariant. */
+    {
+        struct chat *pub = chat_with_cid (sess, 0);
+        gtk_editable_set_text (GTK_EDITABLE (gchat->subject),
+                               pub ? pub->subject : "");
+    }
     subj_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     subj_frame = gtk_frame_new (0);
     gtkhx_widget_set_child (subj_frame, subj_hbox);
@@ -2574,6 +2604,13 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
     session *sess = &the_session;
     struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
 
+    /* gchat_with_cid is the UI-side hashtable lookup. If the chat
+	 * window was closed but the server still pushes a clear-chat
+	 * for this cid (or the cid drifts during reconnect), gchat is
+	 * NULL — nothing to clear, just return. */
+    if (!gchat) {
+        return;
+    }
     gtk_xtext_clear (GTK_XTEXT (gchat->output)->buffer, 0);
     if (gtkhx_prefs.geo.chat.open) {
         if (subj) {
