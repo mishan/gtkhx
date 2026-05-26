@@ -17,7 +17,14 @@ extern void msg_output (char *name, guint16 uid, char *buf);
 struct _HxMsgEvent;
 extern void msg_output_from_event (struct _HxMsgEvent *event);
 
-extern void broadcastmsg (char *text);
+/* Render a received HTLS_HDR_MSG_BROADCAST. sender_name + sender_color
+ * are from the wire chunk (NULL/0 when the server didn't include
+ * them — older Hotline servers and anonymous "rate-limit" notes).
+ * When sender_name is non-NULL the chat log line uses "[name] body"
+ * with sender_color picking the name's mIRC slot; otherwise it
+ * falls back to the legacy "[hx] broadcast: ..." form. */
+extern void broadcastmsg (const char *sender_name, guint16 sender_color,
+                          char *text);
 /* Re-render the recipient info pane from the cached hx_user. Used
  * at create_msgwin time when the cached struct already reflects
  * current state. */
@@ -32,5 +39,11 @@ extern void msgwin_apply_user_change (struct msgwin *msg, const char *nam,
 
 extern void hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg,
                          guint16 len, void *p);
+
+/* Send a server-wide broadcast (HTLC_HDR_MSG_BROADCAST). Requires
+ * HL_ACCESS_CAN_BROADCAST on the account; the toolbar button is
+ * hidden otherwise but the server still enforces it. */
+extern void hx_send_broadcast (struct htlc_conn *htlc, const char *msg,
+                               guint16 len);
 
 #endif

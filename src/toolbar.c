@@ -42,6 +42,8 @@
 #include "options.h"
 #include "connect.h"
 #include "files.h"
+#include "hl_access.h"
+#include "msg.h"
 #include "usermod.h"
 #include "about.h"
 #include "banner.h"
@@ -52,6 +54,7 @@
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
+GtkWidget *broadcast_btn;
 
 #ifdef USE_PLUGIN
 GtkWidget *plugin_btn;
@@ -126,6 +129,103 @@ on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
     (void)param;
     (void)user_data;
     useredit_open_dialog ();
+}
+
+/* AdwAlertDialog "response" handler for the Broadcast button.
+ * Pulls the text out of the AdwEntryRow extra-child and sends it
+ * via HTLC_HDR_MSG_BROADCAST. Cancel / close-via-X / empty text
+ * is a silent no-op. */
+static void
+on_broadcast_response (AdwAlertDialog *dialog, const char *response,
+                       gpointer data)
+{
+    GtkWidget *entry = data;
+    const char *text;
+    gsize len;
+
+    (void)dialog;
+    if (g_strcmp0 (response, "send") != 0) {
+        return;
+    }
+    text = gtk_editable_get_text (GTK_EDITABLE (entry));
+    if (!text || !*text) {
+        return;
+    }
+    len = strlen (text);
+    if (len > 0xfffe) {
+        len = 0xfffe; /* HTLC_DATA_MSG length is u16; clamp. */
+    }
+    hx_send_broadcast (&the_session.htlc, text, (guint16)len);
+}
+
+/* AdwEntryRow swallows Enter for its own entry-activated signal,
+ * which bypasses the dialog's default-response binding. Bridge it
+ * by running the same logic as the Send button (see the open-user
+ * dialog for the same trick). */
+static void
+on_broadcast_entry_activated (AdwEntryRow *entry, gpointer data)
+{
+    AdwAlertDialog *dialog = data;
+    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
+    gsize len;
+    if (text && *text) {
+        len = strlen (text);
+        if (len > 0xfffe) {
+            len = 0xfffe;
+        }
+        hx_send_broadcast (&the_session.htlc, text, (guint16)len);
+    }
+    adw_dialog_close (ADW_DIALOG (dialog));
+}
+
+/* Open the Broadcast composer — an AdwAlertDialog with an
+ * AdwEntryRow in an AdwPreferencesGroup, mirroring the Open User
+ * dialog's shape. Send is the default + suggested-action response;
+ * Cancel / Esc / window-close dismiss without sending. The button
+ * is hidden when the account lacks HL_ACCESS_CAN_BROADCAST, so by
+ * the time this fires we expect the server to accept; if it
+ * doesn't, the task_error path handles the rejection. */
+static void
+on_broadcast_button_clicked (GtkButton *btn, gpointer user_data)
+{
+    AdwDialog *dialog;
+    GtkWidget *prefs_grp;
+    GtkWidget *entry;
+    (void)btn;
+    (void)user_data;
+
+    if (!the_session.htlc.fd) {
+        return;
+    }
+
+    dialog = adw_alert_dialog_new (
+        _ ("Broadcast"),
+        _ ("Send a broadcast message to every user on the server."));
+
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "send",
+                                   _ ("_Send"));
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "send",
+                                              ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "send");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+
+    prefs_grp = adw_preferences_group_new ();
+    entry = adw_entry_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (entry),
+                                   _ ("Message"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prefs_grp), entry);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), prefs_grp);
+
+    g_signal_connect (dialog, "response", G_CALLBACK (on_broadcast_response),
+                      entry);
+    g_signal_connect (entry, "entry-activated",
+                      G_CALLBACK (on_broadcast_entry_activated), dialog);
+
+    adw_dialog_present (dialog,
+                        toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
+    gtk_widget_grab_focus (entry);
 }
 
 /* Phase 5: app.open_bookmark fires from the AdwSplitButton's
@@ -615,6 +715,18 @@ create_toolbar_window (session *sess)
                     make_pixmap_button (
                         "/com/nasledov/gtkhx/pixmaps/tasks.png", _ ("Tasks"),
                         G_CALLBACK (create_tasks_window), sess));
+
+    /* Broadcast — sends an admin-wide message via HTLC_HDR_MSG_BROADCAST.
+	 * Icon comes from icons.rsrc cicn 220 (tools/cicndump).
+	 * Visibility is gated by HL_ACCESS_CAN_BROADCAST in setbtns; on
+	 * disconnect or for accounts without the bit the button is
+	 * hidden entirely (sysop-only action, no point teasing it). */
+    broadcast_btn = make_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/broadcast.png", _ ("Broadcast"),
+        G_CALLBACK (on_broadcast_button_clicked), sess);
+    gtk_widget_set_visible (broadcast_btn, FALSE);
+    gtk_box_append (GTK_BOX (hbox), broadcast_btn);
+
     /* Phase 5: New User / Edit User used to be toolbar buttons.
 	 * They've moved into the hamburger menu's Admin submenu — sysop
 	 * actions don't need to occupy primary real estate. */

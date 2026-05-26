@@ -9,6 +9,9 @@
 <gresources>
   <gresource prefix="/com/nasledov/gtkhx">
     <file>pixmaps/ban.png</file>
+    <!-- Broadcast button on the toolbar. Extracted from
+         icons.rsrc cicn 220 via tools/cicndump. -->
+    <file>pixmaps/broadcast.png</file>
     <file>pixmaps/chat.png</file>
     <file>pixmaps/connect.png</file>
     <file>pixmaps/dl.png</file>

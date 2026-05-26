@@ -304,6 +304,8 @@ hx_rcv_msg (struct htlc_conn *htlc)
     session *sess = &the_session;
     struct chat *chat = chat_with_cid (sess, 0);
     struct hx_user *user = 0;
+    guint32 hdr_type = 0;
+    gboolean is_broadcast;
 
     /* Chunk parse + name/body sanitisation lives in proto_helpers.c
 	 * so the Tier 2 unit tests can drive it. */
@@ -322,7 +324,16 @@ hx_rcv_msg (struct htlc_conn *htlc)
     }
 #endif
 
-    if (pm.uid > 0) {
+    /* Dispatch on the wire opcode, not on pm.uid. mhxd echoes
+	 * broadcasts back with the sender's UID populated (so the
+	 * client can render "broadcast from <name>" if it wants),
+	 * which means a UID-only check would mis-route every broadcast
+	 * on mhxd-family servers into the private-message handler.
+	 * The header type is the authoritative signal. */
+    hl_hdr_decode (htlc->in.buf, &hdr_type, NULL, NULL, NULL, NULL, NULL);
+    is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
+
+    if (!is_broadcast && pm.uid > 0) {
         /* Phase 5+: msg signal payload is a boxed HxMsgEvent
 		 * (parsed once; every subscriber sees the same
 		 * UTF-8-sanitised, self-classified view). */
@@ -332,7 +343,17 @@ hx_rcv_msg (struct htlc_conn *htlc)
         gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
         hx_msg_event_free (ev);
     } else {
-        broadcastmsg (pm.msg);
+        /* Broadcasts on mhxd-family servers carry the sender's UID
+		 * + NAME so the client can render "[name] body" with the
+		 * sender's color. Pull the color from the cached user
+		 * struct keyed on UID; pm.name is the wire-supplied name
+		 * (UTF-8-sanitised by hx_msg_extract). When neither is
+		 * present (older servers, server-generated rate-limit
+		 * notes), broadcastmsg falls back to the legacy
+		 * "[hx] broadcast: …" chat line. */
+        const char *sender_name = pm.name_len > 0 ? pm.name : NULL;
+        guint16 sender_color = user ? user->color : 0;
+        broadcastmsg (sender_name, sender_color, pm.msg);
     }
     play_sound (MSG);
 
