@@ -48,28 +48,20 @@
 static const char *
 get_credits (void)
 {
-    return "       Main Programming: Misha Nasledov\n"
-           "                         <misha@nasledov.com>\n"
-           "                         Ryan Nielsen\n"
-           "                         <ran@krazynet.com>\n"
-           "                         David Raufeisen\n"
-           "                         <david@fortyoz.org>\n"
-           "                         Aaron Lehmann\n"
-           "                         <aaronl@vitelus.com>\n"
+    return "     Main Developer: Misha Nasledov\n"
+           "                     <misha@nasledov.com>\n"
            "\n"
-           "               Graphics: apocalypse\n"
-           "                         <apocalypse@cafelinux.dhs.org>\n"
-           "                         Philip Neustrom\n"
-           "                         <codetoad@pacbell.net>\n"
+           "      hx Developers: Ryan Nielsen\n"
+           "                     <ran@krazynet.com>\n"
+           "                     David Raufeisen\n"
+           "                     <david@fortyoz.org>\n"
            "\n"
-           "          Documentation: Philip Neustrom\n"
-           "                         <codetoad@pacbell.net>\n"
-           "\n"
-           "               Web Site: Jonathan C. Sitte\n"
-           "                         <jcsitte@jcsitte.com>\n"
-           "\n"
-           "    French Localization: Jean-Sebastien Hubert\n"
-           "                         <jshubert@mirabellug.org>\n";
+           "     Special Thanks: Aaron Lehmann\n"
+           "                     apocalypse\n"
+           "                     Philip Neustrom\n"
+           "                     Jonathan C. Sitte\n"
+           "                     Jean-Sebastien Hubert\n"
+           "                     Hotline Wiki Discord\n";
 }
 
 static GtkWidget *about_window;
@@ -103,7 +95,7 @@ create_about_window (GtkWidget *widget, gpointer data)
     about_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (about_window), _ ("About GtkHx"));
     gtk_window_set_resizable (GTK_WINDOW (about_window), FALSE);
-    gtk_window_set_default_size (GTK_WINDOW (about_window), 480, 540);
+    gtk_window_set_default_size (GTK_WINDOW (about_window), 480, 680);
     gtk_window_set_titlebar (GTK_WINDOW (about_window), adw_header_bar_new ());
 
     {
@@ -152,7 +144,7 @@ create_about_window (GtkWidget *widget, gpointer data)
     g_free (markup);
 
     /* One-line tagline below the title — dim, smaller */
-    subtitle = gtk_label_new (_ ("A GTK client for the Hotline protocol"));
+    subtitle = gtk_label_new (_ ("A GTK+ Hotline client"));
     gtk_widget_add_css_class (subtitle, "dim-label");
     gtk_widget_set_halign (subtitle, GTK_ALIGN_CENTER);
     gtk_box_append (GTK_BOX (box), subtitle);
