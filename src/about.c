@@ -185,5 +185,11 @@ create_about_window (GtkWidget *widget, gpointer data)
 
     gtk_window_set_child (GTK_WINDOW (about_window), box);
 
+    /* Standard close shortcuts. Esc here matches AdwDialog's
+	 * dismiss behaviour — About is dialog-y enough that the user
+	 * expects Esc to drop it. Ctrl+W / Ctrl+Q come along for the
+	 * ride because the helper threads them onto every window. */
+    init_keyaccel_dialog (about_window);
+
     gtk_window_present (GTK_WINDOW (about_window));
 }

@@ -469,6 +469,8 @@ open_rename_dialog (struct browser *br, files_panel *panel, HxFileEntry *e)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "rename");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     entry = gtk_entry_new ();
     gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
     gtk_editable_set_text (GTK_EDITABLE (entry), hx_file_entry_get_name (e));
@@ -850,6 +852,8 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
                                               ADW_RESPONSE_SUGGESTED);
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "move");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
 
     entry = gtk_entry_new ();
     gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
@@ -1481,6 +1485,8 @@ on_mkdir_clicked (GtkButton *btn, gpointer user_data)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     entry = gtk_entry_new ();
     gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
@@ -1605,6 +1611,8 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
         ADW_ALERT_DIALOG (dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
 
     /* Snapshot just the names — the dialog runs async and the
 	 * selection set could shift in between. Same defensive

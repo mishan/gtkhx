@@ -831,6 +831,8 @@ prompt_chat (session *sess, guint16 _uid)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "invite");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     ctx = g_new0 (struct prompt_chat_ctx, 1);
     ctx->sess = sess;
     ctx->uid = _uid;

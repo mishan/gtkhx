@@ -2281,6 +2281,8 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "join");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "decline");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     ctx = g_new (struct chat_invite_ctx, 1);
     ctx->htlc = htlc;
     ctx->cid = cid;

@@ -561,6 +561,8 @@ prompt_conversion (char *name)
                                            "convert");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "no");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     g_signal_connect (dialog, "response", G_CALLBACK (convert_bookmark), path);
     g_signal_connect (dialog, "closed", G_CALLBACK (prompt_conversion_closed),
                       path);
@@ -1080,6 +1082,8 @@ save_dialog (GtkWidget *widget, gpointer data)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "save");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     name_entry = gtk_entry_new ();
     gtk_entry_set_activates_default (GTK_ENTRY (name_entry), TRUE);
     g_signal_connect (name_entry, "activate",
@@ -1135,6 +1139,10 @@ create_connect_window (GtkWidget *btn, gpointer data)
     adw_dialog_set_title (dlg, _ ("Connect"));
     adw_dialog_set_content_width (dlg, 480);
     adw_dialog_set_content_height (dlg, 560);
+
+    /* Ctrl+W / Ctrl+Q on the dialog. Esc is wired by AdwDialog
+	 * itself through close_response. */
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
 
     connect_window = GTK_WIDGET (dlg);
     g_signal_connect (dlg, "closed", G_CALLBACK (close_connect_window), NULL);

@@ -1253,6 +1253,12 @@ hx_preview_new (const char *name)
     g_signal_connect (p->window, "close-request",
                       G_CALLBACK (preview_close_request), p);
 
+    /* Standard close / quit shortcuts. Preview is a viewer window
+	 * rather than a dialog (Esc could plausibly land on something
+	 * inside the preview content like a sourceview), so use the
+	 * non-dialog variant — Ctrl+W / Ctrl+Q only. */
+    init_keyaccel (p->window);
+
     gtk_window_present (GTK_WINDOW (p->window));
     return p;
 }

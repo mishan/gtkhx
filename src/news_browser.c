@@ -1178,6 +1178,8 @@ open_create_dialog (gnews_browser *br, HxNewsNode *parent, int kind)
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     entry = gtk_entry_new ();
     gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
@@ -1316,6 +1318,8 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
         ADW_ALERT_DIALOG (dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
 
     ctx = g_new0 (struct delete_ctx, 1);
     ctx->br = br;

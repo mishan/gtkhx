@@ -218,6 +218,8 @@ on_broadcast_button_clicked (GtkButton *btn, gpointer user_data)
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (prefs_grp), entry);
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), prefs_grp);
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     g_signal_connect (dialog, "response", G_CALLBACK (on_broadcast_response),
                       entry);
     g_signal_connect (entry, "entry-activated",
