@@ -302,16 +302,19 @@ setbtns (session *sess, int stat)
 
     gtk_widget_set_sensitive (files_btn, stat);
 
-    /* Broadcast button visibility: only shown when the connection
-	 * is live AND the account has HL_ACCESS_CAN_BROADCAST. Most
-	 * accounts don't, so hiding the button entirely is friendlier
-	 * than greying it out — matches how Kick/Ban behave above. */
+    /* Broadcast button: always present in the toolbar, greyed out
+	 * when unavailable. Unavailable means either the connection is
+	 * down (stat==0) or the account lacks HL_ACCESS_CAN_BROADCAST.
+	 * We used to hide-when-not-permitted to match Kick/Ban; Misha
+	 * preferred always-visible with sensitivity reflecting the
+	 * actual permission, which is also more discoverable for users
+	 * who don't realise the feature exists. */
     if (broadcast_btn) {
         gboolean can_broadcast
             = stat
               && hl_access_has ((const guint8 *)&sess->htlc.access,
                                 HL_ACCESS_CAN_BROADCAST);
-        gtk_widget_set_visible (broadcast_btn, can_broadcast);
+        gtk_widget_set_sensitive (broadcast_btn, can_broadcast);
     }
 
     /* Phase 5: New User / Edit User moved from toolbar buttons to

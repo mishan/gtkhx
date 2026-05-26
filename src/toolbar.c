@@ -739,14 +739,16 @@ create_toolbar_window (session *sess)
                         G_CALLBACK (create_tasks_window), sess));
 
     /* Broadcast — sends an admin-wide message via HTLC_HDR_MSG_BROADCAST.
-	 * Icon comes from icons.rsrc cicn 220 (tools/cicndump).
-	 * Visibility is gated by HL_ACCESS_CAN_BROADCAST in setbtns; on
-	 * disconnect or for accounts without the bit the button is
-	 * hidden entirely (sysop-only action, no point teasing it). */
+	 * Icon comes from icons.rsrc cicn 220 (tools/cicndump). Always
+	 * present in the toolbar; setbtns flips sensitivity based on
+	 * connection state + HL_ACCESS_CAN_BROADCAST. Greyed-out beats
+	 * hidden for feature discoverability — users notice the button
+	 * exists, hover for the tooltip, and learn what it does even
+	 * before they have permission to use it. */
     broadcast_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/broadcast.png", _ ("Broadcast"),
         G_CALLBACK (on_broadcast_button_clicked), sess);
-    gtk_widget_set_visible (broadcast_btn, FALSE);
+    gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
 
     /* Phase 5: New User / Edit User used to be toolbar buttons.
