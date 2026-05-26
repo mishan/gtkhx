@@ -37,12 +37,39 @@
  *   -Wstrict-prototypes     — one K&R-style empty-paren declaration
  *                             of a static helper.
  *
+ *   -Wanalyzer-*            — 37 GCC -fanalyzer findings against the
+ *                             GNU regex internals (use-of-uninit,
+ *                             null-deref through long alloc chains,
+ *                             etc.). All are in vendored code we
+ *                             don't actively maintain; the plan is
+ *                             to replace this file with GRegex /
+ *                             PCRE2 rather than refactor it. See
+ *                             docs/analyze-triage.md.
+ *
  * Suppress these inside dfa.c rather than restructuring the parser. */
 #pragma GCC diagnostic ignored "-Wswitch"
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wanalyzer-too-complex"
+#if defined(__GNUC__) && !defined(__clang__)
+# pragma GCC diagnostic ignored "-Wanalyzer-null-argument"
+# pragma GCC diagnostic ignored "-Wanalyzer-null-dereference"
+# pragma GCC diagnostic ignored "-Wanalyzer-possible-null-argument"
+# pragma GCC diagnostic ignored "-Wanalyzer-possible-null-dereference"
+# pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+# pragma GCC diagnostic ignored "-Wanalyzer-malloc-leak"
+# pragma GCC diagnostic ignored "-Wanalyzer-out-of-bounds"
+# pragma GCC diagnostic ignored "-Wanalyzer-deref-before-check"
+# pragma GCC diagnostic ignored "-Wanalyzer-tainted-array-index"
+# pragma GCC diagnostic ignored "-Wanalyzer-tainted-allocation-size"
+# pragma GCC diagnostic ignored "-Wanalyzer-allocation-size"
+# pragma GCC diagnostic ignored "-Wanalyzer-infinite-loop"
+# pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+# pragma GCC diagnostic ignored "-Wanalyzer-double-free"
+# pragma GCC diagnostic ignored "-Wanalyzer-use-after-free"
+#endif
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>

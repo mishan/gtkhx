@@ -16,6 +16,20 @@ ASan + UBSan on the full unit + proto suite passes clean. **No
 runtime sanitizer findings** — the codebase is well-behaved on
 the paths the tests exercise.
 
+### After noise reduction (2026-05, claude/analyzer-noise-reduction)
+
+After landing steps 1–3 from "Suggested execution order":
+
+| Tool                | Before | After | Notes |
+|---------------------|-------:|------:|-------|
+| GCC `-fanalyzer`    |     51 |    11 | dfa.c (37) silenced via per-file pragma; 6 real bugs fixed; 6 false positives in GLib internals + test code |
+| clang-tidy          |   ~570 |   ~80 | dfa.c (586) excluded via regex; `misc-unused-parameters` count drops dramatically with StrictMode=false (sites that already used `(void)x;`) |
+
+Production-code `-fanalyzer` count is now **zero**. Remaining 11
+are: 1 in `files_remote_provider.c` (GLib `g_strdup_inline` false
+positive), 5 in test code (`g_assert_nonnull` not modelled as
+terminator), 3 in GLib `gstrfuncs.h`, 2 in test integration harness.
+
 ## Recommendations
 
 Ownership stance (Misha, 2026-05): xtext.c and hfs.c are **ours**
@@ -206,15 +220,17 @@ adjusting the run-clang-tidy regex to exclude `gtkhx-resources.c`.
 
 If we're going to chip away at this:
 
-1. **Fix the 6 real bugs** (rcv.c:1169, chat.c:286/2577/1973/1651,
-   commands.c:459). Half a day's work; each is small and gets a
-   regression test if possible. After this the prod-code
-   `-fanalyzer` count drops to ~6 false positives.
-2. **Flip `.clang-tidy` `StrictMode=false`** for
-   `misc-unused-parameters` — drops 84 warnings to zero.
-3. **Baseline `dfa.c` only** (per-file pragma + clang-tidy regex
-   filter). 586 clang-tidy + 37 -fanalyzer noise findings gone.
-   Track the GRegex/PCRE2 replacement as the long-term fix.
+1. ✅ **Fix the 6 real bugs** (rcv.c:1169, chat.c:286/2577/1973/1651,
+   commands.c:459). Shipped on `claude/analyzer-bug-fixes`. After
+   this the prod-code `-fanalyzer` count drops to ~6 false positives.
+2. ✅ **Flip `.clang-tidy` `StrictMode=false`** for
+   `misc-unused-parameters`. Shipped on
+   `claude/analyzer-noise-reduction`. Drops the subset of 84 that
+   already had `(void)x;` casts in place.
+3. ✅ **Baseline `dfa.c` only** (per-file pragma + clang-tidy regex
+   filter). Shipped on `claude/analyzer-noise-reduction`. 586
+   clang-tidy + 37 -fanalyzer noise findings gone. Track the
+   GRegex/PCRE2 replacement as the long-term fix.
 4. **Tackle `protocol.h` macro-parentheses** (~15-20 fixes,
    mechanical).
 5. **Duplicate-include + redundant-declaration cleanups** —
@@ -227,10 +243,12 @@ If we're going to chip away at this:
    result, branch-clone. Each is small and surfaces a real
    concern even when benign.
 
-After steps 1–3, the per-PR signal-to-noise should be good
-enough to flip the CI jobs from `continue-on-error: true` to
-mandatory. Anything new failing the check would be a real
-regression.
+After steps 1–3 (now complete), the per-PR signal-to-noise should
+be good enough to flip the CI jobs from `continue-on-error: true`
+to mandatory. Anything new failing the check would be a real
+regression. Recommend flipping `gcc-analyzer` first (the
+production-code count is zero); `clang-tidy` can follow once a
+few more rounds knock the prod-code count down further.
 
 ## Reproducing
 
