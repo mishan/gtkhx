@@ -22,7 +22,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
-#include "regex.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -32,7 +31,6 @@
 #include "gtkutil.h"
 #include "connect.h"
 #include "gtk_hlist.h"
-#include "dfa.h"
 #include "chat.h"
 #include "options.h"
 #include "cfgkeys.h"
@@ -44,7 +42,18 @@ static GtkWidget *tracker_search_entry;
 static GtkWidget *tracker_case_btn;
 static GtkWidget *lbl_found, *lbl_total;
 static int num_found, num_total;
-static struct dfa *current_search;
+
+/* Search filter for the tracker list.
+ *
+ * Phase 5+: was a hand-rolled `struct dfa *` from a vendored 2500-line
+ * GNU regex; now a GLib GRegex (PCRE2). Two states matter:
+ *   - current_search == NULL  → empty pattern, match-all (the common
+ *                                case when the search entry is empty).
+ *   - current_search != NULL  → compiled regex; g_regex_match decides
+ *                                each row.
+ * Invalid patterns (parse error during compile) also fall to match-all
+ * with a one-line warning to the chat output. */
+static GRegex *current_search;
 
 struct tracker_server {
     char *name;
@@ -100,8 +109,10 @@ close_tracker_window (GtkWindow *window, gpointer data)
     tracker_case_btn = NULL;
 
     tracker_list_destroy (tracker_server_tree);
-    dfafree (current_search);
-    current_search = NULL;
+    if (current_search) {
+        g_regex_unref (current_search);
+        current_search = NULL;
+    }
     return FALSE;
 }
 
@@ -140,31 +151,25 @@ tracker_getlist (GtkWidget *widget, gpointer data)
 }
 
 static void
-tracker_search_tree (struct dfa *preg, struct tracker_server *root)
+tracker_search_tree (GRegex *preg, struct tracker_server *root)
 {
     int row;
     char nusersstr[8], portstr[8], *text[5];
-    int namelen, desclen;
-    char flag;
+    gboolean flag;
 
     if (!root) {
         return;
     }
-    /* Defensive: the worker thread feeds new servers through here as
-	 * tracker_server_create runs, so a stray result that arrives before
-	 * current_search is set up (or after teardown) would deref NULL in
-	 * dfaexec. The window's first-open path now initializes preg before
-	 * spawning the worker, but keep the guard for paranoia. */
+    /* preg == NULL means "match everything" — the common case when the
+     * search entry is empty. Otherwise both name and desc are tried.
+     * GRegex copes with embedded NULs because we pass the buffers as
+     * NUL-terminated C strings via g_regex_match. */
     if (!preg) {
-        return;
+        flag = TRUE;
+    } else {
+        flag = g_regex_match (preg, root->name, 0, NULL)
+               || g_regex_match (preg, root->desc, 0, NULL);
     }
-
-    namelen = strlen (root->name);
-    desclen = strlen (root->desc);
-    flag = dfaexec (preg, root->name, &root->name[namelen], 0, NULL, NULL)
-           || dfaexec (preg, root->desc, &root->desc[desclen], 0, NULL, NULL);
-    root->name[namelen] = '\0';
-    root->desc[desclen] = '\0';
     if (flag) {
         snprintf (nusersstr, sizeof (nusersstr), "%u", root->nusers);
         snprintf (portstr, sizeof (portstr), "%u", root->port);
@@ -209,15 +214,31 @@ tracker_rerun_search (void)
         return;
     }
 
-    dfafree (current_search);
-    current_search = g_malloc (sizeof (struct dfa));
+    if (current_search) {
+        g_regex_unref (current_search);
+        current_search = NULL;
+    }
 
     num_found = 0;
     str = gtk_editable_get_text (GTK_EDITABLE (tracker_search_entry));
-    if (!str) {
-        str = "";
+    if (str && *str) {
+        /* Case-folding follows the gtkhx_prefs.track_case toggle:
+         * track_case ON → match case; OFF → G_REGEX_CASELESS.
+         * Bad patterns fall through to match-all + a chat warning, so
+         * a user typing an incomplete regex doesn't blank the list. */
+        GRegexCompileFlags flags = 0;
+        GError *err = NULL;
+        if (!gtkhx_prefs.track_case) {
+            flags |= G_REGEX_CASELESS;
+        }
+        current_search = g_regex_new (str, flags, 0, &err);
+        if (!current_search) {
+            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+                              "Tracker regex: %s\n",
+                              err ? err->message : "compile failed");
+            g_clear_error (&err);
+        }
     }
-    dfacomp ((char *)str, strlen (str), current_search, 1);
     tracker_clear ();
     gtk_hlist_freeze (GTK_HLIST (tracker_list));
 
@@ -245,9 +266,10 @@ tracker_search_refresh (void)
 
 /* "Aa" case-sensitive toggle in the search row. Routes through the
  * generic prefs setter so the Settings switch (if open) stays in
- * lockstep, the dfa fold flag updates via the cfgvar change-callback,
- * and the new value persists. Then re-run the search so the visible
- * result list reflects the new case mode immediately. */
+ * lockstep; the cfgvar change-callback then invokes our
+ * tracker_search_refresh, which recompiles the GRegex with the new
+ * G_REGEX_CASELESS bit so the visible result list reflects the new
+ * case mode immediately. */
 static void
 tracker_case_toggled (GtkToggleButton *btn, gpointer data)
 {
@@ -564,21 +586,12 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
     gtk_widget_grab_focus (searchentry);
 
-    /* Initialize the search filter BEFORE spawning the tracker worker.
-	 * Each result the worker streams in calls tracker_server_create →
-	 * tracker_search_tree(current_search, ...), which dereferences
-	 * current_search inside dfaexec. The legacy ordering raced: the
-	 * worker could fire faster than the synchronous init below it. */
-    current_search = g_malloc (sizeof (struct dfa));
-    dfacomp ("", 0, current_search, 1);
+    /* current_search is left NULL → match-all semantics, which is
+     * what the empty search entry implies. Results streamed in from
+     * the tracker worker via tracker_server_create pass through
+     * tracker_search_tree(NULL, ...) and are unconditionally
+     * accepted until the user types into the search field. */
+    current_search = NULL;
 
     tracker_getlist (0, sess);
-}
-
-void
-dfaerror (const char *mesg)
-{
-    /*	g_warning("%s\n", mesg); */
-    hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX, "Tracker Regexps: %s\n",
-                      mesg);
 }

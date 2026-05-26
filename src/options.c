@@ -32,12 +32,10 @@
 #include "gtkhx.h"
 #include "news.h"
 #include "xtext.h"
-#include "regex.h"
 #include "cicn.h"
 #include "sound.h"
 #include "users.h"
 #include "chat.h"
-#include "dfa.h"
 #include "files.h"
 #include "network.h"
 #include "news15.h"
@@ -643,14 +641,12 @@ static void
 changed_case (session *sess)
 {
     (void)sess;
-    dfasyntax ((RE_CHAR_CLASSES | RE_CONTEXT_INDEP_ANCHORS
-                | RE_CONTEXT_INDEP_OPS | RE_HAT_LISTS_NOT_NEWLINE
-                | RE_NEWLINE_ALT | RE_NO_BK_PARENS | RE_NO_BK_VBAR),
-               !gtkhx_prefs.track_case, '\n');
-    /* If the Tracker window is open, refresh its filter against the
-	 * already-cached server tree so the visible result list reflects
-	 * the new fold mode immediately. No-op when the Tracker isn't
-	 * open. */
+    /* Phase 5+: case-fold lives on gtkhx_prefs.track_case and is read
+     * directly by tracker.c::tracker_rerun_search when compiling the
+     * GRegex (G_REGEX_CASELESS toggled per the pref). No global regex-
+     * engine state to flip; just kick the live filter so the result
+     * list reflects the new mode immediately. No-op when the Tracker
+     * isn't open. */
     tracker_search_refresh ();
 }
 

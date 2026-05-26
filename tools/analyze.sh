@@ -69,14 +69,10 @@ run_tidy() {
     if [ ! -d build-tidy ]; then
         meson setup build-tidy
     fi
-    # Negative lookahead skips src/dfa.c (vendored GNU regex —
-    # slated for replacement with GRegex/PCRE2 per
-    # docs/analyze-triage.md). Python re supports (?!…) so
-    # run-clang-tidy's pattern arg accepts it.
     set +e
     run-clang-tidy -p build-tidy -j "$(nproc)" \
         -extra-arg=-Wno-unknown-warning-option \
-        'src/(?!dfa\.c$).*\.c$' 2>&1 \
+        'src/.*\.c$' 2>&1 \
         | tee build-tidy/clang-tidy.log
     set -e
     {

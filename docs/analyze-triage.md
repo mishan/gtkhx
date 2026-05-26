@@ -159,12 +159,17 @@ fwrite(..., fp);  /* analyzer flags this */
 GLib's assertion macros as terminators. False positive in test
 code, no action needed.
 
-### dfa.c — 37 warnings in vendored regex
+### dfa.c — 37 warnings in vendored regex ✅ retired
 
-GNU regex from 2003. We don't want to maintain this — the plan
-is to replace it with a regex library (GRegex / PCRE2). Until
-then, bracket the file with a pragma or filter regex so the
-noise doesn't drown the signal.
+GNU regex from 2003. Replaced by GLib's GRegex (PCRE2) on
+`claude/dfa-to-gregex`: deleted dfa.c (2,603 LOC), dfa.h (366
+LOC), and regex.h (518 LOC); tracker.c's filter compiles a
+GRegex each time the search entry changes (empty pattern →
+match-all, invalid pattern → toast + match-all), and
+options.c::changed_case became a one-line tracker_search_refresh
+call now that there's no global regex-engine syntax to flip.
+The .gcovr.cfg + analyze.yml + analyze.sh dfa.c exclusions are
+gone — there's no dfa.c left to exclude.
 
 ## clang-tidy by category
 
