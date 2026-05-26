@@ -224,9 +224,9 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 
 **Protocol & networking**
 
-- **Full backward compat with Hotline 1.2 and 1.5 is a hard requirement.** Don't break it. The wire-format code in `rcv.c`, `commands.c`, `hotline.h`, and the cipher/compress negotiation in `cipher.c`/`compress.c` should not change shape during the GTK ports — only the surrounding C and the libraries it leans on. If a refactor accidentally drops 1.2 compatibility, that's a regression.
-- **Reimplement SOCKS support** (TODO item from 2003). mhxd has SOCKS5 client support too — worth seeing how they did it.
-- **Audit the wire-level int handling.** The `HN16`/`HN32` byte-swap macros and `PACKED` structs in `hotline.h` work but should be replaced with explicit `g_ntohl` / `GUINT32_FROM_BE` and proper buffer-cursor reads. Reduces the chance of strict-aliasing or alignment bugs on ARM64.
+- ✅ **Full backward compat with Hotline 1.2 and 1.5** — maintained throughout the GTK ports. Verified end-to-end against mhxd (1.2/legacy), hlserver.com (1.0/1.2-style), and Badmoon / Mobius / Janus (1.9). Tier 3 integration suite covers chat, news, file transfers, banner, HOPE+stream/AEAD ciphers, colored nicknames. Modern transport security is still a Phase ∞ effort (see below).
+- ✅ **SOCKS support** — comes for free with the GSocketClient + GProxyResolver migration. `GSocketClient` honours `GProxyResolver`'s lookup, so `http_proxy`/`socks_proxy` env vars and GNOME's network proxy settings just work for both the Hotline control connection (network.c) and HTXF transfers (xfers.c). No reimplementation of the 2003 TODO needed.
+- ✅ **Wire-level int handling audit** — `HN16`/`HN32` byte-swap macros remain (they're terse and the call sites are dense), but the structural correctness audit landed: `proto_helpers.c` for cursor-based chunk reads, `network_decode.c` for bounded TLV walking, and the Tier 2 wire-fixture harness pins layout under both -O0 and ASan. Strict-aliasing / alignment bugs on ARM64 would now surface as test failures rather than silent data corruption.
 
 **Plugin system**
 
@@ -238,21 +238,22 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 - ✅ **Flatpak manifest.** `com.nasledov.gtkhx.yml` at the repo root, GNOME 49 runtime, local-source variant for development. To submit to Flathub, swap the `dir` source for a `git` source pointing at a tagged commit and add screenshots to `data/screenshots/`.
 - ✅ **AppStream metadata** (`data/com.nasledov.gtkhx.metainfo.xml`) — full Flathub-ready: id, name, summary, description, screenshots, releases, OARS-1.1 content_rating, branding colors. Validated at `meson test` time via `appstreamcli validate --pedantic`.
 - ✅ **`com.nasledov.gtkhx.desktop`** with proper categories (Network/Chat/FileTransfer), validated at test time via `desktop-file-validate`.
-- **Update or remove the RPM spec and `debian/`.** The `debian/` dir is 2003-era; most distros want a Flatpak / Snap these days, or rebuild from upstream tarball.
+- ✅ **RPM spec + `debian/` removed.** Both directories deleted during Phase 0–1 cleanup (the 2003-era files were referencing pre-Glib-2 paths and APIs). Distro packaging story is now Flatpak (com.nasledov.gtkhx on Flathub-ready manifest); native distro maintainers can rebuild from the tagged tarball when there's demand.
 
 **Quality / process**
 
-- **A test suite.** Even a tiny one. The protocol parsing in `rcv.c` (~1100 lines) is the natural place to start — pure functions, well-defined inputs. Add a `tests/` directory and a `make check` target.
-- **Static analysis.** clang-tidy + scan-build + `-fanalyzer`. This codebase has 23 years of accumulated UB potential.
-- **AddressSanitizer / UBSan** in CI for the test runs.
-- **Use `g_autoptr` / `g_autofree` aggressively** once on Glib 2.44+ — eliminates a huge class of leak/cleanup bugs in the dialog code.
+- ✅ **Test suite.** Three tiers under `tests/`: Tier 1 unit tests for pure-glib modules (~20 covering text utilities, byte-swap, hash collections, prefs parser, HMAC, HTsc bookmark format, etc.), Tier 2 wire-fixture tests for protocol parsers / encoders (HOPE handshake KATs, FILELIST walkers, opcode round-trips), Tier 3 integration tests run end-to-end against Dockerized mhxd / Mobius / Janus servers. Coverage reporting via `tools/coverage.sh` → `coverage/index.html`. CI runs every push, full Tier 3 matrix included.
+- **Static analysis.** clang-tidy + scan-build + `-fanalyzer`. Still pending — coverage tooling is in place but no scanner runs in CI yet.
+- **AddressSanitizer / UBSan** in CI for the test runs. Still pending; would catch a class of bugs that the test suite alone misses.
+- **Use `g_autoptr` / `g_autofree` aggressively.** Adopted ad-hoc in newer code (bookmarks, files browser, banner); legacy paths still mostly use explicit g_free. Not worth a sweep — convert opportunistically when touching a function.
 
 **UX features the original always wanted**
 
-- Multi-server connections (`MAX_CONN > 1`, the abstraction is half-built).
-- Real preferences UI (TODO calls out "fix preferences broken-ness").
-- Logging (`log.c` exists but is `#if 0`'d out in `gtkhx.c`).
-- Tracker tracker (tracker of trackers) — keep, drop, or replace with a curated list.
+- **Multi-server connections** (`MAX_CONN > 1`, the abstraction is half-built). Still pending — the plan is a tabbed UI for multi-conn rather than the current per-window layout. Single-conn was deliberately preserved through the GTK ports to keep blast radius small; revisit against the modernized codebase.
+- ✅ **Real preferences UI** — Settings is now an `AdwPreferencesDialog` with nine pages (General, Identity, Chat, Sound, Notifications, Trackers, Misc, and the icon picker / theme controls), backed by GKeyFile-on-disk persistence at `$CONFIG/gtkhxrc`. The original "fix preferences broken-ness" TODO is closed.
+- **Chat/message logging.** Still pending — `log.c` is still `#if 0`'d-out in the build. The `$CONFIG/logs/` directory is reserved (prefs / path machinery resolves it), but nothing actually writes chat transcripts there yet. Separate from the categorised debug logger in `debug.c` / `proto_trace.c`, which is for stderr instrumentation (`GTKHX_DEBUG=proto,news,login,…`) and is unrelated to user-facing chat history persistence.
+- **Tracker tracker (tracker of trackers).** Still undecided. The current Trackers settings page lets the user manage a list of tracker addresses; a server-discovered metadirectory is a bigger swing — see `docs/tracker-v3-scoping.md` for one direction.
+- **New-user experience.** Still pending — `docs/new-user-experience-scoping.md` lays out a first-run welcome dialog with an optional 3-page wizard (identity / server pick / done) for users without a `gtkhxrc`. Detects first run by absence of the prefs file. Open questions on tone, curated server list, dead-server pinging.
 
 ---
 
