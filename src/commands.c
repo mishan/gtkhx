@@ -448,20 +448,44 @@ find_cmd_arg:
         close (pfds[1]);
         return;
     case 0:
+        /* In the shell-pipe child: discard stdin (no terminal
+		 * input plumbed through), close our read end of the pipe,
+		 * then dup the write end into stdout + stderr.
+		 *
+		 * close(1)/close(2) before dup2 is redundant — POSIX dup2
+		 * implicitly closes the target slot if it was open, and
+		 * does so atomically with the assignment. The redundant
+		 * pair also tripped GCC -fanalyzer's
+		 * -Wanalyzer-fd-use-without-check (it tracks the close
+		 * and then sees the literal `1`/`2` arg to dup2 as a
+		 * use-after-close). */
         close (0);
-        close (1);
-        close (2);
         close (pfds[0]);
         av[0] = "/bin/sh";
         av[1] = "-c";
         av[2] = p;
         av[3] = 0;
+        /* GCC -fanalyzer's -Wanalyzer-fd-leak flags every dup2 + execve
+		 * idiom: it models dup2 as "opens a new fd, you must close
+		 * it" and doesn't see execve as a process-replacement that
+		 * inherits descriptors. The duped fds (now 1 and 2) ARE
+		 * supposed to outlive this stack frame — they become the
+		 * child's stdout + stderr. Suppress locally; the pattern is
+		 * standard POSIX and the analyzer just lacks the model. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
         if (dup2 (pfds[1], 1) == -1 || dup2 (pfds[1], 2) == -1) {
             hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: dup2: %s\n", argv[0],
                               strerror (errno));
             _exit (1);
         }
+        /* The duped fds (now 1 and 2) keep the pipe open; the
+		 * original pfds[1] is redundant. Close it so the child
+		 * doesn't carry an extra reference to the write end across
+		 * execve. */
+        close (pfds[1]);
         execve ("/bin/sh", av, hxd_environ);
+#pragma GCC diagnostic pop
         hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: execve: %s\n", argv[0],
                           strerror (errno));
         _exit (127);
