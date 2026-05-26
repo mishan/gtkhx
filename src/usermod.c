@@ -594,38 +594,13 @@ create_useredit_window (const char *login, int new)
     gtk_window_set_titlebar (GTK_WINDOW (window), header);
     gtk_window_set_child (GTK_WINDOW (window), page);
 
-    /* Bail-out shortcuts: Escape and Ctrl-W close the window
-	 * (matches what every other top-level in the app does, and
-	 * what the user reasonably expects from a desktop dialog).
-	 * Both fire the built-in "window.close" action, so any close-
-	 * request handler (none here, but useredit_destroy runs via
-	 * the destroy signal) still gets a chance.
-	 *
-	 * CAPTURE phase so a focused AdwEntryRow doesn't swallow Esc
-	 * before we see it. window-scope so the shortcut fires
-	 * regardless of which descendant has focus. */
-    {
-        GtkEventController *shortcuts;
-        GtkShortcut *sh;
-
-        shortcuts = gtk_shortcut_controller_new ();
-        gtk_event_controller_set_propagation_phase (shortcuts,
-                                                    GTK_PHASE_CAPTURE);
-        gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (shortcuts),
-                                           GTK_SHORTCUT_SCOPE_LOCAL);
-        gtk_widget_add_controller (window, shortcuts);
-
-        sh = gtk_shortcut_new (gtk_keyval_trigger_new (GDK_KEY_Escape, 0),
-                               gtk_named_action_new ("window.close"));
-        gtk_shortcut_controller_add_shortcut (
-            GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
-
-        sh = gtk_shortcut_new (
-            gtk_keyval_trigger_new (GDK_KEY_w, GDK_CONTROL_MASK),
-            gtk_named_action_new ("window.close"));
-        gtk_shortcut_controller_add_shortcut (
-            GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
-    }
+    /* Bail-out shortcuts: Esc / Ctrl+W close the window, Ctrl+Q quits
+	 * the app, Ctrl+K opens the Connect dialog. init_keyaccel_dialog
+	 * is the shared helper for dialog-style GtkWindows — it wires the
+	 * full set in one call so editor / settings / about / agreement
+	 * windows behave consistently. CAPTURE phase, so a focused
+	 * AdwEntryRow doesn't swallow the key before we see it. */
+    init_keyaccel_dialog (window);
 
     if (!new) {
         useredit_login (login, ues);
@@ -666,6 +641,10 @@ useredit_open_dialog (void)
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (entry), _ ("Login"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (prefs_grp), entry);
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), prefs_grp);
+
+    /* Ctrl+W = dismiss (same as Esc, which AdwDialog handles natively
+	 * via close_response="cancel"). Ctrl+Q quits the app. */
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
 
     g_signal_connect (dialog, "response", G_CALLBACK (useredit_open_response),
                       entry);

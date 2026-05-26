@@ -2,6 +2,9 @@
 #define HX_GTKUTIL_H
 
 extern void init_keyaccel (GtkWidget *widget);
+extern void init_keyaccel_dialog (GtkWidget *widget);
+extern void init_keyaccel_full (GtkWidget *widget, gboolean esc_closes);
+extern void gtkhx_dialog_add_close_shortcuts (GtkWidget *dialog);
 extern void set_disconnect_btn (session *sess, int stat);
 extern void setbtns (session *sess, int stat);
 extern void set_status_bar (int status);

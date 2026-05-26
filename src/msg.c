@@ -881,6 +881,8 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
 
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
     adw_dialog_present (dialog,
                         toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }

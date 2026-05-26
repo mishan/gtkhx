@@ -2760,6 +2760,11 @@ create_options_window (GtkWidget *widget, gpointer data)
     adw_dialog_set_content_width (ADW_DIALOG (dlg), 840);
     adw_dialog_set_content_height (ADW_DIALOG (dlg), 640);
 
+    /* Esc closes via AdwDialog's built-in close_response; wire Ctrl+W
+	 * (close) and Ctrl+Q (app.quit) for keyboard parity with the
+	 * rest of the app. */
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
+
     g_object_set_data (G_OBJECT (dlg), "sess", sess);
     g_signal_connect (dlg, "closed", G_CALLBACK (close_options_bookkeeping),
                       NULL);

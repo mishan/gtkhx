@@ -120,8 +120,37 @@ keyaccel_tracker_cb (GtkWidget *w, GVariant *args, gpointer data)
     return TRUE;
 }
 
+/* AdwDialog variant of keyaccel_close_cb — adw_dialog_close runs the
+ * close-attempt machinery (fires close_response + close-attempt
+ * signal) instead of destroying the widget. Used for Ctrl+W on
+ * AdwDialog, which otherwise wouldn't have a usable close shortcut.
+ * Esc is handled natively by AdwDialog via close_response, so no
+ * separate Esc binding is needed. */
+static gboolean
+keyaccel_close_adw_dialog_cb (GtkWidget *w, GVariant *args, gpointer data)
+{
+    (void)args;
+    (void)data;
+    if (ADW_IS_DIALOG (w)) {
+        adw_dialog_close (ADW_DIALOG (w));
+    }
+    return TRUE;
+}
+
 void
 init_keyaccel (GtkWidget *widget)
+{
+    init_keyaccel_full (widget, FALSE);
+}
+
+void
+init_keyaccel_dialog (GtkWidget *widget)
+{
+    init_keyaccel_full (widget, TRUE);
+}
+
+void
+init_keyaccel_full (GtkWidget *widget, gboolean esc_closes)
 {
     GtkEventController *ctrl = gtk_shortcut_controller_new ();
     GtkShortcut *sc;
@@ -153,9 +182,58 @@ init_keyaccel (GtkWidget *widget)
             gtk_callback_action_new (keyaccel_close_cb, NULL, NULL));
         gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl),
                                               sc);
+
+        /* Esc → close for dialog-like windows (Settings, Bookmarks,
+		 * User Editor, About, Agreement, etc.). Off by default so that
+		 * the main user-facing windows (chat, news, files, tracker)
+		 * don't swallow Esc — those windows give Esc to widgets like
+		 * search entries and inline editors. AdwDialog wires Esc
+		 * itself, so this path is only for GtkWindows that we *want*
+		 * to behave dialog-y: gtk_window_close runs through any
+		 * close-request handler the window registered, just like the
+		 * Ctrl+W path. */
+        if (esc_closes) {
+            sc = gtk_shortcut_new (
+                gtk_keyval_trigger_new (GDK_KEY_Escape, 0),
+                gtk_callback_action_new (keyaccel_close_cb, NULL, NULL));
+            gtk_shortcut_controller_add_shortcut (
+                GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+        }
     }
 
     gtk_widget_add_controller (widget, ctrl);
+}
+
+/* Companion to init_keyaccel for AdwDialog instances. AdwDialog
+ * isn't a GtkWindow, so init_keyaccel's gtk_window_close path can't
+ * be reused; instead we attach Ctrl+W → adw_dialog_close and Ctrl+Q
+ * → app.quit directly to the dialog widget. Esc is handled by
+ * AdwDialog natively via close_response. Call this right after
+ * adw_dialog_new() / adw_alert_dialog_new() / adw_preferences_dialog_new(),
+ * before adw_dialog_present(). */
+void
+gtkhx_dialog_add_close_shortcuts (GtkWidget *dialog)
+{
+    GtkEventController *ctrl;
+    GtkShortcut *sc;
+
+    if (!dialog) {
+        return;
+    }
+    ctrl = gtk_shortcut_controller_new ();
+    gtk_event_controller_set_propagation_phase (ctrl, GTK_PHASE_CAPTURE);
+
+    sc = gtk_shortcut_new (
+        gtk_keyval_trigger_new ('w', GDK_CONTROL_MASK),
+        gtk_callback_action_new (keyaccel_close_adw_dialog_cb, NULL, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+    sc = gtk_shortcut_new (
+        gtk_keyval_trigger_new ('q', GDK_CONTROL_MASK),
+        gtk_callback_action_new (keyaccel_quit_cb, NULL, NULL));
+    gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
+
+    gtk_widget_add_controller (dialog, ctrl);
 }
 
 void
@@ -498,6 +576,10 @@ error_dialog (char *title, char *msg)
     adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dlg), "ok", _ ("_OK"));
     adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dlg), "ok");
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dlg), "ok");
+
+    /* Ctrl+W / Ctrl+Q for keyboard parity. Esc dismisses via the
+	 * close_response set above. */
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
 
     adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
 }

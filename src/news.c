@@ -623,6 +623,12 @@ create_post_window (GtkWidget *widget, gpointer data)
                       sess);
     gtk_widget_add_controller (post_window, kc);
 
+    /* Ctrl+W / Ctrl+Q via the shared helper. Esc is handled above
+	 * because the inline path also calls gtkhx_widget_destroy
+	 * directly (and clears the post_window global) — keeping that
+	 * existing behaviour rather than routing Esc through window.close. */
+    init_keyaccel (post_window);
+
     gtk_window_present (GTK_WINDOW (post_window));
     gtk_widget_grab_focus (postprompt);
 }
