@@ -15,7 +15,6 @@ gtkhx_sources = files(
   'connect_magic.c',
   'connect.c',
   'debug.c',
-  'dfa.c',
   'emoji.c',
   'filelist_walker.c',
   'files.c',
@@ -98,9 +97,10 @@ conf.set_quoted('PACKAGE_LOCALE_DIR', get_option('prefix') / get_option('localed
 
 # Headers/feature defines historically probed via autoconf. All universally
 # present on the targets we care about (any modern glibc/musl/BSD); we set
-# them unconditionally so the legacy `#ifdef HAVE_FOO` gates in vendored
-# code (notably dfa.c) take the right branch without us having to edit
-# 2,500 lines of GNU regex.
+# them unconditionally. Previously these were also load-bearing for the
+# vendored dfa.c's `#ifdef HAVE_FOO` gates — that file has been replaced
+# by GLib's GRegex (PCRE2) so the constraint is gone, but the defines are
+# still useful for the few HAVE_LIBINTL_H consumers etc.
 conf.set('STDC_HEADERS',    1)
 conf.set('HAVE_STRING_H',   1)
 conf.set('HAVE_STDLIB_H',   1)
