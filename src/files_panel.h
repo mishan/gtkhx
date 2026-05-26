@@ -42,7 +42,13 @@ typedef void (*files_panel_swap_cb) (files_panel *p, gboolean want_local,
  *
  * `swap_cb` is invoked when the user picks a different side from
  * the panel's side dropdown. NULL hides the dropdown — the panel
- * is then locked to the side its initial provider sets. */
+ * is then locked to the side its initial provider sets.
+ *
+ * Inline rename is handled entirely inside the panel (the row's
+ * GtkEditableLabel does the edit + commit), so the constructor
+ * no longer needs a rename callback. The headerbar Rename button
+ * + F2 shortcut still go through the browser's open_rename_dialog
+ * helper for the "I want a dialog" workflow. */
 extern files_panel *files_panel_new (HxFilesProvider *provider,
                                      files_panel_swap_cb swap_cb,
                                      gpointer swap_cb_user_data);

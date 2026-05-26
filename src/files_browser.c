@@ -128,32 +128,11 @@ struct browser {
 	 * Copy action to surface "no permission" / "not connected" /
 	 * etc. results without an interrupting dialog. */
     AdwToastOverlay *toast;
-
-    /* Copy button — re-tooltip'd on active-panel change so the
-	 * arrow direction in the hover text reflects which side is
-	 * source vs. dest. */
-    GtkWidget *btn_copy;
 };
 
 static struct browser *the_browser = NULL;
 
 /* ---- Active-panel tracking ---- */
-
-/* Update Copy's tooltip to reflect which way the transfer goes. */
-static void
-sync_copy_tooltip (struct browser *br)
-{
-    if (!br || !br->btn_copy) {
-        return;
-    }
-    if (br->active == br->left) {
-        gtk_widget_set_tooltip_text (br->btn_copy,
-                                     _ ("Copy selection from left to right"));
-    } else if (br->active == br->right) {
-        gtk_widget_set_tooltip_text (br->btn_copy,
-                                     _ ("Copy selection from right to left"));
-    }
-}
 
 static void
 set_active (struct browser *br, files_panel *p)
@@ -164,7 +143,6 @@ set_active (struct browser *br, files_panel *p)
     files_panel_set_active (br->left, p == br->left);
     files_panel_set_active (br->right, p == br->right);
     br->active = p;
-    sync_copy_tooltip (br);
 }
 
 static void
@@ -305,10 +283,6 @@ on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
 
     files_panel_set_provider (p, new_prov);
     g_object_unref (new_prov);
-
-    /* Copy-direction tooltip refresh: the destination kind may
-	 * have changed, which affects the arrow direction we show. */
-    sync_copy_tooltip (br);
 }
 
 /* ---- Actions (scoped to active panel) ---- */
@@ -350,7 +324,12 @@ on_preview_clicked (GtkButton *btn, gpointer user_data)
         show_toast (br, _ ("Preview is for files, not folders."));
         return;
     }
-    hx_files_provider_activate_entry (files_panel_get_provider (br->active), e);
+    /* Route through preview_entry — activate_entry was repurposed
+	 * to download (the row-Enter default) so the explicit Preview
+	 * button has its own dispatch path that still streams into the
+	 * in-app preview window. Local providers fall back to
+	 * activate_entry (xdg-open) inside the wrapper. */
+    hx_files_provider_preview_entry (files_panel_get_provider (br->active), e);
 }
 
 /* ---- Get Info ----
@@ -459,28 +438,21 @@ cleanup:
     g_free (ctx);
 }
 
+/* Build + present the Rename AdwAlertDialog pre-populated with
+ * `e`'s name. This dialog path only fires from the headerbar
+ * Rename button (and the F2 keyboard shortcut bound to it). The
+ * click-on-selected-name inline-rename gesture is handled entirely
+ * inside files_panel via GtkEditableLabel and bypasses this
+ * dialog. */
 static void
-on_rename_clicked (GtkButton *btn, gpointer user_data)
+open_rename_dialog (struct browser *br, files_panel *panel, HxFileEntry *e)
 {
-    struct browser *br = user_data;
-    HxFileEntry *e;
     AdwDialog *dialog;
     GtkWidget *entry;
     struct rename_ctx *ctx;
     char *body;
-    (void)btn;
 
-    if (!br->active) {
-        return;
-    }
-
-    /* Rename is a singleton operation — only meaningful when
-	 * exactly one row is selected. Multi-rename (mass rename
-	 * with a pattern) is a separate feature; toast a hint
-	 * and bail. */
-    e = files_panel_get_single_selected (br->active);
-    if (!e) {
-        show_toast (br, _ ("Select a single file to rename."));
+    if (!br || !panel || !e) {
         return;
     }
 
@@ -504,7 +476,7 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
 
     ctx = g_new0 (struct rename_ctx, 1);
     ctx->br = br;
-    ctx->panel = br->active;
+    ctx->panel = panel;
     ctx->old_name = g_strdup (hx_file_entry_get_name (e));
     ctx->entry = entry;
 
@@ -516,10 +488,40 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
 
     /* Focus + select all → user can either accept the default
 	 * (just hit Enter to confirm same name = no-op safety) or
-	 * start typing immediately to replace. Matches Files
-	 * Manager UX in GNOME / Finder. */
+	 * start typing immediately to replace. Matches the file-
+	 * manager convention. */
     gtk_widget_grab_focus (entry);
     gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+}
+
+/* Note: the inline click-on-selected-name gesture is handled
+ * entirely inside files_panel now (GtkEditableLabel in the Name
+ * column). open_rename_dialog above only fires from the headerbar
+ * Rename button + F2 shortcut, for users who prefer the dialog
+ * (handles multi-character renames, has explicit OK/Cancel). */
+
+static void
+on_rename_clicked (GtkButton *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+    HxFileEntry *e;
+    (void)btn;
+
+    if (!br->active) {
+        return;
+    }
+
+    /* Rename is a singleton operation — only meaningful when
+	 * exactly one row is selected. Multi-rename (mass rename
+	 * with a pattern) is a separate feature; toast a hint
+	 * and bail. */
+    e = files_panel_get_single_selected (br->active);
+    if (!e) {
+        show_toast (br, _ ("Select a single file to rename."));
+        return;
+    }
+
+    open_rename_dialog (br, br->active, e);
 }
 
 /* ---- Move (F6 cross-directory) ----
@@ -724,6 +726,50 @@ cleanup:
     g_free (ctx);
 }
 
+/* Forward decl — implementation lives below alongside the
+ * dialog-based on_move_clicked + on_copy_clicked. */
+static void copy_entries_and_toast (struct browser *br, files_panel *src,
+                                    files_panel *dst, GPtrArray *entries);
+
+/* Directional cross-pane copy — fires from the Copy → and Copy ←
+ * buttons in the center column. Source / destination are baked
+ * into the handler (not inferred from active-panel state) so the
+ * gesture is unambiguous: click Copy → and the left pane's
+ * selection lands in the right pane's current path. The same
+ * machinery the existing direction-aware F5 / drag-drop path uses
+ * (copy_entries_and_toast) handles the per-entry transfer,
+ * cross-side fan-out (local ↔ remote = xfer_new), and toasts. */
+static void
+do_directional_copy (struct browser *br, files_panel *src, files_panel *dst)
+{
+    GPtrArray *entries;
+
+    if (!br || !src || !dst || src == dst) {
+        return;
+    }
+    entries = files_panel_get_selected_entries (src);
+    copy_entries_and_toast (br, src, dst, entries);
+    if (entries) {
+        g_ptr_array_unref (entries);
+    }
+}
+
+static void
+on_copy_lr_clicked (GtkButton *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+    (void)btn;
+    do_directional_copy (br, br->left, br->right);
+}
+
+static void
+on_copy_rl_clicked (GtkButton *btn, gpointer user_data)
+{
+    struct browser *br = user_data;
+    (void)btn;
+    do_directional_copy (br, br->right, br->left);
+}
+
 static void
 on_move_clicked (GtkButton *btn, gpointer user_data)
 {
@@ -746,7 +792,7 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     entries = files_panel_get_selected_entries (br->active);
     if (!entries || entries->len == 0) {
         if (entries) {
-            g_ptr_array_free (entries, TRUE);
+            g_ptr_array_unref (entries);
         }
         show_toast (br, _ ("Select files to move first."));
         return;
@@ -767,7 +813,7 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
         HxFilesProvider *dp = files_panel_get_provider (dst_panel);
         if (HX_IS_LOCAL_FILES_PROVIDER (sp)
             != HX_IS_LOCAL_FILES_PROVIDER (dp)) {
-            g_ptr_array_free (entries, TRUE);
+            g_ptr_array_unref (entries);
             show_toast (br, _ ("Move only works within one side. Use Copy then "
                                "Delete to move between local and remote."));
             return;
@@ -820,7 +866,7 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
         g_ptr_array_add (ctx->names, g_strdup (hx_file_entry_get_name (e)));
     }
     ctx->entry = entry;
-    g_ptr_array_free (entries, TRUE);
+    g_ptr_array_unref (entries);
 
     /* Attach the same smart-case path-completion popover the
 	 * local panel's path entry uses. Local-source only — the
@@ -848,7 +894,9 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
  * Enter-on-row already does, but driven from a keypress that
  * doesn't require the column view to have row focus. Routes
  * the active panel's single selection through the provider's
- * activate_entry (preview for remote, xdg-open for local). */
+ * activate_entry — for remote that's a download to the user's
+ * download folder; for local it's xdg-open. Preview stays on
+ * F3 / Ctrl+P (see on_preview_clicked). */
 static gboolean
 on_open_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
 {
@@ -1108,7 +1156,7 @@ on_copy_clicked (GtkButton *btn, gpointer user_data)
     entries = files_panel_get_selected_entries (src);
     copy_entries_and_toast (br, src, dst, entries);
     if (entries) {
-        g_ptr_array_free (entries, TRUE);
+        g_ptr_array_unref (entries);
     }
 }
 
@@ -1148,7 +1196,7 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
     entries = files_panel_get_selected_entries (p);
     if (!entries || entries->len == 0) {
         if (entries) {
-            g_ptr_array_free (entries, TRUE);
+            g_ptr_array_unref (entries);
         }
         return NULL;
     }
@@ -1247,7 +1295,7 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
         (void)other_is_local;
     }
 
-    g_ptr_array_free (entries, TRUE);
+    g_ptr_array_unref (entries);
 
     if (cp_files) {
         /* Union: external apps receive GDK_TYPE_FILE_LIST (or
@@ -1540,7 +1588,7 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
     entries = files_panel_get_selected_entries (br->active);
     if (!entries || entries->len == 0) {
         if (entries) {
-            g_ptr_array_free (entries, TRUE);
+            g_ptr_array_unref (entries);
         }
         return;
     }
@@ -1569,7 +1617,7 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
         HxFileEntry *e = g_ptr_array_index (entries, i);
         g_ptr_array_add (ctx->names, g_strdup (hx_file_entry_get_name (e)));
     }
-    g_ptr_array_free (entries, TRUE);
+    g_ptr_array_unref (entries);
 
     /* Single-handler ownership — see the libadwaita ordering note
 	 * above on_rename_response. */
@@ -1670,10 +1718,33 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
  * unambiguously across libadwaita color-scheme + accent
  * settings — gtkurl.c does the same thing for its URL tag.
  * #1c71d8 is libadwaita's default light-theme accent. */
-static const char *active_css = ".files-panel-active {\n"
-                                "  box-shadow: inset 0 0 0 2px #1c71d8;\n"
-                                "  border-radius: 8px;\n"
-                                "}\n";
+/* Active-panel highlight. Three signals layered so the active panel
+ * pops at any zoom level and any theme:
+ *
+ *   1. inset 0 0 0 3px accent — a thicker (was 2px, now 3px) inner
+ *      border. The accent color is libadwaita's @accent_color CSS
+ *      variable so it tracks the user's accent pref (Settings →
+ *      Appearance → Accent color in GNOME 47+) and dark/light theme.
+ *   2. accent-tinted background — a faint @accent_bg_color wash at
+ *      8% opacity on the active panel's frame, so the eye picks up
+ *      the whole pane region not just its edge.
+ *   3. soft glow — outset 0 0 8px 0 of the same accent. Without it
+ *      a flat inset border can blend into adjacent chrome on dark
+ *      themes; the glow lifts the panel forward.
+ *
+ * Inactive panel keeps a 1px subtle border (.files-panel) so the
+ * pane region is always perceptible and the active state has
+ * something to transition from. */
+static const char *active_css =
+    ".files-panel {\n"
+    "  border-radius: 8px;\n"
+    "}\n"
+    ".files-panel-active {\n"
+    "  box-shadow: inset 0 0 0 3px @accent_color,\n"
+    "              0 0 8px 0 alpha(@accent_color, 0.35);\n"
+    "  background-color: alpha(@accent_bg_color, 0.08);\n"
+    "  border-radius: 8px;\n"
+    "}\n";
 
 static void
 install_css (struct browser *br)
@@ -1803,8 +1874,9 @@ void
 open_files_browser (void)
 {
     struct browser *br;
-    GtkWidget *header, *paned, *refresh_btn, *mkdir_btn, *move_btn,
-        *preview_btn, *info_btn, *rename_btn, *delete_btn;
+    GtkWidget *header, *paned, *right_side, *center_col, *refresh_btn,
+        *mkdir_btn, *copy_lr_btn, *copy_rl_btn, *preview_btn, *info_btn,
+        *rename_btn, *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
@@ -1825,30 +1897,44 @@ open_files_browser (void)
     install_css (br);
 
     /* Headerbar:
-	 *   pack_start: Refresh, New Folder, Copy, Move, Preview, Get Info
+	 *   pack_start: Refresh, New Folder, Preview, Get Info
 	 *   pack_end:   Delete, Rename
 	 *
-	 * Icons come from the in-tree pixmap set via gtkhx_pixmap_button,
-	 * mirroring the classic Hotline look the toolbar and users
-	 * windows already use. Scaling at 2x matches the toolbar.
+	 * Cross-pane Copy + Move are NOT in the headerbar — they're
+	 * the three buttons in the vertical column between the two
+	 * panels (see center_col below). That position matches the
+	 * user's mental model: the actions transfer between panes,
+	 * so the buttons that fire them sit between the panes. The
+	 * single-panel actions (refresh, mkdir, preview, info, rename,
+	 * delete) stay in the headerbar.
 	 *
-	 * Copy moves the active panel's selection to the inactive
-	 * panel's current path. The arrow direction in the tooltip
-	 * gets re-set on active-panel changes via sync_copy_tooltip.
-	 *
-	 * Where the classic icon set doesn't have an obvious match
-	 * (Move, Rename), we reuse what's close (mkdir for Move,
-	 * edituser as a generic edit icon for Rename) rather than
-	 * mixing symbolic icons in with the period look. */
+	 * Icons:
+	 *   Rename:  pencil.png — a yellow pencil glyph (also used
+	 *            by news_browser's New Post button). Renamed
+	 *            from news_reply.png to match its actual
+	 *            visual content; "pencil" is the cross-app
+	 *            shorthand for "edit name" and reads better
+	 *            than the previous generic person-with-pencil
+	 *            edituser.png.
+	 *   Copy →:  file_move_lr.png — cicn 219, a stacked-paper
+	 *            glyph with a right-pointing arrow. Copy ← uses
+	 *            file_move_rl.png, the same icon flipped along
+	 *            the vertical axis. Both extracted via
+	 *            tools/cicndump and committed under src/pixmaps.
+	 *            The filenames still say "move" — they were
+	 *            originally drawn for the Move action and reused
+	 *            verbatim when the center column flipped to Copy
+	 *            semantics. Rename of the PNGs deferred to keep
+	 *            this diff focused on UX rather than asset moves. */
     header = adw_header_bar_new ();
 #define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, 2, NULL, NULL)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
-    br->btn_copy = FB_BTN ("/com/nasledov/gtkhx/pixmaps/dl.png");
-    move_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/move.png");
+    copy_lr_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_lr.png");
+    copy_rl_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_rl.png");
     preview_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/preview.png");
     info_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/info.png");
-    rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/edituser.png");
+    rename_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/pencil.png");
     delete_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/trash.png");
 #undef FB_BTN
 
@@ -1856,10 +1942,10 @@ open_files_browser (void)
                                  _ ("Reload active panel (Ctrl+R)"));
     gtk_widget_set_tooltip_text (mkdir_btn,
                                  _ ("New folder in active panel (F7, Ctrl+N)"));
-    gtk_widget_set_tooltip_text (br->btn_copy,
-                                 _ ("Copy selection to the other panel (F5)"));
-    gtk_widget_set_tooltip_text (
-        move_btn, _ ("Move selection to another directory (F6)"));
+    gtk_widget_set_tooltip_text (copy_lr_btn,
+                                 _ ("Copy left selection to the right panel"));
+    gtk_widget_set_tooltip_text (copy_rl_btn,
+                                 _ ("Copy right selection to the left panel"));
     gtk_widget_set_tooltip_text (preview_btn,
                                  _ ("Preview selected file (F3, Ctrl+P)"));
     gtk_widget_set_tooltip_text (info_btn,
@@ -1872,9 +1958,10 @@ open_files_browser (void)
     g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked),
                       br);
     g_signal_connect (mkdir_btn, "clicked", G_CALLBACK (on_mkdir_clicked), br);
-    g_signal_connect (br->btn_copy, "clicked", G_CALLBACK (on_copy_clicked),
-                      br);
-    g_signal_connect (move_btn, "clicked", G_CALLBACK (on_move_clicked), br);
+    g_signal_connect (copy_lr_btn, "clicked",
+                      G_CALLBACK (on_copy_lr_clicked), br);
+    g_signal_connect (copy_rl_btn, "clicked",
+                      G_CALLBACK (on_copy_rl_clicked), br);
     g_signal_connect (preview_btn, "clicked", G_CALLBACK (on_preview_clicked),
                       br);
     g_signal_connect (info_btn, "clicked", G_CALLBACK (on_get_info_clicked),
@@ -1886,45 +1973,11 @@ open_files_browser (void)
 
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_copy);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), move_btn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), preview_btn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), info_btn);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header), delete_btn);
     adw_header_bar_pack_end (ADW_HEADER_BAR (header), rename_btn);
     gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
-
-    /* Two panels in a horizontal GtkPaned. Phase 1: both local;
-	 * Phase 2 swaps the right panel's provider for a remote one
-	 * (and adds the L/R side selectors). The user can drag the
-	 * divider.
-	 *
-	 * NOTE: we set the position explicitly. With no position set,
-	 * GtkPaned recomputes the split during every allocation pass
-	 * based on the children's natural sizes — and the panel
-	 * GtkColumnView's natural size changes when items-changed
-	 * fires on the underlying GListStore (e.g. when a directory
-	 * listing arrives). Each recomputation cascades into another
-	 * allocation pass, which in GTK 4 ends up moving focus back to
-	 * whichever panel has the "default" focus. End result: the
-	 * focus-drift bug logged in BUGS — double-click on a folder in
-	 * the right (remote) panel takes an extra click because the
-	 * first click's focus is stolen mid-population.
-	 *
-	 * The empirical confirmation: the user reported that manually
-	 * dragging the divider once stops the focus drift for the rest
-	 * of the session. That's because a user drag toggles
-	 * `position-set` to TRUE internally, after which GtkPaned no
-	 * longer recomputes. Setting the position here up-front gets
-	 * us into the same state from the start. */
-    paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
-    gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
-    gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
-    gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
-    gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
-    /* Centered split for the default 980 px window — see
-	 * gtk_widget_set_size_request a few lines up. */
-    gtk_paned_set_position (GTK_PANED (paned), 490);
 
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
 	 * R = remote Hotline server. The remote provider sits idle
@@ -1961,10 +2014,69 @@ open_files_browser (void)
         = g_signal_connect (gtkhx_session_get_default (), "file-update",
                             G_CALLBACK (on_file_update), br);
 
+    /* Center column: two explicit-direction Copy buttons (→ and ←)
+	 * live between the two panels. Norton / Krusader / Total
+	 * Commander all place cross-pane buttons here for the same
+	 * reason: the action transfers items between panes, so the
+	 * buttons that fire it should physically sit between them.
+	 *
+	 * Direction is baked into each button (its icon and its
+	 * handler), so the user doesn't have to inspect the active-
+	 * panel marker to know what will happen — clicking Copy →
+	 * always copies the LEFT pane's selection into the RIGHT
+	 * pane's current path, and vice versa. F5 still fires the
+	 * direction-aware active-panel Copy for keyboard users.
+	 *
+	 * Move isn't represented in the column — cross-side move
+	 * doesn't work and same-side move is rarely a copy-button-
+	 * replacement gesture. The F6 destination-picker dialog
+	 * covers the rare case.
+	 *
+	 * valign=CENTER keeps the buttons floating at the vertical
+	 * midpoint of the window: easy to reach without eye-tracking
+	 * up to the headerbar, and out of the way of any particular
+	 * file row most of the time. */
+    center_col = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_valign (center_col, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_start (center_col, 4);
+    gtk_widget_set_margin_end (center_col, 4);
+    gtk_box_append (GTK_BOX (center_col), copy_lr_btn);
+    gtk_box_append (GTK_BOX (center_col), copy_rl_btn);
+
+    /* Layout: outer GtkPaned [left_panel, right_side]
+	 *           right_side = horizontal GtkBox [center_col, right_panel]
+	 *
+	 * The user can drag the paned divider to resize the left
+	 * panel; right_panel takes the remaining space minus the
+	 * center column's fixed width. The center column itself
+	 * doesn't reflow on drag — keeping the buttons at a
+	 * stable horizontal anchor right next to the divider.
+	 *
+	 * The position-set workaround the previous GtkPaned-only
+	 * layout used (setting position=490 to avoid a focus-drift
+	 * bug from repeated allocation passes) still applies here:
+	 * without it, the divider recomputes on every items-changed,
+	 * which steals focus mid-population. The starting split is
+	 * tuned for the 980px default window with the center column
+	 * taking ~60px in the middle. */
+    paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
+    gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
+    gtk_paned_set_position (GTK_PANED (paned), 460);
+
+    right_side = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    {
+        GtkWidget *right_widget = files_panel_get_widget (br->right);
+        gtk_widget_set_hexpand (right_widget, TRUE);
+        gtk_box_append (GTK_BOX (right_side), center_col);
+        gtk_box_append (GTK_BOX (right_side), right_widget);
+    }
+
     gtk_paned_set_start_child (GTK_PANED (paned),
                                files_panel_get_widget (br->left));
-    gtk_paned_set_end_child (GTK_PANED (paned),
-                             files_panel_get_widget (br->right));
+    gtk_paned_set_end_child (GTK_PANED (paned), right_side);
 
     /* Wrap in a toast overlay so the Copy action (and future
 	 * polish-phase actions) have somewhere to surface transient
@@ -2016,12 +2128,13 @@ open_files_browser (void)
 
     /* F4 = "view/edit" (Norton F4 was Edit). Same action as
 	 * Enter-on-row / double-click — routes through the
-	 * provider's activate_entry, which picks preview for
-	 * remote and xdg-open for local. Useful for users whose
-	 * row focus isn't where their selection is (keyboard
-	 * navigation in a multi-select). F3 (classic View)
-	 * doesn't get a dedicated binding; the activation is
-	 * preview-first anyway. */
+	 * provider's activate_entry, which for remote queues a
+	 * download to the user's download folder and for local
+	 * fires xdg-open. Useful for users whose row focus isn't
+	 * where their selection is (keyboard navigation in a
+	 * multi-select). Preview lives on F3 / Ctrl+P; see
+	 * preview_entry on the provider iface for the explicit
+	 * preview dispatch. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F4, 0),
         gtk_callback_action_new (on_open_shortcut, br, NULL));
@@ -2145,7 +2258,6 @@ open_files_browser (void)
     /* Initial focus on the left panel so the user has a working
 	 * active selection right away. */
     set_active (br, br->left);
-    sync_copy_tooltip (br);
     gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
     gtk_window_present (GTK_WINDOW (br->window));

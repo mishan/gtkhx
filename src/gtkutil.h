@@ -133,4 +133,16 @@ extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
                                        const char *tooltip, int scale,
                                        GCallback cb, gpointer user_data);
 
+/*
+ * Phase 5+: like gtkhx_pixmap_button, but takes an already-loaded
+ * GdkPixbuf instead of a GResource path. Useful when the icon source
+ * isn't a packaged GResource — e.g. the files browser pulling icons
+ * out of icons.rsrc via load_icon(). Same scaling / GtkPicture
+ * treatment as the resource-based variant. The function does not
+ * take ownership of pixbuf; the caller can g_object_unref after.
+ */
+extern GtkWidget *gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip,
+                                       int scale, GCallback cb,
+                                       gpointer user_data);
+
 #endif

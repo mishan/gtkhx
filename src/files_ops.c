@@ -189,7 +189,18 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
         return HX_OPS_OK;
     }
 
-    lpath = join_path (dst_dir, hx_file_entry_get_name (e));
+    /* Sanitize the remote name into a safe local basename before
+	 * joining onto the local download dir — a hostile server could
+	 * ship a name like "../../etc/passwd" that would let
+	 * join_path escape dst_dir. The wire-side request below still
+	 * passes the raw name to xfer_new as a separate (name,
+	 * name_len) tuple so the FILE_NAME chunk is unchanged. */
+    {
+        char *safe = hx_files_provider_safe_local_basename (
+            hx_file_entry_get_name (e));
+        lpath = join_path (dst_dir, safe);
+        g_free (safe);
+    }
 
     size = hx_file_entry_get_size (e);
     /* xfer_new takes the remote location as (dir, name, name_len)

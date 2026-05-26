@@ -45,7 +45,7 @@
     <file>pixmaps/newscat.png</file>
     <file>pixmaps/newsfld.png</file>
     <file>pixmaps/newspost.png</file>
-    <file>pixmaps/news_reply.png</file>
+    <file>pixmaps/pencil.png</file>
     <file>pixmaps/newuser.png</file>
     <file>pixmaps/options.png</file>
     <file>pixmaps/postnews.png</file>
@@ -72,6 +72,9 @@
     <file>pixmaps/file_disk.png</file>
     <file>pixmaps/file_html.png</file>
     <file>pixmaps/file_image.png</file>
+    <file>pixmaps/file_move.png</file>
+    <file>pixmaps/file_move_lr.png</file>
+    <file>pixmaps/file_move_rl.png</file>
     <file>pixmaps/file_movie.png</file>
     <file>pixmaps/file_note.png</file>
     <file>pixmaps/file_sit.png</file>

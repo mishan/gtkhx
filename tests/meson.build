@@ -126,6 +126,21 @@ test_path_util = executable('test_path_util',
 test('path_util', test_path_util,
      suite : 'unit')
 
+# safe_local_basename — sanitizer that defangs a remote-supplied
+# file name before joining it onto the local download path.
+# Drives the path-traversal defense lives in
+# hx_files_provider_safe_local_basename (files_provider.c). The
+# function itself is dependency-free string ops, but the test pulls
+# in files_provider.c which uses GObject for the iface definition.
+test_safe_local_basename = executable('test_safe_local_basename',
+  'unit/test_safe_local_basename.c',
+  '../src/files_provider.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('safe_local_basename', test_safe_local_basename,
+     suite : 'unit')
+
 # pict_embed — sniff-an-embedded-JPEG/PNG/GIF/TIFF helper used by
 # preview.c::image_done as a fallback when GdkPixbuf can't decode a
 # PICT directly. Pure GLib bytes-in / GBytes-out; the test inputs

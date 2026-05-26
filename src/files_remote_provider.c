@@ -516,20 +516,17 @@ remote_rename (HxFilesProvider *self, const char *old_name,
     return TRUE;
 }
 
-/* Activate a remote file: stream it into the preview pipeline.
- * xfer_new with preview=1 routes the downloaded bytes through
- * hx_preview_set_info / _chunk / _done rather than writing to
- * disk (see preview.c). lpath is required for xfer_new's
- * bookkeeping even though no on-disk file gets written; we
- * derive a temp path from XDG cache + the entry name. */
+/* Common xfer_new path used by both activate (download) and
+ * preview, parameterised on the preview flag. xfer_new's
+ * preview=1 routes bytes through hx_preview_set_info / _chunk /
+ * _done rather than writing to disk; preview=0 writes the file
+ * to lpath like a normal download. */
 static void
-remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
 {
-    HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
     const char *dir;
     char *lpath;
     struct htxf_conn *htxf;
-    (void)r;
 
     if (!e || hx_file_entry_is_dir (e)) {
         return;
@@ -544,13 +541,27 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
 
     dir = hx_files_provider_get_current_path (self);
 
-    /* Preview xfer never writes to disk (see opt.preview branch
-	 * in xfer_new). The lpath argument still has to exist
-	 * because the worker references it for logging / tooltip,
-	 * so synthesise something sane in the download dir. */
-    lpath = g_build_filename (
-        gtkhx_prefs.download_path ? gtkhx_prefs.download_path : "/tmp",
-        hx_file_entry_get_name (e), NULL);
+    /* lpath: real on-disk destination for downloads (preview=0)
+	 * or a placeholder used only for logging/tooltip on the
+	 * preview path (preview=1, opt.preview branch in xfer_new
+	 * skips the write). The download dir comes from the user's
+	 * Settings → File Browser → Download folder pref, falling
+	 * back to /tmp if unset.
+	 *
+	 * Sanitize the entry name to a safe local basename: a
+	 * hostile server could ship "../../etc/passwd" or similar
+	 * as a file name to escape the user's download folder via
+	 * g_build_filename. The wire-side path still uses the raw
+	 * name (xfer_new takes it as a separate (name, name_len)
+	 * tuple below) so the over-the-wire request is unchanged. */
+    {
+        char *safe = hx_files_provider_safe_local_basename (
+            hx_file_entry_get_name (e));
+        lpath = g_build_filename (
+            gtkhx_prefs.download_path ? gtkhx_prefs.download_path : "/tmp",
+            safe, NULL);
+        g_free (safe);
+    }
 
     /* xfer_new takes the remote location as a (dir, name, name_len)
 	 * triple — keeping the name's bytes (which may legally include
@@ -561,7 +572,7 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
         const char *name = hx_file_entry_get_name (e);
         gsize name_len = name ? strlen (name) : 0;
         htxf = xfer_new (lpath, dir ? dir : "", name, name_len, XFER_GET,
-                         1 /* preview */, 0);
+                         preview, 0);
     }
     if (htxf) {
         htxf->filter_argv = 0;
@@ -569,6 +580,26 @@ remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
     }
 
     g_free (lpath);
+}
+
+/* Enter / double-click on a remote file row: download to the
+ * user's download folder. This is the "do the obvious thing"
+ * default Misha asked for — preview remains one click away via
+ * F3 / Ctrl+P / the Preview headerbar button (which routes
+ * through preview_entry instead). */
+static void
+remote_activate_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+    remote_start_get (self, e, 0 /* download to disk */);
+}
+
+/* Explicit preview path — F3 / Ctrl+P / Preview button. Streams
+ * the file into the in-app preview window without writing to
+ * disk (opt.preview branch in xfer_new). */
+static void
+remote_preview_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+    remote_start_get (self, e, 1 /* preview, no on-disk write */);
 }
 
 static void
@@ -585,4 +616,5 @@ hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface)
     iface->rename = remote_rename;
     iface->get_unavailable_reason = remote_get_unavailable_reason;
     iface->activate_entry = remote_activate_entry;
+    iface->preview_entry = remote_preview_entry;
 }

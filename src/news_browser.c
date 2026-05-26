@@ -1859,7 +1859,7 @@ build_browser_window (void)
         "/com/nasledov/gtkhx/pixmaps/newscat.png", _ ("New Category"), 2,
         G_CALLBACK (on_new_category_clicked), br);
     br->btn_new_post = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/news_reply.png", _ ("New Post"), 2,
+        "/com/nasledov/gtkhx/pixmaps/pencil.png", _ ("New Post"), 2,
         G_CALLBACK (on_new_post_clicked), br);
     br->btn_reply = gtkhx_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/postnews.png", _ ("Reply"), 2,

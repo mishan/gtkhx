@@ -71,11 +71,30 @@ struct _HxFilesProviderInterface {
     const char *(*get_unavailable_reason) (HxFilesProvider *self);
 
     /* Activate a single non-directory entry — fires the
-	 * provider-appropriate default action. Local: launch
+	 * provider-appropriate default action for "the user pressed
+	 * Enter (or double-clicked) on this row". Local: launch
 	 * with the desktop's default app via xdg-open. Remote:
-	 * download into the preview pipeline. Optional; NULL
-	 * means "no action on activate". */
+	 * download to the configured download folder (the closest
+	 * analogue to xdg-open's "do the obvious thing" semantic
+	 * for a remote file). Optional; NULL means "no action on
+	 * activate".
+	 *
+	 * Preview is a separate action — see preview_entry below.
+	 * Misha asked for Enter-on-remote to download rather than
+	 * preview because download is the action users almost
+	 * always want on a remote row, and preview stays one F-key
+	 * (F3) or one button click away. */
     void (*activate_entry) (HxFilesProvider *self, HxFileEntry *e);
+
+    /* Explicit preview action — fired by the headerbar Preview
+	 * button and F3/Ctrl+P. Local: same as activate_entry
+	 * (xdg-open); the OS default app for the type IS the
+	 * preview. Remote: stream the file into the in-app preview
+	 * window (the old activate_entry body). Optional; default
+	 * fallback is to call activate_entry, which gives the
+	 * "preview means open by default" behaviour for any
+	 * provider that doesn't override it. */
+    void (*preview_entry) (HxFilesProvider *self, HxFileEntry *e);
 };
 
 /* Thin wrappers that dispatch through the vtable. Use these from
@@ -97,12 +116,31 @@ extern gboolean hx_files_provider_rename (HxFilesProvider *self,
 extern const char *
 hx_files_provider_get_unavailable_reason (HxFilesProvider *self);
 
-/* Default action on a non-directory entry. Provider decides
- * what that means — local launches xdg-open, remote streams
- * into the preview window. No-op if the provider didn't
- * override activate_entry. */
+/* Default row-activate action (Enter / double-click). Local
+ * launches xdg-open; remote queues a download. No-op if the
+ * provider didn't override activate_entry. */
 extern void hx_files_provider_activate_entry (HxFilesProvider *self,
                                               HxFileEntry *e);
+
+/* Explicit preview action (F3 / Ctrl+P / Preview button).
+ * Local providers that don't override fall back to
+ * activate_entry — for local files preview-via-xdg-open is the
+ * right answer. Remote providers stream into the in-app preview
+ * window. */
+extern void hx_files_provider_preview_entry (HxFilesProvider *self,
+                                             HxFileEntry *e);
+
+/* Sanitize a wire-supplied remote file name to a safe local
+ * basename. The Hotline name's bytes ride to the wire untouched
+ * (it can legitimately contain '/' under the Classic-Mac
+ * convention), but when we use it to build an on-disk path we
+ * must defang against path-traversal: a hostile server could
+ * supply "../../etc/passwd" or similar and escape the user's
+ * chosen download folder. This function strips path separators
+ * (replacing '/' and '\\' with '_'), rejects pure-dot names
+ * ("." and ".."), and falls back to "download" for empty /
+ * dangerous inputs. Caller frees with g_free. */
+extern char *hx_files_provider_safe_local_basename (const char *remote_name);
 
 G_END_DECLS
 
