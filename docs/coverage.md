@@ -57,7 +57,6 @@ cleanly but the overall percentage will look artificially low.
 | `src/*.c`      | Yes      | The whole production surface, with exclusions  |
 | `src/xtext.c`  | No       | Vendored HexChat fork (4500 LOC)               |
 | `src/dfa.c`    | No       | Vendored regex engine (2550 LOC)               |
-| `src/rand.c`   | No       | Slated for replacement with Nettle             |
 | `tests/`       | No       | Test code itself never counts                  |
 | `subprojects/` | No       | Wrapped dependencies                           |
 
