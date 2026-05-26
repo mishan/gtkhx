@@ -241,9 +241,25 @@ If we're going to chip away at this:
    duplicate `#include` lines and 13 redundant in-file extern
    prototypes whose declarations already live in the matching
    header.
-6. **Walk xtext.c, hfs.c, cicn.c, macres.c findings** — these
-   are ours; chip away at the bugprone-* clusters in batches
-   when touching the files.
+6. ✅ **Walk xtext.c, hfs.c, cicn.c, macres.c bugprone-\* clusters.**
+   Shipped on `claude/analyzer-step6-bugprone`. Cleared every
+   actionable real-concern category in those four files:
+   `implicit-widening-of-multiplication-result` (hfs.c x18 via
+   `SIZEOF_HFS_HDR_DESCR` cast, cicn.c x7 via per-site `(size_t)`),
+   `integer-division` (xtext.c x2 — Cairo / scrollbar page_size
+   now done in floating-point), `branch-clone` (xtext.c x1 —
+   merged the two RENDER_FLUSH branches with OR), `assert-side-
+   effect` (xtext.c x2 — NOLINT, false positive on g_assert
+   sizeof), `signed-char-misuse` (xtext.c x3 — charlen macro now
+   casts to guchar; hfs.c x2 — pathbuf cast to guint8 in compare),
+   `reserved-identifier` (macres.c x3 — `_e_int{16,24,32}`
+   renamed to `mr_extract_int*`), `not-null-terminated-result`
+   (hfs.c x1 — NOLINT on binary 8-byte type/creator memcpy),
+   `assignment-in-if-condition` (hfs.c x1 — split into two
+   statements). Remaining bugprone in these files
+   (narrowing-conversions, casting-through-void,
+   easily-swappable-parameters, switch-missing-default-case)
+   are stylistic / GObject-idiom noise; intentionally skipped.
 7. **Address the remaining `bugprone-*` clusters in core code**
    — assert-side-effect, integer-division, not-null-terminated-
    result, branch-clone. Each is small and surfaces a real

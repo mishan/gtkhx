@@ -354,12 +354,15 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 		return NULL;
 
 	/* Color table sits after both bitmap data blocks; pixel data is
-	 * the trailing rowBytes*height bytes of the resource. */
+	 * the trailing rowBytes*height bytes of the resource. Width and
+	 * height are bounded to <=4096 above so the multiplications can't
+	 * overflow, but the (size_t) casts pin the arithmetic to size_t
+	 * before pointer addition (silences bugprone-implicit-widening). */
 	ct = (ColorTable *)((unsigned char *)cicn_rsrc
 		+ 50 + 14 + 14 + 4
-		+ mbm_rb * mbm_h
-		+ bm_rb  * bm_h);
-	pixdata = ((unsigned char *)cicn_rsrc + len) - rowBytes * height;
+		+ (size_t)mbm_rb * mbm_h
+		+ (size_t)bm_rb  * bm_h);
+	pixdata = ((unsigned char *)cicn_rsrc + len) - (size_t)rowBytes * height;
 	maskdata = (unsigned char *)cicn_rsrc + 82;
 	have_mask = (mbm->bounds.right != 0 && mbm->bounds.bottom != 0);
 
@@ -406,7 +409,7 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 		 * the value field — could be all-0, which would explain
 		 * the all-black render). Also one pixdata byte sample so
 		 * we can correlate against the palette. */
-		if (ct_off + 8 + 4 * 8 <= len) {
+		if (ct_off + 8 + (size_t)4 * 8 <= len) {
 			GString *s = g_string_new (NULL);
 			for (unsigned int i = 0; i < 4 && i <= ctSize_raw; i++) {
 				/* ColorTable's ctTable[] is PACKED — take care
@@ -447,9 +450,9 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 	n_channels = gdk_pixbuf_get_n_channels (pb);  /* always 4 with alpha */
 
 	for (y = 0; y < height; y++) {
-		const unsigned char *id = pixdata + rowBytes * y;
-		const unsigned char *mp = have_mask ? (maskdata + mbm_rb * y) : NULL;
-		prow = pixels + y * rowstride;
+		const unsigned char *id = pixdata + (size_t)rowBytes * y;
+		const unsigned char *mp = have_mask ? (maskdata + (size_t)mbm_rb * y) : NULL;
+		prow = pixels + (size_t)y * rowstride;
 		for (x = 0; x < width; x++) {
 			unsigned int idx;
 			guint32 rgb;
@@ -566,7 +569,7 @@ cicn_add_halo (GdkPixbuf *src)
 			if (!has_neighbour)
 				continue;
 
-			p = pixels + y * rowstride + x * 4;
+			p = pixels + (size_t)y * rowstride + (size_t)x * 4;
 			p[0] = 0x80;	/* medium grey reads on both light and dark themes */
 			p[1] = 0x80;
 			p[2] = 0x80;

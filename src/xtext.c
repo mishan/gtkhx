@@ -85,7 +85,11 @@
 #include "xtext.h"
 #include "debug.h"
 
-#define charlen(str) g_utf8_skip[*(guchar *)(str)]
+/* g_utf8_skip is declared `const gchar *const` so the table cells are
+ * (signed) char on default-signed-char platforms. The stored values
+ * are 1..6 so the sign bit is never set, but we cast to guchar to
+ * silence bugprone-signed-char-misuse at every charlen() call site. */
+#define charlen(str) ((guchar)g_utf8_skip[*(guchar *)(str)])
 
 /* --- HexChat glue: keyboard-modifier name aliases -------------------- */
 #define STATE_SHIFT		GDK_SHIFT_MASK
@@ -570,7 +574,11 @@ xtext_draw_layout_line (cairo_t          *cr,
 		pango_glyph_string_extents (run->glyphs, run->item->analysis.font,
 											 NULL, &logical_rect);
 
-		cairo_move_to (cr, x + x_off / PANGO_SCALE, y);
+		/* Cairo takes a double for x; divide the PANGO_SCALE-units
+		 * width in floating point so we keep subpixel precision in
+		 * the per-glyph cursor and silence
+		 * bugprone-integer-division. */
+		cairo_move_to (cr, x + (double)x_off / PANGO_SCALE, y);
 		pango_cairo_show_glyph_string (cr, run->item->analysis.font, run->glyphs);
 
 		x_off += logical_rect.width;
@@ -792,7 +800,9 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 		 * (replacement is gtk_widget_compute_bounds, but we only need
 		 * width/height which the bare accessors give us). */
 		int alloc_h = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
-		page_size = alloc_h / buf->xtext->fontsize;
+		/* page_size is a double — let the adjustment carry fractional
+		 * pages when the viewport isn't a whole multiple of fontsize. */
+		page_size = (double)alloc_h / buf->xtext->fontsize;
 		gtk_adjustment_set_lower(adj, 0);
 		gtk_adjustment_set_upper(adj, buf->num_lines);
 
@@ -3413,14 +3423,11 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
                 */
 		if (offset == 0)
 		{
-			/* we've reached the end of the left part? */
-			if ((pstr-str)+j == ent->left_len)
-			{
-				RENDER_FLUSH;
-				pstr += j;
-				j = 0;
-			}
-			else if ((pstr-str)+j == ent->left_len+1)
+			/* end of the left part (or one byte past, for the
+			 * separator char) — flush a run so bidi state can
+			 * reset between left/separator/right. */
+			if ((pstr-str)+j == ent->left_len ||
+			    (pstr-str)+j == ent->left_len+1)
 			{
 				RENDER_FLUSH;
 				pstr += j;
@@ -5291,7 +5298,11 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	ent->str_len = left_len + 1 + right_len;
 	ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
 
-	/* This is copied into the scratch buffer later, double check math */
+	/* This is copied into the scratch buffer later, double check math.
+	 * clang-tidy's bugprone-assert-side-effect treats every -> on the
+	 * left of < as a "possible side effect" inside g_assert even
+	 * though neither ent->str_len nor sizeof() has any. */
+	/* NOLINTNEXTLINE(bugprone-assert-side-effect) */
 	g_assert (ent->str_len < sizeof (buf->xtext->scratch_buffer));
 
 	if (buf->time_stamp)
@@ -5370,6 +5381,8 @@ gtk_xtext_insert_indent_before (xtext_buffer *buf, textentry *anchor,
 	ent->str_len = left_len + 1 + right_len;
 	ent->indent = (buf->indent - left_width) - buf->xtext->space_width;
 
+	/* See sibling site above for why this is NOLINT'd. */
+	/* NOLINTNEXTLINE(bugprone-assert-side-effect) */
 	g_assert (ent->str_len < sizeof (buf->xtext->scratch_buffer));
 
 	if (buf->time_stamp)
