@@ -74,8 +74,6 @@ bookmarks_dir_legacy (void)
 static char *
 bookmark_resolve_path (const char *name)
 {
-    char *path;
-    char *legacy_dir;
     struct stat st;
 
     if (!name || !*name) {
@@ -95,26 +93,24 @@ bookmark_resolve_path (const char *name)
 
     /* primary */
     {
-        char *dir = bookmarks_dir_primary ();
-        path = g_build_filename (dir, name, NULL);
-        g_free (dir);
+        g_autofree char *dir = bookmarks_dir_primary ();
+        g_autofree char *path = g_build_filename (dir, name, NULL);
         if (stat (path, &st) == 0) {
-            return path;
+            return g_steal_pointer (&path);
         }
-        g_free (path);
     }
 
     /* legacy fallback */
-    legacy_dir = bookmarks_dir_legacy ();
-    if (!legacy_dir) {
-        return NULL;
+    {
+        g_autofree char *legacy_dir = bookmarks_dir_legacy ();
+        if (!legacy_dir) {
+            return NULL;
+        }
+        g_autofree char *path = g_build_filename (legacy_dir, name, NULL);
+        if (stat (path, &st) == 0) {
+            return g_steal_pointer (&path);
+        }
     }
-    path = g_build_filename (legacy_dir, name, NULL);
-    g_free (legacy_dir);
-    if (stat (path, &st) == 0) {
-        return path;
-    }
-    g_free (path);
     return NULL;
 }
 
@@ -126,10 +122,9 @@ bookmark_resolve_path (const char *name)
 static gboolean
 bookmark_in_legacy_only (const char *safe_name)
 {
-    char *legacy_dir;
-    char *legacy_path;
+    g_autofree char *legacy_dir = NULL;
+    g_autofree char *legacy_path = NULL;
     struct stat st;
-    gboolean present;
 
     if (!safe_name || !*safe_name) {
         return FALSE;
@@ -139,10 +134,7 @@ bookmark_in_legacy_only (const char *safe_name)
         return FALSE;
     }
     legacy_path = g_build_filename (legacy_dir, safe_name, NULL);
-    present = (stat (legacy_path, &st) == 0);
-    g_free (legacy_path);
-    g_free (legacy_dir);
-    return present;
+    return stat (legacy_path, &st) == 0;
 }
 
 /* ============================================================
@@ -237,18 +229,15 @@ hx_bookmark_list (void)
     GHashTable *seen;
     GPtrArray *names;
     GList *out = NULL;
-    char *primary, *legacy;
+    g_autofree char *primary = bookmarks_dir_primary ();
+    g_autofree char *legacy = bookmarks_dir_legacy ();
     guint i;
 
     seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     names = g_ptr_array_new_with_free_func (g_free);
 
-    primary = bookmarks_dir_primary ();
-    legacy = bookmarks_dir_legacy ();
     list_dir_into (seen, names, primary);
     list_dir_into (seen, names, legacy);
-    g_free (primary);
-    g_free (legacy);
 
     g_ptr_array_sort (names, str_collate);
 
@@ -272,9 +261,9 @@ hx_bookmark_list (void)
 HxBookmark *
 hx_bookmark_load (const char *name)
 {
-    char *path = bookmark_resolve_path (name);
+    g_autofree char *path = bookmark_resolve_path (name);
+    g_autoptr (HxBookmark) out = NULL;
     int bm;
-    HxBookmark *out = NULL;
     char header[5];
     char junk[132];
     char len_addr;
@@ -286,7 +275,6 @@ hx_bookmark_load (const char *name)
         return NULL;
     }
     bm = open (path, O_RDONLY);
-    g_free (path);
     if (bm < 0) {
         return NULL;
     }
@@ -372,11 +360,10 @@ hx_bookmark_load (const char *name)
     g_strlcpy (out->server, server_buf, sizeof (out->server));
 
     close (bm);
-    return out;
+    return g_steal_pointer (&out);
 
 fail:
     close (bm);
-    hx_bookmark_free (out);
     return NULL;
 }
 
@@ -395,10 +382,10 @@ write_all (FILE *f, const void *buf, size_t n)
 gboolean
 hx_bookmark_save (const HxBookmark *bm, GError **err)
 {
-    char *dir;
-    char *safe;
-    char *path;
-    char *server_str = NULL;
+    g_autofree char *dir = NULL;
+    g_autofree char *safe = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *server_str = NULL;
     FILE *f = NULL;
     char zeros[256];
     char hdr[6] = { 'H', 'T', 's', 'c', 0, 1 };
@@ -520,10 +507,6 @@ out:
     if (f) {
         fclose (f);
     }
-    g_free (server_str);
-    g_free (path);
-    g_free (dir);
-    g_free (safe);
     return ok;
 }
 
@@ -534,9 +517,9 @@ out:
 gboolean
 hx_bookmark_delete (const char *name, GError **err)
 {
-    char *path;
-    char *dir;
-    char *safe;
+    g_autofree char *path = NULL;
+    g_autofree char *dir = NULL;
+    g_autofree char *safe = NULL;
     gboolean ok = FALSE;
     int saved_errno;
 
@@ -552,20 +535,25 @@ hx_bookmark_delete (const char *name, GError **err)
     /* ENOENT-is-an-error contract — see the header docstring. A
 	 * bookmark that lives only in the legacy ~/.hx/bookmarks/ dir
 	 * is absent from the primary dir, so unlink returns ENOENT.
-	 * Distinguish the two cases for the user: a legacy-only entry
-	 * is read-only by design, so surface a clear "convert via
-	 * Connect dialog" message; an actually-missing file gets the
-	 * standard "no such file" so a tampered or stale list row is
-	 * still recoverable. */
+	 * Distinguish the two cases for the user: a legacy-location
+	 * entry is read-only by design (we only ever write to the
+	 * primary dir), so point the user at the migration path —
+	 * resaving from this dialog writes an HTsc copy into the
+	 * primary dir, which then unlinks cleanly. An actually-missing
+	 * file gets the standard "no such file" so a tampered or stale
+	 * list row is still recoverable. The on-disk byte layout is
+	 * identical between the two locations — only the directory
+	 * changed, not the format. */
     if (unlink (path) == 0) {
         ok = TRUE;
     } else {
         saved_errno = errno;
         if (saved_errno == ENOENT && bookmark_in_legacy_only (safe)) {
             g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_PERM,
-                         "\"%s\" is a legacy bookmark and can't be "
-                         "deleted from here. Open it from the Connect "
-                         "dialog to convert.",
+                         "\"%s\" lives in the legacy ~/.hx/bookmarks/ "
+                         "directory. Save it once from this dialog to "
+                         "copy it to the current bookmarks directory, "
+                         "then you can delete it.",
                          name);
         } else {
             g_set_error (err, G_FILE_ERROR,
@@ -574,21 +562,19 @@ hx_bookmark_delete (const char *name, GError **err)
         }
     }
 
-    g_free (path);
-    g_free (dir);
-    g_free (safe);
     return ok;
 }
 
 gboolean
 hx_bookmark_rename (const char *old_name, const char *new_name, GError **err)
 {
-    char *dir;
-    char *old_safe, *new_safe;
-    char *old_path, *new_path;
+    g_autofree char *dir = NULL;
+    g_autofree char *old_safe = NULL;
+    g_autofree char *new_safe = NULL;
+    g_autofree char *old_path = NULL;
+    g_autofree char *new_path = NULL;
     struct stat st;
     int saved_errno;
-    gboolean ok = FALSE;
 
     if (!old_name || !*old_name || !new_name || !*new_name) {
         g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_INVAL,
@@ -611,32 +597,26 @@ hx_bookmark_rename (const char *old_name, const char *new_name, GError **err)
     if (stat (new_path, &st) == 0) {
         g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_EXIST,
                      "bookmark \"%s\" already exists", new_name);
-        goto out;
+        return FALSE;
     }
 
     if (rename (old_path, new_path) == 0) {
-        ok = TRUE;
-    } else {
-        saved_errno = errno;
-        if (saved_errno == ENOENT && bookmark_in_legacy_only (old_safe)) {
-            g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_PERM,
-                         "\"%s\" is a legacy bookmark and can't be "
-                         "renamed from here. Open it from the Connect "
-                         "dialog to convert.",
-                         old_name);
-        } else {
-            g_set_error (err, G_FILE_ERROR,
-                         g_file_error_from_errno (saved_errno),
-                         "rename %s -> %s: %s", old_path, new_path,
-                         g_strerror (saved_errno));
-        }
+        return TRUE;
     }
 
-out:
-    g_free (old_path);
-    g_free (new_path);
-    g_free (old_safe);
-    g_free (new_safe);
-    g_free (dir);
-    return ok;
+    saved_errno = errno;
+    if (saved_errno == ENOENT && bookmark_in_legacy_only (old_safe)) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_PERM,
+                     "\"%s\" lives in the legacy ~/.hx/bookmarks/ "
+                     "directory. Save it once from this dialog to "
+                     "copy it to the current bookmarks directory, "
+                     "then you can rename it.",
+                     old_name);
+    } else {
+        g_set_error (err, G_FILE_ERROR,
+                     g_file_error_from_errno (saved_errno),
+                     "rename %s -> %s: %s", old_path, new_path,
+                     g_strerror (saved_errno));
+    }
+    return FALSE;
 }

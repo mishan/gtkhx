@@ -46,6 +46,12 @@ typedef struct {
 extern HxBookmark *hx_bookmark_new (void);
 extern void hx_bookmark_free (HxBookmark *bm);
 
+/* Lets callers use g_autoptr(HxBookmark) for scope-bound ownership of
+ * the result of hx_bookmark_load. The cleanup func is hx_bookmark_free,
+ * which is already NULL-safe, so g_autoptr drops cleanly on early
+ * return / goto / branch without per-path g_free bookkeeping. */
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (HxBookmark, hx_bookmark_free)
+
 /* Canonicalize a user-typed name into the on-disk filename:
  * replaces '/' with '\\' (the convention connect.c::save_bookmark_response
  * has used since Phase 5). Returns g_strdup'd; NULL on NULL/empty

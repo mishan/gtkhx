@@ -206,9 +206,10 @@ make_bookmark (const char *name, const char *server, const char *port,
 static void
 test_save_load_roundtrip (Fixture *f, gconstpointer data)
 {
-    HxBookmark *bm;
-    HxBookmark *out;
+    g_autoptr (HxBookmark) bm = NULL;
+    g_autoptr (HxBookmark) out = NULL;
     GError *err = NULL;
+    (void)f;
     (void)data;
 
     bm = make_bookmark ("mhxd", "hotline.example.org", "5500", "admin",
@@ -228,9 +229,6 @@ test_save_load_roundtrip (Fixture *f, gconstpointer data)
     g_assert_cmpint (out->secure, ==, 1);
     g_assert_cmpint (out->compress, ==, 2);
     g_assert_cmpint (out->cipher, ==, 1);
-
-    hx_bookmark_free (bm);
-    hx_bookmark_free (out);
 }
 
 /* Roundtrip with a blank port — the writer omits the ':port' suffix
@@ -239,8 +237,9 @@ test_save_load_roundtrip (Fixture *f, gconstpointer data)
 static void
 test_save_load_blank_port (Fixture *f, gconstpointer data)
 {
-    HxBookmark *bm;
-    HxBookmark *out;
+    g_autoptr (HxBookmark) bm = NULL;
+    g_autoptr (HxBookmark) out = NULL;
+    (void)f;
     (void)data;
 
     bm = make_bookmark ("default-port", "host.example", "", "u", "p");
@@ -250,9 +249,6 @@ test_save_load_blank_port (Fixture *f, gconstpointer data)
     g_assert_nonnull (out);
     g_assert_cmpstr (out->server, ==, "host.example");
     g_assert_cmpstr (out->port, ==, "");
-
-    hx_bookmark_free (bm);
-    hx_bookmark_free (out);
 }
 
 /* Byte-layout check: the first 6 bytes are the "HTsc\0\1" magic, and
@@ -305,7 +301,7 @@ test_htsc_byte_layout (Fixture *f, gconstpointer data)
 static void
 test_load_missing (Fixture *f, gconstpointer data)
 {
-    HxBookmark *out;
+    g_autoptr (HxBookmark) out = NULL;
     (void)f;
     (void)data;
     out = hx_bookmark_load ("not-there");
@@ -347,10 +343,9 @@ test_list_dedup_sort_and_dotfiles (Fixture *f, gconstpointer data)
     /* The "dup" entry has to be the primary version — listing must
 	 * not shadow the user's primary save with the legacy file. */
     {
-        HxBookmark *dup = hx_bookmark_load ("dup");
+        g_autoptr (HxBookmark) dup = hx_bookmark_load ("dup");
         g_assert_nonnull (dup);
         g_assert_cmpstr (dup->server, ==, "primary-version");
-        hx_bookmark_free (dup);
     }
 
     g_list_free_full (list, g_free);
@@ -361,12 +356,11 @@ test_list_dedup_sort_and_dotfiles (Fixture *f, gconstpointer data)
 static void
 test_rename_succeeds (Fixture *f, gconstpointer data)
 {
-    HxBookmark *bm;
-    HxBookmark *out;
+    g_autoptr (HxBookmark) bm = NULL;
+    g_autoptr (HxBookmark) out = NULL;
     (void)data;
     bm = make_bookmark ("oldname", "h", "", "", "");
     g_assert_true (hx_bookmark_save (bm, NULL));
-    hx_bookmark_free (bm);
 
     g_assert_true (hx_bookmark_rename ("oldname", "newname", NULL));
     g_assert_false (file_exists (f->primary_dir, "oldname"));
@@ -375,7 +369,6 @@ test_rename_succeeds (Fixture *f, gconstpointer data)
     out = hx_bookmark_load ("newname");
     g_assert_nonnull (out);
     g_assert_cmpstr (out->name, ==, "newname");
-    hx_bookmark_free (out);
 }
 
 /* Rename refuses to clobber an existing target — both files survive. */
@@ -415,9 +408,9 @@ test_rename_legacy_only_clear_error (Fixture *f, gconstpointer data)
 
     g_assert_false (hx_bookmark_rename ("legacy-only", "renamed", &err));
     g_assert_error (err, G_FILE_ERROR, G_FILE_ERROR_PERM);
-    /* The error message has to mention the Connect dialog so the
-	 * user knows what to do next. */
-    g_assert_nonnull (strstr (err->message, "Connect"));
+    /* The error message has to mention the legacy directory so the
+	 * user knows why this failed and how to migrate. */
+    g_assert_nonnull (strstr (err->message, "legacy"));
     g_error_free (err);
 }
 
@@ -434,7 +427,7 @@ test_delete_legacy_only_clear_error (Fixture *f, gconstpointer data)
 
     g_assert_false (hx_bookmark_delete ("legacy-del", &err));
     g_assert_error (err, G_FILE_ERROR, G_FILE_ERROR_PERM);
-    g_assert_nonnull (strstr (err->message, "Connect"));
+    g_assert_nonnull (strstr (err->message, "legacy"));
     g_error_free (err);
 
     /* Legacy file is untouched. */
@@ -454,8 +447,8 @@ test_delete_truly_missing (Fixture *f, gconstpointer data)
 
     g_assert_false (hx_bookmark_delete ("never-existed", &err));
     g_assert_error (err, G_FILE_ERROR, G_FILE_ERROR_NOENT);
-    /* No "Connect" mention — this isn't the legacy path. */
-    g_assert_null (strstr (err->message, "Connect"));
+    /* No "legacy" mention — this isn't the legacy-location path. */
+    g_assert_null (strstr (err->message, "legacy"));
     g_error_free (err);
 }
 
@@ -480,17 +473,18 @@ test_delete_succeeds (Fixture *f, gconstpointer data)
 static void
 test_safe_filename_slash (Fixture *f, gconstpointer data)
 {
-    char *out;
     (void)f;
     (void)data;
 
-    out = hx_bookmark_safe_filename ("foo/bar/baz");
-    g_assert_cmpstr (out, ==, "foo\\bar\\baz");
-    g_free (out);
+    {
+        g_autofree char *out = hx_bookmark_safe_filename ("foo/bar/baz");
+        g_assert_cmpstr (out, ==, "foo\\bar\\baz");
+    }
 
-    out = hx_bookmark_safe_filename ("no-slashes-here");
-    g_assert_cmpstr (out, ==, "no-slashes-here");
-    g_free (out);
+    {
+        g_autofree char *out = hx_bookmark_safe_filename ("no-slashes-here");
+        g_assert_cmpstr (out, ==, "no-slashes-here");
+    }
 
     g_assert_null (hx_bookmark_safe_filename (NULL));
     g_assert_null (hx_bookmark_safe_filename (""));
@@ -503,14 +497,13 @@ test_safe_filename_slash (Fixture *f, gconstpointer data)
 static void
 test_save_with_slash_canonicalizes (Fixture *f, gconstpointer data)
 {
-    HxBookmark *bm;
-    HxBookmark *out;
-    char *safe;
+    g_autoptr (HxBookmark) bm = NULL;
+    g_autoptr (HxBookmark) out = NULL;
+    g_autofree char *safe = NULL;
     (void)data;
 
     bm = make_bookmark ("group/server", "h", "", "", "");
     g_assert_true (hx_bookmark_save (bm, NULL));
-    hx_bookmark_free (bm);
 
     /* On-disk file is the canonicalized form. */
     g_assert_true (file_exists (f->primary_dir, "group\\server"));
@@ -519,8 +512,6 @@ test_save_with_slash_canonicalizes (Fixture *f, gconstpointer data)
     safe = hx_bookmark_safe_filename ("group/server");
     out = hx_bookmark_load (safe);
     g_assert_nonnull (out);
-    hx_bookmark_free (out);
-    g_free (safe);
 }
 
 /* bookmark_resolve_path rejects '/' in names — direct load with a
