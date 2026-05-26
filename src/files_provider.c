@@ -134,3 +134,52 @@ hx_files_provider_activate_entry (HxFilesProvider *self, HxFileEntry *e)
         iface->activate_entry (self, e);
     }
 }
+
+void
+hx_files_provider_preview_entry (HxFilesProvider *self, HxFileEntry *e)
+{
+    HxFilesProviderInterface *iface;
+    g_return_if_fail (HX_IS_FILES_PROVIDER (self));
+    iface = HX_FILES_PROVIDER_GET_IFACE (self);
+    /* preview_entry is optional and falls back to activate_entry
+	 * — for the local provider that means "the OS default app IS
+	 * the preview", which is the right answer. */
+    if (iface->preview_entry) {
+        iface->preview_entry (self, e);
+    } else if (iface->activate_entry) {
+        iface->activate_entry (self, e);
+    }
+}
+
+char *
+hx_files_provider_safe_local_basename (const char *remote_name)
+{
+    char *out, *p;
+
+    /* Empty / NULL: fall back to a generic placeholder. */
+    if (!remote_name || !*remote_name) {
+        return g_strdup ("download");
+    }
+
+    /* Replace path separators with '_'. Hotline's wire name can
+	 * legitimately contain '/' under the Classic-Mac convention,
+	 * but we're constructing a local path — '/' (and '\\' for
+	 * Win-style names) would let a hostile server break out of
+	 * the user's download directory. */
+    out = g_strdup (remote_name);
+    for (p = out; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            *p = '_';
+        }
+    }
+
+    /* Pure-dot names map to the parent / current directory at the
+	 * filesystem level; replace with the generic placeholder so
+	 * the resulting g_build_filename can't escape upward. */
+    if (g_strcmp0 (out, ".") == 0 || g_strcmp0 (out, "..") == 0) {
+        g_free (out);
+        return g_strdup ("download");
+    }
+
+    return out;
+}

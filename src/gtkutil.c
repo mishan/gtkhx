@@ -728,6 +728,61 @@ gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
     return btn;
 }
 
+/* Pixbuf-source companion to gtkhx_pixmap_button. The caller already
+ * has a GdkPixbuf in hand (e.g. from cicn_to_pixbuf via load_icon),
+ * so we skip the GResource lookup and reuse the same scaling +
+ * GtkPicture wrapping the resource variant does. Returns NULL only
+ * if pixbuf is NULL — call sites that allow a missing-icon fallback
+ * should null-check the return. */
+GtkWidget *
+gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
+                     GCallback cb, gpointer user_data)
+{
+    GtkWidget *btn;
+    GdkPixbuf *use_pb;
+    GdkTexture *tex;
+    GtkWidget *picture;
+
+    if (!pixbuf) {
+        return NULL;
+    }
+
+    btn = gtk_button_new ();
+
+    if (scale > 1) {
+        int w = gdk_pixbuf_get_width (pixbuf) * scale;
+        int h = gdk_pixbuf_get_height (pixbuf) * scale;
+        use_pb = gdk_pixbuf_scale_simple (pixbuf, w, h, GDK_INTERP_NEAREST);
+    } else {
+        use_pb = g_object_ref (pixbuf);
+    }
+
+    /* scale_simple may return NULL under OOM. Fall back to the
+	 * unscaled source rather than letting the next line dereference
+	 * a NULL pixbuf and crash. This matches gtkhx_pixmap_button's
+	 * defensive handling of its own allocation failures. */
+    if (!use_pb) {
+        use_pb = g_object_ref (pixbuf);
+    }
+
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    tex = gdk_texture_new_for_pixbuf (use_pb);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+    g_object_unref (tex);
+    gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    gtkhx_widget_set_child (btn, picture);
+
+    if (tooltip) {
+        gtk_widget_set_tooltip_text (btn, tooltip);
+    }
+    if (cb) {
+        g_signal_connect (btn, "clicked", cb, user_data);
+    }
+    g_object_unref (use_pb);
+    return btn;
+}
+
 /* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
  * gtk_window_destroy which tears down the surface and drops refs.
  * Non-toplevels: if the widget has a parent, unparent it (the

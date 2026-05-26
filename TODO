@@ -1,8 +1,3 @@
-High Priority for 1.0.0 Release:
-- Fix button icons in Files browser
-- Bug stomping / fixing in Files browser
-- Add missing actions to News browser
-
 User Editor:
 - Need to check that it works, and polish the UI
 
@@ -24,7 +19,6 @@ i18n:
 Security:
 - TLS support (see mobius as an example server that supports it; https://github.com/jhalter/mobius/blob/master/docs/tls.md)
   - Also I think Janus supports it?
-- Default to encryption on? Can we tell if a server supports encryption? If not, we can try connecting with encryption first, and then fallback to no encryption
 
 Bookmarks:
 - Better bookmark management, allowing user to add/edit/delete bookmarks within GtkHx

@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 
 #include "hx.h"        /* the_session */
+#include "debug.h"     /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
 #include "hl_access.h" /* HL_ACCESS_* + hl_access_has */
 #include "files.h"     /* ICON_* */
 #include "files_complete.h"
@@ -56,6 +57,71 @@ struct _files_panel {
 	 * type and calls files_panel_set_provider. */
     files_panel_swap_cb swap_cb;
     gpointer swap_cb_user_data;
+
+    /* Backing for the click-on-selected-name rename gesture.
+	 * When the row-click gesture fires, we record the row's
+	 * entry + its GtkEditableLabel widget and arm a 350 ms
+	 * timer. If the timer fires without being cancelled by a
+	 * subsequent click (the second click of a double-click
+	 * cancels it via row activation), we call
+	 * gtk_editable_label_start_editing on the label and the
+	 * user gets a focused in-line text entry to retype the
+	 * name. Commit/cancel is wired through the label's
+	 * notify::editing signal in on_label_editing_changed.
+	 *
+	 * The 350 ms threshold is above GtkSettings's default
+	 * double-click-time (250 ms in GNOME defaults) with a
+	 * small safety margin, so a normal double-click never
+	 * trips the inline-rename path.
+	 *
+	 * pending_label is g_object_ref'd while the timer is
+	 * armed: between click and fire a provider swap or items-
+	 * changed could destroy the row and free the label out
+	 * from under us. The ref keeps the widget memory alive
+	 * long enough for inline_rename_fire to safely inspect
+	 * it; the pending_name check then rejects fire if the
+	 * label was recycled to a different entry.
+	 * inline_rename_cancel is also called from
+	 * panel_detach_provider and on_items_changed so the
+	 * timer doesn't outlive a listing swap.
+	 *
+	 * pending_name is a strdup of the entry's name at click
+	 * time, used by inline_rename_fire to confirm the label
+	 * is still bound to the same entry before kicking off
+	 * editing — a defensive check against rebind-between-
+	 * click-and-timer-fire. */
+    guint inline_rename_timer_id;
+    HxFileEntry *inline_rename_pending; /* full ref */
+    GtkWidget *inline_rename_pending_label; /* full ref while armed */
+    char *inline_rename_pending_name;
+
+    /* The GtkEditableLabel currently in edit mode, or NULL.
+	 * Tracked here (not queried from the model) so we can find
+	 * and stop the previously-editing label when the user clicks
+	 * a different row. Refreshed in on_label_editing_changed on
+	 * every editing-state transition; held without a ref because
+	 * the column view owns the label widget. */
+    GtkWidget *editing_label;
+
+    /* Per-panel record of the last primary-button click. The
+	 * inline-rename gate compares the current click to this:
+	 * the rename arms only when the user clicks the SAME row
+	 * twice, with a pause between them long enough that it
+	 * couldn't be a double-click. This is the Finder /
+	 * Nautilus / GNOME Files gesture.
+	 *
+	 * Earlier drafts tried to gate by reading the selection
+	 * model — both pre-click snapshot (couldn't reliably
+	 * fire before the column view's own selection update,
+	 * regardless of which ancestor widget we attached the
+	 * snapshot gesture to) and post-click selection-changed
+	 * time-stamping (selection-changed didn't always fire
+	 * synchronously with the click event the way we needed).
+	 * Tracking our own click history avoids both pitfalls —
+	 * we don't depend on phase order or signal timing, only
+	 * on the two presses arriving in the same widget. */
+    gint last_clicked_pos;       /* -1 initially; row position of last click */
+    gint64 last_click_time_us;   /* monotonic time of last click */
 
     /* Set TRUE when the user triggers a navigation FROM this
 	 * panel (double-click row, Up button, path entry Enter).
@@ -296,6 +362,378 @@ cmp_kind (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 
 /* ---- Column factories ---- */
 
+/* Cancel any pending inline-rename timer. Called when the
+ * gesture is superseded — a double-click that activates the row,
+ * a different row click, panel teardown, items-changed on the
+ * underlying listing, or a provider swap. */
+static void
+inline_rename_cancel (files_panel *p)
+{
+    if (p->inline_rename_timer_id) {
+        g_source_remove (p->inline_rename_timer_id);
+        p->inline_rename_timer_id = 0;
+    }
+    g_clear_object (&p->inline_rename_pending);
+    /* The label is owned via g_object_ref while the timer is
+	 * armed (see arming site at the end of on_name_label_pressed
+	 * and the field comment in struct _files_panel). Release that
+	 * ref here. g_clear_object on the GtkWidget* is safe — GTK
+	 * widgets are GObjects. */
+    g_clear_object (&p->inline_rename_pending_label);
+    g_clear_pointer (&p->inline_rename_pending_name, g_free);
+}
+
+static gboolean
+inline_rename_fire (gpointer user_data)
+{
+    files_panel *p = user_data;
+    HxFileEntry *e;
+    GtkWidget *label;
+    char *expected_name;
+
+    p->inline_rename_timer_id = 0;
+
+    /* Drain the pending state into locals before doing anything that
+	 * could re-enter (the start-editing call below transfers focus
+	 * which can fire other signal handlers). */
+    e = p->inline_rename_pending;
+    label = p->inline_rename_pending_label;
+    expected_name = p->inline_rename_pending_name;
+    p->inline_rename_pending = NULL;
+    p->inline_rename_pending_label = NULL;
+    p->inline_rename_pending_name = NULL;
+
+    debug_log ("files", "inline_rename_fire: expected=%s",
+               expected_name ? expected_name : "(null)");
+
+    if (label && GTK_IS_EDITABLE_LABEL (label) && expected_name) {
+        /* Defensive: confirm the label is still bound to the same
+		 * entry we armed against. The column view recycles row
+		 * widgets, so a rebind during the 350 ms window could leave
+		 * this label pointing at a different file. The "old-name"
+		 * data refreshed in name_bind is our anchor. */
+        const char *current
+            = g_object_get_data (G_OBJECT (label), "old-name");
+        debug_log ("files",
+                   "  current_label_name=%s editing=%d",
+                   current ? current : "(null)",
+                   gtk_editable_label_get_editing (GTK_EDITABLE_LABEL (label)));
+        if (g_strcmp0 (current, expected_name) == 0
+            && !gtk_editable_label_get_editing (GTK_EDITABLE_LABEL (label))) {
+            debug_log ("files", "  START editing");
+            /* Flip editable on first so start_editing isn't a no-op
+			 * (GtkEditableLabel won't enter edit mode when the
+			 * underlying GtkEditable.editable is FALSE). The leave-
+			 * edit handler flips it back to FALSE. */
+            gtk_editable_set_editable (GTK_EDITABLE (label), TRUE);
+            gtk_editable_label_start_editing (GTK_EDITABLE_LABEL (label));
+            /* Select all so the user can immediately type a
+			 * replacement, matching Finder / Nautilus behaviour. */
+            gtk_editable_select_region (GTK_EDITABLE (label), 0, -1);
+        }
+    }
+    g_clear_object (&e);
+    /* The label held a g_object_ref taken at arm time; release it
+	 * now (drain transferred ownership of the ref to `label`). */
+    g_clear_object (&label);
+    g_free (expected_name);
+    return G_SOURCE_REMOVE;
+}
+
+/* Stop any in-progress inline rename without committing.
+ *
+ * Order matters: gtk_editable_label_stop_editing(FALSE) must run
+ * BEFORE we move focus off the entry. If grab_focus on the column
+ * view ran first, label_A's internal GtkText would lose focus,
+ * which triggers GtkEditableLabel's own focus-out path — that
+ * commits and finalizes through a different code path that
+ * doesn't always swap the internal GtkStack back to label mode
+ * promptly (the entry chrome visibly sticks around in that case,
+ * which is exactly the symptom we're working around). Calling our
+ * explicit stop_editing(FALSE) first triggers the direct
+ * stack-swap path; the focus move afterwards is a defensive
+ * cleanup for builds where stop_editing alone leaves focus
+ * orphaned on the now-hidden entry.
+ *
+ * Safe to call when no edit is in progress (early-returns on
+ * editing_label==NULL). */
+static void
+panel_stop_inline_edit (files_panel *p)
+{
+    GtkWidget *label;
+
+    if (!p || !p->editing_label) {
+        return;
+    }
+    label = p->editing_label;
+    if (!GTK_IS_EDITABLE_LABEL (label)) {
+        p->editing_label = NULL;
+        return;
+    }
+    debug_log ("files", "panel_stop_inline_edit: cancelling edit");
+
+    /* Direct programmatic exit — switches the internal stack from
+	 * entry to label mode synchronously. Triggers notify::editing
+	 * (FALSE) which on_label_editing_changed handles: clears
+	 * p->editing_label, flips editable back to FALSE, handles the
+	 * commit/revert decision (no commit here since FALSE). */
+    gtk_editable_label_stop_editing (GTK_EDITABLE_LABEL (label),
+                                     /*commit=*/FALSE);
+
+    /* Move focus off the (now-hidden) entry. After stop_editing
+	 * the entry is no longer the stack's visible-child, but focus
+	 * may still be on it logically. Without this, subsequent
+	 * keyboard input goes nowhere useful. */
+    if (p->column_view) {
+        gtk_widget_grab_focus (p->column_view);
+    }
+
+    /* Defensive: on_label_editing_changed normally handles the
+	 * cleanup, but force it here too in case notify::editing didn't
+	 * fire (some GTK builds skip the notify when called from inside
+	 * another focus transition). */
+    if (p->editing_label == label) {
+        p->editing_label = NULL;
+    }
+    gtk_editable_set_editable (GTK_EDITABLE (label), FALSE);
+}
+
+/* notify::editing handler — fires twice per inline-rename
+ * session: once when the user enters editing (we use that to
+ * select-all the text) and once when they leave (Enter, Escape,
+ * or focus-out). On the leave-edit transition, commit if the
+ * text changed; revert silently on empty or failed-rename.
+ *
+ * Errors get a g_warning rather than a toast because the panel
+ * doesn't have access to the browser's AdwToastOverlay — adding
+ * an error callback through files_panel_new is overkill for what
+ * should be a rare failure path. */
+static void
+on_label_editing_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
+{
+    files_panel *p = user_data;
+    GtkEditableLabel *el = GTK_EDITABLE_LABEL (obj);
+    gboolean editing;
+    const char *new_name, *old_name;
+    GError *err = NULL;
+    (void)pspec;
+
+    editing = gtk_editable_label_get_editing (el);
+    if (editing) {
+        p->editing_label = GTK_WIDGET (el);
+        gtk_editable_select_region (GTK_EDITABLE (el), 0, -1);
+        return;
+    }
+
+    /* Editing finished. Flip editable back to FALSE so the next
+	 * click on the now-display-mode label doesn't reopen edit
+	 * mode via GtkEditableLabel's built-in click handler — our
+	 * rename gate is the only thing that should re-enter edit. */
+    gtk_editable_set_editable (GTK_EDITABLE (el), FALSE);
+    if (p->editing_label == GTK_WIDGET (el)) {
+        p->editing_label = NULL;
+    }
+
+    new_name = gtk_editable_get_text (GTK_EDITABLE (el));
+    old_name = g_object_get_data (obj, "old-name");
+    if (!old_name) {
+        return;
+    }
+    if (!new_name || !*new_name || g_strcmp0 (new_name, old_name) == 0) {
+        /* Empty or unchanged — revert the displayed text to the
+		 * known-good old name in case the user blanked the entry. */
+        gtk_editable_set_text (GTK_EDITABLE (el), old_name);
+        return;
+    }
+
+    if (!hx_files_provider_rename (p->provider, old_name, new_name, &err)) {
+        g_warning ("files: inline rename %s -> %s failed: %s",
+                   old_name, new_name,
+                   err ? err->message : "(no message)");
+        gtk_editable_set_text (GTK_EDITABLE (el), old_name);
+        g_clear_error (&err);
+        return;
+    }
+    /* Success: update the stashed old-name so a quick second edit
+	 * compares against the new name. The provider's reload-on-
+	 * navigated path will eventually rebind the row with the fresh
+	 * name from the listing, which would also refresh old-name, but
+	 * that's an async round-trip for the remote case. */
+    g_object_set_data_full (obj, "old-name", g_strdup (new_name), g_free);
+}
+
+/* Click on the row. Arm the inline-rename timer if and only if
+ * this click is the SECOND primary click on the same row, with
+ * enough pause between the two to rule out a double-click. The
+ * two-click-with-pause is the Finder / Nautilus / GNOME Files
+ * rename gesture.
+ *
+ * We track the clicks ourselves (last_clicked_pos +
+ * last_click_time_us) rather than reading the selection model
+ * because earlier attempts to gate on selection state lost the
+ * phase race — the column view updates its selection model
+ * before any CAPTURE-phase observer we could attach was reached,
+ * and selection-changed didn't always fire in time-based ways
+ * we could use either. Tracking our own clicks is phase-order-
+ * independent.
+ *
+ * We deliberately don't claim the gesture — the column view's
+ * own click handler still runs alongside, so single-click selects
+ * the row and double-click activates as usual. */
+static void
+on_name_label_pressed (GtkGestureClick *gesture, int n_press, double x,
+                       double y, gpointer user_data)
+{
+    files_panel *p = user_data;
+    GtkWidget *row, *label;
+    GtkListItem *item;
+    HxFileEntry *e;
+    guint pos;
+    gint64 now_us, delta_us;
+    gboolean same_row, paused_enough;
+    (void)x;
+    (void)y;
+
+    debug_log ("files", "on_name_label_pressed: n_press=%d", n_press);
+
+    /* Only the very first press in a press-sequence is interesting;
+	 * the second press of a double-click is what fires row activation
+	 * and we want that to win. */
+    if (n_press != 1) {
+        debug_log ("files", "  cancel: n_press != 1");
+        inline_rename_cancel (p);
+        return;
+    }
+    row = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    item = g_object_get_data (G_OBJECT (row), "list-item");
+    if (!item) {
+        debug_log ("files", "  bail: no list-item on row");
+        return;
+    }
+    pos = gtk_list_item_get_position (item);
+    e = gtk_list_item_get_item (item);
+    debug_log ("files", "  pos=%u entry=%s",
+               pos, e ? hx_file_entry_get_name (e) : "(null)");
+
+    /* GtkEditableLabel doesn't always propagate clicks down to the
+	 * column view's row-selection gesture (preexisting behaviour —
+	 * GtkLabel descendants tend to consume button events for their
+	 * own selection / cursor handling even when they don't act on
+	 * the click). Result: clicking a row's name region might select
+	 * the row, but might not. Synthesize the selection ourselves so
+	 * the row always lights up; the call is idempotent for an
+	 * already-selected row.
+	 *
+	 * Only synthesize on a plain click. With Ctrl or Shift held the
+	 * user means to toggle or extend the existing selection; an
+	 * exclusive-select here would clobber GtkMultiSelection's
+	 * modifier-aware logic running in the column view's own gesture
+	 * (and break Ctrl/Shift-click multi-select on name-column
+	 * clicks). On modified clicks we skip the synth and accept the
+	 * preexisting label-eats-click pitfall — the user can Ctrl/
+	 * Shift-click any non-label cell to extend selection
+	 * unimpeded. */
+    {
+        GdkEvent *ev = gtk_event_controller_get_current_event (
+            GTK_EVENT_CONTROLLER (gesture));
+        GdkModifierType mods = ev ? gdk_event_get_modifier_state (ev) : 0;
+        if (!(mods & (GDK_CONTROL_MASK | GDK_SHIFT_MASK))) {
+            gtk_selection_model_select_item (
+                GTK_SELECTION_MODEL (p->selection), pos,
+                /*exclusive=*/TRUE);
+        }
+    }
+
+    /* If a different label was in edit mode and the user just
+	 * clicked elsewhere, cancel that edit. The synthesized
+	 * selection above will fire on_selection_changed which also
+	 * calls panel_stop_inline_edit, but only when the click is
+	 * on a row OTHER than the editing one — and we want to be
+	 * safe across all phase-order outcomes, so call it directly
+	 * here when this_label != editing_label. Idempotent. */
+    {
+        GtkWidget *this_label = g_object_get_data (G_OBJECT (row), "label");
+        if (p->editing_label && p->editing_label != this_label) {
+            panel_stop_inline_edit (p);
+        }
+    }
+
+    if (!e || hx_file_entry_is_dir (e)) {
+        /* Inline-rename on directories is dangerous — users often
+		 * mean to navigate. The headerbar Rename / F2 still works
+		 * on dirs; this gesture is a power-user shortcut for files. */
+        debug_log ("files", "  cancel: dir or null entry");
+        inline_rename_cancel (p);
+        return;
+    }
+    label = g_object_get_data (G_OBJECT (row), "label");
+    if (!label || !GTK_IS_EDITABLE_LABEL (label)) {
+        debug_log ("files", "  bail: no/invalid label widget");
+        return;
+    }
+
+    /* If the row is already in edit mode, this click is the user
+	 * trying to reposition the cursor inside the entry. Don't arm
+	 * a new rename timer; the entry's own click handler will take
+	 * care of cursor placement. */
+    if (gtk_editable_label_get_editing (GTK_EDITABLE_LABEL (label))) {
+        debug_log ("files", "  cancel: label already editing");
+        inline_rename_cancel (p);
+        return;
+    }
+
+    /* Two-click-with-pause gate. */
+    {
+        gint prev_pos = p->last_clicked_pos;
+        now_us = g_get_monotonic_time ();
+        same_row = (prev_pos == (gint) pos);
+        delta_us = now_us - p->last_click_time_us;
+        /* Update history for the next click BEFORE evaluating
+		 * the arm — even if we don't arm here, this click is the
+		 * baseline for the next one. */
+        p->last_clicked_pos = (gint) pos;
+        p->last_click_time_us = now_us;
+
+        /* 350 ms is well above GtkSettings's default double-click
+		 * time (250 ms) so a fast second click that forms a
+		 * double-click doesn't arm; it falls through to
+		 * on_row_activated. */
+        paused_enough = (delta_us >= 350000);
+
+        debug_log ("files",
+                   "  gate: prev_pos=%d cur_pos=%u same_row=%d "
+                   "delta_us=%lld paused_enough=%d",
+                   prev_pos, pos, same_row, (long long) delta_us,
+                   paused_enough);
+    }
+
+    if (!same_row || !paused_enough) {
+        debug_log ("files", "  cancel: gate failed");
+        inline_rename_cancel (p);
+        return;
+    }
+    debug_log ("files", "  ARM rename timer (350ms) for pos=%u", pos);
+
+    /* Same row, with a real pause between clicks → arm the
+	 * 350 ms inline-rename timer. The timer's threshold matches
+	 * the paused_enough comparison above so the gating and the
+	 * fire delay use the same constant; a quick subsequent click
+	 * inside that window will be on_row_activated (the second
+	 * press of a double-click), which calls inline_rename_cancel
+	 * to defuse this timer. */
+    inline_rename_cancel (p);
+    p->inline_rename_pending = g_object_ref (e);
+    /* g_object_ref the label so a row-recycle / listing swap
+	 * during the 350 ms window can't free it out from under
+	 * inline_rename_fire. The fire path's pending_name check
+	 * still rejects fire if the label was reassigned to a
+	 * different entry. */
+    p->inline_rename_pending_label = g_object_ref (label);
+    p->inline_rename_pending_name = g_strdup (hx_file_entry_get_name (e));
+    p->inline_rename_timer_id
+        = g_timeout_add (350, inline_rename_fire, p);
+}
+
 /* Name column: icon + label. Icon comes from the panel-cached
  * XPM paintables (folder vs. generic file), passed through to
  * the bind callback via the factory's user_data slot.
@@ -306,19 +744,38 @@ cmp_kind (gconstpointer a_p, gconstpointer b_p, gpointer user_data)
 static void
 name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 {
+    files_panel *p = d;
     GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     GtkWidget *icon = gtk_image_new ();
-    GtkWidget *lbl = gtk_label_new (NULL);
+    GtkWidget *lbl;
+    GtkGesture *click;
     (void)f;
-    (void)d;
+    (void)item;
+
+    /* GtkEditableLabel renders as a plain label until edit mode is
+	 * entered, then swaps in a GtkEntry-like in-place editor. The
+	 * stop conditions (Enter / Escape / focus-out) are built in;
+	 * we observe via notify::editing to commit the new name.
+	 *
+	 * IMPORTANT: GtkEditableLabel has built-in click-to-edit
+	 * behaviour (clicking on the focused label starts editing).
+	 * We don't want that — our own row gesture is the only thing
+	 * that should trigger editing. Setting editable=FALSE here
+	 * suppresses the built-in trigger; inline_rename_fire flips it
+	 * to TRUE just before calling gtk_editable_label_start_editing,
+	 * and the leave-edit handler flips it back to FALSE so a stray
+	 * click on the now-back-to-label widget doesn't reopen edit
+	 * mode behind our back. */
+    lbl = gtk_editable_label_new ("");
+    gtk_editable_set_editable (GTK_EDITABLE (lbl), FALSE);
+    gtk_widget_set_hexpand (lbl, TRUE);
+    gtk_widget_set_halign (lbl, GTK_ALIGN_START);
+    gtk_widget_set_valign (lbl, GTK_ALIGN_CENTER);
 
     /* XPMs are 16x16; scaled 1.5x = 24x24. Match that with
 	 * pixel_size so GtkImage's icon-size clamp doesn't shrink
 	 * them back down. */
     gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
-    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand (lbl, TRUE);
 
     gtk_box_append (GTK_BOX (row), icon);
     gtk_box_append (GTK_BOX (row), lbl);
@@ -326,6 +783,33 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 
     g_object_set_data (G_OBJECT (row), "icon", icon);
     g_object_set_data (G_OBJECT (row), "label", lbl);
+
+    /* notify::editing → commit on edit-end. The handler reads the
+	 * pre-edit name from the "old-name" data slot name_bind keeps
+	 * fresh, so it doesn't need its own state to know what changed. */
+    g_signal_connect (lbl, "notify::editing",
+                      G_CALLBACK (on_label_editing_changed), p);
+
+    /* Click-on-selected-row → inline rename. The gesture sits on
+	 * the row's outer GtkBox in CAPTURE phase so it sees the click
+	 * before GtkColumnView's descendant click handlers can claim
+	 * it (an earlier draft attached on the label in BUBBLE phase
+	 * and never fired). The gate inside on_name_label_pressed is
+	 * per-panel click history (last_clicked_pos + last_click_time_us):
+	 * the rename arms only when the user clicks the SAME row twice
+	 * with a pause long enough to rule out a double-click. Earlier
+	 * drafts gated on selection state but lost the phase race —
+	 * tracking our own clicks is phase-order-independent.
+	 *
+	 * We don't claim the gesture, so the column view's own
+	 * selection / activation behaviour still works as expected
+	 * even with our handler in the capture path. */
+    click = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), GDK_BUTTON_PRIMARY);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
+                                                GTK_PHASE_CAPTURE);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_name_label_pressed), p);
+    gtk_widget_add_controller (row, GTK_EVENT_CONTROLLER (click));
 }
 
 static void
@@ -339,9 +823,23 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     GdkPaintable *paintable;
     (void)f;
 
+    /* Stash the GtkListItem on the row so on_name_label_pressed
+	 * can recover the row's position and bound entry. Stored as a
+	 * weak (non-ref) pointer — the column view owns the lifetime
+	 * and re-binds the row when the underlying model changes. The
+	 * gesture handler always re-reads from the list item rather
+	 * than caching, so a recycled row carries the right state. */
+    g_object_set_data (G_OBJECT (row), "list-item", item);
+
     if (!e) {
         gtk_image_clear (icon);
-        gtk_label_set_text (lbl, "");
+        gtk_editable_set_text (GTK_EDITABLE (lbl), "");
+        /* set_data_full (not set_data) so the prior destroy_notify
+		 * runs against the OLD strdup — otherwise the old "old-name"
+		 * string leaks (set_data overwrites the qdata slot without
+		 * invoking the destroy registered by the previous
+		 * set_data_full call). */
+        g_object_set_data_full (G_OBJECT (lbl), "old-name", NULL, NULL);
         return;
     }
 
@@ -351,7 +849,23 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     } else {
         gtk_image_clear (icon);
     }
-    gtk_label_set_text (lbl, hx_file_entry_get_name (e));
+
+    /* If a rebind lands while the user is mid-edit on this widget,
+	 * cancel the edit before swapping the text out from under them
+	 * — otherwise GtkEditableLabel's notify::editing-leave will
+	 * commit garbage. Listings rarely change mid-edit but a server
+	 * push or a sort-order change technically could. */
+    if (gtk_editable_label_get_editing (GTK_EDITABLE_LABEL (lbl))) {
+        gtk_editable_label_stop_editing (GTK_EDITABLE_LABEL (lbl),
+                                         /*commit=*/FALSE);
+    }
+    gtk_editable_set_text (GTK_EDITABLE (lbl), hx_file_entry_get_name (e));
+    /* old-name is what the inline-rename commit handler compares
+	 * the post-edit text against to decide whether to call rename.
+	 * Refreshed every rebind so a recycled row's data matches its
+	 * currently-displayed entry. */
+    g_object_set_data_full (G_OBJECT (lbl), "old-name",
+                            g_strdup (hx_file_entry_get_name (e)), g_free);
 }
 
 /* Generic right-aligned label column shared by Size + Modified. */
@@ -545,11 +1059,18 @@ static void
 on_items_changed (GListModel *m, guint pos, guint rem, guint add,
                   gpointer user_data)
 {
+    files_panel *p = user_data;
     (void)m;
     (void)pos;
     (void)rem;
     (void)add;
-    update_status (user_data);
+    /* Listing changed underneath us — any pending inline-rename
+	 * arm is now suspect (the row's label may have been recycled
+	 * to a different entry or destroyed outright). Cancel the
+	 * timer to avoid firing rename against a stale binding. The
+	 * label ref is dropped by inline_rename_cancel. */
+    inline_rename_cancel (p);
+    update_status (p);
 }
 
 /* Double-click / Enter on a row → descend if folder, no-op
@@ -561,6 +1082,15 @@ on_row_activated (GtkColumnView *view, guint pos, gpointer user_data)
     files_panel *p = user_data;
     HxFileEntry *e;
     (void)view;
+
+    debug_log ("files", "on_row_activated: pos=%u", pos);
+
+    /* Activation cancels any pending inline-rename — a double-click
+	 * on the name labels arms the rename timer on its first press
+	 * (the row is already selected), then the second press fires
+	 * activation; if we didn't cancel here the rename dialog would
+	 * pop up immediately after the activation. */
+    inline_rename_cancel (p);
 
     e = g_list_model_get_item (G_LIST_MODEL (gtk_column_view_get_model (view)),
                                pos);
@@ -777,6 +1307,11 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
         g_signal_connect (p->selection, "selection-changed",
                           G_CALLBACK (on_selection_changed), p);
     }
+    /* Sentinels: -1 means "no prior click recorded". The very
+	 * first click anywhere can't satisfy same_row (no prior pos)
+	 * so the rename gate correctly never arms on a single click. */
+    p->last_clicked_pos = -1;
+    p->last_click_time_us = 0;
 
     scrolled = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
@@ -786,8 +1321,13 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
                                    p->column_view);
 
     /* Wrap the scrolled view in a frame so the active-panel CSS
-	 * class has somewhere to put an accent border. */
+	 * class has somewhere to put an accent border. The base
+	 * ".files-panel" class is always present (so the rounded
+	 * corners + inactive-state styling apply) and
+	 * files_panel_set_active toggles ".files-panel-active" on
+	 * top of it. */
     p->frame = gtk_frame_new (NULL);
+    gtk_widget_add_css_class (p->frame, "files-panel");
     gtk_widget_set_vexpand (p->frame, TRUE);
     gtk_frame_set_child (GTK_FRAME (p->frame), scrolled);
     gtk_widget_set_margin_start (p->frame, 6);
@@ -830,6 +1370,10 @@ panel_detach_provider (files_panel *p)
     if (!p || !p->provider) {
         return;
     }
+    /* Drop any armed inline-rename — the new provider's listing
+	 * will not have the row widget the timer is pointing at. The
+	 * label ref taken at arm time is released here. */
+    inline_rename_cancel (p);
     if (p->navigated_handler) {
         g_signal_handler_disconnect (p->provider, p->navigated_handler);
         p->navigated_handler = 0;
@@ -1054,6 +1598,9 @@ files_panel_free (files_panel *p)
     if (!p) {
         return;
     }
+    /* Cancel the pending inline-rename timer + drop the held ref
+	 * so the closure callback never fires after the panel is gone. */
+    inline_rename_cancel (p);
     if (p->path_complete) {
         hx_path_complete_free (p->path_complete);
         p->path_complete = NULL;
