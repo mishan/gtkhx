@@ -1545,7 +1545,7 @@ prefs_allocate (char *tag, char *rest)
         break;
     }
     case STRING:
-        if (!*result->variable.str || strcmp (rest, *result->variable.str)) {
+        if (!*result->variable.str || strcmp (rest, *result->variable.str) != 0) {
             if (result->allocated) {
                 g_free (*result->variable.str);
             }

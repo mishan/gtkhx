@@ -158,10 +158,10 @@ struct useredit_session {
 };
 
 static void
-user_open (void *__uesp, const char *name, const char *login, const char *pass,
+user_open (void *uesp, const char *name, const char *login, const char *pass,
            const hl_access_bits access)
 {
-    struct useredit_session *ues = (struct useredit_session *)__uesp;
+    struct useredit_session *ues = (struct useredit_session *)uesp;
     unsigned int i;
     int on;
 
@@ -571,7 +571,7 @@ create_useredit_window (const char *login, int new)
         adw_preferences_row_set_title (ADW_PREFERENCES_ROW (switch_row),
                                        access_names[i].name);
         awi = i - nframes;
-        ues->access_widgets[awi].bitno = access_names[i].bitno;
+        ues->access_widgets[awi].bitno = (unsigned char) access_names[i].bitno;
         ues->access_widgets[awi].widget = switch_row;
         g_signal_connect (switch_row, "notify::active",
                           G_CALLBACK (useredit_chk_activate), ues);

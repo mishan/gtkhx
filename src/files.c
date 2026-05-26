@@ -868,7 +868,7 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
         && (len
                 != strlen (src_path)
                        - (strlen (src_path) - (src_file - src_path))
-            || memcmp (dst_path, src_path, len))) {
+            || memcmp (dst_path, src_path, len) != 0)) {
         rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
         task_new (htlc, 0, 0, 0, "mv");
         hlwrite (htlc, HTLC_HDR_FILE_MOVE, 0, 3, HTLC_DATA_FILE_NAME,
@@ -876,7 +876,7 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
                  HTLC_DATA_DIR_RENAME, rnhldirlen, rnhldir);
         g_free (rnhldir);
     }
-    if (*dst_file && strcmp (src_file, dst_file)) {
+    if (*dst_file && strcmp (src_file, dst_file) != 0) {
         task_new (htlc, 0, 0, 0, "mv");
         hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 3, HTLC_DATA_FILE_NAME,
                  (guint16)src_len, src_wire, HTLC_DATA_FILE_RENAME,

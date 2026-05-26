@@ -626,7 +626,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
 		 * window, etc.); htlc->name is reserved for the wire-side
 		 * USER_CHANGE we *send* and the gtkhxrc persistence. The
 		 * two diverging is exactly the model the protocol expects. */
-        if (uid && uid == htlc->uid) {
+        {
             gsize unlen = strlen (user->name);
             debug_log ("name",
                        "USER_CHANGE for our uid=%u: server says "
@@ -1998,7 +1998,7 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                         }
                     }
                     *p++ = '/';
-                    while (*p == dir_char) {
+                    while ((guint8)*p == dir_char) {
                         *p++ = '/';
                     }
                 }

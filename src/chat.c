@@ -1651,7 +1651,9 @@ tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
         /* Reaching here implies the while(1) above broke via the
 		 * match_pos = -1 path, which only fires after match_text
 		 * was g_malloc'd. The analyzer can't prove the cross-loop
-		 * dependency — document with an assert. */
+		 * dependency — document with an assert. clang-tidy reads
+		 * the != as a side effect in g_assert; suppress. */
+        /* NOLINTNEXTLINE(bugprone-assert-side-effect) */
         g_assert (match_text != NULL);
         if (first) {
             snprintf (buf, sizeof (buf), "%s", match_text);

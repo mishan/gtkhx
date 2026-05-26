@@ -661,7 +661,7 @@ bookmark_parse (const char *name, struct bookmark_parsed *out,
     int bm = open_bookmark_file (name, &path);
     char junk[132];
     char header[5];
-    char len_addr;
+    unsigned char len_addr;
     char *p;
     size_t len;
 
