@@ -262,13 +262,12 @@ load_selection (BookmarksWindow *w)
 		 * otherwise the user has no way to clear out a broken entry
 		 * from the list. Save stays disabled because there's no
 		 * loaded bookmark to write back. */
-        char *msg = g_strdup_printf (
+        g_autofree char *msg = g_strdup_printf (
             _ ("Could not load bookmark \"%s\". The file may be in the "
-               "legacy format — open it from the Connect dialog to "
-               "convert."),
+               "legacy format — pick it from the toolbar's Connect-button "
+               "dropdown to convert it first."),
             name);
         toast_error (w, msg);
-        g_free (msg);
         w->original_name = g_strdup (name);
         show_empty_state (w);
         gtk_widget_set_sensitive (w->delete_btn, TRUE);
