@@ -32,7 +32,6 @@
 #include <gtk/gtk.h>
 #include <sys/time.h>
 #include <time.h>
-#include <netinet/in.h>
 #include "hx.h"
 #include "hope.h"
 #include "login_packet.h"
@@ -66,12 +65,11 @@
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
 static char *hx_timeformat = "%c";
-extern int xfer_go_timer (void *__arg);
 
-void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text);
-/* Phase 5: forward decl so hx_post_login_fetches (defined just below)
- * can hand it to task_new before the implementation site. */
-void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text);
+/* xfer_go_timer (xfers.h), rcv_task_user_list and rcv_task_news_users
+ * (rcv.h) are forward-referenced by hx_post_login_fetches below
+ * before their definitions land later in the file. Prototypes come
+ * from the headers we already #include. */
 
 /* Phase 5: post-login state-machine. The 1.5 flow per
  * Capabilities/connect-spec is:

@@ -21,7 +21,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
@@ -53,8 +52,6 @@
 #include "debug.h"
 
 static char *termed_buf = 0;
-extern PangoFontDescription *gtkhx_font_desc;
-
 #define WORD_URL 1
 #define WORD_NICK 2
 #define WORD_HOST 4

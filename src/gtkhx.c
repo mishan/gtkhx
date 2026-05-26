@@ -60,7 +60,6 @@
 #include "xtext.h"
 #include "gtkthreads.h"
 #include "options.h"
-#include "toolbar.h"
 #include "xfers.h"
 #include "plugin.h"
 #include "commands.h"
@@ -820,8 +819,6 @@ init_icons (void)
 	 * ownership to ifn->files. */
     g_ptr_array_free (paths, FALSE);
 }
-
-extern void reinit_gtktexts (session *sess);
 
 static void
 fe_init (void)
@@ -1660,8 +1657,6 @@ struct hxd_file *hxd_files = 0;
 
 /* qbuf_set / qbuf_add moved to src/qbuf.c so both the GUI binary and
  * the Tier 3 integration harness link the same implementation. */
-
-extern void hlclient_reap_pid (pid_t pid, int status);
 
 static RETSIGTYPE
 sig_chld (int sig)

@@ -36,7 +36,6 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <time.h>
-#include <netinet/in.h>
 
 #include <signal.h>
 #include <stdarg.h>

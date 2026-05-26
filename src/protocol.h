@@ -437,28 +437,28 @@ extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
 #if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
 #define HN32(_to, _from)                                                       \
     do {                                                                       \
-        *((unsigned char *)_to) = *(((unsigned char *)_from) + 3);             \
-        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 2);       \
-        *(((unsigned char *)_to) + 2) = *(((unsigned char *)_from) + 1);       \
-        *(((unsigned char *)_to) + 3) = *((unsigned char *)_from);             \
+        *((unsigned char *)(_to)) = *(((unsigned char *)(_from)) + 3);         \
+        *(((unsigned char *)(_to)) + 1) = *(((unsigned char *)(_from)) + 2);   \
+        *(((unsigned char *)(_to)) + 2) = *(((unsigned char *)(_from)) + 1);   \
+        *(((unsigned char *)(_to)) + 3) = *((unsigned char *)(_from));         \
     } while (0)
 #define HN16(_to, _from)                                                       \
     do {                                                                       \
-        *((unsigned char *)_to) = *(((unsigned char *)_from) + 1);             \
-        *(((unsigned char *)_to) + 1) = *((unsigned char *)_from);             \
+        *((unsigned char *)(_to)) = *(((unsigned char *)(_from)) + 1);         \
+        *(((unsigned char *)(_to)) + 1) = *((unsigned char *)(_from));         \
     } while (0)
 #else
 #define HN32(_to, _from)                                                       \
     do {                                                                       \
-        *((unsigned char *)_to) = *((unsigned char *)_from);                   \
-        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 1);       \
-        *(((unsigned char *)_to) + 2) = *(((unsigned char *)_from) + 2);       \
-        *(((unsigned char *)_to) + 3) = *(((unsigned char *)_from) + 3);       \
+        *((unsigned char *)(_to)) = *((unsigned char *)(_from));               \
+        *(((unsigned char *)(_to)) + 1) = *(((unsigned char *)(_from)) + 1);   \
+        *(((unsigned char *)(_to)) + 2) = *(((unsigned char *)(_from)) + 2);   \
+        *(((unsigned char *)(_to)) + 3) = *(((unsigned char *)(_from)) + 3);   \
     } while (0)
 #define HN16(_to, _from)                                                       \
     do {                                                                       \
-        *((unsigned char *)_to) = *((unsigned char *)_from);                   \
-        *(((unsigned char *)_to) + 1) = *(((unsigned char *)_from) + 1);       \
+        *((unsigned char *)(_to)) = *((unsigned char *)(_from));               \
+        *(((unsigned char *)(_to)) + 1) = *(((unsigned char *)(_from)) + 1);   \
     } while (0)
 #endif
 
@@ -478,6 +478,9 @@ memory_copy (void *__dst, void *__src, unsigned int len)
         _x = htonl (_word);                                                    \
         memory_copy ((_addr), &_x, 4);                                         \
     } while (0)
+/* _word is passed straight to htonl(), which already takes a value
+ * (not an expression to evaluate), so it doesn't need parenthesising.
+ * _addr is wrapped in parens at the memory_copy call site. */
 
 /* ---- Walking data-header lists in incoming packets ----------------- */
 
@@ -524,9 +527,9 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 #define dh_getint(_word)                                                       \
     do {                                                                       \
         if (_len == 4)                                                         \
-            HN32 (&_word, dh->data);                                           \
+            HN32 (&(_word), dh->data);                                         \
         else /* if (ntohs(dh->len) == 2) */                                    \
-            HN16 (&_word, dh->data);                                           \
+            HN16 (&(_word), dh->data);                                         \
     } while (0)
 
 #define dh_end()                                                               \

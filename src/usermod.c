@@ -35,7 +35,6 @@
 #include "usermod.h"
 
 #define NACCESS 28
-void create_useredit_window (const char *login, int new);
 
 void
 hx_useredit_create (struct htlc_conn *htlc, const char *login, const char *pass,
@@ -93,12 +92,13 @@ struct access_name {
     char *name;
 } access_names[] = {
 #define ENTRY(x, y)                                                            \
-    { (x != -1)                                                                \
+    { ((x) != -1)                                                              \
           ? (63                                                                \
-             - ((G_BYTE_ORDER == G_BIG_ENDIAN) ? x                             \
-                                               : (x % 8) + 8 * (7 - x / 8)))   \
+             - ((G_BYTE_ORDER == G_BIG_ENDIAN)                                 \
+                    ? (x)                                                      \
+                    : ((x) % 8) + 8 * (7 - (x) / 8)))                          \
           : -1,                                                                \
-      y }
+      (y) }
     ENTRY (-1, "File Privileges"),
     ENTRY (1, "Can Upload Files"),
     ENTRY (2, "Can Download Files"),
@@ -135,9 +135,9 @@ struct access_name {
 #undef ENTRY
 };
 
-#define test_bit(buf, bitno) ((buf >> bitno) & 1)
-#define set_bit(buf, bitno) (buf |= ((long long)1 << bitno))
-#define unset_bit(buf, bitno) (buf &= ~((long long)1 << bitno))
+#define test_bit(buf, bitno) (((buf) >> (bitno)) & 1)
+#define set_bit(buf, bitno) ((buf) |= ((long long)1 << (bitno)))
+#define unset_bit(buf, bitno) ((buf) &= ~((long long)1 << (bitno)))
 
 struct access_widget {
     int bitno;

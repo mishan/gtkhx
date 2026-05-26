@@ -48,7 +48,6 @@
 #include "about.h"
 #include "banner.h"
 #include "bookmarks.h"
-#include "options.h"
 #include "gtkthreads.h"
 #include "plugin.h"
 #include "toolbar.h"

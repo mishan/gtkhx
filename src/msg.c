@@ -21,7 +21,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
@@ -110,9 +109,6 @@ hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
              (guint16)wire_len, wire);
     g_free (wire);
 }
-
-void msg_output (char *name, guint16 uid, char *buf);
-void msg_output_from_event (HxMsgEvent *event);
 
 /* Phase 5+: msgwin lifecycle on GHashTable.
  *

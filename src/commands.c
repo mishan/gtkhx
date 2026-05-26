@@ -24,8 +24,8 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <ctype.h>
+#include <getopt.h>
 #include <gtk/gtk.h>
-#include <netinet/in.h>
 #include "hx.h"
 #include "network.h"
 #include "rcv.h"
@@ -37,9 +37,7 @@
 #include "news.h"
 #include "text_util.h"
 #include "users.h"
-#include "sound.h"
 #include "msg.h"
-#include <getopt.h>
 #include "commands.h"
 
 void

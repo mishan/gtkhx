@@ -60,17 +60,17 @@ extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
 #define _(string) (string)
 #endif
 
-#define atou32(_str) ((guint32)strtoul (_str, 0, 0))
-#define atou16(_str) ((guint16)strtoul (_str, 0, 0))
+#define atou32(_str) ((guint32)strtoul ((_str), 0, 0))
+#define atou16(_str) ((guint16)strtoul ((_str), 0, 0))
 
 /* In-place character substitution. Used for CR<->LF conversion at the
  * Hotline wire boundary (the protocol uses CR; we use LF internally). */
 #define X2X(_ptr, _len, _x1, _x2)                                              \
     do {                                                                       \
-        char *_p = _ptr, *_end = _ptr + _len;                                  \
+        char *_p = (_ptr), *_end = (_ptr) + (_len);                            \
         for (; _p < _end; _p++)                                                \
-            if (*_p == _x1)                                                    \
-                *_p = _x2;                                                     \
+            if (*_p == (_x1))                                                  \
+                *_p = (_x2);                                                   \
     } while (0)
 
 #define CR2LF(_ptr, _len) X2X (_ptr, _len, '\r', '\n')

@@ -259,9 +259,8 @@ rgb_pack_net (RGBColor c)
 	     | ((guint32)(ntohs (c.blue)  >> 8) <<  0);
 }
 
-/* Defined further down — declared here so cicn_to_pixbuf can wrap its
- * output through the halo before returning. */
-GdkPixbuf *cicn_add_halo (GdkPixbuf *src);
+/* cicn_add_halo is declared in cicn.h and defined further down; it's
+ * called by cicn_to_pixbuf below to wrap its output through the halo. */
 
 /*
  * Build a 256-entry palette table for an icon: take the canonical Mac
