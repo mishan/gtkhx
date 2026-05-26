@@ -1,27 +1,20 @@
-User Editor:
-- Need to check that it works, and polish the UI
-
 General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
-- Keyboard shortcuts like Ctrl-W and Ctrl-Q ought to work in all windows/dialogs including Settings
 
 Icons:
 - Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
 
 Docs:
 - Rewrite README.md to explain this project better
-- Write a section about migrating from 0.9.4 to modern versions
 
 i18n:
 - Translate to other languages
+- Use indexed args (e.g. %1$s instead of %s) so that translations can display these in different order if necessary
 
 Security:
 - TLS support (see mobius as an example server that supports it; https://github.com/jhalter/mobius/blob/master/docs/tls.md)
   - Also I think Janus supports it?
-
-Bookmarks:
-- Better bookmark management, allowing user to add/edit/delete bookmarks within GtkHx
 
 Tracker:
 - Ship with some more built in trackers configured

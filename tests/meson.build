@@ -169,6 +169,21 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
+# bookmarks_io.c (carved out of bookmarks.c, which still holds the
+# GTK / libadwaita dialog) so this test can drive it without the
+# whole UI tree. The test provides its own gtkhx_config_dir() stub
+# so each test sees a fresh tmpdir for primary + legacy bookmark
+# directories.
+test_bookmarks = executable('test_bookmarks',
+  'unit/test_bookmarks.c',
+  '../src/bookmarks_io.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('bookmarks', test_bookmarks,
+     suite : 'unit')
+
 # task_hash — the Phase 1.1 GLib-collections migration replaced the
 # per-session task linked list (the intrusive __task_list / task_list
 # / task_tail trio) with GHashTable<u32 trans, struct task*>. The
