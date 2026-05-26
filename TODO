@@ -2,6 +2,10 @@ General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
 
+Bookmarks:
+- Ship some bookmarks for more servers
+- Ship hlserver.com bookmark as a bookmark file rather than hardcoding it into the source code
+
 Icons:
 - Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
 
