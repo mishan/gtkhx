@@ -201,13 +201,15 @@ jobs:
         # run-clang-tidy parallelises across cores and respects the
         # repo's .clang-tidy. -p points it at the compile-commands.
         # The .c-only filter avoids dragging in the system headers
-        # we ignore via HeaderFilterRegex anyway.
+        # we ignore via HeaderFilterRegex anyway. The (?!dfa\.c$)
+        # lookahead skips src/dfa.c — vendored GNU regex slated for
+        # replacement with a regex library; ~580 noise findings.
         # ALWAYS exit 0 so the artifact upload still runs.
         run: |
           set +e
           run-clang-tidy -p build-tidy -j "$(nproc)" \
             -extra-arg=-Wno-unknown-warning-option \
-            'src/.*\.c$' 2>&1 \
+            'src/(?!dfa\.c$).*\.c$' 2>&1 \
             | tee build-tidy/clang-tidy.log
           exit 0
 

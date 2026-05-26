@@ -65,4 +65,4 @@ CheckOptions:
     value: 'assert,g_assert'  # treat g_assert like assert for the
                               # side-effect check
   - key:   misc-unused-parameters.StrictMode
-    value: 'true'
+    value: 'false'           # let `(void)arg;` silence the warning
