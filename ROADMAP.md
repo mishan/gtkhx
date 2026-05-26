@@ -305,7 +305,11 @@ Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiab
 - **`hmac.c`** → reduce to a thin wrapper over `GHmac`, except for the HAVAL branch (see below).
 - **`haval.c`** → keep for now, it's wired into `hmac.c`'s `HMAC-HAVAL` MAC negotiation. Verify whether any extant Hotline server still advertises HAVAL; if not, delete the whole branch and `haval.[ch]`.
 - **`cipher.c`** → rewrite over Nettle (`nettle/blowfish.h`, `nettle/arcfour.h`). This is **only** for the existing Hotline `HOPE` cipher negotiation (Blowfish/RC4 over the legacy protocol). Still useful for client-to-client privacy on the rare server that supports it; survives unchanged.
-- **`rand.c`** → replace with `getrandom(2)` directly on Linux, fall back to `/dev/urandom`. Or use Nettle's `yarrow256_*`. No need to drag in OpenSSL just for random bytes.
+- **`rand.c`** → ✅ done (Phase 1.3): wraps `getrandom(2)` with a
+  `/dev/urandom` fallback for old kernels. No OpenSSL dep, no extra
+  library either. Nettle's `yarrow256_*` was considered and rejected:
+  it's a userland PRNG that has to be seeded from the kernel CSPRNG
+  anyway, so all it would add is state-management complexity.
 
 **What this is *not*:** This is *not* a path to TLS. There is no Hotline server in the wild speaking TLS — the protocol predates that ever being a thing, and Hotline is dead enough that nobody's adding it. Real modern transport security is a separate, much bigger initiative: see "Phase ∞ — Modernized Hotline protocol" below.
 
