@@ -226,9 +226,29 @@ setbtns (session *sess, int stat)
 
     /* Phase 5: New User / Edit User moved from toolbar buttons to
 	 * the hamburger menu's Admin submenu. Flip the corresponding
-	 * GActions instead of the old GtkWidget pointers. */
-    set_app_action_enabled ("user_new", stat);
-    set_app_action_enabled ("user_edit", stat);
+	 * GActions instead of the old GtkWidget pointers. Each item is
+	 * gated independently on its access bit so a sysop with view-
+	 * only privileges can still open the editor on an existing
+	 * account but can't fire off the New User dialog (or vice
+	 * versa for create-only).
+	 *
+	 *   user_new  → HL_ACCESS_CREATE_USERS
+	 *   user_edit → HL_ACCESS_READ_USERS (lets you open the dialog;
+	 *                MODIFY_USERS still gates Save server-side, but
+	 *                even view-only privilege should let you inspect)
+	 *
+	 * On disconnect (`stat == 0`) both are always disabled —
+	 * there's no session to talk to. */
+    if (stat) {
+        const guint8 *bits = (const guint8 *)&sess->htlc.access;
+        set_app_action_enabled (
+            "user_new", hl_access_has (bits, HL_ACCESS_CREATE_USERS));
+        set_app_action_enabled (
+            "user_edit", hl_access_has (bits, HL_ACCESS_READ_USERS));
+    } else {
+        set_app_action_enabled ("user_new", FALSE);
+        set_app_action_enabled ("user_edit", FALSE);
+    }
 
     /* Phase 5: News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape

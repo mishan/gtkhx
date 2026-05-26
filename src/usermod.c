@@ -35,7 +35,7 @@
 #include "usermod.h"
 
 #define NACCESS 28
-void create_useredit_window (char *login, int new);
+void create_useredit_window (const char *login, int new);
 
 void
 hx_useredit_create (struct htlc_conn *htlc, const char *login, const char *pass,
@@ -182,16 +182,24 @@ user_open (void *__uesp, const char *name, const char *login, const char *pass,
     }
 }
 static void
-useredit_login (char *login, struct useredit_session *ues)
+useredit_login (const char *login, struct useredit_session *ues)
 {
     size_t len;
 
     hx_useredit_open (&the_session.htlc, login, user_open, ues);
     len = strlen (login);
-    if (len > 31) {
-        len = 31;
+    if (len > sizeof (ues->login) - 1) {
+        len = sizeof (ues->login) - 1;
     }
-    memcpy (ues->login, login, len + 1);
+    /* Copy exactly `len` bytes then NUL-terminate explicitly.
+	 * The previous "memcpy(ues->login, login, len + 1)" had a bug:
+	 * after clamping len to 31 it copied 32 bytes from `login`,
+	 * which for an oversized input means the 32nd byte was a
+	 * non-NUL character from the source string. ues->login was
+	 * then unterminated, and every subsequent strlen / strcpy on
+	 * it ran past the buffer. */
+    memcpy (ues->login, login, len);
+    ues->login[len] = '\0';
 }
 
 /* Phase 5: AdwAlertDialog response callback. The "open" response opens
@@ -206,10 +214,29 @@ useredit_open_response (AdwAlertDialog *dialog, const char *response,
     if (g_strcmp0 (response, "open") == 0) {
         const char *login = gtk_editable_get_text (GTK_EDITABLE (entry));
         if (login && *login) {
-            create_useredit_window ((char *)login, 0);
+            create_useredit_window (login, 0);
         }
     }
     (void)dialog;
+}
+
+/* AdwEntryRow's Enter key fires "entry-activated" rather than
+ * letting the keypress bubble up to the dialog's default-response
+ * binding. Bridge it: invoke the same open-user logic the response
+ * handler runs, then close the dialog. libadwaita's AdwAlertDialog
+ * has no public API to synthesize a response, so we run the work
+ * inline and dismiss via adw_dialog_close (which fires the
+ * "cancel" close-response — harmless since useredit_open_response
+ * only acts on "open"). */
+static void
+useredit_open_entry_activated (AdwEntryRow *entry, gpointer data)
+{
+    AdwAlertDialog *dialog = data;
+    const char *login = gtk_editable_get_text (GTK_EDITABLE (entry));
+    if (login && *login) {
+        create_useredit_window (login, 0);
+    }
+    adw_dialog_close (ADW_DIALOG (dialog));
 }
 
 static void
@@ -308,6 +335,97 @@ useredit_destroy (GtkWidget *widget, gpointer data)
     g_free (data);
 }
 
+/* Generate a cryptographically-random password of `pw_len` bytes
+ * into `out` (buffer must hold pw_len + 1 for the NUL terminator).
+ * Returns TRUE on success, FALSE if the entropy source failed.
+ * Callers must check: on failure `out` is left as an empty string
+ * (out[0] = '\0') so a caller that ignores the return value still
+ * doesn't end up writing uninitialised stack bytes into the entry.
+ *
+ * Alphabet is 75 characters — A-Z, a-z, 0-9, plus a curated symbol
+ * set that survives most Hotline server password handlers (no
+ * quote, backslash, or whitespace). 75 doesn't divide 256 evenly,
+ * so we use rejection sampling: any random byte ≥ 225 (the
+ * largest multiple of 75 below 256) is discarded and a fresh one
+ * drawn. That keeps each output character uniformly distributed
+ * over the alphabet, which is what "16 chars of entropy" actually
+ * means.
+ *
+ * Entropy source is random_bytes() (src/rand.c) which prefers the
+ * getrandom(2) syscall and falls back to /dev/urandom — same
+ * source the cipher layer uses for nonces. random_bytes returns
+ * 0 if both syscall and /dev/urandom fail (extremely rare —
+ * essentially "the system is broken" territory) and the function
+ * bails rather than reading uninitialised stack bytes. We pull
+ * bytes in a 64-byte batch to minimise syscall overhead. */
+static gboolean
+generate_random_password (char *out, size_t pw_len)
+{
+    static const char alphabet[]
+        = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+          "abcdefghijklmnopqrstuvwxyz"
+          "0123456789"
+          "!#$%^&*()-_=+?";
+    const unsigned int alpha_size = (unsigned int)(sizeof (alphabet) - 1);
+    const unsigned int limit = (256u / alpha_size) * alpha_size;
+    size_t out_i = 0;
+    u_int8_t buf[64];
+    size_t bi = sizeof (buf);
+
+    if (!out) {
+        return FALSE;
+    }
+    if (pw_len == 0) {
+        out[0] = '\0';
+        return TRUE;
+    }
+
+    while (out_i < pw_len) {
+        if (bi >= sizeof (buf)) {
+            if (random_bytes (buf, sizeof (buf)) != sizeof (buf)) {
+                /* Entropy source failed — both getrandom() and
+				 * /dev/urandom are unavailable. Leave the buffer
+				 * empty and let the caller surface the failure
+				 * (clears the password field rather than silently
+				 * filling it with predictable bytes). */
+                out[0] = '\0';
+                return FALSE;
+            }
+            bi = 0;
+        }
+        if (buf[bi] < limit) {
+            out[out_i++] = alphabet[buf[bi] % alpha_size];
+        }
+        bi++;
+    }
+    out[pw_len] = '\0';
+    return TRUE;
+}
+
+/* Default generator length. 16 chars over a 75-char alphabet is
+ * ~99.7 bits of entropy — strong enough that brute-forcing is
+ * out of reach but still short enough to fit comfortably in the
+ * password row. The sysop can edit the field after generation
+ * if a different length is wanted. */
+#define GENERATED_PASSWORD_LEN 16
+
+static void
+useredit_generate_clicked (GtkWidget *button, gpointer data)
+{
+    struct useredit_session *ues = (struct useredit_session *)data;
+    char pw[GENERATED_PASSWORD_LEN + 1];
+
+    (void)button;
+    if (!generate_random_password (pw, GENERATED_PASSWORD_LEN)) {
+        /* Entropy source failed. Clear the field (which is what
+		 * pw already is — empty string) and warn; better to make
+		 * the failure visible than to silently leave a stale
+		 * value or fill with predictable bytes. */
+        g_warning ("password generation failed: no entropy source");
+    }
+    gtk_editable_set_text (GTK_EDITABLE (ues->pass_entry), pw);
+}
+
 /* Phase 5: full Adwaita rewrite of the User Editor. The legacy layout
  * was a vbox of GtkFrames containing GtkCheckButtons — functionally
  * fine but visually noisy and inconsistent with the rest of the app
@@ -332,10 +450,9 @@ useredit_destroy (GtkWidget *widget, gpointer data)
  * Delete is .destructive-action (red); both are hidden in the New
  * User flow until something useful would happen there. */
 void
-create_useredit_window (char *login, int new)
+create_useredit_window (const char *login, int new)
 {
     GtkWidget *window, *header;
-    GtkWidget *toolbar_view;
     GtkWidget *page;
     GtkWidget *save_btn, *delete_btn;
     GtkWidget *info_grp, *current_grp = NULL;
@@ -413,6 +530,25 @@ create_useredit_window (char *login, int new)
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (info_grp), pass_row);
     ues->pass_entry = pass_row;
 
+    /* Generate button as a suffix on the password row. AdwEntryRow
+	 * (which AdwPasswordEntryRow extends) lets the suffix area carry
+	 * any GtkWidget; flat styling keeps it visually subordinate to
+	 * the row chrome. The handler fills the field with a fresh 16-
+	 * char password; the sysop can edit it before Save. We use the
+	 * view-refresh icon as a stand-in for "regenerate" — the tooltip
+	 * carries the actual semantic. */
+    {
+        GtkWidget *gen_btn
+            = gtk_button_new_from_icon_name ("view-refresh-symbolic");
+        gtk_widget_set_valign (gen_btn, GTK_ALIGN_CENTER);
+        gtk_widget_add_css_class (gen_btn, "flat");
+        gtk_widget_set_tooltip_text (gen_btn,
+                                     _ ("Generate a random password"));
+        g_signal_connect (gen_btn, "clicked",
+                          G_CALLBACK (useredit_generate_clicked), ues);
+        adw_entry_row_add_suffix (ADW_ENTRY_ROW (pass_row), gen_btn);
+    }
+
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
                               ADW_PREFERENCES_GROUP (info_grp));
 
@@ -447,10 +583,49 @@ create_useredit_window (char *login, int new)
 
     /* ---- Wrap in AdwToolbarView so the headerbar gets the proper
 	 * top-bar styling and the page sits in the content slot. */
-    toolbar_view = adw_toolbar_view_new ();
-    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
-    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), page);
-    gtk_window_set_child (GTK_WINDOW (window), toolbar_view);
+    /* Install the AdwHeaderBar AS the window's titlebar via
+	 * gtk_window_set_titlebar rather than tucking it inside an
+	 * AdwToolbarView. The toolbar-view-in-a-window pattern double-
+	 * stacks chrome on regular GtkWindows: the window keeps its
+	 * default system decoration AND the top-bar's headerbar
+	 * renders below it. (AdwToolbarView is the right tool inside
+	 * an AdwDialog, where the dialog itself has no system
+	 * titlebar — see connect.c.) Matching chat.c's pattern here. */
+    gtk_window_set_titlebar (GTK_WINDOW (window), header);
+    gtk_window_set_child (GTK_WINDOW (window), page);
+
+    /* Bail-out shortcuts: Escape and Ctrl-W close the window
+	 * (matches what every other top-level in the app does, and
+	 * what the user reasonably expects from a desktop dialog).
+	 * Both fire the built-in "window.close" action, so any close-
+	 * request handler (none here, but useredit_destroy runs via
+	 * the destroy signal) still gets a chance.
+	 *
+	 * CAPTURE phase so a focused AdwEntryRow doesn't swallow Esc
+	 * before we see it. window-scope so the shortcut fires
+	 * regardless of which descendant has focus. */
+    {
+        GtkEventController *shortcuts;
+        GtkShortcut *sh;
+
+        shortcuts = gtk_shortcut_controller_new ();
+        gtk_event_controller_set_propagation_phase (shortcuts,
+                                                    GTK_PHASE_CAPTURE);
+        gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (shortcuts),
+                                           GTK_SHORTCUT_SCOPE_LOCAL);
+        gtk_widget_add_controller (window, shortcuts);
+
+        sh = gtk_shortcut_new (gtk_keyval_trigger_new (GDK_KEY_Escape, 0),
+                               gtk_named_action_new ("window.close"));
+        gtk_shortcut_controller_add_shortcut (
+            GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+
+        sh = gtk_shortcut_new (
+            gtk_keyval_trigger_new (GDK_KEY_w, GDK_CONTROL_MASK),
+            gtk_named_action_new ("window.close"));
+        gtk_shortcut_controller_add_shortcut (
+            GTK_SHORTCUT_CONTROLLER (shortcuts), sh);
+    }
 
     if (!new) {
         useredit_login (login, ues);
@@ -494,6 +669,15 @@ useredit_open_dialog (void)
 
     g_signal_connect (dialog, "response", G_CALLBACK (useredit_open_response),
                       entry);
+
+    /* Enter inside the entry fires the same response as clicking
+	 * Open. AdwAlertDialog binds Enter to the default response
+	 * when focus is on its own action buttons, but an AdwEntryRow
+	 * swallows Activate for its own entry-activated signal, so we
+	 * have to bridge it explicitly. The "open" response then runs
+	 * through useredit_open_response just like a button click. */
+    g_signal_connect (entry, "entry-activated",
+                      G_CALLBACK (useredit_open_entry_activated), dialog);
 
     adw_dialog_present (dialog,
                         toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
