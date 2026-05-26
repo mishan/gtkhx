@@ -44,9 +44,7 @@ Pass:    (empty)
 ```
 
 The shipped `run/hxd/` skeleton from mhxd has `guest` and `admin`
-accounts pre-configured. The `admin` password is whatever mhxd's
-default seed sets — check `run/hxd/accounts/admin/access` and
-related files inside the container if you need elevated testing.
+accounts pre-configured. Both have blank passwords.
 
 ## Ports
 
