@@ -575,16 +575,23 @@ static void *
 banner_htxf_worker_thread (void *arg)
 {
     struct htxf_fetch *f = arg;
-    int s;
+    GSocketConnection *conn = NULL;
+    int s = -1;
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     char errbuf[256] = { 0 };
 
-    s = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
-                                 sizeof (errbuf));
-    if (s < 0) {
+    conn = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
+                                    sizeof (errbuf));
+    if (!conn) {
         debug_log ("banner", "htxf connect failed: %s", errbuf);
         goto out;
     }
+    /* Borrow the raw fd for the body byte-streaming loops. The conn
+	 * owns the fd; g_clear_object at the bottom closes it. Phase B
+	 * will replace the read_n/write_n/htxf_io_read calls below with
+	 * GIOStream-shaped equivalents; for now the fd extraction here
+	 * matches the xfers.c workers exactly. */
+    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this
 	 * subchannel through their banner-send path rather than the
@@ -601,7 +608,6 @@ banner_htxf_worker_thread (void *arg)
     if (hdr_len == 0 || !write_n (s, hdr_buf, hdr_len)) {
         debug_log ("banner", "htxf header write failed: %s",
                    g_strerror (errno));
-        close (s);
         goto out;
     }
 
@@ -634,7 +640,6 @@ banner_htxf_worker_thread (void *arg)
                            "htxf body read failed (AEAD) at < %zu bytes: %s",
                            (size_t) remain, g_strerror (errno));
                 htxf_io_release (&xfer);
-                close (s);
                 goto out;
             }
             p += r;
@@ -648,18 +653,21 @@ banner_htxf_worker_thread (void *arg)
             debug_log ("banner",
                        "htxf body read failed at < %u bytes: %s",
                        f->size, g_strerror (errno));
-            close (s);
             goto out;
         }
     }
 
-    close (s);
     f->bytes_len = f->size;
     f->ok = TRUE;
     debug_log ("banner", "htxf worker fetched %u bytes (gen=%u)", f->size,
                f->generation);
 
 out:
+    /* g_clear_object closes the underlying socket fd; replaces the
+	 * explicit close(s) calls the fd-shape used. NULL-safe. */
+    g_clear_object (&conn);
+    (void)s;
+
     /* Hand back to the main thread regardless of success — the
 	 * idle decides whether to display or surface an error. */
     g_idle_add (banner_htxf_completion_idle, f);

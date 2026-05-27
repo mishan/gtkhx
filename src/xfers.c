@@ -916,14 +916,16 @@ static void *
 get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
+    GSocketConnection *conn = NULL;
     int s = -1, retval;
     guint8 buf[1024];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     retval = file_recv_one (s, htxf, htxf->total_size, buf);
     if (retval) {
@@ -936,9 +938,11 @@ get_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    /* g_object_unref drops the GIO machinery and closes the
+	 * underlying socket fd — replaces the explicit close(s) the
+	 * fd-returning shape used. The s int is borrowed from the
+	 * conn for the duration of the worker; we don't own it. */
+    g_clear_object (&conn);
 
     /* Cleanup is marshaled to the main thread so it runs AFTER
 	 * every file_update idle posted above — GMainContext FIFO
@@ -994,15 +998,17 @@ static void *
 folder_get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
+    GSocketConnection *conn = NULL;
     int s = -1, retval = 0;
     guint8 buf[1024];
     char base_path[MAXPATHLEN];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* Snapshot the destination root. file_recv_one rewrites
 	 * htxf->path per-file; we restore the root on exit. */
@@ -1143,9 +1149,7 @@ folder_get_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* Restore the root path on error paths that goto'd here mid-
 	 * loop. The success path above already restored before
@@ -1316,14 +1320,16 @@ static void *
 put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
+    GSocketConnection *conn = NULL;
     int s = -1, retval;
     guint8 buf[512];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     retval = file_send_one (s, htxf, buf);
     if (retval) {
@@ -1335,9 +1341,7 @@ put_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* See get_thread for the cleanup-via-marshal rationale. */
     post_xfer_cleanup (htxf);
@@ -1472,17 +1476,19 @@ static void *
 folder_put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
+    GSocketConnection *conn = NULL;
     int s = -1, retval = 0;
     guint8 buf[2048];
     char base_path[MAXPATHLEN];
     GPtrArray *entries = NULL;
     GPtrArray *initial_comps = NULL;
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     g_strlcpy (base_path, htxf->path, sizeof (base_path));
 
@@ -1640,9 +1646,7 @@ cleanup:
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* Restore the root path so the tasks-window label stays
 	 * sensible post-completion. */
