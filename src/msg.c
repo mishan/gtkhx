@@ -130,6 +130,11 @@ msgwin_free (gpointer p)
     }
     g_free (msg->name);
     g_free (msg->uid);
+    /* msg->history (readline-history state) is intentionally
+     * leaked here — pre-existing, called out in the function
+     * comment above. The draft slot is new and small; free it
+     * so the symmetric comment in session.h holds. */
+    g_free (msg->history_draft);
     g_free (msg);
 }
 
@@ -443,7 +448,9 @@ create_msg (guint16 _uid, char *name)
     guint16 *uid = g_malloc (sizeof (guint16));
     *uid = _uid;
 
-    msg = g_malloc (sizeof (struct msgwin));
+    /* g_malloc0: see chat.c, same reason — history_draft must be
+     * NULL before the first g_free(msg->history_draft). */
+    msg = g_malloc0 (sizeof (struct msgwin));
 
     msg->name = g_strdup (name);
     msg->uid = uid;

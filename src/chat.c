@@ -497,7 +497,17 @@ chat_with_cid (session *sess, guint32 cid)
 static void
 gchat_free (gpointer p)
 {
-    g_free (p);
+    struct gtkhx_chat *gchat = p;
+    if (!gchat)
+        return;
+    /* The readline-history state itself (chat_history) is leaked
+     * by historical convention — same Phase-1 mechanical-migration
+     * scope note as msgwin_free in msg.c. The draft buffer added
+     * for Up-arrow recovery is new and small, so free it here so
+     * the comment in session.h ("Freed via g_free … at chat
+     * teardown") is actually true. */
+    g_free (gchat->chat_history_draft);
+    g_free (gchat);
 }
 
 void
@@ -1879,7 +1889,12 @@ create_chat (session *sess)
     GtkWidget *text;
     GtkWidget *vscroll;
 
-    gchat = g_malloc (sizeof (struct gtkhx_chat));
+    /* g_malloc0 so the chat_history_draft slot starts at NULL —
+     * the first Up press at the bottom-of-history "draft"
+     * position g_free()s the previous draft before snapshotting
+     * the current entry, and g_free on uninitialized memory is
+     * undefined. */
+    gchat = g_malloc0 (sizeof (struct gtkhx_chat));
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
@@ -2170,7 +2185,12 @@ pchat_new (session *sess, struct chat *chat)
     GtkWidget *userlist;
     struct gtkhx_chat *gchat;
 
-    gchat = g_malloc (sizeof (struct gtkhx_chat));
+    /* g_malloc0 so the chat_history_draft slot starts at NULL —
+     * the first Up press at the bottom-of-history "draft"
+     * position g_free()s the previous draft before snapshotting
+     * the current entry, and g_free on uninitialized memory is
+     * undefined. */
+    gchat = g_malloc0 (sizeof (struct gtkhx_chat));
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
