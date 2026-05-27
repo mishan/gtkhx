@@ -1087,7 +1087,6 @@ GSocketConnection *
 htxf_connect (struct htxf_conn *htxf)
 {
     GSocketConnection *conn;
-    int s;
     char errbuf[256];
     /* htxf is required — every caller in the codebase (xfers.c,
 	 * news worker, banner worker, xfer_go) allocates the struct
@@ -1124,17 +1123,17 @@ htxf_connect (struct htxf_conn *htxf)
     if (!conn) {
         return NULL;
     }
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
 	 * is set). hx_htxf_subchannel_pack_preamble handles the
 	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
 	 * zeroing for the 24-byte variant.
 	 *
-	 * Phase A keeps the raw write(s, ...) for the handshake — the
-	 * Phase B port to GIOStream switches this to
-	 * g_output_stream_write_all. The wire bytes are identical
-	 * either way. */
+	 * The handshake write goes through GIOStream so a future TLS
+	 * wrap (docs/tls-scoping.md Phase 2) catches these bytes on
+	 * the same path as the rest of the subchannel.
+	 * g_output_stream_write_all blocks until the whole buffer
+	 * lands or an error fires. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     guint16 type
         = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
@@ -1146,7 +1145,8 @@ htxf_connect (struct htxf_conn *htxf)
         g_object_unref (conn);
         return NULL;
     }
-    if (write (s, hdr_buf, hdr_len) != (ssize_t) hdr_len) {
+    GOutputStream *out = g_io_stream_get_output_stream (G_IO_STREAM (conn));
+    if (!g_output_stream_write_all (out, hdr_buf, hdr_len, NULL, NULL, NULL)) {
         g_object_unref (conn);
         return NULL;
     }

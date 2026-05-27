@@ -10,8 +10,8 @@
 #include "config.h"
 #include <errno.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/types.h>
+#include <gio/gio.h>
 #include <glib.h>
 #include "compat.h" /* PACKED — required before hotline.h / protocol.h */
 #include "hotline.h"
@@ -63,24 +63,26 @@ hexdump_for_debug (const char *label, const uint8_t *p, gsize n, guint32 ref)
 }
 
 /* AEAD read path: serve from the plaintext accumulator first;
- * refill from socket as needed. Returns bytes copied, or 0/-1
- * for EOF / error matching read() semantics.
+ * refill from the input stream as needed. Returns bytes copied,
+ * or 0 / -1 for EOF / error matching read() semantics.
  *
- * Refill strategy: drain whatever the socket has into the
- * ciphertext accumulator one read() at a time, peek the length
- * prefix, and Open the frame when fully buffered. The plaintext
- * accumulator is grown to fit the frame's payload. The worker
- * thread blocks on read() (the htxf socket is in blocking mode
- * post-htxf_connect), so a single accumulator-empty refill
+ * Refill strategy: drain whatever the stream has into the
+ * ciphertext accumulator one g_input_stream_read at a time, peek
+ * the length prefix, and Open the frame when fully buffered. The
+ * plaintext accumulator is grown to fit the frame's payload. The
+ * worker thread blocks on g_input_stream_read (GSocketConnection
+ * is blocking by default), so a single accumulator-empty refill
  * loop is enough — we don't have to interleave reads from
- * multiple sockets.
+ * multiple streams.
  *
- * Returns 0 to mean clean EOF (matches read()), -1 (errno set)
- * for I/O error or Open failure. The MAC-fail / oversized-frame
- * cases set errno = EIO so the caller's existing `(r < 1)`
- * check fires and the worker tears down the transfer cleanly. */
+ * Returns 0 to mean clean EOF (matches read()), -1 with errno =
+ * EIO for I/O error or Open failure. EINTR no longer surfaces
+ * here — GIO handles partial-interrupt recovery internally. The
+ * MAC-fail / oversized-frame cases also set errno = EIO so the
+ * caller's existing `(r < 1)` check fires and the worker tears
+ * down the transfer cleanly. */
 static ssize_t
-aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
+aead_read (struct htxf_conn *htxf, GInputStream *in, void *buf, size_t len)
 {
     struct htxf_aead_io *io = &htxf->aead_io;
 
@@ -100,11 +102,11 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
         return (ssize_t) give;
     }
 
-    /* Need to pull and Open another frame. Loop reading from
-	 * socket until we have at least the 4-byte length prefix,
-	 * then keep reading until we have prefix + ciphertext +
-	 * tag. cipher_aead_peek_frame_size returns 0 if we're
-	 * still below the prefix or the prefix is malformed. */
+    /* Need to pull and Open another frame. Loop reading from the
+	 * input stream until we have at least the 4-byte length
+	 * prefix, then keep reading until we have prefix + ciphertext
+	 * + tag. cipher_aead_peek_frame_size returns 0 if we're still
+	 * below the prefix or the prefix is malformed. */
     for (;;) {
         gsize need = cipher_aead_peek_frame_size (io->cipher_buf,
                                                   io->cipher_len);
@@ -112,7 +114,7 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
             break; /* full frame buffered */
         }
 
-        /* Read more bytes from the socket. Grow cipher_buf to
+        /* Read more bytes from the stream. Grow cipher_buf to
 		 * fit either the prefix's announced size or a small
 		 * default chunk (so the first read can land the prefix
 		 * even before we know the frame length). */
@@ -122,13 +124,15 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
             io->cipher_buf = g_realloc (io->cipher_buf, new_cap);
             io->cipher_cap = new_cap;
         }
-        ssize_t r = read (fd, io->cipher_buf + io->cipher_len, want);
+        GError *err = NULL;
+        gssize r = g_input_stream_read (in, io->cipher_buf + io->cipher_len,
+                                        want, NULL, &err);
         if (r == 0) {
             /* Clean EOF mid-frame — surface as EOF only if we
 			 * had nothing buffered yet. Otherwise the peer
 			 * truncated a frame; surface as I/O error. */
             debug_log ("xfer-aead",
-                       "ref=%u read() EOF: cipher_len=%zu need=%zu",
+                       "ref=%u stream EOF: cipher_len=%zu need=%zu",
                        htxf->ref, io->cipher_len, need);
             if (io->cipher_len == 0) {
                 return 0;
@@ -137,11 +141,10 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
             return -1;
         }
         if (r < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            debug_log ("xfer-aead", "ref=%u read() errno=%d (%s)",
-                       htxf->ref, errno, g_strerror (errno));
+            debug_log ("xfer-aead", "ref=%u read failed: %s",
+                       htxf->ref, err ? err->message : "(no error info)");
+            g_clear_error (&err);
+            errno = EIO;
             return -1;
         }
         io->cipher_len += (gsize) r;
@@ -203,15 +206,17 @@ aead_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
 }
 
 /* AEAD write path: Seal the buffer as exactly one frame, then
- * write the framed bytes atomically. Each htxf_io_write call
- * produces one frame on the wire — large transfer payloads
- * already loop with a fixed buffer size, so the call rate stays
- * sane and the per-frame overhead (20 bytes: 4 length + 16 tag)
- * is amortised. Returns `len` (matching the read()/write()
- * convention "we accepted all your bytes") on success, -1 on
- * Seal / socket failure with errno set. */
+ * push the framed bytes through the output stream with
+ * g_output_stream_write_all. Each htxf_io_write call produces
+ * one frame on the wire — large transfer payloads already loop
+ * with a fixed buffer size, so the call rate stays sane and the
+ * per-frame overhead (20 bytes: 4 length + 16 tag) is amortised.
+ * Returns `len` on success (matches read()/write()'s "we accepted
+ * all your bytes" convention), -1 with errno = EIO / EMSGSIZE on
+ * Seal / stream failure. */
 static ssize_t
-aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
+aead_write (struct htxf_conn *htxf, GOutputStream *out, const void *buf,
+            size_t len)
 {
     if (len == 0) {
         return 0;
@@ -231,23 +236,24 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
         = CIPHER_AEAD_LENGTH_PREFIX + len + CIPHER_AEAD_TAG_SIZE;
     /* 16 KiB stack threshold — covers the common per-call sizes
 	 * (transfer headers, fork records, the 8 KiB bulk-data loop)
-	 * without overflowing the worker thread's stack. */
+	 * without overflowing the worker thread's stack. g_autofree
+	 * on heap_buf releases on every return path so we don't
+	 * mirror an `if (heap) g_free` into each error site. */
     guint8 stack_buf[16 * 1024];
-    guint8 *out;
-    gboolean heap = framed_cap > sizeof (stack_buf);
-    if (heap) {
-        out = g_malloc (framed_cap);
+    g_autofree guint8 *heap_buf = NULL;
+    guint8 *frame;
+    if (framed_cap > sizeof (stack_buf)) {
+        heap_buf = g_malloc (framed_cap);
+        frame = heap_buf;
     } else {
-        out = stack_buf;
+        frame = stack_buf;
     }
     /* Snapshot the encode counter BEFORE seal advances it — useful
      * for matching this frame to a corresponding server-side decode
      * failure in protocol traces. */
     guint64 enc_counter_before = htxf->xfer_encode.counter;
-    gsize n = cipher_aead_seal (&htxf->xfer_encode, buf, len, out, framed_cap);
+    gsize n = cipher_aead_seal (&htxf->xfer_encode, buf, len, frame, framed_cap);
     if (n == 0) {
-        if (heap)
-            g_free (out);
         debug_log ("xfer-aead", "ref=%u seal failed (len=%zu)",
                    htxf->ref, len);
         errno = EIO;
@@ -260,29 +266,18 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
                htxf->xfer_encode.key[0], htxf->xfer_encode.key[1],
                htxf->xfer_encode.key[2], htxf->xfer_encode.key[3],
                (unsigned) htxf->xfer_encode.dir);
-    hexdump_for_debug ("write", out, n, htxf->ref);
-    /* Atomic-on-success write loop. */
-    gsize wrote = 0;
-    while (wrote < n) {
-        ssize_t w = write (fd, out + wrote, n - wrote);
-        if (w < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (heap)
-                g_free (out);
-            return -1;
-        }
-        if (w == 0) {
-            if (heap)
-                g_free (out);
-            errno = EIO;
-            return -1;
-        }
-        wrote += (gsize) w;
-    }
-    if (heap) {
-        g_free (out);
+    hexdump_for_debug ("write", frame, n, htxf->ref);
+    /* g_output_stream_write_all loops over partial writes
+	 * internally — short writes can't surface, EINTR is handled
+	 * inside GIO. Either the whole frame lands or we get an
+	 * error. */
+    GError *err = NULL;
+    if (!g_output_stream_write_all (out, frame, n, NULL, NULL, &err)) {
+        debug_log ("xfer-aead", "ref=%u write failed: %s",
+                   htxf->ref, err ? err->message : "(no error info)");
+        g_clear_error (&err);
+        errno = EIO;
+        return -1;
     }
     /* Pretend we accepted the plaintext bytes — the framing
 	 * overhead is invisible to xfers.c, just as compression
@@ -292,19 +287,46 @@ aead_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
 
 
 ssize_t
-htxf_io_read (struct htxf_conn *htxf, int fd, void *buf, size_t len)
+htxf_io_read (struct htxf_conn *htxf, GIOStream *io, void *buf, size_t len)
 {
+    GInputStream *in = g_io_stream_get_input_stream (io);
     if (htxf && htxf->aead_active) {
-        return aead_read (htxf, fd, buf, len);
+        return aead_read (htxf, in, buf, len);
     }
-    return read (fd, buf, len);
+    /* Plaintext: read directly off the stream. GIO blocks until
+	 * at least one byte, EOF, or error — same shape as read(2). */
+    GError *err = NULL;
+    gssize r = g_input_stream_read (in, buf, len, NULL, &err);
+    if (r < 0) {
+        debug_log ("xfer", "ref=%u plain read failed: %s",
+                   htxf ? htxf->ref : 0,
+                   err ? err->message : "(no error info)");
+        g_clear_error (&err);
+        errno = EIO;
+        return -1;
+    }
+    return (ssize_t) r;
 }
 
 ssize_t
-htxf_io_write (struct htxf_conn *htxf, int fd, const void *buf, size_t len)
+htxf_io_write (struct htxf_conn *htxf, GIOStream *io, const void *buf,
+               size_t len)
 {
+    GOutputStream *out = g_io_stream_get_output_stream (io);
     if (htxf && htxf->aead_active) {
-        return aead_write (htxf, fd, buf, len);
+        return aead_write (htxf, out, buf, len);
     }
-    return write (fd, buf, len);
+    /* Plaintext: write_all loops over partial writes internally,
+	 * so the caller's `if (htxf_io_write (...) != n)` check
+	 * either succeeds with `len` returned or fails with -1. */
+    GError *err = NULL;
+    if (!g_output_stream_write_all (out, buf, len, NULL, NULL, &err)) {
+        debug_log ("xfer", "ref=%u plain write failed: %s",
+                   htxf ? htxf->ref : 0,
+                   err ? err->message : "(no error info)");
+        g_clear_error (&err);
+        errno = EIO;
+        return -1;
+    }
+    return (ssize_t) len;
 }

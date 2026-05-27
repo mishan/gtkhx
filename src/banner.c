@@ -576,6 +576,7 @@ banner_htxf_worker_thread (void *arg)
 {
     struct htxf_fetch *f = arg;
     GSocketConnection *conn = NULL;
+    GIOStream *io = NULL;
     int s = -1;
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     char errbuf[256] = { 0 };
@@ -586,11 +587,13 @@ banner_htxf_worker_thread (void *arg)
         debug_log ("banner", "htxf connect failed: %s", errbuf);
         goto out;
     }
-    /* Borrow the raw fd for the body byte-streaming loops. The conn
-	 * owns the fd; g_clear_object at the bottom closes it. Phase B
-	 * will replace the read_n/write_n/htxf_io_read calls below with
-	 * GIOStream-shaped equivalents; for now the fd extraction here
-	 * matches the xfers.c workers exactly. */
+    /* io is for htxf_io_read (Phase B); s is still used by the
+	 * plaintext read_n / write_n helpers (Phase E will drop those).
+	 * Both point at the same underlying socket — io references the
+	 * GSocketConnection's streams, s is the raw fd borrowed from
+	 * the GSocket. g_clear_object on conn at the bottom closes the
+	 * fd via the conn's finaliser; no double-close. */
+    io = G_IO_STREAM (conn);
     s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this
@@ -634,7 +637,7 @@ banner_htxf_worker_thread (void *arg)
         guint8 *p = f->bytes;
         gsize remain = f->size;
         while (remain) {
-            ssize_t r = htxf_io_read (&xfer, s, p, remain);
+            ssize_t r = htxf_io_read (&xfer, io, p, remain);
             if (r <= 0) {
                 debug_log ("banner",
                            "htxf body read failed (AEAD) at < %zu bytes: %s",

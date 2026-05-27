@@ -12,10 +12,16 @@
  * subchannel that route through ChaCha20-Poly1305 AEAD when the
  * control channel negotiated it (HOPE-ChaCha20-Poly1305 Phase E).
  *
- * Wire shape, plaintext mode (the only thing this commit actually
- * does):
- *     read(s, buf, len)  ≡  htxf_io_read(htxf, s, buf, len)
- *     write(s, buf, len) ≡  htxf_io_write(htxf, s, buf, len)
+ * Wire shape, plaintext mode:
+ *     g_input_stream_read(in, ...)   ≡  htxf_io_read(htxf, io, buf, len)
+ *     g_output_stream_write_all(...) ≡  htxf_io_write(htxf, io, buf, len)
+ *
+ * `io` is the GIOStream of the GSocketConnection htxf_connect
+ * returned. The wrappers extract its input / output streams
+ * internally. Using GIOStream (rather than a raw socket fd) lets
+ * the same code path absorb a future TLS wrap — replacing the
+ * GSocketConnection's stream with a GTlsClientConnection wrapping
+ * it (docs/tls-scoping.md Phase 2) needs no edits below this line.
  *
  * Wire shape, AEAD mode (Phase E2 — htxf_connect flips
  * htxf->aead_active = TRUE after deriving xfer_encode / xfer_decode
@@ -60,6 +66,7 @@
 #define __htxf_io_h
 
 #include "config.h"
+#include <gio/gio.h>
 #include <glib.h>
 #include <sys/types.h> /* ssize_t */
 
@@ -101,26 +108,34 @@ extern void htxf_io_init (struct htxf_conn *htxf);
  * own owner (struct htxf_conn) when the htxf_conn frees. */
 extern void htxf_io_release (struct htxf_conn *htxf);
 
-/* Drop-in replacement for read(fd, buf, len).
+/* Read up to `len` bytes from `io` into `buf`.
  *
- * Plaintext path: returns read(fd, buf, len) directly.
+ * Plaintext path: g_input_stream_read on io's input stream.
  *
  * AEAD path: serves up to `len` bytes from the plaintext
- * accumulator, refilling from the socket as needed. Returns
- * bytes copied to buf, or 0 / -1 with errno preserved on socket
- * EOF / error. */
-extern ssize_t htxf_io_read (struct htxf_conn *htxf, int fd,
+ * accumulator, refilling from the input stream as needed.
+ *
+ * Returns bytes copied to buf (>0), 0 on EOF, -1 on error
+ * (errno set to EIO; GError details surface through debug_log
+ * under the xfer / xfer-aead categories). Close enough to read(2)
+ * semantics that the historical `if (r < 1)` idioms in xfers.c
+ * keep working without per-site logic changes. */
+extern ssize_t htxf_io_read (struct htxf_conn *htxf, GIOStream *io,
                              void *buf, size_t len);
 
-/* Drop-in replacement for write(fd, buf, len).
+/* Write exactly `len` bytes from `buf` to `io`.
  *
- * Plaintext path: returns write(fd, buf, len) directly.
+ * Plaintext path: g_output_stream_write_all on io's output
+ * stream (loops over partial writes internally — short writes
+ * can't surface).
  *
  * AEAD path: Seal's the buffer as one frame, writes the framed
- * bytes to the socket. Returns `len` on success (so the caller's
- * `if (write(s, x, n) != n)` check still works) or -1 with errno
+ * bytes through the output stream.
+ *
+ * Returns `len` on success (matches the caller's
+ * `if (htxf_io_write (...) != n)` check) or -1 with errno = EIO
  * on error / oversized plaintext. */
-extern ssize_t htxf_io_write (struct htxf_conn *htxf, int fd,
+extern ssize_t htxf_io_write (struct htxf_conn *htxf, GIOStream *io,
                               const void *buf, size_t len);
 
 #endif /* __htxf_io_h */
