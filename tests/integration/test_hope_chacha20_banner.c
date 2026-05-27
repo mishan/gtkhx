@@ -256,9 +256,16 @@ test_hope_chacha20_banner_htxf (void)
     GError *err = NULL;
     GSocket *xfer_sock = g_socket_new_from_fd (xfer_fd, &err);
     g_assert_no_error (err);
+    g_assert_nonnull (xfer_sock);
     GSocketConnection *xfer_conn
         = g_socket_connection_factory_create_connection (xfer_sock);
     g_object_unref (xfer_sock);
+    /* The factory only returns NULL when the socket's family/type
+     * combination has no registered GSocketConnection subclass.
+     * AF_INET + SOCK_STREAM (what the harness produces) is always
+     * registered as GTcpConnection. Assert so a future harness
+     * shape change doesn't pass a NULL through to G_IO_STREAM(). */
+    g_assert_nonnull (xfer_conn);
     GIOStream *xfer_io = G_IO_STREAM (xfer_conn);
 
     /* Read `size` body bytes through htxf_io_read — consumes AEAD

@@ -176,6 +176,26 @@ unignore_signals (sigset_t *oldset)
     sigprocmask (SIG_SETMASK, oldset, 0);
 }
 
+/* Get the underlying GSocket from a HTXF GIOStream so we can call
+ * g_socket_condition_timed_wait on it. Today htxf_io is always a
+ * GSocketConnection (htxf_connect / hx_sync_connect_to_host return
+ * those directly), so the type check is a no-op narrowing. When
+ * TLS lands (docs/tls-scoping.md Phase 2), `io` will be a
+ * GTlsClientConnection wrapping a GSocketConnection — at that
+ * point this helper grows a GTlsConnection branch that reads the
+ * "base-io-stream" property via g_object_get to reach the socket.
+ * Returns NULL if io is an unexpected shape — current callers
+ * treat NULL as "skip the timed wait", matching the legacy
+ * select(sr <= 0) "give up and move on" fallback. */
+static GSocket *
+htxf_io_get_socket (GIOStream *io)
+{
+    if (G_IS_SOCKET_CONNECTION (io)) {
+        return g_socket_connection_get_socket (G_SOCKET_CONNECTION (io));
+    }
+    return NULL;
+}
+
 /* Does either fork (data or resource) of the local path exist? */
 static int
 local_path_exists (const char *path)
@@ -861,12 +881,16 @@ get_rsrc:
         if (tot_len < file_budget) {
             /* GSocket needed for the timed-wait below. Reach
 			 * through the GSocketConnection that backs `io` —
-			 * Phase D doesn't worry about a future TLS wrap
-			 * because the TLS port (docs/tls-scoping.md Phase 2)
-			 * will walk through g_tls_connection_get_base_io_stream
-			 * to the same socket. */
-            GSocket *sock = g_socket_connection_get_socket (
-                G_SOCKET_CONNECTION (io));
+			 * htxf_io_get_socket walks through a future TLS
+			 * wrap so the call site stays the same when the TLS
+			 * port (docs/tls-scoping.md Phase 2) lands. */
+            GSocket *sock = htxf_io_get_socket (io);
+            if (!sock) {
+                /* Unknown stream shape — skip the drain. The
+				 * select(sr <= 0) branch had a "give up and move
+				 * on" fallback for the same condition. */
+                goto done;
+            }
             guint64 remaining = file_budget - tot_len;
             while (remaining > 0) {
                 guint8 sink[2048];

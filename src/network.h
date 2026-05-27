@@ -31,13 +31,11 @@ extern void kill_threads (void);
  * the caller owns (g_object_unref drops both the GIO machinery
  * and the underlying socket). On failure returns NULL.
  *
- * Worker threads pull the fd back out via
- *   int s = g_socket_get_fd (g_socket_connection_get_socket (conn));
- * and pass it to htxf_io_read / htxf_io_write exactly as the
- * earlier dup-and-close-yourself shape did. The Phase A
- * conversion to GSocketConnection drops the dup and the manual
- * O_NONBLOCK toggle but doesn't change any worker logic; the
- * GIOStream-shaped htxf_io_* port lands in Phase B.
+ * Worker threads cast the returned conn to GIOStream and feed it
+ * to htxf_io_read / htxf_io_write — both now stream-shaped and
+ * AEAD-aware. The dup() + manual O_NONBLOCK toggle the old
+ * fd-returning shape needed are gone; GSocketConnection is
+ * blocking by default and the GIOStream APIs handle EINTR.
  *
  * AEAD subchannel keys (HOPE+ChaCha20) are armed before return
  * when the control channel negotiated CIPHER_MODE_AEAD. */

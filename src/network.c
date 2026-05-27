@@ -1049,14 +1049,11 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
  * IPv4/IPv6 fallback and SOCKS proxy resolution (via
  * GProxyResolver) come for free.
  *
- * Workers that still want a raw fd extract it via
- *   int s = g_socket_get_fd (g_socket_connection_get_socket (conn));
- * and pass it to htxf_io_read / htxf_io_write. The fd is owned by
- * the GSocketConnection — don't close(2) it; unref the conn and
- * GSocket's finaliser closes the fd. The Phase B port to
- * GIOStream-shaped htxf_io_* makes the fd extraction unnecessary;
- * Phase A just gets us off the dup() and the manual O_NONBLOCK
- * toggle the old fd-returning shape needed. */
+ * Workers cast the returned conn to GIOStream and stream bytes
+ * through htxf_io_read / htxf_io_write (both stream-shaped and
+ * AEAD-aware since Phase B). The fd is owned by the
+ * GSocketConnection — don't close(2) it; unref the conn and
+ * GSocket's finaliser closes the fd. */
 GSocketConnection *
 hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
                          gsize errbuf_len)
