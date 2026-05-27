@@ -39,25 +39,209 @@
 #include "tasks.h"
 #include "tasks_table.h"
 
+/* Phase 5 task-row polish: each row is now an Adwaita-shaped
+ * action-row layout — icon column on the left, then a vbox with
+ * three stacked elements:
+ *
+ *   [icon] [Title (filename)                          Queue #3]
+ *          [Subtitle: bytes · speed · ETA                     ]
+ *          [progress bar                                      ]
+ *
+ * The subtitle uses font-feature-settings: "tnum" so digit
+ * widths stay fixed across updates — that's what kills the
+ * "label keeps moving around" jitter the old single-line label
+ * suffered from: when "1.2 MB" grew to "10.2 MB" the whole
+ * trailing path shifted right by one glyph each tick.
+ *
+ * The struct now holds pointers to all three independently-
+ * updatable widgets so file_update / task_update can refresh
+ * them in place without rebuilding the row. */
 struct gtask {
     struct gtask *next, *prev;
     guint32 trans;
     struct htxf_conn *htxf;
-    GtkWidget *label;
+    GtkWidget *icon;
+    GtkWidget *title;
+    GtkWidget *subtitle;
     GtkWidget *pbar;
     GtkWidget *listitem;
-    GtkWidget *queue;
+    GtkWidget *queue; /* badge on the title row; NULL for non-xfer tasks */
 };
+
+/* One-time CSS provider for the tasks rows. Loads tabular-nums on
+ * the subtitle (kills digit-width jitter), dims the subtitle, and
+ * gives the progress bar a sensible minimum height. Attached at
+ * GTK_STYLE_PROVIDER_PRIORITY_APPLICATION so our rules sit above
+ * theme defaults but below the user's gtk.css. */
+static GtkCssProvider *tasks_css_provider;
+
+static void
+ensure_tasks_css (void)
+{
+    /* Subtitle size + queue size now come from Pango attributes
+	 * set directly on the labels (see gtask_apply_smaller_font),
+	 * not from CSS font-size. CSS font-size resolves AFTER the
+	 * label asks Pango for its natural height, and rounding from
+	 * em -> px occasionally leaves the rendered glyphs 1 px
+	 * taller than the allocated height — which clipped the top of
+	 * the subtitle line. Pango attributes are consulted during
+	 * layout's get_extents call, so allocation matches rendering
+	 * exactly. CSS still handles opacity + tabular-nums + the
+	 * progress-bar height. */
+    static const char tasks_css[] =
+        ".gtkhx-task-row {"
+        "  padding: 8px 12px;"
+        "}"
+        ".gtkhx-task-title {"
+        "  font-weight: 600;"
+        "}"
+        ".gtkhx-task-subtitle {"
+        "  opacity: 0.65;"
+        "  font-feature-settings: \"tnum\";"
+        "}"
+        ".gtkhx-task-queue {"
+        "  opacity: 0.65;"
+        "  font-feature-settings: \"tnum\";"
+        "}"
+        ".gtkhx-task-row progressbar > trough {"
+        "  min-height: 6px;"
+        "}"
+        ".gtkhx-task-row progressbar > trough > progress {"
+        "  min-height: 6px;"
+        "}";
+
+    GdkDisplay *display;
+
+    if (tasks_css_provider) {
+        return;
+    }
+    /* No display means we're running before GTK is initialised or
+	 * in a non-GUI context (the unit tests don't currently exercise
+	 * tasks.c, but be defensive — attach-with-NULL is a hard crash
+	 * in GTK 4 rather than a graceful no-op). The provider stays
+	 * NULL so the next call retries once a display exists. */
+    display = gdk_display_get_default ();
+    if (!display) {
+        return;
+    }
+    tasks_css_provider = gtk_css_provider_new ();
+    gtk_css_provider_load_from_string (tasks_css_provider, tasks_css);
+    gtk_style_context_add_provider_for_display (
+        display, GTK_STYLE_PROVIDER (tasks_css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+/* Apply a "smaller than default" font size as a Pango attribute on
+ * the label. Pango consults its attribute list during get_extents,
+ * which is the same call the GtkLabel measure path goes through,
+ * so the label's natural-size matches what the glyphs need. CSS
+ * font-size doesn't have that property — it resolves after the
+ * em-to-px conversion, which can leave 1 px of clip at the top
+ * of the line when the conversion rounds down. */
+static void
+gtask_apply_smaller_font (GtkLabel *label, double scale)
+{
+    PangoAttrList *attrs = pango_attr_list_new ();
+    PangoAttribute *a = pango_attr_scale_new (scale);
+    pango_attr_list_insert (attrs, a);
+    gtk_label_set_attributes (label, attrs);
+    pango_attr_list_unref (attrs);
+}
+
+/* Resolve a gresource path for the row icon column. We use the
+ * same retro pixmaps the toolbar carries (dl/ul/tracker/connect/
+ * tasks) so the Tasks window keeps the period-appropriate look
+ * instead of jumping into Adwaita's symbolic icon set. The pixmaps
+ * are 16x16 originals; gtask_make_icon scales 2x to 32px to match
+ * the toolbar treatment. */
+static const char *
+gtask_icon_for (guint32 trans, struct htxf_conn *htxf)
+{
+    if (htxf) {
+        return htxf->type == XFER_GET
+                   ? "/com/nasledov/gtkhx/pixmaps/dl.png"
+                   : "/com/nasledov/gtkhx/pixmaps/ul.png";
+    }
+    switch ((gint32) trans) {
+    case -127: /* tracker list */
+    case -129: /* tracker connect */
+        return "/com/nasledov/gtkhx/pixmaps/tracker.png";
+    case -128: /* main control-channel connect */
+        return "/com/nasledov/gtkhx/pixmaps/connect.png";
+    default:
+        return "/com/nasledov/gtkhx/pixmaps/tasks.png";
+    }
+}
+
+/* Build a GtkPicture from a gresource pixmap path, scaled
+ * nearest-neighbour to preserve the chunky pixel-art look. Mirrors
+ * the icon-loading half of gtkhx_pixmap_button without the
+ * surrounding GtkButton wrap. The icons we use are all 16x16
+ * originals; the 2x scale gives 32x32 to match the toolbar
+ * treatment. On a missing resource (shouldn't happen in a normal
+ * build — the gresource bundle is compiled in) we hand back a
+ * GtkPicture with the same size request so the row's icon column
+ * stays aligned with sibling rows that did get their icon. */
+#define GTASK_ICON_SRC_SIZE 16
+#define GTASK_ICON_SCALE 2
+#define GTASK_ICON_PX (GTASK_ICON_SRC_SIZE * GTASK_ICON_SCALE)
+static GtkWidget *
+gtask_make_icon (const char *resource_path)
+{
+    GdkPixbuf *src;
+    GdkPixbuf *use_pb;
+    GdkTexture *tex;
+    GtkWidget *picture;
+
+    src = gdk_pixbuf_new_from_resource (resource_path, NULL);
+    if (!src) {
+        picture = gtk_picture_new ();
+        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        return picture;
+    }
+    if (GTASK_ICON_SCALE > 1) {
+        int w = gdk_pixbuf_get_width (src) * GTASK_ICON_SCALE;
+        int h = gdk_pixbuf_get_height (src) * GTASK_ICON_SCALE;
+        use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
+        g_object_unref (src);
+    } else {
+        use_pb = src;
+    }
+    /* gdk_pixbuf_scale_simple can return NULL under OOM (or if the
+	 * scaled dimensions overflow). Treat it the same as a missing
+	 * resource: empty GtkPicture with the expected size request so
+	 * the icon column stays aligned with sibling rows. Matches
+	 * gtkhx_pixmap_button's defensive shape. */
+    if (!use_pb) {
+        picture = gtk_picture_new ();
+        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        return picture;
+    }
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    tex = gdk_texture_new_for_pixbuf (use_pb);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+    gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    g_object_unref (tex);
+    g_object_unref (use_pb);
+    return picture;
+}
 
 void
 create_tasks (session *sess)
 {
     GtkWidget *gtklist, *gtask_scroll;
 
+    /* CSS-loading happens once at first session bring-up — the
+	 * provider is attached to the display, so all sessions share
+	 * it. Idempotent if already loaded. */
+    ensure_tasks_css ();
+
     /* Phase 3.2: ported from GtkList (removed in GTK 3) to GtkListBox.
-	 * Each transfer/task is a GtkListBoxRow holding the label+pbar
-	 * vbox; gtsk->listitem points at the row, with the gtsk pointer
-	 * stashed via g_object_set_data on the row itself. */
+	 * Each transfer/task is a GtkListBoxRow holding the icon + title +
+	 * subtitle + progress-bar layout; gtsk->listitem points at the row,
+	 * with the gtsk pointer stashed via g_object_set_data on the row
+	 * itself. */
     gtklist = gtk_list_box_new ();
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (gtklist),
                                      GTK_SELECTION_MULTIPLE);
@@ -101,30 +285,47 @@ gtask_with_htxf (session *sess, struct htxf_conn *htxf)
     return 0;
 }
 
+/* Refresh the queue badge text + visibility from htxf->queue. The
+ * server sends a position-in-queue when too many transfers are
+ * pending; 0 means "running now". We hide the badge when the
+ * value isn't useful so the title row doesn't carry dead chrome. */
+static void
+gtask_refresh_queue_badge (struct gtask *gtsk)
+{
+    if (!gtsk->queue) {
+        return;
+    }
+    if (gtsk->htxf && gtsk->htxf->queue > 0) {
+        /* g_strdup_printf sizes itself so neither a translated
+		 * "Queued #%u" form nor a large queue number can truncate.
+		 * %u matches htxf->queue's guint32 type. */
+        g_autofree char *qid
+            = g_strdup_printf (_ ("Queued #%u"), gtsk->htxf->queue);
+        gtk_label_set_text (GTK_LABEL (gtsk->queue), qid);
+        gtk_widget_set_visible (gtsk->queue, TRUE);
+    } else {
+        gtk_widget_set_visible (gtsk->queue, FALSE);
+    }
+}
+
 void
 output_xfer_queue (session *sess, struct htxf_conn *htxf)
 {
     struct gtask *gtsk = gtask_with_htxf (sess, htxf);
-    char qid[16];
 
     if (!gtsk) {
         return;
     }
-
-    g_snprintf (qid, sizeof (qid), "%d", htxf->queue);
-    gtk_label_set_text (GTK_LABEL (gtsk->queue), qid);
+    gtask_refresh_queue_badge (gtsk);
 }
 
 static struct gtask *
 gtask_new (session *sess, guint32 trans, struct htxf_conn *htxf)
 {
-    GtkWidget *pbar;
-    GtkWidget *vbox;
-    GtkWidget *hbox;
-    GtkWidget *label;
-    GtkWidget *listitem;
-    GtkWidget *queue = 0;
-    char qid[16];
+    GtkWidget *row_box;        /* outer hbox: icon | vbox */
+    GtkWidget *content_box;    /* inner vbox: title-row, subtitle, pbar */
+    GtkWidget *title_row;      /* inner hbox: title (hexpand) | queue badge */
+    GtkWidget *icon, *title, *subtitle, *pbar, *queue, *listitem;
     struct gtask *gtsk;
 
     gtsk = g_malloc (sizeof (struct gtask));
@@ -134,57 +335,106 @@ gtask_new (session *sess, guint32 trans, struct htxf_conn *htxf)
         sess->gtask_list->next = gtsk;
     }
 
+    /* Icon column. Retro Hotline-era pixmaps from gresource —
+	 * gtask_make_icon scales nearest-neighbour so the pixel art
+	 * stays crisp at the 2x size. Vcentered against the title +
+	 * subtitle block to its right. */
+    icon = gtask_make_icon (gtask_icon_for (trans, htxf));
+    gtk_widget_set_valign (icon, GTK_ALIGN_CENTER);
+
+    /* Title — bold via CSS class, ellipsize keeps it on one line,
+	 * expands horizontally inside the title row so the queue badge
+	 * sits flush-right. xalign=0 keeps the text left-aligned.
+	 *
+	 * NOTE: we deliberately do NOT call gtk_label_set_single_line_mode
+	 * here. That API pins the label's height to the *default* font's
+	 * ascent+descent. The subtitle below uses Pango attributes to
+	 * scale its font down (see gtask_apply_smaller_font); single_line_mode
+	 * uses the unscaled metric for its height query, which over-reserves
+	 * vertical space and earlier interactions even managed to clip the
+	 * top of the smaller subtitle line. Skip set_single_line_mode and
+	 * rely on ellipsize alone to enforce one-line behaviour — both
+	 * labels are always populated in gtask_new so the empty/non-empty
+	 * height jump set_single_line_mode was designed to suppress is a
+	 * non-issue here. */
+    title = gtk_label_new ("");
+    gtk_widget_add_css_class (title, "gtkhx-task-title");
+    gtk_label_set_xalign (GTK_LABEL (title), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (title), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand (title, TRUE);
+
+    /* Subtitle — the line that updates every tick. CSS pins it to
+	 * tabular-nums + dim opacity, which is what stops the digits
+	 * shifting siblings around as the speed / ETA churn. Font-size
+	 * shrinkage goes through a Pango scale attribute (not CSS) so
+	 * the label's natural-height query matches the rendered glyph
+	 * height exactly — see gtask_apply_smaller_font's comment. */
+    subtitle = gtk_label_new ("");
+    gtk_widget_add_css_class (subtitle, "gtkhx-task-subtitle");
+    gtk_label_set_xalign (GTK_LABEL (subtitle), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (subtitle), PANGO_ELLIPSIZE_END);
+    gtask_apply_smaller_font (GTK_LABEL (subtitle), PANGO_SCALE_SMALL);
+
+    /* Queue badge — only allocated for xfer rows (HTLC tasks never
+	 * carry a queue position). Starts hidden; gtask_refresh_queue_badge
+	 * flips it on when htxf->queue > 0. */
+    queue = NULL;
+    if (htxf) {
+        queue = gtk_label_new ("");
+        gtk_widget_add_css_class (queue, "gtkhx-task-queue");
+        gtk_widget_set_valign (queue, GTK_ALIGN_CENTER);
+        gtk_widget_set_visible (queue, FALSE);
+        gtask_apply_smaller_font (GTK_LABEL (queue), PANGO_SCALE_X_SMALL);
+    }
+
+    /* Progress bar — slim Adwaita-styled bar via CSS min-height,
+	 * no overlaid percent text (subtitle carries position info). */
     pbar = gtk_progress_bar_new ();
-    /* Phase 5 dark-theme follow-up: surface percent on the bar itself
-	 * and give it real vertical room. The default GTK 4 progress-bar
-	 * trough is ~6 px tall, which is hard to read against any theme;
-	 * a 16 px floor keeps it visible without dwarfing the row, and
-	 * show_text overlays percentage right where the eye looks. The
-	 * descriptive label above still carries filename + transferred /
-	 * total / speed / ETA. */
-    gtk_progress_bar_set_show_text (GTK_PROGRESS_BAR (pbar), TRUE);
-    gtk_widget_set_size_request (pbar, -1, 16);
+    gtk_progress_bar_set_show_text (GTK_PROGRESS_BAR (pbar), FALSE);
     gtk_widget_set_valign (pbar, GTK_ALIGN_CENTER);
-    label = gtk_label_new ("");
 
-    if (htxf) {
-        if (htxf->queue > 0) {
-            g_snprintf (qid, sizeof (qid), "%d", htxf->queue);
-            queue = gtk_label_new (qid);
-        } else {
-            queue = gtk_label_new ("");
-        }
+    /* Top-row hbox: title (hexpand) + optional queue badge. */
+    title_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtkhx_box_pack (title_row, title, 1, 1, 0);
+    if (queue) {
+        gtkhx_box_pack (title_row, queue, 0, 0, 0);
     }
 
-    gtk_label_set_justify (GTK_LABEL (label), GTK_JUSTIFY_LEFT);
-    gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_size_request (vbox, 240, 50);
+    /* Content vbox stacks title-row, subtitle, progress bar. */
+    content_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_hexpand (content_box, TRUE);
+    gtkhx_box_pack (content_box, title_row, 0, 0, 0);
+    gtkhx_box_pack (content_box, subtitle, 0, 0, 0);
+    gtkhx_box_pack (content_box, pbar, 0, 0, 0);
 
-    if (htxf) {
-        gtkhx_box_pack (hbox, queue, 0, 0, 0);
-    }
-    gtkhx_box_pack (hbox, label, 1, 1, 4);
-    gtkhx_box_pack (vbox, hbox, 0, 0, 0);
-    gtkhx_box_pack (vbox, pbar, 1, 1, 0);
+    /* Outer row hbox: icon + content. Min width keeps narrow
+	 * tasks windows from squashing the bar to nothing. */
+    row_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class (row_box, "gtkhx-task-row");
+    gtk_widget_set_size_request (row_box, 280, -1);
+    gtkhx_box_pack (row_box, icon, 0, 0, 0);
+    gtkhx_box_pack (row_box, content_box, 1, 1, 0);
 
     listitem = gtk_list_box_row_new ();
     g_object_set_data (G_OBJECT (listitem), "gtsk", gtsk);
-    gtkhx_widget_set_child (listitem, vbox);
+    gtkhx_widget_set_child (listitem, row_box);
 
     if (sess->gtklist) {
         gtk_list_box_insert (GTK_LIST_BOX (sess->gtklist), listitem, -1);
     }
 
-    gtsk->label = label;
+    gtsk->icon = icon;
+    gtsk->title = title;
+    gtsk->subtitle = subtitle;
     gtsk->pbar = pbar;
     gtsk->listitem = listitem;
     gtsk->trans = trans;
     gtsk->htxf = htxf;
     gtsk->queue = queue;
     sess->gtask_list = gtsk;
+
+    /* Initial queue-badge state if the htxf came in pre-queued. */
+    gtask_refresh_queue_badge (gtsk);
 
     return gtsk;
 }
@@ -250,30 +500,54 @@ gtask_delete_tsk (session *sess, guint32 trans)
     gtask_delete (sess, gtsk);
 }
 
+/* Set the progress bar fraction to num/total, guarded against zero
+ * total and clamped to [0.0, 1.0]. Earlier task_update / progress
+ * call sites used num / (num + total) which never reaches 1.0
+ * (tops out at 0.5 when num == total). Caller semantics here are
+ * the natural "X of Y" — num is current count, total is the
+ * denominator. */
+static void
+gtask_set_fraction (GtkProgressBar *pbar, guint32 num, guint32 total)
+{
+    gdouble frac;
+
+    if (total == 0) {
+        gtk_progress_bar_set_fraction (pbar, 0.0);
+        return;
+    }
+    frac = (gdouble) num / (gdouble) total;
+    if (frac < 0.0) {
+        frac = 0.0;
+    }
+    if (frac > 1.0) {
+        frac = 1.0;
+    }
+    gtk_progress_bar_set_fraction (pbar, frac);
+}
+
 void
 track_prog_update (session *sess, char *str, int num, int total)
 {
-    GtkWidget *pbar;
-    GtkWidget *label;
-    char taskstr[256];
     struct gtask *gtsk;
-    guint32 pos = num;
+    guint32 pos = (guint32) (num < 0 ? 0 : num);
+    guint32 tot = (guint32) (total < 0 ? 0 : total);
+    g_autofree char *sub = NULL;
 
     gtsk = gtask_with_trans (sess, -127);
     if (!gtsk) {
         gtsk = gtask_new (sess, -127, 0);
     }
 
-    label = gtsk->label;
-    pbar = gtsk->pbar;
-    g_snprintf (taskstr, sizeof (taskstr),
-                _ ("Task (Listing Tracker: %s) %u/%u"), str, pos, total);
-    gtk_label_set_text (GTK_LABEL (label), taskstr);
+    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Listing tracker"));
+    /* g_strdup_printf sizes itself so a long tracker hostname (str)
+	 * or a translated form with extra glyphs can't truncate. Cast
+	 * the int args explicitly so the %u format matches the type
+	 * actually passed through varargs. */
+    sub = g_strdup_printf (_ ("%s \xc2\xb7 %u of %u servers"),
+                           str ? str : "", pos, tot);
+    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
-    if (pos) {
-        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (pbar),
-                                       (gfloat)pos / (gfloat)(pos + total));
-    }
+    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
 
     if (num >= total) {
         gtask_delete (sess, gtsk);
@@ -283,27 +557,22 @@ track_prog_update (session *sess, char *str, int num, int total)
 void
 trackconn_prog_update (session *sess, char *str, int num, int total)
 {
-    GtkWidget *pbar;
-    GtkWidget *label;
-    char taskstr[256];
     struct gtask *gtsk;
-    guint32 pos = num;
+    guint32 pos = (guint32) (num < 0 ? 0 : num);
+    guint32 tot = (guint32) (total < 0 ? 0 : total);
+    g_autofree char *sub = NULL;
 
     gtsk = gtask_with_trans (sess, -129);
     if (!gtsk) {
         gtsk = gtask_new (sess, -129, 0);
     }
 
-    label = gtsk->label;
-    pbar = gtsk->pbar;
-    g_snprintf (taskstr, sizeof (taskstr),
-                _ ("Task (Connecting to Tracker: %s) %u/%u"), str, pos, total);
-    gtk_label_set_text (GTK_LABEL (label), taskstr);
+    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting to tracker"));
+    sub = g_strdup_printf (_ ("%s \xc2\xb7 %u of %u"),
+                           str ? str : "", pos, tot);
+    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
-    if (pos) {
-        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (pbar),
-                                       (gfloat)pos / (gfloat)(pos + total));
-    }
+    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
 
     if (num >= total) {
         gtask_delete (sess, gtsk);
@@ -313,29 +582,31 @@ trackconn_prog_update (session *sess, char *str, int num, int total)
 void
 conn_task_update (session *sess, int stat)
 {
-    GtkWidget *pbar;
-    GtkWidget *label;
-    char taskstr[256];
+    char sub[64];
     struct gtask *gtsk;
-    guint32 pos = stat / 2, len = 2;
+    /* Callers (toolbar.c / gtkhx.c) pass stat in {0, 1, 2}
+	 * representing the connection-phase step. The old code split
+	 * that into pos=stat/2 + len=2 which gave nonsense progress
+	 * (e.g. stat==2 -> "Step 1 of 3" at ~33%). Treat stat as the
+	 * step directly: "Step 0..2 of 2", fraction = stat/2. */
+    guint32 pos = (guint32) (stat < 0 ? 0 : stat);
+    const guint32 len = 2;
+    if (pos > len) {
+        pos = len;
+    }
 
     gtsk = gtask_with_trans (sess, -128);
     if (!gtsk) {
         gtsk = gtask_new (sess, -128, 0);
     }
 
-    label = gtsk->label;
-    pbar = gtsk->pbar;
-    snprintf (taskstr, sizeof (taskstr), _ ("Task (Connecting) %u/%u"), pos,
-              pos + len);
-    gtk_label_set_text (GTK_LABEL (label), taskstr);
+    gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting"));
+    g_snprintf (sub, sizeof (sub), _ ("Step %u of %u"), pos, len);
+    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
-    if (pos) {
-        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (pbar),
-                                       (gfloat)pos / (gfloat)(pos + len));
-    }
+    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, len);
 
-    if ((guint32)stat == len) {
+    if (pos >= len) {
         gtask_delete (sess, gtsk);
     }
 }
@@ -343,26 +614,47 @@ conn_task_update (session *sess, int stat)
 void
 task_update (session *sess, struct task *tsk)
 {
-    GtkWidget *pbar;
-    GtkWidget *label;
-    char taskstr[256];
     struct gtask *gtsk;
-    guint32 pos = tsk->pos, len = tsk->len;
+    /* tsk->pos / tsk->len are byte counts on the inbound TASK
+	 * reply: pos is bytes received so far, len is bytes still
+	 * to read, so pos + len is the announced total. (See
+	 * network.c::update_task which copies them out of
+	 * htlc->in.pos / htlc->in.len.) */
+    guint32 pos = tsk->pos;
+    guint32 len = tsk->len;
+    guint32 tot = pos + len;
+    char posbuf[LONGEST_HUMAN_READABLE + 1];
+    char totbuf[LONGEST_HUMAN_READABLE + 1];
+    g_autofree char *posstr = NULL;
+    g_autofree char *totstr = NULL;
+    g_autofree char *sub = NULL;
 
     gtsk = gtask_with_trans (sess, tsk->trans);
     if (!gtsk) {
         gtsk = gtask_new (sess, tsk->trans, 0);
     }
 
-    label = gtsk->label;
-    pbar = gtsk->pbar;
-    snprintf (taskstr, sizeof (taskstr), _ ("Task 0x%x (%s) %u/%u"), tsk->trans,
-              tsk->str ? tsk->str : "", pos, pos + len);
-    gtk_label_set_text (GTK_LABEL (label), taskstr);
-    if (pos) {
-        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (pbar),
-                                       (gfloat)pos / (gfloat)(pos + len));
+    /* tsk->str is the human-friendly task description from task_new
+	 * (e.g. "Login", "Get file list", "Send chat"). Falls back to
+	 * the trans id when missing so the row isn't a mystery. */
+    if (tsk->str && *tsk->str) {
+        gtk_label_set_text (GTK_LABEL (gtsk->title), tsk->str);
+    } else {
+        g_autofree char *title = g_strdup_printf (_ ("Task 0x%x"), tsk->trans);
+        gtk_label_set_text (GTK_LABEL (gtsk->title), title);
     }
+
+    /* Subtitle: bytes received / total announced. The earlier
+	 * "Step %u of %u" labelling was misleading — these are not
+	 * discrete steps. human_size keeps the digits compact for
+	 * the typical KB-sized TASK replies (and stays readable on
+	 * the rare large ones). */
+    posstr = g_strdup (human_size (posbuf, pos));
+    totstr = g_strdup (human_size (totbuf, tot));
+    sub = g_strdup_printf (_ ("%s of %s"), posstr, totstr);
+    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
+
+    gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
 
     if (len == 0) {
         gtask_delete (sess, gtsk);
@@ -677,41 +969,63 @@ create_tasks_window (GtkWidget *widget, gpointer data)
 void
 file_update (session *sess, struct htxf_conn *htxf)
 {
-    GtkWidget *pbar;
-    GtkWidget *label;
     struct gtask *gtsk;
-    char humanbuf[LONGEST_HUMAN_READABLE + 1], *posstr, *sizestr, *bpsstr;
-    guint32 pos, size;
+    char humanbuf[LONGEST_HUMAN_READABLE + 1];
+    g_autofree char *posstr = NULL;
+    g_autofree char *sizestr = NULL;
+    g_autofree char *bpsstr = NULL;
+    g_autofree char *basename = NULL;
+    g_autofree char *subtitle = NULL;
+    /* htxf->total_pos / total_size are guint64 to support the
+	 * Large-File extension (>4 GiB transfers). Earlier code stuffed
+	 * them into guint32 and quietly broke past the 32-bit cap. */
+    guint64 pos, size, Bps, remaining, eta;
     struct timeval now;
-    time_t sdiff, Bps, eta;
+    time_t sdiff;
     int hrs, mins, secs;
+    gboolean title_set;
 
     gtsk = gtask_with_htxf (sess, htxf);
     if (!gtsk) {
         gtsk = gtask_new (sess, 0, htxf);
     }
-    label = gtsk->label;
-    pbar = gtsk->pbar;
 
     pos = htxf->total_pos;
     size = htxf->total_size;
 
     gettimeofday (&now, 0);
     sdiff = now.tv_sec - htxf->start.tv_sec;
-    if (!sdiff) {
+    if (sdiff < 1) {
         sdiff = 1;
     }
-    Bps = pos / sdiff;
-    if (!Bps) {
+    Bps = pos / (guint64) sdiff;
+    if (Bps == 0) {
         Bps = 1;
     }
-    eta = (size - pos) / Bps + ((size - pos) % Bps) / Bps;
 
-    hrs = eta / 3600;
+    /* ETA = remaining bytes / Bps, rounded UP so the displayed
+	 * countdown ticks down to 0 instead of clipping the last
+	 * fractional second. The earlier code wrote
+	 *   (size-pos)/Bps + ((size-pos)%Bps)/Bps
+	 * which is dead-on-arrival in integer math: the second term
+	 * is (a value < Bps) / Bps == 0.
+	 *
+	 * Guard against pos > size first — that case shows up when
+	 * total_size is a placeholder (1 for unknown-size folder
+	 * transfers, 0 for not-yet-stamped fresh htxf rows) and the
+	 * counter creeps past it. Unsigned subtraction would wrap to
+	 * an absurd remaining value otherwise. */
+    if (size > pos) {
+        remaining = size - pos;
+        eta = (remaining + Bps - 1) / Bps;
+    } else {
+        eta = 0;
+    }
+
+    hrs = (int) (eta / 3600);
     eta %= 3600;
-    mins = eta / 60;
-    eta %= 60;
-    secs = eta;
+    mins = (int) (eta / 60);
+    secs = (int) (eta % 60);
 
     posstr = g_strdup (human_size (humanbuf, pos));
     memset (&humanbuf, 0, sizeof (humanbuf));
@@ -719,27 +1033,47 @@ file_update (session *sess, struct htxf_conn *htxf)
     memset (&humanbuf, 0, sizeof (humanbuf));
     bpsstr = g_strdup (human_size (humanbuf, Bps));
 
-    {
-        /* htxf->path is up to MAXPATHLEN (4096) bytes — if we held the
-		 * format result in a fixed-size local snprintf walks GCC's
-		 * worst-case length analysis right into a -Wformat-truncation
-		 * warning. Use g_strdup_printf and let GLib size the buffer. */
-        char *line
-            = g_strdup_printf (_ ("%s  %s/%s  %s/s  ETA: %d:%02d:%02d  %s"),
-                               htxf->type == XFER_GET ? "get" : "put", posstr,
-                               sizestr, bpsstr, hrs, mins, secs, htxf->path);
-        gtk_label_set_text (GTK_LABEL (label), line);
-        g_free (line);
+    /* Title: just the filename. htxf->path is the local-filesystem
+	 * path (g_path_get_basename uses POSIX '/' which is what xfers.c
+	 * builds), so the basename is the bare filename. Tooltip carries
+	 * the full path for the curious. We only set the title once per
+	 * row — htxf->path doesn't change after xfer_new. */
+    title_set = (gtk_label_get_text (GTK_LABEL (gtsk->title))[0] != '\0');
+    if (!title_set) {
+        basename = g_path_get_basename (htxf->path);
+        gtk_label_set_text (GTK_LABEL (gtsk->title), basename);
+        gtk_widget_set_tooltip_text (gtsk->title, htxf->path);
     }
 
-    if (((gfloat)pos / size) <= 1) {
-        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (pbar),
-                                       (gfloat)pos / size);
+    /* Subtitle: structured stable-width metrics. Middle dots
+	 * (U+00B7) separate the segments — easier to scan than a string
+	 * of spaces, and the dim-label CSS makes the whole line read as
+	 * supporting text below the title. Tabular-nums (CSS feature)
+	 * keeps the digits from shifting siblings as values churn.
+	 *
+	 * Format:  3.2 MB of 12.5 MB \xb7 150 KB/s \xb7 ETA 1:15
+	 *
+	 * The "ETA" prefix matches Adwaita / GNOME Files conventions
+	 * and avoids the trailing path that the old format glued on. */
+    if (hrs > 0) {
+        subtitle = g_strdup_printf (
+            _ ("%s of %s \xc2\xb7 %s/s \xc2\xb7 ETA %d:%02d:%02d"),
+            posstr, sizestr, bpsstr, hrs, mins, secs);
+    } else {
+        subtitle = g_strdup_printf (
+            _ ("%s of %s \xc2\xb7 %s/s \xc2\xb7 ETA %d:%02d"),
+            posstr, sizestr, bpsstr, mins, secs);
     }
+    gtk_label_set_text (GTK_LABEL (gtsk->subtitle), subtitle);
 
-    g_free (posstr);
-    g_free (sizestr);
-    g_free (bpsstr);
+    if (size > 0 && pos <= size) {
+        /* gdouble (not gfloat) so multi-GB transfers don't lose
+		 * precision in the divide — gfloat only has ~7 decimal
+		 * digits of mantissa, which starts to dither at the
+		 * gigabyte scale. */
+        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar),
+                                       (gdouble) pos / (gdouble) size);
+    }
 
     if (pos >= size) {
         gtask_delete (sess, gtsk);
