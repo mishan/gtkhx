@@ -999,10 +999,11 @@ get_thread (void *arg)
 
 ret:
     (void)retval;
-    /* g_object_unref drops the GIO machinery and closes the
-	 * underlying socket fd — replaces the explicit close(s) the
-	 * fd-returning shape used. The s int is borrowed from the
-	 * conn for the duration of the worker; we don't own it. */
+    /* g_clear_object drops the GSocketConnection (and with it the
+	 * GIOStream we passed to htxf_io_*). The underlying socket fd
+	 * is owned by the GSocket the conn wraps; the GSocket
+	 * finaliser close(2)s it. Replaces the explicit close(s) the
+	 * fd-returning shape used before Phase A. */
     g_clear_object (&conn);
 
     /* Cleanup is marshaled to the main thread so it runs AFTER

@@ -631,14 +631,25 @@ banner_htxf_worker_thread (void *arg)
     {
         GError *body_err = NULL;
         gsize got = 0;
-        if (!g_input_stream_read_all (g_io_stream_get_input_stream (io),
-                                      f->bytes, f->size, &got, NULL,
-                                      &body_err)
-            || got != f->size) {
-            debug_log ("banner",
-                       "htxf body read failed at < %zu bytes: %s",
-                       (size_t) (f->size - got),
-                       body_err ? body_err->message : g_strerror (errno));
+        gboolean ok = g_input_stream_read_all (
+            g_io_stream_get_input_stream (io),
+            f->bytes, f->size, &got, NULL, &body_err);
+        if (!ok || got != f->size) {
+            /* read_all sets body_err only when the stream errored.
+             * A clean EOF mid-read returns TRUE with got < count
+             * and NO GError — and errno is unrelated to GIO, so
+             * g_strerror(errno) would print stale junk ("Success",
+             * an unrelated syscall error from earlier in the
+             * worker, etc.). Distinguish the two cases explicitly. */
+            if (body_err) {
+                debug_log ("banner",
+                           "htxf body read failed at < %zu bytes: %s",
+                           (size_t) (f->size - got), body_err->message);
+            } else {
+                debug_log ("banner",
+                           "htxf body unexpected EOF (%zu of %u bytes)",
+                           got, f->size);
+            }
             g_clear_error (&body_err);
             goto out;
         }

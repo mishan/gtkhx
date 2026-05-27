@@ -115,11 +115,16 @@ extern void htxf_io_release (struct htxf_conn *htxf);
  * AEAD path: serves up to `len` bytes from the plaintext
  * accumulator, refilling from the input stream as needed.
  *
- * Returns bytes copied to buf (>0), 0 on EOF, -1 on error
- * (errno set to EIO; GError details surface through debug_log
- * under the xfer / xfer-aead categories). Close enough to read(2)
- * semantics that the historical `if (r < 1)` idioms in xfers.c
- * keep working without per-site logic changes. */
+ * Returns bytes copied to buf (>0), 0 on clean EOF, -1 on error.
+ * errno is set to one of:
+ *   EINVAL  io is NULL
+ *   EIO     stream read error, AEAD tag verification failure,
+ *           truncated frame mid-stream, malformed / oversized
+ *           AEAD length prefix
+ * GError details (where one was produced by GIO) surface through
+ * debug_log under the xfer / xfer-aead categories. Close enough to
+ * read(2) semantics that the historical `if (r < 1)` idioms in
+ * xfers.c keep working without per-site logic changes. */
 extern ssize_t htxf_io_read (struct htxf_conn *htxf, GIOStream *io,
                              void *buf, size_t len);
 
@@ -133,8 +138,14 @@ extern ssize_t htxf_io_read (struct htxf_conn *htxf, GIOStream *io,
  * bytes through the output stream.
  *
  * Returns `len` on success (matches the caller's
- * `if (htxf_io_write (...) != n)` check) or -1 with errno = EIO
- * on error / oversized plaintext. */
+ * `if (htxf_io_write (...) != n)` check) or -1 on error. errno is
+ * set to one of:
+ *   EINVAL    io is NULL
+ *   EMSGSIZE  AEAD path, plaintext exceeds the spec cap
+ *             (CIPHER_AEAD_MAX_FRAME_SIZE - tag)
+ *   EIO       stream write error, AEAD seal failure
+ * GError details (where one was produced by GIO) surface through
+ * debug_log under the xfer / xfer-aead categories. */
 extern ssize_t htxf_io_write (struct htxf_conn *htxf, GIOStream *io,
                               const void *buf, size_t len);
 
