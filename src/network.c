@@ -1041,21 +1041,26 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
  * whose only excuse for existing is the blocking byte-streaming
  * loop, so a sync GSocketClient call here keeps them simple.
  *
- * Returns a raw fd in blocking mode that the caller owns (must
- * close(2) when done). On failure returns -1 and writes the
- * GError's message to errbuf (truncated to errbuf_len) if both are
- * non-NULL. host/port go straight through to GSocketClient — IPv4/
- * IPv6 fallback comes for free. */
-int
+ * Returns a connected GSocketConnection the caller owns
+ * (g_object_unref drops both the GIO machinery and the underlying
+ * socket fd). On failure returns NULL and writes the GError
+ * message to errbuf (truncated to errbuf_len) if both are
+ * non-NULL. host/port go straight through to GSocketClient —
+ * IPv4/IPv6 fallback and SOCKS proxy resolution (via
+ * GProxyResolver) come for free.
+ *
+ * Workers cast the returned conn to GIOStream and stream bytes
+ * through htxf_io_read / htxf_io_write (both stream-shaped and
+ * AEAD-aware since Phase B). The fd is owned by the
+ * GSocketConnection — don't close(2) it; unref the conn and
+ * GSocket's finaliser closes the fd. */
+GSocketConnection *
 hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
                          gsize errbuf_len)
 {
     GSocketClient *client;
     GSocketConnection *conn;
-    GSocket *sock;
     GError *err = NULL;
-    int s = -1;
-    int flags;
 
     client = g_socket_client_new ();
     conn = g_socket_client_connect_to_host (client, host, port, NULL, &err);
@@ -1065,39 +1070,20 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
             g_strlcpy (errbuf, err->message, errbuf_len);
         }
         g_clear_error (&err);
-        return -1;
+        return NULL;
     }
-
-    sock = g_socket_connection_get_socket (conn);
-
-    /* GSocketConnection insists on close()ing its fd at unref —
-	 * there is no close_on_unref toggle on GSocket. Hand the
-	 * worker a dup so the unref below can clean up the GIO
-	 * machinery without taking the fd with it. */
-    s = dup (g_socket_get_fd (sock));
-    g_object_unref (conn);
-    if (s < 0) {
-        if (errbuf && errbuf_len) {
-            g_strlcpy (errbuf, g_strerror (errno), errbuf_len);
-        }
-        return -1;
-    }
-
-    /* GSocketClient leaves the fd in non-blocking mode (GIO's
-	 * preference). Our transfer workers want blocking semantics for
-	 * their read()/write() loops; clear O_NONBLOCK explicitly. */
-    flags = fcntl (s, F_GETFL, 0);
-    if (flags >= 0) {
-        fcntl (s, F_SETFL, flags & ~O_NONBLOCK);
-    }
-
-    return s;
+    /* GSocketConnection is blocking by default — exactly what the
+	 * worker threads want. The old fd-returning variant had to
+	 * dup() and explicitly clear O_NONBLOCK because g_socket_get_fd
+	 * surfaces whatever flags GSocket happens to have set; on the
+	 * GSocketConnection-shaped API neither dance is needed. */
+    return conn;
 }
 
-int
+GSocketConnection *
 htxf_connect (struct htxf_conn *htxf)
 {
-    int s;
+    GSocketConnection *conn;
     char errbuf[256];
     /* htxf is required — every caller in the codebase (xfers.c,
 	 * news worker, banner worker, xfer_go) allocates the struct
@@ -1105,7 +1091,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * inside the body, but the preceding lines unconditionally
 	 * dereferenced htxf, so the guard was dead anyway. Assert and
 	 * fail loud rather than papering over a programmer error. */
-    g_return_val_if_fail (htxf != NULL, -1);
+    g_return_val_if_fail (htxf != NULL, NULL);
 
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
 	 * caps include the bit AND the transfer actually needs 64-bit
@@ -1129,16 +1115,22 @@ htxf_connect (struct htxf_conn *htxf)
                       && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 
-    s = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport, errbuf,
-                                 sizeof (errbuf));
-    if (s < 0) {
-        return -1;
+    conn = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport,
+                                    errbuf, sizeof (errbuf));
+    if (!conn) {
+        return NULL;
     }
 
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
 	 * is set). hx_htxf_subchannel_pack_preamble handles the
 	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
-	 * zeroing for the 24-byte variant. */
+	 * zeroing for the 24-byte variant.
+	 *
+	 * The handshake write goes through GIOStream so a future TLS
+	 * wrap (docs/tls-scoping.md Phase 2) catches these bytes on
+	 * the same path as the rest of the subchannel.
+	 * g_output_stream_write_all blocks until the whole buffer
+	 * lands or an error fires. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     guint16 type
         = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
@@ -1147,12 +1139,13 @@ htxf_connect (struct htxf_conn *htxf)
         htxf->ref, htxf->total_size,
         type, /*flags=*/0, size64);
     if (hdr_len == 0) {
-        close (s);
-        return -1;
+        g_object_unref (conn);
+        return NULL;
     }
-    if (write (s, hdr_buf, hdr_len) != (ssize_t) hdr_len) {
-        close (s);
-        return -1;
+    GOutputStream *out = g_io_stream_get_output_stream (G_IO_STREAM (conn));
+    if (!g_output_stream_write_all (out, hdr_buf, hdr_len, NULL, NULL, NULL)) {
+        g_object_unref (conn);
+        return NULL;
     }
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
@@ -1193,7 +1186,7 @@ htxf_connect (struct htxf_conn *htxf)
                    htxf->ref, htxf->htlc->sklen);
     }
 
-    return s;
+    return conn;
 }
 
 /*

@@ -809,6 +809,26 @@ test_aead = executable('test_aead',
 test('aead', test_aead,
      suite : 'proto')
 
+# htxf_io wrappers (htxf_io_read / htxf_io_write) round-tripped over
+# GMemoryInputStream / GMemoryOutputStream wrapped in GSimpleIOStream.
+# Pins plaintext + AEAD round-trip, multi-frame sequencing through
+# the receive-side accumulator, oversized-write rejection (EMSGSIZE),
+# and the truncated-frame / tag-tamper paths that must surface
+# errno=EIO to the worker. The Tier 3 matrix covers the happy path
+# against live mhxd / janus, but a framing-edge regression would
+# pass Tier 3 if servers send small enough frames — Tier 2 catches
+# that class with a deterministic in-memory transport.
+test_htxf_io = executable('test_htxf_io',
+  'proto/test_htxf_io.c',
+  '../src/htxf_io.c',
+  '../src/cipher_aead.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps + [dependency('nettle')],
+  include_directories : proto_test_inc,
+)
+test('htxf_io', test_htxf_io,
+     suite : 'proto')
+
 # network_decode — receive-side qbuf-to-qbuf decoder split out of
 # network.c specifically so this test can drive its three branches
 # (plaintext / stream cipher / AEAD framing) against canned bytes.

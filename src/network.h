@@ -1,6 +1,8 @@
 #ifndef HX_NETWORK_H
 #define HX_NETWORK_H
 
+#include <gio/gio.h>
+
 /* we only want pthread.h if we're not in debug mode */
 #ifndef DEBUG
 #include <pthread.h>
@@ -24,16 +26,34 @@ extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 
 extern void kill_threads (void);
 
-extern int htxf_connect (struct htxf_conn *htxf);
+/* Open the HTXF subchannel for `htxf` and send the 16/24-byte
+ * plaintext preamble. Returns a connected GSocketConnection that
+ * the caller owns (g_object_unref drops both the GIO machinery
+ * and the underlying socket). On failure returns NULL.
+ *
+ * Worker threads cast the returned conn to GIOStream and feed it
+ * to htxf_io_read / htxf_io_write — both now stream-shaped and
+ * AEAD-aware. The dup() + manual O_NONBLOCK toggle the old
+ * fd-returning shape needed are gone; GSocketConnection is
+ * blocking by default and the GIOStream APIs handle EINTR.
+ *
+ * AEAD subchannel keys (HOPE+ChaCha20) are armed before return
+ * when the control channel negotiated CIPHER_MODE_AEAD. */
+extern GSocketConnection *htxf_connect (struct htxf_conn *htxf);
 
-/* Worker-thread connect helper: blocking GSocketClient connect to
- * host:port, returns a blocking-mode raw fd the caller must close.
- * On failure returns -1 and writes the GError message to errbuf if
- * non-NULL. Used by HTXF (file transfer) workers in xfers.c and
- * banner.c, both of which need a connected fd to do blocking
- * byte-streaming with read(2) / write(2). */
-extern int hx_sync_connect_to_host (const char *host, guint16 port,
-                                    char *errbuf, gsize errbuf_len);
+/* Worker-thread blocking GSocketClient connect to host:port.
+ * Returns a connected GSocketConnection on success (caller owns,
+ * g_object_unref drops both the GIO objects and the socket fd),
+ * NULL on failure. SOCKS proxying flows through GProxyResolver
+ * automatically — same as the rest of GIO. Used by HTXF (file
+ * transfer) workers in xfers.c and banner.c.
+ *
+ * Writes the GError message to errbuf (truncated to errbuf_len)
+ * if both are non-NULL on failure. */
+extern GSocketConnection *hx_sync_connect_to_host (const char *host,
+                                                   guint16 port,
+                                                   char *errbuf,
+                                                   gsize errbuf_len);
 
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                      ...);

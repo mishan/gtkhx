@@ -176,6 +176,26 @@ unignore_signals (sigset_t *oldset)
     sigprocmask (SIG_SETMASK, oldset, 0);
 }
 
+/* Get the underlying GSocket from a HTXF GIOStream so we can call
+ * g_socket_condition_timed_wait on it. Today htxf_io is always a
+ * GSocketConnection (htxf_connect / hx_sync_connect_to_host return
+ * those directly), so the type check is a no-op narrowing. When
+ * TLS lands (docs/tls-scoping.md Phase 2), `io` will be a
+ * GTlsClientConnection wrapping a GSocketConnection — at that
+ * point this helper grows a GTlsConnection branch that reads the
+ * "base-io-stream" property via g_object_get to reach the socket.
+ * Returns NULL if io is an unexpected shape — current callers
+ * treat NULL as "skip the timed wait", matching the legacy
+ * select(sr <= 0) "give up and move on" fallback. */
+static GSocket *
+htxf_io_get_socket (GIOStream *io)
+{
+    if (G_IS_SOCKET_CONNECTION (io)) {
+        return g_socket_connection_get_socket (G_SOCKET_CONNECTION (io));
+    }
+    return NULL;
+}
+
 /* Does either fork (data or resource) of the local path exist? */
 static int
 local_path_exists (const char *path)
@@ -585,29 +605,35 @@ xfer_num (struct htxf_conn *htxf)
 
     return -1;
 }
-/* XXX: restore gtk_threads */
+/* Receive bulk bytes from the HTXF subchannel and write them to a
+ * local file fd. The socket side goes through htxf_io_read which
+ * is AEAD-aware (HOPE+ChaCha20 wraps the bytes in length-prefixed
+ * frames; the wrapper unwraps and serves plaintext) — that's the
+ * correctness payoff of the Phase C split. The previous rd_wr
+ * took two raw fds and used read(2) directly, which under AEAD
+ * would have returned ciphertext bytes; the tests didn't catch
+ * this because the file-transfer body never exercised AEAD until
+ * this phase.
+ *
+ * XXX: restore gtk_threads */
 static int
-rd_wr (int rd_fd, int wr_fd, guint64 data_len, struct htxf_conn *htxf)
+rd_wr_recv (GIOStream *io_src, int dst_fd, guint64 data_len,
+            struct htxf_conn *htxf)
 {
     int r, pos, len;
-    guint8 *buf;
+    g_autofree guint8 *buf = NULL;
     size_t bufsiz;
 
     bufsiz = 0xf000;
     buf = g_malloc (bufsiz);
-    if (!buf) {
-        return 111;
-    }
     while (data_len) {
         size_t want = (bufsiz < data_len) ? bufsiz : (size_t)data_len;
-        if ((len = read (rd_fd, buf, want)) < 1) {
-            g_free (buf);
+        if ((len = htxf_io_read (htxf, io_src, buf, want)) < 1) {
             return len ? errno : EIO;
         }
         pos = 0;
         while (len) {
-            if ((r = write (wr_fd, &(buf[pos]), len)) < 1) {
-                g_free (buf);
+            if ((r = write (dst_fd, &(buf[pos]), len)) < 1) {
                 return errno;
             }
             pos += r;
@@ -618,25 +644,52 @@ rd_wr (int rd_fd, int wr_fd, guint64 data_len, struct htxf_conn *htxf)
         }
         data_len -= pos;
     }
-    g_free (buf);
-
     return 0;
 }
 
+/* Send bulk bytes from a local file fd to the HTXF subchannel.
+ * Socket-side write goes through htxf_io_write (AEAD-aware). */
 static int
-preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
+rd_wr_send (int src_fd, GIOStream *io_dst, guint64 data_len,
+            struct htxf_conn *htxf)
 {
     int len;
-    guint8 *buf;
+    g_autofree guint8 *buf = NULL;
     size_t bufsiz;
 
     bufsiz = 0xf000;
     buf = g_malloc (bufsiz);
-    if (!buf) {
-        return 111;
-    }
     while (data_len) {
-        if ((len = read (rd_fd, buf, (bufsiz < data_len) ? bufsiz : data_len))
+        size_t want = (bufsiz < data_len) ? bufsiz : (size_t)data_len;
+        if ((len = read (src_fd, buf, want)) < 1) {
+            return len ? errno : EIO;
+        }
+        /* htxf_io_write returns len on success (it loops the
+		 * underlying g_output_stream_write_all internally) so the
+		 * partial-write loop the fd-shaped rd_wr needed is gone. */
+        if (htxf_io_write (htxf, io_dst, buf, (size_t)len) != len) {
+            return errno ? errno : EIO;
+        }
+        htxf->total_pos += len;
+        post_file_update (htxf);
+        data_len -= (guint64)len;
+    }
+    return 0;
+}
+
+static int
+preview_get (GIOStream *io_src, guint32 data_len, struct htxf_conn *htxf,
+             hx_preview *p)
+{
+    int len;
+    g_autofree guint8 *buf = NULL;
+    size_t bufsiz;
+
+    bufsiz = 0xf000;
+    buf = g_malloc (bufsiz);
+    while (data_len) {
+        if ((len = htxf_io_read (htxf, io_src, buf,
+                                 (bufsiz < data_len) ? bufsiz : data_len))
             < 1) {
             return len ? errno : EIO;
         }
@@ -648,8 +701,6 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
         post_file_update (htxf);
         data_len -= len;
     }
-    g_free (buf);
-
     hx_preview_done (p);
     return 0;
 }
@@ -681,7 +732,8 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
  *
  * Returns 0 on success, errno-like positive code on failure. */
 static int
-file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
+file_recv_one (GIOStream *io, struct htxf_conn *htxf,
+               guint64 file_budget, guint8 *buf)
 {
     guint32 pos, len;
     guint64 fork_len = 0;
@@ -694,7 +746,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
     len = 40;
     pos = 0;
     while (len) {
-        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, io, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -707,7 +759,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
     len += 16;
     tot_len = 40 + len;
     while (len) {
-        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, io, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -761,7 +813,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
         if (htxf->data_pos) {
             lseek (f, htxf->data_pos, SEEK_SET);
         }
-        retval = rd_wr (s, f, fork_len, htxf);
+        retval = rd_wr_recv (io, f, fork_len, htxf);
         fsync (f);
         close (f);
     } else {
@@ -792,7 +844,7 @@ file_recv_one (int s, struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
         /* preview_get still takes 32-bit length; previews are small
 		 * files (the preview window's whole point), so a >4 GiB
 		 * preview is implausible. Clamp on the way through. */
-        retval = preview_get (s, (guint32)MIN (fork_len, (guint64)0xFFFFFFFFu),
+        retval = preview_get (io, (guint32)MIN (fork_len, (guint64)0xFFFFFFFFu),
                               htxf, p);
     }
     if (retval) {
@@ -827,28 +879,36 @@ get_rsrc:
 	 * gave up after the marker we time out and move on. */
     if (htxf->opt.folder) {
         if (tot_len < file_budget) {
+            /* GSocket needed for the timed-wait below. Reach
+			 * through the GSocketConnection that backs `io` —
+			 * htxf_io_get_socket walks through a future TLS
+			 * wrap so the call site stays the same when the TLS
+			 * port (docs/tls-scoping.md Phase 2) lands. */
+            GSocket *sock = htxf_io_get_socket (io);
+            if (!sock) {
+                /* Unknown stream shape — skip the drain. The
+				 * select(sr <= 0) branch had a "give up and move
+				 * on" fallback for the same condition. */
+                goto done;
+            }
             guint64 remaining = file_budget - tot_len;
             while (remaining > 0) {
-                fd_set rfds;
-                struct timeval tv;
-                int sr;
                 guint8 sink[2048];
                 size_t want = remaining < sizeof (sink) ? remaining
                                                         : sizeof (sink);
-                FD_ZERO (&rfds);
-                FD_SET (s, &rfds);
                 /* 200 ms per read — long enough for legitimate
 				 * MACR marker bytes still buffered server-side
 				 * to land; short enough that mhxd's hung
 				 * resource_open path doesn't stall the whole
 				 * tree. */
-                tv.tv_sec = 0;
-                tv.tv_usec = 200 * 1000;
-                sr = select (s + 1, &rfds, NULL, NULL, &tv);
-                if (sr <= 0) {
+                if (!g_socket_condition_timed_wait (
+                        sock, G_IO_IN, 200 * G_TIME_SPAN_MILLISECOND,
+                        NULL, NULL)) {
+                    /* Timeout or error — same "give up and move
+					 * on" semantics the select(sr <= 0) branch had. */
                     break;
                 }
-                ssize_t got = htxf_io_read (htxf, s, sink, want);
+                ssize_t got = htxf_io_read (htxf, io, sink, want);
                 if (got <= 0) {
                     break;
                 }
@@ -869,7 +929,7 @@ get_rsrc:
     pos = 0;
     len = 16;
     while (len) {
-        if ((r = htxf_io_read (htxf, s, &(buf[pos]), len)) < 1) {
+        if ((r = htxf_io_read (htxf, io, &(buf[pos]), len)) < 1) {
             return errno ? errno : EIO;
         }
         pos += r;
@@ -898,7 +958,7 @@ get_rsrc:
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
-    retval = rd_wr (s, f, fork_len, htxf);
+    retval = rd_wr_recv (io, f, fork_len, htxf);
     if (retval) {
         return retval;
     }
@@ -916,16 +976,19 @@ static void *
 get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
-    int s = -1, retval;
+    GSocketConnection *conn = NULL;
+    GIOStream *io = NULL;
+    int retval;
     guint8 buf[1024];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    io = G_IO_STREAM (conn);
 
-    retval = file_recv_one (s, htxf, htxf->total_size, buf);
+    retval = file_recv_one (io, htxf, htxf->total_size, buf);
     if (retval) {
         goto ret;
     }
@@ -936,9 +999,12 @@ get_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    /* g_clear_object drops the GSocketConnection (and with it the
+	 * GIOStream we passed to htxf_io_*). The underlying socket fd
+	 * is owned by the GSocket the conn wraps; the GSocket
+	 * finaliser close(2)s it. Replaces the explicit close(s) the
+	 * fd-returning shape used before Phase A. */
+    g_clear_object (&conn);
 
     /* Cleanup is marshaled to the main thread so it runs AFTER
 	 * every file_update idle posted above — GMainContext FIFO
@@ -994,15 +1060,18 @@ static void *
 folder_get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
-    int s = -1, retval = 0;
+    GSocketConnection *conn = NULL;
+    GIOStream *io = NULL;
+    int retval = 0;
     guint8 buf[1024];
     char base_path[MAXPATHLEN];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    io = G_IO_STREAM (conn);
 
     /* Snapshot the destination root. file_recv_one rewrites
 	 * htxf->path per-file; we restore the root on exit. */
@@ -1027,12 +1096,12 @@ folder_get_thread (void *arg)
         ssize_t n;
 
         cmd_n = htons (3); /* FILE_NEXT */
-        if (htxf_io_write (htxf, s, &cmd_n, 2) != 2) {
+        if (htxf_io_write (htxf, io, &cmd_n, 2) != 2) {
             retval = errno ? errno : EIO;
             goto ret;
         }
 
-        n = htxf_io_read (htxf, s, &nfi, sizeof (nfi));
+        n = htxf_io_read (htxf, io, &nfi, sizeof (nfi));
         if (n != (ssize_t)sizeof (nfi)) {
             /* Clean end-of-stream when n == 0 — server has run
 			 * out of files and closed the socket. */
@@ -1053,7 +1122,7 @@ folder_get_thread (void *arg)
             guint8 ph[3];
             guint8 nlen;
             char name[256];
-            if (htxf_io_read (htxf, s, ph, 3) != 3) {
+            if (htxf_io_read (htxf, io, ph, 3) != 3) {
                 retval = errno ? errno : EIO;
                 goto ret;
             }
@@ -1061,7 +1130,7 @@ folder_get_thread (void *arg)
             /* nlen is guint8 (max 255); name is 256 bytes — the
 			 * read can never overflow. The original explicit guard
 			 * triggered a `comparison always false` warning. */
-            if (nlen && htxf_io_read (htxf, s, name, nlen) != nlen) {
+            if (nlen && htxf_io_read (htxf, io, name, nlen) != nlen) {
                 retval = errno ? errno : EIO;
                 goto ret;
             }
@@ -1110,12 +1179,12 @@ folder_get_thread (void *arg)
 		 * follow-up; FILE_SEND with data_pos/rsrc_pos zeroed
 		 * tells the server to send the whole file. */
         cmd_n = htons (1); /* FILE_SEND */
-        if (htxf_io_write (htxf, s, &cmd_n, 2) != 2) {
+        if (htxf_io_write (htxf, io, &cmd_n, 2) != 2) {
             retval = errno ? errno : EIO;
             goto ret;
         }
 
-        if (htxf_io_read (htxf, s, &file_size, 4) != 4) {
+        if (htxf_io_read (htxf, io, &file_size, 4) != 4) {
             retval = errno ? errno : EIO;
             goto ret;
         }
@@ -1124,7 +1193,7 @@ folder_get_thread (void *arg)
         htxf->data_pos = 0;
         htxf->rsrc_pos = 0;
 
-        retval = file_recv_one (s, htxf, file_size, buf);
+        retval = file_recv_one (io, htxf, file_size, buf);
         if (retval) {
             goto ret;
         }
@@ -1143,9 +1212,7 @@ folder_get_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* Restore the root path on error paths that goto'd here mid-
 	 * loop. The success path above already restored before
@@ -1180,7 +1247,7 @@ ret:
  *
  * Returns 0 on success, errno-like positive code on failure. */
 static int
-file_send_one (int s, struct htxf_conn *htxf, guint8 *buf)
+file_send_one (GIOStream *io, struct htxf_conn *htxf, guint8 *buf)
 {
     int f, retval;
     struct hfsinfo fi;
@@ -1200,7 +1267,7 @@ file_send_one (int s, struct htxf_conn *htxf, guint8 *buf)
         if ((f = open (htxf->path, O_RDONLY)) < 0) {
             return errno;
         }
-        retval = rd_wr (f, s, htxf->data_size, htxf);
+        retval = rd_wr_send (f, io, htxf->data_size, htxf);
         close (f);
         return retval;
     }
@@ -1253,7 +1320,7 @@ TYPECREA\
             HN32 (&buf[121 + fi.comlen], &hi);
         }
     }
-    if (htxf_io_write (htxf, s, buf, 133 + fi.comlen) != 133 + (ssize_t)fi.comlen) {
+    if (htxf_io_write (htxf, io, buf, 133 + fi.comlen) != 133 + (ssize_t)fi.comlen) {
         return errno ? errno : EIO;
     }
     htxf->total_pos += 133 + fi.comlen;
@@ -1266,7 +1333,7 @@ TYPECREA\
     if (htxf->data_pos) {
         lseek (f, htxf->data_pos, SEEK_SET);
     }
-    retval = rd_wr (f, s, htxf->data_size, htxf);
+    retval = rd_wr_send (f, io, htxf->data_size, htxf);
     if (retval) {
         close (f);
         return retval;
@@ -1285,7 +1352,7 @@ put_rsrc:
             HN32 (&buf[4], &hi);
         }
     }
-    if (htxf_io_write (htxf, s, buf, 16) != 16) {
+    if (htxf_io_write (htxf, io, buf, 16) != 16) {
         /* Same behaviour as the inlined version: a short write at
 		 * the MACR-marker boundary is treated as a clean stop (the
 		 * server may not want the rsrc fork). Don't surface as an
@@ -1303,7 +1370,7 @@ put_rsrc:
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
-    retval = rd_wr (f, s, htxf->rsrc_size, htxf);
+    retval = rd_wr_send (f, io, htxf->rsrc_size, htxf);
     if (retval) {
         close (f);
         return retval;
@@ -1316,16 +1383,19 @@ static void *
 put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
-    int s = -1, retval;
+    GSocketConnection *conn = NULL;
+    GIOStream *io = NULL;
+    int retval;
     guint8 buf[512];
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    io = G_IO_STREAM (conn);
 
-    retval = file_send_one (s, htxf, buf);
+    retval = file_send_one (io, htxf, buf);
     if (retval) {
         goto ret;
     }
@@ -1335,9 +1405,7 @@ put_thread (void *arg)
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* See get_thread for the cleanup-via-marshal rationale. */
     post_xfer_cleanup (htxf);
@@ -1472,17 +1540,20 @@ static void *
 folder_put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
-    int s = -1, retval = 0;
+    GSocketConnection *conn = NULL;
+    GIOStream *io = NULL;
+    int retval = 0;
     guint8 buf[2048];
     char base_path[MAXPATHLEN];
     GPtrArray *entries = NULL;
     GPtrArray *initial_comps = NULL;
 
-    s = htxf_connect (htxf);
-    if (s < 0) {
-        retval = s;
+    conn = htxf_connect (htxf);
+    if (!conn) {
+        retval = -1;
         goto ret;
     }
+    io = G_IO_STREAM (conn);
 
     g_strlcpy (base_path, htxf->path, sizeof (base_path));
 
@@ -1499,7 +1570,7 @@ folder_put_thread (void *arg)
         guint16 wire_len = 4;
 
         /* Wait for FILE_NEXT from the server. */
-        n = htxf_io_read (htxf, s, &cmd_n, 2);
+        n = htxf_io_read (htxf, io, &cmd_n, 2);
         if (n != 2) {
             retval = errno ? errno : EIO;
             goto cleanup;
@@ -1524,7 +1595,7 @@ folder_put_thread (void *arg)
             t = htons ((guint16)e->components->len);
             memcpy (&buf[4], &t, 2);
         }
-        if (htxf_io_write (htxf, s, buf, 6) != 6) {
+        if (htxf_io_write (htxf, io, buf, 6) != 6) {
             retval = errno ? errno : EIO;
             goto cleanup;
         }
@@ -1540,11 +1611,11 @@ folder_put_thread (void *arg)
             ch[0] = 0;
             ch[1] = 0;
             ch[2] = (guint8)cl;
-            if (htxf_io_write (htxf, s, ch, 3) != 3) {
+            if (htxf_io_write (htxf, io, ch, 3) != 3) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
-            if (cl && htxf_io_write (htxf, s, c, cl) != (ssize_t)cl) {
+            if (cl && htxf_io_write (htxf, io, c, cl) != (ssize_t)cl) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1557,7 +1628,7 @@ folder_put_thread (void *arg)
 
         /* File leaf — server replies with FILE_SEND (fresh) or
 		 * FILE_RESUME (resume from data_pos/rsrc_pos). */
-        n = htxf_io_read (htxf, s, &cmd_n, 2);
+        n = htxf_io_read (htxf, io, &cmd_n, 2);
         if (n != 2) {
             retval = errno ? errno : EIO;
             goto cleanup;
@@ -1568,7 +1639,7 @@ folder_put_thread (void *arg)
         if (cmd_n == 2 /* FILE_RESUME */) {
             guint16 rlen;
             guint8 rflt[128];
-            if (htxf_io_read (htxf, s, &rlen, 2) != 2) {
+            if (htxf_io_read (htxf, io, &rlen, 2) != 2) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1577,7 +1648,7 @@ folder_put_thread (void *arg)
                 retval = EPROTO;
                 goto cleanup;
             }
-            if (rlen && htxf_io_read (htxf, s, rflt, rlen) != (ssize_t)rlen) {
+            if (rlen && htxf_io_read (htxf, io, rflt, rlen) != (ssize_t)rlen) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
@@ -1617,13 +1688,13 @@ folder_put_thread (void *arg)
                 file_size += 16 + (htxf->rsrc_size - htxf->rsrc_pos);
             }
             size_n = htonl (file_size);
-            if (htxf_io_write (htxf, s, &size_n, 4) != 4) {
+            if (htxf_io_write (htxf, io, &size_n, 4) != 4) {
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
         }
 
-        retval = file_send_one (s, htxf, buf);
+        retval = file_send_one (io, htxf, buf);
         if (retval) {
             goto cleanup;
         }
@@ -1640,9 +1711,7 @@ cleanup:
 
 ret:
     (void)retval;
-    if (s >= 0) {
-        close (s);
-    }
+    g_clear_object (&conn);
 
     /* Restore the root path so the tasks-window label stays
 	 * sensible post-completion. */

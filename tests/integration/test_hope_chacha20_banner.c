@@ -248,12 +248,32 @@ test_hope_chacha20_banner_htxf (void)
         &hope.encode_state, &hope.decode_state,
         ref);
 
+    /* Wrap the raw fd from the harness in a GSocketConnection so we
+     * can hand a GIOStream to the Phase B htxf_io_read API. The
+     * GSocket adopts the fd (takes ownership), so we drop the
+     * integration_close call below — g_object_unref on the conn
+     * closes via the GSocket finaliser. */
+    GError *err = NULL;
+    GSocket *xfer_sock = g_socket_new_from_fd (xfer_fd, &err);
+    g_assert_no_error (err);
+    g_assert_nonnull (xfer_sock);
+    GSocketConnection *xfer_conn
+        = g_socket_connection_factory_create_connection (xfer_sock);
+    g_object_unref (xfer_sock);
+    /* The factory only returns NULL when the socket's family/type
+     * combination has no registered GSocketConnection subclass.
+     * AF_INET + SOCK_STREAM (what the harness produces) is always
+     * registered as GTcpConnection. Assert so a future harness
+     * shape change doesn't pass a NULL through to G_IO_STREAM(). */
+    g_assert_nonnull (xfer_conn);
+    GIOStream *xfer_io = G_IO_STREAM (xfer_conn);
+
     /* Read `size` body bytes through htxf_io_read — consumes AEAD
      * frames off the socket and reassembles the plaintext payload. */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = htxf_io_read (&xfer, xfer_fd, bytes + got, size - got);
+        ssize_t r = htxf_io_read (&xfer, xfer_io, bytes + got, size - got);
         if (r <= 0) {
             g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
                             "(%s)",
@@ -263,7 +283,7 @@ test_hope_chacha20_banner_htxf (void)
         got += (gsize) r;
     }
     g_assert_cmpuint ((guint) got, ==, size);
-    integration_close (xfer_fd);
+    g_object_unref (xfer_conn);
     htxf_io_release (&xfer);
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",
