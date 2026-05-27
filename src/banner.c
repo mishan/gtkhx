@@ -572,13 +572,21 @@ banner_htxf_worker_thread (void *arg)
         hdr_buf, sizeof (hdr_buf),
         f->ref, f->size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
+    if (hdr_len == 0) {
+        /* Builder refused to pack — typically a sizing-bug that
+         * caller has to fix (buf too small, or impossible flag
+         * combination). errno isn't set on this path, so don't
+         * pretend it is. */
+        debug_log ("banner",
+                   "htxf header build failed (preamble builder returned 0)");
+        goto out;
+    }
     GError *err = NULL;
-    if (hdr_len == 0
-        || !g_output_stream_write_all (
+    if (!g_output_stream_write_all (
             g_io_stream_get_output_stream (io),
             hdr_buf, hdr_len, NULL, NULL, &err)) {
         debug_log ("banner", "htxf header write failed: %s",
-                   err ? err->message : g_strerror (errno));
+                   err ? err->message : "(no error info)");
         g_clear_error (&err);
         goto out;
     }

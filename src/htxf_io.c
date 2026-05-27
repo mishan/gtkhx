@@ -222,11 +222,16 @@ aead_write (struct htxf_conn *htxf, GOutputStream *out, const void *buf,
         return 0;
     }
     /* Stack-allocate small frames; heap-allocate the rest. The
-	 * AEAD spec caps a single frame at 16 MiB minus the 20-byte
-	 * envelope; oversized writes are an upstream contract bug
-	 * (the file-transfer worker reads in 8 KiB chunks today). */
-    if (len > CIPHER_AEAD_MAX_FRAME_SIZE
-                  - (CIPHER_AEAD_LENGTH_PREFIX + CIPHER_AEAD_TAG_SIZE)) {
+	 * AEAD spec caps a single frame's BODY (ciphertext + tag) at
+	 * 16 MiB — the 4-byte length prefix sits in front of the cap,
+	 * NOT inside it. So the maximum acceptable plaintext is
+	 * (MAX - TAG); cipher_aead_seal enforces the same boundary,
+	 * and matching the check here keeps htxf_io_write and seal in
+	 * lockstep (no 4-byte gap where the wrapper rejects bytes the
+	 * primitive would accept). Oversized writes are still an
+	 * upstream contract bug — the file-transfer worker reads in
+	 * 8 KiB chunks — this is just defensive. */
+    if (len > CIPHER_AEAD_MAX_FRAME_SIZE - CIPHER_AEAD_TAG_SIZE) {
         debug_log ("xfer-aead", "ref=%u oversized write (%zu bytes)",
                    htxf->ref, len);
         errno = EMSGSIZE;
@@ -289,6 +294,15 @@ aead_write (struct htxf_conn *htxf, GOutputStream *out, const void *buf,
 ssize_t
 htxf_io_read (struct htxf_conn *htxf, GIOStream *io, void *buf, size_t len)
 {
+    /* Reject NULL io explicitly — keeps the contract close to
+     * read(2)/write(2): a bad descriptor surfaces as -1 with errno,
+     * not a segfault. Callers (xfers.c, banner.c) shouldn't pass
+     * NULL today, but a future TLS-handshake-failed path could
+     * easily leave a stream slot empty. */
+    if (!io) {
+        errno = EINVAL;
+        return -1;
+    }
     GInputStream *in = g_io_stream_get_input_stream (io);
     if (htxf && htxf->aead_active) {
         return aead_read (htxf, in, buf, len);
@@ -312,6 +326,11 @@ ssize_t
 htxf_io_write (struct htxf_conn *htxf, GIOStream *io, const void *buf,
                size_t len)
 {
+    /* Reject NULL io explicitly — same rationale as htxf_io_read. */
+    if (!io) {
+        errno = EINVAL;
+        return -1;
+    }
     GOutputStream *out = g_io_stream_get_output_stream (io);
     if (htxf && htxf->aead_active) {
         return aead_write (htxf, out, buf, len);

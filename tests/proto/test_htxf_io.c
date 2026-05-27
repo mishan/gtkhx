@@ -301,12 +301,14 @@ test_aead_oversized_write_rejected (void)
     struct htxf_conn enc_xfer;
     arm_aead (&enc_xfer, CIPHER_AEAD_DIR_CLIENT_TO_SERVER);
 
-    /* CIPHER_AEAD_MAX_FRAME_SIZE caps the total frame at 16 MiB
-	 * including the 20-byte envelope. Asking to seal anything
-	 * larger than (MAX - LENGTH_PREFIX - TAG) plaintext bytes
-	 * must surface as -1 with errno=EMSGSIZE. */
+    /* CIPHER_AEAD_MAX_FRAME_SIZE is the cap on the length-prefixed
+	 * body (ciphertext + tag) — the 4-byte length prefix sits in
+	 * front of the cap, not inside it. So the maximum acceptable
+	 * plaintext is (MAX - TAG); anything larger must surface as
+	 * -1 with errno=EMSGSIZE. cipher_aead_seal enforces the same
+	 * boundary internally; this test pins the htxf_io_write
+	 * wrapper to the same value so the two can't drift apart. */
     const size_t max_pt = CIPHER_AEAD_MAX_FRAME_SIZE
-                          - CIPHER_AEAD_LENGTH_PREFIX
                           - CIPHER_AEAD_TAG_SIZE;
     g_autofree uint8_t *pt = g_malloc (max_pt + 1);
     memset (pt, 0xAA, max_pt + 1);
@@ -321,6 +323,84 @@ test_aead_oversized_write_rejected (void)
 
     g_object_unref (write_io);
     htxf_io_release (&enc_xfer);
+}
+
+/* Sibling to the rejection test: a plaintext of exactly MAX - TAG
+ * bytes (the largest value cipher_aead_seal will accept) must NOT
+ * be rejected by the wrapper. Catches an off-by-N regression in
+ * the htxf_io_write guard — earlier the guard subtracted both
+ * the 4-byte length prefix AND the tag, which locked out a
+ * 4-byte sliver right at the spec boundary. We don't actually
+ * exercise the round-trip (allocating 32 MiB of memory and
+ * letting Poly1305 chew on it is slow for Tier 2); just confirm
+ * the wrapper accepts the size and produces a frame. */
+static void
+test_aead_max_write_accepted (void)
+{
+    struct htxf_conn enc_xfer;
+    arm_aead (&enc_xfer, CIPHER_AEAD_DIR_CLIENT_TO_SERVER);
+
+    const size_t max_pt = CIPHER_AEAD_MAX_FRAME_SIZE
+                          - CIPHER_AEAD_TAG_SIZE;
+    g_autofree uint8_t *pt = g_malloc0 (max_pt);
+
+    GMemoryOutputStream *out_mem = NULL;
+    GIOStream *write_io = make_mem_iostream (NULL, 0, &out_mem);
+    errno = 0;
+    ssize_t w = htxf_io_write (&enc_xfer, write_io, pt, max_pt);
+    g_assert_cmpint (w, ==, (ssize_t) max_pt);
+    g_assert_cmpuint (enc_xfer.xfer_encode.counter, ==, 1);
+    /* The on-wire framed size = 4 (prefix) + max_pt + 16 (tag). */
+    gsize sealed_len = g_memory_output_stream_get_data_size (out_mem);
+    g_assert_cmpuint (sealed_len, ==,
+                      CIPHER_AEAD_LENGTH_PREFIX + max_pt
+                          + CIPHER_AEAD_TAG_SIZE);
+
+    g_object_unref (write_io);
+    htxf_io_release (&enc_xfer);
+}
+
+/* NULL io rejection: the new pointer-based API is sharper than the
+ * old fd-based one — passing -1 as an fd would have surfaced
+ * EBADF through the kernel; passing NULL as a GIOStream would
+ * crash on the unconditional dereference in
+ * g_io_stream_get_input_stream. Reject NULL up front with
+ * errno=EINVAL so callers get a predictable shape, and pin that
+ * contract here so a future "simplify the NULL check away"
+ * refactor doesn't reintroduce the segfault. */
+static void
+test_null_io_read_returns_einval (void)
+{
+    struct htxf_conn xfer;
+    memset (&xfer, 0, sizeof (xfer));
+    uint8_t buf[8];
+    errno = 0;
+    ssize_t r = htxf_io_read (&xfer, NULL, buf, sizeof (buf));
+    g_assert_cmpint (r, ==, -1);
+    g_assert_cmpint (errno, ==, EINVAL);
+}
+
+static void
+test_null_io_write_returns_einval (void)
+{
+    struct htxf_conn xfer;
+    memset (&xfer, 0, sizeof (xfer));
+    /* AEAD-active or plain doesn't matter — the NULL check must
+	 * fire BEFORE we ever touch htxf->aead_active. Exercise both
+	 * shapes to confirm there's no branch that sneaks past the
+	 * NULL guard. */
+    uint8_t buf[8] = { 0 };
+    errno = 0;
+    g_assert_cmpint (htxf_io_write (&xfer, NULL, buf, sizeof (buf)), ==, -1);
+    g_assert_cmpint (errno, ==, EINVAL);
+
+    arm_aead (&xfer, CIPHER_AEAD_DIR_CLIENT_TO_SERVER);
+    errno = 0;
+    g_assert_cmpint (htxf_io_write (&xfer, NULL, buf, sizeof (buf)), ==, -1);
+    g_assert_cmpint (errno, ==, EINVAL);
+    /* Counter must NOT advance on rejected writes. */
+    g_assert_cmpuint (xfer.xfer_encode.counter, ==, 0);
+    htxf_io_release (&xfer);
 }
 
 /* Truncated frame: feed only the length prefix to the decoder.
@@ -423,10 +503,16 @@ main (int argc, char **argv)
                      test_aead_multi_frame_sequence);
     g_test_add_func ("/htxf_io/aead_oversized_write_rejected",
                      test_aead_oversized_write_rejected);
+    g_test_add_func ("/htxf_io/aead_max_write_accepted",
+                     test_aead_max_write_accepted);
     g_test_add_func ("/htxf_io/aead_truncated_frame_surfaces_eio",
                      test_aead_truncated_frame_surfaces_eio);
     g_test_add_func ("/htxf_io/aead_tag_tamper_surfaces_eio",
                      test_aead_tag_tamper_surfaces_eio);
+    g_test_add_func ("/htxf_io/null_io_read_returns_einval",
+                     test_null_io_read_returns_einval);
+    g_test_add_func ("/htxf_io/null_io_write_returns_einval",
+                     test_null_io_write_returns_einval);
 
     return g_test_run ();
 }
