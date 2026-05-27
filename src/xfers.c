@@ -585,29 +585,35 @@ xfer_num (struct htxf_conn *htxf)
 
     return -1;
 }
-/* XXX: restore gtk_threads */
+/* Receive bulk bytes from the HTXF subchannel and write them to a
+ * local file fd. The socket side goes through htxf_io_read which
+ * is AEAD-aware (HOPE+ChaCha20 wraps the bytes in length-prefixed
+ * frames; the wrapper unwraps and serves plaintext) — that's the
+ * correctness payoff of the Phase C split. The previous rd_wr
+ * took two raw fds and used read(2) directly, which under AEAD
+ * would have returned ciphertext bytes; the tests didn't catch
+ * this because the file-transfer body never exercised AEAD until
+ * this phase.
+ *
+ * XXX: restore gtk_threads */
 static int
-rd_wr (int rd_fd, int wr_fd, guint64 data_len, struct htxf_conn *htxf)
+rd_wr_recv (GIOStream *io_src, int dst_fd, guint64 data_len,
+            struct htxf_conn *htxf)
 {
     int r, pos, len;
-    guint8 *buf;
+    g_autofree guint8 *buf = NULL;
     size_t bufsiz;
 
     bufsiz = 0xf000;
     buf = g_malloc (bufsiz);
-    if (!buf) {
-        return 111;
-    }
     while (data_len) {
         size_t want = (bufsiz < data_len) ? bufsiz : (size_t)data_len;
-        if ((len = read (rd_fd, buf, want)) < 1) {
-            g_free (buf);
+        if ((len = htxf_io_read (htxf, io_src, buf, want)) < 1) {
             return len ? errno : EIO;
         }
         pos = 0;
         while (len) {
-            if ((r = write (wr_fd, &(buf[pos]), len)) < 1) {
-                g_free (buf);
+            if ((r = write (dst_fd, &(buf[pos]), len)) < 1) {
                 return errno;
             }
             pos += r;
@@ -618,25 +624,52 @@ rd_wr (int rd_fd, int wr_fd, guint64 data_len, struct htxf_conn *htxf)
         }
         data_len -= pos;
     }
-    g_free (buf);
-
     return 0;
 }
 
+/* Send bulk bytes from a local file fd to the HTXF subchannel.
+ * Socket-side write goes through htxf_io_write (AEAD-aware). */
 static int
-preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
+rd_wr_send (int src_fd, GIOStream *io_dst, guint64 data_len,
+            struct htxf_conn *htxf)
 {
     int len;
-    guint8 *buf;
+    g_autofree guint8 *buf = NULL;
     size_t bufsiz;
 
     bufsiz = 0xf000;
     buf = g_malloc (bufsiz);
-    if (!buf) {
-        return 111;
-    }
     while (data_len) {
-        if ((len = read (rd_fd, buf, (bufsiz < data_len) ? bufsiz : data_len))
+        size_t want = (bufsiz < data_len) ? bufsiz : (size_t)data_len;
+        if ((len = read (src_fd, buf, want)) < 1) {
+            return len ? errno : EIO;
+        }
+        /* htxf_io_write returns len on success (it loops the
+		 * underlying g_output_stream_write_all internally) so the
+		 * partial-write loop the fd-shaped rd_wr needed is gone. */
+        if (htxf_io_write (htxf, io_dst, buf, (size_t)len) != len) {
+            return errno ? errno : EIO;
+        }
+        htxf->total_pos += len;
+        post_file_update (htxf);
+        data_len -= (guint64)len;
+    }
+    return 0;
+}
+
+static int
+preview_get (GIOStream *io_src, guint32 data_len, struct htxf_conn *htxf,
+             hx_preview *p)
+{
+    int len;
+    g_autofree guint8 *buf = NULL;
+    size_t bufsiz;
+
+    bufsiz = 0xf000;
+    buf = g_malloc (bufsiz);
+    while (data_len) {
+        if ((len = htxf_io_read (htxf, io_src, buf,
+                                 (bufsiz < data_len) ? bufsiz : data_len))
             < 1) {
             return len ? errno : EIO;
         }
@@ -648,8 +681,6 @@ preview_get (int rd_fd, guint32 data_len, struct htxf_conn *htxf, hx_preview *p)
         post_file_update (htxf);
         data_len -= len;
     }
-    g_free (buf);
-
     hx_preview_done (p);
     return 0;
 }
@@ -762,7 +793,7 @@ file_recv_one (GIOStream *io, int s, struct htxf_conn *htxf,
         if (htxf->data_pos) {
             lseek (f, htxf->data_pos, SEEK_SET);
         }
-        retval = rd_wr (s, f, fork_len, htxf);
+        retval = rd_wr_recv (io, f, fork_len, htxf);
         fsync (f);
         close (f);
     } else {
@@ -793,7 +824,7 @@ file_recv_one (GIOStream *io, int s, struct htxf_conn *htxf,
         /* preview_get still takes 32-bit length; previews are small
 		 * files (the preview window's whole point), so a >4 GiB
 		 * preview is implausible. Clamp on the way through. */
-        retval = preview_get (s, (guint32)MIN (fork_len, (guint64)0xFFFFFFFFu),
+        retval = preview_get (io, (guint32)MIN (fork_len, (guint64)0xFFFFFFFFu),
                               htxf, p);
     }
     if (retval) {
@@ -899,7 +930,7 @@ get_rsrc:
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
-    retval = rd_wr (s, f, fork_len, htxf);
+    retval = rd_wr_recv (io, f, fork_len, htxf);
     if (retval) {
         return retval;
     }
@@ -1189,7 +1220,7 @@ ret:
  *
  * Returns 0 on success, errno-like positive code on failure. */
 static int
-file_send_one (GIOStream *io, int s, struct htxf_conn *htxf, guint8 *buf)
+file_send_one (GIOStream *io, struct htxf_conn *htxf, guint8 *buf)
 {
     int f, retval;
     struct hfsinfo fi;
@@ -1209,7 +1240,7 @@ file_send_one (GIOStream *io, int s, struct htxf_conn *htxf, guint8 *buf)
         if ((f = open (htxf->path, O_RDONLY)) < 0) {
             return errno;
         }
-        retval = rd_wr (f, s, htxf->data_size, htxf);
+        retval = rd_wr_send (f, io, htxf->data_size, htxf);
         close (f);
         return retval;
     }
@@ -1275,7 +1306,7 @@ TYPECREA\
     if (htxf->data_pos) {
         lseek (f, htxf->data_pos, SEEK_SET);
     }
-    retval = rd_wr (f, s, htxf->data_size, htxf);
+    retval = rd_wr_send (f, io, htxf->data_size, htxf);
     if (retval) {
         close (f);
         return retval;
@@ -1312,7 +1343,7 @@ put_rsrc:
     if (htxf->rsrc_pos) {
         lseek (f, htxf->rsrc_pos, SEEK_SET);
     }
-    retval = rd_wr (f, s, htxf->rsrc_size, htxf);
+    retval = rd_wr_send (f, io, htxf->rsrc_size, htxf);
     if (retval) {
         close (f);
         return retval;
@@ -1327,7 +1358,7 @@ put_thread (void *arg)
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     GSocketConnection *conn = NULL;
     GIOStream *io = NULL;
-    int s = -1, retval;
+    int retval;
     guint8 buf[512];
 
     conn = htxf_connect (htxf);
@@ -1336,9 +1367,8 @@ put_thread (void *arg)
         goto ret;
     }
     io = G_IO_STREAM (conn);
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
-    retval = file_send_one (io, s, htxf, buf);
+    retval = file_send_one (io, htxf, buf);
     if (retval) {
         goto ret;
     }
@@ -1485,7 +1515,7 @@ folder_put_thread (void *arg)
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     GSocketConnection *conn = NULL;
     GIOStream *io = NULL;
-    int s = -1, retval = 0;
+    int retval = 0;
     guint8 buf[2048];
     char base_path[MAXPATHLEN];
     GPtrArray *entries = NULL;
@@ -1497,7 +1527,6 @@ folder_put_thread (void *arg)
         goto ret;
     }
     io = G_IO_STREAM (conn);
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     g_strlcpy (base_path, htxf->path, sizeof (base_path));
 
@@ -1638,7 +1667,7 @@ folder_put_thread (void *arg)
             }
         }
 
-        retval = file_send_one (io, s, htxf, buf);
+        retval = file_send_one (io, htxf, buf);
         if (retval) {
             goto cleanup;
         }
