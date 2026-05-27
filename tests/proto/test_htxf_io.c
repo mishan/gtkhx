@@ -403,6 +403,106 @@ test_null_io_write_returns_einval (void)
     htxf_io_release (&xfer);
 }
 
+/* Oversized length prefix: a malicious / corrupted peer announces
+ * a frame body bigger than CIPHER_AEAD_MAX_FRAME_SIZE (16 MiB).
+ * Without the malformed-prefix guard in aead_read the refill loop
+ * would g_realloc cipher_buf forever, growing 4096 bytes per
+ * iteration, hoping the prefix starts to look sensible. With the
+ * guard, the read surfaces -1 with errno=EIO almost immediately
+ * (after the first read returns the 4 prefix bytes) so the worker
+ * tears down cleanly. We feed exactly 4 bytes of "0xFFFFFFFF" so
+ * the test can't accidentally pass by EOF — if the guard
+ * regressed, the loop would hit EOF on read 2 and surface a
+ * different code path. */
+static void
+test_aead_oversized_length_prefix_rejected (void)
+{
+    struct htxf_conn dec_xfer;
+    arm_aead (&dec_xfer, CIPHER_AEAD_DIR_CLIENT_TO_SERVER);
+
+    static const uint8_t evil_prefix[] = { 0xff, 0xff, 0xff, 0xff };
+    GIOStream *read_io
+        = make_mem_iostream (evil_prefix, sizeof (evil_prefix), NULL);
+
+    uint8_t buf[64];
+    errno = 0;
+    ssize_t r = htxf_io_read (&dec_xfer, read_io, buf, sizeof (buf));
+    g_assert_cmpint (r, ==, -1);
+    g_assert_cmpint (errno, ==, EIO);
+    /* Counter MUST NOT advance on rejected reads. */
+    g_assert_cmpuint (dec_xfer.xfer_decode.counter, ==, 0);
+
+    g_object_unref (read_io);
+    htxf_io_release (&dec_xfer);
+}
+
+/* Plaintext path with htxf=NULL: htxf_io_read / htxf_io_write
+ * guard the AEAD branch with `if (htxf && htxf->aead_active)`,
+ * so passing htxf=NULL must fall through to the thin GIO wrapper
+ * shape. Useful for callers that don't have a per-transfer
+ * struct (e.g. the legacy banner read_n / write_n helpers used
+ * to do this with raw fds) — and is the more permissive contract
+ * of the two, so we want to keep it. */
+static void
+test_plain_htxf_null_round_trip (void)
+{
+    static const uint8_t payload[] = "no htxf, no problem";
+    const gsize payload_len = sizeof (payload) - 1;
+
+    GMemoryOutputStream *out_mem = NULL;
+    GIOStream *write_io = make_mem_iostream (NULL, 0, &out_mem);
+    ssize_t w = htxf_io_write (NULL, write_io, payload, payload_len);
+    g_assert_cmpint (w, ==, (ssize_t) payload_len);
+
+    gsize captured_len = g_memory_output_stream_get_data_size (out_mem);
+    g_assert_cmpuint (captured_len, ==, payload_len);
+    g_autofree guint8 *captured = g_memdup2 (
+        g_memory_output_stream_get_data (out_mem), captured_len);
+    g_object_unref (write_io);
+
+    GIOStream *read_io = make_mem_iostream (captured, captured_len, NULL);
+    uint8_t buf[64];
+    ssize_t r = htxf_io_read (NULL, read_io, buf, sizeof (buf));
+    g_assert_cmpint (r, ==, (ssize_t) payload_len);
+    g_assert_cmpmem (buf, r, payload, payload_len);
+    g_object_unref (read_io);
+}
+
+/* Plaintext path with len == 0: g_output_stream_write_all is a
+ * no-op on a zero-length buffer (returns TRUE without touching
+ * the stream), and htxf_io_write should return 0 to the caller —
+ * NOT -1, since a zero-length write is legitimately "I'm done,
+ * nothing left." The AEAD path has its own len==0 handling
+ * (covered by test_aead_round_trip_empty); this test pins the
+ * plaintext branch.
+ *
+ * Why this matters: a worker that exits its bulk-data loop with
+ * remaining=0 may still call htxf_io_write(buf, 0) before tearing
+ * down the connection. If we ever regress and return -1 here,
+ * that perfectly-clean exit would log a spurious "plain write
+ * failed" line and the worker would report failure. */
+static void
+test_plain_zero_len_write (void)
+{
+    struct htxf_conn xfer;
+    memset (&xfer, 0, sizeof (xfer));
+    /* aead_active = FALSE — plaintext path. */
+
+    GMemoryOutputStream *out_mem = NULL;
+    GIOStream *write_io = make_mem_iostream (NULL, 0, &out_mem);
+
+    /* A non-NULL buf with len=0 is the realistic shape — workers
+	 * pass a stack/local buffer pointer that just happens to have
+	 * 0 bytes pending. */
+    uint8_t dummy = 0;
+    ssize_t w = htxf_io_write (&xfer, write_io, &dummy, 0);
+    g_assert_cmpint (w, ==, 0);
+    g_assert_cmpuint (g_memory_output_stream_get_data_size (out_mem),
+                      ==, 0);
+
+    g_object_unref (write_io);
+}
+
 /* Truncated frame: feed only the length prefix to the decoder.
  * htxf_io_read should read the prefix, try to refill the body,
  * see EOF mid-frame, and return -1 with errno=EIO (not 0, which
@@ -513,6 +613,12 @@ main (int argc, char **argv)
                      test_null_io_read_returns_einval);
     g_test_add_func ("/htxf_io/null_io_write_returns_einval",
                      test_null_io_write_returns_einval);
+    g_test_add_func ("/htxf_io/aead_oversized_length_prefix_rejected",
+                     test_aead_oversized_length_prefix_rejected);
+    g_test_add_func ("/htxf_io/plain_htxf_null_round_trip",
+                     test_plain_htxf_null_round_trip);
+    g_test_add_func ("/htxf_io/plain_zero_len_write",
+                     test_plain_zero_len_write);
 
     return g_test_run ();
 }

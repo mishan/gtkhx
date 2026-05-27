@@ -114,6 +114,23 @@ aead_read (struct htxf_conn *htxf, GInputStream *in, void *buf, size_t len)
             break; /* full frame buffered */
         }
 
+        /* If peek returned 0 but we already have the full
+		 * 4-byte prefix, the prefix itself is malformed —
+		 * either body_len < TAG (truncated) or > MAX_FRAME_SIZE
+		 * (oversized / hostile peer). Without this guard the
+		 * refill loop would happily g_realloc the cipher buffer
+		 * forever reading 4096-byte chunks, hoping the prefix
+		 * starts to look sensible. It never will. Surface as
+		 * EIO so the worker tears down the transfer. */
+        if (need == 0 && io->cipher_len >= CIPHER_AEAD_LENGTH_PREFIX) {
+            debug_log ("xfer-aead",
+                       "ref=%u malformed length prefix "
+                       "(cipher_len=%zu peek=0)",
+                       htxf->ref, io->cipher_len);
+            errno = EIO;
+            return -1;
+        }
+
         /* Read more bytes from the stream. Grow cipher_buf to
 		 * fit either the prefix's announced size or a small
 		 * default chunk (so the first read can land the prefix
