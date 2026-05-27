@@ -424,8 +424,15 @@ inline_rename_fire (gpointer user_data)
             /* Flip editable on first so start_editing isn't a no-op
 			 * (GtkEditableLabel won't enter edit mode when the
 			 * underlying GtkEditable.editable is FALSE). The leave-
-			 * edit handler flips it back to FALSE. */
+			 * edit handler flips it back to FALSE.
+			 *
+			 * Also flip can_target back to TRUE so the in-place
+			 * GtkEntry can receive clicks for cursor positioning
+			 * and text selection while the user is editing. The
+			 * leave-edit handler flips it back to FALSE so the
+			 * post-edit display state is click-through again. */
             gtk_editable_set_editable (GTK_EDITABLE (label), TRUE);
+            gtk_widget_set_can_target (label, TRUE);
             gtk_editable_label_start_editing (GTK_EDITABLE_LABEL (label));
             /* Select all so the user can immediately type a
 			 * replacement, matching Finder / Nautilus behaviour. */
@@ -496,6 +503,7 @@ panel_stop_inline_edit (files_panel *p)
         p->editing_label = NULL;
     }
     gtk_editable_set_editable (GTK_EDITABLE (label), FALSE);
+    gtk_widget_set_can_target (label, FALSE);
 }
 
 /* notify::editing handler — fires twice per inline-rename
@@ -528,8 +536,14 @@ on_label_editing_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
     /* Editing finished. Flip editable back to FALSE so the next
 	 * click on the now-display-mode label doesn't reopen edit
 	 * mode via GtkEditableLabel's built-in click handler — our
-	 * rename gate is the only thing that should re-enter edit. */
+	 * rename gate is the only thing that should re-enter edit.
+	 * Also restore can_target=FALSE so the label is once again
+	 * transparent to pointer picking — that's what lets clicks
+	 * pass through to the row's gestures (selection, drag-source,
+	 * double-click row-activate). See the name_setup docstring
+	 * for the full rationale. */
     gtk_editable_set_editable (GTK_EDITABLE (el), FALSE);
+    gtk_widget_set_can_target (GTK_WIDGET (el), FALSE);
     if (p->editing_label == GTK_WIDGET (el)) {
         p->editing_label = NULL;
     }
@@ -615,24 +629,22 @@ on_name_label_pressed (GtkGestureClick *gesture, int n_press, double x,
     debug_log ("files", "  pos=%u entry=%s",
                pos, e ? hx_file_entry_get_name (e) : "(null)");
 
-    /* GtkEditableLabel doesn't always propagate clicks down to the
-	 * column view's row-selection gesture (preexisting behaviour —
-	 * GtkLabel descendants tend to consume button events for their
-	 * own selection / cursor handling even when they don't act on
-	 * the click). Result: clicking a row's name region might select
-	 * the row, but might not. Synthesize the selection ourselves so
-	 * the row always lights up; the call is idempotent for an
-	 * already-selected row.
+    /* Synthesize an exclusive selection on plain clicks. With the
+	 * label now set to can_target=FALSE (see name_setup), clicks
+	 * already pass through to the column view's selection gesture,
+	 * so this is mostly belt-and-suspenders — but keeping it makes
+	 * sure the row visibly highlights as the first click of the
+	 * two-click rename gesture even if any future GTK behaviour
+	 * change re-routes the press elsewhere. Idempotent on already-
+	 * selected rows.
 	 *
 	 * Only synthesize on a plain click. With Ctrl or Shift held the
 	 * user means to toggle or extend the existing selection; an
 	 * exclusive-select here would clobber GtkMultiSelection's
 	 * modifier-aware logic running in the column view's own gesture
 	 * (and break Ctrl/Shift-click multi-select on name-column
-	 * clicks). On modified clicks we skip the synth and accept the
-	 * preexisting label-eats-click pitfall — the user can Ctrl/
-	 * Shift-click any non-label cell to extend selection
-	 * unimpeded. */
+	 * clicks). On modified clicks we skip the synth so the column
+	 * view's gesture is the sole arbiter of multi-select state. */
     {
         GdkEvent *ev = gtk_event_controller_get_current_event (
             GTK_EVENT_CONTROLLER (gesture));
@@ -658,14 +670,23 @@ on_name_label_pressed (GtkGestureClick *gesture, int n_press, double x,
         }
     }
 
-    if (!e || hx_file_entry_is_dir (e)) {
-        /* Inline-rename on directories is dangerous — users often
-		 * mean to navigate. The headerbar Rename / F2 still works
-		 * on dirs; this gesture is a power-user shortcut for files. */
-        debug_log ("files", "  cancel: dir or null entry");
+    if (!e) {
+        debug_log ("files", "  cancel: null entry");
         inline_rename_cancel (p);
         return;
     }
+    /* Earlier code gated this branch on hx_file_entry_is_dir(e)
+	 * out of concern that users meant to navigate. That worry was
+	 * load-bearing back when GtkEditableLabel's pointer-event
+	 * eating made the click behaviour ambiguous (clicks on the
+	 * label area sometimes reached the activate gesture, sometimes
+	 * didn't). With name_setup's can_target=FALSE fix the gestures
+	 * are now deterministic — single-click selects, double-click
+	 * activates (opens the folder), two clicks with a >=350ms pause
+	 * arm rename. These are well-separated, so inline-rename on
+	 * directories is safe and matches Finder / Nautilus behaviour.
+	 * Directories rename through the same hx_files_provider_rename
+	 * call files do. */
     label = g_object_get_data (G_OBJECT (row), "label");
     if (!label || !GTK_IS_EDITABLE_LABEL (label)) {
         debug_log ("files", "  bail: no/invalid label widget");
@@ -765,9 +786,27 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 	 * to TRUE just before calling gtk_editable_label_start_editing,
 	 * and the leave-edit handler flips it back to FALSE so a stray
 	 * click on the now-back-to-label widget doesn't reopen edit
-	 * mode behind our back. */
+	 * mode behind our back.
+	 *
+	 * ALSO IMPORTANT: editable=FALSE alone doesn't stop the
+	 * GtkEditableLabel from consuming pointer events — the inner
+	 * GtkLabel still picks up presses for its own text-selection
+	 * handling, which blocks the column view's row-activation
+	 * gesture (double-click to open folders) and the drag-source
+	 * controller (drag a file to copy / move) from ever seeing
+	 * those events. set_can_target=FALSE makes the whole label
+	 * subtree transparent to pointer picking, so clicks pass
+	 * through to the row underneath. Our own inline-rename click
+	 * gesture lives on the row's outer GtkBox (see the click
+	 * controller attached below) so it still fires from the row
+	 * side regardless of where in the row the user clicked.
+	 * inline_rename_fire flips can_target back to TRUE before
+	 * start_editing so the in-place GtkEntry can receive clicks
+	 * for cursor positioning + text selection; the leave-edit
+	 * handler flips it back to FALSE. */
     lbl = gtk_editable_label_new ("");
     gtk_editable_set_editable (GTK_EDITABLE (lbl), FALSE);
+    gtk_widget_set_can_target (lbl, FALSE);
     gtk_widget_set_hexpand (lbl, TRUE);
     gtk_widget_set_halign (lbl, GTK_ALIGN_START);
     gtk_widget_set_valign (lbl, GTK_ALIGN_CENTER);
