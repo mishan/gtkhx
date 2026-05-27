@@ -541,43 +541,12 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
                size, f->generation);
 }
 
-static gboolean
-read_n (int fd, void *buf, gsize len)
-{
-    guint8 *p = buf;
-    while (len) {
-        ssize_t r = read (fd, p, len);
-        if (r <= 0) {
-            return FALSE;
-        }
-        p += r;
-        len -= r;
-    }
-    return TRUE;
-}
-
-static gboolean
-write_n (int fd, const void *buf, gsize len)
-{
-    const guint8 *p = buf;
-    while (len) {
-        ssize_t w = write (fd, p, len);
-        if (w <= 0) {
-            return FALSE;
-        }
-        p += w;
-        len -= w;
-    }
-    return TRUE;
-}
-
 static void *
 banner_htxf_worker_thread (void *arg)
 {
     struct htxf_fetch *f = arg;
     GSocketConnection *conn = NULL;
     GIOStream *io = NULL;
-    int s = -1;
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     char errbuf[256] = { 0 };
 
@@ -587,14 +556,9 @@ banner_htxf_worker_thread (void *arg)
         debug_log ("banner", "htxf connect failed: %s", errbuf);
         goto out;
     }
-    /* io is for htxf_io_read (Phase B); s is still used by the
-	 * plaintext read_n / write_n helpers (Phase E will drop those).
-	 * Both point at the same underlying socket — io references the
-	 * GSocketConnection's streams, s is the raw fd borrowed from
-	 * the GSocket. g_clear_object on conn at the bottom closes the
-	 * fd via the conn's finaliser; no double-close. */
+    /* g_clear_object on conn at the bottom closes the underlying
+	 * socket fd via the GSocket finaliser. */
     io = G_IO_STREAM (conn);
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this
 	 * subchannel through their banner-send path rather than the
@@ -608,9 +572,14 @@ banner_htxf_worker_thread (void *arg)
         hdr_buf, sizeof (hdr_buf),
         f->ref, f->size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
-    if (hdr_len == 0 || !write_n (s, hdr_buf, hdr_len)) {
+    GError *err = NULL;
+    if (hdr_len == 0
+        || !g_output_stream_write_all (
+            g_io_stream_get_output_stream (io),
+            hdr_buf, hdr_len, NULL, NULL, &err)) {
         debug_log ("banner", "htxf header write failed: %s",
-                   g_strerror (errno));
+                   err ? err->message : g_strerror (errno));
+        g_clear_error (&err);
         goto out;
     }
 
@@ -652,10 +621,17 @@ banner_htxf_worker_thread (void *arg)
         htxf_io_release (&xfer);
     } else
     {
-        if (!read_n (s, f->bytes, f->size)) {
+        GError *body_err = NULL;
+        gsize got = 0;
+        if (!g_input_stream_read_all (g_io_stream_get_input_stream (io),
+                                      f->bytes, f->size, &got, NULL,
+                                      &body_err)
+            || got != f->size) {
             debug_log ("banner",
-                       "htxf body read failed at < %u bytes: %s",
-                       f->size, g_strerror (errno));
+                       "htxf body read failed at < %zu bytes: %s",
+                       (size_t) (f->size - got),
+                       body_err ? body_err->message : g_strerror (errno));
+            g_clear_error (&body_err);
             goto out;
         }
     }
@@ -666,10 +642,9 @@ banner_htxf_worker_thread (void *arg)
                f->generation);
 
 out:
-    /* g_clear_object closes the underlying socket fd; replaces the
-	 * explicit close(s) calls the fd-shape used. NULL-safe. */
+    /* g_clear_object closes the underlying socket fd via the
+	 * GSocket finaliser. NULL-safe. */
     g_clear_object (&conn);
-    (void)s;
 
     /* Hand back to the main thread regardless of success — the
 	 * idle decides whether to display or surface an error. */
