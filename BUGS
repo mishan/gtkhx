@@ -1,7 +1,8 @@
 High priority:
 
-(none)
-
+- Chat bugs
+ - If I am typing a message and then hit the Up key, the current message is replaced with a previous message from the message history. There is no way to get back to the message I was typing -- it is gone. There should be a way to go back to what I was typing, or perhaps simply not going back into chat history if there is anything entered into the entry field already.
+ - Once there is enough text to scroll in xtext, the last line gets cut off, even after scrolling all the way down.
 
 Medium priority:
 
