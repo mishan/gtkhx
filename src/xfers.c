@@ -712,7 +712,7 @@ preview_get (GIOStream *io_src, guint32 data_len, struct htxf_conn *htxf,
  *
  * Returns 0 on success, errno-like positive code on failure. */
 static int
-file_recv_one (GIOStream *io, int s, struct htxf_conn *htxf,
+file_recv_one (GIOStream *io, struct htxf_conn *htxf,
                guint64 file_budget, guint8 *buf)
 {
     guint32 pos, len;
@@ -859,25 +859,29 @@ get_rsrc:
 	 * gave up after the marker we time out and move on. */
     if (htxf->opt.folder) {
         if (tot_len < file_budget) {
+            /* GSocket needed for the timed-wait below. Reach
+			 * through the GSocketConnection that backs `io` —
+			 * Phase D doesn't worry about a future TLS wrap
+			 * because the TLS port (docs/tls-scoping.md Phase 2)
+			 * will walk through g_tls_connection_get_base_io_stream
+			 * to the same socket. */
+            GSocket *sock = g_socket_connection_get_socket (
+                G_SOCKET_CONNECTION (io));
             guint64 remaining = file_budget - tot_len;
             while (remaining > 0) {
-                fd_set rfds;
-                struct timeval tv;
-                int sr;
                 guint8 sink[2048];
                 size_t want = remaining < sizeof (sink) ? remaining
                                                         : sizeof (sink);
-                FD_ZERO (&rfds);
-                FD_SET (s, &rfds);
                 /* 200 ms per read — long enough for legitimate
 				 * MACR marker bytes still buffered server-side
 				 * to land; short enough that mhxd's hung
 				 * resource_open path doesn't stall the whole
 				 * tree. */
-                tv.tv_sec = 0;
-                tv.tv_usec = 200 * 1000;
-                sr = select (s + 1, &rfds, NULL, NULL, &tv);
-                if (sr <= 0) {
+                if (!g_socket_condition_timed_wait (
+                        sock, G_IO_IN, 200 * G_TIME_SPAN_MILLISECOND,
+                        NULL, NULL)) {
+                    /* Timeout or error — same "give up and move
+					 * on" semantics the select(sr <= 0) branch had. */
                     break;
                 }
                 ssize_t got = htxf_io_read (htxf, io, sink, want);
@@ -950,7 +954,7 @@ get_thread (void *arg)
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     GSocketConnection *conn = NULL;
     GIOStream *io = NULL;
-    int s = -1, retval;
+    int retval;
     guint8 buf[1024];
 
     conn = htxf_connect (htxf);
@@ -959,9 +963,8 @@ get_thread (void *arg)
         goto ret;
     }
     io = G_IO_STREAM (conn);
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
-    retval = file_recv_one (io, s, htxf, htxf->total_size, buf);
+    retval = file_recv_one (io, htxf, htxf->total_size, buf);
     if (retval) {
         goto ret;
     }
@@ -1034,7 +1037,7 @@ folder_get_thread (void *arg)
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     GSocketConnection *conn = NULL;
     GIOStream *io = NULL;
-    int s = -1, retval = 0;
+    int retval = 0;
     guint8 buf[1024];
     char base_path[MAXPATHLEN];
 
@@ -1044,7 +1047,6 @@ folder_get_thread (void *arg)
         goto ret;
     }
     io = G_IO_STREAM (conn);
-    s = g_socket_get_fd (g_socket_connection_get_socket (conn));
 
     /* Snapshot the destination root. file_recv_one rewrites
 	 * htxf->path per-file; we restore the root on exit. */
@@ -1166,7 +1168,7 @@ folder_get_thread (void *arg)
         htxf->data_pos = 0;
         htxf->rsrc_pos = 0;
 
-        retval = file_recv_one (io, s, htxf, file_size, buf);
+        retval = file_recv_one (io, htxf, file_size, buf);
         if (retval) {
             goto ret;
         }
