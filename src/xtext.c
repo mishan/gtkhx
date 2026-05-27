@@ -4272,7 +4272,7 @@ gtk_xtext_render_page (GtkXText * xtext)
 	 * fractional remainder — the last line gets clipped even
 	 * after scrolling all the way down. Drop the inner cast
 	 * so the fractional part survives. */
-	xtext->pixel_offset = (gtk_adjustment_get_value(xtext->adj) - startline) * xtext->fontsize;
+	xtext->pixel_offset = (int) ((gtk_adjustment_get_value(xtext->adj) - startline) * xtext->fontsize);
 
 	subline = line = 0;
 	ent = xtext->buffer->text_first;
