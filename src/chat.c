@@ -1789,9 +1789,40 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
         gtk_widget_grab_focus (GTK_WIDGET (text));
         return TRUE;
     } else if (keyval == GDK_KEY_Up) {
+        /* If we're at the bottom-of-history "draft" position
+         * (current_history returns NULL only when offset ==
+         * length), capture whatever the user has typed so far so
+         * Down can restore it. Bash-style: edits to a history
+         * entry while paging through are NOT preserved — only the
+         * original draft, snapshotted on first Up. */
+        if (current_history (gchat->chat_history) == NULL) {
+            GtkTextIter s, e;
+            g_free (gchat->chat_history_draft);
+            gtk_text_buffer_get_start_iter (buf, &s);
+            gtk_text_buffer_get_end_iter (buf, &e);
+            gchat->chat_history_draft =
+                gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        }
         hent = previous_history (gchat->chat_history);
     } else if (keyval == GDK_KEY_Down) {
-        hent = next_history (gchat->chat_history);
+        /* Skip next_history when we're already at the draft
+         * position — otherwise the next_history-past-end
+         * detection would clobber whatever the user is in the
+         * middle of typing. */
+        if (current_history (gchat->chat_history) != NULL) {
+            hent = next_history (gchat->chat_history);
+            if (!hent) {
+                /* Just stepped past the most recent entry back to
+                 * the draft position — restore the saved draft. */
+                const char *draft = gchat->chat_history_draft
+                                  ? gchat->chat_history_draft : "";
+                GtkTextIter end;
+                gtk_text_buffer_set_text (buf, draft, strlen (draft));
+                gtk_text_buffer_get_end_iter (buf, &end);
+                gtk_text_buffer_place_cursor (buf, &end);
+                return TRUE;
+            }
+        }
     }
 
     if (hent) {

@@ -219,9 +219,31 @@ msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         msg_input_activate (widget, msg->uid);
         return TRUE;
     } else if (keyval == GDK_KEY_Up) {
+        /* Snapshot the in-progress draft on first Up out of the
+         * bottom-of-history position so Down can restore it.
+         * See chat.c for the same pattern with more comments. */
+        if (current_history (msg->history) == NULL) {
+            GtkTextIter s, e;
+            g_free (msg->history_draft);
+            gtk_text_buffer_get_start_iter (buf, &s);
+            gtk_text_buffer_get_end_iter (buf, &e);
+            msg->history_draft =
+                gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        }
         hent = previous_history (msg->history);
     } else if (keyval == GDK_KEY_Down) {
-        hent = next_history (msg->history);
+        if (current_history (msg->history) != NULL) {
+            hent = next_history (msg->history);
+            if (!hent) {
+                const char *draft = msg->history_draft
+                                  ? msg->history_draft : "";
+                GtkTextIter end;
+                gtk_text_buffer_set_text (buf, draft, strlen (draft));
+                gtk_text_buffer_get_end_iter (buf, &end);
+                gtk_text_buffer_place_cursor (buf, &end);
+                return TRUE;
+            }
+        }
     }
 
     if (hent) {
