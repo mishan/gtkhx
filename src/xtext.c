@@ -4259,7 +4259,20 @@ gtk_xtext_render_page (GtkXText * xtext)
 	if (width < 34 || height < xtext->fontsize || width < xtext->buffer->indent + 32)
 		return;
 
-	xtext->pixel_offset = ((int)gtk_adjustment_get_value(xtext->adj) - startline) * xtext->fontsize;
+	/* pixel_offset is the sub-line fractional scroll position
+	 * times fontsize — how many pixels of the top line are
+	 * chopped off above the viewport. The previous code cast
+	 * the adjustment value to int BOTH explicitly here AND
+	 * implicitly via startline (`(int)gtk_adjustment_get_value
+	 * - startline` = `(int)x - (int)x` = 0), so pixel_offset
+	 * was always zero. With a fractional page_size (viewport
+	 * height not a whole multiple of fontsize), the max scroll
+	 * value lands at a non-integer line, and rendering with
+	 * pixel_offset=0 overshoots the viewport bottom by the
+	 * fractional remainder — the last line gets clipped even
+	 * after scrolling all the way down. Drop the inner cast
+	 * so the fractional part survives. */
+	xtext->pixel_offset = (int) ((gtk_adjustment_get_value(xtext->adj) - startline) * xtext->fontsize);
 
 	subline = line = 0;
 	ent = xtext->buffer->text_first;
