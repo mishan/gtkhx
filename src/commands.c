@@ -197,7 +197,10 @@ COMMAND (server)
         port = HTLS_TCPPORT;
     }
 
-    hx_connect (htlc, serverstr, port, login, pass, 0);
+    /* commands.c::cmd_connect drives connect from the in-app /connect
+	 * shell command — Phase 4 will add a /tls flag; for now this
+	 * inherits the GTKHX_TLS env var like the rest of the callers. */
+    hx_connect (htlc, serverstr, port, login, pass, 0, /*tls=*/0);
 }
 
 static u_int32_t

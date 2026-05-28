@@ -70,6 +70,8 @@ gtkhx_sources = files(
   'tasks.c',
   'tasks_table.c',
   'text_util.c',
+  'tls_trust.c',
+  'tls_trust_dialog.c',
   'toolbar.c',
   'tracker.c',
   'tracker_parser.c',

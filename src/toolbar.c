@@ -298,11 +298,14 @@ disconnect_clicked (void)
         set_status_bar (0);
         set_disconnect_btn (&the_session, 0);
         conn_task_update (&the_session, 2);
-        if (the_session.htlc.gdk_input) {
-            hxd_fd_clr (the_session.htlc.fd, FDR | FDW);
-            close (the_session.htlc.fd);
-            the_session.htlc.gdk_input = 0;
-        }
+        /* hx_htlc_close (which set connected=0) already detached
+         * the GPollable sources and released current_conn, so the
+         * legacy hxd_fd_clr + close(fd) cleanup here would either
+         * be a no-op or worse — close(fd) would target a fd
+         * already owned (and possibly closed) by the released
+         * GSocketConnection. Just clear the gdk_input bookkeeping
+         * flag and emit the user-visible notice. */
+        the_session.htlc.gdk_input = 0;
         hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX, "%s: %s\n",
                           server_addr, _ ("connection closed"));
     }

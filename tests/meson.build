@@ -342,6 +342,21 @@ test_hl_code = executable('test_hl_code',
 test('hl_code', test_hl_code,
      suite : 'unit')
 
+# tls_trust — TLS Phase 3 TOFU trust DB. Pure GLib/GIO (SHA-256
+# fingerprint cache in SSH known_hosts shape). Tier 1 drives the
+# pin/lookup/MISMATCH semantics against a tmpdir via the
+# GTKHX_KNOWN_HOSTS env override; the dialog UX layer
+# (tls_trust_dialog) is Adwaita-only and exercised via Tier 3 with
+# GTKHX_TLS_AUTO_ACCEPT=1 instead of GUI scripting.
+test_tls_trust = executable('test_tls_trust',
+  'unit/test_tls_trust.c',
+  '../src/tls_trust.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('tls_trust', test_tls_trust,
+     suite : 'unit')
+
 # hx_user_hash — Phase 1.5 replaces the intrusive hx_user linked
 # list per chat (chat->__user_list / user_list / user_tail with
 # next/prev fields on each hx_user) with chat->users, a
@@ -893,6 +908,7 @@ integration_test_inc = include_directories('integration', '../src')
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
+  'integration/integration_tls.c',
   'integration/server_matrix.c',
   '../src/proto_helpers.c',
   '../src/text_util.c',
@@ -986,6 +1002,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   'integration/fake_server.c',
   'integration/connect_test_stubs.c',
   '../src/network.c',
+  '../src/tls_trust.c',
   '../src/network_decode.c',
   '../src/connect_magic.c',
   '../src/login_packet.c',
@@ -1015,6 +1032,133 @@ test_integration_real_connect = executable('test_integration_real_connect',
 test('real_connect', test_integration_real_connect,
      suite   : 'integration',
      timeout : 30)
+
+# real_tls — Tier 3 coverage for docs/tls-scoping.md Phase 1: the
+# Mobius / Janus separate-port TLS model, where the server speaks
+# HTLS-over-TLS from byte zero on a dedicated port. Drives the
+# real production hx_connect with tls=1 against the matrix entry
+# advertising HX_TEST_CAP_TLS (today: Janus on 5610), and asserts
+# the GtkhxSession::connection-state-changed signal sequence
+# completes through to HANDSHAKE_DONE — i.e. TCP connect + GnuTLS
+# handshake + HTLS magic exchange all succeeded over the wrapped
+# socket.
+#
+# Same link surface as test_real_connect (production network.c +
+# its cipher / hope / proto pile, plus connect_test_stubs.c for
+# the UI / fd-table no-ops) but additionally links the
+# integration harness static lib for hx_test_servers_with /
+# server_matrix access — without it the test can't find Janus's
+# tls_port. The connect_test_stubs.c rcv_login_reset and other
+# UI shims still apply because the boundary is the same: the
+# test stops at HANDSHAKE_DONE; no LOGIN reply is consumed.
+#
+# Fails loudly (not g_test_skip) when no TLS-capable server is
+# configured — per the "no silent skips" feedback, a missing
+# matrix entry should surface in CI as a failed test, not a green
+# run. To run a build without the Janus container, use
+# `meson test --no-suite integration` (matching how the rest of
+# the Tier 3 suite handles "no Docker matrix" today).
+# Compile server_matrix.c in directly rather than link_with
+# integration_harness_lib. The harness lib carries its own
+# hlwrite_chunks stub (test-side wire writer) that would collide
+# with the production hlwrite_chunks pulled in from src/network.c
+# below. server_matrix.c is the only harness file we actually
+# need — it's standalone (depends on integration_harness.c's
+# hx_integration_connect_to which we provide as an unused-static
+# tucked into the test, see below).
+test_integration_real_tls = executable('test_integration_real_tls',
+  'integration/test_real_tls.c',
+  'integration/connect_test_stubs.c',
+  'integration/server_matrix.c',
+  '../src/network.c',
+  '../src/tls_trust.c',
+  '../src/network_decode.c',
+  '../src/connect_magic.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/compress.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_session.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/hmac.c',
+  '../src/tracker_parser.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep],
+  include_directories : integration_test_inc,
+)
+# is_parallel: false — Janus-only, same per-IP connect-rate
+# caveat documented on the other Janus tests. The test only opens
+# one connection, so the cost is low, but interleaving with the
+# other Janus tests under parallel meson trips the rate limit.
+test('real_tls', test_integration_real_tls,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+# real_tls_login — Phase 1 close-out coverage: full login + chat
+# round-trip over TLS. test_real_tls (above) pins the connect-
+# state-machine progression via production hx_connect; this binary
+# uses the GIOStream-based harness (tests/integration/integration_tls.c)
+# to actually speak the Hotline protocol over the wrapped socket
+# end-to-end against Janus's tls_port. Asserts SELFINFO parses
+# cleanly after TLS decrypt + a non-ASCII chat body round-trips
+# intact through TLS-encrypt-on-send + TLS-decrypt-on-recv.
+#
+# Doesn't link production src/network.c (the protocol-only harness
+# is enough); link surface stays minimal.
+test_integration_real_tls_login = executable('test_integration_real_tls_login',
+  'integration/test_real_tls_login.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+# Janus-only, is_parallel: false per the per-IP connect-rate caveat.
+test('real_tls_login', test_integration_real_tls_login,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+# real_tls_file_get / real_tls_banner — Phase 2 coverage: HTXF
+# subchannel over TLS. The control channel is wrapped (same as
+# Phase 1) PLUS the second TCP connection that carries the file/
+# banner body. Mirrors test_file_get.c and the htxf_mode banner
+# subtest but with TLS at both endpoints. The TLS HTXF socket
+# uses Janus's tls_xfer_port (5611 host-mapped).
+test_integration_real_tls_file_get = executable(
+  'test_integration_real_tls_file_get',
+  'integration/test_real_tls_file_get.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('real_tls_file_get', test_integration_real_tls_file_get,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_real_tls_banner = executable(
+  'test_integration_real_tls_banner',
+  'integration/test_real_tls_banner.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('real_tls_banner', test_integration_real_tls_banner,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
 
 # server_matrix — in-process unit coverage for the multi-server
 # matrix helpers (hx_test_servers_with, hx_test_server_default,

@@ -1,14 +1,13 @@
 # TLS Client Support — Scoping Notes for GtkHx
 
-Status: scoped, decisions locked (§12). **Phase 2's load-bearing
-prerequisite — the HTXF GIOStream port — shipped 2026-05-27** as
-branch `claude/htxf-giostream` (PR #122, merged). The remaining
-Phase 2 work is just flowing the TLS flag through the now-stream-
-shaped HTXF connect helpers. Written 2026-05-26 against
+Status: shipped. **All five sub-phases landed on branch
+`claude/tls-phase1-control-channel`** (Phase 1: control-channel
+TLS; Phase 2: HTXF over TLS; Phase 3: cert trust UX; Phase 4:
+Connect dialog + bookmark UI; Phase 5: docs). Written 2026-05-26
+against
 <https://github.com/jhalter/mobius/blob/master/docs/tls.md> at fetch
-time, refreshed 2026-05-27 after the HTXF port landed. Janus /
-VesperNet TLS status is unconfirmed (memory note [[gtkhx_janus]] —
-closed-source binary, no public docs).
+time, refreshed through 2026-05-28 as each phase landed. Janus
+is the live Tier 3 TLS target.
 
 This supersedes the "Phase ∞ — Modernized Hotline protocol" entry in
 ROADMAP.md, which assumed transport security required inventing a new
@@ -278,63 +277,155 @@ anything else (legacy plaintext stays the default).
 
 Five landable pieces, each with its own merge:
 
-**Phase 1 — Control-channel TLS, no UI.**
-- Add `g_socket_client_set_tls()` call gated on a new `tls` field on
-  the connect/session struct (no UI plumbing yet — flip it via a
-  pref or hardcoded test build).
-- Wire `GTlsConnection::accept-certificate` to a stub that accepts
-  everything (allows testing against a self-signed Mobius without
-  the trust UI yet).
-- Tier 3 integration test: spin up Mobius with TLS in Docker
-  Compose, point GtkHx at it, exercise login + chat round-trip.
-- Estimated diff: ~100 LOC src + ~150 LOC tests.
+**Phase 1 — Control-channel TLS, no UI. _Shipped on
+`claude/tls-phase1-control-channel`._**
+- `g_socket_client_set_tls()` call gated on a new `tls` parameter
+  on `hx_connect` (no UI plumbing — flip it via the `GTKHX_TLS=1`
+  env var until Phase 4 lands the Connect-dialog toggle). Done in
+  `src/network.{c,h}`.
+- `GTlsConnection::accept-certificate` stub
+  (`tls_accept_certificate_phase1_stub`) wired via the
+  `GSocketClient::event` signal at `G_SOCKET_CLIENT_TLS_HANDSHAKING`
+  phase. Accepts every cert so the self-signed Janus/Mobius cert
+  doesn't trip GnuTLS verification. Phase 3 replaces this with the
+  real TOFU trust UI.
+- Tier 3 coverage:
+  - `test_real_tls` — drives production `hx_connect(tls=1)` against
+    Janus's TLS port and asserts the connection-state signal
+    sequence reaches `HANDSHAKE_DONE`.
+  - `test_real_tls_login` — full LOGIN + chat round-trip over the
+    wrapped socket via the new `_stream` family of harness helpers
+    in `tests/integration/integration_tls.{c,h}`.
+- Test container: `tests/janus/Dockerfile` generates a self-signed
+  `CN=localhost` cert at image build time and Janus exposes
+  HTLS-TLS on 5600 / HTXF-TLS on 5601 (host-mapped 5610 / 5611).
+- Matrix: `HX_TEST_CAP_TLS` bit + `tls_port` / `tls_xfer_port`
+  fields on `hx_test_server`; Janus advertises both. A new
+  `/integration/server-matrix/tls-cap` subtest pins that any
+  cap-advertising entry has non-zero port fields.
+- Actual diff: ~150 LOC src (`network.c` connect plumbing) + ~600
+  LOC tests (Tier 3 binaries, GIOStream harness helpers, server-
+  matrix wiring).
 
-**Phase 2 — HTXF over TLS.**
-- _Prerequisite already shipped_: the HTXF GIOStream port landed
-  on `claude/htxf-giostream` (PR #122) — option (A) from §4. The
-  ~250 LOC src + ~250 LOC tests estimate from this scope doc was
-  the prerequisite work, not Phase 2 itself. See §4 for the
-  delivered phasing (A–F).
-- Remaining work: thread the `tls` flag from the session struct
-  through `htxf_connect` and `hx_sync_connect_to_host` to the
-  `GSocketClient`. Both helpers already use GSocketClient
-  internally, so it's a `g_socket_client_set_tls(client, TRUE)`
-  call before `g_socket_client_connect_to_host` plus the
-  per-htxf flag plumbing.
-- Grow `xfers.c::htxf_io_get_socket` to handle the TLS-wrapped
-  case: when the GIOStream is a GTlsConnection, fetch the
-  `base-io-stream` property to reach the underlying
-  GSocketConnection / GSocket (the `accept-certificate` plumbing
-  and trust prompt come in from Phase 3, but the GSocket fetch
-  is independent and small).
-- Tier 3: TLS file transfer + TLS banner fetch round-trips.
-- Estimated diff: ~30 LOC src + ~100 LOC tests.
+**Phase 2 — HTXF over TLS. _Shipped on
+`claude/tls-phase1-control-channel`_** (extended onto the Phase 1
+branch per Misha's choice to bundle both rounds in one PR).
+- `htlc->tls` field added on `struct htlc_conn`. Set in
+  `hx_connect` from the tls parameter so HTXF subchannels
+  downstream can read it back from `htxf->htlc->tls` or via the
+  banner-fetch snapshot.
+- `hx_sync_connect_to_host` grew a trailing `char tls` parameter
+  — same `g_socket_client_set_tls(client, TRUE)` + accept-
+  everything cert hook as `hx_connect` (Phase 1 stub reused
+  unchanged via `on_socket_client_event`).
+- `htxf_connect` reads `htxf->htlc->tls` and passes through.
+  Banner worker snapshots `htlc->tls` into the per-fetch struct
+  at spawn time (same way it already snapshots host/port/AEAD
+  state — works around connection reset / reconnect races).
+- Port arithmetic is preserved: the Mobius/Janus separate-port
+  model puts TLS-HTXF on TLSPort+1 (5601), which falls out of the
+  existing `htlc->serverport + 1` math when `serverport` already
+  stores the TLS HTLS port (5600) in TLS mode. No `tls_xfer_port`
+  concept needed on the production side.
+- `xfers.c::htxf_io_get_socket` grew the `GTlsConnection` branch
+  the prior comment promised — walks `base-io-stream` via
+  `g_object_get` (the direct accessor `g_tls_connection_get_base_io_stream`
+  isn't ABI-stable across the GLib versions we still build
+  against; property access is always available). Same shape as
+  the harness `stream_underlying_socket` helper.
+- Tier 3 coverage:
+  - `test_real_tls_file_get` — full FILE_GET over TLS control +
+    TLS HTXF subchannel against Janus, asserts the seed bytes
+    round-trip intact through TLS encrypt/decrypt.
+  - `test_real_tls_banner` — file-mode banner HTXF over TLS;
+    asserts the JPEG / GIF / PNG magic-byte prefix survives the
+    larger (~2 KB) body transfer.
+- Actual diff: ~80 LOC src (network.c / banner.c / xfers.c
+  threading) + ~330 LOC tests (two Tier 3 binaries + the harness
+  `_xfer_tls` connect helper + `_task_trans_stream` drain helper).
 
-**Phase 3 — Cert trust UX.**
-- `tls_trust.{c,h}` module: fingerprint pinning, known-hosts DB.
-- Adwaita prompt dialog wired from `connect.c`.
-- Tier 1 unit tests for the trust DB; Tier 3 covers the dialog
-  paths under accept / pin / reject flows.
-- Estimated diff: ~250 LOC src + ~150 LOC tests.
+**Phase 3 — Cert trust UX.** *Shipped 2026-05-27.*
+- `tls_trust.{c,h}` module: SHA-256 fingerprint over the cert
+  DER, SSH known_hosts file shape (host:port → fingerprint with a
+  trailing date comment), TRUSTED / UNKNOWN / MISMATCH lookup.
+  Path resolves via `gtkhx_config_dir()` with a `GTKHX_KNOWN_HOSTS`
+  env override for tests.
+- `tls_trust_dialog.{c,h}` module: `AdwAlertDialog` wrapping a
+  nested `GMainLoop` so the GSocketClient accept-certificate
+  signal handler (which has to return sync) can prompt the user.
+  Distinct copy + button styling for the MISMATCH path
+  (destructive response).
+- Wired into `network.c::tls_accept_certificate`: fingerprint →
+  lookup → TRUSTED returns TRUE silently; UNKNOWN / MISMATCH
+  prompt via the dialog and pin on acceptance.
+  `GTKHX_TLS_AUTO_ACCEPT=1` env override bypasses the dialog so
+  Tier 3 tests can run headless.
+- Pin writes are dispatched off the accept-certificate signal
+  via `g_idle_add` (`schedule_trust_pin`) — calling
+  `g_mkdir_with_parents` directly from the accept handler wedges
+  the TLS handshake on glib-networking + GnuTLS (handshake never
+  resumes, server logs `read handshake: EOF`). Pin no longer
+  mkdir's the config dir (created at app startup; tests use
+  `/tmp`).
+- Tier 1: `tests/unit/test_tls_trust.c` — 8 subtests covering
+  pin-then-lookup, unknown host, wrong port, mismatch, rewrite,
+  comment / blank-line preservation, hostname-only entries,
+  missing file.
+- Tier 3: existing TLS tests (`test_real_tls`, `_login`,
+  `_file_get`, `_banner`) now run with `GTKHX_TLS_AUTO_ACCEPT=1`
+  and a tmpdir `GTKHX_KNOWN_HOSTS`, exercising the real trust
+  DB write path on the first connect and the TRUSTED fast path
+  on the second.
+- Actual diff: ~395 LOC src (`tls_trust.c` + `tls_trust_dialog.c`
+  + accept-certificate plumbing in `network.c`) + ~290 LOC tests
+  (`test_tls_trust.c` + harness stubs).
 
-**Phase 4 — Connect dialog + bookmark UI.**
-- "Use TLS" toggle in `connect.c`; port auto-flip; HOPE+cipher
-  grey-out when TLS on.
-- Bookmark format extension (claim `flags[3]`); bookmarks dialog
-  TLS toggle row.
-- Tier 1: bookmark round-trip with the new flag; pre-existing
-  bookmarks still load with `tls=0`.
-- Estimated diff: ~150 LOC src + ~50 LOC tests.
+**Phase 4 — Connect dialog + bookmark UI.** *Shipped 2026-05-28.*
+- Connect dialog (`connect.c`) gained a "Use TLS"
+  `AdwSwitchRow` at the top of the Connection group. Toggling
+  flips the default port (5500 ↔ 5600 — custom ports survive
+  unchanged) and greys out HOPE + cipher + compress (the TLS-port
+  endpoint expects raw HTLS; layering HOPE on top would double-
+  encrypt). `connect_with_args` enforces the same coupling at
+  the data layer so a bookmark with `tls=1,secure=1` doesn't
+  trigger a HOPE handshake against a TLS port.
+- `last_conn` cache grew a `tls` field so Reconnect-after-
+  disconnect carries the choice through; `set_the_entries` /
+  `connect_open_bookmark_by_name` thread `tls` end-to-end.
+- Bookmark format extended: HxBookmark + bookmark_parsed gain a
+  `tls` field; the 4th flag byte in the HTsc on-disk layout
+  (zero in legacy files, naturally back-compat as TLS off).
+  Both writer call sites (`bookmarks_io.c::hx_bookmark_save`
+  and `connect.c::bookmark_save_response`) and both reader call
+  sites (`hx_bookmark_load` and `connect.c::bookmark_parse`)
+  updated; pre-TLS files still round-trip cleanly.
+- Bookmarks management dialog (`bookmarks.c`) gained a matching
+  "Use TLS" `AdwSwitchRow`; load + save plumb `bm->tls` through.
+- Tier 1: `tests/unit/test_bookmarks.c` got two new subtests —
+  `save_load_tls` (round-trips `tls=1`) and `load_pre_tls_bookmark`
+  (a hand-written legacy-shape file loads with `tls=0`). The
+  existing byte-layout test grew an assertion on the 4th flag
+  byte's position.
+- Actual diff: ~115 LOC src across `connect.c` / `bookmarks.c` /
+  `bookmarks_io.c` / `bookmarks.h` / `connect.h` + ~75 LOC tests.
 
-**Phase 5 — Documentation + matrix entry.**
-- README / man page mention.
-- Add the TLS-enabled Mobius container to the Tier 3 matrix as a
-  new entry (parallel to the Janus / mhxd ones).
-- ROADMAP.md: mark Phase 7 done, retire the "Phase ∞" entry.
+**Phase 5 — Documentation.** *Shipped 2026-05-28.*
+- This doc updated: every Phase row marked shipped, the §11
+  effort table closed out.
+- ROADMAP.md Phase 7 entries 4 + 5 marked ✅.
+- README / man page mention left for the next user-facing release
+  notes pass — out of scope for the per-phase scoping doc itself.
 
-Order matters: Phase 1 has to land before 2, 3, 4 can be tested
-end-to-end. Phases 2, 3, 4 are otherwise independent and could
-land in any order.
+What's deliberately not in Phase 5: a Mobius container in the
+Tier 3 matrix. Janus already covers the TLS-capable server slot
+end-to-end (`test_real_tls`, `_login`, `_file_get`, `_banner`),
+and Mobius integration is tracked as its own multi-server harness
+phase (Phase B in [[gtkhx_multi_server_test_plan]]).
+
+Order followed (Phase 1 → 2 → 3 → 4 → 5): Phase 1's control
+channel was the load-bearing prerequisite for every later phase;
+2, 3, 4 each extended it independently and landed sequentially on
+the same `claude/tls-phase1-control-channel` branch.
 
 ---
 
@@ -377,9 +468,9 @@ estimate.
 | 0 — HTXF GIOStream port | ~600 | ~430 | shipped | done (PR #122) |
 | 1 — Control-channel TLS | ~100 | ~150 | 1–2 days | pending |
 | 2 — HTXF over TLS | ~30 | ~100 | half day | pending (prereq done) |
-| 3 — Cert trust UX | ~250 | ~150 | 2–3 days | pending |
-| 4 — Connect + bookmark UI | ~150 | ~50 | 1–2 days | pending |
-| 5 — Docs + matrix | — | — | half day | pending |
+| 3 — Cert trust UX | ~395 | ~290 | shipped | done |
+| 4 — Connect + bookmark UI | ~115 | ~75 | shipped | done |
+| 5 — Docs | — | — | shipped | done |
 
 **Remaining: ~530 LOC src, ~450 LOC tests, ~1 week of focused work.**
 

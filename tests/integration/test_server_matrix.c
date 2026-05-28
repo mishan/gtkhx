@@ -102,6 +102,35 @@ test_servers_with_chat_history_cap (void)
 }
 
 static void
+test_servers_with_tls_cap (void)
+{
+    if (g_test_subprocess ()) {
+        g_unsetenv ("GTKHX_TEST_SERVERS");
+        /* HX_TEST_CAP_TLS shipped on the TLS Phase 1 branch
+         * advertising Janus as the lone TLS-capable matrix entry
+         * (mhxd doesn't ship a TLS listener). When a second TLS-
+         * capable entry lands — Mobius with TLS for example —
+         * this count goes up. The hard assertion below is that
+         * the cap-advertising entry has a non-zero tls_port:
+         * exposing the cap without populating the port would be
+         * a wiring bug that would surface as connect-refused
+         * at test time. */
+        GPtrArray *r = hx_test_servers_with (HX_TEST_CAP_TLS);
+        g_assert_nonnull (r);
+        g_assert_cmpuint (r->len, >=, 1);
+        for (guint i = 0; i < r->len; i++) {
+            const hx_test_server *s = g_ptr_array_index (r, i);
+            g_assert_cmpuint (s->tls_port, >, 0);
+            g_assert_cmpuint (s->tls_xfer_port, >, 0);
+        }
+        g_ptr_array_unref (r);
+        return;
+    }
+    g_test_trap_subprocess (NULL, 0, G_TEST_SUBPROCESS_INHERIT_STDOUT);
+    g_test_trap_assert_passed ();
+}
+
+static void
 test_env_filter_named_match (void)
 {
     if (g_test_subprocess ()) {
@@ -224,6 +253,8 @@ main (int argc, char **argv)
                      test_servers_with_unknown_cap_returns_empty);
     g_test_add_func ("/integration/server-matrix/chat-history-cap",
                      test_servers_with_chat_history_cap);
+    g_test_add_func ("/integration/server-matrix/tls-cap",
+                     test_servers_with_tls_cap);
     g_test_add_func ("/integration/server-matrix/env-named-match",
                      test_env_filter_named_match);
     g_test_add_func ("/integration/server-matrix/env-named-no-match",

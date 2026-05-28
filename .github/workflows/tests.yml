@@ -139,13 +139,20 @@ jobs:
       - name: start janus
         # Janus's own Dockerfile maps its internal 5500/5501 to host
         # 5510/5511 — see tests/janus/README.md for why (mhxd keeps
-        # the conventional 5500/5501 free). The server matrix entry
-        # for janus hard-codes 127.0.0.1:5510 / 5511, matching this.
+        # the conventional 5500/5501 free). Internal 5600/5601 are
+        # the TLS-wrapped HTLS / HTXF ports (config.yaml turns TLS
+        # on with the self-signed cert generated at image build
+        # time); those map to host 5610/5611 to match the matrix
+        # entry's tls_port / tls_xfer_port. Without those mappings
+        # every Tier 3 TLS binary (test_real_tls, _login,
+        # _file_get, _banner) hits "Connection refused" — the
+        # no-silent-skips policy then turns that into a CI fail.
         # Wait loop mirrors mhxd's above; Janus is statically-linked
         # Go and listens within ~1 s on a warm runner.
         run: |
           docker run -d --name gtkhx-janus \
             -p 5510:5500 -p 5511:5501 \
+            -p 5610:5600 -p 5611:5601 \
             gtkhx-janus
           for i in 1 2 3 4 5 6 7 8 9 10; do
             if (echo > /dev/tcp/127.0.0.1/5510) 2>/dev/null; then

@@ -52,15 +52,20 @@ const hx_test_server hx_test_server_matrix[] = {
          * (test_hope_{rc4,blowfish}_banner) need a server that
          * actually serves HTXF banner under HOPE+stream — only
          * Janus today. */
-        .name       = "mhxd",
-        .host       = "127.0.0.1",
-        .port       = 5500,
-        .xfer_port  = 5501,
-        .hl_version = 185,
-        .caps       = HX_TEST_CAP_HOPE
-                    | HX_TEST_CAP_NEWS_15
-                    | HX_TEST_CAP_BLOWFISH
-                    | HX_TEST_CAP_RC4,
+        .name          = "mhxd",
+        .host          = "127.0.0.1",
+        .port          = 5500,
+        .xfer_port     = 5501,
+        /* mhxd doesn't ship a TLS listener (no built-in cert/key
+         * config). tls_port=0 marks "no TLS"; the matrix-filter
+         * for HX_TEST_CAP_TLS won't pick mhxd. */
+        .tls_port      = 0,
+        .tls_xfer_port = 0,
+        .hl_version    = 185,
+        .caps          = HX_TEST_CAP_HOPE
+                       | HX_TEST_CAP_NEWS_15
+                       | HX_TEST_CAP_BLOWFISH
+                       | HX_TEST_CAP_RC4,
     },
     {
         /* Janus: VesperNet's closed-source server, pulled from
@@ -78,33 +83,43 @@ const hx_test_server hx_test_server_matrix[] = {
          * passwords.sh for the full background on why we don't
          * seed guest.
          *
-         * TLS is still off — the cert-generation flow is a
-         * separate follow-up. */
-        .name       = "janus",
-        .host       = "127.0.0.1",
-        .port       = 5510,
-        .xfer_port  = 5511,
-        .hl_version = 190,
-        .caps       = HX_TEST_CAP_LARGE_FILES
-                    | HX_TEST_CAP_TEXT_ENCODING
-                    | HX_TEST_CAP_CHAT_HISTORY
-                    | HX_TEST_CAP_BANNER_HTXF
-                    | HX_TEST_CAP_NEWS_15
-                    | HX_TEST_CAP_HOPE
-                    | HX_TEST_CAP_CHACHA20
-                    /* Janus also accepts RC4 and Blowfish under
-				     * HOPE Step 2 in addition to ChaCha20 AEAD.
-				     * Asserting the caps here lets the
-				     * test_hope_rc4_chat_history and
-				     * test_hope_blowfish_chat_history matrix
-				     * picks land on Janus — without these,
-				     * neither row in the matrix had both
-				     * CHAT_HISTORY and a stream cipher, and the
-				     * tests failed with "no server has both" at
-				     * pick time. Confirmed by Misha 2026-05-24. */
-                    | HX_TEST_CAP_RC4
-                    | HX_TEST_CAP_BLOWFISH
-                    | HX_TEST_CAP_NICK_COLORS,
+         * TLS shipped 2026-05 (claude/tls-phase1-control-channel):
+         * the Dockerfile generates a self-signed CN=localhost cert
+         * at build time and the container exposes the matching
+         * HTLS / HTXF TLS ports. Host-side mapping follows the same
+         * +10 convention the plain ports use (5600→5610,
+         * 5601→5611). Janus is the only matrix entry advertising
+         * HX_TEST_CAP_TLS today; the cap-filter routes
+         * test_real_tls (Phase 1) and the upcoming Phase 2 HTXF
+         * TLS tests here. */
+        .name          = "janus",
+        .host          = "127.0.0.1",
+        .port          = 5510,
+        .xfer_port     = 5511,
+        .tls_port      = 5610,
+        .tls_xfer_port = 5611,
+        .hl_version    = 190,
+        .caps          = HX_TEST_CAP_LARGE_FILES
+                       | HX_TEST_CAP_TEXT_ENCODING
+                       | HX_TEST_CAP_CHAT_HISTORY
+                       | HX_TEST_CAP_BANNER_HTXF
+                       | HX_TEST_CAP_NEWS_15
+                       | HX_TEST_CAP_HOPE
+                       | HX_TEST_CAP_CHACHA20
+                       /* Janus also accepts RC4 and Blowfish under
+                        * HOPE Step 2 in addition to ChaCha20 AEAD.
+                        * Asserting the caps here lets the
+                        * test_hope_rc4_chat_history and
+                        * test_hope_blowfish_chat_history matrix
+                        * picks land on Janus — without these,
+                        * neither row in the matrix had both
+                        * CHAT_HISTORY and a stream cipher, and the
+                        * tests failed with "no server has both" at
+                        * pick time. Confirmed by Misha 2026-05-24. */
+                       | HX_TEST_CAP_RC4
+                       | HX_TEST_CAP_BLOWFISH
+                       | HX_TEST_CAP_NICK_COLORS
+                       | HX_TEST_CAP_TLS,
     },
 };
 

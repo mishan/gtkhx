@@ -51,6 +51,9 @@
 #include "inet.h"
 #include "log.h"
 #include "proto_trace.h"
+#include "tls_trust.h"
+#include "tls_trust_dialog.h"
+#include "toolbar.h"
 #include "tracker.h"
 #include "network.h"
 #include "banner.h"
@@ -77,6 +80,15 @@ struct log *server_log = NULL;
  * async API; cancellation goes through current_cancel. */
 static GSocketConnection *current_conn; /* owns the post-handshake fd */
 static GCancellable *current_cancel;
+
+/* Forward decls for the control-channel GPollable source helpers.
+ * Definitions live further down (alongside the read/write
+ * callbacks) but hx_htlc_close above needs to call
+ * control_remove_all_sources before they're defined. */
+static void control_arm_read_source (struct htlc_conn *htlc);
+static void control_arm_write_source (struct htlc_conn *htlc);
+static void control_remove_write_source (void);
+static void control_remove_all_sources (void);
 
 int connected;
 
@@ -164,7 +176,6 @@ ping_stop (void)
 void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
-    int fd = htlc->fd;
     char buf[HOSTLEN];
 
     session *sess = &the_session;
@@ -216,7 +227,10 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                          GTKHX_CONNECTION_DISCONNECTED);
     close_connected_windows (sess);
-    hxd_fd_clr (fd, FDR | FDW);
+    /* Detach the GPollable read/write sources before dropping
+     * current_conn so the callbacks can't fire on a freed
+     * stream. */
+    control_remove_all_sources ();
 
     /* Phase 5+: GSocketConnection owns the fd; releasing it closes
 	 * the socket. Replaces the legacy close(fd) call. */
@@ -231,7 +245,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_free (htlc->out.buf);
         htlc->out.buf = NULL;
     }
-    memset (&hxd_files[fd], 0, sizeof (struct hxd_file));
+    /* hxd_files[fd] no longer used for the control channel (the
+     * GPollable sources installed in send_login replaced the
+     * legacy hxd_fd_set GIOChannel watch); no slot to clear. */
     htlc->fd = 0;
     htlc->uid = 0;
     htlc->color = 0;
@@ -403,41 +419,231 @@ update_task (struct htlc_conn *htlc)
     }
 }
 
-static void
-htlc_read (int fd)
-{
-    ssize_t r;
-    struct htlc_conn *htlc = hxd_files[fd].conn.htlc;
-    struct qbuf *in = &htlc->read_in;
+/* ============================================================
+ * Control-channel I/O via GPollable sources
+ * ============================================================
+ *
+ * The control connection runs on top of current_conn's GIOStream.
+ * Two watch sources, attached to the default main context:
+ *
+ *   control_read_src_id   permanent for the connection's life
+ *                         (installed in send_login, removed in
+ *                         hx_htlc_close).
+ *   control_write_src_id  installed lazily when there's data in
+ *                         htlc->out (control_arm_write_source),
+ *                         removed when the buffer drains
+ *                         (inside the writable callback).
+ *
+ * Each source fires on the main thread when the wrapped stream
+ * has application-level read / write capacity — i.e. plaintext
+ * bytes available, or decrypted TLS bytes ready for the read
+ * side, and writable socket capacity (modulo any TLS-internal
+ * buffering) for the write side.
+ *
+ * Replaces the previous hxd_fd_set GIOChannel-on-raw-fd watch
+ * that drove the legacy htlc_read(int fd) / htlc_write(int fd)
+ * callbacks. That watch fired on kernel-level socket activity,
+ * which was a good approximation in plaintext but didn't see
+ * TLS-buffered decrypted data (multi-record-per-segment case);
+ * the GPollable sources are aware of that buffering and fire
+ * at the right moment.
+ *
+ * hxd_files[] is still consumed by commands.c's /exec pipe
+ * plumbing, so the array stays — we just don't populate it for
+ * the control fd anymore. */
+static guint control_read_src_id;
+static guint control_write_src_id;
 
-    if (!in->len) {
-        qbuf_set (in, in->pos, READ_BUFSIZE);
-        in->len = 0;
+static gboolean control_on_readable (GObject *source, gpointer user_data);
+static gboolean control_on_writable (GObject *source, gpointer user_data);
+
+static void
+control_arm_read_source (struct htlc_conn *htlc)
+{
+    GInputStream *in_stream;
+    GSource *src;
+
+    g_return_if_fail (current_conn != NULL);
+    g_return_if_fail (control_read_src_id == 0);
+
+    in_stream = g_io_stream_get_input_stream (G_IO_STREAM (current_conn));
+    src = g_pollable_input_stream_create_source (
+        G_POLLABLE_INPUT_STREAM (in_stream), NULL);
+    /* G_SOURCE_FUNC silences -Wcast-function-type. The actual
+     * callback signature is GPollableSourceFunc — same shape that
+     * g_pollable_input_stream_create_source wires up internally. */
+    g_source_set_callback (src, G_SOURCE_FUNC (control_on_readable),
+                           htlc, NULL);
+    control_read_src_id = g_source_attach (src, NULL);
+    g_source_unref (src);
+}
+
+/* Idempotent: a hot send path that queues into htlc->out and
+ * then calls control_arm_write_source from inside a callback
+ * already holding the source can call this without paying
+ * for a double-install. */
+static void
+control_arm_write_source (struct htlc_conn *htlc)
+{
+    GOutputStream *out_stream;
+    GSource *src;
+
+    if (!current_conn || control_write_src_id != 0) {
+        return;
     }
-    r = read (fd, &in->buf[in->pos], READ_BUFSIZE - in->len);
-    if (r == 0 || (r < 0 && errno != EWOULDBLOCK && errno != EINTR)) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX, "htlc_read: %zd %s\n",
-                          (ssize_t)r, strerror (errno));
-        hx_htlc_close (htlc, 0);
-    } else {
-        in->len += r;
+    out_stream = g_io_stream_get_output_stream (G_IO_STREAM (current_conn));
+    src = g_pollable_output_stream_create_source (
+        G_POLLABLE_OUTPUT_STREAM (out_stream), NULL);
+    g_source_set_callback (src, G_SOURCE_FUNC (control_on_writable),
+                           htlc, NULL);
+    control_write_src_id = g_source_attach (src, NULL);
+    g_source_unref (src);
+}
+
+static void
+control_remove_write_source (void)
+{
+    if (control_write_src_id) {
+        g_source_remove (control_write_src_id);
+        control_write_src_id = 0;
+    }
+}
+
+static void
+control_remove_all_sources (void)
+{
+    if (control_read_src_id) {
+        g_source_remove (control_read_src_id);
+        control_read_src_id = 0;
+    }
+    control_remove_write_source ();
+}
+
+/* Read bytes off the control connection's GIOStream. Returns:
+ *   >0  : bytes read into buf
+ *    0  : EOF — caller should close
+ *   -1  : transient (would-block); caller leaves the buffer
+ *         where it is and waits for the next source fire
+ *   -2  : fatal stream error; caller closes (and logs the
+ *         GError message so a TLS alert / expired cert /
+ *         broken pipe surfaces to the user). */
+static ssize_t
+htlc_stream_read (struct htlc_conn *htlc, void *buf, size_t buflen)
+{
+    GInputStream *in_stream;
+    GError *err = NULL;
+    gssize r;
+
+    if (!current_conn) {
+        return -2;
+    }
+    in_stream = g_io_stream_get_input_stream (G_IO_STREAM (current_conn));
+    r = g_pollable_input_stream_read_nonblocking (
+        G_POLLABLE_INPUT_STREAM (in_stream), buf, buflen, NULL, &err);
+    if (r < 0) {
+        if (err && err->domain == G_IO_ERROR
+            && err->code == G_IO_ERROR_WOULD_BLOCK) {
+            g_clear_error (&err);
+            return -1;
+        }
+        hx_printf_prefix (htlc, 0, INFOPREFIX, "stream read: %s\n",
+                          err ? err->message : "unknown error");
+        g_clear_error (&err);
+        return -2;
+    }
+    return (ssize_t) r;
+}
+
+/* Readable callback. The GPollable source fires when application
+ * data is available — which for TLS means "decrypted bytes
+ * buffered or new ciphertext to decrypt."
+ *
+ * We loop read → decode → read inside one callback so a payload
+ * larger than READ_BUFSIZE drains fully even when GTlsConnection
+ * has decrypted bytes internally buffered: kernel readability
+ * has already been spent on the first read, so the source won't
+ * re-fire just because more decrypted bytes are sitting in the
+ * TLS layer. Stopping after one read+decode pass would stall the
+ * receive path on big payloads (banners over TLS, multi-record
+ * news posts, large file-list replies).
+ *
+ * Termination: we exit the loop the moment a read returns
+ * WOULD_BLOCK, EOF, or fatal — those are the three signals that
+ * say "no more application data is going to materialise this
+ * watch fire."
+ */
+static gboolean
+control_on_readable (GObject *source G_GNUC_UNUSED, gpointer user_data)
+{
+    struct htlc_conn *htlc = user_data;
+    struct qbuf *in = &htlc->read_in;
+    ssize_t r;
+    gboolean stream_drained = FALSE;
+
+    for (;;) {
+        if (!in->len) {
+            qbuf_set (in, in->pos, READ_BUFSIZE);
+            in->len = 0;
+        }
+
+        /* Skip the read if we don't have buffer space — hx_decode
+         * below will consume some bytes and free capacity for the
+         * next iteration. Avoids spurious WOULD_BLOCK calls when
+         * the buffer is genuinely full.
+         *
+         * Index into &in->buf[in->pos], not in->pos + in->len:
+         * hx_decode compacts any unprocessed bytes back to the
+         * start of the buffer via memmove and sets both pos and
+         * len to the count of leftover bytes, so in->pos IS the
+         * end-of-data write offset. Adding len on top doubles
+         * the offset and leaves a gap of uninitialised bytes
+         * between the leftover frame data and the new read. */
+        if (!stream_drained && in->len < READ_BUFSIZE) {
+            r = htlc_stream_read (htlc, &in->buf[in->pos],
+                                  READ_BUFSIZE - in->len);
+            if (r == -1) {
+                /* would-block — stream is fully drained for now.
+                 * Continue into the decode loop to consume what
+                 * we already have, then exit the outer loop. */
+                stream_drained = TRUE;
+            } else if (r <= 0) {
+                hx_printf_prefix (htlc, 0, INFOPREFIX,
+                                  "htlc_read: stream %s\n",
+                                  r == 0 ? "EOF" : "error");
+                hx_htlc_close (htlc, 0);
+                return G_SOURCE_REMOVE;
+            } else {
+                in->len += r;
+            }
+        }
+
+        /* Decode as many frames as we can with the buffer's
+         * current contents. */
+        gboolean decoded_any = FALSE;
         while (hx_decode (htlc)) {
+            decoded_any = TRUE;
             update_task (htlc);
             if (htlc->rcv) {
                 if (htlc->rcv == hx_rcv_hdr) {
                     hx_rcv_hdr (htlc);
-                    if (!hxd_files[fd].conn.htlc) {
-                        return;
+                    /* hx_rcv_hdr may have closed the connection
+                     * via an inner code path (e.g. a frame that
+                     * triggered a tear-down in a task handler).
+                     * current_conn is cleared by hx_htlc_close,
+                     * so it's our liveness marker now that
+                     * hxd_files no longer is. */
+                    if (!current_conn) {
+                        return G_SOURCE_REMOVE;
                     }
                 } else {
                     /* Phase 5: body is fully buffered now;
-					 * dump its data chunks before dispatch.
-					 * No-op when "proto" debug category is
-					 * disabled. */
+                     * dump its data chunks before dispatch.
+                     * No-op when "proto" debug category is
+                     * disabled. */
                     proto_trace_recv_chunks (htlc);
                     htlc->rcv (htlc);
-                    if (!hxd_files[fd].conn.htlc) {
-                        return;
+                    if (!current_conn) {
+                        return G_SOURCE_REMOVE;
                     }
                     goto reset;
                 }
@@ -448,29 +654,79 @@ htlc_read (int fd)
             }
         }
         update_task (htlc);
-    }
-}
 
-static void
-htlc_write (int fd)
-{
-    ssize_t r;
-    struct htlc_conn *htlc = hxd_files[fd].conn.htlc;
-
-    r = write (fd, &htlc->out.buf[htlc->out.pos], htlc->out.len);
-    if (r == 0 || (r < 0 && errno != EWOULDBLOCK && errno != EINTR)) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX, "htlc_write: %zd %s\n",
-                          (ssize_t)r, strerror (errno));
-        hx_htlc_close (htlc, 0);
-    } else {
-        htlc->out.pos += r;
-        htlc->out.len -= r;
-        if (!htlc->out.len) {
-            htlc->out.pos = 0;
-            htlc->out.len = 0;
-            hxd_fd_clr (fd, FDW);
+        /* Exit when the stream said WOULD_BLOCK AND we made no
+         * decode progress this iteration — either we have
+         * partial frame data waiting for more bytes, or the
+         * buffer was full but decode freed nothing. Both mean
+         * there's nothing useful to do until the next source
+         * fire. */
+        if (stream_drained && !decoded_any) {
+            break;
         }
     }
+    return G_SOURCE_CONTINUE;
+}
+
+/* Mirror of htlc_stream_read for the outbound side. Same return
+ * shape: >=0 bytes written, -1 transient, -2 fatal. */
+static ssize_t
+htlc_stream_write (struct htlc_conn *htlc, const void *buf, size_t buflen)
+{
+    GOutputStream *out_stream;
+    GError *err = NULL;
+    gssize r;
+
+    if (!current_conn) {
+        return -2;
+    }
+    out_stream = g_io_stream_get_output_stream (G_IO_STREAM (current_conn));
+    r = g_pollable_output_stream_write_nonblocking (
+        G_POLLABLE_OUTPUT_STREAM (out_stream), buf, buflen, NULL, &err);
+    if (r < 0) {
+        if (err && err->domain == G_IO_ERROR
+            && err->code == G_IO_ERROR_WOULD_BLOCK) {
+            g_clear_error (&err);
+            return -1;
+        }
+        hx_printf_prefix (htlc, 0, INFOPREFIX, "stream write: %s\n",
+                          err ? err->message : "unknown error");
+        g_clear_error (&err);
+        return -2;
+    }
+    return (ssize_t) r;
+}
+
+/* Writable callback. The GPollable output source is attached
+ * by control_arm_write_source from the hlwrite path (whenever
+ * data lands in htlc->out) and detaches itself when the buffer
+ * drains. */
+static gboolean
+control_on_writable (GObject *source G_GNUC_UNUSED, gpointer user_data)
+{
+    struct htlc_conn *htlc = user_data;
+    ssize_t r;
+
+    r = htlc_stream_write (htlc, &htlc->out.buf[htlc->out.pos],
+                           htlc->out.len);
+    if (r == -1) {
+        return G_SOURCE_CONTINUE; /* transient, keep source. */
+    }
+    if (r < 0) {
+        hx_printf_prefix (htlc, 0, INFOPREFIX,
+                          "htlc_write: stream error\n");
+        hx_htlc_close (htlc, 0);
+        return G_SOURCE_REMOVE;
+    }
+    htlc->out.pos += r;
+    htlc->out.len -= r;
+    if (!htlc->out.len) {
+        htlc->out.pos = 0;
+        htlc->out.len = 0;
+        control_write_src_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
@@ -592,13 +848,30 @@ typedef enum {
     GTKHX_CONNECT_STATE_DONE,
 } GtkhxConnectState;
 
+/* Phase 3 TLS: identifying tuple threaded through the
+ * GSocketClient::event signal to the accept-certificate handler.
+ * Defined here so gtkhx_connect_ctx below can hold one inline.
+ * The accept handler body lives later in the file; this
+ * forward declaration just gives the struct its layout. */
+struct tls_endpoint {
+    const char *host;
+    guint16 port;
+};
+
 struct gtkhx_connect_ctx {
     struct htlc_conn *htlc;
     char *serverstr;
     char *login;
     char *pass;
     int secure;
+    int tls; /* TLS Phase 1: wrap control socket from byte zero */
     guint16 port;
+
+    /* Phase 3: identifying tuple for the accept-certificate
+     * handler. Populated when tls=1 right before the
+     * GSocketClient connect kicks off; .host borrows from
+     * serverstr (same lifetime). */
+    struct tls_endpoint tls_endpoint;
 
     GSocketConnection *conn;
     GCancellable *cancel;
@@ -786,9 +1059,9 @@ on_async_connected (GObject *source, GAsyncResult *res, gpointer data)
 /* Finalize the connect after the magic round-trip succeeds: stash
  * the GSocketConnection on the current_conn global (it owns the
  * fd; hx_htlc_close unrefs it), populate htlc->ip_addr from the
- * remote endpoint, initialise the qbuf state, install the fd watch
- * via the existing hxd_files / hxd_fd_set machinery, and send the
- * LOGIN packet.
+ * remote endpoint, initialise the qbuf state, install the GPollable
+ * input source via control_arm_read_source, and send the LOGIN
+ * packet.
  *
  * The secure-login flag in ctx->secure picks between the HOPE
  * MAC-ALG / CIPHER-ALG / COMPRESS-ALG negotiation packet and the
@@ -807,6 +1080,22 @@ send_login (struct gtkhx_connect_ctx *ctx)
 
     sock = g_socket_connection_get_socket (ctx->conn);
     s = g_socket_get_fd (sock);
+
+    /* Clear the per-socket I/O timeout that GSocketClient set
+     * for the magic-exchange phase (MAGIC_TIMEOUT_SEC). The
+     * value persists on the GSocket past the connect call and
+     * GTlsConnection / GPollable*Stream honour it — leaving it
+     * armed makes any 30+ second idle period on an established
+     * connection (a quiet TLS session with no inbound chatter)
+     * surface as G_IO_ERROR_TIMED_OUT and we close. The legacy
+     * raw read(fd) path didn't see this timeout, so the bug
+     * only showed up after the GIOStream / GPollable rewrite.
+     *
+     * Keepalive at the application layer is handled by
+     * ping_start (60s HTLC_HDR_PING) and at the transport
+     * layer by the kernel's TCP keepalive defaults; neither
+     * needs help from a hard read-timeout on the socket. */
+    g_socket_set_timeout (sock, 0);
 
     /* Stash the GSocketConnection so it stays alive past ctx_free —
 	 * hx_htlc_close unrefs current_conn, which closes the fd. */
@@ -827,14 +1116,16 @@ send_login (struct gtkhx_connect_ctx *ctx)
     set_nonblocking (s);
     fd_closeonexec (s, 1);
 
-    hxd_files[s].ready_read = htlc_read;
-    hxd_files[s].ready_write = htlc_write;
-    hxd_files[s].conn.htlc = htlc;
-    hxd_files[s].fd = s;
-
     connected = 1;
     htlc->gdk_input = 1;
-    hxd_fd_set (s, FDR);
+    /* Phase 5+: control-channel I/O is driven by GPollable
+     * sources on current_conn's input / output streams (see the
+     * control_arm_* helpers). The legacy hxd_fd_set GIOChannel
+     * watch was tied to the raw socket fd and didn't see
+     * TLS-internal buffering; the pollable sources do.
+     * hxd_files[] stays unset for the control fd — only the
+     * /exec pipe consumers in commands.c use it now. */
+    control_arm_read_source (htlc);
 
     if (ctx->login) {
         strcpy (htlc->login, ctx->login);
@@ -933,12 +1224,337 @@ send_login (struct gtkhx_connect_ctx *ctx)
     connect_ctx_free (ctx);
 }
 
+/* Phase 3 TLS: deferred pin payload. Stamping a new known-hosts
+ * entry from inside the accept-certificate signal handler turned
+ * out to hang the TLS handshake — the handler runs on glib-
+ * networking's TLS worker thread, and the GLib file I/O (mkstemp
+ * + rename) inside hx_tls_trust_pin interacts badly with the
+ * thread state the handshake needs after we return TRUE. Janus
+ * waits forever for the client's next handshake message; we
+ * eventually time out and Janus logs "perform handshake: read
+ * handshake: EOF".
+ *
+ * The fix: return TRUE immediately from the accept handler and
+ * let the handshake resume; queue the file write on the default
+ * main context where the rest of GtkHx already runs file I/O.
+ * The trust DECISION (accept this cert) is what the signal
+ * contract needs; the pin is persistence and can happen any
+ * time before the next connect. */
+typedef struct {
+    char *host;
+    guint16 port;
+    char *fingerprint;
+} trust_pin_payload;
+
+static void
+trust_pin_payload_free (gpointer data)
+{
+    trust_pin_payload *p = data;
+    if (!p) {
+        return;
+    }
+    g_free (p->host);
+    g_free (p->fingerprint);
+    g_free (p);
+}
+
+static gboolean
+trust_pin_idle (gpointer data)
+{
+    trust_pin_payload *p = data;
+    if (p) {
+        if (!hx_tls_trust_pin (p->host, p->port, p->fingerprint)) {
+            /* Pin failed — likely permissions on $CONFIG, a
+             * missing config dir, or a rename(2) error. The
+             * connection is already up (we returned TRUE from
+             * accept-certificate before queueing this idle),
+             * so we don't disturb it; but the trust state
+             * won't persist and the user will see the TOFU
+             * prompt again on next connect with no obvious
+             * explanation. g_warning routes through GLib's
+             * log machinery so it shows up on stderr for
+             * console-launched runs and in journalctl for
+             * Flatpak. Should be rare enough that the noise
+             * cost is acceptable; if it stops being rare we
+             * can promote to a user-visible toast. */
+            g_warning ("TLS trust pin failed for %s:%u — connection "
+                       "allowed but the trust state will not "
+                       "persist; expect another trust prompt on "
+                       "the next connect to this server. Check "
+                       "permissions on the known_hosts path.",
+                       p->host, (unsigned) p->port);
+        }
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static void
+schedule_trust_pin (const char *host, guint16 port, const char *fingerprint)
+{
+    trust_pin_payload *p = g_new0 (trust_pin_payload, 1);
+    p->host = g_strdup (host);
+    p->port = port;
+    p->fingerprint = g_strdup (fingerprint);
+    g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, trust_pin_idle, p,
+                     trust_pin_payload_free);
+}
+
+/* Marshal hx_tls_trust_dialog_run_sync to the main thread.
+ *
+ * The accept-certificate signal can fire on a worker thread:
+ * hx_sync_connect_to_host (HTXF subchannel workers in xfers.c
+ * + banner.c) drives a sync GSocketClient connect from a non-
+ * main thread, and glib-networking emits accept-certificate on
+ * whichever thread is currently inside the handshake. Dialog
+ * APIs (libadwaita, the nested GMainLoop in hx_tls_trust_dialog_
+ * run_sync) require the main thread — calling them from a worker
+ * crashes or deadlocks.
+ *
+ * The pattern: pack the dialog args + a result slot + a
+ * GMutex/GCond into a stack-local struct, g_main_context_invoke
+ * to dispatch the body, wait on the condvar. On the main thread
+ * the invoke runs synchronously (the callback fills in result
+ * before invoke returns), so the wait loop sees done==TRUE
+ * immediately and exits without contention. On a worker the
+ * invoke queues an idle on the main context, the worker blocks
+ * on the condvar, and the main thread eventually wakes it with
+ * the user's decision. The dialog's own nested GMainLoop keeps
+ * pumping events while the user clicks, including any GSource
+ * activity the worker is waiting on. */
+typedef struct {
+    GtkWindow *parent;
+    const char *host;
+    guint16 port;
+    const char *fingerprint;
+    hx_tls_trust_status status;
+    /* Mutex + cond + done form the worker-thread wait protocol;
+     * accepted is the result. */
+    GMutex mutex;
+    GCond cond;
+    gboolean done;
+    gboolean accepted;
+} trust_dialog_marshal;
+
+static gboolean
+trust_dialog_invoke (gpointer data)
+{
+    trust_dialog_marshal *m = data;
+    gboolean accepted = hx_tls_trust_dialog_run_sync (
+        m->parent, m->host, m->port, m->fingerprint, m->status);
+    g_mutex_lock (&m->mutex);
+    m->accepted = accepted;
+    m->done = TRUE;
+    g_cond_signal (&m->cond);
+    g_mutex_unlock (&m->mutex);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
+                              guint16 port, const char *fingerprint,
+                              hx_tls_trust_status status)
+{
+    trust_dialog_marshal m = {
+        .parent = parent,
+        .host = host,
+        .port = port,
+        .fingerprint = fingerprint,
+        .status = status,
+        .done = FALSE,
+        .accepted = FALSE,
+    };
+    g_mutex_init (&m.mutex);
+    g_cond_init (&m.cond);
+
+    /* g_main_context_invoke runs synchronously when called from
+     * the context's owner (main thread) and asynchronously
+     * otherwise; either way the callback eventually signals
+     * m.cond, and the wait loop below covers both cases. */
+    g_main_context_invoke (NULL, trust_dialog_invoke, &m);
+
+    g_mutex_lock (&m.mutex);
+    while (!m.done) {
+        g_cond_wait (&m.cond, &m.mutex);
+    }
+    g_mutex_unlock (&m.mutex);
+
+    g_mutex_clear (&m.mutex);
+    g_cond_clear (&m.cond);
+    return m.accepted;
+}
+
+/* Phase 3 TLS: TOFU accept-certificate handler. Pulls (host,
+ * port) from the tls_endpoint (passed as user_data via the
+ * GSocketClient event signal),
+ * computes the cert fingerprint, looks it up in the user's
+ * known-hosts file, and either silently accepts (TRUSTED),
+ * pins-then-accepts after a TOFU prompt (UNKNOWN), or warns
+ * loudly before accepting/rejecting (MISMATCH).
+ *
+ * GTKHX_TLS_AUTO_ACCEPT=1 in the environment bypasses the
+ * dialog: any UNKNOWN cert is auto-pinned, any MISMATCH is
+ * auto-trusted (with a noisy log line). Used by the Tier 3
+ * test harness, which has no GtkApplication and would deadlock
+ * waiting on the prompt's nested GMainLoop. Also handy for
+ * scripted first-run pinning. Default-off — production users
+ * always see the prompt.
+ *
+ * The signal contract is sync (return TRUE/FALSE). When the
+ * signal fires on a worker thread (HTXF subchannel connects
+ * — see trust_dialog_run_thread_safe above), the dialog is
+ * marshalled to the main thread. */
+static gboolean
+tls_accept_certificate (GTlsConnection *conn G_GNUC_UNUSED,
+                        GTlsCertificate *peer_cert,
+                        GTlsCertificateFlags errors,
+                        gpointer user_data)
+{
+    struct tls_endpoint *ep = user_data;
+    const char *host = (ep && ep->host) ? ep->host : "?";
+    guint16 port = ep ? ep->port : 0;
+
+    g_autofree gchar *fingerprint = hx_tls_trust_fingerprint (peer_cert);
+    if (!fingerprint) {
+        /* No DER blob on the cert — shouldn't happen, but if it
+         * does we have no way to identify the cert so we have to
+         * reject. */
+        debug_log ("tls",
+                   "accept-certificate: no fingerprint available for %s:%u",
+                   host, (unsigned) port);
+        return FALSE;
+    }
+
+    hx_tls_trust_status status =
+        hx_tls_trust_lookup (host, port, fingerprint);
+    debug_log ("tls",
+               "accept-certificate: %s:%u fp=%s status=%d errors=0x%x",
+               host, (unsigned) port, fingerprint, (int) status,
+               (unsigned) errors);
+
+    if (status == HX_TLS_TRUST_TRUSTED) {
+        return TRUE;
+    }
+
+    /* If the user already pinned THIS cert for THIS host on
+     * some OTHER port, silently accept and pin the new port
+     * too. The canonical case: control channel was just pinned
+     * at host:5600, now the HTXF subchannel connects to
+     * host:5601 with the bit-identical cert — without this
+     * cross-port check the user would see the trust prompt
+     * twice for what they perceive as a single connection.
+     *
+     * Only consulted on a strict-UNKNOWN result. A
+     * strict-MISMATCH on this (host, port) is a security
+     * signal — we never let an any-port match override it. */
+    if (status == HX_TLS_TRUST_UNKNOWN
+        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
+        debug_log ("tls",
+                   "accept-certificate: %s:%u auto-accepted "
+                   "(same cert pinned for host on another port)",
+                   host, (unsigned) port);
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Auto-accept escape hatch for headless tests + scripted
+     * first-run pinning. Tier 3 sets this; production never
+     * does. The pin is queued via g_idle_add (schedule_trust_pin)
+     * rather than called inline because hx_tls_trust_pin's body
+     * uses to call g_mkdir_with_parents which wedges the TLS
+     * handshake when invoked from inside this accept-certificate
+     * signal handler. The pin function no longer calls mkdir, but
+     * keeping the work on the main thread is the conservative
+     * default — file I/O latency here would extend the handshake
+     * window even if it doesn't deadlock, and the trust DECISION
+     * (which is what the signal contract needs) doesn't depend
+     * on the pin write completing.
+     *
+     * MISMATCH inside the auto-accept branch is logged loudly
+     * via g_warning: a test or scripted run that silently
+     * overrides a real fingerprint change without anyone
+     * noticing is exactly the failure mode the warning is
+     * meant to surface. UNKNOWN doesn't need the warning —
+     * that's the documented first-run / fresh-server case. */
+    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
+    if (auto_accept && *auto_accept) {
+        if (status == HX_TLS_TRUST_MISMATCH) {
+            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS "
+                       "MISMATCH for %s:%u (fp=%s) — the pinned "
+                       "fingerprint differs from this one. Set "
+                       "this env var only for trusted test "
+                       "harnesses; production should never see "
+                       "this line.",
+                       host, (unsigned) port, fingerprint);
+        }
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Real user-facing prompt. Parent transient-for the toolbar
+     * window if it exists; otherwise float (still works, just
+     * less polished). trust_dialog_run_thread_safe handles
+     * marshalling to the main thread when this signal fires on
+     * an HTXF worker — see the docstring above. */
+    GtkWindow *parent = NULL;
+    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
+        parent = GTK_WINDOW (toolbar_window);
+    }
+    gboolean accepted = trust_dialog_run_thread_safe (
+        parent, host, port, fingerprint, status);
+    if (accepted) {
+        schedule_trust_pin (host, port, fingerprint);
+    }
+    return accepted;
+}
+
+/* The GSocketClient event signal fires through every phase of the
+ * connect-and-wrap sequence. We're interested in the TLS_HANDSHAKING
+ * phase because that's the only phase where the connection arg is a
+ * GTlsClientConnection we can attach accept-certificate to. Earlier
+ * phases give a plain GSocketConnection (or NULL); later phases'
+ * cert decision has already happened.
+ *
+ * `user_data` is a `struct tls_endpoint *` (the async connect
+ * path passes &ctx->tls_endpoint, the sync HTXF connect path
+ * passes a stack-local endpoint) — forwarded as-is to the
+ * accept-certificate handler so it can read (host, port) for
+ * the trust lookup. Lifetime is the caller's; we just borrow
+ * the pointer for the duration of the handshake. */
+static void
+on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
+                        GSocketClientEvent event,
+                        GSocketConnectable *connectable G_GNUC_UNUSED,
+                        GIOStream *connection,
+                        gpointer user_data)
+{
+    if (event != G_SOCKET_CLIENT_TLS_HANDSHAKING) {
+        return;
+    }
+    if (!connection || !G_IS_TLS_CONNECTION (connection)) {
+        return;
+    }
+    g_signal_connect (connection, "accept-certificate",
+                      G_CALLBACK (tls_accept_certificate), user_data);
+}
+
 void
 hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
-            const char *login, const char *pass, char secure)
+            const char *login, const char *pass, char secure, char tls)
 {
     struct gtkhx_connect_ctx *ctx;
     GSocketClient *client;
+
+    /* GTKHX_TLS=1 env-var override. While Phase 4 (Connect dialog
+	 * TLS toggle) is unimplemented, this is how the test harness
+	 * and power users flip TLS on without rebuilding. Anything
+	 * non-empty counts as truthy — matches the convention the rest
+	 * of the GTKHX_* env vars follow. */
+    if (!tls) {
+        const char *env = g_getenv ("GTKHX_TLS");
+        if (env && *env) {
+            tls = 1;
+        }
+    }
 
     /* Cancel any in-flight async connect (user kicked off another
 	 * connect, or the previous one is still resolving). */
@@ -1005,6 +1621,15 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
 
+    /* Phase 2: also stamp the tls flag so HTXF subchannel connects
+     * (xfers.c::htxf_connect via htxf->htlc, banner.c via the
+     * fetch snapshot) know to wrap their data ports too. The
+     * Mobius / Janus separate-port model pairs TLS-HTLS on port N
+     * with TLS-HTXF on port N+1, so reusing the existing port+1
+     * arithmetic just works without a separate tls_xfer_port
+     * concept on the production side. */
+    htlc->tls = tls;
+
 #if 0 /* XXX */
 	server_log = create_log(server_addr);
 #endif
@@ -1016,12 +1641,15 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     ctx->login = g_strdup (login);
     ctx->pass = g_strdup (pass);
     ctx->secure = (unsigned char) secure;
+    ctx->tls = (unsigned char) tls;
     ctx->cancel = g_cancellable_new ();
     current_cancel = g_object_ref (ctx->cancel);
     ctx->state = GTKHX_CONNECT_STATE_RESOLVING;
 
     htlc->gdk_input = 0;
-    hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
+    hx_printf_prefix (htlc, 0, INFOPREFIX,
+                      tls ? _ ("connecting to %s (TLS)\n")
+                          : _ ("connecting to %s\n"),
                       server_addr);
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                          GTKHX_CONNECTION_CONNECTING);
@@ -1031,6 +1659,28 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 	 * available and try each resolved address in turn — same fallback
 	 * behaviour the legacy getaddrinfo loop had. */
     g_socket_client_set_timeout (client, MAGIC_TIMEOUT_SEC);
+    if (tls) {
+        /* Phase 1: TLS from byte zero (Mobius / Janus separate-port
+		 * model — no STARTTLS, no in-band negotiation). GIO routes
+		 * the underlying socket through whatever TLS backend
+		 * glib-networking provides (GnuTLS or OpenSSL depending on
+		 * distro / runtime); we don't link a TLS lib directly. The
+		 * event signal lets us attach accept-certificate during the
+		 * TLS_HANDSHAKING phase — see on_socket_client_event. */
+        g_socket_client_set_tls (client, TRUE);
+        /* Phase 3: user_data is a tls_endpoint stashed on the
+         * connect ctx (ep_host points at the same memory as
+         * ctx->serverstr, alive until the connect completes).
+         * Lives long enough — the GSocketClient is unref'd
+         * below but the underlying handshake completes before
+         * the connect callback fires, and the signal handler
+         * only runs during the handshake. */
+        ctx->tls_endpoint.host = ctx->serverstr;
+        ctx->tls_endpoint.port = port;
+        g_signal_connect (client, "event",
+                          G_CALLBACK (on_socket_client_event),
+                          &ctx->tls_endpoint);
+    }
     g_socket_client_connect_to_host_async (client, serverstr, port, ctx->cancel,
                                            on_async_connected, ctx);
     g_object_unref (client);
@@ -1056,13 +1706,28 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
  * GSocket's finaliser closes the fd. */
 GSocketConnection *
 hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
-                         gsize errbuf_len)
+                         gsize errbuf_len, char tls)
 {
     GSocketClient *client;
     GSocketConnection *conn;
     GError *err = NULL;
 
     client = g_socket_client_new ();
+    /* Phase 2: optional TLS wrap on the HTXF subchannel. Same
+     * shape as hx_connect's control-channel TLS plumbing — flip
+     * set_tls before the connect and hook accept-everything via
+     * the GSocketClient event signal at TLS_HANDSHAKING. Phase 3:
+     * the handler now does a real TOFU lookup; the endpoint
+     * struct on the stack tells it which host:port we're
+     * connecting to. The struct lives until this function
+     * returns, which outlives the connect call. */
+    struct tls_endpoint endpoint = { .host = host, .port = port };
+    if (tls) {
+        g_socket_client_set_tls (client, TRUE);
+        g_signal_connect (client, "event",
+                          G_CALLBACK (on_socket_client_event),
+                          &endpoint);
+    }
     conn = g_socket_client_connect_to_host (client, host, port, NULL, &err);
     g_object_unref (client);
     if (!conn) {
@@ -1115,8 +1780,16 @@ htxf_connect (struct htxf_conn *htxf)
                       && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 
+    /* Mirror the control channel's TLS mode onto this HTXF
+     * subchannel — separate-port model expects TLS-HTXF on
+     * port+1 to pair with TLS-HTLS. htxf->htlc is non-NULL on
+     * every existing caller (xfers.c file_get/put/folder paths
+     * and xfer_go all populate it), so reading htlc->tls here is
+     * safe; the g_return_val_if_fail above guards the
+     * htxf-itself-NULL case. */
+    char xfer_tls = (htxf->htlc != NULL) ? htxf->htlc->tls : 0;
     conn = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport,
-                                    errbuf, sizeof (errbuf));
+                                    errbuf, sizeof (errbuf), xfer_tls);
     if (!conn) {
         return NULL;
     }
@@ -1717,7 +2390,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	 * cipher / compress hooks below. */
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
-    hxd_fd_set (htlc->fd, FDW);
+    control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
     }
@@ -1775,7 +2448,7 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
-    hxd_fd_set (htlc->fd, FDW);
+    control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
     }

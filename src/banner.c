@@ -89,6 +89,13 @@ struct htxf_fetch {
 	 * the subchannel port (main + 1). */
     char serverhost[HOSTLEN];
     guint16 serverport;
+    /* TLS mode snapshot from htlc->tls at spawn time. When set,
+     * the worker passes tls=1 to hx_sync_connect_to_host, which
+     * wraps the HTXF subchannel in a GTlsClientConnection just
+     * like the control channel was. Separate-port model: this
+     * is the only path needed — no STARTTLS, no protocol
+     * negotiation. */
+    char tls;
     /* HOPE+ChaCha20 AEAD state, snapshot at spawn time. When the
 	 * control channel negotiated CIPHER_MODE_AEAD, the HTXF
 	 * subchannel for the banner fetch needs the same per-transfer
@@ -509,6 +516,12 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
 	 * hands them straight to GSocketClient. */
     g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
     f->serverport = htlc->serverport + 1;
+    /* Phase 2: mirror the control-channel TLS mode so the HTXF
+     * subchannel wraps in TLS too when the control did. Janus
+     * binds TLS-HTXF on TLSPort+1 (5601), which falls out of the
+     * existing port+1 arithmetic — the htlc->serverport already
+     * stores the TLS HTLS port (5600) in TLS mode. */
+    f->tls = htlc->tls;
 
     /* Snapshot the HOPE AEAD context so the worker can derive its
 	 * per-transfer keys (cipher_aead_derive_transfer_keys mixes the
@@ -551,7 +564,7 @@ banner_htxf_worker_thread (void *arg)
     char errbuf[256] = { 0 };
 
     conn = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
-                                    sizeof (errbuf));
+                                    sizeof (errbuf), f->tls);
     if (!conn) {
         debug_log ("banner", "htxf connect failed: %s", errbuf);
         goto out;

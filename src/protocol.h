@@ -190,6 +190,14 @@ struct htlc_conn {
 	 * log lines (post-connect IP-then-status messages). */
     char serverhost[HOSTLEN];
     guint16 serverport;
+    /* TLS mode for THIS connection (separate-port model — Mobius /
+     * Janus). Set in hx_connect from the tls parameter (Phase 1).
+     * HTXF subchannel connects in xfers.c / banner.c mirror this
+     * flag so the data port runs over TLS too when the control
+     * port does — the wire-level expectation on those servers is
+     * that TLS-HTLS on port N pairs with TLS-HTXF on port N+1.
+     * char (not gboolean) to match the hx_connect parameter type. */
+    char tls;
     char ip_addr[HOSTLEN];
     int fd;
     guint32 trans;

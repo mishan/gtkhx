@@ -429,7 +429,11 @@ tracker_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
                 sizeof (the_session.htlc.compressalg));
         memset (the_session.htlc.cipheralg, 0,
                 sizeof (the_session.htlc.cipheralg));
-        hx_connect (&the_session.htlc, buf, server->port, "", "", 0);
+        /* Tracker-driven connects are always plaintext: the tracker
+		 * doesn't advertise a TLS port today. If a future tracker
+		 * variant returns one (see docs/tls-scoping.md §10), this
+		 * stamp gets replaced with that field. */
+        hx_connect (&the_session.htlc, buf, server->port, "", "", 0, /*tls=*/0);
     }
 }
 

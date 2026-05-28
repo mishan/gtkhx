@@ -196,7 +196,7 @@ test_full_handshake (void)
     reset_test_htlc ();
 
     hx_connect (&test_htlc, "127.0.0.1", hx_fake_server_get_port (srv),
-                /*login=*/"guest", /*pass=*/"", /*secure=*/0);
+                /*login=*/"guest", /*pass=*/"", /*secure=*/0, /*tls=*/0);
 
     drive_until (obs, 5000);
 
@@ -272,7 +272,7 @@ test_bad_magic (void)
     reset_test_htlc ();
 
     hx_connect (&test_htlc, "127.0.0.1", hx_fake_server_get_port (srv),
-                "guest", "", 0);
+                "guest", "", 0, /*tls=*/0);
 
     drive_until (obs, 5000);
 
@@ -320,7 +320,7 @@ test_connect_refused (void)
     reset_test_htlc ();
 
     hx_connect (&test_htlc, "127.0.0.1", (guint16) port_int,
-                "guest", "", 0);
+                "guest", "", 0, /*tls=*/0);
 
     /* GSocketClient's ECONNREFUSED comes back in <10 ms on a clean
 	 * box. 5000 ms is a watchdog for loaded CI; the loop quits on

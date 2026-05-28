@@ -20,9 +20,34 @@ extern int fd_closeonexec (int fd, int on);
 extern int fd_lock_write (int fd);
 
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
+
+/* `secure` is the legacy hxd "secure server" password flag (not
+ * transport security — it just selects an alternate password
+ * encoding). `tls` is the transport-security flag: non-zero
+ * wraps the control-channel socket in GTlsClientConnection from
+ * byte zero (see docs/tls-scoping.md Phase 1). The default port
+ * for TLS is 5600 by Mobius/Janus convention; the caller is
+ * responsible for handing that in via `port` — hx_connect
+ * doesn't auto-translate. The Connect dialog (Phase 4) flips
+ * the port when the TLS toggle changes; bookmarks carry their
+ * own port + tls flag.
+ *
+ * Cert trust policy (Phase 3): the accept-certificate signal
+ * handler computes a SHA-256 fingerprint over the cert DER,
+ * looks it up in $CONFIG/known_hosts (SSH known_hosts shape),
+ * and either silently accepts (TRUSTED) or prompts the user via
+ * an AdwAlertDialog (UNKNOWN / MISMATCH) before pinning. The
+ * GTKHX_KNOWN_HOSTS env var overrides the path for tests.
+ * GTKHX_TLS_AUTO_ACCEPT=1 bypasses the dialog and auto-pins —
+ * intended for the Tier 3 headless test harness; production
+ * users always see the prompt.
+ *
+ * Env-var override: setting GTKHX_TLS=1 forces tls=1 regardless
+ * of the parameter. Mostly a leftover from before Phase 4 wired
+ * the Connect-dialog toggle; kept for power-user scripting. */
 extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
                         guint16 port, const char *login, const char *pass,
-                        char secure);
+                        char secure, char tls);
 
 extern void kill_threads (void);
 
@@ -49,11 +74,27 @@ extern GSocketConnection *htxf_connect (struct htxf_conn *htxf);
  * transfer) workers in xfers.c and banner.c.
  *
  * Writes the GError message to errbuf (truncated to errbuf_len)
- * if both are non-NULL on failure. */
+ * if both are non-NULL on failure.
+ *
+ * `tls` (Phase 2): when non-zero, flips
+ * g_socket_client_set_tls(client, TRUE) before the connect and
+ * hooks the same TOFU accept-certificate handler at the
+ * G_SOCKET_CLIENT_TLS_HANDSHAKING phase that hx_connect uses
+ * (see network.c::tls_accept_certificate). Trust lookups hit
+ * the same $CONFIG/known_hosts file, so the HTXF subchannel
+ * cert is pinned per (host, port) just like the control
+ * channel. Callers should pass htlc->tls so the subchannel
+ * mirrors the control channel.
+ *
+ * The returned GSocketConnection is actually a
+ * GTlsClientConnection in the tls=1 case; the rest of the GIO
+ * stream APIs (g_io_stream_get_input_stream etc.) work the same
+ * way on both shapes. */
 extern GSocketConnection *hx_sync_connect_to_host (const char *host,
                                                    guint16 port,
                                                    char *errbuf,
-                                                   gsize errbuf_len);
+                                                   gsize errbuf_len,
+                                                   char tls);
 
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                      ...);

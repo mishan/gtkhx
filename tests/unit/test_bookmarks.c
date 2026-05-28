@@ -229,6 +229,62 @@ test_save_load_roundtrip (Fixture *f, gconstpointer data)
     g_assert_cmpint (out->secure, ==, 1);
     g_assert_cmpint (out->compress, ==, 2);
     g_assert_cmpint (out->cipher, ==, 1);
+    /* Phase 4: TLS defaults off on a fresh make_bookmark; this
+     * subtest doesn't set it, so the load value should be 0. The
+     * dedicated TLS round-trip test below covers the on-path. */
+    g_assert_cmpint (out->tls, ==, 0);
+}
+
+/* Phase 4: TLS flag round-trips through save/load. Set tls=1 (and
+ * everything else off — TLS + HOPE is a meaningless combination at
+ * the protocol layer; connect_with_args refuses it). Reload and
+ * confirm the new flag byte survives. */
+static void
+test_save_load_tls (Fixture *f, gconstpointer data)
+{
+    g_autoptr (HxBookmark) bm = NULL;
+    g_autoptr (HxBookmark) out = NULL;
+    (void)f;
+    (void)data;
+
+    bm = make_bookmark ("tls-srv", "tls.example.org", "5600", "u", "p");
+    bm->secure = 0;
+    bm->compress = 0;
+    bm->cipher = 0;
+    bm->tls = 1;
+    g_assert_true (hx_bookmark_save (bm, NULL));
+
+    out = hx_bookmark_load ("tls-srv");
+    g_assert_nonnull (out);
+    g_assert_cmpint (out->tls, ==, 1);
+    g_assert_cmpint (out->secure, ==, 0);
+    g_assert_cmpstr (out->port, ==, "5600");
+}
+
+/* Phase 4: a pre-TLS bookmark on disk (the 3-flag layout the
+ * legacy writer emitted) must load with tls=0. The format
+ * extension trick is that pre-TLS files wrote a zero byte at
+ * the slot where TLS now lives — naturally readable as off. */
+static void
+test_load_pre_tls_bookmark (Fixture *f, gconstpointer data)
+{
+    g_autoptr (HxBookmark) out = NULL;
+    (void)data;
+
+    /* write_legacy_bookmark uses the pre-TLS shape — secure=1,
+     * compress=0, cipher=0, and the bytes past those three are
+     * zero-padded. Drop it into the LEGACY dir so hx_bookmark_load
+     * picks it up via the legacy fallback path. */
+    write_legacy_bookmark (f, "pre-tls", "old.example.org:5500");
+
+    out = hx_bookmark_load ("pre-tls");
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out->server, ==, "old.example.org");
+    g_assert_cmpstr (out->port, ==, "5500");
+    g_assert_cmpint (out->secure, ==, 1);
+    g_assert_cmpint (out->compress, ==, 0);
+    g_assert_cmpint (out->cipher, ==, 0);
+    g_assert_cmpint (out->tls, ==, 0);
 }
 
 /* Roundtrip with a blank port — the writer omits the ':port' suffix
@@ -265,6 +321,7 @@ test_htsc_byte_layout (Fixture *f, gconstpointer data)
     (void)data;
 
     bm = make_bookmark ("byte-check", "h", "5500", "lo", "pa");
+    bm->tls = 1;
     g_assert_true (hx_bookmark_save (bm, NULL));
 
     path = g_build_filename (f->primary_dir, "byte-check", NULL);
@@ -288,10 +345,13 @@ test_htsc_byte_layout (Fixture *f, gconstpointer data)
     /* Server length byte at offset 203, "h:5500" = 6 chars. */
     g_assert_cmpint (buf[203], ==, 6);
     g_assert_cmpmem (buf + 204, 6, "h:5500", 6);
-    /* Flags follow the server bytes: secure=1, compress=0, cipher=0. */
+    /* Flags follow the server bytes: secure=1, compress=0,
+     * cipher=0, tls=1 (Phase 4: 4th flag byte added on disk;
+     * pre-TLS files have a zero here naturally via padding). */
     g_assert_cmpint (buf[210], ==, 1);
     g_assert_cmpint (buf[211], ==, 0);
     g_assert_cmpint (buf[212], ==, 0);
+    g_assert_cmpint (buf[213], ==, 1);
 
     hx_bookmark_free (bm);
 }
@@ -564,6 +624,8 @@ main (int argc, char **argv)
 
     ADD ("save_load_roundtrip", test_save_load_roundtrip);
     ADD ("save_load_blank_port", test_save_load_blank_port);
+    ADD ("save_load_tls", test_save_load_tls);
+    ADD ("load_pre_tls_bookmark", test_load_pre_tls_bookmark);
     ADD ("htsc_byte_layout", test_htsc_byte_layout);
     ADD ("load_missing", test_load_missing);
     ADD ("list_dedup_sort_and_dotfiles", test_list_dedup_sort_and_dotfiles);

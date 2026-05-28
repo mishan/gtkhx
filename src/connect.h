@@ -5,7 +5,7 @@ extern void connect_set_entries (const char *address, const char *login,
                                  const char *pasword, guint16 port);
 extern void set_the_entries (char *address, char *login, char *password,
                              char *port, char secure, char compress,
-                             char cipher);
+                             char cipher, char tls);
 extern void connect_bookmark_name (char *name);
 extern void create_connect_window (GtkWidget *btn, gpointer data);
 

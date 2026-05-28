@@ -348,6 +348,15 @@ hx_bookmark_load (const char *name)
     if (read (bm, &out->cipher, 1) != 1) {
         goto fail;
     }
+    /* TLS flag is the 4th byte after the server field. Pre-TLS
+	 * bookmarks zero-padded the rest of the 256-byte block, so a
+	 * read here returns 0 = TLS off — natural back-compat without
+	 * a version bump. Short read isn't a hard error: if the file
+	 * was truncated to exactly the legacy 3-flag length, treat
+	 * that as TLS off too rather than failing the whole load. */
+    if (read (bm, &out->tls, 1) != 1) {
+        out->tls = 0;
+    }
 
     /* server_buf is "host:port" — split. */
     colon = strrchr (server_buf, ':');
@@ -389,7 +398,7 @@ hx_bookmark_save (const HxBookmark *bm, GError **err)
     FILE *f = NULL;
     char zeros[256];
     char hdr[6] = { 'H', 'T', 's', 'c', 0, 1 };
-    char flags[3];
+    char flags[4];
     char lenbyte;
     size_t len, len_total;
     gboolean ok = FALSE;
@@ -462,23 +471,28 @@ hx_bookmark_save (const HxBookmark *bm, GError **err)
         goto io_err;
     }
 
-    /* Server "host:port" + 3 trailing flag bytes + zero padding up
-	 * to a 256-byte block (256 - len - 3 zeros). */
+    /* Server "host:port" + 4 trailing flag bytes + zero padding up
+	 * to a 256-byte block (256 - len - 4 zeros). The 4th flag is
+	 * TLS (Phase 4); the legacy on-disk shape had 3 flags, with
+	 * everything past byte 3 being zero-padding. A pre-TLS reader
+	 * simply ignores the new byte; a TLS-aware reader of a legacy
+	 * file finds 0 there (off), which is the right default. */
     len = strlen (server_str);
-    if (len > 252) {
-        /* Truncate to fit; 252 = 256 - 1 (length byte) - 3 (flags) —
+    if (len > 251) {
+        /* Truncate to fit; 251 = 256 - 1 (length byte) - 4 (flags) —
 		 * not a path we expect to hit since server max is 128 +
 		 * port max ~7 + ':'. */
-        len = 252;
+        len = 251;
     }
     len_total = 256 - len;
     lenbyte = (char)len;
     flags[0] = bm->secure;
     flags[1] = bm->compress;
     flags[2] = bm->cipher;
+    flags[3] = bm->tls;
     if (!write_all (f, &lenbyte, 1) || !write_all (f, server_str, len)
         || !write_all (f, flags, sizeof (flags))
-        || !write_all (f, zeros, len_total - 3)) {
+        || !write_all (f, zeros, len_total - 4)) {
         goto io_err;
     }
 

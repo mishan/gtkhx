@@ -177,13 +177,14 @@ unignore_signals (sigset_t *oldset)
 }
 
 /* Get the underlying GSocket from a HTXF GIOStream so we can call
- * g_socket_condition_timed_wait on it. Today htxf_io is always a
- * GSocketConnection (htxf_connect / hx_sync_connect_to_host return
- * those directly), so the type check is a no-op narrowing. When
- * TLS lands (docs/tls-scoping.md Phase 2), `io` will be a
- * GTlsClientConnection wrapping a GSocketConnection — at that
- * point this helper grows a GTlsConnection branch that reads the
- * "base-io-stream" property via g_object_get to reach the socket.
+ * g_socket_condition_timed_wait on it. With Phase 2 the stream can
+ * be one of two shapes:
+ *   - GSocketConnection: plaintext HTXF, used directly.
+ *   - GTlsClientConnection: TLS-wrapped HTXF, reach the underlying
+ *     GSocket via the "base-io-stream" property (we can't call
+ *     g_tls_connection_get_base_io_stream directly because the
+ *     symbol isn't ABI-stable across the GLib versions we still
+ *     build against; the property accessor is always available).
  * Returns NULL if io is an unexpected shape — current callers
  * treat NULL as "skip the timed wait", matching the legacy
  * select(sr <= 0) "give up and move on" fallback. */
@@ -192,6 +193,24 @@ htxf_io_get_socket (GIOStream *io)
 {
     if (G_IS_SOCKET_CONNECTION (io)) {
         return g_socket_connection_get_socket (G_SOCKET_CONNECTION (io));
+    }
+    if (G_IS_TLS_CONNECTION (io)) {
+        GIOStream *base = NULL;
+        g_object_get (io, "base-io-stream", &base, NULL);
+        if (!base) {
+            return NULL;
+        }
+        GSocket *sock = NULL;
+        if (G_IS_SOCKET_CONNECTION (base)) {
+            sock = g_socket_connection_get_socket (
+                G_SOCKET_CONNECTION (base));
+        }
+        /* g_object_get added a ref via the property API; drop it.
+         * The socket pointer stays valid because the
+         * GSocketConnection still owns it via the TLS connection
+         * chain above. */
+        g_object_unref (base);
+        return sock;
     }
     return NULL;
 }
