@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-28 11:18-0700\n"
+"POT-Creation-Date: 2026-05-28 11:44-0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1546,16 +1546,16 @@ msgstr ""
 #: src/tls_trust_dialog.c:98
 #, c-format
 msgid ""
-"The TLS certificate for %s:%u doesn'''t match the one you previously "
-"trusted. This usually means the server rotated its certificate, but it can "
-"also indicate a man-in-the-middle attack. Verify the fingerprint out-of-band "
-"with the server operator before accepting."
+"The TLS certificate for %s:%u doesn't match the one you previously trusted. "
+"This usually means the server rotated its certificate, but it can also "
+"indicate a man-in-the-middle attack. Verify the fingerprint out-of-band with "
+"the server operator before accepting."
 msgstr ""
 
 #: src/tls_trust_dialog.c:107
 #, c-format
 msgid ""
-"You haven'''t connected to %s:%u over TLS before. GtkHx will pin this "
+"You haven't connected to %s:%u over TLS before. GtkHx will pin this "
 "certificate so future connections are silent — but only if you trust it now."
 msgstr ""
 

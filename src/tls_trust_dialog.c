@@ -11,7 +11,7 @@
  * TLS Phase 3 — TOFU prompt dialog. See tls_trust_dialog.h for
  * the API contract.
  *
- * Synchronous-from-async-callback pattern: AdwAlertDialog'\''s
+ * Synchronous-from-async-callback pattern: AdwAlertDialog's
  * native API is async (g_signal_connect on "response"), but the
  * GSocketClient::accept-certificate signal handler MUST return
  * TRUE/FALSE before the TLS handshake can proceed. We spin a
@@ -19,7 +19,7 @@
  * clicks a button, capture the decision, then quit the loop and
  * return.
  *
- * This is the same pattern Adwaita'\''s own
+ * This is the same pattern Adwaita's own
  * adw_alert_dialog_choose_sync wraps internally (and the same
  * pattern GTK 4 docs call out as the correct way to expose a
  * synchronous response API on top of an async dialog primitive).
@@ -37,7 +37,7 @@
 
 /* State shared between the AdwAlertDialog::response handler and
  * the loop-spin caller. The dialog runs synchronously from the
- * caller'\''s POV, so the state lives on the stack and never
+ * caller's POV, so the state lives on the stack and never
  * outlives the call. */
 typedef struct {
     GMainLoop *loop;
@@ -85,7 +85,7 @@ hx_tls_trust_dialog_run_sync (GtkWindow *parent,
         destructive = FALSE;
     }
 
-    /* Body builds a multi-line description: the host:port we'\''re
+    /* Body builds a multi-line description: the host:port we're
      * about to talk to, the SHA-256 fingerprint as the user can
      * cross-check it against a server admin or out-of-band
      * source, and (for MISMATCH) a pointer at the known_hosts
@@ -95,7 +95,7 @@ hx_tls_trust_dialog_run_sync (GtkWindow *parent,
     if (status == HX_TLS_TRUST_MISMATCH) {
         g_string_append_printf (
             body,
-            _ ("The TLS certificate for %s:%u doesn'\''t match the one "
+            _ ("The TLS certificate for %s:%u doesn't match the one "
                "you previously trusted. This usually means the server "
                "rotated its certificate, but it can also indicate a "
                "man-in-the-middle attack. Verify the fingerprint "
@@ -104,7 +104,7 @@ hx_tls_trust_dialog_run_sync (GtkWindow *parent,
     } else {
         g_string_append_printf (
             body,
-            _ ("You haven'\''t connected to %s:%u over TLS before. "
+            _ ("You haven't connected to %s:%u over TLS before. "
                "GtkHx will pin this certificate so future "
                "connections are silent — but only if you trust it "
                "now."),
@@ -148,8 +148,8 @@ hx_tls_trust_dialog_run_sync (GtkWindow *parent,
 
     /* Present the dialog on the parent window (or as a detached
      * floating dialog if no parent is available). The
-     * AdwDialog::present API doesn'\''t block; the nested loop
-     * below is what makes the call synchronous from our caller'\''s
+     * AdwDialog::present API doesn't block; the nested loop
+     * below is what makes the call synchronous from our caller's
      * POV. */
     adw_dialog_present (ADW_DIALOG (dialog),
                         parent ? GTK_WIDGET (parent) : NULL);
