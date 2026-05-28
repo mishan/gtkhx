@@ -47,6 +47,7 @@
 - Updated icons.rsrc to include icons from HLC 1.9
 - Implement Broadcast command
 - New Bookmark manager dialog allows for in-app management of Hotline bookmarks
+- New machine-generated translations for French, German, Spanish, and Portuguese
 
 0.9.4
 -----

@@ -12,10 +12,6 @@ Icons:
 Docs:
 - Rewrite README.md to explain this project better
 
-i18n:
-- Translate to other languages
-- Use indexed args (e.g. %1$s instead of %s) so that translations can display these in different order if necessary
-
 Tracker:
 - Ship with some more built in trackers configured
 - New Tracker protocol support
