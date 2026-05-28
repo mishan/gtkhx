@@ -7,8 +7,15 @@ Port: 5500
 
 # ─── Network: TLS ───────────────────────────────────────────────────────────
 # Path to TLS certificate and key files. Leave empty to disable TLS.
-TLSCert: ""
-TLSKey: ""
+# The Dockerfile generates a self-signed cert at build time and drops
+# it at /opt/janus/Server/tls/{cert,key}.pem. We use ABSOLUTE paths
+# here because Janus resolves relative paths against its cwd, not
+# the config file's directory — and the two relevant cwds differ:
+# the seed-hope-passwords script inherits cwd=/build from the
+# earlier Dockerfile WORKDIR, and the runtime stage's ENTRYPOINT
+# inherits cwd=/opt/janus. Absolute paths sidestep both.
+TLSCert: "/opt/janus/Server/tls/cert.pem"
+TLSKey: "/opt/janus/Server/tls/key.pem"
 
 # Base TLS port. TLS file transfer port is TLSPort + 1.
 TLSPort: 5600

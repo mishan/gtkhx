@@ -1995,8 +1995,10 @@ hotline_client_init (int argc, char **argv)
             pass = g_malloc (128);
             get_password (pass);
         }
+        /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
+		 * override applies (Phase 4 adds a --tls CLI flag). */
         hx_connect (&the_session.htlc, server, port, login ? login : "guest",
-                    pass ? pass : "", 0);
+                    pass ? pass : "", 0, /*tls=*/0);
         g_free (server);
         g_free (login);
         g_free (pass);

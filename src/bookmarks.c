@@ -64,6 +64,7 @@ typedef struct {
     GtkWidget *hope_row;
     GtkWidget *cipher_row;
     GtkWidget *compress_row;
+    GtkWidget *tls_row;
 
     GtkWidget *empty_status;  /* AdwStatusPage shown when no selection */
     GtkWidget *detail_form;   /* The form box, hidden when empty */
@@ -157,6 +158,7 @@ form_from_bookmark (BookmarksWindow *w, const HxBookmark *bm)
     gtk_editable_set_text (GTK_EDITABLE (w->login_row), bm->login);
     gtk_editable_set_text (GTK_EDITABLE (w->pass_row), bm->pass);
     adw_switch_row_set_active (ADW_SWITCH_ROW (w->hope_row), bm->secure != 0);
+    adw_switch_row_set_active (ADW_SWITCH_ROW (w->tls_row), bm->tls != 0);
     /* combo indexes: 0 = "Off", 1..N = valid_*[N-1]. The on-disk
 	 * value matches the combo's selected index, so passing it
 	 * through unmodified is correct. Clamp to the model's actual
@@ -197,6 +199,8 @@ form_to_bookmark (BookmarksWindow *w, HxBookmark *bm)
         = (char)adw_combo_row_get_selected (ADW_COMBO_ROW (w->cipher_row));
     bm->compress
         = (char)adw_combo_row_get_selected (ADW_COMBO_ROW (w->compress_row));
+    bm->tls
+        = adw_switch_row_get_active (ADW_SWITCH_ROW (w->tls_row)) ? 1 : 0;
 }
 
 /* ----------------------------------------------------------
@@ -766,6 +770,21 @@ create_bookmarks_window (void)
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (w->pass_row),
                                    _ ("Password"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), w->pass_row);
+
+    /* TLS comes first — toggling it grey-outs HOPE + cipher + compress
+     * in the Connect dialog. The bookmarks editor doesn't currently
+     * mirror that sensitivity coupling (the user could in principle
+     * save a bookmark with both tls=1 and secure=1, in which case
+     * connect_with_args forces HOPE off at connect time). */
+    w->tls_row = adw_switch_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (w->tls_row),
+                                   _ ("Use TLS"));
+    adw_action_row_set_subtitle (
+        ADW_ACTION_ROW (w->tls_row),
+        _ ("Connect to the server's TLS port. Disables HOPE and "
+           "compression — they're not meaningful over a TLS-encrypted "
+           "stream."));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (group), w->tls_row);
 
     w->hope_row = adw_switch_row_new ();
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (w->hope_row),

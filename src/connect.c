@@ -49,6 +49,16 @@ static GtkWidget *port_entry;
 static GtkWidget *hope;
 static GtkWidget *compress_menu;
 static GtkWidget *cipher_menu;
+/* Phase 4 (TLS). When TLS is on the connection runs the unchanged
+ * Hotline wire protocol over a TLS-wrapped TCP socket on the server's
+ * dedicated TLS port (defaults: 5600 control / 5601 transfer).
+ * Toggling this:
+ *   - auto-flips the port between the plaintext default (5500) and
+ *     the TLS default (5600). Custom ports are left alone.
+ *   - greys out HOPE + cipher + compress (TLS-on-HOPE is wasted CPU
+ *     and double-encryption; the server-side TLS port is expected
+ *     to be the canonical secure endpoint). */
+static GtkWidget *tls_switch;
 
 
 #define DEFAULT_CIPHER "BLOWFISH"
@@ -146,11 +156,13 @@ static struct {
     char secure;
     char compress;
     char cipher;
-} last_conn = { 0, NULL, 0, NULL, NULL, 0, 0, 0 };
+    char tls;
+} last_conn = { 0, NULL, 0, NULL, NULL, 0, 0, 0, 0 };
 
 static void
 last_conn_set (const char *server, guint16 port, const char *login,
-               const char *pass, char secure, char compress, char cipher)
+               const char *pass, char secure, char compress, char cipher,
+               char tls)
 {
     /* Strdup the inputs *before* freeing the old slots — the caller
      * may have passed pointers that alias our existing fields. The
@@ -176,6 +188,7 @@ last_conn_set (const char *server, guint16 port, const char *login,
     last_conn.secure = secure;
     last_conn.compress = compress;
     last_conn.cipher = cipher;
+    last_conn.tls = tls;
     last_conn.valid = 1;
 }
 
@@ -212,10 +225,23 @@ connect_set_entries (const char *address, const char *login,
 static void
 connect_with_args (session *sess, const char *server, guint16 port,
                    const char *login, const char *pass, char secure,
-                   char compress, char cipher)
+                   char compress, char cipher, char tls)
 {
     (void)compress;
     (void)cipher;
+
+    /* TLS and HOPE are mutually exclusive end-to-end transports.
+     * If TLS is on, force-disable HOPE + cipher + compress so the
+     * legacy bookmark with "secure=1,compress=1,cipher=1,tls=1"
+     * doesn't double-encrypt or trigger the HOPE handshake against
+     * a TLS port that's expecting raw HTLS. The Connect dialog's
+     * coupling helper greys these out in the UI; this is the
+     * data-layer enforcement for bookmark / programmatic paths. */
+    if (tls) {
+        secure = 0;
+        compress = 0;
+        cipher = 0;
+    }
 
     memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
     if (secure && compress) {
@@ -242,7 +268,7 @@ connect_with_args (session *sess, const char *server, guint16 port,
         }
     }
 
-    last_conn_set (server, port, login, pass, secure, compress, cipher);
+    last_conn_set (server, port, login, pass, secure, compress, cipher, tls);
 
     /* From here on use last_conn.{server,login,pass} rather than the
      * incoming parameters: when this function is called from
@@ -252,7 +278,7 @@ connect_with_args (session *sess, const char *server, guint16 port,
      * for the synchronous portion of hx_connect (which g_strdup's
      * what it needs before going async via GSocketClient). */
     hx_connect (&sess->htlc, last_conn.server, port,
-                last_conn.login, last_conn.pass, secure);
+                last_conn.login, last_conn.pass, secure, tls);
 }
 
 /* Reconnect to the most-recently-used server, no dialog. Wired to
@@ -269,7 +295,7 @@ connect_reconnect_last (void)
     }
     connect_with_args (&the_session, last_conn.server, last_conn.port,
                        last_conn.login, last_conn.pass, last_conn.secure,
-                       last_conn.compress, last_conn.cipher);
+                       last_conn.compress, last_conn.cipher, last_conn.tls);
 }
 
 static void
@@ -280,6 +306,7 @@ server_connect (GtkWidget *widget, gpointer data)
     session *sess = data;
     guint16 port = 5500;
     char compress = 0, cipher = 0;
+    char tls = 0;
     (void)widget;
 
     login = gtk_editable_get_text (GTK_EDITABLE (login_entry));
@@ -289,13 +316,16 @@ server_connect (GtkWidget *widget, gpointer data)
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
     cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
+    if (tls_switch) {
+        tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
 
     if (portstr && portstr[0]) {
         port = atoi (portstr);
     }
 
     connect_with_args (sess, server, port, login, pass, (char)secure, compress,
-                       cipher);
+                       cipher, tls);
 
     if (connect_window) {
         adw_dialog_close (ADW_DIALOG (connect_window));
@@ -325,10 +355,33 @@ server_connect (GtkWidget *widget, gpointer data)
 static void
 hope_coupling_sync_sensitivity (void)
 {
+    gboolean tls_on = FALSE;
     gboolean on;
     if (!hope) {
         return;
     }
+    if (tls_switch) {
+        tls_on = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
+    /* TLS overrides HOPE — the secure-port endpoint expects raw HTLS
+     * over the TLS-wrapped socket. Grey out HOPE plus its dependent
+     * combos so the user can't accidentally pick double-encryption,
+     * and force HOPE off in the underlying widget state so the saved
+     * bookmark / live connect carries (tls=1, secure=0). */
+    if (tls_on) {
+        if (adw_switch_row_get_active (ADW_SWITCH_ROW (hope))) {
+            adw_switch_row_set_active (ADW_SWITCH_ROW (hope), FALSE);
+        }
+        gtk_widget_set_sensitive (hope, FALSE);
+        if (compress_menu) {
+            gtk_widget_set_sensitive (compress_menu, FALSE);
+        }
+        if (cipher_menu) {
+            gtk_widget_set_sensitive (cipher_menu, FALSE);
+        }
+        return;
+    }
+    gtk_widget_set_sensitive (hope, TRUE);
     on = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
     if (compress_menu) {
         gtk_widget_set_sensitive (compress_menu, on);
@@ -336,6 +389,29 @@ hope_coupling_sync_sensitivity (void)
     if (cipher_menu) {
         gtk_widget_set_sensitive (cipher_menu, on);
     }
+}
+
+/* TLS port defaults — TLS-on flips 5500 → 5600 (the typical TLS port);
+ * TLS-off flips back. Custom ports (anything that doesn't match either
+ * default) are left alone so a user-typed value survives toggling. */
+static void
+on_tls_active_notify (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+    gboolean on;
+    const char *portstr;
+    (void) pspec;
+    (void) data;
+    if (!ADW_IS_SWITCH_ROW (obj) || !port_entry) {
+        return;
+    }
+    on = adw_switch_row_get_active (ADW_SWITCH_ROW (obj));
+    portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+    if (on && portstr && g_str_equal (portstr, "5500")) {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), "5600");
+    } else if (!on && portstr && g_str_equal (portstr, "5600")) {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
+    }
+    hope_coupling_sync_sensitivity ();
 }
 
 static void
@@ -367,7 +443,7 @@ on_secure_combo_selected_notify (GObject *obj, GParamSpec *pspec,
 
 void
 set_the_entries (char *address, char *login, char *password, char *port,
-                 char secure, char compress, char cipher)
+                 char secure, char compress, char cipher, char tls)
 {
     if (address && address[0]) {
         gtk_editable_set_text (GTK_EDITABLE (address_entry), address);
@@ -410,6 +486,10 @@ set_the_entries (char *address, char *login, char *password, char *port,
     }
     if (cipher_menu) {
         adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), cipher);
+    }
+    if (tls_switch) {
+        adw_switch_row_set_active (ADW_SWITCH_ROW (tls_switch),
+                                   tls ? TRUE : FALSE);
     }
 
     /* Either set_the_entries was called with a bookmark before the
@@ -499,7 +579,7 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
         g_snprintf (port, sizeof (port), "%u", atoi (p));
     }
 
-    set_the_entries (server, login, pass, port, 0, 0, 0);
+    set_the_entries (server, login, pass, port, 0, 0, 0, 0);
 
     bm = fopen (data, "w");
     if (!bm) {
@@ -528,9 +608,9 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
     fprintf (bm, "%c", (int)len);
     fprintf (bm, "%s", server);
 
-    /* secure:0, compress:0, cipher:0 */
-    fprintf (bm, "%c%c%c", 0, 0, 0);
-    fwrite (zeros, 1, len_total - 3, bm);
+    /* secure:0, compress:0, cipher:0, tls:0 */
+    fprintf (bm, "%c%c%c%c", 0, 0, 0, 0);
+    fwrite (zeros, 1, len_total - 4, bm);
 
     fclose (bm);
 }
@@ -642,6 +722,7 @@ struct bookmark_parsed {
     char secure;
     char compress;
     char cipher;
+    char tls;          /* Phase 4: TLS over dedicated server port */
 };
 
 /* Phase 5: read the new-format (HTsc) bookmark at $name and fill *out.
@@ -723,6 +804,12 @@ bookmark_parse (const char *name, struct bookmark_parsed *out,
     if (read (bm, &out->cipher, 1) != 1) {
         goto bad;
     }
+    /* Phase 4: TLS flag — 4th byte after the server field. Old
+	 * bookmarks zero-padded the slot, so a short read returns 0
+	 * = TLS off, which is the right back-compat default. */
+    if (read (bm, &out->tls, 1) != 1) {
+        out->tls = 0;
+    }
 
     close (bm);
 
@@ -773,7 +860,7 @@ open_bookmark (GtkWidget *widget, gpointer data)
     }
 
     set_the_entries (bm.server, bm.login, bm.pass, bm.port, bm.secure,
-                     bm.compress, bm.cipher);
+                     bm.compress, bm.cipher, bm.tls);
 }
 
 /* Phase 5: scan a bookmarks dir and append each entry as a menu item
@@ -926,7 +1013,7 @@ connect_open_bookmark_by_name (const char *name)
     }
 
     connect_with_args (&the_session, bm.server, port, bm.login, bm.pass,
-                       bm.secure, bm.compress, bm.cipher);
+                       bm.secure, bm.compress, bm.cipher, bm.tls);
 }
 
 /* Phase 5: connect to a built-in "well-known" Hotline server. After
@@ -947,7 +1034,7 @@ connect_open_builtin_bookmark (int idx)
         return;
     }
 
-    connect_with_args (&the_session, server, 5500, "", "", 0, 0, 0);
+    connect_with_args (&the_session, server, 5500, "", "", 0, 0, 0, 0);
 }
 
 /* Phase 5: bookmark save migrates to AdwAlertDialog with the name
@@ -964,6 +1051,7 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     const char *server, *login, *pass, *port;
     char secure;
     char compress = 0, cipher = 0;
+    char tls = 0;
     char *dir, *path = NULL, *server_str;
     FILE *bookmark = NULL;
     size_t len, len_total;
@@ -993,6 +1081,9 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
     cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
+    if (tls_switch) {
+        tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
 
     dir = bookmarks_dir_primary ();
     server_str = g_strdup_printf ("%s:%s", server, port);
@@ -1037,8 +1128,12 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     len_total = 256 - len;
     fprintf (bookmark, "%c%s", (int)len, server_str);
 
-    fprintf (bookmark, "%c%c%c", secure, compress, cipher);
-    len_total -= 3;
+    /* Phase 4: flags[3] (tls) is a forward-compatible extension —
+	 * pre-TLS readers stop at flags[2] and ignore the rest of the
+	 * 256-byte block; pre-TLS files have a zero in flags[3] from
+	 * the original zero-padding, which loads as tls=0 = off. */
+    fprintf (bookmark, "%c%c%c%c", secure, compress, cipher, tls);
+    len_total -= 4;
     fwrite (zeros, 1, len_total, bookmark);
 
     fclose (bookmark);
@@ -1225,6 +1320,23 @@ create_connect_window (GtkWidget *btn, gpointer data)
     conn_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (conn_grp, _ ("Connection"));
 
+    /* TLS comes first in the group so when it's toggled the user
+     * sees HOPE + cipher + compress grey out visually below it.
+     * notify::active on this switch auto-flips the default port
+     * (5500↔5600) and re-syncs sensitivity of the rows below. */
+    tls_switch = adw_switch_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (tls_switch),
+                                   _ ("Use TLS"));
+    adw_action_row_set_subtitle (
+        ADW_ACTION_ROW (tls_switch),
+        _ ("Connect to the server's TLS port. Disables HOPE and "
+           "compression — they're not meaningful over a TLS-encrypted "
+           "stream."));
+    adw_switch_row_set_active (ADW_SWITCH_ROW (tls_switch), FALSE);
+    g_signal_connect (tls_switch, "notify::active",
+                      G_CALLBACK (on_tls_active_notify), NULL);
+    adw_preferences_group_add (conn_grp, tls_switch);
+
     hope = adw_switch_row_new ();
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (hope),
                                    _ ("Secure (HOPE)"));
@@ -1319,7 +1431,7 @@ create_connect_window (GtkWidget *btn, gpointer data)
         g_snprintf (portbuf, sizeof (portbuf), "%u", last_conn.port);
         set_the_entries (last_conn.server, last_conn.login, last_conn.pass,
                          portbuf, last_conn.secure, last_conn.compress,
-                         last_conn.cipher);
+                         last_conn.cipher, last_conn.tls);
     }
 
     adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));

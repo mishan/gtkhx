@@ -41,6 +41,7 @@ typedef struct {
     char secure;      /* HOPE on */
     char compress;    /* 0 = off, 1+ indexes valid_compressors[] */
     char cipher;      /* 0 = off, 1+ indexes valid_ciphers[] */
+    char tls;         /* 0 = off, 1 = TLS over the server's dedicated TLS port */
 } HxBookmark;
 
 extern HxBookmark *hx_bookmark_new (void);

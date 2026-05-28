@@ -406,7 +406,7 @@ extern void hotline_client_input (struct htlc_conn *htlc, char *str,
 
 extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
                         guint16 port, const char *login, const char *pass,
-                        char secure);
+                        char secure, char tls);
 extern void hx_tracker_list_async (session *sess);
 extern void hx_quit (void);
 

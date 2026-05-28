@@ -37,6 +37,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install --no-install-recommends -y \
         ca-certificates \
         curl \
+        openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Pinned Janus build (current as of May 2026). Upstream's public
@@ -87,6 +88,35 @@ RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
 #                                    disabled binary reads them
 #                                    when present.
 COPY conf/config.yaml /opt/janus/Server/config.yaml
+
+# Generate the self-signed TLS cert + key BEFORE the HOPE seed
+# step. The seed script boots Janus internally to PATCH passwords
+# through the admin REST API, and Janus refuses to start if its
+# configured TLSCert path doesn't resolve ("Error loading TLS
+# certificate: no such file or directory"). The cert + key have
+# to be present on disk by the time the first `janus` process
+# starts in this Dockerfile — and that's the seed script, not the
+# runtime container.
+#
+# CN=localhost + SAN entries cover the typical test-rig connect
+# strings (127.0.0.1 from the host, "localhost" inside Compose).
+# The Phase 1 TLS client code accepts every cert via an accept-
+# certificate stub (see network.c::tls_accept_certificate_phase1_stub),
+# so the specific name doesn't matter for the test path — but using
+# localhost + 127.0.0.1 keeps the future Phase 3 trust UI sensible
+# when it lands. 10-year validity (this is a test container, not a
+# production deployment — cert rotation is a non-concern). 2048-bit
+# RSA is the standard self-signed-test sweet spot: fast enough to
+# generate during docker build, comfortably above any modern TLS
+# lib's minimum-keysize floor.
+RUN mkdir -p /opt/janus/Server/tls \
+ && openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /opt/janus/Server/tls/key.pem \
+        -out    /opt/janus/Server/tls/cert.pem \
+        -days 3650 \
+        -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+ && chmod 600 /opt/janus/Server/tls/key.pem
 
 # Seed HOPE-compatible password hashes onto the bundled accounts.
 # Standalone script — see its preamble for the full background;
@@ -152,8 +182,10 @@ RUN chown -R janus:janus /opt/janus
 # Hotline ports:
 #   5500/tcp — HTLS server (clients connect here)
 #   5501/tcp — HTXF file transfer subchannel
-#   5600/tcp — HTLS over TLS (reserved; TLS not enabled in v1)
-#   5601/tcp — HTXF over TLS
+#   5600/tcp — HTLS over TLS (self-signed cert generated above;
+#              docs/tls-scoping.md Phase 1)
+#   5601/tcp — HTXF over TLS (Phase 2 in docs/tls-scoping.md;
+#              client side wraps in Phase 2 of TLS support)
 EXPOSE 5500/tcp 5501/tcp 5600/tcp 5601/tcp
 
 USER janus

@@ -58,6 +58,7 @@
 #define HX_TEST_CAP_BLOWFISH      (1u << 20) /* HOPE Blowfish OFB-64  */
 #define HX_TEST_CAP_RC4           (1u << 21) /* HOPE RC4 stream       */
 #define HX_TEST_CAP_NICK_COLORS   (1u << 22) /* Colored-Nicknames     */
+#define HX_TEST_CAP_TLS           (1u << 23) /* TLS on a separate port*/
 
 /* ---- The matrix struct ------------------------------------------ */
 
@@ -66,6 +67,13 @@ typedef struct {
     const char *host;       /* DNS name or IP, used by getaddrinfo  */
     guint16     port;       /* HTLS server port                     */
     guint16     xfer_port;  /* HTXF subchannel port (usually port+1)*/
+    /* Mobius / Janus separate-port TLS model: when the server
+     * advertises HX_TEST_CAP_TLS, tls_port is the host-side port
+     * that speaks HTLS-over-TLS from byte zero (no STARTTLS), and
+     * tls_xfer_port is the matching HTXF subchannel port for the
+     * Phase 2 wrap. Both are 0 when the server doesn't expose TLS. */
+    guint16     tls_port;
+    guint16     tls_xfer_port;
     guint16     hl_version; /* HTLS_DATA_VERSION value, e.g. 185    */
     guint32     caps;       /* HX_TEST_CAP_* bitmask                */
 } hx_test_server;
