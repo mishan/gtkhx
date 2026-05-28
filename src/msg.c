@@ -485,7 +485,9 @@ create_msg (guint16 _uid, char *name)
                                       GTK_XTEXT (msg->outputbuf)->adj);
     msg->inputbuf = gtk_text_view_new ();
 
-    gtkhx_apply_text_style (msg->inputbuf);
+    /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
+	 * the rationale and gtkhx_apply_input_font for the implementation. */
+    gtkhx_apply_input_font (msg->inputbuf);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (msg->inputbuf), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (msg->inputbuf), GTK_WRAP_WORD);
     /* Inner margins so the text isn't clipped by the input frame's
@@ -572,6 +574,7 @@ create_msgwin (guint16 uid, char *name)
     GtkWidget *input_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (input_scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_overflow (input_scroll, GTK_OVERFLOW_VISIBLE);
     gtk_scrolled_window_set_propagate_natural_height (
         GTK_SCROLLED_WINDOW (input_scroll), TRUE);
     gtk_scrolled_window_set_min_content_height (

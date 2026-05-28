@@ -294,6 +294,25 @@ gtkhx_apply_text_style (GtkWidget *w)
 }
 
 void
+gtkhx_apply_input_font (GtkWidget *w)
+{
+    if (!w || !GTK_IS_TEXT_VIEW (w)) {
+        return;
+    }
+    /* gtk_text_view_set_monospace() sets the built-in .monospace CSS
+	 * class which the theme handles natively (usually picks Source Code
+	 * Pro or similar at the theme's UI size). We can't honor the user's
+	 * size pick from Settings this way — but every other mechanism we
+	 * tried (CSS .gtkhx-text class, PangoContext font_description, font
+	 * via GtkTextTag) triggered an ascender-ink clip on newly typed
+	 * glyphs at small sizes (Monospace 9 / 10), and at this point
+	 * monospace-at-theme-size is a strictly better outcome than the
+	 * clip. ASCII-art preservation (the main reason to want monospace)
+	 * still works. */
+    gtk_text_view_set_monospace (GTK_TEXT_VIEW (w), TRUE);
+}
+
+void
 gtkhx_apply_userlist_style (GtkWidget *w)
 {
     if (!w) {

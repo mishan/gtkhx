@@ -369,7 +369,7 @@ reinit_gtktexts (session *sess)
                 gtk_xtext_set_font (GTK_XTEXT (gchat->output), fontname);
                 gtk_xtext_refresh (GTK_XTEXT (gchat->output));
                 if (gchat->input) {
-                    gtkhx_apply_text_style (gchat->input);
+                    gtkhx_apply_input_font (gchat->input);
                 }
                 if (gchat->subject) {
                     gtkhx_apply_text_style (gchat->subject);
@@ -391,7 +391,7 @@ reinit_gtktexts (session *sess)
                 struct msgwin *msg = val;
                 gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
                 gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
-                gtkhx_apply_text_style (msg->inputbuf);
+                gtkhx_apply_input_font (msg->inputbuf);
             }
         }
         g_free (fontname);

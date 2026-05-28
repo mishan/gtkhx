@@ -2142,7 +2142,11 @@ create_chat_window (GtkWidget *widget, gpointer data)
     gtkhx_widget_set_child (inputframe, hbox);
 
     gchat->input = gtk_text_view_new ();
-    gtkhx_apply_text_style (gchat->input);
+    /* Theme monospace via gtk_text_view_set_monospace. We deliberately
+	 * do NOT use the Settings font here — applying it triggered an
+	 * unresolved ascender-ink clip on newly typed glyphs at small
+	 * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
+    gtkhx_apply_input_font (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     {
@@ -2524,7 +2528,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_widget_set_child (inputframe, hbox);
 
     gchat->input = gtk_text_view_new ();
-    gtkhx_apply_text_style (gchat->input);
+    /* See create_chat_window — theme monospace, not the Settings font. */
+    gtkhx_apply_input_font (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     {
@@ -2540,6 +2545,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 	 * input setup for the rationale (rounded-frame clip). */
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
+    /* Same as create_chat_window — see comment there. */
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
     {
