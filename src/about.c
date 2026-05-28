@@ -20,17 +20,10 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <string.h>
-#include "hx.h"
+#include "hx.h"  /* pulls in compat.h, which provides _() */
 #include "about.h"
 #include "gtkhx.h"
 #include "gtkutil.h"
-
-#ifdef HAVE_DCGETTEXT
-#include <libintl.h>
-#define _(string) dgettext (PACKAGE, string)
-#else
-#define _(string) (string)
-#endif
 
 /* Phase 5: keep the GtkHx-original "logo + custom credits" feel
  * (AdwAboutDialog's rigid slot layout was too constraining), but
