@@ -34,6 +34,9 @@
 #include <termios.h>
 #include <ctype.h>
 #include <locale.h>
+#ifdef HAVE_LIBINTL_H
+#include <libintl.h> /* bindtextdomain, bind_textdomain_codeset, textdomain */
+#endif
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
@@ -1045,6 +1048,20 @@ init (int argc, char **argv)
     /* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
 	 * setlocale() itself. */
     setlocale (LC_ALL, "");
+    /* Tell gettext where our message catalogues live and which domain
+	 * the _() macro should look up. Without these calls dgettext()
+	 * either consults the wrong domain ("messages") or searches the
+	 * compiled-in default LOCALEDIR (typically /usr/share/locale on
+	 * glibc), so a binary installed under /usr/local/share/locale sees
+	 * zero translations. PACKAGE and PACKAGE_LOCALE_DIR are both
+	 * defined in config.h via meson; the codeset bind tells libintl to
+	 * hand us UTF-8 regardless of the user's LC_CTYPE so GTK doesn't
+	 * trip over Latin-1 in fr_FR / es_ES locale aliases. */
+#ifdef HAVE_LIBINTL_H
+    bindtextdomain (PACKAGE, PACKAGE_LOCALE_DIR);
+    bind_textdomain_codeset (PACKAGE, "UTF-8");
+    textdomain (PACKAGE);
+#endif
     /* Phase 3.3: gdk_threads_init() is gone in GTK 4 and deprecated since
 	 * GTK 3.6. The worker threads still need a serializing lock against
 	 * the main thread; gtkthreads.c now provides one via GRecMutex +
