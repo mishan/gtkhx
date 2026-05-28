@@ -1,4 +1,4 @@
-# GtkHx French translation.
+# GtkHx Spanish translation.
 # Copyright (C) 2026 Misha Nasledov
 # This file is distributed under the same license as the gtkhx package.
 # Auto-generated machine translation, marked fuzzy for human review.
@@ -11,8 +11,8 @@ msgstr ""
 "POT-Creation-Date: 2026-05-28 11:18-0700\n"
 "PO-Revision-Date: 2026-05-28 18:52+0000\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: French <fr@li.org>\n"
-"Language: fr\n"
+"Language-Team: Spanish <es@li.org>\n"
+"Language: es\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -20,12 +20,12 @@ msgstr ""
 #: src/about.c:96 src/toolbar.c:591
 #, fuzzy
 msgid "About GtkHx"
-msgstr "À propos de GtkHx"
+msgstr "Acerca de GtkHx"
 
 #: src/about.c:147
 #, fuzzy
 msgid "A GTK+ Hotline client"
-msgstr "Un client Hotline GTK+"
+msgstr "Un cliente Hotline GTK+"
 
 #: src/about.c:153
 #, fuzzy
@@ -35,107 +35,107 @@ msgstr "Copyright © 2000–2026 Misha Nasledov"
 #: src/banner.c:240
 #, fuzzy
 msgid "Server banner: URL mode without URL"
-msgstr "Bannière du serveur : mode URL sans URL"
+msgstr "Banner del servidor: modo URL sin URL"
 
 #: src/banner.c:257
 #, fuzzy, c-format
 msgid "Server banner [%s] — loading..."
-msgstr "Bannière du serveur [%s] — chargement..."
+msgstr "Banner del servidor [%s] — cargando..."
 
 #: src/banner.c:371
 #, fuzzy
 msgid "Server banner: URL is not parseable"
-msgstr "Bannière du serveur : URL non analysable"
+msgstr "Banner del servidor: URL no analizable"
 
 #: src/banner.c:406
 #, fuzzy
 msgid "Server banner: fetch failed"
-msgstr "Bannière du serveur : échec du téléchargement"
+msgstr "Banner del servidor: descarga fallida"
 
 #: src/banner.c:416
 #, fuzzy
 msgid "Server banner: HTTP error"
-msgstr "Bannière du serveur : erreur HTTP"
+msgstr "Banner del servidor: error HTTP"
 
 #: src/banner.c:431 src/banner.c:715
 #, fuzzy
 msgid "Server banner: image not decodable"
-msgstr "Bannière du serveur : image non décodable"
+msgstr "Banner del servidor: imagen no decodificable"
 
 #: src/banner.c:499
 #, fuzzy
 msgid "Server banner: empty transfer"
-msgstr "Bannière du serveur : transfert vide"
+msgstr "Banner del servidor: transferencia vacía"
 
 #: src/banner.c:504
 #, fuzzy
 msgid "Server banner: image too large"
-msgstr "Bannière du serveur : image trop grande"
+msgstr "Banner del servidor: imagen demasiado grande"
 
 #: src/banner.c:550
 #, fuzzy
 msgid "Server banner: fetch worker failed to start"
-msgstr "Bannière du serveur : impossible de démarrer le téléchargement"
+msgstr "Banner del servidor: no se pudo iniciar la descarga"
 
 #: src/banner.c:704
 #, fuzzy
 msgid "Server banner: HTXF fetch failed"
-msgstr "Bannière du serveur : échec du téléchargement HTXF"
+msgstr "Banner del servidor: descarga HTXF fallida"
 
 #: src/bookmarks.c:100
 #, fuzzy
 msgid "Bookmark error"
-msgstr "Erreur de marque-page"
+msgstr "Error de marcador"
 
 #: src/bookmarks.c:101 src/gtkutil.c:579 src/msg.c:890
 #, fuzzy
 msgid "_OK"
-msgstr "_OK"
+msgstr "_Aceptar"
 
 #: src/bookmarks.c:270
 #, fuzzy, c-format
 msgid "Could not load bookmark \"%s\". The file may be in the legacy format — pick it from the toolbar's Connect-button dropdown to convert it first."
-msgstr "Impossible de charger le marque-page « %s ». Le fichier est peut-être au format hérité — sélectionnez-le depuis le menu déroulant du bouton Connecter de la barre d'outils pour le convertir d'abord."
+msgstr "No se pudo cargar el marcador «%s». El archivo puede estar en el formato heredado — selecciónelo desde el menú desplegable del botón Conectar de la barra de herramientas para convertirlo primero."
 
 #: src/bookmarks.c:378 src/bookmarks.c:390
 #, fuzzy
 msgid "Bookmark name cannot be empty."
-msgstr "Le nom du marque-page ne peut pas être vide."
+msgstr "El nombre del marcador no puede estar vacío."
 
 #: src/bookmarks.c:420
 #, fuzzy, c-format
 msgid "Rename failed: %s"
-msgstr "Échec du renommage : %s"
+msgstr "Error al renombrar: %s"
 
 #: src/bookmarks.c:457
 #, fuzzy, c-format
 msgid "Save failed: %s. The bookmark was restored to its original name."
-msgstr "Échec de l'enregistrement : %s. Le marque-page a été restauré à son nom d'origine."
+msgstr "Error al guardar: %s. El marcador se restauró a su nombre original."
 
 #: src/bookmarks.c:462
 #, fuzzy, c-format
 msgid "Save failed: %s. The file is now at \"%s\" with the previous contents — rollback also failed (%s)."
-msgstr "Échec de l'enregistrement : %s. Le fichier se trouve maintenant à « %s » avec le contenu précédent — la restauration a également échoué (%s)."
+msgstr "Error al guardar: %s. El archivo está ahora en «%s» con el contenido anterior — la reversión también falló (%s)."
 
 #: src/bookmarks.c:469
 #, fuzzy, c-format
 msgid "Save failed: %s"
-msgstr "Échec de l'enregistrement : %s"
+msgstr "Error al guardar: %s"
 
 #: src/bookmarks.c:547
 #, fuzzy, c-format
 msgid "Delete failed: %s"
-msgstr "Échec de la suppression : %s"
+msgstr "Error al eliminar: %s"
 
 #: src/bookmarks.c:571
 #, fuzzy, c-format
 msgid "Delete the bookmark \"%s\"? This cannot be undone."
-msgstr "Supprimer le marque-page « %s » ? Cette action est irréversible."
+msgstr "¿Eliminar el marcador «%s»? Esta acción no se puede deshacer."
 
 #: src/bookmarks.c:574
 #, fuzzy
 msgid "Delete Bookmark"
-msgstr "Supprimer le marque-page"
+msgstr "Eliminar marcador"
 
 #: src/bookmarks.c:577 src/connect.c:1172 src/files_browser.c:464
 #: src/files_browser.c:848 src/files_browser.c:1480 src/files_browser.c:1607
@@ -144,130 +144,130 @@ msgstr "Supprimer le marque-page"
 #: src/usermod.c:628 src/users.c:824
 #, fuzzy
 msgid "_Cancel"
-msgstr "_Annuler"
+msgstr "_Cancelar"
 
 #: src/bookmarks.c:579 src/files_browser.c:1609
 #, fuzzy
 msgid "_Delete"
-msgstr "_Supprimer"
+msgstr "_Eliminar"
 
 #: src/bookmarks.c:597 src/bookmarks.c:609
 #, fuzzy
 msgid "Off"
-msgstr "Désactivé"
+msgstr "Desactivado"
 
 #: src/bookmarks.c:641
 #, fuzzy
 msgid "Bookmarks"
-msgstr "Marque-pages"
+msgstr "Marcadores"
 
 #: src/bookmarks.c:705
 #, fuzzy
 msgid "New bookmark"
-msgstr "Nouveau marque-page"
+msgstr "Nuevo marcador"
 
 #: src/bookmarks.c:710
 #, fuzzy
 msgid "Delete selected bookmark"
-msgstr "Supprimer le marque-page sélectionné"
+msgstr "Eliminar el marcador seleccionado"
 
 #: src/bookmarks.c:730
 #, fuzzy
 msgid "No Bookmark Selected"
-msgstr "Aucun marque-page sélectionné"
+msgstr "Ningún marcador seleccionado"
 
 #: src/bookmarks.c:733
 #, fuzzy
 msgid "Pick one from the list, or create a new one with the + button."
-msgstr "Choisissez-en un dans la liste, ou créez-en un nouveau avec le bouton +."
+msgstr "Elija uno de la lista, o cree uno nuevo con el botón +."
 
 #: src/bookmarks.c:747
 #, fuzzy
 msgid "Bookmark"
-msgstr "Marque-page"
+msgstr "Marcador"
 
 #: src/bookmarks.c:751 src/chat.c:2409 src/files.c:368 src/files_panel.c:1325
 #: src/plugin.c:153 src/tracker.c:469 src/users.c:975
 #, fuzzy
 msgid "Name"
-msgstr "Nom"
+msgstr "Nombre"
 
 #: src/bookmarks.c:756 src/connect.c:1275 src/connect.c:1288
 #, fuzzy
 msgid "Server"
-msgstr "Serveur"
+msgstr "Servidor"
 
 #: src/bookmarks.c:761
 #, fuzzy
 msgid "Port (blank = 5500)"
-msgstr "Port (vide = 5500)"
+msgstr "Puerto (vacío = 5500)"
 
 #: src/bookmarks.c:766 src/connect.c:1307 src/options.c:2263 src/usermod.c:512
 #: src/usermod.c:641
 #, fuzzy
 msgid "Login"
-msgstr "Identifiant"
+msgstr "Usuario"
 
 #: src/bookmarks.c:771 src/connect.c:1313 src/usermod.c:529
 #, fuzzy
 msgid "Password"
-msgstr "Mot de passe"
+msgstr "Contraseña"
 
 #: src/bookmarks.c:781 src/connect.c:1329
 #, fuzzy
 msgid "Use TLS"
-msgstr "Utiliser TLS"
+msgstr "Usar TLS"
 
 #: src/bookmarks.c:784 src/connect.c:1332
 #, fuzzy
 msgid "Connect to the server's TLS port. Disables HOPE and compression — they're not meaningful over a TLS-encrypted stream."
-msgstr "Se connecter au port TLS du serveur. Désactive HOPE et la compression — ils n'ont pas de sens sur un flux chiffré TLS."
+msgstr "Conectarse al puerto TLS del servidor. Desactiva HOPE y la compresión — no tienen sentido sobre un flujo cifrado con TLS."
 
 #: src/bookmarks.c:791
 #, fuzzy
 msgid "HOPE (encrypted handshake)"
-msgstr "HOPE (poignée de main chiffrée)"
+msgstr "HOPE (handshake cifrado)"
 
 #: src/bookmarks.c:796 src/connect.c:1383
 #, fuzzy
 msgid "Cipher"
-msgstr "Chiffrement"
+msgstr "Cifrado"
 
 #: src/bookmarks.c:811 src/connect.c:1362
 #, fuzzy
 msgid "Compression"
-msgstr "Compression"
+msgstr "Compresión"
 
 #: src/bookmarks.c:832 src/files.c:351 src/usermod.c:483
 #, fuzzy
 msgid "Save"
-msgstr "Enregistrer"
+msgstr "Guardar"
 
 #: src/chat.c:2028 src/chat.c:2169 src/gtkutil.c:467 src/gtkutil.c:511
 #: src/options.c:2772 src/toolbar.c:736
 #, fuzzy
 msgid "Chat"
-msgstr "Discussion"
+msgstr "Chat"
 
 #: src/chat.c:2352
 #, fuzzy
 msgid "invites you to private chat"
-msgstr "vous invite à une discussion privée"
+msgstr "le invita a un chat privado"
 
 #: src/chat.c:2354
 #, fuzzy
 msgid "Chat Invitation"
-msgstr "Invitation à discuter"
+msgstr "Invitación a chat"
 
 #: src/chat.c:2356
 #, fuzzy
 msgid "_Decline"
-msgstr "_Refuser"
+msgstr "_Rechazar"
 
 #: src/chat.c:2358
 #, fuzzy
 msgid "_Join"
-msgstr "_Rejoindre"
+msgstr "_Unirse"
 
 #: src/chat.c:2408 src/users.c:974
 #, fuzzy
@@ -277,47 +277,47 @@ msgstr "UID"
 #: src/chat.c:2430 src/chat.c:2586 src/users.c:548 src/users.c:1083
 #, fuzzy
 msgid "Private Chat"
-msgstr "Discussion privée"
+msgstr "Chat privado"
 
 #: src/chat.c:2548 src/users.c:1063
 #, fuzzy
 msgid "Msg"
-msgstr "Message"
+msgstr "Mensaje"
 
 #: src/chat.c:2559 src/users.c:527 src/users.c:1068
 #, fuzzy
 msgid "Kick"
-msgstr "Expulser"
+msgstr "Expulsar"
 
 #: src/chat.c:2570 src/users.c:1073
 #, fuzzy
 msgid "User Info"
-msgstr "Infos utilisateur"
+msgstr "Info de usuario"
 
 #: src/chat.c:2581 src/users.c:529 src/users.c:1078
 #, fuzzy
 msgid "Ban"
-msgstr "Bannir"
+msgstr "Banear"
 
 #: src/chat.c:2597 src/users.c:536 src/users.c:1088
 #, fuzzy
 msgid "Ignore"
-msgstr "Ignorer"
+msgstr "Ignorar"
 
 #: src/connect.c:632
 #, fuzzy
 msgid "Convert Bookmark"
-msgstr "Convertir le marque-page"
+msgstr "Convertir marcador"
 
 #: src/connect.c:633
 #, fuzzy
 msgid "This bookmark is written in an old GtkHx format. Would you like to convert it to the new format?"
-msgstr "Ce marque-page est écrit dans un ancien format GtkHx. Voulez-vous le convertir au nouveau format ?"
+msgstr "Este marcador está escrito en un formato antiguo de GtkHx. ¿Desea convertirlo al nuevo formato?"
 
 #: src/connect.c:635
 #, fuzzy
 msgid "_No"
-msgstr "_Non"
+msgstr "_No"
 
 #: src/connect.c:637
 #, fuzzy
@@ -327,304 +327,304 @@ msgstr "_Convertir"
 #: src/connect.c:849 src/connect.c:998
 #, fuzzy
 msgid "No such bookmark"
-msgstr "Marque-page introuvable"
+msgstr "Marcador no encontrado"
 
 #: src/connect.c:858 src/connect.c:1007
 #, fuzzy
 msgid "Could not read bookmark"
-msgstr "Impossible de lire le marque-page"
+msgstr "No se pudo leer el marcador"
 
 #: src/connect.c:1071 src/options.c:2257
 #, fuzzy
 msgid "Error"
-msgstr "Erreur"
+msgstr "Error"
 
 #: src/connect.c:1072
 #, fuzzy
 msgid "You must specify a name for this bookmark with at least one character."
-msgstr "Vous devez spécifier un nom d'au moins un caractère pour ce marque-page."
+msgstr "Debe especificar un nombre de al menos un carácter para este marcador."
 
 #: src/connect.c:1169
 #, fuzzy
 msgid "Save Bookmark"
-msgstr "Enregistrer le marque-page"
+msgstr "Guardar marcador"
 
 #: src/connect.c:1170
 #, fuzzy
 msgid "Enter a name for this bookmark."
-msgstr "Entrez un nom pour ce marque-page."
+msgstr "Introduzca un nombre para este marcador."
 
 #: src/connect.c:1174
 #, fuzzy
 msgid "_Save"
-msgstr "_Enregistrer"
+msgstr "_Guardar"
 
 #: src/connect.c:1234 src/connect.c:1254 src/toolbar.c:677
 #, fuzzy
 msgid "Connect"
-msgstr "Connecter"
+msgstr "Conectar"
 
 #: src/connect.c:1249
 #, fuzzy
 msgid "Save Bookmark…"
-msgstr "Enregistrer le marque-page…"
+msgstr "Guardar marcador…"
 
 #: src/connect.c:1278
 #, fuzzy
 msgid "Enter the server address. If you have an account, fill in your login and password below; otherwise leave them blank."
-msgstr "Entrez l'adresse du serveur. Si vous avez un compte, renseignez votre identifiant et votre mot de passe ci-dessous ; sinon, laissez-les vides."
+msgstr "Introduzca la dirección del servidor. Si tiene una cuenta, rellene su usuario y contraseña abajo; de lo contrario, déjelos en blanco."
 
 #: src/connect.c:1294 src/tracker.c:472
 #, fuzzy
 msgid "Port"
-msgstr "Port"
+msgstr "Puerto"
 
 #: src/connect.c:1303
 #, fuzzy
 msgid "Account"
-msgstr "Compte"
+msgstr "Cuenta"
 
 #: src/connect.c:1321
 #, fuzzy
 msgid "Connection"
-msgstr "Connexion"
+msgstr "Conexión"
 
 #: src/connect.c:1342
 #, fuzzy
 msgid "Secure (HOPE)"
-msgstr "Sécurisé (HOPE)"
+msgstr "Seguro (HOPE)"
 
 #: src/connect.c:1345
 #, fuzzy
 msgid "Encrypt and optionally compress the connection"
-msgstr "Chiffrer et éventuellement compresser la connexion"
+msgstr "Cifrar y opcionalmente comprimir la conexión"
 
 #: src/emoji.c:67
 #, fuzzy
 msgid "Insert emoji"
-msgstr "Insérer un emoji"
+msgstr "Insertar emoji"
 
 #: src/files.c:200
 #, fuzzy
 msgid "Unknown"
-msgstr "Inconnu"
+msgstr "Desconocido"
 
 #: src/files.c:226
 #, fuzzy, c-format
 msgid "%s file"
-msgstr "Fichier %s"
+msgstr "Archivo %s"
 
 #: src/files.c:346
 #, fuzzy
 msgid "File Info"
-msgstr "Infos sur le fichier"
+msgstr "Info del archivo"
 
 #: src/files.c:379 src/files.c:382
 #, fuzzy
 msgid "bytes"
-msgstr "octets"
+msgstr "bytes"
 
 #: src/files.c:390
 #, fuzzy
 msgid "Creator"
-msgstr "Créateur"
+msgstr "Creador"
 
 #: src/files.c:392
 #, fuzzy
 msgid "Type"
-msgstr "Type"
+msgstr "Tipo"
 
 #: src/files.c:394 src/files_panel.c:1327
 #, fuzzy
 msgid "Size"
-msgstr "Taille"
+msgstr "Tamaño"
 
 #: src/files.c:396
 #, fuzzy
 msgid "Created"
-msgstr "Créé"
+msgstr "Creado"
 
 #: src/files.c:398 src/files_panel.c:1330
 #, fuzzy
 msgid "Modified"
-msgstr "Modifié"
+msgstr "Modificado"
 
 #: src/files.c:405
 #, fuzzy
 msgid "Comments"
-msgstr "Commentaires"
+msgstr "Comentarios"
 
 #: src/files_browser.c:320
 #, fuzzy
 msgid "Select a single file to preview."
-msgstr "Sélectionnez un seul fichier à prévisualiser."
+msgstr "Seleccione un solo archivo para previsualizar."
 
 #: src/files_browser.c:324
 #, fuzzy
 msgid "Preview is for files, not folders."
-msgstr "L'aperçu est pour les fichiers, pas les dossiers."
+msgstr "La vista previa es para archivos, no carpetas."
 
 #: src/files_browser.c:357
 #, fuzzy
 msgid "Get Info is only available for remote files."
-msgstr "Obtenir les infos n'est disponible que pour les fichiers distants."
+msgstr "Obtener Info solo está disponible para archivos remotos."
 
 #: src/files_browser.c:361
 #, fuzzy
 msgid "Not connected."
-msgstr "Non connecté."
+msgstr "Sin conexión."
 
 #: src/files_browser.c:366
 #, fuzzy
 msgid "Select a single file."
-msgstr "Sélectionnez un seul fichier."
+msgstr "Seleccione un solo archivo."
 
 #: src/files_browser.c:432
 #, fuzzy
 msgid "Rename failed."
-msgstr "Échec du renommage."
+msgstr "Error al renombrar."
 
 #: src/files_browser.c:459
 #, fuzzy, c-format
 msgid "Rename “%s” to:"
-msgstr "Renommer « %s » en :"
+msgstr "Renombrar «%s» a:"
 
 #: src/files_browser.c:460
 #, fuzzy
 msgid "Rename"
-msgstr "Renommer"
+msgstr "Renombrar"
 
 #: src/files_browser.c:466
 #, fuzzy
 msgid "_Rename"
-msgstr "_Renommer"
+msgstr "_Renombrar"
 
 #: src/files_browser.c:522
 #, fuzzy
 msgid "Select a single file to rename."
-msgstr "Sélectionnez un seul fichier à renommer."
+msgstr "Seleccione un solo archivo para renombrar."
 
 #: src/files_browser.c:651 src/files_browser.c:1102 src/files_ops.c:40
 #: src/files_remote_provider.c:122
 #, fuzzy
 msgid "Not connected to a server."
-msgstr "Non connecté à un serveur."
+msgstr "No conectado a ningún servidor."
 
 #: src/files_browser.c:656 src/files_browser.c:1107
 #, fuzzy
 msgid "You don't have permission to move files on the server."
-msgstr "Vous n'avez pas la permission de déplacer des fichiers sur le serveur."
+msgstr "No tiene permiso para mover archivos en el servidor."
 
 #: src/files_browser.c:707
 #, fuzzy
 msgid "Move failed."
-msgstr "Échec du déplacement."
+msgstr "Error al mover."
 
 #: src/files_browser.c:799
 #, fuzzy
 msgid "Select files to move first."
-msgstr "Sélectionnez d'abord les fichiers à déplacer."
+msgstr "Seleccione primero los archivos a mover."
 
 #: src/files_browser.c:819
 #, fuzzy
 msgid "Move only works within one side. Use Copy then Delete to move between local and remote."
-msgstr "Le déplacement ne fonctionne que d'un seul côté. Utilisez Copier puis Supprimer pour déplacer entre local et distant."
+msgstr "Mover solo funciona dentro de un mismo lado. Use Copiar y luego Eliminar para mover entre local y remoto."
 
 #: src/files_browser.c:838
 #, fuzzy, c-format
 msgid "Move “%s” to:"
-msgstr "Déplacer « %s » vers :"
+msgstr "Mover «%s» a:"
 
 #: src/files_browser.c:844
 #, fuzzy
 msgid "Move"
-msgstr "Déplacer"
+msgstr "Mover"
 
 #: src/files_browser.c:850
 #, fuzzy
 msgid "_Move"
-msgstr "_Déplacer"
+msgstr "_Mover"
 
 #: src/files_browser.c:1035
 #, fuzzy
 msgid "Select a file to copy first."
-msgstr "Sélectionnez d'abord un fichier à copier."
+msgstr "Seleccione primero un archivo para copiar."
 
 #: src/files_browser.c:1066
 #, fuzzy, c-format
 msgid "%u queued, %u failed (%s)."
-msgstr "%u en file d'attente, %u en échec (%s)."
+msgstr "%u en cola, %u fallidos (%s)."
 
 #: src/files_browser.c:1478 src/news_browser.c:1860
 #, fuzzy
 msgid "New Folder"
-msgstr "Nouveau dossier"
+msgstr "Nueva carpeta"
 
 #: src/files_browser.c:1478
 #, fuzzy
 msgid "Enter a name for the new folder."
-msgstr "Entrez un nom pour le nouveau dossier."
+msgstr "Introduzca un nombre para la nueva carpeta."
 
 #: src/files_browser.c:1482
 #, fuzzy
 msgid "C_reate"
-msgstr "C_réer"
+msgstr "C_rear"
 
 #: src/files_browser.c:1571
 #, fuzzy, c-format
 msgid "Delete “%s”? This cannot be undone."
-msgstr "Supprimer « %s » ? Cette action est irréversible."
+msgstr "¿Eliminar «%s»? Esta acción no se puede deshacer."
 
 #: src/files_browser.c:1603 src/news_browser.c:1310 src/news_browser.c:1872
 #: src/usermod.c:492
 #, fuzzy
 msgid "Delete"
-msgstr "Supprimer"
+msgstr "Eliminar"
 
 #: src/files_browser.c:1902 src/toolbar.c:727
 #, fuzzy
 msgid "Files"
-msgstr "Fichiers"
+msgstr "Archivos"
 
 #: src/files_browser.c:1950
 #, fuzzy
 msgid "Reload active panel (Ctrl+R)"
-msgstr "Recharger le panneau actif (Ctrl+R)"
+msgstr "Recargar panel activo (Ctrl+R)"
 
 #: src/files_browser.c:1952
 #, fuzzy
 msgid "New folder in active panel (F7, Ctrl+N)"
-msgstr "Nouveau dossier dans le panneau actif (F7, Ctrl+N)"
+msgstr "Nueva carpeta en el panel activo (F7, Ctrl+N)"
 
 #: src/files_browser.c:1954
 #, fuzzy
 msgid "Copy left selection to the right panel"
-msgstr "Copier la sélection de gauche vers le panneau droit"
+msgstr "Copiar selección izquierda al panel derecho"
 
 #: src/files_browser.c:1956
 #, fuzzy
 msgid "Copy right selection to the left panel"
-msgstr "Copier la sélection de droite vers le panneau gauche"
+msgstr "Copiar selección derecha al panel izquierdo"
 
 #: src/files_browser.c:1958
 #, fuzzy
 msgid "Preview selected file (F3, Ctrl+P)"
-msgstr "Aperçu du fichier sélectionné (F3, Ctrl+P)"
+msgstr "Vista previa del archivo seleccionado (F3, Ctrl+P)"
 
 #: src/files_browser.c:1960
 #, fuzzy
 msgid "Get Info for selected file (Ctrl+I)"
-msgstr "Obtenir les infos du fichier sélectionné (Ctrl+I)"
+msgstr "Obtener info del archivo seleccionado (Ctrl+I)"
 
 #: src/files_browser.c:1961
 #, fuzzy
 msgid "Rename selected file (F2)"
-msgstr "Renommer le fichier sélectionné (F2)"
+msgstr "Renombrar el archivo seleccionado (F2)"
 
 #: src/files_browser.c:1964
 #, fuzzy
 msgid "Delete selection in active panel (F8, Delete, Ctrl+D)"
-msgstr "Supprimer la sélection dans le panneau actif (F8, Suppr, Ctrl+D)"
+msgstr "Eliminar selección en el panel activo (F8, Supr, Ctrl+D)"
 
 #: src/files_local_provider.c:134
 #, fuzzy
@@ -634,122 +634,122 @@ msgstr "Local"
 #: src/files_local_provider.c:156
 #, fuzzy
 msgid "No path to list"
-msgstr "Aucun chemin à lister"
+msgstr "Sin ruta para listar"
 
 #: src/files_local_provider.c:172
 #, fuzzy, c-format
 msgid "Can't read %s: %s"
-msgstr "Impossible de lire %s : %s"
+msgstr "No se puede leer %s: %s"
 
 #: src/files_local_provider.c:214
 #, fuzzy
 msgid "Folder"
-msgstr "Dossier"
+msgstr "Carpeta"
 
 #: src/files_local_provider.c:239
 #, fuzzy, c-format
 msgid "Error reading %s: %s"
-msgstr "Erreur de lecture de %s : %s"
+msgstr "Error al leer %s: %s"
 
 #: src/files_ops.c:34
 #, fuzzy
 msgid "Copied."
-msgstr "Copié."
+msgstr "Copiado."
 
 #: src/files_ops.c:36
 #, fuzzy
 msgid "Nothing to copy."
-msgstr "Rien à copier."
+msgstr "Nada que copiar."
 
 #: src/files_ops.c:38
 #, fuzzy
 msgid "No target panel."
-msgstr "Aucun panneau cible."
+msgstr "Sin panel de destino."
 
 #: src/files_ops.c:42
 #, fuzzy
 msgid "You don't have permission for that."
-msgstr "Vous n'avez pas la permission pour cela."
+msgstr "No tiene permiso para eso."
 
 #: src/files_ops.c:44
 #, fuzzy
 msgid "Hotline has no server-side copy. Use Move (F6) to relocate the file, or drag to your local panel first."
-msgstr "Hotline ne dispose pas de copie côté serveur. Utilisez Déplacer (F6) pour déplacer le fichier, ou faites-le glisser d'abord vers votre panneau local."
+msgstr "Hotline no admite copia del lado del servidor. Use Mover (F6) para reubicar el archivo, o arrástrelo primero a su panel local."
 
 #: src/files_ops.c:51
 #, fuzzy
 msgid "Folder transfer not supported here."
-msgstr "Transfert de dossier non pris en charge ici."
+msgstr "Transferencia de carpetas no admitida aquí."
 
 #: src/files_ops.c:53
 #, fuzzy
 msgid "Local copy failed."
-msgstr "Échec de la copie locale."
+msgstr "Error en la copia local."
 
 #: src/files_ops.c:55
 #, fuzzy
 msgid "Copy failed."
-msgstr "Échec de la copie."
+msgstr "Error al copiar."
 
 #: src/files_panel.c:1022
 #, fuzzy
 msgid "Folder is upload-only — drop files here to upload"
-msgstr "Dossier en téléversement uniquement — déposez des fichiers ici pour les téléverser"
+msgstr "La carpeta es solo para subir — suelte archivos aquí para subirlos"
 
 #: src/files_panel.c:1024
 #, fuzzy
 msgid "Can't list this folder."
-msgstr "Impossible de lister ce dossier."
+msgstr "No se puede listar esta carpeta."
 
 #: src/files_panel.c:1039
 #, fuzzy, c-format
 msgid "%u of %u selected"
-msgstr "%u sur %u sélectionné(s)"
+msgstr "%u de %u seleccionado(s)"
 
 #: src/files_panel.c:1272
 #, fuzzy
 msgid "Switch this panel between local filesystem and remote server"
-msgstr "Basculer ce panneau entre le système de fichiers local et le serveur distant"
+msgstr "Alternar este panel entre el sistema de archivos local y el servidor remoto"
 
 #: src/files_panel.c:1281
 #, fuzzy
 msgid "Up one level"
-msgstr "Niveau supérieur"
+msgstr "Subir un nivel"
 
 #: src/files_panel.c:1333
 #, fuzzy
 msgid "Kind"
-msgstr "Genre"
+msgstr "Tipo"
 
 #: src/files_remote_provider.c:134
 #, fuzzy
 msgid "Logging in…"
-msgstr "Connexion en cours…"
+msgstr "Iniciando sesión…"
 
 #: src/files_remote_provider.c:392
 #, fuzzy
 msgid "Remote"
-msgstr "Distant"
+msgstr "Remoto"
 
 #: src/gtkhx.c:1072
 #, fuzzy, c-format
 msgid "User Info: %s (%u)"
-msgstr "Infos utilisateur : %s (%u)"
+msgstr "Info de usuario: %s (%u)"
 
 #: src/gtkhx.c:1583
 #, fuzzy
 msgid "Agreement"
-msgstr "Conditions d'utilisation"
+msgstr "Acuerdo"
 
 #: src/gtkhx.c:1605
 #, fuzzy
 msgid "Agree"
-msgstr "Accepter"
+msgstr "Aceptar"
 
 #: src/gtkhx.c:1609
 #, fuzzy
 msgid "Disagree"
-msgstr "Refuser"
+msgstr "Rechazar"
 
 #: src/gtkhx.c:1873
 #, fuzzy, c-format
@@ -763,14 +763,14 @@ msgstr ""
 msgid ""
 "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
 msgstr ""
-"GtkHx est fourni SANS AUCUNE GARANTIE.\n"
+"GtkHx se distribuye SIN NINGUNA GARANTÍA.\n"
 
 #: src/gtkhx.c:1875
 #, fuzzy, c-format
 msgid ""
 "This is free software, and you are welcome\n"
 msgstr ""
-"Ceci est un logiciel libre, et vous êtes invité\n"
+"Este es software libre, y puede\n"
 
 #: src/gtkhx.c:1876
 #, fuzzy, c-format
@@ -778,7 +778,7 @@ msgid ""
 "to redistribute it under certain conditions.\n"
 "\n"
 msgstr ""
-"à le redistribuer sous certaines conditions.\n"
+"redistribuirlo bajo ciertas condiciones.\n"
 "\n"
 
 #: src/gtkhx.c:1878
@@ -786,7 +786,7 @@ msgstr ""
 msgid ""
 "usage: %s [options]\n"
 msgstr ""
-"usage : %s [options]\n"
+"uso: %s [opciones]\n"
 
 #: src/gtkhx.c:1879
 #, fuzzy, c-format
@@ -795,84 +795,84 @@ msgid ""
 "supported options:\n"
 msgstr ""
 "\n"
-"options disponibles :\n"
+"opciones disponibles:\n"
 
 #: src/gtkhx.c:1880
 #, fuzzy, c-format
 msgid ""
 "\t--help, -h\t\tPrint this help message out.\n"
 msgstr ""
-"\t--help, -h\t\tAfficher ce message d'aide.\n"
+"\t--help, -h\t\tMostrar este mensaje de ayuda.\n"
 
 #: src/gtkhx.c:1881
 #, fuzzy, c-format
 msgid ""
 "\t--server, -s <host>\tConnect to <host>\n"
 msgstr ""
-"\t--server, -s <hôte>\tSe connecter à <hôte>\n"
+"\t--server, -s <host>\tConectarse a <host>\n"
 
 #: src/gtkhx.c:1882
 #, fuzzy, c-format
 msgid ""
 "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
 msgstr ""
-"\t--port, -t <port>\tSe connecter à <hôte> sur <port>. (défaut : 5500)\n"
+"\t--port, -t <puerto>\tConectarse a <host> en <puerto>. (por defecto: 5500)\n"
 
 #: src/gtkhx.c:1884
 #, fuzzy, c-format
 msgid ""
 "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
 msgstr ""
-"\t--login, -l <login>\tUtiliser <login> pour <hôte>. (défaut : guest)\n"
+"\t--login, -l <usuario>\tUsar <usuario> para <host>. (por defecto: guest)\n"
 
 #: src/gtkhx.c:1886
 #, fuzzy, c-format
 msgid ""
 "\t--pass, -p\t\tPrompt for pass of <login>.\n"
 msgstr ""
-"\t--pass, -p\t\tDemander le mot de passe de <login>.\n"
+"\t--pass, -p\t\tSolicitar la contraseña de <usuario>.\n"
 
 #: src/gtkhx.c:1887
 #, fuzzy, c-format
 msgid ""
 "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
 msgstr ""
-"\t--bookmark, -b <nom>\tSe connecter via le marque-page <nom>.\n"
+"\t--bookmark, -b <nombre>\tConectarse usando el marcador <nombre>.\n"
 
 #: src/gtkurl.c:475
 #, fuzzy
 msgid "Open Link in Browser"
-msgstr "Ouvrir le lien dans le navigateur"
+msgstr "Abrir enlace en el navegador"
 
 #: src/gtkurl.c:486
 #, fuzzy
 msgid "Copy Selected Link"
-msgstr "Copier le lien sélectionné"
+msgstr "Copiar enlace seleccionado"
 
 #: src/gtkutil.c:410
 #, fuzzy
 msgid "Connecting to"
-msgstr "Connexion à"
+msgstr "Conectando a"
 
 #: src/gtkutil.c:416 src/toolbar.c:769
 #, fuzzy
 msgid "Not Connected"
-msgstr "Non connecté"
+msgstr "Sin conexión"
 
 #: src/gtkutil.c:421
 #, fuzzy
 msgid "Disconnected from"
-msgstr "Déconnecté de"
+msgstr "Desconectado de"
 
 #: src/gtkutil.c:427
 #, fuzzy
 msgid "Connected to"
-msgstr "Connecté à"
+msgstr "Conectado a"
 
 #: src/gtkutil.c:431
 #, fuzzy
 msgid "Logged in to"
-msgstr "Connecté à"
+msgstr "Sesión iniciada en"
 
 #: src/gtkutil.c:457 src/gtkutil.c:520
 #, fuzzy
@@ -883,19 +883,19 @@ msgstr "GtkHx"
 #: src/toolbar.c:716
 #, fuzzy
 msgid "News"
-msgstr "Nouvelles"
+msgstr "Noticias"
 
 #: src/gtkutil.c:472 src/gtkutil.c:514 src/toolbar.c:732 src/tracker.c:470
 #: src/users.c:987 src/users.c:1147
 #, fuzzy
 msgid "Users"
-msgstr "Utilisateurs"
+msgstr "Usuarios"
 
 #: src/gtkutil.c:477 src/gtkutil.c:517 src/tasks.c:903 src/tasks.c:955
 #: src/toolbar.c:740
 #, fuzzy
 msgid "Tasks"
-msgstr "Tâches"
+msgstr "Tareas"
 
 #: src/msg.c:353 src/toolbar.c:592 src/users.c:506
 #, fuzzy
@@ -905,147 +905,147 @@ msgstr "Admin"
 #: src/msg.c:353 src/users.c:506
 #, fuzzy
 msgid "Guest"
-msgstr "Invité"
+msgstr "Invitado"
 
 #: src/msg.c:354 src/users.c:507
 #, fuzzy
 msgid " (Away)"
-msgstr " (Absent)"
+msgstr " (Ausente)"
 
 #: src/msg.c:880
 #, fuzzy, c-format
 msgid ""
 "broadcast: %s\n"
 msgstr ""
-"diffusion : %s\n"
+"difusión: %s\n"
 
 #: src/msg.c:889 src/toolbar.c:202 src/toolbar.c:751
 #, fuzzy
 msgid "Broadcast"
-msgstr "Diffusion"
+msgstr "Difundir"
 
 #: src/network.c:220 src/toolbar.c:310
 #, fuzzy
 msgid "connection closed"
-msgstr "connexion fermée"
+msgstr "conexión cerrada"
 
 #: src/network.c:950
 #, fuzzy
 msgid "failed"
-msgstr "échec"
+msgstr "fallido"
 
 #: src/network.c:989
 #, fuzzy
 msgid "reading server magic"
-msgstr "lecture du magic du serveur"
+msgstr "leyendo magic del servidor"
 
 #: src/network.c:999
 #, fuzzy
 msgid "invalid hotline server"
-msgstr "serveur hotline invalide"
+msgstr "servidor hotline no válido"
 
 #: src/network.c:1016
 #, fuzzy
 msgid "writing client magic"
-msgstr "écriture du magic client"
+msgstr "escribiendo magic del cliente"
 
 #: src/network.c:1041
 #, fuzzy
 msgid "connect"
-msgstr "connexion"
+msgstr "conectar"
 
 #: src/network.c:1050
 #, fuzzy, c-format
 msgid ""
 "connected to %s\n"
 msgstr ""
-"connecté à %s\n"
+"conectado a %s\n"
 
 #: src/network.c:1077
 #, fuzzy
 msgid "remote address"
-msgstr "adresse distante"
+msgstr "dirección remota"
 
 #: src/network.c:1218
 #, fuzzy
 msgid "building LOGIN packet"
-msgstr "construction du paquet LOGIN"
+msgstr "construyendo paquete LOGIN"
 
 #: src/network.c:1651
 #, fuzzy, c-format
 msgid ""
 "connecting to %s (TLS)\n"
 msgstr ""
-"connexion à %s (TLS)\n"
+"conectando a %s (TLS)\n"
 
 #: src/network.c:1652
 #, fuzzy, c-format
 msgid ""
 "connecting to %s\n"
 msgstr ""
-"connexion à %s\n"
+"conectando a %s\n"
 
 #: src/network.c:2072 src/network.c:2100 src/network.c:2126
 #, fuzzy, c-format
 msgid ""
 "tracker: %s: %s\n"
 msgstr ""
-"tracker : %s : %s\n"
+"tracker: %s: %s\n"
 
 #: src/network.c:2073
 #, fuzzy
 msgid "connect failed"
-msgstr "échec de connexion"
+msgstr "conexión fallida"
 
 #: src/network.c:2101
 #, fuzzy
 msgid "magic write failed"
-msgstr "échec d'écriture du magic"
+msgstr "falló la escritura del magic"
 
 #: src/news.c:152
 #, fuzzy
 msgid "No results"
-msgstr "Aucun résultat"
+msgstr "Sin resultados"
 
 #: src/news.c:334
 #, fuzzy
 msgid "Previous match"
-msgstr "Correspondance précédente"
+msgstr "Coincidencia anterior"
 
 #: src/news.c:340
 #, fuzzy
 msgid "Next match"
-msgstr "Correspondance suivante"
+msgstr "Siguiente coincidencia"
 
 #: src/news.c:561 src/news.c:662
 #, fuzzy
 msgid "Post News"
-msgstr "Publier des nouvelles"
+msgstr "Publicar noticia"
 
 #: src/news.c:584 src/news_browser.c:1590
 #, fuzzy
 msgid "_Post"
-msgstr "_Publier"
+msgstr "_Publicar"
 
 #: src/news.c:665
 #, fuzzy
 msgid "Reload News"
-msgstr "Recharger les nouvelles"
+msgstr "Recargar noticias"
 
 #: src/news.c:667
 #, fuzzy
 msgid "Find in News (Ctrl+F)"
-msgstr "Rechercher dans les nouvelles (Ctrl+F)"
+msgstr "Buscar en noticias (Ctrl+F)"
 
 #: src/news_browser.c:932 src/news_browser.c:1973
 #, fuzzy
 msgid "Select a post in the tree to view it here."
-msgstr "Sélectionnez un message dans l'arborescence pour l'afficher ici."
+msgstr "Seleccione una publicación en el árbol para verla aquí."
 
 #: src/news_browser.c:939 src/news_browser.c:1506
 #, fuzzy
 msgid "(no subject)"
-msgstr "(sans objet)"
+msgstr "(sin asunto)"
 
 #: src/news_browser.c:943
 #, fuzzy, c-format
@@ -1055,127 +1055,127 @@ msgstr "%s — %s"
 #: src/news_browser.c:956
 #, fuzzy
 msgid "Loading…"
-msgstr "Chargement…"
+msgstr "Cargando…"
 
 #: src/news_browser.c:1162
 #, fuzzy
 msgid "New News Folder"
-msgstr "Nouveau dossier de nouvelles"
+msgstr "Nueva carpeta de noticias"
 
 #: src/news_browser.c:1163
 #, fuzzy
 msgid "Enter a name for the new news folder."
-msgstr "Entrez un nom pour le nouveau dossier de nouvelles."
+msgstr "Introduzca un nombre para la nueva carpeta de noticias."
 
 #: src/news_browser.c:1164
 #, fuzzy
 msgid "C_reate Folder"
-msgstr "C_réer le dossier"
+msgstr "C_rear carpeta"
 
 #: src/news_browser.c:1166
 #, fuzzy
 msgid "New News Category"
-msgstr "Nouvelle catégorie de nouvelles"
+msgstr "Nueva categoría de noticias"
 
 #: src/news_browser.c:1167
 #, fuzzy
 msgid "Enter a name for the new news category."
-msgstr "Entrez un nom pour la nouvelle catégorie de nouvelles."
+msgstr "Introduzca un nombre para la nueva categoría de noticias."
 
 #: src/news_browser.c:1168
 #, fuzzy
 msgid "C_reate Category"
-msgstr "C_réer la catégorie"
+msgstr "C_rear categoría"
 
 #: src/news_browser.c:1294
 #, fuzzy, c-format
 msgid "Delete the folder “%s” and all its contents?"
-msgstr "Supprimer le dossier « %s » et tout son contenu ?"
+msgstr "¿Eliminar la carpeta «%s» y todo su contenido?"
 
 #: src/news_browser.c:1295
 #, fuzzy
 msgid "_Delete Folder"
-msgstr "_Supprimer le dossier"
+msgstr "_Eliminar carpeta"
 
 #: src/news_browser.c:1298
 #, fuzzy, c-format
 msgid "Delete the category “%s” and all its posts?"
-msgstr "Supprimer la catégorie « %s » et tous ses messages ?"
+msgstr "¿Eliminar la categoría «%s» y todas sus publicaciones?"
 
 #: src/news_browser.c:1299
 #, fuzzy
 msgid "_Delete Category"
-msgstr "_Supprimer la catégorie"
+msgstr "_Eliminar categoría"
 
 #: src/news_browser.c:1302
 #, fuzzy, c-format
 msgid "Delete the post “%s”?"
-msgstr "Supprimer le message « %s » ?"
+msgstr "¿Eliminar la publicación «%s»?"
 
 #: src/news_browser.c:1303
 #, fuzzy
 msgid "_Delete Post"
-msgstr "_Supprimer le message"
+msgstr "_Eliminar publicación"
 
 #: src/news_browser.c:1493
 #, fuzzy, c-format
 msgid "Replying to %s — %s"
-msgstr "Réponse à %s — %s"
+msgstr "Respondiendo a %s — %s"
 
 #: src/news_browser.c:1542
 #, fuzzy
 msgid "(original post body not loaded — open the post first to fetch it)"
-msgstr "(corps du message original non chargé — ouvrez d'abord le message pour le récupérer)"
+msgstr "(cuerpo de la publicación original no cargado — abra la publicación primero para obtenerlo)"
 
 #: src/news_browser.c:1577 src/news_browser.c:1869
 #, fuzzy
 msgid "Reply"
-msgstr "Répondre"
+msgstr "Responder"
 
 #: src/news_browser.c:1577 src/news_browser.c:1866
 #, fuzzy
 msgid "New Post"
-msgstr "Nouveau message"
+msgstr "Nueva publicación"
 
 #: src/news_browser.c:1615
 #, fuzzy
 msgid "Subject:"
-msgstr "Sujet :"
+msgstr "Asunto:"
 
 #: src/news_browser.c:1832
 #, fuzzy
 msgid "Threaded News"
-msgstr "Nouvelles avec fil de discussion"
+msgstr "Noticias con hilos"
 
 #: src/news_browser.c:1857
 #, fuzzy
 msgid "Refresh"
-msgstr "Actualiser"
+msgstr "Actualizar"
 
 #: src/news_browser.c:1863
 #, fuzzy
 msgid "New Category"
-msgstr "Nouvelle catégorie"
+msgstr "Nueva categoría"
 
 #: src/options.c:1337
 #, fuzzy
 msgid "Nickname color"
-msgstr "Couleur du pseudonyme"
+msgstr "Color del apodo"
 
 #: src/options.c:1340
 #, fuzzy
 msgid "Optional RGB color shown on servers that support the Colored-Nicknames extension"
-msgstr "Couleur RVB optionnelle affichée sur les serveurs prenant en charge l'extension Colored-Nicknames"
+msgstr "Color RGB opcional mostrado en servidores que admiten la extensión Colored-Nicknames"
 
 #: src/options.c:1366
 #, fuzzy
 msgid "Clear"
-msgstr "Effacer"
+msgstr "Limpiar"
 
 #: src/options.c:2084
 #, fuzzy
 msgid "Browse Fonts"
-msgstr "Parcourir les polices"
+msgstr "Examinar fuentes"
 
 #: src/options.c:2161 src/options.c:2779
 #, fuzzy
@@ -1185,543 +1185,543 @@ msgstr "Trackers"
 #: src/options.c:2163
 #, fuzzy
 msgid "Servers polled when the Tracker window opens"
-msgstr "Serveurs interrogés à l'ouverture de la fenêtre Tracker"
+msgstr "Servidores consultados al abrir la ventana de Tracker"
 
 #: src/options.c:2180
 #, fuzzy
 msgid "Address:"
-msgstr "Adresse :"
+msgstr "Dirección:"
 
 #: src/options.c:2189
 #, fuzzy
 msgid "Add"
-msgstr "Ajouter"
+msgstr "Añadir"
 
 #: src/options.c:2192
 #, fuzzy
 msgid "Remove"
-msgstr "Supprimer"
+msgstr "Quitar"
 
 #: src/options.c:2220
 #, fuzzy
 msgid "Search"
-msgstr "Rechercher"
+msgstr "Buscar"
 
 #: src/options.c:2224
 #, fuzzy
 msgid "Case-sensitive tracker search"
-msgstr "Recherche sensible à la casse dans le tracker"
+msgstr "Búsqueda sensible a mayúsculas en el tracker"
 
 #: src/options.c:2243
 #, fuzzy
 msgid "Sounds"
-msgstr "Sons"
+msgstr "Sonidos"
 
 #: src/options.c:2246
 #, fuzzy
 msgid "Play sounds"
-msgstr "Lire les sons"
+msgstr "Reproducir sonidos"
 
 #: src/options.c:2247
 #, fuzzy
 msgid "Master switch for chat and transfer alerts"
-msgstr "Interrupteur principal pour les alertes de discussion et de transfert"
+msgstr "Interruptor maestro para alertas de chat y transferencia"
 
 #: src/options.c:2251 src/options.c:2547
 #, fuzzy
 msgid "Events"
-msgstr "Événements"
+msgstr "Eventos"
 
 #: src/options.c:2253
 #, fuzzy
 msgid "Chat invitation"
-msgstr "Invitation à discuter"
+msgstr "Invitación a chat"
 
 #: src/options.c:2255
 #, fuzzy
 msgid "Chat message"
-msgstr "Message de discussion"
+msgstr "Mensaje de chat"
 
 #: src/options.c:2259
 #, fuzzy
 msgid "Transfer complete"
-msgstr "Transfert terminé"
+msgstr "Transferencia completada"
 
 #: src/options.c:2261
 #, fuzzy
 msgid "Join"
-msgstr "Arrivée"
+msgstr "Entrada"
 
 #: src/options.c:2265 src/options.c:2552
 #, fuzzy
 msgid "Private message"
-msgstr "Message privé"
+msgstr "Mensaje privado"
 
 #: src/options.c:2267
 #, fuzzy
 msgid "News post"
-msgstr "Nouveau message"
+msgstr "Nueva publicación"
 
 #: src/options.c:2269
 #, fuzzy
 msgid "Leave"
-msgstr "Départ"
+msgstr "Salida"
 
 #: src/options.c:2285
 #, fuzzy
 msgid "Chat output"
-msgstr "Sortie de discussion"
+msgstr "Salida de chat"
 
 #: src/options.c:2288
 #, fuzzy
 msgid "Show timestamps"
-msgstr "Afficher les horodatages"
+msgstr "Mostrar marcas de tiempo"
 
 #: src/options.c:2290
 #, fuzzy
 msgid "Word wrap"
-msgstr "Retour à la ligne automatique"
+msgstr "Ajuste de línea"
 
 #: src/options.c:2293
 #, fuzzy
 msgid "Scrollback lines"
-msgstr "Lignes d'historique"
+msgstr "Líneas de historial"
 
 #: src/options.c:2294
 #, fuzzy
 msgid "0 keeps unlimited scrollback"
-msgstr "0 conserve un historique illimité"
+msgstr "0 mantiene historial ilimitado"
 
 #: src/options.c:2303
 #, fuzzy
 msgid "Timestamp format"
-msgstr "Format d'horodatage"
+msgstr "Formato de marca de tiempo"
 
 #: src/options.c:2305
 #, fuzzy
 msgid "strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` for the full list of conversion specifiers."
-msgstr "Chaîne de format strftime(3). Par défaut : « [%H:%M:%S] ». Consultez « man 3 strftime » pour la liste complète des spécificateurs de conversion."
+msgstr "Cadena de formato strftime(3). Por defecto: «[%H:%M:%S] ». Consulte «man 3 strftime» para la lista completa de especificadores."
 
 #: src/options.c:2309
 #, fuzzy
 msgid "Format"
-msgstr "Format"
+msgstr "Formato"
 
 #: src/options.c:2319
 #, fuzzy
 msgid "Highlight"
-msgstr "Surlignage"
+msgstr "Resaltar"
 
 #: src/options.c:2321
 #, fuzzy
 msgid "Comma-separated words to highlight in chat (in addition to your own nick). Matches are case-insensitive at word boundaries."
-msgstr "Mots séparés par des virgules à surligner dans la discussion (en plus de votre propre pseudonyme). Les correspondances sont insensibles à la casse aux limites des mots."
+msgstr "Palabras separadas por comas para resaltar en el chat (además de su propio apodo). Las coincidencias son insensibles a mayúsculas en los límites de palabra."
 
 #: src/options.c:2325
 #, fuzzy
 msgid "Words"
-msgstr "Mots"
+msgstr "Palabras"
 
 #: src/options.c:2338
 #, fuzzy
 msgid "Chat history"
-msgstr "Historique de discussion"
+msgstr "Historial de chat"
 
 #: src/options.c:2340
 #, fuzzy
 msgid "Servers that implement the chat-history extension (e.g. Janus) replay recent chat to you on login. 0 disables the initial pull; the \"Load older messages\" link in chat still works to fetch on demand."
-msgstr "Les serveurs qui implémentent l'extension chat-history (par exemple Janus) vous rejouent les discussions récentes à la connexion. 0 désactive la récupération initiale ; le lien « Charger les messages plus anciens » dans la discussion fonctionne toujours pour récupérer à la demande."
+msgstr "Los servidores que implementan la extensión chat-history (por ejemplo Janus) le reproducen el chat reciente al iniciar sesión. 0 desactiva la descarga inicial; el enlace «Cargar mensajes anteriores» en el chat sigue funcionando para obtenerlos a demanda."
 
 #: src/options.c:2348
 #, fuzzy
 msgid "Initial messages to fetch"
-msgstr "Messages initiaux à récupérer"
+msgstr "Mensajes iniciales a obtener"
 
 #: src/options.c:2349
 #, fuzzy
 msgid "Also used as the page size for \"Load older messages\""
-msgstr "Également utilisé comme taille de page pour « Charger les messages plus anciens »"
+msgstr "También usado como tamaño de página para «Cargar mensajes anteriores»"
 
 #: src/options.c:2356 src/options.c:2360
 #, fuzzy
 msgid "Font"
-msgstr "Police"
+msgstr "Fuente"
 
 #: src/options.c:2358
 #, fuzzy
 msgid "Pango font description, e.g. \"Monospace 11\""
-msgstr "Description de police Pango, par exemple « Monospace 11 »"
+msgstr "Descripción de fuente Pango, por ejemplo «Monospace 11»"
 
 #: src/options.c:2364
 #, fuzzy
 msgid "Browse"
-msgstr "Parcourir"
+msgstr "Examinar"
 
 #: src/options.c:2373 src/options.c:2588 src/options.c:2631
 #, fuzzy
 msgid "Behavior"
-msgstr "Comportement"
+msgstr "Comportamiento"
 
 #: src/options.c:2376
 #, fuzzy
 msgid "Show join / leave in chat"
-msgstr "Afficher les arrivées / départs dans la discussion"
+msgstr "Mostrar entradas / salidas en el chat"
 
 #: src/options.c:2379
 #, fuzzy
 msgid "Old-style nick completion"
-msgstr "Complétion de pseudo à l'ancienne"
+msgstr "Completado de apodo al estilo antiguo"
 
 #: src/options.c:2380
 #, fuzzy
 msgid "Match against the most recently typed prefix instead of all users"
-msgstr "Correspondance avec le préfixe le plus récemment tapé plutôt qu'avec tous les utilisateurs"
+msgstr "Coincidir con el prefijo escrito más recientemente en lugar de con todos los usuarios"
 
 #: src/options.c:2393
 #, fuzzy
 msgid "Auto Copy Behavior"
-msgstr "Comportement de copie automatique"
+msgstr "Comportamiento de copia automática"
 
 #: src/options.c:2396
 #, fuzzy
 msgid "Drag-select in chat / news / private message text to populate the clipboard. Ctrl-V or middle-click pastes the selection elsewhere."
-msgstr "La sélection par glissement dans le texte de discussion / nouvelles / messages privés remplit le presse-papiers. Ctrl-V ou clic milieu colle la sélection ailleurs."
+msgstr "La selección con arrastre en el texto de chat / noticias / mensajes privados rellena el portapapeles. Ctrl-V o clic del medio pega la selección en otro lugar."
 
 #: src/options.c:2402
 #, fuzzy
 msgid "Automatically copy selected text"
-msgstr "Copier automatiquement le texte sélectionné"
+msgstr "Copiar automáticamente el texto seleccionado"
 
 #: src/options.c:2406
 #, fuzzy
 msgid "Automatically include timestamps"
-msgstr "Inclure automatiquement les horodatages"
+msgstr "Incluir automáticamente las marcas de tiempo"
 
 #: src/options.c:2410
 #, fuzzy
 msgid "Automatically include color information"
-msgstr "Inclure automatiquement les informations de couleur"
+msgstr "Incluir automáticamente la información de color"
 
 #: src/options.c:2441 src/usermod.c:523
 #, fuzzy
 msgid "Display name"
-msgstr "Nom d'affichage"
+msgstr "Nombre mostrado"
 
 #: src/options.c:2443
 #, fuzzy
 msgid "Your name"
-msgstr "Votre nom"
+msgstr "Su nombre"
 
 #: src/options.c:2448
 #, fuzzy
 msgid "Identity icon"
-msgstr "Icône d'identité"
+msgstr "Icono de identidad"
 
 #: src/options.c:2451
 #, fuzzy
 msgid "Icon ID"
-msgstr "ID d'icône"
+msgstr "ID de icono"
 
 #: src/options.c:2452
 #, fuzzy
 msgid "Numeric ID from the loaded icon resource files"
-msgstr "ID numérique des fichiers de ressources d'icônes chargés"
+msgstr "ID numérico de los archivos de recursos de iconos cargados"
 
 #: src/options.c:2457
 #, fuzzy
 msgid "Available icons"
-msgstr "Icônes disponibles"
+msgstr "Iconos disponibles"
 
 #: src/options.c:2459
 #, fuzzy
 msgid "Click an entry to copy its ID into the field above"
-msgstr "Cliquez sur une entrée pour copier son ID dans le champ ci-dessus"
+msgstr "Haga clic en una entrada para copiar su ID al campo de arriba"
 
 #: src/options.c:2549
 #, fuzzy
 msgid "Show a desktop notification when these events happen."
-msgstr "Afficher une notification de bureau lorsque ces événements se produisent."
+msgstr "Mostrar una notificación de escritorio cuando ocurran estos eventos."
 
 #: src/options.c:2553
 #, fuzzy
 msgid "Someone sends you a 1-to-1 message"
-msgstr "Quelqu'un vous envoie un message individuel"
+msgstr "Alguien le envía un mensaje individual"
 
 #: src/options.c:2556
 #, fuzzy
 msgid "Private chat invitation"
-msgstr "Invitation à discussion privée"
+msgstr "Invitación a chat privado"
 
 #: src/options.c:2557
 #, fuzzy
 msgid "Someone invites you to a private chat"
-msgstr "Quelqu'un vous invite à une discussion privée"
+msgstr "Alguien le invita a un chat privado"
 
 #: src/options.c:2561
 #, fuzzy
 msgid "Mention in public chat"
-msgstr "Mention en discussion publique"
+msgstr "Mención en chat público"
 
 #: src/options.c:2562
 #, fuzzy
 msgid "Your name or a highlight word appears in a chat message"
-msgstr "Votre nom ou un mot surligné apparaît dans un message de discussion"
+msgstr "Su nombre o una palabra resaltada aparece en un mensaje de chat"
 
 #: src/options.c:2566
 #, fuzzy
 msgid "Mention in private chat"
-msgstr "Mention en discussion privée"
+msgstr "Mención en chat privado"
 
 #: src/options.c:2567
 #, fuzzy
 msgid "Your name or a highlight word appears in a private chat"
-msgstr "Votre nom ou un mot surligné apparaît dans une discussion privée"
+msgstr "Su nombre o una palabra resaltada aparece en un chat privado"
 
 #: src/options.c:2570
 #, fuzzy
 msgid "Every public chat message"
-msgstr "Chaque message de discussion publique"
+msgstr "Cada mensaje de chat público"
 
 #: src/options.c:2571
 #, fuzzy
 msgid "Noisy — only useful on quiet servers"
-msgstr "Bruyant — utile uniquement sur les serveurs calmes"
+msgstr "Ruidoso — solo útil en servidores tranquilos"
 
 #: src/options.c:2574
 #, fuzzy
 msgid "Every private chat message"
-msgstr "Chaque message de discussion privée"
+msgstr "Cada mensaje de chat privado"
 
 #: src/options.c:2576
 #, fuzzy
 msgid "New news post"
-msgstr "Nouvelle publication"
+msgstr "Nueva noticia"
 
 #: src/options.c:2579
 #, fuzzy
 msgid "File transfer complete"
-msgstr "Transfert de fichier terminé"
+msgstr "Transferencia de archivo completada"
 
 #: src/options.c:2582
 #, fuzzy
 msgid "Server broadcast"
-msgstr "Diffusion du serveur"
+msgstr "Difusión del servidor"
 
 #: src/options.c:2583
 #, fuzzy
 msgid "Admin-issued announcement to every user"
-msgstr "Annonce administrative à tous les utilisateurs"
+msgstr "Anuncio administrativo a todos los usuarios"
 
 #: src/options.c:2592
 #, fuzzy
 msgid "Don't notify when the relevant window is focused"
-msgstr "Ne pas notifier lorsque la fenêtre pertinente est active"
+msgstr "No notificar cuando la ventana relevante esté activa"
 
 #: src/options.c:2593
 #, fuzzy
 msgid "If a chat or private message window is already active, don't pop a notification on top of it"
-msgstr "Si une fenêtre de discussion ou de message privé est déjà active, ne pas afficher de notification par-dessus"
+msgstr "Si una ventana de chat o mensaje privado ya está activa, no mostrar una notificación encima"
 
 #: src/options.c:2601
 #, fuzzy
 msgid "Mention Words"
-msgstr "Mots de mention"
+msgstr "Palabras de mención"
 
 #: src/options.c:2603
 #, fuzzy
 msgid "Comma-separated. Your nickname is always matched in addition to this list. The same list drives chat message highlighting."
-msgstr "Séparés par des virgules. Votre pseudonyme correspond toujours en plus de cette liste. La même liste pilote le surlignage des messages."
+msgstr "Separadas por comas. Su apodo siempre coincide además de esta lista. La misma lista controla el resaltado de mensajes de chat."
 
 #: src/options.c:2607
 #, fuzzy
 msgid "Highlight words"
-msgstr "Mots surlignés"
+msgstr "Palabras resaltadas"
 
 #: src/options.c:2622
 #, fuzzy
 msgid "Auto Reply"
-msgstr "Réponse automatique"
+msgstr "Respuesta automática"
 
 #: src/options.c:2625
 #, fuzzy
 msgid "Enable auto reply"
-msgstr "Activer la réponse automatique"
+msgstr "Activar respuesta automática"
 
 #: src/options.c:2627
 #, fuzzy
 msgid "Reply message"
-msgstr "Message de réponse"
+msgstr "Mensaje de respuesta"
 
 #: src/options.c:2635
 #, fuzzy
 msgid "Show private messages at back"
-msgstr "Afficher les messages privés en arrière-plan"
+msgstr "Mostrar mensajes privados en segundo plano"
 
 #: src/options.c:2636
 #, fuzzy
 msgid "Don't raise the chat window when a private message arrives"
-msgstr "Ne pas faire apparaître la fenêtre de discussion à l'arrivée d'un message privé"
+msgstr "No elevar la ventana de chat cuando llegue un mensaje privado"
 
 #: src/options.c:2640
 #, fuzzy
 msgid "Queue file transfers"
-msgstr "Mettre les transferts en file d'attente"
+msgstr "Poner transferencias en cola"
 
 #: src/options.c:2641
 #, fuzzy
 msgid "Run downloads one at a time instead of in parallel"
-msgstr "Exécuter les téléchargements un à la fois au lieu de les paralléliser"
+msgstr "Ejecutar descargas una a una en lugar de en paralelo"
 
 #: src/options.c:2657
 #, fuzzy
 msgid "Follow system"
-msgstr "Suivre le système"
+msgstr "Seguir al sistema"
 
 #: src/options.c:2658
 #, fuzzy
 msgid "Light"
-msgstr "Clair"
+msgstr "Claro"
 
 #: src/options.c:2659
 #, fuzzy
 msgid "Dark"
-msgstr "Sombre"
+msgstr "Oscuro"
 
 #: src/options.c:2662
 #, fuzzy
 msgid "Appearance"
-msgstr "Apparence"
+msgstr "Apariencia"
 
 #: src/options.c:2665
 #, fuzzy
 msgid "Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
-msgstr "Schéma de couleurs. « Suivre le système » suit la préférence clair/sombre du bureau."
+msgstr "Esquema de colores. «Seguir al sistema» rastrea la preferencia claro/oscuro del escritorio."
 
 #: src/options.c:2669
 #, fuzzy
 msgid "Theme"
-msgstr "Thème"
+msgstr "Tema"
 
 #: src/options.c:2678
 #, fuzzy
 msgid "Paths"
-msgstr "Chemins"
+msgstr "Rutas"
 
 #: src/options.c:2680
 #, fuzzy
 msgid "Download directory"
-msgstr "Répertoire de téléchargement"
+msgstr "Directorio de descargas"
 
 #: src/options.c:2692
 #, fuzzy
 msgid "System Integration"
-msgstr "Intégration système"
+msgstr "Integración con el sistema"
 
 #: src/options.c:2695
 #, fuzzy
 msgid "Show tray icon"
-msgstr "Afficher l'icône de zone de notification"
+msgstr "Mostrar icono en bandeja"
 
 #: src/options.c:2696
 #, fuzzy
 msgid "Display a status icon in the system tray. Closing the main window hides to tray; click the icon to toggle GtkHx's windows."
-msgstr "Afficher une icône d'état dans la zone de notification. Fermer la fenêtre principale la masque dans la zone de notification ; cliquez sur l'icône pour afficher/masquer les fenêtres de GtkHx."
+msgstr "Mostrar un icono de estado en la bandeja del sistema. Cerrar la ventana principal la oculta en la bandeja; haga clic en el icono para mostrar/ocultar las ventanas de GtkHx."
 
 #: src/options.c:2753
 #, fuzzy
 msgid "GtkHx Preferences"
-msgstr "Préférences GtkHx"
+msgstr "Preferencias de GtkHx"
 
 #: src/options.c:2768
 #, fuzzy
 msgid "General"
-msgstr "Général"
+msgstr "General"
 
 #: src/options.c:2770 src/usermod.c:508
 #, fuzzy
 msgid "Identity"
-msgstr "Identité"
+msgstr "Identidad"
 
 #: src/options.c:2774
 #, fuzzy
 msgid "Sound"
-msgstr "Son"
+msgstr "Sonido"
 
 #: src/options.c:2776
 #, fuzzy
 msgid "Notifications"
-msgstr "Notifications"
+msgstr "Notificaciones"
 
 #: src/options.c:2781
 #, fuzzy
 msgid "Misc"
-msgstr "Divers"
+msgstr "Misc"
 
 #: src/plugin.c:96
 #, fuzzy
 msgid "GtkHx - Select Plugin"
-msgstr "GtkHx — Sélectionner un greffon"
+msgstr "GtkHx — Seleccionar complemento"
 
 #: src/plugin.c:154 src/tracker.c:473
 #, fuzzy
 msgid "Description"
-msgstr "Description"
+msgstr "Descripción"
 
 #: src/plugin.c:161
 #, fuzzy
 msgid "GtkHx - Plugins"
-msgstr "GtkHx — Greffons"
+msgstr "GtkHx — Complementos"
 
 #: src/plugin.c:165
 #, fuzzy
 msgid "Load"
-msgstr "Charger"
+msgstr "Cargar"
 
 #: src/plugin.c:168
 #, fuzzy
 msgid "Unload"
-msgstr "Décharger"
+msgstr "Descargar"
 
 #: src/plugin.c:173
 #, fuzzy
 msgid "Close"
-msgstr "Fermer"
+msgstr "Cerrar"
 
 #: src/plugin.c:350
 #, fuzzy
 msgid "Loading"
-msgstr "Chargement"
+msgstr "Cargando"
 
 #: src/plugin.c:526
 #, fuzzy
 msgid "Could not load plugin: "
-msgstr "Impossible de charger le greffon : "
+msgstr "No se pudo cargar el complemento: "
 
 #: src/rcv.c:556
 #, fuzzy, c-format
 msgid ""
 "join: %s\n"
 msgstr ""
-"arrivée : %s\n"
+"entrada: %s\n"
 
 #: src/rcv.c:589
 #, fuzzy, c-format
 msgid ""
 "%s is now known as %s\n"
 msgstr ""
-"%s s'appelle désormais %s\n"
+"%s ahora se llama %s\n"
 
 #: src/rcv.c:664
 #, fuzzy, c-format
 msgid ""
 "parts: %s \n"
 msgstr ""
-"départ : %s \n"
+"sale: %s \n"
 
 #: src/rcv.c:712
 #, fuzzy
 msgid "Subject Changed to"
-msgstr "Sujet modifié en"
+msgstr "Asunto cambiado a"
 
 #: src/rcv.c:847
 #, fuzzy, c-format
@@ -1729,147 +1729,147 @@ msgid ""
 "Received queue id (%d) for xfer ref %d\n"
 "No such xfer.\n"
 msgstr ""
-"ID de file d'attente reçu (%d) pour la ref de transfert %d\n"
-"Transfert introuvable.\n"
+"ID de cola recibido (%d) para la ref de transferencia %d\n"
+"Transferencia no encontrada.\n"
 
 #: src/rcv.c:928
 #, fuzzy
 msgid ""
 "polite quit\n"
 msgstr ""
-"départ poli\n"
+"salida educada\n"
 
 #: src/rcv.c:937
 #, fuzzy, c-format
 msgid ""
 "unknown header type 0x%08x\n"
 msgstr ""
-"type d'en-tête inconnu 0x%08x\n"
+"tipo de cabecera desconocido 0x%08x\n"
 
 #: src/rcv.c:1206
 #, fuzzy
 msgid "login"
-msgstr "connexion"
+msgstr "inicio de sesión"
 
 #: src/rcv.c:1208
 #, fuzzy
 msgid "failed?"
-msgstr "échec ?"
+msgstr "¿fallido?"
 
 #: src/rcv.c:1209
 #, fuzzy
 msgid "successful"
-msgstr "réussi"
+msgstr "exitoso"
 
 #: src/rcv.c:1889
 #, fuzzy
 msgid "kick successful"
-msgstr "expulsion réussie"
+msgstr "expulsión exitosa"
 
 #: src/tasks.c:303
 #, fuzzy, c-format
 msgid "Queued #%u"
-msgstr "En file d'attente #%u"
+msgstr "En cola #%u"
 
 #: src/tasks.c:541
 #, fuzzy
 msgid "Listing tracker"
-msgstr "Listage du tracker"
+msgstr "Listando tracker"
 
 #: src/tasks.c:546
 #, fuzzy, c-format
 msgid "%s · %u of %u servers"
-msgstr "%s · %u sur %u serveurs"
+msgstr "%s · %u de %u servidores"
 
 #: src/tasks.c:570
 #, fuzzy
 msgid "Connecting to tracker"
-msgstr "Connexion au tracker"
+msgstr "Conectando al tracker"
 
 #: src/tasks.c:571
 #, fuzzy, c-format
 msgid "%s · %u of %u"
-msgstr "%s · %u sur %u"
+msgstr "%s · %u de %u"
 
 #: src/tasks.c:603
 #, fuzzy
 msgid "Connecting"
-msgstr "Connexion"
+msgstr "Conectando"
 
 #: src/tasks.c:604
 #, fuzzy, c-format
 msgid "Step %u of %u"
-msgstr "Étape %u sur %u"
+msgstr "Paso %u de %u"
 
 #: src/tasks.c:643
 #, fuzzy, c-format
 msgid "Task 0x%x"
-msgstr "Tâche 0x%x"
+msgstr "Tarea 0x%x"
 
 #: src/tasks.c:654
 #, fuzzy, c-format
 msgid "%s of %s"
-msgstr "%s sur %s"
+msgstr "%s de %s"
 
 #: src/tasks.c:915
 #, fuzzy
 msgid "Stop Task"
-msgstr "Arrêter la tâche"
+msgstr "Detener tarea"
 
 #: src/tasks.c:917
 #, fuzzy
 msgid "Start Task"
-msgstr "Démarrer la tâche"
+msgstr "Iniciar tarea"
 
 #: src/tasks.c:919
 #, fuzzy
 msgid "Move Xfer Up in Queue"
-msgstr "Monter le transfert dans la file"
+msgstr "Subir transferencia en la cola"
 
 #: src/tasks.c:922
 #, fuzzy
 msgid "Move Xfer Down in Queue"
-msgstr "Descendre le transfert dans la file"
+msgstr "Bajar transferencia en la cola"
 
 #: src/tasks.c:1060
 #, fuzzy, c-format
 msgid "%s of %s · %s/s · ETA %d:%02d:%02d"
-msgstr "%s sur %s · %s/s · ETA %d:%02d:%02d"
+msgstr "%s de %s · %s/s · ETA %d:%02d:%02d"
 
 #: src/tasks.c:1064
 #, fuzzy, c-format
 msgid "%s of %s · %s/s · ETA %d:%02d"
-msgstr "%s sur %s · %s/s · ETA %d:%02d"
+msgstr "%s de %s · %s/s · ETA %d:%02d"
 
 #: src/tls_trust_dialog.c:79
 #, fuzzy
 msgid "Certificate changed"
-msgstr "Certificat modifié"
+msgstr "Certificado cambiado"
 
 #: src/tls_trust_dialog.c:80
 #, fuzzy
 msgid "_Trust New Certificate"
-msgstr "_Faire confiance au nouveau certificat"
+msgstr "_Confiar en el nuevo certificado"
 
 #: src/tls_trust_dialog.c:83
 #, fuzzy
 msgid "Unknown server certificate"
-msgstr "Certificat de serveur inconnu"
+msgstr "Certificado de servidor desconocido"
 
 #: src/tls_trust_dialog.c:84
 #, fuzzy
 msgid "_Trust and Connect"
-msgstr "_Faire confiance et se connecter"
+msgstr "_Confiar y conectar"
 
 #: src/tls_trust_dialog.c:98
 #, fuzzy, c-format
 msgid "The TLS certificate for %s:%u doesn't match the one you previously trusted. This usually means the server rotated its certificate, but it can also indicate a man-in-the-middle attack. Verify the fingerprint out-of-band with the server operator before accepting."
-msgstr "Le certificat TLS pour %s:%u ne correspond pas à celui auquel vous aviez précédemment fait confiance. Cela signifie généralement que le serveur a renouvelé son certificat, mais cela peut aussi indiquer une attaque de l'homme du milieu. Vérifiez l'empreinte hors bande avec l'opérateur du serveur avant d'accepter."
+msgstr "El certificado TLS para %s:%u no coincide con el que aprobó anteriormente. Esto suele significar que el servidor ha renovado su certificado, pero también podría indicar un ataque de intermediario. Verifique la huella digital fuera de banda con el operador del servidor antes de aceptar."
 
 #: src/tls_trust_dialog.c:107
 #, fuzzy, c-format
 msgid "You haven't connected to %s:%u over TLS before. GtkHx will pin this certificate so future connections are silent — but only if you trust it now."
-msgstr "Vous ne vous êtes jamais connecté à %s:%u via TLS. GtkHx épinglera ce certificat afin que les connexions futures soient silencieuses — uniquement si vous lui faites confiance maintenant."
+msgstr "Nunca se ha conectado a %s:%u por TLS. GtkHx fijará este certificado para que las conexiones futuras sean silenciosas — solo si confía en él ahora."
 
 #: src/tls_trust_dialog.c:114
 #, fuzzy, c-format
@@ -1877,68 +1877,68 @@ msgid ""
 "Fingerprint:\n"
 "%s"
 msgstr ""
-"Empreinte :\n"
+"Huella digital:\n"
 "%s"
 
 #: src/tls_trust_dialog.c:118
 #, fuzzy, c-format
 msgid "Pinned certificates live in %s."
-msgstr "Les certificats épinglés se trouvent dans %s."
+msgstr "Los certificados fijados se encuentran en %s."
 
 #: src/toolbar.c:203
 #, fuzzy
 msgid "Send a broadcast message to every user on the server."
-msgstr "Envoyer un message de diffusion à tous les utilisateurs du serveur."
+msgstr "Enviar un mensaje de difusión a todos los usuarios del servidor."
 
 #: src/toolbar.c:208
 #, fuzzy
 msgid "_Send"
-msgstr "_Envoyer"
+msgstr "_Enviar"
 
 #: src/toolbar.c:217
 #, fuzzy
 msgid "Message"
-msgstr "Message"
+msgstr "Mensaje"
 
 #: src/toolbar.c:518
 #, fuzzy, c-format
 msgid "Lost connection to %s"
-msgstr "Connexion perdue avec %s"
+msgstr "Conexión perdida con %s"
 
 #: src/toolbar.c:585
 #, fuzzy
 msgid "New User…"
-msgstr "Nouvel utilisateur…"
+msgstr "Nuevo usuario…"
 
 #: src/toolbar.c:586
 #, fuzzy
 msgid "Edit User…"
-msgstr "Modifier l'utilisateur…"
+msgstr "Editar usuario…"
 
 #: src/toolbar.c:589
 #, fuzzy
 msgid "Settings"
-msgstr "Paramètres"
+msgstr "Configuración"
 
 #: src/toolbar.c:590
 #, fuzzy
 msgid "Bookmarks…"
-msgstr "Marque-pages…"
+msgstr "Marcadores…"
 
 #: src/toolbar.c:593
 #, fuzzy
 msgid "Quit"
-msgstr "Quitter"
+msgstr "Salir"
 
 #: src/toolbar.c:599
 #, fuzzy
 msgid "Main menu"
-msgstr "Menu principal"
+msgstr "Menú principal"
 
 #: src/toolbar.c:689
 #, fuzzy
 msgid "Disconnect"
-msgstr "Déconnecter"
+msgstr "Desconectar"
 
 #: src/toolbar.c:713 src/tracker.c:480
 #, fuzzy
@@ -1948,123 +1948,123 @@ msgstr "Tracker"
 #: src/toolbar.c:723
 #, fuzzy
 msgid "News (1.5+)"
-msgstr "Nouvelles (1.5+)"
+msgstr "Noticias (1.5+)"
 
 #: src/toolbar.c:762
 #, fuzzy
 msgid "Plugin Manager"
-msgstr "Gestionnaire de greffons"
+msgstr "Gestor de complementos"
 
 #: src/toolbar.c:791
 #, fuzzy
 msgid "Reconnect"
-msgstr "Reconnecter"
+msgstr "Reconectar"
 
 #: src/tracker.c:471
 #, fuzzy
 msgid "Address"
-msgstr "Adresse"
+msgstr "Dirección"
 
 #: src/tracker.c:516
 #, fuzzy
 msgid "Search trackers"
-msgstr "Rechercher dans les trackers"
+msgstr "Buscar en trackers"
 
 #: src/tracker.c:528
 #, fuzzy
 msgid "Match case in tracker search"
-msgstr "Respecter la casse dans la recherche du tracker"
+msgstr "Sensible a mayúsculas en la búsqueda del tracker"
 
 #: src/tracker.c:546
 #, fuzzy
 msgid "Refresh tracker list"
-msgstr "Actualiser la liste des trackers"
+msgstr "Actualizar lista de trackers"
 
 #: src/tracker.c:549
 #, fuzzy
 msgid "Connect to selected server"
-msgstr "Se connecter au serveur sélectionné"
+msgstr "Conectarse al servidor seleccionado"
 
 #: src/usermod.c:469
 #, fuzzy
 msgid "User Editor"
-msgstr "Éditeur d'utilisateur"
+msgstr "Editor de usuario"
 
 #: src/usermod.c:473
 #, fuzzy
 msgid "New User"
-msgstr "Nouvel utilisateur"
+msgstr "Nuevo usuario"
 
 #: src/usermod.c:546
 #, fuzzy
 msgid "Generate a random password"
-msgstr "Générer un mot de passe aléatoire"
+msgstr "Generar una contraseña aleatoria"
 
 #: src/usermod.c:625
 #, fuzzy
 msgid "Open User"
-msgstr "Ouvrir un utilisateur"
+msgstr "Abrir usuario"
 
 #: src/usermod.c:625
 #, fuzzy
 msgid "Enter the login of the account to edit."
-msgstr "Entrez l'identifiant du compte à modifier."
+msgstr "Introduzca el usuario de la cuenta a editar."
 
 #: src/usermod.c:630
 #, fuzzy
 msgid "_Open"
-msgstr "_Ouvrir"
+msgstr "_Abrir"
 
 #: src/users.c:233 src/users.c:731
 #, fuzzy, c-format
 msgid ""
 "ignore: %s is now ignored\n"
 msgstr ""
-"ignorer : %s est désormais ignoré(e)\n"
+"ignorar: %s ahora está ignorado(a)\n"
 
 #: src/users.c:247
 #, fuzzy, c-format
 msgid ""
 "ignore: %s is now unignored\n"
 msgstr ""
-"ignorer : %s n'est plus ignoré(e)\n"
+"ignorar: %s ya no está ignorado(a)\n"
 
 #: src/users.c:538
 #, fuzzy
 msgid "UnIgnore"
-msgstr "Ne plus ignorer"
+msgstr "Dejar de ignorar"
 
 #: src/users.c:544
 #, fuzzy
 msgid "Get User Info"
-msgstr "Obtenir les infos utilisateur"
+msgstr "Obtener info de usuario"
 
 #: src/users.c:546
 #, fuzzy
 msgid "Private Message"
-msgstr "Message privé"
+msgstr "Mensaje privado"
 
 #: src/users.c:732
 #, fuzzy, c-format
 msgid "ignore: %s is now unignored"
-msgstr "ignorer : %s n'est plus ignoré(e)"
+msgstr "ignorar: %s ya no está ignorado(a)"
 
 #: src/users.c:820
 #, fuzzy
 msgid "Private Chat Invitation"
-msgstr "Invitation à discussion privée"
+msgstr "Invitación a chat privado"
 
 #: src/users.c:821
 #, fuzzy
 msgid "Invite this user to an existing private chat, or create a new one."
-msgstr "Inviter cet utilisateur à une discussion privée existante, ou en créer une nouvelle."
+msgstr "Invitar a este usuario a un chat privado existente, o crear uno nuevo."
 
 #: src/users.c:826
 #, fuzzy
 msgid "_New Chat"
-msgstr "_Nouvelle discussion"
+msgstr "_Nuevo chat"
 
 #: src/users.c:828
 #, fuzzy
 msgid "_Invite"
-msgstr "_Inviter"
+msgstr "_Invitar"
