@@ -134,14 +134,24 @@ GtkWidget *toolbar_window = NULL;
  * unconditionally, so this stub is never consulted on the
  * happy path. Return NULL so a buggy test that loses the
  * env var fails the lookup loudly rather than touching the
- * developer's real $CONFIG. */
+ * developer's real $CONFIG.
+ *
+ * Forward-declared inline (rather than via #include "gtkhx.h",
+ * which would drag in the GTK / Adwaita header pile) so
+ * -Wmissing-prototypes stays happy. Same trick tls_trust.c
+ * uses for the same symbol. */
+extern const char *gtkhx_config_dir (void);
 const char *
 gtkhx_config_dir (void)
 {
     return NULL;
 }
 
-#include "tls_trust.h"
+/* tls_trust_dialog.h declares hx_tls_trust_dialog_run_sync (and
+ * pulls in tls_trust.h for the hx_tls_trust_status enum). The
+ * include here puts the prototype in scope before the stub
+ * definition below, silencing -Wmissing-prototypes. */
+#include "tls_trust_dialog.h"
 gboolean
 hx_tls_trust_dialog_run_sync (GtkWindow *parent G_GNUC_UNUSED,
                               const char *host G_GNUC_UNUSED,
