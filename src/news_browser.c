@@ -940,8 +940,8 @@ render_selected_post (gnews_browser *br)
     {
         char *date_str = post_date_format (&node->date);
         char *meta = g_strdup_printf (
-            _ ("%s — %s"), node->sender && *node->sender ? node->sender : "?",
-            date_str);
+            _ ("%1$s — %2$s"),
+            node->sender && *node->sender ? node->sender : "?", date_str);
         gtk_label_set_text (br->meta_label, meta);
         g_free (meta);
         g_free (date_str);
@@ -1490,7 +1490,7 @@ build_reply_context_panel (HxNewsNode *reply_to)
 
     date_str = post_date_format (&reply_to->date);
     meta = g_strdup_printf (
-        _ ("Replying to %s — %s"),
+        _ ("Replying to %1$s — %2$s"),
         reply_to->sender && *reply_to->sender ? reply_to->sender : "?",
         date_str);
     meta_lbl = gtk_label_new (meta);

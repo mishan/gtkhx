@@ -169,7 +169,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
         G_FILE_QUERY_INFO_NONE, NULL, &err);
 
     if (!enumer) {
-        char *msg = g_strdup_printf (_ ("Can't read %s: %s"), path,
+        char *msg = g_strdup_printf (_ ("Can't read %1$s: %2$s"), path,
                                      err ? err->message : "unknown error");
         g_signal_emit_by_name (self, "error", msg);
         g_free (msg);
@@ -236,7 +236,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
     if (err) {
         /* Partial-read error — keep what we got and tell the user. */
         char *msg
-            = g_strdup_printf (_ ("Error reading %s: %s"), path, err->message);
+            = g_strdup_printf (_ ("Error reading %1$s: %2$s"), path, err->message);
         g_signal_emit_by_name (self, "error", msg);
         g_free (msg);
         g_clear_error (&err);

@@ -543,7 +543,7 @@ track_prog_update (session *sess, char *str, int num, int total)
 	 * or a translated form with extra glyphs can't truncate. Cast
 	 * the int args explicitly so the %u format matches the type
 	 * actually passed through varargs. */
-    sub = g_strdup_printf (_ ("%s \xc2\xb7 %u of %u servers"),
+    sub = g_strdup_printf (_ ("%1$s \xc2\xb7 %2$u of %3$u servers"),
                            str ? str : "", pos, tot);
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
@@ -568,7 +568,7 @@ trackconn_prog_update (session *sess, char *str, int num, int total)
     }
 
     gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting to tracker"));
-    sub = g_strdup_printf (_ ("%s \xc2\xb7 %u of %u"),
+    sub = g_strdup_printf (_ ("%1$s \xc2\xb7 %2$u of %3$u"),
                            str ? str : "", pos, tot);
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
@@ -601,7 +601,7 @@ conn_task_update (session *sess, int stat)
     }
 
     gtk_label_set_text (GTK_LABEL (gtsk->title), _ ("Connecting"));
-    g_snprintf (sub, sizeof (sub), _ ("Step %u of %u"), pos, len);
+    g_snprintf (sub, sizeof (sub), _ ("Step %1$u of %2$u"), pos, len);
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
     gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, len);
@@ -651,7 +651,7 @@ task_update (session *sess, struct task *tsk)
 	 * the rare large ones). */
     posstr = g_strdup (human_size (posbuf, pos));
     totstr = g_strdup (human_size (totbuf, tot));
-    sub = g_strdup_printf (_ ("%s of %s"), posstr, totstr);
+    sub = g_strdup_printf (_ ("%1$s of %2$s"), posstr, totstr);
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), sub);
 
     gtask_set_fraction (GTK_PROGRESS_BAR (gtsk->pbar), pos, tot);
@@ -1057,11 +1057,11 @@ file_update (session *sess, struct htxf_conn *htxf)
 	 * and avoids the trailing path that the old format glued on. */
     if (hrs > 0) {
         subtitle = g_strdup_printf (
-            _ ("%s of %s \xc2\xb7 %s/s \xc2\xb7 ETA %d:%02d:%02d"),
+            _ ("%1$s of %2$s \xc2\xb7 %3$s/s \xc2\xb7 ETA %4$d:%5$02d:%6$02d"),
             posstr, sizestr, bpsstr, hrs, mins, secs);
     } else {
         subtitle = g_strdup_printf (
-            _ ("%s of %s \xc2\xb7 %s/s \xc2\xb7 ETA %d:%02d"),
+            _ ("%1$s of %2$s \xc2\xb7 %3$s/s \xc2\xb7 ETA %4$d:%5$02d"),
             posstr, sizestr, bpsstr, mins, secs);
     }
     gtk_label_set_text (GTK_LABEL (gtsk->subtitle), subtitle);

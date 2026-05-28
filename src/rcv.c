@@ -586,7 +586,8 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         }
         if (uid != htlc->uid && nlen > 0 && strcmp (name, user->name) != 0) {
             hx_printf_prefix (htlc, cid, INFOPREFIX,
-                              _ ("%s is now known as %s\n"), user->name, name);
+                              _ ("%1$s is now known as %2$s\n"), user->name,
+                              name);
         }
     }
     if (nlen) {
@@ -844,7 +845,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
     htxf = htxf_with_ref (xq.ref);
 
     if (!htxf) {
-        g_warning (_ ("Received queue id (%d) for xfer ref %d\n"
+        g_warning (_ ("Received queue id (%1$d) for xfer ref %2$d\n"
                       "No such xfer.\n"),
                    xq.queueid, xq.ref);
         return;

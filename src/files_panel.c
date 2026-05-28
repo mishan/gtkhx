@@ -1036,7 +1036,7 @@ update_status (files_panel *p)
         text = g_strdup_printf (
             g_dngettext (NULL, "%u item", "%u items", n_total), n_total);
     } else {
-        text = g_strdup_printf (_ ("%u of %u selected"), n_sel, n_total);
+        text = g_strdup_printf (_ ("%1$u of %2$u selected"), n_sel, n_total);
     }
 
     gtk_label_set_text (GTK_LABEL (p->status_label), text);
