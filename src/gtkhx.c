@@ -1069,7 +1069,7 @@ output_user_info (guint16 uid, const char *nam, const char *info, guint16 len)
         info_window = gtk_window_new ();
         gtk_widget_set_size_request (info_window, 260, 250);
 
-        g_snprintf (infotitle, sizeof (infotitle), _ ("User Info: %s (%u)"),
+        g_snprintf (infotitle, sizeof (infotitle), _ ("User Info: %1$s (%2$u)"),
                     nam, uid);
         gtk_window_set_title (GTK_WINDOW (info_window), infotitle);
 

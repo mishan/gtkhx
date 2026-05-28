@@ -1063,8 +1063,8 @@ copy_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         show_toast (br, hx_files_ops_result_message (last_err));
     } else {
         char *msg
-            = g_strdup_printf (_ ("%u queued, %u failed (%s)."), queued, failed,
-                               hx_files_ops_result_message (last_err));
+            = g_strdup_printf (_ ("%1$u queued, %2$u failed (%3$s)."), queued,
+                               failed, hx_files_ops_result_message (last_err));
         show_toast (br, msg);
         g_free (msg);
     }

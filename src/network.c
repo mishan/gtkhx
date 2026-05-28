@@ -2069,7 +2069,7 @@ on_tracker_connected (GObject *src, GAsyncResult *res, gpointer u)
     if (!ctx->conn) {
         if (!err_is_cancel (err)) {
             hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %s: %s\n"), ctx->serverstr,
+                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
                               err ? err->message : _ ("connect failed"));
         }
         g_clear_error (&err);
@@ -2097,7 +2097,7 @@ on_tracker_magic_sent (GObject *src, GAsyncResult *res, gpointer u)
                                            &err)) {
         if (!err_is_cancel (err)) {
             hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %s: %s\n"), ctx->serverstr,
+                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
                               err ? err->message : _ ("magic write failed"));
         }
         g_clear_error (&err);
@@ -2123,7 +2123,7 @@ on_tracker_header_read (GObject *src, GAsyncResult *res, gpointer u)
         || n != 14) {
         if (err && !err_is_cancel (err)) {
             hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %s: %s\n"), ctx->serverstr,
+                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
                               err->message);
         }
         g_clear_error (&err);

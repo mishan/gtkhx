@@ -459,8 +459,8 @@ on_save_clicked (GtkButton *btn, gpointer data)
                     save_err_msg);
             } else {
                 msg = g_strdup_printf (
-                    _ ("Save failed: %s. The file is now at \"%s\" with "
-                       "the previous contents — rollback also failed (%s)."),
+                    _ ("Save failed: %1$s. The file is now at \"%2$s\" with "
+                       "the previous contents — rollback also failed (%3$s)."),
                     save_err_msg, safe_name,
                     rb_err ? rb_err->message : "(unknown)");
                 g_clear_error (&rb_err);
