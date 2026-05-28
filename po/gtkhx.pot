@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-28 11:44-0700\n"
+"POT-Creation-Date: 2026-05-28 13:06-0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -16,6 +16,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
 #: src/about.c:96 src/toolbar.c:591
 msgid "About GtkHx"
@@ -165,7 +166,7 @@ msgstr ""
 msgid "Bookmark"
 msgstr ""
 
-#: src/bookmarks.c:751 src/chat.c:2409 src/files.c:368 src/files_panel.c:1325
+#: src/bookmarks.c:751 src/chat.c:2453 src/files.c:368 src/files_panel.c:1325
 #: src/plugin.c:153 src/tracker.c:469 src/users.c:975
 msgid "Name"
 msgstr ""
@@ -213,52 +214,67 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: src/chat.c:2028 src/chat.c:2169 src/gtkutil.c:467 src/gtkutil.c:511
+#: src/chat.c:82
+msgid "Load older messages"
+msgstr ""
+
+#: src/chat.c:92
+msgid "Loading older messages..."
+msgstr ""
+
+#: src/chat.c:886
+#, c-format
+msgid "chat history (%u message)"
+msgid_plural "chat history (%u messages)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/chat.c:2072 src/chat.c:2213 src/gtkutil.c:467 src/gtkutil.c:511
 #: src/options.c:2772 src/toolbar.c:736
 msgid "Chat"
 msgstr ""
 
-#: src/chat.c:2352
+#: src/chat.c:2396
 msgid "invites you to private chat"
 msgstr ""
 
-#: src/chat.c:2354
+#: src/chat.c:2398
 msgid "Chat Invitation"
 msgstr ""
 
-#: src/chat.c:2356
+#: src/chat.c:2400
 msgid "_Decline"
 msgstr ""
 
-#: src/chat.c:2358
+#: src/chat.c:2402
 msgid "_Join"
 msgstr ""
 
-#: src/chat.c:2408 src/users.c:974
+#: src/chat.c:2452 src/users.c:974
 msgid "UID"
 msgstr ""
 
-#: src/chat.c:2430 src/chat.c:2586 src/users.c:548 src/users.c:1083
+#: src/chat.c:2474 src/chat.c:2630 src/users.c:548 src/users.c:1083
 msgid "Private Chat"
 msgstr ""
 
-#: src/chat.c:2548 src/users.c:1063
+#: src/chat.c:2592 src/users.c:1063
 msgid "Msg"
 msgstr ""
 
-#: src/chat.c:2559 src/users.c:527 src/users.c:1068
+#: src/chat.c:2603 src/users.c:527 src/users.c:1068
 msgid "Kick"
 msgstr ""
 
-#: src/chat.c:2570 src/users.c:1073
+#: src/chat.c:2614 src/users.c:1073
 msgid "User Info"
 msgstr ""
 
-#: src/chat.c:2581 src/users.c:529 src/users.c:1078
+#: src/chat.c:2625 src/users.c:529 src/users.c:1078
 msgid "Ban"
 msgstr ""
 
-#: src/chat.c:2597 src/users.c:536 src/users.c:1088
+#: src/chat.c:2641 src/users.c:536 src/users.c:1088
 msgid "Ignore"
 msgstr ""
 
@@ -437,6 +453,20 @@ msgstr ""
 msgid "You don't have permission to move files on the server."
 msgstr ""
 
+#: src/files_browser.c:696 src/files_browser.c:1133
+#, c-format
+msgid "Move requested for %u item."
+msgid_plural "Move requested for %u items."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/files_browser.c:701
+#, c-format
+msgid "Moved %u item."
+msgid_plural "Moved %u items."
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/files_browser.c:707
 msgid "Move failed."
 msgstr ""
@@ -456,6 +486,13 @@ msgstr ""
 msgid "Move “%s” to:"
 msgstr ""
 
+#: src/files_browser.c:841
+#, c-format
+msgid "Move %u item to:"
+msgid_plural "Move %u items to:"
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/files_browser.c:844
 msgid "Move"
 msgstr ""
@@ -467,6 +504,13 @@ msgstr ""
 #: src/files_browser.c:1035
 msgid "Select a file to copy first."
 msgstr ""
+
+#: src/files_browser.c:1057
+#, c-format
+msgid "Transfer queued (%u item)."
+msgid_plural "Transfers queued (%u items)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/files_browser.c:1066
 #, c-format
@@ -489,6 +533,13 @@ msgstr ""
 #, c-format
 msgid "Delete “%s”? This cannot be undone."
 msgstr ""
+
+#: src/files_browser.c:1575
+#, c-format
+msgid "Delete %u item? This cannot be undone."
+msgid_plural "Delete %u items? This cannot be undone."
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/files_browser.c:1603 src/news_browser.c:1310 src/news_browser.c:1872
 #: src/usermod.c:492
@@ -530,6 +581,12 @@ msgstr ""
 #: src/files_browser.c:1964
 msgid "Delete selection in active panel (F8, Delete, Ctrl+D)"
 msgstr ""
+
+#: src/files_entry.c:130
+msgid "(%"
+msgid_plural "(%"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/files_local_provider.c:134
 msgid "Local"
@@ -594,6 +651,13 @@ msgstr ""
 #: src/files_panel.c:1024
 msgid "Can't list this folder."
 msgstr ""
+
+#: src/files_panel.c:1037
+#, c-format
+msgid "%u item"
+msgid_plural "%u items"
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/files_panel.c:1039
 #, c-format
@@ -1455,7 +1519,19 @@ msgstr ""
 msgid "successful"
 msgstr ""
 
-#: src/rcv.c:1889
+#: src/rcv.c:1555
+msgid "server confirmed large-file (64-bit) mode for this session\n"
+msgstr ""
+
+#: src/rcv.c:1561
+msgid "server confirmed UTF-8 text encoding for this session\n"
+msgstr ""
+
+#: src/rcv.c:1567
+msgid "server confirmed chat-history extension for this session\n"
+msgstr ""
+
+#: src/rcv.c:1891
 msgid "kick successful"
 msgstr ""
 

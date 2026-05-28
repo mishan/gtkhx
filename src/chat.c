@@ -50,6 +50,49 @@
 #include "connect.h"
 #include "log.h"
 #include "debug.h"
+#include "compat.h" /* _() i18n macro */
+
+/* Compose the load-older / loading-older sentinels by translating the
+ * bare phrase (e.g. "Load older messages") and stitching the leading
+ * up-arrow + NBSP joiners back in. xtext's word tokenizer splits on
+ * ASCII space/'\n'/'<'/'>'/NUL, so internal spaces in the translated
+ * phrase become NBSPs (U+00A0 = "\xc2\xa0") to keep the row clickable
+ * as one token. The leading U+2191 (up-arrow) is part of the click
+ * target — chat_history_word_click compares against the same
+ * composed string. */
+static char *
+hx_compose_sentinel (const char *phrase)
+{
+    GString *s = g_string_new ("\xe2\x86\x91" "\xc2\xa0"); /* ↑ + NBSP */
+    for (const char *p = phrase; *p; p++) {
+        if (*p == ' ') {
+            g_string_append (s, "\xc2\xa0"); /* NBSP */
+        } else {
+            g_string_append_c (s, *p);
+        }
+    }
+    return g_string_free (s, FALSE);
+}
+
+const char *
+hx_load_older_sentinel (void)
+{
+    static char *cached = NULL;
+    if (!cached) {
+        cached = hx_compose_sentinel (_ ("Load older messages"));
+    }
+    return cached;
+}
+
+const char *
+hx_loading_older_sentinel (void)
+{
+    static char *cached = NULL;
+    if (!cached) {
+        cached = hx_compose_sentinel (_ ("Loading older messages..."));
+    }
+    return cached;
+}
 
 static char *termed_buf = 0;
 #define WORD_URL 1
@@ -838,16 +881,19 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * any future Load-older inserts. gtk_xtext_get_last_entry
 	 * returns buf->text_last, which is the entry we just appended. */
     if (!prepend_mode) {
-        gchar *divider
-            = g_strdup_printf ("\003" "37"
-                               "─── chat history (%u %s) ───",
-                               entries->len,
-                               entries->len == 1 ? "message" : "messages");
+        const char *fmt = g_dngettext (
+            NULL,
+            "chat history (%u message)",
+            "chat history (%u messages)",
+            entries->len);
+        gchar *body = g_strdup_printf (fmt, entries->len);
+        gchar *divider = g_strdup_printf ("\003" "37" "─── %s ───", body);
         gtk_xtext_append_indent (xbuf,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
                                  (int) strlen (divider), 0);
         g_free (divider);
+        g_free (body);
         gchat->history_anchor_ent = gtk_xtext_get_last_entry (xbuf);
     }
 
@@ -885,7 +931,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     if (has_more) {
         gchar *row = g_strdup_printf (
             "\003" "37"
-            "─── " HX_LOAD_OLDER_SENTINEL " ───");
+            "─── %s ───",
+            hx_load_older_sentinel ());
         gchat->history_load_older_ent = gtk_xtext_insert_indent_before (xbuf,
             gchat->history_anchor_ent,
             (unsigned char *) "", 0,
@@ -1029,7 +1076,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     if (button != GDK_BUTTON_PRIMARY) {
         return;
     }
-    if (strcmp (word, HX_LOAD_OLDER_SENTINEL) != 0) {
+    if (strcmp (word, hx_load_older_sentinel ()) != 0) {
         return;
     }
 
@@ -1118,13 +1165,9 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 	 * only the body text changes between the two states. */
     if (gchat->history_load_older_ent) {
         xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
-        const char *loading_row
-            = "\003" "37"
-              "─── \xe2\x86\x91"
-              "\xc2\xa0" "Loading"
-              "\xc2\xa0" "older"
-              "\xc2\xa0" "messages..."
-              " ───";
+        gchar *loading_row
+            = g_strdup_printf ("\003" "37" "─── %s ───",
+                               hx_loading_older_sentinel ());
 
         gtk_xtext_remove_entry (xbuf, gchat->history_load_older_ent);
         gchat->history_load_older_ent = gtk_xtext_insert_indent_before (
@@ -1132,6 +1175,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
             (unsigned char *) "", 0,
             (unsigned char *) loading_row,
             (int) strlen (loading_row), 0);
+        g_free (loading_row);
     }
 }
 

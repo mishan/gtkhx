@@ -15,6 +15,12 @@ i18n.gettext(meson.project_name(),
   args : [
     '--directory=' + meson.project_source_root(),
     '--from-code=UTF-8',
+    # xgettext's defaults know about gettext / ngettext / dgettext but
+    # not the glib variants. Tell it that g_dngettext's plural arg
+    # pair lives at positions 2 (singular) and 3 (plural) — see
+    # `info gettext "Marking Plural Forms"` — so plural strings from
+    # files_browser.c / chat.c / etc. land in gtkhx.pot.
+    '--keyword=g_dngettext:2,3',
   ],
   install : false,
 )

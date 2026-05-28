@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-28 11:18-0700\n"
+"POT-Creation-Date: 2026-05-28 13:06-0700\n"
 "PO-Revision-Date: 2026-05-28 18:52+0000\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Spanish <es@li.org>\n"
@@ -94,8 +94,13 @@ msgstr "_Aceptar"
 
 #: src/bookmarks.c:270
 #, fuzzy, c-format
-msgid "Could not load bookmark \"%s\". The file may be in the legacy format — pick it from the toolbar's Connect-button dropdown to convert it first."
-msgstr "No se pudo cargar el marcador «%s». El archivo puede estar en el formato heredado — selecciónelo desde el menú desplegable del botón Conectar de la barra de herramientas para convertirlo primero."
+msgid ""
+"Could not load bookmark \"%s\". The file may be in the legacy format — pick "
+"it from the toolbar's Connect-button dropdown to convert it first."
+msgstr ""
+"No se pudo cargar el marcador «%s». El archivo puede estar en el formato "
+"heredado — selecciónelo desde el menú desplegable del botón Conectar de la "
+"barra de herramientas para convertirlo primero."
 
 #: src/bookmarks.c:378 src/bookmarks.c:390
 #, fuzzy
@@ -114,8 +119,12 @@ msgstr "Error al guardar: %s. El marcador se restauró a su nombre original."
 
 #: src/bookmarks.c:462
 #, fuzzy, c-format
-msgid "Save failed: %s. The file is now at \"%s\" with the previous contents — rollback also failed (%s)."
-msgstr "Error al guardar: %s. El archivo está ahora en «%s» con el contenido anterior — la reversión también falló (%s)."
+msgid ""
+"Save failed: %s. The file is now at \"%s\" with the previous contents — "
+"rollback also failed (%s)."
+msgstr ""
+"Error al guardar: %s. El archivo está ahora en «%s» con el contenido "
+"anterior — la reversión también falló (%s)."
 
 #: src/bookmarks.c:469
 #, fuzzy, c-format
@@ -186,7 +195,7 @@ msgstr "Elija uno de la lista, o cree uno nuevo con el botón +."
 msgid "Bookmark"
 msgstr "Marcador"
 
-#: src/bookmarks.c:751 src/chat.c:2409 src/files.c:368 src/files_panel.c:1325
+#: src/bookmarks.c:751 src/chat.c:2453 src/files.c:368 src/files_panel.c:1325
 #: src/plugin.c:153 src/tracker.c:469 src/users.c:975
 #, fuzzy
 msgid "Name"
@@ -220,8 +229,12 @@ msgstr "Usar TLS"
 
 #: src/bookmarks.c:784 src/connect.c:1332
 #, fuzzy
-msgid "Connect to the server's TLS port. Disables HOPE and compression — they're not meaningful over a TLS-encrypted stream."
-msgstr "Conectarse al puerto TLS del servidor. Desactiva HOPE y la compresión — no tienen sentido sobre un flujo cifrado con TLS."
+msgid ""
+"Connect to the server's TLS port. Disables HOPE and compression — they're "
+"not meaningful over a TLS-encrypted stream."
+msgstr ""
+"Conectarse al puerto TLS del servidor. Desactiva HOPE y la compresión — no "
+"tienen sentido sobre un flujo cifrado con TLS."
 
 #: src/bookmarks.c:791
 #, fuzzy
@@ -243,63 +256,80 @@ msgstr "Compresión"
 msgid "Save"
 msgstr "Guardar"
 
-#: src/chat.c:2028 src/chat.c:2169 src/gtkutil.c:467 src/gtkutil.c:511
+#, fuzzy
+#: src/chat.c:82
+msgid "Load older messages"
+msgstr "Cargar mensajes anteriores"
+
+#, fuzzy
+#: src/chat.c:92
+msgid "Loading older messages..."
+msgstr "Cargando mensajes anteriores..."
+
+#: src/chat.c:886
+#, fuzzy, c-format
+msgid "chat history (%u message)"
+msgid_plural "chat history (%u messages)"
+msgstr[0] "historial de chat (%u mensaje)"
+msgstr[1] "historial de chat (%u mensajes)"
+
+#: src/chat.c:2072 src/chat.c:2213 src/gtkutil.c:467 src/gtkutil.c:511
 #: src/options.c:2772 src/toolbar.c:736
 #, fuzzy
 msgid "Chat"
 msgstr "Chat"
 
-#: src/chat.c:2352
+#: src/chat.c:2396
 #, fuzzy
 msgid "invites you to private chat"
 msgstr "le invita a un chat privado"
 
-#: src/chat.c:2354
+#: src/chat.c:2398
 #, fuzzy
 msgid "Chat Invitation"
 msgstr "Invitación a chat"
 
-#: src/chat.c:2356
+#: src/chat.c:2400
 #, fuzzy
 msgid "_Decline"
 msgstr "_Rechazar"
 
-#: src/chat.c:2358
+#: src/chat.c:2402
 #, fuzzy
 msgid "_Join"
 msgstr "_Unirse"
 
-#: src/chat.c:2408 src/users.c:974
+#: src/chat.c:2452 src/users.c:974
 #, fuzzy
 msgid "UID"
 msgstr "UID"
 
-#: src/chat.c:2430 src/chat.c:2586 src/users.c:548 src/users.c:1083
+#: src/chat.c:2474 src/chat.c:2630 src/users.c:548 src/users.c:1083
 #, fuzzy
 msgid "Private Chat"
 msgstr "Chat privado"
 
-#: src/chat.c:2548 src/users.c:1063
+#: src/chat.c:2592 src/users.c:1063
 #, fuzzy
 msgid "Msg"
 msgstr "Mensaje"
 
-#: src/chat.c:2559 src/users.c:527 src/users.c:1068
+#: src/chat.c:2603 src/users.c:527 src/users.c:1068
 #, fuzzy
 msgid "Kick"
 msgstr "Expulsar"
 
-#: src/chat.c:2570 src/users.c:1073
+#: src/chat.c:2614 src/users.c:1073
 #, fuzzy
 msgid "User Info"
 msgstr "Info de usuario"
 
-#: src/chat.c:2581 src/users.c:529 src/users.c:1078
+#: src/chat.c:2625 src/users.c:529 src/users.c:1078
 #, fuzzy
 msgid "Ban"
 msgstr "Banear"
 
-#: src/chat.c:2597 src/users.c:536 src/users.c:1088
+#: src/chat.c:2641 src/users.c:536 src/users.c:1088
 #, fuzzy
 msgid "Ignore"
 msgstr "Ignorar"
@@ -311,8 +341,12 @@ msgstr "Convertir marcador"
 
 #: src/connect.c:633
 #, fuzzy
-msgid "This bookmark is written in an old GtkHx format. Would you like to convert it to the new format?"
-msgstr "Este marcador está escrito en un formato antiguo de GtkHx. ¿Desea convertirlo al nuevo formato?"
+msgid ""
+"This bookmark is written in an old GtkHx format. Would you like to convert "
+"it to the new format?"
+msgstr ""
+"Este marcador está escrito en un formato antiguo de GtkHx. ¿Desea "
+"convertirlo al nuevo formato?"
 
 #: src/connect.c:635
 #, fuzzy
@@ -371,8 +405,12 @@ msgstr "Guardar marcador…"
 
 #: src/connect.c:1278
 #, fuzzy
-msgid "Enter the server address. If you have an account, fill in your login and password below; otherwise leave them blank."
-msgstr "Introduzca la dirección del servidor. Si tiene una cuenta, rellene su usuario y contraseña abajo; de lo contrario, déjelos en blanco."
+msgid ""
+"Enter the server address. If you have an account, fill in your login and "
+"password below; otherwise leave them blank."
+msgstr ""
+"Introduzca la dirección del servidor. Si tiene una cuenta, rellene su "
+"usuario y contraseña abajo; de lo contrario, déjelos en blanco."
 
 #: src/connect.c:1294 src/tracker.c:472
 #, fuzzy
@@ -515,6 +553,20 @@ msgstr "No conectado a ningún servidor."
 msgid "You don't have permission to move files on the server."
 msgstr "No tiene permiso para mover archivos en el servidor."
 
+#: src/files_browser.c:696 src/files_browser.c:1133
+#, c-format
+msgid "Move requested for %u item."
+msgid_plural "Move requested for %u items."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/files_browser.c:701
+#, fuzzy, c-format
+msgid "Moved %u item."
+msgid_plural "Moved %u items."
+msgstr[0] "Error al mover."
+msgstr[1] "Error al mover."
+
 #: src/files_browser.c:707
 #, fuzzy
 msgid "Move failed."
@@ -527,13 +579,24 @@ msgstr "Seleccione primero los archivos a mover."
 
 #: src/files_browser.c:819
 #, fuzzy
-msgid "Move only works within one side. Use Copy then Delete to move between local and remote."
-msgstr "Mover solo funciona dentro de un mismo lado. Use Copiar y luego Eliminar para mover entre local y remoto."
+msgid ""
+"Move only works within one side. Use Copy then Delete to move between local "
+"and remote."
+msgstr ""
+"Mover solo funciona dentro de un mismo lado. Use Copiar y luego Eliminar "
+"para mover entre local y remoto."
 
 #: src/files_browser.c:838
 #, fuzzy, c-format
 msgid "Move “%s” to:"
 msgstr "Mover «%s» a:"
+
+#: src/files_browser.c:841
+#, fuzzy, c-format
+msgid "Move %u item to:"
+msgid_plural "Move %u items to:"
+msgstr[0] "Mover «%s» a:"
+msgstr[1] "Mover «%s» a:"
 
 #: src/files_browser.c:844
 #, fuzzy
@@ -549,6 +612,13 @@ msgstr "_Mover"
 #, fuzzy
 msgid "Select a file to copy first."
 msgstr "Seleccione primero un archivo para copiar."
+
+#: src/files_browser.c:1057
+#, c-format
+msgid "Transfer queued (%u item)."
+msgid_plural "Transfers queued (%u items)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: src/files_browser.c:1066
 #, fuzzy, c-format
@@ -574,6 +644,13 @@ msgstr "C_rear"
 #, fuzzy, c-format
 msgid "Delete “%s”? This cannot be undone."
 msgstr "¿Eliminar «%s»? Esta acción no se puede deshacer."
+
+#: src/files_browser.c:1575
+#, fuzzy, c-format
+msgid "Delete %u item? This cannot be undone."
+msgid_plural "Delete %u items? This cannot be undone."
+msgstr[0] "¿Eliminar «%s»? Esta acción no se puede deshacer."
+msgstr[1] "¿Eliminar «%s»? Esta acción no se puede deshacer."
 
 #: src/files_browser.c:1603 src/news_browser.c:1310 src/news_browser.c:1872
 #: src/usermod.c:492
@@ -626,6 +703,12 @@ msgstr "Renombrar el archivo seleccionado (F2)"
 msgid "Delete selection in active panel (F8, Delete, Ctrl+D)"
 msgstr "Eliminar selección en el panel activo (F8, Supr, Ctrl+D)"
 
+#: src/files_entry.c:130
+msgid "(%"
+msgid_plural "(%"
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/files_local_provider.c:134
 #, fuzzy
 msgid "Local"
@@ -673,8 +756,12 @@ msgstr "No tiene permiso para eso."
 
 #: src/files_ops.c:44
 #, fuzzy
-msgid "Hotline has no server-side copy. Use Move (F6) to relocate the file, or drag to your local panel first."
-msgstr "Hotline no admite copia del lado del servidor. Use Mover (F6) para reubicar el archivo, o arrástrelo primero a su panel local."
+msgid ""
+"Hotline has no server-side copy. Use Move (F6) to relocate the file, or drag "
+"to your local panel first."
+msgstr ""
+"Hotline no admite copia del lado del servidor. Use Mover (F6) para reubicar "
+"el archivo, o arrástrelo primero a su panel local."
 
 #: src/files_ops.c:51
 #, fuzzy
@@ -701,6 +788,13 @@ msgstr "La carpeta es solo para subir — suelte archivos aquí para subirlos"
 msgid "Can't list this folder."
 msgstr "No se puede listar esta carpeta."
 
+#: src/files_panel.c:1037
+#, c-format
+msgid "%u item"
+msgid_plural "%u items"
+msgstr[0] ""
+msgstr[1] ""
+
 #: src/files_panel.c:1039
 #, fuzzy, c-format
 msgid "%u of %u selected"
@@ -709,7 +803,8 @@ msgstr "%u de %u seleccionado(s)"
 #: src/files_panel.c:1272
 #, fuzzy
 msgid "Switch this panel between local filesystem and remote server"
-msgstr "Alternar este panel entre el sistema de archivos local y el servidor remoto"
+msgstr ""
+"Alternar este panel entre el sistema de archivos local y el servidor remoto"
 
 #: src/files_panel.c:1281
 #, fuzzy
@@ -753,24 +848,18 @@ msgstr "Rechazar"
 
 #: src/gtkhx.c:1873
 #, fuzzy, c-format
-msgid ""
-"GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
-msgstr ""
-"GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
+msgid "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
+msgstr "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 
 #: src/gtkhx.c:1874
 #, fuzzy, c-format
-msgid ""
-"GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
-msgstr ""
-"GtkHx se distribuye SIN NINGUNA GARANTÍA.\n"
+msgid "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
+msgstr "GtkHx se distribuye SIN NINGUNA GARANTÍA.\n"
 
 #: src/gtkhx.c:1875
 #, fuzzy, c-format
-msgid ""
-"This is free software, and you are welcome\n"
-msgstr ""
-"Este es software libre, y puede\n"
+msgid "This is free software, and you are welcome\n"
+msgstr "Este es software libre, y puede\n"
 
 #: src/gtkhx.c:1876
 #, fuzzy, c-format
@@ -783,10 +872,8 @@ msgstr ""
 
 #: src/gtkhx.c:1878
 #, fuzzy, c-format
-msgid ""
-"usage: %s [options]\n"
-msgstr ""
-"uso: %s [opciones]\n"
+msgid "usage: %s [options]\n"
+msgstr "uso: %s [opciones]\n"
 
 #: src/gtkhx.c:1879
 #, fuzzy, c-format
@@ -799,45 +886,35 @@ msgstr ""
 
 #: src/gtkhx.c:1880
 #, fuzzy, c-format
-msgid ""
-"\t--help, -h\t\tPrint this help message out.\n"
-msgstr ""
-"\t--help, -h\t\tMostrar este mensaje de ayuda.\n"
+msgid "\t--help, -h\t\tPrint this help message out.\n"
+msgstr "\t--help, -h\t\tMostrar este mensaje de ayuda.\n"
 
 #: src/gtkhx.c:1881
 #, fuzzy, c-format
-msgid ""
-"\t--server, -s <host>\tConnect to <host>\n"
-msgstr ""
-"\t--server, -s <host>\tConectarse a <host>\n"
+msgid "\t--server, -s <host>\tConnect to <host>\n"
+msgstr "\t--server, -s <host>\tConectarse a <host>\n"
 
 #: src/gtkhx.c:1882
 #, fuzzy, c-format
-msgid ""
-"\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
+msgid "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
 msgstr ""
 "\t--port, -t <puerto>\tConectarse a <host> en <puerto>. (por defecto: 5500)\n"
 
 #: src/gtkhx.c:1884
 #, fuzzy, c-format
-msgid ""
-"\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
+msgid "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
 msgstr ""
 "\t--login, -l <usuario>\tUsar <usuario> para <host>. (por defecto: guest)\n"
 
 #: src/gtkhx.c:1886
 #, fuzzy, c-format
-msgid ""
-"\t--pass, -p\t\tPrompt for pass of <login>.\n"
-msgstr ""
-"\t--pass, -p\t\tSolicitar la contraseña de <usuario>.\n"
+msgid "\t--pass, -p\t\tPrompt for pass of <login>.\n"
+msgstr "\t--pass, -p\t\tSolicitar la contraseña de <usuario>.\n"
 
 #: src/gtkhx.c:1887
 #, fuzzy, c-format
-msgid ""
-"\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
-msgstr ""
-"\t--bookmark, -b <nombre>\tConectarse usando el marcador <nombre>.\n"
+msgid "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
+msgstr "\t--bookmark, -b <nombre>\tConectarse usando el marcador <nombre>.\n"
 
 #: src/gtkurl.c:475
 #, fuzzy
@@ -914,10 +991,8 @@ msgstr " (Ausente)"
 
 #: src/msg.c:880
 #, fuzzy, c-format
-msgid ""
-"broadcast: %s\n"
-msgstr ""
-"difusión: %s\n"
+msgid "broadcast: %s\n"
+msgstr "difusión: %s\n"
 
 #: src/msg.c:889 src/toolbar.c:202 src/toolbar.c:751
 #, fuzzy
@@ -956,10 +1031,8 @@ msgstr "conectar"
 
 #: src/network.c:1050
 #, fuzzy, c-format
-msgid ""
-"connected to %s\n"
-msgstr ""
-"conectado a %s\n"
+msgid "connected to %s\n"
+msgstr "conectado a %s\n"
 
 #: src/network.c:1077
 #, fuzzy
@@ -973,24 +1046,18 @@ msgstr "construyendo paquete LOGIN"
 
 #: src/network.c:1651
 #, fuzzy, c-format
-msgid ""
-"connecting to %s (TLS)\n"
-msgstr ""
-"conectando a %s (TLS)\n"
+msgid "connecting to %s (TLS)\n"
+msgstr "conectando a %s (TLS)\n"
 
 #: src/network.c:1652
 #, fuzzy, c-format
-msgid ""
-"connecting to %s\n"
-msgstr ""
-"conectando a %s\n"
+msgid "connecting to %s\n"
+msgstr "conectando a %s\n"
 
 #: src/network.c:2072 src/network.c:2100 src/network.c:2126
 #, fuzzy, c-format
-msgid ""
-"tracker: %s: %s\n"
-msgstr ""
-"tracker: %s: %s\n"
+msgid "tracker: %s: %s\n"
+msgstr "tracker: %s: %s\n"
 
 #: src/network.c:2073
 #, fuzzy
@@ -1125,7 +1192,9 @@ msgstr "Respondiendo a %s — %s"
 #: src/news_browser.c:1542
 #, fuzzy
 msgid "(original post body not loaded — open the post first to fetch it)"
-msgstr "(cuerpo de la publicación original no cargado — abra la publicación primero para obtenerlo)"
+msgstr ""
+"(cuerpo de la publicación original no cargado — abra la publicación primero "
+"para obtenerlo)"
 
 #: src/news_browser.c:1577 src/news_browser.c:1869
 #, fuzzy
@@ -1164,8 +1233,12 @@ msgstr "Color del apodo"
 
 #: src/options.c:1340
 #, fuzzy
-msgid "Optional RGB color shown on servers that support the Colored-Nicknames extension"
-msgstr "Color RGB opcional mostrado en servidores que admiten la extensión Colored-Nicknames"
+msgid ""
+"Optional RGB color shown on servers that support the Colored-Nicknames "
+"extension"
+msgstr ""
+"Color RGB opcional mostrado en servidores que admiten la extensión Colored-"
+"Nicknames"
 
 #: src/options.c:1366
 #, fuzzy
@@ -1299,8 +1372,12 @@ msgstr "Formato de marca de tiempo"
 
 #: src/options.c:2305
 #, fuzzy
-msgid "strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` for the full list of conversion specifiers."
-msgstr "Cadena de formato strftime(3). Por defecto: «[%H:%M:%S] ». Consulte «man 3 strftime» para la lista completa de especificadores."
+msgid ""
+"strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` "
+"for the full list of conversion specifiers."
+msgstr ""
+"Cadena de formato strftime(3). Por defecto: «[%H:%M:%S] ». Consulte «man 3 "
+"strftime» para la lista completa de especificadores."
 
 #: src/options.c:2309
 #, fuzzy
@@ -1314,8 +1391,13 @@ msgstr "Resaltar"
 
 #: src/options.c:2321
 #, fuzzy
-msgid "Comma-separated words to highlight in chat (in addition to your own nick). Matches are case-insensitive at word boundaries."
-msgstr "Palabras separadas por comas para resaltar en el chat (además de su propio apodo). Las coincidencias son insensibles a mayúsculas en los límites de palabra."
+msgid ""
+"Comma-separated words to highlight in chat (in addition to your own nick). "
+"Matches are case-insensitive at word boundaries."
+msgstr ""
+"Palabras separadas por comas para resaltar en el chat (además de su propio "
+"apodo). Las coincidencias son insensibles a mayúsculas en los límites de "
+"palabra."
 
 #: src/options.c:2325
 #, fuzzy
@@ -1329,8 +1411,15 @@ msgstr "Historial de chat"
 
 #: src/options.c:2340
 #, fuzzy
-msgid "Servers that implement the chat-history extension (e.g. Janus) replay recent chat to you on login. 0 disables the initial pull; the \"Load older messages\" link in chat still works to fetch on demand."
-msgstr "Los servidores que implementan la extensión chat-history (por ejemplo Janus) le reproducen el chat reciente al iniciar sesión. 0 desactiva la descarga inicial; el enlace «Cargar mensajes anteriores» en el chat sigue funcionando para obtenerlos a demanda."
+msgid ""
+"Servers that implement the chat-history extension (e.g. Janus) replay recent "
+"chat to you on login. 0 disables the initial pull; the \"Load older "
+"messages\" link in chat still works to fetch on demand."
+msgstr ""
+"Los servidores que implementan la extensión chat-history (por ejemplo Janus) "
+"le reproducen el chat reciente al iniciar sesión. 0 desactiva la descarga "
+"inicial; el enlace «Cargar mensajes anteriores» en el chat sigue funcionando "
+"para obtenerlos a demanda."
 
 #: src/options.c:2348
 #, fuzzy
@@ -1375,7 +1464,9 @@ msgstr "Completado de apodo al estilo antiguo"
 #: src/options.c:2380
 #, fuzzy
 msgid "Match against the most recently typed prefix instead of all users"
-msgstr "Coincidir con el prefijo escrito más recientemente en lugar de con todos los usuarios"
+msgstr ""
+"Coincidir con el prefijo escrito más recientemente en lugar de con todos los "
+"usuarios"
 
 #: src/options.c:2393
 #, fuzzy
@@ -1384,8 +1475,13 @@ msgstr "Comportamiento de copia automática"
 
 #: src/options.c:2396
 #, fuzzy
-msgid "Drag-select in chat / news / private message text to populate the clipboard. Ctrl-V or middle-click pastes the selection elsewhere."
-msgstr "La selección con arrastre en el texto de chat / noticias / mensajes privados rellena el portapapeles. Ctrl-V o clic del medio pega la selección en otro lugar."
+msgid ""
+"Drag-select in chat / news / private message text to populate the clipboard. "
+"Ctrl-V or middle-click pastes the selection elsewhere."
+msgstr ""
+"La selección con arrastre en el texto de chat / noticias / mensajes privados "
+"rellena el portapapeles. Ctrl-V o clic del medio pega la selección en otro "
+"lugar."
 
 #: src/options.c:2402
 #, fuzzy
@@ -1519,8 +1615,12 @@ msgstr "No notificar cuando la ventana relevante esté activa"
 
 #: src/options.c:2593
 #, fuzzy
-msgid "If a chat or private message window is already active, don't pop a notification on top of it"
-msgstr "Si una ventana de chat o mensaje privado ya está activa, no mostrar una notificación encima"
+msgid ""
+"If a chat or private message window is already active, don't pop a "
+"notification on top of it"
+msgstr ""
+"Si una ventana de chat o mensaje privado ya está activa, no mostrar una "
+"notificación encima"
 
 #: src/options.c:2601
 #, fuzzy
@@ -1529,8 +1629,12 @@ msgstr "Palabras de mención"
 
 #: src/options.c:2603
 #, fuzzy
-msgid "Comma-separated. Your nickname is always matched in addition to this list. The same list drives chat message highlighting."
-msgstr "Separadas por comas. Su apodo siempre coincide además de esta lista. La misma lista controla el resaltado de mensajes de chat."
+msgid ""
+"Comma-separated. Your nickname is always matched in addition to this list. "
+"The same list drives chat message highlighting."
+msgstr ""
+"Separadas por comas. Su apodo siempre coincide además de esta lista. La "
+"misma lista controla el resaltado de mensajes de chat."
 
 #: src/options.c:2607
 #, fuzzy
@@ -1594,8 +1698,11 @@ msgstr "Apariencia"
 
 #: src/options.c:2665
 #, fuzzy
-msgid "Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
-msgstr "Esquema de colores. «Seguir al sistema» rastrea la preferencia claro/oscuro del escritorio."
+msgid ""
+"Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
+msgstr ""
+"Esquema de colores. «Seguir al sistema» rastrea la preferencia claro/oscuro "
+"del escritorio."
 
 #: src/options.c:2669
 #, fuzzy
@@ -1624,8 +1731,13 @@ msgstr "Mostrar icono en bandeja"
 
 #: src/options.c:2696
 #, fuzzy
-msgid "Display a status icon in the system tray. Closing the main window hides to tray; click the icon to toggle GtkHx's windows."
-msgstr "Mostrar un icono de estado en la bandeja del sistema. Cerrar la ventana principal la oculta en la bandeja; haga clic en el icono para mostrar/ocultar las ventanas de GtkHx."
+msgid ""
+"Display a status icon in the system tray. Closing the main window hides to "
+"tray; click the icon to toggle GtkHx's windows."
+msgstr ""
+"Mostrar un icono de estado en la bandeja del sistema. Cerrar la ventana "
+"principal la oculta en la bandeja; haga clic en el icono para mostrar/"
+"ocultar las ventanas de GtkHx."
 
 #: src/options.c:2753
 #, fuzzy
@@ -1699,24 +1811,18 @@ msgstr "No se pudo cargar el complemento: "
 
 #: src/rcv.c:556
 #, fuzzy, c-format
-msgid ""
-"join: %s\n"
-msgstr ""
-"entrada: %s\n"
+msgid "join: %s\n"
+msgstr "entrada: %s\n"
 
 #: src/rcv.c:589
 #, fuzzy, c-format
-msgid ""
-"%s is now known as %s\n"
-msgstr ""
-"%s ahora se llama %s\n"
+msgid "%s is now known as %s\n"
+msgstr "%s ahora se llama %s\n"
 
 #: src/rcv.c:664
 #, fuzzy, c-format
-msgid ""
-"parts: %s \n"
-msgstr ""
-"sale: %s \n"
+msgid "parts: %s \n"
+msgstr "sale: %s \n"
 
 #: src/rcv.c:712
 #, fuzzy
@@ -1734,17 +1840,13 @@ msgstr ""
 
 #: src/rcv.c:928
 #, fuzzy
-msgid ""
-"polite quit\n"
-msgstr ""
-"salida educada\n"
+msgid "polite quit\n"
+msgstr "salida educada\n"
 
 #: src/rcv.c:937
 #, fuzzy, c-format
-msgid ""
-"unknown header type 0x%08x\n"
-msgstr ""
-"tipo de cabecera desconocido 0x%08x\n"
+msgid "unknown header type 0x%08x\n"
+msgstr "tipo de cabecera desconocido 0x%08x\n"
 
 #: src/rcv.c:1206
 #, fuzzy
@@ -1761,7 +1863,22 @@ msgstr "¿fallido?"
 msgid "successful"
 msgstr "exitoso"
 
-#: src/rcv.c:1889
+#, fuzzy
+#: src/rcv.c:1555
+msgid "server confirmed large-file (64-bit) mode for this session\n"
+msgstr "el servidor confirmó el modo de archivos grandes (64 bits) para esta sesión\n"
+
+#, fuzzy
+#: src/rcv.c:1561
+msgid "server confirmed UTF-8 text encoding for this session\n"
+msgstr "el servidor confirmó la codificación de texto UTF-8 para esta sesión\n"
+
+#, fuzzy
+#: src/rcv.c:1567
+msgid "server confirmed chat-history extension for this session\n"
+msgstr "el servidor confirmó la extensión chat-history para esta sesión\n"
+
+#: src/rcv.c:1891
 #, fuzzy
 msgid "kick successful"
 msgstr "expulsión exitosa"
@@ -1863,13 +1980,25 @@ msgstr "_Confiar y conectar"
 
 #: src/tls_trust_dialog.c:98
 #, fuzzy, c-format
-msgid "The TLS certificate for %s:%u doesn't match the one you previously trusted. This usually means the server rotated its certificate, but it can also indicate a man-in-the-middle attack. Verify the fingerprint out-of-band with the server operator before accepting."
-msgstr "El certificado TLS para %s:%u no coincide con el que aprobó anteriormente. Esto suele significar que el servidor ha renovado su certificado, pero también podría indicar un ataque de intermediario. Verifique la huella digital fuera de banda con el operador del servidor antes de aceptar."
+msgid ""
+"The TLS certificate for %s:%u doesn't match the one you previously trusted. "
+"This usually means the server rotated its certificate, but it can also "
+"indicate a man-in-the-middle attack. Verify the fingerprint out-of-band with "
+"the server operator before accepting."
+msgstr ""
+"El certificado TLS para %s:%u no coincide con el que aprobó anteriormente. "
+"Esto suele significar que el servidor ha renovado su certificado, pero "
+"también podría indicar un ataque de intermediario. Verifique la huella "
+"digital fuera de banda con el operador del servidor antes de aceptar."
 
 #: src/tls_trust_dialog.c:107
 #, fuzzy, c-format
-msgid "You haven't connected to %s:%u over TLS before. GtkHx will pin this certificate so future connections are silent — but only if you trust it now."
-msgstr "Nunca se ha conectado a %s:%u por TLS. GtkHx fijará este certificado para que las conexiones futuras sean silenciosas — solo si confía en él ahora."
+msgid ""
+"You haven't connected to %s:%u over TLS before. GtkHx will pin this "
+"certificate so future connections are silent — but only if you trust it now."
+msgstr ""
+"Nunca se ha conectado a %s:%u por TLS. GtkHx fijará este certificado para "
+"que las conexiones futuras sean silenciosas — solo si confía en él ahora."
 
 #: src/tls_trust_dialog.c:114
 #, fuzzy, c-format
@@ -2017,17 +2146,13 @@ msgstr "_Abrir"
 
 #: src/users.c:233 src/users.c:731
 #, fuzzy, c-format
-msgid ""
-"ignore: %s is now ignored\n"
-msgstr ""
-"ignorar: %s ahora está ignorado(a)\n"
+msgid "ignore: %s is now ignored\n"
+msgstr "ignorar: %s ahora está ignorado(a)\n"
 
 #: src/users.c:247
 #, fuzzy, c-format
-msgid ""
-"ignore: %s is now unignored\n"
-msgstr ""
-"ignorar: %s ya no está ignorado(a)\n"
+msgid "ignore: %s is now unignored\n"
+msgstr "ignorar: %s ya no está ignorado(a)\n"
 
 #: src/users.c:538
 #, fuzzy
