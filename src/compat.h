@@ -53,7 +53,13 @@
 extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
 #endif
 
-#ifdef HAVE_DCGETTEXT
+/* libintl provides dgettext on every platform we care about. Older
+ * autotools layouts checked HAVE_DCGETTEXT (set by AM_GNU_GETTEXT)
+ * before pulling libintl in, but meson detects libintl directly via
+ * intl_dep + HAVE_LIBINTL_H, so we gate on the header check that's
+ * actually performed at configure time. Identity fallback is kept
+ * for the unusual case where libintl isn't present at all. */
+#ifdef HAVE_LIBINTL_H
 #include <libintl.h>
 #define _(string) dgettext (PACKAGE, string)
 #else
