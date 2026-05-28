@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtkhx\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-28 13:06-0700\n"
+"POT-Creation-Date: 2026-05-28 13:21-0700\n"
 "PO-Revision-Date: 2026-05-28 18:52+0000\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: German <de@li.org>\n"
@@ -17,17 +17,17 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/about.c:96 src/toolbar.c:591
+#: src/about.c:89 src/toolbar.c:591
 #, fuzzy
 msgid "About GtkHx"
 msgstr "Über GtkHx"
 
-#: src/about.c:147
+#: src/about.c:140
 #, fuzzy
 msgid "A GTK+ Hotline client"
 msgstr "Ein GTK+ Hotline-Client"
 
-#: src/about.c:153
+#: src/about.c:146
 #, fuzzy
 msgid "Copyright © 2000–2026 Misha Nasledov"
 msgstr "Copyright © 2000–2026 Misha Nasledov"
@@ -122,8 +122,8 @@ msgstr ""
 #: src/bookmarks.c:462
 #, fuzzy, c-format
 msgid ""
-"Save failed: %s. The file is now at \"%s\" with the previous contents — "
-"rollback also failed (%s)."
+"Save failed: %1$s. The file is now at \"%2$s\" with the previous contents — "
+"rollback also failed (%3$s)."
 msgstr ""
 "Speichern fehlgeschlagen: %s. Die Datei befindet sich nun unter „%s“ mit dem "
 "vorherigen Inhalt — auch das Zurücksetzen ist fehlgeschlagen (%s)."
@@ -151,7 +151,7 @@ msgstr "Lesezeichen löschen"
 #: src/bookmarks.c:577 src/connect.c:1172 src/files_browser.c:464
 #: src/files_browser.c:848 src/files_browser.c:1480 src/files_browser.c:1607
 #: src/news.c:578 src/news_browser.c:1173 src/news_browser.c:1314
-#: src/news_browser.c:1589 src/tls_trust_dialog.c:124 src/toolbar.c:206
+#: src/news_browser.c:1589 src/tls_trust_dialog.c:132 src/toolbar.c:206
 #: src/usermod.c:628 src/users.c:824
 #, fuzzy
 msgid "_Cancel"
@@ -198,7 +198,7 @@ msgstr ""
 msgid "Bookmark"
 msgstr "Lesezeichen"
 
-#: src/bookmarks.c:751 src/chat.c:2453 src/files.c:368 src/files_panel.c:1325
+#: src/bookmarks.c:751 src/chat.c:2455 src/files.c:368 src/files_panel.c:1325
 #: src/plugin.c:153 src/tracker.c:469 src/users.c:975
 #, fuzzy
 msgid "Name"
@@ -259,13 +259,13 @@ msgstr "Kompression"
 msgid "Save"
 msgstr "Speichern"
 
-#, fuzzy
 #: src/chat.c:82
+#, fuzzy
 msgid "Load older messages"
 msgstr "Ältere Nachrichten laden"
 
-#, fuzzy
 #: src/chat.c:92
+#, fuzzy
 msgid "Loading older messages..."
 msgstr "Lade ältere Nachrichten …"
 
@@ -276,63 +276,68 @@ msgid_plural "chat history (%u messages)"
 msgstr[0] "Chatverlauf (%u Nachricht)"
 msgstr[1] "Chatverlauf (%u Nachrichten)"
 
-#: src/chat.c:2072 src/chat.c:2213 src/gtkutil.c:467 src/gtkutil.c:511
+#: src/chat.c:1010
+#, fuzzy
+msgid "live messages"
+msgstr "Nachrichten in Echtzeit"
+
+#: src/chat.c:2074 src/chat.c:2215 src/gtkutil.c:467 src/gtkutil.c:511
 #: src/options.c:2772 src/toolbar.c:736
 #, fuzzy
 msgid "Chat"
 msgstr "Chat"
 
-#: src/chat.c:2396
+#: src/chat.c:2398
 #, fuzzy
 msgid "invites you to private chat"
 msgstr "lädt Sie zu einem privaten Chat ein"
 
-#: src/chat.c:2398
+#: src/chat.c:2400
 #, fuzzy
 msgid "Chat Invitation"
 msgstr "Chat-Einladung"
 
-#: src/chat.c:2400
+#: src/chat.c:2402
 #, fuzzy
 msgid "_Decline"
 msgstr "_Ablehnen"
 
-#: src/chat.c:2402
+#: src/chat.c:2404
 #, fuzzy
 msgid "_Join"
 msgstr "_Beitreten"
 
-#: src/chat.c:2452 src/users.c:974
+#: src/chat.c:2454 src/users.c:974
 #, fuzzy
 msgid "UID"
 msgstr "UID"
 
-#: src/chat.c:2474 src/chat.c:2630 src/users.c:548 src/users.c:1083
+#: src/chat.c:2476 src/chat.c:2632 src/users.c:548 src/users.c:1083
 #, fuzzy
 msgid "Private Chat"
 msgstr "Privater Chat"
 
-#: src/chat.c:2592 src/users.c:1063
+#: src/chat.c:2594 src/users.c:1063
 #, fuzzy
 msgid "Msg"
 msgstr "Nachricht"
 
-#: src/chat.c:2603 src/users.c:527 src/users.c:1068
+#: src/chat.c:2605 src/users.c:527 src/users.c:1068
 #, fuzzy
 msgid "Kick"
 msgstr "Hinauswerfen"
 
-#: src/chat.c:2614 src/users.c:1073
+#: src/chat.c:2616 src/users.c:1073
 #, fuzzy
 msgid "User Info"
 msgstr "Benutzer-Info"
 
-#: src/chat.c:2625 src/users.c:529 src/users.c:1078
+#: src/chat.c:2627 src/users.c:529 src/users.c:1078
 #, fuzzy
 msgid "Ban"
 msgstr "Bannen"
 
-#: src/chat.c:2641 src/users.c:536 src/users.c:1088
+#: src/chat.c:2643 src/users.c:536 src/users.c:1088
 #, fuzzy
 msgid "Ignore"
 msgstr "Ignorieren"
@@ -627,7 +632,7 @@ msgstr[1] ""
 
 #: src/files_browser.c:1066
 #, fuzzy, c-format
-msgid "%u queued, %u failed (%s)."
+msgid "%1$u queued, %2$u failed (%3$s)."
 msgstr "%u in Warteschlange, %u fehlgeschlagen (%s)."
 
 #: src/files_browser.c:1478 src/news_browser.c:1860
@@ -726,7 +731,7 @@ msgstr "Kein Pfad zum Auflisten"
 
 #: src/files_local_provider.c:172
 #, fuzzy, c-format
-msgid "Can't read %s: %s"
+msgid "Can't read %1$s: %2$s"
 msgstr "%s kann nicht gelesen werden: %s"
 
 #: src/files_local_provider.c:214
@@ -736,7 +741,7 @@ msgstr "Ordner"
 
 #: src/files_local_provider.c:239
 #, fuzzy, c-format
-msgid "Error reading %s: %s"
+msgid "Error reading %1$s: %2$s"
 msgstr "Fehler beim Lesen von %s: %s"
 
 #: src/files_ops.c:34
@@ -802,7 +807,7 @@ msgstr[1] ""
 
 #: src/files_panel.c:1039
 #, fuzzy, c-format
-msgid "%u of %u selected"
+msgid "%1$u of %2$u selected"
 msgstr "%u von %u ausgewählt"
 
 #: src/files_panel.c:1272
@@ -831,42 +836,42 @@ msgstr "Anmeldung läuft…"
 msgid "Remote"
 msgstr "Entfernt"
 
-#: src/gtkhx.c:1072
+#: src/gtkhx.c:1089
 #, fuzzy, c-format
-msgid "User Info: %s (%u)"
+msgid "User Info: %1$s (%2$u)"
 msgstr "Benutzer-Info: %s (%u)"
 
-#: src/gtkhx.c:1583
+#: src/gtkhx.c:1600
 #, fuzzy
 msgid "Agreement"
 msgstr "Vereinbarung"
 
-#: src/gtkhx.c:1605
+#: src/gtkhx.c:1622
 #, fuzzy
 msgid "Agree"
 msgstr "Akzeptieren"
 
-#: src/gtkhx.c:1609
+#: src/gtkhx.c:1626
 #, fuzzy
 msgid "Disagree"
 msgstr "Ablehnen"
 
-#: src/gtkhx.c:1873
+#: src/gtkhx.c:1890
 #, fuzzy, c-format
 msgid "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 msgstr "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
 
-#: src/gtkhx.c:1874
+#: src/gtkhx.c:1891
 #, fuzzy, c-format
 msgid "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
 msgstr "GtkHx wird OHNE JEGLICHE GARANTIE bereitgestellt.\n"
 
-#: src/gtkhx.c:1875
+#: src/gtkhx.c:1892
 #, fuzzy, c-format
 msgid "This is free software, and you are welcome\n"
 msgstr "Dies ist freie Software, und Sie dürfen sie\n"
 
-#: src/gtkhx.c:1876
+#: src/gtkhx.c:1893
 #, fuzzy, c-format
 msgid ""
 "to redistribute it under certain conditions.\n"
@@ -875,12 +880,12 @@ msgstr ""
 "unter bestimmten Bedingungen weiterverbreiten.\n"
 "\n"
 
-#: src/gtkhx.c:1878
+#: src/gtkhx.c:1895
 #, fuzzy, c-format
 msgid "usage: %s [options]\n"
 msgstr "Verwendung: %s [Optionen]\n"
 
-#: src/gtkhx.c:1879
+#: src/gtkhx.c:1896
 #, fuzzy, c-format
 msgid ""
 "\n"
@@ -889,35 +894,35 @@ msgstr ""
 "\n"
 "unterstützte Optionen:\n"
 
-#: src/gtkhx.c:1880
+#: src/gtkhx.c:1897
 #, fuzzy, c-format
 msgid "\t--help, -h\t\tPrint this help message out.\n"
 msgstr "\t--help, -h\t\tDiese Hilfemeldung anzeigen.\n"
 
-#: src/gtkhx.c:1881
+#: src/gtkhx.c:1898
 #, fuzzy, c-format
 msgid "\t--server, -s <host>\tConnect to <host>\n"
 msgstr "\t--server, -s <Host>\tMit <Host> verbinden\n"
 
-#: src/gtkhx.c:1882
+#: src/gtkhx.c:1899
 #, fuzzy, c-format
 msgid "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
 msgstr ""
 "\t--port, -t <Port>\tMit <Host> auf <Port> verbinden. (Standard: 5500)\n"
 
-#: src/gtkhx.c:1884
+#: src/gtkhx.c:1901
 #, fuzzy, c-format
 msgid "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
 msgstr ""
 "\t--login, -l <Benutzer>\t<Benutzer> für <Host> verwenden. (Standard: "
 "guest)\n"
 
-#: src/gtkhx.c:1886
+#: src/gtkhx.c:1903
 #, fuzzy, c-format
 msgid "\t--pass, -p\t\tPrompt for pass of <login>.\n"
 msgstr "\t--pass, -p\t\tNach Passwort für <Benutzer> fragen.\n"
 
-#: src/gtkhx.c:1887
+#: src/gtkhx.c:1904
 #, fuzzy, c-format
 msgid "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
 msgstr "\t--bookmark, -b <Name>\tÜber Lesezeichen <Name> verbinden.\n"
@@ -1062,7 +1067,7 @@ msgstr "verbinde mit %s\n"
 
 #: src/network.c:2072 src/network.c:2100 src/network.c:2126
 #, fuzzy, c-format
-msgid "tracker: %s: %s\n"
+msgid "tracker: %1$s: %2$s\n"
 msgstr "Tracker: %s: %s\n"
 
 #: src/network.c:2073
@@ -1122,7 +1127,7 @@ msgstr "(kein Betreff)"
 
 #: src/news_browser.c:943
 #, fuzzy, c-format
-msgid "%s — %s"
+msgid "%1$s — %2$s"
 msgstr "%s — %s"
 
 #: src/news_browser.c:956
@@ -1192,7 +1197,7 @@ msgstr "Beitrag _löschen"
 
 #: src/news_browser.c:1493
 #, fuzzy, c-format
-msgid "Replying to %s — %s"
+msgid "Replying to %1$s — %2$s"
 msgstr "Antwort an %s — %s"
 
 #: src/news_browser.c:1542
@@ -1827,69 +1832,69 @@ msgstr "Beitritt: %s\n"
 
 #: src/rcv.c:589
 #, fuzzy, c-format
-msgid "%s is now known as %s\n"
+msgid "%1$s is now known as %2$s\n"
 msgstr "%s heißt nun %s\n"
 
-#: src/rcv.c:664
+#: src/rcv.c:665
 #, fuzzy, c-format
 msgid "parts: %s \n"
 msgstr "verlässt: %s \n"
 
-#: src/rcv.c:712
+#: src/rcv.c:713
 #, fuzzy
 msgid "Subject Changed to"
 msgstr "Betreff geändert in"
 
-#: src/rcv.c:847
+#: src/rcv.c:848
 #, fuzzy, c-format
 msgid ""
-"Received queue id (%d) for xfer ref %d\n"
+"Received queue id (%1$d) for xfer ref %2$d\n"
 "No such xfer.\n"
 msgstr ""
 "Warteschlangen-ID (%d) für Übertragungs-Ref %d empfangen\n"
 "Übertragung nicht vorhanden.\n"
 
-#: src/rcv.c:928
+#: src/rcv.c:929
 #, fuzzy
 msgid "polite quit\n"
 msgstr "höfliches Beenden\n"
 
-#: src/rcv.c:937
+#: src/rcv.c:938
 #, fuzzy, c-format
 msgid "unknown header type 0x%08x\n"
 msgstr "unbekannter Kopfzeilentyp 0x%08x\n"
 
-#: src/rcv.c:1206
+#: src/rcv.c:1207
 #, fuzzy
 msgid "login"
 msgstr "Anmeldung"
 
-#: src/rcv.c:1208
+#: src/rcv.c:1209
 #, fuzzy
 msgid "failed?"
 msgstr "fehlgeschlagen?"
 
-#: src/rcv.c:1209
+#: src/rcv.c:1210
 #, fuzzy
 msgid "successful"
 msgstr "erfolgreich"
 
+#: src/rcv.c:1556
 #, fuzzy
-#: src/rcv.c:1555
 msgid "server confirmed large-file (64-bit) mode for this session\n"
 msgstr "Server hat den Large-File-Modus (64 Bit) für diese Sitzung bestätigt\n"
 
+#: src/rcv.c:1562
 #, fuzzy
-#: src/rcv.c:1561
 msgid "server confirmed UTF-8 text encoding for this session\n"
 msgstr "Server hat die UTF-8-Textcodierung für diese Sitzung bestätigt\n"
 
+#: src/rcv.c:1568
 #, fuzzy
-#: src/rcv.c:1567
 msgid "server confirmed chat-history extension for this session\n"
 msgstr "Server hat die Chat-History-Erweiterung für diese Sitzung bestätigt\n"
 
-#: src/rcv.c:1891
+#: src/rcv.c:1892
 #, fuzzy
 msgid "kick successful"
 msgstr "Hinauswerfen erfolgreich"
@@ -1906,7 +1911,7 @@ msgstr "Tracker wird aufgelistet"
 
 #: src/tasks.c:546
 #, fuzzy, c-format
-msgid "%s · %u of %u servers"
+msgid "%1$s · %2$u of %3$u servers"
 msgstr "%s · %u von %u Servern"
 
 #: src/tasks.c:570
@@ -1916,7 +1921,7 @@ msgstr "Verbinden mit Tracker"
 
 #: src/tasks.c:571
 #, fuzzy, c-format
-msgid "%s · %u of %u"
+msgid "%1$s · %2$u of %3$u"
 msgstr "%s · %u von %u"
 
 #: src/tasks.c:603
@@ -1926,7 +1931,7 @@ msgstr "Verbinden"
 
 #: src/tasks.c:604
 #, fuzzy, c-format
-msgid "Step %u of %u"
+msgid "Step %1$u of %2$u"
 msgstr "Schritt %u von %u"
 
 #: src/tasks.c:643
@@ -1936,7 +1941,7 @@ msgstr "Aufgabe 0x%x"
 
 #: src/tasks.c:654
 #, fuzzy, c-format
-msgid "%s of %s"
+msgid "%1$s of %2$s"
 msgstr "%s von %s"
 
 #: src/tasks.c:915
@@ -1961,12 +1966,12 @@ msgstr "Übertragung in Warteschlange nach unten verschieben"
 
 #: src/tasks.c:1060
 #, fuzzy, c-format
-msgid "%s of %s · %s/s · ETA %d:%02d:%02d"
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d:%6$02d"
 msgstr "%s von %s · %s/s · verbleibend %d:%02d:%02d"
 
 #: src/tasks.c:1064
 #, fuzzy, c-format
-msgid "%s of %s · %s/s · ETA %d:%02d"
+msgid "%1$s of %2$s · %3$s/s · ETA %4$d:%5$02d"
 msgstr "%s von %s · %s/s · verbleibend %d:%02d"
 
 #: src/tls_trust_dialog.c:79
@@ -2012,7 +2017,15 @@ msgstr ""
 "Zertifikat anheften, sodass zukünftige Verbindungen unauffällig erfolgen — "
 "aber nur, wenn Sie ihm jetzt vertrauen."
 
-#: src/tls_trust_dialog.c:114
+#: src/tls_trust_dialog.c:115
+#, c-format
+msgid ""
+"If %s later presents the same certificate on a different port (for example "
+"the file transfer subchannel), it will be accepted silently without another "
+"prompt."
+msgstr ""
+
+#: src/tls_trust_dialog.c:122
 #, fuzzy, c-format
 msgid ""
 "Fingerprint:\n"
@@ -2021,7 +2034,7 @@ msgstr ""
 "Fingerabdruck:\n"
 "%s"
 
-#: src/tls_trust_dialog.c:118
+#: src/tls_trust_dialog.c:126
 #, fuzzy, c-format
 msgid "Pinned certificates live in %s."
 msgstr "Angeheftete Zertifikate befinden sich in %s."

@@ -1006,11 +1006,13 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * divider from the initial batch is still in place further
 	 * down. */
     if (!prepend_mode) {
-        const char *divider = "\003" "37" "─── live messages ───";
+        gchar *divider
+            = g_strdup_printf ("\003" "37" "─── %s ───", _ ("live messages"));
         gtk_xtext_append_indent (xbuf,
                                  (unsigned char *) "", 0,
                                  (unsigned char *) divider,
                                  (int) strlen (divider), 0);
+        g_free (divider);
     }
 
 #undef HX_RENDER
