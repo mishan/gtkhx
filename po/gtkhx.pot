@@ -1,0 +1,1720 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the gtkhx package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: gtkhx\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-28 11:18-0700\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/about.c:96 src/toolbar.c:591
+msgid "About GtkHx"
+msgstr ""
+
+#: src/about.c:147
+msgid "A GTK+ Hotline client"
+msgstr ""
+
+#: src/about.c:153
+msgid "Copyright © 2000–2026 Misha Nasledov"
+msgstr ""
+
+#: src/banner.c:240
+msgid "Server banner: URL mode without URL"
+msgstr ""
+
+#: src/banner.c:257
+#, c-format
+msgid "Server banner [%s] — loading..."
+msgstr ""
+
+#: src/banner.c:371
+msgid "Server banner: URL is not parseable"
+msgstr ""
+
+#: src/banner.c:406
+msgid "Server banner: fetch failed"
+msgstr ""
+
+#: src/banner.c:416
+msgid "Server banner: HTTP error"
+msgstr ""
+
+#: src/banner.c:431 src/banner.c:715
+msgid "Server banner: image not decodable"
+msgstr ""
+
+#: src/banner.c:499
+msgid "Server banner: empty transfer"
+msgstr ""
+
+#: src/banner.c:504
+msgid "Server banner: image too large"
+msgstr ""
+
+#: src/banner.c:550
+msgid "Server banner: fetch worker failed to start"
+msgstr ""
+
+#: src/banner.c:704
+msgid "Server banner: HTXF fetch failed"
+msgstr ""
+
+#: src/bookmarks.c:100
+msgid "Bookmark error"
+msgstr ""
+
+#: src/bookmarks.c:101 src/gtkutil.c:579 src/msg.c:890
+msgid "_OK"
+msgstr ""
+
+#: src/bookmarks.c:270
+#, c-format
+msgid ""
+"Could not load bookmark \"%s\". The file may be in the legacy format — pick "
+"it from the toolbar's Connect-button dropdown to convert it first."
+msgstr ""
+
+#: src/bookmarks.c:378 src/bookmarks.c:390
+msgid "Bookmark name cannot be empty."
+msgstr ""
+
+#: src/bookmarks.c:420
+#, c-format
+msgid "Rename failed: %s"
+msgstr ""
+
+#: src/bookmarks.c:457
+#, c-format
+msgid "Save failed: %s. The bookmark was restored to its original name."
+msgstr ""
+
+#: src/bookmarks.c:462
+#, c-format
+msgid ""
+"Save failed: %s. The file is now at \"%s\" with the previous contents — "
+"rollback also failed (%s)."
+msgstr ""
+
+#: src/bookmarks.c:469
+#, c-format
+msgid "Save failed: %s"
+msgstr ""
+
+#: src/bookmarks.c:547
+#, c-format
+msgid "Delete failed: %s"
+msgstr ""
+
+#: src/bookmarks.c:571
+#, c-format
+msgid "Delete the bookmark \"%s\"? This cannot be undone."
+msgstr ""
+
+#: src/bookmarks.c:574
+msgid "Delete Bookmark"
+msgstr ""
+
+#: src/bookmarks.c:577 src/connect.c:1172 src/files_browser.c:464
+#: src/files_browser.c:848 src/files_browser.c:1480 src/files_browser.c:1607
+#: src/news.c:578 src/news_browser.c:1173 src/news_browser.c:1314
+#: src/news_browser.c:1589 src/tls_trust_dialog.c:124 src/toolbar.c:206
+#: src/usermod.c:628 src/users.c:824
+msgid "_Cancel"
+msgstr ""
+
+#: src/bookmarks.c:579 src/files_browser.c:1609
+msgid "_Delete"
+msgstr ""
+
+#: src/bookmarks.c:597 src/bookmarks.c:609
+msgid "Off"
+msgstr ""
+
+#: src/bookmarks.c:641
+msgid "Bookmarks"
+msgstr ""
+
+#: src/bookmarks.c:705
+msgid "New bookmark"
+msgstr ""
+
+#: src/bookmarks.c:710
+msgid "Delete selected bookmark"
+msgstr ""
+
+#: src/bookmarks.c:730
+msgid "No Bookmark Selected"
+msgstr ""
+
+#: src/bookmarks.c:733
+msgid "Pick one from the list, or create a new one with the + button."
+msgstr ""
+
+#: src/bookmarks.c:747
+msgid "Bookmark"
+msgstr ""
+
+#: src/bookmarks.c:751 src/chat.c:2409 src/files.c:368 src/files_panel.c:1325
+#: src/plugin.c:153 src/tracker.c:469 src/users.c:975
+msgid "Name"
+msgstr ""
+
+#: src/bookmarks.c:756 src/connect.c:1275 src/connect.c:1288
+msgid "Server"
+msgstr ""
+
+#: src/bookmarks.c:761
+msgid "Port (blank = 5500)"
+msgstr ""
+
+#: src/bookmarks.c:766 src/connect.c:1307 src/options.c:2263 src/usermod.c:512
+#: src/usermod.c:641
+msgid "Login"
+msgstr ""
+
+#: src/bookmarks.c:771 src/connect.c:1313 src/usermod.c:529
+msgid "Password"
+msgstr ""
+
+#: src/bookmarks.c:781 src/connect.c:1329
+msgid "Use TLS"
+msgstr ""
+
+#: src/bookmarks.c:784 src/connect.c:1332
+msgid ""
+"Connect to the server's TLS port. Disables HOPE and compression — they're "
+"not meaningful over a TLS-encrypted stream."
+msgstr ""
+
+#: src/bookmarks.c:791
+msgid "HOPE (encrypted handshake)"
+msgstr ""
+
+#: src/bookmarks.c:796 src/connect.c:1383
+msgid "Cipher"
+msgstr ""
+
+#: src/bookmarks.c:811 src/connect.c:1362
+msgid "Compression"
+msgstr ""
+
+#: src/bookmarks.c:832 src/files.c:351 src/usermod.c:483
+msgid "Save"
+msgstr ""
+
+#: src/chat.c:2028 src/chat.c:2169 src/gtkutil.c:467 src/gtkutil.c:511
+#: src/options.c:2772 src/toolbar.c:736
+msgid "Chat"
+msgstr ""
+
+#: src/chat.c:2352
+msgid "invites you to private chat"
+msgstr ""
+
+#: src/chat.c:2354
+msgid "Chat Invitation"
+msgstr ""
+
+#: src/chat.c:2356
+msgid "_Decline"
+msgstr ""
+
+#: src/chat.c:2358
+msgid "_Join"
+msgstr ""
+
+#: src/chat.c:2408 src/users.c:974
+msgid "UID"
+msgstr ""
+
+#: src/chat.c:2430 src/chat.c:2586 src/users.c:548 src/users.c:1083
+msgid "Private Chat"
+msgstr ""
+
+#: src/chat.c:2548 src/users.c:1063
+msgid "Msg"
+msgstr ""
+
+#: src/chat.c:2559 src/users.c:527 src/users.c:1068
+msgid "Kick"
+msgstr ""
+
+#: src/chat.c:2570 src/users.c:1073
+msgid "User Info"
+msgstr ""
+
+#: src/chat.c:2581 src/users.c:529 src/users.c:1078
+msgid "Ban"
+msgstr ""
+
+#: src/chat.c:2597 src/users.c:536 src/users.c:1088
+msgid "Ignore"
+msgstr ""
+
+#: src/connect.c:632
+msgid "Convert Bookmark"
+msgstr ""
+
+#: src/connect.c:633
+msgid ""
+"This bookmark is written in an old GtkHx format. Would you like to convert "
+"it to the new format?"
+msgstr ""
+
+#: src/connect.c:635
+msgid "_No"
+msgstr ""
+
+#: src/connect.c:637
+msgid "_Convert"
+msgstr ""
+
+#: src/connect.c:849 src/connect.c:998
+msgid "No such bookmark"
+msgstr ""
+
+#: src/connect.c:858 src/connect.c:1007
+msgid "Could not read bookmark"
+msgstr ""
+
+#: src/connect.c:1071 src/options.c:2257
+msgid "Error"
+msgstr ""
+
+#: src/connect.c:1072
+msgid "You must specify a name for this bookmark with at least one character."
+msgstr ""
+
+#: src/connect.c:1169
+msgid "Save Bookmark"
+msgstr ""
+
+#: src/connect.c:1170
+msgid "Enter a name for this bookmark."
+msgstr ""
+
+#: src/connect.c:1174
+msgid "_Save"
+msgstr ""
+
+#: src/connect.c:1234 src/connect.c:1254 src/toolbar.c:677
+msgid "Connect"
+msgstr ""
+
+#: src/connect.c:1249
+msgid "Save Bookmark…"
+msgstr ""
+
+#: src/connect.c:1278
+msgid ""
+"Enter the server address. If you have an account, fill in your login and "
+"password below; otherwise leave them blank."
+msgstr ""
+
+#: src/connect.c:1294 src/tracker.c:472
+msgid "Port"
+msgstr ""
+
+#: src/connect.c:1303
+msgid "Account"
+msgstr ""
+
+#: src/connect.c:1321
+msgid "Connection"
+msgstr ""
+
+#: src/connect.c:1342
+msgid "Secure (HOPE)"
+msgstr ""
+
+#: src/connect.c:1345
+msgid "Encrypt and optionally compress the connection"
+msgstr ""
+
+#: src/emoji.c:67
+msgid "Insert emoji"
+msgstr ""
+
+#: src/files.c:200
+msgid "Unknown"
+msgstr ""
+
+#: src/files.c:226
+#, c-format
+msgid "%s file"
+msgstr ""
+
+#: src/files.c:346
+msgid "File Info"
+msgstr ""
+
+#: src/files.c:379 src/files.c:382
+msgid "bytes"
+msgstr ""
+
+#: src/files.c:390
+msgid "Creator"
+msgstr ""
+
+#: src/files.c:392
+msgid "Type"
+msgstr ""
+
+#: src/files.c:394 src/files_panel.c:1327
+msgid "Size"
+msgstr ""
+
+#: src/files.c:396
+msgid "Created"
+msgstr ""
+
+#: src/files.c:398 src/files_panel.c:1330
+msgid "Modified"
+msgstr ""
+
+#: src/files.c:405
+msgid "Comments"
+msgstr ""
+
+#: src/files_browser.c:320
+msgid "Select a single file to preview."
+msgstr ""
+
+#: src/files_browser.c:324
+msgid "Preview is for files, not folders."
+msgstr ""
+
+#: src/files_browser.c:357
+msgid "Get Info is only available for remote files."
+msgstr ""
+
+#: src/files_browser.c:361
+msgid "Not connected."
+msgstr ""
+
+#: src/files_browser.c:366
+msgid "Select a single file."
+msgstr ""
+
+#: src/files_browser.c:432
+msgid "Rename failed."
+msgstr ""
+
+#: src/files_browser.c:459
+#, c-format
+msgid "Rename “%s” to:"
+msgstr ""
+
+#: src/files_browser.c:460
+msgid "Rename"
+msgstr ""
+
+#: src/files_browser.c:466
+msgid "_Rename"
+msgstr ""
+
+#: src/files_browser.c:522
+msgid "Select a single file to rename."
+msgstr ""
+
+#: src/files_browser.c:651 src/files_browser.c:1102 src/files_ops.c:40
+#: src/files_remote_provider.c:122
+msgid "Not connected to a server."
+msgstr ""
+
+#: src/files_browser.c:656 src/files_browser.c:1107
+msgid "You don't have permission to move files on the server."
+msgstr ""
+
+#: src/files_browser.c:707
+msgid "Move failed."
+msgstr ""
+
+#: src/files_browser.c:799
+msgid "Select files to move first."
+msgstr ""
+
+#: src/files_browser.c:819
+msgid ""
+"Move only works within one side. Use Copy then Delete to move between local "
+"and remote."
+msgstr ""
+
+#: src/files_browser.c:838
+#, c-format
+msgid "Move “%s” to:"
+msgstr ""
+
+#: src/files_browser.c:844
+msgid "Move"
+msgstr ""
+
+#: src/files_browser.c:850
+msgid "_Move"
+msgstr ""
+
+#: src/files_browser.c:1035
+msgid "Select a file to copy first."
+msgstr ""
+
+#: src/files_browser.c:1066
+#, c-format
+msgid "%u queued, %u failed (%s)."
+msgstr ""
+
+#: src/files_browser.c:1478 src/news_browser.c:1860
+msgid "New Folder"
+msgstr ""
+
+#: src/files_browser.c:1478
+msgid "Enter a name for the new folder."
+msgstr ""
+
+#: src/files_browser.c:1482
+msgid "C_reate"
+msgstr ""
+
+#: src/files_browser.c:1571
+#, c-format
+msgid "Delete “%s”? This cannot be undone."
+msgstr ""
+
+#: src/files_browser.c:1603 src/news_browser.c:1310 src/news_browser.c:1872
+#: src/usermod.c:492
+msgid "Delete"
+msgstr ""
+
+#: src/files_browser.c:1902 src/toolbar.c:727
+msgid "Files"
+msgstr ""
+
+#: src/files_browser.c:1950
+msgid "Reload active panel (Ctrl+R)"
+msgstr ""
+
+#: src/files_browser.c:1952
+msgid "New folder in active panel (F7, Ctrl+N)"
+msgstr ""
+
+#: src/files_browser.c:1954
+msgid "Copy left selection to the right panel"
+msgstr ""
+
+#: src/files_browser.c:1956
+msgid "Copy right selection to the left panel"
+msgstr ""
+
+#: src/files_browser.c:1958
+msgid "Preview selected file (F3, Ctrl+P)"
+msgstr ""
+
+#: src/files_browser.c:1960
+msgid "Get Info for selected file (Ctrl+I)"
+msgstr ""
+
+#: src/files_browser.c:1961
+msgid "Rename selected file (F2)"
+msgstr ""
+
+#: src/files_browser.c:1964
+msgid "Delete selection in active panel (F8, Delete, Ctrl+D)"
+msgstr ""
+
+#: src/files_local_provider.c:134
+msgid "Local"
+msgstr ""
+
+#: src/files_local_provider.c:156
+msgid "No path to list"
+msgstr ""
+
+#: src/files_local_provider.c:172
+#, c-format
+msgid "Can't read %s: %s"
+msgstr ""
+
+#: src/files_local_provider.c:214
+msgid "Folder"
+msgstr ""
+
+#: src/files_local_provider.c:239
+#, c-format
+msgid "Error reading %s: %s"
+msgstr ""
+
+#: src/files_ops.c:34
+msgid "Copied."
+msgstr ""
+
+#: src/files_ops.c:36
+msgid "Nothing to copy."
+msgstr ""
+
+#: src/files_ops.c:38
+msgid "No target panel."
+msgstr ""
+
+#: src/files_ops.c:42
+msgid "You don't have permission for that."
+msgstr ""
+
+#: src/files_ops.c:44
+msgid ""
+"Hotline has no server-side copy. Use Move (F6) to relocate the file, or drag "
+"to your local panel first."
+msgstr ""
+
+#: src/files_ops.c:51
+msgid "Folder transfer not supported here."
+msgstr ""
+
+#: src/files_ops.c:53
+msgid "Local copy failed."
+msgstr ""
+
+#: src/files_ops.c:55
+msgid "Copy failed."
+msgstr ""
+
+#: src/files_panel.c:1022
+msgid "Folder is upload-only — drop files here to upload"
+msgstr ""
+
+#: src/files_panel.c:1024
+msgid "Can't list this folder."
+msgstr ""
+
+#: src/files_panel.c:1039
+#, c-format
+msgid "%u of %u selected"
+msgstr ""
+
+#: src/files_panel.c:1272
+msgid "Switch this panel between local filesystem and remote server"
+msgstr ""
+
+#: src/files_panel.c:1281
+msgid "Up one level"
+msgstr ""
+
+#: src/files_panel.c:1333
+msgid "Kind"
+msgstr ""
+
+#: src/files_remote_provider.c:134
+msgid "Logging in…"
+msgstr ""
+
+#: src/files_remote_provider.c:392
+msgid "Remote"
+msgstr ""
+
+#: src/gtkhx.c:1072
+#, c-format
+msgid "User Info: %s (%u)"
+msgstr ""
+
+#: src/gtkhx.c:1583
+msgid "Agreement"
+msgstr ""
+
+#: src/gtkhx.c:1605
+msgid "Agree"
+msgstr ""
+
+#: src/gtkhx.c:1609
+msgid "Disagree"
+msgstr ""
+
+#: src/gtkhx.c:1873
+#, c-format
+msgid "GtkHx %s, Copyright (C) 2000-2026 Misha Nasledov\n"
+msgstr ""
+
+#: src/gtkhx.c:1874
+#, c-format
+msgid "GtkHx comes with ABSOLUTELY NO WARRANTY.\n"
+msgstr ""
+
+#: src/gtkhx.c:1875
+#, c-format
+msgid "This is free software, and you are welcome\n"
+msgstr ""
+
+#: src/gtkhx.c:1876
+#, c-format
+msgid ""
+"to redistribute it under certain conditions.\n"
+"\n"
+msgstr ""
+
+#: src/gtkhx.c:1878
+#, c-format
+msgid "usage: %s [options]\n"
+msgstr ""
+
+#: src/gtkhx.c:1879
+#, c-format
+msgid ""
+"\n"
+"supported options:\n"
+msgstr ""
+
+#: src/gtkhx.c:1880
+#, c-format
+msgid "\t--help, -h\t\tPrint this help message out.\n"
+msgstr ""
+
+#: src/gtkhx.c:1881
+#, c-format
+msgid "\t--server, -s <host>\tConnect to <host>\n"
+msgstr ""
+
+#: src/gtkhx.c:1882
+#, c-format
+msgid "\t--port, -t <port>\tConnect to <host> on <port>. (default: 5500)\n"
+msgstr ""
+
+#: src/gtkhx.c:1884
+#, c-format
+msgid "\t--login, -l <login>\tUse <login> for <host>. (default: guest)\n"
+msgstr ""
+
+#: src/gtkhx.c:1886
+#, c-format
+msgid "\t--pass, -p\t\tPrompt for pass of <login>.\n"
+msgstr ""
+
+#: src/gtkhx.c:1887
+#, c-format
+msgid "\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"
+msgstr ""
+
+#: src/gtkurl.c:475
+msgid "Open Link in Browser"
+msgstr ""
+
+#: src/gtkurl.c:486
+msgid "Copy Selected Link"
+msgstr ""
+
+#: src/gtkutil.c:410
+msgid "Connecting to"
+msgstr ""
+
+#: src/gtkutil.c:416 src/toolbar.c:769
+msgid "Not Connected"
+msgstr ""
+
+#: src/gtkutil.c:421
+msgid "Disconnected from"
+msgstr ""
+
+#: src/gtkutil.c:427
+msgid "Connected to"
+msgstr ""
+
+#: src/gtkutil.c:431
+msgid "Logged in to"
+msgstr ""
+
+#: src/gtkutil.c:457 src/gtkutil.c:520
+msgid "GtkHx"
+msgstr ""
+
+#: src/gtkutil.c:462 src/gtkutil.c:508 src/news.c:671 src/news.c:768
+#: src/toolbar.c:716
+msgid "News"
+msgstr ""
+
+#: src/gtkutil.c:472 src/gtkutil.c:514 src/toolbar.c:732 src/tracker.c:470
+#: src/users.c:987 src/users.c:1147
+msgid "Users"
+msgstr ""
+
+#: src/gtkutil.c:477 src/gtkutil.c:517 src/tasks.c:903 src/tasks.c:955
+#: src/toolbar.c:740
+msgid "Tasks"
+msgstr ""
+
+#: src/msg.c:353 src/toolbar.c:592 src/users.c:506
+msgid "Admin"
+msgstr ""
+
+#: src/msg.c:353 src/users.c:506
+msgid "Guest"
+msgstr ""
+
+#: src/msg.c:354 src/users.c:507
+msgid " (Away)"
+msgstr ""
+
+#: src/msg.c:880
+#, c-format
+msgid "broadcast: %s\n"
+msgstr ""
+
+#: src/msg.c:889 src/toolbar.c:202 src/toolbar.c:751
+msgid "Broadcast"
+msgstr ""
+
+#: src/network.c:220 src/toolbar.c:310
+msgid "connection closed"
+msgstr ""
+
+#: src/network.c:950
+msgid "failed"
+msgstr ""
+
+#: src/network.c:989
+msgid "reading server magic"
+msgstr ""
+
+#: src/network.c:999
+msgid "invalid hotline server"
+msgstr ""
+
+#: src/network.c:1016
+msgid "writing client magic"
+msgstr ""
+
+#: src/network.c:1041
+msgid "connect"
+msgstr ""
+
+#: src/network.c:1050
+#, c-format
+msgid "connected to %s\n"
+msgstr ""
+
+#: src/network.c:1077
+msgid "remote address"
+msgstr ""
+
+#: src/network.c:1218
+msgid "building LOGIN packet"
+msgstr ""
+
+#: src/network.c:1651
+#, c-format
+msgid "connecting to %s (TLS)\n"
+msgstr ""
+
+#: src/network.c:1652
+#, c-format
+msgid "connecting to %s\n"
+msgstr ""
+
+#: src/network.c:2072 src/network.c:2100 src/network.c:2126
+#, c-format
+msgid "tracker: %s: %s\n"
+msgstr ""
+
+#: src/network.c:2073
+msgid "connect failed"
+msgstr ""
+
+#: src/network.c:2101
+msgid "magic write failed"
+msgstr ""
+
+#: src/news.c:152
+msgid "No results"
+msgstr ""
+
+#: src/news.c:334
+msgid "Previous match"
+msgstr ""
+
+#: src/news.c:340
+msgid "Next match"
+msgstr ""
+
+#: src/news.c:561 src/news.c:662
+msgid "Post News"
+msgstr ""
+
+#: src/news.c:584 src/news_browser.c:1590
+msgid "_Post"
+msgstr ""
+
+#: src/news.c:665
+msgid "Reload News"
+msgstr ""
+
+#: src/news.c:667
+msgid "Find in News (Ctrl+F)"
+msgstr ""
+
+#: src/news_browser.c:932 src/news_browser.c:1973
+msgid "Select a post in the tree to view it here."
+msgstr ""
+
+#: src/news_browser.c:939 src/news_browser.c:1506
+msgid "(no subject)"
+msgstr ""
+
+#: src/news_browser.c:943
+#, c-format
+msgid "%s — %s"
+msgstr ""
+
+#: src/news_browser.c:956
+msgid "Loading…"
+msgstr ""
+
+#: src/news_browser.c:1162
+msgid "New News Folder"
+msgstr ""
+
+#: src/news_browser.c:1163
+msgid "Enter a name for the new news folder."
+msgstr ""
+
+#: src/news_browser.c:1164
+msgid "C_reate Folder"
+msgstr ""
+
+#: src/news_browser.c:1166
+msgid "New News Category"
+msgstr ""
+
+#: src/news_browser.c:1167
+msgid "Enter a name for the new news category."
+msgstr ""
+
+#: src/news_browser.c:1168
+msgid "C_reate Category"
+msgstr ""
+
+#: src/news_browser.c:1294
+#, c-format
+msgid "Delete the folder “%s” and all its contents?"
+msgstr ""
+
+#: src/news_browser.c:1295
+msgid "_Delete Folder"
+msgstr ""
+
+#: src/news_browser.c:1298
+#, c-format
+msgid "Delete the category “%s” and all its posts?"
+msgstr ""
+
+#: src/news_browser.c:1299
+msgid "_Delete Category"
+msgstr ""
+
+#: src/news_browser.c:1302
+#, c-format
+msgid "Delete the post “%s”?"
+msgstr ""
+
+#: src/news_browser.c:1303
+msgid "_Delete Post"
+msgstr ""
+
+#: src/news_browser.c:1493
+#, c-format
+msgid "Replying to %s — %s"
+msgstr ""
+
+#: src/news_browser.c:1542
+msgid "(original post body not loaded — open the post first to fetch it)"
+msgstr ""
+
+#: src/news_browser.c:1577 src/news_browser.c:1869
+msgid "Reply"
+msgstr ""
+
+#: src/news_browser.c:1577 src/news_browser.c:1866
+msgid "New Post"
+msgstr ""
+
+#: src/news_browser.c:1615
+msgid "Subject:"
+msgstr ""
+
+#: src/news_browser.c:1832
+msgid "Threaded News"
+msgstr ""
+
+#: src/news_browser.c:1857
+msgid "Refresh"
+msgstr ""
+
+#: src/news_browser.c:1863
+msgid "New Category"
+msgstr ""
+
+#: src/options.c:1337
+msgid "Nickname color"
+msgstr ""
+
+#: src/options.c:1340
+msgid ""
+"Optional RGB color shown on servers that support the Colored-Nicknames "
+"extension"
+msgstr ""
+
+#: src/options.c:1366
+msgid "Clear"
+msgstr ""
+
+#: src/options.c:2084
+msgid "Browse Fonts"
+msgstr ""
+
+#: src/options.c:2161 src/options.c:2779
+msgid "Trackers"
+msgstr ""
+
+#: src/options.c:2163
+msgid "Servers polled when the Tracker window opens"
+msgstr ""
+
+#: src/options.c:2180
+msgid "Address:"
+msgstr ""
+
+#: src/options.c:2189
+msgid "Add"
+msgstr ""
+
+#: src/options.c:2192
+msgid "Remove"
+msgstr ""
+
+#: src/options.c:2220
+msgid "Search"
+msgstr ""
+
+#: src/options.c:2224
+msgid "Case-sensitive tracker search"
+msgstr ""
+
+#: src/options.c:2243
+msgid "Sounds"
+msgstr ""
+
+#: src/options.c:2246
+msgid "Play sounds"
+msgstr ""
+
+#: src/options.c:2247
+msgid "Master switch for chat and transfer alerts"
+msgstr ""
+
+#: src/options.c:2251 src/options.c:2547
+msgid "Events"
+msgstr ""
+
+#: src/options.c:2253
+msgid "Chat invitation"
+msgstr ""
+
+#: src/options.c:2255
+msgid "Chat message"
+msgstr ""
+
+#: src/options.c:2259
+msgid "Transfer complete"
+msgstr ""
+
+#: src/options.c:2261
+msgid "Join"
+msgstr ""
+
+#: src/options.c:2265 src/options.c:2552
+msgid "Private message"
+msgstr ""
+
+#: src/options.c:2267
+msgid "News post"
+msgstr ""
+
+#: src/options.c:2269
+msgid "Leave"
+msgstr ""
+
+#: src/options.c:2285
+msgid "Chat output"
+msgstr ""
+
+#: src/options.c:2288
+msgid "Show timestamps"
+msgstr ""
+
+#: src/options.c:2290
+msgid "Word wrap"
+msgstr ""
+
+#: src/options.c:2293
+msgid "Scrollback lines"
+msgstr ""
+
+#: src/options.c:2294
+msgid "0 keeps unlimited scrollback"
+msgstr ""
+
+#: src/options.c:2303
+msgid "Timestamp format"
+msgstr ""
+
+#: src/options.c:2305
+msgid ""
+"strftime(3) format string. Default: \"[%H:%M:%S] \". See `man 3 strftime` "
+"for the full list of conversion specifiers."
+msgstr ""
+
+#: src/options.c:2309
+msgid "Format"
+msgstr ""
+
+#: src/options.c:2319
+msgid "Highlight"
+msgstr ""
+
+#: src/options.c:2321
+msgid ""
+"Comma-separated words to highlight in chat (in addition to your own nick). "
+"Matches are case-insensitive at word boundaries."
+msgstr ""
+
+#: src/options.c:2325
+msgid "Words"
+msgstr ""
+
+#: src/options.c:2338
+msgid "Chat history"
+msgstr ""
+
+#: src/options.c:2340
+msgid ""
+"Servers that implement the chat-history extension (e.g. Janus) replay recent "
+"chat to you on login. 0 disables the initial pull; the \"Load older "
+"messages\" link in chat still works to fetch on demand."
+msgstr ""
+
+#: src/options.c:2348
+msgid "Initial messages to fetch"
+msgstr ""
+
+#: src/options.c:2349
+msgid "Also used as the page size for \"Load older messages\""
+msgstr ""
+
+#: src/options.c:2356 src/options.c:2360
+msgid "Font"
+msgstr ""
+
+#: src/options.c:2358
+msgid "Pango font description, e.g. \"Monospace 11\""
+msgstr ""
+
+#: src/options.c:2364
+msgid "Browse"
+msgstr ""
+
+#: src/options.c:2373 src/options.c:2588 src/options.c:2631
+msgid "Behavior"
+msgstr ""
+
+#: src/options.c:2376
+msgid "Show join / leave in chat"
+msgstr ""
+
+#: src/options.c:2379
+msgid "Old-style nick completion"
+msgstr ""
+
+#: src/options.c:2380
+msgid "Match against the most recently typed prefix instead of all users"
+msgstr ""
+
+#: src/options.c:2393
+msgid "Auto Copy Behavior"
+msgstr ""
+
+#: src/options.c:2396
+msgid ""
+"Drag-select in chat / news / private message text to populate the clipboard. "
+"Ctrl-V or middle-click pastes the selection elsewhere."
+msgstr ""
+
+#: src/options.c:2402
+msgid "Automatically copy selected text"
+msgstr ""
+
+#: src/options.c:2406
+msgid "Automatically include timestamps"
+msgstr ""
+
+#: src/options.c:2410
+msgid "Automatically include color information"
+msgstr ""
+
+#: src/options.c:2441 src/usermod.c:523
+msgid "Display name"
+msgstr ""
+
+#: src/options.c:2443
+msgid "Your name"
+msgstr ""
+
+#: src/options.c:2448
+msgid "Identity icon"
+msgstr ""
+
+#: src/options.c:2451
+msgid "Icon ID"
+msgstr ""
+
+#: src/options.c:2452
+msgid "Numeric ID from the loaded icon resource files"
+msgstr ""
+
+#: src/options.c:2457
+msgid "Available icons"
+msgstr ""
+
+#: src/options.c:2459
+msgid "Click an entry to copy its ID into the field above"
+msgstr ""
+
+#: src/options.c:2549
+msgid "Show a desktop notification when these events happen."
+msgstr ""
+
+#: src/options.c:2553
+msgid "Someone sends you a 1-to-1 message"
+msgstr ""
+
+#: src/options.c:2556
+msgid "Private chat invitation"
+msgstr ""
+
+#: src/options.c:2557
+msgid "Someone invites you to a private chat"
+msgstr ""
+
+#: src/options.c:2561
+msgid "Mention in public chat"
+msgstr ""
+
+#: src/options.c:2562
+msgid "Your name or a highlight word appears in a chat message"
+msgstr ""
+
+#: src/options.c:2566
+msgid "Mention in private chat"
+msgstr ""
+
+#: src/options.c:2567
+msgid "Your name or a highlight word appears in a private chat"
+msgstr ""
+
+#: src/options.c:2570
+msgid "Every public chat message"
+msgstr ""
+
+#: src/options.c:2571
+msgid "Noisy — only useful on quiet servers"
+msgstr ""
+
+#: src/options.c:2574
+msgid "Every private chat message"
+msgstr ""
+
+#: src/options.c:2576
+msgid "New news post"
+msgstr ""
+
+#: src/options.c:2579
+msgid "File transfer complete"
+msgstr ""
+
+#: src/options.c:2582
+msgid "Server broadcast"
+msgstr ""
+
+#: src/options.c:2583
+msgid "Admin-issued announcement to every user"
+msgstr ""
+
+#: src/options.c:2592
+msgid "Don't notify when the relevant window is focused"
+msgstr ""
+
+#: src/options.c:2593
+msgid ""
+"If a chat or private message window is already active, don't pop a "
+"notification on top of it"
+msgstr ""
+
+#: src/options.c:2601
+msgid "Mention Words"
+msgstr ""
+
+#: src/options.c:2603
+msgid ""
+"Comma-separated. Your nickname is always matched in addition to this list. "
+"The same list drives chat message highlighting."
+msgstr ""
+
+#: src/options.c:2607
+msgid "Highlight words"
+msgstr ""
+
+#: src/options.c:2622
+msgid "Auto Reply"
+msgstr ""
+
+#: src/options.c:2625
+msgid "Enable auto reply"
+msgstr ""
+
+#: src/options.c:2627
+msgid "Reply message"
+msgstr ""
+
+#: src/options.c:2635
+msgid "Show private messages at back"
+msgstr ""
+
+#: src/options.c:2636
+msgid "Don't raise the chat window when a private message arrives"
+msgstr ""
+
+#: src/options.c:2640
+msgid "Queue file transfers"
+msgstr ""
+
+#: src/options.c:2641
+msgid "Run downloads one at a time instead of in parallel"
+msgstr ""
+
+#: src/options.c:2657
+msgid "Follow system"
+msgstr ""
+
+#: src/options.c:2658
+msgid "Light"
+msgstr ""
+
+#: src/options.c:2659
+msgid "Dark"
+msgstr ""
+
+#: src/options.c:2662
+msgid "Appearance"
+msgstr ""
+
+#: src/options.c:2665
+msgid ""
+"Color scheme. \"Follow system\" tracks the desktop's light/dark preference."
+msgstr ""
+
+#: src/options.c:2669
+msgid "Theme"
+msgstr ""
+
+#: src/options.c:2678
+msgid "Paths"
+msgstr ""
+
+#: src/options.c:2680
+msgid "Download directory"
+msgstr ""
+
+#: src/options.c:2692
+msgid "System Integration"
+msgstr ""
+
+#: src/options.c:2695
+msgid "Show tray icon"
+msgstr ""
+
+#: src/options.c:2696
+msgid ""
+"Display a status icon in the system tray. Closing the main window hides to "
+"tray; click the icon to toggle GtkHx's windows."
+msgstr ""
+
+#: src/options.c:2753
+msgid "GtkHx Preferences"
+msgstr ""
+
+#: src/options.c:2768
+msgid "General"
+msgstr ""
+
+#: src/options.c:2770 src/usermod.c:508
+msgid "Identity"
+msgstr ""
+
+#: src/options.c:2774
+msgid "Sound"
+msgstr ""
+
+#: src/options.c:2776
+msgid "Notifications"
+msgstr ""
+
+#: src/options.c:2781
+msgid "Misc"
+msgstr ""
+
+#: src/plugin.c:96
+msgid "GtkHx - Select Plugin"
+msgstr ""
+
+#: src/plugin.c:154 src/tracker.c:473
+msgid "Description"
+msgstr ""
+
+#: src/plugin.c:161
+msgid "GtkHx - Plugins"
+msgstr ""
+
+#: src/plugin.c:165
+msgid "Load"
+msgstr ""
+
+#: src/plugin.c:168
+msgid "Unload"
+msgstr ""
+
+#: src/plugin.c:173
+msgid "Close"
+msgstr ""
+
+#: src/plugin.c:350
+msgid "Loading"
+msgstr ""
+
+#: src/plugin.c:526
+msgid "Could not load plugin: "
+msgstr ""
+
+#: src/rcv.c:556
+#, c-format
+msgid "join: %s\n"
+msgstr ""
+
+#: src/rcv.c:589
+#, c-format
+msgid "%s is now known as %s\n"
+msgstr ""
+
+#: src/rcv.c:664
+#, c-format
+msgid "parts: %s \n"
+msgstr ""
+
+#: src/rcv.c:712
+msgid "Subject Changed to"
+msgstr ""
+
+#: src/rcv.c:847
+#, c-format
+msgid ""
+"Received queue id (%d) for xfer ref %d\n"
+"No such xfer.\n"
+msgstr ""
+
+#: src/rcv.c:928
+msgid "polite quit\n"
+msgstr ""
+
+#: src/rcv.c:937
+#, c-format
+msgid "unknown header type 0x%08x\n"
+msgstr ""
+
+#: src/rcv.c:1206
+msgid "login"
+msgstr ""
+
+#: src/rcv.c:1208
+msgid "failed?"
+msgstr ""
+
+#: src/rcv.c:1209
+msgid "successful"
+msgstr ""
+
+#: src/rcv.c:1889
+msgid "kick successful"
+msgstr ""
+
+#: src/tasks.c:303
+#, c-format
+msgid "Queued #%u"
+msgstr ""
+
+#: src/tasks.c:541
+msgid "Listing tracker"
+msgstr ""
+
+#: src/tasks.c:546
+#, c-format
+msgid "%s · %u of %u servers"
+msgstr ""
+
+#: src/tasks.c:570
+msgid "Connecting to tracker"
+msgstr ""
+
+#: src/tasks.c:571
+#, c-format
+msgid "%s · %u of %u"
+msgstr ""
+
+#: src/tasks.c:603
+msgid "Connecting"
+msgstr ""
+
+#: src/tasks.c:604
+#, c-format
+msgid "Step %u of %u"
+msgstr ""
+
+#: src/tasks.c:643
+#, c-format
+msgid "Task 0x%x"
+msgstr ""
+
+#: src/tasks.c:654
+#, c-format
+msgid "%s of %s"
+msgstr ""
+
+#: src/tasks.c:915
+msgid "Stop Task"
+msgstr ""
+
+#: src/tasks.c:917
+msgid "Start Task"
+msgstr ""
+
+#: src/tasks.c:919
+msgid "Move Xfer Up in Queue"
+msgstr ""
+
+#: src/tasks.c:922
+msgid "Move Xfer Down in Queue"
+msgstr ""
+
+#: src/tasks.c:1060
+#, c-format
+msgid "%s of %s · %s/s · ETA %d:%02d:%02d"
+msgstr ""
+
+#: src/tasks.c:1064
+#, c-format
+msgid "%s of %s · %s/s · ETA %d:%02d"
+msgstr ""
+
+#: src/tls_trust_dialog.c:79
+msgid "Certificate changed"
+msgstr ""
+
+#: src/tls_trust_dialog.c:80
+msgid "_Trust New Certificate"
+msgstr ""
+
+#: src/tls_trust_dialog.c:83
+msgid "Unknown server certificate"
+msgstr ""
+
+#: src/tls_trust_dialog.c:84
+msgid "_Trust and Connect"
+msgstr ""
+
+#: src/tls_trust_dialog.c:98
+#, c-format
+msgid ""
+"The TLS certificate for %s:%u doesn'''t match the one you previously "
+"trusted. This usually means the server rotated its certificate, but it can "
+"also indicate a man-in-the-middle attack. Verify the fingerprint out-of-band "
+"with the server operator before accepting."
+msgstr ""
+
+#: src/tls_trust_dialog.c:107
+#, c-format
+msgid ""
+"You haven'''t connected to %s:%u over TLS before. GtkHx will pin this "
+"certificate so future connections are silent — but only if you trust it now."
+msgstr ""
+
+#: src/tls_trust_dialog.c:114
+#, c-format
+msgid ""
+"Fingerprint:\n"
+"%s"
+msgstr ""
+
+#: src/tls_trust_dialog.c:118
+#, c-format
+msgid "Pinned certificates live in %s."
+msgstr ""
+
+#: src/toolbar.c:203
+msgid "Send a broadcast message to every user on the server."
+msgstr ""
+
+#: src/toolbar.c:208
+msgid "_Send"
+msgstr ""
+
+#: src/toolbar.c:217
+msgid "Message"
+msgstr ""
+
+#: src/toolbar.c:518
+#, c-format
+msgid "Lost connection to %s"
+msgstr ""
+
+#: src/toolbar.c:585
+msgid "New User…"
+msgstr ""
+
+#: src/toolbar.c:586
+msgid "Edit User…"
+msgstr ""
+
+#: src/toolbar.c:589
+msgid "Settings"
+msgstr ""
+
+#: src/toolbar.c:590
+msgid "Bookmarks…"
+msgstr ""
+
+#: src/toolbar.c:593
+msgid "Quit"
+msgstr ""
+
+#: src/toolbar.c:599
+msgid "Main menu"
+msgstr ""
+
+#: src/toolbar.c:689
+msgid "Disconnect"
+msgstr ""
+
+#: src/toolbar.c:713 src/tracker.c:480
+msgid "Tracker"
+msgstr ""
+
+#: src/toolbar.c:723
+msgid "News (1.5+)"
+msgstr ""
+
+#: src/toolbar.c:762
+msgid "Plugin Manager"
+msgstr ""
+
+#: src/toolbar.c:791
+msgid "Reconnect"
+msgstr ""
+
+#: src/tracker.c:471
+msgid "Address"
+msgstr ""
+
+#: src/tracker.c:516
+msgid "Search trackers"
+msgstr ""
+
+#: src/tracker.c:528
+msgid "Match case in tracker search"
+msgstr ""
+
+#: src/tracker.c:546
+msgid "Refresh tracker list"
+msgstr ""
+
+#: src/tracker.c:549
+msgid "Connect to selected server"
+msgstr ""
+
+#: src/usermod.c:469
+msgid "User Editor"
+msgstr ""
+
+#: src/usermod.c:473
+msgid "New User"
+msgstr ""
+
+#: src/usermod.c:546
+msgid "Generate a random password"
+msgstr ""
+
+#: src/usermod.c:625
+msgid "Open User"
+msgstr ""
+
+#: src/usermod.c:625
+msgid "Enter the login of the account to edit."
+msgstr ""
+
+#: src/usermod.c:630
+msgid "_Open"
+msgstr ""
+
+#: src/users.c:233 src/users.c:731
+#, c-format
+msgid "ignore: %s is now ignored\n"
+msgstr ""
+
+#: src/users.c:247
+#, c-format
+msgid "ignore: %s is now unignored\n"
+msgstr ""
+
+#: src/users.c:538
+msgid "UnIgnore"
+msgstr ""
+
+#: src/users.c:544
+msgid "Get User Info"
+msgstr ""
+
+#: src/users.c:546
+msgid "Private Message"
+msgstr ""
+
+#: src/users.c:732
+#, c-format
+msgid "ignore: %s is now unignored"
+msgstr ""
+
+#: src/users.c:820
+msgid "Private Chat Invitation"
+msgstr ""
+
+#: src/users.c:821
+msgid "Invite this user to an existing private chat, or create a new one."
+msgstr ""
+
+#: src/users.c:826
+msgid "_New Chat"
+msgstr ""
+
+#: src/users.c:828
+msgid "_Invite"
+msgstr ""
