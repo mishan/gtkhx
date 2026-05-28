@@ -18,6 +18,17 @@ extern void init_icons (void);
  * is a screen-wide GtkCssProvider keyed off the .gtkhx-text class. */
 extern void gtkhx_apply_text_style (GtkWidget *w);
 
+/* Style a GtkTextView used as an editable input (chat / pchat / PM
+ * input). Calls gtk_text_view_set_monospace(TRUE), which applies GTK's
+ * built-in .monospace CSS class — the theme picks a monospace face at
+ * the theme's UI size. Deliberately does NOT honor gtkhx_font_desc /
+ * the Settings font preference: applying the configured font on the
+ * input (whether via .gtkhx-text CSS, PangoContext, or GtkTextTag)
+ * triggers an unresolved per-line ascender-ink clip on newly typed
+ * glyphs at small Monospace sizes. See gtkhx_apply_input_font in
+ * gtkhx.c for the full history. */
+extern void gtkhx_apply_input_font (GtkWidget *w);
+
 /* Same idea for the user list font (independent prefs entry, no
  * fg/bg). Tags the widget with the .gtkhx-userlist class. */
 extern void gtkhx_apply_userlist_style (GtkWidget *w);
