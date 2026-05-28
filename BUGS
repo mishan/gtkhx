@@ -1,8 +1,6 @@
 High priority:
 
-- Chat bugs
- - If I am typing a message and then hit the Up key, the current message is replaced with a previous message from the message history. There is no way to get back to the message I was typing -- it is gone. There should be a way to go back to what I was typing, or perhaps simply not going back into chat history if there is anything entered into the entry field already.
- - Once there is enough text to scroll in xtext, the last line gets cut off, even after scrolling all the way down.
+(none)
 
 Medium priority:
 
@@ -11,8 +9,5 @@ Medium priority:
 Low priority:
 
 - The connection to hlserver.com eventually gets closed for some reason (possibly server timeout). If it is
-  a server activity timeout, it would be nice to indicate that
-
-Won't Fix:
-
-- Window position saving does not work on Wayland. GTK+ 4.24 might have an API for saving sessions
+  a server activity timeout, it would be nice to indicate that.
+- hlserver.com broadcasts to us "0 command(s) at a time" on login.
