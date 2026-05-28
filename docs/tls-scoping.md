@@ -1,10 +1,14 @@
 # TLS Client Support — Scoping Notes for GtkHx
 
-Status: scoped, decisions locked (§12), no code yet. Written
-2026-05-26 against
+Status: scoped, decisions locked (§12). **Phase 2's load-bearing
+prerequisite — the HTXF GIOStream port — shipped 2026-05-27** as
+branch `claude/htxf-giostream` (PR #122, merged). The remaining
+Phase 2 work is just flowing the TLS flag through the now-stream-
+shaped HTXF connect helpers. Written 2026-05-26 against
 <https://github.com/jhalter/mobius/blob/master/docs/tls.md> at fetch
-time. Janus / VesperNet TLS status is unconfirmed (memory note
-[[gtkhx_janus]] — closed-source binary, no public docs).
+time, refreshed 2026-05-27 after the HTXF port landed. Janus /
+VesperNet TLS status is unconfirmed (memory note [[gtkhx_janus]] —
+closed-source binary, no public docs).
 
 This supersedes the "Phase ∞ — Modernized Hotline protocol" entry in
 ROADMAP.md, which assumed transport security required inventing a new
@@ -57,27 +61,34 @@ on every server adopting Mobius's flag.
 The connect path is async and lives in `network.c`:
 
 - `hx_connect` → `g_socket_client_new()` →
-  `g_socket_client_connect_to_host_async(...)` (line ~1029).
-  Returns a `GSocketConnection` whose `GIOStream` becomes
-  `htlc->in` / `htlc->out`. Everything downstream reads / writes
-  through that stream — `rcv.c`, `commands.c`, `cipher.c` HOPE wrap.
-- Sync helper `hx_sync_connect_to_host` (line ~1049) for HTXF
-  worker threads. Returns a **raw fd** in blocking mode. `xfers.c`
-  and `banner.c` use this for the file-transfer subchannel.
-- Async tracker connect at ~line 1388 (same `GSocketClient` shape as
-  the main connect path).
+  `g_socket_client_connect_to_host_async(...)`. Returns a
+  `GSocketConnection` whose `GIOStream` becomes `htlc->in` /
+  `htlc->out`. Everything downstream reads / writes through that
+  stream — `rcv.c`, `commands.c`, `cipher.c` HOPE wrap.
+- Sync helper `hx_sync_connect_to_host` for HTXF worker threads.
+  Returns a **`GSocketConnection`** since the GIOStream port
+  (PR #122). `xfers.c` and `banner.c` cast it to GIOStream and
+  feed it to `htxf_io_read` / `htxf_io_write` (`src/htxf_io.{c,h}`),
+  which handle both the plaintext path and the HOPE+ChaCha20 AEAD
+  framing layer.
+- Async tracker connect (same `GSocketClient` shape as the main
+  connect path).
 
 Three pieces matter for TLS:
 
 1. **Async control connect** — works against GIO streams, easy to
    TLS-ify (`g_socket_client_set_tls(client, TRUE)` and the rest is
    transparent).
-2. **Sync HTXF connect** — returns a raw fd. **This is the awkward
-   one.** TLS can't ride over a raw fd that bypasses it. Either we
-   port the HTXF workers to `GIOStream` I/O (so `GTlsConnection`
-   wraps cleanly), or we add a GnuTLS / OpenSSL shim that gives the
-   workers raw-style read/write over a TLS context. Detail below
-   (§4).
+2. **Sync HTXF connect** — now also `GSocketConnection`-shaped.
+   The worker call sites already feed a GIOStream into htxf_io_*,
+   so wrapping it in a `GTlsClientConnection` only needs a single
+   `g_socket_client_set_tls(client, TRUE)` call inside
+   `hx_sync_connect_to_host` (gated on the per-htxf TLS flag). One
+   small lingering item: `xfers.c::htxf_io_get_socket` walks
+   through `G_IS_SOCKET_CONNECTION` directly to reach the underlying
+   GSocket for `g_socket_condition_timed_wait`; under TLS that
+   helper needs a `G_IS_TLS_CONNECTION` branch that fetches the
+   `base-io-stream` property. Maybe ~5 LOC.
 3. **Tracker connect** — unchanged. Mobius doesn't TLS its tracker
    listener, and we have no evidence anyone else does either.
    Re-scope if a TLS-tracker spec emerges.
@@ -107,43 +118,51 @@ that does add a build dep. The GIO-only path doesn't.
 
 ---
 
-## 4. The HTXF problem
+## 4. The HTXF problem — resolved
 
-The control channel is easy. The HTXF subchannel is the question
-mark, so it's worth thinking through:
+This was the load-bearing question mark in the original scoping.
+Three options were on the table — port the HTXF workers to
+`GIOStream` (option A), add a `tls_fd_t` shim (B), or run a
+stunnel-style proxy thread (C). Option A was the recommendation
+and it shipped on `claude/htxf-giostream` (PR #122, merged
+2026-05-27) in six phased commits:
 
-`xfers.c` and `banner.c` open the HTXF socket via
-`hx_sync_connect_to_host`, get a raw fd, and run a blocking
-`read(2)` / `write(2)` loop in a pthread. That's the wrong shape
-for TLS — `GTlsConnection` exposes a `GIOStream`, not an fd.
+- Phase A: `htxf_connect` and `hx_sync_connect_to_host` return
+  `GSocketConnection` instead of raw fd
+- Phase B: `htxf_io_read` / `htxf_io_write` (new `src/htxf_io.{c,h}`)
+  take `GIOStream *io`; internals use `g_input_stream_read` /
+  `g_output_stream_write_all`
+- Phase C: `xfers.c::rd_wr` split into `rd_wr_recv` / `rd_wr_send`
+  to route through `htxf_io_*` (incidentally fixed a latent AEAD
+  bulk-transfer bug); `preview_get` ported to GIOStream
+- Phase D: `select(s+1, ...)` drain in the folder-receive path
+  replaced with `g_socket_condition_timed_wait` on the underlying
+  GSocket
+- Phase E: `banner.c` worker ported; `read_n`/`write_n` static
+  helpers deleted
+- Phase F: Tier 2 round-trip tests for `htxf_io_*` against
+  `GMemoryInputStream` + `GMemoryOutputStream` wrapped in
+  `GSimpleIOStream` (15 subtests covering plaintext, AEAD round-
+  trip, NULL-io rejection, oversized-length-prefix rejection,
+  tag tampering, etc.)
 
-Three ways out:
+The HTXF path now flows through `GIOStream` end-to-end. Wrapping
+it in `GTlsClientConnection` is a one-line change in
+`hx_sync_connect_to_host` (set the client's TLS flag before
+`g_socket_client_connect_to_host`).
 
-**(A) Port the HTXF workers to `GIOStream`.** Read/write through
-`g_input_stream_read` / `g_output_stream_write` against the
-GTlsConnection. The worker thread loop stays blocking (the streams
-support sync I/O); only the read/write call sites change. Estimated
-~150 LOC of churn across `xfers.c` + `banner.c`. Cleanest answer,
-no new dep, lets us delete `hx_sync_connect_to_host` entirely.
+This branch was driven by the TLS scoping but it also delivered
+two related wins:
 
-**(B) Add a `tls_fd_t` abstraction.** A small wrapper that's either
-a raw fd or a `(GTlsConnection*, internal-buffer)` pair, with
-`tls_read` / `tls_write` that branches. Lets the workers keep their
-fd-shaped loops. Lower diff churn (~50 LOC + new file), but
-introduces a parallel I/O abstraction that's awkward to test and
-ages worse than option A.
+- **SOCKS proxying works for HTXF for free**, since GIO routes
+  socket-client connects through `GProxyResolver` automatically.
+- **Latent AEAD bulk-transfer bug fixed**: rd_wr's raw read()/write()
+  loop bypassed the AEAD frame codec on the bulk data fork. The
+  routing change in Phase C funnels everything through `htxf_io_*`,
+  closing the bypass.
 
-**(C) Run TLS in a stunnel-style proxy goroutine** — spawn a thread
-whose only job is to ferry bytes between the `GTlsConnection` and a
-local pipe pair, then hand the worker a fd to one end of the pipe.
-Worst of both worlds (extra thread per transfer, extra copy). Don't.
-
-**Recommendation: A.** It moves us toward the eventual goal of
-killing `hx_sync_connect_to_host` and unifying on `GIOStream` for
-everything — which is also where we'd land if we ever wanted to
-support SOCKS-proxied HTXF (GIO does that for free on streams).
-The estimated 150 LOC is a one-time port; it doesn't add ongoing
-maintenance surface.
+The original (B) and (C) options are obsolete — kept here as
+historical context for why we picked A.
 
 ---
 
@@ -271,11 +290,25 @@ Five landable pieces, each with its own merge:
 - Estimated diff: ~100 LOC src + ~150 LOC tests.
 
 **Phase 2 — HTXF over TLS.**
-- Port `hx_sync_connect_to_host` callers (`xfers.c`, `banner.c`) to
-  GIOStream-style I/O — option (A) from §4.
-- Same `set_tls` flag flows through.
+- _Prerequisite already shipped_: the HTXF GIOStream port landed
+  on `claude/htxf-giostream` (PR #122) — option (A) from §4. The
+  ~250 LOC src + ~250 LOC tests estimate from this scope doc was
+  the prerequisite work, not Phase 2 itself. See §4 for the
+  delivered phasing (A–F).
+- Remaining work: thread the `tls` flag from the session struct
+  through `htxf_connect` and `hx_sync_connect_to_host` to the
+  `GSocketClient`. Both helpers already use GSocketClient
+  internally, so it's a `g_socket_client_set_tls(client, TRUE)`
+  call before `g_socket_client_connect_to_host` plus the
+  per-htxf flag plumbing.
+- Grow `xfers.c::htxf_io_get_socket` to handle the TLS-wrapped
+  case: when the GIOStream is a GTlsConnection, fetch the
+  `base-io-stream` property to reach the underlying
+  GSocketConnection / GSocket (the `accept-certificate` plumbing
+  and trust prompt come in from Phase 3, but the GSocket fetch
+  is independent and small).
 - Tier 3: TLS file transfer + TLS banner fetch round-trips.
-- Estimated diff: ~250 LOC src + ~100 LOC tests.
+- Estimated diff: ~30 LOC src + ~100 LOC tests.
 
 **Phase 3 — Cert trust UX.**
 - `tls_trust.{c,h}` module: fingerprint pinning, known-hosts DB.
@@ -334,23 +367,30 @@ land in any order.
 
 ## 11. Effort estimate
 
-Rough numbers, assuming smooth code review:
+Rough numbers, assuming smooth code review. Phase 2's prerequisite
+HTXF GIOStream port has already shipped (PR #122) so the remaining
+TLS work is considerably smaller than the original ~750 LOC src
+estimate.
 
-| Phase | Code LOC | Test LOC | Calendar time |
-|---|---|---|---|
-| 1 — Control-channel TLS | ~100 | ~150 | 1–2 days |
-| 2 — HTXF over TLS | ~250 | ~100 | 2–3 days |
-| 3 — Cert trust UX | ~250 | ~150 | 2–3 days |
-| 4 — Connect + bookmark UI | ~150 | ~50 | 1–2 days |
-| 5 — Docs + matrix | — | — | half day |
+| Phase | Code LOC | Test LOC | Calendar time | Status |
+|---|---|---|---|---|
+| 0 — HTXF GIOStream port | ~600 | ~430 | shipped | done (PR #122) |
+| 1 — Control-channel TLS | ~100 | ~150 | 1–2 days | pending |
+| 2 — HTXF over TLS | ~30 | ~100 | half day | pending (prereq done) |
+| 3 — Cert trust UX | ~250 | ~150 | 2–3 days | pending |
+| 4 — Connect + bookmark UI | ~150 | ~50 | 1–2 days | pending |
+| 5 — Docs + matrix | — | — | half day | pending |
 
-**Total: ~750 LOC src, ~450 LOC tests, 1–2 weeks of focused work.**
+**Remaining: ~530 LOC src, ~450 LOC tests, ~1 week of focused work.**
 
-The biggest risk is Phase 2's HTXF GIOStream port — that's the part
-most likely to surface a subtle worker-thread bug (the existing
-pthread + blocking-fd loop has been hardened over many bugfixes).
-Suggest doing it on a branch with full Tier 3 file-transfer tests
-running locally before pushing.
+The biggest risk used to be Phase 2's HTXF GIOStream port — that
+ended up taking six commits (Phases A–F on `claude/htxf-giostream`),
+incidentally caught a latent AEAD bulk-transfer bug, and grew Tier
+2 round-trip coverage. With that done, Phase 1 (the control-channel
+TLS) is now the riskiest piece — but it's a single
+`g_socket_client_set_tls` call plus the `accept-certificate` stub,
+backed by a Tier 3 test that exercises a TLS-enabled Mobius
+container. Hard to get wrong.
 
 ---
 
