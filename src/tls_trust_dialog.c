@@ -109,6 +109,14 @@ hx_tls_trust_dialog_run_sync (GtkWindow *parent,
                "connections are silent — but only if you trust it "
                "now."),
             host, (unsigned) port);
+        g_string_append (body, "\n\n");
+        g_string_append_printf (
+            body,
+            _ ("If %s later presents the same certificate on a "
+               "different port (for example the file transfer "
+               "subchannel), it will be accepted silently without "
+               "another prompt."),
+            host);
     }
     g_string_append (body, "\n\n");
     g_string_append_printf (body, _ ("Fingerprint:\n%s"), fingerprint);
