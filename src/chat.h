@@ -52,11 +52,16 @@ extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
  * also acts as a secondary signature on the off chance the user's
  * click lands on a "word" that doesn't include the full sentinel.
  *
- * The literal value matters: chat_history_word_click compares the
- * received word string against this exact sentinel. Keep the two in
- * sync if you change it. */
-#define HX_LOAD_OLDER_SENTINEL \
-    "\xe2\x86\x91" "\xc2\xa0" "Load" "\xc2\xa0" "older" "\xc2\xa0" "messages"
+ * Functions instead of #define: the visible text is translated via
+ * gettext, and chat_history_word_click compares the received word
+ * against the same function so the click match keeps working in any
+ * locale. Both functions cache the composed UTF-8 on first call. The
+ * translatable msgids are the bare phrases "Load older messages" and
+ * "Loading older messages..."; the leading arrow + NBSP joiners are
+ * stitched in at runtime so translators don't have to worry about
+ * preserving non-breaking-space characters by hand. */
+extern const char *hx_load_older_sentinel (void);
+extern const char *hx_loading_older_sentinel (void);
 
 /* word_click handler that recognises the Load-older sentinel and
  * fires a BEFORE= chat-history fetch. Connected on every xtext that

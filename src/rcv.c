@@ -1551,20 +1551,22 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                             = hl_capabilities_decode (dh->data, _len);
                         htlc->caps = caps;
                         if (caps & HTLC_CAP_LARGE_FILES) {
-                            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                              "server confirmed large-file "
-                                              "(64-bit) mode for this "
-                                              "session\n");
+                            hx_printf_prefix (
+                                htlc, 0, INFOPREFIX,
+                                _ ("server confirmed large-file (64-bit) "
+                                   "mode for this session\n"));
                         }
                         if (caps & HTLC_CAP_TEXT_ENCODING) {
-                            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                              "server confirmed UTF-8 text "
-                                              "encoding for this session\n");
+                            hx_printf_prefix (
+                                htlc, 0, INFOPREFIX,
+                                _ ("server confirmed UTF-8 text encoding "
+                                   "for this session\n"));
                         }
                         if (caps & HTLC_CAP_CHAT_HISTORY) {
-                            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                              "server confirmed chat-history "
-                                              "extension for this session\n");
+                            hx_printf_prefix (
+                                htlc, 0, INFOPREFIX,
+                                _ ("server confirmed chat-history extension "
+                                   "for this session\n"));
                         }
                     }
                     break;
