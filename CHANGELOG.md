@@ -1,4 +1,4 @@
-## 1.0.0 (WIP)
+## 1.0.0
 
 - General
   - Tons of fixes, esp for modern systems / 64-bit architectures
