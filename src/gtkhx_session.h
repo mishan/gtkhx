@@ -48,6 +48,7 @@ struct cached_filelist;
 struct hl_filelist_hdr;
 
 #include <netinet/in.h> /* struct in_addr for tracker signal */
+#include "tracker_event.h" /* HxTrackerServer (boxed payload) */
 /* struct task already defined in protocol.h (included above). */
 
 #define GTKHX_TYPE_SESSION (gtkhx_session_get_type ())
@@ -168,11 +169,15 @@ void gtkhx_session_emit_xfer_queue (GtkhxSession *self, session *sess,
  * back into xfer_* APIs. */
 void gtkhx_session_emit_xfer_destroyed (GtkhxSession *self, session *sess,
                                         struct htxf_conn *htxf);
+/* tracker-server-create — one server record landed during a
+ * tracker listing fetch. Payload is a boxed HxTrackerServer
+ * carrying address (printable), addr_type discriminator,
+ * port/nusers, UTF-8 name+desc, optional v3 TLV trailer, and the
+ * per-batch total. Subscribers get a borrowed pointer for the
+ * duration of the signal emit; boxed copy hooks let any that
+ * want to keep the event past return take a ref. */
 void gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
-                                               struct in_addr addr,
-                                               guint16 port, guint16 nusers,
-                                               const char *nam,
-                                               const char *desc, int total);
+                                               HxTrackerServer *event);
 void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
                                      struct task *tsk);
 

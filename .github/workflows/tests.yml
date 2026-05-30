@@ -4,10 +4,11 @@
 #
 #   unit         — pure-function tests, no GTK / network. Fast.
 #   proto        — wire-format parsers driven from canned fixtures.
-#   integration  — end-to-end against the mhxd + Janus Docker
-#                  containers in tests/mhxd/ and tests/janus/.
-#                  Slower (rebuilds both containers on every run
-#                  unless the layer cache is warm).
+#   integration  — end-to-end against the mhxd + Janus + hxtrackd
+#                  Docker containers in tests/mhxd/, tests/janus/,
+#                  and tests/hxtrackd/. Slower (rebuilds all three
+#                  containers on every run unless the layer cache
+#                  is warm).
 #
 # Two jobs:
 #
@@ -18,15 +19,18 @@
 #                     LTS images don't ship.
 #
 #   integration     — Same Fedora image, plus sibling steps that
-#                     build the mhxd + Janus containers and start
-#                     them on localhost:5500/5501 + 5510/5511. The
-#                     server matrix in tests/integration/server_
-#                     matrix.c records those host ports per server.
-#                     Both containers must be reachable: tests that
-#                     pick Janus via HX_TEST_CAP_* filters (chat-
-#                     history, banner-HTXF, Janus-only ciphers) fail
-#                     loudly when the server isn't up — no silent
-#                     skips, per [[feedback_no_test_skips]].
+#                     build mhxd + Janus + hxtrackd and start them
+#                     on localhost:5500/5501 + 5510/5511 +
+#                     5598/5599. The server / tracker matrices in
+#                     tests/integration/server_matrix.c and
+#                     tracker_matrix.c record those host ports per
+#                     target. All three containers must be
+#                     reachable: tests that pick Janus or hxtrackd
+#                     via HX_TEST_CAP_* / HX_TEST_TRACKER_CAP_*
+#                     filters (chat-history, banner-HTXF,
+#                     Janus-only ciphers, v1 tracker fallback)
+#                     fail loudly when the server isn't up — no
+#                     silent skips, per [[feedback_no_test_skips]].
 #
 # Branch protection on `main` should require both jobs green before
 # merge. That setup is in the GitHub repository UI — Settings →
@@ -100,7 +104,7 @@ jobs:
           path: build/meson-logs/
 
   integration:
-    name: integration vs mhxd + janus
+    name: integration vs mhxd + janus + hxtrackd
     runs-on: ubuntu-latest
     needs: build-and-test
     steps:
@@ -120,6 +124,16 @@ jobs:
         # later "janus not reachable" test failure.
         run: |
           docker build -t gtkhx-janus tests/janus
+
+      - name: build hxtrackd test container
+        # hxtrackd is mhxd's bundled pre-spec v1 tracker — built
+        # from the same upstream mhxd source as the mhxd container
+        # above, just with `make install` running the hxtrackd
+        # binary. Coverage for the probe-then-fallback path in
+        # network.c (v3 magic times out against v1-only trackers,
+        # client retries with v1 magic). See tests/hxtrackd/README.md.
+        run: |
+          docker build -t gtkhx-hxtrackd tests/hxtrackd
 
       - name: start mhxd
         run: |
@@ -161,6 +175,45 @@ jobs:
             sleep 1
           done
 
+      - name: start hxtrackd
+        # hxtrackd container exposes its internal 5498/5499 on
+        # host 5598/5599 (5498/5499 are kept free for future
+        # v3-capable trackers that benefit from the spec port).
+        # The tracker_matrix.c entry for "hxtrackd" hard-codes
+        # 5598 as its host-side port. The entrypoint also runs
+        # seed-tracker.py which sends a UDP registration into
+        # 127.0.0.1:5499 (inside the container) every 60s; that
+        # registration appears in v1 listings as the deterministic
+        # "hxtrackd test server" record the Tier 3 test asserts on.
+        run: |
+          docker run -d --name gtkhx-hxtrackd \
+            -p 5598:5498 -p 5599:5499/udp \
+            gtkhx-hxtrackd
+          # The TCP listener opens ~immediately, but the seed UDP
+          # registration takes another second or two to land
+          # (entrypoint sleeps 1s before launching seed-tracker.py
+          # so hxtrackd has bound 5499/udp). Wait for the listing
+          # to actually contain >= 1 record, not just for the
+          # TCP port to be reachable — otherwise the Tier 3 test
+          # can race the seed and assert against an empty listing.
+          for i in $(seq 1 30); do
+            if python3 -c "
+          import socket, struct, sys
+          s = socket.socket()
+          s.settimeout(2)
+          s.connect(('127.0.0.1', 5598))
+          s.sendall(b'HTRK\x00\x01')
+          d = s.recv(14)
+          if len(d) < 14:
+              sys.exit(1)
+          n = struct.unpack('>H', d[10:12])[0]
+          sys.exit(0 if n > 0 else 1)
+          " 2>/dev/null; then
+              echo "hxtrackd is up with seeded record"; break
+            fi
+            sleep 1
+          done
+
       # The build itself runs in a Fedora container so we have the
       # right libadwaita; the test binaries then talk to mhxd +
       # janus on the runner's localhost via the docker port
@@ -195,6 +248,10 @@ jobs:
         if: failure()
         run: docker logs gtkhx-janus || true
 
+      - name: dump hxtrackd logs on failure
+        if: failure()
+        run: docker logs gtkhx-hxtrackd || true
+
       - name: upload meson test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -209,3 +266,7 @@ jobs:
       - name: stop janus
         if: always()
         run: docker rm -f gtkhx-janus || true
+
+      - name: stop hxtrackd
+        if: always()
+        run: docker rm -f gtkhx-hxtrackd || true

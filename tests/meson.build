@@ -500,6 +500,21 @@ test_tracker_parser = executable('test_tracker_parser',
 test('tracker_parser', test_tracker_parser,
      suite : 'proto')
 
+# tracker_v3 — pure encoders / parsers for the Hotline tracker v3
+# wire format (fogWraith spec). Phase A floor: handshake encoder,
+# 6/8-byte response detection, listing-request encoder, response
+# header, variable-length server records (IPv4 / IPv6 / hostname),
+# TLV walker. Pinned against synthesized byte fixtures so we don't
+# need a live (or mock) v3 tracker to catch regressions.
+test_tracker_v3 = executable('test_tracker_v3',
+  'proto/test_tracker_v3.c',
+  '../src/tracker_v3.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('tracker_v3', test_tracker_v3,
+     suite : 'proto')
+
 # connect_magic — HTLS_MAGIC validator carved out of network.c's
 # async connect state machine (on_magic_received). Replaces a
 # strncmp-based comparison that had a NUL-terminator bug — HTLS
@@ -910,6 +925,7 @@ integration_harness_lib = static_library(
   'integration/integration_harness.c',
   'integration/integration_tls.c',
   'integration/server_matrix.c',
+  'integration/tracker_matrix.c',
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',
@@ -1022,6 +1038,8 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/algo_list.c',
   '../src/hmac.c',
   '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
@@ -1091,6 +1109,8 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/algo_list.c',
   '../src/hmac.c',
   '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
@@ -1159,6 +1179,35 @@ test('real_tls_banner', test_integration_real_tls_banner,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)
+
+# tracker_v1_hxtrackd — Tier 3 coverage for the probe-then-fallback
+# path against a pre-spec v1 tracker (mhxd's hxtrackd, wrapped in
+# tests/hxtrackd/). Pins the wire shape of the v1 fallback after
+# the production state machine's watchdog has expired the v3 probe:
+# 6-byte v1 magic → 14-byte reply header (HTRK_MAGIC echo + chunk
+# header) → records.
+#
+# Uses src/tracker_parser.c on real wire bytes from a real tracker
+# — complements the canned-fixture coverage in tests/proto/
+# test_tracker_parser.c. Asserts at the wire-parser layer rather
+# than driving the main-loop state machine (which would need a
+# GMainLoop test harness this binary doesn't ship); the production
+# machine's v1 path is the same byte sequence either way.
+#
+# Fails loudly with rc=134 (SIGABRT) when hxtrackd is unreachable,
+# matching the no-silent-skips policy. See tests/hxtrackd/README.md
+# for the container details.
+test_integration_tracker_v1_hxtrackd = executable(
+  'test_integration_tracker_v1_hxtrackd',
+  'integration/test_tracker_v1_hxtrackd.c',
+  '../src/tracker_parser.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('tracker_v1_hxtrackd', test_integration_tracker_v1_hxtrackd,
+     suite       : 'integration',
+     timeout     : 30)
 
 # server_matrix — in-process unit coverage for the multi-server
 # matrix helpers (hx_test_servers_with, hx_test_server_default,

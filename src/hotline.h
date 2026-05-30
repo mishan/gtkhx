@@ -65,6 +65,115 @@ struct hl_user_data {
 #define HTLS_MAGIC_LEN 8
 #define HTRK_MAGIC "HTRK\0\1"
 #define HTRK_MAGIC_LEN 6
+
+/* Tracker protocol v3.
+ *
+ * v1 handshake is 6 bytes: "HTRK" + u16 version (0x0001). v3 extends
+ * that to 8 bytes by appending a 2-byte feature-flag bitmask. A
+ * v3-spec-compliant tracker reads 6 bytes first, looks at the
+ * version, then conditionally reads 2 more if it's 0x0003 (and only
+ * if it actually implements v3).
+ *
+ * Pre-spec v1 trackers in the wild (hxtrackd, hltracker.com, every
+ * hxd-derived tracker we've tested) do NOT do this. They memcmp the
+ * full 6-byte HTRK_MAGIC against "HTRK\0\1" and silently fall
+ * through when byte 5 is 0x03 instead of 0x01 — the connection
+ * stays open with no response. The probe-then-fallback in
+ * network.c handles this: send the 8-byte v3 magic with a 2-second
+ * read watchdog, fall back to a fresh connection sending the
+ * 6-byte v1 magic if no response arrives. */
+#define HTRK_V3_MAGIC_PREFIX  "HTRK"           /* 4 bytes; version u16 BE follows */
+#define HTRK_V3_HANDSHAKE_LEN 8                /* full client-side handshake */
+#define HTRK_VERSION_V1       ((guint16) 0x0001)
+#define HTRK_VERSION_V2       ((guint16) 0x0002)
+#define HTRK_VERSION_V3       ((guint16) 0x0003)
+
+/* v3 handshake feature-flag bits (u16 BE in the trailing 2 bytes).
+ * Client-offered + tracker-offered; the negotiated set is the AND of
+ * the two. Bits 5–15 are reserved and MUST be zero (and MUST be
+ * ignored on receipt). */
+#define HTRK_V3_FEAT_IPV6        ((guint16) 0x0001)
+#define HTRK_V3_FEAT_QUERY       ((guint16) 0x0002)
+#define HTRK_V3_FEAT_CLIENT_AUTH ((guint16) 0x0004)
+#define HTRK_V3_FEAT_REG_ACK     ((guint16) 0x0008)
+#define HTRK_V3_FEAT_HMAC        ((guint16) 0x0010)
+
+/* v3 listing-request type. Sent by the client after the handshake
+ * negotiation completes; takes a u16 BE type field, a u16 BE
+ * field-count, then field_count TLVs (search text, pagination). */
+#define HTRK_V3_REQ_LIST       ((guint16) 0x0001)
+
+/* v3 listing-response header type. Tracker replies with this u16 BE
+ * followed by u32 BE total_size, u16 BE total_servers, u16 BE
+ * record_count, then record_count server records back-to-back. */
+#define HTRK_V3_RESP_LIST      ((guint16) 0x0001)
+#define HTRK_V3_RESP_HDR_LEN   10              /* type(2)+size(4)+total(2)+rec(2) */
+
+/* Server-record address-type discriminator (first byte of each
+ * record in a v3 response). */
+#define HTRK_V3_ADDR_IPV4      ((guint8) 0x04) /* 4 bytes follow */
+#define HTRK_V3_ADDR_IPV6      ((guint8) 0x06) /* 16 bytes follow */
+#define HTRK_V3_ADDR_HOSTNAME  ((guint8) 0x48) /* u16 BE length + UTF-8 bytes */
+
+/* Listing-request TLV IDs (query parameters). Phase C tees the
+ * search-entry text into SEARCH_TEXT and may add pagination. */
+#define HTRK_V3_TLV_SEARCH_TEXT  ((guint16) 0x1001)
+#define HTRK_V3_TLV_PAGE_OFFSET  ((guint16) 0x1010)
+#define HTRK_V3_TLV_PAGE_LIMIT   ((guint16) 0x1011)
+
+/* Server-record TLV IDs the client cares about. Each is OPTIONAL in
+ * the trailer; unknown IDs MUST be silently ignored (forward-compat
+ * escape hatch). Phase A walks the trailer to advance the parse but
+ * doesn't surface these yet; Phase B will. */
+#define HTRK_V3_TLV_ADDRESS_IPV6      ((guint16) 0x0100)
+#define HTRK_V3_TLV_HOSTNAME          ((guint16) 0x0101)
+#define HTRK_V3_TLV_SERVER_SOFTWARE   ((guint16) 0x0200)
+#define HTRK_V3_TLV_COUNTRY_CODE      ((guint16) 0x0201)
+#define HTRK_V3_TLV_REGION            ((guint16) 0x0202)
+#define HTRK_V3_TLV_LANGUAGE          ((guint16) 0x0203)
+#define HTRK_V3_TLV_MAX_USERS         ((guint16) 0x0204)
+#define HTRK_V3_TLV_MATURITY          ((guint16) 0x0205)
+#define HTRK_V3_TLV_UPTIME            ((guint16) 0x0206)
+#define HTRK_V3_TLV_RULES_URL         ((guint16) 0x0207)
+#define HTRK_V3_TLV_BANNER_URL        ((guint16) 0x0208)
+#define HTRK_V3_TLV_ICON_URL          ((guint16) 0x0209)
+#define HTRK_V3_TLV_LINK_DOWN_MBIT    ((guint16) 0x020A)
+#define HTRK_V3_TLV_LINK_UP_MBIT      ((guint16) 0x020B)
+#define HTRK_V3_TLV_TIMEZONE_OFFSET   ((guint16) 0x020C)
+#define HTRK_V3_TLV_CONTACT_URL       ((guint16) 0x020D)
+#define HTRK_V3_TLV_SERVER_LAUNCHED   ((guint16) 0x020E)
+#define HTRK_V3_TLV_MIN_PROTO_VERSION ((guint16) 0x0210)
+#define HTRK_V3_TLV_PEAK_24H          ((guint16) 0x0211)
+#define HTRK_V3_TLV_AVG_24H           ((guint16) 0x0212)
+#define HTRK_V3_TLV_PROTOCOL_VERSION  ((guint16) 0x0300)
+#define HTRK_V3_TLV_SUPPORTS_HOPE     ((guint16) 0x0301)
+#define HTRK_V3_TLV_SUPPORTS_TLS      ((guint16) 0x0302)
+#define HTRK_V3_TLV_TLS_PORT          ((guint16) 0x0303)
+#define HTRK_V3_TLV_SUPPORTS_INLINE   ((guint16) 0x0304)
+#define HTRK_V3_TLV_SUPPORTS_VOICE    ((guint16) 0x0305)
+#define HTRK_V3_TLV_SUPPORTS_LARGEFILE ((guint16) 0x0306)
+#define HTRK_V3_TLV_SUPPORTS_IPV6_TLV ((guint16) 0x0307)
+#define HTRK_V3_TLV_HOPE_CIPHERS      ((guint16) 0x0309)
+#define HTRK_V3_TLV_TAGS              ((guint16) 0x0310)
+#define HTRK_V3_TLV_NEWS_COUNT        ((guint16) 0x0450)
+#define HTRK_V3_TLV_MSGBOARD_COUNT    ((guint16) 0x0451)
+#define HTRK_V3_TLV_FILES_COUNT       ((guint16) 0x0452)
+#define HTRK_V3_TLV_TOTAL_FILE_SIZE   ((guint16) 0x0453)
+#define HTRK_V3_TLV_LAST_NEWS_TIME    ((guint16) 0x0454)
+#define HTRK_V3_TLV_LAST_CHAT_TIME    ((guint16) 0x0455)
+#define HTRK_V3_TLV_PRIVATE_LISTING   ((guint16) 0x0500)
+#define HTRK_V3_TLV_LISTING_CATEGORY  ((guint16) 0x0501)
+#define HTRK_V3_TLV_LANGUAGE_STRICT   ((guint16) 0x0502)
+#define HTRK_V3_TLV_IS_PROMOTED       ((guint16) 0x0600)
+#define HTRK_V3_TLV_FIRST_SEEN        ((guint16) 0x0601)
+#define HTRK_V3_TLV_LAST_HEARTBEAT    ((guint16) 0x0602)
+#define HTRK_V3_TLV_VERIFIED_ONLINE   ((guint16) 0x0603)
+
+/* H3 extension magic — marks the start of the v3 TLV extension block
+ * in a UDP REGISTRATION datagram. We don't register, so this is
+ * documented but unused. Kept here so the v3-aware reader can match
+ * the spec section that references it without grep-failing. */
+#define HTRK_V3_EXT_MAGIC      ((guint16) 0x4833) /* "H3" */
 #define HTXF_MAGIC "HTXF"
 #define HTXF_MAGIC_LEN 4
 #define HTXF_MAGIC_INT 0x48545846

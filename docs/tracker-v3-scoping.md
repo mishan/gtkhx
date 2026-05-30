@@ -1,8 +1,16 @@
 # Tracker Protocol v3 — Scoping Notes for GtkHx
 
-Status: research only, no code yet. Written 2026-05-23 against
+Status: implemented as of 2026-05-30 on `claude/tracker-v3-phase-a`.
+Written 2026-05-23 against the v3 spec document at
 <https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Tracker/Tracker-Protocol-v3.md>
-revision in `main` at fetch time.
+(revision in `main` at fetch time). Phase A (the floor — detection
++ record parser + boxed event + Tier 2 + Tier 3 against a v1
+tracker) shipped together with the probe-then-fallback that lets
+us keep talking to pre-spec v1 trackers. The Phase B/C/D/E
+breakdown below is preserved as future scoping; the "v3 IPv6 /
+hostname records flow through the same code path as IPv4" piece
+of Phase E shipped early because Argus emits all
+`promoted_servers` entries as `0x48` hostname records.
 
 GtkHx is a *client*. The spec covers three roles — tracker, registering
 server, listing client — and only the last is relevant here. Sections of
@@ -433,13 +441,12 @@ because the new TLV bag isn't surfaced yet, just walked-over.
 ## 8. Server availability
 
 As of 2026-05-23 I'm not aware of any production-deployed v3 tracker.
-The reference implementations live under fogWraith's umbrella; Janus
-is at v1 today. This is the same shape of problem we had with the
-chat-history extension — we'll need a Go mock server in the test
+Janus is at v1 today. This is the same shape of problem we had with
+the chat-history extension — we'll need a Go mock server in the test
 matrix to validate Phase A+B in CI, with the option to retire it (or
 just keep it as a regression net) once a real v3 tracker exists.
 
-Worth checking before starting: ping the fogWraith repo to see if
-there's a public test endpoint or a reference Go implementation we can
+Worth checking before starting: poke the v3 spec repo to see if
+there's a public test endpoint or a reference implementation we can
 point our integration matrix at instead of writing our own mock from
 scratch.

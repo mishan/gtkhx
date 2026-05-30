@@ -34,6 +34,8 @@
 #include "chat.h"
 #include "options.h"
 #include "cfgkeys.h"
+#include "debug.h"
+#include "hotline.h"
 #include "tracker.h"
 
 static GtkWidget *tracker_window;
@@ -55,14 +57,31 @@ static int num_found, num_total;
  * with a one-line warning to the chat output. */
 static GRegex *current_search;
 
+/* Per-tracker-listing row.
+ *
+ * `address` is the printable address from HxTrackerServer.address —
+ * inet_ntop("192.0.2.10") for v1 + v3-IPv4 records, inet_ntop6 for
+ * v3 IPv6 records, or the literal hostname for v3 0x48 records.
+ * Always non-NULL, UTF-8 valid. Used as the dedup key (paired with
+ * port) and rendered into the "Address" column directly.
+ *
+ * Phase E (claude/tracker-v3-phase-a tail end): switched the dedup
+ * key from `struct in_addr addr` (32-bit IPv4) to a string so v3's
+ * IPv6 + hostname records can flow through the same BST without
+ * needing a separate non-IPv4 path. The compare in find_server /
+ * insert_server is `strcmp(a, b)` then port; ordering is
+ * lexicographic on the address string, which is arbitrary-but-stable
+ * (and the user only sees it through tracker_search_tree's render
+ * loop, so the order isn't user-facing). */
 struct tracker_server {
     char *name;
     char *desc;
 
+    char *address;
+
     guint16 nusers;
     guint16 port;
 
-    struct in_addr addr;
     struct tracker_server *left, *right;
 };
 
@@ -83,6 +102,9 @@ tracker_list_destroy (struct tracker_server *root)
     }
     if (root->desc) {
         g_free (root->desc);
+    }
+    if (root->address) {
+        g_free (root->address);
     }
     g_free (root);
 
@@ -176,10 +198,13 @@ tracker_search_tree (GRegex *preg, struct tracker_server *root)
 
         text[0] = root->name;
         text[1] = nusersstr;
-        text[2] = g_malloc (HOSTLEN);
-
-        inet_ntop (AF_INET, &root->addr, text[2], HOSTLEN);
-
+        /* Phase E: render whatever printable address the boxed
+         * event delivered (IPv4 / IPv6 / hostname). No inet_ntop
+         * call here — the event constructor already did that for
+         * the IPv4 / IPv6 records, and the hostname-record path
+         * (Argus's promoted_servers format) carries the literal
+         * hostname through. */
+        text[2] = root->address ? root->address : (char *) "";
         text[3] = portstr;
         text[4] = root->desc;
 
@@ -187,7 +212,6 @@ tracker_search_tree (GRegex *preg, struct tracker_server *root)
         /* Phase 5: no per-row foreground override — let the GTK theme's
 		 * default foreground apply so the tracker list reads correctly
 		 * under both light and dark themes. */
-        g_free (text[2]);
         gtk_hlist_set_row_data (GTK_HLIST (tracker_list), row, root);
         num_found++;
     }
@@ -279,19 +303,28 @@ tracker_case_toggled (GtkToggleButton *btn, gpointer data)
     tracker_rerun_search ();
 }
 
+/* Phase E: dedup key is (address-string, port). Compare order is
+ * strcmp(address) then numeric port. Both fields are non-NULL by
+ * construction — tracker_server_create populates address from
+ * event->address (always non-NULL, see tracker_event.c) and port
+ * from event->port. */
 static int
-find_server (struct in_addr addr, guint16 port, struct tracker_server *root)
+find_server (const char *address, guint16 port, struct tracker_server *root)
 {
-    /* a one-liner to traverse a binary search tree ...
-	   kids: don't do this for your computer science course! */
-    return (root
-            && (((root->addr.s_addr == addr.s_addr) && (root->port == port))
-                || (find_server (
-                    addr, port,
-                    (root->addr.s_addr == addr.s_addr)
-                        ? ((root->port > port) ? root->left : root->right)
-                        : ((root->addr.s_addr > addr.s_addr) ? root->left
-                                                             : root->right)))));
+    if (!root || !address) {
+        return 0;
+    }
+    int c = strcmp (root->address, address);
+    if (c == 0 && root->port == port) {
+        return 1;
+    }
+    struct tracker_server *next;
+    if (c == 0) {
+        next = (root->port > port) ? root->left : root->right;
+    } else {
+        next = (c > 0) ? root->left : root->right;
+    }
+    return find_server (address, port, next);
 }
 
 static void
@@ -305,7 +338,8 @@ insert_server (struct tracker_server *server, struct tracker_server *root)
         return;
     }
 
-    if (root->addr.s_addr == server->addr.s_addr) {
+    int c = strcmp (root->address, server->address);
+    if (c == 0) {
         if (root->port > server->port) {
             if (root->left) {
                 insert_server (server, root->left);
@@ -322,7 +356,7 @@ insert_server (struct tracker_server *server, struct tracker_server *root)
         return;
     }
 
-    else if (root->addr.s_addr > server->addr.s_addr) {
+    if (c > 0) {
         if (root->left) {
             insert_server (server, root->left);
             return;
@@ -337,49 +371,50 @@ insert_server (struct tracker_server *server, struct tracker_server *root)
     }
 
     root->right = server;
-    return;
 }
 
 void
-tracker_server_create (struct in_addr addr, guint16 port, guint16 nusers,
-                       const char *nam, const char *desc, int total)
+tracker_server_create (HxTrackerServer *event)
 {
     struct tracker_server *server;
     char *num;
     int old_num_found;
 
-    if (!tracker_list) {
+    if (!event || !tracker_list) {
         return;
     }
 
-    if (find_server (addr, port, tracker_server_tree)) {
+    /* event->address is always non-NULL (the constructor guarantees
+     * it for every addr_type — see tracker_event.c::format_address).
+     * Defensive bail anyway so a future refactor that loosens that
+     * invariant doesn't NULL-deref strcmp. */
+    if (!event->address || !*event->address) {
+        debug_log ("tracker",
+                   "skipping record with empty address (addr_type=0x%02x, "
+                   "name=%s)",
+                   event->addr_type,
+                   event->name ? event->name : "(no name)");
+        return;
+    }
+
+    if (find_server (event->address, event->port, tracker_server_tree)) {
         return;
     }
 
     num_total++;
-    server = g_malloc (sizeof (struct tracker_server));
-    server->addr = addr;
-    server->port = port;
-    server->nusers = nusers;
-    /* Phase 3.x: server names from old Hotline trackers are MacRoman-
-	 * encoded. Pango requires UTF-8; without conversion any non-ASCII
-	 * byte (very common in Mac-era server names) makes
-	 * gtk_label_set_text → pango_layout_set_text print the
-	 * "Invalid UTF-8 string passed to pango_layout_set_text" critical.
-	 * Convert with fallback so unmappable bytes degrade to '?' rather
-	 * than dropping the whole row. */
-    server->name = g_convert_with_fallback (nam, -1, "UTF-8", "MACINTOSH", "?",
-                                            NULL, NULL, NULL);
-    if (!server->name) {
-        server->name = g_strdup (nam ? nam : "");
-    }
-    server->desc = g_convert_with_fallback (desc, -1, "UTF-8", "MACINTOSH", "?",
-                                            NULL, NULL, NULL);
-    if (!server->desc) {
-        server->desc = g_strdup (desc ? desc : "");
-    }
-    server->left = 0;
-    server->right = 0;
+    server = g_malloc0 (sizeof (struct tracker_server));
+    server->address = g_strdup (event->address);
+    server->port = event->port;
+    server->nusers = event->nusers;
+    /* MacRoman → UTF-8 transcoding lives in the boxed-event
+     * constructor now (hx_tracker_server_new_v1). v3 records arrive
+     * already-UTF-8 per spec, validated with g_utf8_make_valid in
+     * the constructor. Either way, by the time we get here the
+     * strings are Pango-safe — just g_strdup so the dedup tree
+     * owns its own copies and the event can be freed by the
+     * signal emitter. */
+    server->name = g_strdup (event->name ? event->name : "");
+    server->desc = g_strdup (event->desc ? event->desc : "");
     insert_server (server, tracker_server_tree);
 
     old_num_found = num_found;
@@ -417,14 +452,12 @@ tracker_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
 
     if (n_press == 2) {
         struct tracker_server *server;
-        char buf[HOSTLEN];
 
         server
             = gtk_hlist_get_row_data (GTK_HLIST (tracker_list), tracker_storow);
-        if (!server) {
+        if (!server || !server->address) {
             return;
         }
-        inet_ntop (AF_INET, &server->addr, buf, HOSTLEN);
         memset (the_session.htlc.compressalg, 0,
                 sizeof (the_session.htlc.compressalg));
         memset (the_session.htlc.cipheralg, 0,
@@ -432,8 +465,16 @@ tracker_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
         /* Tracker-driven connects are always plaintext: the tracker
 		 * doesn't advertise a TLS port today. If a future tracker
 		 * variant returns one (see docs/tls-scoping.md §10), this
-		 * stamp gets replaced with that field. */
-        hx_connect (&the_session.htlc, buf, server->port, "", "", 0, /*tls=*/0);
+		 * stamp gets replaced with that field.
+		 *
+		 * Phase E: server->address is the printable string the boxed
+		 * event delivered — IPv4 dotted-quad, IPv6 colon-hex, or
+		 * a literal hostname. hx_connect's first arg is a host
+		 * string that GSocketClient resolves via getaddrinfo, so
+		 * all three forms route through the same resolver and
+		 * connect happily. */
+        hx_connect (&the_session.htlc, server->address, server->port,
+                    "", "", 0, /*tls=*/0);
     }
 }
 
@@ -443,12 +484,13 @@ tracker_connect (void)
     struct tracker_server *server;
 
     server = gtk_hlist_get_row_data (GTK_HLIST (tracker_list), tracker_storow);
-    if (server) {
-        char buf[HOSTLEN];
-
+    if (server && server->address) {
         create_connect_window (0, &the_session);
-        inet_ntop (AF_INET, &server->addr, buf, HOSTLEN);
-        connect_set_entries (buf, 0, 0, server->port);
+        /* Phase E: hand the connect-dialog the address string verbatim
+         * (IPv4 dotted-quad, IPv6 colon-hex, or hostname). The dialog
+         * just stuffs it into the host entry where the user can
+         * tweak it before connecting. */
+        connect_set_entries (server->address, 0, 0, server->port);
     }
 }
 

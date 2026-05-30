@@ -233,17 +233,16 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
         "xfer-destroyed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL,
         NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 
-    /* tracker-server-create — struct in_addr is 32 bits; passed as
-	 * a uint32 to keep the marshaller happy. The handler reconstructs
-	 * an in_addr from it. */
+    /* tracker-server-create — boxed HxTrackerServer carrying the
+     * full parsed record (addr_type, printable address, port /
+     * users, UTF-8 name + description, optional TLV trailer for
+     * v3, batch total). Same pattern as the Phase 5 HxChatEvent
+     * / HxMsgEvent payloads: future-proof for v3's richer
+     * metadata without growing the marshaller signature each
+     * time. */
     signals[SIGNAL_TRACKER_SERVER_CREATE] = g_signal_new (
         "tracker-server-create", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
-        0, NULL, NULL, NULL, G_TYPE_NONE, 6, G_TYPE_UINT, /* in_addr.s_addr */
-        G_TYPE_UINT,                                      /* port */
-        G_TYPE_UINT,                                      /* nusers */
-        G_TYPE_POINTER,                                   /* nam */
-        G_TYPE_POINTER,                                   /* desc */
-        G_TYPE_INT);                                      /* total */
+        0, NULL, NULL, NULL, G_TYPE_NONE, 1, HX_TYPE_TRACKER_SERVER);
 
     signals[SIGNAL_TASK_UPDATE] = g_signal_new (
         "task-update", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL,
@@ -436,13 +435,9 @@ gtkhx_session_emit_xfer_destroyed (GtkhxSession *self, session *sess,
 
 void
 gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
-                                          struct in_addr addr, guint16 port,
-                                          guint16 nusers, const char *nam,
-                                          const char *desc, int total)
+                                          HxTrackerServer *event)
 {
-    g_signal_emit (self, signals[SIGNAL_TRACKER_SERVER_CREATE], 0,
-                   (guint)addr.s_addr, (guint)port, (guint)nusers, nam, desc,
-                   total);
+    g_signal_emit (self, signals[SIGNAL_TRACKER_SERVER_CREATE], 0, event);
 }
 
 void
