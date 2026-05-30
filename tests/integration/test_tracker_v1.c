@@ -8,9 +8,15 @@
  */
 
 /*
- * tests/integration/test_tracker_v1_hxtrackd.c — Tier 3 coverage
- * for the v1 fallback wire path against a real pre-spec v1
- * tracker (mhxd's hxtrackd, wrapped by tests/hxtrackd/).
+ * tests/integration/test_tracker_v1.c — Tier 3 coverage for the v1
+ * fallback wire path against any v1-only tracker in the matrix.
+ * Picks the first entry that has HX_TEST_TRACKER_CAP_V1 but NOT
+ * HX_TEST_TRACKER_CAP_V3 (the v3-aware row has V1 too but pointing
+ * the test at it would exercise the v3 happy path, not the
+ * fallback). Today that's hxtrackd (wrapped in tests/hxtrackd/),
+ * but the test is tracker-agnostic — drop in another v1-only
+ * target by adding a matrix row and CI step, no test changes
+ * required.
  *
  * What this test pins:
  *
@@ -22,35 +28,40 @@
  *     piece (reply header, padding sentinel, fixed record
  *     prefix) against real wire bytes from a real tracker — not
  *     just the canned fixtures in tests/proto/test_tracker_parser.c.
- *   - At least one record matches the seeded
- *     "hxtrackd test server" entry that tests/hxtrackd/
- *     seed-tracker.py registers via UDP at container startup.
+ *   - When the picked target is hxtrackd specifically: one
+ *     record matches the seeded "hxtrackd test server" entry
+ *     that tests/hxtrackd/seed-tracker.py registers via UDP at
+ *     container startup, with port=5500 and nusers=4 from the
+ *     seed packet. This is the offset-math regression net.
+ *     Other v1-only trackers added to the matrix later can pin
+ *     their own seed names via additional name-gated blocks if
+ *     they want the same coverage.
  *
  * The probe-then-fallback state machine in network.c (8-byte v3
  * probe → 2-second watchdog → fresh conn with v1 magic) is the
- * code path this container exists to regression-net. We don't
- * exercise the watchdog inline here — the production state
- * machine is main-loop-driven and would need a GMainLoop test
- * harness this binary doesn't ship. Instead, the test's
- * existence + the matrix entry's HX_TEST_TRACKER_CAP_V1-only
- * caps mean a future change that breaks the v1 wire path against
- * hxtrackd surfaces in CI, which gives us most of the protection
- * we want.
+ * code path this test exists to regression-net. We don't exercise
+ * the watchdog inline here — the production state machine is
+ * main-loop-driven and would need a GMainLoop test harness this
+ * binary doesn't ship. Instead, the test's existence + the matrix
+ * entry's V1-only caps mean a future change that breaks the v1
+ * wire path against a v1-only tracker surfaces in CI, which gives
+ * us most of the protection we want.
  *
  * What this test does NOT cover:
  *
- *   - The GtkhxSession::tracker-server-create signal path.
- *     Sandbox doesn't have GTK available.
+ *   - The GtkhxSession::tracker-server-create signal path. The UI
+ *     render path would need a GMainLoop test harness this binary
+ *     doesn't ship.
  *
  *   - The actual production state machine's watchdog timing. The
- *     `tracker_v3_argus` test exercises the v3 happy path, which
+ *     `tracker_v3_listing` test exercises the v3 happy path, which
  *     forces the same callbacks down a different branch; together
  *     the two tests give end-to-end wire-format coverage.
  *
  * No-silent-skip contract: if the matrix has no V1-only tracker
- * entry (hxtrackd container down or filtered out via
- * GTKHX_TEST_TRACKERS), the test fails loudly with
- * g_test_fail_printf.
+ * entry (no v1-only container is running or all such entries have
+ * been filtered out via GTKHX_TEST_TRACKERS), the test fails
+ * loudly with g_test_fail_printf.
  */
 
 #include "config.h"
@@ -77,8 +88,11 @@ read_exact (int fd, void *buf, gsize len, const char *what)
     g_assert_true (ok);
 }
 
-/* Pick the hxtrackd entry — the matrix's only v1-only tracker. If
- * it's not there (container down / env filter), fail loudly. */
+/* Pick a tracker that has V1 but NOT V3 — the v3-aware matrix entry
+ * also has V1 set, but pointing this test at it would exercise the
+ * v3 happy path, not the fallback. Subset semantics so a future
+ * v1-only tracker that grows an unrelated metadata bit
+ * (HOSTNAME_RECS, PROMOTED, ...) still gets picked. */
 static const hx_test_tracker *
 pick_v1_only_tracker (void)
 {
@@ -91,12 +105,6 @@ pick_v1_only_tracker (void)
     const hx_test_tracker *picked = NULL;
     for (guint i = 0; i < targets->len; i++) {
         const hx_test_tracker *t = g_ptr_array_index (targets, i);
-        /* Prefer a tracker that has V1 but NOT V3 — the v3-aware
-         * matrix entry (Argus) also has V1 set, but pointing this
-         * test at Argus would exercise the v3 happy path, not the
-         * fallback. Subset semantics (not strict equality) so a
-         * future hxtrackd that grows an unrelated metadata bit
-         * (HOSTNAME_RECS, PROMOTED, ...) still gets picked. */
         if ((t->caps & HX_TEST_TRACKER_CAP_V1)
             && !(t->caps & HX_TEST_TRACKER_CAP_V3)) {
             picked = t;
@@ -106,8 +114,9 @@ pick_v1_only_tracker (void)
     g_ptr_array_unref (targets);
     if (!picked) {
         g_test_fail_printf (
-            "no v1-only tracker in the matrix — bring up tests/hxtrackd "
-            "container or check GTKHX_TEST_TRACKERS");
+            "no v1-only tracker in the matrix — bring up a v1-only test "
+            "container (tests/hxtrackd/ is the current one) or check "
+            "GTKHX_TEST_TRACKERS");
     }
     return picked;
 }
@@ -123,10 +132,8 @@ test_v1_fallback_listing (void)
     int fd = hx_test_tracker_connect (trk);
     if (fd < 0) {
         g_test_fail_printf (
-            "couldn't connect to %s tracker at %s:%u — is the container "
-            "up? (`docker run --rm -p 5598:5498 -p 5599:5499/udp "
-            "gtkhx-hxtrackd`)",
-            trk->name, trk->host, (unsigned) trk->port);
+            "couldn't connect to %s tracker at %s:%u — is its container "
+            "up?", trk->name, trk->host, (unsigned) trk->port);
         return;
     }
 
@@ -144,8 +151,8 @@ test_v1_fallback_listing (void)
     guint8 reply_hdr[14];
     read_exact (fd, reply_hdr, sizeof (reply_hdr), "v1 reply header");
 
-    /* First 6 bytes echo HTRK_MAGIC. Pin that so a future
-     * hxtrackd that started serving raw chunk headers (without
+    /* First 6 bytes echo HTRK_MAGIC. Pin that so a future v1
+     * tracker that started serving raw chunk headers (without
      * the magic prefix) breaks the test loudly instead of
      * misaligning record reads downstream. */
     g_assert_cmpmem (reply_hdr, HTRK_MAGIC_LEN, HTRK_MAGIC, HTRK_MAGIC_LEN);
@@ -156,26 +163,28 @@ test_v1_fallback_listing (void)
     g_assert_true (
         hx_tracker_reply_parse_header (reply_hdr, sizeof (reply_hdr),
                                        &nservers));
-    /* The hxtrackd container's seed-tracker.py registers exactly
-     * one server (and one in the listing means one in the count —
-     * v1's u16 nservers can include padding entries but hxtrackd's
-     * encoder for our case won't emit any). Demand >= 1 so a
-     * future seed-script change can grow the count without
-     * breaking the test. */
+    /* Demand >= 1 record. A v1-only test container is expected to
+     * have at least one server (either a seeded registration or a
+     * real one) so the test exercises record parsing as well as
+     * the header. */
     g_assert_cmpuint (nservers, >=, 1);
 
-    /* Drain the seeded record(s). For each, peel:
+    /* Drain the records. For each, peel:
      *   - 8 bytes addr(4)+port(2)+nusers(2)
      *   - 3 bytes reserved(2)+name_len(1)
      *   - name_len bytes name
      *   - 1 byte desc_len
      *   - desc_len bytes desc
      *
-     * Look for the "hxtrackd test server" entry seeded by
-     * tests/hxtrackd/seed-tracker.py. Skip padding entries
-     * (first byte = 0 sentinel). */
+     * When the picked target is hxtrackd, look for the "hxtrackd
+     * test server" entry seeded by tests/hxtrackd/seed-tracker.py
+     * — that's the field-offset regression net. For other v1
+     * trackers, just pin that records decode cleanly. Skip
+     * padding entries (first byte = 0 sentinel). */
+    const gboolean expect_hxtrackd_seed
+        = (strcmp (trk->name, "hxtrackd") == 0);
     int decoded = 0;
-    int seen_seed = 0;
+    int seen_hxtrackd_seed = 0;
     for (guint16 i = 0; i < nservers; i++) {
         guint8 hdr8[8];
         read_exact (fd, hdr8, sizeof (hdr8), "v1 record hdr");
@@ -206,9 +215,10 @@ test_v1_fallback_listing (void)
         }
 
         decoded++;
-        if (rec.name_len == strlen ("hxtrackd test server")
+        if (expect_hxtrackd_seed
+            && rec.name_len == strlen ("hxtrackd test server")
             && memcmp (name, "hxtrackd test server", rec.name_len) == 0) {
-            seen_seed = 1;
+            seen_hxtrackd_seed = 1;
             /* Sanity: the seed-tracker.py packet stamps port=5500
              * and nusers=4. Pin those so an accidental script
              * tweak surfaces here. */
@@ -218,7 +228,9 @@ test_v1_fallback_listing (void)
     }
 
     g_assert_cmpint (decoded, >=, 1);
-    g_assert_true (seen_seed);
+    if (expect_hxtrackd_seed) {
+        g_assert_true (seen_hxtrackd_seed);
+    }
 
     integration_close (fd);
 }
@@ -228,7 +240,7 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/tracker_v1/hxtrackd/probe_then_v1_listing",
+    g_test_add_func ("/tracker_v1/integration/v1_listing",
                      test_v1_fallback_listing);
 
     return g_test_run ();

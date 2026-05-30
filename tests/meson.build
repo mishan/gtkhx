@@ -1180,12 +1180,53 @@ test('real_tls_banner', test_integration_real_tls_banner,
      is_parallel : false,
      timeout     : 60)
 
-# tracker_v1_hxtrackd — Tier 3 coverage for the probe-then-fallback
-# path against a pre-spec v1 tracker (mhxd's hxtrackd, wrapped in
-# tests/hxtrackd/). Pins the wire shape of the v1 fallback after
-# the production state machine's watchdog has expired the v3 probe:
-# 6-byte v1 magic → 14-byte reply header (HTRK_MAGIC echo + chunk
-# header) → records.
+# tracker_v3_listing — Tier 3 coverage for the tracker v3 client
+# against any v3-capable target in the matrix. Drives the
+# production tracker_v3.c encoders + parsers over a real TCP
+# connection, pinning the 8-byte handshake → 4-byte listing
+# request → 10-byte response header → variable-length records
+# flow against software we didn't write.
+#
+# Picks the first HX_TEST_TRACKER_CAP_V3 entry — today Argus only,
+# but the test is tracker-agnostic. The known-seed name check
+# (Argus's "Promoted Alpha") is gated on the picked entry's name,
+# so a future v3 tracker added to the matrix exercises the
+# generic flow without needing test changes.
+#
+# Asserts at the wire-parser layer rather than the boxed-event
+# signal layer because the UI render path would need a GMainLoop
+# test harness this binary doesn't ship; the production state
+# machine processes the same byte sequence either way.
+#
+# Test name is `tracker_v3_listing` (not bare `tracker_v3`) to
+# avoid collision with the proto-suite test of the same name.
+# Fails loudly when no v3-capable container is reachable — per the
+# no-silent-skip feedback, missing Tier 3 coverage should surface
+# in CI as a red light.
+test_integration_tracker_v3 = executable(
+  'test_integration_tracker_v3',
+  'integration/test_tracker_v3.c',
+  '../src/tracker_v3.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('tracker_v3_listing', test_integration_tracker_v3,
+     suite       : 'integration',
+     timeout     : 30)
+
+# tracker_v1_listing — Tier 3 coverage for the v1 fallback wire
+# path against any v1-only target in the matrix. Pins the wire
+# shape after the production state machine's watchdog has expired
+# the v3 probe: 6-byte v1 magic → 14-byte reply header (HTRK_MAGIC
+# echo + chunk header) → records.
+#
+# Picks the first matrix entry that has HX_TEST_TRACKER_CAP_V1 but
+# NOT HX_TEST_TRACKER_CAP_V3 — today hxtrackd only, but the test
+# is tracker-agnostic. The known-seed name check (hxtrackd's
+# "hxtrackd test server") is gated on the picked entry's name, so
+# a future v1-only tracker added to the matrix exercises the
+# generic flow without needing test changes.
 #
 # Uses src/tracker_parser.c on real wire bytes from a real tracker
 # — complements the canned-fixture coverage in tests/proto/
@@ -1194,18 +1235,21 @@ test('real_tls_banner', test_integration_real_tls_banner,
 # GMainLoop test harness this binary doesn't ship); the production
 # machine's v1 path is the same byte sequence either way.
 #
-# Fails loudly with rc=134 (SIGABRT) when hxtrackd is unreachable,
-# matching the no-silent-skips policy. See tests/hxtrackd/README.md
-# for the container details.
-test_integration_tracker_v1_hxtrackd = executable(
-  'test_integration_tracker_v1_hxtrackd',
-  'integration/test_tracker_v1_hxtrackd.c',
+# Test name is `tracker_v1_listing` (not bare `tracker_v1`) for
+# symmetry with the v3-tier-3 test (`tracker_v3_listing`) and to
+# leave the bare `tracker_v1` slot free for a future proto-suite
+# test of the v1 parser. Fails loudly with rc=134 (SIGABRT) when
+# no v1-only container is reachable, matching the no-silent-skips
+# policy.
+test_integration_tracker_v1 = executable(
+  'test_integration_tracker_v1',
+  'integration/test_tracker_v1.c',
   '../src/tracker_parser.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
-test('tracker_v1_hxtrackd', test_integration_tracker_v1_hxtrackd,
+test('tracker_v1_listing', test_integration_tracker_v1,
      suite       : 'integration',
      timeout     : 30)
 

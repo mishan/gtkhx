@@ -16,34 +16,86 @@
 
 /* ---- The matrix --------------------------------------------------- */
 /*
- * Phase A on this branch: only the v1-only hxtrackd entry — that's
- * what's needed to give the probe-then-fallback code path in
- * network.c its own Tier 3 coverage. A v3-capable entry (Argus)
- * lands on a follow-up branch that wraps VesperNet's closed-source
- * tracker; the matrix grows by one row there, no other changes.
+ * Two rows today:
+ *
+ *   - argus: VesperNet's closed-source v3-capable tracker
+ *     (wrapped in tests/argus/). Speaks v1+v2+v3 simultaneously
+ *     on the same port; advertises FEAT_QUERY + pagination;
+ *     emits all promoted_servers entries as 0x48 hostname
+ *     records (see tests/argus/README.md "Known gotcha"). Covers
+ *     the v3 happy path.
+ *
+ *   - hxtrackd: mhxd's bundled pre-spec v1 tracker (wrapped in
+ *     tests/hxtrackd/). v1-only — pre-spec trackers memcmp the
+ *     full 6-byte HTRK_MAGIC and silently ignore the v3 version
+ *     byte. Covers the probe-then-fallback path in network.c.
+ *
+ * Container port mapping: Argus uses the conventional 5498/5499
+ * (nothing else in the rig binds those). hxtrackd is mapped to
+ * host 5598/5599 to dodge the collision.
  */
 const hx_test_tracker hx_test_tracker_matrix[] = {
     {
-        /* hxtrackd: mhxd's bundled pre-spec v1 tracker, wrapped in
-         * tests/hxtrackd/. Coverage for the probe-then-fallback
-         * path (8-byte v3 magic → watchdog timeout → fresh conn
-         * with 6-byte v1 magic). Pre-spec v1 trackers memcmp the
-         * full 6-byte HTRK_MAGIC and silently ignore the v3
-         * version byte, so we need a real one in the matrix to
-         * make sure that fallback can't regress.
+        /* Argus: the first real v3-capable Hotline tracker we
+         * have access to (and the impetus for shipping the v3
+         * client support). Wrapped in tests/argus/ — Dockerfile
+         * pulls the binary from get.vespernet.net, COPY-overlays
+         * our config.yaml, exposes the standard ports.
+         *
+         * Capabilities are conservative — only bits Argus
+         * reliably handles get set. We know from the bundled
+         * configuration.md + a live wire probe (see commit body
+         * and the tests/argus/README.md "Known gotcha" section)
+         * that Argus speaks v1+v2+v3, accepts FEAT_QUERY
+         * (SEARCH_TEXT TLV), and emits every promoted_servers
+         * entry as a 0x48 hostname record regardless of whether
+         * the YAML address is an IP literal.
+         *
+         * IPV6_RECORDS: not asserted yet — Argus supports IPv6
+         * server addresses on the registration side, but none of
+         * our test promoted entries use IPv6 addresses so we
+         * don't currently exercise the emit path.
+         *
+         * TLS: not advertised. The v3 spec says clients SHOULD
+         * prefer TLS on the listing port but Argus 1.0.2 doesn't
+         * ship a TLS listener. GtkHx Phase D is the future axis. */
+        .name                    = "argus",
+        .host                    = "127.0.0.1",
+        .port                    = 5498,
+        .udp_port                = 5499,
+        .tls_port                = 0,
+        /* tests/argus/conf/config.yaml seeds three promoted
+         * entries (Alpha / Beta / Gamma). Test asserts on this
+         * count. If the config grows, bump this. */
+        .expected_promoted_count = 3,
+        .caps                    = HX_TEST_TRACKER_CAP_V1
+                                 | HX_TEST_TRACKER_CAP_V2
+                                 | HX_TEST_TRACKER_CAP_V3
+                                 | HX_TEST_TRACKER_CAP_SEARCH_TEXT
+                                 | HX_TEST_TRACKER_CAP_PAGINATION
+                                 | HX_TEST_TRACKER_CAP_HOSTNAME_RECS
+                                 | HX_TEST_TRACKER_CAP_PROMOTED,
+    },
+    {
+        /* hxtrackd: mhxd's bundled pre-spec v1 tracker, wrapped
+         * in tests/hxtrackd/. Coverage for the probe-then-
+         * fallback path (8-byte v3 magic → watchdog timeout →
+         * fresh conn with 6-byte v1 magic). Pre-spec v1 trackers
+         * memcmp the full 6-byte HTRK_MAGIC and silently ignore
+         * the v3 version byte, so we need a real one in the
+         * matrix to make sure that fallback can't regress.
          *
          * Container exposes its internal 5498/5499 on host
-         * 5598/5599 (the conventional 5498/5499 are reserved for
-         * future v3-capable matrix rows that benefit from running
-         * on the spec port).
+         * 5598/5599 (Argus already claims the conventional
+         * ports above).
          *
          * Caps: V1 only. No V2 (mhxd's tracker doesn't speak v2),
          * no V3, no FEAT_QUERY, no pagination, no TLS.
          * seed-tracker.py inside the container registers one
-         * server via UDP — that's not a v3 "promoted" entry, just
-         * a regular registration. expected_promoted_count stays 0;
-         * the v1 Tier 3 test asserts at least one record arrives,
-         * not a specific count. */
+         * server via UDP — that's not a v3 "promoted" entry,
+         * just a regular registration. expected_promoted_count
+         * stays 0; the v1 Tier 3 test asserts at least one
+         * record arrives, not a specific count. */
         .name                    = "hxtrackd",
         .host                    = "127.0.0.1",
         .port                    = 5598,
