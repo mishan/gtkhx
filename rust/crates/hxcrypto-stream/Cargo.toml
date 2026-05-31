@@ -12,6 +12,8 @@ crate-type = ["staticlib"]
 [dependencies]
 hxcrypto-hash = { path = "../hxcrypto-hash" }
 hxrand = { path = "../hxrand" }
+blowfish = "0.10"
+cipher = "0.5"
 
 [build-dependencies]
 cbindgen = "0.27"
