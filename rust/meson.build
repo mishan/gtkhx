@@ -21,7 +21,6 @@ rust_sources = files(
   'crates/hxcrypto-hash/build.rs',
   'crates/hxcrypto-hash/cbindgen.toml',
   'crates/hxcrypto-stream/src/lib.rs',
-  'crates/hxcrypto-stream/src/rc4.rs',
   'crates/hxcrypto-stream/src/blowfish_ofb.rs',
   'crates/hxcrypto-stream/build.rs',
   'crates/hxcrypto-stream/cbindgen.toml',
