@@ -5,13 +5,6 @@
 #include "config.h"
 
 #include <sys/types.h> /* u_int32_t */
-#include <zlib.h>
-#ifdef HAVE_LZ4
-#include <lz4frame.h>
-#endif
-#ifdef HAVE_ZSTD
-#include <zstd.h>
-#endif
 
 /* HOPE-Secure-Login transport compression algorithms.
  *
@@ -34,19 +27,12 @@
 #define COMPRESS_LZ4 2
 #define COMPRESS_ZSTD 3
 
+/* Opaque Rust-allocated encoder/decoder state. Created via
+ * gtkhx_compress_encoder_new / gtkhx_compress_decoder_new and
+ * freed via the corresponding _free functions. The union is kept
+ * only for sizing; only the pointer member is used. */
 union compress_state {
-    z_stream stream;
-#ifdef HAVE_LZ4
-    /* LZ4 frame format separates compression and decompression
-	 * contexts. The htlc has one decode union and one encode union;
-	 * only the field for the active direction is meaningful. */
-    LZ4F_cctx *lz4_cctx;
-    LZ4F_dctx *lz4_dctx;
-#endif
-#ifdef HAVE_ZSTD
-    ZSTD_CCtx *zstd_cctx;
-    ZSTD_DCtx *zstd_dctx;
-#endif
+    void *ctx;  /* opaque Rust CompressEncoder* or CompressDecoder* */
 };
 
 struct htlc_conn;

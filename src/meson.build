@@ -137,12 +137,9 @@ endif
 # dispatch into the corresponding src/compress.c branch; when
 # absent the negotiation list just doesn't include it and the
 # dispatcher entries compile out.
-if lz4_dep.found()
-  conf.set('HAVE_LZ4', 1)
-endif
-if zstd_dep.found()
-  conf.set('HAVE_ZSTD', 1)
-endif
+# LZ4 and ZSTD are always available via the Rust hxcompress crate.
+conf.set('HAVE_LZ4', 1)
+conf.set('HAVE_ZSTD', 1)
 
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,
 # gtk_signal_connect, gtk_widget_set_usize). Per ROADMAP, the dlopen

@@ -52,8 +52,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
-#include <nettle/arcfour.h>
-#include <nettle/blowfish.h>
 
 #include "protocol.h"
 #include "cipher.h"
@@ -62,27 +60,15 @@
 #include "gtkhx_log.h"   /* hx_printf_prefix prototype */
 #include "network_decode.h"
 
-/* Local copy of cipher.c's static blowfish_ofb64_crypt — used by
- * the Blowfish round-trip subtest below to encode the plaintext
- * exactly the same way production's do_encode does. Keeping this
- * here (rather than de-staticing the original) avoids broadening
- * the cipher.c surface for a test-only need. */
-static void
-test_blowfish_ofb64_crypt (blowfish_state *bs,
-                           const uint8_t *src, uint8_t *dst, size_t len)
-{
-    int n = bs->num;
+/* ---- Rust FFI declarations (used by the encode side in tests) ---- */
 
-    while (len--) {
-        if (n == 0) {
-            blowfish_encrypt (&bs->ctx, BLOWFISH_BLOCK_SIZE,
-                              bs->ivec, bs->ivec);
-        }
-        *dst++ = *src++ ^ bs->ivec[n];
-        n = (n + 1) % BLOWFISH_BLOCK_SIZE;
-    }
-    bs->num = n;
-}
+extern Rc4State *gtkhx_rc4_new (const uint8_t *key, uint32_t keylen);
+extern void gtkhx_rc4_free (Rc4State *state);
+extern void gtkhx_rc4_crypt (Rc4State *state, const uint8_t *src, uint8_t *dst, uint32_t len);
+
+extern BlowfishOfb64State *gtkhx_blowfish_ofb64_new (const uint8_t *key, uint32_t keylen);
+extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
+extern void gtkhx_blowfish_ofb64_crypt (BlowfishOfb64State *state, const uint8_t *src, uint8_t *dst, uint32_t len);
 
 /* ---- Stubs for hx_htlc_close + hx_printf_prefix ---------------- *
  *
@@ -314,12 +300,11 @@ test_rc4_round_trip (void)
     };
     guint8 cipher[22];
 
-    /* Two-arcfour-state setup. The receive side lives on htlc; the
-     * encode side is local (we don't drive cipher_encode in this
-     * test, only the decode half of network_decode). */
-    struct arcfour_ctx encode;
-    arcfour_set_key (&encode, sizeof (key), key);
-    arcfour_crypt (&encode, sizeof (plain), cipher, plain);
+    /* Use Rust RC4 to encode the plaintext (mirrors what
+     * cipher_encode/do_encode does for RC4). */
+    Rc4State *encode = gtkhx_rc4_new (key, sizeof (key));
+    gtkhx_rc4_crypt (encode, plain, cipher, sizeof (plain));
+    gtkhx_rc4_free (encode);
 
     /* Mirror that key on the decode side. */
     strcpy (h->cipheralg, "RC4");
@@ -356,28 +341,17 @@ test_blowfish_round_trip (void)
     };
     guint8 cipher[22];
 
-    /* blowfish_state pairs an underlying blowfish_ctx with an
-     * 8-byte ivec + nibble counter; cipher_decode_init runs
-     * blowfish_set_key for us, but the ivec/num live in the
-     * union and must already be zeroed (which production gets
-     * from htlc_conn zero-allocation; we mirror it explicitly
-     * below). For the encode side we set up a matching fresh
-     * state and drive test_blowfish_ofb64_crypt directly. */
-    blowfish_state encode;
-    memset (&encode, 0, sizeof (encode));
-    blowfish_set_key (&encode.ctx, sizeof (key), key);
-    test_blowfish_ofb64_crypt (&encode, plain, cipher, sizeof (plain));
+    /* Use Rust Blowfish OFB-64 to encode the plaintext. */
+    BlowfishOfb64State *encode = gtkhx_blowfish_ofb64_new (key, sizeof (key));
+    gtkhx_blowfish_ofb64_crypt (encode, plain, cipher, sizeof (plain));
+    gtkhx_blowfish_ofb64_free (encode);
 
     strcpy (h->cipheralg, "BLOWFISH");
     h->cipher_decode_type    = CIPHER_BLOWFISH;
     h->cipher_decode_keylen  = sizeof (key);
     memcpy (h->cipher_decode_key, key, sizeof (key));
-    /* Blowfish state starts at OFB block boundary by zero-init —
-     * matches what htlc_conn zero allocation gives us in
-     * production. cipher_decode_init only sets the bf key
-     * schedule, not the ivec/num. */
-    memset (&h->cipher_decode_state.blowfish, 0,
-            sizeof (h->cipher_decode_state.blowfish));
+    /* cipher_decode_state.stream starts NULL from zero-init;
+     * cipher_decode_init will create a fresh Rust state. */
     cipher_decode_init (h);
 
     feed_read_in (h, cipher, sizeof (cipher));

@@ -1,11 +1,11 @@
 /*
  * Per-connection cipher state for the Hotline HOPE handshake.
  *
- * The wire protocol uses Blowfish in 64-bit OFB mode (ofb64) and
- * ARC4 (RC4); both implementations come from Nettle. IDEA was once
- * defined as CIPHER_IDEA = 3 but never wired into HOPE negotiation
- * (patent-encumbered at the time and now expired but still unused);
- * the union/struct entries are gone.
+ * Stream cipher primitives (RC4, Blowfish OFB-64) are implemented in
+ * Rust (rust/crates/hxcrypto-stream/). AEAD (ChaCha20-Poly1305) is
+ * in rust/crates/hxcrypto-aead/. This header exposes opaque pointers
+ * for the stream ciphers and a repr(C) struct for AEAD state that
+ * maps directly to the Rust AeadState.
  */
 
 #ifndef __cipher_h
@@ -16,8 +16,6 @@
 
 #include <stdint.h>
 #include <sys/types.h> /* u_int8_t / u_int32_t */
-#include <nettle/arcfour.h>
-#include <nettle/blowfish.h>
 
 /* Note: cipher.h is pulled into protocol.h via the htlc_conn cipher_state
  * fields, so this header MUST NOT include hx.h or session.h — that would
@@ -54,24 +52,17 @@
 #define CIPHER_MODE_STREAM 0
 #define CIPHER_MODE_AEAD   1
 
-/* RC4: Nettle's arcfour_ctx is the entire state. */
-typedef struct arcfour_ctx rc4_state;
-
-/* Blowfish in 64-bit OFB needs the key schedule plus an IV register
- * and a byte index into it (0..7). Mirrors the OpenSSL BF_KEY/ivec/num
- * trio that the previous cipher_openssl.h shim exposed. */
-struct blowfish_state {
-    struct blowfish_ctx ctx;
-    uint8_t ivec[BLOWFISH_BLOCK_SIZE];
-    int num;
-};
-typedef struct blowfish_state blowfish_state;
+/* Opaque Rust-allocated stream cipher states. Created via
+ * gtkhx_rc4_new / gtkhx_blowfish_ofb64_new, freed via the
+ * corresponding _free functions. */
+typedef struct Rc4State Rc4State;
+typedef struct BlowfishOfb64State BlowfishOfb64State;
 
 /* ChaCha20-Poly1305 AEAD state.
  *
- * Per-frame nettle contexts are constructed on the stack at seal/open
- * time (Nettle's chacha_poly1305_ctx is just a tiny stateful API), so
- * the persistent state we carry on htlc_conn is only:
+ * This struct is repr(C)-compatible with the Rust AeadState defined
+ * in rust/crates/hxcrypto-aead/src/lib.rs. The Rust AEAD functions
+ * take pointers to this struct directly.
  *
  *   key      32-byte HKDF-expanded session key (encode or decode)
  *   counter  monotonic frame counter for this direction (u64 BE in
@@ -90,9 +81,13 @@ struct chacha_aead_state {
 };
 typedef struct chacha_aead_state chacha_aead_state;
 
+/* The cipher_state union holds either an opaque pointer to a Rust-
+ * allocated stream cipher context (RC4 or Blowfish OFB-64), or the
+ * inline chacha_aead_state for AEAD connections. Only one member is
+ * active at a time, selected by cipher_encode_type / cipher_decode_type
+ * on the htlc_conn. */
 union cipher_state {
-    rc4_state rc4;
-    blowfish_state blowfish;
+    void *stream;           /* Rc4State* or BlowfishOfb64State* */
     chacha_aead_state chacha;
 };
 

@@ -18,13 +18,11 @@ test_deps = [
   gtk_dep,
 ]
 
-# Tests that include protocol.h need cipher / compress headers via
-# nettle and zlib. Kept separate from test_deps so pure-GLib tests
-# (hl_access, text_util) don't pull in unnecessary link args.
-proto_test_deps = test_deps + [
-  nettle_dep,
-  zlib_dep,
-]
+# Tests that include protocol.h need cipher / compress headers.
+# With the Nettle→Rust migration, no extra C deps are needed beyond
+# the Rust crate link deps which come in via the rust_hxcrypto_*_dep
+# declared_dependency objects.
+proto_test_deps = test_deps
 
 test_inc = include_directories('../src')
 
@@ -59,9 +57,8 @@ test('text_util', test_text_util,
      suite : 'unit')
 
 # byte_swap — HN16 / HN32 macros from protocol.h. Header-only macros,
-# but protocol.h pulls in cipher.h / compress.h, so the test needs
-# nettle + zlib on its dep list. Worth it: these macros are the
-# load-bearing piece of every chunk parse in rcv.c.
+# but protocol.h pulls in cipher.h / compress.h. Worth it: these
+# macros are the load-bearing piece of every chunk parse in rcv.c.
 test_byte_swap = executable('test_byte_swap',
   'unit/test_byte_swap.c',
   dependencies        : proto_test_deps,
@@ -288,7 +285,7 @@ test('human_readable', test_human_readable,
 # fields and pin the bytes. Catches the "Oni Tracks folder hang"
 # regression (always-zero type field) and any future struct
 # rearrangement. Pulls in proto_test_deps because hotline.h
-# transitively wants nettle + zlib via protocol.h.
+# transitively pulls in cipher.h / compress.h via protocol.h.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
   '../src/proto_helpers.c',
@@ -832,7 +829,7 @@ test_aead = executable('test_aead',
   'proto/test_aead.c',
   '../src/cipher_aead.c',
   '../src/debug.c', # cipher_aead's debug_log() trace hooks
-  dependencies        : proto_test_deps + [dependency('nettle')],
+  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
   include_directories : proto_test_inc,
 )
 test('aead', test_aead,
@@ -852,7 +849,7 @@ test_htxf_io = executable('test_htxf_io',
   '../src/htxf_io.c',
   '../src/cipher_aead.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [dependency('nettle')],
+  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
   include_directories : proto_test_inc,
 )
 test('htxf_io', test_htxf_io,
@@ -875,7 +872,7 @@ test_network_decode = executable('test_network_decode',
   '../src/cipher_aead.c',
   '../src/qbuf.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [dependency('nettle'), rust_hxrand_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_stream_dep, rust_hxcrypto_aead_dep, rust_hxrand_dep],
   include_directories : proto_test_inc,
 )
 test('network_decode', test_network_decode,
@@ -938,12 +935,10 @@ integration_harness_lib = static_library(
   # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
   # hxrand crate via rust_hxrand_dep; hmac_xxx is provided by
   # rust_hxcrypto_hash_dep (inlined via protocol.h); hope.c brings the
-  # HMAC chain + chunk walker; algo_list.c is a transitive dep. All are
-  # pure functions (Nettle + glib only — cipher.c's
-  # hx.h → protocol.h swap landed alongside this), so pulling them in
-  # costs the harness nothing in link surface — and lets the
-  # HOPE+stream Tier 3 tests drive the same secure-login + cipher
-  # state machine production uses.
+  # HMAC chain + chunk walker; algo_list.c is a transitive dep. All
+  # crypto is now in Rust crates; cipher.c and cipher_aead.c are thin
+  # dispatchers. The HOPE+stream Tier 3 tests drive the same
+  # secure-login + cipher state machine production uses.
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/htxf_io.c',
@@ -952,7 +947,7 @@ integration_harness_lib = static_library(
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_stream_dep, rust_hxcrypto_aead_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1039,7 +1034,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_stream_dep, rust_hxcrypto_aead_dep, rust_hxcompress_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1108,7 +1103,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_stream_dep, rust_hxcrypto_aead_dep, rust_hxcompress_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate

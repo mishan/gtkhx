@@ -72,8 +72,8 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
-zlib_dep    = dependency('zlib')
-nettle_dep  = dependency('nettle',    version : '>= 3.0')
+# zlib and nettle are no longer used directly — crypto and compression
+# are implemented in Rust crates (hxcrypto-stream, hxcrypto-aead, hxcompress).
 threads_dep = dependency('threads')
 
 # Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
@@ -135,20 +135,10 @@ sourceview_dep = dependency('gtksourceview-5',  required : false)
 # are libmagickwand-dev / ImageMagick-devel respectively.
 imagemagick_dep = dependency('MagickWand', required : false)
 
-# Optional: LZ4 and Zstandard — HOPE-Secure-Login transport
-# compression algorithms (Janus/Klein hx-family server extension).
-# Negotiated alongside GZIP during the HOPE identification phase;
-# servers that don't speak either fall through to GZIP or none. The
-# HAVE_LZ4 / HAVE_ZSTD defines below gate the dispatcher entries
-# inside src/compress.c and the algorithm entries in
-# src/connect.c::valid_compressors[].
-#
-# Both available as Debian/Ubuntu liblz4-dev / libzstd-dev and
-# Fedora lz4-devel / libzstd-devel. Neither ships in the GNOME 49
-# Flatpak runtime / SDK — com.nasledov.gtkhx.yml builds both as
-# inline modules so the Flatpak binary speaks LZ4 and ZSTD too.
-lz4_dep  = dependency('liblz4',  required : false)
-zstd_dep = dependency('libzstd', required : false)
+# LZ4 and Zstandard are now always available via the Rust hxcompress
+# crate (compiled with default features = ["lz4", "zstd"]). The C
+# library deps are no longer needed. HAVE_LZ4 / HAVE_ZSTD are set
+# unconditionally in config.h below so src/connect.c advertises them.
 
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
@@ -161,16 +151,12 @@ deps = [
   adw_dep,
   glib_dep,
   gthread_dep,
-  zlib_dep,
-  nettle_dep,
   threads_dep,
   gsound_dep,
   soup_dep,
   poppler_dep,
   sourceview_dep,
   imagemagick_dep,
-  lz4_dep,
-  zstd_dep,
   intl_dep,
   dl_dep,
   math_dep,
@@ -307,15 +293,11 @@ summary(
     'GTK'           : gtk_dep.version(),
     'libadwaita'    : adw_dep.version(),
     'GLib'          : glib_dep.version(),
-    'Nettle'        : nettle_dep.version(),
-    'zlib'          : zlib_dep.version(),
     'GSound'        : gsound_dep.version(),
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
     'ImageMagick'   : imagemagick_dep.found() ? imagemagick_dep.version() : 'no',
-    'liblz4'        : lz4_dep.found()         ? lz4_dep.version()         : 'no',
-    'libzstd'       : zstd_dep.found()        ? zstd_dep.version()        : 'no',
   },
   section : 'Dependencies',
 )
