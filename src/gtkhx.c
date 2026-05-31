@@ -1430,16 +1430,12 @@ on_xfer_destroyed_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
 }
 
 static void
-on_tracker_server_create_signal (GtkhxSession *emitter, guint addr_u32,
-                                 guint port, guint nusers, gpointer nam,
-                                 gpointer desc, gint total, gpointer user_data)
+on_tracker_server_create_signal (GtkhxSession *emitter, HxTrackerServer *event,
+                                 gpointer user_data)
 {
-    struct in_addr addr;
     (void)emitter;
     (void)user_data;
-    addr.s_addr = (in_addr_t)addr_u32;
-    tracker_server_create (addr, (guint16)port, (guint16)nusers,
-                           (const char *)nam, (const char *)desc, total);
+    tracker_server_create (event);
 }
 
 static void

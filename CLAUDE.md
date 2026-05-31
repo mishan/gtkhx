@@ -39,6 +39,9 @@ The big rocks, by line count:
 | `src/debug.c/.h`        |  ~~~ | Categorised runtime logger (`GTKHX_DEBUG=cat1,cat2`).         |
 | `src/proto_trace.c/.h`  |  ~~~ | Hotline wire-protocol trace (debug category `proto`).         |
 | `src/hl_access.h`       |  ~~~ | Account-access-bit constants matching mhxd's `hl_access_bits`.|
+| `src/tracker_parser.c/.h` | ~~~ | Pure parsers for the v1 HTRK reply (header + fixed record).   |
+| `src/tracker_v3.c/.h`   |  ~~~ | Pure encoders / parsers for tracker v3 (fogWraith spec).      |
+| `src/tracker_event.c/.h`|  ~~~ | `HxTrackerServer` boxed type — payload of `tracker-server-create`. |
 
 `src/hx.h` (655 lines) is the kitchen-sink header: session struct, output_functions, most
 typedefs. `src/hotline.h` is the wire-protocol constants/structs.
@@ -255,9 +258,9 @@ GTKHX_DEBUG=all               # everything
 
 Output goes to stderr, prefixed `[<category>]`. See `src/debug.{c,h}` for the
 infrastructure and `src/proto_trace.{c,h}` for the protocol trace (the first and
-biggest consumer). Existing categories: `proto`, `news`, `login`, `msg`. Add new
-ones inline — `debug_log("xfer", "starting transfer %u", htxf->ref)` just works,
-no registration needed.
+biggest consumer). Existing categories: `proto`, `news`, `login`, `msg`,
+`tracker`. Add new ones inline — `debug_log("xfer", "starting transfer %u",
+htxf->ref)` just works, no registration needed.
 
 The protocol trace is invaluable for diagnosing "server doesn't like X" bugs —
 matching outgoing trans IDs against incoming `HTLS_HDR_TASK flag=1` task-error
