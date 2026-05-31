@@ -55,6 +55,7 @@
 #include <glib.h>
 #include <glib-object.h>
 #include <netinet/in.h>     /* struct in_addr */
+#include "tracker_v3_meta.h"
 
 G_BEGIN_DECLS
 
@@ -89,11 +90,22 @@ struct _HxTrackerServer {
 
     /* TLV trailer — only populated for v3 records. tlv_count is
      * the entry count; tlv_bytes wraps the concatenated raw
-     * {id, len, value} bytes for forward-compat. Phase A doesn't
-     * decode these; Phase B will. NULL + tlv_count==0 for v1
-     * records. */
+     * {id, len, value} bytes for forward-compat with future spec
+     * revs (the typed-accessor module below knows the current
+     * catalog; new ids fall through to the raw blob until we
+     * grow a case). NULL + tlv_count==0 for v1 records. */
     guint16 tlv_count;
     GBytes *tlv_bytes;
+
+    /* Typed view over tlv_bytes. Populated by hx_tracker_server
+     * _new_v3 at construction time so subscribers don't each have
+     * to walk the blob; v1 records get an all-zero meta so callers
+     * can read fields like `meta->is_promoted` unconditionally
+     * without a NULL guard. Non-NULL on every well-formed event;
+     * NULL only when the constructor rejected a malformed TLV
+     * blob (and the constructor returns NULL in that case too,
+     * so subscribers never see it). */
+    HxTrackerV3Meta *meta;
 
     /* Tracker-side "this many records in this batch" — feeds the
      * progress widget. For v1: copied from the reply header's

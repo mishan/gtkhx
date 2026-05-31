@@ -82,6 +82,13 @@ struct tracker_server {
     guint16 nusers;
     guint16 port;
 
+    /* Deep-copied snapshot of the v3 TLV metadata at insertion
+     * time. Always non-NULL — Phase B's hx_tracker_server_new_v1
+     * allocates a zero-init meta for legacy records so callers
+     * don't have to NULL-check. NULL pointers inside meta (strings)
+     * mean "TLV absent"; that's the meta module's contract. */
+    HxTrackerV3Meta *meta;
+
     struct tracker_server *left, *right;
 };
 
@@ -106,6 +113,7 @@ tracker_list_destroy (struct tracker_server *root)
     if (root->address) {
         g_free (root->address);
     }
+    hx_tracker_v3_meta_free (root->meta);
     g_free (root);
 
     tracker_server_tree = NULL;
@@ -172,11 +180,61 @@ tracker_getlist (GtkWidget *widget, gpointer data)
     hx_tracker_list_async (sess);
 }
 
+/* Build the compact "Caps" column string from the typed v3 meta.
+ * Each badge is appended only when its TLV said so; an empty buffer
+ * (no caps advertised, or a v1 record with a zero-init meta) renders
+ * as an empty cell. Fixed-size stack buffer is fine — the longest
+ * possible string we emit fits in ~32 bytes.
+ *
+ * Badge legend (deliberately terse so the column stays narrow):
+ *   ★    is_promoted     (operator-pinned in the tracker UI)
+ *   HOPE supports_hope   (gtkhx's legacy crypto extension)
+ *   TLS  supports_tls    (Mobius-style separate TLS port — Phase 7)
+ *   v6   supports_ipv6   (the server has an IPv6 listener too)
+ * Order is fixed for visual stability; the row reads naturally
+ * left-to-right even when only one badge is present.
+ */
+static void
+format_caps_badges (const HxTrackerV3Meta *m, char *out, gsize outsz)
+{
+    out[0] = '\0';
+    if (!m) {
+        return;
+    }
+    gboolean first = TRUE;
+    /* "★" is U+2605 BLACK STAR — three UTF-8 bytes. The hlist is
+     * UTF-8 throughout, so no transcoding needed. */
+    if (m->is_promoted) {
+        g_strlcat (out, "\xe2\x98\x85", outsz);
+        first = FALSE;
+    }
+    if (m->supports_hope) {
+        if (!first) {
+            g_strlcat (out, " ", outsz);
+        }
+        g_strlcat (out, "HOPE", outsz);
+        first = FALSE;
+    }
+    if (m->supports_tls) {
+        if (!first) {
+            g_strlcat (out, " ", outsz);
+        }
+        g_strlcat (out, "TLS", outsz);
+        first = FALSE;
+    }
+    if (m->supports_ipv6) {
+        if (!first) {
+            g_strlcat (out, " ", outsz);
+        }
+        g_strlcat (out, "v6", outsz);
+    }
+}
+
 static void
 tracker_search_tree (GRegex *preg, struct tracker_server *root)
 {
     int row;
-    char nusersstr[8], portstr[8], *text[5];
+    char nusersstr[8], portstr[8], capsbuf[48], *text[7];
     gboolean flag;
 
     if (!root) {
@@ -195,18 +253,27 @@ tracker_search_tree (GRegex *preg, struct tracker_server *root)
     if (flag) {
         snprintf (nusersstr, sizeof (nusersstr), "%u", root->nusers);
         snprintf (portstr, sizeof (portstr), "%u", root->port);
+        format_caps_badges (root->meta, capsbuf, sizeof (capsbuf));
 
         text[0] = root->name;
         text[1] = nusersstr;
+        /* country_code is a 2-letter ISO 3166-1 alpha-2 code when
+         * the tracker advertised it; absent → empty cell. v1 records
+         * always land here as empty since their zero-init meta has
+         * country_code == NULL. */
+        text[2] = (root->meta && root->meta->country_code)
+                      ? root->meta->country_code
+                      : (char *) "";
         /* Phase E: render whatever printable address the boxed
          * event delivered (IPv4 / IPv6 / hostname). No inet_ntop
          * call here — the event constructor already did that for
          * the IPv4 / IPv6 records, and the hostname-record path
          * (Argus's promoted_servers format) carries the literal
          * hostname through. */
-        text[2] = root->address ? root->address : (char *) "";
-        text[3] = portstr;
-        text[4] = root->desc;
+        text[3] = root->address ? root->address : (char *) "";
+        text[4] = portstr;
+        text[5] = capsbuf;
+        text[6] = root->desc;
 
         row = gtk_hlist_append (GTK_HLIST (tracker_list), text);
         /* Phase 5: no per-row foreground override — let the GTK theme's
@@ -415,6 +482,15 @@ tracker_server_create (HxTrackerServer *event)
      * signal emitter. */
     server->name = g_strdup (event->name ? event->name : "");
     server->desc = g_strdup (event->desc ? event->desc : "");
+    /* Snapshot the typed TLV view so server-tree rows can render
+     * metadata columns (country, capabilities) and the details
+     * popover without re-walking the raw TLV blob. Deep copy
+     * because the signal subscriber's event is freed after the
+     * emit. hx_tracker_v3_meta_copy(NULL) returns NULL, but the
+     * constructors always populate event->meta (v1 with a
+     * zero-init meta, v3 with the parsed one), so this is
+     * always non-NULL in practice. */
+    server->meta = hx_tracker_v3_meta_copy (event->meta);
     insert_server (server, tracker_server_tree);
 
     old_num_found = num_found;
@@ -494,6 +570,445 @@ tracker_connect (void)
     }
 }
 
+/* ---------------------------------------------------------------- */
+/* Server-details dialog                                            */
+/*                                                                  */
+/* Read-only AdwDialog that lays out the per-row v3 TLV snapshot in */
+/* AdwPreferencesGroups. Each TLV maps to one AdwActionRow with the */
+/* TLV name as title and the decoded value as subtitle. Rows for    */
+/* absent TLVs are omitted entirely, and groups with zero rows are  */
+/* dropped — a v1 record therefore renders the "Server" group only  */
+/* (name / address / users / desc), which is genuinely all the      */
+/* tracker told us about it.                                        */
+/*                                                                  */
+/* Triggered from the headerbar "Details" button, which uses the    */
+/* last-selected row (tracker_storow, kept current via the          */
+/* select_row signal wired in create_tracker_window).               */
+/* ---------------------------------------------------------------- */
+
+/* Add an AdwActionRow with the given title + subtitle text to the
+ * group. Skips silently and returns FALSE when the value is NULL or
+ * empty, so call sites can chain `n += add_str_row(...)` to count
+ * how many rows actually got added (used to drop empty groups).
+ */
+static gboolean
+details_add_str_row (AdwPreferencesGroup *grp, const char *title,
+                     const char *value)
+{
+    GtkWidget *row;
+
+    if (!value || !*value) {
+        return FALSE;
+    }
+    row = adw_action_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (row), value);
+    /* Subtitle-selectable so the user can copy fingerprint-ish
+     * values (URLs, country codes) out of the dialog. */
+    adw_action_row_set_subtitle_selectable (ADW_ACTION_ROW (row), TRUE);
+    adw_preferences_group_add (grp, row);
+    return TRUE;
+}
+
+/* Same as details_add_str_row but with a numeric value rendered as
+ * "%u". A value of 0 is treated as "absent" and skipped — that's the
+ * convention for the count-like TLVs (news_count, msgboard_count,
+ * etc.) where 0 and "TLV missing" are indistinguishable on the wire.
+ */
+static gboolean
+details_add_uint_row (AdwPreferencesGroup *grp, const char *title, guint val)
+{
+    char buf[32];
+
+    if (val == 0) {
+        return FALSE;
+    }
+    g_snprintf (buf, sizeof (buf), "%u", val);
+    return details_add_str_row (grp, title, buf);
+}
+
+/* Bool row — emits only when val is TRUE, with subtitle "Yes". The
+ * "No" case is implicit (TLV absent / FALSE → omit the row entirely)
+ * because the dialog is meant to read like a capability list, not a
+ * checklist. */
+static gboolean
+details_add_bool_row (AdwPreferencesGroup *grp, const char *title, gboolean val)
+{
+    if (!val) {
+        return FALSE;
+    }
+    return details_add_str_row (grp, title, _ ("Yes"));
+}
+
+/* Human-readable uptime: "Xd Yh Zm". Zero is treated as absent. */
+static gboolean
+details_add_uptime_row (AdwPreferencesGroup *grp, const char *title,
+                        guint32 secs)
+{
+    char buf[64];
+
+    if (secs == 0) {
+        return FALSE;
+    }
+    guint days = secs / 86400;
+    guint hours = (secs / 3600) % 24;
+    guint mins = (secs / 60) % 60;
+    if (days) {
+        g_snprintf (buf, sizeof (buf), "%ud %uh %um", days, hours, mins);
+    } else if (hours) {
+        g_snprintf (buf, sizeof (buf), "%uh %um", hours, mins);
+    } else if (mins) {
+        g_snprintf (buf, sizeof (buf), "%um", mins);
+    } else {
+        g_snprintf (buf, sizeof (buf), "%us", (unsigned) secs);
+    }
+    return details_add_str_row (grp, title, buf);
+}
+
+/* Unix timestamp → "YYYY-MM-DD HH:MM UTC". Zero is treated as
+ * "never / not set", which matches the spec's convention for
+ * last_news_timestamp / last_chat_timestamp. */
+static gboolean
+details_add_timestamp_row (AdwPreferencesGroup *grp, const char *title,
+                           guint32 unix_ts)
+{
+    GDateTime *dt;
+    gchar *s;
+    gboolean ret;
+
+    if (unix_ts == 0) {
+        return FALSE;
+    }
+    dt = g_date_time_new_from_unix_utc ((gint64) unix_ts);
+    if (!dt) {
+        return FALSE;
+    }
+    s = g_date_time_format (dt, "%Y-%m-%d %H:%M UTC");
+    g_date_time_unref (dt);
+    if (!s) {
+        return FALSE;
+    }
+    ret = details_add_str_row (grp, title, s);
+    g_free (s);
+    return ret;
+}
+
+/* Byte count → "1.2 MB" via g_format_size. Zero is "absent". */
+static gboolean
+details_add_byte_size_row (AdwPreferencesGroup *grp, const char *title,
+                           guint64 bytes)
+{
+    gchar *s;
+    gboolean ret;
+
+    if (bytes == 0) {
+        return FALSE;
+    }
+    s = g_format_size (bytes);
+    if (!s) {
+        return FALSE;
+    }
+    ret = details_add_str_row (grp, title, s);
+    g_free (s);
+    return ret;
+}
+
+static const char *
+maturity_label (HxTrackerV3Maturity m)
+{
+    switch (m) {
+    case HX_TRACKER_V3_MATURITY_TEEN:
+        return _ ("Teen");
+    case HX_TRACKER_V3_MATURITY_MATURE:
+        return _ ("Mature");
+    case HX_TRACKER_V3_MATURITY_ADULT:
+        return _ ("Adult");
+    case HX_TRACKER_V3_MATURITY_GENERAL:
+    default:
+        return _ ("General");
+    }
+}
+
+static const char *
+category_label (HxTrackerV3Category c)
+{
+    switch (c) {
+    case HX_TRACKER_V3_CATEGORY_GENERAL:
+        return _ ("General");
+    case HX_TRACKER_V3_CATEGORY_DEVELOPMENT:
+        return _ ("Development");
+    case HX_TRACKER_V3_CATEGORY_ARCHIVE:
+        return _ ("Archive");
+    case HX_TRACKER_V3_CATEGORY_WAREZ:
+        return _ ("Warez");
+    case HX_TRACKER_V3_CATEGORY_GAMING:
+        return _ ("Gaming");
+    case HX_TRACKER_V3_CATEGORY_MEDIA:
+        return _ ("Media");
+    case HX_TRACKER_V3_CATEGORY_EDUCATION:
+        return _ ("Education");
+    case HX_TRACKER_V3_CATEGORY_RESEARCH:
+        return _ ("Research");
+    case HX_TRACKER_V3_CATEGORY_FILE_SHARING:
+        return _ ("File Sharing");
+    case HX_TRACKER_V3_CATEGORY_SOCIAL:
+        return _ ("Social");
+    case HX_TRACKER_V3_CATEGORY_SECURITY:
+        return _ ("Security");
+    case HX_TRACKER_V3_CATEGORY_CREATIVE:
+        return _ ("Creative");
+    case HX_TRACKER_V3_CATEGORY_UNSPECIFIED:
+    default:
+        return _ ("Unspecified");
+    }
+}
+
+/* If `count > 0`, append the group to `content` and return; otherwise
+ * sink + drop the floating reference so it doesn't leak. Empty groups
+ * get suppressed so the dialog reads tightly — e.g. a v1 record only
+ * renders the Server group. */
+static void
+details_finish_group (GtkWidget *content, AdwPreferencesGroup *grp, int count)
+{
+    if (count > 0) {
+        gtk_box_append (GTK_BOX (content), GTK_WIDGET (grp));
+    } else {
+        /* AdwPreferencesGroup is a GInitiallyUnowned — sink + unref
+         * to drop it cleanly without appending. */
+        g_object_ref_sink (grp);
+        g_object_unref (grp);
+    }
+}
+
+static void
+show_server_details (struct tracker_server *server)
+{
+    AdwDialog *dlg;
+    GtkWidget *toolbar_view, *header, *content, *clamp, *scrolled;
+    AdwPreferencesGroup *grp;
+    HxTrackerV3Meta *m;
+    char title_buf[256];
+    char addrport[256];
+    char nbuf[32];
+    int n;
+
+    if (!server) {
+        return;
+    }
+
+    dlg = ADW_DIALOG (adw_dialog_new ());
+    g_snprintf (title_buf, sizeof (title_buf), _ ("Server details — %s"),
+                (server->name && *server->name)
+                    ? server->name
+                    : (server->address ? server->address : "?"));
+    adw_dialog_set_title (dlg, title_buf);
+    adw_dialog_set_content_width (dlg, 520);
+    adw_dialog_set_content_height (dlg, 640);
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
+
+    header = adw_header_bar_new ();
+    toolbar_view = adw_toolbar_view_new ();
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
+
+    content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
+    gtk_widget_set_margin_top (content, 18);
+    gtk_widget_set_margin_bottom (content, 18);
+    gtk_widget_set_margin_start (content, 18);
+    gtk_widget_set_margin_end (content, 18);
+
+    m = server->meta;
+
+    /* ------------------ Server (always present) ------------------ */
+    grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (grp, _ ("Server"));
+    n = 0;
+    if (server->name && *server->name) {
+        n += details_add_str_row (grp, _ ("Name"), server->name);
+    }
+    if (server->address && *server->address) {
+        /* Bracket the address when it contains a colon so an IPv6
+         * literal (either from an IPV6-type wire record or from a
+         * HOSTNAME-type record carrying an IPv6 literal, which is
+         * what Argus emits for promoted servers) doesn't render as
+         * `2001:db8::1:5500` and leave the reader guessing where the
+         * port starts. RFC 3986 §3.2.2 bracket form. IPv4 and bare
+         * hostnames have no colons, so they pass through unchanged. */
+        if (strchr (server->address, ':') != NULL) {
+            g_snprintf (addrport, sizeof (addrport), "[%s]:%u",
+                        server->address, server->port);
+        } else {
+            g_snprintf (addrport, sizeof (addrport), "%s:%u",
+                        server->address, server->port);
+        }
+        n += details_add_str_row (grp, _ ("Address"), addrport);
+    }
+    if (server->desc && *server->desc) {
+        n += details_add_str_row (grp, _ ("Description"), server->desc);
+    }
+    g_snprintf (nbuf, sizeof (nbuf), "%u", server->nusers);
+    n += details_add_str_row (grp, _ ("Users online"), nbuf);
+    if (m && m->has_max_users) {
+        g_snprintf (nbuf, sizeof (nbuf), "%u", m->max_users);
+        n += details_add_str_row (grp, _ ("Maximum users"), nbuf);
+    }
+    details_finish_group (content, grp, n);
+
+    if (m) {
+        /* ------------------------- Identity ------------------------- */
+        grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (grp, _ ("Identity"));
+        n = 0;
+        n += details_add_str_row (grp, _ ("Software"), m->server_software);
+        n += details_add_str_row (grp, _ ("Country"), m->country_code);
+        n += details_add_str_row (grp, _ ("Region"), m->region);
+        n += details_add_str_row (grp, _ ("Language"), m->language);
+        n += details_add_str_row (grp, _ ("Tags"), m->tags);
+        if (m->maturity != HX_TRACKER_V3_MATURITY_GENERAL) {
+            n += details_add_str_row (grp, _ ("Maturity"),
+                                      maturity_label (m->maturity));
+        }
+        if (m->listing_category != HX_TRACKER_V3_CATEGORY_UNSPECIFIED) {
+            n += details_add_str_row (grp, _ ("Category"),
+                                      category_label (m->listing_category));
+        }
+        n += details_add_str_row (grp, _ ("Contact"), m->contact_url);
+        n += details_add_str_row (grp, _ ("Rules"), m->rules_url);
+        n += details_add_str_row (grp, _ ("Banner URL"), m->banner_url);
+        n += details_add_str_row (grp, _ ("Icon URL"), m->icon_url);
+        if (m->has_timezone_offset) {
+            char tzbuf[32];
+            int mins = m->timezone_offset_min;
+            int sign = (mins < 0) ? -1 : 1;
+            int absm = mins * sign;
+            g_snprintf (tzbuf, sizeof (tzbuf), "UTC%c%02d:%02d",
+                        sign < 0 ? '-' : '+', absm / 60, absm % 60);
+            n += details_add_str_row (grp, _ ("Timezone"), tzbuf);
+        }
+        n += details_add_timestamp_row (grp, _ ("Server launched"),
+                                        m->server_launched);
+        n += details_add_uptime_row (grp, _ ("Uptime"), m->uptime_secs);
+        details_finish_group (content, grp, n);
+
+        /* ----------------------- Capabilities ----------------------- */
+        grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (grp, _ ("Capabilities"));
+        n = 0;
+        if (m->protocol_version) {
+            char pvbuf[32];
+            g_snprintf (pvbuf, sizeof (pvbuf), "0x%04x (%u)",
+                        m->protocol_version, m->protocol_version);
+            n += details_add_str_row (grp, _ ("Protocol version"), pvbuf);
+        }
+        if (m->min_proto_version) {
+            char pvbuf[32];
+            g_snprintf (pvbuf, sizeof (pvbuf), "0x%04x (%u)",
+                        m->min_proto_version, m->min_proto_version);
+            n += details_add_str_row (grp, _ ("Minimum client protocol"),
+                                      pvbuf);
+        }
+        n += details_add_bool_row (grp, _ ("HOPE encryption"),
+                                   m->supports_hope);
+        n += details_add_str_row (grp, _ ("HOPE ciphers"), m->hope_ciphers);
+        n += details_add_bool_row (grp, _ ("TLS"), m->supports_tls);
+        if (m->supports_tls && m->tls_port) {
+            char tpbuf[16];
+            g_snprintf (tpbuf, sizeof (tpbuf), "%u", m->tls_port);
+            n += details_add_str_row (grp, _ ("TLS port"), tpbuf);
+        }
+        n += details_add_bool_row (grp, _ ("IPv6"), m->supports_ipv6);
+        n += details_add_bool_row (grp, _ ("Inline media"),
+                                   m->supports_inline_media);
+        n += details_add_bool_row (grp, _ ("Voice"), m->supports_voice);
+        n += details_add_bool_row (grp, _ ("Large files"),
+                                   m->supports_large_files);
+        n += details_add_uint_row (grp, _ ("Link down (Mbit/s)"),
+                                   m->link_down_mbit);
+        n += details_add_uint_row (grp, _ ("Link up (Mbit/s)"),
+                                   m->link_up_mbit);
+        details_finish_group (content, grp, n);
+
+        /* --------------------- Activity / Content --------------------- */
+        grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (grp, _ ("Activity"));
+        n = 0;
+        n += details_add_uint_row (grp, _ ("Peak users (24h)"), m->peak_24h);
+        n += details_add_uint_row (grp, _ ("Average users (24h)"), m->avg_24h);
+        n += details_add_uint_row (grp, _ ("News posts"), m->news_count);
+        n += details_add_uint_row (grp, _ ("Message-board posts"),
+                                   m->msgboard_count);
+        n += details_add_uint_row (grp, _ ("Files"), m->files_count);
+        n += details_add_byte_size_row (grp, _ ("Total file size"),
+                                        (guint64) m->total_file_size);
+        n += details_add_timestamp_row (grp, _ ("Last news activity"),
+                                        m->last_news_timestamp);
+        n += details_add_timestamp_row (grp, _ ("Last public chat"),
+                                        m->last_chat_timestamp);
+        details_finish_group (content, grp, n);
+
+        /* --------------- Tracker / Privacy ---------------- */
+        grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (grp, _ ("Tracker"));
+        n = 0;
+        n += details_add_bool_row (grp, _ ("Promoted"), m->is_promoted);
+        n += details_add_bool_row (grp, _ ("Verified online"),
+                                   m->verified_online);
+        n += details_add_bool_row (grp, _ ("Private listing"),
+                                   m->private_listing);
+        n += details_add_bool_row (grp, _ ("Language strict"),
+                                   m->language_strict);
+        n += details_add_timestamp_row (grp, _ ("First seen"), m->first_seen);
+        n += details_add_timestamp_row (grp, _ ("Last heartbeat"),
+                                        m->last_heartbeat);
+        details_finish_group (content, grp, n);
+    }
+
+    clamp = adw_clamp_new ();
+    adw_clamp_set_child (ADW_CLAMP (clamp), content);
+    scrolled = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), clamp);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), scrolled);
+    adw_dialog_set_child (dlg, toolbar_view);
+
+    adw_dialog_present (ADW_DIALOG (dlg),
+                        tracker_window ? GTK_WIDGET (tracker_window) : NULL);
+}
+
+/* Headerbar "Details" button handler. Uses the last-selected row
+ * (tracker_storow), same convention as tracker_connect — the
+ * select_row signal handler below keeps that current as the user
+ * clicks or arrow-keys through the list. If no row has been
+ * selected yet, fall through silently rather than opening an empty
+ * dialog. */
+static void
+tracker_details (void)
+{
+    struct tracker_server *server;
+
+    if (!tracker_list || tracker_storow < 0) {
+        return;
+    }
+    server = gtk_hlist_get_row_data (GTK_HLIST (tracker_list), tracker_storow);
+    if (server) {
+        show_server_details (server);
+    }
+}
+
+/* Track the selection so the Details / Connect buttons act on the
+ * row the user has highlighted (with mouse OR arrow keys). The
+ * tracker_pressed gesture handler also updates tracker_storow on
+ * click — that's still needed for the n_press == 2 double-click
+ * path which fires before any select_row arrives. */
+static void
+tracker_row_selected (GtkHList *hlist G_GNUC_UNUSED, gint row,
+                      gint column G_GNUC_UNUSED, gpointer event G_GNUC_UNUSED,
+                      gpointer data G_GNUC_UNUSED)
+{
+    tracker_storow = row;
+}
+
 void
 create_tracker_window (GtkWidget *widget, gpointer data)
 {
@@ -504,15 +1019,23 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     GtkWidget *tracker_window_scroll;
     GtkWidget *refreshbtn;
     GtkWidget *connbtn;
+    GtkWidget *detailsbtn;
     GtkWidget *count_box;
-    gchar *titles[5];
+    gchar *titles[7];
     session *sess = data;
 
     titles[0] = _ ("Name");
     titles[1] = _ ("Users");
-    titles[2] = _ ("Address");
-    titles[3] = _ ("Port");
-    titles[4] = _ ("Description");
+    /* Phase B: Country + Caps columns surface the most useful TLV
+     * fields directly in the list. Country fits a 2-letter ISO code
+     * in ~56 px; Caps holds short badge text ("★ HOPE TLS v6") and
+     * needs a bit more breathing room. v1 records and v3 records
+     * without TLVs render these as empty cells. */
+    titles[2] = _ ("Country");
+    titles[3] = _ ("Address");
+    titles[4] = _ ("Port");
+    titles[5] = _ ("Caps");
+    titles[6] = _ ("Description");
 
     if (tracker_window) {
         return;
@@ -520,18 +1043,30 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 
     tracker_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (tracker_window), _ ("Tracker"));
-    gtk_window_set_default_size (GTK_WINDOW (tracker_window), 720, 500);
+    gtk_window_set_default_size (GTK_WINDOW (tracker_window), 860, 500);
     g_signal_connect (tracker_window, "close-request",
                       G_CALLBACK (close_tracker_window), 0);
 
-    tracker_list = gtk_hlist_new_with_titles (5, titles);
+    tracker_list = gtk_hlist_new_with_titles (7, titles);
     gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 0, 200);
     gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 1, 76);
     gtk_hlist_set_column_justification (GTK_HLIST (tracker_list), 1,
                                         GTK_JUSTIFY_CENTER);
-    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 2, 150);
-    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 3, 70);
-    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 4, 320);
+    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 2, 60);
+    gtk_hlist_set_column_justification (GTK_HLIST (tracker_list), 2,
+                                        GTK_JUSTIFY_CENTER);
+    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 3, 150);
+    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 4, 70);
+    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 5, 110);
+    gtk_hlist_set_column_width (GTK_HLIST (tracker_list), 6, 280);
+
+    /* Track row selection so headerbar actions (Details, Connect)
+     * follow the current highlight — including arrow-key
+     * navigation, not just clicks. tracker_pressed still updates
+     * tracker_storow on double-click for the connect-via-click
+     * shortcut. */
+    g_signal_connect (tracker_list, "select_row",
+                      G_CALLBACK (tracker_row_selected), NULL);
     {
         /* Phase 4.5: button-press-event is gone — install a gesture
 		 * controller for the double-click-to-connect path. */
@@ -590,10 +1125,20 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     connbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/connect.png",
                                    _ ("Connect to selected server"), 2,
                                    G_CALLBACK (tracker_connect), 0);
+    /* Phase B: opens the v3 metadata popover for whichever row is
+     * currently highlighted. Uses a stock symbolic icon rather than
+     * a bespoke pixmap so the button reads correctly under both
+     * light + dark themes. */
+    detailsbtn = gtk_button_new_from_icon_name ("dialog-information-symbolic");
+    gtk_widget_set_tooltip_text (detailsbtn,
+                                 _ ("Show details for selected server"));
+    g_signal_connect (detailsbtn, "clicked", G_CALLBACK (tracker_details),
+                      NULL);
 
     header = adw_header_bar_new ();
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), refreshbtn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), connbtn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), detailsbtn);
 
     count_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_append (GTK_BOX (count_box), lbl_found);
@@ -638,6 +1183,13 @@ create_tracker_window (GtkWidget *widget, gpointer data)
      * tracker_search_tree(NULL, ...) and are unconditionally
      * accepted until the user types into the search field. */
     current_search = NULL;
+
+    /* No row highlighted yet — the Details / Connect buttons treat
+     * this as "nothing selected" and no-op until the first click or
+     * arrow-key navigation populates it via tracker_row_selected /
+     * tracker_pressed. */
+    tracker_storow = -1;
+    tracker_stocol = -1;
 
     tracker_getlist (0, sess);
 }

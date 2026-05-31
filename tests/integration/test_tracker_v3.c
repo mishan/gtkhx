@@ -77,6 +77,7 @@
 #include "compat.h"
 #include "hotline.h"
 #include "tracker_v3.h"
+#include "tracker_v3_meta.h"
 #include "tracker_matrix.h"
 #include "integration_harness.h"
 
@@ -201,7 +202,22 @@ test_v3_handshake_and_listing (void)
      * from tests/argus/conf/config.yaml — that's the field-offset-
      * math regression net. For other v3 trackers, the test just
      * pins that all records decode cleanly and the cursor lands
-     * exactly at total_size. */
+     * exactly at total_size.
+     *
+     * Phase B addition: every record's TLV trailer is run through
+     * the production typed decoder (hx_tracker_v3_meta_new). Two
+     * regression nets:
+     *   1. The decoder accepts every TLV blob the picked tracker
+     *      emits — i.e. no exotic TLV id, no length-prefix encoding
+     *      we missed, no oversized count tripping the bounds check.
+     *      The Tier 2 tests in test_tracker_v3_meta.c pin individual
+     *      shapes against synthesised bytes; this is the "actual
+     *      tracker software in the wild" cross-check.
+     *   2. For the Argus seed, meta->is_promoted must be TRUE.
+     *      Argus tags every promoted_servers entry with the
+     *      tracker-injected IS_PROMOTED (0x0600) TLV, so this is a
+     *      direct pin that the typed decoder routes the byte to the
+     *      expected field. */
     const gboolean expect_argus_seed = (strcmp (trk->name, "argus") == 0);
     const guint8 *cursor = payload;
     gsize remaining = total_size;
@@ -221,6 +237,22 @@ test_v3_handshake_and_listing (void)
         }
         decoded++;
 
+        /* Drive the typed-meta decoder over the trailer. A NULL
+         * return means the TLV blob was malformed against our
+         * decoder's contract — that's a Tier 3 regression we want
+         * loud, not silent: it points at either a decoder bug or a
+         * tracker that started emitting bytes we can't yet handle. */
+        HxTrackerV3Meta *meta = hx_tracker_v3_meta_new (
+            rec.tlv_bytes, rec.tlv_bytes_len, rec.tlv_count);
+        if (!meta) {
+            g_test_fail_printf (
+                "record %u/%u: typed-meta decoder rejected the TLV "
+                "trailer (count=%u, bytes=%zu)",
+                (unsigned) (i + 1), (unsigned) record_count,
+                (unsigned) rec.tlv_count, (size_t) rec.tlv_bytes_len);
+            break;
+        }
+
         if (expect_argus_seed
             && rec.name_len == strlen ("Promoted Alpha")
             && memcmp (rec.name, "Promoted Alpha", rec.name_len) == 0) {
@@ -230,8 +262,13 @@ test_v3_handshake_and_listing (void)
              * IS_PROMOTED TLV should be in the trailer. */
             g_assert_cmpuint (rec.addr_type, ==, HTRK_V3_ADDR_HOSTNAME);
             g_assert_cmpuint (rec.tlv_count, >=, 1u);
+            /* The typed decoder routed the tracker-injected
+             * IS_PROMOTED (0x0600) TLV into the meta->is_promoted
+             * field — pin that. */
+            g_assert_true (meta->is_promoted);
         }
 
+        hx_tracker_v3_meta_free (meta);
         cursor += consumed;
         remaining -= consumed;
     }
