@@ -63,7 +63,7 @@ jobs:
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
-            git
+            git rust cargo
 
       - name: meson setup (sanitizers)
         # b_sanitize: combines AddressSanitizer + UndefinedBehavior
@@ -129,7 +129,7 @@ jobs:
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
-            git
+            git rust cargo
 
       - name: meson setup (-fanalyzer)
         # Wno-analyzer-too-complex: gives up on the analysis early
@@ -192,7 +192,7 @@ jobs:
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
-            git
+            git rust cargo
 
       - name: meson setup (export compile_commands.json)
         run: meson setup build-tidy
