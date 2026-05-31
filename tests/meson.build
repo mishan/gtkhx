@@ -103,12 +103,11 @@ test('text_sanitisers', test_text_sanitisers,
 # hmac — the HOPE handshake's MAC dispatcher. RFC 2104 / RFC 2202
 # canonical vectors for the HMAC-prefixed branches; cross-checked
 # GChecksum hand-computed digests for the legacy unprefixed key||text
-# branches. hmac.c is a thin GChecksum / GHmac wrapper, so this
-# really tests the dispatch glue + GLib's primitives.
+# branches. hmac_xxx is now implemented in Rust (hxcrypto-hash crate);
+# protocol.h provides an inline wrapper that delegates to the Rust FFI.
 test_hmac = executable('test_hmac',
   'unit/test_hmac.c',
-  '../src/hmac.c',
-  dependencies        : proto_test_deps,
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
   include_directories : test_inc,
 )
 test('hmac', test_hmac,
@@ -809,16 +808,16 @@ test('msg_event', test_msg_event,
 # chain (password_mac → encode_key → decode_key) with SHA-256
 # KAT vectors, LOGIN field encoding (XOR vs. HMAC variants),
 # session-key IP:port validation. Compiles hope.c, algo_list.c,
-# hmac.c, and hl_code.c in directly — none of which need GTK or
+# and hl_code.c in directly; hmac_xxx comes from the Rust
+# hxcrypto-hash crate via rust_hxcrypto_hash_dep. None need GTK or
 # Adwaita, so the test binary stays self-contained the way the
 # rest of Tier 2 does.
 test_hope = executable('test_hope',
   'proto/test_hope.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/hl_code.c',
-  dependencies        : proto_test_deps,
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
   include_directories : proto_test_inc,
 )
 test('hope', test_hope,
@@ -937,8 +936,10 @@ integration_harness_lib = static_library(
   # brings the stream-cipher (RC4 / Blowfish OFB-64) seal/open + the
   # HMAC-chained rekey rotation that mirrors production's
   # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
-  # hxrand crate via rust_hxrand_dep; hope.c brings the HMAC chain +
-  # chunk walker; algo_list.c / hmac.c are their transitive deps. All are pure functions (Nettle + glib only — cipher.c's
+  # hxrand crate via rust_hxrand_dep; hmac_xxx is provided by
+  # rust_hxcrypto_hash_dep (inlined via protocol.h); hope.c brings the
+  # HMAC chain + chunk walker; algo_list.c is a transitive dep. All are
+  # pure functions (Nettle + glib only — cipher.c's
   # hx.h → protocol.h swap landed alongside this), so pulling them in
   # costs the harness nothing in link surface — and lets the
   # HOPE+stream Tier 3 tests drive the same secure-login + cipher
@@ -950,9 +951,8 @@ integration_harness_lib = static_library(
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep],
+  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1032,7 +1032,6 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_event.c',
@@ -1040,7 +1039,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1102,7 +1101,6 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_event.c',
@@ -1110,7 +1108,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep, rust_hxcrypto_hash_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate
