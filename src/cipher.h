@@ -1,11 +1,17 @@
 /*
  * Per-connection cipher state for the Hotline HOPE handshake.
  *
- * The wire protocol uses Blowfish in 64-bit OFB mode (ofb64) and
- * ARC4 (RC4); both implementations come from Nettle. IDEA was once
- * defined as CIPHER_IDEA = 3 but never wired into HOPE negotiation
- * (patent-encumbered at the time and now expired but still unused);
- * the union/struct entries are gone.
+ * The wire protocol once offered ARC4 (RC4) and Blowfish in 64-bit
+ * OFB mode (ofb64) as the legacy stream-cipher choices. RC4 was
+ * removed in claude/remove-rc4 — it's a known-broken stream cipher
+ * and shipping it under a "Secure (HOPE)" label gave users a false
+ * sense of security. The CIPHER_RC4 = 1 protocol slot stays reserved
+ * so the constant doesn't get accidentally re-used; no code path
+ * advertises or accepts RC4 anymore. Blowfish comes from Nettle.
+ *
+ * IDEA was once defined as CIPHER_IDEA = 3 but never wired into HOPE
+ * negotiation (patent-encumbered at the time and now expired but
+ * still unused); the union/struct entries are gone.
  */
 
 #ifndef __cipher_h
@@ -16,7 +22,6 @@
 
 #include <stdint.h>
 #include <sys/types.h> /* u_int8_t / u_int32_t */
-#include <nettle/arcfour.h>
 #include <nettle/blowfish.h>
 
 /* Note: cipher.h is pulled into protocol.h via the htlc_conn cipher_state
@@ -26,18 +31,20 @@
  * below are sufficient. */
 
 #define CIPHER_NONE 0
-#define CIPHER_RC4 1
+/* CIPHER_RC4 = 1 — the legacy RC4 slot. Removed; the integer is
+ * reserved so the protocol assignment doesn't get re-used by a
+ * future cipher. See the file header for the rationale. */
 #define CIPHER_BLOWFISH 2
 /* CIPHER_IDEA = 3 was reserved at the protocol level but never offered. */
 /* Phase 5+: ChaCha20-Poly1305 AEAD (fogWraith HOPE-ChaCha20-Poly1305.md
- * extension). Unlike RC4/Blowfish which run as byte-stream XOR ciphers,
+ * extension). Unlike Blowfish which runs as a byte-stream XOR cipher,
  * this one operates on length-prefixed authenticated frames. The cipher
  * type and the cipher MODE are negotiated independently: a server can
  * theoretically negotiate this type with cipher_mode = STREAM (no real
  * server does that, but the spec keeps them orthogonal). */
 #define CIPHER_CHACHA20_POLY1305 4
 
-/* Cipher mode. Stream ciphers (RC4, Blowfish OFB) use STREAM; AEAD
+/* Cipher mode. Stream ciphers (Blowfish OFB) use STREAM; AEAD
  * ciphers (ChaCha20-Poly1305) use AEAD. The mode controls framing:
  *
  *   STREAM: byte-at-a-time XOR over the entire connection, with a
@@ -53,9 +60,6 @@
  * value during the HOPE Step 2 reply ("STREAM" / "AEAD"). */
 #define CIPHER_MODE_STREAM 0
 #define CIPHER_MODE_AEAD   1
-
-/* RC4: Nettle's arcfour_ctx is the entire state. */
-typedef struct arcfour_ctx rc4_state;
 
 /* Blowfish in 64-bit OFB needs the key schedule plus an IV register
  * and a byte index into it (0..7). Mirrors the OpenSSL BF_KEY/ivec/num
@@ -91,7 +95,6 @@ struct chacha_aead_state {
 typedef struct chacha_aead_state chacha_aead_state;
 
 union cipher_state {
-    rc4_state rc4;
     blowfish_state blowfish;
     chacha_aead_state chacha;
 };

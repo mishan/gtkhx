@@ -20,6 +20,8 @@
 
 #include "hx.h"
 #include "bookmarks.h"
+#include "bookmark_cipher.h"
+#include "bookmark_rc4_dialog.h"
 #include "connect.h"      /* valid_ciphers[] / valid_compressors[] for combos */
 #include "toolbar.h"      /* toolbar_window for dialog transient_for */
 
@@ -159,17 +161,22 @@ form_from_bookmark (BookmarksWindow *w, const HxBookmark *bm)
     gtk_editable_set_text (GTK_EDITABLE (w->pass_row), bm->pass);
     adw_switch_row_set_active (ADW_SWITCH_ROW (w->hope_row), bm->secure != 0);
     adw_switch_row_set_active (ADW_SWITCH_ROW (w->tls_row), bm->tls != 0);
-    /* combo indexes: 0 = "Off", 1..N = valid_*[N-1]. The on-disk
-	 * value matches the combo's selected index, so passing it
-	 * through unmodified is correct. Clamp to the model's actual
-	 * length: a corrupted or future-format bookmark could carry a
-	 * cipher/compress byte that exceeds what we know how to render,
-	 * and AdwComboRow would silently fall back to 0 in a way that
-	 * hides the bug instead of pinning to the last known value. */
+    /* Compress is still on-disk-index == dropdown-index (no
+     * compressor was ever retired, so the indexes coincide).
+     * Cipher uses the stable bookmark vocabulary
+     * (bookmark_cipher.h) — translate to the live dropdown index
+     * via the connect-side helper. A byte naming a cipher the
+     * dropdown no longer offers (RC4) lands at index 0 ("no
+     * cipher"); the user re-picks consciously via the dropdown,
+     * and the RC4 migration dialog runs separately when they hit
+     * Connect. clamp_combo_index still wraps both rows so a
+     * corrupt / forward-format byte > model length doesn't trip
+     * AdwComboRow into a silent 0. */
     adw_combo_row_set_selected (
         ADW_COMBO_ROW (w->cipher_row),
-        clamp_combo_index (ADW_COMBO_ROW (w->cipher_row),
-                           (guint)(unsigned char)bm->cipher));
+        clamp_combo_index (
+            ADW_COMBO_ROW (w->cipher_row),
+            connect_cipher_byte_to_dropdown ((unsigned char) bm->cipher)));
     adw_combo_row_set_selected (
         ADW_COMBO_ROW (w->compress_row),
         clamp_combo_index (ADW_COMBO_ROW (w->compress_row),
@@ -195,8 +202,10 @@ form_to_bookmark (BookmarksWindow *w, HxBookmark *bm)
 
     bm->secure
         = adw_switch_row_get_active (ADW_SWITCH_ROW (w->hope_row)) ? 1 : 0;
-    bm->cipher
-        = (char)adw_combo_row_get_selected (ADW_COMBO_ROW (w->cipher_row));
+    /* Cipher: dropdown index → stable bookmark byte. See
+     * bookmark_cipher.h for the byte vocabulary. */
+    bm->cipher = (char) connect_dropdown_to_cipher_byte (
+        adw_combo_row_get_selected (ADW_COMBO_ROW (w->cipher_row)));
     bm->compress
         = (char)adw_combo_row_get_selected (ADW_COMBO_ROW (w->compress_row));
     bm->tls
@@ -276,6 +285,33 @@ load_selection (BookmarksWindow *w)
         show_empty_state (w);
         gtk_widget_set_sensitive (w->delete_btn, TRUE);
         return;
+    }
+    /* RC4 migration: if the loaded bookmark was saved with the
+     * legacy RC4 cipher, prompt for a replacement before showing
+     * the form. Without this, form_from_bookmark would translate
+     * the RC4 byte to dropdown index 0 ("no cipher"), and the user
+     * could accidentally Save back with cipher=0 — silently turning
+     * a previously-encrypted bookmark into a plaintext one. The
+     * dialog rewrites the bookmark file in-place, so on a non-cancel
+     * return we reload to pick up the new byte. */
+    if (bm->secure && bm->cipher == BOOKMARK_CIPHER_BYTE_RC4) {
+        int new_byte = hx_bookmark_rc4_dialog_run_sync (
+            GTK_WINDOW (w->window), name);
+        if (new_byte < 0) {
+            hx_bookmark_free (bm);
+            show_empty_state (w);
+            return;
+        }
+        /* The dialog wrote the new byte to disk; reload so the form
+         * shows the persisted value (also gives the file a single
+         * fresh in-memory view, avoiding a divergence between
+         * bm->cipher and what's on disk). */
+        hx_bookmark_free (bm);
+        bm = hx_bookmark_load (name);
+        if (!bm) {
+            show_empty_state (w);
+            return;
+        }
     }
     w->current = bm;
     w->original_name = g_strdup (bm->name);

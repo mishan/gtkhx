@@ -246,7 +246,7 @@ struct htlc_conn {
 	 * of -Wpointer-sign warnings without changing storage layout —
 	 * char and guint8 are both 1 byte, just signed/unsigned. Same
 	 * reasoning applies to macalg / cipheralg / compressalg below
-	 * (those hold strings like "HMAC-SHA1", "RC4", "GZIP"). */
+	 * (those hold strings like "HMAC-SHA1", "BLOWFISH", "GZIP"). */
     char name[32];
     char login[32];
 
@@ -280,8 +280,8 @@ struct htlc_conn {
 	 * Defaults to STREAM. The server's HTLS_DATA_CIPHER_MODE chunk
 	 * in the HOPE Step-2 reply sets this — "AEAD" → AEAD, anything
 	 * else (or chunk absent) → STREAM. cipher_encode/decode dispatch
-	 * on this to pick between the byte-stream XOR path (RC4/
-	 * Blowfish) and the framed Seal/Open path (ChaCha20-Poly1305). */
+	 * on this to pick between the byte-stream XOR path (Blowfish)
+	 * and the framed Seal/Open path (ChaCha20-Poly1305). */
     u_int8_t cipher_mode;
     /* AEAD decoded-plaintext accumulator. network.c::decode() in
 	 * AEAD mode opens complete length-prefixed frames out of

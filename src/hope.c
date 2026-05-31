@@ -373,9 +373,13 @@ hope_cipher_id_from_name (const char *name)
     if (!name || !*name) {
         return CIPHER_NONE;
     }
-    if (!strcmp (name, "RC4")) {
-        return CIPHER_RC4;
-    }
+    /* "RC4" used to map to CIPHER_RC4 here. Removed in
+     * claude/remove-rc4 — see the comment on valid_ciphers[] in
+     * connect.c for the rationale. An unknown cipher name (including
+     * "RC4") returns CIPHER_NONE, which the connect path treats as
+     * "fall back to plaintext" rather than failing hard, matching the
+     * "any other cipher, TLS, or even plain text is preferable to
+     * RC4" intent. */
     if (!strcmp (name, "BLOWFISH")) {
         return CIPHER_BLOWFISH;
     }

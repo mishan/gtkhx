@@ -12,16 +12,15 @@
  * end-to-end test for the fogWraith chat-history extension under
  * HOPE+Blowfish-OFB-64 stream-cipher framing.
  *
- * Sister to test_hope_rc4_chat_history; see that file for the full
- * preamble — same scope (cipher_encode/_decode parity around the
- * TRAN 700 round-trip; rekey-marker rotation is left to
- * test_hope_blowfish.c). Only differences here:
+ * Originally written as the sister of test_hope_rc4_chat_history;
+ * that file is gone (RC4 removed in claude/remove-rc4) so this is
+ * the canonical HOPE+stream chat-history Tier 3 test. Scope:
+ * cipher_encode/_decode parity around the TRAN 700 round-trip;
+ * rekey-marker rotation is left to test_hope_blowfish.c.
  *
- *   - cipheralg = "BLOWFISH"
- *   - HX_TEST_CAP_BLOWFISH cap filter
- *
- * Same caveat about no matrix entry currently advertising both
- * CHAT_HISTORY and BLOWFISH — test skips cleanly until one does.
+ * Filters on HX_TEST_CAP_BLOWFISH + HX_TEST_CAP_CHAT_HISTORY.
+ * Same caveat about no matrix entry currently advertising both —
+ * test skips cleanly until one does.
  */
 
 #include "config.h"

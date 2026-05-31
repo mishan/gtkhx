@@ -30,7 +30,7 @@ The big rocks, by line count:
 | `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
 | `src/gtk_hlist_compat.c`|  ~800| Shim: GtkHList API over GtkTreeView+GtkListStore.             |
 | `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
-| `src/cipher.c`          |  ~~~ | Per-connection cipher (Blowfish/RC4); HOPE negotiation.       |
+| `src/cipher.c`          |  ~~~ | Per-connection cipher (Blowfish); HOPE negotiation.           |
 | `src/compress.c`        |  ~~~ | zlib compression layer; HOPE negotiation.                     |
 | `src/hmac.c`            |  ~~~ | HMAC-MD5 / HMAC-SHA / HMAC-HAVAL.                             |
 | `src/md5.c` `src/sha.c` `src/haval.c` | ~~~ | Hash primitives (Phase 5 follow-up: replace with GLib/Nettle). |

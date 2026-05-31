@@ -1323,13 +1323,13 @@ integration_open_login_hope_or_skip (
     } else if (sel.s_cipheralg[0] && sel.c_cipheralg[0]
                && hope_cipher_id_from_name (sel.s_cipheralg) != CIPHER_NONE
                && hope_cipher_id_from_name (sel.c_cipheralg) != CIPHER_NONE) {
-        /* Stream-cipher (RC4 / Blowfish OFB-64) post-Step-2 setup.
+        /* Stream-cipher (Blowfish OFB-64) post-Step-2 setup.
          * Mirrors production's rcv.c HOPE Step 2 reply handler:
          *   - cipher_{decode,encode}_type from the negotiated names
          *   - cipher_mode = STREAM
          *   - cipher_{encode,decode}_init reads cipher_{encode,decode
          *     }_key (already populated by send_hope_step2) and
-         *     primes the per-direction RC4 / Blowfish state.
+         *     primes the per-direction Blowfish state.
          *
          * From this point on every byte on the wire (both directions)
          * goes through cipher_encode / cipher_decode. The harness's
@@ -1442,7 +1442,7 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     }
 
     if (hope && hope->stream_active) {
-        /* Stream-cipher (RC4 / Blowfish OFB-64) send path. cipher
+        /* Stream-cipher (Blowfish OFB-64) send path. cipher
          * _encode does the work production does: optionally stamp a
          * 1..63-iteration rekey marker into the type field's high
          * byte (~3/16 random probability), do_encode the header,
@@ -1547,7 +1547,7 @@ integration_send_agreementagree_hope (int                       fd,
 }
 
 
-/* Apply htlc's stream cipher (RC4 / Blowfish OFB-64) to `n` raw
+/* Apply htlc's stream cipher (Blowfish OFB-64) to `n` raw
  * bytes in place. Used for both the encrypted header and the
  * encrypted body of an incoming message after a successful
  * HOPE+stream-cipher negotiation. Mirrors production's network.c
@@ -1677,7 +1677,7 @@ integration_recv_message_hope (int fd, struct htlc_conn *htlc,
     }
 
     if (hope && hope->stream_active) {
-        /* Stream-cipher (RC4 / Blowfish OFB-64) recv path. Mirrors the
+        /* Stream-cipher (Blowfish OFB-64) recv path. Mirrors the
          * production network.c::htlc_read + rcv.c::hx_rcv_hdr split:
          *
          *   1. Read the 20-byte header off the socket, decrypt in

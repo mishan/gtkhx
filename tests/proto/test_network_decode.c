@@ -27,10 +27,11 @@
  *   1. Plaintext passthrough          (cipheralg empty, compress none).
  *      Drains whatever's available, splits across rcv-loop iterations
  *      that ask for fewer bytes than read_in is holding.
- *   2. Stream-cipher decode           (RC4 + Blowfish OFB-64).
- *      Symmetric: encrypt plaintext with arcfour_crypt /
- *      blowfish_ofb64_crypt, drop the ciphertext into read_in, call
- *      hx_decode, assert the plaintext comes back out into htlc->in.
+ *   2. Stream-cipher decode           (Blowfish OFB-64).
+ *      Symmetric: encrypt plaintext with blowfish_ofb64_crypt,
+ *      drop the ciphertext into read_in, call hx_decode, assert the
+ *      plaintext comes back out into htlc->in. RC4 used to share
+ *      this branch but was removed in claude/remove-rc4.
  *   3. ChaCha20-Poly1305 AEAD framing (cipher_mode AEAD).
  *      Seal a plaintext payload with cipher_aead_seal into a frame,
  *      drop the framed bytes into read_in, call hx_decode (which
@@ -52,7 +53,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
-#include <nettle/arcfour.h>
 #include <nettle/blowfish.h>
 
 #include "protocol.h"
@@ -139,7 +139,7 @@ const char *INFOPREFIX = "";
  * (we always leave it at zero), and the stream-cipher rekey path in
  * cipher.c::cipher_change_*_key only fires when production's random
  * 3/16 marker triggers (we drive the encode side ourselves via raw
- * arcfour_crypt / blowfish_ofb64_crypt and never call cipher_encode).
+ * blowfish_ofb64_crypt and never call cipher_encode).
  * The linker still needs the symbols though; provide aborting stubs
  * so a future test that accidentally trips one of these branches
  * fails loudly instead of silently misbehaving. */
@@ -290,52 +290,11 @@ test_plain_empty_read_in (void)
     free_test_htlc (h);
 }
 
-/* ---- RC4 stream cipher round-trip ------------------------------ *
- *
- * Encrypt some plaintext with arcfour_crypt directly (mirrors what
- * cipher_encode/do_encode does for RC4), put the ciphertext into
- * read_in, configure htlc->cipher_decode_* and call hx_decode.
- * Verify plaintext is restored.                                    */
-
-static void
-test_rc4_round_trip (void)
-{
-    reset_stub_state ();
-    struct htlc_conn *h = new_test_htlc (32, 64, 0);
-    h->in.pos = 0;
-    h->in.len = 22;
-
-    static const guint8 key[16] = {
-        0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
-    };
-    static const guint8 plain[22] = {
-        0xab,0xcd,0xef,0x00, 0x12,0x34,0x56,0x78,
-        0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0
-    };
-    guint8 cipher[22];
-
-    /* Two-arcfour-state setup. The receive side lives on htlc; the
-     * encode side is local (we don't drive cipher_encode in this
-     * test, only the decode half of network_decode). */
-    struct arcfour_ctx encode;
-    arcfour_set_key (&encode, sizeof (key), key);
-    arcfour_crypt (&encode, sizeof (plain), cipher, plain);
-
-    /* Mirror that key on the decode side. */
-    strcpy (h->cipheralg, "RC4");
-    h->cipher_decode_type    = CIPHER_RC4;
-    h->cipher_decode_keylen  = sizeof (key);
-    memcpy (h->cipher_decode_key, key, sizeof (key));
-    cipher_decode_init (h);
-
-    feed_read_in (h, cipher, sizeof (cipher));
-
-    g_assert_cmpuint (hx_decode (h), ==, 1);
-    g_assert_cmpuint (h->in.pos, ==, 22);
-    g_assert_cmpmem (h->in.buf, 22, plain, 22);
-
-    free_test_htlc (h);
-}
+/* RC4 round-trip test removed in claude/remove-rc4 — the cipher
+ * itself is gone from cipher.c, so the test would have nothing
+ * to drive. Blowfish OFB-64 (below) is the only stream cipher
+ * left on the legacy path; ChaCha20-Poly1305 has its own test
+ * binary (test_aead) covering the AEAD framing. */
 
 /* ---- Blowfish OFB-64 round-trip -------------------------------- */
 
@@ -610,8 +569,6 @@ main (int argc, char **argv)
                      test_plain_partial);
     g_test_add_func ("/network_decode/plain/empty_read_in",
                      test_plain_empty_read_in);
-    g_test_add_func ("/network_decode/rc4/round_trip",
-                     test_rc4_round_trip);
     g_test_add_func ("/network_decode/blowfish/round_trip",
                      test_blowfish_round_trip);
     g_test_add_func ("/network_decode/aead/round_trip",

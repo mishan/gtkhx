@@ -84,9 +84,10 @@ costs more than the gain.
    can run on the GLib executor directly via `glib::spawn_future_local`.
 
 5. **Crypto: RustCrypto crates.** `md-5`, `sha1`, `sha2`, `hmac`, `blowfish`,
-   `rc4` (`arcfour`), `chacha20poly1305`. All pure-Rust, audited, MIT/Apache-2.0
-   licensed (GPL-compatible). HAVAL — historically advertised but unused — was
-   already deleted in Phase 5; no Rust HAVAL crate needed.
+   `chacha20poly1305`. All pure-Rust, audited, MIT/Apache-2.0 licensed
+   (GPL-compatible). HAVAL — historically advertised but unused — was already
+   deleted in Phase 5; no Rust HAVAL crate needed. RC4 (`rc4` / `arcfour`)
+   was retired in `claude/remove-rc4` and is not on the migration list.
 
 6. **Custom widgets stay vendored C: xtext (HexChat's modern fork) does not
    get rewritten.** It is 4,500 LOC of cairo + Pango + mIRC color parsing that
@@ -221,10 +222,11 @@ the primitives.
    for LZ4, `zstd` for Zstandard. Replaces `compress.c`'s zlib/lz4/zstd
    dispatcher. The `HAVE_*` build-time gates collapse — Rust crates are
    either compiled in or excluded by Cargo features.
-6. **Migrate Tier 3 cipher tests.** `tests/integration/test_hope_rc4`,
-   `test_hope_blowfish`, etc., already link `cipher.c` directly without GTK.
-   They keep working unchanged because the C symbols are still there — just
-   implemented in Rust now.
+6. **Migrate Tier 3 cipher tests.** `tests/integration/test_hope_blowfish`
+   and the chacha20 / banner sisters already link `cipher.c` directly
+   without GTK. They keep working unchanged because the C symbols are
+   still there — just implemented in Rust now. (`test_hope_rc4*` is
+   gone since RC4 was retired.)
 
 **Gotchas**
 

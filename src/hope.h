@@ -191,7 +191,7 @@ hope_parse_step1_reply (struct htlc_conn *htlc,
  * `htlc->cipher_decode_key` holds the spec's encode_key (first-
  * derived from password_mac), and `htlc->cipher_encode_key`
  * holds the spec's decode_key (second-derived from encode_key).
- * For the legacy stream ciphers (RC4 / Blowfish OFB) this swap
+ * For the legacy stream cipher (Blowfish OFB) this swap
  * was harmless — both peers compute the same byte values and
  * the labeling is convention only. For ChaCha20-Poly1305 AEAD,
  * the spec's labels matter because HKDF info strings are bound
@@ -308,7 +308,8 @@ hope_build_alg_reply (const char *alg, uint8_t *out_buf, size_t out_cap);
  * value used in htlc->cipher_*_type. Returns CIPHER_NONE for
  * empty / unknown names.
  *
- * Recognised today: "RC4", "BLOWFISH", "CHACHA20-POLY1305".
+ * Recognised today: "BLOWFISH", "CHACHA20-POLY1305".
+ * "RC4" maps to CIPHER_NONE (RC4 was removed in claude/remove-rc4).
  *
  * The return type is `int` rather than the cipher enum because
  * cipher.h's enum-via-#define style doesn't lend itself to a
@@ -320,7 +321,7 @@ extern int hope_cipher_id_from_name (const char *name);
  * Does this cipher name imply AEAD framing (length-prefixed
  * sealed transactions) on the wire? Pure name predicate; returns
  * 1 for "CHACHA20-POLY1305", 0 for anything else (including NULL).
- * Stream ciphers (RC4, Blowfish OFB) return 0.
+ * Stream ciphers (Blowfish OFB) return 0.
  */
 extern int hope_cipher_is_aead (const char *name);
 
