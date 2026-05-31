@@ -1,0 +1,17 @@
+[package]
+name = "hxcrypto-stream"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Stream cipher primitives for GtkHx — replaces cipher.c"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+hxcrypto-hash = { path = "../hxcrypto-hash" }
+hxrand = { path = "../hxrand" }
+
+[build-dependencies]
+cbindgen = "0.27"

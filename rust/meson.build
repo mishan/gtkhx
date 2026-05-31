@@ -5,9 +5,9 @@
 # directory inside the Meson build dir. The output is the static library
 # archive(s) that src/meson.build links into the gtkhx executable.
 #
-# The cbindgen-generated header (hxrand.h) lands at
-#   <rust_target_dir>/release/include/hxrand.h
-# which src/meson.build picks up via an include_directories() declaration.
+# The cbindgen-generated headers land at
+#   <rust_target_dir>/release/include/*.h
+# which src/meson.build picks up via compile_args.
 
 cargo = find_program('cargo')
 
@@ -17,9 +17,27 @@ rust_sources = files(
   'crates/hxrand/build.rs',
   'crates/hxrand/cbindgen.toml',
   'crates/hxutil/src/lib.rs',
+  'crates/hxcrypto-hash/src/lib.rs',
+  'crates/hxcrypto-hash/build.rs',
+  'crates/hxcrypto-hash/cbindgen.toml',
+  'crates/hxcrypto-stream/src/lib.rs',
+  'crates/hxcrypto-stream/src/rc4.rs',
+  'crates/hxcrypto-stream/src/blowfish_ofb.rs',
+  'crates/hxcrypto-stream/build.rs',
+  'crates/hxcrypto-stream/cbindgen.toml',
+  'crates/hxcrypto-aead/src/lib.rs',
+  'crates/hxcrypto-aead/build.rs',
+  'crates/hxcrypto-aead/cbindgen.toml',
+  'crates/hxcompress/src/lib.rs',
+  'crates/hxcompress/build.rs',
+  'crates/hxcompress/cbindgen.toml',
   'Cargo.toml',
   'crates/hxrand/Cargo.toml',
   'crates/hxutil/Cargo.toml',
+  'crates/hxcrypto-hash/Cargo.toml',
+  'crates/hxcrypto-stream/Cargo.toml',
+  'crates/hxcrypto-aead/Cargo.toml',
+  'crates/hxcompress/Cargo.toml',
 )
 
 rust_target_dir = meson.project_build_root() / 'rust-target'
@@ -43,16 +61,55 @@ rust_build = custom_target('rust-workspace',
   console : true,
 )
 
+# Common include path for all Rust-generated headers.
+rust_include_args = ['-I' + rust_target_dir / 'release' / 'include']
+
 # Create a dependency object for the Rust hxrand library.
-# Use compile_args for the include path since the generated headers live
-# in the build directory (include_directories() rejects absolute paths).
 rust_hxrand_dep = declare_dependency(
   sources : rust_build,
-  compile_args : [
-    '-I' + rust_target_dir / 'release' / 'include',
-  ],
+  compile_args : rust_include_args,
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxrand',
+  ],
+)
+
+# Crypto hash (replaces hmac.c)
+rust_hxcrypto_hash_dep = declare_dependency(
+  sources : rust_build,
+  compile_args : rust_include_args,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_hash',
+  ],
+)
+
+# Stream cipher (replaces cipher.c stream operations)
+rust_hxcrypto_stream_dep = declare_dependency(
+  sources : rust_build,
+  compile_args : rust_include_args,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_stream',
+  ],
+)
+
+# AEAD (replaces cipher_aead.c)
+rust_hxcrypto_aead_dep = declare_dependency(
+  sources : rust_build,
+  compile_args : rust_include_args,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_aead',
+  ],
+)
+
+# Compression (replaces compress.c)
+rust_hxcompress_dep = declare_dependency(
+  sources : rust_build,
+  compile_args : rust_include_args,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcompress',
   ],
 )
