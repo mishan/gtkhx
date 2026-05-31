@@ -1,11 +1,13 @@
 /*
  * Per-connection cipher state for the Hotline HOPE handshake.
  *
- * Stream cipher primitives (RC4, Blowfish OFB-64) are implemented in
+ * The wire protocol uses ARC4 (RC4) and Blowfish in 64-bit OFB mode.
+ * RC4 comes from Nettle (arcfour); Blowfish OFB-64 is implemented in
  * Rust (rust/crates/hxcrypto-stream/). AEAD (ChaCha20-Poly1305) is
- * in rust/crates/hxcrypto-aead/. This header exposes opaque pointers
- * for the stream ciphers and a repr(C) struct for AEAD state that
- * maps directly to the Rust AeadState.
+ * in rust/crates/hxcrypto-aead/. IDEA was once defined as
+ * CIPHER_IDEA = 3 but never wired into HOPE negotiation (patent-
+ * encumbered at the time and now expired but still unused); the
+ * union/struct entries are gone.
  */
 
 #ifndef __cipher_h
@@ -16,6 +18,7 @@
 
 #include <stdint.h>
 #include <sys/types.h> /* u_int8_t / u_int32_t */
+#include <nettle/arcfour.h>
 
 /* Note: cipher.h is pulled into protocol.h via the htlc_conn cipher_state
  * fields, so this header MUST NOT include hx.h or session.h — that would
@@ -52,10 +55,11 @@
 #define CIPHER_MODE_STREAM 0
 #define CIPHER_MODE_AEAD   1
 
-/* Opaque Rust-allocated stream cipher states. Created via
- * gtkhx_rc4_new / gtkhx_blowfish_ofb64_new, freed via the
- * corresponding _free functions. */
-typedef struct Rc4State Rc4State;
+/* RC4: Nettle's arcfour_ctx is the entire state. */
+typedef struct arcfour_ctx rc4_state;
+
+/* Opaque Rust-allocated Blowfish OFB-64 state. Created via
+ * gtkhx_blowfish_ofb64_new, freed via gtkhx_blowfish_ofb64_free. */
 typedef struct BlowfishOfb64State BlowfishOfb64State;
 
 /* ChaCha20-Poly1305 AEAD state.
@@ -81,13 +85,15 @@ struct chacha_aead_state {
 };
 typedef struct chacha_aead_state chacha_aead_state;
 
-/* The cipher_state union holds either an opaque pointer to a Rust-
- * allocated stream cipher context (RC4 or Blowfish OFB-64), or the
- * inline chacha_aead_state for AEAD connections. Only one member is
- * active at a time, selected by cipher_encode_type / cipher_decode_type
- * on the htlc_conn. */
+/* The cipher_state union holds one of:
+ *   - rc4_state (inline Nettle arcfour_ctx) for RC4;
+ *   - void *stream (opaque Rust-allocated BlowfishOfb64State*) for Blowfish;
+ *   - chacha_aead_state for AEAD connections.
+ * Only one member is active at a time, selected by cipher_encode_type /
+ * cipher_decode_type on the htlc_conn. */
 union cipher_state {
-    void *stream;           /* Rc4State* or BlowfishOfb64State* */
+    rc4_state rc4;
+    void *stream;           /* BlowfishOfb64State* */
     chacha_aead_state chacha;
 };
 

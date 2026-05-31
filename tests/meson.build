@@ -18,11 +18,12 @@ test_deps = [
   gtk_dep,
 ]
 
-# Tests that include protocol.h need cipher / compress headers.
-# With the Nettle→Rust migration, no extra C deps are needed beyond
-# the Rust crate link deps which come in via the rust_hxcrypto_*_dep
-# declared_dependency objects.
-proto_test_deps = test_deps
+# Tests that include protocol.h need cipher / compress headers via
+# nettle (RC4 still uses Nettle's arcfour). Rust crate link deps
+# come in via the rust_hxcrypto_*_dep declared_dependency objects.
+proto_test_deps = test_deps + [
+  nettle_dep,
+]
 
 test_inc = include_directories('../src')
 

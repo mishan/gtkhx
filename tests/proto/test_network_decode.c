@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
+#include <nettle/arcfour.h>
 
 #include "protocol.h"
 #include "cipher.h"
@@ -60,11 +61,7 @@
 #include "gtkhx_log.h"   /* hx_printf_prefix prototype */
 #include "network_decode.h"
 
-/* ---- Rust FFI declarations (used by the encode side in tests) ---- */
-
-extern Rc4State *gtkhx_rc4_new (const uint8_t *key, uint32_t keylen);
-extern void gtkhx_rc4_free (Rc4State *state);
-extern void gtkhx_rc4_crypt (Rc4State *state, const uint8_t *src, uint8_t *dst, uint32_t len);
+/* ---- Rust FFI declarations (used by the Blowfish encode side in tests) ---- */
 
 extern BlowfishOfb64State *gtkhx_blowfish_ofb64_new (const uint8_t *key, uint32_t keylen);
 extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
@@ -300,11 +297,12 @@ test_rc4_round_trip (void)
     };
     guint8 cipher[22];
 
-    /* Use Rust RC4 to encode the plaintext (mirrors what
-     * cipher_encode/do_encode does for RC4). */
-    Rc4State *encode = gtkhx_rc4_new (key, sizeof (key));
-    gtkhx_rc4_crypt (encode, plain, cipher, sizeof (plain));
-    gtkhx_rc4_free (encode);
+    /* Two-arcfour-state setup. The receive side lives on htlc; the
+     * encode side is local (we don't drive cipher_encode in this
+     * test, only the decode half of network_decode). */
+    struct arcfour_ctx encode;
+    arcfour_set_key (&encode, sizeof (key), key);
+    arcfour_crypt (&encode, sizeof (plain), cipher, plain);
 
     /* Mirror that key on the decode side. */
     strcpy (h->cipheralg, "RC4");

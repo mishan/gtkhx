@@ -72,8 +72,10 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
-# zlib and nettle are no longer used directly — crypto and compression
-# are implemented in Rust crates (hxcrypto-stream, hxcrypto-aead, hxcompress).
+# Nettle is still needed for RC4 (arcfour) in cipher.c.
+# Compression is implemented in the Rust hxcompress crate; Blowfish
+# OFB-64 is in the Rust hxcrypto-stream crate.
+nettle_dep  = dependency('nettle',    version : '>= 3.0')
 threads_dep = dependency('threads')
 
 # Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
@@ -151,6 +153,7 @@ deps = [
   adw_dep,
   glib_dep,
   gthread_dep,
+  nettle_dep,
   threads_dep,
   gsound_dep,
   soup_dep,
@@ -293,6 +296,7 @@ summary(
     'GTK'           : gtk_dep.version(),
     'libadwaita'    : adw_dep.version(),
     'GLib'          : glib_dep.version(),
+    'Nettle'        : nettle_dep.version(),
     'GSound'        : gsound_dep.version(),
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',

@@ -35,9 +35,7 @@
 #include "gtkhx_log.h"    /* hx_printf_prefix + INFOPREFIX forward-decls */
 #include "network_decode.h"
 
-/* Rust FFI (hxcrypto-stream) — clone/free for cipher state rollback. */
-extern Rc4State *gtkhx_rc4_clone (const Rc4State *state);
-extern void gtkhx_rc4_free (Rc4State *state);
+/* Rust FFI (hxcrypto-stream) — clone/free for Blowfish cipher state rollback. */
 extern BlowfishOfb64State *gtkhx_blowfish_ofb64_clone (const BlowfishOfb64State *state);
 extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
 
@@ -202,17 +200,19 @@ hx_decode (struct htlc_conn *htlc)
         max = 0xffffffff;
     } else
         max = htlc->in.len;
-    void *saved_stream = NULL;
+    void *saved_bf_stream = NULL;
+    union cipher_state saved_rc4_state;
     if (htlc->cipheralg[0] && htlc->cipher_decode_type != CIPHER_NONE) {
-        /* Save stream cipher state before decode in case we need to
-         * roll back (happens when compress consumes fewer bytes than
-         * the cipher decoded). Clone the Rust-allocated opaque state
-         * so we can restore from the snapshot. */
+        /* Save cipher state before decode in case we need to roll back
+         * (happens when compress consumes fewer bytes than the cipher
+         * decoded). RC4 uses an inline Nettle arcfour_ctx (memcpy is
+         * sufficient); Blowfish uses an opaque Rust-allocated state
+         * that must be cloned. */
         if (htlc->cipher_decode_type == CIPHER_RC4) {
-            saved_stream = gtkhx_rc4_clone (
-                (Rc4State *)htlc->cipher_decode_state.stream);
+            memcpy (&saved_rc4_state, &htlc->cipher_decode_state,
+                    sizeof (saved_rc4_state));
         } else if (htlc->cipher_decode_type == CIPHER_BLOWFISH) {
-            saved_stream = gtkhx_blowfish_ofb64_clone (
+            saved_bf_stream = gtkhx_blowfish_ofb64_clone (
                 (BlowfishOfb64State *)htlc->cipher_decode_state.stream);
         }
         out = &cipher_out;
@@ -240,28 +240,26 @@ hx_decode (struct htlc_conn *htlc)
     }
     memcpy (&htlc->in.buf[htlc->in.pos], &out->buf[out->pos], len);
     if (r != inused) {
-        if (htlc->cipher_decode_type != CIPHER_NONE && saved_stream) {
-            /* Roll back: free the advanced state, restore from
-             * snapshot, then re-decode with the correct byte count. */
+        if (htlc->cipher_decode_type != CIPHER_NONE) {
+            /* Roll back cipher state, then re-decode with the
+             * correct byte count. */
             if (htlc->cipher_decode_type == CIPHER_RC4) {
-                gtkhx_rc4_free ((Rc4State *)htlc->cipher_decode_state.stream);
-            } else if (htlc->cipher_decode_type == CIPHER_BLOWFISH) {
+                memcpy (&htlc->cipher_decode_state, &saved_rc4_state,
+                        sizeof (saved_rc4_state));
+            } else if (htlc->cipher_decode_type == CIPHER_BLOWFISH
+                       && saved_bf_stream) {
                 gtkhx_blowfish_ofb64_free (
                     (BlowfishOfb64State *)htlc->cipher_decode_state.stream);
+                htlc->cipher_decode_state.stream = saved_bf_stream;
+                saved_bf_stream = NULL;
             }
-            htlc->cipher_decode_state.stream = saved_stream;
-            saved_stream = NULL;
             cipher_decode (htlc, &cipher_out, in, inused, &inused);
         }
         memmove (&in->buf[0], &in->buf[inused], r - inused);
     }
-    /* Free the saved snapshot if we didn't need it for rollback. */
-    if (saved_stream) {
-        if (htlc->cipher_decode_type == CIPHER_RC4) {
-            gtkhx_rc4_free ((Rc4State *)saved_stream);
-        } else if (htlc->cipher_decode_type == CIPHER_BLOWFISH) {
-            gtkhx_blowfish_ofb64_free ((BlowfishOfb64State *)saved_stream);
-        }
+    /* Free the saved Blowfish snapshot if we didn't need it for rollback. */
+    if (saved_bf_stream) {
+        gtkhx_blowfish_ofb64_free ((BlowfishOfb64State *)saved_bf_stream);
     }
     in->pos = r - inused;
     in->len -= inused;
