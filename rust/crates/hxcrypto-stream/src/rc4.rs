@@ -4,6 +4,7 @@
 //! protocol's expectations.
 
 /// RC4 state: 256-byte permutation table + two indices.
+#[derive(Clone)]
 pub struct Rc4State {
     s: [u8; 256],
     i: u8,

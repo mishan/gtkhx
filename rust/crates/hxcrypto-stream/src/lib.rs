@@ -122,6 +122,26 @@ pub unsafe extern "C" fn gtkhx_blowfish_ofb64_crypt(
     (*state).crypt(src_slice, dst_slice);
 }
 
+/// Clone an RC4 state. Returns a new heap-allocated copy.
+/// The caller must free it with `gtkhx_rc4_free`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_rc4_clone(state: *const Rc4State) -> *mut Rc4State {
+    if state.is_null() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new((*state).clone()))
+}
+
+/// Clone a Blowfish OFB-64 state. Returns a new heap-allocated copy.
+/// The caller must free it with `gtkhx_blowfish_ofb64_free`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_blowfish_ofb64_clone(state: *const BlowfishOfb64State) -> *mut BlowfishOfb64State {
+    if state.is_null() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new((*state).clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -18,6 +18,7 @@ use blowfish::Blowfish;
 use cipher::{Array, BlockCipherEncrypt, KeyInit};
 
 /// Blowfish in 64-bit OFB mode. Carries state across calls.
+#[derive(Clone)]
 pub struct BlowfishOfb64State {
     cipher: Blowfish,
     ivec: [u8; 8],

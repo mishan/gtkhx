@@ -70,6 +70,10 @@
 #include "tracker_event.h"
 #include "connect_magic.h"
 
+/* Rust FFI (hxcrypto-stream) — free opaque stream cipher states. */
+extern void gtkhx_rc4_free (Rc4State *state);
+extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
+
 char *server_addr;
 guint16 server_port;
 
@@ -335,6 +339,19 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     memset (htlc->cipher_encode_key, 0, sizeof (htlc->cipher_encode_key));
     memset (htlc->cipher_decode_key, 0, sizeof (htlc->cipher_decode_key));
+    /* Free Rust-allocated stream cipher states before zeroing. */
+    if (htlc->cipher_encode_state.stream) {
+        if (htlc->cipher_encode_type == CIPHER_RC4)
+            gtkhx_rc4_free ((Rc4State *)htlc->cipher_encode_state.stream);
+        else if (htlc->cipher_encode_type == CIPHER_BLOWFISH)
+            gtkhx_blowfish_ofb64_free ((BlowfishOfb64State *)htlc->cipher_encode_state.stream);
+    }
+    if (htlc->cipher_decode_state.stream) {
+        if (htlc->cipher_decode_type == CIPHER_RC4)
+            gtkhx_rc4_free ((Rc4State *)htlc->cipher_decode_state.stream);
+        else if (htlc->cipher_decode_type == CIPHER_BLOWFISH)
+            gtkhx_blowfish_ofb64_free ((BlowfishOfb64State *)htlc->cipher_decode_state.stream);
+    }
     memset (&htlc->cipher_encode_state, 0, sizeof (htlc->cipher_encode_state));
     memset (&htlc->cipher_decode_state, 0, sizeof (htlc->cipher_decode_state));
     htlc->cipher_encode_type = 0;
