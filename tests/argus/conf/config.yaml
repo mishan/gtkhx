@@ -1,0 +1,103 @@
+# Argus tracker configuration — GtkHx Tier 3 test container.
+#
+# Edits from upstream's default config.yaml (1.0.2 ships):
+#
+#   listen.bind_address: 0.0.0.0       — needed because we map host
+#                                         ports to container ports and
+#                                         the default "" already binds
+#                                         all interfaces, but we make
+#                                         it explicit so the intent is
+#                                         visible.
+#
+#   registration.reject_private_ips: false
+#                                      — Tier 3 hammers the container
+#                                         from 127.0.0.1 / Docker bridge
+#                                         RFC 1918 IPs. The default
+#                                         true would reject any UDP
+#                                         registration from those — not
+#                                         strictly needed for the
+#                                         current "client lists, no
+#                                         server registers" tests, but
+#                                         a future test that registers
+#                                         a fake server inside the
+#                                         container would trip the
+#                                         filter. Cheap to flip now.
+#
+#   promoted_servers: [...]            — three pinned entries so the
+#                                         listing-fetch tests have
+#                                         deterministic content without
+#                                         needing a Hotline server
+#                                         running alongside. Mix of
+#                                         hostname-shape entries (which
+#                                         is what Argus emits for any
+#                                         promoted_servers entry — see
+#                                         the note in
+#                                         tests/argus/README.md).
+#
+#   logging.level: debug               — Tier 3 failures are easier to
+#                                         diagnose when Argus prints
+#                                         per-connection v3 negotiation
+#                                         lines. Cheap; the container
+#                                         is throwaway.
+#
+# Everything else (API, federation, Mnemosyne, HMAC, accounts-based
+# auth) stays disabled. We're testing the v3 listing path from the
+# client's perspective only.
+
+listen:
+  tcp_port: 5498
+  udp_port: 5499
+  bind_address: "0.0.0.0"
+
+registration:
+  password: ""
+  expiry_seconds: 600
+  max_servers_per_ip: 10
+  reject_private_ips: false
+  ack_enabled: false
+  heartbeat_interval: 300
+  tracker_name: "gtkhx-argus-test"
+  hmac_secret: ""
+
+authentication:
+  listing_mode: open
+  registration_mode: open
+  accounts_file: "accounts.yaml"
+
+api:
+  enabled: false
+
+federation:
+  enabled: false
+
+mnemosyne:
+  enabled: false
+
+logging:
+  level: debug
+
+ban_file: "bans.txt"
+
+promoted_dedup: true
+
+# Three pinned entries — deterministic content for the integration
+# tests. Argus renders all promoted_servers entries as v3 0x48
+# (hostname) records on the wire, regardless of whether the address
+# is an IP literal or a real hostname. The client-side parser
+# (src/tracker_v3.c::hx_tracker_v3_parse_record) handles all three
+# address-type bytes (0x04 / 0x06 / 0x48); the view side
+# (src/tracker.c::tracker_server_create) routes all three through
+# the same string-keyed dedup tree, so 0x48 records flow through
+# to the UI just like IPv4 records do. The Tier 3 test asserts at
+# the parser layer for offset-math regression coverage; see
+# tests/argus/README.md "Known gotcha" for the full background.
+promoted_servers:
+  - address: "203.0.113.10:5500"
+    name: "Promoted Alpha"
+    description: "First deterministic promoted server for Tier 3."
+  - address: "203.0.113.20:5500"
+    name: "Promoted Beta"
+    description: "Second promoted server (different IP)."
+  - address: "203.0.113.30:5500"
+    name: "Promoted Gamma"
+    description: "Third promoted server."

@@ -4,11 +4,11 @@
 #
 #   unit         — pure-function tests, no GTK / network. Fast.
 #   proto        — wire-format parsers driven from canned fixtures.
-#   integration  — end-to-end against the mhxd + Janus + hxtrackd
-#                  Docker containers in tests/mhxd/, tests/janus/,
-#                  and tests/hxtrackd/. Slower (rebuilds all three
-#                  containers on every run unless the layer cache
-#                  is warm).
+#   integration  — end-to-end against the mhxd + Janus + Argus +
+#                  hxtrackd Docker containers in tests/mhxd/,
+#                  tests/janus/, tests/argus/, and tests/hxtrackd/.
+#                  Slower (rebuilds all four containers on every
+#                  run unless the layer cache is warm).
 #
 # Two jobs:
 #
@@ -19,18 +19,19 @@
 #                     LTS images don't ship.
 #
 #   integration     — Same Fedora image, plus sibling steps that
-#                     build mhxd + Janus + hxtrackd and start them
-#                     on localhost:5500/5501 + 5510/5511 +
-#                     5598/5599. The server / tracker matrices in
-#                     tests/integration/server_matrix.c and
-#                     tracker_matrix.c record those host ports per
-#                     target. All three containers must be
-#                     reachable: tests that pick Janus or hxtrackd
-#                     via HX_TEST_CAP_* / HX_TEST_TRACKER_CAP_*
-#                     filters (chat-history, banner-HTXF,
-#                     Janus-only ciphers, v1 tracker fallback)
-#                     fail loudly when the server isn't up — no
-#                     silent skips, per [[feedback_no_test_skips]].
+#                     build mhxd + Janus + Argus + hxtrackd and
+#                     start them on localhost:5500/5501 + 5510/5511
+#                     + 5498/5499 + 5598/5599. The server / tracker
+#                     matrices in tests/integration/server_matrix.c
+#                     and tracker_matrix.c record those host ports
+#                     per target. All four containers must be
+#                     reachable: tests that pick Janus / Argus /
+#                     hxtrackd via HX_TEST_CAP_* /
+#                     HX_TEST_TRACKER_CAP_* filters (chat-history,
+#                     banner-HTXF, Janus-only ciphers, v3 tracker,
+#                     v1 tracker fallback) fail loudly when the
+#                     server isn't up — no silent skips, per
+#                     [[feedback_no_test_skips]].
 #
 # Branch protection on `main` should require both jobs green before
 # merge. That setup is in the GitHub repository UI — Settings →
@@ -104,7 +105,7 @@ jobs:
           path: build/meson-logs/
 
   integration:
-    name: integration vs mhxd + janus + hxtrackd
+    name: integration vs mhxd + janus + argus + hxtrackd
     runs-on: ubuntu-latest
     needs: build-and-test
     steps:
@@ -134,6 +135,18 @@ jobs:
         # client retries with v1 magic). See tests/hxtrackd/README.md.
         run: |
           docker build -t gtkhx-hxtrackd tests/hxtrackd
+
+      - name: build argus test container
+        # Argus build pulls a sha256-pinned tarball from
+        # get.vespernet.net (VesperNet's closed-source v3 tracker,
+        # fogWraith's reference implementation — see
+        # tests/argus/Dockerfile preamble). Same legal posture as
+        # Janus: not redistributed; pulled fresh at image-build
+        # time + verified. Network failure here surfaces as a red
+        # CI step rather than disappearing into a later
+        # "argus not reachable" test failure.
+        run: |
+          docker build -t gtkhx-argus tests/argus
 
       - name: start mhxd
         run: |
@@ -177,14 +190,14 @@ jobs:
 
       - name: start hxtrackd
         # hxtrackd container exposes its internal 5498/5499 on
-        # host 5598/5599 (5498/5499 are kept free for future
-        # v3-capable trackers that benefit from the spec port).
-        # The tracker_matrix.c entry for "hxtrackd" hard-codes
-        # 5598 as its host-side port. The entrypoint also runs
-        # seed-tracker.py which sends a UDP registration into
-        # 127.0.0.1:5499 (inside the container) every 60s; that
-        # registration appears in v1 listings as the deterministic
-        # "hxtrackd test server" record the Tier 3 test asserts on.
+        # host 5598/5599 (Argus claims the conventional 5498/5499
+        # ports below). The tracker_matrix.c entry for "hxtrackd"
+        # hard-codes 5598 as its host-side port. The entrypoint
+        # also runs seed-tracker.py which sends a UDP registration
+        # into 127.0.0.1:5499 (inside the container) every 60s;
+        # that registration appears in v1 listings as the
+        # deterministic "hxtrackd test server" record the Tier 3
+        # test asserts on.
         run: |
           docker run -d --name gtkhx-hxtrackd \
             -p 5598:5498 -p 5599:5499/udp \
@@ -210,6 +223,26 @@ jobs:
           sys.exit(0 if n > 0 else 1)
           " 2>/dev/null; then
               echo "hxtrackd is up with seeded record"; break
+            fi
+            sleep 1
+          done
+
+      - name: start argus
+        # Argus listens on the conventional Hotline tracker ports
+        # 5498/tcp (client listing) + 5499/udp (server registration
+        # heartbeats). Nothing else in the rig binds those, so we
+        # publish them straight-through (no port remap, unlike
+        # Janus or hxtrackd). The tracker_matrix.c entry for
+        # "argus" expects 127.0.0.1:5498 — without this step the
+        # Tier 3 test_integration_tracker_v3 binary fails
+        # loudly per the no-silent-skips policy.
+        run: |
+          docker run -d --name gtkhx-argus \
+            -p 5498:5498 -p 5499:5499/udp \
+            gtkhx-argus
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if (echo > /dev/tcp/127.0.0.1/5498) 2>/dev/null; then
+              echo "argus is up"; break
             fi
             sleep 1
           done
@@ -252,6 +285,10 @@ jobs:
         if: failure()
         run: docker logs gtkhx-hxtrackd || true
 
+      - name: dump argus logs on failure
+        if: failure()
+        run: docker logs gtkhx-argus || true
+
       - name: upload meson test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -270,3 +307,7 @@ jobs:
       - name: stop hxtrackd
         if: always()
         run: docker rm -f gtkhx-hxtrackd || true
+
+      - name: stop argus
+        if: always()
+        run: docker rm -f gtkhx-argus || true
