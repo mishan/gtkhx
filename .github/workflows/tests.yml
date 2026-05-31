@@ -84,7 +84,7 @@ jobs:
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
-            git
+            git rust cargo
 
       - name: meson setup
         run: meson setup build
@@ -96,6 +96,10 @@ jobs:
         run: |
           meson test -C build --suite unit --suite proto \
             --print-errorlogs
+
+      - name: cargo test (Rust workspace)
+        run: |
+          cd rust && cargo test --workspace
 
       - name: upload meson test logs
         if: always()
@@ -266,7 +270,7 @@ jobs:
                 gsound-devel \
                 gettext-devel \
                 desktop-file-utils appstream \
-                git
+                git rust cargo
               meson setup build
               meson compile -C build
               meson test -C build --suite integration \

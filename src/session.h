@@ -5,7 +5,7 @@
  * the output_functions vtable, and chat/news/file UI structures live.
  * Anything that includes this header transitively pulls in <gtk/gtk.h>.
  *
- * Files that don't talk to widgets (hmac.c, rand.c, network code) should
+ * Files that don't talk to widgets (hmac.c, network code) should
  * include protocol.h directly instead.
  */
 

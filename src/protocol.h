@@ -3,7 +3,7 @@
  *
  * Pulls in <glib.h> for guint*_t and hotline.h for the on-the-wire
  * structs, but deliberately avoids <gtk/gtk.h>. Crypto and protocol
- * code (hmac.c, rand.c, cipher.c, network.c, ...) can include this
+ * code (hmac.c, cipher.c, network.c, ...) can include this
  * without dragging in widget definitions.
  *
  * If you're tempted to add a GtkWidget* field here, it belongs in
@@ -432,13 +432,22 @@ extern int task_inerror (struct htlc_conn *htlc);
 #define COMPLETE_LS_R 2
 #define COMPLETE_GET_R 3
 
-/* ---- Crypto helpers (implementations in hmac.c / rand.c) ----------- */
+/* ---- Crypto helpers (implementations in hmac.c / rand via Rust) ----- */
 
 extern u_int16_t hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
                            const void *text, u_int32_t textlen,
                            const char *macalg);
 
-extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
+/* random_bytes() is now implemented in Rust (rust/crates/hxrand/).
+ * The C symbol is gtkhx_random_bytes(); this inline keeps call sites
+ * unchanged. The generated header is produced by cbindgen at build time. */
+extern unsigned int gtkhx_random_bytes(unsigned char *buf, unsigned int nbytes);
+
+static inline unsigned int
+random_bytes(u_int8_t *buf, unsigned int nbytes)
+{
+	return gtkhx_random_bytes(buf, nbytes);
+}
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 

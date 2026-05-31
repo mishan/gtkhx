@@ -39,7 +39,6 @@ EXCLUDED_BASENAMES=(
     "sha.c"   "sha.h"
     "haval.c" "haval.h"
     "hmac.c"  "hmac.h"
-    "rand.c"
     "cipher.c"
     "cipher_openssl.h"
     # Mac-format parsers, copied from external implementations.

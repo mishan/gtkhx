@@ -64,7 +64,6 @@ gtkhx_sources = files(
   'proto_helpers.c',
   'proto_trace.c',
   'qbuf.c',
-  'rand.c',
   'rcv.c',
   'sound.c',
   'tasks.c',
@@ -176,7 +175,7 @@ gtkhx_resources = gnome.compile_resources(
 executable('gtkhx',
   gtkhx_sources,
   gtkhx_resources,
-  dependencies        : deps,
+  dependencies        : deps + [rust_hxrand_dep],
   include_directories : include_directories('.'),
   install             : true,
 )
