@@ -206,7 +206,7 @@ else
     # Manual exclusions — lcov can't read .gcovr.cfg. Keep this
     # list in sync with the exclude= lines there.
     lcov --remove "$LCOV_INFO" \
-         "*/src/xtext.[ch]" "*/src/dfa.[ch]" "*/src/rand.c" \
+         "*/src/xtext.[ch]" "*/src/dfa.[ch]" \
          "*/tests/*" "*/build*/*" "*/subprojects/*" \
          --output-file "$LCOV_INFO" \
          --rc lcov_branch_coverage=1 \

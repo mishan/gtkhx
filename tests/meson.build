@@ -863,7 +863,7 @@ test('htxf_io', test_htxf_io,
 # network.c specifically so this test can drive its three branches
 # (plaintext / stream cipher / AEAD framing) against canned bytes.
 # Pulls in the full cipher stack (cipher.c + cipher_aead.c + qbuf.c
-# + rand.c — the same set the Tier 3 harness linked in for HOPE
+# + Rust hxrand — the same set the Tier 3 harness linked in for HOPE
 # coverage) plus a couple of stub symbols for hx_htlc_close +
 # hx_printf_prefix that the test binary provides inline. The
 # AEAD failure subtests exercise the close-on-error path; the
@@ -875,9 +875,8 @@ test_network_decode = executable('test_network_decode',
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/qbuf.c',
-  '../src/rand.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [dependency('nettle')],
+  dependencies        : proto_test_deps + [dependency('nettle'), rust_hxrand_dep],
   include_directories : proto_test_inc,
 )
 test('network_decode', test_network_decode,
@@ -937,10 +936,9 @@ integration_harness_lib = static_library(
   # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
   # brings the stream-cipher (RC4 / Blowfish OFB-64) seal/open + the
   # HMAC-chained rekey rotation that mirrors production's
-  # rcv.c::hx_rcv_hdr behaviour; rand.c is cipher.c's random_bytes
-  # source for the per-message rekey decision; hope.c brings the HMAC
-  # chain + chunk walker; algo_list.c / hmac.c are their transitive
-  # deps. All are pure functions (Nettle + glib only — cipher.c's
+  # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
+  # hxrand crate via rust_hxrand_dep; hope.c brings the HMAC chain +
+  # chunk walker; algo_list.c / hmac.c are their transitive deps. All are pure functions (Nettle + glib only — cipher.c's
   # hx.h → protocol.h swap landed alongside this), so pulling them in
   # costs the harness nothing in link surface — and lets the
   # HOPE+stream Tier 3 tests drive the same secure-login + cipher
@@ -950,12 +948,11 @@ integration_harness_lib = static_library(
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   '../src/qbuf.c',
-  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/hmac.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps,
+  dependencies        : proto_test_deps + [rust_hxrand_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1033,7 +1030,6 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/debug.c',
   '../src/text_util.c',
   '../src/qbuf.c',
-  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/hmac.c',
@@ -1044,7 +1040,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep],
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1104,7 +1100,6 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/debug.c',
   '../src/text_util.c',
   '../src/qbuf.c',
-  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/hmac.c',
@@ -1115,7 +1110,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep],
+  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate

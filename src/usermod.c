@@ -351,13 +351,12 @@ useredit_destroy (GtkWidget *widget, gpointer data)
  * over the alphabet, which is what "16 chars of entropy" actually
  * means.
  *
- * Entropy source is random_bytes() (src/rand.c) which prefers the
- * getrandom(2) syscall and falls back to /dev/urandom — same
- * source the cipher layer uses for nonces. random_bytes returns
- * 0 if both syscall and /dev/urandom fail (extremely rare —
- * essentially "the system is broken" territory) and the function
- * bails rather than reading uninitialised stack bytes. We pull
- * bytes in a 64-byte batch to minimise syscall overhead. */
+ * Entropy source is random_bytes() (Rust crate hxrand) which wraps
+ * getrandom — same source the cipher layer uses for nonces.
+ * random_bytes returns 0 on failure (extremely rare — essentially
+ * "the system is broken" territory) and the function bails rather
+ * than reading uninitialised stack bytes. We pull bytes in a 64-byte
+ * batch to minimise syscall overhead. */
 static gboolean
 generate_random_password (char *out, size_t pw_len)
 {

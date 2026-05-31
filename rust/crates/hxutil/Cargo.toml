@@ -1,0 +1,7 @@
+[package]
+name = "hxutil"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Utility crate for GtkHx — build-validation placeholder"
+publish = false

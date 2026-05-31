@@ -148,3 +148,6 @@ setup.log
 
 # Vendored mhxd clone — local reference per CLAUDE.md, never committed
 /mhxd/
+
+# Rust build output (Cargo workspace lives in rust/)
+/rust/target/
