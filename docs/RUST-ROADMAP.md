@@ -110,7 +110,7 @@ costs more than the gain.
 
 ---
 
-## Phase R0 — Build plumbing & first Rust foothold
+## Phase R0 — Build plumbing & first Rust foothold ✅
 
 **Goal:** Cargo workspace exists, Meson invokes it, one trivial Rust function
 is callable from C, CI is green. Nothing about the running binary changes

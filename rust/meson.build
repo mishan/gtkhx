@@ -43,15 +43,16 @@ rust_build = custom_target('rust-workspace',
   console : true,
 )
 
-# The cbindgen-generated headers live here after cargo build.
-rust_inc = include_directories(rust_target_dir / 'release' / 'include')
-
 # Create a dependency object for the Rust hxrand library.
+# Use compile_args for the include path since the generated headers live
+# in the build directory (include_directories() rejects absolute paths).
 rust_hxrand_dep = declare_dependency(
   sources : rust_build,
+  compile_args : [
+    '-I' + rust_target_dir / 'release' / 'include',
+  ],
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxrand',
   ],
-  include_directories : rust_inc,
 )
