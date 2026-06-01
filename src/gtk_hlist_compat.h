@@ -150,6 +150,12 @@ void gtk_hlist_thaw (GtkHList *hlist);
 void gtk_hlist_set_column_width (GtkHList *hlist, gint column, gint width);
 void gtk_hlist_set_column_justification (GtkHList *hlist, gint column,
                                          GtkJustification justification);
+/* Show or hide one column. Wraps gtk_tree_view_column_set_visible.
+ * Used by tracker.c's per-section list construction to suppress
+ * Country / Caps for sections sourced from v1 trackers (those
+ * records can never carry the TLV-backed metadata). */
+void gtk_hlist_set_column_visible (GtkHList *hlist, gint column,
+                                   gboolean visible);
 
 void gtk_hlist_set_row_height (GtkHList *hlist, guint height);
 

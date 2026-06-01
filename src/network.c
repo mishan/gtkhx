@@ -2580,6 +2580,17 @@ on_tracker_v1_rest_read (GObject *src, GAsyncResult *res, gpointer u)
     ctx->total = ctx->nservers;
     ctx->server_i = 1;
 
+    /* Tell the view we're about to start emitting v1 records for this
+     * tracker URL. The view uses this to create / recycle a per-tracker
+     * section (and pick which columns to show — v1 sections suppress
+     * Country / Caps since v1 records can't carry those TLVs). The
+     * batch-begin / record-arrival ordering is guaranteed by the fact
+     * that tracker_run_ctx walks trackers sequentially. */
+    gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
+                                            ctx->serverstr,
+                                            /*version=*/1,
+                                            ctx->nservers);
+
     track_prog_update (ctx->run->sess, ctx->serverstr, 0, ctx->total);
 
     read_next_server_hdr (ctx);
@@ -2888,6 +2899,15 @@ on_tracker_v3_resp_hdr_read (GObject *src, GAsyncResult *res, gpointer u)
     ctx->total = (int) record_count;
     ctx->server_i = 1;
     track_prog_update (ctx->run->sess, ctx->serverstr, 0, ctx->total);
+
+    /* Tell the view we're about to start emitting v3 records for this
+     * tracker. Even when record_count is 0 we still emit so the view
+     * creates the (empty) section — feedback that the tracker WAS
+     * contacted and replied, even if it had nothing to list. */
+    gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
+                                            ctx->serverstr,
+                                            /*version=*/3,
+                                            record_count);
 
     if (total_size == 0 && record_count == 0) {
         /* Empty listing — clean finish, no records to read. */

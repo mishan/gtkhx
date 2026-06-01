@@ -59,6 +59,7 @@ enum {
     SIGNAL_XFER_QUEUE,
     SIGNAL_XFER_DESTROYED,
     SIGNAL_TRACKER_SERVER_CREATE,
+    SIGNAL_TRACKER_BATCH_BEGIN,
     SIGNAL_TASK_UPDATE,
     SIGNAL_CHAT_LOG_LINE,
     SIGNAL_CONNECTION_STATE,
@@ -243,6 +244,32 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
     signals[SIGNAL_TRACKER_SERVER_CREATE] = g_signal_new (
         "tracker-server-create", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
         0, NULL, NULL, NULL, G_TYPE_NONE, 1, HX_TYPE_TRACKER_SERVER);
+
+    /* tracker-batch-begin — fires once per tracker URL right after
+     * network.c settles on a wire version (v1 vs v3) and BEFORE any
+     * tracker-server-create signals carrying records for that batch
+     * arrive. Used by the view (tracker.c) to:
+     *   - create (or recycle) a per-tracker section in the result UI
+     *   - choose which columns to show (v1 sections hide Country / Caps)
+     *   - render a "fetching N..." subtitle (expected_count is the
+     *     wire-declared total: nservers for v1, record_count for v3).
+     *
+     * Signal types are (G_TYPE_STRING, G_TYPE_UCHAR, G_TYPE_UINT):
+     * tracker_url is a NUL-terminated UTF-8 string, version is a
+     * single byte (1 or 3), and expected_count is widened from the
+     * wire's u16 to a G_TYPE_UINT here so the marshaller doesn't
+     * have to learn about a separate u16 type. View-side handlers
+     * just cast back to guint16 after reading.
+     *
+     * Multiple trackers fire sequentially (run_ctx walks the list one
+     * at a time), so the most recently emitted tracker_url is the
+     * implicit "current section" for the records that follow until
+     * the next batch-begin.
+     */
+    signals[SIGNAL_TRACKER_BATCH_BEGIN] = g_signal_new (
+        "tracker-batch-begin", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL, G_TYPE_NONE, 3,
+        G_TYPE_STRING, G_TYPE_UCHAR, G_TYPE_UINT);
 
     signals[SIGNAL_TASK_UPDATE] = g_signal_new (
         "task-update", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, NULL,
@@ -438,6 +465,17 @@ gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
                                           HxTrackerServer *event)
 {
     g_signal_emit (self, signals[SIGNAL_TRACKER_SERVER_CREATE], 0, event);
+}
+
+void
+gtkhx_session_emit_tracker_batch_begin (GtkhxSession *self,
+                                        const char *tracker_url,
+                                        guint8 version,
+                                        guint16 expected_count)
+{
+    g_signal_emit (self, signals[SIGNAL_TRACKER_BATCH_BEGIN], 0,
+                   tracker_url ? tracker_url : "",
+                   version, (guint) expected_count);
 }
 
 void
