@@ -62,13 +62,26 @@
 #include "gtkhx_log.h"   /* hx_printf_prefix prototype */
 #include "network_decode.h"
 
-/* Local copy of cipher.c's static blowfish_ofb64_crypt — used by
- * the Blowfish round-trip subtest below to encode the plaintext
- * exactly the same way production's do_encode does. Keeping this
- * here (rather than de-staticing the original) avoids broadening
- * the cipher.c surface for a test-only need. */
+/* Test-local Blowfish OFB-64 encode state + helper. Used by the
+ * Blowfish round-trip subtest below to synthesize ciphertext
+ * matching the bytes production's do_encode would emit for the
+ * same key + plaintext.
+ *
+ * Phase R1: cipher.h no longer declares a blowfish_state struct
+ * (the production state moved to opaque Rust-allocated
+ * BlowfishOfb64State). The test driver still wants byte-identical
+ * encode output and the simplest way to get it is a private inline
+ * struct + the legacy OFB-64 feedback loop here — it's the same
+ * algorithm the Rust crate runs, and the encode bytes ARE the
+ * wire-compat contract the test verifies. */
+typedef struct {
+    struct blowfish_ctx ctx;
+    uint8_t ivec[BLOWFISH_BLOCK_SIZE];
+    int num;
+} test_blowfish_state;
+
 static void
-test_blowfish_ofb64_crypt (blowfish_state *bs,
+test_blowfish_ofb64_crypt (test_blowfish_state *bs,
                            const uint8_t *src, uint8_t *dst, size_t len)
 {
     int n = bs->num;
@@ -152,13 +165,18 @@ compress_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
     return 0;
 }
 
+/* Phase R1: hmac_xxx is now a static inline in protocol.h that
+ * delegates to the Rust gtkhx_hmac_xxx. Provide a guarding stub at
+ * the Rust symbol so any path that tries to compute a real HMAC
+ * from this test (none today) fails loudly instead of pulling the
+ * Rust crate into the link surface. */
 u_int16_t
-hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
-          const void *text, u_int32_t textlen, const char *macalg)
+gtkhx_hmac_xxx (u_int8_t *md, const u_int8_t *key, u_int32_t keylen,
+                const u_int8_t *text, u_int32_t textlen, const char *macalg)
 {
     (void) md; (void) key; (void) keylen;
     (void) text; (void) textlen; (void) macalg;
-    g_error ("hmac_xxx called from test — unexpected");
+    g_error ("gtkhx_hmac_xxx called from test — unexpected");
     return 0;
 }
 
@@ -315,14 +333,13 @@ test_blowfish_round_trip (void)
     };
     guint8 cipher[22];
 
-    /* blowfish_state pairs an underlying blowfish_ctx with an
-     * 8-byte ivec + nibble counter; cipher_decode_init runs
-     * blowfish_set_key for us, but the ivec/num live in the
-     * union and must already be zeroed (which production gets
-     * from htlc_conn zero-allocation; we mirror it explicitly
-     * below). For the encode side we set up a matching fresh
-     * state and drive test_blowfish_ofb64_crypt directly. */
-    blowfish_state encode;
+    /* Encode side: drive the local Nettle-based blowfish_ofb64_crypt
+     * helper directly to produce ciphertext. The Rust crate's
+     * gtkhx_blowfish_ofb64_crypt is wire-compatible by construction,
+     * so we don't need to call it on the encode side here; the
+     * point of this test is to drive the production decode path
+     * (hx_decode → cipher_decode → Rust crypt) end-to-end. */
+    test_blowfish_state encode;
     memset (&encode, 0, sizeof (encode));
     blowfish_set_key (&encode.ctx, sizeof (key), key);
     test_blowfish_ofb64_crypt (&encode, plain, cipher, sizeof (plain));
@@ -331,12 +348,12 @@ test_blowfish_round_trip (void)
     h->cipher_decode_type    = CIPHER_BLOWFISH;
     h->cipher_decode_keylen  = sizeof (key);
     memcpy (h->cipher_decode_key, key, sizeof (key));
-    /* Blowfish state starts at OFB block boundary by zero-init —
-     * matches what htlc_conn zero allocation gives us in
-     * production. cipher_decode_init only sets the bf key
-     * schedule, not the ivec/num. */
-    memset (&h->cipher_decode_state.blowfish, 0,
-            sizeof (h->cipher_decode_state.blowfish));
+    /* Phase R1: cipher_decode_state.stream is NULL on a freshly-
+     * zeroed htlc_conn; cipher_decode_init goes through the
+     * gtkhx_blowfish_ofb64_new branch and allocates a Rust state
+     * with ivec/num at the OFB block boundary — the same starting
+     * state the pre-port code got from inline zero-init. */
+    h->cipher_decode_state.stream = NULL;
     cipher_decode_init (h);
 
     feed_read_in (h, cipher, sizeof (cipher));
@@ -345,6 +362,14 @@ test_blowfish_round_trip (void)
     g_assert_cmpuint (h->in.pos, ==, 22);
     g_assert_cmpmem (h->in.buf, 22, plain, 22);
 
+    /* Free the Rust-allocated state before tearing down the htlc so
+     * valgrind / asan don't flag a leak. */
+    extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *);
+    if (h->cipher_decode_state.stream) {
+        gtkhx_blowfish_ofb64_free (
+            (BlowfishOfb64State *) h->cipher_decode_state.stream);
+        h->cipher_decode_state.stream = NULL;
+    }
     free_test_htlc (h);
 }
 

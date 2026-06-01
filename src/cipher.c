@@ -1,25 +1,23 @@
 /*
  * Per-connection cipher state machine for the Hotline HOPE handshake.
  *
- * Crypto primitives come from Nettle. The wire protocol predates
- * common integrated cipher modes and originally asked for two things:
+ * After Phase R1 this file is a thin dispatcher: the actual
+ * cryptographic primitives live in Rust crates (rust/crates/
+ * hxcrypto-stream for Blowfish OFB-64; rust/crates/hxcrypto-aead
+ * for ChaCha20-Poly1305). The HOPE per-message rekey trick
+ * (random nibble in the header triggering N rounds of HMAC-
+ * stretching the cipher key), the AEAD-vs-STREAM mode split, and
+ * the legacy "no header marker when compression is on" carve-out
+ * stay here because they're protocol concerns, not crypto.
  *
- *   - ARC4 (RC4)            stream cipher, byte-at-a-time   [REMOVED]
- *   - Blowfish in OFB-64    block cipher run as a keystream generator
+ * RC4 was removed in claude/remove-rc4 (insecure stream cipher).
+ * Blowfish is the only stream cipher left; ChaCha20-Poly1305 takes
+ * the secure path on servers that advertise it.
  *
- * RC4 was removed in claude/remove-rc4 — see cipher.h for the
- * rationale. Blowfish is the only stream cipher left; ChaCha20-Poly1305
- * AEAD takes the secure path on servers that advertise it.
- *
- * Nettle ships ECB Blowfish but no OFB helper, so blowfish_ofb64_crypt
- * below is a tiny reimplementation of OpenSSL's BF_ofb64_encrypt: walk
- * the keystream byte-by-byte, refilling ivec by encrypting it in-place
- * every 8 bytes. Symmetric (encrypt == decrypt). The on-the-wire bytes
- * are byte-identical to what the old OpenSSL path produced — verified
- * against historical packet captures during the port.
- *
- * The HOPE rekey trick (random nibble in the header triggering N
- * rounds of HMAC-stretching the cipher key) is unchanged.
+ * Wire output is byte-identical to the pre-port Nettle (and original
+ * OpenSSL) implementations — verified against historical packet
+ * captures and against live mhxd / Janus via the Tier 3 hope_blowfish
+ * and hope_chacha20 tests.
  */
 
 #include "config.h"
@@ -38,17 +36,40 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <netinet/in.h>
-#include <nettle/blowfish.h>
 /* Deliberately avoid pulling in hx.h: hx.h transitively includes
  * session.h, which #includes <gtk/gtk.h>. cipher.c only needs the
  * wire-protocol types and helpers (struct htlc_conn, qbuf, hmac_xxx,
- * random_bytes) — all of which live in protocol.h directly. Skipping
- * hx.h lets the Tier 3 integration harness link cipher.c without
- * dragging GTK + Adwaita into the test binaries. Same pattern
- * proto_trace.c follows. */
+ * random_bytes) — all of which live in protocol.h directly. */
 #include "protocol.h"
 #include "cipher.h"
 #include "cipher_aead.h"
+
+
+/* ---- Rust FFI declarations (hxcrypto-stream) ----
+ *
+ * Hand-written rather than #include'd from a cbindgen-generated
+ * header — keeps the FFI surface obvious to anyone reading this
+ * file and avoids the build-time dance of generating headers into
+ * the meson build dir. Drift between Rust signatures and these
+ * externs would surface at link time as undefined-symbol errors,
+ * not at runtime; for opaque-pointer FFI that's enough.
+ */
+
+extern BlowfishOfb64State *gtkhx_blowfish_ofb64_new (const uint8_t *key,
+                                                     uint32_t keylen);
+extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
+extern void gtkhx_blowfish_ofb64_set_key (BlowfishOfb64State *state,
+                                          const uint8_t *key, uint32_t keylen);
+extern void gtkhx_blowfish_ofb64_crypt (BlowfishOfb64State *state,
+                                        const uint8_t *src, uint8_t *dst,
+                                        uint32_t len);
+
+/* Forward-declared rather than #include'd from network.h to keep
+ * cipher.c free of GTK / hx.h transitives — the Tier 3 integration
+ * harness re-builds this TU and pulling network.h would drag a wide
+ * link surface in. Only used for the NULL-cipher-state hard-fail
+ * path below. */
+extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
 
 #define CIPHER_DEBUG	0
@@ -75,33 +96,6 @@ writestuff (const char *str, u_int8_t type, const u_int8_t *buf, unsigned int le
 }
 #endif
 
-/*
- * Blowfish in 64-bit Output Feedback mode.
- *
- * OFB is symmetric: same routine for encrypt and decrypt. State carried
- * across calls is the 8-byte ivec (current keystream block) plus the
- * byte index `num` into that block (0..7). When `num` rolls over to
- * zero we re-encrypt ivec in place to produce the next keystream block.
- *
- * Matches OpenSSL's BF_ofb64_encrypt exactly, which is the contract
- * the wire protocol expects. Safe for in-place (src == dst).
- */
-static void
-blowfish_ofb64_crypt(blowfish_state *bs,
-                     const uint8_t *src, uint8_t *dst, size_t len)
-{
-	int n = bs->num;
-
-	while (len--) {
-		if (n == 0)
-			blowfish_encrypt(&bs->ctx, BLOWFISH_BLOCK_SIZE,
-			                 bs->ivec, bs->ivec);
-		*dst++ = *src++ ^ bs->ivec[n];
-		n = (n + 1) & 7;
-	}
-	bs->num = n;
-}
-
 u_int32_t
 cipher_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
 	       u_int32_t max, u_int32_t *inusedp)
@@ -117,8 +111,20 @@ cipher_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
 #endif
 	switch (htlc->cipher_decode_type) {
 		case CIPHER_BLOWFISH:
-			blowfish_ofb64_crypt(&htlc->cipher_decode_state.blowfish,
-			                     &in->buf[in->pos], &out->buf[out->pos], len);
+			/* NULL state means cipher_decode_init never ran or
+			 * its allocation failed; either way the output qbuf
+			 * (qbuf_set'd to `len` above) would be uninitialised
+			 * heap and the rcv loop would parse garbage. Close
+			 * the connection rather than leak garbage onto the
+			 * receive path. */
+			if (!htlc->cipher_decode_state.stream) {
+				hx_htlc_close (htlc, 0);
+				*inusedp = 0;
+				return 0;
+			}
+			gtkhx_blowfish_ofb64_crypt(
+			    (BlowfishOfb64State *)htlc->cipher_decode_state.stream,
+			    &in->buf[in->pos], &out->buf[out->pos], len);
 			break;
 		default:
 			break;
@@ -193,8 +199,19 @@ do_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 #endif
 	switch (htlc->cipher_encode_type) {
 		case CIPHER_BLOWFISH:
-			blowfish_ofb64_crypt(&htlc->cipher_encode_state.blowfish,
-			                     &htlc->out.buf[pos], &htlc->out.buf[pos], len);
+			/* NULL state on the encode path is the more dangerous
+			 * NULL: a no-op leaves plaintext in htlc->out and the
+			 * socket-write loop sends it on a connection the user
+			 * believes is HOPE-encrypted. Fail closed by tearing
+			 * down the connection before any plaintext touches the
+			 * wire. */
+			if (!htlc->cipher_encode_state.stream) {
+				hx_htlc_close (htlc, 0);
+				return;
+			}
+			gtkhx_blowfish_ofb64_crypt(
+			    (BlowfishOfb64State *)htlc->cipher_encode_state.stream,
+			    &htlc->out.buf[pos], &htlc->out.buf[pos], len);
 			break;
 		default:
 			break;
@@ -298,25 +315,38 @@ cipher_encode_init (struct htlc_conn *htlc)
 {
 	switch (htlc->cipher_encode_type) {
 		case CIPHER_BLOWFISH:
-			/* DO NOT reset ivec/num here. cipher_encode_init is
-			 * called twice in a connection's lifetime: at post-
-			 * Step-2 setup (where the blowfish_state union was
-			 * already zero-initialised when htlc was allocated,
-			 * so ivec/num start at the OFB block boundary
-			 * naturally), and again from cipher_change_encode_key
-			 * every time the legacy HOPE per-message rekey marker
-			 * fires (~3/16 of outgoing messages). The wire
-			 * contract for the rekey case is "rotate the key
-			 * schedule, KEEP the OFB ivec/num where they are" —
-			 * mhxd's cipher_encode_init does the same (just
-			 * BF_set_key, no memset). The early Nettle-port
-			 * revision of this file added a memset here as
-			 * defensive scrubbing; it desynced the cipher state
-			 * every rekey, which the new Tier 3 test_hope_
-			 * blowfish caught against mhxd. */
-			blowfish_set_key(&htlc->cipher_encode_state.blowfish.ctx,
-			                 htlc->cipher_encode_keylen,
-			                 htlc->cipher_encode_key);
+			/* Re-key WITHOUT resetting the OFB ivec/num.
+			 *
+			 * cipher_encode_init is called twice in a
+			 * connection's lifetime: at post-Step-2 setup (where
+			 * the union was just zero-initialised — the .stream
+			 * pointer is NULL, so we go through the
+			 * gtkhx_blowfish_ofb64_new branch and the freshly-
+			 * allocated state starts with ivec/num at the OFB
+			 * block boundary), and again from
+			 * cipher_change_encode_key every time the legacy
+			 * HOPE per-message rekey marker fires (~3/16 of
+			 * outgoing messages). The wire contract for the
+			 * rekey case is "rotate the key schedule, KEEP the
+			 * OFB ivec/num where they are" — mhxd does the same.
+			 * gtkhx_blowfish_ofb64_set_key only rotates the key
+			 * schedule, leaving ivec/num intact, so the existing
+			 * state pointer path is the correct shape. An early
+			 * Nettle-port revision added a memset of ivec/num
+			 * here as defensive scrubbing; it desynced the
+			 * cipher state every rekey, which the Tier 3
+			 * test_hope_blowfish caught against mhxd. Don't
+			 * reintroduce that. */
+			if (htlc->cipher_encode_state.stream) {
+				gtkhx_blowfish_ofb64_set_key(
+				    (BlowfishOfb64State *)htlc->cipher_encode_state.stream,
+				    htlc->cipher_encode_key,
+				    htlc->cipher_encode_keylen);
+			} else {
+				htlc->cipher_encode_state.stream =
+				    gtkhx_blowfish_ofb64_new(htlc->cipher_encode_key,
+				                             htlc->cipher_encode_keylen);
+			}
 			break;
 		default:
 			break;
@@ -329,13 +359,22 @@ cipher_decode_init (struct htlc_conn *htlc)
 	switch (htlc->cipher_decode_type) {
 		case CIPHER_BLOWFISH:
 			/* See cipher_encode_init above for why we don't
-			 * memset ivec/num here. */
-			blowfish_set_key(&htlc->cipher_decode_state.blowfish.ctx,
-			                 htlc->cipher_decode_keylen,
-			                 htlc->cipher_decode_key);
+			 * memset ivec/num here, and why we go through the
+			 * new-vs-set_key branch. Same contract on the
+			 * decode side — both peers compute the same
+			 * keystream from the same shared key. */
+			if (htlc->cipher_decode_state.stream) {
+				gtkhx_blowfish_ofb64_set_key(
+				    (BlowfishOfb64State *)htlc->cipher_decode_state.stream,
+				    htlc->cipher_decode_key,
+				    htlc->cipher_decode_keylen);
+			} else {
+				htlc->cipher_decode_state.stream =
+				    gtkhx_blowfish_ofb64_new(htlc->cipher_decode_key,
+				                             htlc->cipher_decode_keylen);
+			}
 			break;
 		default:
 			break;
 	}
 }
-

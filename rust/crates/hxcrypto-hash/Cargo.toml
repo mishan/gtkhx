@@ -1,0 +1,17 @@
+[package]
+name = "hxcrypto-hash"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "HMAC/hash primitives for GtkHx — replaces src/hmac.c"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+digest = "0.10"

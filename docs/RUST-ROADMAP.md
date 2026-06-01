@@ -174,7 +174,49 @@ CI passes Tiers 1, 2, and 3.
 
 ---
 
-## Phase R1 — Crypto primitives → Rust
+## Phase R1 — Crypto primitives → Rust ✅
+
+**Status:** Done. Shipped on `claude/phase-r1` (six commits, no squash).
+The four target crates — `hxcrypto-hash`, `hxcrypto-stream`, `hxcrypto-aead`,
+and `hxcompress` — are wired through `rust/Cargo.toml` and `rust/meson.build`,
+and each replaces its C counterpart with a thin dispatcher. `src/hmac.c` is
+deleted; `src/cipher.c`, `src/cipher_aead.c`, and `src/compress.c` survive
+only as forwarders that preserve the legacy C API for callers. The C-side
+hand-declared `extern` blocks at each FFI boundary catch signature drift at
+link time (the cbindgen-generated headers from R0 weren't actually included
+by C code; the Phase R1 crates skip cbindgen entirely to avoid the build
+machinery for an unused output).
+
+Notes worth carrying forward:
+
+- **Rust crate panics weren't on the bug ladder before R1 review.** The
+  initial extraction had `BlowfishOfb64State::new` / `set_key` panicking on
+  invalid key length and `gtkhx_compress_encoder_new` `.expect()`-ing on
+  zstd init failure — both turn a malformed server reply into a client
+  abort. Both fixed in R1: `Option<Self>` / `bool` from Rust, NULL from the
+  FFI, C dispatcher fails closed.
+- **AEAD ABI is asserted at compile time on both sides.** `cipher.h`'s
+  `_Static_assert(sizeof(chacha_aead_state) == 48, ...)` pairs with the
+  Rust crate's `const _: () = assert!(size_of::<AeadState>() == 48, ...)`.
+  Field reorder on either side trips a build error rather than a
+  misalignment at decrypt time.
+- **Blowfish rollback uses snapshot-state, not state-clone.** Earlier
+  drafts of the migration cloned the whole Rust BlowfishOfb64State on every
+  speculative cipher_decode (a ~4 KiB key-schedule allocation per Hotline
+  transaction). The shipped version exposes
+  `gtkhx_blowfish_ofb64_{save,restore}_state` and snapshots only the 9-byte
+  OFB feedback state into a stack buffer.
+- **Legacy `key||text` hash branches are pinned byte-for-byte.** The
+  `hxcrypto-hash` crate has three Tier 1 tests asserting the
+  hand-computed digest output of `SHA1("keytext")`, `MD5("keytext")`, and
+  `SHA256("keytext")` — so a future "consistency fix" can't quietly
+  rewrite the branch into RFC 2104 HMAC and silently break HOPE login
+  against legacy servers.
+- **License compatibility.** Every Rust dep pulled into the Phase R1
+  crates (RustCrypto family, `hkdf`, `flate2`, `lz4_flex`, `zstd`) is MIT
+  or Apache-2.0 — GPL-2.0-or-later compatible.
+
+The original goal text follows for reference.
 
 **Goal:** Every byte of crypto in the running binary comes from Rust. The
 HOPE handshake, the per-packet cipher, the HMAC challenge/response, and the

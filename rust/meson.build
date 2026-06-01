@@ -3,11 +3,20 @@
 #
 # Strategy: a custom_target runs `cargo build --release` with the target
 # directory inside the Meson build dir. The output is the static library
-# archive(s) that src/meson.build links into the gtkhx executable.
+# archives that src/meson.build links into the gtkhx executable.
 #
-# The cbindgen-generated header (hxrand.h) lands at
-#   <rust_target_dir>/release/include/hxrand.h
-# which src/meson.build picks up via an include_directories() declaration.
+# Phase R1 introduced four crypto/compression crates alongside hxrand:
+#   hxcrypto-hash   — HMAC/MD5/SHA1/SHA256 (replaces src/hmac.c)
+#   hxcrypto-stream — Blowfish OFB-64 (replaces src/cipher.c primitives)
+#   hxcrypto-aead   — ChaCha20-Poly1305 + HKDF-SHA256 (replaces
+#                     src/cipher_aead.c primitives)
+#   hxcompress      — GZIP / LZ4 / ZSTD streaming (replaces src/compress.c)
+#
+# Each crate is a staticlib that the C side wraps with a thin dispatcher.
+# FFI signatures are hand-declared `extern` blocks in the relevant C TU
+# rather than cbindgen-generated headers — drift surfaces at link time
+# as undefined symbols, which is enough for opaque-pointer APIs and
+# keeps the build simpler.
 
 cargo = find_program('cargo')
 
@@ -17,16 +26,25 @@ rust_sources = files(
   'crates/hxrand/build.rs',
   'crates/hxrand/cbindgen.toml',
   'crates/hxutil/src/lib.rs',
+  'crates/hxcrypto-hash/src/lib.rs',
+  'crates/hxcrypto-stream/src/lib.rs',
+  'crates/hxcrypto-stream/src/blowfish_ofb.rs',
+  'crates/hxcrypto-aead/src/lib.rs',
+  'crates/hxcompress/src/lib.rs',
   'Cargo.toml',
   'crates/hxrand/Cargo.toml',
   'crates/hxutil/Cargo.toml',
+  'crates/hxcrypto-hash/Cargo.toml',
+  'crates/hxcrypto-stream/Cargo.toml',
+  'crates/hxcrypto-aead/Cargo.toml',
+  'crates/hxcompress/Cargo.toml',
 )
 
 rust_target_dir = meson.project_build_root() / 'rust-target'
 
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
-# archives and generated headers under rust_target_dir/release/.
+# archives under rust_target_dir/release/.
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',
@@ -43,16 +61,52 @@ rust_build = custom_target('rust-workspace',
   console : true,
 )
 
-# Create a dependency object for the Rust hxrand library.
-# Use compile_args for the include path since the generated headers live
-# in the build directory (include_directories() rejects absolute paths).
+# hxrand is still wired through its own cbindgen-generated header
+# (rust_target_dir/release/include/hxrand.h) — Phase R0 set that up
+# and the C side already does `#include "hxrand.h"`. Keep the include
+# path on the dep so consumers don't need to know.
 rust_hxrand_dep = declare_dependency(
   sources : rust_build,
-  compile_args : [
-    '-I' + rust_target_dir / 'release' / 'include',
-  ],
+  compile_args : ['-I' + rust_target_dir / 'release' / 'include'],
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxrand',
+  ],
+)
+
+# Crypto hash (Phase R1; will replace src/hmac.c when wired through).
+rust_hxcrypto_hash_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_hash',
+  ],
+)
+
+# Stream cipher (Phase R1; will replace src/cipher.c Blowfish path
+# when wired through).
+rust_hxcrypto_stream_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_stream',
+  ],
+)
+
+# AEAD (Phase R1; will replace src/cipher_aead.c when wired through).
+rust_hxcrypto_aead_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcrypto_aead',
+  ],
+)
+
+# Compression (Phase R1; will replace src/compress.c when wired through).
+rust_hxcompress_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcompress',
   ],
 )

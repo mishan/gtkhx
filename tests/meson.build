@@ -18,12 +18,16 @@ test_deps = [
   gtk_dep,
 ]
 
-# Tests that include protocol.h need cipher / compress headers via
-# nettle and zlib. Kept separate from test_deps so pure-GLib tests
-# (hl_access, text_util) don't pull in unnecessary link args.
+# Tier 2/3 tests link a couple of source files that still use
+# Nettle's blowfish_set_key / blowfish_encrypt directly from the
+# test-side to synthesize ciphertext for round-trip checks (the
+# production decode path now goes through the Rust hxcrypto-stream
+# crate). Nettle stays here so those tests still find the symbols;
+# Phase R1 already moved the crypto primitives (hash, stream
+# cipher, AEAD, compression) to Rust crates, so neither protocol.h
+# nor compress.h pull C-library cipher headers anymore.
 proto_test_deps = test_deps + [
   nettle_dep,
-  zlib_dep,
 ]
 
 test_inc = include_directories('../src')
@@ -100,15 +104,16 @@ test_text_sanitisers = executable('test_text_sanitisers',
 test('text_sanitisers', test_text_sanitisers,
      suite : 'unit')
 
-# hmac — the HOPE handshake's MAC dispatcher. RFC 2104 / RFC 2202
-# canonical vectors for the HMAC-prefixed branches; cross-checked
-# GChecksum hand-computed digests for the legacy unprefixed key||text
-# branches. hmac.c is a thin GChecksum / GHmac wrapper, so this
-# really tests the dispatch glue + GLib's primitives.
+# hmac — the HOPE handshake's MAC dispatcher. Phase R1 moved the
+# implementation to Rust (rust/crates/hxcrypto-hash); protocol.h
+# now exposes hmac_xxx as a static inline that delegates to
+# gtkhx_hmac_xxx. This binary still tests the dispatch glue + the
+# RFC 2104 / RFC 2202 canonical vectors + the legacy unprefixed
+# key||text construction; the test's call sites are unchanged
+# because the shim preserves the signature.
 test_hmac = executable('test_hmac',
   'unit/test_hmac.c',
-  '../src/hmac.c',
-  dependencies        : proto_test_deps,
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
   include_directories : test_inc,
 )
 test('hmac', test_hmac,
@@ -199,6 +204,21 @@ test_bookmark_cipher = executable('test_bookmark_cipher',
   include_directories : test_inc,
 )
 test('bookmark_cipher', test_bookmark_cipher,
+     suite : 'unit')
+
+# compress_bufsize — Phase R1 round 3 fix for the
+# compress_encode_bufsize overflow guard. Pins that the function
+# returns 0 when 2*len + 1024 would overflow u32 (rather than
+# wrapping around silently and producing an undersized allocation).
+# compress_encode_bufsize is defined `static inline` in compress.h
+# specifically so this test can drive it without linking compress.c
+# (which transitively pulls GTK via hx.h).
+test_compress_bufsize = executable('test_compress_bufsize',
+  'unit/test_compress_bufsize.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('compress_bufsize', test_compress_bufsize,
      suite : 'unit')
 
 # task_hash — the Phase 1.1 GLib-collections migration replaced the
@@ -826,16 +846,16 @@ test('msg_event', test_msg_event,
 # chain (password_mac → encode_key → decode_key) with SHA-256
 # KAT vectors, LOGIN field encoding (XOR vs. HMAC variants),
 # session-key IP:port validation. Compiles hope.c, algo_list.c,
-# hmac.c, and hl_code.c in directly — none of which need GTK or
-# Adwaita, so the test binary stays self-contained the way the
-# rest of Tier 2 does.
+# and hl_code.c in directly; hmac_xxx is the Rust hxcrypto-hash
+# crate now (Phase R1), wired via rust_hxcrypto_hash_dep — none of
+# the linked source files need GTK or Adwaita, so the test binary
+# stays self-contained the way the rest of Tier 2 does.
 test_hope = executable('test_hope',
   'proto/test_hope.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/hl_code.c',
-  dependencies        : proto_test_deps,
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
   include_directories : proto_test_inc,
 )
 test('hope', test_hope,
@@ -850,7 +870,7 @@ test_aead = executable('test_aead',
   'proto/test_aead.c',
   '../src/cipher_aead.c',
   '../src/debug.c', # cipher_aead's debug_log() trace hooks
-  dependencies        : proto_test_deps + [dependency('nettle')],
+  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
   include_directories : proto_test_inc,
 )
 test('aead', test_aead,
@@ -870,7 +890,7 @@ test_htxf_io = executable('test_htxf_io',
   '../src/htxf_io.c',
   '../src/cipher_aead.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [dependency('nettle')],
+  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
   include_directories : proto_test_inc,
 )
 test('htxf_io', test_htxf_io,
@@ -893,7 +913,14 @@ test_network_decode = executable('test_network_decode',
   '../src/cipher_aead.c',
   '../src/qbuf.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [dependency('nettle'), rust_hxrand_dep],
+  # Nettle's blowfish_set_key / blowfish_encrypt come in via
+  # proto_test_deps's nettle_dep already; the test driver uses
+  # them directly on the encode side to synthesize ciphertext
+  # (production's decode path runs through the Rust crate via
+  # rust_hxcrypto_stream_dep).
+  dependencies        : proto_test_deps + [rust_hxrand_dep,
+                                           rust_hxcrypto_aead_dep,
+                                           rust_hxcrypto_stream_dep],
   include_directories : proto_test_inc,
 )
 test('network_decode', test_network_decode,
@@ -954,12 +981,18 @@ integration_harness_lib = static_library(
   # brings the stream-cipher (Blowfish OFB-64) seal/open + the
   # HMAC-chained rekey rotation that mirrors production's
   # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
-  # hxrand crate via rust_hxrand_dep; hope.c brings the HMAC chain +
-  # chunk walker; algo_list.c / hmac.c are their transitive deps. All are pure functions (Nettle + glib only — cipher.c's
-  # hx.h → protocol.h swap landed alongside this), so pulling them in
-  # costs the harness nothing in link surface — and lets the
-  # HOPE+stream Tier 3 tests drive the same secure-login + cipher
-  # state machine production uses.
+  # hxrand crate via rust_hxrand_dep; hmac_xxx is provided by the Rust
+  # hxcrypto-hash crate via rust_hxcrypto_hash_dep (Phase R1; the C
+  # symbol is hmac_xxx, an inline shim in protocol.h that delegates
+  # to gtkhx_hmac_xxx); hope.c brings the HMAC chain + chunk walker;
+  # algo_list.c is its transitive dep. After Phase R1 the crypto
+  # primitives all come from Rust crates (rust_hxcrypto_{hash,
+  # stream,aead}_dep below); cipher.c / cipher_aead.c / hope.c
+  # survive as thin C dispatchers + protocol state machines that
+  # only need glib at link time. The harness still links the C
+  # source files (not just calls the FFI) so the Tier 3 HOPE+stream
+  # tests drive the same dispatch and rekey state machine
+  # production uses.
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/htxf_io.c',
@@ -967,9 +1000,8 @@ integration_harness_lib = static_library(
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep],
+  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1049,7 +1081,6 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_event.c',
@@ -1057,7 +1088,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
+  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1119,7 +1150,6 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/qbuf.c',
   '../src/hope.c',
   '../src/algo_list.c',
-  '../src/hmac.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_event.c',
@@ -1127,7 +1157,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [lz4_dep, zstd_dep, rust_hxrand_dep],
+  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate

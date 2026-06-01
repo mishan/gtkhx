@@ -59,6 +59,12 @@
 #include "banner.h"
 #include "debug.h"
 #include "cipher_aead.h"
+#include "cipher.h"
+
+/* Phase R1: Rust FFI for the Blowfish OFB-64 state — only used here
+ * to free the state on hx_htlc_close. cipher.c owns the alloc and
+ * crypt FFI. */
+extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
 #include "login_packet.h"
 #include "agreement_packet.h"
 #include "hl_code.h"
@@ -335,6 +341,21 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     memset (htlc->cipher_encode_key, 0, sizeof (htlc->cipher_encode_key));
     memset (htlc->cipher_decode_key, 0, sizeof (htlc->cipher_decode_key));
+    /* Phase R1: the Blowfish state lives behind an opaque pointer
+     * allocated by rust/crates/hxcrypto-stream. Free it before
+     * zeroing the union so the heap allocation isn't leaked.
+     * AEAD state is inline in the union (no heap), so the memset
+     * below still cleans that up. */
+    if (htlc->cipher_encode_type == CIPHER_BLOWFISH
+        && htlc->cipher_encode_state.stream) {
+        gtkhx_blowfish_ofb64_free (
+            (BlowfishOfb64State *) htlc->cipher_encode_state.stream);
+    }
+    if (htlc->cipher_decode_type == CIPHER_BLOWFISH
+        && htlc->cipher_decode_state.stream) {
+        gtkhx_blowfish_ofb64_free (
+            (BlowfishOfb64State *) htlc->cipher_decode_state.stream);
+    }
     memset (&htlc->cipher_encode_state, 0, sizeof (htlc->cipher_encode_state));
     memset (&htlc->cipher_decode_state, 0, sizeof (htlc->cipher_decode_state));
     htlc->cipher_encode_type = 0;
@@ -3113,6 +3134,17 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
+        /* compress_encode fails closed via hx_htlc_close when the
+         * Rust codec can't produce output — see the comment block in
+         * src/compress.c::compress_encode for the rationale. Once
+         * the connection is torn down, htlc->fd is zero and any
+         * further cipher_encode call would operate on a stale buffer
+         * that the socket-write loop will never flush. Skip out of
+         * the rest of this send so we don't pretend to send a
+         * message we couldn't compress. */
+        if (!htlc->fd) {
+            return;
+        }
     }
     if (htlc->cipher_encode_type != CIPHER_NONE) {
         cipher_encode (htlc, this_off, len);
@@ -3171,6 +3203,17 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
+        /* compress_encode fails closed via hx_htlc_close when the
+         * Rust codec can't produce output — see the comment block in
+         * src/compress.c::compress_encode for the rationale. Once
+         * the connection is torn down, htlc->fd is zero and any
+         * further cipher_encode call would operate on a stale buffer
+         * that the socket-write loop will never flush. Skip out of
+         * the rest of this send so we don't pretend to send a
+         * message we couldn't compress. */
+        if (!htlc->fd) {
+            return;
+        }
     }
     if (htlc->cipher_encode_type != CIPHER_NONE) {
         cipher_encode (htlc, this_off, len);
