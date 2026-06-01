@@ -43,7 +43,6 @@ gtkhx_sources = files(
   'hl_code.c',
   'hl_date.c',
   'human_readable.c',
-  'hmac.c',
   'log.c',
   'login_packet.c',
   'agreement_packet.c',
@@ -177,7 +176,7 @@ gtkhx_resources = gnome.compile_resources(
 executable('gtkhx',
   gtkhx_sources,
   gtkhx_resources,
-  dependencies        : deps + [rust_hxrand_dep],
+  dependencies        : deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
   include_directories : include_directories('.'),
   install             : true,
 )

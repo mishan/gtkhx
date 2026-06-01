@@ -432,11 +432,29 @@ extern int task_inerror (struct htlc_conn *htlc);
 #define COMPLETE_LS_R 2
 #define COMPLETE_GET_R 3
 
-/* ---- Crypto helpers (implementations in hmac.c / rand via Rust) ----- */
+/* ---- Crypto helpers (implementations in Rust crates) ---- */
 
-extern u_int16_t hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
-                           const void *text, u_int32_t textlen,
-                           const char *macalg);
+/* hmac_xxx() is implemented in Rust (rust/crates/hxcrypto-hash);
+ * the C symbol is gtkhx_hmac_xxx. This static inline keeps the
+ * legacy call sites compiling without renaming and translates the
+ * void * key/text args to the u8 * the Rust FFI takes. The shim
+ * sits in protocol.h (rather than a new hmac.h) so every TU that
+ * already includes protocol.h for the wire types picks it up
+ * automatically. */
+extern u_int16_t gtkhx_hmac_xxx (u_int8_t *md,
+                                 const u_int8_t *key, u_int32_t keylen,
+                                 const u_int8_t *text, u_int32_t textlen,
+                                 const char *macalg);
+
+static inline u_int16_t
+hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
+          const void *text, u_int32_t textlen, const char *macalg)
+{
+    return gtkhx_hmac_xxx (md,
+                           (const u_int8_t *) key, keylen,
+                           (const u_int8_t *) text, textlen,
+                           macalg);
+}
 
 /* random_bytes() is now implemented in Rust (rust/crates/hxrand/).
  * The C symbol is gtkhx_random_bytes(); this inline keeps call sites

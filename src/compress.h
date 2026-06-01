@@ -5,15 +5,14 @@
 #include "config.h"
 
 #include <sys/types.h> /* u_int32_t */
-#include <zlib.h>
-#ifdef HAVE_LZ4
-#include <lz4frame.h>
-#endif
-#ifdef HAVE_ZSTD
-#include <zstd.h>
-#endif
 
 /* HOPE-Secure-Login transport compression algorithms.
+ *
+ * Phase R1 moved the codec implementations to Rust
+ * (rust/crates/hxcompress). This header keeps the numeric IDs
+ * aligned with the wire-protocol negotiation and exposes a single
+ * opaque pointer so htlc_conn can carry the per-direction codec
+ * state without naming the Rust types.
  *
  *   GZIP — zlib (RFC 1950). Despite the name, NOT gzip (RFC 1952).
  *          Uses deflateInit/inflateInit with Z_SYNC_FLUSH per chunk.
@@ -28,25 +27,22 @@
  *
  * IDs match the order they were added to the protocol family — the
  * value isn't observable on the wire (the name string is what we
- * negotiate), so renumber-safe. */
+ * negotiate), so renumber-safe. The Rust crate has matching
+ * constants; the FFI takes the algorithm ID by value rather than
+ * reaching into a shared enum. */
 #define COMPRESS_NONE 0
 #define COMPRESS_GZIP 1
 #define COMPRESS_LZ4 2
 #define COMPRESS_ZSTD 3
 
+/* Per-direction codec state. The pointer is opaque on the C side
+ * — gtkhx_compress_{encoder,decoder}_new returns it, the
+ * encode/decode FFI takes it, and gtkhx_compress_{encoder,decoder}
+ * _free destroys it. compress.c knows the actual Rust type
+ * (CompressEncoder / CompressDecoder) via the cast inside the
+ * dispatch. */
 union compress_state {
-    z_stream stream;
-#ifdef HAVE_LZ4
-    /* LZ4 frame format separates compression and decompression
-	 * contexts. The htlc has one decode union and one encode union;
-	 * only the field for the active direction is meaningful. */
-    LZ4F_cctx *lz4_cctx;
-    LZ4F_dctx *lz4_dctx;
-#endif
-#ifdef HAVE_ZSTD
-    ZSTD_CCtx *zstd_cctx;
-    ZSTD_DCtx *zstd_dctx;
-#endif
+    void *ctx;
 };
 
 struct htlc_conn;
@@ -68,6 +64,27 @@ extern void compress_decode_end (struct htlc_conn *htlc);
  * by rcv.c when applying the server's algorithm selection from
  * the HOPE Step 2 reply. */
 extern u_int16_t compress_id_from_name (const char *name);
+
+/* Worst-case output buffer size for compress_encode on an input of
+ * `len` bytes. Computes `2 * len + 1024` in u64 internally;
+ * returns 0 if the u32 result would overflow (any len > ~2 GiB).
+ * Defined `static inline` here so the Tier 1 test in
+ * tests/unit/test_compress_bufsize.c can drive the overflow guard
+ * without linking compress.c (which transitively pulls GTK via
+ * hx.h). Production callers in compress.c get the same body
+ * inlined and check the 0-return before allocating. */
+#include <stdint.h>
+static inline u_int32_t
+compress_encode_bufsize (u_int32_t len)
+{
+    /* 64-bit accumulator so the u32 result's overflow case is
+     * detectable rather than wrap-around-silently. */
+    uint64_t bound = 2ULL * (uint64_t) len + 1024ULL;
+    if (bound > (uint64_t) 0xffffffffu) {
+        return 0;
+    }
+    return (u_int32_t) bound;
+}
 
 
 #endif

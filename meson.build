@@ -161,7 +161,6 @@ deps = [
   adw_dep,
   glib_dep,
   gthread_dep,
-  zlib_dep,
   nettle_dep,
   threads_dep,
   gsound_dep,
@@ -169,12 +168,19 @@ deps = [
   poppler_dep,
   sourceview_dep,
   imagemagick_dep,
-  lz4_dep,
-  zstd_dep,
   intl_dep,
   dl_dep,
   math_dep,
 ]
+
+# Phase R1: zlib, liblz4, and libzstd are no longer linked into the
+# main binary — the HOPE transport compression dispatcher moved to
+# the Rust hxcompress crate (rust/crates/hxcompress) which bundles
+# flate2 + lz4_flex + zstd internally. The lz4_dep / zstd_dep /
+# zlib_dep handles above are still declared (they're useful for the
+# version-info banner below, and a couple of Tier 3 integration test
+# executables still link the legacy C-side decompressor stubs while
+# Phase R1 lands).
 
 # -----------------------------------------------------------------------------
 # Subdirs

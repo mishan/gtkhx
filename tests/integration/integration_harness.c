@@ -77,6 +77,28 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 "integration_send_* helper instead.");
 }
 
+/* Phase R1: cipher.c's NULL-state fail-closed paths call
+ * hx_htlc_close to tear the connection down rather than encrypt
+ * with an uninitialised state. Production wires that to network.c;
+ * the integration harness needs its own stub for the Tier 3
+ * binaries that link cipher.c without network.c. Test harness
+ * behaviour: g_critical (visible failure) and zero htlc->fd so any
+ * subsequent integration_send/recv loop terminates. Tests that DO
+ * link network.c (test_integration_real_connect, real_tls) get the
+ * real symbol and skip this stub via the link-order resolution. */
+extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
+__attribute__((weak)) void
+hx_htlc_close (struct htlc_conn *htlc, int expected)
+{
+    (void) expected;
+    g_critical ("hx_htlc_close called from a Tier 3 binary — "
+                "cipher.c hit a NULL-state fail-closed path, which "
+                "shouldn't happen with valid test fixtures");
+    if (htlc) {
+        htlc->fd = 0;
+    }
+}
+
 int
 hx_integration_connect_to (const char *host, int port, int timeout_ms)
 {

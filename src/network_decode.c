@@ -35,6 +35,17 @@
 #include "gtkhx_log.h"    /* hx_printf_prefix + INFOPREFIX forward-decls */
 #include "network_decode.h"
 
+/* Phase R1: Blowfish save/restore for the rollback path below.
+ * Snapshots the 9-byte OFB feedback state (ivec + num) rather than
+ * cloning the full key schedule — see the comment in hx_decode for
+ * the rationale. */
+extern void gtkhx_blowfish_ofb64_save_state (const BlowfishOfb64State *state,
+                                             uint8_t *out_ivec,
+                                             uint32_t *out_num);
+extern void gtkhx_blowfish_ofb64_restore_state (BlowfishOfb64State *state,
+                                                const uint8_t *ivec,
+                                                uint32_t num);
+
 u_int32_t
 hx_aead_pump_frames (struct htlc_conn *htlc)
 {
@@ -197,11 +208,61 @@ hx_decode (struct htlc_conn *htlc)
         max = 0xffffffff;
     } else
         max = htlc->in.len;
+    /* Phase R1 rollback snapshot for the Blowfish path.
+     *
+     * The rollback fires when compress_decode consumes fewer bytes
+     * than cipher_decode produced — we need to un-do the speculative
+     * Blowfish OFB advance and re-run cipher_decode with the smaller
+     * count. Before Phase R1 the cipher_state union held an inline
+     * blowfish_state, so a stack-local copy + memcpy-back was enough.
+     * Now the union holds a pointer to a Rust-allocated
+     * BlowfishOfb64State; copying the pointer back doesn't restore
+     * the state behind it (the same allocation has had its ivec/num
+     * advanced through the pointer).
+     *
+     * Snapshot the OFB feedback state (8-byte ivec + 1-byte num)
+     * into a 9-byte stack buffer via the
+     * gtkhx_blowfish_ofb64_save_state FFI, then restore via
+     * gtkhx_blowfish_ofb64_restore_state on the rollback branch.
+     * The key schedule doesn't change during a single
+     * speculative-decode-then-rollback, so saving + restoring the
+     * full ~4 KiB key schedule (an earlier draft of the migration
+     * did a heap clone here) would be wasted work on every
+     * transaction. */
+    uint8_t  saved_bf_ivec[8] = { 0 };
+    uint32_t saved_bf_num     = 0;
+    int      saved_bf_valid   = 0;
     if (htlc->cipheralg[0] && htlc->cipher_decode_type != CIPHER_NONE) {
-        memcpy (&cipher_state, &htlc->cipher_decode_state,
-                sizeof (cipher_state));
+        if (htlc->cipher_decode_type == CIPHER_BLOWFISH
+            && htlc->cipher_decode_state.stream) {
+            gtkhx_blowfish_ofb64_save_state (
+                (const BlowfishOfb64State *) htlc->cipher_decode_state.stream,
+                saved_bf_ivec, &saved_bf_num);
+            saved_bf_valid = 1;
+        } else {
+            /* AEAD never reaches here in production (the
+             * hx_aead_pump_frames branch above returns first), and
+             * CIPHER_NONE is caught by the outer if. Defensive
+             * fallback: copy the union by value, matching the
+             * pre-R1 shape so a hypothetical inline-state cipher
+             * still rolls back cleanly. */
+            memcpy (&cipher_state, &htlc->cipher_decode_state,
+                    sizeof (cipher_state));
+        }
         out = &cipher_out;
         len = cipher_decode (htlc, out, in, max, &inused);
+        /* Phase R1: cipher_decode can call hx_htlc_close on a NULL
+         * Blowfish state (insurance against the never-init'd-state
+         * footgun). hx_htlc_close zeros htlc->fd; bail before doing
+         * any more decode/rollback work that would operate on a
+         * torn-down connection. Free cipher_out so the qbuf
+         * allocation doesn't leak on this early-exit path. */
+        if (!htlc->fd) {
+            if (cipher_out.buf) {
+                g_free (cipher_out.buf);
+            }
+            return 0;
+        }
     } else
         if (htlc->compress_decode_type == COMPRESS_NONE)
     {
@@ -226,8 +287,14 @@ hx_decode (struct htlc_conn *htlc)
     memcpy (&htlc->in.buf[htlc->in.pos], &out->buf[out->pos], len);
     if (r != inused) {
         if (htlc->cipher_decode_type != CIPHER_NONE) {
-            memcpy (&htlc->cipher_decode_state, &cipher_state,
-                    sizeof (cipher_state));
+            if (saved_bf_valid) {
+                gtkhx_blowfish_ofb64_restore_state (
+                    (BlowfishOfb64State *) htlc->cipher_decode_state.stream,
+                    saved_bf_ivec, saved_bf_num);
+            } else {
+                memcpy (&htlc->cipher_decode_state, &cipher_state,
+                        sizeof (cipher_state));
+            }
             cipher_decode (htlc, &cipher_out, in, inused, &inused);
         }
         memmove (&in->buf[0], &in->buf[inused], r - inused);

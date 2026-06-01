@@ -3,4 +3,8 @@ resolver = "2"
 members = [
     "crates/hxutil",
     "crates/hxrand",
+    "crates/hxcrypto-hash",
+    "crates/hxcrypto-stream",
+    "crates/hxcrypto-aead",
+    "crates/hxcompress",
 ]
