@@ -17,6 +17,19 @@
  * Connect button hand event->address verbatim to hx_connect,
  * whose getaddrinfo accepts every form transparently. */
 extern void tracker_server_create (HxTrackerServer *event);
+
+/* Set up the per-tracker section for the upcoming batch of records.
+ * network.c emits this signal once after the v1/v3 wire version is
+ * known and BEFORE any tracker_server_create calls land for that
+ * batch — see gtkhx_session_emit_tracker_batch_begin's docs. The
+ * view creates (or finds) a section for `tracker_url`, sets it as
+ * the current sink for records, and chooses which columns to show
+ * (v1 sections suppress Country / Caps since v1 records can never
+ * carry the TLV-backed metadata). `expected_count` is the wire-
+ * declared total; the view renders it in the section's subtitle. */
+extern void tracker_batch_begin (const char *tracker_url, guint8 version,
+                                 guint16 expected_count);
+
 extern void create_tracker_window (GtkWidget *widget, gpointer data);
 extern void tracker_clear (void);
 extern void tracker_kill_threads (void);

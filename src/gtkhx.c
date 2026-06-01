@@ -1169,13 +1169,13 @@ on_chat_subject_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 
 static void
 on_chat_history_batch_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                              guint cid, gpointer entries_p,
-                              gboolean has_more, gpointer user_data)
+                              guint cid, gpointer entries_p, gboolean has_more,
+                              gpointer user_data)
 {
     GPtrArray *entries = entries_p;
-    (void) emitter;
-    (void) user_data;
-    output_chat_history_batch (htlc, (guint32) cid, entries, has_more);
+    (void)emitter;
+    (void)user_data;
+    output_chat_history_batch (htlc, (guint32)cid, entries, has_more);
 }
 
 static void
@@ -1439,6 +1439,16 @@ on_tracker_server_create_signal (GtkhxSession *emitter, HxTrackerServer *event,
 }
 
 static void
+on_tracker_batch_begin_signal (GtkhxSession *emitter, const char *tracker_url,
+                               guchar version, guint expected_count,
+                               gpointer user_data)
+{
+    (void)emitter;
+    (void)user_data;
+    tracker_batch_begin (tracker_url, (guint8)version, (guint16)expected_count);
+}
+
+static void
 on_task_update_signal (GtkhxSession *emitter, gpointer sess, gpointer tsk,
                        gpointer user_data)
 {
@@ -1543,6 +1553,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_xfer_destroyed_signal), NULL);
     g_signal_connect (emitter, "tracker-server-create",
                       G_CALLBACK (on_tracker_server_create_signal), NULL);
+    g_signal_connect (emitter, "tracker-batch-begin",
+                      G_CALLBACK (on_tracker_batch_begin_signal), NULL);
     g_signal_connect (emitter, "task-update",
                       G_CALLBACK (on_task_update_signal), NULL);
     g_signal_connect (emitter, "chat-log-line",

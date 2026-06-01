@@ -178,6 +178,19 @@ void gtkhx_session_emit_xfer_destroyed (GtkhxSession *self, session *sess,
  * want to keep the event past return take a ref. */
 void gtkhx_session_emit_tracker_server_create (GtkhxSession *self,
                                                HxTrackerServer *event);
+
+/* tracker-batch-begin — emitted once per tracker URL right after
+ * network.c settles on a wire version, BEFORE any records for
+ * that batch land. Lets the view create / recycle a per-tracker
+ * section, choose which columns to show, and render an
+ * "expecting N..." subtitle. Records for the batch arrive via
+ * tracker-server-create until the next batch-begin (or the run
+ * ends). */
+void gtkhx_session_emit_tracker_batch_begin (GtkhxSession *self,
+                                             const char *tracker_url,
+                                             guint8 version,
+                                             guint16 expected_count);
+
 void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
                                      struct task *tsk);
 

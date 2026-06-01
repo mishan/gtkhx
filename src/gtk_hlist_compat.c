@@ -367,7 +367,8 @@ gtk_hlist_overlay_cell_make_layout (GtkHListOverlayCell *self,
 	 * Pango multiplies the effective size by `scale` at layout time. */
     if (self->pixel_scale != 1.0) {
         PangoAttrList *attrs = pango_attr_list_new ();
-        pango_attr_list_insert (attrs, pango_attr_scale_new (self->pixel_scale));
+        pango_attr_list_insert (attrs,
+                                pango_attr_scale_new (self->pixel_scale));
         pango_layout_set_attributes (layout, attrs);
         pango_attr_list_unref (attrs);
     }
@@ -552,15 +553,13 @@ gtk_hlist_overlay_cell_snapshot (GtkCellRenderer *cell, GtkSnapshot *snapshot,
 		 * doesn't cost us anything in practice. */
         if (self->text_outline) {
             const GdkRGBA outline = { 0.0, 0.0, 0.0, 1.0 };
-            const float offsets[4][2] = {
-                { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 }
-            };
+            const float offsets[4][2]
+                = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
             for (int i = 0; i < 4; i++) {
                 gtk_snapshot_save (snapshot);
                 gtk_snapshot_translate (
-                    snapshot,
-                    &GRAPHENE_POINT_INIT (tx + offsets[i][0],
-                                          ty + offsets[i][1]));
+                    snapshot, &GRAPHENE_POINT_INIT (tx + offsets[i][0],
+                                                    ty + offsets[i][1]));
                 gtk_snapshot_append_layout (snapshot, layout, &outline);
                 gtk_snapshot_restore (snapshot);
             }
@@ -865,6 +864,17 @@ gtk_hlist_set_column_width (GtkHList *hlist, gint column, gint width)
     if (col) {
         gtk_tree_view_column_set_sizing (col, GTK_TREE_VIEW_COLUMN_FIXED);
         gtk_tree_view_column_set_fixed_width (col, MAX (1, width));
+    }
+}
+
+void
+gtk_hlist_set_column_visible (GtkHList *hlist, gint column, gboolean visible)
+{
+    GtkTreeViewColumn *col;
+    g_return_if_fail (GTK_IS_HLIST (hlist));
+    col = gtk_tree_view_get_column (GTK_TREE_VIEW (hlist), column);
+    if (col) {
+        gtk_tree_view_column_set_visible (col, visible);
     }
 }
 
