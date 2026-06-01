@@ -1,3 +1,10 @@
+## 1.0.1-dev
+
+- Code Modernization
+  - Parts of GtkHx are being rewritten in Rust
+- Hotline Protocol
+  - Tracker v3 support
+
 ## 1.0.0
 
 - General
