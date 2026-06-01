@@ -76,6 +76,7 @@ gtkhx_sources = files(
   'tracker.c',
   'tracker_event.c',
   'tracker_parser.c',
+  'tracker_row.c',
   'tracker_v3.c',
   'tracker_v3_meta.c',
   'tray.c',

@@ -30,13 +30,16 @@
 #include "gtkhx.h"
 #include "gtkutil.h"
 #include "connect.h"
-#include "gtk_hlist.h"
 #include "chat.h"
 #include "options.h"
 #include "cfgkeys.h"
 #include "debug.h"
+#include "bookmarks.h"
+#include "bookmark_cipher.h"
 #include "hotline.h"
+#include "toolbar.h"
 #include "tracker.h"
+#include "tracker_row.h"
 
 static GtkWidget *tracker_window;
 static GtkWidget *tracker_sections_box; /* vbox of per-tracker GtkExpanders */
@@ -57,74 +60,58 @@ static int num_found_total, num_total_total;
  * with a one-line warning to the chat output. */
 static GRegex *current_search;
 
-/* Column indices for the per-section GtkHList. Defined once so the
- * titles array, width table, and column-visibility calls don't drift. */
-enum {
-    COL_NAME = 0,
-    COL_USERS,
-    COL_COUNTRY,
-    COL_ADDRESS,
-    COL_PORT,
-    COL_CAPS,
-    COL_DESC,
-    N_TRACKER_COLS,
-};
-
-/* Per-tracker-listing row.
- *
- * `address` is the printable address from HxTrackerServer.address —
- * inet_ntop("192.0.2.10") for v1 + v3-IPv4 records, inet_ntop6 for
- * v3 IPv6 records, or the literal hostname for v3 0x48 records.
- * Always non-NULL, UTF-8 valid. Used as the dedup key (paired with
- * port) and rendered into the "Address" column directly.
- *
- * Phase E (claude/tracker-v3-phase-a tail end): switched the dedup
- * key from `struct in_addr addr` (32-bit IPv4) to a string so v3's
- * IPv6 + hostname records can flow through the same BST without
- * needing a separate non-IPv4 path. The compare in find_server /
- * insert_server is `strcmp(a, b)` then port; ordering is
- * lexicographic on the address string, which is arbitrary-but-stable
- * (and the user only sees it through tracker_search_tree's render
- * loop, so the order isn't user-facing). */
-struct tracker_server {
-    char *name;
-    char *desc;
-
-    char *address;
-
-    guint16 nusers;
-    guint16 port;
-
-    /* Deep-copied snapshot of the v3 TLV metadata at insertion
-     * time. Always non-NULL — Phase B's hx_tracker_server_new_v1
-     * allocates a zero-init meta for legacy records so callers
-     * don't have to NULL-check. NULL pointers inside meta (strings)
-     * mean "TLV absent"; that's the meta module's contract. */
-    HxTrackerV3Meta *meta;
-
-    struct tracker_server *left, *right;
-};
+/* Column ids weren't carried over to the GtkColumnView build —
+ * each column is created inline in tracker_section_new by name. */
 
 /* One section per tracker URL. Created on tracker_batch_begin,
  * populated by tracker_server_create calls that follow. The visible
- * UI is a GtkExpander whose child is a scrolled GtkHList; section
- * lifetime ties to the expander widget's lifetime (the box owns
- * the expander, we own the section data). Sections survive across
- * search filter changes (search just hides rows) and across a
- * refresh only by URL-keyed recycling — tracker_clear blanks
- * everything per refresh. */
+ * UI is a GtkExpander whose child is a scrolled GtkColumnView;
+ * section lifetime ties to the expander widget's lifetime (the box
+ * owns the expander, we own the section data). Sections survive
+ * across search filter changes (GtkFilterListModel just hides
+ * non-matching rows) and across a refresh only by URL-keyed
+ * recycling — tracker_clear blanks everything per refresh. */
 struct tracker_section {
     char *url;        /* hash key — owned */
     guint8 version;   /* 1 or 3, from batch-begin */
     guint16 expected; /* batch-begin's announced count — used in subtitle */
 
-    struct tracker_server *tree;
-    int num_total; /* records inserted into this section's tree */
-    int num_found; /* records matching the current filter in this section */
+    /* Model chain:
+     *   store     — GListStore<HxTrackerRow *>, the unfiltered
+     *               truth. Append-only during a fetch; cleared on
+     *               batch-begin recycling.
+     *   filter_model — GtkFilterListModel wrapping `store` and the
+     *               shared tracker_filter (one GtkCustomFilter for
+     *               the whole window — when the search regex
+     *               changes, gtk_filter_changed makes every
+     *               section's filter_model re-evaluate).
+     *   sort_model — GtkSortListModel wrapping filter_model. Its
+     *               sorter is the column view's "header sorter"
+     *               (so clicking a column header sorts that
+     *               column ascending / descending / unsorted in
+     *               the usual cycle).
+     *   selection — GtkSingleSelection wrapping sort_model. This
+     *               is the model the column view binds to;
+     *               notify::selected drives the cross-section
+     *               (selected_section, selected_row) state below. */
+    GListStore *store;
+    GtkFilterListModel *filter_model;
+    GtkSortListModel *sort_model;
+    GtkSingleSelection *selection;
 
-    GtkWidget *expander; /* GtkExpander, child of tracker_sections_box */
-    GtkWidget *list;     /* GtkHList inside the expander */
-    GtkWidget *scroll;   /* GtkScrolledWindow wrapping the list */
+    /* O(1) dedup: keys are "<addr>:<port>" g_strdup'd; values are
+     * unused (we only check presence). Per-section because the
+     * same physical server appearing on tracker A AND tracker B
+     * is the whole point of grouping by tracker, so the dedup
+     * window is intra-section only. */
+    GHashTable *dedup;
+
+    GtkWidget *expander;    /* GtkExpander, child of tracker_sections_box */
+    GtkWidget *column_view; /* GtkColumnView inside the expander */
+    GtkWidget *scroll;      /* GtkScrolledWindow wrapping the column view */
+
+    GtkColumnViewColumn *col_country; /* hidden on v1 sections */
+    GtkColumnViewColumn *col_caps;    /* hidden on v1 sections */
 };
 
 /* All known sections keyed by URL. Values are owned struct
@@ -149,37 +136,28 @@ static struct tracker_section *current_section;
 
 /* Selection across all sections — replaces the old single-list
  * tracker_storow + tracker_list pair. Updated by each section's
- * select_row handler; consumed by Details / Connect buttons in the
- * headerbar. NULL means "nothing selected anywhere." */
+ * notify::selected handler; consumed by Details / Connect buttons
+ * in the headerbar. NULL means "nothing selected anywhere." */
 static struct tracker_section *selected_section;
 static int selected_row;
 
-/* Recursive BST destructor — frees each node's strings + meta then
- * the node itself. NOT responsible for the section it lives in; the
- * caller resets section->tree to NULL after this returns. Doesn't
- * touch any global state — multiple section trees can be torn down
- * independently. */
-static void
-tracker_tree_destroy (struct tracker_server *root)
-{
-    if (!root) {
-        return;
-    }
+/* One shared GtkCustomFilter for the whole window. Every section's
+ * filter_model uses this same instance, so when tracker_rerun_search
+ * recompiles the regex and calls gtk_filter_changed we get one
+ * re-evaluation pass across all sections for free. The match
+ * function (tracker_row_matches) reads the current_search GRegex
+ * above. */
+static GtkCustomFilter *tracker_filter;
 
-    tracker_tree_destroy (root->left);
-    tracker_tree_destroy (root->right);
-
-    g_free (root->name);
-    g_free (root->desc);
-    g_free (root->address);
-    hx_tracker_v3_meta_free (root->meta);
-    g_free (root);
-}
-
-/* Free a section: destroy the BST, detach the expander from the
- * sections box, drop the URL key. The widget tear-down chain
- * (gtk_box_remove → expander unrefs scrolled-window → unrefs
- * GtkHList) cleans up the GTK side. */
+/* Free a section: drop the model-chain GObject refs, drop the
+ * dedup hashtable, detach the expander from the sections box, drop
+ * the URL key. The widget tear-down chain (gtk_box_remove →
+ * expander unrefs scrolled-window → unrefs column view, which
+ * unrefs its selection model, which unrefs its filter model, which
+ * unrefs the underlying store) cleans up the GTK side. We hold
+ * parallel refs to the model-chain pieces during the section's
+ * lifetime so model-side updates (g_list_store_append) don't need
+ * to walk the widget tree. */
 static void
 tracker_section_free (struct tracker_section *sec)
 {
@@ -195,8 +173,23 @@ tracker_section_free (struct tracker_section *sec)
     if (current_section == sec) {
         current_section = NULL;
     }
-    tracker_tree_destroy (sec->tree);
-    sec->tree = NULL;
+    /* Null the "tracker-section" qdata before we drop our refs on
+     * the model + widget. If a deferred signal (notify::selected,
+     * activate) fires during the dispose cascade after gtk_box_remove
+     * below, the handler reads the qdata and bails on NULL — we don't
+     * want it dereferencing `sec` while we're freeing it. */
+    if (sec->selection) {
+        g_object_set_data (G_OBJECT (sec->selection), "tracker-section", NULL);
+    }
+    if (sec->column_view) {
+        g_object_set_data (G_OBJECT (sec->column_view), "tracker-section",
+                           NULL);
+    }
+    g_clear_object (&sec->selection);
+    g_clear_object (&sec->sort_model);
+    g_clear_object (&sec->filter_model);
+    g_clear_object (&sec->store);
+    g_clear_pointer (&sec->dedup, g_hash_table_unref);
     if (sec->expander && tracker_sections_box) {
         gtk_box_remove (GTK_BOX (tracker_sections_box), sec->expander);
     }
@@ -245,6 +238,7 @@ close_tracker_window (GtkWindow *window, gpointer data)
         g_hash_table_unref (tracker_sections);
         tracker_sections = NULL;
     }
+    g_clear_object (&tracker_filter);
 
     tracker_window = NULL;
     tracker_sections_box = NULL;
@@ -338,78 +332,52 @@ format_caps_badges (const HxTrackerV3Meta *m, char *out, gsize outsz)
     }
 }
 
-/* Render every server in `root` that matches `preg` into `sec`'s
- * GtkHList, updating sec->num_found. Walked in-order (left → root
- * → right) across the BST; the resulting visual order is
- * lexicographic by address, which is arbitrary-but-stable. Caller
- * is responsible for freezing the list and clearing it before the
- * first call.
+/* GtkCustomFilter match callback. Called by every section's
+ * GtkFilterListModel whenever a row arrives or the shared filter
+ * is notified via gtk_filter_changed. Returns TRUE if the row
+ * should be visible.
  *
- * Note: tracker_server_create calls this with the just-inserted
- * server as root (left/right == NULL), so for that path the
- * traversal degenerates to "render this one row." The traversal
- * order only matters for tracker_rerun_search which walks the
- * whole tree. */
-static void
-tracker_search_tree (GRegex *preg, struct tracker_section *sec,
-                     struct tracker_server *root)
+ * current_search == NULL means "match everything" — the common
+ * case when the search entry is empty. Otherwise both name and
+ * desc are tried; GRegex's match callback handles NUL-terminated
+ * UTF-8 strings via the row getters. */
+static gboolean
+tracker_row_matches (gpointer item, gpointer user_data)
 {
-    int row;
-    char nusersstr[8], portstr[8], capsbuf[48], *text[N_TRACKER_COLS];
-    gboolean flag;
+    HxTrackerRow *row = item;
+    (void)user_data;
 
-    if (!root || !sec) {
-        return;
+    if (!row) {
+        return FALSE;
     }
-
-    tracker_search_tree (preg, sec, root->left);
-
-    /* preg == NULL means "match everything" — the common case when the
-     * search entry is empty. Otherwise both name and desc are tried.
-     * GRegex copes with embedded NULs because we pass the buffers as
-     * NUL-terminated C strings via g_regex_match. */
-    if (!preg) {
-        flag = TRUE;
-    } else {
-        flag = g_regex_match (preg, root->name, 0, NULL)
-               || g_regex_match (preg, root->desc, 0, NULL);
+    if (!current_search) {
+        return TRUE;
     }
-    if (flag) {
-        snprintf (nusersstr, sizeof (nusersstr), "%u", root->nusers);
-        snprintf (portstr, sizeof (portstr), "%u", root->port);
-        format_caps_badges (root->meta, capsbuf, sizeof (capsbuf));
+    return g_regex_match (current_search, hx_tracker_row_get_name (row), 0,
+                          NULL)
+           || g_regex_match (current_search, hx_tracker_row_get_desc (row), 0,
+                             NULL);
+}
 
-        text[COL_NAME] = root->name;
-        text[COL_USERS] = nusersstr;
-        /* country_code is a 2-letter ISO 3166-1 alpha-2 code when
-         * the tracker advertised it; absent → empty cell. v1 records
-         * always land here as empty since their zero-init meta has
-         * country_code == NULL. The whole column is hidden on v1
-         * sections so this just defends against v3 records that
-         * didn't carry the TLV. */
-        text[COL_COUNTRY] = (root->meta && root->meta->country_code)
-                                ? root->meta->country_code
-                                : (char *)"";
-        /* Phase E: render whatever printable address the boxed
-         * event delivered (IPv4 / IPv6 / hostname). No inet_ntop
-         * call here — the event constructor already did that for
-         * the IPv4 / IPv6 records, and the hostname-record path
-         * (Argus's promoted_servers format) carries the literal
-         * hostname through. */
-        text[COL_ADDRESS] = root->address ? root->address : (char *)"";
-        text[COL_PORT] = portstr;
-        text[COL_CAPS] = capsbuf;
-        text[COL_DESC] = root->desc;
+/* Convenience: counts straight off the model chain. The store's
+ * count is "every row this tracker emitted, dedup'd"; the filter
+ * model's count is "every row that passes the current filter."
+ * Both update synchronously as rows are appended / removed / when
+ * the filter changes — no need for parallel manual counters. */
+static guint
+tracker_section_num_total (struct tracker_section *sec)
+{
+    return sec && sec->store
+               ? g_list_model_get_n_items (G_LIST_MODEL (sec->store))
+               : 0;
+}
 
-        row = gtk_hlist_append (GTK_HLIST (sec->list), text);
-        /* Phase 5: no per-row foreground override — let the GTK theme's
-         * default foreground apply so the tracker list reads correctly
-         * under both light and dark themes. */
-        gtk_hlist_set_row_data (GTK_HLIST (sec->list), row, root);
-        sec->num_found++;
-    }
-
-    tracker_search_tree (preg, sec, root->right);
+static guint
+tracker_section_num_found (struct tracker_section *sec)
+{
+    return sec && sec->filter_model
+               ? g_list_model_get_n_items (G_LIST_MODEL (sec->filter_model))
+               : 0;
 }
 
 /* Refresh the section's expander title with the latest counts. The
@@ -427,14 +395,17 @@ tracker_section_update_title (struct tracker_section *sec)
     char *markup;
     char *url_escaped;
     char vbuf[8];
+    guint n_total, n_found;
 
     if (!sec || !sec->expander) {
         return;
     }
     g_snprintf (vbuf, sizeof (vbuf), "v%u", (unsigned)sec->version);
     url_escaped = g_markup_escape_text (sec->url, -1);
+    n_total = tracker_section_num_total (sec);
+    n_found = tracker_section_num_found (sec);
 
-    if (sec->num_total == 0) {
+    if (n_total == 0) {
         /* Empty so far. Show the expected count from batch-begin so
          * the user sees "expecting 200" rather than a flat "0
          * servers" while the tracker is still streaming records.
@@ -449,16 +420,16 @@ tracker_section_update_title (struct tracker_section *sec)
                 "<b>%s</b>  <span alpha=\"60%%\">%s · %s</span>", url_escaped,
                 vbuf, _ ("no servers"));
         }
-    } else if (sec->num_found == sec->num_total) {
-        markup = g_strdup_printf (
-            "<b>%s</b>  <span alpha=\"60%%\">%s · %d %s</span>", url_escaped,
-            vbuf, sec->num_total,
-            sec->num_total == 1 ? _ ("server") : _ ("servers"));
+    } else if (n_found == n_total) {
+        markup
+            = g_strdup_printf ("<b>%s</b>  <span alpha=\"60%%\">%s · %u %s</span>",
+                               url_escaped, vbuf, n_total,
+                               n_total == 1 ? _ ("server") : _ ("servers"));
     } else {
         markup = g_strdup_printf (
-            "<b>%s</b>  <span alpha=\"60%%\">%s · %d / %d %s</span>",
-            url_escaped, vbuf, sec->num_found, sec->num_total,
-            sec->num_total == 1 ? _ ("server") : _ ("servers"));
+            "<b>%s</b>  <span alpha=\"60%%\">%s · %u / %u %s</span>",
+            url_escaped, vbuf, n_found, n_total,
+            n_total == 1 ? _ ("server") : _ ("servers"));
     }
     /* Flip use-markup ON before writing the label so the first
      * call (when sec->expander was just constructed with no label)
@@ -516,26 +487,51 @@ tracker_rerun_search (void)
         }
     }
 
-    /* Walk every section, blank its list, re-render with the new
-     * filter. The aggregate count for the headerbar label sums each
-     * section's num_found after the per-section walk settles. */
+    /* One notification to the shared filter — every section's
+     * GtkFilterListModel re-evaluates against the new regex.
+     * GTK_FILTER_CHANGE_DIFFERENT means "treat all current
+     * decisions as potentially invalidated" — the conservative
+     * answer that's always correct after a fresh regex compile. */
+    if (tracker_filter) {
+        gtk_filter_changed (GTK_FILTER (tracker_filter),
+                            GTK_FILTER_CHANGE_DIFFERENT);
+    }
+
+    /* Selection state needs to clear ON TWO FRONTS:
+     *   - the global (selected_section, selected_row) so the
+     *     headerbar Connect / Details actions no-op rather than
+     *     act on a row that may have been filtered out or shifted
+     *   - every per-section GtkSingleSelection so the column view
+     *     doesn't keep a row visually highlighted when the
+     *     headerbar actions would refuse to operate on it
+     *
+     * Without the second sweep, the UI is inconsistent: a row
+     * looks selected but Connect / Details quietly do nothing.
+     * Clearing both keeps the visual state in lockstep with the
+     * functional state.
+     *
+     * The notify::selected handler on each section sees pos =
+     * INVALID and clears the global state — which is fine since
+     * we're about to overwrite the globals anyway. */
+    selected_section = NULL;
+    selected_row = -1;
+    for (l = tracker_sections_order; l; l = l->next) {
+        struct tracker_section *sec = l->data;
+        if (sec->selection) {
+            gtk_single_selection_set_selected (
+                GTK_SINGLE_SELECTION (sec->selection),
+                GTK_INVALID_LIST_POSITION);
+        }
+    }
+
+    /* Roll up the per-section found counts and refresh every
+     * section's expander subtitle. */
     num_found_total = 0;
     for (l = tracker_sections_order; l; l = l->next) {
         struct tracker_section *sec = l->data;
-        gtk_hlist_clear (GTK_HLIST (sec->list));
-        sec->num_found = 0;
-        gtk_hlist_freeze (GTK_HLIST (sec->list));
-        tracker_search_tree (current_search, sec, sec->tree);
-        gtk_hlist_thaw (GTK_HLIST (sec->list));
         tracker_section_update_title (sec);
-        num_found_total += sec->num_found;
+        num_found_total += (int)tracker_section_num_found (sec);
     }
-
-    /* Selection state's row index may now point past the end of
-     * its section's list — clear so Connect / Details can't act
-     * on a stale row. The user just needs to click again. */
-    selected_section = NULL;
-    selected_row = -1;
 
     num = g_strdup_printf ("  %d", num_found_total);
     gtk_label_set_text (GTK_LABEL (lbl_found), num);
@@ -571,129 +567,436 @@ tracker_case_toggled (GtkToggleButton *btn, gpointer data)
     tracker_rerun_search ();
 }
 
-/* Phase E: dedup key is (address-string, port). Compare order is
- * strcmp(address) then numeric port. Both fields are non-NULL by
- * construction — tracker_server_create populates address from
- * event->address (always non-NULL, see tracker_event.c) and port
- * from event->port. Per-section dedup now: each section gets its
- * own BST since the same physical server may legitimately appear
- * on multiple trackers, and the user wants to see who's reporting
- * what. */
-static int
-find_server (const char *address, guint16 port, struct tracker_server *root)
+/* Per-section dedup key: "<address>:<port>". String-keyed
+ * GHashTable inside each section so the same physical server
+ * showing up on two different trackers lands in both sections,
+ * but a tracker sending the same record twice gets dropped. */
+static char *
+dedup_key_for (const char *address, guint16 port)
 {
-    if (!root || !address) {
+    return g_strdup_printf ("%s:%u", address, (unsigned)port);
+}
+
+/* ---------------------------------------------------------------- */
+/* Column factories (setup + bind pairs for GtkSignalListItemFactory) */
+/* ---------------------------------------------------------------- */
+
+/* Setup helpers build the per-row widget once when the list item
+ * factory creates a new ListItem; bind helpers refresh that widget
+ * from the HxTrackerRow as the column view scrolls and recycles
+ * ListItems against different rows. */
+
+static void
+text_setup_left (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkWidget *lbl = gtk_label_new (NULL);
+    (void)f;
+    (void)d;
+    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_margin_start (lbl, 6);
+    gtk_widget_set_margin_end (lbl, 6);
+    gtk_list_item_set_child (item, lbl);
+}
+
+static void
+text_setup_center (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkWidget *lbl = gtk_label_new (NULL);
+    (void)f;
+    (void)d;
+    gtk_label_set_xalign (GTK_LABEL (lbl), 0.5f);
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_margin_start (lbl, 6);
+    gtk_widget_set_margin_end (lbl, 6);
+    gtk_list_item_set_child (item, lbl);
+}
+
+/* Stash a weak (non-ref) pointer to the GtkListItem on the cell
+ * widget. The right-click gesture handler walks up the widget
+ * tree from the click target until it finds a widget with this
+ * qdata set, then reads the row position out of the list item.
+ * GtkListItem is owned by the column view; the stash is a borrow
+ * that's only valid while the cell is bound (which is the only
+ * window during which a click can find it anyway).
+ *
+ * Also stash on the row widget so right-clicks in the row's
+ * vertical padding (the few pixels Adwaita adds above + below
+ * each cell, where no cell widget covers) can still locate the
+ * row. GtkColumnView's internal hierarchy is:
+ *   GtkColumnView → listview → row → cell → our label
+ * so the row widget is our parent's parent. Stashing the same
+ * GtkListItem on all seven cells' row-widget-grandparents is a
+ * no-op redundancy (it's the same row widget across cells), but
+ * keeps the bind callback uniform and avoids racing on which
+ * cell binds first. */
+static void
+stash_list_item (GtkWidget *cell, GtkListItem *item)
+{
+    GtkWidget *cell_w, *row_w;
+    g_object_set_data (G_OBJECT (cell), "tracker-list-item", item);
+    cell_w = gtk_widget_get_parent (cell);
+    row_w = cell_w ? gtk_widget_get_parent (cell_w) : NULL;
+    if (row_w) {
+        g_object_set_data (G_OBJECT (row_w), "tracker-list-item", item);
+    }
+}
+
+static void
+name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    gtk_label_set_text (lbl, row ? hx_tracker_row_get_name (row) : "");
+}
+
+static void
+desc_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    gtk_label_set_text (lbl, row ? hx_tracker_row_get_desc (row) : "");
+}
+
+static void
+address_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    gtk_label_set_text (lbl, row ? hx_tracker_row_get_address (row) : "");
+}
+
+static void
+port_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    char buf[8];
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    if (!row) {
+        gtk_label_set_text (lbl, "");
+        return;
+    }
+    g_snprintf (buf, sizeof (buf), "%u",
+                (unsigned)hx_tracker_row_get_port (row));
+    gtk_label_set_text (lbl, buf);
+}
+
+static void
+users_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    char buf[8];
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    if (!row) {
+        gtk_label_set_text (lbl, "");
+        return;
+    }
+    g_snprintf (buf, sizeof (buf), "%u",
+                (unsigned)hx_tracker_row_get_nusers (row));
+    gtk_label_set_text (lbl, buf);
+}
+
+static void
+country_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    HxTrackerV3Meta *m;
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    if (!row) {
+        gtk_label_set_text (lbl, "");
+        return;
+    }
+    /* country_code is a 2-letter ISO 3166-1 alpha-2 code when the
+     * tracker advertised it; absent → empty cell. The column is
+     * hidden on v1 sections anyway. */
+    m = hx_tracker_row_get_meta (row);
+    gtk_label_set_text (lbl, (m && m->country_code) ? m->country_code : "");
+}
+
+static void
+caps_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    HxTrackerRow *row = gtk_list_item_get_item (item);
+    char buf[48];
+    (void)f;
+    (void)d;
+    stash_list_item (GTK_WIDGET (lbl), item);
+    if (!row) {
+        gtk_label_set_text (lbl, "");
+        return;
+    }
+    format_caps_badges (hx_tracker_row_get_meta (row), buf, sizeof (buf));
+    gtk_label_set_text (lbl, buf);
+}
+
+/* ---------------------------------------------------------------- */
+/* Per-column comparison functions                                   */
+/* ---------------------------------------------------------------- */
+
+/* All comparators follow GCompareDataFunc semantics: return < 0
+ * if `a` should sort before `b`, > 0 if after, 0 if equal. String
+ * comparisons go through g_utf8_collate so locale-aware ordering
+ * survives accented names ("Östra" sorts as the user expects).
+ *
+ * When a string field is NULL or empty, it sorts BEFORE non-empty
+ * values — same convention as g_strcmp0. Country / Caps cells on
+ * v1 records are always empty, but the v1 sections hide those
+ * columns anyway so it doesn't visually matter. */
+
+static int
+cmp_str (const char *a, const char *b)
+{
+    if (a == b) {
         return 0;
     }
-    int c = strcmp (root->address, address);
-    if (c == 0 && root->port == port) {
+    if (!a) {
+        return -1;
+    }
+    if (!b) {
         return 1;
     }
-    struct tracker_server *next;
-    if (c == 0) {
-        next = (root->port > port) ? root->left : root->right;
-    } else {
-        next = (c > 0) ? root->left : root->right;
-    }
-    return find_server (address, port, next);
+    return g_utf8_collate (a, b);
 }
 
-static void
-insert_server_at (struct tracker_server *server, struct tracker_server *root)
+static int
+cmp_uint (guint a, guint b)
 {
-    int c = strcmp (root->address, server->address);
-    if (c == 0) {
-        if (root->port > server->port) {
-            if (root->left) {
-                insert_server_at (server, root->left);
-                return;
-            }
-            root->left = server;
-            return;
-        }
-        if (root->right) {
-            insert_server_at (server, root->right);
-            return;
-        }
-        root->right = server;
-        return;
+    if (a < b) {
+        return -1;
     }
-
-    if (c > 0) {
-        if (root->left) {
-            insert_server_at (server, root->left);
-            return;
-        }
-        root->left = server;
-        return;
+    if (a > b) {
+        return 1;
     }
-
-    if (root->right) {
-        insert_server_at (server, root->right);
-        return;
-    }
-
-    root->right = server;
+    return 0;
 }
 
-static void
-insert_server (struct tracker_server *server, struct tracker_section *sec)
+static int
+cmp_name (gconstpointer a, gconstpointer b, gpointer ud)
 {
-    if (!sec->tree) {
-        sec->tree = server;
-        server->left = NULL;
-        server->right = NULL;
-        return;
-    }
-    insert_server_at (server, sec->tree);
+    (void)ud;
+    return cmp_str (hx_tracker_row_get_name ((HxTrackerRow *)a),
+                    hx_tracker_row_get_name ((HxTrackerRow *)b));
 }
 
-/* Forward decls — the gesture / selection handlers live below the
- * window builder; tracker_section_new wires them on its newly-built
- * list. */
-static void tracker_section_pressed (GtkGestureClick *gesture, int n_press,
-                                     double x, double y, gpointer data);
-static void tracker_section_row_selected (GtkHList *hlist, gint row,
-                                          gint column, gpointer event,
-                                          gpointer data);
+static int
+cmp_desc (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    (void)ud;
+    return cmp_str (hx_tracker_row_get_desc ((HxTrackerRow *)a),
+                    hx_tracker_row_get_desc ((HxTrackerRow *)b));
+}
 
-/* Build the per-section UI: a GtkExpander whose child is a scrolled
- * GtkHList with the standard tracker columns. v1 sections hide the
- * Country / Caps columns since their records can't carry those TLVs.
- * The list pointer is stored as widget data on the list itself so
- * the click + select handlers can recover the owning section. */
+static int
+cmp_address (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    (void)ud;
+    return cmp_str (hx_tracker_row_get_address ((HxTrackerRow *)a),
+                    hx_tracker_row_get_address ((HxTrackerRow *)b));
+}
+
+static int
+cmp_users (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    (void)ud;
+    return cmp_uint (hx_tracker_row_get_nusers ((HxTrackerRow *)a),
+                     hx_tracker_row_get_nusers ((HxTrackerRow *)b));
+}
+
+static int
+cmp_port (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    (void)ud;
+    return cmp_uint (hx_tracker_row_get_port ((HxTrackerRow *)a),
+                     hx_tracker_row_get_port ((HxTrackerRow *)b));
+}
+
+static int
+cmp_country (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    HxTrackerV3Meta *ma = hx_tracker_row_get_meta ((HxTrackerRow *)a);
+    HxTrackerV3Meta *mb = hx_tracker_row_get_meta ((HxTrackerRow *)b);
+    (void)ud;
+    return cmp_str (ma ? ma->country_code : NULL,
+                    mb ? mb->country_code : NULL);
+}
+
+/* Caps column sorts on the same formatted-badge string the column
+ * renders. Same characters, same widths, same ordering — gives a
+ * stable, human-recognisable sort (★-prefixed rows cluster, HOPE-
+ * only follow, etc.). */
+static int
+cmp_caps (gconstpointer a, gconstpointer b, gpointer ud)
+{
+    char ba[48], bb[48];
+    (void)ud;
+    format_caps_badges (hx_tracker_row_get_meta ((HxTrackerRow *)a), ba,
+                        sizeof (ba));
+    format_caps_badges (hx_tracker_row_get_meta ((HxTrackerRow *)b), bb,
+                        sizeof (bb));
+    return cmp_str (ba, bb);
+}
+
+/* Build one column from a (setup, bind) pair. Wraps the boilerplate
+ * for a signal-based factory + column construction + sorter
+ * attachment. Returns a borrowed pointer (column view holds the
+ * only strong ref afterwards).
+ *
+ * `cmp` may be NULL for columns that shouldn't be sortable, but
+ * the tracker view makes every column sortable. */
+static GtkColumnViewColumn *
+add_column (GtkColumnView *view, const char *title,
+            void (*setup) (GtkSignalListItemFactory *, GtkListItem *, gpointer),
+            void (*bind) (GtkSignalListItemFactory *, GtkListItem *, gpointer),
+            GCompareDataFunc cmp, int fixed_width, gboolean expand)
+{
+    GtkListItemFactory *factory;
+    GtkColumnViewColumn *col;
+
+    factory = gtk_signal_list_item_factory_new ();
+    g_signal_connect (factory, "setup", G_CALLBACK (setup), NULL);
+    g_signal_connect (factory, "bind", G_CALLBACK (bind), NULL);
+
+    col = gtk_column_view_column_new (title, factory);
+    if (fixed_width > 0) {
+        gtk_column_view_column_set_fixed_width (col, fixed_width);
+    }
+    gtk_column_view_column_set_expand (col, expand);
+    gtk_column_view_column_set_resizable (col, TRUE);
+
+    if (cmp) {
+        GtkSorter *sorter = GTK_SORTER (gtk_custom_sorter_new (cmp, NULL, NULL));
+        gtk_column_view_column_set_sorter (col, sorter);
+        g_object_unref (sorter);
+    }
+
+    gtk_column_view_append_column (view, col);
+    g_object_unref (col);
+    return col;
+}
+
+/* Forward decls — the selection / activate handlers live below
+ * tracker_section_new so they can reach the section's siblings via
+ * the typed struct; tracker_section_new wires them on its newly-
+ * built selection + column view. */
+static void on_section_selected_changed (GObject *obj, GParamSpec *ps,
+                                         gpointer data);
+static void on_section_activate (GtkColumnView *cv, guint pos, gpointer data);
+static void on_section_secondary_press (GtkGestureClick *gesture, int n_press,
+                                        double x, double y, gpointer data);
+/* The right-click popover wires these as button click actions. */
+static void tracker_connect (void);
+static void tracker_save_bookmark (void);
+static void tracker_details (void);
+
+/* Build the per-section UI. Model chain:
+ *   GListStore → GtkFilterListModel (shared filter)
+ *              → GtkSingleSelection → GtkColumnView
+ *
+ * v1 sections hide the Country / Caps columns since their records
+ * can't carry those TLVs. The section pointer is stashed on both
+ * the selection model (for notify::selected) and the column view
+ * (for activate) so the handlers can recover their owner without
+ * a global widget→section lookup. */
 static struct tracker_section *
 tracker_section_new (const char *url, guint8 version, guint16 expected)
 {
     struct tracker_section *sec;
-    const char *titles[N_TRACKER_COLS];
-    GtkGesture *click;
+    GtkColumnView *cv;
 
     sec = g_new0 (struct tracker_section, 1);
     sec->url = g_strdup (url ? url : "");
     sec->version = version;
     sec->expected = expected;
+    sec->dedup
+        = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
 
-    titles[COL_NAME] = _ ("Name");
-    titles[COL_USERS] = _ ("Users");
-    titles[COL_COUNTRY] = _ ("Country");
-    titles[COL_ADDRESS] = _ ("Address");
-    titles[COL_PORT] = _ ("Port");
-    titles[COL_CAPS] = _ ("Caps");
-    titles[COL_DESC] = _ ("Description");
+    sec->store = g_list_store_new (HX_TYPE_TRACKER_ROW);
 
-    sec->list = gtk_hlist_new_with_titles (N_TRACKER_COLS, (gchar **)titles);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_NAME, 200);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_USERS, 76);
-    gtk_hlist_set_column_justification (GTK_HLIST (sec->list), COL_USERS,
-                                        GTK_JUSTIFY_CENTER);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_COUNTRY, 60);
-    gtk_hlist_set_column_justification (GTK_HLIST (sec->list), COL_COUNTRY,
-                                        GTK_JUSTIFY_CENTER);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_ADDRESS, 150);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_PORT, 70);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_CAPS, 110);
-    gtk_hlist_set_column_width (GTK_HLIST (sec->list), COL_DESC, 280);
+    /* The shared tracker_filter (owned by create_tracker_window)
+     * gates which rows pass through. set_incremental(FALSE)
+     * because the row counts here are modest (typically <500 per
+     * tracker) and we want the filter view to reflect a single
+     * append synchronously — the headerbar count label and the
+     * section subtitle both read from get_n_items right after
+     * the store append. */
+    sec->filter_model
+        = gtk_filter_list_model_new (G_LIST_MODEL (g_object_ref (sec->store)),
+                                     GTK_FILTER (
+                                         g_object_ref (tracker_filter)));
+    gtk_filter_list_model_set_incremental (sec->filter_model, FALSE);
+
+    /* Sort model sits between the filter and the selection. Its
+     * sorter is plugged in below — gtk_column_view_get_sorter
+     * returns a "header sorter" that updates as the user clicks
+     * column headers (cycle: ascending → descending → unsorted).
+     * Starts with no sorter so the visible order matches
+     * tracker-arrival order until the user touches a header. */
+    sec->sort_model = gtk_sort_list_model_new (
+        G_LIST_MODEL (g_object_ref (sec->filter_model)), NULL);
+    gtk_sort_list_model_set_incremental (sec->sort_model, FALSE);
+
+    sec->selection = gtk_single_selection_new (
+        G_LIST_MODEL (g_object_ref (sec->sort_model)));
+    /* The default is autoselect: the model picks position 0 on
+     * model load. We want the headerbar Details / Connect buttons
+     * to act on rows the user has actually clicked, not an
+     * arbitrary first row, so turn autoselect off and start
+     * unselected. */
+    gtk_single_selection_set_autoselect (sec->selection, FALSE);
+    gtk_single_selection_set_can_unselect (sec->selection, TRUE);
+    gtk_single_selection_set_selected (sec->selection,
+                                       GTK_INVALID_LIST_POSITION);
+
+    sec->column_view = gtk_column_view_new (
+        GTK_SELECTION_MODEL (g_object_ref (sec->selection)));
+    cv = GTK_COLUMN_VIEW (sec->column_view);
+    /* Single-click activation is a touch aggressive — keep the
+     * default (double-click / Enter to activate) so the Connect
+     * button + single-click selection stay distinguishable. */
+    gtk_column_view_set_show_column_separators (cv, TRUE);
+    gtk_column_view_set_show_row_separators (cv, FALSE);
+
+    add_column (cv, _ ("Name"), text_setup_left, name_bind, cmp_name, 200,
+                TRUE);
+    add_column (cv, _ ("Users"), text_setup_center, users_bind, cmp_users, 76,
+                FALSE);
+    sec->col_country = add_column (cv, _ ("Country"), text_setup_center,
+                                   country_bind, cmp_country, 60, FALSE);
+    add_column (cv, _ ("Address"), text_setup_left, address_bind, cmp_address,
+                150, FALSE);
+    add_column (cv, _ ("Port"), text_setup_center, port_bind, cmp_port, 70,
+                FALSE);
+    sec->col_caps = add_column (cv, _ ("Caps"), text_setup_left, caps_bind,
+                                cmp_caps, 110, FALSE);
+    add_column (cv, _ ("Description"), text_setup_left, desc_bind, cmp_desc,
+                280, TRUE);
+
+    /* Plumb the column view's header sorter into the sort model.
+     * gtk_column_view_get_sorter returns a GtkColumnViewSorter that
+     * tracks which header was clicked + the sort direction; setting
+     * it on the sort model makes the model re-sort on every click.
+     * The sorter belongs to the column view (no extra ref needed). */
+    gtk_sort_list_model_set_sorter (sec->sort_model,
+                                    gtk_column_view_get_sorter (cv));
 
     /* v1 sections suppress the columns that can ONLY ever be empty
      * for v1 records. v3 sections keep them visible even when
@@ -701,59 +1004,63 @@ tracker_section_new (const char *url, guint8 version, guint16 expected)
      * could carry mixed records, and the column being present is
      * informative on its own). */
     if (version == 1) {
-        gtk_hlist_set_column_visible (GTK_HLIST (sec->list), COL_COUNTRY,
-                                      FALSE);
-        gtk_hlist_set_column_visible (GTK_HLIST (sec->list), COL_CAPS, FALSE);
+        gtk_column_view_column_set_visible (sec->col_country, FALSE);
+        gtk_column_view_column_set_visible (sec->col_caps, FALSE);
     }
 
-    /* Stash the section pointer on the list so the click + select
-     * handlers can recover their owner without a global lookup. */
-    g_object_set_data (G_OBJECT (sec->list), "tracker-section", sec);
+    /* Stash the section pointer on both the selection (for
+     * notify::selected) and the column view (for activate). The
+     * handlers recover their owner from there — no global
+     * widget→section table needed. */
+    g_object_set_data (G_OBJECT (sec->selection), "tracker-section", sec);
+    g_object_set_data (G_OBJECT (sec->column_view), "tracker-section", sec);
 
-    g_signal_connect (sec->list, "select_row",
-                      G_CALLBACK (tracker_section_row_selected), NULL);
-    click = gtk_gesture_click_new ();
-    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
-                                   GDK_BUTTON_PRIMARY);
-    g_signal_connect (click, "pressed", G_CALLBACK (tracker_section_pressed),
-                      NULL);
-    gtk_widget_add_controller (sec->list, GTK_EVENT_CONTROLLER (click));
+    g_signal_connect (sec->selection, "notify::selected",
+                      G_CALLBACK (on_section_selected_changed), NULL);
+    g_signal_connect (sec->column_view, "activate",
+                      G_CALLBACK (on_section_activate), NULL);
 
-    /* GtkTreeView (under the GtkHList shim) doesn't ship its own
-     * scrollbars — it relies on a wrapping GtkScrolledWindow for
-     * column overflow + header alignment. We still want that wrapper,
-     * but VERTICALLY the section should be exactly as tall as its
-     * rows (no inner scrollbar, no fixed height): the outer scroller
-     * on the sections box does the up/down scrolling for the whole
-     * stack, so a section's inner list scrolling would be a second
-     * scrollbar fighting the first.
+    /* Right-click context menu: GtkGestureClick on the column view
+     * itself listening for the secondary mouse button. Capture phase
+     * so we see the press before GtkColumnView's internal handlers
+     * (they ignore secondary clicks anyway, but capture-phase keeps
+     * the ordering deterministic). The handler picks the deepest
+     * widget under (x,y), walks up to find a cell with a stashed
+     * GtkListItem, and pops up a row-context menu. */
+    {
+        GtkGesture *rclick = gtk_gesture_click_new ();
+        gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (rclick),
+                                       GDK_BUTTON_SECONDARY);
+        gtk_event_controller_set_propagation_phase (
+            GTK_EVENT_CONTROLLER (rclick), GTK_PHASE_CAPTURE);
+        g_signal_connect (rclick, "pressed",
+                          G_CALLBACK (on_section_secondary_press), NULL);
+        gtk_widget_add_controller (sec->column_view,
+                                   GTK_EVENT_CONTROLLER (rclick));
+    }
+
+    /* GtkColumnView wraps its content in its own internal scroller
+     * for column-header alignment, but we still want a per-section
+     * GtkScrolledWindow to give horizontal column-overflow scrolling
+     * AND a visible frame around each section.
      *
-     * Vertical = NEVER: the scrolled window adopts its child's
-     *   natural height (sum of header + row heights). Empty
-     *   sections collapse to roughly the header height; busy
-     *   sections grow until they hit whatever space the outer
-     *   scroller is willing to give them (i.e. unbounded — that's
-     *   what the outer scroller exists for).
-     * Horizontal = AUTOMATIC: when columns overflow the window's
-     *   width, the section gets its own horizontal scrollbar.
-     *   That's per-section so each tracker's column widths stay
-     *   independent — clean across mixed v1 / v3 sections where
-     *   the visible columns differ. */
+     * Vertical = NEVER + propagate-natural-height: the section's
+     *   height = the natural height of its content (header + rows).
+     *   The outer sections-stack scroller handles the vertical
+     *   scrolling for the window as a whole.
+     * Horizontal = AUTOMATIC: per-section horizontal scrollbar
+     *   appears when the columns overflow. Per-section so that
+     *   v1 and v3 sections (with different visible columns) can
+     *   each present their own row of columns without one section
+     *   forcing the other's column widths. */
     sec->scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sec->scroll),
                                     GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
     gtk_scrolled_window_set_has_frame (GTK_SCROLLED_WINDOW (sec->scroll), TRUE);
-    /* Without this, GtkScrolledWindow caps its reported natural
-     * height at its default (~minimum) — the section would still
-     * collapse to a few rows even with policy NEVER. With it
-     * enabled the scrolled window passes through the GtkTreeView's
-     * natural height (header + every row), so the section ends up
-     * exactly as tall as its content. */
     gtk_scrolled_window_set_propagate_natural_height (
         GTK_SCROLLED_WINDOW (sec->scroll), TRUE);
-
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sec->scroll),
-                                   sec->list);
+                                   sec->column_view);
 
     sec->expander = gtk_expander_new (NULL);
     gtk_expander_set_expanded (GTK_EXPANDER (sec->expander), TRUE);
@@ -785,20 +1092,46 @@ tracker_batch_begin (const char *tracker_url, guint8 version,
      * the user hit Refresh between fetches and the old section is
      * still hanging around (shouldn't happen — tracker_clear runs
      * at the top of tracker_getlist — but treat it idempotently to
-     * be safe). Recycle the existing section. */
+     * be safe). Recycle the existing section.
+     *
+     * The aggregate headerbar counters track sum-over-all-sections,
+     * so emptying this section means subtracting its old totals
+     * from them. Similarly, if our selection was in this section,
+     * clear it now since the row about to be wiped from the store
+     * would leave a dangling selected_row index. */
     sec = g_hash_table_lookup (tracker_sections, tracker_url);
     if (sec) {
+        guint old_total = tracker_section_num_total (sec);
+        guint old_found = tracker_section_num_found (sec);
+        char *num;
+
         sec->version = version;
         sec->expected = expected_count;
-        tracker_tree_destroy (sec->tree);
-        sec->tree = NULL;
-        sec->num_total = 0;
-        sec->num_found = 0;
-        gtk_hlist_clear (GTK_HLIST (sec->list));
-        gtk_hlist_set_column_visible (GTK_HLIST (sec->list), COL_COUNTRY,
-                                      version != 1);
-        gtk_hlist_set_column_visible (GTK_HLIST (sec->list), COL_CAPS,
-                                      version != 1);
+        if (selected_section == sec) {
+            selected_section = NULL;
+            selected_row = -1;
+            if (sec->selection) {
+                gtk_single_selection_set_selected (
+                    GTK_SINGLE_SELECTION (sec->selection),
+                    GTK_INVALID_LIST_POSITION);
+            }
+        }
+        g_list_store_remove_all (sec->store);
+        g_hash_table_remove_all (sec->dedup);
+        gtk_column_view_column_set_visible (sec->col_country, version != 1);
+        gtk_column_view_column_set_visible (sec->col_caps, version != 1);
+
+        /* Reconcile aggregate counters: this section just went
+         * from (old_total, old_found) → (0, 0). */
+        num_total_total -= (int)old_total;
+        num_found_total -= (int)old_found;
+        num = g_strdup_printf ("  %d", num_found_total);
+        gtk_label_set_text (GTK_LABEL (lbl_found), num);
+        g_free (num);
+        num = g_strdup_printf (" / %d", num_total_total);
+        gtk_label_set_text (GTK_LABEL (lbl_total), num);
+        g_free (num);
+
         tracker_section_update_title (sec);
         current_section = sec;
         return;
@@ -814,10 +1147,11 @@ tracker_batch_begin (const char *tracker_url, guint8 version,
 void
 tracker_server_create (HxTrackerServer *event)
 {
-    struct tracker_server *server;
+    HxTrackerRow *row;
     struct tracker_section *sec;
+    char *dedup_key;
     char *num;
-    int old_num_found;
+    guint old_found, new_found;
 
     if (!event || !tracker_sections_box) {
         return;
@@ -839,7 +1173,7 @@ tracker_server_create (HxTrackerServer *event)
     /* event->address is always non-NULL (the constructor guarantees
      * it for every addr_type — see tracker_event.c::format_address).
      * Defensive bail anyway so a future refactor that loosens that
-     * invariant doesn't NULL-deref strcmp. */
+     * invariant doesn't NULL-deref the dedup key. */
     if (!event->address || !*event->address) {
         debug_log ("tracker",
                    "skipping record with empty address (addr_type=0x%02x, "
@@ -851,41 +1185,30 @@ tracker_server_create (HxTrackerServer *event)
     /* Dedup is per-section: the same server appearing on tracker A
      * and tracker B is intentionally shown twice, once per section,
      * because the per-tracker view IS the whole point of the
-     * grouping. */
-    if (find_server (event->address, event->port, sec->tree)) {
+     * grouping. The hashtable owns the dedup key strings; we
+     * insert with NULL value since we only care about presence. */
+    dedup_key = dedup_key_for (event->address, event->port);
+    if (g_hash_table_contains (sec->dedup, dedup_key)) {
+        g_free (dedup_key);
         return;
     }
+    g_hash_table_insert (sec->dedup, dedup_key, NULL);
 
-    sec->num_total++;
+    /* Append to the per-section GListStore. The filter model
+     * decides synchronously (set_incremental FALSE) whether the
+     * new row passes the current GRegex; if so, the section's
+     * num_found ticks up by one. We capture old/new found counts
+     * to update the headerbar's aggregate filtered count cheaply
+     * (avoids walking every section). */
+    old_found = tracker_section_num_found (sec);
+    row = hx_tracker_row_new_from_event (event);
+    g_list_store_append (sec->store, row);
+    g_object_unref (row);
+    new_found = tracker_section_num_found (sec);
+
     num_total_total++;
-    server = g_malloc0 (sizeof (struct tracker_server));
-    server->address = g_strdup (event->address);
-    server->port = event->port;
-    server->nusers = event->nusers;
-    /* MacRoman → UTF-8 transcoding lives in the boxed-event
-     * constructor now (hx_tracker_server_new_v1). v3 records arrive
-     * already-UTF-8 per spec, validated with g_utf8_make_valid in
-     * the constructor. Either way, by the time we get here the
-     * strings are Pango-safe — just g_strdup so the dedup tree
-     * owns its own copies and the event can be freed by the
-     * signal emitter. */
-    server->name = g_strdup (event->name ? event->name : "");
-    server->desc = g_strdup (event->desc ? event->desc : "");
-    /* Snapshot the typed TLV view so server-tree rows can render
-     * metadata columns (country, capabilities) and the details
-     * popover without re-walking the raw TLV blob. Deep copy
-     * because the signal subscriber's event is freed after the
-     * emit. hx_tracker_v3_meta_copy(NULL) returns NULL, but the
-     * constructors always populate event->meta (v1 with a
-     * zero-init meta, v3 with the parsed one), so this is
-     * always non-NULL in practice. */
-    server->meta = hx_tracker_v3_meta_copy (event->meta);
-    insert_server (server, sec);
-
-    old_num_found = sec->num_found;
-    tracker_search_tree (current_search, sec, server);
-    if (old_num_found != sec->num_found) {
-        num_found_total += (sec->num_found - old_num_found);
+    if (new_found != old_found) {
+        num_found_total += (int)(new_found - old_found);
     }
 
     tracker_section_update_title (sec);
@@ -901,86 +1224,609 @@ tracker_server_create (HxTrackerServer *event)
     gtk_label_set_text (GTK_LABEL (lbl_total), num);
     g_free (num);
 
-    if (old_num_found != sec->num_found) {
+    if (new_found != old_found) {
         num = g_strdup_printf ("  %d", num_found_total);
         gtk_label_set_text (GTK_LABEL (lbl_found), num);
         g_free (num);
     }
 }
 
-/* Phase 4.5: button-press-event is gone in GTK 4. Each section's
- * GtkHList carries its own gesture controller — the controller's
- * widget is the GtkHList, and we recover the owning section via
- * the "tracker-section" qdata stashed at section construction.
- *
- * On any press: update selected_section + selected_row to point at
- * the row just clicked (across all sections — this section becomes
- * the new active one for Details / Connect). On double-click:
- * connect immediately. */
-static void
-tracker_section_pressed (GtkGestureClick *gesture, int n_press, double x,
-                         double y, gpointer data)
+/* Helper: pull the HxTrackerRow currently at `pos` in `sec`'s
+ * filtered view (i.e. what's actually visible in the column view).
+ * Returns a transfer-full GObject ref — caller must g_object_unref. */
+static HxTrackerRow *
+tracker_section_get_row (struct tracker_section *sec, int pos)
 {
-    GtkWidget *widget
-        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-    struct tracker_section *sec;
-    int row = -1, col = -1;
+    if (!sec || pos < 0) {
+        return NULL;
+    }
+    return g_list_model_get_item (G_LIST_MODEL (sec->selection), (guint)pos);
+}
+
+/* notify::selected handler — fires on every selection change on
+ * every section. Two responsibilities:
+ *   1. Mirror the section's selection into our global (selected_
+ *      section, selected_row) so the headerbar Details / Connect
+ *      buttons act on the right row.
+ *   2. Cross-section single-selection invariant: when section A
+ *      gets a selection, clear section B's so only one row is
+ *      visually highlighted at a time.
+ *
+ * Recursion control: clearing B's selection fires its own
+ * notify::selected with pos==INVALID. The handler checks whether
+ * selected_section still points at it before nulling the global
+ * state, so the recursive call sees the new selected_section is
+ * already someone else and no-ops. */
+static void
+on_section_selected_changed (GObject *obj, GParamSpec *ps, gpointer data)
+{
+    GtkSingleSelection *sel = GTK_SINGLE_SELECTION (obj);
+    struct tracker_section *sec
+        = g_object_get_data (G_OBJECT (obj), "tracker-section");
+    guint pos;
+    (void)ps;
     (void)data;
 
-    sec = g_object_get_data (G_OBJECT (widget), "tracker-section");
     if (!sec) {
         return;
     }
-    gtk_hlist_get_selection_info (GTK_HLIST (widget), (int)x, (int)y, &row,
-                                  &col);
-    selected_section = sec;
-    selected_row = row;
+    pos = gtk_single_selection_get_selected (sel);
 
-    if (n_press == 2) {
-        struct tracker_server *server;
+    if (pos == GTK_INVALID_LIST_POSITION) {
+        /* This section is being cleared. Only blank the global
+         * state if it still points at us — otherwise we're the
+         * recursive callee handling someone else's clear. */
+        if (selected_section == sec) {
+            selected_section = NULL;
+            selected_row = -1;
+        }
+        return;
+    }
 
-        server = gtk_hlist_get_row_data (GTK_HLIST (sec->list), row);
-        if (!server || !server->address) {
+    /* Set global state FIRST so the recursive clear below sees
+     * selected_section != cleared_sec and skips the global
+     * blanking. */
+    {
+        struct tracker_section *old = selected_section;
+        selected_section = sec;
+        selected_row = (int)pos;
+
+        if (old && old != sec && old->selection) {
+            gtk_single_selection_set_selected (
+                GTK_SINGLE_SELECTION (old->selection),
+                GTK_INVALID_LIST_POSITION);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- */
+/* Best-effort v3 security picking                                   */
+/*                                                                   */
+/* When the row's tracker carried v3 TLVs telling us this server     */
+/* supports TLS or HOPE, we'd like to auto-prefer the stronger       */
+/* transport rather than connecting plaintext-by-default. The        */
+/* picker returns:                                                   */
+/*   *out_port    — the port to connect to (regular port, or         */
+/*                  tls_port when TLS is on)                         */
+/*   *out_tls     — 1 if TLS, 0 otherwise                            */
+/*   *out_secure  — 1 if HOPE on, 0 otherwise                        */
+/*   *out_cipher  — bookmark-vocabulary cipher byte (0 = none)       */
+/* The picker is conservative: TLS wins over HOPE when both are      */
+/* offered, since dedicated-port TLS is independently auditable      */
+/* and doesn't rely on the legacy HOPE handshake. The HOPE-cipher    */
+/* preference order is CHACHA20-POLY1305 > BLOWFISH (RC4 retired).   */
+/* ---------------------------------------------------------------- */
+
+/* Substring-match a cipher name in the comma/space-separated
+ * hope_ciphers string. Case-insensitive so a tracker emitting
+ * "chacha20-poly1305" matches our canonical "CHACHA20-POLY1305".
+ * Whole-token match: searching for "RC4" doesn't trigger on
+ * "RC4-DROP" (a hypothetical future name) because we require the
+ * match to be bracketed by start-of-string / end-of-string / a
+ * delimiter on both sides. */
+static gboolean
+hope_ciphers_offers (const char *list, const char *needle)
+{
+    gchar *folded_list, *folded_needle;
+    gchar **tokens;
+    gboolean found = FALSE;
+    int i;
+
+    if (!list || !*list || !needle || !*needle) {
+        return FALSE;
+    }
+    folded_list = g_ascii_strdown (list, -1);
+    folded_needle = g_ascii_strdown (needle, -1);
+    /* Split on common delimiters seen in the wild: comma, space,
+     * semicolon. g_strsplit_set tolerates empty tokens, so a list
+     * like "A,,B" doesn't trip the strcmp below. */
+    tokens = g_strsplit_set (folded_list, ", ;", -1);
+    for (i = 0; tokens[i]; i++) {
+        const char *t = g_strstrip (tokens[i]);
+        if (*t && g_strcmp0 (t, folded_needle) == 0) {
+            found = TRUE;
+            break;
+        }
+    }
+    g_strfreev (tokens);
+    g_free (folded_list);
+    g_free (folded_needle);
+    return found;
+}
+
+static void
+tracker_row_pick_security (HxTrackerRow *row, guint16 *out_port,
+                           gboolean *out_tls, gboolean *out_secure,
+                           unsigned char *out_cipher)
+{
+    HxTrackerV3Meta *m;
+    guint16 port;
+
+    port = hx_tracker_row_get_port (row);
+    *out_port = port;
+    *out_tls = FALSE;
+    *out_secure = FALSE;
+    *out_cipher = BOOKMARK_CIPHER_BYTE_NONE;
+
+    m = hx_tracker_row_get_meta (row);
+    if (!m) {
+        return;
+    }
+
+    /* TLS first: dedicated port, independently auditable. tls_port
+     * MUST be non-zero — supports_tls without a port is a malformed
+     * TLV combo, defer to HOPE. */
+    if (m->supports_tls && m->tls_port) {
+        *out_port = m->tls_port;
+        *out_tls = TRUE;
+        return;
+    }
+
+    /* HOPE: pick the strongest cipher the server advertised. The
+     * hope_ciphers TLV is optional — older HOPE-supporting servers
+     * may not advertise specifics, in which case we leave the cipher
+     * unset and let hx_connect's HOPE handshake negotiate. */
+    if (m->supports_hope) {
+        *out_secure = TRUE;
+        if (hope_ciphers_offers (m->hope_ciphers, "CHACHA20-POLY1305")) {
+            *out_cipher = BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305;
+        } else if (hope_ciphers_offers (m->hope_ciphers, "BLOWFISH")) {
+            *out_cipher = BOOKMARK_CIPHER_BYTE_BLOWFISH;
+        }
+        /* No hope_ciphers info → leave cipher = NONE; the HOPE
+         * handshake will negotiate whatever the server + client
+         * have in common. */
+    }
+}
+
+/* ---------------------------------------------------------------- */
+/* Bookmark save                                                    */
+/* ---------------------------------------------------------------- */
+
+#define TRACKER_MAX_BOOKMARK_NAME 96
+
+/* Sanitize a tracker-provided server name for use as a bookmark
+ * filename. Strategy:
+ *   1. Strip ASCII control chars (< 0x20, 0x7F).
+ *   2. Replace filesystem-meaningful punctuation (/, \\, :, *, ?,
+ *      ", <, >, |) with '_'. The union of POSIX-bad and Windows-bad
+ *      keeps the resulting filename portable to network mounts.
+ *   3. Strip leading whitespace + dots so we don't generate hidden
+ *      files or oddly-leading names.
+ *   4. Strip trailing whitespace.
+ *   5. Reject "." / ".." reserved names (post-stripping).
+ *   6. Cap length at TRACKER_MAX_BOOKMARK_NAME bytes, snapped to a
+ *      UTF-8 boundary so we don't slice a multi-byte sequence.
+ *   7. Empty result → fall back to `fallback` (typically the
+ *      server address), or "server" if that's empty too.
+ *
+ * Returns a fresh g_strdup'd buffer; caller frees with g_free. */
+static char *
+tracker_safe_bookmark_filename (const char *raw, const char *fallback)
+{
+    GString *out;
+    const char *p;
+    gsize start;
+
+    if (!raw || !*raw) {
+        raw = (fallback && *fallback) ? fallback : "server";
+    }
+
+    out = g_string_new (NULL);
+    for (p = raw; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7F) {
+            continue;
+        }
+        switch (c) {
+        case '/':
+        case '\\':
+        case ':':
+        case '*':
+        case '?':
+        case '"':
+        case '<':
+        case '>':
+        case '|':
+            g_string_append_c (out, '_');
+            break;
+        default:
+            g_string_append_c (out, c);
+            break;
+        }
+    }
+
+    /* Strip leading whitespace + dots. */
+    start = 0;
+    while (start < out->len
+           && (out->str[start] == ' ' || out->str[start] == '\t'
+               || out->str[start] == '.')) {
+        start++;
+    }
+    if (start > 0) {
+        g_string_erase (out, 0, (gssize)start);
+    }
+    /* Trim trailing whitespace. */
+    while (out->len > 0
+           && (out->str[out->len - 1] == ' '
+               || out->str[out->len - 1] == '\t')) {
+        g_string_truncate (out, out->len - 1);
+    }
+
+    /* Reserved names → fall back. */
+    if (out->len == 0 || g_strcmp0 (out->str, ".") == 0
+        || g_strcmp0 (out->str, "..") == 0) {
+        g_string_truncate (out, 0);
+        g_string_append (out,
+                         (fallback && *fallback) ? fallback : "server");
+    }
+
+    /* Cap length. If the truncation would slice mid-UTF8, snap back
+     * to the last valid boundary. */
+    if (out->len > TRACKER_MAX_BOOKMARK_NAME) {
+        const char *valid_end = out->str + TRACKER_MAX_BOOKMARK_NAME;
+        if (!g_utf8_validate (out->str, TRACKER_MAX_BOOKMARK_NAME,
+                              &valid_end)) {
+            /* valid_end now points at the first invalid byte; back
+             * up to the start of the partial sequence. */
+        }
+        g_string_truncate (out, (gsize)(valid_end - out->str));
+    }
+
+    return g_string_free (out, FALSE);
+}
+
+/* Build + save an HxBookmark for the given row. Applies the v3
+ * security picker so the bookmark records "use TLS on tls_port"
+ * or "use HOPE with cipher X" when the tracker advertised them.
+ * Surfaces success / failure via toolbar_show_toast. */
+static void
+tracker_save_bookmark_for_row (HxTrackerRow *row)
+{
+    HxBookmark *bm;
+    char *safe_name, *display_name;
+    GError *err = NULL;
+    guint16 port;
+    gboolean tls, secure;
+    unsigned char cipher;
+    char toastbuf[256];
+
+    if (!row) {
+        return;
+    }
+
+    bm = hx_bookmark_new ();
+    if (!bm) {
+        return;
+    }
+
+    /* Sanitize the server name into a filesystem-safe filename
+     * with a fallback to the server address. hx_bookmark_safe_
+     * filename swaps any residual '/' for '\\' on top of our
+     * sanitizer's '/'→'_' pass. */
+    safe_name = tracker_safe_bookmark_filename (
+        hx_tracker_row_get_name (row), hx_tracker_row_get_address (row));
+    display_name = safe_name ? hx_bookmark_safe_filename (safe_name) : NULL;
+    g_free (safe_name);
+    if (!display_name) {
+        toolbar_show_toast (
+            _ ("Couldn't pick a bookmark filename for this server."));
+        hx_bookmark_free (bm);
+        return;
+    }
+
+    /* Refuse to clobber an existing bookmark with the same name.
+     * Saving silently with "w" would overwrite whatever's there;
+     * surface the conflict so the user can rename or delete the
+     * existing one from the Bookmarks dialog. */
+    {
+        g_autoptr (HxBookmark) existing = hx_bookmark_load (display_name);
+        if (existing) {
+            g_snprintf (toastbuf, sizeof (toastbuf),
+                        _ ("Bookmark \"%s\" already exists. Manage it from "
+                           "the Bookmarks dialog."),
+                        display_name);
+            toolbar_show_toast (toastbuf);
+            g_free (display_name);
+            hx_bookmark_free (bm);
             return;
         }
-        memset (the_session.htlc.compressalg, 0,
-                sizeof (the_session.htlc.compressalg));
-        memset (the_session.htlc.cipheralg, 0,
-                sizeof (the_session.htlc.cipheralg));
-        /* Tracker-driven connects are always plaintext: the tracker
-		 * doesn't advertise a TLS port today. If a future tracker
-		 * variant returns one (see docs/tls-scoping.md §10), this
-		 * stamp gets replaced with that field.
-		 *
-		 * Phase E: server->address is the printable string the boxed
-		 * event delivered — IPv4 dotted-quad, IPv6 colon-hex, or
-		 * a literal hostname. hx_connect's first arg is a host
-		 * string that GSocketClient resolves via getaddrinfo, so
-		 * all three forms route through the same resolver and
-		 * connect happily. */
-        hx_connect (&the_session.htlc, server->address, server->port, "", "", 0,
-                    /*tls=*/0);
     }
+
+    bm->name = display_name;
+
+    /* Pick best transport security. */
+    tracker_row_pick_security (row, &port, &tls, &secure, &cipher);
+
+    g_strlcpy (bm->server, hx_tracker_row_get_address (row),
+               sizeof (bm->server));
+    g_snprintf (bm->port, sizeof (bm->port), "%u", (unsigned)port);
+    /* Leave login/pass empty: tracker hits don't carry credentials,
+     * and the user can fill them in via the bookmarks dialog. */
+    bm->login[0] = '\0';
+    bm->pass[0] = '\0';
+    bm->secure = secure ? 1 : 0;
+    bm->compress = 0; /* HOPE compression negotiates at connect time */
+    bm->cipher = (char)cipher;
+    bm->tls = tls ? 1 : 0;
+
+    if (!hx_bookmark_save (bm, &err)) {
+        g_snprintf (toastbuf, sizeof (toastbuf),
+                    _ ("Couldn't save bookmark: %s"),
+                    err ? err->message : "unknown error");
+        toolbar_show_toast (toastbuf);
+        g_clear_error (&err);
+    } else {
+        g_snprintf (toastbuf, sizeof (toastbuf),
+                    _ ("Saved bookmark \"%s\""), bm->name);
+        toolbar_show_toast (toastbuf);
+    }
+    hx_bookmark_free (bm);
+}
+
+/* GtkColumnView "activate" — fired on double-click or Enter. Same
+ * intent as the old gesture handler's n_press==2 path: connect to
+ * the row's server immediately. When the tracker carried v3 TLVs
+ * about transport security (supports_tls / supports_hope /
+ * hope_ciphers), the picker auto-enables the strongest available
+ * — TLS on tls_port if offered, else HOPE with the best known
+ * cipher. v1 records all fall through plaintext. */
+static void
+on_section_activate (GtkColumnView *cv, guint pos, gpointer data)
+{
+    struct tracker_section *sec
+        = g_object_get_data (G_OBJECT (cv), "tracker-section");
+    HxTrackerRow *row;
+    guint16 port;
+    gboolean tls, secure;
+    unsigned char cipher_byte;
+    const char *cipher_name;
+    (void)data;
+
+    if (!sec) {
+        return;
+    }
+    row = tracker_section_get_row (sec, (int)pos);
+    if (!row) {
+        return;
+    }
+
+    memset (the_session.htlc.compressalg, 0,
+            sizeof (the_session.htlc.compressalg));
+    memset (the_session.htlc.cipheralg, 0,
+            sizeof (the_session.htlc.cipheralg));
+
+    tracker_row_pick_security (row, &port, &tls, &secure, &cipher_byte);
+    cipher_name = bookmark_cipher_name (cipher_byte);
+    if (cipher_name) {
+        g_strlcpy (the_session.htlc.cipheralg, cipher_name,
+                   sizeof (the_session.htlc.cipheralg));
+    }
+
+    /* Phase E: address is the printable string the boxed event
+     * delivered — IPv4 dotted-quad, IPv6 colon-hex, or a literal
+     * hostname. hx_connect's first arg is a host string that
+     * GSocketClient resolves via getaddrinfo, so all three forms
+     * route through the same resolver and connect happily. */
+    hx_connect (&the_session.htlc, hx_tracker_row_get_address (row), port,
+                "", "", secure ? 1 : 0, tls ? 1 : 0);
+    g_object_unref (row);
+}
+
+/* Helper: build one button for the right-click popover. The
+ * callback receives the popover so it can pop it down before
+ * (or after) invoking the action. */
+typedef void (*menu_action_func) (void);
+
+static void
+on_popover_action_clicked (GtkButton *btn, gpointer user_data)
+{
+    menu_action_func action = g_object_get_data (G_OBJECT (btn), "menu-action");
+    GtkWidget *popover = user_data;
+
+    if (action) {
+        action ();
+    }
+    if (popover) {
+        gtk_popover_popdown (GTK_POPOVER (popover));
+    }
+}
+
+static GtkWidget *
+build_menu_button (const char *label, menu_action_func action,
+                   GtkWidget *popover)
+{
+    GtkWidget *btn = gtk_button_new_with_label (label);
+    GtkWidget *child;
+    gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
+    /* Left-align the label like a real menu item rather than the
+     * default center-aligned GtkButton. */
+    child = gtk_button_get_child (GTK_BUTTON (btn));
+    if (child) {
+        gtk_widget_set_halign (child, GTK_ALIGN_START);
+    }
+    gtk_widget_set_hexpand (btn, TRUE);
+    g_object_set_data (G_OBJECT (btn), "menu-action", (gpointer)action);
+    g_signal_connect (btn, "clicked", G_CALLBACK (on_popover_action_clicked),
+                      popover);
+    return btn;
+}
+
+/* The popover is built fresh on each right-click and parented to
+ * the column view. The "closed" signal handler unparents + drops
+ * it so we don't leak. */
+static void
+on_context_popover_closed (GtkPopover *popover, gpointer user_data)
+{
+    (void)user_data;
+    gtk_widget_unparent (GTK_WIDGET (popover));
+}
+
+static void
+on_section_secondary_press (GtkGestureClick *gesture, int n_press, double x,
+                            double y, gpointer data)
+{
+    GtkWidget *cv_widget
+        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
+    struct tracker_section *sec
+        = g_object_get_data (G_OBJECT (cv_widget), "tracker-section");
+    GtkWidget *picked, *walker;
+    GtkListItem *item = NULL;
+    guint pos;
+    GtkWidget *popover, *vbox, *btn;
+    GdkRectangle rect;
+    (void)n_press;
+    (void)data;
+
+    if (!sec) {
+        return;
+    }
+
+    /* Find which row was right-clicked. gtk_widget_pick returns the
+     * deepest pickable descendant under (x,y); we walk up the parent
+     * chain until we find a cell that has the GtkListItem stash from
+     * a bind callback. If we never find one (right-click was on
+     * column headers or the gap below the rows), bail. */
+    picked = gtk_widget_pick (cv_widget, x, y, GTK_PICK_DEFAULT);
+    for (walker = picked; walker && walker != cv_widget;
+         walker = gtk_widget_get_parent (walker)) {
+        item = g_object_get_data (G_OBJECT (walker), "tracker-list-item");
+        if (item) {
+            break;
+        }
+    }
+    if (!item) {
+        return;
+    }
+    pos = gtk_list_item_get_position (item);
+    if (pos == GTK_INVALID_LIST_POSITION) {
+        return;
+    }
+
+    /* Select the row first so the action handlers (Connect, Save
+     * Bookmark, Get Info) all act on it via selected_section /
+     * selected_row. notify::selected fires synchronously here, which
+     * is what we want — the global state is up to date by the time
+     * the user clicks an item in the menu. */
+    gtk_single_selection_set_selected (
+        GTK_SINGLE_SELECTION (sec->selection), pos);
+
+    /* Build a fresh popover. Same pattern users.c uses (hand-built
+     * GtkBox of flat buttons instead of GtkPopoverMenu) since
+     * GtkPopoverMenu had the well-known hover-routing + max-height
+     * regressions documented in users.c. */
+    popover = gtk_popover_new ();
+    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
+    gtk_widget_set_halign (popover, GTK_ALIGN_START);
+    rect.x = (int)x;
+    rect.y = (int)y;
+    rect.width = 1;
+    rect.height = 1;
+    gtk_widget_set_parent (popover, cv_widget);
+    gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
+    g_signal_connect (popover, "closed",
+                      G_CALLBACK (on_context_popover_closed), NULL);
+
+    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start (vbox, 4);
+    gtk_widget_set_margin_end (vbox, 4);
+    gtk_widget_set_margin_top (vbox, 4);
+    gtk_widget_set_margin_bottom (vbox, 4);
+    gtk_popover_set_child (GTK_POPOVER (popover), vbox);
+
+    /* The three actions reuse the same handlers the headerbar
+     * buttons fire; they all read selected_section + selected_row
+     * which we just refreshed via set_selected above. Order is
+     * Connect (most common) → Save Bookmark → Get Info. */
+    btn = build_menu_button (_ ("Connect"), tracker_connect, popover);
+    gtk_box_append (GTK_BOX (vbox), btn);
+    btn = build_menu_button (_ ("Save Bookmark"), tracker_save_bookmark,
+                             popover);
+    gtk_box_append (GTK_BOX (vbox), btn);
+    btn = build_menu_button (_ ("Get Info"), tracker_details, popover);
+    gtk_box_append (GTK_BOX (vbox), btn);
+
+    gtk_popover_popup (GTK_POPOVER (popover));
 }
 
 static void
 tracker_connect (void)
 {
-    struct tracker_server *server;
+    HxTrackerRow *row;
+    guint16 port;
+    gboolean tls, secure;
+    unsigned char cipher_byte;
+    char addrbuf[256];
+    char portbuf[16];
 
     if (!selected_section || selected_row < 0) {
         return;
     }
-    server = gtk_hlist_get_row_data (GTK_HLIST (selected_section->list),
-                                     selected_row);
-    if (server && server->address) {
-        create_connect_window (0, &the_session);
-        /* Phase E: hand the connect-dialog the address string verbatim
-         * (IPv4 dotted-quad, IPv6 colon-hex, or hostname). The dialog
-         * just stuffs it into the host entry where the user can
-         * tweak it before connecting. */
-        connect_set_entries (server->address, 0, 0, server->port);
+    row = tracker_section_get_row (selected_section, selected_row);
+    if (!row) {
+        return;
     }
+
+    create_connect_window (0, &the_session);
+
+    /* Phase E: hand the connect-dialog the address string verbatim
+     * (IPv4 dotted-quad, IPv6 colon-hex, or hostname). The dialog
+     * just stuffs it into the host entry where the user can
+     * tweak it before connecting. The port + security fields are
+     * the v3-aware picks: TLS on tls_port when supports_tls, else
+     * HOPE with the best advertised cipher, else plaintext. Pre-
+     * populating these on the dialog matches what the double-
+     * click-to-connect path does, so the user sees the same
+     * setting either way and only has to confirm. */
+    tracker_row_pick_security (row, &port, &tls, &secure, &cipher_byte);
+    g_strlcpy (addrbuf, hx_tracker_row_get_address (row), sizeof (addrbuf));
+    g_snprintf (portbuf, sizeof (portbuf), "%u", (unsigned)port);
+    /* set_the_entries takes char* (not const char*) by convention;
+     * the buffers we just filled are stack-local so the cast is
+     * safe. compress=0 — HOPE compression negotiates at connect
+     * time, not driven by the dropdown. */
+    set_the_entries (addrbuf, (char *)"", (char *)"", portbuf,
+                     secure ? 1 : 0, 0, (char)cipher_byte,
+                     tls ? 1 : 0);
+    g_object_unref (row);
+}
+
+/* Headerbar "Save bookmark" handler. Saves a bookmark for the
+ * currently-selected row; toast surfaces success / failure. */
+static void
+tracker_save_bookmark (void)
+{
+    HxTrackerRow *row;
+
+    if (!selected_section || selected_row < 0) {
+        return;
+    }
+    row = tracker_section_get_row (selected_section, selected_row);
+    if (!row) {
+        return;
+    }
+    tracker_save_bookmark_for_row (row);
+    g_object_unref (row);
 }
 
 /* ---------------------------------------------------------------- */
@@ -1194,12 +2040,17 @@ details_finish_group (GtkWidget *content, AdwPreferencesGroup *grp, int count)
 }
 
 static void
-show_server_details (struct tracker_server *server)
+show_server_details (HxTrackerRow *server)
 {
     AdwDialog *dlg;
     GtkWidget *toolbar_view, *header, *content, *clamp, *scrolled;
     AdwPreferencesGroup *grp;
     HxTrackerV3Meta *m;
+    const char *name;
+    const char *address;
+    const char *desc;
+    guint16 port;
+    guint16 nusers;
     char title_buf[256];
     char addrport[256];
     char nbuf[32];
@@ -1209,11 +2060,15 @@ show_server_details (struct tracker_server *server)
         return;
     }
 
+    name = hx_tracker_row_get_name (server);
+    address = hx_tracker_row_get_address (server);
+    desc = hx_tracker_row_get_desc (server);
+    port = hx_tracker_row_get_port (server);
+    nusers = hx_tracker_row_get_nusers (server);
+
     dlg = ADW_DIALOG (adw_dialog_new ());
     g_snprintf (title_buf, sizeof (title_buf), _ ("Server details — %s"),
-                (server->name && *server->name)
-                    ? server->name
-                    : (server->address ? server->address : "?"));
+                (name && *name) ? name : (address ? address : "?"));
     adw_dialog_set_title (dlg, title_buf);
     adw_dialog_set_content_width (dlg, 520);
     adw_dialog_set_content_height (dlg, 640);
@@ -1230,16 +2085,16 @@ show_server_details (struct tracker_server *server)
     gtk_widget_set_margin_start (content, 18);
     gtk_widget_set_margin_end (content, 18);
 
-    m = server->meta;
+    m = hx_tracker_row_get_meta (server);
 
     /* ------------------ Server (always present) ------------------ */
     grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (grp, _ ("Server"));
     n = 0;
-    if (server->name && *server->name) {
-        n += details_add_str_row (grp, _ ("Name"), server->name);
+    if (name && *name) {
+        n += details_add_str_row (grp, _ ("Name"), name);
     }
-    if (server->address && *server->address) {
+    if (address && *address) {
         /* Bracket the address when it contains a colon so an IPv6
          * literal (either from an IPV6-type wire record or from a
          * HOSTNAME-type record carrying an IPv6 literal, which is
@@ -1247,19 +2102,17 @@ show_server_details (struct tracker_server *server)
          * `2001:db8::1:5500` and leave the reader guessing where the
          * port starts. RFC 3986 §3.2.2 bracket form. IPv4 and bare
          * hostnames have no colons, so they pass through unchanged. */
-        if (strchr (server->address, ':') != NULL) {
-            g_snprintf (addrport, sizeof (addrport), "[%s]:%u", server->address,
-                        server->port);
+        if (strchr (address, ':') != NULL) {
+            g_snprintf (addrport, sizeof (addrport), "[%s]:%u", address, port);
         } else {
-            g_snprintf (addrport, sizeof (addrport), "%s:%u", server->address,
-                        server->port);
+            g_snprintf (addrport, sizeof (addrport), "%s:%u", address, port);
         }
         n += details_add_str_row (grp, _ ("Address"), addrport);
     }
-    if (server->desc && *server->desc) {
-        n += details_add_str_row (grp, _ ("Description"), server->desc);
+    if (desc && *desc) {
+        n += details_add_str_row (grp, _ ("Description"), desc);
     }
-    g_snprintf (nbuf, sizeof (nbuf), "%u", server->nusers);
+    g_snprintf (nbuf, sizeof (nbuf), "%u", nusers);
     n += details_add_str_row (grp, _ ("Users online"), nbuf);
     if (m && m->has_max_users) {
         g_snprintf (nbuf, sizeof (nbuf), "%u", m->max_users);
@@ -1389,47 +2242,24 @@ show_server_details (struct tracker_server *server)
                         tracker_window ? GTK_WIDGET (tracker_window) : NULL);
 }
 
-/* Headerbar "Details" button handler. Uses the last-selected row
- * (tracker_storow), same convention as tracker_connect — the
- * select_row signal handler below keeps that current as the user
- * clicks or arrow-keys through the list. If no row has been
- * selected yet, fall through silently rather than opening an empty
- * dialog. */
+/* Headerbar "Details" button handler. Uses the last-selected
+ * row, kept current by the GtkSingleSelection notify::selected
+ * handler in on_section_selected_changed. If no row has been
+ * selected yet, fall through silently rather than opening an
+ * empty dialog. */
 static void
 tracker_details (void)
 {
-    struct tracker_server *server;
+    HxTrackerRow *row;
 
     if (!selected_section || selected_row < 0) {
         return;
     }
-    server = gtk_hlist_get_row_data (GTK_HLIST (selected_section->list),
-                                     selected_row);
-    if (server) {
-        show_server_details (server);
+    row = tracker_section_get_row (selected_section, selected_row);
+    if (row) {
+        show_server_details (row);
+        g_object_unref (row);
     }
-}
-
-/* Track the selection so the Details / Connect buttons act on the
- * row the user has highlighted (with mouse OR arrow keys). The
- * tracker_section_pressed gesture handler also updates the selection
- * on click — that's still needed for the n_press == 2 double-click
- * path which fires before any select_row arrives. The owning section
- * is read out of the list's "tracker-section" qdata stashed at
- * section construction time. */
-static void
-tracker_section_row_selected (GtkHList *hlist, gint row,
-                              gint column G_GNUC_UNUSED,
-                              gpointer event G_GNUC_UNUSED,
-                              gpointer data G_GNUC_UNUSED)
-{
-    struct tracker_section *sec
-        = g_object_get_data (G_OBJECT (hlist), "tracker-section");
-    if (!sec) {
-        return;
-    }
-    selected_section = sec;
-    selected_row = row;
 }
 
 void
@@ -1442,6 +2272,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     GtkWidget *sections_scroll;
     GtkWidget *refreshbtn;
     GtkWidget *connbtn;
+    GtkWidget *bookmarkbtn;
     GtkWidget *detailsbtn;
     GtkWidget *count_box;
     session *sess = data;
@@ -1455,6 +2286,29 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     gtk_window_set_default_size (GTK_WINDOW (tracker_window), 860, 500);
     g_signal_connect (tracker_window, "close-request",
                       G_CALLBACK (close_tracker_window), 0);
+
+    /* Register the window with the GtkApplication so dialogs
+     * opened while it has focus (the Connect dialog from our
+     * Connect button, in particular) parent themselves to the
+     * tracker rather than to whichever window happened to be
+     * application-active before. gtkhx_active_window() reads
+     * gtk_application_get_active_window which only tracks
+     * windows that have been added to the application. */
+    {
+        GApplication *app = gtkhx_get_application ();
+        if (app && GTK_IS_APPLICATION (app)) {
+            gtk_application_add_window (GTK_APPLICATION (app),
+                                        GTK_WINDOW (tracker_window));
+        }
+    }
+
+    /* Shared filter: one GtkCustomFilter the whole window's
+     * sections share. tracker_rerun_search notifies it via
+     * gtk_filter_changed when the regex compiles to a new value;
+     * every section's GtkFilterListModel re-evaluates in a single
+     * pass. The match callback reads `current_search` directly,
+     * so we don't need to hand a user_data pointer through. */
+    tracker_filter = gtk_custom_filter_new (tracker_row_matches, NULL, NULL);
 
     /* Per-section sink. Created here, populated by tracker_batch_begin
      * as each tracker comes online. The value-destroy hook tears each
@@ -1514,19 +2368,28 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     connbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/connect.png",
                                    _ ("Connect to selected server"), 2,
                                    G_CALLBACK (tracker_connect), 0);
+    /* Save Bookmark — record the selected server in the user's
+     * bookmarks dir. GNOME placeholder icon (the same one Files
+     * uses for "Bookmark this location") until we pick a bespoke
+     * pixmap; symbolic so it themes correctly. */
+    bookmarkbtn = gtk_button_new_from_icon_name ("bookmark-new-symbolic");
+    gtk_widget_set_tooltip_text (
+        bookmarkbtn, _ ("Save selected server as a bookmark"));
+    g_signal_connect (bookmarkbtn, "clicked",
+                      G_CALLBACK (tracker_save_bookmark), NULL);
+
     /* Phase B: opens the v3 metadata popover for whichever row is
-     * currently highlighted. Uses a stock symbolic icon rather than
-     * a bespoke pixmap so the button reads correctly under both
-     * light + dark themes. */
-    detailsbtn = gtk_button_new_from_icon_name ("dialog-information-symbolic");
-    gtk_widget_set_tooltip_text (detailsbtn,
-                                 _ ("Show details for selected server"));
-    g_signal_connect (detailsbtn, "clicked", G_CALLBACK (tracker_details),
-                      NULL);
+     * currently highlighted. Uses the same info pixmap the chat /
+     * users / files-browser headerbars use so the iconography stays
+     * consistent across windows. */
+    detailsbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
+                                      _ ("Show details for selected server"),
+                                      2, G_CALLBACK (tracker_details), NULL);
 
     header = adw_header_bar_new ();
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), refreshbtn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), connbtn);
+    adw_header_bar_pack_start (ADW_HEADER_BAR (header), bookmarkbtn);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), detailsbtn);
 
     count_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -1537,13 +2400,11 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     gtk_window_set_titlebar (GTK_WINDOW (tracker_window), header);
 
     /* Per-tracker sections stack inside a scrolled vbox. Each section
-     * is a GtkExpander with its own scrolled GtkHList inside; the
-     * section's inner scroller is vertical=NEVER so the list sizes
-     * to its full content (header + every row) and contributes that
-     * full height up to this outer scroller, which does the actual
-     * vertical scrolling for the stack. The per-section scroller
-     * IS still used for horizontal column overflow. 8 px gutter
-     * between sections. */
+     * is a GtkExpander with its own scrolled GtkColumnView inside;
+     * the column view sizes to its content (header + every row), the
+     * inner scroller handles only horizontal column overflow, and
+     * this outer scroller handles all the vertical scrolling for the
+     * stack as a whole. 8 px gutter between sections. */
     tracker_sections_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
     sections_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sections_scroll),
