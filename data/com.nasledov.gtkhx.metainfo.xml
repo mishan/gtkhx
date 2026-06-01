@@ -62,7 +62,7 @@
       <li>File browser, downloads, uploads, and previews</li>
       <li>Tracker browsing for finding active servers</li>
       <li>Bookmark manager for quick reconnects</li>
-      <li>HOPE secure-login + Blowfish/RC4 link encryption</li>
+      <li>HOPE secure-login with Blowfish or ChaCha20-Poly1305 link encryption</li>
     </ul>
     <p>
       GtkHx was originally written in 2000 against GTK+ 1.2 and

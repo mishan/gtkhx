@@ -3,6 +3,8 @@ gtkhx_sources = files(
   'algo_list.c',
   'banner.c',
   'banner_dispatch.c',
+  'bookmark_cipher.c',
+  'bookmark_rc4_dialog.c',
   'bookmarks.c',
   'bookmarks_io.c',
   'chat.c',

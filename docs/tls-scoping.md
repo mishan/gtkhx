@@ -20,8 +20,10 @@ What stays out of scope: server-side TLS (we're a client),
 TLS-for-the-Hotline-tracker (Mobius doesn't do it, and the tracker
 protocol is a separate UDP/TCP wire format we'd need a separate
 scoping pass for), TLS for the Hotline 1.x in-band cipher (the HOPE
-ChaCha20 / RC4 / Blowfish stack stays exactly as-is — they coexist
-with TLS, they don't compete with it).
+ChaCha20 / Blowfish stack stays exactly as-is — they coexist with
+TLS, they don't compete with it). RC4 used to be in that list and
+was removed in `claude/remove-rc4`; the rest of this doc still
+holds.
 
 ---
 

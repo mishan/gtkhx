@@ -1,11 +1,15 @@
 /*
  * Per-connection cipher state machine for the Hotline HOPE handshake.
  *
- * Crypto primitives now come from Nettle. The wire protocol predates
- * common integrated cipher modes and asks for two things:
+ * Crypto primitives come from Nettle. The wire protocol predates
+ * common integrated cipher modes and originally asked for two things:
  *
- *   - ARC4 (RC4)            stream cipher, byte-at-a-time
+ *   - ARC4 (RC4)            stream cipher, byte-at-a-time   [REMOVED]
  *   - Blowfish in OFB-64    block cipher run as a keystream generator
+ *
+ * RC4 was removed in claude/remove-rc4 — see cipher.h for the
+ * rationale. Blowfish is the only stream cipher left; ChaCha20-Poly1305
+ * AEAD takes the secure path on servers that advertise it.
  *
  * Nettle ships ECB Blowfish but no OFB helper, so blowfish_ofb64_crypt
  * below is a tiny reimplementation of OpenSSL's BF_ofb64_encrypt: walk
@@ -34,7 +38,6 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <netinet/in.h>
-#include <nettle/arcfour.h>
 #include <nettle/blowfish.h>
 /* Deliberately avoid pulling in hx.h: hx.h transitively includes
  * session.h, which #includes <gtk/gtk.h>. cipher.c only needs the
@@ -113,10 +116,6 @@ cipher_decode (struct htlc_conn *htlc, struct qbuf *out, struct qbuf *in,
 	writestuff("dec: ", htlc->cipher_decode_type, &in->buf[in->pos], len);
 #endif
 	switch (htlc->cipher_decode_type) {
-		case CIPHER_RC4:
-			arcfour_crypt(&htlc->cipher_decode_state.rc4, len,
-			              &out->buf[out->pos], &in->buf[in->pos]);
-			break;
 		case CIPHER_BLOWFISH:
 			blowfish_ofb64_crypt(&htlc->cipher_decode_state.blowfish,
 			                     &in->buf[in->pos], &out->buf[out->pos], len);
@@ -193,10 +192,6 @@ do_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 	writestuff("enc: ", htlc->cipher_encode_type, &htlc->out.buf[pos], len);
 #endif
 	switch (htlc->cipher_encode_type) {
-		case CIPHER_RC4:
-			arcfour_crypt(&htlc->cipher_encode_state.rc4, len,
-			              &htlc->out.buf[pos], &htlc->out.buf[pos]);
-			break;
 		case CIPHER_BLOWFISH:
 			blowfish_ofb64_crypt(&htlc->cipher_encode_state.blowfish,
 			                     &htlc->out.buf[pos], &htlc->out.buf[pos], len);
@@ -261,10 +256,10 @@ cipher_encode (struct htlc_conn *htlc, unsigned int pos, unsigned int len)
 		return;
 	}
 
-	/* Stream-cipher path (RC4 / Blowfish OFB). The rekey-on-
-	 * random-nibble trick is the legacy HOPE behaviour: with
-	 * probability 3/16, mark the header type byte and the next
-	 * N rounds of HMAC-stretching for the cipher key (see
+	/* Stream-cipher path (Blowfish OFB). The rekey-on-random-
+	 * nibble trick is the legacy HOPE behaviour: with probability
+	 * 3/16, mark the header type byte and the next N rounds of
+	 * HMAC-stretching for the cipher key (see
 	 * cipher_change_encode_key). */
 	if (htlc->compress_encode_type == COMPRESS_NONE) {
 		unsigned char ran;
@@ -302,11 +297,6 @@ void
 cipher_encode_init (struct htlc_conn *htlc)
 {
 	switch (htlc->cipher_encode_type) {
-		case CIPHER_RC4:
-			arcfour_set_key(&htlc->cipher_encode_state.rc4,
-			                htlc->cipher_encode_keylen,
-			                htlc->cipher_encode_key);
-			break;
 		case CIPHER_BLOWFISH:
 			/* DO NOT reset ivec/num here. cipher_encode_init is
 			 * called twice in a connection's lifetime: at post-
@@ -337,11 +327,6 @@ void
 cipher_decode_init (struct htlc_conn *htlc)
 {
 	switch (htlc->cipher_decode_type) {
-		case CIPHER_RC4:
-			arcfour_set_key(&htlc->cipher_decode_state.rc4,
-			                htlc->cipher_decode_keylen,
-			                htlc->cipher_decode_key);
-			break;
 		case CIPHER_BLOWFISH:
 			/* See cipher_encode_init above for why we don't
 			 * memset ivec/num here. */

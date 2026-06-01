@@ -33,6 +33,9 @@
 #include "gtkhx.h"
 #include "toolbar.h"
 #include "connect.h"
+#include "bookmark_cipher.h"
+#include "bookmark_rc4_dialog.h"
+#include "bookmarks.h"
 
 /* Phase 5: the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
  * that used to live here suppressed warnings from the GtkComboBoxText
@@ -62,7 +65,21 @@ static GtkWidget *tls_switch;
 
 
 #define DEFAULT_CIPHER "BLOWFISH"
-char *valid_ciphers[] = { "RC4", "BLOWFISH",
+/* RC4 was once the first entry here and the default cipher offered to
+ * old Hotline servers. It was removed in claude/remove-rc4 because RC4
+ * is a known-broken stream cipher and shipping it under a "Secure"
+ * label gives users a false sense of security — plaintext is more
+ * honest, BLOWFISH is still acceptable as a minimum bar, and
+ * CHACHA20-POLY1305 is the modern choice.
+ *
+ * This array is UI-only: it's the model behind the connect dialog's
+ * AdwComboRow and the bookmarks dialog's matching combo. The on-disk
+ * cipher byte uses a SEPARATE stable vocabulary defined in
+ * bookmark_cipher.h, so reordering / shortening this array doesn't
+ * shift the meaning of any bookmark byte. The translation helpers
+ * connect_dropdown_to_cipher_byte and connect_cipher_byte_to_dropdown
+ * live at the boundary. */
+char *valid_ciphers[] = { "BLOWFISH",
                           /* Phase 5+ (fogWraith HOPE-ChaCha20-Poly1305.md):
 						   * preferred AEAD cipher, advertised when the
 						   * connection is encrypted. The negotiation sends
@@ -70,6 +87,48 @@ char *valid_ciphers[] = { "RC4", "BLOWFISH",
 						   * picks whichever it supports. */
                           "CHACHA20-POLY1305",
                           0 };
+
+unsigned char
+connect_dropdown_to_cipher_byte (unsigned int dropdown_idx)
+{
+    unsigned int n_valid = 0;
+
+    if (dropdown_idx == 0) {
+        return BOOKMARK_CIPHER_BYTE_NONE;
+    }
+    while (valid_ciphers[n_valid]) {
+        n_valid++;
+    }
+    if (dropdown_idx > n_valid) {
+        return BOOKMARK_CIPHER_BYTE_NONE;
+    }
+    return bookmark_cipher_byte_from_name (valid_ciphers[dropdown_idx - 1]);
+}
+
+unsigned int
+connect_cipher_byte_to_dropdown (unsigned char byte)
+{
+    const char *name;
+    unsigned int i;
+
+    if (byte == BOOKMARK_CIPHER_BYTE_NONE) {
+        return 0;
+    }
+    name = bookmark_cipher_name (byte);
+    if (!name) {
+        return 0;
+    }
+    for (i = 0; valid_ciphers[i]; i++) {
+        if (strcmp (valid_ciphers[i], name) == 0) {
+            return i + 1;
+        }
+    }
+    /* Name resolved (e.g. "RC4") but is not in the live dropdown.
+     * Caller's RC4 intercept should have caught this; surface as
+     * "no cipher" defensively so the connect path doesn't auto-
+     * pick a different cipher under the user's nose. */
+    return 0;
+}
 
 int
 valid_cipher (const char *cipheralg)
@@ -257,7 +316,16 @@ connect_with_args (session *sess, const char *server, guint16 port,
     }
     memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
     if (secure && cipher) {
-        const char *cipher_algo = valid_ciphers[cipher - 1];
+        /* Resolve the stable bookmark cipher byte to a HOPE
+         * cipher-name string. The RC4 byte (cipher=1) would resolve
+         * to "RC4" here; the connect-time intercept upstream of this
+         * function (connect_open_bookmark_by_name + peers) runs the
+         * migration dialog and rewrites the byte before we get
+         * called. Any RC4 byte that reaches this point is therefore
+         * a defensive case — drop to "no cipher" rather than try to
+         * advertise a cipher we no longer support. */
+        const char *cipher_algo
+            = bookmark_cipher_name ((unsigned char) cipher);
         if (cipher_algo && valid_cipher (cipher_algo)) {
             size_t cilen = strlen (cipher_algo);
             if (cilen >= sizeof (sess->htlc.cipheralg)) {
@@ -315,7 +383,14 @@ server_connect (GtkWidget *widget, gpointer data)
     portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
-    cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
+    /* Translate the dropdown index to a stable bookmark cipher byte
+     * before passing it down — connect_with_args + last_conn cache
+     * the value, and the cache may later get written to the bookmark
+     * file via the reconnect / save path. Keeping the byte in the
+     * stable vocabulary everywhere it flows makes that round-trip
+     * lossless. */
+    cipher = connect_dropdown_to_cipher_byte (
+        adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu)));
     if (tls_switch) {
         tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
     }
@@ -485,7 +560,17 @@ set_the_entries (char *address, char *login, char *password, char *port,
         adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), compress);
     }
     if (cipher_menu) {
-        adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), cipher);
+        /* The `cipher` argument is a stable bookmark cipher byte
+         * (see bookmark_cipher.h), not a dropdown index — translate
+         * before stuffing it into the AdwComboRow. A byte naming a
+         * cipher the dropdown no longer offers (RC4, primarily)
+         * resolves to dropdown index 0 ("no cipher"), so a stray
+         * RC4 byte that escaped the intercept upstream lands with
+         * a visibly-no-cipher form rather than silently picking the
+         * first available cipher. */
+        adw_combo_row_set_selected (
+            ADW_COMBO_ROW (cipher_menu),
+            connect_cipher_byte_to_dropdown ((unsigned char) cipher));
     }
     if (tls_switch) {
         adw_switch_row_set_active (ADW_SWITCH_ROW (tls_switch),
@@ -841,12 +926,13 @@ open_bookmark (GtkWidget *widget, gpointer data)
 {
     struct bookmark_parsed bm;
     char *legacy_path = NULL;
+    const char *name = (const char *)data;
     int rc;
     (void)widget;
 
-    rc = bookmark_parse ((char *)data, &bm, &legacy_path);
+    rc = bookmark_parse (name, &bm, &legacy_path);
     if (rc == -1) {
-        g_warning ("%s \"%s\"\n", _ ("No such bookmark"), (char *)data);
+        g_warning ("%s \"%s\"\n", _ ("No such bookmark"), name);
         return;
     }
     if (rc == -2) {
@@ -855,8 +941,27 @@ open_bookmark (GtkWidget *widget, gpointer data)
         return;
     }
     if (rc != 0) {
-        g_warning ("%s \"%s\"\n", _ ("Could not read bookmark"), (char *)data);
+        g_warning ("%s \"%s\"\n", _ ("Could not read bookmark"), name);
         return;
+    }
+
+    /* RC4 migration on the preload path. Without this, an RC4
+     * bookmark would land in the form with HOPE enabled and the
+     * cipher dropdown at "no cipher" (set_the_entries translates
+     * the stable RC4 byte to dropdown 0), and a subsequent Connect
+     * click would silently send a plaintext connection without
+     * asking the user. Prompting here mirrors what
+     * connect_open_bookmark_by_name does for direct-connect; the
+     * dialog persists the user's choice to the bookmark file. On
+     * cancel, abandon the preload — leaves the form in whatever
+     * state it was in. */
+    if (bm.secure && bm.cipher == BOOKMARK_CIPHER_BYTE_RC4) {
+        int new_byte = hx_bookmark_rc4_dialog_run_sync (
+            gtkhx_active_window (), name);
+        if (new_byte < 0) {
+            return;
+        }
+        bm.cipher = (char) new_byte;
     }
 
     set_the_entries (bm.server, bm.login, bm.pass, bm.port, bm.secure,
@@ -1012,6 +1117,20 @@ connect_open_bookmark_by_name (const char *name)
         port = atoi (bm.port);
     }
 
+    /* RC4 migration: if the bookmark was saved with the legacy RC4
+     * cipher (stable byte 1), prompt the user for a replacement
+     * before connecting. The dialog also writes the chosen byte
+     * back to the bookmark file so subsequent opens of the same
+     * bookmark don't re-prompt. Cancel = abandon the connection. */
+    if (bm.secure && bm.cipher == BOOKMARK_CIPHER_BYTE_RC4) {
+        int new_byte = hx_bookmark_rc4_dialog_run_sync (
+            gtkhx_active_window (), name);
+        if (new_byte < 0) {
+            return;
+        }
+        bm.cipher = (char) new_byte;
+    }
+
     connect_with_args (&the_session, bm.server, port, bm.login, bm.pass,
                        bm.secure, bm.compress, bm.cipher, bm.tls);
 }
@@ -1080,7 +1199,10 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     port = gtk_editable_get_text (GTK_EDITABLE (port_entry));
     secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
     compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
-    cipher = adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu));
+    /* Save-to-bookmark: stable byte vocabulary, not the live
+     * dropdown index. See connect_dropdown_to_cipher_byte. */
+    cipher = connect_dropdown_to_cipher_byte (
+        adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu)));
     if (tls_switch) {
         tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
     }

@@ -40,7 +40,11 @@ typedef struct {
     char pass[33];
     char secure;      /* HOPE on */
     char compress;    /* 0 = off, 1+ indexes valid_compressors[] */
-    char cipher;      /* 0 = off, 1+ indexes valid_ciphers[] */
+    /* Stable bookmark cipher byte; see bookmark_cipher.h for the
+     * byte ↔ cipher-name mapping. Independent of valid_ciphers[]
+     * so reordering the connect dialog's dropdown doesn't shift
+     * the meaning of any saved bookmark. */
+    char cipher;
     char tls;         /* 0 = off, 1 = TLS over the server's dedicated TLS port */
 } HxBookmark;
 

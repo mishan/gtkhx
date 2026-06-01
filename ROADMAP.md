@@ -299,12 +299,15 @@ These were the open questions on the first draft. Answers:
 5. **Plugin API → break it.** Delete `plugins/sample`, keep `plugins/eliza` if it amuses anyone, but don't preserve the `MODULE_IFACE_VER 2` ABI. If a plugin system comes back, it'll be a Phase 5 redesign (e.g., embedded Lua or GJS) rather than the current dlopen pattern.
 6. **Crypto stack → GnuTLS + Nettle for ciphers, GLib's `GChecksum` / `GHmac` for hashes.** Rationale captured in the next section. OpenSSL is the fallback if Nettle ergonomics turn out worse than expected once we're elbows-deep in `cipher.c`.
 7. **License → keep GPL-2.0-or-later** (the existing "version 2... or any later version" header text). Not switching to v2-only, not upgrading to v3-only.
+8. **RC4 retired.** Removed from `valid_ciphers[]`, the HOPE cipher offer list, and `cipher.c`'s dispatch in `claude/remove-rc4`. RC4 is a known-broken stream cipher; advertising it under a "Secure (HOPE)" label gave users a false sense of security. Plaintext, Blowfish (still acceptable), or ChaCha20-Poly1305 are all preferable. `CIPHER_RC4 = 1` stays reserved as a protocol-slot integer so it doesn't get re-used by accident.
+
+    On-disk bookmark compatibility is handled via a stable cipher-byte vocabulary in `src/bookmark_cipher.{c,h}` — independent of `valid_ciphers[]` so reordering the connect dropdown can never shift the meaning of any byte already on disk. Byte assignments: `0=off, 1=RC4 (retired-but-named), 2=BLOWFISH, 3=CHACHA20-POLY1305`. New ciphers get new bytes at the tail; bytes don't get re-used when a cipher is retired. Bookmarks with non-RC4 ciphers load exactly as they were — no silent upgrades. A bookmark holding the legacy RC4 byte triggers `src/bookmark_rc4_dialog.{c,h}` at every connect entry point (toolbar SplitButton, Bookmarks dialog row-select); the dialog prompts the user for a replacement (ChaCha20-Poly1305 suggested, Blowfish, "Connect without encryption" destructive, Cancel) and rewrites the bookmark file in place so subsequent opens don't re-prompt. Cancel abandons the connection.
 
 ---
 
 ## Crypto stack rationale
 
-Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiable hash — including HAVAL, which `hmac.c` checks for as `"HMAC-HAVAL"`), and optionally Blowfish / RC4 ciphers. IDEA is disabled (`CONFIG_NO_IDEA`).
+Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiable hash — including HAVAL, which `hmac.c` checks for as `"HMAC-HAVAL"`), and optionally Blowfish (RC4 was retired in `claude/remove-rc4` — see Decision 8 above). IDEA is disabled (`CONFIG_NO_IDEA`).
 
 | Option | Pros | Cons |
 |---|---|---|
@@ -318,7 +321,7 @@ Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiab
 - **`md5.c`, `sha.c`** → delete, use `g_checksum_*`.
 - **`hmac.c`** → reduce to a thin wrapper over `GHmac`, except for the HAVAL branch (see below).
 - **`haval.c`** → keep for now, it's wired into `hmac.c`'s `HMAC-HAVAL` MAC negotiation. Verify whether any extant Hotline server still advertises HAVAL; if not, delete the whole branch and `haval.[ch]`.
-- **`cipher.c`** → rewrite over Nettle (`nettle/blowfish.h`, `nettle/arcfour.h`). This is **only** for the existing Hotline `HOPE` cipher negotiation (Blowfish/RC4 over the legacy protocol). Still useful for client-to-client privacy on the rare server that supports it; survives unchanged.
+- **`cipher.c`** → rewrite over Nettle (`nettle/blowfish.h`). This is **only** for the existing Hotline `HOPE` cipher negotiation (Blowfish over the legacy protocol; RC4 retired in `claude/remove-rc4`). Still useful for client-to-client privacy on the rare server that supports it; survives unchanged.
 - **`rand.c`** → ✅ done (Phase 1.3): wraps `getrandom(2)` with a
   `/dev/urandom` fallback for old kernels. No OpenSSL dep, no extra
   library either. Nettle's `yarrow256_*` was considered and rejected:

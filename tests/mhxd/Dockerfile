@@ -21,7 +21,9 @@ FROM debian:bookworm-slim AS build
 
 # Build deps. Most are obvious; the less-obvious ones:
 #   libssl-dev   — mhxd's --enable-cipher uses OpenSSL crypto for
-#                  Blowfish / RC4 + the HOPE handshake.
+#                  Blowfish + the HOPE handshake. (mhxd still
+#                  compiles RC4 in too, but our client doesn't
+#                  offer it.)
 #   libpcre2-dev — pulled in by some optional features; harmless if
 #                  unused.
 #   pkg-config   — autotools macros lean on it for SSL detection.
@@ -66,7 +68,9 @@ RUN cd /build/mhxd && git apply /build/patches/folder-xfer-size.patch
 #                           is what src/common needs to find cipher.h.
 #   --with-pthreads       — thread model (mhxd's default is fork/clone)
 #   --enable-hope         — secure login handshake; GtkHx negotiates this
-#   --enable-cipher       — Blowfish/RC4 link encryption
+#   --enable-cipher       — Blowfish link encryption (mhxd also compiles
+#                           in RC4 here but the GtkHx client doesn't
+#                           offer it anymore)
 #   --enable-compress     — zlib link compression
 #   --enable-hxtrackd     — tracker server (port 5498); compile but
 #                           skip exposing by default

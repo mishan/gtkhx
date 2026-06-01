@@ -514,7 +514,8 @@ typedef struct {
     gsize rx_accum_cap;
 
     /* Stream-cipher framing flag. Active only after a successful HOPE
-     * negotiation with a non-AEAD cipher (RC4 or Blowfish today).
+     * negotiation with a non-AEAD cipher (Blowfish today; RC4 was
+     * retired in claude/remove-rc4).
      * Mutually exclusive with aead_active. The actual cipher state
      * lives on htlc->cipher_{encode,decode}_state / _key / _keylen /
      * _type / cipher_mode — same fields production reads in

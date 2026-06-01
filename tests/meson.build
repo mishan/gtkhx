@@ -184,6 +184,23 @@ test_bookmarks = executable('test_bookmarks',
 test('bookmarks', test_bookmarks,
      suite : 'unit')
 
+# bookmark_cipher — stable byte ↔ cipher-name vocabulary used by
+# the HTsc bookmark file format. Independent of the UI dropdown
+# (valid_ciphers[]) so reordering the dropdown doesn't shift the
+# meaning of a saved byte. Pins the byte assignments numerically
+# so a renumber breaks here before it breaks every bookmark on
+# disk. RC4 keeps its slot named even though the cipher itself
+# was retired in claude/remove-rc4 — the migration dialog needs
+# string equality on this slot to detect a legacy RC4 bookmark.
+test_bookmark_cipher = executable('test_bookmark_cipher',
+  'unit/test_bookmark_cipher.c',
+  '../src/bookmark_cipher.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('bookmark_cipher', test_bookmark_cipher,
+     suite : 'unit')
+
 # task_hash — the Phase 1.1 GLib-collections migration replaced the
 # per-session task linked list (the intrusive __task_list / task_list
 # / task_tail trio) with GHashTable<u32 trans, struct task*>. The
@@ -934,7 +951,7 @@ integration_harness_lib = static_library(
   '../src/chat_history.c',
   # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
   # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
-  # brings the stream-cipher (RC4 / Blowfish OFB-64) seal/open + the
+  # brings the stream-cipher (Blowfish OFB-64) seal/open + the
   # HMAC-chained rekey rotation that mirrors production's
   # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
   # hxrand crate via rust_hxrand_dep; hope.c brings the HMAC chain +
@@ -1811,14 +1828,14 @@ test('hope_hmac', test_integration_hope_hmac,
      suite   : 'integration',
      timeout : 60)
 
-# hope_blowfish / hope_rc4 — Tier 3 coverage for the legacy HOPE
-# stream-cipher paths. Same handshake state machine as hope_chacha20
-# but with the per-message 3/16-probability rekey marker exercised
-# end-to-end. Each test sends 12 PINGs in a row against an mhxd-style
-# server, which gives ~90% odds of hitting at least one rekey-marker
-# round-trip — far better coverage of the cipher state machine than
-# hand-driven GUI testing produced (where the bug landed back-and-
-# forth for half a day before pivoting to this test infrastructure).
+# hope_blowfish — Tier 3 coverage for the legacy HOPE stream-cipher
+# path. Same handshake state machine as hope_chacha20 but with the
+# per-message 3/16-probability rekey marker exercised end-to-end.
+# Sends 12 PINGs in a row against an mhxd-style server, which gives
+# ~90% odds of hitting at least one rekey-marker round-trip — far
+# better coverage of the cipher state machine than hand-driven GUI
+# testing produced. (A sister hope_rc4 test was retired alongside
+# the RC4 removal — there's no longer a code path for it to drive.)
 test_integration_hope_blowfish = executable('test_integration_hope_blowfish',
   'integration/test_hope_blowfish.c',
   dependencies        : proto_test_deps,
@@ -1826,16 +1843,6 @@ test_integration_hope_blowfish = executable('test_integration_hope_blowfish',
   link_with           : integration_harness_lib,
 )
 test('hope_blowfish', test_integration_hope_blowfish,
-     suite   : 'integration',
-     timeout : 60)
-
-test_integration_hope_rc4 = executable('test_integration_hope_rc4',
-  'integration/test_hope_rc4.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-test('hope_rc4', test_integration_hope_rc4,
      suite   : 'integration',
      timeout : 60)
 
@@ -1877,30 +1884,14 @@ test('hope_chacha20_banner', test_integration_hope_chacha20_banner,
      is_parallel : false,
      timeout     : 60)
 
-# Stream-cipher variants of the chat-history + banner coverage. Same
-# shape as the chacha20 sisters above; the cap filters route each
-# test to whichever matrix entry advertises both the cipher and the
-# feature. mhxd advertises BLOWFISH+RC4+BANNER_HTXF but no chat-
-# history; Janus has chat-history+CHACHA20 but no stream ciphers, so
-# the chat-history stream tests skip cleanly until a matrix entry
-# combining stream-cipher + chat-history shows up.
-test_integration_hope_rc4_chat_history = executable(
-  'test_integration_hope_rc4_chat_history',
-  'integration/test_hope_rc4_chat_history.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-# All four stream-cipher × {chat_history, banner} matrices route to
-# Janus (mhxd advertises neither CHAT_HISTORY nor — since the matrix-
-# fix branch — BANNER_HTXF), so they're subject to the same per-IP
-# connect-rate caveat as the chacha20 sisters above. is_parallel:false
-# keeps them from racing each other in meson's default parallel run.
-test('hope_rc4_chat_history', test_integration_hope_rc4_chat_history,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
+# Blowfish variants of the chat-history + banner coverage. Same
+# shape as the chacha20 sisters above; the cap filter routes the
+# test to whichever matrix entry advertises both BLOWFISH and the
+# feature. mhxd advertises BLOWFISH+BANNER_HTXF but no chat-history;
+# Janus has chat-history+CHACHA20 but no stream cipher, so the
+# chat-history stream test skips cleanly until a matrix entry
+# combining stream-cipher + chat-history shows up. The RC4 sisters
+# were retired alongside the RC4 removal.
 test_integration_hope_blowfish_chat_history = executable(
   'test_integration_hope_blowfish_chat_history',
   'integration/test_hope_blowfish_chat_history.c',
@@ -1908,19 +1899,13 @@ test_integration_hope_blowfish_chat_history = executable(
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
+# Stream-cipher × {chat_history, banner} matrices route to Janus
+# (mhxd advertises neither CHAT_HISTORY nor — since the matrix-fix
+# branch — BANNER_HTXF), so they're subject to the same per-IP
+# connect-rate caveat as the chacha20 sisters above. is_parallel:
+# false keeps them from racing each other in meson's default
+# parallel run.
 test('hope_blowfish_chat_history', test_integration_hope_blowfish_chat_history,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
-test_integration_hope_rc4_banner = executable(
-  'test_integration_hope_rc4_banner',
-  'integration/test_hope_rc4_banner.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-test('hope_rc4_banner', test_integration_hope_rc4_banner,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)

@@ -120,7 +120,6 @@ test_cipher_id_known_names (void)
     /* These constants come from cipher.h — we keep them stable on
 	 * purpose. If anyone renumbers them, this test will fail
 	 * loudly. */
-    g_assert_cmpint (hope_cipher_id_from_name ("RC4"),               ==, 1);
     g_assert_cmpint (hope_cipher_id_from_name ("BLOWFISH"),          ==, 2);
     g_assert_cmpint (hope_cipher_id_from_name ("CHACHA20-POLY1305"), ==, 4);
 }
@@ -131,6 +130,11 @@ test_cipher_id_unknown_returns_none (void)
     g_assert_cmpint (hope_cipher_id_from_name (""),         ==, 0);
     g_assert_cmpint (hope_cipher_id_from_name (NULL),       ==, 0);
     g_assert_cmpint (hope_cipher_id_from_name ("AES-256"),  ==, 0);
+    /* RC4 was removed from the cipher offer list; the name now
+     * resolves to "no cipher" (CIPHER_NONE) so a server still
+     * mentioning it gets ignored rather than driving an unsafe
+     * encrypt path. */
+    g_assert_cmpint (hope_cipher_id_from_name ("RC4"),      ==, 0);
 }
 
 static void
@@ -138,7 +142,6 @@ test_cipher_is_aead (void)
 {
     g_assert_true  (hope_cipher_is_aead ("CHACHA20-POLY1305"));
     g_assert_false (hope_cipher_is_aead ("BLOWFISH"));
-    g_assert_false (hope_cipher_is_aead ("RC4"));
     g_assert_false (hope_cipher_is_aead (""));
     g_assert_false (hope_cipher_is_aead (NULL));
 }

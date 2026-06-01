@@ -12,18 +12,12 @@
  * test for the file-mode banner HTXF subchannel under HOPE+Blowfish
  * OFB-64 stream-cipher framing.
  *
- * Sister to test_hope_rc4_banner.c — see that file for the full
- * preamble. Only differences here:
- *
- *   - cipheralg = "BLOWFISH"
- *   - HX_TEST_CAP_BLOWFISH filter
- *
- * Keeping the two as separate binaries (rather than one
- * parameterised test) so individual failures bisect cleanly: a
- * green RC4 test and a red Blowfish test narrows a bug to the
- * Blowfish OFB-64 state machine without further diagnosis. Same
- * convention as test_hope_blowfish / test_hope_rc4 (post-login
- * PING coverage).
+ * Originally written as the sister of test_hope_rc4_banner.c; that
+ * file is gone (RC4 removed in claude/remove-rc4) so this is the
+ * canonical HOPE+stream banner Tier 3 test. Picks any matrix server
+ * that advertises HX_TEST_CAP_BLOWFISH + HX_TEST_CAP_BANNER_HTXF and
+ * runs the post-login banner HTXF flow under HOPE-negotiated Blowfish
+ * OFB-64 framing.
  */
 
 #include "config.h"

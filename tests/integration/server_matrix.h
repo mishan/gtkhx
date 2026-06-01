@@ -56,7 +56,9 @@
 #define HX_TEST_CAP_NEWS_15       (1u << 18) /* threaded 1.5+ news    */
 #define HX_TEST_CAP_CHACHA20      (1u << 19) /* HOPE ChaCha20-Poly1305*/
 #define HX_TEST_CAP_BLOWFISH      (1u << 20) /* HOPE Blowfish OFB-64  */
-#define HX_TEST_CAP_RC4           (1u << 21) /* HOPE RC4 stream       */
+/* (1u << 21) reserved — was HX_TEST_CAP_RC4 before RC4 was
+ * removed in claude/remove-rc4. Slot stays out of rotation so
+ * existing capability bitmasks don't accidentally light it up. */
 #define HX_TEST_CAP_NICK_COLORS   (1u << 22) /* Colored-Nicknames     */
 #define HX_TEST_CAP_TLS           (1u << 23) /* TLS on a separate port*/
 

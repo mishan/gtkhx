@@ -138,7 +138,7 @@ hx_decode (struct htlc_conn *htlc)
      *
      * This path completely bypasses the byte-stream cipher_decode
      * + compress_decode plumbing below — those still operate on
-     * the legacy stream-cipher RC4/Blowfish path.
+     * the legacy stream-cipher Blowfish path.
      *
      * IMPORTANT: this branch is checked BEFORE the `if (!r)` early
      * return below, because the AEAD path's plaintext accumulator

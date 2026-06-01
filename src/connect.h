@@ -13,6 +13,22 @@ extern int valid_compress (const char *compressalg);
 extern char *valid_compressors[];
 extern int valid_cipher (const char *cipheralg);
 extern char *valid_ciphers[];
+
+/* Translate the connect dialog's AdwComboRow cipher index (0 = no
+ * cipher, 1..N indexes valid_ciphers[N-1]) to a stable on-disk
+ * bookmark byte from bookmark_cipher.h. Save paths use this when
+ * writing the cipher byte to the HTsc bookmark file so the byte's
+ * semantics stay stable across UI dropdown reorderings. */
+extern unsigned char connect_dropdown_to_cipher_byte (unsigned int dropdown_idx);
+
+/* Inverse of connect_dropdown_to_cipher_byte: translate a stable
+ * bookmark cipher byte to the matching AdwComboRow index, or 0
+ * ("no cipher") if the byte names a cipher the dropdown no longer
+ * offers (e.g. RC4 after claude/remove-rc4). Used by load paths
+ * that pre-fill the connect dialog from a bookmark — the RC4
+ * intercept fires earlier in the pipeline, so any caller reaching
+ * here with an RC4 byte is a defensive fallback. */
+extern unsigned int connect_cipher_byte_to_dropdown (unsigned char byte);
 /* list_n moved to src/algo_list.{c,h} — re-include so historic
  * connect.h consumers keep finding the declaration without an
  * extra include. */
