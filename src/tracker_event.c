@@ -140,6 +140,11 @@ hx_tracker_server_new_v1 (struct in_addr addr, guint16 port, guint16 nusers,
 
     e->tlv_count = 0;
     e->tlv_bytes = NULL;
+    /* v1 records carry no TLVs but consumers shouldn't have to
+     * NULL-check meta. Allocate a zero-init meta — every is_*
+     * flag is FALSE, every string is NULL, every numeric is 0 —
+     * which matches the "no TLVs were advertised" reality. */
+    e->meta = hx_tracker_v3_meta_new (NULL, 0, 0);
 
     e->total = total;
     return e;
@@ -196,6 +201,26 @@ hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
         e->tlv_bytes = NULL;
     }
 
+    /* Parse the TLV blob into a typed view. NULL return here means
+     * the blob was malformed (length-prefix overran the buffer, or
+     * count > available bytes); the whole record is therefore
+     * untrustworthy and we reject the construction. The wire-side
+     * record parser already bounds-checked the slice in
+     * hx_tracker_v3_parse_record, so a NULL here points at a
+     * tlv_count / tlv_bytes_len mismatch in our own code path
+     * rather than tracker-side junk. Fail closed. */
+    e->meta = hx_tracker_v3_meta_new (tlv_bytes, tlv_bytes_len, tlv_count);
+    if (!e->meta) {
+        g_free (e->address);
+        g_free (e->name);
+        g_free (e->desc);
+        if (e->tlv_bytes) {
+            g_bytes_unref (e->tlv_bytes);
+        }
+        g_free (e);
+        return NULL;
+    }
+
     e->total = total;
     return e;
 }
@@ -215,6 +240,9 @@ hx_tracker_server_copy (HxTrackerServer *e)
     c->desc      = g_strdup (e->desc ? e->desc : "");
     c->tlv_count = e->tlv_count;
     c->tlv_bytes = e->tlv_bytes ? g_bytes_ref (e->tlv_bytes) : NULL;
+    /* Deep-copy the parsed meta so subscribers that keep the
+     * copied event past the emit get their own owned strings. */
+    c->meta      = hx_tracker_v3_meta_copy (e->meta);
     c->total     = e->total;
     return c;
 }
@@ -231,6 +259,7 @@ hx_tracker_server_free (HxTrackerServer *e)
     if (e->tlv_bytes) {
         g_bytes_unref (e->tlv_bytes);
     }
+    hx_tracker_v3_meta_free (e->meta);
     g_free (e);
 }
 

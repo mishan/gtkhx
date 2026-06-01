@@ -552,6 +552,23 @@ test_tracker_v3 = executable('test_tracker_v3',
 test('tracker_v3', test_tracker_v3,
      suite : 'proto')
 
+# tracker_v3_meta — Tier 2 coverage for the typed TLV-trailer
+# accessor in src/tracker_v3_meta.c (Phase B of tracker v3).
+# Pins one canonical decode per TLV type (string, u8, u16, i16,
+# u32, bool), the closed-vocab clamping for MATURITY and
+# LISTING_CATEGORY, the unknown-id forward-compat skip, malformed-
+# input rejection, UTF-8 sanitisation, deep-copy semantics. Pure
+# function under test; no GIO / no network.
+test_tracker_v3_meta = executable('test_tracker_v3_meta',
+  'proto/test_tracker_v3_meta.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('tracker_v3_meta', test_tracker_v3_meta,
+     suite : 'proto')
+
 # connect_magic — HTLS_MAGIC validator carved out of network.c's
 # async connect state machine (on_magic_received). Replaces a
 # strncmp-based comparison that had a NUL-terminator bug — HTLS
@@ -1083,6 +1100,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/tasks_table.c',
@@ -1152,6 +1170,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/tasks_table.c',
@@ -1249,6 +1268,7 @@ test_integration_tracker_v3 = executable(
   'test_integration_tracker_v3',
   'integration/test_tracker_v3.c',
   '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
   dependencies        : proto_test_deps,
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,

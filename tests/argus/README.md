@@ -113,6 +113,28 @@ need a GMainLoop test harness this binary doesn't ship; the
 production state machine processes the same byte sequence either
 way.
 
+## TLV coverage from `promoted_servers`
+
+`promoted_servers` only takes `address` / `name` / `description`,
+which means the TLV trailer Argus emits for these records is just
+the tracker-injected 0x0600 block (`IS_PROMOTED`, optionally
+`FIRST_SEEN` / `LAST_HEARTBEAT`). The richer descriptive +
+capability + content-index TLV blocks (`0x0200` / `0x0300` /
+`0x0400` / `0x0500`) would only appear if a real Hotline server
+UDP-registered against this tracker and supplied them — Argus
+doesn't fabricate them itself.
+
+For Phase B, the typed-meta decoder (`hx_tracker_v3_meta_new` in
+`src/tracker_v3_meta.c`) gets per-TLV coverage from synthetic
+fixtures in `tests/proto/test_tracker_v3_meta.c`, and the Tier 3
+test here cross-checks the 0x0600 block by asserting
+`meta->is_promoted` for the Promoted Alpha record. A future
+follow-up could wire a small UDP-registration helper (parallel to
+`tests/hxtrackd/seed-tracker.py`) that registers a synthetic v3
+server with a populated TLV trailer; that's deferred until we have
+a concrete use case the existing Tier 2 fixtures don't already
+cover.
+
 ## Connecting GtkHx
 
 In the running app:
