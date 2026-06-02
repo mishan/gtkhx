@@ -43,17 +43,9 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pull mhxd master and apply our local fixes.
-#
-# patches/folder-xfer-size.patch — fixes two copy/paste typos in
-# folder_getpaths (htxf.c) and rcv_folder_get (files.c) that compute
-# the per-file size formula incorrectly, breaking multi-file folder
-# transfers when files have no resource fork. See the patch's commit
-# message for the full root-cause writeup.
+# Pull mhxd master
 WORKDIR /build
 RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
-COPY patches/folder-xfer-size.patch /build/patches/folder-xfer-size.patch
-RUN cd /build/mhxd && git apply /build/patches/folder-xfer-size.patch
 
 # Configure with the feature set GtkHx exercises:
 #
