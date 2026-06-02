@@ -1,0 +1,12 @@
+[package]
+name = "hotline-proto"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Typed Hotline 1.0/1.2/1.5/1.9 wire protocol parser & serializer for GtkHx"
+publish = false
+
+[lib]
+# staticlib: the C side (rcv.c / commands.c shims) links the FFI symbols.
+# rlib:      future Rust consumers (hxnet in Phase R3) depend on the typed API.
+crate-type = ["staticlib", "rlib"]

@@ -31,6 +31,12 @@ rust_sources = files(
   'crates/hxcrypto-stream/src/blowfish_ofb.rs',
   'crates/hxcrypto-aead/src/lib.rs',
   'crates/hxcompress/src/lib.rs',
+  'crates/hotline-proto/src/lib.rs',
+  'crates/hotline-proto/src/wire.rs',
+  'crates/hotline-proto/src/messages.rs',
+  'crates/hotline-proto/src/text.rs',
+  'crates/hotline-proto/src/parse.rs',
+  'crates/hotline-proto/src/ffi.rs',
   'Cargo.toml',
   'crates/hxrand/Cargo.toml',
   'crates/hxutil/Cargo.toml',
@@ -38,6 +44,7 @@ rust_sources = files(
   'crates/hxcrypto-stream/Cargo.toml',
   'crates/hxcrypto-aead/Cargo.toml',
   'crates/hxcompress/Cargo.toml',
+  'crates/hotline-proto/Cargo.toml',
 )
 
 rust_target_dir = meson.project_build_root() / 'rust-target'
@@ -108,5 +115,19 @@ rust_hxcompress_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxcompress',
+  ],
+)
+
+# Wire protocol (Phase R2). Replaces the byte-twiddling in rcv.c /
+# commands.c one opcode at a time; the C side keeps the dispatch table
+# and the GtkhxSession signal emit. Foundation commit wires the
+# SELFINFO + TASK-header parsers. FFI prototypes are hand-declared on
+# the C side (no cbindgen) — drift surfaces as a link-time undefined
+# symbol, same discipline as the R1 crates.
+rust_hotline_proto_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhotline_proto',
   ],
 )

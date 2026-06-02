@@ -28,6 +28,12 @@ test_deps = [
 # nor compress.h pull C-library cipher headers anymore.
 proto_test_deps = test_deps + [
   nettle_dep,
+  # Phase R2: src/proto_helpers.c (compiled into most proto tests)
+  # now calls into the Rust hotline-proto crate for the SELFINFO
+  # parse, so every test that links proto_helpers.c needs the
+  # staticlib. Harmless for the few proto tests that don't reference
+  # the symbol — the linker drops the unused archive members.
+  rust_hotline_proto_dep,
 ]
 
 test_inc = include_directories('../src')

@@ -56,6 +56,7 @@
 #include "news15.h"
 #include "hfs.h"
 #include "proto_trace.h"
+#include "hotline_proto.h"
 #include "debug.h"
 #include "connect.h"
 #include "banner.h"
@@ -241,16 +242,11 @@ void print_binary(char *buf, int len)
 int
 task_inerror (struct htlc_conn *htlc)
 {
-    struct hl_hdr *h = (struct hl_hdr *)htlc->in.buf;
-
-    /*		g_print("task_inerror: h->flag == %d\n", h->flag);
-		print_binary(&h->flag, 4); */
-
-    if ((ntohl (h->flag) & 1)) {
-        return 1;
-    }
-
-    return 0;
+    /* Phase R2: the header error-bit test moved to the Rust
+	 * hotline-proto crate (gtkhx_proto_header_in_error). Same
+	 * computation as the old ntohl(h->flag) & 1, with bounds
+	 * checking on a short buffer. */
+    return gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos) ? 1 : 0;
 }
 
 void
@@ -436,12 +432,15 @@ hx_rcv_news_post (struct htlc_conn *htlc)
 void
 hx_rcv_task (struct htlc_conn *htlc)
 {
-    struct hl_hdr *h = (struct hl_hdr *)htlc->in.buf;
-    guint32 trans;
+    guint32 trans = 0;
     struct task *tsk;
     char error = 0;
 
-    HN32 (&trans, &h->trans);
+    /* Phase R2: transaction-id extraction moved to the Rust
+	 * hotline-proto crate (replaces HN32(&trans, &h->trans)). A
+	 * short buffer leaves trans at 0, which task_with_trans treats
+	 * as "no such task" — the same safe fallthrough as before. */
+    gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &trans);
     tsk = task_with_trans (&the_session, trans);
 
     if (task_inerror (htlc)) {
