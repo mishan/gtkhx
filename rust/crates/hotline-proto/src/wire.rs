@@ -80,6 +80,27 @@ impl<'a> Decoder<'a> {
         self.pos = end;
         Some(slice)
     }
+
+    /// Read a Hotline-style length-prefixed byte string ("pstring"):
+    /// a `u8` length followed by exactly that many bytes. Returns the
+    /// borrowed payload (possibly empty when the length byte is 0) and
+    /// advances the cursor past both the length byte and the payload.
+    /// `None` (and cursor unmoved) if either the length byte itself or
+    /// the claimed payload runs off the end of the buffer — matching
+    /// the C `newscat_read_pstring`'s overrun reject.
+    pub fn pstring(&mut self) -> Option<&'a [u8]> {
+        let saved = self.pos;
+        let len = *self.bytes(1)?.first()? as usize;
+        match self.bytes(len) {
+            Some(s) => Some(s),
+            None => {
+                // Restore the cursor so the caller can see we didn't
+                // advance — mirrors the C helper's behaviour.
+                self.pos = saved;
+                None
+            }
+        }
+    }
 }
 
 /// One TLV-style data chunk: a 16-bit type, a 16-bit length, and `len`

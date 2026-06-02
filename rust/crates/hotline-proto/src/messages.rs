@@ -148,6 +148,10 @@ pub mod tag {
     pub const VERSION: u16 = 0x00a0;
     /// `0x012c` — user-list record (server → client).
     pub const USER_LIST: u16 = 0x012c;
+    /// `0x0141` — 1.5 threaded-news article listing (the
+    /// HTLC_HDR_NEWSCATLIST reply payload). One catlist chunk per
+    /// reply; body shape is documented on [`crate::parse::parse_catlist`].
+    pub const CATLIST: u16 = 0x0141;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 

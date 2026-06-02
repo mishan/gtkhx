@@ -266,4 +266,72 @@ gtkhx_proto_parse_news_categoryitem (const uint8_t *data, size_t dlen,
                                      uint8_t *name_buf, size_t name_cap,
                                      struct gtkhx_proto_news_dir_entry *out);
 
+/* ---- HTLC_DATA_CATLIST (1.5 threaded news article listing) ----
+ *
+ * The C consumer (rcv.c::news_item_take_from_wire) steals the parsed
+ * pstring pointers (subject / sender / mime_type) and frees them with
+ * g_free later. Rather than allocate strings on the Rust side and
+ * worry about mixing allocators, the FFI exposes an opaque handle plus
+ * view-struct accessors: the C shim copies each pstring into a
+ * g_strndup'd buffer itself, so g_malloc/g_free pair correctly on the
+ * C side and Rust owns its parse tree end-to-end.
+ *
+ * Lifecycle:
+ *   1. gtkhx_proto_parse_catlist returns an opaque handle (or NULL).
+ *   2. _post_count + _post_get + _part_get expose the parse tree via
+ *      borrowed-pointer view structs.
+ *   3. gtkhx_proto_catlist_free releases the tree. The byte pointers
+ *      in any view structs become invalid at that point. */
+
+struct gtkhx_proto_catlist; /* opaque handle */
+
+struct gtkhx_proto_catlist_post_view {
+    uint32_t postid;
+    uint32_t parentid;
+    uint32_t date_seconds;
+    uint16_t date_base_year;
+    uint16_t date_pad;
+    uint16_t partcount;
+    uint16_t size_total;
+    /* NULL when the wire pstring was zero-length (matches the C
+     * hx_newscat's "NULL when empty" convention). */
+    const uint8_t *subject_ptr;
+    size_t subject_len;
+    const uint8_t *sender_ptr;
+    size_t sender_len;
+};
+
+struct gtkhx_proto_catlist_part_view {
+    /* NULL when the mime pstring was zero-length. */
+    const uint8_t *mime_type_ptr;
+    size_t mime_type_len;
+    uint16_t size;
+};
+
+/* Parse the first HTLC_DATA_CATLIST chunk. Returns NULL when no
+ * CATLIST chunk is present or the body is malformed (the FALSE return
+ * from hx_newscat_parse). The caller owns the returned handle and
+ * must free it with gtkhx_proto_catlist_free. */
+extern struct gtkhx_proto_catlist *
+gtkhx_proto_parse_catlist (const uint8_t *msg, size_t msglen);
+
+/* Free a catlist handle. NULL is a no-op. */
+extern void gtkhx_proto_catlist_free (struct gtkhx_proto_catlist *cl);
+
+/* Number of posts in *cl. 0 on NULL. */
+extern uint32_t
+gtkhx_proto_catlist_post_count (const struct gtkhx_proto_catlist *cl);
+
+/* Fill *view with a borrowed snapshot of post idx. Returns false on
+ * NULL / out-of-range idx. */
+extern bool
+gtkhx_proto_catlist_post_get (const struct gtkhx_proto_catlist *cl, uint32_t idx,
+                              struct gtkhx_proto_catlist_post_view *view);
+
+/* Fill *view with a borrowed snapshot of part (post_idx, part_idx). */
+extern bool
+gtkhx_proto_catlist_part_get (const struct gtkhx_proto_catlist *cl,
+                              uint32_t post_idx, uint16_t part_idx,
+                              struct gtkhx_proto_catlist_part_view *view);
+
 #endif /* _HOTLINE_PROTO_H */
