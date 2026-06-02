@@ -31,7 +31,6 @@
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
-#include "gtk_hlist.h"
 #include "macres.h"
 #include "xfers.h"
 #include "toolbar.h"

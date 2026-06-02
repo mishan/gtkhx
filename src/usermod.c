@@ -29,7 +29,6 @@
 #include "hx.h"
 #include "tasks.h"
 #include "rcv.h"
-#include "gtk_hlist.h"
 #include "gtkutil.h"
 #include "toolbar.h"
 #include "usermod.h"

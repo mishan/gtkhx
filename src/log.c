@@ -38,7 +38,6 @@
 #include "network.h"
 #include "gtkutil.h"
 #include "gtkhx.h"
-#include "gtk_hlist.h"
 #include "tasks.h"
 #include "rcv.h"
 #include "files.h"
