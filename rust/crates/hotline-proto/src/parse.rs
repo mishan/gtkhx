@@ -449,6 +449,170 @@ pub fn news_post_chunks(buf: &[u8], len: usize, max_len: usize) -> NewsPostIter<
     }
 }
 
+// ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
+
+/// One mime part attached to a [`CatPost`]. Mirrors `struct
+/// hx_newscat_part`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatPart {
+    /// Raw mime-type bytes. Empty when the wire pstring was zero-length;
+    /// callers materialise it to whatever string type they need.
+    pub mime_type: Vec<u8>,
+    pub size: u16,
+}
+
+/// One article in a [`CatList`]. Mirrors `struct hx_newscat_post`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatPost {
+    pub postid: u32,
+    pub parentid: u32,
+    /// Mac classic 8-byte date split the way `news15.c` consumes it.
+    pub date_base_year: u16,
+    pub date_pad: u16,
+    pub date_seconds: u32,
+    pub partcount: u16,
+    /// Sum of every `parts[].size`. The C parser tracks this as a u16;
+    /// we preserve the type so a forged sum can't surprise the C
+    /// side via truncation (it'd wrap in C too).
+    pub size_total: u16,
+    /// Raw subject bytes (empty when zero-length on the wire).
+    pub subject: Vec<u8>,
+    /// Raw sender bytes (empty when zero-length on the wire).
+    pub sender: Vec<u8>,
+    /// Parts; length always equals [`Self::partcount`].
+    pub parts: Vec<CatPart>,
+}
+
+/// Parsed `HTLC_DATA_CATLIST` payload.
+///
+/// This is the reply body of `HTLC_HDR_NEWSCATLIST` (the 1.5 threaded
+/// news article listing). Wire shape (see mhxd's
+/// `hl_news_threadlist_hdr` + `hl_news_thread_hdr`, and the doc on
+/// [`parse_catlist`]):
+///
+/// ```text
+/// u32 __x0           opaque
+/// u32 post_count
+/// u16 __x1           opaque
+/// per post:
+///   u32 postid
+///   u16 date.base_year
+///   u16 date.pad
+///   u32 date.seconds
+///   u32 parentid
+///   u32 __flags       opaque (post header is 22 bytes total)
+///   u16 partcount
+///   pstring subject
+///   pstring sender
+///   per part:
+///     pstring mime_type
+///     u16     size
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatList {
+    pub posts: Vec<CatPost>,
+}
+
+/// Per-post minimum-on-wire byte budget: 22-byte fixed header + 2 (two
+/// zero-length pstrings). Matches the C `(post_count > remaining / 24)`
+/// defensive reject.
+const MIN_POST_BYTES: usize = 24;
+/// Per-part minimum-on-wire byte budget: 1 byte length + u16 size.
+const MIN_PART_BYTES: usize = 3;
+
+/// Parse the first `HTLC_DATA_CATLIST` chunk in `buf[..len]`. Returns
+/// `None` when no CATLIST chunk is present **or** the body is
+/// malformed — matching the C `hx_newscat_parse`'s FALSE return on
+/// either condition. Subsequent CATLIST chunks (the wire convention is
+/// one per reply) are ignored, just like the C "first chunk wins".
+///
+/// The defensive caps mirror the C parser:
+///
+/// - `post_count > remaining / 24` ⇒ reject (a forged count larger
+///   than the chunk can possibly fit).
+/// - `partcount > remaining / 3` ⇒ reject.
+///
+/// These caps fail closed before any heap allocation, so a single
+/// malicious CATLIST can't drive us to allocate gigabytes.
+pub fn parse_catlist(buf: &[u8], len: usize) -> Option<CatList> {
+    for chunk in ChunkIter::over_message(buf, len) {
+        if chunk.tag != tag::CATLIST {
+            continue;
+        }
+        return parse_catlist_body(chunk.data);
+    }
+    None
+}
+
+fn parse_catlist_body(body: &[u8]) -> Option<CatList> {
+    let mut d = Decoder::new(body);
+    // Threadlist header: u32 __x0, u32 post_count, u16 __x1 = 10 bytes.
+    let _x0 = d.u32()?;
+    let post_count = d.u32()?;
+    let _x1 = d.u16()?;
+
+    if post_count == 0 {
+        return Some(CatList { posts: Vec::new() });
+    }
+
+    let remaining = d.remaining();
+    if (post_count as usize) > remaining / MIN_POST_BYTES {
+        return None;
+    }
+
+    let mut posts = Vec::with_capacity(post_count as usize);
+    for _ in 0..post_count {
+        // 22-byte fixed thread header.
+        let postid = d.u32()?;
+        let date_base_year = d.u16()?;
+        let date_pad = d.u16()?;
+        let date_seconds = d.u32()?;
+        let parentid = d.u32()?;
+        let _flags = d.u32()?;
+        let partcount = d.u16()?;
+
+        let subject = d.pstring()?.to_vec();
+        let sender = d.pstring()?.to_vec();
+
+        // Allocate parts only AFTER the partcount-vs-remaining check;
+        // otherwise a forged partcount (e.g. u16::MAX) drives a giant
+        // Vec::with_capacity reservation before the defensive reject
+        // would fire — same "fail closed before large allocation"
+        // property the C parser has for post_count.
+        let mut size_total: u16 = 0;
+        let mut parts: Vec<CatPart> = Vec::new();
+
+        if partcount > 0 {
+            let rem = d.remaining();
+            if (partcount as usize) > rem / MIN_PART_BYTES {
+                return None;
+            }
+            parts.reserve_exact(partcount as usize);
+            for _ in 0..partcount {
+                let mime_type = d.pstring()?.to_vec();
+                let size = d.u16()?;
+                size_total = size_total.wrapping_add(size);
+                parts.push(CatPart { mime_type, size });
+            }
+        }
+
+        posts.push(CatPost {
+            postid,
+            parentid,
+            date_base_year,
+            date_pad,
+            date_seconds,
+            partcount,
+            size_total,
+            subject,
+            sender,
+            parts,
+        });
+    }
+
+    Some(CatList { posts })
+}
+
 // ---- HTLC_DATA_NEWSFOLDERITEM / HTLC_DATA_CATEGORYITEM ------------------
 
 /// Kind of a 1.5 threaded-news directory entry.
@@ -1322,5 +1486,237 @@ mod tests {
         let e = parse_news_categoryitem(&data, 255).expect("ok");
         assert_eq!(e.kind, NewsDirKind::Folder);
         assert!(e.name.is_empty());
+    }
+
+    // ---- catlist ----
+
+    /// Build a CATLIST body — 10-byte threadlist header followed by
+    /// the caller's per-post bytes. The body is what goes inside the
+    /// `HTLC_DATA_CATLIST` chunk; tests assemble it themselves to
+    /// match the wire layout `hx_newscat_parse` reads.
+    fn catlist_body(post_count: u32, posts_bytes: &[u8]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&0u32.to_be_bytes()); // __x0
+        b.extend_from_slice(&post_count.to_be_bytes());
+        b.extend_from_slice(&0u16.to_be_bytes()); // __x1
+        b.extend_from_slice(posts_bytes);
+        b
+    }
+
+    /// 22-byte thread header.
+    fn thread_hdr(
+        postid: u32,
+        parentid: u32,
+        base_year: u16,
+        date_pad: u16,
+        seconds: u32,
+        partcount: u16,
+    ) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&postid.to_be_bytes());
+        b.extend_from_slice(&base_year.to_be_bytes());
+        b.extend_from_slice(&date_pad.to_be_bytes());
+        b.extend_from_slice(&seconds.to_be_bytes());
+        b.extend_from_slice(&parentid.to_be_bytes());
+        b.extend_from_slice(&0u32.to_be_bytes()); // __flags
+        b.extend_from_slice(&partcount.to_be_bytes());
+        b
+    }
+
+    fn pstring(s: &[u8]) -> Vec<u8> {
+        let mut b = Vec::with_capacity(1 + s.len());
+        b.push(s.len() as u8);
+        b.extend_from_slice(s);
+        b
+    }
+
+    fn wrap_catlist(body: &[u8]) -> Vec<u8> {
+        msg(0x0001_0000, 1, 0, &chunk(tag::CATLIST, body))
+    }
+
+    #[test]
+    fn catlist_empty_post_count_yields_empty_vec() {
+        let body = catlist_body(0, &[]);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        assert!(cl.posts.is_empty());
+    }
+
+    #[test]
+    fn catlist_single_post_no_parts() {
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(0x42, 0, 2026, 0, 12345, 0));
+        posts.extend(pstring(b"Welcome"));
+        posts.extend(pstring(b"Admin"));
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        assert_eq!(cl.posts.len(), 1);
+        let p = &cl.posts[0];
+        assert_eq!(p.postid, 0x42);
+        assert_eq!(p.parentid, 0);
+        assert_eq!(p.date_base_year, 2026);
+        assert_eq!(p.date_seconds, 12345);
+        assert_eq!(p.partcount, 0);
+        assert_eq!(p.subject, b"Welcome");
+        assert_eq!(p.sender, b"Admin");
+        assert_eq!(p.size_total, 0);
+        assert!(p.parts.is_empty());
+    }
+
+    #[test]
+    fn catlist_post_with_parts_accumulates_size_total() {
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(100, 0, 1970, 0, 0, 2));
+        posts.extend(pstring(b"Subject"));
+        posts.extend(pstring(b"Sender"));
+        posts.extend(pstring(b"text/plain"));
+        posts.extend_from_slice(&45u16.to_be_bytes());
+        posts.extend(pstring(b"text/html"));
+        posts.extend_from_slice(&123u16.to_be_bytes());
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        let p = &cl.posts[0];
+        assert_eq!(p.partcount, 2);
+        assert_eq!(p.size_total, 168);
+        assert_eq!(p.parts[0].mime_type, b"text/plain");
+        assert_eq!(p.parts[0].size, 45);
+        assert_eq!(p.parts[1].mime_type, b"text/html");
+        assert_eq!(p.parts[1].size, 123);
+    }
+
+    #[test]
+    fn catlist_threading_round_trip() {
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(1, 0, 0, 0, 0, 0));
+        posts.extend(pstring(b"Root"));
+        posts.extend(pstring(b"alice"));
+        posts.extend(thread_hdr(2, 1, 0, 0, 0, 0));
+        posts.extend(pstring(b"Re: Root"));
+        posts.extend(pstring(b"bob"));
+        posts.extend(thread_hdr(3, 2, 0, 0, 0, 0));
+        posts.extend(pstring(b"Re: Re: Root"));
+        posts.extend(pstring(b"carol"));
+        let body = catlist_body(3, &posts);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        assert_eq!(cl.posts.len(), 3);
+        assert_eq!(cl.posts[1].parentid, 1);
+        assert_eq!(cl.posts[2].parentid, 2);
+    }
+
+    #[test]
+    fn catlist_empty_pstrings_yield_empty_vec() {
+        // C's hx_newscat semantics: empty pstring → NULL in the C
+        // struct. In Rust we surface it as Vec::new(); the C shim must
+        // skip g_strndup when len == 0 to preserve the NULL contract.
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(1, 0, 0, 0, 0, 0));
+        posts.extend(pstring(b""));
+        posts.extend(pstring(b""));
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        assert!(cl.posts[0].subject.is_empty());
+        assert!(cl.posts[0].sender.is_empty());
+    }
+
+    #[test]
+    fn catlist_missing_chunk_rejected() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_short_header_rejected() {
+        // 5 bytes < 10-byte threadlist header.
+        let m = msg(0x0001_0000, 1, 0, &chunk(tag::CATLIST, &[0u8; 5]));
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_forged_post_count_rejected() {
+        // post_count = 1000 but no per-post bytes — defensive cap
+        // bites before any allocation.
+        let body = catlist_body(1000, &[]);
+        let m = wrap_catlist(&body);
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_overlong_pstring_rejected() {
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(1, 0, 0, 0, 0, 0));
+        // Length byte claims 200 but only 3 bytes follow.
+        posts.push(200u8);
+        posts.extend_from_slice(b"abc");
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_forged_partcount_rejected() {
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(1, 0, 0, 0, 0, 1000));
+        posts.extend(pstring(b"S"));
+        posts.extend(pstring(b"a"));
+        // Claim 1000 parts but provide no per-part bytes.
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_truncated_thread_header_rejected() {
+        let mut posts = Vec::new();
+        // Only 10 of the 22 bytes of the thread header.
+        posts.extend_from_slice(&[0u8; 10]);
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        assert!(parse_catlist(&m, m.len()).is_none());
+    }
+
+    #[test]
+    fn catlist_first_chunk_wins() {
+        // Build two CATLIST chunks; only the first should be read.
+        let mut first_posts = Vec::new();
+        first_posts.extend(thread_hdr(1, 0, 0, 0, 0, 0));
+        first_posts.extend(pstring(b"first"));
+        first_posts.extend(pstring(b"a"));
+        let first_body = catlist_body(1, &first_posts);
+
+        let mut second_posts = Vec::new();
+        second_posts.extend(thread_hdr(2, 0, 0, 0, 0, 0));
+        second_posts.extend(pstring(b"second"));
+        second_posts.extend(pstring(b"b"));
+        let second_body = catlist_body(1, &second_posts);
+
+        let mut chunks = Vec::new();
+        chunks.extend(chunk(tag::CATLIST, &first_body));
+        chunks.extend(chunk(tag::CATLIST, &second_body));
+        let m = msg(0x0001_0000, 1, 0, &chunks);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        assert_eq!(cl.posts.len(), 1);
+        assert_eq!(cl.posts[0].subject, b"first");
+    }
+
+    #[test]
+    fn catlist_size_total_wraps_at_u16() {
+        // Two parts each with size = 0xff_00; sum wraps to 0xfe00.
+        let mut posts = Vec::new();
+        posts.extend(thread_hdr(1, 0, 0, 0, 0, 2));
+        posts.extend(pstring(b"S"));
+        posts.extend(pstring(b"a"));
+        posts.extend(pstring(b"m"));
+        posts.extend_from_slice(&0xff00u16.to_be_bytes());
+        posts.extend(pstring(b"m2"));
+        posts.extend_from_slice(&0xff00u16.to_be_bytes());
+        let body = catlist_body(1, &posts);
+        let m = wrap_catlist(&body);
+        let cl = parse_catlist(&m, m.len()).expect("ok");
+        // 0xff00 + 0xff00 = 0x1fe00, wrapped to u16 = 0xfe00.
+        assert_eq!(cl.posts[0].size_total, 0xfe00);
     }
 }

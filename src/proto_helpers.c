@@ -420,53 +420,6 @@ hx_news_dirlist_parse_folderitem (const guint8 *data, gsize dlen,
 
 /* ---- HTLC_DATA_CATLIST parser ------------------------------------- */
 
-/* Read one length-prefixed Hotline pstring from `*pp`.
- *
- * Wire format: u8 length, then `length` bytes. Length 0 means an
- * empty string; the original gtkhx parser returned NULL for that
- * case and we preserve the contract (consumers null-check before
- * use).
- *
- * On success advances `*pp` past the pstring (length byte + content)
- * and decrements `*remaining` accordingly. Returns TRUE.
- *
- * On overrun (not enough bytes for the length byte itself, or
- * length > remaining-after-len-byte) returns FALSE without
- * advancing. `*out` is set to NULL on FALSE so the caller's free
- * walk is safe. */
-static gboolean
-newscat_read_pstring (const guint8 **pp, gsize *remaining, char **out)
-{
-    const guint8 *p = *pp;
-    gsize r = *remaining;
-    guint8 len;
-
-    *out = NULL;
-
-    if (r < 1) {
-        return FALSE;
-    }
-    len = *p;
-    p++;
-    r--;
-
-    if (len > r) {
-        return FALSE;
-    }
-
-    if (len > 0) {
-        *out = g_malloc (len + 1);
-        memcpy (*out, p, len);
-        (*out)[len] = '\0';
-        p += len;
-        r -= len;
-    }
-
-    *pp = p;
-    *remaining = r;
-    return TRUE;
-}
-
 static void
 newscat_post_clear (struct hx_newscat_post *p)
 {
@@ -504,130 +457,76 @@ hx_newscat_clear (struct hx_newscat *r)
 gboolean
 hx_newscat_parse (struct htlc_conn *htlc, struct hx_newscat *out)
 {
-    const guint8 *p;
-    gsize remaining;
-    guint32 i;
-    gboolean found = FALSE, ok = TRUE;
-
     if (!out) {
         return FALSE;
     }
     memset (out, 0, sizeof (*out));
 
-    dh_start (htlc)
-    {
-        if (_type != HTLC_DATA_CATLIST || found) {
-            continue;
-        }
-        found = TRUE;
-
-        p = (const guint8 *)dh->data;
-        remaining = _len;
-
-        /* Threadlist header: u32 __x0 + u32 post_count + u16 __x1.
-		 * 10 bytes total. */
-        if (remaining < 10) {
-            ok = FALSE;
-            break;
-        }
-        p += 4; /* skip __x0 */
-        remaining -= 4;
-        HN32 (&out->post_count, p);
-        p += 4;
-        remaining -= 4;
-        p += 2; /* skip __x1 */
-        remaining -= 2;
-
-        if (out->post_count == 0) {
-            break;
-        }
-
-        /* Defensive: refuse counts that obviously can't fit. Each
-		 * post needs at minimum SIZEOF_HL_NEWS_THREAD_HDR (22) +
-		 * 2 (two zero-len pstrings) = 24 bytes. Cap the up-front
-		 * allocation against the wire's actual byte budget so a
-		 * forged post_count can't make us allocate gigabytes. */
-        if ((gsize)out->post_count > remaining / 24) {
-            ok = FALSE;
-            break;
-        }
-
-        out->posts = g_new0 (struct hx_newscat_post, out->post_count);
-
-        for (i = 0; i < out->post_count && ok; i++) {
-            struct hx_newscat_post *pp = &out->posts[i];
-            guint16 j;
-
-            /* Per-thread fixed header: 22 bytes
-			 * (id + 8-byte date + parentid + 4-byte flags +
-			 *  partcount). */
-            if (remaining < 22) {
-                ok = FALSE;
-                break;
-            }
-            HN32 (&pp->postid, p);
-            p += 4;
-            remaining -= 4;
-            HN16 (&pp->date_base_year, p);
-            p += 2;
-            remaining -= 2;
-            HN16 (&pp->date_pad, p);
-            p += 2;
-            remaining -= 2;
-            HN32 (&pp->date_seconds, p);
-            p += 4;
-            remaining -= 4;
-            HN32 (&pp->parentid, p);
-            p += 4;
-            remaining -= 4;
-            p += 4; /* skip flags */
-            remaining -= 4;
-            HN16 (&pp->partcount, p);
-            p += 2;
-            remaining -= 2;
-
-            if (!newscat_read_pstring (&p, &remaining, &pp->subject)) {
-                ok = FALSE;
-                break;
-            }
-            if (!newscat_read_pstring (&p, &remaining, &pp->sender)) {
-                ok = FALSE;
-                break;
-            }
-
-            if (pp->partcount == 0) {
-                continue;
-            }
-
-            /* Each part: pstring mime + u16 size = at least 3 bytes. */
-            if ((gsize)pp->partcount > remaining / 3) {
-                ok = FALSE;
-                break;
-            }
-            pp->parts = g_new0 (struct hx_newscat_part, pp->partcount);
-            for (j = 0; j < pp->partcount; j++) {
-                if (!newscat_read_pstring (&p, &remaining,
-                                           &pp->parts[j].mime_type)) {
-                    ok = FALSE;
-                    break;
-                }
-                if (remaining < 2) {
-                    ok = FALSE;
-                    break;
-                }
-                HN16 (&pp->parts[j].size, p);
-                p += 2;
-                remaining -= 2;
-                pp->size_total += pp->parts[j].size;
-            }
-        }
-    }
-    dh_end ();
-
-    if (!found || !ok) {
-        hx_newscat_clear (out);
+    /* Phase R2: chunk walk + bounds checks + pstring decoding moved to
+     * gtkhx_proto_parse_catlist in the Rust hotline-proto crate. The
+     * crate owns the parse tree; we copy each pstring out via
+     * g_strndup so the per-post char* fields are g_malloc'd and
+     * news_item_take_from_wire can steal them as before. Empty
+     * pstrings stay NULL to match the C extractor's contract (the
+     * Tier 2 test_newscat_empty_pstrings case pins this). */
+    struct gtkhx_proto_catlist *cl
+        = gtkhx_proto_parse_catlist (htlc->in.buf, htlc->in.pos);
+    if (!cl) {
         return FALSE;
     }
+
+    out->post_count = gtkhx_proto_catlist_post_count (cl);
+    if (out->post_count == 0) {
+        gtkhx_proto_catlist_free (cl);
+        return TRUE;
+    }
+
+    out->posts = g_new0 (struct hx_newscat_post, out->post_count);
+
+    for (guint32 i = 0; i < out->post_count; i++) {
+        struct hx_newscat_post *pp = &out->posts[i];
+        struct gtkhx_proto_catlist_post_view v;
+        if (!gtkhx_proto_catlist_post_get (cl, i, &v)) {
+            hx_newscat_clear (out);
+            gtkhx_proto_catlist_free (cl);
+            return FALSE;
+        }
+
+        pp->postid = v.postid;
+        pp->parentid = v.parentid;
+        pp->date_base_year = v.date_base_year;
+        pp->date_pad = v.date_pad;
+        pp->date_seconds = v.date_seconds;
+        pp->partcount = v.partcount;
+        pp->size_total = v.size_total;
+
+        if (v.subject_len) {
+            pp->subject = g_strndup ((const char *)v.subject_ptr, v.subject_len);
+        }
+        if (v.sender_len) {
+            pp->sender = g_strndup ((const char *)v.sender_ptr, v.sender_len);
+        }
+
+        if (v.partcount) {
+            pp->parts = g_new0 (struct hx_newscat_part, v.partcount);
+            for (guint16 j = 0; j < v.partcount; j++) {
+                struct gtkhx_proto_catlist_part_view pv;
+                if (!gtkhx_proto_catlist_part_get (cl, i, j, &pv)) {
+                    hx_newscat_clear (out);
+                    gtkhx_proto_catlist_free (cl);
+                    return FALSE;
+                }
+                if (pv.mime_type_len) {
+                    pp->parts[j].mime_type
+                        = g_strndup ((const char *)pv.mime_type_ptr,
+                                     pv.mime_type_len);
+                }
+                pp->parts[j].size = pv.size;
+            }
+        }
+    }
+
+    gtkhx_proto_catlist_free (cl);
     return TRUE;
 }
 

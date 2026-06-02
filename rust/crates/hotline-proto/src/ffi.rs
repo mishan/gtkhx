@@ -9,7 +9,7 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
-use crate::parse::{self, AgreementResult, Header, NewsDirEntry, NewsDirKind};
+use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
@@ -596,6 +596,175 @@ pub unsafe extern "C" fn gtkhx_proto_parse_news_categoryitem(
         Some(e) => write_news_dir(e, name_buf, name_cap, out),
         None => false,
     }
+}
+
+// ---- HTLC_DATA_CATLIST (1.5 threaded news article listing) ------------
+//
+// The C consumer (rcv.c::news_item_take_from_wire) steals the parsed
+// pstring pointers (subject / sender / mime_type) and frees them via
+// g_free later. To preserve that allocator boundary without g_malloc-
+// from-Rust, the FFI exposes an opaque handle plus view-struct
+// accessors: the C shim copies each pstring into a g_strndup'd buffer
+// itself, so g_malloc/g_free pair correctly on the C side and Rust
+// owns its parse tree end-to-end.
+
+/// View of one post inside a [`CatList`]. The byte pointers borrow
+/// into the Rust-owned parse tree and are valid only while the
+/// owning handle is alive — copy out before [`gtkhx_proto_catlist_free`].
+/// Empty pstrings on the wire surface as `*_ptr == NULL` and
+/// `*_len == 0` to match the C `hx_newscat`'s "NULL when empty"
+/// convention.
+#[repr(C)]
+pub struct CatListPostView {
+    pub postid: u32,
+    pub parentid: u32,
+    pub date_seconds: u32,
+    pub date_base_year: u16,
+    pub date_pad: u16,
+    pub partcount: u16,
+    pub size_total: u16,
+    pub subject_ptr: *const u8,
+    pub subject_len: usize,
+    pub sender_ptr: *const u8,
+    pub sender_len: usize,
+}
+
+/// View of one mime part inside a [`CatListPostView`].
+#[repr(C)]
+pub struct CatListPartView {
+    pub mime_type_ptr: *const u8,
+    pub mime_type_len: usize,
+    pub size: u16,
+}
+
+fn empty_view_ptr(bytes: &[u8]) -> (*const u8, usize) {
+    if bytes.is_empty() {
+        (std::ptr::null(), 0)
+    } else {
+        (bytes.as_ptr(), bytes.len())
+    }
+}
+
+/// Parse the first `HTLC_DATA_CATLIST` chunk and return an opaque
+/// handle to the parsed tree, or NULL when the chunk is absent or
+/// malformed (the C `hx_newscat_parse`'s FALSE return). The caller
+/// owns the handle and must free it with [`gtkhx_proto_catlist_free`].
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_catlist(
+    msg: *const u8,
+    msglen: usize,
+) -> *mut CatList {
+    let s = as_slice(msg, msglen);
+    match parse::parse_catlist(s, s.len()) {
+        Some(cl) => Box::into_raw(Box::new(cl)),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// Free a catlist handle returned by [`gtkhx_proto_parse_catlist`].
+/// NULL is a no-op.
+///
+/// # Safety
+/// `cl` must be either NULL or a pointer previously returned by
+/// `gtkhx_proto_parse_catlist`. Each handle must be freed exactly once.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_catlist_free(cl: *mut CatList) {
+    if !cl.is_null() {
+        drop(Box::from_raw(cl));
+    }
+}
+
+/// Number of posts in `*cl`. 0 on NULL.
+///
+/// # Safety
+/// `cl` must be NULL or a live handle from
+/// [`gtkhx_proto_parse_catlist`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_catlist_post_count(cl: *const CatList) -> u32 {
+    if cl.is_null() {
+        return 0;
+    }
+    (*cl).posts.len() as u32
+}
+
+/// Fill `*view` with a borrowed snapshot of post `idx`. Returns false
+/// on NULL `cl` / NULL `view` / out-of-range `idx`; otherwise true.
+/// The pointers in `*view` are valid only until the next call mutating
+/// the handle (currently no such API exists — they are valid until the
+/// handle is freed).
+///
+/// # Safety
+/// `cl` and `view` must be valid pointers, or NULL. `cl` must point at
+/// a live handle from [`gtkhx_proto_parse_catlist`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_catlist_post_get(
+    cl: *const CatList,
+    idx: u32,
+    view: *mut CatListPostView,
+) -> bool {
+    if cl.is_null() || view.is_null() {
+        return false;
+    }
+    let posts = &(*cl).posts;
+    let i = idx as usize;
+    if i >= posts.len() {
+        return false;
+    }
+    let p = &posts[i];
+    let (sptr, slen) = empty_view_ptr(&p.subject);
+    let (nptr, nlen) = empty_view_ptr(&p.sender);
+    *view = CatListPostView {
+        postid: p.postid,
+        parentid: p.parentid,
+        date_seconds: p.date_seconds,
+        date_base_year: p.date_base_year,
+        date_pad: p.date_pad,
+        partcount: p.partcount,
+        size_total: p.size_total,
+        subject_ptr: sptr,
+        subject_len: slen,
+        sender_ptr: nptr,
+        sender_len: nlen,
+    };
+    true
+}
+
+/// Fill `*view` with a borrowed snapshot of part `(post_idx, part_idx)`.
+/// Same NULL / OOB rules as [`gtkhx_proto_catlist_post_get`].
+///
+/// # Safety
+/// As [`gtkhx_proto_catlist_post_get`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_catlist_part_get(
+    cl: *const CatList,
+    post_idx: u32,
+    part_idx: u16,
+    view: *mut CatListPartView,
+) -> bool {
+    if cl.is_null() || view.is_null() {
+        return false;
+    }
+    let posts = &(*cl).posts;
+    let pi = post_idx as usize;
+    if pi >= posts.len() {
+        return false;
+    }
+    let parts = &posts[pi].parts;
+    let qi = part_idx as usize;
+    if qi >= parts.len() {
+        return false;
+    }
+    let q = &parts[qi];
+    let (mptr, mlen) = empty_view_ptr(&q.mime_type);
+    *view = CatListPartView {
+        mime_type_ptr: mptr,
+        mime_type_len: mlen,
+        size: q.size,
+    };
+    true
 }
 
 /// C-ABI result of [`parse::parse_user_part`].
