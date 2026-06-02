@@ -325,9 +325,9 @@ disconnect_clicked (void)
  * The action callbacks defer their real work to g_idle_add — when the
  * action fires from a hamburger menu item, the popover is mid-dismiss
  * and the GdkSurface for it is still alive on the click stack. Building
- * a new top-level dialog (especially the AdwPreferencesWindow with its
- * 9 pages and the icon-picker GtkHList that walks main-loop iterations)
- * inside that callstack hit a Heisenbug — segfault on bare run, no
+ * a new top-level dialog (especially the AdwPreferencesWindow with
+ * its 9 pages and the icon-picker FlowBox that walks main-loop
+ * iterations) inside that callstack hit a Heisenbug — segfault on bare run, no
  * crash under gdb. Letting the click chain unwind first via the idle
  * source side-steps it cleanly. */
 static gboolean

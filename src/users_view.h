@@ -8,9 +8,8 @@
  */
 
 /*
- * users_view.h — GtkColumnView-backed user list, replacing the
- * GtkHList-based standalone Users window + per-chat / per-pchat
- * user lists.
+ * users_view.h — GtkColumnView-backed user list. Used by the
+ * standalone Users window and by the per-pchat sidebars.
  *
  * Model chain per view:
  *
@@ -58,10 +57,11 @@ G_DECLARE_FINAL_TYPE (HxUserListView, hx_user_list_view, HX, USER_LIST_VIEW,
                       GObject)
 
 /* Visual style flags. The Users window passes USERS for the
- * standalone-window appearance (24 px rows, 1.25× pixel scale,
+ * standalone-window appearance (26 px rows, 1.25× pixel scale,
  * text outline, 36-px text offset). Chat / pchat sidebars pass
  * CHAT for the compact appearance (18-px rows, 1.0× scale, no
- * outline, 22-px offset). */
+ * outline, 36-px offset — same offset as the Users window so
+ * medium-wide non-banner icons clear the name in both layouts). */
 typedef enum {
     HX_USER_LIST_STYLE_USERS = 0, /* standalone Users window */
     HX_USER_LIST_STYLE_CHAT,      /* chat / pchat sidebar */

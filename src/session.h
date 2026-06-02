@@ -23,13 +23,13 @@
 /*
  * Phase 3.2: GdkPixmap, GdkBitmap, and GdkColormap were removed in GTK 3.
  * Code throughout this tree still declares variables of those types — most
- * of which are eventually fed into gtk_image_new_from_pixbuf or the
- * gtk_hlist shim, which want GdkPixbuf*. Aliasing the legacy types to
- * GdkPixbuf lets the bulk-mechanical sweep stay mechanical: pixmap *and*
- * mask now point to pixbufs, and the pixmap_create_from_xpm_d → pixbuf
- * migration in Phase 3.2 already feeds pixbufs in. GdkColormap isn't
- * actually used at runtime past truecolor — alias to gpointer for the
- * leftover declarations in init_colors() / cicn.c.
+ * of which are eventually fed into gtk_image_new_from_pixbuf, which wants
+ * GdkPixbuf*. Aliasing the legacy types to GdkPixbuf lets the bulk-
+ * mechanical sweep stay mechanical: pixmap *and* mask now point to
+ * pixbufs, and the pixmap_create_from_xpm_d → pixbuf migration in Phase
+ * 3.2 already feeds pixbufs in. GdkColormap isn't actually used at
+ * runtime past truecolor — alias to gpointer for the leftover
+ * declarations in init_colors() / cicn.c.
  *
  * Phase 3.4 (cairo) removes the cicn drawing paths that still reference
  * "real" pixmaps/drawables; once that lands the typedefs can be replaced

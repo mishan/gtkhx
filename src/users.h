@@ -35,8 +35,8 @@ extern GdkRGBA *user_color_gdk (guint16 color);
  * regular-user slot in user_color_gdk returns NULL so callers fall
  * through to the GTK theme's default foreground, which is what reads
  * correctly under both light and dark themes).
- * gtk_hlist_set_foreground accepts NULL as "use theme default", so
- * callers can pass the result through unconditionally. */
+ * The cell renderer treats NULL as "use theme default", so callers
+ * can pass the result through unconditionally. */
 extern GdkRGBA *user_nick_color_gdk (const struct hx_user *user, guint16 status,
                                      GdkRGBA *out);
 

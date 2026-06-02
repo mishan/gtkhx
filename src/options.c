@@ -183,17 +183,16 @@ static void icon_flow_child_activated (GtkFlowBox *flowbox,
 static void
 list_icons (void)
 {
-    /* Phase 5: replaced the 1-row-per-icon GtkHList layout (18px tall
-	 * rows, 34px icons) with a GtkFlowBox that auto-flows multiple
-	 * larger icons per row. Each entry is now a 64x64 image plus the
-	 * resource-ID label, packed into a vertical box and inserted as
-	 * a flowbox child. The flowbox itself is configured with min/max
-	 * children per line so the picker grows to as many columns as
-	 * fit the picker width without going single-column-narrow.
+    /* GtkFlowBox auto-flows multiple icons per row. Each entry is a
+	 * 64x64 image plus the resource-ID label, packed into a vertical
+	 * box and inserted as a flowbox child. The flowbox itself is
+	 * configured with min/max children per line so the picker grows
+	 * to as many columns as fit the picker width without going
+	 * single-column-narrow.
 	 *
-	 * Phase 3.4: cicn_to_pixbuf returns a GdkPixbuf directly with the
-	 * Mac classic mask folded into the alpha channel. Wide icons
-	 * (the 32x32 family bundles four variants in a 4*32-pixel row)
+	 * cicn_to_pixbuf returns a GdkPixbuf directly with the Mac
+	 * classic mask folded into the alpha channel. Wide icons (the
+	 * 32x32 family bundles four variants in a 4*32-pixel row)
 	 * are clipped to the rightmost 32 px to mirror the historical
 	 * "off = width > 400 ? 198 : 0" hack.
 	 *
@@ -1001,11 +1000,9 @@ icon_picker_sort_cb (GtkFlowBoxChild *a, GtkFlowBoxChild *b, gpointer data)
     return 0;
 }
 
-/* Phase 5: handler for the FlowBox's child-activated signal. The
- * activated child carries the resid as g_object_set_data; copy it
- * into the AdwSpinRow so the user's selection becomes the active
- * icon ID — same write-through behaviour the legacy
- * icon_row_selected() had against the GtkHList row. */
+/* Handler for the FlowBox's child-activated signal. The activated
+ * child carries the resid as g_object_set_data; copy it into the
+ * AdwSpinRow so the user's selection becomes the active icon ID. */
 static void
 icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
                            gpointer data)
@@ -2518,12 +2515,9 @@ settings_page_chat (AdwPreferencesPage *page)
  * into the Identity page since they're both "who am I to the server"
  * settings. Display name first, then icon ID, then the resource picker.
  *
- * Phase 5 follow-up #2: icon picker is now a GtkFlowBox with 64x64
- * pixel-art icons in a multi-column grid, replacing the legacy
- * 1-row-per-icon GtkHList. See icon_flow_child_activated (above) for
- * the click handler — this used to be icon_row_selected but the
- * flowbox emits child-activated, not select_row, so the dispatch
- * shape changed. */
+ * The icon picker is a GtkFlowBox of 64x64 pixel-art icons in a
+ * multi-column grid. See icon_flow_child_activated for the click
+ * handler. */
 static void
 settings_page_identity (AdwPreferencesPage *page)
 {

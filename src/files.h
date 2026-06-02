@@ -1,12 +1,11 @@
 #ifndef HX_FILES_H
 #define HX_FILES_H
 
-/* Phase 5: legacy single-pane GtkHList file browser was retired
- * with the new orthodox-file-manager browser in files_browser.c /
+/* The orthodox file-manager browser lives in files_browser.c /
  * files_panel.c / files_{local,remote}_provider.c / files_ops.c.
- * files.c is now just wire helpers + a couple of utilities still
- * used by the new browser (icon picker, kind formatter, hldir
- * encoder, the file-info dialog).
+ * files.c is wire helpers + a few utilities the browser uses
+ * (icon picker, kind formatter, hldir encoder, the file-info
+ * dialog).
  *
  * Forward decls so consumers that don't pull in the protocol
  * headers (e.g. files_entry.c, which only needs the ICON_*

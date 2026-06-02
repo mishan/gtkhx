@@ -2285,11 +2285,10 @@ pchat_new (session *sess, struct chat *chat)
     subject = gtk_entry_new ();
     gtkhx_apply_text_style (subject);
 
-    /* Phase C (users_view migration): the orphan GtkHList that used
-	 * to live here was always overwritten by create_pchat_window's
-	 * userlist on the very next call (pchat_new is only called from
-	 * create_pchat_window), so it served no purpose beyond the
-	 * leak. The visible HxUserListView is built down there. */
+    /* pchat_new is only called from create_pchat_window, which
+	 * builds the visible HxUserListView itself further down — the
+	 * sidebar's userlist starts NULL here and gets filled in
+	 * there. */
     g_object_ref_sink (text);
     g_object_ref_sink (vscroll);
     g_object_ref_sink (subject);
@@ -2571,9 +2570,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
         gtk_box_append (GTK_BOX (hbox), emoji_btn);
     }
 
-    /* Phase C (users_view migration): the pchat sidebar is now an
-	 * HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,
-	 * 22-px text offset). The view installs its own right-click
+    /* HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,
+	 * 36-px text offset). The view installs its own right-click
 	 * gesture and double-click → msgwin handler, so the older
 	 * users_attach_click_gesture wiring is gone. Selection lives
 	 * on the view's GtkSingleSelection — the action buttons below

@@ -22,15 +22,14 @@
 #include "cicn.h"   /* load_icon */
 #include "gtkhx.h"  /* gtkhx_apply_userlist_style + icon_files */
 #include "msg.h"    /* msgwin_with_uid + create_msgwin */
-#include "users.h"  /* users_font_desc + users_attach_click_gesture */
+#include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
 
-/* Right-click handler — opens the same user_popup the legacy
- * GtkHList path uses. Installed by hx_user_list_view_new on the
- * column view; finds the row under (x,y) via gtk_widget_pick +
- * walk-up to a GtkListItem (same pattern tracker.c uses), then
- * selects it and pops the menu. */
+/* Right-click handler — pops user_popup over the row under (x,y).
+ * Installed by hx_user_list_view_new on the column view; locates
+ * the row by gtk_widget_pick + walk-up to a GtkListItem (same
+ * pattern tracker.c uses), then selects it and pops the menu. */
 static void
 on_view_secondary_press (GtkGestureClick *gesture, int n_press, double x,
                          double y, gpointer data);
@@ -40,8 +39,7 @@ on_view_secondary_press (GtkGestureClick *gesture, int n_press, double x,
 /* ============================================================ */
 
 /* Renders the Mac-classic "icon as background + name overlay at
- * fixed text-x-offset" look the GtkHList shim used to provide via
- * its overlay_pixtext cell renderer. Snapshots:
+ * fixed text-x-offset" look. Snapshots:
  *
  *   1. Icon paintable at its natural width (scaled by pixel_scale)
  *      anchored to the cell's start edge, vertically centered.
@@ -69,10 +67,9 @@ G_DECLARE_FINAL_TYPE (HxUserCellName, hx_user_cell_name, HX, USER_CELL_NAME,
  * with opaque black) and the actual banner art lives in the right
  * portion. For our overlay layout (name at fixed x with icon
  * BEHIND it) the icon needs to render with its left ~200 px shifted
- * off-cell so the visible banner art lands behind the name.
- * Mirrors gtk_hlist_compat.c's compute_left_padding constants — the
- * same 200 px is empirically right across every wide banner the
- * client has shipped. */
+ * off-cell so the visible banner art lands behind the name. The
+ * 200 px constant is empirically right across every wide banner
+ * the client has shipped. */
 #define HX_USER_WIDE_ICON_THRESHOLD 48
 #define HX_USER_WIDE_ICON_LEFT_PAD 200
 
@@ -147,9 +144,7 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     load_icon (GTK_WIDGET (cell), icon_id, &icon_files, 1, &pixbuf,
                &mask_unused);
     if (pixbuf) {
-        /* Wide-banner detection — the source pixbuf's width is the
-		 * pre-scale bitmap width. Mirrors gtk_hlist_compat's
-		 * compute_left_padding: anything >= 48 px gets the 200 px
+        /* Wide-banner detection: anything >= 48 px gets the 200 px
 		 * left shift (clamped to the actual width for the rare
 		 * pathologically narrow "wide" icon). */
         int pb_w = gdk_pixbuf_get_width (pixbuf);
@@ -267,7 +262,7 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
      * convention: blank/transparent left ~200 px reserved for the
      * name area, art in the right portion) are shifted LEFT by
      * scaled_lpad so the visible art lines up with the cell's
-     * left edge — same trick gtk_hlist_compat used. */
+     * left edge. */
     if (cell->icon) {
         double iw = gdk_paintable_get_intrinsic_width (cell->icon)
                     * cell->pixel_scale;
@@ -774,15 +769,11 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
     gtk_sort_list_model_set_sorter (v->sort_model,
                                     gtk_column_view_get_sorter (cv));
 
-    /* Default sort by UID ascending — matches what the legacy
-	 * GtkHList Users window showed before any header click, which
-	 * is the order users developed an eye for over the years. The
-	 * Name-column header click is one tap away for anyone who
-	 * prefers alphabetical. */
+    /* Default sort by UID ascending. Name-column header click is
+	 * one tap away for anyone who prefers alphabetical. */
     gtk_column_view_sort_by_column (cv, col_uid, GTK_SORT_ASCENDING);
 
-    /* Double-click / Enter → open msgwin. Same behavior as the
-     * old GtkHList n_press == 2 click path. */
+    /* Double-click / Enter → open msgwin. */
     g_signal_connect (cv, "activate", G_CALLBACK (on_view_activate), v);
 
     /* Apply the userlist CSS class so the global font from
@@ -793,11 +784,11 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
     /* Tighten row + cell padding. Adwaita's default columnview row
 	 * gets ~10 px combined vertical padding from .listview / .cell
 	 * rules, which on top of the 1.25× scaled icons reads as way
-	 * too airy compared with the legacy GtkHList shim. Override on
-	 * a one-shot global provider scoped via the .gtkhx-userlist
-	 * class so we only touch our two userlist call sites (Users
-	 * window + Phase C pchat sidebars). min-height: 0 also lets
-	 * our measure-returned row_height actually take effect. */
+	 * too airy. Override on a one-shot global provider scoped via
+	 * the .gtkhx-userlist class so we only touch our two userlist
+	 * call sites (Users window + pchat sidebars). min-height: 0
+	 * also lets our measure-returned row_height actually take
+	 * effect. */
     {
         static GtkCssProvider *p = NULL;
         if (!p) {
