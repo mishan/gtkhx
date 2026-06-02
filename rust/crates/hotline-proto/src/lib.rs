@@ -19,6 +19,8 @@
 //!   breaking change for downstream `match`es.
 //! - [`text`] — Mac Roman <-> UTF-8, matching glibc's `iconv` "MACINTOSH"
 //!   table byte-for-byte (the table the C code reaches through `g_convert`).
+//! - [`sanitize`] — in-place CR→LF and control-byte folding (`strip_ansi`),
+//!   the post-parse cleanup the chat / message handlers apply.
 //! - [`parse`] — typed parsers for individual server messages. Phase R2
 //!   grows this one opcode at a time; the proof-of-concept opcodes are
 //!   `HTLS_HDR_USER_SELFINFO` and `HTLS_HDR_TASK`.
@@ -36,6 +38,7 @@
 
 pub mod messages;
 pub mod parse;
+pub mod sanitize;
 pub mod text;
 pub mod wire;
 
