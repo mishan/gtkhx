@@ -2,9 +2,6 @@ General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
 
-Users:
-- Look into using GtkColumnView instead of GtkHList
-
 Bookmarks:
 - Ship some bookmarks for more servers
 - Ship hlserver.com bookmark as a bookmark file rather than hardcoding it into the source code
@@ -27,7 +24,6 @@ Inline Media:
 Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them (or having them littered throughout the code)
-- Get rid of GtkHList
 
 Plugins:
 - New plugin ABI using GIRepository

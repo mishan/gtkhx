@@ -83,6 +83,8 @@ gtkhx_sources = files(
   'uniquify_path.c',
   'usermod.c',
   'users.c',
+  'users_row.c',
+  'users_view.c',
   'xfers.c',
   'xtext.c',
 )

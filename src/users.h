@@ -53,19 +53,26 @@ extern void user_change (struct htlc_conn *htlc, struct chat *chat,
                          struct hx_user *user, const char *nam, guint16 icon,
                          guint16 color);
 extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
-/* Phase 4.5/4.7: user_clicked was the GdkEventButton-shaped GtkCList
- * "button_press_event" handler. GTK 4 widgets don't emit
- * button_press_event — clicks come via a GtkGestureClick controller.
- * users_attach_click_gesture() installs a controller on `list' that
- * dispatches double-clicks to the message window and right-clicks to
- * the user popup, pulling the session from `sess'. */
-extern void users_attach_click_gesture (GtkWidget *list, session *sess);
-extern void open_message_btn (GtkWidget *widget, gpointer data);
-extern void user_info_btn (GtkWidget *widget, gpointer data);
-extern void user_kick_btn (GtkWidget *widget, gpointer data);
-extern void user_igno_btn (GtkWidget *widget, gpointer data);
-extern void user_ban_btn (GtkWidget *widget, gpointer data);
-extern void user_chat_btn (GtkWidget *widget, gpointer data);
+/* Right-click context menu for a user, used by the GtkGestureClick
+ * controller inside HxUserListView. Both the standalone Users
+ * window and the pchat sidebars share this single popover builder.
+ *
+ * `anchor` is the widget the popover gets parented to (and where
+ * pointing-to coords are taken from); `x`/`y` are widget-local. */
+extern void user_popup_show (GtkWidget *anchor, struct hx_user *user,
+                             session *sess, double x, double y);
+
+/* Shared headerbar / sidebar button handlers. `data` is the
+ * HxUserListView* the button is attached to — selection + session
+ * are pulled off the view. Drive both the Users window's headerbar
+ * (users.c::create_users_window) and the pchat sidebars
+ * (chat.c::create_pchat_window). */
+extern void view_msg_btn (GtkWidget *widget, gpointer data);
+extern void view_info_btn (GtkWidget *widget, gpointer data);
+extern void view_kick_btn (GtkWidget *widget, gpointer data);
+extern void view_igno_btn (GtkWidget *widget, gpointer data);
+extern void view_ban_btn (GtkWidget *widget, gpointer data);
+extern void view_chat_btn (GtkWidget *widget, gpointer data);
 
 extern struct hx_user *hx_user_new (struct chat *chat, guint16 uid);
 extern void hx_user_delete (struct chat *chat, struct hx_user *user);

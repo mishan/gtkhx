@@ -39,7 +39,7 @@
 #include "gtkutil.h"
 #include "xtext.h"
 #include "users.h"
-#include "gtk_hlist.h"
+#include "users_view.h"
 #include "gtkhx.h"
 #include "chat.h"
 #include "gtkurl.h"
@@ -306,15 +306,22 @@ hx_chat_join (struct htlc_conn *htlc, guint32 cid)
     struct chat *chat;
     chat = chat_with_cid (&the_session, cid);
 
-    if (chat) {
-        return;
-    } else {
+    /* Self-invite edge case: when the user creates a private chat
+	 * with their own UID, the server replies to CHAT_CREATE with the
+	 * chat info AND then sends a CHAT_INVITE for the same cid. The
+	 * CHAT_CREATE reply ran hx_rcv_user_change which already
+	 * registered the chat in sess->chats — so when the user clicks
+	 * Join on the invite dialog, chat_with_cid finds it. The earlier
+	 * guard here bailed at that point and never sent CHAT_JOIN, so
+	 * the membership-list reply never landed and the pchat window
+	 * never opened. We always send the JOIN now; chat_new is only
+	 * called when the chat hasn't been pre-registered. */
+    if (!chat) {
         chat = chat_new (&the_session, cid);
-        cid = htonl (cid);
-        task_new (htlc, RCV_TASK_FN (rcv_task_user_list_switch), chat, 0,
-                  "join");
-        hlwrite (htlc, HTLC_HDR_CHAT_JOIN, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
     }
+    cid = htonl (cid);
+    task_new (htlc, RCV_TASK_FN (rcv_task_user_list_switch), chat, 0, "join");
+    hlwrite (htlc, HTLC_HDR_CHAT_JOIN, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
 }
 
 void
@@ -543,6 +550,13 @@ gchat_free (gpointer p)
     struct gtkhx_chat *gchat = p;
     if (!gchat)
         return;
+    /* Release our strong ref to the per-pchat HxUserListView (Phase
+	 * C). The view's column_view widget is already being torn down
+	 * with the parent window, but we held a separate ref on the
+	 * GObject itself since create_pchat_window. The public-chat
+	 * gchat is created in create_chat with userlist=NULL so this is
+	 * a no-op there. */
+    g_clear_object (&gchat->userlist);
     /* The readline-history state itself (chat_history) is leaked
      * by historical convention — same Phase-1 mechanical-migration
      * scope note as msgwin_free in msg.c. The draft buffer added
@@ -2232,7 +2246,6 @@ pchat_new (session *sess, struct chat *chat)
     GtkWidget *text;
     GtkWidget *vscroll;
     GtkWidget *subject;
-    GtkWidget *userlist;
     struct gtkhx_chat *gchat;
 
     /* g_malloc0 so the chat_history_draft slot starts at NULL —
@@ -2272,29 +2285,21 @@ pchat_new (session *sess, struct chat *chat)
     subject = gtk_entry_new ();
     gtkhx_apply_text_style (subject);
 
-    userlist = gtk_hlist_new (2);
-    gtk_hlist_set_column_width (GTK_HLIST (userlist), 0, 30);
-    gtk_hlist_set_column_width (GTK_HLIST (userlist), 1, 210);
-    gtk_hlist_set_row_height (GTK_HLIST (userlist), 18);
-    gtk_hlist_set_shadow_type (GTK_HLIST (userlist), GTK_SHADOW_NONE);
-    /* Phase 5: Mac-classic overlay layout for the pchat name column —
-	 * wide icons render as row background, name overlays at fixed
-	 * 22-px offset (clears typical 18-px stock icons with breathing
-	 * room). See users.c create_users_window for rationale. */
-    gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (userlist), 1, 22);
-    gtk_hlist_set_column_justification (GTK_HLIST (userlist), 0,
-                                        GTK_JUSTIFY_LEFT);
+    /* Phase C (users_view migration): the orphan GtkHList that used
+	 * to live here was always overwritten by create_pchat_window's
+	 * userlist on the very next call (pchat_new is only called from
+	 * create_pchat_window), so it served no purpose beyond the
+	 * leak. The visible HxUserListView is built down there. */
     g_object_ref_sink (text);
     g_object_ref_sink (vscroll);
     g_object_ref_sink (subject);
-    g_object_ref_sink (userlist);
 
     gchat->cid = chat->cid;
     gchat->chat = chat;
     gchat->output = text;
     gchat->vscroll = vscroll;
     gchat->subject = subject;
-    gchat->userlist = userlist;
+    gchat->userlist = NULL;
     gchat->chat_history = history_new ();
     gchat->history_oldest_msgid    = 0;
     gchat->history_has_more        = FALSE;
@@ -2451,12 +2456,9 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     GtkWidget *pix;
     GdkPixmap *icon;
     char *title;
-    gchar *titles[2];
     session *sess = &the_session;
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
-    titles[0] = _ ("UID");
-    titles[1] = _ ("Name");
 
     pchat_window = gtk_window_new ();
     /* Phase 5: AdwHeaderBar across all GtkHx windows for visual
@@ -2569,62 +2571,52 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
         gtk_box_append (GTK_BOX (hbox), emoji_btn);
     }
 
-    gchat->userlist = gtk_hlist_new_with_titles (2, titles);
-    gtk_hlist_set_column_width (GTK_HLIST (gchat->userlist), 0, 35);
-    gtk_hlist_set_column_width (GTK_HLIST (gchat->userlist), 1, 240);
-    gtk_hlist_set_row_height (GTK_HLIST (gchat->userlist), 18);
-    gtk_hlist_set_shadow_type (GTK_HLIST (gchat->userlist), GTK_SHADOW_NONE);
-    gtk_hlist_set_column_justification (GTK_HLIST (gchat->userlist), 1,
-                                        GTK_JUSTIFY_LEFT);
-    /* Phase 4.5: button-press-event is gone in GTK 4. Install the same
-	 * gesture controller the standalone Users window uses. The previous
-	 * GTK-3 path passed user_clicked the chat-userlist with data=0, which
-	 * meant the right-click menu would deref a NULL session — fixed in
-	 * passing here by handing it the live session. */
-    users_attach_click_gesture (gchat->userlist, sess);
+    /* Phase C (users_view migration): the pchat sidebar is now an
+	 * HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,
+	 * 22-px text offset). The view installs its own right-click
+	 * gesture and double-click → msgwin handler, so the older
+	 * users_attach_click_gesture wiring is gone. Selection lives
+	 * on the view's GtkSingleSelection — the action buttons below
+	 * pull it via hx_user_list_view_get_selected_user. */
+    gchat->userlist = hx_user_list_view_new (sess, HX_USER_LIST_STYLE_CHAT);
 
     if (!users_font_desc) {
         users_font_desc = pango_font_description_from_string ("Sans 10");
     }
     gtkhx_refresh_userlist_css (users_font_desc);
-    gtkhx_apply_userlist_style (gchat->userlist);
 
     msg_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (msg_btn), "sess", sess);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/msg.png", NULL);
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (msg_btn, pix);
-    g_signal_connect (msg_btn, "clicked", G_CALLBACK (open_message_btn),
+    g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (msg_btn, _ ("Msg"));
     icon = 0, pix = 0;
 
     kick_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (kick_btn), "sess", sess);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/kick.png", NULL);
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (kick_btn, pix);
-    g_signal_connect (kick_btn, "clicked", G_CALLBACK (user_kick_btn),
+    g_signal_connect (kick_btn, "clicked", G_CALLBACK (view_kick_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (kick_btn, _ ("Kick"));
     icon = 0, pix = 0;
 
     info_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (info_btn), "sess", sess);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/info.png", NULL);
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (info_btn, pix);
-    g_signal_connect (info_btn, "clicked", G_CALLBACK (user_info_btn),
+    g_signal_connect (info_btn, "clicked", G_CALLBACK (view_info_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (info_btn, _ ("User Info"));
     icon = 0, pix = 0;
 
     ban_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (ban_btn), "sess", sess);
-    g_signal_connect (ban_btn, "clicked", G_CALLBACK (user_ban_btn),
+    g_signal_connect (ban_btn, "clicked", G_CALLBACK (view_ban_btn),
                       gchat->userlist);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/ban.png", NULL);
@@ -2634,9 +2626,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     icon = 0, pix = 0;
 
     chat_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (chat_btn), "sess", sess);
     gtk_widget_set_tooltip_text (chat_btn, _ ("Private Chat"));
-    g_signal_connect (chat_btn, "clicked", G_CALLBACK (user_chat_btn),
+    g_signal_connect (chat_btn, "clicked", G_CALLBACK (view_chat_btn),
                       gchat->userlist);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/chat.png", NULL);
@@ -2645,9 +2636,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     icon = 0, pix = 0;
 
     igno_btn = gtk_button_new ();
-    g_object_set_data (G_OBJECT (igno_btn), "sess", sess);
     gtk_widget_set_tooltip_text (igno_btn, _ ("Ignore"));
-    g_signal_connect (igno_btn, "clicked", G_CALLBACK (user_igno_btn),
+    g_signal_connect (igno_btn, "clicked", G_CALLBACK (view_igno_btn),
                       gchat->userlist);
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/ignore.png", NULL);
@@ -2676,7 +2666,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
     gtk_widget_set_size_request (scroll, 232, 232);
-    gtkhx_widget_set_child (scroll, gchat->userlist);
+    gtkhx_widget_set_child (scroll,
+                            hx_user_list_view_get_widget (gchat->userlist));
     gtkhx_widget_set_child (userframe, scroll);
 
     gtkhx_box_pack (user_vbox, topframe, 0, 0, 0);

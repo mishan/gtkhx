@@ -129,7 +129,12 @@ struct gtkhx_chat {
     GtkWidget *output;
     GtkWidget *input;
     GtkWidget *subject;
-    GtkWidget *userlist;
+    /* Phase 5 (Phase C of the users_view migration): per-pchat
+	 * sidebar is now an HxUserListView GObject (GtkColumnView-
+	 * backed). Forward-declared as an opaque typedef so this
+	 * header doesn't have to pull in users_view.h — the field
+	 * is read/written from chat.c + users.c only. */
+    struct _HxUserListView *userlist;
     guint32 cid;
     struct chat *chat;
     void *chat_history;   /* GNU readline command-line history. */
@@ -321,7 +326,14 @@ typedef struct _session {
     GtkWidget *tasks_window;
     GtkWidget *users_window;
 
-    GtkWidget *users_list;
+    /* Phase 5: the standalone Users window's row list is now a
+	 * HxUserListView GObject (GtkColumnView-backed). Forward-declared
+	 * as an opaque typedef so this header doesn't have to pull in
+	 * gtk-side users_view.h — the field is read/written from
+	 * users.c only. The view holds the GtkColumnView widget
+	 * internally; the column view is packed into a scrolled window
+	 * inside the toplevel users_window. */
+    struct _HxUserListView *users_view;
 
     GtkWidget *news_text;
     GtkWidget *postButton;
