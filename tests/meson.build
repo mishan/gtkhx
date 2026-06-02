@@ -1277,6 +1277,33 @@ test('tracker_v3_listing', test_integration_tracker_v3,
      suite       : 'integration',
      timeout     : 30)
 
+# tracker_v3_tls_listing — Tier 3 coverage for the Phase D TLS-on-
+# the-tracker-port path. Talks to any matrix entry advertising
+# HX_TEST_TRACKER_CAP_TLS via its tls_port. Argus has no native
+# TLS support so tests/argus/ adds a stunnel sidecar that
+# terminates TLS on port 6498 and forwards to plain Argus on
+# 5498. The cert is self-signed at image-build time; the test
+# accepts any cert inline (we have no GMainLoop / GtkApplication
+# to drive the production TOFU prompt against).
+#
+# Uses GSocketClient + set_tls(TRUE) — the same TLS plumbing the
+# production tracker fetch uses in network.c::tracker_fetch_
+# connect — so if the wire flow over TLS breaks, this test
+# catches it before a user does. Fails loudly when no TLS-capable
+# container is reachable, matching the no-silent-skips policy.
+test_integration_tracker_v3_tls = executable(
+  'test_integration_tracker_v3_tls',
+  'integration/test_tracker_v3_tls.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('tracker_v3_tls_listing', test_integration_tracker_v3_tls,
+     suite       : 'integration',
+     timeout     : 30)
+
 # tracker_v1_listing — Tier 3 coverage for the v1 fallback wire
 # path against any v1-only target in the matrix. Pins the wire
 # shape after the production state machine's watchdog has expired

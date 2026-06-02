@@ -48,7 +48,9 @@ ARG; we deliberately don't auto-track upstream.
 ## Run
 
 ```sh
-docker run --rm -p 5498:5498 -p 5499:5499/udp gtkhx-argus
+docker run --rm \
+    -p 5498:5498 -p 6498:6498 -p 5499:5499/udp \
+    gtkhx-argus
 ```
 
 GtkHx points at the tracker by default (Settings → Tracker host),
@@ -56,10 +58,15 @@ so connecting is just opening the tracker window.
 
 ## Ports
 
-| Port | Protocol | Purpose                                                |
-|------|----------|--------------------------------------------------------|
-| 5498 | TCP      | Client listing requests (v1/v2/v3 — auto-detected)     |
-| 5499 | UDP      | Server registration heartbeats (not driven by tests today) |
+| Port | Protocol  | Purpose                                                |
+|------|-----------|--------------------------------------------------------|
+| 5498 | TCP       | Client listing requests (v1/v2/v3 — auto-detected)     |
+| 6498 | TCP + TLS | Phase D TLS-wrapped listing requests. stunnel sidecar terminates TLS here and forwards to plain Argus on `127.0.0.1:5498`. Self-signed cert generated at image-build time. |
+| 5499 | UDP       | Server registration heartbeats (not driven by tests today) |
+
+The TLS port is `6498` rather than the natural `5598` because
+hxtrackd's container already publishes its plain endpoint on
+host:5598. `+1000` is the next clean non-colliding step.
 
 ## What's enabled
 

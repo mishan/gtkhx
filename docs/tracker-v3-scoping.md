@@ -1,6 +1,11 @@
 # Tracker Protocol v3 — Scoping Notes for GtkHx
 
-Status: implemented as of 2026-05-30 on `claude/tracker-v3-phase-a`.
+Status: Phases A, B, D implemented as of 2026-06-01. Phase A
+shipped on `claude/tracker-v3-phase-a`; Phase B (TLV decoder +
+typed-meta view) on `claude/tracker-v3-phase-b`; Phase D
+(TLS-first with plain fallback, TOFU cert pinning) on
+`claude/tracker-v3-phase-d`. Phase C (server-side SEARCH_TEXT /
+pagination TLVs) is still future scoping below.
 Written 2026-05-23 against the v3 spec document at
 <https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Tracker/Tracker-Protocol-v3.md>
 (revision in `main` at fetch time). Phase A (the floor — detection
@@ -293,26 +298,64 @@ group is independent and can land in its own commit.
   entry is "what we narrow to in the rendered list" (re-fired on every
   keystroke against cached results).
 
-### Phase D — TLS on TCP/5498
+### Phase D — TLS on TCP/5498 ✅ Shipped
 
-- `GSocketClient` natively supports TLS via
-  `g_socket_client_set_tls(client, TRUE)` plus
-  `GTlsClientConnection`. We already use GIO for the connection, so
-  the wiring lives entirely inside `tracker_fetch_start`.
-- Cert handling: trust the system store for public trackers; offer
-  per-tracker "trust this self-signed cert" for private ones (the
-  bookmark equivalent of the Hotline connect dialog's per-server pref
-  bag). Probably stored as a SHA-256 fingerprint pin in
-  `gtkhxrc`/the tracker pref list.
-- Fallback flow per spec: try TLS first, on failure retry without TLS
-  and treat as v1. That's two connect attempts per tracker on TLS
-  failure — fine for the few-trackers-per-session case but worth
-  caching the "this tracker doesn't speak TLS" verdict so we don't
-  re-pay it on each Refresh.
-- This is the only part of the v3 plan that meaningfully touches
-  *security* — and even then only on the listing side, which is
-  inherently public info. Compromising this isn't a path to compromising
-  any actual Hotline session.
+Implementation summary:
+
+- `tracker_fetch_ctx` gained `use_tls`, `tls_attempted`, and a
+  `tls_endpoint` for the shared `on_socket_client_event` TOFU
+  hook. `tracker_fetch_connect` flips `g_socket_client_set_tls`
+  when `use_tls` is set; otherwise the connect goes plain TCP.
+- `on_tracker_connected` distinguishes TLS handshake failure
+  (`G_TLS_ERROR` domain) from generic connect failure
+  (`G_IO_ERROR` domain). TLS-failures route through a new
+  `tracker_fetch_retry_plain` that closes the connection,
+  records the tracker as plain-only in the verdict cache, and
+  re-runs `tracker_fetch_connect` with `use_tls = 0`. The
+  existing v3-probe-then-v1-fallback machinery still runs on top
+  of plain TCP, so the worst-case ladder is TLS-fail → plain →
+  v3 probe → v1 fallback.
+- In-memory verdict cache (`tracker_tls_verdict_cache` —
+  `GHashTable<char *, hx_tracker_tls_verdict>`) tracks per-URL
+  "TLS works" vs "TLS doesn't, skip the handshake cost next
+  Refresh." Cleared on process restart so a tracker that adds
+  TLS support is rediscovered at next launch.
+- Cert handling shares the main Hotline session's `tls_trust.c`
+  module: SHA-256 fingerprint lookup in `$CONFIG/known_hosts`,
+  TOFU prompt on UNKNOWN, hard-warn on MISMATCH. The same
+  endpoint struct, the same accept-certificate handler — a pin
+  set for a session-server fingerprint and a pin set for a
+  tracker fingerprint coexist without stepping on each other.
+- Test harness: `tests/argus/` gained a stunnel sidecar (Argus
+  itself has no native TLS support — verified by grepping the
+  binary's `yaml:"..."` tags; none of the keys are TLS-related)
+  that terminates TLS on `tcp/6498` and forwards to plain Argus
+  on `127.0.0.1:5498`. The Tier 3 test
+  `tests/integration/test_tracker_v3_tls.c` connects via
+  `GSocketClient` + `set_tls(TRUE)` and walks the same handshake
+  → listing-request → records flow the plain test does, pinning
+  that the wire shape is unchanged under TLS.
+
+What's covered, what isn't:
+
+- Wire-level TLS: covered by the Tier 3 test against the
+  stunnel-wrapped Argus.
+- Production state-machine TLS-fail → plain-fallback: exercised
+  end-to-end when the user points GtkHx at any plain-only
+  tracker (the verdict cache records the fallback on first try
+  and skips the TLS attempt subsequently). Not Tier 3-covered
+  in CI because the test would need a GMainLoop harness to
+  observe the boxed-event signal flow; the verdict-cache logic
+  in network.c is small enough to read by hand.
+- TOFU dialog: shared with the main session's UI module; not
+  retested per-tracker. Headless tests bypass via
+  `GTKHX_TLS_AUTO_ACCEPT=1` or pre-pinning in
+  `GTKHX_KNOWN_HOSTS`.
+
+This is the only part of the v3 plan that meaningfully touches
+*security* — and even then only on the listing side, which is
+inherently public info. Compromising this isn't a path to
+compromising any actual Hotline session.
 
 ### Phase E (optional) — IPv6 server records / hostname records end-to-end
 
