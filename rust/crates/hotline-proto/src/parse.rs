@@ -10,6 +10,7 @@
 //! `HTLS_HDR_USER_SELFINFO` and `HTLS_HDR_TASK`.
 
 use crate::messages::tag;
+use crate::sanitize::{cr2lf, strip_ansi};
 use crate::wire::{ChunkIter, Decoder};
 
 // ---- Transaction header -------------------------------------------------
@@ -129,6 +130,127 @@ pub fn parse_selfinfo(buf: &[u8], len: usize) -> SelfInfo<'_> {
     out
 }
 
+// ---- HTLS_HDR_CHAT ------------------------------------------------------
+
+/// Parsed + sanitised public-chat line.
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub cid: u32,
+    pub uid: u16,
+    /// The full sanitised line (CR→LF + `strip_ansi` applied), without a
+    /// trailing NUL. `buf[text_off..]` is the display text.
+    pub buf: Vec<u8>,
+    /// 0, or 1 when a leading `\n` was stripped (the common
+    /// "\nUser: message" Hotline framing).
+    pub text_off: usize,
+}
+
+impl ChatMessage {
+    /// The display text after the leading-LF strip.
+    pub fn text(&self) -> &[u8] {
+        &self.buf[self.text_off..]
+    }
+}
+
+/// Parse `HTLS_HDR_CHAT`. `max_body` caps the body (the C handler uses
+/// 8192). The body is CR2LF'd then `strip_ansi`'d, and a single leading LF
+/// is dropped from the display text. Missing CHAT_ID / UID default to 0;
+/// an empty body is a valid "" message.
+pub fn parse_chat(buf: &[u8], len: usize, max_body: usize) -> ChatMessage {
+    let mut cid = 0u32;
+    let mut uid = 0u16;
+    let mut body: Vec<u8> = Vec::new();
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            // HTLS_DATA_CHAT shares the 0x0065 "body" tag.
+            tag::BODY => {
+                let take = chunk.data.len().min(max_body);
+                body = chunk.data[..take].to_vec();
+            }
+            tag::CHAT_ID => cid = chunk.as_uint(),
+            tag::UID => uid = chunk.as_uint() as u16,
+            _ => {}
+        }
+    }
+
+    cr2lf(&mut body);
+    strip_ansi(&mut body);
+    let text_off = usize::from(body.first() == Some(&b'\n'));
+
+    ChatMessage {
+        cid,
+        uid,
+        buf: body,
+        text_off,
+    }
+}
+
+// ---- HTLS_HDR_CHAT_SUBJECT ---------------------------------------------
+
+/// Parsed chat-subject change.
+#[derive(Debug, Clone)]
+pub struct ChatSubject {
+    pub cid: u32,
+    /// Raw subject bytes, capped, no NUL. Subjects are not CR2LF'd or
+    /// `strip_ansi`'d — they carry no line endings.
+    pub subject: Vec<u8>,
+}
+
+/// Parse `HTLS_HDR_CHAT_SUBJECT`. `max_subject` caps the subject (the C
+/// handler uses 255).
+pub fn parse_chat_subject(buf: &[u8], len: usize, max_subject: usize) -> ChatSubject {
+    let mut cid = 0u32;
+    let mut subject: Vec<u8> = Vec::new();
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::CHAT_ID => cid = chunk.as_uint(),
+            tag::CHAT_SUBJECT => {
+                let take = chunk.data.len().min(max_subject);
+                subject = chunk.data[..take].to_vec();
+            }
+            _ => {}
+        }
+    }
+
+    ChatSubject { cid, subject }
+}
+
+// ---- HTLS_HDR_CHAT_INVITE ----------------------------------------------
+
+/// Parsed chat invitation.
+#[derive(Debug, Clone)]
+pub struct ChatInvite {
+    pub uid: u16,
+    pub cid: u32,
+    /// Inviter name, capped, `strip_ansi`'d, no NUL.
+    pub name: Vec<u8>,
+}
+
+/// Parse `HTLS_HDR_CHAT_INVITE`. `max_name` caps the inviter name (the C
+/// handler uses 31). The name is `strip_ansi`'d (no CR2LF).
+pub fn parse_chat_invite(buf: &[u8], len: usize, max_name: usize) -> ChatInvite {
+    let mut uid = 0u16;
+    let mut cid = 0u32;
+    let mut name: Vec<u8> = Vec::new();
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::UID => uid = chunk.as_uint() as u16,
+            tag::CHAT_ID => cid = chunk.as_uint(),
+            tag::NAME => {
+                let take = chunk.data.len().min(max_name);
+                name = chunk.data[..take].to_vec();
+            }
+            _ => {}
+        }
+    }
+
+    strip_ansi(&mut name);
+    ChatInvite { uid, cid, name }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +347,112 @@ mod tests {
         let m = msg(0x0000_0162, 1, 0, &[]);
         let si = parse_selfinfo(&m, m.len());
         assert_eq!(si.seen, 0);
+    }
+
+    // ---- chat ----
+
+    #[test]
+    fn chat_extracts_body_cid_uid() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::BODY, b"hello"));
+        body.extend(chunk(tag::CHAT_ID, &7u32.to_be_bytes()));
+        body.extend(chunk(tag::UID, &0x1234u16.to_be_bytes()));
+        let m = msg(0x0000_0068, 1, 0, &body);
+        let c = parse_chat(&m, m.len(), 8192);
+        assert_eq!(c.cid, 7);
+        assert_eq!(c.uid, 0x1234);
+        assert_eq!(c.text(), b"hello");
+        assert_eq!(c.text_off, 0);
+    }
+
+    #[test]
+    fn chat_strips_leading_lf_after_cr2lf() {
+        // Wire CR before the "User:" — CR2LF makes it '\n', then the
+        // leading-LF strip advances text past it.
+        let m = msg(0x0000_0068, 1, 0, &chunk(tag::BODY, b"\rBob: hi"));
+        let c = parse_chat(&m, m.len(), 8192);
+        assert_eq!(c.buf, b"\nBob: hi"); // full sanitised line keeps the LF
+        assert_eq!(c.text(), b"Bob: hi"); // display text drops it
+        assert_eq!(c.text_off, 1);
+    }
+
+    #[test]
+    fn chat_applies_strip_ansi() {
+        // 0x0e (14) folds to 'N'; CR (0x0d) -> LF.
+        let m = msg(0x0000_0068, 1, 0, &chunk(tag::BODY, b"a\x0eb\rc"));
+        let c = parse_chat(&m, m.len(), 8192);
+        assert_eq!(c.text(), b"aNb\nc");
+    }
+
+    #[test]
+    fn chat_caps_body() {
+        let big = vec![b'x'; 9000];
+        let m = msg(0x0000_0068, 1, 0, &chunk(tag::BODY, &big));
+        let c = parse_chat(&m, m.len(), 8192);
+        assert_eq!(c.buf.len(), 8192);
+    }
+
+    #[test]
+    fn chat_empty_is_valid() {
+        let m = msg(0x0000_0068, 1, 0, &[]);
+        let c = parse_chat(&m, m.len(), 8192);
+        assert_eq!(c.cid, 0);
+        assert_eq!(c.uid, 0);
+        assert_eq!(c.text(), b"");
+        assert_eq!(c.text_off, 0);
+    }
+
+    // ---- chat subject ----
+
+    #[test]
+    fn chat_subject_extracts() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::CHAT_ID, &3u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_SUBJECT, b"Welcome"));
+        let m = msg(0x0000_0077, 1, 0, &body);
+        let s = parse_chat_subject(&m, m.len(), 255);
+        assert_eq!(s.cid, 3);
+        assert_eq!(s.subject, b"Welcome");
+    }
+
+    #[test]
+    fn chat_subject_not_sanitised() {
+        // CR must survive — subjects are not CR2LF'd.
+        let m = msg(0x0000_0077, 1, 0, &chunk(tag::CHAT_SUBJECT, b"a\rb"));
+        let s = parse_chat_subject(&m, m.len(), 255);
+        assert_eq!(s.subject, b"a\rb");
+    }
+
+    #[test]
+    fn chat_subject_caps() {
+        let big = vec![b's'; 400];
+        let m = msg(0x0000_0077, 1, 0, &chunk(tag::CHAT_SUBJECT, &big));
+        let s = parse_chat_subject(&m, m.len(), 255);
+        assert_eq!(s.subject.len(), 255);
+    }
+
+    // ---- chat invite ----
+
+    #[test]
+    fn chat_invite_extracts() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &42u16.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_ID, &99u32.to_be_bytes()));
+        body.extend(chunk(tag::NAME, b"Alice"));
+        let m = msg(0x0000_0071, 1, 0, &body);
+        let inv = parse_chat_invite(&m, m.len(), 31);
+        assert_eq!(inv.uid, 42);
+        assert_eq!(inv.cid, 99);
+        assert_eq!(inv.name, b"Alice");
+    }
+
+    #[test]
+    fn chat_invite_strips_ansi_and_caps_name() {
+        let mut n = vec![0x0eu8]; // folds to 'N'
+        n.extend(vec![b'q'; 40]);
+        let m = msg(0x0000_0071, 1, 0, &chunk(tag::NAME, &n));
+        let inv = parse_chat_invite(&m, m.len(), 31);
+        assert_eq!(inv.name.len(), 31);
+        assert_eq!(inv.name[0], b'N');
     }
 }

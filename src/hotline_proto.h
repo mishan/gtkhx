@@ -62,4 +62,51 @@ struct gtkhx_proto_selfinfo {
 extern uint32_t gtkhx_proto_parse_selfinfo (const uint8_t *buf, size_t len,
                                             struct gtkhx_proto_selfinfo *out);
 
+/* ---- Chat-family parsers (HTLS_HDR_CHAT / _SUBJECT / _INVITE) ----
+ *
+ * Each takes the message buffer (msg/msglen = htlc->in.buf/in.pos) plus a
+ * caller-owned text buffer (buf/bufcap) the sanitised text is written into
+ * (NUL-terminated, capped at bufcap-1). Scalar fields land in *out. They
+ * return false on a NULL out, NULL buf, or zero bufcap; otherwise true,
+ * mirroring the C extractors that always succeed on a well-formed frame. */
+
+struct gtkhx_proto_chat {
+    uint32_t cid;
+    uint16_t uid;
+    /* Offset into buf where the display text starts (0, or 1 when a
+     * leading LF was stripped from the common "\nUser: msg" framing). */
+    uint16_t text_off;
+    /* Display-text length: strlen(buf + text_off). */
+    uint16_t text_len;
+};
+
+/* Parse HTLS_HDR_CHAT. Writes the full sanitised line (CR2LF + strip_ansi)
+ * into buf; out->text_off/text_len describe the display slice. */
+extern bool gtkhx_proto_parse_chat (const uint8_t *msg, size_t msglen,
+                                    uint8_t *buf, size_t bufcap,
+                                    struct gtkhx_proto_chat *out);
+
+struct gtkhx_proto_chat_subject {
+    uint32_t cid;
+    uint16_t subject_len;
+};
+
+/* Parse HTLS_HDR_CHAT_SUBJECT. Writes the subject into buf (no CR2LF /
+ * strip_ansi — subjects carry no line endings). */
+extern bool gtkhx_proto_parse_chat_subject (const uint8_t *msg, size_t msglen,
+                                            uint8_t *buf, size_t bufcap,
+                                            struct gtkhx_proto_chat_subject *out);
+
+struct gtkhx_proto_chat_invite {
+    uint32_t cid;
+    uint16_t uid;
+    uint16_t name_len;
+};
+
+/* Parse HTLS_HDR_CHAT_INVITE. Writes the strip_ansi'd inviter name into
+ * buf. */
+extern bool gtkhx_proto_parse_chat_invite (const uint8_t *msg, size_t msglen,
+                                           uint8_t *buf, size_t bufcap,
+                                           struct gtkhx_proto_chat_invite *out);
+
 #endif /* _HOTLINE_PROTO_H */

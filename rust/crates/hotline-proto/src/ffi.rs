@@ -118,3 +118,128 @@ pub unsafe extern "C" fn gtkhx_proto_parse_selfinfo(
     }
     si.seen
 }
+
+/// Copy `src` into the C buffer `dst` (capacity `cap`), truncating to
+/// `cap - 1` and NUL-terminating. Returns the number of bytes written
+/// (excluding the NUL). No-op returning 0 on NULL / zero-capacity dst.
+///
+/// # Safety
+/// `dst` must be valid for `cap` bytes, or NULL.
+unsafe fn write_cstr(dst: *mut u8, cap: usize, src: &[u8]) -> usize {
+    if dst.is_null() || cap == 0 {
+        return 0;
+    }
+    let n = src.len().min(cap - 1);
+    if n > 0 {
+        std::ptr::copy_nonoverlapping(src.as_ptr(), dst, n);
+    }
+    *dst.add(n) = 0;
+    n
+}
+
+/// C-ABI result of [`parse::parse_chat`]. The sanitised line is written
+/// into the caller's `buf`; `text_off` (0 or 1) is where the display text
+/// starts after the leading-LF strip, and `text_len` is its length.
+#[repr(C)]
+pub struct ChatOut {
+    pub cid: u32,
+    pub uid: u16,
+    pub text_off: u16,
+    pub text_len: u16,
+}
+
+/// Parse `HTLS_HDR_CHAT`. Writes the full sanitised line into `buf`
+/// (capacity `bufcap`, NUL-terminated) and fills `*out`. The body is
+/// capped at `bufcap - 1`. Returns false on NULL `out`, NULL `buf`, or
+/// zero `bufcap`; otherwise true (a well-formed frame always parses).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `buf` valid for `bufcap`
+/// bytes; `out` a valid writable `ChatOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_chat(
+    msg: *const u8,
+    msglen: usize,
+    buf: *mut u8,
+    bufcap: usize,
+    out: *mut ChatOut,
+) -> bool {
+    if out.is_null() || buf.is_null() || bufcap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let c = parse::parse_chat(s, s.len(), bufcap - 1);
+    let written = write_cstr(buf, bufcap, &c.buf);
+    let text_off = c.text_off.min(written);
+    (*out).cid = c.cid;
+    (*out).uid = c.uid;
+    (*out).text_off = text_off as u16;
+    (*out).text_len = (written - text_off) as u16;
+    true
+}
+
+/// C-ABI result of [`parse::parse_chat_subject`].
+#[repr(C)]
+pub struct ChatSubjectOut {
+    pub cid: u32,
+    pub subject_len: u16,
+}
+
+/// Parse `HTLS_HDR_CHAT_SUBJECT`. Writes the subject into `buf` (NUL-
+/// terminated, capped at `bufcap - 1`) and fills `*out`. Returns false on
+/// NULL `out`, NULL `buf`, or zero `bufcap`; otherwise true.
+///
+/// # Safety
+/// As [`gtkhx_proto_parse_chat`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_chat_subject(
+    msg: *const u8,
+    msglen: usize,
+    buf: *mut u8,
+    bufcap: usize,
+    out: *mut ChatSubjectOut,
+) -> bool {
+    if out.is_null() || buf.is_null() || bufcap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let sub = parse::parse_chat_subject(s, s.len(), bufcap - 1);
+    let written = write_cstr(buf, bufcap, &sub.subject);
+    (*out).cid = sub.cid;
+    (*out).subject_len = written as u16;
+    true
+}
+
+/// C-ABI result of [`parse::parse_chat_invite`].
+#[repr(C)]
+pub struct ChatInviteOut {
+    pub cid: u32,
+    pub uid: u16,
+    pub name_len: u16,
+}
+
+/// Parse `HTLS_HDR_CHAT_INVITE`. Writes the inviter name into `buf` (NUL-
+/// terminated, capped at `bufcap - 1`) and fills `*out`. Returns false on
+/// NULL `out`, NULL `buf`, or zero `bufcap`; otherwise true.
+///
+/// # Safety
+/// As [`gtkhx_proto_parse_chat`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_chat_invite(
+    msg: *const u8,
+    msglen: usize,
+    buf: *mut u8,
+    bufcap: usize,
+    out: *mut ChatInviteOut,
+) -> bool {
+    if out.is_null() || buf.is_null() || bufcap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let inv = parse::parse_chat_invite(s, s.len(), bufcap - 1);
+    let written = write_cstr(buf, bufcap, &inv.name);
+    (*out).cid = inv.cid;
+    (*out).uid = inv.uid;
+    (*out).name_len = written as u16;
+    true
+}

@@ -72,47 +72,21 @@ hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
         return FALSE;
     }
 
-    out->cid = 0;
-    out->uid = 0;
-    out->buf[0] = '\0';
-    out->text = out->buf;
-    out->text_len = 0;
-
-    guint16 len = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_CHAT:
-            len = (_len > (sizeof (out->buf) - 1)) ? (sizeof (out->buf) - 1)
-                                                   : _len;
-            memcpy (out->buf, dh->data, len);
-            break;
-        case HTLS_DATA_CHAT_ID:
-            dh_getint (out->cid);
-            break;
-        case HTLS_DATA_UID:
-            dh_getint (out->uid);
-            break;
-        }
+    /* Phase R2: the chunk walk + CR2LF + strip_ansi + leading-LF strip
+     * moved to the Rust hotline-proto crate (gtkhx_proto_parse_chat). It
+     * writes the full sanitised line into out->buf (NUL-terminated, capped
+     * at sizeof(out->buf)-1) and reports where the display text starts. */
+    struct gtkhx_proto_chat c;
+    if (!gtkhx_proto_parse_chat (htlc->in.buf, htlc->in.pos,
+                                 (uint8_t *) out->buf, sizeof (out->buf),
+                                 &c)) {
+        return FALSE;
     }
-    dh_end ();
 
-    CR2LF (out->buf, len);
-    strip_ansi (out->buf, len);
-    out->buf[len] = '\0';
-
-    /* Hotline servers commonly format a chat line as
-	 * "\nUser: message" — the leading LF would render as a blank
-	 * line in the chat widget, so the original handler stripped
-	 * it. Preserve the behaviour. */
-    if (out->buf[0] == '\n') {
-        out->text = out->buf + 1;
-        out->text_len = (len > 0) ? (guint16)(len - 1) : 0;
-    } else {
-        out->text = out->buf;
-        out->text_len = len;
-    }
+    out->cid = c.cid;
+    out->uid = c.uid;
+    out->text = out->buf + c.text_off;
+    out->text_len = c.text_len;
 
     return TRUE;
 }
@@ -296,28 +270,18 @@ hx_chat_subject_extract (struct htlc_conn *htlc,
         return FALSE;
     }
 
-    out->cid = 0;
-    out->subject[0] = '\0';
-    out->subject_len = 0;
-
-    guint16 slen = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_CHAT_ID:
-            dh_getint (out->cid);
-            break;
-        case HTLS_DATA_CHAT_SUBJECT:
-            slen = (_len > 255) ? 255 : _len;
-            memcpy (out->subject, dh->data, slen);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_chat_subject.
+     * Subjects are NOT CR2LF'd / strip_ansi'd (they carry no line
+     * endings); the crate preserves that. */
+    struct gtkhx_proto_chat_subject sub;
+    if (!gtkhx_proto_parse_chat_subject (htlc->in.buf, htlc->in.pos,
+                                         (uint8_t *) out->subject,
+                                         sizeof (out->subject), &sub)) {
+        return FALSE;
     }
-    dh_end ();
 
-    out->subject[slen] = '\0';
-    out->subject_len = slen;
+    out->cid = sub.cid;
+    out->subject_len = sub.subject_len;
 
     return TRUE;
 }
@@ -329,33 +293,19 @@ hx_chat_invite_extract (struct htlc_conn *htlc, struct hx_chat_invite_msg *out)
         return FALSE;
     }
 
-    out->uid = 0;
-    out->cid = 0;
-    out->name[0] = '\0';
-    out->name_len = 0;
-
-    guint16 nlen = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_UID:
-            dh_getint (out->uid);
-            break;
-        case HTLS_DATA_CHAT_ID:
-            dh_getint (out->cid);
-            break;
-        case HTLS_DATA_NAME:
-            nlen = (_len > 31) ? 31 : _len;
-            memcpy (out->name, dh->data, nlen);
-            strip_ansi (out->name, nlen);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_chat_invite, which
+     * strip_ansi's the inviter name (no CR2LF) and caps it at
+     * sizeof(out->name)-1. */
+    struct gtkhx_proto_chat_invite inv;
+    if (!gtkhx_proto_parse_chat_invite (htlc->in.buf, htlc->in.pos,
+                                        (uint8_t *) out->name,
+                                        sizeof (out->name), &inv)) {
+        return FALSE;
     }
-    dh_end ();
 
-    out->name[nlen] = '\0';
-    out->name_len = nlen;
+    out->uid = inv.uid;
+    out->cid = inv.cid;
+    out->name_len = inv.name_len;
 
     return TRUE;
 }
