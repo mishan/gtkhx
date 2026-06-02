@@ -30,6 +30,7 @@
 #include "protocol.h"
 #include "hotline.h"
 #include "proto_helpers.h"
+#include "hotline_proto.h"
 #include "text_util.h"
 #include "debug.h"
 
@@ -206,110 +207,57 @@ hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {
-    struct hl_userlist_hdr *uh;
-    guint16 nlen;
-    unsigned seen = 0;
+    /* Phase R2: the chunk walk moved to the Rust hotline-proto crate
+     * (gtkhx_proto_parse_selfinfo). The crate enforces the same
+     * field-length gates the C code did (ACCESS exactly 8, USER_LIST
+     * >= 8 fixed bytes, COLOR exactly 4) and clamps the cached name to
+     * 31 bytes. The behavioural nuances this handler grew in Phase 5
+     * are preserved on the C side here:
+     *
+     *   - htlc->uid / icon come from the USER_LIST chunk. This is the
+     *     fix for the old self-aliasing HN16(&htlc->uid, &htlc->uid)
+     *     bug; the crate reads the wire uid out of the record
+     *     explicitly (see gtkhx_selfinfo_uid_bug.md in memory).
+     *   - htlc->name is deliberately NOT overwritten with the server's
+     *     cached nick. Local prefs win, to avoid the corrupt-nick
+     *     feedback loop documented in hx_rcv_user_selfinfo (server
+     *     caches our nick by IP and echoes back whatever a previous
+     *     broken client left). We only log the cached bytes under
+     *     category 'name' for forensics.
+     *   - htlc->nick_color mirrors the server's view; network.c
+     *     re-seeds it from prefs and pushes a USER_CHANGE after
+     *     AGREEMENTAGREE, so the local value still wins.
+     *     HX_NICK_COLOR_NONE passes through verbatim. */
+    struct gtkhx_proto_selfinfo si;
+    unsigned seen
+        = gtkhx_proto_parse_selfinfo (htlc->in.buf, htlc->in.pos, &si);
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_ACCESS:
-            if (_len != 8) {
-                break;
-            }
-            memcpy (&htlc->access, dh->data, 8);
-            seen |= HX_SELFINFO_ACCESS;
-            break;
-        case HTLS_DATA_USER_LIST:
-            if (_len < (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
-                break;
-            }
-            uh = (struct hl_userlist_hdr *)dh;
-            /* Phase 5: the line used to be
-			 *   HN16 (&htlc->uid, &htlc->uid);
-			 * which is a self-aliasing HN16. The macro reads
-			 * from[1] twice (the first line clobbers from[0]),
-			 * so both bytes ended up as the original high byte
-			 * — corrupting htlc->uid into (high<<8)|high on every
-			 * SELFINFO. The user_change handler at rcv.c uses
-			 * htlc->uid to detect "this is me" and copy
-			 * icon/color/name back out of the user-list row;
-			 * with the corruption that branch never matched.
-			 * Fix: extract the wire uid out of the chunk like
-			 * the surrounding HN16 calls do for icon and nlen. */
-            HN16 (&htlc->uid, &uh->uid);
-            HN16 (&htlc->icon, &uh->icon);
-            /* Phase 5: the original handler also had
-			 *   HN16 (&uh->color, &uh->color);
-			 * Same self-alias issue, but on a chunk field nothing
-			 * else reads. Drop it — if we ever wanted to capture
-			 * our own colour out of SELFINFO we'd need an
-			 * htlc->color field write parallel to the icon line. */
-            HN16 (&nlen, &uh->nlen);
-            nlen = (nlen > 31) ? 31 : nlen;
-            /* Phase 5: deliberately DO NOT overwrite htlc->name
-			 * with the server-supplied bytes. The server caches
-			 * our nick across sessions (hlserver.com keys by IP)
-			 * and on every reconnect sends back whatever it
-			 * remembered — including bytes from a previous broken
-			 * client (Hotline 1.x's Mac Roman, gtkhx's pre-sanitiser
-			 * raw-bytes era, an accidental one's-complement, etc.).
-			 * Letting that overwrite our local prefs value sets up
-			 * a feedback loop: server sends corrupt bytes →
-			 * htlc->name picks them up → prefs_write persists →
-			 * next session sends the same corrupt bytes back to the
-			 * server. (See hx_rcv_user_selfinfo: it now pushes our
-			 * local name + icon via hx_change_name_icon right after
-			 * the parse, so the server's cache gets updated to
-			 * match our prefs instead of the other way around.)
-			 *
-			 * uh->name is still chunk-bounded so the wire frame
-			 * stays valid; we just don't write the bytes anywhere.
-			 * Surface them under category 'name' for forensics. */
-            if (nlen) {
-                GString *hex = g_string_new (NULL);
-                guint16 i;
-                for (i = 0; i < nlen; i++) {
-                    if (i) {
-                        g_string_append_c (hex, ' ');
-                    }
-                    g_string_append_printf (hex, "%02x",
-                                            ((const guint8 *)uh->name)[i]);
+    if (seen & HX_SELFINFO_ACCESS) {
+        memcpy (&htlc->access, si.access, 8);
+    }
+    if (seen & HX_SELFINFO_USER_LIST) {
+        htlc->uid = si.uid;
+        htlc->icon = si.icon;
+        if (si.cached_name_len) {
+            GString *hex = g_string_new (NULL);
+            for (gsize i = 0; i < si.cached_name_len; i++) {
+                if (i) {
+                    g_string_append_c (hex, ' ');
                 }
-                debug_log ("name",
-                           "SELFINFO USER_LIST cached name "
-                           "ignored (nlen=%u hex=[%s]) — local "
-                           "prefs nick wins; will push via "
-                           "USER_CHANGE",
-                           (unsigned)nlen, hex->str);
-                g_string_free (hex, TRUE);
+                g_string_append_printf (hex, "%02x",
+                                        (unsigned)si.cached_name_ptr[i]);
             }
-            seen |= HX_SELFINFO_USER_LIST;
-            break;
-        case HTLS_DATA_COLOR:
-            /* Colored-Nicknames extension. Spec pins the field at
-             * exactly 4 bytes (BE u32). Mirror onto htlc->nick_color
-             * so we capture the server's view of our color (which
-             * may be a per-account override the server persists).
-             * The local pref still wins: network.c re-seeds
-             * htlc->nick_color from gtkhx_prefs on each connection
-             * teardown, and the follow-up USER_CHANGE-with-
-             * DATA_COLOR that network.c::hx_send_agreement_agree
-             * pushes after AGREEMENTAGREE (gated on nick_color !=
-             * HX_NICK_COLOR_NONE) overrides the server-cached
-             * value. Wire-side HX_NICK_COLOR_NONE preserves through
-             * verbatim — the renderer treats it as "no color, fall
-             * back to status palette". */
-            if (_len == 4) {
-                guint32 wire;
-                dh_getint (wire);
-                htlc->nick_color = wire;
-                seen |= HX_SELFINFO_NICK_COLOR;
-            }
-            break;
+            debug_log ("name",
+                       "SELFINFO USER_LIST cached name ignored "
+                       "(nlen=%u hex=[%s]) — local prefs nick wins; "
+                       "will push via USER_CHANGE",
+                       (unsigned)si.cached_name_len, hex->str);
+            g_string_free (hex, TRUE);
         }
     }
-    dh_end ();
+    if (seen & HX_SELFINFO_NICK_COLOR) {
+        htlc->nick_color = si.nick_color;
+    }
 
     return seen;
 }

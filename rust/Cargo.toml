@@ -7,4 +7,5 @@ members = [
     "crates/hxcrypto-stream",
     "crates/hxcrypto-aead",
     "crates/hxcompress",
+    "crates/hotline-proto",
 ]
