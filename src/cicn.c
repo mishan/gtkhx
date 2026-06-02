@@ -36,10 +36,11 @@
  *                   GdkPixbuf **out, GdkPixbuf **mask_unused);
  *
  * The mask out-param is kept for source-level compatibility with the old
- * 5-parameter call sites; it is always set to NULL and the gtk_hlist
- * compat shim's pixmap_to_pixbuf() already ignores it (alpha lives in the
- * pixbuf).  The widget out-param is also kept, but is now only consulted
- * for a fallback colormap-free decode (no GdkVisual lookup needed).
+ * 5-parameter call sites; it is always set to NULL and call sites that
+ * still pass a mask pointer in ignore it (alpha lives in the pixbuf
+ * itself).  The widget out-param is also kept, but is now only
+ * consulted for a fallback colormap-free decode (no GdkVisual lookup
+ * needed).
  */
 
 #include <stdlib.h>

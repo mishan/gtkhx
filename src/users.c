@@ -28,7 +28,6 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hl_access.h"
-#include "gtk_hlist.h"
 #include "cicn.h"
 #include "network.h"
 #include "chat.h"
@@ -38,12 +37,12 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "users.h"
+#include "users_view.h"
 
-static int user_storow, user_stocolumn;
-
-#define COL_UID 0
-#define COL_USERNAME 1
-static int user_click_col;
+/* Every userlist call site is HxUserListView-backed; selection
+ * comes from the view's GtkSingleSelection, right-click pops via
+ * the view's internal gesture, and the shared view_*_btn handlers
+ * below drive both the Users window and the pchat sidebars. */
 
 PangoFontDescription *users_font_desc;
 
@@ -421,9 +420,13 @@ user_popup_install_css (void)
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
-static void
-user_popup (GtkWidget *anchor, struct hx_user *user, session *sess, double x,
-            double y)
+/* The user_popup_show entry point is what HxUserListView's
+ * right-click gesture and any future in-file callers use; the
+ * old static `user_popup' wrapper retired with the legacy
+ * user_pressed handler (Phase C). */
+void
+user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
+                 double x, double y)
 {
     GtkWidget *popover, *vbox, *info_label, *sep, *parent;
     struct UserActionCtx *ctx;
@@ -560,228 +563,44 @@ user_popup (GtkWidget *anchor, struct hx_user *user, session *sess, double x,
     gtk_popover_popup (GTK_POPOVER (popover));
 }
 
-static int
-users_sort (GtkHList *hlist, gconstpointer ptr1, gconstpointer ptr2)
-{
-    const GtkHListRow *row1 = ptr1;
-    const GtkHListRow *row2 = ptr2;
-    struct hx_user *usr1 = row1->data;
-    struct hx_user *usr2 = row2->data;
+/* HxUserListView installs its own GtkGestureClick for right-click
+ * (see users_view.c::on_view_secondary_press) and its
+ * GtkSortListModel + GtkCustomSorter pair handles header-click
+ * sorting. The shared view_*_btn handlers (above) drive every
+ * userlist button site. */
 
-    if (user_click_col == COL_UID) {
-        if (usr1->uid < usr2->uid) {
-            return -1;
-        } else {
-            return 1;
-        }
-    } else {
-        int len1 = strlen (usr1->name), len2 = strlen (usr2->name);
-        int len = len1 < len2 ? len1 : len2;
-        int i;
-
-        for (i = 0; i < len; i++) {
-            if (tolower (usr1->name[i]) < tolower (usr2->name[i])) {
-                return -1;
-            } else if (tolower (usr2->name[i]) < tolower (usr1->name[i])) {
-                return 1;
-            }
-        }
-
-        return 0;
-    }
-
-    return 0;
-}
-
-static void
-usercol_clicked (GtkWidget *clist, gint col, gpointer data)
-{
-    user_click_col = col;
-    gtk_hlist_sort (GTK_HLIST (clist));
-}
-
-/* Phase 4.5: GTK 4 widgets don't emit button-press-event. Clicks come
- * via a GtkGestureClick controller; the "pressed" signal carries
- * (gesture, n_press, x, y, user_data). The button is read off the
- * gesture itself with gtk_gesture_single_get_current_button. */
-static void
-user_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
-              gpointer data)
-{
-    GtkWidget *list
-        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
-    session *sess = data;
-    guint button
-        = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
-    int row = -1, column = -1;
-
-    gtk_hlist_get_selection_info (GTK_HLIST (list), (int)x, (int)y, &row,
-                                  &column);
-
-    if (button == GDK_BUTTON_PRIMARY) {
-        if (n_press == 2) {
-            struct hx_user *user
-                = gtk_hlist_get_row_data (GTK_HLIST (list), row);
-            if (user) {
-                struct msgwin *msg = msgwin_with_uid (user->uid);
-                if (msg) {
-                    gtk_window_present (GTK_WINDOW (msg->window));
-                } else {
-                    create_msgwin (user->uid, user->name);
-                }
-            }
-        } else if (row >= 0) {
-            user_storow = row;
-            user_stocolumn = column;
-        }
-    } else if (button == GDK_BUTTON_SECONDARY) {
-        struct hx_user *user = gtk_hlist_get_row_data (GTK_HLIST (list), row);
-        if (user) {
-            gtk_hlist_select_row (GTK_HLIST (list), row, 0);
-            user_popup (list, user, sess, x, y);
-        }
-    }
-}
-
-void
-users_attach_click_gesture (GtkWidget *list, session *sess)
-{
-    /* Phase 4.5: a GtkGestureClick with button=0 fires for every button.
-	 * GTK_PHASE_BUBBLE so the GtkTreeView's own selection click runs first
-	 * (it does single-click row selection and is the source of the row
-	 * highlight we want under our right-click menu). */
-    GtkGesture *click = gtk_gesture_click_new ();
-
-    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click), 0);
-    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
-                                                GTK_PHASE_BUBBLE);
-    g_signal_connect (click, "pressed", G_CALLBACK (user_pressed), sess);
-    gtk_widget_add_controller (list, GTK_EVENT_CONTROLLER (click));
-}
-
-void
-open_message_btn (GtkWidget *widget, gpointer data)
-{
-    struct hx_user *user;
-    GtkWidget *users_list = data;
-
-    if (!users_list) {
-        return;
-    }
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
-    if (!user) {
-        return;
-    }
-    create_msgwin (user->uid, user->name);
-}
-
-void
-user_info_btn (GtkWidget *widget, gpointer data)
-{
-    struct hx_user *user;
-    GtkWidget *users_list = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
-
-    if (!users_list) {
-        return;
-    }
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
-    if (!user) {
-        return;
-    }
-
-    hx_get_user_info (&sess->htlc, user->uid);
-}
-
-void
-user_kick_btn (GtkWidget *widget, gpointer data)
-{
-    struct hx_user *user;
-    GtkWidget *users_list = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
-
-    if (!users_list) {
-        return;
-    }
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
-    if (!user) {
-        return;
-    }
-    hx_kick_user (&sess->htlc, user->uid, 0);
-}
-
-void
-user_igno_btn (GtkWidget *widget, gpointer data)
-{
-    struct hx_user *user;
-    GtkWidget *users_list = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
-
-    if (!users_list) {
-        return;
-    }
-
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
-    if (!user) {
-        return;
-    }
-
-    user->ignore ^= 1;
-    hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
-                      user->ignore ? _ ("ignore: %s is now ignored\n")
-                                   : _ ("ignore: %s is now unignored"),
-                      user->name);
-}
-
-void
-user_ban_btn (GtkWidget *widget, gpointer data)
-{
-    struct hx_user *user;
-    GtkWidget *users_list = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
-
-    if (!users_list) {
-        return;
-    }
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
-    if (!user) {
-        return;
-    }
-    hx_kick_user (&sess->htlc, user->uid, 1);
-}
-
-/* Phase 4.5: GdkEventButton is gone; the gtk_hlist_compat shim emits
- * "select_row" with a NULL GdkEvent so the parameter is just typed
- * as the bare GdkEvent* now. The handler only reads `row'. */
-static void
-select_cid (GtkWidget *widget, gint row, gint col, GdkEvent *event,
-            gpointer data)
-{
-    guint32 *cid = data;
-    (void)widget;
-    (void)col;
-    (void)event;
-    *cid = row;
-}
-
-/* Phase 5: AdwAlertDialog with three responses (Cancel / New / Invite)
- * replaces the hand-rolled GtkDialog. The chat list (GtkHList of
- * existing pchat sessions) goes in extra-child. The response
- * handler dispatches by id: "invite" reads the selected row's
- * stashed cid and calls hx_invite_user, "new" creates a fresh pchat
- * via hx_chat_user, "cancel" does nothing.
+/* Phase 5 / Phase D: AdwAlertDialog with three responses
+ * (Cancel / New / Invite) replaces the hand-rolled GtkDialog. A
+ * GtkListBox of existing pchat sessions goes in extra-child. The
+ * response handler dispatches by id: "invite" reads the listbox's
+ * selected row's stashed cid and calls hx_invite_user, "new" creates
+ * a fresh pchat via hx_chat_user, "cancel" does nothing.
  *
- * State carried through user_data: sess + uid + list + selected_row.
- * The list pointer lets the response handler reach back into the
- * GtkHList for row_data; selected_row is updated by select_cid as
- * the user picks a different row. Both freed via the "closed"
- * signal once the response handler returns. */
+ * State carried through user_data: sess + uid + listbox. Selection
+ * tracking lives on the GtkListBox itself — no separate selected_row
+ * counter. Each row is a GtkListBoxRow with a horizontal label pair
+ * (cid in monospace, subject right-aligned) and the cid stashed as
+ * "pchat-cid" qdata for O(1) read-back.
+ *
+ * Lifetime: ctx is owned by the dialog GObject via
+ * g_object_set_data_full. The destroy-notify (prompt_chat_ctx_free)
+ * runs when the dialog itself is finalised — strictly AFTER both
+ * "response" and "closed" have fired and their handlers have
+ * returned. Earlier versions wired ctx to a "closed" handler that
+ * g_free'd it directly, which raced ahead of "response" under
+ * re-entrant dialog conditions and crashed in hx_chat_user via
+ * &ctx->sess->htlc reading freed memory. */
 struct prompt_chat_ctx {
     session *sess;
     guint16 uid;
-    GtkWidget *list; /* the GtkHList of existing pchats */
-    guint32 selected_row;
+    GtkWidget *listbox; /* the GtkListBox of existing pchats */
 };
+
+static void
+prompt_chat_ctx_free (gpointer data)
+{
+    g_free (data);
+}
 
 static void
 prompt_chat_response (AdwAlertDialog *dialog, const char *response,
@@ -791,30 +610,62 @@ prompt_chat_response (AdwAlertDialog *dialog, const char *response,
     (void)dialog;
 
     if (g_strcmp0 (response, "invite") == 0) {
-        guint32 chat_cid = GPOINTER_TO_UINT (
-            gtk_hlist_get_row_data (GTK_HLIST (ctx->list), ctx->selected_row));
+        GtkListBoxRow *row
+            = gtk_list_box_get_selected_row (GTK_LIST_BOX (ctx->listbox));
+        if (!row) {
+            return;
+        }
+        guint32 chat_cid
+            = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (row), "pchat-cid"));
         hx_invite_user (&ctx->sess->htlc, ctx->uid, chat_cid);
     } else if (g_strcmp0 (response, "new") == 0) {
         hx_chat_user (&ctx->sess->htlc, ctx->uid);
     }
 }
 
-static void
-prompt_chat_closed (AdwDialog *dialog, gpointer data)
+/* Build one GtkListBoxRow for a pchat. Layout: monospace cid label
+ * on the start side (fixed-ish width via xalign + width-chars), the
+ * subject as a single-line ellipsised label filling the rest. The cid
+ * lives on the row as qdata for the response handler. */
+static GtkWidget *
+prompt_chat_make_row (guint32 cid, const char *subject)
 {
-    (void)dialog;
-    g_free (data);
+    GtkWidget *row = gtk_list_box_row_new ();
+    GtkWidget *hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *cid_lbl;
+    GtkWidget *subj_lbl;
+    char *cid_str = g_strdup_printf ("0x%08x", cid);
+
+    gtk_widget_set_margin_start (hbox, 8);
+    gtk_widget_set_margin_end (hbox, 8);
+    gtk_widget_set_margin_top (hbox, 4);
+    gtk_widget_set_margin_bottom (hbox, 4);
+
+    cid_lbl = gtk_label_new (cid_str);
+    gtk_label_set_xalign (GTK_LABEL (cid_lbl), 0.0f);
+    gtk_widget_add_css_class (cid_lbl, "monospace");
+    g_free (cid_str);
+
+    subj_lbl = gtk_label_new (subject ? subject : "");
+    gtk_label_set_xalign (GTK_LABEL (subj_lbl), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (subj_lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand (subj_lbl, TRUE);
+
+    gtk_box_append (GTK_BOX (hbox), cid_lbl);
+    gtk_box_append (GTK_BOX (hbox), subj_lbl);
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), hbox);
+
+    g_object_set_data (G_OBJECT (row), "pchat-cid", GUINT_TO_POINTER (cid));
+    return row;
 }
 
 static void
 prompt_chat (session *sess, guint16 _uid)
 {
     AdwDialog *dialog;
-    GtkWidget *list, *scroll;
+    GtkWidget *listbox, *scroll;
     struct gtkhx_chat *gchat;
     struct prompt_chat_ctx *ctx;
-    char *titles[] = { "CID", "Subject" };
-    char *entry[2];
 
     dialog = adw_alert_dialog_new (
         _ ("Private Chat Invitation"),
@@ -841,12 +692,16 @@ prompt_chat (session *sess, guint16 _uid)
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
-    list = gtk_hlist_new_with_titles (2, titles);
-    gtk_hlist_set_selection_mode (GTK_HLIST (list), GTK_SELECTION_SINGLE);
-    gtk_hlist_set_column_width (GTK_HLIST (list), 0, 80);
-    g_signal_connect (list, "select_row", G_CALLBACK (select_cid),
-                      &ctx->selected_row);
-    gtkhx_widget_set_child (scroll, list);
+    /* GtkListBox in BROWSE selection mode: exactly one row is
+	 * selected at a time (single-select), the user can't unselect
+	 * by re-clicking the same row, and arrow-key navigation moves
+	 * the selection. .boxed-list gives us the Adwaita rounded-card
+	 * look that fits an alert-dialog extra-child. */
+    listbox = gtk_list_box_new ();
+    gtk_list_box_set_selection_mode (GTK_LIST_BOX (listbox),
+                                     GTK_SELECTION_BROWSE);
+    gtk_widget_add_css_class (listbox, "boxed-list");
+    gtkhx_widget_set_child (scroll, listbox);
     gtk_widget_set_size_request (scroll, 350, 200);
 
     if (sess->gchats) {
@@ -854,49 +709,198 @@ prompt_chat (session *sess, guint16 _uid)
         gpointer val;
         g_hash_table_iter_init (&iter, sess->gchats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            gint row;
             gchat = val;
             if (!gchat->cid) {
                 continue;
             }
-            entry[0] = g_strdup_printf ("0x%08x", gchat->chat->cid);
-            entry[1] = gchat->chat->subject;
-            row = gtk_hlist_append (GTK_HLIST (list), entry);
-            /* Stash the cid as row_data so the response
-			 * handler can recover it without parsing back
-			 * the display string. */
-            gtk_hlist_set_row_data (GTK_HLIST (list), row,
-                                    GUINT_TO_POINTER (gchat->chat->cid));
+            GtkWidget *row
+                = prompt_chat_make_row (gchat->chat->cid, gchat->chat->subject);
+            gtk_list_box_append (GTK_LIST_BOX (listbox), row);
         }
     }
-    ctx->list = list;
+    /* Pre-select the first row so the default "Invite" response
+	 * always has a target, even if the user hits Enter without
+	 * touching the list. */
+    {
+        GtkListBoxRow *first
+            = gtk_list_box_get_row_at_index (GTK_LIST_BOX (listbox), 0);
+        if (first) {
+            gtk_list_box_select_row (GTK_LIST_BOX (listbox), first);
+        }
+    }
+    ctx->listbox = listbox;
 
     adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), scroll);
 
     g_signal_connect (dialog, "response", G_CALLBACK (prompt_chat_response),
                       ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (prompt_chat_closed), ctx);
+    /* Anchor ctx to the dialog GObject's qdata — destroy-notify runs
+	 * at finalize, strictly after both "response" and "closed" have
+	 * already fired. */
+    g_object_set_data_full (G_OBJECT (dialog), "prompt-chat-ctx", ctx,
+                            prompt_chat_ctx_free);
 
     adw_dialog_present (dialog, sess && sess->users_window
                                     ? GTK_WIDGET (sess->users_window)
                                     : NULL);
 }
 
-void
-user_chat_btn (GtkWidget *widget, gpointer data)
+/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
+ * when a window's titlebar close button is clicked. The handler returns
+ * FALSE to allow the default destroy to proceed. */
+static gboolean
+close_users_window (GtkWindow *window, gpointer data)
 {
-    struct hx_user *user;
-    int with_cid = 0;
-    GtkWidget *users_list = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
+    session *sess = data;
+    (void)window;
 
-    if (!users_list) {
+    sess->users_window = 0;
+    /* Drop our strong ref to the view object — its GtkColumnView
+	 * widget is being unparented as the window dies, but the view
+	 * GObject itself outlives only as long as someone holds a ref
+	 * to it. We've been that someone since create_users_window. */
+    if (sess->users_view) {
+        g_object_unref (sess->users_view);
+        sess->users_view = NULL;
+    }
+    gtkhx_prefs.geo.users.open = 0;
+    gtkhx_prefs.geo.users.init = 0;
+    return FALSE;
+}
+
+/* Phase 4.5: the configure-event size tracker is gone — GTK 4 widgets
+ * don't fire configure-event. Window size is now captured at hx_quit()
+ * time alongside the position; see gtkhx.c gtkhx_save_window_positions. */
+
+void
+user_list (session *sess)
+{
+    struct chat *pub;
+
+    if (!sess->users_window || !sess->users_view) {
         return;
     }
 
-    user = gtk_hlist_get_row_data (GTK_HLIST (users_list), user_storow);
+    pub = chat_with_cid (sess, 0);
+    hx_user_list_view_clear (sess->users_view);
+    if (pub && pub->users) {
+        GHashTableIter iter;
+        gpointer val;
+        g_hash_table_iter_init (&iter, pub->users);
+        while (g_hash_table_iter_next (&iter, NULL, &val)) {
+            struct hx_user *user = val;
+            /* Emit via the signal so any listener (incl. the
+			 * per-pchat sidebars when the cid==0 broadcast lands
+			 * on them downstream) sees a single canonical add. */
+            gtkhx_session_emit_user_create (gtkhx_session_get_default (),
+                                            &sess->htlc, pub, user, user->name,
+                                            user->icon, user->color);
+        }
+    }
+}
 
+/* ----------------------------------------------------------------
+ * Headerbar / sidebar button handlers, shared between the standalone
+ * Users window and the pchat sidebars in chat.c.
+ *
+ * The `data' parameter is the HxUserListView* the button is attached
+ * to. view_selected_user reads the current single-selection; the
+ * session pointer is borrowed from the view (set at construction). */
+static struct hx_user *
+view_selected_user (gpointer data)
+{
+    HxUserListView *v = data;
+    if (!v) {
+        return NULL;
+    }
+    return hx_user_list_view_get_selected_user (v);
+}
+
+static session *
+view_session (gpointer data)
+{
+    HxUserListView *v = data;
+    return v ? hx_user_list_view_get_session (v) : NULL;
+}
+
+void
+view_msg_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    struct msgwin *mw;
+    (void)w;
     if (!user) {
+        return;
+    }
+    mw = msgwin_with_uid (user->uid);
+    if (mw) {
+        gtk_window_present (GTK_WINDOW (mw->window));
+    } else {
+        create_msgwin (user->uid, user->name);
+    }
+}
+
+void
+view_info_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    session *sess = view_session (data);
+    (void)w;
+    if (!user || !sess) {
+        return;
+    }
+    hx_get_user_info (&sess->htlc, user->uid);
+}
+
+void
+view_kick_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    session *sess = view_session (data);
+    (void)w;
+    if (!user || !sess) {
+        return;
+    }
+    hx_kick_user (&sess->htlc, user->uid, 0);
+}
+
+void
+view_ban_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    session *sess = view_session (data);
+    (void)w;
+    if (!user || !sess) {
+        return;
+    }
+    hx_kick_user (&sess->htlc, user->uid, 1);
+}
+
+void
+view_igno_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    session *sess = view_session (data);
+    (void)w;
+    if (!user || !sess) {
+        return;
+    }
+    user->ignore ^= 1;
+    hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
+                      user->ignore ? _ ("ignore: %s is now ignored\n")
+                                   : _ ("ignore: %s is now unignored"),
+                      user->name);
+}
+
+void
+view_chat_btn (GtkWidget *w, gpointer data)
+{
+    struct hx_user *user = view_selected_user (data);
+    session *sess = view_session (data);
+    int with_cid = 0;
+    (void)w;
+
+    if (!user || !sess) {
         return;
     }
     if (sess->gchats) {
@@ -917,62 +921,15 @@ user_chat_btn (GtkWidget *widget, gpointer data)
     }
 }
 
-/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
- * when a window's titlebar close button is clicked. The handler returns
- * FALSE to allow the default destroy to proceed. */
-static gboolean
-close_users_window (GtkWindow *window, gpointer data)
-{
-    session *sess = data;
-    (void)window;
-
-    sess->users_window = 0;
-    sess->users_list = 0;
-    gtkhx_prefs.geo.users.open = 0;
-    gtkhx_prefs.geo.users.init = 0;
-    return FALSE;
-}
-
-/* Phase 4.5: the configure-event size tracker is gone — GTK 4 widgets
- * don't fire configure-event. Window size is now captured at hx_quit()
- * time alongside the position; see gtkhx.c gtkhx_save_window_positions. */
-
-void
-user_list (session *sess)
-{
-    struct chat *pub;
-
-    if (!sess->users_window) {
-        return;
-    }
-
-    pub = chat_with_cid (sess, 0);
-    gtk_hlist_freeze (GTK_HLIST (sess->users_list));
-    gtk_hlist_clear (GTK_HLIST (sess->users_list));
-    if (pub && pub->users) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, pub->users);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct hx_user *user = val;
-            gtkhx_session_emit_user_create (gtkhx_session_get_default (),
-                                            &sess->htlc, pub, user, user->name,
-                                            user->icon, user->color);
-        }
-    }
-    gtk_hlist_thaw (GTK_HLIST (sess->users_list));
-}
-
 void
 create_users_window (GtkWidget *widget, gpointer data)
 {
     GtkWidget *users_window_scroll;
-    GtkWidget *users_list;
+    GtkWidget *cv_widget;
     GtkWidget *users_window;
-    gchar *titles[2];
+    HxUserListView *view;
     session *sess = data;
-    titles[0] = _ ("UID");
-    titles[1] = _ ("Name");
+    (void)widget;
 
     if (gtkhx_prefs.geo.users.open) {
         gtk_window_present (GTK_WINDOW (sess->users_window));
@@ -980,114 +937,60 @@ create_users_window (GtkWidget *widget, gpointer data)
     }
 
     users_window = gtk_window_new ();
-    /* Phase 3.x: dropped a GTK 1.2-era gtk_widget_realize + get_style
-	 * pair that left `style' unread. Forcing realize on a toplevel
-	 * before its children are packed is a footgun under GTK 3 Wayland —
-	 * it creates the wl_surface in an under-committed state. */
     gtk_window_set_title (GTK_WINDOW (users_window), _ ("Users"));
-    /* Phase 5: default-size, not size_request — set_size_request
-	 * sets both min AND natural in GTK 4, baking in a floor that
-	 * wasn't intended. The right-click popover does its own
-	 * sizing/positioning math; the window default-size shouldn't
-	 * be coupled to it. */
+    /* Default-size, not size_request — set_size_request sets both
+	 * min AND natural in GTK 4. */
     gtk_window_set_default_size (GTK_WINDOW (users_window), 320, 480);
     gtk_window_set_resizable (GTK_WINDOW (users_window), TRUE);
     g_signal_connect (users_window, "close-request",
                       G_CALLBACK (close_users_window), sess);
 
-    users_list = gtk_hlist_new_with_titles (2, titles);
-    gtk_hlist_set_column_width (GTK_HLIST (users_list), 0, 35);
-    gtk_hlist_set_column_width (GTK_HLIST (users_list), 1, 240);
-    /* Row height bumped from 18 to 24 in 2026-05 alongside the
-	 * 1.25x pixel-scale on the Name column (see below). Both
-	 * combine to give the list ~25% larger entries — easier to
-	 * read at typical desktop scales. */
-    gtk_hlist_set_row_height (GTK_HLIST (users_list), 24);
-    gtk_hlist_set_shadow_type (GTK_HLIST (users_list), GTK_SHADOW_NONE);
-
-    /* Phase 5: column 1 (Name) gets the Mac-classic overlay layout.
-	 * Wide banner-style icons (Badmoon & co.) render as a row
-	 * background and the name draws on top at a fixed offset from
-	 * the cell edge — so names stay column-aligned regardless of
-	 * how wide the user's icon happens to be.
-	 *
-	 * The offset clears the icon width plus a few px of breathing
-	 * room. We bumped this from 22 to 36 in 2026-05 — the original
-	 * value just cleared 16-18 px stock-icon widths, but the
-	 * medium-wide "non-banner" tiles (UNIX = 500, a handful of
-	 * others) are 24-32 px and were overlapping the name. 36 gives
-	 * those room and still keeps banner-format icons (60+ px wide)
-	 * rendering as backgrounds with the name overlaid on top —
-	 * the Mac-classic look. */
-    gtk_hlist_column_set_overlay_pixtext (GTK_HLIST (users_list), 1, 36);
-    /* Pixel scale 1.25x on the Name column — multiplies both the
-	 * icon dimensions and the font size. Combined with the 24 px
-	 * row height above, the user list reads ~25% larger without
-	 * affecting other tables (Tracker, Tasks, Files browser).
-	 * Text outline draws a 1 px contrasting halo behind each name
-	 * so light user colours (the pink default in particular) stay
-	 * readable on busy banner-icon backgrounds. */
-    gtk_hlist_column_set_overlay_decoration (GTK_HLIST (users_list), 1,
-                                             /*pixel_scale=*/1.25,
-                                             /*text_outline=*/TRUE);
-    gtk_hlist_set_column_justification (GTK_HLIST (users_list), 1,
-                                        GTK_JUSTIFY_LEFT);
-    gtk_hlist_set_compare_func (GTK_HLIST (users_list),
-                                (GtkHListCompareFunc)users_sort);
-    g_signal_connect (users_list, "click_column", G_CALLBACK (usercol_clicked),
-                      sess);
-    /* Phase 4.5: button-press-event is gone in GTK 4. The gesture
-	 * controller installed here dispatches double-clicks to the message
-	 * window and right-clicks to the user popup. */
-    users_attach_click_gesture (users_list, sess);
+    /* HxUserListView wraps a GtkColumnView with a custom
+	 * snapshot()-rendered Name cell that gives us the Mac-classic
+	 * icon-as-background + name-on-top look. STYLE_USERS picks the
+	 * standalone window's chrome: 24-px row height, 1.25× pixel
+	 * scale, text outline, 36-px text offset. The view also installs
+	 * its own right-click gesture that pops user_popup. */
+    view = hx_user_list_view_new (sess, HX_USER_LIST_STYLE_USERS);
+    cv_widget = hx_user_list_view_get_widget (view);
 
     if (!users_font_desc) {
         users_font_desc = pango_font_description_from_string ("Sans 10");
     }
+    /* Refresh the CSS provider that paints the .gtkhx-userlist
+	 * class so the global font / fg / bg tracking the rest of the
+	 * app does also covers our column-view cells. The view applied
+	 * the class to its column_view widget at construction. */
     gtkhx_refresh_userlist_css (users_font_desc);
-    gtkhx_apply_userlist_style (users_list);
 
     users_window_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (users_window_scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    /* Phase 5: dropped explicit 240x400 size_request; vexpand on
-	 * the scroll lets it grow with the window naturally, and the
-	 * 240px min width was a holdover that prevented the user from
-	 * shrinking the window narrower than that. */
     gtk_widget_set_vexpand (users_window_scroll, TRUE);
-    gtkhx_widget_set_child (users_window_scroll, users_list);
+    gtkhx_widget_set_child (users_window_scroll, cv_widget);
 
-    /* Phase 5: per-user action buttons via the shared
-	 * gtkhx_pixmap_button helper (2x scale, matches the toolbar). */
-    msgbtn
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.png", _ ("Msg"),
-                               2, G_CALLBACK (open_message_btn), users_list);
-    g_object_set_data (G_OBJECT (msgbtn), "sess", sess);
-
+    /* Per-user action buttons. `data' is the HxUserListView itself —
+	 * the view_*_btn handlers read its current single-selection and
+	 * its borrowed session pointer. Same handlers drive the chat.c
+	 * pchat sidebars; see view_msg_btn above for the shape. */
+    msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.png",
+                                  _ ("Msg"), 2,
+                                  G_CALLBACK (view_msg_btn), view);
     kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
-                                   _ ("Kick"), 2, G_CALLBACK (user_kick_btn),
-                                   users_list);
-    g_object_set_data (G_OBJECT (kickbtn), "sess", sess);
-
+                                   _ ("Kick"), 2,
+                                   G_CALLBACK (view_kick_btn), view);
     infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
                                    _ ("User Info"), 2,
-                                   G_CALLBACK (user_info_btn), users_list);
-    g_object_set_data (G_OBJECT (infobtn), "sess", sess);
-
-    banbtn
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png", _ ("Ban"),
-                               2, G_CALLBACK (user_ban_btn), users_list);
-    g_object_set_data (G_OBJECT (banbtn), "sess", sess);
-
+                                   G_CALLBACK (view_info_btn), view);
+    banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png",
+                                  _ ("Ban"), 2,
+                                  G_CALLBACK (view_ban_btn), view);
     chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                    _ ("Private Chat"), 2,
-                                   G_CALLBACK (user_chat_btn), users_list);
-    g_object_set_data (G_OBJECT (chatbtn), "sess", sess);
-
+                                   G_CALLBACK (view_chat_btn), view);
     ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
-                                   _ ("Ignore"), 2, G_CALLBACK (user_igno_btn),
-                                   users_list);
-    g_object_set_data (G_OBJECT (ignobtn), "sess", sess);
+                                   _ ("Ignore"), 2,
+                                   G_CALLBACK (view_igno_btn), view);
 
     gtk_widget_set_sensitive (msgbtn, FALSE);
     gtk_widget_set_sensitive (kickbtn, FALSE);
@@ -1096,13 +999,6 @@ create_users_window (GtkWidget *widget, gpointer data)
     gtk_widget_set_sensitive (chatbtn, FALSE);
     gtk_widget_set_sensitive (ignobtn, FALSE);
 
-    /* Phase 5: action buttons live in the AdwHeaderBar instead of an
-	 * in-content topframe + hbuttonbox row. Communication actions
-	 * (Msg, Private Chat) on the start; moderation actions (Info,
-	 * Kick, Ban, Ignore) packed end-to-start so the visible order
-	 * reads info / kick / ban / ignore left-to-right with the close
-	 * button at the very right. The window's child collapses to the
-	 * scrolled user list — no outer vbox or topframe. */
     {
         GtkWidget *header = adw_header_bar_new ();
 
@@ -1121,12 +1017,6 @@ create_users_window (GtkWidget *widget, gpointer data)
 
     init_keyaccel (users_window);
 
-    /* Phase 3.x: only apply saved geometry when the prefs file actually
-	 * has one. On a fresh install the geo struct is zeroed, and calling
-	 * set_size_request(window, 0, 0) collapses the window to 0x0 — under
-	 * GTK 3 the compositor then refuses to map it and the window never
-	 * appears. The earlier set_size_request(264, 400) call serves as
-	 * the default size. */
     if (gtkhx_prefs.geo.users.xsize > 0 && gtkhx_prefs.geo.users.ysize > 0) {
         gtk_window_set_default_size (GTK_WINDOW (users_window),
                                      gtkhx_prefs.geo.users.xsize,
@@ -1140,7 +1030,7 @@ create_users_window (GtkWidget *widget, gpointer data)
     gtkhx_prefs.geo.users.open = 1;
     gtkhx_prefs.geo.users.init = 1;
 
-    sess->users_list = users_list;
+    sess->users_view = view;
     sess->users_window = users_window;
 
     if (connected == 1) {
@@ -1159,12 +1049,14 @@ void
 users_clear (struct htlc_conn *htlc, struct chat *chat)
 {
     session *sess = &the_session;
+    (void)htlc;
+    (void)chat;
 
-    if (!sess->users_list || !gtkhx_prefs.geo.users.open) {
+    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
 
-    gtk_hlist_clear (GTK_HLIST (sess->users_list));
+    hx_user_list_view_clear (sess->users_view);
 }
 
 /* Phase 5 dark-theme: the four-slot palette is { regular, idle, admin,
@@ -1186,11 +1078,10 @@ user_color_gdk (guint16 color)
 /* Colored-Nicknames extension. When the user has a
  * server-supplied RGB nick color, fill the caller's GdkRGBA from
  * the 0x00RRGGBB value and return a pointer to it; otherwise
- * fall through to user_color_gdk's legacy status palette
- * (Admin/Guest/Away). gtk_hlist_set_foreground reads the channels
- * synchronously and formats them into a hex string for the cell
- * renderer, so a stack-allocated GdkRGBA is fine for the caller's
- * lifetime.
+ * fall through to user_color_gdk's status palette
+ * (Admin/Guest/Away). The cell renderer copies the colour into the
+ * row immediately so a stack-allocated GdkRGBA buffer at the call
+ * site is fine.
  *
  * `status` is the 2-bit status field that user_color_gdk reads —
  * passed explicitly rather than read off user->color because at
@@ -1209,8 +1100,8 @@ user_color_gdk (guint16 color)
  * resolves to the regular-user slot — user_color_gdk explicitly
  * returns NULL there so the caller falls through to the GTK
  * theme's default foreground (hard-coding black would be
- * invisible on dark themes). gtk_hlist_set_foreground treats NULL
- * as "use theme default", so call sites can pass the result
+ * invisible on dark themes). The renderer treats NULL as
+ * "use theme default", so call sites can pass the result
  * through unconditionally. */
 GdkRGBA *
 user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
@@ -1244,100 +1135,91 @@ void
 user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
              const char *nam, guint16 icon, guint16 color)
 {
-    GdkPixmap *pixmap;
-    GdkBitmap *mask;
-    gint row;
     session *sess = &the_session;
-    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
-    gchar *nulls[2];
     struct gtkhx_chat *gchat;
 
     if (chat->cid) {
+        /* Per-pchat sidebar — HxUserListView, STYLE_CHAT. The
+		 * pchat window's userlist GObject is created lazily by
+		 * create_pchat_window (Phase C) the first time a user
+		 * shows up in this chat. */
         gchat = gchat_with_cid (sess, chat->cid);
         if (!gchat) {
             gchat = create_pchat_window (htlc, chat);
         }
-        list_widget = gchat->userlist;
-    }
-
-    if (!list_widget) {
+        if (!gchat || !gchat->userlist) {
+            return;
+        }
+        hx_user_list_view_add (gchat->userlist, user, nam, icon, color);
         return;
     }
 
-    nulls[0] = g_strdup_printf ("%u", user->uid);
-    nulls[1] = 0;
-    row = gtk_hlist_append (GTK_HLIST (list_widget), nulls);
-    gtk_hlist_set_row_data (GTK_HLIST (list_widget), row, user);
-    g_free (nulls[0]);
-    /* Colored-Nicknames: prefer the per-user RGB
-	 * nick_color, fall back to the status palette via the helper.
-	 * Pass the caller's `color` arg as the status bitmap rather
-	 * than reading user->color — at this point we're rendering the
-	 * NEW state, but rcv.c stamps user->color AFTER emitting the
-	 * signal, so user->color would still hold the previous value.
-	 * Stack-allocated GdkRGBA is fine — gtk_hlist_set_foreground
-	 * reads the channels synchronously into a hex string. */
-    GdkRGBA fg_buf;
-    GdkRGBA *fg = user_nick_color_gdk (user, color, &fg_buf);
-    gtk_hlist_set_foreground (GTK_HLIST (list_widget), row, fg);
-    load_icon (list_widget, icon, &icon_files, 1, &pixmap, &mask);
-    if (!pixmap) {
-        gtk_hlist_set_text (GTK_HLIST (list_widget), row, 1, nam);
-    } else {
-        gtk_hlist_set_pixtext (GTK_HLIST (list_widget), row, 1, nam, 34, pixmap,
-                               mask);
+    /* chat->cid == 0 — standalone Users window. The view's own
+	 * bookkeeping (GListStore + GtkSortListModel) does the insert +
+	 * position; the row computes its own foreground via
+	 * user_nick_color_gdk from the `color` arg. */
+    (void)htlc;
+    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
+        return;
     }
+    hx_user_list_view_add (sess->users_view, user, nam, icon, color);
 }
 
 void
 user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
 {
-    gint row;
     struct gtkhx_chat *gchat;
     session *sess = &the_session;
-    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
 
+    (void)htlc;
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);
-        if (!gchat) {
+        if (!gchat || !gchat->userlist) {
             return;
         }
-        list_widget = gchat->userlist;
-    }
-
-    if (!list_widget) {
+        hx_user_list_view_remove (gchat->userlist, user);
         return;
     }
 
-    row = gtk_hlist_find_row_from_data (GTK_HLIST (list_widget), user);
-    gtk_hlist_remove (GTK_HLIST (list_widget), row);
+    /* chat->cid == 0 — standalone Users window. */
+    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
+        return;
+    }
+    hx_user_list_view_remove (sess->users_view, user);
 }
 
 void
 user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
              const char *nam, guint16 icon, guint16 color)
 {
-    GdkPixmap *pixmap;
-    GdkBitmap *mask;
-    gint row;
-    gchar *rowdat[2];
     struct gtkhx_chat *gchat;
     session *sess = &the_session;
-    GtkWidget *list_widget = gtkhx_prefs.geo.users.open ? sess->users_list : 0;
+
+    (void)htlc;
 
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);
         if (!gchat) {
             gchat = create_pchat_window (&sess->htlc, chat);
         }
-        list_widget = gchat->userlist;
-    }
-
-    if (!list_widget) {
+        if (!gchat || !gchat->userlist) {
+            return;
+        }
+        /* In-place state mutation: HxUserRow::set_state fires its
+		 * "changed" signal, the sort model re-orders, the cell
+		 * re-snapshots. The row keeps its GObject identity so the
+		 * sidebar selection stays on the same user across rename or
+		 * icon change. */
+        hx_user_list_view_update (gchat->userlist, user, nam, icon, color);
         return;
     }
 
-    if (!chat->cid && sess->gchats) {
+    /* chat->cid == 0 — fan out the change into per-pchat sidebars
+	 * AND into the standalone Users window. The fan-out happens
+	 * BEFORE the Users-window update so the recursion shape is the
+	 * same as the legacy code; both arms compute the foreground
+	 * from the freshly-parsed `color`. */
+    if (sess->gchats) {
         GHashTableIter iter;
         gpointer key, val;
         g_hash_table_iter_init (&iter, sess->gchats);
@@ -1353,38 +1235,24 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         }
     }
 
-    rowdat[0] = g_strdup_printf ("%u", user->uid);
-    rowdat[1] = 0;
-    row = gtk_hlist_find_row_from_data (GTK_HLIST (list_widget), user);
-    gtk_hlist_remove (GTK_HLIST (list_widget), row);
-    gtk_hlist_insert (GTK_HLIST (list_widget), row, rowdat);
-    g_free (rowdat[0]);
-    gtk_hlist_set_row_data (GTK_HLIST (list_widget), row, user);
-    /* See user_create — same nick_color-prefer-status-fallback,
-	 * same reason to pass `color` (the freshly-parsed status) rather
-	 * than rely on user->color (which rcv.c stamps later). */
-    GdkRGBA fg_buf;
-    GdkRGBA *fg = user_nick_color_gdk (user, color, &fg_buf);
-    gtk_hlist_set_foreground (GTK_HLIST (list_widget), row, fg);
-    load_icon (sess->users_window, icon, &icon_files, 1, &pixmap, &mask);
-    if (!pixmap) {
-        gtk_hlist_set_text (GTK_HLIST (list_widget), row, 1, nam);
-    } else {
-        gtk_hlist_set_pixtext (GTK_HLIST (list_widget), row, 1, nam, 34, pixmap,
-                               mask);
+    if (sess->users_view && gtkhx_prefs.geo.users.open) {
+        /* HxUserListView's update is an in-place state mutation
+		 * (HxUserRow::set_state fires "changed", the sort model
+		 * re-orders, the column-view cell re-snapshots). The row
+		 * keeps its GObject identity, so the live selection stays
+		 * on the same user across rename or icon change. */
+        hx_user_list_view_update (sess->users_view, user, nam, icon, color);
     }
 
     /* Phase 5: if this user has an open PM window, refresh its info
 	 * pane (icon / name / status) so it tracks the user changing
-	 * their nick or going idle. Only fires on the global-list pass
-	 * (cid==0) to avoid duplicate refreshes from the per-pchat
-	 * recursion above. We pass the new nam/icon/color through
-	 * directly rather than re-reading user->* — rcv.c hasn't
-	 * patched the new values onto the cached struct yet at this
-	 * point in the dispatch (its rename-detection compares
+	 * their nick or going idle. We pass the new nam/icon/color
+	 * through directly rather than re-reading user->* — rcv.c
+	 * hasn't patched the new values onto the cached struct yet at
+	 * this point in the dispatch (its rename-detection compares
 	 * user->name vs nam after we return), so a cache-lookup
 	 * refresh would paint the OLD identity. */
-    if (!chat->cid) {
+    {
         struct msgwin *mw = msgwin_with_uid (user->uid);
         if (mw) {
             msgwin_apply_user_change (mw, nam, icon, color);

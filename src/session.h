@@ -23,13 +23,13 @@
 /*
  * Phase 3.2: GdkPixmap, GdkBitmap, and GdkColormap were removed in GTK 3.
  * Code throughout this tree still declares variables of those types — most
- * of which are eventually fed into gtk_image_new_from_pixbuf or the
- * gtk_hlist shim, which want GdkPixbuf*. Aliasing the legacy types to
- * GdkPixbuf lets the bulk-mechanical sweep stay mechanical: pixmap *and*
- * mask now point to pixbufs, and the pixmap_create_from_xpm_d → pixbuf
- * migration in Phase 3.2 already feeds pixbufs in. GdkColormap isn't
- * actually used at runtime past truecolor — alias to gpointer for the
- * leftover declarations in init_colors() / cicn.c.
+ * of which are eventually fed into gtk_image_new_from_pixbuf, which wants
+ * GdkPixbuf*. Aliasing the legacy types to GdkPixbuf lets the bulk-
+ * mechanical sweep stay mechanical: pixmap *and* mask now point to
+ * pixbufs, and the pixmap_create_from_xpm_d → pixbuf migration in Phase
+ * 3.2 already feeds pixbufs in. GdkColormap isn't actually used at
+ * runtime past truecolor — alias to gpointer for the leftover
+ * declarations in init_colors() / cicn.c.
  *
  * Phase 3.4 (cairo) removes the cicn drawing paths that still reference
  * "real" pixmaps/drawables; once that lands the typedefs can be replaced
@@ -129,7 +129,12 @@ struct gtkhx_chat {
     GtkWidget *output;
     GtkWidget *input;
     GtkWidget *subject;
-    GtkWidget *userlist;
+    /* Phase 5 (Phase C of the users_view migration): per-pchat
+	 * sidebar is now an HxUserListView GObject (GtkColumnView-
+	 * backed). Forward-declared as an opaque typedef so this
+	 * header doesn't have to pull in users_view.h — the field
+	 * is read/written from chat.c + users.c only. */
+    struct _HxUserListView *userlist;
     guint32 cid;
     struct chat *chat;
     void *chat_history;   /* GNU readline command-line history. */
@@ -321,7 +326,14 @@ typedef struct _session {
     GtkWidget *tasks_window;
     GtkWidget *users_window;
 
-    GtkWidget *users_list;
+    /* Phase 5: the standalone Users window's row list is now a
+	 * HxUserListView GObject (GtkColumnView-backed). Forward-declared
+	 * as an opaque typedef so this header doesn't have to pull in
+	 * gtk-side users_view.h — the field is read/written from
+	 * users.c only. The view holds the GtkColumnView widget
+	 * internally; the column view is packed into a scrolled window
+	 * inside the toplevel users_window. */
+    struct _HxUserListView *users_view;
 
     GtkWidget *news_text;
     GtkWidget *postButton;

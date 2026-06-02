@@ -1,6 +1,7 @@
 High priority:
 
-(none)
+- Flatpak build broken. Missing `cargo` and probably the rest of the Rust toolchain
+- Crash when inviting oneself to a second Private Chat
 
 Medium priority:
 

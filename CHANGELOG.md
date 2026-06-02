@@ -2,6 +2,10 @@
 
 - Code Modernization
   - Parts of GtkHx are being rewritten in Rust
+- User Interface
+  - Dropped custom GtkHList in favor of GtkColumnView
+  - Fixed icons in Private Chat user list
+  - Results from different trackers are nested in their own result sets
 - Hotline Protocol
   - Tracker v3 support
   - Support for fetching tracker listings via TLS

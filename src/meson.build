@@ -28,7 +28,6 @@ gtkhx_sources = files(
   'files_panel.c',
   'files_provider.c',
   'files_remote_provider.c',
-  'gtk_hlist_compat.c',
   'gtkhx.c',
   'gtkhx_log.c',
   'gtkhx_session.c',
@@ -83,6 +82,8 @@ gtkhx_sources = files(
   'uniquify_path.c',
   'usermod.c',
   'users.c',
+  'users_row.c',
+  'users_view.c',
   'xfers.c',
   'xtext.c',
 )
