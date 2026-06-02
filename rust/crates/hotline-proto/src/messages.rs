@@ -135,6 +135,15 @@ pub mod tag {
     pub const CHAT_ID: u16 = 0x0072;
     /// `0x0073` — chat subject.
     pub const CHAT_SUBJECT: u16 = 0x0073;
+    /// `0x0074` — file-transfer queue position (u32; 0 means "ready,
+    /// you can start the transfer").
+    pub const QUEUE: u16 = 0x0074;
+    /// `0x0098` — banner type code (exactly 4 bytes, e.g. "URL ", "JPEG").
+    pub const BANNER_TYPE: u16 = 0x0098;
+    /// `0x0099` — banner URL (only present when type == "URL ").
+    pub const BANNER_URL: u16 = 0x0099;
+    /// `0x009a` — "server has no agreement" sentinel (zero-length).
+    pub const NOAGREEMENT: u16 = 0x009a;
     /// `0x00a0` — server version (server) / client version (client).
     pub const VERSION: u16 = 0x00a0;
     /// `0x012c` — user-list record (server → client).

@@ -9,7 +9,7 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
-use crate::parse::{self, Header};
+use crate::parse::{self, AgreementResult, Header};
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
@@ -242,6 +242,216 @@ pub unsafe extern "C" fn gtkhx_proto_parse_chat_invite(
     (*out).uid = inv.uid;
     (*out).name_len = written as u16;
     true
+}
+
+/// Extract the `HTLS_DATA_TASKERROR` chunk's CR2LF + `strip_ansi`
+/// sanitised text into `out` (NUL-terminated, capped at `cap - 1`).
+/// Returns the number of bytes written (excluding the trailing NUL),
+/// or `SIZE_MAX` (i.e. `(usize)-1`) when no TASK_ERROR chunk was
+/// present — in which case **`out` is left untouched**, matching the C
+/// `task_error_extract` contract that `tests/proto/test_task_error.c`
+/// pins ("untouched" sentinel on the no-chunk path). Returns 0 on
+/// NULL `out` or zero `cap`.
+///
+/// The SIZE_MAX sentinel keeps the API from conflating a missing chunk
+/// with an empty error string (which is legal wire shape).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` valid for `cap`
+/// bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_task_error(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    if out.is_null() || cap == 0 {
+        return 0;
+    }
+    let s = as_slice(msg, msglen);
+    match parse::parse_task_error(s, s.len(), cap - 1) {
+        Some(bytes) => write_cstr(out, cap, &bytes),
+        None => usize::MAX,
+    }
+}
+
+/// C-ABI result of [`parse::parse_msg`]. The name lands in `name_buf`,
+/// the sanitised body in `msg_buf`; lengths report bytes written
+/// (excluding the trailing NUL).
+#[repr(C)]
+pub struct MsgOut {
+    pub uid: u16,
+    pub name_len: u16,
+    pub msg_len: u16,
+}
+
+/// Parse `HTLS_HDR_MSG` (also `MSG_BROADCAST` / `POLITEQUIT`, which
+/// share the same shape). Writes the `strip_ansi`'d name into
+/// `name_buf` (cap `name_cap`) and the CR2LF + `strip_ansi`'d body into
+/// `msg_buf` (cap `msg_cap`). Returns false on any NULL / zero-cap
+/// pointer; otherwise true.
+///
+/// # Safety
+/// As [`gtkhx_proto_parse_chat`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_msg(
+    msg: *const u8,
+    msglen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    msg_buf: *mut u8,
+    msg_cap: usize,
+    out: *mut MsgOut,
+) -> bool {
+    if out.is_null()
+        || name_buf.is_null()
+        || name_cap == 0
+        || msg_buf.is_null()
+        || msg_cap == 0
+    {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let p = parse::parse_msg(s, s.len(), name_cap - 1, msg_cap - 1);
+    let nlen = write_cstr(name_buf, name_cap, &p.name);
+    let mlen = write_cstr(msg_buf, msg_cap, &p.msg);
+    (*out).uid = p.uid;
+    (*out).name_len = nlen as u16;
+    (*out).msg_len = mlen as u16;
+    true
+}
+
+/// C-ABI result of [`parse::parse_banner`]. `type_code` is the 4-byte
+/// banner code (zeroed when `got_type` is 0); `has_url` / `url_len` tell
+/// the caller whether to read `url_buf`.
+#[repr(C)]
+pub struct BannerOut {
+    pub type_code: [u8; 4],
+    pub url_len: u16,
+    pub got_type: u8,
+    pub has_url: u8,
+}
+
+/// Parse `HTLS_HDR_BANNER`. The banner type is gated at exactly 4 bytes.
+/// The URL (if present) is written into `url_buf` (NUL-terminated, capped
+/// at `url_cap - 1`). Returns `got_type` (true iff the type chunk was
+/// present and well-formed) — matching the C extractor's contract.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `url_buf` valid for
+/// `url_cap` bytes (or NULL); `out` a valid writable `BannerOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_banner(
+    msg: *const u8,
+    msglen: usize,
+    url_buf: *mut u8,
+    url_cap: usize,
+    out: *mut BannerOut,
+) -> bool {
+    if out.is_null() || url_buf.is_null() || url_cap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let b = parse::parse_banner(s, s.len(), url_cap - 1);
+    (*out).type_code = b.type_code;
+    (*out).got_type = b.got_type as u8;
+    match b.url {
+        Some(url) => {
+            let n = write_cstr(url_buf, url_cap, &url);
+            (*out).has_url = 1;
+            (*out).url_len = n as u16;
+        }
+        None => {
+            *url_buf = 0;
+            (*out).has_url = 0;
+            (*out).url_len = 0;
+        }
+    }
+    b.got_type
+}
+
+/// C-ABI result of [`parse::parse_xfer_queue`].
+#[repr(C)]
+pub struct XferQueueOut {
+    pub htxf_ref: u32,
+    pub queueid: u32,
+}
+
+/// Parse `HTLS_HDR_QUEUE`. Both fields default to 0 when missing;
+/// `queueid == 0` means "ready, you can start the transfer". Returns
+/// false on NULL `out`; otherwise true.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `XferQueueOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_xfer_queue(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut XferQueueOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let q = parse::parse_xfer_queue(s, s.len());
+    (*out).htxf_ref = q.htxf_ref;
+    (*out).queueid = q.queueid;
+    true
+}
+
+/// Result codes for [`gtkhx_proto_parse_agreement`], matching the C
+/// `hx_agreement_result` enum:
+/// `0` = OK (body in `out`), `1` = NONE sentinel, `2` = MISSING.
+pub const HX_AGREEMENT_OK_FFI: u32 = 0;
+pub const HX_AGREEMENT_NONE_FFI: u32 = 1;
+pub const HX_AGREEMENT_MISSING_FFI: u32 = 2;
+
+/// Parse `HTLS_HDR_AGREEMENT`. On OK, writes the CR2LF + `strip_ansi`
+/// sanitised body into `out` (NUL-terminated, capped at `cap - 1`) and
+/// stores the byte count (excluding the NUL) into `*out_len`. On NONE
+/// and MISSING the output buffer is **not** touched at all — matching
+/// the C `hx_agreement_extract` contract, which the existing
+/// `test_agreement.c` cases rely on (the "untouched" sentinel string
+/// stays put for NONE/NOT_FOUND). Passing NULL `out` (or zero `cap`)
+/// is permitted: the result code is still returned correctly, no write
+/// happens, and `*out_len` is left untouched.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` valid for `cap`
+/// bytes (or NULL); `out_len` valid for one `usize` write, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_agreement(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+) -> u32 {
+    let s = as_slice(msg, msglen);
+    // Cap the sanitised body at cap - 1 only when we have somewhere to
+    // write it; with no output buffer the body still has to be cheaply
+    // computed (we discard it) so the result code matches OK / NONE.
+    let body_cap = if !out.is_null() && cap > 0 {
+        cap - 1
+    } else {
+        usize::MAX
+    };
+    let (r, body) = parse::parse_agreement(s, s.len(), body_cap);
+    match r {
+        AgreementResult::Ok => {
+            if !out.is_null() && cap > 0 {
+                let n = write_cstr(out, cap, &body);
+                if !out_len.is_null() {
+                    *out_len = n;
+                }
+            }
+            HX_AGREEMENT_OK_FFI
+        }
+        AgreementResult::None => HX_AGREEMENT_NONE_FFI,
+        AgreementResult::Missing => HX_AGREEMENT_MISSING_FFI,
+    }
 }
 
 /// C-ABI result of [`parse::parse_user_part`].
