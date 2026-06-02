@@ -511,7 +511,10 @@ uid_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     GtkWidget *lbl = gtk_label_new (NULL);
     (void)f;
     (void)d;
-    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
+    /* Right-aligned per the column's "narrow numeric" role —
+	 * matches what users_view.h documents and what the legacy
+	 * Users window's UID column showed. */
+    gtk_label_set_xalign (GTK_LABEL (lbl), 1.0f);
     gtk_widget_set_margin_start (lbl, 6);
     gtk_widget_set_margin_end (lbl, 6);
     gtk_list_item_set_child (item, lbl);
@@ -817,7 +820,15 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
                                        GDK_BUTTON_SECONDARY);
         gtk_event_controller_set_propagation_phase (
             GTK_EVENT_CONTROLLER (rclick), GTK_PHASE_CAPTURE);
-        g_object_set_data (G_OBJECT (v->column_view), "user-list-view", v);
+        /* The gesture handler reads `v` back off the column view's
+		 * qdata. Hold a strong ref via g_object_set_data_full so the
+		 * view object outlives any pending gesture dispatch even if
+		 * callers (e.g. close_users_window) drop their ref before
+		 * the widget is fully torn down. The destroy-notify runs at
+		 * widget finalize, which is strictly after the gesture
+		 * controller's own finalize. */
+        g_object_set_data_full (G_OBJECT (v->column_view), "user-list-view",
+                                g_object_ref (v), g_object_unref);
         g_signal_connect (rclick, "pressed",
                           G_CALLBACK (on_view_secondary_press), NULL);
         gtk_widget_add_controller (v->column_view,
