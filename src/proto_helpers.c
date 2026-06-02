@@ -243,21 +243,14 @@ hx_user_part_extract (struct htlc_conn *htlc, struct hx_user_part_msg *out)
         return FALSE;
     }
 
-    out->uid = 0;
-    out->cid = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_UID:
-            dh_getint (out->uid);
-            break;
-        case HTLS_DATA_CHAT_ID:
-            dh_getint (out->cid);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_user_part. */
+    struct gtkhx_proto_user_part p;
+    if (!gtkhx_proto_parse_user_part (htlc->in.buf, htlc->in.pos, &p)) {
+        return FALSE;
     }
-    dh_end ();
+
+    out->uid = p.uid;
+    out->cid = p.cid;
 
     return TRUE;
 }
@@ -317,54 +310,25 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
         return FALSE;
     }
 
-    out->uid = 0;
-    out->icon = 0;
-    out->color = 0;
-    out->got_color = FALSE;
-    out->nick_color = HX_NICK_COLOR_NONE;
-    out->got_nick_color = FALSE;
-    out->cid = 0;
-    out->name[0] = '\0';
-    out->name_len = 0;
-
-    guint16 nlen = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_UID:
-            dh_getint (out->uid);
-            break;
-        case HTLS_DATA_ICON:
-            dh_getint (out->icon);
-            break;
-        case HTLS_DATA_NAME:
-            nlen = (_len > 31) ? 31 : _len;
-            memcpy (out->name, dh->data, nlen);
-            strip_ansi (out->name, nlen);
-            break;
-        case HTLS_DATA_COLOUR:
-            dh_getint (out->color);
-            out->got_color = TRUE;
-            break;
-        case HTLS_DATA_COLOR:
-            /* Colored-Nicknames extension. Spec pins the
-             * field at exactly 4 bytes (BE u32); reject any other
-             * width as malformed rather than misread it. */
-            if (_len == 4) {
-                dh_getint (out->nick_color);
-                out->got_nick_color = TRUE;
-            }
-            break;
-        case HTLS_DATA_CHAT_ID:
-            dh_getint (out->cid);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_user_change. The
+     * crate strip_ansi's the nickname (no CR2LF — names carry no line
+     * endings) and gates the Colored-Nicknames COLOR chunk at exactly
+     * 4 bytes; nick_color defaults to HX_NICK_COLOR_NONE when absent. */
+    struct gtkhx_proto_user_change uc;
+    if (!gtkhx_proto_parse_user_change (htlc->in.buf, htlc->in.pos,
+                                        (uint8_t *) out->name,
+                                        sizeof (out->name), &uc)) {
+        return FALSE;
     }
-    dh_end ();
 
-    out->name[nlen] = '\0';
-    out->name_len = nlen;
+    out->uid = uc.uid;
+    out->icon = uc.icon;
+    out->color = uc.color;
+    out->got_color = uc.got_color ? TRUE : FALSE;
+    out->nick_color = uc.nick_color;
+    out->got_nick_color = uc.got_nick_color ? TRUE : FALSE;
+    out->cid = uc.cid;
+    out->name_len = uc.name_len;
 
     return TRUE;
 }

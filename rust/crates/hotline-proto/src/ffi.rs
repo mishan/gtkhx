@@ -243,3 +243,81 @@ pub unsafe extern "C" fn gtkhx_proto_parse_chat_invite(
     (*out).name_len = written as u16;
     true
 }
+
+/// C-ABI result of [`parse::parse_user_part`].
+#[repr(C)]
+pub struct UserPartOut {
+    pub cid: u32,
+    pub uid: u16,
+}
+
+/// Parse `HTLS_HDR_USER_PART`. Fills `*out`. Returns false on NULL `out`;
+/// otherwise true (a well-formed frame always parses, missing chunks
+/// default to zero).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `UserPartOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_user_part(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut UserPartOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let p = parse::parse_user_part(s, s.len());
+    (*out).cid = p.cid;
+    (*out).uid = p.uid;
+    true
+}
+
+/// C-ABI result of [`parse::parse_user_change`]. The sanitised name is
+/// written into the caller's `buf` (NUL-terminated, capped at
+/// `bufcap - 1`). `got_color` / `got_nick_color` are 0/1; `nick_color`
+/// defaults to `HX_NICK_COLOR_NONE` (0xffff_ffff) when no COLOR chunk
+/// was present.
+#[repr(C)]
+pub struct UserChangeOut {
+    pub cid: u32,
+    pub nick_color: u32,
+    pub uid: u16,
+    pub icon: u16,
+    pub color: u16,
+    pub got_color: u8,
+    pub got_nick_color: u8,
+    pub name_len: u16,
+}
+
+/// Parse `HTLS_HDR_USER_CHANGE`. Writes the strip_ansi'd nickname into
+/// `buf` and fills `*out`. Returns false on NULL `out`, NULL `buf`, or
+/// zero `bufcap`; otherwise true.
+///
+/// # Safety
+/// As [`gtkhx_proto_parse_chat`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_user_change(
+    msg: *const u8,
+    msglen: usize,
+    buf: *mut u8,
+    bufcap: usize,
+    out: *mut UserChangeOut,
+) -> bool {
+    if out.is_null() || buf.is_null() || bufcap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let uc = parse::parse_user_change(s, s.len(), bufcap - 1);
+    let written = write_cstr(buf, bufcap, &uc.name);
+    (*out).cid = uc.cid;
+    (*out).nick_color = uc.nick_color;
+    (*out).uid = uc.uid;
+    (*out).icon = uc.icon;
+    (*out).color = uc.color;
+    (*out).got_color = uc.got_color as u8;
+    (*out).got_nick_color = uc.got_nick_color as u8;
+    (*out).name_len = written as u16;
+    true
+}

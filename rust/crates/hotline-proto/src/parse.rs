@@ -9,7 +9,7 @@
 //! Proof-of-concept opcodes for the foundation commit:
 //! `HTLS_HDR_USER_SELFINFO` and `HTLS_HDR_TASK`.
 
-use crate::messages::tag;
+use crate::messages::{tag, NICK_COLOR_NONE};
 use crate::sanitize::{cr2lf, strip_ansi};
 use crate::wire::{ChunkIter, Decoder};
 
@@ -215,6 +215,96 @@ pub fn parse_chat_subject(buf: &[u8], len: usize, max_subject: usize) -> ChatSub
     }
 
     ChatSubject { cid, subject }
+}
+
+// ---- HTLS_HDR_USER_PART ------------------------------------------------
+
+/// Parsed `HTLS_HDR_USER_PART`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserPart {
+    pub uid: u16,
+    pub cid: u32,
+}
+
+/// Parse `HTLS_HDR_USER_PART`. Missing chunks default to zero.
+pub fn parse_user_part(buf: &[u8], len: usize) -> UserPart {
+    let mut uid = 0u16;
+    let mut cid = 0u32;
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::UID => uid = chunk.as_uint() as u16,
+            tag::CHAT_ID => cid = chunk.as_uint(),
+            _ => {}
+        }
+    }
+
+    UserPart { uid, cid }
+}
+
+// ---- HTLS_HDR_USER_CHANGE ----------------------------------------------
+
+/// Parsed `HTLS_HDR_USER_CHANGE`. Mirrors the C `hx_user_change_msg`
+/// extractor: name is `strip_ansi`'d and capped (no CR2LF), and the
+/// Colored-Nicknames `COLOR` field is only accepted at exactly 4 bytes.
+#[derive(Debug, Clone)]
+pub struct UserChange {
+    pub uid: u16,
+    pub icon: u16,
+    pub color: u16,
+    pub got_color: bool,
+    pub nick_color: u32,
+    pub got_nick_color: bool,
+    pub cid: u32,
+    /// Nickname bytes after `strip_ansi`, capped at `max_name`. The
+    /// `strip_ansi` fold does not touch 0x00, so an interior NUL on
+    /// the wire survives in this `Vec` verbatim.
+    pub name: Vec<u8>,
+}
+
+/// Parse `HTLS_HDR_USER_CHANGE`. `max_name` caps the nickname (the C
+/// handler uses 31). Missing chunks default to zero / "" / `false`;
+/// `nick_color` defaults to [`NICK_COLOR_NONE`] when the COLOR extension
+/// chunk is absent.
+pub fn parse_user_change(buf: &[u8], len: usize, max_name: usize) -> UserChange {
+    let mut out = UserChange {
+        uid: 0,
+        icon: 0,
+        color: 0,
+        got_color: false,
+        nick_color: NICK_COLOR_NONE,
+        got_nick_color: false,
+        cid: 0,
+        name: Vec::new(),
+    };
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::UID => out.uid = chunk.as_uint() as u16,
+            tag::ICON => out.icon = chunk.as_uint() as u16,
+            tag::NAME => {
+                let take = chunk.data.len().min(max_name);
+                out.name = chunk.data[..take].to_vec();
+            }
+            tag::COLOUR => {
+                out.color = chunk.as_uint() as u16;
+                out.got_color = true;
+            }
+            tag::COLOR => {
+                // Colored-Nicknames spec pins this field to exactly 4
+                // bytes (BE u32); reject any other width as malformed.
+                if chunk.data.len() == 4 {
+                    out.nick_color = chunk.as_uint();
+                    out.got_nick_color = true;
+                }
+            }
+            tag::CHAT_ID => out.cid = chunk.as_uint(),
+            _ => {}
+        }
+    }
+
+    strip_ansi(&mut out.name);
+    out
 }
 
 // ---- HTLS_HDR_CHAT_INVITE ----------------------------------------------
@@ -454,5 +544,94 @@ mod tests {
         let inv = parse_chat_invite(&m, m.len(), 31);
         assert_eq!(inv.name.len(), 31);
         assert_eq!(inv.name[0], b'N');
+    }
+
+    // ---- user part ----
+
+    #[test]
+    fn user_part_extracts_uid_and_cid() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &0x1234u16.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_ID, &7u32.to_be_bytes()));
+        let m = msg(0x0000_012e, 1, 0, &body);
+        let p = parse_user_part(&m, m.len());
+        assert_eq!(p.uid, 0x1234);
+        assert_eq!(p.cid, 7);
+    }
+
+    #[test]
+    fn user_part_missing_chunks_default_zero() {
+        let m = msg(0x0000_012e, 1, 0, &[]);
+        let p = parse_user_part(&m, m.len());
+        assert_eq!(p.uid, 0);
+        assert_eq!(p.cid, 0);
+    }
+
+    // ---- user change ----
+
+    #[test]
+    fn user_change_extracts_all_fields() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &0x00abu16.to_be_bytes()));
+        body.extend(chunk(tag::ICON, &0x0005u16.to_be_bytes()));
+        body.extend(chunk(tag::NAME, b"alice"));
+        body.extend(chunk(tag::COLOUR, &0x0002u16.to_be_bytes()));
+        body.extend(chunk(tag::COLOR, &0x00ff_8800u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_ID, &0u32.to_be_bytes()));
+        let m = msg(0x0000_012d, 1, 0, &body);
+        let uc = parse_user_change(&m, m.len(), 31);
+        assert_eq!(uc.uid, 0x00ab);
+        assert_eq!(uc.icon, 0x0005);
+        assert_eq!(uc.color, 0x0002);
+        assert!(uc.got_color);
+        assert_eq!(uc.nick_color, 0x00ff_8800);
+        assert!(uc.got_nick_color);
+        assert_eq!(uc.cid, 0);
+        assert_eq!(uc.name, b"alice");
+    }
+
+    #[test]
+    fn user_change_defaults_when_chunks_missing() {
+        let m = msg(0x0000_012d, 1, 0, &[]);
+        let uc = parse_user_change(&m, m.len(), 31);
+        assert_eq!(uc.uid, 0);
+        assert_eq!(uc.icon, 0);
+        assert_eq!(uc.color, 0);
+        assert!(!uc.got_color);
+        assert_eq!(uc.nick_color, NICK_COLOR_NONE);
+        assert!(!uc.got_nick_color);
+        assert_eq!(uc.cid, 0);
+        assert!(uc.name.is_empty());
+    }
+
+    #[test]
+    fn user_change_strips_ansi_and_caps_name() {
+        // 0x0e folds to 'N'; pad past 31 bytes to verify the cap.
+        let mut n = vec![0x0eu8];
+        n.extend(vec![b'q'; 40]);
+        let m = msg(0x0000_012d, 1, 0, &chunk(tag::NAME, &n));
+        let uc = parse_user_change(&m, m.len(), 31);
+        assert_eq!(uc.name.len(), 31);
+        assert_eq!(uc.name[0], b'N');
+    }
+
+    #[test]
+    fn user_change_rejects_wrong_length_color() {
+        // COLOR (Colored-Nicknames) must be exactly 4 bytes; a 2-byte
+        // payload leaves got_nick_color false and nick_color at NONE.
+        let m = msg(0x0000_012d, 1, 0, &chunk(tag::COLOR, &[0xff, 0x00]));
+        let uc = parse_user_change(&m, m.len(), 31);
+        assert!(!uc.got_nick_color);
+        assert_eq!(uc.nick_color, NICK_COLOR_NONE);
+    }
+
+    #[test]
+    fn user_change_name_not_cr2lfd() {
+        // CR (0x0d) is outside strip_ansi's band and not folded by
+        // CR2LF (which the user-change handler doesn't apply), so it
+        // survives untouched in the captured name.
+        let m = msg(0x0000_012d, 1, 0, &chunk(tag::NAME, b"a\rb"));
+        let uc = parse_user_change(&m, m.len(), 31);
+        assert_eq!(uc.name, b"a\rb");
     }
 }
