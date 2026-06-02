@@ -394,6 +394,135 @@ pub fn parse_agreement(buf: &[u8], len: usize, max_len: usize) -> (AgreementResu
     (AgreementResult::Missing, Vec::new())
 }
 
+// ---- HTLS_HDR_NEWS reply (HTLS_DATA_NEWS chunks) ------------------------
+
+/// Extract the first `HTLS_DATA_NEWS` chunk's CR2LF + `strip_ansi`
+/// sanitised body. `None` when no NEWS chunk is present (the C
+/// `hx_news_file_extract` returns FALSE and leaves the caller buffer
+/// untouched in that case — same sentinel discipline as
+/// [`parse_task_error`]).
+pub fn parse_news_file(buf: &[u8], len: usize, max_len: usize) -> Option<Vec<u8>> {
+    for chunk in ChunkIter::over_message(buf, len) {
+        if chunk.tag == tag::NEWS {
+            let take = chunk.data.len().min(max_len);
+            let mut v = chunk.data[..take].to_vec();
+            cr2lf(&mut v);
+            strip_ansi(&mut v);
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Iterate the `HTLS_DATA_NEWS` chunks of a message body, yielding
+/// each one's CR2LF + `strip_ansi` sanitised contents. Mirrors the
+/// per-chunk-emit contract of the C `hx_news_post_walk` (one callback
+/// invocation per NEWS chunk; non-NEWS chunks are skipped).
+pub struct NewsPostIter<'a> {
+    inner: ChunkIter<'a>,
+    max_len: usize,
+}
+
+impl<'a> Iterator for NewsPostIter<'a> {
+    type Item = Vec<u8>;
+    fn next(&mut self) -> Option<Vec<u8>> {
+        loop {
+            let chunk = self.inner.next()?;
+            if chunk.tag != tag::NEWS {
+                continue;
+            }
+            let take = chunk.data.len().min(self.max_len);
+            let mut v = chunk.data[..take].to_vec();
+            cr2lf(&mut v);
+            strip_ansi(&mut v);
+            return Some(v);
+        }
+    }
+}
+
+/// Build an iterator over the sanitised bodies of every `HTLS_DATA_NEWS`
+/// chunk in `buf[..len]`.
+pub fn news_post_chunks(buf: &[u8], len: usize, max_len: usize) -> NewsPostIter<'_> {
+    NewsPostIter {
+        inner: ChunkIter::over_message(buf, len),
+        max_len,
+    }
+}
+
+// ---- HTLC_DATA_NEWSFOLDERITEM / HTLC_DATA_CATEGORYITEM ------------------
+
+/// Kind of a 1.5 threaded-news directory entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewsDirKind {
+    /// folder-entry (ntype == 1 in HTLC_DATA_NEWSFOLDERITEM, or
+    /// HTLC_DATA_CATEGORYITEM with ntype == 2).
+    Folder,
+    /// category-entry (everything else).
+    Category,
+}
+
+/// One entry from a 1.5 threaded-news directory listing.
+#[derive(Debug, Clone)]
+pub struct NewsDirEntry {
+    pub kind: NewsDirKind,
+    /// Name bytes (no NUL, capped at the caller's max).
+    pub name: Vec<u8>,
+}
+
+/// Parse an `HTLC_DATA_NEWSFOLDERITEM` (0x0140) chunk body:
+/// `u8 ntype`, then `name[dlen - 1]`. `ntype == 1` ⇒ folder, else
+/// category. The name is the rest of the chunk body, capped at
+/// `max_name` bytes. Returns `None` on a zero-length body — that's
+/// the C extractor's `dlen < 1` reject.
+pub fn parse_news_folderitem(data: &[u8], max_name: usize) -> Option<NewsDirEntry> {
+    if data.is_empty() {
+        return None;
+    }
+    let kind = if data[0] == 1 {
+        NewsDirKind::Folder
+    } else {
+        NewsDirKind::Category
+    };
+    let body = &data[1..];
+    let take = body.len().min(max_name);
+    Some(NewsDirEntry {
+        kind,
+        name: body[..take].to_vec(),
+    })
+}
+
+/// Parse an `HTLC_DATA_CATEGORYITEM` (0x0143) chunk body:
+///
+/// - `ntype` (u16 BE): 2 → bundle/folder, 3 → category. Anything else
+///   is malformed and yields `None`.
+/// - For `ntype == 2`: header is `ntype(2) + count(2)` = 4 bytes;
+///   then `namelen(u8)` and `name[namelen]`.
+/// - For `ntype == 3`: header is `ntype(2) + count(2) + guid(16) +
+///   addsn(4) + deletesn(4)` = 28 bytes; then `namelen(u8)` and
+///   `name[namelen]`.
+///
+/// Returns `None` on any truncation or unknown `ntype` (matches the C
+/// extractor's defensive rejects).
+pub fn parse_news_categoryitem(data: &[u8], max_name: usize) -> Option<NewsDirEntry> {
+    let mut d = Decoder::new(data);
+    let ntype = d.u16()?;
+    let (kind, header_after_ntype) = match ntype {
+        2 => (NewsDirKind::Folder, 2usize),   // count(2) before namelen
+        3 => (NewsDirKind::Category, 26usize), // count(2)+guid(16)+addsn(4)+deletesn(4)
+        _ => return None,
+    };
+    // Skip the remainder of the fixed header.
+    d.bytes(header_after_ntype)?;
+    // namelen (u8)
+    let namelen = *d.bytes(1)?.first()? as usize;
+    let nm = d.bytes(namelen)?;
+    let take = nm.len().min(max_name);
+    Some(NewsDirEntry {
+        kind,
+        name: nm[..take].to_vec(),
+    })
+}
+
 // ---- HTLS_HDR_USER_PART ------------------------------------------------
 
 /// Parsed `HTLS_HDR_USER_PART`.
@@ -1007,5 +1136,191 @@ mod tests {
         let (r, body) = parse_agreement(&m, m.len(), 4096);
         assert_eq!(r, AgreementResult::Ok);
         assert_eq!(body.len(), 4096);
+    }
+
+    // ---- news file ----
+
+    #[test]
+    fn news_file_first_chunk_wins() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NEWS, b"first"));
+        body.extend(chunk(tag::NEWS, b"second"));
+        let m = msg(0x0000_0067, 1, 0, &body);
+        let n = parse_news_file(&m, m.len(), 256).expect("present");
+        assert_eq!(n, b"first");
+    }
+
+    #[test]
+    fn news_file_sanitises_body() {
+        // CR → LF, 0x0e → 'N'.
+        let m = msg(0x0000_0067, 1, 0, &chunk(tag::NEWS, b"a\rb\x0e"));
+        let n = parse_news_file(&m, m.len(), 256).expect("present");
+        assert_eq!(n, b"a\nb\x4e");
+    }
+
+    #[test]
+    fn news_file_caps_length() {
+        let big = vec![b'x'; 5000];
+        let m = msg(0x0000_0067, 1, 0, &chunk(tag::NEWS, &big));
+        let n = parse_news_file(&m, m.len(), 1024).expect("present");
+        assert_eq!(n.len(), 1024);
+    }
+
+    #[test]
+    fn news_file_missing_chunk_returns_none() {
+        let m = msg(0x0000_0067, 1, 0, &[]);
+        assert!(parse_news_file(&m, m.len(), 256).is_none());
+    }
+
+    // ---- news post walker ----
+
+    #[test]
+    fn news_post_chunks_yields_each_news_chunk() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NEWS, b"one"));
+        body.extend(chunk(tag::NEWS, b"two"));
+        body.extend(chunk(tag::NEWS, b"three"));
+        let m = msg(0x0000_0066, 1, 0, &body);
+        let v: Vec<Vec<u8>> = news_post_chunks(&m, m.len(), 8192).collect();
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0], b"one");
+        assert_eq!(v[1], b"two");
+        assert_eq!(v[2], b"three");
+    }
+
+    #[test]
+    fn news_post_chunks_skips_non_news_chunks() {
+        // Tag 0x0123 is bogus / unrelated; it must not stop iteration
+        // (pre-cleanup the C code's macro hung on it).
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NEWS, b"first"));
+        body.extend(chunk(0x0123, b"junk"));
+        body.extend(chunk(tag::NEWS, b"second"));
+        let m = msg(0x0000_0066, 1, 0, &body);
+        let v: Vec<Vec<u8>> = news_post_chunks(&m, m.len(), 8192).collect();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], b"first");
+        assert_eq!(v[1], b"second");
+    }
+
+    #[test]
+    fn news_post_chunks_sanitises_each() {
+        let m = msg(0x0000_0066, 1, 0, &chunk(tag::NEWS, b"a\rb\x0e"));
+        let v: Vec<Vec<u8>> = news_post_chunks(&m, m.len(), 8192).collect();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], b"a\nb\x4e");
+    }
+
+    #[test]
+    fn news_post_chunks_empty_when_none_present() {
+        let m = msg(0x0000_0066, 1, 0, &[]);
+        let v: Vec<Vec<u8>> = news_post_chunks(&m, m.len(), 8192).collect();
+        assert!(v.is_empty());
+    }
+
+    // ---- news dirlist: folderitem ----
+
+    #[test]
+    fn news_folderitem_folder() {
+        // ntype = 1, name = "Articles"
+        let mut data = vec![1u8];
+        data.extend_from_slice(b"Articles");
+        let e = parse_news_folderitem(&data, 255).expect("ok");
+        assert_eq!(e.kind, NewsDirKind::Folder);
+        assert_eq!(e.name, b"Articles");
+    }
+
+    #[test]
+    fn news_folderitem_category() {
+        // ntype = 0 (not 1) → Category
+        let mut data = vec![0u8];
+        data.extend_from_slice(b"Stuff");
+        let e = parse_news_folderitem(&data, 255).expect("ok");
+        assert_eq!(e.kind, NewsDirKind::Category);
+        assert_eq!(e.name, b"Stuff");
+    }
+
+    #[test]
+    fn news_folderitem_caps_name() {
+        let mut data = vec![1u8];
+        data.extend_from_slice(&vec![b'q'; 400]);
+        let e = parse_news_folderitem(&data, 255).expect("ok");
+        assert_eq!(e.name.len(), 255);
+    }
+
+    #[test]
+    fn news_folderitem_empty_body_rejected() {
+        assert!(parse_news_folderitem(&[], 255).is_none());
+    }
+
+    // ---- news dirlist: categoryitem ----
+
+    #[test]
+    fn news_categoryitem_bundle_folder() {
+        // ntype = 2 (folder), count = 5, namelen = 8, name = "Folder42"
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_be_bytes());
+        data.extend_from_slice(&5u16.to_be_bytes());
+        data.push(8u8);
+        data.extend_from_slice(b"Folder42");
+        let e = parse_news_categoryitem(&data, 255).expect("ok");
+        assert_eq!(e.kind, NewsDirKind::Folder);
+        assert_eq!(e.name, b"Folder42");
+    }
+
+    #[test]
+    fn news_categoryitem_category_with_guid() {
+        // ntype = 3 (category), count, 16-byte guid, addsn, deletesn,
+        // then namelen + name.
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_be_bytes());
+        data.extend_from_slice(&1u16.to_be_bytes());
+        data.extend_from_slice(&[0u8; 16]);
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.push(4u8);
+        data.extend_from_slice(b"News");
+        let e = parse_news_categoryitem(&data, 255).expect("ok");
+        assert_eq!(e.kind, NewsDirKind::Category);
+        assert_eq!(e.name, b"News");
+    }
+
+    #[test]
+    fn news_categoryitem_unknown_ntype_rejected() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&7u16.to_be_bytes()); // unknown
+        data.extend_from_slice(&[0u8; 100]);
+        assert!(parse_news_categoryitem(&data, 255).is_none());
+    }
+
+    #[test]
+    fn news_categoryitem_truncated_header_rejected() {
+        // ntype = 3 but body is too short for the 28-byte header.
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_be_bytes());
+        data.extend_from_slice(&[0u8; 10]);
+        assert!(parse_news_categoryitem(&data, 255).is_none());
+    }
+
+    #[test]
+    fn news_categoryitem_caps_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_be_bytes());
+        data.extend_from_slice(&0u16.to_be_bytes());
+        data.push(200u8);
+        data.extend_from_slice(&vec![b'x'; 200]);
+        let e = parse_news_categoryitem(&data, 16).expect("ok");
+        assert_eq!(e.name.len(), 16);
+    }
+
+    #[test]
+    fn news_categoryitem_namelen_zero() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_be_bytes());
+        data.extend_from_slice(&0u16.to_be_bytes());
+        data.push(0u8);
+        let e = parse_news_categoryitem(&data, 255).expect("ok");
+        assert_eq!(e.kind, NewsDirKind::Folder);
+        assert!(e.name.is_empty());
     }
 }

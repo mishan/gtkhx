@@ -9,7 +9,7 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
-use crate::parse::{self, AgreementResult, Header};
+use crate::parse::{self, AgreementResult, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
@@ -451,6 +451,150 @@ pub unsafe extern "C" fn gtkhx_proto_parse_agreement(
         }
         AgreementResult::None => HX_AGREEMENT_NONE_FFI,
         AgreementResult::Missing => HX_AGREEMENT_MISSING_FFI,
+    }
+}
+
+/// Extract the first `HTLS_DATA_NEWS` chunk's CR2LF + `strip_ansi`
+/// sanitised text into `out` (NUL-terminated, capped at `cap - 1`).
+/// Returns the byte count (excluding the NUL), or `SIZE_MAX` when no
+/// NEWS chunk was present — in which case **`out` is left untouched**,
+/// matching `hx_news_file_extract`'s C contract. Returns 0 on NULL
+/// `out` or zero `cap`.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` valid for `cap`
+/// bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_news_file(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    if out.is_null() || cap == 0 {
+        return 0;
+    }
+    let s = as_slice(msg, msglen);
+    match parse::parse_news_file(s, s.len(), cap - 1) {
+        Some(bytes) => write_cstr(out, cap, &bytes),
+        None => usize::MAX,
+    }
+}
+
+/// Walk every `HTLS_DATA_NEWS` chunk in the message, invoking `cb` once
+/// per chunk with the CR2LF + `strip_ansi` sanitised body. The body
+/// passed to `cb` is heap-allocated for the call's lifetime, NUL-
+/// terminated, and freed by Rust after `cb` returns — `cb` must not
+/// retain the pointer beyond its frame. Returns the number of chunks
+/// emitted. NULL `cb` is allowed (it just counts).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL). `cb` is `extern "C"` and
+/// must not unwind. `user` is opaque.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_walk_news_post(
+    msg: *const u8,
+    msglen: usize,
+    cb: Option<unsafe extern "C" fn(user: *mut std::ffi::c_void, bytes: *const u8, len: usize)>,
+    user: *mut std::ffi::c_void,
+) -> i32 {
+    let s = as_slice(msg, msglen);
+    let mut count = 0i32;
+    for body in parse::news_post_chunks(s, s.len(), u16::MAX as usize) {
+        count += 1;
+        if let Some(callback) = cb {
+            // Hand the callback a NUL-terminated buffer so it can use
+            // C-string utilities. Length is the byte count *without*
+            // the NUL — matches the C handler's old contract.
+            let mut buf = body;
+            let len = buf.len();
+            buf.push(0);
+            callback(user, buf.as_ptr(), len);
+            // buf is dropped here.
+        }
+    }
+    count
+}
+
+/// C-ABI mirror of [`parse::NewsDirEntry`].
+#[repr(C)]
+pub struct NewsDirEntryOut {
+    /// 1 = folder-entry, 2 = category-entry. Matches the `kind` field
+    /// of `struct hx_news_dirlist_entry`.
+    pub kind: i32,
+    pub name_len: u16,
+}
+
+fn news_dir_kind_to_c(k: NewsDirKind) -> i32 {
+    match k {
+        NewsDirKind::Folder => 1,
+        NewsDirKind::Category => 2,
+    }
+}
+
+fn write_news_dir(
+    e: NewsDirEntry,
+    name_buf: *mut u8,
+    name_cap: usize,
+    out: *mut NewsDirEntryOut,
+) -> bool {
+    unsafe {
+        let written = write_cstr(name_buf, name_cap, &e.name);
+        (*out).kind = news_dir_kind_to_c(e.kind);
+        (*out).name_len = written as u16;
+    }
+    true
+}
+
+/// Parse a `HTLC_DATA_NEWSFOLDERITEM` chunk body. Writes the entry's
+/// name into `name_buf` (NUL-terminated, capped at `name_cap - 1`) and
+/// fills `*out`. Returns false on NULL / zero-cap arguments or on a
+/// rejected body (empty chunk).
+///
+/// # Safety
+/// `data` valid for `dlen` bytes (or NULL); `name_buf` valid for
+/// `name_cap` bytes; `out` a valid writable `NewsDirEntryOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_news_folderitem(
+    data: *const u8,
+    dlen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    out: *mut NewsDirEntryOut,
+) -> bool {
+    if out.is_null() || name_buf.is_null() || name_cap == 0 {
+        return false;
+    }
+    let s = as_slice(data, dlen);
+    match parse::parse_news_folderitem(s, name_cap - 1) {
+        Some(e) => write_news_dir(e, name_buf, name_cap, out),
+        None => false,
+    }
+}
+
+/// Parse a `HTLC_DATA_CATEGORYITEM` chunk body. Writes the entry's
+/// name into `name_buf` (NUL-terminated, capped at `name_cap - 1`) and
+/// fills `*out`. Returns false on NULL / zero-cap arguments, on
+/// unknown `ntype`, or on a truncated header (the C extractor's
+/// defensive-reject contract).
+///
+/// # Safety
+/// As [`gtkhx_proto_parse_news_folderitem`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_news_categoryitem(
+    data: *const u8,
+    dlen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    out: *mut NewsDirEntryOut,
+) -> bool {
+    if out.is_null() || name_buf.is_null() || name_cap == 0 {
+        return false;
+    }
+    let s = as_slice(data, dlen);
+    match parse::parse_news_categoryitem(s, name_cap - 1) {
+        Some(e) => write_news_dir(e, name_buf, name_cap, out),
+        None => false,
     }
 }
 
