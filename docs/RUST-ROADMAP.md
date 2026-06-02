@@ -301,14 +301,27 @@ anymore.
 ## Phase R2 — Wire protocol crate
 
 **Goal:** A typed Rust representation of every Hotline 1.0/1.2/1.5/1.9 message,
-plus parser and serializer. `rcv.c` and `commands.c` become thin C shims that
-call into the Rust crate; new wire-format work happens in Rust.
+plus parser and serializer. The receive path (`rcv.c` + the `proto_helpers.c`
+extractors) and the send path (the `hlwrite()`-based serialization) become
+thin C shims that call into the Rust crate; new wire-format work happens in
+Rust.
+
+> **Note on `commands.c`:** an earlier draft of this plan named `commands.c`
+> as the message *serializer*. That is wrong. `commands.c` is the chat
+> **slash-command parser** (`/me`, `/msg`, `/clear`, …): `hx_command`,
+> `commands_tbl`, `cmd_arg`, `gen_command_hash`. It has nothing to do with
+> the wire protocol and is out of scope for R2. The actual protocol *send*
+> path is `hlwrite()` / `hlwrite_chunks()` in `network.c`, the handful of
+> `hx_send_*` helpers (`hx_send_chat` in `chat.c`, `hx_send_msg` /
+> `hx_send_broadcast` in `msg.c`, `hx_send_agreement_agree` in `network.c`),
+> and a large number of inline `hlwrite(...)` call sites scattered across
+> the UI files.
 
 This is the single largest extraction in the roadmap (~3,000 LOC C across
-`rcv.c` + `commands.c` + `hotline.h`/`protocol.h`). It also gives the biggest
-maintainability win: type-safe enums for opcodes, exhaustive `match` on field
-IDs, no more `HN16(&foo, &foo)` aliasing footguns (see `gtkhx_selfinfo_uid_bug.md`
-in memory).
+`rcv.c` + `proto_helpers.c` + the `hlwrite` send path + `hotline.h`/`protocol.h`).
+It also gives the biggest maintainability win: type-safe enums for opcodes,
+exhaustive `match` on field IDs, no more `HN16(&foo, &foo)` aliasing footguns
+(see `gtkhx_selfinfo_uid_bug.md` in memory).
 
 **Work items**
 
@@ -328,11 +341,14 @@ in memory).
    - Then chat-related: `HTLS_HDR_CHAT`, chat subject, chat invitation.
    - Then user-list events.
    - Save file-list and news-thread for last (most complex parsing).
-3. **Port `commands.c` similarly.** Each `hx_send_*` becomes a `build_*`
-   function in the Rust crate that returns a `Vec<u8>`; the C wrapper still
-   calls `hlwrite()` or the qbuf path to actually push it onto the socket.
-   This separates "build the message" from "send it" — the latter waits for
-   R3.
+3. **Port the send path similarly.** Each message-building site — the
+   `hx_send_*` helpers (`hx_send_chat`, `hx_send_msg`, `hx_send_broadcast`,
+   `hx_send_agreement_agree`) and the inline `hlwrite(...)` call sites —
+   becomes a `build_*` function in the Rust crate that returns a `Vec<u8>`;
+   the C wrapper still calls `hlwrite()` / `hlwrite_chunks()` (or the qbuf
+   path) to actually push it onto the socket. This separates "build the
+   message" from "send it" — the latter waits for R3. (`commands.c`, the
+   slash-command parser, is **not** part of this — see the note above.)
 4. **Port `proto_helpers.c` and `proto_trace.c`.** The boxed `HxChatEvent`
    and friends become Rust types that derive `#[repr(C)]` and expose
    `_new` / `_free` / `_copy` symbols for the GObject boxed-type integration
@@ -354,17 +370,21 @@ in memory).
 - The Hotline 1.9 protocol additions live alongside the 1.2/1.5 ones; the
   crate's enum needs `#[non_exhaustive]` on the opcode enum because mhxd's
   ChangeLog adds new ones occasionally.
-- Mac Roman ↔ UTF-8 conversion (`gtkhx_text_to_utf8` in `hl_code.c`) is wire-
-  protocol-adjacent. Decide whether it lives in `hotline-proto` (probably
-  yes; it's a property of the wire encoding) or in a separate `hx-text`
-  crate (cleaner separation, more files).
+- Mac Roman ↔ UTF-8 conversion (`gtkhx_text_to_utf8` in `text_util.c` — not
+  `hl_code.c`, which is the unrelated XOR-0xff obfuscation of LOGIN/PASSWORD
+  chunks) is wire-protocol-adjacent. **Decided in the R2 foundation:** it
+  lives in `hotline-proto` (the `text` module), matching glibc's `iconv`
+  "MACINTOSH" table byte-for-byte. The legacy C `text_util.c` stays until its
+  call sites migrate with their owning windows.
 - The compressed-frame path in `rcv.c` goes
   `dechunk → decrypt → decompress → parse`. The Rust crate should accept
   fully-assembled message buffers; the chunk/decrypt/decompress orchestration
   stays in `network.c` for now and moves in R3.
 
-**Exit criteria:** `rcv.c` and `commands.c` are reduced to dispatch tables and
-GObject signal-emit calls; the actual byte-twiddling is all in Rust. The
+**Exit criteria:** `rcv.c` (and the `proto_helpers.c` extractors) are reduced
+to dispatch tables and GObject signal-emit calls, and the `hlwrite` send
+sites build their payloads in Rust; the actual byte-twiddling is all in Rust.
+The
 unit-test count in the Rust workspace exceeds the surviving C unit-test count.
 Wire-format regressions caught by `cargo test --workspace` before they ever
 reach a server.
