@@ -37,7 +37,12 @@ app-id: com.nasledov.gtkhx
 runtime: org.gnome.Platform
 runtime-version: "49"
 sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
 command: gtkhx
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
 
 # Sandbox permissions. Each line is justified — Flathub reviewers
 # expect a finish-args list that's the minimum for the app to work.
@@ -269,9 +274,16 @@ modules:
     buildsystem: meson
     config-opts:
       - --buildtype=release
+    build-options:
+      env:
+        CARGO_HOME: /run/build/gtkhx/cargo
     sources:
       # Local-source variant: builds from the working tree. Swap
       # this for a `type: git` block when targeting a Flathub
       # submission.
       - type: dir
         path: .
+      # Pre-downloaded Cargo dependencies (the Flatpak build sandbox
+      # has no network access). Regenerate with:
+      #   python3 tools/flatpak-cargo-generator.py rust/Cargo.lock
+      - rust/cargo-sources.json
