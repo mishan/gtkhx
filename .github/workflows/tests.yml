@@ -240,13 +240,28 @@ jobs:
         # "argus" expects 127.0.0.1:5498 — without this step the
         # Tier 3 test_integration_tracker_v3 binary fails
         # loudly per the no-silent-skips policy.
+        #
+        # Phase D adds tcp/6498 for the stunnel-wrapped TLS path.
+        # tracker_matrix.c's argus entry advertises tls_port=6498
+        # (chosen as +1000 from the plain port because the natural
+        # +100 = 5598 collides with hxtrackd's host-port mapping);
+        # the test_integration_tracker_v3_tls binary points there.
+        # The container's entrypoint launches both Argus and
+        # stunnel (see tests/argus/entrypoint.sh), so a single
+        # docker-run brings up both endpoints.
         run: |
           docker run -d --name gtkhx-argus \
-            -p 5498:5498 -p 5499:5499/udp \
+            -p 5498:5498 -p 6498:6498 -p 5499:5499/udp \
             gtkhx-argus
           for i in 1 2 3 4 5 6 7 8 9 10; do
             if (echo > /dev/tcp/127.0.0.1/5498) 2>/dev/null; then
-              echo "argus is up"; break
+              echo "argus plain is up"; break
+            fi
+            sleep 1
+          done
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if (echo > /dev/tcp/127.0.0.1/6498) 2>/dev/null; then
+              echo "argus TLS (stunnel) is up"; break
             fi
             sleep 1
           done

@@ -56,14 +56,28 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * our test promoted entries use IPv6 addresses so we
          * don't currently exercise the emit path.
          *
-         * TLS: not advertised. The v3 spec says clients SHOULD
-         * prefer TLS on the listing port but Argus 1.0.2 doesn't
-         * ship a TLS listener. GtkHx Phase D is the future axis. */
+         * TLS: Phase D adds a stunnel sidecar inside the same
+         * Argus container that terminates TLS on tcp/6498 and
+         * forwards to plain Argus on 127.0.0.1:5498. Argus
+         * itself has no native TLS support (we verified by
+         * grepping the binary's yaml-tag strings — no tls/cert/
+         * ssl keys), so the wrapper is how we exercise the v3
+         * spec's "TLS on the listing port" recommendation. The
+         * stunnel cert is self-signed, generated at image-build
+         * time; the test relies on GTKHX_TLS_AUTO_ACCEPT=1 or
+         * a pre-pin via GTKHX_KNOWN_HOSTS to dodge the TOFU
+         * prompt that would otherwise block a headless run.
+         *
+         * Port 6498 (not the natural +100 = 5598) because
+         * hxtrackd's container already publishes its plain
+         * endpoint on host:5598, so +1000 is the next clean
+         * non-colliding step that keeps the port relationship
+         * obvious. */
         .name                    = "argus",
         .host                    = "127.0.0.1",
         .port                    = 5498,
         .udp_port                = 5499,
-        .tls_port                = 0,
+        .tls_port                = 6498,
         /* tests/argus/conf/config.yaml seeds three promoted
          * entries (Alpha / Beta / Gamma). Test asserts on this
          * count. If the config grows, bump this. */
@@ -74,7 +88,8 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
                                  | HX_TEST_TRACKER_CAP_SEARCH_TEXT
                                  | HX_TEST_TRACKER_CAP_PAGINATION
                                  | HX_TEST_TRACKER_CAP_HOSTNAME_RECS
-                                 | HX_TEST_TRACKER_CAP_PROMOTED,
+                                 | HX_TEST_TRACKER_CAP_PROMOTED
+                                 | HX_TEST_TRACKER_CAP_TLS,
     },
     {
         /* hxtrackd: mhxd's bundled pre-spec v1 tracker, wrapped

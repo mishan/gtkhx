@@ -96,9 +96,32 @@ COPY conf/config.yaml /opt/argus/config.yaml
 # -----------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
+# stunnel + openssl land here for the Phase D TLS test target.
+# Argus itself has no native TLS support (its config.yaml has no
+# tls/ssl/cert section — verified against the upstream 1.0.2
+# configuration.md included in the tarball). To exercise the
+# tracker client's TLS-first path against a real cert + handshake
+# we wrap Argus with stunnel:
+#
+#   stunnel terminates TLS on 0.0.0.0:6498, forwards to argus on
+#   127.0.0.1:5498 (the same plain port the existing Tier 3 test
+#   already uses). One container, two ports — plain on 5498, TLS
+#   on 6498 — so the existing test stays unchanged and the new
+#   Phase D test points at 6498. (Port 6498 not 5598 because
+#   hxtrackd's container already publishes its plain endpoint on
+#   host:5598; +1000 sidesteps the collision.)
+#
+# Cert: generated at image-build time, self-signed, SHA-256
+# fingerprint is captured into /opt/argus/tls.fingerprint so the
+# Tier 3 harness can pre-pin it via GTKHX_KNOWN_HOSTS rather than
+# prompting. The Tier 3 test today goes the simpler route of
+# inline-accepting any cert (no GMainLoop to drive the production
+# TOFU prompt), so the fingerprint file is informational for now.
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install --no-install-recommends -y \
         ca-certificates \
+        openssl \
+        stunnel4 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /var/lib/argus \
                --shell /usr/sbin/nologin argus
@@ -106,22 +129,50 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY --from=build /opt/argus /opt/argus
 RUN chown -R argus:argus /opt/argus
 
-# Tracker ports:
-#   5498/tcp — client listing requests (HTRK over TCP — what GtkHx
-#              speaks against; v1/v2/v3 all multiplex here)
-#   5499/udp — server registration heartbeats (we don't drive this
-#              in tests today, but expose it so a future
-#              registration-round-trip test doesn't need an image
-#              rebuild)
-EXPOSE 5498/tcp 5499/udp
+# Generate the self-signed cert for the stunnel TLS wrapper. CN =
+# the docker-compose / test-host hostname; -nodes makes the key
+# unencrypted (we'd otherwise need a passphrase pipe into
+# stunnel). 10-year validity so a rebuild is the only reason the
+# cert would change. The fingerprint file is what the Tier 3
+# test reads to pre-pin trust.
+RUN openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /opt/argus/tls.key \
+        -out    /opt/argus/tls.crt \
+        -days 3650 \
+        -subj "/CN=gtkhx-argus/O=GtkHx Test" \
+    && openssl x509 -in /opt/argus/tls.crt -outform DER \
+        | openssl dgst -sha256 -binary \
+        | xxd -p -c 256 \
+        | awk '{print "sha256:" $0}' \
+        > /opt/argus/tls.fingerprint \
+    && cat /opt/argus/tls.fingerprint \
+    && chmod 0640 /opt/argus/tls.key \
+    && chown argus:argus /opt/argus/tls.key /opt/argus/tls.crt \
+        /opt/argus/tls.fingerprint
 
-USER argus
+COPY conf/stunnel.conf /etc/stunnel/stunnel.conf
+COPY entrypoint.sh /opt/argus/entrypoint.sh
+RUN chmod +x /opt/argus/entrypoint.sh
+
+# Tracker ports:
+#   5498/tcp — client listing requests over plain TCP (HTRK over
+#              TCP — what GtkHx speaks against; v1/v2/v3 all
+#              multiplex here)
+#   6498/tcp — TLS-wrapped client listing requests (stunnel
+#              terminates TLS here and forwards to 127.0.0.1:5498).
+#              Skips a thousand instead of the natural +100 to
+#              avoid colliding with hxtrackd's host-port mapping
+#              (its container's 5498 is published on host:5598).
+#   5499/udp — server registration heartbeats (not driven by tests
+#              today)
+EXPOSE 5498/tcp 6498/tcp 5499/udp
+
 WORKDIR /opt/argus
 
-# Argus has no required CLI args. It looks for config.yaml,
-# accounts.yaml, bans.txt, and federation.key in the directory
-# containing the binary — our COPY placed them at /opt/argus/.
-# Logs go to stdout (JSON in non-TTY environments like Docker), so
-# `docker logs` works without -d.
-ENTRYPOINT ["/opt/argus/argus"]
+# The entrypoint launches argus as the argus user under stunnel
+# (which runs as root briefly to bind the privileged-ish port,
+# then drops). Both processes log to stdout so `docker logs`
+# captures the merged stream. argus' SIGINT propagates through
+# the shell wrapper so `docker stop` shuts down cleanly.
+ENTRYPOINT ["/opt/argus/entrypoint.sh"]
 CMD []

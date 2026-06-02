@@ -2033,6 +2033,19 @@ struct tracker_fetch_ctx {
     gulong attempt_cancel_link;
     guint v3_probe_timeout_id;
 
+    /* Phase D TLS state. use_tls = 1 means the next connect attempt
+     * goes through gtls (g_socket_client_set_tls). tls_attempted
+     * is set as soon as we kick off a TLS connect so a failure
+     * callback can tell "TLS just failed → try plain" apart from
+     * "plain failed, no fallback to try". tls_endpoint feeds the
+     * shared on_socket_client_event TOFU handler so trust pins for
+     * tracker certs land in the same known_hosts file the main
+     * Hotline session uses — .host borrows ctx->serverstr's
+     * lifetime, valid for the duration of the connect. */
+    int use_tls;
+    int tls_attempted;
+    struct tls_endpoint tls_endpoint;
+
     /* v3 listing-request scratch + listing-response buffer.
      * v3_payload is allocated to hold `total_size` bytes once we
      * have the response header; freed in tracker_fetch_free. */
@@ -2065,10 +2078,59 @@ struct tracker_run_ctx {
 
 static struct tracker_run_ctx *current_tracker_run;
 
+/* Phase D TLS verdict cache.
+ *
+ * Per-tracker memory of "this tracker speaks TLS" vs "this tracker
+ * doesn't, don't re-pay the failed handshake on every Refresh."
+ * Keyed on the tracker URL string (the same g_strdup'd string we
+ * use for the prefs entry); values are pointer-cast enums.
+ *
+ * Lifetime: scoped to the process (cleared on hx_tracker_kill_
+ * threads only when a fresh hx_tracker_list_async would otherwise
+ * pay full re-probe cost). Re-probed at next launch so a tracker
+ * that adds TLS support gets picked up next time the user starts
+ * GtkHx — no manual cache clear, no stale "this tracker has no
+ * TLS" bit lingering across upgrades.
+ *
+ * NULL key (g_str_hash + g_str_equal + g_free for keys + NULL
+ * value destroy since the values are just enum-sized pointers). */
+typedef enum {
+    HX_TRACKER_TLS_UNKNOWN = 0, /* never tried */
+    HX_TRACKER_TLS_OK,          /* TLS handshake succeeded */
+    HX_TRACKER_TLS_NO,          /* TLS handshake failed; use plain */
+} hx_tracker_tls_verdict;
+
+static GHashTable *tracker_tls_verdict_cache;
+
+static hx_tracker_tls_verdict
+tracker_tls_verdict_lookup (const char *url)
+{
+    if (!url || !tracker_tls_verdict_cache) {
+        return HX_TRACKER_TLS_UNKNOWN;
+    }
+    return (hx_tracker_tls_verdict) GPOINTER_TO_UINT (
+        g_hash_table_lookup (tracker_tls_verdict_cache, url));
+}
+
+static void
+tracker_tls_verdict_record (const char *url, hx_tracker_tls_verdict v)
+{
+    if (!url) {
+        return;
+    }
+    if (!tracker_tls_verdict_cache) {
+        tracker_tls_verdict_cache
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
+    g_hash_table_replace (tracker_tls_verdict_cache, g_strdup (url),
+                          GUINT_TO_POINTER ((guint) v));
+}
+
 /* Forward decls — the protocol is a chain of one-bounce callbacks. */
 static void tracker_fetch_start (struct tracker_run_ctx *run);
 static void tracker_fetch_connect (struct tracker_fetch_ctx *ctx);
 static void tracker_fetch_retry_v1 (struct tracker_fetch_ctx *ctx);
+static void tracker_fetch_retry_plain (struct tracker_fetch_ctx *ctx);
 static void on_tracker_connected (GObject *src, GAsyncResult *r, gpointer u);
 static void on_tracker_magic_sent (GObject *src, GAsyncResult *r, gpointer u);
 static void on_tracker_attempt_cancelled (GCancellable *src, gpointer u);
@@ -2246,6 +2308,27 @@ tracker_fetch_connect (struct tracker_fetch_ctx *ctx)
      * HTTP CONNECT proxies configured at the desktop level
      * (gsettings / libproxy) work transparently here. */
     client = g_socket_client_new ();
+
+    /* Phase D TLS: when ctx->use_tls is set, flip the GSocketClient
+     * into TLS mode and hook the shared TOFU accept-certificate
+     * handler. The handler writes its trust decision into the same
+     * known_hosts file the main Hotline session uses, so a tracker
+     * fingerprint pin and a session-server fingerprint pin coexist
+     * without stepping on each other. tls_attempted is set right
+     * before the async kicks off so on_tracker_connected's failure
+     * branch can tell "TLS handshake just failed" apart from "plain
+     * connect failed." */
+    if (ctx->use_tls) {
+        g_socket_client_set_tls (client, TRUE);
+        ctx->tls_endpoint.host = ctx->serverstr;
+        ctx->tls_endpoint.port = ctx->port;
+        g_signal_connect (client, "event",
+                          G_CALLBACK (on_socket_client_event),
+                          &ctx->tls_endpoint);
+        ctx->tls_attempted = 1;
+        debug_log ("tracker", "%s: attempting TLS connect", ctx->serverstr);
+    }
+
     /* Connect attempt itself uses the run cancellable — if the user
      * aborts during DNS / TCP connect we want to unwind immediately;
      * we don't want a watchdog-triggered attempt_cancel to kill the
@@ -2260,6 +2343,7 @@ static void
 tracker_fetch_start (struct tracker_run_ctx *run)
 {
     struct tracker_fetch_ctx *ctx;
+    hx_tracker_tls_verdict cached;
 
     ctx = g_new0 (struct tracker_fetch_ctx, 1);
     ctx->run = run;
@@ -2273,9 +2357,51 @@ tracker_fetch_start (struct tracker_run_ctx *run)
      * version byte is 0x03 instead of 0x01 — so the watchdog is
      * what makes the fallback work. */
     ctx->use_v3 = 1;
+
+    /* Phase D TLS: try TLS first unless the verdict cache says
+     * this tracker is plain-only. UNKNOWN (first time we see
+     * this tracker in this session) → try TLS. OK → try TLS
+     * (silently accepts via TOFU on the second + later fetches
+     * since the fingerprint is pinned). NO → skip TLS, go
+     * straight to plain. Re-probes happen on each fresh process
+     * launch (cache is in-memory only). */
+    cached = tracker_tls_verdict_lookup (ctx->serverstr);
+    ctx->use_tls = (cached != HX_TRACKER_TLS_NO);
+    if (cached == HX_TRACKER_TLS_NO) {
+        debug_log ("tracker",
+                   "%s: cached TLS verdict = NO; skipping TLS attempt",
+                   ctx->serverstr);
+    }
+
     run->cur_ctx = ctx;
 
     trackconn_prog_update (run->sess, ctx->serverstr, 0, 2);
+
+    tracker_fetch_connect (ctx);
+}
+
+/* TLS handshake failed on the first attempt — close the conn,
+ * record the verdict so the next Refresh skips TLS, and reopen
+ * with plain TCP. The v3-probe-then-v1-fallback machinery still
+ * runs on top, so we end up with the full TLS-fail → plain → v3
+ * probe → v1 fallback ladder for the worst case. */
+static void
+tracker_fetch_retry_plain (struct tracker_fetch_ctx *ctx)
+{
+    debug_log ("tracker",
+               "%s: TLS handshake failed; falling back to plain TCP",
+               ctx->serverstr);
+    tracker_tls_verdict_record (ctx->serverstr, HX_TRACKER_TLS_NO);
+    ctx->use_tls = 0;
+
+    g_clear_object (&ctx->conn);
+    ctx->in = NULL;
+    ctx->out = NULL;
+
+    if (ctx->attempt_cancel && ctx->attempt_cancel_link) {
+        g_cancellable_disconnect (ctx->run->cancel, ctx->attempt_cancel_link);
+        ctx->attempt_cancel_link = 0;
+    }
 
     tracker_fetch_connect (ctx);
 }
@@ -2329,6 +2455,24 @@ on_tracker_connected (GObject *src, GAsyncResult *res, gpointer u)
     ctx->conn = g_socket_client_connect_to_host_finish (G_SOCKET_CLIENT (src),
                                                         res, &err);
     if (!ctx->conn) {
+        /* Phase D: a failed TLS handshake on the first attempt
+         * triggers the plain-TCP fallback rather than surfacing as a
+         * connect error. Distinguish "TLS handshake itself failed"
+         * (G_TLS_ERROR domain — bad cert, no TLS server here, etc.)
+         * from "couldn't even reach the host" (G_IO_ERROR domain —
+         * DNS, refused, timeout). The latter isn't a TLS problem; a
+         * plain retry on a host we can't reach won't help and would
+         * just double the user's wait. Cancellations route through
+         * tracker_fetch_done unchanged. */
+        if (ctx->tls_attempted && err && err->domain == G_TLS_ERROR
+            && !err_is_cancel (err)) {
+            debug_log ("tracker",
+                       "%s: TLS error during connect (%s); will retry plain",
+                       ctx->serverstr, err->message);
+            g_clear_error (&err);
+            tracker_fetch_retry_plain (ctx);
+            return;
+        }
         if (!err_is_cancel (err)) {
             hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
                               _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
@@ -2338,6 +2482,15 @@ on_tracker_connected (GObject *src, GAsyncResult *res, gpointer u)
         tracker_fetch_done (ctx);
         return;
     }
+
+    /* Connect succeeded. If we got here on a TLS attempt, the
+     * handshake completed cleanly + the cert was trusted (or pinned
+     * via TOFU). Record the verdict so subsequent fetches skip the
+     * "is this tracker even TLS?" probe overhead. */
+    if (ctx->use_tls) {
+        tracker_tls_verdict_record (ctx->serverstr, HX_TRACKER_TLS_OK);
+    }
+
     ctx->in = g_io_stream_get_input_stream (G_IO_STREAM (ctx->conn));
     ctx->out = g_io_stream_get_output_stream (G_IO_STREAM (ctx->conn));
 
