@@ -40,7 +40,6 @@
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
-#include "gtk_hlist.h"
 #include "macres.h"
 #include "cicn.h"
 #include "news.h"

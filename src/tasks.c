@@ -28,7 +28,6 @@
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
-#include "gtk_hlist.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "human_readable.h"

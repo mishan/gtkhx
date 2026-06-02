@@ -30,7 +30,6 @@
 #include <time.h>
 #include <pthread.h>
 #include "hx.h"
-#include "gtk_hlist.h"
 #include "news.h"
 #include "network.h"
 #include "toolbar.h"

@@ -28,7 +28,6 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
-#include "gtk_hlist.h"
 #include "gtkhx.h"
 #include "news.h"
 #include "xtext.h"
@@ -68,7 +67,20 @@ time_t total_time;
 static struct icon_viewer *iv;
 
 GtkWidget *options_window = NULL;
-GtkWidget *tracker_list = NULL;
+
+/* Tracker page (Settings → Trackers): GListStore<GtkStringObject *>
+ * is the source of truth; the GtkColumnView reads through a
+ * GtkSingleSelection wrapping the store. The widget pointer is
+ * kept so close_options_bookkeeping doesn't have to know the
+ * model topology — the existing teardown chain unrefs the view,
+ * which drops the selection's ref on the model, etc. The store
+ * pointer is the one we mutate from add_tracker / remove_tracker.
+ * Module-static rather than per-page-local so parse_tracker_list
+ * (the Save path) can read the model without plumbing a widget
+ * pointer through every dialog handler. */
+static GtkWidget *tracker_list = NULL;
+static GListStore *tracker_store = NULL;
+static GtkSingleSelection *tracker_selection = NULL;
 
 struct gtkhx_prefs gtkhx_prefs = {
     0,                /* num_tracker */
@@ -1948,35 +1960,45 @@ parse_tracker (session *sess)
     }
 }
 
+/* Re-derive gtkhx_prefs.tracker[] + tracker_str from whatever the
+ * GListStore<GtkStringObject *> currently holds. Called from the
+ * add / remove handlers below; the result feeds prefs_write +
+ * the next hx_tracker_list_async. The serialised tracker_str is
+ * comma-separated to match the on-disk gtkhxrc format the
+ * cfgvar handles. */
 static void
 parse_tracker_list (void)
 {
-    GtkWidget *list = tracker_list;
-    int i = 0;
+    guint n;
     size_t len = 0;
+    int i;
 
-    /* go through the CList and populate the gtkhx_prefs.tracker
-	   array and create gtkhx_prefs.tracker_str */
     if (gtkhx_prefs.tracker) {
         for (i = 0; i != gtkhx_prefs.num_tracker; ++i) {
             g_free (gtkhx_prefs.tracker[i]);
         }
         g_free (gtkhx_prefs.tracker);
+        gtkhx_prefs.tracker = NULL;
     }
 
-    gtkhx_prefs.num_tracker = GTK_HLIST (list)->rows;
-    gtkhx_prefs.tracker = g_malloc (GTK_HLIST (list)->rows * sizeof (char *));
+    n = tracker_store
+            ? g_list_model_get_n_items (G_LIST_MODEL (tracker_store))
+            : 0;
+    gtkhx_prefs.num_tracker = (int) n;
+    gtkhx_prefs.tracker = n ? g_malloc (n * sizeof (char *)) : NULL;
     if ((*cfgvar_for_name (CFG_TRACKER)).allocated) {
         g_free (gtkhx_prefs.tracker_str);
     }
     gtkhx_prefs.tracker_str = g_malloc0 (1);
 
-    for (i = 0; i < GTK_HLIST (list)->rows; i++) {
-        char *tracker = gtk_hlist_get_row_data (GTK_HLIST (list), i);
+    for (guint j = 0; j < n; j++) {
+        GtkStringObject *so
+            = g_list_model_get_item (G_LIST_MODEL (tracker_store), j);
+        const char *tracker = gtk_string_object_get_string (so);
         size_t trackersize = strlen (tracker) + 1;
         gtkhx_prefs.tracker_str
             = g_realloc (gtkhx_prefs.tracker_str, len + trackersize + 1);
-        if (i) {
+        if (j) {
             gtkhx_prefs.tracker_str[len] = ',';
             memcpy (gtkhx_prefs.tracker_str + len + 1, tracker, trackersize);
             len++;
@@ -1984,7 +2006,8 @@ parse_tracker_list (void)
             memcpy (gtkhx_prefs.tracker_str + len, tracker, trackersize);
         }
         len += trackersize - 1;
-        gtkhx_prefs.tracker[i] = g_strdup (tracker);
+        gtkhx_prefs.tracker[j] = g_strdup (tracker);
+        g_object_unref (so);
     }
 }
 
@@ -2005,6 +2028,16 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
     options_window = 0;
     g_free (iv);
     iv = NULL;
+
+    /* Tracker page model chain: drop our parallel refs on the
+     * store + selection so they don't dangle past the dialog's
+     * widget tree teardown. The column view holds its own refs
+     * via gtk_column_view_new and disposes them in its own
+     * unref chain; we just need to make sure the module-static
+     * pointers aren't usable after the dialog is gone. */
+    tracker_list = NULL;
+    g_clear_object (&tracker_selection);
+    g_clear_object (&tracker_store);
     /* Phase 5: per-cfgvar widget pointers are populated as Settings
 	 * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
 	 * point at AdwPreferencesRow children of the dialog. Once the dialog
@@ -2105,49 +2138,79 @@ create_fontsel (GtkWidget *btn, GtkWidget *entry)
 static void
 add_tracker (GtkWidget *add, GtkWidget *entry)
 {
-    char *tracker = g_strdup (gtk_editable_get_text (GTK_EDITABLE (entry)));
-    gint row;
+    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
+    GtkStringObject *so;
+    (void)add;
 
-    row = gtk_hlist_append (GTK_HLIST (tracker_list), &tracker);
-    gtk_hlist_set_row_data (GTK_HLIST (tracker_list), row, tracker);
+    if (!text || !*text || !tracker_store) {
+        return;
+    }
+    /* GtkStringObject's constructor copies the input — the
+     * GListStore then owns one strong ref; we drop our ref after
+     * append. */
+    so = gtk_string_object_new (text);
+    g_list_store_append (tracker_store, so);
+    g_object_unref (so);
+
     gtk_editable_set_text (GTK_EDITABLE (entry), "");
     parse_tracker_list ();
     prefs_write ();
 }
 
 static void
-remove_tracker (GtkWidget *del, GtkWidget *list)
+remove_tracker (GtkWidget *del, gpointer data)
 {
-    /* Phase 3.2: GtkCList tracked the focused row in a public ->focus_row
-	 * field. The gtk_hlist_compat shim is built on GtkTreeView, where
-	 * "focus" lives in GtkTreeSelection.  Resolve the selected row's
-	 * index via the underlying tree-view selection and feed it to
-	 * gtk_hlist_remove. */
-    GtkTreeSelection *sel;
-    GtkTreeModel *model;
-    GtkTreeIter iter;
-    GtkTreePath *path;
-    gint row;
+    guint pos;
+    (void)del;
+    (void)data;
 
-    sel = gtk_tree_view_get_selection (GTK_TREE_VIEW (list));
-    if (!gtk_tree_selection_get_selected (sel, &model, &iter)) {
+    if (!tracker_store || !tracker_selection) {
         return;
     }
-
-    path = gtk_tree_model_get_path (model, &iter);
-    row = gtk_tree_path_get_indices (path)[0];
-    gtk_tree_path_free (path);
-
-    gtk_hlist_remove (GTK_HLIST (list), row);
+    /* GtkSingleSelection reports GTK_INVALID_LIST_POSITION when no
+     * row is selected — bail rather than try to remove position 0
+     * by mistake. */
+    pos = gtk_single_selection_get_selected (tracker_selection);
+    if (pos == GTK_INVALID_LIST_POSITION) {
+        return;
+    }
+    g_list_store_remove (tracker_store, pos);
     parse_tracker_list ();
     prefs_write ();
 }
 
-/* Tracker page hosts the existing GtkHList + Add/Remove controls inside
- * a custom AdwPreferencesRow. Phase 5 commit E follow-up: replace the
- * GtkHList with a proper Adw rendering (likely AdwExpanderRow per
- * tracker, or a custom listbox model). For now the embedded layout
- * keeps the existing add/remove flow working under the new shell. */
+/* Column factory pair for the single "URL" column on the Settings
+ * tracker list. setup creates a left-aligned, ellipsised GtkLabel
+ * once per recycled list item; bind reads the URL out of the
+ * row's GtkStringObject and updates the label. */
+static void
+tracker_url_setup (GtkSignalListItemFactory *f, GtkListItem *item,
+                   gpointer d)
+{
+    GtkWidget *lbl = gtk_label_new (NULL);
+    (void)f;
+    (void)d;
+    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_margin_start (lbl, 6);
+    gtk_widget_set_margin_end (lbl, 6);
+    gtk_list_item_set_child (item, lbl);
+}
+
+static void
+tracker_url_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
+    GtkStringObject *so = gtk_list_item_get_item (item);
+    (void)f;
+    (void)d;
+    gtk_label_set_text (lbl, so ? gtk_string_object_get_string (so) : "");
+}
+
+/* Tracker page: Add / Remove a GListStore-backed list of URL
+ * strings displayed in a GtkColumnView. The column view sits
+ * inside a custom AdwPreferencesRow so it lives flush with the
+ * other Adw pages rather than as a floating chunk of GTK. */
 static void
 settings_page_tracker (AdwPreferencesPage *page)
 {
@@ -2155,7 +2218,9 @@ settings_page_tracker (AdwPreferencesPage *page)
     GtkWidget *row;
     GtkWidget *vbox, *scroll, *ent_hbox, *btnhbox;
     GtkWidget *lbl, *entry, *add_btn, *remove_btn;
-    int i, hrow;
+    GtkColumnViewColumn *col;
+    GtkListItemFactory *factory;
+    int i;
 
     grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (grp, _ ("Trackers"));
@@ -2168,11 +2233,41 @@ settings_page_tracker (AdwPreferencesPage *page)
     gtk_widget_set_margin_start (vbox, 6);
     gtk_widget_set_margin_end (vbox, 6);
 
+    /* Build the model chain bottom-up: GListStore is the truth;
+     * GtkSingleSelection wraps it so the column view has a
+     * selection model to render off (and remove_tracker reads
+     * the selected position from). The store ref the selection
+     * takes is the long-lived one — we drop ours at function
+     * end since the selection (and through it the column view)
+     * keeps the chain alive for the dialog's lifetime. */
+    tracker_store = g_list_store_new (GTK_TYPE_STRING_OBJECT);
+    tracker_selection = gtk_single_selection_new (
+        G_LIST_MODEL (g_object_ref (tracker_store)));
+    gtk_single_selection_set_autoselect (tracker_selection, FALSE);
+    gtk_single_selection_set_can_unselect (tracker_selection, TRUE);
+    gtk_single_selection_set_selected (tracker_selection,
+                                       GTK_INVALID_LIST_POSITION);
+
+    tracker_list = gtk_column_view_new (
+        GTK_SELECTION_MODEL (g_object_ref (tracker_selection)));
+    gtk_column_view_set_show_column_separators (
+        GTK_COLUMN_VIEW (tracker_list), FALSE);
+    gtk_column_view_set_show_row_separators (GTK_COLUMN_VIEW (tracker_list),
+                                             FALSE);
+
+    factory = gtk_signal_list_item_factory_new ();
+    g_signal_connect (factory, "setup", G_CALLBACK (tracker_url_setup), NULL);
+    g_signal_connect (factory, "bind", G_CALLBACK (tracker_url_bind), NULL);
+    col = gtk_column_view_column_new (_ ("URL"), factory);
+    gtk_column_view_column_set_expand (col, TRUE);
+    gtk_column_view_column_set_resizable (col, TRUE);
+    gtk_column_view_append_column (GTK_COLUMN_VIEW (tracker_list), col);
+    g_object_unref (col);
+
     scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    tracker_list = gtk_hlist_new (1);
-    gtkhx_widget_set_child (scroll, tracker_list);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), tracker_list);
     gtk_widget_set_size_request (scroll, -1, 220);
     gtk_box_append (GTK_BOX (vbox), scroll);
 
@@ -2191,8 +2286,11 @@ settings_page_tracker (AdwPreferencesPage *page)
     g_signal_connect (add_btn, "clicked", G_CALLBACK (add_tracker), entry);
     remove_btn = gtk_button_new_with_label (_ ("Remove"));
     gtk_widget_add_css_class (remove_btn, "destructive-action");
+    /* The remove handler reads tracker_store + tracker_selection
+     * directly from module-static state; no per-widget data
+     * needed. */
     g_signal_connect (remove_btn, "clicked", G_CALLBACK (remove_tracker),
-                      tracker_list);
+                      NULL);
     gtk_box_append (GTK_BOX (btnhbox), remove_btn);
     gtk_box_append (GTK_BOX (btnhbox), add_btn);
     gtk_box_append (GTK_BOX (vbox), btnhbox);
@@ -2203,10 +2301,13 @@ settings_page_tracker (AdwPreferencesPage *page)
     gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), vbox);
     adw_preferences_group_add (grp, row);
 
+    /* Seed the store from the current pref. GtkStringObject's
+     * constructor copies the input; we drop our ref after
+     * append (the store keeps one). */
     for (i = 0; i < gtkhx_prefs.num_tracker; i++) {
-        char *tracker = g_strdup (gtkhx_prefs.tracker[i]);
-        hrow = gtk_hlist_append (GTK_HLIST (tracker_list), &tracker);
-        gtk_hlist_set_row_data (GTK_HLIST (tracker_list), hrow, tracker);
+        GtkStringObject *so = gtk_string_object_new (gtkhx_prefs.tracker[i]);
+        g_list_store_append (tracker_store, so);
+        g_object_unref (so);
     }
 
     adw_preferences_page_add (page, grp);
