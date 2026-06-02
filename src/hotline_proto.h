@@ -334,4 +334,57 @@ gtkhx_proto_catlist_part_get (const struct gtkhx_proto_catlist *cl,
                               uint32_t post_idx, uint16_t part_idx,
                               struct gtkhx_proto_catlist_part_view *view);
 
+/* ---- SEND-path builders (HTLC_HDR_CHAT / _MSG / _MSG_BROADCAST) ----
+ *
+ * Each builder fills a caller-provided struct hx_chunk[] (and a
+ * uint8_t scratch[] buffer for the integer chunks) and returns the
+ * number of chunks populated, or 0 on validation failure. Matches the
+ * pre-existing hx_agreement_agree_build_chunks API in
+ * src/agreement_packet.{c,h}, so production callers hand the chunks
+ * array to hlwrite_chunks() for actual wire encoding — cipher,
+ * compression, and fd dispatch all stay in C until Phase R3.
+ *
+ * Both the chunks buffer and the scratch buffer must outlive the
+ * eventual hlwrite_chunks() call: the chunk data pointers reference
+ * into scratch (for integer fields) and into the caller's body
+ * buffer (for variable-length payloads).
+ *
+ * Text encoding (UTF-8 vs Mac Roman per CAP_TEXT_ENCODING) is the
+ * caller's responsibility — gtkhx_text_for_wire is C-side and keeps
+ * the Rust crate free of iconv. */
+
+/* Forward decl matches what agreement_packet.h does — only the
+ * struct's tag is referenced in the prototypes below (no field
+ * access). Callers that need to stack-allocate `struct hx_chunk
+ * chunks[N]` must #include "proto_helpers.h" directly. */
+struct hx_chunk;
+
+/* HTLC_HDR_CHAT: STYLE (u16) + CHAT body + CHAT_ID (u32, only when
+ * cid != 0). Requires chunks_cap >= 3 and scratch_cap >= 6. Returns
+ * 2 (no cid) or 3 (with cid) on success, or 0 on validation failure. */
+extern int32_t gtkhx_proto_build_chat_chunks (uint32_t cid, uint16_t style,
+                                              const uint8_t *body_ptr,
+                                              size_t body_len,
+                                              struct hx_chunk *chunks,
+                                              size_t chunks_cap,
+                                              uint8_t *scratch,
+                                              size_t scratch_cap);
+
+/* HTLC_HDR_MSG: UID (u16) + MSG body. Requires chunks_cap >= 2 and
+ * scratch_cap >= 2. Returns 2 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_msg_chunks (uint16_t uid,
+                                             const uint8_t *body_ptr,
+                                             size_t body_len,
+                                             struct hx_chunk *chunks,
+                                             size_t chunks_cap,
+                                             uint8_t *scratch,
+                                             size_t scratch_cap);
+
+/* HTLC_HDR_MSG_BROADCAST: just MSG body. No scratch needed. Requires
+ * chunks_cap >= 1. Returns 1 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_broadcast_chunks (const uint8_t *body_ptr,
+                                                   size_t body_len,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap);
+
 #endif /* _HOTLINE_PROTO_H */

@@ -127,6 +127,8 @@ pub mod tag {
     pub const HTXF_REF: u16 = 0x006b;
     /// `0x006c` — HTXF transfer size / chat-msg style.
     pub const HTXF_SIZE: u16 = 0x006c;
+    /// `0x006d` — outgoing chat style bitmap (HTLC → server).
+    pub const STYLE: u16 = 0x006d;
     /// `0x006e` — access bitmap (u64).
     pub const ACCESS: u16 = 0x006e;
     /// `0x0070` — legacy status colour bitmap (u16).
