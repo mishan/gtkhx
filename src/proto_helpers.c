@@ -42,27 +42,18 @@ task_error_extract (struct htlc_conn *htlc, char *out, gsize out_size,
         return FALSE;
     }
 
-    gboolean found = FALSE;
-    dh_start (htlc)
-    {
-        if (_type == HTLS_DATA_TASKERROR && !found) {
-            gsize copy_len = _len;
-            if (copy_len > out_size - 1) {
-                copy_len = out_size - 1;
-            }
-            memcpy (out, dh->data, copy_len);
-            CR2LF (out, copy_len);
-            strip_ansi (out, copy_len);
-            out[copy_len] = '\0';
-            if (out_len) {
-                *out_len = copy_len;
-            }
-            found = TRUE;
-        }
+    /* Phase R2: chunk walk + CR2LF + strip_ansi moved to
+     * gtkhx_proto_parse_task_error. The crate sentinel SIZE_MAX
+     * distinguishes "no TASK_ERROR chunk" from "empty error string". */
+    size_t n = gtkhx_proto_parse_task_error (htlc->in.buf, htlc->in.pos,
+                                             (uint8_t *) out, out_size);
+    if (n == (size_t)-1) {
+        return FALSE;
     }
-    dh_end ();
-
-    return found;
+    if (out_len) {
+        *out_len = n;
+    }
+    return TRUE;
 }
 
 gboolean
@@ -98,39 +89,18 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
         return FALSE;
     }
 
-    out->uid = 0;
-    out->name[0] = '\0';
-    out->name_len = 0;
-    out->msg[0] = '\0';
-    out->msg_len = 0;
-
-    guint16 nlen = 0, msglen = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_UID:
-            dh_getint (out->uid);
-            break;
-        case HTLS_DATA_MSG:
-            msglen = (_len > 8192) ? 8192 : _len;
-            memcpy (out->msg, dh->data, msglen);
-            break;
-        case HTLS_DATA_NAME:
-            nlen = (_len > 128) ? 128 : _len;
-            memcpy (out->name, dh->data, nlen);
-            strip_ansi (out->name, nlen);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_msg. */
+    struct gtkhx_proto_msg m;
+    if (!gtkhx_proto_parse_msg (htlc->in.buf, htlc->in.pos,
+                                (uint8_t *) out->name, sizeof (out->name),
+                                (uint8_t *) out->msg, sizeof (out->msg),
+                                &m)) {
+        return FALSE;
     }
-    dh_end ();
 
-    CR2LF (out->msg, msglen);
-    strip_ansi (out->msg, msglen);
-    out->name[nlen] = '\0';
-    out->msg[msglen] = '\0';
-    out->name_len = nlen;
-    out->msg_len = msglen;
+    out->uid = m.uid;
+    out->name_len = m.name_len;
+    out->msg_len = m.msg_len;
 
     return TRUE;
 }
@@ -138,44 +108,27 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
 gboolean
 hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
 {
-    gboolean got_type = FALSE;
-
     if (!out) {
         return FALSE;
     }
 
-    memset (out->type, 0, sizeof (out->type));
-    out->has_url = FALSE;
-    out->url[0] = '\0';
-    out->url_len = 0;
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_banner. The type
+     * is gated at exactly 4 bytes per mhxd's rcv_agreementagree (always
+     * 4 bytes, right-padded with spaces for shorter codes like "URL").
+     * The crate zeroes type_code when got_type is false; we still copy
+     * those 4 bytes into out->type and NUL-terminate to match the
+     * existing C contract. */
+    struct gtkhx_proto_banner b;
+    bool got_type = gtkhx_proto_parse_banner (htlc->in.buf, htlc->in.pos,
+                                              (uint8_t *) out->url,
+                                              sizeof (out->url), &b);
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_BANNER_TYPE:
-            /* Per mhxd's rcv_agreementagree, the type is always
-			 * 4 bytes (right-padded with spaces for shorter codes
-			 * like "URL"). Reject anything else as malformed. */
-            if (_len != 4) {
-                continue;
-            }
-            memcpy (out->type, dh->data, 4);
-            out->type[4] = '\0';
-            got_type = TRUE;
-            break;
-        case HTLS_DATA_BANNER_URL:
-            out->url_len = (_len > sizeof (out->url) - 1)
-                               ? (guint16)(sizeof (out->url) - 1)
-                               : _len;
-            memcpy (out->url, dh->data, out->url_len);
-            out->url[out->url_len] = '\0';
-            out->has_url = TRUE;
-            break;
-        }
-    }
-    dh_end ();
+    memcpy (out->type, b.type_code, 4);
+    out->type[4] = '\0';
+    out->has_url = b.has_url ? TRUE : FALSE;
+    out->url_len = b.url_len;
 
-    return got_type;
+    return got_type ? TRUE : FALSE;
 }
 
 unsigned
@@ -340,21 +293,14 @@ hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
         return FALSE;
     }
 
-    out->ref = 0;
-    out->queueid = 0;
-
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (out->ref);
-            break;
-        case HTLS_DATA_QUEUE:
-            dh_getint (out->queueid);
-            break;
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_xfer_queue. */
+    struct gtkhx_proto_xfer_queue q;
+    if (!gtkhx_proto_parse_xfer_queue (htlc->in.buf, htlc->in.pos, &q)) {
+        return FALSE;
     }
-    dh_end ();
+
+    out->ref = q.htxf_ref;
+    out->queueid = q.queueid;
 
     return TRUE;
 }
@@ -389,33 +335,21 @@ hx_agreement_result
 hx_agreement_extract (struct htlc_conn *htlc, char *out, gsize out_size,
                       gsize *out_len)
 {
-    dh_start (htlc)
-    {
-        if (_type == HTLS_DATA_NOAGREEMENT) {
-            return HX_AGREEMENT_NONE;
-        }
-        if (_type != HTLS_DATA_AGREEMENT) {
-            continue;
-        }
-
-        if (out && out_size > 0) {
-            gsize copy_len = _len;
-            if (copy_len > out_size - 1) {
-                copy_len = out_size - 1;
-            }
-            memcpy (out, dh->data, copy_len);
-            CR2LF (out, copy_len);
-            strip_ansi (out, copy_len);
-            out[copy_len] = '\0';
-            if (out_len) {
-                *out_len = copy_len;
-            }
-        }
+    /* Phase R2: chunk walk moved to gtkhx_proto_parse_agreement. The
+     * Rust crate leaves *out untouched on NONE / MISSING (matching the
+     * "untouched" sentinel assertions in tests/proto/test_agreement.c),
+     * and only writes *out_len when both out and out_len are non-NULL. */
+    uint32_t r = gtkhx_proto_parse_agreement (htlc->in.buf, htlc->in.pos,
+                                              (uint8_t *) out, out_size,
+                                              out_len);
+    switch (r) {
+    case GTKHX_PROTO_AGREEMENT_OK:
         return HX_AGREEMENT_OK;
+    case GTKHX_PROTO_AGREEMENT_NONE:
+        return HX_AGREEMENT_NONE;
+    default:
+        return HX_AGREEMENT_NOT_FOUND;
     }
-    dh_end ();
-
-    return HX_AGREEMENT_NOT_FOUND;
 }
 
 gboolean

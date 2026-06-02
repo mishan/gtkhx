@@ -144,4 +144,76 @@ extern bool gtkhx_proto_parse_user_change (const uint8_t *msg, size_t msglen,
                                            uint8_t *buf, size_t bufcap,
                                            struct gtkhx_proto_user_change *out);
 
+/* ---- Misc smaller parsers ---- */
+
+/* Extract a HTLS_DATA_TASKERROR chunk's CR2LF + strip_ansi sanitised
+ * text into *out (NUL-terminated, capped at cap-1). Returns the byte
+ * count (excluding the NUL), or SIZE_MAX when no TASK_ERROR chunk was
+ * present. Returns 0 on NULL out or zero cap. */
+extern size_t gtkhx_proto_parse_task_error (const uint8_t *msg, size_t msglen,
+                                            uint8_t *out, size_t cap);
+
+struct gtkhx_proto_msg {
+    uint16_t uid;
+    uint16_t name_len;
+    uint16_t msg_len;
+};
+
+/* Parse HTLS_HDR_MSG (and MSG_BROADCAST / POLITEQUIT, which share the
+ * same shape). Writes the strip_ansi'd name into name_buf and the CR2LF
+ * + strip_ansi'd body into msg_buf (both NUL-terminated, capped at
+ * cap-1). Returns false on any NULL / zero-cap pointer; otherwise true. */
+extern bool gtkhx_proto_parse_msg (const uint8_t *msg, size_t msglen,
+                                   uint8_t *name_buf, size_t name_cap,
+                                   uint8_t *msg_buf, size_t msg_cap,
+                                   struct gtkhx_proto_msg *out);
+
+struct gtkhx_proto_banner {
+    uint8_t type_code[4];
+    uint16_t url_len;
+    uint8_t got_type;
+    uint8_t has_url;
+};
+
+/* Parse HTLS_HDR_BANNER. The banner type is gated at exactly 4 bytes.
+ * URL (if present) is written into url_buf (NUL-terminated, capped at
+ * url_cap-1). Returns got_type — true iff the BANNER_TYPE chunk was
+ * well-formed (the C extractor's contract). */
+extern bool gtkhx_proto_parse_banner (const uint8_t *msg, size_t msglen,
+                                      uint8_t *url_buf, size_t url_cap,
+                                      struct gtkhx_proto_banner *out);
+
+struct gtkhx_proto_xfer_queue {
+    uint32_t htxf_ref;
+    uint32_t queueid;
+};
+
+/* Parse HTLS_HDR_QUEUE. Both fields default to 0; queueid == 0 means
+ * "ready, you can start the transfer". Returns false on NULL out;
+ * otherwise true. */
+extern bool gtkhx_proto_parse_xfer_queue (const uint8_t *msg, size_t msglen,
+                                          struct gtkhx_proto_xfer_queue *out);
+
+/* HTLS_HDR_AGREEMENT result codes matching hx_agreement_result. */
+#define GTKHX_PROTO_AGREEMENT_OK      0u
+#define GTKHX_PROTO_AGREEMENT_NONE    1u
+#define GTKHX_PROTO_AGREEMENT_MISSING 2u
+
+/* Parse HTLS_HDR_AGREEMENT. Returns one of GTKHX_PROTO_AGREEMENT_*.
+ *
+ * Output-buffer contract (matches hx_agreement_extract, which
+ * tests/proto/test_agreement.c pins via "untouched" sentinel strings):
+ *
+ *   * OK: when out != NULL && cap > 0, writes the CR2LF + strip_ansi
+ *     sanitised body into out (NUL-terminated, capped at cap-1) and,
+ *     if out_len != NULL, stores the byte count (excluding the NUL)
+ *     into *out_len. When out is NULL or cap is 0, the result code is
+ *     still OK but neither out nor *out_len is touched.
+ *   * NONE / MISSING: out and *out_len are both left untouched
+ *     regardless of NULL-ness. Callers that initialised out to a
+ *     known sentinel before the call can rely on it surviving. */
+extern uint32_t gtkhx_proto_parse_agreement (const uint8_t *msg, size_t msglen,
+                                             uint8_t *out, size_t cap,
+                                             size_t *out_len);
+
 #endif /* _HOTLINE_PROTO_H */

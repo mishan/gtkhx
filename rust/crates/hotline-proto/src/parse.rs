@@ -13,6 +13,20 @@ use crate::messages::{tag, NICK_COLOR_NONE};
 use crate::sanitize::{cr2lf, strip_ansi};
 use crate::wire::{ChunkIter, Decoder};
 
+/// Outcome of parsing an `HTLS_HDR_AGREEMENT` body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgreementResult {
+    /// Server sent the `HTLS_DATA_NOAGREEMENT` sentinel (no agreement to
+    /// display; the client skips the agreement modal).
+    None,
+    /// Server sent an `HTLS_DATA_AGREEMENT` chunk; the sanitised body is
+    /// in the caller's buffer.
+    Ok,
+    /// Body contained neither chunk; matches the C extractor's
+    /// "fell off the loop" return.
+    Missing,
+}
+
 // ---- Transaction header -------------------------------------------------
 
 /// The fixed 22-byte transaction header (`struct hl_hdr`), big-endian.
@@ -215,6 +229,169 @@ pub fn parse_chat_subject(buf: &[u8], len: usize, max_subject: usize) -> ChatSub
     }
 
     ChatSubject { cid, subject }
+}
+
+// ---- TASK error string (HTLS_DATA_TASKERROR inside a TASK reply) -------
+
+/// Parse a `HTLS_DATA_TASKERROR` chunk out of an error TASK reply.
+/// Returns `Some(bytes)` containing the CR2LF + `strip_ansi`-sanitised
+/// error string (capped at `max_len` bytes), or `None` when no
+/// `TASK_ERROR` chunk is present in the body. The C-facing wrapper
+/// (`gtkhx_proto_parse_task_error` in `ffi.rs`) is where the
+/// "write into caller buffer / SIZE_MAX sentinel" surface lives.
+pub fn parse_task_error(buf: &[u8], len: usize, max_len: usize) -> Option<Vec<u8>> {
+    for chunk in ChunkIter::over_message(buf, len) {
+        if chunk.tag == tag::TASK_ERROR {
+            let take = chunk.data.len().min(max_len);
+            let mut v = chunk.data[..take].to_vec();
+            cr2lf(&mut v);
+            strip_ansi(&mut v);
+            return Some(v);
+        }
+    }
+    None
+}
+
+// ---- HTLS_HDR_MSG / HTLS_HDR_MSG_BROADCAST / HTLS_HDR_POLITEQUIT -------
+
+/// Parsed `HTLS_HDR_MSG`-family payload (also `MSG_BROADCAST` and
+/// `POLITEQUIT`, all of which share the same `rcv_msg` handler).
+#[derive(Debug, Clone)]
+pub struct Msg {
+    pub uid: u16,
+    /// `strip_ansi`'d sender name, capped at `max_name`. May contain
+    /// embedded NULs only if the wire payload did.
+    pub name: Vec<u8>,
+    /// CR2LF + `strip_ansi` sanitised message body, capped at `max_msg`.
+    pub msg: Vec<u8>,
+}
+
+/// Parse the MSG family. `max_name` caps the name (C handler uses 128),
+/// `max_msg` caps the body (C handler uses 8192).
+pub fn parse_msg(buf: &[u8], len: usize, max_name: usize, max_msg: usize) -> Msg {
+    let mut out = Msg {
+        uid: 0,
+        name: Vec::new(),
+        msg: Vec::new(),
+    };
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::UID => out.uid = chunk.as_uint() as u16,
+            // HTLS_DATA_MSG and HTLS_DATA_AGREEMENT share the 0x0065 tag
+            // with chat's BODY; the MSG handler is the only consumer in
+            // this opcode's parser.
+            tag::BODY => {
+                let take = chunk.data.len().min(max_msg);
+                out.msg = chunk.data[..take].to_vec();
+            }
+            tag::NAME => {
+                let take = chunk.data.len().min(max_name);
+                out.name = chunk.data[..take].to_vec();
+            }
+            _ => {}
+        }
+    }
+
+    strip_ansi(&mut out.name);
+    cr2lf(&mut out.msg);
+    strip_ansi(&mut out.msg);
+    out
+}
+
+// ---- HTLS_HDR_BANNER ---------------------------------------------------
+
+/// Parsed `HTLS_HDR_BANNER` payload.
+#[derive(Debug, Clone)]
+pub struct Banner {
+    /// True iff the `HTLS_DATA_BANNER_TYPE` chunk was present at exactly
+    /// 4 bytes. Mirrors the C extractor's `got_type` return value.
+    pub got_type: bool,
+    /// The 4 banner-type bytes (e.g. `b"URL "`, `b"JPEG"`, `b"GIFf"`).
+    /// Zeroed when `got_type` is false.
+    pub type_code: [u8; 4],
+    /// Optional URL bytes (capped at `max_url`).
+    pub url: Option<Vec<u8>>,
+}
+
+/// Parse `HTLS_HDR_BANNER`. `max_url` caps the URL (C handler uses 1024).
+/// Banner type is gated at exactly 4 bytes — per mhxd's
+/// `rcv_agreementagree`, the type is always 4 bytes (right-padded with
+/// spaces for shorter codes like "URL"). Anything else is malformed and
+/// the type is rejected.
+pub fn parse_banner(buf: &[u8], len: usize, max_url: usize) -> Banner {
+    let mut out = Banner {
+        got_type: false,
+        type_code: [0; 4],
+        url: None,
+    };
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::BANNER_TYPE => {
+                if chunk.data.len() == 4 {
+                    out.type_code.copy_from_slice(chunk.data);
+                    out.got_type = true;
+                }
+            }
+            tag::BANNER_URL => {
+                let take = chunk.data.len().min(max_url);
+                out.url = Some(chunk.data[..take].to_vec());
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
+// ---- HTLS_HDR_QUEUE ----------------------------------------------------
+
+/// Parsed `HTLS_HDR_QUEUE`. Both fields default to 0 when missing.
+/// `queueid` of 0 means "ready, you can start the transfer".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct XferQueue {
+    pub htxf_ref: u32,
+    pub queueid: u32,
+}
+
+/// Parse `HTLS_HDR_QUEUE`.
+pub fn parse_xfer_queue(buf: &[u8], len: usize) -> XferQueue {
+    let mut out = XferQueue { htxf_ref: 0, queueid: 0 };
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.htxf_ref = chunk.as_uint(),
+            tag::QUEUE => out.queueid = chunk.as_uint(),
+            _ => {}
+        }
+    }
+    out
+}
+
+// ---- HTLS_HDR_AGREEMENT ------------------------------------------------
+
+/// Parse `HTLS_HDR_AGREEMENT`. Whichever of `HTLS_DATA_NOAGREEMENT` or
+/// `HTLS_DATA_AGREEMENT` (sharing the [`tag::BODY`] value 0x0065)
+/// appears first wins, matching the C `hx_agreement_extract`'s
+/// early-return-from-inside-loop semantics. NOAGREEMENT yields
+/// [`AgreementResult::None`] with an empty body; AGREEMENT yields
+/// [`AgreementResult::Ok`] with the CR2LF + `strip_ansi` sanitised body
+/// (capped at `max_len`). Neither chunk → [`AgreementResult::Missing`]
+/// and an empty body.
+pub fn parse_agreement(buf: &[u8], len: usize, max_len: usize) -> (AgreementResult, Vec<u8>) {
+    for chunk in ChunkIter::over_message(buf, len) {
+        if chunk.tag == tag::NOAGREEMENT {
+            return (AgreementResult::None, Vec::new());
+        }
+        if chunk.tag == tag::BODY {
+            let take = chunk.data.len().min(max_len);
+            let mut body = chunk.data[..take].to_vec();
+            cr2lf(&mut body);
+            strip_ansi(&mut body);
+            return (AgreementResult::Ok, body);
+        }
+    }
+    (AgreementResult::Missing, Vec::new())
 }
 
 // ---- HTLS_HDR_USER_PART ------------------------------------------------
@@ -633,5 +810,202 @@ mod tests {
         let m = msg(0x0000_012d, 1, 0, &chunk(tag::NAME, b"a\rb"));
         let uc = parse_user_change(&m, m.len(), 31);
         assert_eq!(uc.name, b"a\rb");
+    }
+
+    // ---- task error ----
+
+    #[test]
+    fn task_error_extracts_and_sanitises() {
+        let m = msg(0x0001_0000, 1, 1, &chunk(tag::TASK_ERROR, b"bad\rthing\x0e"));
+        let e = parse_task_error(&m, m.len(), 256).expect("present");
+        assert_eq!(e, b"bad\nthing\x4e"); // CR → LF, 0x0e → 'N' (0x4e)
+    }
+
+    #[test]
+    fn task_error_caps_length() {
+        let big = vec![b'x'; 500];
+        let m = msg(0x0001_0000, 1, 1, &chunk(tag::TASK_ERROR, &big));
+        let e = parse_task_error(&m, m.len(), 64).expect("present");
+        assert_eq!(e.len(), 64);
+    }
+
+    #[test]
+    fn task_error_returns_none_when_missing() {
+        let m = msg(0x0001_0000, 1, 1, &[]);
+        assert!(parse_task_error(&m, m.len(), 256).is_none());
+    }
+
+    // ---- msg ----
+
+    #[test]
+    fn msg_extracts_uid_name_body() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &0x0042u16.to_be_bytes()));
+        body.extend(chunk(tag::NAME, b"alice"));
+        body.extend(chunk(tag::BODY, b"hello"));
+        let m = msg(0x0000_006a, 1, 0, &body);
+        let p = parse_msg(&m, m.len(), 128, 8192);
+        assert_eq!(p.uid, 0x42);
+        assert_eq!(p.name, b"alice");
+        assert_eq!(p.msg, b"hello");
+    }
+
+    #[test]
+    fn msg_sanitises_body_cr2lf_and_strip_ansi() {
+        // CR → LF; 0x0e → 'N'.
+        let m = msg(0x0000_006a, 1, 0, &chunk(tag::BODY, b"hi\rthere\x0e"));
+        let p = parse_msg(&m, m.len(), 128, 8192);
+        assert_eq!(p.msg, b"hi\nthere\x4e");
+    }
+
+    #[test]
+    fn msg_caps_lengths() {
+        let big_name = vec![b'a'; 200];
+        let big_body = vec![b'x'; 9000];
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NAME, &big_name));
+        body.extend(chunk(tag::BODY, &big_body));
+        let m = msg(0x0000_006a, 1, 0, &body);
+        let p = parse_msg(&m, m.len(), 128, 8192);
+        assert_eq!(p.name.len(), 128);
+        assert_eq!(p.msg.len(), 8192);
+    }
+
+    #[test]
+    fn msg_name_strip_ansi_but_no_cr2lf() {
+        // CR survives in the name (the C handler never CR2LF's names),
+        // but 0x0e in the name still gets folded.
+        let m = msg(0x0000_006a, 1, 0, &chunk(tag::NAME, b"a\rb\x0e"));
+        let p = parse_msg(&m, m.len(), 128, 8192);
+        assert_eq!(p.name, b"a\rb\x4e");
+    }
+
+    #[test]
+    fn msg_empty_yields_zero_uid_and_empty_strings() {
+        let m = msg(0x0000_006a, 1, 0, &[]);
+        let p = parse_msg(&m, m.len(), 128, 8192);
+        assert_eq!(p.uid, 0);
+        assert!(p.name.is_empty());
+        assert!(p.msg.is_empty());
+    }
+
+    // ---- banner ----
+
+    #[test]
+    fn banner_extracts_type_and_url() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::BANNER_TYPE, b"URL "));
+        body.extend(chunk(tag::BANNER_URL, b"https://example.com/banner.png"));
+        let m = msg(0x0000_010d, 1, 0, &body);
+        let b = parse_banner(&m, m.len(), 1024);
+        assert!(b.got_type);
+        assert_eq!(&b.type_code, b"URL ");
+        assert_eq!(b.url.as_deref(), Some(&b"https://example.com/banner.png"[..]));
+    }
+
+    #[test]
+    fn banner_rejects_wrong_length_type() {
+        // Anything but exactly 4 bytes is malformed and not adopted.
+        let m = msg(0x0000_010d, 1, 0, &chunk(tag::BANNER_TYPE, b"URL"));
+        let b = parse_banner(&m, m.len(), 1024);
+        assert!(!b.got_type);
+        assert_eq!(b.type_code, [0; 4]);
+    }
+
+    #[test]
+    fn banner_url_optional() {
+        let m = msg(0x0000_010d, 1, 0, &chunk(tag::BANNER_TYPE, b"JPEG"));
+        let b = parse_banner(&m, m.len(), 1024);
+        assert!(b.got_type);
+        assert_eq!(&b.type_code, b"JPEG");
+        assert!(b.url.is_none());
+    }
+
+    #[test]
+    fn banner_caps_url() {
+        let big = vec![b'u'; 2000];
+        let mut body = Vec::new();
+        body.extend(chunk(tag::BANNER_TYPE, b"URL "));
+        body.extend(chunk(tag::BANNER_URL, &big));
+        let m = msg(0x0000_010d, 1, 0, &body);
+        let b = parse_banner(&m, m.len(), 1024);
+        assert_eq!(b.url.as_deref().unwrap().len(), 1024);
+    }
+
+    // ---- xfer queue ----
+
+    #[test]
+    fn xfer_queue_extracts() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &0xdeadbeefu32.to_be_bytes()));
+        body.extend(chunk(tag::QUEUE, &3u32.to_be_bytes()));
+        let m = msg(0x0000_00d3, 1, 0, &body);
+        let q = parse_xfer_queue(&m, m.len());
+        assert_eq!(q.htxf_ref, 0xdead_beef);
+        assert_eq!(q.queueid, 3);
+    }
+
+    #[test]
+    fn xfer_queue_defaults_zero() {
+        let m = msg(0x0000_00d3, 1, 0, &[]);
+        let q = parse_xfer_queue(&m, m.len());
+        assert_eq!(q.htxf_ref, 0);
+        assert_eq!(q.queueid, 0);
+    }
+
+    // ---- agreement ----
+
+    #[test]
+    fn agreement_noagreement_sentinel() {
+        let m = msg(0x0000_006d, 1, 0, &chunk(tag::NOAGREEMENT, &[]));
+        let (r, body) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::None);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn agreement_ok_with_sanitised_body() {
+        // CR → LF, 0x0e → 'N'.
+        let m = msg(0x0000_006d, 1, 0, &chunk(tag::BODY, b"line\rmore\x0e"));
+        let (r, body) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::Ok);
+        assert_eq!(body, b"line\nmore\x4e");
+    }
+
+    #[test]
+    fn agreement_missing_when_neither_chunk_present() {
+        let m = msg(0x0000_006d, 1, 0, &[]);
+        let (r, body) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::Missing);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn agreement_first_chunk_wins() {
+        // BODY before NOAGREEMENT → Ok (the body is taken).
+        let mut bodybuf = Vec::new();
+        bodybuf.extend(chunk(tag::BODY, b"ok"));
+        bodybuf.extend(chunk(tag::NOAGREEMENT, &[]));
+        let m = msg(0x0000_006d, 1, 0, &bodybuf);
+        let (r, _) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::Ok);
+
+        // NOAGREEMENT before BODY → None (sentinel wins).
+        let mut bodybuf = Vec::new();
+        bodybuf.extend(chunk(tag::NOAGREEMENT, &[]));
+        bodybuf.extend(chunk(tag::BODY, b"ignored"));
+        let m = msg(0x0000_006d, 1, 0, &bodybuf);
+        let (r, body) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::None);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn agreement_caps_length() {
+        let big = vec![b'x'; 5000];
+        let m = msg(0x0000_006d, 1, 0, &chunk(tag::BODY, &big));
+        let (r, body) = parse_agreement(&m, m.len(), 4096);
+        assert_eq!(r, AgreementResult::Ok);
+        assert_eq!(body.len(), 4096);
     }
 }
