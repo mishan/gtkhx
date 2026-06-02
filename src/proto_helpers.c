@@ -360,80 +360,39 @@ hx_news_file_extract (struct htlc_conn *htlc, char *out, gsize out_size,
         return FALSE;
     }
 
-    gboolean found = FALSE;
-    dh_start (htlc)
-    {
-        if (_type != HTLS_DATA_NEWS) {
-            continue;
-        }
-        if (found) {
-            continue; /* first NEWS chunk wins */
-        }
-
-        gsize copy_len = _len;
-        if (copy_len > out_size - 1) {
-            copy_len = out_size - 1;
-        }
-        memcpy (out, dh->data, copy_len);
-        CR2LF (out, copy_len);
-        strip_ansi (out, copy_len);
-        out[copy_len] = '\0';
-        if (out_len) {
-            *out_len = copy_len;
-        }
-        found = TRUE;
+    /* Phase R2: chunk walk + sanitise moved to
+     * gtkhx_proto_parse_news_file. The SIZE_MAX sentinel return
+     * preserves the "leave *out untouched when no NEWS chunk is
+     * present" contract tests/proto/test_news_file.c pins. */
+    size_t n = gtkhx_proto_parse_news_file (htlc->in.buf, htlc->in.pos,
+                                            (uint8_t *) out, out_size);
+    if (n == (size_t)-1) {
+        return FALSE;
     }
-    dh_end ();
-
-    return found;
+    if (out_len) {
+        *out_len = n;
+    }
+    return TRUE;
 }
 
 gboolean
 hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
                                     struct hx_news_dirlist_entry *out)
 {
-    guint16 ntype;
-    gsize off;
-    guint8 namelen;
-
     if (!out) {
         return FALSE;
     }
-    if (!data || dlen < 4) {
+
+    /* Phase R2: byte-level parse moved to
+     * gtkhx_proto_parse_news_categoryitem. */
+    struct gtkhx_proto_news_dir_entry e;
+    if (!gtkhx_proto_parse_news_categoryitem (data, dlen,
+                                              (uint8_t *) out->name,
+                                              sizeof (out->name), &e)) {
         return FALSE;
     }
-
-    HN16 (&ntype, data);
-
-    if (ntype == 2) {
-        /* bundle / folder: ntype(2) + count(2) before namelen */
-        off = 4;
-    } else if (ntype == 3) {
-        /* category: ntype(2) + count(2) + guid(16) + addsn(4) +
-		 * deletesn(4) = 28 bytes before namelen */
-        off = 28;
-    } else {
-        /* Unknown subtype — refuse the entry. Don't fail the
-		 * surrounding dirlist; the caller skips and keeps walking. */
-        return FALSE;
-    }
-
-    if (dlen < off + 1u) {
-        return FALSE;
-    }
-    namelen = data[off];
-    off++;
-
-    if (dlen < off + namelen) {
-        return FALSE;
-    }
-
-    out->kind = (ntype == 2) ? 1 : 2;
-    out->name_len = namelen;
-    if (namelen) {
-        memcpy (out->name, data + off, namelen);
-    }
-    out->name[namelen] = '\0';
+    out->kind = e.kind;
+    out->name_len = e.name_len;
     return TRUE;
 }
 
@@ -441,29 +400,21 @@ gboolean
 hx_news_dirlist_parse_folderitem (const guint8 *data, gsize dlen,
                                   struct hx_news_dirlist_entry *out)
 {
-    guint16 nlen;
-
     if (!out) {
         return FALSE;
     }
-    if (!data || dlen < 1) {
+
+    /* Phase R2: byte-level parse moved to
+     * gtkhx_proto_parse_news_folderitem. The C extractor preserved a
+     * subtle contract — folderitem == 1 ⇒ folder, anything else ⇒
+     * category — which the Rust impl mirrors. */
+    struct gtkhx_proto_news_dir_entry e;
+    if (!gtkhx_proto_parse_news_folderitem (data, dlen, (uint8_t *) out->name,
+                                            sizeof (out->name), &e)) {
         return FALSE;
     }
-
-    /* u8 ntype, then name[dlen - 1]. The original gtkhx parser at
-	 * rcv_task_newsfolder_list copied dh->data[0] straight into
-	 * item->type and used the rest as the name. We preserve that
-	 * contract exactly: ntype==1 → folder (kind 1), anything else
-	 * → category (kind 2). */
-    nlen = (dlen > sizeof (out->name)) ? (sizeof (out->name) - 1)
-                                       : (guint16)(dlen - 1);
-
-    out->kind = (data[0] == 1) ? 1 : 2;
-    out->name_len = nlen;
-    if (nlen) {
-        memcpy (out->name, data + 1, nlen);
-    }
-    out->name[nlen] = '\0';
+    out->kind = e.kind;
+    out->name_len = e.name_len;
     return TRUE;
 }
 
@@ -680,38 +631,35 @@ hx_newscat_parse (struct htlc_conn *htlc, struct hx_newscat *out)
     return TRUE;
 }
 
+/* Trampoline: gtkhx_proto_walk_news_post invokes a typedef'd C
+ * callback with a uint8_t* buffer; the public hx_news_post_walk
+ * promises a (char *bytes, gsize len) callback. Pack the user's
+ * callback + state into a small struct, hand the trampoline to Rust,
+ * and route the per-chunk emit through it. */
+struct hx_news_post_trampoline {
+    hx_news_post_cb cb;
+    void *user;
+};
+
+static void
+hx_news_post_emit (void *t, const uint8_t *bytes, size_t len)
+{
+    struct hx_news_post_trampoline *tr = t;
+    if (tr->cb) {
+        tr->cb (tr->user, (const char *)bytes, (gsize)len);
+    }
+}
+
 int
 hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb, void *user)
 {
-    int seen = 0;
-
-    dh_start (htlc)
-    {
-        if (_type != HTLS_DATA_NEWS) {
-            continue;
-        }
-
-        /* Sanitise into a heap buffer we own — chunk bodies can
-		 * be up to 64 KiB (uint16 length), too big for the stack
-		 * on every platform. NUL-terminate for the cb's
-		 * convenience. The buffer is freed before returning. */
-        gsize len = _len;
-        char *buf = g_malloc (len + 1);
-        memcpy (buf, dh->data, len);
-        CR2LF (buf, len);
-        strip_ansi (buf, len);
-        buf[len] = '\0';
-
-        seen++;
-        if (cb) {
-            cb (user, buf, len);
-        }
-
-        g_free (buf);
-    }
-    dh_end ();
-
-    return seen;
+    /* Phase R2: chunk walk + sanitise moved to
+     * gtkhx_proto_walk_news_post. Per-chunk buffer ownership is
+     * Rust's; the trampoline above adapts the FFI callback signature
+     * to the public hx_news_post_cb's (char *, gsize) shape. */
+    struct hx_news_post_trampoline tr = { cb, user };
+    return (int)gtkhx_proto_walk_news_post (htlc->in.buf, htlc->in.pos,
+                                            hx_news_post_emit, &tr);
 }
 
 void

@@ -216,4 +216,54 @@ extern uint32_t gtkhx_proto_parse_agreement (const uint8_t *msg, size_t msglen,
                                              uint8_t *out, size_t cap,
                                              size_t *out_len);
 
+/* ---- News parsers (1.0 flat news + 1.5 dirlist entries) ---- */
+
+/* Extract the first HTLS_DATA_NEWS chunk's CR2LF + strip_ansi
+ * sanitised text into *out (NUL-terminated, capped at cap-1). Returns
+ * one of:
+ *
+ *   * a byte count (excluding the trailing NUL) on success;
+ *   * SIZE_MAX when no NEWS chunk was present — *out is left
+ *     untouched in that case (matches the "untouched" pattern
+ *     test_news_file.c pins);
+ *   * 0 when out == NULL or cap == 0 (no parse attempted; same
+ *     defensive contract as gtkhx_proto_parse_task_error).
+ *
+ * Callers must distinguish "empty body" (return == 0 AND out != NULL
+ * AND cap > 0) from "bad arguments" (return == 0 AND out == NULL or
+ * cap == 0) on their own. The function never returns 0 for a present
+ * NEWS chunk with a non-empty sanitised body. */
+extern size_t gtkhx_proto_parse_news_file (const uint8_t *msg, size_t msglen,
+                                           uint8_t *out, size_t cap);
+
+/* Callback type for gtkhx_proto_walk_news_post. The bytes pointer is a
+ * NUL-terminated, sanitised buffer valid only for the call's duration;
+ * len is the byte count excluding the NUL. */
+typedef void (*gtkhx_proto_news_post_cb) (void *user, const uint8_t *bytes,
+                                          size_t len);
+
+/* Walk every HTLS_DATA_NEWS chunk, invoking cb once per chunk with the
+ * sanitised body. Returns the number of chunks emitted. NULL cb is
+ * allowed (counts without dispatching). */
+extern int32_t gtkhx_proto_walk_news_post (const uint8_t *msg, size_t msglen,
+                                           gtkhx_proto_news_post_cb cb,
+                                           void *user);
+
+struct gtkhx_proto_news_dir_entry {
+    int32_t kind;     /* 1 = folder, 2 = category */
+    uint16_t name_len;
+};
+
+/* Parse HTLC_DATA_NEWSFOLDERITEM (0x0140) chunk body. */
+extern bool
+gtkhx_proto_parse_news_folderitem (const uint8_t *data, size_t dlen,
+                                   uint8_t *name_buf, size_t name_cap,
+                                   struct gtkhx_proto_news_dir_entry *out);
+
+/* Parse HTLC_DATA_CATEGORYITEM (0x0143) chunk body. */
+extern bool
+gtkhx_proto_parse_news_categoryitem (const uint8_t *data, size_t dlen,
+                                     uint8_t *name_buf, size_t name_cap,
+                                     struct gtkhx_proto_news_dir_entry *out);
+
 #endif /* _HOTLINE_PROTO_H */

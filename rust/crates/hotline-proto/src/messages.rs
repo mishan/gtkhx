@@ -150,6 +150,12 @@ pub mod tag {
     pub const USER_LIST: u16 = 0x012c;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
+
+    /// `0x0065` — HTLS_DATA_NEWS body (1.0 flat news only; aliases BODY).
+    /// The chat / msg / agreement readers each look at this same tag
+    /// from inside the opcode's parser — see the module comment about
+    /// 0x0065 being reused across contexts.
+    pub const NEWS: u16 = BODY;
 }
 
 /// Sentinel for "no nickname colour" in the Colored-Nicknames extension
