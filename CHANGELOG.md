@@ -4,6 +4,7 @@
   - Parts of GtkHx are being rewritten in Rust
 - Hotline Protocol
   - Tracker v3 support
+  - Support for fetching tracker listings via TLS
   - Dropped RC4 cipher support. RC4 is weak/insecure and should not be used.
 
 ## 1.0.0
