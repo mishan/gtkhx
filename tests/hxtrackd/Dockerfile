@@ -41,11 +41,15 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pull mhxd master (unpinned, same as tests/mhxd/Dockerfile). If
-# upstream churn breaks our config later, pin to a SHA here and
-# bump deliberately.
+# Pull mhxd at a pinned revision, kept in lockstep with
+# tests/mhxd/Dockerfile (MHXD_REV). Both used to clone master
+# unpinned; that let upstream churn break the build (a merged patch
+# stopped applying) and let a stale local clone-layer cache diverge
+# from CI. Bump both Dockerfiles together when you want a newer mhxd.
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
+ARG MHXD_REV=c16f038452bbb406b226bcdd5a5510b26ec526c0
+RUN git clone https://github.com/kangsterizer/mhxd.git mhxd \
+    && git -C mhxd checkout --quiet "$MHXD_REV"
 
 # Same configure feature set as tests/mhxd/, with the same
 # rationale (see tests/mhxd/Dockerfile for the per-flag comments).
