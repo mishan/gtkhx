@@ -12,10 +12,21 @@
 # Run:      docker run --rm -p 5500:5500 -p 5501:5501 gtkhx-mhxd
 # Connect:  point GtkHx at localhost:5500
 #
-# The mhxd clone is unpinned (`--depth 1` master). If a future mhxd
-# rev breaks our checked-in config (e.g. by adding a required section
-# to hxd.conf), pin the clone to a specific commit here and bump
-# deliberately.
+# The mhxd clone is PINNED to a specific commit (MHXD_REV below). It
+# used to be an unpinned `--depth 1 master`, which bit us twice in one
+# day:
+#
+#   1. Upstream merged our folder-xfer size patch (and reworked it
+#      behind a CONFIG_HFS / operation.hfs gate), so `git apply` of the
+#      checked-in patch started failing → the image build broke.
+#   2. After removing the patch, the `git clone` layer was still cached
+#      locally on the pre-fix revision, so the local container kept
+#      running the *buggy* mhxd while CI (fresh runner, no layer cache)
+#      built the fixed one — diverging behaviour between dev and CI.
+#
+# Pinning fixes both: the build is reproducible everywhere, and a new
+# pin (a line change) busts the clone layer's cache deliberately. When
+# you want a newer mhxd, bump MHXD_REV below and rebuild.
 
 FROM debian:bookworm-slim AS build
 
@@ -43,17 +54,17 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pull mhxd master and apply our local fixes.
-#
-# patches/folder-xfer-size.patch — fixes two copy/paste typos in
-# folder_getpaths (htxf.c) and rcv_folder_get (files.c) that compute
-# the per-file size formula incorrectly, breaking multi-file folder
-# transfers when files have no resource fork. See the patch's commit
-# message for the full root-cause writeup.
+# Pull mhxd at a pinned revision. c16f038 is the master merge that
+# includes the folder-transfer per-file size fix reworked behind the
+# CONFIG_HFS / operation.hfs gate (PR #3,
+# "fix-folder-get-with-hfs-on-and-no-rsrc-data"). With our `hfs yes`
+# config + fork-less seed files, resource_len() returns 0, so the
+# server claims the correct small per-file size and folder_send streams
+# every file in the tree instead of dying after the first.
 WORKDIR /build
-RUN git clone --depth 1 https://github.com/kangsterizer/mhxd.git mhxd
-COPY patches/folder-xfer-size.patch /build/patches/folder-xfer-size.patch
-RUN cd /build/mhxd && git apply /build/patches/folder-xfer-size.patch
+ARG MHXD_REV=c16f038452bbb406b226bcdd5a5510b26ec526c0
+RUN git clone https://github.com/kangsterizer/mhxd.git mhxd \
+    && git -C mhxd checkout --quiet "$MHXD_REV"
 
 # Configure with the feature set GtkHx exercises:
 #
