@@ -109,4 +109,39 @@ extern bool gtkhx_proto_parse_chat_invite (const uint8_t *msg, size_t msglen,
                                            uint8_t *buf, size_t bufcap,
                                            struct gtkhx_proto_chat_invite *out);
 
+/* ---- User-list parsers (HTLS_HDR_USER_PART / _USER_CHANGE) ---- */
+
+struct gtkhx_proto_user_part {
+    uint32_t cid;
+    uint16_t uid;
+};
+
+/* Parse HTLS_HDR_USER_PART. Both fields default to 0 when missing.
+ * Returns false on NULL out; otherwise true. */
+extern bool gtkhx_proto_parse_user_part (const uint8_t *msg, size_t msglen,
+                                         struct gtkhx_proto_user_part *out);
+
+struct gtkhx_proto_user_change {
+    uint32_t cid;
+    /* HX_NICK_COLOR_NONE (0xffffffff) when no COLOR chunk was present. */
+    uint32_t nick_color;
+    uint16_t uid;
+    uint16_t icon;
+    uint16_t color;
+    /* 0/1 booleans, set when the corresponding chunk was present. */
+    uint8_t got_color;
+    uint8_t got_nick_color;
+    /* Bytes of nickname written to buf (excluding the trailing NUL),
+     * capped at bufcap-1. May differ from strlen(buf) if the wire
+     * payload contained an interior NUL. */
+    uint16_t name_len;
+};
+
+/* Parse HTLS_HDR_USER_CHANGE. Writes the strip_ansi'd nickname into buf
+ * (NUL-terminated, capped at bufcap-1) and fills *out. Returns false on
+ * NULL out, NULL buf, or zero bufcap; otherwise true. */
+extern bool gtkhx_proto_parse_user_change (const uint8_t *msg, size_t msglen,
+                                           uint8_t *buf, size_t bufcap,
+                                           struct gtkhx_proto_user_change *out);
+
 #endif /* _HOTLINE_PROTO_H */
