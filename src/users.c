@@ -29,7 +29,9 @@
 #include "gtkhx_session.h"
 #include "hl_access.h"
 #include "cicn.h"
+#include "hotline_proto.h"
 #include "network.h"
+#include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "chat.h"
 #include "gtkhx.h"
 #include "msg.h"
@@ -54,8 +56,6 @@ GtkWidget *msgbtn, *kickbtn, *infobtn, *banbtn, *chatbtn, *ignobtn;
 void
 hx_change_name_icon (struct htlc_conn *htlc)
 {
-    guint16 icon16 = htons (htlc->icon);
-
     /* Phase E2: encode the nick to the negotiated wire encoding.
 	 * is_body = FALSE — nicks don't have line endings; we want the
 	 * Mac-Roman transcoding (or UTF-8 passthrough) without the
@@ -66,23 +66,24 @@ hx_change_name_icon (struct htlc_conn *htlc)
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
                                utf8, /*is_body=*/FALSE, &name_len);
 
-    /* Colored-Nicknames extension. Include HTLC_DATA_COLOR
-	 * (BE u32, 0x00RRGGBB) ONLY when the local pref has set a real
-	 * color — we deliberately don't send HX_NICK_COLOR_NONE because
-	 * the spec's auto-opt-in marks the session as color-aware on
-	 * first DATA_COLOR receipt regardless of the value, and a
-	 * "no color" client shouldn't opt in. Servers that don't know
-	 * the extension ignore the trailing chunk; supporting servers
-	 * mark us color-aware and start decorating other users'
-	 * USER_CHANGE pushes for us. */
-    if (htlc->nick_color != HX_NICK_COLOR_NONE) {
-        guint32 color32 = htonl (htlc->nick_color);
-        hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 3, HTLC_DATA_ICON, 2, &icon16,
-                 HTLC_DATA_NAME, (guint16)name_len, name_wire,
-                 HTLC_DATA_COLOR, 4, &color32);
-    } else {
-        hlwrite (htlc, HTLC_HDR_USER_CHANGE, 0, 2, HTLC_DATA_ICON, 2, &icon16,
-                 HTLC_DATA_NAME, (guint16)name_len, name_wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_change
+	 * _chunks. Colored-Nicknames extension: include DATA_COLOR ONLY
+	 * when the local pref has set a real color — we deliberately
+	 * don't send HX_NICK_COLOR_NONE because the spec's auto-opt-in
+	 * marks the session as color-aware on first DATA_COLOR receipt
+	 * regardless of the value, and a "no color" client shouldn't opt
+	 * in. Servers that don't know the extension ignore the trailing
+	 * chunk; supporting servers mark us color-aware and start
+	 * decorating other users' USER_CHANGE pushes for us. */
+    bool has_color = htlc->nick_color != HX_NICK_COLOR_NONE;
+    struct hx_chunk chunks[3];
+    guint8 scratch[6];
+    int hc = (int)gtkhx_proto_build_user_change_chunks (
+        htlc->icon, (const uint8_t *)name_wire, name_len, has_color ? 1 : 0,
+        htlc->nick_color, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_USER_CHANGE, 0, chunks, hc);
     }
     g_free (name_wire);
 }
@@ -90,26 +91,37 @@ hx_change_name_icon (struct htlc_conn *htlc)
 void
 hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 {
-    uid = htons (uid);
-    task_new (htlc, RCV_TASK_FN (rcv_task_kick), 0, 0, "kick");
-    if (ban) {
-        ban = htons (ban);
-        hlwrite (htlc, HTLC_HDR_USER_KICK, 0, 2, HTLC_DATA_BAN, 2, &ban,
-                 HTLC_DATA_UID, 2, &uid);
-    } else {
-        hlwrite (htlc, HTLC_HDR_USER_KICK, 0, 1, HTLC_DATA_UID, 2, &uid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_kick_chunks.
+	 * Build BEFORE task_new — see hx_send_msg for the rationale
+	 * (task_new snapshots htlc->trans into a pending entry; the
+	 * increment happens inside hlpack_chunks during packing). A
+	 * builder failure must not leave a phantom task behind. */
+    struct hx_chunk chunks[2];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_user_kick_chunks (
+        uid, ban, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_kick), 0, 0, "kick");
+        hlwrite_chunks (htlc, HTLC_HDR_USER_KICK, 0, chunks, hc);
     }
 }
 
 void
 hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
 {
-    guint16 *_uid = g_malloc (sizeof (guint16));
-    *_uid = uid;
-
-    task_new (htlc, RCV_TASK_FN (rcv_task_user_info), (void *)_uid, 0, "info");
-    uid = htons (uid);
-    hlwrite (htlc, HTLC_HDR_USER_GETINFO, 0, 1, HTLC_DATA_UID, 2, &uid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_getinfo
+	 * _chunks. Same build-before-task ordering as hx_kick_user. */
+    struct hx_chunk chunks[1];
+    guint8 scratch[2];
+    int hc = (int)gtkhx_proto_build_user_getinfo_chunks (
+        uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        guint16 *_uid = g_malloc (sizeof (guint16));
+        *_uid = uid;
+        task_new (htlc, RCV_TASK_FN (rcv_task_user_info), (void *)_uid, 0,
+                  "info");
+        hlwrite_chunks (htlc, HTLC_HDR_USER_GETINFO, 0, chunks, hc);
+    }
 }
 
 /* Phase 5+: per-chat user list lives in chat->users, a
