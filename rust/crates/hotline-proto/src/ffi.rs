@@ -10,8 +10,8 @@
 //! closed rather than read out of bounds.
 
 use crate::build::{
-    self, AgreementAgreeRequest, BroadcastRequest, ChatRequest, ChatSubjectRequest, HxChunk,
-    MsgRequest, UserChangeRequest, UserKickRequest,
+    self, AccountModifyRequest, AgreementAgreeRequest, BroadcastRequest, ChatRequest,
+    ChatSubjectRequest, HxChunk, MsgRequest, UserChangeRequest, UserKickRequest,
 };
 use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
@@ -1364,4 +1364,148 @@ pub unsafe extern "C" fn gtkhx_proto_build_user_getinfo_chunks(
     let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
     let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
     build::build_user_getinfo_chunks(uid, chunks_slice, scratch_slice) as i32
+}
+
+// ---- Account-management SEND builders --------------------------------
+//
+// Same chunks[] + scratch[] contract as the user-management shims
+// above. ACCOUNT_READ and ACCOUNT_DELETE share a single-LOGIN wire
+// shape and so share a single FFI implementation under the hood; the
+// distinct entry points keep call-site semantics clear.
+
+/// Common implementation for the ACCOUNT_READ / ACCOUNT_DELETE wire
+/// shape (a single `HTLC_DATA_LOGIN` chunk). Both opcodes have
+/// identical byte layout; the C caller picks the header type when
+/// calling hlwrite_chunks.
+unsafe fn build_account_login_only_chunks(
+    login_ptr: *const u8,
+    login_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    body_using: fn(&[u8], &mut [HxChunk]) -> usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if login_ptr.is_null() && login_len != 0 {
+        return 0;
+    }
+    if login_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let login = as_slice(login_ptr, login_len);
+    body_using(login, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_ACCOUNT_READ` chunks: single LOGIN. `chunks_cap >= 1`.
+/// No scratch needed.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `login_ptr` valid
+/// for `login_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_account_read_chunks(
+    login_ptr: *const u8,
+    login_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_account_login_only_chunks(
+        login_ptr,
+        login_len,
+        chunks,
+        chunks_cap,
+        build::build_account_read_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_ACCOUNT_DELETE` chunks: single LOGIN. Same shape
+/// as ACCOUNT_READ. `chunks_cap >= 1`. No scratch needed.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_account_read_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_account_delete_chunks(
+    login_ptr: *const u8,
+    login_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_account_login_only_chunks(
+        login_ptr,
+        login_len,
+        chunks,
+        chunks_cap,
+        build::build_account_delete_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_ACCOUNT_MODIFY` chunks: LOGIN + PASSWORD + NAME +
+/// ACCESS (8 bytes). The `access` argument is a pointer to 8 raw wire
+/// bytes (the `hl_access_bits` bitmap, big-endian-in-memory). Returns
+/// 4 on success.
+///
+/// `chunks_cap >= 4`, `scratch_cap >= 8` (the access bytes live in
+/// scratch). Rejects any individual field longer than `u16::MAX`.
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths (or NULL).
+/// Each of `login_ptr` / `password_ptr` / `name_ptr` valid for the
+/// matching length (or NULL with length 0). `access_ptr` must be a
+/// valid pointer to at least 8 bytes (NULL is rejected — ACCESS is
+/// mandatory).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_account_modify_chunks(
+    login_ptr: *const u8,
+    login_len: usize,
+    password_ptr: *const u8,
+    password_len: usize,
+    name_ptr: *const u8,
+    name_len: usize,
+    access_ptr: *const u8,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    const MAX_SCRATCH: usize = 8;
+
+    if chunks.is_null() || scratch.is_null() || access_ptr.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if (login_ptr.is_null() && login_len != 0)
+        || (password_ptr.is_null() && password_len != 0)
+        || (name_ptr.is_null() && name_len != 0)
+    {
+        return 0;
+    }
+    if login_len > u16::MAX as usize
+        || password_len > u16::MAX as usize
+        || name_len > u16::MAX as usize
+    {
+        return 0;
+    }
+
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+
+    let mut access = [0u8; 8];
+    std::ptr::copy_nonoverlapping(access_ptr, access.as_mut_ptr(), 8);
+
+    let req = AccountModifyRequest {
+        login: as_slice(login_ptr, login_len),
+        password: as_slice(password_ptr, password_len),
+        name: as_slice(name_ptr, name_len),
+        access,
+    };
+    build::build_account_modify_chunks(&req, chunks_slice, scratch_slice) as i32
 }

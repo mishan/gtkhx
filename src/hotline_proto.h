@@ -475,4 +475,29 @@ extern int32_t gtkhx_proto_build_user_getinfo_chunks (uint16_t uid,
                                                       uint8_t *scratch,
                                                       size_t scratch_cap);
 
+/* HTLC_HDR_ACCOUNT_READ: single LOGIN chunk. No scratch needed.
+ * chunks_cap >= 1. Returns 1 on success. */
+extern int32_t gtkhx_proto_build_account_read_chunks (const uint8_t *login_ptr,
+                                                      size_t login_len,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap);
+
+/* HTLC_HDR_ACCOUNT_DELETE: single LOGIN chunk (same shape as READ). */
+extern int32_t gtkhx_proto_build_account_delete_chunks (const uint8_t *login_ptr,
+                                                        size_t login_len,
+                                                        struct hx_chunk *chunks,
+                                                        size_t chunks_cap);
+
+/* HTLC_HDR_ACCOUNT_MODIFY: LOGIN + PASSWORD + NAME + ACCESS (8 raw
+ * bytes — the hl_access_bits bitmap). chunks_cap >= 4, scratch_cap >= 8.
+ * access_ptr must point at exactly 8 bytes (NULL is rejected). Returns
+ * 4 on success. */
+extern int32_t gtkhx_proto_build_account_modify_chunks (
+    const uint8_t *login_ptr, size_t login_len,
+    const uint8_t *password_ptr, size_t password_len,
+    const uint8_t *name_ptr, size_t name_len,
+    const uint8_t *access_ptr,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */
