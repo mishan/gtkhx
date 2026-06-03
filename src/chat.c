@@ -34,6 +34,8 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "network.h"
+#include "hotline_proto.h"
+#include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "history.h"
 #include "chat_history.h"
 #include "gtkutil.h"
@@ -258,8 +260,6 @@ gtkhx_apply_theme_palette (gboolean dark)
 void
 hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
 {
-    style = htons (style);
-
     /* Phase E2/E3: encode to the negotiated wire encoding (UTF-8 if
 	 * the server confirmed CAP_TEXT_ENCODING, else MACINTOSH with
 	 * '?' for unmappables) and normalise LF→CR on legacy servers
@@ -269,15 +269,20 @@ hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
     char *wire = gtkhx_text_for_wire (str, strlen (str), utf8,
                                       /*is_body=*/TRUE, &wire_len);
 
-    if (cid) {
-        guint32 cids = htonl (cid);
-        hlwrite (htlc, HTLC_HDR_CHAT, 0, 3, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, (guint16)wire_len, wire, HTLC_DATA_CHAT_ID, 4,
-                 &cids);
-
-    } else {
-        hlwrite (htlc, HTLC_HDR_CHAT, 0, 2, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, (guint16)wire_len, wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_chunks.
+	 * Scratch holds the BE style (offset 0, 2 bytes) and BE cid
+	 * (offset 2, 4 bytes); the chunk array's data pointers reference
+	 * into scratch and into the local wire buffer below — both
+	 * outlive hlwrite_chunks. */
+    struct hx_chunk chunks[3];
+    guint8 scratch[8];
+    int hc = (int)gtkhx_proto_build_chat_chunks (cid, style,
+                                                 (const uint8_t *)wire,
+                                                 wire_len, chunks,
+                                                 G_N_ELEMENTS (chunks),
+                                                 scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT, 0, chunks, hc);
     }
     g_free (wire);
 }

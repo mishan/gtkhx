@@ -28,6 +28,9 @@
 #include "hx.h"
 #include "chat.h"
 #include "emoji.h"
+#include "hotline_proto.h"
+#include "network.h"
+#include "proto_helpers.h"
 #include "gtkhx.h"
 #include "gtkhx_log.h"
 #include "gtkutil.h"
@@ -48,9 +51,6 @@ void
 hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
              void *data)
 {
-    uid = htons (uid);
-    task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0, data ? data : "msg");
-
     /* Phase E2/E3: body field — UTF-8 / Mac Roman conversion plus
 	 * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
 	 * src/text_util.c. */
@@ -59,8 +59,26 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
     char *wire
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
 
-    hlwrite (htlc, HTLC_HDR_MSG, 0, 2, HTLC_DATA_UID, 2, &uid, HTLC_DATA_MSG,
-             (guint16)wire_len, wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_msg_chunks.
+	 * Build chunks BEFORE registering the task — task_new() snapshots
+	 * the current htlc->trans into a new task table entry (which then
+	 * waits for the server's matching TASK reply); the actual increment
+	 * of htlc->trans happens later inside hlpack_chunks during packing.
+	 * If we registered the task first and the builder then failed
+	 * (validation reject), hlwrite_chunks would be skipped — leaving a
+	 * pending task with no on-wire request to reply to and hanging the
+	 * tasks UI. Build, register, send is the safe order. */
+    struct hx_chunk chunks[2];
+    guint8 scratch[2];
+    int hc = (int)gtkhx_proto_build_msg_chunks (uid, (const uint8_t *)wire,
+                                                wire_len, chunks,
+                                                G_N_ELEMENTS (chunks), scratch,
+                                                sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0,
+                  data ? data : "msg");
+        hlwrite_chunks (htlc, HTLC_HDR_MSG, 0, chunks, hc);
+    }
     g_free (wire);
 }
 
@@ -100,13 +118,24 @@ hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
         return;
     }
 
-    task_new (htlc, 0, 0, 0, "broadcast");
-
     utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     wire = gtkhx_text_for_wire (msg, safe_len, utf8, /*is_body=*/TRUE,
                                 &wire_len);
-    hlwrite (htlc, HTLC_HDR_MSG_BROADCAST, 0, 1, HTLC_DATA_MSG,
-             (guint16)wire_len, wire);
+
+    /* Phase R2: chunk layout moved to
+	 * gtkhx_proto_build_broadcast_chunks. No scratch (single body
+	 * chunk, no integer fields). Build chunks BEFORE registering the
+	 * task — see hx_send_msg for the rationale (task_new snapshots
+	 * htlc->trans into a pending entry; the increment happens inside
+	 * hlpack_chunks during packing). A builder failure must not leave
+	 * a phantom task behind. */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_broadcast_chunks (
+        (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "broadcast");
+        hlwrite_chunks (htlc, HTLC_HDR_MSG_BROADCAST, 0, chunks, hc);
+    }
     g_free (wire);
 }
 

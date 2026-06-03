@@ -9,6 +9,7 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
+use crate::build::{self, BroadcastRequest, ChatRequest, HxChunk, MsgRequest};
 use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
 
@@ -765,6 +766,159 @@ pub unsafe extern "C" fn gtkhx_proto_catlist_part_get(
         size: q.size,
     };
     true
+}
+
+// ---- SEND-path builders (HTLC_HDR_CHAT / _MSG / _MSG_BROADCAST) -------
+//
+// Each builder fills a caller-provided `struct hx_chunk[]` (and, where
+// integer fields are present, a `uint8_t scratch[]` buffer) and returns
+// the chunk count. Matches `hx_agreement_agree_build_chunks` in
+// agreement_packet.c so the production code can keep using
+// `hlwrite_chunks` for the actual wire push (the cipher/compression/fd
+// dispatch stays in C until Phase R3). Returns 0 on validation failure
+// (NULL pointer, too-small chunks or scratch slice). Body lifetime is
+// the caller's: the chunk data pointers reference into `body_ptr`, so
+// the buffer must outlive the hlwrite_chunks call.
+
+/// Build `HTLC_HDR_CHAT` chunks. Three chunks when `cid != 0` (STYLE +
+/// CHAT body + CHAT_ID), two when `cid == 0` (STYLE + CHAT body — the
+/// public-chat case).
+///
+/// Requires `chunks_cap >= 3` and `scratch_cap >= 6`. The scratch
+/// buffer holds the BE-encoded style (offset 0, 2 bytes) and cid
+/// (offset 2, 4 bytes); the chunk array's `data` pointers reference
+/// into it.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` `HxChunk` slots (or NULL); `scratch`
+/// valid for `scratch_cap` bytes (or NULL); `body_ptr` valid for
+/// `body_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_chunks(
+    cid: u32,
+    style: u16,
+    body_ptr: *const u8,
+    body_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima for this builder: 3 chunks (STYLE + BODY + CHAT_ID),
+    // 6 scratch bytes (u16 style at +0, u32 cid at +2). The slices we
+    // hand the builder are sized to these maxima, NOT the caller-
+    // provided caps — otherwise a too-large cap would let
+    // from_raw_parts_mut produce an out-of-bounds slice (UB) before
+    // the builder's length check runs.
+    const MAX_CHUNKS: usize = 3;
+    const MAX_SCRATCH: usize = 6;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // NULL body_ptr with body_len > 0 is a caller bug: as_slice
+    // silently turns it into an empty slice, which would put an
+    // empty CHAT chunk on the wire instead of the intended message.
+    // Fail fast so the inconsistency surfaces in the caller instead.
+    if body_ptr.is_null() && body_len != 0 {
+        return 0;
+    }
+    // body_len > u16::MAX would overflow the chunk len field; reject
+    // here so the Rust builder's internal check is unreachable from
+    // the C side.
+    if body_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let body = as_slice(body_ptr, body_len);
+    let req = ChatRequest { cid, style, body };
+    build::build_chat_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_MSG` chunks: UID + MSG body, exactly 2 chunks.
+/// Requires `chunks_cap >= 2` and `scratch_cap >= 2` (the BE-encoded
+/// uid at offset 0).
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_msg_chunks(
+    uid: u16,
+    body_ptr: *const u8,
+    body_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima for this builder: 2 chunks (UID + BODY), 2 scratch
+    // bytes (the u16 uid). Slices are sized to the maxima; see
+    // gtkhx_proto_build_chat_chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 2;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // See gtkhx_proto_build_chat_chunks for the NULL-ptr-with-nonzero-
+    // len rationale: as_slice would silently treat this as an empty
+    // body and turn the intended MSG into an empty-body chunk.
+    if body_ptr.is_null() && body_len != 0 {
+        return 0;
+    }
+    if body_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let body = as_slice(body_ptr, body_len);
+    let req = MsgRequest { uid, body };
+    build::build_msg_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_MSG_BROADCAST` chunks: a single MSG-body chunk.
+/// Requires `chunks_cap >= 1`. No scratch needed.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` `HxChunk` slots (or NULL);
+/// `body_ptr` valid for `body_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_broadcast_chunks(
+    body_ptr: *const u8,
+    body_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    // Fixed maximum: 1 chunk (BODY). Slice is sized to the maximum;
+    // see gtkhx_proto_build_chat_chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 1;
+
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    // See gtkhx_proto_build_chat_chunks for the NULL-ptr-with-nonzero-
+    // len rationale: as_slice would silently turn an intended
+    // broadcast into an empty-body broadcast.
+    if body_ptr.is_null() && body_len != 0 {
+        return 0;
+    }
+    if body_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let body = as_slice(body_ptr, body_len);
+    let req = BroadcastRequest { body };
+    build::build_broadcast_chunks(&req, chunks_slice) as i32
 }
 
 /// C-ABI result of [`parse::parse_user_part`].

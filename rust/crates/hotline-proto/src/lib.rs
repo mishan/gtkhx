@@ -24,6 +24,9 @@
 //! - [`parse`] — typed parsers for individual server messages. Phase R2
 //!   grows this one opcode at a time; the proof-of-concept opcodes are
 //!   `HTLS_HDR_USER_SELFINFO` and `HTLS_HDR_TASK`.
+//! - [`build`] — outgoing-message builders for the SEND path. Each
+//!   `hx_send_*` in C delegates to a `build_*_chunks` here, then hands
+//!   the chunk array to `hlwrite_chunks()` for actual wire encoding.
 //! - `ffi` — `#[no_mangle] extern "C"` entry points the C dispatcher calls.
 //!   Not part of the Rust-facing API; only compiled into the staticlib.
 //!
@@ -36,6 +39,7 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+pub mod build;
 pub mod messages;
 pub mod parse;
 pub mod sanitize;
