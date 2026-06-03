@@ -607,6 +607,143 @@ pub fn build_user_getinfo_chunks(
     1
 }
 
+// ---- Account-management send opcodes ---------------------------------
+//
+// HTLC_HDR_ACCOUNT_READ:   ask the server for an account's fields
+//                          (reply is a TASK carrying the user record).
+// HTLC_HDR_ACCOUNT_MODIFY: create / overwrite an account
+//                          (LOGIN + PASSWORD + NAME + ACCESS).
+// HTLC_HDR_ACCOUNT_DELETE: remove an account by login.
+//
+// Login and password fields use the Hotline obfuscation (XOR with 0xFF),
+// applied by the caller before invoking these builders. The builders
+// themselves treat all the byte fields as opaque payload — same
+// discipline as the chat / msg body fields.
+
+/// Build the chunk array for `HTLC_HDR_ACCOUNT_READ`. Single
+/// `HTLC_DATA_LOGIN` chunk. Returns 1 on success, 0 on a too-small
+/// chunks buffer or `login.len() > u16::MAX`.
+///
+/// Note: the C `hx_useredit_open` call site passes the login bytes
+/// *unencoded* (a deliberate mhxd convention — READ takes a raw login,
+/// MODIFY / DELETE take an hl_encoded one). Either way, the encoding
+/// decision belongs to the caller.
+pub fn build_account_read_chunks(
+    login: &[u8],
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.is_empty() || login.len() > u16::MAX as usize {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::LOGIN,
+        len: login.len() as u16,
+        data: if login.is_empty() {
+            b"".as_ptr()
+        } else {
+            login.as_ptr()
+        },
+    };
+    1
+}
+
+/// Build the chunk array for `HTLC_HDR_ACCOUNT_DELETE`. Same wire
+/// shape as ACCOUNT_READ (a single `HTLC_DATA_LOGIN` chunk); the
+/// caller picks the header opcode. Returns 1 on success, 0 on a
+/// too-small chunks buffer or `login.len() > u16::MAX`.
+pub fn build_account_delete_chunks(
+    login: &[u8],
+    chunks: &mut [HxChunk],
+) -> usize {
+    // Same wire shape as READ — reuse the helper.
+    build_account_read_chunks(login, chunks)
+}
+
+/// Request data for [`build_account_modify_chunks`]. Mirrors the C
+/// `hx_useredit_create` call site in `src/usermod.c`. The login,
+/// password, and name fields are already-encoded byte buffers (the
+/// caller has applied `hl_encode` to LOGIN / PASSWORD where
+/// appropriate).
+pub struct AccountModifyRequest<'a> {
+    /// `HTLC_DATA_LOGIN` body. hl_encoded by the caller.
+    pub login: &'a [u8],
+    /// `HTLC_DATA_PASSWORD` body. hl_encoded by the caller. The C
+    /// convention for an empty password is a single 0x00 byte
+    /// (i.e. `password = &[0]`), not a zero-length slice — see the
+    /// `if (!*pass)` branch in `hx_useredit_create`.
+    pub password: &'a [u8],
+    /// `HTLC_DATA_NAME` body. Plain text; the wire format here does
+    /// not apply `hl_encode` to NAME.
+    pub name: &'a [u8],
+    /// `HTLC_DATA_ACCESS` body — 8 raw wire bytes (the
+    /// `hl_access_bits` bitmap, big-endian-in-memory). `hl_access.h`
+    /// is the canonical reference.
+    pub access: [u8; 8],
+}
+
+/// Build the chunk array for `HTLC_HDR_ACCOUNT_MODIFY`. Wire shape
+/// (the order matches the C call site):
+///
+/// - `HTLC_DATA_LOGIN`    — bytes (hl_encoded).
+/// - `HTLC_DATA_PASSWORD` — bytes (hl_encoded).
+/// - `HTLC_DATA_NAME`     — bytes (plain).
+/// - `HTLC_DATA_ACCESS`   — 8 raw bytes (the access bitmap).
+///
+/// Returns 4 on success. Requires `chunks_cap >= 4`, `scratch_cap >= 8`
+/// (the access bytes live in `scratch`). Rejects any of login /
+/// password / name longer than `u16::MAX` (the 16-bit chunk-length
+/// boundary).
+pub fn build_account_modify_chunks(
+    req: &AccountModifyRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 4
+        || scratch.len() < 8
+        || req.login.len() > u16::MAX as usize
+        || req.password.len() > u16::MAX as usize
+        || req.name.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+
+    scratch[0..8].copy_from_slice(&req.access);
+
+    chunks[0] = HxChunk {
+        tag: tag::LOGIN,
+        len: req.login.len() as u16,
+        data: if req.login.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.login.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::PASSWORD,
+        len: req.password.len() as u16,
+        data: if req.password.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.password.as_ptr()
+        },
+    };
+    chunks[2] = HxChunk {
+        tag: tag::NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    chunks[3] = HxChunk {
+        tag: tag::ACCESS,
+        len: 8,
+        data: scratch.as_ptr(),
+    };
+    4
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1197,5 +1334,144 @@ mod tests {
             build_user_getinfo_chunks(1, &mut chunks, &mut scratch_short),
             0
         );
+    }
+
+    // ---- account read / delete (single LOGIN chunk) ----
+
+    #[test]
+    fn account_read_emits_login_chunk() {
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_account_read_chunks(b"admin", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::LOGIN);
+        assert_eq!(chunks[0].len, 5);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"admin");
+    }
+
+    #[test]
+    fn account_delete_same_shape_as_read() {
+        let mut chunks_r = [HxChunk::EMPTY];
+        let mut chunks_d = [HxChunk::EMPTY];
+        let r = build_account_read_chunks(b"alice", &mut chunks_r);
+        let d = build_account_delete_chunks(b"alice", &mut chunks_d);
+        assert_eq!(r, d);
+        assert_eq!(chunks_r[0].tag, chunks_d[0].tag);
+        assert_eq!(chunks_r[0].len, chunks_d[0].len);
+        assert_eq!(unsafe { chunk_bytes(&chunks_r[0]) }, b"alice");
+        assert_eq!(unsafe { chunk_bytes(&chunks_d[0]) }, b"alice");
+    }
+
+    #[test]
+    fn account_read_empty_login_legal() {
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_account_read_chunks(b"", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].len, 0);
+        assert!(!chunks[0].data.is_null());
+    }
+
+    #[test]
+    fn account_read_rejects_empty_chunks_slice() {
+        let mut chunks: [HxChunk; 0] = [];
+        assert_eq!(build_account_read_chunks(b"x", &mut chunks), 0);
+    }
+
+    #[test]
+    fn account_read_rejects_login_larger_than_u16_max() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY];
+        assert_eq!(build_account_read_chunks(&big, &mut chunks), 0);
+    }
+
+    // ---- account modify ----
+
+    #[test]
+    fn account_modify_emits_four_chunks_in_order() {
+        let req = AccountModifyRequest {
+            login: b"admin",
+            // hl_encoded password — caller-supplied bytes, builder
+            // doesn't care about the encoding scheme.
+            password: &[0x9e, 0x90, 0x93, 0x9e, 0x91], // hl_encode("admin")
+            name: b"Administrator",
+            access: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch = [0u8; 8];
+        let hc = build_account_modify_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 4);
+        assert_eq!(chunks[0].tag, tag::LOGIN);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"admin");
+        assert_eq!(chunks[1].tag, tag::PASSWORD);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x9e, 0x90, 0x93, 0x9e, 0x91]);
+        assert_eq!(chunks[2].tag, tag::NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"Administrator");
+        assert_eq!(chunks[3].tag, tag::ACCESS);
+        assert_eq!(chunks[3].len, 8);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[3]) },
+            &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+        );
+    }
+
+    #[test]
+    fn account_modify_zero_byte_password_is_legal() {
+        // The C `if (!*pass)` branch writes a single 0x00 byte for an
+        // empty password — verify we can emit that exact 1-byte chunk.
+        let req = AccountModifyRequest {
+            login: b"u",
+            password: &[0x00],
+            name: b"n",
+            access: [0; 8],
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch = [0u8; 8];
+        let hc = build_account_modify_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 4);
+        assert_eq!(chunks[1].tag, tag::PASSWORD);
+        assert_eq!(chunks[1].len, 1);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x00]);
+    }
+
+    #[test]
+    fn account_modify_rejects_short_buffers() {
+        let req = AccountModifyRequest {
+            login: b"u",
+            password: b"p",
+            name: b"n",
+            access: [0; 8],
+        };
+        let mut chunks_short = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_account_modify_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch_short = [0u8; 7];
+        assert_eq!(
+            build_account_modify_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn account_modify_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        for which in 0..3 {
+            let req = AccountModifyRequest {
+                login: if which == 0 { &big } else { b"u" },
+                password: if which == 1 { &big } else { b"p" },
+                name: if which == 2 { &big } else { b"n" },
+                access: [0; 8],
+            };
+            let mut chunks = [HxChunk::EMPTY; 4];
+            let mut scratch = [0u8; 8];
+            assert_eq!(
+                build_account_modify_chunks(&req, &mut chunks, &mut scratch),
+                0,
+                "oversize field {which} should be rejected"
+            );
+        }
     }
 }
