@@ -440,4 +440,39 @@ extern int32_t gtkhx_proto_build_agreement_agree_chunks (
     struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
     size_t scratch_cap);
 
+/* HTLC_HDR_USER_CHANGE: ICON + NAME + optional COLOR (Colored-
+ * Nicknames extension). chunks_cap >= 3, scratch_cap >= 6.
+ * has_nick_color is a 0/1 flag — when non-zero, emit DATA_COLOR with
+ * the BE u32 nick_color (0x00RRGGBB); when zero, omit the chunk.
+ * Returns 2 (no color) or 3 (with color) on success, or 0 on
+ * validation failure (NULL pointer, short buffer, name_len > u16
+ * max). */
+extern int32_t
+gtkhx_proto_build_user_change_chunks (uint16_t icon,
+                                      const uint8_t *name_ptr, size_t name_len,
+                                      uint8_t has_nick_color,
+                                      uint32_t nick_color,
+                                      struct hx_chunk *chunks,
+                                      size_t chunks_cap,
+                                      uint8_t *scratch, size_t scratch_cap);
+
+/* HTLC_HDR_USER_KICK: optional BAN + UID. When ban != 0, emits BAN
+ * first, then UID; when ban == 0, emits just UID. chunks_cap >= 2,
+ * scratch_cap >= 4. Returns 1 (no ban) or 2 (with ban) on success,
+ * or 0 on validation failure (NULL pointer or short buffer). */
+extern int32_t gtkhx_proto_build_user_kick_chunks (uint16_t uid, uint16_t ban,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap,
+                                                   uint8_t *scratch,
+                                                   size_t scratch_cap);
+
+/* HTLC_HDR_USER_GETINFO: single UID. chunks_cap >= 1,
+ * scratch_cap >= 2. Returns 1 on success, or 0 on validation failure
+ * (NULL pointer or short buffer). */
+extern int32_t gtkhx_proto_build_user_getinfo_chunks (uint16_t uid,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap,
+                                                      uint8_t *scratch,
+                                                      size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */

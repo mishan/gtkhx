@@ -446,6 +446,167 @@ pub fn build_agreement_agree_chunks(
     3
 }
 
+// ---- User-management send opcodes ------------------------------------
+//
+// HTLC_HDR_USER_CHANGE: client pushes its current ICON / NAME (and
+// optionally the Colored-Nicknames COLOR) — the server broadcasts it
+// back as HTLS_HDR_USER_CHANGE to everyone in the chat.
+// HTLC_HDR_USER_KICK: kick-with-optional-ban (the BAN flag chunk shares
+// 0x0071 with OPTIONS, see the `tag::BAN` doc).
+// HTLC_HDR_USER_GETINFO: ask the server for an arbitrary user's info
+// (the reply is a TASK whose body carries the user-info text).
+
+/// Request data for [`build_user_change_chunks`]. Mirrors the C
+/// `hx_change_name_icon` call site in `src/users.c`.
+pub struct UserChangeRequest<'a> {
+    /// HTLC_DATA_ICON value. Always emitted.
+    pub icon: u16,
+    /// HTLC_DATA_NAME body, already encoded to the negotiated wire
+    /// encoding (UTF-8 or Mac Roman per CAP_TEXT_ENCODING). Empty is
+    /// legal (zero-length NAME chunk).
+    pub name: &'a [u8],
+    /// Colored-Nicknames extension. When `Some(c)`, emit
+    /// HTLC_DATA_COLOR (BE u32 0x00RRGGBB); when `None`, omit the
+    /// chunk entirely. The C side passes `None` for
+    /// `HX_NICK_COLOR_NONE` (the spec's auto-opt-in fires on first
+    /// DATA_COLOR receipt regardless of value, and a "no color"
+    /// client shouldn't opt in — see the long comment in
+    /// hx_change_name_icon for the rationale).
+    pub nick_color: Option<u32>,
+}
+
+/// Build the chunk array for `HTLC_HDR_USER_CHANGE`. Wire shape:
+///
+/// - `HTLC_DATA_ICON` (`tag::ICON`, 0x0068) — u16 BE.
+/// - `HTLC_DATA_NAME` (`tag::NAME`, 0x0066) — body bytes.
+/// - `HTLC_DATA_COLOR` (`tag::COLOR`, 0x0500) — u32 BE — **only when
+///   `nick_color.is_some()`**. Servers that don't know the
+///   Colored-Nicknames extension ignore this trailing chunk; supporting
+///   servers mark the session color-aware on first DATA_COLOR receipt.
+///
+/// Returns 2 (no color) or 3 (with color) on success, or 0 on
+/// validation failure: too-small chunks / scratch buffers, or
+/// `name.len() > u16::MAX` (16-bit chunk-length boundary).
+///
+/// Scratch layout: icon at +0 (2 bytes), color at +2 (4 bytes). The
+/// chunks' data pointers reference into `scratch` and into `req.name`,
+/// so both must outlive the eventual `hlwrite_chunks` call.
+pub fn build_user_change_chunks(
+    req: &UserChangeRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 3 || scratch.len() < 6 || req.name.len() > u16::MAX as usize {
+        return 0;
+    }
+
+    scratch[0..2].copy_from_slice(&req.icon.to_be_bytes());
+
+    chunks[0] = HxChunk {
+        tag: tag::ICON,
+        len: 2,
+        data: scratch.as_ptr(),
+    };
+    chunks[1] = HxChunk {
+        tag: tag::NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    if let Some(c) = req.nick_color {
+        scratch[2..6].copy_from_slice(&c.to_be_bytes());
+        chunks[2] = HxChunk {
+            tag: tag::COLOR,
+            len: 4,
+            data: scratch[2..6].as_ptr(),
+        };
+        3
+    } else {
+        2
+    }
+}
+
+/// Request data for [`build_user_kick_chunks`]. Mirrors the C
+/// `hx_kick_user` call site: the BAN flag is emitted only when
+/// `ban != 0`, and (matching the wire ordering used in production)
+/// BAN comes BEFORE UID.
+pub struct UserKickRequest {
+    pub uid: u16,
+    /// Non-zero means "also ban" (the BAN chunk is emitted with this
+    /// value); zero suppresses the BAN chunk entirely.
+    pub ban: u16,
+}
+
+/// Build the chunk array for `HTLC_HDR_USER_KICK`. Wire shape:
+///
+/// - `HTLC_DATA_BAN` (`tag::BAN`, 0x0071) — u16 BE — only when
+///   `ban != 0`. Emitted FIRST when present, matching the C call site.
+/// - `HTLC_DATA_UID` (`tag::UID`, 0x0067) — u16 BE.
+///
+/// Returns 1 (no ban) or 2 (with ban) on success, or 0 on a too-small
+/// chunks / scratch buffer. Scratch layout: ban at +0 (2 bytes), uid
+/// at +2 (2 bytes).
+pub fn build_user_kick_chunks(
+    req: &UserKickRequest,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 2 || scratch.len() < 4 {
+        return 0;
+    }
+
+    let with_ban = req.ban != 0;
+    let uid_be = req.uid.to_be_bytes();
+
+    if with_ban {
+        let ban_be = req.ban.to_be_bytes();
+        scratch[0..2].copy_from_slice(&ban_be);
+        scratch[2..4].copy_from_slice(&uid_be);
+        chunks[0] = HxChunk {
+            tag: tag::BAN,
+            len: 2,
+            data: scratch.as_ptr(),
+        };
+        chunks[1] = HxChunk {
+            tag: tag::UID,
+            len: 2,
+            data: scratch[2..4].as_ptr(),
+        };
+        2
+    } else {
+        scratch[0..2].copy_from_slice(&uid_be);
+        chunks[0] = HxChunk {
+            tag: tag::UID,
+            len: 2,
+            data: scratch.as_ptr(),
+        };
+        1
+    }
+}
+
+/// Build the chunk array for `HTLC_HDR_USER_GETINFO`. Single
+/// `HTLC_DATA_UID` chunk (u16 BE). Returns 1 on success, 0 on a
+/// too-small chunks / scratch buffer.
+pub fn build_user_getinfo_chunks(
+    uid: u16,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.is_empty() || scratch.len() < 2 {
+        return 0;
+    }
+    scratch[0..2].copy_from_slice(&uid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::UID,
+        len: 2,
+        data: scratch.as_ptr(),
+    };
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -863,6 +1024,177 @@ mod tests {
         let mut scratch = [0u8; 4];
         assert_eq!(
             build_agreement_agree_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+    }
+
+    // ---- user change ----
+
+    #[test]
+    fn user_change_no_color_emits_two_chunks() {
+        let req = UserChangeRequest {
+            icon: 0x01f4,
+            name: b"misha",
+            nick_color: None,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        let hc = build_user_change_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::ICON);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0x01, 0xf4]);
+        assert_eq!(chunks[1].tag, tag::NAME);
+        assert_eq!(chunks[1].len, 5);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"misha");
+    }
+
+    #[test]
+    fn user_change_with_color_emits_three_chunks_in_order() {
+        let req = UserChangeRequest {
+            icon: 0x0005,
+            name: b"alice",
+            nick_color: Some(0x00ff_8800),
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        let hc = build_user_change_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::ICON);
+        assert_eq!(chunks[1].tag, tag::NAME);
+        assert_eq!(chunks[2].tag, tag::COLOR);
+        assert_eq!(chunks[2].len, 4);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0x00, 0xff, 0x88, 0x00]);
+    }
+
+    #[test]
+    fn user_change_empty_name_legal() {
+        let req = UserChangeRequest {
+            icon: 0,
+            name: b"",
+            nick_color: None,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        let hc = build_user_change_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[1].len, 0);
+        assert!(!chunks[1].data.is_null());
+    }
+
+    #[test]
+    fn user_change_rejects_short_buffers() {
+        let req = UserChangeRequest {
+            icon: 0,
+            name: b"",
+            nick_color: Some(0),
+        };
+        let mut chunks_short = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_user_change_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 5];
+        assert_eq!(
+            build_user_change_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn user_change_rejects_name_larger_than_u16_max() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        let req = UserChangeRequest {
+            icon: 0,
+            name: &big,
+            nick_color: None,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_user_change_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+    }
+
+    // ---- user kick ----
+
+    #[test]
+    fn user_kick_no_ban_emits_just_uid() {
+        let req = UserKickRequest { uid: 0x1234, ban: 0 };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_user_kick_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::UID);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0x12, 0x34]);
+    }
+
+    #[test]
+    fn user_kick_with_ban_emits_ban_then_uid() {
+        // BAN comes BEFORE UID — matches the C call-site ordering, which
+        // mhxd cares about (the kick handler reads chunks in order).
+        let req = UserKickRequest { uid: 0x1234, ban: 1 };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_user_kick_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::BAN);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0x00, 0x01]);
+        assert_eq!(chunks[1].tag, tag::UID);
+        assert_eq!(chunks[1].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x12, 0x34]);
+    }
+
+    #[test]
+    fn user_kick_rejects_short_buffers() {
+        let req = UserKickRequest { uid: 1, ban: 1 };
+        let mut chunks_short = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_user_kick_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 3];
+        assert_eq!(
+            build_user_kick_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    // ---- user get info ----
+
+    #[test]
+    fn user_getinfo_emits_uid_chunk() {
+        let mut chunks = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_user_getinfo_chunks(0xabcd, &mut chunks, &mut scratch);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::UID);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0xab, 0xcd]);
+    }
+
+    #[test]
+    fn user_getinfo_rejects_short_buffers() {
+        let mut chunks_short: [HxChunk; 0] = [];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_user_getinfo_chunks(1, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 1];
+        assert_eq!(
+            build_user_getinfo_chunks(1, &mut chunks, &mut scratch_short),
             0
         );
     }
