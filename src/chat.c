@@ -290,19 +290,34 @@ hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
 void
 hx_chat_user (struct htlc_conn *htlc, guint16 uid)
 {
-    uid = htons (uid);
-    task_new (htlc, RCV_TASK_FN (hx_rcv_user_change), 0, 0, "chat");
-    hlwrite (htlc, HTLC_HDR_CHAT_CREATE, 0, 1, HTLC_DATA_UID, 2, &uid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_create_chunks.
+	 * Build chunks BEFORE task_new — task_new consumes htlc->trans and
+	 * parks an entry in the task table waiting for the server's TASK
+	 * reply. If the builder ever fails (validation reject), an early
+	 * task_new would leave a phantom task with no on-wire request. */
+    struct hx_chunk chunks[1];
+    guint8 scratch[2];
+    int hc = (int)gtkhx_proto_build_chat_create_chunks (
+        uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (hx_rcv_user_change), 0, 0, "chat");
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_CREATE, 0, chunks, hc);
+    }
 }
 
 void
 hx_invite_user (struct htlc_conn *htlc, guint16 uid, guint32 cid)
 {
-    cid = htonl (cid);
-    uid = htons (uid);
-    task_new (htlc, 0, 0, 0, "invite");
-    hlwrite (htlc, HTLC_HDR_CHAT_INVITE, 0, 2, HTLC_DATA_CHAT_ID, 4, &cid,
-             HTLC_DATA_UID, 2, &uid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_invite_chunks.
+	 * See hx_chat_user for the task_new-after-build rationale. */
+    struct hx_chunk chunks[2];
+    guint8 scratch[6];
+    int hc = (int)gtkhx_proto_build_chat_invite_chunks (
+        cid, uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "invite");
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_INVITE, 0, chunks, hc);
+    }
 }
 
 void
@@ -324,9 +339,18 @@ hx_chat_join (struct htlc_conn *htlc, guint32 cid)
     if (!chat) {
         chat = chat_new (&the_session, cid);
     }
-    cid = htonl (cid);
-    task_new (htlc, RCV_TASK_FN (rcv_task_user_list_switch), chat, 0, "join");
-    hlwrite (htlc, HTLC_HDR_CHAT_JOIN, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_join_chunks.
+	 * See hx_chat_user for the task_new-after-build rationale. */
+    struct hx_chunk chunks[1];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_chat_join_chunks (
+        cid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_user_list_switch), chat, 0,
+                  "join");
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_JOIN, 0, chunks, hc);
+    }
 }
 
 void
@@ -342,15 +366,20 @@ hx_part_chat (struct htlc_conn *htlc, guint32 cid)
     if (!chat) {
         return;
     }
-    cid = htonl (chat->cid);
-    hlwrite (htlc, HTLC_HDR_CHAT_PART, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_part_chunks. */
+    struct hx_chunk chunks[1];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_chat_part_chunks (
+        chat->cid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_PART, 0, chunks, hc);
+    }
 }
 
 void
 hx_change_subject (struct htlc_conn *htlc, guint32 cid, char *subject)
 {
-    cid = htonl (cid);
-
     /* Phase E (follow-up): encode the subject string for the wire.
 	 * Single-line field, so is_body = FALSE. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
@@ -358,8 +387,15 @@ hx_change_subject (struct htlc_conn *htlc, guint32 cid, char *subject)
     char *subj_wire = gtkhx_text_for_wire (subject, strlen (subject), utf8,
                                            FALSE, &subj_len);
 
-    hlwrite (htlc, HTLC_HDR_CHAT_SUBJECT, 0, 2, HTLC_DATA_CHAT_ID, 4, &cid,
-             HTLC_DATA_CHAT_SUBJECT, (guint16)subj_len, subj_wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_subject_chunks. */
+    struct hx_chunk chunks[2];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_chat_subject_chunks (
+        cid, (const uint8_t *)subj_wire, subj_len, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_SUBJECT, 0, chunks, hc);
+    }
     g_free (subj_wire);
 }
 
@@ -2390,9 +2426,14 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
 void
 hx_reject_chat (struct htlc_conn *htlc, guint32 _cid)
 {
-    guint32 cid = htonl (_cid);
-
-    hlwrite (htlc, HTLC_HDR_CHAT_DECLINE, 0, 1, HTLC_DATA_CHAT_ID, 4, &cid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_decline_chunks. */
+    struct hx_chunk chunks[1];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_chat_decline_chunks (
+        _cid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT_DECLINE, 0, chunks, hc);
+    }
 }
 
 /* Phase 5: AdwAlertDialog with two responses (Join / Decline) replaces

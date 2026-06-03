@@ -243,6 +243,209 @@ pub fn build_broadcast_chunks(
     1
 }
 
+// ---- Chat-admin send opcodes ------------------------------------------
+//
+// HTLC_HDR_CHAT_CREATE / _INVITE / _JOIN / _PART / _DECLINE / _SUBJECT
+// are the chat-room management opcodes. Most are pure integer-chunk
+// requests; the only one with a variable-length payload is
+// CHAT_SUBJECT (the subject body).
+
+/// Build chunks for `HTLC_HDR_CHAT_CREATE` — `HTLC_DATA_UID` (u16 BE)
+/// only, 1 chunk. Requires `chunks_cap >= 1`, `scratch_cap >= 2`.
+pub fn build_chat_create_chunks(
+    uid: u16,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.is_empty() || scratch.len() < 2 {
+        return 0;
+    }
+    scratch[0..2].copy_from_slice(&uid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::UID,
+        len: 2,
+        data: scratch.as_ptr(),
+    };
+    1
+}
+
+/// Build chunks for `HTLC_HDR_CHAT_INVITE` — `HTLC_DATA_CHAT_ID` (u32)
+/// then `HTLC_DATA_UID` (u16). 2 chunks; `chunks_cap >= 2`,
+/// `scratch_cap >= 6` (cid at offset 0, uid at offset 4).
+pub fn build_chat_invite_chunks(
+    cid: u32,
+    uid: u16,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 2 || scratch.len() < 6 {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&cid.to_be_bytes());
+    scratch[4..6].copy_from_slice(&uid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::CHAT_ID,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    chunks[1] = HxChunk {
+        tag: tag::UID,
+        len: 2,
+        // Uid lives at scratch[4..6]; subslice + as_ptr is safe and
+        // bounds-checked, scratch.len() >= 6 already verified above.
+        data: scratch[4..6].as_ptr(),
+    };
+    2
+}
+
+/// Internal helper: single-`CHAT_ID` chunk for the JOIN / PART / DECLINE
+/// opcodes (all three share the wire shape). The caller picks the
+/// header type when handing the chunks to `hlwrite_chunks`.
+fn build_chat_id_only_chunks(
+    cid: u32,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.is_empty() || scratch.len() < 4 {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&cid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::CHAT_ID,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    1
+}
+
+/// Build chunks for `HTLC_HDR_CHAT_JOIN` — `HTLC_DATA_CHAT_ID` only.
+pub fn build_chat_join_chunks(
+    cid: u32,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    build_chat_id_only_chunks(cid, chunks, scratch)
+}
+
+/// Build chunks for `HTLC_HDR_CHAT_PART` — `HTLC_DATA_CHAT_ID` only.
+pub fn build_chat_part_chunks(
+    cid: u32,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    build_chat_id_only_chunks(cid, chunks, scratch)
+}
+
+/// Build chunks for `HTLC_HDR_CHAT_DECLINE` — `HTLC_DATA_CHAT_ID` only.
+pub fn build_chat_decline_chunks(
+    cid: u32,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    build_chat_id_only_chunks(cid, chunks, scratch)
+}
+
+/// Request data for [`build_chat_subject_chunks`].
+pub struct ChatSubjectRequest<'a> {
+    pub cid: u32,
+    /// Already-encoded subject bytes (UTF-8 or Mac Roman per
+    /// CAP_TEXT_ENCODING). Empty subject is legal.
+    pub subject: &'a [u8],
+}
+
+/// Build chunks for `HTLC_HDR_CHAT_SUBJECT` — `HTLC_DATA_CHAT_ID` (u32)
+/// + `HTLC_DATA_CHAT_SUBJECT` (bytes). 2 chunks; `chunks_cap >= 2`,
+/// `scratch_cap >= 4`. Also rejects `subject.len() > u16::MAX` (the
+/// wire chunk length is 16-bit; without this check a 65 KiB subject
+/// would silently wrap and emit an invalid chunk).
+pub fn build_chat_subject_chunks(
+    req: &ChatSubjectRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 2 || scratch.len() < 4 || req.subject.len() > u16::MAX as usize {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&req.cid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::CHAT_ID,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    chunks[1] = HxChunk {
+        tag: tag::CHAT_SUBJECT,
+        len: req.subject.len() as u16,
+        data: if req.subject.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.subject.as_ptr()
+        },
+    };
+    2
+}
+
+// ---- HTLC_HDR_AGREEMENTAGREE ------------------------------------------
+//
+// Phase R2 port of agreement_packet.c::hx_agreement_agree_build_chunks.
+// Same wire shape (ICON + NAME + OPTIONS, all three mandatory), same
+// chunks-array + scratch contract. The C function stays as a thin
+// shim so the existing call sites (network.c::hx_send_agreement_agree
+// and the integration harness) keep working.
+
+/// Request data for [`build_agreement_agree_chunks`]. Mirrors the
+/// C `hx_agreement_agree_request` struct in `agreement_packet.h`.
+pub struct AgreementAgreeRequest<'a> {
+    /// HTLC_DATA_ICON value. Always emitted.
+    pub icon: u16,
+    /// HTLC_DATA_NAME body, already encoded to the negotiated wire
+    /// encoding. Empty is legal (zero-length NAME chunk).
+    pub display_name: &'a [u8],
+    /// HTLC_DATA_OPTIONS bitmap. Mandatory — Mobius panics without it,
+    /// see the long comment in `src/network.c::hx_send_agreement_agree`.
+    pub options: u16,
+}
+
+/// Build the chunk array for `HTLC_HDR_AGREEMENTAGREE`. Always 3
+/// chunks (ICON + NAME + OPTIONS). Requires `chunks_cap >= 3`,
+/// `scratch_cap >= 4` (icon at offset 0, options at offset 2). Also
+/// rejects `display_name.len() > u16::MAX` (chunk lengths are 16-bit
+/// on the wire — without this check a 65 KiB nick would silently
+/// wrap and emit an invalid chunk).
+pub fn build_agreement_agree_chunks(
+    req: &AgreementAgreeRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 3 || scratch.len() < 4 || req.display_name.len() > u16::MAX as usize {
+        return 0;
+    }
+    scratch[0..2].copy_from_slice(&req.icon.to_be_bytes());
+    scratch[2..4].copy_from_slice(&req.options.to_be_bytes());
+
+    chunks[0] = HxChunk {
+        tag: tag::ICON,
+        len: 2,
+        data: scratch.as_ptr(),
+    };
+    chunks[1] = HxChunk {
+        tag: tag::NAME,
+        len: req.display_name.len() as u16,
+        data: if req.display_name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.display_name.as_ptr()
+        },
+    };
+    chunks[2] = HxChunk {
+        tag: tag::OPTIONS,
+        len: 2,
+        // Options lives at scratch[2..4]; subslice + as_ptr is safe
+        // and bounds-checked, scratch.len() >= 4 already verified.
+        data: scratch[2..4].as_ptr(),
+    };
+    3
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +609,261 @@ mod tests {
         let req = BroadcastRequest { body: &big };
         let mut chunks = [HxChunk::EMPTY];
         assert_eq!(build_broadcast_chunks(&req, &mut chunks), 0);
+    }
+
+    // ---- chat admin ----
+
+    #[test]
+    fn chat_create_emits_uid_chunk() {
+        let mut chunks = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_chat_create_chunks(0x1234, &mut chunks, &mut scratch);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::UID);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0x12, 0x34]);
+    }
+
+    #[test]
+    fn chat_create_rejects_short_buffers() {
+        let mut chunks_short: [HxChunk; 0] = [];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_chat_create_chunks(1, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 1];
+        assert_eq!(
+            build_chat_create_chunks(1, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn chat_invite_emits_cid_then_uid() {
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        let hc = build_chat_invite_chunks(0xdead_beef, 0x42, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::CHAT_ID);
+        assert_eq!(chunks[0].len, 4);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(chunks[1].tag, tag::UID);
+        assert_eq!(chunks[1].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x00, 0x42]);
+    }
+
+    #[test]
+    fn chat_invite_rejects_short_buffers() {
+        let mut chunks_short = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_chat_invite_chunks(1, 1, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 5];
+        assert_eq!(
+            build_chat_invite_chunks(1, 1, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn chat_id_only_builders_share_shape() {
+        // join, part, decline all wrap the same helper — verify each
+        // emits a single CHAT_ID chunk with the BE-encoded cid.
+        for &builder in &[
+            build_chat_join_chunks
+                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+            build_chat_part_chunks
+                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+            build_chat_decline_chunks
+                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+        ] {
+            let mut chunks = [HxChunk::EMPTY];
+            let mut scratch = [0u8; 4];
+            let hc = builder(0xcafe_babe, &mut chunks, &mut scratch);
+            assert_eq!(hc, 1);
+            assert_eq!(chunks[0].tag, tag::CHAT_ID);
+            assert_eq!(chunks[0].len, 4);
+            assert_eq!(
+                unsafe { chunk_bytes(&chunks[0]) },
+                &[0xca, 0xfe, 0xba, 0xbe]
+            );
+        }
+    }
+
+    #[test]
+    fn chat_id_only_rejects_short_buffers() {
+        let mut chunks_short: [HxChunk; 0] = [];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_chat_join_chunks(1, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 2];
+        assert_eq!(
+            build_chat_part_chunks(1, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn chat_subject_emits_cid_then_subject() {
+        let req = ChatSubjectRequest {
+            cid: 0x0000_0007,
+            subject: b"Welcome",
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_chat_subject_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::CHAT_ID);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0, 0, 0, 7]);
+        assert_eq!(chunks[1].tag, tag::CHAT_SUBJECT);
+        assert_eq!(chunks[1].len, 7);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"Welcome");
+    }
+
+    #[test]
+    fn chat_subject_empty_subject_legal() {
+        let req = ChatSubjectRequest { cid: 1, subject: b"" };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_chat_subject_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[1].len, 0);
+        assert!(!chunks[1].data.is_null());
+    }
+
+    #[test]
+    fn chat_subject_rejects_short_buffers() {
+        let req = ChatSubjectRequest { cid: 1, subject: b"" };
+        let mut chunks_short = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_chat_subject_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 3];
+        assert_eq!(
+            build_chat_subject_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    // ---- agreement agree ----
+
+    #[test]
+    fn agreement_agree_emits_three_chunks_in_order() {
+        let req = AgreementAgreeRequest {
+            icon: 0x01f4,
+            display_name: b"misha",
+            options: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_agreement_agree_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::ICON);
+        assert_eq!(chunks[0].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0x01, 0xf4]);
+        assert_eq!(chunks[1].tag, tag::NAME);
+        assert_eq!(chunks[1].len, 5);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"misha");
+        assert_eq!(chunks[2].tag, tag::OPTIONS);
+        assert_eq!(chunks[2].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0x00, 0x00]);
+    }
+
+    #[test]
+    fn agreement_agree_empty_name_legal() {
+        let req = AgreementAgreeRequest {
+            icon: 0,
+            display_name: b"",
+            options: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_agreement_agree_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[1].len, 0);
+        // OPTIONS chunk is always emitted (Mobius-panic invariant).
+        assert_eq!(chunks[2].tag, tag::OPTIONS);
+    }
+
+    #[test]
+    fn agreement_agree_rejects_short_buffers() {
+        let req = AgreementAgreeRequest {
+            icon: 0,
+            display_name: b"",
+            options: 0,
+        };
+        let mut chunks_short = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_agreement_agree_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 3];
+        assert_eq!(
+            build_agreement_agree_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    // ---- oversize-body rejects (chat_subject + agreement_agree) ----
+    //
+    // Same 16-bit-chunk-length boundary checked above for the
+    // chat / msg / broadcast builders, applied to the
+    // variable-length payloads on the chat-admin builders.
+
+    #[test]
+    fn chat_subject_rejects_subject_larger_than_u16_max() {
+        let big = vec![0u8; u16::MAX as usize + 1];
+        let req = ChatSubjectRequest { cid: 1, subject: &big };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_chat_subject_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+    }
+
+    #[test]
+    fn chat_subject_accepts_subject_exactly_u16_max() {
+        let big = vec![b's'; u16::MAX as usize];
+        let req = ChatSubjectRequest { cid: 1, subject: &big };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_chat_subject_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[1].len, u16::MAX);
+    }
+
+    #[test]
+    fn agreement_agree_rejects_name_larger_than_u16_max() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        let req = AgreementAgreeRequest {
+            icon: 0,
+            display_name: &big,
+            options: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_agreement_agree_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
     }
 }

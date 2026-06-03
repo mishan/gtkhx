@@ -9,7 +9,10 @@
 //! pass `htlc->in.buf` + `htlc->in.pos`, and a truncated frame must fail
 //! closed rather than read out of bounds.
 
-use crate::build::{self, BroadcastRequest, ChatRequest, HxChunk, MsgRequest};
+use crate::build::{
+    self, AgreementAgreeRequest, BroadcastRequest, ChatRequest, ChatSubjectRequest, HxChunk,
+    MsgRequest,
+};
 use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
 
@@ -919,6 +922,255 @@ pub unsafe extern "C" fn gtkhx_proto_build_broadcast_chunks(
     let body = as_slice(body_ptr, body_len);
     let req = BroadcastRequest { body };
     build::build_broadcast_chunks(&req, chunks_slice) as i32
+}
+
+// ---- Chat-admin SEND builders ----------------------------------------
+//
+// Same shape as the chat/msg/broadcast shims above: fill the caller's
+// chunks[] + scratch[] and return the chunk count (0 on failure). The
+// scratch buffer holds BE-encoded integer fields; data pointers in the
+// chunk array reference into scratch (and into the subject body for
+// CHAT_SUBJECT).
+
+/// Build `HTLC_HDR_CHAT_CREATE` chunks (just UID). `chunks_cap >= 1`,
+/// `scratch_cap >= 2`.
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_create_chunks(
+    uid: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 1 chunk (UID), 2 scratch bytes (u16 uid). Slices
+    // are sized to the maxima, NOT chunks_cap / scratch_cap — a
+    // too-large caller cap would let from_raw_parts_mut produce an
+    // out-of-bounds slice (UB) before the builder's length check runs.
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 2;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    build::build_chat_create_chunks(uid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_CHAT_INVITE` chunks (CHAT_ID + UID). `chunks_cap >= 2`,
+/// `scratch_cap >= 6`.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_create_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_invite_chunks(
+    cid: u32,
+    uid: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 2 chunks (CHAT_ID + UID), 6 scratch bytes (cid at
+    // +0, uid at +4). See gtkhx_proto_build_chat_create_chunks for the
+    // UB rationale.
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 6;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    build::build_chat_invite_chunks(cid, uid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_CHAT_JOIN` chunks (single CHAT_ID). `chunks_cap >= 1`,
+/// `scratch_cap >= 4`.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_create_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_join_chunks(
+    cid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 1 chunk (CHAT_ID), 4 scratch bytes (the u32 cid).
+    // See gtkhx_proto_build_chat_create_chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    build::build_chat_join_chunks(cid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_CHAT_PART` chunks (single CHAT_ID).
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_create_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_part_chunks(
+    cid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 1 chunk (CHAT_ID), 4 scratch bytes (the u32 cid).
+    // See gtkhx_proto_build_chat_create_chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    build::build_chat_part_chunks(cid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_CHAT_DECLINE` chunks (single CHAT_ID).
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_create_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_decline_chunks(
+    cid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 1 chunk (CHAT_ID), 4 scratch bytes (the u32 cid).
+    // See gtkhx_proto_build_chat_create_chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    build::build_chat_decline_chunks(cid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_CHAT_SUBJECT` chunks (CHAT_ID + subject body).
+/// `chunks_cap >= 2`, `scratch_cap >= 4`. The subject buffer is the
+/// caller's; its bytes are referenced (not copied) by the second
+/// chunk, so it must outlive the eventual `hlwrite_chunks` call.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_chat_create_chunks`]; `subject_ptr` valid
+/// for `subject_len` bytes, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_chat_subject_chunks(
+    cid: u32,
+    subject_ptr: *const u8,
+    subject_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 2 chunks (CHAT_ID + subject body), 4 scratch
+    // bytes (the u32 cid). See gtkhx_proto_build_chat_create_chunks
+    // for the UB rationale.
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // See gtkhx_proto_build_chat_chunks for the rationale: as_slice
+    // turns NULL+nonzero-len into an empty slice, which would
+    // silently turn an intended subject into a zero-length chunk.
+    if subject_ptr.is_null() && subject_len != 0 {
+        return 0;
+    }
+    if subject_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let subject = as_slice(subject_ptr, subject_len);
+    let req = ChatSubjectRequest { cid, subject };
+    build::build_chat_subject_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_AGREEMENTAGREE` chunks (ICON + NAME + OPTIONS, all
+/// three mandatory — Mobius panics without OPTIONS). `chunks_cap >= 3`,
+/// `scratch_cap >= 4`.
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths, or NULL.
+/// `name_ptr` valid for `name_len` bytes, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_agreement_agree_chunks(
+    icon: u16,
+    name_ptr: *const u8,
+    name_len: usize,
+    options: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    // Fixed maxima: 3 chunks (ICON + NAME + OPTIONS — all three
+    // mandatory; Mobius panics without OPTIONS), 4 scratch bytes
+    // (icon at +0, options at +2). See gtkhx_proto_build_chat_create
+    // _chunks for the UB rationale.
+    const MAX_CHUNKS: usize = 3;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // See gtkhx_proto_build_chat_chunks for the rationale: as_slice
+    // would silently turn NULL+nonzero-len into an empty NAME chunk,
+    // putting an empty-nick AGREEMENTAGREE on the wire instead of
+    // surfacing the caller's bug.
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let display_name = as_slice(name_ptr, name_len);
+    let req = AgreementAgreeRequest { icon, display_name, options };
+    build::build_agreement_agree_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
 /// C-ABI result of [`parse::parse_user_part`].

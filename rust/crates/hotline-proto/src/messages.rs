@@ -133,6 +133,20 @@ pub mod tag {
     pub const ACCESS: u16 = 0x006e;
     /// `0x0070` — legacy status colour bitmap (u16).
     pub const COLOUR: u16 = 0x0070;
+    /// `0x0071` — agreement-agree options bitmap (u16). Mandatory on
+    /// the AGREEMENTAGREE wire; Mobius panics without it.
+    ///
+    /// Shares the 0x0071 code point with [`BAN`] (the kick-and-ban
+    /// flag inside HTLC_HDR_USER_KICK — `HTLC_DATA_BAN` in
+    /// `src/hotline.h`). Same opcode-distinct reuse pattern as
+    /// 0x0065 BODY does for chat/msg/news/agreement bodies.
+    pub const OPTIONS: u16 = 0x0071;
+    /// `0x0071` — kick "and ban" flag inside `HTLC_HDR_USER_KICK`
+    /// (`HTLC_DATA_BAN` in `src/hotline.h`). Same code point as
+    /// [`OPTIONS`] above, different opcode context. The chat-admin
+    /// batch only emits OPTIONS, but the alias is here so the Rust
+    /// `OPTIONS` doc can intra-link to it.
+    pub const BAN: u16 = OPTIONS;
     /// `0x0072` — chat / channel id (u32).
     pub const CHAT_ID: u16 = 0x0072;
     /// `0x0073` — chat subject.

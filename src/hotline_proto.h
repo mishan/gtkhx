@@ -387,4 +387,57 @@ extern int32_t gtkhx_proto_build_broadcast_chunks (const uint8_t *body_ptr,
                                                    struct hx_chunk *chunks,
                                                    size_t chunks_cap);
 
+/* HTLC_HDR_CHAT_CREATE: UID. chunks_cap >= 1, scratch_cap >= 2. */
+extern int32_t gtkhx_proto_build_chat_create_chunks (uint16_t uid,
+                                                     struct hx_chunk *chunks,
+                                                     size_t chunks_cap,
+                                                     uint8_t *scratch,
+                                                     size_t scratch_cap);
+
+/* HTLC_HDR_CHAT_INVITE: CHAT_ID + UID. chunks_cap >= 2,
+ * scratch_cap >= 6. */
+extern int32_t gtkhx_proto_build_chat_invite_chunks (uint32_t cid, uint16_t uid,
+                                                     struct hx_chunk *chunks,
+                                                     size_t chunks_cap,
+                                                     uint8_t *scratch,
+                                                     size_t scratch_cap);
+
+/* HTLC_HDR_CHAT_JOIN: single CHAT_ID. chunks_cap >= 1,
+ * scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_chat_join_chunks (uint32_t cid,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap,
+                                                   uint8_t *scratch,
+                                                   size_t scratch_cap);
+
+/* HTLC_HDR_CHAT_PART: single CHAT_ID. chunks_cap >= 1,
+ * scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_chat_part_chunks (uint32_t cid,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap,
+                                                   uint8_t *scratch,
+                                                   size_t scratch_cap);
+
+/* HTLC_HDR_CHAT_DECLINE: single CHAT_ID. chunks_cap >= 1,
+ * scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_chat_decline_chunks (uint32_t cid,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap,
+                                                      uint8_t *scratch,
+                                                      size_t scratch_cap);
+
+/* HTLC_HDR_CHAT_SUBJECT: CHAT_ID + subject body. chunks_cap >= 2,
+ * scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_chat_subject_chunks (
+    uint32_t cid, const uint8_t *subject_ptr, size_t subject_len,
+    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
+    size_t scratch_cap);
+
+/* HTLC_HDR_AGREEMENTAGREE: ICON + NAME + OPTIONS (all three mandatory —
+ * Mobius panics without OPTIONS). chunks_cap >= 3, scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_agreement_agree_chunks (
+    uint16_t icon, const uint8_t *name_ptr, size_t name_len, uint16_t options,
+    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
+    size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */

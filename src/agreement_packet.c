@@ -9,11 +9,12 @@
 
 #include "config.h"
 #include <string.h>
-#include <arpa/inet.h>
+#include <stdint.h>
 #include <glib.h>
 
 #include "compat.h"
 #include "hotline.h"
+#include "hotline_proto.h"
 #include "proto_helpers.h"
 #include "agreement_packet.h"
 
@@ -22,37 +23,23 @@ hx_agreement_agree_build_chunks (const hx_agreement_agree_request *req,
                                  struct hx_chunk *chunks, int chunks_cap,
                                  guint8 *scratch, size_t scratch_cap)
 {
-    if (!req || !chunks || !scratch) {
+    if (!req) {
         return 0;
     }
-    if (chunks_cap < HX_AGREEMENT_AGREE_MAX_CHUNKS) {
+    /* chunks_cap is signed in the public C API; a negative value
+     * coming from a buggy caller would wrap to a huge size_t on the
+     * (size_t) cast below and slip past the Rust FFI's chunks_cap <
+     * MAX_CHUNKS guard. Fail closed here so the cast only ever runs
+     * against a non-negative value. */
+    if (chunks_cap < 0) {
         return 0;
     }
-    if (scratch_cap < 4) {
-        /* Two u16s laid out back-to-back. */
-        return 0;
-    }
-
-    /* Lay out the two big-endian u16s in scratch. icon at offset 0,
-     * options at offset 2. Chunks point at those slots. */
-    guint16 icon_be    = htons (req->icon);
-    guint16 options_be = htons (req->options);
-    memcpy (scratch + 0, &icon_be,    2);
-    memcpy (scratch + 2, &options_be, 2);
-
-    chunks[0].type = HTLC_DATA_ICON;
-    chunks[0].len  = 2;
-    chunks[0].data = scratch + 0;
-
-    chunks[1].type = HTLC_DATA_NAME;
-    chunks[1].len  = req->display_name_len;
-    chunks[1].data = (req->display_name && req->display_name_len)
-                         ? (const void *) req->display_name
-                         : (const void *) "";
-
-    chunks[2].type = HTLC_DATA_OPTIONS;
-    chunks[2].len  = 2;
-    chunks[2].data = scratch + 2;
-
-    return HX_AGREEMENT_AGREE_MAX_CHUNKS;
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_agreement_agree
+     * _chunks in the Rust hotline-proto crate. The wire shape (ICON +
+     * NAME + OPTIONS, all three mandatory — Mobius panics without
+     * OPTIONS) is unchanged. */
+    return (int)gtkhx_proto_build_agreement_agree_chunks (
+        req->icon, (const uint8_t *)req->display_name,
+        req->display_name_len, req->options, chunks,
+        (size_t)chunks_cap, scratch, scratch_cap);
 }
