@@ -1724,7 +1724,6 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 void
 rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 {
-    struct hl_userlist_hdr *uh;
     struct hx_user *user;
     guint16 nlen, uid;
     int new;
@@ -1732,19 +1731,23 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
     dh_start (htlc)
     {
         if (_type == HTLS_DATA_USER_LIST) {
-            /* Body layout (`_len` bytes total, after the 4-byte
-			 * hl_data_hdr that dh_start already consumed):
-			 *   u16 uid, u16 icon, u16 color, u16 nlen, u8 name[],
-			 *   [optional u32 nick_color trailer per Colored-
-			 *   Nicknames extension]
-			 * Minimum legal body = 8 bytes (header tail + zero-len
-			 * name). Anything shorter is malformed; skip rather
-			 * than risk an out-of-bounds read. */
-            if (_len < 8) {
+            /* Phase R2: chunk-record parsing moved to Rust
+			 * gtkhx_proto_parse_user_list_record. The parser handles
+			 * the 8-byte fixed header, two-stage nlen clamp
+			 * (avail-first, then cap-31), strip_ansi, and the
+			 * Colored-Nicknames trailer at `8 + clamped_nlen`. The C
+			 * side keeps the hx_user creation, the "is this us?"
+			 * adoption gate that sets htlc->uid / ->color, and the
+			 * GtkhxSession signal emit — all of which need
+			 * session/chat objects the Rust layer doesn't see. */
+            struct gtkhx_proto_user_list_record rec;
+            char name_buf[32];
+            if (!gtkhx_proto_parse_user_list_record (
+                    dh->data, _len, (uint8_t *)name_buf, sizeof (name_buf),
+                    &rec)) {
                 continue;
             }
-            uh = (struct hl_userlist_hdr *)dh;
-            HN16 (&uid, &uh->uid);
+            uid = rec.uid;
             user = hx_user_with_uid (chat, uid);
             /* Phase 5: reset `new` per chunk. Previously declared
 			 * once at the top of the function and set to 1 inside
@@ -1767,47 +1770,19 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 user = hx_user_new (chat, uid);
                 chat->nusers++;
             }
-            HN16 (&user->uid, &uh->uid);
-            HN16 (&user->icon, &uh->icon);
-            HN16 (&user->color, &uh->color);
-            HN16 (&nlen, &uh->nlen);
-            /* Two-stage clamp: first against bytes actually
-			 * available in the chunk body (defends against a
-			 * malicious or buggy server lying about nlen vs. the
-			 * chunk length); then against user->name's 31-byte
-			 * cap. The body-available clamp is load-bearing for
-			 * the memcpy below and for the trailer offset math. */
-            const gsize avail = _len - 8;
-            if (nlen > avail) {
-                nlen = (guint16) avail;
-            }
-            if (nlen > 31) {
-                nlen = 31;
-            }
-            memcpy (user->name, uh->name, nlen);
-            strip_ansi (user->name, nlen);
+            user->uid = rec.uid;
+            user->icon = rec.icon;
+            user->color = rec.color;
+            nlen = rec.name_len;
+            memcpy (user->name, name_buf, nlen);
             user->name[nlen] = 0;
-            /* Colored-Nicknames extension. Servers that
-			 * implement the spec append 4 trailing bytes to
-			 * every hl_userlist_hdr in USER_LIST replies: the
-			 * per-user 0x00RRGGBB nick color, big-endian.
-			 * HX_NICK_COLOR_NONE (0xffffffff) means "no color
-			 * set, fall back to status palette". Confirmed
-			 * against Janus in the wild; other implementations
-			 * are likely to vary in whether they emit the
-			 * trailer at all. Standard pre-extension entry has
-			 * _len == 8 + nlen (uid/icon/color/nlen tail +
-			 * name); the extension pushes that to 8 + nlen + 4.
-			 * Read only when present so we stay compatible with
-			 * servers that don't emit it. The trailer lives at
-			 * &uh->name[nlen]. */
-            const gsize body_required = 8 + nlen + 4;
-            if (_len >= body_required) {
-                guint32 col_be;
-                memcpy (&col_be, &uh->name[nlen], 4);
-                user->nick_color = g_ntohl (col_be);
+            /* Colored-Nicknames extension: trailer present in this
+			 * record? rec.got_nick_color is 0/1; on 0 the Rust shim
+			 * substitutes HX_NICK_COLOR_NONE (0xffffffff). */
+            if (rec.got_nick_color) {
+                user->nick_color = rec.nick_color;
                 if (uid == htlc->uid) {
-                    htlc->nick_color = user->nick_color;
+                    htlc->nick_color = rec.nick_color;
                 }
             }
             if (!htlc->uid && !strcmp (user->name, htlc->name) &&

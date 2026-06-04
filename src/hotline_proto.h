@@ -144,6 +144,35 @@ extern bool gtkhx_proto_parse_user_change (const uint8_t *msg, size_t msglen,
                                            uint8_t *buf, size_t bufcap,
                                            struct gtkhx_proto_user_change *out);
 
+struct gtkhx_proto_user_list_record {
+    /* HX_NICK_COLOR_NONE (0xffffffff) when no Colored-Nicknames
+     * trailer was present; otherwise the 0x00RRGGBB nick colour. */
+    uint32_t nick_color;
+    uint16_t uid;
+    uint16_t icon;
+    uint16_t color;
+    /* 0/1 — set iff the Colored-Nicknames trailer was present in
+     * this record (chunk had at least 8 + clamped_nlen + 4 bytes). */
+    uint8_t got_nick_color;
+    /* Bytes written to name_buf, excluding the trailing NUL. */
+    uint16_t name_len;
+};
+
+/* Parse one HTLS_DATA_USER_LIST chunk's payload — the per-user
+ * record body, not a whole frame. Writes the strip_ansi'd nickname
+ * into name_buf (NUL-terminated, capped at name_cap-1) and fills
+ * *out. Returns false on NULL out / NULL name_buf / zero name_cap /
+ * a chunk shorter than the 8 fixed bytes (mirroring the C
+ * extractor silently skipping malformed records); otherwise true.
+ *
+ * Caller iterates HTLS_DATA_USER_LIST chunks (with the dh_start /
+ * dh_end macros in the rcv path) and invokes this for each chunk's
+ * (data, len) pair. */
+extern bool gtkhx_proto_parse_user_list_record (
+    const uint8_t *data, size_t data_len,
+    uint8_t *name_buf, size_t name_cap,
+    struct gtkhx_proto_user_list_record *out);
+
 /* ---- Account / user-info reply parsers (post-TASK payloads) ---- */
 
 struct gtkhx_proto_user_info {

@@ -687,6 +687,102 @@ pub fn parse_news_categoryitem(data: &[u8], max_name: usize) -> Option<NewsDirEn
     })
 }
 
+// ---- HTLS_DATA_USER_LIST record ----------------------------------------
+//
+// Per-user record carried inside `HTLS_DATA_USER_LIST` chunks. The same
+// wire shape appears in two places:
+//
+//   - `HTLS_HDR_USER_SELFINFO` carries exactly one record (our self).
+//     `parse_selfinfo` pulls the uid/icon/name out for the login state
+//     machine; the COLOR chunk (separate from the trailer here) carries
+//     our colour.
+//   - The post-`HTLC_HDR_USER_GETLIST` TASK reply carries N records,
+//     one per online user, in `rcv_task_user_list`. That walker is in
+//     C and still drives GTK side effects (hx_user_new, signal emit).
+//
+// Body layout (`chunk.data` after the 4-byte data header that
+// `ChunkIter` already consumed):
+//
+//   u16 uid, u16 icon, u16 color, u16 nlen, u8 name[nlen],
+//   [optional u32 nick_color trailer per Colored-Nicknames extension]
+//
+// The trailer is the 4-byte big-endian 0x00RRGGBB per-user nick
+// colour. When absent the caller falls back to the status palette
+// (the `nick_color: None` case here corresponds to the C
+// `HX_NICK_COLOR_NONE` sentinel).
+
+/// One parsed USER_LIST record.
+#[derive(Debug, Clone)]
+pub struct UserListRecord {
+    pub uid: u16,
+    pub icon: u16,
+    pub color: u16,
+    /// `strip_ansi`'d name bytes, capped at `max_name`. Two-stage
+    /// clamp: first against bytes actually available in the chunk
+    /// (defends against a malicious or buggy server lying about
+    /// `nlen` vs. the chunk length); then against `max_name`.
+    pub name: Vec<u8>,
+    /// `Some(0x00RRGGBB)` when the Colored-Nicknames trailer was
+    /// present (chunk had at least `8 + clamped_nlen + 4` bytes).
+    /// `None` mirrors the C `HX_NICK_COLOR_NONE` (0xffffffff)
+    /// sentinel — callers that need the u32 sentinel can substitute
+    /// via [`NICK_COLOR_NONE`].
+    pub nick_color: Option<u32>,
+}
+
+/// Parse a single `HTLS_DATA_USER_LIST` chunk payload. Returns
+/// `None` when fewer than the 8 fixed bytes are present (a
+/// malformed record the C extractor would have skipped because
+/// the dh_start macro caps `_len`).
+///
+/// `max_name` caps the name length (the C handlers use 31). The
+/// trailer-presence test uses the *clamped* nlen (matching the C
+/// `&uh->name[nlen]` indexing after the avail/31 clamp).
+pub fn parse_user_list_record(data: &[u8], max_name: usize) -> Option<UserListRecord> {
+    if data.len() < 8 {
+        return None;
+    }
+    let uid = u16::from_be_bytes([data[0], data[1]]);
+    let icon = u16::from_be_bytes([data[2], data[3]]);
+    let color = u16::from_be_bytes([data[4], data[5]]);
+    let mut nlen = u16::from_be_bytes([data[6], data[7]]) as usize;
+    let avail = data.len() - 8;
+    // Two-stage clamp matches the C extractor's order: chunk-body
+    // availability first, then the caller's max.
+    if nlen > avail {
+        nlen = avail;
+    }
+    if nlen > max_name {
+        nlen = max_name;
+    }
+    let mut name = data[8..8 + nlen].to_vec();
+    strip_ansi(&mut name);
+    // Colored-Nicknames trailer lives immediately after the
+    // (clamped) name bytes — body has length 8 + nlen + 4 when it's
+    // present. The clamp matters here: if the caller's max_name
+    // truncated nlen below the server's actual name length, the
+    // trailer offset still uses the clamped value (matches the C
+    // `&uh->name[nlen]` indexing where nlen is the post-clamp local).
+    let trailer_offset = 8 + nlen;
+    let nick_color = if data.len() >= trailer_offset + 4 {
+        Some(u32::from_be_bytes([
+            data[trailer_offset],
+            data[trailer_offset + 1],
+            data[trailer_offset + 2],
+            data[trailer_offset + 3],
+        ]))
+    } else {
+        None
+    };
+    Some(UserListRecord {
+        uid,
+        icon,
+        color,
+        name,
+        nick_color,
+    })
+}
+
 // ---- HTLS_HDR_USER_PART ------------------------------------------------
 
 /// Parsed `HTLS_HDR_USER_PART`.
@@ -1388,6 +1484,128 @@ mod tests {
         let inv = parse_chat_invite(&m, m.len(), 31);
         assert_eq!(inv.name.len(), 31);
         assert_eq!(inv.name[0], b'N');
+    }
+
+    // ---- user_list record ----
+
+    /// Build a USER_LIST record body: uid+icon+color+nlen (BE u16
+    /// each) + name + optional trailer.
+    fn user_list_body(
+        uid: u16,
+        icon: u16,
+        color: u16,
+        nlen_field: u16,
+        name: &[u8],
+        trailer: Option<u32>,
+    ) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&uid.to_be_bytes());
+        v.extend_from_slice(&icon.to_be_bytes());
+        v.extend_from_slice(&color.to_be_bytes());
+        v.extend_from_slice(&nlen_field.to_be_bytes());
+        v.extend_from_slice(name);
+        if let Some(c) = trailer {
+            v.extend_from_slice(&c.to_be_bytes());
+        }
+        v
+    }
+
+    #[test]
+    fn user_list_record_basic() {
+        let body = user_list_body(0x1234, 0x05, 0x02, 3, b"bob", None);
+        let r = parse_user_list_record(&body, 31).expect("ok");
+        assert_eq!(r.uid, 0x1234);
+        assert_eq!(r.icon, 0x05);
+        assert_eq!(r.color, 0x02);
+        assert_eq!(r.name, b"bob");
+        assert!(r.nick_color.is_none());
+    }
+
+    #[test]
+    fn user_list_record_with_colored_nicknames_trailer() {
+        let body = user_list_body(1, 0, 0, 3, b"bob", Some(0x00ff_8800));
+        let r = parse_user_list_record(&body, 31).expect("ok");
+        assert_eq!(r.nick_color, Some(0x00ff_8800));
+    }
+
+    #[test]
+    fn user_list_record_short_chunk_rejected() {
+        // Body shorter than the 8 fixed bytes → None (the C
+        // extractor's `if (_len < 8) continue;` analogue).
+        for len in 0..8 {
+            let data = vec![0u8; len];
+            assert!(
+                parse_user_list_record(&data, 31).is_none(),
+                "len={len} should be rejected"
+            );
+        }
+        // Exactly 8 bytes (zero-length name) is the minimum legal
+        // record.
+        let body = user_list_body(0, 0, 0, 0, &[], None);
+        assert_eq!(body.len(), 8);
+        assert!(parse_user_list_record(&body, 31).is_some());
+    }
+
+    #[test]
+    fn user_list_record_clamps_nlen_to_avail() {
+        // Server lies: declares nlen=50 but only 5 name bytes
+        // follow. Two-stage clamp first against avail, so we get
+        // 5 name bytes, no trailer (would need len 8+50+4).
+        let body = user_list_body(1, 0, 0, 50, b"short", None);
+        let r = parse_user_list_record(&body, 31).expect("ok");
+        assert_eq!(r.name, b"short");
+        assert!(r.nick_color.is_none());
+    }
+
+    #[test]
+    fn user_list_record_clamps_nlen_to_max_name() {
+        // Server sends nlen=100 with 100 bytes available, but
+        // caller's max_name=10. We get 10 bytes.
+        let mut name = Vec::new();
+        name.extend(std::iter::repeat(b'x').take(100));
+        let body = user_list_body(1, 0, 0, 100, &name, None);
+        let r = parse_user_list_record(&body, 10).expect("ok");
+        assert_eq!(r.name.len(), 10);
+    }
+
+    #[test]
+    fn user_list_record_strip_ansi_applied_to_name() {
+        // 0x1b (ESC, in the strip_ansi band 14..=30 minus
+        // {15,22}) folds to 0x5b ('[').
+        let name = b"a\x1bb";
+        let body = user_list_body(1, 0, 0, name.len() as u16, name, None);
+        let r = parse_user_list_record(&body, 31).expect("ok");
+        assert_eq!(r.name, b"a[b");
+    }
+
+    #[test]
+    fn user_list_record_trailer_uses_clamped_nlen() {
+        // When max_name truncates nlen, the trailer offset uses
+        // the clamped value — matches the C `&uh->name[nlen]`
+        // indexing where `nlen` is the post-clamp local. With
+        // max_name=5 and an actual 10-byte name, the trailer is
+        // read at offset 8+5=13, which IS the 5th-from-end name
+        // byte rather than the actual trailer position. This is
+        // the C behaviour: callers using a max_name smaller than
+        // 31 on a real wire record would mis-read; the protocol
+        // caps real names at 31 so this case doesn't fire in
+        // practice but the contract is pinned.
+        let name = b"0123456789";
+        let mut body = user_list_body(1, 0, 0, 10, name, None);
+        body.extend_from_slice(&0x00ff_0000u32.to_be_bytes());
+        let r = parse_user_list_record(&body, 5).expect("ok");
+        // Trailer read from offset 8+5=13, which is bytes
+        // [name[5..9]] of name = "56789" interpreted as 0x35363738.
+        assert_eq!(r.nick_color, Some(0x3536_3738));
+    }
+
+    #[test]
+    fn user_list_record_no_trailer_when_too_short() {
+        // Body is 8 + nlen + 3 — one byte short of the trailer.
+        let mut body = user_list_body(1, 0, 0, 3, b"bob", None);
+        body.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+        let r = parse_user_list_record(&body, 31).expect("ok");
+        assert!(r.nick_color.is_none());
     }
 
     // ---- user part ----
