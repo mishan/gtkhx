@@ -1893,6 +1893,37 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_mkdir_chunks(
     build::build_file_mkdir_chunks(dir, chunks_slice) as i32
 }
 
+/// Build `HTLC_HDR_FILE_LIST` chunks: single DIR. Same contract as
+/// [`gtkhx_proto_build_file_mkdir_chunks`] — the wire shape is
+/// identical, only the header opcode differs.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_file_mkdir_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_list_chunks(
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if dir_ptr.is_null() && dir_len != 0 {
+        return 0;
+    }
+    if dir_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let dir = as_slice(dir_ptr, dir_len);
+    build::build_file_list_chunks(dir, chunks_slice) as i32
+}
+
 /// Common implementation for the three file-ops opcodes that share
 /// the FILE_NAME + optional DIR wire shape. `has_dir` is a 0/1 flag —
 /// when non-zero, emit DIR with the given bytes; when zero, omit it

@@ -159,7 +159,10 @@ ping_tick (gpointer data)
         ping_timer_id = 0;
         return G_SOURCE_REMOVE;
     }
-    hlwrite (htlc, HTLC_HDR_PING, 0, 0);
+    /* Phase R2: PING is a zero-chunk opcode. Send directly through
+	 * hlwrite_chunks with hc=0 so the trace path matches the rest of
+	 * the SEND opcodes (no fallback to the variadic hlwrite). */
+    hlwrite_chunks (htlc, HTLC_HDR_PING, 0, NULL, 0);
     return G_SOURCE_CONTINUE;
 }
 

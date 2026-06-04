@@ -129,7 +129,8 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 * gated on HL_ACCESS_READ_NEWS. */
     task_new (htlc, RCV_TASK_FN (rcv_task_news_users),
               chat_with_cid (&the_session, 0), 0, "who");
-    hlwrite (htlc, HTLC_HDR_USER_GETLIST, 0, 0);
+    /* Phase R2: USER_GETLIST is a zero-chunk opcode. */
+    hlwrite_chunks (htlc, HTLC_HDR_USER_GETLIST, 0, NULL, 0);
 
     /* Chat-history extension: if the server echoed our cap bit in
 	 * the LOGIN reply, request a batch for public chat (channel 0).
@@ -1978,10 +1979,20 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                     ncfl->path = g_strdup (pathbuf);
                 }
                 hldir = path_to_hldir (pathbuf, &hldirlen, 0);
-                task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list),
-                          ncfl, 0, "ls_complete");
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1,
-                         HTLC_DATA_DIR, hldirlen, hldir);
+
+                /* Phase R2: chunk layout moved to
+				 * gtkhx_proto_build_file_list_chunks. Build BEFORE
+				 * task_new — see hx_send_msg for the rationale. */
+                struct hx_chunk chunks[1];
+                int hc = (int)gtkhx_proto_build_file_list_chunks (
+                    hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+                if (hc > 0) {
+                    task_new (&the_session.htlc,
+                              RCV_TASK_FN (rcv_task_file_list), ncfl, 0,
+                              "ls_complete");
+                    hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_LIST, 0,
+                                    chunks, hc);
+                }
                 g_free (hldir);
             } else if (cfl->completing == COMPLETE_GET_R) {
                 struct htxf_conn *htxf;

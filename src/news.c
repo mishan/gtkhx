@@ -391,7 +391,8 @@ void
 hx_get_news (struct htlc_conn *htlc)
 {
     task_new (htlc, RCV_TASK_FN (rcv_task_news_file), 0, 0, "news");
-    hlwrite (htlc, HTLC_HDR_NEWS_GETFILE, 0, 0);
+    /* Phase R2: NEWS_GETFILE is a zero-chunk opcode. */
+    hlwrite_chunks (htlc, HTLC_HDR_NEWS_GETFILE, 0, NULL, 0);
 }
 
 void

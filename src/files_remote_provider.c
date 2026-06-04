@@ -22,6 +22,7 @@
 #include "session.h"
 #include "hotline.h"
 #include "hl_access.h"
+#include "hotline_proto.h"
 #include "network.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -164,10 +165,17 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     g_hash_table_insert (pending_listings, self, g_object_ref (self));
 
     hldir = path_to_hldir (cfl->path, &hldirlen, 0);
-    task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl, self,
-              "ls");
-    hlwrite (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, 1, HTLC_DATA_DIR,
-             hldirlen, hldir);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_list_chunks.
+	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_file_list_chunks (
+        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl,
+                  self, "ls");
+        hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
