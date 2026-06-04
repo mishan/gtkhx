@@ -31,7 +31,9 @@
 
 #include "hx.h"
 #include "hl_access.h"
+#include "hotline_proto.h"
 #include "network.h"
+#include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "gtkutil.h"
 #include "gtkhx.h"
 #include "tasks.h"
@@ -395,8 +397,6 @@ hx_get_news (struct htlc_conn *htlc)
 void
 hx_post_news (struct htlc_conn *htlc, const char *news, guint16 len)
 {
-    task_new (htlc, 0, 0, 0, "post");
-
     /* Phase E2/E3: news body — UTF-8 / Mac Roman + LF→CR for
 	 * legacy servers. The flat 1.0 news file is line-oriented,
 	 * so getting line endings right is what makes posts render
@@ -406,8 +406,17 @@ hx_post_news (struct htlc_conn *htlc, const char *news, guint16 len)
     char *wire
         = gtkhx_text_for_wire (news, len, utf8, /*is_body=*/TRUE, &wire_len);
 
-    hlwrite (htlc, HTLC_HDR_NEWS_POST, 0, 1, HTLC_DATA_NEWS_POST,
-             (guint16)wire_len, wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_post_chunks.
+	 * Build BEFORE task_new — see hx_send_msg for the rationale
+	 * (task_new snapshots htlc->trans into a pending entry; a builder
+	 * failure must not leave a phantom task behind). */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_news_post_chunks (
+        (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "post");
+        hlwrite_chunks (htlc, HTLC_HDR_NEWS_POST, 0, chunks, hc);
+    }
     g_free (wire);
 }
 

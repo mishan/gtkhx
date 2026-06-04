@@ -500,4 +500,39 @@ extern int32_t gtkhx_proto_build_account_modify_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
+/* HTLC_HDR_NEWS_POST (1.0 flat news): single body chunk. No scratch.
+ * chunks_cap >= 1. Returns 1 on success, or 0 on validation failure
+ * (NULL pointer, short buffer, body_len > u16 max). */
+extern int32_t gtkhx_proto_build_news_post_chunks (const uint8_t *body_ptr,
+                                                   size_t body_len,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap);
+
+/* HTLC_HDR_NEWSCATLIST: single HTLC_DATA_NEWSPATH chunk. chunks_cap >= 1.
+ * Returns 1 on success, or 0 on validation failure. */
+extern int32_t gtkhx_proto_build_news_catlist_chunks (const uint8_t *path_ptr,
+                                                      size_t path_len,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap);
+
+/* HTLC_HDR_NEWSDIRLIST: same shape as NEWSCATLIST. */
+extern int32_t gtkhx_proto_build_news_dirlist_chunks (const uint8_t *path_ptr,
+                                                      size_t path_len,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap);
+
+/* HTLC_HDR_DELNEWSDIRCAT: same shape as NEWSCATLIST (path tells the
+ * server whether to delete a folder or a category). */
+extern int32_t gtkhx_proto_build_news_delete_chunks (const uint8_t *path_ptr,
+                                                     size_t path_len,
+                                                     struct hx_chunk *chunks,
+                                                     size_t chunks_cap);
+
+/* HTLC_HDR_MAKENEWSDIR: same shape as NEWSCATLIST (the last path
+ * component is the new directory name). */
+extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
+                                                    size_t path_len,
+                                                    struct hx_chunk *chunks,
+                                                    size_t chunks_cap);
+
 #endif /* _HOTLINE_PROTO_H */

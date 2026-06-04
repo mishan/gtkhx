@@ -168,6 +168,10 @@ pub mod tag {
     /// HTLC_HDR_NEWSCATLIST reply payload). One catlist chunk per
     /// reply; body shape is documented on [`crate::parse::parse_catlist`].
     pub const CATLIST: u16 = 0x0141;
+    /// `0x0145` — 1.5 news path (server → client and client → server).
+    /// The path component encoding is the responsibility of the
+    /// caller (`path_to_hldir` on the C side).
+    pub const NEWSPATH: u16 = 0x0145;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 
