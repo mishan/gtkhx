@@ -657,4 +657,30 @@ extern int32_t gtkhx_proto_build_file_putfolder_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
+/* HTLC_HDR_FILE_GET: FILE_NAME + optional DIR + optional RFLT (74
+ * bytes — fixed-size resume payload built by the C caller).
+ * has_dir / has_rflt are 0/1 flags; rflt_ptr must point to exactly
+ * 74 bytes when has_rflt is set. chunks_cap >= 3. Returns 1..=3 on
+ * success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_file_get_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
+    uint8_t has_rflt, const uint8_t *rflt_ptr,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* HTLC_HDR_FILE_PUT: FILE_NAME + optional DIR + optional FILE_PREVIEW
+ * (2 bytes "\0\1", set when overwriting an existing remote file) +
+ * HTXF_SIZE (u32 BE, host order in) + optional XFERSIZE64 (u64 BE,
+ * host order in; large-files mode). has_dir / has_preview /
+ * has_size64 are 0/1 flags. chunks_cap >= 5, scratch_cap >= 12 (u32
+ * at +0, u64 at +4). Returns 2..=5 on success, 0 on validation
+ * failure. */
+extern int32_t gtkhx_proto_build_file_put_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
+    uint8_t has_preview, uint32_t size,
+    uint8_t has_size64, uint64_t size64,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */

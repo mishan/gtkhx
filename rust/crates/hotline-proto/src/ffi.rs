@@ -2306,3 +2306,139 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_putfolder_chunks(
     };
     build::build_file_putfolder_chunks(&req, chunks_slice, scratch_slice) as i32
 }
+
+/// Build `HTLC_HDR_FILE_GET` chunks: FILE_NAME + optional DIR +
+/// optional RFLT (74 bytes). `has_dir` / `has_rflt` are 0/1 flags.
+/// When `has_rflt` is non-zero, `rflt_ptr` must point to exactly 74
+/// bytes (the resume-payload size is fixed; the C caller builds the
+/// binary blob with fork offsets baked in). `chunks_cap >= 3`.
+/// Returns 1..=3 on success, 0 on validation failure (NULL `chunks`,
+/// NULL payload pointer with non-zero len, oversize field, RFLT
+/// length not exactly 74, or short slice).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `name_ptr` /
+/// `dir_ptr` valid for their respective lengths (or NULL when the
+/// matching length is 0). `rflt_ptr` valid for 74 bytes when
+/// `has_rflt != 0` (or NULL when both `has_rflt` is 0).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_get_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    has_rflt: u8,
+    rflt_ptr: *const u8,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 3;
+    const RFLT_LEN: usize = 74;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    let dir_opt = if has_dir != 0 {
+        if dir_ptr.is_null() && dir_len != 0 {
+            return 0;
+        }
+        if dir_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(dir_ptr, dir_len))
+    } else {
+        None
+    };
+    let rflt_opt = if has_rflt != 0 {
+        if rflt_ptr.is_null() {
+            return 0;
+        }
+        Some(slice::from_raw_parts(rflt_ptr, RFLT_LEN))
+    } else {
+        None
+    };
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = build::FileGetRequest {
+        name: as_slice(name_ptr, name_len),
+        dir: dir_opt,
+        rflt: rflt_opt,
+    };
+    build::build_file_get_chunks(&req, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_FILE_PUT` chunks: FILE_NAME + optional DIR +
+/// optional FILE_PREVIEW(2) + HTXF_SIZE(u32 BE) + optional
+/// XFERSIZE64(u64 BE). `has_dir` / `has_preview` / `has_size64` are
+/// 0/1 flags. `size` is the clamped-to-u32 transfer size (caller
+/// clamps a u64 down before the call); `size64` is the true u64
+/// total used only when `has_size64 != 0` (large-files mode).
+/// `chunks_cap >= 5` (the shim always reserves the full slot count);
+/// `scratch_cap >= 12` (u32 at +0, u64 at +4). Returns 2..=5 on
+/// success, 0 on validation failure.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `scratch` valid
+/// for `scratch_cap` bytes (or NULL); `name_ptr` / `dir_ptr` valid
+/// for their respective lengths (or NULL when the matching length
+/// is 0).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_put_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    has_preview: u8,
+    size: u32,
+    has_size64: u8,
+    size64: u64,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 5;
+    const MAX_SCRATCH: usize = 12;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    let dir_opt = if has_dir != 0 {
+        if dir_ptr.is_null() && dir_len != 0 {
+            return 0;
+        }
+        if dir_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(dir_ptr, dir_len))
+    } else {
+        None
+    };
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let req = build::FilePutRequest {
+        name: as_slice(name_ptr, name_len),
+        dir: dir_opt,
+        has_preview: has_preview != 0,
+        size,
+        size64: if has_size64 != 0 { Some(size64) } else { None },
+    };
+    build::build_file_put_chunks(&req, chunks_slice, scratch_slice) as i32
+}

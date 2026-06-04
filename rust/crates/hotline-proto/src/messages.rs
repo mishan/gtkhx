@@ -163,6 +163,16 @@ pub mod tag {
     /// `path_to_hldir` on the C side; the builders treat it as opaque
     /// payload).
     pub const DIR: u16 = 0x00ca;
+    /// `0x00cb` — "Resume FLT" payload on FILE_GET (74 bytes:
+    /// `"RFLT"` magic + version + DATA / MACR fork offsets, with
+    /// each fork's resume position big-endian-encoded at fixed
+    /// offsets 46 / 62). The C caller builds the binary blob; the
+    /// builder treats it as opaque payload bytes.
+    pub const RFLT: u16 = 0x00cb;
+    /// `0x00cc` — FILE_PREVIEW marker on FILE_PUT (2 bytes `"\0\1"`),
+    /// signalling preview / overwrite-existing semantics when the
+    /// file already exists at the destination path.
+    pub const FILE_PREVIEW: u16 = 0x00cc;
     /// `0x00d2` — file comment string (multi-line; CR2LF normalisation
     /// applied at the caller).
     pub const FILE_COMMENT: u16 = 0x00d2;
@@ -211,6 +221,12 @@ pub mod tag {
     /// `0x014e` — 1.5 news "parent thread id" (u32 BE). Required by
     /// the spec but not actually consulted by mhxd; gtkhx sends 0.
     pub const PARENTTHREAD: u16 = 0x014e;
+    /// `0x01f3` — Large-Files extension: 64-bit transfer size
+    /// companion to `HTXF_SIZE` (u64 BE, 8 bytes). Sent on FILE_PUT
+    /// when `CAP_LARGE_FILES` was negotiated; receivers in large-
+    /// file mode prefer this over the 32-bit legacy field, which is
+    /// clamped at `0xFFFFFFFF` when the true size overflows.
+    pub const XFERSIZE64: u16 = 0x01f3;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 

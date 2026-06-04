@@ -1517,6 +1517,202 @@ pub fn build_file_putfolder_chunks(
     hc + 1
 }
 
+// ---- xfers.c send opcodes (FILE_GET / FILE_PUT) ---------------------
+//
+// HTLC_HDR_FILE_GET:  NAME + optional DIR + optional RFLT(74). RFLT
+//                     is present iff the local file already has a
+//                     partial copy and we want to resume; the C
+//                     caller builds the 74-byte blob with the fork
+//                     offsets baked in.
+//
+// HTLC_HDR_FILE_PUT:  NAME + optional DIR + optional FILE_PREVIEW(2)
+//                     + HTXF_SIZE(u32 BE) + optional XFERSIZE64(u64
+//                     BE). FILE_PREVIEW is "\0\1" and indicates the
+//                     file already exists at the destination (the
+//                     server picks rename / overwrite based on
+//                     this); XFERSIZE64 is the Large-Files cap.
+//                     HTXF_SIZE is the clamped-to-u32 size; the
+//                     caller is responsible for clamping a u64 down
+//                     to u32 before the call.
+
+/// Request data for [`build_file_get_chunks`].
+pub struct FileGetRequest<'a> {
+    /// `HTLC_DATA_FILE_NAME` — file basename, already encoded.
+    pub name: &'a [u8],
+    /// `HTLC_DATA_DIR` — parent directory bytes. `None` skips.
+    pub dir: Option<&'a [u8]>,
+    /// `HTLC_DATA_RFLT` — 74-byte resume payload (the C caller
+    /// builds the binary blob with fork offsets at `[46..50]` /
+    /// `[62..66]`). `None` skips (no-resume / fresh download).
+    /// The builder rejects any length other than 0 or 74 — RFLT
+    /// is a fixed-size record on the wire.
+    pub rflt: Option<&'a [u8]>,
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_GET`. Wire shape:
+///
+/// 1. `HTLC_DATA_FILE_NAME` — always
+/// 2. `HTLC_DATA_DIR`       — when `dir.is_some()`
+/// 3. `HTLC_DATA_RFLT`      — when `rflt.is_some()` (resume)
+///
+/// Returns the chunk count (1..=3) on success, or 0 on validation
+/// failure (`chunks` slice too small for the chunks that will be
+/// emitted, `name.len() > u16::MAX`, `dir.len() > u16::MAX`, or
+/// `rflt.is_some() && rflt.len() != 74`).
+pub fn build_file_get_chunks(
+    req: &FileGetRequest<'_>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if req.name.len() > u16::MAX as usize {
+        return 0;
+    }
+    if let Some(d) = req.dir {
+        if d.len() > u16::MAX as usize {
+            return 0;
+        }
+    }
+    if let Some(r) = req.rflt {
+        if r.len() != 74 {
+            return 0;
+        }
+    }
+    let needed = 1 + usize::from(req.dir.is_some()) + usize::from(req.rflt.is_some());
+    if chunks.len() < needed {
+        return 0;
+    }
+
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    let mut hc = 1;
+    if let Some(d) = req.dir {
+        chunks[hc] = HxChunk {
+            tag: tag::DIR,
+            len: d.len() as u16,
+            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+        };
+        hc += 1;
+    }
+    if let Some(r) = req.rflt {
+        chunks[hc] = HxChunk {
+            tag: tag::RFLT,
+            len: 74,
+            data: r.as_ptr(),
+        };
+        hc += 1;
+    }
+    hc
+}
+
+/// Request data for [`build_file_put_chunks`].
+pub struct FilePutRequest<'a> {
+    /// `HTLC_DATA_FILE_NAME` — file basename, already encoded.
+    pub name: &'a [u8],
+    /// `HTLC_DATA_DIR` — parent directory bytes. `None` skips.
+    pub dir: Option<&'a [u8]>,
+    /// `HTLC_DATA_FILE_PREVIEW` — when `true`, emit the 2-byte
+    /// `"\0\1"` preview marker (signals overwrite/preview because
+    /// the file already exists at the destination).
+    pub has_preview: bool,
+    /// `HTLC_DATA_HTXF_SIZE` — u32 host-order size, big-endian-
+    /// encoded into scratch. The caller is responsible for
+    /// clamping a u64 total size down to u32 (set to `u32::MAX`
+    /// on overflow per the Large-Files spec).
+    pub size: u32,
+    /// `HTLC_DATA_XFERSIZE64` — u64 host-order size (the true
+    /// total, no clamp); big-endian-encoded into scratch. `None`
+    /// skips (legacy client / server didn't negotiate
+    /// `CAP_LARGE_FILES`).
+    pub size64: Option<u64>,
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_PUT`. Wire shape:
+///
+/// 1. `HTLC_DATA_FILE_NAME`     — always
+/// 2. `HTLC_DATA_DIR`           — when `dir.is_some()`
+/// 3. `HTLC_DATA_FILE_PREVIEW`  — when `has_preview`
+/// 4. `HTLC_DATA_HTXF_SIZE`     — u32 BE, always
+/// 5. `HTLC_DATA_XFERSIZE64`    — u64 BE, when `size64.is_some()`
+///
+/// Returns the chunk count (2..=5) on success, or 0 on validation
+/// failure: `chunks` slice too small (count up to 5), `scratch` <
+/// 12 bytes (u32 at +0, u64 at +4), `name.len() > u16::MAX`, or
+/// `dir.len() > u16::MAX`.
+pub fn build_file_put_chunks(
+    req: &FilePutRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if scratch.len() < 12 || req.name.len() > u16::MAX as usize {
+        return 0;
+    }
+    if let Some(d) = req.dir {
+        if d.len() > u16::MAX as usize {
+            return 0;
+        }
+    }
+    let needed = 2
+        + usize::from(req.dir.is_some())
+        + usize::from(req.has_preview)
+        + usize::from(req.size64.is_some());
+    if chunks.len() < needed {
+        return 0;
+    }
+
+    scratch[0..4].copy_from_slice(&req.size.to_be_bytes());
+    if let Some(s64) = req.size64 {
+        scratch[4..12].copy_from_slice(&s64.to_be_bytes());
+    }
+
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    let mut hc = 1;
+    if let Some(d) = req.dir {
+        chunks[hc] = HxChunk {
+            tag: tag::DIR,
+            len: d.len() as u16,
+            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+        };
+        hc += 1;
+    }
+    if req.has_preview {
+        chunks[hc] = HxChunk {
+            tag: tag::FILE_PREVIEW,
+            len: 2,
+            data: b"\x00\x01".as_ptr(),
+        };
+        hc += 1;
+    }
+    chunks[hc] = HxChunk {
+        tag: tag::HTXF_SIZE,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    hc += 1;
+    if req.size64.is_some() {
+        chunks[hc] = HxChunk {
+            tag: tag::XFERSIZE64,
+            len: 8,
+            data: scratch[4..12].as_ptr(),
+        };
+        hc += 1;
+    }
+    hc
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3032,5 +3228,315 @@ mod tests {
             build_file_putfolder_chunks(&req2, &mut chunks, &mut scratch),
             0
         );
+    }
+
+    // ---- file get ----
+
+    fn make_rflt() -> [u8; 74] {
+        let mut rflt = [0u8; 74];
+        rflt[0..4].copy_from_slice(b"RFLT");
+        // Fork offsets at 46 / 62; rest is the static template the
+        // C side memcpys before stamping the offsets in.
+        rflt[46..50].copy_from_slice(&0x0000_1234u32.to_be_bytes());
+        rflt[62..66].copy_from_slice(&0x0000_5678u32.to_be_bytes());
+        rflt
+    }
+
+    #[test]
+    fn file_get_minimal_emits_just_name() {
+        // Fresh download from the root: NAME alone.
+        let req = FileGetRequest {
+            name: b"file.bin",
+            dir: None,
+            rflt: None,
+        };
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_file_get_chunks(&req, &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"file.bin");
+    }
+
+    #[test]
+    fn file_get_with_dir_emits_two_chunks() {
+        let req = FileGetRequest {
+            name: b"file.bin",
+            dir: Some(b"Public"),
+            rflt: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let hc = build_file_get_chunks(&req, &mut chunks);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::DIR);
+    }
+
+    #[test]
+    fn file_get_resume_with_dir_emits_three_chunks_in_order() {
+        let rflt = make_rflt();
+        let req = FileGetRequest {
+            name: b"file.bin",
+            dir: Some(b"Public"),
+            rflt: Some(&rflt),
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build_file_get_chunks(&req, &mut chunks);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(chunks[2].tag, tag::RFLT);
+        assert_eq!(chunks[2].len, 74);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &rflt);
+    }
+
+    #[test]
+    fn file_get_resume_root_emits_name_then_rflt() {
+        let rflt = make_rflt();
+        let req = FileGetRequest {
+            name: b"file.bin",
+            dir: None,
+            rflt: Some(&rflt),
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let hc = build_file_get_chunks(&req, &mut chunks);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::RFLT);
+    }
+
+    #[test]
+    fn file_get_rejects_rflt_of_wrong_length() {
+        // RFLT is a fixed 74-byte record. Anything else is a bug.
+        let short = [0u8; 73];
+        let long = [0u8; 75];
+        let req_short = FileGetRequest {
+            name: b"f",
+            dir: None,
+            rflt: Some(&short),
+        };
+        let req_long = FileGetRequest {
+            name: b"f",
+            dir: None,
+            rflt: Some(&long),
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        assert_eq!(build_file_get_chunks(&req_short, &mut chunks), 0);
+        assert_eq!(build_file_get_chunks(&req_long, &mut chunks), 0);
+    }
+
+    #[test]
+    fn file_get_rejects_short_chunks_slice() {
+        let rflt = make_rflt();
+        // Resume + dir = 3 chunks; 2-slot slice insufficient.
+        let req = FileGetRequest {
+            name: b"f",
+            dir: Some(b"d"),
+            rflt: Some(&rflt),
+        };
+        let mut chunks2 = [HxChunk::EMPTY; 2];
+        assert_eq!(build_file_get_chunks(&req, &mut chunks2), 0);
+        // Empty slice rejects even the minimal NAME-only variant.
+        let req_min = FileGetRequest {
+            name: b"f",
+            dir: None,
+            rflt: None,
+        };
+        let mut empty: [HxChunk; 0] = [];
+        assert_eq!(build_file_get_chunks(&req_min, &mut empty), 0);
+    }
+
+    #[test]
+    fn file_get_rejects_oversize_fields() {
+        let big = vec![b'x'; u16::MAX as usize + 1];
+        // Oversize name.
+        let req = FileGetRequest {
+            name: &big,
+            dir: None,
+            rflt: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        assert_eq!(build_file_get_chunks(&req, &mut chunks), 0);
+        // Oversize dir.
+        let req2 = FileGetRequest {
+            name: b"n",
+            dir: Some(&big),
+            rflt: None,
+        };
+        assert_eq!(build_file_get_chunks(&req2, &mut chunks), 0);
+    }
+
+    // ---- file put ----
+
+    #[test]
+    fn file_put_minimal_emits_name_then_size() {
+        // No dir, no preview, no large: NAME + HTXF_SIZE.
+        let req = FilePutRequest {
+            name: b"upload.bin",
+            dir: None,
+            has_preview: false,
+            size: 0x0102_0304,
+            size64: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let mut scratch = [0u8; 12];
+        let hc = build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::HTXF_SIZE);
+        assert_eq!(chunks[1].len, 4);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[1]) },
+            &[0x01, 0x02, 0x03, 0x04]
+        );
+    }
+
+    #[test]
+    fn file_put_full_emits_all_five_chunks_in_order() {
+        // Everything on: NAME + DIR + PREVIEW + HTXF_SIZE + XFERSIZE64.
+        let req = FilePutRequest {
+            name: b"upload.bin",
+            dir: Some(b"Uploads"),
+            has_preview: true,
+            size: u32::MAX,
+            size64: Some(0x0000_0001_0000_0000),
+        };
+        let mut chunks = [HxChunk::EMPTY; 5];
+        let mut scratch = [0u8; 12];
+        let hc = build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 5);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(chunks[2].tag, tag::FILE_PREVIEW);
+        assert_eq!(chunks[2].len, 2);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0, 1]);
+        assert_eq!(chunks[3].tag, tag::HTXF_SIZE);
+        assert_eq!(chunks[3].len, 4);
+        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, &[0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(chunks[4].tag, tag::XFERSIZE64);
+        assert_eq!(chunks[4].len, 8);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[4]) },
+            &[0, 0, 0, 1, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn file_put_dir_no_preview_no_large_emits_three_chunks() {
+        let req = FilePutRequest {
+            name: b"u",
+            dir: Some(b"d"),
+            has_preview: false,
+            size: 0,
+            size64: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 12];
+        let hc = build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(chunks[2].tag, tag::HTXF_SIZE);
+    }
+
+    #[test]
+    fn file_put_preview_no_dir_emits_three_chunks() {
+        let req = FilePutRequest {
+            name: b"u",
+            dir: None,
+            has_preview: true,
+            size: 0,
+            size64: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 12];
+        let hc = build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::FILE_PREVIEW);
+        assert_eq!(chunks[2].tag, tag::HTXF_SIZE);
+    }
+
+    #[test]
+    fn file_put_large_no_dir_no_preview_emits_three_chunks() {
+        // Large-files-mode, root, fresh: NAME + HTXF_SIZE + XFERSIZE64.
+        let req = FilePutRequest {
+            name: b"u",
+            dir: None,
+            has_preview: false,
+            size: 0,
+            size64: Some(0),
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 12];
+        let hc = build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::HTXF_SIZE);
+        assert_eq!(chunks[2].tag, tag::XFERSIZE64);
+    }
+
+    #[test]
+    fn file_put_rejects_short_scratch() {
+        let req = FilePutRequest {
+            name: b"u",
+            dir: None,
+            has_preview: false,
+            size: 0,
+            size64: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let mut scratch = [0u8; 11];
+        assert_eq!(build_file_put_chunks(&req, &mut chunks, &mut scratch), 0);
+    }
+
+    #[test]
+    fn file_put_rejects_short_chunks_slice() {
+        // Full layout (5 chunks) into a 4-slot slice.
+        let req = FilePutRequest {
+            name: b"u",
+            dir: Some(b"d"),
+            has_preview: true,
+            size: 0,
+            size64: Some(0),
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch = [0u8; 12];
+        assert_eq!(build_file_put_chunks(&req, &mut chunks, &mut scratch), 0);
+        // Minimal layout (2 chunks) into a 1-slot slice.
+        let req_min = FilePutRequest {
+            name: b"u",
+            dir: None,
+            has_preview: false,
+            size: 0,
+            size64: None,
+        };
+        let mut chunks_min = [HxChunk::EMPTY; 1];
+        assert_eq!(
+            build_file_put_chunks(&req_min, &mut chunks_min, &mut scratch),
+            0
+        );
+    }
+
+    #[test]
+    fn file_put_rejects_oversize_fields() {
+        let big = vec![b'x'; u16::MAX as usize + 1];
+        let req = FilePutRequest {
+            name: &big,
+            dir: None,
+            has_preview: false,
+            size: 0,
+            size64: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 5];
+        let mut scratch = [0u8; 12];
+        assert_eq!(build_file_put_chunks(&req, &mut chunks, &mut scratch), 0);
+        let req2 = FilePutRequest {
+            name: b"n",
+            dir: Some(&big),
+            has_preview: false,
+            size: 0,
+            size64: None,
+        };
+        assert_eq!(build_file_put_chunks(&req2, &mut chunks, &mut scratch), 0);
     }
 }
