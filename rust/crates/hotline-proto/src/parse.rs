@@ -449,6 +449,68 @@ pub fn news_post_chunks(buf: &[u8], len: usize, max_len: usize) -> NewsPostIter<
     }
 }
 
+// ---- HTLC_HDR_GETTHREAD reply ------------------------------------------
+//
+// GETTHREAD is a client opcode (HTLC_HDR_*); the server's reply arrives
+// inside an HTLS_HDR_TASK frame, and this parser walks that post-TASK
+// payload. Backs the C `rcv_task_news_post` handler (the function name
+// is historical — it's the news-thread-fetch reply, not a news-post
+// notification).
+
+/// Parsed GETTHREAD reply — a single news-thread article body plus its
+/// optional thread id. The body has CR2LF + `strip_ansi` applied
+/// (matching the C extractor).
+#[derive(Debug, Clone, Default)]
+pub struct NewsThreadReply {
+    /// `Some(bytes)` when a NEWSDATA chunk was present (and no
+    /// TASK_ERROR short-circuited the walk). The bytes are CR2LF +
+    /// `strip_ansi`'d and capped at `max_text`. `None` means no
+    /// body in the reply — the C caller bails on that case.
+    pub text: Option<Vec<u8>>,
+    /// THREADID chunk value, zero when absent. The C handler
+    /// decodes this into a local but never uses it; surfaced here
+    /// for completeness in case a future caller wants the id.
+    pub thread_id: u32,
+    /// `true` when a HTLS_DATA_TASKERROR chunk was seen mid-walk.
+    /// The C extractor bails on the spot — callers should treat
+    /// this as "no body, drop the reply".
+    pub has_task_error: bool,
+}
+
+/// Parse the post-`HTLC_HDR_GETTHREAD` TASK reply payload (the C
+/// `rcv_task_news_post` body). `max_text` caps the NEWSDATA body.
+/// TASK_ERROR short-circuits: when seen, the walk stops immediately
+/// and the body is dropped, matching the C `case HTLS_DATA_TASKERROR:
+/// return;` early-out.
+pub fn parse_news_thread_reply(
+    buf: &[u8],
+    len: usize,
+    max_text: usize,
+) -> NewsThreadReply {
+    let mut out = NewsThreadReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::NEWSDATA => {
+                let take = chunk.data.len().min(max_text);
+                let mut v = chunk.data[..take].to_vec();
+                cr2lf(&mut v);
+                strip_ansi(&mut v);
+                out.text = Some(v);
+            }
+            tag::THREADID => out.thread_id = chunk.as_uint(),
+            tag::TASK_ERROR => {
+                // Mirror the C extractor's early-out: drop any body
+                // we may have parsed and signal the error.
+                out.text = None;
+                out.has_task_error = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -2064,6 +2126,77 @@ mod tests {
         let m = msg(0x0000_0066, 1, 0, &[]);
         let v: Vec<Vec<u8>> = news_post_chunks(&m, m.len(), 8192).collect();
         assert!(v.is_empty());
+    }
+
+    // ---- news_thread_reply (GETTHREAD post-TASK payload) ----
+
+    #[test]
+    fn news_thread_reply_extracts_body_and_thread_id() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NEWSDATA, b"line1\rline2\x1b"));
+        body.extend(chunk(tag::THREADID, &0xdead_beefu32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 8192);
+        // CR -> LF, then strip_ansi folds 0x1b to '['.
+        assert_eq!(r.text.as_deref(), Some(&b"line1\nline2["[..]));
+        assert_eq!(r.thread_id, 0xdead_beef);
+        assert!(!r.has_task_error);
+    }
+
+    #[test]
+    fn news_thread_reply_task_error_drops_body() {
+        // TASK_ERROR seen after the body — the C extractor's early-
+        // out drops what we'd parsed. Mirror that behaviour.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NEWSDATA, b"would-be-body"));
+        body.extend(chunk(tag::TASK_ERROR, b"server said no"));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 8192);
+        assert!(r.text.is_none());
+        assert!(r.has_task_error);
+    }
+
+    #[test]
+    fn news_thread_reply_task_error_alone_returns_no_body() {
+        let body = chunk(tag::TASK_ERROR, b"oops");
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 8192);
+        assert!(r.text.is_none());
+        assert!(r.has_task_error);
+    }
+
+    #[test]
+    fn news_thread_reply_caps_text_at_max() {
+        // Chunk lengths on the wire are u16 (max 65535), so the
+        // test fixture is sized just under that and the cap is
+        // tighter; the parser truncates to `max_text` regardless
+        // of what the chunk carries.
+        let big = vec![b'x'; 32_000];
+        let body = chunk(tag::NEWSDATA, &big);
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 4_096);
+        assert_eq!(r.text.as_deref().map(|s| s.len()), Some(4_096));
+    }
+
+    #[test]
+    fn news_thread_reply_missing_newsdata_yields_none() {
+        // Reply carrying only THREADID — the C caller bails with
+        // "reply missing HTLC_DATA_NEWSDATA" debug. text is None.
+        let body = chunk(tag::THREADID, &1u32.to_be_bytes());
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 8192);
+        assert!(r.text.is_none());
+        assert_eq!(r.thread_id, 1);
+    }
+
+    #[test]
+    fn news_thread_reply_empty_body_legal() {
+        // Empty NEWSDATA chunk → empty Vec, distinct from missing
+        // (the caller can still emit the empty article).
+        let body = chunk(tag::NEWSDATA, b"");
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_news_thread_reply(&m, m.len(), 8192);
+        assert_eq!(r.text.as_deref(), Some(&b""[..]));
     }
 
     // ---- news dirlist: folderitem ----

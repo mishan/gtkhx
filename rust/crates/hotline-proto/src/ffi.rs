@@ -1614,6 +1614,65 @@ pub unsafe extern "C" fn gtkhx_proto_parse_banner_get_reply(
     true
 }
 
+/// C-ABI result of [`parse::parse_news_thread_reply`]. `text_len`
+/// reports bytes written to `text_buf` (NUL-terminated, capped at
+/// `text_cap - 1`); `has_text` is the dispatch gate — when zero,
+/// the reply carried no NEWSDATA chunk (or a TASK_ERROR
+/// short-circuited the walk), and the caller should bail. The text
+/// buffer is left NUL-terminated at offset 0 in that case.
+#[repr(C)]
+pub struct NewsThreadReplyOut {
+    pub thread_id: u32,
+    pub text_len: u16,
+    pub has_text: u8,
+    pub has_task_error: u8,
+}
+
+/// Parse the post-`HTLC_HDR_GETTHREAD` TASK reply payload (the C
+/// `rcv_task_news_post` body). Writes the CR2LF + strip_ansi'd
+/// NEWSDATA body into `text_buf` (NUL-terminated, capped at
+/// `text_cap - 1`) and fills `*out`. Returns false on NULL `out`,
+/// NULL `text_buf`, or zero `text_cap`; otherwise true. Empty NEWSDATA
+/// still sets `has_text = 1` (the caller can emit an empty article);
+/// only missing NEWSDATA or a TASK_ERROR short-circuit yields
+/// `has_text = 0`.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `text_buf` valid for
+/// `text_cap` bytes (or NULL); `out` a valid writable
+/// `NewsThreadReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_news_thread_reply(
+    msg: *const u8,
+    msglen: usize,
+    text_buf: *mut u8,
+    text_cap: usize,
+    out: *mut NewsThreadReplyOut,
+) -> bool {
+    if out.is_null() || text_buf.is_null() || text_cap == 0 {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_news_thread_reply(s, s.len(), text_cap - 1);
+    match &r.text {
+        Some(bytes) => {
+            let written = write_cstr(text_buf, text_cap, bytes);
+            (*out).text_len = written as u16;
+            (*out).has_text = 1;
+        }
+        None => {
+            // Leave the buffer NUL-terminated at offset 0 so the C
+            // caller can treat text_buf as a valid empty C string.
+            *text_buf = 0;
+            (*out).text_len = 0;
+            (*out).has_text = 0;
+        }
+    }
+    (*out).thread_id = r.thread_id;
+    (*out).has_task_error = r.has_task_error as u8;
+    true
+}
+
 /// C-ABI result of [`parse::parse_file_getinfo`]. Strings land in
 /// caller-owned `name_buf` / `type_buf` / `creator_buf` /
 /// `comment_buf`, NUL-terminated, capped at the matching `_cap - 1`;
