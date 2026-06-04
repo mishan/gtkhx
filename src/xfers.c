@@ -35,6 +35,7 @@
 #include <gtk/gtk.h>
 #include <time.h>
 #include "hx.h"
+#include "hotline_proto.h"
 #include "gtkhx_session.h"
 #include "hfs.h"
 #include "text_util.h"
@@ -329,8 +330,6 @@ xfer_go (struct htxf_conn *htxf)
 		 * pass through), remotedir for the DIR chunk components.
 		 * The has-parent-dir test is whether remotedir is anything
 		 * other than empty or just `/`. */
-        task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_get), htxf, 0,
-                  "xfer_go");
 
         /* Phase E (follow-up): encode remotename to the negotiated
 		 * wire encoding. remotename is stored UTF-8 in memory
@@ -344,41 +343,55 @@ xfer_go (struct htxf_conn *htxf)
                 htxf->remotename, htxf->remotename_len, utf8, FALSE,
                 &nm_wire_len);
 
-            if (htxf->remotedir[0]
-                && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0)) {
+            bool has_dir
+                = htxf->remotedir[0]
+                  && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0);
+            hldir = NULL;
+            hldirlen = 0;
+            if (has_dir) {
                 hldir = path_to_hldir (htxf->remotedir, &hldirlen, 0);
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0,
-                         resuming ? 3 : 2, HTLC_DATA_FILE_NAME,
-                         (guint16)nm_wire_len, nm_wire, HTLC_DATA_DIR, hldirlen,
-                         hldir, HTLC_DATA_RFLT, 74, rflt);
-                g_free (hldir);
-            } else {
-                hlwrite (&the_session.htlc, HTLC_HDR_FILE_GET, 0,
-                         resuming ? 2 : 1, HTLC_DATA_FILE_NAME,
-                         (guint16)nm_wire_len, nm_wire, HTLC_DATA_RFLT, 74,
-                         rflt);
             }
+
+            /* Phase R2: chunk layout moved to
+			 * gtkhx_proto_build_file_get_chunks. Build BEFORE
+			 * task_new — see hx_send_msg for the rationale. */
+            struct hx_chunk chunks[3];
+            int hc = (int)gtkhx_proto_build_file_get_chunks (
+                (const uint8_t *)nm_wire, nm_wire_len, has_dir ? 1 : 0, hldir,
+                hldirlen, resuming ? 1 : 0, resuming ? rflt : NULL, chunks,
+                G_N_ELEMENTS (chunks));
+            if (hc > 0) {
+                task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_get),
+                          htxf, 0, "xfer_go");
+                hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_GET, 0, chunks,
+                                hc);
+            }
+            g_free (hldir);
             g_free (nm_wire);
         }
     } else {
-        /* Legacy 32-bit field. Per the Large-File spec, "MUST be
-		 * clamped to 0xFFFFFFFF when the true size exceeds 32
-		 * bits" — receivers in large-file mode prefer the 64-bit
-		 * companion below. */
-        guint32 size = htonl ((guint32)MIN (htxf->total_size,
-                                            (guint64)0xFFFFFFFFUL));
-        /* 64-bit XFERSIZE companion, sent alongside the legacy
-		 * chunk when CAP_LARGE_FILES is active for the session.
-		 * Endianness: GUINT64_TO_BE (big-endian on the wire). */
+        /* Legacy 32-bit HTXF_SIZE — clamped to 0xFFFFFFFF when the
+		 * true size exceeds 32 bits per the Large-File spec.
+		 * Receivers in large-file mode prefer the 64-bit XFERSIZE64
+		 * companion (sent only when CAP_LARGE_FILES was negotiated). */
+        guint32 size_host = (guint32)MIN (htxf->total_size,
+                                          (guint64)0xFFFFFFFFUL);
         gboolean large = (the_session.htlc.caps & HTLC_CAP_LARGE_FILES) != 0;
-        guint64 size64 = GUINT64_TO_BE (htxf->total_size);
 
-        task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_put), htxf, 0,
-                  "xfer_go");
+        /* Initialise before the ternary — when the no-dir branch
+		 * takes the NULL path, path_to_hldir never runs and
+		 * hldirlen would otherwise stay indeterminate (function-
+		 * scope declaration at the top of xfer_go). The builder
+		 * still reads hldirlen on its way through, so an
+		 * indeterminate read here is undefined behaviour even
+		 * though the chunk is ultimately skipped. */
+        hldirlen = 0;
         hldir = (htxf->remotedir[0]
                  && !(htxf->remotedir[0] == '/' && htxf->remotedir[1] == 0))
                     ? path_to_hldir (htxf->remotedir, &hldirlen, 0)
                     : NULL;
+        bool has_dir = (hldir != NULL);
+        bool has_preview = exists_remote (htxf->remotepath);
 
         /* Phase E (follow-up): encode remotename. */
         gboolean utf8 = (the_session.htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
@@ -387,62 +400,24 @@ xfer_go (struct htxf_conn *htxf)
             = gtkhx_text_for_wire (htxf->remotename, htxf->remotename_len,
                                    utf8, FALSE, &nm_wire_len);
 
-        if (exists_remote (htxf->remotepath)) {
-            if (hldir) {
-                if (large) {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 5,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_DIR, hldirlen, hldir,
-                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                             HTLC_DATA_HTXF_SIZE, 4, &size,
-                             HTLC_DATA_XFERSIZE64, 8, &size64);
-                } else {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_DIR, hldirlen, hldir,
-                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                             HTLC_DATA_HTXF_SIZE, 4, &size);
-                }
-            } else {
-                if (large) {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                             HTLC_DATA_HTXF_SIZE, 4, &size,
-                             HTLC_DATA_XFERSIZE64, 8, &size64);
-                } else {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_FILE_PREVIEW, 2, "\0\1",
-                             HTLC_DATA_HTXF_SIZE, 4, &size);
-                }
-            }
-        } else {
-            if (hldir) {
-                if (large) {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 4,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_DIR, hldirlen, hldir,
-                             HTLC_DATA_HTXF_SIZE, 4, &size,
-                             HTLC_DATA_XFERSIZE64, 8, &size64);
-                } else {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_DIR, hldirlen, hldir,
-                             HTLC_DATA_HTXF_SIZE, 4, &size);
-                }
-            } else {
-                if (large) {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 3,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_HTXF_SIZE, 4, &size,
-                             HTLC_DATA_XFERSIZE64, 8, &size64);
-                } else {
-                    hlwrite (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, 2,
-                             HTLC_DATA_FILE_NAME, (guint16)nm_wire_len, nm_wire,
-                             HTLC_DATA_HTXF_SIZE, 4, &size);
-                }
-            }
+        /* Phase R2: chunk layout moved to gtkhx_proto_build_file_put
+		 * _chunks. Build BEFORE task_new — see hx_send_msg for the
+		 * rationale. Eight variants collapse to one builder call:
+		 * presence flags for DIR / FILE_PREVIEW / XFERSIZE64 select
+		 * the chunk count (2..=5). The builder takes host-order
+		 * u32/u64 and BE-encodes into scratch. */
+        struct hx_chunk chunks[5];
+        uint8_t scratch[12];
+        int hc = (int)gtkhx_proto_build_file_put_chunks (
+            (const uint8_t *)nm_wire, nm_wire_len, has_dir ? 1 : 0, hldir,
+            hldirlen, has_preview ? 1 : 0, size_host, large ? 1 : 0,
+            htxf->total_size, chunks, G_N_ELEMENTS (chunks), scratch,
+            sizeof (scratch));
+        if (hc > 0) {
+            task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_put), htxf,
+                      0, "xfer_go");
+            hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, chunks,
+                            hc);
         }
         g_free (nm_wire);
         if (hldir) {
