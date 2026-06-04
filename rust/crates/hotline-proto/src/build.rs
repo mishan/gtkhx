@@ -1077,6 +1077,124 @@ pub fn build_news_post_thread_chunks(
     6
 }
 
+// ---- File send opcodes -----------------------------------------------
+//
+// HTLC_HDR_FILE_MKDIR:   create a directory (single HTLC_DATA_DIR
+//                        chunk).
+// HTLC_HDR_FILE_DELETE / _GETINFO / _GETFOLDER:
+//                        FILE_NAME + optional DIR. The presence of
+//                        DIR distinguishes "file in a subdir"
+//                        (FILE_NAME = basename, DIR = parent path)
+//                        from "file at the root" (FILE_NAME alone).
+//
+// All variable-length payloads (file name, directory path) are
+// pre-encoded by the C caller: gtkhx_text_for_wire handles UTF-8 /
+// Mac Roman conversion for the filename; path_to_hldir builds the DIR
+// chunk bytes verbatim. The Rust crate treats both as opaque byte
+// buffers.
+
+/// Build the chunk array for `HTLC_HDR_FILE_MKDIR` — single
+/// `HTLC_DATA_DIR` chunk. Returns 1 on success, or 0 on a too-small
+/// `chunks` slice or `dir.len() > u16::MAX`.
+pub fn build_file_mkdir_chunks(dir: &[u8], chunks: &mut [HxChunk]) -> usize {
+    if chunks.is_empty() || dir.len() > u16::MAX as usize {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::DIR,
+        len: dir.len() as u16,
+        data: if dir.is_empty() {
+            b"".as_ptr()
+        } else {
+            dir.as_ptr()
+        },
+    };
+    1
+}
+
+/// Internal helper for the three file-ops opcodes that share the
+/// FILE_NAME + optional DIR wire shape (FILE_DELETE / FILE_GETINFO /
+/// FILE_GETFOLDER). When `dir` is `Some`, emits both chunks (FILE_NAME
+/// first, then DIR); when `dir` is `None`, emits just FILE_NAME. The
+/// caller's public wrappers below pick the matching header opcode.
+fn build_file_name_with_optional_dir_chunks(
+    name: &[u8],
+    dir: Option<&[u8]>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if name.len() > u16::MAX as usize {
+        return 0;
+    }
+    if let Some(d) = dir {
+        if d.len() > u16::MAX as usize {
+            return 0;
+        }
+        if chunks.len() < 2 {
+            return 0;
+        }
+    } else if chunks.is_empty() {
+        return 0;
+    }
+
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: name.len() as u16,
+        data: if name.is_empty() {
+            b"".as_ptr()
+        } else {
+            name.as_ptr()
+        },
+    };
+    match dir {
+        Some(d) => {
+            chunks[1] = HxChunk {
+                tag: tag::DIR,
+                len: d.len() as u16,
+                data: if d.is_empty() {
+                    b"".as_ptr()
+                } else {
+                    d.as_ptr()
+                },
+            };
+            2
+        }
+        None => 1,
+    }
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_DELETE` — FILE_NAME +
+/// optional DIR. Returns 1 (no dir) or 2 (with dir) on success, or 0
+/// on validation failure (`chunks` too short, `name.len()` or
+/// `dir.len() > u16::MAX`).
+pub fn build_file_delete_chunks(
+    name: &[u8],
+    dir: Option<&[u8]>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    build_file_name_with_optional_dir_chunks(name, dir, chunks)
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_GETINFO`. Same wire shape
+/// as FILE_DELETE.
+pub fn build_file_getinfo_chunks(
+    name: &[u8],
+    dir: Option<&[u8]>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    build_file_name_with_optional_dir_chunks(name, dir, chunks)
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_GETFOLDER`. Same wire
+/// shape as FILE_DELETE / FILE_GETINFO; the caller picks the header
+/// opcode based on what they want the server to do with the path.
+pub fn build_file_getfolder_chunks(
+    name: &[u8],
+    dir: Option<&[u8]>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    build_file_name_with_optional_dir_chunks(name, dir, chunks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2083,5 +2201,112 @@ mod tests {
                 "oversize field {which} should be rejected"
             );
         }
+    }
+
+    // ---- file mkdir ----
+
+    #[test]
+    fn file_mkdir_emits_dir_chunk() {
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_file_mkdir_chunks(b"Uploads/2026", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::DIR);
+        assert_eq!(chunks[0].len, 12);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"Uploads/2026");
+    }
+
+    #[test]
+    fn file_mkdir_rejects_short_buffer_and_oversize() {
+        let mut empty: [HxChunk; 0] = [];
+        assert_eq!(build_file_mkdir_chunks(b"x", &mut empty), 0);
+        let big = vec![b'/'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY];
+        assert_eq!(build_file_mkdir_chunks(&big, &mut chunks), 0);
+    }
+
+    // ---- file delete / getinfo / getfolder (shared shape) ----
+
+    #[test]
+    fn file_name_with_dir_emits_two_chunks() {
+        // FILE_NAME first, then DIR — verified across all three
+        // wrappers that share the helper.
+        for &builder in &[
+            build_file_delete_chunks
+                as fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize,
+            build_file_getinfo_chunks,
+            build_file_getfolder_chunks,
+        ] {
+            let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+            let hc = builder(b"file.txt", Some(b"Public"), &mut chunks);
+            assert_eq!(hc, 2);
+            assert_eq!(chunks[0].tag, tag::FILE_NAME);
+            assert_eq!(chunks[0].len, 8);
+            assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"file.txt");
+            assert_eq!(chunks[1].tag, tag::DIR);
+            assert_eq!(chunks[1].len, 6);
+            assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"Public");
+        }
+    }
+
+    #[test]
+    fn file_name_without_dir_emits_one_chunk() {
+        // None for the dir argument: only the FILE_NAME chunk is
+        // emitted. The single-chunk slice is sufficient.
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_file_delete_chunks(b"root.bin", None, &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"root.bin");
+    }
+
+    #[test]
+    fn file_name_with_dir_rejects_short_chunks_slice() {
+        // With dir present, builder needs >= 2 slots.
+        let mut chunks = [HxChunk::EMPTY];
+        assert_eq!(
+            build_file_getinfo_chunks(b"f", Some(b"d"), &mut chunks),
+            0
+        );
+    }
+
+    #[test]
+    fn file_name_only_rejects_empty_chunks_slice() {
+        let mut chunks: [HxChunk; 0] = [];
+        assert_eq!(build_file_getfolder_chunks(b"x", None, &mut chunks), 0);
+    }
+
+    #[test]
+    fn file_name_with_dir_empty_strings_legal() {
+        // Empty name + empty dir: zero-length chunks, non-NULL data
+        // pointers so the C side's defensive null-checks don't fire.
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let hc = build_file_getinfo_chunks(b"", Some(b""), &mut chunks);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].len, 0);
+        assert_eq!(chunks[1].len, 0);
+        assert!(!chunks[0].data.is_null());
+        assert!(!chunks[1].data.is_null());
+    }
+
+    #[test]
+    fn file_name_with_dir_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        // Oversize name.
+        assert_eq!(
+            build_file_delete_chunks(&big, Some(b"d"), &mut chunks),
+            0
+        );
+        // Oversize dir.
+        assert_eq!(
+            build_file_delete_chunks(b"n", Some(&big), &mut chunks),
+            0
+        );
+        // Oversize name with no dir.
+        let mut chunks_single = [HxChunk::EMPTY];
+        assert_eq!(
+            build_file_delete_chunks(&big, None, &mut chunks_single),
+            0
+        );
     }
 }

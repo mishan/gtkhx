@@ -570,4 +570,42 @@ extern int32_t gtkhx_proto_build_news_post_thread_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
+/* HTLC_HDR_FILE_MKDIR: single HTLC_DATA_DIR chunk. chunks_cap >= 1.
+ * No scratch needed. Returns 1 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_file_mkdir_chunks (const uint8_t *dir_ptr,
+                                                    size_t dir_len,
+                                                    struct hx_chunk *chunks,
+                                                    size_t chunks_cap);
+
+/* HTLC_HDR_FILE_DELETE: FILE_NAME + optional DIR. has_dir is a 0/1
+ * flag — when non-zero, emit DIR with the given bytes; when zero,
+ * omit (dir_ptr / dir_len are ignored). chunks_cap >= 2.
+ * Returns 1 (no dir) or 2 (with dir) on success, 0 on validation
+ * failure (NULL pointer, short buffer, oversize field). */
+extern int32_t gtkhx_proto_build_file_delete_chunks (const uint8_t *name_ptr,
+                                                     size_t name_len,
+                                                     uint8_t has_dir,
+                                                     const uint8_t *dir_ptr,
+                                                     size_t dir_len,
+                                                     struct hx_chunk *chunks,
+                                                     size_t chunks_cap);
+
+/* HTLC_HDR_FILE_GETINFO: same shape as FILE_DELETE. */
+extern int32_t gtkhx_proto_build_file_getinfo_chunks (const uint8_t *name_ptr,
+                                                      size_t name_len,
+                                                      uint8_t has_dir,
+                                                      const uint8_t *dir_ptr,
+                                                      size_t dir_len,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap);
+
+/* HTLC_HDR_FILE_GETFOLDER: same shape as FILE_DELETE. */
+extern int32_t gtkhx_proto_build_file_getfolder_chunks (const uint8_t *name_ptr,
+                                                        size_t name_len,
+                                                        uint8_t has_dir,
+                                                        const uint8_t *dir_ptr,
+                                                        size_t dir_len,
+                                                        struct hx_chunk *chunks,
+                                                        size_t chunks_cap);
+
 #endif /* _HOTLINE_PROTO_H */
