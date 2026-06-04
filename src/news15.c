@@ -39,7 +39,9 @@
 #include <glib.h>
 
 #include "hx.h"
+#include "hotline_proto.h"
 #include "network.h"
+#include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "tasks.h"
 #include "rcv.h"
 #include "files.h"
@@ -71,10 +73,19 @@ hx_news15_cat_list (struct htlc_conn *htlc, struct gnews_catalog *gcnews)
 
     gcnews->listing = 1;
     hldir = path_to_hldir (gcnews->path, &hldirlen, 0);
-    task_new (htlc, RCV_TASK_FN (rcv_task_newscat_list), gcnews, 0,
-              "news_category");
-    hlwrite (htlc, HTLC_HDR_NEWSCATLIST, 0, 1, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_catlist
+	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
+	 * rationale (a builder failure must not leave a phantom task
+	 * behind). */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_news_catlist_chunks (
+        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_newscat_list), gcnews, 0,
+                  "news_category");
+        hlwrite_chunks (htlc, HTLC_HDR_NEWSCATLIST, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
@@ -86,11 +97,17 @@ hx_news15_fldr_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
 
     gfnews->listing = 1;
     hldir = path_to_hldir (gfnews->path, &hldirlen, 0);
-    task_new (htlc, RCV_TASK_FN (rcv_task_newsfolder_list), gfnews, 0,
-              "news_folder");
 
-    hlwrite (htlc, HTLC_HDR_NEWSDIRLIST, 0, 1, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_dirlist
+	 * _chunks. See hx_news15_cat_list for the task ordering note. */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_news_dirlist_chunks (
+        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_newsfolder_list), gfnews, 0,
+                  "news_folder");
+        hlwrite_chunks (htlc, HTLC_HDR_NEWSDIRLIST, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
@@ -153,9 +170,16 @@ hx_news15_delete (struct htlc_conn *htlc, char *path)
     guint16 hldirlen;
 
     hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, 0, 0, 0, "news15_rm");
-    hlwrite (htlc, HTLC_HDR_DELNEWSDIRCAT, 0, 1, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_delete
+	 * _chunks. See hx_news15_cat_list for the task ordering note. */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_news_delete_chunks (
+        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "news15_rm");
+        hlwrite_chunks (htlc, HTLC_HDR_DELNEWSDIRCAT, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
@@ -190,8 +214,15 @@ hx_news15_mkdir (struct htlc_conn *htlc, char *path)
     guint16 hldirlen;
 
     hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, 0, 0, 0, "news15_mkdir");
-    hlwrite (htlc, HTLC_HDR_MAKENEWSDIR, 0, 1, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_mkdir
+	 * _chunks. See hx_news15_cat_list for the task ordering note. */
+    struct hx_chunk chunks[1];
+    int hc = (int)gtkhx_proto_build_news_mkdir_chunks (
+        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "news15_mkdir");
+        hlwrite_chunks (htlc, HTLC_HDR_MAKENEWSDIR, 0, chunks, hc);
+    }
     g_free (hldir);
 }

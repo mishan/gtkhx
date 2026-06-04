@@ -1509,3 +1509,158 @@ pub unsafe extern "C" fn gtkhx_proto_build_account_modify_chunks(
     };
     build::build_account_modify_chunks(&req, chunks_slice, scratch_slice) as i32
 }
+
+// ---- News-1.0 + News-1.5 SEND builders -------------------------------
+//
+// HTLC_HDR_NEWS_POST: single body chunk (1.0 flat news).
+// HTLC_HDR_NEWSCATLIST / _NEWSDIRLIST / _DELNEWSDIRCAT /
+//   _MAKENEWSDIR: single HTLC_DATA_NEWSPATH chunk; they share a single
+// underlying FFI helper. The distinct entry points keep the wire
+// opcode obvious at the call site.
+
+/// Build `HTLC_HDR_NEWS_POST` chunks: a single body chunk.
+/// `chunks_cap >= 1`. No scratch needed. Returns 1 on success, or 0
+/// on validation failure (NULL `chunks`, NULL body_ptr with non-zero
+/// body_len, `body_len > u16::MAX`, or `chunks_cap < 1`).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `body_ptr` valid
+/// for `body_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_post_chunks(
+    body_ptr: *const u8,
+    body_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if body_ptr.is_null() && body_len != 0 {
+        return 0;
+    }
+    if body_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let body = as_slice(body_ptr, body_len);
+    build::build_news_post_chunks(body, chunks_slice) as i32
+}
+
+/// Common implementation for the four NEWSPATH-only 1.5 news opcodes.
+/// The opcode-specific entry points below pick which `build::` helper
+/// to dispatch to so the call-site code reads naturally.
+unsafe fn build_news_path_only_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    inner: fn(&[u8], &mut [HxChunk]) -> usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if path_ptr.is_null() && path_len != 0 {
+        return 0;
+    }
+    if path_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let path = as_slice(path_ptr, path_len);
+    inner(path, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_NEWSCATLIST` chunks: single `HTLC_DATA_NEWSPATH`.
+/// `chunks_cap >= 1`. Returns 1 on success, 0 on validation failure.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `path_ptr` valid
+/// for `path_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_catlist_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_news_path_only_chunks(
+        path_ptr,
+        path_len,
+        chunks,
+        chunks_cap,
+        build::build_news_catlist_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_NEWSDIRLIST` chunks. Same shape and contract as
+/// [`gtkhx_proto_build_news_catlist_chunks`].
+///
+/// # Safety
+/// As [`gtkhx_proto_build_news_catlist_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_dirlist_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_news_path_only_chunks(
+        path_ptr,
+        path_len,
+        chunks,
+        chunks_cap,
+        build::build_news_dirlist_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_DELNEWSDIRCAT` chunks (delete a 1.5 news folder or
+/// category — the path tells the server which). Same shape and
+/// contract as [`gtkhx_proto_build_news_catlist_chunks`].
+///
+/// # Safety
+/// As [`gtkhx_proto_build_news_catlist_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_delete_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_news_path_only_chunks(
+        path_ptr,
+        path_len,
+        chunks,
+        chunks_cap,
+        build::build_news_delete_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_MAKENEWSDIR` chunks. Same shape and contract as
+/// [`gtkhx_proto_build_news_catlist_chunks`].
+///
+/// # Safety
+/// As [`gtkhx_proto_build_news_catlist_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_mkdir_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_news_path_only_chunks(
+        path_ptr,
+        path_len,
+        chunks,
+        chunks_cap,
+        build::build_news_mkdir_chunks,
+    )
+}

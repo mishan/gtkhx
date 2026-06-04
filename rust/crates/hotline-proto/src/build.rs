@@ -744,6 +744,91 @@ pub fn build_account_modify_chunks(
     4
 }
 
+// ---- News send opcodes -----------------------------------------------
+//
+// HTLC_HDR_NEWS_POST: 1.0 flat-news post (HTLC_DATA_NEWS_POST body —
+//                     same tag as BODY/MSG/etc., reused per opcode).
+// HTLC_HDR_NEWSCATLIST / _NEWSDIRLIST / _DELNEWSDIRCAT / _MAKENEWSDIR:
+//                     1.5 threaded-news opcodes whose request body is
+//                     a single HTLC_DATA_NEWSPATH chunk. The path
+//                     encoding is the caller's responsibility
+//                     (`path_to_hldir` on the C side).
+
+/// Build the chunk array for `HTLC_HDR_NEWS_POST` (1.0 flat news).
+/// Single chunk: `HTLC_DATA_NEWS_POST` body. Returns 1 on success, or
+/// 0 on a too-small `chunks` slice or `body.len() > u16::MAX`.
+///
+/// Note: `HTLC_DATA_NEWS_POST` shares the 0x0065 tag with BODY / MSG /
+/// CHAT / AGREEMENT — same opcode-distinct reuse pattern the protocol
+/// uses everywhere. The Rust crate spells this as [`tag::BODY`].
+pub fn build_news_post_chunks(
+    body: &[u8],
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.is_empty() || body.len() > u16::MAX as usize {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::BODY,
+        len: body.len() as u16,
+        data: if body.is_empty() {
+            b"".as_ptr()
+        } else {
+            body.as_ptr()
+        },
+    };
+    1
+}
+
+/// Internal helper for the four NEWSPATH-only 1.5 news opcodes. Each
+/// public wrapper picks the matching header type when handing the
+/// chunks to `hlwrite_chunks`. Returns 1 on success, 0 on too-small
+/// `chunks` slice or `path.len() > u16::MAX`.
+fn build_newspath_only_chunks(
+    path: &[u8],
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.is_empty() || path.len() > u16::MAX as usize {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: path.len() as u16,
+        data: if path.is_empty() {
+            b"".as_ptr()
+        } else {
+            path.as_ptr()
+        },
+    };
+    1
+}
+
+/// Build the chunk array for `HTLC_HDR_NEWSCATLIST` — single
+/// `HTLC_DATA_NEWSPATH` chunk.
+pub fn build_news_catlist_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
+    build_newspath_only_chunks(path, chunks)
+}
+
+/// Build the chunk array for `HTLC_HDR_NEWSDIRLIST` — single
+/// `HTLC_DATA_NEWSPATH` chunk.
+pub fn build_news_dirlist_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
+    build_newspath_only_chunks(path, chunks)
+}
+
+/// Build the chunk array for `HTLC_HDR_DELNEWSDIRCAT` — single
+/// `HTLC_DATA_NEWSPATH` chunk. The same wire shape works for deleting
+/// either a category or a folder; mhxd inspects the path to decide.
+pub fn build_news_delete_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
+    build_newspath_only_chunks(path, chunks)
+}
+
+/// Build the chunk array for `HTLC_HDR_MAKENEWSDIR` — single
+/// `HTLC_DATA_NEWSPATH` chunk (the path encodes the new directory's
+/// position; the last component is the new name).
+pub fn build_news_mkdir_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
+    build_newspath_only_chunks(path, chunks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1473,5 +1558,89 @@ mod tests {
                 "oversize field {which} should be rejected"
             );
         }
+    }
+
+    // ---- news_post ----
+
+    #[test]
+    fn news_post_emits_body_chunk() {
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_news_post_chunks(b"Hello, world", &mut chunks);
+        assert_eq!(hc, 1);
+        // Tag is BODY (0x0065), same code point HTLC_DATA_NEWS_POST
+        // aliases — protocol re-uses 0x0065 per opcode context.
+        assert_eq!(chunks[0].tag, tag::BODY);
+        assert_eq!(chunks[0].len, 12);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"Hello, world");
+    }
+
+    #[test]
+    fn news_post_empty_body_legal() {
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_news_post_chunks(b"", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].len, 0);
+        assert!(!chunks[0].data.is_null());
+    }
+
+    #[test]
+    fn news_post_rejects_empty_chunks_slice() {
+        let mut chunks: [HxChunk; 0] = [];
+        assert_eq!(build_news_post_chunks(b"x", &mut chunks), 0);
+    }
+
+    #[test]
+    fn news_post_rejects_body_larger_than_u16_max() {
+        let big = vec![0u8; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY];
+        assert_eq!(build_news_post_chunks(&big, &mut chunks), 0);
+    }
+
+    // ---- NEWSPATH-only opcodes ----
+
+    #[test]
+    fn news_path_only_builders_share_shape() {
+        // catlist / dirlist / delete / mkdir all wrap the same helper.
+        // Each must emit a single NEWSPATH chunk with the verbatim
+        // bytes.
+        for &builder in &[
+            build_news_catlist_chunks as fn(&[u8], &mut [HxChunk]) -> usize,
+            build_news_dirlist_chunks,
+            build_news_delete_chunks,
+            build_news_mkdir_chunks,
+        ] {
+            let mut chunks = [HxChunk::EMPTY];
+            let hc = builder(b"/Articles/2026", &mut chunks);
+            assert_eq!(hc, 1);
+            assert_eq!(chunks[0].tag, tag::NEWSPATH);
+            assert_eq!(chunks[0].len, 14);
+            assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles/2026");
+        }
+    }
+
+    #[test]
+    fn news_path_only_empty_path_legal() {
+        // Root path: zero-length NEWSPATH chunk. Empty body is legal
+        // (same convention as every other variable-length builder
+        // here); data pointer non-NULL so the C side's defensive
+        // null-checks don't fire.
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_news_catlist_chunks(b"", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].len, 0);
+        assert!(!chunks[0].data.is_null());
+    }
+
+    #[test]
+    fn news_path_only_rejects_empty_chunks_slice() {
+        let mut chunks: [HxChunk; 0] = [];
+        assert_eq!(build_news_dirlist_chunks(b"x", &mut chunks), 0);
+    }
+
+    #[test]
+    fn news_path_only_rejects_path_larger_than_u16_max() {
+        let big = vec![b'/'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY];
+        assert_eq!(build_news_delete_chunks(&big, &mut chunks), 0);
     }
 }
