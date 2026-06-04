@@ -4,12 +4,15 @@
   - Parts of GtkHx are being rewritten in Rust
 - User Interface
   - Dropped custom GtkHList in favor of GtkColumnView
-  - Fixed icons in Private Chat user list
   - Results from different trackers are nested in their own result sets
+- Bug Fixes
+  - Handle Chat subjects with Mac Roman characters
+  - Fixed icons in Private Chat user list
 - Hotline Protocol
   - Tracker v3 support
   - Support for fetching tracker listings via TLS
   - Dropped RC4 cipher support. RC4 is weak/insecure and should not be used.
+  - Handle servers that echo request opcode in TASK replies
 
 ## 1.0.0
 
