@@ -811,6 +811,165 @@ pub fn parse_chat_invite(buf: &[u8], len: usize, max_name: usize) -> ChatInvite 
     ChatInvite { uid, cid, name }
 }
 
+// ---- HTLS_HDR_USER_GETINFO reply ---------------------------------------
+
+/// Parsed user-info reply. Mirrors the C `rcv_task_user_info` extractor:
+/// the nickname is `strip_ansi`'d (no CR2LF) and the info body is CR2LF
+/// + `strip_ansi`'d.
+#[derive(Debug, Clone)]
+pub struct UserInfo {
+    /// Nickname bytes after `strip_ansi`, capped at `max_name`.
+    pub name: Vec<u8>,
+    /// User-info body bytes after CR2LF + `strip_ansi`, capped at
+    /// `max_info`.
+    pub info: Vec<u8>,
+}
+
+/// Parse the post-`HTLS_HDR_USER_GETINFO` TASK reply payload (the C
+/// `rcv_task_user_info` body). `max_name` / `max_info` cap the two
+/// strings the same way the C extractor does (31 / 4096). Missing
+/// chunks are returned as empty `Vec`s — the C caller's gate is
+/// `nlen && ilen`, so the empty-`name`-and-info pair behaves identically.
+pub fn parse_user_info(buf: &[u8], len: usize, max_name: usize, max_info: usize) -> UserInfo {
+    let mut name: Vec<u8> = Vec::new();
+    let mut info: Vec<u8> = Vec::new();
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            // USER_INFO aliases 0x0065 BODY — same code point as
+            // chat / msg / news-post / agreement, distinct by opcode
+            // context (this parser is gated by the rcv_task fn).
+            tag::BODY => {
+                let take = chunk.data.len().min(max_info);
+                info = chunk.data[..take].to_vec();
+            }
+            tag::NAME => {
+                let take = chunk.data.len().min(max_name);
+                name = chunk.data[..take].to_vec();
+            }
+            _ => {}
+        }
+    }
+
+    strip_ansi(&mut name);
+    cr2lf(&mut info);
+    strip_ansi(&mut info);
+    UserInfo { name, info }
+}
+
+// ---- HTLS_HDR_ACCOUNT_READ reply ---------------------------------------
+
+/// Parsed account-read reply. Mirrors the C `rcv_task_user_open`
+/// extractor: NAME bytes verbatim (no `strip_ansi` — the C handler
+/// also leaves the display name untouched here), LOGIN /
+/// PASSWORD chunks de-obfuscated with the XOR-0xff transform
+/// (`hl_decode` in `hl_code.c`), and the 8-byte ACCESS bitmap copied
+/// verbatim. The C caller gates the dispatch on `accessbool` —
+/// `got_access` exposes that signal.
+#[derive(Debug, Clone)]
+pub struct AccountRead {
+    /// Account display name, capped at `max_name`. No `strip_ansi`
+    /// (matches the C extractor).
+    pub name: Vec<u8>,
+    /// XOR-0xff-decoded login bytes, capped at `max_login`.
+    pub login: Vec<u8>,
+    /// XOR-0xff-decoded password bytes, capped at `max_pass`. Empty
+    /// when the PASSWORD chunk is missing, single-zero (the
+    /// no-password sentinel), or empty.
+    pub pass: Vec<u8>,
+    /// Raw 8 bytes of the ACCESS chunk, copied verbatim from the
+    /// wire (matches the C `memcpy (&access, dh->data, sizeof
+    /// (access))`).
+    pub access: [u8; 8],
+    /// `true` iff the ACCESS chunk was present and at least 8 bytes
+    /// (the C gate). When `false`, the caller skips the callback
+    /// entirely.
+    pub got_access: bool,
+}
+
+/// Parse the post-`HTLC_HDR_ACCOUNT_READ` TASK reply payload (the C
+/// `rcv_task_user_open` body). `max_name` / `max_login` / `max_pass`
+/// cap the three strings (the C extractor uses 31 for all three).
+///
+/// LOGIN / PASSWORD chunks are XOR-0xff-decoded inline (the
+/// Hotline-wire obfuscation used for credentials). The PASSWORD
+/// no-password convention from the C extractor is preserved: a
+/// single zero byte (or empty / missing) yields an empty `pass`
+/// vector rather than a decoded one-byte 0xff string.
+pub fn parse_account_read(
+    buf: &[u8],
+    len: usize,
+    max_name: usize,
+    max_login: usize,
+    max_pass: usize,
+) -> AccountRead {
+    let mut out = AccountRead {
+        name: Vec::new(),
+        login: Vec::new(),
+        pass: Vec::new(),
+        access: [0u8; 8],
+        got_access: false,
+    };
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::NAME => {
+                let take = chunk.data.len().min(max_name);
+                out.name = chunk.data[..take].to_vec();
+            }
+            tag::LOGIN => {
+                let take = chunk.data.len().min(max_login);
+                let mut buf = Vec::with_capacity(take);
+                for &b in &chunk.data[..take] {
+                    buf.push(b ^ 0xff);
+                }
+                out.login = buf;
+            }
+            tag::PASSWORD => {
+                // C-side gate: plen > 1 && dh->data[0] — i.e., at
+                // least two bytes AND the first byte non-zero. The
+                // single-byte 0x00 case is the explicit "no password"
+                // sentinel; anything else is decoded.
+                //
+                // The C extractor applies the `plen > 1` check
+                // *after* truncating to `sizeof(pass) - 1`, so a
+                // chunk that fits the wire but collapses to a single
+                // byte after the cap also takes the no-password
+                // path. Compute `take` first and gate on `take > 1`
+                // here so a small `max_pass` (e.g. 1) behaves the
+                // same way it does in C.
+                //
+                // Last-PASSWORD-wins semantics: the C extractor's
+                // sentinel path actively sets pass[0]=0 (overwriting
+                // any prior decoded password), so a server that
+                // somehow emits multiple PASSWORD chunks with a
+                // sentinel last would clear the buffer. Mirror that
+                // by always overwriting out.pass — either with the
+                // decoded bytes or with an empty Vec.
+                let take = chunk.data.len().min(max_pass);
+                if take > 1 && chunk.data[0] != 0 {
+                    let mut buf = Vec::with_capacity(take);
+                    for &b in &chunk.data[..take] {
+                        buf.push(b ^ 0xff);
+                    }
+                    out.pass = buf;
+                } else {
+                    out.pass.clear();
+                }
+            }
+            tag::ACCESS => {
+                if chunk.data.len() >= 8 {
+                    out.access.copy_from_slice(&chunk.data[..8]);
+                    out.got_access = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1718,5 +1877,215 @@ mod tests {
         let cl = parse_catlist(&m, m.len()).expect("ok");
         // 0xff00 + 0xff00 = 0x1fe00, wrapped to u16 = 0xfe00.
         assert_eq!(cl.posts[0].size_total, 0xfe00);
+    }
+
+    // ---- user-info ----
+
+    #[test]
+    fn user_info_extracts_name_and_info_with_cr2lf_strip_ansi() {
+        let mut body = Vec::new();
+        // Embed a 0x1b (ESC) in the name to verify strip_ansi folds
+        // it to printable '[' (0x1b -> 0x1b|0x40 = 0x5b).
+        body.extend(chunk(tag::NAME, b"alice\x1bX"));
+        // Info body uses Mac CR line endings + a control-band byte.
+        body.extend(chunk(tag::BODY, b"line1\rline2\x1b"));
+        // 0x0001_0000 = HTLS_HDR_TASK — parse_user_info parses the
+        // post-TASK reply payload, so the fixture frame should
+        // carry the TASK opcode in its header.
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let info = parse_user_info(&m, m.len(), 31, 4096);
+        assert_eq!(info.name, b"alice[X");
+        assert_eq!(info.info, b"line1\nline2[");
+    }
+
+    #[test]
+    fn user_info_caps_at_max_lengths() {
+        let long_name = vec![b'a'; 200];
+        let long_info = vec![b'i'; 8192];
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NAME, &long_name));
+        body.extend(chunk(tag::BODY, &long_info));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let out = parse_user_info(&m, m.len(), 31, 4096);
+        assert_eq!(out.name.len(), 31);
+        assert_eq!(out.info.len(), 4096);
+    }
+
+    #[test]
+    fn user_info_missing_chunks_are_empty() {
+        // No chunks at all — name + info both empty, caller's
+        // `nlen && ilen` gate fails and no event is emitted.
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let out = parse_user_info(&m, m.len(), 31, 4096);
+        assert!(out.name.is_empty());
+        assert!(out.info.is_empty());
+    }
+
+    // ---- account-read ----
+
+    /// XOR every byte with 0xff (the Hotline credential-obfuscation
+    /// transform); used to build account-read fixture wire bytes.
+    fn xor_ff(b: &[u8]) -> Vec<u8> {
+        b.iter().map(|&x| x ^ 0xff).collect()
+    }
+
+    #[test]
+    fn account_read_full() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NAME, b"Bob"));
+        body.extend(chunk(tag::LOGIN, &xor_ff(b"bob")));
+        body.extend(chunk(tag::PASSWORD, &xor_ff(b"hunter2")));
+        body.extend(chunk(tag::ACCESS, &[0x80, 0, 0, 0, 0, 0, 0, 0x01]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert_eq!(ar.name, b"Bob");
+        assert_eq!(ar.login, b"bob");
+        assert_eq!(ar.pass, b"hunter2");
+        assert_eq!(ar.access, [0x80, 0, 0, 0, 0, 0, 0, 0x01]);
+        assert!(ar.got_access);
+    }
+
+    #[test]
+    fn account_read_no_password_sentinel_yields_empty_pass() {
+        // Single zero byte is the explicit "no password" sentinel —
+        // C extractor leaves pass empty; we must too.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NAME, b"Alice"));
+        body.extend(chunk(tag::LOGIN, &xor_ff(b"alice")));
+        body.extend(chunk(tag::PASSWORD, &[0x00]));
+        body.extend(chunk(tag::ACCESS, &[0; 8]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(ar.pass.is_empty());
+        assert!(ar.got_access);
+    }
+
+    #[test]
+    fn account_read_empty_password_chunk_yields_empty_pass() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::NAME, b"x"));
+        body.extend(chunk(tag::LOGIN, &xor_ff(b"x")));
+        body.extend(chunk(tag::PASSWORD, &[]));
+        body.extend(chunk(tag::ACCESS, &[0; 8]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(ar.pass.is_empty());
+    }
+
+    #[test]
+    fn account_read_first_byte_zero_yields_empty_pass() {
+        // Two-byte password with first byte 0x00 also fails the
+        // C-side gate (plen > 1 && dh->data[0]).
+        let mut body = Vec::new();
+        body.extend(chunk(tag::PASSWORD, &[0x00, 0x55]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(ar.pass.is_empty());
+    }
+
+    #[test]
+    fn account_read_pass_gate_uses_capped_length() {
+        // The C extractor caps the password length to sizeof(pass)-1
+        // *before* the `plen > 1` check, so a multi-byte wire chunk
+        // that gets capped down to 1 byte takes the no-password
+        // path. Mirror that here: max_pass=1 should leave pass empty
+        // even though the chunk has multiple non-zero bytes.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::PASSWORD, &xor_ff(b"abc")));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 1);
+        assert!(
+            ar.pass.is_empty(),
+            "max_pass=1 should collapse to no-password sentinel"
+        );
+
+        // Sanity check: max_pass=2 should let one byte through
+        // (take=2 > 1, first byte non-zero), producing a 2-byte
+        // decoded prefix.
+        let ar2 = parse_account_read(&m, m.len(), 31, 31, 2);
+        assert_eq!(ar2.pass, b"ab");
+    }
+
+    #[test]
+    fn account_read_last_password_chunk_wins() {
+        // Two PASSWORD chunks in one frame: the C extractor's
+        // sentinel branch sets pass[0]=0, so a sentinel chunk that
+        // arrives AFTER a decoded one clears the buffer (last
+        // chunk wins). Mirror that behaviour — without explicit
+        // clear-on-sentinel, a stale decoded password would leak
+        // through.
+        //
+        // First chunk: normal password "abc" (xor-encoded on wire).
+        // Second chunk: single zero byte → no-password sentinel.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::PASSWORD, &xor_ff(b"abc")));
+        body.extend(chunk(tag::PASSWORD, &[0x00]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(
+            ar.pass.is_empty(),
+            "trailing sentinel PASSWORD chunk should clear the buffer"
+        );
+
+        // Reverse order: sentinel first, then a real password —
+        // last-wins should keep the decoded bytes.
+        let mut body2 = Vec::new();
+        body2.extend(chunk(tag::PASSWORD, &[0x00]));
+        body2.extend(chunk(tag::PASSWORD, &xor_ff(b"abc")));
+        let m2 = msg(0x0001_0000, 1, 0, &body2);
+        let ar2 = parse_account_read(&m2, m2.len(), 31, 31, 31);
+        assert_eq!(ar2.pass, b"abc");
+
+        // Same idea with a leading-zero sentinel (plen > 1 but first
+        // byte is 0) following a real password.
+        let mut body3 = Vec::new();
+        body3.extend(chunk(tag::PASSWORD, &xor_ff(b"hunter2")));
+        body3.extend(chunk(tag::PASSWORD, &[0x00, 0x55]));
+        let m3 = msg(0x0001_0000, 1, 0, &body3);
+        let ar3 = parse_account_read(&m3, m3.len(), 31, 31, 31);
+        assert!(ar3.pass.is_empty());
+
+        // And once more for the small-cap sentinel: a multi-byte
+        // chunk that truncates to take=1 (max_pass=1) hits the same
+        // sentinel branch and clears.
+        let mut body4 = Vec::new();
+        body4.extend(chunk(tag::PASSWORD, &xor_ff(b"first")));
+        body4.extend(chunk(tag::PASSWORD, &xor_ff(b"xy")));
+        let m4 = msg(0x0001_0000, 1, 0, &body4);
+        let ar4 = parse_account_read(&m4, m4.len(), 31, 31, 1);
+        assert!(ar4.pass.is_empty());
+    }
+
+    #[test]
+    fn account_read_caps_login_and_pass_at_max() {
+        let long = xor_ff(&vec![b'l'; 200]);
+        let long_pw = xor_ff(&vec![b'p'; 200]);
+        let mut body = Vec::new();
+        body.extend(chunk(tag::LOGIN, &long));
+        body.extend(chunk(tag::PASSWORD, &long_pw));
+        body.extend(chunk(tag::ACCESS, &[0; 8]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert_eq!(ar.login.len(), 31);
+        assert_eq!(ar.pass.len(), 31);
+        // Decoded bytes should be the original 'l' / 'p' values.
+        assert!(ar.login.iter().all(|&b| b == b'l'));
+        assert!(ar.pass.iter().all(|&b| b == b'p'));
+    }
+
+    #[test]
+    fn account_read_short_access_chunk_rejected() {
+        // C gate: `_len >= sizeof(access)` (8). Anything shorter
+        // leaves accessbool=0 → no callback dispatch.
+        let m = msg(0x0001_0000, 1, 0, &chunk(tag::ACCESS, &[0, 0, 0, 0]));
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(!ar.got_access);
+    }
+
+    #[test]
+    fn account_read_missing_access_yields_no_got_access() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let ar = parse_account_read(&m, m.len(), 31, 31, 31);
+        assert!(!ar.got_access);
     }
 }

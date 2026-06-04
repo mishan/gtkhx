@@ -955,55 +955,24 @@ void
 rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn)
 {
     char name[32], login[32], pass[32];
-    guint16 nlen = 0, llen = 0, plen = 0;
     hl_access_bits access;
-    char accessbool = 0;
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_NAME:
-            if (_len >= sizeof (name)) {
-                nlen = sizeof (name) - 1;
-            } else {
-                nlen = _len;
-            }
-            memcpy (name, dh->data, nlen);
-            break;
-        case HTLS_DATA_LOGIN:
-            if (_len >= sizeof (login)) {
-                llen = sizeof (login) - 1;
-            } else {
-                llen = _len;
-            }
-            hl_decode (login, dh->data, llen);
-            break;
-        case HTLS_DATA_PASSWORD:
-            if (_len >= sizeof (pass)) {
-                plen = sizeof (pass) - 1;
-            } else {
-                plen = _len;
-            }
-            if (plen > 1 && dh->data[0]) {
-                hl_decode (pass, dh->data, plen);
-            } else {
-                pass[0] = 0;
-            }
-            break;
-        case HTLS_DATA_ACCESS:
-            if (_len >= sizeof (access)) {
-                accessbool = 1;
-                memcpy (&access, dh->data, sizeof (access));
-            }
-            break;
-        }
-    }
-    dh_end ();
-
-    name[nlen] = 0;
-    login[llen] = 0;
-    pass[plen] = 0;
-    if (accessbool) {
+    /* Phase R2: chunk-walk + hl_decode (XOR-0xff) of LOGIN /
+	 * PASSWORD moved to the Rust hotline-proto crate's
+	 * parse_account_read. The PASSWORD no-password sentinel
+	 * (single 0x00 byte, or empty) is preserved by the Rust
+	 * parser — pass_len = 0 in that case, and the C buffer stays
+	 * NUL-terminated at offset 0. */
+    struct gtkhx_proto_account_read ar;
+    bool ok = gtkhx_proto_parse_account_read (
+        htlc->in.buf, htlc->in.pos, (uint8_t *)name, sizeof (name),
+        (uint8_t *)login, sizeof (login), (uint8_t *)pass, sizeof (pass), &ar);
+    if (ok && ar.got_access) {
+        /* ACCESS lands in ar.access as raw 8 wire bytes; copy into
+		 * the typed hl_access_bits exactly as the C extractor did
+		 * (memcpy preserves byte order on this struct, which the
+		 * server's access bitmap is). */
+        memcpy (&access, ar.access, sizeof (access));
         uespfn->fn (uespfn->uesp, name, login, pass, access);
     }
     g_free (uespfn);
@@ -1895,35 +1864,22 @@ rcv_task_kick (struct htlc_conn *htlc)
 void
 rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
 {
-    guint16 ilen = 0, nlen = 0;
     char info[4096 + 1], name[32];
     guint16 uid = *_uid;
     g_free (_uid);
 
-    name[0] = 0;
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_USER_INFO:
-            ilen = (_len > 4096) ? 4096 : _len;
-            memcpy (info, dh->data, ilen);
-            info[ilen] = 0;
-            break;
-        case HTLS_DATA_NAME:
-            nlen = (_len > 31) ? 31 : _len;
-            memcpy (name, dh->data, nlen);
-            name[nlen] = 0;
-            strip_ansi (name, nlen);
-            break;
-        }
-    }
-    dh_end ();
-
-    if (nlen && ilen) {
-        CR2LF (info, ilen);
-        strip_ansi (info, ilen);
+    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to the Rust
+	 * hotline-proto crate's parse_user_info. The C side keeps the
+	 * uid carry-through (it's a task parameter, not a chunk) and
+	 * the `nlen && ilen` dispatch gate that filters out unanswered
+	 * server frames. */
+    struct gtkhx_proto_user_info ui;
+    bool ok = gtkhx_proto_parse_user_info (htlc->in.buf, htlc->in.pos, (uint8_t *)name,
+                                           sizeof (name), (uint8_t *)info,
+                                           sizeof (info), &ui);
+    if (ok && ui.name_len && ui.info_len) {
         gtkhx_session_emit_user_info (gtkhx_session_get_default (), uid, name,
-                                      info, ilen);
+                                      info, ui.info_len);
     }
 }
 

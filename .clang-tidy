@@ -35,6 +35,7 @@ Checks: >
     clang-analyzer-deadcode.*,
     clang-analyzer-security.*,
     clang-analyzer-unix.*,
+    misc-include-cleaner,
     misc-redundant-expression,
     misc-unused-parameters,
     readability-braces-around-statements,

@@ -144,6 +144,53 @@ extern bool gtkhx_proto_parse_user_change (const uint8_t *msg, size_t msglen,
                                            uint8_t *buf, size_t bufcap,
                                            struct gtkhx_proto_user_change *out);
 
+/* ---- Account / user-info reply parsers (post-TASK payloads) ---- */
+
+struct gtkhx_proto_user_info {
+    /* Bytes written to name_buf / info_buf, excluding the trailing NUL. */
+    uint16_t name_len;
+    uint16_t info_len;
+};
+
+/* Parse the post-HTLS_HDR_USER_GETINFO TASK reply payload (the
+ * rcv_task_user_info body). Writes strip_ansi'd NAME into name_buf
+ * (NUL-terminated, capped at name_cap-1) and CR2LF + strip_ansi'd
+ * USER_INFO body into info_buf (capped at info_cap-1). Returns false
+ * on any NULL / zero-cap pointer; otherwise true. The caller's
+ * `nlen && ilen` dispatch gate is preserved at the call site. */
+extern bool gtkhx_proto_parse_user_info (const uint8_t *msg, size_t msglen,
+                                         uint8_t *name_buf, size_t name_cap,
+                                         uint8_t *info_buf, size_t info_cap,
+                                         struct gtkhx_proto_user_info *out);
+
+struct gtkhx_proto_account_read {
+    /* Raw 8 bytes of the ACCESS chunk (memcpy'd verbatim). */
+    uint8_t access[8];
+    /* 0/1 — set iff the ACCESS chunk was present and at least 8 bytes.
+     * The call site uses this as the dispatch gate (matches the C
+     * extractor's accessbool). */
+    uint8_t got_access;
+    /* Bytes written to the three string buffers, excluding NUL. */
+    uint16_t name_len;
+    uint16_t login_len;
+    uint16_t pass_len;
+};
+
+/* Parse the post-HTLC_HDR_ACCOUNT_READ TASK reply payload (the
+ * rcv_task_user_open body). Writes NAME (raw, no strip_ansi),
+ * XOR-0xff-decoded LOGIN, and XOR-0xff-decoded PASSWORD into their
+ * respective buffers (NUL-terminated, capped at the matching _cap-1).
+ * PASSWORD no-password convention: a single zero byte (or empty)
+ * yields an empty pass buffer — matches the C extractor's
+ * `plen > 1 && dh->data[0]` gate. ACCESS lands in out->access (8
+ * bytes); out->got_access is the dispatch gate. Returns false on any
+ * NULL / zero-cap pointer; otherwise true. */
+extern bool gtkhx_proto_parse_account_read (const uint8_t *msg, size_t msglen,
+                                            uint8_t *name_buf, size_t name_cap,
+                                            uint8_t *login_buf, size_t login_cap,
+                                            uint8_t *pass_buf, size_t pass_cap,
+                                            struct gtkhx_proto_account_read *out);
+
 /* ---- Misc smaller parsers ---- */
 
 /* Extract a HTLS_DATA_TASKERROR chunk's CR2LF + strip_ansi sanitised
