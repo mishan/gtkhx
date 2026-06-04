@@ -2268,24 +2268,15 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (ref);
-            break;
-        case HTLS_DATA_QUEUE:
-            dh_getint (queue);
-            break;
-        case HTLS_DATA_RFLT:
-            if (_len >= 66) {
-                HN32 (&data_pos, &dh->data[46]);
-                HN32 (&rsrc_pos, &dh->data[62]);
-            }
-            break;
-        }
-    }
-    dh_end ();
+    /* Phase R2: chunk-walk moved to Rust parse_file_put_reply. RFLT
+	 * resume offsets (data_pos at +46, rsrc_pos at +62) gate on
+	 * len >= 66 in the Rust parser, matching the C extractor. */
+    struct gtkhx_proto_file_put_reply r;
+    gtkhx_proto_parse_file_put_reply (htlc->in.buf, htlc->in.pos, &r);
+    ref = r.ref_;
+    queue = r.queue;
+    data_pos = r.data_pos;
+    rsrc_pos = r.rsrc_pos;
 
     if (!ref) {
         return;
@@ -2336,18 +2327,13 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (ref);
-            break;
-        case HTLS_DATA_QUEUE:
-            dh_getint (queue);
-            break;
-        }
-    }
-    dh_end ();
+    /* Phase R2: chunk-walk moved to Rust parse_folder_put_reply.
+	 * Strict subset of file_put — no RFLT (per-file resume happens
+	 * inside folder_put_thread, not at the task boundary). */
+    struct gtkhx_proto_folder_put_reply r;
+    gtkhx_proto_parse_folder_put_reply (htlc->in.buf, htlc->in.pos, &r);
+    ref = r.ref_;
+    queue = r.queue;
 
     if (!ref) {
         return;
@@ -2384,18 +2370,13 @@ rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data)
         return;
     }
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (ref);
-            break;
-        case HTLS_DATA_HTXF_SIZE:
-            dh_getint (size);
-            break;
-        }
-    }
-    dh_end ();
+    /* Phase R2: chunk-walk moved to Rust parse_banner_get_reply.
+	 * Just REF + SIZE — banner.c spins up an HTXF subchannel
+	 * worker on the back of these two scalars. */
+    struct gtkhx_proto_banner_get_reply r;
+    gtkhx_proto_parse_banner_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    ref = r.ref_;
+    size = r.size;
 
     debug_log ("banner", "DOWNLOAD_BANNER reply: ref=%u size=%u", ref, size);
 
