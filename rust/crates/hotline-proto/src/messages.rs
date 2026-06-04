@@ -156,6 +156,25 @@ pub mod tag {
     pub const QUEUE: u16 = 0x0074;
     /// `0x0098` — banner type code (exactly 4 bytes, e.g. "URL ", "JPEG").
     pub const BANNER_TYPE: u16 = 0x0098;
+    /// `0x00c9` — file basename (the leaf of a FILE_*-opcode path).
+    /// Already encoded by the C caller via `gtkhx_text_for_wire`.
+    pub const FILE_NAME: u16 = 0x00c9;
+    /// `0x00ca` — directory path component bytes (built by
+    /// `path_to_hldir` on the C side; the builders treat it as opaque
+    /// payload).
+    pub const DIR: u16 = 0x00ca;
+    /// `0x00d2` — file comment string (multi-line; CR2LF normalisation
+    /// applied at the caller).
+    pub const FILE_COMMENT: u16 = 0x00d2;
+    /// `0x00d3` — file rename target (the new basename in
+    /// FILE_SETINFO / FILE_SYMLINK).
+    pub const FILE_RENAME: u16 = 0x00d3;
+    /// `0x00d4` — directory rename target (the destination dir bytes
+    /// in FILE_MOVE / FILE_SYMLINK).
+    pub const DIR_RENAME: u16 = 0x00d4;
+    /// `0x00dc` — folder file count (u32 BE) on PUTFOLDER, used by
+    /// the server's progress UI.
+    pub const FILE_NFILES: u16 = 0x00dc;
     /// `0x0099` — banner URL (only present when type == "URL ").
     pub const BANNER_URL: u16 = 0x0099;
     /// `0x009a` — "server has no agreement" sentinel (zero-length).

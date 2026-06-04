@@ -1852,3 +1852,169 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_post_thread_chunks(
     };
     build::build_news_post_thread_chunks(&req, chunks_slice, scratch_slice) as i32
 }
+
+// ---- File send opcodes -----------------------------------------------
+//
+// FILE_MKDIR: single DIR chunk. FILE_DELETE / _GETINFO / _GETFOLDER:
+// FILE_NAME + optional DIR (presence signalled by has_dir; when 0,
+// `dir_ptr` / `dir_len` are ignored). The four shims share an
+// internal helper for the FILE_NAME+optional-DIR shape.
+
+/// Build `HTLC_HDR_FILE_MKDIR` chunks: single DIR. `chunks_cap >= 1`,
+/// no scratch needed. Returns 1 on success, or 0 on validation
+/// failure (NULL `chunks`, NULL `dir_ptr` with non-zero len, oversize
+/// dir, or `chunks_cap < 1`).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `dir_ptr` valid
+/// for `dir_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_mkdir_chunks(
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if dir_ptr.is_null() && dir_len != 0 {
+        return 0;
+    }
+    if dir_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let dir = as_slice(dir_ptr, dir_len);
+    build::build_file_mkdir_chunks(dir, chunks_slice) as i32
+}
+
+/// Common implementation for the three file-ops opcodes that share
+/// the FILE_NAME + optional DIR wire shape. `has_dir` is a 0/1 flag —
+/// when non-zero, emit DIR with the given bytes; when zero, omit it
+/// entirely (`dir_ptr` / `dir_len` are ignored in that case).
+unsafe fn build_file_name_with_optional_dir_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    inner: fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    let dir_opt = if has_dir != 0 {
+        if dir_ptr.is_null() && dir_len != 0 {
+            return 0;
+        }
+        if dir_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(dir_ptr, dir_len))
+    } else {
+        None
+    };
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let name = as_slice(name_ptr, name_len);
+    inner(name, dir_opt, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_FILE_DELETE` chunks: FILE_NAME + optional DIR.
+/// `chunks_cap >= 2`. Returns 1 (no dir) or 2 (with dir) on success,
+/// 0 on validation failure.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `name_ptr` /
+/// `dir_ptr` valid for their respective lengths (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_delete_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_file_name_with_optional_dir_chunks(
+        name_ptr,
+        name_len,
+        has_dir,
+        dir_ptr,
+        dir_len,
+        chunks,
+        chunks_cap,
+        build::build_file_delete_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_FILE_GETINFO` chunks. Same shape and contract as
+/// [`gtkhx_proto_build_file_delete_chunks`].
+///
+/// # Safety
+/// As [`gtkhx_proto_build_file_delete_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_getinfo_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_file_name_with_optional_dir_chunks(
+        name_ptr,
+        name_len,
+        has_dir,
+        dir_ptr,
+        dir_len,
+        chunks,
+        chunks_cap,
+        build::build_file_getinfo_chunks,
+    )
+}
+
+/// Build `HTLC_HDR_FILE_GETFOLDER` chunks. Same shape and contract as
+/// [`gtkhx_proto_build_file_delete_chunks`].
+///
+/// # Safety
+/// As [`gtkhx_proto_build_file_delete_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_getfolder_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    build_file_name_with_optional_dir_chunks(
+        name_ptr,
+        name_len,
+        has_dir,
+        dir_ptr,
+        dir_len,
+        chunks,
+        chunks_cap,
+        build::build_file_getfolder_chunks,
+    )
+}
