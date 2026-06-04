@@ -2072,101 +2072,33 @@ hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
 void
 rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
 {
-    guint8 icon[4], date_create[8], date_modify[8];
     char type[32], crea[32];
     char name[256], comment[256];
-    guint16 nlen, clen, tlen;
-    guint32 size = 0;
-    /* Large-file (CAP_LARGE_FILES) companion: when present, prefer
-	 * the 64-bit size over the clamped 32-bit one. */
-    guint64 size64 = 0;
-    gboolean size64_seen = FALSE;
     char created[32], modified[32];
 
     if (task_inerror (htlc)) {
         return;
     }
-    name[0] = comment[0] = type[0] = crea[0] = 0;
-    memset (date_create, 0, sizeof date_create);
-    memset (date_modify, 0, sizeof date_modify);
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_FILE_ICON:
-            if (_len >= 4) {
-                memcpy (icon, dh->data, 4);
-            }
-            break;
-        case HTLS_DATA_FILE_TYPE:
-            tlen = (_len > 31) ? 31 : _len;
-            memcpy (type, dh->data, tlen);
-            type[tlen] = 0;
-            break;
-        case HTLS_DATA_FILE_CREATOR:
-            clen = (_len > 31) ? 31 : _len;
-            memcpy (crea, dh->data, clen);
-            crea[clen] = 0;
-            break;
-        case HTLS_DATA_FILE_SIZE:
-            /* Some servers (mhxd) emit the size in the smallest
-			 * big-endian width that fits, so we may see len 1, 2,
-			 * 3, or 4. Read whatever bytes arrived as a big-endian
-			 * unsigned and zero-extend to guint32. */
-            size = 0;
-            for (guint16 i = 0; i < _len && i < 4; i++) {
-                size = (size << 8) | dh->data[i];
-            }
-            break;
-        case HTLS_DATA_FILESIZE64:
-            /* Companion to FILE_SIZE; sent by large-file-mode
-			 * servers. 8-byte big-endian unsigned. */
-            if (_len >= 8) {
-                size64 = 0;
-                for (guint16 _i = 0; _i < 8; _i++) {
-                    size64 = (size64 << 8) | dh->data[_i];
-                }
-                size64_seen = TRUE;
-            }
-            break;
-        case HTLS_DATA_FILE_NAME:
-            nlen = (_len > 255) ? 255 : _len;
-            memcpy (name, dh->data, nlen);
-            name[nlen] = 0;
-            strip_ansi (name, nlen);
-            break;
-        case HTLS_DATA_FILE_DATE_CREATE:
-            if (_len >= 8) {
-                memcpy (date_create, dh->data, 8);
-            }
-            break;
-        case HTLS_DATA_FILE_DATE_MODIFY:
-            if (_len >= 8) {
-                memcpy (date_modify, dh->data, 8);
-            }
-            break;
-        case HTLS_DATA_FILE_COMMENT:
-            clen = (_len > 255) ? 255 : _len;
-            memcpy (comment, dh->data, clen);
-            comment[clen] = 0;
-            CR2LF (comment, clen);
-            /* historical bug: pre-cleanup version called
-			 * strip_ansi(name, clen) here, stripping ANSI from the
-			 * filename buffer using the comment length. We hit it
-			 * during the pointer-sign retype pass — surfaced because
-			 * GCC complained about (now-mismatched) sign once both
-			 * buffers became char[]. */
-            strip_ansi (comment, clen);
-            break;
-        }
-    }
-    dh_end ();
 
-    hx_format_hotline_date (date_create, created, sizeof created);
-    hx_format_hotline_date (date_modify, modified, sizeof modified);
+    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to Rust
+	 * parse_file_getinfo. The C side keeps the formatted-date
+	 * conversion (calls into hl_date which speaks the Hotline
+	 * date stamp format) and the per-call session emit. */
+    struct gtkhx_proto_file_getinfo f;
+    bool ok = gtkhx_proto_parse_file_getinfo (
+        htlc->in.buf, htlc->in.pos, (uint8_t *)name, sizeof (name),
+        (uint8_t *)type, sizeof (type), (uint8_t *)crea, sizeof (crea),
+        (uint8_t *)comment, sizeof (comment), &f);
+    if (!ok) {
+        return;
+    }
+
+    hx_format_hotline_date (f.date_create, created, sizeof created);
+    hx_format_hotline_date (f.date_modify, modified, sizeof modified);
 
     gtkhx_session_emit_file_info (gtkhx_session_get_default (), path, name,
                                   crea, type, comment, modified, created,
-                                  size64_seen ? size64 : (guint64)size);
+                                  f.size64_seen ? f.size64 : (guint64)f.size);
 }
 
 /* Adapter matching hx_preview_cancel_fn (void (*)(void *)).
@@ -2214,31 +2146,16 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_SIZE:
-            dh_getint (size);
-            break;
-        case HTLS_DATA_XFERSIZE64:
-            /* 8-byte big-endian unsigned. */
-            if (_len >= 8) {
-                size64 = 0;
-                for (guint16 _i = 0; _i < 8; _i++) {
-                    size64 = (size64 << 8) | dh->data[_i];
-                }
-                size64_seen = TRUE;
-            }
-            break;
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (ref);
-            break;
-        case HTLS_DATA_QUEUE:
-            dh_getint (queue); /* Only on 1.5+ servers */
-            break;
-        }
-    }
-    dh_end ();
+    /* Phase R2: chunk-walk moved to Rust parse_file_get_reply. The
+	 * `(!size && !size64_seen) || !ref` dispatch gate stays here —
+	 * malformed replies short-circuit the rest of the xfer kickoff. */
+    struct gtkhx_proto_file_get_reply r;
+    gtkhx_proto_parse_file_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    ref = r.ref_;
+    size = r.size;
+    size64 = r.size64;
+    size64_seen = r.size64_seen != 0;
+    queue = r.queue;
 
     if ((!size && !size64_seen) || !ref) {
         return;
@@ -2323,33 +2240,19 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLS_DATA_HTXF_SIZE:
-            dh_getint (size);
-            break;
-        case HTLS_DATA_XFERSIZE64:
-            if (_len >= 8) {
-                size64 = 0;
-                for (guint16 _i = 0; _i < 8; _i++) {
-                    size64 = (size64 << 8) | dh->data[_i];
-                }
-                size64_seen = TRUE;
-            }
-            break;
-        case HTLS_DATA_HTXF_REF:
-            dh_getint (ref);
-            break;
-        case HTLS_DATA_QUEUE:
-            dh_getint (queue);
-            break;
-        case HTLS_DATA_FILE_NFILES:
-            dh_getint (nfiles);
-            break;
-        }
-    }
-    dh_end ();
+    /* Phase R2: chunk-walk moved to Rust parse_folder_get_reply.
+	 * Same scalar shape as file_get plus FILE_NFILES (folder file
+	 * count). The C-side gate here is just `!ref` — folders are
+	 * legal at total_size 0 (the `total_size = ... : 1` clamp
+	 * below normalises that for the progress UI). */
+    struct gtkhx_proto_folder_get_reply r;
+    gtkhx_proto_parse_folder_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    ref = r.ref_;
+    size = r.size;
+    size64 = r.size64;
+    size64_seen = r.size64_seen != 0;
+    queue = r.queue;
+    nfiles = r.nfiles;
 
     if (!ref) {
         return;

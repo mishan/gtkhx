@@ -811,7 +811,11 @@ pub fn parse_chat_invite(buf: &[u8], len: usize, max_name: usize) -> ChatInvite 
     ChatInvite { uid, cid, name }
 }
 
-// ---- HTLS_HDR_USER_GETINFO reply ---------------------------------------
+// ---- HTLC_HDR_USER_GETINFO reply ---------------------------------------
+//
+// USER_GETINFO is a client opcode (HTLC_HDR_*); the server's response
+// arrives inside an HTLS_HDR_TASK frame, and this parser walks that
+// post-TASK payload.
 
 /// Parsed user-info reply. Mirrors the C `rcv_task_user_info` extractor:
 /// the nickname is `strip_ansi`'d (no CR2LF) and the info body is CR2LF
@@ -825,7 +829,7 @@ pub struct UserInfo {
     pub info: Vec<u8>,
 }
 
-/// Parse the post-`HTLS_HDR_USER_GETINFO` TASK reply payload (the C
+/// Parse the post-`HTLC_HDR_USER_GETINFO` TASK reply payload (the C
 /// `rcv_task_user_info` body). `max_name` / `max_info` cap the two
 /// strings the same way the C extractor does (31 / 4096). Missing
 /// chunks are returned as empty `Vec`s — the C caller's gate is
@@ -857,7 +861,11 @@ pub fn parse_user_info(buf: &[u8], len: usize, max_name: usize, max_info: usize)
     UserInfo { name, info }
 }
 
-// ---- HTLS_HDR_ACCOUNT_READ reply ---------------------------------------
+// ---- HTLC_HDR_ACCOUNT_READ reply ---------------------------------------
+//
+// ACCOUNT_READ is a client opcode (HTLC_HDR_*); the server's response
+// arrives inside an HTLS_HDR_TASK frame, and this parser walks that
+// post-TASK payload.
 
 /// Parsed account-read reply. Mirrors the C `rcv_task_user_open`
 /// extractor: NAME bytes verbatim (no `strip_ansi` — the C handler
@@ -967,6 +975,213 @@ pub fn parse_account_read(
         }
     }
 
+    out
+}
+
+// ---- xfer-reply parsers (post-TASK payloads) --------------------------
+//
+// FILE_GET / FOLDER_GET replies share the same scalar shape (HTXF_REF,
+// HTXF_SIZE, optional XFERSIZE64 companion, optional QUEUE — 1.5+
+// servers); folder_get adds NFILES. FILE_GETINFO is the richer reply
+// the file-info dialog renders.
+
+/// Read up to 4 bytes of a chunk's payload as a big-endian unsigned,
+/// zero-extending to u32. Mirrors the C `for (i = 0; i < _len && i <
+/// 4; i++) { size = (size << 8) | dh->data[i]; }` pattern that
+/// FILE_SIZE uses — some servers (mhxd) emit the size in the
+/// smallest BE width that fits. For exactly-4 or exactly-2 byte
+/// payloads, [`Chunk::as_uint`] already handles the standard case;
+/// this helper covers the variable-width tail.
+fn be_uint_up_to_4(data: &[u8]) -> u32 {
+    let mut v: u32 = 0;
+    for &b in data.iter().take(4) {
+        v = (v << 8) | u32::from(b);
+    }
+    v
+}
+
+/// Read the first 8 bytes of a chunk as a big-endian u64; returns
+/// `None` when fewer than 8 bytes are available. Trailing bytes are
+/// ignored, matching the C extractor's `if (_len >= 8)` gate that
+/// FILESIZE64 / XFERSIZE64 use.
+fn be_u64_first8(data: &[u8]) -> Option<u64> {
+    if data.len() >= 8 {
+        Some(u64::from_be_bytes([
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+        ]))
+    } else {
+        None
+    }
+}
+
+/// Parsed FILE_GET reply (the post-TASK payload backing the C
+/// `rcv_task_file_get`). Missing chunks default to 0; `size64_seen`
+/// reports whether the Large-Files companion was present.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileGetReply {
+    pub ref_: u32,
+    pub size: u32,
+    pub size64: u64,
+    pub size64_seen: bool,
+    pub queue: u32,
+}
+
+/// Parse the FILE_GET reply scalars. The caller is responsible for the
+/// `(!size && !size64_seen) || !ref` dispatch gate the C extractor
+/// uses to reject malformed frames (matches the receive-side check).
+pub fn parse_file_get_reply(buf: &[u8], len: usize) -> FileGetReply {
+    let mut out = FileGetReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.ref_ = chunk.as_uint(),
+            tag::HTXF_SIZE => out.size = chunk.as_uint(),
+            tag::XFERSIZE64 => {
+                if let Some(v) = be_u64_first8(chunk.data) {
+                    out.size64 = v;
+                    out.size64_seen = true;
+                }
+            }
+            tag::QUEUE => out.queue = chunk.as_uint(),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parsed FOLDER_GET reply — `FileGetReply` plus the file-count
+/// hint the server's progress UI uses.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FolderGetReply {
+    pub ref_: u32,
+    pub size: u32,
+    pub size64: u64,
+    pub size64_seen: bool,
+    pub queue: u32,
+    pub nfiles: u32,
+}
+
+/// Parse the FOLDER_GET reply scalars. Same shape as
+/// [`parse_file_get_reply`] with the addition of `FILE_NFILES`.
+pub fn parse_folder_get_reply(buf: &[u8], len: usize) -> FolderGetReply {
+    let mut out = FolderGetReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.ref_ = chunk.as_uint(),
+            tag::HTXF_SIZE => out.size = chunk.as_uint(),
+            tag::XFERSIZE64 => {
+                if let Some(v) = be_u64_first8(chunk.data) {
+                    out.size64 = v;
+                    out.size64_seen = true;
+                }
+            }
+            tag::QUEUE => out.queue = chunk.as_uint(),
+            tag::FILE_NFILES => out.nfiles = chunk.as_uint(),
+            _ => {}
+        }
+    }
+    out
+}
+
+// ---- FILE_GETINFO reply -------------------------------------------------
+
+/// Parsed FILE_GETINFO reply (the post-TASK payload backing
+/// `rcv_task_file_getinfo`). Mirrors the C extractor field-for-field.
+///
+/// Strings are NOT NUL-terminated here — capping + termination happens
+/// at the FFI boundary. `name` is `strip_ansi`'d; `comment` is CR2LF
+/// + `strip_ansi`'d (multi-line). `type_` / `creator` are 4-byte
+/// HFS-style codes (or shorter if the server emitted fewer bytes);
+/// the C extractor copies up to 31 bytes and NUL-terminates, but in
+/// practice servers send exactly 4. We expose the raw bytes here and
+/// let the FFI side stringify with its cap.
+#[derive(Debug, Clone, Default)]
+pub struct FileGetInfo {
+    /// `FILE_ICON` — 4 bytes when present, else empty.
+    pub icon: [u8; 4],
+    pub got_icon: bool,
+    /// `FILE_TYPE` — HFS type code (typically 4 bytes), capped at
+    /// `max_type`.
+    pub type_: Vec<u8>,
+    /// `FILE_CREATOR` — HFS creator code (typically 4 bytes), capped
+    /// at `max_creator`.
+    pub creator: Vec<u8>,
+    /// `FILE_SIZE` — legacy 1..=4-byte BE size, zero-extended to u32.
+    pub size: u32,
+    /// `FILESIZE64` — Large-Files companion (u64 BE).
+    pub size64: u64,
+    pub size64_seen: bool,
+    /// `FILE_NAME` — strip_ansi'd, capped at `max_name`.
+    pub name: Vec<u8>,
+    /// `FILE_DATE_CREATE` — raw 8 wire bytes (Hotline date stamp),
+    /// zero-filled when missing or short.
+    pub date_create: [u8; 8],
+    /// `FILE_DATE_MODIFY` — raw 8 wire bytes.
+    pub date_modify: [u8; 8],
+    /// `FILE_COMMENT` — CR2LF + strip_ansi'd, capped at `max_comment`.
+    pub comment: Vec<u8>,
+}
+
+/// Parse the FILE_GETINFO reply. `max_name` / `max_type` /
+/// `max_creator` / `max_comment` cap the corresponding strings (the C
+/// extractor uses 255 / 31 / 31 / 255). Missing chunks default
+/// to zero-length / zero-filled. Sanitisation (`strip_ansi` on name,
+/// CR2LF + `strip_ansi` on comment) matches the C extractor's order.
+pub fn parse_file_getinfo(
+    buf: &[u8],
+    len: usize,
+    max_name: usize,
+    max_type: usize,
+    max_creator: usize,
+    max_comment: usize,
+) -> FileGetInfo {
+    let mut out = FileGetInfo::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::FILE_ICON => {
+                if chunk.data.len() >= 4 {
+                    out.icon.copy_from_slice(&chunk.data[..4]);
+                    out.got_icon = true;
+                }
+            }
+            tag::FILE_TYPE => {
+                let take = chunk.data.len().min(max_type);
+                out.type_ = chunk.data[..take].to_vec();
+            }
+            tag::FILE_CREATOR => {
+                let take = chunk.data.len().min(max_creator);
+                out.creator = chunk.data[..take].to_vec();
+            }
+            tag::FILE_SIZE => out.size = be_uint_up_to_4(chunk.data),
+            tag::FILESIZE64 => {
+                if let Some(v) = be_u64_first8(chunk.data) {
+                    out.size64 = v;
+                    out.size64_seen = true;
+                }
+            }
+            tag::FILE_NAME => {
+                let take = chunk.data.len().min(max_name);
+                out.name = chunk.data[..take].to_vec();
+            }
+            tag::FILE_DATE_CREATE => {
+                if chunk.data.len() >= 8 {
+                    out.date_create.copy_from_slice(&chunk.data[..8]);
+                }
+            }
+            tag::FILE_DATE_MODIFY => {
+                if chunk.data.len() >= 8 {
+                    out.date_modify.copy_from_slice(&chunk.data[..8]);
+                }
+            }
+            tag::FILE_COMMENT => {
+                let take = chunk.data.len().min(max_comment);
+                out.comment = chunk.data[..take].to_vec();
+            }
+            _ => {}
+        }
+    }
+    strip_ansi(&mut out.name);
+    cr2lf(&mut out.comment);
+    strip_ansi(&mut out.comment);
     out
 }
 
@@ -2087,5 +2302,182 @@ mod tests {
         let m = msg(0x0001_0000, 1, 0, &[]);
         let ar = parse_account_read(&m, m.len(), 31, 31, 31);
         assert!(!ar.got_access);
+    }
+
+    // ---- file_get / folder_get reply ----
+
+    #[test]
+    fn file_get_reply_extracts_ref_size_queue() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &0x1234_5678u32.to_be_bytes()));
+        body.extend(chunk(tag::HTXF_SIZE, &1_048_576u32.to_be_bytes()));
+        body.extend(chunk(tag::QUEUE, &7u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_get_reply(&m, m.len());
+        assert_eq!(r.ref_, 0x1234_5678);
+        assert_eq!(r.size, 1_048_576);
+        assert_eq!(r.queue, 7);
+        assert!(!r.size64_seen);
+    }
+
+    #[test]
+    fn file_get_reply_with_xfersize64_companion() {
+        let big = 0x0000_0001_0000_0000u64;
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::HTXF_SIZE, &u32::MAX.to_be_bytes()));
+        body.extend(chunk(tag::XFERSIZE64, &big.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_get_reply(&m, m.len());
+        assert!(r.size64_seen);
+        assert_eq!(r.size64, big);
+    }
+
+    #[test]
+    fn file_get_reply_short_xfersize64_ignored() {
+        // 7-byte XFERSIZE64 is malformed; size64_seen stays false.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::XFERSIZE64, &[0u8; 7]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_get_reply(&m, m.len());
+        assert!(!r.size64_seen);
+    }
+
+    #[test]
+    fn file_get_reply_missing_chunks_default_zero() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let r = parse_file_get_reply(&m, m.len());
+        assert_eq!(r, FileGetReply::default());
+    }
+
+    #[test]
+    fn folder_get_reply_extracts_nfiles() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::HTXF_SIZE, &1024u32.to_be_bytes()));
+        body.extend(chunk(tag::FILE_NFILES, &42u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_folder_get_reply(&m, m.len());
+        assert_eq!(r.ref_, 1);
+        assert_eq!(r.size, 1024);
+        assert_eq!(r.nfiles, 42);
+    }
+
+    // ---- file_getinfo reply ----
+
+    /// Build an 8-byte Hotline date stamp from a u64 (BE).
+    fn date_stamp(v: u64) -> [u8; 8] {
+        v.to_be_bytes()
+    }
+
+    #[test]
+    fn file_getinfo_full() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::FILE_ICON, b"ICN1"));
+        body.extend(chunk(tag::FILE_TYPE, b"TEXT"));
+        body.extend(chunk(tag::FILE_CREATOR, b"MSWD"));
+        body.extend(chunk(tag::FILE_SIZE, &12345u32.to_be_bytes()));
+        body.extend(chunk(tag::FILE_NAME, b"hello.txt"));
+        body.extend(chunk(tag::FILE_DATE_CREATE, &date_stamp(0x0102_0304_0506_0708)));
+        body.extend(chunk(tag::FILE_DATE_MODIFY, &date_stamp(0x0807_0605_0403_0201)));
+        body.extend(chunk(tag::FILE_COMMENT, b"first line\rsecond line"));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert!(f.got_icon);
+        assert_eq!(&f.icon, b"ICN1");
+        assert_eq!(f.type_, b"TEXT");
+        assert_eq!(f.creator, b"MSWD");
+        assert_eq!(f.size, 12345);
+        assert_eq!(f.name, b"hello.txt");
+        assert_eq!(f.date_create, date_stamp(0x0102_0304_0506_0708));
+        assert_eq!(f.date_modify, date_stamp(0x0807_0605_0403_0201));
+        assert_eq!(f.comment, b"first line\nsecond line");
+        assert!(!f.size64_seen);
+    }
+
+    #[test]
+    fn file_getinfo_size_smaller_widths() {
+        // Servers may pack FILE_SIZE in 1, 2, 3, or 4 bytes BE — the
+        // parser zero-extends in all cases.
+        for (bytes, expect) in &[
+            (&[0x12][..], 0x12u32),
+            (&[0x12, 0x34][..], 0x1234u32),
+            (&[0x12, 0x34, 0x56][..], 0x12_3456u32),
+            (&[0x12, 0x34, 0x56, 0x78][..], 0x1234_5678u32),
+        ] {
+            let m = msg(0x0001_0000, 1, 0, &chunk(tag::FILE_SIZE, bytes));
+            let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+            assert_eq!(f.size, *expect, "FILE_SIZE width {} bytes", bytes.len());
+        }
+    }
+
+    #[test]
+    fn file_getinfo_size64_companion() {
+        let big = 0x0000_0002_0000_0000u64;
+        let mut body = Vec::new();
+        body.extend(chunk(tag::FILE_SIZE, &u32::MAX.to_be_bytes()));
+        body.extend(chunk(tag::FILESIZE64, &big.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert!(f.size64_seen);
+        assert_eq!(f.size64, big);
+        // Legacy FILE_SIZE still captured.
+        assert_eq!(f.size, u32::MAX);
+    }
+
+    #[test]
+    fn file_getinfo_name_strip_ansi_and_caps() {
+        // Embed a 0x1b in the name → folds to '['; name is capped at
+        // max_name.
+        let long = vec![b'x'; 500];
+        let m = msg(0x0001_0000, 1, 0, &chunk(tag::FILE_NAME, &long));
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert_eq!(f.name.len(), 255);
+
+        let m2 = msg(0x0001_0000, 1, 0, &chunk(tag::FILE_NAME, b"hi\x1bX"));
+        let f2 = parse_file_getinfo(&m2, m2.len(), 255, 31, 31, 255);
+        assert_eq!(f2.name, b"hi[X");
+    }
+
+    #[test]
+    fn file_getinfo_comment_cr2lf_and_strip_ansi() {
+        // CR → LF, then strip_ansi folds the 0x1b. Multi-line.
+        let m = msg(0x0001_0000, 1, 0, &chunk(tag::FILE_COMMENT, b"a\rb\x1b"));
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert_eq!(f.comment, b"a\nb[");
+    }
+
+    #[test]
+    fn file_getinfo_short_dates_default_zero() {
+        // Short FILE_DATE_* chunks are ignored — date stays zero-filled.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::FILE_DATE_CREATE, &[1, 2, 3]));
+        body.extend(chunk(tag::FILE_DATE_MODIFY, &[]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert_eq!(f.date_create, [0u8; 8]);
+        assert_eq!(f.date_modify, [0u8; 8]);
+    }
+
+    #[test]
+    fn file_getinfo_short_icon_skipped() {
+        let m = msg(0x0001_0000, 1, 0, &chunk(tag::FILE_ICON, b"ab"));
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert!(!f.got_icon);
+        assert_eq!(f.icon, [0u8; 4]);
+    }
+
+    #[test]
+    fn file_getinfo_empty_body() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);
+        assert!(f.name.is_empty());
+        assert!(f.type_.is_empty());
+        assert!(f.creator.is_empty());
+        assert!(f.comment.is_empty());
+        assert!(!f.got_icon);
+        assert!(!f.size64_seen);
+        assert_eq!(f.size, 0);
     }
 }

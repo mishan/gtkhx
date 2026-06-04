@@ -1261,8 +1261,10 @@ pub struct UserInfoOut {
     pub info_len: u16,
 }
 
-/// Parse the post-`HTLS_HDR_USER_GETINFO` TASK reply payload (the C
-/// `rcv_task_user_info` body). Writes the strip_ansi'd name into
+/// Parse the post-`HTLC_HDR_USER_GETINFO` TASK reply payload (the C
+/// `rcv_task_user_info` body — USER_GETINFO is a client opcode and
+/// the server's reply arrives inside an HTLS_HDR_TASK frame).
+/// Writes the strip_ansi'd name into
 /// `name_buf` (cap `name_cap`) and the CR2LF + strip_ansi'd info body
 /// into `info_buf` (cap `info_cap`). Returns false on any NULL /
 /// zero-cap pointer; otherwise true. The C caller's `nlen && ilen`
@@ -1367,6 +1369,165 @@ pub unsafe extern "C" fn gtkhx_proto_parse_account_read(
     (*out).name_len = nw as u16;
     (*out).login_len = lw as u16;
     (*out).pass_len = pw as u16;
+    true
+}
+
+/// C-ABI result of [`parse::parse_file_get_reply`].
+#[repr(C)]
+pub struct FileGetReplyOut {
+    pub ref_: u32,
+    pub size: u32,
+    pub size64: u64,
+    pub queue: u32,
+    pub size64_seen: u8,
+}
+
+/// Parse the FILE_GET reply scalars (HTXF_REF + HTXF_SIZE +
+/// optional XFERSIZE64 + optional QUEUE). Returns false on NULL
+/// `out`; otherwise true (missing chunks default to zero — caller
+/// applies the `(!size && !size64_seen) || !ref` dispatch gate).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `FileGetReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_file_get_reply(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut FileGetReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_file_get_reply(s, s.len());
+    (*out).ref_ = r.ref_;
+    (*out).size = r.size;
+    (*out).size64 = r.size64;
+    (*out).queue = r.queue;
+    (*out).size64_seen = r.size64_seen as u8;
+    true
+}
+
+/// C-ABI result of [`parse::parse_folder_get_reply`]. Same shape as
+/// [`FileGetReplyOut`] with `nfiles` appended.
+#[repr(C)]
+pub struct FolderGetReplyOut {
+    pub ref_: u32,
+    pub size: u32,
+    pub size64: u64,
+    pub queue: u32,
+    pub nfiles: u32,
+    pub size64_seen: u8,
+}
+
+/// Parse the FOLDER_GET reply scalars. Same contract as
+/// [`gtkhx_proto_parse_file_get_reply`] plus `FILE_NFILES`.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `FolderGetReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_folder_get_reply(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut FolderGetReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_folder_get_reply(s, s.len());
+    (*out).ref_ = r.ref_;
+    (*out).size = r.size;
+    (*out).size64 = r.size64;
+    (*out).queue = r.queue;
+    (*out).nfiles = r.nfiles;
+    (*out).size64_seen = r.size64_seen as u8;
+    true
+}
+
+/// C-ABI result of [`parse::parse_file_getinfo`]. Strings land in
+/// caller-owned `name_buf` / `type_buf` / `creator_buf` /
+/// `comment_buf`, NUL-terminated, capped at the matching `_cap - 1`;
+/// dates and icon land in fixed-size byte arrays.
+#[repr(C)]
+pub struct FileGetInfoOut {
+    pub icon: [u8; 4],
+    pub date_create: [u8; 8],
+    pub date_modify: [u8; 8],
+    pub size: u32,
+    pub size64: u64,
+    pub size64_seen: u8,
+    pub got_icon: u8,
+    pub name_len: u16,
+    pub type_len: u16,
+    pub creator_len: u16,
+    pub comment_len: u16,
+}
+
+/// Parse the FILE_GETINFO reply. Writes strip_ansi'd `FILE_NAME` into
+/// `name_buf`, raw `FILE_TYPE` / `FILE_CREATOR` into their buffers,
+/// CR2LF + strip_ansi'd `FILE_COMMENT` into `comment_buf` — all NUL-
+/// terminated and capped at the matching `_cap - 1`. `FILE_ICON`,
+/// `FILE_DATE_CREATE`, `FILE_DATE_MODIFY` land in fixed-size byte
+/// arrays inside `*out`. Returns false on any NULL / zero-cap
+/// pointer; otherwise true.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); the four string buffers
+/// valid for their capacities (or NULL); `out` a valid writable
+/// `FileGetInfoOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_file_getinfo(
+    msg: *const u8,
+    msglen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    type_buf: *mut u8,
+    type_cap: usize,
+    creator_buf: *mut u8,
+    creator_cap: usize,
+    comment_buf: *mut u8,
+    comment_cap: usize,
+    out: *mut FileGetInfoOut,
+) -> bool {
+    if out.is_null()
+        || name_buf.is_null()
+        || name_cap == 0
+        || type_buf.is_null()
+        || type_cap == 0
+        || creator_buf.is_null()
+        || creator_cap == 0
+        || comment_buf.is_null()
+        || comment_cap == 0
+    {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let f = parse::parse_file_getinfo(
+        s,
+        s.len(),
+        name_cap - 1,
+        type_cap - 1,
+        creator_cap - 1,
+        comment_cap - 1,
+    );
+    let nw = write_cstr(name_buf, name_cap, &f.name);
+    let tw = write_cstr(type_buf, type_cap, &f.type_);
+    let cw = write_cstr(creator_buf, creator_cap, &f.creator);
+    let mw = write_cstr(comment_buf, comment_cap, &f.comment);
+    (*out).icon = f.icon;
+    (*out).date_create = f.date_create;
+    (*out).date_modify = f.date_modify;
+    (*out).size = f.size;
+    (*out).size64 = f.size64;
+    (*out).size64_seen = f.size64_seen as u8;
+    (*out).got_icon = f.got_icon as u8;
+    (*out).name_len = nw as u16;
+    (*out).type_len = tw as u16;
+    (*out).creator_len = cw as u16;
+    (*out).comment_len = mw as u16;
     true
 }
 
