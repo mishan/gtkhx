@@ -260,6 +260,48 @@ extern bool gtkhx_proto_parse_folder_get_reply (
     const uint8_t *msg, size_t msglen,
     struct gtkhx_proto_folder_get_reply *out);
 
+struct gtkhx_proto_file_put_reply {
+    uint32_t ref_;
+    uint32_t queue;
+    /* Fork resume offsets parsed from the optional RFLT payload.
+     * Zero when no RFLT was sent or it was shorter than 66 bytes
+     * (the C extractor's gate; RFLT carries data_pos at +46 and
+     * rsrc_pos at +62, both BE u32). */
+    uint32_t data_pos;
+    uint32_t rsrc_pos;
+};
+
+/* Parse the FILE_PUT reply scalars. Returns false on NULL out;
+ * otherwise true (missing chunks default to zero — caller applies
+ * the `!ref` dispatch gate). */
+extern bool gtkhx_proto_parse_file_put_reply (
+    const uint8_t *msg, size_t msglen,
+    struct gtkhx_proto_file_put_reply *out);
+
+struct gtkhx_proto_folder_put_reply {
+    uint32_t ref_;
+    uint32_t queue;
+};
+
+/* Parse the FOLDER_PUT reply scalars (strict subset of
+ * gtkhx_proto_parse_file_put_reply — no RFLT; per-file resume
+ * happens inside folder_put_thread, not at the task boundary). */
+extern bool gtkhx_proto_parse_folder_put_reply (
+    const uint8_t *msg, size_t msglen,
+    struct gtkhx_proto_folder_put_reply *out);
+
+struct gtkhx_proto_banner_get_reply {
+    uint32_t ref_;
+    uint32_t size;
+};
+
+/* Parse the DOWNLOAD_BANNER reply scalars. Just the transfer
+ * reference + total byte count for the HTXF subchannel fetch
+ * banner.c spins up. */
+extern bool gtkhx_proto_parse_banner_get_reply (
+    const uint8_t *msg, size_t msglen,
+    struct gtkhx_proto_banner_get_reply *out);
+
 struct gtkhx_proto_file_getinfo {
     uint8_t icon[4];
     uint8_t date_create[8];

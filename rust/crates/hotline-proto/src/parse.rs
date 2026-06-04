@@ -1178,6 +1178,98 @@ pub fn parse_folder_get_reply(buf: &[u8], len: usize) -> FolderGetReply {
     out
 }
 
+/// Parsed FILE_PUT reply — the server's response to our
+/// HTLC_HDR_FILE_PUT. Carries the transfer reference, an optional
+/// queue position, and an optional RFLT resume payload telling us
+/// the partial-upload fork offsets to resume from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FilePutReply {
+    pub ref_: u32,
+    pub queue: u32,
+    /// Data-fork resume offset (RFLT bytes 46..50, BE u32). Zero
+    /// when no RFLT was sent, or when the RFLT was shorter than 66
+    /// bytes (the C extractor's gate; the trailer at offset 62..66
+    /// is the resource fork's, so a record shorter than 66 can't
+    /// carry both).
+    pub data_pos: u32,
+    /// Resource-fork resume offset (RFLT bytes 62..66, BE u32).
+    pub rsrc_pos: u32,
+}
+
+/// Parse the FILE_PUT reply scalars. RFLT is gated at len >= 66
+/// (matching the C extractor); shorter records leave data_pos /
+/// rsrc_pos at zero. The caller applies the `!ref` dispatch gate.
+pub fn parse_file_put_reply(buf: &[u8], len: usize) -> FilePutReply {
+    let mut out = FilePutReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.ref_ = chunk.as_uint(),
+            tag::QUEUE => out.queue = chunk.as_uint(),
+            tag::RFLT => {
+                if chunk.data.len() >= 66 {
+                    out.data_pos = u32::from_be_bytes([
+                        chunk.data[46],
+                        chunk.data[47],
+                        chunk.data[48],
+                        chunk.data[49],
+                    ]);
+                    out.rsrc_pos = u32::from_be_bytes([
+                        chunk.data[62],
+                        chunk.data[63],
+                        chunk.data[64],
+                        chunk.data[65],
+                    ]);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parsed FOLDER_PUT reply — strict subset of [`FilePutReply`]
+/// (no RFLT; per-file resume happens inside folder_put_thread,
+/// not at the task boundary).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FolderPutReply {
+    pub ref_: u32,
+    pub queue: u32,
+}
+
+/// Parse the FOLDER_PUT reply scalars.
+pub fn parse_folder_put_reply(buf: &[u8], len: usize) -> FolderPutReply {
+    let mut out = FolderPutReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.ref_ = chunk.as_uint(),
+            tag::QUEUE => out.queue = chunk.as_uint(),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parsed DOWNLOAD_BANNER reply — the server hands back a transfer
+/// reference and total byte count for the HTXF subchannel fetch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BannerGetReply {
+    pub ref_: u32,
+    pub size: u32,
+}
+
+/// Parse the DOWNLOAD_BANNER reply scalars.
+pub fn parse_banner_get_reply(buf: &[u8], len: usize) -> BannerGetReply {
+    let mut out = BannerGetReply::default();
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::HTXF_REF => out.ref_ = chunk.as_uint(),
+            tag::HTXF_SIZE => out.size = chunk.as_uint(),
+            _ => {}
+        }
+    }
+    out
+}
+
 // ---- FILE_GETINFO reply -------------------------------------------------
 
 /// Parsed FILE_GETINFO reply (the post-TASK payload backing
@@ -2580,6 +2672,111 @@ mod tests {
         assert_eq!(r.ref_, 1);
         assert_eq!(r.size, 1024);
         assert_eq!(r.nfiles, 42);
+    }
+
+    // ---- file_put reply ----
+
+    /// Build a 66-byte RFLT payload with `data_pos` at offset 46
+    /// and `rsrc_pos` at offset 62 (the fork-offset positions the
+    /// C extractor reads from). Pad to 74 bytes to match real
+    /// server emissions; the parser only requires >= 66 bytes.
+    fn rflt_payload(data_pos: u32, rsrc_pos: u32) -> [u8; 74] {
+        let mut rflt = [0u8; 74];
+        rflt[0..4].copy_from_slice(b"RFLT");
+        rflt[46..50].copy_from_slice(&data_pos.to_be_bytes());
+        rflt[62..66].copy_from_slice(&rsrc_pos.to_be_bytes());
+        rflt
+    }
+
+    #[test]
+    fn file_put_reply_extracts_ref_queue() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &0xdead_beefu32.to_be_bytes()));
+        body.extend(chunk(tag::QUEUE, &3u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_put_reply(&m, m.len());
+        assert_eq!(r.ref_, 0xdead_beef);
+        assert_eq!(r.queue, 3);
+        assert_eq!(r.data_pos, 0);
+        assert_eq!(r.rsrc_pos, 0);
+    }
+
+    #[test]
+    fn file_put_reply_with_rflt_resume() {
+        let rflt = rflt_payload(0x0000_1234, 0x0000_5678);
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::RFLT, &rflt));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_put_reply(&m, m.len());
+        assert_eq!(r.data_pos, 0x0000_1234);
+        assert_eq!(r.rsrc_pos, 0x0000_5678);
+    }
+
+    #[test]
+    fn file_put_reply_short_rflt_ignored() {
+        // RFLT requires >= 66 bytes (the C `if (_len >= 66)` gate).
+        // A 65-byte RFLT leaves both fork offsets at zero.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::RFLT, &[0u8; 65]));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_file_put_reply(&m, m.len());
+        assert_eq!(r.data_pos, 0);
+        assert_eq!(r.rsrc_pos, 0);
+    }
+
+    #[test]
+    fn file_put_reply_missing_chunks_default_zero() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let r = parse_file_put_reply(&m, m.len());
+        assert_eq!(r, FilePutReply::default());
+    }
+
+    // ---- folder_put reply ----
+
+    #[test]
+    fn folder_put_reply_extracts_ref_queue() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &0xcafe_babeu32.to_be_bytes()));
+        body.extend(chunk(tag::QUEUE, &5u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_folder_put_reply(&m, m.len());
+        assert_eq!(r.ref_, 0xcafe_babe);
+        assert_eq!(r.queue, 5);
+    }
+
+    #[test]
+    fn folder_put_reply_ignores_unknown_chunks() {
+        // Folder-put has no RFLT / SIZE / NFILES — only REF + QUEUE.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &1u32.to_be_bytes()));
+        body.extend(chunk(tag::HTXF_SIZE, &9999u32.to_be_bytes()));
+        body.extend(chunk(tag::FILE_NFILES, &7u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_folder_put_reply(&m, m.len());
+        assert_eq!(r.ref_, 1);
+        assert_eq!(r.queue, 0);
+    }
+
+    // ---- banner_get reply ----
+
+    #[test]
+    fn banner_get_reply_extracts_ref_size() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::HTXF_REF, &0xfeed_face_u32.to_be_bytes()));
+        body.extend(chunk(tag::HTXF_SIZE, &65_536u32.to_be_bytes()));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let r = parse_banner_get_reply(&m, m.len());
+        assert_eq!(r.ref_, 0xfeed_face);
+        assert_eq!(r.size, 65_536);
+    }
+
+    #[test]
+    fn banner_get_reply_missing_chunks_default_zero() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        let r = parse_banner_get_reply(&m, m.len());
+        assert_eq!(r, BannerGetReply::default());
     }
 
     // ---- file_getinfo reply ----

@@ -1516,6 +1516,104 @@ pub unsafe extern "C" fn gtkhx_proto_parse_folder_get_reply(
     true
 }
 
+/// C-ABI result of [`parse::parse_file_put_reply`]. `data_pos` /
+/// `rsrc_pos` carry the fork resume offsets parsed from the RFLT
+/// payload (zero when no RFLT was present or it was shorter than 66
+/// bytes).
+#[repr(C)]
+pub struct FilePutReplyOut {
+    pub ref_: u32,
+    pub queue: u32,
+    pub data_pos: u32,
+    pub rsrc_pos: u32,
+}
+
+/// Parse the FILE_PUT reply scalars (HTXF_REF + optional QUEUE +
+/// optional RFLT with fork offsets at +46 / +62). Missing chunks
+/// default to zero; the caller applies the `!ref` dispatch gate.
+/// Returns false on NULL `out`; otherwise true.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `FilePutReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_file_put_reply(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut FilePutReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_file_put_reply(s, s.len());
+    (*out).ref_ = r.ref_;
+    (*out).queue = r.queue;
+    (*out).data_pos = r.data_pos;
+    (*out).rsrc_pos = r.rsrc_pos;
+    true
+}
+
+/// C-ABI result of [`parse::parse_folder_put_reply`]. Strict subset
+/// of [`FilePutReplyOut`] (no RFLT — per-file resume happens inside
+/// folder_put_thread, not at the task boundary).
+#[repr(C)]
+pub struct FolderPutReplyOut {
+    pub ref_: u32,
+    pub queue: u32,
+}
+
+/// Parse the FOLDER_PUT reply scalars.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `FolderPutReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_folder_put_reply(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut FolderPutReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_folder_put_reply(s, s.len());
+    (*out).ref_ = r.ref_;
+    (*out).queue = r.queue;
+    true
+}
+
+/// C-ABI result of [`parse::parse_banner_get_reply`]. Just the
+/// transfer reference + total byte count for the HTXF subchannel
+/// fetch banner.c spins up.
+#[repr(C)]
+pub struct BannerGetReplyOut {
+    pub ref_: u32,
+    pub size: u32,
+}
+
+/// Parse the DOWNLOAD_BANNER reply scalars.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `out` a valid writable
+/// `BannerGetReplyOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_banner_get_reply(
+    msg: *const u8,
+    msglen: usize,
+    out: *mut BannerGetReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let r = parse::parse_banner_get_reply(s, s.len());
+    (*out).ref_ = r.ref_;
+    (*out).size = r.size;
+    true
+}
+
 /// C-ABI result of [`parse::parse_file_getinfo`]. Strings land in
 /// caller-owned `name_buf` / `type_buf` / `creator_buf` /
 /// `comment_buf`, NUL-terminated, capped at the matching `_cap - 1`;
