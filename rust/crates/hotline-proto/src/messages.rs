@@ -173,6 +173,25 @@ pub mod tag {
     /// signalling preview / overwrite-existing semantics when the
     /// file already exists at the destination path.
     pub const FILE_PREVIEW: u16 = 0x00cc;
+    /// `0x00cd` — file type code (server → client on FILE_GETINFO
+    /// reply: 4-byte HFS-style type, e.g. `"TEXT"`, `"PICT"`).
+    pub const FILE_TYPE: u16 = 0x00cd;
+    /// `0x00ce` — file creator code (server → client on FILE_GETINFO
+    /// reply: 4-byte HFS-style creator code, e.g. `"MSWD"`).
+    pub const FILE_CREATOR: u16 = 0x00ce;
+    /// `0x00cf` — legacy file size (1..=4 bytes BE unsigned) on the
+    /// FILE_GETINFO reply (the file-info dialog payload). Some
+    /// servers (mhxd) emit the size in the smallest BE width that
+    /// fits; the parser zero-extends to u32. Companion field
+    /// [`FILESIZE64`] when the server speaks Large-Files.
+    ///
+    /// Note: not to be confused with [`HTXF_SIZE`] (0x006c), which
+    /// is the FILE_GET / FILE_PUT transfer-size chunk.
+    pub const FILE_SIZE: u16 = 0x00cf;
+    /// `0x00d0` — file creation date (8-byte Hotline date stamp).
+    pub const FILE_DATE_CREATE: u16 = 0x00d0;
+    /// `0x00d1` — file modification date (8-byte Hotline date stamp).
+    pub const FILE_DATE_MODIFY: u16 = 0x00d1;
     /// `0x00d2` — file comment string (multi-line; CR2LF normalisation
     /// applied at the caller).
     pub const FILE_COMMENT: u16 = 0x00d2;
@@ -182,6 +201,9 @@ pub mod tag {
     /// `0x00d4` — directory rename target (the destination dir bytes
     /// in FILE_MOVE / FILE_SYMLINK).
     pub const DIR_RENAME: u16 = 0x00d4;
+    /// `0x00d5` — file icon code (server → client on FILE_GETINFO
+    /// reply: 4-byte icon resource id).
+    pub const FILE_ICON: u16 = 0x00d5;
     /// `0x00dc` — folder file count (u32 BE) on PUTFOLDER, used by
     /// the server's progress UI.
     pub const FILE_NFILES: u16 = 0x00dc;
@@ -221,6 +243,11 @@ pub mod tag {
     /// `0x014e` — 1.5 news "parent thread id" (u32 BE). Required by
     /// the spec but not actually consulted by mhxd; gtkhx sends 0.
     pub const PARENTTHREAD: u16 = 0x014e;
+    /// `0x01f1` — Large-Files extension: 64-bit file size companion
+    /// to `FILE_SIZE` on FILE_GETINFO replies (u64 BE, 8 bytes).
+    /// When present, callers prefer this over the legacy 32-bit
+    /// field (which may have been clamped at `0xFFFFFFFF`).
+    pub const FILESIZE64: u16 = 0x01f1;
     /// `0x01f3` — Large-Files extension: 64-bit transfer size
     /// companion to `HTXF_SIZE` (u64 BE, 8 bytes). Sent on FILE_PUT
     /// when `CAP_LARGE_FILES` was negotiated; receivers in large-

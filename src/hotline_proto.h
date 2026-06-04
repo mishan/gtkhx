@@ -152,8 +152,10 @@ struct gtkhx_proto_user_info {
     uint16_t info_len;
 };
 
-/* Parse the post-HTLS_HDR_USER_GETINFO TASK reply payload (the
- * rcv_task_user_info body). Writes strip_ansi'd NAME into name_buf
+/* Parse the post-HTLC_HDR_USER_GETINFO TASK reply payload — the
+ * server's response arrives inside an HTLS_HDR_TASK frame; this
+ * parses the post-TASK body (the rcv_task_user_info body in C).
+ * Writes strip_ansi'd NAME into name_buf
  * (NUL-terminated, capped at name_cap-1) and CR2LF + strip_ansi'd
  * USER_INFO body into info_buf (capped at info_cap-1). Returns false
  * on any NULL / zero-cap pointer; otherwise true. The caller's
@@ -190,6 +192,74 @@ extern bool gtkhx_proto_parse_account_read (const uint8_t *msg, size_t msglen,
                                             uint8_t *login_buf, size_t login_cap,
                                             uint8_t *pass_buf, size_t pass_cap,
                                             struct gtkhx_proto_account_read *out);
+
+/* ---- Xfer-reply parsers (post-TASK payloads on FILE_GET / FOLDER_GET /
+ * FILE_GETINFO replies) ---- */
+
+struct gtkhx_proto_file_get_reply {
+    uint32_t ref_;
+    uint32_t size;
+    uint64_t size64;
+    uint32_t queue;
+    /* 0/1 — set iff the XFERSIZE64 companion chunk was present and
+     * carried at least 8 bytes (the parser reads the first 8 BE
+     * bytes; trailing bytes are ignored, matching the C `_len >= 8`
+     * gate). Callers prefer size64 when set. */
+    uint8_t size64_seen;
+};
+
+/* Parse the FILE_GET reply scalars (HTXF_REF + HTXF_SIZE + optional
+ * XFERSIZE64 + optional QUEUE). Missing chunks default to zero; the
+ * caller applies the C extractor's `(!size && !size64_seen) || !ref`
+ * dispatch gate. Returns false on NULL out; otherwise true. */
+extern bool gtkhx_proto_parse_file_get_reply (
+    const uint8_t *msg, size_t msglen,
+    struct gtkhx_proto_file_get_reply *out);
+
+struct gtkhx_proto_folder_get_reply {
+    uint32_t ref_;
+    uint32_t size;
+    uint64_t size64;
+    uint32_t queue;
+    uint32_t nfiles;
+    uint8_t size64_seen;
+};
+
+/* Parse the FOLDER_GET reply scalars. Same contract as
+ * gtkhx_proto_parse_file_get_reply with the addition of FILE_NFILES. */
+extern bool gtkhx_proto_parse_folder_get_reply (
+    const uint8_t *msg, size_t msglen,
+    struct gtkhx_proto_folder_get_reply *out);
+
+struct gtkhx_proto_file_getinfo {
+    uint8_t icon[4];
+    uint8_t date_create[8];
+    uint8_t date_modify[8];
+    uint32_t size;
+    uint64_t size64;
+    uint8_t size64_seen;
+    uint8_t got_icon;
+    /* Bytes written to the four string buffers (excluding trailing NUL). */
+    uint16_t name_len;
+    uint16_t type_len;
+    uint16_t creator_len;
+    uint16_t comment_len;
+};
+
+/* Parse the FILE_GETINFO reply (the file-info dialog payload).
+ * Writes strip_ansi'd FILE_NAME into name_buf, FILE_TYPE / FILE_CREATOR
+ * (4-byte HFS codes, typically) into their buffers, and CR2LF +
+ * strip_ansi'd FILE_COMMENT into comment_buf — all NUL-terminated and
+ * capped at the matching _cap-1. FILE_ICON / FILE_DATE_CREATE /
+ * FILE_DATE_MODIFY land in fixed-size byte arrays in *out. Returns
+ * false on any NULL / zero-cap pointer; otherwise true. */
+extern bool gtkhx_proto_parse_file_getinfo (
+    const uint8_t *msg, size_t msglen,
+    uint8_t *name_buf, size_t name_cap,
+    uint8_t *type_buf, size_t type_cap,
+    uint8_t *creator_buf, size_t creator_cap,
+    uint8_t *comment_buf, size_t comment_cap,
+    struct gtkhx_proto_file_getinfo *out);
 
 /* ---- Misc smaller parsers ---- */
 
