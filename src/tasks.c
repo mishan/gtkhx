@@ -1027,9 +1027,9 @@ file_update (session *sess, struct htxf_conn *htxf)
     secs = (int) (eta % 60);
 
     posstr = g_strdup (human_size (humanbuf, pos));
-    memset_s (&humanbuf, sizeof(humanbuf), 0, sizeof (humanbuf));
+    memset (&humanbuf, 0, sizeof (humanbuf));
     sizestr = g_strdup (human_size (humanbuf, size));
-    memset_s (&humanbuf, sizeof(humanbuf), 0, sizeof (humanbuf));
+    memset (&humanbuf, 0, sizeof (humanbuf));
     bpsstr = g_strdup (human_size (humanbuf, Bps));
 
     /* Title: just the filename. htxf->path is the local-filesystem
