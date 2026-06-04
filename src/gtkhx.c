@@ -541,7 +541,9 @@ timer_delete_ptr (void *ptr)
 {
     struct timer *timer;
 
-    for (timer = timer_list; timer; timer = timer->prev) {
+    for (timer = timer_list; timer;) {
+        struct timer *prev = timer->prev;
+
         if (timer->ptr == ptr) {
             if (timer->next) {
                 timer->next->prev = timer->prev;
@@ -555,6 +557,8 @@ timer_delete_ptr (void *ptr)
             g_source_remove (timer->id);
             g_free (timer); /* bring out yer dead! */
         }
+
+        timer = prev;
     }
 }
 
