@@ -268,7 +268,6 @@ set_name_comment (GtkWidget *btn, gpointer data)
     }
 
     file = dirchar_basename (path);
-    task_new (&the_session.htlc, 0, 0, 0, "set file info");
 
     /* Phase E (follow-up): encode the user-facing strings to the
 	 * negotiated wire encoding. file (the current basename, which
@@ -288,21 +287,26 @@ set_name_comment (GtkWidget *btn, gpointer data)
     char *comments_wire = gtkhx_text_for_wire (
         comments, strlen (comments), utf8, /*is_body=*/TRUE, &comments_len);
 
-    if (file != path) {
-        guint16 hldirlen = 0;
-        guint8 *hldir = path_to_hldir (path, &hldirlen, 1);
-        hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 4, HTLC_DATA_FILE_NAME,
-                 (guint16)file_len, file_wire, HTLC_DATA_FILE_RENAME,
-                 (guint16)name_len, name_wire, HTLC_DATA_FILE_COMMENT,
-                 (guint16)comments_len, comments_wire, HTLC_DATA_DIR,
-                 hldirlen, hldir);
-        g_free (hldir);
-    } else {
-        hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 3, HTLC_DATA_FILE_NAME,
-                 (guint16)file_len, file_wire, HTLC_DATA_FILE_RENAME,
-                 (guint16)name_len, name_wire, HTLC_DATA_FILE_COMMENT,
-                 (guint16)comments_len, comments_wire);
+    bool has_dir = (file != path);
+    guint16 hldirlen = 0;
+    guint8 *hldir = NULL;
+    if (has_dir) {
+        hldir = path_to_hldir (path, &hldirlen, 1);
     }
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_setinfo_chunks.
+	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+    struct hx_chunk chunks[4];
+    int hc = (int)gtkhx_proto_build_file_setinfo_chunks (
+        (const uint8_t *)file_wire, file_len, (const uint8_t *)name_wire,
+        name_len, /*has_comment=*/1, (const uint8_t *)comments_wire,
+        comments_len, has_dir ? 1 : 0, hldir, hldirlen, chunks,
+        G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "set file info");
+        hlwrite_chunks (htlc, HTLC_HDR_FILE_SETINFO, 0, chunks, hc);
+    }
+    g_free (hldir);
     g_free (file_wire);
     g_free (name_wire);
     g_free (comments_wire);
@@ -782,23 +786,17 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     gsize rdir_len;
     guint64 total_bytes = 0;
     guint32 nfiles = 0;
-    guint32 size_n;
-    guint32 nfiles_n;
 
     if (!name_len) {
         return;
     }
 
     /* Pre-walk for the SIZE / NFILES chunks. The server uses
-	 * these for the queue/display, not for framing. */
+	 * these for the queue/display, not for framing.
+	 * HTLC_DATA_HTXF_SIZE is u32 on the wire; total_bytes is u64
+	 * here, so we clamp on the C side at the build call below
+	 * before handing the u32 to the builder. */
     hx_folder_aggregate (lpath, &total_bytes, &nfiles);
-    /* HTLC_DATA_HTXF_SIZE is u32; clamp on overflow. */
-    if (total_bytes > G_MAXUINT32) {
-        size_n = htonl (G_MAXUINT32);
-    } else {
-        size_n = htonl ((guint32)total_bytes);
-    }
-    nfiles_n = htonl (nfiles);
 
     rdir_len = rdir ? strlen (rdir) : 0;
     if (rdir_len >= sizeof (rdir_buf)) {
@@ -820,27 +818,44 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
         htxf->total_size = 1;
     }
 
-    task_new (htlc, RCV_TASK_FN (rcv_task_folder_put), htxf, 0,
-              "xfer_go_folder");
-
     /* Phase E (follow-up): encode the folder name. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     gsize name_wire_len = 0;
     char *name_wire
         = gtkhx_text_for_wire (name, name_len, utf8, FALSE, &name_wire_len);
 
-    if (rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0)) {
+    bool has_dir
+        = rdir_buf[0] && !(rdir_buf[0] == (char)dir_char && rdir_buf[1] == 0);
+    if (has_dir) {
         hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
-        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 4, HTLC_DATA_FILE_NAME,
-                 (guint16)name_wire_len, name_wire, HTLC_DATA_DIR, hldirlen,
-                 hldir, HTLC_DATA_HTXF_SIZE, 4, &size_n, HTLC_DATA_FILE_NFILES,
-                 4, &nfiles_n);
-        g_free (hldir);
-    } else {
-        hlwrite (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, 3, HTLC_DATA_FILE_NAME,
-                 (guint16)name_wire_len, name_wire, HTLC_DATA_HTXF_SIZE, 4,
-                 &size_n, HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
     }
+
+    /* Phase R2: chunk layout moved to
+	 * gtkhx_proto_build_file_putfolder_chunks. Build BEFORE task_new —
+	 * see hx_send_msg for the rationale. The builder takes host-order
+	 * u32s for SIZE and NFILES and big-endian-encodes them into scratch
+	 * internally.
+	 *
+	 * Note: on builder failure the task isn't created and hlwrite is
+	 * skipped — matches the rest of the SEND-path opcodes (no orphaned
+	 * task, no unmatched server response). htxf was already created
+	 * above for the xfer machinery; folder_put_thread is dormant until
+	 * the server replies, so a builder-failure xfer is effectively a
+	 * no-op slot in the xfer list. */
+    guint32 size_host
+        = (total_bytes > G_MAXUINT32) ? G_MAXUINT32 : (guint32)total_bytes;
+    struct hx_chunk chunks[4];
+    uint8_t scratch[8];
+    int hc = (int)gtkhx_proto_build_file_putfolder_chunks (
+        (const uint8_t *)name_wire, name_wire_len, has_dir ? 1 : 0, hldir,
+        hldirlen, size_host, nfiles, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_folder_put), htxf, 0,
+                  "xfer_go_folder");
+        hlwrite_chunks (htlc, HTLC_HDR_FILE_PUTFOLDER, 0, chunks, hc);
+    }
+    g_free (hldir);
     g_free (name_wire);
 }
 
@@ -855,7 +870,6 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
     dst_file = dirchar_basename (dst_path);
     hldir = path_to_hldir (src_path, &hldirlen, 1);
     rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
-    task_new (htlc, 0, 0, 0, "ln");
 
     /* Phase E (follow-up): encode src + dst basenames. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
@@ -865,10 +879,17 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
     char *dst_wire = gtkhx_text_for_wire (dst_file, strlen (dst_file), utf8,
                                           FALSE, &dst_len);
 
-    hlwrite (htlc, HTLC_HDR_FILE_SYMLINK, 0, 4, HTLC_DATA_FILE_NAME,
-             (guint16)src_len, src_wire, HTLC_DATA_DIR, hldirlen, hldir,
-             HTLC_DATA_DIR_RENAME, rnhldirlen, rnhldir, HTLC_DATA_FILE_RENAME,
-             (guint16)dst_len, dst_wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_symlink_chunks.
+	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+    struct hx_chunk chunks[4];
+    int hc = (int)gtkhx_proto_build_file_symlink_chunks (
+        (const uint8_t *)src_wire, src_len, hldir, hldirlen, rnhldir,
+        rnhldirlen, (const uint8_t *)dst_wire, dst_len, chunks,
+        G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "ln");
+        hlwrite_chunks (htlc, HTLC_HDR_FILE_SYMLINK, 0, chunks, hc);
+    }
     g_free (src_wire);
     g_free (dst_wire);
     g_free (rnhldir);
@@ -903,17 +924,32 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
                        - (strlen (src_path) - (src_file - src_path))
             || memcmp (dst_path, src_path, len) != 0)) {
         rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
-        task_new (htlc, 0, 0, 0, "mv");
-        hlwrite (htlc, HTLC_HDR_FILE_MOVE, 0, 3, HTLC_DATA_FILE_NAME,
-                 (guint16)src_len, src_wire, HTLC_DATA_DIR, hldirlen, hldir,
-                 HTLC_DATA_DIR_RENAME, rnhldirlen, rnhldir);
+
+        /* Phase R2: chunk layout moved to gtkhx_proto_build_file_move
+		 * _chunks. Build BEFORE task_new — see hx_send_msg for the
+		 * rationale. */
+        struct hx_chunk chunks[3];
+        int hc = (int)gtkhx_proto_build_file_move_chunks (
+            (const uint8_t *)src_wire, src_len, hldir, hldirlen, rnhldir,
+            rnhldirlen, chunks, G_N_ELEMENTS (chunks));
+        if (hc > 0) {
+            task_new (htlc, 0, 0, 0, "mv");
+            hlwrite_chunks (htlc, HTLC_HDR_FILE_MOVE, 0, chunks, hc);
+        }
         g_free (rnhldir);
     }
     if (*dst_file && strcmp (src_file, dst_file) != 0) {
-        task_new (htlc, 0, 0, 0, "mv");
-        hlwrite (htlc, HTLC_HDR_FILE_SETINFO, 0, 3, HTLC_DATA_FILE_NAME,
-                 (guint16)src_len, src_wire, HTLC_DATA_FILE_RENAME,
-                 (guint16)dst_len, dst_wire, HTLC_DATA_DIR, hldirlen, hldir);
+        /* Rename-within-dir variant: FILE_SETINFO with NAME + RENAME +
+		 * DIR (no COMMENT chunk). */
+        struct hx_chunk chunks[4];
+        int hc = (int)gtkhx_proto_build_file_setinfo_chunks (
+            (const uint8_t *)src_wire, src_len, (const uint8_t *)dst_wire,
+            dst_len, /*has_comment=*/0, NULL, 0, /*has_dir=*/1, hldir, hldirlen,
+            chunks, G_N_ELEMENTS (chunks));
+        if (hc > 0) {
+            task_new (htlc, 0, 0, 0, "mv");
+            hlwrite_chunks (htlc, HTLC_HDR_FILE_SETINFO, 0, chunks, hc);
+        }
     }
     g_free (src_wire);
     g_free (dst_wire);

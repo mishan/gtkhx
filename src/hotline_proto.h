@@ -608,4 +608,45 @@ extern int32_t gtkhx_proto_build_file_getfolder_chunks (const uint8_t *name_ptr,
                                                         struct hx_chunk *chunks,
                                                         size_t chunks_cap);
 
+/* HTLC_HDR_FILE_SETINFO: FILE_NAME + FILE_RENAME + optional
+ * FILE_COMMENT + optional DIR. has_comment / has_dir are 0/1 flags;
+ * when zero the corresponding payload pointer/len are ignored.
+ * chunks_cap >= 4 (the shim always slices to the full setinfo size).
+ * Returns 2..=4 on success, 0 on validation failure (NULL pointer,
+ * short buffer, oversize field). */
+extern int32_t gtkhx_proto_build_file_setinfo_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    const uint8_t *rename_ptr, size_t rename_len,
+    uint8_t has_comment, const uint8_t *comment_ptr, size_t comment_len,
+    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* HTLC_HDR_FILE_MOVE: FILE_NAME + DIR + DIR_RENAME. chunks_cap >= 3.
+ * Returns 3 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_file_move_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    const uint8_t *dir_ptr, size_t dir_len,
+    const uint8_t *dir_rename_ptr, size_t dir_rename_len,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* HTLC_HDR_FILE_SYMLINK: FILE_NAME + DIR + DIR_RENAME + FILE_RENAME.
+ * chunks_cap >= 4. Returns 4 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_file_symlink_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    const uint8_t *dir_ptr, size_t dir_len,
+    const uint8_t *dir_rename_ptr, size_t dir_rename_len,
+    const uint8_t *rename_ptr, size_t rename_len,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* HTLC_HDR_FILE_PUTFOLDER: FILE_NAME + optional DIR + HTXF_SIZE (u32
+ * BE, host order in) + FILE_NFILES (u32 BE, host order in).
+ * chunks_cap >= 4, scratch_cap >= 8. Returns 3 (no dir) or 4 (with
+ * dir) on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_file_putfolder_chunks (
+    const uint8_t *name_ptr, size_t name_len,
+    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
+    uint32_t size, uint32_t nfiles,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */

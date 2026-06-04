@@ -1195,6 +1195,319 @@ pub fn build_file_getfolder_chunks(
     build_file_name_with_optional_dir_chunks(name, dir, chunks)
 }
 
+// ---- Larger files.c send opcodes -------------------------------------
+//
+// HTLC_HDR_FILE_SETINFO:   NAME + RENAME + optional COMMENT + optional
+//                          DIR. The two C call sites — the rename +
+//                          comment dialog and the rename-within-dir
+//                          path in hx_file_move — share this single
+//                          builder, distinguished by whether COMMENT
+//                          is `Some`.
+// HTLC_HDR_FILE_MOVE:      NAME + DIR + DIR_RENAME. Move a file
+//                          across directories; both src dir and dst
+//                          dir are mandatory.
+// HTLC_HDR_FILE_SYMLINK:   NAME + DIR + DIR_RENAME + RENAME. Same
+//                          shape as MOVE plus the new basename.
+// HTLC_HDR_FILE_PUTFOLDER: NAME + optional DIR + HTXF_SIZE + NFILES.
+//                          Folder-upload kickoff; size + file-count
+//                          are u32 BE values for the server's queue
+//                          UI (mhxd doesn't validate against the
+//                          actual stream).
+
+/// Request data for [`build_file_setinfo_chunks`]. Covers both the
+/// full setinfo (rename + comment + optional dir) and the rename-only
+/// variant used by `hx_file_move` (rename + dir, no comment).
+pub struct FileSetInfoRequest<'a> {
+    /// `HTLC_DATA_FILE_NAME` — the current basename. Mandatory.
+    pub name: &'a [u8],
+    /// `HTLC_DATA_FILE_RENAME` — the new basename. Mandatory in both
+    /// call sites (rename is what FILE_SETINFO is for in this code).
+    pub rename: &'a [u8],
+    /// `HTLC_DATA_FILE_COMMENT` — file-comment text. `None` skips
+    /// the chunk entirely (the rename-only variant in `hx_file_move`).
+    pub comment: Option<&'a [u8]>,
+    /// `HTLC_DATA_DIR` — parent directory path. `None` skips the
+    /// chunk (file lives at the root and the full-setinfo call site
+    /// is operating on a root-level file).
+    pub dir: Option<&'a [u8]>,
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_SETINFO`. Wire shape:
+///
+/// 1. `HTLC_DATA_FILE_NAME`   — always
+/// 2. `HTLC_DATA_FILE_RENAME` — always
+/// 3. `HTLC_DATA_FILE_COMMENT` — when `comment.is_some()`
+/// 4. `HTLC_DATA_DIR`         — when `dir.is_some()`
+///
+/// Returns the chunk count (2..=4) on success, or 0 on validation
+/// failure (`chunks` slice too small for the chunks that will be
+/// emitted, or any of `name` / `rename` / `comment` / `dir` longer
+/// than `u16::MAX`).
+pub fn build_file_setinfo_chunks(
+    req: &FileSetInfoRequest<'_>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if req.name.len() > u16::MAX as usize
+        || req.rename.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    if let Some(c) = req.comment {
+        if c.len() > u16::MAX as usize {
+            return 0;
+        }
+    }
+    if let Some(d) = req.dir {
+        if d.len() > u16::MAX as usize {
+            return 0;
+        }
+    }
+    let needed = 2 + usize::from(req.comment.is_some()) + usize::from(req.dir.is_some());
+    if chunks.len() < needed {
+        return 0;
+    }
+
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::FILE_RENAME,
+        len: req.rename.len() as u16,
+        data: if req.rename.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.rename.as_ptr()
+        },
+    };
+    let mut hc = 2;
+    if let Some(c) = req.comment {
+        chunks[hc] = HxChunk {
+            tag: tag::FILE_COMMENT,
+            len: c.len() as u16,
+            data: if c.is_empty() { b"".as_ptr() } else { c.as_ptr() },
+        };
+        hc += 1;
+    }
+    if let Some(d) = req.dir {
+        chunks[hc] = HxChunk {
+            tag: tag::DIR,
+            len: d.len() as u16,
+            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+        };
+        hc += 1;
+    }
+    hc
+}
+
+/// Request data for [`build_file_move_chunks`].
+pub struct FileMoveRequest<'a> {
+    /// Source basename.
+    pub name: &'a [u8],
+    /// Source directory.
+    pub dir: &'a [u8],
+    /// Destination directory.
+    pub dir_rename: &'a [u8],
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_MOVE` — NAME + DIR +
+/// DIR_RENAME. 3 chunks; `chunks.len() >= 3`. No scratch needed.
+/// Returns 3 on success, 0 on validation failure (short slice or
+/// any field longer than `u16::MAX`).
+pub fn build_file_move_chunks(
+    req: &FileMoveRequest<'_>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.len() < 3
+        || req.name.len() > u16::MAX as usize
+        || req.dir.len() > u16::MAX as usize
+        || req.dir_rename.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::DIR,
+        len: req.dir.len() as u16,
+        data: if req.dir.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.dir.as_ptr()
+        },
+    };
+    chunks[2] = HxChunk {
+        tag: tag::DIR_RENAME,
+        len: req.dir_rename.len() as u16,
+        data: if req.dir_rename.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.dir_rename.as_ptr()
+        },
+    };
+    3
+}
+
+/// Request data for [`build_file_symlink_chunks`].
+pub struct FileSymlinkRequest<'a> {
+    /// Source basename.
+    pub name: &'a [u8],
+    /// Source directory.
+    pub dir: &'a [u8],
+    /// Destination directory.
+    pub dir_rename: &'a [u8],
+    /// New basename in the destination directory.
+    pub rename: &'a [u8],
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_SYMLINK` — NAME + DIR +
+/// DIR_RENAME + RENAME. 4 chunks. Returns 4 on success, 0 on
+/// validation failure (short slice or any field longer than
+/// `u16::MAX`).
+pub fn build_file_symlink_chunks(
+    req: &FileSymlinkRequest<'_>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.len() < 4
+        || req.name.len() > u16::MAX as usize
+        || req.dir.len() > u16::MAX as usize
+        || req.dir_rename.len() > u16::MAX as usize
+        || req.rename.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::DIR,
+        len: req.dir.len() as u16,
+        data: if req.dir.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.dir.as_ptr()
+        },
+    };
+    chunks[2] = HxChunk {
+        tag: tag::DIR_RENAME,
+        len: req.dir_rename.len() as u16,
+        data: if req.dir_rename.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.dir_rename.as_ptr()
+        },
+    };
+    chunks[3] = HxChunk {
+        tag: tag::FILE_RENAME,
+        len: req.rename.len() as u16,
+        data: if req.rename.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.rename.as_ptr()
+        },
+    };
+    4
+}
+
+/// Request data for [`build_file_putfolder_chunks`].
+pub struct FilePutFolderRequest<'a> {
+    /// `HTLC_DATA_FILE_NAME` — the folder name being uploaded.
+    pub name: &'a [u8],
+    /// `HTLC_DATA_DIR` — parent directory. `None` when uploading at
+    /// the root.
+    pub dir: Option<&'a [u8]>,
+    /// `HTLC_DATA_HTXF_SIZE` — aggregate byte size of the folder
+    /// (host order; the builder big-endian-encodes it). Clamps at
+    /// `G_MAXUINT32` on the caller side; the wire field is u32.
+    pub size: u32,
+    /// `HTLC_DATA_FILE_NFILES` — number of regular files in the
+    /// folder tree (caller-supplied; mhxd uses it for queue display
+    /// rather than framing).
+    pub nfiles: u32,
+}
+
+/// Build the chunk array for `HTLC_HDR_FILE_PUTFOLDER`. Wire shape:
+///
+/// 1. `HTLC_DATA_FILE_NAME`   — always
+/// 2. `HTLC_DATA_DIR`         — when `dir.is_some()`
+/// 3. `HTLC_DATA_HTXF_SIZE`   — u32 BE, always
+/// 4. `HTLC_DATA_FILE_NFILES` — u32 BE, always
+///
+/// Returns 3 (no dir) or 4 (with dir) on success. Requires
+/// `chunks.len()` ≥ the matching count and `scratch.len() >= 8`
+/// (two BE u32 slots). Rejects `name.len() > u16::MAX` or
+/// `dir.len() > u16::MAX`.
+pub fn build_file_putfolder_chunks(
+    req: &FilePutFolderRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if scratch.len() < 8 || req.name.len() > u16::MAX as usize {
+        return 0;
+    }
+    if let Some(d) = req.dir {
+        if d.len() > u16::MAX as usize {
+            return 0;
+        }
+    }
+    let needed = 3 + usize::from(req.dir.is_some());
+    if chunks.len() < needed {
+        return 0;
+    }
+
+    scratch[0..4].copy_from_slice(&req.size.to_be_bytes());
+    scratch[4..8].copy_from_slice(&req.nfiles.to_be_bytes());
+
+    chunks[0] = HxChunk {
+        tag: tag::FILE_NAME,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    let mut hc = 1;
+    if let Some(d) = req.dir {
+        chunks[hc] = HxChunk {
+            tag: tag::DIR,
+            len: d.len() as u16,
+            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+        };
+        hc += 1;
+    }
+    chunks[hc] = HxChunk {
+        tag: tag::HTXF_SIZE,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    hc += 1;
+    chunks[hc] = HxChunk {
+        tag: tag::FILE_NFILES,
+        len: 4,
+        data: scratch[4..8].as_ptr(),
+    };
+    hc + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2306,6 +2619,390 @@ mod tests {
         let mut chunks_single = [HxChunk::EMPTY];
         assert_eq!(
             build_file_delete_chunks(&big, None, &mut chunks_single),
+            0
+        );
+    }
+
+    // ---- file setinfo ----
+
+    #[test]
+    fn file_setinfo_full_emits_four_chunks_in_order() {
+        // The "rename + comment dialog" call site: all four fields
+        // present. Verifies NAME → RENAME → COMMENT → DIR ordering.
+        let req = FileSetInfoRequest {
+            name: b"old.txt",
+            rename: b"new.txt",
+            comment: Some(b"the comment"),
+            dir: Some(b"Uploads"),
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let hc = build_file_setinfo_chunks(&req, &mut chunks);
+        assert_eq!(hc, 4);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"old.txt");
+        assert_eq!(chunks[1].tag, tag::FILE_RENAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"new.txt");
+        assert_eq!(chunks[2].tag, tag::FILE_COMMENT);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"the comment");
+        assert_eq!(chunks[3].tag, tag::DIR);
+        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, b"Uploads");
+    }
+
+    #[test]
+    fn file_setinfo_rename_only_emits_three_chunks() {
+        // The hx_file_move within-dir rename branch: comment is None,
+        // dir is Some. Output is NAME + RENAME + DIR (no COMMENT chunk).
+        let req = FileSetInfoRequest {
+            name: b"old.txt",
+            rename: b"new.txt",
+            comment: None,
+            dir: Some(b"Uploads"),
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build_file_setinfo_chunks(&req, &mut chunks);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::FILE_RENAME);
+        assert_eq!(chunks[2].tag, tag::DIR);
+    }
+
+    #[test]
+    fn file_setinfo_no_comment_no_dir_emits_two_chunks() {
+        // Root-level rename with no comment dialog text: only NAME +
+        // RENAME. Smallest legal chunks slice is 2.
+        let req = FileSetInfoRequest {
+            name: b"a",
+            rename: b"b",
+            comment: None,
+            dir: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        let hc = build_file_setinfo_chunks(&req, &mut chunks);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::FILE_RENAME);
+    }
+
+    #[test]
+    fn file_setinfo_comment_only_emits_three_chunks() {
+        // Rename + comment on a root-level file: NAME + RENAME +
+        // COMMENT, no DIR.
+        let req = FileSetInfoRequest {
+            name: b"a",
+            rename: b"b",
+            comment: Some(b"hi"),
+            dir: None,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build_file_setinfo_chunks(&req, &mut chunks);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[2].tag, tag::FILE_COMMENT);
+    }
+
+    #[test]
+    fn file_setinfo_rejects_short_chunks_slice() {
+        // Full setinfo wants 4 slots; 3 is too few.
+        let req = FileSetInfoRequest {
+            name: b"a",
+            rename: b"b",
+            comment: Some(b"c"),
+            dir: Some(b"d"),
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        assert_eq!(build_file_setinfo_chunks(&req, &mut chunks), 0);
+        // 2-slot slice is too few for rename-only-with-dir (needs 3).
+        let req2 = FileSetInfoRequest {
+            name: b"a",
+            rename: b"b",
+            comment: None,
+            dir: Some(b"d"),
+        };
+        let mut chunks2 = [HxChunk::EMPTY; 2];
+        assert_eq!(build_file_setinfo_chunks(&req2, &mut chunks2), 0);
+        // 1-slot slice is too few even for the minimal NAME+RENAME.
+        let req3 = FileSetInfoRequest {
+            name: b"a",
+            rename: b"b",
+            comment: None,
+            dir: None,
+        };
+        let mut chunks3 = [HxChunk::EMPTY; 1];
+        assert_eq!(build_file_setinfo_chunks(&req3, &mut chunks3), 0);
+    }
+
+    #[test]
+    fn file_setinfo_rejects_oversize_fields() {
+        let big = vec![b'x'; u16::MAX as usize + 1];
+        for which in 0..4 {
+            let req = FileSetInfoRequest {
+                name: if which == 0 { &big } else { b"n" },
+                rename: if which == 1 { &big } else { b"r" },
+                comment: Some(if which == 2 { big.as_slice() } else { b"c" }),
+                dir: Some(if which == 3 { big.as_slice() } else { b"d" }),
+            };
+            let mut chunks = [HxChunk::EMPTY; 4];
+            assert_eq!(
+                build_file_setinfo_chunks(&req, &mut chunks),
+                0,
+                "oversize field {which} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn file_setinfo_empty_strings_legal() {
+        // All fields empty: non-NULL data pointers preserved so the C
+        // side's defensive checks don't fire.
+        let req = FileSetInfoRequest {
+            name: b"",
+            rename: b"",
+            comment: Some(b""),
+            dir: Some(b""),
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let hc = build_file_setinfo_chunks(&req, &mut chunks);
+        assert_eq!(hc, 4);
+        for c in &chunks {
+            assert_eq!(c.len, 0);
+            assert!(!c.data.is_null());
+        }
+    }
+
+    // ---- file move ----
+
+    #[test]
+    fn file_move_emits_three_chunks_in_order() {
+        let req = FileMoveRequest {
+            name: b"file.bin",
+            dir: b"src",
+            dir_rename: b"dst",
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build_file_move_chunks(&req, &mut chunks);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"file.bin");
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"src");
+        assert_eq!(chunks[2].tag, tag::DIR_RENAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"dst");
+    }
+
+    #[test]
+    fn file_move_rejects_short_chunks_slice() {
+        let req = FileMoveRequest {
+            name: b"n",
+            dir: b"d",
+            dir_rename: b"r",
+        };
+        let mut chunks = [HxChunk::EMPTY; 2];
+        assert_eq!(build_file_move_chunks(&req, &mut chunks), 0);
+    }
+
+    #[test]
+    fn file_move_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        for which in 0..3 {
+            let req = FileMoveRequest {
+                name: if which == 0 { &big } else { b"n" },
+                dir: if which == 1 { &big } else { b"d" },
+                dir_rename: if which == 2 { &big } else { b"r" },
+            };
+            let mut chunks = [HxChunk::EMPTY; 3];
+            assert_eq!(
+                build_file_move_chunks(&req, &mut chunks),
+                0,
+                "oversize field {which} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn file_move_empty_strings_legal() {
+        let req = FileMoveRequest {
+            name: b"",
+            dir: b"",
+            dir_rename: b"",
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build_file_move_chunks(&req, &mut chunks);
+        assert_eq!(hc, 3);
+        for c in &chunks {
+            assert_eq!(c.len, 0);
+            assert!(!c.data.is_null());
+        }
+    }
+
+    // ---- file symlink ----
+
+    #[test]
+    fn file_symlink_emits_four_chunks_in_order() {
+        let req = FileSymlinkRequest {
+            name: b"file.bin",
+            dir: b"src",
+            dir_rename: b"dst",
+            rename: b"link.bin",
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let hc = build_file_symlink_chunks(&req, &mut chunks);
+        assert_eq!(hc, 4);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"file.bin");
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"src");
+        assert_eq!(chunks[2].tag, tag::DIR_RENAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"dst");
+        assert_eq!(chunks[3].tag, tag::FILE_RENAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, b"link.bin");
+    }
+
+    #[test]
+    fn file_symlink_rejects_short_chunks_slice() {
+        let req = FileSymlinkRequest {
+            name: b"n",
+            dir: b"d",
+            dir_rename: b"r",
+            rename: b"l",
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        assert_eq!(build_file_symlink_chunks(&req, &mut chunks), 0);
+    }
+
+    #[test]
+    fn file_symlink_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        for which in 0..4 {
+            let req = FileSymlinkRequest {
+                name: if which == 0 { &big } else { b"n" },
+                dir: if which == 1 { &big } else { b"d" },
+                dir_rename: if which == 2 { &big } else { b"r" },
+                rename: if which == 3 { &big } else { b"l" },
+            };
+            let mut chunks = [HxChunk::EMPTY; 4];
+            assert_eq!(
+                build_file_symlink_chunks(&req, &mut chunks),
+                0,
+                "oversize field {which} should be rejected"
+            );
+        }
+    }
+
+    // ---- file putfolder ----
+
+    #[test]
+    fn file_putfolder_with_dir_emits_four_chunks_in_order() {
+        let req = FilePutFolderRequest {
+            name: b"MyFolder",
+            dir: Some(b"Uploads"),
+            size: 0x0102_0304,
+            nfiles: 42,
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch = [0u8; 8];
+        let hc = build_file_putfolder_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 4);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"MyFolder");
+        assert_eq!(chunks[1].tag, tag::DIR);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"Uploads");
+        assert_eq!(chunks[2].tag, tag::HTXF_SIZE);
+        assert_eq!(chunks[2].len, 4);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[2]) },
+            &[0x01, 0x02, 0x03, 0x04]
+        );
+        assert_eq!(chunks[3].tag, tag::FILE_NFILES);
+        assert_eq!(chunks[3].len, 4);
+        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, &[0, 0, 0, 42]);
+    }
+
+    #[test]
+    fn file_putfolder_without_dir_emits_three_chunks() {
+        let req = FilePutFolderRequest {
+            name: b"MyFolder",
+            dir: None,
+            size: 1024,
+            nfiles: 3,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 8];
+        let hc = build_file_putfolder_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::FILE_NAME);
+        assert_eq!(chunks[1].tag, tag::HTXF_SIZE);
+        assert_eq!(chunks[2].tag, tag::FILE_NFILES);
+    }
+
+    #[test]
+    fn file_putfolder_rejects_short_scratch() {
+        let req = FilePutFolderRequest {
+            name: b"x",
+            dir: None,
+            size: 0,
+            nfiles: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 7];
+        assert_eq!(
+            build_file_putfolder_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+    }
+
+    #[test]
+    fn file_putfolder_rejects_short_chunks_slice() {
+        // With dir: needs 4 slots.
+        let req = FilePutFolderRequest {
+            name: b"x",
+            dir: Some(b"d"),
+            size: 0,
+            nfiles: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_file_putfolder_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+        // Without dir: needs 3 slots; 2 is too few.
+        let req2 = FilePutFolderRequest {
+            name: b"x",
+            dir: None,
+            size: 0,
+            nfiles: 0,
+        };
+        let mut chunks2 = [HxChunk::EMPTY; 2];
+        assert_eq!(
+            build_file_putfolder_chunks(&req2, &mut chunks2, &mut scratch),
+            0
+        );
+    }
+
+    #[test]
+    fn file_putfolder_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        // Oversize name.
+        let req = FilePutFolderRequest {
+            name: &big,
+            dir: None,
+            size: 0,
+            nfiles: 0,
+        };
+        let mut chunks = [HxChunk::EMPTY; 4];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_file_putfolder_chunks(&req, &mut chunks, &mut scratch),
+            0
+        );
+        // Oversize dir.
+        let req2 = FilePutFolderRequest {
+            name: b"x",
+            dir: Some(&big),
+            size: 0,
+            nfiles: 0,
+        };
+        assert_eq!(
+            build_file_putfolder_chunks(&req2, &mut chunks, &mut scratch),
             0
         );
     }

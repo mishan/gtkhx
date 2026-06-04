@@ -2018,3 +2018,260 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_getfolder_chunks(
         build::build_file_getfolder_chunks,
     )
 }
+
+/// Build `HTLC_HDR_FILE_SETINFO` chunks: FILE_NAME + FILE_RENAME +
+/// optional FILE_COMMENT + optional DIR. `has_comment` / `has_dir` are
+/// 0/1 flags — when non-zero, the matching chunk is emitted. Caller
+/// must size `chunks_cap >= 4` to hold the full setinfo. Returns
+/// 2..=4 on success, 0 on validation failure (NULL `chunks`, NULL
+/// payload pointer with non-zero len, oversize field, or short slice).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); each payload
+/// pointer is valid for the matching length, or NULL when both the
+/// flag and length are zero.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_setinfo_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    rename_ptr: *const u8,
+    rename_len: usize,
+    has_comment: u8,
+    comment_ptr: *const u8,
+    comment_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    if rename_ptr.is_null() && rename_len != 0 {
+        return 0;
+    }
+    if rename_len > u16::MAX as usize {
+        return 0;
+    }
+    let comment_opt = if has_comment != 0 {
+        if comment_ptr.is_null() && comment_len != 0 {
+            return 0;
+        }
+        if comment_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(comment_ptr, comment_len))
+    } else {
+        None
+    };
+    let dir_opt = if has_dir != 0 {
+        if dir_ptr.is_null() && dir_len != 0 {
+            return 0;
+        }
+        if dir_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(dir_ptr, dir_len))
+    } else {
+        None
+    };
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = build::FileSetInfoRequest {
+        name: as_slice(name_ptr, name_len),
+        rename: as_slice(rename_ptr, rename_len),
+        comment: comment_opt,
+        dir: dir_opt,
+    };
+    build::build_file_setinfo_chunks(&req, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_FILE_MOVE` chunks: FILE_NAME + DIR + DIR_RENAME.
+/// `chunks_cap >= 3`. Returns 3 on success, 0 on validation failure
+/// (NULL `chunks`, NULL payload pointer with non-zero len, oversize
+/// field, or short slice).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); each payload
+/// pointer is valid for the matching length, or NULL when the
+/// matching length is 0.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_move_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    dir_rename_ptr: *const u8,
+    dir_rename_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 3;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    if dir_ptr.is_null() && dir_len != 0 {
+        return 0;
+    }
+    if dir_len > u16::MAX as usize {
+        return 0;
+    }
+    if dir_rename_ptr.is_null() && dir_rename_len != 0 {
+        return 0;
+    }
+    if dir_rename_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = build::FileMoveRequest {
+        name: as_slice(name_ptr, name_len),
+        dir: as_slice(dir_ptr, dir_len),
+        dir_rename: as_slice(dir_rename_ptr, dir_rename_len),
+    };
+    build::build_file_move_chunks(&req, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_FILE_SYMLINK` chunks: FILE_NAME + DIR + DIR_RENAME
+/// + FILE_RENAME. `chunks_cap >= 4`. Returns 4 on success, 0 on
+/// validation failure (NULL `chunks`, NULL payload pointer with
+/// non-zero len, oversize field, or short slice).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); each payload
+/// pointer is valid for the matching length, or NULL when the
+/// matching length is 0.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_symlink_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    dir_rename_ptr: *const u8,
+    dir_rename_len: usize,
+    rename_ptr: *const u8,
+    rename_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    if dir_ptr.is_null() && dir_len != 0 {
+        return 0;
+    }
+    if dir_len > u16::MAX as usize {
+        return 0;
+    }
+    if dir_rename_ptr.is_null() && dir_rename_len != 0 {
+        return 0;
+    }
+    if dir_rename_len > u16::MAX as usize {
+        return 0;
+    }
+    if rename_ptr.is_null() && rename_len != 0 {
+        return 0;
+    }
+    if rename_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = build::FileSymlinkRequest {
+        name: as_slice(name_ptr, name_len),
+        dir: as_slice(dir_ptr, dir_len),
+        dir_rename: as_slice(dir_rename_ptr, dir_rename_len),
+        rename: as_slice(rename_ptr, rename_len),
+    };
+    build::build_file_symlink_chunks(&req, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_FILE_PUTFOLDER` chunks: FILE_NAME + optional DIR +
+/// HTXF_SIZE (u32 BE) + FILE_NFILES (u32 BE). `chunks_cap >= 4` (the
+/// shim always reserves the with-dir slot count to give us a fixed
+/// `MAX_CHUNKS` to slice to). `scratch_cap >= 8` for the two BE u32
+/// scratch slots. Returns 3 (no dir) or 4 (with dir) on success, 0 on
+/// validation failure (NULL `chunks` / `scratch`, NULL payload pointer
+/// with non-zero len, oversize field, or short slice).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `scratch` valid
+/// for `scratch_cap` bytes (or NULL); `name_ptr` / `dir_ptr` valid for
+/// their respective lengths (or NULL when the matching length is 0,
+/// and for `dir_ptr` also valid when `has_dir == 0`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_file_putfolder_chunks(
+    name_ptr: *const u8,
+    name_len: usize,
+    has_dir: u8,
+    dir_ptr: *const u8,
+    dir_len: usize,
+    size: u32,
+    nfiles: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    const MAX_SCRATCH: usize = 8;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if name_ptr.is_null() && name_len != 0 {
+        return 0;
+    }
+    if name_len > u16::MAX as usize {
+        return 0;
+    }
+    let dir_opt = if has_dir != 0 {
+        if dir_ptr.is_null() && dir_len != 0 {
+            return 0;
+        }
+        if dir_len > u16::MAX as usize {
+            return 0;
+        }
+        Some(as_slice(dir_ptr, dir_len))
+    } else {
+        None
+    };
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let req = build::FilePutFolderRequest {
+        name: as_slice(name_ptr, name_len),
+        dir: dir_opt,
+        size,
+        nfiles,
+    };
+    build::build_file_putfolder_chunks(&req, chunks_slice, scratch_slice) as i32
+}
