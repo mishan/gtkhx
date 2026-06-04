@@ -535,4 +535,39 @@ extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
                                                     struct hx_chunk *chunks,
                                                     size_t chunks_cap);
 
+/* HTLC_HDR_DELETETHREAD: NEWSPATH + THREADID (u32). chunks_cap >= 2,
+ * scratch_cap >= 4. Returns 2 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_news_delete_thread_chunks (
+    const uint8_t *path_ptr, size_t path_len, uint32_t threadid,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* HTLC_HDR_GETTHREAD: NEWSPATH + THREADID + NEWSTYPE.
+ * chunks_cap >= 3, scratch_cap >= 4. Returns 3 on success, 0 on
+ * validation failure. */
+extern int32_t gtkhx_proto_build_news_getthread_chunks (
+    const uint8_t *path_ptr, size_t path_len, uint32_t threadid,
+    const uint8_t *mime_type_ptr, size_t mime_type_len,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* HTLC_HDR_MAKECATEGORY: NEWSPATH + CATEGORY name. chunks_cap >= 2.
+ * No scratch. Returns 2 on success, 0 on validation failure. */
+extern int32_t gtkhx_proto_build_news_mkcat_chunks (
+    const uint8_t *path_ptr, size_t path_len,
+    const uint8_t *name_ptr, size_t name_len,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* HTLC_HDR_POSTTHREAD: 6 chunks in wire order — NEWSPATH +
+ * PARENTTHREAD (u32) + NEWSTYPE + NEWSSUBJECT + NEWSDATA + THREADID
+ * (u32). chunks_cap >= 6, scratch_cap >= 8. Returns 6 on success, 0
+ * on validation failure. */
+extern int32_t gtkhx_proto_build_news_post_thread_chunks (
+    const uint8_t *path_ptr, size_t path_len, uint32_t parent_thread,
+    const uint8_t *mime_type_ptr, size_t mime_type_len,
+    const uint8_t *subject_ptr, size_t subject_len,
+    const uint8_t *text_ptr, size_t text_len, uint32_t thread_id,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */
