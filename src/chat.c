@@ -2420,7 +2420,25 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     if (!gchat || !gchat->subject) {
         return;
     }
-    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), buf);
+    /* buf comes from chat->subject — set by hx_rcv_chat_subject
+	 * (HTLS_HDR_CHAT_SUBJECT broadcast) and by the
+	 * HTLS_DATA_CHAT_SUBJECT branch of rcv_task_user_list
+	 * (initial-subject-discovery). Both paths copy the raw wire
+	 * bytes verbatim, so a Mac-Roman-only server (Heidrun's Inn:
+	 * 0xd5 = curly apostrophe in "Heidrun's Inn") delivers
+	 * bytes that aren't valid UTF-8.
+	 *
+	 * Pango's editable widget accepts only valid UTF-8 and emits
+	 * a runtime warning otherwise — gtkhx_text_to_utf8 walks the
+	 * common encodings (UTF-8 / Latin-1 / Mac Roman) and returns
+	 * a fresh g_malloc'd UTF-8 copy that we hand to GTK. The
+	 * chat-line log path already runs through hx_printf which
+	 * does the same conversion; this matches the subject widget
+	 * to that path. */
+    gsize utf8_len = 0;
+    char *utf8 = gtkhx_text_to_utf8 (buf, strlen (buf), &utf8_len);
+    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), utf8 ? utf8 : buf);
+    g_free (utf8);
 }
 
 void
