@@ -11,7 +11,8 @@
 
 use crate::build::{
     self, AccountModifyRequest, AgreementAgreeRequest, BroadcastRequest, ChatRequest,
-    ChatSubjectRequest, HxChunk, MsgRequest, UserChangeRequest, UserKickRequest,
+    ChatSubjectRequest, HxChunk, MsgRequest, NewsDeleteThreadRequest, NewsGetThreadRequest,
+    NewsMakeCategoryRequest, NewsPostThreadRequest, UserChangeRequest, UserKickRequest,
 };
 use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
@@ -1663,4 +1664,191 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_mkdir_chunks(
         chunks_cap,
         build::build_news_mkdir_chunks,
     )
+}
+
+// ---- 1.5 news SEND builders with extra fields ------------------------
+
+/// Build `HTLC_HDR_DELETETHREAD` chunks: NEWSPATH + THREADID.
+/// `chunks_cap >= 2`, `scratch_cap >= 4`. Returns 2 on success, or 0
+/// on validation failure.
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths (or NULL);
+/// `path_ptr` valid for `path_len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_delete_thread_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    threadid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if path_ptr.is_null() && path_len != 0 {
+        return 0;
+    }
+    if path_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let req = NewsDeleteThreadRequest {
+        path: as_slice(path_ptr, path_len),
+        threadid,
+    };
+    build::build_news_delete_thread_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_GETTHREAD` chunks: NEWSPATH + THREADID + NEWSTYPE.
+/// `chunks_cap >= 3`, `scratch_cap >= 4`. Returns 3 on success, 0 on
+/// validation failure (NULL ptr / cap / oversize path or mime_type).
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths (or NULL);
+/// `path_ptr` / `mime_type_ptr` valid for their lengths (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_getthread_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    threadid: u32,
+    mime_type_ptr: *const u8,
+    mime_type_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 3;
+    const MAX_SCRATCH: usize = 4;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if (path_ptr.is_null() && path_len != 0)
+        || (mime_type_ptr.is_null() && mime_type_len != 0)
+    {
+        return 0;
+    }
+    if path_len > u16::MAX as usize || mime_type_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let req = NewsGetThreadRequest {
+        path: as_slice(path_ptr, path_len),
+        threadid,
+        mime_type: as_slice(mime_type_ptr, mime_type_len),
+    };
+    build::build_news_getthread_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build `HTLC_HDR_MAKECATEGORY` chunks: NEWSPATH + CATEGORY.
+/// `chunks_cap >= 2`. No scratch needed.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `path_ptr` /
+/// `name_ptr` valid for their lengths (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_mkcat_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    name_ptr: *const u8,
+    name_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    if (path_ptr.is_null() && path_len != 0)
+        || (name_ptr.is_null() && name_len != 0)
+    {
+        return 0;
+    }
+    if path_len > u16::MAX as usize || name_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let req = NewsMakeCategoryRequest {
+        path: as_slice(path_ptr, path_len),
+        name: as_slice(name_ptr, name_len),
+    };
+    build::build_news_mkcat_chunks(&req, chunks_slice) as i32
+}
+
+/// Build `HTLC_HDR_POSTTHREAD` chunks: 6 chunks in the wire order
+/// NEWSPATH + PARENTTHREAD + NEWSTYPE + NEWSSUBJECT + NEWSDATA +
+/// THREADID. `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s).
+///
+/// # Safety
+/// `chunks` / `scratch` valid for their declared lengths (or NULL);
+/// each variable-length pointer valid for its matching length (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_news_post_thread_chunks(
+    path_ptr: *const u8,
+    path_len: usize,
+    parent_thread: u32,
+    mime_type_ptr: *const u8,
+    mime_type_len: usize,
+    subject_ptr: *const u8,
+    subject_len: usize,
+    text_ptr: *const u8,
+    text_len: usize,
+    thread_id: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 6;
+    const MAX_SCRATCH: usize = 8;
+
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    if (path_ptr.is_null() && path_len != 0)
+        || (mime_type_ptr.is_null() && mime_type_len != 0)
+        || (subject_ptr.is_null() && subject_len != 0)
+        || (text_ptr.is_null() && text_len != 0)
+    {
+        return 0;
+    }
+    if path_len > u16::MAX as usize
+        || mime_type_len > u16::MAX as usize
+        || subject_len > u16::MAX as usize
+        || text_len > u16::MAX as usize
+    {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let req = NewsPostThreadRequest {
+        path: as_slice(path_ptr, path_len),
+        parent_thread,
+        mime_type: as_slice(mime_type_ptr, mime_type_len),
+        subject: as_slice(subject_ptr, subject_len),
+        text: as_slice(text_ptr, text_len),
+        thread_id,
+    };
+    build::build_news_post_thread_chunks(&req, chunks_slice, scratch_slice) as i32
 }

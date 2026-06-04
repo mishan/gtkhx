@@ -168,10 +168,30 @@ pub mod tag {
     /// HTLC_HDR_NEWSCATLIST reply payload). One catlist chunk per
     /// reply; body shape is documented on [`crate::parse::parse_catlist`].
     pub const CATLIST: u16 = 0x0141;
+    /// `0x0142` — 1.5 category name (the name field on
+    /// `HTLC_HDR_MAKECATEGORY`).
+    pub const CATEGORY: u16 = 0x0142;
     /// `0x0145` — 1.5 news path (server → client and client → server).
     /// The path component encoding is the responsibility of the
     /// caller (`path_to_hldir` on the C side).
     pub const NEWSPATH: u16 = 0x0145;
+    /// `0x0146` — 1.5 news thread id (u32 BE).
+    pub const THREADID: u16 = 0x0146;
+    /// `0x0147` — 1.5 news article MIME type (e.g. "text/plain").
+    pub const NEWSTYPE: u16 = 0x0147;
+    /// `0x0148` — 1.5 news article subject line. Single-line; the C
+    /// `gtkhx_text_for_wire` is called with `is_body = FALSE` so the
+    /// LF→CR send-path normalisation is skipped.
+    pub const NEWSSUBJECT: u16 = 0x0148;
+    /// `0x014d` — 1.5 news article body. Multi-line; the C
+    /// `gtkhx_text_for_wire` is called with `is_body = TRUE` so the
+    /// LF→CR send-path normalisation is applied for legacy Mac
+    /// servers. (CR2LF is the *receive*-path inverse — applied in
+    /// `parse_news_post` / `parse_news_file`, not here.)
+    pub const NEWSDATA: u16 = 0x014d;
+    /// `0x014e` — 1.5 news "parent thread id" (u32 BE). Required by
+    /// the spec but not actually consulted by mhxd; gtkhx sends 0.
+    pub const PARENTTHREAD: u16 = 0x014e;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 

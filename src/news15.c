@@ -53,15 +53,21 @@ hx_news15_get_post (struct htlc_conn *htlc, struct news_item *item)
 {
     guint8 *hldir;
     guint16 hldirlen;
-    guint32 postid;
 
     hldir = path_to_hldir (item->group->path, &hldirlen, 0);
-    task_new (htlc, RCV_TASK_FN (rcv_task_news_post), item, 0, "news_post");
 
-    postid = htonl (item->postid);
-    hlwrite (htlc, HTLC_HDR_GETTHREAD, 0, 3, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir, HTLC_DATA_THREADID, 4, &postid, HTLC_DATA_NEWSTYPE,
-             strlen (item->parts[0].mime_type), item->parts[0].mime_type);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_getthread
+	 * _chunks. See hx_news15_cat_list for the task ordering rationale. */
+    struct hx_chunk chunks[3];
+    guint8 scratch[4];
+    const char *mime = item->parts[0].mime_type;
+    int hc = (int)gtkhx_proto_build_news_getthread_chunks (
+        hldir, hldirlen, item->postid, (const uint8_t *)mime, strlen (mime),
+        chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, RCV_TASK_FN (rcv_task_news_post), item, 0, "news_post");
+        hlwrite_chunks (htlc, HTLC_HDR_GETTHREAD, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
@@ -123,11 +129,8 @@ hx_news15_post_thread (struct htlc_conn *htlc, char *path, const char *subject,
 {
     guint8 *hldir;
     guint16 hldirlen;
-    guint32 parent = 0;
 
     hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, 0, 0, 0, "news15_post");
-    threadid = htonl (threadid);
 
     /* Phase E2/E3: subject is a single-line name field (no LF→CR);
 	 * the article body is a body field (with LF→CR normalisation
@@ -139,11 +142,22 @@ hx_news15_post_thread (struct htlc_conn *htlc, char *path, const char *subject,
     char *text_wire = gtkhx_text_for_wire (text, strlen (text), utf8,
                                            /*is_body=*/TRUE, &text_len);
 
-    hlwrite (htlc, HTLC_HDR_POSTTHREAD, 0, 6, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir, HTLC_DATA_PARENTTHREAD, 4, &parent, HTLC_DATA_NEWSTYPE, 11,
-             "text/plain", HTLC_DATA_NEWSSUBJECT, (guint16)subj_len, subj_wire,
-             HTLC_DATA_NEWSDATA, (guint16)text_len, text_wire,
-             HTLC_DATA_THREADID, 4, &threadid);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_post
+	 * _thread_chunks. NEWSTYPE is hard-coded "text/plain" — gtkhx
+	 * only sends plain-text articles. See hx_news15_cat_list for the
+	 * task ordering rationale. */
+    static const char mime_type[] = "text/plain";
+    struct hx_chunk chunks[6];
+    guint8 scratch[8];
+    int hc = (int)gtkhx_proto_build_news_post_thread_chunks (
+        hldir, hldirlen, /*parent_thread=*/0, (const uint8_t *)mime_type,
+        strlen (mime_type), (const uint8_t *)subj_wire, subj_len,
+        (const uint8_t *)text_wire, text_len, threadid, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "news15_post");
+        hlwrite_chunks (htlc, HTLC_HDR_POSTTHREAD, 0, chunks, hc);
+    }
     g_free (hldir);
     g_free (subj_wire);
     g_free (text_wire);
@@ -156,10 +170,18 @@ hx_news15_delete_thread (struct htlc_conn *htlc, char *path, guint32 threadid)
     guint16 hldirlen;
 
     hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, 0, 0, 0, "news15_rm_thread");
-    threadid = htonl (threadid);
-    hlwrite (htlc, HTLC_HDR_DELETETHREAD, 0, 2, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir, HTLC_DATA_THREADID, 4, &threadid);
+
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_delete
+	 * _thread_chunks. See hx_news15_cat_list for the task ordering. */
+    struct hx_chunk chunks[2];
+    guint8 scratch[4];
+    int hc = (int)gtkhx_proto_build_news_delete_thread_chunks (
+        hldir, hldirlen, threadid, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "news15_rm_thread");
+        hlwrite_chunks (htlc, HTLC_HDR_DELETETHREAD, 0, chunks, hc);
+    }
     g_free (hldir);
 }
 
@@ -190,7 +212,6 @@ hx_news15_mkcat (struct htlc_conn *htlc, char *path, const char *name)
     guint16 hldirlen;
 
     hldir = path_to_hldir (path, &hldirlen, 0);
-    task_new (htlc, 0, 0, 0, "news15_mkcat");
 
     /* Phase E (follow-up): encode the category name. The path
 	 * (NEWSPATH chunk) is built byte-verbatim by path_to_hldir;
@@ -201,8 +222,16 @@ hx_news15_mkcat (struct htlc_conn *htlc, char *path, const char *name)
     char *name_wire
         = gtkhx_text_for_wire (name, strlen (name), utf8, FALSE, &name_len);
 
-    hlwrite (htlc, HTLC_HDR_MAKECATEGORY, 0, 2, HTLC_DATA_NEWSPATH, hldirlen,
-             hldir, HTLC_DATA_CATEGORY, (guint16)name_len, name_wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_mkcat
+	 * _chunks. See hx_news15_cat_list for the task ordering. */
+    struct hx_chunk chunks[2];
+    int hc = (int)gtkhx_proto_build_news_mkcat_chunks (
+        hldir, hldirlen, (const uint8_t *)name_wire, name_len, chunks,
+        G_N_ELEMENTS (chunks));
+    if (hc > 0) {
+        task_new (htlc, 0, 0, 0, "news15_mkcat");
+        hlwrite_chunks (htlc, HTLC_HDR_MAKECATEGORY, 0, chunks, hc);
+    }
     g_free (hldir);
     g_free (name_wire);
 }

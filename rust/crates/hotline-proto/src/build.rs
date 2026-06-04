@@ -829,6 +829,254 @@ pub fn build_news_mkdir_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
     build_newspath_only_chunks(path, chunks)
 }
 
+// ---- 1.5 news send opcodes with extra fields -------------------------
+//
+// Build on top of the NEWSPATH-only shape with one or more additional
+// chunks: THREADID (u32), NEWSTYPE / NEWSSUBJECT / NEWSDATA /
+// CATEGORY (byte payloads), PARENTTHREAD (u32, gtkhx always sends 0).
+//
+// All the variable-length payloads (mime type, subject, body, category
+// name) are pre-encoded by the C caller via `gtkhx_text_for_wire`;
+// the builders treat them as opaque byte buffers — same discipline as
+// chat / msg / agreement-agree.
+
+/// Request data for [`build_news_delete_thread_chunks`].
+pub struct NewsDeleteThreadRequest<'a> {
+    pub path: &'a [u8],
+    pub threadid: u32,
+}
+
+/// Build the chunk array for `HTLC_HDR_DELETETHREAD` — NEWSPATH +
+/// THREADID. Returns 2 on success, 0 on validation failure.
+/// `chunks_cap >= 2`, `scratch_cap >= 4` (the u32 threadid).
+pub fn build_news_delete_thread_chunks(
+    req: &NewsDeleteThreadRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 2 || scratch.len() < 4 || req.path.len() > u16::MAX as usize {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&req.threadid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: req.path.len() as u16,
+        data: if req.path.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.path.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::THREADID,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    2
+}
+
+/// Request data for [`build_news_getthread_chunks`].
+pub struct NewsGetThreadRequest<'a> {
+    pub path: &'a [u8],
+    pub threadid: u32,
+    /// MIME type bytes (e.g. b"text/plain"). Already encoded by the
+    /// caller; ASCII passes through both encoding paths verbatim.
+    pub mime_type: &'a [u8],
+}
+
+/// Build the chunk array for `HTLC_HDR_GETTHREAD` — NEWSPATH +
+/// THREADID + NEWSTYPE. 3 chunks; `chunks_cap >= 3`, `scratch_cap >= 4`.
+/// Returns 3 on success, 0 on validation failure (including
+/// `path.len() > u16::MAX` or `mime_type.len() > u16::MAX`).
+pub fn build_news_getthread_chunks(
+    req: &NewsGetThreadRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 3
+        || scratch.len() < 4
+        || req.path.len() > u16::MAX as usize
+        || req.mime_type.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&req.threadid.to_be_bytes());
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: req.path.len() as u16,
+        data: if req.path.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.path.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::THREADID,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    chunks[2] = HxChunk {
+        tag: tag::NEWSTYPE,
+        len: req.mime_type.len() as u16,
+        data: if req.mime_type.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.mime_type.as_ptr()
+        },
+    };
+    3
+}
+
+/// Request data for [`build_news_mkcat_chunks`].
+pub struct NewsMakeCategoryRequest<'a> {
+    pub path: &'a [u8],
+    /// New category name, already encoded by the caller.
+    pub name: &'a [u8],
+}
+
+/// Build the chunk array for `HTLC_HDR_MAKECATEGORY` — NEWSPATH +
+/// CATEGORY. 2 chunks; the `chunks` slice must have at least 2 slots.
+/// No scratch needed. Returns 2 on success, 0 on validation failure
+/// (`chunks.len() < 2`, `path.len() > u16::MAX`, or `name.len() >
+/// u16::MAX`). NULL-pointer rejects live in the FFI shim
+/// `gtkhx_proto_build_news_mkcat_chunks` — at the Rust level the
+/// arguments are slices and a reference, so they can't be null.
+pub fn build_news_mkcat_chunks(
+    req: &NewsMakeCategoryRequest<'_>,
+    chunks: &mut [HxChunk],
+) -> usize {
+    if chunks.len() < 2
+        || req.path.len() > u16::MAX as usize
+        || req.name.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: req.path.len() as u16,
+        data: if req.path.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.path.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::CATEGORY,
+        len: req.name.len() as u16,
+        data: if req.name.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.name.as_ptr()
+        },
+    };
+    2
+}
+
+/// Request data for [`build_news_post_thread_chunks`]. Mirrors the C
+/// `hx_news15_post_thread` call site: subject, text, and mime type are
+/// pre-encoded bytes; PARENTTHREAD is opaque to mhxd (the C side
+/// always sends 0) but the wire spec requires the chunk to be
+/// present.
+pub struct NewsPostThreadRequest<'a> {
+    pub path: &'a [u8],
+    /// PARENTTHREAD chunk value. gtkhx always sends 0; the wire shape
+    /// requires the chunk regardless of value.
+    pub parent_thread: u32,
+    /// MIME type bytes (the C call site hard-codes "text/plain").
+    pub mime_type: &'a [u8],
+    /// Single-line subject bytes, already encoded by the caller's
+    /// `gtkhx_text_for_wire` (called with `is_body = FALSE` so the
+    /// LF→CR send-path normalisation is skipped — subjects don't
+    /// carry line endings).
+    pub subject: &'a [u8],
+    /// Article body bytes, already encoded by the caller's
+    /// `gtkhx_text_for_wire` (called with `is_body = TRUE` so the
+    /// LF→CR send-path normalisation is applied for legacy Mac
+    /// servers).
+    pub text: &'a [u8],
+    /// THREADID for the post being replied to. mhxd writes this into
+    /// the new post's `References:` header.
+    pub thread_id: u32,
+}
+
+/// Build the chunk array for `HTLC_HDR_POSTTHREAD` — 6 chunks in this
+/// wire order:
+///
+/// 1. `HTLC_DATA_NEWSPATH`
+/// 2. `HTLC_DATA_PARENTTHREAD`  (u32 BE; gtkhx always sends 0)
+/// 3. `HTLC_DATA_NEWSTYPE`      (e.g. "text/plain")
+/// 4. `HTLC_DATA_NEWSSUBJECT`
+/// 5. `HTLC_DATA_NEWSDATA`
+/// 6. `HTLC_DATA_THREADID`      (u32 BE; the article being replied to)
+///
+/// `chunks_cap >= 6`, `scratch_cap >= 8` (two u32s — parent at +0,
+/// thread at +4). Returns 6 on success, 0 on validation failure.
+pub fn build_news_post_thread_chunks(
+    req: &NewsPostThreadRequest<'_>,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 6
+        || scratch.len() < 8
+        || req.path.len() > u16::MAX as usize
+        || req.mime_type.len() > u16::MAX as usize
+        || req.subject.len() > u16::MAX as usize
+        || req.text.len() > u16::MAX as usize
+    {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&req.parent_thread.to_be_bytes());
+    scratch[4..8].copy_from_slice(&req.thread_id.to_be_bytes());
+
+    chunks[0] = HxChunk {
+        tag: tag::NEWSPATH,
+        len: req.path.len() as u16,
+        data: if req.path.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.path.as_ptr()
+        },
+    };
+    chunks[1] = HxChunk {
+        tag: tag::PARENTTHREAD,
+        len: 4,
+        data: scratch.as_ptr(),
+    };
+    chunks[2] = HxChunk {
+        tag: tag::NEWSTYPE,
+        len: req.mime_type.len() as u16,
+        data: if req.mime_type.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.mime_type.as_ptr()
+        },
+    };
+    chunks[3] = HxChunk {
+        tag: tag::NEWSSUBJECT,
+        len: req.subject.len() as u16,
+        data: if req.subject.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.subject.as_ptr()
+        },
+    };
+    chunks[4] = HxChunk {
+        tag: tag::NEWSDATA,
+        len: req.text.len() as u16,
+        data: if req.text.is_empty() {
+            b"".as_ptr()
+        } else {
+            req.text.as_ptr()
+        },
+    };
+    chunks[5] = HxChunk {
+        tag: tag::THREADID,
+        len: 4,
+        data: scratch[4..8].as_ptr(),
+    };
+    6
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1642,5 +1890,198 @@ mod tests {
         let big = vec![b'/'; u16::MAX as usize + 1];
         let mut chunks = [HxChunk::EMPTY];
         assert_eq!(build_news_delete_chunks(&big, &mut chunks), 0);
+    }
+
+    // ---- news delete_thread ----
+
+    #[test]
+    fn news_delete_thread_emits_path_then_threadid() {
+        let req = NewsDeleteThreadRequest {
+            path: b"/Articles",
+            threadid: 0xdead_beef,
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_news_delete_thread_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles");
+        assert_eq!(chunks[1].tag, tag::THREADID);
+        assert_eq!(chunks[1].len, 4);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn news_delete_thread_rejects_short_buffers() {
+        let req = NewsDeleteThreadRequest { path: b"p", threadid: 1 };
+        let mut chunks_short = [HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        assert_eq!(
+            build_news_delete_thread_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch_short = [0u8; 3];
+        assert_eq!(
+            build_news_delete_thread_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    // ---- news getthread ----
+
+    #[test]
+    fn news_getthread_emits_path_threadid_mime() {
+        let req = NewsGetThreadRequest {
+            path: b"/News",
+            threadid: 0x42,
+            mime_type: b"text/plain",
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        let hc = build_news_getthread_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 3);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(chunks[1].tag, tag::THREADID);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0, 0, 0, 0x42]);
+        assert_eq!(chunks[2].tag, tag::NEWSTYPE);
+        assert_eq!(chunks[2].len, 10);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"text/plain");
+    }
+
+    #[test]
+    fn news_getthread_rejects_oversize_fields() {
+        let big = vec![b'x'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
+        let mut scratch = [0u8; 4];
+        // Oversize path.
+        let req_path = NewsGetThreadRequest {
+            path: &big,
+            threadid: 0,
+            mime_type: b"text/plain",
+        };
+        assert_eq!(
+            build_news_getthread_chunks(&req_path, &mut chunks, &mut scratch),
+            0
+        );
+        // Oversize mime.
+        let req_mime = NewsGetThreadRequest {
+            path: b"p",
+            threadid: 0,
+            mime_type: &big,
+        };
+        assert_eq!(
+            build_news_getthread_chunks(&req_mime, &mut chunks, &mut scratch),
+            0
+        );
+    }
+
+    // ---- news mkcat ----
+
+    #[test]
+    fn news_mkcat_emits_path_then_category() {
+        let req = NewsMakeCategoryRequest {
+            path: b"/Articles",
+            name: b"Reviews",
+        };
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        let hc = build_news_mkcat_chunks(&req, &mut chunks);
+        assert_eq!(hc, 2);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles");
+        assert_eq!(chunks[1].tag, tag::CATEGORY);
+        assert_eq!(chunks[1].len, 7);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, b"Reviews");
+    }
+
+    #[test]
+    fn news_mkcat_rejects_short_buffer_or_oversize_fields() {
+        let req = NewsMakeCategoryRequest { path: b"p", name: b"n" };
+        let mut chunks_short = [HxChunk::EMPTY];
+        assert_eq!(build_news_mkcat_chunks(&req, &mut chunks_short), 0);
+
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
+        // Oversize path.
+        let req_path = NewsMakeCategoryRequest { path: &big, name: b"n" };
+        assert_eq!(build_news_mkcat_chunks(&req_path, &mut chunks), 0);
+        // Oversize name.
+        let req_name = NewsMakeCategoryRequest { path: b"p", name: &big };
+        assert_eq!(build_news_mkcat_chunks(&req_name, &mut chunks), 0);
+    }
+
+    // ---- news post_thread (6 chunks) ----
+
+    #[test]
+    fn news_post_thread_emits_six_chunks_in_order() {
+        let req = NewsPostThreadRequest {
+            path: b"/Articles",
+            parent_thread: 0,
+            mime_type: b"text/plain",
+            subject: b"Hello",
+            text: b"World",
+            thread_id: 0xcafe_babe,
+        };
+        let mut chunks = [HxChunk::EMPTY; 6];
+        let mut scratch = [0u8; 8];
+        let hc = build_news_post_thread_chunks(&req, &mut chunks, &mut scratch);
+        assert_eq!(hc, 6);
+        assert_eq!(chunks[0].tag, tag::NEWSPATH);
+        assert_eq!(chunks[1].tag, tag::PARENTTHREAD);
+        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0, 0, 0, 0]);
+        assert_eq!(chunks[2].tag, tag::NEWSTYPE);
+        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"text/plain");
+        assert_eq!(chunks[3].tag, tag::NEWSSUBJECT);
+        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, b"Hello");
+        assert_eq!(chunks[4].tag, tag::NEWSDATA);
+        assert_eq!(unsafe { chunk_bytes(&chunks[4]) }, b"World");
+        assert_eq!(chunks[5].tag, tag::THREADID);
+        assert_eq!(unsafe { chunk_bytes(&chunks[5]) }, &[0xca, 0xfe, 0xba, 0xbe]);
+    }
+
+    #[test]
+    fn news_post_thread_rejects_short_buffers() {
+        let req = NewsPostThreadRequest {
+            path: b"p",
+            parent_thread: 0,
+            mime_type: b"m",
+            subject: b"s",
+            text: b"t",
+            thread_id: 0,
+        };
+        let mut chunks_short = [HxChunk::EMPTY; 5];
+        let mut scratch = [0u8; 8];
+        assert_eq!(
+            build_news_post_thread_chunks(&req, &mut chunks_short, &mut scratch),
+            0
+        );
+        let mut chunks = [HxChunk::EMPTY; 6];
+        let mut scratch_short = [0u8; 7];
+        assert_eq!(
+            build_news_post_thread_chunks(&req, &mut chunks, &mut scratch_short),
+            0
+        );
+    }
+
+    #[test]
+    fn news_post_thread_rejects_oversize_fields() {
+        let big = vec![b'q'; u16::MAX as usize + 1];
+        for which in 0..4 {
+            let req = NewsPostThreadRequest {
+                path: if which == 0 { &big } else { b"p" },
+                parent_thread: 0,
+                mime_type: if which == 1 { &big } else { b"m" },
+                subject: if which == 2 { &big } else { b"s" },
+                text: if which == 3 { &big } else { b"t" },
+                thread_id: 0,
+            };
+            let mut chunks = [HxChunk::EMPTY; 6];
+            let mut scratch = [0u8; 8];
+            assert_eq!(
+                build_news_post_thread_chunks(&req, &mut chunks, &mut scratch),
+                0,
+                "oversize field {which} should be rejected"
+            );
+        }
     }
 }
