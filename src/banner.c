@@ -470,7 +470,8 @@ banner_send_download_request (struct htlc_conn *htlc)
     debug_log ("banner", "sending HTLC_HDR_DOWNLOAD_BANNER (file-mode fetch)");
     task_new (htlc, RCV_TASK_FN (rcv_task_banner_get), NULL, NULL,
               "banner_get");
-    hlwrite (htlc, HTLC_HDR_DOWNLOAD_BANNER, 0, 0);
+    /* Phase R2: DOWNLOAD_BANNER is a zero-chunk opcode. */
+    hlwrite_chunks (htlc, HTLC_HDR_DOWNLOAD_BANNER, 0, NULL, 0);
 }
 
 void

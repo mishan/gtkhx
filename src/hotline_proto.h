@@ -577,6 +577,14 @@ extern int32_t gtkhx_proto_build_file_mkdir_chunks (const uint8_t *dir_ptr,
                                                     struct hx_chunk *chunks,
                                                     size_t chunks_cap);
 
+/* HTLC_HDR_FILE_LIST: single HTLC_DATA_DIR chunk. Wire-identical to
+ * FILE_MKDIR. chunks_cap >= 1. Returns 1 on success, 0 on validation
+ * failure. */
+extern int32_t gtkhx_proto_build_file_list_chunks (const uint8_t *dir_ptr,
+                                                   size_t dir_len,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap);
+
 /* HTLC_HDR_FILE_DELETE: FILE_NAME + optional DIR. has_dir is a 0/1
  * flag — when non-zero, emit DIR with the given bytes; when zero,
  * omit (dir_ptr / dir_len are ignored). chunks_cap >= 2.

@@ -1112,6 +1112,15 @@ pub fn build_file_mkdir_chunks(dir: &[u8], chunks: &mut [HxChunk]) -> usize {
     1
 }
 
+/// Build the chunk array for `HTLC_HDR_FILE_LIST` — single
+/// `HTLC_DATA_DIR` chunk. Wire-identical shape to `FILE_MKDIR` (server
+/// dispatches on the header opcode, not the chunk layout). Returns 1
+/// on success, or 0 on a too-small `chunks` slice or `dir.len() >
+/// u16::MAX`.
+pub fn build_file_list_chunks(dir: &[u8], chunks: &mut [HxChunk]) -> usize {
+    build_file_mkdir_chunks(dir, chunks)
+}
+
 /// Internal helper for the three file-ops opcodes that share the
 /// FILE_NAME + optional DIR wire shape (FILE_DELETE / FILE_GETINFO /
 /// FILE_GETFOLDER). When `dir` is `Some`, emits both chunks (FILE_NAME
@@ -2535,6 +2544,24 @@ mod tests {
         let big = vec![b'/'; u16::MAX as usize + 1];
         let mut chunks = [HxChunk::EMPTY];
         assert_eq!(build_file_mkdir_chunks(&big, &mut chunks), 0);
+    }
+
+    #[test]
+    fn file_list_shares_mkdir_shape() {
+        // FILE_LIST is wire-identical to FILE_MKDIR (server dispatches
+        // on the header opcode). Verify the same single-DIR contract
+        // and validation behaviour holds through the alias.
+        let mut chunks = [HxChunk::EMPTY];
+        let hc = build_file_list_chunks(b"Public", &mut chunks);
+        assert_eq!(hc, 1);
+        assert_eq!(chunks[0].tag, tag::DIR);
+        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"Public");
+
+        let mut empty: [HxChunk; 0] = [];
+        assert_eq!(build_file_list_chunks(b"x", &mut empty), 0);
+        let big = vec![b'/'; u16::MAX as usize + 1];
+        let mut chunks2 = [HxChunk::EMPTY];
+        assert_eq!(build_file_list_chunks(&big, &mut chunks2), 0);
     }
 
     // ---- file delete / getinfo / getfolder (shared shape) ----

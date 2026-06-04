@@ -27,6 +27,7 @@
 #include <getopt.h>
 #include <gtk/gtk.h>
 #include "hx.h"
+#include "hotline_proto.h"
 #include "network.h"
 #include "rcv.h"
 #include "chat.h"
@@ -329,14 +330,12 @@ COMMAND (msg)
 COMMAND (me)
 {
     char *p;
-    guint16 style;
 
     for (p = str; *p && *p != ' '; p++)
         ;
     if (!*p || !(*++p)) {
         return;
     }
-    style = htons (1);
 
     /* Phase E2/E3: chat body — same encoder as hx_send_chat. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
@@ -344,14 +343,20 @@ COMMAND (me)
     char *wire = gtkhx_text_for_wire (p, strlen (p), utf8,
                                       /*is_body=*/TRUE, &wire_len);
 
-    if (cid) {
-        guint32 cidh = htonl (cid);
-        hlwrite (htlc, HTLC_HDR_CHAT, 0, 3, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, (guint16)wire_len, wire, HTLC_DATA_CHAT_ID, 4,
-                 &cidh);
-    } else {
-        hlwrite (htlc, HTLC_HDR_CHAT, 0, 2, HTLC_DATA_STYLE, 2, &style,
-                 HTLC_DATA_CHAT, (guint16)wire_len, wire);
+    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_chunks.
+	 * Same shape as hx_send_chat; the only difference is the style
+	 * value — /me sends style=1 (emote) vs. style=0 (normal). The
+	 * builder takes style as host-order and big-endian-encodes it
+	 * into scratch. */
+    struct hx_chunk chunks[3];
+    guint8 scratch[8];
+    int hc = (int)gtkhx_proto_build_chat_chunks (cid, /*style=*/1,
+                                                 (const uint8_t *)wire,
+                                                 wire_len, chunks,
+                                                 G_N_ELEMENTS (chunks),
+                                                 scratch, sizeof (scratch));
+    if (hc > 0) {
+        hlwrite_chunks (htlc, HTLC_HDR_CHAT, 0, chunks, hc);
     }
     g_free (wire);
 }
