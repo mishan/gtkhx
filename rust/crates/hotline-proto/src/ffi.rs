@@ -1252,6 +1252,75 @@ pub unsafe extern "C" fn gtkhx_proto_parse_user_change(
     true
 }
 
+/// C-ABI result of [`parse::parse_user_list_record`]. `nick_color`
+/// is always valid: the Colored-Nicknames trailer when present,
+/// otherwise `HX_NICK_COLOR_NONE` (0xffffffff). `got_nick_color`
+/// is a 0/1 trailer-presence flag — callers that need to
+/// distinguish "server set us to 0xffffffff explicitly" from
+/// "server didn't emit the trailer" can read it; callers that
+/// just want a colour to render don't need to substitute anything.
+#[repr(C)]
+pub struct UserListRecordOut {
+    pub nick_color: u32,
+    pub uid: u16,
+    pub icon: u16,
+    pub color: u16,
+    pub got_nick_color: u8,
+    pub name_len: u16,
+}
+
+/// Parse one `HTLS_DATA_USER_LIST` chunk's payload (the C
+/// `hl_userlist_hdr` body — uid/icon/color/nlen + name +
+/// optional Colored-Nicknames trailer). Writes the strip_ansi'd
+/// name into `name_buf` (NUL-terminated, capped at `name_cap - 1`)
+/// and fills `*out`. Returns false on NULL `out`, NULL `name_buf`,
+/// zero `name_cap`, or a chunk shorter than the 8 fixed bytes; the
+/// last case mirrors the C extractor silently skipping malformed
+/// USER_LIST records.
+///
+/// Caller iterates `HTLS_DATA_USER_LIST` chunks (e.g. via the
+/// `dh_start`/`dh_end` macros in the rcv path) and invokes this for
+/// each chunk's `(data, len)` pair.
+///
+/// # Safety
+/// `data` valid for `data_len` bytes (or NULL); `name_buf` valid
+/// for `name_cap` bytes (or NULL); `out` a valid writable
+/// `UserListRecordOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_user_list_record(
+    data: *const u8,
+    data_len: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    out: *mut UserListRecordOut,
+) -> bool {
+    if out.is_null() || name_buf.is_null() || name_cap == 0 {
+        return false;
+    }
+    let s = as_slice(data, data_len);
+    match parse::parse_user_list_record(s, name_cap - 1) {
+        Some(rec) => {
+            let written = write_cstr(name_buf, name_cap, &rec.name);
+            (*out).uid = rec.uid;
+            (*out).icon = rec.icon;
+            (*out).color = rec.color;
+            match rec.nick_color {
+                Some(c) => {
+                    (*out).nick_color = c;
+                    (*out).got_nick_color = 1;
+                }
+                None => {
+                    (*out).nick_color = crate::messages::NICK_COLOR_NONE;
+                    (*out).got_nick_color = 0;
+                }
+            }
+            (*out).name_len = written as u16;
+            true
+        }
+        None => false,
+    }
+}
+
 /// C-ABI result of [`parse::parse_user_info`]. The sanitised name lands
 /// in `name_buf`, the CR2LF + strip_ansi'd info body in `info_buf`;
 /// both are NUL-terminated, capped at the corresponding `_cap - 1`.
