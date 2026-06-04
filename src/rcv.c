@@ -1126,40 +1126,39 @@ rcv_task_newsfolder_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
 void
 rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
 {
-    struct news_post *post = 0;
-    guint32 postid;
+    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to Rust
+	 * parse_news_thread_reply. The TASK_ERROR short-circuit is
+	 * preserved (the Rust parser drops the body on that path and
+	 * sets has_task_error). The C side keeps the news_post
+	 * allocation + emit so the news_item back-pointer can be
+	 * stitched in without crossing the FFI.
+	 *
+	 * Buffer sized at 65536 to match what real-world NEWSDATA
+	 * bodies need (chunk lens are u16 = 65535 max, so this is the
+	 * comfortable cap — text_cap-1 inside the parser is 65535,
+	 * matching the wire ceiling). */
+    char *buf = g_malloc (65536);
+    struct gtkhx_proto_news_thread_reply r;
+    gtkhx_proto_parse_news_thread_reply (htlc->in.buf, htlc->in.pos,
+                                         (uint8_t *)buf, 65536, &r);
 
-    dh_start (htlc)
-    {
-        switch (_type) {
-        case HTLC_DATA_NEWSDATA:
-            post = g_malloc (sizeof (struct news_post));
-            post->buf = g_malloc (_len + 1);
-            memcpy (post->buf, dh->data, _len);
-            CR2LF (post->buf, _len);
-            strip_ansi (post->buf, _len);
-            post->buf[_len] = 0;
-            break;
-        case HTLC_DATA_THREADID:
-            dh_getint (postid);
-            break;
-        case HTLS_DATA_TASKERROR:
-            return;
-        }
+    if (r.has_task_error) {
+        g_free (buf);
+        return;
     }
-    dh_end ();
-
-    /* A well-formed reply carries HTLC_DATA_NEWSDATA. If the server
-	 * sent a reply without it — protocol corruption, future revision,
-	 * or chunks in an order we don't expect — fall through to here
-	 * with post still NULL. Bail rather than dereferencing a NULL
-	 * pointer and segfaulting. */
-    if (!post) {
+    if (!r.has_text) {
+        /* A well-formed reply carries NEWSDATA. If the server sent
+		 * a reply without it — protocol corruption, future
+		 * revision, or chunks in an order we don't expect — bail
+		 * rather than emitting an empty article. */
         debug_log ("news",
                    "rcv_task_news_post: reply missing HTLC_DATA_NEWSDATA");
+        g_free (buf);
         return;
     }
 
+    struct news_post *post = g_malloc (sizeof (struct news_post));
+    post->buf = buf;
     post->item = item;
     gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
 }

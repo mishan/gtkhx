@@ -302,6 +302,31 @@ extern bool gtkhx_proto_parse_banner_get_reply (
     const uint8_t *msg, size_t msglen,
     struct gtkhx_proto_banner_get_reply *out);
 
+struct gtkhx_proto_news_thread_reply {
+    uint32_t thread_id;
+    /* Bytes written to text_buf, excluding the trailing NUL. */
+    uint16_t text_len;
+    /* 0/1 — set iff a NEWSDATA chunk was present and no TASK_ERROR
+     * short-circuited the walk. Caller bails when zero. Empty
+     * NEWSDATA still counts as has_text=1 (text_len may be 0). */
+    uint8_t has_text;
+    /* 0/1 — set iff a TASK_ERROR chunk was seen mid-walk. */
+    uint8_t has_task_error;
+};
+
+/* Parse the post-HTLC_HDR_GETTHREAD TASK reply payload — the
+ * server's response arrives inside an HTLS_HDR_TASK frame; this
+ * parses the post-TASK body (the rcv_task_news_post body in C).
+ * Writes the CR2LF + strip_ansi'd NEWSDATA body into text_buf
+ * (NUL-terminated, capped at text_cap-1) and fills *out. Returns
+ * false on NULL out, NULL text_buf, or zero text_cap; otherwise true.
+ * The out->has_text gate filters out the missing-body and TASK_ERROR
+ * paths the way the C extractor does. */
+extern bool gtkhx_proto_parse_news_thread_reply (
+    const uint8_t *msg, size_t msglen,
+    uint8_t *text_buf, size_t text_cap,
+    struct gtkhx_proto_news_thread_reply *out);
+
 struct gtkhx_proto_file_getinfo {
     uint8_t icon[4];
     uint8_t date_create[8];
