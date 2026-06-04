@@ -1252,6 +1252,124 @@ pub unsafe extern "C" fn gtkhx_proto_parse_user_change(
     true
 }
 
+/// C-ABI result of [`parse::parse_user_info`]. The sanitised name lands
+/// in `name_buf`, the CR2LF + strip_ansi'd info body in `info_buf`;
+/// both are NUL-terminated, capped at the corresponding `_cap - 1`.
+#[repr(C)]
+pub struct UserInfoOut {
+    pub name_len: u16,
+    pub info_len: u16,
+}
+
+/// Parse the post-`HTLS_HDR_USER_GETINFO` TASK reply payload (the C
+/// `rcv_task_user_info` body). Writes the strip_ansi'd name into
+/// `name_buf` (cap `name_cap`) and the CR2LF + strip_ansi'd info body
+/// into `info_buf` (cap `info_cap`). Returns false on any NULL /
+/// zero-cap pointer; otherwise true. The C caller's `nlen && ilen`
+/// dispatch gate is left to the call site (matches the rcv_task
+/// behaviour where empty fields silently skip the emit).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `name_buf` /
+/// `info_buf` valid for their respective capacities (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_user_info(
+    msg: *const u8,
+    msglen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    info_buf: *mut u8,
+    info_cap: usize,
+    out: *mut UserInfoOut,
+) -> bool {
+    if out.is_null()
+        || name_buf.is_null()
+        || name_cap == 0
+        || info_buf.is_null()
+        || info_cap == 0
+    {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let ui = parse::parse_user_info(s, s.len(), name_cap - 1, info_cap - 1);
+    let nw = write_cstr(name_buf, name_cap, &ui.name);
+    let iw = write_cstr(info_buf, info_cap, &ui.info);
+    (*out).name_len = nw as u16;
+    (*out).info_len = iw as u16;
+    true
+}
+
+/// C-ABI result of [`parse::parse_account_read`]. NAME / LOGIN / PASS
+/// land in the caller's three buffers (NUL-terminated, capped at
+/// `_cap - 1`); ACCESS is the raw 8 wire bytes; `got_access` is the
+/// C-extractor's accessbool gate.
+#[repr(C)]
+pub struct AccountReadOut {
+    pub access: [u8; 8],
+    pub got_access: u8,
+    pub name_len: u16,
+    pub login_len: u16,
+    pub pass_len: u16,
+}
+
+/// Parse the post-`HTLC_HDR_ACCOUNT_READ` TASK reply payload (the C
+/// `rcv_task_user_open` body). Writes NAME into `name_buf`, the
+/// XOR-0xff-decoded LOGIN into `login_buf`, and (when present) the
+/// XOR-0xff-decoded PASSWORD into `pass_buf` — all three NUL-
+/// terminated and capped at the matching `_cap - 1`. The 8-byte
+/// ACCESS field lands verbatim in `out->access`; `out->got_access`
+/// is the dispatch gate (the C call site only fires the user-edit
+/// callback when this is non-zero).
+///
+/// PASSWORD no-password convention: a single zero byte (or empty /
+/// missing) yields an empty `pass` buffer (NUL only); matches the
+/// C extractor's `plen > 1 && dh->data[0]` gate.
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `name_buf` /
+/// `login_buf` / `pass_buf` valid for their respective capacities
+/// (or NULL); `out` a valid writable `AccountReadOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_account_read(
+    msg: *const u8,
+    msglen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    login_buf: *mut u8,
+    login_cap: usize,
+    pass_buf: *mut u8,
+    pass_cap: usize,
+    out: *mut AccountReadOut,
+) -> bool {
+    if out.is_null()
+        || name_buf.is_null()
+        || name_cap == 0
+        || login_buf.is_null()
+        || login_cap == 0
+        || pass_buf.is_null()
+        || pass_cap == 0
+    {
+        return false;
+    }
+    let s = as_slice(msg, msglen);
+    let ar = parse::parse_account_read(
+        s,
+        s.len(),
+        name_cap - 1,
+        login_cap - 1,
+        pass_cap - 1,
+    );
+    let nw = write_cstr(name_buf, name_cap, &ar.name);
+    let lw = write_cstr(login_buf, login_cap, &ar.login);
+    let pw = write_cstr(pass_buf, pass_cap, &ar.pass);
+    (*out).access = ar.access;
+    (*out).got_access = ar.got_access as u8;
+    (*out).name_len = nw as u16;
+    (*out).login_len = lw as u16;
+    (*out).pass_len = pw as u16;
+    true
+}
+
 // ---- User-management SEND builders -----------------------------------
 //
 // Same chunks[] + scratch[] contract as the chat / msg / broadcast
