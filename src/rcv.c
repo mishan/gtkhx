@@ -884,6 +884,21 @@ hx_rcv_hdr (struct htlc_conn *htlc)
 
     proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 
+    /* Some servers (Heidrun's Inn-family) echo the original request
+	 * opcode in the low u16 of a TASK reply: 0x0001_006b = TASK |
+	 * HTLC_HDR_LOGIN, 0x0001_012c = TASK | HTLC_HDR_USER_GETLIST,
+	 * etc. Standard servers (mhxd, hlserver.com, Janus, …) send
+	 * plain 0x0001_0000 for every TASK reply and rely on the trans
+	 * id for correlation. We use task_with_trans(trans) inside
+	 * hx_rcv_task either way, so the low-u16 opcode is purely
+	 * diagnostic — strip it before dispatch so both server styles
+	 * land in the HTLS_HDR_TASK arm. Without this mask the Heidrun
+	 * variant falls through to "unknown header type 0x0001006b"
+	 * and the login (and subsequent USER_GETLIST) never completes. */
+    if ((type & 0xffff0000) == HTLS_HDR_TASK) {
+        type = HTLS_HDR_TASK;
+    }
+
     /* htlc->trans = ntohl(h->trans); */
     htlc->rcv = 0;
     switch (type) {
