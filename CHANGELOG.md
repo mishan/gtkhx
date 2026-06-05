@@ -13,6 +13,8 @@
   - Support for fetching tracker listings via TLS
   - Dropped RC4 cipher support. RC4 is weak/insecure and should not be used.
   - Handle servers that echo request opcode in TASK replies
+- Settings
+  - Dropped *(X|Y)POS config keys as GTK+ 4 does not support getting the window position
 
 ## 1.0.0
 

@@ -3,7 +3,7 @@
 
 extern void reload_news (GtkWidget *widget, gpointer data);
 extern void create_post_window (GtkWidget *widget, gpointer data);
-extern void create_news_window (session *sess);
+extern void create_news_window (GtkWidget *toolbar_window, session *sess);
 extern void open_news (GtkWidget *widget, gpointer data);
 
 extern void hx_post_news (struct htlc_conn *htlc, const char *news,

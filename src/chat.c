@@ -2077,7 +2077,7 @@ create_chat (session *sess)
     gchat->history_load_older_ent  = NULL;
 
     /* Public chat (cid=0) UI gets seeded into the table on the
-	 * single create_chat call at session init. */
+     * single create_chat call at session init. */
     g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (0u), gchat);
 }
 
@@ -2092,7 +2092,7 @@ change_subject (GtkWidget *widget, gpointer data)
 }
 
 void
-create_chat_window (GtkWidget *widget, gpointer data)
+create_chat_window (GtkWidget *toolbar_window, gpointer data)
 {
     GtkWidget *hbox;
     GtkWidget *outputframe, *inputframe, *subj_frame;
@@ -2109,17 +2109,16 @@ create_chat_window (GtkWidget *widget, gpointer data)
 
     gchat = gchat_with_cid (sess, 0);
     /* gchats_init seeds cid=0 (public chat) on session bring-up;
-	 * gchat_with_cid(sess, 0) is invariant non-NULL on every path
-	 * that reaches create_chat_window (which only fires post-login).
-	 * Bail loudly on the invariant break — we can't build a chat
-	 * window without a backing gtkhx_chat struct. */
+     * gchat_with_cid(sess, 0) is invariant non-NULL on every path
+     * that reaches create_chat_window (which only fires post-login).
+     * Bail loudly on the invariant break — we can't build a chat
+     * window without a backing gtkhx_chat struct. */
     if (!gchat) {
         g_warning ("create_chat_window: no public-chat gchat — skipping");
         return;
     }
     chat_window = gtk_window_new ();
-    /* Phase 5: AdwHeaderBar replaces the default GtkWindow title bar
-	 * for the unified Adwaita look across all GtkHx windows. */
+    gtk_window_set_transient_for(GTK_WINDOW(chat_window),  GTK_WINDOW(toolbar_window));
     gtk_window_set_titlebar (GTK_WINDOW (chat_window), adw_header_bar_new ());
 
     gtk_widget_set_size_request (chat_window, 412, 280);
@@ -2139,11 +2138,11 @@ create_chat_window (GtkWidget *widget, gpointer data)
 
     gchat->subject = gtk_entry_new ();
     /* chats_init seeds cid=0 (public chat) before the table is
-	 * usable; chat_with_cid(sess, 0) is invariant non-NULL on this
-	 * path (we're inside create_chat_window, post-login).
-	 * Defensive ?: anyway — costs nothing, makes the analyzer
-	 * happy, and survives a hypothetical refactor that breaks the
-	 * invariant. */
+     * usable; chat_with_cid(sess, 0) is invariant non-NULL on this
+     * path (we're inside create_chat_window, post-login).
+     * Defensive ?: anyway — costs nothing, makes the analyzer
+     * happy, and survives a hypothetical refactor that breaks the
+     * invariant. */
     {
         struct chat *pub = chat_with_cid (sess, 0);
         gtk_editable_set_text (GTK_EDITABLE (gchat->subject),
@@ -2161,16 +2160,6 @@ create_chat_window (GtkWidget *widget, gpointer data)
     outputframe = gtk_frame_new (0);
     inputframe = gtk_frame_new (0);
 
-    /* Phase 5+: replace the vertical GtkPaned with a plain box. The
-	 * paned'"'"'s draggable divider was nice but it pinned the input area
-	 * to a fixed height (50px minimum, user-resizable via drag),
-	 * which meant a single-line input took two visible lines'"'"' worth of
-	 * space and a multi-line paste required scrolling inside a
-	 * fixed-height widget. The new layout has the output frame
-	 * vexpand=TRUE eating remaining vertical space, and the input
-	 * scrolled window using min/max-content-height + propagate-
-	 * natural-height to grow with the buffer'"'"'s line count (capped at
-	 * 5 lines; scrolls beyond that). */
     GtkWidget *vstack = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_set_margin_start (vstack, 5);
     gtk_widget_set_margin_end (vstack, 5);
@@ -2191,23 +2180,19 @@ create_chat_window (GtkWidget *widget, gpointer data)
     }
 
     gtkhx_widget_set_child (outputframe, chat_hbox);
-    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
 
     hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtkhx_widget_set_child (inputframe, hbox);
 
     gchat->input = gtk_text_view_new ();
     /* Theme monospace via gtk_text_view_set_monospace. We deliberately
-	 * do NOT use the Settings font here — applying it triggered an
-	 * unresolved ascender-ink clip on newly typed glyphs at small
-	 * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
+     * do NOT use the Settings font here — applying it triggered an
+     * unresolved ascender-ink clip on newly typed glyphs at small
+     * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
     gtkhx_apply_input_font (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     {
-        /* Phase 4.5: key-press-event is gone — install the chat-input
-		 * Tab/Return/history controller. Object-data stash above is
-		 * what chat_input_key_pressed reads to find sess + gchat. */
         GtkEventController *kctrl = gtk_event_controller_key_new ();
         g_signal_connect (kctrl, "key-pressed",
                           G_CALLBACK (chat_input_key_pressed), NULL);
@@ -2216,8 +2201,8 @@ create_chat_window (GtkWidget *widget, gpointer data)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
     /* Inner margins so the text doesn't sit flush against the
-	 * rounded-corner frame (the left+top corner used to clip the
-	 * leading character + first line of the input). */
+     * rounded-corner frame (the left+top corner used to clip the
+     * leading character + first line of the input). */
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
@@ -2228,12 +2213,12 @@ create_chat_window (GtkWidget *widget, gpointer data)
         gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (input_scroll),
                                         GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
         /* Auto-grow input behaviour: the scrolled window reports a
-		 * natural height that matches the embedded GtkTextView'"'"'s
-		 * content, clamped between a single-line minimum and a
-		 * 5-line maximum. Below the min the input gets the floor;
-		 * above the max the scrollbar takes over. The font size
-		 * varies per theme so we pick generous pixel approximations
-		 * (28px ≈ 1 line of body text, 120px ≈ 5 lines). */
+         * natural height that matches the embedded GtkTextView'"'"'s
+         * content, clamped between a single-line minimum and a
+         * 5-line maximum. Below the min the input gets the floor;
+         * above the max the scrollbar takes over. The font size
+         * varies per theme so we pick generous pixel approximations
+         * (28px ≈ 1 line of body text, 120px ≈ 5 lines). */
         gtk_scrolled_window_set_propagate_natural_height (
             GTK_SCROLLED_WINDOW (input_scroll), TRUE);
         gtk_scrolled_window_set_min_content_height (
@@ -2254,17 +2239,10 @@ create_chat_window (GtkWidget *widget, gpointer data)
 
     g_object_set_data (G_OBJECT (chat_window), "sess", sess);
 
-    /* Phase 3.x: only apply saved geometry when the prefs file actually
-	 * has one (see users.c for rationale — zero-size collapses the
-	 * window under GTK 3). The earlier set_size_request(412, 280)
-	 * call serves as the default. */
-    if (gtkhx_prefs.geo.chat.xpos > 0 || gtkhx_prefs.geo.chat.ypos > 0) {
-        /* Phase 4.2: gtk_window_move removed (Wayland) */
-        if (gtkhx_prefs.geo.chat.xsize > 0 && gtkhx_prefs.geo.chat.ysize > 0) {
-            gtk_window_set_default_size (GTK_WINDOW (chat_window),
-                                         gtkhx_prefs.geo.chat.xsize,
-                                         gtkhx_prefs.geo.chat.ysize);
-        }
+    if (gtkhx_prefs.geo.chat.xsize > 0 && gtkhx_prefs.geo.chat.ysize > 0) {
+        gtk_window_set_default_size (GTK_WINDOW (chat_window),
+                                     gtkhx_prefs.geo.chat.xsize,
+                                     gtkhx_prefs.geo.chat.ysize);
     }
 
     gtk_window_present (GTK_WINDOW (chat_window));

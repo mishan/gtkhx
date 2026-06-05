@@ -88,7 +88,7 @@ extern void chat_log_line_handler (GtkhxSession *emitter,
                                    gpointer body, gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
 extern void create_chat (session *sess);
-extern void create_chat_window (GtkWidget *widget, gpointer data);
+extern void create_chat_window (GtkWidget *toolbar_window, gpointer data);
 extern struct gtkhx_chat *pchat_new (session *sess, struct chat *chat);
 extern void output_chat_subject (struct htlc_conn *htlc, guint32 cid,
                                  char *buf);

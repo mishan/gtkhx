@@ -382,11 +382,6 @@ news_search_ctx_free (gpointer data)
     g_free (ctx);
 }
 
-/* Phase 5: gtkhx_text_to_utf8 → gtkhx_text_to_utf8 (moved to
- * gtkutil — server names, news bodies, post subjects all want the
- * same Mac Roman / Latin-1 / already-UTF-8 fallback chain). The
- * old name in this TU is gone; callers just include gtkutil.h. */
-
 void
 hx_get_news (struct htlc_conn *htlc)
 {
@@ -399,18 +394,18 @@ void
 hx_post_news (struct htlc_conn *htlc, const char *news, guint16 len)
 {
     /* Phase E2/E3: news body — UTF-8 / Mac Roman + LF→CR for
-	 * legacy servers. The flat 1.0 news file is line-oriented,
-	 * so getting line endings right is what makes posts render
-	 * correctly on Mac clients. */
+     * legacy servers. The flat 1.0 news file is line-oriented,
+     * so getting line endings right is what makes posts render
+     * correctly on Mac clients. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     gsize wire_len = 0;
     char *wire
         = gtkhx_text_for_wire (news, len, utf8, /*is_body=*/TRUE, &wire_len);
 
     /* Phase R2: chunk layout moved to gtkhx_proto_build_news_post_chunks.
-	 * Build BEFORE task_new — see hx_send_msg for the rationale
-	 * (task_new snapshots htlc->trans into a pending entry; a builder
-	 * failure must not leave a phantom task behind). */
+     * Build BEFORE task_new — see hx_send_msg for the rationale
+     * (task_new snapshots htlc->trans into a pending entry; a builder
+     * failure must not leave a phantom task behind). */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_news_post_chunks (
         (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks));
@@ -644,7 +639,7 @@ create_post_window (GtkWidget *widget, gpointer data)
 }
 
 void
-create_news_window (session *sess)
+create_news_window (GtkWidget *toolbar_window, session *sess)
 {
     GtkWidget *news_scroll;
     GtkWidget *content_vbox;
@@ -660,6 +655,7 @@ create_news_window (session *sess)
     }
 
     news_window = gtk_window_new ();
+    gtk_window_set_transient_for(GTK_WINDOW(news_window),  GTK_WINDOW(toolbar_window));
 
     /* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
 
@@ -760,19 +756,13 @@ create_news_window (session *sess)
     gtk_widget_set_sensitive (postButton, FALSE);
     gtk_widget_set_sensitive (reloadButton, FALSE);
 
-    /* Phase 3.x: only apply saved geometry when the prefs file actually
-	 * has one (see users.c for rationale — zero-size collapses the
-	 * window under GTK 3). */
     if (gtkhx_prefs.geo.news.xsize > 0 && gtkhx_prefs.geo.news.ysize > 0) {
         gtk_window_set_default_size (GTK_WINDOW (news_window),
                                      gtkhx_prefs.geo.news.xsize,
                                      gtkhx_prefs.geo.news.ysize);
     }
-    if (gtkhx_prefs.geo.news.xpos > 0 || gtkhx_prefs.geo.news.ypos > 0) {
-        /* Phase 4.2: gtk_window_move removed (Wayland) */
 
-        gtk_window_present (GTK_WINDOW (news_window));
-    }
+    gtk_window_present (GTK_WINDOW (news_window));
 
     if (connected == 1) {
         changetitlespecific (news_window, _ ("News"));
@@ -796,7 +786,7 @@ open_news (GtkWidget *widget, gpointer data)
     session *sess = data;
 
     if (!gtkhx_prefs.geo.news.open) {
-        create_news_window (sess);
+        create_news_window (widget, sess);
         if (connected) {
             hx_get_news (&sess->htlc);
         }

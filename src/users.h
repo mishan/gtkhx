@@ -42,7 +42,7 @@ extern GdkRGBA *user_nick_color_gdk (const struct hx_user *user, guint16 status,
 
 extern PangoFontDescription *users_font_desc;
 
-extern void create_users_window (GtkWidget *widget, gpointer data);
+extern void create_users_window (GtkWidget *toolbar_window, gpointer data);
 extern void user_list (session *sess);
 extern void user_create (struct htlc_conn *htlc, struct chat *chat,
                          struct hx_user *user, const char *nam, guint16 icon,
