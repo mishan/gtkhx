@@ -450,7 +450,6 @@ hx_rcv_task (struct htlc_conn *htlc)
     }
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
-        int fd = htlc->fd;
         /* HTXF transfer tasks (the ones xfer_go fires for FILE_GET /
 		 * FILE_PUT, identified by the "xfer_go" label) own an
 		 * htxf_conn that needs to be reclaimed when the request
@@ -466,7 +465,24 @@ hx_rcv_task (struct htlc_conn *htlc)
         if (tsk->rcv && (!error || is_xfer)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }
-        if (hxd_files[fd].conn.htlc) {
+        /* Liveness gate: skip task_delete if the rcv handler tore
+		 * down the connection (rcv_task_login does this on a
+		 * malformed HOPE Step 1 reply, for example). hx_htlc_close
+		 * clears htlc->fd to 0, so a non-zero fd here means the
+		 * connection is still live and task_delete (hash remove +
+		 * gtask UI row removal) is safe to run.
+		 *
+		 * The pre-GIOStream code used `hxd_files[fd].conn.htlc`
+		 * here — that array stopped tracking the control fd after
+		 * the GIOStream rewrite (see comment in network.c
+		 * connect_finish_handshake) and the check became always-
+		 * false, so task_delete was always skipped and Tasks-window
+		 * rows accumulated forever. The bug was latent against
+		 * servers like mhxd that mostly skip TASK replies for
+		 * login-time setup; it surfaced against Heidrun's Inn
+		 * (which echoes the request opcode in the TASK reply type
+		 * and now reaches hx_rcv_task after the dispatch mask fix). */
+        if (htlc->fd) {
             task_delete (&the_session, tsk);
         }
     } else {
