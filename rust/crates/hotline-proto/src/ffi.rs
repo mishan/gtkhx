@@ -3080,3 +3080,126 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_put_chunks(
     };
     build::build_file_put_chunks(&req, chunks_slice, scratch_slice) as i32
 }
+
+// ---- HTRK tracker reply parsers ---------------------------------------
+
+/// Parse the 14-byte HTRK reply header. Writes `nservers` (host
+/// byte order) into `*out_nservers`. Returns false on NULL
+/// `out_nservers` or a buffer shorter than 14 bytes; otherwise true.
+///
+/// # Safety
+/// `buf` either valid for `len` bytes or NULL (treated as an empty
+/// slice regardless of `len`); `out_nservers` a valid writable u16
+/// or NULL (early-rejected, function returns false).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_tracker_header(
+    buf: *const u8,
+    len: usize,
+    out_nservers: *mut u16,
+) -> bool {
+    if out_nservers.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_header(s) {
+        Some(n) => {
+            *out_nservers = n;
+            true
+        }
+        None => false,
+    }
+}
+
+/// `true` iff the byte at `buf[0]` is 0 — marks a padding/empty
+/// slot the HTRK reply uses to pad its server list. Returns false
+/// on empty input (defensive).
+///
+/// # Safety
+/// `buf` either valid for `len` bytes or NULL (treated as an empty
+/// slice regardless of `len`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_record_is_padding(
+    buf: *const u8,
+    len: usize,
+) -> bool {
+    parse::tracker_record_is_padding(as_slice(buf, len))
+}
+
+/// C-ABI mirror of [`parse::TrackerRecordFixed`]. `addr_be` stores
+/// the 4 IPv4 address bytes verbatim from the wire — the C caller
+/// memcpy's it into `struct in_addr`'s `s_addr` field (which uses
+/// the same network-byte-order storage convention).
+#[repr(C)]
+pub struct TrackerRecordFixedOut {
+    pub addr_be: u32,
+    pub port: u16,
+    pub nusers: u16,
+    pub name_len: u8,
+}
+
+// Pin the cross-language ABI layout from the Rust side so the
+// `_Static_assert(sizeof(gtkhx_proto_tracker_record_fixed) == 12,
+// ...)` in src/hotline_proto.h has a peer compile-time check here.
+// A future field reorder / type change that drifts the struct fails
+// the Rust build before any C caller can read garbage at runtime.
+//
+// Layout under #[repr(C)] with natural alignment: u32 @ 0, u16 @ 4,
+// u16 @ 6, u8 @ 8, then 3 bytes of trailing alignment-to-4 padding
+// — 12 bytes total, alignment 4. Same on 32-bit and 64-bit targets.
+const _: () = {
+    assert!(std::mem::offset_of!(TrackerRecordFixedOut, addr_be) == 0);
+    assert!(std::mem::offset_of!(TrackerRecordFixedOut, port) == 4);
+    assert!(std::mem::offset_of!(TrackerRecordFixedOut, nusers) == 6);
+    assert!(std::mem::offset_of!(TrackerRecordFixedOut, name_len) == 8);
+    assert!(std::mem::size_of::<TrackerRecordFixedOut>() == 12);
+    assert!(std::mem::align_of::<TrackerRecordFixedOut>() == 4);
+};
+
+/// Parse the 11-byte fixed prefix of a HTRK server record. Returns
+/// false on NULL `out` or a buffer shorter than 11 bytes;
+/// otherwise true.
+///
+/// # Safety
+/// `buf` either valid for `len` bytes or NULL (treated as an empty
+/// slice regardless of `len`); `out` a valid writable
+/// `TrackerRecordFixedOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_tracker_record_fixed(
+    buf: *const u8,
+    len: usize,
+    out: *mut TrackerRecordFixedOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_record_fixed(s) {
+        Some(r) => {
+            (*out).addr_be = r.addr_be;
+            (*out).port = r.port;
+            (*out).nusers = r.nusers;
+            (*out).name_len = r.name_len;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Normalize a server name or description in place: CR → LF, then
+/// strip_ansi (folds C0 controls to printable ASCII, buffer length
+/// unchanged). No-op on NULL `buf` or zero `len`.
+///
+/// # Safety
+/// `buf` either valid (writable) for `len` bytes or NULL (no-op,
+/// independent of `len`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_normalize_text(
+    buf: *mut u8,
+    len: usize,
+) {
+    if buf.is_null() || len == 0 {
+        return;
+    }
+    let s = slice::from_raw_parts_mut(buf, len);
+    parse::tracker_normalize_text(s);
+}

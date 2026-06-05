@@ -734,6 +734,100 @@ pub fn parse_file_list_entry(data: &[u8], off: usize) -> Option<(FileListEntry<'
     ))
 }
 
+// ---- HTRK (Hotline tracker, v1) reply parsers --------------------------
+//
+// Pure parsers for the Hotline tracker reply wire format. Carved out
+// of src/network.c's async tracker fetch state machine so this can
+// be tested without GIO / GSocketClient. Backs the four functions in
+// src/tracker_parser.c.
+//
+// HTRK reply layout (after the client sends HTRK_MAGIC and gets a
+// matching server reply):
+//
+//   14-byte response header
+//     [0..9]   opaque (msg type + protocol ver + msg-id; unused
+//              by the client)
+//     [10..11] u16 BE — number of server records to follow
+//     [12..13] opaque
+//
+//   Per server record (variable length, head only handled here):
+//     [0..3]   u32 BE — IPv4 address (network byte order; IP=0 in
+//              byte 0 marks a padding/empty slot, NOT a record)
+//     [4..5]   u16 BE — TCP port
+//     [6..7]   u16 BE — number of users currently on this server
+//     [8..9]   reserved (skipped)
+//     [10]     u8     — server name length N
+//   (name + desc come on separate reads in the async state machine.)
+
+/// Parsed fixed portion of one HTRK server record. The variable name
+/// + description bytes come on separate reads — the Rust parser only
+/// covers the 11-byte fixed prefix, same split as the C extractor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackerRecordFixed {
+    /// IPv4 address in network byte order (the storage convention
+    /// `in_addr.s_addr` uses, so the C side can `memcpy` straight
+    /// into it without re-swapping).
+    pub addr_be: u32,
+    /// TCP port in host byte order.
+    pub port: u16,
+    /// User count on this server, host byte order.
+    pub nusers: u16,
+    /// Server name length follows in the next read.
+    pub name_len: u8,
+}
+
+/// Parse the 14-byte HTRK reply header. Returns `Some(nservers)`
+/// when `buf.len() >= 14`; `None` on a short buffer. `nservers` is
+/// host byte order. Bytes outside [10..12] are opaque to the client.
+pub fn parse_tracker_header(buf: &[u8]) -> Option<u16> {
+    if buf.len() < 14 {
+        return None;
+    }
+    Some(u16::from_be_bytes([buf[10], buf[11]]))
+}
+
+/// `true` iff `buf` (length ≥ 1) starts a padding slot — first byte
+/// = 0 means the leading octet of the IPv4 address is 0, which
+/// isn't a legal Hotline server IP. The async state machine skips
+/// these without advancing the record counter. Returns `false` on
+/// empty input (defensive — caller should not have invoked us).
+pub fn tracker_record_is_padding(buf: &[u8]) -> bool {
+    matches!(buf.first(), Some(&0))
+}
+
+/// Parse the 11-byte fixed prefix of a HTRK server record. Returns
+/// `None` on a short buffer. Bytes 8 and 9 are the spec-reserved
+/// field and aren't surfaced; byte 10 is `name_len`.
+pub fn parse_tracker_record_fixed(buf: &[u8]) -> Option<TrackerRecordFixed> {
+    if buf.len() < 11 {
+        return None;
+    }
+    // addr is left in network byte order (the storage convention
+    // `in_addr.s_addr` uses) so callers that hand it to inet_ntoa /
+    // GtkhxSession's tracker-server-create signal don't byte-swap.
+    // `from_ne_bytes` preserves the raw wire layout verbatim,
+    // matching the C `memcpy (&addr_be, &buf[0], 4)` byte-for-byte.
+    let addr_be = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let port = u16::from_be_bytes([buf[4], buf[5]]);
+    let nusers = u16::from_be_bytes([buf[6], buf[7]]);
+    let name_len = buf[10];
+    Some(TrackerRecordFixed {
+        addr_be,
+        port,
+        nusers,
+        name_len,
+    })
+}
+
+/// Normalize a server name or description in place: CR → LF, then
+/// strip_ansi (which folds C0 control bytes ESC etc. into printable
+/// ASCII, NOT removing them — buffer length unchanged). Matches the
+/// hx_tracker_normalize_text contract in C.
+pub fn tracker_normalize_text(buf: &mut [u8]) {
+    cr2lf(buf);
+    strip_ansi(buf);
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -2731,6 +2825,95 @@ mod tests {
         body.extend_from_slice(b"ab"); // 2 bytes of "name"
         assert_eq!(body.len(), 26);
         assert!(parse_file_list_entry(&body, 0).is_none());
+    }
+
+    // ---- HTRK tracker reply ----
+
+    #[test]
+    fn tracker_header_extracts_nservers() {
+        // 14-byte header; nservers occupies bytes 10 and 11 (2-byte
+        // BE field) — 0x012c = 300.
+        let mut h = vec![0u8; 14];
+        h[10] = 0x01;
+        h[11] = 0x2c;
+        assert_eq!(parse_tracker_header(&h), Some(0x012c));
+    }
+
+    #[test]
+    fn tracker_header_short_buffer_rejected() {
+        // 13 bytes < 14 → None.
+        let h = vec![0u8; 13];
+        assert!(parse_tracker_header(&h).is_none());
+        assert!(parse_tracker_header(&[]).is_none());
+    }
+
+    #[test]
+    fn tracker_record_padding_detection() {
+        // First byte 0 → padding.
+        assert!(tracker_record_is_padding(&[0x00, 0xff, 0xff, 0xff]));
+        // First byte non-zero → real record.
+        assert!(!tracker_record_is_padding(&[0x55, 0x36, 0x82, 0xda]));
+        // Empty buffer → false (defensive).
+        assert!(!tracker_record_is_padding(&[]));
+    }
+
+    #[test]
+    fn tracker_record_fixed_basic() {
+        // addr 85.54.130.218, port 5500 (0x157c), nusers 7 (0x0007),
+        // reserved 0x0000, name_len 11.
+        let buf: &[u8] = &[
+            0x55, 0x36, 0x82, 0xda, // addr (BE)
+            0x15, 0x7c,             // port = 5500
+            0x00, 0x07,             // nusers = 7
+            0x00, 0x00,             // reserved
+            0x0b,                   // name_len = 11
+        ];
+        let r = parse_tracker_record_fixed(buf).expect("ok");
+        // addr_be stores the wire bytes verbatim; verify by reading
+        // back as u8 array.
+        let addr_bytes = r.addr_be.to_ne_bytes();
+        assert_eq!(addr_bytes, [0x55, 0x36, 0x82, 0xda]);
+        assert_eq!(r.port, 5500);
+        assert_eq!(r.nusers, 7);
+        assert_eq!(r.name_len, 11);
+    }
+
+    #[test]
+    fn tracker_record_fixed_short_buffer_rejected() {
+        let buf = vec![0u8; 10];
+        assert!(parse_tracker_record_fixed(&buf).is_none());
+        assert!(parse_tracker_record_fixed(&[]).is_none());
+    }
+
+    #[test]
+    fn tracker_record_fixed_ignores_reserved_bytes() {
+        // Whatever is at [8..10] must not affect the parse.
+        let buf: &[u8] = &[
+            1, 2, 3, 4,             // addr
+            0, 80,                  // port
+            0, 0,                   // nusers
+            0xde, 0xad,             // reserved — garbage, ignored
+            5,                      // name_len
+        ];
+        let r = parse_tracker_record_fixed(buf).expect("ok");
+        assert_eq!(r.port, 80);
+        assert_eq!(r.name_len, 5);
+    }
+
+    #[test]
+    fn tracker_normalize_text_cr2lf_and_strip_ansi() {
+        // CR (0x0d) → LF (0x0a); strip_ansi folds 0x1b (ESC) →
+        // 0x5b ('[') — buffer length unchanged.
+        let mut buf = b"a\rb\x1bc".to_vec();
+        tracker_normalize_text(&mut buf);
+        assert_eq!(buf, b"a\nb[c");
+    }
+
+    #[test]
+    fn tracker_normalize_text_empty_safe() {
+        let mut buf: Vec<u8> = Vec::new();
+        tracker_normalize_text(&mut buf);
+        assert!(buf.is_empty());
     }
 
     // ---- news dirlist: folderitem ----

@@ -976,4 +976,50 @@ extern int32_t gtkhx_proto_build_file_put_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
+/* ---- HTRK (Hotline tracker, v1) reply parsers ---- */
+
+/* Parse the 14-byte HTRK reply header. Writes nservers (host byte
+ * order) into *out_nservers. Returns false on NULL out_nservers
+ * or a buffer shorter than 14; otherwise true. */
+extern bool gtkhx_proto_parse_tracker_header (const uint8_t *buf, size_t len,
+                                               uint16_t *out_nservers);
+
+/* True iff buf[0] == 0 — the HTRK padding-slot marker the async
+ * fetch state machine skips without advancing the record counter.
+ * False on empty input. */
+extern bool gtkhx_proto_tracker_record_is_padding (const uint8_t *buf,
+                                                    size_t len);
+
+struct gtkhx_proto_tracker_record_fixed {
+    /* 4 IPv4 address bytes verbatim from the wire. memcpy straight
+     * into struct in_addr's s_addr (same network-byte-order storage
+     * convention). */
+    uint32_t addr_be;
+    uint16_t port;       /* host byte order */
+    uint16_t nusers;     /* host byte order */
+    uint8_t name_len;
+};
+
+/* Pin the C-ABI mirror size so any padding drift across compilers
+ * or targets surfaces at build time rather than memory corruption
+ * on the Rust side. Layout: u32 + 2×u16 + u8 = 9 bytes of data +
+ * 3 bytes of trailing alignment-to-4 padding = 12 bytes. */
+_Static_assert (sizeof (struct gtkhx_proto_tracker_record_fixed) == 12,
+                "gtkhx_proto_tracker_record_fixed size drifted from Rust ABI mirror");
+
+/* Parse the 11-byte fixed prefix of a HTRK server record. Returns
+ * false on NULL out or a buffer shorter than 11; otherwise true.
+ * Bytes 8 and 9 are spec-reserved and not surfaced; byte 10 is
+ * name_len (returned in *out). */
+extern bool gtkhx_proto_parse_tracker_record_fixed (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_tracker_record_fixed *out);
+
+/* Normalize a server name or description in place: CR (0x0D) → LF
+ * (0x0A); strip_ansi folds C0 control bytes (ESC etc. in the
+ * 14..30 band, minus the {15, 22} exception set) to printable
+ * ASCII via (c & 127) | 64 — buffer length unchanged. No-op on
+ * NULL buf or zero len. */
+extern void gtkhx_proto_tracker_normalize_text (uint8_t *buf, size_t len);
+
 #endif /* _HOTLINE_PROTO_H */
