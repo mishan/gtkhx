@@ -628,6 +628,112 @@ pub fn parse_history_entry(data: &[u8]) -> Option<HistoryEntry<'_>> {
     })
 }
 
+// ---- HTLS_DATA_FILE_LIST entry walker ----------------------------------
+//
+// Per-entry packed-binary decoder for the accumulated HTLS_DATA_FILE_LIST
+// listing (file-browser response). Backs `hl_filelist_walk` in
+// `src/filelist_walker.c`.
+//
+// One chunk's wire shape (all multi-byte fields big-endian):
+//
+//   u16 type        (0x00c8 = HTLS_DATA_FILE_LIST, ignored here —
+//                    the caller already gated on the chunk tag)
+//   u16 len         (rest-of-chunk byte count after this 4-byte
+//                    data-header)
+//   u32 ftype       (FourCC, e.g. "fldr" / "TEXT" / "JPEG")
+//   u32 fcreator    (FourCC, surfaced for completeness; the C
+//                    walker drops it on the floor)
+//   u32 fsize       (byte size, or item count for folders)
+//   u32 unknown
+//   u32 fnlen       (filename byte length)
+//   u8  fname[fnlen]
+//
+// Total fixed header = 4 (data hdr) + 20 (fields) = 24 bytes before
+// the variable-length name. The C walker had a 23-byte precondition
+// (off-by-one against the 24-byte fixed prefix) but the secondary
+// bounds-check inside the loop caught most malformed cases at run
+// time; here we require the full 24 bytes up front before reading
+// any field, which removes the read-past-end risk on a 23-byte
+// suffix.
+
+/// One parsed `HTLS_DATA_FILE_LIST` entry. `name` borrows into the
+/// caller's input buffer — copy it out before the input goes away.
+#[derive(Debug, Clone)]
+pub struct FileListEntry<'a> {
+    pub ftype: u32,
+    pub fcreator: u32,
+    pub fsize: u32,
+    pub fnlen: u32,
+    pub name: &'a [u8],
+}
+
+/// Parse one packed `HTLS_DATA_FILE_LIST` entry starting at `data[off]`.
+/// Returns `Some((entry, next_off))` on success — `next_off` is the
+/// start offset of the next chunk in the same buffer, suitable for
+/// the next call. Returns `None` when:
+///
+/// - Fewer than 24 bytes remain at `off` (the fixed-header floor).
+/// - The declared `len` runs past the end of `data` (malformed chunk).
+///
+/// The caller iterates by passing `off = 0` initially and repeatedly
+/// invoking with the returned `next_off` until `None`.
+pub fn parse_file_list_entry(data: &[u8], off: usize) -> Option<(FileListEntry<'_>, usize)> {
+    if off > data.len() {
+        return None;
+    }
+    let rest = &data[off..];
+    if rest.len() < 24 {
+        return None;
+    }
+    let chunk_len = u16::from_be_bytes([rest[2], rest[3]]) as usize;
+    // The chunk's declared rest-length must be at least 20 — the
+    // five fixed u32s (ftype + fcreator + fsize + unknown + fnlen)
+    // live at offsets 4..24 of `rest` but are CONCEPTUALLY part of
+    // the chunk body, not the data-header. A server that declared
+    // chunk_len < 20 would have ftype / fsize / fnlen sitting in
+    // the NEXT chunk's bytes (or past the buffer end). The 24-byte
+    // outer check above only guards against the latter; the 20-
+    // byte floor here is what keeps the parsed fields semantically
+    // inside the chunk we claim to be parsing.
+    if chunk_len < 20 {
+        return None;
+    }
+    // Total chunk size = 4-byte data hdr + chunk_len rest. Reject
+    // if it would run past the buffer end.
+    let chunk_total = 4 + chunk_len;
+    if rest.len() < chunk_total {
+        return None;
+    }
+    let ftype = u32::from_be_bytes([rest[4], rest[5], rest[6], rest[7]]);
+    let fcreator = u32::from_be_bytes([rest[8], rest[9], rest[10], rest[11]]);
+    let fsize = u32::from_be_bytes([rest[12], rest[13], rest[14], rest[15]]);
+    // rest[16..20] is the spec-named `unknown` field — surfaced
+    // nowhere in current callers, dropped on the floor here.
+    let fnlen = u32::from_be_bytes([rest[20], rest[21], rest[22], rest[23]]);
+
+    // Name follows at offset 24 within this chunk. Bound the name
+    // read against both the declared chunk total AND the actual
+    // remaining bytes — a server lying about fnlen vs. the chunk's
+    // own `len` field shouldn't walk us off the end.
+    let name_start: usize = 24;
+    let name_end = name_start.checked_add(fnlen as usize)?;
+    if name_end > chunk_total {
+        return None;
+    }
+    let name = &rest[name_start..name_end];
+
+    Some((
+        FileListEntry {
+            ftype,
+            fcreator,
+            fsize,
+            fnlen,
+            name,
+        },
+        off + chunk_total,
+    ))
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -2451,6 +2557,180 @@ mod tests {
         let e = parse_history_entry(&body).expect("ok");
         assert_eq!(e.nick, b"a");
         assert_eq!(e.message, b"b");
+    }
+
+    // ---- file_list entry walker ----
+
+    /// Build one HTLS_DATA_FILE_LIST chunk: u16 type + u16 len +
+    /// u32 ftype/fcreator/fsize/unknown/fnlen + fname bytes. `len`
+    /// is the rest-of-chunk byte count (20 + fnlen).
+    fn file_list_chunk(
+        ftype: u32,
+        fcreator: u32,
+        fsize: u32,
+        unknown: u32,
+        name: &[u8],
+    ) -> Vec<u8> {
+        let fnlen = name.len() as u32;
+        let chunk_len = (20 + fnlen) as u16;
+        let mut v = Vec::new();
+        v.extend_from_slice(&0x00c8u16.to_be_bytes()); // type = HTLS_DATA_FILE_LIST
+        v.extend_from_slice(&chunk_len.to_be_bytes());
+        v.extend_from_slice(&ftype.to_be_bytes());
+        v.extend_from_slice(&fcreator.to_be_bytes());
+        v.extend_from_slice(&fsize.to_be_bytes());
+        v.extend_from_slice(&unknown.to_be_bytes());
+        v.extend_from_slice(&fnlen.to_be_bytes());
+        v.extend_from_slice(name);
+        v
+    }
+
+    #[test]
+    fn file_list_entry_basic() {
+        // FourCC "TEXT" = 0x54455854, "ttxt" = 0x74747874.
+        let body = file_list_chunk(
+            0x5445_5854, // ftype
+            0x7474_7874, // fcreator
+            12345,       // fsize
+            0,           // unknown
+            b"readme.txt",
+        );
+        let (e, next) = parse_file_list_entry(&body, 0).expect("ok");
+        assert_eq!(e.ftype, 0x5445_5854);
+        assert_eq!(e.fcreator, 0x7474_7874);
+        assert_eq!(e.fsize, 12345);
+        assert_eq!(e.fnlen, 10);
+        assert_eq!(e.name, b"readme.txt");
+        // Next offset = 4-byte hdr + chunk_len (20 + 10) = 34.
+        assert_eq!(next, 34);
+        assert_eq!(next, body.len());
+    }
+
+    #[test]
+    fn file_list_iterate_multiple_entries() {
+        // Three back-to-back chunks: a folder, a text file, an
+        // image. Walker iterates them in order.
+        let mut body = Vec::new();
+        body.extend(file_list_chunk(0x666c_6472, 0, 7, 0, b"Public")); // "fldr"
+        body.extend(file_list_chunk(0x5445_5854, 0x7474_7874, 100, 0, b"a.txt"));
+        body.extend(file_list_chunk(0x4a50_4547, 0, 200, 0, b"pic.jpg")); // "JPEG"
+
+        let mut entries = Vec::new();
+        let mut off = 0;
+        while let Some((e, next)) = parse_file_list_entry(&body, off) {
+            entries.push((e.ftype, e.fsize, e.name.to_vec()));
+            off = next;
+        }
+        assert_eq!(off, body.len());
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0], (0x666c_6472, 7, b"Public".to_vec()));
+        assert_eq!(entries[1], (0x5445_5854, 100, b"a.txt".to_vec()));
+        assert_eq!(entries[2], (0x4a50_4547, 200, b"pic.jpg".to_vec()));
+    }
+
+    #[test]
+    fn file_list_zero_length_name_legal() {
+        // Empty filename: chunk_len = 20 (no fname bytes). The
+        // 24-byte fixed prefix is the entire chunk.
+        let body = file_list_chunk(0x666c_6472, 0, 0, 0, b"");
+        assert_eq!(body.len(), 24);
+        let (e, next) = parse_file_list_entry(&body, 0).expect("ok");
+        assert!(e.name.is_empty());
+        assert_eq!(next, 24);
+    }
+
+    #[test]
+    fn file_list_short_buffer_at_end() {
+        // After the last valid entry, fewer than 24 bytes remain.
+        // Walker returns None — silently stops, matching the C
+        // walker's "while p + sizeof - 1 <= end" loop exit.
+        let body = file_list_chunk(0x666c_6472, 0, 1, 0, b"f");
+        let first_end = body.len();
+        let mut padded = body.clone();
+        padded.extend_from_slice(&[0u8; 10]); // 10 bytes of garbage, < 24
+        let (_, next) = parse_file_list_entry(&padded, 0).expect("ok");
+        assert_eq!(next, first_end);
+        assert!(parse_file_list_entry(&padded, next).is_none());
+    }
+
+    #[test]
+    fn file_list_empty_buffer() {
+        let empty: [u8; 0] = [];
+        assert!(parse_file_list_entry(&empty, 0).is_none());
+    }
+
+    #[test]
+    fn file_list_off_past_end() {
+        // off beyond buffer is None, not panic.
+        let body = file_list_chunk(0x666c_6472, 0, 1, 0, b"f");
+        assert!(parse_file_list_entry(&body, body.len() + 100).is_none());
+    }
+
+    #[test]
+    fn file_list_chunk_len_runs_past_buffer() {
+        // Header says chunk_len = 100 but only 24 bytes total —
+        // the declared length runs past the end. Walker returns
+        // None rather than reading garbage.
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x00c8u16.to_be_bytes());
+        body.extend_from_slice(&100u16.to_be_bytes()); // chunk_len LIES
+        body.extend_from_slice(&[0u8; 20]); // payload (20 bytes)
+        assert_eq!(body.len(), 24);
+        assert!(parse_file_list_entry(&body, 0).is_none());
+    }
+
+    #[test]
+    fn file_list_chunk_len_below_fixed_payload_rejected() {
+        // chunk_len < 20 means the declared rest-of-chunk length
+        // is shorter than the 5×u32 fixed payload — ftype / fsize /
+        // fnlen would land in the NEXT chunk's bytes (or past the
+        // buffer end). The 24-byte outer floor and the chunk_total
+        // bound check on their own don't catch this: a buffer that
+        // happens to be ≥ 24 bytes with a small chunk_len would
+        // silently mis-parse and bleed into the next entry. Pin
+        // the chunk_len >= 20 floor explicitly.
+        for declared in 0..20 {
+            // Concat a second chunk so we DO have ≥ 24 bytes in
+            // `data` from this chunk's offset 0 — that's the only
+            // way the bug surfaces in practice (one short chunk
+            // followed by a well-formed neighbour).
+            let mut body = Vec::new();
+            body.extend_from_slice(&0x00c8u16.to_be_bytes());
+            body.extend_from_slice(&(declared as u16).to_be_bytes());
+            // Fill the declared bytes (varies 0..20) plus enough
+            // trailing garbage to keep the buffer ≥ 24 bytes from
+            // offset 0 so the outer rest.len() < 24 check passes.
+            body.extend_from_slice(&[0u8; 60]);
+            assert!(
+                parse_file_list_entry(&body, 0).is_none(),
+                "chunk_len={declared} should be rejected (< 20-byte fixed payload)"
+            );
+        }
+        // chunk_len == 20 (zero-length filename) is the legal floor.
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x00c8u16.to_be_bytes());
+        body.extend_from_slice(&20u16.to_be_bytes());
+        body.extend_from_slice(&[0u8; 20]);
+        assert!(parse_file_list_entry(&body, 0).is_some());
+    }
+
+    #[test]
+    fn file_list_fnlen_runs_past_chunk_len() {
+        // Header says chunk_len = 22 (so 2 fname bytes after the
+        // 20-byte payload), but fnlen says 50. We have the 24-byte
+        // fixed prefix + 2 trailing bytes = 26 total; the lying
+        // fnlen would walk past name_end > chunk_total.
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x00c8u16.to_be_bytes());
+        body.extend_from_slice(&22u16.to_be_bytes()); // chunk_len = 22
+        body.extend_from_slice(&0u32.to_be_bytes()); // ftype
+        body.extend_from_slice(&0u32.to_be_bytes()); // fcreator
+        body.extend_from_slice(&0u32.to_be_bytes()); // fsize
+        body.extend_from_slice(&0u32.to_be_bytes()); // unknown
+        body.extend_from_slice(&50u32.to_be_bytes()); // fnlen LIES
+        body.extend_from_slice(b"ab"); // 2 bytes of "name"
+        assert_eq!(body.len(), 26);
+        assert!(parse_file_list_entry(&body, 0).is_none());
     }
 
     // ---- news dirlist: folderitem ----
