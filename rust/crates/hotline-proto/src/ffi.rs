@@ -1673,6 +1673,86 @@ pub unsafe extern "C" fn gtkhx_proto_parse_news_thread_reply(
     true
 }
 
+/// C-ABI result of [`parse::parse_history_entry`]. Nick / message
+/// are returned as `(offset, length)` pairs into the caller's input
+/// buffer — the C side allocates owned copies by length
+/// (`g_malloc(len + 1)` + `memcpy(len)` + trailing NUL) since the
+/// owning struct in C wants heap-allocated strings AND the wire
+/// payload can contain embedded NULs that `g_strndup` would
+/// truncate at, leaving the allocation shorter than the recorded
+/// `*_len`.
+#[repr(C)]
+pub struct HistoryEntryOut {
+    pub message_id: u64,
+    /// i64 on the wire (Unix epoch UTC). Two's-complement
+    /// preserved — negative values are legal pre-1970 timestamps.
+    pub timestamp: i64,
+    pub flags: u16,
+    pub icon_id: u16,
+    pub nick_off: u16,
+    pub nick_len: u16,
+    pub msg_off: u16,
+    pub msg_len: u16,
+}
+
+/// Parse one `HTLS_DATA_HISTORY_ENTRY` chunk body (chat-history
+/// extension). Returns false on NULL `out` or any of the
+/// `parse::parse_history_entry` reject conditions (sub-24-byte
+/// buffer, nick_len overruns, msg_len overruns); otherwise true.
+/// Surfaces nick / message as offsets into `data` — caller copies
+/// out by length (`g_malloc(len + 1)` + `memcpy(data + off, len)`
+/// + trailing NUL) since the owning struct in C wants heap-
+/// allocated strings AND the wire payload can contain embedded
+/// NULs that `g_strndup` would truncate at.
+///
+/// # Safety
+/// `data` valid for `len` bytes (or NULL when `len == 0`); `out` a
+/// valid writable `HistoryEntryOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_history_entry(
+    data: *const u8,
+    len: usize,
+    out: *mut HistoryEntryOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(data, len);
+    match parse::parse_history_entry(s) {
+        Some(e) => {
+            // Offsets are stable in the C extractor's layout:
+            // nick starts at 22, message at 24 + nick_len. We
+            // recompute from the slice positions to keep this
+            // shim independent of the parser's internal layout.
+            let base = s.as_ptr() as usize;
+            let nick_off = e.nick.as_ptr() as usize - base;
+            let msg_off = e.message.as_ptr() as usize - base;
+            // Fallible u16 narrowing: chat-history chunks fit in
+            // u16 by spec (wire chunk lengths are u16, so the
+            // input buffer this shim receives is ≤ 65535 bytes),
+            // but a future caller that passes a larger frame
+            // would silently wrap an `as u16` cast and produce
+            // out-of-bounds `data + off` reads on the C side.
+            // Reject explicitly rather than write a truncated
+            // offset / length.
+            let Ok(nick_off_u16) = u16::try_from(nick_off) else { return false; };
+            let Ok(nick_len_u16) = u16::try_from(e.nick.len()) else { return false; };
+            let Ok(msg_off_u16) = u16::try_from(msg_off) else { return false; };
+            let Ok(msg_len_u16) = u16::try_from(e.message.len()) else { return false; };
+            (*out).message_id = e.message_id;
+            (*out).timestamp = e.timestamp;
+            (*out).flags = e.flags;
+            (*out).icon_id = e.icon_id;
+            (*out).nick_off = nick_off_u16;
+            (*out).nick_len = nick_len_u16;
+            (*out).msg_off = msg_off_u16;
+            (*out).msg_len = msg_len_u16;
+            true
+        }
+        None => false,
+    }
+}
+
 /// C-ABI result of [`parse::parse_file_getinfo`]. Strings land in
 /// caller-owned `name_buf` / `type_buf` / `creator_buf` /
 /// `comment_buf`, NUL-terminated, capped at the matching `_cap - 1`;

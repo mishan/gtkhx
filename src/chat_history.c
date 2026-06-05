@@ -15,99 +15,58 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h" /* struct hx_chunk */
+#include "hotline_proto.h" /* gtkhx_proto_parse_history_entry */
 #include "network.h"       /* hlwrite_chunks */
 #include "chat_history.h"
 #include "debug.h"
 
 /* ---- Packed-binary entry parser -------------------------------- */
 
-/* Big-endian byte loaders. We deliberately don't include
- * <arpa/inet.h> for ntohs/ntohl — the parser stays self-contained
- * so Tier 2 fixtures can build it without the network headers. */
-
-static inline guint16
-be16 (const guint8 *p)
-{
-    return ((guint16) p[0] << 8) | (guint16) p[1];
-}
-
-static inline guint32
-be32 (const guint8 *p)
-{
-    return ((guint32) p[0] << 24) | ((guint32) p[1] << 16)
-         | ((guint32) p[2] << 8)  | (guint32) p[3];
-}
-
-static inline guint64
-be64 (const guint8 *p)
-{
-    return ((guint64) be32 (p) << 32) | (guint64) be32 (p + 4);
-}
-
 HxHistoryEntry *
 hx_history_entry_parse (const guint8 *data, gsize len)
 {
-    /* Minimum: 8 (msgid) + 8 (ts) + 2 (flags) + 2 (icon) + 2
-     * (nick_len) + 2 (msg_len) = 24 bytes with empty nick + msg. */
-    if (!data || len < 24) {
-        return NULL;
-    }
-
-    guint16 nick_len = be16 (data + 20);
-    /* Header (22) + nick + 2 (msg_len) ≤ len */
-    if ((gsize) 22 + nick_len + 2 > len) {
-        return NULL;
-    }
-    guint16 msg_len = be16 (data + 22 + nick_len);
-    /* Header (24) + nick + msg ≤ len */
-    if ((gsize) 24 + nick_len + msg_len > len) {
+    /* Phase R2: packed-binary decode (24-byte fixed header + nick
+	 * + message + best-effort mini-TLV walk) moved to the Rust
+	 * hotline-proto crate's parse_history_entry. The C side keeps
+	 * the HxHistoryEntry allocation and the by-length nick /
+	 * message copies (g_malloc + memcpy + trailing NUL — see the
+	 * comment on those allocations below for why g_strndup is
+	 * wrong here) — the entry's owner expects g_free-able
+	 * strings, and crossing the FFI allocator boundary would
+	 * complicate the contract for no gain. */
+    struct gtkhx_proto_history_entry parsed;
+    if (!gtkhx_proto_parse_history_entry (data, len, &parsed)) {
         return NULL;
     }
 
     HxHistoryEntry *entry = g_new0 (HxHistoryEntry, 1);
-    entry->message_id = be64 (data + 0);
-    /* timestamp is signed int64 per spec; cast preserves the
-     * two's-complement bit pattern. */
-    entry->timestamp = (gint64) be64 (data + 8);
-    entry->flags     = be16 (data + 16);
-    entry->icon_id   = be16 (data + 18);
+    entry->message_id = parsed.message_id;
+    entry->timestamp = parsed.timestamp;
+    entry->flags = parsed.flags;
+    entry->icon_id = parsed.icon_id;
 
-    entry->nick_len    = nick_len;
-    entry->nick        = g_malloc (nick_len + 1);
-    if (nick_len) {
-        memcpy (entry->nick, data + 22, nick_len);
+    /* Copy by length, not by g_strndup. g_strndup stops at the
+	 * first embedded NUL and allocates only what it copied + 1,
+	 * but we record nick_len / message_len from the wire and
+	 * downstream consumers (e.g. g_strstr_len) use those lengths
+	 * with length-aware APIs. A wire payload that contains an
+	 * interior NUL (the server has no obligation to scrub them)
+	 * would then have the length-aware reader walk past the
+	 * truncated allocation. g_malloc + memcpy + trailing NUL
+	 * keeps allocation length and recorded length in lockstep. */
+    entry->nick_len = parsed.nick_len;
+    entry->nick = g_malloc (parsed.nick_len + 1);
+    if (parsed.nick_len) {
+        memcpy (entry->nick, data + parsed.nick_off, parsed.nick_len);
     }
-    entry->nick[nick_len] = '\0';
+    entry->nick[parsed.nick_len] = '\0';
 
-    entry->message_len = msg_len;
-    entry->message     = g_malloc (msg_len + 1);
-    if (msg_len) {
-        memcpy (entry->message, data + 24 + nick_len, msg_len);
+    entry->message_len = parsed.msg_len;
+    entry->message = g_malloc (parsed.msg_len + 1);
+    if (parsed.msg_len) {
+        memcpy (entry->message, data + parsed.msg_off, parsed.msg_len);
     }
-    entry->message[msg_len] = '\0';
-
-    /* Mini-TLV sub-fields follow after the message body. The spec
-     * defines none in v1, but we must walk past any that appear so
-     * a future server emitting them doesn't trip our caller. Each
-     * sub-field: uint16 type, uint16 length, length bytes data.
-     * Malformed sub-fields (length runs past the buffer) stop
-     * iteration silently — we keep the entry, just don't expose
-     * the sub-fields we couldn't parse. */
-    gsize off = (gsize) 24 + nick_len + msg_len;
-    while (off + 4 <= len) {
-        guint16 sub_type = be16 (data + off);
-        guint16 sub_len  = be16 (data + off + 2);
-        if (off + 4 + sub_len > len) {
-            debug_log ("chat-history",
-                       "entry %" G_GUINT64_FORMAT ": malformed sub-field "
-                       "(type=0x%04x, len=%u, off=%zu, total=%zu) — stopping",
-                       entry->message_id, sub_type, sub_len, off, len);
-            break;
-        }
-        /* No sub-field types defined yet — skip silently. */
-        (void) sub_type;
-        off += (gsize) 4 + sub_len;
-    }
+    entry->message[parsed.msg_len] = '\0';
 
     return entry;
 }

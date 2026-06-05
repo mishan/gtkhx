@@ -327,6 +327,52 @@ extern bool gtkhx_proto_parse_news_thread_reply (
     uint8_t *text_buf, size_t text_cap,
     struct gtkhx_proto_news_thread_reply *out);
 
+/* ---- Chat-history extension (HTLS_DATA_HISTORY_ENTRY) ---- */
+
+struct gtkhx_proto_history_entry {
+    uint64_t message_id;
+    /* i64 on the wire (Unix epoch UTC). Two's-complement preserved;
+     * negative values are legal pre-1970 timestamps. */
+    int64_t timestamp;
+    uint16_t flags;     /* HX_HISTORY_FLAG_* */
+    uint16_t icon_id;
+    /* nick / message land in (offset, length) pairs into the
+     * caller's `data` buffer — the call site allocates owned
+     * copies by length (g_malloc + memcpy + trailing NUL), NOT
+     * via g_strndup: payloads can contain embedded NULs (the
+     * server has no obligation to scrub them) and g_strndup
+     * would stop at the first one, leaving the allocation
+     * shorter than the recorded *_len. The wire bytes are NOT
+     * NUL-terminated; server has already transcoded to the
+     * negotiated encoding. */
+    uint16_t nick_off;
+    uint16_t nick_len;
+    uint16_t msg_off;
+    uint16_t msg_len;
+};
+
+/* Pin the C-ABI mirror size so any padding / alignment drift across
+ * compilers or targets is caught at build time rather than turning
+ * into memory corruption on the Rust side (the #[repr(C)] mirror
+ * HistoryEntryOut in rust/crates/hotline-proto/src/ffi.rs has to
+ * match exactly). Layout: u64 (8) + i64 (8) + 6×u16 (flags +
+ * icon_id + nick_off + nick_len + msg_off + msg_len = 12) =
+ * 28 bytes of data + 4 bytes of trailing alignment-to-8 padding
+ * = 32 bytes. Same discipline as chacha_aead_state in
+ * src/cipher.h. */
+_Static_assert (sizeof (struct gtkhx_proto_history_entry) == 32,
+                "gtkhx_proto_history_entry size drifted from Rust ABI mirror");
+
+/* Parse one HTLS_DATA_HISTORY_ENTRY chunk body (chat-history
+ * extension). Returns false on NULL out or a malformed packed
+ * record (buffer < 24 bytes, declared nick_len or msg_len runs
+ * past the buffer); otherwise true. Mini-TLV sub-fields after the
+ * message body are walked past silently — v1 defines no sub-types
+ * and a malformed sub-field stops the walk but the entry is still
+ * returned. */
+extern bool gtkhx_proto_parse_history_entry (const uint8_t *data, size_t len,
+                                              struct gtkhx_proto_history_entry *out);
+
 struct gtkhx_proto_file_getinfo {
     uint8_t icon[4];
     uint8_t date_create[8];
