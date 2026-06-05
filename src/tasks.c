@@ -898,15 +898,10 @@ create_tasks_window (GtkWidget *widget, gpointer data)
     }
 
     tasks_window = gtk_window_new ();
+    gtk_window_set_transient_for(GTK_WINDOW(tasks_window),  GTK_WINDOW(toolbar_window));
     gtk_window_set_resizable (GTK_WINDOW (tasks_window), TRUE);
     gtk_window_set_title (GTK_WINDOW (tasks_window), _ ("Tasks"));
 
-    /* Phase 5: AdwHeaderBar replaces both the default GtkWindow
-	 * title bar and the in-content "topframe + hbuttonbox" row. The
-	 * four task-control buttons (Stop / Start on the start, Move Up /
-	 * Down on the end) live directly in the headerbar — exactly the
-	 * shape AdwHeaderBar was designed for. The content area drops
-	 * down to just the task scrolledwindow. */
     header = adw_header_bar_new ();
 
     stopbtn
@@ -937,18 +932,16 @@ create_tasks_window (GtkWidget *widget, gpointer data)
 
     init_keyaccel (tasks_window);
 
-    /* Phase 3.x: only apply saved geometry when the prefs file actually
-	 * has one (see users.c for rationale — zero-size collapses the
-	 * window under GTK 3). */
+    /* only apply saved geometry when the prefs file actually
+     * has one (see users.c for rationale — zero-size collapses the
+     * window under GTK 3). */
     if (gtkhx_prefs.geo.tasks.xsize > 0 && gtkhx_prefs.geo.tasks.ysize > 0) {
         gtk_window_set_default_size (GTK_WINDOW (tasks_window),
                                      gtkhx_prefs.geo.tasks.xsize,
                                      gtkhx_prefs.geo.tasks.ysize);
     }
-    if (gtkhx_prefs.geo.tasks.xpos > 0 || gtkhx_prefs.geo.tasks.ypos > 0) {
-        /* Phase 4.2: gtk_window_move removed (Wayland) */
-        gtk_window_present (GTK_WINDOW (tasks_window));
-    }
+
+    gtk_window_present (GTK_WINDOW (tasks_window));
 
     if (connected == 1) {
         changetitlespecific (tasks_window, _ ("Tasks"));
@@ -1079,9 +1072,7 @@ file_update (session *sess, struct htxf_conn *htxf)
     }
 }
 
-/* Phase 5+: task lifecycle on GHashTable.
- *
- * The GHashTable factory + value-destroy notify (task_free) live in
+/* The GHashTable factory + value-destroy notify (task_free) live in
  * tasks_table.c so the unit tests can build the same table the
  * runtime uses without pulling in GTK. task_delete() below is the
  * public removal entry point and additionally notifies the UI side
@@ -1149,26 +1140,26 @@ task_error (struct htlc_conn *htlc)
     }
 
     (void)len;
-    /* Phase 5: server task errors used to pop a modal
-	 * error_dialog. That's too heavy for the common case —
-	 * the server rejecting one of our auto-fired bootstrap
-	 * requests (news fetch on a no-news-permission account,
-	 * user list on a server that rate-limits, etc.) made
-	 * every login on certain servers (hlserver.com is the
-	 * known-bad example) yield a dialog the user has to
-	 * click through before they can do anything else.
-	 *
-	 * Toast instead: AdwToast slides in over the toolbar
-	 * window's overlay, auto-dismisses after a few seconds,
-	 * doesn't steal focus. The user still sees the message;
-	 * they're just not blocked by it. The ERROR sound still
-	 * fires so the alert isn't fully silent.
-	 *
-	 * Phase 5+: errormsg may contain MacRoman bytes (Mac servers
-	 * commonly hand us curly quotes \xd2/\xd3 around filenames).
-	 * toolbar_show_toast sanitises to UTF-8 internally — the
-	 * accessibility announcement layer behind AdwToast aborts on
-	 * non-UTF-8, so the defence has to be at that choke point. */
+    /* server task errors used to pop a modal
+     * error_dialog. That's too heavy for the common case —
+     * the server rejecting one of our auto-fired bootstrap
+     * requests (news fetch on a no-news-permission account,
+     * user list on a server that rate-limits, etc.) made
+     * every login on certain servers (hlserver.com is the
+     * known-bad example) yield a dialog the user has to
+     * click through before they can do anything else.
+     *
+     * Toast instead: AdwToast slides in over the toolbar
+     * window's overlay, auto-dismisses after a few seconds,
+     * doesn't steal focus. The user still sees the message;
+     * they're just not blocked by it. The ERROR sound still
+     * fires so the alert isn't fully silent.
+     *
+     * Phase 5+: errormsg may contain MacRoman bytes (Mac servers
+     * commonly hand us curly quotes \xd2/\xd3 around filenames).
+     * toolbar_show_toast sanitises to UTF-8 internally — the
+     * accessibility announcement layer behind AdwToast aborts on
+     * non-UTF-8, so the defence has to be at that choke point. */
     toolbar_show_toast (errormsg);
     play_sound (ERROR);
 }

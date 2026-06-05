@@ -139,32 +139,21 @@
 /* Timer / startup bookkeeping */
 #define CFG_TIME "TIME"
 
-/* Window geometry — five windows × four corners + an OPEN flag.
+/* Window geometry — four windows × (w, h) + an OPEN flag.
  * Names match the historic gtkhxrc keys; consumers always use these
  * five base names so a global 5x5 sweep still finds every reference. */
-#define CFG_CHAT_XPOS "CHATXPOS"
-#define CFG_CHAT_YPOS "CHATYPOS"
 #define CFG_CHAT_XSIZE "CHATXSIZE"
 #define CFG_CHAT_YSIZE "CHATYSIZE"
 #define CFG_OPEN_CHAT "OPENCHAT"
 
-#define CFG_NEWS_XPOS "NEWSXPOS"
-#define CFG_NEWS_YPOS "NEWSYPOS"
 #define CFG_NEWS_XSIZE "NEWSXSIZE"
 #define CFG_NEWS_YSIZE "NEWSYSIZE"
 #define CFG_OPEN_NEWS "OPENNEWS"
 
-#define CFG_TOOL_XPOS "TOOLXPOS"
-#define CFG_TOOL_YPOS "TOOLYPOS"
-
-#define CFG_TASK_XPOS "TASKXPOS"
-#define CFG_TASK_YPOS "TASKYPOS"
 #define CFG_TASK_XSIZE "TASKXSIZE"
 #define CFG_TASK_YSIZE "TASKYSIZE"
 #define CFG_OPEN_TASKS "OPENTASKS"
 
-#define CFG_USER_XPOS "USERXPOS"
-#define CFG_USER_YPOS "USERYPOS"
 #define CFG_USER_XSIZE "USERXSIZE"
 #define CFG_USER_YSIZE "USERYSIZE"
 #define CFG_OPEN_USERS "OPENUSERS"

@@ -48,17 +48,6 @@
 #include "tracker.h"
 #include "debug.h"
 
-/* Phase 4.13: this file uses GtkTreeView + GtkListStore + GtkTreeStore
- * for the icon viewer and the prefs notebook tree (Phase 2.x work),
- * plus GtkDialog for the prefs dialog itself, GtkFontChooserDialog
- * for the font picker, and GtkComboBox for assorted dropdowns. All
- * those API families are deprecated in GTK 4.10+ in favor of
- * GtkColumnView/GListModel, GtkAlertDialog/GtkWindow, GtkFontDialog,
- * and GtkDropDown respectively. The migrations are tracked as
- * Phase 5 (tree-view), Phase 4.7 (dialogs), and a Phase 5 UX
- * follow-up (combo boxes, font chooser); until then suppress
- * deprecations across the file so the rest of the tree can keep
- * -Werror=deprecated-declarations on. */
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
 time_t start_time;
@@ -756,9 +745,7 @@ struct cfgvar {
       0,
       NULL,
       NULL },
-    { CFG_CHAT_XPOS, { &gtkhx_prefs.geo.chat.xpos }, INT, 0, NULL, NULL },
     { CFG_CHAT_XSIZE, { &gtkhx_prefs.geo.chat.xsize }, INT, 0, NULL, NULL },
-    { CFG_CHAT_YPOS, { &gtkhx_prefs.geo.chat.ypos }, INT, 0, NULL, NULL },
     { CFG_CHAT_YSIZE, { &gtkhx_prefs.geo.chat.ysize }, INT, 0, NULL, NULL },
     { CFG_DOWNLOAD,
       { &gtkhx_prefs.download_path },
@@ -783,17 +770,10 @@ struct cfgvar {
       0,
       changed_nickoricon,
       NULL },
-/* Phase 5: ICONS used to be a comma-separated list of *.rsrc files.
-	 * Auto-discovery in $CONFIG/icons/ + $PREFIX/share/gtkhx/icons/
-	 * replaces it; the cfgvar is gone so a stray ICONS=... line in a
-	 * legacy gtkhxrc is silently dropped by prefs_allocate's bsearch
-	 * miss path, and prefs_write never re-emits one. */
 #if 0 /* XXX */
 	{CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
 #endif
-    { CFG_NEWS_XPOS, { &gtkhx_prefs.geo.news.xpos }, INT, 0, NULL, NULL },
     { CFG_NEWS_XSIZE, { &gtkhx_prefs.geo.news.xsize }, INT, 0, NULL, NULL },
-    { CFG_NEWS_YPOS, { &gtkhx_prefs.geo.news.ypos }, INT, 0, NULL, NULL },
     { CFG_NEWS_YSIZE, { &gtkhx_prefs.geo.news.ysize }, INT, 0, NULL, NULL },
     { CFG_NICK,
       { the_session.htlc.name },
@@ -869,9 +849,7 @@ struct cfgvar {
 	 * replaces it; the cfgvar is gone so legacy gtkhxrc lines are
 	 * silently dropped at parse time. */
     { CFG_SOUNDS_ON, { &hxsnd.on }, BOOLEAN, 0, NULL, NULL },
-    { CFG_TASK_XPOS, { &gtkhx_prefs.geo.tasks.xpos }, INT, 0, NULL, NULL },
     { CFG_TASK_XSIZE, { &gtkhx_prefs.geo.tasks.xsize }, INT, 0, NULL, NULL },
-    { CFG_TASK_YPOS, { &gtkhx_prefs.geo.tasks.ypos }, INT, 0, NULL, NULL },
     { CFG_TASK_YSIZE, { &gtkhx_prefs.geo.tasks.ysize }, INT, 0, NULL, NULL },
     { CFG_THEME, { &gtkhx_prefs.theme }, STRING, 0, changed_theme, NULL },
     { CFG_TIME, { &total_time }, TIME_T, 0, NULL, NULL },
@@ -887,8 +865,6 @@ struct cfgvar {
       0,
       changed_stampformat,
       NULL },
-    { CFG_TOOL_XPOS, { &gtkhx_prefs.geo.tool.xpos }, INT, 0, NULL, NULL },
-    { CFG_TOOL_YPOS, { &gtkhx_prefs.geo.tool.ypos }, INT, 0, NULL, NULL },
     { CFG_TRACKER,
       { &gtkhx_prefs.tracker_str },
       STRING,
@@ -902,9 +878,7 @@ struct cfgvar {
       changed_case,
       NULL },
     { CFG_TRAY, { &gtkhx_prefs.tray }, BOOLEAN, 0, changed_tray, NULL },
-    { CFG_USER_XPOS, { &gtkhx_prefs.geo.users.xpos }, INT, 0, NULL, NULL },
     { CFG_USER_XSIZE, { &gtkhx_prefs.geo.users.xsize }, INT, 0, NULL, NULL },
-    { CFG_USER_YPOS, { &gtkhx_prefs.geo.users.ypos }, INT, 0, NULL, NULL },
     { CFG_USER_YSIZE, { &gtkhx_prefs.geo.users.ysize }, INT, 0, NULL, NULL },
     { CFG_WORDWRAP,
       { &gtkhx_prefs.word_wrap },
@@ -2085,12 +2059,6 @@ gtkhx_prefs_set_bool (const char *name, int value)
     pref_apply (v);
 }
 
-/* Phase 3.9: GtkFontSelectionDialog was deprecated in GTK 3.2 in favor
- * of GtkFontChooserDialog. The two have entirely different APIs —
- * Selection exposes ok_button / cancel_button widgets you wire up by
- * hand, Chooser uses the GtkDialog "response" signal. The handler
- * below is the GtkChooserDialog equivalent of the old set_font
- * + destroy pair. */
 static void
 fontsel_response (GtkDialog *dialog, gint response, gpointer user_data)
 {
@@ -2115,10 +2083,10 @@ create_fontsel (GtkWidget *btn, GtkWidget *entry)
     (void)btn;
 
     /* The Settings AdwDialog is presented modal against the main
-	 * window; without transient_for + modal here, GTK keeps the
-	 * input grab on Settings and the font chooser receives no
-	 * keyboard or mouse events until Settings is dismissed. (Also
-	 * silences "GtkDialog mapped without a transient parent".) */
+     * window; without transient_for + modal here, GTK keeps the
+     * input grab on Settings and the font chooser receives no
+     * keyboard or mouse events until Settings is dismissed. (Also
+     * silences "GtkDialog mapped without a transient parent".) */
     gtk_window_set_modal (GTK_WINDOW (fontsel), TRUE);
 
     if (gtkhx_prefs.font && *gtkhx_prefs.font) {
@@ -2393,8 +2361,8 @@ settings_page_chat (AdwPreferencesPage *page)
     adw_preferences_page_add (page, output_grp);
 
     /* Phase 5: timestamp format. Separate group so the strftime
-	 * hint can live as a group description without making the
-	 * Chat-output group feel cluttered. */
+     * hint can live as a group description without making the
+     * Chat-output group feel cluttered. */
     {
         AdwPreferencesGroup *stamp_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2409,8 +2377,8 @@ settings_page_chat (AdwPreferencesPage *page)
     }
 
     /* Highlight words — comma-separated extras to flag in chat
-	 * (own nick is always implicit so the field stays empty by
-	 * default). Matched lines render bold red. */
+     * (own nick is always implicit so the field stays empty by
+     * default). Matched lines render bold red. */
     {
         AdwPreferencesGroup *hl_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2425,11 +2393,11 @@ settings_page_chat (AdwPreferencesPage *page)
     }
 
     /* Phase 5+: fogWraith chat-history extension (Janus and any
-	 * future server that implements Capabilities-Chat-History.md).
-	 * Single spin row for the initial pull count — also used as
-	 * the per-click Load-older count, with a 50-floor in the
-	 * click handler so the affordance still works when initial
-	 * is set to 0. */
+     * future server that implements Capabilities-Chat-History.md).
+     * Single spin row for the initial pull count — also used as
+     * the per-click Load-older count, with a 50-floor in the
+     * click handler so the affordance still works when initial
+     * is set to 0. */
     {
         AdwPreferencesGroup *hist_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2480,10 +2448,10 @@ settings_page_chat (AdwPreferencesPage *page)
     adw_preferences_page_add (page, behavior_grp);
 
     /* Phase 5: HexChat-style auto-copy controls. Three independent
-	 * toggles drive xtext's drag-end clipboard behaviour. The three
-	 * gtk_xtext_set_autocopy_* setters take care of propagating the
-	 * value to the widget; the changefunc on each cfgvar calls the
-	 * matching setter. */
+     * toggles drive xtext's drag-end clipboard behaviour. The three
+     * gtk_xtext_set_autocopy_* setters take care of propagating the
+     * value to the widget; the changefunc on each cfgvar calls the
+     * matching setter. */
     {
         AdwPreferencesGroup *autocopy_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2525,11 +2493,11 @@ settings_page_identity (AdwPreferencesPage *page)
     GtkWidget *picker_row, *vbox, *scroll, *icon_list, *wide_list;
 
     /* Phase 5: g_malloc0 — zero-fill the struct so any read of
-	 * iv->icon_list / nfound / icon_high before they're set later in
-	 * this function returns 0 / NULL deterministically. The previous
-	 * g_malloc gave us a struct full of whatever was at that address,
-	 * which is exactly the kind of "crashes without gdb, runs fine
-	 * with gdb" Heisenbug glibc's allocator likes to deliver. */
+     * iv->icon_list / nfound / icon_high before they're set later in
+     * this function returns 0 / NULL deterministically. The previous
+     * g_malloc gave us a struct full of whatever was at that address,
+     * which is exactly the kind of "crashes without gdb, runs fine
+     * with gdb" Heisenbug glibc's allocator likes to deliver. */
     iv = g_malloc0 (sizeof (struct icon_viewer));
 
     name_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2568,9 +2536,9 @@ settings_page_identity (AdwPreferencesPage *page)
     gtk_widget_set_size_request (scroll, -1, 380);
 
     /* Two flowboxes share one scrolled window so the picker reads
-	 * as a single unified list: the multi-column grid for narrow
-	 * icons sits on top, the one-per-row strip of wide banner
-	 * icons sits directly under it inside the same scroll area. */
+     * as a single unified list: the multi-column grid for narrow
+     * icons sits on top, the one-per-row strip of wide banner
+     * icons sits directly under it inside the same scroll area. */
     {
         GtkWidget *picker_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
 
@@ -2579,8 +2547,8 @@ settings_page_identity (AdwPreferencesPage *page)
                                          GTK_SELECTION_SINGLE);
         gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
         /* Two columns minimum, four maximum. With 56px icons, four
-		 * columns fits comfortably in the typical settings dialog
-		 * width without horizontal cramming. */
+         * columns fits comfortably in the typical settings dialog
+         * width without horizontal cramming. */
         gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
         gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
         gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (icon_list), 4);
@@ -2594,8 +2562,8 @@ settings_page_identity (AdwPreferencesPage *page)
         gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (wide_list),
                                          GTK_SELECTION_SINGLE);
         /* homogeneous=FALSE so each child keeps the banner's natural
-		 * scaled width; 1/1 children per line forces one banner per
-		 * row regardless of available width. */
+         * scaled width; 1/1 children per line forces one banner per
+         * row regardless of available width. */
         gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (wide_list), FALSE);
         gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (wide_list), 1);
         gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (wide_list), 1);
@@ -2690,8 +2658,8 @@ settings_page_notifications (AdwPreferencesPage *page)
     adw_preferences_page_add (page, behavior);
 
     /* Mirror the Chat page's highlight-word entry so users can
-	 * configure it from either place. Edits in either flow
-	 * the same gtkhx_prefs.highlight_words string. */
+     * configure it from either place. Edits in either flow
+     * the same gtkhx_prefs.highlight_words string. */
     mentions = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (mentions, _ ("Mention Words"));
     adw_preferences_group_set_description (
@@ -2764,11 +2732,6 @@ settings_page_general (AdwPreferencesPage *page)
         pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
     adw_preferences_page_add (page, appearance_grp);
 
-    /* Phase 5: icon and sound paths used to live here too. Auto-
-	 * discovery now finds *.rsrc icon packs in ~/.config/gtkhx/icons/
-	 * and sound files in ~/.config/gtkhx/sounds/ + the system data
-	 * dir, so neither needs a UI row. The ICONS / SOUNDPATH cfgvars
-	 * stay defined so legacy gtkhxrc files still parse cleanly. */
     paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (paths_grp, _ ("Paths"));
     adw_preferences_group_add (
@@ -2776,11 +2739,11 @@ settings_page_general (AdwPreferencesPage *page)
     adw_preferences_page_add (page, paths_grp);
 
     /* System integration. The tray icon needs a StatusNotifierItem
-	 * host in the desktop environment — KDE Plasma, Cinnamon, MATE,
-	 * Budgie and XFCE support it natively; GNOME Shell needs the
-	 * AppIndicator extension. On a desktop without one, this toggle
-	 * is effectively inert (the icon registers but nothing renders
-	 * it). */
+     * host in the desktop environment — KDE Plasma, Cinnamon, MATE,
+     * Budgie and XFCE support it natively; GNOME Shell needs the
+     * AppIndicator extension. On a desktop without one, this toggle
+     * is effectively inert (the icon registers but nothing renders
+     * it). */
     {
         AdwPreferencesGroup *system_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());

@@ -56,10 +56,10 @@ GtkWidget *msgbtn, *kickbtn, *infobtn, *banbtn, *chatbtn, *ignobtn;
 void
 hx_change_name_icon (struct htlc_conn *htlc)
 {
-    /* Phase E2: encode the nick to the negotiated wire encoding.
-	 * is_body = FALSE — nicks don't have line endings; we want the
-	 * Mac-Roman transcoding (or UTF-8 passthrough) without the
-	 * LF→CR substitution. */
+    /* encode the nick to the negotiated wire encoding.
+     * is_body = FALSE — nicks don't have line endings; we want the
+     * Mac-Roman transcoding (or UTF-8 passthrough) without the
+     * LF→CR substitution. */
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     gsize name_len = 0;
     char *name_wire
@@ -67,14 +67,14 @@ hx_change_name_icon (struct htlc_conn *htlc)
                                utf8, /*is_body=*/FALSE, &name_len);
 
     /* Phase R2: chunk layout moved to gtkhx_proto_build_user_change
-	 * _chunks. Colored-Nicknames extension: include DATA_COLOR ONLY
-	 * when the local pref has set a real color — we deliberately
-	 * don't send HX_NICK_COLOR_NONE because the spec's auto-opt-in
-	 * marks the session as color-aware on first DATA_COLOR receipt
-	 * regardless of the value, and a "no color" client shouldn't opt
-	 * in. Servers that don't know the extension ignore the trailing
-	 * chunk; supporting servers mark us color-aware and start
-	 * decorating other users' USER_CHANGE pushes for us. */
+     * _chunks. Colored-Nicknames extension: include DATA_COLOR ONLY
+     * when the local pref has set a real color — we deliberately
+     * don't send HX_NICK_COLOR_NONE because the spec's auto-opt-in
+     * marks the session as color-aware on first DATA_COLOR receipt
+     * regardless of the value, and a "no color" client shouldn't opt
+     * in. Servers that don't know the extension ignore the trailing
+     * chunk; supporting servers mark us color-aware and start
+     * decorating other users' USER_CHANGE pushes for us. */
     bool has_color = htlc->nick_color != HX_NICK_COLOR_NONE;
     struct hx_chunk chunks[3];
     guint8 scratch[6];
@@ -92,10 +92,10 @@ void
 hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 {
     /* Phase R2: chunk layout moved to gtkhx_proto_build_user_kick_chunks.
-	 * Build BEFORE task_new — see hx_send_msg for the rationale
-	 * (task_new snapshots htlc->trans into a pending entry; the
-	 * increment happens inside hlpack_chunks during packing). A
-	 * builder failure must not leave a phantom task behind. */
+     * Build BEFORE task_new — see hx_send_msg for the rationale
+     * (task_new snapshots htlc->trans into a pending entry; the
+     * increment happens inside hlpack_chunks during packing). A
+     * builder failure must not leave a phantom task behind. */
     struct hx_chunk chunks[2];
     guint8 scratch[4];
     int hc = (int)gtkhx_proto_build_user_kick_chunks (
@@ -124,7 +124,7 @@ hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
     }
 }
 
-/* Phase 5+: per-chat user list lives in chat->users, a
+/* per-chat user list lives in chat->users, a
  * GHashTable<u16 uid, struct hx_user*>. hx_user_new mallocs a fresh
  * hx_user, stamps its uid, and inserts it; hx_user_delete drops it
  * from the table (the table's value-destroy notify g_frees the
@@ -135,13 +135,13 @@ hx_user_new (struct chat *chat, guint16 uid)
     struct hx_user *user = g_malloc0 (sizeof (struct hx_user));
     user->uid = uid;
     /* Colored-Nicknames extension. Default to "no color"
-	 * — the renderer falls back to the legacy status palette
-	 * (Admin/Guest/Away from user->color) unless a server-pushed
-	 * DATA_COLOR chunk overrides this. g_malloc0 has already
-	 * zeroed the struct so the explicit assignment is just to
-	 * avoid a "what does zero mean here?" question on the read
-	 * side — HX_NICK_COLOR_NONE = 0xFFFFFFFF is the canonical
-	 * sentinel. */
+     * — the renderer falls back to the legacy status palette
+     * (Admin/Guest/Away from user->color) unless a server-pushed
+     * DATA_COLOR chunk overrides this. g_malloc0 has already
+     * zeroed the struct so the explicit assignment is just to
+     * avoid a "what does zero mean here?" question on the read
+     * side — HX_NICK_COLOR_NONE = 0xFFFFFFFF is the canonical
+     * sentinel. */
     user->nick_color = HX_NICK_COLOR_NONE;
     g_hash_table_insert (chat->users, GUINT_TO_POINTER ((guint)uid), user);
     return user;
@@ -186,12 +186,6 @@ hx_user_with_name (struct chat *chat, const char *name)
     }
     return NULL;
 }
-
-/* Phase 4.7: GtkMenu + gtk_menu_popup_at_pointer are gone in GTK 4.
- * The user-list right-click menu is now built as a GMenu model, hung
- * off a GtkPopoverMenu with its action group's user/sess context
- * captured per-click in a small UserActionCtx that lives for the life
- * of the popover (released on the popover's "closed" signal). */
 
 struct UserActionCtx {
     session *sess;
@@ -320,7 +314,7 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 }
 
-/* Phase 5: the GActionEntry table that drove the old GtkPopoverMenu
+/* Tthe GActionEntry table that drove the old GtkPopoverMenu
  * is gone — the bare-popover rewrite invokes the on_user_* handlers
  * directly via on_user_btn_clicked. The handler signatures still
  * take (GSimpleAction*, GVariant*, gpointer) so a future caller that
@@ -332,8 +326,8 @@ user_popover_closed (GtkPopover *popover, gpointer data)
 {
     (void)data;
     /* Unparent on close so the popover, its ctx, and per-button
-	 * closures all get released. The popover was parented to the
-	 * user list anchor in user_popup. */
+     * closures all get released. The popover was parented to the
+     * user list anchor in user_popup. */
     gtk_widget_unparent (GTK_WIDGET (popover));
 }
 
@@ -380,16 +374,16 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
     gtk_widget_add_css_class (btn, "gtkhx-user-popup-item");
     gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
     /* Phase 5: keyboard focus on the first button auto-paints a
-	 * focus ring when the popover opens; the user reads that as
-	 * 'this item is hovered' and gets confused when cursor motion
-	 * doesn't update it. We don't expect the popup to be navigated
-	 * by keyboard (right-click → click is the path), so just turn
-	 * focus off for these buttons. The CSS provider below adds a
-	 * visible :hover background so cursor tracking is obvious. */
+     * focus ring when the popover opens; the user reads that as
+     * 'this item is hovered' and gets confused when cursor motion
+     * doesn't update it. We don't expect the popup to be navigated
+     * by keyboard (right-click → click is the path), so just turn
+     * focus off for these buttons. The CSS provider below adds a
+     * visible :hover background so cursor tracking is obvious. */
     gtk_widget_set_focusable (btn, FALSE);
     gtk_widget_set_can_focus (btn, FALSE);
     /* Left-align label inside the flat button so the menu reads
-	 * like a menu, not a row of centred captions. */
+     * like a menu, not a row of centred captions. */
     {
         GtkWidget *lbl = gtk_button_get_child (GTK_BUTTON (btn));
         if (GTK_IS_LABEL (lbl)) {
@@ -457,16 +451,6 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
     ctx->sess = sess;
     ctx->user = user;
 
-    /* Phase 5: parent the popover to the toplevel root, NOT the
-	 * user-list anchor. Same fix that gtkurl_show_popup needed:
-	 * GtkPopover's autohide grab needs a 'top-most parent' in the
-	 * widget tree, and the user list (a GtkTreeView wrapped in a
-	 * GtkScrolledWindow) is not it. Anchoring there lets the
-	 * popover render but breaks pointer-motion routing into its
-	 * children — clicks still work because they're button-press
-	 * events, but :hover never triggers, so the buttons looked
-	 * frozen. Translating click coords from anchor-local to
-	 * toplevel-local keeps pointing_to right. */
     parent = GTK_WIDGET (gtk_widget_get_root (anchor));
     if (!parent) {
         parent = anchor;
@@ -482,27 +466,6 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
     rect.width = 1;
     rect.height = 1;
 
-    /* Phase 5: dropped GtkPopoverMenu in favour of a bare GtkPopover
-	 * with a vertical box of flat buttons. GtkPopoverMenu had two
-	 * regressions:
-	 *
-	 *   - It wraps its model items in an internal GtkScrolledWindow
-	 *     with a non-overridable max-content-height; the menu's last
-	 *     item kept getting clipped and the user had to scroll to
-	 *     see it. The CSS workaround that used to disable max-height
-	 *     on the inner scrolledwindow stopped applying after a GTK /
-	 *     libadwaita refresh.
-	 *
-	 *   - Hover routing got stuck on the first item once the popover
-	 *     opened; the cursor's motion events didn't re-target items
-	 *     after the keyboard-focus default landed on "Ignore", so
-	 *     the user couldn't pick anything except by arrow keys.
-	 *
-	 * Building the popover by hand avoids both: a GtkBox with native
-	 * GtkButtons hover correctly, sizes to its natural content
-	 * height, and gives us full control over separators / styling.
-	 * The on_user_* action handlers stay as-is and are invoked from
-	 * a thin per-button click closure (see on_user_btn_clicked). */
     popover = gtk_popover_new ();
     gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
     gtk_popover_set_pointing_to (GTK_POPOVER (popover), &rect);
@@ -534,8 +497,8 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
     gtk_box_append (GTK_BOX (vbox), sep);
 
     /* Kick / Ban — only when the account has DISCONNECT_USERS.
-	 * Same rule as before: hidden, not disabled, since the server
-	 * would reject the wire op anyway. */
+     * Same rule as before: hidden, not disabled, since the server
+     * would reject the wire op anyway. */
     if (hl_access_has ((const guint8 *)&sess->htlc.access,
                        HL_ACCESS_DISCONNECT_USERS)) {
         user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
@@ -563,9 +526,9 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
                               _ ("Private Chat"), on_user_pchat);
 
     /* ctx outlives any one button-click — bound to the popover,
-	 * freed when it's unparented. The on_user_btn_clicked closure
-	 * borrows the pointer; safe since clicks fire synchronously
-	 * while the popover (and so the ctx) is still alive. */
+     * freed when it's unparented. The on_user_btn_clicked closure
+     * borrows the pointer; safe since clicks fire synchronously
+     * while the popover (and so the ctx) is still alive. */
     g_object_set_data_full (G_OBJECT (popover), "user-action-ctx", ctx,
                             user_action_ctx_free);
 
@@ -705,10 +668,10 @@ prompt_chat (session *sess, guint16 _uid)
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
 
     /* GtkListBox in BROWSE selection mode: exactly one row is
-	 * selected at a time (single-select), the user can't unselect
-	 * by re-clicking the same row, and arrow-key navigation moves
-	 * the selection. .boxed-list gives us the Adwaita rounded-card
-	 * look that fits an alert-dialog extra-child. */
+     * selected at a time (single-select), the user can't unselect
+     * by re-clicking the same row, and arrow-key navigation moves
+     * the selection. .boxed-list gives us the Adwaita rounded-card
+     * look that fits an alert-dialog extra-child. */
     listbox = gtk_list_box_new ();
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (listbox),
                                      GTK_SELECTION_BROWSE);
@@ -731,8 +694,8 @@ prompt_chat (session *sess, guint16 _uid)
         }
     }
     /* Pre-select the first row so the default "Invite" response
-	 * always has a target, even if the user hits Enter without
-	 * touching the list. */
+     * always has a target, even if the user hits Enter without
+     * touching the list. */
     {
         GtkListBoxRow *first
             = gtk_list_box_get_row_at_index (GTK_LIST_BOX (listbox), 0);
@@ -747,8 +710,8 @@ prompt_chat (session *sess, guint16 _uid)
     g_signal_connect (dialog, "response", G_CALLBACK (prompt_chat_response),
                       ctx);
     /* Anchor ctx to the dialog GObject's qdata — destroy-notify runs
-	 * at finalize, strictly after both "response" and "closed" have
-	 * already fired. */
+     * at finalize, strictly after both "response" and "closed" have
+     * already fired. */
     g_object_set_data_full (G_OBJECT (dialog), "prompt-chat-ctx", ctx,
                             prompt_chat_ctx_free);
 
@@ -768,9 +731,9 @@ close_users_window (GtkWindow *window, gpointer data)
 
     sess->users_window = 0;
     /* Drop our strong ref to the view object — its GtkColumnView
-	 * widget is being unparented as the window dies, but the view
-	 * GObject itself outlives only as long as someone holds a ref
-	 * to it. We've been that someone since create_users_window. */
+     * widget is being unparented as the window dies, but the view
+     * GObject itself outlives only as long as someone holds a ref
+     * to it. We've been that someone since create_users_window. */
     if (sess->users_view) {
         g_object_unref (sess->users_view);
         sess->users_view = NULL;
@@ -779,10 +742,6 @@ close_users_window (GtkWindow *window, gpointer data)
     gtkhx_prefs.geo.users.init = 0;
     return FALSE;
 }
-
-/* Phase 4.5: the configure-event size tracker is gone — GTK 4 widgets
- * don't fire configure-event. Window size is now captured at hx_quit()
- * time alongside the position; see gtkhx.c gtkhx_save_window_positions. */
 
 void
 user_list (session *sess)
@@ -934,14 +893,13 @@ view_chat_btn (GtkWidget *w, gpointer data)
 }
 
 void
-create_users_window (GtkWidget *widget, gpointer data)
+create_users_window (GtkWidget *toolbar_window, gpointer data)
 {
     GtkWidget *users_window_scroll;
     GtkWidget *cv_widget;
     GtkWidget *users_window;
     HxUserListView *view;
     session *sess = data;
-    (void)widget;
 
     if (gtkhx_prefs.geo.users.open) {
         gtk_window_present (GTK_WINDOW (sess->users_window));
@@ -949,20 +907,21 @@ create_users_window (GtkWidget *widget, gpointer data)
     }
 
     users_window = gtk_window_new ();
+    gtk_window_set_transient_for(GTK_WINDOW(users_window),  GTK_WINDOW(toolbar_window));
     gtk_window_set_title (GTK_WINDOW (users_window), _ ("Users"));
     /* Default-size, not size_request — set_size_request sets both
-	 * min AND natural in GTK 4. */
+     * min AND natural in GTK 4. */
     gtk_window_set_default_size (GTK_WINDOW (users_window), 320, 480);
     gtk_window_set_resizable (GTK_WINDOW (users_window), TRUE);
     g_signal_connect (users_window, "close-request",
                       G_CALLBACK (close_users_window), sess);
 
     /* HxUserListView wraps a GtkColumnView with a custom
-	 * snapshot()-rendered Name cell that gives us the Mac-classic
-	 * icon-as-background + name-on-top look. STYLE_USERS picks the
-	 * standalone window's chrome: 24-px row height, 1.25× pixel
-	 * scale, text outline, 36-px text offset. The view also installs
-	 * its own right-click gesture that pops user_popup. */
+     * snapshot()-rendered Name cell that gives us the Mac-classic
+     * icon-as-background + name-on-top look. STYLE_USERS picks the
+     * standalone window's chrome: 24-px row height, 1.25× pixel
+     * scale, text outline, 36-px text offset. The view also installs
+     * its own right-click gesture that pops user_popup. */
     view = hx_user_list_view_new (sess, HX_USER_LIST_STYLE_USERS);
     cv_widget = hx_user_list_view_get_widget (view);
 
@@ -1034,10 +993,8 @@ create_users_window (GtkWidget *widget, gpointer data)
                                      gtkhx_prefs.geo.users.xsize,
                                      gtkhx_prefs.geo.users.ysize);
     }
-    if (gtkhx_prefs.geo.users.xpos > 0 || gtkhx_prefs.geo.users.ypos > 0) {
-        /* Phase 4.2: gtk_window_move removed (Wayland) */
-        gtk_window_present (GTK_WINDOW (users_window));
-    }
+
+    gtk_window_present (GTK_WINDOW (users_window));
 
     gtkhx_prefs.geo.users.open = 1;
     gtkhx_prefs.geo.users.init = 1;

@@ -60,7 +60,6 @@
 #include "tracker.h"
 #include "tray.h"
 #include "xtext.h"
-#include "gtkthreads.h"
 #include "options.h"
 #include "xfers.h"
 #include "plugin.h"
@@ -78,26 +77,12 @@ GdkRGBA bg_col;
 
 PangoFontDescription *gtkhx_font_desc;
 
-/*
- * Phase 3.5: gtk_widget_modify_font/text/base were deprecated in GTK 3.0
- * and removed in GTK 4. Replace them with a single screen-wide
- * GtkCssProvider whose body is rebuilt whenever the font or colors
- * change; the per-widget step then collapses to "tag the widget with
- * a class name so the provider's selector matches."
- *
- * The provider is attached at GTK_STYLE_PROVIDER_PRIORITY_APPLICATION,
- * which beats the user's theme but sits below !important inline rules.
- * That matches the precedence the old gtk_widget_modify_* family had.
- */
 static GtkCssProvider *gtkhx_css_provider = NULL;
 static GtkCssProvider *gtkhx_userlist_css_provider = NULL;
 
 static void
 ensure_provider_attached (GtkCssProvider *prov)
 {
-    /* Phase 4.4: GdkScreen / add_provider_for_screen are gone in GTK 4.
-	 * Attach to the default GdkDisplay instead — under Wayland there is
-	 * no per-screen partition anyway. */
     GdkDisplay *display = gdk_display_get_default ();
     if (!display) {
         return;
@@ -241,12 +226,6 @@ gtkhx_refresh_css (void)
                            "}",
                            fontprops);
 
-    /* Phase 4.13: gtk_css_provider_load_from_data is deprecated in
-	 * GTK 4.12 in favor of gtk_css_provider_load_from_string (which
-	 * takes a NUL-terminated str rather than (str, len)). Parse errors
-	 * still come via the `parsing-error` signal — for these hardcoded
-	 * strings a parse failure is a developer bug, not a runtime issue
-	 * we need to log. */
     gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
     g_free (css);
@@ -299,15 +278,15 @@ gtkhx_apply_input_font (GtkWidget *w)
         return;
     }
     /* gtk_text_view_set_monospace() sets the built-in .monospace CSS
-	 * class which the theme handles natively (usually picks Source Code
-	 * Pro or similar at the theme's UI size). We can't honor the user's
-	 * size pick from Settings this way — but every other mechanism we
-	 * tried (CSS .gtkhx-text class, PangoContext font_description, font
-	 * via GtkTextTag) triggered an ascender-ink clip on newly typed
-	 * glyphs at small sizes (Monospace 9 / 10), and at this point
-	 * monospace-at-theme-size is a strictly better outcome than the
-	 * clip. ASCII-art preservation (the main reason to want monospace)
-	 * still works. */
+     * class which the theme handles natively (usually picks Source Code
+     * Pro or similar at the theme's UI size). We can't honor the user's
+     * size pick from Settings this way — but every other mechanism we
+     * tried (CSS .gtkhx-text class, PangoContext font_description, font
+     * via GtkTextTag) triggered an ascender-ink clip on newly typed
+     * glyphs at small sizes (Monospace 9 / 10), and at this point
+     * monospace-at-theme-size is a strictly better outcome than the
+     * clip. ASCII-art preservation (the main reason to want monospace)
+     * still works. */
     gtk_text_view_set_monospace (GTK_TEXT_VIEW (w), TRUE);
 }
 
@@ -366,9 +345,7 @@ gtkhx_get_application (void)
     return G_APPLICATION (gtkhx_app);
 }
 
-/* Phase 5 settings management:
- *
- * Resolve the per-user config root, in priority order:
+/* Resolve the per-user config root, in priority order:
  *   1. $GTKHX_PATH if set (escape hatch / portable installs)
  *   2. $XDG_CONFIG_HOME/gtkhx
  *   3. $HOME/.config/gtkhx
@@ -422,44 +399,9 @@ gtkhx_config_dir (void)
     return cached;
 }
 
-/*
- * Phase 3.x: capture each toplevel's final position into prefs before
- * prefs_write.
- *
- * Wayland caveat: the protocol deliberately does not expose absolute
- * toplevel positions to clients, and gtk_window_move is a documented
- * no-op there too. gtk_window_get_position therefore returns (0, 0)
- * on every Wayland session, so saving it would overwrite legitimately-
- * useful X11-era prefs with garbage. Detect Wayland by GdkDisplay
- * type name and skip the position save entirely on that backend —
- * size persistence still works because gtk_window_get_size returns
- * the real current allocation on both backends.
- *
- * On X11 / Quartz the read is honest, so the captured values match
- * what the user actually lived with by quit time.
- */
-static gboolean
-gtkhx_backend_supports_position (void)
-{
-    GdkDisplay *display = gdk_display_get_default ();
-    const char *name;
-
-    if (!display) {
-        return TRUE;
-    }
-    name = G_OBJECT_TYPE_NAME (display);
-    if (name && g_str_has_prefix (name, "GdkWayland")) {
-        return FALSE;
-    }
-    return TRUE;
-}
-
-/* Phase 4.5: also capture size at quit. Previously the configure-event
- * handlers in chat/users/tasks/news did the per-resize size save and
- * this function only did position. GTK 4 has no configure-event on
- * widgets, so we move size into the quit-time pass too. */
+// Capture size at quit
 static void
-save_geo (GtkWidget *w, Window_Geo *geo, gboolean save_pos_too)
+save_geo (GtkWidget *w, Window_Geo *geo)
 {
     int width, height;
     if (!w || !gtk_widget_get_realized (w)) {
@@ -472,22 +414,16 @@ save_geo (GtkWidget *w, Window_Geo *geo, gboolean save_pos_too)
     if (height > 0) {
         geo->ysize = height;
     }
-    (void)save_pos_too; /* position save is no longer possible client-side
-	                       * under Wayland, and gtk_window_get_position is
-	                       * gone entirely in GTK 4 — keep the existing
-	                       * prefs values from a prior X11 session. */
 }
 
 static void
 gtkhx_save_window_positions (void)
 {
-    gboolean want_pos = gtkhx_backend_supports_position ();
-
-    save_geo (toolbar_window, &gtkhx_prefs.geo.tool, want_pos);
-    save_geo (the_session.chat_window, &gtkhx_prefs.geo.chat, want_pos);
-    save_geo (the_session.users_window, &gtkhx_prefs.geo.users, want_pos);
-    save_geo (the_session.tasks_window, &gtkhx_prefs.geo.tasks, want_pos);
-    save_geo (the_session.news_window, &gtkhx_prefs.geo.news, want_pos);
+    save_geo (toolbar_window, &gtkhx_prefs.geo.tool);
+    save_geo (the_session.chat_window, &gtkhx_prefs.geo.chat);
+    save_geo (the_session.users_window, &gtkhx_prefs.geo.users);
+    save_geo (the_session.tasks_window, &gtkhx_prefs.geo.tasks);
+    save_geo (the_session.news_window, &gtkhx_prefs.geo.news);
 }
 
 void
@@ -506,10 +442,6 @@ hx_quit (void)
 	close_logs();
 #endif
 
-    /* Phase 3.6: g_application_quit() ends g_application_run() in loop().
-	 * Phase 4.x: gtk_main_quit() is gone in GTK 4 — there is no main-loop
-	 * fallback. If hx_quit fires before the GtkApplication is constructed
-	 * we just fall through to exit(). */
     if (gtkhx_app) {
         g_application_quit (G_APPLICATION (gtkhx_app));
     }
@@ -645,12 +577,6 @@ hxd_fd_clr (int fd, int rw)
 static void
 init_colors (GtkWidget *widget)
 {
-    /* Phase 3.10: GdkRGBA all the way down. The GTK 1.2-era manual
-	 * .pixel computation is gone for good — paletted colormaps have
-	 * been gone since GTK 3, and cairo + Pango consume the float
-	 * channels directly. Initializer literals via the RGB16 macro
-	 * preserve the historic 16-bit channel values used by the rest
-	 * of the codebase. */
     static const GdkRGBA defaults_user_colors[8] = {
         RGB16 (0x0000, 0x0000, 0x0000), RGB16 (0xffff, 0x0000, 0x0000),
         RGB16 (0x0000, 0xffff, 0x0000), RGB16 (0xffff, 0xffff, 0x0000),
@@ -774,29 +700,29 @@ init_icons (void)
         g_free (ifn->files);
     }
 
-    /* Phase 5: build the list of icon resource files from auto-discovery
-	 * locations. The legacy ICONS pref (a comma-separated list of .rsrc
-	 * paths) was retired with the path-pref cleanup — drop a file into
-	 * $CONFIG/icons/ instead. Sources, in priority order:
-	 *   1. $CONFIG/icons/                            — per-user drop-ins
-	 *   2. $XDG_DATA_HOME/gtkhx/icons/               — Flatpak / app-style
-	 *   3. each $XDG_DATA_DIRS/gtkhx/icons/          — distro-shipped
-	 *      (covers /usr/share, /usr/local/share, snap mounts, etc.)
-	 *   4. $PREFIX/share/gtkhx/icons/                — build-time fixed path
-	 *   5. $PREFIX/share/gtkhx/                      — legacy top-level
-	 *      (autotools-era installs put icons.rsrc directly here),
-	 *      ONLY if 1-4 turned up nothing
-	 *
-	 * collect_rsrc_files de-dupes by absolute path string, so the same
-	 * file showing up in two of these (e.g. PREFIX matches an XDG dir)
-	 * doesn't load twice. The legacy top-level scan is special-cased:
-	 * if the meson install has put icons.rsrc into both
-	 * $PREFIX/share/gtkhx/icons/icons.rsrc (new) AND
-	 * $PREFIX/share/gtkhx/icons.rsrc (legacy autotools-era leftover),
-	 * those are different paths so the path-string de-dupe doesn't
-	 * catch them — they have the same content though, and you'd see
-	 * every icon doubled in the Settings picker. So only fall back to
-	 * the legacy top-level scan if the proper scans found zero files. */
+    /* build the list of icon resource files from auto-discovery
+     * locations. The legacy ICONS pref (a comma-separated list of .rsrc
+     * paths) was retired with the path-pref cleanup — drop a file into
+     * $CONFIG/icons/ instead. Sources, in priority order:
+     *   1. $CONFIG/icons/                            — per-user drop-ins
+     *   2. $XDG_DATA_HOME/gtkhx/icons/               — Flatpak / app-style
+     *   3. each $XDG_DATA_DIRS/gtkhx/icons/          — distro-shipped
+     *      (covers /usr/share, /usr/local/share, snap mounts, etc.)
+     *   4. $PREFIX/share/gtkhx/icons/                — build-time fixed path
+     *   5. $PREFIX/share/gtkhx/                      — legacy top-level
+     *      (autotools-era installs put icons.rsrc directly here),
+     *      ONLY if 1-4 turned up nothing
+     *
+     * collect_rsrc_files de-dupes by absolute path string, so the same
+     * file showing up in two of these (e.g. PREFIX matches an XDG dir)
+     * doesn't load twice. The legacy top-level scan is special-cased:
+     * if the meson install has put icons.rsrc into both
+     * $PREFIX/share/gtkhx/icons/icons.rsrc (new) AND
+     * $PREFIX/share/gtkhx/icons.rsrc (legacy autotools-era leftover),
+     * those are different paths so the path-string de-dupe doesn't
+     * catch them — they have the same content though, and you'd see
+     * every icon doubled in the Settings picker. So only fall back to
+     * the legacy top-level scan if the proper scans found zero files. */
     paths = g_ptr_array_new ();
 
     user_dir = g_build_filename (gtkhx_config_dir (), "icons", NULL);
@@ -841,7 +767,7 @@ init_icons (void)
     }
     ifn->n = paths->len;
     /* free the GPtrArray shell only — element strings transferred
-	 * ownership to ifn->files. */
+     * ownership to ifn->files. */
     g_ptr_array_free (paths, FALSE);
 }
 
@@ -856,33 +782,20 @@ fe_init (void)
 
     memset (&icon_files, 0, sizeof (icon_files));
     prefs_read ();
-    /* Phase 3.5: prep the screen-wide CSS provider once prefs are loaded
-	 * so the very first widget that gets gtkhx_apply_text_style() picks
-	 * up the right look on the first paint. */
+    /* prep the screen-wide CSS provider once prefs are loaded
+     * so the very first widget that gets gtkhx_apply_text_style() picks
+     * up the right look on the first paint. */
     gtkhx_refresh_css ();
     init_icons ();
 
-    /* initialize some pointers with linked list
-	   this will be handled somewhere else in case of
-	   multiconnection support */
-
-    /* Phase 5+: hashtable-backed session collections. chats_init
-	 * additionally seeds the table with the public chat (cid=0),
-	 * which must always exist while the table does. */
+    /* hashtable-backed session collections. chats_init
+     * additionally seeds the table with the public chat (cid=0),
+     * which must always exist while the table does. */
     chats_init (&the_session);
     gchats_init (&the_session);
     tasks_init (&the_session);
     msg_windows_init (&the_session);
 
-    /* Phase 3+: connect the view-side handlers to the
-	 * GtkhxSession signal emitter. As Phase 3 progresses, each
-	 * vtable notification gets a g_signal_connect line here and
-	 * the corresponding output_functions member goes away. The
-	 * signal-handler signature (instance + signal args + user_data,
-	 * with guint16 widened to guint by the marshaller) doesn't
-	 * match the legacy vtable-function signatures exactly, so we
-	 * route each one through a small static adapter declared
-	 * below — `on_*_signal`. */
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
     create_toolbar_window (&the_session);
@@ -890,36 +803,22 @@ fe_init (void)
 
     create_chat (&the_session);
     if (gtkhx_prefs.geo.chat.init == 1) {
-        create_chat_window (0, &the_session);
+        create_chat_window (toolbar_window, &the_session);
     }
     if (gtkhx_prefs.geo.news.init == 1) {
-        create_news_window (&the_session);
+        create_news_window (toolbar_window, &the_session);
     }
     if (gtkhx_prefs.geo.users.init == 1) {
-        create_users_window (0, &the_session);
+        create_users_window (toolbar_window, &the_session);
     }
     create_tasks (&the_session);
     if (gtkhx_prefs.geo.tasks.init == 1) {
-        create_tasks_window (0, &the_session);
+        create_tasks_window (toolbar_window, &the_session);
     }
 
     reinit_gtktexts (&the_session);
 }
 
-/*
- * Phase 3.6: drive the main loop through a GtkApplication instead of
- * a bare gtk_main(). gtk_main() is gone in GTK 4; GtkApplication is the
- * portable replacement and gives us a well-defined "active" lifecycle,
- * a primary window registration, and a place to hang DBus actions
- * later.
- *
- * The existing two-step init/loop split is preserved deliberately:
- * fe_init() (UI construction) and the optional CLI auto-connect that
- * happens between them in hotline_client_init() both run BEFORE we
- * enter the loop, so by the time gtkhx_activate fires the toolbar
- * window already exists. The activate handler just registers it with
- * the app so closing it terminates g_application_run cleanly.
- */
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
  * state off the manager and pushes it into the xtext palette plus
  * every live chat-output widget. Connected once from
@@ -942,16 +841,16 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     (void)user_data;
 
     /* Hook the bundled icon up to the icon theme so windows can
-	 * find it by name, then declare it as the default icon for
-	 * every window we open. The pixmap is aliased into the
-	 * gresource at /com/nasledov/gtkhx/icons/16x16/apps/
-	 * com.nasledov.gtkhx.xpm — i.e., the conventional
-	 * <prefix>/<size>/<context>/<name>.<ext> layout that
-	 * gtk_icon_theme_add_resource_path scans. The icon name itself
-	 * matches our GApplication app-id ("com.nasledov.gtkhx") so a
-	 * future .desktop file with Icon=com.nasledov.gtkhx and a
-	 * matching system-installed icon path will Just Work for
-	 * Wayland compositor / dock integration. */
+     * find it by name, then declare it as the default icon for
+     * every window we open. The pixmap is aliased into the
+     * gresource at /com/nasledov/gtkhx/icons/16x16/apps/
+     * com.nasledov.gtkhx.xpm — i.e., the conventional
+     * <prefix>/<size>/<context>/<name>.<ext> layout that
+     * gtk_icon_theme_add_resource_path scans. The icon name itself
+     * matches our GApplication app-id ("com.nasledov.gtkhx") so a
+     * future .desktop file with Icon=com.nasledov.gtkhx and a
+     * matching system-installed icon path will Just Work for
+     * Wayland compositor / dock integration. */
     {
         GdkDisplay *display = gdk_display_get_default ();
         if (display) {
@@ -963,17 +862,17 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     }
 
     /* fe_init() ran before g_application_run(), which means every
-	 * window the auto-open path created (chat / users / tasks / news,
-	 * plus the toolbar itself) already exists and has had show_all()
-	 * called on it. Any toplevel that isn't registered with the
-	 * GtkApplication doesn't get its xdg_toplevel commit serviced
-	 * during the activate cycle on Wayland — symptom: the chat window
-	 * stays invisible until the user closes and re-opens it (the
-	 * second open happens after the app is fully up and works fine).
-	 *
-	 * Sweep gtk_window_list_toplevels() and add every GtkWindow the
-	 * app doesn't already own. Idempotent — add_window() is a no-op
-	 * if the window is already in the app's list. */
+     * window the auto-open path created (chat / users / tasks / news,
+     * plus the toolbar itself) already exists and has had show_all()
+     * called on it. Any toplevel that isn't registered with the
+     * GtkApplication doesn't get its xdg_toplevel commit serviced
+     * during the activate cycle on Wayland — symptom: the chat window
+     * stays invisible until the user closes and re-opens it (the
+     * second open happens after the app is fully up and works fine).
+     *
+     * Sweep gtk_window_list_toplevels() and add every GtkWindow the
+     * app doesn't already own. Idempotent — add_window() is a no-op
+     * if the window is already in the app's list. */
     toplevels = gtk_window_list_toplevels ();
     for (l = toplevels; l; l = l->next) {
         if (GTK_IS_WINDOW (l->data)) {
@@ -982,45 +881,45 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     }
     g_list_free (toplevels);
 
-    /* Phase 5: register the toolbar's hamburger-menu actions
-	 * (app.settings / app.about / app.quit). The actions can't be
-	 * added during create_toolbar_window because that runs in
-	 * fe_init() — before g_application_run, so before the
-	 * AdwApplication exists. Now that we're in the activate handler
-	 * the application is alive, so wire them in. */
+    /* register the toolbar's hamburger-menu actions
+     * (app.settings / app.about / app.quit). The actions can't be
+     * added during create_toolbar_window because that runs in
+     * fe_init() — before g_application_run, so before the
+     * AdwApplication exists. Now that we're in the activate handler
+     * the application is alive, so wire them in. */
     toolbar_register_actions (G_APPLICATION (app), &the_session);
 
-    /* Phase 5: bind Ctrl+Q (and Ctrl+K) to GApplication actions so the
-	 * accelerators work from every window without per-window
-	 * GtkShortcutController plumbing. Previously these were installed
-	 * only on windows that called init_keyaccel(), so e.g. typing
-	 * Ctrl+Q with the chat window focused did nothing. Application-
-	 * level accels work in any window the GtkApplication owns —
-	 * gtk_application_add_window above brings the existing toplevels
-	 * into that set. */
+    /* bind Ctrl+Q (and Ctrl+K) to GApplication actions so the
+     * accelerators work from every window without per-window
+     * GtkShortcutController plumbing. Previously these were installed
+     * only on windows that called init_keyaccel(), so e.g. typing
+     * Ctrl+Q with the chat window focused did nothing. Application-
+     * level accels work in any window the GtkApplication owns —
+     * gtk_application_add_window above brings the existing toplevels
+     * into that set. */
     {
         const char *quit_accels[] = { "<Control>q", NULL };
         gtk_application_set_accels_for_action (app, "app.quit", quit_accels);
     }
 
-    /* Phase 5+: StatusNotifierItem tray icon. Reads the TRAY pref at
-	 * register-time; the changed_tray cfgvar callback flips it on/off
-	 * as the user toggles the Setting. */
+    /* StatusNotifierItem tray icon. Reads the TRAY pref at
+     * register-time; the changed_tray cfgvar callback flips it on/off
+     * as the user toggles the Setting. */
     gtkhx_tray_init (app);
 
-    /* Phase 5+: desktop notifications. Each event-class entry
-	 * point consults its NOTIFY_* pref + the
-	 * notify_omit_focused gate before posting. */
+    /* desktop notifications. Each event-class entry
+     * point consults its NOTIFY_* pref + the
+     * notify_omit_focused gate before posting. */
     gtkhx_notify_init (app);
 
     /* Seed and track the xtext chat-output palette against the
-	 * AdwStyleManager's dark state. The static colors[] array in
-	 * chat.c starts with dark-mode XTEXT_FG/XTEXT_BG values, which
-	 * we'll either keep (manager says dark) or rewrite to the
-	 * light-mode set (manager says light) before any window opens.
-	 * Subsequent `notify::dark` fires (e.g. user flips THEME in
-	 * Settings, or follows-system and system goes dark) re-run
-	 * gtkhx_apply_theme_palette to refresh every open xtext. */
+     * AdwStyleManager's dark state. The static colors[] array in
+     * chat.c starts with dark-mode XTEXT_FG/XTEXT_BG values, which
+     * we'll either keep (manager says dark) or rewrite to the
+     * light-mode set (manager says light) before any window opens.
+     * Subsequent `notify::dark` fires (e.g. user flips THEME in
+     * Settings, or follows-system and system goes dark) re-run
+     * gtkhx_apply_theme_palette to refresh every open xtext. */
     {
         AdwStyleManager *sm = adw_style_manager_get_default ();
         gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
@@ -1032,18 +931,18 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
 static void
 loop (void)
 {
-    /* Phase 5: AdwApplication wraps GtkApplication and additionally
-	 * calls adw_init() so libadwaita's stylesheet, types, and the
-	 * AdwStyleManager singleton are available app-wide. The activate
-	 * signal still fires the same way; existing window-registration
-	 * logic in gtkhx_activate stays unchanged. */
+    /* AdwApplication wraps GtkApplication and additionally
+     * calls adw_init() so libadwaita's stylesheet, types, and the
+     * AdwStyleManager singleton are available app-wide. The activate
+     * signal still fires the same way; existing window-registration
+     * logic in gtkhx_activate stays unchanged. */
     gtkhx_app
         = adw_application_new ("com.nasledov.gtkhx", G_APPLICATION_NON_UNIQUE);
     g_signal_connect (gtkhx_app, "activate", G_CALLBACK (gtkhx_activate), NULL);
 
     /* g_application_run() takes argc/argv only to forward them to a
-	 * "command-line" handler we don't install — pass 0/NULL so it
-	 * doesn't try to re-parse our flags. */
+     * "command-line" handler we don't install — pass 0/NULL so it
+     * doesn't try to re-parse our flags. */
     g_application_run (G_APPLICATION (gtkhx_app), 0, NULL);
 
     g_object_unref (gtkhx_app);
@@ -1055,12 +954,12 @@ init (int argc, char **argv)
 {
     int i;
 
-    /* Phase 5: parse the GTKHX_DEBUG env var into the categorised
-	 * debug logger before anything else, so init paths can already
-	 * call debug_log("startup", ...) etc. The proto_trace module
-	 * checks debug_category_enabled("proto") on every send/recv
-	 * hook — a lookup against a (possibly empty) hash table, cheap
-	 * enough to leave unconditionally. */
+    /* parse the GTKHX_DEBUG env var into the categorised
+     * debug logger before anything else, so init paths can already
+     * call debug_log("startup", ...) etc. The proto_trace module
+     * checks debug_category_enabled("proto") on every send/recv
+     * hook — a lookup against a (possibly empty) hash table, cheap
+     * enough to leave unconditionally. */
     debug_init ();
 
     for (i = 0; i < 1024; i++) {
@@ -1071,26 +970,19 @@ init (int argc, char **argv)
 	 * setlocale() itself. */
     setlocale (LC_ALL, "");
     /* Tell gettext where our message catalogues live and which domain
-	 * the _() macro should look up. Without these calls dgettext()
-	 * either consults the wrong domain ("messages") or searches the
-	 * compiled-in default LOCALEDIR (typically /usr/share/locale on
-	 * glibc), so a binary installed under /usr/local/share/locale sees
-	 * zero translations. PACKAGE and PACKAGE_LOCALE_DIR are both
-	 * defined in config.h via meson; the codeset bind tells libintl to
-	 * hand us UTF-8 regardless of the user's LC_CTYPE so GTK doesn't
-	 * trip over Latin-1 in fr_FR / es_ES locale aliases. */
+     * the _() macro should look up. Without these calls dgettext()
+     * either consults the wrong domain ("messages") or searches the
+     * compiled-in default LOCALEDIR (typically /usr/share/locale on
+     * glibc), so a binary installed under /usr/local/share/locale sees
+     * zero translations. PACKAGE and PACKAGE_LOCALE_DIR are both
+     * defined in config.h via meson; the codeset bind tells libintl to
+     * hand us UTF-8 regardless of the user's LC_CTYPE so GTK doesn't
+     * trip over Latin-1 in fr_FR / es_ES locale aliases. */
 #ifdef HAVE_LIBINTL_H
     bindtextdomain (PACKAGE, PACKAGE_LOCALE_DIR);
     bind_textdomain_codeset (PACKAGE, "UTF-8");
     textdomain (PACKAGE);
 #endif
-    /* Phase 3.3: gdk_threads_init() is gone in GTK 4 and deprecated since
-	 * GTK 3.6. The worker threads still need a serializing lock against
-	 * the main thread; gtkthreads.c now provides one via GRecMutex +
-	 * a custom GMainContext poll function (see gtkthreads.c).
-	 * Phase 4.x: gtk_init() in GTK 4 takes no arguments — argc/argv
-	 * parsing is the application's job (we don't use any GTK-owned flags
-	 * anyway). */
     gtk_init ();
     fe_init ();
 }
