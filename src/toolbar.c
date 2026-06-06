@@ -719,7 +719,7 @@ create_toolbar_window (session *sess)
 	 * Removed in 2026-05 — the News window already exposes a
 	 * "Post News" button in its headerbar, so the toolbar entry
 	 * was redundant clutter. */
-    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newscat.png",
+    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newsfld.png",
                                      _ ("News (1.5+)"),
                                      G_CALLBACK (open_news_browser), sess);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
