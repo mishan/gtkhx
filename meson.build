@@ -72,7 +72,6 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
-zlib_dep    = dependency('zlib')
 nettle_dep  = dependency('nettle',    version : '>= 3.0')
 threads_dep = dependency('threads')
 
@@ -135,21 +134,6 @@ sourceview_dep = dependency('gtksourceview-5',  required : false)
 # are libmagickwand-dev / ImageMagick-devel respectively.
 imagemagick_dep = dependency('MagickWand', required : false)
 
-# Optional: LZ4 and Zstandard — HOPE-Secure-Login transport
-# compression algorithms (Janus/Klein hx-family server extension).
-# Negotiated alongside GZIP during the HOPE identification phase;
-# servers that don't speak either fall through to GZIP or none. The
-# HAVE_LZ4 / HAVE_ZSTD defines below gate the dispatcher entries
-# inside src/compress.c and the algorithm entries in
-# src/connect.c::valid_compressors[].
-#
-# Both available as Debian/Ubuntu liblz4-dev / libzstd-dev and
-# Fedora lz4-devel / libzstd-devel. Neither ships in the GNOME 49
-# Flatpak runtime / SDK — com.nasledov.gtkhx.yml builds both as
-# inline modules so the Flatpak binary speaks LZ4 and ZSTD too.
-lz4_dep  = dependency('liblz4',  required : false)
-zstd_dep = dependency('libzstd', required : false)
-
 # Optional: only present on systems that don't fold libintl into libc.
 intl_dep    = dependency('intl', required : false)
 # libdl is in libc on glibc >= 2.34; harmless if missing there.
@@ -176,11 +160,7 @@ deps = [
 # Phase R1: zlib, liblz4, and libzstd are no longer linked into the
 # main binary — the HOPE transport compression dispatcher moved to
 # the Rust hxcompress crate (rust/crates/hxcompress) which bundles
-# flate2 + lz4_flex + zstd internally. The lz4_dep / zstd_dep /
-# zlib_dep handles above are still declared (they're useful for the
-# version-info banner below, and a couple of Tier 3 integration test
-# executables still link the legacy C-side decompressor stubs while
-# Phase R1 lands).
+# flate2 + lz4_flex + zstd internally.
 
 # -----------------------------------------------------------------------------
 # Subdirs
@@ -314,6 +294,7 @@ summary(
     'libadwaita'    : adw_dep.version(),
     'GLib'          : glib_dep.version(),
     'GSound'        : gsound_dep.version(),
+    'Nettle'        : nettle_dep.version() ,
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
