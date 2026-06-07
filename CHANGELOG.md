@@ -1,10 +1,12 @@
 ## 1.0.1-dev
 
-- Code Modernization
-  - Parts of GtkHx are being rewritten in Rust
 - User Interface
+  - New multi-panel interface with support for custom layouts and undocking panels into their
+    own windows so that users can still have the nostalgic multi-window experience if they prefer
   - Dropped custom GtkHList in favor of GtkColumnView
   - Results from different trackers are nested in their own result sets
+- Code Modernization
+  - Parts of GtkHx are being rewritten in Rust
 - Bug Fixes
   - Handle Chat subjects with Mac Roman characters
   - Fixed icons in Private Chat user list

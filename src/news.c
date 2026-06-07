@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 #include <sys/time.h>
@@ -30,6 +31,9 @@
 #include <netinet/in.h>
 
 #include "hx.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
+#include "toolbar.h"
 #include "hl_access.h"
 #include "hotline_proto.h"
 #include "network.h"
@@ -469,19 +473,13 @@ reload_news (GtkWidget *widget, gpointer data)
     }
 }
 
-/* Phase 4.5: GTK 4 close-request on (GtkWindow *, gpointer); FALSE
- * allows default destroy. */
-static gboolean
-close_news_window (GtkWindow *window, gpointer data)
-{
-    session *sess = data;
-    (void)window;
-
-    gtkhx_prefs.geo.news.open = 0;
-    gtkhx_prefs.geo.news.init = 0;
-    sess->news_window = 0;
-    return FALSE;
-}
+/* Phase 5 / docking (Phase 2): close_news_window retired. The
+ * standalone News GtkWindow is gone; the News panel persists in
+ * the toolbar window's center PanelGrid. Worker-thread update
+ * paths (output_news_post / output_news_file) used to gate on
+ * gtkhx_prefs.geo.news.open; that bit is now set permanently at
+ * panel creation and stays set, so the gates remain truthy for
+ * the lifetime of the process. */
 
 /* Phase 4.5: configure-event is gone in GTK 4. News window size is
  * captured at hx_quit() time alongside position; see gtkhx.c
@@ -565,8 +563,10 @@ create_post_window (GtkWidget *widget, gpointer data)
     post_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (post_window), _ ("Post News"));
     gtk_window_set_default_size (GTK_WINDOW (post_window), 540, 380);
+    /* Phase 5 / docking (Phase 2): News no longer has its own
+     * window; transient-for the toolbar (the news panel's host). */
     gtk_window_set_transient_for (GTK_WINDOW (post_window),
-                                  GTK_WINDOW (sess->news_window));
+                                  GTK_WINDOW (toolbar_window));
     gtk_window_set_modal (GTK_WINDOW (post_window), TRUE);
     g_signal_connect (post_window, "close-request",
                       G_CALLBACK (close_post_window), 0);
@@ -639,30 +639,34 @@ create_post_window (GtkWidget *widget, gpointer data)
 }
 
 void
-create_news_window (GtkWidget *toolbar_window, session *sess)
+create_news_window (GtkWidget *parent_window, session *sess)
 {
     GtkWidget *news_scroll;
     GtkWidget *content_vbox;
+    GtkWidget *button_bar;
     GtkWidget *news_text;
-    GtkWidget *news_window;
     GtkWidget *postButton, *reloadButton, *findButton;
     GtkWidget *search_bar;
+    HxPanel   *panel;
     struct news_search_ctx *search_ctx;
 
-    if (gtkhx_prefs.geo.news.open) {
-        gtk_window_present (GTK_WINDOW (sess->news_window));
+    (void)parent_window;  /* vestigial — see users.c */
+
+    /* Phase 5 / docking (Phase 2): News panel lives in the
+     * toolbar's center PanelGrid. First call constructs it, later
+     * calls raise it (which also flips the grid's current visible
+     * tab to News if it was on Chat / Files). */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
         return;
     }
 
-    news_window = gtk_window_new ();
-    gtk_window_set_transient_for(GTK_WINDOW(news_window),  GTK_WINDOW(toolbar_window));
-
-    /* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
-
-    /* Phase 5: 2x-scaled headerbar buttons via the shared helper.
-	 * Find is added at unscaled size (1) since it's a stock GTK
-	 * symbolic icon — gtkhx_pixmap_button's XPM-upscale path
-	 * would render it blurry. Use a plain GtkButton instead. */
+    /* Phase 5: 2x-scaled buttons via the shared helper. Find is
+     * added at unscaled size (1) since it's a stock GTK symbolic
+     * icon — gtkhx_pixmap_button's XPM-upscale path would render
+     * it blurry. Use a plain GtkButton instead. */
     postButton
         = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
                                _ ("Post News"), 2, NULL, NULL);
@@ -672,26 +676,9 @@ create_news_window (GtkWidget *toolbar_window, session *sess)
     findButton = gtk_button_new_from_icon_name ("system-search-symbolic");
     gtk_widget_set_tooltip_text (findButton, _ ("Find in News (Ctrl+F)"));
 
-    gtk_window_set_resizable (GTK_WINDOW (news_window), TRUE);
-
-    gtk_window_set_title (GTK_WINDOW (news_window), _ ("News"));
-    gtk_widget_set_size_request (news_window, 412, 384);
-    g_signal_connect (news_window, "close-request",
-                      G_CALLBACK (close_news_window), sess);
     g_signal_connect (postButton, "clicked", G_CALLBACK (create_post_window),
                       sess);
     g_signal_connect (reloadButton, "clicked", G_CALLBACK (reload_news), sess);
-
-    /* Phase 5: AdwHeaderBar replaces both the default GtkWindow title
-	 * bar and the in-content btn_frame + posthbox row. Post on the
-	 * start, Find + Reload on the end. */
-    {
-        GtkWidget *header = adw_header_bar_new ();
-        adw_header_bar_pack_start (ADW_HEADER_BAR (header), postButton);
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), reloadButton);
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), findButton);
-        gtk_window_set_titlebar (GTK_WINDOW (news_window), header);
-    }
 
     news_text = gtk_text_view_new ();
     gtk_text_view_set_editable (GTK_TEXT_VIEW (news_text), FALSE);
@@ -706,35 +693,70 @@ create_news_window (GtkWidget *toolbar_window, session *sess)
     gtk_widget_set_vexpand (news_scroll, TRUE);
     gtkhx_widget_set_child (news_scroll, news_text);
 
-    /* Search ctx and bar. The bar is placed above the news scroll in
-	 * a vertical box; it stays hidden (search-mode-enabled=FALSE)
-	 * until Ctrl+F or the headerbar Find button reveals it. */
+    /* Search ctx — hung off the panel widget (was hung off the
+     * standalone news_window). output_news_post / output_news_file
+     * look it up via the panel from the registry; see those
+     * functions for the swapped lookup path. */
     search_ctx = g_new0 (struct news_search_ctx, 1);
     search_ctx->text_view = GTK_TEXT_VIEW (news_text);
     search_ctx->matches
         = g_array_new (FALSE, FALSE, sizeof (struct news_match));
     search_ctx->current_match = -1;
-    g_object_set_data_full (G_OBJECT (news_window), "search-ctx", search_ctx,
-                            news_search_ctx_free);
 
-    /* Create the search-match / search-current tags up front. The
-	 * news content paths (output_news_post / output_news_file) call
-	 * news_search_run after each new chunk arrives, and the very
-	 * first call's news_search_clear_highlights tries to remove these
-	 * tags by name — without a prior ensure-pass, GtkTextBuffer warns
-	 * "Unknown tag 'search-match'" / "Unknown tag 'search-current'"
-	 * once per news load. Ensuring the tags here once at window-build
-	 * time is cheaper than guarding every remove_tag_by_name caller. */
+    /* Create the search-match / search-current tags up front, same
+     * rationale as before — first news_search_clear_highlights
+     * pass would otherwise warn about unknown tag names. */
     news_search_ensure_tags (gtk_text_view_get_buffer (search_ctx->text_view));
 
     search_bar = news_search_bar_new (search_ctx);
-    /* set_key_capture_widget covers Esc-closes-bar and printable-
-	 * key-opens-bar-with-text. It does NOT cover Ctrl+F — that
-	 * needs an explicit GtkShortcutController. (My first attempt
-	 * relied on the capture widget alone and Ctrl+F silently did
-	 * nothing.) */
+    g_signal_connect (findButton, "clicked", G_CALLBACK (on_find_btn_clicked),
+                      search_ctx);
+
+    /* Phase 5 / docking (Phase 2): Post on start, Reload + Find on
+     * end — same start/end grouping the headerbar had. Slim
+     * top-of-content GtkBox with an hexpand spacer. */
+    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start  (button_bar, 6);
+    gtk_widget_set_margin_end    (button_bar, 6);
+    gtk_widget_set_margin_top    (button_bar, 6);
+    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_box_append (GTK_BOX (button_bar), postButton);
+    {
+        GtkWidget *spacer = gtk_label_new (NULL);
+        gtk_widget_set_hexpand (spacer, TRUE);
+        gtk_box_append (GTK_BOX (button_bar), spacer);
+    }
+    gtk_box_append (GTK_BOX (button_bar), findButton);
+    gtk_box_append (GTK_BOX (button_bar), reloadButton);
+
+    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (content_vbox), button_bar);
+    gtk_box_append (GTK_BOX (content_vbox), search_bar);
+    gtk_box_append (GTK_BOX (content_vbox), news_scroll);
+
+    gtk_widget_set_sensitive (postButton, FALSE);
+    gtk_widget_set_sensitive (reloadButton, FALSE);
+
+    panel = hx_panel_new (HX_PANEL_ID_NEWS,
+                          HX_PANEL_KIND_CENTER,
+                          PANEL_AREA_CENTER);
+    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("News"));
+    panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                "text-x-generic-symbolic");
+    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
+
+    /* Hang the search-ctx off the panel widget (instead of the
+     * now-defunct news_window) so the GtkTextView consumers below
+     * can find it via registry → panel → object-data. */
+    g_object_set_data_full (G_OBJECT (panel), "search-ctx", search_ctx,
+                            news_search_ctx_free);
+
+    /* Ctrl+F shortcut + Esc/printable-key capture. Both used to
+     * attach to news_window; they attach to the panel widget now.
+     * GtkShortcutController on the panel still routes when focus
+     * is anywhere inside the panel's subtree. */
     gtk_search_bar_set_key_capture_widget (GTK_SEARCH_BAR (search_bar),
-                                           news_window);
+                                           GTK_WIDGET (panel));
     {
         GtkEventController *sc = gtk_shortcut_controller_new ();
         gtk_event_controller_set_propagation_phase (sc, GTK_PHASE_CAPTURE);
@@ -743,56 +765,59 @@ create_news_window (GtkWidget *toolbar_window, session *sess)
             gtk_shortcut_new (
                 gtk_keyval_trigger_new (GDK_KEY_f, GDK_CONTROL_MASK),
                 gtk_callback_action_new (on_find_shortcut, search_ctx, NULL)));
-        gtk_widget_add_controller (news_window, sc);
+        gtk_widget_add_controller (GTK_WIDGET (panel), sc);
     }
 
-    g_signal_connect (findButton, "clicked", G_CALLBACK (on_find_btn_clicked),
-                      search_ctx);
-
-    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (content_vbox), search_bar);
-    gtk_box_append (GTK_BOX (content_vbox), news_scroll);
-    gtk_window_set_child (GTK_WINDOW (news_window), content_vbox);
-    gtk_widget_set_sensitive (postButton, FALSE);
-    gtk_widget_set_sensitive (reloadButton, FALSE);
-
-    if (gtkhx_prefs.geo.news.xsize > 0 && gtkhx_prefs.geo.news.ysize > 0) {
-        gtk_window_set_default_size (GTK_WINDOW (news_window),
-                                     gtkhx_prefs.geo.news.xsize,
-                                     gtkhx_prefs.geo.news.ysize);
+    if (toolbar_center_grid != NULL) {
+        panel_grid_add (PANEL_GRID (toolbar_center_grid),
+                        PANEL_WIDGET (panel));
+        /* For Redock home, walk back to whichever frame the grid
+         * just placed us in. */
+        {
+            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
+                                                        PANEL_TYPE_FRAME);
+            hx_panel_set_home_frame (panel, frame);
+        }
+    } else {
+        g_critical ("create_news_window: toolbar dock not built yet");
     }
 
-    gtk_window_present (GTK_WINDOW (news_window));
+    /* Registry takes the owning ref; do NOT g_object_unref after.
+     * See users.c for the ref-count walk-through. */
+    hx_panel_registry_register (panel);
 
-    if (connected == 1) {
-        changetitlespecific (news_window, _ ("News"));
-        gtk_widget_set_sensitive (postButton, TRUE);
-        gtk_widget_set_sensitive (reloadButton, TRUE);
-    }
-
-    init_keyaccel (news_window);
     gtkhx_prefs.geo.news.open = 1;
     gtkhx_prefs.geo.news.init = 1;
 
-    sess->news_window = news_window;
-    sess->news_text = news_text;
-    sess->postButton = postButton;
+    sess->news_text    = news_text;
+    sess->postButton   = postButton;
     sess->reloadButton = reloadButton;
+
+    if (connected == 1) {
+        gtk_widget_set_sensitive (postButton, TRUE);
+        gtk_widget_set_sensitive (reloadButton, TRUE);
+    }
 }
 
 void
 open_news (GtkWidget *widget, gpointer data)
 {
     session *sess = data;
+    HxPanel *panel;
 
-    if (!gtkhx_prefs.geo.news.open) {
-        create_news_window (widget, sess);
-        if (connected) {
-            hx_get_news (&sess->htlc);
-        }
+    /* Phase 5 / docking (Phase 2): News is a permanent resident of
+     * the toolbar's center PanelGrid. The toolbar button just
+     * raises it; the first connect triggers the hx_get_news()
+     * fetch since the panel exists but the buffer is empty. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
     } else {
-        gtk_window_present (GTK_WINDOW (sess->news_window));
-        gtk_widget_grab_focus (sess->news_window);
+        create_news_window (widget, sess);
+    }
+    if (connected) {
+        hx_get_news (&sess->htlc);
     }
 }
 
@@ -830,8 +855,10 @@ output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 	 * picks up its highlights too. No-op if the bar is hidden or the
 	 * entry is empty. */
     {
-        struct news_search_ctx *sctx
-            = g_object_get_data (G_OBJECT (sess->news_window), "search-ctx");
+        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
+        struct news_search_ctx *sctx = panel
+            ? g_object_get_data (G_OBJECT (panel), "search-ctx")
+            : NULL;
         if (sctx) {
             news_search_run (sctx);
         }
@@ -869,7 +896,12 @@ output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
     /* Same Find-still-active reconciliation as output_news_post —
 	 * the bulk-load path appends the whole news file in one go, and
 	 * the user might have a query already typed. */
-    sctx = g_object_get_data (G_OBJECT (sess->news_window), "search-ctx");
+    {
+        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
+        sctx = panel
+            ? g_object_get_data (G_OBJECT (panel), "search-ctx")
+            : NULL;
+    }
     if (sctx) {
         news_search_run (sctx);
     }

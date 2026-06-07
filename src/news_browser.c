@@ -39,9 +39,15 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 
 #include "hx.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
+#include "toolbar.h"
 #include "session.h"
+#include "gtkhx_session.h"
+#include "network.h"
 #include "news15.h"
 #include "news_browser.h"
 #include "gtkutil.h"
@@ -124,7 +130,19 @@ hx_news_node_new (int kind, const char *name, const char *path)
 /* ---------- Browser ---------- */
 
 struct _gnews_browser {
+    /* Phase 5 / docking (Phase 2): window points at the HxPanel
+     * widget that hosts the browser content (was a standalone
+     * GtkWindow). adw_dialog_present and gtk_widget_get_root keep
+     * working via the duck-typed widget walk to the toplevel
+     * (toolbar_window). init_keyaccel is still attached to this
+     * widget but only the Ctrl+Q / Ctrl+K / Ctrl+T accelerators
+     * take effect — the Ctrl+W close path inside init_keyaccel
+     * checks GTK_IS_WINDOW and bails on a PanelWidget. The one
+     * site that actually needed a GtkWindow —
+     * gtk_window_set_transient_for for the compose window —
+     * switched to toolbar_window. */
     GtkWidget *window;
+    GtkWidget *button_bar;
 
     /* Tree side */
     GListStore *root_store;       /* top-level nodes */
@@ -175,6 +193,21 @@ struct _gnews_browser {
     GtkWidget *btn_new_post;
     GtkWidget *btn_reply;
     GtkWidget *btn_delete;
+
+    /* Disconnected-state banner. AdwBanner above the breadcrumb row
+     * that reveals when the connection drops and dismisses on
+     * LOGIN_READY. Hidden by default — built unconnected so the
+     * first present without a server already shows the right
+     * state without flashing. */
+    AdwBanner *disconnected_banner;
+
+    /* GtkhxSession::connection-state-changed handler — manages the
+     * disconnected banner + auto-fetches NEWSDIRLIST on LOGIN_READY
+     * when the panel is open. Disconnected on browser teardown
+     * (currently never — the HxPanel is a permanent toolbar
+     * resident; the handler ID is still tracked for Phase 4 layout-
+     * teardown work). */
+    gulong conn_state_handler;
 };
 
 /* Single open browser. */
@@ -1576,7 +1609,12 @@ open_compose_window (gnews_browser *br, const char *category_path,
     gtk_window_set_title (GTK_WINDOW (window),
                           reply_to ? _ ("Reply") : _ ("New Post"));
     gtk_widget_set_size_request (window, 560, reply_to ? 540 : 380);
-    gtk_window_set_transient_for (GTK_WINDOW (window), GTK_WINDOW (br->window));
+    /* Phase 5 / docking (Phase 2): br->window is a PanelWidget,
+     * not a GtkWindow. Transient-for the toolbar window which now
+     * hosts the panel — same target every other panel uses for
+     * sub-dialog parenting. */
+    gtk_window_set_transient_for (GTK_WINDOW (window),
+                                  GTK_WINDOW (toolbar_window));
     gtk_window_set_modal (GTK_WINDOW (window), TRUE);
     ctx->window = window;
 
@@ -1781,8 +1819,116 @@ sync_action_buttons (gnews_browser *br)
         br->btn_delete, delete_bit >= 0 && hl_access_has (access, delete_bit));
 }
 
+/* ---------- Connection-state handling ---------- */
+
+/* Reset the browser back to a freshly-built state. Used on
+ * DISCONNECTED so the next connection starts from a clean slate
+ * instead of inheriting the previous server's tree, and avoids
+ * showing stale content when the user is no longer logged in. */
+static void
+reset_browser_state (gnews_browser *br)
+{
+    GtkTextBuffer *buf;
+
+    if (!br) {
+        return;
+    }
+
+    /* Drop every node — both the top-level folders and (by
+     * GListStore ownership) every descendant store cached on
+     * those nodes. Pending fetches that come back later for
+     * stubs we kept hashes on are no-ops: the carrier struct
+     * is freed by the matching code and the ref drops. */
+    if (br->root_store) {
+        g_list_store_remove_all (br->root_store);
+    }
+    br->selected_post = NULL;
+
+    /* Reset the right pane to the empty-selection prompt. */
+    if (br->post_view) {
+        buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
+        gtk_text_buffer_set_text (
+            buf, _ ("Select a post in the tree to view it here."), -1);
+    }
+    if (br->header_strip) {
+        gtk_widget_set_visible (br->header_strip, FALSE);
+    }
+
+    /* Breadcrumb back to the root marker. */
+    if (br->breadcrumb) {
+        gtk_label_set_text (br->breadcrumb, "/");
+    }
+
+    /* sync_action_buttons keys off htlc->access. Calling it here
+     * with the disconnected (zero) access bitmap leaves every
+     * button greyed but visible-where-appropriate, matching the
+     * "logged out" rendering. */
+    sync_action_buttons (br);
+}
+
+/* Connection state changed on the GtkhxSession singleton. */
+static void
+on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
+{
+    gnews_browser *br = user_data;
+    (void)sess;
+
+    switch (state) {
+    case GTKHX_CONNECTION_DISCONNECTED:
+        reset_browser_state (br);
+        if (br->disconnected_banner) {
+            adw_banner_set_revealed (br->disconnected_banner, TRUE);
+        }
+        break;
+
+    case GTKHX_CONNECTION_LOGIN_READY:
+        if (br->disconnected_banner) {
+            adw_banner_set_revealed (br->disconnected_banner, FALSE);
+        }
+        /* Fire the initial NEWSDIRLIST so the user sees content
+         * without having to switch to the tab or hit Refresh.
+         * Skipping when the tree is non-empty avoids clobbering
+         * an in-progress fetch race (the LOGIN_READY → fetch
+         * here vs. the panel-presented → fetch below firing back-
+         * to-back when the user logs in with News already
+         * focused). */
+        if (br->root_store
+            && g_list_model_get_n_items (G_LIST_MODEL (br->root_store)) == 0) {
+            fetch_dirlist (br, NULL);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/* PanelWidget::presented — fires every time the panel is brought
+ * to the foreground (tab clicked, panel_widget_raise, undock /
+ * redock). Mirrors the open_news_browser-on-toolbar-click path so
+ * a user who clicks the news tab while connected and empty also
+ * gets an auto-fetch. */
+static void
+on_panel_presented (PanelWidget *panel, gpointer user_data)
+{
+    gnews_browser *br = user_data;
+    (void)panel;
+
+    if (!connected || !br || !br->root_store) {
+        return;
+    }
+    if (g_list_model_get_n_items (G_LIST_MODEL (br->root_store)) == 0) {
+        fetch_dirlist (br, NULL);
+    }
+}
+
 /* ---------- Window lifecycle ---------- */
 
+/* Phase 5 / docking (Phase 2): kept defined for the void-cast at
+ * the bottom of build_browser_window. Was wired to close-request
+ * on the standalone GtkWindow; the HxPanel persists across opens
+ * and uses libpanel's own close-page machinery instead. Phase 4
+ * layout teardown may grow a real destroy path here. */
 static gboolean
 on_window_close (GtkWindow *window, gpointer user_data)
 {
@@ -1811,10 +1957,12 @@ static gnews_browser *
 build_browser_window (void)
 {
     gnews_browser *br = g_new0 (gnews_browser, 1);
-    GtkWidget *header, *paned, *left_scroll, *right_box, *right_scroll;
+    GtkWidget *paned, *left_scroll, *right_box, *right_scroll;
     GtkWidget *header_title;
+    GtkWidget *content_vbox;
     GtkListItemFactory *factory;
     GtkTextBuffer *buf;
+    HxPanel *panel;
 
     /* ---- Icons (cached for the lifetime of the window) ---- */
     br->icon_folder
@@ -1824,23 +1972,23 @@ build_browser_window (void)
     br->icon_post
         = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
 
-    /* ---- Window ---- */
-    br->window = gtk_window_new ();
-    /* Title goes through changetitlespecific so the connected
-	 * server's name lands in parentheses ("Threaded News (Badmoon)"),
-	 * matching the rest of the windows. */
-    changetitlespecific (br->window, _ ("Threaded News"));
-    gtk_widget_set_size_request (br->window, 720, 480);
-
-    /* ---- AdwHeaderBar with breadcrumb as the title widget ----
-	 *
-	 * Phase 5 will pack context-sensitive action buttons here
-	 * (New Folder / New Category / Delete / Reply / Refresh). */
-    header = adw_header_bar_new ();
+    /* Phase 5 / docking (Phase 2): no standalone GtkWindow. The
+     * browser content lives inside an HxPanel resident of the
+     * toolbar's center PanelGrid. br->window points at the panel
+     * widget so the dialog-parent calls (adw_dialog_present) keep
+     * compiling; the one gtk_window_set_transient_for site is
+     * fixed up below to use toolbar_window instead.
+     *
+     * Breadcrumb relocates to its own row in the panel content
+     * since the panel header strip is taken by the tab title. */
     header_title = gtk_label_new ("/");
     gtk_widget_add_css_class (header_title, "heading");
+    gtk_label_set_xalign (GTK_LABEL (header_title), 0.0f);
+    gtk_widget_set_margin_start  (header_title, 12);
+    gtk_widget_set_margin_end    (header_title, 12);
+    gtk_widget_set_margin_top    (header_title, 4);
+    gtk_widget_set_margin_bottom (header_title, 4);
     br->breadcrumb = GTK_LABEL (header_title);
-    adw_header_bar_set_title_widget (ADW_HEADER_BAR (header), header_title);
 
     /* Header action buttons.
 	 *
@@ -1872,20 +2020,36 @@ build_browser_window (void)
         "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), 2,
         G_CALLBACK (on_delete_clicked), br);
 
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_refresh);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_folder);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_category);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), br->btn_new_post);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), br->btn_delete);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), br->btn_reply);
-
-    gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
+    /* Phase 5 / docking (Phase 2): the AdwHeaderBar with Refresh /
+     * NewFolder / NewCategory / NewPost on start and Reply /
+     * Delete on end relocates to a slim top-of-content GtkBox,
+     * matching the other Phase 2 migrations. */
+    {
+        GtkWidget *button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+        gtk_widget_set_margin_start  (button_bar, 6);
+        gtk_widget_set_margin_end    (button_bar, 6);
+        gtk_widget_set_margin_top    (button_bar, 6);
+        gtk_widget_set_margin_bottom (button_bar, 4);
+        gtk_box_append (GTK_BOX (button_bar), br->btn_refresh);
+        gtk_box_append (GTK_BOX (button_bar), br->btn_new_folder);
+        gtk_box_append (GTK_BOX (button_bar), br->btn_new_category);
+        gtk_box_append (GTK_BOX (button_bar), br->btn_new_post);
+        {
+            GtkWidget *spacer = gtk_label_new (NULL);
+            gtk_widget_set_hexpand (spacer, TRUE);
+            gtk_box_append (GTK_BOX (button_bar), spacer);
+        }
+        gtk_box_append (GTK_BOX (button_bar), br->btn_reply);
+        gtk_box_append (GTK_BOX (button_bar), br->btn_delete);
+        br->button_bar = button_bar;
+    }
 
     /* ---- Two-pane body ---- */
     paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_position (GTK_PANED (paned), 280);
     gtk_paned_set_resize_start_child (GTK_PANED (paned), FALSE);
-    gtkhx_widget_set_child (br->window, paned);
+    gtk_widget_set_hexpand (paned, TRUE);
+    gtk_widget_set_vexpand (paned, TRUE);
 
     /* ---- Left: GtkListView over a GtkTreeListModel ---- */
     br->root_store = g_list_store_new (HX_TYPE_NEWS_NODE);
@@ -1975,8 +2139,75 @@ build_browser_window (void)
     gtkhx_box_pack (right_box, right_scroll, TRUE, TRUE, 0);
     gtk_paned_set_end_child (GTK_PANED (paned), right_box);
 
-    g_signal_connect (br->window, "close-request", G_CALLBACK (on_window_close),
-                      br);
+    /* Phase 5 / docking (Phase 2): assemble the panel content
+     * vbox (button bar + breadcrumb + paned) and wrap it in an
+     * HxPanel. on_window_close stays defined (see comment on the
+     * function) but is no longer wired — the panel persists and
+     * uses libpanel's own close-page machinery. */
+    (void)on_window_close;
+
+    /* Disconnected-state AdwBanner — sits above the button bar so
+     * the action buttons stay below it (a banner that hides the
+     * Refresh button would be confusing). Defaults to "not
+     * connected" since the panel eager-constructs before any
+     * connection; on_connection_state flips it off on LOGIN_READY
+     * and back on at DISCONNECTED. */
+    br->disconnected_banner = ADW_BANNER (
+        adw_banner_new (_ ("Not connected to a server.")));
+    adw_banner_set_revealed (br->disconnected_banner, !connected);
+
+    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (content_vbox),
+                    GTK_WIDGET (br->disconnected_banner));
+    gtk_box_append (GTK_BOX (content_vbox), br->button_bar);
+    gtk_box_append (GTK_BOX (content_vbox), header_title);
+    gtk_box_append (GTK_BOX (content_vbox),
+                    gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+    gtk_box_append (GTK_BOX (content_vbox), paned);
+
+    panel = hx_panel_new (HX_PANEL_ID_NEWS15,
+                          HX_PANEL_KIND_CENTER,
+                          PANEL_AREA_CENTER);
+    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("News (1.5+)"));
+    panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                "text-x-generic-symbolic");
+    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
+
+    /* Hook PanelWidget::presented so a tab switch onto News while
+     * connected and empty fires the initial NEWSDIRLIST without
+     * the user needing to hit Refresh — the toolbar-button entry
+     * point already does this, this covers the tab-strip path. */
+    g_signal_connect (panel, "presented",
+                      G_CALLBACK (on_panel_presented), br);
+
+    /* Connection-state changes from any source drive the
+     * disconnected banner + the auto-fetch on LOGIN_READY. */
+    br->conn_state_handler = g_signal_connect (
+        gtkhx_session_get_default (), "connection-state-changed",
+        G_CALLBACK (on_connection_state), br);
+
+    /* br->window points at the panel widget so adw_dialog_present
+     * parents, gtk_widget_get_root walks, init_keyaccel
+     * controllers etc. keep compiling unchanged. The one site
+     * that actually wanted a GtkWindow (compose-window
+     * transient-for) switched to toolbar_window above. */
+    br->window = GTK_WIDGET (panel);
+
+    if (toolbar_center_grid != NULL) {
+        panel_grid_add (PANEL_GRID (toolbar_center_grid),
+                        PANEL_WIDGET (panel));
+        {
+            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
+                                                        PANEL_TYPE_FRAME);
+            hx_panel_set_home_frame (panel, frame);
+        }
+    } else {
+        g_critical ("build_browser_window: toolbar dock not built yet");
+    }
+
+    /* Registry takes the owning ref; do NOT g_object_unref after.
+     * See users.c for the ref-count walk-through. */
+    hx_panel_registry_register (panel);
 
     /* Initial state: no selection → New Folder + New Category
 	 * visible (operating at the root); Reply + Delete hidden. */
@@ -1990,24 +2221,51 @@ build_browser_window (void)
 void
 open_news_browser (GtkWidget *widget, struct _session *sess)
 {
+    HxPanel *panel;
+
     (void)widget;
     (void)sess;
 
-    if (the_browser) {
-        gtk_window_present (GTK_WINDOW (the_browser->window));
+    /* Phase 5 / docking (Phase 2): the browser panel lives in the
+     * toolbar's center PanelGrid. First call (the eager-construct
+     * from create_toolbar_window) builds it before any
+     * connection — so we skip the NEWSDIRLIST until we're actually
+     * connected. Later calls (user clicks the toolbar button) just
+     * raise + optionally re-fetch.
+     *
+     * The fetch-on-open behaviour matches News (1.0)'s open_news:
+     * each explicit open while connected pulls a fresh tree so the
+     * user doesn't have to hit Refresh manually after a quiet
+     * period. The Refresh button on the panel still works for
+     * mid-session reloads. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS15);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
+        if (connected && the_browser != NULL) {
+            g_list_store_remove_all (the_browser->root_store);
+            fetch_dirlist (the_browser, NULL);
+        }
         return;
     }
 
     the_browser = build_browser_window ();
-    /* Wire Ctrl+W (close), Ctrl+Q (quit), Ctrl+K (connect dialog),
-	 * Ctrl+T (tracker) — same accelerators every other window
-	 * picks up via init_keyaccel. The controller attaches in
-	 * capture phase, so the column-view's internal focus chain
-	 * can't swallow them. */
+    /* Wire Ctrl+Q (quit), Ctrl+K (connect dialog), Ctrl+T (tracker)
+	 * via init_keyaccel. Ctrl+W is also in init_keyaccel's bindings,
+	 * but its handler checks GTK_IS_WINDOW and bails on a panel —
+	 * the panel's tab close is the X on the libpanel tab strip.
+	 * Controllers attach in capture phase so the column-view's
+	 * internal focus chain doesn't swallow the accelerators, and
+	 * they live on the panel widget (br->window) so they stay in
+	 * scope while the panel is focused. */
     init_keyaccel (the_browser->window);
-    gtk_window_present (GTK_WINDOW (the_browser->window));
 
     /* Phase 2: kick off the root NEWSDIRLIST so the top level
-	 * populates as soon as the window appears. */
-    fetch_dirlist (the_browser, NULL);
+	 * populates as soon as the panel appears — but only when
+	 * connected. Eager-construct from create_toolbar_window runs
+	 * pre-connection and just leaves the tree empty; the first
+	 * user-driven open after connect fills it in. */
+    if (connected) {
+        fetch_dirlist (the_browser, NULL);
+    }
 }

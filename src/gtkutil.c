@@ -37,6 +37,7 @@
 #include "tasks.h"
 #include "users.h"
 #include "chat.h"
+#include "chat_tabs.h"
 #include "connect.h"
 #include "gtkhx.h"
 #include "files.h"
@@ -447,36 +448,17 @@ set_status_bar (int status)
 void
 changetitlesconnected (session *sess)
 {
-    char *newstitle;
-    char *taskstitle;
-    char *chattitle;
-    char *userstitle;
     char *tooltitle;
 
     tooltitle = g_strdup_printf ("%s (%s)", _ ("GtkHx"), server_addr);
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), tooltitle);
     g_free (tooltitle);
 
-    if (gtkhx_prefs.geo.news.open) {
-        newstitle = g_strdup_printf ("%s (%s)", _ ("News"), server_addr);
-        gtk_window_set_title (GTK_WINDOW (sess->news_window), newstitle);
-        g_free (newstitle);
-    }
-    if (gtkhx_prefs.geo.chat.open) {
-        chattitle = g_strdup_printf ("%s (%s)", _ ("Chat"), server_addr);
-        gtk_window_set_title (GTK_WINDOW (sess->chat_window), chattitle);
-        g_free (chattitle);
-    }
-    if (gtkhx_prefs.geo.users.open) {
-        userstitle = g_strdup_printf ("%s (%s)", _ ("Users"), server_addr);
-        gtk_window_set_title (GTK_WINDOW (sess->users_window), userstitle);
-        g_free (userstitle);
-    }
-    if (gtkhx_prefs.geo.tasks.open) {
-        taskstitle = g_strdup_printf ("%s (%s)", _ ("Tasks"), server_addr);
-        gtk_window_set_title (GTK_WINDOW (sess->tasks_window), taskstitle);
-        g_free (taskstitle);
-    }
+    /* Phase 5 / docking (Phase 2): the per-window title-setting
+     * loop for News / Chat / Users / Tasks is gone — those panels
+     * live inside the toolbar window now, so their "title" is the
+     * tab label set by the panel factory. Per-server attribution
+     * is carried by the toolbar window's title above. */
 }
 
 void
@@ -503,18 +485,14 @@ changetitlespecific (GtkWidget *widget, char *name)
 void
 changetitlesdisconnected (session *sess)
 {
-    if (gtkhx_prefs.geo.news.open) {
-        gtk_window_set_title (GTK_WINDOW (sess->news_window), _ ("News"));
-    }
-    if (gtkhx_prefs.geo.chat.open) {
-        gtk_window_set_title (GTK_WINDOW (sess->chat_window), _ ("Chat"));
-    }
-    if (gtkhx_prefs.geo.users.open) {
-        gtk_window_set_title (GTK_WINDOW (sess->users_window), _ ("Users"));
-    }
-    if (gtkhx_prefs.geo.tasks.open) {
-        gtk_window_set_title (GTK_WINDOW (sess->tasks_window), _ ("Tasks"));
-    }
+    /* Phase 5 / docking (Phase 2): see News note in
+     * changetitlesconnected. */
+    /* Phase 5 / docking (Phase 2): see Chat note in
+     * changetitlesconnected. */
+    /* Phase 5 / docking (Phase 2): Users panel title — see the
+     * matching note in changetitlesconnected. */
+    /* Phase 5 / docking (Phase 2): see Tasks note in
+     * changetitlesconnected. */
 
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), _ ("GtkHx"));
 }
@@ -531,27 +509,40 @@ close_connected_windows (session *sess)
 	 * singleton owned by its open_files_browser entry point and
 	 * cleans itself up via the close-request handler. */
 
-    /* Phase 5+: walk the gchats hashtable, destroying every non-public
-	 * pchat window. The public chat (cid=0) UI persists across
-	 * reconnects, like its model-side counterpart in sess->chats.
-	 * Collect cids first then delete in a second pass so we don't
-	 * mutate the table mid-iteration. */
+    /* Phase 5+: walk the gchats hashtable, closing every non-public
+	 * pchat tab via the chat_tabs API. The public chat (cid=0) UI
+	 * persists across reconnects, like its model-side counterpart
+	 * in sess->chats.
+	 *
+	 * gtkhx_chat_tabs_close_pchat fires AdwTabView::close-page,
+	 * which runs the registered teardown (pchat_close in chat.c).
+	 * That teardown calls gchat_delete, which removes the entry
+	 * from sess->gchats. Iterating sess->gchats while it's being
+	 * mutated would invalidate the iterator, so collect cids in a
+	 * first pass and close in a second.
+	 *
+	 * Phase 3 / docking: this was destroying gchat->window
+	 * directly, but gchat->window now points at the tab content
+	 * widget (hpane). Destroying that unparented the child but
+	 * left the AdwTabPage and the pchat_tabs index entry stale —
+	 * a real leak on every disconnect. Routing through the
+	 * close-page dispatcher keeps the AdwTabView, the registry
+	 * index, and gchat lifecycle consistent. */
     if (sess->gchats) {
         GHashTableIter iter;
         gpointer key, val;
-        GList *to_close = NULL;
+        GArray *cids = g_array_new (FALSE, FALSE, sizeof (guint32));
         g_hash_table_iter_init (&iter, sess->gchats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
-            if (GPOINTER_TO_UINT (key) != 0) {
-                struct gtkhx_chat *gchat = val;
-                gtkhx_widget_destroy (gchat->window);
-                to_close = g_list_prepend (to_close, key);
-            }
+            guint32 cid = GPOINTER_TO_UINT (key);
+            if (cid != 0)
+                g_array_append_val (cids, cid);
         }
-        for (GList *l = to_close; l; l = l->next) {
-            g_hash_table_remove (sess->gchats, l->data);
+        for (guint i = 0; i < cids->len; i++) {
+            guint32 cid = g_array_index (cids, guint32, i);
+            gtkhx_chat_tabs_close_pchat (cid);
         }
-        g_list_free (to_close);
+        g_array_free (cids, TRUE);
     }
 }
 

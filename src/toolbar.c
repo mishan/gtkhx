@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <netinet/in.h>
 #include "hx.h"
 #include "network.h"
@@ -51,10 +52,20 @@
 #include "gtkthreads.h"
 #include "plugin.h"
 #include "toolbar.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
 GtkWidget *broadcast_btn;
+
+/* Phase 5 / docking (Phase 1): handles to the dock that per-window
+ * panel factories use to insert their HxPanels. See toolbar.h. */
+GtkWidget *toolbar_dock          = NULL;
+GtkWidget *toolbar_sidebar_frame = NULL;
+GtkWidget *toolbar_end_frame     = NULL;
+GtkWidget *toolbar_bottom_frame  = NULL;
+GtkWidget *toolbar_center_grid   = NULL;
 
 #ifdef USE_PLUGIN
 GtkWidget *plugin_btn;
@@ -274,19 +285,57 @@ on_action_connect_builtin (GSimpleAction *action, GVariant *param,
  * quitting — the conventional "minimize-to-tray" pattern. We require
  * an actual host (not just the pref) so users with the toggle on
  * but no AppIndicator extension installed don't end up unable to
- * exit the app. Without an SNI host, fall through to hx_quit() as
- * before. */
+ * exit the app. Without an SNI host, fall through to a quit-
+ * confirmation dialog. */
+static void
+quit_confirm_response (AdwAlertDialog *dialog, const char *response,
+                       gpointer data)
+{
+    (void)dialog;
+    (void)data;
+    if (g_strcmp0 (response, "quit") == 0) {
+        hx_quit ();
+    }
+    /* "cancel" / Esc / window-close: do nothing — toolbar window
+     * stays open. The close-request that brought us here already
+     * returned TRUE to inhibit destroy. */
+}
+
 static gboolean
 close_toolbar_window (GtkWindow *window, gpointer data)
 {
-    (void)window;
+    AdwDialog *dialog;
     (void)data;
+
     if (gtkhx_tray_is_enabled () && gtkhx_tray_host_available ()) {
         gtkhx_tray_hide_all_windows ();
         return TRUE; /* inhibit destroy */
     }
-    hx_quit ();
-    return FALSE;
+
+    /* No tray host — confirm before quitting so the user doesn't
+     * lose an active connection (or just an open chat) by accident.
+     * AdwAlertDialog so the dialog adapts to the OS theme; the
+     * "quit" response gets DESTRUCTIVE appearance to mark it as
+     * the irreversible action. */
+    dialog = adw_alert_dialog_new (
+        _ ("Quit GtkHx?"),
+        _ ("Closing this window will disconnect from the current "
+           "server and exit GtkHx."));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "quit",
+                                   _ ("_Quit"));
+    adw_alert_dialog_set_response_appearance (
+        ADW_ALERT_DIALOG (dialog), "quit", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+                                           "cancel");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog),
+                                         "cancel");
+    g_signal_connect (dialog, "response",
+                      G_CALLBACK (quit_confirm_response), NULL);
+    adw_dialog_present (dialog, GTK_WIDGET (window));
+
+    return TRUE; /* inhibit destroy until the user confirms */
 }
 
 void
@@ -396,18 +445,11 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
     g_idle_add (defer_quit, NULL);
 }
 
-/* Toolbar GtkButton::clicked adapter — the signal hands us
- * (button, user_data) but open_files_browser() takes no args.
- * Reached from the toolbar Files button; the legacy hamburger
- * menu entry that fired this through an app.files_browser GAction
- * was retired with the legacy single-pane UI in Phase 5. */
-static void
-on_files_button_clicked (GtkButton *button, gpointer user_data)
-{
-    (void)button;
-    (void)user_data;
-    open_files_browser ();
-}
+/* Phase 5 / docking (Phase 2 follow-up): on_files_button_clicked
+ * retired. The Files button now uses the toolbar_show_panel
+ * helper directly; for the first click on Files (when the panel
+ * doesn't exist yet) the panel factory runs at toolbar build
+ * time, so the registry lookup always succeeds. */
 
 static const GActionEntry app_actions[] = {
     { .name = "settings", .activate = on_action_settings },
@@ -642,11 +684,93 @@ toolbar_refresh_bookmarks (void)
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
+/* Phase 5 / docking: the create-frame signal handler used by the
+ * toolbar's center PanelGrid. Each time the grid needs a new
+ * PanelFrame (first add, or DnD into empty grid space), this is
+ * what hands it one. Mirrors the spike's helper and the canonical
+ * pattern from libpanel's own testsuite/test-dock.c.
+ *
+ * Phase 3 / docking: install the HxPanel close dispatcher on the
+ * new frame so dynamic panels (pchat / msg) that get split off
+ * into a fresh center frame still tear down their backing state
+ * when the user closes the tab. */
+static PanelFrame *
+toolbar_create_frame_cb (PanelGrid *grid, gpointer user_data)
+{
+    GtkWidget        *frame  = panel_frame_new ();
+    PanelFrameHeader *header = PANEL_FRAME_HEADER (panel_frame_header_bar_new ());
+    panel_frame_set_header (PANEL_FRAME (frame), header);
+    hx_panel_install_close_dispatcher (frame);
+    hx_panel_install_drag_out_on_frame (frame);
+    hx_panel_defang_drop_controls_on_frame (frame);
+    return PANEL_FRAME (frame);
+}
+
+/* Phase 5 / docking (Phase 2 follow-up): toolbar buttons "show
+ * panel X". The button's `data' is the panel's registry id (a
+ * static string). Behaviour:
+ *
+ *   - Look up the panel from the registry.
+ *   - panel_widget_raise() — selects the panel's tab in its frame,
+ *     so even if its area was already visible with a different tab
+ *     active, the click brings THIS panel forward.
+ *   - Reveal the area the panel lives in. Walking the panel up to
+ *     its PanelFrame and that frame up to a PanelDockChild gives
+ *     us the right area; flip its reveal-area on.
+ *
+ * Net: each toolbar button reliably brings up its specific panel
+ * regardless of dock state, instead of just toggling visibility of
+ * whatever happens to be in a given area. */
+static void
+toolbar_show_panel (GtkButton *button, gpointer data)
+{
+    const char *panel_id = data;
+    HxPanel    *panel;
+    GtkWidget  *frame;
+
+    (void)button;
+
+    panel = hx_panel_registry_lookup (panel_id);
+    if (panel == NULL || toolbar_dock == NULL)
+        return;
+
+    /* If the panel was closed (frame chevron "Close all pages",
+     * per-tab close), it has no parent; the registry still owns a
+     * strong ref so the widget is alive. Splice it back into its
+     * home area before raising — without this the raise no-ops and
+     * the user's click on the toolbar button silently does nothing. */
+    hx_panel_ensure_attached (panel);
+
+    panel_widget_raise (PANEL_WIDGET (panel));
+
+    /* Reveal the area the panel is in. hx_panel_get_home_area
+     * recorded the original area at construction; if the user
+     * later moved the panel (via DnD or a move-area menu item),
+     * the live area takes precedence — walk up from the panel to
+     * find it. */
+    frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
+                                     PANEL_TYPE_FRAME);
+    if (frame == NULL)
+        return;
+
+    /* Live area: check which sidebar frame's tree the panel sits
+     * in. The center grid has no surrounding revealer so it needs
+     * no reveal toggle. */
+    if (frame == toolbar_sidebar_frame)
+        panel_dock_set_reveal_start  (PANEL_DOCK (toolbar_dock), TRUE);
+    else if (frame == toolbar_end_frame)
+        panel_dock_set_reveal_end    (PANEL_DOCK (toolbar_dock), TRUE);
+    else if (frame == toolbar_bottom_frame)
+        panel_dock_set_reveal_bottom (PANEL_DOCK (toolbar_dock), TRUE);
+    /* else: center grid — no revealer */
+}
+
 void
 create_toolbar_window (session *sess)
 {
     GtkWidget *header;
-    GtkWidget *hbox, *vbox;
+    GtkWidget *hbox;
+    GtkWidget *toolbar_view;
 
     /* Phase 5: stay on plain GtkWindow rather than AdwApplicationWindow.
 	 * fe_init() runs the toolbar construction BEFORE g_application_run
@@ -657,10 +781,22 @@ create_toolbar_window (session *sess)
 	 * AdwHeaderBar slotted in via gtk_window_set_titlebar gives us
 	 * the same "no double title bar" appearance AdwApplicationWindow
 	 * would have. The hamburger actions live on the application and
-	 * get registered from gtkhx_activate via toolbar_register_actions. */
+	 * get registered from gtkhx_activate via toolbar_register_actions.
+	 *
+	 * Phase 5 / docking (Phase 1): the toolbar window is now the
+	 * dock host. The button row and banners stay where they always
+	 * were (top of the content), and a PanelDock fills the rest of
+	 * the window. The dock starts empty — Phase 2 migrates one
+	 * window at a time into PanelToggleButton-driven HxPanels.
+	 * Until then the legacy create_*_window paths still spawn the
+	 * standalone top-levels they always have. */
     toolbar_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (toolbar_window), "GtkHx");
-    gtk_window_set_resizable (GTK_WINDOW (toolbar_window), FALSE);
+    /* Phase 1 (docking): non-resizable no longer fits — the
+	 * dock area needs to grow. Pick a sensible default size; saved
+	 * geometry restores in gtkhx_save_window_positions handle the
+	 * persisted case. */
+    gtk_window_set_default_size (GTK_WINDOW (toolbar_window), 1100, 700);
 
     /* ------------- header bar (top) ------------- */
     header = adw_header_bar_new ();
@@ -712,33 +848,51 @@ create_toolbar_window (session *sess)
         make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
                             _ ("Tracker"), G_CALLBACK (create_tracker_window),
                             sess));
+    /* Phase 5 / docking (Phase 2 follow-up): Files / Users / Tasks
+     * buttons use the toolbar_show_panel helper so each one raises
+     * its specific panel + reveals the area, rather than just
+     * toggling area visibility. Chat and the two news entry
+     * points keep their own factories which build-or-raise AND
+     * kick off a server fetch when connected — that's the bit
+     * the bare show-panel helper can't do. */
     news_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news.png",
-                                   _ ("News"), G_CALLBACK (open_news), sess);
+                                   _ ("News"),
+                                   G_CALLBACK (open_news), sess);
     gtk_box_append (GTK_BOX (hbox), news_btn);
-    /* The standalone Post-News toolbar button used to live here.
-	 * Removed in 2026-05 — the News window already exposes a
-	 * "Post News" button in its headerbar, so the toolbar entry
-	 * was redundant clutter. */
+    /* News (1.5+): same shape — the entry point raises the
+     * existing panel via the registry AND triggers a NEWSDIRLIST
+     * when connected, so the user sees fresh content on each open
+     * instead of having to hit Refresh after the first build. */
     news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newsfld.png",
                                      _ ("News (1.5+)"),
                                      G_CALLBACK (open_news_browser), sess);
     gtk_box_append (GTK_BOX (hbox), news15_btn);
     files_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/files.png",
                                     _ ("Files"),
-                                    G_CALLBACK (on_files_button_clicked), sess);
+                                    G_CALLBACK (toolbar_show_panel),
+                                    (gpointer) HX_PANEL_ID_FILES);
     gtk_box_append (GTK_BOX (hbox), files_btn);
+    /* Phase 5 / docking (Phase 2 follow-up): Users defaults to
+     * the END (right) area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
                         "/com/nasledov/gtkhx/pixmaps/users.png", _ ("Users"),
-                        G_CALLBACK (create_users_window), sess));
+                        G_CALLBACK (toolbar_show_panel),
+                        (gpointer) HX_PANEL_ID_USERS));
+    /* Phase 5 / docking (Phase 2): Chat is a center-area panel
+     * resident; raise + reveal via the shared helper. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                         _ ("Chat"),
-                                        G_CALLBACK (create_chat_window), sess));
+                                        G_CALLBACK (toolbar_show_panel),
+                                        (gpointer) HX_PANEL_ID_CHAT));
+    /* Phase 5 / docking (Phase 2 follow-up): Tasks defaults to
+     * the BOTTOM area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
                         "/com/nasledov/gtkhx/pixmaps/tasks.png", _ ("Tasks"),
-                        G_CALLBACK (create_tasks_window), sess));
+                        G_CALLBACK (toolbar_show_panel),
+                        (gpointer) HX_PANEL_ID_TASKS));
 
     /* Broadcast — sends an admin-wide message via HTLC_HDR_MSG_BROADCAST.
 	 * Icon comes from icons.rsrc cicn 220 (tools/cicndump). Always
@@ -777,10 +931,7 @@ create_toolbar_window (session *sess)
     /* ------------- compose ------------- */
     /* Phase 5: gtk_window_set_titlebar installs the AdwHeaderBar AS
 	 * the window's title bar (no GTK default chrome on top of it),
-	 * which is what AdwApplicationWindow does implicitly. Content is
-	 * a plain vertical GtkBox holding the button row and status
-	 * label; the window's non-resizable flag collapses it to the
-	 * natural height of those two children. */
+	 * which is what AdwApplicationWindow does implicitly. */
     gtk_window_set_titlebar (GTK_WINDOW (toolbar_window), header);
 
     /* Phase 5: AdwBanner sits above the content row for "lost
@@ -793,15 +944,101 @@ create_toolbar_window (session *sess)
     g_signal_connect (toolbar_banner, "button-clicked",
                       G_CALLBACK (on_banner_button_clicked), sess);
 
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (vbox), GTK_WIDGET (toolbar_banner));
-    gtk_box_append (GTK_BOX (vbox), hbox);
-    /* Phase 5: server banner row (banner.c). Hidden until an
-	 * HTLS_HDR_BANNER message arrives. Sits above the status bar
-	 * so it doesn't push the persistent connection state out of
-	 * sight. */
-    gtk_box_append (GTK_BOX (vbox), banner_widget_new ());
-    gtk_box_append (GTK_BOX (vbox), status_bar);
+    /* Phase 5 / docking (Phase 1): the PanelDock that future Phase 2
+	 * migrations will fill with HxPanels. Center area is a
+	 * PanelGrid (libpanel's idiom — the grid lazily creates its
+	 * own PanelFrames via the create-frame signal); start area is a
+	 * single PanelFrame ready to host sidebar panels (Users, Tasks).
+	 * Both start empty; the legacy create_*_window paths keep
+	 * working until each is rewired to register an HxPanel here. */
+    toolbar_dock = panel_dock_new ();
+    gtk_widget_set_hexpand (toolbar_dock, TRUE);
+    gtk_widget_set_vexpand (toolbar_dock, TRUE);
+
+    /* Phase 4 / docking: dock-level drop target. Per-frame drop
+     * targets don't receive events in our setup — some libpanel
+     * descendant of the frame is consuming them before they reach
+     * us. The dock target catches the drop event high up the
+     * tree and picks the target frame by hit-testing the drop
+     * coordinates against descendant PanelFrames. */
+    hx_panel_install_drop_target_on_dock (toolbar_dock);
+
+    toolbar_sidebar_frame = panel_frame_new ();
+    panel_frame_set_header (PANEL_FRAME (toolbar_sidebar_frame),
+                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
+    hx_panel_install_close_dispatcher (toolbar_sidebar_frame);
+    hx_panel_install_drag_out_on_frame (toolbar_sidebar_frame);
+    hx_panel_defang_drop_controls_on_frame (toolbar_sidebar_frame);
+
+    toolbar_end_frame = panel_frame_new ();
+    panel_frame_set_header (PANEL_FRAME (toolbar_end_frame),
+                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
+    hx_panel_install_close_dispatcher (toolbar_end_frame);
+    hx_panel_install_drag_out_on_frame (toolbar_end_frame);
+    hx_panel_defang_drop_controls_on_frame (toolbar_end_frame);
+
+    toolbar_bottom_frame = panel_frame_new ();
+    panel_frame_set_header (PANEL_FRAME (toolbar_bottom_frame),
+                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
+    hx_panel_install_close_dispatcher (toolbar_bottom_frame);
+    hx_panel_install_drag_out_on_frame (toolbar_bottom_frame);
+    hx_panel_defang_drop_controls_on_frame (toolbar_bottom_frame);
+
+    toolbar_center_grid = panel_grid_new ();
+    g_signal_connect (toolbar_center_grid, "create-frame",
+                      G_CALLBACK (toolbar_create_frame_cb), NULL);
+
+    /* PanelDock has no C-level add-child method — children flow in
+	 * through the GtkBuildable.add_child vfunc, which routes on the
+	 * `type` parameter from <child type="…">. Invoke it directly:
+	 * gtk_widget_set_parent skips the area-routing wrap, and
+	 * gtk_buildable_add_child the symbol is not in the public ABI.
+	 * Documented in docs/docking-phase0-findings.md, finding #1. */
+    {
+        GtkBuilder        *b     = gtk_builder_new ();
+        GtkBuildable      *bdock = GTK_BUILDABLE (toolbar_dock);
+        GtkBuildableIface *iface = GTK_BUILDABLE_GET_IFACE (bdock);
+        iface->add_child (bdock, b, G_OBJECT (toolbar_sidebar_frame), "start");
+        iface->add_child (bdock, b, G_OBJECT (toolbar_end_frame),     "end");
+        iface->add_child (bdock, b, G_OBJECT (toolbar_bottom_frame),  "bottom");
+        iface->add_child (bdock, b, G_OBJECT (toolbar_center_grid),   NULL);
+        g_object_unref (b);
+    }
+    /* Sidebar auto-collapses to hidden when its frame becomes empty
+	 * (panel_dock_notify_empty_cb). Leave reveal-start off until
+	 * something actually populates the sidebar; flipping it on now
+	 * just exposes a 0-px revealer. The first
+	 * hx_panel_registry_register for a SIDEBAR-kind panel will flip
+	 * it on. */
+
+    /* AdwToolbarView: the canonical libadwaita way to stack
+	 * top/bottom chrome around a content widget. Top bars get the
+	 * AdwBanner (reconnect), and a horizontal row holding the
+	 * button strip + the server banner. Bottom bar gets the
+	 * status label. The dock fills the rest.
+	 *
+	 * Phase 5 / docking (Phase 2 follow-up): server banner row
+	 * (banner.c, hidden until an HTLS_HDR_BANNER message arrives)
+	 * sits to the RIGHT of the button row rather than below it.
+	 * That kept the buttons compactly clustered on the left and
+	 * gives the banner the rest of the horizontal real estate. */
+    toolbar_view = adw_toolbar_view_new ();
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                  GTK_WIDGET (toolbar_banner));
+    {
+        GtkWidget *toprow = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+        GtkWidget *banner_row = banner_widget_new ();
+        gtk_widget_set_hexpand (banner_row, TRUE);
+        gtk_widget_set_valign  (banner_row, GTK_ALIGN_CENTER);
+        gtk_box_append (GTK_BOX (toprow), hbox);
+        gtk_box_append (GTK_BOX (toprow), banner_row);
+        adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                      toprow);
+    }
+    adw_toolbar_view_set_content  (ADW_TOOLBAR_VIEW (toolbar_view),
+                                   toolbar_dock);
+    adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view),
+                                     status_bar);
 
     /* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()
 	 * can push transient notifications over the button row. Toasts
@@ -809,7 +1046,7 @@ create_toolbar_window (session *sess)
 	 * persistent status label stays visible underneath for ambient
 	 * connection state. */
     toolbar_toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
-    adw_toast_overlay_set_child (toolbar_toast, vbox);
+    adw_toast_overlay_set_child (toolbar_toast, toolbar_view);
     gtk_window_set_child (GTK_WINDOW (toolbar_window),
                           GTK_WIDGET (toolbar_toast));
 
@@ -844,4 +1081,27 @@ create_toolbar_window (session *sess)
         changetitlespecific (toolbar_window, "GtkHx");
     }
     sess->toolbar_window = toolbar_window;
+
+    /* Phase 5 / docking (Phase 2): eager-construct the sidebar
+     * panels (Users + Tasks) so the sidebar has real residents
+     * from the start. Revealing an empty side area would
+     * auto-collapse immediately (panel_dock_notify_empty_cb).
+     * News goes in the center PanelGrid; the grid lazily
+     * creates a PanelFrame for it (and subsequent center
+     * panels share that frame's tab strip). Subsequent fe_init
+     * auto-open calls hit the registry. */
+    create_users_window (toolbar_window, sess);
+    create_tasks_window (toolbar_window, sess);
+    create_news_window  (toolbar_window, sess);
+    create_chat_window  (toolbar_window, sess);
+    /* open_files_browser doesn't take a (parent, sess) signature;
+     * it reads the_session directly. Eager-construct so the Files
+     * toolbar button's toolbar_show_panel lookup always hits. */
+    open_files_browser  ();
+    /* Same shape as open_files_browser: no (parent, sess) — the
+     * news (1.5+) entry point ignores its (widget, sess) args
+     * since the browser is a singleton, but eager-construct so
+     * the toolbar button's toolbar_show_panel lookup hits the
+     * registry on first click. */
+    open_news_browser   (NULL, sess);
 }

@@ -22,6 +22,7 @@
 #include "cicn.h"   /* load_icon */
 #include "gtkhx.h"  /* gtkhx_apply_userlist_style + icon_files */
 #include "msg.h"    /* msgwin_with_uid + create_msgwin */
+#include "chat_tabs.h"
 #include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
@@ -606,7 +607,7 @@ on_view_activate (GtkColumnView *cv, guint pos, gpointer user_data)
     }
     mw = msgwin_with_uid (user->uid);
     if (mw) {
-        gtk_window_present (GTK_WINDOW (mw->window));
+        gtkhx_chat_tabs_raise_msg (user->uid);
     } else {
         create_msgwin (user->uid, user->name);
     }
