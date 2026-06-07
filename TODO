@@ -4,7 +4,7 @@ General:
 
 Bookmarks:
 - Ship some bookmarks for more servers
-- Ship hlserver.com bookmark as a bookmark file rather than hardcoding it into the source code
+- Built-in bookmarks should be written once as real bookmark files on config dir creation, instead of being hardcoded in the Connect dialog
 
 Icons:
 - Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
