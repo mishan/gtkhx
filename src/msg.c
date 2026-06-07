@@ -27,6 +27,7 @@
 #include <netinet/in.h>
 #include "hx.h"
 #include "chat.h"
+#include "chat_tabs.h"
 #include "emoji.h"
 #include "hotline_proto.h"
 #include "network.h"
@@ -167,6 +168,11 @@ msgwin_free (gpointer p)
     g_free (msg);
 }
 
+/* Forward decl so msg_windows_init can wire it as the chat-tabs
+ * close handler before destroy_msgwin's old static destroy_msgwin
+ * function (now retired) was defined. */
+static void msg_tab_on_close (guint16 uid);
+
 void
 msg_windows_init (session *sess)
 {
@@ -174,6 +180,11 @@ msg_windows_init (session *sess)
         sess->msg_windows = g_hash_table_new_full (
             g_direct_hash, g_direct_equal, NULL, msgwin_free);
     }
+    /* Phase 3 / docking: register the close-tab dispatcher target
+     * so user-clicks on a msg tab's X end up calling msgwin_delete.
+     * Idempotent — re-registers the same callback on each session
+     * init. */
+    gtkhx_chat_tabs_set_close_msg_handler (msg_tab_on_close);
 }
 
 /* Unhook the window from the per-session table; the value-destroy
@@ -486,12 +497,12 @@ create_msg (guint16 _uid, char *name)
 
     msg->history = history_new ();
 
-    msg->window = gtk_window_new ();
-    /* Phase 5: AdwHeaderBar across all GtkHx secondary windows for
-	 * consistent chrome with the toolbar / chat / news / files /
-	 * preview / agreement windows. The msg window had been left as
-	 * a bare GtkWindow with the system default titlebar. */
-    gtk_window_set_titlebar (GTK_WINDOW (msg->window), adw_header_bar_new ());
+    /* Phase 3 / docking: msg->window is no longer a standalone
+     * GtkWindow. It's the content widget of an AdwTabPage inside
+     * the Chat panel's tab view; create_msgwin builds the layout
+     * vbox and points msg->window at it after gtkhx_chat_tabs_add_msg.
+     * Until then it stays NULL — create_msg only builds the
+     * sub-widgets (xtext + input + ctrl). */
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
         msg->outputbuf = gtk_xtext_new (colors, 1);
@@ -547,17 +558,23 @@ create_msg (guint16 _uid, char *name)
     return msg;
 }
 
-/* Phase 4.5: GTK 4 fires "close-request" on (GtkWindow *, gpointer)
- * returning TRUE to inhibit close, FALSE to allow default destroy.
- * Just unlink the msg from the list — the framework destroys the
- * widget. */
-static gboolean
-destroy_msgwin (GtkWindow *window, gpointer data)
+/* Phase 3 / docking: this used to be a GtkWindow::close-request
+ * handler returning FALSE to allow default destroy. Now we ride
+ * AdwTabView::close-page via the chat_tabs dispatcher, which calls
+ * us with the uid of the tab being closed. msgwin_delete drops
+ * the entry from sess->msg_windows; the value-destroy
+ * (msgwin_free) reclaims the struct. AdwTabView destroys the page
+ * + content widget tree as part of close-page-finish.
+ *
+ * Registered once at startup by msg_windows_init via
+ * gtkhx_chat_tabs_set_close_handlers. */
+static void
+msg_tab_on_close (guint16 uid)
 {
-    struct msgwin *msg = g_object_get_data (G_OBJECT (window), "msg");
-    (void)data;
-    msgwin_delete (msg);
-    return FALSE;
+    struct msgwin *msg = msgwin_with_uid (uid);
+    if (msg != NULL) {
+        msgwin_delete (msg);
+    }
 }
 
 struct msgwin *
@@ -572,24 +589,13 @@ create_msgwin (guint16 uid, char *name)
 
     msg = create_msg (uid, name);
 
+    /* Title moves from gtk_window_set_title to the AdwTabPage's
+     * "title" property after we've added the tab below. */
     title = g_strdup_printf ("%s (%u)", name, uid);
-    gtk_window_set_title (GTK_WINDOW (msg->window), title);
-    g_free (title);
 
-    /* Phase 5: switch from set_size_request (which sets BOTH min
-	 * AND natural size in GTK 4) to set_default_size for the
-	 * initial window size, and drop the forced 500x400 minimum on
-	 * the inner hbox. The old combination was the cause of the
-	 * "chat appears cut off in top-left until resized" bug — the
-	 * inner hbox demanded 400px tall but the paned was giving it
-	 * 230px, so xtext rendered into a 400px-tall surface that got
-	 * clipped to 230px visible. */
-    gtk_window_set_default_size (GTK_WINDOW (msg->window), 460, 340);
-    gtk_window_set_resizable (GTK_WINDOW (msg->window), TRUE);
-    (gtk_widget_set_margin_start (msg->window, 0),
-     gtk_widget_set_margin_end (msg->window, 0),
-     gtk_widget_set_margin_top (msg->window, 0),
-     gtk_widget_set_margin_bottom (msg->window, 0));
+    /* Phase 3 / docking: the window-level layout (default-size,
+     * resizable, margins) is gone — the tab content sits inside the
+     * Chat panel's tab view, which the dock controls. */
     hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
 
     outputframe = gtk_frame_new (0);
@@ -671,26 +677,28 @@ create_msgwin (guint16 uid, char *name)
     gtk_widget_set_vexpand (vpane, TRUE);
     gtk_box_append (GTK_BOX (outer_vbox), vpane);
 
-    gtkhx_widget_set_child (msg->window, outer_vbox);
+    /* Phase 3 / docking: msg->window points at the AdwTabPage's
+     * content widget — outer_vbox here. Code paths that key off
+     * msg->window (init_keyaccel, etc.) keep compiling unchanged.
+     * The tab is appended to the Chat panel's tab view; the close-
+     * request handler is replaced by the chat_tabs close
+     * dispatcher (see msg_tab_on_close below). */
+    msg->window = outer_vbox;
+    g_object_set_data (G_OBJECT (msg->window), "msg", msg);
+
+    gtkhx_chat_tabs_add_msg (outer_vbox, uid, title);
+    g_free (title);
 
     /* Populate from the cached user list now that the widgets exist. */
     msgwin_refresh_user_info (msg);
 
-    gtk_window_present (GTK_WINDOW (msg->window));
+    /* Surface the new tab to the user the same way the standalone
+     * window used to present itself: raise the Chat dock panel,
+     * select the new tab. */
+    gtkhx_chat_tabs_raise_msg (uid);
 
-    g_object_set_data (G_OBJECT (msg->window), "msg", msg);
-    g_signal_connect (msg->window, "close-request", G_CALLBACK (destroy_msgwin),
-                      0);
     init_keyaccel (msg->window);
-
     gtk_widget_grab_focus (msg->inputbuf);
-
-    /* Phase 4.4: GdkWindow / gdk_window_lower / gtk_widget_get_window
-	 * are gone in GTK 4. The "showback" pref used to lower the new
-	 * message window to the back of the stack so it didn't steal focus.
-	 * Wayland doesn't let clients re-order themselves in the stack, so
-	 * the pref no longer has a meaningful implementation; the window
-	 * comes up at whatever position the compositor picks. */
 
     return msg;
 }
@@ -768,6 +776,14 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 
     g_free (nick_wrapped);
     g_free (valid_body);
+
+    /* Phase 3 / docking: incoming messages set needs-attention on
+     * the tab + the Chat dock panel so the user notices a new PM
+     * arrived while they're elsewhere. Self-echoes (the user just
+     * typed) skip the indicator — no need to flag yourself. */
+    if (!is_self) {
+        gtkhx_chat_tabs_set_attention_msg (uid, TRUE);
+    }
 }
 
 void

@@ -378,6 +378,23 @@ hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self)
     return self ? self->listing_error : FALSE;
 }
 
+void
+hx_remote_files_provider_clear_listing (HxRemoteFilesProvider *self)
+{
+    if (!self) {
+        return;
+    }
+    g_list_store_remove_all (self->listing);
+    self->listing_error = FALSE;
+    /* Re-emit "navigated" with the existing current_path so the
+     * panel's status footer (which reflects row counts) refreshes.
+     * The path itself doesn't change — we're not navigating away,
+     * we're just clearing stale rows the user shouldn't see while
+     * disconnected. */
+    g_signal_emit_by_name (self, "navigated",
+                           self->current_path ? self->current_path : "/");
+}
+
 /* ---- Interface implementations ---- */
 
 static GListModel *

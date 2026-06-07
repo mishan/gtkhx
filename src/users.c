@@ -23,10 +23,14 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
+#include "toolbar.h"
 #include "hl_access.h"
 #include "cicn.h"
 #include "hotline_proto.h"
@@ -35,6 +39,7 @@
 #include "chat.h"
 #include "gtkhx.h"
 #include "msg.h"
+#include "chat_tabs.h"
 #include "gtkutil.h"
 #include "tasks.h"
 #include "rcv.h"
@@ -277,7 +282,10 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 
     if ((msg = msgwin_with_uid (ctx->user->uid))) {
-        gtk_window_present (GTK_WINDOW (msg->window));
+        /* Existing msgwin — just raise its tab inside the Chat
+         * panel. The Chat panel itself gets attached / raised by
+         * gtkhx_chat_tabs_raise_msg if it's hidden. */
+        gtkhx_chat_tabs_raise_msg (ctx->user->uid);
     } else {
         create_msgwin (ctx->user->uid, ctx->user->name);
     }
@@ -720,35 +728,22 @@ prompt_chat (session *sess, guint16 _uid)
                                     : NULL);
 }
 
-/* Phase 4.5: GTK 4 fires "close-request" instead of "delete-event"
- * when a window's titlebar close button is clicked. The handler returns
- * FALSE to allow the default destroy to proceed. */
-static gboolean
-close_users_window (GtkWindow *window, gpointer data)
-{
-    session *sess = data;
-    (void)window;
-
-    sess->users_window = 0;
-    /* Drop our strong ref to the view object — its GtkColumnView
-     * widget is being unparented as the window dies, but the view
-     * GObject itself outlives only as long as someone holds a ref
-     * to it. We've been that someone since create_users_window. */
-    if (sess->users_view) {
-        g_object_unref (sess->users_view);
-        sess->users_view = NULL;
-    }
-    gtkhx_prefs.geo.users.open = 0;
-    gtkhx_prefs.geo.users.init = 0;
-    return FALSE;
-}
+/* Phase 5 / docking (Phase 2): close_users_window dropped — the
+ * standalone Users GtkWindow is gone, and the Users panel is a
+ * permanent resident of the toolbar's sidebar PanelFrame. An
+ * undocked Users panel's "X" affordance flows through libpanel's
+ * own tab-close + Redock-on-close machinery in Phase 4. */
 
 void
 user_list (session *sess)
 {
     struct chat *pub;
 
-    if (!sess->users_window || !sess->users_view) {
+    /* Phase 5 / docking (Phase 2): users_view, not users_window,
+     * is the canonical "have we got a view?" signal now. The
+     * standalone window is gone — the panel is always either
+     * registered or not. */
+    if (!sess->users_view) {
         return;
     }
 
@@ -805,7 +800,7 @@ view_msg_btn (GtkWidget *w, gpointer data)
     }
     mw = msgwin_with_uid (user->uid);
     if (mw) {
-        gtk_window_present (GTK_WINDOW (mw->window));
+        gtkhx_chat_tabs_raise_msg (user->uid);
     } else {
         create_msgwin (user->uid, user->name);
     }
@@ -893,28 +888,33 @@ view_chat_btn (GtkWidget *w, gpointer data)
 }
 
 void
-create_users_window (GtkWidget *toolbar_window, gpointer data)
+create_users_window (GtkWidget *parent_window, gpointer data)
 {
-    GtkWidget *users_window_scroll;
+    GtkWidget *scroll;
     GtkWidget *cv_widget;
-    GtkWidget *users_window;
+    GtkWidget *content_vbox;
+    GtkWidget *button_bar;
     HxUserListView *view;
+    HxPanel *panel;
     session *sess = data;
 
-    if (gtkhx_prefs.geo.users.open) {
-        gtk_window_present (GTK_WINDOW (sess->users_window));
+    /* Phase 5 / docking (Phase 2): the parent_window argument is
+     * vestigial — we don't reparent the panel to it (it's already
+     * a resident of the toolbar's sidebar frame). Kept on the
+     * signature so the existing gtkhx.c auto-open and toolbar
+     * button call sites compile unchanged. */
+    (void)parent_window;
+
+    /* Phase 5 / docking (Phase 2): the standalone Users GtkWindow
+     * is gone. The panel is a permanent resident of the toolbar
+     * window's start-area PanelFrame — first call constructs it
+     * and slots it in; later calls just raise it to focus. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_USERS);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
         return;
     }
-
-    users_window = gtk_window_new ();
-    gtk_window_set_transient_for(GTK_WINDOW(users_window),  GTK_WINDOW(toolbar_window));
-    gtk_window_set_title (GTK_WINDOW (users_window), _ ("Users"));
-    /* Default-size, not size_request — set_size_request sets both
-     * min AND natural in GTK 4. */
-    gtk_window_set_default_size (GTK_WINDOW (users_window), 320, 480);
-    gtk_window_set_resizable (GTK_WINDOW (users_window), TRUE);
-    g_signal_connect (users_window, "close-request",
-                      G_CALLBACK (close_users_window), sess);
 
     /* HxUserListView wraps a GtkColumnView with a custom
      * snapshot()-rendered Name cell that gives us the Mac-classic
@@ -934,11 +934,11 @@ create_users_window (GtkWidget *toolbar_window, gpointer data)
 	 * the class to its column_view widget at construction. */
     gtkhx_refresh_userlist_css (users_font_desc);
 
-    users_window_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (users_window_scroll),
+    scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    gtk_widget_set_vexpand (users_window_scroll, TRUE);
-    gtkhx_widget_set_child (users_window_scroll, cv_widget);
+    gtk_widget_set_vexpand (scroll, TRUE);
+    gtkhx_widget_set_child (scroll, cv_widget);
 
     /* Per-user action buttons. `data' is the HxUserListView itself —
 	 * the view_*_btn handlers read its current single-selection and
@@ -970,40 +970,80 @@ create_users_window (GtkWidget *toolbar_window, gpointer data)
     gtk_widget_set_sensitive (chatbtn, FALSE);
     gtk_widget_set_sensitive (ignobtn, FALSE);
 
+    /* Phase 5 / docking (Phase 2): the headerbar in the old
+     * standalone Users window held Msg / Chat on the start and Ignore /
+     * Ban / Kick / Info on the end. A PanelWidget's tab strip is too
+     * narrow to host action buttons, so they relocate to a slim
+     * GtkBox at the top of the panel content. Spacing + halign keep
+     * the start / end grouping that the headerbar layout implied. */
+    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start (button_bar,  6);
+    gtk_widget_set_margin_end   (button_bar,  6);
+    gtk_widget_set_margin_top   (button_bar,  6);
+    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_box_append (GTK_BOX (button_bar), msgbtn);
+    gtk_box_append (GTK_BOX (button_bar), chatbtn);
     {
-        GtkWidget *header = adw_header_bar_new ();
+        GtkWidget *spacer = gtk_label_new (NULL);
+        gtk_widget_set_hexpand (spacer, TRUE);
+        gtk_box_append (GTK_BOX (button_bar), spacer);
+    }
+    gtk_box_append (GTK_BOX (button_bar), infobtn);
+    gtk_box_append (GTK_BOX (button_bar), kickbtn);
+    gtk_box_append (GTK_BOX (button_bar), banbtn);
+    gtk_box_append (GTK_BOX (button_bar), ignobtn);
 
-        adw_header_bar_pack_start (ADW_HEADER_BAR (header), msgbtn);
-        adw_header_bar_pack_start (ADW_HEADER_BAR (header), chatbtn);
+    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (content_vbox), button_bar);
+    gtk_box_append (GTK_BOX (content_vbox), scroll);
 
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), ignobtn);
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), banbtn);
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), kickbtn);
-        adw_header_bar_pack_end (ADW_HEADER_BAR (header), infobtn);
+    /* The panel itself. SIDEBAR + PANEL_AREA_END routes it to the
+     * toolbar window's right-side PanelFrame on the (Phase 4)
+     * Redock path and tells the registry how to home it after an
+     * Undock. */
+    panel = hx_panel_new (HX_PANEL_ID_USERS,
+                          HX_PANEL_KIND_SIDEBAR,
+                          PANEL_AREA_END);
+    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Users"));
+    panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                "system-users-symbolic");
+    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
 
-        gtk_window_set_titlebar (GTK_WINDOW (users_window), header);
+    /* Side areas auto-collapse when empty (Phase 0 finding #5).
+     * Toggling the side area reveal is the toolbar button's job. */
+    if (toolbar_end_frame != NULL) {
+        panel_frame_add (PANEL_FRAME (toolbar_end_frame),
+                         PANEL_WIDGET (panel));
+        hx_panel_set_home_frame (panel, toolbar_end_frame);
+    } else {
+        g_critical ("create_users_window: toolbar dock not built yet");
     }
 
-    gtk_window_set_child (GTK_WINDOW (users_window), users_window_scroll);
+    /* hx_panel_registry_register strong-refs the panel so it
+     * survives a Close-all-pages on its frame: libpanel's close path
+     * destroys the AdwTabPage (which drops both the page->child ref
+     * and the bin's parent-child ref), so the registry's ref is the
+     * only thing keeping the widget alive between close and the
+     * next toolbar-button-driven re-attach.
+     *
+     * Do NOT g_object_unref(panel) after register. hx_panel_new's
+     * initial ref is the GTK4 floating ref, which panel_frame_add
+     * already claimed via gtk_widget_set_parent's g_object_ref_sink
+     * (clears floating, no new ref). Unrefing here drops the
+     * registry's owning ref instead — the table holds the pointer
+     * but no ownership, and the next close destroys the panel out
+     * from under it. */
+    hx_panel_registry_register (panel);
 
-    init_keyaccel (users_window);
+    sess->users_view = view;
 
-    if (gtkhx_prefs.geo.users.xsize > 0 && gtkhx_prefs.geo.users.ysize > 0) {
-        gtk_window_set_default_size (GTK_WINDOW (users_window),
-                                     gtkhx_prefs.geo.users.xsize,
-                                     gtkhx_prefs.geo.users.ysize);
-    }
-
-    gtk_window_present (GTK_WINDOW (users_window));
-
+    /* Auto-open + size persistence are Phase 4 work (layout
+     * restore). For Phase 2 we just present the panel and trust
+     * libpanel's defaults for sidebar width. */
     gtkhx_prefs.geo.users.open = 1;
     gtkhx_prefs.geo.users.init = 1;
 
-    sess->users_view = view;
-    sess->users_window = users_window;
-
     if (connected == 1) {
-        changetitlespecific (users_window, _ ("Users"));
         gtk_widget_set_sensitive (msgbtn, TRUE);
         gtk_widget_set_sensitive (banbtn, TRUE);
         gtk_widget_set_sensitive (infobtn, TRUE);

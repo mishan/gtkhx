@@ -11,8 +11,12 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 
 #include "hx.h"        /* struct htxf_conn — auto-refresh hook */
+#include "hx_panel.h"
+#include "panel_registry.h"
+#include "toolbar.h"
 #include "session.h"   /* the_session — remote drag uses htlc.access */
 #include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
 #include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
@@ -1837,6 +1841,25 @@ on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
         && state != GTKHX_CONNECTION_LOGIN_READY) {
         return;
     }
+
+    /* On DISCONNECTED, drop the remote panel's stale listing so
+     * the user doesn't see content they no longer have access to
+     * — the rows would silently outlive the session otherwise.
+     * Local providers are no-op here (clear_listing is a remote-
+     * only call). */
+    if (state == GTKHX_CONNECTION_DISCONNECTED) {
+        if (br->left_provider
+            && HX_IS_REMOTE_FILES_PROVIDER (br->left_provider)) {
+            hx_remote_files_provider_clear_listing (
+                HX_REMOTE_FILES_PROVIDER (br->left_provider));
+        }
+        if (br->right_provider
+            && HX_IS_REMOTE_FILES_PROVIDER (br->right_provider)) {
+            hx_remote_files_provider_clear_listing (
+                HX_REMOTE_FILES_PROVIDER (br->right_provider));
+        }
+    }
+
     if (br->left_provider) {
         g_signal_emit_by_name (br->left_provider, "unavailable-changed");
     }
@@ -1882,25 +1905,38 @@ void
 open_files_browser (void)
 {
     struct browser *br;
-    GtkWidget *header, *paned, *right_side, *center_col, *refresh_btn,
+    GtkWidget *button_bar, *content_vbox;
+    GtkWidget *paned, *right_side, *center_col, *refresh_btn,
         *mkdir_btn, *copy_lr_btn, *copy_rl_btn, *preview_btn, *info_btn,
         *rename_btn, *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
+    HxPanel *panel;
 
+    /* Phase 5 / docking (Phase 2): Files panel lives in the
+     * toolbar's center PanelGrid (shared with Chat / News). The
+     * legacy the_browser file-static stays; we just replace the
+     * standalone window with a PanelWidget container, and
+     * br->window points at the panel widget so existing
+     * dialog-parent calls (adw_dialog_present, gtk_widget_get_root)
+     * continue to work via duck typing.
+     *
+     * init_keyaccel is still attached to br->window but only the
+     * Ctrl+Q / Ctrl+K / Ctrl+T accelerators take effect — the
+     * Ctrl+W close path inside init_keyaccel checks GTK_IS_WINDOW
+     * and bails on a PanelWidget. The panel's tab close is the X
+     * on its libpanel tab strip; we don't currently bind Ctrl+W
+     * to that. */
     if (the_browser) {
-        gtk_window_present (GTK_WINDOW (the_browser->window));
+        panel = hx_panel_registry_lookup (HX_PANEL_ID_FILES);
+        if (panel) {
+            hx_panel_ensure_attached (panel);
+            panel_widget_raise (PANEL_WIDGET (panel));
+        }
         return;
     }
 
     br = g_new0 (struct browser, 1);
-
-    br->window = gtk_window_new ();
-    /* Title goes through changetitlespecific so the connected
-	 * server's name lands in parentheses ("Files (Badmoon)"),
-	 * matching the rest of the windows. */
-    changetitlespecific (br->window, _ ("Files"));
-    gtk_widget_set_size_request (br->window, 980, 560);
 
     install_css (br);
 
@@ -1934,7 +1970,6 @@ open_files_browser (void)
 	 *            verbatim when the center column flipped to Copy
 	 *            semantics. Rename of the PNGs deferred to keep
 	 *            this diff focused on UX rather than asset moves. */
-    header = adw_header_bar_new ();
 #define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, 2, NULL, NULL)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
@@ -1979,13 +2014,26 @@ open_files_browser (void)
     g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_clicked),
                       br);
 
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), refresh_btn);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), mkdir_btn);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), preview_btn);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), info_btn);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), delete_btn);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), rename_btn);
-    gtk_window_set_titlebar (GTK_WINDOW (br->window), header);
+    /* Phase 5 / docking (Phase 2): the AdwHeaderBar (Refresh /
+     * MkDir / Preview / Info on start, Rename / Delete on end)
+     * relocates to a slim GtkBox at the top of the panel content
+     * with the same start/end grouping via an hexpand spacer. */
+    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start  (button_bar, 6);
+    gtk_widget_set_margin_end    (button_bar, 6);
+    gtk_widget_set_margin_top    (button_bar, 6);
+    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_box_append (GTK_BOX (button_bar), refresh_btn);
+    gtk_box_append (GTK_BOX (button_bar), mkdir_btn);
+    gtk_box_append (GTK_BOX (button_bar), preview_btn);
+    gtk_box_append (GTK_BOX (button_bar), info_btn);
+    {
+        GtkWidget *spacer = gtk_label_new (NULL);
+        gtk_widget_set_hexpand (spacer, TRUE);
+        gtk_box_append (GTK_BOX (button_bar), spacer);
+    }
+    gtk_box_append (GTK_BOX (button_bar), rename_btn);
+    gtk_box_append (GTK_BOX (button_bar), delete_btn);
 
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
 	 * R = remote Hotline server. The remote provider sits idle
@@ -2092,7 +2140,24 @@ open_files_browser (void)
 	 * for that.", etc.) without an interrupting dialog. */
     br->toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
     adw_toast_overlay_set_child (br->toast, paned);
-    gtk_window_set_child (GTK_WINDOW (br->window), GTK_WIDGET (br->toast));
+
+    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (content_vbox), button_bar);
+    gtk_box_append (GTK_BOX (content_vbox), GTK_WIDGET (br->toast));
+    gtk_widget_set_vexpand (GTK_WIDGET (br->toast), TRUE);
+
+    /* Build the panel. br->window points at the panel widget so
+     * the rest of files_browser.c — adw_dialog_present parents,
+     * gtk_widget_get_root() walks, init_keyaccel controllers,
+     * the shortcut controller below — keeps compiling unchanged. */
+    panel = hx_panel_new (HX_PANEL_ID_FILES,
+                          HX_PANEL_KIND_CENTER,
+                          PANEL_AREA_CENTER);
+    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Files"));
+    panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                "folder-symbolic");
+    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
+    br->window = GTK_WIDGET (panel);
 
     /* Track which panel has focus / was clicked so the headerbar
 	 * actions know who to operate on. Wired AFTER both panels
@@ -2252,7 +2317,13 @@ open_files_browser (void)
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
-    g_signal_connect (br->window, "close-request", G_CALLBACK (on_close), br);
+    /* Phase 5 / docking (Phase 2): close-request belongs to
+     * GtkWindow; the panel persists and uses libpanel's own
+     * close-page machinery (the X on the tab). on_close stays
+     * defined for the once-and-only case where the panel widget
+     * is destroyed wholesale — currently never; Phase 4 layout
+     * restore may grow a real teardown path. */
+    (void)on_close;
 
     the_browser = br;
 
@@ -2268,5 +2339,19 @@ open_files_browser (void)
     set_active (br, br->left);
     gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
-    gtk_window_present (GTK_WINDOW (br->window));
+    if (toolbar_center_grid != NULL) {
+        panel_grid_add (PANEL_GRID (toolbar_center_grid),
+                        PANEL_WIDGET (panel));
+        {
+            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
+                                                        PANEL_TYPE_FRAME);
+            hx_panel_set_home_frame (panel, frame);
+        }
+    } else {
+        g_critical ("open_files_browser: toolbar dock not built yet");
+    }
+
+    /* Registry takes the owning ref; do NOT g_object_unref after.
+     * See users.c for the ref-count walk-through. */
+    hx_panel_registry_register (panel);
 }

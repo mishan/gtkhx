@@ -70,6 +70,16 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.6')
 # became deprecated in 1.6 and we pick up -Werror=deprecated-declarations
 # from the build flags. 1.6 was released April 2024; widely available.
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
+# Phase 5 / docking: libpanel-1 is GNOME Builder's docking widget
+# library — PanelDock / PanelGrid / PanelFrame / PanelWidget /
+# PanelToggleButton. Phase 0 spike (docs/docking-phase0-findings.md)
+# de-risked the dependency on Debian trixie (1.10.0) and the
+# org.gnome.Platform/49 Flatpak runtime (which ships it). Floor
+# pinned at 1.4: that's where create-frame on PanelDock/PanelGrid
+# landed (1.2) and where panel_workbench_foreach_workspace landed
+# (1.4) — anything older predates the API surface the docking work
+# leans on.
+panel_dep   = dependency('libpanel-1', version : '>= 1.4')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
 nettle_dep  = dependency('nettle',    version : '>= 3.0')
@@ -143,6 +153,7 @@ math_dep    = cc.find_library('m',  required : false)
 deps = [
   gtk_dep,
   adw_dep,
+  panel_dep,
   glib_dep,
   gthread_dep,
   nettle_dep,
@@ -291,10 +302,11 @@ gnome.post_install(
 summary(
   {
     'GTK'           : gtk_dep.version(),
-    'libadwaita'    : adw_dep.version(),
     'GLib'          : glib_dep.version(),
     'GSound'        : gsound_dep.version(),
-    'Nettle'        : nettle_dep.version() ,
+    'libadwaita'    : adw_dep.version(),
+    'libpanel'      : panel_dep.version(),
+    'Nettle'        : nettle_dep.version(),
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',

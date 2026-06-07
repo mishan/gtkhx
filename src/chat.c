@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <gdk/gdkkeysyms.h>
 #include <sys/types.h>
 #include <ctype.h>
@@ -33,6 +34,9 @@
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
+#include "toolbar.h"
 #include "network.h"
 #include "hotline_proto.h"
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
@@ -44,6 +48,7 @@
 #include "users_view.h"
 #include "gtkhx.h"
 #include "chat.h"
+#include "chat_tabs.h"
 #include "gtkurl.h"
 #include "emoji.h"
 #include "plugin.h"
@@ -608,6 +613,10 @@ gchat_free (gpointer p)
     g_free (gchat);
 }
 
+/* Forward decl so gchats_init can install pchat_close as the tab-
+ * close handler before its definition (further down the file). */
+static void pchat_close (guint32 cid);
+
 void
 gchats_init (session *sess)
 {
@@ -615,6 +624,10 @@ gchats_init (session *sess)
         sess->gchats = g_hash_table_new_full (g_direct_hash, g_direct_equal,
                                               NULL, gchat_free);
     }
+    /* Phase 3 / docking: route user-clicks on a private-chat tab's
+     * X through pchat_close (which sends hx_part_chat and tears
+     * down the gchat). Idempotent. */
+    gtkhx_chat_tabs_set_close_pchat_handler (pchat_close);
 }
 
 struct gtkhx_chat *
@@ -808,6 +821,15 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             }
             cur = next_nl + 1;
         }
+    }
+
+    /* Phase 3 / docking: incoming pchat lines mark the tab + Chat
+     * panel needs-attention. Public chat (cid 0) skips this — the
+     * public-chat tab is what the user sees by default and we
+     * don't want the constant attention flag from a busy public
+     * room. Self-echoes also skip. */
+    if (e->cid != 0 && !e->is_self) {
+        gtkhx_chat_tabs_set_attention_pchat (e->cid, TRUE);
     }
 }
 
@@ -1955,23 +1977,13 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
 static GtkWidget *chat_hbox;
 static GtkWidget *wind_tmp;
 
-static void
-chat_close (GtkWidget *widget, gpointer data)
-{
-    GtkWidget *hbox = chat_hbox;
-    struct gtkhx_chat *gchat = data;
-
-    wind_tmp = gtk_window_new ();
-
-    gtkhx_widget_remove_child (gtk_widget_get_parent (hbox), hbox);
-    gtkhx_widget_set_child (wind_tmp, hbox);
-    /* Phase 4.5: dropped GTK 1.2/2-era gtk_widget_realize. */
-    gchat->input = 0;
-    gchat->subject = 0;
-
-    gtkhx_prefs.geo.chat.open = 0;
-    gtkhx_prefs.geo.chat.init = 0;
-}
+/* Phase 5 / docking (Phase 2): chat_close retired. Public chat is
+ * a permanent resident of the toolbar's center PanelGrid; the
+ * destroy-time chat_hbox re-parent trick that used to live here is
+ * unneeded because the panel never goes away. Kept the wind_tmp /
+ * chat_hbox file-statics so create_chat() can still parent xtext
+ * into a holding box before create_chat_window relocates it into
+ * the panel content. */
 
 void
 generate_colors (GtkWidget *widget)
@@ -2092,18 +2104,24 @@ change_subject (GtkWidget *widget, gpointer data)
 }
 
 void
-create_chat_window (GtkWidget *toolbar_window, gpointer data)
+create_chat_window (GtkWidget *parent_window, gpointer data)
 {
     GtkWidget *hbox;
     GtkWidget *outputframe, *inputframe, *subj_frame;
-    GtkWidget *vpaned;
-    GtkWidget *chat_window;
     GtkWidget *vbox, *subj_hbox;
     struct gtkhx_chat *gchat;
+    HxPanel *panel;
     session *sess = data;
 
-    if (gtkhx_prefs.geo.chat.open) {
-        gtk_window_present (GTK_WINDOW (sess->chat_window));
+    (void)parent_window;  /* vestigial — see users.c */
+
+    /* Phase 5 / docking (Phase 2): public chat is a permanent
+     * resident of the toolbar's center PanelGrid. First call
+     * builds and inserts; later calls raise. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_CHAT);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
         return;
     }
 
@@ -2112,24 +2130,11 @@ create_chat_window (GtkWidget *toolbar_window, gpointer data)
      * gchat_with_cid(sess, 0) is invariant non-NULL on every path
      * that reaches create_chat_window (which only fires post-login).
      * Bail loudly on the invariant break — we can't build a chat
-     * window without a backing gtkhx_chat struct. */
+     * panel without a backing gtkhx_chat struct. */
     if (!gchat) {
         g_warning ("create_chat_window: no public-chat gchat — skipping");
         return;
     }
-    chat_window = gtk_window_new ();
-    gtk_window_set_transient_for(GTK_WINDOW(chat_window),  GTK_WINDOW(toolbar_window));
-    gtk_window_set_titlebar (GTK_WINDOW (chat_window), adw_header_bar_new ());
-
-    gtk_widget_set_size_request (chat_window, 412, 280);
-    gtk_window_set_resizable (GTK_WINDOW (chat_window), TRUE);
-
-    g_signal_connect (chat_window, "destroy", G_CALLBACK (chat_close), gchat);
-    gtk_window_set_title (GTK_WINDOW (chat_window), _ ("Chat"));
-    (gtk_widget_set_margin_start (chat_window, 0),
-     gtk_widget_set_margin_end (chat_window, 0),
-     gtk_widget_set_margin_top (chat_window, 0),
-     gtk_widget_set_margin_bottom (chat_window, 0));
 
     vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
     (gtk_widget_set_margin_start (vbox, 5), gtk_widget_set_margin_end (vbox, 5),
@@ -2169,9 +2174,7 @@ create_chat_window (GtkWidget *toolbar_window, gpointer data)
     gtk_widget_set_vexpand (inputframe, FALSE);
     gtk_box_append (GTK_BOX (vstack), outputframe);
     gtk_box_append (GTK_BOX (vstack), inputframe);
-    (void)vpaned; /* declared above but no longer used */
 
-    gtkhx_widget_set_child (chat_window, vbox);
     gtkhx_box_pack (vbox, vstack, 1, 1, 0);
 
     if (wind_tmp) {
@@ -2237,26 +2240,71 @@ create_chat_window (GtkWidget *toolbar_window, gpointer data)
         gtk_box_append (GTK_BOX (hbox), emoji_btn);
     }
 
-    g_object_set_data (G_OBJECT (chat_window), "sess", sess);
+    /* Phase 3 / docking: the Chat panel's content is an AdwTabView
+     * rather than the public-chat vbox directly. The public chat
+     * goes into a pinned tab at position 0; per-conversation tabs
+     * (private chats, private messages) get appended alongside it
+     * by chat_tabs.c-using code. The tab view fills the panel's
+     * vexpand region; a small AdwTabBar sits above it so the
+     * user can switch / close conversations without going to the
+     * dock's tab strip. */
+    {
+        GtkWidget *tab_view  = gtkhx_chat_tabs_init ();
+        AdwTabBar *tab_bar   = ADW_TAB_BAR (adw_tab_bar_new ());
+        GtkWidget *panel_box;
 
-    if (gtkhx_prefs.geo.chat.xsize > 0 && gtkhx_prefs.geo.chat.ysize > 0) {
-        gtk_window_set_default_size (GTK_WINDOW (chat_window),
-                                     gtkhx_prefs.geo.chat.xsize,
-                                     gtkhx_prefs.geo.chat.ysize);
+        adw_tab_bar_set_view (tab_bar, ADW_TAB_VIEW (tab_view));
+        /* Hide the bar when there's only the pinned public-chat
+         * tab — single-tab strips just take vertical space. */
+        adw_tab_bar_set_autohide (tab_bar, TRUE);
+
+        gtkhx_chat_tabs_add_public (vbox, _ ("Chat"));
+
+        panel_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_set_vexpand (tab_view, TRUE);
+        gtk_box_append (GTK_BOX (panel_box), GTK_WIDGET (tab_bar));
+        gtk_box_append (GTK_BOX (panel_box), tab_view);
+
+        panel = hx_panel_new (HX_PANEL_ID_CHAT,
+                              HX_PANEL_KIND_CENTER,
+                              PANEL_AREA_CENTER);
+        panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Chat"));
+        panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                    "user-available-symbolic");
+        panel_widget_set_child     (PANEL_WIDGET (panel), panel_box);
+        g_object_set_data (G_OBJECT (panel), "sess", sess);
     }
 
-    gtk_window_present (GTK_WINDOW (chat_window));
-    init_keyaccel (chat_window);
-
-    if (connected) {
-        changetitlespecific (chat_window, _ ("Chat"));
+    if (toolbar_center_grid != NULL) {
+        panel_grid_add (PANEL_GRID (toolbar_center_grid),
+                        PANEL_WIDGET (panel));
+        {
+            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
+                                                        PANEL_TYPE_FRAME);
+            hx_panel_set_home_frame (panel, frame);
+        }
+    } else {
+        g_critical ("create_chat_window: toolbar dock not built yet");
     }
+
+    /* Registry takes the owning ref; do NOT g_object_unref after.
+     * See users.c for the ref-count walk-through — short version:
+     * gtk_widget_set_parent sinks the floating ref instead of adding
+     * a new one, so unrefing here drops the registry's ref and the
+     * next Close-all-pages destroys the panel. */
+    hx_panel_registry_register (panel);
 
     gtkhx_prefs.geo.chat.open = 1;
     gtkhx_prefs.geo.chat.init = 1;
     gtk_widget_grab_focus (gchat->input);
 
-    sess->chat_window = chat_window;
+    /* notify.c walks back from the public chat to a focusable
+     * top-level via gchat->window — point it at the panel widget;
+     * window_is_active() will check GTK_IS_WINDOW (panel) → false
+     * → notifications always fire for public chat. Phase 4 work
+     * can teach window_is_active() to walk up to the GtkRoot and
+     * additionally check that the panel's tab is the visible one. */
+    gchat->window = GTK_WIDGET (panel);
 }
 
 struct gtkhx_chat *
@@ -2329,13 +2377,24 @@ pchat_new (session *sess, struct chat *chat)
     return gchat;
 }
 
+/* Phase 3 / docking: this used to be a GtkWindow::destroy handler
+ * (sess pulled from g_object_get_data on the closing window, gchat
+ * passed via the signal's data argument). The standalone window is
+ * gone; the chat_tabs close-page dispatcher calls us with just the
+ * cid. Look up the gchat from sess->gchats; if it's still there,
+ * send the protocol-side leave and tear down the gchat struct (which
+ * removes it from the hashtable via gchat_delete's value-destroy
+ * notify). */
 static void
-pchat_close (GtkWidget *widget, gpointer data)
+pchat_close (guint32 cid)
 {
-    struct gtkhx_chat *gchat = data;
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
+    session *sess = &the_session;
+    struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
 
-    hx_part_chat (&sess->htlc, gchat->cid);
+    if (gchat == NULL)
+        return;
+
+    hx_part_chat (&sess->htlc, cid);
     gchat_delete (sess, gchat);
 }
 
@@ -2501,31 +2560,12 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
 
-    pchat_window = gtk_window_new ();
-    /* Phase 5: AdwHeaderBar across all GtkHx windows for visual
-	 * consistency. */
-    gtk_window_set_titlebar (GTK_WINDOW (pchat_window), adw_header_bar_new ());
-    /* Phase 3.x: dropped GTK 1.2-era realize+get_style pair (style unused). */
-
-    /* Phase 5: same fix as create_msgwin — set_size_request sets
-	 * BOTH minimum and natural size in GTK 4, which combined with
-	 * the inner widgets' size_requests below was forcing the
-	 * window to come up at the natural-size of the layout (often
-	 * larger than the screen, with the chat output clipped to the
-	 * paned's allocated band). Use set_default_size for the
-	 * initial size and let the user shrink as far as the inner
-	 * minimums allow. */
-    gtk_window_set_default_size (GTK_WINDOW (pchat_window), 720, 440);
-    gtk_window_set_resizable (GTK_WINDOW (pchat_window), TRUE);
-
-    g_object_set_data (G_OBJECT (pchat_window), "sess", sess);
-    g_signal_connect (pchat_window, "destroy", G_CALLBACK (pchat_close), gchat);
+    /* Phase 3 / docking: pchat content lives in a tab on the Chat
+     * panel's tab view. No standalone window. The tab's title is
+     * the chat title; pchat_window points at the tab content widget
+     * (the hpane) so other code keying off gchat->window keeps
+     * compiling. */
     title = g_strdup_printf ("%s: 0x%08x", _ ("Private Chat"), chat->cid);
-    gtk_window_set_title (GTK_WINDOW (pchat_window), title);
-    (gtk_widget_set_margin_start (pchat_window, 0),
-     gtk_widget_set_margin_end (pchat_window, 0),
-     gtk_widget_set_margin_top (pchat_window, 0),
-     gtk_widget_set_margin_bottom (pchat_window, 0));
 
     vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
     (gtk_widget_set_margin_start (vbox, 5), gtk_widget_set_margin_end (vbox, 5),
@@ -2718,15 +2758,26 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtk_paned_set_end_child (GTK_PANED (hpane), user_vbox);
     gtk_paned_set_position (GTK_PANED (hpane), 435);
 
-    gtkhx_widget_set_child (pchat_window, hpane);
+    /* Phase 3 / docking: gchat->window points at the tab content
+     * widget (hpane). Existing code that uses gchat->window — the
+     * init_keyaccel below, sub-dialogs parented through
+     * gtkhx_widget_get_root, etc. — keeps compiling unchanged.
+     * pchat_window stays declared above for the same duck-typing
+     * reason. */
+    pchat_window = hpane;
+    gchat->window = pchat_window;
+    g_object_set_data (G_OBJECT (pchat_window), "sess", sess);
 
-    gtk_window_present (GTK_WINDOW (pchat_window));
-    init_keyaccel (pchat_window);
-
-    gtk_widget_grab_focus (gchat->input);
+    gtkhx_chat_tabs_add_pchat (pchat_window, chat->cid, title);
     g_free (title);
 
-    gchat->window = pchat_window;
+    /* Surface the new tab + raise the Chat panel. Same idea as the
+     * old gtk_window_present (the standalone window made itself
+     * visible on creation). */
+    gtkhx_chat_tabs_raise_pchat (chat->cid);
+
+    init_keyaccel (pchat_window);
+    gtk_widget_grab_focus (gchat->input);
 
     return gchat;
 }

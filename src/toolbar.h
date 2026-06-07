@@ -18,6 +18,30 @@ extern GtkWidget *status_bar;
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 
+/* Phase 5 / docking (Phase 1): handles to the toolbar window's
+ * embedded PanelDock and its sidebar PanelFrame. Per-window panel
+ * factories (users_panel.c, tasks_panel.c, …) use these to insert
+ * themselves into the right area when the panel is first
+ * registered. NULL before create_toolbar_window has run.
+ *
+ * toolbar_dock          — the dock; pass to panel_dock_set_reveal_*
+ *                         when adding the first sidebar resident.
+ * toolbar_sidebar_frame — the start-area PanelFrame; pass to
+ *                         panel_frame_add for SIDEBAR-kind panels.
+ * toolbar_center_grid   — the center PanelGrid; pass to
+ *                         panel_grid_add for CENTER-kind panels.
+ *
+ * Phase 2 panel factories call:
+ *   panel_frame_add (PANEL_FRAME (toolbar_sidebar_frame), panel);
+ *   panel_dock_set_reveal_start (PANEL_DOCK (toolbar_dock), TRUE);
+ * (revealer doesn't auto-open on the first add — see Phase 0
+ * finding #5 in docs/docking-phase0-findings.md). */
+extern GtkWidget *toolbar_dock;
+extern GtkWidget *toolbar_sidebar_frame;  /* start-area frame  (initially empty) */
+extern GtkWidget *toolbar_end_frame;      /* end-area frame    (Users default)   */
+extern GtkWidget *toolbar_bottom_frame;   /* bottom-area frame (Tasks default)   */
+extern GtkWidget *toolbar_center_grid;    /* center grid       (Chat/News/Files) */
+
 /* Phase 5: register the hamburger-menu's GActions on the application.
  * Call from gtkhx_activate after the AdwApplication is constructed —
  * fe_init() runs create_toolbar_window earlier (before

@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <gdk/gdkkeysyms.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -420,10 +421,9 @@ static void
 gtkhx_save_window_positions (void)
 {
     save_geo (toolbar_window, &gtkhx_prefs.geo.tool);
-    save_geo (the_session.chat_window, &gtkhx_prefs.geo.chat);
-    save_geo (the_session.users_window, &gtkhx_prefs.geo.users);
-    save_geo (the_session.tasks_window, &gtkhx_prefs.geo.tasks);
-    save_geo (the_session.news_window, &gtkhx_prefs.geo.news);
+    /* Phase 5 / docking (Phase 2): Chat / Users / Tasks / News
+     * panels live inside the toolbar window; per-panel size
+     * persistence is Phase 4 layout restore. */
 }
 
 void
@@ -798,10 +798,25 @@ fe_init (void)
 
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
+    /* Phase 5 / docking (Phase 2): create_chat / create_tasks
+     * build per-session widget state (xtext + chat_hbox, gtask
+     * scroll) that the toolbar window's eager-panel-construction
+     * path consumes when it runs create_chat_window /
+     * create_tasks_window. Order matters: model state first, then
+     * the toolbar (which now hosts everything). */
+    create_chat  (&the_session);
+    create_tasks (&the_session);
+
     create_toolbar_window (&the_session);
     init_colors (toolbar_window);
 
-    create_chat (&the_session);
+    /* The auto-open checks below used to spawn standalone windows
+     * for each tool. With Phase 2 docking the panels are eager-
+     * constructed inside create_toolbar_window; these calls now
+     * just registry-lookup-hit and raise the corresponding tab,
+     * which preserves the "open chat when you reconnect" prefs
+     * semantics — the panel is the focused tab on launch when the
+     * init bit is set. */
     if (gtkhx_prefs.geo.chat.init == 1) {
         create_chat_window (toolbar_window, &the_session);
     }
@@ -811,7 +826,6 @@ fe_init (void)
     if (gtkhx_prefs.geo.users.init == 1) {
         create_users_window (toolbar_window, &the_session);
     }
-    create_tasks (&the_session);
     if (gtkhx_prefs.geo.tasks.init == 1) {
         create_tasks_window (toolbar_window, &the_session);
     }
@@ -984,6 +998,15 @@ init (int argc, char **argv)
     textdomain (PACKAGE);
 #endif
     gtk_init ();
+    /* Phase 5 / docking: panel_init() registers libpanel's boxed
+     * types and CSS provider. It has to run before the first
+     * libpanel widget construction; fe_init -> create_toolbar_window
+     * (below) builds the dock + grid, so init here. Idempotent and
+     * does not require an AdwApplication instance (good, because we
+     * don't have one yet — see the long comment in
+     * create_toolbar_window in toolbar.c about NULL gtkhx_app at
+     * this point in init). */
+    panel_init ();
     fe_init ();
 }
 

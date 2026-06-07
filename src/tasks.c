@@ -23,11 +23,14 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
+#include <libpanel.h>
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "hx_panel.h"
+#include "panel_registry.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "human_readable.h"
@@ -249,6 +252,12 @@ create_tasks (session *sess)
     gtask_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (gtask_scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
+    /* Phase 5 / docking (Phase 2): grow vertically inside the
+     * panel's content vbox so the scrolled area fills whichever
+     * frame the panel resides in. Without this the scroll widget
+     * shrinks to the list's natural height and the panel leaves
+     * empty space below the rows. Matches users.c's pattern. */
+    gtk_widget_set_vexpand (gtask_scroll, TRUE);
     gtkhx_widget_set_child (gtask_scroll, gtklist);
     g_object_ref_sink (gtask_scroll);
 
@@ -660,24 +669,13 @@ task_update (session *sess, struct task *tsk)
     }
 }
 
-static void
-tasks_destroy (GtkWidget *widget, gpointer data)
-{
-    session *sess = data;
-    (void)widget;
-
-    /* Phase 5: gtask_scroll used to live inside an outer vbox that
-	 * also held the topframe + button row; here we unparented it
-	 * from that vbox so the next create_tasks_window could re-attach
-	 * it as a fresh child. With the buttons moved into the
-	 * AdwHeaderBar, gtask_scroll is the window's direct child — so
-	 * we just unparent it from whatever its current parent is. */
-    if (sess->gtask_scroll && gtk_widget_get_parent (sess->gtask_scroll)) {
-        gtk_widget_unparent (sess->gtask_scroll);
-    }
-    gtkhx_prefs.geo.tasks.open = 0;
-    gtkhx_prefs.geo.tasks.init = 0;
-}
+/* Phase 5 / docking (Phase 2): tasks_destroy retired. The Tasks
+ * panel is a permanent resident of the toolbar's sidebar
+ * PanelFrame; the standalone GtkWindow it used to hang under is
+ * gone, so there's nothing to unparent on close. The
+ * gtkhx_prefs.geo.tasks.open flag still flips at panel creation
+ * time so the rest of tasks.c continues to gate worker-thread
+ * updates on it. */
 
 extern void tracker_kill_threads (void);
 static void
@@ -887,22 +885,24 @@ tasks_pixmap_button (const char *resource_name, const char *tooltip,
 void
 create_tasks_window (GtkWidget *widget, gpointer data)
 {
-    GtkWidget *header;
     GtkWidget *stopbtn, *gobtn, *upbtn, *dnbtn;
-    GtkWidget *tasks_window;
-    session *sess = data;
+    GtkWidget *content_vbox;
+    GtkWidget *button_bar;
+    HxPanel   *panel;
+    session   *sess = data;
 
-    if (gtkhx_prefs.geo.tasks.open) {
-        gtk_window_present (GTK_WINDOW (sess->tasks_window));
+    (void)widget;  /* vestigial parent_window arg, see users.c */
+
+    /* Phase 5 / docking (Phase 2): same pattern as Users — the
+     * Tasks panel lives in the toolbar's bottom-area PanelFrame
+     * (home_area=PANEL_AREA_BOTTOM, added to toolbar_bottom_frame
+     * below). First call constructs + slots in; later calls raise. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_TASKS);
+    if (panel != NULL) {
+        hx_panel_ensure_attached (panel);
+        panel_widget_raise (PANEL_WIDGET (panel));
         return;
     }
-
-    tasks_window = gtk_window_new ();
-    gtk_window_set_transient_for(GTK_WINDOW(tasks_window),  GTK_WINDOW(toolbar_window));
-    gtk_window_set_resizable (GTK_WINDOW (tasks_window), TRUE);
-    gtk_window_set_title (GTK_WINDOW (tasks_window), _ ("Tasks"));
-
-    header = adw_header_bar_new ();
 
     stopbtn
         = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
@@ -916,37 +916,48 @@ create_tasks_window (GtkWidget *widget, gpointer data)
                                  _ ("Move Xfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), stopbtn);
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), gobtn);
-    /* pack_end appends from the right edge inward, so up appears
-	 * to the left of down to match the natural reading order. */
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), dnbtn);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), upbtn);
+    /* Phase 5 / docking (Phase 2): the four headerbar action
+     * buttons (Stop/Start on start, Up/Down on end) relocate to a
+     * slim top-of-content GtkBox. Same start/end grouping as the
+     * old headerbar via an hexpand spacer between. */
+    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start (button_bar,  6);
+    gtk_widget_set_margin_end   (button_bar,  6);
+    gtk_widget_set_margin_top   (button_bar,  6);
+    gtk_widget_set_margin_bottom (button_bar, 4);
+    gtk_box_append (GTK_BOX (button_bar), stopbtn);
+    gtk_box_append (GTK_BOX (button_bar), gobtn);
+    {
+        GtkWidget *spacer = gtk_label_new (NULL);
+        gtk_widget_set_hexpand (spacer, TRUE);
+        gtk_box_append (GTK_BOX (button_bar), spacer);
+    }
+    gtk_box_append (GTK_BOX (button_bar), upbtn);
+    gtk_box_append (GTK_BOX (button_bar), dnbtn);
 
-    gtk_window_set_titlebar (GTK_WINDOW (tasks_window), header);
+    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append (GTK_BOX (content_vbox), button_bar);
+    gtk_box_append (GTK_BOX (content_vbox), sess->gtask_scroll);
 
-    gtk_window_set_child (GTK_WINDOW (tasks_window), sess->gtask_scroll);
+    panel = hx_panel_new (HX_PANEL_ID_TASKS,
+                          HX_PANEL_KIND_SIDEBAR,
+                          PANEL_AREA_BOTTOM);
+    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Tasks"));
+    panel_widget_set_icon_name (PANEL_WIDGET (panel),
+                                "view-list-symbolic");
+    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
 
-    g_signal_connect (tasks_window, "destroy", G_CALLBACK (tasks_destroy),
-                      sess);
-
-    init_keyaccel (tasks_window);
-
-    /* only apply saved geometry when the prefs file actually
-     * has one (see users.c for rationale — zero-size collapses the
-     * window under GTK 3). */
-    if (gtkhx_prefs.geo.tasks.xsize > 0 && gtkhx_prefs.geo.tasks.ysize > 0) {
-        gtk_window_set_default_size (GTK_WINDOW (tasks_window),
-                                     gtkhx_prefs.geo.tasks.xsize,
-                                     gtkhx_prefs.geo.tasks.ysize);
+    if (toolbar_bottom_frame != NULL) {
+        panel_frame_add (PANEL_FRAME (toolbar_bottom_frame),
+                         PANEL_WIDGET (panel));
+        hx_panel_set_home_frame (panel, toolbar_bottom_frame);
+    } else {
+        g_critical ("create_tasks_window: toolbar dock not built yet");
     }
 
-    gtk_window_present (GTK_WINDOW (tasks_window));
-
-    if (connected == 1) {
-        changetitlespecific (tasks_window, _ ("Tasks"));
-    }
-    sess->tasks_window = tasks_window;
+    /* Registry takes the owning ref; do NOT g_object_unref after.
+     * See users.c for the ref-count walk-through. */
+    hx_panel_registry_register (panel);
 
     gtkhx_prefs.geo.tasks.open = 1;
     gtkhx_prefs.geo.tasks.init = 1;

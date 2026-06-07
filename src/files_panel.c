@@ -994,6 +994,22 @@ update_status (files_panel *p)
         gtk_bitset_unref (sel);
     }
 
+    /* Provider unavailable — the canonical case is the remote
+	 * provider before login / after disconnect. Surface its
+	 * get_unavailable_reason text (currently "Not connected to a
+	 * server.") so the user sees why the rows are empty instead
+	 * of a misleading "0 items". Local provider always returns
+	 * NULL, so this branch only fires for the remote side. */
+    if (p->provider) {
+        const char *reason
+            = hx_files_provider_get_unavailable_reason (p->provider);
+        if (reason) {
+            gtk_widget_add_css_class (p->status_label, "warning");
+            gtk_label_set_text (GTK_LABEL (p->status_label), reason);
+            return;
+        }
+    }
+
     /* If the remote provider's most recent FILE_LIST came back as
 	 * a task error, the rows are empty and the user would just see
 	 * "0 items" — which doesn't tell them what went wrong.
