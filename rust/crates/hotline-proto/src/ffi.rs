@@ -3418,3 +3418,101 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_parse_tlv_at(
         None => false,
     }
 }
+
+// ---- HTRK v3 meta TLV typed readers -----------------------------------
+//
+// Wire-format-strict fail-closed scalar extractors for the per-record
+// TLV trailer. Strings stay in C (need g_utf8_make_valid + g_strndup);
+// these readers cover only the numeric / bool / enum-clamp half.
+
+/// Read a u8 TLV value with `default` on wrong-size payload (anything
+/// other than exactly 1 byte).
+///
+/// # Safety
+/// `value` valid for `value_len` bytes (or NULL when `value_len == 0`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u8(
+    value: *const u8,
+    value_len: usize,
+    default: u8,
+) -> u8 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u8(s, default)
+}
+
+/// Read a u16 TLV value (big-endian) with `default` on wrong-size
+/// payload (≠ 2 bytes).
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u16(
+    value: *const u8,
+    value_len: usize,
+    default: u16,
+) -> u16 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u16(s, default)
+}
+
+/// Read a signed i16 TLV value (big-endian, two's-complement) with
+/// `default` on wrong-size payload.
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_i16(
+    value: *const u8,
+    value_len: usize,
+    default: i16,
+) -> i16 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_i16(s, default)
+}
+
+/// Read a u32 TLV value (big-endian) with `default` on wrong-size
+/// payload (≠ 4 bytes).
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u32(
+    value: *const u8,
+    value_len: usize,
+    default: u32,
+) -> u32 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u32(s, default)
+}
+
+/// Read a boolean TLV value: any non-zero byte → true. Empty / all-
+/// zero payload → false.
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_bool(
+    value: *const u8,
+    value_len: usize,
+) -> bool {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_bool(s)
+}
+
+/// Clamp a raw maturity-rating byte to {0..=3}, defaulting to 0
+/// (GENERAL) on unknown values. Spec rule.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
+    raw: u8,
+) -> u8 {
+    parse::tracker_v3_meta_clamp_maturity(raw)
+}
+
+/// Clamp a raw listing-category byte to {0..=12}, defaulting to 0
+/// (UNSPECIFIED) on unknown values. Spec rule.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
+    raw: u8,
+) -> u8 {
+    parse::tracker_v3_meta_clamp_listing_category(raw)
+}

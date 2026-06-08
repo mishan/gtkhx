@@ -17,9 +17,9 @@
 
 #include <string.h>
 #include <glib.h>
-#include <netinet/in.h>
 #include "compat.h"
 #include "hotline.h"
+#include "hotline_proto.h" /* gtkhx_proto_tracker_v3_meta_read_* */
 #include "tracker_v3.h"
 #include "tracker_v3_meta.h"
 
@@ -47,59 +47,43 @@
  * has_* presence flag (e.g. a malformed MAX_USERS TLV leaves
  * max_users=0 but sets has_max_users=TRUE). Callers that want to
  * filter malformed presence need to validate at the wire layer
- * before reaching the typed view — this view is best-effort. */
+ * before reaching the typed view — this view is best-effort.
+ *
+ * Phase R2: scalar / bool readers + enum-clamp logic moved to the
+ * Rust hotline-proto crate. The strict-size + closed-vocab
+ * behaviour is preserved byte-for-byte; the thin wrappers below
+ * keep the in-file call shape so the on_tlv switch is unchanged.
+ * Strings stay in C because they need g_utf8_make_valid +
+ * g_strndup, which would complicate the FFI contract for no gain. */
 
-static guint8
+static inline guint8
 read_u8 (const guint8 *v, guint16 len, guint8 def)
 {
-    return len == 1 ? v[0] : def;
+    return gtkhx_proto_tracker_v3_meta_read_u8 (v, len, def);
 }
 
-static guint16
+static inline guint16
 read_u16 (const guint8 *v, guint16 len, guint16 def)
 {
-    if (len != 2) {
-        return def;
-    }
-    guint16 be;
-    memcpy (&be, v, sizeof (be));
-    return ntohs (be);
+    return gtkhx_proto_tracker_v3_meta_read_u16 (v, len, def);
 }
 
-static gint16
+static inline gint16
 read_i16 (const guint8 *v, guint16 len, gint16 def)
 {
-    if (len != 2) {
-        return def;
-    }
-    guint16 ube;
-    memcpy (&ube, v, sizeof (ube));
-    return (gint16) ntohs (ube);
+    return gtkhx_proto_tracker_v3_meta_read_i16 (v, len, def);
 }
 
-static guint32
+static inline guint32
 read_u32 (const guint8 *v, guint16 len, guint32 def)
 {
-    if (len != 4) {
-        return def;
-    }
-    guint32 be;
-    memcpy (&be, v, sizeof (be));
-    return ntohl (be);
+    return gtkhx_proto_tracker_v3_meta_read_u32 (v, len, def);
 }
 
-static gboolean
+static inline gboolean
 read_bool (const guint8 *v, guint16 len)
 {
-    /* Any non-zero byte in the value buffer reads as TRUE. Empty
-     * payloads (len 0) are FALSE — the TLV being present with no
-     * payload is meaningfully "no" per most spec readings. */
-    for (guint16 i = 0; i < len; i++) {
-        if (v[i] != 0) {
-            return TRUE;
-        }
-    }
-    return FALSE;
+    return gtkhx_proto_tracker_v3_meta_read_bool (v, len);
 }
 
 /* g_utf8_make_valid on the borrowed slice, returning a NUL-
@@ -149,12 +133,11 @@ on_tlv (guint16 id, guint16 value_len, const guint8 *value, gpointer user_data)
         break;
     case HTRK_V3_TLV_MATURITY: {
         guint8 raw = read_u8 (value, value_len, 0);
-        /* Spec: unknown values MUST be treated as 0 (GENERAL). */
-        if (raw <= HX_TRACKER_V3_MATURITY_ADULT) {
-            m->maturity = (HxTrackerV3Maturity) raw;
-        } else {
-            m->maturity = HX_TRACKER_V3_MATURITY_GENERAL;
-        }
+        /* Spec: unknown values MUST be treated as 0 (GENERAL).
+         * Closed-vocab clamp lives in the Rust crate so the C side
+         * and any future Rust caller stay locked to the same rule. */
+        m->maturity = (HxTrackerV3Maturity)
+            gtkhx_proto_tracker_v3_meta_clamp_maturity (raw);
         break;
     }
     case HTRK_V3_TLV_UPTIME:
@@ -259,12 +242,11 @@ on_tlv (guint16 id, guint16 value_len, const guint8 *value, gpointer user_data)
         break;
     case HTRK_V3_TLV_LISTING_CATEGORY: {
         guint8 raw = read_u8 (value, value_len, 0);
-        /* Spec: unknown values MUST be treated as 0 (UNSPECIFIED). */
-        if (raw <= HX_TRACKER_V3_CATEGORY_CREATIVE) {
-            m->listing_category = (HxTrackerV3Category) raw;
-        } else {
-            m->listing_category = HX_TRACKER_V3_CATEGORY_UNSPECIFIED;
-        }
+        /* Spec: unknown values MUST be treated as 0 (UNSPECIFIED).
+         * Closed-vocab clamp lives in the Rust crate so the C side
+         * and any future Rust caller stay locked to the same rule. */
+        m->listing_category = (HxTrackerV3Category)
+            gtkhx_proto_tracker_v3_meta_clamp_listing_category (raw);
         break;
     }
     case HTRK_V3_TLV_LANGUAGE_STRICT:

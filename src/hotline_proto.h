@@ -1097,4 +1097,30 @@ extern bool gtkhx_proto_tracker_v3_parse_tlv_at (
     const uint8_t *buf, size_t len, size_t off,
     struct gtkhx_proto_tracker_v3_tlv *out);
 
+/* ---- HTRK v3 meta TLV typed readers ----
+ *
+ * Wire-format-strict fail-closed scalar extractors for the
+ * per-record TLV trailer. "Wrong size" — anything other than the
+ * exact spec-mandated width — returns the supplied default rather
+ * than silently decoding partial bytes. Strings stay in C
+ * (g_utf8_make_valid + g_strndup); these cover only the numeric /
+ * bool / enum-clamp half. */
+
+extern uint8_t gtkhx_proto_tracker_v3_meta_read_u8 (
+    const uint8_t *value, size_t value_len, uint8_t default_);
+extern uint16_t gtkhx_proto_tracker_v3_meta_read_u16 (
+    const uint8_t *value, size_t value_len, uint16_t default_);
+extern int16_t gtkhx_proto_tracker_v3_meta_read_i16 (
+    const uint8_t *value, size_t value_len, int16_t default_);
+extern uint32_t gtkhx_proto_tracker_v3_meta_read_u32 (
+    const uint8_t *value, size_t value_len, uint32_t default_);
+extern bool gtkhx_proto_tracker_v3_meta_read_bool (
+    const uint8_t *value, size_t value_len);
+
+/* Closed-vocab enum clamps. raw values inside the spec-defined
+ * range pass through; out-of-range values reset to 0 (GENERAL /
+ * UNSPECIFIED). Spec rule for forward-compat. */
+extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_maturity (uint8_t raw);
+extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
+
 #endif /* _HOTLINE_PROTO_H */

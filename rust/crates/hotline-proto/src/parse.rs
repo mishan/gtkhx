@@ -1150,6 +1150,87 @@ pub fn parse_tracker_v3_tlv_at(buf: &[u8], off: usize) -> Option<(TrackerV3Tlv<'
     ))
 }
 
+// ---- HTRK v3 meta TLV typed readers ------------------------------------
+//
+// Per-record TLV trailer fields are typed (u8 / u16 / i16 / u32 / bool /
+// string / enum). These readers fail CLOSED on a wrong-size payload —
+// a truncated or overlong TLV returns the caller's `default` instead of
+// silently decoding partial bytes. "Wrong size" means anything other
+// than the exact spec-mandated width (e.g. u16 reader rejects len != 2,
+// not just len < 2 — so an oversize payload can't quietly decode from
+// its first 2 bytes and paper over a corrupt or future-spec-extended
+// TLV).
+//
+// String fields are NOT handled here — they need GLib's
+// `g_utf8_make_valid` for the Pango safety pass that's mandatory for
+// untrusted UTF-8 going to the display layer. The C side of
+// src/tracker_v3_meta.c keeps the string copies + sanitisation; this
+// module only owns the scalar half of the wire decode.
+
+/// Read a u8 TLV value with the spec-mandated default on a non-1-byte
+/// payload. Mirrors the `static read_u8` in `src/tracker_v3_meta.c`.
+pub fn tracker_v3_meta_read_u8(value: &[u8], default: u8) -> u8 {
+    if value.len() == 1 {
+        value[0]
+    } else {
+        default
+    }
+}
+
+/// Read a u16 TLV value (big-endian) with the spec-mandated default
+/// on a wrong-size (≠ 2 bytes) payload.
+pub fn tracker_v3_meta_read_u16(value: &[u8], default: u16) -> u16 {
+    if value.len() == 2 {
+        u16::from_be_bytes([value[0], value[1]])
+    } else {
+        default
+    }
+}
+
+/// Read a signed i16 TLV value (big-endian, two's-complement) with the
+/// spec-mandated default on a wrong-size payload. Used for the
+/// timezone-offset-minutes TLV which is the only signed scalar in
+/// the meta surface.
+pub fn tracker_v3_meta_read_i16(value: &[u8], default: i16) -> i16 {
+    if value.len() == 2 {
+        i16::from_be_bytes([value[0], value[1]])
+    } else {
+        default
+    }
+}
+
+/// Read a u32 TLV value (big-endian) with the spec-mandated default
+/// on a wrong-size (≠ 4 bytes) payload.
+pub fn tracker_v3_meta_read_u32(value: &[u8], default: u32) -> u32 {
+    if value.len() == 4 {
+        u32::from_be_bytes([value[0], value[1], value[2], value[3]])
+    } else {
+        default
+    }
+}
+
+/// Read a boolean TLV value: any non-zero byte in the payload reads
+/// as `true`, empty / all-zero payload reads as `false`. Tracker v3
+/// spec deliberately leaves the width open to allow forward-compat
+/// "any-non-zero-byte means yes" decoding.
+pub fn tracker_v3_meta_read_bool(value: &[u8]) -> bool {
+    value.iter().any(|&b| b != 0)
+}
+
+/// Clamp a raw maturity-rating byte to the closed vocabulary
+/// {0 GENERAL, 1 TEEN, 2 MATURE, 3 ADULT}. Spec rule: unknown values
+/// MUST be treated as 0 (GENERAL).
+pub fn tracker_v3_meta_clamp_maturity(raw: u8) -> u8 {
+    if raw <= 3 { raw } else { 0 }
+}
+
+/// Clamp a raw listing-category byte to the closed vocabulary
+/// 0..=12 (UNSPECIFIED .. CREATIVE). Spec rule: unknown values MUST
+/// be treated as 0 (UNSPECIFIED).
+pub fn tracker_v3_meta_clamp_listing_category(raw: u8) -> u8 {
+    if raw <= 12 { raw } else { 0 }
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -3533,6 +3614,94 @@ mod tests {
         assert_eq!(tlv.id, 0x0100);
         assert!(tlv.value.is_empty());
         assert_eq!(next, 4);
+    }
+
+    // ---- HTRK v3 meta typed readers ----
+
+    #[test]
+    fn tracker_v3_meta_u8_correct_and_wrong_size() {
+        // Right size: read through.
+        assert_eq!(tracker_v3_meta_read_u8(&[0x42], 0xff), 0x42);
+        // Wrong size: default.
+        assert_eq!(tracker_v3_meta_read_u8(&[], 0xff), 0xff);
+        assert_eq!(tracker_v3_meta_read_u8(&[0, 0], 0xff), 0xff);
+        // Overlong: default (we don't decode the first byte).
+        assert_eq!(tracker_v3_meta_read_u8(&[0x42, 0x42, 0x42], 0xff), 0xff);
+    }
+
+    #[test]
+    fn tracker_v3_meta_u16_correct_and_wrong_size() {
+        // BE decode at exactly 2 bytes.
+        assert_eq!(tracker_v3_meta_read_u16(&[0x12, 0x34], 0xffff), 0x1234);
+        // Truncated.
+        assert_eq!(tracker_v3_meta_read_u16(&[], 0xffff), 0xffff);
+        assert_eq!(tracker_v3_meta_read_u16(&[0x12], 0xffff), 0xffff);
+        // Overlong — does NOT decode the first 2 bytes.
+        assert_eq!(
+            tracker_v3_meta_read_u16(&[0x12, 0x34, 0x56], 0xffff),
+            0xffff
+        );
+    }
+
+    #[test]
+    fn tracker_v3_meta_i16_preserves_sign() {
+        // -1 as BE bytes: 0xFFFF.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xff, 0xff], 0), -1);
+        // -480 (UTC-08:00) as BE bytes: 0xFE20.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xfe, 0x20], 0), -480);
+        // Positive.
+        assert_eq!(tracker_v3_meta_read_i16(&[0x01, 0x68], 0), 360);
+        // Wrong size → default.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xff], 7), 7);
+    }
+
+    #[test]
+    fn tracker_v3_meta_u32_correct_and_wrong_size() {
+        assert_eq!(
+            tracker_v3_meta_read_u32(&[0x12, 0x34, 0x56, 0x78], 0),
+            0x1234_5678
+        );
+        // Wrong size → default.
+        assert_eq!(tracker_v3_meta_read_u32(&[0, 0, 0], 99), 99);
+        assert_eq!(tracker_v3_meta_read_u32(&[], 99), 99);
+        // Overlong.
+        assert_eq!(tracker_v3_meta_read_u32(&[0; 5], 99), 99);
+    }
+
+    #[test]
+    fn tracker_v3_meta_bool_any_nonzero() {
+        // Empty payload → false.
+        assert!(!tracker_v3_meta_read_bool(&[]));
+        // All zero → false.
+        assert!(!tracker_v3_meta_read_bool(&[0, 0, 0]));
+        // Single non-zero byte → true.
+        assert!(tracker_v3_meta_read_bool(&[1]));
+        // Mixed: any non-zero anywhere → true.
+        assert!(tracker_v3_meta_read_bool(&[0, 0, 1, 0]));
+    }
+
+    #[test]
+    fn tracker_v3_meta_clamp_maturity_closed_vocab() {
+        // Closed vocab 0..=3 passes through.
+        for raw in 0u8..=3 {
+            assert_eq!(tracker_v3_meta_clamp_maturity(raw), raw);
+        }
+        // Unknown values → 0 (GENERAL).
+        for raw in [4u8, 5, 100, 255] {
+            assert_eq!(tracker_v3_meta_clamp_maturity(raw), 0);
+        }
+    }
+
+    #[test]
+    fn tracker_v3_meta_clamp_listing_category_closed_vocab() {
+        // Closed vocab 0..=12 passes through.
+        for raw in 0u8..=12 {
+            assert_eq!(tracker_v3_meta_clamp_listing_category(raw), raw);
+        }
+        // Unknown values → 0 (UNSPECIFIED).
+        for raw in [13u8, 50, 100, 255] {
+            assert_eq!(tracker_v3_meta_clamp_listing_category(raw), 0);
+        }
     }
 
     // ---- news dirlist: folderitem ----
