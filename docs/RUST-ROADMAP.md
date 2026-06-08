@@ -300,11 +300,122 @@ anymore.
 
 ## Phase R2 — Wire protocol crate
 
-**Goal:** A typed Rust representation of every Hotline 1.0/1.2/1.5/1.9 message,
-plus parser and serializer. The receive path (`rcv.c` + the `proto_helpers.c`
-extractors) and the send path (the `hlwrite()`-based serialization) become
-thin C shims that call into the Rust crate; new wire-format work happens in
-Rust.
+**Status:** Substantially complete. The `hotline-proto` crate exists at
+`rust/crates/hotline-proto/` with `parse`, `build`, `wire`, `messages`,
+`sanitize`, `text`, and `ffi` modules; the C side calls into Rust through
+~90 `#[no_mangle]` FFI shims declared in `src/hotline_proto.h`. The bulk of
+the receive-side extractors in `proto_helpers.c` and every shipped send-side
+opcode builder now delegate to Rust. Outstanding items are listed at the end
+of this section so the phase has a concrete exit checklist; the **Goal**
+prose below is the original framing and stays for reference.
+
+### Shipped on `main`
+
+Receive path (extractors → Rust, dispatch in `rcv.c` stays C per design):
+
+- HTLS_HDR_USER_SELFINFO, HTLS_HDR_TASK header fields (TASK-mask dispatch fix
+  in `hx_rcv_hdr` also landed — task replies whose `type` carries the original
+  opcode in the high 16 bits now dispatch correctly).
+- HTLS_HDR_CHAT, _CHAT_SUBJECT, _CHAT_INVITE.
+- HTLS_HDR_MSG, MSG_BROADCAST.
+- HTLS_HDR_BANNER, _QUEUE, _AGREEMENT.
+- HTLS_HDR_USER_PART, _USER_CHANGE, plus the per-record USER_LIST chunk
+  parser shared by selfinfo + user_list.
+- News path: `hx_news_file_extract`, `hx_news_dirlist_parse_{categoryitem,
+  folderitem}`, `hx_news_post_walk` chunk walker, `hx_newscat_parse`,
+  `rcv_task_news_post` (GETTHREAD reply parser).
+- Task-reply parsers: `rcv_task_user_info`, `rcv_task_user_open`,
+  `file_get` / `folder_get` / `file_getinfo` / `file_put` / `folder_put` /
+  `banner_get` xfer-reply parsers.
+- Chat-history extension entry (fogWraith spec, packed-binary with TLV
+  trailer; `g_malloc + memcpy + trailing NUL` for embedded-NUL safety).
+- File-list packed-binary entry walker (`hl_filelist_walk`).
+- Tracker path: HTRK v1 reply parsers (header + fixed record + text
+  normalization), HTRK v3 pack/parse (handshake, listing-request, response
+  header, record, TLV walker), HTRK v3 meta typed readers (u8/u16/i16/u32/
+  bool + closed-vocab clamps for MATURITY and LISTING_CATEGORY).
+
+Send path (builders → Rust, `hlwrite_chunks` socket-write still C):
+
+- chat / msg / broadcast / chat-admin send opcodes; agreement_packet builder.
+- users.c, usermod.c, news.c / news15.c (both batches), files.c (both
+  batches), misc small (no-chunk + 1-chunk) opcodes.
+- xfers.c FILE_GET + FILE_PUT send opcodes.
+
+Cross-cutting:
+
+- Two ABI-pin patterns in place: `_Static_assert(sizeof(...) == N, ...)` on
+  the C side, mirrored `const _: () = { offset_of/size_of/align_of ... };`
+  on the Rust side. Covers `gtkhx_proto_history_entry` (32 bytes) and
+  `gtkhx_proto_tracker_record_fixed` (12 bytes). New cross-language
+  out-structs should adopt the same pattern.
+- `HxChunk` `#[repr(C)]` mirror of `struct hx_chunk` plus equivalent layout
+  assertions; the FFI shape lets builders return a `chunks[]` array the C
+  side hands directly to `hlwrite_chunks`.
+
+### Remaining in R2
+
+The outer dispatch / signal-emit layer in `rcv.c` is **intentionally** still
+C per the original goal text ("the C side keeps the dispatch table and the
+`GtkhxSession` signal emit"). What's left is leaf work, in rough
+extraction order:
+
+1. **`proto_helpers.c` residuals**
+   - `hlpack` / `hlpack_chunks` (the variadic chunk-array serializer). The
+     opcode-specific builders bypass it now via the `HxChunk` interface; the
+     remaining call sites should migrate so `hlpack` can be deleted with its
+     last consumer.
+   - `hl_capabilities_decode` (HOPE capabilities TLV decode, ~18 LOC).
+   - `hl_hdr_decode` (frame-header decoder — partially covered by
+     `gtkhx_proto_header_trans` / `_header_in_error`, but the C function is
+     still the entry point).
+   - `hl_htxf_hdr_pack` (HTXF subframe header packer, ~18 LOC).
+   - `hx_chat_split_nick_body` (chat line splitter for nick highlighting).
+   - `hx_highlight_match` (substring word-boundary match).
+   - `HxChatEvent` / `HxMsgEvent` boxed-type lifecycle (`_new` / `_copy` /
+     `_free` + `G_DEFINE_BOXED_TYPE`). These are the first two boxed types
+     that need to move; the pattern (FFI returns offsets into a caller-owned
+     scratch buffer, C wraps in the GObject boxed-type machinery) will
+     generalize to the rest of the boxed types when R4 runs.
+
+2. **`network_decode.c`** (~315 LOC, two functions)
+   - `hx_aead_pump_frames` — frame-level AEAD decryption pump.
+   - `hx_decode` — top-level dechunk / decrypt / decompress orchestration.
+
+     Per the original gotcha note, the chunk/decrypt/decompress ordering is
+     wire-format-critical and the file's only two callers are
+     `network.c::hx_rcv` and the Tier 3 hope tests. The orchestration moves
+     in R3 (it ties into the tokio rewrite); decoupling the per-frame
+     decryption pump may still be worth extracting here so the R3 work has
+     a smaller surface to touch.
+
+3. **`proto_trace.c`** (~530 LOC, debug-only)
+   - Opcode + data-tag name lookups; trace emit. Roadmap gotcha note already
+     said "Trace output stays roughly as is; it's a debug aid, not a hot
+     path." Defer unless something motivates moving it.
+
+4. **`gtkhx_text_to_utf8` migration**
+   - `rust/crates/hotline-proto/src/text.rs::to_utf8` already implements the
+     MACINTOSH → UTF-8 table byte-for-byte. The C `text_util.c::gtkhx_text_to_utf8`
+     entry point has not yet been rewritten to delegate. Once it does, the
+     C function becomes a thin wrapper around the Rust implementation and
+     `text_util.c` shrinks to a stub. The R5 chat / news / msg ports later
+     drop the C entry point entirely.
+
+5. **`rcv_task_login`** (the largest remaining `rcv_task_*` in C, ~460 LOC)
+   - The post-LOGIN state machine: HOPE handshake completion, agreement
+     reception, USERLIST request, post-login fetches. Calls many parsers
+     that are already in Rust, but its outer flow stays C until R3 picks up
+     the connection lifecycle. Treat as R3-adjacent rather than R2; document
+     here so the R2 exit checklist doesn't surprise anyone.
+
+6. **Unit-test exit criterion**
+   - Goal: "unit-test count in the Rust workspace exceeds the surviving C
+     unit-test count." Already there in absolute count (~300 Rust tests vs.
+     ~56 C unit+proto tests on `main`), but we should make this an explicit
+     check before declaring R2 done.
+
+
 
 > **Note on `commands.c`:** an earlier draft of this plan named `commands.c`
 > as the message *serializer*. That is wrong. `commands.c` is the chat
@@ -384,10 +495,12 @@ exhaustive `match` on field IDs, no more `HN16(&foo, &foo)` aliasing footguns
 **Exit criteria:** `rcv.c` (and the `proto_helpers.c` extractors) are reduced
 to dispatch tables and GObject signal-emit calls, and the `hlwrite` send
 sites build their payloads in Rust; the actual byte-twiddling is all in Rust.
-The
-unit-test count in the Rust workspace exceeds the surviving C unit-test count.
-Wire-format regressions caught by `cargo test --workspace` before they ever
-reach a server.
+The unit-test count in the Rust workspace exceeds the surviving C unit-test
+count (already true on `main`). Wire-format regressions caught by `cargo test
+--workspace` before they ever reach a server. The "Remaining in R2" checklist
+above is the punch list; items 5 (`rcv_task_login`) and the connection-side
+of network_decode (item 2's `hx_decode` orchestration) explicitly hand off
+to R3.
 
 ---
 
