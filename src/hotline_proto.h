@@ -1022,4 +1022,79 @@ extern bool gtkhx_proto_parse_tracker_record_fixed (
  * NULL buf or zero len. */
 extern void gtkhx_proto_tracker_normalize_text (uint8_t *buf, size_t len);
 
+/* ---- HTRK v3 (newer tracker protocol) ---- */
+
+/* 8-byte client-side handshake builder. Writes "HTRK" + version
+ * (0x0003 BE) + features (BE). Returns false on NULL out or
+ * out_len < 8; otherwise true. */
+extern bool gtkhx_proto_tracker_v3_pack_handshake (uint8_t *out, size_t out_len,
+                                                    uint16_t features);
+
+/* Parse the tracker's handshake response. State machine reads 6
+ * bytes first; if version comes back as v3 it reads the trailing
+ * 2 and calls us again with len == 8. Returns false on NULL out
+ * pointers, wrong length (must be 6 or 8), or bad magic. The
+ * 6-byte form leaves *features_out = 0. */
+extern bool gtkhx_proto_tracker_v3_parse_handshake_response (
+    const uint8_t *buf, size_t len,
+    uint16_t *version_out, uint16_t *features_out);
+
+/* Build the 4-byte minimum listing-request body (request_type =
+ * 0x0001 + field_count = 0). Writes byte count actually written
+ * (always 4 on success) into *out_written. Returns false on NULL
+ * pointers or out_len < 4. */
+extern bool gtkhx_proto_tracker_v3_pack_listing_request_simple (
+    uint8_t *out, size_t out_len, size_t *out_written);
+
+/* Parse the 10-byte listing-response header. Returns false on
+ * NULL out pointers, short buffer, or a response_type that isn't
+ * HTRK_V3_RESP_LIST (0x0001). */
+extern bool gtkhx_proto_tracker_v3_parse_response_header (
+    const uint8_t *buf, size_t len,
+    uint16_t *response_type_out, uint32_t *total_size_out,
+    uint16_t *total_servers_out, uint16_t *record_count_out);
+
+struct gtkhx_proto_tracker_v3_record {
+    /* Offsets into the caller's `buf` argument. Lengths give the
+     * slice extents. Caller dereferences as `buf + off` for each
+     * of address / name / desc / tlv_bytes. */
+    size_t addr_off;
+    size_t addr_len;
+    size_t name_off;
+    size_t name_len;
+    size_t desc_off;
+    size_t desc_len;
+    size_t tlv_off;
+    size_t tlv_len;
+    /* Bytes this record occupied — advance off by this for the
+     * next record. */
+    size_t consumed;
+    uint16_t port;
+    uint16_t nusers;
+    uint16_t tlv_count;
+    uint8_t addr_type;
+};
+
+/* Parse one tracker v3 server record at buf[off..]. Returns false
+ * on truncation, an unknown addr_type, or any declared length that
+ * overruns the buffer. */
+extern bool gtkhx_proto_tracker_v3_parse_record (
+    const uint8_t *buf, size_t len, size_t off,
+    struct gtkhx_proto_tracker_v3_record *out);
+
+struct gtkhx_proto_tracker_v3_tlv {
+    size_t value_off;
+    size_t value_len;
+    size_t next_off;
+    uint16_t id;
+};
+
+/* Parse the next TLV at buf[off..]. Returns false on a short
+ * buffer (< 4 bytes for the id+len header) or when the declared
+ * value_len runs past the buffer. The hx_tracker_v3_walk_tlvs C
+ * wrapper iterates this and fires its callback per entry. */
+extern bool gtkhx_proto_tracker_v3_parse_tlv_at (
+    const uint8_t *buf, size_t len, size_t off,
+    struct gtkhx_proto_tracker_v3_tlv *out);
+
 #endif /* _HOTLINE_PROTO_H */
