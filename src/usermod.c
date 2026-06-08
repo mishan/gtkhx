@@ -308,17 +308,23 @@ useredit_get_login (GtkWidget *login_entry, struct useredit_session *ues)
     ues->login[len] = 0;
 }
 
+/* `notify::*` is a 3-arg signal (gobject, pspec, user_data); declaring
+ * the callback with only (widget, data) reads pspec as `data`, so the
+ * lookup into ues->access_widgets[] never matches and the toggle is
+ * silently dropped. That left every account created from the New User
+ * dialog with an all-zero access bitmap — looked indistinguishable from
+ * "the user wasn't created" once you tried to log in as it. */
 static void
-useredit_chk_activate (GtkWidget *widget, gpointer data)
+useredit_chk_activate (GObject *widget, GParamSpec *pspec, gpointer data)
 {
     struct useredit_session *ues = (struct useredit_session *)data;
     unsigned int i;
     int bitno;
 
-    /* Phase 5: notify::active passes the GObject; AdwSwitchRow's
-	 * active property is the source of truth for the toggle. */
+    (void)pspec;
+
     for (i = 0; i < NACCESS; i++) {
-        if (ues->access_widgets[i].widget == widget) {
+        if ((GObject *)ues->access_widgets[i].widget == widget) {
             break;
         }
     }

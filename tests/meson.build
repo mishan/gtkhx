@@ -1483,6 +1483,32 @@ test('user_info', test_integration_user_info,
      suite   : 'integration',
      timeout : 30)
 
+# user_account — full ACCOUNT_MODIFY / ACCOUNT_READ / ACCOUNT_DELETE
+# lifecycle exercising the wire format src/usermod.c's New User /
+# Edit User / Delete dialog flows produce. Logs in as `admin` (the
+# upstream mhxd default with no password and full access bits) and
+# round-trips a synthesised account through create → read → modify →
+# read → delete → read-fails. A fourth subtest pins down the access-
+# bit serialisation specifically — the regression net for the
+# useredit_chk_activate signature bug that left every newly-created
+# account with an all-zero access mask.
+#
+# Not parallelised against other Tier 3 tests because it logs in as
+# `admin` and mutates the server's accounts directory; concurrent
+# tests against the same login or against the same synthesized
+# account names would race. Each subtest's account name has a
+# per-process random suffix so concurrent meson runs don't collide.
+test_integration_user_account = executable('test_integration_user_account',
+  'integration/test_user_account.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('user_account', test_integration_user_account,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 30)
+
 # user_change_broadcast — Alice and Bob both connect; Alice
 # verifies she receives HTLS_HDR_USER_CHANGE when Bob joins and
 # HTLS_HDR_USER_PART when Bob disconnects. Exercises mhxd's
