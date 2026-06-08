@@ -511,6 +511,123 @@ pub fn parse_news_thread_reply(
     out
 }
 
+// ---- HTLS_DATA_HISTORY_ENTRY (chat-history extension) ------------------
+//
+// Packed-binary per-message record carried in DATA_HISTORY_ENTRY (0x0F05)
+// chunks of TRAN_GET_CHAT_HISTORY (700) replies. fogWraith spec
+// "Capabilities-Chat-History.md". Backs the C
+// `hx_history_entry_parse` in `src/chat_history.c`.
+//
+// Layout (all multi-byte fields big-endian):
+//
+//   offset 0   u64  message_id      (server-assigned, monotonic)
+//   offset 8   i64  timestamp       (Unix epoch UTC seconds)
+//   offset 16  u16  flags           (HX_HISTORY_FLAG_*)
+//   offset 18  u16  icon_id
+//   offset 20  u16  nick_len
+//   offset 22  bytes[nick_len]      nick (server-transcoded)
+//   offset 22 + nick_len   u16  msg_len
+//   offset 24 + nick_len   bytes[msg_len]   message
+//   offset 24 + nick_len + msg_len  optional mini-TLV trailer
+//                                   (u16 type + u16 len + bytes; no
+//                                   sub-types defined in v1)
+//
+// Minimum legal body = 24 bytes (empty nick + empty message).
+// Sub-fields whose declared length runs past the buffer are
+// skipped silently — the entry stays valid, we just don't surface
+// the sub-fields we couldn't parse (matches the C extractor's
+// debug-log-and-break behaviour).
+//
+// Sanitisation: none. The server already transcoded nick + message
+// to the negotiated text encoding (UTF-8 if CAP_TEXT_ENCODING was
+// set, Mac Roman otherwise); callers run their own conversion.
+
+/// Parsed `HTLS_DATA_HISTORY_ENTRY` chunk. `nick` / `message`
+/// borrow into the caller's input — copy them out before the
+/// input goes away.
+#[derive(Debug, Clone)]
+pub struct HistoryEntry<'a> {
+    pub message_id: u64,
+    /// Spec is i64 (signed) — Unix epoch seconds. Negative values
+    /// mean "before 1970"; the parser preserves the two's-complement
+    /// bit pattern rather than rejecting them.
+    pub timestamp: i64,
+    pub flags: u16,
+    pub icon_id: u16,
+    pub nick: &'a [u8],
+    pub message: &'a [u8],
+}
+
+/// Parse a single `HTLS_DATA_HISTORY_ENTRY` chunk body. Returns
+/// `None` for:
+///
+/// - Buffers shorter than the 24-byte minimum (8 + 8 + 2 + 2 + 2
+///   + 2 fixed header).
+/// - A `nick_len` that runs past the buffer (would overrun
+///   reading the msg_len that follows it).
+/// - A `msg_len` that runs past the buffer.
+///
+/// Sub-field trailer (mini-TLV) walk is best-effort: a malformed
+/// sub-field stops the walk but the entry is still returned (no
+/// sub-fields are surfaced in v1 anyway). The C extractor's
+/// `debug_log("chat-history", ...)` on the malformed-sub-field
+/// path is purely diagnostic and isn't reproduced here — the
+/// caller's wider context already knows the entry shape.
+pub fn parse_history_entry(data: &[u8]) -> Option<HistoryEntry<'_>> {
+    if data.len() < 24 {
+        return None;
+    }
+    let nick_len = u16::from_be_bytes([data[20], data[21]]) as usize;
+    // Need header (22) + nick + 2 (msg_len field) bytes.
+    if 22 + nick_len + 2 > data.len() {
+        return None;
+    }
+    let msg_len_off = 22 + nick_len;
+    let msg_len = u16::from_be_bytes([data[msg_len_off], data[msg_len_off + 1]]) as usize;
+    // Need header (24) + nick + msg bytes total.
+    if 24 + nick_len + msg_len > data.len() {
+        return None;
+    }
+
+    let message_id = u64::from_be_bytes([
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+    ]);
+    // Two's-complement reinterpret — same bit pattern as C's
+    // (gint64) cast. Negative values legal per spec.
+    let timestamp = i64::from_be_bytes([
+        data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+    ]);
+    let flags = u16::from_be_bytes([data[16], data[17]]);
+    let icon_id = u16::from_be_bytes([data[18], data[19]]);
+
+    let nick = &data[22..22 + nick_len];
+    let msg_start = 24 + nick_len;
+    let message = &data[msg_start..msg_start + msg_len];
+
+    // Mini-TLV sub-fields follow after the message body. Walk
+    // past any that appear (spec defines none in v1; future
+    // servers may emit some). Malformed sub-fields stop the walk
+    // silently — entry is still valid.
+    let mut off = 24 + nick_len + msg_len;
+    while off + 4 <= data.len() {
+        let _sub_type = u16::from_be_bytes([data[off], data[off + 1]]);
+        let sub_len = u16::from_be_bytes([data[off + 2], data[off + 3]]) as usize;
+        if off + 4 + sub_len > data.len() {
+            break;
+        }
+        off += 4 + sub_len;
+    }
+
+    Some(HistoryEntry {
+        message_id,
+        timestamp,
+        flags,
+        icon_id,
+        nick,
+        message,
+    })
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -2197,6 +2314,143 @@ mod tests {
         let m = msg(0x0001_0000, 1, 0, &body);
         let r = parse_news_thread_reply(&m, m.len(), 8192);
         assert_eq!(r.text.as_deref(), Some(&b""[..]));
+    }
+
+    // ---- chat-history entry (packed binary) ----
+
+    /// Build a HISTORY_ENTRY packed body from individual fields.
+    fn history_entry_body(
+        message_id: u64,
+        timestamp: i64,
+        flags: u16,
+        icon_id: u16,
+        nick: &[u8],
+        message: &[u8],
+        trailer: &[u8],
+    ) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&message_id.to_be_bytes());
+        v.extend_from_slice(&timestamp.to_be_bytes());
+        v.extend_from_slice(&flags.to_be_bytes());
+        v.extend_from_slice(&icon_id.to_be_bytes());
+        v.extend_from_slice(&(nick.len() as u16).to_be_bytes());
+        v.extend_from_slice(nick);
+        v.extend_from_slice(&(message.len() as u16).to_be_bytes());
+        v.extend_from_slice(message);
+        v.extend_from_slice(trailer);
+        v
+    }
+
+    #[test]
+    fn history_entry_basic() {
+        let body = history_entry_body(
+            0x0102_0304_0506_0708,
+            1_700_000_000,
+            0x0001, // HX_HISTORY_FLAG_ACTION
+            42,
+            b"alice",
+            b"hello, world",
+            &[],
+        );
+        let e = parse_history_entry(&body).expect("ok");
+        assert_eq!(e.message_id, 0x0102_0304_0506_0708);
+        assert_eq!(e.timestamp, 1_700_000_000);
+        assert_eq!(e.flags, 0x0001);
+        assert_eq!(e.icon_id, 42);
+        assert_eq!(e.nick, b"alice");
+        assert_eq!(e.message, b"hello, world");
+    }
+
+    #[test]
+    fn history_entry_negative_timestamp() {
+        // Pre-1970 timestamps are legal per spec (i64). Two's-
+        // complement preserved through to the parsed field.
+        let body = history_entry_body(1, -100, 0, 0, b"", b"", &[]);
+        let e = parse_history_entry(&body).expect("ok");
+        assert_eq!(e.timestamp, -100);
+    }
+
+    #[test]
+    fn history_entry_empty_nick_and_message_legal() {
+        // Minimum legal body: 24 bytes (8+8+2+2+2+2, both lengths
+        // zero, no nick / no message bytes).
+        let body = history_entry_body(7, 0, 0, 0, b"", b"", &[]);
+        assert_eq!(body.len(), 24);
+        let e = parse_history_entry(&body).expect("ok");
+        assert!(e.nick.is_empty());
+        assert!(e.message.is_empty());
+        assert_eq!(e.message_id, 7);
+    }
+
+    #[test]
+    fn history_entry_too_short_rejected() {
+        // 23 bytes < 24-byte minimum.
+        let too_short = vec![0u8; 23];
+        assert!(parse_history_entry(&too_short).is_none());
+        // 0 bytes also rejected.
+        assert!(parse_history_entry(&[]).is_none());
+    }
+
+    #[test]
+    fn history_entry_nick_len_overruns_buffer() {
+        // Header says nick_len = 100 but only 5 nick bytes follow.
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u64.to_be_bytes()); // msgid
+        body.extend_from_slice(&0i64.to_be_bytes()); // ts
+        body.extend_from_slice(&0u16.to_be_bytes()); // flags
+        body.extend_from_slice(&0u16.to_be_bytes()); // icon
+        body.extend_from_slice(&100u16.to_be_bytes()); // nick_len LIES
+        body.extend_from_slice(b"short");
+        // Not enough bytes for nick + the msg_len field that's
+        // supposed to follow at offset 22+100=122.
+        assert!(parse_history_entry(&body).is_none());
+    }
+
+    #[test]
+    fn history_entry_msg_len_overruns_buffer() {
+        // nick_len OK but msg_len lies.
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u64.to_be_bytes());
+        body.extend_from_slice(&0i64.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&0u16.to_be_bytes());
+        body.extend_from_slice(&3u16.to_be_bytes()); // nick_len
+        body.extend_from_slice(b"bob");
+        body.extend_from_slice(&100u16.to_be_bytes()); // msg_len LIES
+        body.extend_from_slice(b"hi");
+        assert!(parse_history_entry(&body).is_none());
+    }
+
+    #[test]
+    fn history_entry_walks_past_unknown_subfields() {
+        // v1 defines no sub-field types but the parser must walk
+        // past any that appear cleanly. Two trailing sub-fields:
+        // type=0xCAFE len=3 + type=0xBABE len=0.
+        let mut trailer = Vec::new();
+        trailer.extend_from_slice(&0xCAFEu16.to_be_bytes());
+        trailer.extend_from_slice(&3u16.to_be_bytes());
+        trailer.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+        trailer.extend_from_slice(&0xBABEu16.to_be_bytes());
+        trailer.extend_from_slice(&0u16.to_be_bytes());
+        let body = history_entry_body(1, 0, 0, 0, b"x", b"y", &trailer);
+        // Should parse cleanly; entry is still returned.
+        let e = parse_history_entry(&body).expect("ok");
+        assert_eq!(e.nick, b"x");
+        assert_eq!(e.message, b"y");
+    }
+
+    #[test]
+    fn history_entry_malformed_subfield_does_not_invalidate_entry() {
+        // Sub-field claims length 100 but only 3 bytes follow.
+        // Walk stops silently; entry stays valid.
+        let mut trailer = Vec::new();
+        trailer.extend_from_slice(&0xCAFEu16.to_be_bytes());
+        trailer.extend_from_slice(&100u16.to_be_bytes()); // LIES
+        trailer.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+        let body = history_entry_body(1, 0, 0, 0, b"a", b"b", &trailer);
+        let e = parse_history_entry(&body).expect("ok");
+        assert_eq!(e.nick, b"a");
+        assert_eq!(e.message, b"b");
     }
 
     // ---- news dirlist: folderitem ----
