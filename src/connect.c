@@ -36,6 +36,7 @@
 #include "bookmark_cipher.h"
 #include "bookmark_rc4_dialog.h"
 #include "bookmarks.h"
+#include "hotline_url.h"
 
 /* Phase 5: the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
  * that used to live here suppressed warnings from the GtkComboBoxText
@@ -1154,6 +1155,110 @@ connect_open_builtin_bookmark (int idx)
     }
 
     connect_with_args (&the_session, server, 5500, "", "", 0, 0, 0, 0);
+}
+
+/* ---------------------------------------------------------------- */
+/* hotline:// URL handlers                                          */
+/* ---------------------------------------------------------------- */
+
+gboolean
+connect_open_hotline_url (const char *url)
+{
+    HotlineUrlParts parts;
+    guint16 port;
+
+    if (!hotline_url_parse (url, &parts)) {
+        return FALSE;
+    }
+    port = parts.port ? parts.port : 5500;
+
+    /* Plain Hotline — no HOPE / no TLS / no compress / no cipher.
+	 * The hotline:// URL form doesn't carry transport-security
+	 * parameters; users who want HOPE or TLS for this server should
+	 * save the URL as a bookmark first (Save Bookmark popup item)
+	 * and edit the bookmark's security settings. */
+    connect_with_args (&the_session, parts.host, port, parts.login, parts.pass,
+                       0, 0, 0, 0);
+    return TRUE;
+}
+
+gboolean
+connect_save_hotline_url_as_bookmark (const char *url, char **out_name,
+                                      GError **err)
+{
+    HotlineUrlParts parts;
+    HxBookmark *bm;
+    char *display_name;
+    gboolean ok;
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+
+    if (!hotline_url_parse (url, &parts)) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_INVAL,
+                     _ ("Couldn't parse hotline:// URL"));
+        return FALSE;
+    }
+
+    display_name = hx_bookmark_safe_filename (parts.host);
+    if (!display_name) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_INVAL,
+                     _ ("Couldn't derive a bookmark name from URL"));
+        return FALSE;
+    }
+
+    /* Refuse to clobber an existing bookmark with the same name —
+	 * matches the tracker_save_bookmark_for_row contract so the user
+	 * gets a "rename the existing one" prompt instead of a silent
+	 * overwrite. */
+    {
+        g_autoptr (HxBookmark) existing = hx_bookmark_load (display_name);
+        if (existing) {
+            g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_EXIST,
+                         _ ("Bookmark \"%s\" already exists. Manage it from "
+                            "the Bookmarks dialog."),
+                         display_name);
+            g_free (display_name);
+            return FALSE;
+        }
+    }
+
+    bm = hx_bookmark_new ();
+    if (!bm) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_NOMEM,
+                     _ ("Out of memory"));
+        g_free (display_name);
+        return FALSE;
+    }
+
+    bm->name = display_name; /* takes ownership */
+    g_strlcpy (bm->server, parts.host, sizeof (bm->server));
+    if (parts.port) {
+        g_snprintf (bm->port, sizeof (bm->port), "%u", (unsigned)parts.port);
+    } else {
+        bm->port[0] = '\0'; /* empty == default 5500 */
+    }
+    g_strlcpy (bm->login, parts.login, sizeof (bm->login));
+    g_strlcpy (bm->pass, parts.pass, sizeof (bm->pass));
+    /* No HOPE / TLS / compress / cipher — URL form doesn't carry them. */
+    bm->secure = 0;
+    bm->compress = 0;
+    bm->cipher = 0;
+    bm->tls = 0;
+
+    ok = hx_bookmark_save (bm, err);
+    if (ok) {
+        if (out_name) {
+            *out_name = g_strdup (bm->name);
+        }
+        /* Refresh the toolbar SplitButton's bookmark dropdown so the
+		 * just-saved entry shows up without an app restart — same
+		 * follow-up the dialog save path + bookmarks.c CRUD do. */
+        toolbar_refresh_bookmarks ();
+    }
+    hx_bookmark_free (bm);
+    return ok;
 }
 
 /* Phase 5: bookmark save migrates to AdwAlertDialog with the name

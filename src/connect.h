@@ -62,4 +62,32 @@ extern void connect_reconnect_last (void);
  * builtin combo uses. */
 extern void connect_open_builtin_bookmark (int idx);
 
+/* Parse a hotline:// URL and connect to the server it names.
+ *
+ * Accepted shape (de facto standard from the original Mac client):
+ *
+ *     hotline://[login[:password]@]host[:port][/]
+ *
+ * Components are URL-decoded. Missing port defaults to 5500. The
+ * connection runs plain Hotline — no HOPE / no TLS / no compression /
+ * no cipher — because the URL form doesn't carry those parameters.
+ * The user can bookmark the URL first (connect_save_hotline_url_as_
+ * bookmark) and edit transport security in the Bookmarks dialog if
+ * they want HOPE / TLS for that server. Returns TRUE on a launched
+ * connect, FALSE on a malformed URL. */
+extern gboolean connect_open_hotline_url (const char *url);
+
+/* Parse a hotline:// URL and persist it as a bookmark. The bookmark
+ * filename is derived from the host (sanitised by hx_bookmark_safe_
+ * filename); if a bookmark with that name already exists this returns
+ * FALSE with err set to a translated "already exists" message — the
+ * caller surfaces it via toast so the user can rename / delete the
+ * existing entry from the Bookmarks dialog.
+ *
+ * `out_name` (optional) receives the chosen bookmark filename on
+ * success; caller frees with g_free. NULL on failure. */
+extern gboolean connect_save_hotline_url_as_bookmark (const char *url,
+                                                     char **out_name,
+                                                     GError **err);
+
 #endif

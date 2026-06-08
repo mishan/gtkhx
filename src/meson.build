@@ -40,6 +40,7 @@ gtkhx_sources = files(
   'hfs.c',
   'history.c',
   'hope.c',
+  'hotline_url.c',
   'htxf_io.c',
   'htxf_subchannel.c',
   'hl_code.c',

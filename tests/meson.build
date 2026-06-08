@@ -212,6 +212,20 @@ test_bookmark_cipher = executable('test_bookmark_cipher',
 test('bookmark_cipher', test_bookmark_cipher,
      suite : 'unit')
 
+# hotline_url — parser for the hotline:// URL scheme. Drives the
+# Connect / Save Bookmark entries on the gtkurl right-click popup,
+# so the shapes pinned here come from real paste-from-chat inputs
+# (login:pass@host:port + URL-decoded segments + IPv6 brackets).
+# hotline_url.c is pure-GLib so the test links nothing else.
+test_hotline_url = executable('test_hotline_url',
+  'unit/test_hotline_url.c',
+  '../src/hotline_url.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('hotline_url', test_hotline_url,
+     suite : 'unit')
+
 # compress_bufsize — Phase R1 round 3 fix for the
 # compress_encode_bufsize overflow guard. Pins that the function
 # returns 0 when 2*len + 1024 would overflow u32 (rather than

@@ -51,6 +51,7 @@
 #include "news15.h"
 #include "news_browser.h"
 #include "gtkutil.h"
+#include "gtkurl.h"
 #include "hl_access.h"
 #include "hl_date.h"
 
@@ -963,6 +964,7 @@ render_selected_post (gnews_browser *br)
         buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
         gtk_text_buffer_set_text (
             buf, _ ("Select a post in the tree to view it here."), -1);
+        gtkurl_textview_apply_tags (GTK_TEXT_VIEW (br->post_view));
         return;
     }
 
@@ -989,6 +991,10 @@ render_selected_post (gnews_browser *br)
         gtk_text_buffer_set_text (buf, _ ("Loading…"), -1);
         fetch_thread (br, node);
     }
+    /* Tag URLs (http://, https://, hotline://, mailto:, etc.) so the
+	 * hover-cursor + right-click popup wired by gtkurl_textview_install
+	 * has something to anchor on. */
+    gtkurl_textview_apply_tags (GTK_TEXT_VIEW (br->post_view));
 }
 
 gboolean
@@ -1849,6 +1855,7 @@ reset_browser_state (gnews_browser *br)
         buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
         gtk_text_buffer_set_text (
             buf, _ ("Select a post in the tree to view it here."), -1);
+        gtkurl_textview_apply_tags (GTK_TEXT_VIEW (br->post_view));
     }
     if (br->header_strip) {
         gtk_widget_set_visible (br->header_strip, FALSE);
@@ -2135,6 +2142,12 @@ build_browser_window (void)
     buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
     gtk_text_buffer_set_text (
         buf, _ ("Select a post in the tree to view it here."), -1);
+    /* Wire URL detection: hover/cursor handling + right-click popup,
+	 * same treatment news.c gives its threaded-news pane. The
+	 * gtkurl_textview_apply_tags calls in render_selected_post +
+	 * gnews_browser_set_disconnected re-tag after each
+	 * gtk_text_buffer_set_text. */
+    gtkurl_textview_install (GTK_TEXT_VIEW (br->post_view));
     gtkhx_widget_set_child (right_scroll, br->post_view);
     gtkhx_box_pack (right_box, right_scroll, TRUE, TRUE, 0);
     gtk_paned_set_end_child (GTK_PANED (paned), right_box);
