@@ -411,31 +411,12 @@ word_check (GtkWidget *xtext, char *word)
     size_t i, len = strlen (word);
     int dots;
 
-    if (!strncasecmp (word, "irc://", 6)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "irc.", 4)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "ftp.", 4)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "ftp:", 4)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "www.", 4)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "http:", 5)) {
-        return WORD_URL;
-    }
-
-    if (!strncasecmp (word, "https:", 6)) {
+    /* Scheme + bare-prefix matching lives in gtkurl.c so the xtext
+	 * hover answer (here) and the GtkTextView popup answer
+	 * (gtkurl_textview_install) come off the same scheme list. Adding
+	 * a new URL scheme is a one-line edit to url_schemes[] in
+	 * gtkurl.c; no second change needed here. */
+    if (gtkurl_word_has_url_scheme (word)) {
         return WORD_URL;
     }
 

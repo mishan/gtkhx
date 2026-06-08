@@ -5,6 +5,8 @@
     own windows so that users can still have the nostalgic multi-window experience if they prefer
   - Dropped custom GtkHList in favor of GtkColumnView
   - Results from different trackers are nested in their own result sets
+  - Added support for hotline:// links
+  - Made the News 1.5 browser handle links in the posts
 - Code Modernization
   - Parts of GtkHx are being rewritten in Rust
 - Bug Fixes

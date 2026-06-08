@@ -17,23 +17,33 @@
 #include <gtk/gtk.h>
 #include <gio/gio.h>
 #include "compat.h"
+#include "connect.h"
 #include "gtkurl.h"
+#include "hx.h"
+#include "toolbar.h"
 
 /* ------------------------------------------------------------------- *
  * Detection / normalisation
  * ------------------------------------------------------------------- */
 
-/* The set of prefixes we consider URL-y. Must stay aligned with
- * chat.c's word_check, which xtext uses for hover detection — see
- * the note in gtkurl.h.
+/* The canonical set of prefixes we consider URL-y. Both the
+ * GtkTextView path (gtkurl_textview_install) and the xtext path
+ * (chat.c's word_check, which calls gtkurl_word_has_url_scheme) key
+ * off this single list, so adding a new scheme is a one-line edit
+ * here.
  *
  * Trailing ":" on scheme prefixes ensures we don't misfire on
  * "httpfoo" or "wwwbar"; the bare "www.", "ftp.", "irc." entries
  * accept the historical "www.example.com" pattern that lots of
  * users still type without a scheme. */
 static const char *url_schemes[]
-    = { "http://", "https://", "ftp://", "ftps://", "irc://", "mailto:",
-        "magnet:", "git://",   "ssh://", "sftp://", NULL };
+    = { "http://",    "https://", "ftp://",  "ftps://", "irc://", "mailto:",
+        "magnet:",    "git://",   "ssh://",  "sftp://",
+        /* hotline:// is the protocol-native URL — we route it through
+		 * a different right-click popup (Save Bookmark / Connect to
+		 * Server / Copy Link) instead of the browser-launch menu. The
+		 * branch lives in gtkurl_show_popup. */
+        "hotline://", NULL };
 static const char *url_bare_prefixes[] = { "www.", "ftp.", "irc.", NULL };
 
 /* Trailing punctuation we strip from URL matches. "https://foo.com."
@@ -94,11 +104,9 @@ trim_trailing_url_punct (const char *s, int len)
 }
 
 gboolean
-gtkurl_is_url (const char *word)
+gtkurl_word_has_url_scheme (const char *word)
 {
     int i;
-    const char *dot, *at;
-    size_t len;
 
     if (!word || !*word) {
         return FALSE;
@@ -117,6 +125,23 @@ gtkurl_is_url (const char *word)
             == 0) {
             return TRUE;
         }
+    }
+
+    return FALSE;
+}
+
+gboolean
+gtkurl_is_url (const char *word)
+{
+    const char *dot, *at;
+    size_t len;
+
+    if (!word || !*word) {
+        return FALSE;
+    }
+
+    if (gtkurl_word_has_url_scheme (word)) {
+        return TRUE;
     }
 
     /* Bare email address — handled here so right-click on an email
@@ -372,6 +397,55 @@ on_copy_link (GtkButton *btn, gpointer data)
     gtk_popover_popdown (ctx->popover);
 }
 
+/* hotline:// URL — branches the popup to a Hotline-specific action set
+ * (Save Bookmark / Connect to Server / Copy Link). Browsers don't
+ * speak Hotline, so launching xdg-open on a hotline:// URL would
+ * either pop the "no handler" dialog or, if some kind soul registered
+ * gtkhx as the handler, recurse — neither is what the user meant.
+ *
+ * The is_hotline_url predicate keeps the matching local: it's also
+ * what gtkurl_show_popup keys off when deciding which menu to build. */
+static gboolean
+is_hotline_url (const char *url)
+{
+    return url && g_ascii_strncasecmp (url, "hotline://", 10) == 0;
+}
+
+static void
+on_connect_hotline (GtkButton *btn, gpointer data)
+{
+    struct popup_ctx *ctx = data;
+    (void)btn;
+    if (!connect_open_hotline_url (ctx->url)) {
+        toolbar_show_toast (_ ("Couldn't parse hotline:// URL"));
+    }
+    gtk_popover_popdown (ctx->popover);
+}
+
+static void
+on_save_bookmark_hotline (GtkButton *btn, gpointer data)
+{
+    struct popup_ctx *ctx = data;
+    char *saved_name = NULL;
+    GError *err = NULL;
+    char toastbuf[256];
+    (void)btn;
+
+    if (connect_save_hotline_url_as_bookmark (ctx->url, &saved_name, &err)) {
+        g_snprintf (toastbuf, sizeof (toastbuf), _ ("Saved bookmark \"%s\""),
+                    saved_name ? saved_name : "");
+        toolbar_show_toast (toastbuf);
+    } else {
+        g_snprintf (toastbuf, sizeof (toastbuf),
+                    _ ("Couldn't save bookmark: %s"),
+                    err && err->message ? err->message : _ ("unknown error"));
+        toolbar_show_toast (toastbuf);
+    }
+    g_free (saved_name);
+    g_clear_error (&err);
+    gtk_popover_popdown (ctx->popover);
+}
+
 static GtkWidget *
 make_menu_button (const char *icon_name, const char *label_text, GCallback cb,
                   struct popup_ctx *ctx)
@@ -464,6 +538,48 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
 
     sep = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_box_append (GTK_BOX (vbox), sep);
+
+    if (is_hotline_url (url)) {
+        /* hotline:// — Hotline-native menu. Connect routes through
+		 * connect_open_hotline_url (parses + plain-Hotline connect_with_args);
+		 * Save Bookmark routes through connect_save_hotline_url_as_
+		 * bookmark (parses + persists via hx_bookmark_save). The
+		 * browser-launch entries below are skipped — xdg-open on a
+		 * hotline:// URL has nowhere good to go. */
+        GtkWidget *connect_item, *bookmark_item;
+        {
+            struct popup_ctx *ctx = g_new0 (struct popup_ctx, 1);
+            ctx->url = g_strdup (url);
+            ctx->popover = GTK_POPOVER (popover);
+            connect_item = make_menu_button (
+                "network-server-symbolic", _ ("Connect to Server"),
+                G_CALLBACK (on_connect_hotline), ctx);
+            gtk_box_append (GTK_BOX (vbox), connect_item);
+        }
+        {
+            struct popup_ctx *ctx = g_new0 (struct popup_ctx, 1);
+            ctx->url = g_strdup (url);
+            ctx->popover = GTK_POPOVER (popover);
+            bookmark_item = make_menu_button (
+                "bookmark-new-symbolic", _ ("Save Bookmark"),
+                G_CALLBACK (on_save_bookmark_hotline), ctx);
+            gtk_box_append (GTK_BOX (vbox), bookmark_item);
+        }
+        {
+            struct popup_ctx *ctx = g_new0 (struct popup_ctx, 1);
+            ctx->url = g_strdup (url);
+            ctx->popover = GTK_POPOVER (popover);
+            copy_btn = make_menu_button ("edit-copy-symbolic",
+                                         _ ("Copy Link"),
+                                         G_CALLBACK (on_copy_link), ctx);
+            gtk_box_append (GTK_BOX (vbox), copy_btn);
+        }
+        /* Auto-destroy when the popover hides. */
+        g_signal_connect (popover, "closed", G_CALLBACK (gtk_widget_unparent),
+                          NULL);
+        gtk_popover_popup (GTK_POPOVER (popover));
+        return;
+    }
 
     /* Default-browser entry. */
     def_app = default_http_appinfo ();

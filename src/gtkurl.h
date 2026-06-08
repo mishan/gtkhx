@@ -17,11 +17,22 @@
  */
 
 /* TRUE if `word' looks like a URL we should treat as clickable.
- * Keeps in lockstep with chat.c's word_check, which xtext uses for
- * hover / selection extension; the two answers must agree or the
- * cursor changes on hover but the popup never appears (or vice
- * versa). */
+ * Includes bare email tokens (foo@bar.com) — xtext uses this to
+ * decide whether to draw the word as a link and pop the right-click
+ * menu. */
 extern gboolean gtkurl_is_url (const char *word);
+
+/* Subset of gtkurl_is_url: TRUE iff `word' starts with one of the
+ * scheme prefixes we recognise as a URL (http://, https://, ftp://,
+ * ftps://, irc://, mailto:, magnet:, git://, ssh://, sftp://,
+ * hotline://) OR one of the bare prefixes (www., ftp., irc.). The
+ * email-shape check that gtkurl_is_url does is intentionally NOT
+ * included — callers like chat.c's word_check need to distinguish
+ * "this is a URL" (WORD_URL) from "this is an email" (WORD_EMAIL).
+ * This is the canonical scheme list; both the GtkTextView and xtext
+ * paths key off it, so adding a new scheme only requires editing
+ * url_schemes[] in gtkurl.c. */
+extern gboolean gtkurl_word_has_url_scheme (const char *word);
 
 /* Returns a malloc'd "openable" form of `word' — prepends "https://"
  * to bare "www.foo" / "ftp.foo" tokens so gtk_show_uri / xdg-open
