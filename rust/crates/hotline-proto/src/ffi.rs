@@ -1695,6 +1695,29 @@ pub struct HistoryEntryOut {
     pub msg_len: u16,
 }
 
+// Pin the cross-language ABI layout from the Rust side so the
+// `_Static_assert(sizeof(gtkhx_proto_history_entry) == 32, ...)`
+// in src/hotline_proto.h has a peer compile-time check here. A
+// future field reorder / type change that drifts the struct fails
+// the Rust build before any C caller can read garbage at runtime.
+// Same pattern as `HxChunk` in build.rs.
+//
+// Layout under #[repr(C)] with natural alignment: u64 @ 0, i64 @ 8,
+// then six u16s at 16/18/20/22/24/26 = 28 bytes of data + 4 bytes
+// of trailing alignment-to-8 padding = 32 bytes, alignment 8.
+const _: () = {
+    assert!(std::mem::offset_of!(HistoryEntryOut, message_id) == 0);
+    assert!(std::mem::offset_of!(HistoryEntryOut, timestamp) == 8);
+    assert!(std::mem::offset_of!(HistoryEntryOut, flags) == 16);
+    assert!(std::mem::offset_of!(HistoryEntryOut, icon_id) == 18);
+    assert!(std::mem::offset_of!(HistoryEntryOut, nick_off) == 20);
+    assert!(std::mem::offset_of!(HistoryEntryOut, nick_len) == 22);
+    assert!(std::mem::offset_of!(HistoryEntryOut, msg_off) == 24);
+    assert!(std::mem::offset_of!(HistoryEntryOut, msg_len) == 26);
+    assert!(std::mem::size_of::<HistoryEntryOut>() == 32);
+    assert!(std::mem::align_of::<HistoryEntryOut>() == 8);
+};
+
 /// Parse one `HTLS_DATA_HISTORY_ENTRY` chunk body (chat-history
 /// extension). Returns false on NULL `out` or any of the
 /// `parse::parse_history_entry` reject conditions (sub-24-byte
