@@ -3203,3 +3203,316 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_normalize_text(
     let s = slice::from_raw_parts_mut(buf, len);
     parse::tracker_normalize_text(s);
 }
+
+// ---- HTRK v3 (newer tracker) pack / parse -----------------------------
+
+/// Build the 8-byte v3 client handshake into `out`. Returns false
+/// on NULL `out` or `out_len < 8`; otherwise true.
+///
+/// # Safety
+/// `out` valid for `out_len` bytes (writable, or NULL — early-
+/// rejected).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_pack_handshake(
+    out: *mut u8,
+    out_len: usize,
+    features: u16,
+) -> bool {
+    if out.is_null() || out_len < parse::tracker_v3::HANDSHAKE_LEN {
+        return false;
+    }
+    let s = slice::from_raw_parts_mut(out, out_len);
+    parse::pack_tracker_v3_handshake(s, features)
+}
+
+/// Parse the tracker's handshake response. Writes the version into
+/// `*version_out` and the features into `*features_out` (0 for the
+/// 6-byte v1/v2 form). Returns false on NULL pointers, wrong length
+/// (must be 6 or 8), or bad magic; otherwise true.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL when `len == 0`);
+/// `version_out` / `features_out` valid writable u16s.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_parse_handshake_response(
+    buf: *const u8,
+    len: usize,
+    version_out: *mut u16,
+    features_out: *mut u16,
+) -> bool {
+    if version_out.is_null() || features_out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_v3_handshake_response(s) {
+        Some(r) => {
+            *version_out = r.version;
+            *features_out = r.features;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Build the 4-byte minimum listing-request body. Writes the byte
+/// count actually written (always 4 on success) into `*out_written`.
+/// Returns false on NULL `out` / NULL `out_written` / `out_len < 4`.
+///
+/// # Safety
+/// `out` valid for `out_len` bytes; `out_written` writable.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_pack_listing_request_simple(
+    out: *mut u8,
+    out_len: usize,
+    out_written: *mut usize,
+) -> bool {
+    if out.is_null() || out_written.is_null() || out_len < 4 {
+        return false;
+    }
+    let s = slice::from_raw_parts_mut(out, out_len);
+    match parse::pack_tracker_v3_listing_request_simple(s) {
+        Some(n) => {
+            *out_written = n;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Parse the 10-byte listing-response header. Returns false on
+/// NULL pointers, short buffer, or wrong response_type; otherwise
+/// true.
+///
+/// # Safety
+/// `buf` valid for `len` bytes; out pointers writable.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_parse_response_header(
+    buf: *const u8,
+    len: usize,
+    response_type_out: *mut u16,
+    total_size_out: *mut u32,
+    total_servers_out: *mut u16,
+    record_count_out: *mut u16,
+) -> bool {
+    if response_type_out.is_null()
+        || total_size_out.is_null()
+        || total_servers_out.is_null()
+        || record_count_out.is_null()
+    {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_v3_response_header(s) {
+        Some(h) => {
+            *response_type_out = h.response_type;
+            *total_size_out = h.total_size;
+            *total_servers_out = h.total_servers;
+            *record_count_out = h.record_count;
+            true
+        }
+        None => false,
+    }
+}
+
+/// C-ABI mirror of one parsed v3 record. Offsets are into the
+/// caller's input buffer; lengths give the slice extents. Caller
+/// dereferences via `buf + off` for the matching length.
+/// `consumed` is the number of bytes this record occupied (advance
+/// `off` by this for the next call).
+#[repr(C)]
+pub struct TrackerV3RecordOut {
+    pub addr_off: usize,
+    pub addr_len: usize,
+    pub name_off: usize,
+    pub name_len: usize,
+    pub desc_off: usize,
+    pub desc_len: usize,
+    pub tlv_off: usize,
+    pub tlv_len: usize,
+    pub consumed: usize,
+    pub port: u16,
+    pub nusers: u16,
+    pub tlv_count: u16,
+    pub addr_type: u8,
+}
+
+/// Parse one tracker v3 server record at `buf[off..]`. On success
+/// fills `*out` with the parsed fields and offsets; on failure
+/// (truncation, unknown addr_type, declared length overruns)
+/// returns false.
+///
+/// # Safety
+/// `buf` valid for `len` bytes; `out` writable.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_parse_record(
+    buf: *const u8,
+    len: usize,
+    off: usize,
+    out: *mut TrackerV3RecordOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_v3_record(s, off) {
+        Some((r, consumed)) => {
+            let base = s.as_ptr() as usize;
+            (*out).addr_off = r.address.as_ptr() as usize - base;
+            (*out).addr_len = r.address.len();
+            (*out).name_off = r.name.as_ptr() as usize - base;
+            (*out).name_len = r.name.len();
+            (*out).desc_off = r.desc.as_ptr() as usize - base;
+            (*out).desc_len = r.desc.len();
+            (*out).tlv_off = r.tlv_bytes.as_ptr() as usize - base;
+            (*out).tlv_len = r.tlv_bytes.len();
+            (*out).consumed = consumed;
+            (*out).port = r.port;
+            (*out).nusers = r.nusers;
+            (*out).tlv_count = r.tlv_count;
+            (*out).addr_type = r.addr_type;
+            true
+        }
+        None => false,
+    }
+}
+
+/// C-ABI mirror of one parsed TLV inside a v3 record's TLV blob.
+/// `value_off` / `value_len` are offsets into the caller's
+/// TLV-blob buffer; `next_off` is the offset to the next TLV
+/// (suitable as the next call's `off`).
+#[repr(C)]
+pub struct TrackerV3TlvOut {
+    pub value_off: usize,
+    pub value_len: usize,
+    pub next_off: usize,
+    pub id: u16,
+}
+
+/// Parse the next TLV at `buf[off..]`. Returns false on a short
+/// buffer (< 4 bytes for the id+len header), or when the declared
+/// value_len runs past the buffer. The C `hx_tracker_v3_walk_tlvs`
+/// wrapper iterates this and fires its callback per entry.
+///
+/// # Safety
+/// `buf` valid for `len` bytes; `out` writable.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_parse_tlv_at(
+    buf: *const u8,
+    len: usize,
+    off: usize,
+    out: *mut TrackerV3TlvOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::parse_tracker_v3_tlv_at(s, off) {
+        Some((tlv, next_off)) => {
+            let base = s.as_ptr() as usize;
+            (*out).value_off = tlv.value.as_ptr() as usize - base;
+            (*out).value_len = tlv.value.len();
+            (*out).next_off = next_off;
+            (*out).id = tlv.id;
+            true
+        }
+        None => false,
+    }
+}
+
+// ---- HTRK v3 meta TLV typed readers -----------------------------------
+//
+// Wire-format-strict fail-closed scalar extractors for the per-record
+// TLV trailer. Strings stay in C (need g_utf8_make_valid + g_strndup);
+// these readers cover only the numeric / bool / enum-clamp half.
+
+/// Read a u8 TLV value with `default` on wrong-size payload (anything
+/// other than exactly 1 byte).
+///
+/// # Safety
+/// `value` valid for `value_len` bytes (or NULL when `value_len == 0`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u8(
+    value: *const u8,
+    value_len: usize,
+    default: u8,
+) -> u8 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u8(s, default)
+}
+
+/// Read a u16 TLV value (big-endian) with `default` on wrong-size
+/// payload (≠ 2 bytes).
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u16(
+    value: *const u8,
+    value_len: usize,
+    default: u16,
+) -> u16 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u16(s, default)
+}
+
+/// Read a signed i16 TLV value (big-endian, two's-complement) with
+/// `default` on wrong-size payload.
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_i16(
+    value: *const u8,
+    value_len: usize,
+    default: i16,
+) -> i16 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_i16(s, default)
+}
+
+/// Read a u32 TLV value (big-endian) with `default` on wrong-size
+/// payload (≠ 4 bytes).
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_u32(
+    value: *const u8,
+    value_len: usize,
+    default: u32,
+) -> u32 {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_u32(s, default)
+}
+
+/// Read a boolean TLV value: any non-zero byte → true. Empty / all-
+/// zero payload → false.
+///
+/// # Safety
+/// As above.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_bool(
+    value: *const u8,
+    value_len: usize,
+) -> bool {
+    let s = as_slice(value, value_len);
+    parse::tracker_v3_meta_read_bool(s)
+}
+
+/// Clamp a raw maturity-rating byte to {0..=3}, defaulting to 0
+/// (GENERAL) on unknown values. Spec rule.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
+    raw: u8,
+) -> u8 {
+    parse::tracker_v3_meta_clamp_maturity(raw)
+}
+
+/// Clamp a raw listing-category byte to {0..=12}, defaulting to 0
+/// (UNSPECIFIED) on unknown values. Spec rule.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
+    raw: u8,
+) -> u8 {
+    parse::tracker_v3_meta_clamp_listing_category(raw)
+}

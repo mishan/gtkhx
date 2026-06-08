@@ -828,6 +828,409 @@ pub fn tracker_normalize_text(buf: &mut [u8]) {
     strip_ansi(buf);
 }
 
+// ---- HTRK v3 (newer tracker protocol) ----------------------------------
+//
+// Pure encoders + parsers for the Hotline tracker v3 wire format.
+// Mirrors src/tracker_v3.c. Backs the six public functions in
+// src/tracker_v3.h. The state machine in network.c reads in chunks
+// and threads the offsets/lengths through these.
+//
+// Numeric layout: big-endian on the wire; everything goes through
+// `u16::from_be_bytes` / `u32::from_be_bytes` constructors. No
+// strict-aliasing or alignment concerns at this layer.
+
+/// Constants. Mirrors of the wire values in `src/hotline.h` —
+/// duplicated here so the parser module is self-contained.
+pub mod tracker_v3 {
+    /// "HTRK" magic prefix that opens both handshake directions.
+    pub const MAGIC_PREFIX: [u8; 4] = *b"HTRK";
+    /// Client-side handshake byte count.
+    pub const HANDSHAKE_LEN: usize = 8;
+    /// Listing-response fixed-header byte count.
+    pub const RESP_HDR_LEN: usize = 10;
+    /// Protocol version byte transmitted in the handshake.
+    pub const VERSION_V3: u16 = 0x0003;
+    /// Listing-request type code (`HTRK_V3_REQ_LIST`).
+    pub const REQ_LIST: u16 = 0x0001;
+    /// Listing-response type code (`HTRK_V3_RESP_LIST`).
+    pub const RESP_LIST: u16 = 0x0001;
+    /// Address-type byte: 4-byte IPv4 follows.
+    pub const ADDR_IPV4: u8 = 0x04;
+    /// Address-type byte: 16-byte IPv6 follows.
+    pub const ADDR_IPV6: u8 = 0x06;
+    /// Address-type byte: u16 BE length + UTF-8 hostname follows.
+    pub const ADDR_HOSTNAME: u8 = 0x48;
+}
+
+/// Build the 8-byte v3 client handshake (`"HTRK"` magic + version +
+/// `features`). Returns `Some(bytes)` on success, `None` if `out`
+/// slice is shorter than 8 bytes.
+pub fn pack_tracker_v3_handshake(out: &mut [u8], features: u16) -> bool {
+    if out.len() < tracker_v3::HANDSHAKE_LEN {
+        return false;
+    }
+    out[0..4].copy_from_slice(&tracker_v3::MAGIC_PREFIX);
+    out[4..6].copy_from_slice(&tracker_v3::VERSION_V3.to_be_bytes());
+    out[6..8].copy_from_slice(&features.to_be_bytes());
+    true
+}
+
+/// Parsed handshake response. `version` is the tracker's
+/// HTRK_VERSION_* value; `features` is the offered feature bitmask
+/// (0 for v1/v2 — the 6-byte response variant — and the wire
+/// bytes for v3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackerV3HandshakeResponse {
+    pub version: u16,
+    pub features: u16,
+}
+
+/// Parse the tracker's handshake response. The state machine reads
+/// 6 bytes first; if the version comes back as v3 it then reads
+/// the trailing 2 bytes and calls us again with `buf.len() == 8`.
+/// Returns `None` on bad magic or a wrong-length buffer.
+pub fn parse_tracker_v3_handshake_response(
+    buf: &[u8],
+) -> Option<TrackerV3HandshakeResponse> {
+    if buf.len() != 6 && buf.len() != 8 {
+        return None;
+    }
+    if buf[0..4] != tracker_v3::MAGIC_PREFIX {
+        return None;
+    }
+    let version = u16::from_be_bytes([buf[4], buf[5]]);
+    let features = if buf.len() == 8 {
+        u16::from_be_bytes([buf[6], buf[7]])
+    } else {
+        0
+    };
+    Some(TrackerV3HandshakeResponse { version, features })
+}
+
+/// Build the 4-byte minimum listing-request body (`request_type =
+/// 0x0001` + `field_count = 0`). Returns `Some(4)` (bytes written)
+/// on success, `None` if `out` slice is shorter than 4 bytes.
+pub fn pack_tracker_v3_listing_request_simple(out: &mut [u8]) -> Option<usize> {
+    if out.len() < 4 {
+        return None;
+    }
+    out[0..2].copy_from_slice(&tracker_v3::REQ_LIST.to_be_bytes());
+    out[2..4].copy_from_slice(&0u16.to_be_bytes());
+    Some(4)
+}
+
+/// Parsed 10-byte listing-response header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackerV3ResponseHeader {
+    /// Server-side response type. Currently only `RESP_LIST = 1`.
+    pub response_type: u16,
+    /// Total bytes of records-blob the server will send (excluding
+    /// the 10-byte header).
+    pub total_size: u32,
+    /// Total matching servers (may exceed the records returned in
+    /// this one message — pagination is on the cards).
+    pub total_servers: u16,
+    /// Number of records in this message.
+    pub record_count: u16,
+}
+
+/// Parse the 10-byte listing-response header. Returns `None` on a
+/// short buffer or a response-type byte that isn't `RESP_LIST`.
+pub fn parse_tracker_v3_response_header(buf: &[u8]) -> Option<TrackerV3ResponseHeader> {
+    if buf.len() < tracker_v3::RESP_HDR_LEN {
+        return None;
+    }
+    let response_type = u16::from_be_bytes([buf[0], buf[1]]);
+    if response_type != tracker_v3::RESP_LIST {
+        return None;
+    }
+    let total_size = u32::from_be_bytes([buf[2], buf[3], buf[4], buf[5]]);
+    let total_servers = u16::from_be_bytes([buf[6], buf[7]]);
+    let record_count = u16::from_be_bytes([buf[8], buf[9]]);
+    Some(TrackerV3ResponseHeader {
+        response_type,
+        total_size,
+        total_servers,
+        record_count,
+    })
+}
+
+/// One parsed tracker v3 server record. All slice fields borrow
+/// into the caller's input — copy them out before the input goes
+/// away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackerV3Record<'a> {
+    pub addr_type: u8,
+    /// IPv4: 4 bytes of in_addr.s_addr (network byte order).
+    /// IPv6: 16 bytes of in6_addr.s6_addr.
+    /// Hostname: UTF-8 bytes (no length prefix here — already
+    /// consumed by the parser).
+    pub address: &'a [u8],
+    pub port: u16,
+    pub nusers: u16,
+    pub name: &'a [u8],
+    pub desc: &'a [u8],
+    pub tlv_count: u16,
+    /// Raw TLV blob — iterate with `parse_tracker_v3_tlv_at`.
+    pub tlv_bytes: &'a [u8],
+}
+
+/// Parse one tracker v3 server record at `buf[off..]`. Returns
+/// `Some((record, consumed))` on success — `consumed` is the byte
+/// count the caller advances past for the next record. Returns
+/// `None` on truncation, an unknown address-type byte, or any
+/// declared length that overruns the buffer.
+pub fn parse_tracker_v3_record(
+    buf: &[u8],
+    off: usize,
+) -> Option<(TrackerV3Record<'_>, usize)> {
+    if off > buf.len() {
+        return None;
+    }
+    let rest = &buf[off..];
+    let mut pos: usize = 0;
+
+    // 1 byte address type.
+    if rest.len() < 1 {
+        return None;
+    }
+    let addr_type = rest[pos];
+    pos += 1;
+
+    // Address bytes — size depends on the type byte. Hostname is
+    // the only variable-length form; u16 BE length followed by
+    // that many UTF-8 bytes.
+    let (addr_start, addr_len) = match addr_type {
+        x if x == tracker_v3::ADDR_IPV4 => {
+            if rest.len() < pos + 4 {
+                return None;
+            }
+            let s = pos;
+            pos += 4;
+            (s, 4)
+        }
+        x if x == tracker_v3::ADDR_IPV6 => {
+            if rest.len() < pos + 16 {
+                return None;
+            }
+            let s = pos;
+            pos += 16;
+            (s, 16)
+        }
+        x if x == tracker_v3::ADDR_HOSTNAME => {
+            if rest.len() < pos + 2 {
+                return None;
+            }
+            let hn_len = u16::from_be_bytes([rest[pos], rest[pos + 1]]) as usize;
+            pos += 2;
+            if rest.len() < pos + hn_len {
+                return None;
+            }
+            let s = pos;
+            pos += hn_len;
+            (s, hn_len)
+        }
+        _ => {
+            // Unknown address-type byte — we can't tell how many
+            // bytes to skip, so we bail. The state machine will
+            // close the connection. A future spec rev adding new
+            // address types needs a new code path here or an
+            // explicit "skip unknown" length-prefix convention.
+            return None;
+        }
+    };
+
+    // Port (u16) + nusers (u16) + name_len (u16).
+    if rest.len() < pos + 6 {
+        return None;
+    }
+    let port = u16::from_be_bytes([rest[pos], rest[pos + 1]]);
+    let nusers = u16::from_be_bytes([rest[pos + 2], rest[pos + 3]]);
+    let name_len = u16::from_be_bytes([rest[pos + 4], rest[pos + 5]]) as usize;
+    pos += 6;
+
+    // Name bytes.
+    if rest.len() < pos + name_len {
+        return None;
+    }
+    let name_start = pos;
+    pos += name_len;
+
+    // Description len (u16) + bytes.
+    if rest.len() < pos + 2 {
+        return None;
+    }
+    let desc_len = u16::from_be_bytes([rest[pos], rest[pos + 1]]) as usize;
+    pos += 2;
+    if rest.len() < pos + desc_len {
+        return None;
+    }
+    let desc_start = pos;
+    pos += desc_len;
+
+    // TLV count (u16) + entries.
+    if rest.len() < pos + 2 {
+        return None;
+    }
+    let tlv_count = u16::from_be_bytes([rest[pos], rest[pos + 1]]);
+    pos += 2;
+
+    let tlv_start = pos;
+    for _ in 0..tlv_count {
+        if rest.len() < pos + 4 {
+            return None;
+        }
+        let value_len = u16::from_be_bytes([rest[pos + 2], rest[pos + 3]]) as usize;
+        pos += 4;
+        if rest.len() < pos + value_len {
+            return None;
+        }
+        pos += value_len;
+    }
+    let tlv_bytes_len = pos - tlv_start;
+
+    Some((
+        TrackerV3Record {
+            addr_type,
+            address: &rest[addr_start..addr_start + addr_len],
+            port,
+            nusers,
+            name: &rest[name_start..name_start + name_len],
+            desc: &rest[desc_start..desc_start + desc_len],
+            tlv_count,
+            tlv_bytes: &rest[tlv_start..tlv_start + tlv_bytes_len],
+        },
+        // Byte count this record occupied — caller advances `off`
+        // by this for the next record. `pos` is the cursor inside
+        // `rest = &buf[off..]`, so it's already the number of
+        // consumed bytes, not an absolute offset into `buf`. The
+        // C ABI mirror `TrackerV3RecordOut.consumed` and the C
+        // wrapper `hx_tracker_v3_parse_record` both treat this
+        // value as a length to add (not assign), so it MUST be
+        // the count.
+        pos,
+    ))
+}
+
+/// One parsed TLV entry from inside a v3 record's TLV blob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackerV3Tlv<'a> {
+    pub id: u16,
+    pub value: &'a [u8],
+}
+
+/// Parse the next TLV at `buf[off..]`. Returns `Some((tlv,
+/// next_off))` on success — `next_off` is suitable for the next
+/// call. Returns `None` when fewer than 4 bytes remain (no room
+/// for the id + len header), or when the declared `value_len`
+/// runs past the buffer end. Callers that need the "expected
+/// exactly `count` entries, no leftover bytes" check that the C
+/// walker enforces should track the iteration count themselves
+/// and verify `next_off == buf.len()` after the final iteration —
+/// see the C wrapper in `tracker_v3.c::hx_tracker_v3_walk_tlvs`.
+pub fn parse_tracker_v3_tlv_at(buf: &[u8], off: usize) -> Option<(TrackerV3Tlv<'_>, usize)> {
+    if off > buf.len() {
+        return None;
+    }
+    let rest = &buf[off..];
+    if rest.len() < 4 {
+        return None;
+    }
+    let id = u16::from_be_bytes([rest[0], rest[1]]);
+    let value_len = u16::from_be_bytes([rest[2], rest[3]]) as usize;
+    if rest.len() < 4 + value_len {
+        return None;
+    }
+    Some((
+        TrackerV3Tlv {
+            id,
+            value: &rest[4..4 + value_len],
+        },
+        off + 4 + value_len,
+    ))
+}
+
+// ---- HTRK v3 meta TLV typed readers ------------------------------------
+//
+// Per-record TLV trailer fields are typed (u8 / u16 / i16 / u32 / bool /
+// string / enum). These readers fail CLOSED on a wrong-size payload —
+// a truncated or overlong TLV returns the caller's `default` instead of
+// silently decoding partial bytes. "Wrong size" means anything other
+// than the exact spec-mandated width (e.g. u16 reader rejects len != 2,
+// not just len < 2 — so an oversize payload can't quietly decode from
+// its first 2 bytes and paper over a corrupt or future-spec-extended
+// TLV).
+//
+// String fields are NOT handled here — they need GLib's
+// `g_utf8_make_valid` for the Pango safety pass that's mandatory for
+// untrusted UTF-8 going to the display layer. The C side of
+// src/tracker_v3_meta.c keeps the string copies + sanitisation; this
+// module only owns the scalar half of the wire decode.
+
+/// Read a u8 TLV value with the spec-mandated default on a non-1-byte
+/// payload. Mirrors the `static read_u8` in `src/tracker_v3_meta.c`.
+pub fn tracker_v3_meta_read_u8(value: &[u8], default: u8) -> u8 {
+    if value.len() == 1 {
+        value[0]
+    } else {
+        default
+    }
+}
+
+/// Read a u16 TLV value (big-endian) with the spec-mandated default
+/// on a wrong-size (≠ 2 bytes) payload.
+pub fn tracker_v3_meta_read_u16(value: &[u8], default: u16) -> u16 {
+    if value.len() == 2 {
+        u16::from_be_bytes([value[0], value[1]])
+    } else {
+        default
+    }
+}
+
+/// Read a signed i16 TLV value (big-endian, two's-complement) with the
+/// spec-mandated default on a wrong-size payload. Used for the
+/// timezone-offset-minutes TLV which is the only signed scalar in
+/// the meta surface.
+pub fn tracker_v3_meta_read_i16(value: &[u8], default: i16) -> i16 {
+    if value.len() == 2 {
+        i16::from_be_bytes([value[0], value[1]])
+    } else {
+        default
+    }
+}
+
+/// Read a u32 TLV value (big-endian) with the spec-mandated default
+/// on a wrong-size (≠ 4 bytes) payload.
+pub fn tracker_v3_meta_read_u32(value: &[u8], default: u32) -> u32 {
+    if value.len() == 4 {
+        u32::from_be_bytes([value[0], value[1], value[2], value[3]])
+    } else {
+        default
+    }
+}
+
+/// Read a boolean TLV value: any non-zero byte in the payload reads
+/// as `true`, empty / all-zero payload reads as `false`. Tracker v3
+/// spec deliberately leaves the width open to allow forward-compat
+/// "any-non-zero-byte means yes" decoding.
+pub fn tracker_v3_meta_read_bool(value: &[u8]) -> bool {
+    value.iter().any(|&b| b != 0)
+}
+
+/// Clamp a raw maturity-rating byte to the closed vocabulary
+/// {0 GENERAL, 1 TEEN, 2 MATURE, 3 ADULT}. Spec rule: unknown values
+/// MUST be treated as 0 (GENERAL).
+pub fn tracker_v3_meta_clamp_maturity(raw: u8) -> u8 {
+    if raw <= 3 { raw } else { 0 }
+}
+
+/// Clamp a raw listing-category byte to the closed vocabulary
+/// 0..=12 (UNSPECIFIED .. CREATIVE). Spec rule: unknown values MUST
+/// be treated as 0 (UNSPECIFIED).
+pub fn tracker_v3_meta_clamp_listing_category(raw: u8) -> u8 {
+    if raw <= 12 { raw } else { 0 }
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -2914,6 +3317,391 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         tracker_normalize_text(&mut buf);
         assert!(buf.is_empty());
+    }
+
+    // ---- HTRK v3 pack / parse ----
+
+    #[test]
+    fn tracker_v3_pack_handshake_basic() {
+        let mut out = [0u8; 8];
+        assert!(pack_tracker_v3_handshake(&mut out, 0x0001));
+        // "HTRK" + 0x0003 version + 0x0001 features
+        assert_eq!(&out[0..4], b"HTRK");
+        assert_eq!(&out[4..6], &[0x00, 0x03]);
+        assert_eq!(&out[6..8], &[0x00, 0x01]);
+    }
+
+    #[test]
+    fn tracker_v3_pack_handshake_short_buffer_rejected() {
+        let mut out = [0u8; 7];
+        assert!(!pack_tracker_v3_handshake(&mut out, 0));
+    }
+
+    #[test]
+    fn tracker_v3_handshake_response_v3_8byte() {
+        // Server returns v3 with feature bits 0x0003.
+        let buf = [b'H', b'T', b'R', b'K', 0x00, 0x03, 0x00, 0x03];
+        let r = parse_tracker_v3_handshake_response(&buf).expect("ok");
+        assert_eq!(r.version, 0x0003);
+        assert_eq!(r.features, 0x0003);
+    }
+
+    #[test]
+    fn tracker_v3_handshake_response_v1_v2_6byte() {
+        // Server returns v1 (no features trailer).
+        let buf = [b'H', b'T', b'R', b'K', 0x00, 0x01];
+        let r = parse_tracker_v3_handshake_response(&buf).expect("ok");
+        assert_eq!(r.version, 0x0001);
+        assert_eq!(r.features, 0);
+    }
+
+    #[test]
+    fn tracker_v3_handshake_response_bad_magic() {
+        let buf = [b'X', b'T', b'R', b'K', 0x00, 0x03];
+        assert!(parse_tracker_v3_handshake_response(&buf).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_handshake_response_wrong_length() {
+        // 7-byte response — neither 6 nor 8.
+        let buf = [b'H', b'T', b'R', b'K', 0x00, 0x03, 0x00];
+        assert!(parse_tracker_v3_handshake_response(&buf).is_none());
+        assert!(parse_tracker_v3_handshake_response(&[]).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_pack_listing_request_simple_basic() {
+        let mut out = [0xffu8; 4];
+        let n = pack_tracker_v3_listing_request_simple(&mut out).expect("ok");
+        assert_eq!(n, 4);
+        // request_type = 0x0001, field_count = 0.
+        assert_eq!(out, [0x00, 0x01, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn tracker_v3_pack_listing_request_simple_short_buffer() {
+        let mut out = [0u8; 3];
+        assert!(pack_tracker_v3_listing_request_simple(&mut out).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_response_header_basic() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0001u16.to_be_bytes()); // type
+        buf.extend_from_slice(&12345u32.to_be_bytes()); // total_size
+        buf.extend_from_slice(&500u16.to_be_bytes()); // total_servers
+        buf.extend_from_slice(&50u16.to_be_bytes()); // record_count
+        let h = parse_tracker_v3_response_header(&buf).expect("ok");
+        assert_eq!(h.response_type, 1);
+        assert_eq!(h.total_size, 12345);
+        assert_eq!(h.total_servers, 500);
+        assert_eq!(h.record_count, 50);
+    }
+
+    #[test]
+    fn tracker_v3_response_header_wrong_type() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0002u16.to_be_bytes()); // wrong type
+        buf.extend_from_slice(&[0u8; 8]);
+        assert!(parse_tracker_v3_response_header(&buf).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_response_header_short_buffer() {
+        let buf = vec![0u8; 9];
+        assert!(parse_tracker_v3_response_header(&buf).is_none());
+    }
+
+    /// Build one tracker v3 record with the given fields. `addr_type`
+    /// dispatches the address encoding; `tlvs` is a vec of (id,
+    /// value) pairs already serialised into the TLV blob.
+    fn build_tracker_v3_record(
+        addr_type: u8,
+        address: &[u8],
+        port: u16,
+        nusers: u16,
+        name: &[u8],
+        desc: &[u8],
+        tlvs: &[(u16, &[u8])],
+    ) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.push(addr_type);
+        match addr_type {
+            x if x == tracker_v3::ADDR_IPV4 => v.extend_from_slice(address),
+            x if x == tracker_v3::ADDR_IPV6 => v.extend_from_slice(address),
+            x if x == tracker_v3::ADDR_HOSTNAME => {
+                v.extend_from_slice(&(address.len() as u16).to_be_bytes());
+                v.extend_from_slice(address);
+            }
+            _ => unreachable!(),
+        }
+        v.extend_from_slice(&port.to_be_bytes());
+        v.extend_from_slice(&nusers.to_be_bytes());
+        v.extend_from_slice(&(name.len() as u16).to_be_bytes());
+        v.extend_from_slice(name);
+        v.extend_from_slice(&(desc.len() as u16).to_be_bytes());
+        v.extend_from_slice(desc);
+        v.extend_from_slice(&(tlvs.len() as u16).to_be_bytes());
+        for (id, value) in tlvs {
+            v.extend_from_slice(&id.to_be_bytes());
+            v.extend_from_slice(&(value.len() as u16).to_be_bytes());
+            v.extend_from_slice(value);
+        }
+        v
+    }
+
+    #[test]
+    fn tracker_v3_record_ipv4_basic() {
+        let rec = build_tracker_v3_record(
+            tracker_v3::ADDR_IPV4,
+            &[192, 168, 1, 1],
+            5500,
+            7,
+            b"My Server",
+            b"Welcome",
+            &[],
+        );
+        let (r, consumed) = parse_tracker_v3_record(&rec, 0).expect("ok");
+        assert_eq!(r.addr_type, tracker_v3::ADDR_IPV4);
+        assert_eq!(r.address, &[192, 168, 1, 1]);
+        assert_eq!(r.port, 5500);
+        assert_eq!(r.nusers, 7);
+        assert_eq!(r.name, b"My Server");
+        assert_eq!(r.desc, b"Welcome");
+        assert_eq!(r.tlv_count, 0);
+        assert!(r.tlv_bytes.is_empty());
+        assert_eq!(consumed, rec.len());
+    }
+
+    #[test]
+    fn tracker_v3_record_ipv6_basic() {
+        let addr = [
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+        ];
+        let rec = build_tracker_v3_record(
+            tracker_v3::ADDR_IPV6,
+            &addr,
+            5500,
+            0,
+            b"",
+            b"",
+            &[],
+        );
+        let (r, _) = parse_tracker_v3_record(&rec, 0).expect("ok");
+        assert_eq!(r.addr_type, tracker_v3::ADDR_IPV6);
+        assert_eq!(r.address, &addr);
+        assert_eq!(r.address.len(), 16);
+    }
+
+    #[test]
+    fn tracker_v3_record_hostname_basic() {
+        let rec = build_tracker_v3_record(
+            tracker_v3::ADDR_HOSTNAME,
+            b"server.example.com",
+            5500,
+            0,
+            b"Name",
+            b"Desc",
+            &[],
+        );
+        let (r, _) = parse_tracker_v3_record(&rec, 0).expect("ok");
+        assert_eq!(r.addr_type, tracker_v3::ADDR_HOSTNAME);
+        assert_eq!(r.address, b"server.example.com");
+    }
+
+    #[test]
+    fn tracker_v3_record_unknown_addr_type_rejected() {
+        // 0xFF isn't IPV4 / IPV6 / HOSTNAME → walker can't tell
+        // how many bytes follow, returns None.
+        let buf = [0xFFu8, 0, 0, 0, 0];
+        assert!(parse_tracker_v3_record(&buf, 0).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_record_with_tlvs() {
+        let rec = build_tracker_v3_record(
+            tracker_v3::ADDR_IPV4,
+            &[10, 0, 0, 1],
+            5500,
+            0,
+            b"Srv",
+            b"",
+            &[
+                (0x0100, b"v6-addr-here-16b"),
+                (0x0200, b"hxd 1.9"),
+            ],
+        );
+        let (r, _) = parse_tracker_v3_record(&rec, 0).expect("ok");
+        assert_eq!(r.tlv_count, 2);
+        // Walk the TLV blob.
+        let mut tlvs = Vec::new();
+        let mut off = 0;
+        while let Some((tlv, next)) = parse_tracker_v3_tlv_at(r.tlv_bytes, off) {
+            tlvs.push((tlv.id, tlv.value.to_vec()));
+            off = next;
+        }
+        assert_eq!(off, r.tlv_bytes.len());
+        assert_eq!(tlvs.len(), 2);
+        assert_eq!(tlvs[0].0, 0x0100);
+        assert_eq!(tlvs[0].1, b"v6-addr-here-16b");
+        assert_eq!(tlvs[1].0, 0x0200);
+        assert_eq!(tlvs[1].1, b"hxd 1.9");
+    }
+
+    #[test]
+    fn tracker_v3_record_truncated_rejected() {
+        // Build a complete record then chop the trailing byte —
+        // the TLV walk should detect the overrun.
+        let mut rec = build_tracker_v3_record(
+            tracker_v3::ADDR_IPV4,
+            &[1, 2, 3, 4],
+            80,
+            0,
+            b"a",
+            b"b",
+            &[(0x0100, b"abc")],
+        );
+        rec.pop();
+        assert!(parse_tracker_v3_record(&rec, 0).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_iterate_multiple_records() {
+        // Two records back-to-back.
+        let mut buf = Vec::new();
+        buf.extend(build_tracker_v3_record(
+            tracker_v3::ADDR_IPV4, &[1, 2, 3, 4], 80, 1, b"A", b"", &[],
+        ));
+        buf.extend(build_tracker_v3_record(
+            tracker_v3::ADDR_HOSTNAME, b"x.example", 81, 2, b"B", b"", &[],
+        ));
+
+        let mut entries = Vec::new();
+        let mut off = 0;
+        while let Some((r, consumed)) = parse_tracker_v3_record(&buf, off) {
+            entries.push((r.addr_type, r.port, r.name.to_vec()));
+            off += consumed;
+        }
+        assert_eq!(off, buf.len());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], (tracker_v3::ADDR_IPV4, 80, b"A".to_vec()));
+        assert_eq!(entries[1], (tracker_v3::ADDR_HOSTNAME, 81, b"B".to_vec()));
+    }
+
+    #[test]
+    fn tracker_v3_tlv_short_header_rejected() {
+        // 3 bytes < the 4-byte id+len header.
+        let buf = [0u8; 3];
+        assert!(parse_tracker_v3_tlv_at(&buf, 0).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_tlv_value_len_overruns() {
+        // id + len=100 but only 3 trailing bytes.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0100u16.to_be_bytes());
+        buf.extend_from_slice(&100u16.to_be_bytes());
+        buf.extend_from_slice(&[0xaa, 0xbb, 0xcc]);
+        assert!(parse_tracker_v3_tlv_at(&buf, 0).is_none());
+    }
+
+    #[test]
+    fn tracker_v3_tlv_zero_length_value_legal() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0100u16.to_be_bytes());
+        buf.extend_from_slice(&0u16.to_be_bytes());
+        let (tlv, next) = parse_tracker_v3_tlv_at(&buf, 0).expect("ok");
+        assert_eq!(tlv.id, 0x0100);
+        assert!(tlv.value.is_empty());
+        assert_eq!(next, 4);
+    }
+
+    // ---- HTRK v3 meta typed readers ----
+
+    #[test]
+    fn tracker_v3_meta_u8_correct_and_wrong_size() {
+        // Right size: read through.
+        assert_eq!(tracker_v3_meta_read_u8(&[0x42], 0xff), 0x42);
+        // Wrong size: default.
+        assert_eq!(tracker_v3_meta_read_u8(&[], 0xff), 0xff);
+        assert_eq!(tracker_v3_meta_read_u8(&[0, 0], 0xff), 0xff);
+        // Overlong: default (we don't decode the first byte).
+        assert_eq!(tracker_v3_meta_read_u8(&[0x42, 0x42, 0x42], 0xff), 0xff);
+    }
+
+    #[test]
+    fn tracker_v3_meta_u16_correct_and_wrong_size() {
+        // BE decode at exactly 2 bytes.
+        assert_eq!(tracker_v3_meta_read_u16(&[0x12, 0x34], 0xffff), 0x1234);
+        // Truncated.
+        assert_eq!(tracker_v3_meta_read_u16(&[], 0xffff), 0xffff);
+        assert_eq!(tracker_v3_meta_read_u16(&[0x12], 0xffff), 0xffff);
+        // Overlong — does NOT decode the first 2 bytes.
+        assert_eq!(
+            tracker_v3_meta_read_u16(&[0x12, 0x34, 0x56], 0xffff),
+            0xffff
+        );
+    }
+
+    #[test]
+    fn tracker_v3_meta_i16_preserves_sign() {
+        // -1 as BE bytes: 0xFFFF.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xff, 0xff], 0), -1);
+        // -480 (UTC-08:00) as BE bytes: 0xFE20.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xfe, 0x20], 0), -480);
+        // Positive.
+        assert_eq!(tracker_v3_meta_read_i16(&[0x01, 0x68], 0), 360);
+        // Wrong size → default.
+        assert_eq!(tracker_v3_meta_read_i16(&[0xff], 7), 7);
+    }
+
+    #[test]
+    fn tracker_v3_meta_u32_correct_and_wrong_size() {
+        assert_eq!(
+            tracker_v3_meta_read_u32(&[0x12, 0x34, 0x56, 0x78], 0),
+            0x1234_5678
+        );
+        // Wrong size → default.
+        assert_eq!(tracker_v3_meta_read_u32(&[0, 0, 0], 99), 99);
+        assert_eq!(tracker_v3_meta_read_u32(&[], 99), 99);
+        // Overlong.
+        assert_eq!(tracker_v3_meta_read_u32(&[0; 5], 99), 99);
+    }
+
+    #[test]
+    fn tracker_v3_meta_bool_any_nonzero() {
+        // Empty payload → false.
+        assert!(!tracker_v3_meta_read_bool(&[]));
+        // All zero → false.
+        assert!(!tracker_v3_meta_read_bool(&[0, 0, 0]));
+        // Single non-zero byte → true.
+        assert!(tracker_v3_meta_read_bool(&[1]));
+        // Mixed: any non-zero anywhere → true.
+        assert!(tracker_v3_meta_read_bool(&[0, 0, 1, 0]));
+    }
+
+    #[test]
+    fn tracker_v3_meta_clamp_maturity_closed_vocab() {
+        // Closed vocab 0..=3 passes through.
+        for raw in 0u8..=3 {
+            assert_eq!(tracker_v3_meta_clamp_maturity(raw), raw);
+        }
+        // Unknown values → 0 (GENERAL).
+        for raw in [4u8, 5, 100, 255] {
+            assert_eq!(tracker_v3_meta_clamp_maturity(raw), 0);
+        }
+    }
+
+    #[test]
+    fn tracker_v3_meta_clamp_listing_category_closed_vocab() {
+        // Closed vocab 0..=12 passes through.
+        for raw in 0u8..=12 {
+            assert_eq!(tracker_v3_meta_clamp_listing_category(raw), raw);
+        }
+        // Unknown values → 0 (UNSPECIFIED).
+        for raw in [13u8, 50, 100, 255] {
+            assert_eq!(tracker_v3_meta_clamp_listing_category(raw), 0);
+        }
     }
 
     // ---- news dirlist: folderitem ----
