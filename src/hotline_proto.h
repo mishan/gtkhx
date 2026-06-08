@@ -373,6 +373,40 @@ _Static_assert (sizeof (struct gtkhx_proto_history_entry) == 32,
 extern bool gtkhx_proto_parse_history_entry (const uint8_t *data, size_t len,
                                               struct gtkhx_proto_history_entry *out);
 
+/* ---- HTLS_DATA_FILE_LIST entry walker ---- */
+
+struct gtkhx_proto_file_list_entry {
+    uint32_t ftype;    /* FourCC, e.g. "fldr" / "TEXT" / "JPEG" */
+    uint32_t fcreator; /* FourCC */
+    uint32_t fsize;    /* bytes (or item count for folders) */
+    uint32_t fnlen;
+    /* Offset of filename bytes within the caller's `data` buffer
+     * (relative to `data`, not relative to the chunk start). */
+    size_t name_off;
+    size_t name_len;
+    /* Where the next chunk begins; pass back as the next call's
+     * `off`. Only meaningful when the parse returns true — a false
+     * return means either end-of-buffer OR a malformed chunk, and
+     * the caller can't tell which from next_off alone (it isn't
+     * written on the failure path). Iteration just stops at the
+     * first false return; callers that need to distinguish a
+     * clean end-of-buffer from a corrupt entry must inspect the
+     * remaining `len - off` bytes themselves. */
+    size_t next_off;
+};
+
+/* Parse one packed HTLS_DATA_FILE_LIST entry starting at
+ * data[off]. Caller iterates: off = 0; while
+ * (gtkhx_proto_parse_file_list_entry (data, len, off, &out)) {
+ *     use out; off = out.next_off; }
+ *
+ * Returns true on success with *out filled; false at end-of-buffer
+ * or on a malformed chunk (< 24 bytes remaining, declared chunk
+ * length runs past the buffer, fnlen runs past the chunk). */
+extern bool gtkhx_proto_parse_file_list_entry (const uint8_t *data, size_t len,
+                                                size_t off,
+                                                struct gtkhx_proto_file_list_entry *out);
+
 struct gtkhx_proto_file_getinfo {
     uint8_t icon[4];
     uint8_t date_create[8];

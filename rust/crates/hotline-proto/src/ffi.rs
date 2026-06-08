@@ -1753,6 +1753,59 @@ pub unsafe extern "C" fn gtkhx_proto_parse_history_entry(
     }
 }
 
+/// C-ABI result of [`parse::parse_file_list_entry`]. `name_off` is
+/// the offset of the filename bytes within the caller's input
+/// buffer (relative to `data`, NOT relative to the chunk start);
+/// `next_off` is where the next chunk begins (suitable for the
+/// caller's next `off` argument).
+#[repr(C)]
+pub struct FileListEntryOut {
+    pub ftype: u32,
+    pub fcreator: u32,
+    pub fsize: u32,
+    pub fnlen: u32,
+    pub name_off: usize,
+    pub name_len: usize,
+    pub next_off: usize,
+}
+
+/// Parse one packed `HTLS_DATA_FILE_LIST` entry starting at
+/// `data[off]`. Returns true on success with `*out` filled (use
+/// `out->next_off` as the next call's `off` argument). Returns
+/// false at end-of-buffer or on a malformed chunk (< 24 bytes
+/// remaining, declared chunk length runs past the buffer, fnlen
+/// runs past the chunk).
+///
+/// # Safety
+/// `data` valid for `len` bytes (or NULL when `len == 0`); `out` a
+/// valid writable `FileListEntryOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_file_list_entry(
+    data: *const u8,
+    len: usize,
+    off: usize,
+    out: *mut FileListEntryOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(data, len);
+    match parse::parse_file_list_entry(s, off) {
+        Some((entry, next_off)) => {
+            let base = s.as_ptr() as usize;
+            (*out).ftype = entry.ftype;
+            (*out).fcreator = entry.fcreator;
+            (*out).fsize = entry.fsize;
+            (*out).fnlen = entry.fnlen;
+            (*out).name_off = entry.name.as_ptr() as usize - base;
+            (*out).name_len = entry.name.len();
+            (*out).next_off = next_off;
+            true
+        }
+        None => false,
+    }
+}
+
 /// C-ABI result of [`parse::parse_file_getinfo`]. Strings land in
 /// caller-owned `name_buf` / `type_buf` / `creator_buf` /
 /// `comment_buf`, NUL-terminated, capped at the matching `_cap - 1`;

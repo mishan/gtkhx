@@ -39,46 +39,27 @@
  */
 
 #include "config.h"
-#include <string.h>
-#include <arpa/inet.h>          /* ntohs */
 #include <glib.h>
-#include "compat.h"             /* PACKED */
-#include "hotline.h"            /* struct hl_filelist_hdr, SIZEOF_HL_DATA_HDR */
-#include "protocol.h"           /* HN32 */
+#include "hotline_proto.h" /* gtkhx_proto_parse_file_list_entry */
 #include "filelist_walker.h"
 
 void
 hl_filelist_walk (const void *buf, gsize buflen, hl_filelist_entry_cb cb,
                   void *user_data)
 {
-    const guint8 *p = (const guint8 *)buf;
-    const guint8 *end = p + buflen;
+    /* Phase R2: per-entry packed-binary decode moved to the Rust
+	 * hotline-proto crate's parse_file_list_entry. The C callback
+	 * surface stays the same — files_remote_provider.c keeps its
+	 * existing cb signature without knowing the FFI exists. */
+    const guint8 *data = (const guint8 *)buf;
+    struct gtkhx_proto_file_list_entry entry;
+    size_t off = 0;
 
-    while (p + sizeof (struct hl_filelist_hdr) - 1 <= end) {
-        const struct hl_filelist_hdr *fh = (const struct hl_filelist_hdr *)p;
-        guint16 len_be;
-        guint16 chunk_len;
-        guint32 ftype, fsize, fnlen;
-
-        memcpy (&len_be, &fh->len, sizeof len_be);
-        chunk_len = ntohs (len_be);
-
-        /* Compute the per-entry stride and make sure the body fits
-		 * inside `end`. The legacy walker trusted the server; here
-		 * we bound-check so a malformed chunk doesn't walk us off
-		 * the end of the receive buffer. */
-        if (p + SIZEOF_HL_DATA_HDR + chunk_len > end) {
-            return;
-        }
-
-        HN32 (&ftype, &fh->ftype);
-        HN32 (&fsize, &fh->fsize);
-        HN32 (&fnlen, &fh->fnlen);
-
+    while (gtkhx_proto_parse_file_list_entry (data, buflen, off, &entry)) {
         if (cb) {
-            cb (ftype, fsize, fh->fname, fnlen, user_data);
+            cb (entry.ftype, entry.fsize, data + entry.name_off,
+                entry.name_len, user_data);
         }
-
-        p += SIZEOF_HL_DATA_HDR + chunk_len;
+        off = entry.next_off;
     }
 }
