@@ -10,6 +10,7 @@
 - Bug Fixes
   - Handle Chat subjects with Mac Roman characters
   - Fixed icons in Private Chat user list
+  - Fixed an issue where creating new user accounts was not working
 - Hotline Protocol
   - Tracker v3 support
   - Support for fetching tracker listings via TLS
