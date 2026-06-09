@@ -18,12 +18,20 @@ use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDir
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
-/// NULL. Empty is always safe to parse (every parser handles it).
+/// NULL or `len` is larger than Rust's slice size ceiling. Empty is
+/// always safe to parse (every parser handles it).
+///
+/// `slice::from_raw_parts` requires the total slice byte count to fit in
+/// `isize`. A buggy C caller (or one with attacker-controlled lengths)
+/// passing `len > isize::MAX` would otherwise trigger undefined
+/// behavior here; we treat it as "no buffer at all" instead. Every FFI
+/// shim that constructs a slice from raw pointers uses this helper, so
+/// the guard fires uniformly across the whole receive path.
 ///
 /// # Safety
 /// `ptr` must be valid for `len` bytes, or NULL.
 unsafe fn as_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
-    if ptr.is_null() || len == 0 {
+    if ptr.is_null() || len == 0 || len > isize::MAX as usize {
         &[]
     } else {
         slice::from_raw_parts(ptr, len)
@@ -3538,4 +3546,183 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
     raw: u8,
 ) -> u8 {
     parse::tracker_v3_meta_clamp_listing_category(raw)
+}
+
+// ---- Text encoding: Mac Roman / UTF-8 ---------------------------------
+
+/// Decode wire bytes from `src` into UTF-8 in `dst`, mirroring
+/// `text_util.c::gtkhx_text_to_utf8`. The decoded bytes occupy the
+/// half-open range `dst[0..returned]`; the function returns the number of
+/// bytes written. Returns 0 on NULL `dst` or zero `cap` (also covers NULL
+/// `src` / `len == 0`, which decode to an empty result anyway).
+///
+/// `src` and `dst` are independent buffers — the decode is `src → dst`,
+/// not in place. They must not overlap.
+///
+/// Worst-case Mac Roman → UTF-8 expansion is 3×. With `cap >= len * 3`
+/// the whole decoded output is guaranteed to fit. With a smaller `cap`
+/// the result is truncated at the last UTF-8 character boundary that
+/// still fits — never a partial multi-byte sequence. The return value
+/// `n` satisfies `n <= cap`.
+///
+/// # NUL termination
+///
+/// No trailing NUL is appended; `dst[returned]` is left untouched.
+/// Decoded output may legitimately contain embedded NULs when the input
+/// was already valid UTF-8 with NULs in it, so the FFI deliberately
+/// does not own NUL accounting.
+///
+/// Callers that want a C string should allocate `len * 3 + 1` bytes
+/// total but pass `cap = len * 3` here, then write `'\0'` to
+/// `dst[returned]` after the call. The `+ 1` byte the caller owns is
+/// the NUL slot; with `cap = len * 3` the FFI's return value can be at
+/// most `len * 3`, so `dst[returned]` is always in bounds.
+///
+/// This is a thin C-pointer wrapper around [`text::to_utf8_into`]; the
+/// table lookup, the boundary-walk truncation, and the rest of the
+/// decode rules live in that pure-Rust function so future Rust callers
+/// don't pay the FFI tax to reach them.
+///
+/// # Safety
+/// `src` either valid for `len` bytes or NULL (treated as empty regardless
+/// of `len`); `dst` either valid (writable) for `cap` bytes or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_text_to_utf8(
+    src: *const u8,
+    len: usize,
+    dst: *mut u8,
+    cap: usize,
+) -> usize {
+    // Both `slice::from_raw_parts` (inside `as_slice` for the src side)
+    // and `slice::from_raw_parts_mut` (for the dst side) require the
+    // slice's total byte size to fit in `isize`. The `as_slice` helper
+    // already guards `len`; we have to guard `cap` here directly because
+    // the dst slice is built inline. The C wrapper in text_util.c bounds
+    // both well below this in practice, but a buggy direct caller could
+    // pass garbage — refuse to build a UB slice and return 0 instead.
+    if dst.is_null() || cap == 0 || cap > isize::MAX as usize {
+        return 0;
+    }
+    let s = as_slice(src, len);
+    let buf = slice::from_raw_parts_mut(dst, cap);
+    crate::text::to_utf8_into(s, buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The decode rule + boundary-walk truncation belong to text::to_utf8_into;
+    // tests for those live in src/text.rs. The FFI-only contract — NULL
+    // pointer / zero-cap handling and the pointer-to-slice translation —
+    // is what we cover here.
+
+    #[test]
+    fn text_to_utf8_ffi_null_dst_is_noop() {
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(b"hi".as_ptr(), 2, std::ptr::null_mut(), 16);
+            assert_eq!(n, 0);
+        }
+    }
+
+    #[test]
+    fn text_to_utf8_ffi_zero_cap_is_noop() {
+        let mut dst = [0u8; 16];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(b"hi".as_ptr(), 2, dst.as_mut_ptr(), 0);
+            assert_eq!(n, 0);
+        }
+    }
+
+    #[test]
+    fn text_to_utf8_ffi_null_src_writes_nothing() {
+        // Doc says: NULL src is treated as empty regardless of `len`.
+        // Cover the contract's important half — non-zero `len` with a
+        // NULL pointer must NOT cause an attempted read, just produce
+        // an empty result. (`as_slice` is the helper enforcing this.)
+        let mut dst = [0u8; 16];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(
+                std::ptr::null(),
+                42,
+                dst.as_mut_ptr(),
+                dst.len(),
+            );
+            assert_eq!(n, 0);
+        }
+        // Also cover the literal "no input at all" edge.
+        let mut dst = [0u8; 16];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(
+                std::ptr::null(),
+                0,
+                dst.as_mut_ptr(),
+                dst.len(),
+            );
+            assert_eq!(n, 0);
+        }
+    }
+
+    #[test]
+    fn text_to_utf8_ffi_rejects_oversized_src_len() {
+        // Mirror of the `cap` guard, but on the src side: as_slice must
+        // refuse `len > isize::MAX` rather than construct a UB slice via
+        // slice::from_raw_parts. The shim treats it as "no input" — empty
+        // decoded output, 0 bytes written. A dummy non-NULL src ptr is
+        // fine because the guard fires before the slice is constructed.
+        let stub: u8 = b'x';
+        let mut dst = [0u8; 16];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(
+                &stub as *const u8,
+                (isize::MAX as usize) + 1,
+                dst.as_mut_ptr(),
+                dst.len(),
+            );
+            assert_eq!(n, 0);
+            assert_eq!(dst, [0u8; 16]);
+        }
+    }
+
+    #[test]
+    fn text_to_utf8_ffi_delegates_to_text_module() {
+        // Spot check that the FFI layer actually invokes the decode rule.
+        // Exhaustive coverage of input shapes is in text.rs.
+        let mut dst = [0u8; 32];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(
+                [0x8E].as_ptr(),
+                1,
+                dst.as_mut_ptr(),
+                dst.len(),
+            );
+            assert_eq!(n, 2);
+            assert_eq!(&dst[..n], b"\xC3\xA9");
+        }
+    }
+
+    #[test]
+    fn text_to_utf8_ffi_rejects_oversized_cap() {
+        // Regression: `slice::from_raw_parts_mut` requires the slice's
+        // total byte size to fit in isize. A C caller that passes
+        // `cap > isize::MAX` (a buggy size_t computation, an attacker-
+        // controlled length, or just a confused refactor) must NOT cause
+        // UB inside the FFI — the shim has to reject it with a 0 return
+        // before constructing the slice. We test the threshold rather
+        // than try to build an actual slice that large; the rejection
+        // is the only observable contract.
+        let mut dst = [0u8; 16];
+        unsafe {
+            let n = gtkhx_proto_text_to_utf8(
+                b"hi".as_ptr(),
+                2,
+                dst.as_mut_ptr(),
+                (isize::MAX as usize) + 1,
+            );
+            assert_eq!(n, 0);
+            // Nothing got written; the buffer is still its initial all-zero
+            // contents.
+            assert_eq!(dst, [0u8; 16]);
+        }
+    }
 }

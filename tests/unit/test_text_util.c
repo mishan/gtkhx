@@ -216,6 +216,127 @@ test_out_len_optional_on_mac_roman (void)
     g_free (out);
 }
 
+/* ---------- Pathological-length guard ----------
+ *
+ * Two High-severity issues these tests pin down:
+ *
+ * 1. g_utf8_validate takes a gssize. A gsize len above G_MAXSSIZE wraps
+ *    negative on the cast and GLib treats the input as NUL-terminated —
+ *    happily reading past the supplied buffer. We must catch the
+ *    overflow before the validate call.
+ *
+ * 2. The slow path allocates `len * 3 + 1` bytes. Without an overflow
+ *    check, large len wraps to a tiny allocation; with a "G_MAXSIZE - 1"
+ *    saturation it tries to g_malloc near-SIZE_MAX. Either way: bad.
+ *
+ * The function's contract: return g_strdup("") on pathological input,
+ * never reach g_utf8_validate or g_malloc with the bogus size.
+ *
+ * Construction trick: we pass a tiny on-stack buffer with a huge `len`.
+ * If the guard fires correctly the function never reads through `bytes`,
+ * so the read-OOB only happens if the bug is present. We can't
+ * literally allocate G_MAXSIZE memory to "prove" the bug from this
+ * angle; what we can verify is the contract — empty string out,
+ * out_len = 0, no crash. */
+
+static void
+test_len_above_max_returns_empty (void)
+{
+    /* tiny stack buffer + huge len — the guard must short-circuit
+	 * before g_utf8_validate would scan through `bytes`. */
+    char input = 'a';
+    gsize huge = GTKHX_TEXT_TO_UTF8_MAX_LEN + 1;
+    gsize len_out = 42;
+
+    char *out = gtkhx_text_to_utf8 (&input, huge, &len_out);
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out, ==, "");
+    g_assert_cmpuint (len_out, ==, 0);
+    g_free (out);
+}
+
+static void
+test_len_g_maxsize_returns_empty (void)
+{
+    /* Specifically the SIZE_MAX case Copilot flagged: previous code
+	 * tried to "saturate" with G_MAXSIZE - 1 and then g_malloc that.
+	 * The guard must reject this without any allocation attempt. */
+    char input = 'a';
+    gsize len_out = 99;
+
+    char *out = gtkhx_text_to_utf8 (&input, G_MAXSIZE, &len_out);
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out, ==, "");
+    g_assert_cmpuint (len_out, ==, 0);
+    g_free (out);
+}
+
+static void
+test_len_at_max_does_not_call_validate_with_wraparound (void)
+{
+    /* G_MAXSSIZE + 1 is the precise gssize-wraparound threshold for
+	 * the g_utf8_validate cast (the cast wraps negative at that
+	 * value). The bound covers it. */
+    char input = 'a';
+    gsize len_out = 0;
+
+    char *out = gtkhx_text_to_utf8 (&input, (gsize) G_MAXSSIZE + 1, &len_out);
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out, ==, "");
+    g_assert_cmpuint (len_out, ==, 0);
+    g_free (out);
+}
+
+static void
+test_len_above_decoded_isize_cap_returns_empty (void)
+{
+    /* Pinpoint the case Copilot called out: `len` could be below
+	 * the gssize-wrap threshold but high enough that `len * 3` blows
+	 * past isize::MAX. Without a tight bound the C side would
+	 * g_malloc(len * 3 + 1) (an astronomical allocation that aborts
+	 * the process) while the Rust shim rejects the cap. The tightened
+	 * bound `(G_MAXSSIZE - 1) / 3` rejects any len in that gap,
+	 * before either allocation or FFI hand-off.
+	 *
+	 * Pick a value just above the bound but below G_MAXSSIZE — i.e.
+	 * inside the previously-uncovered gap. */
+    char input = 'a';
+    gsize bad_len = GTKHX_TEXT_TO_UTF8_MAX_LEN + 1;
+    gsize len_out = 0;
+
+    /* Sanity: this value is what the bug requires (above bound but
+	 * still below G_MAXSSIZE, so the old g_utf8_validate cast wouldn't
+	 * wrap and the old bound wouldn't catch it). */
+    g_assert_cmpuint (bad_len, <=, (gsize) G_MAXSSIZE);
+    /* And `bad_len * 3 + 1` would overflow gssize, which is what
+	 * forces the allocation path past isize::MAX. */
+    g_assert_cmpuint (bad_len, >, (gsize) G_MAXSSIZE / 3);
+
+    char *out = gtkhx_text_to_utf8 (&input, bad_len, &len_out);
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out, ==, "");
+    g_assert_cmpuint (len_out, ==, 0);
+    g_free (out);
+}
+
+static void
+test_len_one_byte_under_max_still_works_for_small_input (void)
+{
+    /* The guard is `len > MAX_LEN`, so len == MAX_LEN exactly should
+	 * be accepted (in principle). We can't actually allocate that
+	 * much, so we instead verify the OPPOSITE direction: a tiny
+	 * len with a normal input continues to work — guards above
+	 * the bound aren't accidentally rejecting reasonable input. */
+    const char *input = "still works";
+    gsize len_out = 0;
+
+    char *out = gtkhx_text_to_utf8 (input, strlen (input), &len_out);
+    g_assert_nonnull (out);
+    g_assert_cmpstr (out, ==, "still works");
+    g_assert_cmpuint (len_out, ==, strlen (input));
+    g_free (out);
+}
+
 /* ---------- gtkhx_text_for_wire (Phase E2/E3) ---------- */
 
 /* UTF-8 mode: pass-through. The input is already in the wire
@@ -397,6 +518,16 @@ main (int argc, char **argv)
                      test_out_len_optional_on_valid_input);
     g_test_add_func ("/text_util/out_len_optional_on_mac_roman",
                      test_out_len_optional_on_mac_roman);
+    g_test_add_func ("/text_util/len_above_max_returns_empty",
+                     test_len_above_max_returns_empty);
+    g_test_add_func ("/text_util/len_g_maxsize_returns_empty",
+                     test_len_g_maxsize_returns_empty);
+    g_test_add_func ("/text_util/len_at_max_does_not_call_validate_with_wraparound",
+                     test_len_at_max_does_not_call_validate_with_wraparound);
+    g_test_add_func ("/text_util/len_above_decoded_isize_cap_returns_empty",
+                     test_len_above_decoded_isize_cap_returns_empty);
+    g_test_add_func ("/text_util/len_one_byte_under_max_still_works_for_small_input",
+                     test_len_one_byte_under_max_still_works_for_small_input);
 
     g_test_add_func ("/text_util/for_wire/utf8_mode_passthrough_ascii",
                      test_for_wire_utf8_mode_passthrough_ascii);

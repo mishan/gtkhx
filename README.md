@@ -1,6 +1,17 @@
-GtkHx is a GTK+ Hotline Client based on Hx, a console Hotline Client written by 
-Ryan Nielsen. It is still under development and some features of it may not be
-completely working.
+GtkHx is a GTK+ Hotline Client originally based on Hx.
+
+## Features
+
+- Modern GTK+ 4 / libadwaita / libpanel UI with retro look and feel
+- Full TLS support, for servers, file transfers, and trackers
+- Tracker v3 support
+- HOPE ChaCha20-Poly1305 cipher support
+- Support for native UTF-8, large file transfers, chat history, and colored names on servers that support them
+- File preview supports common image types, QuickDraw PICTs, PDFs, and markdown / source files
+- Orthogonal file manager interface for file transfers
+- Server banner support
+- Systray and app notifications
+- Supports light and dark themes
 
 ## Building:
 
