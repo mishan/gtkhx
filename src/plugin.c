@@ -410,7 +410,15 @@ unhook_signal (struct xp_signal *sig)
 	   sigroots[sig->signal] = NULL;
 	 */
 
-    g_assert (sig);
+    /* Defensive: NULL sig means there's nothing to remove. Use a
+     * graceful early return rather than g_assert, which compiles
+     * out under G_DISABLE_ASSERT. (This whole file is dead code
+     * while USE_PLUGIN is undef, but keep it honest in case the
+     * plugin API gets revived.) */
+    if (sig == NULL) {
+        g_critical ("unhook_signal: NULL sig — nothing to remove");
+        return;
+    }
     /*g_assert (sig->signal > 0); */
     /* if sig->signal == -1 then it is an textevent */
     sigroots[sig->signal] = g_slist_remove (sigroots[sig->signal], sig);
@@ -440,8 +448,19 @@ hook_signal (struct xp_signal *sig)
 	   sigroots[sig->signal] = sig;
 	*/
 
-    g_assert (sig);
-    g_assert (sig->callback);
+    /* Reject invalid inputs with a non-zero error code rather than
+     * g_assert (which compiles out under G_DISABLE_ASSERT). Same
+     * caveat as unhook_signal: this whole file is dead while
+     * USE_PLUGIN is undef, but stay honest. The error codes
+     * mirror the original commented-out gate above. */
+    if (sig == NULL) {
+        g_critical ("hook_signal: NULL sig");
+        return 2;
+    }
+    if (sig->callback == NULL) {
+        g_critical ("hook_signal: NULL sig->callback");
+        return 2;
+    }
 
     sigroots[sig->signal] = g_slist_prepend (sigroots[sig->signal], sig);
 

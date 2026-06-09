@@ -351,9 +351,15 @@ hx_login_build_chunks (const hx_login_request *req,
         }
     }
 
-    /* hc is a local size_t and HX_LOGIN_MAX_CHUNKS a compile-time
-     * constant — no side effects. clang-tidy is over-eager. */
-    /* NOLINTNEXTLINE(bugprone-assert-side-effect) */
-    g_assert (hc <= HX_LOGIN_MAX_CHUNKS);
+    /* Post-condition check: if hc ever overshoots HX_LOGIN_MAX_CHUNKS
+     * the caller's fixed-size chunks[] array has ALREADY been written
+     * past its end above. Use g_error, not g_assert — the latter
+     * compiles out under G_DISABLE_ASSERT, which would silently let a
+     * stack buffer overrun propagate to the wire. */
+    if (G_UNLIKELY (hc > HX_LOGIN_MAX_CHUNKS)) {
+        g_error ("hx_login_chunks: hc=%d exceeded HX_LOGIN_MAX_CHUNKS=%d "
+                 "— stack buffer overrun in caller; aborting",
+                 hc, HX_LOGIN_MAX_CHUNKS);
+    }
     return hc;
 }

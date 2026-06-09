@@ -346,7 +346,17 @@ hx_split_close_leaf (HxSplit *self)
     }
 
     sibling = (parent->child_a == self) ? parent->child_b : parent->child_a;
-    g_assert (sibling != NULL && sibling != self);
+    /* Structural invariant: a HxSplit parent always has two distinct
+     * children, so the sibling lookup above can only fail if the split
+     * tree is corrupted (NULL or self-aliasing). Use g_critical + bail
+     * (via the existing `out:` cleanup) rather than g_assert, which
+     * downstream packagers can compile out via G_DISABLE_ASSERT. */
+    if (sibling == NULL || sibling == self) {
+        g_critical ("hx_split_close_leaf: corrupt parent split (sibling=%p, "
+                    "self=%p) — refusing to close",
+                    (void *) sibling, (void *) self);
+        goto out;
+    }
 
     /* Detach the sibling from the dying paned, hold a ref, drop
      * the paned, reparent the sibling into the parent split. */
