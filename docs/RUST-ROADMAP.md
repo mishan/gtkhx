@@ -22,11 +22,15 @@ Three motivations, locked in during the kickoff conversation:
    the tree — manual buffer management, hand-written byte-swap macros,
    pthread/g_idle marshalling. Rust eliminates the categories of bug that
    regularly cost time during Tier 3 debugging.
-2. **Better concurrency.** The current pthread + `g_idle_add` + `GRecMutex`
-   pattern works but is the wrong shape for the multi-connection tabbed UI
-   planned in Phase 5. tokio (in a dedicated thread, with GLib's main context
-   as the UI side) is the modern, well-trodden pattern and replaces the
-   custom GMainContext poll wrapper in `gtkthreads.c`.
+2. **Better concurrency.** The current pthread + `g_main_context_invoke`
+   pattern works (worker threads in `network.c`, `xfers.c`, `banner.c`,
+   `preview.c`, `tracker.c` post events back to the main loop via
+   `gtkhx_post_to_main`, which is now a 3-line wrapper around
+   `g_main_context_invoke`) but is the wrong shape for the multi-connection
+   tabbed UI planned in Phase 5 — each connection still owns one global
+   `htlc_conn`. tokio (in a dedicated thread, with GLib's main context as the
+   UI side) is the modern, well-trodden pattern; the migration also lets us
+   drop the last surviving `pthread_create` call sites.
 3. **Modernization for contributors.** Rust + gtk4-rs is what a 2026 GNOME
    contributor expects to encounter when they file an issue and want to fix
    it. The C of 2003 is not.
@@ -523,11 +527,24 @@ to R3.
 
 ## Phase R3 — Networking & async core
 
-**Goal:** Replace the `pthread + g_idle_add + GRecMutex` machinery with a
+**Goal:** Replace the `pthread + g_main_context_invoke` machinery with a
 proper tokio runtime. The Hotline connection (`network.c`), file transfers
 (`htxf_*`, `xfers.c`), and HTTP banner fetch (`banner.c`) all become tokio
 tasks. UI handlers stay on the GLib main context and consume events via
 channels.
+
+> **Current state of `gtkthreads.c`:** the original Phase 4-era GTK 4 port
+> kept a recursive-mutex + custom `GMainContext` poll wrapper that simulated
+> the old GTK 2/3 `gdk_threads_enter` / `_leave` contract. That bridge was
+> retired during Phase 5 modernization in favour of a strict "workers
+> never touch GTK; main thread runs all UI work" rule. `gtkthreads.c` is
+> now 39 LOC and exposes a single function: `gtkhx_post_to_main`, a thin
+> wrapper around `g_main_context_invoke` that worker threads use to queue
+> idle callbacks on the main context. R3's job here isn't to "delete the
+> custom threading bridge" (that's already gone) — it's to remove the
+> remaining `pthread_create` call sites by replacing each worker with a
+> tokio task that emits events over channels. Once the workers are gone,
+> `gtkhx_post_to_main` has no callers and `gtkthreads.c` deletes with it.
 
 This is the architectural phase. R1 and R2 are mechanical — port code, link
 it, move on. R3 is where the shape of the program actually changes, and
@@ -554,11 +571,17 @@ where the concurrency motivation pays off.
    sees the events arrive. See the
    [balena-io rust-async-interop example](https://github.com/balena-io-experimental/rust-async-interop)
    for the canonical shape.
-3. **Replace `gtkthreads.c` outright.** The custom recursive-mutex + poll-
-   wrapper goes away. Any code path that used to call `gtk_threads_enter()` /
-   `gtk_threads_leave()` (worker threads in `network.c`, `xfers.c`,
-   `preview.c`) now sends a message over a channel instead. The
-   `gdk_threads_init` calls vanish.
+3. **Retire `gtkthreads.c` with its last worker.** The file is already down
+   to one function (`gtkhx_post_to_main` over `g_main_context_invoke`); its
+   callers are the legacy pthread workers in `network.c` (connection
+   thread), `xfers.c` (transfer dispatch), `banner.c` (HTTP fetch),
+   `preview.c` (Poppler / GtkSourceView async parse), and `tracker.c` (list
+   worker). Each of those workers becomes a tokio task in steps 1, 4, 5 of
+   this phase; their replacement runs on the tokio runtime and forwards
+   events through the bridge (step 2) instead of calling
+   `gtkhx_post_to_main` directly. Once the last `pthread_create` call goes
+   away, `gtkhx_post_to_main` has no consumers and `gtkthreads.c` deletes
+   with it.
 4. **`xfers.c` → tokio tasks.** Each file transfer (`htxf_conn` direction)
    becomes a tokio task that streams bytes. Folder transfers (the `folder_get_thread`
    / `folder_put_thread` already shipped per memory) port across as `async fn`s.
@@ -569,9 +592,9 @@ where the concurrency motivation pays off.
    (or `hyper` if reqwest's dep tree feels too heavy). The file-mode HTXF
    path is just an instance of step 4.
 6. **`preview.c` async parses** (Poppler, GtkSourceView) — these are
-   GTK-side concerns that already use g_idle to marshal back. Leave them in
-   C for now; they're not on the connection's hot path. Phase R5 picks them
-   up when the corresponding window moves.
+   GTK-side concerns that marshal back through `gtkhx_post_to_main`. Leave
+   them in C for now; they're not on the connection's hot path. Phase R5
+   picks them up when the corresponding window moves.
 7. **Audit every `g_idle_add` / `g_timeout_add` site in the codebase.** Each
    one is a candidate for replacement with a tokio-side channel or an
    `Interval`. Some stay (the post-login SELFINFO fallback timer, for
@@ -589,16 +612,20 @@ where the concurrency motivation pays off.
   the network read." 64 or 128 is probably right.
 - **GtkhxSession is still a GObject.** It survives R3 unchanged — the
   signal-emit calls now come from the GLib-main-thread side of the bridge
-  rather than from `g_idle_add` callbacks, but the signal taxonomy doesn't
-  shift. R4 is when GtkhxSession itself moves to Rust.
+  rather than from `gtkhx_post_to_main` callbacks, but the signal taxonomy
+  doesn't shift. R4 is when GtkhxSession itself moves to Rust.
 - **Tier 3 tests** in `tests/integration/` connect via raw `mhxd`/`Janus`
   containers; they should pass unchanged because the wire format is
   unchanged. Use them as the regression gate for this phase.
 
-**Exit criteria:** No pthread / `g_thread_new` calls remain outside vendored
-xtext. `gtkthreads.c` is deleted. Connection, transfers, banner fetch are all
-tokio tasks. The `MAX_CONN > 1` half-built abstraction can finally be
-abstracted properly because a connection is a struct in Rust, not a global.
+**Exit criteria:** No `pthread_create` / `g_thread_new` calls remain
+outside vendored xtext. `gtkthreads.c` deletes when its last consumer
+goes away (the workers in `network.c` / `xfers.c` / `banner.c` /
+`tracker.c`; `preview.c` keeps `gtkhx_post_to_main` until R5 picks up the
+preview windows). Connection, transfers, banner fetch are all tokio
+tasks. The `MAX_CONN > 1` half-built abstraction can finally be
+abstracted properly because a connection is a struct in Rust, not a
+global.
 
 ---
 
