@@ -1713,6 +1713,55 @@ pub fn build_file_put_chunks(
     hc
 }
 
+// ---- HTXF subframe header packer -------------------------------------
+
+/// Magic bytes prefixing every HTXF subframe. "HTXF" as a big-endian
+/// `u32`, mirroring `HTXF_MAGIC_INT` in `src/hotline.h`.
+pub const HTXF_MAGIC: u32 = 0x48545846;
+
+/// Fixed size of the HTXF subframe header (`SIZEOF_HTXF_HDR` in C).
+pub const HTXF_HDR_SIZE: usize = 16;
+
+/// Pack the 16-byte HTXF subframe header into `out[..HTXF_HDR_SIZE]`.
+///
+/// Wire layout (big-endian throughout):
+///
+/// ```text
+///   off  size  field
+///    0    4    magic     = HTXF_MAGIC ("HTXF" big-endian)
+///    4    4    ref       = transfer reference
+///    8    4    len       = wire payload length
+///   12    4    (type<<16) | flags
+/// ```
+///
+/// The trailing u32 is shared between two readings: classic Mac-native
+/// servers read the high u16 as a *type* code to dispatch the
+/// subchannel; capability-aware peers read the low u16 as *flags* to
+/// know whether to expect the 24-byte large-file variant. Both
+/// interpretations share the same word — production gives type a
+/// non-zero value and flags the appropriate bits, so the same packed
+/// header serves both.
+///
+/// Returns `false` and writes nothing if `out` is shorter than
+/// `HTXF_HDR_SIZE`; otherwise writes 16 bytes and returns `true`.
+pub fn build_htxf_hdr(
+    out: &mut [u8],
+    ref_id: u32,
+    payload_len: u32,
+    type_code: u16,
+    flags: u16,
+) -> bool {
+    if out.len() < HTXF_HDR_SIZE {
+        return false;
+    }
+    out[0..4].copy_from_slice(&HTXF_MAGIC.to_be_bytes());
+    out[4..8].copy_from_slice(&ref_id.to_be_bytes());
+    out[8..12].copy_from_slice(&payload_len.to_be_bytes());
+    let type_flags = ((type_code as u32) << 16) | (flags as u32);
+    out[12..16].copy_from_slice(&type_flags.to_be_bytes());
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3538,5 +3587,58 @@ mod tests {
             size64: None,
         };
         assert_eq!(build_file_put_chunks(&req2, &mut chunks, &mut scratch), 0);
+    }
+
+    // ---- HTXF subframe header packer ----
+
+    #[test]
+    fn htxf_hdr_packs_full_16_bytes_be() {
+        let mut out = [0u8; 16];
+        let ok = build_htxf_hdr(&mut out, 0xdeadbeef, 0x12345678, 0xcafe, 0x0001);
+        assert!(ok);
+        // magic "HTXF" big-endian.
+        assert_eq!(&out[0..4], b"HTXF");
+        // ref BE
+        assert_eq!(&out[4..8], &0xdeadbeef_u32.to_be_bytes());
+        // payload len BE
+        assert_eq!(&out[8..12], &0x12345678_u32.to_be_bytes());
+        // (type << 16) | flags BE — high u16 is type, low u16 is flags
+        assert_eq!(&out[12..16], &0xcafe0001_u32.to_be_bytes());
+    }
+
+    #[test]
+    fn htxf_hdr_zero_type_and_flags_packs_zero_trailer() {
+        let mut out = [0u8; 16];
+        assert!(build_htxf_hdr(&mut out, 1, 2, 0, 0));
+        assert_eq!(&out[12..16], &[0u8; 4]);
+    }
+
+    #[test]
+    fn htxf_hdr_rejects_short_buffer() {
+        let mut out = [0xffu8; 15];
+        let copy = out;
+        let ok = build_htxf_hdr(&mut out, 1, 2, 3, 4);
+        assert!(!ok);
+        // Failed pack must not touch the buffer.
+        assert_eq!(out, copy);
+    }
+
+    #[test]
+    fn htxf_hdr_size_const_matches_layout() {
+        // The constant exists so C callers (and the FFI shim) can size
+        // their buffers without knowing the byte breakdown. Verify it
+        // matches the actual write.
+        assert_eq!(HTXF_HDR_SIZE, 16);
+        let mut out = [0u8; HTXF_HDR_SIZE];
+        assert!(build_htxf_hdr(&mut out, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn htxf_hdr_extra_capacity_does_not_overwrite_tail() {
+        // The pack writes exactly HTXF_HDR_SIZE bytes — anything past
+        // that in `out` stays at its original value.
+        let mut out = [0xabu8; 32];
+        assert!(build_htxf_hdr(&mut out, 1, 2, 3, 4));
+        assert!(out[16..].iter().all(|&b| b == 0xab));
     }
 }

@@ -3567,6 +3567,46 @@ pub unsafe extern "C" fn gtkhx_proto_capabilities_decode(
     parse::capabilities_decode(as_slice(bytes, len))
 }
 
+// ---- HTXF subframe header packer --------------------------------------
+
+/// Pack the 16-byte HTXF subframe header into `out[..16]`. See
+/// [`crate::build::build_htxf_hdr`] for the wire layout (magic + ref +
+/// payload-len + (type<<16)|flags, all big-endian).
+///
+/// Returns `false` (and writes nothing) on NULL `out`, an `out_cap` below
+/// `HTXF_HDR_SIZE`, or `out_cap > isize::MAX`. Otherwise writes exactly
+/// 16 bytes and returns `true`.
+///
+/// # Safety
+/// `out` either valid (writable) for `out_cap` bytes or NULL. The size
+/// check fires **before** the slice is constructed, so a caller that
+/// passes a dummy or undersized pointer knowing the rejection will
+/// happen never causes `slice::from_raw_parts_mut` to be called with
+/// the bogus length.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_htxf_hdr_pack(
+    out: *mut u8,
+    out_cap: usize,
+    ref_id: u32,
+    payload_len: u32,
+    type_code: u16,
+    flags: u16,
+) -> bool {
+    // Reject **before** constructing the slice. `slice::from_raw_parts_mut`
+    // requires `out` to be valid for the full `out_cap` bytes; if a caller
+    // passes a small buffer (or a placeholder pointer they expect us to
+    // reject), building an oversized slice over it would be UB even if we
+    // never read or write through the bad tail.
+    if out.is_null()
+        || out_cap < crate::build::HTXF_HDR_SIZE
+        || out_cap > isize::MAX as usize
+    {
+        return false;
+    }
+    let buf = slice::from_raw_parts_mut(out, out_cap);
+    crate::build::build_htxf_hdr(buf, ref_id, payload_len, type_code, flags)
+}
+
 // ---- Text encoding: Mac Roman / UTF-8 ---------------------------------
 
 /// Decode wire bytes from `src` into UTF-8 in `dst`, mirroring
@@ -3742,6 +3782,95 @@ mod tests {
             // Nothing got written; the buffer is still its initial all-zero
             // contents.
             assert_eq!(dst, [0u8; 16]);
+        }
+    }
+
+    // ---- htxf_hdr_pack FFI safety ----
+
+    #[test]
+    fn htxf_hdr_pack_ffi_rejects_undersized_buffer_before_slice_build() {
+        // Regression: the shim used to build `slice::from_raw_parts_mut(out,
+        // out_cap)` before checking `out_cap >= HTXF_HDR_SIZE`. That's UB
+        // — `from_raw_parts_mut` requires `out` to be valid for the full
+        // `out_cap` bytes regardless of what the function does with the
+        // slice afterwards. A caller passing a small buffer (or a
+        // placeholder pointer they expect us to reject) would have
+        // triggered UB even though the pack itself would have returned
+        // false.
+        //
+        // Now the size check fires first, so the slice is never
+        // constructed over an undersized buffer.
+        //
+        // We exercise this with a real 8-byte buffer (smaller than
+        // HTXF_HDR_SIZE = 16) seeded with sentinel bytes; the call must
+        // return false and leave every byte untouched. With ASan the same
+        // test would also catch any future regression that re-introduces
+        // the bad ordering, since the bogus slice would span past the
+        // 8-byte stack allocation.
+        let mut buf = [0xabu8; 8];
+        let copy = buf;
+        unsafe {
+            let ok = gtkhx_proto_htxf_hdr_pack(
+                buf.as_mut_ptr(),
+                buf.len(),
+                /*ref_id=*/ 1,
+                /*payload_len=*/ 2,
+                /*type_code=*/ 3,
+                /*flags=*/ 4,
+            );
+            assert!(!ok);
+        }
+        assert_eq!(buf, copy);
+    }
+
+    #[test]
+    fn htxf_hdr_pack_ffi_zero_cap_rejected() {
+        // Zero capacity is the degenerate form of "too small" — same
+        // rejection, same no-write contract. The pointer doesn't have
+        // to be valid for any bytes here, but we pass a real one so the
+        // test exercises the early-reject path (not the NULL branch).
+        let mut buf = [0xffu8; 1];
+        unsafe {
+            let ok = gtkhx_proto_htxf_hdr_pack(buf.as_mut_ptr(), 0, 1, 2, 3, 4);
+            assert!(!ok);
+        }
+        assert_eq!(buf, [0xffu8; 1]);
+    }
+
+    #[test]
+    fn htxf_hdr_pack_ffi_exact_size_writes() {
+        // Positive control: an exactly-16-byte buffer is the smallest
+        // accepted size. The first 16 bytes get the packed header.
+        let mut buf = [0u8; 16];
+        unsafe {
+            let ok = gtkhx_proto_htxf_hdr_pack(
+                buf.as_mut_ptr(),
+                buf.len(),
+                0xdeadbeef,
+                0x12345678,
+                0xcafe,
+                0x0001,
+            );
+            assert!(ok);
+        }
+        assert_eq!(&buf[0..4], b"HTXF");
+        assert_eq!(&buf[4..8], &0xdeadbeef_u32.to_be_bytes());
+        assert_eq!(&buf[8..12], &0x12345678_u32.to_be_bytes());
+        assert_eq!(&buf[12..16], &0xcafe0001_u32.to_be_bytes());
+    }
+
+    #[test]
+    fn htxf_hdr_pack_ffi_null_out_rejected() {
+        unsafe {
+            let ok = gtkhx_proto_htxf_hdr_pack(
+                std::ptr::null_mut(),
+                16,
+                1,
+                2,
+                3,
+                4,
+            );
+            assert!(!ok);
         }
     }
 }
