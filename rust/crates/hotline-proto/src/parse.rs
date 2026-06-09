@@ -1231,6 +1231,29 @@ pub fn tracker_v3_meta_clamp_listing_category(raw: u8) -> u8 {
     if raw <= 12 { raw } else { 0 }
 }
 
+// ---- HTLS_DATA_CAPABILITIES decode -------------------------------------
+
+/// Decode an `HTLS_DATA_CAPABILITIES` payload (variable-width big-endian
+/// unsigned integer) into a `u64`. The wire format is the same shape any
+/// peer uses to advertise the fogWraith capability bitmask: 1..8 bytes,
+/// MSB first, no fixed length.
+///
+/// Truncation: payloads longer than 8 bytes are clipped at the first 8
+/// (the rest can't fit in a `u64` anyway, and the spec lets us drop
+/// trailing capability bits we don't understand — bits stay round-trip
+/// consistent at the wire layer, we just can't store them locally).
+///
+/// Empty input returns `0` — used by pre-spec servers that advertise the
+/// CAPABILITIES chunk without a payload.
+pub fn capabilities_decode(bytes: &[u8]) -> u64 {
+    let n = bytes.len().min(8);
+    let mut caps: u64 = 0;
+    for &b in &bytes[..n] {
+        caps = (caps << 8) | (b as u64);
+    }
+    caps
+}
+
 // ---- HTLC_DATA_CATLIST (1.5 threaded-news article listing) -------------
 
 /// One mime part attached to a [`CatPost`]. Mirrors `struct
@@ -3702,6 +3725,44 @@ mod tests {
         for raw in [13u8, 50, 100, 255] {
             assert_eq!(tracker_v3_meta_clamp_listing_category(raw), 0);
         }
+    }
+
+    // ---- HTLS_DATA_CAPABILITIES ----
+
+    #[test]
+    fn capabilities_decode_empty_is_zero() {
+        // Pre-spec servers can advertise the chunk with no payload.
+        assert_eq!(capabilities_decode(&[]), 0);
+    }
+
+    #[test]
+    fn capabilities_decode_single_byte() {
+        assert_eq!(capabilities_decode(&[0x42]), 0x42);
+    }
+
+    #[test]
+    fn capabilities_decode_two_bytes_be() {
+        // Production-typical width — CHAT_HISTORY (bit 0) + LARGE_FILES
+        // (bit 1) + TEXT_ENCODING (bit 4) all fit in 16 bits.
+        assert_eq!(capabilities_decode(&[0x00, 0x13]), 0x0013);
+    }
+
+    #[test]
+    fn capabilities_decode_eight_bytes_saturates_u64() {
+        let bytes = [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe];
+        assert_eq!(capabilities_decode(&bytes), 0xdeadbeefcafebabe);
+    }
+
+    #[test]
+    fn capabilities_decode_oversize_truncates_to_first_eight() {
+        // A future >64-bit advertisement: only the leading 8 bytes fit
+        // in u64. Spec lets us drop the rest; the wire is round-trip
+        // consistent regardless because we don't echo what we didn't
+        // parse.
+        let bytes = [
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0xff, 0xff, 0xff,
+        ];
+        assert_eq!(capabilities_decode(&bytes), 0x123456789abcdef0);
     }
 
     // ---- news dirlist: folderitem ----

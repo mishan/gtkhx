@@ -1123,6 +1123,15 @@ extern bool gtkhx_proto_tracker_v3_meta_read_bool (
 extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_maturity (uint8_t raw);
 extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
 
+/* ---- HTLS_DATA_CAPABILITIES decode ---- */
+
+/* Decode an HTLS_DATA_CAPABILITIES payload (1..8 bytes, big-endian,
+ * MSB-first) into a u64. Payloads longer than 8 bytes are truncated at
+ * the first 8; NULL `bytes` or zero `len` returns 0 (matching the bare-
+ * advertisement convention pre-spec servers use). */
+extern uint64_t gtkhx_proto_capabilities_decode (const uint8_t *bytes,
+                                                 size_t len);
+
 /* ---- Text encoding: Mac Roman -> UTF-8 ---- */
 
 /* Decode `src[0..len)` wire bytes into UTF-8 in `dst`, writing into the

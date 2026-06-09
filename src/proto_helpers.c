@@ -634,19 +634,11 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
 guint64
 hl_capabilities_decode (const guint8 *bytes, guint16 len)
 {
-    if (!bytes || !len) {
-        return 0;
-    }
-    guint64 caps = 0;
-    /* Cap at 8 bytes — anything past that is more than u64 can hold
-     * and the spec lets us truncate cleanly (unknown bits are
-     * silently preserved by the wire format on round-trip; we just
-     * can't store them). */
-    guint16 n = len > 8 ? 8 : len;
-    for (guint16 i = 0; i < n; i++) {
-        caps = (caps << 8) | bytes[i];
-    }
-    return caps;
+    /* Phase R2: delegate to the Rust hotline-proto crate. The decode
+     * rule (1..8 bytes big-endian, MSB-first, truncate beyond 8, empty
+     * is 0) is identical; this wrapper just bridges the GLib u16-len
+     * signature to the FFI's size_t. */
+    return gtkhx_proto_capabilities_decode (bytes, len);
 }
 
 gboolean
