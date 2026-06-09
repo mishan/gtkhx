@@ -179,36 +179,38 @@ pango_to_css_props (const PangoFontDescription *fd)
                                 style_s);
     }
 
-    /* Phase 5+: apply the global UI scale to the size. Multiplying in
-	 * the pango-side units (1024ths) keeps subpixel fidelity through
-	 * the integer division below, so 1.15× of "10pt" reads as 11pt
-	 * (10 * 1.15 = 11.5 → 11) rather than the truncated 10 we'd get if
-	 * we scaled after dividing. is_abs (px) and the default (pt) paths
-	 * both reuse the same multiplier. */
+    /* Phase 5+: convert to CSS units (point / pixel) AS DOUBLES, apply
+	 * the UI scale, and round once at emission. Rounding in CSS units
+	 * keeps the presets close to their advertised percentage — the
+	 * earlier "scale in Pango 1024ths then divide" version truncated
+	 * the fractional point, so 85% of a 10pt font landed on 8pt
+	 * (floor of 8.5) instead of 9pt (round-half-up). 1pt is the
+	 * minimum legible CSS size; clamp to that when the math would
+	 * otherwise round to zero. */
     {
         double mul = gtkhx_ui_scale ();
-        gint scaled_size_pt = (gint) (size_pt * mul + 0.5);
-        if (scaled_size_pt <= 0) {
-            scaled_size_pt = size_pt;
+        double css_size = ((double) size_pt / PANGO_SCALE) * mul;
+        gint css_size_int = (gint) (css_size + 0.5);
+        if (css_size_int < 1) {
+            css_size_int = 1;
         }
-        size_pt = scaled_size_pt;
-    }
 
-    if (is_abs) {
+        if (is_abs) {
+            return g_strdup_printf ("font-family: \"%s\";"
+                                    "font-size: %dpx;"
+                                    "font-weight: %s;"
+                                    "font-style: %s;",
+                                    family ? family : "Monospace",
+                                    css_size_int, weight_s, style_s);
+        }
+
         return g_strdup_printf ("font-family: \"%s\";"
-                                "font-size: %dpx;"
+                                "font-size: %dpt;"
                                 "font-weight: %s;"
                                 "font-style: %s;",
                                 family ? family : "Monospace",
-                                size_pt / PANGO_SCALE, weight_s, style_s);
+                                css_size_int, weight_s, style_s);
     }
-
-    return g_strdup_printf ("font-family: \"%s\";"
-                            "font-size: %dpt;"
-                            "font-weight: %s;"
-                            "font-style: %s;",
-                            family ? family : "Monospace",
-                            size_pt / PANGO_SCALE, weight_s, style_s);
 }
 
 void
