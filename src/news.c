@@ -738,8 +738,8 @@ create_news_window (GtkWidget *parent_window, session *sess)
     gtk_widget_set_sensitive (reloadButton, FALSE);
 
     panel = hx_panel_new (HX_PANEL_ID_NEWS,
-                          HX_PANEL_KIND_CENTER,
-                          PANEL_AREA_CENTER);
+                          HX_PANEL_KIND_SIDEBAR,
+                          PANEL_AREA_START);
     panel_widget_set_title     (PANEL_WIDGET (panel), _ ("News"));
     panel_widget_set_icon_name (PANEL_WIDGET (panel),
                                 "text-x-generic-symbolic");
@@ -768,16 +768,10 @@ create_news_window (GtkWidget *parent_window, session *sess)
         gtk_widget_add_controller (GTK_WIDGET (panel), sc);
     }
 
-    if (toolbar_center_grid != NULL) {
-        panel_grid_add (PANEL_GRID (toolbar_center_grid),
-                        PANEL_WIDGET (panel));
-        /* For Redock home, walk back to whichever frame the grid
-         * just placed us in. */
-        {
-            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                                        PANEL_TYPE_FRAME);
-            hx_panel_set_home_frame (panel, frame);
-        }
+    if (toolbar_sidebar_frame != NULL) {
+        panel_frame_add (PANEL_FRAME (toolbar_sidebar_frame),
+                         PANEL_WIDGET (panel));
+        hx_panel_set_home_frame (panel, toolbar_sidebar_frame);
     } else {
         g_critical ("create_news_window: toolbar dock not built yet");
     }

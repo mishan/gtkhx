@@ -20,10 +20,14 @@
 #include "config.h"
 
 #include "hx_panel.h"
+#include "hx_panel_frame.h"
+#include "hx_split.h"
 #include "panel_registry.h"
 #include "debug.h"
-#include "hx.h"       /* session typedef, required by gtkutil.h */
+#include "compat.h"   /* _() gettext macro for menu labels */
+#include "hx.h"       /* session typedef, required by gtkutil.h and toolbar.h */
 #include "gtkutil.h"  /* init_keyaccel for undocked windows */
+#include "toolbar.h"  /* toolbar_window — main-dock root comparison */
 
 #include <adwaita.h>
 
@@ -51,9 +55,6 @@ G_DEFINE_FINAL_TYPE (HxPanel, hx_panel, PANEL_TYPE_WIDGET)
 static void        on_undock_activate           (GSimpleAction *action,
                                                  GVariant      *parameter,
                                                  gpointer       user_data);
-static void        on_move_area_activate        (GSimpleAction *action,
-                                                 GVariant      *parameter,
-                                                 gpointer       user_data);
 static gboolean    on_undocked_close_request    (GtkWindow     *window,
                                                  gpointer       user_data);
 static PanelFrame *hx_panel_undocked_create_frame (PanelGrid   *grid,
@@ -66,8 +67,34 @@ static PanelFrame *hx_panel_undocked_create_frame (PanelGrid   *grid,
 extern GtkWidget *toolbar_sidebar_frame;  /* PANEL_AREA_START  */
 extern GtkWidget *toolbar_end_frame;      /* PANEL_AREA_END    */
 extern GtkWidget *toolbar_bottom_frame;   /* PANEL_AREA_BOTTOM */
-extern GtkWidget *toolbar_center_grid;    /* PANEL_AREA_CENTER */
+extern GtkWidget *toolbar_center_frame;   /* PANEL_AREA_CENTER */
 extern GtkWidget *toolbar_dock;
+
+/* Map a default-leaf frame back to its PanelArea. Returns TRUE and
+ * writes *out when `frame' is one of the four toolbar_*_frame
+ * defaults; returns FALSE and leaves *out untouched for any other
+ * frame (user-created split leaves, undocked-window frames, NULL).
+ *
+ * Used by in-dock relocation paths (DnD and move-direction) to
+ * decide whether to update the panel's home_area fallback. Updating
+ * home_area only on default-frame targets is intentional: when the
+ * user drops a panel into a custom split leaf, home_frame already
+ * captures the exact leaf; if that leaf is later closed while the
+ * panel is detached, hx_panel_ensure_attached's home_area fallback
+ * should return the panel to its ORIGINAL area's default (where a
+ * sidebar panel started life, say) rather than to whatever sentinel
+ * the user-created leaf would map to. Overwriting home_area on
+ * every move would silently coerce sidebar-kind panels to the
+ * center default once their custom leaf vanished. */
+static gboolean
+panel_area_for_default_frame (GtkWidget *frame, PanelArea *out)
+{
+    if (frame == toolbar_sidebar_frame) { *out = PANEL_AREA_START;  return TRUE; }
+    if (frame == toolbar_end_frame)     { *out = PANEL_AREA_END;    return TRUE; }
+    if (frame == toolbar_bottom_frame)  { *out = PANEL_AREA_BOTTOM; return TRUE; }
+    if (frame == toolbar_center_frame)  { *out = PANEL_AREA_CENTER; return TRUE; }
+    return FALSE;
+}
 
 static void
 hx_panel_finalize (GObject *object)
@@ -115,55 +142,29 @@ hx_panel_init (HxPanel *self)
     g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (undock));
     g_object_unref (undock);
 
-    /* panel.move-area takes a string parameter — "start", "end",
-     * "bottom", or "center" — and moves the panel to the matching
-     * toolbar frame. One action with a parameter (rather than four
-     * separate actions) keeps the menu wiring compact, and GMenu
-     * items target it via the `target` attribute. */
-    {
-        GSimpleAction *move
-            = g_simple_action_new ("move-area", G_VARIANT_TYPE_STRING);
-        g_signal_connect (move, "activate",
-                          G_CALLBACK (on_move_area_activate), self);
-        g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (move));
-        g_object_unref (move);
-    }
+    /* Move-direction actions used to live here as panel.move-*
+     * and surfaced via our own chevron-menu section. They migrated
+     * to the per-frame "page.move-{left,right,up,down}" inserted
+     * action group (hx_panel_install_page_move_actions) so they
+     * REPURPOSE libpanel's built-in "Move Page L/R/U/D" items in
+     * the chevron's joined menu — those items used to be
+     * always-greyed because libpanel's default handlers assume a
+     * PanelGrid layout we don't have. Net: one set of Move items
+     * in the chevron now, not two, and they actually work. */
 
     panel_widget_insert_action_group (PANEL_WIDGET (self), "panel",
                                       G_ACTION_GROUP (group));
     g_object_unref (group);
 
-    /* Per-panel chevron menu. Two sections:
-     *
-     *   Move to …    panel.move-area("start" / "end" / "bottom"
-     *                / "center") — repositions the panel between
-     *                the dock's areas. Clicking the entry that
-     *                matches the panel's current area is a no-op.
-     *
-     *   Undock       panel.undock — spawn the panel in its own
-     *                AdwApplicationWindow; close-request returns
-     *                it home.
-     *
-     * Action name composition: panel_widget_insert_action_group
-     * inserts our group at internal prefix "panel." inside the
-     * PanelActionMuxer; PanelFrame exposes that muxer to GTK at
-     * prefix "page". So full action names are
-     * "page.panel.move-area" / "page.panel.undock". */
+    /* Per-panel chevron menu. The only entry here is Undock; the
+     * Move Page items in the chevron come from libpanel's
+     * frame_menu template and are rerouted to our cross-frame
+     * neighbour move by the per-frame "page" action group install
+     * in hx_panel_install_page_move_actions. Split + close-frame
+     * live on the small menu button on each PanelFrame's header
+     * (hx_split_install_frame_ui). */
     menu = g_menu_new ();
-    {
-        GMenu *move_section = g_menu_new ();
-        g_menu_append (move_section, "Move to left sidebar",
-                       "page.panel.move-area('start')");
-        g_menu_append (move_section, "Move to right sidebar",
-                       "page.panel.move-area('end')");
-        g_menu_append (move_section, "Move to bottom",
-                       "page.panel.move-area('bottom')");
-        g_menu_append (move_section, "Move to center",
-                       "page.panel.move-area('center')");
-        g_menu_append_section (menu, NULL, G_MENU_MODEL (move_section));
-        g_object_unref (move_section);
-    }
-    g_menu_append (menu, "Undock", "page.panel.undock");
+    g_menu_append (menu, _ ("Undock"), "page.panel.undock");
     panel_widget_set_menu_model (PANEL_WIDGET (self), G_MENU_MODEL (menu));
     g_object_unref (menu);
 }
@@ -525,16 +526,22 @@ on_frame_drop (GtkDropTarget *target,
      * we'd loop: home is in the undocked window, on close the
      * panel goes "home" to itself.) */
     if (target_dock == toolbar_dock) {
-        PanelArea new_area = PANEL_AREA_CENTER;
         GtkWidget *tf = GTK_WIDGET (target_frame);
-        if (tf == toolbar_sidebar_frame)
-            new_area = PANEL_AREA_START;
-        else if (tf == toolbar_end_frame)
-            new_area = PANEL_AREA_END;
-        else if (tf == toolbar_bottom_frame)
-            new_area = PANEL_AREA_BOTTOM;
-        /* else: center grid (default initialiser above). */
-        panel->home_area = new_area;
+        PanelArea  new_area;
+        /* Update home_frame unconditionally — the user's exact
+         * destination leaf is what should come back on re-show.
+         *
+         * Only update home_area when the drop landed in one of the
+         * four default leaves. A drop into a user-created split
+         * leaf leaves the panel's original area intent intact: if
+         * that custom leaf is later closed while the panel is
+         * detached, hx_panel_ensure_attached's home_area fallback
+         * should send the panel back to where it ORIGINALLY lived
+         * (e.g. a sidebar panel returns to its sidebar default),
+         * not to whatever area the user-created leaf might happen
+         * to overlap. */
+        if (panel_area_for_default_frame (tf, &new_area))
+            panel->home_area = new_area;
         hx_panel_set_home_frame (panel, tf);
     }
     g_object_unref (panel);
@@ -549,7 +556,11 @@ on_frame_drop (GtkDropTarget *target,
      * Disconnect the close-request handler before destroying so it
      * doesn't try to redock the (already-moved) panel via
      * home_frame. */
-    if (was_cross_dock && GTK_IS_WINDOW (src_root)) {
+    /* Close the source window only when the drag came from an
+     * UNDOCKED window — never close the main toolbar window even
+     * if it happens to be the source. */
+    if (was_cross_dock && GTK_IS_WINDOW (src_root)
+        && src_dock != toolbar_dock) {
         gboolean src_dock_empty = TRUE;
         GPtrArray *frames = g_ptr_array_new ();
         guint i;
@@ -809,51 +820,53 @@ hx_panel_ensure_attached (HxPanel *self)
         g_object_unref (self);
     }
 
-    /* Pick the destination by home_area. Mirror on_move_area_activate
-     * above so the splice-back behaves identically whether the user
-     * closes-then-reopens or invokes move-area. */
-    switch (self->home_area) {
-    case PANEL_AREA_START:
-        target = toolbar_sidebar_frame;
-        break;
-    case PANEL_AREA_END:
-        target = toolbar_end_frame;
-        break;
-    case PANEL_AREA_BOTTOM:
-        target = toolbar_bottom_frame;
-        break;
-    case PANEL_AREA_CENTER:
-    default:
-        if (toolbar_center_grid == NULL) {
-            // g_warning ("hx_panel_ensure_attached: toolbar center grid is "
-            //            "NULL; can't re-attach %s",
-            //            self->id ? self->id : "(unset)");
+    /* Phase 5b / docking: prefer the panel's existing home_frame
+     * weak ref. The user can move panels into user-created split
+     * leaves (via Move-direction or DnD); home_frame records
+     * which leaf they wanted, and the home_area is just a fallback
+     * for the case where the home_frame's weak ref has expired
+     * (e.g. close-frame destroyed the leaf the user moved into).
+     *
+     * Before Phase 5b this function ignored home_frame entirely
+     * and re-attached on home_area alone, which clobbered the
+     * user's actual placement on every Close-all-pages /
+     * toolbar-button re-show round trip. */
+    {
+        GtkWidget *home = hx_panel_get_home_frame (self);
+        gboolean home_usable = FALSE;
+        if (home != NULL && PANEL_IS_FRAME (home)
+            && gtk_widget_get_parent (home) != NULL) {
+            /* Still parented in the dock tree — use it. */
+            target = home;
+            home_usable = TRUE;
+        } else {
+            target = NULL;
+        }
+        if (home != NULL)
+            g_object_unref (home);  /* get_home_frame strong ref */
+
+        if (!home_usable) {
+            /* Fall back to home_area default. Only update the
+             * stored home_frame in this branch — when home_frame
+             * was already usable, leave it untouched so the user's
+             * choice persists. */
+            switch (self->home_area) {
+            case PANEL_AREA_START:  target = toolbar_sidebar_frame; break;
+            case PANEL_AREA_END:    target = toolbar_end_frame;     break;
+            case PANEL_AREA_BOTTOM: target = toolbar_bottom_frame;  break;
+            case PANEL_AREA_CENTER:
+            default:                target = toolbar_center_frame;  break;
+            }
+            if (target == NULL)
+                return;
+            panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
+            hx_panel_set_home_frame (self, target);
             return;
         }
-        panel_grid_add (PANEL_GRID (toolbar_center_grid),
-                        PANEL_WIDGET (self));
-        /* Pick up the home frame the grid just put us in so a
-         * later undock/redock has a target. The grid may have
-         * created a fresh frame; the explicit walk-up makes the
-         * home_frame match what's actually on screen. */
-        {
-            GtkWidget *frame
-                = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                           PANEL_TYPE_FRAME);
-            if (frame != NULL)
-                hx_panel_set_home_frame (self, frame);
-        }
-        return;
     }
 
-    if (target == NULL) {
-        // g_warning ("hx_panel_ensure_attached: target frame for area %d is "
-        //            "NULL; can't re-attach %s",
-        //            (int)self->home_area, self->id ? self->id : "(unset)");
-        return;
-    }
     panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
-    hx_panel_set_home_frame (self, target);
+    /* home_frame already points here — don't reset. */
 }
 
 GtkWidget *
@@ -884,7 +897,6 @@ on_undocked_close_request (GtkWindow *window, gpointer user_data)
     HxPanel   *self = HX_PANEL (user_data);
     GtkWidget *home;
     GtkWidget *parent_frame;
-    GtkWidget *dock;
 
     g_object_ref (self);
 
@@ -896,32 +908,10 @@ on_undocked_close_request (GtkWindow *window, gpointer user_data)
 
     if (home != NULL) {
         panel_frame_add (PANEL_FRAME (home), PANEL_WIDGET (self));
-
-        /* Side areas auto-collapse when empty (libpanel's
-         * panel_dock_notify_empty_cb). Adding doesn't auto-reveal —
-         * walk up to the dock and flip the right area on by hand. */
-        dock = gtk_widget_get_ancestor (home, PANEL_TYPE_DOCK);
-        if (dock != NULL) {
-            switch (self->home_area) {
-            case PANEL_AREA_START:
-                panel_dock_set_reveal_start (PANEL_DOCK (dock), TRUE);
-                break;
-            case PANEL_AREA_END:
-                panel_dock_set_reveal_end (PANEL_DOCK (dock), TRUE);
-                break;
-            case PANEL_AREA_TOP:
-                panel_dock_set_reveal_top (PANEL_DOCK (dock), TRUE);
-                break;
-            case PANEL_AREA_BOTTOM:
-                panel_dock_set_reveal_bottom (PANEL_DOCK (dock), TRUE);
-                break;
-            case PANEL_AREA_CENTER:
-            default:
-                break;  /* center isn't revealer-wrapped */
-            }
-        }
-        /* hx_panel_get_home_frame returns a strong ref; release. */
-        g_object_unref (home);
+        /* Phase 5b / docking: no more PanelDock revealers; the
+         * tree just shows everything that's in it. No area
+         * reveal flip needed on Redock. */
+        g_object_unref (home);  /* hx_panel_get_home_frame strong ref */
     }
 
     g_object_unref (self);
@@ -932,7 +922,6 @@ void
 hx_panel_undock (HxPanel *self)
 {
     GtkWidget         *current_frame;
-    GtkWidget         *current_dock;
     GtkBuilder        *builder;
     GtkBuilderScope   *scope;
     GtkWindow         *window;
@@ -982,21 +971,27 @@ hx_panel_undock (HxPanel *self)
         return;
     }
 
-    /* Phase 4 / docking: if the panel is already in an undocked
-     * window (its dock is some PanelDock other than toolbar_dock),
+    /* Phase 5b / docking: if the panel is already in an undocked
+     * window (its widget root is NOT the main toolbar window),
      * "Undock" is meaningless — what the user wants is "Dock"
-     * (redock to main). The cleanest way to do that is to close
-     * the source window; its close-request handler
-     * (on_undocked_close_request) takes care of moving the panel
-     * back to its home frame. */
-    current_dock = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                            PANEL_TYPE_DOCK);
-    if (current_dock != NULL && current_dock != toolbar_dock) {
-        GtkRoot *root = gtk_widget_get_root (current_dock);
-        if (GTK_IS_WINDOW (root))
-            gtk_window_close (GTK_WINDOW (root));
-        g_object_unref (self);
-        return;
+     * (redock to main). Close the source window; its
+     * close-request handler (on_undocked_close_request) takes
+     * care of moving the panel back to its home frame.
+     *
+     * The pre-Phase-5b version walked up to PANEL_TYPE_DOCK and
+     * compared with toolbar_dock. With the main dock no longer a
+     * PanelDock, the ancestor walk had to learn the new shape;
+     * the simpler test of "is this panel's GtkRoot the toolbar
+     * window?" works for the same purpose. Undocked windows are
+     * still AdwApplicationWindows separate from toolbar_window. */
+    {
+        GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (self));
+        if (root != NULL && GTK_WIDGET (root) != toolbar_window) {
+            if (GTK_IS_WINDOW (root))
+                gtk_window_close (GTK_WINDOW (root));
+            g_object_unref (self);
+            return;
+        }
     }
 
     panel_frame_remove (PANEL_FRAME (current_frame), PANEL_WIDGET (self));
@@ -1023,7 +1018,7 @@ hx_panel_undock (HxPanel *self)
         gtk_window_set_application (window, GTK_APPLICATION (app));
 
     title = panel_widget_get_title (PANEL_WIDGET (self));
-    gtk_window_set_title (window, title ? title : "Undocked panel");
+    gtk_window_set_title (window, title ? title : _ ("Undocked panel"));
 
     panel_grid_add (grid, PANEL_WIDGET (self));
 
@@ -1069,13 +1064,21 @@ on_undock_activate (GSimpleAction *action,
     hx_panel_undock (HX_PANEL (user_data));
 }
 
-/* The undocked window's grid needs a create-frame handler. Mirrors
- * the toolbar's: an empty PanelFrame with a default header bar,
- * plus the same set of HxPanel hookups so a frame inside an
- * undocked window behaves exactly like one in the main dock —
- * close-dispatcher (DYNAMIC panel teardown + registry unregister),
- * drag-out (drag onto desktop → spawn yet another window) and
- * drop-controls defang. */
+/* The undocked window's grid needs a create-frame handler. Uses
+ * a plain PanelFrame — NOT HxPanelFrame — so libpanel's built-in
+ * page.move-{left,right,up,down} class actions remain in force.
+ * Those actions reflow pages between PanelGrid cells (auto-
+ * creating a new column at the edge), which is the right
+ * behaviour for an undocked-window layout. HxPanelFrame's
+ * override targets the main dock's HxSplit tree and would
+ * disable the chevron Move Page items here because there's no
+ * HxSplit ancestor in an undocked window.
+ *
+ * The other HxPanel hookups still apply — close-dispatcher
+ * (DYNAMIC panel teardown + registry unregister), drag-out
+ * (drag onto desktop → spawn yet another window) and drop-
+ * controls defang — they're frame-level concerns, independent
+ * of the HxSplit world. */
 static PanelFrame *
 hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
 {
@@ -1090,105 +1093,126 @@ hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
     return PANEL_FRAME (frame);
 }
 
-/* panel.move-area handler — string parameter is the destination
- * area ("start" / "end" / "bottom" / "center"). Walks the panel
- * out of its current frame, places it in the appropriate target
- * (frame for sidebar areas, grid for center), updates the home
- * pointer and reveals the destination if applicable. */
-static void
-on_move_area_activate (GSimpleAction *action,
-                       GVariant      *parameter,
-                       gpointer       user_data)
+/* on_move_area_activate retired — panel.move-area gave way to
+ * the four relative-direction actions (panel.move-left / right /
+ * up / down) plus split / close-frame. See on_move_direction_
+ * activate below. */
+
+/* ----------------------------------------------------------------- */
+/* Phase 5a / docking — relative move + split + close-frame          */
+/* ----------------------------------------------------------------- */
+
+/* Phase 5b / docking: panel_neighbor_across_areas removed. The
+ * dock is now ONE recursive HxSplit tree (no PanelDock; no fixed
+ * areas), so hx_split_neighbor walks the entire dock and finds
+ * any neighbour the user could navigate to. The cross-area
+ * bridge that existed during Phase 5a's four-tree period is no
+ * longer needed. */
+
+/* Walk up from the panel to its HxSplit leaf. Returns NULL if the
+ * panel isn't inside a split tree (e.g. it's in an undocked
+ * window — in that case the relative-move / split / close-frame
+ * actions are no-ops). */
+static HxSplit *
+panel_get_split_leaf (HxPanel *self)
 {
-    HxPanel    *self = HX_PANEL (user_data);
-    const char *dest;
+    GtkWidget *anc = gtk_widget_get_ancestor (GTK_WIDGET (self),
+                                              HX_TYPE_SPLIT);
+    if (anc == NULL)
+        return NULL;
+    if (!hx_split_is_leaf (HX_SPLIT (anc))) {
+        /* HxSplit ancestor is an internal split — find the leaf
+         * by walking from the panel's PanelFrame ancestor to the
+         * matching leaf within `anc`'s tree. */
+        GtkWidget *frame_anc = gtk_widget_get_ancestor (GTK_WIDGET (self),
+                                                        PANEL_TYPE_FRAME);
+        if (frame_anc == NULL)
+            return NULL;
+        return hx_split_find_for_frame (HX_SPLIT (anc),
+                                        PANEL_FRAME (frame_anc));
+    }
+    return HX_SPLIT (anc);
+}
+
+/* Cross-frame neighbor move. Used by HxPanelFrame's page.move-*
+ * class-action handlers (hx_panel_frame.c) so that libpanel's
+ * always-greyed "Move Page L/R/U/D" chevron items, which assume a
+ * PanelGrid layout we don't have, become a working cross-frame
+ * move across the HxSplit tree. */
+void
+hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
+{
+    HxSplit    *leaf;
+    HxSplit    *target_leaf;
     GtkWidget  *current_frame;
-    GtkWidget  *target = NULL;
-    PanelArea   new_area = PANEL_AREA_CENTER;
-    gboolean    is_grid = FALSE;
+    PanelFrame *target_frame;
 
-    (void)action;
-    if (parameter == NULL || !g_variant_is_of_type (parameter,
-                                                    G_VARIANT_TYPE_STRING))
-        return;
-    dest = g_variant_get_string (parameter, NULL);
+    g_return_if_fail (HX_IS_PANEL (self));
 
-    if (g_strcmp0 (dest, "start") == 0) {
-        target = toolbar_sidebar_frame;
-        new_area = PANEL_AREA_START;
-    } else if (g_strcmp0 (dest, "end") == 0) {
-        target = toolbar_end_frame;
-        new_area = PANEL_AREA_END;
-    } else if (g_strcmp0 (dest, "bottom") == 0) {
-        target = toolbar_bottom_frame;
-        new_area = PANEL_AREA_BOTTOM;
-    } else if (g_strcmp0 (dest, "center") == 0) {
-        target = toolbar_center_grid;
-        new_area = PANEL_AREA_CENTER;
-        is_grid = TRUE;
-    } else {
-        // g_warning ("HxPanel move-area: unknown destination '%s'", dest);
+    leaf = panel_get_split_leaf (self);
+    if (leaf == NULL) {
+        debug_log ("dock",
+                   "hx_panel %s: page.move-* — no HxSplit ancestor",
+                   self->id ? self->id : "(unset)");
         return;
     }
-
-    if (target == NULL) {
-        // g_warning ("HxPanel move-area: target frame for '%s' is NULL", dest);
+    target_leaf = hx_split_neighbor (leaf, dir);
+    if (target_leaf == NULL) {
+        debug_log ("dock",
+                   "hx_panel %s: page.move-* — no neighbour leaf in that "
+                   "direction (tree edge)",
+                   self->id ? self->id : "(unset)");
         return;
     }
+    target_frame = hx_split_get_frame (target_leaf);
+    if (target_frame == NULL)
+        return;
 
     current_frame = gtk_widget_get_ancestor (GTK_WIDGET (self),
                                              PANEL_TYPE_FRAME);
-    /* No-op when the destination matches the current frame — same
-     * remove/add dance would just blink the tab. */
-    if (current_frame == target)
-        return;
+    if (current_frame == (GtkWidget *) target_frame)
+        return;  /* shouldn't happen — neighbour by definition is elsewhere */
 
     g_object_ref (self);
-
     if (current_frame != NULL)
         panel_frame_remove (PANEL_FRAME (current_frame), PANEL_WIDGET (self));
-
-    if (is_grid) {
-        panel_grid_add (PANEL_GRID (target), PANEL_WIDGET (self));
-        /* For Redock home, walk back to whichever frame the grid
-         * just placed us in. */
-        {
-            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                                        PANEL_TYPE_FRAME);
-            hx_panel_set_home_frame (self, frame);
-        }
-    } else {
-        panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
-        hx_panel_set_home_frame (self, target);
+    panel_frame_add (target_frame, PANEL_WIDGET (self));
+    {
+        GtkWidget *tf = GTK_WIDGET (target_frame);
+        PanelArea  new_area;
+        /* home_frame tracks the exact leaf the user chose.
+         * home_area only follows along when the destination is one
+         * of the four default leaves; a move into a user-created
+         * split leaf preserves the panel's original area intent so
+         * that — if that custom leaf is later closed while the
+         * panel is detached — the home_area fallback in
+         * hx_panel_ensure_attached returns the panel to its
+         * original default frame rather than coercing it onto
+         * whatever area sentinel the custom leaf might map to. */
+        if (panel_area_for_default_frame (tf, &new_area))
+            self->home_area = new_area;
+        hx_panel_set_home_frame (self, tf);
     }
-
-    /* Update the home_area record so Undock + close-request later
-     * routes back to the new area. */
-    self->home_area = new_area;
-
-    /* Reveal the destination area (no-op for center, which has no
-     * revealer). */
-    if (toolbar_dock != NULL && !is_grid) {
-        switch (new_area) {
-        case PANEL_AREA_START:
-            panel_dock_set_reveal_start  (PANEL_DOCK (toolbar_dock), TRUE);
-            break;
-        case PANEL_AREA_END:
-            panel_dock_set_reveal_end    (PANEL_DOCK (toolbar_dock), TRUE);
-            break;
-        case PANEL_AREA_BOTTOM:
-            panel_dock_set_reveal_bottom (PANEL_DOCK (toolbar_dock), TRUE);
-            break;
-        case PANEL_AREA_TOP:
-            panel_dock_set_reveal_top    (PANEL_DOCK (toolbar_dock), TRUE);
-            break;
-        case PANEL_AREA_CENTER:
-        default:
-            break;
-        }
-    }
-
     panel_widget_raise (PANEL_WIDGET (self));
-
     g_object_unref (self);
 }
+
+gboolean
+hx_panel_can_move_in_direction (HxPanel *self, GtkDirectionType dir)
+{
+    HxSplit *leaf;
+
+    g_return_val_if_fail (HX_IS_PANEL (self), FALSE);
+
+    leaf = panel_get_split_leaf (self);
+    if (leaf == NULL)
+        return FALSE;
+    return hx_split_neighbor (leaf, dir) != NULL;
+}
+
+/* Per-panel split / close-frame handlers retired — those
+ * operations now live on each PanelFrame's header via
+ * hx_split_install_frame_ui. Per-panel chevron stays focused on
+ * undock; libpanel's chevron items Move Page L/R/U/D are routed
+ * to hx_panel_do_move_in_direction by HxPanelFrame's overriding
+ * class actions (src/hx_panel_frame.c). */

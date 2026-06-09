@@ -34,6 +34,8 @@ gtkhx_sources = files(
   'gtkhx_session.c',
   'gtkthreads.c',
   'hx_panel.c',
+  'hx_panel_frame.c',
+  'hx_split.c',
   'panel_registry.c',
   'gtkurl.c',
   'gtkutil.c',

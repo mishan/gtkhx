@@ -53,19 +53,30 @@
 #include "plugin.h"
 #include "toolbar.h"
 #include "hx_panel.h"
+#include "hx_panel_frame.h"
+#include "hx_split.h"
 #include "panel_registry.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
 GtkWidget *broadcast_btn;
 
-/* Phase 5 / docking (Phase 1): handles to the dock that per-window
- * panel factories use to insert their HxPanels. See toolbar.h. */
-GtkWidget *toolbar_dock          = NULL;
-GtkWidget *toolbar_sidebar_frame = NULL;
-GtkWidget *toolbar_end_frame     = NULL;
-GtkWidget *toolbar_bottom_frame  = NULL;
-GtkWidget *toolbar_center_grid   = NULL;
+/* Phase 5 / docking: handles to the dock + four default-leaf
+ * PanelFrame globals that per-window panel factories use to
+ * insert their HxPanels. See toolbar.h for the contract.
+ *
+ * toolbar_dock is a libpanel PanelDock acting as a thin wrapper
+ * around the HxSplit tree — the dock has exactly one center
+ * child, the HxSplit root, and no other children. The wrapper
+ * exists to satisfy libpanel's PanelDropControls invariant
+ * (which assert a PANEL_TYPE_DOCK ancestor at root time); from
+ * the user's perspective the dock is a single recursive HxSplit
+ * tree. See docs/docking-splits.md for the rationale. */
+GtkWidget *toolbar_dock           = NULL;  /* thin PanelDock wrapper */
+GtkWidget *toolbar_sidebar_frame  = NULL;
+GtkWidget *toolbar_end_frame      = NULL;
+GtkWidget *toolbar_bottom_frame   = NULL;
+GtkWidget *toolbar_center_frame   = NULL;
 
 #ifdef USE_PLUGIN
 GtkWidget *plugin_btn;
@@ -684,26 +695,27 @@ toolbar_refresh_bookmarks (void)
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
-/* Phase 5 / docking: the create-frame signal handler used by the
- * toolbar's center PanelGrid. Each time the grid needs a new
- * PanelFrame (first add, or DnD into empty grid space), this is
- * what hands it one. Mirrors the spike's helper and the canonical
- * pattern from libpanel's own testsuite/test-dock.c.
+/* Phase 5a / docking: install the per-frame plumbing every leaf
+ * PanelFrame in the dock needs. Three concerns:
  *
- * Phase 3 / docking: install the HxPanel close dispatcher on the
- * new frame so dynamic panels (pchat / msg) that get split off
- * into a fresh center frame still tear down their backing state
- * when the user closes the tab. */
-static PanelFrame *
-toolbar_create_frame_cb (PanelGrid *grid, gpointer user_data)
+ *   - close-dispatcher: routes PanelFrame::page-closed to the
+ *     dynamic panel's teardown (pchat / msg).
+ *   - drag-out hook: detects drag-cancel on the libpanel drag
+ *     handle and undocks the dragged panel.
+ *   - defang drop-controls: makes PanelDropControls transparent
+ *     so the dock-level drop target sees the drop.
+ *
+ * Called once per area at dock build time, and again whenever a
+ * user splits a leaf — the new sibling leaf needs the same hooks
+ * so the user can interact with it the same way as the originals. */
+void
+toolbar_install_panel_hooks_on_frame (GtkWidget *frame)
 {
-    GtkWidget        *frame  = panel_frame_new ();
-    PanelFrameHeader *header = PANEL_FRAME_HEADER (panel_frame_header_bar_new ());
-    panel_frame_set_header (PANEL_FRAME (frame), header);
+    g_return_if_fail (PANEL_IS_FRAME (frame));
     hx_panel_install_close_dispatcher (frame);
     hx_panel_install_drag_out_on_frame (frame);
     hx_panel_defang_drop_controls_on_frame (frame);
-    return PANEL_FRAME (frame);
+    hx_split_install_frame_ui (frame);
 }
 
 /* Phase 5 / docking (Phase 2 follow-up): toolbar buttons "show
@@ -726,7 +738,6 @@ toolbar_show_panel (GtkButton *button, gpointer data)
 {
     const char *panel_id = data;
     HxPanel    *panel;
-    GtkWidget  *frame;
 
     (void)button;
 
@@ -742,27 +753,72 @@ toolbar_show_panel (GtkButton *button, gpointer data)
     hx_panel_ensure_attached (panel);
 
     panel_widget_raise (PANEL_WIDGET (panel));
+}
 
-    /* Reveal the area the panel is in. hx_panel_get_home_area
-     * recorded the original area at construction; if the user
-     * later moved the panel (via DnD or a move-area menu item),
-     * the live area takes precedence — walk up from the panel to
-     * find it. */
-    frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                     PANEL_TYPE_FRAME);
-    if (frame == NULL)
+/* Hard horizontal minimum on every leaf in the default dock
+ * layout. Applied to each PanelFrame in MAKE_LEAF_FRAME via
+ * gtk_widget_set_size_request, and used as the floor when the
+ * one-shot below halves the right paned's share on first
+ * allocation. The value propagates through paned -> window:
+ * GTK's window-size computation sums child minimums + handle
+ * widths + chrome and refuses to shrink the window below that.
+ *
+ * 300 px covers the widest of the default panels' button rows
+ * (Users panel: 6 pixmap icon-buttons in the action row need
+ * ~280 px with spacing/margins) with a small margin. Tune up if
+ * a panel's content still clips at this width. */
+#define DEFAULT_LEAF_MIN_WIDTH 300
+
+/* notify::max-position handler — see the comment block where this
+ * is connected in create_toolbar_window for the rationale.
+ *
+ * Halves the right child's share on first allocation, with a
+ * floor at DEFAULT_LEAF_MIN_WIDTH (matches the size-request
+ * MAKE_LEAF_FRAME installs on every leaf). The size-request is
+ * what bounds user-dragging too — this handler only sets the
+ * initial divider position. */
+static void
+on_right_paned_first_alloc (GObject    *object,
+                            GParamSpec *pspec,
+                            gpointer    user_data)
+{
+    GtkPaned *paned = GTK_PANED (object);
+    int       max_position = 0;
+    int       paned_width;
+    int       pos;
+    int       right_current;
+    int       target;
+
+    (void)pspec;
+    (void)user_data;
+
+    /* notify::max-position fires once with 0 before allocation
+     * happens (the initial property value), and again with the
+     * real width on first allocation. Skip the 0 notification. */
+    g_object_get (object, "max-position", &max_position, NULL);
+    if (max_position <= 0)
         return;
 
-    /* Live area: check which sidebar frame's tree the panel sits
-     * in. The center grid has no surrounding revealer so it needs
-     * no reveal toggle. */
-    if (frame == toolbar_sidebar_frame)
-        panel_dock_set_reveal_start  (PANEL_DOCK (toolbar_dock), TRUE);
-    else if (frame == toolbar_end_frame)
-        panel_dock_set_reveal_end    (PANEL_DOCK (toolbar_dock), TRUE);
-    else if (frame == toolbar_bottom_frame)
-        panel_dock_set_reveal_bottom (PANEL_DOCK (toolbar_dock), TRUE);
-    /* else: center grid — no revealer */
+    paned_width = gtk_widget_get_width (GTK_WIDGET (paned));
+    pos = gtk_paned_get_position (paned);
+
+    /* With position-set=FALSE (the default before this handler
+     * runs), GtkPaned reports the natural divider position once
+     * allocated. right_current = paned_width - divider_position
+     * (the handle width is negligible for the halving math). */
+    right_current = paned_width - pos;
+    if (right_current <= 0)
+        goto out;
+
+    target = right_current / 2;
+    if (target < DEFAULT_LEAF_MIN_WIDTH)
+        target = DEFAULT_LEAF_MIN_WIDTH;
+    gtk_paned_set_position (paned, paned_width - target);
+
+out:
+    g_signal_handlers_disconnect_by_func (object,
+                                          on_right_paned_first_alloc,
+                                          user_data);
 }
 
 void
@@ -944,72 +1000,128 @@ create_toolbar_window (session *sess)
     g_signal_connect (toolbar_banner, "button-clicked",
                       G_CALLBACK (on_banner_button_clicked), sess);
 
-    /* Phase 5 / docking (Phase 1): the PanelDock that future Phase 2
-	 * migrations will fill with HxPanels. Center area is a
-	 * PanelGrid (libpanel's idiom — the grid lazily creates its
-	 * own PanelFrames via the create-frame signal); start area is a
-	 * single PanelFrame ready to host sidebar panels (Users, Tasks).
-	 * Both start empty; the legacy create_*_window paths keep
-	 * working until each is rewired to register an HxPanel here. */
-    toolbar_dock = panel_dock_new ();
-    gtk_widget_set_hexpand (toolbar_dock, TRUE);
-    gtk_widget_set_vexpand (toolbar_dock, TRUE);
-
-    /* Phase 4 / docking: dock-level drop target. Per-frame drop
-     * targets don't receive events in our setup — some libpanel
-     * descendant of the frame is consuming them before they reach
-     * us. The dock target catches the drop event high up the
-     * tree and picks the target frame by hit-testing the drop
-     * coordinates against descendant PanelFrames. */
-    hx_panel_install_drop_target_on_dock (toolbar_dock);
-
-    toolbar_sidebar_frame = panel_frame_new ();
-    panel_frame_set_header (PANEL_FRAME (toolbar_sidebar_frame),
-                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
-    hx_panel_install_close_dispatcher (toolbar_sidebar_frame);
-    hx_panel_install_drag_out_on_frame (toolbar_sidebar_frame);
-    hx_panel_defang_drop_controls_on_frame (toolbar_sidebar_frame);
-
-    toolbar_end_frame = panel_frame_new ();
-    panel_frame_set_header (PANEL_FRAME (toolbar_end_frame),
-                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
-    hx_panel_install_close_dispatcher (toolbar_end_frame);
-    hx_panel_install_drag_out_on_frame (toolbar_end_frame);
-    hx_panel_defang_drop_controls_on_frame (toolbar_end_frame);
-
-    toolbar_bottom_frame = panel_frame_new ();
-    panel_frame_set_header (PANEL_FRAME (toolbar_bottom_frame),
-                            PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
-    hx_panel_install_close_dispatcher (toolbar_bottom_frame);
-    hx_panel_install_drag_out_on_frame (toolbar_bottom_frame);
-    hx_panel_defang_drop_controls_on_frame (toolbar_bottom_frame);
-
-    toolbar_center_grid = panel_grid_new ();
-    g_signal_connect (toolbar_center_grid, "create-frame",
-                      G_CALLBACK (toolbar_create_frame_cb), NULL);
-
-    /* PanelDock has no C-level add-child method — children flow in
-	 * through the GtkBuildable.add_child vfunc, which routes on the
-	 * `type` parameter from <child type="…">. Invoke it directly:
-	 * gtk_widget_set_parent skips the area-routing wrap, and
-	 * gtk_buildable_add_child the symbol is not in the public ABI.
-	 * Documented in docs/docking-phase0-findings.md, finding #1. */
+    /* Phase 5b / docking: the dock is ONE recursive HxSplit tree.
+     * The previous PanelDock-with-four-areas structure is gone;
+     * splits / moves / closes operate over a single uniform tree.
+     * The default layout below mimics the visual placement of the
+     * Phase 5a four-area arrangement so existing users see the
+     * same dock on first launch.
+     *
+     * Default layout:
+     *
+     *   root  (horizontal split):
+     *   ├── left leaf  — News                  (toolbar_sidebar_frame)
+     *   └── rest       (horizontal split):
+     *       ├── middle (vertical split):
+     *       │   ├── center leaf — Chat, Files,
+     *       │   │                 News 1.5      (toolbar_center_frame)
+     *       │   └── bottom leaf — Tasks         (toolbar_bottom_frame)
+     *       └── right leaf — Users              (toolbar_end_frame)
+     *
+     * toolbar_*_frame pointers reference the four initial leaves'
+     * PanelFrames so static-panel factories' panel_frame_add
+     * target keeps working unchanged. The pointers stay STABLE
+     * across user splits — when the user splits the Chat/Files
+     * leaf, that leaf's frame keeps Chat+Files and a NEW empty
+     * frame appears alongside; toolbar_center_frame still points
+     * at the original.
+     *
+     * No more area revealers, no PanelDock-level reveal toggling.
+     * The user closes a frame to remove it; the empty-frame
+     * stays-visible behaviour that PanelDock used to suppress via
+     * notify::empty is the new normal. */
     {
-        GtkBuilder        *b     = gtk_builder_new ();
-        GtkBuildable      *bdock = GTK_BUILDABLE (toolbar_dock);
-        GtkBuildableIface *iface = GTK_BUILDABLE_GET_IFACE (bdock);
-        iface->add_child (bdock, b, G_OBJECT (toolbar_sidebar_frame), "start");
-        iface->add_child (bdock, b, G_OBJECT (toolbar_end_frame),     "end");
-        iface->add_child (bdock, b, G_OBJECT (toolbar_bottom_frame),  "bottom");
-        iface->add_child (bdock, b, G_OBJECT (toolbar_center_grid),   NULL);
-        g_object_unref (b);
+        PanelFrame *f_left, *f_center, *f_bottom, *f_right;
+        HxSplit    *leaf_left, *leaf_center, *leaf_bottom, *leaf_right;
+        HxSplit    *middle, *cb_plus_right, *root;
+
+        #define MAKE_LEAF_FRAME(out, var)                                \
+            do {                                                         \
+                (var) = hx_panel_frame_new ();                           \
+                panel_frame_set_header (                                 \
+                    (var), PANEL_FRAME_HEADER (                          \
+                               panel_frame_header_bar_new ()));          \
+                (out) = GTK_WIDGET (var);                                \
+                gtk_widget_set_size_request ((out),                      \
+                                             DEFAULT_LEAF_MIN_WIDTH,     \
+                                             -1);                        \
+                toolbar_install_panel_hooks_on_frame (out);              \
+            } while (0)
+
+        MAKE_LEAF_FRAME (toolbar_sidebar_frame, f_left);
+        MAKE_LEAF_FRAME (toolbar_center_frame,  f_center);
+        MAKE_LEAF_FRAME (toolbar_bottom_frame,  f_bottom);
+        MAKE_LEAF_FRAME (toolbar_end_frame,     f_right);
+        #undef MAKE_LEAF_FRAME
+
+        leaf_left   = hx_split_new_with_frame (f_left);
+        leaf_center = hx_split_new_with_frame (f_center);
+        leaf_bottom = hx_split_new_with_frame (f_bottom);
+        leaf_right  = hx_split_new_with_frame (f_right);
+
+        middle = hx_split_new_internal (leaf_center, leaf_bottom,
+                                        GTK_ORIENTATION_VERTICAL);
+        cb_plus_right = hx_split_new_internal (middle, leaf_right,
+                                               GTK_ORIENTATION_HORIZONTAL);
+        root = hx_split_new_internal (leaf_left, cb_plus_right,
+                                      GTK_ORIENTATION_HORIZONTAL);
+        gtk_widget_set_hexpand (GTK_WIDGET (root), TRUE);
+        gtk_widget_set_vexpand (GTK_WIDGET (root), TRUE);
+
+        /* The Users panel's natural width (6 icon-buttons in the
+         * action row + the column view) makes the right leaf
+         * start out wider than it really needs to be. Halve its
+         * width on first allocation via a notify::max-position
+         * one-shot: max-position changes from 0 to the real value
+         * on first allocation; the handler reads the current
+         * divider, halves the right share (floored at
+         * DEFAULT_LEAF_MIN_WIDTH), calls set_position once, then
+         * disconnects so user-drags aren't fought every frame.
+         *
+         * NB: leave shrink_end_child at the hx_split default
+         * (FALSE). Looking at GTK 4 paned source
+         * (gtk_paned_compute_position + the paned measure):
+         *   max_position = shrink ? allocation
+         *                         : allocation - end_child_req
+         * where end_child_req is the end child's MINIMUM (which
+         * respects size-request), not its natural. So shrink=FALSE
+         * still lets the user halve below natural — it caps at the
+         * 300 px floor MAKE_LEAF_FRAME sets. shrink=TRUE on the
+         * other hand makes the end child contribute 0 to the
+         * paned's reported min, which lets the window be sized
+         * below the right leaf's minimum width entirely. */
+        g_signal_connect (hx_split_get_paned (cb_plus_right),
+                          "notify::max-position",
+                          G_CALLBACK (on_right_paned_first_alloc), NULL);
+
+        /* PanelDock as a thin wrapper. The HxSplit root is the
+         * dock's single center child; no start/end/top/bottom
+         * children, no revealers active. The wrapper exists for
+         * one reason: libpanel's PanelFrame template includes
+         * PanelDropControls overlays that assert a PANEL_TYPE_DOCK
+         * ancestor at root time (panel-drop-controls.c
+         * panel_drop_controls_root). Without it, every frame
+         * emits a 'PanelDropControls added without a dock'
+         * warning even though we don't use libpanel's DnD. From
+         * the user's perspective the dock is still one
+         * recursive HxSplit tree — the wrapper just satisfies
+         * libpanel's invariants. */
+        toolbar_dock = panel_dock_new ();
+        gtk_widget_set_hexpand (toolbar_dock, TRUE);
+        gtk_widget_set_vexpand (toolbar_dock, TRUE);
+        {
+            GtkBuilder        *b     = gtk_builder_new ();
+            GtkBuildable      *bdock = GTK_BUILDABLE (toolbar_dock);
+            GtkBuildableIface *iface = GTK_BUILDABLE_GET_IFACE (bdock);
+            iface->add_child (bdock, b, G_OBJECT (root), NULL); /* center */
+            g_object_unref (b);
+        }
+
+        /* Dock-level drop target. The hit-test for the deepest
+         * descendant PanelFrame walks through HxSplit nodes
+         * transparently. */
+        hx_panel_install_drop_target_on_dock (toolbar_dock);
     }
-    /* Sidebar auto-collapses to hidden when its frame becomes empty
-	 * (panel_dock_notify_empty_cb). Leave reveal-start off until
-	 * something actually populates the sidebar; flipping it on now
-	 * just exposes a 0-px revealer. The first
-	 * hx_panel_registry_register for a SIDEBAR-kind panel will flip
-	 * it on. */
 
     /* AdwToolbarView: the canonical libadwaita way to stack
 	 * top/bottom chrome around a content widget. Top bars get the

@@ -96,10 +96,21 @@ GtkWidget  *hx_panel_get_home_frame (HxPanel    *self);
  * the dock thinks it's gone, and a subsequent toolbar-button click
  * (or open_* entry point) calls this to splice it back into its
  * home area before raising. No-op when the panel is already in a
- * frame. The destination is the panel's home_area (CENTER → grid,
- * SIDEBAR → matching toolbar_*_frame); a custom location from a
- * prior DnD or move-area action is *not* preserved across a close,
- * matching the "Close" semantics every other docking UI has. */
+ * frame.
+ *
+ * The destination is the panel's recorded home_frame when its
+ * weak ref still resolves to a live PanelFrame in the dock tree —
+ * which is the common case once the user has moved the panel into
+ * a custom split leaf via Move-direction or DnD. Phase 5b /
+ * docking deliberately preserves that placement across Close all
+ * pages → re-show so that user-arranged layouts survive the round
+ * trip. Only when home_frame has expired (e.g. the leaf was
+ * collapsed) does this fall back to the home_area default — the
+ * matching toolbar_*_frame for that area (Phase 5b dropped the
+ * separate PanelGrid in favor of a single HxSplit root, so even
+ * CENTER resolves to a PanelFrame — toolbar_center_frame —
+ * rather than a grid). The stored home_frame is updated to that
+ * fallback target. */
 void        hx_panel_ensure_attached (HxPanel   *self);
 
 /* Per-panel close callback for DYNAMIC kind panels. Phase 3.
@@ -122,6 +133,22 @@ typedef void (*HxPanelCloseFunc) (HxPanel *panel, gpointer user_data);
 void        hx_panel_set_close_handler (HxPanel          *self,
                                         HxPanelCloseFunc  func,
                                         gpointer          user_data);
+
+/* Move the panel into the leaf adjacent to its current frame in
+ * the given direction (across the HxSplit tree, found via
+ * hx_split_neighbor). No-op when there's no neighbour. Used by
+ * HxPanelFrame's page.move-* class-action handlers so the chevron
+ * "Move Page L/R/U/D" items perform a cross-frame move. */
+void        hx_panel_do_move_in_direction (HxPanel          *self,
+                                           GtkDirectionType  dir);
+
+/* Returns TRUE iff hx_panel_do_move_in_direction(self, dir) would
+ * actually move the panel — i.e. there is a neighbour leaf in
+ * that direction in the dock's HxSplit tree. Used to gate the
+ * enabled state of the chevron's per-direction Move Page items so
+ * a no-op direction renders greyed instead of clickable-but-inert. */
+gboolean    hx_panel_can_move_in_direction (HxPanel          *self,
+                                            GtkDirectionType  dir);
 
 /* Hook the dispatcher onto a PanelFrame's page-closed signal.
  * Called once per frame at toolbar build time and from the

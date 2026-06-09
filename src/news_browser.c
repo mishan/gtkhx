@@ -2206,14 +2206,10 @@ build_browser_window (void)
      * transient-for) switched to toolbar_window above. */
     br->window = GTK_WIDGET (panel);
 
-    if (toolbar_center_grid != NULL) {
-        panel_grid_add (PANEL_GRID (toolbar_center_grid),
-                        PANEL_WIDGET (panel));
-        {
-            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                                        PANEL_TYPE_FRAME);
-            hx_panel_set_home_frame (panel, frame);
-        }
+    if (toolbar_center_frame != NULL) {
+        panel_frame_add (PANEL_FRAME (toolbar_center_frame),
+                         PANEL_WIDGET (panel));
+        hx_panel_set_home_frame (panel, toolbar_center_frame);
     } else {
         g_critical ("build_browser_window: toolbar dock not built yet");
     }

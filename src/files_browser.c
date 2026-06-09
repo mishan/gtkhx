@@ -2339,14 +2339,10 @@ open_files_browser (void)
     set_active (br, br->left);
     gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
-    if (toolbar_center_grid != NULL) {
-        panel_grid_add (PANEL_GRID (toolbar_center_grid),
-                        PANEL_WIDGET (panel));
-        {
-            GtkWidget *frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                                        PANEL_TYPE_FRAME);
-            hx_panel_set_home_frame (panel, frame);
-        }
+    if (toolbar_center_frame != NULL) {
+        panel_frame_add (PANEL_FRAME (toolbar_center_frame),
+                         PANEL_WIDGET (panel));
+        hx_panel_set_home_frame (panel, toolbar_center_frame);
     } else {
         g_critical ("open_files_browser: toolbar dock not built yet");
     }
