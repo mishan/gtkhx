@@ -1132,6 +1132,41 @@ extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
 extern uint64_t gtkhx_proto_capabilities_decode (const uint8_t *bytes,
                                                  size_t len);
 
+/* ---- Transaction header decode ----
+ *
+ * Companion to gtkhx_proto_header_trans / _header_in_error: the full
+ * 6-output decode the C entry point hl_hdr_decode dispatches on. */
+
+struct gtkhx_proto_header_decoded {
+    uint32_t type_;
+    uint32_t trans;
+    uint32_t flag;
+    /* Raw on-wire `len` field — passes through verbatim so production
+     * logging can show the server's claim even when pathological. */
+    uint32_t wire_len;
+    /* Body bytes after `hc`, clamped at max_packet_len - sizeof(hc).
+     * Wire `len` counts (body + hc=2); subtract 2 to get the body. */
+    uint32_t body_len;
+    uint16_t hc;
+};
+
+/* Pin the C-ABI mirror size so any padding / alignment drift across
+ * compilers or targets surfaces at build time rather than reading
+ * garbage on the Rust side. Layout: 5×u32 (20) + u16 (2) + 2 bytes
+ * trailing alignment-to-4 padding = 24 bytes total. The Rust side
+ * has a matching `const _: () = assert!(size_of == 24, ...)`. */
+_Static_assert (sizeof (struct gtkhx_proto_header_decoded) == 24,
+                "gtkhx_proto_header_decoded size drifted from Rust ABI mirror");
+
+/* Decode the 22-byte transaction header. Fills *out with type / trans /
+ * flag / hc / wire_len / body_len; returns false on NULL out or a
+ * buffer shorter than the header. max_packet_len is the protocol-layer
+ * packet ceiling (production passes MAX_HOTLINE_PACKET_LEN from
+ * compat.h) and clamps body_len without touching wire_len. */
+extern bool gtkhx_proto_decode_header (const uint8_t *buf, size_t len,
+                                       uint32_t max_packet_len,
+                                       struct gtkhx_proto_header_decoded *out);
+
 /* ---- HTXF subframe header pack ---- */
 
 /* Pack the 16-byte HTXF subframe header into `out[0..16)`. Wire layout
