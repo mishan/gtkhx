@@ -1165,10 +1165,13 @@ create_toolbar_window (session *sess)
     /* Initial sensitivity: pre-connection, only Connect + the global
 	 * menu items are usable. setbtns() flips the rest on at login,
 	 * including the Admin submenu's app.user_new / app.user_edit
-	 * GActions. */
+	 * GActions.
+	 *
+	 * files_btn and news15_btn stay enabled regardless of
+	 * connection state — their click just brings the (always
+	 * resident) Files / News 1.5 panel forward in the dock; even
+	 * disconnected the panel shows whatever it has cached. */
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
-    gtk_widget_set_sensitive (files_btn, FALSE);
-    gtk_widget_set_sensitive (news15_btn, FALSE);
 
     /* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
 	 * a GtkWidget pointer, not a function. Calling a widget address as
@@ -1188,8 +1191,6 @@ create_toolbar_window (session *sess)
 
     if (connected) {
         gtk_widget_set_sensitive (disconnect_btn, TRUE);
-        gtk_widget_set_sensitive (files_btn, TRUE);
-        gtk_widget_set_sensitive (news15_btn, TRUE);
         changetitlespecific (toolbar_window, "GtkHx");
     }
     sess->toolbar_window = toolbar_window;

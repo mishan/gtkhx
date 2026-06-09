@@ -300,7 +300,11 @@ setbtns (session *sess, int stat)
         gtk_widget_set_sensitive (sess->reloadButton, stat);
     }
 
-    gtk_widget_set_sensitive (files_btn, stat);
+    /* files_btn intentionally not gated on connection state — the
+     * Files panel is always resident in the dock and the button
+     * just brings it forward; even offline it can show whatever
+     * directory listing was last fetched. See toolbar.c initial-
+     * sensitivity comment. */
 
     /* Broadcast button: always present in the toolbar, greyed out
 	 * when unavailable. Unavailable means either the connection is
@@ -345,8 +349,7 @@ setbtns (session *sess, int stat)
 
     /* Phase 5: News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape
-	 * doesn't reshape between connections. Three buttons, three
-	 * independent decisions:
+	 * doesn't reshape between connections.
 	 *
 	 *   news_btn   (legacy News): enabled when the account has
 	 *               HL_ACCESS_READ_NEWS. The legacy news file
@@ -360,20 +363,21 @@ setbtns (session *sess, int stat)
 	 *               already exposes a Post action gated on
 	 *               HL_ACCESS_POST_NEWS, so the toolbar copy was
 	 *               redundant.
-	 *   news15_btn (threaded News): enabled on 1.5+ servers when
-	 *               the account has HL_ACCESS_READ_NEWS. mhxd's
-	 *               struct has one read bit gating both legacy and
-	 *               threaded news, so the same access bit applies. */
+	 *
+	 *   news15_btn (threaded News): NOT gated here. Like Files,
+	 *               News 1.5 is a permanent panel in the dock now;
+	 *               clicking the button just brings it forward.
+	 *               The panel itself can show its cached state
+	 *               when disconnected, or a 'this server is older
+	 *               than 1.5' message when connected to an old
+	 *               server. */
     if (!stat) {
         gtk_widget_set_sensitive (news_btn, FALSE);
-        gtk_widget_set_sensitive (news15_btn, FALSE);
     } else {
         const guint8 *access = (const guint8 *)&sess->htlc.access;
         gboolean can_read = hl_access_has (access, HL_ACCESS_READ_NEWS);
-        gboolean is_15plus = sess->htlc.version >= 150;
 
         gtk_widget_set_sensitive (news_btn, can_read);
-        gtk_widget_set_sensitive (news15_btn, is_15plus && can_read);
     }
 }
 
