@@ -90,6 +90,16 @@ extern void toolbar_register_actions (GApplication *app, session *sess);
  * leaf's PanelFrame needs the same hooks). */
 extern void toolbar_install_panel_hooks_on_frame (GtkWidget *frame);
 
+/* Hard horizontal minimum every leaf in the dock applies via
+ * gtk_widget_set_size_request. Lives in the header so the
+ * saved-layout loader (src/dock_layout.c) and the default-build
+ * path (src/toolbar.c) share the same value — drift between them
+ * would silently restore custom layouts at a different minimum
+ * than the default layout uses. 300 px covers the widest of the
+ * default panels' button rows (Users: 6 icon-buttons + spacing
+ * + margins ≈ 280 px) with a small margin. */
+#define DEFAULT_LEAF_MIN_WIDTH 300
+
 /* Phase 5: push a transient AdwToast onto the toolbar window's
  * AdwToastOverlay. Safe to call before the toolbar is built (no-op).
  * The toast auto-dismisses after libadwaita's default timeout. */

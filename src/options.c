@@ -865,6 +865,8 @@ struct cfgvar {
       0,
       changed_stampformat,
       NULL },
+    { CFG_TOOL_XSIZE, { &gtkhx_prefs.geo.tool.xsize }, INT, 0, NULL, NULL },
+    { CFG_TOOL_YSIZE, { &gtkhx_prefs.geo.tool.ysize }, INT, 0, NULL, NULL },
     { CFG_TRACKER,
       { &gtkhx_prefs.tracker_str },
       STRING,

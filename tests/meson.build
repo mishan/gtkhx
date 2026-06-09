@@ -257,6 +257,21 @@ test_task_hash = executable('test_task_hash',
 test('task_hash', test_task_hash,
      suite : 'unit')
 
+# dock_layout_parse — recursive-descent parser for the saved-layout
+# tree expression. Pure GLib so the test links just the parser .c
+# without dragging in GTK + libpanel + the rest of dock_layout.c.
+# Covers valid trees, whitespace tolerance, malformed input
+# variants, and the empty-leaf-with-role case (the all-undocked-
+# layout edge that broke before the role-default fix).
+test_dock_layout_parse = executable('test_dock_layout_parse',
+  'unit/test_dock_layout_parse.c',
+  '../src/dock_layout_parse.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('dock_layout_parse', test_dock_layout_parse,
+     suite : 'unit')
+
 # msgwin_hash — Phase 1.2 replaces the doubly-linked msg_list (a
 # file-scope global in msg.c) with GHashTable<u16 uid, struct msgwin*>
 # on the session. struct msgwin lives in session.h, which pulls in

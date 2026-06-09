@@ -29,6 +29,8 @@ gtkhx_sources = files(
   'files_panel.c',
   'files_provider.c',
   'files_remote_provider.c',
+  'dock_layout.c',
+  'dock_layout_parse.c',
   'gtkhx.c',
   'gtkhx_log.c',
   'gtkhx_session.c',
