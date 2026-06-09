@@ -57,6 +57,71 @@ pub fn to_utf8(bytes: &[u8]) -> String {
     out
 }
 
+/// Decode `bytes` (same rules as [`to_utf8`]) and write the resulting UTF-8
+/// into `dst`, returning the number of bytes written. If the decoded output
+/// is longer than `dst`, truncates at the last UTF-8 character boundary
+/// that still fits — never writes a partial multi-byte sequence. No NUL
+/// terminator is appended; the slice content is just the UTF-8 bytes.
+///
+/// This is the byte-oriented form a C caller wants (via the FFI shim) and
+/// is also the right shape for a future Rust caller decoding into a
+/// pre-sized scratch buffer. Sizing the destination at `bytes.len() * 3`
+/// guarantees the result fits (Mac Roman → UTF-8 worst-case expansion is
+/// 3×); a smaller destination causes truncation.
+///
+/// **No intermediate allocation.** Unlike [`to_utf8`] (which returns an
+/// owned `String`), this writes straight into `dst`:
+/// 1. Valid-UTF-8 fast path — verbatim copy from `bytes` to `dst`, with
+///    boundary truncation when `dst` is smaller than `bytes`.
+/// 2. Mac Roman path — per-byte table lookup, `char::encode_utf8` into a
+///    4-byte stack scratch buffer, copy whole UTF-8 sequences into `dst`.
+///    Loop breaks as soon as the next codepoint wouldn't fit, which
+///    enforces the "no partial sequences" rule for free.
+///
+/// Hot path: this runs on every server chat / news / msg payload.
+pub fn to_utf8_into(bytes: &[u8], dst: &mut [u8]) -> usize {
+    if dst.is_empty() {
+        return 0;
+    }
+    // Fast path: input is already valid UTF-8. Copy verbatim, truncating
+    // at the last character boundary that fits.
+    if std::str::from_utf8(bytes).is_ok() {
+        let mut n = bytes.len().min(dst.len());
+        if n < bytes.len() {
+            while n > 0 && (bytes[n] & 0b1100_0000) == 0b1000_0000 {
+                n -= 1;
+            }
+        }
+        if n > 0 {
+            dst[..n].copy_from_slice(&bytes[..n]);
+        }
+        return n;
+    }
+    // Mac Roman path: decode byte-by-byte directly into `dst`.
+    let mut written = 0;
+    let mut tmp = [0u8; 4];
+    for &b in bytes {
+        let seq: &[u8] = if b < 0x80 {
+            tmp[0] = b;
+            &tmp[..1]
+        } else {
+            let cp = MAC_ROMAN_HIGH[(b - 0x80) as usize];
+            let ch = char::from_u32(cp).unwrap_or('\u{FFFD}');
+            ch.encode_utf8(&mut tmp).as_bytes()
+        };
+        if written + seq.len() > dst.len() {
+            // Next codepoint doesn't fit — stop, leaving `dst` ending at
+            // the prior char boundary. (Don't continue with smaller
+            // codepoints either: the caller wants a prefix, not a
+            // gappy decode.)
+            break;
+        }
+        dst[written..written + seq.len()].copy_from_slice(seq);
+        written += seq.len();
+    }
+    written
+}
+
 /// Convert UTF-8 text to Mac Roman wire bytes, mirroring the legacy-mode
 /// branch of `gtkhx_text_for_wire`. Characters outside the Mac Roman
 /// repertoire are replaced with `?` (the same fallback the C code passes to
@@ -125,5 +190,74 @@ mod tests {
     fn unrepresentable_becomes_question_mark() {
         // An emoji has no Mac Roman codepoint.
         assert_eq!(from_utf8("hi 😀"), b"hi ?");
+    }
+
+    // ---- to_utf8_into: byte-buffer form ----
+
+    #[test]
+    fn into_empty_dst_writes_nothing() {
+        let mut dst = [];
+        assert_eq!(to_utf8_into(b"hello", &mut dst), 0);
+    }
+
+    #[test]
+    fn into_ascii_copies() {
+        let mut dst = [0u8; 32];
+        let n = to_utf8_into(b"hello", &mut dst);
+        assert_eq!(n, 5);
+        assert_eq!(&dst[..n], b"hello");
+    }
+
+    #[test]
+    fn into_mac_roman_decodes() {
+        // 0x8E is Mac Roman 'é' → UTF-8 0xC3 0xA9 (2 bytes).
+        let mut dst = [0u8; 32];
+        let n = to_utf8_into(&[0x8E], &mut dst);
+        assert_eq!(n, 2);
+        assert_eq!(&dst[..n], b"\xC3\xA9");
+    }
+
+    #[test]
+    fn into_valid_utf8_passes_through() {
+        let mut dst = [0u8; 32];
+        let n = to_utf8_into(b"\xC3\xA9", &mut dst);
+        assert_eq!(n, 2);
+        assert_eq!(&dst[..n], b"\xC3\xA9");
+    }
+
+    #[test]
+    fn into_truncates_at_utf8_char_boundary() {
+        // Mac Roman 0xAA → "™" → UTF-8 0xE2 0x84 0xA2 (3 bytes). dst of 2
+        // would slice the 3-byte sequence; the function must back up and
+        // write nothing rather than emit a partial sequence.
+        let mut dst = [0u8; 2];
+        assert_eq!(to_utf8_into(&[0xAA], &mut dst), 0);
+        // dst of 3 fits exactly.
+        let mut dst = [0u8; 3];
+        let n = to_utf8_into(&[0xAA], &mut dst);
+        assert_eq!(n, 3);
+        assert_eq!(&dst[..n], b"\xE2\x84\xA2");
+    }
+
+    #[test]
+    fn into_truncates_mid_string_at_boundary() {
+        // "a" + Mac Roman 0xAA "™" + "b" → "a" + 3 + "b" = 5 bytes total.
+        // dst of 4 fits "a" + "™"; "b" doesn't fit and is dropped.
+        let mut dst = [0u8; 4];
+        let n = to_utf8_into(&[b'a', 0xAA, b'b'], &mut dst);
+        assert_eq!(n, 4);
+        assert_eq!(&dst[..n], b"a\xE2\x84\xA2");
+        // dst of 3: "a" + first 2 bytes of "™" — must drop the multi-byte
+        // char entirely, leaving just "a".
+        let mut dst = [0u8; 3];
+        let n = to_utf8_into(&[b'a', 0xAA, b'b'], &mut dst);
+        assert_eq!(n, 1);
+        assert_eq!(&dst[..n], b"a");
+    }
+
+    #[test]
+    fn into_empty_input_writes_nothing() {
+        let mut dst = [0u8; 16];
+        assert_eq!(to_utf8_into(b"", &mut dst), 0);
     }
 }

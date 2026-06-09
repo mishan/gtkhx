@@ -1123,4 +1123,42 @@ extern bool gtkhx_proto_tracker_v3_meta_read_bool (
 extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_maturity (uint8_t raw);
 extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
 
+/* ---- Text encoding: Mac Roman -> UTF-8 ---- */
+
+/* Decode `src[0..len)` wire bytes into UTF-8 in `dst`, writing into the
+ * half-open range `dst[0..returned)`. Returns the number of bytes
+ * written (always <= cap). Mirrors src/text_util.c::gtkhx_text_to_utf8's
+ * decode rule: valid UTF-8 passes through verbatim (including any
+ * embedded NULs); non-UTF-8 input is decoded byte-by-byte through the
+ * glibc MACINTOSH table.
+ *
+ * `src` and `dst` are independent buffers — the decode is src → dst,
+ * not in place. They must not overlap.
+ *
+ * Worst-case Mac Roman → UTF-8 expansion is 3×. With cap >= len * 3 the
+ * whole decoded output fits. With a smaller cap the result is truncated
+ * at the last UTF-8 character boundary that still fits (never writes a
+ * partial multi-byte sequence).
+ *
+ * No-op returns (returns 0 without writing):
+ *   - dst == NULL, OR
+ *   - cap == 0, OR
+ *   - cap > isize::MAX (would violate Rust's slice ceiling), OR
+ *   - src == NULL — treated as empty input regardless of `len`, so
+ *     even a non-zero `len` is safe with a NULL pointer. (Same goes
+ *     for `len > isize::MAX`: the input is treated as empty.)
+ *
+ * No trailing NUL is appended; `dst[returned]` is untouched. Decoded
+ * output may legitimately contain embedded NULs (when the input was
+ * already valid UTF-8 with NULs), so this FFI does not own NUL
+ * accounting.
+ *
+ * For a NUL-terminated C string, allocate `len * 3 + 1` bytes,
+ * pass `cap = len * 3` to reserve the trailing byte as the NUL slot,
+ * then write `'\0'` to `dst[returned]` after the call. With
+ * cap = len * 3, returned is at most len * 3, so dst[returned] is
+ * always in bounds. */
+extern size_t gtkhx_proto_text_to_utf8 (const uint8_t *src, size_t len,
+                                        uint8_t *dst, size_t cap);
+
 #endif /* _HOTLINE_PROTO_H */

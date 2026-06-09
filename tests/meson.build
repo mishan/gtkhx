@@ -55,14 +55,20 @@ test('hl_access', test_hl_access,
 # text_util — gtkhx_text_to_utf8 lives in src/text_util.c (broken out
 # of gtkutil.c specifically so this test doesn't have to drag in GTK,
 # Adwaita, and the rest of gtkhx's header pile). Compile the source
-# in directly rather than linking a shared lib — it's pure GLib, the
-# binary stays small, and the test stays a single self-contained
-# translation unit pair.
+# in directly rather than linking a shared lib — keeps the binary
+# small and the test compilation simple. Two dependencies in addition
+# to test_deps:
+#   - debug.c, compiled in alongside (used directly by text_util.c
+#     via the categorised debug logger).
+#   - rust_hotline_proto_dep — Phase R2 moved the MACINTOSH decode
+#     to the hotline-proto Rust staticlib (text.rs::to_utf8 via
+#     gtkhx_proto_text_to_utf8). Without this dep the test fails
+#     to link, not at runtime.
 test_text_util = executable('test_text_util',
   'unit/test_text_util.c',
   '../src/text_util.c',
   '../src/debug.c',
-  dependencies        : test_deps,
+  dependencies        : test_deps + [rust_hotline_proto_dep],
   include_directories : test_inc,
 )
 test('text_util', test_text_util,
