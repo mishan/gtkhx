@@ -158,6 +158,13 @@
 #define CFG_USER_YSIZE "USERYSIZE"
 #define CFG_OPEN_USERS "OPENUSERS"
 
+/* Toolbar window. gtkhx_prefs.geo.tool has always been written
+ * via gtkhx_save_window_positions, but for years no key existed
+ * in the prefs file so the value never actually survived the
+ * write → load round-trip. */
+#define CFG_TOOL_XSIZE "TOOLXSIZE"
+#define CFG_TOOL_YSIZE "TOOLYSIZE"
+
 /* GKeyFile section name for the prefs file. */
 #define CFG_KEYFILE_GROUP "gtkhx"
 

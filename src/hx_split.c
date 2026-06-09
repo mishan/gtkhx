@@ -36,6 +36,7 @@
 #include "config.h"
 
 #include "compat.h"  /* _() gettext macro */
+#include "dock_layout.h"
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
@@ -104,6 +105,37 @@ hx_split_init (HxSplit *self)
 }
 
 /* ----------------------------------------------------------------- */
+/* Save-trigger helpers                                              */
+/* ----------------------------------------------------------------- */
+
+static void
+on_dock_change_notify (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+    (void)obj; (void)pspec; (void)data;
+    dock_layout_request_save ();
+}
+
+/* Track paned-level mutations: notify::position fires when the
+ * user drags the divider. Called from hx_split_new_internal so
+ * every paned in the tree gets the handler.
+ *
+ * Note for the next person: PanelFrame does NOT expose
+ * page-added / page-removed (only page-closed and adopt-widget
+ * — see panel-frame.c in libpanel). The AdwTabView nested inside
+ * has page-attached / page-detached but it's a private template
+ * child. Rather than walk descendants for the tab view, the
+ * places that actually move panels between frames
+ * (hx_panel.c on_frame_drop, hx_panel_do_move_in_direction,
+ *  on_undocked_close_request, on_frame_close's migration loop
+ *  in this file) call dock_layout_request_save explicitly. */
+static void
+install_paned_save_triggers (GtkPaned *paned)
+{
+    g_signal_connect (paned, "notify::position",
+                      G_CALLBACK (on_dock_change_notify), NULL);
+}
+
+/* ----------------------------------------------------------------- */
 /* Construction                                                      */
 /* ----------------------------------------------------------------- */
 
@@ -163,6 +195,7 @@ hx_split_new_internal (HxSplit        *child_a,
     self->child_b = child_b;
 
     gtk_widget_set_parent (paned, GTK_WIDGET (self));
+    install_paned_save_triggers (GTK_PANED (paned));
     return self;
 }
 
@@ -258,8 +291,10 @@ hx_split_split (HxSplit *self, GtkOrientation orientation)
 
     self->paned = GTK_PANED (paned);
     gtk_widget_set_parent (paned, GTK_WIDGET (self));
+    install_paned_save_triggers (GTK_PANED (paned));
 
     sibling = self->child_b;
+    dock_layout_request_save ();
     return sibling;
 }
 
@@ -367,6 +402,8 @@ hx_split_close_leaf (HxSplit *self)
 
 out:
     g_object_unref (self);
+    if (result)
+        dock_layout_request_save ();
     return result;
 }
 

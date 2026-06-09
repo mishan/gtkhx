@@ -22,6 +22,7 @@
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
+#include "dock_layout.h"
 #include "panel_registry.h"
 #include "debug.h"
 #include "compat.h"   /* _() gettext macro for menu labels */
@@ -546,6 +547,13 @@ on_frame_drop (GtkDropTarget *target,
     }
     g_object_unref (panel);
 
+    /* DnD between main-dock frames is a placement change; persist
+     * the new layout. No-op on cross-dock drops since the panel
+     * left the main dock — the destination is an undocked window
+     * whose state isn't part of the saved layout (yet). */
+    if (target_dock == toolbar_dock)
+        dock_layout_request_save ();
+
     /* On a cross-dock drop, if the source undocked window is now
      * empty, destroy it. Earlier this assumed an undocked window
      * only ever held one panel, but the user can stack multiple
@@ -914,8 +922,21 @@ on_undocked_close_request (GtkWindow *window, gpointer user_data)
         g_object_unref (home);  /* hx_panel_get_home_frame strong ref */
     }
 
+    /* Redock changes which main-dock leaf the panel lives in. */
+    dock_layout_request_save ();
+
     g_object_unref (self);
     return FALSE;  /* let the window close */
+}
+
+/* notify::default-width / notify::default-height handler attached
+ * to every undocked window. Resize fires this; we just request a
+ * debounced save so the [Undocked] section captures the new size. */
+static void
+on_undocked_window_size_notify (GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)object; (void)pspec; (void)data;
+    dock_layout_request_save ();
 }
 
 void
@@ -1044,7 +1065,23 @@ hx_panel_undock (HxPanel *self)
      * carry them. */
     init_keyaccel (GTK_WIDGET (window));
 
+    /* Persist user-resize. GTK 4's GtkWindow keeps default-width
+     * and default-height in sync with the actual surface size on
+     * user resize (that's the per-session-size persistence design
+     * — gtk_window_get_default_size returns the live size for
+     * exactly this reason). notify:: on either property fires on
+     * every resize step; dock_layout_request_save debounces, so a
+     * drag-resize collapses to one write. */
+    g_signal_connect (window, "notify::default-width",
+                      G_CALLBACK (on_undocked_window_size_notify), NULL);
+    g_signal_connect (window, "notify::default-height",
+                      G_CALLBACK (on_undocked_window_size_notify), NULL);
+
     gtk_window_present (window);
+
+    /* Undocking removed the panel from the main dock; persist
+     * the change so it doesn't re-appear after restart. */
+    dock_layout_request_save ();
 
     g_object_unref (builder);
     g_object_unref (self);
@@ -1194,6 +1231,7 @@ hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
         hx_panel_set_home_frame (self, tf);
     }
     panel_widget_raise (PANEL_WIDGET (self));
+    dock_layout_request_save ();
     g_object_unref (self);
 }
 

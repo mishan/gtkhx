@@ -55,6 +55,7 @@
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
+#include "dock_layout.h"
 #include "panel_registry.h"
 
 GtkWidget *toolbar_window, *files_btn, *connect_btn;
@@ -312,6 +313,44 @@ quit_confirm_response (AdwAlertDialog *dialog, const char *response,
      * returned TRUE to inhibit destroy. */
 }
 
+/* Debounced toolbar-resize save. notify::default-width / -height
+ * fire on every pixel of a user drag — coalesce them on a 500 ms
+ * idle so the prefs write runs once when the user lets go. The
+ * actual save uses the existing save path: gtk_window_get_default_size
+ * → gtkhx_prefs.geo.tool → prefs_write. */
+static guint toolbar_size_save_idle = 0;
+
+static gboolean
+on_toolbar_size_save_idle (gpointer data)
+{
+    int w = 0, h = 0;
+
+    (void)data;
+    toolbar_size_save_idle = 0;
+    if (toolbar_window == NULL || !gtk_widget_get_realized (toolbar_window))
+        return G_SOURCE_REMOVE;
+
+    gtk_window_get_default_size (GTK_WINDOW (toolbar_window), &w, &h);
+    if (w > 0) gtkhx_prefs.geo.tool.xsize = w;
+    if (h > 0) gtkhx_prefs.geo.tool.ysize = h;
+    prefs_write ();
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_toolbar_size_notify (GObject *object, GParamSpec *pspec, gpointer data)
+{
+    (void)object; (void)pspec; (void)data;
+    /* Debounce, not throttle: cancel + reschedule on every notify
+     * so a drag-resize burst collapses to one prefs_write 500 ms
+     * after the user lets go, not one every 500 ms across the
+     * drag. Same fix as dock_layout's request_save. */
+    if (toolbar_size_save_idle != 0)
+        g_source_remove (toolbar_size_save_idle);
+    toolbar_size_save_idle = g_timeout_add (500, on_toolbar_size_save_idle,
+                                            NULL);
+}
+
 static gboolean
 close_toolbar_window (GtkWindow *window, gpointer data)
 {
@@ -456,6 +495,19 @@ on_action_quit (GSimpleAction *action, GVariant *param, gpointer user_data)
     g_idle_add (defer_quit, NULL);
 }
 
+static void
+on_action_reset_layout (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+    (void)action; (void)param; (void)user_data;
+    /* Wipe the saved file. The current in-memory dock isn't
+     * rebuilt to defaults — that would require tearing down and
+     * re-creating every panel — but the NEXT launch comes up
+     * with the default layout. A toast tells the user this so
+     * they don't think the action no-op'd. */
+    dock_layout_reset ();
+    toolbar_show_toast (_ ("Layout will reset on next launch."));
+}
+
 /* Phase 5 / docking (Phase 2 follow-up): on_files_button_clicked
  * retired. The Files button now uses the toolbar_show_panel
  * helper directly; for the first click on Files (when the panel
@@ -475,6 +527,7 @@ static const GActionEntry app_actions[] = {
       .activate = on_action_connect_builtin,
       .parameter_type = "i" },
     { .name = "quit", .activate = on_action_quit },
+    { .name = "reset_layout", .activate = on_action_reset_layout },
 };
 
 /* live_toasts bookkeeping — remove the dismissed toast from the
@@ -642,6 +695,7 @@ build_hamburger (void)
     g_menu_append (menu, _ ("Settings"), "app.settings");
     g_menu_append (menu, _ ("Bookmarks…"), "app.bookmarks");
     g_menu_append (menu, _ ("About GtkHx"), "app.about");
+    g_menu_append (menu, _ ("Reset Layout"), "app.reset_layout");
     g_menu_append_submenu (menu, _ ("Admin"), G_MENU_MODEL (admin_menu));
     g_menu_append (menu, _ ("Quit"), "app.quit");
     g_object_unref (admin_menu);
@@ -718,6 +772,20 @@ toolbar_install_panel_hooks_on_frame (GtkWidget *frame)
     hx_split_install_frame_ui (frame);
 }
 
+/* hx_split_foreach_leaf callback. Bridges to
+ * toolbar_install_panel_hooks_on_frame for each leaf in the dock
+ * tree. Used by create_toolbar_window so both the default-built
+ * tree and a saved-layout-restored tree get the same per-frame
+ * setup in one pass. */
+static void
+install_leaf_hooks_cb (HxSplit *leaf, gpointer user_data)
+{
+    PanelFrame *frame = hx_split_get_frame (leaf);
+    (void)user_data;
+    if (frame != NULL)
+        toolbar_install_panel_hooks_on_frame (GTK_WIDGET (frame));
+}
+
 /* Phase 5 / docking (Phase 2 follow-up): toolbar buttons "show
  * panel X". The button's `data' is the panel's registry id (a
  * static string). Behaviour:
@@ -755,19 +823,8 @@ toolbar_show_panel (GtkButton *button, gpointer data)
     panel_widget_raise (PANEL_WIDGET (panel));
 }
 
-/* Hard horizontal minimum on every leaf in the default dock
- * layout. Applied to each PanelFrame in MAKE_LEAF_FRAME via
- * gtk_widget_set_size_request, and used as the floor when the
- * one-shot below halves the right paned's share on first
- * allocation. The value propagates through paned -> window:
- * GTK's window-size computation sums child minimums + handle
- * widths + chrome and refuses to shrink the window below that.
- *
- * 300 px covers the widest of the default panels' button rows
- * (Users panel: 6 pixmap icon-buttons in the action row need
- * ~280 px with spacing/margins) with a small margin. Tune up if
- * a panel's content still clips at this width. */
-#define DEFAULT_LEAF_MIN_WIDTH 300
+/* DEFAULT_LEAF_MIN_WIDTH lives in toolbar.h so the saved-layout
+ * loader uses the same value as MAKE_LEAF_FRAME below. */
 
 /* notify::max-position handler — see the comment block where this
  * is connected in create_toolbar_window for the rationale.
@@ -848,11 +905,31 @@ create_toolbar_window (session *sess)
 	 * standalone top-levels they always have. */
     toolbar_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (toolbar_window), "GtkHx");
-    /* Phase 1 (docking): non-resizable no longer fits — the
-	 * dock area needs to grow. Pick a sensible default size; saved
-	 * geometry restores in gtkhx_save_window_positions handle the
-	 * persisted case. */
-    gtk_window_set_default_size (GTK_WINDOW (toolbar_window), 1100, 700);
+    /* Restore the saved window size if there is one. The existing
+     * gtkhx_save_window_positions writes width/height into
+     * gtkhx_prefs.geo.tool on quit; this is the matching read-back
+     * path that the original code never had — for years the
+     * toolbar always came up at the hardcoded default. Fall back
+     * to 1100x700 when no saved size exists yet (first launch, or
+     * the user wiped prefs). */
+    {
+        int saved_w = gtkhx_prefs.geo.tool.xsize;
+        int saved_h = gtkhx_prefs.geo.tool.ysize;
+        /* Sanity floor only rejects zero / negative (first launch
+         * before any save, or a corrupted prefs file). We can't
+         * floor at a 'sensible' value here because the user has a
+         * legitimate reason to want a small toolbar when they've
+         * undocked everything — Misha demoed exactly this with
+         * a 442x177 saved size that the previous >200 floor was
+         * silently rejecting on restore. GTK clamps anything
+         * below the window's actual minimum at allocate time. */
+        if (saved_w > 0 && saved_h > 0)
+            gtk_window_set_default_size (GTK_WINDOW (toolbar_window),
+                                         saved_w, saved_h);
+        else
+            gtk_window_set_default_size (GTK_WINDOW (toolbar_window),
+                                         1100, 700);
+    }
 
     /* ------------- header bar (top) ------------- */
     header = adw_header_bar_new ();
@@ -1031,68 +1108,77 @@ create_toolbar_window (session *sess)
      * stays-visible behaviour that PanelDock used to suppress via
      * notify::empty is the new normal. */
     {
-        PanelFrame *f_left, *f_center, *f_bottom, *f_right;
-        HxSplit    *leaf_left, *leaf_center, *leaf_bottom, *leaf_right;
-        HxSplit    *middle, *cb_plus_right, *root;
+        HxSplit *root = NULL;
+        gboolean from_saved = dock_layout_load (&root,
+                                                &toolbar_sidebar_frame,
+                                                &toolbar_center_frame,
+                                                &toolbar_bottom_frame,
+                                                &toolbar_end_frame);
 
-        #define MAKE_LEAF_FRAME(out, var)                                \
-            do {                                                         \
-                (var) = hx_panel_frame_new ();                           \
-                panel_frame_set_header (                                 \
-                    (var), PANEL_FRAME_HEADER (                          \
-                               panel_frame_header_bar_new ()));          \
-                (out) = GTK_WIDGET (var);                                \
-                gtk_widget_set_size_request ((out),                      \
-                                             DEFAULT_LEAF_MIN_WIDTH,     \
-                                             -1);                        \
-                toolbar_install_panel_hooks_on_frame (out);              \
-            } while (0)
+        if (!from_saved) {
+            PanelFrame *f_left, *f_center, *f_bottom, *f_right;
+            HxSplit    *leaf_left, *leaf_center, *leaf_bottom, *leaf_right;
+            HxSplit    *middle, *cb_plus_right;
 
-        MAKE_LEAF_FRAME (toolbar_sidebar_frame, f_left);
-        MAKE_LEAF_FRAME (toolbar_center_frame,  f_center);
-        MAKE_LEAF_FRAME (toolbar_bottom_frame,  f_bottom);
-        MAKE_LEAF_FRAME (toolbar_end_frame,     f_right);
-        #undef MAKE_LEAF_FRAME
+            #define MAKE_LEAF_FRAME(out, var)                                \
+                do {                                                         \
+                    (var) = hx_panel_frame_new ();                           \
+                    panel_frame_set_header (                                 \
+                        (var), PANEL_FRAME_HEADER (                          \
+                                   panel_frame_header_bar_new ()));          \
+                    (out) = GTK_WIDGET (var);                                \
+                    gtk_widget_set_size_request ((out),                      \
+                                                 DEFAULT_LEAF_MIN_WIDTH,     \
+                                                 -1);                        \
+                } while (0)
 
-        leaf_left   = hx_split_new_with_frame (f_left);
-        leaf_center = hx_split_new_with_frame (f_center);
-        leaf_bottom = hx_split_new_with_frame (f_bottom);
-        leaf_right  = hx_split_new_with_frame (f_right);
+            MAKE_LEAF_FRAME (toolbar_sidebar_frame, f_left);
+            MAKE_LEAF_FRAME (toolbar_center_frame,  f_center);
+            MAKE_LEAF_FRAME (toolbar_bottom_frame,  f_bottom);
+            MAKE_LEAF_FRAME (toolbar_end_frame,     f_right);
+            #undef MAKE_LEAF_FRAME
 
-        middle = hx_split_new_internal (leaf_center, leaf_bottom,
-                                        GTK_ORIENTATION_VERTICAL);
-        cb_plus_right = hx_split_new_internal (middle, leaf_right,
-                                               GTK_ORIENTATION_HORIZONTAL);
-        root = hx_split_new_internal (leaf_left, cb_plus_right,
-                                      GTK_ORIENTATION_HORIZONTAL);
+            leaf_left   = hx_split_new_with_frame (f_left);
+            leaf_center = hx_split_new_with_frame (f_center);
+            leaf_bottom = hx_split_new_with_frame (f_bottom);
+            leaf_right  = hx_split_new_with_frame (f_right);
+
+            middle = hx_split_new_internal (leaf_center, leaf_bottom,
+                                            GTK_ORIENTATION_VERTICAL);
+            cb_plus_right = hx_split_new_internal (middle, leaf_right,
+                                                   GTK_ORIENTATION_HORIZONTAL);
+            root = hx_split_new_internal (leaf_left, cb_plus_right,
+                                          GTK_ORIENTATION_HORIZONTAL);
+
+            /* The Users panel's natural width makes the right leaf
+             * start out wider than it really needs to be — halve
+             * its share on first allocation via a notify::max-
+             * position one-shot. Only attached for the default
+             * layout; saved layouts come back with paned positions
+             * from dock_layout_apply_geometry instead.
+             *
+             * shrink_end_child stays FALSE (hx_split default). GTK
+             * paned source: max_position = shrink ? allocation :
+             * allocation - end_child_req, where end_child_req is
+             * the end child's MIN (respects size-request), not its
+             * natural. So shrink=FALSE still lets the user halve
+             * below natural — it caps at the 300 px floor. */
+            g_signal_connect (hx_split_get_paned (cb_plus_right),
+                              "notify::max-position",
+                              G_CALLBACK (on_right_paned_first_alloc),
+                              NULL);
+        }
+
+        /* Both paths converge here: every leaf needs the per-frame
+         * hooks (close-dispatcher, drag-out, drop-controls defang,
+         * Split/Close menu button). One foreach pass over the tree
+         * covers both default-construction and saved-layout-restore. */
+        hx_split_foreach_leaf (root, install_leaf_hooks_cb, NULL);
+
         gtk_widget_set_hexpand (GTK_WIDGET (root), TRUE);
         gtk_widget_set_vexpand (GTK_WIDGET (root), TRUE);
 
-        /* The Users panel's natural width (6 icon-buttons in the
-         * action row + the column view) makes the right leaf
-         * start out wider than it really needs to be. Halve its
-         * width on first allocation via a notify::max-position
-         * one-shot: max-position changes from 0 to the real value
-         * on first allocation; the handler reads the current
-         * divider, halves the right share (floored at
-         * DEFAULT_LEAF_MIN_WIDTH), calls set_position once, then
-         * disconnects so user-drags aren't fought every frame.
-         *
-         * NB: leave shrink_end_child at the hx_split default
-         * (FALSE). Looking at GTK 4 paned source
-         * (gtk_paned_compute_position + the paned measure):
-         *   max_position = shrink ? allocation
-         *                         : allocation - end_child_req
-         * where end_child_req is the end child's MINIMUM (which
-         * respects size-request), not its natural. So shrink=FALSE
-         * still lets the user halve below natural — it caps at the
-         * 300 px floor MAKE_LEAF_FRAME sets. shrink=TRUE on the
-         * other hand makes the end child contribute 0 to the
-         * paned's reported min, which lets the window be sized
-         * below the right leaf's minimum width entirely. */
-        g_signal_connect (hx_split_get_paned (cb_plus_right),
-                          "notify::max-position",
-                          G_CALLBACK (on_right_paned_first_alloc), NULL);
+        dock_layout_set_dock_root (root);
 
         /* PanelDock as a thin wrapper. The HxSplit root is the
          * dock's single center child; no start/end/top/bottom
@@ -1122,6 +1208,13 @@ create_toolbar_window (session *sess)
          * transparently. */
         hx_panel_install_drop_target_on_dock (toolbar_dock);
     }
+
+    /* If we restored the tree from disk, push the saved paned
+     * positions onto the now-mounted paneds. Has to happen after
+     * the dock is added to the dock widget — pre-mount, the
+     * paneds' max-position is 0 and set_position would clamp to
+     * 0. No-op for the default-built tree. */
+    dock_layout_apply_geometry (GTK_WINDOW (toolbar_window));
 
     /* AdwToolbarView: the canonical libadwaita way to stack
 	 * top/bottom chrome around a content widget. Top bars get the
@@ -1183,6 +1276,20 @@ create_toolbar_window (session *sess)
 	 * hx_quit() properly. */
     g_signal_connect (toolbar_window, "close-request",
                       G_CALLBACK (close_toolbar_window), 0);
+
+    /* Persist toolbar size on every user resize. The existing
+     * gtkhx_save_window_positions path captures the size at quit
+     * time, but if the user undocks everything and resizes the
+     * toolbar but doesn't quit through the confirmation dialog
+     * (or quits via a path that skips hx_quit), no capture
+     * happens and the size reverts on next launch. Mirroring the
+     * undocked-window approach: connect notify::default-width
+     * and -height; the handler debounces a save_geo + prefs_write
+     * on a 500 ms idle. */
+    g_signal_connect (toolbar_window, "notify::default-width",
+                      G_CALLBACK (on_toolbar_size_notify), NULL);
+    g_signal_connect (toolbar_window, "notify::default-height",
+                      G_CALLBACK (on_toolbar_size_notify), NULL);
 
     /* Phase 4.2: gtk_window_move removed (Wayland) */
 

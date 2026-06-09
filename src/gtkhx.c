@@ -54,6 +54,7 @@
 #include "gtkutil.h"
 #include "debug.h"
 #include "toolbar.h"
+#include "dock_layout.h"
 #include "chat.h"
 #include "msg.h"
 #include "gtkhx_session.h"
@@ -431,6 +432,7 @@ hx_quit (void)
 {
     gtkhx_save_window_positions ();
     prefs_write ();
+    dock_layout_shutdown ();   /* flush pending debounced save */
     xfers_delete_all ();
     tracker_kill_threads ();
 

@@ -552,54 +552,128 @@ For history if anyone needs to rewind:
   `GtkDropTarget` still hits the deepest descendant
   `PanelFrame`. Worth verifying after several user splits.
 - **Layout persistence (Phase 4b)** (task #41). Now much
-  simpler than the previous four-tree model — one tree to
-  serialize plus the undocked-window roster. The serialization
-  sketch from the original draft of this doc still applies;
-  rewritten below.
+  simpler than the previous four-tree model. Main dock + undocked
+  windows shipped in `src/dock_layout.{c,h}` — see *Layout
+  persistence* below for the file format and the
+  `[Undocked]`-section round-trip.
 
-### Layout persistence sketch
+## Layout persistence
+
+`src/dock_layout.{c,h}`. File: `$gtkhx_config_dir/dock-layout.ini`,
+GKeyFile format.
 
 ```ini
-# ~/.config/com.nasledov.gtkhx/dock-layout.ini
+[Dock]
+# Recursive s-expression:
+#   h(A,B)              horizontal split
+#   v(A,B)              vertical split
+#   L[id1,id2,...]      leaf with panel IDs in tab order
+#   L[id1,id2,...:role] leaf tagged with a role; the four roles
+#                       (start, end, bottom, center) anchor the
+#                       toolbar_*_frame globals
+tree=h(L[news:start],h(v(L[chat,files,news15:center],L[tasks:bottom]),L[users:end]))
 
-[window]
-width  = 1280
-height = 800
-
-[dock]
-# A parenthesised s-expression: leaf("id1","id2",...) and
-# paned-h(left, right) / paned-v(top, bottom).
-tree = paned-h(
-  leaf("news","news15"),
-  paned-h(
-    paned-v(
-      leaf("chat","files"),
-      leaf("tasks")
-    ),
-    leaf("users")
-  )
-)
-# Paned handle positions, depth-first.
-sizes = 240, 600, 480
-
-[undocked]
-panels = preview
-preview.width  = 600
-preview.height = 400
+# Paned divider positions in depth-first order; same count as
+# internal splits in the tree.
+sizes=240;620;380
 ```
 
-On startup:
-1. Build the HxSplit tree from `[dock].tree`.
-2. For each panel id, drive its factory and place via
-   `panel_frame_add` into the named leaf.
-3. For each entry under `[undocked]`, create the undocked
-   window shell with saved size and run the factory inside.
-4. Restore paned positions.
-5. If the file is missing or malformed, fall through to the
-   default-layout code in toolbar.c.
+Window size lives in `gtkhxrc` (the existing `gtkhx_prefs.geo.tool`
+mechanism) — `dock-layout.ini` stays focused on the dock tree.
 
-A *Reset layout* hamburger action wipes the file and rebuilds
-from defaults.
+### Save trigger
+
+`dock_layout_request_save()` is debounced on a 200 ms idle so a
+burst of dock changes (a paned drag, a rapid sequence of splits)
+collapses to a single write 200 ms after the last request. Wired
+into the entry points that mutate shape or placement:
+
+- `hx_split_new_internal` connects `notify::position` on every
+  paned — covers user-drag of the divider.
+- `hx_split_split` and `hx_split_close_leaf` call request-save
+  directly — covers tree-shape changes.
+- The panel-migration sites in `hx_panel.c` (`on_frame_drop`,
+  `hx_panel_undock`, `on_undocked_close_request`,
+  `hx_panel_do_move_in_direction`) call request-save explicitly.
+  `PanelFrame` doesn't expose `page-added` / `page-removed` —
+  only `page-closed` and `adopt-widget` — and `AdwTabView`'s
+  page-attached/-detached is a private template child, so the
+  per-site calls are the simplest way to cover panel movement.
+- `hx_panel_undock` also connects `notify::default-width` and
+  `notify::default-height` on the new top-level so user-resize
+  of the undocked window persists.
+- `hx_quit` calls `dock_layout_shutdown` which flushes any pending
+  save synchronously before exit.
+
+`dock_layout_reset` (hamburger Reset Layout) sets a session-scoped
+`save_disabled` flag that `request_save` checks before scheduling.
+Without that flag, a notify::position from a divider drag (or any
+of the other triggers above) could re-create the file we just
+deleted between Reset and next launch.
+
+### Load policy
+
+`dock_layout_load` runs from `create_toolbar_window` before the
+default-build path. If the file is missing, malformed, or doesn't
+have all four role-tagged leaves, it returns FALSE and the
+default-layout code runs as before — defaults are always the
+recovery path. The four `toolbar_*_frame` globals get set from
+the role tags (`start` → `toolbar_sidebar_frame`, etc.).
+
+After construction, `dock_layout_apply_geometry` pushes the saved
+paned positions onto the now-mounted paneds.
+
+### Panel placement
+
+Static-panel factories still call `panel_frame_add(toolbar_*_frame,
+panel)` — they don't know about saved layouts. After the factory
+runs, `hx_panel_registry_register` calls `dock_layout_place_panel`
+which looks up the panel's id in the saved id→frame map. If the
+saved frame differs from where the factory just placed the panel,
+the panel is reseated. The window is invisible at this point so
+the user doesn't see the brief flash.
+
+### Reset
+
+`app.reset_layout` (hamburger menu *Reset Layout*) calls
+`dock_layout_reset` to wipe the saved file. Doesn't tear down the
+live dock — that'd require destroying and re-creating every panel
+— but the next launch comes up with the default layout. A toast
+tells the user the action only takes effect on next launch.
+
+### Undocked window persistence
+
+Each panel whose root is not the main toolbar window gets a key
+in an `[Undocked]` section:
+
+```
+[Undocked]
+tracker=600,400
+```
+
+One key per panel id, value `W,H`. Save walks
+`hx_panel_registry_foreach` and emits a key for every panel whose
+root differs from `toolbar_window`. Load parses the section into a
+one-shot pending-undock map (`dock.id_to_undock_size`).
+
+When each panel's factory runs at startup,
+`hx_panel_registry_register` fires `dock_layout_place_panel`. Its
+two-phase flow:
+
+1. Reseat into the saved leaf (main-dock placement).
+2. If the panel's id is in the pending-undock map, consume the
+   entry, call `hx_panel_undock`, and apply the saved size to the
+   resulting top-level via `gtk_window_set_default_size`.
+
+The map entry is removed after consumption so a later
+register-after-redock-then-close doesn't re-undock.
+
+Wayland gives clients no portable way to set absolute window
+position, so we don't try — only size persists.
+
+### Out of scope (for now)
+
+- Pre-shipped layouts and per-user named layout presets.
 
 ## What didn't change
 

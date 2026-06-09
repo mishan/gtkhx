@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include "panel_registry.h"
+#include "dock_layout.h"
 
 #include <glib.h>
 
@@ -54,6 +55,13 @@ hx_panel_registry_register (HxPanel *panel)
      * inserting the new one; protects against a re-register on the
      * same id (which would otherwise leak the previous panel). */
     g_hash_table_replace (get_table (), (gpointer) id, g_object_ref (panel));
+
+    /* If a saved layout is in effect, the panel may belong in a
+     * different leaf than the factory just added it to. Reseat it
+     * now, before the user sees the brief flash of the wrong
+     * placement. No-op when no saved layout is loaded or when the
+     * panel's id isn't mentioned in the layout. */
+    dock_layout_place_panel (panel);
 }
 
 void
