@@ -122,6 +122,16 @@ is callable from C, CI is green. Nothing about the running binary changes
 behaviorally — this is purely about proving the integration works end-to-end
 before any real code gets ported.
 
+> **R2-closeout note:** the two crates the R0 work items below describe
+> (`hxutil` as a build-validation placeholder, `hxrand` wrapping
+> `getrandom(2)`) were both retired at the R2 closeout. `hxutil` was empty
+> and nothing depended on it; `hxrand` was a one-line wrapper that the
+> restored C `src/rand.c` (`getrandom(2)` + `/dev/urandom` fallback)
+> replaces directly. The R0 work itself stayed valuable — the Meson/Cargo
+> integration patterns it landed are what the R1 crypto crates and the R2
+> `hotline-proto` crate build on. The crates themselves just outlived
+> their usefulness.
+
 **Work items**
 
 1. Create `rust/` at the repo root as a Cargo workspace (`rust/Cargo.toml`
@@ -302,16 +312,17 @@ anymore.
 
 ---
 
-## Phase R2 — Wire protocol crate
+## Phase R2 — Wire protocol crate ✅
 
-**Status:** Substantially complete. The `hotline-proto` crate exists at
-`rust/crates/hotline-proto/` with `parse`, `build`, `wire`, `messages`,
-`sanitize`, `text`, and `ffi` modules; the C side calls into Rust through
-~90 `#[no_mangle]` FFI shims declared in `src/hotline_proto.h`. The bulk of
-the receive-side extractors in `proto_helpers.c` and every shipped send-side
-opcode builder now delegate to Rust. Outstanding items are listed at the end
-of this section so the phase has a concrete exit checklist; the **Goal**
-prose below is the original framing and stays for reference.
+**Status:** Done. The `hotline-proto` crate at
+`rust/crates/hotline-proto/` (`parse`, `build`, `wire`, `messages`,
+`sanitize`, `text`, `ffi` modules) is the receive- and send-side wire layer
+for the whole client; the C side calls into Rust through ~95
+`#[no_mangle]` FFI shims declared in `src/hotline_proto.h`. Every shipped
+receive-path extractor in `proto_helpers.c` and every shipped send-path
+opcode builder now delegates to Rust, including the shared `pack_message`
+serializer that backs `hlpack_chunks`. The **Goal** prose below is the
+original framing and stays for reference.
 
 ### Shipped on `main`
 
@@ -357,86 +368,73 @@ Cross-cutting:
   assertions; the FFI shape lets builders return a `chunks[]` array the C
   side hands directly to `hlwrite_chunks`.
 
-### Remaining in R2
+### R2 closeout
 
-The outer dispatch / signal-emit layer in `rcv.c` is **intentionally** still
-C per the original goal text ("the C side keeps the dispatch table and the
-`GtkhxSession` signal emit"). What's left is leaf work, in rough
-extraction order:
+Wire protocol crate complete. Final shipped scope:
 
-1. **`proto_helpers.c` wire-protocol residuals**
-   - `hlpack` / `hlpack_chunks` (the variadic chunk-array serializer). The
-     opcode-specific builders bypass it now via the `HxChunk` interface; the
-     remaining call sites should migrate so `hlpack` can be deleted with its
-     last consumer.
-   - ~~`hl_capabilities_decode`~~ (shipped on `claude/r2-capabilities-decode`).
-   - ~~`hl_hdr_decode`~~ (shipped on `claude/r2-hl-hdr-decode` — finishes the
-     partial port that left `gtkhx_proto_header_trans` / `_header_in_error`
-     exposed; full 6-output decoder + body-len wire-cap math now in Rust).
-   - ~~`hl_htxf_hdr_pack`~~ (shipped on `claude/r2-htxf-hdr-pack`).
+1. **`proto_helpers.c` wire-protocol residuals — all done.**
+   - `hl_capabilities_decode` (`claude/r2-capabilities-decode`).
+   - `hl_htxf_hdr_pack` (`claude/r2-htxf-hdr-pack`).
+   - `hl_hdr_decode` (`claude/r2-hl-hdr-decode` — full 6-output decoder +
+     body-len wire-cap math now in Rust, finishing the partial port that
+     had left `gtkhx_proto_header_trans` / `_header_in_error` as the only
+     exposed slices).
+   - `hlpack_chunks` pure serialization (`claude/r2-hlpack-chunks-pack` —
+     pure wire-format in `build::pack_message` with a safe `&[PackChunk<'_>]`
+     interface; C-side qbuf growth + `htlc->trans++` stay in C because they
+     tie to the connection lifecycle R3 owns).
+   - The variadic `hlpack(va_list)` form has exactly one production caller —
+     `hlwrite()` in `network.c`. It retires with `hlwrite` when **R3** picks
+     up the connection's send buffer.
 
-   The remaining items in `proto_helpers.c` — `hx_chat_split_nick_body`,
-   `hx_highlight_match`, plus the `HxChatEvent` / `HxMsgEvent` boxed-type
-   lifecycle — are **not** wire protocol and are deliberately out of R2:
+2. **`gtkhx_text_to_utf8` migration** (`claude/r2-text-utf8-delegation`).
+   `text_util.c::gtkhx_text_to_utf8` now delegates to
+   `hotline-proto::text::to_utf8_into` via the FFI; the C entry point keeps
+   its `g_free`-able heap-return contract via a worst-case `g_malloc +
+   g_realloc` pair, with a `g_utf8_validate` fast-path that skips the FFI
+   for already-UTF-8 input. R5 chat / news / msg ports will eventually drop
+   the C entry point entirely.
 
-   - **Chat-display helpers** (`hx_chat_split_nick_body`,
-     `hx_highlight_match`). These are UI behaviour — splitting a chat line
-     at the `nick: body` separator for highlight rendering, and the
-     word-boundary substring match used to highlight mentions. They live in
-     `proto_helpers.c` for build-tree reasons (kept out of `gtk/gtk.h` so
-     unit tests can link them), not because they belong to the protocol
-     layer. They move with the chat window in **R5** when the rewrite owns
-     the display logic.
-   - **Boxed-type lifecycle** (`HxChatEvent` / `HxMsgEvent` `_new` / `_copy`
-     / `_free` + `G_DEFINE_BOXED_TYPE`). GObject signal payloads — view-side
-     plumbing emitted by `GtkhxSession`. The roadmap text already points
-     these at **R4** (GtkhxSession migration to `glib::subclass`-derived
-     Rust); they generalise from there to the rest of the boxed-type family.
+3. **Cross-cutting hardening.** Two ABI-pin patterns now established —
+   C-side `_Static_assert(sizeof(...) == N, ...)` paired with Rust
+   `const _: () = { offset_of / size_of / align_of ... };` (covers
+   `gtkhx_proto_history_entry` 32 B, `gtkhx_proto_tracker_record_fixed`
+   12 B, `gtkhx_proto_header_decoded` 24 B). The shared `as_slice` helper
+   in `ffi.rs` enforces `len <= isize::MAX` for every receive-path FFI shim;
+   each `slice::from_raw_parts_mut` site has its own `cap <= isize::MAX`
+   guard.
 
-2. **`network_decode.c`** (~315 LOC, two functions)
-   - `hx_aead_pump_frames` — frame-level AEAD decryption pump.
-   - `hx_decode` — top-level dechunk / decrypt / decompress orchestration.
+4. **Unit-test exit criterion** met. ~345 Rust unit tests in the
+   workspace vs. ~58 surviving C unit+proto tests; wire-format regressions
+   surface at `cargo test --workspace` before they ever reach a server.
 
-     Per the original gotcha note, the chunk/decrypt/decompress ordering is
-     wire-format-critical and the file's only two callers are
-     `network.c::hx_rcv` and the Tier 3 hope tests. The orchestration moves
-     in **R3** (it ties into the tokio rewrite); decoupling the per-frame
-     decryption pump may still be worth extracting here so the R3 work has
-     a smaller surface to touch.
+5. **Closeout housekeeping** (`claude/r2-closeout`). Dropped two crates
+   that R0 set up but R2 never grew into:
+   - `hxutil` — empty build-validation placeholder, nothing depended on it.
+   - `hxrand` — pure wrapper around `getrandom(2)`. C `src/rand.c` restored
+     (`getrandom(2)` + `/dev/urandom` fallback) and called directly until
+     its consumers (`cipher.c`, `usermod.c`) port to Rust naturally.
 
-3. **`proto_trace.c`** (~530 LOC, debug-only)
-   - Opcode + data-tag name lookups; trace emit. Roadmap gotcha note already
-     said "Trace output stays roughly as is; it's a debug aid, not a hot
-     path." Defer unless something motivates moving it.
+### Handed off to other phases
 
-4. ~~**`gtkhx_text_to_utf8` migration**~~ (shipped on
-   `claude/r2-text-utf8-delegation`). `text_util.c::gtkhx_text_to_utf8` now
-   delegates to `hotline-proto::text::to_utf8_into` via the FFI; the C
-   entry point keeps its `g_free`-able heap-return contract via a
-   worst-case `g_malloc + g_realloc` pair, with a `g_utf8_validate`
-   fast-path that skips the FFI for already-UTF-8 input. R5 chat / news /
-   msg ports will eventually drop the C entry point entirely.
+These were on the R2 punch list but are not R2 work:
 
-5. **`rcv_task_login`** (the largest remaining `rcv_task_*` in C, ~460 LOC)
-   - The post-LOGIN state machine: HOPE handshake completion, agreement
-     reception, USERLIST request, post-login fetches. Calls many parsers
-     that are already in Rust, but its outer flow stays C until **R3** picks
-     up the connection lifecycle. Treat as R3-adjacent rather than R2;
-     document here so the R2 exit checklist doesn't surprise anyone.
-
-6. **Unit-test exit criterion**
-   - Goal: "unit-test count in the Rust workspace exceeds the surviving C
-     unit-test count." Already there in absolute count (~325 Rust tests vs.
-     ~58 C unit+proto tests on `main`), but we should make this an explicit
-     check before declaring R2 done.
-
-After the items above, R2's only true remaining unit is the `hlpack` /
-`hlpack_chunks` variadic serializer migration. Everything else either
-ships under a different phase (R3 for connection lifecycle, R4 for boxed
-types and `GtkhxSession`, R5 for chat-display helpers) or is debug-only
-deferral (`proto_trace.c`).
-
-
+- **`network_decode.c`** (`hx_aead_pump_frames`, `hx_decode`) → **R3**. The
+  chunk/decrypt/decompress orchestration is wire-format-critical and ties
+  into the tokio connection rewrite; only callers are
+  `network.c::hx_rcv` and the Tier 3 hope tests.
+- **`rcv_task_login`** (~460 LOC post-LOGIN state machine) → **R3**. Calls
+  many parsers that are already in Rust, but its outer flow follows the
+  connection lifecycle.
+- **`proto_trace.c`** (~530 LOC, debug-only) → **deferred**. Trace emit is
+  a debug aid; nothing on the hot path depends on it.
+- **`hx_chat_split_nick_body`, `hx_highlight_match`** → **R5**. UI behaviour
+  (chat-line nick splitter + nickname highlight match) that lives in
+  `proto_helpers.c` for build-tree reasons (kept out of `gtk/gtk.h` so unit
+  tests can link them), not because it belongs to the protocol layer.
+- **`HxChatEvent` / `HxMsgEvent` boxed-type lifecycle** → **R4**. GObject
+  signal payloads — view-side plumbing emitted by `GtkhxSession`. Generalise
+  to the rest of the boxed-type family during the GtkhxSession migration.
 
 > **Note on `commands.c`:** an earlier draft of this plan named `commands.c`
 > as the message *serializer*. That is wrong. `commands.c` is the chat

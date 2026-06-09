@@ -5,27 +5,29 @@
 # directory inside the Meson build dir. The output is the static library
 # archives that src/meson.build links into the gtkhx executable.
 #
-# Phase R1 introduced four crypto/compression crates alongside hxrand:
+# Current crates:
 #   hxcrypto-hash   — HMAC/MD5/SHA1/SHA256 (replaces src/hmac.c)
 #   hxcrypto-stream — Blowfish OFB-64 (replaces src/cipher.c primitives)
 #   hxcrypto-aead   — ChaCha20-Poly1305 + HKDF-SHA256 (replaces
 #                     src/cipher_aead.c primitives)
 #   hxcompress      — GZIP / LZ4 / ZSTD streaming (replaces src/compress.c)
+#   hotline-proto   — Phase R2 wire protocol parsers + builders.
 #
 # Each crate is a staticlib that the C side wraps with a thin dispatcher.
 # FFI signatures are hand-declared `extern` blocks in the relevant C TU
 # rather than cbindgen-generated headers — drift surfaces at link time
 # as undefined symbols, which is enough for opaque-pointer APIs and
 # keeps the build simpler.
+#
+# Two crates retired at the R2 closeout: hxrand (whose only purpose was
+# wrapping getrandom(2) — the C code calls getrandom() directly via the
+# restored src/rand.c now) and hxutil (a build-validation placeholder
+# from R0 that nothing depended on).
 
 cargo = find_program('cargo')
 
 # Collect all .rs sources so Meson knows to re-run when they change.
 rust_sources = files(
-  'crates/hxrand/src/lib.rs',
-  'crates/hxrand/build.rs',
-  'crates/hxrand/cbindgen.toml',
-  'crates/hxutil/src/lib.rs',
   'crates/hxcrypto-hash/src/lib.rs',
   'crates/hxcrypto-stream/src/lib.rs',
   'crates/hxcrypto-stream/src/blowfish_ofb.rs',
@@ -38,8 +40,6 @@ rust_sources = files(
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
   'Cargo.toml',
-  'crates/hxrand/Cargo.toml',
-  'crates/hxutil/Cargo.toml',
   'crates/hxcrypto-hash/Cargo.toml',
   'crates/hxcrypto-stream/Cargo.toml',
   'crates/hxcrypto-aead/Cargo.toml',
@@ -66,19 +66,6 @@ rust_build = custom_target('rust-workspace',
   output : 'rust-workspace.stamp',
   build_by_default : true,
   console : true,
-)
-
-# hxrand is still wired through its own cbindgen-generated header
-# (rust_target_dir/release/include/hxrand.h) — Phase R0 set that up
-# and the C side already does `#include "hxrand.h"`. Keep the include
-# path on the dep so consumers don't need to know.
-rust_hxrand_dep = declare_dependency(
-  sources : rust_build,
-  compile_args : ['-I' + rust_target_dir / 'release' / 'include'],
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxrand',
-  ],
 )
 
 # Crypto hash (Phase R1; will replace src/hmac.c when wired through).

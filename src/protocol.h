@@ -456,16 +456,12 @@ hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
                            macalg);
 }
 
-/* random_bytes() is now implemented in Rust (rust/crates/hxrand/).
- * The C symbol is gtkhx_random_bytes(); this inline keeps call sites
- * unchanged. The generated header is produced by cbindgen at build time. */
-extern unsigned int gtkhx_random_bytes(unsigned char *buf, unsigned int nbytes);
-
-static inline unsigned int
-random_bytes(u_int8_t *buf, unsigned int nbytes)
-{
-	return gtkhx_random_bytes(buf, nbytes);
-}
+/* Cryptographic RNG used by cipher rekey, usermod password salt, and
+ * any other caller that needs unpredictable bytes. Implementation in
+ * src/rand.c: getrandom(2) on the happy path, /dev/urandom fallback
+ * for kernels/libcs without getrandom support. Returns nbytes on
+ * success or 0 on failure. */
+extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 

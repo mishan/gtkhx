@@ -958,9 +958,9 @@ test('htxf_io', test_htxf_io,
 # network.c specifically so this test can drive its three branches
 # (plaintext / stream cipher / AEAD framing) against canned bytes.
 # Pulls in the full cipher stack (cipher.c + cipher_aead.c + qbuf.c
-# + Rust hxrand — the same set the Tier 3 harness linked in for HOPE
-# coverage) plus a couple of stub symbols for hx_htlc_close +
-# hx_printf_prefix that the test binary provides inline. The
+# — the same set the Tier 3 harness linked in for HOPE coverage)
+# plus a couple of stub symbols for hx_htlc_close + hx_printf_prefix
+# that the test binary provides inline. The
 # AEAD failure subtests exercise the close-on-error path; the
 # stubs zero htlc->fd to mirror hx_htlc_close's one observable
 # side effect from hx_decode's perspective.
@@ -970,14 +970,14 @@ test_network_decode = executable('test_network_decode',
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/qbuf.c',
+  '../src/rand.c',
   '../src/debug.c',
   # Nettle's blowfish_set_key / blowfish_encrypt come in via
   # proto_test_deps's nettle_dep already; the test driver uses
   # them directly on the encode side to synthesize ciphertext
   # (production's decode path runs through the Rust crate via
   # rust_hxcrypto_stream_dep).
-  dependencies        : proto_test_deps + [rust_hxrand_dep,
-                                           rust_hxcrypto_aead_dep,
+  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep,
                                            rust_hxcrypto_stream_dep],
   include_directories : proto_test_inc,
 )
@@ -1038,8 +1038,9 @@ integration_harness_lib = static_library(
   # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
   # brings the stream-cipher (Blowfish OFB-64) seal/open + the
   # HMAC-chained rekey rotation that mirrors production's
-  # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the Rust
-  # hxrand crate via rust_hxrand_dep; hmac_xxx is provided by the Rust
+  # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the
+  # C src/rand.c (getrandom(2) with /dev/urandom fallback);
+  # hmac_xxx is provided by the Rust
   # hxcrypto-hash crate via rust_hxcrypto_hash_dep (Phase R1; the C
   # symbol is hmac_xxx, an inline shim in protocol.h that delegates
   # to gtkhx_hmac_xxx); hope.c brings the HMAC chain + chunk walker;
@@ -1056,10 +1057,11 @@ integration_harness_lib = static_library(
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   '../src/qbuf.c',
+  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/debug.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1137,6 +1139,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/debug.c',
   '../src/text_util.c',
   '../src/qbuf.c',
+  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
@@ -1147,7 +1150,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1207,6 +1210,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/debug.c',
   '../src/text_util.c',
   '../src/qbuf.c',
+  '../src/rand.c',
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
@@ -1217,7 +1221,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxrand_dep, rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate
