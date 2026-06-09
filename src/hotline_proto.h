@@ -1132,6 +1132,23 @@ extern uint8_t gtkhx_proto_tracker_v3_meta_clamp_listing_category (uint8_t raw);
 extern uint64_t gtkhx_proto_capabilities_decode (const uint8_t *bytes,
                                                  size_t len);
 
+/* ---- HTXF subframe header pack ---- */
+
+/* Pack the 16-byte HTXF subframe header into `out[0..16)`. Wire layout
+ * (big-endian throughout): magic ("HTXF") | ref | payload-len |
+ * (type<<16)|flags. The trailing word is read as `type` by classic Mac-
+ * native servers (high u16) and as `flags` by cap-aware peers (low u16);
+ * both interpretations share the same wire bytes. Returns false (writes
+ * nothing) when any of the following holds:
+ *   - out == NULL
+ *   - out_cap < 16        (no room for the header)
+ *   - out_cap > SSIZE_MAX (Rust slice ceiling — protects the FFI from
+ *                          UB when a buggy caller passes a garbage size)
+ * Otherwise writes 16 bytes and returns true. */
+extern bool gtkhx_proto_htxf_hdr_pack (uint8_t *out, size_t out_cap,
+                                       uint32_t ref_id, uint32_t payload_len,
+                                       uint16_t type_code, uint16_t flags);
+
 /* ---- Text encoding: Mac Roman -> UTF-8 ---- */
 
 /* Decode `src[0..len)` wire bytes into UTF-8 in `dst`, writing into the

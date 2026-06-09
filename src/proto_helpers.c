@@ -616,19 +616,39 @@ void
 hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
                   guint16 flags)
 {
-    struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (ref);
-    h.len = htonl (len);
-    /* Last 4 bytes are `unknown u32` in the struct; on the wire
-     * they're (u16 type) (u16 flags). Mac-native servers read the
-     * type to dispatch the subchannel; cap-aware peers read the
-     * flags to know whether to expect the 24-byte large-file
-     * variant. Both interpretations share the same word — the type
-     * lives in the high u16 and is non-zero, the flags in the low
-     * u16. */
-    h.unknown = htonl ((((guint32) type) << 16) | flags);
-    memcpy (buf, &h, SIZEOF_HTXF_HDR);
+    /* Phase R2: delegate to the Rust hotline-proto crate. The wire
+     * layout (16 bytes, big-endian: magic, ref, len, (type<<16)|flags)
+     * is byte-for-byte identical; callers in htxf_subchannel.c and the
+     * Tier 3 harness use this as a leaf packer so the FFI signature
+     * gains the explicit out_cap (always SIZEOF_HTXF_HDR here, the
+     * production callers already size their buffer for it).
+     *
+     * The legacy C contract returns void and assumes the write
+     * succeeded — callers send `buf` over the wire immediately after,
+     * with no failure path. The Rust FFI is fallible (rejects NULL out
+     * or out_cap < HTXF_HDR_SIZE), so a precondition violation has to
+     * be a hard programmer error rather than a silent uninitialised-
+     * buffer send.
+     *
+     * Use g_error rather than g_assert so the check survives release
+     * builds — g_assert compiles out under G_DISABLE_ASSERT, which
+     * downstream packagers can set without the project realising it,
+     * and silently producing uninitialised wire bytes is precisely the
+     * failure mode the Copilot review flagged. Same convention as
+     * the LOGIN handshake check in rcv.c::rcv_task_login. g_error logs
+     * the failure (under G_LOG_LEVEL_ERROR which is always fatal) and
+     * aborts; it is unaffected by G_DISABLE_ASSERT. */
+    if (buf == NULL) {
+        g_error ("hl_htxf_hdr_pack: NULL buf — programmer error");
+    }
+    bool ok = gtkhx_proto_htxf_hdr_pack (buf, SIZEOF_HTXF_HDR, ref, len,
+                                         type, flags);
+    if (!ok) {
+        g_error ("hl_htxf_hdr_pack: Rust FFI rejected the call — "
+                 "out_cap %zu would not fit a %u-byte header; "
+                 "programmer error",
+                 (size_t) SIZEOF_HTXF_HDR, (unsigned) SIZEOF_HTXF_HDR);
+    }
 }
 
 guint64
