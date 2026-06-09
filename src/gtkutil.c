@@ -44,6 +44,7 @@
 #include "xtext.h"
 #include "gtkutil.h"
 #include "hl_access.h"
+#include "gtkhx_session.h" /* ui-scale-changed signal */
 
 /* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
@@ -795,39 +796,115 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
  * source paintable's natural dimensions, so a 32x32 pixbuf in a
  * GtkImage would still render at 16x16. GtkPicture doesn't carry
  * those constraints — with set_can_shrink(FALSE) it renders at
- * the paintable's natural size. */
+ * the paintable's natural size.
+ *
+ * Phase 5+: the rendered dimensions are scale * gtkhx_ui_scale ()
+ * times the source pixbuf's natural width/height. New buttons
+ * constructed at non-100% scale come out at the right size, AND
+ * existing buttons subscribe to "ui-scale-changed" so a live
+ * Settings tweak refreshes their GtkPicture child without a restart.
+ * The signal subscription is automatically dropped when the button
+ * is finalized (g_signal_connect_object). */
+
+/* Helper: compute effective integer pixel dimensions from a base
+ * pixbuf + integer scale * float ui_scale, clamped to >= 1. */
+static void
+button_compute_scaled_size (GdkPixbuf *src, int scale, int *out_w, int *out_h)
+{
+    double mul = (scale > 1 ? (double)scale : 1.0) * gtkhx_ui_scale ();
+    int w = (int) (gdk_pixbuf_get_width (src) * mul + 0.5);
+    int h = (int) (gdk_pixbuf_get_height (src) * mul + 0.5);
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
+    *out_w = w;
+    *out_h = h;
+}
+
+/* Helper: load the source pixbuf for a tracked button. Returns a new
+ * ref the caller owns. Returns NULL if the source can't be located
+ * — either the gresource went missing or the tracked GdkPixbuf ref
+ * is gone (the original pixbuf path doesn't outlive its source). */
+static GdkPixbuf *
+button_load_source (GtkWidget *btn)
+{
+    const char *resource_name
+        = g_object_get_data (G_OBJECT (btn), "gtkhx-pixmap-resource");
+    GdkPixbuf *source_pb
+        = g_object_get_data (G_OBJECT (btn), "gtkhx-pixmap-pixbuf");
+    if (resource_name) {
+        return gdk_pixbuf_new_from_resource (resource_name, NULL);
+    }
+    if (source_pb) {
+        return g_object_ref (source_pb);
+    }
+    return NULL;
+}
+
+/* Helper: rebuild a button's GtkPicture child from its tracked source
+ * at the current ui_scale. Called once by the constructor and on every
+ * "ui-scale-changed" emission. */
+static void
+button_refresh_picture (GtkWidget *btn)
+{
+    int base_scale = GPOINTER_TO_INT (
+        g_object_get_data (G_OBJECT (btn), "gtkhx-pixmap-scale"));
+    GdkPixbuf *src, *use_pb;
+    GdkTexture *tex;
+    GtkWidget *picture;
+    int w, h;
+
+    src = button_load_source (btn);
+    if (!src) {
+        picture = gtk_picture_new ();
+        gtkhx_widget_set_child (btn, picture);
+        return;
+    }
+
+    button_compute_scaled_size (src, base_scale, &w, &h);
+    use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
+    g_object_unref (src);
+
+    /* gdk_pixbuf_scale_simple may return NULL under OOM. Fall back to
+	 * a blank picture rather than dereferencing a NULL. */
+    if (!use_pb) {
+        picture = gtk_picture_new ();
+        gtkhx_widget_set_child (btn, picture);
+        return;
+    }
+
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    tex = gdk_texture_new_for_pixbuf (use_pb);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    g_object_unref (use_pb);
+
+    picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+    g_object_unref (tex);
+    /* set_can_shrink(FALSE) pins the picture at the paintable's
+	 * natural size — GtkButton then sizes itself around that. */
+    gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    gtkhx_widget_set_child (btn, picture);
+}
+
 GtkWidget *
 gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
                      GCallback cb, gpointer user_data)
 {
     GtkWidget *btn = gtk_button_new ();
-    GdkPixbuf *src, *use_pb;
-    GdkTexture *tex;
-    GtkWidget *picture;
 
-    src = gdk_pixbuf_new_from_resource (resource_name, NULL);
-    if (src && scale > 1) {
-        int w = gdk_pixbuf_get_width (src) * scale;
-        int h = gdk_pixbuf_get_height (src) * scale;
-        use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
-        g_object_unref (src);
-    } else {
-        use_pb = src;
-    }
+    /* Stash the source resource + base scale so button_refresh_picture
+	 * can rebuild from a clean reload at the current ui_scale. The
+	 * resource_name is an interned literal at the call sites — no
+	 * destroy notify needed. */
+    g_object_set_data (G_OBJECT (btn), "gtkhx-pixmap-resource",
+                       (gpointer)resource_name);
+    g_object_set_data (G_OBJECT (btn), "gtkhx-pixmap-scale",
+                       GINT_TO_POINTER (scale));
 
-    if (use_pb) {
-        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        tex = gdk_texture_new_for_pixbuf (use_pb);
-        G_GNUC_END_IGNORE_DEPRECATIONS
-        picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-        g_object_unref (tex);
-        /* set_can_shrink(FALSE) pins the picture at the paintable's
-		 * natural size — GtkButton then sizes itself around that. */
-        gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
-    } else {
-        picture = gtk_picture_new ();
-    }
-    gtkhx_widget_set_child (btn, picture);
+    button_refresh_picture (btn);
 
     if (tooltip) {
         gtk_widget_set_tooltip_text (btn, tooltip);
@@ -835,7 +912,15 @@ gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
     if (cb) {
         g_signal_connect (btn, "clicked", cb, user_data);
     }
-    g_clear_object (&use_pb);
+
+    /* Subscribe to "ui-scale-changed" via connect_object so the handler
+	 * is automatically detached when the button finalizes — no manual
+	 * tracking of handler IDs across the toolbar / tasks / news_browser
+	 * call sites. */
+    g_signal_connect_object (gtkhx_session_get_default (), "ui-scale-changed",
+                             G_CALLBACK (button_refresh_picture), btn,
+                             G_CONNECT_SWAPPED);
+
     return btn;
 }
 
@@ -844,15 +929,16 @@ gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
  * so we skip the GResource lookup and reuse the same scaling +
  * GtkPicture wrapping the resource variant does. Returns NULL only
  * if pixbuf is NULL — call sites that allow a missing-icon fallback
- * should null-check the return. */
+ * should null-check the return.
+ *
+ * Phase 5+: stashes a ref to the source pixbuf on the button so the
+ * shared button_refresh_picture path can rebuild the GtkPicture child
+ * at the current ui_scale when "ui-scale-changed" fires. */
 GtkWidget *
 gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
                      GCallback cb, gpointer user_data)
 {
     GtkWidget *btn;
-    GdkPixbuf *use_pb;
-    GdkTexture *tex;
-    GtkWidget *picture;
 
     if (!pixbuf) {
         return NULL;
@@ -860,29 +946,15 @@ gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
 
     btn = gtk_button_new ();
 
-    if (scale > 1) {
-        int w = gdk_pixbuf_get_width (pixbuf) * scale;
-        int h = gdk_pixbuf_get_height (pixbuf) * scale;
-        use_pb = gdk_pixbuf_scale_simple (pixbuf, w, h, GDK_INTERP_NEAREST);
-    } else {
-        use_pb = g_object_ref (pixbuf);
-    }
+    /* Hold a strong ref to the source pixbuf for the life of the
+	 * button. set_data_full's GDestroyNotify drops the ref on
+	 * finalize so it can't outlive the widget. */
+    g_object_set_data_full (G_OBJECT (btn), "gtkhx-pixmap-pixbuf",
+                            g_object_ref (pixbuf), g_object_unref);
+    g_object_set_data (G_OBJECT (btn), "gtkhx-pixmap-scale",
+                       GINT_TO_POINTER (scale));
 
-    /* scale_simple may return NULL under OOM. Fall back to the
-	 * unscaled source rather than letting the next line dereference
-	 * a NULL pixbuf and crash. This matches gtkhx_pixmap_button's
-	 * defensive handling of its own allocation failures. */
-    if (!use_pb) {
-        use_pb = g_object_ref (pixbuf);
-    }
-
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (use_pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
-    picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-    g_object_unref (tex);
-    gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
-    gtkhx_widget_set_child (btn, picture);
+    button_refresh_picture (btn);
 
     if (tooltip) {
         gtk_widget_set_tooltip_text (btn, tooltip);
@@ -890,7 +962,11 @@ gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
     if (cb) {
         g_signal_connect (btn, "clicked", cb, user_data);
     }
-    g_object_unref (use_pb);
+
+    g_signal_connect_object (gtkhx_session_get_default (), "ui-scale-changed",
+                             G_CALLBACK (button_refresh_picture), btn,
+                             G_CONNECT_SWAPPED);
+
     return btn;
 }
 

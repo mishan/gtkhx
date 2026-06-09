@@ -47,6 +47,7 @@
 #include "text_util.h"
 #include "tracker.h"
 #include "debug.h"
+#include "gtkhx_session.h"
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
@@ -138,6 +139,9 @@ struct gtkhx_prefs gtkhx_prefs = {
 	 * means "no color, use theme default" and hx_change_name_icon
 	 * skips the optional HTLC_DATA_COLOR chunk. */
     -1, /* nick_color */
+
+    /* Phase 5+: UI scale, percentage form. 100 = unchanged. */
+    UI_SCALE_PCT_DEFAULT, /* ui_scale_pct */
 };
 
 static void parse_tracker (session *);
@@ -261,9 +265,19 @@ list_icons (void)
 		 * Wide banners → preserve aspect ratio (scale to a row-
 		 * height of 56 and proportional width) so the banner
 		 * art is recognisable instead of being squashed into a
-		 * square cell. */
+		 * square cell.
+		 *
+		 * Phase 5+: the 56-px base scales with gtkhx_ui_scale ().
+		 * list_icons runs once per Settings dialog open, so reopening
+		 * Settings is enough to pick up a freshly-changed ui_scale —
+		 * hot-reload of the icon picker itself isn't worth the
+		 * hundreds-of-pixbuf re-render cost for a rarely-visited page. */
+        int target_base = (int) (56 * gtkhx_ui_scale () + 0.5);
+        if (target_base < 8) {
+            target_base = 8;
+        }
         if (is_wide) {
-            int target_h = 56;
+            int target_h = target_base;
             int target_w = width * target_h / (height > 0 ? height : 1);
             if (target_w < 1) {
                 target_w = 1;
@@ -273,7 +287,8 @@ list_icons (void)
         } else {
             /* Nearest-neighbor preserves pixel-art look at
 			 * 3.5x of 16px / 1.75x of 32px sources. */
-            scaled = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
+            scaled = gdk_pixbuf_scale_simple (pb, target_base, target_base,
+                                              GDK_INTERP_NEAREST);
         }
         g_object_unref (pb);
         pb = scaled ? scaled : pb;
@@ -356,7 +371,11 @@ reinit_gtktexts (session *sess)
         gtkhx_apply_text_style (sess->news_text);
     }
     {
-        gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+        /* Phase 5+: gtkhx_scaled_font_name folds gtkhx_prefs.ui_scale_pct
+		 * into the serialized Pango string. xtext renders its own cairo
+		 * text so the .gtkhx-text CSS path doesn't reach the chat
+		 * output; this helper is the equivalent for the set_font API. */
+        gchar *fontname = gtkhx_scaled_font_name (gtkhx_font_desc);
         if (sess->gchats) {
             GHashTableIter iter;
             gpointer key, val;
@@ -542,6 +561,34 @@ changed_font (session *sess)
     if (sess) {
         reinit_gtktexts (sess);
     }
+}
+
+/* Phase 5+: UI-scale changefunc.
+ *
+ * Validates ui_scale_pct against the documented clamp range (50..200) so
+ * a malformed gtkhxrc value can't shrink icons below visibility or
+ * balloon them to compositor-killing sizes; reuses the font refresh path
+ * (changed_font + reinit_gtktexts) so chat output + entry fonts pick up
+ * the new effective size via the central pango_to_css_props multiplier;
+ * finally fires "ui-scale-changed" on the singleton emitter so the icon
+ * consumers (users_view, files_panel, news_browser, toolbar, settings
+ * icon picker) can drop their cached paintables and re-render at the new
+ * scale. */
+static void
+changed_ui_scale (session *sess)
+{
+    if (gtkhx_prefs.ui_scale_pct < UI_SCALE_PCT_MIN
+        || gtkhx_prefs.ui_scale_pct > UI_SCALE_PCT_MAX) {
+        gtkhx_prefs.ui_scale_pct = UI_SCALE_PCT_DEFAULT;
+    }
+
+    /* Fonts piggyback on the existing changed_font path: it rebuilds
+	 * the .gtkhx-text / .gtkhx-userlist CSS providers (which call
+	 * pango_to_css_props, where the ui_scale multiplier lives) and
+	 * walks open chats / PM windows to re-apply gtk_xtext_set_font. */
+    changed_font (sess);
+
+    gtkhx_session_emit_ui_scale_changed (gtkhx_session_get_default ());
 }
 
 #if 0 /* XXX */
@@ -880,6 +927,12 @@ struct cfgvar {
       changed_case,
       NULL },
     { CFG_TRAY, { &gtkhx_prefs.tray }, BOOLEAN, 0, changed_tray, NULL },
+    { CFG_UI_SCALE,
+      { &gtkhx_prefs.ui_scale_pct },
+      INT,
+      0,
+      changed_ui_scale,
+      NULL },
     { CFG_USER_XSIZE, { &gtkhx_prefs.geo.users.xsize }, INT, 0, NULL, NULL },
     { CFG_USER_YSIZE, { &gtkhx_prefs.geo.users.ysize }, INT, 0, NULL, NULL },
     { CFG_WORDWRAP,
@@ -1389,6 +1442,84 @@ on_combo_row_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
     *v->variable.str = g_strdup (selected);
     v->allocated = 1;
     pref_apply (v);
+}
+
+/* AdwComboRow over a fixed list of integer values. Parallels
+ * pref_combo_row but targets cfgvars of type INT — the existing combo
+ * helper only handles STRING. `values[]` is the integer stored in the
+ * cfgvar; `labels[]` are user-visible (translatable) presentation. n
+ * is the number of entries; arrays are not freed. The active selection
+ * is the entry whose value matches *v->variable.integer, falling back
+ * to the first entry. */
+static void
+on_int_combo_row_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
+{
+    struct cfgvar *v = data;
+    const int *values;
+    guint idx;
+    int n;
+    (void)pspec;
+
+    if (v->type != INT) {
+        return;
+    }
+
+    values = g_object_get_data (G_OBJECT (row), "pref-combo-int-values");
+    n = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (row), "pref-combo-int-n"));
+    idx = adw_combo_row_get_selected (row);
+    if (!values || (int)idx >= n) {
+        return;
+    }
+    if (*v->variable.integer == values[idx]) {
+        return;
+    }
+    *v->variable.integer = values[idx];
+    pref_apply (v);
+}
+
+static GtkWidget *
+pref_int_combo_row (const char *cfgname, const char *title, const char *subtitle,
+                    const int *values, const char **labels, int n)
+{
+    struct cfgvar *v = cfgvar_for_name (cfgname);
+    GtkWidget *row = adw_combo_row_new ();
+    GtkStringList *labels_model;
+    int i, selected = 0;
+
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+    if (subtitle && *subtitle) {
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
+    }
+    if (!v || v->type != INT) {
+        gtk_widget_set_sensitive (row, FALSE);
+        return row;
+    }
+
+    labels_model = gtk_string_list_new (NULL);
+    for (i = 0; i < n; i++) {
+        gtk_string_list_append (labels_model, labels[i]);
+    }
+    adw_combo_row_set_model (ADW_COMBO_ROW (row), G_LIST_MODEL (labels_model));
+    g_object_unref (labels_model);
+
+    /* Cache the values + count on the row so the notify handler can
+	 * map back from selected-index to integer without a parallel
+	 * lookup table. Values array is caller-owned (typically static
+	 * const at call site) so we just store the pointer. */
+    g_object_set_data (G_OBJECT (row), "pref-combo-int-values", (gpointer)values);
+    g_object_set_data (G_OBJECT (row), "pref-combo-int-n", GINT_TO_POINTER (n));
+
+    for (i = 0; i < n; i++) {
+        if (*v->variable.integer == values[i]) {
+            selected = i;
+            break;
+        }
+    }
+    adw_combo_row_set_selected (ADW_COMBO_ROW (row), selected);
+    v->widget = row;
+    g_signal_connect (row, "notify::selected",
+                      G_CALLBACK (on_int_combo_row_selected), v);
+    return row;
 }
 
 /* AdwComboRow with a fixed value list. `values[]` are the strings
@@ -2732,6 +2863,29 @@ settings_page_general (AdwPreferencesPage *page)
     adw_preferences_group_add (
         appearance_grp,
         pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
+
+    /* UI scale combo. Discrete presets scale icons (user-list rows,
+	 * files / news rows, toolbar buttons, settings icon picker) and
+	 * fonts (xtext chat output, .gtkhx-text CSS class) by the same
+	 * percentage. Persisted as CFG_UI_SCALE; changefunc rebuilds the
+	 * CSS + emits ui-scale-changed for icon consumers. */
+    {
+        static const int scale_values[] = { 85, 100, 115, 125, 150 };
+        const char *scale_labels[5];
+        scale_labels[0] = _ ("Compact (85%)");
+        scale_labels[1] = _ ("Normal (100%)");
+        scale_labels[2] = _ ("Comfortable (115%)");
+        scale_labels[3] = _ ("Large (125%)");
+        scale_labels[4] = _ ("Extra Large (150%)");
+        adw_preferences_group_add (
+            appearance_grp,
+            pref_int_combo_row (CFG_UI_SCALE, _ ("Interface scale"),
+                                _ ("Scales icons and fonts together. Takes "
+                                   "effect immediately."),
+                                scale_values, scale_labels,
+                                G_N_ELEMENTS (scale_values)));
+    }
+
     adw_preferences_page_add (page, appearance_grp);
 
     paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());

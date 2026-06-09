@@ -238,6 +238,14 @@ typedef enum {
 void gtkhx_session_emit_connection_state (GtkhxSession *self,
                                           GtkhxConnectionState state);
 
+/* "ui-scale-changed" — global Settings UI-scale knob moved. Carries
+ * no payload; subscribers read gtkhx_prefs.ui_scale_pct (or call
+ * gtkhx_ui_scale()) for the new effective scale. Fired by
+ * changed_ui_scale in options.c after the prefs value is validated
+ * and after the font CSS refresh has run, so a subscriber's icon
+ * rebuild and the CSS-driven font change observe the same scale. */
+void gtkhx_session_emit_ui_scale_changed (GtkhxSession *self);
+
 /* Connects every Phase 3 signal handler to the supplied emitter.
  * Called once from fe_init at startup. The handlers themselves are
  * static adapters in gtkhx.c that bridge the marshaller signature

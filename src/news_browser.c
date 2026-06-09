@@ -162,6 +162,11 @@ struct _gnews_browser {
     GdkPaintable *icon_category;
     GdkPaintable *icon_post;
 
+    /* Phase 5+: connection ID for the singleton "ui-scale-changed"
+	 * subscription. Disconnected before the browser memory is freed
+	 * so a late-firing signal can't reach a dangling pointer. */
+    gulong ui_scale_handler;
+
     /* Content side */
     GtkWidget *post_view;    /* GtkTextView, read-only */
     GtkLabel *subject_label; /* subject above the body, "heading" */
@@ -320,14 +325,25 @@ load_icon_paintable (const char *resource)
     GdkPixbuf *pb;
     GdkTexture *tex;
     int w, h;
+    /* Phase 5+: fold the global UI scale on top of the 1.5x base.
+	 * gtkhx_ui_scale () returns 1.0 by default so existing rendering
+	 * is unchanged; only when the user picks a non-100% preset in
+	 * Settings → Appearance does this multiply differ from 1.5. */
+    double mul = 1.5 * gtkhx_ui_scale ();
 
     pb = gdk_pixbuf_new_from_resource (resource, NULL);
     if (!pb) {
         return NULL;
     }
 
-    w = (gdk_pixbuf_get_width (pb) * 3) / 2;
-    h = (gdk_pixbuf_get_height (pb) * 3) / 2;
+    w = (int) (gdk_pixbuf_get_width (pb) * mul + 0.5);
+    h = (int) (gdk_pixbuf_get_height (pb) * mul + 0.5);
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
     {
         GdkPixbuf *scaled
             = gdk_pixbuf_scale_simple (pb, w, h, GDK_INTERP_NEAREST);
@@ -499,8 +515,12 @@ on_factory_setup (GtkSignalListItemFactory *factory, GtkListItem *list_item,
     /* GtkImage clamps paintable size to its `icon-size` (~16px by
 	 * default in Adwaita), so the upscaled-paintable bytes are
 	 * shrunk back down at draw time. Override with pixel_size to
-	 * make the row actually use the 1.5x render. */
-    gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
+	 * make the row actually use the 1.5x render. The global UI scale
+	 * rides on top of the fixed 24-px base; on_factory_bind re-stamps
+	 * the value on every rebind so cached cells pick up a live
+	 * Settings → Appearance change. */
+    gtk_image_set_pixel_size (GTK_IMAGE (icon),
+                              (int) (24 * gtkhx_ui_scale () + 0.5));
 
     gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
     gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
@@ -530,6 +550,13 @@ on_factory_bind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
     GtkLabel *label = g_object_get_data (G_OBJECT (expander), "label");
 
     gtk_tree_expander_set_list_row (GTK_TREE_EXPANDER (expander), row);
+
+    /* Phase 5+: re-stamp pixel_size on every bind so cached cells
+	 * pick up a hot ui_scale change. No-op when unchanged. */
+    if (icon) {
+        gtk_image_set_pixel_size (icon,
+                                  (int) (24 * gtkhx_ui_scale () + 0.5));
+    }
 
     if (!node) {
         gtk_image_clear (icon);
@@ -1946,6 +1973,12 @@ on_window_close (GtkWindow *window, gpointer user_data)
         the_browser = NULL;
     }
 
+    if (br->ui_scale_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     br->ui_scale_handler);
+        br->ui_scale_handler = 0;
+    }
+
     g_clear_object (&br->icon_folder);
     g_clear_object (&br->icon_category);
     g_clear_object (&br->icon_post);
@@ -1956,6 +1989,42 @@ on_window_close (GtkWindow *window, gpointer user_data)
 	 * paintables. */
     g_free (br);
     return FALSE;
+}
+
+/* Phase 5+: ui-scale-changed handler. Connected swapped so the
+ * second arg is the browser itself. Reload the 3 cached paintables
+ * at the new scale, then force the GtkListView to rebind every
+ * visible row by swapping its model NULL → back. Each rebound row
+ * picks up the new pixel_size from on_factory_bind and the new
+ * paintable from icon_paintable_for_kind. */
+static void
+gnews_browser_on_ui_scale_changed (gnews_browser *br)
+{
+    GtkSelectionModel *sel;
+
+    if (!br) {
+        return;
+    }
+    g_clear_object (&br->icon_folder);
+    g_clear_object (&br->icon_category);
+    g_clear_object (&br->icon_post);
+    br->icon_folder
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.png");
+    br->icon_category
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.png");
+    br->icon_post
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
+
+    if (!br->list_view) {
+        return;
+    }
+    sel = gtk_list_view_get_model (GTK_LIST_VIEW (br->list_view));
+    if (sel) {
+        g_object_ref (sel);
+        gtk_list_view_set_model (GTK_LIST_VIEW (br->list_view), NULL);
+        gtk_list_view_set_model (GTK_LIST_VIEW (br->list_view), sel);
+        g_object_unref (sel);
+    }
 }
 
 /* ---------- Window construction ---------- */
@@ -1978,6 +2047,13 @@ build_browser_window (void)
         = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.png");
     br->icon_post
         = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
+
+    /* Phase 5+: subscribe to global UI-scale changes. The handler
+	 * re-loads the cached paintables and forces a rebind of all
+	 * visible rows. */
+    br->ui_scale_handler = g_signal_connect_swapped (
+        gtkhx_session_get_default (), "ui-scale-changed",
+        G_CALLBACK (gnews_browser_on_ui_scale_changed), br);
 
     /* Phase 5 / docking (Phase 2): no standalone GtkWindow. The
      * browser content lives inside an HxPanel resident of the

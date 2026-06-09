@@ -1,6 +1,12 @@
 #ifndef HX_GTKUTIL_H
 #define HX_GTKUTIL_H
 
+/* gtkhx_ui_scale lives in prefs.h so unit tests can include it
+ * without pulling in GTK. The prototype is re-exposed here via that
+ * transitive include for the many gtkutil.c consumers that already
+ * #include "gtkutil.h". */
+#include "prefs.h"
+
 extern void init_keyaccel (GtkWidget *widget);
 extern void init_keyaccel_dialog (GtkWidget *widget);
 extern void init_keyaccel_full (GtkWidget *widget, gboolean esc_closes);

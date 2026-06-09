@@ -26,6 +26,8 @@
 #include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
+#include "gtkutil.h" /* gtkhx_ui_scale */
+#include "gtkhx_session.h" /* ui-scale-changed signal */
 
 /* Right-click handler — pops user_popup over the row under (x,y).
  * Installed by hx_user_list_view_new on the column view; locates
@@ -216,13 +218,19 @@ make_layout (HxUserCellName *cell)
     } else {
         fd = pango_font_description_from_string ("Sans 10");
     }
-    /* Scale font size by pixel_scale. Pango sizes are in 1024ths
-     * of a point. */
-    if (cell->pixel_scale != 1.0) {
-        int size = pango_font_description_get_size (fd);
-        if (size > 0) {
-            pango_font_description_set_size (
-                fd, (gint) (size * cell->pixel_scale));
+    /* Scale font size by pixel_scale × global UI scale. Pango sizes
+	 * are in 1024ths of a point. The .gtkhx-userlist CSS path already
+	 * folds ui_scale into the *header* labels; this snapshot path
+	 * draws the per-row name itself with cairo and so re-applies
+	 * ui_scale explicitly. */
+    {
+        double effective = cell->pixel_scale * gtkhx_ui_scale ();
+        if (effective < 0.999 || effective > 1.001) {
+            int size = pango_font_description_get_size (fd);
+            if (size > 0) {
+                pango_font_description_set_size (
+                    fd, (gint) (size * effective));
+            }
         }
     }
     pango_layout_set_font_description (layout, fd);
@@ -264,13 +272,19 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
      * name area, art in the right portion) are shifted LEFT by
      * scaled_lpad so the visible art lines up with the cell's
      * left edge. */
+    /* Phase 5+: fold the live ui_scale into every pixel_scale multiply
+	 * for this snapshot. cell->pixel_scale is the *base* (1.0 or 1.25)
+	 * set at construction; the live scale changes whenever the
+	 * Settings combo flips. */
+    double effective_scale = cell->pixel_scale * gtkhx_ui_scale ();
+
     if (cell->icon) {
         double iw = gdk_paintable_get_intrinsic_width (cell->icon)
-                    * cell->pixel_scale;
+                    * effective_scale;
         double ih = gdk_paintable_get_intrinsic_height (cell->icon)
-                    * cell->pixel_scale;
+                    * effective_scale;
         double iy = (height - ih) / 2.0;
-        double ix = -(cell->icon_left_pad * cell->pixel_scale);
+        double ix = -(cell->icon_left_pad * effective_scale);
         gtk_snapshot_save (snapshot);
         gtk_snapshot_translate (
             snapshot, &GRAPHENE_POINT_INIT ((float) ix, (float) iy));
@@ -283,7 +297,7 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
      * foreground so light/dark theme tracking keeps working. */
     layout = make_layout (cell);
     pango_layout_get_pixel_extents (layout, &ink, &log);
-    text_x = (int) (cell->text_x_offset * cell->pixel_scale);
+    text_x = (int) (cell->text_x_offset * effective_scale);
     text_y = (height - log.height) / 2;
 
     row_fg = hx_user_row_get_foreground (cell->row);
@@ -342,15 +356,22 @@ hx_user_cell_name_measure (GtkWidget *widget, GtkOrientation orientation,
     if (natural_baseline) {
         *natural_baseline = -1;
     }
+    /* Phase 5+: same effective-scale convention as snapshot. */
+    double effective_scale = cell->pixel_scale * gtkhx_ui_scale ();
+
     if (orientation == GTK_ORIENTATION_VERTICAL) {
-        *minimum = *natural = cell->row_height;
+        /* Row height scales with ui_scale so 1.25× icons in the 26-px
+		 * standalone Users row don't clip when the user picks 1.5×
+		 * Extra Large. Pixel_scale already encodes the per-style base
+		 * (1.0 / 1.25); ui_scale is layered on top. */
+        *minimum = *natural = (int) (cell->row_height * gtkhx_ui_scale () + 0.5);
     } else {
         /* Natural width = text offset + room for a typical 16-char
          * name at the current font size. GtkColumnView gives us
          * whatever the column's set_fixed_width says, so this is
          * only a hint to the layout machinery. */
-        *minimum = (int) (cell->text_x_offset * cell->pixel_scale);
-        *natural = *minimum + (int) (140 * cell->pixel_scale);
+        *minimum = (int) (cell->text_x_offset * effective_scale);
+        *natural = *minimum + (int) (140 * effective_scale);
     }
 }
 
@@ -422,6 +443,10 @@ struct _HxUserListView {
     /* Widgets. column_view is what hx_user_list_view_get_widget
      * returns. */
     GtkWidget *column_view;
+
+    /* Phase 5+: connection ID for the ui-scale-changed signal so
+	 * dispose can detach cleanly. 0 = not connected. */
+    gulong ui_scale_handler;
 };
 
 G_DEFINE_FINAL_TYPE (HxUserListView, hx_user_list_view, G_TYPE_OBJECT)
@@ -430,6 +455,14 @@ static void
 hx_user_list_view_dispose (GObject *object)
 {
     HxUserListView *v = HX_USER_LIST_VIEW (object);
+    /* Phase 5+: drop the ui-scale signal subscription before the rest
+	 * of the teardown so a late-firing signal can't reach into a
+	 * half-disposed view. */
+    if (v->ui_scale_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     v->ui_scale_handler);
+        v->ui_scale_handler = 0;
+    }
     g_clear_pointer (&v->by_user, g_hash_table_unref);
     g_clear_object (&v->selection);
     g_clear_object (&v->sort_model);
@@ -678,6 +711,21 @@ on_view_secondary_press (GtkGestureClick *gesture, int n_press, double x,
 /* Public constructors and mutators                              */
 /* ============================================================ */
 
+/* Phase 5+: ui-scale-changed handler. Connected swapped, so the
+ * second arg is the view itself (no extra parsing). Queue a resize
+ * + draw on the column view; the per-cell measure + snapshot
+ * re-multiply against gtkhx_ui_scale() on the next frame, so existing
+ * cells pick up the new dimensions without factory churn. */
+static void
+hx_user_list_view_relayout_for_scale (HxUserListView *v)
+{
+    if (!v || !v->column_view) {
+        return;
+    }
+    gtk_widget_queue_resize (v->column_view);
+    gtk_widget_queue_draw (v->column_view);
+}
+
 HxUserListView *
 hx_user_list_view_new (session *sess, HxUserListStyle style)
 {
@@ -809,6 +857,16 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
         }
     }
+
+    /* Phase 5+: track Settings → Appearance → Interface scale. When
+	 * it flips, queue a resize + redraw on the column view so the
+	 * cells re-measure (picks up the new row_height and effective
+	 * pixel_scale) and re-snapshot (picks up the new icon dimensions
+	 * and font multiplier). No factory work needed: cell snapshot
+	 * reads gtkhx_ui_scale() live. */
+    v->ui_scale_handler = g_signal_connect_swapped (
+        gtkhx_session_get_default (), "ui-scale-changed",
+        G_CALLBACK (hx_user_list_view_relayout_for_scale), v);
 
     /* Right-click context menu. Capture-phase secondary-button
      * gesture on the column view; the handler picks the deepest

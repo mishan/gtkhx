@@ -1991,7 +1991,7 @@ create_chat (session *sess)
     gchat = g_malloc0 (sizeof (struct gtkhx_chat));
 
     {
-        gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+        gchar *fontname = gtkhx_scaled_font_name (gtkhx_font_desc);
         text = gtk_xtext_new (colors, 1);
         gtk_xtext_set_font (GTK_XTEXT (text), fontname);
         g_free (fontname);
@@ -2300,7 +2300,7 @@ pchat_new (session *sess, struct chat *chat)
     gchat = g_malloc0 (sizeof (struct gtkhx_chat));
 
     {
-        gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+        gchar *fontname = gtkhx_scaled_font_name (gtkhx_font_desc);
         text = gtk_xtext_new (colors, 1);
         gtk_xtext_set_font (GTK_XTEXT (text), fontname);
         g_free (fontname);

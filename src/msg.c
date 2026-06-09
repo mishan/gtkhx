@@ -504,7 +504,7 @@ create_msg (guint16 _uid, char *name)
      * Until then it stays NULL — create_msg only builds the
      * sub-widgets (xtext + input + ctrl). */
     {
-        gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
+        gchar *fontname = gtkhx_scaled_font_name (gtkhx_font_desc);
         msg->outputbuf = gtk_xtext_new (colors, 1);
         gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
         g_free (fontname);

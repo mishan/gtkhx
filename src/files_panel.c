@@ -21,6 +21,8 @@
 #include "files_provider.h"
 #include "files_remote_provider.h" /* listing-error query for empty-state */
 #include "files_panel.h"
+#include "gtkutil.h"       /* gtkhx_ui_scale */
+#include "gtkhx_session.h" /* ui-scale-changed signal */
 
 /* hx.h pulls compat.h which defines _(s) as a passthrough; undef
  * before gi18n.h gives us the proper gettext() expansion without
@@ -147,6 +149,11 @@ struct _files_panel {
 	 * on remote panels (we can't synchronously enumerate without
 	 * an RPC round-trip, so we don't try). See files_complete.c. */
     hx_path_complete *path_complete;
+
+    /* Phase 5+: connection ID for the singleton ui-scale-changed
+	 * signal. Disconnected in files_panel_free so a delayed signal
+	 * after teardown can't reach freed memory. */
+    gulong ui_scale_handler;
 };
 
 /* Map an ICON_* id to a gresource path. Returns NULL for ids
@@ -190,24 +197,32 @@ icon_resource_for_id (guint16 icon_id)
 }
 
 /* Load an icon resource (XPM or PNG) and wrap it in a GdkPaintable
- * scaled 1.5x with nearest-neighbor interpolation. Same treatment
- * as news_browser.c so both browsers' row chrome looks consistent;
- * the cicn-derived PNGs we extract from icons.rsrc are also 16x16,
- * so they scale the same way the XPMs do. Returns NULL silently
- * on a missing resource — callers null-check. */
+ * scaled by the base files-panel factor (1.5x) times the live UI
+ * scale (gtkhx_ui_scale ()). Nearest-neighbor interpolation keeps the
+ * pixel-art XPM/PNG sources crisp at any integer-ish multiple. Same
+ * treatment news_browser.c uses so both browsers' row chrome stays
+ * consistent. Returns NULL silently on a missing resource — callers
+ * null-check. */
 static GdkPaintable *
 load_icon_paintable (const char *resource)
 {
     GdkPixbuf *pb, *scaled;
     GdkTexture *tex;
     int w, h;
+    double mul = 1.5 * gtkhx_ui_scale ();
 
     pb = gdk_pixbuf_new_from_resource (resource, NULL);
     if (!pb) {
         return NULL;
     }
-    w = (gdk_pixbuf_get_width (pb) * 3) / 2;
-    h = (gdk_pixbuf_get_height (pb) * 3) / 2;
+    w = (int) (gdk_pixbuf_get_width (pb) * mul + 0.5);
+    h = (int) (gdk_pixbuf_get_height (pb) * mul + 0.5);
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
     scaled = gdk_pixbuf_scale_simple (pb, w, h, GDK_INTERP_NEAREST);
     g_object_unref (pb);
     if (!scaled) {
@@ -219,6 +234,44 @@ load_icon_paintable (const char *resource)
     G_GNUC_END_IGNORE_DEPRECATIONS
     g_object_unref (scaled);
     return GDK_PAINTABLE (tex);
+}
+
+/* Phase 5+: ui-scale-changed handler. Connected swapped, so the
+ * second arg is the panel itself.
+ *
+ *   1. Drop every cached paintable. Next bind reloads via
+ *      load_icon_paintable which now multiplies by the live scale.
+ *   2. Swap the underlying GtkSortListModel's inner model NULL → back.
+ *      That makes the sort model emit a clean items-changed (remove all,
+ *      then add all), which the column view honors by unbinding +
+ *      rebinding every row. Each rebind re-stamps pixel_size and
+ *      re-looks-up the now-fresh paintable from p->icons.
+ *
+ * We own p->sort_model so emitting through its public set_model API is
+ * the supported way to nudge it. Doing nothing when no inner model is
+ * attached avoids spurious work on freshly-constructed panels. */
+static void
+files_panel_on_ui_scale_changed (files_panel *p)
+{
+    GListModel *current;
+
+    if (!p) {
+        return;
+    }
+    if (p->icons) {
+        g_hash_table_remove_all (p->icons);
+    }
+    if (!p->sort_model) {
+        return;
+    }
+    current = gtk_sort_list_model_get_model (p->sort_model);
+    if (!current) {
+        return;
+    }
+    g_object_ref (current);
+    gtk_sort_list_model_set_model (p->sort_model, NULL);
+    gtk_sort_list_model_set_model (p->sort_model, current);
+    g_object_unref (current);
 }
 
 /* Lazy-cache lookup. Returns a borrowed GdkPaintable* (panel owns
@@ -813,8 +866,11 @@ name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 
     /* XPMs are 16x16; scaled 1.5x = 24x24. Match that with
 	 * pixel_size so GtkImage's icon-size clamp doesn't shrink
-	 * them back down. */
-    gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
+	 * them back down. The global UI scale rides on top of the
+	 * fixed 24-px base; name_bind re-applies the value on every
+	 * rebind so cached cells pick up a hot ui_scale change. */
+    gtk_image_set_pixel_size (GTK_IMAGE (icon),
+                              (int) (24 * gtkhx_ui_scale () + 0.5));
 
     gtk_box_append (GTK_BOX (row), icon);
     gtk_box_append (GTK_BOX (row), lbl);
@@ -881,6 +937,13 @@ name_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
         g_object_set_data_full (G_OBJECT (lbl), "old-name", NULL, NULL);
         return;
     }
+
+    /* Phase 5+: re-stamp the pixel size on every bind so cells whose
+	 * setup ran before a ui_scale change still pick up the new
+	 * dimensions when the column view rebinds them. Cheap when the
+	 * value's unchanged. */
+    gtk_image_set_pixel_size (icon,
+                              (int) (24 * gtkhx_ui_scale () + 0.5));
 
     paintable = lookup_icon_paintable (p, hx_file_entry_get_icon_id (e));
     if (paintable) {
@@ -1262,6 +1325,12 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
 	 * and drops them when the panel is freed. */
     p->icons = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
                                       (GDestroyNotify)g_object_unref);
+
+    /* Phase 5+: subscribe to global UI-scale changes so the icon
+	 * cache + visible row dimensions refresh without a restart. */
+    p->ui_scale_handler = g_signal_connect_swapped (
+        gtkhx_session_get_default (), "ui-scale-changed",
+        G_CALLBACK (files_panel_on_ui_scale_changed), p);
 
     /* ---- Root box ---- */
     p->root = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1652,6 +1721,13 @@ files_panel_free (files_panel *p)
 {
     if (!p) {
         return;
+    }
+    /* Phase 5+: detach the ui-scale subscription first so a late-firing
+	 * signal can't reach into a half-disposed panel. */
+    if (p->ui_scale_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     p->ui_scale_handler);
+        p->ui_scale_handler = 0;
     }
     /* Cancel the pending inline-rename timer + drop the held ref
 	 * so the closure callback never fires after the panel is gone. */

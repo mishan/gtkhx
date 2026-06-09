@@ -179,6 +179,21 @@ pango_to_css_props (const PangoFontDescription *fd)
                                 style_s);
     }
 
+    /* Phase 5+: apply the global UI scale to the size. Multiplying in
+	 * the pango-side units (1024ths) keeps subpixel fidelity through
+	 * the integer division below, so 1.15× of "10pt" reads as 11pt
+	 * (10 * 1.15 = 11.5 → 11) rather than the truncated 10 we'd get if
+	 * we scaled after dividing. is_abs (px) and the default (pt) paths
+	 * both reuse the same multiplier. */
+    {
+        double mul = gtkhx_ui_scale ();
+        gint scaled_size_pt = (gint) (size_pt * mul + 0.5);
+        if (scaled_size_pt <= 0) {
+            scaled_size_pt = size_pt;
+        }
+        size_pt = scaled_size_pt;
+    }
+
     if (is_abs) {
         return g_strdup_printf ("font-family: \"%s\";"
                                 "font-size: %dpx;"
@@ -252,6 +267,39 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 
     g_free (css);
     g_free (fontprops);
+}
+
+gchar *
+gtkhx_scaled_font_name (const PangoFontDescription *fd)
+{
+    PangoFontDescription *copy;
+    gint size_pt;
+    double mul;
+    gchar *out;
+
+    if (!fd) {
+        return g_strdup ("");
+    }
+
+    mul = gtkhx_ui_scale ();
+    size_pt = pango_font_description_get_size (fd);
+
+    /* Fast path: nothing to scale (no size set, or scale == 1.0). Just
+	 * stringify the original. Spelling out the no-size case spares us
+	 * a pango_font_description_copy + free for the common 100% pref. */
+    if (size_pt <= 0 || (mul > 0.999 && mul < 1.001)) {
+        return pango_font_description_to_string (fd);
+    }
+
+    copy = pango_font_description_copy (fd);
+    if (pango_font_description_get_size_is_absolute (fd)) {
+        pango_font_description_set_absolute_size (copy, size_pt * mul);
+    } else {
+        pango_font_description_set_size (copy, (gint) (size_pt * mul + 0.5));
+    }
+    out = pango_font_description_to_string (copy);
+    pango_font_description_free (copy);
+    return out;
 }
 
 void

@@ -108,6 +108,16 @@
 /* Appearance */
 #define CFG_THEME "THEME"
 
+/* Phase 5+: global UI scale, stored as a percentage integer (100 = 1.0,
+ * 125 = 1.25, etc.). Drives icon and font sizes everywhere ui_scale is
+ * applied. Defaults to 100; the Settings combo offers a few discrete
+ * presets but hand-edited values in gtkhxrc are honored if they fall
+ * within UI_SCALE_PCT_MIN / UI_SCALE_PCT_MAX. */
+#define CFG_UI_SCALE "UISCALE"
+#define UI_SCALE_PCT_MIN 50
+#define UI_SCALE_PCT_MAX 200
+#define UI_SCALE_PCT_DEFAULT 100
+
 /* THEME string values (case-sensitive — must match changed_theme()). */
 #define CFG_THEME_SYSTEM "system"
 #define CFG_THEME_LIGHT "light"

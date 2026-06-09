@@ -63,6 +63,7 @@ enum {
     SIGNAL_TASK_UPDATE,
     SIGNAL_CHAT_LOG_LINE,
     SIGNAL_CONNECTION_STATE,
+    SIGNAL_UI_SCALE_CHANGED,
     SIGNAL_LAST
 };
 
@@ -290,6 +291,15 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
     signals[SIGNAL_CONNECTION_STATE] = g_signal_new (
         "connection-state-changed", G_TYPE_FROM_CLASS (klass),
         G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
+
+    /* "ui-scale-changed" — Settings → Appearance → Interface scale
+	 * moved. No args; consumers read gtkhx_prefs.ui_scale_pct or call
+	 * gtkhx_ui_scale() to compute new icon dimensions / font
+	 * multipliers. Toolbar + icon picker + per-window icon caches
+	 * subscribe so the change applies without a restart. */
+    signals[SIGNAL_UI_SCALE_CHANGED] = g_signal_new (
+        "ui-scale-changed", G_TYPE_FROM_CLASS (klass),
+        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 GtkhxSession *
@@ -490,6 +500,12 @@ gtkhx_session_emit_chat_log_line (GtkhxSession *self, struct htlc_conn *htlc,
                                   guint32 cid, const char *body)
 {
     g_signal_emit (self, signals[SIGNAL_CHAT_LOG_LINE], 0, htlc, cid, body);
+}
+
+void
+gtkhx_session_emit_ui_scale_changed (GtkhxSession *self)
+{
+    g_signal_emit (self, signals[SIGNAL_UI_SCALE_CHANGED], 0);
 }
 
 void

@@ -40,6 +40,13 @@ extern void gtkhx_refresh_css (void);
 /* Rebuild the user list CSS provider after the user list font changes. */
 extern void gtkhx_refresh_userlist_css (PangoFontDescription *fd);
 
+/* Phase 5+: serialize a PangoFontDescription with gtkhx_prefs.ui_scale_pct
+ * applied to its size. Used for the xtext set_font calls in chat / PM /
+ * options reinit, since xtext renders its own cairo text (the CSS path
+ * doesn't reach it). Returns a freshly-allocated string the caller must
+ * g_free. NULL fd → returns an empty string. */
+extern gchar *gtkhx_scaled_font_name (const PangoFontDescription *fd);
+
 /* Returns the application's currently-active toplevel, or NULL during
  * early startup. Callers use it as a transient parent for dialogs
  * spawned from a context without a natural parent widget. */

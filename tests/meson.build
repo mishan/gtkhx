@@ -180,6 +180,19 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# ui_scale — gtkhx_ui_scale() is the chokepoint every icon / font
+# scaling site reads, so a wrong clamp here would scatter wrong
+# dimensions across every panel. Inline in prefs.h, pure GLib —
+# the test defines its own gtkhx_prefs storage and drives the
+# clamp matrix.
+test_ui_scale = executable('test_ui_scale',
+  'unit/test_ui_scale.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('ui_scale', test_ui_scale,
+     suite : 'unit')
+
 # bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
 # bookmarks_io.c (carved out of bookmarks.c, which still holds the
 # GTK / libadwaita dialog) so this test can drive it without the

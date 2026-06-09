@@ -10,6 +10,7 @@
 #define __gtkhx_PREFS_H 1
 
 #include "compat.h"
+#include "cfgkeys.h" /* UI_SCALE_PCT_MIN / MAX / DEFAULT */
 
 typedef struct {
     int xsize, ysize;
@@ -115,9 +116,39 @@ struct gtkhx_prefs {
 	 * to fit the cfgvars INT slot; reinterpreted as guint32 when
 	 * stamped onto htlc->nick_color. Persisted as CFG_NICK_COLOR. */
     int nick_color;
+
+    /* Phase 5+: global UI scale as an integer percentage. Drives
+	 * icon dimensions (users window 1.25x, files/news rows 1.5x,
+	 * toolbar button upscale, settings icon picker grid) and font
+	 * sizes for the global gtkhx-text / gtkhx-userlist CSS providers
+	 * and the xtext chat output. Default 100 = unchanged behaviour.
+	 * Discrete preset values land via Settings (85/100/115/125/150)
+	 * but any integer >= 50 and <= 200 is accepted on read so users
+	 * can hand-edit gtkhxrc. Persisted as CFG_UI_SCALE. */
+    int ui_scale_pct;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;
+
+/*
+ * Phase 5+: read gtkhx_prefs.ui_scale_pct as a double scale factor.
+ * 100 → 1.0, 125 → 1.25, etc. Values outside the validated range are
+ * clamped to the default so a corrupt or hand-edited gtkhxrc can't
+ * shrink icons to 0 px or balloon the toolbar past compositor limits.
+ * Defined inline so consumers (users_view.c, files_panel.c, gtkhx.c,
+ * toolbar.c, ...) don't need to add an #include for one accessor.
+ * Lives in prefs.h (rather than gtkutil.h) so unit tests can call it
+ * without dragging GTK into the test binary.
+ */
+static inline double
+gtkhx_ui_scale (void)
+{
+    int pct = gtkhx_prefs.ui_scale_pct;
+    if (pct < UI_SCALE_PCT_MIN || pct > UI_SCALE_PCT_MAX) {
+        pct = UI_SCALE_PCT_DEFAULT;
+    }
+    return pct / 100.0;
+}
 
 struct hx_sounds {
     unsigned char on;
