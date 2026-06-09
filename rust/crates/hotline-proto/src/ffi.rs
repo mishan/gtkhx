@@ -3548,6 +3548,25 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
     parse::tracker_v3_meta_clamp_listing_category(raw)
 }
 
+// ---- HTLS_DATA_CAPABILITIES decode ------------------------------------
+
+/// Decode an `HTLS_DATA_CAPABILITIES` payload (variable-width big-endian
+/// unsigned, 1..8 bytes) into a `u64`. Payloads longer than 8 bytes are
+/// truncated at the first 8 (the spec lets us drop bits we can't store).
+/// Returns 0 on NULL `bytes` or zero `len` — pre-spec servers advertise
+/// the chunk without a payload, and that decodes to "no capabilities".
+///
+/// # Safety
+/// `bytes` either valid for `len` bytes or NULL (treated as empty
+/// regardless of `len`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_capabilities_decode(
+    bytes: *const u8,
+    len: usize,
+) -> u64 {
+    parse::capabilities_decode(as_slice(bytes, len))
+}
+
 // ---- Text encoding: Mac Roman / UTF-8 ---------------------------------
 
 /// Decode wire bytes from `src` into UTF-8 in `dst`, mirroring
