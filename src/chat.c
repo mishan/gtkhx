@@ -1765,19 +1765,28 @@ tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
         /* Reaching here implies the while(1) above broke via the
 		 * match_pos = -1 path, which only fires after match_text
 		 * was g_malloc'd. The analyzer can't prove the cross-loop
-		 * dependency — document with an assert. clang-tidy reads
-		 * the != as a side effect in g_assert; suppress. */
-        /* NOLINTNEXTLINE(bugprone-assert-side-effect) */
-        g_assert (match_text != NULL);
-        if (first) {
-            snprintf (buf, sizeof (buf), "%s", match_text);
+		 * dependency. g_critical + skip the substitution if the
+		 * invariant ever breaks rather than g_assert (which
+		 * compiles out under G_DISABLE_ASSERT) or g_error (which
+		 * would abort the app on a recoverable display glitch). */
+        if (match_text == NULL) {
+            g_critical ("chat: nick-completion match_text NULL after "
+                        "match_pos = -1 path — skipping substitution");
+            if (!first) {
+                g_free (b4);
+                g_free (c5);
+            }
         } else {
-            snprintf (buf, sizeof (buf), "%s %s%s", b4, match_text, c5);
-            cursor_pos = strlen (b4) + strlen (match_text);
-            g_free (b4);
-            g_free (c5);
+            if (first) {
+                snprintf (buf, sizeof (buf), "%s", match_text);
+            } else {
+                snprintf (buf, sizeof (buf), "%s %s%s", b4, match_text, c5);
+                cursor_pos = strlen (b4) + strlen (match_text);
+                g_free (b4);
+                g_free (c5);
+            }
+            g_free (match_text);
         }
-        g_free (match_text);
     }
 
     else {
