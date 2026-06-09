@@ -705,65 +705,61 @@ void
 hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                const struct hx_chunk *chunks, int hc)
 {
-    /* Mirror hlpack's wire layout exactly — same header math, same
-     * length encoding, same trans++ side effect. We re-implement
-     * the body here rather than build a fake va_list (which is
-     * unportable) or call hlpack in a loop (which would emit one
-     * packet per chunk).
+    /* Phase R2: the inner serialize loop (header byte layout, per-chunk
+     * data hdr + payload writes, len/len2 wire-length math) moved to the
+     * Rust hotline-proto crate (build::pack_message). The C side keeps
+     * the qbuf growth and the htlc->trans++ side effect because those
+     * tie to the connection lifecycle that's R3 territory.
      *
      * Public-API guardrails: this function is the entry point for
-     * every shared chunk-array builder (login_packet,
-     * chat_history, future modules) plus the integration harness,
-     * so a NULL htlc or a chunks=NULL+hc>0 caller is a programming
-     * bug we want loud — not a silent NULL deref inside memcpy. */
+     * every shared chunk-array builder (login_packet, chat_history,
+     * future modules) plus the integration harness, so a NULL htlc or
+     * a chunks=NULL+hc>0 caller is a programming bug we want loud —
+     * not a silent NULL deref. The per-chunk NULL-data + len>0
+     * validation moved to Rust along with the serialize loop
+     * (build::pack_message rejects the malformed chunk and returns 0);
+     * the size+pack mismatch g_error below fires on that path too, so
+     * the failure mode still surfaces loudly. */
     g_return_if_fail (htlc != NULL);
     g_return_if_fail (hc >= 0);
     g_return_if_fail (hc == 0 || chunks != NULL);
 
-    struct hl_hdr h;
-    struct hl_data_hdr dhs;
     struct qbuf *q = &htlc->out;
-    guint32 this_off, pos;
-    guint32 my_trans;
-
-    this_off = q->pos + q->len;
-    pos = this_off + SIZEOF_HL_HDR;
-    q->len += SIZEOF_HL_HDR;
-    q->buf = g_realloc (q->buf, q->pos + q->len);
-
-    h.type = htonl (type);
-    my_trans = htlc->trans;
-    h.trans = htonl (my_trans);
-    htlc->trans++;
-    h.flag = htonl (flag);
-    h.hc = htons ((guint16) hc);
-
-    for (int i = 0; i < hc; i++) {
-        guint16 t = chunks[i].type;
-        guint16 l = chunks[i].len;
-
-        /* len==0 with data==NULL is a legitimate empty-chunk shape
-		 * (HOPE Step 1 sends an empty HTLC_DATA_SESSIONKEY this
-		 * way); a non-zero length with NULL data is a caller bug. */
-        g_return_if_fail (l == 0 || chunks[i].data != NULL);
-
-        dhs.type = htons (t);
-        dhs.len = htons (l);
-
-        q->len += SIZEOF_HL_DATA_HDR + l;
-        q->buf = g_realloc (q->buf, q->pos + q->len);
-        memcpy (&q->buf[pos], (guint8 *) &dhs, SIZEOF_HL_DATA_HDR);
-        pos += SIZEOF_HL_DATA_HDR;
-
-        if (l) {
-            memcpy (&q->buf[pos], chunks[i].data, l);
-            pos += l;
-        }
+    gsize this_off = q->pos + q->len;
+    gsize needed = gtkhx_proto_pack_message_size (chunks, (size_t) hc);
+    if (needed == 0) {
+        /* pack_message_size returns 0 on hc > MAX_PACK_CHUNKS (currently
+         * 64 — well above the largest production builder), on NULL chunks
+         * with hc > 0 (caller-side bug we already guarded above), or on a
+         * chunks_len that overflows the slice-byte ceiling. All three are
+         * programmer errors; the in-tree caller paths can't legitimately
+         * trip any of them. */
+        g_error ("hlpack_chunks: pack_message_size rejected hc=%d "
+                 "(hc above MAX_PACK_CHUNKS, NULL chunks, or "
+                 "pathological size overflow)",
+                 hc);
     }
 
-    guint32 packed_len = pos - this_off;
-    h.len = h.len2 = htonl (packed_len - (SIZEOF_HL_HDR - sizeof (h.hc)));
-    memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
+    q->len += needed;
+    q->buf = g_realloc (q->buf, q->pos + q->len);
+
+    guint32 my_trans = htlc->trans;
+    htlc->trans++;
+
+    size_t written = gtkhx_proto_pack_message (q->buf + this_off, needed,
+                                               type, my_trans, flag,
+                                               chunks, (size_t) hc);
+    if (written != needed) {
+        /* pack_message returns 0 on: hc > MAX_PACK_CHUNKS, NULL chunks
+         * with hc > 0, any chunk with len > 0 && data == NULL, or
+         * out_cap < pack_message_size (we just sized to the size helper,
+         * so the last case implies one of the others). */
+        g_error ("hlpack_chunks: pack_message wrote %zu bytes, expected %zu "
+                 "(programmer error — too many chunks (hc > MAX_PACK_CHUNKS "
+                 "= 64), NULL chunks with hc > 0, or NULL data with non-zero "
+                 "len in some chunk)",
+                 written, (size_t) needed);
+    }
 }
 
 /* See doc-comment in proto_helpers.h. */

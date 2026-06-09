@@ -3675,6 +3675,160 @@ pub unsafe extern "C" fn gtkhx_proto_htxf_hdr_pack(
     crate::build::build_htxf_hdr(buf, ref_id, payload_len, type_code, flags)
 }
 
+// ---- Full message packer ---------------------------------------------
+
+/// Materialize a `[PackChunk<'_>]` from a C-ABI `[HxChunk]` slice on the
+/// stack, with all NULL-data validation done up front. Returns the
+/// populated stack-array prefix on success, `None` when:
+///
+///   - `chunks.len() > MAX_PACK_CHUNKS` (the staging buffer is fixed at
+///     [`crate::build::MAX_PACK_CHUNKS`] entries; we can't materialize
+///     more than that without reallocating, and the safe API caps
+///     `pack_message` at the same value anyway), OR
+///   - any chunk with `len > 0 && data == NULL` (caller bug — an empty
+///     chunk must use `len == 0`).
+///
+/// # Safety
+/// `chunks` must be a valid `[HxChunk]` slice. Each chunk with `len > 0`
+/// must have `data` valid for `len` bytes of reads.
+unsafe fn hxchunks_to_packchunks<'a>(
+    chunks: &'a [crate::build::HxChunk],
+    out: &'a mut [std::mem::MaybeUninit<crate::build::PackChunk<'a>>;
+             crate::build::MAX_PACK_CHUNKS],
+) -> Option<&'a [crate::build::PackChunk<'a>]> {
+    if chunks.len() > crate::build::MAX_PACK_CHUNKS {
+        return None;
+    }
+    for (i, c) in chunks.iter().enumerate() {
+        let data: &[u8] = if c.len == 0 {
+            // `len == 0` with NULL data is a legitimate empty-chunk
+            // shape (HOPE Step 1 sends an empty HTLC_DATA_SESSIONKEY);
+            // treat it as an empty slice regardless of `c.data`.
+            &[]
+        } else if c.data.is_null() {
+            return None;
+        } else {
+            slice::from_raw_parts(c.data, c.len as usize)
+        };
+        out[i].write(crate::build::PackChunk { tag: c.tag, data });
+    }
+    // SAFETY: every index in 0..chunks.len() was written above; nothing
+    // past `chunks.len()` is read.
+    let initialized = std::slice::from_raw_parts(
+        out.as_ptr() as *const crate::build::PackChunk<'_>,
+        chunks.len(),
+    );
+    Some(initialized)
+}
+
+/// Total byte count a packed Hotline transaction with `chunks_len`
+/// chunks occupies. Caller uses this to size the destination buffer
+/// before calling [`gtkhx_proto_pack_message`].
+///
+/// Returns 0 (an impossible size — the smallest legal packet is the
+/// 22-byte header) on any of:
+///   - `chunks == NULL && chunks_len != 0` (the safety contract is
+///     violated; we fail closed rather than silently shrink the request
+///     to a header-only packet and let the caller under-size the buffer),
+///   - `chunks_len > MAX_PACK_CHUNKS`,
+///   - `chunks_len` overflows the slice-byte limit.
+///
+/// `chunks_len == 0` (with either a valid or NULL `chunks` pointer) is
+/// legitimate and returns the header-only size (22).
+///
+/// # Safety
+/// `chunks` either valid for `chunks_len` `HxChunk` entries or NULL when
+/// `chunks_len == 0`. The payload pointer in each chunk is NOT
+/// dereferenced — only the `len` field is read for the size computation.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_pack_message_size(
+    chunks: *const crate::build::HxChunk,
+    chunks_len: usize,
+) -> usize {
+    if chunks_len == 0 {
+        // Either chunks ptr is irrelevant when chunks_len is 0; produce
+        // the header-only size.
+        return crate::build::pack_message_size(&[]);
+    }
+    if chunks.is_null()
+        || chunks_len > crate::build::MAX_PACK_CHUNKS
+        || chunks_len > isize::MAX as usize / std::mem::size_of::<crate::build::HxChunk>()
+    {
+        return 0;
+    }
+    let raw = slice::from_raw_parts(chunks, chunks_len);
+    // pack_message_size only reads `len`, not `data` — synthesize empty
+    // slices to satisfy the safe API's type without dereferencing
+    // anything.
+    let mut total = crate::HL_HDR_LEN;
+    for c in raw {
+        total += crate::HL_DATA_HDR_LEN + c.len as usize;
+    }
+    total
+}
+
+/// Pack a full Hotline transaction (header + chunks) into `out`. Returns
+/// the number of bytes written, or 0 on any of:
+///   - NULL `out`, `out_cap == 0`, or `out_cap > isize::MAX`,
+///   - `chunks == NULL && chunks_len != 0` (fail-closed: we never
+///     silently turn a non-empty request into a header-only packet),
+///   - `chunks_len > MAX_PACK_CHUNKS`,
+///   - `out_cap` smaller than the packed size,
+///   - any chunk with `len > 0 && data == NULL` (caller bug — empty
+///     chunks must have `len == 0` to skip the `data` deref).
+///
+/// Returning 0 is unambiguous: the smallest legal packet is a header-only
+/// message (22 bytes); the smallest output `pack_message` ever produces
+/// is therefore 22.
+///
+/// # Safety
+/// `out` either valid (writable) for `out_cap` bytes or NULL. `chunks`
+/// either valid for `chunks_len` `HxChunk` entries or NULL when
+/// `chunks_len == 0`. Each chunk with `len > 0` must have `data` valid
+/// for `len` bytes of reads.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_pack_message(
+    out: *mut u8,
+    out_cap: usize,
+    type_: u32,
+    trans: u32,
+    flag: u32,
+    chunks: *const crate::build::HxChunk,
+    chunks_len: usize,
+) -> usize {
+    if out.is_null() || out_cap == 0 || out_cap > isize::MAX as usize {
+        return 0;
+    }
+    let buf = slice::from_raw_parts_mut(out, out_cap);
+    if chunks_len == 0 {
+        // chunks ptr is irrelevant when chunks_len is 0; pack a
+        // header-only message.
+        return crate::build::pack_message(buf, type_, trans, flag, &[])
+            .unwrap_or(0);
+    }
+    if chunks.is_null()
+        || chunks_len > crate::build::MAX_PACK_CHUNKS
+        || chunks_len > isize::MAX as usize / std::mem::size_of::<crate::build::HxChunk>()
+    {
+        return 0;
+    }
+    let raw = slice::from_raw_parts(chunks, chunks_len);
+    // Stack-allocated staging buffer. The inline-const array initializer is
+    // the stable safe replacement for `MaybeUninit::uninit().assume_init()`
+    // on a `[MaybeUninit<T>; N]` (MSRV 1.79+); it makes the per-element
+    // construction explicit and avoids the wider "assume the whole array is
+    // initialized" claim, which never actually held for the elements we
+    // hadn't written to yet.
+    let mut staging: [std::mem::MaybeUninit<crate::build::PackChunk<'_>>;
+        crate::build::MAX_PACK_CHUNKS] =
+        [const { std::mem::MaybeUninit::uninit() }; crate::build::MAX_PACK_CHUNKS];
+    let safe_chunks = match hxchunks_to_packchunks(raw, &mut staging) {
+        Some(s) => s,
+        None => return 0,
+    };
+    crate::build::pack_message(buf, type_, trans, flag, safe_chunks).unwrap_or(0)
+}
+
 // ---- Text encoding: Mac Roman / UTF-8 ---------------------------------
 
 /// Decode wire bytes from `src` into UTF-8 in `dst`, mirroring
@@ -3939,6 +4093,74 @@ mod tests {
                 4,
             );
             assert!(!ok);
+        }
+    }
+
+    // ---- pack_message FFI: NULL chunks must not be silently treated as
+    //                        empty when chunks_len > 0 ----
+
+    #[test]
+    fn pack_message_size_ffi_null_chunks_with_nonzero_len_returns_zero() {
+        // Regression: an earlier draft of the FFI shim treated
+        // `chunks == NULL` as an empty slice regardless of `chunks_len`,
+        // which would let a caller under-size the destination buffer.
+        // The correct behaviour is to fail closed.
+        unsafe {
+            let n = gtkhx_proto_pack_message_size(std::ptr::null(), 3);
+            assert_eq!(n, 0);
+        }
+    }
+
+    #[test]
+    fn pack_message_size_ffi_null_chunks_with_zero_len_returns_header_size() {
+        // Legitimate header-only request: chunks_len == 0 is valid with
+        // any chunks pointer.
+        unsafe {
+            let n = gtkhx_proto_pack_message_size(std::ptr::null(), 0);
+            assert_eq!(n, 22);
+        }
+    }
+
+    #[test]
+    fn pack_message_ffi_null_chunks_with_nonzero_len_returns_zero() {
+        // Same regression mirror on the pack side. We allocate a
+        // legitimate output buffer; the rejection must come from the
+        // chunks-side guard, not the out-side checks.
+        let mut buf = [0u8; 64];
+        unsafe {
+            let n = gtkhx_proto_pack_message(
+                buf.as_mut_ptr(),
+                buf.len(),
+                0x010d,
+                42,
+                0,
+                std::ptr::null(),
+                3,
+            );
+            assert_eq!(n, 0);
+            // Nothing got written: the buffer is still all zeros.
+            assert_eq!(buf, [0u8; 64]);
+        }
+    }
+
+    #[test]
+    fn pack_message_ffi_null_chunks_with_zero_len_packs_header_only() {
+        // Header-only positive case.
+        let mut buf = [0u8; 64];
+        unsafe {
+            let n = gtkhx_proto_pack_message(
+                buf.as_mut_ptr(),
+                buf.len(),
+                0x010d,
+                42,
+                0,
+                std::ptr::null(),
+                0,
+            );
+            assert_eq!(n, 22);
+            assert_eq!(&buf[0..4], &0x010d_u32.to_be_bytes());
+            assert_eq!(&buf[4..8], &42u32.to_be_bytes());
+            assert_eq!(&buf[20..22], &0u16.to_be_bytes()); // hc
         }
     }
 }

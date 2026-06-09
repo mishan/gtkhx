@@ -1184,6 +1184,57 @@ extern bool gtkhx_proto_htxf_hdr_pack (uint8_t *out, size_t out_cap,
                                        uint32_t ref_id, uint32_t payload_len,
                                        uint16_t type_code, uint16_t flags);
 
+/* ---- Full message packer (header + chunks → wire bytes) ----
+ *
+ * Pure serialization of a Hotline transaction message. The connection-
+ * side concerns (qbuf growth on htlc->out, htlc->trans++ side effect)
+ * stay in C in proto_helpers.c::hlpack_chunks; this Rust function does
+ * the byte-twiddling.
+ *
+ * struct hx_chunk is the chunk-array element type already shared with
+ * proto_helpers.h — its layout is { guint16 type; guint16 len;
+ * const void *data; }, mirrored byte-for-byte by hotline-proto::build's
+ * #[repr(C)] HxChunk (the Rust mirror calls the first field `tag` because
+ * `type` is a Rust keyword, but the ABI is identical). */
+
+struct hx_chunk; /* forward decl — defined in proto_helpers.h */
+
+/* Total bytes a packed message with `chunks_len` chunks will occupy.
+ * Caller uses this to size the destination buffer. Returns 0 on any of:
+ *   - chunks == NULL && chunks_len != 0 (caller-side bug: fail closed
+ *     rather than silently treat as empty and under-size the buffer)
+ *   - chunks_len > MAX_PACK_CHUNKS (currently 64 — well above what any
+ *     in-tree builder produces; surfaces a wildly pathological hc as a
+ *     hard error)
+ *   - chunks_len overflows the slice-byte limit (defensive)
+ *
+ * chunks_len == 0 always returns the header-only size (22), regardless
+ * of whether chunks is NULL or a valid pointer. */
+extern size_t gtkhx_proto_pack_message_size (const struct hx_chunk *chunks,
+                                             size_t chunks_len);
+
+/* Serialize `(type, trans, flag, chunks[0..chunks_len))` as a Hotline
+ * transaction into `out[0..out_cap)`. Returns the number of bytes
+ * written, or 0 on any of:
+ *   - out == NULL or out_cap == 0
+ *   - out_cap > SSIZE_MAX (Rust slice ceiling)
+ *   - out_cap < pack_message_size (would truncate)
+ *   - chunks == NULL && chunks_len != 0 (caller bug — fail closed)
+ *   - chunks_len > MAX_PACK_CHUNKS (currently 64)
+ *   - any chunk with len > 0 && data == NULL (caller bug — empty chunks
+ *     must have len == 0 to skip the data deref)
+ *
+ * chunks_len == 0 packs a header-only message (22 bytes) regardless of
+ * whether chunks is NULL or a valid pointer.
+ *
+ * Zero is unambiguous: the smallest legal packet is 22 bytes (a
+ * header-only message), so a successful pack never returns 0. */
+extern size_t gtkhx_proto_pack_message (uint8_t *out, size_t out_cap,
+                                        uint32_t type, uint32_t trans,
+                                        uint32_t flag,
+                                        const struct hx_chunk *chunks,
+                                        size_t chunks_len);
+
 /* ---- Text encoding: Mac Roman -> UTF-8 ---- */
 
 /* Decode `src[0..len)` wire bytes into UTF-8 in `dst`, writing into the
