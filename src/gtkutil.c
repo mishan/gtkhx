@@ -865,15 +865,24 @@ button_refresh_picture (GtkWidget *btn)
     }
 
     button_compute_scaled_size (src, base_scale, &w, &h);
-    use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
-    g_object_unref (src);
+    /* Fast path: dimensions unchanged (scale=1 + ui_scale=1.0, or a
+	 * tracker / news refresh that landed on the same scale we last
+	 * built at). Reuse the freshly-loaded source pixbuf as-is — no
+	 * scale_simple allocation, no extra pixbuf walk. */
+    if (w == gdk_pixbuf_get_width (src)
+        && h == gdk_pixbuf_get_height (src)) {
+        use_pb = src; /* transfer ownership */
+    } else {
+        use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
+        g_object_unref (src);
 
-    /* gdk_pixbuf_scale_simple may return NULL under OOM. Fall back to
-	 * a blank picture rather than dereferencing a NULL. */
-    if (!use_pb) {
-        picture = gtk_picture_new ();
-        gtkhx_widget_set_child (btn, picture);
-        return;
+        /* gdk_pixbuf_scale_simple may return NULL under OOM. Fall back
+		 * to a blank picture rather than dereferencing a NULL. */
+        if (!use_pb) {
+            picture = gtk_picture_new ();
+            gtkhx_widget_set_child (btn, picture);
+            return;
+        }
     }
 
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS

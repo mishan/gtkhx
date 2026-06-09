@@ -1485,6 +1485,10 @@ pref_int_combo_row (const char *cfgname, const char *title, const char *subtitle
     GtkWidget *row = adw_combo_row_new ();
     GtkStringList *labels_model;
     int i, selected = 0;
+    int current_val;
+    int total;
+    int *values_copy;
+    gboolean has_match = FALSE;
 
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
     if (subtitle && *subtitle) {
@@ -1495,26 +1499,66 @@ pref_int_combo_row (const char *cfgname, const char *title, const char *subtitle
         return row;
     }
 
+    current_val = *v->variable.integer;
+    for (i = 0; i < n; i++) {
+        if (current_val == values[i]) {
+            has_match = TRUE;
+            selected = i;
+            break;
+        }
+    }
+
+    /* When the stored value isn't one of the discrete presets (a
+	 * hand-edited gtkhxrc, an older preset that was retired, etc.)
+	 * we prepend a synthetic "Custom (X%)" row so the combo
+	 * accurately reflects the active value. Without this, the
+	 * fallback `selected = 0` would visually claim the lowest
+	 * preset, and the user would have no way to tell their hand-
+	 * edit was non-standard. The user only overwrites the custom
+	 * value if they actively pick a different combo entry.
+	 *
+	 * The synthetic entry's value at index 0 matches the stored
+	 * value, so the no-op early-return in on_int_combo_row_selected
+	 * keeps the persisted value untouched if the user opens
+	 * Settings, looks at the combo, and closes without changing it. */
     labels_model = gtk_string_list_new (NULL);
+    total = has_match ? n : n + 1;
+    values_copy = g_new (int, total);
+
+    if (!has_match) {
+        /* Note: the format string is intentionally simple. The
+		 * accessor's clamp range is documented in cfgkeys.h, so any
+		 * out-of-range stored value is impossible here — the cfgvar
+		 * apply path validates and clamps before we ever see it. */
+        char custom_label[64];
+        g_snprintf (custom_label, sizeof custom_label,
+                    _ ("Custom (%d%%)"), current_val);
+        gtk_string_list_append (labels_model, custom_label);
+        values_copy[0] = current_val;
+        for (i = 0; i < n; i++) {
+            values_copy[i + 1] = values[i];
+        }
+        selected = 0;
+    } else {
+        for (i = 0; i < n; i++) {
+            values_copy[i] = values[i];
+        }
+    }
     for (i = 0; i < n; i++) {
         gtk_string_list_append (labels_model, labels[i]);
     }
     adw_combo_row_set_model (ADW_COMBO_ROW (row), G_LIST_MODEL (labels_model));
     g_object_unref (labels_model);
 
-    /* Cache the values + count on the row so the notify handler can
-	 * map back from selected-index to integer without a parallel
-	 * lookup table. Values array is caller-owned (typically static
-	 * const at call site) so we just store the pointer. */
-    g_object_set_data (G_OBJECT (row), "pref-combo-int-values", (gpointer)values);
-    g_object_set_data (G_OBJECT (row), "pref-combo-int-n", GINT_TO_POINTER (n));
+    /* Cache the (heap-allocated) values + count on the row so the
+	 * notify handler can map from selected-index to integer.
+	 * set_data_full's GDestroyNotify frees values_copy on widget
+	 * finalize. */
+    g_object_set_data_full (G_OBJECT (row), "pref-combo-int-values",
+                            values_copy, g_free);
+    g_object_set_data (G_OBJECT (row), "pref-combo-int-n",
+                       GINT_TO_POINTER (total));
 
-    for (i = 0; i < n; i++) {
-        if (*v->variable.integer == values[i]) {
-            selected = i;
-            break;
-        }
-    }
     adw_combo_row_set_selected (ADW_COMBO_ROW (row), selected);
     v->widget = row;
     g_signal_connect (row, "notify::selected",

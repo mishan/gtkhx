@@ -1,15 +1,16 @@
 /*
  * tests/unit/test_ui_scale.c — verify the gtkhx_ui_scale() inline
- * helper in gtkutil.h reads gtkhx_prefs.ui_scale_pct, clamps it to
- * the documented [UI_SCALE_PCT_MIN, UI_SCALE_PCT_MAX] range, and
- * returns the percentage as a double scale factor.
+ * helper in prefs.h reads gtkhx_prefs.ui_scale_pct, clamps it to the
+ * documented [UI_SCALE_PCT_MIN, UI_SCALE_PCT_MAX] range, and returns
+ * the percentage as a double scale factor.
  *
  * gtkhx_ui_scale is the single chokepoint every consumer (users_view
  * pixel_scale, files_panel / news_browser icon sizing, gtkutil
- * pixmap-button construction, options.c font CSS) calls, so a wrong
+ * pixmap-button construction, gtkhx.c font CSS) calls, so a wrong
  * clamp value here would corrupt rendering across the whole UI. The
- * inline lives in gtkutil.h so we don't need to link any of gtkhx —
- * just define the gtkhx_prefs storage and call it.
+ * inline lives in prefs.h so this test stays pure GLib — including
+ * prefs.h directly avoids dragging GTK into the test binary, the
+ * same shape test_prefs_parser uses.
  */
 
 #include "config.h"
