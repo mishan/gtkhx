@@ -7,6 +7,16 @@ spec at
 spec). Re-pin to a newer SHA if the upstream doc moves before
 implementation starts.
 
+**Revised 2026-06-09**: §3, §4, §5 (new Phase 8.0 inserted), §7, §8,
+§9, §11, §12 switched from the original "C bindings + hybrid Rust
+state machine" pick to `gstreamer-rs` end-to-end, on the back of a
+new R3.0 — glib-rs foothold prerequisite (~1 week). The trigger was
+re-scoping the R3 prerequisite after R2 closeout: it turned out the
+voice controller doesn't need tokio, doesn't need a full GtkhxSession
+rewrite, and doesn't need the rest of R3 — it needs glib-rs in the
+workspace and one wrapping pattern for the C GtkhxSession. See §3 for
+the revised reasoning and what changed.
+
 The fogWraith spec adds real-time voice to Hotline via a server-side
 SFU (Selective Forwarding Unit). Clients negotiate the capability in
 LOGIN, then run a WebRTC session against the server — DTLS + SRTP +
@@ -118,48 +128,71 @@ discipline.
 
 ---
 
-## 3. The WebRTC stack decision — GStreamer `webrtcbin`
+## 3. The WebRTC stack decision — `gstreamer-rs`
 
 This is the single biggest decision in the plan. The spec is written
 assuming you can call an off-the-shelf WebRTC library and get the
 SDP/ICE/DTLS/SRTP/RTP behaviour for free; the question is *which*.
 
+GStreamer is the right base regardless of bindings — audio capture
++ playback + μ-law encode/decode + RTP packetization + the WebRTC
+peer connection in one dep, with GLib idioms throughout, GNOME
+runtime already ships it, active upstream, LGPL. Every alternative
+(`libdatachannel`, `webrtc-rs`, `libwebrtc`, `Pion`) requires us to
+write three layers of glue for audio I/O, μ-law, and RTP that
+GStreamer hands us. The decision below is purely *which language
+drives `webrtcbin`*.
+
 | Option | Pros | Cons |
 |---|---|---|
-| **GStreamer `webrtcbin` (gst-plugins-bad)** *(picked)* | GLib-native API, plays well with GtkHx's existing main loop and thread model. Audio I/O comes for free via `autoaudiosrc` / `autoaudiosink` (PipeWire / PulseAudio / ALSA automatic). DTLS, ICE, RTP, RTCP, SRTP all handled. PCMU element built in (`mulawenc` / `mulawdec`). Already used by GNOME-shipped voice/video apps. Active upstream development. LGPL. | Big dep — `gstreamer-1.0`, `gst-plugins-base`, `gst-plugins-bad` (≥ 1.20 for stable `webrtcbin`), `gst-plugins-good`. Flatpak runtime already ships them; distro packaging adds a couple Recommends. The webrtcbin API is non-trivial to drive (pad-added signals, SDP munging callbacks). |
-| **libdatachannel** (paullouisageneau/libdatachannel) | MIT. Single C++ library, C API binding. ~25k LOC, builds standalone. No GLib runtime to interact with. | Audio I/O is *not* included — we'd need PortAudio or miniaudio as a separate dep, plus a μ-law encoder, plus a thread that pumps RTP into libdatachannel's send queue. Three layers of code we'd write that GStreamer gives us for free. |
-| **webrtc-rs** | Pure Rust. Could ride the existing `hotline-proto` crate path. MIT. | Heavy crate tree (~150 transitive deps). Still no audio I/O. Same "we'd have to wire up capture/playback ourselves" problem as libdatachannel. The R2 Rust integration is small and isolated today; this would blow that up. |
-| **libwebrtc** (Google) | Reference impl. | Build is a nightmare (depot_tools, gn, ninja, ~hour first build). Vendored deps fight everything. Disqualified. |
-| **Pion** | Spec author's reference. | Go. Disqualified for a C/GTK client. |
+| **`gstreamer-rs` + `gstreamer-webrtc-rs`** *(picked, revised 2026-06-09)* | Voice controller is one language end-to-end (state machine *and* dispatch in Rust). Typed `WebRTCSessionDescription` / `WebRTCSDPType` / `WebRTCPeerConnectionState` / `WebRTCSignalingState` / `WebRTCICEGatheringState` enums instead of stringly-typed `g_object_get`. `connect_pad_added` is a typed signal method instead of `g_signal_connect` with a `void*` payload + manual lifetime tracking. `gst::Promise::new_with_change_func(|reply| …)` for `create-offer` / `create-answer` is the established pattern (Centricular's `gstwebrtc-demos` is the reference, since superseded by `gst-examples/webrtc` in the main GStreamer tree). MIT/Apache-2.0. Bindings are at 0.25.2 as of 2026-05, paired with `glib` 0.22 / `gtk-rs-core` 0.22 / `gtk4-rs` 0.11+ — consistent with RUST-ROADMAP's "gtk4-rs is at 0.11+ as of May 2026" note (gtk4-rs 0.11 ships in the gtk-rs-core 0.22 family; RUST-ROADMAP doesn't pin a strict family version, but the 0.22 line is the natural reading). Prerequisite is the new **Phase 8.0 — R3.0 glib-rs foothold** (~1 week, §5), not full R3. | Workspace gains the `glib` / `gio` / `gtk4` / `libadwaita` / `gstreamer*` Rust crate trees before R3 proper. We commit to gtk-rs idioms inside the voice controller before R3/R4 has shaken them out elsewhere — though "we will adopt them eventually" was already a locked-in roadmap decision. |
+| GStreamer `webrtcbin` via C bindings + hybrid Rust state machine *(previous pick, deprecated)* | Voice work starts immediately without R3.0 plumbing. Smaller blast radius if gtk-rs idioms turn out to need iteration. | ~550 LOC of C glue (`voice.{c,h}` + `voice_audio.{c,h}`) we'd delete during the §11 migration anyway. `g_signal_connect` lifetime tracking around `GstWebRTCBin` callbacks is exactly the bug surface 8.C debugging is most likely to hit. |
+| libdatachannel (paullouisageneau) | MIT. Single C++ library, C API binding. ~25k LOC standalone. | Audio I/O isn't included — PortAudio / miniaudio dep, μ-law encoder, RTP pump all become our problem. |
+| webrtc-rs | Pure Rust. MIT. | Heavy crate tree (~150 transitive deps). Same audio-I/O gap as libdatachannel — none of the WebRTC media path is wired. |
+| libwebrtc (Google) | Reference impl. | Build is a nightmare (depot_tools, gn, ninja, vendored deps). Disqualified. |
+| Pion | Spec author's reference. | Go. Disqualified for a Linux/GTK client. |
 
-**Pick: GStreamer `webrtcbin`.** The decisive factor is that
-GStreamer gives us audio capture + audio playback + μ-law encode/
-decode + RTP packetization + WebRTC peer connection in one
-dependency, with GLib idioms throughout. Every other option requires
-us to write three layers of glue.
+**Why the revision.** An earlier draft of this plan picked the C
+bindings with a hybrid Rust state machine, on the assumption that
+`gstreamer-rs` required a stack of R3/R4 prerequisites we hadn't paid
+for yet. On re-examination after R2 closed, the actual prerequisite
+is much smaller — see §5 Phase 8.0 — and Phase R2 already shipped the
+Cargo workspace plumbing we'd build on. Switching now saves us from
+writing ~550 LOC of C glue we'd delete during the migration §11
+described anyway. Tokio is *not* a prerequisite: `webrtcbin` runs on
+GLib threads and dispatches through `GMainContext`, which
+`gstreamer-rs` integrates with via `gst::bus::BusStream` and
+`glib::MainContext::default().spawn_local`. The voice controller
+doesn't need an async runtime.
 
-**C bindings now, gstreamer-rs later.** The Rust bindings
-(`gstreamer-rs`, including `gstreamer-webrtc`) are mature and are
-the obvious long-term home for the voice controller. We're not
-adopting them in Phase 8 because doing so requires plumbing that
-properly belongs to Phase R3: a `glib::MainContext` bridge for
-Rust-side async work, a Rust→C `g_signal_emit_by_name` shim for
-emitting on the C `GtkhxSession` GObject, and the first tokio
-runtime in the tree. None of those are blockers individually, but
-piling them into Phase 8 would expand its scope materially and
-couple voice's schedule to a tangle of R3 prerequisites. The clean
-boundary is: Rust owns the *state machine* (decisions, queues,
-typed events / actions), C owns the *GStreamer instances*
-(`GstElement*`, `GstPipeline*`, `GstWebRTCBin*`) using the
-existing C bindings. When R3-R4 lands the tokio runtime + Rust
-GtkhxSession, the voice controller is a strong candidate to swap
-the C glue out for `gstreamer-rs` — the state machine slides
-across unchanged because it never directly held a GstElement
-pointer in the first place. See §4 for the split, §11 for the
-migration path.
+**`gstreamer-webrtc-rs` API coverage** (verified against
+`gstreamer-webrtc` 0.25.2, dropped 2026-05-11):
 
-A representative pipeline for one voice session (one send + N-1
-receive tracks bundled on one transport):
+- `WebRTCSessionDescription`, `WebRTCSDPType` — SDP offer / answer.
+- `WebRTCPeerConnectionState`, `WebRTCSignalingState`,
+  `WebRTCICEGatheringState`, `WebRTCICEConnectionState` — the
+  state-machine reads these out of `webrtcbin` properties instead of
+  parsing strings.
+- `WebRTCRTPTransceiver` / `Sender` / `Receiver` — per-track mid /
+  direction handling.
+- `WebRTCICECandidate` (v1.28), `WebRTCICETransport`,
+  `WebRTCDTLSTransport` — typed ICE / DTLS state for toasts and
+  proto-trace output.
+- `connect_pad_added` typed on `WebRTCBin`; `connect("on-negotiation-needed", …)`,
+  `connect("on-ice-candidate", …)`; `Promise::new_with_change_func`
+  + `emit("create-offer" / "create-answer", …)`;
+  `emit("set-{local,remote}-description", …)`;
+  `emit("add-ice-candidate", …)`.
+- `gst_sdp::SDPMessage::parse_buffer` for SDP parsing into typed
+  structures.
+- Renegotiation supported since 2019; same `webrtcbin`-core caveat
+  applies whether you drive it from C or Rust (removed streams
+  marked inactive rather than transceiver/m-line reuse).
+
+A representative pipeline for one voice session (one send + N−1
+receive tracks bundled on one transport) — unchanged from the C
+draft, `webrtcbin` is `webrtcbin` regardless of the language driving
+it:
 
 ```
 webrtcbin name=webrtc
@@ -177,75 +210,85 @@ webrtcbin name=webrtc
          ! audioconvert ! audioresample ! autoaudiosink
 ```
 
-The per-receive-leg add/remove is driven by `pad-added` /
-`pad-removed` signals on the webrtcbin element, which fire when the
-SDP renegotiation completes. Standard GStreamer pattern.
+Per-receive-leg add/remove is driven by `connect_pad_added` /
+`connect_pad_removed` on the Rust-side `WebRTCBin`, which fire when
+SDP renegotiation completes. Standard GStreamer pattern, typed in
+gstreamer-rs.
 
 ---
 
-## 4. New code layout — hybrid Rust/C
+## 4. New code layout — all-Rust controller
 
-Two pieces are Rust, three pieces are C. The split is drawn along
-the line that maximizes Rust's value (state-machine correctness,
-exhaustive matching, wire-format parsing) while not requiring any
-infrastructure that R3 hasn't built yet (no tokio, no glib-rs
-main-context bridge, no Rust→C signal emit, no Rust ownership of
-`GstElement*`). Existing chat-history / tracker-v3 / news pattern
-extends naturally to the wire side; the state-machine module is
-new but uses a pure-function shape that needs no glue.
+Three Rust crates, the existing `hotline-proto` crate extended, plus
+three small C touch-points (UI panel, settings page, `rcv.c`
+dispatch) and the GtkhxSession signal additions. The all-Rust pivot
+in §3 collapsed the previous "hybrid Rust/C" split: the C voice
+controller (`voice.{c,h}`) and audio-factory module
+(`voice_audio.{c,h}`) move into the new `hxvoice-runtime` Rust crate
+that drives `gstreamer-rs` directly.
 
 ### Rust — wire-protocol layer, in `rust/crates/hotline-proto/`
 
 | Addition | Role |
 |---|---|
 | `src/voice.rs` (new module) | Typed representation of voice transactions: `JoinRequest`, `LeaveRequest`, `SdpAnswer`, `IceCandidate`, `MuteToggle`, `Participant`, `MidLabel`. Builders return `HxChunk` arrays like the rest of `build::`; parsers return `#[repr(C)]` out-structs with `_Static_assert`-mirrored layouts. |
-| `src/voice.rs::sdp` submod | Minimal SDP shape parser — just enough to find `a=mid:user-{UID}` labels, the `a=group:BUNDLE` list, the disabled `m=audio 0` lines for left-participant slots, and confirm PCMU is offered. We don't reimplement SDP; the heavy lifting is GStreamer's job. We only extract the bits the UI needs. |
-| `src/voice.rs::ice` submod | Tiny JSON build/parse for the `RTCIceCandidateInit` dict (`candidate`, `sdpMid`, `sdpMLineIndex`, `usernameFragment`). Use `serde_json` (already in the workspace via tracker-v3 work) or hand-roll given how small the schema is. |
+| `src/voice.rs::sdp` submod | Minimal SDP shape parser — just enough to find `a=mid:user-{UID}` labels, the `a=group:BUNDLE` list, the disabled `m=audio 0` lines for left-participant slots, and confirm PCMU is offered. We don't reimplement SDP; the heavy lifting is `gst_sdp::SDPMessage`. We only extract the bits the state machine needs. |
+| `src/voice.rs::ice` submod | Tiny JSON build/parse for the `RTCIceCandidateInit` dict (`candidate`, `sdpMid`, `sdpMLineIndex`, `usernameFragment`). Use `serde_json` (already in the workspace via tracker-v3 work). |
 | `messages.rs` additions | New opcode variants (`VoiceJoinRoom = 600`, etc.) and field-tag variants (`VoiceSdp = 0x01F5`, etc.) added to the `#[non_exhaustive]` enums. |
-| `ffi.rs` additions | ~8–10 new `#[no_mangle] extern "C"` shims: `gtkhx_proto_build_voice_join`, `_build_voice_answer`, `_build_voice_ice`, `_build_voice_mute`, `_parse_voice_participants`, `_parse_voice_mid_label`, `_parse_voice_sdp_summary`, `_parse_voice_ice_json`. |
+| `ffi.rs` additions | ~4 new `#[no_mangle] extern "C"` shims for the C wire-dispatch in `rcv.c`: `gtkhx_proto_parse_voice_participants`, `_parse_voice_mid_label`, `_parse_voice_sdp_summary`, `_parse_voice_ice_json`. (Builders no longer need FFI shims — `hxvoice-runtime` calls the Rust builders directly.) |
 
 ### Rust — voice session state machine, in a new crate
 
 | Addition | Role |
 |---|---|
-| `rust/crates/hxvoice/` (new crate, `no_std`-friendly) | Pure state machine. One `SessionMachine` per active voice session. Holds: current state enum (`Idle` / `JoinSent` / `OfferPending` / `Connecting` / `Connected` / `Leaving`), pending-renegotiation queue, mid→user_id map, mute flag, current participant list. Single entry point `step(&mut self, Event) -> Vec<Action>`. **No I/O, no GStreamer, no GLib types** — just typed data in, typed data out. The C controller in `voice.{c,h}` pumps events in and dispatches the returned actions. |
+| `rust/crates/hxvoice/` (new crate, `no_std`-friendly) | Pure state machine. One `SessionMachine` per active voice session. Holds: current state enum (`Idle` / `JoinSent` / `OfferPending` / `Connecting` / `Connected` / `Leaving`), pending-renegotiation queue, mid→user_id map, mute flag, current participant list. Single entry point `step(&mut self, Event) -> Vec<Action>`. **No I/O, no GStreamer, no GLib types** — just typed data in, typed data out. The `hxvoice-runtime` crate pumps events in and dispatches the returned actions. |
 | `src/event.rs` | Typed inbound events: `JoinRequested { cid }`, `LeaveRequested { cid }`, `MuteToggleRequested { muted }`, `SdpOfferReceived { sdp }`, `IceCandidateReceived { json }`, `EndOfRemoteCandidates`, `ParticipantsUpdated { entries }`, `ServerTaskError { code, text }`, `WebrtcPadAdded { mid }`, `WebrtcPadRemoved { mid }`, `WebrtcAnswerCreated { sdp }`, `WebrtcLocalIceGathered { json }`, `WebrtcConnectionStateChanged { state }`, `Timeout { kind }`. |
 | `src/action.rs` | Typed outbound actions: `SendWireFrame { opcode, chunks }`, `SetRemoteDescription { sdp }`, `CreateAnswer`, `SetLocalDescription { sdp }`, `AddRemoteIce { json }`, `StartReceivePipeline { mid, user_id }`, `StopReceivePipeline { mid }`, `SetSendPipelineMute { muted }`, `EmitSignal { kind, payload }`, `ArmTimer { kind, ms }`, `CancelTimer { kind }`, `TearDown`. |
-| `src/state.rs` | The `SessionMachine` itself. Pure `match (state, event)` impl. The hard cases the spec calls out — renegotiation serialization, dropping stale offers, implicit-leave when joining a second room, ICE/DTLS/media timeouts, mid-slot reuse after a participant leaves — are all enforced here, not in the C controller. |
+| `src/state.rs` | The `SessionMachine` itself. Pure `match (state, event)` impl. The hard cases the spec calls out — renegotiation serialization, dropping stale offers, implicit-leave when joining a second room, ICE/DTLS/media timeouts, mid-slot reuse after a participant leaves — are all enforced here, not in the runtime layer. |
 | `tests/` | Property-style state-machine tests: every event in every state has a defined transition; renegotiation queue under all 4 combinations of (pending-offer, new-offer-arrives); spec's annotated lifecycle (join → renegotiate-for-late-arriver → leave) replayed as event sequences. This is where the spec's defensive notes (§Renegotiation Flow, §Session Timeout and Failure) become assertions. |
 
 `hxvoice` is a separate crate, not a submodule of `hotline-proto`,
 because it depends on `hotline-proto`'s typed messages (one-way:
 hxvoice → hotline-proto) and because keeping it isolated lets it
 stay `no_std`-friendly with zero GLib / GStreamer dependencies.
-That isolation is what makes the future gstreamer-rs migration
-cheap — `hxvoice` doesn't change, only the glue that pumps events
-into it.
+CI can run its property tests without GStreamer installed.
 
-### C — GStreamer glue, dispatch, UI
+### Rust — GStreamer / webrtcbin runtime, in a new crate
+
+| Addition | Role |
+|---|---|
+| `rust/crates/hxvoice-runtime/` (new crate) | Side-effectful layer that holds the `gstreamer::Pipeline` and `gstreamer_webrtc::WebRTCBin` for one voice session, pumps GStreamer signals into `hxvoice::SessionMachine`, and dispatches the returned actions. Subscribes to `connect_pad_added`, `connect("on-negotiation-needed", …)`, `connect("on-ice-candidate", …)` using `gstreamer-rs`'s typed methods. Dispatches `Action`s via `webrtcbin.emit("set-remote-description", &[&sdp, &None::<gst::Promise>])`, `gst::Promise::new_with_change_func(…)` for `create-answer`, etc. |
+| `src/runtime.rs` | `VoiceRuntime` struct — the per-session owner of the pipeline + webrtcbin + `SessionMachine`. Implements `step_with_event(Event)` (which calls into `SessionMachine::step` and walks the action list). |
+| `src/wire_io.rs` | Thin layer that turns `Action::SendWireFrame { opcode, chunks }` into a call back into the C `hlwrite_chunks` (via one C-side FFI helper) until R3 lands the Rust-side connection. Documented as the one remaining piece that ports to native Rust when R3's `hxnet` crate exists. |
+| `src/signals.rs` | `EmitSignal` action handler — wraps the C-side `GtkhxSession` pointer with `unsafe { glib::Object::from_glib_borrow(ptr) }` and calls `obj.emit_by_name::<()>("voice-*", &[…])`. The wrapping pattern is the one R3.0 (Phase 8.0) lands and documents. |
+| `src/audio.rs` | Audio device enumeration (`gst::DeviceMonitor`) + factory functions for the configured `autoaudiosrc` / `autoaudiosink` elements. Handles "no mic" graceful degradation (listen-only). Replaces the planned C `voice_audio.{c,h}`. |
+| `src/ffi.rs` | ~6 `#[no_mangle] extern "C"` shims: `gtkhx_voice_runtime_new(session_ptr) -> *mut VoiceRuntime`, `_free`, `_handle_join`, `_handle_leave`, `_handle_mute_toggle`, `_handle_rcv_task(opcode, …)`. Opaque pointer ABI; the C side only sees `HxVoiceRuntime *`. |
+| `tests/` | Tier 2 integration tests that build a runtime against a `webrtcbin` loopback (two `WebRTCBin` elements connected to each other in one process) and run the full SDP/ICE round-trip without a network. Catches binding-level regressions independently of Janus. |
+
+The runtime crate is the file that materially benefits from
+`gstreamer-rs`: typed signal connections instead of
+`g_signal_connect` with `void*`; `gst::Promise::new_with_change_func`
+instead of manual closure lifetime tracking around promise replies;
+exhaustive matching on `WebRTCSignalingState` instead of stringly
+compared property reads.
+
+### C — wire dispatch, UI, GtkhxSession bridge
 
 | File | Role | Rough LOC |
 |---|---|---|
 | `src/hotline.h` additions | 7 opcodes (`HTLC_HDR_VOICE_JOIN` 600 … `HTLC_HDR_VOICE_MUTE` 606), 5 data IDs (0x01F5–0x01F9). `#define`s only; the canonical typed definitions live in Rust. Same dual-define convention chat-history already uses. | ~50 |
-| `src/hotline_proto.h` additions | `extern` declarations for the new FFI shims, paired with `_Static_assert(sizeof(gtkhx_proto_voice_participant) == N, ...)` for each out-struct. | ~50 |
-| `src/voice.{c,h}` | Thin GStreamer / GLib glue. Holds the per-session `GstPipeline*`, `GstWebRTCBin*`, and an opaque `HxVoiceSession*` handle into the Rust state machine. Three responsibilities: (1) translate C-side events (UI click, rcv_task result, webrtcbin signal, g_timeout fire) into Rust `Event`s and call `hxvoice_step`; (2) interpret the returned `Action` array — `SetRemoteDescription` calls `gst_webrtc_bin_set_remote_description`, `SendWireFrame` calls `hlwrite_chunks`, `EmitSignal` calls `g_signal_emit_by_name` on `GtkhxSession`, etc.; (3) own the GStreamer signal callbacks (`pad-added`, `on-ice-candidate`, `on-negotiation-needed`) and marshal them through `g_idle_add` back into Rust events. **No protocol decisions here. No "should I queue this offer" logic. Pure transport.** | ~350 |
-| `src/voice_audio.{c,h}` | Audio device enumeration + GStreamer source/sink element factories. Handles "no mic" graceful degradation (listen-only). | ~200 |
-| `src/voice_panel.{c,h}` | UI: per-chat-tab voice toolbar (Join/Leave/Mute/PTT) + participant speaker indicators in the user list. Attaches to the AdwTabPage for each cid. | ~400 |
-| `src/voice_settings.{c,h}` | AdwPreferencesPage for input/output device, default-muted, PTT keybind, "auto-join voice when joining a chat room." | ~200 |
-| `src/rcv.c` additions | `rcv_task_voice_*` for 600/601/603/606 replies. Switch arms for 602/604/605 server-initiated notifications. Each calls a Rust parser, then pumps the typed result into the state machine via `voice.c`. | ~200 |
-| `src/gtkhx_session.{c,h}` additions | New signals: `voice-room-status`, `voice-track-added`, `voice-track-removed`, `voice-mute-changed`, `voice-state-changed`, `voice-error`. Model→view bridge mirrors the existing taxonomy. | ~100 |
+| `src/hotline_proto.h` additions | `extern` declarations for the new `gtkhx_proto_parse_voice_*` FFI shims, paired with `_Static_assert(sizeof(gtkhx_proto_voice_participant) == N, ...)` for each out-struct. | ~40 |
+| `src/voice_panel.{c,h}` | UI: per-chat-tab voice toolbar (Join/Leave/Mute/PTT) + participant speaker indicators in the user list. Attaches to the AdwTabPage for each cid. Stays C until R5 picks up `chat.c` / `users.c`. Calls `gtkhx_voice_runtime_handle_join` etc. on the opaque Rust runtime pointer. | ~400 |
+| `src/voice_settings.{c,h}` | AdwPreferencesPage for input/output device, default-muted, PTT keybind, "auto-join voice when joining a chat room." Calls into the Rust runtime's `gst::DeviceMonitor` wrapper for device enumeration. | ~200 |
+| `src/rcv.c` additions | `rcv_task_voice_*` for 600/601/603/606 replies. Switch arms for 602/604/605 server-initiated notifications. Each calls a Rust parser, then calls `gtkhx_voice_runtime_handle_rcv_task` to feed the typed result into the state machine. | ~150 |
+| `src/gtkhx_session.{c,h}` additions | New signals: `voice-room-status`, `voice-track-added`, `voice-track-removed`, `voice-mute-changed`, `voice-state-changed`, `voice-error`. Model→view bridge mirrors the existing taxonomy. The Rust runtime emits them via `glib::Object::from_glib_borrow` (Phase 8.0 pattern). | ~100 |
+| `src/voice.h` (header only) | Tiny C-visible API: `HxVoiceRuntime` opaque struct, `gtkhx_voice_runtime_new` / `_free` / `_handle_*` declarations. The implementation is the Rust `hxvoice-runtime::ffi` shims. | ~30 |
 
-The C controller is meaningfully smaller (~350 vs the ~500 in the
-all-C draft) because the state-machine logic — which is where the
-bug surface area concentrates — moved to Rust. The C is now nearly
-pure transport: take an event, call `hxvoice_step`, walk the
-action list with a switch.
-
-Total roughly 1.55 k C LOC + ~900 Rust LOC + tests. FFI surface
-grows by ~10 shims in `hotline-proto::ffi` plus a small handful in
-`hxvoice::ffi` (opaque session pointer, `_new`, `_free`, `_step`,
-event/action marshalling — about 6 functions and a couple of
-`#[repr(C)]` structs).
+Total roughly **940 C LOC + ~1,500 Rust LOC** + tests, vs the
+previous draft's 1.55 k C + ~900 Rust. The C shrinkage comes from
+`voice.c` (~350) and `voice_audio.c` (~200) moving into the Rust
+runtime; the Rust growth covers `hxvoice-runtime`'s gstreamer-rs
+dispatch (~600) and audio-monitor wrapper (~150).
 
 The Hotline 1.x wire-protocol additions are pure: 7 new TRAN
 opcodes (600–606) and 5 new data fields (0x01F5–0x01F9). They don't
@@ -254,28 +297,31 @@ are gated behind the capability echo — legacy servers and legacy
 clients are completely unaffected. Same property as every other
 fogWraith extension we've already shipped.
 
-### Why split the SDP / ICE work between Rust and GStreamer
+### Why split the SDP / ICE work between `hotline-proto` and `gstreamer-rs`
 
-GStreamer parses SDP into `GstSDPMessage` and ICE candidates into
-`GstWebRTCICE` internally. We don't need a second full SDP parser
-in Rust. What we *do* need from Rust:
+`gstreamer-rs` parses SDP into `gst_sdp::SDPMessage` and ICE
+candidates into `WebRTCICECandidate` (v1.28). We don't need a second
+full SDP parser in Rust. What we *do* still want from
+`hotline-proto`:
 
 - **mid label parsing** — `user-{UID}` → `u16 user_id` with strict
-  validation (no leading zeros, in 1..=65535, etc.). This is wire-
-  format-shaped, belongs in `hotline-proto`.
+  validation (no leading zeros, in 1..=65535, etc.). Wire-format
+  shaped, belongs in `hotline-proto`. The runtime crate then maps
+  the parsed mid to the `WebRTCRTPTransceiver` it associates with.
 - **Participant blob walking** — the packed 6-byte-per-entry
   `DATA_VOICE_PARTICIPANTS` binary is exactly the shape `hotline-
   proto::parse` already handles for the file-list and history walkers.
 - **ICE JSON build / parse** — the inner JSON payload is wire data
-  carried inside a Hotline data field. Rust owns that boundary.
+  carried inside a Hotline data field. Rust owns that boundary, and
+  the runtime hands the parsed `{ candidate, sdp_mline_index }` to
+  `webrtcbin.emit("add-ice-candidate", …)`.
 - **SDP summary** — extract just the `a=mid` list and the BUNDLE
-  group from the SDP blob so the C controller can sanity-check what
-  GStreamer is about to set as the remote description. Cheap defensive
-  parse, not a full SDP implementation.
+  group from the SDP blob so the state machine can sanity-check what
+  it's about to set as the remote description. Cheap defensive parse,
+  not a full SDP implementation.
 
-The full SDP and full ICE handling stays in GStreamer where they
-belong. The C controller drives `GstSDPMessage` / `GstWebRTCICE`
-directly — those aren't wire types, they're media-stack types.
+Full SDP and full ICE handling stays in `gstreamer-rs` /
+`gst-sdp-rs` where they belong.
 
 ---
 
@@ -285,11 +331,132 @@ Each sub-phase ends on a clean build + passing tests. Same discipline
 as the TLS phasing — don't pile up "and these other 800 lines also
 need to land before anything works."
 
+### Phase 8.0 — R3.0 glib-rs foothold (prerequisite)
+
+Goal: the Rust workspace gains the `glib` / `gio` / `gtk4` /
+`libadwaita` crate trees, and we land + document the pattern for
+Rust code to wrap a C-owned GObject and emit signals on it. This is
+the precondition that makes `gstreamer-rs` (Phase 8.B+) a reasonable
+choice. Independent of the rest of R3 (no tokio, no `hxnet`, no
+`xfers.c` port — just the GLib/gtk-rs deps and the wrapping pattern).
+
+Crate name: **`hxbridge`** — the name RUST-ROADMAP §R3 work item 2
+already uses for the Rust↔GLib bridge crate. Phase 8.0 lands the
+precursor; subsequent R3 work expands it with the tokio↔GLib
+forwarding pipeline.
+
+Work:
+1. Add `glib`, `gio`, `gtk4`, `libadwaita`, `gstreamer`,
+   `gstreamer-app`, `gstreamer-audio`, `gstreamer-sdp`,
+   `gstreamer-webrtc`, `gstreamer-rtp` to `rust/Cargo.toml`. Pin to
+   the gtk-rs-core 0.22 family (which is what RUST-ROADMAP's
+   "gtk4-rs is at 0.11+" note refers to — gtk4 0.11 ships in
+   gtk-rs-core 0.22) and the gstreamer-rs 0.25 line. Plumb through
+   the existing `rust/meson.build` `custom_target` — no special
+   build work, the cargo workspace picks them up.
+2. New `rust/crates/hxbridge/`. Contains:
+   - `pub unsafe fn session_from_ptr(ptr: *mut GObject) -> glib::Object` —
+     wraps `glib::Object::from_glib_borrow` with the lifetime model
+     spelled out in a doc-comment (Rust holds a borrowed ref, C owns
+     the GObject, do not `g_object_unref` from Rust). **Decision to
+     lock in via the lifetime-model doc page:** use `from_glib_borrow`
+     for read-only / non-emit access; use `from_glib_none` (which adds
+     a ref, dropped on Rust-side drop) for the emit path, because
+     C signal handlers can re-enter and `g_object_unref` the session
+     out from under a borrowed Rust handle. Picking `from_glib_none`
+     for emit is one extra ref per call — negligible cost vs the
+     use-after-free window `from_glib_borrow` would open.
+   - One reference implementation of "emit a `GtkhxSession` signal
+     from Rust" — **pick a scalar-only signal**. `task-update`
+     (carries `(session, task)` where `task` is an opaque pointer in
+     `G_TYPE_POINTER`, no boxed-type plumbing involved) is the
+     obvious candidate, or `user-delete` / `users-clear` if a less
+     hot-path signal is preferable. **Do NOT** pick a boxed-type
+     signal (`chat`, `msg`, `user-create`, etc.); the
+     `HxChatEvent`/`HxMsgEvent` boxed-type port is R4 work per the
+     post-R2 roadmap, and dragging it into R3.0 inflates scope.
+3. CI: add `cargo build -p hxbridge` to the existing matrix.
+   Confirm Tier 1, 2, 3 still green; the existing C-only build path
+   is unaffected because nothing C-side uses the new crate yet.
+4. Document the wrapping pattern in `docs/rust-glib-interop.md` —
+   future contributors should not have to re-derive the lifetime
+   model. Two pages, max: the wrapping shape, the `from_glib_borrow`
+   vs `from_glib_none` rule (with the re-entrant-emit example that
+   motivates it), and a one-paragraph pointer to
+   `glib::MainContext::default().spawn_local` for futures (no
+   wrapper — the canonical glib name is the documented entry point;
+   wrapping it would just hide the canonical spelling without adding
+   type safety).
+
+Tests (~150 LOC, not 50):
+- Ref-count doesn't leak across N emits (loop 1000 times,
+  `g_object_unref` self afterwards, check refcount is back to 1).
+- C-side handler observes the Rust-driven emit (set a flag in a
+  `g_signal_connect`'d C callback, assert it fires).
+- Re-entrant emit: Rust emits → C handler emits the same signal →
+  Rust handler. The `from_glib_none` decision above keeps this
+  re-entrant case safe; the test pins it.
+- `glib::MainContext::default().spawn_local` actually polls the
+  future (set a flag from inside the future, drive the main loop,
+  assert the flag flipped).
+
+**Costs to flag.** Phase 8.0 isn't free even at "~1 week + 150 LOC":
+
+- **Cargo.lock blast radius.** The gtk-rs-core + gstreamer-webrtc-rs
+  dep tree is large — today's `Cargo.lock` is around 150 crates;
+  after 8.0 it's 700+. This affects (a) CI cache size / restore
+  time, (b) the vendored `cargo-sources.json` Flatpak builds depend
+  on (offline-sources tarball balloons proportionally), (c) cold-
+  build time for new contributors.
+- **GStreamer runtime floor.** gstreamer-rs 0.25 tracks GStreamer
+  1.26. The Flatpak runtime (`com.nasledov.gtkhx.yml`) needs to
+  ship 1.26-or-newer when 8.B starts consuming the WebRTC bindings —
+  GNOME 47 runtime ships GStreamer 1.24, GNOME 48 brings 1.26.
+  Verify before 8.B; not blocking for 8.0 itself since 8.0 only
+  pulls the bindings in, doesn't exercise them yet.
+- **Pre-emptive commit to gtk-rs 0.22 idioms.** R3.0 ships the
+  lifetime model and signal-emit shape ahead of R3 proper, R4, and
+  R5. A bad pattern at this layer propagates. The
+  `docs/rust-glib-interop.md` page is the single source of truth
+  for the convention; treat its review as Phase 8.0 work, not 8.0
+  follow-up.
+
+Exit criteria: workspace compiles cleanly with the new deps. The
+chosen scalar signal (e.g. `task-update`) is emitted from Rust via
+`hxbridge`, with the C-side call site reduced to a thin pass-
+through. `docs/rust-glib-interop.md` checked in and reviewed.
+Tier 1/2/3 green. The `gstreamer-webrtc` crate graph is in the
+build but unused — voice work in 8.B starts using it. Flatpak
+runtime version + GStreamer 1.26 floor verified (note in the doc
+even if action defers to 8.B).
+
+Branch: `claude/voice-phase-0-glib-foothold` (a sub-branch of the
+RUST-ROADMAP R3 work, even though it lands ahead of formal R3
+kickoff).
+
+**Order note** — §5 lands 8.0 before 8.A. The case for: 8.0 is the
+gtk-rs version + dep-tree commit, and 8.B (gstreamer-rs pipeline)
+shouldn't have to scramble for the wrapping pattern under time
+pressure. The case against: 8.A is pure hotline-proto wire-format
+extension and could land first with no gtk-rs deps at all,
+deferring the 700-crate Cargo.lock churn. We keep 8.0 first
+because the lifetime-model doc page lands once and is a permanent
+asset; landing 8.A first would mean reviewing the 8.0 PR with
+nothing to look at except "one signal moved to Rust + Cargo.lock
+ballooned." If 8.0 starts and the dep churn looks worse than
+expected (Flatpak vendoring blows up, CI cache eviction starts
+churning), swap the order — 8.A doesn't depend on 8.0 work at
+all.
+
 ### Phase 8.A — Capability advertisement + signaling scaffolding
 
 Goal: server sees us as voice-capable, we can send and receive every
 600–606 opcode, but no media flows yet. **All new wire code lands in
-Rust.**
+Rust.** Depends on Phase 8.0 only for the `hotline-proto` workspace
+machinery already shipped in R2 — 8.A could land before 8.0 if we
+wanted to interleave, but the order in this doc lands 8.0 first so
+8.B doesn't have to scramble for the glib-rs pattern under time
+pressure.
 
 Work:
 1. Add `VoiceJoinRoom` (600) through `VoiceMute` (606) variants to
@@ -321,9 +488,12 @@ Work:
    bitmap accessor `hl_access_has()` already handles bits 0–63,
    no new decoding work needed. Phase 8.D queries this constant to
    grey out the Voice button when the user lacks permission.
-6. New thin `src/voice.{c,h}` controller that just calls into the
-   Rust builders + emits the chunks through `hlwrite_chunks`. No
-   GStreamer yet.
+6. New `src/voice.h` opaque-handle header + thin `rcv.c`-side
+   wire-out path that calls the Rust builders in `hotline-proto::voice`
+   and emits the chunks through `hlwrite_chunks`. No `hxvoice-runtime`
+   crate yet — that lands in 8.C. Builder FFI is needed for these
+   in-flight 8.A sends; mark the shims for retirement once 8.C wires
+   the runtime to call the Rust builders directly.
 7. New `rcv_task_voice_*` in `src/rcv.c` — call Rust parsers, log
    the typed result, emit GtkhxSession signals. View side not wired
    yet.
@@ -341,95 +511,110 @@ events. Nothing audible. Rust test count grows by ~15–20.
 
 Branch: `claude/voice-phase-a`.
 
-### Phase 8.B — GStreamer dependency + bare pipeline
+### Phase 8.B — GStreamer dependency + bare pipeline (Rust)
 
-Goal: a GStreamer pipeline that captures from the mic, encodes to
-μ-law, and renders silence on playback — proves the dep is wired,
-the audio devices are reachable, the build works on Flatpak, none
-of the protocol changes have moved.
+Goal: a `hxvoice-runtime` skeleton that owns a `gst::Pipeline`,
+captures from the mic, encodes to μ-law, and renders silence on
+playback — proves the gstreamer-rs crates are wired, the audio
+devices are reachable, the build works on Flatpak, none of the
+protocol changes have moved.
 
 Work:
-1. `meson.build` additions: `dependency('gstreamer-1.0', version:
-   '>=1.20')`, `gstreamer-app-1.0`, `gstreamer-audio-1.0`,
-   `gstreamer-webrtc-1.0`. Flatpak `com.nasledov.gtkhx.yml`
-   confirms the GNOME runtime already ships them; if not, add
-   `org.freedesktop.Sdk.Extension.gst-plugins-bad` lines.
-2. `gst_init` in `gtkhx.c::main` before `gtk_init`.
-3. New `src/voice_audio.{c,h}` — enumerate input devices via
-   `GstDeviceMonitor`, factory functions that return configured
-   source/sink elements.
-4. Smoke test (`tests/integration/test_voice_loopback.c`,
-   Tier 1) that builds a `autoaudiosrc ! mulawenc ! mulawdec !
-   fakesink` pipeline, runs it for 100 ms, checks state went to
-   PLAYING. Catches "GStreamer is here, audio is accessible" on CI.
+1. C-side `meson.build` additions: `dependency('gstreamer-1.0',
+   version: '>=1.20')`, `gstreamer-app-1.0`, `gstreamer-audio-1.0`,
+   `gstreamer-webrtc-1.0`. The system libs are still required (the
+   Rust crates wrap them via `gstreamer-sys`). Flatpak
+   `com.nasledov.gtkhx.yml` confirms the GNOME runtime already ships
+   them; if not, add `org.freedesktop.Sdk.Extension.gst-plugins-bad`
+   lines.
+2. `gst::init()` from Rust, called once from the C `main` via a
+   small `gtkhx_voice_init()` shim. Order: `gst::init` after
+   `gtk_init` since GStreamer doesn't care about display init.
+3. New `rust/crates/hxvoice-runtime/src/audio.rs` — enumerate input
+   devices via `gst::DeviceMonitor`, factory functions that return
+   configured `gst::Element` for source / sink. Replaces the planned
+   C `voice_audio.{c,h}` outright.
+4. Smoke test (`hxvoice-runtime/tests/loopback.rs`, Tier 2) that
+   builds an `audiotestsrc ! mulawenc ! mulawdec ! fakesink`
+   pipeline, runs it for 100 ms, checks state reached `Playing`.
+   `audiotestsrc` (not `autoaudiosrc`) because CI containers have no
+   audio device. Catches "gstreamer-rs is here and the wrapped libs
+   work" before any voice-specific code.
 
-Exit criteria: clean build with new deps. Loopback test passes
-locally and in the Tier 1 suite. No protocol changes in this
+Exit criteria: clean build with new deps. Loopback Rust test
+passes locally and in the Tier 2 suite. No protocol changes in this
 phase — voice transactions still scaffolded only from Phase A.
 
 Branch: `claude/voice-phase-b`.
 
-### Phase 8.C — state machine (Rust) + webrtcbin glue (C)
+### Phase 8.C — state machine + webrtcbin runtime (both Rust)
 
 Goal: send-only voice works against Janus. We can hear a remote
 participant but they can't hear us yet. (Or vice versa — pick
 one direction to chase down completely first.)
 
-This is the phase where the hybrid split earns its keep. The state
+This is the phase where the all-Rust pivot earns its keep. The state
 machine lands first, fully tested in pure Rust against scripted
 event sequences from the spec's annotated lifecycle examples; the
-GStreamer glue lands second and is reduced to "translate
-GStreamer signal → Rust event, walk action list → call GStreamer."
+`gstreamer-rs` runtime lands second and is reduced to "translate
+typed GStreamer signal → typed Rust event, walk action list → call
+typed GStreamer methods."
 
 Work:
 1. New `rust/crates/hxvoice/` — pure `SessionMachine` per §4. Lands
    with property tests covering every event-in-every-state
    transition, plus replays of the spec's "B joins room with A
-   already in voice" and "B leaves" sequences as event traces.
-   Builder, FFI shims (`hxvoice_session_new`, `_free`, `_step`),
-   `#[repr(C)]` event/action marshalling structs. Layout pinned
-   with the same `_Static_assert` + `const _: ()` pattern R2
-   already uses.
-2. New `src/voice.{c,h}` — transport glue. Holds the per-cid
-   `GstPipeline*`, `GstWebRTCBin*`, the opaque `HxVoiceSession*`,
-   and a small action-dispatch switch. Roughly one C function per
-   `Action` variant (`do_set_remote_description`,
-   `do_send_wire_frame`, `do_emit_signal`, …); roughly one
-   pump-event helper per `Event` source (`pump_from_rcv_task`,
-   `pump_from_webrtcbin_signal`, `pump_from_ui`, …).
-3. Wire the SDP offer flow: 602 arrives → rcv_task parses with
-   Rust → `pump_from_rcv_task(SdpOfferReceived)` → state machine
-   returns `[SetRemoteDescription, CreateAnswer]` → C calls
-   `gst_webrtc_bin_set_remote_description`, then
-   `g_signal_emit_by_name(webrtcbin, "create-answer", ...)` →
-   answer-created callback fires → `pump_from_webrtcbin_signal(
-   WebrtcAnswerCreated)` → state machine returns
-   `[SetLocalDescription, SendWireFrame(603, …)]`.
-4. Wire the ICE flow with the same shape: `on-ice-candidate` →
-   `WebrtcLocalIceGathered` event → `SendWireFrame(604)` action;
-   incoming 604 → `IceCandidateReceived` event → `AddRemoteIce`
-   action; empty-candidate end-of-candidates handled with a
-   distinct `EndOfRemoteCandidates` event so the state machine
-   knows it has a complete remote candidate set.
-5. Track-to-user mapping in Rust: `WebrtcPadAdded { mid }` event →
-   the machine cross-references its mid→UID map (populated from
-   the SDP summary parse) and returns
-   `StartReceivePipeline { mid, user_id }`. C builds the
-   `rtppcmudepay ! mulawdec ! … ! autoaudiosink` sub-pipeline
-   rooted at the new pad.
+   already in voice" and "B leaves" sequences as event traces. No
+   FFI needed — `hxvoice-runtime` consumes it as a normal Rust crate
+   dep.
+2. New `rust/crates/hxvoice-runtime/src/runtime.rs` — `VoiceRuntime`
+   owns the `gst::Pipeline`, `gstreamer_webrtc::WebRTCBin`, the
+   `hxvoice::SessionMachine`, and a `glib::Object` borrow of the
+   C-side `GtkhxSession`. One method per inbound event source
+   (`handle_join`, `handle_leave`, `handle_mute_toggle`,
+   `handle_rcv_task`), each calling `SessionMachine::step` and
+   dispatching the returned actions.
+3. Wire the SDP offer flow with typed `gstreamer-rs` calls: 602
+   arrives → C `rcv_task_voice_sdp_offer` calls
+   `gtkhx_voice_runtime_handle_rcv_task` → `SessionMachine::step`
+   returns `[SetRemoteDescription, CreateAnswer]` →
+   `webrtcbin.emit("set-remote-description", &[&sdp, &None::<gst::Promise>])`,
+   then `webrtcbin.emit("create-answer", &[&None::<gst::Structure>, &promise])`
+   where `promise = gst::Promise::new_with_change_func(move |reply| { … step(WebrtcAnswerCreated …) })`
+   → state machine returns `[SetLocalDescription, SendWireFrame(603, …)]`.
+4. Wire the ICE flow with the same shape: `webrtcbin.connect("on-ice-candidate", false, …)`
+   → `WebrtcLocalIceGathered` event → `SendWireFrame(604)` action;
+   incoming 604 → `IceCandidateReceived` event → `webrtcbin.emit("add-ice-candidate", &[&mline_index, &candidate])`.
+   The empty-candidate end-of-candidates marker becomes a distinct
+   `EndOfRemoteCandidates` event so the state machine knows it has a
+   complete remote candidate set.
+5. Track-to-user mapping in Rust: `webrtcbin.connect_pad_added(…)`
+   (typed!) → `WebrtcPadAdded { mid }` event → the state machine
+   cross-references its mid→UID map (populated from the SDP summary
+   parse) and returns `StartReceivePipeline { mid, user_id }`. The
+   runtime adds `rtppcmudepay ! mulawdec ! audioconvert !
+   audioresample ! autoaudiosink` as a `gst::Bin` and links it to
+   the new pad.
 6. Renegotiation serialization in the state machine — `OfferPending`
-   state queues a second `SdpOfferReceived`, transitions emit
-   `[]` until the first answer flushes, then drains. The C side
-   doesn't know about the queue at all.
+   state queues a second `SdpOfferReceived`, transitions emit `[]`
+   until the first answer flushes, then drains. The runtime doesn't
+   know about the queue at all.
 7. Timeouts (spec §Session Timeout and Failure) as `ArmTimer` /
-   `CancelTimer` actions plus a `Timeout { kind }` event the C
-   side fires from `g_timeout_add_seconds` callbacks. ICE failure,
-   DTLS failure, media timeout all funnel through the same shape.
+   `CancelTimer` actions plus a `Timeout { kind }` event the runtime
+   fires from `glib::timeout_add_seconds_local` callbacks. ICE
+   failure, DTLS failure, media timeout all funnel through the same
+   shape.
+8. Bus message handling — `pipeline.bus().unwrap().add_watch_local(…)`
+   forwards `gst::message::MessageView::Error` / `::Warning` /
+   `::StateChanged` into typed events the state machine can react to
+   (e.g. on `WebRTCPeerConnectionState::Failed`, transition to
+   `Leaving` and emit `EmitSignal { voice-error }`).
 
 Exit criteria: against Janus, join an empty room → invite a second
 client (or use the Janus admin tooling to inject a participant) →
 SDP offer received → answer + ICE complete → audio flows. Rust
-state-machine test count >50.
+state-machine test count >50; `hxvoice-runtime` loopback test count
+>5.
 
 Branch: `claude/voice-phase-c`.
 
@@ -624,14 +809,17 @@ Phase 8.C and finding incompatibilities the hard way.
   `com.nasledov.gtkhx.yml` doesn't request either. Phase 8.B adds
   `--device=all` as the cheap path; portal-based capture is a Phase
   8.x follow-up if we care about stricter sandboxing.
-- **`gtkthreads.c` recursive mutex + GStreamer.** GStreamer's bus
+- **`gtkthreads.c` recursive mutex + gstreamer-rs.** GStreamer's bus
   callbacks fire on the main loop and should be safe under the
   existing thread model, but webrtcbin's worker threads emit signals
-  (`on-ice-candidate`, `on-negotiation-needed`) that we'll be
-  marshalling back to main via `g_idle_add` — same pattern as the
-  HTXF workers in `network.c` / `xfers.c`. Don't be tempted to send
-  604/606 directly from the webrtcbin callback thread; route through
-  the idle.
+  (`on-ice-candidate`, `on-negotiation-needed`) on arbitrary threads.
+  In gstreamer-rs, `connect_local` / `connect_closure_local` is the
+  main-thread-only variant; for `connect` (which can fire from any
+  thread), wrap the closure body in `glib::MainContext::default().spawn(async move { … })`
+  to marshal back to main before touching the state machine or the
+  C-side GtkhxSession. Same discipline as the HTXF workers in
+  `network.c` / `xfers.c`; documenting in `rust-glib-interop.md`
+  (Phase 8.0) is part of the foothold work.
 - **SDP size and Hotline framing.** `DATA_VOICE_SDP` is a Hotline
   data field with the standard `uint16` length prefix → 65535 bytes
   max. Spec says a 16-participant voice SDP is well under 10 KB.
@@ -669,26 +857,34 @@ Phase 8.C and finding incompatibilities the hard way.
   128-bit extended bitmap
   (gated on `HTLC_CAP_EXTENDED_PRIV`, which we don't advertise yet)
   is a separate follow-up; voice doesn't need it.
-- **Rust workspace grows by one crate + ~16 FFI shims.** `hxvoice`
-  is the new crate (~600 LOC, the state machine); `hotline-proto`
-  gains a `voice` module (~300 LOC, the wire-protocol parsers/
-  builders) and ~10 new FFI shims. The state machine adds ~6 more
-  FFI entry points (`hxvoice_session_new` / `_free` / `_step` plus
-  event/action marshalling). The existing `rust/meson.build`
-  `custom_target` picks up the new crate by listing it in
-  `rust/Cargo.toml`'s workspace members and recompiles whenever
-  any `.rs` under `rust/` changes — no special build-system work.
-- **State machine is a no_std-friendly pure crate.** No GLib, no
-  GStreamer, no GTK in `hxvoice`. This is what makes the future
-  gstreamer-rs migration cheap: when the C glue eventually swaps
-  to a Rust controller (post-R3, when there's a tokio runtime and
-  a glib-rs main-context bridge), `hxvoice` keeps its shape
-  exactly — only the *event sources* and *action dispatchers*
-  change from `unsafe extern "C"` to safe glib-rs / gstreamer-rs
-  calls. Concrete consequence for Phase 8: do not let
-  GLib/GStreamer types creep into `hxvoice`'s public types, even
-  via FFI. Events and actions are plain `#[repr(C)]` structs of
-  primitives + byte slices.
+- **Rust workspace grows by two crates + ~10 FFI shims.** `hxvoice`
+  is one new crate (~600 LOC, pure state machine, no GLib /
+  GStreamer / GTK deps — CI can test it without GStreamer
+  installed); `hxvoice-runtime` is the other (~900 LOC, gstreamer-rs
+  + glib-rs dispatch); `hotline-proto` gains a `voice` module
+  (~300 LOC, wire-protocol parsers/builders) and ~4 new FFI shims
+  for `rcv.c`'s wire-dispatch path. `hxvoice-runtime` exposes ~6
+  opaque-handle FFI entry points (`gtkhx_voice_runtime_new` / `_free`
+  / `_handle_*`). The existing `rust/meson.build` `custom_target`
+  picks both crates up by listing them in `rust/Cargo.toml`'s
+  workspace members. Phase 8.0 lands the new gtk-rs / gstreamer-rs
+  workspace deps; 8.B onward consumes them.
+- **State machine stays a no_std-friendly pure crate.** No GLib, no
+  GStreamer, no GTK in `hxvoice`. The deliberate isolation lets
+  `cargo test -p hxvoice` run in any CI container regardless of
+  audio device or GStreamer install state; it also means
+  `hxvoice-runtime` is the only crate that takes the gstreamer-rs
+  dep surface. Concrete consequence: do not let GLib/GStreamer types
+  creep into `hxvoice`'s public types. Events and actions stay plain
+  Rust structs of primitives + byte slices + small typed enums.
+- **R3.0 makes glib-rs idioms first-class in the workspace.** Phase
+  8.0 is the first time we write Rust that wraps a C-owned GObject
+  (`unsafe { glib::Object::from_glib_borrow(ptr) }`) and emit
+  signals on it. Document the lifetime model in
+  `docs/rust-glib-interop.md` (Rust holds a borrowed ref, C owns the
+  GObject — do not `g_object_unref` from Rust under any
+  circumstance, including `Drop`). Future contributors should not
+  have to re-derive this.
 - **GStreamer 1.20 floor.** That's the version webrtcbin stabilized
   in. GNOME runtime 49 (our Flatpak target) ships 1.24+, so we're
   fine. Distro packagers on Debian stable / older RHEL might lag —
@@ -703,9 +899,12 @@ Phase 8.C and finding incompatibilities the hard way.
 
 ## 8. Open decisions to lock in before Phase 8.A
 
-- **WebRTC stack**: GStreamer webrtcbin via the C bindings, with
-  the hybrid Rust state machine (§4) in `hxvoice`. Migration to
-  `gstreamer-rs` deferred to after R3-R4 per §11. Confirm.
+- **WebRTC stack**: GStreamer `webrtcbin` via `gstreamer-rs` (revised
+  2026-06-09 — see §3). Voice controller is all-Rust: state machine
+  in `hxvoice`, runtime in `hxvoice-runtime`. Phase 8.0 (R3.0
+  glib-rs foothold) is the ~1-week prerequisite that lands the
+  gtk-rs / gstreamer-rs crate deps and the C-GObject wrapping
+  pattern. Confirm.
 - **Mock SFU**: skip for v1 — Janus (already in our Tier 3 matrix
   as the TLS target) implements the spec, so the happy-path tests
   run against a real server and the adversarial cases land as
@@ -743,20 +942,35 @@ weeks at evening pace; multiply by ~3 for life).
 
 | Phase | C LOC | Rust LOC | Test LOC | Calendar |
 |---|---|---|---|---|
-| 8.A — capability + signaling | ~150 | ~300 | ~400 | 1–2 weeks |
-| 8.B — GStreamer pipeline | ~250 | — | ~100 | 1 week |
-| 8.C — state machine + webrtcbin glue | ~350 | ~600 | ~700 | 3–4 weeks (the hard one) |
+| 8.0 — R3.0 glib-rs foothold (prereq) | ~20 | ~150 | ~150 | 1 week |
+| 8.A — capability + signaling | ~120 | ~300 | ~400 | 1–2 weeks |
+| 8.B — gstreamer-rs deps + bare pipeline | ~30 | ~200 | ~150 | 1 week |
+| 8.C — state machine + webrtcbin runtime (all Rust) | ~50 | ~1,500 | ~800 | 3–4 weeks (the hard one) |
 | 8.D — UI in chat tab | ~600 | — | ~200 | 1–2 weeks |
-| 8.E — settings + PTT | ~300 | — | ~100 | 1 week |
+| 8.E — settings + PTT | ~300 | ~50 | ~100 | 1 week |
 | 8.F — tests against Janus | ~150 | — | ~800 | 1 week (no mock SFU to build) |
 
-Biggest risk is 8.C: webrtcbin's API has sharp edges around
-`pad-added` race conditions and the renegotiation flow. The hybrid
-split mitigates this — the state machine is fully testable in
-isolated Rust before any GStreamer glue exists, so the C side
-ships against a known-good control flow. Budget debugging time
-generously anyway; the glue layer is where the GStreamer
-surprises will land.
+Totals (revised): ~1,270 C LOC + ~2,200 Rust LOC + ~2,600 test LOC,
+across 9–11 calendar weeks at evening pace (~27–33 weeks lifeful).
+The C → Rust shift vs the old plan: ~280 C LOC moved into Rust
+(`voice.c` 350 + `voice_audio.c` 200, minus ~270 C LOC retained for
+the opaque-handle header + thin wire-out path + UI panels +
+settings + rcv.c dispatch), Rust gains ~1,300 LOC (the
+`hxvoice-runtime` crate replacing the C glue). Phase 8.0 is the
+new ~1-week prerequisite.
+
+Biggest risk is still 8.C: `webrtcbin`'s API has sharp edges around
+`pad-added` race conditions and the renegotiation flow. The all-
+Rust pivot mitigates this differently than the hybrid plan did —
+instead of one language for the state machine + another for
+dispatch, we get typed signal connections, typed
+`gst::Promise::new_with_change_func` callbacks, and exhaustive
+`match` on `WebRTCSignalingState`. The state machine still ships
+first (testable in `cargo test -p hxvoice` with zero GStreamer dep),
+and the runtime crate's loopback tests catch binding-level issues
+against an in-process two-webrtcbin loopback before we even reach
+Janus. Budget debugging time generously anyway; the GStreamer
+surprises will land in the runtime crate, not the state machine.
 
 ---
 
@@ -778,82 +992,99 @@ surprises will land.
 
 ---
 
-## 11. Future migration to `gstreamer-rs`
+## 11. What this means for R3 / R4 / R5
 
-Long-term, the voice controller should be all Rust — `gstreamer-rs`
-+ `gstreamer-webrtc-rs` owning the `GstWebRTCBin` outright, with
-the C glue gone. This was the path not taken in Phase 8 because
-the prerequisites (tokio runtime, `glib::MainContext` interop,
-Rust-side `g_signal_emit` on the C GtkhxSession GObject) belong to
-Phase R3-R4 and bundling them into voice would inflate the phase.
-The hybrid split in §4 is the intermediate step that gets us most
-of the value now while preserving cheap migration later.
+Phase 8 (per the 2026-06-09 revision) is the leading edge of the
+gtk-rs adoption that `docs/RUST-ROADMAP.md` plans across R3–R6. The
+voice work doesn't *do* R3 — there's still no tokio runtime, no
+`hxnet` Connection actor, no `xfers.c` / `banner.c` port — but it
+establishes the glib-rs / gstreamer-rs idioms the rest of R3+ will
+build on.
 
-The migration plan, once R3-R4 has set the table:
+What R3 inherits from Phase 8:
 
-1. **`hxvoice` doesn't change.** This is the whole point of keeping
-   it free of GLib / GStreamer types. The state machine, the
-   property tests, the action/event marshalling all stay byte-for-
-   byte identical. The handful of FFI shims in `hxvoice::ffi`
-   become safe-Rust functions in `hxvoice::lib` directly callable
-   from the Rust controller.
-2. **A new `rust/crates/hxvoice-runtime/`** wraps `hxvoice` with
-   the side-effectful layer: holds the `gstreamer::Pipeline`, the
-   `gstreamer_webrtc::WebRTCBin`, the per-cid receive pipelines.
-   Subscribes to webrtcbin signals using gstreamer-rs's typed
-   `connect_*` methods (no more `g_signal_connect` with a void*
-   callback and manual data lifetime tracking). Pumps events into
-   `SessionMachine::step` and dispatches the returned actions.
-3. **C `src/voice.{c,h}` deletes.** Its rcv_task entry points
-   become FFI calls into `hxvoice-runtime`. Its GStreamer
-   pipeline ownership moves to Rust. The UI side (`voice_panel.c`)
-   keeps talking to it through the same `GtkhxSession` signals,
-   which by then will themselves be Rust-side per R4.
-4. **`voice_audio.c` either deletes or becomes a 50-LOC wrapper**
-   for `GstDeviceMonitor` enumeration that the settings page
-   consumes. The device-monitor API is also available through
-   gstreamer-rs, so it likely just disappears.
+- **The C-GObject wrapping pattern.** `unsafe { glib::Object::from_glib_borrow(ptr) }`
+  with the lifetime model documented in `docs/rust-glib-interop.md`.
+  R3's tokio↔GLib bridge crate (`hxbridge` per RUST-ROADMAP) uses
+  the same pattern when forwarding events into the C `GtkhxSession`.
+- **The `glib::MainContext::default().spawn_local` discipline.**
+  Phase 8's `hxvoice-runtime` uses it for webrtcbin signal handlers;
+  R3 uses it for the tokio→GLib forwarding pipeline. The Phase 8.0
+  doc page is the canonical reference.
+- **The Rust workspace's gtk-rs / gstreamer-rs / libadwaita
+  dependency graph.** Phase 8.0 lands the deps; subsequent R3+ work
+  consumes them without further `Cargo.toml` plumbing.
 
-Order matters: this migration sits *behind* R3 (tokio + main-
-context bridge) and *behind* R4 (Rust GtkhxSession, so action
-dispatch can emit signals natively). It does not require waiting
-for R5's UI migration — the C UI side can keep talking to a Rust
-controller across the existing GObject signal boundary.
+What changes for R4 (GtkhxSession in Rust):
 
-Estimated cost when the time comes: the state machine is already
-there, so this is roughly 600–800 LOC of `hxvoice-runtime` Rust
-replacing ~550 LOC of `voice.c` + `voice_audio.c` glue. Net code
-change is small; the win is removing manual GObject lifetime
-management for `GstWebRTCBin` callbacks and getting
-gstreamer-rs's typed pad / message / promise APIs in exchange.
+- The C `GtkhxSession` adds 6 new voice-related signals in Phase 8.D
+  (`voice-room-status`, `voice-track-added`, etc.). When R4 ports
+  GtkhxSession to a `glib::subclass`-derived Rust GObject, the voice
+  signals come along — they're nothing special, just more `Signal::builder()`
+  entries in `class_init`. The `hxvoice-runtime` emit calls go from
+  `glib::Object::from_glib_borrow(c_ptr).emit_by_name(…)` to direct
+  method calls on the typed `GtkhxSession`, but that's a one-call-
+  site mechanical change.
 
-The decision to go hybrid for Phase 8 is not a vote against
-gstreamer-rs; it is a vote against doing R3's prerequisite work
-inside a feature phase. The state-machine-in-Rust split is
-explicitly designed to make this migration a swap, not a rewrite.
+What changes for R5 (UI in Rust, window by window):
+
+- `voice_panel.{c,h}` ports across when `chat.c` does (chat-tab UI).
+  Calls into `hxvoice-runtime` switch from FFI shims to direct
+  method calls.
+- `voice_settings.{c,h}` ports across when `options.c` does. Same
+  story.
+- The `voice.h` opaque-handle header and the FFI shim layer in
+  `hxvoice-runtime::ffi` both delete when no C UI is left.
+
+What doesn't change ever: `hxvoice` stays `no_std`-friendly with
+pure typed data in/out. That's load-bearing for keeping CI's
+state-machine test runs cheap.
+
+The original §11 framed gstreamer-rs adoption as a future migration
+that would replace C glue. The 2026-06-09 revision collapses that
+distinction — we ship Phase 8 already using gstreamer-rs, the
+"migration" never happens because the C glue never gets written.
 
 ---
 
 ## 12. Suggested next concrete step
 
-Janus already implements the voice extension, so unlike the chat-
-history rollout there's no gating spike — we can start Phase 8.A
-immediately against the existing Tier 3 Janus container.
+The 2026-06-09 revision changed the first step. **Phase 8.0 — R3.0
+glib-rs foothold** is now the gating work: ~1 week to land the
+gtk-rs / gstreamer-rs / libadwaita workspace deps and document the
+C-GObject wrapping pattern. Without it, 8.B+ doesn't have the
+machinery to drive `gstreamer-rs`.
 
-Two pre-flight items:
+Pre-flight items in parallel with 8.0:
 
 1. **Confirm Janus voice impl status** with the VesperNet
    maintainers — wire protocol vs. server-side behaviour
    (mute enforcement, access bit, room-full). One short ping,
-   not a blocker for starting the Rust scaffolding.
+   not a blocker for starting 8.0 or 8.A.
 2. **Extend the Janus test container** to expose UDP base+4
    alongside the existing TCP control + TLS ports. Edit
    `tests/janus/Dockerfile` (and `tests/janus/conf/` if voice
    needs a server-side enable flag), then mirror the port in the
    CI service-container block in `.github/workflows/tests.yml`.
 
-Then Phase 8.A — Rust opcode/field enums in `hotline-proto`,
-builders/parsers, capability bit advertised, `voice.{c,h}` stub.
-First milestone: a debug toggle that fires Join (600) and we see
-the 602 SDP offer come back in the proto trace, parsed into a
-structured event by Rust. No GStreamer, no UI.
+Phase 8.A can interleave with 8.0 — the wire-protocol Rust code
+(`hotline-proto::voice` module + the `gtkhx_proto_parse_voice_*`
+FFI shims) lives entirely in `hotline-proto` and doesn't depend on
+glib-rs. Land 8.A's wire scaffolding while 8.0's glib-rs foothold
+shakes out, then 8.B builds on both. First user-visible milestone is
+still 8.A: a debug toggle that fires Join (600) and we see the 602
+SDP offer come back in the proto trace, parsed into a structured
+event by Rust. No GStreamer, no UI.
+
+Branch sequencing:
+
+1. `claude/voice-phase-0-glib-foothold` — adds the gtk-rs /
+   gstreamer-rs / libadwaita workspace deps, lands `hxbridge`
+   wrapping shim, docs the pattern. Merges to main first.
+2. `claude/voice-phase-a` — `hotline-proto::voice` module,
+   capability bit, rcv.c dispatch with debug-only logging. Can
+   open in parallel with 8.0 once the rebase target is clear.
+3. `claude/voice-phase-b` — `hxvoice-runtime` skeleton with a
+   loopback pipeline. Depends on both above being on main.
+4. `claude/voice-phase-c` — the hard one. State machine in
+   `hxvoice` + full webrtcbin dispatch in `hxvoice-runtime`.
