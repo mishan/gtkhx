@@ -18,29 +18,61 @@ extern GtkWidget *status_bar;
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 
-/* Phase 5 / docking (Phase 1): handles to the toolbar window's
- * embedded PanelDock and its sidebar PanelFrame. Per-window panel
- * factories (users_panel.c, tasks_panel.c, …) use these to insert
- * themselves into the right area when the panel is first
- * registered. NULL before create_toolbar_window has run.
+/* Phase 5b / docking: the dock is ONE recursive HxSplit tree.
+ * The five globals below are the handles every other module
+ * needs. NULL before create_toolbar_window has run.
  *
- * toolbar_dock          — the dock; pass to panel_dock_set_reveal_*
- *                         when adding the first sidebar resident.
- * toolbar_sidebar_frame — the start-area PanelFrame; pass to
- *                         panel_frame_add for SIDEBAR-kind panels.
- * toolbar_center_grid   — the center PanelGrid; pass to
- *                         panel_grid_add for CENTER-kind panels.
+ *   toolbar_dock          A libpanel PanelDock acting as a
+ *                         thin wrapper around the HxSplit tree.
+ *                         The dock has exactly one child — the
+ *                         HxSplit root — added as its center
+ *                         child via Buildable add_child. The
+ *                         wrapper exists for one reason:
+ *                         libpanel's PanelFrame template
+ *                         instantiates PanelDropControls as a
+ *                         private child whose root vfunc
+ *                         asserts a PANEL_TYPE_DOCK ancestor at
+ *                         root time. We don't use libpanel's
+ *                         drop controls — we have our own
+ *                         dock-level GtkDropTarget — but the
+ *                         warning still fires without the
+ *                         wrapper. There's NO sidebar / area
+ *                         reveal in play; do not call
+ *                         panel_dock_set_reveal_* on this
+ *                         pointer. See docs/docking-splits.md.
  *
- * Phase 2 panel factories call:
+ *   toolbar_*_frame       The default-leaf PanelFrame for each
+ *                         of the four default placement slots
+ *                         (left sidebar = News, right sidebar =
+ *                         Users, bottom = Tasks, center = Chat +
+ *                         Files + News 1.5). Per-window panel
+ *                         factories use these as their
+ *                         panel_frame_add target.
+ *
+ *                         Stable across user splits: when the
+ *                         user splits a default leaf, the
+ *                         original PanelFrame stays in place
+ *                         (it becomes child_a of the new
+ *                         internal split), and a fresh sibling
+ *                         leaf appears as child_b. The pointer
+ *                         still references the original frame.
+ *
+ *                         Updated when the user closes a
+ *                         default leaf — on_frame_close in
+ *                         hx_split.c reseats the relevant
+ *                         pointer onto the surviving sibling's
+ *                         PanelFrame before the leaf is
+ *                         destroyed.
+ *
+ * Factory call shape:
  *   panel_frame_add (PANEL_FRAME (toolbar_sidebar_frame), panel);
- *   panel_dock_set_reveal_start (PANEL_DOCK (toolbar_dock), TRUE);
- * (revealer doesn't auto-open on the first add — see Phase 0
- * finding #5 in docs/docking-phase0-findings.md). */
+ *   hx_panel_registry_register (panel);
+ */
 extern GtkWidget *toolbar_dock;
-extern GtkWidget *toolbar_sidebar_frame;  /* start-area frame  (initially empty) */
-extern GtkWidget *toolbar_end_frame;      /* end-area frame    (Users default)   */
-extern GtkWidget *toolbar_bottom_frame;   /* bottom-area frame (Tasks default)   */
-extern GtkWidget *toolbar_center_grid;    /* center grid       (Chat/News/Files) */
+extern GtkWidget *toolbar_sidebar_frame;  /* News default */
+extern GtkWidget *toolbar_end_frame;      /* Users default */
+extern GtkWidget *toolbar_bottom_frame;   /* Tasks default */
+extern GtkWidget *toolbar_center_frame;   /* Chat + Files + News 1.5 default */
 
 /* Phase 5: register the hamburger-menu's GActions on the application.
  * Call from gtkhx_activate after the AdwApplication is constructed —
@@ -50,6 +82,13 @@ extern GtkWidget *toolbar_center_grid;    /* center grid       (Chat/News/Files)
  * second registration with a g_critical (we want to see that, so
  * caller should only call this once). */
 extern void toolbar_register_actions (GApplication *app, session *sess);
+
+/* Phase 5a / docking: install the per-frame plumbing every leaf
+ * PanelFrame in the dock needs (close-dispatcher, drag-out hook,
+ * defanged drop-controls). Called once per area at dock build
+ * time, and again whenever a user splits a leaf (the new sibling
+ * leaf's PanelFrame needs the same hooks). */
+extern void toolbar_install_panel_hooks_on_frame (GtkWidget *frame);
 
 /* Phase 5: push a transient AdwToast onto the toolbar window's
  * AdwToastOverlay. Safe to call before the toolbar is built (no-op).
