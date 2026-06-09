@@ -666,40 +666,37 @@ hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
                guint32 *flag_out, guint16 *hc_out, guint32 *wire_len_out,
                guint32 *body_len_out)
 {
+    /* Phase R2: delegate the full 22-byte decode to the Rust crate.
+     * The wire_len → body_len clamp math (cap at MAX_HOTLINE_PACKET_LEN,
+     * saturating_sub by sizeof(hc) so wire_len < 2 doesn't underflow)
+     * lives in parse::decode_header_full. The C side just redistributes
+     * the filled struct to whichever caller-provided pointers are
+     * non-NULL. */
     if (!hdr_bytes) {
         return FALSE;
     }
-    const struct hl_hdr *h = (const struct hl_hdr *) hdr_bytes;
-    guint32 wire_len = ntohl (h->len);
-
+    struct gtkhx_proto_header_decoded d;
+    if (!gtkhx_proto_decode_header ((const uint8_t *) hdr_bytes, SIZEOF_HL_HDR,
+                                    MAX_HOTLINE_PACKET_LEN, &d)) {
+        return FALSE;
+    }
     if (type_out) {
-        *type_out = ntohl (h->type);
+        *type_out = d.type_;
     }
     if (trans_out) {
-        *trans_out = ntohl (h->trans);
+        *trans_out = d.trans;
     }
     if (flag_out) {
-        *flag_out = ntohl (h->flag);
+        *flag_out = d.flag;
     }
     if (hc_out) {
-        *hc_out = ntohs (h->hc);
+        *hc_out = d.hc;
     }
     if (wire_len_out) {
-        *wire_len_out = wire_len;
+        *wire_len_out = d.wire_len;
     }
     if (body_len_out) {
-        /* The wire `len` field encodes "body bytes plus the
-         * 2-byte hc field" — hc lives at the tail of the 22-byte
-         * header struct but counts as the start of the data
-         * section per the protocol spec. Back out to body byte
-         * count, clamping wire_len at MAX_HOTLINE_PACKET_LEN and
-         * guarding against wire_len < 2 to dodge underflow. */
-        guint32 capped = wire_len > MAX_HOTLINE_PACKET_LEN
-                             ? MAX_HOTLINE_PACKET_LEN
-                             : wire_len;
-        *body_len_out = capped < sizeof (h->hc)
-                            ? 0
-                            : capped - (guint32) sizeof (h->hc);
+        *body_len_out = d.body_len;
     }
     return TRUE;
 }

@@ -79,6 +79,74 @@ pub unsafe extern "C" fn gtkhx_proto_header_trans(
     }
 }
 
+/// C-ABI mirror of [`parse::HeaderDecoded`]. Used by the
+/// `gtkhx_proto_decode_header` shim that backs `hl_hdr_decode` —
+/// the C caller fills its individual optional pointers from these
+/// fields. `wire_len` and `body_len` are documented at the source
+/// type.
+#[repr(C)]
+pub struct HeaderDecodedOut {
+    pub type_: u32,
+    pub trans: u32,
+    pub flag: u32,
+    pub wire_len: u32,
+    pub body_len: u32,
+    pub hc: u16,
+}
+
+// Pin the cross-language ABI layout from the Rust side so the C-side
+// uses don't need to know the exact byte breakdown. Same pattern as
+// `HxChunk` / `TrackerRecordFixedOut` / `HistoryEntryOut`. Layout
+// under #[repr(C)] with natural alignment: five u32s @ 0/4/8/12/16
+// (size 20, align 4), then u16 @ 20 (size 2), then 2 bytes trailing
+// alignment-to-4 padding = 24 bytes total.
+const _: () = {
+    assert!(std::mem::offset_of!(HeaderDecodedOut, type_) == 0);
+    assert!(std::mem::offset_of!(HeaderDecodedOut, trans) == 4);
+    assert!(std::mem::offset_of!(HeaderDecodedOut, flag) == 8);
+    assert!(std::mem::offset_of!(HeaderDecodedOut, wire_len) == 12);
+    assert!(std::mem::offset_of!(HeaderDecodedOut, body_len) == 16);
+    assert!(std::mem::offset_of!(HeaderDecodedOut, hc) == 20);
+    assert!(std::mem::size_of::<HeaderDecodedOut>() == 24);
+    assert!(std::mem::align_of::<HeaderDecodedOut>() == 4);
+};
+
+/// Decode the 22-byte transaction header into `*out`, including the
+/// derived `body_len` (the wire `len` field minus `sizeof(hc)`, clamped
+/// at `max_packet_len`). Returns false on a short buffer or NULL `out`.
+/// `wire_len` passes through verbatim so production logging can show
+/// the server's raw claim.
+///
+/// # Safety
+/// `buf` either valid for `len` bytes or NULL (treated as empty
+/// regardless of `len`); `out` either a valid writable
+/// `HeaderDecodedOut` or NULL (early-rejected — function returns
+/// false without dereferencing).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_decode_header(
+    buf: *const u8,
+    len: usize,
+    max_packet_len: u32,
+    out: *mut HeaderDecodedOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    match parse::decode_header_full(s, max_packet_len) {
+        Some(d) => {
+            (*out).type_ = d.type_;
+            (*out).trans = d.trans;
+            (*out).flag = d.flag;
+            (*out).wire_len = d.wire_len;
+            (*out).body_len = d.body_len;
+            (*out).hc = d.hc;
+            true
+        }
+        None => false,
+    }
+}
+
 /// C-ABI mirror of [`parse::SelfInfo`]. `cached_name_ptr` borrows into the
 /// caller's buffer and is valid only for the duration of the call; the C
 /// shim uses it immediately (forensic logging) and does not retain it.

@@ -62,6 +62,51 @@ impl Header {
     }
 }
 
+/// Full decoded header plus the derived body byte count, returned by
+/// [`decode_header_full`]. Mirrors the multi-pointer-out shape of the C
+/// `hl_hdr_decode` (rcv.c + the Tier 3 integration harness call into
+/// the C entry point; the FFI shim hands callers the same field set
+/// without forcing every consumer to deserialize the whole [`Header`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeaderDecoded {
+    pub type_: u32,
+    pub trans: u32,
+    pub flag: u32,
+    pub hc: u16,
+    /// Raw on-wire `len` field. Production logging surfaces this verbatim
+    /// (so traces show the server's claim even when it's pathological);
+    /// callers that need the safe body byte count use `body_len` instead.
+    pub wire_len: u32,
+    /// Body bytes after `hc`, clamped at `max_packet_len - sizeof(hc)`.
+    /// The wire `len` field counts `body bytes + hc(=2)`; subtract 2 to
+    /// get the body, and clamp at the packet ceiling to guard the
+    /// downstream allocators in `network.c::hx_decode`.
+    pub body_len: u32,
+}
+
+/// Decode the 22-byte transaction header into the full
+/// [`HeaderDecoded`] tuple, including the derived `body_len`. Returns
+/// `None` if `buf` is shorter than the header.
+///
+/// `max_packet_len` is the packet-size ceiling the protocol layer
+/// enforces (production passes `MAX_HOTLINE_PACKET_LEN` from `compat.h`,
+/// currently 1 MiB). It clamps the body-length output without affecting
+/// the raw `wire_len` we surface for logging.
+pub fn decode_header_full(buf: &[u8], max_packet_len: u32) -> Option<HeaderDecoded> {
+    let h = Header::parse(buf)?;
+    let capped = h.len.min(max_packet_len);
+    let hc_size = std::mem::size_of::<u16>() as u32;
+    let body_len = capped.saturating_sub(hc_size);
+    Some(HeaderDecoded {
+        type_: h.type_,
+        trans: h.trans,
+        flag: h.flag,
+        hc: h.hc,
+        wire_len: h.len,
+        body_len,
+    })
+}
+
 // ---- HTLS_HDR_USER_SELFINFO --------------------------------------------
 
 /// Bit flags reporting which SELFINFO fields were present, mirroring the
@@ -2221,6 +2266,61 @@ mod tests {
     #[test]
     fn header_too_short_is_none() {
         assert!(Header::parse(&[0u8; 10]).is_none());
+    }
+
+    /// Hand-pack a header with explicit `len` (and len2 == len) so the
+    /// body-length math has something to clamp.
+    fn header_bytes_with_len(type_: u32, trans: u32, flag: u32, len: u32) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&type_.to_be_bytes());
+        v.extend_from_slice(&trans.to_be_bytes());
+        v.extend_from_slice(&flag.to_be_bytes());
+        v.extend_from_slice(&len.to_be_bytes());
+        v.extend_from_slice(&len.to_be_bytes()); // len2 same as len
+        v.extend_from_slice(&0u16.to_be_bytes()); // hc
+        assert_eq!(v.len(), HL_HDR_LEN);
+        v
+    }
+
+    const MAX_PACKET: u32 = 0x100000;
+
+    #[test]
+    fn decode_header_full_basic_subtracts_hc() {
+        // wire_len = 18 (body 16 + sizeof(hc) 2). body_len = 16.
+        let h = header_bytes_with_len(0x0123_4567, 77, 0, 18);
+        let d = decode_header_full(&h, MAX_PACKET).unwrap();
+        assert_eq!(d.type_, 0x0123_4567);
+        assert_eq!(d.trans, 77);
+        assert_eq!(d.flag, 0);
+        assert_eq!(d.wire_len, 18);
+        assert_eq!(d.body_len, 16);
+    }
+
+    #[test]
+    fn decode_header_full_oversize_clamps_body_len_but_keeps_wire_len() {
+        // wire_len = 2 * MAX. wire_len passes through verbatim (so
+        // production trace shows the server's claim), body_len clamps
+        // at MAX - sizeof(hc).
+        let pathological = MAX_PACKET.saturating_mul(2);
+        let h = header_bytes_with_len(0x00b4_0000, 1, 0, pathological);
+        let d = decode_header_full(&h, MAX_PACKET).unwrap();
+        assert_eq!(d.wire_len, pathological);
+        assert_eq!(d.body_len, MAX_PACKET - 2);
+    }
+
+    #[test]
+    fn decode_header_full_wire_len_below_hc_size_returns_zero_body() {
+        // wire_len = 1 < sizeof(hc) = 2. saturating_sub keeps us at 0
+        // (the original C code had an explicit guard against underflow).
+        let h = header_bytes_with_len(0x00b4_0000, 1, 0, 1);
+        let d = decode_header_full(&h, MAX_PACKET).unwrap();
+        assert_eq!(d.body_len, 0);
+    }
+
+    #[test]
+    fn decode_header_full_short_buffer_returns_none() {
+        assert!(decode_header_full(&[0u8; 21], MAX_PACKET).is_none());
+        assert!(decode_header_full(&[], MAX_PACKET).is_none());
     }
 
     #[test]
