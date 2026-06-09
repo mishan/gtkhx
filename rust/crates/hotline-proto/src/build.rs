@@ -1762,6 +1762,123 @@ pub fn build_htxf_hdr(
     true
 }
 
+// ---- Full message packer (Hotline transaction wire format) ----------
+
+/// A chunk with a safely-borrowed payload, used by the pure-Rust
+/// [`pack_message`] / [`pack_message_size`] interface. Distinct from the
+/// FFI-shaped [`HxChunk`] (which carries a raw pointer): the FFI shim in
+/// `ffi.rs` converts `HxChunk` → `PackChunk` in one unsafe block, then
+/// hands a slice of these to the safe pack function. This is what keeps
+/// `build.rs` free of `unsafe` despite the underlying C ABI carrying
+/// raw pointers.
+#[derive(Clone, Copy)]
+pub struct PackChunk<'a> {
+    pub tag: u16,
+    pub data: &'a [u8],
+}
+
+/// Maximum chunks per packed message. Sized well above what any current
+/// builder produces (login is the largest at ~10 chunks) — exists so the
+/// FFI shim can stack-allocate the `[PackChunk; MAX_PACK_CHUNKS]`
+/// staging buffer without a heap allocation. Bump if a future builder
+/// needs more; this is also the cap that lets `pack_message` reject
+/// pathological `chunks_len` values at the API boundary.
+pub const MAX_PACK_CHUNKS: usize = 64;
+
+/// Total byte count a full Hotline message will occupy when packed:
+/// 22-byte header + every chunk's 4-byte data header + that chunk's
+/// payload length.
+///
+/// **Unchecked.** This is the pure size arithmetic; it computes a number
+/// for any input slice. The constraints [`pack_message`] enforces —
+/// `chunks.len() <= MAX_PACK_CHUNKS` and per-chunk `data.len() <=
+/// u16::MAX` — are NOT re-checked here. Callers that use this value to
+/// pre-size a buffer should either (a) also call `pack_message` and
+/// handle its `None`, or (b) range-check the slice themselves before
+/// calling this. The FFI shim at `gtkhx_proto_pack_message_size` does
+/// the latter and returns 0 to signal a rejected request.
+pub fn pack_message_size(chunks: &[PackChunk<'_>]) -> usize {
+    let mut n = crate::HL_HDR_LEN;
+    for c in chunks {
+        n += crate::HL_DATA_HDR_LEN + c.data.len();
+    }
+    n
+}
+
+/// Pack a full Hotline transaction (header + chunks) into `out`.
+///
+/// Wire layout (big-endian throughout):
+///
+/// ```text
+///   off  size  field
+///    0    4    type
+///    4    4    trans
+///    8    4    flag
+///   12    4    len      = body bytes + sizeof(hc)
+///   16    4    len2     = identical to `len`
+///   20    2    hc       = chunk count
+///  --- per chunk ---
+///   0    2    type
+///   2    2    len
+///   4    L    payload
+/// ```
+///
+/// Returns `Some(bytes_written)` (always equal to [`pack_message_size`])
+/// or `None` when:
+///   - `out` is shorter than `pack_message_size(chunks)`,
+///   - any chunk's `data.len()` does not fit in u16,
+///   - `chunks.len()` exceeds [`MAX_PACK_CHUNKS`].
+///
+/// All inputs are safely-borrowed slices, so there is no NULL-pointer
+/// edge case to model — a zero-length payload on the wire is simply a
+/// `PackChunk { tag, data: &[] }`.
+pub fn pack_message(
+    out: &mut [u8],
+    type_: u32,
+    trans: u32,
+    flag: u32,
+    chunks: &[PackChunk<'_>],
+) -> Option<usize> {
+    if chunks.len() > MAX_PACK_CHUNKS {
+        return None;
+    }
+    // Each chunk's payload length lives in a u16 on the wire.
+    for c in chunks {
+        if c.data.len() > u16::MAX as usize {
+            return None;
+        }
+    }
+    let needed = pack_message_size(chunks);
+    if out.len() < needed {
+        return None;
+    }
+    // Wire `len` field encodes "body bytes after the header, plus the 2
+    // bytes hc occupies at the tail of the header". hc is at the tail of
+    // the 22-byte header but counts as the start of the data section per
+    // the protocol spec. Mirror the C `packed_len - (SIZEOF_HL_HDR -
+    // sizeof(h.hc))` math: `needed - HL_HDR_LEN + 2` = `needed - 20`.
+    let wire_len = (needed - (crate::HL_HDR_LEN - 2)) as u32;
+    out[0..4].copy_from_slice(&type_.to_be_bytes());
+    out[4..8].copy_from_slice(&trans.to_be_bytes());
+    out[8..12].copy_from_slice(&flag.to_be_bytes());
+    out[12..16].copy_from_slice(&wire_len.to_be_bytes());
+    out[16..20].copy_from_slice(&wire_len.to_be_bytes()); // len2
+    out[20..22].copy_from_slice(&(chunks.len() as u16).to_be_bytes());
+    let mut pos = crate::HL_HDR_LEN;
+    for c in chunks {
+        let plen = c.data.len() as u16;
+        out[pos..pos + 2].copy_from_slice(&c.tag.to_be_bytes());
+        out[pos + 2..pos + 4].copy_from_slice(&plen.to_be_bytes());
+        pos += crate::HL_DATA_HDR_LEN;
+        if !c.data.is_empty() {
+            out[pos..pos + c.data.len()].copy_from_slice(c.data);
+            pos += c.data.len();
+        }
+    }
+    debug_assert_eq!(pos, needed);
+    Some(needed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3640,5 +3757,123 @@ mod tests {
         let mut out = [0xabu8; 32];
         assert!(build_htxf_hdr(&mut out, 1, 2, 3, 4));
         assert!(out[16..].iter().all(|&b| b == 0xab));
+    }
+
+    // ---- pack_message ----
+
+    fn pc(tag: u16, data: &[u8]) -> PackChunk<'_> {
+        PackChunk { tag, data }
+    }
+
+    #[test]
+    fn pack_message_size_header_only() {
+        assert_eq!(pack_message_size(&[]), 22);
+    }
+
+    #[test]
+    fn pack_message_size_single_chunk() {
+        let body = b"hello";
+        let c = [pc(0x101, body)];
+        // 22 header + 4 data hdr + 5 body = 31.
+        assert_eq!(pack_message_size(&c), 31);
+    }
+
+    #[test]
+    fn pack_message_size_three_chunks() {
+        let a = b"a";
+        let bb = b"bb";
+        let ccc = b"ccc";
+        let chunks = [pc(1, a), pc(2, bb), pc(3, ccc)];
+        // 22 + 3 * 4 + 1 + 2 + 3 = 40.
+        assert_eq!(pack_message_size(&chunks), 40);
+    }
+
+    #[test]
+    fn pack_message_header_only_writes_22_bytes() {
+        let mut out = [0u8; 32];
+        let n = pack_message(&mut out, 0xdeadbeef, 7, 1, &[]).unwrap();
+        assert_eq!(n, 22);
+        assert_eq!(&out[0..4], &0xdeadbeef_u32.to_be_bytes());
+        assert_eq!(&out[4..8], &7u32.to_be_bytes());
+        assert_eq!(&out[8..12], &1u32.to_be_bytes());
+        // body bytes after the header + sizeof(hc) = 0 + 2 = 2.
+        assert_eq!(&out[12..16], &2u32.to_be_bytes());
+        assert_eq!(&out[16..20], &2u32.to_be_bytes());
+        // hc = 0.
+        assert_eq!(&out[20..22], &0u16.to_be_bytes());
+        // Bytes past 22 are unchanged.
+        assert!(out[22..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn pack_message_with_one_chunk_lays_out_data_hdr_then_body() {
+        let body = b"hi";
+        let chunks = [pc(0x0067, body)]; // 0x67 = HTLC_DATA_CHAT
+        let mut out = [0u8; 64];
+        let n = pack_message(&mut out, 0x010d, 42, 0, &chunks).unwrap();
+        // 22 header + 4 data hdr + 2 body = 28.
+        assert_eq!(n, 28);
+        // Header
+        assert_eq!(&out[0..4], &0x010d_u32.to_be_bytes());
+        assert_eq!(&out[4..8], &42u32.to_be_bytes());
+        // wire_len = body + hc = (4 + 2) + 2 = 8.
+        assert_eq!(&out[12..16], &8u32.to_be_bytes());
+        assert_eq!(&out[20..22], &1u16.to_be_bytes());
+        // Data hdr
+        assert_eq!(&out[22..24], &0x0067_u16.to_be_bytes());
+        assert_eq!(&out[24..26], &2u16.to_be_bytes());
+        // Body
+        assert_eq!(&out[26..28], b"hi");
+    }
+
+    #[test]
+    fn pack_message_rejects_undersized_buffer() {
+        let mut out = [0u8; 21];
+        let copy = out;
+        let r = pack_message(&mut out, 0, 0, 0, &[]);
+        assert!(r.is_none());
+        assert_eq!(out, copy);
+    }
+
+    #[test]
+    fn pack_message_accepts_empty_payload_chunk() {
+        // HOPE Step 1 sends an empty HTLC_DATA_SESSIONKEY — an empty
+        // payload in the safe API is just a zero-len slice.
+        let empty = pc(0xcafe, &[]);
+        let mut out = [0u8; 64];
+        let n = pack_message(&mut out, 1, 2, 3, &[empty]).unwrap();
+        assert_eq!(n, 26); // 22 + 4 + 0
+        assert_eq!(&out[22..24], &0xcafe_u16.to_be_bytes());
+        assert_eq!(&out[24..26], &0u16.to_be_bytes());
+    }
+
+    #[test]
+    fn pack_message_does_not_overrun_buffer_past_needed() {
+        let body = b"abc";
+        let chunks = [pc(9, body)];
+        let mut out = [0xffu8; 32];
+        let n = pack_message(&mut out, 0, 0, 0, &chunks).unwrap();
+        assert_eq!(n, 29);
+        assert!(out[29..].iter().all(|&b| b == 0xff));
+    }
+
+    #[test]
+    fn pack_message_rejects_too_many_chunks() {
+        let big: Vec<PackChunk<'_>> = (0..MAX_PACK_CHUNKS + 1)
+            .map(|i| pc(i as u16, &[]))
+            .collect();
+        let mut out = [0u8; 4096];
+        assert!(pack_message(&mut out, 0, 0, 0, &big).is_none());
+    }
+
+    #[test]
+    fn pack_message_rejects_chunk_payload_above_u16_max() {
+        // A payload longer than 65535 bytes can't be expressed in the
+        // wire's u16 length field. Construct a slice that big via
+        // Vec::with_capacity, then take a borrow.
+        let huge = vec![0u8; u16::MAX as usize + 1];
+        let chunks = [pc(1, &huge)];
+        let mut out = vec![0u8; huge.len() + 64];
+        assert!(pack_message(&mut out, 0, 0, 0, &chunks).is_none());
     }
 }
