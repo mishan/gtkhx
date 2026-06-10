@@ -51,15 +51,14 @@ config.
 ```sh
 docker run --rm -p 5510:5500 -p 5511:5501 \
                 -p 5514:5504/udp \
+                -p 5610:5600 -p 5611:5601 \
                 gtkhx-janus
 ```
 
-Host ports 5510/5511 keep mhxd's conventional 5500/5501 free for
-side-by-side use via the multi-server Compose setup; 5514 mirrors
-the same offset for voice's base+4 UDP port. Drop the `-p
-5514:5504/udp` mapping if you don't need voice during the session
-(no harm, just a port that nothing's listening on host-side).
-Connect with:
+Host ports keep mhxd's conventional 5500/5501 free for side-by-side
+use via the multi-server Compose setup, applying a uniform +10
+offset: 5510/5511 for plaintext TCP, 5514 for voice's base+4 UDP,
+5610/5611 for TLS (control + HTXF subchannel). Connect with:
 
 ```
 Server:  localhost:5510
@@ -87,8 +86,8 @@ work without any tweak.
 | 5500 | TCP      | HTLS — main client connection                          |
 | 5501 | TCP      | HTXF — file transfer subchannel                        |
 | 5504 | UDP      | WebRTC voice (ICE/DTLS/RTP, base+4)                    |
-| 5600 | TCP      | HTLS over TLS (reserved; TLS not enabled in v1)        |
-| 5601 | TCP      | HTXF over TLS (reserved)                               |
+| 5600 | TCP      | HTLS over TLS — self-signed cert generated at build    |
+| 5601 | TCP      | HTXF over TLS                                          |
 
 ## What's enabled
 
@@ -135,13 +134,21 @@ Out of the box:
   mapping is therefore inert today and only becomes load-bearing
   with the runtime crate.
 
-Not enabled in v1 (separate follow-up):
+Also enabled:
 
-- **TLS.** `Extras/generate_cert.sh` + `Extras/openssl.cnf` would
-  generate a self-signed cert at build time; we haven't audited
-  that flow yet. Pencilled in alongside the GtkHx-side TLS work.
-- **IRC bridge / NewsBridge / Mnemosyne content sync.** Out of
-  scope for GtkHx.
+- **TLS** on 5600 (control) and 5601 (HTXF subchannel). The
+  Dockerfile generates a self-signed cert (CN=localhost,
+  SAN=DNS:localhost,IP:127.0.0.1, 10-year validity, 2048-bit RSA)
+  into `Server/tls/` before the seed step (the seed-time Janus
+  process refuses to start without it). Janus is the canonical TLS
+  test target — `test_integration_real_tls` and the Tier 3 TLS
+  matrix rows depend on this. The Phase 1 client trust path
+  accepts any cert via an accept-certificate stub; the Phase 3
+  trust UI lands the actual pinning flow.
+
+Not enabled (out of scope for GtkHx):
+
+- **IRC bridge / NewsBridge / Mnemosyne content sync.**
 
 ## Iterate
 
@@ -197,9 +204,6 @@ yet:
 Phase D — wiring chat-history tests against this container — will
 need to pick one of these. For now, manual one-off connects work
 fine and the container boots cleanly.
-
-**TLS / HOPE not enabled yet.** See "What's enabled" above. These
-are deliberate v1 omissions, not bugs.
 
 ## Layout
 
