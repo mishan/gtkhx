@@ -199,11 +199,22 @@ jobs:
         # every Tier 3 TLS binary (test_real_tls, _login,
         # _file_get, _banner) hits "Connection refused" — the
         # no-silent-skips policy then turns that into a CI fail.
+        #
+        # 5504/udp -> 5514: WebRTC voice (base+4, fogWraith
+        # Capabilities-Voice.md). Phase 8.A's wire-protocol scaffolding
+        # doesn't actually move RTP yet — the JOIN / SDP / ICE / mute
+        # transactions ride the existing TCP control channel — so the
+        # mapping is inert until Phase 8.C wires the gstreamer-rs
+        # runtime. Mapped now so 8.F (Tier 3 voice tests against
+        # Janus) doesn't have to re-edit CI for a port number that's
+        # already documented in the matrix.
+        #
         # Wait loop mirrors mhxd's above; Janus is statically-linked
         # Go and listens within ~1 s on a warm runner.
         run: |
           docker run -d --name gtkhx-janus \
             -p 5510:5500 -p 5511:5501 \
+            -p 5514:5504/udp \
             -p 5610:5600 -p 5611:5601 \
             gtkhx-janus
           for i in 1 2 3 4 5 6 7 8 9 10; do

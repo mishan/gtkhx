@@ -70,6 +70,18 @@ RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
 #                                    HOPEPassword fields onto the
 #                                    bundled YAMLs so Step 2
 #                                    actually validates.
+#   EnableVoice: true              — Janus is also the voice-chat
+#   VoiceUDPPort: 5504               target (Phase 8.A/F). The UDP
+#   VoiceMaxPerRoom: 16              port is pinned to base+4 so the
+#                                    Dockerfile EXPOSE and the CI
+#                                    matrix can agree on a fixed
+#                                    number.
+#   NewUserDefaults.VoiceChat:true — new accounts get bit 55
+#                                    (HL_ACCESS_VOICE_CHAT) by
+#                                    default; the bundled guest /
+#                                    admin YAMLs are seeded with
+#                                    bit 55 separately in the seed
+#                                    script below.
 #   APIAddr: ":8973"               — temporarily exposes the
 #                                    admin REST API. Needed by
 #                                    the seed step; left enabled
@@ -182,11 +194,16 @@ RUN chown -R janus:janus /opt/janus
 # Hotline ports:
 #   5500/tcp — HTLS server (clients connect here)
 #   5501/tcp — HTXF file transfer subchannel
+#   5504/udp — WebRTC ICE/DTLS/RTP for voice (base+4, fogWraith
+#              Capabilities-Voice.md). All voice PeerConnections
+#              multiplex on this single port. Tier 3 voice tests
+#              (Phase 8.F) bind a host-side mapping with `-p
+#              5514:5504/udp` alongside the TCP ports.
 #   5600/tcp — HTLS over TLS (self-signed cert generated above;
 #              docs/tls-scoping.md Phase 1)
 #   5601/tcp — HTXF over TLS (Phase 2 in docs/tls-scoping.md;
 #              client side wraps in Phase 2 of TLS support)
-EXPOSE 5500/tcp 5501/tcp 5600/tcp 5601/tcp
+EXPOSE 5500/tcp 5501/tcp 5504/udp 5600/tcp 5601/tcp
 
 USER janus
 WORKDIR /opt/janus

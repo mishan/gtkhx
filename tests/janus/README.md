@@ -49,11 +49,16 @@ config.
 ## Run
 
 ```sh
-docker run --rm -p 5510:5500 -p 5511:5501 gtkhx-janus
+docker run --rm -p 5510:5500 -p 5511:5501 \
+                -p 5514:5504/udp \
+                -p 5610:5600 -p 5611:5601 \
+                gtkhx-janus
 ```
 
-Host ports 5510/5511 keep mhxd's conventional 5500/5501 free for
-side-by-side use via the multi-server Compose setup. Connect with:
+Host ports keep mhxd's conventional 5500/5501 free for side-by-side
+use via the multi-server Compose setup, applying a uniform +10
+offset: 5510/5511 for plaintext TCP, 5514 for voice's base+4 UDP,
+5610/5611 for TLS (control + HTXF subchannel). Connect with:
 
 ```
 Server:  localhost:5510
@@ -80,8 +85,9 @@ work without any tweak.
 |------|----------|--------------------------------------------------------|
 | 5500 | TCP      | HTLS — main client connection                          |
 | 5501 | TCP      | HTXF — file transfer subchannel                        |
-| 5600 | TCP      | HTLS over TLS (reserved; TLS not enabled in v1)        |
-| 5601 | TCP      | HTXF over TLS (reserved)                               |
+| 5504 | UDP      | WebRTC voice (ICE/DTLS/RTP, base+4)                    |
+| 5600 | TCP      | HTLS over TLS — self-signed cert generated at build    |
+| 5601 | TCP      | HTXF over TLS                                          |
 
 ## What's enabled
 
@@ -112,14 +118,37 @@ Out of the box:
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).
 - Threaded news (Hotline 1.5+).
+- **Voice chat extension** (`EnableVoice: true`, fogWraith
+  Capabilities-Voice.md). `VoiceUDPPort: 5504` is pinned
+  explicitly (base+4). `NewUserDefaults.VoiceChat: true` gives
+  any runtime-created account access bit 55 by default; the
+  bundled `guest` and `admin` accounts get the bit through an
+  in-place YAML edit in `seed-hope-passwords.sh` (the upstream
+  YAML schema is one boolean per access bit, two-space-indented
+  under `Access:`).
 
-Not enabled in v1 (separate follow-up):
+  GtkHx Phase 8.A advertises `HTLC_CAP_VOICE` in LOGIN; Janus
+  with this config echoes the cap and the client sees voice as
+  available. No media flows in Phase 8.A — the WebRTC pipeline
+  and audio I/O land in Phases 8.B and 8.C. The 5504/udp port
+  mapping is therefore inert today and only becomes load-bearing
+  with the runtime crate.
 
-- **TLS.** `Extras/generate_cert.sh` + `Extras/openssl.cnf` would
-  generate a self-signed cert at build time; we haven't audited
-  that flow yet. Pencilled in alongside the GtkHx-side TLS work.
-- **Voice chat / IRC bridge / NewsBridge / Mnemosyne content
-  sync.** Out of scope for GtkHx.
+Also enabled:
+
+- **TLS** on 5600 (control) and 5601 (HTXF subchannel). The
+  Dockerfile generates a self-signed cert (CN=localhost,
+  SAN=DNS:localhost,IP:127.0.0.1, 10-year validity, 2048-bit RSA)
+  into `Server/tls/` before the seed step (the seed-time Janus
+  process refuses to start without it). Janus is the canonical TLS
+  test target — `test_integration_real_tls` and the Tier 3 TLS
+  matrix rows depend on this. The Phase 1 client trust path
+  accepts any cert via an accept-certificate stub; the Phase 3
+  trust UI lands the actual pinning flow.
+
+Not enabled (out of scope for GtkHx):
+
+- **IRC bridge / NewsBridge / Mnemosyne content sync.**
 
 ## Iterate
 
@@ -175,9 +204,6 @@ yet:
 Phase D — wiring chat-history tests against this container — will
 need to pick one of these. For now, manual one-off connects work
 fine and the container boots cleanly.
-
-**TLS / HOPE not enabled yet.** See "What's enabled" above. These
-are deliberate v1 omissions, not bugs.
 
 ## Layout
 
