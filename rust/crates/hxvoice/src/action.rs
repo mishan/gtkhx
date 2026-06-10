@@ -35,19 +35,32 @@ pub enum Action {
     // ---- Wire ----
     /// Emit a Hotline transaction over the existing TCP control
     /// channel. `opcode` is one of the `HTLC_HDR_VOICE_*` family
-    /// (600, 601, 603, 604, 606). `body` is the already-encoded
-    /// chunk payload `hotline-proto::voice::build_*` produced —
-    /// the runtime hands it straight to `hlwrite_chunks` without
-    /// repacking.
+    /// (600, 601, 603, 604, 606).
+    ///
+    /// `body` is an OPAQUE payload the state machine produces — a
+    /// small `Vec<u8>` shaped per opcode:
+    ///
+    /// - JOIN / LEAVE: 4-byte big-endian `cid`.
+    /// - SDP_ANSWER: 4-byte `cid` + UTF-8 SDP bytes.
+    /// - ICE: 4-byte `cid` + UTF-8 JSON candidate (or empty for
+    ///   end-of-candidates).
+    /// - MUTE: 4-byte `cid` + 2-byte BE `muted` flag.
+    ///
+    /// The state machine deliberately doesn't depend on
+    /// `hotline-proto`'s `HxChunk` ABI. The runtime side parses
+    /// this payload, calls the matching
+    /// `hotline_proto::voice::build_voice_*_chunks` builder to
+    /// produce a real chunk array, and hands those chunks to
+    /// `hlwrite_chunks` via the C FFI. Keeping the wire-format
+    /// encoding out of the state machine lets `cargo test -p
+    /// hxvoice` run without a `hotline-proto` dependency.
     SendWireFrame {
         /// The HTLC opcode (e.g. `0x258` for VOICE_JOIN).
         opcode: u32,
-        /// Pre-built chunk array bytes the FFI consumes. For
-        /// Phase 8.C the runtime side calls `hotline-proto`'s
-        /// `build_voice_*_chunks` and copies the result into
-        /// owned storage before passing it to the C wire-out
-        /// path — this lets the state machine remain free of
-        /// any reference to the underlying `HxChunk` ABI.
+        /// Opaque payload bytes — see [`SendWireFrame`] for the
+        /// per-opcode shape the runtime must re-pack into
+        /// `hotline-proto`'s `HxChunk` array before calling
+        /// `hlwrite_chunks`.
         body: WireFrameBody,
     },
 
@@ -130,22 +143,32 @@ impl core::fmt::Debug for WireFrameBody {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SignalKind {
-    /// `voice-room-status` — emitted on every 605 ROOM_STATUS,
-    /// plus on the join / leave transitions. UI uses it to
-    /// drive the participant list speaker indicator.
+    /// `voice-room-status` — emitted in response to a 605
+    /// ROOM_STATUS notification updating the participant list.
+    /// UI uses it to drive the speaker indicator in the user
+    /// list. Phase 8.C step 1 emits this on
+    /// `Event::ParticipantsUpdated` only — earlier draft docs
+    /// mentioned join / leave transitions but the state machine
+    /// doesn't fire it on those (the `StateChanged` signal
+    /// covers the lifecycle UI updates).
     RoomStatus,
     /// `voice-state-changed` — high-level session state for the
-    /// UI's headerbar indicator. Fires on Idle → JoinSent,
-    /// JoinSent → Connecting, Connecting → Connected,
-    /// → Leaving, → Idle transitions.
+    /// UI's headerbar indicator. Fires on every state transition
+    /// the machine performs: Idle → JoinSent → OfferPending →
+    /// Connecting → Connected, plus the Leaving paths from any
+    /// of those.
     StateChanged,
     /// `voice-error` — surfaces a user-facing error toast.
-    /// Fired on `ServerTaskError` and on `Failed` connection
-    /// states.
+    /// Fired on `ServerTaskError` (any opcode) and on the
+    /// `ConnectionState::Failed` path that collapses the session
+    /// to Leaving.
     Error,
     /// `voice-mute-changed` — UI mute toggle reflection. Fires
-    /// whenever our local mute state changes or a 605 reports
-    /// our mute flag.
+    /// when our local mute state changes via
+    /// `MuteToggleRequested`. The state machine does NOT
+    /// currently derive the local mute flag from 605 ROOM_STATUS
+    /// (server-reported flips don't change our local state); a
+    /// future revision may wire that path through.
     MuteChanged,
 }
 

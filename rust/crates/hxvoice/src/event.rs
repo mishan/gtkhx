@@ -8,10 +8,14 @@
 //! done.
 //!
 //! Variants stay typed-data only. No `Box<dyn …>`, no
-//! `glib::Object` refs, no GStreamer types. Borrowed slices in
-//! payload fields (`sdp: &str`, etc.) keep allocator hits off the
-//! common path; the runtime owns the underlying buffers and
-//! decides their lifetime.
+//! `glib::Object` refs, no GStreamer types. Variable-length
+//! payloads (`sdp`, `candidate_json`, the participant `Vec`)
+//! are OWNED (`String` / `Vec<Participant>`) so the state
+//! machine can outlive any single event-source buffer the
+//! runtime handed in. The clone cost is bounded — SDP blobs
+//! stay under a few KB per spec, ICE candidate JSON is ~200
+//! bytes, and the participant list caps at 16 entries × 6
+//! bytes per the spec's room-size default.
 
 use alloc::string::String;
 use alloc::vec::Vec;

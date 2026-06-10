@@ -103,7 +103,9 @@ pub struct SessionMachine {
     /// teardown.
     mid_to_user: HashMap<String, u16>,
     /// Last seen participant list, indexed by user_id. Updated
-    /// on `ParticipantsUpdated`; consumed by signal emit.
+    /// on `ParticipantsUpdated`; consumed by the runtime layer
+    /// via [`SessionMachine::participants`] when it builds the
+    /// boxed payload for the `voice-room-status` signal.
     participants: HashMap<u16, Participant>,
     /// Local mute state. Reflects what we've told the server (and
     /// our send pipeline) — not what the server reports about
@@ -142,6 +144,29 @@ impl SessionMachine {
     /// Current local mute state.
     pub fn is_muted(&self) -> bool {
         self.muted
+    }
+
+    /// Current participant list (last 605 ROOM_STATUS we accepted).
+    ///
+    /// The runtime layer reads this on
+    /// `Action::EmitSignal { kind: SignalKind::RoomStatus, .. }`
+    /// to populate the boxed payload it hands to GtkhxSession —
+    /// keeping the participants here rather than in
+    /// [`SignalPayload::RoomStatus`] lets the runtime skip a clone
+    /// per emit and read the typed slice when (and only when) it
+    /// needs to.
+    ///
+    /// Iteration order is unspecified — the underlying map is a
+    /// `HashMap<u16, Participant>` keyed on `user_id`.
+    pub fn participants(&self) -> impl Iterator<Item = &Participant> + '_ {
+        self.participants.values()
+    }
+
+    /// Number of participants in the current room. Cheap u16-bounded
+    /// accessor for the runtime's signal-emit fast path; avoids
+    /// counting via the `participants()` iterator.
+    pub fn participant_count(&self) -> usize {
+        self.participants.len()
     }
 
     /// Drive one transition.
@@ -192,7 +217,21 @@ impl SessionMachine {
                     return Vec::new();
                 }
                 self.set_state(SessionState::Leaving, |actions| {
+                    // Cancel every kind the spec arms — the runtime
+                    // tracks them by kind regardless of whether one
+                    // is actually live, so emitting a Cancel for an
+                    // unarmed kind is a cheap no-op on its side. The
+                    // alternative (only cancelling JoinReply) lets a
+                    // DTLS / ICE / Media watchdog fire after the
+                    // pipeline has been torn down, which the runtime
+                    // would then dispatch back into a torn-down
+                    // SessionMachine.
                     actions.push(Action::CancelTimer { kind: TimerKind::JoinReply });
+                    actions.push(Action::CancelTimer { kind: TimerKind::Dtls });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::IceConnectivity,
+                    });
+                    actions.push(Action::CancelTimer { kind: TimerKind::Media });
                     actions.push(Action::SendWireFrame {
                         opcode: HTLC_HDR_VOICE_LEAVE,
                         body: WireFrameBody(encode_cid_only(cid)),
@@ -288,24 +327,37 @@ impl SessionMachine {
             // Connecting and Connected (during renegotiation the
             // server may send candidates while we're back in
             // OfferPending — accept those too for robustness).
+            //
+            // Spec-defensive: drop ICE for a different room than the
+            // one we're currently bound to. A late 604 for a room we
+            // already left would otherwise leak into the current
+            // session's webrtcbin and corrupt the ICE table.
             (
                 SessionState::Connecting
                 | SessionState::Connected
                 | SessionState::OfferPending,
-                Event::IceCandidateReceived { cid: _, candidate_json },
+                Event::IceCandidateReceived { cid, candidate_json },
             ) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
                 vec![Action::AddRemoteIce { candidate_json }]
             }
 
             // EndOfRemoteCandidates is informational only — the
             // WebRTC stack uses it for diagnostics but doesn't
-            // strictly require it. No action.
+            // strictly require it. Same cid filter as ICE.
             (
                 SessionState::Connecting
                 | SessionState::Connected
                 | SessionState::OfferPending,
-                Event::EndOfRemoteCandidates { .. },
-            ) => Vec::new(),
+                Event::EndOfRemoteCandidates { cid },
+            ) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
+                Vec::new()
+            }
 
             // Local candidate; ship over 604.
             (
@@ -326,6 +378,16 @@ impl SessionMachine {
             // Receive pad appeared: map to user_id via the cached
             // mid map. mid `"send"` is the local send leg; we
             // don't open a receive bin for it.
+            //
+            // Unknown mid (not in the cached mid_to_user map): no-op.
+            // Earlier revisions fabricated user_id=0 here, but spec
+            // §"Track-to-User Mapping" reserves uid 0 and the runtime
+            // would then start a receive pipeline tagged to an
+            // invalid speaker — better to surface the missing
+            // mid_to_user entry by NOT starting the receive bin at
+            // all, which makes the issue (stale SDP cache vs a fresh
+            // pad-added) visible at the runtime layer instead of
+            // silently routing audio to nobody.
             (
                 SessionState::Connecting | SessionState::Connected,
                 Event::WebrtcPadAdded { mid },
@@ -333,8 +395,13 @@ impl SessionMachine {
                 if mid == "send" {
                     return Vec::new();
                 }
-                let user_id = self.mid_to_user.get(&mid).copied().unwrap_or(0);
-                vec![Action::StartReceivePipeline { mid, user_id }]
+                match self.mid_to_user.get(&mid).copied() {
+                    Some(user_id) => vec![Action::StartReceivePipeline {
+                        mid,
+                        user_id,
+                    }],
+                    None => Vec::new(),
+                }
             }
 
             // Receive pad gone: tear the matching bin down. mid
@@ -353,9 +420,13 @@ impl SessionMachine {
 
             // ---- Participants list ----
 
-            // 605 ROOM_STATUS: stash + emit signal. Also possibly
-            // emit MuteChanged if the server reports our own
-            // mute flag flipped.
+            // 605 ROOM_STATUS: stash + emit signal.
+            //
+            // Spec-defensive: drop updates for a different room than
+            // the active one. A late 605 from a previous room
+            // (server queued it before we finished leaving) would
+            // otherwise overwrite our current room's participants
+            // and push a misleading UI update.
             (
                 SessionState::JoinSent
                 | SessionState::OfferPending
@@ -363,6 +434,9 @@ impl SessionMachine {
                 | SessionState::Connected,
                 Event::ParticipantsUpdated { cid, entries },
             ) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
                 self.participants.clear();
                 for p in &entries {
                     self.participants.insert(p.user_id, *p);
@@ -756,6 +830,39 @@ mod tests {
         assert!(acts.is_empty());
     }
 
+    /// Regression (Copilot review): LeaveRequested used to cancel
+    /// only the JoinReply timer. If the session was already in
+    /// Connecting / Connected, the DTLS / ICE / Media watchdogs
+    /// stayed armed and could fire after teardown — the runtime
+    /// would then dispatch a `Timeout` event into a half-freed
+    /// SessionMachine. The transition now emits CancelTimer for
+    /// every kind the spec arms.
+    #[test]
+    fn leave_cancels_every_armed_timer() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+
+        let acts = m.step(Event::LeaveRequested { cid: 1 });
+        // Collect every cancel kind the leave path emitted.
+        let cancels: Vec<Timeout> = acts
+            .iter()
+            .filter_map(|a| match a {
+                Action::CancelTimer { kind } => Some(*kind),
+                _ => None,
+            })
+            .collect();
+        assert!(cancels.contains(&Timeout::JoinReply));
+        assert!(cancels.contains(&Timeout::Dtls));
+        assert!(cancels.contains(&Timeout::IceConnectivity));
+        assert!(cancels.contains(&Timeout::Media));
+    }
+
     // ---- SDP offer / answer ----
     #[test]
     fn sdp_offer_after_join_caches_mids_and_walks_to_offer_pending() {
@@ -870,6 +977,29 @@ mod tests {
         assert!(acts.is_empty());
     }
 
+    /// Regression (Copilot review): ICE events for a non-active
+    /// room used to be passed through to AddRemoteIce, which would
+    /// corrupt the active session's webrtcbin ICE table. Now the
+    /// state machine drops them.
+    #[test]
+    fn remote_ice_for_wrong_cid_is_dropped() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        // ICE for a different room: dropped, no action.
+        let acts = m.step(Event::IceCandidateReceived {
+            cid: 99,
+            candidate_json: "{\"candidate\":\"c\",\"sdpMid\":\"send\"}".into(),
+        });
+        assert!(acts.is_empty());
+        // EndOfRemoteCandidates for the wrong room is also dropped
+        // (the spec uses an empty payload as EOC; we filter the
+        // same way as the regular candidate).
+        let acts = m.step(Event::EndOfRemoteCandidates { cid: 99 });
+        assert!(acts.is_empty());
+    }
+
     // ---- Track lifecycle ----
     #[test]
     fn pad_added_for_user_mid_starts_receive_pipeline_with_uid() {
@@ -902,6 +1032,31 @@ mod tests {
         });
         m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
         let acts = m.step(Event::WebrtcPadAdded { mid: "send".into() });
+        assert!(acts.is_empty());
+    }
+
+    /// Regression (Copilot review): WebrtcPadAdded for a mid not in
+    /// the cached mid_to_user map used to fabricate `user_id = 0`
+    /// and start a receive pipeline anyway. uid 0 is the spec's
+    /// reserved sentinel — the runtime would then route audio to
+    /// a non-existent speaker. Now the unknown-mid path no-ops so
+    /// the missing cache entry surfaces as a silent leg rather
+    /// than corrupted UI.
+    #[test]
+    fn pad_added_for_unknown_user_mid_is_a_noop() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        // SDP carries user-5 only; user-99 isn't in the cache.
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:user-5\na=mid:send\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        // Pad arrives for an uncached mid.
+        let acts = m.step(Event::WebrtcPadAdded {
+            mid: "user-99".into(),
+        });
+        // No StartReceivePipeline — pad is silently dropped.
         assert!(acts.is_empty());
     }
 
@@ -979,6 +1134,65 @@ mod tests {
         assert!(saw_signal);
         assert_eq!(m.participants.len(), 2);
         assert!(m.participants[&12].muted);
+    }
+
+    /// Regression (Copilot review): ParticipantsUpdated for a
+    /// non-active cid used to overwrite the local participants
+    /// map and emit a RoomStatus signal for the wrong room. Now
+    /// the cid mismatch path is a no-op.
+    #[test]
+    fn participants_update_for_wrong_cid_is_dropped() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::ParticipantsUpdated {
+            cid: 1,
+            entries: vec![Participant {
+                user_id: 7,
+                codec_id: 0,
+                muted: false,
+            }],
+        });
+        // Sanity: the legit update landed.
+        assert_eq!(m.participant_count(), 1);
+
+        // Stale update for a different room arrives — must NOT
+        // overwrite the current room's state, and must not emit
+        // a signal.
+        let acts = m.step(Event::ParticipantsUpdated {
+            cid: 99,
+            entries: vec![
+                Participant { user_id: 1, codec_id: 0, muted: false },
+                Participant { user_id: 2, codec_id: 0, muted: true },
+            ],
+        });
+        assert!(acts.is_empty());
+        // Original participant still there, stale ones not added.
+        assert_eq!(m.participant_count(), 1);
+        let still_there: Vec<u16> = m.participants().map(|p| p.user_id).collect();
+        assert_eq!(still_there, vec![7]);
+    }
+
+    /// Regression (Copilot review): the runtime layer couldn't
+    /// access the cached participants without reaching into
+    /// private state. The public participants() / participant_count()
+    /// accessors expose what it needs.
+    #[test]
+    fn participants_accessor_returns_cached_list() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::ParticipantsUpdated {
+            cid: 1,
+            entries: vec![
+                Participant { user_id: 3, codec_id: 0, muted: false },
+                Participant { user_id: 8, codec_id: 0, muted: true },
+            ],
+        });
+        assert_eq!(m.participant_count(), 2);
+        let mut uids: Vec<u16> = m.participants().map(|p| p.user_id).collect();
+        uids.sort_unstable();
+        assert_eq!(uids, vec![3, 8]);
+        let p8 = m.participants().find(|p| p.user_id == 8).unwrap();
+        assert!(p8.muted);
     }
 
     // ---- Connection state walk ----
