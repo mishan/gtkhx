@@ -1,2 +1,15 @@
 [toolchain]
-channel = "1.85"
+# Floor is dictated by the gtk-rs 0.22 family (glib 0.22.6 requires rustc
+# 1.92). Bumped from 1.85 in Phase R3.0 along with the gtk-rs/gstreamer-rs
+# dep pulls. Tracks the deps' MSRV, not the latest stable.
+#
+# Scope: this file is read by rustup, which honors it on `cargo`
+# invocation for local developers and any CI that uses rustup. The
+# project's CI installs rust via `dnf install rust cargo` from
+# Fedora 42 (see .github/workflows/tests.yml), which bypasses rustup —
+# the channel pin here does NOT apply there. Fedora's rust package
+# tracks current stable and currently ships >= 1.95, comfortably above
+# 1.92. The `meson test` job has an explicit `rustc --version`
+# assertion step (see workflow) to catch a Fedora rust regression
+# before the build proper.
+channel = "1.92"

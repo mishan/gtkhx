@@ -90,6 +90,23 @@ jobs:
             libpanel-devel \
             git rust cargo
 
+      - name: assert rustc meets MSRV
+        # Fedora's `rust` package ignores rust-toolchain.toml (it isn't
+        # rustup). Verify the dnf-installed rustc is >= the workspace
+        # MSRV before the build proper, so a Fedora rust regression
+        # below the gtk-rs 0.22 floor fails loudly here rather than as
+        # an opaque mid-build error.
+        run: |
+          set -eu
+          MIN_MSRV="1.92.0"
+          actual=$(rustc --version | awk '{print $2}')
+          if printf '%s\n%s\n' "$MIN_MSRV" "$actual" | sort -V -C; then
+            echo "rustc $actual >= $MIN_MSRV ok"
+          else
+            echo "rustc $actual is below required $MIN_MSRV" >&2
+            exit 1
+          fi
+
       - name: meson setup
         run: meson setup build
 
