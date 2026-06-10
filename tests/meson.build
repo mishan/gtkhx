@@ -34,6 +34,12 @@ proto_test_deps = test_deps + [
   # staticlib. Harmless for the few proto tests that don't reference
   # the symbol — the linker drops the unused archive members.
   rust_hotline_proto_dep,
+  # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
+  # delegates to gtkhx_bridge_emit_pointer_pair_signal in hxbridge.
+  # The integration harness + real_connect / real_tls tests link
+  # gtkhx_session.c directly and need the staticlib. Same "linker
+  # drops unused members" caveat for tests that don't reference it.
+  rust_hxbridge_dep,
 ]
 
 test_inc = include_directories('../src')

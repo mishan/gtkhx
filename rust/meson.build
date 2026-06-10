@@ -12,6 +12,9 @@
 #                     src/cipher_aead.c primitives)
 #   hxcompress      — GZIP / LZ4 / ZSTD streaming (replaces src/compress.c)
 #   hotline-proto   — Phase R2 wire protocol parsers + builders.
+#   hxbridge        — Phase R3.0 Rust ↔ GLib bridge (C-owned GObject
+#                     wrapping + signal emit). Lifetime model documented
+#                     in docs/rust-glib-interop.md.
 #
 # Each crate is a staticlib that the C side wraps with a thin dispatcher.
 # FFI signatures are hand-declared `extern` blocks in the relevant C TU
@@ -39,13 +42,20 @@ rust_sources = files(
   'crates/hotline-proto/src/text.rs',
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
+  'crates/hxbridge/src/lib.rs',
   'Cargo.toml',
+  'Cargo.lock',
   'crates/hxcrypto-hash/Cargo.toml',
   'crates/hxcrypto-stream/Cargo.toml',
   'crates/hxcrypto-aead/Cargo.toml',
   'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
+  'crates/hxbridge/Cargo.toml',
 )
+# cargo-sources.json is regenerated from Cargo.lock for the Flatpak
+# offline build; it is not consumed by `cargo build` directly. Cargo.lock
+# above is the load-bearing dep-graph file that drives this custom_target's
+# re-execution when versions move.
 
 rust_target_dir = meson.project_build_root() / 'rust-target'
 
@@ -116,5 +126,21 @@ rust_hotline_proto_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhotline_proto',
+  ],
+)
+
+# Rust ↔ GLib bridge (Phase R3.0). hxbridge wraps a C-owned
+# GtkhxSession GObject and exposes signal-emit shims for the C side.
+# The first reference is gtkhx_bridge_emit_pointer_pair_signal, used
+# by gtkhx_session_emit_task_update. Pulls in glib/gio 0.22 transitively,
+# which links libglib-2.0 + libgobject-2.0 + libgio-2.0 — already
+# in the C-side deps, so the link surface doesn't change. The
+# gstreamer-rs crate family pinned in workspace.dependencies isn't
+# consumed yet; Phase 8.B wires the gstreamer-webrtc bindings.
+rust_hxbridge_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxbridge',
   ],
 )

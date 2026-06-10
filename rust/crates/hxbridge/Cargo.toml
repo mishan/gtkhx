@@ -1,0 +1,61 @@
+[package]
+name = "hxbridge"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Rust ↔ GLib bridge for GtkHx: C-owned GObject wrapping + signal emit"
+publish = false
+
+[lib]
+# staticlib: the C side (gtkhx_session.c shims) links the FFI symbols.
+# rlib:      future Rust consumers (hxvoice-runtime in Phase 8.B+, hxnet
+#            in R3 proper) depend on the wrapping helpers.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Used by Phase R3.0 code (signal emit, lifetime-model wrapping).
+# Builds against libglib-2.0 / libgobject-2.0 which are already C-side
+# deps of GtkHx, so the system-libs surface doesn't grow.
+#
+# gio is intentionally NOT pulled in at R3.0 — there is no use site yet.
+# The workspace pin (rust/Cargo.toml) is still there so the Phase R3
+# proper hxnet crate (tokio↔GLib bridge) can add it with
+# `gio = { workspace = true }` then. Keeping the unused dep here would
+# only slow builds and grow the link surface for no reason.
+glib = { workspace = true }
+
+# Phase 8.B (gstreamer-rs voice pipeline) will consume these. Listed as
+# `optional = true` so the resolver locks a version for each (Cargo
+# records every optional dep in Cargo.lock so that a later
+# `--features voice` build is reproducible against the same versions),
+# and those lockfile entries flow through to cargo-sources.json for the
+# no-network Flatpak vendoring. The default `cargo build` does NOT
+# compile them, which matters: the gstreamer-webrtc-sys / gstreamer-sys
+# family runs pkg-config at build.rs time and would fail on hosts
+# without the GStreamer 1.26 dev libs. Phase 8.B turns the `voice`
+# feature on; the Flatpak manifest is already on GNOME 49 which ships
+# GStreamer 1.26+.
+gtk4 = { workspace = true, optional = true }
+libadwaita = { workspace = true, optional = true }
+gstreamer = { workspace = true, optional = true }
+gstreamer-app = { workspace = true, optional = true }
+gstreamer-audio = { workspace = true, optional = true }
+gstreamer-sdp = { workspace = true, optional = true }
+gstreamer-webrtc = { workspace = true, optional = true }
+gstreamer-rtp = { workspace = true, optional = true }
+
+[features]
+# Pulls in the gtk-rs + gstreamer-rs trees Phase 8.B needs. Default
+# off; enable with `cargo build -p hxbridge --features voice` (or
+# `cargo build --workspace --features hxbridge/voice`) when the voice
+# pipeline lands.
+voice = [
+    "dep:gtk4",
+    "dep:libadwaita",
+    "dep:gstreamer",
+    "dep:gstreamer-app",
+    "dep:gstreamer-audio",
+    "dep:gstreamer-sdp",
+    "dep:gstreamer-webrtc",
+    "dep:gstreamer-rtp",
+]

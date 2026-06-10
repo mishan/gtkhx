@@ -6,4 +6,34 @@ members = [
     "crates/hxcrypto-aead",
     "crates/hxcompress",
     "crates/hotline-proto",
+    "crates/hxbridge",
 ]
+
+# Shared version pins for the gtk-rs + gstreamer-rs families. Phase R3.0
+# (per docs/voice-chat-plan.md §5) lands the deps via the hxbridge crate;
+# subsequent R3+ crates (hxnet, hxvoice-runtime) inherit by writing
+# `glib.workspace = true` etc. in their own Cargo.toml.
+#
+# - gtk-rs-core 0.22 family: glib 0.22, gio 0.22, gtk4 0.11, libadwaita 0.9
+#   are the crates.io releases that ship together in this line. (libadwaita
+#   0.10 is not yet released; 0.9.x is the current line for the 0.22 family.)
+#   MSRV floor: rustc 1.92 — see rust-toolchain.toml.
+# - gstreamer-rs 0.25 family: tracks GStreamer 1.26 at runtime. The
+#   Flatpak runtime needs 1.26 by Phase 8.B; GNOME 47 runtime ships 1.24
+#   and GNOME 48 brings 1.26. Verify the manifest's runtime-version
+#   before consuming the webrtc bindings (Phase 8.B). Phase R3.0 only
+#   pulls them in.
+#
+# Pinning at major.minor rather than exact patch lets `cargo update`
+# pick up bug-fix releases within the line without ABI surprises.
+[workspace.dependencies]
+glib = "0.22"
+gio = "0.22"
+gtk4 = "0.11"
+libadwaita = "0.9"
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+gstreamer-audio = "0.25"
+gstreamer-sdp = "0.25"
+gstreamer-webrtc = "0.25"
+gstreamer-rtp = "0.25"

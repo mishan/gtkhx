@@ -30,6 +30,14 @@
 #include "protocol.h"
 #include "gtkhx_session.h"
 
+/* Phase R3.0: hxbridge Rust crate exposes the pointer-pair signal
+ * emit. Hand-declared extern per the R2 FFI convention — a signature
+ * mismatch surfaces as a link-time undefined symbol. */
+extern void gtkhx_bridge_emit_pointer_pair_signal (void *session_ptr,
+                                                   const char *signal_name,
+                                                   void *arg0,
+                                                   void *arg1);
+
 struct _GtkhxSession {
     GObject parent_instance;
 };
@@ -482,7 +490,16 @@ void
 gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
                                 struct task *tsk)
 {
-    g_signal_emit (self, signals[SIGNAL_TASK_UPDATE], 0, sess, tsk);
+    /* Phase R3.0 reference port: route the emit through the Rust
+     * hxbridge crate. This is the canonical "drive a C-side signal
+     * emit from Rust" example documented in
+     * docs/rust-glib-interop.md. The wrapping uses from_glib_none
+     * (one extra g_object_ref) so the session stays alive across
+     * the synchronous emit even if a connected C handler runs
+     * g_object_unref. Picked as the foothold because task-update
+     * is a (G_TYPE_POINTER, G_TYPE_POINTER) signal with no boxed-
+     * type marshaling — the boxed-type pattern is R4 work. */
+    gtkhx_bridge_emit_pointer_pair_signal (self, "task-update", sess, tsk);
 }
 
 void
