@@ -1,0 +1,186 @@
+//! Outbound effects the runtime should perform.
+//!
+//! Every effect the state machine wants the world to undergo
+//! gets emitted as exactly one `Action` variant. The runtime
+//! crate walks the action list returned from
+//! `SessionMachine::step` and dispatches each to its concrete
+//! handler:
+//!
+//! - `SendWireFrame` → `hlwrite_chunks` via the C-side FFI shim.
+//! - `SetRemoteDescription` / `CreateAnswer` / etc. →
+//!   `webrtcbin.emit(…)` via `gstreamer-rs`.
+//! - `EmitSignal` → `GtkhxSession::emit_by_name(…)` via the
+//!   Phase R3.0 `hxbridge` wrapping shim.
+//! - `ArmTimer` / `CancelTimer` → `glib::timeout_add_seconds_local`.
+//!
+//! The point of expressing actions as typed data — not as
+//! `Box<dyn FnMut>` callbacks — is that the test suite can
+//! pattern-match on the list. `assert_eq!(actions, vec![…])` is
+//! how the spec's annotated lifecycle replays land.
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::event::{ConnectionState, Timeout};
+
+/// What the state machine wants done in response to an event.
+///
+/// Order in the returned `Vec<Action>` matters — the runtime
+/// dispatches them in order, and several pairs (`SetRemoteDescription`
+/// then `CreateAnswer`, `SetLocalDescription` then `SendWireFrame`)
+/// rely on that for the webrtcbin handshake to land correctly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Action {
+    // ---- Wire ----
+    /// Emit a Hotline transaction over the existing TCP control
+    /// channel. `opcode` is one of the `HTLC_HDR_VOICE_*` family
+    /// (600, 601, 603, 604, 606). `body` is the already-encoded
+    /// chunk payload `hotline-proto::voice::build_*` produced —
+    /// the runtime hands it straight to `hlwrite_chunks` without
+    /// repacking.
+    SendWireFrame {
+        /// The HTLC opcode (e.g. `0x258` for VOICE_JOIN).
+        opcode: u32,
+        /// Pre-built chunk array bytes the FFI consumes. For
+        /// Phase 8.C the runtime side calls `hotline-proto`'s
+        /// `build_voice_*_chunks` and copies the result into
+        /// owned storage before passing it to the C wire-out
+        /// path — this lets the state machine remain free of
+        /// any reference to the underlying `HxChunk` ABI.
+        body: WireFrameBody,
+    },
+
+    // ---- webrtcbin ----
+    /// Hand the SDP to `webrtcbin.set-remote-description`. Always
+    /// followed by `CreateAnswer` in the offer-arrived branch.
+    SetRemoteDescription { sdp: String },
+    /// Tell webrtcbin to generate the answer SDP. The runtime
+    /// arms a `gst::Promise::new_with_change_func` callback that
+    /// turns into `Event::WebrtcAnswerCreated` when the answer
+    /// is ready.
+    CreateAnswer,
+    /// Hand the answer SDP back to webrtcbin via
+    /// `set-local-description`. Always followed by
+    /// `SendWireFrame(603)` so the server gets the answer.
+    SetLocalDescription { sdp: String },
+    /// Hand a remote ICE candidate to webrtcbin via
+    /// `add-ice-candidate`.
+    AddRemoteIce { candidate_json: String },
+
+    // ---- Audio pipeline (managed by hxvoice-runtime) ----
+    /// A receive pad appeared for the given mid; map it to the
+    /// associated user_id and start playback. The runtime
+    /// constructs the `rtppcmudepay ! mulawdec ! audioconvert !
+    /// audioresample ! autoaudiosink` bin and links it to the
+    /// new pad.
+    StartReceivePipeline { mid: String, user_id: u16 },
+    /// A receive pad disappeared (mid slot recycled or
+    /// participant left). Tear down the matching playback bin.
+    StopReceivePipeline { mid: String },
+    /// Apply the local mute state to the send leg of the
+    /// pipeline. `muted = true` drops outgoing buffers; `false`
+    /// resumes them.
+    SetSendPipelineMute { muted: bool },
+
+    // ---- GtkhxSession signals (model → view bridge) ----
+    /// Emit a GtkhxSession signal so the UI updates without the
+    /// state machine knowing anything about GLib. The runtime
+    /// maps `SignalKind` to the concrete signal name + payload.
+    EmitSignal { kind: SignalKind, payload: SignalPayload },
+
+    // ---- Timers ----
+    /// Arm a one-shot timer of the given kind to fire `ms`
+    /// milliseconds from now. The runtime tracks it (so it can
+    /// implement `CancelTimer`) and dispatches `Event::Timeout`
+    /// back to the state machine on expiry.
+    ArmTimer { kind: TimerKind, ms: u32 },
+    /// Cancel a previously armed timer. No-op if the timer
+    /// already fired or wasn't armed.
+    CancelTimer { kind: TimerKind },
+
+    // ---- Lifecycle ----
+    /// Tear the entire voice session down — close webrtcbin,
+    /// stop all pipelines, free the state machine. Final
+    /// action emitted by the machine before the runtime drops
+    /// it.
+    TearDown,
+}
+
+/// Body bytes for a wire frame. Owned `Vec<u8>` so the state
+/// machine can hand the runtime a payload it doesn't have to
+/// copy.
+///
+/// Wrapped in a struct rather than aliased to `Vec<u8>` because
+/// future work may want to carry the chunk array as a typed
+/// `Vec<HxChunkRef>` instead — keeping the wrapping point lets
+/// us evolve without rippling through the public surface.
+#[derive(Clone, PartialEq, Eq)]
+pub struct WireFrameBody(pub Vec<u8>);
+
+impl core::fmt::Debug for WireFrameBody {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "WireFrameBody({} bytes)", self.0.len())
+    }
+}
+
+/// The GtkhxSession signals the state machine asks the runtime
+/// to emit. Concrete signal names + boxed payload types live on
+/// the runtime side; this enum is the runtime's lookup key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SignalKind {
+    /// `voice-room-status` — emitted on every 605 ROOM_STATUS,
+    /// plus on the join / leave transitions. UI uses it to
+    /// drive the participant list speaker indicator.
+    RoomStatus,
+    /// `voice-state-changed` — high-level session state for the
+    /// UI's headerbar indicator. Fires on Idle → JoinSent,
+    /// JoinSent → Connecting, Connecting → Connected,
+    /// → Leaving, → Idle transitions.
+    StateChanged,
+    /// `voice-error` — surfaces a user-facing error toast.
+    /// Fired on `ServerTaskError` and on `Failed` connection
+    /// states.
+    Error,
+    /// `voice-mute-changed` — UI mute toggle reflection. Fires
+    /// whenever our local mute state changes or a 605 reports
+    /// our mute flag.
+    MuteChanged,
+}
+
+/// Typed payload carried with an `EmitSignal` action. Variants
+/// match `SignalKind` 1:1 — pairing them keeps the runtime's
+/// dispatch loop a single `match` rather than a property-bag
+/// downcast.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SignalPayload {
+    RoomStatus {
+        cid: u32,
+        connection_state: ConnectionState,
+    },
+    StateChanged {
+        /// `crate::state::SessionState` discriminant the
+        /// machine just entered. Carried as a copy (the enum is
+        /// `Copy`) so the runtime can hand it to the signal's
+        /// boxed-type wrapper.
+        new_state: crate::state::SessionState,
+    },
+    Error {
+        /// Human-readable text suitable for a toast.
+        text: String,
+    },
+    MuteChanged {
+        muted: bool,
+    },
+}
+
+/// Which timer is being armed / cancelled / fired.
+///
+/// Identifies the spec's §"Session Timeout and Failure" table
+/// entries. `Event::Timeout` carries the same enum
+/// (re-exported as `event::Timeout`); pairing them rather than
+/// reusing a single `Timeout` enum keeps the action-side and
+/// event-side concerns in their respective module's docs.
+pub type TimerKind = Timeout;

@@ -22,6 +22,13 @@
 #                     gstreamer + gstreamer-app + gstreamer-audio +
 #                     gstreamer-sdp + gstreamer-webrtc from
 #                     workspace.dependencies.
+#   hxvoice         — Phase 8.C pure-Rust voice-chat state machine.
+#                     no_std-friendly (hashbrown is the only dep);
+#                     deliberately has no GLib / GStreamer / GTK
+#                     surface so `cargo test -p hxvoice` runs in
+#                     any CI container. Consumed by hxvoice-runtime,
+#                     not linked into the C binary directly — hence
+#                     no rust_hxvoice_dep declared below.
 #
 # Each crate is a staticlib that the C side wraps with a thin dispatcher.
 # FFI signatures are hand-declared `extern` blocks in the relevant C TU
@@ -50,6 +57,10 @@ rust_sources = files(
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',
+  'crates/hxvoice/src/lib.rs',
+  'crates/hxvoice/src/event.rs',
+  'crates/hxvoice/src/action.rs',
+  'crates/hxvoice/src/state.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/ffi.rs',
@@ -61,6 +72,7 @@ rust_sources = files(
   'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
+  'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
