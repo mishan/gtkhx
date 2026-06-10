@@ -49,11 +49,17 @@ config.
 ## Run
 
 ```sh
-docker run --rm -p 5510:5500 -p 5511:5501 gtkhx-janus
+docker run --rm -p 5510:5500 -p 5511:5501 \
+                -p 5514:5504/udp \
+                gtkhx-janus
 ```
 
 Host ports 5510/5511 keep mhxd's conventional 5500/5501 free for
-side-by-side use via the multi-server Compose setup. Connect with:
+side-by-side use via the multi-server Compose setup; 5514 mirrors
+the same offset for voice's base+4 UDP port. Drop the `-p
+5514:5504/udp` mapping if you don't need voice during the session
+(no harm, just a port that nothing's listening on host-side).
+Connect with:
 
 ```
 Server:  localhost:5510
@@ -80,6 +86,7 @@ work without any tweak.
 |------|----------|--------------------------------------------------------|
 | 5500 | TCP      | HTLS — main client connection                          |
 | 5501 | TCP      | HTXF — file transfer subchannel                        |
+| 5504 | UDP      | WebRTC voice (ICE/DTLS/RTP, base+4)                    |
 | 5600 | TCP      | HTLS over TLS (reserved; TLS not enabled in v1)        |
 | 5601 | TCP      | HTXF over TLS (reserved)                               |
 
@@ -112,14 +119,29 @@ Out of the box:
 - Text encoding negotiation (UTF-8 / Mac Roman).
 - File-mode banner (Janus ships a `banner.gif`).
 - Threaded news (Hotline 1.5+).
+- **Voice chat extension** (`EnableVoice: true`, fogWraith
+  Capabilities-Voice.md). `VoiceUDPPort: 5504` is pinned
+  explicitly (base+4). `NewUserDefaults.VoiceChat: true` gives
+  any runtime-created account access bit 55 by default; the
+  bundled `guest` and `admin` accounts get the bit through an
+  in-place YAML edit in `seed-hope-passwords.sh` (the upstream
+  YAML schema is one boolean per access bit, two-space-indented
+  under `Access:`).
+
+  GtkHx Phase 8.A advertises `HTLC_CAP_VOICE` in LOGIN; Janus
+  with this config echoes the cap and the client sees voice as
+  available. No media flows in Phase 8.A — the WebRTC pipeline
+  and audio I/O land in Phases 8.B and 8.C. The 5504/udp port
+  mapping is therefore inert today and only becomes load-bearing
+  with the runtime crate.
 
 Not enabled in v1 (separate follow-up):
 
 - **TLS.** `Extras/generate_cert.sh` + `Extras/openssl.cnf` would
   generate a self-signed cert at build time; we haven't audited
   that flow yet. Pencilled in alongside the GtkHx-side TLS work.
-- **Voice chat / IRC bridge / NewsBridge / Mnemosyne content
-  sync.** Out of scope for GtkHx.
+- **IRC bridge / NewsBridge / Mnemosyne content sync.** Out of
+  scope for GtkHx.
 
 ## Iterate
 

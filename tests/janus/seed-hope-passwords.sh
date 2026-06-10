@@ -130,7 +130,61 @@ if ! grep -q '^HOPEPassword:' "$JANUS_DIR/Users/admin.yaml"; then
     exit 1
 fi
 
+# Seed VoiceChat=true onto the bundled guest + admin accounts.
+#
+# Background: the spec mandates access bit 55
+# (HL_ACCESS_VOICE_CHAT) for HTLC_HDR_VOICE_JOIN; the server
+# rejects 600 with DATA_ERROR_TEXT ("You are not allowed to
+# join voice chat.") when the bit is unset. Unlike the
+# chat-history extension, voice has no fallback to a lower-
+# privilege bit — bit 55 is the only gate.
+#
+# The NewUserDefaults block in config.yaml already sets
+# VoiceChat: true, which covers any account the integration
+# suite creates at runtime via the admin API. But the bundled
+# `guest` and `admin` YAMLs ship from the upstream Janus
+# tarball with VoiceChat: false, so any voice test that uses
+# either of those credentials would bounce off bit 55 unless
+# we flip it now.
+#
+# Strategy: in-place YAML edit on each bundled account
+# YAML after the seed-time Janus instance has shut down (so
+# Janus isn't going to write the YAML back). Match the
+# documented YAML shape — Janus writes one access bit per
+# line as `<BitName>: <bool>` — and flip the booleans. We
+# don't trust sed's pattern recall here; we apply it
+# defensively and verify with grep, failing the build if the
+# edit didn't take.
+for u in guest admin; do
+    yaml="$JANUS_DIR/Users/$u.yaml"
+    if [ ! -f "$yaml" ]; then
+        echo "missing $yaml after Janus first-run; cannot seed VoiceChat" >&2
+        exit 1
+    fi
+    # The upstream YAML shape under Access: is two-space-indented:
+    #   Access:
+    #     VoiceChat: false
+    # Match both indented and non-indented variants in case the
+    # serialiser ever changes its whitespace policy. If neither
+    # matches, fall back to a no-op and let the verify step fail
+    # loudly with the YAML dumped.
+    sed -i \
+        -e 's/^\(  VoiceChat:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
+        -e 's/^\(VoiceChat:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
+        "$yaml"
+    if ! grep -E '^[[:space:]]*VoiceChat:[[:space:]]+true' "$yaml" \
+            >/dev/null; then
+        echo "VoiceChat seed failed for $u" >&2
+        echo "--- $yaml ---" >&2
+        cat "$yaml" >&2
+        echo "--- janus log tail ---" >&2
+        tail -40 "$LOG" >&2
+        exit 1
+    fi
+done
+
 echo "HOPE seed OK"
 grep -E '^Login|^HOPEPassword' \
     "$JANUS_DIR/Users/guest.yaml" \
     "$JANUS_DIR/Users/admin.yaml"
+echo "VoiceChat seed OK (bit 55 set on guest + admin)"

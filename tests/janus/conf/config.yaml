@@ -234,14 +234,24 @@ EnableCompression: false
 # ─── Voice Chat ─────────────────────────────────────────────────────────────
 # Enable WebRTC voice chat support. Requires clients that negotiate the
 # voice capability.
-EnableVoice: false
+#
+# Test-target setting: enabled. The GtkHx Phase 8.A wire scaffolding
+# advertises HTLC_CAP_VOICE in LOGIN, and we want Janus to echo it in
+# the reply so the client sees the cap as negotiated. Bit 2 (0x0004)
+# in DATA_CAPABILITIES per fogWraith Capabilities-Voice.md.
+EnableVoice: true
 
 # UDP port for WebRTC ICE/DTLS/RTP traffic. Defaults to Port + 4 if not set.
 # All voice PeerConnections are multiplexed over this single port.
-# VoiceUDPPort: 5504
+#
+# Test-target setting: pinned to base+4 (5504) explicitly. The
+# Dockerfile EXPOSEs 5504/udp and the CI matrix expects the same
+# number. Tier 3 voice tests (Phase 8.F) will bind a host-side
+# mapping to forward UDP datagrams to this port.
+VoiceUDPPort: 5504
 
 # Maximum participants per voice room (default: 16).
-# VoiceMaxPerRoom: 16
+VoiceMaxPerRoom: 16
 
 # ─── Inline Media (Images in Chat) ──────────────────────────────────────────
 # Capability extension that lets capable clients exchange small images
@@ -622,7 +632,14 @@ NewUserDefaults:
   AdminInspector:       false  # Use the admin inspector (GLoarbLine)
 
   # ── Extensions (capability-gated) ───────────────────────────────
-  VoiceChat:            false   # Join voice chat rooms
+  # Test-target setting: VoiceChat enabled in the new-account template
+  # so any account the integration suite creates at runtime gets bit
+  # 55 (HL_ACCESS_VOICE_CHAT) without an extra PATCH step. The bundled
+  # guest / admin accounts (whose YAMLs were written by an upstream
+  # Janus build before this template was edited) are seeded
+  # separately in seed-hope-passwords.sh — see the bit-flip block at
+  # the end of that script.
+  VoiceChat:            true    # Join voice chat rooms
   ReadChatHistory:      false   # Request chat history (replay on demand)
   SendMedia:            false   # Attach inline images in chat
 
