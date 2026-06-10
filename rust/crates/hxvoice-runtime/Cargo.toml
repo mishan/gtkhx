@@ -36,3 +36,10 @@ gstreamer-audio = { workspace = true }
 gstreamer-sdp = { workspace = true }
 gstreamer-webrtc = { workspace = true }
 glib = { workspace = true }
+
+# Phase 8.C: the pure-Rust state machine the runtime drives. Path
+# dep (workspace member) so changes to hxvoice's typed Event /
+# Action / SessionMachine surface flow through to the runtime
+# crate's tests at the same `cargo build`. No version pinned —
+# both crates evolve together within the workspace.
+hxvoice = { path = "../hxvoice" }

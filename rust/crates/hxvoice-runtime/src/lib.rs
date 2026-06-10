@@ -51,6 +51,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 pub mod audio;
+pub mod runtime;
 mod ffi;
 
 /// Initialise the GStreamer subsystem.
