@@ -106,9 +106,36 @@ pub trait Backend {
     /// the GLib side expects.
     fn emit_signal(&mut self, kind: SignalKind, payload: SignalPayload);
 
-    /// Final teardown notification. The runtime walks itself to
-    /// the `Idle` state after this; the implementor closes any
-    /// resources it allocated.
+    /// Teardown notification — the state machine has emitted
+    /// [`hxvoice::action::Action::TearDown`] for whatever reason
+    /// (terminal failure, explicit Leave, mid-session room
+    /// switch). The implementor closes any resources it
+    /// allocated for the current voice session.
+    ///
+    /// **`tear_down` does NOT mean "the runtime returns to Idle."**
+    /// It describes runtime-resource teardown only; whether the
+    /// runtime can be reused depends on the post-step
+    /// `SessionMachine` state:
+    ///
+    /// - When the machine has transitioned to
+    ///   [`hxvoice::state::SessionState::Leaving`] (terminal),
+    ///   the runtime stays in `Leaving` — the state machine
+    ///   treats `Leaving` as terminal and there is no `Leaving →
+    ///   Idle` step. Production drops the whole `VoiceRuntime`
+    ///   after observing this state and constructs a fresh one
+    ///   if voice is rejoined later.
+    /// - When `TearDown` accompanied a mid-session room switch
+    ///   (the implicit-leave path: `JoinRequested` for a
+    ///   different cid while in voice), the machine has walked
+    ///   back to `JoinSent` with fresh per-room state in the
+    ///   same `step()`. The runtime is expected to rebuild its
+    ///   GStreamer-side resources for the new room and keep
+    ///   running.
+    ///
+    /// Implementations that need to know which path triggered
+    /// teardown can read the post-step state via the runtime's
+    /// own accessor (`VoiceRuntime::state`) after the action
+    /// list finishes dispatching.
     fn tear_down(&mut self);
 }
 
@@ -205,8 +232,14 @@ struct Inner {
     /// an event. A re-entrant call (backend dispatches an action
     /// that triggers a Hotline signal which calls back into
     /// `handle_event`) queues onto `pending` instead of running
-    /// inline; the outer loop drains it after each action is
-    /// dispatched. Removes the entire class of "borrow_mut while
+    /// inline; the outer loop drains the queue **between
+    /// events** — after the current event's full action list
+    /// finishes dispatching, the loop checks `pending`, pops the
+    /// next event, and walks its action list start-to-finish.
+    /// Drains happen at the event boundary, not after each
+    /// individual action.
+    ///
+    /// Removes the entire class of "borrow_mut while
     /// dispatching" panics, including the Backend-on-Backend
     /// case the simple two-Rc split doesn't cover on its own.
     dispatching: bool,
@@ -231,7 +264,7 @@ impl VoiceRuntime {
     /// panic from inside gstreamer-rs's assert-initialised
     /// checks.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
-        gstreamer::init().map_err(|_| RuntimeError::GstInitFailed)?;
+        gstreamer::init().map_err(RuntimeError::GstInitFailed)?;
         let pipeline = gstreamer::Pipeline::builder()
             .name("hxvoice-pipeline")
             .build();
@@ -450,22 +483,33 @@ pub enum RuntimeError {
     /// `gtkhx_voice_init()` from `main` which surfaces this in
     /// the C-side log; constructing a runtime then sees the
     /// re-init no-op and never reaches this branch.
-    GstInitFailed,
+    ///
+    /// The wrapped `glib::Error` carries the gstreamer-rs init
+    /// failure message verbatim — included in `Display` so
+    /// callers (and the C-side toast) get the actual reason
+    /// instead of a generic hint.
+    GstInitFailed(gstreamer::glib::Error),
 }
 
 impl core::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            RuntimeError::GstInitFailed => write!(
+            RuntimeError::GstInitFailed(err) => write!(
                 f,
-                "gst::init() failed — check the GStreamer install \
+                "gst::init() failed: {err} — check the GStreamer install \
                  (gst-plugins-base / -plugins-bad must be available)"
             ),
         }
     }
 }
 
-impl std::error::Error for RuntimeError {}
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RuntimeError::GstInitFailed(err) => Some(err),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -540,7 +584,6 @@ mod tests {
         assert_eq!(opcodes, vec![600, 603]);
     }
 
-    #[test]
     /// Regression (Copilot review): ArmTimer used to no-op when
     /// the same kind was already armed. That's wrong semantics
     /// for a (re-)arm — the state machine sends repeat ArmTimer
