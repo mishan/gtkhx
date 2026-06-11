@@ -1113,33 +1113,29 @@ impl VoiceRuntime {
             // runtime is the layer that decides whether to
             // actually drive GStreamer.
             Action::SetRemoteDescription { sdp } => {
-                let webrtcbin = self
-                    .inner
-                    .borrow()
-                    .webrtcbin
-                    .clone();
-                if let Some(bin) = webrtcbin {
-                    apply_remote_offer(&bin, &sdp);
-                }
-            }
-            Action::CreateAnswer => {
-                // Capture data needed by the (Send) promise
-                // closure: the runtime id (to find ourselves
-                // again on the main thread), the answer
-                // generation (so we can ignore stale
-                // resolutions if a later offer arrives before
-                // the old promise fires — see below), and a
-                // handle to the main GLib context (its accessor
-                // is callable from any thread — `Send`-safe).
+                // set-remote-description on webrtcbin is async.
+                // `create-answer` requires remote desc to be
+                // applied first — issuing it synchronously after
+                // (the previous bug) made webrtcbin error the
+                // promise, the state machine never saw
+                // `WebrtcAnswerCreated`, and the session stalled
+                // in `OfferPending` until the JoinReply timer
+                // walked it to Failed.
                 //
-                // Bump the generation BEFORE handing the
-                // promise to webrtcbin. The state machine's
-                // OfferPending+SdpOfferReceived arm
-                // re-issues CreateAnswer without changing
-                // state; without the bump-and-compare the old
-                // promise's resolution would still match the
-                // current generation and send a stale 603 for
-                // the wrong offer.
+                // Now: attach a promise to set-remote-description
+                // and chain `create-answer` from inside its
+                // resolution. The state machine's separate
+                // `Action::CreateAnswer` becomes a no-op (see
+                // below) — the runtime has already taken
+                // responsibility for issuing it at the right
+                // point.
+                //
+                // Bump `answer_generation` BEFORE handing the
+                // promise to webrtcbin so a renegotiation offer
+                // arriving while this chain is in flight
+                // produces a fresh generation, and the in-flight
+                // promise's eventual resolution is correctly
+                // dropped as stale.
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
                     inner.answer_generation =
@@ -1151,8 +1147,19 @@ impl VoiceRuntime {
                     )
                 };
                 if let Some(bin) = webrtcbin {
-                    create_answer(&bin, runtime_id, generation);
+                    apply_remote_offer_and_chain_answer(
+                        &bin, &sdp, runtime_id, generation,
+                    );
                 }
+            }
+            Action::CreateAnswer => {
+                // No-op: `Action::SetRemoteDescription`'s promise
+                // chain calls `create_answer` once webrtcbin has
+                // actually applied the remote offer. The state
+                // machine still emits this action because the
+                // chain isn't its concern; we silently absorb it
+                // here so we don't fire `create-answer` twice
+                // (once stale, once correctly chained).
             }
             Action::SetLocalDescription { sdp } => {
                 let webrtcbin = self
@@ -1343,18 +1350,75 @@ fn build_session_description(
 }
 
 /// Dispatch arm for `Action::SetRemoteDescription`. Parses the
-/// offer SDP and emits `webrtcbin.set-remote-description` with a
-/// null promise (we don't currently track when remote-desc has
-/// finished applying; the state machine just sequences
-/// `CreateAnswer` immediately after).
-fn apply_remote_offer(webrtcbin: &gstreamer::Element, sdp: &str) {
+/// offer SDP, emits `webrtcbin.set-remote-description` with a
+/// promise, and chains `create-answer` from the promise's
+/// resolution.
+///
+/// The chain matters: webrtcbin's `set-remote-description` is
+/// asynchronous, and `create-answer` requires remote desc to be
+/// applied before it can produce a usable answer. Issuing them
+/// back-to-back synchronously (the previous behaviour) left
+/// webrtcbin without a real remote-desc when `create-answer`
+/// fired, the promise either errored or returned an empty
+/// structure, the state machine never saw
+/// `Event::WebrtcAnswerCreated`, and the session stalled in
+/// `OfferPending` until the JoinReply timer walked it to Failed.
+///
+/// Renegotiation race guard: `answer_generation` was bumped by
+/// the dispatch arm before calling us, and the captured value is
+/// checked inside `create_answer`'s promise too. If a fresh
+/// `SetRemoteDescription` runs before this chain's `create-answer`
+/// promise resolves, the generation mismatch drops the stale
+/// answer.
+fn apply_remote_offer_and_chain_answer(
+    webrtcbin: &gstreamer::Element,
+    sdp: &str,
+    runtime_id: u64,
+    generation: u64,
+) {
     let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer)
     else {
         return;
     };
+    let main_ctx = gstreamer::glib::MainContext::default();
+    let promise = gstreamer::Promise::with_change_func(move |reply| {
+        // `set-remote-description` populates the promise's reply
+        // structure with at most a debug hint; we only care that
+        // it resolved (whether Ok or Err). On Err the webrtcbin
+        // state hasn't actually advanced — issuing create-answer
+        // anyway would just produce the same stall as before.
+        // Log and bail.
+        if let Err(e) = reply {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: set-remote-description promise resolved with \
+                 error for runtime {runtime_id}: {e:?} — skipping chained \
+                 create-answer; JoinReply timer will walk the session to \
+                 Failed"
+            );
+            return;
+        }
+        // Marshal back to the main thread. The closure must be
+        // `Send + 'static`; we capture only `runtime_id` and
+        // `generation` (both `u64: Copy`) plus the main-context
+        // handle. `create_answer` does its own generation re-
+        // check inside its promise resolution.
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                if rt.inner.borrow().answer_generation != generation {
+                    return;
+                }
+                let webrtcbin =
+                    rt.inner.borrow().webrtcbin.clone();
+                if let Some(bin) = webrtcbin {
+                    create_answer(&bin, runtime_id, generation);
+                }
+            });
+        });
+    });
     webrtcbin.emit_by_name::<()>(
         "set-remote-description",
-        &[&desc, &None::<gstreamer::Promise>],
+        &[&desc, &promise],
     );
 }
 
@@ -2733,35 +2797,62 @@ mod tests {
         assert!(runtime.inner.borrow().webrtcbin.is_some());
     }
 
-    /// Regression (Copilot review #3): `Action::CreateAnswer`
-    /// must bump `answer_generation` on every dispatch. The
-    /// generation is the load-bearing piece of the
-    /// renegotiation race guard — promise change-funcs capture
-    /// the value at issue time and compare it on the main
-    /// thread, so we need each new CreateAnswer to be a fresh
-    /// generation to discriminate stale resolutions.
+    /// Regression: `answer_generation` must bump on every
+    /// `Action::SetRemoteDescription` dispatch. The generation is
+    /// the load-bearing piece of the renegotiation race guard —
+    /// `set-remote-description`'s promise chain captures the
+    /// value at issue time, and so does the chained
+    /// `create-answer`'s promise. A renegotiation `SetRemote` in
+    /// flight must invalidate any older chain's eventual
+    /// `WebrtcAnswerCreated` dispatch.
     ///
-    /// Driven through `dispatch` rather than the state machine
-    /// because we want to exercise the runtime arm directly
-    /// without depending on the offer/answer state path.
+    /// Originally pinned to `Action::CreateAnswer`; moved to
+    /// `SetRemoteDescription` when create-answer became a chained
+    /// continuation of set-remote-description (see
+    /// `apply_remote_offer_and_chain_answer`). `Action::CreateAnswer`
+    /// is now a no-op and must NOT bump the generation — a bump
+    /// there would corrupt the generation captured by the in-flight
+    /// chain's promise.
     #[test]
-    fn create_answer_dispatch_bumps_answer_generation() {
+    fn set_remote_description_dispatch_bumps_answer_generation() {
         let runtime =
             VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         let before = runtime.inner.borrow().answer_generation;
-        runtime.dispatch(Action::CreateAnswer);
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: "v=0\r\n".into(),
+        });
         let after_one = runtime.inner.borrow().answer_generation;
         assert_eq!(
             after_one,
             before.wrapping_add(1),
-            "first CreateAnswer dispatch must bump the generation by 1"
+            "first SetRemoteDescription dispatch must bump the generation by 1"
         );
-        runtime.dispatch(Action::CreateAnswer);
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: "v=0\r\n".into(),
+        });
         let after_two = runtime.inner.borrow().answer_generation;
         assert_eq!(
             after_two,
             before.wrapping_add(2),
-            "second CreateAnswer dispatch must bump the generation again"
+            "second SetRemoteDescription dispatch must bump the generation again"
+        );
+    }
+
+    /// `Action::CreateAnswer` is a no-op after the chain refactor —
+    /// the `set-remote-description` promise drives `create-answer`
+    /// on its resolution. Verify the runtime doesn't bump the
+    /// generation a second time when the state machine emits both
+    /// actions back-to-back.
+    #[test]
+    fn create_answer_dispatch_is_now_a_noop_on_generation() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let before = runtime.inner.borrow().answer_generation;
+        runtime.dispatch(Action::CreateAnswer);
+        let after = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after, before,
+            "Action::CreateAnswer is a no-op; the chain handles it"
         );
     }
 
