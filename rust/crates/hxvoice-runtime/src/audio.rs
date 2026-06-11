@@ -257,6 +257,62 @@ pub fn make_receive_bin(name: &str) -> Option<gst::Bin> {
     Some(bin)
 }
 
+/// Build a send-leg `gst::Bin` that captures audio, encodes to
+/// μ-law, payloads as RTP/PCMU, and exposes a single source pad
+/// ready to link to `webrtcbin`'s sink request pad.
+///
+/// Chain:
+///
+/// ```text
+/// audiotestsrc -> audioconvert -> audioresample -> capsfilter(PCM 8 kHz mono)
+///              -> mulawenc -> rtppcmupay -> (ghost src)
+/// ```
+///
+/// `audiotestsrc` is a deliberate stub — it emits a 440 Hz tone so
+/// the WebRTC handshake completes and remote peers hear *something*
+/// without us having wired the system microphone. Phase 8.E swaps
+/// in `autoaudiosrc` (or a user-picked device from the settings
+/// UI). The encoder / payloader chain stays identical either way.
+///
+/// Returns `None` on any factory failure. The eventual missing
+/// element is whichever one the user's GStreamer install doesn't
+/// ship; `mulawenc` lives in `gst-plugins-good` and `rtppcmupay` in
+/// `gst-plugins-good` as well, both of which production already
+/// has via the audio runtime.
+///
+/// Linking note: the chain ends in a ghost src pad, NOT a direct
+/// link to webrtcbin. The caller asks webrtcbin for a sink request
+/// pad (`sink_%u`) and links the ghost src to it. That gives
+/// webrtcbin the chance to advertise the right SDP media
+/// description (PCMU caps, sendrecv direction) when answering an
+/// incoming offer — without a send-leg attached, webrtcbin answers
+/// with `a=inactive` and the peer connection never carries media.
+pub fn make_send_bin(name: &str) -> Option<gst::Bin> {
+    let bin = gst::Bin::builder().name(name).build();
+    // `audiotestsrc` exposes `wave` as a typed enum, not a plain
+    // integer. The default is sine (0), so don't set it — leave
+    // it at default. `is-live=true` keeps timestamps tied to real
+    // wallclock time (matters for RTP pacing into webrtcbin).
+    let src = gst::ElementFactory::make("audiotestsrc")
+        .property("is-live", true)
+        .property("freq", 440.0_f64)
+        .build()
+        .ok()?;
+    let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
+    let res = gst::ElementFactory::make("audioresample").build().ok()?;
+    let caps = make_pcm8khz_caps_filter()?;
+    let enc = make_mulaw_encoder()?;
+    let pay = gst::ElementFactory::make("rtppcmupay").build().ok()?;
+    bin.add_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
+    gst::Element::link_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
+    // Expose the payloader's src as a ghost pad on the bin so the
+    // caller can link it to webrtcbin's sink request pad.
+    let pay_src = pay.static_pad("src")?;
+    let ghost = gst::GhostPad::with_target(&pay_src).ok()?;
+    bin.add_pad(&ghost).ok()?;
+    Some(bin)
+}
+
 // glib import kept above for completeness even though no glib symbol
 // is referenced directly today — the device-name strings round-trip
 // through `glib::GString`, and Phase 8.E will lean on glib types in

@@ -855,6 +855,72 @@ impl VoiceRuntime {
                 );
                 RuntimeError::WebrtcbinUnavailable
             })?;
+        // Add the send-leg stub so webrtcbin has something to
+        // advertise on the audio mline when it answers. Without
+        // a sink pad attached, webrtcbin produces an answer with
+        // `a=inactive` for the audio media — Janus then has nothing
+        // to route the media stream through, and the ICE
+        // connection-state walks new → checking → failed at the
+        // ~7 second mark.
+        //
+        // The send bin is built around `audiotestsrc` for now
+        // (440 Hz sine tone). Phase 8.E swaps it for `autoaudiosrc`
+        // and a user-selected device from the settings UI; the
+        // encoder + payloader chain is identical either way.
+        //
+        // Build failure here means the user's GStreamer install
+        // is missing `mulawenc` or `rtppcmupay` (both in
+        // gst-plugins-good); collapse to WebrtcbinUnavailable
+        // since the runtime can't function without the send leg
+        // either way.
+        let send_bin = crate::audio::make_send_bin("hxvoice-send-bin")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to build the send bin — check that \
+                     mulawenc and rtppcmupay are installed (both ship in \
+                     gst-plugins-good)"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        pipeline.add(&send_bin).map_err(|e| {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to add send bin to pipeline: {e}"
+            );
+            RuntimeError::WebrtcbinUnavailable
+        })?;
+        // Request a sink pad on webrtcbin and link the send bin's
+        // src ghost pad to it. `sink_%u` is the template name;
+        // webrtcbin picks the index. The link must happen BEFORE
+        // pipeline.set_state(Playing) so the negotiation sees a
+        // populated transceiver direction when create-answer
+        // fires later.
+        let webrtc_sink = webrtcbin
+            .request_pad_simple("sink_%u")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: webrtcbin refused to grant a sink_%u pad"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        let send_src = send_bin
+            .static_pad("src")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: send_bin missing its ghost src pad"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        send_src.link(&webrtc_sink).map_err(|e| {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to link send_bin → webrtcbin sink: {e:?}"
+            );
+            RuntimeError::WebrtcbinUnavailable
+        })?;
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
         // Wire the on-ice-candidate signal BEFORE registering.
         // The signal callback only looks the runtime up via
