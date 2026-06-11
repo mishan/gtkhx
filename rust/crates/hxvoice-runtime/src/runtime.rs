@@ -1045,11 +1045,26 @@ fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
 /// The signal callback must be `Send + 'static` (webrtcbin may fire
 /// it on a GStreamer worker thread); we follow the same shape as
 /// `create_answer`'s promise — capture the runtime id (u64, Copy)
-/// and the main context handle (Send), build the JSON in the
-/// callback (`sdpMLineIndex` + `candidate`, no `sdpMid` because
-/// webrtcbin doesn't surface it on the local-gather path), marshal
-/// back to the main thread via `MainContext::invoke`, and re-enter
+/// and the main context handle (Send), build the outgoing
+/// `RTCIceCandidateInit` JSON in the callback, marshal back to the
+/// main thread via `MainContext::invoke`, and re-enter
 /// `handle_event` after a registry lookup.
+///
+/// The JSON carries all three of `candidate`, `sdpMid`, and
+/// `sdpMLineIndex`. `candidate` and `sdpMLineIndex` come directly
+/// from the signal payload; `sdpMid` isn't surfaced by the signal,
+/// so we resolve it from the bin's `local-description` SDP by
+/// looking up the `a=mid:…` attribute on the media line at the
+/// signal's index. The fogWraith voice extension's wire format
+/// treats `sdpMid` as a required key — `hotline_proto::voice::ice`
+/// rejects payloads missing it — so shipping a candidate without
+/// it would break trickle ICE downstream.
+///
+/// If the `sdpMid` lookup fails (local-description not yet set,
+/// no `mid` attribute on the indexed media), the candidate is
+/// dropped with a GStreamer warning. ICE failure timers (Phase
+/// 8.C step 7) drive the session to Failed if no usable
+/// candidates ever land.
 ///
 /// Called from `VoiceRuntime::new` once the bin is in the pipeline,
 /// so production gets ICE wiring for every fresh runtime
@@ -1065,6 +1080,13 @@ fn connect_on_ice_candidate(
         // end), but the callback receives a slice of `glib::Value`s
         // — by signature `[webrtcbin, mlineindex: u32,
         // candidate: &str]`.
+        let bin = match values
+            .first()
+            .and_then(|v| v.get::<gstreamer::Element>().ok())
+        {
+            Some(b) => b,
+            None => return None,
+        };
         let mline_index = match values.get(1).and_then(|v| v.get::<u32>().ok()) {
             Some(v) => v,
             None => return None,
@@ -1073,10 +1095,28 @@ fn connect_on_ice_candidate(
             Some(s) => s,
             None => return None,
         };
+        // Resolve sdpMid by walking the bin's local-description.
+        // Dropping the candidate when the lookup fails is the
+        // correct move — voice::ice::parse on the wire side
+        // rejects payloads missing sdpMid, so we'd just produce
+        // a JSON the server can't accept.
+        let sdp_mid = match lookup_local_sdp_mid(&bin, mline_index) {
+            Some(mid) => mid,
+            None => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: local-description doesn't have an \
+                     a=mid:… for mline {mline_index}; dropping \
+                     ICE candidate (would have produced JSON \
+                     rejected by voice::ice::parse)"
+                );
+                return None;
+            }
+        };
         let candidate_json = hotline_proto::voice::ice::build(
             &hotline_proto::voice::ice::IceCandidate {
                 candidate: Some(candidate),
-                sdp_mid: None,
+                sdp_mid: Some(sdp_mid),
                 sdp_mline_index: Some(mline_index),
                 username_fragment: None,
             },
@@ -1091,6 +1131,27 @@ fn connect_on_ice_candidate(
         });
         None
     });
+}
+
+/// Look up the `a=mid:…` attribute on the media line at the
+/// given index in `webrtcbin`'s `local-description` SDP. Returns
+/// `None` if local-description isn't set yet, the index is out of
+/// range, or the indexed media has no `mid` attribute.
+///
+/// Pulled into its own helper so the on-ice-candidate callback
+/// stays linear and the lookup logic can be reused by the
+/// step-5 pad-added path when it lands.
+fn lookup_local_sdp_mid(
+    webrtcbin: &gstreamer::Element,
+    mline_index: u32,
+) -> Option<String> {
+    let desc: gstreamer_webrtc::WebRTCSessionDescription = webrtcbin
+        .property_value("local-description")
+        .get()
+        .ok()?;
+    let sdp = desc.sdp();
+    let media = sdp.media(mline_index)?;
+    media.attribute_val("mid").map(|s| s.to_string())
 }
 
 /// Errors returned from `VoiceRuntime::new`.
@@ -1848,5 +1909,28 @@ mod tests {
             candidate_json: "garbage".into(),
         });
         assert_eq!(runtime.state(), SessionState::Idle);
+    }
+
+    /// `lookup_local_sdp_mid` returns `None` when the bin's
+    /// `local-description` hasn't been set yet — the on-ice-candidate
+    /// callback's path for "candidate fires before
+    /// set-local-description has landed". Without this graceful
+    /// return the callback would unwrap on `None` and panic the
+    /// worker thread.
+    ///
+    /// Driven against a fresh, unconfigured `webrtcbin` element
+    /// because that's the cleanest way to put it in the "no
+    /// local-description" state from a unit test. We don't try
+    /// to assert the happy path here — that requires a full
+    /// SDP round-trip, which lives in the Tier 3 voice
+    /// integration test (Phase 8.F).
+    #[test]
+    fn lookup_local_sdp_mid_returns_none_without_local_description() {
+        assert!(crate::init());
+        let bin = gstreamer::ElementFactory::make("webrtcbin")
+            .build()
+            .expect("webrtcbin element must be constructable");
+        assert_eq!(lookup_local_sdp_mid(&bin, 0), None);
+        assert_eq!(lookup_local_sdp_mid(&bin, 42), None);
     }
 }
