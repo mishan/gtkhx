@@ -2403,7 +2403,11 @@ mod tests {
         });
 
         runtime.handle_event(Event::LeaveRequested { cid: 7 });
-        assert_eq!(runtime.state(), SessionState::Leaving);
+        // LeaveRequested walks directly to Idle so the user can
+        // rejoin without the machine wedging in Leaving. See
+        // hxvoice::state::tests::rejoin_after_leave_walks_idle_to_join_sent
+        // for the canonical pin.
+        assert_eq!(runtime.state(), SessionState::Idle);
         let backend = backend.borrow();
         let opcodes: Vec<u32> = backend
             .wire_frames
@@ -2457,7 +2461,9 @@ mod tests {
             state: ConnectionState::Connected,
         });
         runtime.handle_event(Event::LeaveRequested { cid: 1 });
-        assert_eq!(runtime.state(), SessionState::Leaving);
+        // User-driven Leave walks directly to Idle (see
+        // hxvoice::state::tests::rejoin_after_leave_walks_idle_to_join_sent).
+        assert_eq!(runtime.state(), SessionState::Idle);
     }
 
     /// Regression (Copilot review): dispatch() used to hold an
@@ -2523,12 +2529,13 @@ mod tests {
         // The fact that we reached this line at all is the test —
         // the old code would have panicked on the re-entry.
         // We verify the re-entry actually happened by observing
-        // the state machine transitioned all the way to Leaving
-        // (JOIN sets active_cid to 42 → LEAVE matches active_cid
-        // and walks to Leaving).
+        // the state machine transitioned all the way back to Idle
+        // (JOIN sets active_cid to 42, LEAVE matches active_cid
+        // and walks Idle now that LeaveRequested no longer parks
+        // at Leaving).
         let backend_slot = runtime_slot.borrow();
         let runtime_ref = backend_slot.as_ref().unwrap();
-        assert_eq!(runtime_ref.state(), SessionState::Leaving);
+        assert_eq!(runtime_ref.state(), SessionState::Idle);
     }
 
     #[test]
