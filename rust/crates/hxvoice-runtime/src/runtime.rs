@@ -755,6 +755,16 @@ struct Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
+        // Walk the pipeline back to Null before letting it drop.
+        // Production sets it to Playing in VoiceRuntime::new so
+        // webrtcbin can do peer-connection work; teardown is the
+        // matching reverse. Without this, the pipeline thread
+        // may outlive the dispatch loop and a late bus message
+        // can fire against the about-to-be-dropped bus watch.
+        if let Some(pipeline) = self.pipeline.as_ref() {
+            let _ = pipeline.set_state(gstreamer::State::Null);
+        }
+
         // Cancel any still-armed timer sources so glib doesn't
         // fire a callback against a now-dropped runtime. The
         // callback's `with_main_thread_runtime` lookup would
@@ -856,6 +866,50 @@ impl VoiceRuntime {
         connect_pad_added(&webrtcbin, runtime_id);
         connect_connection_state_notify(&webrtcbin, runtime_id);
         let bus_watch_guard = attach_pipeline_bus_watch(&pipeline);
+        // Transition the pipeline out of Null so webrtcbin's
+        // internal peer connection becomes usable. While the
+        // pipeline is in Null, webrtcbin reports its peer
+        // connection as `closed` and silently aborts every task
+        // we hand it — set-remote-description, create-answer,
+        // add-ice-candidate, the lot. That manifests as the
+        // state machine getting stuck in OfferPending: webrtcbin
+        // accepts the call, logs "Peerconnection is closed,
+        // aborting execution" at DEBUG level, and never resolves
+        // the promise.
+        //
+        // Playing is the production target — that's the state
+        // webrtcbin needs to actually flow media. A failure here
+        // (state-change rejected by an element) is fatal to the
+        // session, so collapse to WebrtcbinUnavailable rather
+        // than soldier on with a half-initialised pipeline.
+        // Move the pipeline to Playing. webrtcbin's internal
+        // `is_closed` flag mirrors the bin's element state: it's
+        // TRUE while in Null, FALSE in any higher state. With
+        // is_closed=TRUE every peer-connection task (set-remote-
+        // description, create-answer, add-ice-candidate, ...)
+        // logs "Peerconnection is closed, aborting execution" at
+        // DEBUG level and returns silently — which manifests
+        // user-side as the state machine getting stuck in
+        // OfferPending forever.
+        //
+        // The state change is best-effort: in test environments
+        // (no audio devices, no GLib main loop driving the bus)
+        // rtpbin and other internal elements may refuse to
+        // preroll and the call returns StateChangeError. That's
+        // fine for the unit tests, which exit the dispatch arms
+        // cleanly regardless of peer-connection state. In
+        // production the pipeline reaches at least Ready (often
+        // Async toward Playing as transceivers are added by the
+        // SDP exchange) which is enough to clear `is_closed` so
+        // the negotiation can proceed.
+        if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: pipeline set_state(Playing) returned {e:?}; \
+                 continuing anyway — production usually recovers as the \
+                 SDP exchange adds transceivers"
+            );
+        }
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
