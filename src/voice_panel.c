@@ -454,14 +454,19 @@ voice_panel_refresh (GtkWidget *panel, session *sess)
     update_button_labels (panel);
 }
 
-/* Map FFI gtkhx_voice_state → "in voice or not". Connecting and
- * Connected mean we have a live session for the user; everything
- * else (including the terminal Leaving) means the panel should
- * read "Join Voice". */
+/* Map FFI gtkhx_voice_state → "in voice or not". From the user's
+ * perspective the toolbar should flip to "Leave Voice" as soon as
+ * the JOIN goes on the wire so they can cancel the attempt — they
+ * don't care that we're still mid-SDP-offer or ICE-establishing.
+ * Treat anything past Idle as joined, EXCEPT Leaving (the
+ * terminal post-tear-down state, where the panel should read
+ * "Join Voice" again so the user can rejoin). */
 static gboolean
 state_is_joined (gtkhx_voice_state state)
 {
-    return state == GTKHX_VOICE_STATE_CONNECTING ||
+    return state == GTKHX_VOICE_STATE_JOIN_SENT ||
+           state == GTKHX_VOICE_STATE_OFFER_PENDING ||
+           state == GTKHX_VOICE_STATE_CONNECTING ||
            state == GTKHX_VOICE_STATE_CONNECTED;
 }
 
