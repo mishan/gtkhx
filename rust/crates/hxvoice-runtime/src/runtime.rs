@@ -81,15 +81,37 @@
 //!   main thread, parks the pad in `Inner::pending_pads`, and
 //!   re-enters `handle_event(Event::WebrtcPadAdded { mid })`.
 //!
-//! ## What's deferred to step 6+
+//! ## What step 7 implements
 //!
-//! - `Action::SetSendPipelineMute`. The send leg lands in
-//!   step 6 (audio capture + RTP send chain); the mute arm
-//!   needs the send-leg element handles, so it can't usefully
-//!   land before then.
+//! - Real timer wiring. The state machine has emitted
+//!   `Action::ArmTimer { kind, ms }` and `Action::CancelTimer
+//!   { kind }` since step 1 (JoinReply / Dtls / IceConnectivity
+//!   / Media watchdogs per the spec's §"Session Timeout and
+//!   Failure"); the runtime had been bookkeeping them in a
+//!   `Vec<Timeout>` without actually firing anything. Step 7
+//!   replaces that with a `HashMap<Timeout, Option<glib::SourceId>>`
+//!   driven by `glib::timeout_add_local`. ArmTimer cancels any
+//!   existing source for the kind (re-arm restarts the
+//!   watchdog), then attaches a fresh one-shot timeout whose
+//!   callback fires `Event::Timeout { kind }` against the
+//!   state machine via the same `with_main_thread_runtime`
+//!   registry hop the SDP / ICE / pad callbacks use.
+//!   CancelTimer pops the source and removes it from the loop;
+//!   Drop on `Inner` removes any still-armed source so glib
+//!   doesn't fire a callback against a dropped runtime.
+//!   `Option<SourceId>` because the test runner can't always
+//!   own the default `MainContext` — see the field doc on
+//!   `Inner::armed_timer_sources` for the contention story.
+//!
+//! ## What's deferred to step 8
+//!
+//! - `Action::SetSendPipelineMute` and the audio-capture +
+//!   RTP-send chain it acts on.
 //! - `webrtcbin` signal wiring for `connection-state` /
-//!   pipeline `bus`. Step 7 covers connection-state-driven
-//!   timeouts; step 8 covers the bus.
+//!   pipeline `bus`. Step 8 covers the bus; bus messages
+//!   that surface connection-state transitions then fire
+//!   into the state machine the same way the SDP / ICE /
+//!   pad signals do.
 //!
 //! ## Layering
 //!
@@ -386,15 +408,36 @@ struct Inner {
     /// drive — exactly what production wants if the bin was never
     /// initialised either).
     webrtcbin: Option<gstreamer::Element>,
-    /// Currently-armed timer kinds. The runtime arms `glib::timeout`
-    /// callbacks elsewhere; we track the kind here so we know
-    /// whether a fire is still relevant by the time it arrives
-    /// (race with `CancelTimer`).
+    /// Currently-armed timer sources keyed by timer kind. The
+    /// `Option` carries the `glib::SourceId` when the runtime
+    /// owns the GLib default `MainContext` (i.e. production, on
+    /// the main thread) — that's the case where the one-shot
+    /// `glib::timeout_add_local` actually attached and the
+    /// callback will fire `Event::Timeout { kind }` when the
+    /// spec-mandated duration elapses.
     ///
-    /// `Vec` rather than `HashSet` because the bound is tiny —
-    /// at most four entries (JoinReply / Dtls / IceConnectivity /
+    /// `None` is the test fallback: when multiple cargo test
+    /// threads race over default-context ownership, the loser
+    /// can't call `timeout_add_local` (it panics on
+    /// non-ownership). We degrade to bookkeeping only — the
+    /// kind is tracked so `armed_timers()` returns it, but no
+    /// glib source exists. Tests that need to actually observe
+    /// timer firing live in `tests/timer_firing.rs` which runs
+    /// in its own process and owns the context outright.
+    ///
+    /// `HashMap` rather than `Vec` so cancellation by kind
+    /// (the common shape — `CancelTimer { kind: Dtls }` when
+    /// a `WebRTCConnectionState::Connected` arrives) is O(1)
+    /// and so a re-arm of the same kind cleanly supersedes
+    /// the previous source. The bound stays tiny: at most
+    /// four entries (JoinReply / Dtls / IceConnectivity /
     /// Media) per the spec's timer table.
-    armed_timers: Vec<Timeout>,
+    ///
+    /// Drop on `Inner` walks this map and `remove`s every
+    /// `Some` source so glib doesn't fire a callback against a
+    /// dropped runtime.
+    armed_timer_sources:
+        HashMap<Timeout, Option<gstreamer::glib::SourceId>>,
     /// True while `handle_event` is walking the action list for
     /// an event. A re-entrant call (backend dispatches an action
     /// that triggers a Hotline signal which calls back into
@@ -459,6 +502,22 @@ struct Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
+        // Cancel any still-armed timer sources so glib doesn't
+        // fire a callback against a now-dropped runtime. The
+        // callback's `with_main_thread_runtime` lookup would
+        // fail (we evict from the registry immediately below),
+        // making the late fire a silent no-op, but cancelling
+        // here is cleaner: glib's main loop doesn't keep
+        // wakeups scheduled for a session that's gone.
+        //
+        // `mem::take` to drain — the SourceId by-value `remove`
+        // call wants ownership of each id.
+        for (_kind, source) in core::mem::take(&mut self.armed_timer_sources) {
+            if let Some(s) = source {
+                s.remove();
+            }
+        }
+
         // Evict our entry from the thread-local registry so a
         // late-firing closure (Promise change-func that races
         // teardown) becomes a silent no-op when it tries to
@@ -547,7 +606,7 @@ impl VoiceRuntime {
                 machine: SessionMachine::new(),
                 pipeline: Some(pipeline),
                 webrtcbin: Some(webrtcbin),
-                armed_timers: Vec::new(),
+                armed_timer_sources: HashMap::new(),
                 dispatching: false,
                 pending: VecDeque::new(),
                 runtime_id,
@@ -576,7 +635,7 @@ impl VoiceRuntime {
                 machine: SessionMachine::new(),
                 pipeline: None,
                 webrtcbin: None,
-                armed_timers: Vec::new(),
+                armed_timer_sources: HashMap::new(),
                 dispatching: false,
                 pending: VecDeque::new(),
                 runtime_id,
@@ -651,7 +710,7 @@ impl VoiceRuntime {
                 inner.machine.step(event)
             };
             for action in actions {
-                self.dispatch(action);
+                self.dispatch_inner(action);
             }
         }
         self.inner.borrow().machine.state()
@@ -662,13 +721,49 @@ impl VoiceRuntime {
         self.inner.borrow().machine.state()
     }
 
-    /// Currently-armed timers. Order matches `ArmTimer` arrival
-    /// order; primarily a test-introspection hook.
+    /// Currently-armed timer kinds. Order is unspecified
+    /// (HashMap-backed); primarily a test-introspection hook.
+    /// Use `.contains(&kind)` rather than `assert_eq!` against
+    /// a literal `Vec`.
     pub fn armed_timers(&self) -> Vec<Timeout> {
-        self.inner.borrow().armed_timers.clone()
+        self.inner
+            .borrow()
+            .armed_timer_sources
+            .keys()
+            .copied()
+            .collect()
     }
 
-    fn dispatch(&self, action: Action) {
+    /// Drive a single `Action` through the dispatch loop.
+    ///
+    /// Internal entrypoint shared by `handle_event`'s walk of
+    /// the state machine's action list, and (with the
+    /// `test-utils` Cargo feature) exposed to out-of-crate test
+    /// binaries that want to inject surgical actions without
+    /// running them through the state machine. In-crate unit
+    /// tests in `runtime::tests` reach it via the implicit
+    /// `cfg(test)` gate alone.
+    ///
+    /// **Not for production callers.** Direct dispatch bypasses
+    /// `handle_event`'s re-entrancy queue: a backend callback
+    /// invoked here that turns around and calls back into the
+    /// runtime would panic on the nested `borrow_mut`. The
+    /// queue/drain in `handle_event` is what makes that path
+    /// safe; jump over it at your own risk.
+    ///
+    /// The dispatch arms themselves have no preconditions beyond
+    /// "we're on the main thread" — actions are safe to drive in
+    /// any order, dispatch arms handle their own pipeline-less /
+    /// missing-bin / unknown-mid fallbacks.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn dispatch(&self, action: Action) {
+        self.dispatch_inner(action);
+    }
+
+    /// Private (always-compiled) wrapper around the dispatch
+    /// match. Lets `handle_event` reach the same code path
+    /// without conditionally compiling the inner logic.
+    fn dispatch_inner(&self, action: Action) {
         match action {
             // ---- C-side integration points (delegated to Backend) ----
             //
@@ -690,35 +785,39 @@ impl VoiceRuntime {
                 self.backend.borrow_mut().tear_down();
             }
 
-            // ---- Timers ----
+            // ---- Timers (Phase 8.C step 7) ----
             //
-            // Phase 8.C step 2: we track armed timers but don't
-            // actually wire `glib::timeout_add_local` here. Step 3
-            // adds the real timer wiring (which needs the GLib
-            // main context running, which production has but
-            // bare-tests don't). For now, tests can call
-            // `armed_timers()` to verify the right kinds were
-            // requested and synthetically fire `Event::Timeout` if
-            // they want to exercise the expiry path.
-            Action::ArmTimer { kind, ms: _ } => {
-                // (Re-)arm. Step 3 will replace the bookkeeping
-                // here with `glib::timeout_add_local`; the
-                // (re-)arm semantics must match — calling it a
-                // second time for the same kind cancels the
-                // previous timer and starts a fresh one. A naïve
-                // `if !contains { push }` short-circuit would
-                // make a same-kind re-arm a silent no-op, which
-                // would matter once we wire real timers (the
-                // state machine sends repeat `ArmTimer` events
-                // on renegotiation, intending the watchdog to
-                // restart from the new offer's reception time).
-                let mut inner = self.inner.borrow_mut();
-                inner.armed_timers.retain(|t| *t != kind);
-                inner.armed_timers.push(kind);
+            // ArmTimer: cancel any existing timer of this kind
+            // (re-arm semantics — the state machine sends repeat
+            // ArmTimers on renegotiation, intending the watchdog
+            // to restart from the new event's reception time),
+            // then arm a fresh one-shot `glib::timeout_add_local`
+            // for `ms` milliseconds. The callback fires
+            // `Event::Timeout { kind }` back at the state machine
+            // via the same `with_main_thread_runtime` registry
+            // hop the SDP / ICE callbacks use.
+            //
+            // We're already on the main thread (the dispatch
+            // loop runs main-thread-only), which is the only
+            // place `timeout_add_local` is callable.
+            Action::ArmTimer { kind, ms } => {
+                arm_timer(self, kind, ms);
             }
+
+            // CancelTimer: pop the source out of our map and
+            // call `remove()` if we have a live SourceId. The
+            // source goes away from the main loop; no callback
+            // fires. `None` entries (test-fallback bookkeeping)
+            // just drop.
             Action::CancelTimer { kind } => {
-                let mut inner = self.inner.borrow_mut();
-                inner.armed_timers.retain(|t| *t != kind);
+                let source = self
+                    .inner
+                    .borrow_mut()
+                    .armed_timer_sources
+                    .remove(&kind);
+                if let Some(Some(s)) = source {
+                    s.remove();
+                }
             }
 
             // ---- webrtcbin-shaped SDP actions (Phase 8.C step 3) ----
@@ -1489,6 +1588,107 @@ fn stop_receive_bin(
     }
     let _ = bin.set_state(gstreamer::State::Null);
     let _ = pipeline.remove(bin);
+}
+
+/// Helper for the `Action::ArmTimer` dispatch arm — cancels any
+/// existing timer of the same kind, then arms a fresh one-shot
+/// `glib::timeout_add_local` for `ms` milliseconds whose callback
+/// fires `Event::Timeout { kind }` against the state machine.
+///
+/// Captures `runtime_id` (u64, Copy) and `kind` (Timeout, Copy)
+/// in the callback closure — no Rc clones, so the callback
+/// doesn't artificially extend the runtime's lifetime past its
+/// last user-facing strong reference.
+///
+/// Inside the callback we pop our own bookkeeping entry before
+/// firing `handle_event` (the source is auto-removed by glib
+/// because we return `ControlFlow::Break`; popping just keeps
+/// our `armed_timer_sources` map honest). The state machine may
+/// emit a fresh `Action::ArmTimer` for the same kind in
+/// response to the `Event::Timeout`; that lands as a clean
+/// insert after our pop.
+fn arm_timer(runtime: &VoiceRuntime, kind: Timeout, ms: u32) {
+    // Cancel any existing timer of this kind first — the
+    // re-arm semantics on `ArmTimer` are "restart the
+    // watchdog from now", not "no-op if already armed".
+    let prev = runtime
+        .inner
+        .borrow_mut()
+        .armed_timer_sources
+        .remove(&kind);
+    if let Some(Some(s)) = prev {
+        s.remove();
+    }
+
+    let runtime_id = runtime.inner.borrow().runtime_id;
+    // `glib::timeout_add_local` panics if the GLib default
+    // `MainContext` isn't owned by the current thread. In
+    // production the main thread owns it (acquired in `main`
+    // by `gtk_application_run`). In cargo's parallel test
+    // runner, multiple test threads race for ownership; the
+    // losers can't arm real timers. We try-acquire first; on
+    // failure we degrade to bookkeeping-only — the kind is
+    // still tracked in `armed_timer_sources` (as `None`), so
+    // `armed_timers()` returns the right thing for the
+    // dispatch-loop tests that just check what was requested.
+    //
+    // The real timer-firing path is exercised by the
+    // `tests/timer_firing.rs` integration test, which runs in
+    // its own process and owns the context outright.
+    let ctx = gstreamer::glib::MainContext::default();
+    // If we don't already own the context, acquire it and hold
+    // the guard across the timeout_add_local call. Naive
+    // `ctx.acquire().is_ok()` drops the guard at the end of the
+    // expression — between that drop and timeout_add_local
+    // running, another thread can grab ownership and we'd panic
+    // inside the timeout_add_local internal `assert!(is_owner)`.
+    // Binding the guard to a named local keeps it alive through
+    // the whole arming sequence; the guard drops at the end of
+    // the if-let, releasing ownership cleanly.
+    let _acquire_guard = if ctx.is_owner() {
+        None
+    } else {
+        match ctx.acquire() {
+            Ok(g) => Some(g),
+            // Some other thread holds the context — degrade to
+            // bookkeeping-only. The kind is tracked in
+            // armed_timer_sources as None; the real timer-firing
+            // path runs in `tests/timer_firing.rs` which has the
+            // process to itself.
+            Err(_) => {
+                runtime
+                    .inner
+                    .borrow_mut()
+                    .armed_timer_sources
+                    .insert(kind, None);
+                return;
+            }
+        }
+    };
+    let source_id = Some(gstreamer::glib::timeout_add_local(
+        core::time::Duration::from_millis(ms as u64),
+        move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                // Drop our bookkeeping entry first. The source
+                // will be auto-removed by glib when we return
+                // Break below; we just want the SourceId out of
+                // our map so any subsequent CancelTimer for the
+                // same kind doesn't try to `remove` an already-
+                // gone source.
+                rt.inner.borrow_mut().armed_timer_sources.remove(&kind);
+                // Now fire the event. The state machine may
+                // emit fresh ArmTimers in response; those land
+                // through the normal dispatch path.
+                rt.handle_event(Event::Timeout { kind });
+            });
+            gstreamer::glib::ControlFlow::Break
+        },
+    ));
+    runtime
+        .inner
+        .borrow_mut()
+        .armed_timer_sources
+        .insert(kind, source_id);
 }
 
 /// Errors returned from `VoiceRuntime::new`.

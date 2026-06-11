@@ -14,6 +14,34 @@ publish = false
 #            the typed API.
 crate-type = ["staticlib", "rlib"]
 
+[features]
+# `test-utils` exposes `VoiceRuntime::dispatch` (and any future
+# surgical-injection helpers) for integration tests that want to
+# drive raw `Action`s without going through `handle_event`'s
+# state-machine + re-entrancy plumbing. Production binaries MUST
+# NOT enable this — dispatch bypasses the queue/drain invariants
+# that keep nested borrow_mut from panicking when a backend
+# callback re-enters the runtime.
+#
+# Internal unit tests in `runtime::tests` see `dispatch` via the
+# `cfg(test)` gate alone; the feature exists so out-of-crate test
+# binaries (e.g. `tests/timer_firing.rs`) can opt in.
+#
+# Integration tests that need `dispatch` declare
+# `required-features = ["test-utils"]` below — `cargo test`
+# auto-enables them. The production staticlib build (driven by
+# Meson) doesn't pass `--features test-utils`, so `dispatch`
+# stays hidden from the C side.
+test-utils = []
+
+# Integration tests that drive raw `Action`s via `dispatch`
+# require the `test-utils` feature. Listing them here tells
+# cargo to enable the feature automatically when running
+# `cargo test`.
+[[test]]
+name = "timer_firing"
+required-features = ["test-utils"]
+
 [dependencies]
 # Phase 8.B consumes gstreamer-rs core + app + audio for the bare
 # pipeline (audiotestsrc / mulawenc / mulawdec / fakesink and the
