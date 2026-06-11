@@ -44,17 +44,33 @@
 //!   - `Action::SetLocalDescription` — same shape as
 //!     `SetRemoteDescription` but type `Answer`.
 //!
-//! ## What's deferred to step 4+
+//! ## What step 4 implements
+//!
+//! - Dispatch arm for `Action::AddRemoteIce` — parses the
+//!   `RTCIceCandidateInit` JSON via the shared
+//!   `hotline_proto::voice::ice::parse` helper, emits
+//!   `webrtcbin.add-ice-candidate(mline_index, candidate)`.
+//!   Defensive drops on malformed JSON, missing
+//!   `sdpMLineIndex`, and the end-of-candidates marker (empty
+//!   `candidate` string).
+//! - `webrtcbin.on-ice-candidate` signal wired in
+//!   `VoiceRuntime::new` via `connect_on_ice_candidate`. The
+//!   callback is `Send + 'static` (webrtcbin may fire it from a
+//!   worker thread) — captures only `runtime_id` + the main
+//!   context handle, builds the outgoing JSON in the callback,
+//!   marshals back through `MainContext::invoke`, and re-enters
+//!   `handle_event(Event::WebrtcLocalIceGathered)`. Same
+//!   thread-bridge shape as the SDP promise.
+//!
+//! ## What's deferred to step 5+
 //!
 //! - Dispatch arms for the remaining WebRTC-shaped actions
-//!   (`AddRemoteIce`, `StartReceivePipeline` /
-//!   `StopReceivePipeline` / `SetSendPipelineMute`). They still
-//!   no-op today.
+//!   (`StartReceivePipeline` / `StopReceivePipeline` /
+//!   `SetSendPipelineMute`). They still no-op today.
 //! - `webrtcbin` signal wiring for `pad-added` /
-//!   `on-ice-candidate` / `connection-state` / `bus`. Step 4
-//!   covers ICE (with the same main-thread marshaling shape as
-//!   `CreateAnswer`); step 5 covers the receive-leg pads; step 8
-//!   covers the bus.
+//!   `connection-state` / pipeline `bus`. Step 5 covers the
+//!   receive-leg pads; step 7 covers connection-state-driven
+//!   timeouts; step 8 covers the bus.
 //!
 //! ## Layering
 //!
@@ -480,6 +496,13 @@ impl VoiceRuntime {
                 RuntimeError::WebrtcbinUnavailable
             })?;
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        // Wire the on-ice-candidate signal BEFORE registering.
+        // The signal callback only looks the runtime up via
+        // `with_main_thread_runtime` (which acquires the registry
+        // entry lazily), so the order is safe in either direction;
+        // doing it pre-register keeps the construction sequence
+        // strictly linear.
+        connect_on_ice_candidate(&webrtcbin, runtime_id);
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
@@ -728,12 +751,32 @@ impl VoiceRuntime {
                 }
             }
 
-            // ---- webrtcbin-shaped ICE / pad / mute (Phase 8.C step 4+) ----
+            // ---- webrtcbin-shaped ICE dispatch (Phase 8.C step 4) ----
             //
-            // These still no-op today. Step 4 lands the ICE flow;
-            // step 5 lands receive-pad dispatch.
-            Action::AddRemoteIce { .. }
-            | Action::StartReceivePipeline { .. }
+            // Same shape as the SDP arms: clone the bin handle,
+            // drop the `Inner` borrow, hand the parsed bits to
+            // GStreamer. Parse via hotline-proto::voice::ice (the
+            // same parser the C-side wire layer uses, so the JSON
+            // shape definition lives in one place) and hand
+            // webrtcbin a (mlineindex, candidate) pair through
+            // its `add-ice-candidate` signal.
+            Action::AddRemoteIce { candidate_json } => {
+                let webrtcbin = self
+                    .inner
+                    .borrow()
+                    .webrtcbin
+                    .clone();
+                if let Some(bin) = webrtcbin {
+                    apply_remote_ice(&bin, &candidate_json);
+                }
+            }
+
+            // ---- webrtcbin-shaped pad / mute (Phase 8.C step 5+) ----
+            //
+            // Still no-op today. Step 5 lands receive-pad
+            // dispatch (StartReceivePipeline /
+            // StopReceivePipeline); the mute arm lands with it.
+            Action::StartReceivePipeline { .. }
             | Action::StopReceivePipeline { .. }
             | Action::SetSendPipelineMute { .. } => {
                 // Subsequent steps fill these in.
@@ -931,6 +974,184 @@ fn create_answer(
         "create-answer",
         &[&None::<gstreamer::Structure>, &promise],
     );
+}
+
+/// Dispatch arm for `Action::AddRemoteIce`. Parses the JSON via
+/// the shared hotline-proto::voice::ice parser, then emits
+/// `webrtcbin.add-ice-candidate` with the extracted mlineindex +
+/// candidate string.
+///
+/// Handles three malformed-input shapes without panicking:
+///
+/// 1. JSON that fails to parse → log + return; the state machine
+///    will not see the candidate, the missing entry just means
+///    one fewer path for ICE to converge on. ICE failure
+///    timers (Phase 8.C step 7) drive the session to Failed
+///    if no candidates ever land.
+/// 2. End-of-candidates marker (empty `candidate` string) →
+///    silent no-op at the bin level. webrtcbin doesn't need an
+///    explicit EOC signal; gathering completes when the remote
+///    stops sending. The state machine's
+///    `EndOfRemoteCandidates` event is informational only.
+/// 3. Missing `sdpMLineIndex` → log + return. The bin signal
+///    requires the index; without it we'd have to guess, which
+///    is worse than dropping the candidate.
+fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
+    let parsed = match hotline_proto::voice::ice::parse(
+        candidate_json.as_bytes(),
+    ) {
+        Some(p) => p,
+        None => {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to parse ICE candidate JSON \
+                 ({} bytes); dropping",
+                candidate_json.len()
+            );
+            return;
+        }
+    };
+    if parsed.is_end_of_candidates() {
+        // EOC marker — the state machine routes this through
+        // EndOfRemoteCandidates instead of AddRemoteIce, but
+        // we belt-and-brace here in case a path slips through.
+        return;
+    }
+    let Some(candidate) = parsed.candidate.as_deref() else {
+        // Parser guarantees `candidate` is Some on a successful
+        // parse (it's a required field; absence is the
+        // None-return above). Defensive double-check so the
+        // compiler can use `Option<String>` properties on the
+        // `IceCandidate` struct for other callsites too.
+        return;
+    };
+    let Some(mline_index) = parsed.sdp_mline_index else {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: ICE candidate JSON missing sdpMLineIndex; \
+             dropping (webrtcbin requires it)"
+        );
+        return;
+    };
+    webrtcbin.emit_by_name::<()>(
+        "add-ice-candidate",
+        &[&mline_index, &candidate],
+    );
+}
+
+/// Wire `webrtcbin.on-ice-candidate` so locally-gathered candidates
+/// flow back into the state machine as `Event::WebrtcLocalIceGathered`.
+///
+/// The signal callback must be `Send + 'static` (webrtcbin may fire
+/// it on a GStreamer worker thread); we follow the same shape as
+/// `create_answer`'s promise — capture the runtime id (u64, Copy)
+/// and the main context handle (Send), build the outgoing
+/// `RTCIceCandidateInit` JSON in the callback, marshal back to the
+/// main thread via `MainContext::invoke`, and re-enter
+/// `handle_event` after a registry lookup.
+///
+/// The JSON carries all three of `candidate`, `sdpMid`, and
+/// `sdpMLineIndex`. `candidate` and `sdpMLineIndex` come directly
+/// from the signal payload; `sdpMid` isn't surfaced by the signal,
+/// so we resolve it from the bin's `local-description` SDP by
+/// looking up the `a=mid:…` attribute on the media line at the
+/// signal's index. The fogWraith voice extension's wire format
+/// treats `sdpMid` as a required key — `hotline_proto::voice::ice`
+/// rejects payloads missing it — so shipping a candidate without
+/// it would break trickle ICE downstream.
+///
+/// If the `sdpMid` lookup fails (local-description not yet set,
+/// no `mid` attribute on the indexed media), the candidate is
+/// dropped with a GStreamer warning. ICE failure timers (Phase
+/// 8.C step 7) drive the session to Failed if no usable
+/// candidates ever land.
+///
+/// Called from `VoiceRuntime::new` once the bin is in the pipeline,
+/// so production gets ICE wiring for every fresh runtime
+/// automatically. The pipeline-less constructor skips this — there's
+/// no bin to attach to.
+fn connect_on_ice_candidate(
+    webrtcbin: &gstreamer::Element,
+    runtime_id: u64,
+) {
+    let main_ctx = gstreamer::glib::MainContext::default();
+    webrtcbin.connect("on-ice-candidate", false, move |values| {
+        // The signal-emit returns no value (we return None at the
+        // end), but the callback receives a slice of `glib::Value`s
+        // — by signature `[webrtcbin, mlineindex: u32,
+        // candidate: &str]`.
+        let bin = match values
+            .first()
+            .and_then(|v| v.get::<gstreamer::Element>().ok())
+        {
+            Some(b) => b,
+            None => return None,
+        };
+        let mline_index = match values.get(1).and_then(|v| v.get::<u32>().ok()) {
+            Some(v) => v,
+            None => return None,
+        };
+        let candidate = match values.get(2).and_then(|v| v.get::<String>().ok()) {
+            Some(s) => s,
+            None => return None,
+        };
+        // Resolve sdpMid by walking the bin's local-description.
+        // Dropping the candidate when the lookup fails is the
+        // correct move — voice::ice::parse on the wire side
+        // rejects payloads missing sdpMid, so we'd just produce
+        // a JSON the server can't accept.
+        let sdp_mid = match lookup_local_sdp_mid(&bin, mline_index) {
+            Some(mid) => mid,
+            None => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: local-description doesn't have an \
+                     a=mid:… for mline {mline_index}; dropping \
+                     ICE candidate (would have produced JSON \
+                     rejected by voice::ice::parse)"
+                );
+                return None;
+            }
+        };
+        let candidate_json = hotline_proto::voice::ice::build(
+            &hotline_proto::voice::ice::IceCandidate {
+                candidate: Some(candidate),
+                sdp_mid: Some(sdp_mid),
+                sdp_mline_index: Some(mline_index),
+                username_fragment: None,
+            },
+        );
+        let main_ctx = main_ctx.clone();
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                rt.handle_event(Event::WebrtcLocalIceGathered {
+                    candidate_json,
+                });
+            });
+        });
+        None
+    });
+}
+
+/// Look up the `a=mid:…` attribute on the media line at the
+/// given index in `webrtcbin`'s `local-description` SDP. Returns
+/// `None` if local-description isn't set yet, the index is out of
+/// range, or the indexed media has no `mid` attribute.
+///
+/// Pulled into its own helper so the on-ice-candidate callback
+/// stays linear and the lookup logic can be reused by the
+/// step-5 pad-added path when it lands.
+fn lookup_local_sdp_mid(
+    webrtcbin: &gstreamer::Element,
+    mline_index: u32,
+) -> Option<String> {
+    let desc: gstreamer_webrtc::WebRTCSessionDescription = webrtcbin
+        .property_value("local-description")
+        .get()
+        .ok()?;
+    let sdp = desc.sdp();
+    let media = sdp.media(mline_index)?;
+    media.attribute_val("mid").map(|s| s.to_string())
 }
 
 /// Errors returned from `VoiceRuntime::new`.
@@ -1589,5 +1810,127 @@ mod tests {
             before.wrapping_add(2),
             "second CreateAnswer dispatch must bump the generation again"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 8.C step 4 — ICE dispatch + on-ice-candidate plumbing.
+    // ------------------------------------------------------------------
+
+    /// Well-formed ICE candidate JSON for the dispatch tests.
+    /// Mirrors the shape webrtcbin emits + Janus serves: a
+    /// candidate string + sdpMLineIndex + sdpMid. The exact
+    /// candidate bytes don't matter — they just need to round-trip
+    /// through `voice::ice::parse` cleanly.
+    const VALID_ICE_JSON: &str = concat!(
+        r#"{"candidate":"candidate:1 1 UDP 2113937151 192.0.2.1 12345 typ host","#,
+        r#""sdpMid":"audio0","#,
+        r#""sdpMLineIndex":0}"#,
+    );
+
+    /// AddRemoteIce dispatch with a valid candidate JSON reaches
+    /// `webrtcbin.emit("add-ice-candidate", …)` without panicking.
+    /// We can't observe the bin's reaction (the bin needs the
+    /// pipeline running + a remote DTLS state to actually accept
+    /// the candidate), so the assertion is structural: the
+    /// dispatch completes and the bin is still alive.
+    #[test]
+    fn add_remote_ice_with_valid_json_dispatches_without_panic() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: VALID_ICE_JSON.into(),
+        });
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Malformed JSON early-returns through
+    /// `voice::ice::parse` without panicking. The dispatch arm
+    /// logs the failure on the GStreamer warning channel and
+    /// aborts; the bin stays alive for subsequent candidates.
+    #[test]
+    fn add_remote_ice_with_garbage_json_logs_and_drops_candidate() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: "not actually json".into(),
+        });
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// End-of-candidates marker (empty `candidate` string) is
+    /// dropped at the bin level — webrtcbin doesn't need an
+    /// explicit signal, gathering finishes when the remote
+    /// stops sending. The dispatch must not panic on the empty
+    /// candidate, which is the failure mode of a naïve
+    /// `unwrap()` on `candidate.as_deref()`.
+    #[test]
+    fn add_remote_ice_end_of_candidates_marker_is_dropped() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let eoc_json = r#"{"candidate":"","sdpMid":"audio0","sdpMLineIndex":0}"#;
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: eoc_json.into(),
+        });
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Missing `sdpMLineIndex` is a defensive drop — the bin
+    /// signal requires the mline index. We can't synthesise it
+    /// from `sdpMid` reliably, so we log and skip the candidate.
+    #[test]
+    fn add_remote_ice_missing_mline_index_is_dropped() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let no_mline = concat!(
+            r#"{"candidate":"candidate:1 1 UDP 100 192.0.2.1 12345 typ host","#,
+            r#""sdpMid":"audio0"}"#,
+        );
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: no_mline.into(),
+        });
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Pipeline-less runtime: AddRemoteIce dispatch early-returns
+    /// cleanly when there's no bin to feed. Same shape as the
+    /// existing pipeline-less SDP test.
+    #[test]
+    fn pipeline_less_runtime_no_ops_add_remote_ice() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: VALID_ICE_JSON.into(),
+        });
+        runtime.dispatch(Action::AddRemoteIce {
+            candidate_json: "garbage".into(),
+        });
+        assert_eq!(runtime.state(), SessionState::Idle);
+    }
+
+    /// `lookup_local_sdp_mid` returns `None` when the bin's
+    /// `local-description` hasn't been set yet — the on-ice-candidate
+    /// callback's path for "candidate fires before
+    /// set-local-description has landed". Without this graceful
+    /// return the callback would unwrap on `None` and panic the
+    /// worker thread.
+    ///
+    /// Driven against a fresh, unconfigured `webrtcbin` element
+    /// because that's the cleanest way to put it in the "no
+    /// local-description" state from a unit test. We don't try
+    /// to assert the happy path here — that requires a full
+    /// SDP round-trip, which lives in the Tier 3 voice
+    /// integration test (Phase 8.F).
+    #[test]
+    fn lookup_local_sdp_mid_returns_none_without_local_description() {
+        assert!(crate::init());
+        let bin = gstreamer::ElementFactory::make("webrtcbin")
+            .build()
+            .expect("webrtcbin element must be constructable");
+        assert_eq!(lookup_local_sdp_mid(&bin, 0), None);
+        assert_eq!(lookup_local_sdp_mid(&bin, 42), None);
     }
 }
