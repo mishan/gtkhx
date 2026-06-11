@@ -1617,33 +1617,54 @@ fn arm_timer(runtime: &VoiceRuntime, kind: Timeout, ms: u32) {
     // `tests/timer_firing.rs` integration test, which runs in
     // its own process and owns the context outright.
     let ctx = gstreamer::glib::MainContext::default();
-    let source_id = if ctx.is_owner() || ctx.acquire().is_ok() {
-        // We own the context (either we already did, or
-        // acquire just gave it to us). `timeout_add_local`
-        // will succeed.
-        Some(gstreamer::glib::timeout_add_local(
-            core::time::Duration::from_millis(ms as u64),
-            move || {
-                with_main_thread_runtime(runtime_id, |rt| {
-                    // Drop our bookkeeping entry first. The
-                    // source will be auto-removed by glib when
-                    // we return Break below; we just want the
-                    // SourceId out of our map so any subsequent
-                    // CancelTimer for the same kind doesn't try
-                    // to `remove` an already-gone source.
-                    rt.inner.borrow_mut().armed_timer_sources.remove(&kind);
-                    // Now fire the event. The state machine
-                    // may emit fresh ArmTimers in response;
-                    // those land through the normal dispatch
-                    // path.
-                    rt.handle_event(Event::Timeout { kind });
-                });
-                gstreamer::glib::ControlFlow::Break
-            },
-        ))
-    } else {
+    // If we don't already own the context, acquire it and hold
+    // the guard across the timeout_add_local call. Naive
+    // `ctx.acquire().is_ok()` drops the guard at the end of the
+    // expression — between that drop and timeout_add_local
+    // running, another thread can grab ownership and we'd panic
+    // inside the timeout_add_local internal `assert!(is_owner)`.
+    // Binding the guard to a named local keeps it alive through
+    // the whole arming sequence; the guard drops at the end of
+    // the if-let, releasing ownership cleanly.
+    let _acquire_guard = if ctx.is_owner() {
         None
+    } else {
+        match ctx.acquire() {
+            Ok(g) => Some(g),
+            // Some other thread holds the context — degrade to
+            // bookkeeping-only. The kind is tracked in
+            // armed_timer_sources as None; the real timer-firing
+            // path runs in `tests/timer_firing.rs` which has the
+            // process to itself.
+            Err(_) => {
+                runtime
+                    .inner
+                    .borrow_mut()
+                    .armed_timer_sources
+                    .insert(kind, None);
+                return;
+            }
+        }
     };
+    let source_id = Some(gstreamer::glib::timeout_add_local(
+        core::time::Duration::from_millis(ms as u64),
+        move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                // Drop our bookkeeping entry first. The source
+                // will be auto-removed by glib when we return
+                // Break below; we just want the SourceId out of
+                // our map so any subsequent CancelTimer for the
+                // same kind doesn't try to `remove` an already-
+                // gone source.
+                rt.inner.borrow_mut().armed_timer_sources.remove(&kind);
+                // Now fire the event. The state machine may
+                // emit fresh ArmTimers in response; those land
+                // through the normal dispatch path.
+                rt.handle_event(Event::Timeout { kind });
+            });
+            gstreamer::glib::ControlFlow::Break
+        },
+    ));
     runtime
         .inner
         .borrow_mut()
