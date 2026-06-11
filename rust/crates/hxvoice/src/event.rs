@@ -185,7 +185,7 @@ pub enum ConnectionState {
 /// - `IceConnectivity` — no successful ICE pair in 30s (tear down).
 /// - `Dtls` — DTLS handshake didn't complete in 10s (tear down).
 /// - `Media` — no RTP/RTCP from peer for 30s (tear down + leave).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Timeout {
     JoinReply,
     IceConnectivity,
