@@ -3349,24 +3349,47 @@ mod tests {
         // No assertion beyond "didn't crash".
     }
 
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    /// Static flags the must-not-fire callbacks flip on invocation.
+    /// The callbacks deliberately do NOT dereference `user_data` —
+    /// a regression that invoked them would otherwise UB-read
+    /// through a type-confused pointer and turn the test failure
+    /// into nondeterministic flake instead of a clean assertion.
+    static MUTE_FIRED: AtomicBool = AtomicBool::new(false);
+    static STATE_FIRED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn mute_must_not_fire(
+        _user_data: *mut core::ffi::c_void,
+        _muted: i32,
+    ) {
+        MUTE_FIRED.store(true, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn state_must_not_fire(
+        _user_data: *mut core::ffi::c_void,
+        _state: u32,
+    ) {
+        STATE_FIRED.store(true, Ordering::SeqCst);
+    }
+
     #[test]
     fn callback_backend_ignores_unsubscribed_signal_kinds() {
         // RoomStatus + Error don't have C-side subscriber slots
         // yet; emitting them with subscribed state/mute callbacks
-        // must not call them either.
-        let states = CapturedStates(RefCell::new(Vec::new()));
-        let mutes = CapturedMutes(RefCell::new(Vec::new()));
-        let user_data =
-            &states as *const CapturedStates as *mut core::ffi::c_void;
+        // must not call them either. Use flag-only callbacks so
+        // the assertion fails deterministically on a regression
+        // rather than UB-reading a type-confused user_data
+        // pointer.
+        STATE_FIRED.store(false, Ordering::SeqCst);
+        MUTE_FIRED.store(false, Ordering::SeqCst);
+
         let signals = SignalCallbacks {
-            state_changed: Some(state_capture),
-            // Mute callback intentionally captures from a
-            // different user_data than what's registered — would
-            // produce a UB read if invoked. Verify it isn't.
-            mute_changed: Some(mute_capture),
+            state_changed: Some(state_must_not_fire),
+            mute_changed: Some(mute_must_not_fire),
         };
         let mut backend = CallbackBackend::new_with_signals(
-            user_data,
+            core::ptr::null_mut(),
             None,
             signals,
         );
@@ -3382,7 +3405,13 @@ mod tests {
             SignalKind::Error,
             SignalPayload::Error { text: "oops".into() },
         );
-        assert!(states.0.borrow().is_empty());
-        assert!(mutes.0.borrow().is_empty());
+        assert!(
+            !STATE_FIRED.load(Ordering::SeqCst),
+            "state_changed must not fire for RoomStatus / Error"
+        );
+        assert!(
+            !MUTE_FIRED.load(Ordering::SeqCst),
+            "mute_changed must not fire for RoomStatus / Error"
+        );
     }
 }
