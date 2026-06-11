@@ -163,15 +163,26 @@ impl WeakRuntime {
 /// runtime is found — late callbacks (after teardown) become a
 /// silent no-op.
 ///
+/// Uses `try_with` rather than `with` so a `MainContext::invoke`
+/// callback firing during thread-local destructor teardown (the
+/// main thread is shutting down) becomes a clean no-op instead
+/// of panicking on `AccessError`. The intended semantics for a
+/// late callback are "do nothing"; the registry just happens to
+/// be one of the things that disappears in the same teardown
+/// sequence.
+///
 /// Public to the crate so the planned ICE / pad / bus dispatch
 /// in step 4+ can share the same registry hop.
 pub(crate) fn with_main_thread_runtime<F>(id: u64, f: F)
 where
     F: FnOnce(&VoiceRuntime),
 {
-    let upgraded = MAIN_THREAD_RUNTIMES.with(|cell| {
-        cell.borrow().get(&id).and_then(WeakRuntime::upgrade)
-    });
+    let upgraded = MAIN_THREAD_RUNTIMES
+        .try_with(|cell| {
+            cell.borrow().get(&id).and_then(WeakRuntime::upgrade)
+        })
+        .ok()
+        .flatten();
     if let Some(rt) = upgraded {
         f(&rt);
     }
@@ -386,7 +397,16 @@ impl Drop for Inner {
         // `Inner: !Send` guarantees we drop on the same thread
         // that registered us, so this thread_local lookup hits
         // the correct registry.
-        MAIN_THREAD_RUNTIMES.with(|cell| {
+        //
+        // `try_with` rather than `with` because `Inner` can be
+        // dropped during the thread's destructor pass (the
+        // runtime's last `Rc` falls out of scope as the GLib
+        // main context is being torn down). At that point
+        // `MAIN_THREAD_RUNTIMES` may already be destroyed; the
+        // registry going away itself makes the eviction
+        // unnecessary, so an `AccessError` is just "nothing to
+        // do" — ignore it instead of panicking on the way out.
+        let _ = MAIN_THREAD_RUNTIMES.try_with(|cell| {
             cell.borrow_mut().remove(&self.runtime_id);
         });
     }
@@ -416,13 +436,33 @@ impl VoiceRuntime {
         let pipeline = gstreamer::Pipeline::builder()
             .name("hxvoice-pipeline")
             .build();
+        // Log the underlying gstreamer-rs `BoolError` at each
+        // failure site before collapsing it into the
+        // payload-less `WebrtcbinUnavailable` variant. The error
+        // type isn't `std::error::Error` and doesn't carry
+        // enough structure to be wrappable cleanly; logging on
+        // the way through is the simplest preservation that
+        // still helps an operator distinguish "plugin missing"
+        // from "pipeline rejected the element."
         let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
             .name("hxvoice-webrtcbin")
             .build()
-            .map_err(|_| RuntimeError::WebrtcbinUnavailable)?;
+            .map_err(|e| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to build webrtcbin element: {e}"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
         pipeline
             .add(&webrtcbin)
-            .map_err(|_| RuntimeError::WebrtcbinUnavailable)?;
+            .map_err(|e| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to add webrtcbin to pipeline: {e}"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
@@ -768,10 +808,12 @@ fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
 /// and the main context); the runtime itself stays `!Send`. See the
 /// module-level "Threading" section for the full reasoning.
 fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64) {
-    // Snapshot the main context up front so the change-func
-    // closure doesn't have to call the (thread-local-only)
-    // `MainContext::default()` lookup itself. The handle is
-    // `Send`.
+    // Snapshot the main context up front so the closure carries
+    // a `Send` handle into the worker thread without having to
+    // re-acquire it there. `MainContext::default()` returns the
+    // global default context — it's callable from any thread,
+    // we just want the handle in scope before we move into the
+    // promise's closure so the worker-side code stays linear.
     let main_ctx = gstreamer::glib::MainContext::default();
     let promise = gstreamer::Promise::with_change_func(move |reply| {
         let Ok(Some(reply)) = reply else {
@@ -848,10 +890,17 @@ pub enum RuntimeError {
     /// arms in step 3+ (which surface plugin-load failures
     /// separately).
     GstInitFailed(gstreamer::glib::Error),
-    /// `webrtcbin` couldn't be constructed. The element lives in
-    /// `gst-plugins-bad`; if that package isn't installed, the
-    /// factory lookup fails. The C side disables voice UI for
-    /// the rest of the session in this case.
+    /// `webrtcbin` couldn't be wired into the runtime's pipeline.
+    /// Covers both `ElementFactory::make("webrtcbin").build()`
+    /// failures (typical case: `gst-plugins-bad` isn't installed
+    /// at runtime so the factory lookup misses) AND
+    /// `Pipeline::add` failures (rare — a misconfigured pipeline,
+    /// a registry race). The underlying `BoolError` is logged on
+    /// the GStreamer warning channel at the failure site; the
+    /// variant itself is payload-less because the error type
+    /// doesn't implement `std::error::Error` cleanly.
+    /// The C side disables voice UI for the rest of the session
+    /// in either case.
     WebrtcbinUnavailable,
 }
 
@@ -866,8 +915,12 @@ impl core::fmt::Display for RuntimeError {
             ),
             RuntimeError::WebrtcbinUnavailable => write!(
                 f,
-                "couldn't build the `webrtcbin` element — \
-                 `gst-plugins-bad` must be installed at runtime"
+                "couldn't wire `webrtcbin` into the runtime \
+                 pipeline; the most common cause is that \
+                 `gst-plugins-bad` isn't installed (the package \
+                 that ships webrtcbin), but a misconfigured \
+                 pipeline can produce this too — the underlying \
+                 GStreamer error is logged at the failure site"
             ),
         }
     }
