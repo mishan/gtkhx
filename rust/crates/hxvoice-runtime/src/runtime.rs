@@ -1846,10 +1846,10 @@ mod tests {
 
     /// Malformed JSON early-returns through
     /// `voice::ice::parse` without panicking. The dispatch arm
-    /// logs and aborts; the bin stays alive for subsequent
-    /// candidates.
+    /// logs the failure on the GStreamer warning channel and
+    /// aborts; the bin stays alive for subsequent candidates.
     #[test]
-    fn add_remote_ice_with_garbage_json_is_a_silent_noop() {
+    fn add_remote_ice_with_garbage_json_logs_and_drops_candidate() {
         assert!(crate::init());
         let runtime = VoiceRuntime::new(Box::new(NoopBackend))
             .expect("runtime should construct with a fresh pipeline");
