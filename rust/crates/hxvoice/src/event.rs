@@ -181,7 +181,10 @@ pub enum ConnectionState {
 /// kind }` when they expire.
 ///
 /// Values mirror the spec's §"Session Timeout and Failure" table:
-/// - `JoinReply` — no SDP answer 10s after JOIN reply (tear down).
+/// - `JoinReply` — armed on `JoinRequested`, cancelled on
+///   `SdpOfferReceived`. Guards the JOIN → server's SDP-offer
+///   round-trip: if no 602 VOICE_SDP_OFFER arrives within 10s of
+///   the JOIN going on the wire, tear the session down.
 /// - `IceConnectivity` — no successful ICE pair in 30s (tear down).
 /// - `Dtls` — DTLS handshake didn't complete in 10s (tear down).
 /// - `Media` — no RTP/RTCP from peer for 30s (tear down + leave).

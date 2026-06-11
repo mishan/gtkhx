@@ -89,7 +89,9 @@ fn timer_firing_scenarios() {
         assert_eq!(runtime.state(), SessionState::JoinSent);
         assert!(runtime.armed_timers().contains(&Timeout::JoinReply));
 
-        // Short-circuit the 5 s spec timeout with a 10 ms one.
+        // Short-circuit the 10 s production JoinReply watchdog
+        // (JOIN_REPLY_TIMEOUT_MS in hxvoice::state) with a 10 ms
+        // one so the test runs in a reasonable wallclock.
         runtime.dispatch(Action::ArmTimer {
             kind: Timeout::JoinReply,
             ms: 10,
