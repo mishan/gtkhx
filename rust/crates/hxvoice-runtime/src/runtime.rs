@@ -365,6 +365,17 @@ impl Backend for NoopBackend {
 /// call; the runtime drops the underlying `Vec<u8>` when the
 /// dispatch arm returns. Implementations should copy out anything
 /// they need to retain past the call.
+///
+/// **Re-entrancy contract.** The runtime invokes
+/// `send_wire_frame` while the backend's `RefCell` is mutably
+/// borrowed. A callback that synchronously re-enters
+/// `VoiceRuntime::handle_event` (or any other path that lands in
+/// `dispatch_inner` and reaches for `self.backend.borrow_mut()`)
+/// will panic on the nested borrow_mut. If your callback needs to
+/// drive new events into the runtime — including the obvious one
+/// of "the wire send failed, so cancel the session" — defer that
+/// via `glib::idle_add_local` (or equivalent main-context post)
+/// so the outer dispatch loop unwinds first.
 pub type SendWireFrameCallback = unsafe extern "C" fn(
     user_data: *mut core::ffi::c_void,
     opcode: u32,
