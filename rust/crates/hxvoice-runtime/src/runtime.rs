@@ -830,40 +830,49 @@ impl VoiceRuntime {
             // UI use (speaker indicator); the runtime doesn't
             // need it after the link is established.
             Action::StartReceivePipeline { mid, user_id: _ } => {
-                let (pipeline, pad, existing) = {
+                // Pop the new pad first; the existing-bin
+                // teardown only fires when we actually have a
+                // pad to replace it with. Otherwise this would
+                // orphan a still-playing receive leg on every
+                // speculative StartReceivePipeline that the
+                // state machine emits without a matching
+                // pad-added event.
+                let (pipeline, pad) = {
                     let mut inner = self.inner.borrow_mut();
                     (
                         inner.pipeline.clone(),
                         inner.pending_pads.remove(&mid),
-                        inner.receive_bins.remove(&mid),
                     )
                 };
-                // Tear down any pre-existing receive bin for this
-                // mid before adding a fresh one. Renegotiation can
-                // bring a second pad-added for the same mid (a
-                // recycled slot, a re-offer that re-declares the
-                // same media line); without this teardown,
-                // start_receive_bin's `pipeline.add(&bin)` would
-                // fail on the duplicate "hxvoice-recv-{mid}"
-                // element name and the OLD bin would stay linked,
-                // wedging playback.
-                if let (Some(pipeline_ref), Some(bin)) =
-                    (pipeline.as_ref(), existing.as_ref())
+                let (Some(pipeline), Some(pad)) = (pipeline, pad) else {
+                    // Pipeline-less runtime (test) or no pending
+                    // pad for this mid (state machine drove past
+                    // pad-added) — silent no-op. Don't touch
+                    // receive_bins; the previously-linked bin
+                    // for this mid (if any) stays installed.
+                    return;
+                };
+                // We have a fresh pad. Tear down any pre-existing
+                // receive bin for this mid before adding a new
+                // one — renegotiation can bring a second
+                // pad-added for the same mid (a recycled slot, a
+                // re-offer that re-declares the same media line);
+                // without this teardown, start_receive_bin's
+                // `pipeline.add(&bin)` would fail on the
+                // duplicate "hxvoice-recv-{mid}" element name and
+                // the OLD bin would stay linked, wedging
+                // playback.
+                if let Some(existing) =
+                    self.inner.borrow_mut().receive_bins.remove(&mid)
                 {
-                    stop_receive_bin(pipeline_ref, bin);
+                    stop_receive_bin(&pipeline, &existing);
                 }
-                // Pipeline-less runtime (test) or no pending pad
-                // for this mid (state machine drove past
-                // pad-added) ⇒ both are silent no-ops, valid
-                // configurations.
-                if let (Some(pipeline), Some(pad)) = (pipeline, pad) {
-                    if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid)
-                    {
-                        self.inner
-                            .borrow_mut()
-                            .receive_bins
-                            .insert(mid, bin);
-                    }
+                if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid)
+                {
+                    self.inner
+                        .borrow_mut()
+                        .receive_bins
+                        .insert(mid, bin);
                 }
             }
 
@@ -2283,6 +2292,49 @@ mod tests {
             user_id: 7,
         });
         assert!(runtime.inner.borrow().receive_bins.is_empty());
+    }
+
+    /// Regression: a speculative StartReceivePipeline (no pending
+    /// pad for the mid) must NOT remove an already-installed
+    /// receive bin for the same mid. The earlier dispatch removed
+    /// `receive_bins[&mid]` up front, then early-returned when
+    /// pad was None — orphaning a still-playing leg on every
+    /// no-pad dispatch.
+    #[test]
+    fn start_receive_pipeline_without_pad_leaves_existing_bin_intact() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        // Pre-seed receive_bins with a sentinel bin to stand in
+        // for an already-installed receive leg. Use a bare
+        // `gst::Bin` — it's not linked into the pipeline, which
+        // is exactly the property we care about preserving (the
+        // dispatch must not yank it out of the bookkeeping map).
+        let sentinel = gstreamer::Bin::with_name("sentinel-leg");
+        runtime
+            .inner
+            .borrow_mut()
+            .receive_bins
+            .insert("audio0".into(), sentinel.clone());
+
+        // Dispatch with no matching pad in pending_pads. The
+        // dispatch's no-op path used to remove the bin from
+        // receive_bins.
+        runtime.dispatch(Action::StartReceivePipeline {
+            mid: "audio0".into(),
+            user_id: 42,
+        });
+
+        let inner = runtime.inner.borrow();
+        let surviving = inner
+            .receive_bins
+            .get("audio0")
+            .expect("existing bin must still be in receive_bins");
+        // Same Bin instance, not a freshly-allocated replacement.
+        assert!(
+            sentinel.as_ptr() == surviving.as_ptr(),
+            "the pre-seeded bin must be the one still parked under audio0"
+        );
     }
 
     /// StopReceivePipeline with no matching bin in
