@@ -279,16 +279,6 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
 
     gboolean sent;
     if (want_joined) {
-        /* Spec recommends joining muted by default. Set the local
-         * muted bit BEFORE issuing VOICE_JOIN so any downstream
-         * code reading panel state during the send sees a
-         * consistent "joining muted" view. Roll it back if the
-         * wire-out skipped. The state machine's MuteToggleRequested
-         * arm doesn't fire on JoinRequested, so this optimistic
-         * set still owns the post-join muted display until the
-         * user actually clicks Mute / Unmute. */
-        gboolean prev_muted = panel_get_bool (panel, KEY_MUTED);
-        panel_set_bool (panel, KEY_MUTED, TRUE);
         sent = hx_send_voice_join (&sess->htlc, cid);
         if (sent) {
             /* Drive the runtime state machine. handle_event runs
@@ -301,17 +291,29 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
                 ensure_voice_runtime (sess);
             if (rt) {
                 gtkhx_voice_runtime_join (rt, cid);
+                /* Spec recommends joining muted by default.
+                 * Drive the state machine's self.muted to TRUE so
+                 * it stays in sync with what the toolbar shows;
+                 * the MuteChanged signal that this fires updates
+                 * KEY_MUTED + ships the VOICE_MUTE wire frame.
+                 *
+                 * Without this, the C side's optimistic
+                 * KEY_MUTED=TRUE would diverge from the state
+                 * machine's default (self.muted=false), and the
+                 * user's first Unmute click would hit the
+                 * redundant-mute no-op branch — wire frame ships
+                 * but no MuteChanged signal fires, so the label
+                 * stays stuck on 'Unmute' until a second click
+                 * actually transitions the machine. */
+                gtkhx_voice_runtime_mute (rt, 1);
             } else {
                 /* Runtime construction failed (GStreamer not
                  * initialised, webrtcbin missing). Roll back the
                  * wire-side join so the user isn't left in a
                  * room that never finishes the handshake. */
                 (void) hx_send_voice_leave (&sess->htlc, cid);
-                panel_set_bool (panel, KEY_MUTED, prev_muted);
                 sent = FALSE;
             }
-        } else {
-            panel_set_bool (panel, KEY_MUTED, prev_muted);
         }
     } else {
         sent = hx_send_voice_leave (&sess->htlc, cid);
