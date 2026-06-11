@@ -134,6 +134,113 @@ extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_with_callbacks (
     gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb);
 
 /*
+ * High-level voice-session state mirror of hxvoice::SessionState.
+ * The state-changed signal callback receives one of these values.
+ * The numeric assignments match the Rust state.rs enum
+ * discriminants so a future cbindgen pass would line up; the
+ * runtime maps via an exhaustive match at the FFI boundary.
+ */
+typedef enum {
+    GTKHX_VOICE_STATE_IDLE          = 0,
+    GTKHX_VOICE_STATE_JOIN_SENT     = 1,
+    GTKHX_VOICE_STATE_OFFER_PENDING = 2,
+    GTKHX_VOICE_STATE_CONNECTING    = 3,
+    GTKHX_VOICE_STATE_CONNECTED     = 4,
+    GTKHX_VOICE_STATE_LEAVING       = 5,
+} gtkhx_voice_state;
+
+/*
+ * `voice-state-changed` signal callback. Fires on every transition
+ * the state machine performs.
+ *
+ * Recommended mapping to a "joined" UI flag (this is what
+ * voice_panel.c does — see state_is_joined): treat
+ * GTKHX_VOICE_STATE_JOIN_SENT, GTKHX_VOICE_STATE_OFFER_PENDING,
+ * GTKHX_VOICE_STATE_CONNECTING, and GTKHX_VOICE_STATE_CONNECTED
+ * all as joined so the toolbar flips to "Leave Voice" the moment
+ * the JOIN ships and the user can cancel a stuck handshake.
+ * GTKHX_VOICE_STATE_IDLE (back-to-start) and
+ * GTKHX_VOICE_STATE_LEAVING (post-tear-down terminal state)
+ * read as not-joined so the toolbar offers a fresh Join Voice.
+ */
+typedef void (*gtkhx_voice_runtime_state_changed_cb) (void *user_data,
+                                                      gtkhx_voice_state state);
+
+/*
+ * `voice-mute-changed` signal callback. Fires when the state
+ * machine's local mute flag changes via MuteToggleRequested. The
+ * value is the new mute state (1 = muted, 0 = unmuted).
+ *
+ * The state machine does NOT currently reflect server-reported mute
+ * flips from 605 ROOM_STATUS — only local toggle changes drive this
+ * signal. A future revision may extend the surface.
+ */
+typedef void (*gtkhx_voice_runtime_mute_changed_cb) (void *user_data,
+                                                     int muted);
+
+/*
+ * Bundle of per-SignalKind callbacks. Pass a pointer to one of
+ * these to gtkhx_voice_runtime_new_v2 to subscribe to the runtime's
+ * state-machine signals. The struct is read once at construction;
+ * the runtime captures the function pointers + user_data and the
+ * caller may free this struct as soon as the constructor returns.
+ *
+ * Any field may be NULL — the runtime treats NULL as "no
+ * subscriber for this signal".
+ *
+ * ABI note: this is a plain C struct without a size / version
+ * field. Adding new fields here is NOT ABI-compatible — older
+ * callers built against a smaller struct definition would have
+ * the callee read past the end of their allocation. Whenever a
+ * new SignalKind callback slot is added below, every consumer of
+ * this header must be rebuilt against the new definition. Since
+ * the C side and the Rust runtime live in the same workspace and
+ * are built in lockstep by the same Meson invocation, "the
+ * runtime build" is the only consumer in practice.
+ *
+ * RoomStatus and Error signal slots are not present yet; they'll
+ * land in a follow-up step that wires up users.c mic icons +
+ * AdwToastOverlay, and that follow-up will require a full rebuild
+ * of both the staticlib and the C binary.
+ */
+typedef struct {
+    gtkhx_voice_runtime_state_changed_cb state_changed;
+    gtkhx_voice_runtime_mute_changed_cb  mute_changed;
+} gtkhx_voice_runtime_signal_callbacks;
+
+/*
+ * Construct a runtime that bridges both `Action::SendWireFrame` and
+ * `Action::EmitSignal` back to the C side. The signal-callbacks
+ * struct pointer may be NULL (no signal subscription); each
+ * function-pointer field inside the struct may also be NULL (skip
+ * just that signal). The send_wire_frame_cb has the same NULL
+ * semantics as gtkhx_voice_runtime_new_with_callbacks.
+ *
+ * Same lifetime contract as the older constructor: user_data and
+ * every non-NULL callback must remain valid for the lifetime of
+ * the returned runtime.
+ */
+extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_v2 (
+    void *user_data,
+    gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb,
+    const gtkhx_voice_runtime_signal_callbacks *signals);
+
+/*
+ * Read the runtime's currently-active cid. Returns 1 and writes
+ * the cid through `out_cid` when the state machine has an active
+ * room (any state except Idle / Leaving); returns 0 and leaves
+ * `out_cid` untouched otherwise. NULL-safe on both `rt` and
+ * `out_cid` (returns 0).
+ *
+ * Production uses this from the signal callbacks to figure out
+ * which voice panel to update — the StateChanged / MuteChanged
+ * payloads don't carry cid, but the C side may have multiple
+ * chat panels each tracking a different cid.
+ */
+extern int gtkhx_voice_runtime_active_cid (gtkhx_voice_runtime *rt,
+                                           uint32_t *out_cid);
+
+/*
  * Free a runtime. Safe to call with NULL. The caller must not use
  * the pointer after this call returns.
  */

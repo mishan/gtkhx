@@ -383,16 +383,88 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
     body_len: usize,
 );
 
-/// Backend implementation that bridges to a C callback. Production
-/// uses this with `voice_runtime_send_wire_frame_cb` in voice_panel.c
-/// so the state machine's outbound voice opcodes reach `hlwrite_chunks`
-/// via the existing `hx_send_voice_*` helpers.
+/// C-callback for `SignalKind::StateChanged`. The `state` value is
+/// the FFI mirror of [`hxvoice::state::SessionState`]; integer
+/// values match the C header's `gtkhx_voice_state` enum
+/// (`Idle=0` through `Leaving=5`).
+pub type StateChangedCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, state: u32);
+
+/// C-callback for `SignalKind::MuteChanged`. `muted` is 0 or 1.
+pub type MuteChangedCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, muted: i32);
+
+/// Bundle of per-`SignalKind` C callbacks. Mirrors
+/// `gtkhx_voice_runtime_signal_callbacks` in `src/voice_runtime.h`.
+/// Each field is `Option` because the C caller may pass NULL for
+/// signals it doesn't care about — the runtime treats `None` as
+/// "no subscriber" and drops the corresponding emit silently.
 ///
-/// `emit_signal` and `tear_down` are stubbed out for now — the
-/// runtime-to-UI signal path lands in a follow-up that wires
-/// `GtkhxSession::emit_*`. Until then, the C side reads runtime
-/// state synchronously from the UI click handlers and the
-/// optimistic-UI fallback covers the post-click feedback.
+/// **ABI note.** Adding fields here is NOT ABI-safe — older C
+/// callers built against a smaller struct definition would have
+/// the runtime read past the end of their allocation. Whenever a
+/// new SignalKind callback slot lands, every consumer must be
+/// rebuilt against the new layout. The Meson build that ships
+/// this crate as a staticlib is the only consumer in practice,
+/// so the rebuild is automatic — but don't be tempted to read
+/// this as "older callers silently skip new signals". They
+/// don't; they undefined-behave.
+#[derive(Clone, Copy)]
+pub struct SignalCallbacks {
+    pub state_changed: Option<StateChangedCallback>,
+    pub mute_changed: Option<MuteChangedCallback>,
+}
+
+impl SignalCallbacks {
+    /// Empty subscription. The bridge falls back to the
+    /// `NoopBackend` behaviour for every signal.
+    pub const fn none() -> Self {
+        Self {
+            state_changed: None,
+            mute_changed: None,
+        }
+    }
+}
+
+/// Map an `hxvoice::state::SessionState` to the discriminant the
+/// C header uses (`gtkhx_voice_state`). Pulled out so the test
+/// suite can pin the mapping without dragging in unsafe extern fn
+/// noise.
+pub(crate) fn session_state_to_ffi(
+    state: hxvoice::state::SessionState,
+) -> u32 {
+    use hxvoice::state::SessionState as S;
+    match state {
+        S::Idle => 0,
+        S::JoinSent => 1,
+        S::OfferPending => 2,
+        S::Connecting => 3,
+        S::Connected => 4,
+        S::Leaving => 5,
+        // `SessionState` is `#[non_exhaustive]` so a wildcard is
+        // mandatory. Future variants should be added to the
+        // header's `gtkhx_voice_state` enum and to the explicit
+        // arms above; until then, map unknown to Idle (the safe
+        // "not in voice" default for the C-side joined-flag
+        // computation) and debug_assert so a test run catches
+        // the omission.
+        _ => {
+            debug_assert!(false, "unhandled SessionState variant: {state:?}");
+            0
+        }
+    }
+}
+
+/// Backend implementation that bridges to C callbacks. Production
+/// uses this with `voice_runtime_send_wire_frame_cb` in
+/// voice_panel.c so the state machine's outbound voice opcodes
+/// reach `hlwrite_chunks` via the existing `hx_send_voice_*`
+/// helpers, and with the matching signal callbacks so the C side
+/// reflects authoritative state-machine state instead of running
+/// optimistic UI.
+///
+/// `tear_down` is stubbed — the C side handles teardown via
+/// `gtkhx_voice_runtime_free` on disconnect.
 ///
 /// Main-thread-only by convention: `Backend` doesn't require
 /// `Send`, and the entire runtime dispatch loop runs on the GLib
@@ -404,20 +476,38 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
 pub struct CallbackBackend {
     user_data: *mut core::ffi::c_void,
     send_wire_frame_cb: Option<SendWireFrameCallback>,
+    signal_callbacks: SignalCallbacks,
 }
 
 impl CallbackBackend {
     /// Construct a backend that calls `send_wire_frame_cb` for
     /// every `Action::SendWireFrame` action. A `None` callback
     /// makes the backend behave like `NoopBackend` for that
-    /// surface.
+    /// surface. No signal subscription.
     pub fn new(
         user_data: *mut core::ffi::c_void,
         send_wire_frame_cb: Option<SendWireFrameCallback>,
     ) -> Self {
+        Self::new_with_signals(
+            user_data,
+            send_wire_frame_cb,
+            SignalCallbacks::none(),
+        )
+    }
+
+    /// Construct a backend with both wire-frame and signal
+    /// callbacks. Each individual callback may still be `None` —
+    /// the runtime falls back to NoopBackend behaviour for that
+    /// specific surface.
+    pub fn new_with_signals(
+        user_data: *mut core::ffi::c_void,
+        send_wire_frame_cb: Option<SendWireFrameCallback>,
+        signal_callbacks: SignalCallbacks,
+    ) -> Self {
         Self {
             user_data,
             send_wire_frame_cb,
+            signal_callbacks,
         }
     }
 }
@@ -434,10 +524,46 @@ impl Backend for CallbackBackend {
         // of the call only.
         unsafe { cb(self.user_data, opcode, body.as_ptr(), body.len()) };
     }
-    fn emit_signal(&mut self, _kind: SignalKind, _payload: SignalPayload) {
-        // Stubbed: the runtime-to-UI signal bridge lands in a
-        // follow-up. For now the C side reads runtime state
-        // synchronously from the UI click handlers.
+    fn emit_signal(&mut self, kind: SignalKind, payload: SignalPayload) {
+        match (kind, payload) {
+            (
+                SignalKind::StateChanged,
+                SignalPayload::StateChanged { new_state },
+            ) => {
+                if let Some(cb) = self.signal_callbacks.state_changed {
+                    let ffi_state = session_state_to_ffi(new_state);
+                    // SAFETY: same lifetime contract as
+                    // send_wire_frame.
+                    unsafe { cb(self.user_data, ffi_state) };
+                }
+            }
+            (
+                SignalKind::MuteChanged,
+                SignalPayload::MuteChanged { muted },
+            ) => {
+                if let Some(cb) = self.signal_callbacks.mute_changed {
+                    // SAFETY: same lifetime contract as
+                    // send_wire_frame.
+                    unsafe {
+                        cb(self.user_data, if muted { 1 } else { 0 })
+                    };
+                }
+            }
+            // RoomStatus + Error land in a follow-up step (users.c
+            // mic icons + AdwToastOverlay). Drop silently for
+            // now — the C side has no subscriber slot for them
+            // yet, so emitting would be a no-op anyway.
+            _ => {
+                debug_assert!(
+                    matches!(
+                        kind,
+                        SignalKind::RoomStatus | SignalKind::Error
+                    ),
+                    "unexpected (SignalKind, SignalPayload) pair: \
+                     ({kind:?}, payload-omitted)"
+                );
+            }
+        }
     }
     fn tear_down(&mut self) {
         // Stubbed: the C side handles teardown via
@@ -852,6 +978,16 @@ impl VoiceRuntime {
         self.inner.borrow().machine.state()
     }
 
+    /// Currently-active cid (the room the state machine is
+    /// joining / joined to). `None` in `SessionState::Idle` and
+    /// `SessionState::Leaving`. Production callers use this from
+    /// inside signal callbacks to figure out which voice panel to
+    /// update; the state machine owns the canonical answer so we
+    /// just delegate.
+    pub fn active_cid(&self) -> Option<u32> {
+        self.inner.borrow().machine.active_cid()
+    }
+
     /// Test-only accessor for the underlying `gst::Pipeline`.
     /// Phase 8.C step 8's bus-watch integration test uses this
     /// to post synthetic messages onto the bus and verify the
@@ -982,33 +1118,29 @@ impl VoiceRuntime {
             // runtime is the layer that decides whether to
             // actually drive GStreamer.
             Action::SetRemoteDescription { sdp } => {
-                let webrtcbin = self
-                    .inner
-                    .borrow()
-                    .webrtcbin
-                    .clone();
-                if let Some(bin) = webrtcbin {
-                    apply_remote_offer(&bin, &sdp);
-                }
-            }
-            Action::CreateAnswer => {
-                // Capture data needed by the (Send) promise
-                // closure: the runtime id (to find ourselves
-                // again on the main thread), the answer
-                // generation (so we can ignore stale
-                // resolutions if a later offer arrives before
-                // the old promise fires — see below), and a
-                // handle to the main GLib context (its accessor
-                // is callable from any thread — `Send`-safe).
+                // set-remote-description on webrtcbin is async.
+                // `create-answer` requires remote desc to be
+                // applied first — issuing it synchronously after
+                // (the previous bug) made webrtcbin error the
+                // promise, the state machine never saw
+                // `WebrtcAnswerCreated`, and the session stalled
+                // in `OfferPending` until the JoinReply timer
+                // walked it to Failed.
                 //
-                // Bump the generation BEFORE handing the
-                // promise to webrtcbin. The state machine's
-                // OfferPending+SdpOfferReceived arm
-                // re-issues CreateAnswer without changing
-                // state; without the bump-and-compare the old
-                // promise's resolution would still match the
-                // current generation and send a stale 603 for
-                // the wrong offer.
+                // Now: attach a promise to set-remote-description
+                // and chain `create-answer` from inside its
+                // resolution. The state machine's separate
+                // `Action::CreateAnswer` becomes a no-op (see
+                // below) — the runtime has already taken
+                // responsibility for issuing it at the right
+                // point.
+                //
+                // Bump `answer_generation` BEFORE handing the
+                // promise to webrtcbin so a renegotiation offer
+                // arriving while this chain is in flight
+                // produces a fresh generation, and the in-flight
+                // promise's eventual resolution is correctly
+                // dropped as stale.
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
                     inner.answer_generation =
@@ -1020,8 +1152,19 @@ impl VoiceRuntime {
                     )
                 };
                 if let Some(bin) = webrtcbin {
-                    create_answer(&bin, runtime_id, generation);
+                    apply_remote_offer_and_chain_answer(
+                        &bin, &sdp, runtime_id, generation,
+                    );
                 }
+            }
+            Action::CreateAnswer => {
+                // No-op: `Action::SetRemoteDescription`'s promise
+                // chain calls `create_answer` once webrtcbin has
+                // actually applied the remote offer. The state
+                // machine still emits this action because the
+                // chain isn't its concern; we silently absorb it
+                // here so we don't fire `create-answer` twice
+                // (once stale, once correctly chained).
             }
             Action::SetLocalDescription { sdp } => {
                 let webrtcbin = self
@@ -1212,18 +1355,75 @@ fn build_session_description(
 }
 
 /// Dispatch arm for `Action::SetRemoteDescription`. Parses the
-/// offer SDP and emits `webrtcbin.set-remote-description` with a
-/// null promise (we don't currently track when remote-desc has
-/// finished applying; the state machine just sequences
-/// `CreateAnswer` immediately after).
-fn apply_remote_offer(webrtcbin: &gstreamer::Element, sdp: &str) {
+/// offer SDP, emits `webrtcbin.set-remote-description` with a
+/// promise, and chains `create-answer` from the promise's
+/// resolution.
+///
+/// The chain matters: webrtcbin's `set-remote-description` is
+/// asynchronous, and `create-answer` requires remote desc to be
+/// applied before it can produce a usable answer. Issuing them
+/// back-to-back synchronously (the previous behaviour) left
+/// webrtcbin without a real remote-desc when `create-answer`
+/// fired, the promise either errored or returned an empty
+/// structure, the state machine never saw
+/// `Event::WebrtcAnswerCreated`, and the session stalled in
+/// `OfferPending` until the JoinReply timer walked it to Failed.
+///
+/// Renegotiation race guard: `answer_generation` was bumped by
+/// the dispatch arm before calling us, and the captured value is
+/// checked inside `create_answer`'s promise too. If a fresh
+/// `SetRemoteDescription` runs before this chain's `create-answer`
+/// promise resolves, the generation mismatch drops the stale
+/// answer.
+fn apply_remote_offer_and_chain_answer(
+    webrtcbin: &gstreamer::Element,
+    sdp: &str,
+    runtime_id: u64,
+    generation: u64,
+) {
     let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer)
     else {
         return;
     };
+    let main_ctx = gstreamer::glib::MainContext::default();
+    let promise = gstreamer::Promise::with_change_func(move |reply| {
+        // `set-remote-description` populates the promise's reply
+        // structure with at most a debug hint; we only care that
+        // it resolved (whether Ok or Err). On Err the webrtcbin
+        // state hasn't actually advanced — issuing create-answer
+        // anyway would just produce the same stall as before.
+        // Log and bail.
+        if let Err(e) = reply {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: set-remote-description promise resolved with \
+                 error for runtime {runtime_id}: {e:?} — skipping chained \
+                 create-answer; JoinReply timer will walk the session to \
+                 Failed"
+            );
+            return;
+        }
+        // Marshal back to the main thread. The closure must be
+        // `Send + 'static`; we capture only `runtime_id` and
+        // `generation` (both `u64: Copy`) plus the main-context
+        // handle. `create_answer` does its own generation re-
+        // check inside its promise resolution.
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                if rt.inner.borrow().answer_generation != generation {
+                    return;
+                }
+                let webrtcbin =
+                    rt.inner.borrow().webrtcbin.clone();
+                if let Some(bin) = webrtcbin {
+                    create_answer(&bin, runtime_id, generation);
+                }
+            });
+        });
+    });
     webrtcbin.emit_by_name::<()>(
         "set-remote-description",
-        &[&desc, &None::<gstreamer::Promise>],
+        &[&desc, &promise],
     );
 }
 
@@ -2602,35 +2802,62 @@ mod tests {
         assert!(runtime.inner.borrow().webrtcbin.is_some());
     }
 
-    /// Regression (Copilot review #3): `Action::CreateAnswer`
-    /// must bump `answer_generation` on every dispatch. The
-    /// generation is the load-bearing piece of the
-    /// renegotiation race guard — promise change-funcs capture
-    /// the value at issue time and compare it on the main
-    /// thread, so we need each new CreateAnswer to be a fresh
-    /// generation to discriminate stale resolutions.
+    /// Regression: `answer_generation` must bump on every
+    /// `Action::SetRemoteDescription` dispatch. The generation is
+    /// the load-bearing piece of the renegotiation race guard —
+    /// `set-remote-description`'s promise chain captures the
+    /// value at issue time, and so does the chained
+    /// `create-answer`'s promise. A renegotiation `SetRemote` in
+    /// flight must invalidate any older chain's eventual
+    /// `WebrtcAnswerCreated` dispatch.
     ///
-    /// Driven through `dispatch` rather than the state machine
-    /// because we want to exercise the runtime arm directly
-    /// without depending on the offer/answer state path.
+    /// Originally pinned to `Action::CreateAnswer`; moved to
+    /// `SetRemoteDescription` when create-answer became a chained
+    /// continuation of set-remote-description (see
+    /// `apply_remote_offer_and_chain_answer`). `Action::CreateAnswer`
+    /// is now a no-op and must NOT bump the generation — a bump
+    /// there would corrupt the generation captured by the in-flight
+    /// chain's promise.
     #[test]
-    fn create_answer_dispatch_bumps_answer_generation() {
+    fn set_remote_description_dispatch_bumps_answer_generation() {
         let runtime =
             VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         let before = runtime.inner.borrow().answer_generation;
-        runtime.dispatch(Action::CreateAnswer);
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: "v=0\r\n".into(),
+        });
         let after_one = runtime.inner.borrow().answer_generation;
         assert_eq!(
             after_one,
             before.wrapping_add(1),
-            "first CreateAnswer dispatch must bump the generation by 1"
+            "first SetRemoteDescription dispatch must bump the generation by 1"
         );
-        runtime.dispatch(Action::CreateAnswer);
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: "v=0\r\n".into(),
+        });
         let after_two = runtime.inner.borrow().answer_generation;
         assert_eq!(
             after_two,
             before.wrapping_add(2),
-            "second CreateAnswer dispatch must bump the generation again"
+            "second SetRemoteDescription dispatch must bump the generation again"
+        );
+    }
+
+    /// `Action::CreateAnswer` is a no-op after the chain refactor —
+    /// the `set-remote-description` promise drives `create-answer`
+    /// on its resolution. Verify the runtime doesn't bump the
+    /// generation a second time when the state machine emits both
+    /// actions back-to-back.
+    #[test]
+    fn create_answer_dispatch_is_now_a_noop_on_generation() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let before = runtime.inner.borrow().answer_generation;
+        runtime.dispatch(Action::CreateAnswer);
+        let after = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after, before,
+            "Action::CreateAnswer is a no-op; the chain handles it"
         );
     }
 
@@ -2994,5 +3221,197 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].0, 600);
         assert!(frames[0].1.is_empty());
+    }
+
+    // ---- Signal-bridge unit tests ----
+
+    /// Capture site for state-changed signals.
+    struct CapturedStates(RefCell<Vec<u32>>);
+    /// Capture site for mute-changed signals.
+    struct CapturedMutes(RefCell<Vec<i32>>);
+
+    unsafe extern "C" fn state_capture(
+        user_data: *mut core::ffi::c_void,
+        state: u32,
+    ) {
+        let captured = unsafe { &*(user_data as *const CapturedStates) };
+        captured.0.borrow_mut().push(state);
+    }
+
+    unsafe extern "C" fn mute_capture(
+        user_data: *mut core::ffi::c_void,
+        muted: i32,
+    ) {
+        let captured = unsafe { &*(user_data as *const CapturedMutes) };
+        captured.0.borrow_mut().push(muted);
+    }
+
+    #[test]
+    fn session_state_to_ffi_covers_every_variant() {
+        use hxvoice::state::SessionState as S;
+        // Pin every Rust state's discriminant to its C-side
+        // mirror. A new SessionState variant added without
+        // updating session_state_to_ffi would otherwise silently
+        // route through the wildcard's debug_assert.
+        assert_eq!(session_state_to_ffi(S::Idle), 0);
+        assert_eq!(session_state_to_ffi(S::JoinSent), 1);
+        assert_eq!(session_state_to_ffi(S::OfferPending), 2);
+        assert_eq!(session_state_to_ffi(S::Connecting), 3);
+        assert_eq!(session_state_to_ffi(S::Connected), 4);
+        assert_eq!(session_state_to_ffi(S::Leaving), 5);
+    }
+
+    #[test]
+    fn callback_backend_forwards_state_changed_signal() {
+        use hxvoice::state::SessionState;
+        let captured = CapturedStates(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedStates as *mut core::ffi::c_void;
+        let signals = SignalCallbacks {
+            state_changed: Some(state_capture),
+            mute_changed: None,
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            user_data,
+            None,
+            signals,
+        );
+
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::JoinSent,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::Leaving,
+            },
+        );
+
+        assert_eq!(captured.0.borrow().as_slice(), &[1, 4, 5]);
+    }
+
+    #[test]
+    fn callback_backend_forwards_mute_changed_signal() {
+        let captured = CapturedMutes(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedMutes as *mut core::ffi::c_void;
+        let signals = SignalCallbacks {
+            state_changed: None,
+            mute_changed: Some(mute_capture),
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            user_data,
+            None,
+            signals,
+        );
+
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: true },
+        );
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: false },
+        );
+
+        assert_eq!(captured.0.borrow().as_slice(), &[1, 0]);
+    }
+
+    #[test]
+    fn callback_backend_drops_signal_with_no_subscriber() {
+        // None callback in SignalCallbacks must not be invoked.
+        // Pair with NULL user_data so a wayward invocation would
+        // segfault.
+        let mut backend = CallbackBackend::new_with_signals(
+            core::ptr::null_mut(),
+            None,
+            SignalCallbacks::none(),
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: hxvoice::state::SessionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: true },
+        );
+        // No assertion beyond "didn't crash".
+    }
+
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    /// Static flags the must-not-fire callbacks flip on invocation.
+    /// The callbacks deliberately do NOT dereference `user_data` —
+    /// a regression that invoked them would otherwise UB-read
+    /// through a type-confused pointer and turn the test failure
+    /// into nondeterministic flake instead of a clean assertion.
+    static MUTE_FIRED: AtomicBool = AtomicBool::new(false);
+    static STATE_FIRED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn mute_must_not_fire(
+        _user_data: *mut core::ffi::c_void,
+        _muted: i32,
+    ) {
+        MUTE_FIRED.store(true, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn state_must_not_fire(
+        _user_data: *mut core::ffi::c_void,
+        _state: u32,
+    ) {
+        STATE_FIRED.store(true, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn callback_backend_ignores_unsubscribed_signal_kinds() {
+        // RoomStatus + Error don't have C-side subscriber slots
+        // yet; emitting them with subscribed state/mute callbacks
+        // must not call them either. Use flag-only callbacks so
+        // the assertion fails deterministically on a regression
+        // rather than UB-reading a type-confused user_data
+        // pointer.
+        STATE_FIRED.store(false, Ordering::SeqCst);
+        MUTE_FIRED.store(false, Ordering::SeqCst);
+
+        let signals = SignalCallbacks {
+            state_changed: Some(state_must_not_fire),
+            mute_changed: Some(mute_must_not_fire),
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            core::ptr::null_mut(),
+            None,
+            signals,
+        );
+        backend.emit_signal(
+            SignalKind::RoomStatus,
+            SignalPayload::RoomStatus {
+                cid: 42,
+                connection_state:
+                    hxvoice::event::ConnectionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::Error,
+            SignalPayload::Error { text: "oops".into() },
+        );
+        assert!(
+            !STATE_FIRED.load(Ordering::SeqCst),
+            "state_changed must not fire for RoomStatus / Error"
+        );
+        assert!(
+            !MUTE_FIRED.load(Ordering::SeqCst),
+            "mute_changed must not fire for RoomStatus / Error"
+        );
     }
 }

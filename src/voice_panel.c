@@ -129,25 +129,39 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
     }
 }
 
+/* Forward decl — defined below. Called from
+ * ensure_voice_runtime's signal-callbacks registration; the
+ * static-storage-class ordering needs the forward so the bridge
+ * callback's address is taken at the same compilation point as
+ * voice_runtime_send_wire_frame_cb above. */
+static void voice_runtime_state_changed_cb (void *user_data,
+                                            gtkhx_voice_state state);
+static void voice_runtime_mute_changed_cb (void *user_data, int muted);
+
 /* Lazy-create the per-session voice runtime on first use. Returns
  * sess->voice_runtime, NULL on construction failure (GStreamer not
  * initialised, webrtcbin plugin missing). Idempotent: returns the
  * same handle on subsequent calls.
  *
- * Registers the bridge callback so the state machine's outbound
- * 603 SDP_ANSWER / 604 ICE actions reach `hlwrite_chunks`. The
- * user_data is &sess->htlc; both stay valid until network.c::
- * hx_htlc_close frees the runtime on disconnect (it does so
- * before the htlc itself is touched, so the callback can never
- * fire on a freed htlc). */
+ * Registers both the wire-out bridge (so the state machine's 603
+ * SDP_ANSWER / 604 ICE actions reach hlwrite_chunks) and the
+ * signal-in bridge (so the panel's joined / muted state reflects
+ * authoritative state-machine state instead of optimistic UI).
+ * user_data is &sess->htlc; from there the signal handlers reach
+ * sess via the the_session singleton. Both stay valid until
+ * network.c::hx_htlc_close frees the runtime on disconnect. */
 static struct gtkhx_voice_runtime *
 ensure_voice_runtime (session *sess)
 {
     if (!sess)
         return NULL;
     if (!sess->voice_runtime) {
-        sess->voice_runtime = gtkhx_voice_runtime_new_with_callbacks (
-            &sess->htlc, voice_runtime_send_wire_frame_cb);
+        gtkhx_voice_runtime_signal_callbacks signals = {
+            .state_changed = voice_runtime_state_changed_cb,
+            .mute_changed  = voice_runtime_mute_changed_cb,
+        };
+        sess->voice_runtime = gtkhx_voice_runtime_new_v2 (
+            &sess->htlc, voice_runtime_send_wire_frame_cb, &signals);
     }
     return sess->voice_runtime;
 }
@@ -269,30 +283,29 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
          * muted bit BEFORE issuing VOICE_JOIN so any downstream
          * code reading panel state during the send sees a
          * consistent "joining muted" view. Roll it back if the
-         * wire-out skipped — a join that didn't ship shouldn't
-         * pretend we're in voice. */
+         * wire-out skipped. The state machine's MuteToggleRequested
+         * arm doesn't fire on JoinRequested, so this optimistic
+         * set still owns the post-join muted display until the
+         * user actually clicks Mute / Unmute. */
         gboolean prev_muted = panel_get_bool (panel, KEY_MUTED);
         panel_set_bool (panel, KEY_MUTED, TRUE);
         sent = hx_send_voice_join (&sess->htlc, cid);
         if (sent) {
-            /* Drive the runtime state machine in parallel.
-             * The C side still owns the wire-out (NoopBackend
-             * on the runtime side), so this doesn't
-             * double-send — it just feeds the state machine
-             * the matching JoinRequested event so SDP /
-             * ICE / pad dispatch on the inbound side has the
-             * right active_cid + pipeline state. */
+            /* Drive the runtime state machine. handle_event runs
+             * synchronously: by the time gtkhx_voice_runtime_join
+             * returns, the state machine has transitioned
+             * Idle→JoinSent and the StateChanged signal has fired
+             * — voice_runtime_state_changed_cb above has already
+             * updated KEY_JOINED on this panel. */
             struct gtkhx_voice_runtime *rt =
                 ensure_voice_runtime (sess);
             if (rt) {
                 gtkhx_voice_runtime_join (rt, cid);
             } else {
                 /* Runtime construction failed (GStreamer not
-                 * initialised, webrtcbin missing). Roll back
-                 * the wire-side join so the UI doesn't pretend
-                 * we're joined while no local WebRTC plumbing
-                 * exists — without it, no SDP answer ever
-                 * fires and the server times us out anyway. */
+                 * initialised, webrtcbin missing). Roll back the
+                 * wire-side join so the user isn't left in a
+                 * room that never finishes the handshake. */
                 (void) hx_send_voice_leave (&sess->htlc, cid);
                 panel_set_bool (panel, KEY_MUTED, prev_muted);
                 sent = FALSE;
@@ -303,31 +316,29 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
     } else {
         sent = hx_send_voice_leave (&sess->htlc, cid);
         if (sent) {
+            /* Runtime LeaveRequested fires StateChanged
+             * (→Leaving), which our signal handler picks up to
+             * clear KEY_JOINED + KEY_MUTED on this panel. */
             gtkhx_voice_runtime_leave (sess->voice_runtime, cid);
-            /* On a successful leave, clear muted so a
-             * subsequent Join doesn't restore a stale Unmute
-             * label. The disabled mute button (mute is gated on
-             * "currently joined" in update_button_labels) would
-             * otherwise show "Unmute" while not joined. */
-            panel_set_bool (panel, KEY_MUTED, FALSE);
         }
     }
 
-    if (sent) {
-        /* Optimistic UI: reflect the requested state. The
-         * voice-room-status signal will correct us if the wire
-         * op fails after this point. */
-        panel_set_bool (panel, KEY_JOINED, want_joined);
-    } else {
+    if (!sent) {
         /* Wire-out was skipped — revert the toggle so the
          * button visually matches the underlying state. The
          * KEY_SUPPRESS guard at the top of this handler keeps
-         * the set_active call from re-firing us. */
+         * the set_active call from re-firing us.
+         *
+         * Sent path: the state_changed signal handler already
+         * called update_button_labels with the authoritative
+         * KEY_JOINED value, so no extra UI refresh is needed.
+         * Skipped path: KEY_JOINED is still its pre-click value,
+         * so update_button_labels below restores the label. */
         panel_set_bool (panel, KEY_SUPPRESS, TRUE);
         gtk_toggle_button_set_active (btn, !want_joined);
         panel_set_bool (panel, KEY_SUPPRESS, FALSE);
+        update_button_labels (panel);
     }
-    update_button_labels (panel);
 }
 
 static void
@@ -347,17 +358,22 @@ on_mute_toggled (GtkToggleButton *btn, gpointer user_data)
 
     gboolean sent = hx_send_voice_mute (&sess->htlc, cid, want_muted);
     if (sent) {
+        /* gtkhx_voice_runtime_mute fires MuteToggleRequested which
+         * the state machine handles synchronously: by the time it
+         * returns, the MuteChanged signal has already updated
+         * KEY_MUTED on this panel via voice_runtime_mute_changed_cb. */
         gtkhx_voice_runtime_mute (sess->voice_runtime,
                                   want_muted ? 1 : 0);
-        panel_set_bool (panel, KEY_MUTED, want_muted);
     } else {
-        /* Revert the toggle so the button matches the
-         * unchanged underlying state. */
+        /* Revert the toggle so the button matches the unchanged
+         * underlying state. The KEY_MUTED model hasn't moved, so
+         * update_button_labels at the bottom restores the label
+         * to its prior value. */
         panel_set_bool (panel, KEY_SUPPRESS, TRUE);
         gtk_toggle_button_set_active (btn, !want_muted);
         panel_set_bool (panel, KEY_SUPPRESS, FALSE);
+        update_button_labels (panel);
     }
-    update_button_labels (panel);
 }
 
 GtkWidget *
@@ -436,6 +452,107 @@ voice_panel_refresh (GtkWidget *panel, session *sess)
         gtk_widget_set_sensitive (join_btn, enabled);
     }
     update_button_labels (panel);
+}
+
+/* Map FFI gtkhx_voice_state → "in voice or not". From the user's
+ * perspective the toolbar should flip to "Leave Voice" as soon as
+ * the JOIN goes on the wire so they can cancel the attempt — they
+ * don't care that we're still mid-SDP-offer or ICE-establishing.
+ * Treat anything past Idle as joined, EXCEPT Leaving (the
+ * terminal post-tear-down state, where the panel should read
+ * "Join Voice" again so the user can rejoin). */
+static gboolean
+state_is_joined (gtkhx_voice_state state)
+{
+    return state == GTKHX_VOICE_STATE_JOIN_SENT ||
+           state == GTKHX_VOICE_STATE_OFFER_PENDING ||
+           state == GTKHX_VOICE_STATE_CONNECTING ||
+           state == GTKHX_VOICE_STATE_CONNECTED;
+}
+
+/* Signal handler: voice_runtime emitted SignalKind::StateChanged.
+ * user_data is &htlc; we use the_session to walk the session's
+ * gchats (single-session for now — see CLAUDE.md note on the
+ * sess_from_htlc lie). Updates KEY_JOINED on every panel: TRUE
+ * only on the panel matching the runtime's active cid, FALSE on
+ * all others. */
+static void
+voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
+{
+    (void) user_data;
+    session *sess = &the_session;
+    if (!sess->gchats)
+        return;
+
+    gboolean joined_now = state_is_joined (state);
+
+    /* Figure out which cid (if any) the runtime considers active.
+     * Idle / Leaving paths return 0, which we treat as "no active
+     * room" so every panel reads as not joined. */
+    uint32_t active_cid = 0;
+    int has_active = 0;
+    if (sess->voice_runtime) {
+        has_active = gtkhx_voice_runtime_active_cid (sess->voice_runtime,
+                                                    &active_cid);
+    }
+
+    debug_log ("voice",
+               "panel: state=%u joined=%d active_cid=%s%u",
+               /* enum → unsigned int through varargs:
+                * gtkhx_voice_state is an enum that promotes to
+                * int; passing it directly to %u is UB. Cast to
+                * unsigned so the varargs type matches the format
+                * specifier. */
+               (unsigned int) state,
+               joined_now ? 1 : 0,
+               has_active ? "" : "(none) ",
+               (unsigned int) active_cid);
+
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init (&iter, sess->gchats);
+    while (g_hash_table_iter_next (&iter, &key, &val)) {
+        struct gtkhx_chat *gchat = val;
+        if (!gchat || !gchat->voice_panel)
+            continue;
+        guint32 cid = GPOINTER_TO_UINT (key);
+        gboolean is_active = has_active && cid == active_cid;
+        panel_set_bool (gchat->voice_panel, KEY_JOINED,
+                        joined_now && is_active);
+        /* Leaving / Idle on a previously-joined panel needs muted
+         * cleared too — otherwise a subsequent Join sees a stale
+         * Unmute label, which update_button_labels disabled-state
+         * gate would otherwise paper over. */
+        if (!joined_now || !is_active) {
+            panel_set_bool (gchat->voice_panel, KEY_MUTED, FALSE);
+        }
+        update_button_labels (gchat->voice_panel);
+    }
+}
+
+/* Signal handler: voice_runtime emitted SignalKind::MuteChanged.
+ * Updates KEY_MUTED on the panel matching active_cid. */
+static void
+voice_runtime_mute_changed_cb (void *user_data, int muted)
+{
+    (void) user_data;
+    session *sess = &the_session;
+    if (!sess->gchats || !sess->voice_runtime)
+        return;
+
+    uint32_t active_cid = 0;
+    if (!gtkhx_voice_runtime_active_cid (sess->voice_runtime, &active_cid)) {
+        debug_log ("voice",
+                   "panel: mute_changed muted=%d but no active cid (dropped)",
+                   muted);
+        return;
+    }
+    struct gtkhx_chat *gchat = g_hash_table_lookup (
+        sess->gchats, GUINT_TO_POINTER (active_cid));
+    if (!gchat || !gchat->voice_panel)
+        return;
+    panel_set_bool (gchat->voice_panel, KEY_MUTED, muted ? TRUE : FALSE);
+    update_button_labels (gchat->voice_panel);
 }
 
 void
