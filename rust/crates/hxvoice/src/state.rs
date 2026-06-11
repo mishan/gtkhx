@@ -72,8 +72,13 @@ use crate::event::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionState {
-    /// No voice room joined. The starting state and the final
-    /// state after a successful leave / failure.
+    /// No voice room joined. The **starting state only** — there
+    /// is no `Leaving → Idle` transition in this enum, so a
+    /// machine that has reached `Leaving` never re-enters `Idle`.
+    /// A fresh voice session constructs a new `SessionMachine`
+    /// (which starts in `Idle`); the runtime drops the previous
+    /// one when it sees the post-step state hit `Leaving`. See
+    /// the module-level doc for the full lifetime contract.
     Idle,
     /// We sent VOICE_JOIN (600); waiting for the server's reply
     /// or its accompanying SDP offer (602). Both arrive in
@@ -111,7 +116,14 @@ pub enum SessionState {
 pub struct SessionMachine {
     state: SessionState,
     /// Currently active (or pending) chat-room id. Populated on
-    /// `JoinRequested`, cleared on transition back to `Idle`.
+    /// `JoinRequested` (both the initial JOIN and the mid-session
+    /// room-switch path), and cleared internally by `fail()` when
+    /// the machine walks itself to terminal `Leaving`. There is
+    /// no `Leaving → Idle` transition, so this is the only
+    /// in-machine clear path; the explicit-leave handler doesn't
+    /// touch this field because the runtime drops the whole
+    /// machine afterwards.
+    ///
     /// `0` is a valid cid (public chat), so we use `Option<u32>`
     /// rather than a sentinel.
     active_cid: Option<u32>,
@@ -1631,9 +1643,20 @@ mod tests {
             SessionState::JoinSent,
             "state must not advance on a dropped offer"
         );
-        // The mid cache must still be empty — the offer's mids
-        // must NOT have been swallowed.
-        assert_eq!(m.participants().count(), 0);
+        // The mid_to_user cache must NOT have absorbed the
+        // wrong-cid offer's mids. The offer's body contains
+        // `a=mid:user-1`; if cache_offer_mids() had run
+        // (regression shape) the cache would now hold the
+        // "user-1" → 1 entry. Checking the private field
+        // directly here (rather than the participants() iter)
+        // is the precise invariant — a corrupted mid cache that
+        // happens to have zero pad-added events would slip past
+        // a count-based check.
+        assert!(
+            m.mid_to_user.is_empty(),
+            "mid_to_user must stay empty on a dropped offer; got {:?}",
+            m.mid_to_user
+        );
     }
 
     /// Regression: same guard for the Connected (renegotiation)

@@ -30,11 +30,13 @@
 #                     not linked into the C binary directly — hence
 #                     no rust_hxvoice_dep declared below.
 #
-# Each crate is a staticlib that the C side wraps with a thin dispatcher.
-# FFI signatures are hand-declared `extern` blocks in the relevant C TU
-# rather than cbindgen-generated headers — drift surfaces at link time
-# as undefined symbols, which is enough for opaque-pointer APIs and
-# keeps the build simpler.
+# Each FFI-exposed crate is a staticlib that the C side wraps with a
+# thin dispatcher. (hxvoice above is the exception — pure Rust,
+# rlib-only, consumed by hxvoice-runtime as a workspace dep with no
+# C-side surface at all.) FFI signatures are hand-declared `extern`
+# blocks in the relevant C TU rather than cbindgen-generated headers
+# — drift surfaces at link time as undefined symbols, which is
+# enough for opaque-pointer APIs and keeps the build simpler.
 #
 # Two crates retired at the R2 closeout: hxrand (whose only purpose was
 # wrapping getrandom(2) — the C code calls getrandom() directly via the
