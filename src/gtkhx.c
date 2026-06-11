@@ -60,6 +60,7 @@
 #include "gtkhx_session.h"
 #include "notify.h"
 #include "tracker.h"
+#include "voice_runtime.h"
 #include "tray.h"
 #include "xtext.h"
 #include "options.h"
@@ -1009,6 +1010,17 @@ init (int argc, char **argv)
      * create_toolbar_window in toolbar.c about NULL gtkhx_app at
      * this point in init). */
     panel_init ();
+    /* Phase 8.B: initialise GStreamer for the voice runtime. Idempotent;
+     * the Rust hxvoice-runtime wraps gst::init which checks its own
+     * "already initialised" flag. Order doesn't matter relative to
+     * gtk_init (GStreamer doesn't care about display init) but landing
+     * it after gtk_init keeps the "init the world in order" reading
+     * honest. A 0 return means GStreamer failed to start; voice UI
+     * (Phase 8.D) will be disabled rather than crashing. */
+    if (gtkhx_voice_init () == 0) {
+        g_warning (
+            "gtkhx_voice_init failed; voice features will be unavailable");
+    }
     fe_init ();
 }
 

@@ -7,6 +7,7 @@ members = [
     "crates/hxcompress",
     "crates/hotline-proto",
     "crates/hxbridge",
+    "crates/hxvoice-runtime",
 ]
 
 # Shared version pins for the gtk-rs + gstreamer-rs families. Phase R3.0

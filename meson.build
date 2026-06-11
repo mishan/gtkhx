@@ -91,6 +91,49 @@ threads_dep = dependency('threads')
 # GSound is the canonical path; the fallback fork+exec code was retired.
 gsound_dep = dependency('gsound')
 
+# Phase 8.B: GStreamer system libraries. The Rust hxvoice-runtime
+# crate wraps these via gstreamer-sys (from the gstreamer-rs 0.25
+# family pinned in rust/Cargo.toml's workspace.dependencies). The
+# system libs still need to be on the build host so cargo's build
+# script can find the .pc files and the final linker can resolve the
+# shared library symbols.
+#
+# Version floor: 1.20 ships webrtcbin's stable API surface and is
+# the minimum the gstreamer-rs 0.25 line will link against on the
+# bind-time check. The runtime floor for the gstreamer-webrtc-rs
+# crate is 1.26 (GNOME 48 runtime ships 1.26; GNOME 47 ships 1.24,
+# which is too old for the webrtc bindings even though it satisfies
+# the build-time floor). The Flatpak manifest needs to be on GNOME
+# 48 or later before Phase 8.C consumes the webrtc bindings —
+# tracked in docs/voice-chat-plan.md §5.B and
+# docs/rust-glib-interop.md "GStreamer runtime floor".
+#
+# Plugin set:
+#   gstreamer-1.0       — core pipeline / element framework
+#   gstreamer-app-1.0   — appsrc/appsink for in-process data exchange
+#   gstreamer-audio-1.0 — audio caps, GstAudioInfo, format helpers
+#   gstreamer-webrtc-1.0— webrtcbin (Phase 8.C consumer)
+#
+# Phase 8.B's loopback test only exercises core + audio (audiotestsrc
+# ! mulawenc ! mulawdec ! fakesink). The other two pkg-config probes
+# fail early if the Phase 8.C dep graph isn't present on this host;
+# better a clear "package not found" at configure time than a cryptic
+# Rust link error mid-build.
+gstreamer_dep        = dependency('gstreamer-1.0',        version : '>= 1.20')
+gstreamer_app_dep    = dependency('gstreamer-app-1.0',    version : '>= 1.20')
+gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20')
+# gstreamer-webrtc-1.0 lives in gst-plugins-bad on most distros and on
+# the GNOME 48+ Flatpak runtime. Phase 8.B's loopback pipeline
+# (audiotestsrc ! mulawenc ! mulawdec ! fakesink) doesn't actually
+# consume webrtcbin, but the runtime crate's Cargo.toml pulls in
+# gstreamer-sdp / gstreamer-webrtc anyway so the resolver locks
+# their Cargo.lock entries — the Phase 8.C build that flips
+# webrtcbin on doesn't churn dependent crate versions. Build host
+# needs gst-plugins-bad-dev (Debian/Ubuntu) or
+# gstreamer1-plugins-bad-free-devel (Fedora) by configure time.
+gstreamer_sdp_dep    = dependency('gstreamer-sdp-1.0',    version : '>= 1.20')
+gstreamer_webrtc_dep = dependency('gstreamer-webrtc-1.0', version : '>= 1.20')
+
 # Phase 5: libsoup-3 powers the URL-mode banner fetcher in banner.c.
 # Modern Hotline servers can advertise a banner via HTLS_HDR_BANNER as
 # either an http(s) URL (URL-mode) or as bytes pulled over the HTXF
@@ -159,6 +202,11 @@ deps = [
   nettle_dep,
   threads_dep,
   gsound_dep,
+  gstreamer_dep,
+  gstreamer_app_dep,
+  gstreamer_audio_dep,
+  gstreamer_sdp_dep,
+  gstreamer_webrtc_dep,
   soup_dep,
   poppler_dep,
   sourceview_dep,

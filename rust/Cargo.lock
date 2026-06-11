@@ -876,6 +876,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxvoice-runtime"
+version = "0.1.0"
+dependencies = [
+ "glib",
+ "gstreamer",
+ "gstreamer-app",
+ "gstreamer-audio",
+ "gstreamer-sdp",
+ "gstreamer-webrtc",
+]
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
