@@ -60,6 +60,7 @@
 #include "debug.h"
 #include "cipher_aead.h"
 #include "cipher.h"
+#include "voice_runtime.h"
 
 /* Phase R1: Rust FFI for the Blowfish OFB-64 state — only used here
  * to free the state on hx_htlc_close. cipher.c owns the alloc and
@@ -218,6 +219,18 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * retention doesn't carry stale numbers into the UI. */
     htlc->history_max_msgs = 0;
     htlc->history_max_days = 0;
+
+    /* Phase 8.D runtime wiring: tear down the voice runtime.
+     * gtkhx_voice_runtime_free walks the state machine to its
+     * Drop, which cancels armed timers, evicts the thread-local
+     * registry entry, and releases the GStreamer pipeline +
+     * webrtcbin. NULL-safe — the runtime is lazily-created so
+     * sessions that never opened voice don't allocate one. The
+     * `sess` local was bound at the top of this function. */
+    if (sess->voice_runtime) {
+        gtkhx_voice_runtime_free (sess->voice_runtime);
+        sess->voice_runtime = NULL;
+    }
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
 	 * exchange). Safe to call whether or not one's running. */

@@ -276,3 +276,15 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 {
     (void) htlc; (void) pass;
 }
+
+/* Phase 8.D runtime-wire stub. network.c::hx_htlc_close calls
+ * gtkhx_voice_runtime_free on disconnect; the integration test
+ * binaries don't link hxvoice-runtime, so provide a no-op shim.
+ * the_session.voice_runtime stays NULL in the test path anyway. */
+typedef struct gtkhx_voice_runtime gtkhx_voice_runtime;
+extern void gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt);
+void
+gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
+{
+    (void) rt;
+}

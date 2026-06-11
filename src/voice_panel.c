@@ -25,6 +25,22 @@
 #include "hl_access.h"
 #include "hotline.h"
 #include "voice.h"
+#include "voice_runtime.h"
+
+/* Lazy-create the per-session voice runtime on first use. Returns
+ * sess->voice_runtime, NULL on construction failure (GStreamer not
+ * initialised, webrtcbin plugin missing). Idempotent: returns the
+ * same handle on subsequent calls. */
+static struct gtkhx_voice_runtime *
+ensure_voice_runtime (session *sess)
+{
+    if (!sess)
+        return NULL;
+    if (!sess->voice_runtime) {
+        sess->voice_runtime = gtkhx_voice_runtime_new ();
+    }
+    return sess->voice_runtime;
+}
 
 /* Storage keys for per-panel state. */
 #define KEY_SESS    "voice-panel-sess"
@@ -148,17 +164,41 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
         gboolean prev_muted = panel_get_bool (panel, KEY_MUTED);
         panel_set_bool (panel, KEY_MUTED, TRUE);
         sent = hx_send_voice_join (&sess->htlc, cid);
-        if (!sent) {
+        if (sent) {
+            /* Drive the runtime state machine in parallel.
+             * The C side still owns the wire-out (NoopBackend
+             * on the runtime side), so this doesn't
+             * double-send — it just feeds the state machine
+             * the matching JoinRequested event so SDP /
+             * ICE / pad dispatch on the inbound side has the
+             * right active_cid + pipeline state. */
+            struct gtkhx_voice_runtime *rt =
+                ensure_voice_runtime (sess);
+            if (rt) {
+                gtkhx_voice_runtime_join (rt, cid);
+            } else {
+                /* Runtime construction failed (GStreamer not
+                 * initialised, webrtcbin missing). Roll back
+                 * the wire-side join so the UI doesn't pretend
+                 * we're joined while no local WebRTC plumbing
+                 * exists — without it, no SDP answer ever
+                 * fires and the server times us out anyway. */
+                (void) hx_send_voice_leave (&sess->htlc, cid);
+                panel_set_bool (panel, KEY_MUTED, prev_muted);
+                sent = FALSE;
+            }
+        } else {
             panel_set_bool (panel, KEY_MUTED, prev_muted);
         }
     } else {
         sent = hx_send_voice_leave (&sess->htlc, cid);
-        /* On a successful leave, clear muted so a subsequent
-         * Join doesn't restore a stale Unmute label. The disabled
-         * mute button (mute is gated on "currently joined" in
-         * update_button_labels) would otherwise show "Unmute"
-         * while not joined. */
         if (sent) {
+            gtkhx_voice_runtime_leave (sess->voice_runtime, cid);
+            /* On a successful leave, clear muted so a
+             * subsequent Join doesn't restore a stale Unmute
+             * label. The disabled mute button (mute is gated on
+             * "currently joined" in update_button_labels) would
+             * otherwise show "Unmute" while not joined. */
             panel_set_bool (panel, KEY_MUTED, FALSE);
         }
     }
@@ -197,6 +237,8 @@ on_mute_toggled (GtkToggleButton *btn, gpointer user_data)
 
     gboolean sent = hx_send_voice_mute (&sess->htlc, cid, want_muted);
     if (sent) {
+        gtkhx_voice_runtime_mute (sess->voice_runtime,
+                                  want_muted ? 1 : 0);
         panel_set_bool (panel, KEY_MUTED, want_muted);
     } else {
         /* Revert the toggle so the button matches the

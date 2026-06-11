@@ -62,6 +62,7 @@
 #include "banner.h"
 #include "chat_history.h"
 #include "hl_access.h"
+#include "voice_runtime.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -447,6 +448,39 @@ hx_rcv_task (struct htlc_conn *htlc)
     if (task_inerror (htlc)) {
         task_error (htlc);
         error = 1;
+    }
+    /* Phase 8.D runtime wiring: a TASK error reply for one of the
+     * voice opcodes (600 JOIN, 601 LEAVE, 603 SDP_ANSWER, 606
+     * MUTE — 604 ICE doesn't register a task) needs to reach the
+     * state machine via gtkhx_voice_runtime_task_error so it can
+     * decide whether to tear the session down (JOIN/SDP failures
+     * are fatal) or just surface a toast (MUTE/LEAVE failures are
+     * benign). hx_rcv_task otherwise skips the task's rcv handler
+     * for non-xfer error paths, so this is the only place voice
+     * error replies get inspected. */
+    if (error && tsk && tsk->str) {
+        session *sess = &the_session;
+        uint32_t opcode = 0;
+        if (!strcmp (tsk->str, "voice-join")) {
+            opcode = HTLC_HDR_VOICE_JOIN;
+        } else if (!strcmp (tsk->str, "voice-leave")) {
+            opcode = HTLC_HDR_VOICE_LEAVE;
+        } else if (!strcmp (tsk->str, "voice-sdp-answer")) {
+            opcode = HTLC_HDR_VOICE_SDP_ANSWER;
+        } else if (!strcmp (tsk->str, "voice-mute")) {
+            opcode = HTLC_HDR_VOICE_MUTE;
+        }
+        if (opcode && sess->voice_runtime) {
+            char err_text[256];
+            gsize err_len = 0;
+            const char *text =
+                (task_error_extract (htlc, err_text, sizeof (err_text),
+                                     &err_len) && err_len > 0)
+                    ? err_text
+                    : NULL;
+            gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode,
+                                            text);
+        }
     }
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
@@ -943,6 +977,27 @@ hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
         "bundle=%u has_pcmu=%d disabled_slot=%d",
         r.cid, r.sdp_len, sum.mid_count, sum.unknown_mid_count,
         sum.bundle_count, (int) sum.has_pcmu, (int) sum.has_disabled_slot);
+
+    /* Phase 8.D runtime wiring: feed the typed event into the
+     * state machine + GStreamer dispatch. The runtime then walks
+     * SetRemoteDescription + CreateAnswer; the answer flows back
+     * out via the existing hx_send_voice_sdp_answer path once we
+     * wire the SendWireFrame Backend (today the runtime uses a
+     * NoopBackend so the C side keeps owning wire-out). The SDP
+     * bytes from the wire aren't NUL-terminated — copy + NUL the
+     * scratch buffer before handing off. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime && sdp_ptr && sdp_len > 0) {
+            char *sdp_str = g_malloc (sdp_len + 1);
+            memcpy (sdp_str, sdp_ptr, sdp_len);
+            sdp_str[sdp_len] = '\0';
+            gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid,
+                                           sdp_str);
+            g_free (sdp_str);
+        }
+    }
 }
 
 void
@@ -976,6 +1031,19 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
     if (r.ice_len == 0) {
         debug_log ("voice", "← VOICE_ICE cid=%u (end-of-candidates)",
                    r.cid);
+        /* Spec EOC shorthand: zero-length chunk body. The hxvoice
+         * state machine intercepts both the empty-string JSON
+         * variant and the empty-chunk variant inside
+         * `gtkhx_voice_runtime_ice_candidate` (which accepts NULL
+         * candidate_json), so route the empty case through too
+         * rather than
+         * dropping it. Otherwise the state machine never sees
+         * the server finishing its ICE gathering. */
+        session *sess = &the_session;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_ice_candidate (sess->voice_runtime,
+                                               r.cid, NULL);
+        }
         return;
     }
 
@@ -1009,6 +1077,23 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
         cand.sdp_mline_index_present ? "" : " (absent)",
         cand.is_end_of_candidates ? " EOC" : "");
     gtkhx_proto_voice_ice_free (h);
+
+    /* Phase 8.D runtime wiring: hand the raw JSON to the runtime.
+     * The hxvoice state machine re-parses it (same parser, same
+     * required-key validation) and feeds webrtcbin's
+     * add-ice-candidate signal via Action::AddRemoteIce. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime && ice_ptr && ice_len > 0) {
+            char *json_str = g_malloc (ice_len + 1);
+            memcpy (json_str, ice_ptr, ice_len);
+            json_str[ice_len] = '\0';
+            gtkhx_voice_runtime_ice_candidate (sess->voice_runtime, r.cid,
+                                               json_str);
+            g_free (json_str);
+        }
+    }
 }
 
 void
@@ -1061,6 +1146,19 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
         debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
                    ents[i].user_id, ents[i].flags, ents[i].codec_id,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+
+    /* Phase 8.D runtime wiring: forward the raw blob. The Rust
+     * side re-parses via hotline_proto::voice::parse_voice_participants
+     * (same parser the typed walk above used) and feeds the state
+     * machine's mid_to_user / participants caches. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
+                                             blob, blob_len);
+        }
     }
 }
 
@@ -1184,6 +1282,28 @@ rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
         debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
                    ents[i].user_id, ents[i].flags, ents[i].codec_id,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+
+    /* Phase 8.D runtime wiring: the JOIN reply carries the
+     * server's SDP offer + initial participants. Drive both into
+     * the state machine — SdpOfferReceived starts the answer-
+     * generation walk, ParticipantsUpdated populates the
+     * mid_to_user cache the pad-added path needs. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
+                                             blob, blob_len);
+            if (sdp_ptr && sdp_len > 0) {
+                char *sdp_str = g_malloc (sdp_len + 1);
+                memcpy (sdp_str, sdp_ptr, sdp_len);
+                sdp_str[sdp_len] = '\0';
+                gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid,
+                                               sdp_str);
+                g_free (sdp_str);
+            }
+        }
     }
 }
 
