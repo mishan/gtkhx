@@ -341,6 +341,13 @@ typedef struct _session {
 	 * inside the toplevel users_window. */
     struct _HxUserListView *users_view;
 
+    /* Phase 8.D runtime wiring: opaque per-session voice runtime
+     * handle (Box<VoiceRuntime> on the Rust side). NULL until the
+     * first voice interaction (Join Voice click); the lazy-create
+     * helper in voice_panel.c handles construction. Freed on
+     * session teardown / disconnect by network.c. */
+    struct gtkhx_voice_runtime *voice_runtime;
+
     GtkWidget *news_text;
     GtkWidget *postButton;
     GtkWidget *reloadButton;

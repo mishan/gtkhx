@@ -1,18 +1,28 @@
 //! `#[no_mangle] extern "C"` entry points the C side calls.
 //!
-//! Phase 8.B exposes just one symbol: [`gtkhx_voice_init`], the
-//! Rust-side wrapper over `gst::init()`. The C dispatcher in
-//! `src/gtkhx.c::main` calls this once after `gtk_init` so the
-//! voice subsystem is ready before any window construction reaches
-//! a code path that touches voice elements (none today — but Phase
-//! 8.D's voice toolbar will, and putting the init call in `main`
-//! keeps the lifecycle reading honest).
+//! Phase 8.B exposed [`gtkhx_voice_init`] — the Rust-side wrapper
+//! over `gst::init()` — and that's still the lifecycle entry point
+//! the C dispatcher hits from `src/gtkhx.c::main`.
 //!
-//! Future phases will add per-session opaque handles
-//! (`gtkhx_voice_runtime_new` / `_free` / `_handle_join` /
-//! `_handle_leave` / `_handle_mute_toggle` / `_handle_rcv_task`),
-//! all of which sit alongside this entry point. The header that
-//! mirrors these prototypes is `src/voice_runtime.h`.
+//! Phase 8.D's "runtime wiring" follow-up adds the per-session
+//! opaque-handle surface: a `gtkhx_voice_runtime` (opaque pointer
+//! on the C side) that wraps a Rust `VoiceRuntime`, plus a set of
+//! event-injection shims (`_join` / `_leave` / `_mute` /
+//! `_sdp_offer` / `_ice_candidate` / `_room_status` /
+//! `_task_error`) that translate from C-flavoured parameters into
+//! the typed `hxvoice::Event` variants and feed them through
+//! `VoiceRuntime::handle_event`.
+//!
+//! All entry points are documented for safety at the function
+//! level. The mirror prototypes live in `src/voice_runtime.h`.
+
+use core::slice;
+use std::ffi::{c_char, CStr};
+
+use hxvoice::event::Event;
+use hxvoice::event::ServerError;
+
+use crate::runtime::{NoopBackend, VoiceRuntime};
 
 /// Initialise the GStreamer subsystem.
 ///
@@ -41,4 +51,275 @@ pub extern "C" fn gtkhx_voice_init() -> i32 {
     } else {
         0
     }
+}
+
+// ---------------------------------------------------------------------
+// Per-session runtime handle.
+//
+// The C side holds the runtime as an opaque `gtkhx_voice_runtime *`.
+// On the Rust side it's a `Box<VoiceRuntime>` that we leak across
+// the FFI boundary on `new` and recover + drop on `free`.
+//
+// The runtime currently uses `NoopBackend` for outgoing wire frames
+// — the C side already calls `hx_send_voice_join` / `_leave` /
+// `_mute` directly from the UI click handlers, so wiring the state
+// machine's `SendWireFrame` actions back to the wire would
+// double-send. A subsequent follow-up will swap to a bridge
+// Backend that:
+//
+//   - send_wire_frame: routes through `hlwrite_chunks` so the C
+//     side stops doing direct sends and the state machine becomes
+//     the single source of truth for outgoing voice opcodes.
+//   - emit_signal: drives `gtkhx_session_emit_voice_*` so the UI
+//     reflects state-machine state instead of optimistic UI.
+//   - tear_down: closes webrtcbin + receive bins.
+//
+// For now the runtime is wired in receive-direction only: rcv.c
+// hands it SDP offer / ICE / ROOM_STATUS / TASK errors, the state
+// machine + GStreamer plumbing process them, and the resulting
+// outbound 603 / 604 / 606 frames would be NoopBackend'd — which
+// is fine because the C side hasn't started routing wire-frame
+// emissions through here yet.
+// ---------------------------------------------------------------------
+
+/// Construct a new `VoiceRuntime` for a session. Returns an opaque
+/// pointer on success, NULL on failure (typically: GStreamer
+/// runtime not initialised correctly, or `webrtcbin` plugin not
+/// installed). The caller frees with [`gtkhx_voice_runtime_free`].
+///
+/// # Safety
+/// No memory parameters. Must be called from the main thread (the
+/// runtime's `Inner` is `!Send` and tracks its registry entry
+/// against the calling thread's TLS).
+#[no_mangle]
+pub extern "C" fn gtkhx_voice_runtime_new() -> *mut VoiceRuntime {
+    match VoiceRuntime::new(Box::new(NoopBackend)) {
+        Ok(rt) => Box::into_raw(Box::new(rt)),
+        Err(e) => {
+            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
+            core::ptr::null_mut()
+        }
+    }
+}
+
+/// Free a runtime created with [`gtkhx_voice_runtime_new`].
+///
+/// # Safety
+/// `rt` must be a pointer returned by `gtkhx_voice_runtime_new`
+/// and not previously freed. Safe to call with NULL (no-op). The
+/// caller must not use the pointer after this call returns.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_free(rt: *mut VoiceRuntime) {
+    if rt.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(rt) });
+}
+
+/// Helper: borrow a runtime pointer as a `&VoiceRuntime`. Returns
+/// `None` on NULL. Callers should treat `None` as a soft failure
+/// (event dropped, no panic).
+///
+/// # Safety
+/// `rt` must be a pointer returned by `gtkhx_voice_runtime_new` or
+/// NULL. Concurrent calls against the same runtime are not safe —
+/// the dispatch loop is main-thread-only.
+unsafe fn rt_from_ptr<'a>(rt: *mut VoiceRuntime) -> Option<&'a VoiceRuntime> {
+    if rt.is_null() {
+        return None;
+    }
+    Some(unsafe { &*rt })
+}
+
+// ---- Event-injection shims ------------------------------------------
+//
+// Each shim translates from C-flavoured parameters into the typed
+// `hxvoice::Event` and feeds it through `VoiceRuntime::handle_event`.
+// All are NULL-safe on the runtime pointer (drop the event silently
+// — the C side may have torn the runtime down on disconnect just
+// before a late wire frame arrived). String parameters are owned by
+// the caller for the duration of the call; we copy into a Rust
+// `String` before handing to the state machine.
+
+/// Fire `Event::JoinRequested { cid }`. Called from the Join Voice
+/// click handler.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. No memory params
+/// beyond the pointer.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_join(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.handle_event(Event::JoinRequested { cid });
+}
+
+/// Fire `Event::LeaveRequested { cid }`. Called from the Leave
+/// Voice click handler.
+///
+/// # Safety
+/// Same as `gtkhx_voice_runtime_join`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_leave(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.handle_event(Event::LeaveRequested { cid });
+}
+
+/// Fire `Event::MuteToggleRequested { muted }`. Called from the
+/// Mute toggle handler. The state machine ignores redundant
+/// toggles (e.g. already-muted + muted=1), so the C side doesn't
+/// need to dedupe.
+///
+/// # Safety
+/// Same as `gtkhx_voice_runtime_join`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_mute(
+    rt: *mut VoiceRuntime,
+    muted: i32,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.handle_event(Event::MuteToggleRequested {
+        muted: muted != 0,
+    });
+}
+
+/// Fire `Event::SdpOfferReceived { cid, sdp }`. Called from
+/// `rcv_task_voice_join` / `hx_rcv_voice_sdp_offer` after the
+/// server's 602 reply lands and the SDP has been extracted.
+///
+/// `sdp` is a C string (NUL-terminated). NULL is treated as empty
+/// (and dropped by the state machine via the wrong-shape guard
+/// implicit in webrtcbin's parser).
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. `sdp` must be NULL
+/// or a NUL-terminated C string valid for reads up to and including
+/// the NUL terminator. The Rust copy is taken before this function
+/// returns; the caller's buffer can be freed immediately after.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_sdp_offer(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    sdp: *const c_char,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let sdp = unsafe { cstr_to_string(sdp) };
+    rt.handle_event(Event::SdpOfferReceived { cid, sdp });
+}
+
+/// Fire `Event::IceCandidateReceived { cid, candidate_json }`.
+/// Called from `hx_rcv_voice_ice` after the JSON has been extracted
+/// from the DATA_VOICE_ICE chunk.
+///
+/// # Safety
+/// Same shape as `gtkhx_voice_runtime_sdp_offer`. The empty-string
+/// end-of-candidates marker is handled inside the state machine.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_ice_candidate(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    candidate_json: *const c_char,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let candidate_json = unsafe { cstr_to_string(candidate_json) };
+    rt.handle_event(Event::IceCandidateReceived {
+        cid,
+        candidate_json,
+    });
+}
+
+/// Fire `Event::ParticipantsUpdated { cid, entries }`. Called from
+/// `hx_rcv_voice_room_status` after the binary DATA_VOICE_PARTICIPANTS
+/// blob has been parsed.
+///
+/// `blob` + `len` describe the 6-byte-per-entry packed binary the
+/// `hotline_proto::voice::parse_voice_participants` iterator
+/// consumes. We re-parse here on the Rust side rather than asking
+/// the C side to construct `hxvoice::Participant` (which lives
+/// inside hxvoice's `no_std`-friendly typed surface and isn't
+/// directly C-shaped).
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. `blob` must be
+/// valid for reads of `len` bytes, or NULL with `len == 0`. The
+/// Rust copy is taken before return.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
+    rt: *mut VoiceRuntime,
+    cid: u32,
+    blob: *const u8,
+    len: usize,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let bytes: &[u8] = if blob.is_null() || len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(blob, len) }
+    };
+    let entries: Vec<hxvoice::event::Participant> =
+        hotline_proto::voice::parse_voice_participants(bytes)
+            .map(|p| hxvoice::event::Participant {
+                user_id: p.user_id,
+                codec_id: p.codec_id,
+                muted: p.is_muted(),
+            })
+            .collect();
+    rt.handle_event(Event::ParticipantsUpdated { cid, entries });
+}
+
+/// Fire `Event::ServerTaskError { origin_opcode, text }`. Called
+/// from the `HTLS_HDR_TASK` error dispatch when the task's
+/// originating opcode was one of the voice ones (600 / 603 / 604 /
+/// 606). The state machine decides whether to tear down (JOIN /
+/// SDP_ANSWER errors → fail) or surface as a toast only (MUTE /
+/// ICE / LEAVE errors).
+///
+/// # Safety
+/// `text` shape matches `gtkhx_voice_runtime_sdp_offer`. NULL is
+/// treated as an empty error message.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_task_error(
+    rt: *mut VoiceRuntime,
+    origin_opcode: u32,
+    text: *const c_char,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    let text = unsafe { cstr_to_string(text) };
+    rt.handle_event(Event::ServerTaskError(ServerError {
+        origin_opcode,
+        text,
+    }));
+}
+
+/// Copy a C string into a Rust `String`. NULL → empty. Invalid
+/// UTF-8 → replaced via `String::from_utf8_lossy`.
+///
+/// # Safety
+/// `s` must be NULL or a NUL-terminated C string valid for reads
+/// up to and including the NUL terminator.
+unsafe fn cstr_to_string(s: *const c_char) -> String {
+    if s.is_null() {
+        return String::new();
+    }
+    let cstr = unsafe { CStr::from_ptr(s) };
+    String::from_utf8_lossy(cstr.to_bytes()).into_owned()
 }

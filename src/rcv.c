@@ -62,6 +62,7 @@
 #include "banner.h"
 #include "chat_history.h"
 #include "hl_access.h"
+#include "voice_runtime.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -943,6 +944,27 @@ hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
         "bundle=%u has_pcmu=%d disabled_slot=%d",
         r.cid, r.sdp_len, sum.mid_count, sum.unknown_mid_count,
         sum.bundle_count, (int) sum.has_pcmu, (int) sum.has_disabled_slot);
+
+    /* Phase 8.D runtime wiring: feed the typed event into the
+     * state machine + GStreamer dispatch. The runtime then walks
+     * SetRemoteDescription + CreateAnswer; the answer flows back
+     * out via the existing hx_send_voice_sdp_answer path once we
+     * wire the SendWireFrame Backend (today the runtime uses a
+     * NoopBackend so the C side keeps owning wire-out). The SDP
+     * bytes from the wire aren't NUL-terminated — copy + NUL the
+     * scratch buffer before handing off. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime && sdp_ptr && sdp_len > 0) {
+            char *sdp_str = g_malloc (sdp_len + 1);
+            memcpy (sdp_str, sdp_ptr, sdp_len);
+            sdp_str[sdp_len] = '\0';
+            gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid,
+                                           sdp_str);
+            g_free (sdp_str);
+        }
+    }
 }
 
 void
@@ -1009,6 +1031,23 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
         cand.sdp_mline_index_present ? "" : " (absent)",
         cand.is_end_of_candidates ? " EOC" : "");
     gtkhx_proto_voice_ice_free (h);
+
+    /* Phase 8.D runtime wiring: hand the raw JSON to the runtime.
+     * The hxvoice state machine re-parses it (same parser, same
+     * required-key validation) and feeds webrtcbin's
+     * add-ice-candidate signal via Action::AddRemoteIce. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime && ice_ptr && ice_len > 0) {
+            char *json_str = g_malloc (ice_len + 1);
+            memcpy (json_str, ice_ptr, ice_len);
+            json_str[ice_len] = '\0';
+            gtkhx_voice_runtime_ice_candidate (sess->voice_runtime, r.cid,
+                                               json_str);
+            g_free (json_str);
+        }
+    }
 }
 
 void
@@ -1061,6 +1100,19 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
         debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
                    ents[i].user_id, ents[i].flags, ents[i].codec_id,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+
+    /* Phase 8.D runtime wiring: forward the raw blob. The Rust
+     * side re-parses via hotline_proto::voice::parse_voice_participants
+     * (same parser the typed walk above used) and feeds the state
+     * machine's mid_to_user / participants caches. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
+                                             blob, blob_len);
+        }
     }
 }
 
@@ -1184,6 +1236,28 @@ rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
         debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
                    ents[i].user_id, ents[i].flags, ents[i].codec_id,
                    (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+
+    /* Phase 8.D runtime wiring: the JOIN reply carries the
+     * server's SDP offer + initial participants. Drive both into
+     * the state machine — SdpOfferReceived starts the answer-
+     * generation walk, ParticipantsUpdated populates the
+     * mid_to_user cache the pad-added path needs. */
+    {
+        session *sess = &the_session;
+        (void) htlc;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
+                                             blob, blob_len);
+            if (sdp_ptr && sdp_len > 0) {
+                char *sdp_str = g_malloc (sdp_len + 1);
+                memcpy (sdp_str, sdp_ptr, sdp_len);
+                sdp_str[sdp_len] = '\0';
+                gtkhx_voice_runtime_sdp_offer (sess->voice_runtime, r.cid,
+                                               sdp_str);
+                g_free (sdp_str);
+            }
+        }
     }
 }
 
