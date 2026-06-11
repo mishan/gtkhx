@@ -22,22 +22,112 @@
 
 #include "voice_panel.h"
 
+#include "debug.h"
 #include "hl_access.h"
 #include "hotline.h"
 #include "voice.h"
 #include "voice_runtime.h"
 
+/* Bridge from the Rust runtime's Action::SendWireFrame dispatch to
+ * the C-side hx_send_voice_* helpers. The runtime invokes this on
+ * the main thread for every outbound voice opcode the state
+ * machine produces. user_data is the `htlc_conn *` the runtime was
+ * constructed with (production: &sess->htlc).
+ *
+ * Body layout, per hxvoice::state::encode_*:
+ *
+ *   - 600 JOIN, 601 LEAVE:  4 bytes BE cid
+ *   - 603 SDP_ANSWER:       4 bytes BE cid + SDP bytes (no NUL)
+ *   - 604 ICE:              4 bytes BE cid + JSON bytes (no NUL)
+ *   - 606 MUTE:             4 bytes BE cid + 2 bytes BE muted-flag
+ *
+ * 600 / 601 / 606 originate from the UI click handlers, which call
+ * hx_send_voice_* directly with proper return-value handling and
+ * only feed the runtime its matching event on success. The bridge
+ * therefore SKIPS those opcodes here to avoid double-send. 603
+ * (SDP answer) and 604 (ICE) come from webrtcbin events that only
+ * the runtime sees — those go on the wire via the bridge. */
+static void
+voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
+                                  const uint8_t *body, size_t body_len)
+{
+    struct htlc_conn *htlc = user_data;
+    if (!htlc || !body || body_len < 4) {
+        debug_log ("voice",
+                   "bridge dropping opcode 0x%x: htlc=%p body=%p len=%zu",
+                   opcode, (void *) htlc, (const void *) body, body_len);
+        return;
+    }
+
+    /* All four encodings start with a 4-byte BE cid. */
+    guint32 cid = ((guint32) body[0] << 24) | ((guint32) body[1] << 16) |
+                  ((guint32) body[2] << 8)  | (guint32) body[3];
+    const guint8 *payload = body + 4;
+    gsize payload_len = body_len - 4;
+
+    switch (opcode) {
+    case HTLC_HDR_VOICE_SDP_ANSWER:
+        /* SDP payload is empty on a join-without-answer? Never —
+         * encode_cid_plus_sdp only fires from Action paths that
+         * carry a real SDP blob. Bail loudly if we ever see one. */
+        if (payload_len == 0) {
+            debug_log ("voice",
+                       "bridge: empty SDP_ANSWER body for cid=%u (skipped)",
+                       cid);
+            return;
+        }
+        (void) hx_send_voice_sdp_answer (htlc, cid, payload, payload_len);
+        return;
+    case HTLC_HDR_VOICE_ICE:
+        /* Empty ICE body is the end-of-candidates marker, which
+         * the wire helper accepts as NULL/0. payload_len == 0
+         * shouldn't happen from encode_cid_plus_ice (it always
+         * includes at least the JSON braces), but handle it
+         * defensively. */
+        if (payload_len == 0) {
+            (void) hx_send_voice_ice (htlc, cid, NULL, 0);
+        } else {
+            (void) hx_send_voice_ice (htlc, cid, payload, payload_len);
+        }
+        return;
+    case HTLC_HDR_VOICE_JOIN:
+    case HTLC_HDR_VOICE_LEAVE:
+    case HTLC_HDR_VOICE_MUTE:
+        /* Already sent by the UI click handler — skipping here
+         * prevents double-send. The runtime's
+         * SendWireFrame action is unconditional, so the bridge
+         * is the right place to enforce the split. */
+        debug_log ("voice",
+                   "bridge: opcode 0x%x for cid=%u handled by UI (skipped)",
+                   opcode, cid);
+        return;
+    default:
+        debug_log ("voice",
+                   "bridge: unknown opcode 0x%x for cid=%u (skipped)",
+                   opcode, cid);
+        return;
+    }
+}
+
 /* Lazy-create the per-session voice runtime on first use. Returns
  * sess->voice_runtime, NULL on construction failure (GStreamer not
  * initialised, webrtcbin plugin missing). Idempotent: returns the
- * same handle on subsequent calls. */
+ * same handle on subsequent calls.
+ *
+ * Registers the bridge callback so the state machine's outbound
+ * 603 SDP_ANSWER / 604 ICE actions reach `hlwrite_chunks`. The
+ * user_data is &sess->htlc; both stay valid until network.c::
+ * hx_htlc_close frees the runtime on disconnect (it does so
+ * before the htlc itself is touched, so the callback can never
+ * fire on a freed htlc). */
 static struct gtkhx_voice_runtime *
 ensure_voice_runtime (session *sess)
 {
     if (!sess)
         return NULL;
     if (!sess->voice_runtime) {
-        sess->voice_runtime = gtkhx_voice_runtime_new ();
+        sess->voice_runtime = gtkhx_voice_runtime_new_with_callbacks (
+            &sess->htlc, voice_runtime_send_wire_frame_cb);
     }
     return sess->voice_runtime;
 }

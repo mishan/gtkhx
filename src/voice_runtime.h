@@ -74,20 +74,64 @@ extern int gtkhx_voice_init (void);
  * injection shims must be called from the GLib main thread; the
  * state machine + GStreamer dispatch live there.
  *
- * Outgoing wire frames: the runtime currently uses a NoopBackend
- * for `Action::SendWireFrame` because the C side already calls
- * `hx_send_voice_*` directly from the UI click path. A follow-up
- * will swap to a bridge Backend so the state machine becomes the
- * single source of truth for outbound voice opcodes.
+ * Outgoing wire frames: production uses
+ * gtkhx_voice_runtime_new_with_callbacks to register a bridge
+ * callback that the state machine drives for opcodes 603
+ * (SDP_ANSWER) and 604 (ICE), which originate from webrtcbin
+ * events and have no other path to the wire. Opcodes 600 (JOIN),
+ * 601 (LEAVE), and 606 (MUTE) come from UI click handlers in
+ * voice_panel.c which call `hx_send_voice_*` directly with proper
+ * return-value handling, so the dispatcher skips those to avoid
+ * double-send. The legacy NoopBackend constructor still exists for
+ * test paths that don't care about wire output.
  */
 typedef struct gtkhx_voice_runtime gtkhx_voice_runtime;
 
 /*
- * Construct a new runtime. Returns NULL on failure (GStreamer not
- * initialised, webrtcbin plugin missing). The caller frees with
- * gtkhx_voice_runtime_free.
+ * Outgoing-wire-frame callback. The runtime invokes this for every
+ * `Action::SendWireFrame` action, passing the opaque `user_data`
+ * that was registered alongside the callback (production: the
+ * `htlc_conn *` for the session), the opcode (one of
+ * HTLC_HDR_VOICE_*), and a pointer + length describing the action
+ * body.
+ *
+ * Body layout matches the encoders in hxvoice::state::encode_*:
+ *
+ *   - 600 (JOIN), 601 (LEAVE): 4 bytes BE cid
+ *   - 603 (SDP_ANSWER): 4 bytes BE cid + SDP bytes (not NUL-terminated)
+ *   - 604 (ICE):        4 bytes BE cid + JSON bytes (not NUL-terminated)
+ *   - 606 (MUTE):       4 bytes BE cid + 2 bytes BE muted-flag
+ *
+ * The `body` slice is valid for the duration of the call only; the
+ * callback must copy out anything it wants to retain. Implementations
+ * must NOT call back into the runtime synchronously (re-entrancy
+ * is unsupported on this path).
+ */
+typedef void (*gtkhx_voice_runtime_send_wire_frame_cb) (void *user_data,
+                                                        uint32_t opcode,
+                                                        const uint8_t *body,
+                                                        size_t body_len);
+
+/*
+ * Construct a new runtime with no outbound-wire bridge (NoopBackend).
+ * Returns NULL on failure (GStreamer not initialised, webrtcbin
+ * plugin missing). The caller frees with gtkhx_voice_runtime_free.
+ * Useful for test paths that don't care about outbound wire frames.
  */
 extern gtkhx_voice_runtime *gtkhx_voice_runtime_new (void);
+
+/*
+ * Construct a new runtime that bridges `Action::SendWireFrame` to
+ * a C callback. `user_data` and `send_wire_frame_cb` must remain
+ * valid for the lifetime of the returned runtime — production
+ * pairs the runtime with its `htlc_conn` and frees both on the
+ * same disconnect path. `send_wire_frame_cb` may be NULL (in which
+ * case the bridge behaves like NoopBackend for that surface, and
+ * this constructor is equivalent to gtkhx_voice_runtime_new).
+ */
+extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_with_callbacks (
+    void *user_data,
+    gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb);
 
 /*
  * Free a runtime. Safe to call with NULL. The caller must not use
