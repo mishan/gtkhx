@@ -11,7 +11,10 @@
 //!   `webrtcbin.emit(…)` via `gstreamer-rs`.
 //! - `EmitSignal` → `GtkhxSession::emit_by_name(…)` via the
 //!   Phase R3.0 `hxbridge` wrapping shim.
-//! - `ArmTimer` / `CancelTimer` → `glib::timeout_add_seconds_local`.
+//! - `ArmTimer` / `CancelTimer` → `glib::timeout_add_local` (the
+//!   millisecond-granularity main-context entry point; the
+//!   `_seconds_local` variant rounds to whole seconds and would
+//!   lose the spec's 10 000 ms / 30 000 ms watchdog precision).
 //!
 //! The point of expressing actions as typed data — not as
 //! `Box<dyn FnMut>` callbacks — is that the test suite can

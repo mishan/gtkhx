@@ -18,21 +18,26 @@
 //!     │             │                 │
 //!     │             │ AnswerCreated   │
 //!     │             ▼                 │
-//!  Idle ◄─── Leaving ◄── Connecting ◄─┘
-//!     ▲                       │
-//!     │                       │ ConnectionState::Connected
-//!     │                       ▼
-//!     │                   Connected
-//!     │                       │
-//!     │  LeaveRequested       │
-//!     └───────────────────────┘
+//!             Leaving ◄── Connecting ◄┘
+//!  (terminal)              │
+//!                          │ ConnectionState::Connected
+//!                          ▼
+//!                      Connected
+//!                          │
+//!                          │ LeaveRequested
+//!                          ▼
+//!                       Leaving (terminal)
 //! ```
 //!
 //! Connected ↔ OfferPending happens during renegotiation (a new
 //! 602 arriving while we're already streaming) — the transition
 //! is identical to the JoinSent → OfferPending step. Failures
 //! (`WebrtcConnectionStateChanged::Failed`, server task error,
-//! any `Timeout`) collapse to the `Leaving → Idle` path.
+//! any `Timeout`) collapse to `Leaving`, which is a **terminal
+//! state** — the runtime drops the `SessionMachine` after the
+//! `TearDown` action that accompanied the transition; a fresh
+//! session constructs a new machine in `Idle`. There is no
+//! `Leaving → Idle` step in this enum.
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -79,9 +84,11 @@ pub enum SessionState {
     /// `OfferPending`; leave / failure pushes us to `Leaving`.
     Connected,
     /// We sent VOICE_LEAVE (601) or are tearing down due to a
-    /// failure. Final action emitted is `TearDown`, which the
-    /// runtime uses to free the pipeline before the machine
-    /// returns to `Idle`.
+    /// failure. **Terminal state** for this machine — the runtime
+    /// drops the `SessionMachine` after dispatching the `TearDown`
+    /// action that accompanied the transition here. A fresh
+    /// session constructs a new machine in `Idle`; this enum has
+    /// no `Leaving → Idle` step.
     Leaving,
 }
 
@@ -180,7 +187,68 @@ impl SessionMachine {
             // ---- Join / Leave lifecycle ----
             (SessionState::Idle, Event::JoinRequested { cid }) => {
                 self.active_cid = Some(cid);
+                self.mid_to_user.clear();
+                self.participants.clear();
                 self.set_state(SessionState::JoinSent, |actions| {
+                    actions.push(Action::SendWireFrame {
+                        opcode: HTLC_HDR_VOICE_JOIN,
+                        body: WireFrameBody(encode_cid_only(cid)),
+                    });
+                    actions.push(Action::ArmTimer {
+                        kind: TimerKind::JoinReply,
+                        ms: JOIN_REPLY_TIMEOUT_MS,
+                    });
+                })
+            }
+
+            // Mid-session JoinRequested — spec §"Room Model": "A
+            // user may only be in voice in one room at a time.
+            // Joining voice in a second room implicitly leaves the
+            // first." The server handles the teardown of the
+            // current room on its side; the client tears down its
+            // local pipeline and walks back to JoinSent for the
+            // new room.
+            //
+            // Same-cid re-join: no-op. Avoids the awkward case
+            // where a stuck UI re-fires JoinRequested for the
+            // already-active room and we'd tear down a healthy
+            // session for no reason.
+            (s, Event::JoinRequested { cid })
+                if matches!(
+                    s,
+                    SessionState::JoinSent
+                        | SessionState::OfferPending
+                        | SessionState::Connecting
+                        | SessionState::Connected
+                ) =>
+            {
+                if self.active_cid == Some(cid) {
+                    return Vec::new();
+                }
+                // Cancel every armed timer kind (the runtime
+                // tracks by kind; a Cancel for an unarmed kind is
+                // a cheap no-op there). Clear per-session caches
+                // since the new room has its own mid/participant
+                // sets. Emit TearDown so the runtime can close the
+                // old pipeline before the new offer arrives.
+                self.active_cid = Some(cid);
+                self.mid_to_user.clear();
+                self.participants.clear();
+                self.muted = false;
+                self.set_state(SessionState::JoinSent, |actions| {
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::JoinReply,
+                    });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::Dtls,
+                    });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::IceConnectivity,
+                    });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::Media,
+                    });
+                    actions.push(Action::TearDown);
                     actions.push(Action::SendWireFrame {
                         opcode: HTLC_HDR_VOICE_JOIN,
                         body: WireFrameBody(encode_cid_only(cid)),
@@ -195,12 +263,15 @@ impl SessionMachine {
             // Connected (or anywhere mid-session): user clicked
             // Leave. Cancel any armed timers, send 601, transition
             // to Leaving and emit TearDown so the runtime closes
-            // the pipeline. The actual transition to Idle happens
-            // when the runtime confirms teardown — for the state
-            // machine we treat `LeaveRequested` as moving directly
-            // to Leaving and let the next `WebrtcConnectionState
-            // Changed(Closed)` (or its absence — we don't depend
-            // on it) walk us home.
+            // the pipeline.
+            //
+            // `Leaving` is a TERMINAL state for this machine — the
+            // runtime layer drops the `SessionMachine` after
+            // dispatching `TearDown`, and a fresh session
+            // constructs a new one in `Idle`. There is no
+            // `Leaving → Idle` transition (no `step` arm consumes
+            // `WebrtcConnectionStateChanged::Closed` here); the
+            // runtime owns the lifecycle past TearDown.
             (s, Event::LeaveRequested { cid })
                 if matches!(
                     s,
@@ -818,6 +889,70 @@ mod tests {
         assert!(kinds.contains(&"tear"));
         assert!(kinds.contains(&"cancel"));
         assert!(kinds.contains(&"signal"));
+    }
+
+    #[test]
+    /// Regression (Copilot review): Event::JoinRequested docs
+    /// claim the state machine handles the spec's implicit-leave
+    /// (joining voice in room B while in voice in A). Earlier
+    /// drafts only handled `JoinRequested` in `Idle`; mid-session
+    /// re-joins fell through the catch-all and became silent
+    /// no-ops. Now the transition cancels every armed timer,
+    /// emits TearDown, sends 600 for the new cid, and walks back
+    /// to JoinSent with fresh state.
+    #[test]
+    fn join_for_different_room_mid_session_implicitly_leaves() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:user-5\na=mid:send\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        // Cached mids from room 1.
+        assert_eq!(m.mid_to_user.get("user-5").copied(), Some(5));
+
+        let acts = m.step(Event::JoinRequested { cid: 99 });
+        // Walked back to JoinSent for the new cid.
+        assert_eq!(m.state(), SessionState::JoinSent);
+        assert_eq!(m.active_cid(), Some(99));
+        // Room 1's mids and participants were cleared.
+        assert!(m.mid_to_user.is_empty());
+        assert_eq!(m.participant_count(), 0);
+        // TearDown + 600 for new cid + JoinReply timer armed.
+        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 600, .. }
+        )));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::ArmTimer { kind: Timeout::JoinReply, .. }
+        )));
+    }
+
+    /// Same-cid re-join (a stuck UI re-fires JoinRequested for
+    /// the already-active room): no-op. Avoids tearing down a
+    /// healthy session for no reason.
+    #[test]
+    fn join_for_active_room_is_noop() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        let acts = m.step(Event::JoinRequested { cid: 7 });
+        assert_eq!(m.state(), SessionState::Connected);
+        assert!(acts.is_empty());
     }
 
     #[test]

@@ -41,8 +41,11 @@
 //!   _what_ should happen; the runtime crate decides _how_
 //!   (`webrtcbin.emit("create-answer", …)` in practice).
 //! - Not a wire-format library. The action list carries
-//!   `SendWireFrame { opcode, chunks }` payloads as already-typed
-//!   data the runtime hands to `hlwrite_chunks` via the FFI.
+//!   `SendWireFrame { opcode, body }` payloads where `body` is a
+//!   small opaque `Vec<u8>` (cid + payload bytes per opcode); the
+//!   runtime crate parses this and calls `hotline-proto`'s
+//!   `build_voice_*_chunks` to produce a real `HxChunk` array
+//!   before handing the chunks to `hlwrite_chunks` via the FFI.
 //!   Building the chunks is `hotline-proto`'s job, not this
 //!   crate's.
 //!
