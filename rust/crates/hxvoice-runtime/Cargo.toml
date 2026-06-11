@@ -43,3 +43,16 @@ glib = { workspace = true }
 # crate's tests at the same `cargo build`. No version pinned —
 # both crates evolve together within the workspace.
 hxvoice = { path = "../hxvoice" }
+
+# Phase 8.C step 4: the hand-rolled `RTCIceCandidateInit` JSON
+# parser + builder in hotline-proto::voice::ice. The runtime
+# consumes it on both ICE legs — parses incoming
+# `Action::AddRemoteIce { candidate_json }` to extract the
+# (mlineindex, candidate) pair webrtcbin's add-ice-candidate
+# signal expects, and builds the outgoing JSON from the
+# (mlineindex, candidate) pair that the on-ice-candidate
+# signal emits. Sharing the parser keeps the wire format
+# definition in one place — the hotline-proto crate already
+# pins it with fixture tests (UTF-16 surrogate pairs, required
+# keys, etc.).
+hotline-proto = { path = "../hotline-proto" }
