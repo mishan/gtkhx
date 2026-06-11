@@ -710,7 +710,7 @@ impl VoiceRuntime {
                 inner.machine.step(event)
             };
             for action in actions {
-                self.dispatch(action);
+                self.dispatch_inner(action);
             }
         }
         self.inner.borrow().machine.state()
@@ -737,14 +737,33 @@ impl VoiceRuntime {
     /// Drive a single `Action` through the dispatch loop.
     ///
     /// Internal entrypoint shared by `handle_event`'s walk of
-    /// the state machine's action list, and exposed publicly
-    /// for tests (and any future caller) that want to inject
-    /// surgical actions without running them through the
-    /// state machine. The dispatch arms have no preconditions
-    /// beyond "we're on the main thread" — actions are safe to
-    /// drive in any order, dispatch arms handle their own
-    /// pipeline-less / missing-bin / unknown-mid fallbacks.
+    /// the state machine's action list, and (with the
+    /// `test-utils` Cargo feature) exposed to out-of-crate test
+    /// binaries that want to inject surgical actions without
+    /// running them through the state machine. In-crate unit
+    /// tests in `runtime::tests` reach it via the implicit
+    /// `cfg(test)` gate alone.
+    ///
+    /// **Not for production callers.** Direct dispatch bypasses
+    /// `handle_event`'s re-entrancy queue: a backend callback
+    /// invoked here that turns around and calls back into the
+    /// runtime would panic on the nested `borrow_mut`. The
+    /// queue/drain in `handle_event` is what makes that path
+    /// safe; jump over it at your own risk.
+    ///
+    /// The dispatch arms themselves have no preconditions beyond
+    /// "we're on the main thread" — actions are safe to drive in
+    /// any order, dispatch arms handle their own pipeline-less /
+    /// missing-bin / unknown-mid fallbacks.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn dispatch(&self, action: Action) {
+        self.dispatch_inner(action);
+    }
+
+    /// Private (always-compiled) wrapper around the dispatch
+    /// match. Lets `handle_event` reach the same code path
+    /// without conditionally compiling the inner logic.
+    fn dispatch_inner(&self, action: Action) {
         match action {
             // ---- C-side integration points (delegated to Backend) ----
             //
