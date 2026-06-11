@@ -1,44 +1,76 @@
 //! GStreamer-backed runtime that drives an `hxvoice::SessionMachine`.
 //!
 //! This is Phase 8.C step 2 per `docs/voice-chat-plan.md` §5.C. The
-//! pure state machine landed in step 1; this module owns the
-//! `gst::Pipeline` + `webrtcbin` it dispatches into, translates
-//! [`hxvoice::Action`]s into either direct GStreamer calls or
-//! [`Backend`]-mediated callbacks, and wires `webrtcbin` signals
-//! back into [`hxvoice::Event`]s so the state machine sees the
-//! WebRTC layer's responses.
+//! pure state machine landed in step 1; this module wires it to a
+//! `Backend` trait that production fills with FFI calls to the C
+//! side.
 //!
-//! ## Layering
+//! ## What step 2 implements
+//!
+//! - The `Backend` trait — `send_wire_frame` / `emit_signal` /
+//!   `tear_down` callbacks the C side hooks up later.
+//! - `VoiceRuntime::new()` — constructs an (empty)
+//!   `gst::Pipeline` container so step 3 has somewhere to add
+//!   `webrtcbin`. Pipeline isn't exercised at this layer yet.
+//! - `handle_event(event)` — the dispatch loop. Pumps the event
+//!   through the state machine and walks the returned action
+//!   list, dispatching backend-shaped actions
+//!   (`SendWireFrame` / `EmitSignal` / `TearDown`) to the
+//!   `Backend` and timer-shaped actions (`ArmTimer` /
+//!   `CancelTimer`) to the local `armed_timers` set.
+//! - Deferred-dispatch queue. Backends that re-enter
+//!   `handle_event` from inside a callback (the production shape
+//!   when an `EmitSignal` GLib signal handler turns into another
+//!   voice transition) enqueue and return; the outer loop
+//!   drains.
+//!
+//! ## What's deferred to step 3
+//!
+//! - `webrtcbin` construction + linking into the pipeline.
+//! - Dispatch arms for the WebRTC-shaped actions
+//!   (`SetRemoteDescription` / `CreateAnswer` /
+//!   `SetLocalDescription` / `AddRemoteIce`,
+//!   `StartReceivePipeline` / `StopReceivePipeline` /
+//!   `SetSendPipelineMute`). They no-op today.
+//! - `webrtcbin` signal wiring — `connect_pad_added`,
+//!   `connect("on-ice-candidate", …)`, the `create-answer`
+//!   promise — that produce the matching `Event::Webrtc*`
+//!   variants. Step 3 lands this; the docs below about
+//!   threading (`glib::MainContext::spawn_local` marshaling for
+//!   cross-thread signal callbacks) describe the design that
+//!   step 3 will instantiate, not anything this commit ships.
+//!
+//! ## Layering (full picture, including step-3 deferred bits)
 //!
 //! The runtime sits between three peers:
 //!
 //! - **`hxvoice::SessionMachine`** owned inside `Inner`. Single
 //!   source of "what should we do" for every transition.
 //! - **`gst::Pipeline` + `gstreamer_webrtc::WebRTCBin`** also owned
-//!   inside `Inner`. The runtime dispatches the
-//!   GStreamer-shaped Actions (`SetRemoteDescription`,
-//!   `CreateAnswer`, `AddRemoteIce`, audio pipeline manipulation)
-//!   directly here.
+//!   inside `Inner` (webrtcbin lands in step 3). The runtime
+//!   dispatches the GStreamer-shaped Actions
+//!   (`SetRemoteDescription`, `CreateAnswer`, `AddRemoteIce`,
+//!   audio pipeline manipulation) directly here.
 //! - **`Backend`** trait, supplied at construction. Captures the
 //!   integration points that aren't GStreamer-shaped: wire frames
 //!   the C side ships via `hx_send_voice_*`, GtkhxSession signal
 //!   emits through `hxbridge`, and teardown. Production wires it
 //!   to FFI shims; tests use a recording mock.
 //!
-//! ## Threading
+//! ## Threading (planned for step 3)
 //!
-//! Designed to run main-thread-only. `webrtcbin` signals
-//! (`on-ice-candidate`, `pad-added`, etc.) may fire on the
-//! GStreamer worker threads; we marshal those back to the main
-//! GLib context via [`glib::MainContext::spawn_local`] before
-//! reaching into `Inner`. That keeps `Inner: !Send` ergonomically
-//! viable — every state-machine borrow happens on a single thread.
+//! Designed to run main-thread-only. Once step 3 wires the
+//! `webrtcbin` signals, the ones that may fire on GStreamer
+//! worker threads (`on-ice-candidate`, `pad-added`, etc.) marshal
+//! back to the main GLib context via
+//! [`glib::MainContext::spawn_local`] before reaching into
+//! `Inner`. That keeps `Inner: !Send` ergonomically viable — every
+//! state-machine borrow happens on a single thread.
 //!
-//! The reentrance hazard the plan §3 calls out (`webrtcbin` worker
-//! emits while we're mid-dispatch holding a `RefCell` borrow on the
-//! machine) is handled by the spawn_local marshaling: the closure
-//! body runs in a fresh main-loop turn, so by the time it borrows
-//! `Inner`, the outer `handle_event` call has already returned.
+//! The deferred-dispatch queue in step 2 makes re-entrant calls
+//! from `Backend` callbacks safe at any depth — the queue is the
+//! same machinery that supports `webrtcbin`-signal re-entry in
+//! step 3.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -193,12 +225,13 @@ impl VoiceRuntime {
     ///
     /// Calls `gst::init()` first — it's idempotent, so production
     /// code that already ran `gtkhx_voice_init()` from `main` just
-    /// sees a no-op. Tests that forgot to initialise see a clean
-    /// `Err(RuntimeError::NotInitialised)` rather than a delayed
+    /// sees a no-op. A real failure (broken GStreamer install,
+    /// missing plugins) propagates as
+    /// [`RuntimeError::GstInitFailed`] rather than the delayed
     /// panic from inside gstreamer-rs's assert-initialised
     /// checks.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
-        gstreamer::init().map_err(|_| RuntimeError::NotInitialised)?;
+        gstreamer::init().map_err(|_| RuntimeError::GstInitFailed)?;
         let pipeline = gstreamer::Pipeline::builder()
             .name("hxvoice-pipeline")
             .build();
@@ -235,18 +268,29 @@ impl VoiceRuntime {
     /// machine, walks the returned action list, dispatches each
     /// effect.
     ///
-    /// Returns the [`SessionState`] the machine has now entered —
-    /// useful for tests; production callers can also consume the
-    /// `StateChanged` signal via their `Backend`.
+    /// ## Return value semantics
     ///
-    /// Re-entrant calls (a backend action triggers a signal
-    /// handler that synchronously calls `handle_event` again on
-    /// the same runtime) are supported: the nested event is
-    /// queued and processed after the outer dispatch loop's
-    /// current step finishes. That's the only way to avoid the
-    /// "borrow_mut while we're already dispatching" panic class
-    /// when production wires `EmitSignal` to a GLib signal that
-    /// the UI's voice button reacts to.
+    /// On a top-level (non-re-entrant) call, returns the
+    /// [`SessionState`] the machine has entered after this event
+    /// and any subsequently-queued events are fully drained.
+    ///
+    /// On a **re-entrant** call (a backend invocation made from
+    /// inside another `handle_event`'s dispatch loop), the
+    /// returned `SessionState` is the **current** state at the
+    /// time of enqueueing — not the post-event state, because
+    /// the queued event hasn't been processed yet. Callers that
+    /// need the eventual state should consult [`Self::state`]
+    /// after the outer dispatch unwinds (or, more typically,
+    /// listen for the `StateChanged` signal via their `Backend`).
+    ///
+    /// Re-entrant calls are supported: a backend action that
+    /// triggers a signal handler that synchronously calls
+    /// `handle_event` again on the same runtime enqueues the
+    /// nested event and the outer dispatch loop drains it after
+    /// the current step's actions finish. This is the only way
+    /// to avoid the "borrow_mut while we're already dispatching"
+    /// panic class when production wires `EmitSignal` to a GLib
+    /// signal that the UI's voice button reacts to.
     pub fn handle_event(&self, event: Event) -> SessionState {
         // Enqueue the event. If we're already dispatching (this is
         // a nested call from inside a Backend invocation), just
@@ -331,10 +375,20 @@ impl VoiceRuntime {
             // requested and synthetically fire `Event::Timeout` if
             // they want to exercise the expiry path.
             Action::ArmTimer { kind, ms: _ } => {
+                // (Re-)arm. Step 3 will replace the bookkeeping
+                // here with `glib::timeout_add_local`; the
+                // (re-)arm semantics must match — calling it a
+                // second time for the same kind cancels the
+                // previous timer and starts a fresh one. A naïve
+                // `if !contains { push }` short-circuit would
+                // make a same-kind re-arm a silent no-op, which
+                // would matter once we wire real timers (the
+                // state machine sends repeat `ArmTimer` events
+                // on renegotiation, intending the watchdog to
+                // restart from the new offer's reception time).
                 let mut inner = self.inner.borrow_mut();
-                if !inner.armed_timers.contains(&kind) {
-                    inner.armed_timers.push(kind);
-                }
+                inner.armed_timers.retain(|t| *t != kind);
+                inner.armed_timers.push(kind);
             }
             Action::CancelTimer { kind } => {
                 let mut inner = self.inner.borrow_mut();
@@ -363,10 +417,23 @@ impl VoiceRuntime {
                 // Step 3 fills these in.
             }
 
-            // hxvoice::Action is #[non_exhaustive]; new variants
-            // would land here as a build-clean no-op until the
-            // runtime grows handling for them.
-            _ => {}
+            // hxvoice::Action is #[non_exhaustive] — the wildcard
+            // is required to compile, but silently dropping a new
+            // variant would be a very subtle correctness bug. In
+            // debug builds (including the test suite), trip a
+            // debug_assert so a missing dispatch arm fails CI
+            // loudly at the test that first walks the unhandled
+            // variant. Release builds keep the no-op so a
+            // partially-rolled-out client doesn't crash against a
+            // newer hxvoice that emits an unknown action.
+            other => {
+                debug_assert!(
+                    false,
+                    "hxvoice::Action variant not handled by \
+                     hxvoice_runtime::VoiceRuntime::dispatch: {other:?}"
+                );
+                let _ = other;
+            }
         }
     }
 }
@@ -374,19 +441,25 @@ impl VoiceRuntime {
 /// Errors returned from `VoiceRuntime::new`.
 #[derive(Debug)]
 pub enum RuntimeError {
-    /// GStreamer wasn't initialised. Production code must call
-    /// `gtkhx_voice_init()` (which runs `gst::init`) before
-    /// constructing a runtime.
-    NotInitialised,
+    /// `gst::init()` failed. The constructor calls
+    /// `gstreamer::init()` itself (idempotent — repeats are a
+    /// no-op), so this variant means the underlying call failed:
+    /// missing GStreamer plugins (`gst-plugins-base` /
+    /// `-plugins-bad`), a broken GStreamer install, or no plugin
+    /// path configured. Production has typically already run
+    /// `gtkhx_voice_init()` from `main` which surfaces this in
+    /// the C-side log; constructing a runtime then sees the
+    /// re-init no-op and never reaches this branch.
+    GstInitFailed,
 }
 
 impl core::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            RuntimeError::NotInitialised => write!(
+            RuntimeError::GstInitFailed => write!(
                 f,
-                "GStreamer subsystem not initialised; call \
-                 gtkhx_voice_init() first"
+                "gst::init() failed — check the GStreamer install \
+                 (gst-plugins-base / -plugins-bad must be available)"
             ),
         }
     }
@@ -465,6 +538,31 @@ mod tests {
             .map(|(op, _)| *op)
             .collect();
         assert_eq!(opcodes, vec![600, 603]);
+    }
+
+    #[test]
+    /// Regression (Copilot review): ArmTimer used to no-op when
+    /// the same kind was already armed. That's wrong semantics
+    /// for a (re-)arm — the state machine sends repeat ArmTimer
+    /// events on renegotiation, expecting the watchdog to
+    /// restart. The fix removes the old entry and pushes a fresh
+    /// one; we verify by counting occurrences (must stay at 1
+    /// across a re-arm).
+    #[test]
+    fn rearming_same_timer_kind_is_an_idempotent_reset() {
+        let (runtime, _) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        // The state machine emits an ArmTimer(JoinReply) on this
+        // event; pump another that re-arms it (we drive it via
+        // dispatch directly, since the state machine wouldn't
+        // emit a redundant ArmTimer naturally).
+        runtime.dispatch(Action::ArmTimer {
+            kind: Timeout::JoinReply,
+            ms: 5000,
+        });
+        let armed = runtime.armed_timers();
+        let count = armed.iter().filter(|t| **t == Timeout::JoinReply).count();
+        assert_eq!(count, 1, "JoinReply should appear exactly once");
     }
 
     #[test]
@@ -662,7 +760,7 @@ mod tests {
         // GStreamer install regression surfaces here as the failed
         // assertion rather than as a delayed panic from VoiceRuntime::new
         // (which itself now propagates the init error as
-        // RuntimeError::NotInitialised).
+        // RuntimeError::GstInitFailed).
         assert!(
             crate::init(),
             "gst::init() must succeed for the with-pipeline test"
