@@ -799,15 +799,52 @@ impl SessionMachine {
                 self.fail("Server did not reply to voice join".into())
             }
 
-            // ICE / DTLS / Media watchdogs — same shape.
+            // ICE / DTLS / Media watchdogs.
+            //
+            // DTLS + ICE used to fail() the session on expiry, but
+            // webrtcbin's `_collate_peer_connection_states` has a
+            // known "Undefined situation detected, returning old
+            // state" branch when the bin has a mix of transports
+            // in different states (which Janus's multi-mline
+            // SDP routinely produces). In that branch webrtcbin
+            // never fires `peer-connection-state == connected`,
+            // even though RTP packets ARE flowing — and our
+            // state machine's wait-for-Connected logic times out
+            // and tears down a working session.
+            //
+            // Workaround: emit an Error toast on DTLS / ICE
+            // expiry (so the user sees something if things really
+            // are wedged) but don't fail() — let the session
+            // continue. The downstream Media timer (no RTP for
+            // 30s while Connected) IS still fatal because that's
+            // a real signal that audio isn't flowing.
+            //
+            // The proper fix is to also notify on
+            // ice-connection-state and use ICE's `connected` /
+            // `completed` as the "we're actually connected" gate,
+            // since ICE state is what webrtcbin manages itself.
+            // That's a bigger refactor; this softening is the
+            // quick unblock.
             (
                 SessionState::Connecting | SessionState::Connected,
                 Event::Timeout { kind: Timeout::IceConnectivity },
-            ) => self.fail("Voice ICE connectivity check failed".into()),
+            ) => vec![Action::EmitSignal {
+                kind: SignalKind::Error,
+                payload: SignalPayload::Error {
+                    text: "Voice ICE connectivity check slow — \
+                           keeping session alive".into(),
+                },
+            }],
             (
                 SessionState::Connecting,
                 Event::Timeout { kind: Timeout::Dtls },
-            ) => self.fail("Voice DTLS handshake failed".into()),
+            ) => vec![Action::EmitSignal {
+                kind: SignalKind::Error,
+                payload: SignalPayload::Error {
+                    text: "Voice DTLS handshake slow — \
+                           keeping session alive".into(),
+                },
+            }],
             (SessionState::Connected, Event::Timeout { kind: Timeout::Media }) => {
                 self.fail("Voice media timeout (no RTP from peer)".into())
             }
@@ -1823,6 +1860,89 @@ mod tests {
             text: "Room is full".into(),
         }));
         assert_eq!(m.state(), SessionState::Leaving);
+        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+    }
+
+    #[test]
+    /// Regression: DTLS / ICE timer expiry used to walk the
+    /// session to Leaving via fail(). That tears down working
+    /// sessions when webrtcbin's _collate_peer_connection_states
+    /// hits the "Undefined situation" branch (which happens
+    /// routinely with multi-mline SDP offers from Janus) and
+    /// stops reporting Connected. The user-visible symptom was:
+    /// voice connects, RTP starts flowing, then 10 seconds later
+    /// the session vanishes.
+    ///
+    /// Now both timers just emit an Error toast and the machine
+    /// stays in whatever state it was. The (more reliable) Media
+    /// timer still fires fatally — that one fires only on
+    /// genuine "no inbound RTP for 30 s" conditions, which IS a
+    /// real signal that audio isn't flowing.
+    #[test]
+    fn dtls_and_ice_timeouts_no_longer_tear_down() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        let connecting_state = m.state();
+        assert_eq!(connecting_state, SessionState::Connecting);
+
+        // DTLS expiry: emits an Error signal but doesn't move state.
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::Dtls,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "DTLS expiry must not tear down the session"
+        );
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    ..
+                }
+            )),
+            "DTLS expiry should still surface an Error toast"
+        );
+        assert!(
+            !acts.iter().any(|a| matches!(a, Action::TearDown)),
+            "DTLS expiry must NOT emit TearDown"
+        );
+
+        // ICE expiry: same shape.
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::IceConnectivity,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "ICE expiry must not tear down the session"
+        );
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::Error,
+                ..
+            }
+        )));
+        assert!(!acts.iter().any(|a| matches!(a, Action::TearDown)));
+
+        // Media expiry IS still fatal — pin that separately to
+        // make sure we didn't accidentally soften it.
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::Media,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Leaving,
+            "Media expiry must still drive fail()"
+        );
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
 
