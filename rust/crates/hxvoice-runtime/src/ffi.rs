@@ -268,11 +268,22 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
     let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
         return;
     };
-    let bytes: &[u8] = if blob.is_null() || len == 0 {
-        &[]
-    } else {
-        unsafe { slice::from_raw_parts(blob, len) }
-    };
+    // FFI safety: `slice::from_raw_parts` requires the total
+    // byte length to be ≤ isize::MAX (so the size in bytes fits
+    // in a `ssize_t`-shaped integer). A C caller passing an
+    // out-of-range `size_t` would otherwise trigger UB. The
+    // hotline-proto FFI shims established the convention of
+    // treating len > isize::MAX as an empty slice; mirror that
+    // here. Combined with the NULL / zero-length guard, the
+    // result is "treat malformed input as a zero-participant
+    // update" — the state machine's wrong-cid + empty-blob
+    // paths handle that cleanly.
+    let bytes: &[u8] =
+        if blob.is_null() || len == 0 || len > isize::MAX as usize {
+            &[]
+        } else {
+            unsafe { slice::from_raw_parts(blob, len) }
+        };
     let entries: Vec<hxvoice::event::Participant> =
         hotline_proto::voice::parse_voice_participants(bytes)
             .map(|p| hxvoice::event::Participant {

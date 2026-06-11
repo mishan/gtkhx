@@ -225,13 +225,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * Drop, which cancels armed timers, evicts the thread-local
      * registry entry, and releases the GStreamer pipeline +
      * webrtcbin. NULL-safe — the runtime is lazily-created so
-     * sessions that never opened voice don't allocate one. */
-    {
-        session *vsess = &the_session;
-        if (vsess->voice_runtime) {
-            gtkhx_voice_runtime_free (vsess->voice_runtime);
-            vsess->voice_runtime = NULL;
-        }
+     * sessions that never opened voice don't allocate one. The
+     * `sess` local was bound at the top of this function. */
+    if (sess->voice_runtime) {
+        gtkhx_voice_runtime_free (sess->voice_runtime);
+        sess->voice_runtime = NULL;
     }
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
