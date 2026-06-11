@@ -875,6 +875,333 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
     }
 }
 
+/* ---- Voice-chat extension (Phase 8.A) ---------------------------- */
+/*
+ * The handlers below parse the body via the Rust hotline-proto::voice
+ * shims and log a structured line through debug_log("voice", ...).
+ * Phase 8.A intentionally does not emit GtkhxSession signals — the
+ * model→view bridge for voice lands in Phase 8.C with the
+ * hxvoice-runtime crate, which turns these wire frames into typed
+ * state-machine events. For now, the logging path is sufficient to
+ * satisfy the exit criterion ("see 602 SDP offer come back in the
+ * trace, see participant list updates from 605 parsed by Rust into
+ * structured events").
+ *
+ * The proto-trace category "voice" surfaces these lines independently
+ * of the protocol category — `GTKHX_DEBUG=voice` for just the voice
+ * events, or `GTKHX_DEBUG=proto,voice` for the full wire trace plus
+ * the typed summaries here.
+ */
+
+void
+hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
+{
+    /* gtkhx_proto_parse_voice_reply only fails on NULL out; with a
+     * stack-allocated `r` it always succeeds. The presence flags
+     * below are the real malformed-frame signal. */
+    struct gtkhx_proto_voice_reply r;
+    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+
+    /* SDP is the mandatory payload on 602; absence is a malformed
+     * frame from the server. Surface the case but don't crash — Phase
+     * 8.C will decide whether to tear down the session. */
+    if (!r.sdp_present) {
+        debug_log ("voice",
+                   "← VOICE_SDP_OFFER cid=%u: missing VOICE_SDP chunk",
+                   r.cid);
+        return;
+    }
+
+    const guint8 *sdp_ptr = NULL;
+    gsize sdp_len = 0;
+    /* Defensive: r.sdp_present was true, so the field walker should
+     * find it, but bail out cleanly if it doesn't (logic bug
+     * upstream, or an exotic frame the wire layer accepted in one
+     * pass and refused in another). Leaving sum uninitialised below
+     * would log garbage; surfacing the inconsistency is better. */
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 0,
+                                        (const uint8_t **) &sdp_ptr,
+                                        &sdp_len)) {
+        debug_log ("voice",
+                   "← VOICE_SDP_OFFER cid=%u: field walker rejected "
+                   "VOICE_SDP after presence check",
+                   r.cid);
+        return;
+    }
+
+    struct gtkhx_proto_voice_sdp_summary sum;
+    if (!gtkhx_proto_parse_voice_sdp_summary (sdp_ptr, sdp_len, &sum)) {
+        debug_log ("voice",
+                   "← VOICE_SDP_OFFER cid=%u sdp_len=%u: SDP summary "
+                   "rejected",
+                   r.cid, r.sdp_len);
+        return;
+    }
+    debug_log (
+        "voice",
+        "← VOICE_SDP_OFFER cid=%u sdp_len=%u mids=%u unknown_mids=%u "
+        "bundle=%u has_pcmu=%d disabled_slot=%d",
+        r.cid, r.sdp_len, sum.mid_count, sum.unknown_mid_count,
+        sum.bundle_count, (int) sum.has_pcmu, (int) sum.has_disabled_slot);
+}
+
+void
+hx_rcv_voice_ice (struct htlc_conn *htlc)
+{
+    /* See hx_rcv_voice_sdp_offer for the parse_voice_reply contract:
+     * it only fails on NULL out, which a stack-allocated r can't
+     * trigger. The presence flags below are the malformed-frame
+     * signal. */
+    struct gtkhx_proto_voice_reply r;
+    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+
+    /* Distinguish the spec's end-of-candidates shorthand from a
+     * malformed 604:
+     *
+     *   - VOICE_ICE chunk MISSING entirely: the server sent a 604
+     *     with no payload chunk at all. That's a protocol violation
+     *     — the spec mandates the chunk on every 604 (with either a
+     *     JSON candidate or the empty-string EOC marker inside).
+     *     Conflating it with EOC would hide server bugs. Log and
+     *     return.
+     *   - VOICE_ICE chunk PRESENT but zero-length: the EOC shorthand.
+     *     The spec lets the chunk's body be empty as an alternative
+     *     to a {"candidate":""} JSON payload. Honour it as EOC. */
+    if (!r.ice_present) {
+        debug_log ("voice",
+                   "← VOICE_ICE cid=%u: missing VOICE_ICE chunk (malformed)",
+                   r.cid);
+        return;
+    }
+    if (r.ice_len == 0) {
+        debug_log ("voice", "← VOICE_ICE cid=%u (end-of-candidates)",
+                   r.cid);
+        return;
+    }
+
+    const guint8 *ice_ptr = NULL;
+    gsize ice_len = 0;
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 1,
+                                        (const uint8_t **) &ice_ptr,
+                                        &ice_len)) {
+        debug_log ("voice",
+                   "← VOICE_ICE cid=%u: field walker rejected VOICE_ICE "
+                   "after presence check",
+                   r.cid);
+        return;
+    }
+
+    struct gtkhx_proto_voice_ice_candidate cand;
+    struct gtkhx_proto_voice_ice_handle *h
+        = gtkhx_proto_parse_voice_ice_json (ice_ptr, ice_len, &cand);
+    if (!h) {
+        debug_log ("voice",
+                   "← VOICE_ICE cid=%u ice_len=%zu: JSON parse failed",
+                   r.cid, ice_len);
+        return;
+    }
+    debug_log (
+        "voice",
+        "← VOICE_ICE cid=%u ice_len=%zu candidate_len=%zu mid_len=%zu "
+        "mline=%u%s%s",
+        r.cid, ice_len, cand.candidate_len, cand.sdp_mid_len,
+        cand.sdp_mline_index,
+        cand.sdp_mline_index_present ? "" : " (absent)",
+        cand.is_end_of_candidates ? " EOC" : "");
+    gtkhx_proto_voice_ice_free (h);
+}
+
+void
+hx_rcv_voice_room_status (struct htlc_conn *htlc)
+{
+    /* parse_voice_reply only fails on NULL out — see
+     * hx_rcv_voice_sdp_offer's comment. */
+    struct gtkhx_proto_voice_reply r;
+    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+
+    if (!r.participants_present) {
+        debug_log (
+            "voice",
+            "← VOICE_ROOM_STATUS cid=%u: missing VOICE_PARTICIPANTS chunk",
+            r.cid);
+        return;
+    }
+
+    const guint8 *blob = NULL;
+    gsize blob_len = 0;
+    /* Defensive return-value check, same shape as the SDP / ICE
+     * handlers above: the presence flag was true, so the field
+     * walker should hand back a non-NULL slice. Surface any
+     * inconsistency instead of walking an uninitialised blob_len. */
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 3,
+                                        (const uint8_t **) &blob,
+                                        &blob_len)) {
+        debug_log ("voice",
+                   "← VOICE_ROOM_STATUS cid=%u: field walker rejected "
+                   "VOICE_PARTICIPANTS after presence check",
+                   r.cid);
+        return;
+    }
+
+    /* Bounded stack buffer for the typed walk. The spec's room cap
+     * default is 16 participants; allow plenty of headroom for
+     * operator-overridden caps. blob_len / 6 is the upper bound on
+     * count; we additionally cap at 64 for stack hygiene. */
+    enum
+    {
+        MAX_LOG_ENTRIES = 64
+    };
+    struct gtkhx_proto_voice_participant ents[MAX_LOG_ENTRIES];
+    size_t n = gtkhx_proto_parse_voice_participants (blob, blob_len, ents,
+                                                     MAX_LOG_ENTRIES);
+    debug_log ("voice",
+               "← VOICE_ROOM_STATUS cid=%u participants=%zu (blob=%zu)",
+               r.cid, n, blob_len);
+    for (size_t i = 0; i < n; i++) {
+        debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
+                   ents[i].user_id, ents[i].flags, ents[i].codec_id,
+                   (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+}
+
+/* ---- Voice TASK reply handlers (client-initiated 600/601/603/606) -- */
+/*
+ * The voice send wrappers in src/voice.c register one of these via
+ * task_new() before each hlwrite_chunks call. hx_rcv_task looks up
+ * the task entry by trans id on the TASK reply and dispatches here.
+ *
+ * Per the fogWraith spec, the JOIN (600) reply carries the server's
+ * initial SDP offer, codec name, and current participant list — the
+ * bulk of the session bootstrap payload. The other three opcodes
+ * (601 LEAVE / 603 SDP_ANSWER / 606 MUTE) get empty-body success
+ * replies; the simple_ack handler logs that the trans completed.
+ * (604 VOICE_ICE is a notification both directions per spec — no
+ * reply expected, so no task is registered for outgoing 604s.)
+ *
+ * The Phase 8.C state machine in hxvoice consumes the SDP / codec /
+ * participants extracted here via SessionMachine events; for now the
+ * handler just logs structured info through the "voice" debug
+ * category so the proto-trace shows the bootstrap succeeded.
+ */
+
+void
+rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
+{
+    guint32 expected_cid = GPOINTER_TO_UINT (channel_ptr);
+
+    /* JOIN reply shape: CHAT_ID (echo) + VOICE_SDP (server offer) +
+     * VOICE_CODEC (active codec name) + VOICE_PARTICIPANTS (current
+     * list). All four fields per spec; a missing one is malformed.
+     * gtkhx_proto_parse_voice_reply only returns false on NULL out,
+     * so we don't need the dead-code conditional here either. */
+    struct gtkhx_proto_voice_reply r;
+    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+
+    if (r.cid != expected_cid) {
+        debug_log (
+            "voice",
+            "← VOICE_JOIN reply cid=%u (expected %u) — server echoed "
+            "different room",
+            r.cid, expected_cid);
+    }
+
+    if (!r.sdp_present || !r.codec_present || !r.participants_present) {
+        debug_log (
+            "voice",
+            "← VOICE_JOIN reply cid=%u: malformed (sdp=%d codec=%d "
+            "participants=%d)",
+            r.cid, (int) r.sdp_present, (int) r.codec_present,
+            (int) r.participants_present);
+        return;
+    }
+
+    /* Defensive: same shape as the other voice handlers — the
+     * presence flag and the field walker agree on a well-formed
+     * frame, so a walker rejection after the presence flag passed
+     * is an internal inconsistency. Surface it instead of logging
+     * a misleading zero-mids/empty-blob summary.
+     *
+     * SDP summary for the trace; the full SDP body lands in
+     * htlc->in.buf at the offset the per-field accessor returns. */
+    const guint8 *sdp_ptr = NULL;
+    gsize sdp_len = 0;
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 0,
+                                        (const uint8_t **) &sdp_ptr,
+                                        &sdp_len)) {
+        debug_log ("voice",
+                   "← VOICE_JOIN reply cid=%u: field walker rejected "
+                   "VOICE_SDP after presence check",
+                   r.cid);
+        return;
+    }
+    struct gtkhx_proto_voice_sdp_summary sum;
+    gtkhx_proto_parse_voice_sdp_summary (sdp_ptr, sdp_len, &sum);
+
+    /* Codec name (short ASCII, typically "PCMU"). */
+    const guint8 *codec_ptr = NULL;
+    gsize codec_len = 0;
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 2,
+                                        (const uint8_t **) &codec_ptr,
+                                        &codec_len)) {
+        debug_log ("voice",
+                   "← VOICE_JOIN reply cid=%u: field walker rejected "
+                   "VOICE_CODEC after presence check",
+                   r.cid);
+        return;
+    }
+    char codec[32] = "?";
+    if (codec_ptr && codec_len > 0 && codec_len < sizeof (codec)) {
+        memcpy (codec, codec_ptr, codec_len);
+        codec[codec_len] = '\0';
+    }
+
+    /* Participants — same walk as hx_rcv_voice_room_status. */
+    const guint8 *blob = NULL;
+    gsize blob_len = 0;
+    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 3,
+                                        (const uint8_t **) &blob,
+                                        &blob_len)) {
+        debug_log ("voice",
+                   "← VOICE_JOIN reply cid=%u: field walker rejected "
+                   "VOICE_PARTICIPANTS after presence check",
+                   r.cid);
+        return;
+    }
+    enum
+    {
+        MAX_LOG_ENTRIES = 64
+    };
+    struct gtkhx_proto_voice_participant ents[MAX_LOG_ENTRIES];
+    size_t n = gtkhx_proto_parse_voice_participants (blob, blob_len, ents,
+                                                     MAX_LOG_ENTRIES);
+
+    debug_log ("voice",
+               "← VOICE_JOIN reply cid=%u codec=%s sdp_len=%u "
+               "mids=%u has_pcmu=%d participants=%zu",
+               r.cid, codec, r.sdp_len, sum.mid_count,
+               (int) sum.has_pcmu, n);
+    for (size_t i = 0; i < n; i++) {
+        debug_log ("voice", "    uid=%u flags=0x%04x codec=%u%s",
+                   ents[i].user_id, ents[i].flags, ents[i].codec_id,
+                   (ents[i].flags & 0x0001) ? " MUTED" : "");
+    }
+}
+
+void
+rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
+                           void *cid_ptr)
+{
+    /* opcode is stashed in ptr via GUINT_TO_POINTER for the trace
+     * label; cid via the data slot. Both are diagnostic only — the
+     * empty-success-reply path doesn't carry any state worth
+     * extracting. task_inerror is handled before this is called by
+     * hx_rcv_task; we only see the success path. */
+    guint32 opcode = GPOINTER_TO_UINT (opcode_ptr);
+    guint32 cid = GPOINTER_TO_UINT (cid_ptr);
+    (void) htlc;
+    debug_log ("voice", "← VOICE %u ack (cid=%u)", opcode, cid);
+}
+
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
 {
@@ -962,6 +1289,15 @@ hx_rcv_hdr (struct htlc_conn *htlc)
         break;
     case HTLS_HDR_QUEUE:
         htlc->rcv = hx_rcv_xfer_queue;
+        break;
+    case HTLS_HDR_VOICE_SDP_OFFER:
+        htlc->rcv = hx_rcv_voice_sdp_offer;
+        break;
+    case HTLS_HDR_VOICE_ICE:
+        htlc->rcv = hx_rcv_voice_ice;
+        break;
+    case HTLS_HDR_VOICE_ROOM_STATUS:
+        htlc->rcv = hx_rcv_voice_room_status;
         break;
     default:
         g_print ("0x%08x\n", type);
@@ -1394,7 +1730,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * advertises (network.c::send_login). */
             .client_version = 185,
             .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                  | HTLC_CAP_CHAT_HISTORY,
+                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE,
             .login_field = login,
             .login_field_len = (guint16) llen,
             .password_mac = password_mac,

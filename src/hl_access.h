@@ -86,7 +86,22 @@
 /* Private messages (40) */
 #define HL_ACCESS_SEND_MSGS 40
 
-/* Bits 41-55: reserved by mhxd struct (__reserved2/3). */
+/* Bits 41-54: reserved by mhxd struct (__reserved2/3). */
+
+/* Voice-chat extension (fogWraith Capabilities-Voice.md).
+ * "accessVoiceChat" — bit 55 — gates HTLC_HDR_VOICE_JOIN (600).
+ * If the bit is unset on a CAPABILITY_VOICE-echoing server, the
+ * server rejects 600 with DATA_ERROR_TEXT ("You are not allowed
+ * to join voice chat."). The fogWraith spec is explicit that
+ * clients SHOULD still display the Voice button greyed-out (with
+ * a "Voice chat requires permission" tooltip) rather than hide
+ * it — surface the affordance, just disable the action.
+ *
+ * Phase 8.D queries this constant from the chat-tab toolbar; the
+ * capability echo is checked first (cap unset → hide toolbar),
+ * and only when the cap is echoed does the access bit decide
+ * greyed-out vs. interactive. */
+#define HL_ACCESS_VOICE_CHAT 55
 
 /* Chat-history extension (fogWraith
  * Capabilities-Chat-History.md). Bit 56 is the next allocation

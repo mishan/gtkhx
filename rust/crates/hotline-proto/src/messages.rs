@@ -56,6 +56,21 @@ pub enum ClientHdr {
     GetThread = 0x0000_0190,
     PostThread = 0x0000_019a,
     Ping = 0x0000_01f4,
+    /// Voice-chat extension (fogWraith `Capabilities-Voice.md`).
+    /// Client requests to join voice in a chat room. Reply carries the
+    /// server's SDP offer; the chat-id round-trips. See [`tag::CHAT_ID`]
+    /// for the room field encoding.
+    VoiceJoin = 0x0000_0258,
+    /// Voice-chat extension: client leaves voice in a chat room.
+    VoiceLeave = 0x0000_0259,
+    /// Voice-chat extension: client's SDP answer to a server-side
+    /// 602 offer.
+    VoiceSdpAnswer = 0x0000_025b,
+    /// Voice-chat extension: trickle-ICE candidate, client→server side.
+    /// Same opcode as the server→client 604 — bidirectional per spec.
+    VoiceIce = 0x0000_025c,
+    /// Voice-chat extension: client toggles mute on a room.
+    VoiceMute = 0x0000_025e,
 }
 
 /// Server → client transaction opcodes (`HTLS_HDR_*`).
@@ -71,6 +86,20 @@ pub enum ServerHdr {
     UserSelfInfo = 0x0000_0162,
     MsgBroadcast = 0x0000_0163,
     Ping = 0x0000_01f4,
+    /// Voice-chat extension (fogWraith `Capabilities-Voice.md`):
+    /// server-initiated SDP offer (initial offer in the JOIN reply, or
+    /// a renegotiation offer when the participant list changes).
+    /// Notification — task id `0`, no reply expected.
+    VoiceSdpOffer = 0x0000_025a,
+    /// Voice-chat extension: trickle-ICE candidate, server→client.
+    /// Bidirectional opcode — the client-side 604 has the same numeric
+    /// value (see [`ClientHdr::VoiceIce`]).
+    VoiceIce = 0x0000_025c,
+    /// Voice-chat extension: notification of voice participants and
+    /// state changes. Sent when the participant list changes, when a
+    /// user mutes/unmutes, or when a participant joins/leaves voice.
+    /// Notification — task id `0`, no reply expected.
+    VoiceRoomStatus = 0x0000_025d,
     Task = 0x0001_0000,
 }
 
@@ -88,6 +117,9 @@ impl ServerHdr {
             0x0000_0162 => UserSelfInfo,
             0x0000_0163 => MsgBroadcast,
             0x0000_01f4 => Ping,
+            0x0000_025a => VoiceSdpOffer,
+            0x0000_025c => VoiceIce,
+            0x0000_025d => VoiceRoomStatus,
             0x0001_0000 => Task,
             _ => return None,
         })
@@ -254,6 +286,31 @@ pub mod tag {
     /// file mode prefer this over the 32-bit legacy field, which is
     /// clamped at `0xFFFFFFFF` when the true size overflows.
     pub const XFERSIZE64: u16 = 0x01f3;
+    /// `0x01f5` — Voice-chat extension: SDP blob (UTF-8 text,
+    /// RFC 8866). Carried on JOIN replies (server's offer),
+    /// HTLS_HDR_VOICE_SDP_OFFER notifications, and HTLC_HDR_VOICE_SDP_ANSWER
+    /// requests. Source: fogWraith Capabilities-Voice.md.
+    pub const VOICE_SDP: u16 = 0x01f5;
+    /// `0x01f6` — Voice-chat extension: JSON-encoded
+    /// RTCIceCandidateInit. Empty string is the end-of-candidates
+    /// marker per spec. Bidirectional via HTLC_HDR_VOICE_ICE /
+    /// HTLS_HDR_VOICE_ICE (the same numeric opcode 604).
+    pub const VOICE_ICE: u16 = 0x01f6;
+    /// `0x01f7` — Voice-chat extension: active codec name (ASCII).
+    /// The spec only mandates PCMU; the field is carried for forward
+    /// compatibility with future codec choices.
+    pub const VOICE_CODEC: u16 = 0x01f7;
+    /// `0x01f8` — Voice-chat extension: mute state (u16 BE). 0 =
+    /// unmuted, 1 = muted. Carried on outgoing VOICE_MUTE; the server
+    /// reflects the new state to other participants via
+    /// VOICE_PARTICIPANTS in a VOICE_ROOM_STATUS notification.
+    pub const VOICE_MUTED: u16 = 0x01f8;
+    /// `0x01f9` — Voice-chat extension: packed participant list,
+    /// binary. Each entry is 6 bytes: `u16 uid` + `u16 flags` (bit 0 =
+    /// muted, bits 1-15 reserved) + `u16 codec_id` (see Codec ID
+    /// Table). All big-endian. Parser is
+    /// [`crate::voice::parse_voice_participants`].
+    pub const VOICE_PARTICIPANTS: u16 = 0x01f9;
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 
@@ -286,5 +343,35 @@ mod tests {
         assert_eq!(ClientHdr::Login.as_u32(), 0x0000_006b);
         assert_eq!(ClientHdr::UserGetList.as_u32(), 0x0000_012c);
         assert_eq!(ClientHdr::Ping.as_u32(), 0x0000_01f4);
+    }
+
+    #[test]
+    fn voice_opcode_numeric_values_match_spec() {
+        // The fogWraith voice spec assigns decimal opcodes 600-606; these
+        // are the hex equivalents that go on the wire. Pin them here so a
+        // typo in the enum literal can't silently retarget us at the wrong
+        // transaction ID.
+        assert_eq!(ClientHdr::VoiceJoin.as_u32(), 600);
+        assert_eq!(ClientHdr::VoiceLeave.as_u32(), 601);
+        assert_eq!(ServerHdr::VoiceSdpOffer.as_u32(), 602);
+        assert_eq!(ClientHdr::VoiceSdpAnswer.as_u32(), 603);
+        // 604 is bidirectional — both sides use the same numeric value.
+        assert_eq!(ClientHdr::VoiceIce.as_u32(), 604);
+        assert_eq!(ServerHdr::VoiceIce.as_u32(), 604);
+        assert_eq!(ServerHdr::VoiceRoomStatus.as_u32(), 605);
+        assert_eq!(ClientHdr::VoiceMute.as_u32(), 606);
+
+        assert_eq!(ServerHdr::from_u32(602), Some(ServerHdr::VoiceSdpOffer));
+        assert_eq!(ServerHdr::from_u32(604), Some(ServerHdr::VoiceIce));
+        assert_eq!(ServerHdr::from_u32(605), Some(ServerHdr::VoiceRoomStatus));
+    }
+
+    #[test]
+    fn voice_field_tag_values_match_spec() {
+        assert_eq!(tag::VOICE_SDP, 0x01f5);
+        assert_eq!(tag::VOICE_ICE, 0x01f6);
+        assert_eq!(tag::VOICE_CODEC, 0x01f7);
+        assert_eq!(tag::VOICE_MUTED, 0x01f8);
+        assert_eq!(tag::VOICE_PARTICIPANTS, 0x01f9);
     }
 }

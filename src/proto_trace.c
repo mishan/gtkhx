@@ -149,6 +149,23 @@ proto_hdr_name (guint32 type)
     case HTLC_HDR_GET_CHAT_HISTORY:
         return "HTLC/S_HDR_GET_CHAT_HISTORY";
 
+    /* fogWraith voice-chat extension — opcodes 600-606 (0x258-0x25e).
+     * 604 ICE is bidirectional (same opcode in both directions). */
+    case HTLC_HDR_VOICE_JOIN:
+        return "HTLC_HDR_VOICE_JOIN";
+    case HTLC_HDR_VOICE_LEAVE:
+        return "HTLC_HDR_VOICE_LEAVE";
+    case HTLS_HDR_VOICE_SDP_OFFER:
+        return "HTLS_HDR_VOICE_SDP_OFFER";
+    case HTLC_HDR_VOICE_SDP_ANSWER:
+        return "HTLC_HDR_VOICE_SDP_ANSWER";
+    case HTLC_HDR_VOICE_ICE:
+        return "HTLC/S_HDR_VOICE_ICE";
+    case HTLS_HDR_VOICE_ROOM_STATUS:
+        return "HTLS_HDR_VOICE_ROOM_STATUS";
+    case HTLC_HDR_VOICE_MUTE:
+        return "HTLC_HDR_VOICE_MUTE";
+
     /* Server → client */
     case HTLS_HDR_NEWS_POST:
         return "HTLS_HDR_NEWS_POST";
@@ -343,6 +360,20 @@ proto_data_name (guint16 type)
         return "HTLS_DATA_HISTORY_MAX_MSGS";
     case HTLS_DATA_HISTORY_MAX_DAYS:
         return "HTLS_DATA_HISTORY_MAX_DAYS";
+
+    /* Voice-chat extension (Capabilities-Voice.md). Fields sit in
+     * 0x01F5-0x01F9, between the Large-File 64-bit extension (ends
+     * at 0x01F4) and the chat-history block at 0x0F01+. */
+    case HTLC_DATA_VOICE_SDP:
+        return "HTLC/S_DATA_VOICE_SDP";
+    case HTLC_DATA_VOICE_ICE:
+        return "HTLC/S_DATA_VOICE_ICE";
+    case HTLC_DATA_VOICE_CODEC:
+        return "HTLC/S_DATA_VOICE_CODEC";
+    case HTLC_DATA_VOICE_MUTED:
+        return "HTLC/S_DATA_VOICE_MUTED";
+    case HTLS_DATA_VOICE_PARTICIPANTS:
+        return "HTLS_DATA_VOICE_PARTICIPANTS";
 
     case HTLC_DATA_NEWSFOLDERITEM:
         return "HTLC_DATA_NEWSFOLDERITEM";
