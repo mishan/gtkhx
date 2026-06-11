@@ -517,6 +517,16 @@ struct Inner {
     /// link; `StopReceivePipeline` removes the entry, sets the
     /// bin to `Null`, and lets it drop out of the pipeline.
     receive_bins: HashMap<String, gstreamer::Bin>,
+    /// `BusWatchGuard` returned by `attach_pipeline_bus_watch`'s
+    /// `add_watch_local`. Dropping this guard removes the watch
+    /// source from the main context; we keep it parked here so
+    /// the watch survives for the lifetime of the runtime
+    /// (otherwise the pipeline's error / warning messages would
+    /// stop reaching the logger after construction returns).
+    ///
+    /// Held for its drop side-effect; never read.
+    #[allow(dead_code)]
+    bus_watch_guard: Option<gstreamer::bus::BusWatchGuard>,
 }
 
 impl Drop for Inner {
@@ -621,7 +631,7 @@ impl VoiceRuntime {
         connect_on_ice_candidate(&webrtcbin, runtime_id);
         connect_pad_added(&webrtcbin, runtime_id);
         connect_connection_state_notify(&webrtcbin, runtime_id);
-        attach_pipeline_bus_watch(&pipeline);
+        let bus_watch_guard = attach_pipeline_bus_watch(&pipeline);
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
@@ -634,6 +644,7 @@ impl VoiceRuntime {
                 answer_generation: 0,
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
+                bus_watch_guard,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -663,6 +674,7 @@ impl VoiceRuntime {
                 answer_generation: 0,
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
+                bus_watch_guard: None,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -1599,15 +1611,16 @@ fn map_peer_connection_state(
 /// triage logging only.
 ///
 /// `add_watch_local` is main-thread-only; that's what we want
-/// (the runtime runs there). Returns `()` because the
-/// `BusWatchGuard`/`SourceId` is auto-removed when the pipeline
-/// drops, which happens when `Inner` drops — so there's no
-/// independent cleanup site to manage.
-fn attach_pipeline_bus_watch(pipeline: &gstreamer::Pipeline) {
-    let bus = match pipeline.bus() {
-        Some(b) => b,
-        None => return,
-    };
+/// (the runtime runs there). Returns the `BusWatchGuard` so the
+/// caller (the runtime constructor) can park it in `Inner`. The
+/// guard drops the watch when it goes out of scope, so dropping
+/// it inline here would yank the watch right back off the bus.
+/// Returns `None` if the bus is unreachable or the default
+/// context can't be acquired.
+fn attach_pipeline_bus_watch(
+    pipeline: &gstreamer::Pipeline,
+) -> Option<gstreamer::bus::BusWatchGuard> {
+    let bus = pipeline.bus()?;
     // `add_watch_local` attaches a source to the default
     // `MainContext` — same ownership requirement as
     // `glib::timeout_add_local` in `arm_timer`. In production
@@ -1617,41 +1630,56 @@ fn attach_pipeline_bus_watch(pipeline: &gstreamer::Pipeline) {
     // contention; the loopback/parser tests that don't depend
     // on bus messages don't care, and the Tier 3 voice tests
     // run with a real main loop that owns the context outright.
+    //
+    // The acquire guard MUST stay live across the
+    // `add_watch_local` call — `ctx.acquire().is_err()` would
+    // drop the guard at the end of the boolean expression,
+    // releasing the context before we attach. Bind it to a
+    // named local instead (mirrors the same fix `arm_timer`
+    // applied).
     let ctx = gstreamer::glib::MainContext::default();
-    if !ctx.is_owner() && ctx.acquire().is_err() {
-        return;
-    }
-    let _ = bus.add_watch_local(move |_bus, msg| {
-        use gstreamer::MessageView;
-        match msg.view() {
-            MessageView::Error(err) => {
-                let src = err
-                    .src()
-                    .map(|o| o.path_string().to_string())
-                    .unwrap_or_else(|| "<unknown>".into());
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: pipeline error from {src}: {} ({:?})",
-                    err.error(),
-                    err.debug()
-                );
-            }
-            MessageView::Warning(w) => {
-                let src = w
-                    .src()
-                    .map(|o| o.path_string().to_string())
-                    .unwrap_or_else(|| "<unknown>".into());
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: pipeline warning from {src}: {} ({:?})",
-                    w.error(),
-                    w.debug()
-                );
-            }
-            _ => {}
+    let _acquire_guard = if ctx.is_owner() {
+        None
+    } else {
+        match ctx.acquire() {
+            Ok(g) => Some(g),
+            Err(_) => return None,
         }
-        gstreamer::glib::ControlFlow::Continue
-    });
+    };
+    let watch = bus
+        .add_watch_local(move |_bus, msg| {
+            use gstreamer::MessageView;
+            match msg.view() {
+                MessageView::Error(err) => {
+                    let src = err
+                        .src()
+                        .map(|o| o.path_string().to_string())
+                        .unwrap_or_else(|| "<unknown>".into());
+                    gstreamer::warning!(
+                        gstreamer::CAT_RUST,
+                        "hxvoice: pipeline error from {src}: {} ({:?})",
+                        err.error(),
+                        err.debug()
+                    );
+                }
+                MessageView::Warning(w) => {
+                    let src = w
+                        .src()
+                        .map(|o| o.path_string().to_string())
+                        .unwrap_or_else(|| "<unknown>".into());
+                    gstreamer::warning!(
+                        gstreamer::CAT_RUST,
+                        "hxvoice: pipeline warning from {src}: {} ({:?})",
+                        w.error(),
+                        w.debug()
+                    );
+                }
+                _ => {}
+            }
+            gstreamer::glib::ControlFlow::Continue
+        })
+        .ok()?;
+    Some(watch)
 }
 
 /// Build the receive bin for `mid`, add it to the pipeline, link
