@@ -233,3 +233,19 @@ voice_panel_set_muted (GtkWidget *panel, gboolean muted)
     panel_set_bool (panel, KEY_MUTED, muted);
     update_button_labels (panel);
 }
+
+void
+voice_panel_refresh_all_chats (session *sess)
+{
+    if (!sess || !sess->gchats)
+        return;
+    GHashTableIter iter;
+    gpointer val;
+    g_hash_table_iter_init (&iter, sess->gchats);
+    while (g_hash_table_iter_next (&iter, NULL, &val)) {
+        struct gtkhx_chat *gchat = val;
+        if (gchat && gchat->voice_panel) {
+            voice_panel_refresh (gchat->voice_panel, sess);
+        }
+    }
+}

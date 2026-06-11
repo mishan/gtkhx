@@ -44,6 +44,7 @@
 #include "xtext.h"
 #include "gtkutil.h"
 #include "hl_access.h"
+#include "voice_panel.h"
 
 /* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
@@ -346,6 +347,18 @@ setbtns (session *sess, int stat)
         set_app_action_enabled ("user_new", FALSE);
         set_app_action_enabled ("user_edit", FALSE);
     }
+
+    /* Phase 8.D: refresh the per-chat voice toolbars. The chat
+     * windows open before LOGIN finishes, so their
+     * construction-time refresh runs against caps=0 / access=0
+     * and the toolbars stay hidden. setbtns() runs after
+     * SELFINFO populates the access bitmap (see
+     * hx_rcv_user_selfinfo) — by then HTLC_CAP_VOICE has also
+     * landed (HTLS_DATA_CAPABILITIES handler in rcv.c), so this
+     * is the right place to flip the toolbars on. On disconnect
+     * (stat==0), the refresh hides them again — htlc->caps will
+     * have been cleared by network.c. */
+    voice_panel_refresh_all_chats (sess);
 
     /* Phase 5: News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape

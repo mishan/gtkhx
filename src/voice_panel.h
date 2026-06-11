@@ -49,6 +49,15 @@ extern GtkWidget *voice_panel_new (session *sess, guint32 cid);
  * with `panel == NULL` (no-op). */
 extern void voice_panel_refresh (GtkWidget *panel, session *sess);
 
+/* Walk every live chat tab in `sess->gchats` and call
+ * `voice_panel_refresh` on its voice panel. Called from the
+ * post-login UI refresh path (`setbtns`) so the panels pick up
+ * `htlc->caps` and `htlc->access` after they land — the chat
+ * windows open BEFORE the LOGIN reply finishes, so the
+ * construction-time refresh runs against zeroed caps and the
+ * panel stays hidden until this is called. */
+extern void voice_panel_refresh_all_chats (session *sess);
+
 /* Update the panel's "joined to voice" indicator. Driven by the
  * GtkhxSession `voice-room-status` signal in production. The Phase
  * 8.D initial commit wires the buttons to call this directly from
