@@ -385,6 +385,22 @@ struct Inner {
     /// so they can find the runtime back on the main thread
     /// without holding a non-`Send` `Rc`.
     runtime_id: u64,
+    /// Generation counter incremented on every `Action::CreateAnswer`
+    /// dispatch. The `gst::Promise` callback captures the value
+    /// at issue time and compares it against the current
+    /// generation on the main thread; mismatches mean a newer
+    /// offer arrived in the meantime (the state machine's
+    /// renegotiation path) and the older answer must be
+    /// dropped on the floor — otherwise the stale answer would
+    /// re-enter `handle_event(WebrtcAnswerCreated)` and the
+    /// state machine would emit a `SendWireFrame(603, …)` for
+    /// the wrong offer, blowing up the renegotiated session.
+    ///
+    /// See `hxvoice/src/state.rs` `(OfferPending, SdpOfferReceived)`
+    /// for the matching state-machine assumption that "the
+    /// existing CreateAnswer promise will resolve with stale
+    /// contents, which the runtime drops on the floor."
+    answer_generation: u64,
 }
 
 impl Drop for Inner {
@@ -473,6 +489,7 @@ impl VoiceRuntime {
                 dispatching: false,
                 pending: VecDeque::new(),
                 runtime_id,
+                answer_generation: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -499,6 +516,7 @@ impl VoiceRuntime {
                 dispatching: false,
                 pending: VecDeque::new(),
                 runtime_id,
+                answer_generation: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -670,17 +688,33 @@ impl VoiceRuntime {
             Action::CreateAnswer => {
                 // Capture data needed by the (Send) promise
                 // closure: the runtime id (to find ourselves
-                // again on the main thread) and a handle to the
-                // main GLib context (its accessor is callable
-                // from any thread — `Send`-safe).
-                let webrtcbin = self
-                    .inner
-                    .borrow()
-                    .webrtcbin
-                    .clone();
-                let runtime_id = self.inner.borrow().runtime_id;
+                // again on the main thread), the answer
+                // generation (so we can ignore stale
+                // resolutions if a later offer arrives before
+                // the old promise fires — see below), and a
+                // handle to the main GLib context (its accessor
+                // is callable from any thread — `Send`-safe).
+                //
+                // Bump the generation BEFORE handing the
+                // promise to webrtcbin. The state machine's
+                // OfferPending+SdpOfferReceived arm
+                // re-issues CreateAnswer without changing
+                // state; without the bump-and-compare the old
+                // promise's resolution would still match the
+                // current generation and send a stale 603 for
+                // the wrong offer.
+                let (webrtcbin, runtime_id, generation) = {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.answer_generation =
+                        inner.answer_generation.wrapping_add(1);
+                    (
+                        inner.webrtcbin.clone(),
+                        inner.runtime_id,
+                        inner.answer_generation,
+                    )
+                };
                 if let Some(bin) = webrtcbin {
-                    create_answer(&bin, runtime_id);
+                    create_answer(&bin, runtime_id, generation);
                 }
             }
             Action::SetLocalDescription { sdp } => {
@@ -727,10 +761,18 @@ impl VoiceRuntime {
 }
 
 /// Build a `WebRTCSessionDescription` from a raw SDP string and
-/// a type tag. Returns `None` if the SDP fails to parse; this
-/// helper logs the failure on the GStreamer warning channel
-/// before returning, so callers should just early-return on
-/// `None` rather than re-logging.
+/// a type tag. Returns `None` if the SDP can't be parsed.
+///
+/// Logging discipline: the **parser-error** path (a non-empty
+/// buffer that `gst_sdp_message_parse_buffer` rejects) logs the
+/// underlying message on the GStreamer warning channel before
+/// returning `None`. The **empty-input** path early-returns
+/// silently — the parser would otherwise trip a
+/// `g_returns_if_fail(size != 0)` on the GStreamer-SDP
+/// critical channel, and an empty buffer is unambiguously
+/// "caller has nothing to parse" rather than a recoverable
+/// shape worth surfacing. Callers should early-return on `None`
+/// without re-logging.
 ///
 /// gstreamer-rs's `SDPMessage::parse_buffer` is the typed entry
 /// point: it parses the SDP into an owned `SDPMessage`, which we
@@ -801,13 +843,21 @@ fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
 /// `webrtcbin.create-answer` with a `gst::Promise` whose change-func
 /// fires (typically on a GStreamer worker thread) when the answer
 /// is ready, marshals back to the GLib main context, looks up the
-/// runtime by id from the thread-local registry, and re-enters
-/// `handle_event(Event::WebrtcAnswerCreated)`.
+/// runtime by id from the thread-local registry, compares the
+/// captured generation against the current `answer_generation` (so
+/// resolutions from a superseded offer are silently dropped), and
+/// re-enters `handle_event(Event::WebrtcAnswerCreated)` only if
+/// the answer is for the still-current offer.
 ///
 /// The closure is `Send + 'static` (captures only `runtime_id: u64`
-/// and the main context); the runtime itself stays `!Send`. See the
-/// module-level "Threading" section for the full reasoning.
-fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64) {
+/// and `generation: u64` and the main context); the runtime itself
+/// stays `!Send`. See the module-level "Threading" section for the
+/// full reasoning.
+fn create_answer(
+    webrtcbin: &gstreamer::Element,
+    runtime_id: u64,
+    generation: u64,
+) {
     // Snapshot the main context up front so the closure carries
     // a `Send` handle into the worker thread without having to
     // re-acquire it there. `MainContext::default()` returns the
@@ -853,10 +903,26 @@ fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64) {
         };
         // Marshal back to the main thread. The closure must be
         // `Send + 'static`; we capture only `runtime_id` (u64,
-        // Copy) and `sdp` (String). The runtime lookup happens on
-        // the main thread inside `with_main_thread_runtime`.
+        // Copy), `generation` (u64, Copy), and `sdp` (String).
+        // The runtime lookup happens on the main thread inside
+        // `with_main_thread_runtime`; the generation check
+        // happens there too because `answer_generation` lives
+        // in `Inner` which is `!Send`.
         main_ctx.invoke(move || {
             with_main_thread_runtime(runtime_id, |rt| {
+                // Renegotiation race guard: if a newer
+                // CreateAnswer was issued while we were
+                // waiting for this promise to resolve (the
+                // OfferPending+SdpOfferReceived state-machine
+                // arm bumps the generation without changing
+                // state), the resolution we're holding is for
+                // a now-stale offer. Drop it — the state
+                // machine would otherwise emit
+                // SendWireFrame(603) carrying the wrong
+                // answer.
+                if rt.inner.borrow().answer_generation != generation {
+                    return;
+                }
                 rt.handle_event(Event::WebrtcAnswerCreated { sdp });
             });
         });
@@ -1327,23 +1393,26 @@ mod tests {
         assert_eq!(desc.type_(), WebRTCSDPType::Offer);
     }
 
-    /// Empty-input edge case. `SDPMessage::parse_buffer` is
-    /// otherwise permissive — it returns recoverable parses for
-    /// almost any byte slice — but an empty buffer is the one
-    /// shape it cleanly fails on. We hold this test only to pin
-    /// the contract that `build_session_description` returns
-    /// `None` rather than panicking when the parser hands back
-    /// an error, regardless of where the threshold lies.
+    /// Empty-input early-return. Exercises the `sdp.is_empty()`
+    /// guard that sits in front of
+    /// `gstreamer_sdp::SDPMessage::parse_buffer`.
+    ///
+    /// Note: the parser-error branch BELOW the empty-input guard
+    /// (the `match parse_buffer { Err(e) => warning! + return
+    /// None }` arm) is effectively unreachable from external
+    /// input — `gst_sdp_message_parse_buffer` is permissive
+    /// enough to accept literally any non-empty byte slice
+    /// (probed manually: NUL bytes, single ASCII control, raw
+    /// 0xFF bytes — all return Ok). The arm exists for forward
+    /// compatibility if a future GStreamer release tightens
+    /// parsing; until then, no fixture-driven test of the
+    /// logging path is possible. The contract this test pins is
+    /// the only externally-reachable failure path:
+    /// empty input → silent `None`, no GStreamer-SDP critical,
+    /// no panic.
     #[test]
-    fn build_session_description_handles_parser_failure() {
+    fn build_session_description_empty_input_returns_none() {
         assert!(crate::init());
-        // Empty buffer — the parser surfaces this as an error.
-        // If a future GStreamer release moves the threshold and
-        // accepts empty input too, this test would start failing;
-        // at that point switch the input to something the parser
-        // still rejects (a single garbage byte, etc.) — the
-        // contract being tested is "we don't panic when the
-        // parser fails", not "this specific input fails".
         let desc = build_session_description("", WebRTCSDPType::Offer);
         assert!(
             desc.is_none(),
@@ -1482,5 +1551,37 @@ mod tests {
             .expect("runtime should construct with a fresh pipeline");
         runtime.dispatch(Action::CreateAnswer);
         assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Regression (Copilot review #3): `Action::CreateAnswer`
+    /// must bump `answer_generation` on every dispatch. The
+    /// generation is the load-bearing piece of the
+    /// renegotiation race guard — promise change-funcs capture
+    /// the value at issue time and compare it on the main
+    /// thread, so we need each new CreateAnswer to be a fresh
+    /// generation to discriminate stale resolutions.
+    ///
+    /// Driven through `dispatch` rather than the state machine
+    /// because we want to exercise the runtime arm directly
+    /// without depending on the offer/answer state path.
+    #[test]
+    fn create_answer_dispatch_bumps_answer_generation() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let before = runtime.inner.borrow().answer_generation;
+        runtime.dispatch(Action::CreateAnswer);
+        let after_one = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after_one,
+            before.wrapping_add(1),
+            "first CreateAnswer dispatch must bump the generation by 1"
+        );
+        runtime.dispatch(Action::CreateAnswer);
+        let after_two = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after_two,
+            before.wrapping_add(2),
+            "second CreateAnswer dispatch must bump the generation again"
+        );
     }
 }
