@@ -3889,6 +3889,665 @@ pub unsafe extern "C" fn gtkhx_proto_text_to_utf8(
     crate::text::to_utf8_into(s, buf)
 }
 
+// ---- Voice-chat extension (Phase 8.A) ---------------------------------
+//
+// FFI surface for the wire-protocol layer added in
+// `rust/crates/hotline-proto/src/voice.rs`. The Phase 8.A C-side
+// wire-out path (src/voice.{h,c}) calls these builders directly;
+// rcv.c dispatch on the 600-606 family calls the parsers.
+//
+// The builder shims are slated for retirement once Phase 8.C lands
+// the `hxvoice-runtime` crate (per docs/voice-chat-plan.md §5),
+// since the runtime can call the Rust builders without an FFI hop.
+// They stay for now because Phase 8.A doesn't have the runtime
+// crate to lean on.
+
+/// Build chunks for `HTLC_HDR_VOICE_JOIN` (600). Fills `chunks` with
+/// the single CHAT_ID chunk (4 bytes, BE u32 at `scratch[0..4]`).
+///
+/// Returns the number of chunks populated (1) on success, or 0 on
+/// validation failure (NULL pointers, undersized caps).
+///
+/// # Safety
+/// `chunks` must be valid for `chunks_cap` `HxChunk` slots (or NULL);
+/// `scratch` must be valid for `scratch_cap` bytes (or NULL). Same
+/// discipline as [`gtkhx_proto_build_chat_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_join_chunks(
+    cid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 4;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    crate::voice::build_voice_join_chunks(cid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for `HTLC_HDR_VOICE_LEAVE` (601). Same shape as JOIN.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_voice_join_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_leave_chunks(
+    cid: u32,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 1;
+    const MAX_SCRATCH: usize = 4;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    crate::voice::build_voice_leave_chunks(cid, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for `HTLC_HDR_VOICE_SDP_ANSWER` (603): CHAT_ID +
+/// VOICE_SDP. Rejects empty SDP (the spec forbids it) and oversize
+/// SDP (> u16::MAX, wire framing limit).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `scratch` valid
+/// for `scratch_cap` bytes (or NULL); `sdp_ptr` valid for `sdp_len`
+/// bytes (or NULL — NULL with nonzero len rejected up front).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_answer_chunks(
+    cid: u32,
+    sdp_ptr: *const u8,
+    sdp_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 4;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // NULL SDP pointer with nonzero len is a caller bug — same
+    // rationale as gtkhx_proto_build_chat_chunks.
+    if sdp_ptr.is_null() && sdp_len != 0 {
+        return 0;
+    }
+    if sdp_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let sdp = as_slice(sdp_ptr, sdp_len);
+    crate::voice::build_voice_answer_chunks(cid, sdp, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for `HTLC_HDR_VOICE_ICE` (604): CHAT_ID + VOICE_ICE.
+/// Empty `ice_len` is accepted (end-of-candidates marker per spec).
+///
+/// # Safety
+/// As [`gtkhx_proto_build_voice_answer_chunks`], except NULL `ice_ptr`
+/// is accepted when `ice_len == 0` (the end-of-candidates marker
+/// carries no body bytes).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_ice_chunks(
+    cid: u32,
+    ice_ptr: *const u8,
+    ice_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 4;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    // NULL with nonzero len is the same caller-bug shape rejected
+    // elsewhere; NULL with zero len is the legitimate
+    // end-of-candidates marker.
+    if ice_ptr.is_null() && ice_len != 0 {
+        return 0;
+    }
+    if ice_len > u16::MAX as usize {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let ice = as_slice(ice_ptr, ice_len);
+    crate::voice::build_voice_ice_chunks(cid, ice, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for `HTLC_HDR_VOICE_MUTE` (606): CHAT_ID + VOICE_MUTED
+/// (u16). `muted` is normalised to 0/1 by the C caller; the shim
+/// accepts any u16 and lets the builder pass it through.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_voice_join_chunks`], but `scratch_cap >= 6`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_mute_chunks(
+    cid: u32,
+    muted: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 6;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    crate::voice::build_voice_mute_chunks(cid, muted, chunks_slice, scratch_slice) as i32
+}
+
+// ---- Voice parsers ----
+
+/// C-ABI mirror of the Rust [`crate::voice::Participant`]. Layout
+/// pinned by a `const _` assert so the C side can rely on the byte
+/// offsets without re-deriving them.
+#[repr(C)]
+pub struct VoiceParticipantOut {
+    pub user_id: u16,
+    pub flags: u16,
+    pub codec_id: u16,
+}
+
+const _: () = {
+    assert!(std::mem::offset_of!(VoiceParticipantOut, user_id) == 0);
+    assert!(std::mem::offset_of!(VoiceParticipantOut, flags) == 2);
+    assert!(std::mem::offset_of!(VoiceParticipantOut, codec_id) == 4);
+    assert!(std::mem::size_of::<VoiceParticipantOut>() == 6);
+    assert!(std::mem::align_of::<VoiceParticipantOut>() == 2);
+};
+
+/// Walk a packed `DATA_VOICE_PARTICIPANTS` blob, writing up to
+/// `cap` entries into `out`. Returns the number of entries
+/// produced — which is `min(cap, blob_len / 6)`. The caller can
+/// detect truncation by passing `cap` larger than expected and
+/// comparing against `blob_len / 6`; or by passing the exact size
+/// it has room for, then re-walking if more space is wanted.
+///
+/// Returns 0 on NULL `out` (and writes nothing) or on a NULL blob
+/// pointer with a nonzero length.
+///
+/// # Safety
+/// `blob_ptr` must be valid for `blob_len` bytes (or NULL with
+/// `blob_len == 0`); `out` must be valid for `cap`
+/// `VoiceParticipantOut` slots.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_voice_participants(
+    blob_ptr: *const u8,
+    blob_len: usize,
+    out: *mut VoiceParticipantOut,
+    cap: usize,
+) -> usize {
+    if out.is_null() {
+        return 0;
+    }
+    if blob_ptr.is_null() && blob_len != 0 {
+        return 0;
+    }
+    let blob = as_slice(blob_ptr, blob_len);
+    let mut n = 0;
+    for p in crate::voice::parse_voice_participants(blob) {
+        if n >= cap {
+            break;
+        }
+        *out.add(n) = VoiceParticipantOut {
+            user_id: p.user_id,
+            flags: p.flags,
+            codec_id: p.codec_id,
+        };
+        n += 1;
+    }
+    n
+}
+
+/// Mid-label tag values for the C-side ABI of
+/// [`gtkhx_proto_parse_voice_mid_label`]. The numeric values are
+/// stable; they're documented in the function comment.
+pub const GTKHX_PROTO_VOICE_MID_INVALID: u32 = 0;
+pub const GTKHX_PROTO_VOICE_MID_SEND: u32 = 1;
+pub const GTKHX_PROTO_VOICE_MID_USER: u32 = 2;
+
+/// Parse an SDP `a=mid:` label.
+///
+/// Returns:
+/// - [`GTKHX_PROTO_VOICE_MID_SEND`] (1) on the literal `send` label;
+///   `*out_uid` is left untouched.
+/// - [`GTKHX_PROTO_VOICE_MID_USER`] (2) on `user-N`; `*out_uid` is
+///   set to N.
+/// - [`GTKHX_PROTO_VOICE_MID_INVALID`] (0) on parse failure or NULL
+///   pointers; `*out_uid` is left untouched.
+///
+/// Defensive — the spec calls out parse failure as a "reject the
+/// track" condition; the caller should treat 0 as "skip this mid".
+///
+/// # Safety
+/// `label_ptr` valid for `label_len` bytes (or NULL with `label_len ==
+/// 0`); `out_uid` either a valid writable `u16` pointer or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_voice_mid_label(
+    label_ptr: *const u8,
+    label_len: usize,
+    out_uid: *mut u16,
+) -> u32 {
+    if label_ptr.is_null() && label_len != 0 {
+        return GTKHX_PROTO_VOICE_MID_INVALID;
+    }
+    let s = as_slice(label_ptr, label_len);
+    match crate::voice::parse_voice_mid_label(s) {
+        Some(crate::voice::MidLabel::Send) => GTKHX_PROTO_VOICE_MID_SEND,
+        Some(crate::voice::MidLabel::User(uid)) => {
+            if !out_uid.is_null() {
+                *out_uid = uid;
+            }
+            GTKHX_PROTO_VOICE_MID_USER
+        }
+        None => GTKHX_PROTO_VOICE_MID_INVALID,
+    }
+}
+
+/// C-ABI summary of an SDP offer/answer. Scalar fields only — the
+/// `mids` and `bundle` lists from the Rust [`crate::voice::sdp::SdpSummary`]
+/// stay Rust-side until the state machine consumes them (Phase 8.C).
+/// Phase 8.A only needs the booleans + counts for the proto-trace log.
+///
+/// `mid_count` is the total number of `a=mid:` lines seen (both
+/// recognised and not); `unknown_mid_count` is the subset whose
+/// value failed the strict `send` / `user-N` parse — useful for
+/// flagging malformed SDP in the trace.
+#[repr(C)]
+pub struct VoiceSdpSummaryOut {
+    pub mid_count: u32,
+    pub unknown_mid_count: u32,
+    pub bundle_count: u32,
+    pub has_disabled_slot: bool,
+    pub has_pcmu: bool,
+}
+
+/// Summarise the SDP into the scalar fields the proto-trace cares
+/// about. Returns true on success; false (leaving `*out` untouched)
+/// only when `out` is NULL — every other input shape, including
+/// empty SDP, parses to an all-zero summary.
+///
+/// # Safety
+/// `sdp_ptr` valid for `sdp_len` bytes (or NULL with `sdp_len == 0`);
+/// `out` either NULL (treated as failure) or a valid writable
+/// `VoiceSdpSummaryOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_voice_sdp_summary(
+    sdp_ptr: *const u8,
+    sdp_len: usize,
+    out: *mut VoiceSdpSummaryOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    if sdp_ptr.is_null() && sdp_len != 0 {
+        return false;
+    }
+    let s = as_slice(sdp_ptr, sdp_len);
+    let summary = crate::voice::sdp::summarize(s);
+    // mid_count is the total across recognised + unknown mids, per
+    // this struct's doc — `summary.mids.len()` alone would
+    // under-report on SDP that mixes spec-conformant `user-N` /
+    // `send` with malformed labels. Saturating arithmetic on u32 +
+    // u32 because either component is bounded by the wire's u16
+    // SDP length anyway, but the cast is required either way.
+    let total_mids =
+        summary.mids.len().saturating_add(summary.unknown_mids.len());
+    *out = VoiceSdpSummaryOut {
+        mid_count: total_mids as u32,
+        unknown_mid_count: summary.unknown_mids.len() as u32,
+        bundle_count: summary.bundle.len() as u32,
+        has_disabled_slot: summary.has_disabled_slot,
+        has_pcmu: summary.has_pcmu,
+    };
+    true
+}
+
+/// C-ABI view of a parsed ICE candidate. Strings borrow from a Rust-
+/// side buffer the parser allocates; the caller must use the slices
+/// immediately (typically: copy into a stack buffer for logging,
+/// then drop the parse handle). The eventual `hxvoice-runtime` will
+/// hand the typed candidate straight to `webrtcbin.emit("add-ice-
+/// candidate", …)` and skip this struct.
+///
+/// Per spec, `candidate` and `sdpMid` are required on every payload
+/// the parser accepts. On a successful return (non-NULL handle),
+/// `candidate_ptr` and `sdp_mid_ptr` are guaranteed to be non-NULL —
+/// their `*_len` may still be 0 (an empty `candidate` is the
+/// end-of-candidates marker; an empty `sdp_mid` is permitted by
+/// the wire shape even though the spec discourages it).
+///
+/// The optional `username_fragment_ptr` IS NULL when the
+/// `usernameFragment` key wasn't on the wire (`username_fragment_len`
+/// is 0 in that case). `sdp_mline_index_present` /
+/// `sdp_mline_index` use the standard "out param + present-flag"
+/// shape because the spec marks the index optional.
+#[repr(C)]
+pub struct VoiceIceCandidateOut {
+    pub candidate_ptr: *const u8,
+    pub candidate_len: usize,
+    pub sdp_mid_ptr: *const u8,
+    pub sdp_mid_len: usize,
+    pub username_fragment_ptr: *const u8,
+    pub username_fragment_len: usize,
+    pub sdp_mline_index: u32,
+    pub sdp_mline_index_present: bool,
+    pub is_end_of_candidates: bool,
+}
+
+/// Opaque handle wrapping the owned strings the parser allocated.
+/// Caller frees via [`gtkhx_proto_voice_ice_free`]. Same opaque-
+/// pointer pattern as [`CatList`] — a Rust-allocated struct boxed
+/// for the C side.
+pub struct VoiceIceCandidate {
+    inner: crate::voice::ice::IceCandidate,
+}
+
+/// Parse the inner JSON from a `DATA_VOICE_ICE` chunk and return an
+/// opaque handle. Returns NULL on parse failure or NULL inputs.
+/// Caller must release the handle with [`gtkhx_proto_voice_ice_free`].
+///
+/// On success, also fills `*out` (if non-NULL) with borrowed
+/// pointers into the handle's owned strings. The pointers stay
+/// valid for the lifetime of the handle.
+///
+/// # Safety
+/// `json_ptr` valid for `json_len` bytes (or NULL with `json_len ==
+/// 0`); `out` either NULL or a valid writable `VoiceIceCandidateOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_voice_ice_json(
+    json_ptr: *const u8,
+    json_len: usize,
+    out: *mut VoiceIceCandidateOut,
+) -> *mut VoiceIceCandidate {
+    if json_ptr.is_null() && json_len != 0 {
+        return std::ptr::null_mut();
+    }
+    let s = as_slice(json_ptr, json_len);
+    let parsed = match crate::voice::ice::parse(s) {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    let boxed = Box::new(VoiceIceCandidate { inner: parsed });
+    if !out.is_null() {
+        let p = &boxed.inner;
+        let candidate_bytes = p.candidate.as_deref().map(str::as_bytes);
+        let mid_bytes = p.sdp_mid.as_deref().map(str::as_bytes);
+        let ufrag_bytes = p.username_fragment.as_deref().map(str::as_bytes);
+        *out = VoiceIceCandidateOut {
+            candidate_ptr: candidate_bytes.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
+            candidate_len: candidate_bytes.map(|b| b.len()).unwrap_or(0),
+            sdp_mid_ptr: mid_bytes.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
+            sdp_mid_len: mid_bytes.map(|b| b.len()).unwrap_or(0),
+            username_fragment_ptr: ufrag_bytes
+                .map(|b| b.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            username_fragment_len: ufrag_bytes.map(|b| b.len()).unwrap_or(0),
+            sdp_mline_index: p.sdp_mline_index.unwrap_or(0),
+            sdp_mline_index_present: p.sdp_mline_index.is_some(),
+            is_end_of_candidates: p.is_end_of_candidates(),
+        };
+    }
+    Box::into_raw(boxed)
+}
+
+/// Free a handle returned by [`gtkhx_proto_parse_voice_ice_json`].
+/// Safe to call on NULL.
+///
+/// # Safety
+/// `h` must be either NULL or a pointer previously returned by
+/// `gtkhx_proto_parse_voice_ice_json` and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_voice_ice_free(h: *mut VoiceIceCandidate) {
+    if !h.is_null() {
+        let _ = Box::from_raw(h);
+    }
+}
+
+/// Build the outgoing JSON for an ICE candidate into `out_buf`.
+/// Returns the number of bytes written (without a trailing NUL), or
+/// `0` on failure (NULL pointers, undersized buffer).
+///
+/// Strings are passed as `(ptr, len)` pairs; NULL pointer means
+/// "key absent." `sdp_mline_index_present` toggles whether the
+/// integer field is emitted.
+///
+/// # Safety
+/// All `*_ptr` parameters must be valid for the corresponding
+/// `*_len` bytes (or NULL with `*_len == 0`); `out_buf` must be
+/// valid for `out_cap` bytes (or NULL — early-rejected).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_voice_ice_json(
+    candidate_ptr: *const u8,
+    candidate_len: usize,
+    sdp_mid_ptr: *const u8,
+    sdp_mid_len: usize,
+    sdp_mline_index: u32,
+    sdp_mline_index_present: bool,
+    username_fragment_ptr: *const u8,
+    username_fragment_len: usize,
+    out_buf: *mut u8,
+    out_cap: usize,
+) -> usize {
+    if out_buf.is_null() || out_cap == 0 || out_cap > isize::MAX as usize {
+        return 0;
+    }
+    // Per fogWraith Capabilities-Voice.md §"ICE Candidate Format",
+    // `candidate` and `sdpMid` are required on every payload. NULL
+    // means "key absent" in this FFI shape, so a NULL pointer for
+    // either of those two would emit JSON that omits a required
+    // key — non-conformant wire output. Reject up front rather
+    // than letting the builder emit `{}` or `{"sdpMid":"…"}`.
+    //
+    // The `candidate` value is allowed to be the empty string
+    // (end-of-candidates shorthand per spec), so the
+    // `candidate_len == 0` case must still pass once `candidate_ptr`
+    // is non-NULL. Same for `sdpMid` to be defensive (the spec
+    // doesn't explicitly say sdpMid must be non-empty).
+    if candidate_ptr.is_null() || sdp_mid_ptr.is_null() {
+        return 0;
+    }
+    // Reject NULL-with-nonzero-len pairs on the optional fields —
+    // same policy as the rest of the FFI surface. The optional
+    // `usernameFragment` may be NULL-with-zero-len (key absent) or
+    // a valid pointer with any length.
+    if username_fragment_ptr.is_null() && username_fragment_len != 0 {
+        return 0;
+    }
+
+    // Body wrapped in a closure so the UTF-8 decode steps can use `?`;
+    // failures fall through to a zero-byte return at the C side.
+    let result: Option<crate::voice::ice::IceCandidate> = (|| {
+        let mut c = crate::voice::ice::IceCandidate::default();
+        // NULL with len 0 means "key absent"; NULL with non-zero len was
+        // rejected up front above.
+        if !candidate_ptr.is_null() {
+            c.candidate = Some(
+                std::str::from_utf8(as_slice(candidate_ptr, candidate_len))
+                    .ok()?
+                    .to_string(),
+            );
+        }
+        if !sdp_mid_ptr.is_null() {
+            c.sdp_mid = Some(
+                std::str::from_utf8(as_slice(sdp_mid_ptr, sdp_mid_len))
+                    .ok()?
+                    .to_string(),
+            );
+        }
+        if sdp_mline_index_present {
+            c.sdp_mline_index = Some(sdp_mline_index);
+        }
+        if !username_fragment_ptr.is_null() {
+            c.username_fragment = Some(
+                std::str::from_utf8(as_slice(
+                    username_fragment_ptr,
+                    username_fragment_len,
+                ))
+                .ok()?
+                .to_string(),
+            );
+        }
+        Some(c)
+    })();
+    let c = match result {
+        Some(c) => c,
+        None => return 0,
+    };
+
+    let json = crate::voice::ice::build(&c);
+    if json.len() > out_cap {
+        return 0;
+    }
+    let buf = slice::from_raw_parts_mut(out_buf, out_cap);
+    buf[..json.len()].copy_from_slice(json.as_bytes());
+    json.len()
+}
+
+/// C-ABI scalar fields from a parsed voice reply / notification body
+/// (the JOIN reply at 600, the 602 SDP_OFFER, the 605 ROOM_STATUS,
+/// the 606 MUTE-toggle reflection). Mirrors
+/// [`crate::voice::VoiceReply`] but without the borrowed slices —
+/// the borrowed payloads are returned via separate
+/// `gtkhx_proto_voice_reply_*` lookup shims so the caller can pull
+/// just the fields it needs.
+#[repr(C)]
+pub struct VoiceReplyOut {
+    pub cid: u32,
+    pub muted: u16,
+    pub muted_present: bool,
+    pub sdp_present: bool,
+    pub ice_present: bool,
+    pub codec_present: bool,
+    pub participants_present: bool,
+    /// Byte length of the SDP payload (when `sdp_present` is true).
+    pub sdp_len: u32,
+    /// Byte length of the ICE payload.
+    pub ice_len: u32,
+    /// Byte length of the codec name.
+    pub codec_len: u32,
+    /// Byte length of the participants blob.
+    pub participants_len: u32,
+}
+
+/// Parse a voice reply / notification body's scalar fields. The
+/// variable-length payloads (SDP / ICE / codec / participants) are
+/// fetched separately via the per-field accessors below, since they
+/// borrow into the caller's input buffer and the C side needs them
+/// only when the matching field is present.
+///
+/// Returns true on success (always, for any input shape — the
+/// parser tolerates empty bodies); false only on NULL `out`.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL with `len == 0`); `out` a
+/// valid writable `VoiceReplyOut` or NULL (early failure).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_voice_reply(
+    buf: *const u8,
+    len: usize,
+    out: *mut VoiceReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let r = crate::voice::parse_voice_reply(s, s.len());
+    *out = VoiceReplyOut {
+        cid: r.cid,
+        muted: r.muted.unwrap_or(0),
+        muted_present: r.muted.is_some(),
+        sdp_present: r.sdp.is_some(),
+        ice_present: r.ice.is_some(),
+        codec_present: r.codec.is_some(),
+        participants_present: r.participants.is_some(),
+        sdp_len: r.sdp.map(|s| s.len() as u32).unwrap_or(0),
+        ice_len: r.ice.map(|s| s.len() as u32).unwrap_or(0),
+        codec_len: r.codec.map(|s| s.len() as u32).unwrap_or(0),
+        participants_len: r.participants.map(|s| s.len() as u32).unwrap_or(0),
+    };
+    true
+}
+
+/// Per-field accessor that fetches a borrowed slice into the message
+/// buffer for one of the variable-length voice payloads. `field`
+/// selects which payload:
+///
+/// - 0 = SDP (`VOICE_SDP`)
+/// - 1 = ICE (`VOICE_ICE`)
+/// - 2 = codec name (`VOICE_CODEC`)
+/// - 3 = participants blob (`VOICE_PARTICIPANTS`)
+///
+/// On success writes `*out_ptr` and `*out_len` pointing into the
+/// caller's `buf`. Returns true if the field was found, false if
+/// absent or on invalid `field`. The returned pointer stays valid
+/// for as long as `buf` does.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out_ptr` / `out_len`
+/// valid writable pointers or NULL (in which case the call still
+/// returns the presence boolean but writes nothing).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_voice_reply_field(
+    buf: *const u8,
+    len: usize,
+    field: u32,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) -> bool {
+    let s = as_slice(buf, len);
+    let r = crate::voice::parse_voice_reply(s, s.len());
+    let payload: Option<&[u8]> = match field {
+        0 => r.sdp,
+        1 => r.ice,
+        2 => r.codec,
+        3 => r.participants,
+        _ => return false,
+    };
+    match payload {
+        Some(bytes) => {
+            if !out_ptr.is_null() {
+                *out_ptr = bytes.as_ptr();
+            }
+            if !out_len.is_null() {
+                *out_len = bytes.len();
+            }
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

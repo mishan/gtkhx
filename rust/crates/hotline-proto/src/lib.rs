@@ -44,6 +44,7 @@ pub mod messages;
 pub mod parse;
 pub mod sanitize;
 pub mod text;
+pub mod voice;
 pub mod wire;
 
 mod ffi;

@@ -17,6 +17,37 @@ extern void hx_rcv_banner (struct htlc_conn *htlc);
 extern void hx_rcv_magic (struct htlc_conn *htlc);
 extern void hx_rcv_hdr (struct htlc_conn *htlc);
 
+/* Voice-chat extension (fogWraith Capabilities-Voice.md), Phase 8.A.
+ * Server-initiated notifications dispatched from the hx_rcv_hdr switch.
+ *   _sdp_offer   — 602 VOICE_SDP_OFFER, initial offer or renegotiation.
+ *   _ice         — 604 VOICE_ICE, trickle-ICE candidate (server side).
+ *   _room_status — 605 VOICE_ROOM_STATUS, updated participant list.
+ * Phase 8.A logs the parsed payload via debug_log("voice", ...) and
+ * proto_trace; the runtime state machine + GtkhxSession signals land
+ * in Phase 8.C with hxvoice-runtime. */
+extern void hx_rcv_voice_sdp_offer (struct htlc_conn *htlc);
+extern void hx_rcv_voice_ice (struct htlc_conn *htlc);
+extern void hx_rcv_voice_room_status (struct htlc_conn *htlc);
+
+/* TASK-reply handlers for the client-initiated 600/601/603/606
+ * transactions. The voice send wrappers in src/voice.c register
+ * one of these via task_new() before each hlwrite_chunks call;
+ * hx_rcv_task dispatches here when the matching trans id comes
+ * back.
+ *   _join         — 600 VOICE_JOIN reply parser. JOIN reply
+ *                   carries the server's initial SDP offer +
+ *                   active codec + current participants per spec.
+ *                   `channel_ptr` is GUINT_TO_POINTER(cid) the
+ *                   send wrapper handed task_new for the data.
+ *   _simple_ack   — Empty-success reply for 601/603/606. Logs
+ *                   that the trans completed. `opcode_ptr` is
+ *                   the originating opcode (label only),
+ *                   `cid_ptr` is the originating cid (diagnostic
+ *                   only). */
+extern void rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr);
+extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
+                                       void *opcode_ptr, void *cid_ptr);
+
 extern void rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn);
 extern void rcv_task_msg (struct htlc_conn *htlc, char *msg_buf);
 extern void rcv_task_newscat_list (struct htlc_conn *htlc,

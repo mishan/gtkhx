@@ -528,6 +528,56 @@ struct hl_user_data {
 #define HTLC_HDR_GET_CHAT_HISTORY ((guint32)0x000002bc) /* 700 */
 #define HTLS_HDR_GET_CHAT_HISTORY ((guint32)0x000002bc)
 
+/* Voice-chat extension (fogWraith Capabilities-Voice.md). All seven
+ * opcodes live in the 600-606 range, clear of the base protocol's
+ * 101-355 and the chat-history extension at 700. Capability is gated
+ * on HTLC_CAP_VOICE (bit 2) in DATA_CAPABILITIES; the server echoes
+ * the bit to advertise SFU support, and clients that don't negotiate
+ * the cap never emit or receive these opcodes.
+ *
+ * The canonical typed definitions live in the Rust hotline-proto
+ * crate (rust/crates/hotline-proto/src/messages.rs); these C #defines
+ * are integer aliases for switch-case readability in rcv.c. Same
+ * dual-define convention as HTLC_HDR_GET_CHAT_HISTORY above. */
+#define HTLC_HDR_VOICE_JOIN ((guint32)0x00000258)        /* 600 client->server */
+#define HTLC_HDR_VOICE_LEAVE ((guint32)0x00000259)       /* 601 client->server */
+#define HTLS_HDR_VOICE_SDP_OFFER ((guint32)0x0000025a)   /* 602 server->client */
+#define HTLC_HDR_VOICE_SDP_ANSWER ((guint32)0x0000025b)  /* 603 client->server */
+#define HTLC_HDR_VOICE_ICE ((guint32)0x0000025c)         /* 604 bidirectional */
+#define HTLS_HDR_VOICE_ICE ((guint32)0x0000025c)
+#define HTLS_HDR_VOICE_ROOM_STATUS ((guint32)0x0000025d) /* 605 server->client */
+#define HTLC_HDR_VOICE_MUTE ((guint32)0x0000025e)        /* 606 client->server */
+
+/* Voice-chat data field IDs. The five sit in 0x01F5-0x01F9, the gap
+ * between the Large-File 64-bit extension (ends at 0x01F4) and the
+ * chat-history block at 0x0F01+.
+ *
+ *   DATA_VOICE_SDP           UTF-8 SDP blob (RFC 8866). Non-empty on
+ *                            both offer and answer sides — an empty
+ *                            answer would tell the server we accept
+ *                            nothing, so both the C wrapper and the
+ *                            Rust builder reject it.
+ *   DATA_VOICE_ICE           UTF-8 JSON-encoded RTCIceCandidateInit.
+ *                            Empty string is the end-of-candidates
+ *                            marker per spec.
+ *   DATA_VOICE_CODEC         Active codec name, ASCII. PCMU is the
+ *                            only codec the spec mandates.
+ *   DATA_VOICE_MUTED         UInt16: 0 = unmuted, 1 = muted.
+ *   DATA_VOICE_PARTICIPANTS  Packed 6-byte-per-entry binary blob.
+ *                            Layout: u16 uid + u16 flags + u16 codec_id,
+ *                            all big-endian. Flags bit 0 = muted.
+ *
+ * Source: fogWraith Docs/Protocol/Capabilities-Voice.md. */
+#define HTLC_DATA_VOICE_SDP ((guint16)0x01f5)
+#define HTLS_DATA_VOICE_SDP ((guint16)0x01f5)
+#define HTLC_DATA_VOICE_ICE ((guint16)0x01f6)
+#define HTLS_DATA_VOICE_ICE ((guint16)0x01f6)
+#define HTLC_DATA_VOICE_CODEC ((guint16)0x01f7)
+#define HTLS_DATA_VOICE_CODEC ((guint16)0x01f7)
+#define HTLC_DATA_VOICE_MUTED ((guint16)0x01f8)
+#define HTLS_DATA_VOICE_MUTED ((guint16)0x01f8)
+#define HTLS_DATA_VOICE_PARTICIPANTS ((guint16)0x01f9)
+
 #define HTLC_DATA_HASH_MD5 ((guint16)0x0e80)
 #define HTLC_DATA_HASH_HAVAL ((guint16)0x0e81)
 #define HTLC_DATA_HASH_SHA1 ((guint16)0x0e82)

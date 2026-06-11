@@ -235,6 +235,99 @@ test_hdr_file_putfolder (void)
                      "HTLC_HDR_FILE_PUTFOLDER");
 }
 
+/* Voice-chat extension opcodes 600-606. 604 ICE is bidirectional and
+ * carries the combined HTLC/S label, mirroring the existing
+ * GET_CHAT_HISTORY convention. */
+static void
+test_hdr_voice_join (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_VOICE_JOIN), ==,
+                     "HTLC_HDR_VOICE_JOIN");
+}
+
+static void
+test_hdr_voice_leave (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_VOICE_LEAVE), ==,
+                     "HTLC_HDR_VOICE_LEAVE");
+}
+
+static void
+test_hdr_voice_sdp_offer (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLS_HDR_VOICE_SDP_OFFER), ==,
+                     "HTLS_HDR_VOICE_SDP_OFFER");
+}
+
+static void
+test_hdr_voice_sdp_answer (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_VOICE_SDP_ANSWER), ==,
+                     "HTLC_HDR_VOICE_SDP_ANSWER");
+}
+
+static void
+test_hdr_voice_ice_bidirectional (void)
+{
+    /* Same opcode for both directions — combined label. */
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_VOICE_ICE), ==,
+                     "HTLC/S_HDR_VOICE_ICE");
+    g_assert_cmpstr (proto_hdr_name (HTLS_HDR_VOICE_ICE), ==,
+                     "HTLC/S_HDR_VOICE_ICE");
+}
+
+static void
+test_hdr_voice_room_status (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLS_HDR_VOICE_ROOM_STATUS), ==,
+                     "HTLS_HDR_VOICE_ROOM_STATUS");
+}
+
+static void
+test_hdr_voice_mute (void)
+{
+    g_assert_cmpstr (proto_hdr_name (HTLC_HDR_VOICE_MUTE), ==,
+                     "HTLC_HDR_VOICE_MUTE");
+}
+
+static void
+test_data_voice_sdp (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_VOICE_SDP), ==,
+                     "HTLC/S_DATA_VOICE_SDP");
+}
+
+static void
+test_data_voice_ice (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_VOICE_ICE), ==,
+                     "HTLC/S_DATA_VOICE_ICE");
+}
+
+static void
+test_data_voice_codec (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_VOICE_CODEC), ==,
+                     "HTLC/S_DATA_VOICE_CODEC");
+}
+
+static void
+test_data_voice_muted (void)
+{
+    g_assert_cmpstr (proto_data_name (HTLC_DATA_VOICE_MUTED), ==,
+                     "HTLC/S_DATA_VOICE_MUTED");
+}
+
+static void
+test_data_voice_participants (void)
+{
+    /* Server-only — sent in VOICE_ROOM_STATUS (605) and the JOIN
+     * reply. The C header doesn't define an HTLC_ alias because
+     * clients never emit this field. */
+    g_assert_cmpstr (proto_data_name (HTLS_DATA_VOICE_PARTICIPANTS), ==,
+                     "HTLS_DATA_VOICE_PARTICIPANTS");
+}
+
 static void
 test_data_unknown_zero_falls_back (void)
 {
@@ -313,6 +406,24 @@ main (int argc, char **argv)
                      test_hdr_file_getfolder);
     g_test_add_func ("/proto_names/hdr_file_putfolder",
                      test_hdr_file_putfolder);
+
+    g_test_add_func ("/proto_names/hdr_voice_join", test_hdr_voice_join);
+    g_test_add_func ("/proto_names/hdr_voice_leave", test_hdr_voice_leave);
+    g_test_add_func ("/proto_names/hdr_voice_sdp_offer",
+                     test_hdr_voice_sdp_offer);
+    g_test_add_func ("/proto_names/hdr_voice_sdp_answer",
+                     test_hdr_voice_sdp_answer);
+    g_test_add_func ("/proto_names/hdr_voice_ice_bidirectional",
+                     test_hdr_voice_ice_bidirectional);
+    g_test_add_func ("/proto_names/hdr_voice_room_status",
+                     test_hdr_voice_room_status);
+    g_test_add_func ("/proto_names/hdr_voice_mute", test_hdr_voice_mute);
+    g_test_add_func ("/proto_names/data_voice_sdp", test_data_voice_sdp);
+    g_test_add_func ("/proto_names/data_voice_ice", test_data_voice_ice);
+    g_test_add_func ("/proto_names/data_voice_codec", test_data_voice_codec);
+    g_test_add_func ("/proto_names/data_voice_muted", test_data_voice_muted);
+    g_test_add_func ("/proto_names/data_voice_participants",
+                     test_data_voice_participants);
 
     return g_test_run ();
 }

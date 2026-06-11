@@ -1273,4 +1273,195 @@ extern size_t gtkhx_proto_pack_message (uint8_t *out, size_t out_cap,
 extern size_t gtkhx_proto_text_to_utf8 (const uint8_t *src, size_t len,
                                         uint8_t *dst, size_t cap);
 
+/* ---- Voice-chat extension (Phase 8.A) -----------------------------
+ *
+ * Builders for HTLC_HDR_VOICE_* and parsers for HTLS_HDR_VOICE_* /
+ * VOICE_ROOM_STATUS / the JOIN reply, all defined in
+ * rust/crates/hotline-proto/src/voice.rs. The C-side wrapper sits
+ * in src/voice.{h,c}; rcv.c dispatches the 600-606 family through
+ * the parsers below.
+ *
+ * Per docs/voice-chat-plan.md §5: the builder FFI shims are slated
+ * for retirement once Phase 8.C lands the `hxvoice-runtime` crate
+ * (the runtime can call the Rust builders directly). They stay for
+ * Phase 8.A because there's no runtime crate to lean on yet. */
+
+/* Build chunks for HTLC_HDR_VOICE_JOIN (600): one CHAT_ID chunk.
+ * chunks_cap >= 1, scratch_cap >= 4. Returns chunk count (1) or 0. */
+extern int32_t gtkhx_proto_build_voice_join_chunks (uint32_t cid,
+                                                    struct hx_chunk *chunks,
+                                                    size_t chunks_cap,
+                                                    uint8_t *scratch,
+                                                    size_t scratch_cap);
+
+/* Build chunks for HTLC_HDR_VOICE_LEAVE (601): one CHAT_ID chunk. */
+extern int32_t gtkhx_proto_build_voice_leave_chunks (uint32_t cid,
+                                                     struct hx_chunk *chunks,
+                                                     size_t chunks_cap,
+                                                     uint8_t *scratch,
+                                                     size_t scratch_cap);
+
+/* Build chunks for HTLC_HDR_VOICE_SDP_ANSWER (603): CHAT_ID + VOICE_SDP.
+ * Empty sdp rejected. chunks_cap >= 2, scratch_cap >= 4. */
+extern int32_t gtkhx_proto_build_voice_answer_chunks (uint32_t cid,
+                                                      const uint8_t *sdp_ptr,
+                                                      size_t sdp_len,
+                                                      struct hx_chunk *chunks,
+                                                      size_t chunks_cap,
+                                                      uint8_t *scratch,
+                                                      size_t scratch_cap);
+
+/* Build chunks for HTLC_HDR_VOICE_ICE (604): CHAT_ID + VOICE_ICE.
+ * ice_len 0 with NULL/non-NULL ice_ptr is the end-of-candidates marker. */
+extern int32_t gtkhx_proto_build_voice_ice_chunks (uint32_t cid,
+                                                   const uint8_t *ice_ptr,
+                                                   size_t ice_len,
+                                                   struct hx_chunk *chunks,
+                                                   size_t chunks_cap,
+                                                   uint8_t *scratch,
+                                                   size_t scratch_cap);
+
+/* Build chunks for HTLC_HDR_VOICE_MUTE (606): CHAT_ID + VOICE_MUTED (u16).
+ * chunks_cap >= 2, scratch_cap >= 6. The C caller normalises `muted` to
+ * 0/1 before the call. */
+extern int32_t gtkhx_proto_build_voice_mute_chunks (uint32_t cid,
+                                                    uint16_t muted,
+                                                    struct hx_chunk *chunks,
+                                                    size_t chunks_cap,
+                                                    uint8_t *scratch,
+                                                    size_t scratch_cap);
+
+/* C-ABI mirror of crate::voice::Participant. */
+struct gtkhx_proto_voice_participant {
+    uint16_t user_id;
+    uint16_t flags;    /* bit 0 = muted, bits 1-15 reserved */
+    uint16_t codec_id; /* 0 = PCMU; others reserved */
+};
+_Static_assert (sizeof (struct gtkhx_proto_voice_participant) == 6,
+                "voice participant ABI is 6 bytes");
+
+/* Walk the packed DATA_VOICE_PARTICIPANTS blob into a caller buffer.
+ * Returns the number of entries written (capped at `cap`). Returns
+ * 0 on NULL out or NULL blob with nonzero blob_len. */
+extern size_t gtkhx_proto_parse_voice_participants (const uint8_t *blob_ptr,
+                                                    size_t blob_len,
+                                                    struct gtkhx_proto_voice_participant *out,
+                                                    size_t cap);
+
+/* Mid-label parse return codes. */
+#define GTKHX_PROTO_VOICE_MID_INVALID 0
+#define GTKHX_PROTO_VOICE_MID_SEND 1
+#define GTKHX_PROTO_VOICE_MID_USER 2
+
+/* Parse an SDP a=mid: label. Returns one of the GTKHX_PROTO_VOICE_MID_*
+ * constants. For the USER variant, *out_uid is set to the parsed uid;
+ * for SEND and INVALID, *out_uid is left untouched. */
+extern uint32_t gtkhx_proto_parse_voice_mid_label (const uint8_t *label_ptr,
+                                                   size_t label_len,
+                                                   uint16_t *out_uid);
+
+/* C-ABI summary of an SDP offer/answer. Scalars only; the mid / bundle
+ * lists stay Rust-side until the runtime crate consumes them. */
+struct gtkhx_proto_voice_sdp_summary {
+    uint32_t mid_count;
+    uint32_t unknown_mid_count;
+    uint32_t bundle_count;
+    bool has_disabled_slot;
+    bool has_pcmu;
+};
+
+/* Returns true on success; false (leaves *out untouched) only on NULL
+ * out or NULL sdp_ptr with nonzero sdp_len. */
+extern bool gtkhx_proto_parse_voice_sdp_summary (
+    const uint8_t *sdp_ptr, size_t sdp_len,
+    struct gtkhx_proto_voice_sdp_summary *out);
+
+/* C-ABI view of a parsed ICE candidate; strings borrow into the
+ * opaque handle and stay valid until gtkhx_proto_voice_ice_free is
+ * called on the handle. */
+struct gtkhx_proto_voice_ice_candidate {
+    const uint8_t *candidate_ptr;
+    size_t candidate_len;
+    const uint8_t *sdp_mid_ptr;
+    size_t sdp_mid_len;
+    const uint8_t *username_fragment_ptr;
+    size_t username_fragment_len;
+    uint32_t sdp_mline_index;
+    bool sdp_mline_index_present;
+    bool is_end_of_candidates;
+};
+
+/* Opaque handle, owned by Rust. */
+struct gtkhx_proto_voice_ice_handle;
+
+/* Parse the inner JSON from a DATA_VOICE_ICE chunk. Returns an opaque
+ * handle on success, NULL on parse failure or NULL inputs. On success
+ * *out (if non-NULL) is populated with borrowed pointers into the
+ * handle's owned strings. Caller frees via gtkhx_proto_voice_ice_free. */
+extern struct gtkhx_proto_voice_ice_handle *
+gtkhx_proto_parse_voice_ice_json (const uint8_t *json_ptr, size_t json_len,
+                                  struct gtkhx_proto_voice_ice_candidate *out);
+
+extern void
+gtkhx_proto_voice_ice_free (struct gtkhx_proto_voice_ice_handle *h);
+
+/* Build the outgoing JSON for an ICE candidate into out_buf.
+ *
+ * Per fogWraith Capabilities-Voice.md §"ICE Candidate Format",
+ * `candidate` and `sdpMid` are required on every payload:
+ *   - candidate_ptr MUST be non-NULL. candidate_len may be 0 (the
+ *     spec's end-of-candidates shorthand emits the key with an
+ *     empty-string value).
+ *   - sdp_mid_ptr MUST be non-NULL. sdp_mid_len may be 0.
+ *
+ * The optional fields preserve the NULL-means-key-absent shape:
+ *   - sdp_mline_index is emitted only when sdp_mline_index_present.
+ *   - username_fragment_ptr == NULL with username_fragment_len == 0
+ *     omits the key. Non-NULL with any length emits the value.
+ *
+ * Returns the number of bytes written, or 0 on failure (NULL
+ * required pointer, undersized buffer, NULL out_buf). No trailing
+ * NUL is appended. The returned length may be up to and including
+ * out_cap on success — callers that want to NUL-terminate the
+ * payload must allocate out_cap + 1 bytes and pass out_cap as the
+ * cap, then write out_buf[returned] = '\0' from the spare slot. */
+extern size_t gtkhx_proto_build_voice_ice_json (
+    const uint8_t *candidate_ptr, size_t candidate_len,
+    const uint8_t *sdp_mid_ptr, size_t sdp_mid_len,
+    uint32_t sdp_mline_index, bool sdp_mline_index_present,
+    const uint8_t *username_fragment_ptr, size_t username_fragment_len,
+    uint8_t *out_buf, size_t out_cap);
+
+/* Scalar fields parsed from a voice reply / notification body. The
+ * variable-length payloads (SDP / ICE / codec / participants) are
+ * fetched separately via gtkhx_proto_voice_reply_field; the scalars
+ * tell the caller which fields are present and how long each payload
+ * is so it can size its buffer. */
+struct gtkhx_proto_voice_reply {
+    uint32_t cid;
+    uint16_t muted;
+    bool muted_present;
+    bool sdp_present;
+    bool ice_present;
+    bool codec_present;
+    bool participants_present;
+    uint32_t sdp_len;
+    uint32_t ice_len;
+    uint32_t codec_len;
+    uint32_t participants_len;
+};
+
+extern bool gtkhx_proto_parse_voice_reply (const uint8_t *buf, size_t len,
+                                           struct gtkhx_proto_voice_reply *out);
+
+/* Per-field accessor for the variable-length payloads. `field`:
+ *   0 = SDP, 1 = ICE, 2 = codec name, 3 = participants blob.
+ * On success writes *out_ptr / *out_len pointing into `buf`; the
+ * pointer stays valid for the lifetime of `buf`. Returns false if
+ * the field is absent or `field` is invalid. */
+extern bool gtkhx_proto_voice_reply_field (const uint8_t *buf, size_t len,
+                                           uint32_t field,
+                                           const uint8_t **out_ptr,
+                                           size_t *out_len);
+
 #endif /* _HOTLINE_PROTO_H */
