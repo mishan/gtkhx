@@ -23,8 +23,33 @@ use hxvoice::event::Event;
 use hxvoice::event::ServerError;
 
 use crate::runtime::{
-    CallbackBackend, NoopBackend, SendWireFrameCallback, VoiceRuntime,
+    CallbackBackend, MuteChangedCallback, NoopBackend, SendWireFrameCallback,
+    SignalCallbacks, StateChangedCallback, VoiceRuntime,
 };
+
+/// FFI mirror of [`crate::runtime::SignalCallbacks`]. The C header
+/// declares this as `gtkhx_voice_runtime_signal_callbacks`;
+/// the field layout (and any future appended fields) must stay in
+/// lock-step.
+///
+/// `#[repr(C)]` because the C caller writes the field offsets
+/// directly. Layout is "pointer-sized fn-pointer slot per signal",
+/// matching the header exactly.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct GtkhxVoiceRuntimeSignalCallbacks {
+    pub state_changed: Option<StateChangedCallback>,
+    pub mute_changed: Option<MuteChangedCallback>,
+}
+
+impl From<&GtkhxVoiceRuntimeSignalCallbacks> for SignalCallbacks {
+    fn from(c: &GtkhxVoiceRuntimeSignalCallbacks) -> Self {
+        SignalCallbacks {
+            state_changed: c.state_changed,
+            mute_changed: c.mute_changed,
+        }
+    }
+}
 
 /// Initialise the GStreamer subsystem.
 ///
@@ -145,6 +170,87 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_new_with_callbacks(
             eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
             core::ptr::null_mut()
         }
+    }
+}
+
+/// Construct a runtime with both wire-frame and state-machine
+/// signal callbacks registered. Production uses this so the C
+/// side's `voice_panel.c` reflects authoritative state-machine
+/// state (joined / muted) instead of running optimistic UI.
+///
+/// `send_wire_frame_cb` and every individual `signals.*` field
+/// follow the same NULL semantics as
+/// [`gtkhx_voice_runtime_new_with_callbacks`] — NULL means "no
+/// subscriber for this surface". A NULL `signals` pointer is
+/// equivalent to passing a struct with all-NULL fields.
+///
+/// # Safety
+/// `user_data` and every non-NULL callback must remain valid for
+/// the lifetime of the returned runtime. The `signals` pointer
+/// itself is read once at construction; the caller may free or
+/// reuse the struct as soon as this function returns.
+/// Must be called from the main thread.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_new_v2(
+    user_data: *mut core::ffi::c_void,
+    send_wire_frame_cb: Option<SendWireFrameCallback>,
+    signals: *const GtkhxVoiceRuntimeSignalCallbacks,
+) -> *mut VoiceRuntime {
+    let signal_callbacks = if signals.is_null() {
+        SignalCallbacks::none()
+    } else {
+        // SAFETY: caller contract — non-NULL `signals` must
+        // point at a valid GtkhxVoiceRuntimeSignalCallbacks for
+        // the duration of this call. We copy out of it before
+        // returning, so its lifetime ends here.
+        SignalCallbacks::from(unsafe { &*signals })
+    };
+    let backend = Box::new(CallbackBackend::new_with_signals(
+        user_data,
+        send_wire_frame_cb,
+        signal_callbacks,
+    ));
+    match VoiceRuntime::new(backend) {
+        Ok(rt) => Box::into_raw(Box::new(rt)),
+        Err(e) => {
+            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
+            core::ptr::null_mut()
+        }
+    }
+}
+
+/// Read the runtime's currently-active cid. Returns `1` and
+/// writes the cid through `out_cid` when the state machine has an
+/// active room (any state except `Idle` / `Leaving`); returns `0`
+/// and leaves `out_cid` untouched otherwise. NULL-safe on both
+/// `rt` and `out_cid` (returns `0`).
+///
+/// Production uses this from the signal callbacks to figure out
+/// which voice panel to update — the StateChanged / MuteChanged
+/// payloads don't carry cid, but the C side may have multiple
+/// chat panels each tracking a different cid.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. `out_cid`, if
+/// non-NULL, must be writable for `sizeof(uint32_t)`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_active_cid(
+    rt: *mut VoiceRuntime,
+    out_cid: *mut u32,
+) -> i32 {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return 0;
+    };
+    if out_cid.is_null() {
+        return 0;
+    }
+    match rt.active_cid() {
+        Some(cid) => {
+            // SAFETY: caller guaranteed out_cid is writable.
+            unsafe { *out_cid = cid };
+            1
+        }
+        None => 0,
     }
 }
 

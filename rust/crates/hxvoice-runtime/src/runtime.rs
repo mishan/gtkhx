@@ -383,16 +383,83 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
     body_len: usize,
 );
 
-/// Backend implementation that bridges to a C callback. Production
-/// uses this with `voice_runtime_send_wire_frame_cb` in voice_panel.c
-/// so the state machine's outbound voice opcodes reach `hlwrite_chunks`
-/// via the existing `hx_send_voice_*` helpers.
+/// C-callback for `SignalKind::StateChanged`. The `state` value is
+/// the FFI mirror of [`hxvoice::state::SessionState`]; integer
+/// values match the C header's `gtkhx_voice_state` enum
+/// (`Idle=0` through `Leaving=5`).
+pub type StateChangedCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, state: u32);
+
+/// C-callback for `SignalKind::MuteChanged`. `muted` is 0 or 1.
+pub type MuteChangedCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, muted: i32);
+
+/// Bundle of per-`SignalKind` C callbacks. Mirrors
+/// `gtkhx_voice_runtime_signal_callbacks` in `src/voice_runtime.h`.
+/// Each field is `Option` because the C caller may pass NULL for
+/// signals it doesn't care about — the runtime treats `None` as
+/// "no subscriber" and drops the corresponding emit silently.
 ///
-/// `emit_signal` and `tear_down` are stubbed out for now — the
-/// runtime-to-UI signal path lands in a follow-up that wires
-/// `GtkhxSession::emit_*`. Until then, the C side reads runtime
-/// state synchronously from the UI click handlers and the
-/// optimistic-UI fallback covers the post-click feedback.
+/// Forward-compatible: future `SignalKind` variants get new
+/// fields appended here and the matching column in the C struct.
+/// Old C callers that built against an earlier definition will
+/// pass NULLs for the new fields, which is the correct behaviour.
+#[derive(Clone, Copy)]
+pub struct SignalCallbacks {
+    pub state_changed: Option<StateChangedCallback>,
+    pub mute_changed: Option<MuteChangedCallback>,
+}
+
+impl SignalCallbacks {
+    /// Empty subscription. The bridge falls back to the
+    /// `NoopBackend` behaviour for every signal.
+    pub const fn none() -> Self {
+        Self {
+            state_changed: None,
+            mute_changed: None,
+        }
+    }
+}
+
+/// Map an `hxvoice::state::SessionState` to the discriminant the
+/// C header uses (`gtkhx_voice_state`). Pulled out so the test
+/// suite can pin the mapping without dragging in unsafe extern fn
+/// noise.
+pub(crate) fn session_state_to_ffi(
+    state: hxvoice::state::SessionState,
+) -> u32 {
+    use hxvoice::state::SessionState as S;
+    match state {
+        S::Idle => 0,
+        S::JoinSent => 1,
+        S::OfferPending => 2,
+        S::Connecting => 3,
+        S::Connected => 4,
+        S::Leaving => 5,
+        // `SessionState` is `#[non_exhaustive]` so a wildcard is
+        // mandatory. Future variants should be added to the
+        // header's `gtkhx_voice_state` enum and to the explicit
+        // arms above; until then, map unknown to Idle (the safe
+        // "not in voice" default for the C-side joined-flag
+        // computation) and debug_assert so a test run catches
+        // the omission.
+        _ => {
+            debug_assert!(false, "unhandled SessionState variant: {state:?}");
+            0
+        }
+    }
+}
+
+/// Backend implementation that bridges to C callbacks. Production
+/// uses this with `voice_runtime_send_wire_frame_cb` in
+/// voice_panel.c so the state machine's outbound voice opcodes
+/// reach `hlwrite_chunks` via the existing `hx_send_voice_*`
+/// helpers, and with the matching signal callbacks so the C side
+/// reflects authoritative state-machine state instead of running
+/// optimistic UI.
+///
+/// `tear_down` is stubbed — the C side handles teardown via
+/// `gtkhx_voice_runtime_free` on disconnect.
 ///
 /// Main-thread-only by convention: `Backend` doesn't require
 /// `Send`, and the entire runtime dispatch loop runs on the GLib
@@ -404,20 +471,38 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
 pub struct CallbackBackend {
     user_data: *mut core::ffi::c_void,
     send_wire_frame_cb: Option<SendWireFrameCallback>,
+    signal_callbacks: SignalCallbacks,
 }
 
 impl CallbackBackend {
     /// Construct a backend that calls `send_wire_frame_cb` for
     /// every `Action::SendWireFrame` action. A `None` callback
     /// makes the backend behave like `NoopBackend` for that
-    /// surface.
+    /// surface. No signal subscription.
     pub fn new(
         user_data: *mut core::ffi::c_void,
         send_wire_frame_cb: Option<SendWireFrameCallback>,
     ) -> Self {
+        Self::new_with_signals(
+            user_data,
+            send_wire_frame_cb,
+            SignalCallbacks::none(),
+        )
+    }
+
+    /// Construct a backend with both wire-frame and signal
+    /// callbacks. Each individual callback may still be `None` —
+    /// the runtime falls back to NoopBackend behaviour for that
+    /// specific surface.
+    pub fn new_with_signals(
+        user_data: *mut core::ffi::c_void,
+        send_wire_frame_cb: Option<SendWireFrameCallback>,
+        signal_callbacks: SignalCallbacks,
+    ) -> Self {
         Self {
             user_data,
             send_wire_frame_cb,
+            signal_callbacks,
         }
     }
 }
@@ -434,10 +519,46 @@ impl Backend for CallbackBackend {
         // of the call only.
         unsafe { cb(self.user_data, opcode, body.as_ptr(), body.len()) };
     }
-    fn emit_signal(&mut self, _kind: SignalKind, _payload: SignalPayload) {
-        // Stubbed: the runtime-to-UI signal bridge lands in a
-        // follow-up. For now the C side reads runtime state
-        // synchronously from the UI click handlers.
+    fn emit_signal(&mut self, kind: SignalKind, payload: SignalPayload) {
+        match (kind, payload) {
+            (
+                SignalKind::StateChanged,
+                SignalPayload::StateChanged { new_state },
+            ) => {
+                if let Some(cb) = self.signal_callbacks.state_changed {
+                    let ffi_state = session_state_to_ffi(new_state);
+                    // SAFETY: same lifetime contract as
+                    // send_wire_frame.
+                    unsafe { cb(self.user_data, ffi_state) };
+                }
+            }
+            (
+                SignalKind::MuteChanged,
+                SignalPayload::MuteChanged { muted },
+            ) => {
+                if let Some(cb) = self.signal_callbacks.mute_changed {
+                    // SAFETY: same lifetime contract as
+                    // send_wire_frame.
+                    unsafe {
+                        cb(self.user_data, if muted { 1 } else { 0 })
+                    };
+                }
+            }
+            // RoomStatus + Error land in a follow-up step (users.c
+            // mic icons + AdwToastOverlay). Drop silently for
+            // now — the C side has no subscriber slot for them
+            // yet, so emitting would be a no-op anyway.
+            _ => {
+                debug_assert!(
+                    matches!(
+                        kind,
+                        SignalKind::RoomStatus | SignalKind::Error
+                    ),
+                    "unexpected (SignalKind, SignalPayload) pair: \
+                     ({kind:?}, payload-omitted)"
+                );
+            }
+        }
     }
     fn tear_down(&mut self) {
         // Stubbed: the C side handles teardown via
@@ -850,6 +971,16 @@ impl VoiceRuntime {
     /// Snapshot of the current state. Cheap accessor for tests.
     pub fn state(&self) -> SessionState {
         self.inner.borrow().machine.state()
+    }
+
+    /// Currently-active cid (the room the state machine is
+    /// joining / joined to). `None` in `SessionState::Idle` and
+    /// `SessionState::Leaving`. Production callers use this from
+    /// inside signal callbacks to figure out which voice panel to
+    /// update; the state machine owns the canonical answer so we
+    /// just delegate.
+    pub fn active_cid(&self) -> Option<u32> {
+        self.inner.borrow().machine.active_cid()
     }
 
     /// Test-only accessor for the underlying `gst::Pipeline`.
@@ -2994,5 +3125,168 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].0, 600);
         assert!(frames[0].1.is_empty());
+    }
+
+    // ---- Signal-bridge unit tests ----
+
+    /// Capture site for state-changed signals.
+    struct CapturedStates(RefCell<Vec<u32>>);
+    /// Capture site for mute-changed signals.
+    struct CapturedMutes(RefCell<Vec<i32>>);
+
+    unsafe extern "C" fn state_capture(
+        user_data: *mut core::ffi::c_void,
+        state: u32,
+    ) {
+        let captured = unsafe { &*(user_data as *const CapturedStates) };
+        captured.0.borrow_mut().push(state);
+    }
+
+    unsafe extern "C" fn mute_capture(
+        user_data: *mut core::ffi::c_void,
+        muted: i32,
+    ) {
+        let captured = unsafe { &*(user_data as *const CapturedMutes) };
+        captured.0.borrow_mut().push(muted);
+    }
+
+    #[test]
+    fn session_state_to_ffi_covers_every_variant() {
+        use hxvoice::state::SessionState as S;
+        // Pin every Rust state's discriminant to its C-side
+        // mirror. A new SessionState variant added without
+        // updating session_state_to_ffi would otherwise silently
+        // route through the wildcard's debug_assert.
+        assert_eq!(session_state_to_ffi(S::Idle), 0);
+        assert_eq!(session_state_to_ffi(S::JoinSent), 1);
+        assert_eq!(session_state_to_ffi(S::OfferPending), 2);
+        assert_eq!(session_state_to_ffi(S::Connecting), 3);
+        assert_eq!(session_state_to_ffi(S::Connected), 4);
+        assert_eq!(session_state_to_ffi(S::Leaving), 5);
+    }
+
+    #[test]
+    fn callback_backend_forwards_state_changed_signal() {
+        use hxvoice::state::SessionState;
+        let captured = CapturedStates(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedStates as *mut core::ffi::c_void;
+        let signals = SignalCallbacks {
+            state_changed: Some(state_capture),
+            mute_changed: None,
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            user_data,
+            None,
+            signals,
+        );
+
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::JoinSent,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: SessionState::Leaving,
+            },
+        );
+
+        assert_eq!(captured.0.borrow().as_slice(), &[1, 4, 5]);
+    }
+
+    #[test]
+    fn callback_backend_forwards_mute_changed_signal() {
+        let captured = CapturedMutes(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedMutes as *mut core::ffi::c_void;
+        let signals = SignalCallbacks {
+            state_changed: None,
+            mute_changed: Some(mute_capture),
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            user_data,
+            None,
+            signals,
+        );
+
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: true },
+        );
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: false },
+        );
+
+        assert_eq!(captured.0.borrow().as_slice(), &[1, 0]);
+    }
+
+    #[test]
+    fn callback_backend_drops_signal_with_no_subscriber() {
+        // None callback in SignalCallbacks must not be invoked.
+        // Pair with NULL user_data so a wayward invocation would
+        // segfault.
+        let mut backend = CallbackBackend::new_with_signals(
+            core::ptr::null_mut(),
+            None,
+            SignalCallbacks::none(),
+        );
+        backend.emit_signal(
+            SignalKind::StateChanged,
+            SignalPayload::StateChanged {
+                new_state: hxvoice::state::SessionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::MuteChanged,
+            SignalPayload::MuteChanged { muted: true },
+        );
+        // No assertion beyond "didn't crash".
+    }
+
+    #[test]
+    fn callback_backend_ignores_unsubscribed_signal_kinds() {
+        // RoomStatus + Error don't have C-side subscriber slots
+        // yet; emitting them with subscribed state/mute callbacks
+        // must not call them either.
+        let states = CapturedStates(RefCell::new(Vec::new()));
+        let mutes = CapturedMutes(RefCell::new(Vec::new()));
+        let user_data =
+            &states as *const CapturedStates as *mut core::ffi::c_void;
+        let signals = SignalCallbacks {
+            state_changed: Some(state_capture),
+            // Mute callback intentionally captures from a
+            // different user_data than what's registered — would
+            // produce a UB read if invoked. Verify it isn't.
+            mute_changed: Some(mute_capture),
+        };
+        let mut backend = CallbackBackend::new_with_signals(
+            user_data,
+            None,
+            signals,
+        );
+        backend.emit_signal(
+            SignalKind::RoomStatus,
+            SignalPayload::RoomStatus {
+                cid: 42,
+                connection_state:
+                    hxvoice::event::ConnectionState::Connected,
+            },
+        );
+        backend.emit_signal(
+            SignalKind::Error,
+            SignalPayload::Error { text: "oops".into() },
+        );
+        assert!(states.0.borrow().is_empty());
+        assert!(mutes.0.borrow().is_empty());
     }
 }
