@@ -473,28 +473,37 @@ impl SessionMachine {
                 // off now and stay in OfferPending; the next
                 // WebrtcAnswerCreated drains again (or transitions
                 // to Connecting if no further offers piled up).
+                //
+                // The wrong-cid guard at enqueue time (above)
+                // means queued_cid == active_cid at *enqueue*
+                // time. By drain time the active cid may have
+                // changed via the mid-session room-switch path
+                // (the JoinRequested arm for a different cid
+                // clears queued_offer inline alongside the other
+                // per-session state — there is no separate
+                // reset-for-new-room helper). We re-check
+                // defensively here too — a stale queued offer
+                // for a now-departed room is dropped, and we
+                // fall through to the normal Connecting
+                // transition so the current answer still
+                // progresses the session.
                 if let Some((queued_cid, queued_sdp)) = self.queued_offer.take()
                 {
-                    // The wrong-cid guard at enqueue time
-                    // (above) means queued_cid == active_cid at
-                    // *enqueue* time. By drain time the active
-                    // cid may have changed via the mid-session
-                    // room-switch path (the JoinRequested arm
-                    // for a different cid clears queued_offer
-                    // inline alongside the other per-session
-                    // state — there is no separate
-                    // reset-for-new-room helper). We re-check
-                    // defensively here too.
                     if self.active_cid == Some(queued_cid) {
                         self.cache_offer_mids(&queued_sdp);
                         self.bind_cid_for_offer(queued_cid);
                         answer_actions
                             .push(Action::SetRemoteDescription { sdp: queued_sdp });
                         answer_actions.push(Action::CreateAnswer);
+                        return answer_actions;
                     }
-                    return answer_actions;
+                    // queued_cid != active_cid: drop the stale
+                    // offer (already taken out of self.queued_offer
+                    // above) and fall through so the answer for
+                    // the current room still drives Connecting.
                 }
-                // No queued offer — normal flow to Connecting.
+                // No queued offer (or queued offer was stale) —
+                // normal flow to Connecting.
                 self.set_state(SessionState::Connecting, |actions| {
                     actions.extend(answer_actions);
                     // Spec timeouts §"Session Timeout and Failure":
@@ -1155,7 +1164,7 @@ mod tests {
     }
 
     #[test]
-    fn renegotiation_offer_while_pending_queues_not_replaces() {
+    fn renegotiation_offer_while_pending_is_queued_not_replaced() {
         // Phase 8.C step 6: a second offer arriving while we're
         // already in OfferPending must be queued (no actions
         // emitted now), then drained after the current answer
@@ -1948,6 +1957,66 @@ mod tests {
         assert!(
             m.queued_offer.is_none(),
             "wrong-cid offer must not enter the queue"
+        );
+    }
+
+    /// Drain-time staleness: if `active_cid` no longer matches
+    /// the queued offer's cid (because the session walked
+    /// through a mid-session room-switch between enqueue and
+    /// drain), the queued offer is dropped and the in-flight
+    /// answer drives Connecting on its own.
+    ///
+    /// Regression for a wedge where the drain block returned
+    /// `answer_actions` unconditionally — on a cid mismatch the
+    /// machine would have stayed in OfferPending with no follow-
+    /// up action queued.
+    #[test]
+    fn stale_queued_offer_does_not_wedge_the_drain() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        // Queue a renegotiation offer for cid=1.
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-2\n".into(),
+        });
+        assert!(m.queued_offer.is_some());
+
+        // Simulate the mid-session room-switch path by hand: a
+        // `JoinRequested { cid: 2 }` here would reset state to
+        // JoinSent and clear the queue inline — we want to hit
+        // the in-arm defensive re-check at drain time, not the
+        // enqueue-arm guard. Force the mismatch by mutating
+        // active_cid directly so we exercise the drain block's
+        // fall-through path.
+        m.active_cid = Some(2);
+
+        let acts = m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        // The current answer still drives Connecting; the stale
+        // queued offer is dropped.
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "stale queue must not wedge — machine must reach Connecting"
+        );
+        assert!(m.queued_offer.is_none());
+        // The current answer's SetLocalDescription + 603 send
+        // are emitted; the dropped offer contributes no
+        // SetRemoteDescription / CreateAnswer.
+        let has_set_remote = acts.iter().any(|a| {
+            matches!(a, Action::SetRemoteDescription { .. })
+        });
+        let has_create_answer =
+            acts.iter().any(|a| matches!(a, Action::CreateAnswer));
+        assert!(
+            !has_set_remote,
+            "stale queued offer must not produce SetRemoteDescription"
+        );
+        assert!(
+            !has_create_answer,
+            "stale queued offer must not produce CreateAnswer"
         );
     }
 
