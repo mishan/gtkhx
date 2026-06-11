@@ -607,11 +607,16 @@ impl VoiceRuntime {
             // GStreamer callback can re-enter `handle_event`
             // cleanly.
             //
-            // No-op (with debug log) if the pipeline-less
-            // constructor was used or the bin slot is empty. The
-            // SDP actions are emitted by the state machine
-            // unconditionally; the runtime is the layer that
-            // decides whether to actually drive GStreamer.
+            // Silent no-op if the pipeline-less constructor was
+            // used or the bin slot is empty — production always
+            // has the bin (it's built by `VoiceRuntime::new`),
+            // and the only paths that exercise these arms
+            // without it are dispatch-loop tests that
+            // deliberately use `new_without_pipeline` to avoid
+            // the `gst::init()` requirement. The SDP actions are
+            // emitted by the state machine unconditionally; the
+            // runtime is the layer that decides whether to
+            // actually drive GStreamer.
             Action::SetRemoteDescription { sdp } => {
                 let webrtcbin = self
                     .inner
@@ -682,8 +687,10 @@ impl VoiceRuntime {
 }
 
 /// Build a `WebRTCSessionDescription` from a raw SDP string and
-/// a type tag. Returns `None` if the SDP fails to parse — the
-/// dispatch caller logs and aborts the action in that case.
+/// a type tag. Returns `None` if the SDP fails to parse; this
+/// helper logs the failure on the GStreamer warning channel
+/// before returning, so callers should just early-return on
+/// `None` rather than re-logging.
 ///
 /// gstreamer-rs's `SDPMessage::parse_buffer` is the typed entry
 /// point: it parses the SDP into an owned `SDPMessage`, which we
@@ -780,7 +787,28 @@ fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64) {
         else {
             return;
         };
-        let sdp = desc.sdp().as_text().unwrap_or_default();
+        // Serialize the answer SDP. `as_text()` returns
+        // `Result<String, BoolError>` — failure here means
+        // something went wrong in gstreamer-sdp's printer,
+        // never an expected condition. Bailing out is the
+        // right move: the state machine would otherwise see
+        // an empty SDP string, emit a `SendWireFrame(603,
+        // empty body)`, and ship an invalid 603 to the
+        // server — the worst possible recovery. The JoinReply
+        // / Dtls timers will fire and walk the session to
+        // Failed naturally.
+        let sdp = match desc.sdp().as_text() {
+            Ok(s) => s,
+            Err(e) => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to serialize answer SDP for \
+                     runtime {runtime_id}: {e} — letting the JoinReply \
+                     timer drive the session to Failed"
+                );
+                return;
+            }
+        };
         // Marshal back to the main thread. The closure must be
         // `Send + 'static`; we capture only `runtime_id` (u64,
         // Copy) and `sdp` (String). The runtime lookup happens on
@@ -849,6 +877,7 @@ impl std::error::Error for RuntimeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RuntimeError::GstInitFailed(err) => Some(err),
+            RuntimeError::WebrtcbinUnavailable => None,
         }
     }
 }
