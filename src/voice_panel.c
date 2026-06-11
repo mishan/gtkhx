@@ -65,6 +65,7 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
     const guint8 *payload = body + 4;
     gsize payload_len = body_len - 4;
 
+    gboolean sent;
     switch (opcode) {
     case HTLC_HDR_VOICE_SDP_ANSWER:
         /* SDP payload is empty on a join-without-answer? Never —
@@ -76,7 +77,18 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
                        cid);
             return;
         }
-        (void) hx_send_voice_sdp_answer (htlc, cid, payload, payload_len);
+        sent = hx_send_voice_sdp_answer (htlc, cid, payload, payload_len);
+        if (!sent) {
+            /* The wire helper skipped: CAP_VOICE cleared mid-
+             * session, sdp_len > 65535, or the proto builder
+             * rejected the input. Without this log, an SDP answer
+             * silently dropping turns into "Janus never finishes
+             * the handshake and the user has no idea why". */
+            debug_log ("voice",
+                       "bridge: hx_send_voice_sdp_answer FAILED cid=%u "
+                       "sdp_len=%zu",
+                       cid, payload_len);
+        }
         return;
     case HTLC_HDR_VOICE_ICE:
         /* Empty ICE body is the end-of-candidates marker, which
@@ -85,9 +97,17 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
          * includes at least the JSON braces), but handle it
          * defensively. */
         if (payload_len == 0) {
-            (void) hx_send_voice_ice (htlc, cid, NULL, 0);
+            sent = hx_send_voice_ice (htlc, cid, NULL, 0);
         } else {
-            (void) hx_send_voice_ice (htlc, cid, payload, payload_len);
+            sent = hx_send_voice_ice (htlc, cid, payload, payload_len);
+        }
+        if (!sent) {
+            /* Same triage rationale as SDP_ANSWER: losing ICE
+             * candidates without a trace breaks ICE establishment
+             * with zero diagnostics. */
+            debug_log ("voice",
+                       "bridge: hx_send_voice_ice FAILED cid=%u ice_len=%zu",
+                       cid, payload_len);
         }
         return;
     case HTLC_HDR_VOICE_JOIN:

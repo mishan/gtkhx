@@ -383,9 +383,13 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
 /// state synchronously from the UI click handlers and the
 /// optimistic-UI fallback covers the post-click feedback.
 ///
-/// Not `Send` because `user_data` is a raw pointer; the runtime's
-/// `Backend` trait doesn't require `Send` and the entire dispatch
-/// loop runs main-thread-only.
+/// Main-thread-only by convention: `Backend` doesn't require
+/// `Send`, and the entire runtime dispatch loop runs on the GLib
+/// main thread (the `Inner` cell is `!Send` via `Rc` + `RefCell`,
+/// which transitively makes `VoiceRuntime` `!Send`). Raw pointers
+/// are auto-`Send`/`Sync` at the Rust level — they don't make this
+/// struct `!Send` on their own — so the main-thread-only invariant
+/// is enforced by the surrounding runtime, not by this type.
 pub struct CallbackBackend {
     user_data: *mut core::ffi::c_void,
     send_wire_frame_cb: Option<SendWireFrameCallback>,
