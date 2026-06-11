@@ -830,13 +830,28 @@ impl VoiceRuntime {
             // UI use (speaker indicator); the runtime doesn't
             // need it after the link is established.
             Action::StartReceivePipeline { mid, user_id: _ } => {
-                let (pipeline, pad) = {
+                let (pipeline, pad, existing) = {
                     let mut inner = self.inner.borrow_mut();
                     (
                         inner.pipeline.clone(),
                         inner.pending_pads.remove(&mid),
+                        inner.receive_bins.remove(&mid),
                     )
                 };
+                // Tear down any pre-existing receive bin for this
+                // mid before adding a fresh one. Renegotiation can
+                // bring a second pad-added for the same mid (a
+                // recycled slot, a re-offer that re-declares the
+                // same media line); without this teardown,
+                // start_receive_bin's `pipeline.add(&bin)` would
+                // fail on the duplicate "hxvoice-recv-{mid}"
+                // element name and the OLD bin would stay linked,
+                // wedging playback.
+                if let (Some(pipeline_ref), Some(bin)) =
+                    (pipeline.as_ref(), existing.as_ref())
+                {
+                    stop_receive_bin(pipeline_ref, bin);
+                }
                 // Pipeline-less runtime (test) or no pending pad
                 // for this mid (state machine drove past
                 // pad-added) ⇒ both are silent no-ops, valid
@@ -1303,7 +1318,28 @@ fn connect_pad_added(
                     .borrow_mut()
                     .pending_pads
                     .insert(mid.clone(), pad);
-                rt.handle_event(Event::WebrtcPadAdded { mid });
+                rt.handle_event(Event::WebrtcPadAdded {
+                    mid: mid.clone(),
+                });
+                // If the state machine didn't consume the pad
+                // through `Action::StartReceivePipeline` (e.g.
+                // unknown mid that doesn't map to a user_id,
+                // pad-added arriving in a state that ignores
+                // it, mid that the spec's "send" leg owns), the
+                // entry in `pending_pads` would otherwise leak
+                // and pile up over the lifetime of the runtime.
+                // Drop it now — the pad's strong ref goes away
+                // with the entry, so glib reclaims the
+                // associated resources.
+                let stale =
+                    rt.inner.borrow_mut().pending_pads.remove(&mid);
+                if stale.is_some() {
+                    gstreamer::warning!(
+                        gstreamer::CAT_RUST,
+                        "hxvoice: pad-added for mid={mid} produced no \
+                         StartReceivePipeline; dropping the parked pad"
+                    );
+                }
             });
         });
     });
