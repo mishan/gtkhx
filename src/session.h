@@ -129,6 +129,12 @@ struct gtkhx_chat {
     GtkWidget *output;
     GtkWidget *input;
     GtkWidget *subject;
+    /* Phase 8.D: voice toolbar at the top of the chat tab. NULL
+     * before the chat window is created; populated by
+     * voice_panel_new in create_{chat,pchat}_window. Hidden
+     * when HTLC_CAP_VOICE wasn't echoed (which is the common
+     * case on most servers). */
+    GtkWidget *voice_panel;
     /* Phase 5 (Phase C of the users_view migration): per-pchat
 	 * sidebar is now an HxUserListView GObject (GtkColumnView-
 	 * backed). Forward-declared as an opaque typedef so this
