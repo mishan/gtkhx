@@ -901,6 +901,7 @@ dependencies = [
  "gstreamer-audio",
  "gstreamer-sdp",
  "gstreamer-webrtc",
+ "hxvoice",
 ]
 
 [[package]]

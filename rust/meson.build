@@ -65,6 +65,7 @@ rust_sources = files(
   'crates/hxvoice/src/state.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
+  'crates/hxvoice-runtime/src/runtime.rs',
   'crates/hxvoice-runtime/src/ffi.rs',
   'Cargo.toml',
   'Cargo.lock',
