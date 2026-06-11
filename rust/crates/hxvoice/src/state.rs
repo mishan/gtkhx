@@ -716,10 +716,19 @@ impl SessionMachine {
 
             // ---- Mute toggle ----
 
-            // Client-driven mute / unmute. No-op if already in
-            // the requested state.
+            // Client-driven mute / unmute. Accepted from any
+            // active-room state: the toolbar treats JoinSent +
+            // OfferPending as "joined" so the user can click
+            // Mute / Unmute before the WebRTC handshake
+            // completes, and the server tracks the mute bit
+            // independently of WebRTC state — the wire MUTE
+            // frame can ship any time after JOIN. No-op if
+            // already in the requested state.
             (
-                SessionState::Connecting | SessionState::Connected,
+                SessionState::JoinSent
+                | SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
                 Event::MuteToggleRequested { muted },
             ) => {
                 if self.muted == muted {
@@ -1616,6 +1625,51 @@ mod tests {
         assert!(kinds.contains(&"pipeline"));
         assert!(kinds.contains(&"wire606"));
         assert!(kinds.contains(&"signal"));
+    }
+
+    /// Regression: the mute toggle was reachable from JoinSent
+    /// and OfferPending via the toolbar (state_is_joined treats
+    /// both as joined so the user can click before the WebRTC
+    /// handshake completes), but the state machine's arm only
+    /// matched Connecting | Connected — the event fell through
+    /// to the catch-all and the MuteChanged signal never fired.
+    /// Symptom: clicking Mute / Unmute during handshake flipped
+    /// the GTK toggle's pressed-color but didn't update the
+    /// label.
+    #[test]
+    fn mute_toggle_works_from_join_sent_and_offer_pending() {
+        // JoinSent: server hasn't sent the SDP offer yet.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 4 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        let acts = m.step(Event::MuteToggleRequested { muted: true });
+        assert!(m.is_muted());
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::MuteChanged,
+                payload: SignalPayload::MuteChanged { muted: true }
+            }
+        )));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 606, .. }
+        )));
+
+        // OfferPending: SDP offer in, answer not ready yet.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 4 });
+        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::OfferPending);
+        let acts = m.step(Event::MuteToggleRequested { muted: true });
+        assert!(m.is_muted());
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::MuteChanged,
+                ..
+            }
+        )));
     }
 
     #[test]
