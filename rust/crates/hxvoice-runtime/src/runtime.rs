@@ -741,12 +741,12 @@ mod tests {
 
         /// Backend that fires LeaveRequested back into the runtime
         /// the first time it sees a JOIN wire frame go out. The
-        /// runtime field is wired post-construction via the OnceCell
-        /// shape; the Cell is a single-shot fuse so the recursion
-        /// doesn't loop.
+        /// runtime field is wired post-construction via the
+        /// `RefCell<Option<…>>` shape; `fired` is a single-shot
+        /// recursion guard so the LEAVE doesn't fire a second
+        /// JOIN→LEAVE loop.
         struct ReentrantBackend {
             runtime: Rc<RefCell<Option<VoiceRuntime>>>,
-            re_entered: Cell<bool>,
             fired: Cell<bool>,
         }
 
@@ -765,7 +765,6 @@ mod tests {
                         // exactly what we want for the re-entry
                         // probe.
                         rt.handle_event(Event::LeaveRequested { cid: 42 });
-                        self.re_entered.set(true);
                     }
                 }
             }
@@ -777,7 +776,6 @@ mod tests {
             Rc::new(RefCell::new(None));
         let backend = Box::new(ReentrantBackend {
             runtime: runtime_slot.clone(),
-            re_entered: Cell::new(false),
             fired: Cell::new(false),
         });
         // Build the runtime, then plug it into the backend so the
@@ -790,13 +788,12 @@ mod tests {
         runtime.handle_event(Event::JoinRequested { cid: 42 });
 
         // The fact that we reached this line at all is the test —
-        // the old code would have panicked. Verify the re-entry
-        // actually happened by inspecting the fuse.
+        // the old code would have panicked on the re-entry.
+        // We verify the re-entry actually happened by observing
+        // the state machine transitioned all the way to Leaving
+        // (JOIN sets active_cid to 42 → LEAVE matches active_cid
+        // and walks to Leaving).
         let backend_slot = runtime_slot.borrow();
-        // We can't downcast the Box<dyn Backend> directly; instead
-        // we verify the re-entry by observing the state machine
-        // transitioned all the way to Leaving (JOIN → LEAVE,
-        // even-though Leaving's cid match is for the active cid).
         let runtime_ref = backend_slot.as_ref().unwrap();
         assert_eq!(runtime_ref.state(), SessionState::Leaving);
     }
