@@ -348,6 +348,104 @@ impl Backend for NoopBackend {
     fn tear_down(&mut self) {}
 }
 
+/// C-callback function pointer type for `Action::SendWireFrame`
+/// dispatch. The callback receives the opaque `user_data` it was
+/// registered with (production: the `htlc_conn *` for the session),
+/// the opcode (one of `HTLC_HDR_VOICE_*`), and a borrowed byte
+/// slice describing the action body.
+///
+/// Body layout matches the encoders in `hxvoice::state::encode_*`:
+///
+/// - 600 (JOIN), 601 (LEAVE): 4-byte big-endian cid
+/// - 603 (SDP_ANSWER): 4-byte BE cid + SDP bytes (not NUL-terminated)
+/// - 604 (ICE): 4-byte BE cid + JSON bytes (not NUL-terminated)
+/// - 606 (MUTE): 4-byte BE cid + 2-byte BE muted-flag (0 / 1)
+///
+/// The callback may read the body slice for the duration of the
+/// call; the runtime drops the underlying `Vec<u8>` when the
+/// dispatch arm returns. Implementations should copy out anything
+/// they need to retain past the call.
+///
+/// **Re-entrancy contract.** The runtime invokes
+/// `send_wire_frame` while the backend's `RefCell` is mutably
+/// borrowed. A callback that synchronously re-enters
+/// `VoiceRuntime::handle_event` (or any other path that lands in
+/// `dispatch_inner` and reaches for `self.backend.borrow_mut()`)
+/// will panic on the nested borrow_mut. If your callback needs to
+/// drive new events into the runtime — including the obvious one
+/// of "the wire send failed, so cancel the session" — defer that
+/// via `glib::idle_add_local` (or equivalent main-context post)
+/// so the outer dispatch loop unwinds first.
+pub type SendWireFrameCallback = unsafe extern "C" fn(
+    user_data: *mut core::ffi::c_void,
+    opcode: u32,
+    body: *const u8,
+    body_len: usize,
+);
+
+/// Backend implementation that bridges to a C callback. Production
+/// uses this with `voice_runtime_send_wire_frame_cb` in voice_panel.c
+/// so the state machine's outbound voice opcodes reach `hlwrite_chunks`
+/// via the existing `hx_send_voice_*` helpers.
+///
+/// `emit_signal` and `tear_down` are stubbed out for now — the
+/// runtime-to-UI signal path lands in a follow-up that wires
+/// `GtkhxSession::emit_*`. Until then, the C side reads runtime
+/// state synchronously from the UI click handlers and the
+/// optimistic-UI fallback covers the post-click feedback.
+///
+/// Main-thread-only by convention: `Backend` doesn't require
+/// `Send`, and the entire runtime dispatch loop runs on the GLib
+/// main thread (the `Inner` cell is `!Send` via `Rc` + `RefCell`,
+/// which transitively makes `VoiceRuntime` `!Send`). Raw pointers
+/// are auto-`Send`/`Sync` at the Rust level — they don't make this
+/// struct `!Send` on their own — so the main-thread-only invariant
+/// is enforced by the surrounding runtime, not by this type.
+pub struct CallbackBackend {
+    user_data: *mut core::ffi::c_void,
+    send_wire_frame_cb: Option<SendWireFrameCallback>,
+}
+
+impl CallbackBackend {
+    /// Construct a backend that calls `send_wire_frame_cb` for
+    /// every `Action::SendWireFrame` action. A `None` callback
+    /// makes the backend behave like `NoopBackend` for that
+    /// surface.
+    pub fn new(
+        user_data: *mut core::ffi::c_void,
+        send_wire_frame_cb: Option<SendWireFrameCallback>,
+    ) -> Self {
+        Self {
+            user_data,
+            send_wire_frame_cb,
+        }
+    }
+}
+
+impl Backend for CallbackBackend {
+    fn send_wire_frame(&mut self, opcode: u32, body: &[u8]) {
+        let Some(cb) = self.send_wire_frame_cb else {
+            return;
+        };
+        // SAFETY: the C caller registered the callback and
+        // user_data together; both stay valid for the lifetime
+        // of the backend, which the runtime owns. `body` is a
+        // borrowed slice the callback may read for the duration
+        // of the call only.
+        unsafe { cb(self.user_data, opcode, body.as_ptr(), body.len()) };
+    }
+    fn emit_signal(&mut self, _kind: SignalKind, _payload: SignalPayload) {
+        // Stubbed: the runtime-to-UI signal bridge lands in a
+        // follow-up. For now the C side reads runtime state
+        // synchronously from the UI click handlers.
+    }
+    fn tear_down(&mut self) {
+        // Stubbed: the C side handles teardown via
+        // gtkhx_voice_runtime_free on disconnect; no need to
+        // signal back through this path yet.
+    }
+}
+
 /// Recording backend that captures every call into per-method
 /// `Vec`s. Used by Tier 2 tests to assert on the action dispatch.
 ///
@@ -2822,5 +2920,79 @@ mod tests {
             .expect("pipeline must be present")
             .bus()
             .is_some());
+    }
+
+    /// Capture site for `CallbackBackend` unit tests. `user_data`
+    /// points at one of these; `extern "C" fn callback_capture`
+    /// reads it back. RefCell-not-Mutex because the runtime is
+    /// !Send and these tests stay on one thread.
+    struct CapturedFrames(RefCell<Vec<(u32, Vec<u8>)>>);
+
+    unsafe extern "C" fn callback_capture(
+        user_data: *mut core::ffi::c_void,
+        opcode: u32,
+        body: *const u8,
+        body_len: usize,
+    ) {
+        // SAFETY: tests below pass a `&CapturedFrames` cast to
+        // `*mut c_void` and keep it alive across the callback
+        // invocation. `body` is a slice the backend owns for
+        // the call duration.
+        let captured = unsafe { &*(user_data as *const CapturedFrames) };
+        let bytes = if body.is_null() || body_len == 0 {
+            Vec::new()
+        } else {
+            unsafe { core::slice::from_raw_parts(body, body_len) }.to_vec()
+        };
+        captured.0.borrow_mut().push((opcode, bytes));
+    }
+
+    #[test]
+    fn callback_backend_forwards_opcode_and_body() {
+        let captured = CapturedFrames(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedFrames as *mut core::ffi::c_void;
+        let mut backend = CallbackBackend::new(user_data, Some(callback_capture));
+
+        backend.send_wire_frame(603, b"v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n");
+        backend.send_wire_frame(604, b"{\"candidate\":\"\",\"sdpMid\":\"0\"}");
+
+        let frames = captured.0.borrow();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].0, 603);
+        assert_eq!(&frames[0].1[..3], b"v=0");
+        assert_eq!(frames[1].0, 604);
+        assert!(frames[1].1.starts_with(b"{\"candidate"));
+    }
+
+    #[test]
+    fn callback_backend_with_no_callback_drops_silently() {
+        // A backend with `send_wire_frame_cb == None` must NOT
+        // attempt to dispatch. Pass a NULL user_data so a buggy
+        // implementation that does dispatch on None segfaults
+        // loudly instead of writing to junk memory.
+        let mut backend = CallbackBackend::new(core::ptr::null_mut(), None);
+        backend.send_wire_frame(603, b"unused");
+        // No assertion beyond "didn't crash" — the !Some branch is
+        // a one-line early-return and unit-testing the absence of
+        // a call is what we have here.
+    }
+
+    #[test]
+    fn callback_backend_forwards_empty_body() {
+        // 600 JOIN / 601 LEAVE are 4-byte BE cid, but Action's
+        // body slice may be any length the encoder produced.
+        // Pin that an empty slice routes through cleanly.
+        let captured = CapturedFrames(RefCell::new(Vec::new()));
+        let user_data =
+            &captured as *const CapturedFrames as *mut core::ffi::c_void;
+        let mut backend = CallbackBackend::new(user_data, Some(callback_capture));
+
+        backend.send_wire_frame(600, &[]);
+
+        let frames = captured.0.borrow();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].0, 600);
+        assert!(frames[0].1.is_empty());
     }
 }

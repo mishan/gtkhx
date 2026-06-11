@@ -22,7 +22,9 @@ use std::ffi::{c_char, CStr};
 use hxvoice::event::Event;
 use hxvoice::event::ServerError;
 
-use crate::runtime::{NoopBackend, VoiceRuntime};
+use crate::runtime::{
+    CallbackBackend, NoopBackend, SendWireFrameCallback, VoiceRuntime,
+};
 
 /// Initialise the GStreamer subsystem.
 ///
@@ -104,6 +106,43 @@ pub extern "C" fn gtkhx_voice_runtime_new() -> *mut VoiceRuntime {
                 gstreamer::CAT_RUST,
                 "hxvoice: VoiceRuntime::new failed: {e}"
             );
+            core::ptr::null_mut()
+        }
+    }
+}
+
+/// Construct a runtime with a C callback registered for
+/// `Action::SendWireFrame` dispatch. Production uses this so the
+/// state machine's outbound voice opcodes (especially 603
+/// SDP_ANSWER and 604 ICE, which originate from webrtcbin events
+/// and have no other path to the wire) reach the C side's
+/// `hx_send_voice_*` helpers.
+///
+/// `send_wire_frame_cb` may be NULL — the bridge then behaves like
+/// `NoopBackend` for that surface. `user_data` is opaque to the
+/// runtime; in production it's the `htlc_conn *` for the session,
+/// which the callback unpacks to drive `hlwrite_chunks`.
+///
+/// See the [`crate::runtime::SendWireFrameCallback`] type alias
+/// for the body-layout contract.
+///
+/// # Safety
+/// `user_data` + `send_wire_frame_cb` must remain valid for the
+/// lifetime of the returned runtime — typically: tied to the
+/// `htlc_conn`'s lifetime, freed in lockstep via
+/// `gtkhx_voice_runtime_free` from the same disconnect path.
+/// Must be called from the main thread.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_new_with_callbacks(
+    user_data: *mut core::ffi::c_void,
+    send_wire_frame_cb: Option<SendWireFrameCallback>,
+) -> *mut VoiceRuntime {
+    let backend =
+        Box::new(CallbackBackend::new(user_data, send_wire_frame_cb));
+    match VoiceRuntime::new(backend) {
+        Ok(rt) => Box::into_raw(Box::new(rt)),
+        Err(e) => {
+            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
             core::ptr::null_mut()
         }
     }
