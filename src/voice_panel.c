@@ -110,22 +110,43 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
     if (!sess)
         return;
 
+    gboolean sent;
     if (want_joined) {
-        /* Spec recommends joining muted by default; the local mute
-         * state is set to TRUE here so the subsequent state-machine
-         * step has a consistent view. The actual wire MUTE is sent
-         * only once we're actually in voice (the state machine emits
-         * it from the appropriate transition). */
-        panel_set_bool (panel, KEY_MUTED, TRUE);
-        hx_send_voice_join (&sess->htlc, cid);
+        sent = hx_send_voice_join (&sess->htlc, cid);
+        /* Spec recommends joining muted by default. Only set the
+         * local muted bit once the wire-out actually shipped —
+         * a join that skipped (CAP_VOICE cleared during a race,
+         * proto builder rejected the input) shouldn't pretend
+         * we're in voice. */
+        if (sent) {
+            panel_set_bool (panel, KEY_MUTED, TRUE);
+        }
     } else {
-        hx_send_voice_leave (&sess->htlc, cid);
+        sent = hx_send_voice_leave (&sess->htlc, cid);
+        /* On a successful leave, clear muted so a subsequent
+         * Join doesn't restore a stale Unmute label. The disabled
+         * mute button (mute is gated on "currently joined" in
+         * update_button_labels) would otherwise show "Unmute"
+         * while not joined. */
+        if (sent) {
+            panel_set_bool (panel, KEY_MUTED, FALSE);
+        }
     }
 
-    /* Optimistic UI: reflect the requested state. The
-     * voice-room-status signal will correct us if the wire op
-     * fails. */
-    panel_set_bool (panel, KEY_JOINED, want_joined);
+    if (sent) {
+        /* Optimistic UI: reflect the requested state. The
+         * voice-room-status signal will correct us if the wire
+         * op fails after this point. */
+        panel_set_bool (panel, KEY_JOINED, want_joined);
+    } else {
+        /* Wire-out was skipped — revert the toggle so the
+         * button visually matches the underlying state. The
+         * KEY_SUPPRESS guard at the top of this handler keeps
+         * the set_active call from re-firing us. */
+        panel_set_bool (panel, KEY_SUPPRESS, TRUE);
+        gtk_toggle_button_set_active (btn, !want_joined);
+        panel_set_bool (panel, KEY_SUPPRESS, FALSE);
+    }
     update_button_labels (panel);
 }
 
@@ -144,8 +165,16 @@ on_mute_toggled (GtkToggleButton *btn, gpointer user_data)
     if (!sess)
         return;
 
-    hx_send_voice_mute (&sess->htlc, cid, want_muted);
-    panel_set_bool (panel, KEY_MUTED, want_muted);
+    gboolean sent = hx_send_voice_mute (&sess->htlc, cid, want_muted);
+    if (sent) {
+        panel_set_bool (panel, KEY_MUTED, want_muted);
+    } else {
+        /* Revert the toggle so the button matches the
+         * unchanged underlying state. */
+        panel_set_bool (panel, KEY_SUPPRESS, TRUE);
+        gtk_toggle_button_set_active (btn, !want_muted);
+        panel_set_bool (panel, KEY_SUPPRESS, FALSE);
+    }
     update_button_labels (panel);
 }
 
@@ -194,9 +223,22 @@ voice_panel_refresh (GtkWidget *panel, session *sess)
         return;
 
     gboolean show = panel_should_show (&sess->htlc);
-    gtk_widget_set_visible (panel, show);
-    if (!show)
+    if (!show) {
+        /* Hiding the panel means the server didn't echo
+         * HTLC_CAP_VOICE (or the session disconnected and the
+         * cap mask was cleared in network.c). Reset
+         * joined/muted state so a reconnect to a server with
+         * different voice support doesn't carry stale UI —
+         * the chat tab persists across disconnect/reconnect,
+         * so 'Leave Voice' / 'Unmute' labels would otherwise
+         * linger from the previous session. */
+        panel_set_bool (panel, KEY_JOINED, FALSE);
+        panel_set_bool (panel, KEY_MUTED, FALSE);
+        update_button_labels (panel);
+        gtk_widget_set_visible (panel, FALSE);
         return;
+    }
+    gtk_widget_set_visible (panel, TRUE);
 
     gboolean enabled = panel_is_enabled (&sess->htlc);
     GtkWidget *join_btn = g_object_get_data (G_OBJECT (panel), KEY_JOIN_BTN);
@@ -214,6 +256,20 @@ voice_panel_refresh (GtkWidget *panel, session *sess)
         if (!enabled)
             gtk_widget_set_sensitive (mute_btn, FALSE);
     }
+    /* Rerun the label/tooltip refresh whether we're enabling or
+     * disabling — a disabled→enabled transition (login completes,
+     * SELFINFO populates the access bitmap) needs to clear the
+     * 'Voice chat requires permission' tooltip the disabled
+     * branch set, and an enabled→disabled transition needs to
+     * apply it. update_button_labels covers both ends from the
+     * stored joined/muted state, which we just normalised
+     * above. */
+    if (enabled) {
+        if (join_btn) {
+            gtk_widget_set_tooltip_text (join_btn, NULL);
+        }
+    }
+    update_button_labels (panel);
 }
 
 void
