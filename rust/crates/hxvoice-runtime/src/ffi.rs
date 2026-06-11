@@ -284,14 +284,32 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
         } else {
             unsafe { slice::from_raw_parts(blob, len) }
         };
-    let entries: Vec<hxvoice::event::Participant> =
+    // Cap participants to a sane ceiling. The on-wire u16 length
+    // would let a server (or a corrupt frame) ship up to ~10k
+    // entries — collecting that uncapped into a Vec + handing it
+    // to the state machine's HashMap is a DoS vector against an
+    // untrusted network input. Real voice rooms are
+    // small-group calls; 256 simultaneous participants is well
+    // past the spec's design point. Log when we truncate so an
+    // operator can see it.
+    const MAX_PARTICIPANTS: usize = 256;
+    let mut entries: Vec<hxvoice::event::Participant> =
         hotline_proto::voice::parse_voice_participants(bytes)
+            .take(MAX_PARTICIPANTS + 1)
             .map(|p| hxvoice::event::Participant {
                 user_id: p.user_id,
                 codec_id: p.codec_id,
                 muted: p.is_muted(),
             })
             .collect();
+    if entries.len() > MAX_PARTICIPANTS {
+        eprintln!(
+            "hxvoice: room_status blob has >{MAX_PARTICIPANTS} participants \
+             (cid={cid}, blob len={}); truncating",
+            bytes.len()
+        );
+        entries.truncate(MAX_PARTICIPANTS);
+    }
     rt.handle_event(Event::ParticipantsUpdated { cid, entries });
 }
 
