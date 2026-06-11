@@ -587,8 +587,21 @@ impl SessionMachine {
             // all, which makes the issue (stale SDP cache vs a fresh
             // pad-added) visible at the runtime layer instead of
             // silently routing audio to nobody.
+            // Accept pad-added in `OfferPending` too: during a
+            // renegotiation drain we stay in `OfferPending` while
+            // emitting `SetLocalDescription` / 603 for the
+            // in-flight answer, and webrtcbin can produce pads
+            // for the just-applied remote description before we
+            // reach `Connecting`. The pad gets cached by
+            // `connect_pad_added` and the matching mid is in
+            // `mid_to_user` (the queue-drain block already
+            // primed it), so we can start the receive bin right
+            // here — dropping the pad would lose the audio leg
+            // for the entire renegotiation cycle.
             (
-                SessionState::Connecting | SessionState::Connected,
+                SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
                 Event::WebrtcPadAdded { mid },
             ) => {
                 if mid == "send" {
@@ -606,9 +619,14 @@ impl SessionMachine {
             // Receive pad gone: tear the matching bin down. mid
             // `"send"` here would be webrtcbin shutting our send
             // leg, which `LeaveRequested` / Failed already covers
-            // — ignore.
+            // — ignore. OfferPending included for symmetry with
+            // the pad-added arm above: webrtcbin can drop a pad
+            // mid-renegotiation when the new remote description
+            // removes a media line.
             (
-                SessionState::Connecting | SessionState::Connected,
+                SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
                 Event::WebrtcPadRemoved { mid },
             ) => {
                 if mid == "send" {
@@ -1402,6 +1420,42 @@ mod tests {
         });
         // No StartReceivePipeline — pad is silently dropped.
         assert!(acts.is_empty());
+    }
+
+    /// Regression: during a renegotiation drain the machine
+    /// stays in `OfferPending` while the in-flight answer's
+    /// `SetLocalDescription` + 603 ship. If webrtcbin produces
+    /// pad-added for the just-applied remote description
+    /// before we reach `Connecting`, the pad must not be
+    /// dropped — that would lose the audio leg for the entire
+    /// renegotiation cycle.
+    #[test]
+    fn pad_added_in_offer_pending_starts_receive_pipeline() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        // First offer primes mid_to_user with user-5.
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "a=mid:user-5\na=mid:send\n".into(),
+        });
+        assert_eq!(m.state(), SessionState::OfferPending);
+        // Pad-added arrives while we're still computing the
+        // answer (state stays OfferPending).
+        let acts = m.step(Event::WebrtcPadAdded {
+            mid: "user-5".into(),
+        });
+        match acts.as_slice() {
+            [Action::StartReceivePipeline { mid, user_id }] => {
+                assert_eq!(mid, "user-5");
+                assert_eq!(*user_id, 5);
+            }
+            _ => panic!(
+                "expected StartReceivePipeline in OfferPending, got {acts:?}"
+            ),
+        }
+        // Sanity: state is still OfferPending (pad-added didn't
+        // transition us).
+        assert_eq!(m.state(), SessionState::OfferPending);
     }
 
     #[test]
