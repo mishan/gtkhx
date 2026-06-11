@@ -41,6 +41,7 @@
 //! `Inner`, the outer `handle_event` call has already returned.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use hxvoice::action::{Action, SignalKind, SignalPayload};
@@ -118,7 +119,7 @@ impl Backend for RecordingBackend {
 }
 
 /// Per-session owner of the WebRTC pipeline and the state machine
-/// it drives. Cheap to clone (it's just an `Rc<RefCell<Inner>>`),
+/// it drives. Cheap to clone (it's just two `Rc<RefCell<…>>`s),
 /// which lets signal closures hold weak references back without
 /// circular ownership.
 ///
@@ -127,14 +128,26 @@ impl Backend for RecordingBackend {
 /// [`VoiceRuntime::new_without_pipeline`] to skip the
 /// `webrtcbin` construction (and the gst-plugins-bad runtime
 /// requirement that goes with it).
+///
+/// ## Re-entrancy
+///
+/// `Inner` and `Backend` live in SEPARATE `Rc<RefCell<…>>`s
+/// deliberately. The backend is the outward-facing surface where
+/// re-entrancy is most likely: a GLib signal handler invoked by
+/// `emit_signal` may turn around and call `handle_event` on the
+/// same runtime (e.g. the UI clicks "Leave" from inside the
+/// `voice-error` toast handler), and that nested call needs to
+/// borrow `Inner` cleanly. Holding an `Inner` borrow across the
+/// backend call would panic on re-entry; splitting the cells
+/// makes the borrow scopes independent.
 #[derive(Clone)]
 pub struct VoiceRuntime {
     inner: Rc<RefCell<Inner>>,
+    backend: Rc<RefCell<Box<dyn Backend>>>,
 }
 
 struct Inner {
     machine: SessionMachine,
-    backend: Box<dyn Backend>,
     /// `Some` once the GStreamer pipeline has been constructed.
     /// `None` for the pipeline-less test path. Future webrtcbin
     /// wiring lands in Phase 8.C step 3 and lives behind this
@@ -156,6 +169,19 @@ struct Inner {
     /// at most four entries (JoinReply / Dtls / IceConnectivity /
     /// Media) per the spec's timer table.
     armed_timers: Vec<Timeout>,
+    /// True while `handle_event` is walking the action list for
+    /// an event. A re-entrant call (backend dispatches an action
+    /// that triggers a Hotline signal which calls back into
+    /// `handle_event`) queues onto `pending` instead of running
+    /// inline; the outer loop drains it after each action is
+    /// dispatched. Removes the entire class of "borrow_mut while
+    /// dispatching" panics, including the Backend-on-Backend
+    /// case the simple two-Rc split doesn't cover on its own.
+    dispatching: bool,
+    /// Events queued during re-entrant `handle_event` calls. The
+    /// outer loop drains this after every step's actions finish
+    /// dispatching.
+    pending: VecDeque<Event>,
 }
 
 impl VoiceRuntime {
@@ -165,20 +191,26 @@ impl VoiceRuntime {
     /// the bin and the signal wiring. Step 2's pipeline is just
     /// the empty container that step 3 grows into.
     ///
-    /// `gst::init()` must have been called first (the C side runs
-    /// `gtkhx_voice_init()` from `main` for this purpose). Calling
-    /// without it returns `Err` rather than panicking.
+    /// Calls `gst::init()` first — it's idempotent, so production
+    /// code that already ran `gtkhx_voice_init()` from `main` just
+    /// sees a no-op. Tests that forgot to initialise see a clean
+    /// `Err(RuntimeError::NotInitialised)` rather than a delayed
+    /// panic from inside gstreamer-rs's assert-initialised
+    /// checks.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
+        gstreamer::init().map_err(|_| RuntimeError::NotInitialised)?;
         let pipeline = gstreamer::Pipeline::builder()
             .name("hxvoice-pipeline")
             .build();
         Ok(VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
-                backend,
                 pipeline: Some(pipeline),
                 armed_timers: Vec::new(),
+                dispatching: false,
+                pending: VecDeque::new(),
             })),
+            backend: Rc::new(RefCell::new(backend)),
         })
     }
 
@@ -190,10 +222,12 @@ impl VoiceRuntime {
         VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
-                backend,
                 pipeline: None,
                 armed_timers: Vec::new(),
+                dispatching: false,
+                pending: VecDeque::new(),
             })),
+            backend: Rc::new(RefCell::new(backend)),
         }
     }
 
@@ -204,13 +238,51 @@ impl VoiceRuntime {
     /// Returns the [`SessionState`] the machine has now entered —
     /// useful for tests; production callers can also consume the
     /// `StateChanged` signal via their `Backend`.
+    ///
+    /// Re-entrant calls (a backend action triggers a signal
+    /// handler that synchronously calls `handle_event` again on
+    /// the same runtime) are supported: the nested event is
+    /// queued and processed after the outer dispatch loop's
+    /// current step finishes. That's the only way to avoid the
+    /// "borrow_mut while we're already dispatching" panic class
+    /// when production wires `EmitSignal` to a GLib signal that
+    /// the UI's voice button reacts to.
     pub fn handle_event(&self, event: Event) -> SessionState {
-        let actions = {
+        // Enqueue the event. If we're already dispatching (this is
+        // a nested call from inside a Backend invocation), just
+        // queue and return — the outer loop will drain it.
+        {
             let mut inner = self.inner.borrow_mut();
-            inner.machine.step(event)
-        };
-        for action in actions {
-            self.dispatch(action);
+            inner.pending.push_back(event);
+            if inner.dispatching {
+                return inner.machine.state();
+            }
+            inner.dispatching = true;
+        }
+
+        // Outer loop — drains pending until empty.
+        loop {
+            let next = {
+                let mut inner = self.inner.borrow_mut();
+                match inner.pending.pop_front() {
+                    Some(e) => Some(e),
+                    None => {
+                        inner.dispatching = false;
+                        None
+                    }
+                }
+            };
+            let Some(event) = next else {
+                break;
+            };
+
+            let actions = {
+                let mut inner = self.inner.borrow_mut();
+                inner.machine.step(event)
+            };
+            for action in actions {
+                self.dispatch(action);
+            }
         }
         self.inner.borrow().machine.state()
     }
@@ -229,17 +301,23 @@ impl VoiceRuntime {
     fn dispatch(&self, action: Action) {
         match action {
             // ---- C-side integration points (delegated to Backend) ----
+            //
+            // Backend calls deliberately do NOT hold an `Inner`
+            // borrow. A backend implementation that turns around
+            // and re-enters `handle_event` (e.g. via a GLib signal
+            // handler) needs the Inner cell free; holding it here
+            // would panic on the nested borrow_mut. The Backend's
+            // own cell still has a re-entrancy hazard if the
+            // backend recursively calls back through `self`, but
+            // that's a constraint the backend implementor manages.
             Action::SendWireFrame { opcode, body } => {
-                self.inner
-                    .borrow_mut()
-                    .backend
-                    .send_wire_frame(opcode, &body.0);
+                self.backend.borrow_mut().send_wire_frame(opcode, &body.0);
             }
             Action::EmitSignal { kind, payload } => {
-                self.inner.borrow_mut().backend.emit_signal(kind, payload);
+                self.backend.borrow_mut().emit_signal(kind, payload);
             }
             Action::TearDown => {
-                self.inner.borrow_mut().backend.tear_down();
+                self.backend.borrow_mut().tear_down();
             }
 
             // ---- Timers ----
@@ -321,26 +399,31 @@ mod tests {
     use super::*;
     use hxvoice::event::ConnectionState;
 
-    fn rec() -> (VoiceRuntime, *mut RecordingBackend) {
-        // Build a recording backend and hand the runtime a Box of
-        // it, but keep a raw pointer so the test can read the
-        // captured state. Safe because we control the lifetime and
-        // never alias the &mut access — the runtime borrows it
-        // only inside `dispatch`, and the test only reads it
-        // between handle_event calls.
-        let backend = Box::new(RecordingBackend::default());
-        let ptr = Box::into_raw(backend);
-        // Reconstruct from the raw pointer for the runtime's Box.
-        let owned = unsafe { Box::from_raw(ptr) };
-        let runtime = VoiceRuntime::new_without_pipeline(owned);
-        (runtime, ptr)
+    /// Shared-state recorder. The runtime owns a `Box<dyn Backend>`
+    /// wrapping one clone of the cell; the test keeps another clone
+    /// for inspection. This replaces the previous raw-pointer hack
+    /// — proper lifetimes, no unsafe — and pairs naturally with the
+    /// `Rc<RefCell<Box<dyn Backend>>>` slot the runtime exposes.
+    struct SharedRec(Rc<RefCell<RecordingBackend>>);
+
+    impl Backend for SharedRec {
+        fn send_wire_frame(&mut self, opcode: u32, body: &[u8]) {
+            self.0.borrow_mut().send_wire_frame(opcode, body);
+        }
+        fn emit_signal(&mut self, kind: SignalKind, payload: SignalPayload) {
+            self.0.borrow_mut().emit_signal(kind, payload);
+        }
+        fn tear_down(&mut self) {
+            self.0.borrow_mut().tear_down();
+        }
     }
 
-    /// Read the recording backend through the raw pointer. Only
-    /// safe between `handle_event` calls (when the runtime isn't
-    /// borrowing it).
-    unsafe fn read(ptr: *mut RecordingBackend) -> &'static RecordingBackend {
-        &*ptr
+    /// Returns a runtime and a shared handle the test can read.
+    fn rec() -> (VoiceRuntime, Rc<RefCell<RecordingBackend>>) {
+        let shared = Rc::new(RefCell::new(RecordingBackend::default()));
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(SharedRec(shared.clone())));
+        (runtime, shared)
     }
 
     #[test]
@@ -348,7 +431,7 @@ mod tests {
         let (runtime, backend) = rec();
         let new_state = runtime.handle_event(Event::JoinRequested { cid: 42 });
         assert_eq!(new_state, SessionState::JoinSent);
-        let backend = unsafe { read(backend) };
+        let backend = backend.borrow();
         assert_eq!(backend.wire_frames.len(), 1);
         assert_eq!(backend.wire_frames[0].0, 600);
         // The state machine encoded cid 42 as BE.
@@ -374,7 +457,7 @@ mod tests {
             sdp: "v=0\n".into(),
         });
         assert_eq!(runtime.state(), SessionState::Connecting);
-        let backend = unsafe { read(backend) };
+        let backend = backend.borrow();
         // 600 (JOIN) then 603 (SDP_ANSWER).
         let opcodes: Vec<u32> = backend
             .wire_frames
@@ -441,7 +524,7 @@ mod tests {
 
         runtime.handle_event(Event::LeaveRequested { cid: 7 });
         assert_eq!(runtime.state(), SessionState::Leaving);
-        let backend = unsafe { read(backend) };
+        let backend = backend.borrow();
         let opcodes: Vec<u32> = backend
             .wire_frames
             .iter()
@@ -465,7 +548,7 @@ mod tests {
         runtime.handle_event(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Failed,
         });
-        let backend = unsafe { read(backend) };
+        let backend = backend.borrow();
         assert_eq!(backend.tear_downs, 1);
         // At least one Error signal should have fired.
         let saw_error = backend
@@ -497,12 +580,93 @@ mod tests {
         assert_eq!(runtime.state(), SessionState::Leaving);
     }
 
+    /// Regression (Copilot review): dispatch() used to hold an
+    /// `Inner` borrow_mut while calling into the Backend. A backend
+    /// implementation that turns around and re-enters
+    /// `handle_event` (the typical shape when a UI signal handler
+    /// triggers another voice transition — e.g. the "Leave" button
+    /// inside the voice-error toast) would panic on the nested
+    /// `Inner` borrow. Splitting backend into its own `Rc<RefCell>`
+    /// makes the borrow scopes independent.
+    #[test]
+    fn backend_can_reenter_handle_event_without_panicking() {
+        use core::cell::Cell;
+
+        /// Backend that fires LeaveRequested back into the runtime
+        /// the first time it sees a JOIN wire frame go out. The
+        /// runtime field is wired post-construction via the OnceCell
+        /// shape; the Cell is a single-shot fuse so the recursion
+        /// doesn't loop.
+        struct ReentrantBackend {
+            runtime: Rc<RefCell<Option<VoiceRuntime>>>,
+            re_entered: Cell<bool>,
+            fired: Cell<bool>,
+        }
+
+        impl Backend for ReentrantBackend {
+            fn send_wire_frame(&mut self, opcode: u32, _body: &[u8]) {
+                // First JOIN wire frame: turn around and request
+                // Leave. Without the Backend-split fix this would
+                // panic on borrow_mut(Inner) because the dispatch
+                // loop is still holding it.
+                if opcode == 600 && !self.fired.get() {
+                    self.fired.set(true);
+                    if let Some(rt) = self.runtime.borrow().as_ref() {
+                        // The state machine only accepts a LEAVE
+                        // for the active cid (42 here); spurious
+                        // ones are dropped silently, which is
+                        // exactly what we want for the re-entry
+                        // probe.
+                        rt.handle_event(Event::LeaveRequested { cid: 42 });
+                        self.re_entered.set(true);
+                    }
+                }
+            }
+            fn emit_signal(&mut self, _: SignalKind, _: SignalPayload) {}
+            fn tear_down(&mut self) {}
+        }
+
+        let runtime_slot: Rc<RefCell<Option<VoiceRuntime>>> =
+            Rc::new(RefCell::new(None));
+        let backend = Box::new(ReentrantBackend {
+            runtime: runtime_slot.clone(),
+            re_entered: Cell::new(false),
+            fired: Cell::new(false),
+        });
+        // Build the runtime, then plug it into the backend so the
+        // re-entry can find it.
+        let runtime = VoiceRuntime::new_without_pipeline(backend);
+        *runtime_slot.borrow_mut() = Some(runtime.clone());
+
+        // Drive the JOIN — backend will re-enter with LEAVE before
+        // we return.
+        runtime.handle_event(Event::JoinRequested { cid: 42 });
+
+        // The fact that we reached this line at all is the test —
+        // the old code would have panicked. Verify the re-entry
+        // actually happened by inspecting the fuse.
+        let backend_slot = runtime_slot.borrow();
+        // We can't downcast the Box<dyn Backend> directly; instead
+        // we verify the re-entry by observing the state machine
+        // transitioned all the way to Leaving (JOIN → LEAVE,
+        // even-though Leaving's cid match is for the active cid).
+        let runtime_ref = backend_slot.as_ref().unwrap();
+        assert_eq!(runtime_ref.state(), SessionState::Leaving);
+    }
+
     #[test]
     fn pipeline_built_runtime_constructs_when_gst_initialised() {
         // Coverage smoke for the with-pipeline constructor. Requires
-        // gst::init() to have been called; we run it inline here
-        // so the test is self-contained.
-        let _ = crate::init();
+        // gst::init() to have been called; we run it inline here so
+        // the test is self-contained, and assert on the result so a
+        // GStreamer install regression surfaces here as the failed
+        // assertion rather than as a delayed panic from VoiceRuntime::new
+        // (which itself now propagates the init error as
+        // RuntimeError::NotInitialised).
+        assert!(
+            crate::init(),
+            "gst::init() must succeed for the with-pipeline test"
+        );
         let runtime = VoiceRuntime::new(Box::new(NoopBackend))
             .expect("runtime should construct with a fresh pipeline");
         // Sanity: the pipeline element is reachable.
