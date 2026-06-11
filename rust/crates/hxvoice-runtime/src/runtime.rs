@@ -1330,29 +1330,45 @@ fn connect_pad_added(
                 rt.handle_event(Event::WebrtcPadAdded {
                     mid: mid.clone(),
                 });
-                // If the state machine didn't consume the pad
-                // through `Action::StartReceivePipeline` (e.g.
-                // unknown mid that doesn't map to a user_id,
-                // pad-added arriving in a state that ignores
-                // it, mid that the spec's "send" leg owns), the
-                // entry in `pending_pads` would otherwise leak
-                // and pile up over the lifetime of the runtime.
-                // Drop it now — the pad's strong ref goes away
-                // with the entry, so glib reclaims the
-                // associated resources.
-                let stale =
-                    rt.inner.borrow_mut().pending_pads.remove(&mid);
-                // The local send leg's transceiver shows up here
-                // with `mid == "send"` and the state machine
-                // intentionally drops it (hxvoice::state). Don't
-                // warn for that — it's expected on every join.
-                if stale.is_some() && mid != "send" {
-                    gstreamer::warning!(
-                        gstreamer::CAT_RUST,
-                        "hxvoice: pad-added for mid={mid} produced no \
-                         StartReceivePipeline; dropping the parked pad"
-                    );
-                }
+            });
+            // The "did the state machine consume the parked pad?"
+            // cleanup runs on the NEXT main-loop tick, not
+            // inline. handle_event has a re-entrancy guard
+            // (inner.dispatching == true): if a backend callback
+            // is still draining the outer dispatch loop, the
+            // WebrtcPadAdded event we just submitted is only
+            // ENQUEUED, not processed. Inlining the
+            // pending_pads.remove(&mid) below would yank the pad
+            // before the outer dispatch loop gets to it, and the
+            // eventual Action::StartReceivePipeline would find
+            // nothing to link.
+            //
+            // Deferring to glib::idle_add_local lets the outer
+            // loop unwind first. By the time idle runs, the
+            // event has been dispatched and a successful
+            // StartReceivePipeline has already migrated the pad
+            // out of pending_pads into receive_bins. If the
+            // entry is still in pending_pads at idle time, it
+            // really is stale and we drop it.
+            let mid = mid.clone();
+            gstreamer::glib::idle_add_local_once(move || {
+                with_main_thread_runtime(runtime_id, |rt| {
+                    let stale =
+                        rt.inner.borrow_mut().pending_pads.remove(&mid);
+                    // The local send leg's transceiver shows up
+                    // here with `mid == "send"` and the state
+                    // machine intentionally drops it
+                    // (hxvoice::state). Don't warn for that —
+                    // it's expected on every join.
+                    if stale.is_some() && mid != "send" {
+                        gstreamer::warning!(
+                            gstreamer::CAT_RUST,
+                            "hxvoice: pad-added for mid={mid} produced \
+                             no StartReceivePipeline; dropping the \
+                             parked pad"
+                        );
+                    }
+                });
             });
         });
     });
