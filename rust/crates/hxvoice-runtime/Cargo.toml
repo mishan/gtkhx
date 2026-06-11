@@ -1,0 +1,38 @@
+[package]
+name = "hxvoice-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GStreamer-based voice runtime for GtkHx (Phase 8.B+)"
+publish = false
+
+[lib]
+# staticlib: the C side links the FFI symbols for gst::init() and the
+# eventual per-session runtime entry points (Phase 8.C onward).
+# rlib:      future Rust consumers (notably the Phase 8.C hxvoice
+#            state-machine crate that drives this runtime) depend on
+#            the typed API.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Phase 8.B consumes gstreamer-rs core + app + audio for the bare
+# pipeline (audiotestsrc / mulawenc / mulawdec / fakesink and the
+# DeviceMonitor wrapper). Each runs pkg-config against its
+# gstreamer-*-1.0 system library at build.rs time; the matching
+# probes are in the top-level meson.build, and the GNOME 49 Flatpak
+# runtime ships them by default.
+#
+# gstreamer-sdp / gstreamer-webrtc aren't instantiated by Phase 8.B
+# code, but they're listed here so the resolver pins their versions
+# in Cargo.lock and the Flatpak vendor tarball — the Phase 8.C
+# build that wires webrtcbin in doesn't churn the rest of the tree.
+# Both system libs live in gst-plugins-bad (Debian:
+# gst-plugins-bad-dev / Fedora: gstreamer1-plugins-bad-free-devel);
+# the meson.build probe requires them at configure time so the
+# build-host gap surfaces before Rust runs.
+gstreamer = { workspace = true }
+gstreamer-app = { workspace = true }
+gstreamer-audio = { workspace = true }
+gstreamer-sdp = { workspace = true }
+gstreamer-webrtc = { workspace = true }
+glib = { workspace = true }

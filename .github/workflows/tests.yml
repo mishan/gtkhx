@@ -77,6 +77,16 @@ jobs:
         # appstream → appstreamcli for the validate-metainfo test.
         # gtk-update-icon-cache is bundled with the gtk4 runtime on
         # Fedora; pulled in transitively by gtk4-devel.
+        #
+        # GStreamer (Phase 8.B): the top-level meson.build probes
+        # gstreamer-1.0, -app-1.0, -audio-1.0, -sdp-1.0, -webrtc-1.0
+        # at configure time. The first three live in
+        # gstreamer1-plugins-base-devel; webrtc + sdp live in
+        # gstreamer1-plugins-bad-free-devel. gstreamer1-devel provides
+        # the core gstreamer-1.0 .pc and pulls the rest transitively
+        # on Fedora, but listing all three explicitly keeps the
+        # configure-time gap clear if any of them get split out
+        # downstream.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -85,6 +95,9 @@ jobs:
             nettle-devel zlib-devel \
             gsound-devel \
             libsoup3-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-bad-free-devel \
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
@@ -315,6 +328,9 @@ jobs:
                 glib2-devel gobject-introspection-devel \
                 nettle-devel zlib-devel \
                 gsound-devel \
+                gstreamer1-devel \
+                gstreamer1-plugins-base-devel \
+                gstreamer1-plugins-bad-free-devel \
                 gettext-devel \
                 desktop-file-utils appstream \
                 libpanel-devel \

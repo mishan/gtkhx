@@ -15,6 +15,13 @@
 #   hxbridge        — Phase R3.0 Rust ↔ GLib bridge (C-owned GObject
 #                     wrapping + signal emit). Lifetime model documented
 #                     in docs/rust-glib-interop.md.
+#   hxvoice-runtime — Phase 8.B GStreamer-based voice runtime. Phase
+#                     8.B exposes only gtkhx_voice_init (gst::init
+#                     wrapper); per-session runtime handle + state
+#                     machine wiring lands in Phase 8.C. Pulls in
+#                     gstreamer + gstreamer-app + gstreamer-audio +
+#                     gstreamer-sdp + gstreamer-webrtc from
+#                     workspace.dependencies.
 #
 # Each crate is a staticlib that the C side wraps with a thin dispatcher.
 # FFI signatures are hand-declared `extern` blocks in the relevant C TU
@@ -43,6 +50,9 @@ rust_sources = files(
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',
+  'crates/hxvoice-runtime/src/lib.rs',
+  'crates/hxvoice-runtime/src/audio.rs',
+  'crates/hxvoice-runtime/src/ffi.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/hxcrypto-hash/Cargo.toml',
@@ -51,6 +61,7 @@ rust_sources = files(
   'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
+  'crates/hxvoice-runtime/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
 # offline build; it is not consumed by `cargo build` directly. Cargo.lock
@@ -142,5 +153,22 @@ rust_hxbridge_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxbridge',
+  ],
+)
+
+# GStreamer voice runtime (Phase 8.B). hxvoice-runtime wraps gst::init
+# and the audio device-enumeration / element-factory helpers. The
+# Phase 8.B exit criterion is a clean build + Tier 2 loopback test
+# passing; per-session runtime handle + state-machine wiring land in
+# Phase 8.C. Pulls in the gstreamer-rs 0.25 crate family (which itself
+# links the gstreamer-1.0 / -app / -audio / -sdp / -webrtc system
+# libraries probed at the top-level meson.build). The system libs are
+# already in `deps` on the gtkhx executable, so the link surface
+# doesn't grow.
+rust_hxvoice_runtime_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxvoice_runtime',
   ],
 )
