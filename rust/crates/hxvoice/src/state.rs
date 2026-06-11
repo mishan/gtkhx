@@ -826,7 +826,16 @@ fn connection_state_for_session(s: SessionState) -> ConnectionState {
         | SessionState::OfferPending
         | SessionState::Connecting => ConnectionState::Connecting,
         SessionState::Connected => ConnectionState::Connected,
-        SessionState::Leaving => ConnectionState::Disconnected,
+        // Leaving is the terminal state of this machine — the
+        // runtime drops the SessionMachine after reaching it.
+        // That's a session that has *ended*, not one with
+        // temporary connectivity loss, so map to Closed.
+        // Disconnected per `ConnectionState`'s own doc is
+        // "connectivity loss the stack thinks is temporary"; a
+        // RoomStatus signal carrying Disconnected here would
+        // mislead the UI into showing "reconnecting" for a
+        // session that's actually done.
+        SessionState::Leaving => ConnectionState::Closed,
     }
 }
 
@@ -834,8 +843,10 @@ fn connection_state_for_session(s: SessionState) -> ConnectionState {
 //
 // Re-declared here rather than imported from `hotline-proto::messages`
 // so this crate stays dep-free. The numeric values are pinned by
-// the same test fixture that pins them in hotline-proto — see
-// `crate::tests::wire_opcode_constants_match_hotline_proto`.
+// the spec-matched test fixture at the bottom of this file's
+// tests module — see `crate::state::tests::wire_opcode_constants_match_spec`
+// (and the corresponding fixture in hotline-proto, which pins the
+// same opcode numbers on its own).
 const HTLC_HDR_VOICE_JOIN: u32 = 600;
 const HTLC_HDR_VOICE_LEAVE: u32 = 601;
 const HTLC_HDR_VOICE_SDP_ANSWER: u32 = 603;

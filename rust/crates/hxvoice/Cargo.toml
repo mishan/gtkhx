@@ -26,6 +26,12 @@ crate-type = ["rlib"]
 # bounded inputs we feed it (mid labels and small participant
 # lists).
 #
+# Version pinned at "0.17" so the workspace resolver picks the same
+# major.minor that the rest of the dep graph already pulls in
+# transitively — without that pin cargo gives us a second
+# `hashbrown 0.16` plus its foldhash sub-dep alongside the existing
+# 0.17, doubling the build's hashbrown footprint.
+#
 # That's load-bearing for `cargo test -p hxvoice` to run in any CI
 # container regardless of audio device or GStreamer install state,
 # and for the rest of the workspace to have exactly one place to
@@ -35,4 +41,4 @@ crate-type = ["rlib"]
 # If a future caller needs runtime types (gst::Element handles,
 # glib::Object refs), those stay in hxvoice-runtime — never bleed
 # into this crate's public surface.
-hashbrown = { version = "0.16", default-features = false, features = ["default-hasher"] }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
