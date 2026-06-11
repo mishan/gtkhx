@@ -1333,7 +1333,11 @@ fn connect_pad_added(
                 // associated resources.
                 let stale =
                     rt.inner.borrow_mut().pending_pads.remove(&mid);
-                if stale.is_some() {
+                // The local send leg's transceiver shows up here
+                // with `mid == "send"` and the state machine
+                // intentionally drops it (hxvoice::state). Don't
+                // warn for that — it's expected on every join.
+                if stale.is_some() && mid != "send" {
                     gstreamer::warning!(
                         gstreamer::CAT_RUST,
                         "hxvoice: pad-added for mid={mid} produced no \
@@ -1436,14 +1440,28 @@ fn start_receive_bin(
     Some(bin)
 }
 
-/// Tear down a receive bin: set to `Null`, remove from the
+/// Tear down a receive bin: unlink the ghost sink from its peer
+/// (the webrtcbin src pad), set to `Null`, remove from the
 /// pipeline. The caller has already popped the bin handle from
 /// `Inner::receive_bins`, so dropping the local reference on
 /// return is what releases the last refcount.
+///
+/// The unlink step matters: `pipeline.remove` doesn't break pad
+/// links — the webrtcbin src pad keeps the ghost sink alive via a
+/// peer ref. A subsequent `StartReceivePipeline` for the same mid
+/// would then try to link the (still-linked) src pad and fail with
+/// "already linked", leaving the new bin orphaned in the pipeline.
 fn stop_receive_bin(
     pipeline: &gstreamer::Pipeline,
     bin: &gstreamer::Bin,
 ) {
+    if let Some(sink_pad) = bin.static_pad("sink") {
+        if let Some(peer) = sink_pad.peer() {
+            // Unlink the src→sink direction. The src pad's peer
+            // ref is what kept the link alive across remove().
+            let _ = peer.unlink(&sink_pad);
+        }
+    }
     let _ = bin.set_state(gstreamer::State::Null);
     let _ = pipeline.remove(bin);
 }
