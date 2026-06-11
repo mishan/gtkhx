@@ -160,3 +160,29 @@ fn pcm_caps_filter_pins_8khz_mono_s16le() {
         "S16LE"
     );
 }
+
+/// Phase 8.C step 5's receive-leg bin builds end-to-end against
+/// the host's installed GStreamer plugins. Pins that
+/// `rtppcmudepay` (gst-plugins-good), `mulawdec` (-good),
+/// `audioconvert` / `audioresample` (gst-plugins-base), and
+/// `autoaudiosink` (-good) are all present and link cleanly.
+///
+/// Also verifies the ghost "sink" pad is exposed — the dispatch
+/// arm's `bin.static_pad("sink")` lookup depends on this name.
+#[test]
+fn receive_bin_builds_and_exposes_ghost_sink_pad() {
+    hxvoice_runtime::init();
+
+    let bin = hxvoice_runtime::audio::make_receive_bin("hxvoice-recv-test")
+        .expect(
+            "receive bin must build — check gst-plugins-good \
+             (rtppcmudepay / mulawdec / autoaudiosink) + \
+             gst-plugins-base (audioconvert / audioresample)",
+        );
+    use gst::prelude::*;
+    assert_eq!(bin.name(), "hxvoice-recv-test");
+    let sink_pad = bin
+        .static_pad("sink")
+        .expect("receive bin must expose a ghost sink pad");
+    assert_eq!(sink_pad.direction(), gst::PadDirection::Sink);
+}
