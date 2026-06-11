@@ -29,12 +29,16 @@
 #ifndef _VOICE_RUNTIME_H
 #define _VOICE_RUNTIME_H
 
+/* Standard library headers go OUTSIDE extern "C" so C++ consumers
+ * pick up the standard-library declarations with their natural
+ * linkage. Matches the convention used by the rest of the headers
+ * in this repo. */
+#include <stdint.h>
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
-#include <stddef.h>
 
 /*
  * Initialise the GStreamer subsystem.
@@ -131,8 +135,10 @@ extern void gtkhx_voice_runtime_room_status (gtkhx_voice_runtime *rt,
 
 /* Fire Event::ServerTaskError { origin_opcode, text }. Called from
  * the HTLS_HDR_TASK error dispatch when the originating opcode was
- * one of the voice opcodes (600 / 603 / 604 / 606). text may be
- * NULL (empty message). */
+ * one of the voice opcodes that registers a TASK: 600 (JOIN),
+ * 601 (LEAVE), 603 (SDP_ANSWER), 606 (MUTE). 604 (ICE) is a
+ * bidirectional notification with no task reply, so it never
+ * reaches this entry point. text may be NULL (empty message). */
 extern void gtkhx_voice_runtime_task_error (gtkhx_voice_runtime *rt,
                                             uint32_t origin_opcode,
                                             const char *text);

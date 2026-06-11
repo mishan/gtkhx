@@ -1035,7 +1035,8 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
          * state machine intercepts both the empty-string JSON
          * variant and the empty-chunk variant inside
          * `gtkhx_voice_runtime_ice_candidate` (which accepts NULL
-         * sdp), so route the empty case through too rather than
+         * candidate_json), so route the empty case through too
+         * rather than
          * dropping it. Otherwise the state machine never sees
          * the server finishing its ICE gathering. */
         session *sess = &the_session;

@@ -96,7 +96,14 @@ pub extern "C" fn gtkhx_voice_runtime_new() -> *mut VoiceRuntime {
     match VoiceRuntime::new(Box::new(NoopBackend)) {
         Ok(rt) => Box::into_raw(Box::new(rt)),
         Err(e) => {
-            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
+            // Route through the GStreamer log channel so the
+            // failure shows up alongside the rest of the voice
+            // runtime's diagnostics (and not as bare stderr
+            // noise on top of any GUI/test runner output).
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: VoiceRuntime::new failed: {e}"
+            );
             core::ptr::null_mut()
         }
     }
@@ -303,7 +310,8 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
             })
             .collect();
     if entries.len() > MAX_PARTICIPANTS {
-        eprintln!(
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
             "hxvoice: room_status blob has >{MAX_PARTICIPANTS} participants \
              (cid={cid}, blob len={}); truncating",
             bytes.len()
@@ -315,10 +323,12 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
 
 /// Fire `Event::ServerTaskError { origin_opcode, text }`. Called
 /// from the `HTLS_HDR_TASK` error dispatch when the task's
-/// originating opcode was one of the voice ones (600 / 603 / 604 /
-/// 606). The state machine decides whether to tear down (JOIN /
-/// SDP_ANSWER errors → fail) or surface as a toast only (MUTE /
-/// ICE / LEAVE errors).
+/// originating opcode was one of the voice opcodes that registers
+/// a TASK: 600 (JOIN), 601 (LEAVE), 603 (SDP_ANSWER), 606 (MUTE).
+/// 604 (ICE) is a bidirectional notification with no task reply,
+/// so it never reaches this entry point. The state machine decides
+/// whether to tear down (JOIN / SDP_ANSWER errors → fail) or
+/// surface as a toast only (LEAVE / MUTE errors).
 ///
 /// # Safety
 /// `text` shape matches `gtkhx_voice_runtime_sdp_offer`. NULL is
