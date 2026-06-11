@@ -449,6 +449,39 @@ hx_rcv_task (struct htlc_conn *htlc)
         task_error (htlc);
         error = 1;
     }
+    /* Phase 8.D runtime wiring: a TASK error reply for one of the
+     * voice opcodes (600 JOIN, 601 LEAVE, 603 SDP_ANSWER, 606
+     * MUTE — 604 ICE doesn't register a task) needs to reach the
+     * state machine via gtkhx_voice_runtime_task_error so it can
+     * decide whether to tear the session down (JOIN/SDP failures
+     * are fatal) or just surface a toast (MUTE/LEAVE failures are
+     * benign). hx_rcv_task otherwise skips the task's rcv handler
+     * for non-xfer error paths, so this is the only place voice
+     * error replies get inspected. */
+    if (error && tsk && tsk->str) {
+        session *sess = &the_session;
+        uint32_t opcode = 0;
+        if (!strcmp (tsk->str, "voice-join")) {
+            opcode = HTLC_HDR_VOICE_JOIN;
+        } else if (!strcmp (tsk->str, "voice-leave")) {
+            opcode = HTLC_HDR_VOICE_LEAVE;
+        } else if (!strcmp (tsk->str, "voice-sdp-answer")) {
+            opcode = HTLC_HDR_VOICE_SDP_ANSWER;
+        } else if (!strcmp (tsk->str, "voice-mute")) {
+            opcode = HTLC_HDR_VOICE_MUTE;
+        }
+        if (opcode && sess->voice_runtime) {
+            char err_text[256];
+            gsize err_len = 0;
+            const char *text =
+                (task_error_extract (htlc, err_text, sizeof (err_text),
+                                     &err_len) && err_len > 0)
+                    ? err_text
+                    : NULL;
+            gtkhx_voice_runtime_task_error (sess->voice_runtime, opcode,
+                                            text);
+        }
+    }
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
         /* HTXF transfer tasks (the ones xfer_go fires for FILE_GET /
@@ -998,6 +1031,18 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
     if (r.ice_len == 0) {
         debug_log ("voice", "← VOICE_ICE cid=%u (end-of-candidates)",
                    r.cid);
+        /* Spec EOC shorthand: zero-length chunk body. The hxvoice
+         * state machine intercepts both the empty-string JSON
+         * variant and the empty-chunk variant inside
+         * `gtkhx_voice_runtime_ice_candidate` (which accepts NULL
+         * sdp), so route the empty case through too rather than
+         * dropping it. Otherwise the state machine never sees
+         * the server finishing its ICE gathering. */
+        session *sess = &the_session;
+        if (sess && sess->voice_runtime) {
+            gtkhx_voice_runtime_ice_candidate (sess->voice_runtime,
+                                               r.cid, NULL);
+        }
         return;
     }
 
