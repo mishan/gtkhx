@@ -151,11 +151,17 @@ typedef enum {
 
 /*
  * `voice-state-changed` signal callback. Fires on every transition
- * the state machine performs. The C side typically maps the state
- * onto a "joined" UI flag: GTKHX_VOICE_STATE_CONNECTING /
- * GTKHX_VOICE_STATE_CONNECTED → joined; everything else (including
- * GTKHX_VOICE_STATE_LEAVING, the spec's terminal state for a closed
- * session) → not joined.
+ * the state machine performs.
+ *
+ * Recommended mapping to a "joined" UI flag (this is what
+ * voice_panel.c does — see state_is_joined): treat
+ * GTKHX_VOICE_STATE_JOIN_SENT, GTKHX_VOICE_STATE_OFFER_PENDING,
+ * GTKHX_VOICE_STATE_CONNECTING, and GTKHX_VOICE_STATE_CONNECTED
+ * all as joined so the toolbar flips to "Leave Voice" the moment
+ * the JOIN ships and the user can cancel a stuck handshake.
+ * GTKHX_VOICE_STATE_IDLE (back-to-start) and
+ * GTKHX_VOICE_STATE_LEAVING (post-tear-down terminal state)
+ * read as not-joined so the toolbar offers a fresh Join Voice.
  */
 typedef void (*gtkhx_voice_runtime_state_changed_cb) (void *user_data,
                                                       gtkhx_voice_state state);
@@ -180,14 +186,22 @@ typedef void (*gtkhx_voice_runtime_mute_changed_cb) (void *user_data,
  * caller may free this struct as soon as the constructor returns.
  *
  * Any field may be NULL — the runtime treats NULL as "no
- * subscriber for this signal". The struct is forward-compatible:
- * future SignalKind variants get new fields appended here, and
- * older callers that built against an earlier definition silently
- * skip the new signals (because the runtime sees NULL).
+ * subscriber for this signal".
  *
- * RoomStatus and Error signals will land in a follow-up step that
- * wires up users.c mic icons + AdwToastOverlay; the field slots
- * are reserved but not yet populated by the runtime.
+ * ABI note: this is a plain C struct without a size / version
+ * field. Adding new fields here is NOT ABI-compatible — older
+ * callers built against a smaller struct definition would have
+ * the callee read past the end of their allocation. Whenever a
+ * new SignalKind callback slot is added below, every consumer of
+ * this header must be rebuilt against the new definition. Since
+ * the C side and the Rust runtime live in the same workspace and
+ * are built in lockstep by the same Meson invocation, "the
+ * runtime build" is the only consumer in practice.
+ *
+ * RoomStatus and Error signal slots are not present yet; they'll
+ * land in a follow-up step that wires up users.c mic icons +
+ * AdwToastOverlay, and that follow-up will require a full rebuild
+ * of both the staticlib and the C binary.
  */
 typedef struct {
     gtkhx_voice_runtime_state_changed_cb state_changed;

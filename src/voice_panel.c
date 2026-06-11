@@ -498,9 +498,15 @@ voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
 
     debug_log ("voice",
                "panel: state=%u joined=%d active_cid=%s%u",
-               state, joined_now,
+               /* enum → unsigned int through varargs:
+                * gtkhx_voice_state is an enum that promotes to
+                * int; passing it directly to %u is UB. Cast to
+                * unsigned so the varargs type matches the format
+                * specifier. */
+               (unsigned int) state,
+               joined_now ? 1 : 0,
                has_active ? "" : "(none) ",
-               active_cid);
+               (unsigned int) active_cid);
 
     GHashTableIter iter;
     gpointer key, val;

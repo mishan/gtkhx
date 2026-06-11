@@ -400,10 +400,15 @@ pub type MuteChangedCallback =
 /// signals it doesn't care about — the runtime treats `None` as
 /// "no subscriber" and drops the corresponding emit silently.
 ///
-/// Forward-compatible: future `SignalKind` variants get new
-/// fields appended here and the matching column in the C struct.
-/// Old C callers that built against an earlier definition will
-/// pass NULLs for the new fields, which is the correct behaviour.
+/// **ABI note.** Adding fields here is NOT ABI-safe — older C
+/// callers built against a smaller struct definition would have
+/// the runtime read past the end of their allocation. Whenever a
+/// new SignalKind callback slot lands, every consumer must be
+/// rebuilt against the new layout. The Meson build that ships
+/// this crate as a staticlib is the only consumer in practice,
+/// so the rebuild is automatic — but don't be tempted to read
+/// this as "older callers silently skip new signals". They
+/// don't; they undefined-behave.
 #[derive(Clone, Copy)]
 pub struct SignalCallbacks {
     pub state_changed: Option<StateChangedCallback>,
