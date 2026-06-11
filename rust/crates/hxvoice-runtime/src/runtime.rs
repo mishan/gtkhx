@@ -1005,6 +1005,12 @@ impl std::error::Error for RuntimeError {
 mod tests {
     use super::*;
     use hxvoice::event::ConnectionState;
+    // Note re: GStreamer extension-trait methods (pipeline.by_name,
+    // bin.factory, property::<T>, etc.) used by the SDP-dispatch
+    // tests below: these come from `gstreamer::prelude::*`, which
+    // the parent module imports at the top. Trait-method resolution
+    // sees parent-module `use` imports inside child modules, so we
+    // don't need to re-import the prelude here.
 
     /// Shared-state recorder. The runtime owns a `Box<dyn Backend>`
     /// wrapping one clone of the cell; the test keeps another clone
