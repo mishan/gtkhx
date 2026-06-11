@@ -8,10 +8,20 @@
 //!
 //! The unit tests in `src/runtime.rs` cover the
 //! `map_peer_connection_state` translation and confirm that
-//! construction completes with the bus watch attached. This test
-//! covers the dynamic shape: a bus message posted after construction
-//! actually reaches the watch closure (verified indirectly by
-//! pumping the main loop and asserting no panic / no crash).
+//! construction completes cleanly with the bus-watch wiring in
+//! place. This test goes one step further: it posts a synthetic
+//! Warning message onto the bus after construction and pumps the
+//! main loop so the watch closure has the opportunity to run,
+//! and confirms the runtime survives that exercise (no panic, no
+//! abort, no spurious tear_down at the backend).
+//!
+//! It does NOT prove the watch closure executed against the
+//! synthetic message — there is no observable side effect of the
+//! Warning arm (logging to the GStreamer warning channel isn't
+//! captured by the test harness). The end-to-end "real bus
+//! message lands in the watch and produces a typed event" path
+//! lives in the Phase 8.F Tier 3 voice integration test against
+//! Janus, where actual pipeline errors / state transitions occur.
 
 use core::cell::RefCell;
 use std::rc::Rc;
@@ -67,7 +77,10 @@ fn pipeline_bus_watch_handles_posted_messages_without_panic() {
     .build();
     let _ = bus.post(msg);
 
-    // Drain the main loop briefly so the watch fires.
+    // Drain the main loop briefly to give the watch a chance to
+    // run. No observable side effect we can assert on — the
+    // Warning arm only logs — so this is the most we can
+    // exercise without a real Janus session.
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_millis(100) {
         while ctx.iteration(false) {}

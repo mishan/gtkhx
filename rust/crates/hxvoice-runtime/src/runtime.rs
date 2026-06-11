@@ -1530,11 +1530,13 @@ fn lookup_pad_mid(pad: &gstreamer::Pad) -> Option<String> {
 /// transitions flow into the state machine as
 /// `Event::WebrtcConnectionStateChanged`.
 ///
-/// `connect_notify_local` keeps the callback main-thread-only — same
-/// shape as `connect_pad_added` and `connect_on_ice_candidate`'s
-/// marshaling, except notify signals fire on the thread that called
-/// the property setter (typically a GStreamer worker), so we still
-/// hop through `MainContext::invoke` for safety.
+/// Uses `connect_notify` (NOT the `_local` variant): notify signals
+/// fire on the thread that called the property setter, which for
+/// webrtcbin's `connection-state` is typically a GStreamer worker.
+/// The Send closure captures only the runtime id + main context
+/// handle (both `Send`) and marshals the actual `handle_event` call
+/// back to the GLib main thread via `MainContext::invoke`, same
+/// shape as `connect_pad_added` and `connect_on_ice_candidate`.
 ///
 /// The `Send + 'static` callback is satisfied because we capture
 /// only the `runtime_id` (`u64`, `Copy`) and the main context
@@ -2775,10 +2777,15 @@ mod tests {
         assert!(crate::init());
         let runtime = VoiceRuntime::new(Box::new(NoopBackend))
             .expect("runtime should construct with a fresh pipeline");
-        // The bus is reachable from the pipeline; that's the
-        // entry point `attach_pipeline_bus_watch` used. Reaching
-        // this assertion at all means the watch attached without
-        // tearing down the pipeline.
+        // The pipeline has a reachable bus and construction
+        // completed without panicking. That's all this assertion
+        // proves — it does NOT verify the watch closure was
+        // actually installed by `attach_pipeline_bus_watch`
+        // (that requires observing a side effect of the closure
+        // running, which the watch's log-only behaviour
+        // doesn't surface). The full bus-message + callback
+        // path is a Tier 3 concern (Phase 8.F, real Janus
+        // session emits real bus errors on real failure modes).
         assert!(runtime
             .inner
             .borrow()
