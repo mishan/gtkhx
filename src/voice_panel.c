@@ -13,6 +13,13 @@
  * as a usability stopgap.
  */
 
+/* config.h first so PACKAGE / HAVE_LIBINTL_H / GETTEXT_PACKAGE
+ * are visible to the gettext _() macro (and any other feature
+ * test macros the rest of the headers reach for). Without this,
+ * _("Join Voice") would fall back to the identity macro and the
+ * toolbar labels wouldn't translate. */
+#include "config.h"
+
 #include "voice_panel.h"
 
 #include "hl_access.h"
