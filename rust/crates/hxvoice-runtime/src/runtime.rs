@@ -890,9 +890,50 @@ impl VoiceRuntime {
             );
             RuntimeError::WebrtcbinUnavailable
         })?;
+        // Pre-add a transceiver with sendrecv direction + PCMU
+        // caps. Without this, requesting a `sink_%u` pad creates
+        // a transceiver with default direction `none`, which the
+        // SDP negotiation collapses to `sendonly` (we have a send
+        // pad attached, nothing on receive). Answering sendonly
+        // means the remote peer can only LISTEN to us — Janus
+        // won't route any other participant's audio back, and
+        // our user hears nothing.
+        //
+        // Adding the transceiver with `Sendrecv` direction commits
+        // webrtcbin to bidirectional negotiation up-front; the
+        // SDP answer says `a=sendrecv` and Janus then routes
+        // remote participants' audio back to us via the inbound
+        // RTP path. The receive leg materialises later via
+        // `connect_pad_added` when the first remote stream
+        // arrives, builds a `rtppcmudepay → mulawdec → ...
+        // → autoaudiosink` bin per remote, and routes audio to
+        // the speakers.
+        //
+        // The caps pin PCMU / 8 kHz mono — what the spec
+        // mandates and what `gst-plugins-good`'s mulawdec
+        // expects on the receive side. Without explicit caps,
+        // webrtcbin would try to negotiate every codec in the
+        // gst-rtp registry, which both bloats the SDP and risks
+        // a codec we have no decoder for.
+        let audio_caps = gstreamer::Caps::builder("application/x-rtp")
+            .field("media", "audio")
+            .field("encoding-name", "PCMU")
+            .field("payload", 0i32)
+            .field("clock-rate", 8000i32)
+            .build();
+        let _transceiver: gstreamer_webrtc::WebRTCRTPTransceiver = webrtcbin
+            .emit_by_name(
+                "add-transceiver",
+                &[
+                    &gstreamer_webrtc::WebRTCRTPTransceiverDirection::Sendrecv,
+                    &audio_caps,
+                ],
+            );
+
         // Request a sink pad on webrtcbin and link the send bin's
-        // src ghost pad to it. `sink_%u` is the template name;
-        // webrtcbin picks the index. The link must happen BEFORE
+        // src ghost pad to it. `sink_%u` returns the sink the
+        // sendrecv transceiver we just added exposes; webrtcbin
+        // picks the index. The link must happen BEFORE
         // pipeline.set_state(Playing) so the negotiation sees a
         // populated transceiver direction when create-answer
         // fires later.
