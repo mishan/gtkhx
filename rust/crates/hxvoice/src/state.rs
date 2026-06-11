@@ -142,6 +142,29 @@ pub struct SessionMachine {
     /// us. Tracked separately so a redundant
     /// `MuteToggleRequested` is a no-op.
     muted: bool,
+    /// Renegotiation queue (Phase 8.C step 6). When an
+    /// `SdpOfferReceived` arrives while we're already in
+    /// `OfferPending`, the new offer is parked here instead of
+    /// being dispatched to webrtcbin immediately — issuing a
+    /// second `SetRemoteDescription`+`CreateAnswer` pair before
+    /// the first answer has flowed through corrupts webrtcbin's
+    /// internal state machine. Drained on
+    /// `OfferPending`+`WebrtcAnswerCreated`: after the current
+    /// answer flushes (`SetLocalDescription` + 603 send), the
+    /// queued offer becomes a new `SetRemoteDescription` +
+    /// `CreateAnswer` pair in the same step, and the machine
+    /// stays in `OfferPending` for the queued offer's answer
+    /// flow.
+    ///
+    /// Replaces, not appends — a third offer arriving before the
+    /// first answer would just supersede the queued one, per spec
+    /// §"Renegotiation Flow" ("process only the newest one").
+    /// `Option<(cid, sdp)>`; the cid is recorded so the wrong-cid
+    /// guard can run at drain time too (defensive: the cid that
+    /// was active at enqueue may have been the only legitimate
+    /// match, but the active cid can have changed in the
+    /// meantime via the mid-session room-switch path).
+    queued_offer: Option<(u32, alloc::string::String)>,
 }
 
 impl Default for SessionState {
@@ -212,6 +235,7 @@ impl SessionMachine {
                 self.active_cid = Some(cid);
                 self.mid_to_user.clear();
                 self.participants.clear();
+                self.queued_offer = None;
                 self.set_state(SessionState::JoinSent, |actions| {
                     actions.push(Action::SendWireFrame {
                         opcode: HTLC_HDR_VOICE_JOIN,
@@ -257,6 +281,7 @@ impl SessionMachine {
                 self.active_cid = Some(cid);
                 self.mid_to_user.clear();
                 self.participants.clear();
+                self.queued_offer = None;
                 self.muted = false;
                 self.set_state(SessionState::JoinSent, |actions| {
                     actions.push(Action::CancelTimer {
@@ -310,6 +335,7 @@ impl SessionMachine {
                 if self.active_cid != Some(cid) {
                     return Vec::new();
                 }
+                self.queued_offer = None;
                 self.set_state(SessionState::Leaving, |actions| {
                     // Cancel every kind the spec arms — the runtime
                     // tracks them by kind regardless of whether one
@@ -383,31 +409,45 @@ impl SessionMachine {
             // new SDP offer while it has not yet answered a
             // previous offer, the client MUST discard the previous
             // unanswered offer and process only the newest one."
-            // We're already OfferPending; the existing
-            // CreateAnswer promise will resolve with stale
-            // contents, which the runtime drops on the floor
-            // because it sees the state machine emit a new
-            // SetRemoteDescription + CreateAnswer pair here.
+            //
+            // Phase 8.C step 6 implements this as a serialised
+            // queue rather than a replacement: stash the new
+            // offer in `queued_offer` and return [] (no actions).
+            // The `(OfferPending, WebrtcAnswerCreated)` arm below
+            // drains the queue after the current answer has
+            // flushed — that way webrtcbin only ever has one
+            // pending SetRemoteDescription+CreateAnswer pair at a
+            // time, and we don't depend on the runtime's
+            // answer-generation guard to discriminate stale
+            // promise resolutions (which is now belt-and-braces).
+            //
+            // The queue replaces, not appends: a third offer
+            // arriving before the first answer just supersedes
+            // the queued one ("process only the newest").
             //
             // Wrong-cid guard (same shape as the other SDP arms):
             // a late offer from a previously-joined room must NOT
-            // replace the in-flight offer for the active room.
+            // enter the queue and surface later as a redirect to
+            // a different webrtcbin session.
             (SessionState::OfferPending, Event::SdpOfferReceived { cid, sdp }) => {
                 if self.active_cid != Some(cid) {
                     return Vec::new();
                 }
-                self.cache_offer_mids(&sdp);
-                self.bind_cid_for_offer(cid);
-                vec![
-                    Action::SetRemoteDescription { sdp },
-                    Action::CreateAnswer,
-                ]
+                self.queued_offer = Some((cid, sdp));
+                Vec::new()
             }
 
             // webrtcbin handed us the answer; finalise locally and
-            // ship 603 to the server. Move to Connecting; we wait
-            // for the WebrtcConnectionStateChanged(Connected) to
-            // walk to Connected proper.
+            // ship 603 to the server.
+            //
+            // Phase 8.C step 6 also lands the drain side of the
+            // renegotiation queue: if a fresh offer arrived while
+            // we were waiting, the answer-flush actions get
+            // appended with a SetRemoteDescription+CreateAnswer
+            // pair for the queued offer, and the machine stays in
+            // OfferPending so the queued offer's answer flow can
+            // proceed. Only when the queue is empty do we walk to
+            // Connecting + arm the DTLS / ICE timers.
             (
                 SessionState::OfferPending,
                 Event::WebrtcAnswerCreated { sdp },
@@ -420,12 +460,40 @@ impl SessionMachine {
                 // runtime translates to chunks via
                 // hotline_proto::voice::build_voice_answer_chunks
                 // before calling hlwrite_chunks.
-                self.set_state(SessionState::Connecting, |actions| {
-                    actions.push(Action::SetLocalDescription { sdp: sdp.clone() });
-                    actions.push(Action::SendWireFrame {
+                let mut answer_actions = vec![
+                    Action::SetLocalDescription { sdp: sdp.clone() },
+                    Action::SendWireFrame {
                         opcode: HTLC_HDR_VOICE_SDP_ANSWER,
                         body: WireFrameBody(encode_cid_plus_sdp(cid, &sdp)),
-                    });
+                    },
+                ];
+                // Drain the renegotiation queue first. If a new
+                // offer landed while this answer was being
+                // computed, kick its SetRemote+CreateAnswer pair
+                // off now and stay in OfferPending; the next
+                // WebrtcAnswerCreated drains again (or transitions
+                // to Connecting if no further offers piled up).
+                if let Some((queued_cid, queued_sdp)) = self.queued_offer.take()
+                {
+                    // The wrong-cid guard at enqueue time
+                    // (above) means queued_cid == active_cid at
+                    // *enqueue* time. By drain time the active
+                    // cid may have changed via the mid-session
+                    // room-switch path — which resets
+                    // queued_offer in self.reset_for_new_room().
+                    // We re-check defensively here too.
+                    if self.active_cid == Some(queued_cid) {
+                        self.cache_offer_mids(&queued_sdp);
+                        self.bind_cid_for_offer(queued_cid);
+                        answer_actions
+                            .push(Action::SetRemoteDescription { sdp: queued_sdp });
+                        answer_actions.push(Action::CreateAnswer);
+                    }
+                    return answer_actions;
+                }
+                // No queued offer — normal flow to Connecting.
+                self.set_state(SessionState::Connecting, |actions| {
+                    actions.extend(answer_actions);
                     // Spec timeouts §"Session Timeout and Failure":
                     // ICE checks must complete in 30s, DTLS in
                     // 10s. Arm both watchdogs.
@@ -696,6 +764,7 @@ impl SessionMachine {
         // whether) to walk back to Idle — typically immediately
         // after TearDown returns.
         self.active_cid = None;
+        self.queued_offer = None;
         let prior_state = mem::replace(&mut self.state, SessionState::Leaving);
         let mut actions = vec![Action::CancelTimer {
             kind: TimerKind::JoinReply,
@@ -1083,22 +1152,64 @@ mod tests {
     }
 
     #[test]
-    fn renegotiation_offer_while_pending_replaces_not_queues() {
+    fn renegotiation_offer_while_pending_queues_not_replaces() {
+        // Phase 8.C step 6: a second offer arriving while we're
+        // already in OfferPending must be queued (no actions
+        // emitted now), then drained after the current answer
+        // flushes. The previous behavior (replace immediately
+        // with a fresh SetRemoteDescription+CreateAnswer pair)
+        // would have webrtcbin holding two pending
+        // set-remote-descriptions, which corrupts its internal
+        // state machine.
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 5 });
         m.step(Event::SdpOfferReceived { cid: 5, sdp: "v=0\n".into() });
         assert_eq!(m.state(), SessionState::OfferPending);
-        // Second offer arrives mid-pending.
+
+        // Second offer arrives mid-pending: enqueue, no actions.
         let acts = m.step(Event::SdpOfferReceived {
             cid: 5,
             sdp: "v=0\na=mid:user-99\n".into(),
         });
-        // Stay in OfferPending; new SetRemoteDescription + CreateAnswer
-        // emitted; cached mids reset to the new offer.
+        assert!(
+            acts.is_empty(),
+            "second offer must enqueue silently while OfferPending; got {acts:?}"
+        );
+        // Mids from the QUEUED offer must not surface yet —
+        // they get cached at drain time.
+        assert_eq!(m.mid_to_user.get("user-99").copied(), None);
+        // State stays OfferPending.
         assert_eq!(m.state(), SessionState::OfferPending);
+
+        // Now the first answer flows in; the queue drains so
+        // the queued offer's SetRemoteDescription+CreateAnswer
+        // pair lands AFTER the SetLocalDescription/Send603
+        // pair for the current answer. Machine stays in
+        // OfferPending (queued offer's answer still in flight).
+        let acts = m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::OfferPending,
+            "queue drain must keep us in OfferPending, not advance to Connecting"
+        );
+        let kinds: Vec<&str> = acts
+            .iter()
+            .map(|a| match a {
+                Action::SetLocalDescription { .. } => "set_local",
+                Action::SendWireFrame { opcode: 603, .. } => "send_603",
+                Action::SetRemoteDescription { .. } => "set_remote",
+                Action::CreateAnswer => "create_answer",
+                _ => "other",
+            })
+            .collect();
+        assert!(kinds.contains(&"set_local"));
+        assert!(kinds.contains(&"send_603"));
+        assert!(kinds.contains(&"set_remote"));
+        assert!(kinds.contains(&"create_answer"));
+        // Now the queued offer's mids are cached.
         assert_eq!(m.mid_to_user.get("user-99").copied(), Some(99));
-        assert!(acts.iter().any(|a| matches!(a, Action::SetRemoteDescription { .. })));
-        assert!(acts.iter().any(|a| matches!(a, Action::CreateAnswer)));
     }
 
     #[test]
@@ -1729,13 +1840,13 @@ mod tests {
     }
 
     /// Counter-test: an offer with the correct cid in
-    /// OfferPending DOES replace the in-flight offer (the spec's
-    /// "discard the previous unanswered offer and process only
-    /// the newest one" behavior). Guards the test above from
-    /// silently passing because we broke the legitimate
-    /// replacement path too.
+    /// OfferPending is queued (Phase 8.C step 6 — used to
+    /// be "replace immediately", now is "park in
+    /// queued_offer"). Guards the wrong-cid-drop test
+    /// above from silently passing because we broke the
+    /// legitimate enqueue path.
     #[test]
-    fn sdp_offer_with_correct_cid_in_offer_pending_replaces() {
+    fn sdp_offer_with_correct_cid_in_offer_pending_queues() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 7 });
         let _ = m.step(Event::SdpOfferReceived {
@@ -1747,12 +1858,148 @@ mod tests {
             cid: 7, // active cid
             sdp: "a=mid:user-2\n".into(),
         });
-        // Should emit the matching SetRemoteDescription + CreateAnswer.
-        let has_set_remote = actions
-            .iter()
-            .any(|a| matches!(a, Action::SetRemoteDescription { .. }));
-        let has_create_answer =
-            actions.iter().any(|a| matches!(a, Action::CreateAnswer));
-        assert!(has_set_remote && has_create_answer);
+        // No actions on enqueue — that's the whole point of
+        // step 6's serialisation.
+        assert!(
+            actions.is_empty(),
+            "queued offer must not emit actions; got {actions:?}"
+        );
+        // The offer is parked, ready to drain when the
+        // current answer comes in.
+        assert!(m.queued_offer.is_some());
+    }
+
+    // ---- Phase 8.C step 6: renegotiation queue/drain ----
+
+    /// Multiple offers arriving back-to-back while OfferPending
+    /// — only the latest survives in the queue (spec
+    /// §Renegotiation Flow: "process only the newest one").
+    #[test]
+    fn multiple_queued_offers_keep_only_the_latest() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        // First queued offer.
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-2\n".into(),
+        });
+        // Second queued offer — replaces the first.
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-7\n".into(),
+        });
+        let queued = m.queued_offer.as_ref().expect("an offer is queued");
+        assert!(
+            queued.1.contains("user-7"),
+            "the latest queued offer must win, got: {:?}",
+            queued.1
+        );
+        assert!(
+            !queued.1.contains("user-2"),
+            "the older queued offer must be discarded"
+        );
+    }
+
+    /// Wrong-cid queued offer is dropped at enqueue time
+    /// (not parked). Prevents a stale 602 from a previously-
+    /// joined room from materialising as a renegotiation
+    /// against the current room when the queue drains.
+    #[test]
+    fn wrong_cid_offer_is_not_queued_while_offer_pending() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 99, // wrong cid
+            sdp: "v=0\na=mid:user-7\n".into(),
+        });
+        assert!(
+            m.queued_offer.is_none(),
+            "wrong-cid offer must not enter the queue"
+        );
+    }
+
+    /// LeaveRequested clears the queue. Otherwise a leave +
+    /// rejoin would surface the queued offer against the new
+    /// session.
+    #[test]
+    fn leave_request_clears_queued_offer() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-2\n".into(),
+        });
+        assert!(m.queued_offer.is_some());
+
+        m.step(Event::LeaveRequested { cid: 1 });
+        assert!(m.queued_offer.is_none());
+    }
+
+    /// A failure path (server-side rejection, terminal WebRTC
+    /// state, etc.) also clears the queue — `fail()` resets
+    /// `active_cid` and walks to `Leaving`, the queued offer
+    /// would be stale against any subsequent fresh session.
+    ///
+    /// Driven through a `ServerTaskError` against the
+    /// `HTLC_HDR_VOICE_SDP_ANSWER` opcode because that's the
+    /// natural fail-causing event reachable while we're in
+    /// `OfferPending` (the DTLS / ICE / Media timeouts are
+    /// only matched in `Connecting` / `Connected`; an
+    /// `OfferPending` Dtls Timeout would silently fall to the
+    /// catch-all).
+    #[test]
+    fn fail_path_clears_queued_offer() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-2\n".into(),
+        });
+        assert!(m.queued_offer.is_some());
+
+        m.step(Event::ServerTaskError(ServerError {
+            origin_opcode: HTLC_HDR_VOICE_SDP_ANSWER,
+            text: "server rejected answer".into(),
+        }));
+        assert!(m.queued_offer.is_none());
+        assert_eq!(m.state(), SessionState::Leaving);
+    }
+
+    /// Mid-session room switch (JoinRequested for a different
+    /// cid while in voice) clears the queue. The queued offer
+    /// belongs to the old room's webrtcbin session; the new
+    /// room will issue its own.
+    #[test]
+    fn mid_session_room_switch_clears_queued_offer() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\na=mid:user-2\n".into(),
+        });
+        assert!(m.queued_offer.is_some());
+
+        m.step(Event::JoinRequested { cid: 99 });
+        assert!(m.queued_offer.is_none());
+    }
+
+    /// Happy path: drain to Connecting. When OfferPending sees
+    /// WebrtcAnswerCreated AND queued_offer is None, the
+    /// machine walks to Connecting (no queue drain to keep us
+    /// stuck in OfferPending).
+    #[test]
+    fn empty_queue_lets_answer_walk_to_connecting() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 4 });
+        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
+        assert!(m.queued_offer.is_none());
+
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::Connecting);
     }
 }
