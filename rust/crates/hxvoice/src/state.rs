@@ -164,7 +164,7 @@ pub struct SessionMachine {
     /// was active at enqueue may have been the only legitimate
     /// match, but the active cid can have changed in the
     /// meantime via the mid-session room-switch path).
-    queued_offer: Option<(u32, alloc::string::String)>,
+    queued_offer: Option<(u32, String)>,
 }
 
 impl Default for SessionState {
@@ -479,9 +479,12 @@ impl SessionMachine {
                     // (above) means queued_cid == active_cid at
                     // *enqueue* time. By drain time the active
                     // cid may have changed via the mid-session
-                    // room-switch path — which resets
-                    // queued_offer in self.reset_for_new_room().
-                    // We re-check defensively here too.
+                    // room-switch path (the JoinRequested arm
+                    // for a different cid clears queued_offer
+                    // inline alongside the other per-session
+                    // state — there is no separate
+                    // reset-for-new-room helper). We re-check
+                    // defensively here too.
                     if self.active_cid == Some(queued_cid) {
                         self.cache_offer_mids(&queued_sdp);
                         self.bind_cid_for_offer(queued_cid);
@@ -1208,6 +1211,34 @@ mod tests {
         assert!(kinds.contains(&"send_603"));
         assert!(kinds.contains(&"set_remote"));
         assert!(kinds.contains(&"create_answer"));
+        // Ordering: the answer flush (SetLocalDescription + 603
+        // send) MUST land before the queued offer's
+        // SetRemoteDescription + CreateAnswer pair. That's the
+        // whole point of the queue: webrtcbin only ever has one
+        // pending SDP exchange. Swapping the order would feed
+        // the new offer to webrtcbin before the current answer
+        // has been applied, which is the wedge the queue exists
+        // to prevent.
+        let set_local_pos = kinds.iter().position(|k| *k == "set_local");
+        let send_603_pos = kinds.iter().position(|k| *k == "send_603");
+        let set_remote_pos = kinds.iter().position(|k| *k == "set_remote");
+        let create_answer_pos =
+            kinds.iter().position(|k| *k == "create_answer");
+        assert!(
+            set_local_pos < set_remote_pos,
+            "SetLocalDescription must precede the queued \
+             SetRemoteDescription; got order={kinds:?}"
+        );
+        assert!(
+            send_603_pos < set_remote_pos,
+            "SendWireFrame(603) must precede the queued \
+             SetRemoteDescription; got order={kinds:?}"
+        );
+        assert!(
+            set_remote_pos < create_answer_pos,
+            "SetRemoteDescription must precede CreateAnswer in \
+             the queued-offer kick-off; got order={kinds:?}"
+        );
         // Now the queued offer's mids are cached.
         assert_eq!(m.mid_to_user.get("user-99").copied(), Some(99));
     }
