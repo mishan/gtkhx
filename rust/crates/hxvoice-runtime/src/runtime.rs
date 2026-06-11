@@ -476,18 +476,23 @@ impl VoiceRuntime {
 pub enum RuntimeError {
     /// `gst::init()` failed. The constructor calls
     /// `gstreamer::init()` itself (idempotent — repeats are a
-    /// no-op), so this variant means the underlying call failed:
-    /// missing GStreamer plugins (`gst-plugins-base` /
-    /// `-plugins-bad`), a broken GStreamer install, or no plugin
-    /// path configured. Production has typically already run
-    /// `gtkhx_voice_init()` from `main` which surfaces this in
-    /// the C-side log; constructing a runtime then sees the
-    /// re-init no-op and never reaches this branch.
+    /// no-op), so this variant means the underlying call
+    /// returned an error: the GStreamer runtime itself failed
+    /// to initialise. Causes vary (broken or missing GStreamer
+    /// install, mis-set `GST_PLUGIN_PATH` / `GST_REGISTRY` env,
+    /// running under a sandbox that can't reach the system
+    /// registry); the wrapped `glib::Error` carries the
+    /// gstreamer-rs message verbatim, which is the most
+    /// reliable signal for triage.
     ///
-    /// The wrapped `glib::Error` carries the gstreamer-rs init
-    /// failure message verbatim — included in `Display` so
-    /// callers (and the C-side toast) get the actual reason
-    /// instead of a generic hint.
+    /// Production has typically already run
+    /// `gtkhx_voice_init()` from `main` which surfaces the
+    /// failure in the C-side log; constructing a runtime
+    /// afterwards then sees the re-init no-op and never reaches
+    /// this branch. Step 2 doesn't need the WebRTC plugin set
+    /// yet — that requirement is local to specific dispatch
+    /// arms in step 3+ (which surface plugin-load failures
+    /// separately).
     GstInitFailed(gstreamer::glib::Error),
 }
 
@@ -496,8 +501,9 @@ impl core::fmt::Display for RuntimeError {
         match self {
             RuntimeError::GstInitFailed(err) => write!(
                 f,
-                "gst::init() failed: {err} — check the GStreamer install \
-                 (gst-plugins-base / -plugins-bad must be available)"
+                "gst::init() failed: {err} — the GStreamer runtime \
+                 couldn't initialise; check the GStreamer install \
+                 and the GST_PLUGIN_PATH / GST_REGISTRY environment"
             ),
         }
     }
@@ -797,13 +803,15 @@ mod tests {
 
     #[test]
     fn pipeline_built_runtime_constructs_when_gst_initialised() {
-        // Coverage smoke for the with-pipeline constructor. Requires
-        // gst::init() to have been called; we run it inline here so
-        // the test is self-contained, and assert on the result so a
-        // GStreamer install regression surfaces here as the failed
-        // assertion rather than as a delayed panic from VoiceRuntime::new
-        // (which itself now propagates the init error as
-        // RuntimeError::GstInitFailed).
+        // Coverage smoke for the with-pipeline constructor.
+        // `VoiceRuntime::new` runs `gstreamer::init()` itself, but
+        // we call `crate::init()` first as an explicit
+        // sanity-check on the test environment: if GStreamer is
+        // misconfigured in this CI container, the standalone
+        // `init()` check surfaces it here as a clear test
+        // failure, before `VoiceRuntime::new` would otherwise
+        // hand back `RuntimeError::GstInitFailed`. With the
+        // standalone init passing, `new` should succeed cleanly.
         assert!(
             crate::init(),
             "gst::init() must succeed for the with-pipeline test"
