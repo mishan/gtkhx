@@ -18,37 +18,44 @@
 //!     │             │                 │
 //!     │             │ AnswerCreated   │
 //!     │             ▼                 │
-//!             Leaving ◄── Connecting ◄┘
-//!  (terminal)              │
-//!                          │ ConnectionState::Connected
-//!                          ▼
-//!                      Connected
-//!                          │
-//!                          │ LeaveRequested
-//!                          ▼
-//!                       Leaving (terminal)
+//!         Idle ◄── Connecting ◄───────┘
+//!         ▲           │
+//!         │           │ ConnectionState::Connected
+//!         │           ▼
+//!         │       Connected
+//!         │           │
+//!         │           │ LeaveRequested
+//!         └───────────┘
+//!
+//!                       Leaving
+//!                  (post-fail() collapse;
+//!                  JoinRequested recovers)
 //! ```
 //!
 //! Connected ↔ OfferPending happens during renegotiation (a new
 //! 602 arriving while we're already streaming) — the transition
-//! is identical to the JoinSent → OfferPending step. Failures
-//! (`WebrtcConnectionStateChanged::Failed`, server task error,
-//! any `Timeout`) collapse to `Leaving`, which is a **terminal
-//! state** — the runtime drops the `SessionMachine` once it
-//! observes the post-step `state() == Leaving`; a fresh session
-//! constructs a new machine in `Idle`. There is no `Leaving →
-//! Idle` step in this enum.
+//! is identical to the JoinSent → OfferPending step.
+//!
+//! Failures (`WebrtcConnectionStateChanged::Failed`, server task
+//! error, any `Timeout`) collapse to `Leaving` via `fail()`, which
+//! clears `active_cid` and emits `TearDown`. `Leaving` is NOT a
+//! drop-the-machine state: a subsequent `JoinRequested` is
+//! accepted through the room-switch arm, walking back to `JoinSent`
+//! with fresh per-session state. The user-driven Leave path skips
+//! `Leaving` entirely and lands directly in `Idle` for the same
+//! reason — the machine stays alive across leave / rejoin cycles.
 //!
 //! **Important — don't drop the machine on every `TearDown`.**
 //! `Action::TearDown` describes runtime-resource teardown
 //! (close webrtcbin, stop pipelines), not state-machine
-//! destruction. The mid-session-room-switch path
-//! (`JoinRequested { cid }` for a *different* `cid` while in
-//! voice; see `event.rs`) also emits `TearDown`, but the
-//! machine continues running and walks back to `JoinSent` with
-//! fresh per-room state in the same `step()` call. The keying
-//! rule is "drop if and only if `state() == Leaving` after the
-//! step", never "drop on seeing `TearDown` in the action list".
+//! destruction. Both the user-driven LeaveRequested path (walks
+//! Idle) and the mid-session-room-switch path (`JoinRequested
+//! { cid }` for a *different* `cid` while in voice; see
+//! `event.rs`) emit `TearDown`, and the machine continues running
+//! in either case. There is no state at which the runtime should
+//! discard the `SessionMachine` instance — its lifetime matches
+//! the surrounding `VoiceRuntime`, which is dropped on session
+//! teardown via `gtkhx_voice_runtime_free`.
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -72,13 +79,15 @@ use crate::event::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionState {
-    /// No voice room joined. The **starting state only** — there
-    /// is no `Leaving → Idle` transition in this enum, so a
-    /// machine that has reached `Leaving` never re-enters `Idle`.
-    /// A fresh voice session constructs a new `SessionMachine`
-    /// (which starts in `Idle`); the runtime drops the previous
-    /// one when it sees the post-step state hit `Leaving`. See
-    /// the module-level doc for the full lifetime contract.
+    /// No voice room joined. Both the initial state on
+    /// `SessionMachine::default()` and the post-leave resting
+    /// state — a user-driven `LeaveRequested` walks back here
+    /// directly (clearing `active_cid` + every per-session
+    /// cache) so the next `JoinRequested` flows through the
+    /// canonical `Idle → JoinSent` arm. There IS no
+    /// `Leaving → Idle` transition; recovery from `Leaving`
+    /// (post-`fail()` collapse) goes straight to `JoinSent` via
+    /// the room-switch arm.
     Idle,
     /// We sent VOICE_JOIN (600); waiting for the server's reply
     /// or its accompanying SDP offer (602). Both arrive in
@@ -99,12 +108,20 @@ pub enum SessionState {
     /// Media is flowing. Renegotiation pulls us back to
     /// `OfferPending`; leave / failure pushes us to `Leaving`.
     Connected,
-    /// We sent VOICE_LEAVE (601) or are tearing down due to a
-    /// failure. **Terminal state** for this machine — the runtime
-    /// drops the `SessionMachine` after dispatching the `TearDown`
-    /// action that accompanied the transition here. A fresh
-    /// session constructs a new machine in `Idle`; this enum has
-    /// no `Leaving → Idle` step.
+    /// Post-`fail()` collapse state. Reached only via the
+    /// failure paths (`WebrtcConnectionStateChanged::Failed`,
+    /// server task error on a fatal opcode, any session
+    /// `Timeout`); `fail()` clears `active_cid` to `None` and
+    /// emits `TearDown`. The user-driven `LeaveRequested` path
+    /// does NOT pass through here — it lands in `Idle`
+    /// directly.
+    ///
+    /// `Leaving` is recoverable, not terminal: a subsequent
+    /// `JoinRequested` flows through the room-switch arm and
+    /// transitions back to `JoinSent` with fresh state. The
+    /// machine instance lives until the surrounding
+    /// `VoiceRuntime` drops; the runtime does NOT discard it on
+    /// `state() == Leaving`.
     Leaving,
 }
 
@@ -117,12 +134,11 @@ pub struct SessionMachine {
     state: SessionState,
     /// Currently active (or pending) chat-room id. Populated on
     /// `JoinRequested` (both the initial JOIN and the mid-session
-    /// room-switch path), and cleared internally by `fail()` when
-    /// the machine walks itself to terminal `Leaving`. There is
-    /// no `Leaving → Idle` transition, so this is the only
-    /// in-machine clear path; the explicit-leave handler doesn't
-    /// touch this field because the runtime drops the whole
-    /// machine afterwards.
+    /// room-switch path). Cleared by `fail()` (which walks to
+    /// `Leaving`) AND by the user-driven `LeaveRequested` arm
+    /// (which walks straight to `Idle`); both paths reset
+    /// per-session state so a subsequent `JoinRequested` starts
+    /// fresh through whichever arm matches.
     ///
     /// `0` is a valid cid (public chat), so we use `Option<u32>`
     /// rather than a sentinel.
@@ -347,18 +363,19 @@ impl SessionMachine {
                     return Vec::new();
                 }
                 // Walk back to Idle directly rather than parking
-                // at Leaving. The wire-side LEAVE is on its way out
-                // and the runtime tears down webrtcbin on
-                // Action::TearDown; by the time the user clicks Join
-                // again the machine is fully reset and ready to
-                // walk Idle → JoinSent through the normal arm
-                // (otherwise the rejoin gets dropped because we
-                // never had a Leaving → Idle / Leaving → JoinSent
-                // transition wired).
-                //
-                // Leaving is still reachable via fail() for the
-                // collapse path; the (Leaving, JoinRequested) arm
-                // below handles recovery there separately.
+                // at Leaving. Both states are JoinRequested-
+                // reachable now (the room-switch arm above
+                // matches Leaving too), so the reason is
+                // hygiene, not transition coverage: an explicit
+                // user-driven leave should drop every shred of
+                // per-session state — active_cid, mid_to_user,
+                // participants, queued_offer, muted — so the
+                // next JoinRequested is a clean start through
+                // the canonical Idle arm with no stale carry-
+                // over. Leaving is left for the fail() collapse
+                // path, where the recovery arm below absorbs
+                // any half-finished bookkeeping (active_cid was
+                // already cleared by fail()).
                 self.queued_offer = None;
                 self.active_cid = None;
                 self.mid_to_user.clear();
@@ -953,10 +970,12 @@ fn connection_state_for_session(s: SessionState) -> ConnectionState {
         | SessionState::OfferPending
         | SessionState::Connecting => ConnectionState::Connecting,
         SessionState::Connected => ConnectionState::Connected,
-        // Leaving is the terminal state of this machine — the
-        // runtime drops the SessionMachine after reaching it.
-        // That's a session that has *ended*, not one with
-        // temporary connectivity loss, so map to Closed.
+        // Leaving is the post-fail() collapse state — the
+        // session has *ended* on its current room, even though
+        // the machine is recoverable on a subsequent
+        // JoinRequested. Map to Closed because that's what the
+        // UI signal payload describes (room is done), not
+        // Disconnected.
         // Disconnected per `ConnectionState`'s own doc is
         // "connectivity loss the stack thinks is temporary"; a
         // RoomStatus signal carrying Disconnected here would
