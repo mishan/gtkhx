@@ -57,19 +57,38 @@
 //!   `VoiceRuntime::new` via `connect_on_ice_candidate`. The
 //!   callback is `Send + 'static` (webrtcbin may fire it from a
 //!   worker thread) — captures only `runtime_id` + the main
-//!   context handle, builds the outgoing JSON in the callback,
-//!   marshals back through `MainContext::invoke`, and re-enters
+//!   context handle, builds the outgoing JSON (resolving
+//!   `sdpMid` via the bin's `local-description`), marshals
+//!   back through `MainContext::invoke`, and re-enters
 //!   `handle_event(Event::WebrtcLocalIceGathered)`. Same
 //!   thread-bridge shape as the SDP promise.
 //!
-//! ## What's deferred to step 5+
+//! ## What step 5 implements
 //!
-//! - Dispatch arms for the remaining WebRTC-shaped actions
-//!   (`StartReceivePipeline` / `StopReceivePipeline` /
-//!   `SetSendPipelineMute`). They still no-op today.
-//! - `webrtcbin` signal wiring for `pad-added` /
-//!   `connection-state` / pipeline `bus`. Step 5 covers the
-//!   receive-leg pads; step 7 covers connection-state-driven
+//! - Dispatch arms for `Action::StartReceivePipeline` and
+//!   `Action::StopReceivePipeline`. StartReceivePipeline pops
+//!   the matching pad out of `Inner::pending_pads`, builds the
+//!   `rtppcmudepay ! mulawdec ! audioconvert ! audioresample !
+//!   autoaudiosink` chain via `audio::make_receive_bin`, adds
+//!   it to the pipeline, links the pad to its ghost sink, and
+//!   stashes the bin in `Inner::receive_bins` keyed by `mid`.
+//!   StopReceivePipeline pops the bin out, sets it to `Null`,
+//!   and removes it from the pipeline.
+//! - `webrtcbin.pad-added` signal wired in `VoiceRuntime::new`
+//!   via `connect_pad_added`. Same thread-bridge shape as
+//!   `connect_on_ice_candidate`: filters Src direction pads,
+//!   resolves `mid` via the pad's transceiver, marshals to the
+//!   main thread, parks the pad in `Inner::pending_pads`, and
+//!   re-enters `handle_event(Event::WebrtcPadAdded { mid })`.
+//!
+//! ## What's deferred to step 6+
+//!
+//! - `Action::SetSendPipelineMute`. The send leg lands in
+//!   step 6 (audio capture + RTP send chain); the mute arm
+//!   needs the send-leg element handles, so it can't usefully
+//!   land before then.
+//! - `webrtcbin` signal wiring for `connection-state` /
+//!   pipeline `bus`. Step 7 covers connection-state-driven
 //!   timeouts; step 8 covers the bus.
 //!
 //! ## Layering
@@ -417,6 +436,25 @@ struct Inner {
     /// existing CreateAnswer promise will resolve with stale
     /// contents, which the runtime drops on the floor."
     answer_generation: u64,
+    /// Pads that `webrtcbin.pad-added` has reported but the
+    /// state machine hasn't yet acknowledged with a
+    /// `StartReceivePipeline` action. Keyed by `mid`. The
+    /// pad-added callback marshals to the main thread, parks
+    /// the pad here, and fires `Event::WebrtcPadAdded { mid }`;
+    /// the state machine cross-references its mid→user_id
+    /// table and returns `StartReceivePipeline { mid, user_id }`,
+    /// whose dispatch arm pops the pad out and links it to the
+    /// freshly-built receive bin.
+    ///
+    /// `gst::Pad` is `Send + Sync` (GObject-backed); no special
+    /// thread plumbing needed.
+    pending_pads: HashMap<String, gstreamer::Pad>,
+    /// Receive-leg bins currently linked into the pipeline,
+    /// keyed by `mid`. The `Action::StartReceivePipeline`
+    /// dispatch arm inserts into this map after a successful
+    /// link; `StopReceivePipeline` removes the entry, sets the
+    /// bin to `Null`, and lets it drop out of the pipeline.
+    receive_bins: HashMap<String, gstreamer::Bin>,
 }
 
 impl Drop for Inner {
@@ -503,6 +541,7 @@ impl VoiceRuntime {
         // doing it pre-register keeps the construction sequence
         // strictly linear.
         connect_on_ice_candidate(&webrtcbin, runtime_id);
+        connect_pad_added(&webrtcbin, runtime_id);
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
@@ -513,6 +552,8 @@ impl VoiceRuntime {
                 pending: VecDeque::new(),
                 runtime_id,
                 answer_generation: 0,
+                pending_pads: HashMap::new(),
+                receive_bins: HashMap::new(),
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -540,6 +581,8 @@ impl VoiceRuntime {
                 pending: VecDeque::new(),
                 runtime_id,
                 answer_generation: 0,
+                pending_pads: HashMap::new(),
+                receive_bins: HashMap::new(),
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -771,15 +814,69 @@ impl VoiceRuntime {
                 }
             }
 
-            // ---- webrtcbin-shaped pad / mute (Phase 8.C step 5+) ----
+            // ---- Receive-leg dispatch (Phase 8.C step 5) ----
             //
-            // Still no-op today. Step 5 lands receive-pad
-            // dispatch (StartReceivePipeline /
-            // StopReceivePipeline); the mute arm lands with it.
-            Action::StartReceivePipeline { .. }
-            | Action::StopReceivePipeline { .. }
-            | Action::SetSendPipelineMute { .. } => {
-                // Subsequent steps fill these in.
+            // StartReceivePipeline: the state machine has
+            // cross-referenced `mid` against its mid→user_id
+            // table and decided this pad should produce audio.
+            // Pop the pad out of `pending_pads` (parked by
+            // `connect_pad_added`), build the
+            // `rtppcmudepay ! mulawdec ! audioconvert !
+            // audioresample ! autoaudiosink` chain via
+            // `audio::make_receive_bin`, add it to the
+            // pipeline, link the pad to its ghost sink, and
+            // stash the bin in `receive_bins` keyed by mid.
+            // `user_id` is captured by the state machine for
+            // UI use (speaker indicator); the runtime doesn't
+            // need it after the link is established.
+            Action::StartReceivePipeline { mid, user_id: _ } => {
+                let (pipeline, pad) = {
+                    let mut inner = self.inner.borrow_mut();
+                    (
+                        inner.pipeline.clone(),
+                        inner.pending_pads.remove(&mid),
+                    )
+                };
+                // Pipeline-less runtime (test) or no pending pad
+                // for this mid (state machine drove past
+                // pad-added) ⇒ both are silent no-ops, valid
+                // configurations.
+                if let (Some(pipeline), Some(pad)) = (pipeline, pad) {
+                    if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid)
+                    {
+                        self.inner
+                            .borrow_mut()
+                            .receive_bins
+                            .insert(mid, bin);
+                    }
+                }
+            }
+
+            // StopReceivePipeline: the matching mid's receive
+            // leg goes away (participant left, mid recycled
+            // through renegotiation). Pop the bin, set it to
+            // Null, remove it from the pipeline so it drops.
+            Action::StopReceivePipeline { mid } => {
+                let (pipeline, bin) = {
+                    let mut inner = self.inner.borrow_mut();
+                    (
+                        inner.pipeline.clone(),
+                        inner.receive_bins.remove(&mid),
+                    )
+                };
+                if let (Some(pipeline), Some(bin)) = (pipeline, bin) {
+                    stop_receive_bin(&pipeline, &bin);
+                }
+            }
+
+            // ---- Mute dispatch (Phase 8.C step 6+) ----
+            //
+            // The send leg lands with step 6 (the audio capture
+            // pipeline + RTP send chain); the mute arm needs
+            // the send leg's element handles to drop buffers,
+            // so it can't usefully land before then.
+            Action::SetSendPipelineMute { .. } => {
+                // Step 6 fills this in.
             }
 
             // hxvoice::Action is #[non_exhaustive] — the wildcard
@@ -1152,6 +1249,167 @@ fn lookup_local_sdp_mid(
     let sdp = desc.sdp();
     let media = sdp.media(mline_index)?;
     media.attribute_val("mid").map(|s| s.to_string())
+}
+
+/// Wire `webrtcbin.pad-added` so each freshly-arrived receive pad
+/// becomes a `Event::WebrtcPadAdded { mid }` against the state
+/// machine. The runtime parks the pad in `Inner::pending_pads` so
+/// the matching `Action::StartReceivePipeline` arm can pop it back
+/// out and link it to the receive-leg bin.
+///
+/// Skips non-`Src` pads — webrtcbin also exposes sink pads (request
+/// pads from the send leg) and we shouldn't try to bind a receive
+/// bin to those. The `mid` is resolved through the pad's
+/// `transceiver` property's `mid`; a pad without a transceiver
+/// (rare; data-channel pads don't have one) or one whose
+/// transceiver doesn't have a `mid` yet is dropped with a warning.
+///
+/// Same `Send + 'static` callback shape as `connect_on_ice_candidate`:
+/// captures only the runtime id + the main context handle, marshals
+/// back to the GLib main thread via `MainContext::invoke`, looks
+/// the runtime up by id in [`MAIN_THREAD_RUNTIMES`], and re-enters
+/// `handle_event` after parking the pad.
+fn connect_pad_added(
+    webrtcbin: &gstreamer::Element,
+    runtime_id: u64,
+) {
+    let main_ctx = gstreamer::glib::MainContext::default();
+    webrtcbin.connect_pad_added(move |_bin, pad| {
+        if pad.direction() != gstreamer::PadDirection::Src {
+            // Sink pads (request pads from the send leg) come
+            // through this signal too; nothing to do with them.
+            return;
+        }
+        let mid = match lookup_pad_mid(pad) {
+            Some(m) => m,
+            None => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: pad-added with no resolvable mid \
+                     (pad={}); dropping",
+                    pad.name()
+                );
+                return;
+            }
+        };
+        // Clone the pad — gst::Pad is Send + Sync (GObject), so
+        // we can hand it across the main-thread hop. Capture
+        // (mid, pad) in the closure; both are Send.
+        let pad = pad.clone();
+        let main_ctx = main_ctx.clone();
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                rt.inner
+                    .borrow_mut()
+                    .pending_pads
+                    .insert(mid.clone(), pad);
+                rt.handle_event(Event::WebrtcPadAdded { mid });
+            });
+        });
+    });
+}
+
+/// Resolve the `mid` (SDP media identifier) for a webrtcbin pad.
+///
+/// webrtcbin tags every transceiver-backed pad with a
+/// `transceiver` property pointing at the matching
+/// `WebRTCRTPTransceiver`. The transceiver's `mid` property
+/// matches the `a=mid:…` attribute in the SDP, which is what we
+/// need to cross-reference against the state machine's
+/// `mid_to_user` cache.
+///
+/// Returns `None` if the pad doesn't have a transceiver (data
+/// channels) or the transceiver hasn't been assigned a `mid` yet
+/// (the bin is still negotiating).
+fn lookup_pad_mid(pad: &gstreamer::Pad) -> Option<String> {
+    let trans: gstreamer_webrtc::WebRTCRTPTransceiver = pad
+        .property_value("transceiver")
+        .get()
+        .ok()?;
+    let mid: Option<String> =
+        trans.property_value("mid").get().ok().flatten();
+    mid
+}
+
+/// Build the receive bin for `mid`, add it to the pipeline, link
+/// the supplied webrtcbin source pad to its ghost sink, and sync
+/// state with the parent so audio flows immediately.
+///
+/// Returns the linked bin on success so the dispatch arm can park
+/// it in `Inner::receive_bins`. On any failure, the bin is removed
+/// from the pipeline (if it got that far) and `None` is returned —
+/// the session keeps running, the user just doesn't hear this one
+/// remote. Each failure mode logs on the GStreamer warning channel
+/// with the mid for triage.
+fn start_receive_bin(
+    pipeline: &gstreamer::Pipeline,
+    src_pad: &gstreamer::Pad,
+    mid: &str,
+) -> Option<gstreamer::Bin> {
+    let bin_name = format!("hxvoice-recv-{mid}");
+    let bin = match crate::audio::make_receive_bin(&bin_name) {
+        Some(b) => b,
+        None => {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to construct receive bin for mid={mid} \
+                 — check that gst-plugins-good (rtppcmudepay, mulawdec, \
+                 autoaudiosink) and gst-plugins-base (audioconvert, \
+                 audioresample) are installed"
+            );
+            return None;
+        }
+    };
+    if pipeline.add(&bin).is_err() {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: failed to add receive bin to pipeline (mid={mid})"
+        );
+        return None;
+    }
+    let sink_pad = match bin.static_pad("sink") {
+        Some(p) => p,
+        None => {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: receive bin has no ghost sink pad (mid={mid})"
+            );
+            let _ = pipeline.remove(&bin);
+            return None;
+        }
+    };
+    if src_pad.link(&sink_pad).is_err() {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: failed to link webrtcbin src pad to receive bin sink \
+             (mid={mid})"
+        );
+        let _ = pipeline.remove(&bin);
+        return None;
+    }
+    if bin.sync_state_with_parent().is_err() {
+        // Not fatal — the pipeline state machine will retry on
+        // its own state-change pass. Log so an operator can see
+        // it if audio doesn't materialize.
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: sync_state_with_parent failed on receive bin \
+             (mid={mid}); audio may not flow until next state change"
+        );
+    }
+    Some(bin)
+}
+
+/// Tear down a receive bin: set to `Null`, remove from the
+/// pipeline. The caller has already popped the bin handle from
+/// `Inner::receive_bins`, so dropping the local reference on
+/// return is what releases the last refcount.
+fn stop_receive_bin(
+    pipeline: &gstreamer::Pipeline,
+    bin: &gstreamer::Bin,
+) {
+    let _ = bin.set_state(gstreamer::State::Null);
+    let _ = pipeline.remove(bin);
 }
 
 /// Errors returned from `VoiceRuntime::new`.
@@ -1932,5 +2190,58 @@ mod tests {
             .expect("webrtcbin element must be constructable");
         assert_eq!(lookup_local_sdp_mid(&bin, 0), None);
         assert_eq!(lookup_local_sdp_mid(&bin, 42), None);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 8.C step 5 — receive-pad dispatch.
+    // ------------------------------------------------------------------
+
+    /// Pipeline-less runtime: StartReceivePipeline dispatch is a
+    /// silent no-op — there's no pipeline to add the bin to and
+    /// no pending pad to link. The state machine emits these
+    /// actions unconditionally; the runtime is the layer that
+    /// decides whether to drive GStreamer.
+    #[test]
+    fn pipeline_less_runtime_no_ops_start_receive_pipeline() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        runtime.dispatch(Action::StartReceivePipeline {
+            mid: "audio0".into(),
+            user_id: 42,
+        });
+        // Bookkeeping confirmation: nothing got stashed in
+        // receive_bins.
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
+    }
+
+    /// StartReceivePipeline with no matching pad in
+    /// `pending_pads` is a silent no-op. Happens when the state
+    /// machine emits the action speculatively or when pad-added
+    /// fired for a mid we've already processed; either way we
+    /// shouldn't crash.
+    #[test]
+    fn start_receive_pipeline_without_pending_pad_is_a_noop() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::StartReceivePipeline {
+            mid: "unknown-mid".into(),
+            user_id: 7,
+        });
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
+    }
+
+    /// StopReceivePipeline with no matching bin in
+    /// `receive_bins` is a silent no-op. Symmetric to the
+    /// no-pending-pad shape above.
+    #[test]
+    fn stop_receive_pipeline_without_matching_bin_is_a_noop() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::StopReceivePipeline {
+            mid: "never-linked".into(),
+        });
+        assert!(runtime.inner.borrow().receive_bins.is_empty());
     }
 }

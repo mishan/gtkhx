@@ -215,6 +215,48 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
     Some(element)
 }
 
+/// Build a receive-leg `gst::Bin` for one inbound voice track.
+///
+/// The shape mirrors the fogWraith voice spec's mandated codec:
+///
+/// ```text
+/// (ghost sink) -> rtppcmudepay -> mulawdec -> audioconvert
+///              -> audioresample -> autoaudiosink
+/// ```
+///
+/// The ghost pad is exposed as the bin's `"sink"` pad, ready for
+/// the caller (Phase 8.C step 5's `start_receive_bin`) to link to
+/// the matching `webrtcbin` source pad. `autoaudiosink` lets
+/// GStreamer pick the host's default output (PipeWire / PulseAudio
+/// / ALSA, depending on what's installed); the eventual settings
+/// UI (Phase 8.E) will swap that for the user-picked device.
+///
+/// Returns `None` if any factory call fails (typically a missing
+/// runtime plugin — `gst-plugins-good` ships `rtppcmudepay`,
+/// `mulawdec`, `autoaudiosink`, and the audio-conversion elements
+/// are in `gst-plugins-base`). Caller should log and skip the
+/// receive leg; the session keeps running, the user just doesn't
+/// hear that one remote.
+///
+/// `name` becomes the bin's element name so pipeline introspection
+/// can tell receive legs apart — convention is `"hxvoice-recv-<mid>"`.
+pub fn make_receive_bin(name: &str) -> Option<gst::Bin> {
+    let bin = gst::Bin::builder().name(name).build();
+    let depay = gst::ElementFactory::make("rtppcmudepay").build().ok()?;
+    let dec = gst::ElementFactory::make("mulawdec").build().ok()?;
+    let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
+    let res = gst::ElementFactory::make("audioresample").build().ok()?;
+    let sink = gst::ElementFactory::make("autoaudiosink").build().ok()?;
+    bin.add_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    // Expose the depayloader's sink as a ghost pad on the bin so
+    // the caller can link the webrtcbin source pad to it.
+    let depay_sink = depay.static_pad("sink")?;
+    let ghost = gst::GhostPad::with_target(&depay_sink).ok()?;
+    bin.add_pad(&ghost).ok()?;
+    Some(bin)
+}
+
 // glib import kept above for completeness even though no glib symbol
 // is referenced directly today — the device-name strings round-trip
 // through `glib::GString`, and Phase 8.E will lean on glib types in
