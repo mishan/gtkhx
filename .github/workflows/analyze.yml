@@ -73,6 +73,7 @@ jobs:
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-bad-free-extras \
             gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \
@@ -145,6 +146,7 @@ jobs:
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-bad-free-extras \
             gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \
@@ -214,6 +216,7 @@ jobs:
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-bad-free-extras \
             gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \

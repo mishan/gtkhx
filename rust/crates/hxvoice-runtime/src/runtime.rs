@@ -903,11 +903,35 @@ impl VoiceRuntime {
         // SDP exchange) which is enough to clear `is_closed` so
         // the negotiation can proceed.
         if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+            // Failure here is usually one of two things:
+            //   1. Missing GStreamer nice plugin (libnice).
+            //      webrtcbin refuses to leave NULL when nicesink /
+            //      nicesrc aren't registered, and silently aborts
+            //      every peer-connection task afterwards
+            //      ("Peerconnection is closed, aborting execution"
+            //      at DEBUG level). On Debian / Ubuntu the plugin
+            //      lives in its own package — gst-plugins-bad
+            //      doesn't include it because of libnice's split
+            //      licensing. Fix: `apt install gstreamer1.0-nice`.
+            //      Fedora: gstreamer1-plugins-bad-free-extras or
+            //      build gst-plugins-bad with --enable-nice.
+            //   2. Test environment with no audio devices and no
+            //      GLib main loop driving the bus — rtpbin can't
+            //      preroll. Unit tests hit this path deliberately
+            //      and don't drive real peer-connection work, so
+            //      they exit cleanly even with the pipeline stuck
+            //      in NULL.
+            // (1) is the user-visible production case and the
+            // reason this warning is loud about the package name.
             gstreamer::warning!(
                 gstreamer::CAT_RUST,
-                "hxvoice: pipeline set_state(Playing) returned {e:?}; \
-                 continuing anyway — production usually recovers as the \
-                 SDP exchange adds transceivers"
+                "hxvoice: pipeline set_state(Playing) returned {e:?}. \
+                 If you see 'libnice elements are not available' on the \
+                 webrtcbin channel just above, install the GStreamer nice \
+                 plugin: `apt install gstreamer1.0-nice` on Debian/Ubuntu, \
+                 or gstreamer1-plugins-bad-free-extras on Fedora. \
+                 webrtcbin won't leave NULL without it and every SDP / \
+                 ICE op will silently no-op."
             );
         }
         let runtime = VoiceRuntime {
