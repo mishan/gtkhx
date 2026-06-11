@@ -116,10 +116,31 @@ pub enum Action {
     CancelTimer { kind: TimerKind },
 
     // ---- Lifecycle ----
-    /// Tear the entire voice session down — close webrtcbin,
-    /// stop all pipelines, free the state machine. Final
-    /// action emitted by the machine before the runtime drops
-    /// it.
+    /// Tear down the runtime-side resources tied to the current
+    /// session — close `webrtcbin`, stop the audio pipelines,
+    /// release any RTP-bin caps. **This action describes runtime
+    /// teardown, not state-machine destruction.** Whether the
+    /// runtime drops the `SessionMachine` afterwards is keyed off
+    /// the resulting state, not off seeing this action:
+    ///
+    /// - When the machine has transitioned to
+    ///   [`crate::state::SessionState::Leaving`] (the terminal
+    ///   state), the runtime drops the machine; a fresh voice
+    ///   session must construct a new one in `Idle`.
+    /// - When `TearDown` accompanies a mid-session room switch
+    ///   (the implicit-leave path triggered by
+    ///   [`crate::event::Event::JoinRequested`] for a different
+    ///   `cid` while in voice — see the `state.rs` module doc),
+    ///   the machine keeps running. It walks back to `JoinSent`
+    ///   with fresh per-room state in the same `step()` call;
+    ///   the runtime must rebuild `webrtcbin` and the pipelines
+    ///   to match the new room but keep the same machine
+    ///   instance.
+    ///
+    /// Runtime implementations should check
+    /// `SessionMachine::state()` after the action list finishes
+    /// dispatching, not infer lifetime from the presence of this
+    /// action alone.
     TearDown,
 }
 

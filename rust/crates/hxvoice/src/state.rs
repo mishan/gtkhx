@@ -34,10 +34,21 @@
 //! is identical to the JoinSent → OfferPending step. Failures
 //! (`WebrtcConnectionStateChanged::Failed`, server task error,
 //! any `Timeout`) collapse to `Leaving`, which is a **terminal
-//! state** — the runtime drops the `SessionMachine` after the
-//! `TearDown` action that accompanied the transition; a fresh
-//! session constructs a new machine in `Idle`. There is no
-//! `Leaving → Idle` step in this enum.
+//! state** — the runtime drops the `SessionMachine` once it
+//! observes the post-step `state() == Leaving`; a fresh session
+//! constructs a new machine in `Idle`. There is no `Leaving →
+//! Idle` step in this enum.
+//!
+//! **Important — don't drop the machine on every `TearDown`.**
+//! `Action::TearDown` describes runtime-resource teardown
+//! (close webrtcbin, stop pipelines), not state-machine
+//! destruction. The mid-session-room-switch path
+//! (`JoinRequested { cid }` for a *different* `cid` while in
+//! voice; see `event.rs`) also emits `TearDown`, but the
+//! machine continues running and walks back to `JoinSent` with
+//! fresh per-room state in the same `step()` call. The keying
+//! rule is "drop if and only if `state() == Leaving` after the
+//! step", never "drop on seeing `TearDown` in the action list".
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -316,7 +327,18 @@ impl SessionMachine {
             // First offer after JOIN: arm renegotiation by tearing
             // up webrtcbin with the offer, then asking it for an
             // answer.
+            //
+            // Drop stale 602s targeted at a previous room. The
+            // mid-session-room-switch path (JoinRequested for a
+            // different cid) updates `active_cid` before the new
+            // server's 602 can race in; an offer with the old
+            // cid would corrupt the mid cache and drive
+            // renegotiation against the wrong server. Same guard
+            // shape as the ICE / ROOM_STATUS handlers.
             (SessionState::JoinSent, Event::SdpOfferReceived { cid, sdp }) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
                 self.cache_offer_mids(&sdp);
                 self.bind_cid_for_offer(cid);
                 self.set_state(SessionState::OfferPending, |actions| {
@@ -328,8 +350,15 @@ impl SessionMachine {
 
             // Renegotiation: a new offer arrived after we're
             // already Connected. Same shape as the initial offer
-            // but no JoinReply timer to cancel.
+            // but no JoinReply timer to cancel. The wrong-cid
+            // guard (see JoinSent arm above) applies here too —
+            // even more important during Connected, where we
+            // already have a live media path that a stale 602
+            // could blow up.
             (SessionState::Connected, Event::SdpOfferReceived { cid, sdp }) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
                 self.cache_offer_mids(&sdp);
                 self.bind_cid_for_offer(cid);
                 self.set_state(SessionState::OfferPending, |actions| {
@@ -347,7 +376,14 @@ impl SessionMachine {
             // contents, which the runtime drops on the floor
             // because it sees the state machine emit a new
             // SetRemoteDescription + CreateAnswer pair here.
+            //
+            // Wrong-cid guard (same shape as the other SDP arms):
+            // a late offer from a previously-joined room must NOT
+            // replace the in-flight offer for the active room.
             (SessionState::OfferPending, Event::SdpOfferReceived { cid, sdp }) => {
+                if self.active_cid != Some(cid) {
+                    return Vec::new();
+                }
                 self.cache_offer_mids(&sdp);
                 self.bind_cid_for_offer(cid);
                 vec![
@@ -891,7 +927,6 @@ mod tests {
         assert!(kinds.contains(&"signal"));
     }
 
-    #[test]
     /// Regression (Copilot review): Event::JoinRequested docs
     /// claim the state machine handles the spec's implicit-leave
     /// (joining voice in room B while in voice in A). Earlier
@@ -1568,5 +1603,122 @@ mod tests {
         assert_eq!(HTLC_HDR_VOICE_SDP_ANSWER, 603);
         assert_eq!(HTLC_HDR_VOICE_ICE, 604);
         assert_eq!(HTLC_HDR_VOICE_MUTE, 606);
+    }
+
+    // ---- Wrong-cid SDP offer guards (Copilot review #3) ----
+
+    /// Regression: an SDP offer for a different cid arriving in
+    /// JoinSent must be dropped on the floor, mirroring the
+    /// ICE / ROOM_STATUS handler shape. Before the guard, a
+    /// stale 602 raced in by the previous server during a
+    /// mid-session room switch would corrupt the mid cache and
+    /// drive renegotiation against the wrong webrtcbin session.
+    #[test]
+    fn sdp_offer_with_wrong_cid_in_join_sent_is_dropped() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        let actions = m.step(Event::SdpOfferReceived {
+            cid: 99, // not the active cid
+            sdp: "a=mid:user-1\n".into(),
+        });
+        assert!(
+            actions.is_empty(),
+            "wrong-cid SDP offer must produce no actions; got {actions:?}"
+        );
+        assert_eq!(
+            m.state(),
+            SessionState::JoinSent,
+            "state must not advance on a dropped offer"
+        );
+        // The mid cache must still be empty — the offer's mids
+        // must NOT have been swallowed.
+        assert_eq!(m.participants().count(), 0);
+    }
+
+    /// Regression: same guard for the Connected (renegotiation)
+    /// arm. A stale 602 arriving here would re-enter
+    /// OfferPending and replace the live media path with bad
+    /// SDP — the worst-case shape, since we have a working
+    /// connection to break.
+    #[test]
+    fn sdp_offer_with_wrong_cid_in_connected_is_dropped() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "a=mid:user-1\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+
+        let actions = m.step(Event::SdpOfferReceived {
+            cid: 42, // wrong cid
+            sdp: "a=mid:user-2\n".into(),
+        });
+        assert!(
+            actions.is_empty(),
+            "wrong-cid SDP renegotiation must produce no actions; got {actions:?}"
+        );
+        assert_eq!(
+            m.state(),
+            SessionState::Connected,
+            "state must not move to OfferPending on a dropped renegotiation"
+        );
+    }
+
+    /// Regression: same guard for the OfferPending replacement
+    /// arm. A late offer from a previously-joined room must NOT
+    /// supersede the in-flight offer for the active room.
+    #[test]
+    fn sdp_offer_with_wrong_cid_in_offer_pending_is_dropped() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        let _ = m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "a=mid:user-1\n".into(),
+        });
+        assert_eq!(m.state(), SessionState::OfferPending);
+
+        let actions = m.step(Event::SdpOfferReceived {
+            cid: 99, // wrong cid
+            sdp: "a=mid:user-2\n".into(),
+        });
+        assert!(
+            actions.is_empty(),
+            "wrong-cid OfferPending replacement must produce no actions; got {actions:?}"
+        );
+        assert_eq!(m.state(), SessionState::OfferPending);
+    }
+
+    /// Counter-test: an offer with the correct cid in
+    /// OfferPending DOES replace the in-flight offer (the spec's
+    /// "discard the previous unanswered offer and process only
+    /// the newest one" behavior). Guards the test above from
+    /// silently passing because we broke the legitimate
+    /// replacement path too.
+    #[test]
+    fn sdp_offer_with_correct_cid_in_offer_pending_replaces() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        let _ = m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "a=mid:user-1\n".into(),
+        });
+
+        let actions = m.step(Event::SdpOfferReceived {
+            cid: 7, // active cid
+            sdp: "a=mid:user-2\n".into(),
+        });
+        // Should emit the matching SetRemoteDescription + CreateAnswer.
+        let has_set_remote = actions
+            .iter()
+            .any(|a| matches!(a, Action::SetRemoteDescription { .. }));
+        let has_create_answer =
+            actions.iter().any(|a| matches!(a, Action::CreateAnswer));
+        assert!(has_set_remote && has_create_answer);
     }
 }

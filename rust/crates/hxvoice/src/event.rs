@@ -62,10 +62,13 @@ pub enum Event {
     /// newest, per spec §"Renegotiation Flow").
     SdpOfferReceived { cid: u32, sdp: String },
 
-    /// Server sent HTLC_HDR_VOICE_ICE (604) carrying a single
-    /// trickle ICE candidate. Empty `candidate` string inside
-    /// the JSON would normally be the end-of-candidates marker;
-    /// the runtime intercepts that case and emits
+    /// Server sent HTLS_HDR_VOICE_ICE (604) carrying a single
+    /// trickle ICE candidate. (604 is the bidirectional opcode
+    /// number — both `HTLC_HDR_VOICE_ICE` and
+    /// `HTLS_HDR_VOICE_ICE` are defined in `hotline.h`; the
+    /// server-sent direction is HTLS.) Empty `candidate` string
+    /// inside the JSON would normally be the end-of-candidates
+    /// marker; the runtime intercepts that case and emits
     /// `EndOfRemoteCandidates` instead so the state machine sees
     /// the distinction clearly.
     IceCandidateReceived { cid: u32, candidate_json: String },
