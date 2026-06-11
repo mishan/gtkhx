@@ -18,37 +18,44 @@
 //!     │             │                 │
 //!     │             │ AnswerCreated   │
 //!     │             ▼                 │
-//!             Leaving ◄── Connecting ◄┘
-//!  (terminal)              │
-//!                          │ ConnectionState::Connected
-//!                          ▼
-//!                      Connected
-//!                          │
-//!                          │ LeaveRequested
-//!                          ▼
-//!                       Leaving (terminal)
+//!         Idle ◄── Connecting ◄───────┘
+//!         ▲           │
+//!         │           │ ConnectionState::Connected
+//!         │           ▼
+//!         │       Connected
+//!         │           │
+//!         │           │ LeaveRequested
+//!         └───────────┘
+//!
+//!                       Leaving
+//!                  (post-fail() collapse;
+//!                  JoinRequested recovers)
 //! ```
 //!
 //! Connected ↔ OfferPending happens during renegotiation (a new
 //! 602 arriving while we're already streaming) — the transition
-//! is identical to the JoinSent → OfferPending step. Failures
-//! (`WebrtcConnectionStateChanged::Failed`, server task error,
-//! any `Timeout`) collapse to `Leaving`, which is a **terminal
-//! state** — the runtime drops the `SessionMachine` once it
-//! observes the post-step `state() == Leaving`; a fresh session
-//! constructs a new machine in `Idle`. There is no `Leaving →
-//! Idle` step in this enum.
+//! is identical to the JoinSent → OfferPending step.
+//!
+//! Failures (`WebrtcConnectionStateChanged::Failed`, server task
+//! error, any `Timeout`) collapse to `Leaving` via `fail()`, which
+//! clears `active_cid` and emits `TearDown`. `Leaving` is NOT a
+//! drop-the-machine state: a subsequent `JoinRequested` is
+//! accepted through the room-switch arm, walking back to `JoinSent`
+//! with fresh per-session state. The user-driven Leave path skips
+//! `Leaving` entirely and lands directly in `Idle` for the same
+//! reason — the machine stays alive across leave / rejoin cycles.
 //!
 //! **Important — don't drop the machine on every `TearDown`.**
 //! `Action::TearDown` describes runtime-resource teardown
 //! (close webrtcbin, stop pipelines), not state-machine
-//! destruction. The mid-session-room-switch path
-//! (`JoinRequested { cid }` for a *different* `cid` while in
-//! voice; see `event.rs`) also emits `TearDown`, but the
-//! machine continues running and walks back to `JoinSent` with
-//! fresh per-room state in the same `step()` call. The keying
-//! rule is "drop if and only if `state() == Leaving` after the
-//! step", never "drop on seeing `TearDown` in the action list".
+//! destruction. Both the user-driven LeaveRequested path (walks
+//! Idle) and the mid-session-room-switch path (`JoinRequested
+//! { cid }` for a *different* `cid` while in voice; see
+//! `event.rs`) emit `TearDown`, and the machine continues running
+//! in either case. There is no state at which the runtime should
+//! discard the `SessionMachine` instance — its lifetime matches
+//! the surrounding `VoiceRuntime`, which is dropped on session
+//! teardown via `gtkhx_voice_runtime_free`.
 
 use alloc::string::{String, ToString};
 use alloc::vec;
@@ -72,13 +79,15 @@ use crate::event::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SessionState {
-    /// No voice room joined. The **starting state only** — there
-    /// is no `Leaving → Idle` transition in this enum, so a
-    /// machine that has reached `Leaving` never re-enters `Idle`.
-    /// A fresh voice session constructs a new `SessionMachine`
-    /// (which starts in `Idle`); the runtime drops the previous
-    /// one when it sees the post-step state hit `Leaving`. See
-    /// the module-level doc for the full lifetime contract.
+    /// No voice room joined. Both the initial state on
+    /// `SessionMachine::default()` and the post-leave resting
+    /// state — a user-driven `LeaveRequested` walks back here
+    /// directly (clearing `active_cid` + every per-session
+    /// cache) so the next `JoinRequested` flows through the
+    /// canonical `Idle → JoinSent` arm. There IS no
+    /// `Leaving → Idle` transition; recovery from `Leaving`
+    /// (post-`fail()` collapse) goes straight to `JoinSent` via
+    /// the room-switch arm.
     Idle,
     /// We sent VOICE_JOIN (600); waiting for the server's reply
     /// or its accompanying SDP offer (602). Both arrive in
@@ -99,12 +108,20 @@ pub enum SessionState {
     /// Media is flowing. Renegotiation pulls us back to
     /// `OfferPending`; leave / failure pushes us to `Leaving`.
     Connected,
-    /// We sent VOICE_LEAVE (601) or are tearing down due to a
-    /// failure. **Terminal state** for this machine — the runtime
-    /// drops the `SessionMachine` after dispatching the `TearDown`
-    /// action that accompanied the transition here. A fresh
-    /// session constructs a new machine in `Idle`; this enum has
-    /// no `Leaving → Idle` step.
+    /// Post-`fail()` collapse state. Reached only via the
+    /// failure paths (`WebrtcConnectionStateChanged::Failed`,
+    /// server task error on a fatal opcode, any session
+    /// `Timeout`); `fail()` clears `active_cid` to `None` and
+    /// emits `TearDown`. The user-driven `LeaveRequested` path
+    /// does NOT pass through here — it lands in `Idle`
+    /// directly.
+    ///
+    /// `Leaving` is recoverable, not terminal: a subsequent
+    /// `JoinRequested` flows through the room-switch arm and
+    /// transitions back to `JoinSent` with fresh state. The
+    /// machine instance lives until the surrounding
+    /// `VoiceRuntime` drops; the runtime does NOT discard it on
+    /// `state() == Leaving`.
     Leaving,
 }
 
@@ -117,12 +134,11 @@ pub struct SessionMachine {
     state: SessionState,
     /// Currently active (or pending) chat-room id. Populated on
     /// `JoinRequested` (both the initial JOIN and the mid-session
-    /// room-switch path), and cleared internally by `fail()` when
-    /// the machine walks itself to terminal `Leaving`. There is
-    /// no `Leaving → Idle` transition, so this is the only
-    /// in-machine clear path; the explicit-leave handler doesn't
-    /// touch this field because the runtime drops the whole
-    /// machine afterwards.
+    /// room-switch path). Cleared by `fail()` (which walks to
+    /// `Leaving`) AND by the user-driven `LeaveRequested` arm
+    /// (which walks straight to `Idle`); both paths reset
+    /// per-session state so a subsequent `JoinRequested` starts
+    /// fresh through whichever arm matches.
     ///
     /// `0` is a valid cid (public chat), so we use `Option<u32>`
     /// rather than a sentinel.
@@ -267,9 +283,20 @@ impl SessionMachine {
                         | SessionState::OfferPending
                         | SessionState::Connecting
                         | SessionState::Connected
+                        | SessionState::Leaving
                 ) =>
             {
-                if self.active_cid == Some(cid) {
+                // Same-cid re-join: silent no-op unless we're in
+                // Leaving (post-fail() collapse), in which case
+                // re-joining the same room is exactly the
+                // recovery path. fail() clears active_cid to
+                // None, so the Some(cid) check below also passes
+                // through cleanly for that case; we only short-
+                // circuit on a stuck UI re-fire against a still-
+                // live session.
+                if self.state != SessionState::Leaving
+                    && self.active_cid == Some(cid)
+                {
                     return Vec::new();
                 }
                 // Cancel every armed timer kind (the runtime
@@ -335,8 +362,26 @@ impl SessionMachine {
                 if self.active_cid != Some(cid) {
                     return Vec::new();
                 }
+                // Walk back to Idle directly rather than parking
+                // at Leaving. Both states are JoinRequested-
+                // reachable now (the room-switch arm above
+                // matches Leaving too), so the reason is
+                // hygiene, not transition coverage: an explicit
+                // user-driven leave should drop every shred of
+                // per-session state — active_cid, mid_to_user,
+                // participants, queued_offer, muted — so the
+                // next JoinRequested is a clean start through
+                // the canonical Idle arm with no stale carry-
+                // over. Leaving is left for the fail() collapse
+                // path, where the recovery arm below absorbs
+                // any half-finished bookkeeping (active_cid was
+                // already cleared by fail()).
                 self.queued_offer = None;
-                self.set_state(SessionState::Leaving, |actions| {
+                self.active_cid = None;
+                self.mid_to_user.clear();
+                self.participants.clear();
+                self.muted = false;
+                self.set_state(SessionState::Idle, |actions| {
                     // Cancel every kind the spec arms — the runtime
                     // tracks them by kind regardless of whether one
                     // is actually live, so emitting a Cancel for an
@@ -925,10 +970,12 @@ fn connection_state_for_session(s: SessionState) -> ConnectionState {
         | SessionState::OfferPending
         | SessionState::Connecting => ConnectionState::Connecting,
         SessionState::Connected => ConnectionState::Connected,
-        // Leaving is the terminal state of this machine — the
-        // runtime drops the SessionMachine after reaching it.
-        // That's a session that has *ended*, not one with
-        // temporary connectivity loss, so map to Closed.
+        // Leaving is the post-fail() collapse state — the
+        // session has *ended* on its current room, even though
+        // the machine is recoverable on a subsequent
+        // JoinRequested. Map to Closed because that's what the
+        // UI signal payload describes (room is done), not
+        // Disconnected.
         // Disconnected per `ConnectionState`'s own doc is
         // "connectivity loss the stack thinks is temporary"; a
         // RoomStatus signal carrying Disconnected here would
@@ -1030,7 +1077,12 @@ mod tests {
         assert_eq!(m.state(), SessionState::Connected);
 
         let acts = m.step(Event::LeaveRequested { cid: 7 });
-        assert_eq!(m.state(), SessionState::Leaving);
+        // User-driven Leave walks directly back to Idle so a
+        // subsequent JoinRequested can use the canonical
+        // Idle → JoinSent arm. Leaving is reserved for the
+        // fail() collapse path.
+        assert_eq!(m.state(), SessionState::Idle);
+        assert_eq!(m.active_cid(), None);
         // Should cancel JoinReply timer, send 601, tear down, emit
         // StateChanged.
         let kinds: Vec<&'static str> = acts
@@ -1047,6 +1099,76 @@ mod tests {
         assert!(kinds.contains(&"tear"));
         assert!(kinds.contains(&"cancel"));
         assert!(kinds.contains(&"signal"));
+    }
+
+    /// Regression: after a user-driven LeaveRequested, the
+    /// machine must be re-joinable. Earlier behaviour parked at
+    /// Leaving with active_cid still Some(prev_cid), and a
+    /// subsequent JoinRequested fell to the catch-all (no arm
+    /// matched Leaving) — UI button stayed stuck on "Join Voice"
+    /// even though the wire VOICE_JOIN went out.
+    #[test]
+    fn rejoin_after_leave_walks_idle_to_join_sent() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 0 });
+        m.step(Event::SdpOfferReceived {
+            cid: 0,
+            sdp: "v=0\na=mid:send\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+
+        m.step(Event::LeaveRequested { cid: 0 });
+        // The fix: Leave walks to Idle, not Leaving.
+        assert_eq!(m.state(), SessionState::Idle);
+        assert_eq!(m.active_cid(), None);
+
+        // Rejoin should now flow through the canonical Idle arm.
+        let acts = m.step(Event::JoinRequested { cid: 0 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        assert_eq!(m.active_cid(), Some(0));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 600, .. }
+        )));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::StateChanged,
+                ..
+            }
+        )));
+    }
+
+    /// Regression: after fail() collapse the machine sits in
+    /// Leaving with active_cid cleared. A JoinRequested must
+    /// recover — otherwise a single server-side error (e.g. a
+    /// 603 SDP_ANSWER rejected) wedges the UI permanently.
+    #[test]
+    fn rejoin_after_fail_recovers_from_leaving() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 5 });
+        // ServerTaskError on the JOIN opcode drives fail() →
+        // Leaving + active_cid=None.
+        m.step(Event::ServerTaskError(ServerError {
+            origin_opcode: HTLC_HDR_VOICE_JOIN,
+            text: "no room".into(),
+        }));
+        assert_eq!(m.state(), SessionState::Leaving);
+        assert_eq!(m.active_cid(), None);
+
+        // User retries — should walk back through the room-switch
+        // arm (now Leaving-aware) to JoinSent.
+        let acts = m.step(Event::JoinRequested { cid: 5 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        assert_eq!(m.active_cid(), Some(5));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 600, .. }
+        )));
     }
 
     /// Regression (Copilot review): Event::JoinRequested docs
@@ -1807,9 +1929,10 @@ mod tests {
         });
         assert_eq!(m.state(), SessionState::Connected);
 
-        // B clicks Leave Voice.
+        // B clicks Leave Voice. Walks straight back to Idle
+        // (see leave_from_connected_emits_tear_down for why).
         let acts = m.step(Event::LeaveRequested { cid: 42 });
-        assert_eq!(m.state(), SessionState::Leaving);
+        assert_eq!(m.state(), SessionState::Idle);
         assert!(acts.iter().any(|a| matches!(
             a,
             Action::SendWireFrame { opcode: 601, .. }
