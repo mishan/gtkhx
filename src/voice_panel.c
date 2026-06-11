@@ -66,23 +66,43 @@ update_button_labels (GtkWidget *panel)
                                                    KEY_MUTE_BTN);
     gboolean joined = panel_get_bool (panel, KEY_JOINED);
     gboolean muted = panel_get_bool (panel, KEY_MUTED);
+    /* Read access from the session so update_button_labels can
+     * apply the "disabled" tooltip and sensitivity itself —
+     * otherwise voice_panel_refresh sets them and we'd
+     * immediately overwrite. */
+    session *sess = g_object_get_data (G_OBJECT (panel), KEY_SESS);
+    gboolean access_ok = sess && panel_is_enabled (&sess->htlc);
 
     /* Join Voice ↔ Leave Voice */
     if (join_btn) {
         gtk_button_set_label (GTK_BUTTON (join_btn),
                               joined ? _ ("Leave Voice") : _ ("Join Voice"));
-        gtk_widget_set_tooltip_text (
-            GTK_WIDGET (join_btn),
-            joined ? _ ("Leave the voice room")
-                   : _ ("Join the voice room for this chat"));
+        if (!access_ok) {
+            /* Access bit missing — spec-mandated permission
+             * tooltip. Keep over the normal one when the panel
+             * is visible-but-disabled (CAP_VOICE echoed but
+             * HL_ACCESS_VOICE_CHAT cleared). */
+            gtk_widget_set_tooltip_text (
+                GTK_WIDGET (join_btn),
+                _ ("Voice chat requires permission"));
+        } else {
+            gtk_widget_set_tooltip_text (
+                GTK_WIDGET (join_btn),
+                joined ? _ ("Leave the voice room")
+                       : _ ("Join the voice room for this chat"));
+        }
         panel_set_bool (panel, KEY_SUPPRESS, TRUE);
         gtk_toggle_button_set_active (join_btn, joined);
         panel_set_bool (panel, KEY_SUPPRESS, FALSE);
     }
 
-    /* Mute is only relevant when joined. */
+    /* Mute is only relevant when joined AND access is granted.
+     * Without the access gate, update_button_labels would re-
+     * enable Mute after voice_panel_refresh disabled it
+     * (the access bit was cleared between refresh and labels). */
     if (mute_btn) {
-        gtk_widget_set_sensitive (GTK_WIDGET (mute_btn), joined);
+        gtk_widget_set_sensitive (GTK_WIDGET (mute_btn),
+                                  joined && access_ok);
         gtk_button_set_label (GTK_BUTTON (mute_btn),
                               muted ? _ ("Unmute") : _ ("Mute"));
         gtk_widget_set_tooltip_text (
@@ -112,14 +132,17 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
 
     gboolean sent;
     if (want_joined) {
+        /* Spec recommends joining muted by default. Set the local
+         * muted bit BEFORE issuing VOICE_JOIN so any downstream
+         * code reading panel state during the send sees a
+         * consistent "joining muted" view. Roll it back if the
+         * wire-out skipped — a join that didn't ship shouldn't
+         * pretend we're in voice. */
+        gboolean prev_muted = panel_get_bool (panel, KEY_MUTED);
+        panel_set_bool (panel, KEY_MUTED, TRUE);
         sent = hx_send_voice_join (&sess->htlc, cid);
-        /* Spec recommends joining muted by default. Only set the
-         * local muted bit once the wire-out actually shipped —
-         * a join that skipped (CAP_VOICE cleared during a race,
-         * proto builder rejected the input) shouldn't pretend
-         * we're in voice. */
-        if (sent) {
-            panel_set_bool (panel, KEY_MUTED, TRUE);
+        if (!sent) {
+            panel_set_bool (panel, KEY_MUTED, prev_muted);
         }
     } else {
         sent = hx_send_voice_leave (&sess->htlc, cid);
@@ -240,34 +263,18 @@ voice_panel_refresh (GtkWidget *panel, session *sess)
     }
     gtk_widget_set_visible (panel, TRUE);
 
+    /* Sensitivity: only the Join button's enabled/disabled state
+     * lives here. The Mute button's sensitivity is computed from
+     * (joined && access_ok) inside update_button_labels — keeping
+     * it here would race with update_button_labels and overwrite.
+     * Tooltips also live in update_button_labels for the same
+     * reason: the disabled-state "Voice chat requires permission"
+     * message would otherwise be immediately overwritten by the
+     * normal Join/Leave tooltip on every refresh. */
     gboolean enabled = panel_is_enabled (&sess->htlc);
     GtkWidget *join_btn = g_object_get_data (G_OBJECT (panel), KEY_JOIN_BTN);
-    GtkWidget *mute_btn = g_object_get_data (G_OBJECT (panel), KEY_MUTE_BTN);
     if (join_btn) {
         gtk_widget_set_sensitive (join_btn, enabled);
-        if (!enabled) {
-            gtk_widget_set_tooltip_text (
-                join_btn, _ ("Voice chat requires permission"));
-        }
-    }
-    if (mute_btn) {
-        /* Mute is additionally gated on "currently joined" — see
-         * update_button_labels. */
-        if (!enabled)
-            gtk_widget_set_sensitive (mute_btn, FALSE);
-    }
-    /* Rerun the label/tooltip refresh whether we're enabling or
-     * disabling — a disabled→enabled transition (login completes,
-     * SELFINFO populates the access bitmap) needs to clear the
-     * 'Voice chat requires permission' tooltip the disabled
-     * branch set, and an enabled→disabled transition needs to
-     * apply it. update_button_labels covers both ends from the
-     * stored joined/muted state, which we just normalised
-     * above. */
-    if (enabled) {
-        if (join_btn) {
-            gtk_widget_set_tooltip_text (join_btn, NULL);
-        }
     }
     update_button_labels (panel);
 }
