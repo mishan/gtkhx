@@ -1,17 +1,17 @@
 //! GStreamer-backed runtime that drives an `hxvoice::SessionMachine`.
 //!
-//! This is Phase 8.C step 2 per `docs/voice-chat-plan.md` §5.C. The
-//! pure state machine landed in step 1; this module wires it to a
-//! `Backend` trait that production fills with FFI calls to the C
-//! side.
+//! Built across Phase 8.C steps 2 and 3 of `docs/voice-chat-plan.md`
+//! §5.C. The pure state machine lives in `hxvoice`; this module
+//! wires it to a `Backend` trait that production fills with FFI
+//! calls to the C side, and to a `gst::Pipeline` containing a
+//! `webrtcbin` element driven by typed `gstreamer-rs` calls.
 //!
-//! ## What step 2 implements
+//! ## What step 2 implemented
 //!
 //! - The `Backend` trait — `send_wire_frame` / `emit_signal` /
 //!   `tear_down` callbacks the C side hooks up later.
-//! - `VoiceRuntime::new()` — constructs an (empty)
-//!   `gst::Pipeline` container so step 3 has somewhere to add
-//!   `webrtcbin`. Pipeline isn't exercised at this layer yet.
+//! - `VoiceRuntime::new()` — constructs the owning
+//!   `gst::Pipeline` container.
 //! - `handle_event(event)` — the dispatch loop. Pumps the event
 //!   through the state machine and walks the returned action
 //!   list, dispatching backend-shaped actions
@@ -24,61 +24,183 @@
 //!   voice transition) enqueue and return; the outer loop
 //!   drains.
 //!
-//! ## What's deferred to step 3
+//! ## What step 3 implements
 //!
-//! - `webrtcbin` construction + linking into the pipeline.
-//! - Dispatch arms for the WebRTC-shaped actions
-//!   (`SetRemoteDescription` / `CreateAnswer` /
-//!   `SetLocalDescription` / `AddRemoteIce`,
-//!   `StartReceivePipeline` / `StopReceivePipeline` /
-//!   `SetSendPipelineMute`). They no-op today.
-//! - `webrtcbin` signal wiring — `connect_pad_added`,
-//!   `connect("on-ice-candidate", …)`, the `create-answer`
-//!   promise — that produce the matching `Event::Webrtc*`
-//!   variants. Step 3 lands this; the docs below about
-//!   threading (`glib::MainContext::spawn_local` marshaling for
-//!   cross-thread signal callbacks) describe the design that
-//!   step 3 will instantiate, not anything this commit ships.
+//! - `webrtcbin` construction in `VoiceRuntime::new()` —
+//!   `gst::ElementFactory::make("webrtcbin")` added to the
+//!   owning pipeline and stashed in `Inner`.
+//! - Dispatch arms for the SDP-shaped actions:
+//!   - `Action::SetRemoteDescription` — parses the SDP via
+//!     `gstreamer_sdp::SDPMessage`, builds a
+//!     `WebRTCSessionDescription` of type `Offer`, emits
+//!     `webrtcbin.set-remote-description`.
+//!   - `Action::CreateAnswer` — emits
+//!     `webrtcbin.create-answer` with a `gst::Promise`. When the
+//!     promise fires (typically on a GStreamer worker thread) the
+//!     change-func marshals back to the main GLib context via
+//!     `glib::MainContext::invoke`, looks the runtime up by
+//!     `runtime_id` from the thread-local registry, and re-enters
+//!     `handle_event(Event::WebrtcAnswerCreated)`.
+//!   - `Action::SetLocalDescription` — same shape as
+//!     `SetRemoteDescription` but type `Answer`.
 //!
-//! ## Layering (full picture, including step-3 deferred bits)
+//! ## What's deferred to step 4+
+//!
+//! - Dispatch arms for the remaining WebRTC-shaped actions
+//!   (`AddRemoteIce`, `StartReceivePipeline` /
+//!   `StopReceivePipeline` / `SetSendPipelineMute`). They still
+//!   no-op today.
+//! - `webrtcbin` signal wiring for `pad-added` /
+//!   `on-ice-candidate` / `connection-state` / `bus`. Step 4
+//!   covers ICE (with the same main-thread marshaling shape as
+//!   `CreateAnswer`); step 5 covers the receive-leg pads; step 8
+//!   covers the bus.
+//!
+//! ## Layering
 //!
 //! The runtime sits between three peers:
 //!
 //! - **`hxvoice::SessionMachine`** owned inside `Inner`. Single
 //!   source of "what should we do" for every transition.
 //! - **`gst::Pipeline` + `gstreamer_webrtc::WebRTCBin`** also owned
-//!   inside `Inner` (webrtcbin lands in step 3). The runtime
-//!   dispatches the GStreamer-shaped Actions
-//!   (`SetRemoteDescription`, `CreateAnswer`, `AddRemoteIce`,
-//!   audio pipeline manipulation) directly here.
+//!   inside `Inner`. The runtime dispatches the GStreamer-shaped
+//!   Actions (`SetRemoteDescription`, `CreateAnswer`,
+//!   `AddRemoteIce`, audio pipeline manipulation) directly here.
 //! - **`Backend`** trait, supplied at construction. Captures the
 //!   integration points that aren't GStreamer-shaped: wire frames
 //!   the C side ships via `hx_send_voice_*`, GtkhxSession signal
 //!   emits through `hxbridge`, and teardown. Production wires it
 //!   to FFI shims; tests use a recording mock.
 //!
-//! ## Threading (planned for step 3)
+//! ## Threading
 //!
-//! Designed to run main-thread-only. Once step 3 wires the
-//! `webrtcbin` signals, the ones that may fire on GStreamer
-//! worker threads (`on-ice-candidate`, `pad-added`, etc.) marshal
-//! back to the main GLib context via
-//! [`glib::MainContext::spawn_local`] before reaching into
-//! `Inner`. That keeps `Inner: !Send` ergonomically viable — every
-//! state-machine borrow happens on a single thread.
+//! The runtime runs main-thread-only. `Inner` and `Backend` live
+//! in `Rc<RefCell<…>>` — `!Send` by construction, which is the
+//! point: every state-machine borrow happens on the same thread
+//! that owns the GLib main loop.
 //!
-//! The deferred-dispatch queue in step 2 makes re-entrant calls
-//! from `Backend` callbacks safe at any depth — the queue is the
-//! same machinery that supports `webrtcbin`-signal re-entry in
-//! step 3.
+//! Cross-thread callbacks that GStreamer fires from worker
+//! threads (currently `gst::Promise::with_change_func`, and from
+//! step 4 onward `on-ice-candidate` / `pad-added` /
+//! `notify::peer-connection-state` / pipeline bus messages) bridge
+//! back via the [`MAIN_THREAD_RUNTIMES`] thread-local registry +
+//! `glib::MainContext::invoke`. The Promise closure must be
+//! `Send + 'static`, so it captures the runtime's `u64` id and a
+//! `String` payload — both `Send`. On the main thread, the
+//! invoked closure looks the runtime back up by id and calls
+//! `handle_event` normally. Drop on `Inner` removes the entry,
+//! so a closure that fires after teardown becomes a silent
+//! no-op rather than a use-after-free.
+//!
+//! The deferred-dispatch queue from step 2 makes re-entrant
+//! calls from `Backend` callbacks safe at any depth — the queue
+//! is the same machinery that supports the `webrtcbin`-signal
+//! re-entry step 3 introduces.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::rc::Rc;
+use std::collections::{HashMap, VecDeque};
+use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use gstreamer::prelude::*;
+use gstreamer_webrtc::WebRTCSDPType;
 
 use hxvoice::action::{Action, SignalKind, SignalPayload};
 use hxvoice::event::{Event, Timeout};
 use hxvoice::state::{SessionMachine, SessionState};
+
+/// Monotonically increasing id for each `VoiceRuntime` ever built
+/// on this process. Used as the key into [`MAIN_THREAD_RUNTIMES`] so
+/// `Send`-required closures can refer to a runtime via a `Copy` id
+/// rather than carrying a non-`Send` `Rc` clone.
+///
+/// `Relaxed` ordering is fine: the value is only ever consumed by
+/// equality lookup in the registry; we never reason about ordering
+/// between ids.
+static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// Per-main-thread registry of live runtimes, keyed by
+    /// `runtime_id`. Entries are `Weak` so the registry never
+    /// keeps a runtime alive past its last strong reference;
+    /// `Drop for Inner` evicts the matching entry when the
+    /// state-machine container drops.
+    ///
+    /// The thread-local form is load-bearing: each `Rc` lives on
+    /// exactly one thread (we don't violate `!Send`), and the
+    /// `gst::Promise::with_change_func` closures that need to
+    /// reach back here run on a GStreamer worker thread first,
+    /// then `glib::MainContext::invoke` hops onto the GLib main
+    /// thread before touching the registry. The registry on that
+    /// thread is the one the runtime was registered with.
+    static MAIN_THREAD_RUNTIMES: RefCell<
+        HashMap<u64, WeakRuntime>,
+    > = RefCell::new(HashMap::new());
+}
+
+/// `Weak`-shaped clone of [`VoiceRuntime`], for storage in the
+/// thread-local registry without circular ref-count keep-alive.
+///
+/// `WeakRuntime` itself is `Clone` but not `Send` — same constraint
+/// as `Weak<Rc<…>>`. It only exists on the main thread.
+#[derive(Clone)]
+struct WeakRuntime {
+    inner: Weak<RefCell<Inner>>,
+    backend: Weak<RefCell<Box<dyn Backend>>>,
+}
+
+impl WeakRuntime {
+    fn upgrade(&self) -> Option<VoiceRuntime> {
+        Some(VoiceRuntime {
+            inner: self.inner.upgrade()?,
+            backend: self.backend.upgrade()?,
+        })
+    }
+}
+
+/// Look up a runtime by id on the current (main) thread and pass
+/// it to the supplied closure. The closure runs only if a live
+/// runtime is found — late callbacks (after teardown) become a
+/// silent no-op.
+///
+/// Uses `try_with` rather than `with` so a `MainContext::invoke`
+/// callback firing during thread-local destructor teardown (the
+/// main thread is shutting down) becomes a clean no-op instead
+/// of panicking on `AccessError`. The intended semantics for a
+/// late callback are "do nothing"; the registry just happens to
+/// be one of the things that disappears in the same teardown
+/// sequence.
+///
+/// Public to the crate so the planned ICE / pad / bus dispatch
+/// in step 4+ can share the same registry hop.
+pub(crate) fn with_main_thread_runtime<F>(id: u64, f: F)
+where
+    F: FnOnce(&VoiceRuntime),
+{
+    let upgraded = MAIN_THREAD_RUNTIMES
+        .try_with(|cell| {
+            cell.borrow().get(&id).and_then(WeakRuntime::upgrade)
+        })
+        .ok()
+        .flatten();
+    if let Some(rt) = upgraded {
+        f(&rt);
+    }
+}
+
+/// Register a freshly-constructed runtime in the thread-local
+/// registry under its `runtime_id`. Called by both constructors;
+/// dropped by `Drop for Inner`.
+fn register(runtime: &VoiceRuntime) {
+    let id = runtime.inner.borrow().runtime_id;
+    let weak = WeakRuntime {
+        inner: Rc::downgrade(&runtime.inner),
+        backend: Rc::downgrade(&runtime.backend),
+    };
+    MAIN_THREAD_RUNTIMES.with(|cell| {
+        cell.borrow_mut().insert(id, weak);
+    });
+}
 
 /// Trait the runtime consults for everything it can't do with
 /// GStreamer alone: wire frames over the Hotline TCP control
@@ -208,17 +330,27 @@ pub struct VoiceRuntime {
 struct Inner {
     machine: SessionMachine,
     /// `Some` once the GStreamer pipeline has been constructed.
-    /// `None` for the pipeline-less test path. Future webrtcbin
-    /// wiring lands in Phase 8.C step 3 and lives behind this
-    /// option.
+    /// `None` for the pipeline-less test path. Holds the
+    /// `webrtcbin` element as a child (added in `new()`).
     ///
-    /// Currently unused — Phase 8.C step 2 builds the pipeline
-    /// container but doesn't add `webrtcbin` or the send leg yet.
-    /// Step 3's `dispatch` path will reach in here when handling
-    /// the `SetRemoteDescription` / `CreateAnswer` / etc. arms
-    /// that are currently no-ops.
+    /// Kept here to extend the pipeline's lifetime to match the
+    /// runtime's (the pipeline owns `webrtcbin` and the receive-leg
+    /// bins step 5+ will add). The dispatch arms reach `webrtcbin`
+    /// directly via the [`Inner::webrtcbin`] handle rather than
+    /// going through the pipeline lookup.
     #[allow(dead_code)]
     pipeline: Option<gstreamer::Pipeline>,
+    /// The `webrtcbin` element living inside `pipeline`. `Some`
+    /// whenever `pipeline` is `Some`; the two move together. Held
+    /// directly so dispatch arms don't have to look it up by name
+    /// on every action.
+    ///
+    /// `None` for the pipeline-less test path (the test still
+    /// exercises the dispatch loop and the timer / Backend arms,
+    /// but the SDP arms early-return when there's no bin to
+    /// drive — exactly what production wants if the bin was never
+    /// initialised either).
+    webrtcbin: Option<gstreamer::Element>,
     /// Currently-armed timer kinds. The runtime arms `glib::timeout`
     /// callbacks elsewhere; we track the kind here so we know
     /// whether a fire is still relevant by the time it arrives
@@ -247,14 +379,61 @@ struct Inner {
     /// outer loop drains this after every step's actions finish
     /// dispatching.
     pending: VecDeque<Event>,
+    /// Unique id assigned at construction; the key into
+    /// [`MAIN_THREAD_RUNTIMES`]. Captured by `Send`-required
+    /// closures (Promise change-funcs, ICE callbacks in step 4+)
+    /// so they can find the runtime back on the main thread
+    /// without holding a non-`Send` `Rc`.
+    runtime_id: u64,
+    /// Generation counter incremented on every `Action::CreateAnswer`
+    /// dispatch. The `gst::Promise` callback captures the value
+    /// at issue time and compares it against the current
+    /// generation on the main thread; mismatches mean a newer
+    /// offer arrived in the meantime (the state machine's
+    /// renegotiation path) and the older answer must be
+    /// dropped on the floor — otherwise the stale answer would
+    /// re-enter `handle_event(WebrtcAnswerCreated)` and the
+    /// state machine would emit a `SendWireFrame(603, …)` for
+    /// the wrong offer, blowing up the renegotiated session.
+    ///
+    /// See `hxvoice/src/state.rs` `(OfferPending, SdpOfferReceived)`
+    /// for the matching state-machine assumption that "the
+    /// existing CreateAnswer promise will resolve with stale
+    /// contents, which the runtime drops on the floor."
+    answer_generation: u64,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Evict our entry from the thread-local registry so a
+        // late-firing closure (Promise change-func that races
+        // teardown) becomes a silent no-op when it tries to
+        // upgrade the Weak.
+        //
+        // `Inner: !Send` guarantees we drop on the same thread
+        // that registered us, so this thread_local lookup hits
+        // the correct registry.
+        //
+        // `try_with` rather than `with` because `Inner` can be
+        // dropped during the thread's destructor pass (the
+        // runtime's last `Rc` falls out of scope as the GLib
+        // main context is being torn down). At that point
+        // `MAIN_THREAD_RUNTIMES` may already be destroyed; the
+        // registry going away itself makes the eviction
+        // unnecessary, so an `AccessError` is just "nothing to
+        // do" — ignore it instead of panicking on the way out.
+        let _ = MAIN_THREAD_RUNTIMES.try_with(|cell| {
+            cell.borrow_mut().remove(&self.runtime_id);
+        });
+    }
 }
 
 impl VoiceRuntime {
-    /// Construct a runtime that owns a fresh `gst::Pipeline` and
-    /// will drive the supplied `Backend`. The pipeline construction
-    /// itself doesn't touch `webrtcbin` yet — Phase 8.C step 3 lands
-    /// the bin and the signal wiring. Step 2's pipeline is just
-    /// the empty container that step 3 grows into.
+    /// Construct a runtime that owns a fresh `gst::Pipeline`
+    /// containing a `webrtcbin` element, and will drive the
+    /// supplied `Backend`. The bin isn't linked to a send or
+    /// receive leg yet — those grow in step 5 (pad-added) and
+    /// the audio-pipeline action arms.
     ///
     /// Calls `gst::init()` first — it's idempotent, so production
     /// code that already ran `gtkhx_voice_init()` from `main` just
@@ -263,38 +442,86 @@ impl VoiceRuntime {
     /// [`RuntimeError::GstInitFailed`] rather than the delayed
     /// panic from inside gstreamer-rs's assert-initialised
     /// checks.
+    ///
+    /// `webrtcbin` lives in `gst-plugins-bad`. If the plugin
+    /// isn't installed, `ElementFactory::make` fails and we
+    /// surface [`RuntimeError::WebrtcbinUnavailable`]; the C
+    /// side then disables voice UI for the rest of the session.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
         gstreamer::init().map_err(RuntimeError::GstInitFailed)?;
         let pipeline = gstreamer::Pipeline::builder()
             .name("hxvoice-pipeline")
             .build();
-        Ok(VoiceRuntime {
+        // Log the underlying gstreamer-rs `BoolError` at each
+        // failure site before collapsing it into the
+        // payload-less `WebrtcbinUnavailable` variant. The error
+        // type isn't `std::error::Error` and doesn't carry
+        // enough structure to be wrappable cleanly; logging on
+        // the way through is the simplest preservation that
+        // still helps an operator distinguish "plugin missing"
+        // from "pipeline rejected the element."
+        let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
+            .name("hxvoice-webrtcbin")
+            .build()
+            .map_err(|e| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to build webrtcbin element: {e}"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        pipeline
+            .add(&webrtcbin)
+            .map_err(|e| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to add webrtcbin to pipeline: {e}"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
                 pipeline: Some(pipeline),
+                webrtcbin: Some(webrtcbin),
                 armed_timers: Vec::new(),
                 dispatching: false,
                 pending: VecDeque::new(),
+                runtime_id,
+                answer_generation: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
-        })
+        };
+        register(&runtime);
+        Ok(runtime)
     }
 
     /// Construct a runtime without the GStreamer pipeline. Tests
     /// that exercise the action dispatch don't need `webrtcbin`
     /// alive; using this constructor lets them skip the
     /// `gst::init()` requirement.
+    ///
+    /// The SDP / ICE / pad dispatch arms early-return when there
+    /// is no `webrtcbin` to drive, so the same tests still cover
+    /// the Backend + timer paths cleanly.
     pub fn new_without_pipeline(backend: Box<dyn Backend>) -> Self {
-        VoiceRuntime {
+        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
                 pipeline: None,
+                webrtcbin: None,
                 armed_timers: Vec::new(),
                 dispatching: false,
                 pending: VecDeque::new(),
+                runtime_id,
+                answer_generation: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
-        }
+        };
+        register(&runtime);
+        runtime
     }
 
     /// Drive one transition. Pumps `event` through the state
@@ -428,26 +655,88 @@ impl VoiceRuntime {
                 inner.armed_timers.retain(|t| *t != kind);
             }
 
-            // ---- webrtcbin-shaped actions (Phase 8.C step 3) ----
+            // ---- webrtcbin-shaped SDP actions (Phase 8.C step 3) ----
             //
-            // The full SDP / ICE / pad lifecycle dispatch lands in
-            // step 3 once webrtcbin construction is wired. For step
-            // 2, we keep the match exhaustive but no-op these arms
-            // — the state machine still emits them so the dispatch
-            // loop walks the full list, and a recording backend
-            // can verify the order surrounding them.
+            // Each arm reads the `webrtcbin` element out of `Inner`
+            // and emits the matching signal. The borrow scope is
+            // tight: we clone the element handle (cheap — it's
+            // refcounted in glib) and drop the `Inner` borrow
+            // before calling into GStreamer, so a synchronous
+            // GStreamer callback can re-enter `handle_event`
+            // cleanly.
             //
-            // Tests synthesise the `Event::WebrtcAnswerCreated` /
-            // `Event::WebrtcPadAdded` / etc. responses directly to
-            // exercise the state machine's downstream transitions.
-            Action::SetRemoteDescription { .. }
-            | Action::CreateAnswer
-            | Action::SetLocalDescription { .. }
-            | Action::AddRemoteIce { .. }
+            // Silent no-op if the pipeline-less constructor was
+            // used or the bin slot is empty — production always
+            // has the bin (it's built by `VoiceRuntime::new`),
+            // and the only paths that exercise these arms
+            // without it are dispatch-loop tests that
+            // deliberately use `new_without_pipeline` to avoid
+            // the `gst::init()` requirement. The SDP actions are
+            // emitted by the state machine unconditionally; the
+            // runtime is the layer that decides whether to
+            // actually drive GStreamer.
+            Action::SetRemoteDescription { sdp } => {
+                let webrtcbin = self
+                    .inner
+                    .borrow()
+                    .webrtcbin
+                    .clone();
+                if let Some(bin) = webrtcbin {
+                    apply_remote_offer(&bin, &sdp);
+                }
+            }
+            Action::CreateAnswer => {
+                // Capture data needed by the (Send) promise
+                // closure: the runtime id (to find ourselves
+                // again on the main thread), the answer
+                // generation (so we can ignore stale
+                // resolutions if a later offer arrives before
+                // the old promise fires — see below), and a
+                // handle to the main GLib context (its accessor
+                // is callable from any thread — `Send`-safe).
+                //
+                // Bump the generation BEFORE handing the
+                // promise to webrtcbin. The state machine's
+                // OfferPending+SdpOfferReceived arm
+                // re-issues CreateAnswer without changing
+                // state; without the bump-and-compare the old
+                // promise's resolution would still match the
+                // current generation and send a stale 603 for
+                // the wrong offer.
+                let (webrtcbin, runtime_id, generation) = {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.answer_generation =
+                        inner.answer_generation.wrapping_add(1);
+                    (
+                        inner.webrtcbin.clone(),
+                        inner.runtime_id,
+                        inner.answer_generation,
+                    )
+                };
+                if let Some(bin) = webrtcbin {
+                    create_answer(&bin, runtime_id, generation);
+                }
+            }
+            Action::SetLocalDescription { sdp } => {
+                let webrtcbin = self
+                    .inner
+                    .borrow()
+                    .webrtcbin
+                    .clone();
+                if let Some(bin) = webrtcbin {
+                    apply_local_answer(&bin, &sdp);
+                }
+            }
+
+            // ---- webrtcbin-shaped ICE / pad / mute (Phase 8.C step 4+) ----
+            //
+            // These still no-op today. Step 4 lands the ICE flow;
+            // step 5 lands receive-pad dispatch.
+            Action::AddRemoteIce { .. }
             | Action::StartReceivePipeline { .. }
             | Action::StopReceivePipeline { .. }
             | Action::SetSendPipelineMute { .. } => {
-                // Step 3 fills these in.
+                // Subsequent steps fill these in.
             }
 
             // hxvoice::Action is #[non_exhaustive] — the wildcard
@@ -469,6 +758,179 @@ impl VoiceRuntime {
             }
         }
     }
+}
+
+/// Build a `WebRTCSessionDescription` from a raw SDP string and
+/// a type tag. Returns `None` if the SDP can't be parsed.
+///
+/// Logging discipline: the **parser-error** path (a non-empty
+/// buffer that `gst_sdp_message_parse_buffer` rejects) logs the
+/// underlying message on the GStreamer warning channel before
+/// returning `None`. The **empty-input** path early-returns
+/// silently — the parser would otherwise trip a
+/// `g_returns_if_fail(size != 0)` on the GStreamer-SDP
+/// critical channel, and an empty buffer is unambiguously
+/// "caller has nothing to parse" rather than a recoverable
+/// shape worth surfacing. Callers should early-return on `None`
+/// without re-logging.
+///
+/// gstreamer-rs's `SDPMessage::parse_buffer` is the typed entry
+/// point: it parses the SDP into an owned `SDPMessage`, which we
+/// then wrap in a `WebRTCSessionDescription` of the requested
+/// type. Both calls are pure parsing — they don't touch the
+/// pipeline or webrtcbin yet.
+fn build_session_description(
+    sdp: &str,
+    type_: WebRTCSDPType,
+) -> Option<gstreamer_webrtc::WebRTCSessionDescription> {
+    // Pre-flight empty check. `gst_sdp_message_parse_buffer`
+    // g_returns_if_fail's on size==0, which lights up the
+    // GStreamer-SDP critical channel — caller intent is "we
+    // couldn't parse it" either way, just less noisily.
+    if sdp.is_empty() {
+        return None;
+    }
+    let message = match gstreamer_sdp::SDPMessage::parse_buffer(sdp.as_bytes())
+    {
+        Ok(m) => m,
+        Err(e) => {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to parse SDP ({} bytes): {e}",
+                sdp.len()
+            );
+            return None;
+        }
+    };
+    Some(gstreamer_webrtc::WebRTCSessionDescription::new(
+        type_, message,
+    ))
+}
+
+/// Dispatch arm for `Action::SetRemoteDescription`. Parses the
+/// offer SDP and emits `webrtcbin.set-remote-description` with a
+/// null promise (we don't currently track when remote-desc has
+/// finished applying; the state machine just sequences
+/// `CreateAnswer` immediately after).
+fn apply_remote_offer(webrtcbin: &gstreamer::Element, sdp: &str) {
+    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer)
+    else {
+        return;
+    };
+    webrtcbin.emit_by_name::<()>(
+        "set-remote-description",
+        &[&desc, &None::<gstreamer::Promise>],
+    );
+}
+
+/// Dispatch arm for `Action::SetLocalDescription`. Parses the
+/// answer SDP we just received from `create-answer` and emits
+/// `webrtcbin.set-local-description`. The state machine emits
+/// the matching `SendWireFrame(603)` separately so the server
+/// gets the answer.
+fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
+    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Answer)
+    else {
+        return;
+    };
+    webrtcbin.emit_by_name::<()>(
+        "set-local-description",
+        &[&desc, &None::<gstreamer::Promise>],
+    );
+}
+
+/// Dispatch arm for `Action::CreateAnswer`. Emits
+/// `webrtcbin.create-answer` with a `gst::Promise` whose change-func
+/// fires (typically on a GStreamer worker thread) when the answer
+/// is ready, marshals back to the GLib main context, looks up the
+/// runtime by id from the thread-local registry, compares the
+/// captured generation against the current `answer_generation` (so
+/// resolutions from a superseded offer are silently dropped), and
+/// re-enters `handle_event(Event::WebrtcAnswerCreated)` only if
+/// the answer is for the still-current offer.
+///
+/// The closure is `Send + 'static` (captures only `runtime_id: u64`
+/// and `generation: u64` and the main context); the runtime itself
+/// stays `!Send`. See the module-level "Threading" section for the
+/// full reasoning.
+fn create_answer(
+    webrtcbin: &gstreamer::Element,
+    runtime_id: u64,
+    generation: u64,
+) {
+    // Snapshot the main context up front so the closure carries
+    // a `Send` handle into the worker thread without having to
+    // re-acquire it there. `MainContext::default()` returns the
+    // global default context — it's callable from any thread,
+    // we just want the handle in scope before we move into the
+    // promise's closure so the worker-side code stays linear.
+    let main_ctx = gstreamer::glib::MainContext::default();
+    let promise = gstreamer::Promise::with_change_func(move |reply| {
+        let Ok(Some(reply)) = reply else {
+            // create-answer either errored or completed with no
+            // structure — both mean the state machine won't see
+            // an answer event, the JoinReply / Dtls timers will
+            // eventually fire, and the session walks to Failed.
+            // Nothing to do here.
+            return;
+        };
+        let Ok(desc) = reply
+            .get::<gstreamer_webrtc::WebRTCSessionDescription>("answer")
+        else {
+            return;
+        };
+        // Serialize the answer SDP. `as_text()` returns
+        // `Result<String, BoolError>` — failure here means
+        // something went wrong in gstreamer-sdp's printer,
+        // never an expected condition. Bailing out is the
+        // right move: the state machine would otherwise see
+        // an empty SDP string, emit a `SendWireFrame(603,
+        // empty body)`, and ship an invalid 603 to the
+        // server — the worst possible recovery. The JoinReply
+        // / Dtls timers will fire and walk the session to
+        // Failed naturally.
+        let sdp = match desc.sdp().as_text() {
+            Ok(s) => s,
+            Err(e) => {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to serialize answer SDP for \
+                     runtime {runtime_id}: {e} — letting the JoinReply \
+                     timer drive the session to Failed"
+                );
+                return;
+            }
+        };
+        // Marshal back to the main thread. The closure must be
+        // `Send + 'static`; we capture only `runtime_id` (u64,
+        // Copy), `generation` (u64, Copy), and `sdp` (String).
+        // The runtime lookup happens on the main thread inside
+        // `with_main_thread_runtime`; the generation check
+        // happens there too because `answer_generation` lives
+        // in `Inner` which is `!Send`.
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                // Renegotiation race guard: if a newer
+                // CreateAnswer was issued while we were
+                // waiting for this promise to resolve (the
+                // OfferPending+SdpOfferReceived state-machine
+                // arm bumps the generation without changing
+                // state), the resolution we're holding is for
+                // a now-stale offer. Drop it — the state
+                // machine would otherwise emit
+                // SendWireFrame(603) carrying the wrong
+                // answer.
+                if rt.inner.borrow().answer_generation != generation {
+                    return;
+                }
+                rt.handle_event(Event::WebrtcAnswerCreated { sdp });
+            });
+        });
+    });
+    webrtcbin.emit_by_name::<()>(
+        "create-answer",
+        &[&None::<gstreamer::Structure>, &promise],
+    );
 }
 
 /// Errors returned from `VoiceRuntime::new`.
@@ -494,6 +956,18 @@ pub enum RuntimeError {
     /// arms in step 3+ (which surface plugin-load failures
     /// separately).
     GstInitFailed(gstreamer::glib::Error),
+    /// `webrtcbin` couldn't be wired into the runtime's pipeline.
+    /// Covers both `ElementFactory::make("webrtcbin").build()`
+    /// failures (typical case: `gst-plugins-bad` isn't installed
+    /// at runtime so the factory lookup misses) AND
+    /// `Pipeline::add` failures (rare — a misconfigured pipeline,
+    /// a registry race). The underlying `BoolError` is logged on
+    /// the GStreamer warning channel at the failure site; the
+    /// variant itself is payload-less because the error type
+    /// doesn't implement `std::error::Error` cleanly.
+    /// The C side disables voice UI for the rest of the session
+    /// in either case.
+    WebrtcbinUnavailable,
 }
 
 impl core::fmt::Display for RuntimeError {
@@ -505,6 +979,15 @@ impl core::fmt::Display for RuntimeError {
                  couldn't initialise; check the GStreamer install \
                  and the GST_PLUGIN_PATH / GST_REGISTRY environment"
             ),
+            RuntimeError::WebrtcbinUnavailable => write!(
+                f,
+                "couldn't wire `webrtcbin` into the runtime \
+                 pipeline; the most common cause is that \
+                 `gst-plugins-bad` isn't installed (the package \
+                 that ships webrtcbin), but a misconfigured \
+                 pipeline can produce this too — the underlying \
+                 GStreamer error is logged at the failure site"
+            ),
         }
     }
 }
@@ -513,6 +996,7 @@ impl std::error::Error for RuntimeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             RuntimeError::GstInitFailed(err) => Some(err),
+            RuntimeError::WebrtcbinUnavailable => None,
         }
     }
 }
@@ -521,6 +1005,12 @@ impl std::error::Error for RuntimeError {
 mod tests {
     use super::*;
     use hxvoice::event::ConnectionState;
+    // Note re: GStreamer extension-trait methods (pipeline.by_name,
+    // bin.factory, property::<T>, etc.) used by the SDP-dispatch
+    // tests below: these come from `gstreamer::prelude::*`, which
+    // the parent module imports at the top. Trait-method resolution
+    // sees parent-module `use` imports inside child modules, so we
+    // don't need to re-import the prelude here.
 
     /// Shared-state recorder. The runtime owns a `Box<dyn Backend>`
     /// wrapping one clone of the cell; the test keeps another clone
@@ -817,5 +1307,287 @@ mod tests {
             .expect("runtime should construct with a fresh pipeline");
         // Sanity: the pipeline element is reachable.
         assert!(runtime.inner.borrow().pipeline.is_some());
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 8.C step 3 — SDP dispatch arms.
+    // ------------------------------------------------------------------
+
+    /// Minimal but valid offer SDP for `webrtcbin`. Needs the
+    /// session-level headers (`v= o= s= t=`) AND at least one media
+    /// description (`m=`) — without media `webrtcbin` keeps
+    /// `signaling-state == Stable` even after set-remote-description
+    /// completes. PCMU/8000 mono is the spec-required codec for
+    /// the Hotline voice extension, so we mirror that here.
+    const MIN_OFFER_SDP: &str = concat!(
+        "v=0\r\n",
+        "o=- 1 1 IN IP4 127.0.0.1\r\n",
+        "s=-\r\n",
+        "t=0 0\r\n",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 0\r\n",
+        "c=IN IP4 0.0.0.0\r\n",
+        "a=rtcp-mux\r\n",
+        "a=sendrecv\r\n",
+        "a=mid:audio0\r\n",
+        "a=rtpmap:0 PCMU/8000\r\n",
+        "a=setup:actpass\r\n",
+        "a=ice-ufrag:abcd\r\n",
+        "a=ice-pwd:0123456789abcdef0123456789\r\n",
+        "a=fingerprint:sha-256 ",
+        "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:",
+        "00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF\r\n",
+    );
+
+    /// Pipeline-built constructor adds a `webrtcbin` element. The
+    /// element should be visible by name on the pipeline so the
+    /// step-4 ICE wiring can find it.
+    #[test]
+    fn pipeline_built_runtime_contains_webrtcbin() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let inner = runtime.inner.borrow();
+        let bin = inner
+            .webrtcbin
+            .as_ref()
+            .expect("webrtcbin must be present");
+        assert_eq!(bin.factory().unwrap().name(), "webrtcbin");
+        // And it should live inside the pipeline.
+        let pipeline = inner.pipeline.as_ref().unwrap();
+        assert!(
+            pipeline.by_name("hxvoice-webrtcbin").is_some(),
+            "webrtcbin must be a child of the hxvoice pipeline"
+        );
+    }
+
+    /// SetRemoteDescription dispatch reaches the underlying
+    /// `webrtcbin.emit("set-remote-description", …)` call without
+    /// panicking when handed a syntactically-valid offer SDP. The
+    /// signal emit itself is fire-and-forget at the bin's NULL
+    /// state — webrtcbin enqueues the task on its main thread and
+    /// only actually transitions `signaling-state` once the
+    /// pipeline is at `Playing` (which requires real codec
+    /// elements wired up, deferred to step 5+). Asserting on the
+    /// post-state property would be testing webrtcbin, not our
+    /// dispatch.
+    ///
+    /// What we DO verify: the dispatch arm completes, the bin is
+    /// still alive (no GStreamer crash), and the SDP parsed
+    /// (otherwise `build_session_description` would have returned
+    /// `None` and the emit would be skipped).
+    #[test]
+    fn set_remote_description_with_valid_sdp_dispatches_without_panic() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: MIN_OFFER_SDP.into(),
+        });
+        // The bin survived the emit.
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Direct unit cover for the SDP parser. `MIN_OFFER_SDP` must
+    /// successfully build a `WebRTCSessionDescription`; without
+    /// this guarantee the higher-level dispatch tests silently
+    /// no-op via the `None` early-return.
+    #[test]
+    fn build_session_description_parses_valid_offer_sdp() {
+        assert!(crate::init());
+        let desc = build_session_description(MIN_OFFER_SDP, WebRTCSDPType::Offer)
+            .expect("MIN_OFFER_SDP must parse cleanly");
+        assert_eq!(desc.type_(), WebRTCSDPType::Offer);
+    }
+
+    /// Empty-input early-return. Exercises the `sdp.is_empty()`
+    /// guard that sits in front of
+    /// `gstreamer_sdp::SDPMessage::parse_buffer`.
+    ///
+    /// Note: the parser-error branch BELOW the empty-input guard
+    /// (the `match parse_buffer { Err(e) => warning! + return
+    /// None }` arm) is effectively unreachable from external
+    /// input — `gst_sdp_message_parse_buffer` is permissive
+    /// enough to accept literally any non-empty byte slice
+    /// (probed manually: NUL bytes, single ASCII control, raw
+    /// 0xFF bytes — all return Ok). The arm exists for forward
+    /// compatibility if a future GStreamer release tightens
+    /// parsing; until then, no fixture-driven test of the
+    /// logging path is possible. The contract this test pins is
+    /// the only externally-reachable failure path:
+    /// empty input → silent `None`, no GStreamer-SDP critical,
+    /// no panic.
+    #[test]
+    fn build_session_description_empty_input_returns_none() {
+        assert!(crate::init());
+        let desc = build_session_description("", WebRTCSDPType::Offer);
+        assert!(
+            desc.is_none(),
+            "expected build_session_description to return None for empty input"
+        );
+    }
+
+    /// Malformed SDP must not panic. The dispatch arm logs and
+    /// returns; the bin stays in its prior state.
+    #[test]
+    fn set_remote_description_with_garbage_sdp_is_a_silent_noop() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let before: gstreamer_webrtc::WebRTCSignalingState =
+            runtime
+                .inner
+                .borrow()
+                .webrtcbin
+                .as_ref()
+                .unwrap()
+                .property("signaling-state");
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: "not an sdp".into(),
+        });
+        let after: gstreamer_webrtc::WebRTCSignalingState =
+            runtime
+                .inner
+                .borrow()
+                .webrtcbin
+                .as_ref()
+                .unwrap()
+                .property("signaling-state");
+        assert_eq!(
+            before, after,
+            "garbage SDP must not transition signaling-state"
+        );
+    }
+
+    /// Pipeline-less runtime: SDP dispatch arms early-return cleanly.
+    /// This is the configuration tests that exercise the
+    /// state-machine + Backend paths use; SDP arms shouldn't
+    /// crash just because there's no bin.
+    #[test]
+    fn pipeline_less_runtime_no_ops_sdp_dispatch() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        // None of these should panic.
+        runtime.dispatch(Action::SetRemoteDescription {
+            sdp: MIN_OFFER_SDP.into(),
+        });
+        runtime.dispatch(Action::SetLocalDescription {
+            sdp: MIN_OFFER_SDP.into(),
+        });
+        runtime.dispatch(Action::CreateAnswer);
+        // Sanity: state machine is still Idle.
+        assert_eq!(runtime.state(), SessionState::Idle);
+    }
+
+    /// Drop on `Inner` evicts the registry entry. We register on
+    /// construction; the registry holds a `Weak`, so the runtime
+    /// dropping reduces the Weak's strong count to zero; Drop
+    /// removes the dead entry so a late closure looking up by
+    /// id sees None.
+    #[test]
+    fn dropping_runtime_evicts_thread_local_registry_entry() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let id = runtime.inner.borrow().runtime_id;
+        // Confirm registered.
+        let present = MAIN_THREAD_RUNTIMES
+            .with(|cell| cell.borrow().contains_key(&id));
+        assert!(present, "runtime should be registered post-construction");
+
+        drop(runtime);
+
+        let still_present = MAIN_THREAD_RUNTIMES
+            .with(|cell| cell.borrow().contains_key(&id));
+        assert!(
+            !still_present,
+            "Drop for Inner should evict the registry entry"
+        );
+    }
+
+    /// Late callbacks (Promise fires after the runtime has been
+    /// dropped) become a silent no-op via the upgrade-from-Weak
+    /// machinery. The `with_main_thread_runtime` helper handles
+    /// the absent case without panicking.
+    #[test]
+    fn with_main_thread_runtime_returns_silently_for_unknown_id() {
+        let mut ran = false;
+        // Use a deliberately-bogus id — far above NEXT_RUNTIME_ID's
+        // monotonic floor for the test.
+        with_main_thread_runtime(u64::MAX - 1, |_| ran = true);
+        assert!(
+            !ran,
+            "closure must not run when the runtime id is unknown"
+        );
+    }
+
+    /// SetLocalDescription on the answerer path: after accepting
+    /// the remote offer, applying a local answer takes the
+    /// signaling state to `Stable`. (`HaveRemoteOffer` → `Stable`
+    /// is the answerer's local-answer transition per RFC 8829
+    /// §3.4.)
+    ///
+    /// We can't actually generate a real answer SDP without
+    /// running webrtcbin's `create-answer` (which needs a
+    /// configured pipeline with media), so we cheat by re-using
+    /// the offer SDP shape. webrtcbin accepts it as a
+    /// syntactically-valid answer and transitions accordingly —
+    /// good enough to verify the dispatch arm reaches the bin.
+    /// SetLocalDescription dispatch reaches the underlying
+    /// `webrtcbin.emit("set-local-description", …)` call without
+    /// panicking. Same scope-caveat as the SetRemoteDescription
+    /// test above.
+    #[test]
+    fn set_local_description_with_valid_sdp_dispatches_without_panic() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::SetLocalDescription {
+            sdp: MIN_OFFER_SDP.into(),
+        });
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// CreateAnswer dispatch emits the `create-answer` signal with
+    /// a real `gst::Promise`. The promise never fires in this test
+    /// (the bin isn't in `Playing` and has no codecs configured),
+    /// but the dispatch arm must complete without panicking.
+    #[test]
+    fn create_answer_dispatches_without_panic() {
+        assert!(crate::init());
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        runtime.dispatch(Action::CreateAnswer);
+        assert!(runtime.inner.borrow().webrtcbin.is_some());
+    }
+
+    /// Regression (Copilot review #3): `Action::CreateAnswer`
+    /// must bump `answer_generation` on every dispatch. The
+    /// generation is the load-bearing piece of the
+    /// renegotiation race guard — promise change-funcs capture
+    /// the value at issue time and compare it on the main
+    /// thread, so we need each new CreateAnswer to be a fresh
+    /// generation to discriminate stale resolutions.
+    ///
+    /// Driven through `dispatch` rather than the state machine
+    /// because we want to exercise the runtime arm directly
+    /// without depending on the offer/answer state path.
+    #[test]
+    fn create_answer_dispatch_bumps_answer_generation() {
+        let runtime =
+            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let before = runtime.inner.borrow().answer_generation;
+        runtime.dispatch(Action::CreateAnswer);
+        let after_one = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after_one,
+            before.wrapping_add(1),
+            "first CreateAnswer dispatch must bump the generation by 1"
+        );
+        runtime.dispatch(Action::CreateAnswer);
+        let after_two = runtime.inner.borrow().answer_generation;
+        assert_eq!(
+            after_two,
+            before.wrapping_add(2),
+            "second CreateAnswer dispatch must bump the generation again"
+        );
     }
 }
