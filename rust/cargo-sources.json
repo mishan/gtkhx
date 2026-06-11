@@ -353,6 +353,19 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/foldhash/foldhash-0.2.0.crate",
+    "sha256": "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb",
+    "dest": "cargo/vendor/foldhash-0.2.0"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb\", \"files\": {}}",
+    "dest": "cargo/vendor/foldhash-0.2.0",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/futures-channel/futures-channel-0.3.32.crate",
     "sha256": "07bbe89c50d7a535e539b8c17bc0b49bdb77747034daa8087407d655f3f7cc1d",
     "dest": "cargo/vendor/futures-channel-0.3.32"

@@ -55,6 +55,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: install build deps
+        # GStreamer (Phase 8.B): meson.build probes gstreamer-1.0,
+        # -app-1.0, -audio-1.0, -sdp-1.0, -webrtc-1.0. The sanitize /
+        # gcc-analyzer / clang-tidy jobs all do a full configure +
+        # compile of the C tree, so they need the same dev packages
+        # the build-and-test job installs. Without these, meson setup
+        # exits with "Dependency gstreamer-1.0 not found" and the
+        # whole job goes red.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -63,6 +70,10 @@ jobs:
             glib2-devel gobject-introspection-devel \
             nettle-devel zlib-devel \
             gsound-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
@@ -123,6 +134,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: install build deps
+        # See sanitize job above for the GStreamer rationale.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -130,6 +142,10 @@ jobs:
             glib2-devel gobject-introspection-devel \
             nettle-devel zlib-devel \
             gsound-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \
@@ -186,6 +202,7 @@ jobs:
         # still build with gcc — clang-tidy only needs the compile-
         # commands database to know how to invoke its frontend per
         # translation unit.
+        # See sanitize job above for the GStreamer rationale.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -194,6 +211,10 @@ jobs:
             glib2-devel gobject-introspection-devel \
             nettle-devel zlib-devel \
             gsound-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-good \
             libsoup3-devel \
             gettext-devel \
             desktop-file-utils appstream \

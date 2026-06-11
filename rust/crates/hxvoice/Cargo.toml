@@ -1,0 +1,44 @@
+[package]
+name = "hxvoice"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Pure-Rust voice-chat state machine for GtkHx (Phase 8.C+)"
+publish = false
+
+[lib]
+# rlib only — hxvoice has no FFI surface. The C side never talks to
+# the state machine directly; hxvoice-runtime sits between them and
+# turns typed events from gstreamer-rs signals into SessionMachine
+# inputs, then dispatches the returned actions onto the
+# webrtcbin / GtkhxSession / wire-out surfaces.
+crate-type = ["rlib"]
+
+[dependencies]
+# Single dep: hashbrown for HashMap. The state machine is no_std-
+# friendly pure logic — typed enums in, typed enums out, no GLib /
+# GStreamer / GTK / OS surface. std::collections::HashMap is only
+# available with `std`; hashbrown is what `std`'s HashMap uses
+# internally and works without std. The default-features=false
+# turns off hashbrown's ahash dep, which would add a transitive
+# `getrandom` requirement; without it hashbrown defaults to a
+# simpler hasher (FxBuildHasher-equivalent) that's fine for the
+# bounded inputs we feed it (mid labels and small participant
+# lists).
+#
+# Version pinned at "0.17" so the workspace resolver picks the same
+# major.minor that the rest of the dep graph already pulls in
+# transitively — without that pin cargo gives us a second
+# `hashbrown 0.16` plus its foldhash sub-dep alongside the existing
+# 0.17, doubling the build's hashbrown footprint.
+#
+# That's load-bearing for `cargo test -p hxvoice` to run in any CI
+# container regardless of audio device or GStreamer install state,
+# and for the rest of the workspace to have exactly one place to
+# maintain the "what does the voice protocol's state machine do at
+# each transition" logic.
+#
+# If a future caller needs runtime types (gst::Element handles,
+# glib::Object refs), those stay in hxvoice-runtime — never bleed
+# into this crate's public surface.
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }

@@ -87,6 +87,16 @@ jobs:
         # on Fedora, but listing all three explicitly keeps the
         # configure-time gap clear if any of them get split out
         # downstream.
+        #
+        # GStreamer runtime plugins for `cargo test`: the
+        # hxvoice-runtime crate's Tier 2 loopback test
+        # (tests/loopback.rs) factory-checks `mulawenc` /
+        # `mulawdec` / `autoaudiosrc` / `autoaudiosink`, which
+        # live in `gstreamer1-plugins-good` — not pulled in
+        # transitively by any of the `-devel` packages above.
+        # Without this the loopback test panics with "mulawenc
+        # plugin available" / "autoaudiosrc fallback element
+        # should be constructable".
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -98,6 +108,7 @@ jobs:
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-good \
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
@@ -331,6 +342,7 @@ jobs:
                 gstreamer1-devel \
                 gstreamer1-plugins-base-devel \
                 gstreamer1-plugins-bad-free-devel \
+                gstreamer1-plugins-good \
                 gettext-devel \
                 desktop-file-utils appstream \
                 libpanel-devel \
