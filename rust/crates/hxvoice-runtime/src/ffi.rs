@@ -167,7 +167,14 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_new_with_callbacks(
     match VoiceRuntime::new(backend) {
         Ok(rt) => Box::into_raw(Box::new(rt)),
         Err(e) => {
-            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
+            // Same rationale as gtkhx_voice_runtime_new — route
+            // through the GStreamer log channel rather than bare
+            // stderr so the failure shows up alongside the rest
+            // of the voice runtime's diagnostics.
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: VoiceRuntime::new failed: {e}"
+            );
             core::ptr::null_mut()
         }
     }
@@ -213,7 +220,14 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_new_v2(
     match VoiceRuntime::new(backend) {
         Ok(rt) => Box::into_raw(Box::new(rt)),
         Err(e) => {
-            eprintln!("hxvoice: VoiceRuntime::new failed: {e}");
+            // Same rationale as gtkhx_voice_runtime_new — route
+            // through the GStreamer log channel rather than bare
+            // stderr so the failure shows up alongside the rest
+            // of the voice runtime's diagnostics.
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: VoiceRuntime::new failed: {e}"
+            );
             core::ptr::null_mut()
         }
     }
