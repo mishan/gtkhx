@@ -176,6 +176,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use gstreamer::prelude::*;
@@ -751,6 +752,59 @@ struct Inner {
     /// Held for its drop side-effect; never read.
     #[allow(dead_code)]
     bus_watch_guard: Option<gstreamer::bus::BusWatchGuard>,
+    /// Always-on RTP buffer counter, incremented by a `BUFFER`
+    /// probe on every receive-bin's depay sink as soon as
+    /// [`start_receive_bin`] links one in. Read by the wedge
+    /// watchdog (see [`WEDGE_WATCHDOG_INTERVAL_MS`]) as a
+    /// liveness signal — if the counter doesn't advance for a
+    /// full watchdog window while in `Connecting`, the runtime
+    /// declares the session wedged and feeds the state machine a
+    /// `Timeout::WedgeDeadline`.
+    ///
+    /// Why `Arc` rather than the `Rc`-shaped fields nearby:
+    /// pad probes run on the GStreamer streaming thread, so the
+    /// closure they hold needs `Send + Sync` access to the
+    /// counter. The increment itself is a single relaxed atomic
+    /// add — cheap enough to leave on in production with the
+    /// diagnostic `voice-flow` log probes still gated off.
+    rtp_buffers_received: Arc<AtomicU64>,
+    /// Currently-armed wedge watchdog `glib::SourceId`, if any.
+    /// Armed in `handle_event` when the state machine transitions
+    /// into `Connecting`; cancelled on the way out (whether to
+    /// `Connected`, `Leaving`, or `Idle`). The dispatch arm uses
+    /// `glib::timeout_add_local` with [`WEDGE_WATCHDOG_INTERVAL_MS`],
+    /// re-arms itself from the callback when RTP is still
+    /// flowing, and lets the source expire on a stalled window
+    /// after injecting `Timeout::WedgeDeadline`.
+    ///
+    /// `None` is ambiguous on its own: it means EITHER
+    ///   (a) the watchdog is unarmed (the machine is not in
+    ///       `Connecting`), OR
+    ///   (b) the machine IS in `Connecting` but we degraded to
+    ///       the test-fallback path (cargo's parallel runner has
+    ///       another thread owning the default `MainContext`, so
+    ///       `timeout_add_local` is unavailable and we kept
+    ///       bookkeeping only).
+    /// Disambiguate by reading `machine.state()` alongside —
+    /// that's the canonical "is the watchdog conceptually armed?"
+    /// signal and what [`VoiceRuntime::wedge_watchdog_armed`]
+    /// returns.
+    wedge_watchdog_source: Option<gstreamer::glib::SourceId>,
+    /// Last `rtp_buffers_received` value the watchdog observed.
+    /// Compared against the live counter on each tick: equality
+    /// means no RTP arrived during the window and the runtime
+    /// injects `Timeout::WedgeDeadline`; inequality means audio
+    /// is flowing despite webrtcbin not having reported
+    /// `Connected`, so the watchdog updates the snapshot and
+    /// rearms.
+    ///
+    /// Set to a fresh snapshot of `rtp_buffers_received` at
+    /// `arm_wedge_watchdog` time — NOT zeroed. The counter is
+    /// process-lifetime (never reset for a new session), so the
+    /// "wedged?" check needs deltas, not absolutes. Pre-existing
+    /// activity from a previous join is therefore baked into the
+    /// snapshot's baseline and ignored by the comparison.
+    wedge_watchdog_last_snapshot: u64,
 }
 
 impl Drop for Inner {
@@ -779,6 +833,12 @@ impl Drop for Inner {
             if let Some(s) = source {
                 s.remove();
             }
+        }
+
+        // Cancel the wedge watchdog source the same way — same
+        // reasoning, just a single `Option` instead of a map.
+        if let Some(s) = self.wedge_watchdog_source.take() {
+            s.remove();
         }
 
         // Evict our entry from the thread-local registry so a
@@ -1015,6 +1075,15 @@ impl VoiceRuntime {
         // once we have a clearer picture of the webrtcbin
         // internals.
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        // Allocate the RTP-activity counter UPFRONT so we can both
+        // (a) clone an `Arc` into `connect_pad_added`'s streaming-
+        // thread closure for the receive-bin liveness probe to
+        // increment, and (b) move the same allocation into Inner
+        // for the wedge watchdog to read from. Sharing the
+        // allocation guarantees the closure and Inner are talking
+        // to the same counter — no risk of a "probe writes one
+        // counter, watchdog reads a different one" mismatch.
+        let rtp_buffers_received = Arc::new(AtomicU64::new(0));
         // Wire the on-ice-candidate signal BEFORE registering.
         // The signal callback only looks the runtime up via
         // `with_main_thread_runtime` (which acquires the registry
@@ -1022,7 +1091,12 @@ impl VoiceRuntime {
         // doing it pre-register keeps the construction sequence
         // strictly linear.
         connect_on_ice_candidate(&webrtcbin, runtime_id);
-        connect_pad_added(&webrtcbin, &pipeline, runtime_id);
+        connect_pad_added(
+            &webrtcbin,
+            &pipeline,
+            runtime_id,
+            Arc::clone(&rtp_buffers_received),
+        );
         connect_connection_state_notify(&webrtcbin, runtime_id);
         connect_on_new_transceiver(&webrtcbin);
         let bus_watch_guard = attach_pipeline_bus_watch(&pipeline);
@@ -1107,6 +1181,9 @@ impl VoiceRuntime {
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
                 bus_watch_guard,
+                rtp_buffers_received,
+                wedge_watchdog_source: None,
+                wedge_watchdog_last_snapshot: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -1137,6 +1214,9 @@ impl VoiceRuntime {
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
                 bus_watch_guard: None,
+                rtp_buffers_received: Arc::new(AtomicU64::new(0)),
+                wedge_watchdog_source: None,
+                wedge_watchdog_last_snapshot: 0,
             })),
             backend: Rc::new(RefCell::new(backend)),
         };
@@ -1200,12 +1280,34 @@ impl VoiceRuntime {
                 break;
             };
 
+            // Sample state BEFORE step() so we can compare against
+            // the post-step state and detect whether this event
+            // caused an entry into or exit from `Connecting`.
+            // `SessionMachine::step` matches one (state, event) arm
+            // per call and performs at most one transition, so the
+            // before-vs-after pair is a complete diff of what this
+            // event did to the state.
+            let before = self.inner.borrow().machine.state();
             let actions = {
                 let mut inner = self.inner.borrow_mut();
                 inner.machine.step(event)
             };
             for action in actions {
                 self.dispatch_inner(action);
+            }
+            let after = self.inner.borrow().machine.state();
+            match (before, after) {
+                (b, SessionState::Connecting)
+                    if b != SessionState::Connecting =>
+                {
+                    arm_wedge_watchdog(self);
+                }
+                (SessionState::Connecting, a)
+                    if a != SessionState::Connecting =>
+                {
+                    cancel_wedge_watchdog(self);
+                }
+                _ => {}
             }
         }
         self.inner.borrow().machine.state()
@@ -1234,6 +1336,71 @@ impl VoiceRuntime {
     #[doc(hidden)]
     pub fn pipeline_for_test(&self) -> Option<gstreamer::Pipeline> {
         self.inner.borrow().pipeline.clone()
+    }
+
+    /// `true` while the wedge watchdog is conceptually armed
+    /// (the runtime transitioned into `Connecting` and hasn't
+    /// left it yet). Test-introspection hook so the wedge-
+    /// watchdog tests don't have to inspect private fields.
+    ///
+    /// Implementation note: we deliberately *don't* require
+    /// `wedge_watchdog_source.is_some()`. Under cargo's parallel
+    /// test runner the source slot is `None` even when the
+    /// machine is in `Connecting` — `arm_wedge_watchdog`
+    /// degrades to bookkeeping-only when another thread owns
+    /// the default `MainContext`. Checking only the state means
+    /// production (where `Some(source_id)` is set) and tests
+    /// (where it stays `None`) both report the same answer.
+    pub fn wedge_watchdog_armed(&self) -> bool {
+        self.inner.borrow().machine.state() == SessionState::Connecting
+    }
+
+    /// Number of RTP buffers the receive-side liveness probe has
+    /// observed since the runtime was constructed. Test-only
+    /// hook for the wedge-watchdog flow tests; production callers
+    /// have no reason to read this. Exposes the underlying
+    /// `Arc<AtomicU64>` by snapshot so callers don't have to
+    /// reason about atomic ordering.
+    #[doc(hidden)]
+    pub fn rtp_buffers_received_for_test(&self) -> u64 {
+        self.inner.borrow().rtp_buffers_received.load(Ordering::Relaxed)
+    }
+
+    /// Test-only mutator: bump the RTP-activity counter so the
+    /// wedge-watchdog tick observes "audio is flowing" without
+    /// having to set up a full receive bin and feed real
+    /// buffers through it. Pairs with
+    /// [`rtp_buffers_received_for_test`].
+    #[doc(hidden)]
+    pub fn bump_rtp_buffers_received_for_test(&self) {
+        self.inner
+            .borrow()
+            .rtp_buffers_received
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Test-only hook: drive one wedge-watchdog tick on demand,
+    /// bypassing the 60-second one-shot. The tick is the same
+    /// function the real timer callback runs — it samples the
+    /// RTP counter, decides advance-vs-stall, and either rearms
+    /// or injects `Timeout::WedgeDeadline`.
+    ///
+    /// Cancels any real `glib::timeout_add_local` source first.
+    /// Without that, the source-id parked in
+    /// `Inner::wedge_watchdog_source` would survive the manual
+    /// tick (the tick clears the bookkeeping field but doesn't
+    /// `remove()` the glib source — it's normally clearing
+    /// bookkeeping because the source is about to expire
+    /// naturally), and the real timer would still fire 60 s
+    /// later with no way to cancel it. Tests can drive the tick
+    /// repeatedly without leaving live glib sources behind.
+    #[doc(hidden)]
+    pub fn fire_wedge_watchdog_for_test(&self) {
+        let prev = self.inner.borrow_mut().wedge_watchdog_source.take();
+        if let Some(s) = prev {
+            s.remove();
+        }
+        wedge_watchdog_tick(self);
     }
 
     /// Currently-armed timer kinds. Order is unspecified
@@ -1509,7 +1676,10 @@ impl VoiceRuntime {
                 {
                     stop_receive_bin(&pipeline, &existing);
                 }
-                if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid)
+                let counter =
+                    Arc::clone(&self.inner.borrow().rtp_buffers_received);
+                if let Some(bin) =
+                    start_receive_bin(&pipeline, &pad, &mid, &counter)
                 {
                     self.inner
                         .borrow_mut()
@@ -1996,6 +2166,7 @@ fn connect_pad_added(
     webrtcbin: &gstreamer::Element,
     pipeline: &gstreamer::Pipeline,
     runtime_id: u64,
+    rtp_buffers_received: Arc<AtomicU64>,
 ) {
     let main_ctx = gstreamer::glib::MainContext::default();
     let pipeline = pipeline.clone();
@@ -2060,7 +2231,8 @@ fn connect_pad_added(
         // The main-thread hop later is only for bookkeeping
         // (recording the bin in receive_bins so LeaveRequested
         // can tear it down).
-        let recv_bin = start_receive_bin(&pipeline, pad, &mid);
+        let recv_bin =
+            start_receive_bin(&pipeline, pad, &mid, &rtp_buffers_received);
         let pad = pad.clone();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
@@ -2468,6 +2640,7 @@ fn start_receive_bin(
     pipeline: &gstreamer::Pipeline,
     src_pad: &gstreamer::Pad,
     mid: &str,
+    rtp_buffers_received: &Arc<AtomicU64>,
 ) -> Option<gstreamer::Bin> {
     // Diagnostic: probe webrtcbin's src_0 BEFORE we link the
     // depay bin to it. If this probe never fires while the
@@ -2540,6 +2713,28 @@ fn start_receive_bin(
         let _ = pipeline.remove(&bin);
         return None;
     }
+    // Always-on liveness probe — increments the runtime's
+    // `rtp_buffers_received` Arc on every buffer that reaches
+    // the depay's sink (i.e. the first place inside our receive
+    // bin that sees RTP after webrtcbin's `src_0` hands a packet
+    // off). The wedge watchdog reads this counter as its "is
+    // media actually flowing?" signal, distinguishing genuinely-
+    // stuck sessions from ones where webrtcbin never reported
+    // `Connected` because of the
+    // `_collate_peer_connection_states: Undefined situation`
+    // FIXME but RTP is still arriving fine.
+    //
+    // Unlike the gated diagnostic probes in audio.rs, this one
+    // runs in production. The per-buffer cost is a single
+    // relaxed atomic add — cheaper than the modulo+log probes,
+    // and load-bearing rather than diagnostic. Attached after
+    // the link so we're observing the path the buffers
+    // actually flow through.
+    let counter = Arc::clone(rtp_buffers_received);
+    sink_pad.add_probe(gstreamer::PadProbeType::BUFFER, move |_pad, _info| {
+        counter.fetch_add(1, Ordering::Relaxed);
+        gstreamer::PadProbeReturn::Ok
+    });
     if bin.sync_state_with_parent().is_err() {
         // Not fatal — the pipeline state machine will retry on
         // its own state-change pass. Log so an operator can see
@@ -2694,6 +2889,142 @@ fn arm_timer(runtime: &VoiceRuntime, kind: Timeout, ms: u32) {
         .insert(kind, source_id);
 }
 
+/// Wedge-watchdog one-shot window in milliseconds. Each tick the
+/// runtime samples [`Inner::rtp_buffers_received`]; if it hasn't
+/// changed since the previous tick, the runtime feeds the state
+/// machine `Timeout::WedgeDeadline` and lets `fail()` tear the
+/// session down. If it HAS changed, the runtime updates the
+/// snapshot and rearms — sessions where webrtcbin never reports
+/// `Connected` but RTP is flowing fine stay alive indefinitely.
+///
+/// 60 seconds is roughly double the spec's `Media` watchdog
+/// (30 s, see `hxvoice::event::Timeout::Media`). That deliberate
+/// extra slack is the whole point of the wedge layer: the spec's
+/// ICE-connectivity, DTLS, and Media watchdogs each have their
+/// own 10–30 s budget and either still fire as fatal in their
+/// respective states (Media) or got softened to non-fatal toasts
+/// (IceConnectivity, Dtls) because of the webrtcbin
+/// `_collate_peer_connection_states: Undefined situation` FIXME.
+/// The wedge watchdog is the last-ditch safety net for the soft
+/// cases — we want it long enough that real sessions whose
+/// negotiation just took longer than the soft timers aren't
+/// torn down (~30 s of slack on top), but short enough that a
+/// truly stuck session doesn't sit in `Connecting` forever.
+const WEDGE_WATCHDOG_INTERVAL_MS: u32 = 60_000;
+
+/// Arm the wedge watchdog timer. Called when the state machine
+/// transitions into `Connecting`.
+///
+/// Snapshots [`Inner::rtp_buffers_received`] into
+/// [`Inner::wedge_watchdog_last_snapshot`] so the next tick can
+/// compare apples to apples. Cancels any previously-armed
+/// watchdog first so a state-change burst that flips Connecting
+/// off and back on doesn't end up with two scheduled checks
+/// running against the same counter.
+///
+/// Same MainContext-acquire pattern as `arm_timer` — try-acquire
+/// for the cargo-parallel-tests fallback, store `None` in
+/// `wedge_watchdog_source` to mark "armed but no real glib
+/// source" so test introspection still sees the watchdog as
+/// active.
+fn arm_wedge_watchdog(runtime: &VoiceRuntime) {
+    {
+        let mut inner = runtime.inner.borrow_mut();
+        if let Some(s) = inner.wedge_watchdog_source.take() {
+            s.remove();
+        }
+        inner.wedge_watchdog_last_snapshot =
+            inner.rtp_buffers_received.load(Ordering::Relaxed);
+    }
+
+    let runtime_id = runtime.inner.borrow().runtime_id;
+    let ctx = gstreamer::glib::MainContext::default();
+    let _acquire_guard = if ctx.is_owner() {
+        None
+    } else {
+        match ctx.acquire() {
+            Ok(g) => Some(g),
+            Err(_) => {
+                // Test fallback: bookkeeping only. The real
+                // wedge-fires test runs in tests/wedge_watchdog.rs
+                // which owns the process default-context outright.
+                runtime.inner.borrow_mut().wedge_watchdog_source = None;
+                return;
+            }
+        }
+    };
+    let source_id = gstreamer::glib::timeout_add_local(
+        core::time::Duration::from_millis(WEDGE_WATCHDOG_INTERVAL_MS as u64),
+        move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                wedge_watchdog_tick(rt);
+            });
+            // We rearm explicitly inside the callback (with a
+            // fresh snapshot), so this one-shot returns Break.
+            gstreamer::glib::ControlFlow::Break
+        },
+    );
+    runtime.inner.borrow_mut().wedge_watchdog_source = Some(source_id);
+}
+
+/// Cancel the wedge watchdog, if armed. Called when the state
+/// machine leaves `Connecting` (whether to `Connected`,
+/// `Leaving`, or `Idle`).
+fn cancel_wedge_watchdog(runtime: &VoiceRuntime) {
+    let prev = runtime.inner.borrow_mut().wedge_watchdog_source.take();
+    if let Some(s) = prev {
+        s.remove();
+    }
+}
+
+/// Wedge-watchdog tick callback. Read the live RTP counter,
+/// compare against the snapshot at arm time:
+///
+/// - If counter advanced: RTP is flowing despite webrtcbin not
+///   reporting `Connected`. This is the soft-stuck case we
+///   deliberately don't want to tear down. Update the snapshot
+///   and rearm for another window.
+/// - If counter unchanged: no RTP arrived in the entire window
+///   while we're still in `Connecting`. This is the genuinely-
+///   wedged case. Inject `Timeout::WedgeDeadline` into the state
+///   machine — its `(Connecting, WedgeDeadline)` arm calls
+///   `fail()` and tears the session down.
+///
+/// Also bails (without rearming) if the state machine already
+/// left `Connecting` since the arm — the `handle_event` machinery
+/// is meant to cancel us via `cancel_wedge_watchdog` in that
+/// case, so reaching the tick from a non-Connecting state means
+/// a race between cancel and fire that we treat as "cancel
+/// won."
+fn wedge_watchdog_tick(runtime: &VoiceRuntime) {
+    let (state, current, snapshot) = {
+        let inner = runtime.inner.borrow();
+        (
+            inner.machine.state(),
+            inner.rtp_buffers_received.load(Ordering::Relaxed),
+            inner.wedge_watchdog_last_snapshot,
+        )
+    };
+    // Already removed by glib when the one-shot fired; nothing
+    // to remove here. Clear our bookkeeping entry so a stale
+    // SourceId doesn't linger.
+    runtime.inner.borrow_mut().wedge_watchdog_source = None;
+
+    if state != SessionState::Connecting {
+        return;
+    }
+    if current > snapshot {
+        // Audio is flowing — keep the session alive and rearm.
+        arm_wedge_watchdog(runtime);
+        return;
+    }
+    // No RTP in the window. Inject the timeout; state.rs's
+    // `(Connecting, WedgeDeadline)` arm calls `fail()`.
+    runtime.handle_event(Event::Timeout {
+        kind: Timeout::WedgeDeadline,
+    });
+}
+
 /// Errors returned from `VoiceRuntime::new`.
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -2817,6 +3148,116 @@ mod tests {
         let (runtime, _) = rec();
         runtime.handle_event(Event::JoinRequested { cid: 1 });
         assert_eq!(runtime.armed_timers(), vec![Timeout::JoinReply]);
+    }
+
+    /// On entering `Connecting`, the wedge watchdog must be
+    /// armed. `wedge_watchdog_armed()` reports the conceptual
+    /// armed state (state == Connecting) rather than the
+    /// SourceId presence, so production and the cargo-parallel
+    /// test-fallback path both return `true` here. The real
+    /// glib-source firing path is covered by the manual-tick
+    /// tests below (`wedge_tick_*`).
+    #[test]
+    fn entering_connecting_arms_wedge_watchdog() {
+        let (runtime, _) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        assert_eq!(runtime.state(), SessionState::Connecting);
+        assert!(
+            runtime.wedge_watchdog_armed(),
+            "wedge watchdog must be armed on entering Connecting"
+        );
+    }
+
+    /// Wedge tick with the RTP counter unchanged from arm time
+    /// injects `Timeout::WedgeDeadline`. Under cargo parallel
+    /// tests we drive the tick manually via
+    /// `fire_wedge_watchdog_for_test` rather than waiting on
+    /// the 60-second glib source.
+    #[test]
+    fn wedge_tick_with_no_rtp_activity_tears_session_down() {
+        let (runtime, backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        assert_eq!(runtime.state(), SessionState::Connecting);
+        // Snapshot is 0 (initial); counter is 0 (no probe ever
+        // fired). Tick fires WedgeDeadline → state.rs walks the
+        // session to Leaving and emits TearDown.
+        runtime.fire_wedge_watchdog_for_test();
+        assert_eq!(runtime.state(), SessionState::Leaving);
+        assert!(
+            backend.borrow().tear_downs > 0,
+            "tear_down should have been called by the WedgeDeadline injection"
+        );
+    }
+
+    /// Wedge tick with the RTP counter advanced since arm time
+    /// rearms instead of injecting WedgeDeadline. The session
+    /// stays in Connecting; we verify by asserting state.
+    #[test]
+    fn wedge_tick_with_rtp_activity_keeps_session_alive() {
+        let (runtime, backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        assert_eq!(runtime.state(), SessionState::Connecting);
+        // Simulate RTP arriving between arm and tick — the
+        // production path increments via a pad probe; the test
+        // hook bumps the same Arc<AtomicU64>.
+        runtime.bump_rtp_buffers_received_for_test();
+        runtime.fire_wedge_watchdog_for_test();
+        assert_eq!(runtime.state(), SessionState::Connecting);
+        assert_eq!(
+            backend.borrow().tear_downs,
+            0,
+            "tear_down must NOT be called when RTP is flowing"
+        );
+    }
+
+    /// Leaving Connecting (e.g. via WebrtcConnectionStateChanged
+    /// → Connected) cancels the wedge watchdog. The next tick
+    /// races at most once with the cancel — and if it does fire,
+    /// the catch-all in `wedge_watchdog_tick` bails because the
+    /// machine is no longer in Connecting. Either way: the
+    /// session is NOT torn down by a late wedge tick.
+    #[test]
+    fn wedge_tick_after_connected_does_not_tear_down() {
+        let (runtime, backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        // Walk to Connected — the watchdog must cancel.
+        runtime.handle_event(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(runtime.state(), SessionState::Connected);
+        // Manually fire a stale tick. The tick observes state !=
+        // Connecting and returns without injecting anything.
+        runtime.fire_wedge_watchdog_for_test();
+        assert_eq!(runtime.state(), SessionState::Connected);
+        assert_eq!(backend.borrow().tear_downs, 0);
     }
 
     #[test]

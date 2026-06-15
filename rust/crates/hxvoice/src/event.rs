@@ -185,13 +185,33 @@ pub enum ConnectionState {
 ///   `SdpOfferReceived`. Guards the JOIN → server's SDP-offer
 ///   round-trip: if no 602 VOICE_SDP_OFFER arrives within 10s of
 ///   the JOIN going on the wire, tear the session down.
-/// - `IceConnectivity` — no successful ICE pair in 30s (tear down).
-/// - `Dtls` — DTLS handshake didn't complete in 10s (tear down).
-/// - `Media` — no RTP/RTCP from peer for 30s (tear down + leave).
+/// - `IceConnectivity` — no successful ICE pair in 30s. Currently
+///   softened to a non-fatal Error toast because the
+///   `webrtcbin: _collate_peer_connection_states: Undefined
+///   situation` FIXME can leave us never reporting `Connected`
+///   even when audio is flowing. See `WedgeDeadline` below for
+///   the actual hard-stop signal.
+/// - `Dtls` — DTLS handshake didn't complete in 10s. Same
+///   softening + reasoning as `IceConnectivity`.
+/// - `Media` — no RTP/RTCP from peer for 30s while `Connected`
+///   (tear down + leave).
+/// - `WedgeDeadline` — runtime-managed last-ditch deadline while
+///   `Connecting`. The runtime owns the timer entirely: it samples
+///   the receive-side RTP-buffer counter when arming, and on
+///   expiry it either silently rearms (counter advanced — keep
+///   the session alive even though webrtcbin never reported
+///   `Connected`) or injects this `Timeout` event into the state
+///   machine (counter never moved — the session is genuinely
+///   wedged and must be torn down). The state machine handles
+///   that injection by treating `(Connecting, WedgeDeadline)` as
+///   `fail()`. This is the distinguishing signal between "ICE
+///   slow but media is flowing" (softened above) and "no media
+///   at all" (truly stuck).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Timeout {
     JoinReply,
     IceConnectivity,
     Dtls,
     Media,
+    WedgeDeadline,
 }
