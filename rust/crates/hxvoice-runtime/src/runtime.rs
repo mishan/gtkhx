@@ -910,7 +910,11 @@ impl VoiceRuntime {
         // gst-plugins-good); collapse to WebrtcbinUnavailable
         // since the runtime can't function without the send leg
         // either way.
-        let send_bin = crate::audio::make_send_bin("hxvoice-send-bin")
+        let input_device = crate::audio::input_device();
+        let send_bin = crate::audio::make_send_bin(
+            "hxvoice-send-bin",
+            input_device.as_deref(),
+        )
             .ok_or_else(|| {
                 gstreamer::warning!(
                     gstreamer::CAT_RUST,
@@ -2492,7 +2496,11 @@ fn start_receive_bin(
         });
     }
     let bin_name = format!("hxvoice-recv-{mid}");
-    let bin = match crate::audio::make_receive_bin(&bin_name) {
+    let output_device = crate::audio::output_device();
+    let bin = match crate::audio::make_receive_bin(
+        &bin_name,
+        output_device.as_deref(),
+    ) {
         Some(b) => b,
         None => {
             gstreamer::warning!(

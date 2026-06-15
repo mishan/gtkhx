@@ -115,6 +115,16 @@ struct gtkhx_prefs {
 	 * to fit the cfgvars INT slot; reinterpreted as guint32 when
 	 * stamped onto htlc->nick_color. Persisted as CFG_NICK_COLOR. */
     int nick_color;
+
+    /* Phase 8.E: voice capture + playback device preferences.
+	 * Stable gst::Device::name() strings. Empty/NULL means
+	 * "system default" — the runtime falls back to autoaudiosrc /
+	 * autoaudiosink. Persisted as CFG_VOICE_INPUT_DEVICE /
+	 * CFG_VOICE_OUTPUT_DEVICE, pushed to the Rust runtime via
+	 * gtkhx_voice_set_input_device / _set_output_device whenever
+	 * the user saves a different pick in Settings → Voice. */
+    char *voice_input_device;
+    char *voice_output_device;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;

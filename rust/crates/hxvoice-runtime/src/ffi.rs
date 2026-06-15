@@ -81,6 +81,200 @@ pub extern "C" fn gtkhx_voice_init() -> i32 {
 }
 
 // ---------------------------------------------------------------------
+// Audio-device enumeration + preference setters.
+//
+// The Settings → Voice page populates input + output device combos
+// from `gtkhx_voice_list_input_devices` / `_list_output_devices`,
+// stores the user's pick as `gst::Device::name()` in `gtkhxrc`, and
+// hands it back via `gtkhx_voice_set_input_device` /
+// `_set_output_device`. `VoiceRuntime::new` reads those preferences
+// at construction time and threads them through to
+// `audio::make_send_bin` / `make_receive_bin`. NULL or "" means
+// "use system default" (autoaudiosrc / autoaudiosink).
+//
+// Device lists are returned as opaque handles with `_len` / `_name`
+// / `_display_name` accessors so we don't have to define a stable
+// C struct layout for the per-device record. The handle wraps a
+// `Vec<AudioDevice>`; the strings inside are kept alive by the
+// handle.
+// ---------------------------------------------------------------------
+
+/// Opaque list handle returned by `gtkhx_voice_list_*_devices`.
+///
+/// C-side type is `gtkhx_voice_device_list`. Construct via the
+/// listing functions; access entries through `_len` / `_name` /
+/// `_display_name`; free with `gtkhx_voice_device_list_free`.
+pub struct GtkhxVoiceDeviceList {
+    devices: Vec<crate::audio::AudioDevice>,
+    /// Per-entry C-string cache. `name_c[i]` and `display_c[i]`
+    /// hold owned `CString`s whose `.as_ptr()` the C side
+    /// dereferences. Built lazily on first `_name` /
+    /// `_display_name` call for that index.
+    name_c: Vec<Option<std::ffi::CString>>,
+    display_c: Vec<Option<std::ffi::CString>>,
+}
+
+fn build_device_list(devices: Vec<crate::audio::AudioDevice>) -> Box<GtkhxVoiceDeviceList> {
+    let len = devices.len();
+    Box::new(GtkhxVoiceDeviceList {
+        devices,
+        name_c: (0..len).map(|_| None).collect(),
+        display_c: (0..len).map(|_| None).collect(),
+    })
+}
+
+/// Enumerate available capture devices.
+///
+/// Returns a heap-allocated, owning handle. The caller must free
+/// it with `gtkhx_voice_device_list_free` when done. Never returns
+/// NULL — a failed DeviceMonitor scan (typically: GStreamer not
+/// initialised; call `gtkhx_voice_init` first) yields a valid
+/// list whose `_len` is 0. C callers can branch on length without
+/// having to NULL-check.
+///
+/// # Safety
+/// No memory parameters. Caller takes ownership of the returned
+/// pointer.
+#[no_mangle]
+pub extern "C" fn gtkhx_voice_list_input_devices(
+) -> *mut GtkhxVoiceDeviceList {
+    let devices = crate::audio::list_input_devices();
+    Box::into_raw(build_device_list(devices))
+}
+
+/// Enumerate available playback devices. Same shape as
+/// `gtkhx_voice_list_input_devices`.
+#[no_mangle]
+pub extern "C" fn gtkhx_voice_list_output_devices(
+) -> *mut GtkhxVoiceDeviceList {
+    let devices = crate::audio::list_output_devices();
+    Box::into_raw(build_device_list(devices))
+}
+
+/// Number of entries in a device list. Returns 0 if `list` is NULL.
+///
+/// # Safety
+/// `list` must be a pointer returned by `gtkhx_voice_list_*_devices`
+/// and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_device_list_len(
+    list: *const GtkhxVoiceDeviceList,
+) -> usize {
+    if list.is_null() {
+        return 0;
+    }
+    (*list).devices.len()
+}
+
+/// Stable `gst::Device::name()` for the entry at `idx`, NUL-terminated.
+/// Returns NULL on out-of-range index or NULL list. The returned
+/// pointer is valid for the lifetime of the list.
+///
+/// # Safety
+/// Same constraints as `gtkhx_voice_device_list_len`. The returned
+/// `*const c_char` must NOT be freed by the caller — it lives as
+/// long as the list does.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_device_list_name(
+    list: *mut GtkhxVoiceDeviceList,
+    idx: usize,
+) -> *const c_char {
+    if list.is_null() {
+        return std::ptr::null();
+    }
+    let list = &mut *list;
+    if idx >= list.devices.len() {
+        return std::ptr::null();
+    }
+    if list.name_c[idx].is_none() {
+        list.name_c[idx] = std::ffi::CString::new(
+            list.devices[idx].name.as_str(),
+        )
+        .ok();
+    }
+    list.name_c[idx]
+        .as_ref()
+        .map(|c| c.as_ptr())
+        .unwrap_or(std::ptr::null())
+}
+
+/// User-facing display name for the entry at `idx`, NUL-terminated.
+/// Same lifetime + safety contract as `gtkhx_voice_device_list_name`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_device_list_display_name(
+    list: *mut GtkhxVoiceDeviceList,
+    idx: usize,
+) -> *const c_char {
+    if list.is_null() {
+        return std::ptr::null();
+    }
+    let list = &mut *list;
+    if idx >= list.devices.len() {
+        return std::ptr::null();
+    }
+    if list.display_c[idx].is_none() {
+        list.display_c[idx] = std::ffi::CString::new(
+            list.devices[idx].display_name.as_str(),
+        )
+        .ok();
+    }
+    list.display_c[idx]
+        .as_ref()
+        .map(|c| c.as_ptr())
+        .unwrap_or(std::ptr::null())
+}
+
+/// Free a device list. No-op on NULL.
+///
+/// # Safety
+/// `list` must have been returned by `gtkhx_voice_list_*_devices`
+/// and not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_device_list_free(
+    list: *mut GtkhxVoiceDeviceList,
+) {
+    if !list.is_null() {
+        drop(Box::from_raw(list));
+    }
+}
+
+/// Set the preferred capture device by `gst::Device::name()`.
+///
+/// `name` may be NULL or "" to clear the preference (system
+/// default, via `autoaudiosrc`). Any non-empty value is stored
+/// verbatim and looked up via DeviceMonitor at the next
+/// `VoiceRuntime::new` call. If the named device isn't present at
+/// runtime construction time, the send chain falls back to
+/// autoaudiosrc — the runtime never panics over a missing device.
+///
+/// # Safety
+/// `name` must either be NULL or a valid NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_set_input_device(name: *const c_char) {
+    let s = if name.is_null() {
+        None
+    } else {
+        CStr::from_ptr(name).to_str().ok()
+    };
+    crate::audio::set_input_device(s);
+}
+
+/// Set the preferred playback device. Same shape and semantics as
+/// `gtkhx_voice_set_input_device` but for the output (sink) side.
+///
+/// # Safety
+/// Same as `gtkhx_voice_set_input_device`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_set_output_device(name: *const c_char) {
+    let s = if name.is_null() {
+        None
+    } else {
+        CStr::from_ptr(name).to_str().ok()
+    };
+    crate::audio::set_output_device(s);
+}
+
+// ---------------------------------------------------------------------
 // Per-session runtime handle.
 //
 // The C side holds the runtime as an opaque `gtkhx_voice_runtime *`.

@@ -56,6 +56,36 @@ extern "C" {
 extern int gtkhx_voice_init (void);
 
 /*
+ * Audio-device enumeration + preference setters (Phase 8.E).
+ *
+ * The Settings → Voice page populates input and output combo boxes
+ * from gtkhx_voice_list_input_devices / _list_output_devices, stores
+ * the user's pick as gst::Device::name() in gtkhxrc, and pushes the
+ * choice back at runtime construction time via
+ * gtkhx_voice_set_input_device / _set_output_device. NULL or empty
+ * string clears the preference and the next VoiceRuntime build falls
+ * back to autoaudiosrc / autoaudiosink (system default).
+ *
+ * The list handle is opaque — caller iterates via _len + _name +
+ * _display_name and frees with _free. Returned strings live as long
+ * as the list does (no per-string free), matching the GListModel
+ * idiom the Settings UI already uses.
+ */
+typedef struct gtkhx_voice_device_list gtkhx_voice_device_list;
+
+extern gtkhx_voice_device_list *gtkhx_voice_list_input_devices (void);
+extern gtkhx_voice_device_list *gtkhx_voice_list_output_devices (void);
+extern size_t gtkhx_voice_device_list_len (const gtkhx_voice_device_list *list);
+extern const char *gtkhx_voice_device_list_name (
+    gtkhx_voice_device_list *list, size_t idx);
+extern const char *gtkhx_voice_device_list_display_name (
+    gtkhx_voice_device_list *list, size_t idx);
+extern void gtkhx_voice_device_list_free (gtkhx_voice_device_list *list);
+
+extern void gtkhx_voice_set_input_device (const char *name);
+extern void gtkhx_voice_set_output_device (const char *name);
+
+/*
  * Per-session voice runtime.
  *
  * Opaque pointer: the C side holds a `gtkhx_voice_runtime *` and

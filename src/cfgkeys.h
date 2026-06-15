@@ -165,6 +165,15 @@
 #define CFG_TOOL_XSIZE "TOOLXSIZE"
 #define CFG_TOOL_YSIZE "TOOLYSIZE"
 
+/* Phase 8.E: voice device preferences. Empty string means "system
+ * default" (autoaudiosrc / autoaudiosink); a non-empty value is the
+ * stable gst::Device::name() that the runtime resolves via
+ * DeviceMonitor at the next VoiceRuntime construction. Missing
+ * devices fall back to the auto-* source / sink rather than failing
+ * loudly. */
+#define CFG_VOICE_INPUT_DEVICE "VOICEINPUTDEVICE"
+#define CFG_VOICE_OUTPUT_DEVICE "VOICEOUTPUTDEVICE"
+
 /* GKeyFile section name for the prefs file. */
 #define CFG_KEYFILE_GROUP "gtkhx"
 
