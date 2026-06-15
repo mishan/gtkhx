@@ -454,6 +454,20 @@ test_hx_user_hash = executable('test_hx_user_hash',
 test('hx_user_hash', test_hx_user_hash,
      suite : 'unit')
 
+# voice_ptt_keyspec — PTT key-spec vocabulary + canonicalisation.
+# Pure functions over GDK keysyms; the unit test drives them
+# without any GTK widget construction. gtk_init_check is called so
+# the gtk_accelerator_name / _parse symbol tables are populated;
+# headless CI works because we use _check (not _init).
+test_voice_ptt_keyspec = executable('test_voice_ptt_keyspec',
+  'unit/test_voice_ptt_keyspec.c',
+  '../src/voice_ptt_keyspec.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('voice_ptt_keyspec', test_voice_ptt_keyspec,
+     suite : 'unit')
+
 # voice_model — per-uid voice presence + state used to drive the
 # speaker indicator column in the user list. Pure GObject + GLib
 # data structure; no GTK, no GStreamer. Pins down the indicator-

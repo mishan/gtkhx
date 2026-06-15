@@ -125,6 +125,25 @@ struct gtkhx_prefs {
 	 * the user saves a different pick in Settings → Voice. */
     char *voice_input_device;
     char *voice_output_device;
+    /* Phase 8.E follow-up: push-to-talk.
+     *
+     *   voice_ptt_enabled — switch row in Settings → Voice.
+     *     When FALSE, the runtime hook is dormant and the toolbar
+     *     mute button is the only mute driver. When TRUE, the
+     *     window-scoped key controller fires UNMUTE on key-press
+     *     and MUTE on key-release for the configured key.
+     *
+     *   voice_ptt_key — canonical name of the captured key,
+     *     e.g. "Pause", "F8", "<Control>F12". Empty string (or
+     *     NULL — pref load defaults to empty) means the user
+     *     enabled PTT but hasn't picked a key yet; the hook
+     *     stays inactive in that combo, and the Settings row
+     *     shows a "Click to set" subtitle. */
+    /* Plain unsigned char (not :1 bitfield) so cfgvars[] can take
+     * its address. The pref read/write path stores BOOLEANs into
+     * the byte verbatim — 0 or 1. */
+    unsigned char voice_ptt_enabled;
+    char *voice_ptt_key;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;

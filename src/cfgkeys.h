@@ -174,6 +174,18 @@
 #define CFG_VOICE_INPUT_DEVICE "VOICEINPUTDEVICE"
 #define CFG_VOICE_OUTPUT_DEVICE "VOICEOUTPUTDEVICE"
 
+/* Phase 8.E follow-up: push-to-talk. CFG_VOICE_PTT_ENABLED is a
+ * BOOLEAN toggle. CFG_VOICE_PTT_KEY is the canonical key spec
+ * (gdk_keyval_name output, plus optional `<Control>` / `<Alt>` /
+ * `<Shift>` prefix for modifier-augmented binds); empty string
+ * means "no key captured yet" and the runtime hook stays inactive
+ * even when the enabled toggle is on. Window-scoped key
+ * controller; vocabulary is restricted to non-typing keys
+ * (function keys, Pause, Insert, ScrollLock, and modifier+ combos)
+ * so PTT can never eat keystrokes meant for chat-input typing. */
+#define CFG_VOICE_PTT_ENABLED "VOICEPTTENABLED"
+#define CFG_VOICE_PTT_KEY "VOICEPTTKEY"
+
 /* GKeyFile section name for the prefs file. */
 #define CFG_KEYFILE_GROUP "gtkhx"
 

@@ -48,6 +48,7 @@
 #include "tracker.h"
 #include "debug.h"
 #include "voice_runtime.h"
+#include "voice_ptt_keyspec.h"
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
@@ -139,6 +140,19 @@ struct gtkhx_prefs gtkhx_prefs = {
 	 * means "no color, use theme default" and hx_change_name_icon
 	 * skips the optional HTLC_DATA_COLOR chunk. */
     -1, /* nick_color */
+
+    /* Phase 8.E + 8.E follow-up: voice device + PTT defaults. NULL
+     * strings here get reallocated to "" by init_variables, which
+     * also flips the cfgvar.allocated bit so prefs_write knows the
+     * heap-owned form. Setting them NULL rather than literal "" in
+     * this static initializer keeps the string-pointer fields
+     * uniformly NULL-or-heap, avoiding the read-only-string vs.
+     * g_free hazard if any pref-write codepath ever tries to free
+     * one. */
+    NULL, /* voice_input_device */
+    NULL, /* voice_output_device */
+    0,    /* voice_ptt_enabled */
+    NULL, /* voice_ptt_key */
 };
 
 static void parse_tracker (session *);
@@ -925,6 +939,23 @@ struct cfgvar {
       0,
       changed_voice_output_device,
       NULL },
+    /* Phase 8.E follow-up: push-to-talk. PTT_ENABLED is a plain
+     * BOOLEAN; PTT_KEY is a STRING that holds the canonical key
+     * spec (`gdk_keyval_name` output ± modifier prefix). Both are
+     * read at runtime-hook activation time — no changefunc, since
+     * the hook samples the live prefs on every key event. */
+    { CFG_VOICE_PTT_ENABLED,
+      { &gtkhx_prefs.voice_ptt_enabled },
+      BOOLEAN,
+      0,
+      NULL,
+      NULL },
+    { CFG_VOICE_PTT_KEY,
+      { &gtkhx_prefs.voice_ptt_key },
+      STRING,
+      0,
+      NULL,
+      NULL },
     { CFG_WORDWRAP,
       { &gtkhx_prefs.word_wrap },
       BOOLEAN,
@@ -1538,6 +1569,13 @@ init_variables (void) /* default settings if prefs file is not found. */
     (*cfgvar_for_name (CFG_VOICE_INPUT_DEVICE)).allocated = 1;
     gtkhx_prefs.voice_output_device = g_strdup ("");
     (*cfgvar_for_name (CFG_VOICE_OUTPUT_DEVICE)).allocated = 1;
+
+    /* Push-to-talk defaults: feature off, no key. Same allocated-
+     * string convention as the device prefs so prefs_write knows
+     * the buffer is heap-owned. */
+    gtkhx_prefs.voice_ptt_enabled = 0;
+    gtkhx_prefs.voice_ptt_key = g_strdup ("");
+    (*cfgvar_for_name (CFG_VOICE_PTT_KEY)).allocated = 1;
 
     start_time = time (NULL);
 }
@@ -2738,6 +2776,215 @@ settings_page_notifications (AdwPreferencesPage *page)
  * change-callbacks (changed_voice_input_device /
  * changed_voice_output_device) push the new value through to the
  * Rust runtime via FFI. */
+
+/* ============================================================ */
+/* Push-to-talk: enable toggle + key capture row.                */
+/* ============================================================ */
+
+/* Refresh the action row's subtitle to reflect the current bind
+ * (or "Not set" when CFG_VOICE_PTT_KEY is empty / unparseable).
+ * The visible label is the canonical spec string itself ("F8",
+ * "<Control>F12") — that's the same vocabulary the user sees in
+ * any GTK / GNOME accelerator UI, so no translation gymnastics.
+ *
+ * The stored spec is validated via the same parser the runtime
+ * hook uses; a corrupt or out-of-vocabulary prefs value reads as
+ * "Not set" here so Settings reflects the EFFECTIVE bind (what
+ * the runtime would honour) rather than the bytes on disk. */
+static void
+ptt_row_refresh_subtitle (AdwActionRow *row)
+{
+    const char *spec = gtkhx_prefs.voice_ptt_key;
+    if (spec && *spec
+        && hx_voice_ptt_keyspec_parse (spec, NULL, NULL)) {
+        adw_action_row_set_subtitle (row, spec);
+    } else {
+        adw_action_row_set_subtitle (row, _ ("Not set — click to capture"));
+    }
+}
+
+/* Persist the captured spec into prefs + write the GKeyFile.
+ *
+ * Mirrors the entry-row STRING-pref update path: gate the free on
+ * `v->allocated` (the static initializer leaves voice_ptt_key as
+ * a read-only NULL pointer until init_variables runs, and that
+ * read-only state must never be g_free'd) and set the bit after
+ * the fresh g_strdup so any future write hits the heap-owned
+ * branch. */
+static void
+ptt_save_key_spec (const char *new_spec)
+{
+    struct cfgvar *v = cfgvar_for_name (CFG_VOICE_PTT_KEY);
+    if (v && v->allocated && gtkhx_prefs.voice_ptt_key) {
+        g_free (gtkhx_prefs.voice_ptt_key);
+    }
+    gtkhx_prefs.voice_ptt_key = g_strdup (new_spec ? new_spec : "");
+    if (v) {
+        v->allocated = 1;
+    }
+    prefs_write ();
+}
+
+/* Key-pressed handler installed on the capture dialog. Returns
+ * TRUE for any keyval — we consume every keypress so the user
+ * can't accidentally trigger app-wide shortcuts during capture.
+ * Valid key → write + close. Escape → close without writing.
+ * Anything else → flash an error label and stay open. */
+static gboolean
+ptt_capture_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
+                         guint keycode, GdkModifierType state,
+                         gpointer user_data)
+{
+    AdwAlertDialog *dlg = user_data;
+    AdwActionRow *parent_row
+        = g_object_get_data (G_OBJECT (dlg), "ptt-parent-row");
+    GtkLabel *err_lbl = g_object_get_data (G_OBJECT (dlg), "ptt-err-label");
+    (void) ctrl;
+    (void) keycode;
+
+    if (keyval == GDK_KEY_Escape
+        && (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) == 0) {
+        adw_dialog_close (ADW_DIALOG (dlg));
+        return TRUE;
+    }
+    if (!hx_voice_ptt_keyspec_allowed (keyval, state)) {
+        /* Show the dialog's error label so the user knows why
+         * their key was rejected. The text spells out the
+         * vocabulary in one line; localisable. Reveal the
+         * label widget too — it's hidden by default so the
+         * dialog body doesn't reserve a blank row. */
+        if (err_lbl) {
+            gtk_label_set_text (
+                err_lbl,
+                _ ("That key would conflict with chat typing. "
+                   "Try a function key (F1–F24), Pause, or a "
+                   "Ctrl/Alt-modified combination."));
+            gtk_widget_set_visible (GTK_WIDGET (err_lbl), TRUE);
+        }
+        return TRUE;
+    }
+    char *spec = hx_voice_ptt_keyspec_canonicalize (keyval, state);
+    if (!spec) {
+        return TRUE;
+    }
+    ptt_save_key_spec (spec);
+    g_free (spec);
+    if (parent_row) {
+        ptt_row_refresh_subtitle (parent_row);
+    }
+    adw_dialog_close (ADW_DIALOG (dlg));
+    return TRUE;
+}
+
+/* Open the capture dialog. The dialog is a tiny AdwAlertDialog
+ * (no buttons; user presses a key or Escape to cancel). */
+static void
+ptt_open_capture_dialog (AdwActionRow *parent_row)
+{
+    AdwDialog *dlg = adw_alert_dialog_new (
+        _ ("Capture push-to-talk key"),
+        _ ("Press the key (or modifier+key combination) you want to "
+           "use as your push-to-talk binding.\n\n"
+           "Accepted: F1–F24, Pause, Scroll Lock, Insert, Print, "
+           "Menu, or any Ctrl/Alt/Super combination with another "
+           "key. Plain letters and digits are rejected so they "
+           "don't conflict with chat input.\n\n"
+           "Press Escape to cancel."));
+    /* Inline error label, hidden until a rejected key tries to
+     * land — `gtk_widget_set_visible (FALSE)` rather than just an
+     * empty label so the dialog body doesn't reserve a blank row
+     * underneath the prompt at first paint. AdwAlertDialog doesn't
+     * expose its body label directly; we add a GtkLabel via the
+     * dialog's "extra-child" slot and toggle visibility from
+     * ptt_capture_key_pressed. */
+    GtkWidget *err = gtk_label_new (NULL);
+    gtk_widget_add_css_class (err, "error");
+    gtk_label_set_wrap (GTK_LABEL (err), TRUE);
+    gtk_label_set_xalign (GTK_LABEL (err), 0.0);
+    gtk_widget_set_visible (err, FALSE);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dlg), err);
+    g_object_set_data (G_OBJECT (dlg), "ptt-err-label", err);
+    g_object_set_data (G_OBJECT (dlg), "ptt-parent-row", parent_row);
+
+    /* The key controller has to be installed on the dialog widget
+     * itself so it sees keys while the dialog has focus. */
+    GtkEventController *kctrl = gtk_event_controller_key_new ();
+    gtk_event_controller_set_propagation_phase (kctrl, GTK_PHASE_CAPTURE);
+    g_signal_connect (kctrl, "key-pressed",
+                      G_CALLBACK (ptt_capture_key_pressed), dlg);
+    gtk_widget_add_controller (GTK_WIDGET (dlg), kctrl);
+
+    adw_dialog_present (dlg, GTK_WIDGET (parent_row));
+}
+
+/* AdwActionRow's "activated" fires on click + Enter. Open the
+ * capture dialog from here so both interaction paths work. */
+static void
+on_ptt_row_activated (AdwActionRow *row, gpointer user_data)
+{
+    (void) user_data;
+    ptt_open_capture_dialog (row);
+}
+
+/* Suffix "Clear" button — wipes the current bind back to "Not set"
+ * without opening the capture dialog. Useful for the "I bound the
+ * wrong key and want to start over" flow. */
+static void
+on_ptt_clear_clicked (GtkButton *btn, gpointer user_data)
+{
+    AdwActionRow *row = user_data;
+    (void) btn;
+    ptt_save_key_spec ("");
+    ptt_row_refresh_subtitle (row);
+}
+
+/* Build the AdwPreferencesGroup and add it to the page. The group
+ * has two rows: the boolean enable toggle (standard pref_switch_row)
+ * and the key capture action row built by hand. */
+static void
+settings_page_voice_ptt_group (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *grp
+        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (grp, _ ("Push-to-Talk"));
+    adw_preferences_group_set_description (
+        grp,
+        _ ("When enabled, you start muted and unmute by holding the "
+           "captured key. Works from any focused widget in the GtkHx "
+           "window."));
+
+    /* Enable toggle. */
+    adw_preferences_group_add (
+        grp,
+        pref_switch_row (CFG_VOICE_PTT_ENABLED,
+                         _ ("Enable push-to-talk"), NULL));
+
+    /* Key capture row. */
+    AdwActionRow *key_row
+        = ADW_ACTION_ROW (adw_action_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (key_row),
+                                   _ ("PTT key"));
+    /* AdwActionRow inherits from GtkListBoxRow; activatable is the
+     * row-level "click / Enter fires 'activated'" toggle. */
+    gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (key_row), TRUE);
+    g_signal_connect (key_row, "activated",
+                      G_CALLBACK (on_ptt_row_activated), NULL);
+
+    /* Suffix Clear button. */
+    GtkWidget *clear_btn
+        = gtk_button_new_from_icon_name ("edit-clear-symbolic");
+    gtk_widget_set_valign (clear_btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (clear_btn, _ ("Clear PTT key"));
+    gtk_widget_add_css_class (clear_btn, "flat");
+    g_signal_connect (clear_btn, "clicked",
+                      G_CALLBACK (on_ptt_clear_clicked), key_row);
+    adw_action_row_add_suffix (key_row, clear_btn);
+
+    ptt_row_refresh_subtitle (key_row);
+    adw_preferences_group_add (grp, GTK_WIDGET (key_row));
+    adw_preferences_page_add (page, grp);
+}
+
 static void
 settings_page_voice (AdwPreferencesPage *page)
 {
@@ -2802,6 +3049,14 @@ settings_page_voice (AdwPreferencesPage *page)
     g_object_set_data_full (G_OBJECT (page), "voice-output-devices",
                             outputs,
                             (GDestroyNotify)gtkhx_voice_device_list_free);
+
+    /* Push-to-talk: toggle + key capture. The toggle binds via the
+     * normal cfgvars BOOLEAN flow; the key capture is bespoke
+     * because the row's content (subtitle = current bind, with a
+     * Clear button) and its interaction (click → capture dialog,
+     * Escape → cancel, valid key → write canonical spec back to
+     * cfgvars) don't fit any of the generic pref_* row helpers. */
+    settings_page_voice_ptt_group (page);
 }
 
 /* Phase 5: Misc used to be a catchall for Behavior toggles. Most of
