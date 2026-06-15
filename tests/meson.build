@@ -2117,3 +2117,104 @@ test_integration_folder_put = executable('test_integration_folder_put',
 test('folder_put', test_integration_folder_put,
      suite   : 'integration',
      timeout : 30)
+
+# voice_* — Phase 8.F coverage for the fogWraith voice-chat
+# extension (HTLC_CAP_VOICE + 600-606 transactions + 0x01F5-0x01F9
+# fields). Filters the matrix for HX_TEST_CAP_VOICE; today only
+# Janus advertises the bit, so each test fails loudly when the
+# Janus container isn't reachable. Janus voice is server-side
+# opt-in (EnableVoice: true + per-account VoiceChat: true); the
+# bundled tests/janus/Dockerfile config has both on by default.
+#
+# All voice tests are Janus-only → is_parallel: false for the same
+# per-IP connect-rate caveat documented on the hope_chacha20
+# sister tests. The multi-client tests (participants_broadcast,
+# disconnect_cleanup) open two connections each, so the cost is
+# higher than the single-client tests but still well under the
+# 60 s timeout.
+test_integration_voice_join = executable('test_integration_voice_join',
+  'integration/test_voice_join.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_join', test_integration_voice_join,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_sdp_roundtrip = executable(
+  'test_integration_voice_sdp_roundtrip',
+  'integration/test_voice_sdp_roundtrip.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_sdp_roundtrip', test_integration_voice_sdp_roundtrip,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_ice_trickle = executable(
+  'test_integration_voice_ice_trickle',
+  'integration/test_voice_ice_trickle.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_ice_trickle', test_integration_voice_ice_trickle,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_mute = executable('test_integration_voice_mute',
+  'integration/test_voice_mute.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_mute', test_integration_voice_mute,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_implicit_leave = executable(
+  'test_integration_voice_implicit_leave',
+  'integration/test_voice_implicit_leave.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_implicit_leave', test_integration_voice_implicit_leave,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_participants = executable(
+  'test_integration_voice_participants',
+  'integration/test_voice_participants.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_participants', test_integration_voice_participants,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
+test_integration_voice_disconnect_cleanup = executable(
+  'test_integration_voice_disconnect_cleanup',
+  'integration/test_voice_disconnect_cleanup.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+# Longer meson timeout than the other voice binaries: the post-
+# disconnect 605 update arrives on a Janus housekeeping tick, not
+# synchronously off the FIN read, so the per-recv wait is bumped to
+# 15 s inside the test and we want headroom on top of that for
+# slow runners.
+test('voice_disconnect_cleanup', test_integration_voice_disconnect_cleanup,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 120)

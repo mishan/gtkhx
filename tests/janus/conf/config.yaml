@@ -3,7 +3,16 @@
 Interface: ""
 
 # Base Hotline server port. File transfer port is Port + 1.
-Port: 5500
+#
+# Test-target setting: pinned to 5510 (HTLS) / 5511 (HTXF), the same
+# numbers tests/integration/server_matrix.c records for the Janus
+# row. Janus runs under `docker run --network=host` (required so
+# WebRTC's UDP path negotiates against 127.0.0.1 — `docker run -p`
+# strips the kernel route libnice depends on), so the container's
+# internal listen port IS the host port. Keeping mhxd at its
+# canonical 5500 alongside Janus at 5510 lets both containers
+# coexist on the same host.
+Port: 5510
 
 # ─── Network: TLS ───────────────────────────────────────────────────────────
 # Path to TLS certificate and key files. Leave empty to disable TLS.
@@ -18,7 +27,12 @@ TLSCert: "/opt/janus/Server/tls/cert.pem"
 TLSKey: "/opt/janus/Server/tls/key.pem"
 
 # Base TLS port. TLS file transfer port is TLSPort + 1.
-TLSPort: 5600
+#
+# Test-target setting: pinned to 5610 (HTLS-over-TLS) / 5611
+# (HTXF-over-TLS), the same numbers the Janus matrix row records.
+# Same --network=host rationale as Port above; the +100 offset
+# keeps the TLS ports symmetric with the plain-port pair.
+TLSPort: 5610
 
 # ─── Directories ────────────────────────────────────────────────────────────
 # Path to the Files directory, by default in a subdirectory of the config root named Files
@@ -244,11 +258,13 @@ EnableVoice: true
 # UDP port for WebRTC ICE/DTLS/RTP traffic. Defaults to Port + 4 if not set.
 # All voice PeerConnections are multiplexed over this single port.
 #
-# Test-target setting: pinned to base+4 (5504) explicitly. The
-# Dockerfile EXPOSEs 5504/udp and the CI matrix expects the same
-# number. Tier 3 voice tests (Phase 8.F) will bind a host-side
-# mapping to forward UDP datagrams to this port.
-VoiceUDPPort: 5504
+# Test-target setting: pinned to 5514 explicitly. With Janus running
+# under --network=host the container's listen port IS the host
+# port; the integration matrix's voice_port field on the Janus row
+# expects this exact number, so the Tier 3 Phase 8.F voice tests
+# (and any future GStreamer media test) can find the subchannel
+# without env overrides.
+VoiceUDPPort: 5514
 
 # Maximum participants per voice room (default: 16).
 VoiceMaxPerRoom: 16
