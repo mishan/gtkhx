@@ -322,28 +322,35 @@ fn attach_buffer_probe(
     });
 }
 
-/// Build a send-leg `gst::Bin` that captures audio, encodes to
-/// μ-law, payloads as RTP/PCMU, and exposes a single source pad
-/// ready to link to `webrtcbin`'s sink request pad.
+/// Build a send-leg `gst::Bin` that captures audio from the system
+/// microphone, encodes to μ-law, payloads as RTP/PCMU, and exposes
+/// a single source pad ready to link to `webrtcbin`'s sink request
+/// pad.
 ///
 /// Chain:
 ///
 /// ```text
-/// audiotestsrc -> audioconvert -> audioresample -> capsfilter(PCM 8 kHz mono)
+/// autoaudiosrc -> audioconvert -> audioresample -> capsfilter(PCM 8 kHz mono)
 ///              -> mulawenc -> rtppcmupay -> (ghost src)
 /// ```
 ///
-/// `audiotestsrc` is a deliberate stub — it emits a 440 Hz tone so
-/// the WebRTC handshake completes and remote peers hear *something*
-/// without us having wired the system microphone. Phase 8.E swaps
-/// in `autoaudiosrc` (or a user-picked device from the settings
-/// UI). The encoder / payloader chain stays identical either way.
+/// `autoaudiosrc` is GStreamer's auto-plugger that picks the host
+/// default capture device — `pulsesrc` on a PulseAudio /
+/// PipeWire-PA-shim setup, `pipewiresrc` if `gst-plugins-rs`'s
+/// pipewire element is registered and PA isn't, `alsasrc` on bare
+/// ALSA, etc. The capture device shows up under pavucontrol's
+/// "Recording" tab while the call is active, just like any
+/// pulse-aware audio app (zoom, discord, etc.).
+///
+/// A user-pickable device selection comes in a follow-up phase
+/// (settings UI for input device — see voice spec §8.E); for now,
+/// system-default microphone is the right behavior.
 ///
 /// Returns `None` on any factory failure. The eventual missing
 /// element is whichever one the user's GStreamer install doesn't
-/// ship; `mulawenc` lives in `gst-plugins-good` and `rtppcmupay` in
-/// `gst-plugins-good` as well, both of which production already
-/// has via the audio runtime.
+/// ship; `autoaudiosrc` lives in `gst-plugins-good`, `mulawenc`
+/// and `rtppcmupay` in `gst-plugins-good` as well — production
+/// already has all of those via the audio runtime install.
 ///
 /// Linking note: the chain ends in a ghost src pad, NOT a direct
 /// link to webrtcbin. The caller asks webrtcbin for a sink request
@@ -354,13 +361,11 @@ fn attach_buffer_probe(
 /// with `a=inactive` and the peer connection never carries media.
 pub fn make_send_bin(name: &str) -> Option<gst::Bin> {
     let bin = gst::Bin::builder().name(name).build();
-    // `audiotestsrc` exposes `wave` as a typed enum, not a plain
-    // integer. The default is sine (0), so don't set it — leave
-    // it at default. `is-live=true` keeps timestamps tied to real
-    // wallclock time (matters for RTP pacing into webrtcbin).
-    let src = gst::ElementFactory::make("audiotestsrc")
-        .property("is-live", true)
-        .property("freq", 440.0_f64)
+    // System-default microphone via autoaudiosrc — the auto-plugger
+    // picks pulsesrc / pipewiresrc / alsasrc / etc. based on what's
+    // available. No `is-live` setting needed; real capture sources
+    // are intrinsically live and the wrapper handles timing.
+    let src = gst::ElementFactory::make("autoaudiosrc")
         .build()
         .ok()?;
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
