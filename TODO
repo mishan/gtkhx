@@ -2,6 +2,9 @@ General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
 
+Testing:
+- Use docker-compose for the Docker container mess
+
 Bookmarks:
 - Ship some bookmarks for more servers
 - Built-in bookmarks should be written once as real bookmark files on config dir creation, instead of being hardcoded in the Connect dialog
@@ -14,9 +17,6 @@ Docs:
 
 Tracker:
 - Ship with some more built in trackers configured
-
-Voice Chat:
-- Build initial prototype of voice chat extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Voice.md
 
 Inline Media:
 - Research spike to determine how difficult it would be to add to xtext (see spec https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Inline-Media.md)
