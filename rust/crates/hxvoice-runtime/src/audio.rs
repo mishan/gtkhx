@@ -302,8 +302,9 @@ fn attach_buffer_probe(
     where_: &'static str,
 ) {
     let Some(pad) = element.static_pad(pad_name) else {
-        eprintln!(
-            "hxvoice: [DBG] {bin_name} {where_}: could not get pad to probe"
+        crate::debug::log!(
+            "voice-flow",
+            "{bin_name} {where_}: could not get pad to probe"
         );
         return;
     };
@@ -314,8 +315,9 @@ fn attach_buffer_probe(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
         if n == 1 || n % 50 == 0 {
-            eprintln!(
-                "hxvoice: [DBG] {bin_name} {where_}: buffer #{n}"
+            crate::debug::log!(
+                "voice-flow",
+                "{bin_name} {where_}: buffer #{n}"
             );
         }
         gst::PadProbeReturn::Ok
@@ -410,8 +412,9 @@ fn attach_send_buffer_probe(
     bin_name: &str,
 ) {
     let Some(pad) = element.static_pad(pad_name) else {
-        eprintln!(
-            "hxvoice: [DBG] send {bin_name}: could not get pad to probe"
+        crate::debug::log!(
+            "voice-flow",
+            "send {bin_name}: could not get pad to probe"
         );
         return;
     };
@@ -422,8 +425,9 @@ fn attach_send_buffer_probe(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
         if n == 1 || n % 50 == 0 {
-            eprintln!(
-                "hxvoice: [DBG] {bin_name} pay.src: buffer #{n}"
+            crate::debug::log!(
+                "voice-flow",
+                "{bin_name} pay.src: buffer #{n}"
             );
         }
         gst::PadProbeReturn::Ok

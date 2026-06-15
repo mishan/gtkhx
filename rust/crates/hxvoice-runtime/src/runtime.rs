@@ -1400,8 +1400,9 @@ impl VoiceRuntime {
                 for line in sdp.lines() {
                     let trimmed = line.trim_end_matches('\r');
                     if let Some(rest) = trimmed.strip_prefix("a=mid:") {
-                        eprintln!(
-                            "hxvoice: [DBG] SDP offer carries a=mid:{rest}"
+                        crate::debug::log!(
+                            "voice-pipe",
+                            "SDP offer carries a=mid:{rest}"
                         );
                     }
                 }
@@ -2003,8 +2004,9 @@ fn connect_pad_added(
         let mid = match lookup_pad_mid(pad) {
             Some(m) => m,
             None => {
-                eprintln!(
-                    "hxvoice: [DBG] pad-added with no resolvable mid (pad={}); dropping",
+                crate::debug::log!(
+                    "voice-pipe",
+                    "pad-added with no resolvable mid (pad={}); dropping",
                     pad.name()
                 );
                 gstreamer::warning!(
@@ -2016,14 +2018,15 @@ fn connect_pad_added(
                 return;
             }
         };
-        // Loud log so we can see exactly what mid webrtcbin
-        // assigned to the receive pad. If this doesn't match what
-        // the state machine cached from the SDP offer's a=mid:
-        // lines, StartReceivePipeline never fires and audio
-        // never reaches the speakers — the silent-failure that
-        // bit us in the multi-client test.
-        eprintln!(
-            "hxvoice: [DBG] pad-added pad={} mid={} dir={:?}",
+        // Log the resolved mid so we can see exactly what mid
+        // webrtcbin assigned to the receive pad. If this doesn't
+        // match what the state machine cached from the SDP
+        // offer's a=mid: lines, StartReceivePipeline never fires
+        // and audio never reaches the speakers — the
+        // silent-failure that bit us in the multi-client test.
+        crate::debug::log!(
+            "voice-pipe",
+            "pad-added pad={} mid={} dir={:?}",
             pad.name(),
             mid,
             pad.direction()
@@ -2128,8 +2131,9 @@ fn connect_pad_added(
                     // `send` for forwarded receive mlines), so
                     // any stale parking is worth surfacing.
                     if stale.is_some() {
-                        eprintln!(
-                            "hxvoice: [DBG] pad mid={mid} produced no \
+                        crate::debug::log!(
+                            "voice-pipe",
+                            "pad mid={mid} produced no \
                              StartReceivePipeline — state machine \
                              rejected WebrtcPadAdded in current state"
                         );
@@ -2257,8 +2261,9 @@ fn connect_on_new_transceiver(webrtcbin: &gstreamer::Element) {
                 let dir: gstreamer_webrtc::WebRTCRTPTransceiverDirection =
                     transceiver.property("direction");
                 let mid: Option<String> = transceiver.property("mid");
-                eprintln!(
-                    "hxvoice: [DBG] on-new-transceiver: pinned PCMU codec-preferences \
+                crate::debug::log!(
+                    "voice-pipe",
+                    "on-new-transceiver: pinned PCMU codec-preferences \
                      on transceiver direction={dir:?} mid={mid:?}"
                 );
             }
@@ -2440,8 +2445,9 @@ fn start_receive_bin(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 + 1;
             if n == 1 || n % 50 == 0 {
-                eprintln!(
-                    "hxvoice: [DBG] webrtcbin src_0 (mid={mid_owned}): buffer #{n}"
+                crate::debug::log!(
+                    "voice-flow",
+                    "webrtcbin src_0 (mid={mid_owned}): buffer #{n}"
                 );
             }
             gstreamer::PadProbeReturn::Ok
@@ -2492,8 +2498,9 @@ fn start_receive_bin(
         // Not fatal — the pipeline state machine will retry on
         // its own state-change pass. Log so an operator can see
         // it if audio doesn't materialize.
-        eprintln!(
-            "hxvoice: [DBG] sync_state_with_parent FAILED for receive bin mid={mid}"
+        crate::debug::log!(
+            "voice-pipe",
+            "sync_state_with_parent FAILED for receive bin mid={mid}"
         );
         gstreamer::warning!(
             gstreamer::CAT_RUST,
@@ -2501,13 +2508,14 @@ fn start_receive_bin(
              (mid={mid}); audio may not flow until next state change"
         );
     } else {
-        // Loud success log: if you see this and still no audio,
-        // the failure is downstream — autoaudiosink can't open a
+        // Success log: if you see this and still no audio, the
+        // failure is downstream — autoaudiosink can't open a
         // device, or PulseAudio is rejecting the connection. If
         // you DON'T see this on a remote join, the path from
         // pad-added to here is broken.
-        eprintln!(
-            "hxvoice: [DBG] receive bin LINKED for mid={mid} — audio should be flowing"
+        crate::debug::log!(
+            "voice-pipe",
+            "receive bin LINKED for mid={mid} — audio should be flowing"
         );
     }
     Some(bin)
