@@ -858,6 +858,24 @@ impl SessionMachine {
             (SessionState::Connected, Event::Timeout { kind: Timeout::Media }) => {
                 self.fail("Voice media timeout (no RTP from peer)".into())
             }
+            // The runtime's wedge watchdog injects this timeout
+            // ONLY after observing no RTP buffer activity for the
+            // full watchdog window while `Connecting`. By the time
+            // the state machine sees it, the runtime has already
+            // ruled out "ICE slow but RTP flowing" — this is the
+            // genuinely-stuck-forever case, so fail() is the right
+            // response. Outside of Connecting, the runtime cancels
+            // the watchdog, so seeing this in any other state is
+            // a late delivery race that the catch-all swallows.
+            (SessionState::Connecting, Event::Timeout { kind: Timeout::WedgeDeadline }) => {
+                self.fail(
+                    concat!(
+                        "Voice connection wedged — no media received ",
+                        "during the runtime's wedge-watchdog window",
+                    )
+                    .into(),
+                )
+            }
 
             // ---- Catch-all ----
 
@@ -2005,6 +2023,38 @@ mod tests {
         });
         assert_eq!(m.state(), SessionState::Leaving);
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+    }
+
+    #[test]
+    fn wedge_deadline_in_connecting_tears_down() {
+        // Walk to Connecting (the only state where WedgeDeadline
+        // is meaningful), then inject the timeout the runtime
+        // would feed us when its receive-side RTP counter
+        // stalled. Expect fail() — Leaving + TearDown.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::Connecting);
+        let acts =
+            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+        assert_eq!(m.state(), SessionState::Leaving);
+        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+    }
+
+    #[test]
+    fn wedge_deadline_outside_connecting_is_noop() {
+        // The runtime is supposed to cancel the wedge watchdog
+        // on state leave; if a tick races and fires anyway, the
+        // catch-all swallows it. This test pins that fall-through:
+        // from `Idle`, a WedgeDeadline must produce no actions
+        // and leave the state untouched.
+        let mut m = machine();
+        assert_eq!(m.state(), SessionState::Idle);
+        let acts =
+            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+        assert!(acts.is_empty());
+        assert_eq!(m.state(), SessionState::Idle);
     }
 
     #[test]
