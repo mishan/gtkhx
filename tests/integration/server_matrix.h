@@ -61,6 +61,7 @@
  * existing capability bitmasks don't accidentally light it up. */
 #define HX_TEST_CAP_NICK_COLORS   (1u << 22) /* Colored-Nicknames     */
 #define HX_TEST_CAP_TLS           (1u << 23) /* TLS on a separate port*/
+#define HX_TEST_CAP_VOICE         (1u << 24) /* WebRTC voice extension*/
 
 /* ---- The matrix struct ------------------------------------------ */
 
@@ -76,6 +77,15 @@ typedef struct {
      * Phase 2 wrap. Both are 0 when the server doesn't expose TLS. */
     guint16     tls_port;
     guint16     tls_xfer_port;
+    /* WebRTC voice subchannel (Phase 8.F). When the server advertises
+     * HX_TEST_CAP_VOICE this is the host-side UDP port the server
+     * receives ICE/DTLS/RTP on (Janus: container's VoiceUDPPort, which
+     * defaults to Port+4). 0 when the server doesn't expose voice.
+     * The Tier 3 voice tests today exercise only the TCP control
+     * channel — none of them sends UDP — but the field is recorded
+     * here so a future GStreamer-backed media test can pick it up
+     * without changing the matrix shape again. */
+    guint16     voice_port;
     guint16     hl_version; /* HTLS_DATA_VERSION value, e.g. 185    */
     guint32     caps;       /* HX_TEST_CAP_* bitmask                */
 } hx_test_server;

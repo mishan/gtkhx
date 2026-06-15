@@ -49,16 +49,36 @@ config.
 ## Run
 
 ```sh
-docker run --rm -p 5510:5500 -p 5511:5501 \
-                -p 5514:5504/udp \
-                -p 5610:5600 -p 5611:5601 \
-                gtkhx-janus
+docker run --rm --network=host gtkhx-janus
 ```
 
-Host ports keep mhxd's conventional 5500/5501 free for side-by-side
-use via the multi-server Compose setup, applying a uniform +10
-offset: 5510/5511 for plaintext TCP, 5514 for voice's base+4 UDP,
-5610/5611 for TLS (control + HTXF subchannel). Connect with:
+`--network=host` is required for the voice chat extension (Phase 8).
+WebRTC's libnice ICE path needs the server to receive UDP datagrams
+whose source address the client can route back through — Docker's
+default bridge strips the kernel route in a way that breaks
+server-reflexive candidate negotiation against 127.0.0.1. Voice
+manual-testing against a `-p`-published Janus simply doesn't work;
+voice manual-testing against a `--network=host` Janus does. The
+Tier 3 voice matrix runs under the same model.
+
+With host networking, the container's listen ports ARE the host
+ports — so Janus's `config.yaml` is pinned to the matrix-published
+numbers directly (no separate `-p HOST:CONTAINER` mapping is
+involved):
+
+| Container port = Host port | Purpose                       |
+|----------------------------|-------------------------------|
+| 5510/tcp                   | HTLS — main client connection |
+| 5511/tcp                   | HTXF — file transfer          |
+| 5514/udp                   | WebRTC voice (ICE/DTLS/RTP)   |
+| 5610/tcp                   | HTLS over TLS                 |
+| 5611/tcp                   | HTXF over TLS                 |
+
+mhxd stays at its canonical 5500/5501 via the usual `-p 5500:5500`
+bridge-net mapping; both containers coexist on the same host
+without port conflicts.
+
+Connect with:
 
 ```
 Server:  localhost:5510
@@ -81,13 +101,20 @@ work without any tweak.
 
 ## Ports
 
-| Port | Protocol | Purpose                                                |
-|------|----------|--------------------------------------------------------|
-| 5500 | TCP      | HTLS — main client connection                          |
-| 5501 | TCP      | HTXF — file transfer subchannel                        |
-| 5504 | UDP      | WebRTC voice (ICE/DTLS/RTP, base+4)                    |
-| 5600 | TCP      | HTLS over TLS — self-signed cert generated at build    |
-| 5601 | TCP      | HTXF over TLS                                          |
+| Port (host = container, via --network=host) | Protocol | Purpose                                             |
+|----------------------------------------------|----------|-----------------------------------------------------|
+| 5510                                         | TCP      | HTLS — main client connection                       |
+| 5511                                         | TCP      | HTXF — file transfer subchannel                     |
+| 5514                                         | UDP      | WebRTC voice (ICE/DTLS/RTP)                         |
+| 5610                                         | TCP      | HTLS over TLS — self-signed cert generated at build |
+| 5611                                         | TCP      | HTXF over TLS                                       |
+
+These match the matrix entry in
+`tests/integration/server_matrix.c` exactly, since under
+`--network=host` the container has no port-translation layer to
+shift them. The same numbers are pinned in `conf/config.yaml`
+(`Port: 5510`, `TLSPort: 5610`, `VoiceUDPPort: 5514`) so the
+integration suite finds Janus without any env overrides.
 
 ## What's enabled
 
@@ -119,20 +146,20 @@ Out of the box:
 - File-mode banner (Janus ships a `banner.gif`).
 - Threaded news (Hotline 1.5+).
 - **Voice chat extension** (`EnableVoice: true`, fogWraith
-  Capabilities-Voice.md). `VoiceUDPPort: 5504` is pinned
-  explicitly (base+4). `NewUserDefaults.VoiceChat: true` gives
-  any runtime-created account access bit 55 by default; the
-  bundled `guest` and `admin` accounts get the bit through an
-  in-place YAML edit in `seed-hope-passwords.sh` (the upstream
-  YAML schema is one boolean per access bit, two-space-indented
-  under `Access:`).
+  Capabilities-Voice.md). `VoiceUDPPort: 5514` is pinned
+  explicitly (matches the matrix's `voice_port`).
+  `NewUserDefaults.VoiceChat: true` gives any runtime-created
+  account access bit 55 by default; the bundled `guest` and
+  `admin` accounts get the bit through an in-place YAML edit in
+  `seed-hope-passwords.sh` (the upstream YAML schema is one
+  boolean per access bit, two-space-indented under `Access:`).
 
-  GtkHx Phase 8.A advertises `HTLC_CAP_VOICE` in LOGIN; Janus
-  with this config echoes the cap and the client sees voice as
-  available. No media flows in Phase 8.A — the WebRTC pipeline
-  and audio I/O land in Phases 8.B and 8.C. The 5504/udp port
-  mapping is therefore inert today and only becomes load-bearing
-  with the runtime crate.
+  GtkHx Phase 8 (A-E) ships end-to-end DTLS-SRTP voice against
+  this container; the Phase 8.F Tier 3 voice tests exercise the
+  control-channel wire shape (600-606 + 0x01F5-0x01F9 fields)
+  against it. The voice tests live in
+  `tests/integration/test_voice_*.c` and gate on
+  `HX_TEST_CAP_VOICE`, which only Janus advertises.
 
 Also enabled:
 

@@ -61,6 +61,10 @@ const hx_test_server hx_test_server_matrix[] = {
          * for HX_TEST_CAP_TLS won't pick mhxd. */
         .tls_port      = 0,
         .tls_xfer_port = 0,
+        /* mhxd has no voice support — the extension is a Janus
+         * (VesperNet) thing. voice_port=0 keeps mhxd out of the
+         * HX_TEST_CAP_VOICE matrix filter. */
+        .voice_port    = 0,
         .hl_version    = 185,
         .caps          = HX_TEST_CAP_HOPE
                        | HX_TEST_CAP_NEWS_15
@@ -97,6 +101,14 @@ const hx_test_server hx_test_server_matrix[] = {
         .xfer_port     = 5511,
         .tls_port      = 5610,
         .tls_xfer_port = 5611,
+        /* Janus must publish its WebRTC subchannel on a real host
+         * UDP port the test client can reach. With the container
+         * running under --network=host (required so libnice's
+         * srflx / DTLS path actually negotiates against 127.0.0.1
+         * — `docker run -p` strips the kernel route the way
+         * WebRTC depends on it), Janus's internal VoiceUDPPort IS
+         * the host port. config.yaml pins it to 5514 to match. */
+        .voice_port    = 5514,
         .hl_version    = 190,
         .caps          = HX_TEST_CAP_LARGE_FILES
                        | HX_TEST_CAP_TEXT_ENCODING
@@ -117,7 +129,15 @@ const hx_test_server hx_test_server_matrix[] = {
                         * but was retired alongside the RC4 removal. */
                        | HX_TEST_CAP_BLOWFISH
                        | HX_TEST_CAP_NICK_COLORS
-                       | HX_TEST_CAP_TLS,
+                       | HX_TEST_CAP_TLS
+                       /* Phase 8.F voice tests. Janus is the only
+                        * matrix entry shipping the WebRTC voice
+                        * extension; mhxd has no voice support. The
+                        * Dockerfile EnableVoice: true + the bundled
+                        * guest/admin account VoiceChat: true flip
+                        * cover both the cap echo and the per-account
+                        * access bit the toolbar gates on. */
+                       | HX_TEST_CAP_VOICE,
     },
 };
 

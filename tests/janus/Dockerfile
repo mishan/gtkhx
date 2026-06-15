@@ -20,12 +20,26 @@
 #     have access to.
 #
 # Build:    docker build -t gtkhx-janus tests/janus
-# Run:      docker run --rm -p 5510:5500 -p 5511:5501 gtkhx-janus
+# Run:      docker run --rm --network=host gtkhx-janus
 # Connect:  point GtkHx at localhost:5510
 #
-# Note the host-side port mapping (5510:5500): mhxd is conventionally
-# on host port 5500, so when both containers run side-by-side via
-# Compose, Janus answers on 5510.
+# WHY --network=host: WebRTC media (voice extension, Phase 8) needs
+# the server to receive UDP datagrams whose return address the
+# client can route back through libnice. Docker's default bridge
+# strips the kernel route in a way that breaks the ICE
+# server-reflexive candidate path against 127.0.0.1, so manual
+# voice testing — and the Tier 3 voice matrix — both require host
+# networking.
+#
+# Port-coexistence with mhxd: Janus's checked-in config.yaml pins
+# Port=5510, TLSPort=5610, VoiceUDPPort=5514. mhxd stays at its
+# canonical 5500/5501. Both containers can run side-by-side on the
+# same host without -p / publish-port acrobatics — the host-net
+# Janus listens on 5510/5511/5610/5611/5514/udp and the bridge-net
+# mhxd publishes 5500/5501 via docker port mapping.
+#
+# (A future docker-compose.yml will wrap both containers + the
+# tracker containers in one file; see the TODO in tests/README.)
 #
 # The binary is not redistributed — the Dockerfile pulls it fresh
 # at image-build time and sha256-verifies. Same legal posture as the
@@ -71,11 +85,13 @@ RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
 #                                    bundled YAMLs so Step 2
 #                                    actually validates.
 #   EnableVoice: true              — Janus is also the voice-chat
-#   VoiceUDPPort: 5504               target (Phase 8.A/F). The UDP
-#   VoiceMaxPerRoom: 16              port is pinned to base+4 so the
-#                                    Dockerfile EXPOSE and the CI
-#                                    matrix can agree on a fixed
-#                                    number.
+#   VoiceUDPPort: 5514               target (Phase 8.A/F). With
+#   VoiceMaxPerRoom: 16              --network=host the container's
+#                                    listen port IS the host port,
+#                                    so the matrix's voice_port
+#                                    5514 is pinned in config.yaml
+#                                    directly (no port mapping
+#                                    translates it).
 #   NewUserDefaults.VoiceChat:true — new accounts get bit 55
 #                                    (HL_ACCESS_VOICE_CHAT) by
 #                                    default; the bundled guest /
@@ -191,19 +207,26 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY --from=build /opt/janus /opt/janus
 RUN chown -R janus:janus /opt/janus
 
-# Hotline ports:
-#   5500/tcp — HTLS server (clients connect here)
-#   5501/tcp — HTXF file transfer subchannel
-#   5504/udp — WebRTC ICE/DTLS/RTP for voice (base+4, fogWraith
+# Hotline ports (matching config.yaml — see WHY --network=host
+# in the file preamble for why these are pinned to the matrix-
+# published host ports rather than the upstream Janus defaults):
+#   5510/tcp — HTLS server (clients connect here)
+#   5511/tcp — HTXF file transfer subchannel
+#   5514/udp — WebRTC ICE/DTLS/RTP for voice (fogWraith
 #              Capabilities-Voice.md). All voice PeerConnections
-#              multiplex on this single port. Tier 3 voice tests
-#              (Phase 8.F) bind a host-side mapping with `-p
-#              5514:5504/udp` alongside the TCP ports.
-#   5600/tcp — HTLS over TLS (self-signed cert generated above;
+#              multiplex on this single port. Tier 3 Phase 8.F
+#              voice tests exercise control-channel only (TCP),
+#              but a future GStreamer-backed media test will hit
+#              this port.
+#   5610/tcp — HTLS over TLS (self-signed cert generated above;
 #              docs/tls-scoping.md Phase 1)
-#   5601/tcp — HTXF over TLS (Phase 2 in docs/tls-scoping.md;
+#   5611/tcp — HTXF over TLS (Phase 2 in docs/tls-scoping.md;
 #              client side wraps in Phase 2 of TLS support)
-EXPOSE 5500/tcp 5501/tcp 5504/udp 5600/tcp 5601/tcp
+# EXPOSE entries are informational under --network=host (Docker
+# uses the host's port table directly), but kept here for
+# documentation parity with the bridge-net containers (mhxd,
+# trackers).
+EXPOSE 5510/tcp 5511/tcp 5514/udp 5610/tcp 5611/tcp
 
 USER janus
 WORKDIR /opt/janus
