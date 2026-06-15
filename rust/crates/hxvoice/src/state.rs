@@ -856,7 +856,37 @@ impl SessionMachine {
                 },
             }],
             (SessionState::Connected, Event::Timeout { kind: Timeout::Media }) => {
-                self.fail("Voice media timeout (no RTP from peer)".into())
+                // Soften the Media timer to match the DTLS / ICE
+                // treatment above: emit an Error toast (so the user
+                // sees something if media really has stalled) but
+                // do not fail() the session.
+                //
+                // Why: the spec's "no RTP in 30s while Connected"
+                // assumption no longer holds for our common test
+                // shape — servers default new joiners to MUTED, and
+                // a room where every participant is muted produces
+                // zero RTP indefinitely. Pre-softening, the local
+                // session would silently walk to Leaving after 30s
+                // and the user would see the toolbar flip back to
+                // "Join Voice" with no warning.
+                //
+                // The runtime's wedge watchdog catches the
+                // genuinely-wedged case (no RTP during Connecting
+                // for the full watchdog window), so the Media timer
+                // becomes redundant for "session is broken" detection.
+                // What it still flags is "audio has been quiet for a
+                // while" — a useful UX signal but not a session-
+                // killer.
+                vec![Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    payload: SignalPayload::Error {
+                        text: concat!(
+                            "Voice quiet for 30s — no audio received ",
+                            "from any participant (everyone muted?)",
+                        )
+                        .into(),
+                    },
+                }]
             }
             // The runtime's wedge watchdog injects this timeout
             // ONLY after observing no RTP buffer activity for the
@@ -1922,10 +1952,15 @@ mod tests {
     /// the session vanishes.
     ///
     /// Now both timers just emit an Error toast and the machine
-    /// stays in whatever state it was. The (more reliable) Media
-    /// timer still fires fatally — that one fires only on
-    /// genuine "no inbound RTP for 30 s" conditions, which IS a
-    /// real signal that audio isn't flowing.
+    /// stays in whatever state it was. As of June 2026 the Media
+    /// timer is also softened — see the matching test
+    /// `media_timeout_in_connected_emits_error_but_stays_connected`
+    /// — because the "no inbound RTP for 30 s" assumption breaks on
+    /// rooms where every participant is muted (servers default new
+    /// joiners to MUTED, so a quiet room is the dominant Tier 3
+    /// shape rather than a real-world failure). The wedge watchdog
+    /// catches the genuinely-wedged Connecting case; soft Media is
+    /// a UX hint, not a session-killer.
     #[test]
     fn dtls_and_ice_timeouts_no_longer_tear_down() {
         let mut m = machine();
@@ -1977,8 +2012,11 @@ mod tests {
         )));
         assert!(!acts.iter().any(|a| matches!(a, Action::TearDown)));
 
-        // Media expiry IS still fatal — pin that separately to
-        // make sure we didn't accidentally soften it.
+        // Media expiry is now ALSO soft. The dedicated test
+        // `media_timeout_in_connected_emits_error_but_stays_connected`
+        // pins the exact wire shape; here we just confirm it shares
+        // the "Error signal, no TearDown" shape of its DTLS / ICE
+        // siblings above.
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1988,10 +2026,21 @@ mod tests {
         });
         assert_eq!(
             m.state(),
-            SessionState::Leaving,
-            "Media expiry must still drive fail()"
+            SessionState::Connected,
+            "Media expiry must NOT tear down the session — the runtime's \
+             wedge watchdog catches the truly-stuck case"
         );
-        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    ..
+                }
+            )),
+            "Media expiry should still surface an Error toast"
+        );
+        assert!(!acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
 
     #[test]
@@ -2057,8 +2106,17 @@ mod tests {
         assert_eq!(m.state(), SessionState::Idle);
     }
 
+    /// The Media timer used to fail() the session ("Voice media
+    /// timeout (no RTP from peer)"). That assumption no longer
+    /// holds — servers default new joiners to MUTED, so a room
+    /// where everyone is muted has zero RTP for 30s through no
+    /// real fault. The softened arm emits an Error toast but
+    /// keeps the session in Connected. The runtime's wedge
+    /// watchdog catches the genuinely-wedged case (no RTP during
+    /// Connecting); Media stays as a "audio has been quiet" UX
+    /// hint rather than a session-killer.
     #[test]
-    fn media_timeout_in_connected_tears_down() {
+    fn media_timeout_in_connected_emits_error_but_stays_connected() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
         m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
@@ -2067,8 +2125,19 @@ mod tests {
             state: ConnectionState::Connected,
         });
         let acts = m.step(Event::Timeout { kind: Timeout::Media });
-        assert_eq!(m.state(), SessionState::Leaving);
-        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+        assert_eq!(m.state(), SessionState::Connected);
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                Action::EmitSignal { kind: SignalKind::Error, .. }
+            )),
+            "Media timeout must surface an Error signal so the user sees \
+             the quiet-session warning"
+        );
+        assert!(
+            !acts.iter().any(|a| matches!(a, Action::TearDown)),
+            "Media timeout must NOT tear the session down"
+        );
     }
 
     // ---- Spec replay: User B joins room with A already in voice ----

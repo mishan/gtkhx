@@ -2,11 +2,18 @@
 
 > Companion to `docs/voice-chat-plan.md` §5 (Phase R3.0) and
 > `RUST-ROADMAP.md` §R3.
+>
+> **Status note (June 2026):** the Phase 8.x references throughout this
+> document were written when those phases were upcoming. All of 8.A
+> through 8.G have since shipped, so wherever this doc says "eventual"
+> or "Phase 8.B will" the actual code already exists in
+> `rust/crates/hxvoice-runtime/`. The conventions described below still
+> apply; the tense just hasn't been swept.
 
 ## The problem
 
 GtkHx's GObjects (the `GtkhxSession` singleton, individual `PanelFrame`s,
-the eventual `webrtcbin` instances from gstreamer-rs in Phase 8.B) are
+the `webrtcbin` instances from gstreamer-rs in `hxvoice-runtime`) are
 constructed and owned by C. Rust code needs to drive them — read
 properties, emit signals, attach handlers — without confusing GLib about
 who holds which reference.

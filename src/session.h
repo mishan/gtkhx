@@ -348,6 +348,19 @@ typedef struct _session {
      * session teardown / disconnect by network.c. */
     struct gtkhx_voice_runtime *voice_runtime;
 
+    /* Phase 8 follow-up: per-uid speaker indicator state. Driven
+     * from two sides — rcv.c calls hx_voice_model_ingest_participants
+     * on every VOICE_PARTICIPANTS blob (presence + mute bit), and
+     * voice_panel.c bridges the runtime's speaker_changed callback
+     * into hx_voice_model_set_speaking. users_view renders the
+     * resulting indicator column on the chat / users windows.
+     *
+     * Initialised once per session (cheap empty hashtable) so the
+     * users_view can subscribe even before any voice interaction
+     * has happened. NULL is also tolerated — the rcv / voice_panel
+     * ingest paths null-check before calling. */
+    struct _HxVoiceModel *voice_model;
+
     GtkWidget *news_text;
     GtkWidget *postButton;
     GtkWidget *reloadButton;

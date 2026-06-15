@@ -61,6 +61,7 @@
 #include "notify.h"
 #include "tracker.h"
 #include "voice_runtime.h"
+#include "voice_model.h"
 #include "tray.h"
 #include "xtext.h"
 #include "options.h"
@@ -798,6 +799,14 @@ fe_init (void)
     gchats_init (&the_session);
     tasks_init (&the_session);
     msg_windows_init (&the_session);
+
+    /* Voice indicator model. Lives for the whole session lifetime
+     * — users_view subscribes once at window construction time and
+     * the model survives reconnects (state cleared inside
+     * hx_htlc_close). Created here so users_view can connect to its
+     * "indicator-changed" signal during fe_init's window-creation
+     * sweep below. */
+    the_session.voice_model = hx_voice_model_new ();
 
     gtkhx_connect_signals (gtkhx_session_get_default ());
 

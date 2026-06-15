@@ -288,3 +288,16 @@ gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
 {
     (void) rt;
 }
+
+/* Speaker-indicator model stub. Same rationale as the runtime stub
+ * above: network.c::hx_htlc_close calls hx_voice_model_clear on
+ * disconnect to drop stale presence state. the_session.voice_model
+ * stays NULL in the test path, so the production null-check above
+ * skips the call — but the link still needs the symbol resolved. */
+typedef struct _HxVoiceModel HxVoiceModel;
+extern void hx_voice_model_clear (HxVoiceModel *self);
+void
+hx_voice_model_clear (HxVoiceModel *self)
+{
+    (void) self;
+}
