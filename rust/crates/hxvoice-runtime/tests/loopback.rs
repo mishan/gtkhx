@@ -173,7 +173,7 @@ fn pcm_caps_filter_pins_8khz_mono_s16le() {
 fn receive_bin_builds_and_exposes_ghost_sink_pad() {
     hxvoice_runtime::init();
 
-    let bin = hxvoice_runtime::audio::make_receive_bin("hxvoice-recv-test")
+    let bin = hxvoice_runtime::audio::make_receive_bin("hxvoice-recv-test", None)
         .expect(
             "receive bin must build — check gst-plugins-good \
              (rtppcmudepay / mulawdec / autoaudiosink) + \

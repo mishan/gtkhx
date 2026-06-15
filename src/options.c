@@ -47,6 +47,7 @@
 #include "text_util.h"
 #include "tracker.h"
 #include "debug.h"
+#include "voice_runtime.h"
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
@@ -687,6 +688,36 @@ changed_tray (session *sess)
     gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
+/* Settings → Voice → "Input device" combobox. Pushes the user's
+ * pick through to the Rust runtime via FFI; the next VoiceRuntime
+ * construction (typically the next Join Voice click) builds the
+ * send leg against the resolved device. Empty / NULL means
+ * "system default" — autoaudiosrc resolves whichever PulseAudio /
+ * PipeWire / ALSA default the host has configured.
+ *
+ * No effect on a currently-active voice session — the runtime is
+ * constructed once per session and the bins are built at Join
+ * time; changing the device picker takes effect on the next call.
+ * Phase 8.E follow-up could hot-swap by rebuilding the send bin
+ * on prefs change, but for now Leave + Join is the prescribed
+ * dance. */
+static void
+changed_voice_input_device (session *sess)
+{
+    (void)sess;
+    gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
+}
+
+/* Settings → Voice → "Output device" combobox. Same shape as
+ * changed_voice_input_device but for the receive (autoaudiosink)
+ * side. */
+static void
+changed_voice_output_device (session *sess)
+{
+    (void)sess;
+    gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
+}
+
 struct cfgvar {
     /* name of variable as it appears in conf file */
     const char *name;
@@ -882,6 +913,18 @@ struct cfgvar {
     { CFG_TRAY, { &gtkhx_prefs.tray }, BOOLEAN, 0, changed_tray, NULL },
     { CFG_USER_XSIZE, { &gtkhx_prefs.geo.users.xsize }, INT, 0, NULL, NULL },
     { CFG_USER_YSIZE, { &gtkhx_prefs.geo.users.ysize }, INT, 0, NULL, NULL },
+    { CFG_VOICE_INPUT_DEVICE,
+      { &gtkhx_prefs.voice_input_device },
+      STRING,
+      0,
+      changed_voice_input_device,
+      NULL },
+    { CFG_VOICE_OUTPUT_DEVICE,
+      { &gtkhx_prefs.voice_output_device },
+      STRING,
+      0,
+      changed_voice_output_device,
+      NULL },
     { CFG_WORDWRAP,
       { &gtkhx_prefs.word_wrap },
       BOOLEAN,
@@ -1484,6 +1527,17 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.notify_xfer = 1;
     gtkhx_prefs.notify_broadcast = 1;
     gtkhx_prefs.notify_omit_focused = 1;
+
+    /* Voice device defaults: empty string === "use system default
+	 * via autoaudiosrc / autoaudiosink". The Rust runtime side
+	 * normalises NULL and "" identically, so we just allocate an
+	 * empty string for the prefs round-trip. cfgvar_for_name's
+	 * allocated flag tells the read/write path the string is
+	 * heap-owned. */
+    gtkhx_prefs.voice_input_device = g_strdup ("");
+    (*cfgvar_for_name (CFG_VOICE_INPUT_DEVICE)).allocated = 1;
+    gtkhx_prefs.voice_output_device = g_strdup ("");
+    (*cfgvar_for_name (CFG_VOICE_OUTPUT_DEVICE)).allocated = 1;
 
     start_time = time (NULL);
 }
@@ -2673,6 +2727,83 @@ settings_page_notifications (AdwPreferencesPage *page)
     adw_preferences_page_add (page, mentions);
 }
 
+/* Phase 8.E: Voice device pickers. Queries gtkhx_voice_list_input_
+ * /output_devices at page-build time (no live monitoring yet — a
+ * Settings re-open after plugging a new mic re-runs the scan), then
+ * builds a "System default" + per-device combo via the existing
+ * pref_combo_row machinery. The values array stores stable
+ * gst::Device::name()s; the labels array stores display_name()s; the
+ * empty-string sentinel is the "use autoaudiosrc/autoaudiosink"
+ * choice. cfgvar_for_name's STRING type handles persistence; the
+ * change-callbacks (changed_voice_input_device /
+ * changed_voice_output_device) push the new value through to the
+ * Rust runtime via FFI. */
+static void
+settings_page_voice (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *devices_grp;
+    gtkhx_voice_device_list *inputs = gtkhx_voice_list_input_devices ();
+    gtkhx_voice_device_list *outputs = gtkhx_voice_list_output_devices ();
+    size_t n_in = inputs ? gtkhx_voice_device_list_len (inputs) : 0;
+    size_t n_out = outputs ? gtkhx_voice_device_list_len (outputs) : 0;
+    /* +1 for the leading "System default" entry whose value is "". */
+    const char **in_vals = g_new (const char *, n_in + 1);
+    const char **in_labels = g_new (const char *, n_in + 1);
+    const char **out_vals = g_new (const char *, n_out + 1);
+    const char **out_labels = g_new (const char *, n_out + 1);
+    size_t i;
+
+    in_vals[0] = "";
+    in_labels[0] = _ ("System default");
+    for (i = 0; i < n_in; i++) {
+        in_vals[i + 1] = gtkhx_voice_device_list_name (inputs, i);
+        in_labels[i + 1]
+            = gtkhx_voice_device_list_display_name (inputs, i);
+    }
+
+    out_vals[0] = "";
+    out_labels[0] = _ ("System default");
+    for (i = 0; i < n_out; i++) {
+        out_vals[i + 1] = gtkhx_voice_device_list_name (outputs, i);
+        out_labels[i + 1]
+            = gtkhx_voice_device_list_display_name (outputs, i);
+    }
+
+    devices_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (devices_grp, _ ("Audio Devices"));
+    adw_preferences_group_set_description (
+        devices_grp,
+        _ ("Capture and playback devices for voice chat. "
+           "\"System default\" follows your desktop's audio configuration. "
+           "Changes take effect the next time you join a voice room."));
+    adw_preferences_group_add (
+        devices_grp,
+        pref_combo_row (CFG_VOICE_INPUT_DEVICE, _ ("Input (microphone)"),
+                        in_vals, in_labels, (int)(n_in + 1)));
+    adw_preferences_group_add (
+        devices_grp,
+        pref_combo_row (CFG_VOICE_OUTPUT_DEVICE, _ ("Output (speakers)"),
+                        out_vals, out_labels, (int)(n_out + 1)));
+    adw_preferences_page_add (page, devices_grp);
+
+    /* pref_combo_row's gtk_string_list_append copies each string into
+	 * its own GtkStringList, so freeing the parallel arrays here is
+	 * safe. The underlying char* pointers for index >= 1 live as long
+	 * as the device list does — we hold those lists alive for the
+	 * page's lifetime by stashing them on the page widget so a later
+	 * close-then-reopen rebuilds against a fresh scan. */
+    g_free (in_vals);
+    g_free (in_labels);
+    g_free (out_vals);
+    g_free (out_labels);
+    g_object_set_data_full (G_OBJECT (page), "voice-input-devices",
+                            inputs,
+                            (GDestroyNotify)gtkhx_voice_device_list_free);
+    g_object_set_data_full (G_OBJECT (page), "voice-output-devices",
+                            outputs,
+                            (GDestroyNotify)gtkhx_voice_device_list_free);
+}
+
 /* Phase 5: Misc used to be a catchall for Behavior toggles. Most of
  * those have moved to the page they belong on (showjoin /
  * old_nickcomp → Chat, tracker_case → Trackers); what stays here is
@@ -2833,6 +2964,8 @@ create_options_window (GtkWidget *widget, gpointer data)
                        settings_page_chat);
     settings_add_page (dlg, _ ("Sound"), "audio-speakers-symbolic",
                        settings_page_sound);
+    settings_add_page (dlg, _ ("Voice"), "audio-input-microphone-symbolic",
+                       settings_page_voice);
     settings_add_page (dlg, _ ("Notifications"),
                        "preferences-system-notifications-symbolic",
                        settings_page_notifications);

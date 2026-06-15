@@ -40,6 +40,73 @@ use gstreamer as gst;
 use gstreamer::glib;
 use gstreamer::prelude::*;
 
+/// Global per-process record of the user's selected capture +
+/// playback device names.
+///
+/// Read by [`VoiceRuntime::new`](crate::runtime::VoiceRuntime::new)
+/// at construction time and threaded through to `make_send_bin` /
+/// `make_receive_bin` as their `device_name` argument. Written by
+/// the C side from preferences on startup, and again whenever the
+/// user changes the Settings → Voice pickers.
+///
+/// `None` means "fall back to system default" — `autoaudiosrc` /
+/// `autoaudiosink`. An empty-string set via FFI is also normalised
+/// to `None` here so the C side can store "" in `gtkhxrc` as the
+/// "use default" sentinel without us having to add an extra
+/// "clear" entry point.
+///
+/// Held behind a single `Mutex` because both the Settings UI and
+/// `VoiceRuntime::new` can run from the same main thread, but the
+/// runtime construction can also race with a "user changed the
+/// picker while a call is being set up" sequence; a Mutex is
+/// cheap and avoids the need to reason about that ordering. The
+/// reads happen once per call (at construction) and the writes
+/// happen on every settings save (rare); contention is negligible.
+static DEVICE_PREFS: std::sync::Mutex<DevicePrefs> =
+    std::sync::Mutex::new(DevicePrefs {
+        input: None,
+        output: None,
+    });
+
+struct DevicePrefs {
+    input: Option<String>,
+    output: Option<String>,
+}
+
+/// Set the preferred capture device by `gst::Device::name()`.
+/// Passing `None` or an empty `&str` clears the preference and
+/// falls back to the system default at the next runtime
+/// construction.
+pub fn set_input_device(name: Option<&str>) {
+    let normalised = name.filter(|s| !s.is_empty()).map(str::to_string);
+    if let Ok(mut prefs) = DEVICE_PREFS.lock() {
+        prefs.input = normalised;
+    }
+}
+
+/// Set the preferred playback device by `gst::Device::name()`.
+/// Same `None` / empty semantics as [`set_input_device`].
+pub fn set_output_device(name: Option<&str>) {
+    let normalised = name.filter(|s| !s.is_empty()).map(str::to_string);
+    if let Ok(mut prefs) = DEVICE_PREFS.lock() {
+        prefs.output = normalised;
+    }
+}
+
+/// Return the currently-preferred capture device name, or `None`
+/// for "system default". The returned owned `String` lives past
+/// the lock release; the runtime needs that because it'll thread
+/// the value through several borrow-checker hops.
+pub fn input_device() -> Option<String> {
+    DEVICE_PREFS.lock().ok().and_then(|p| p.input.clone())
+}
+
+/// Return the currently-preferred playback device name, or
+/// `None` for "system default".
+pub fn output_device() -> Option<String> {
+    DEVICE_PREFS.lock().ok().and_then(|p| p.output.clone())
+}
+
 /// One enumerated audio device, the typed shape the eventual
 /// settings UI cares about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,13 +307,19 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
 ///
 /// `name` becomes the bin's element name so pipeline introspection
 /// can tell receive legs apart — convention is `"hxvoice-recv-<mid>"`.
-pub fn make_receive_bin(name: &str) -> Option<gst::Bin> {
+pub fn make_receive_bin(
+    name: &str,
+    device_name: Option<&str>,
+) -> Option<gst::Bin> {
     let bin = gst::Bin::builder().name(name).build();
     let depay = gst::ElementFactory::make("rtppcmudepay").build().ok()?;
     let dec = gst::ElementFactory::make("mulawdec").build().ok()?;
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
     let res = gst::ElementFactory::make("audioresample").build().ok()?;
-    let sink = gst::ElementFactory::make("autoaudiosink").build().ok()?;
+    // Output device — same Some/None pattern as the send leg.
+    // None falls back to autoaudiosink; an explicit name resolves
+    // via DeviceMonitor against the `Audio/Sink` class.
+    let sink = make_sink(device_name)?;
     bin.add_many([&depay, &dec, &conv, &res, &sink]).ok()?;
     gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
     // Diagnostic: attach pad probes at FOUR points along the
@@ -368,15 +441,20 @@ fn attach_buffer_probe(
 /// description (PCMU caps, sendrecv direction) when answering an
 /// incoming offer — without a send-leg attached, webrtcbin answers
 /// with `a=inactive` and the peer connection never carries media.
-pub fn make_send_bin(name: &str) -> Option<gst::Bin> {
+pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> {
     let bin = gst::Bin::builder().name(name).build();
-    // System-default microphone via autoaudiosrc — the auto-plugger
-    // picks pulsesrc / pipewiresrc / alsasrc / etc. based on what's
-    // available. No `is-live` setting needed; real capture sources
-    // are intrinsically live and the wrapper handles timing.
-    let src = gst::ElementFactory::make("autoaudiosrc")
-        .build()
-        .ok()?;
+    // Capture device. `device_name == None` falls back to
+    // autoaudiosrc (system default); a `Some(name)` value is
+    // looked up via DeviceMonitor with the `Audio/Source` filter
+    // and the resolved device's `create_element` returns a
+    // pre-configured source. The fallback path is intentional:
+    // if the user picked a specific device that's no longer
+    // present (USB mic unplugged, profile changed), they still
+    // get audio through the default source rather than a silent
+    // failure. The Settings UI surfaces this case as a
+    // "configured input device unavailable" toast in Phase
+    // 8.E follow-ups.
+    let src = make_source(device_name)?;
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
     let res = gst::ElementFactory::make("audioresample").build().ok()?;
     let caps = make_pcm8khz_caps_filter()?;
