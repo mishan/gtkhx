@@ -104,10 +104,12 @@ jobs:
             glib2-devel gobject-introspection-devel \
             nettle-devel zlib-devel \
             gsound-devel \
+            libnice-gstreamer1 \
             libsoup3-devel \
             gstreamer1-devel \
             gstreamer1-plugins-base-devel \
             gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-bad-free-extras \
             gstreamer1-plugins-good \
             gettext-devel \
             desktop-file-utils appstream \
@@ -343,6 +345,7 @@ jobs:
                 gstreamer1-plugins-base-devel \
                 gstreamer1-plugins-bad-free-devel \
                 gstreamer1-plugins-good \
+                libnice-gstreamer1 \
                 gettext-devel \
                 desktop-file-utils appstream \
                 libpanel-devel \

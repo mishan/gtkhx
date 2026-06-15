@@ -619,53 +619,58 @@ impl SessionMachine {
 
             // ---- Track lifecycle ----
 
-            // Receive pad appeared: map to user_id via the cached
-            // mid map. mid `"send"` is the local send leg; we
-            // don't open a receive bin for it.
+            // Receive pad appeared: build a receive bin for it.
             //
-            // Unknown mid (not in the cached mid_to_user map): no-op.
-            // Earlier revisions fabricated user_id=0 here, but spec
-            // §"Track-to-User Mapping" reserves uid 0 and the runtime
-            // would then start a receive pipeline tagged to an
-            // invalid speaker — better to surface the missing
-            // mid_to_user entry by NOT starting the receive bin at
-            // all, which makes the issue (stale SDP cache vs a fresh
-            // pad-added) visible at the runtime layer instead of
-            // silently routing audio to nobody.
+            // The runtime's `connect_pad_added` only forwards
+            // Src-direction pads here, so any `WebrtcPadAdded` is by
+            // definition a receive pad — we never need to drop one
+            // because of its mid label. An earlier revision had a
+            // `if mid == "send" { return }` guard, but Janus
+            // VoiceRoom sometimes labels every mline (including the
+            // receive ones it forwards) with `a=mid:send`, so the
+            // guard was silently dropping the only audio leg.
+            //
+            // For speaker attribution we still consult
+            // `mid_to_user`. When the offer's mid label was
+            // `user-N`, we get the right speaker uid. When the
+            // offer reused `send` or some other label we don't
+            // know, we fall back to `user_id = 0` ("anonymous
+            // receive") and let the runtime build the bin anyway.
+            // Audio plays — the UI just can't attribute it to a
+            // specific participant until we figure out Janus's
+            // mid-naming convention.
+            //
             // Accept pad-added in `OfferPending` too: during a
             // renegotiation drain we stay in `OfferPending` while
             // emitting `SetLocalDescription` / 603 for the
             // in-flight answer, and webrtcbin can produce pads
             // for the just-applied remote description before we
-            // reach `Connecting`. The pad gets cached by
-            // `connect_pad_added` and the matching mid is in
-            // `mid_to_user` (the queue-drain block already
-            // primed it), so we can start the receive bin right
-            // here — dropping the pad would lose the audio leg
-            // for the entire renegotiation cycle.
+            // reach `Connecting`. Dropping the pad here would
+            // lose the audio leg for the entire renegotiation
+            // cycle.
             (
                 SessionState::OfferPending
                 | SessionState::Connecting
                 | SessionState::Connected,
                 Event::WebrtcPadAdded { mid },
             ) => {
-                if mid == "send" {
-                    return Vec::new();
-                }
-                match self.mid_to_user.get(&mid).copied() {
-                    Some(user_id) => vec![Action::StartReceivePipeline {
-                        mid,
-                        user_id,
-                    }],
-                    None => Vec::new(),
-                }
+                let user_id =
+                    self.mid_to_user.get(&mid).copied().unwrap_or(0);
+                vec![Action::StartReceivePipeline { mid, user_id }]
             }
 
-            // Receive pad gone: tear the matching bin down. mid
-            // `"send"` here would be webrtcbin shutting our send
-            // leg, which `LeaveRequested` / Failed already covers
-            // — ignore. OfferPending included for symmetry with
-            // the pad-added arm above: webrtcbin can drop a pad
+            // Receive pad gone: tear the matching bin down. We
+            // dropped the `mid == "send"` early-return that the
+            // pad-added arm used to have, for the same reason:
+            // Janus VoiceRoom sometimes labels receive mlines
+            // with `a=mid:send`, so a removed `send` pad can be a
+            // genuine receive-side teardown. StopReceivePipeline
+            // is a no-op if no bin is keyed by that mid, so
+            // there's no harm in firing it for the local send
+            // leg's mid if that ever shows up here.
+            //
+            // OfferPending included for symmetry with the
+            // pad-added arm above: webrtcbin can drop a pad
             // mid-renegotiation when the new remote description
             // removes a media line.
             (
@@ -673,12 +678,7 @@ impl SessionMachine {
                 | SessionState::Connecting
                 | SessionState::Connected,
                 Event::WebrtcPadRemoved { mid },
-            ) => {
-                if mid == "send" {
-                    return Vec::new();
-                }
-                vec![Action::StopReceivePipeline { mid }]
-            }
+            ) => vec![Action::StopReceivePipeline { mid }],
 
             // ---- Participants list ----
 
@@ -716,10 +716,19 @@ impl SessionMachine {
 
             // ---- Mute toggle ----
 
-            // Client-driven mute / unmute. No-op if already in
-            // the requested state.
+            // Client-driven mute / unmute. Accepted from any
+            // active-room state: the toolbar treats JoinSent +
+            // OfferPending as "joined" so the user can click
+            // Mute / Unmute before the WebRTC handshake
+            // completes, and the server tracks the mute bit
+            // independently of WebRTC state — the wire MUTE
+            // frame can ship any time after JOIN. No-op if
+            // already in the requested state.
             (
-                SessionState::Connecting | SessionState::Connected,
+                SessionState::JoinSent
+                | SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
                 Event::MuteToggleRequested { muted },
             ) => {
                 if self.muted == muted {
@@ -790,15 +799,62 @@ impl SessionMachine {
                 self.fail("Server did not reply to voice join".into())
             }
 
-            // ICE / DTLS / Media watchdogs — same shape.
+            // ICE / DTLS / Media watchdogs.
+            //
+            // DTLS + ICE used to fail() the session on expiry, but
+            // webrtcbin's `_collate_peer_connection_states` has a
+            // known "Undefined situation detected, returning old
+            // state" branch when the bin has a mix of transports
+            // in different states (which Janus's multi-mline
+            // SDP routinely produces). In that branch webrtcbin
+            // never fires `peer-connection-state == connected`,
+            // even though RTP packets ARE flowing — and our
+            // state machine's wait-for-Connected logic times out
+            // and tears down a working session.
+            //
+            // Workaround: emit an Error toast on DTLS / ICE
+            // expiry (so the user sees something if things really
+            // are wedged) but don't fail() — let the session
+            // continue. The downstream Media timer (no RTP for
+            // 30s while Connected) IS still fatal because that's
+            // a real signal that audio isn't flowing.
+            //
+            // The proper fix is to also notify on
+            // ice-connection-state and use ICE's `connected` /
+            // `completed` as the "we're actually connected" gate,
+            // since ICE state is what webrtcbin manages itself.
+            // That's a bigger refactor; this softening is the
+            // quick unblock.
             (
                 SessionState::Connecting | SessionState::Connected,
                 Event::Timeout { kind: Timeout::IceConnectivity },
-            ) => self.fail("Voice ICE connectivity check failed".into()),
+            ) => vec![Action::EmitSignal {
+                kind: SignalKind::Error,
+                payload: SignalPayload::Error {
+                    // `concat!` joins adjacent literals without
+                    // embedding source-file indentation — using
+                    // backslash-newline would carry the leading
+                    // spaces into the user-facing toast.
+                    text: concat!(
+                        "Voice ICE connectivity check slow — ",
+                        "keeping session alive",
+                    )
+                    .into(),
+                },
+            }],
             (
                 SessionState::Connecting,
                 Event::Timeout { kind: Timeout::Dtls },
-            ) => self.fail("Voice DTLS handshake failed".into()),
+            ) => vec![Action::EmitSignal {
+                kind: SignalKind::Error,
+                payload: SignalPayload::Error {
+                    text: concat!(
+                        "Voice DTLS handshake slow — ",
+                        "keeping session alive",
+                    )
+                    .into(),
+                },
+            }],
             (SessionState::Connected, Event::Timeout { kind: Timeout::Media }) => {
                 self.fail("Voice media timeout (no RTP from peer)".into())
             }
@@ -1506,8 +1562,20 @@ mod tests {
         }
     }
 
+    /// `WebrtcPadAdded` with mid `"send"` used to no-op — the
+    /// state machine assumed any `send` mid was the local outgoing
+    /// leg's bookkeeping pad. In practice (observed against Janus
+    /// VoiceRoom against the local test server, June 2026) Janus
+    /// also labels forwarded receive mlines with `a=mid:send`, so
+    /// the early-return was silently swallowing the only audio
+    /// leg. The runtime's `connect_pad_added` already filters by
+    /// Src direction before injecting the event, so anything
+    /// reaching this arm is by definition a receive pad — start
+    /// the receive bin regardless of mid label, falling back to
+    /// `user_id = 0` ("anonymous receive") when the mid isn't in
+    /// the cached user map.
     #[test]
-    fn pad_added_for_send_mid_does_nothing() {
+    fn pad_added_for_send_mid_starts_anonymous_receive() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
         m.step(Event::SdpOfferReceived {
@@ -1516,18 +1584,21 @@ mod tests {
         });
         m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
         let acts = m.step(Event::WebrtcPadAdded { mid: "send".into() });
-        assert!(acts.is_empty());
+        assert_eq!(
+            acts,
+            vec![Action::StartReceivePipeline {
+                mid: "send".into(),
+                user_id: 0,
+            }]
+        );
     }
 
-    /// Regression (Copilot review): WebrtcPadAdded for a mid not in
-    /// the cached mid_to_user map used to fabricate `user_id = 0`
-    /// and start a receive pipeline anyway. uid 0 is the spec's
-    /// reserved sentinel — the runtime would then route audio to
-    /// a non-existent speaker. Now the unknown-mid path no-ops so
-    /// the missing cache entry surfaces as a silent leg rather
-    /// than corrupted UI.
+    /// Same fallback for any other mid that's not in `mid_to_user`:
+    /// the speaker is unknown but the receive bin still gets built
+    /// so the audio plays. UI speaker attribution can be wired up
+    /// later once the Janus mid convention is understood.
     #[test]
-    fn pad_added_for_unknown_user_mid_is_a_noop() {
+    fn pad_added_for_unknown_user_mid_starts_anonymous_receive() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
         // SDP carries user-5 only; user-99 isn't in the cache.
@@ -1540,8 +1611,14 @@ mod tests {
         let acts = m.step(Event::WebrtcPadAdded {
             mid: "user-99".into(),
         });
-        // No StartReceivePipeline — pad is silently dropped.
-        assert!(acts.is_empty());
+        // StartReceivePipeline with user_id=0 (unknown speaker).
+        assert_eq!(
+            acts,
+            vec![Action::StartReceivePipeline {
+                mid: "user-99".into(),
+                user_id: 0,
+            }]
+        );
     }
 
     /// Regression: during a renegotiation drain the machine
@@ -1616,6 +1693,51 @@ mod tests {
         assert!(kinds.contains(&"pipeline"));
         assert!(kinds.contains(&"wire606"));
         assert!(kinds.contains(&"signal"));
+    }
+
+    /// Regression: the mute toggle was reachable from JoinSent
+    /// and OfferPending via the toolbar (state_is_joined treats
+    /// both as joined so the user can click before the WebRTC
+    /// handshake completes), but the state machine's arm only
+    /// matched Connecting | Connected — the event fell through
+    /// to the catch-all and the MuteChanged signal never fired.
+    /// Symptom: clicking Mute / Unmute during handshake flipped
+    /// the GTK toggle's pressed-color but didn't update the
+    /// label.
+    #[test]
+    fn mute_toggle_works_from_join_sent_and_offer_pending() {
+        // JoinSent: server hasn't sent the SDP offer yet.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 4 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        let acts = m.step(Event::MuteToggleRequested { muted: true });
+        assert!(m.is_muted());
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::MuteChanged,
+                payload: SignalPayload::MuteChanged { muted: true }
+            }
+        )));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 606, .. }
+        )));
+
+        // OfferPending: SDP offer in, answer not ready yet.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 4 });
+        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::OfferPending);
+        let acts = m.step(Event::MuteToggleRequested { muted: true });
+        assert!(m.is_muted());
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::MuteChanged,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -1769,6 +1891,88 @@ mod tests {
             text: "Room is full".into(),
         }));
         assert_eq!(m.state(), SessionState::Leaving);
+        assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+    }
+
+    /// Regression: DTLS / ICE timer expiry used to walk the
+    /// session to Leaving via fail(). That tears down working
+    /// sessions when webrtcbin's _collate_peer_connection_states
+    /// hits the "Undefined situation" branch (which happens
+    /// routinely with multi-mline SDP offers from Janus) and
+    /// stops reporting Connected. The user-visible symptom was:
+    /// voice connects, RTP starts flowing, then 10 seconds later
+    /// the session vanishes.
+    ///
+    /// Now both timers just emit an Error toast and the machine
+    /// stays in whatever state it was. The (more reliable) Media
+    /// timer still fires fatally — that one fires only on
+    /// genuine "no inbound RTP for 30 s" conditions, which IS a
+    /// real signal that audio isn't flowing.
+    #[test]
+    fn dtls_and_ice_timeouts_no_longer_tear_down() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 1 });
+        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        let connecting_state = m.state();
+        assert_eq!(connecting_state, SessionState::Connecting);
+
+        // DTLS expiry: emits an Error signal but doesn't move state.
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::Dtls,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "DTLS expiry must not tear down the session"
+        );
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    ..
+                }
+            )),
+            "DTLS expiry should still surface an Error toast"
+        );
+        assert!(
+            !acts.iter().any(|a| matches!(a, Action::TearDown)),
+            "DTLS expiry must NOT emit TearDown"
+        );
+
+        // ICE expiry: same shape.
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::IceConnectivity,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "ICE expiry must not tear down the session"
+        );
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::EmitSignal {
+                kind: SignalKind::Error,
+                ..
+            }
+        )));
+        assert!(!acts.iter().any(|a| matches!(a, Action::TearDown)));
+
+        // Media expiry IS still fatal — pin that separately to
+        // make sure we didn't accidentally soften it.
+        m.step(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(m.state(), SessionState::Connected);
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::Media,
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::Leaving,
+            "Media expiry must still drive fail()"
+        );
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
 

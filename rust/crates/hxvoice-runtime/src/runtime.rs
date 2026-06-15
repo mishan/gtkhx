@@ -755,6 +755,16 @@ struct Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
+        // Walk the pipeline back to Null before letting it drop.
+        // Production sets it to Playing in VoiceRuntime::new so
+        // webrtcbin can do peer-connection work; teardown is the
+        // matching reverse. Without this, the pipeline thread
+        // may outlive the dispatch loop and a late bus message
+        // can fire against the about-to-be-dropped bus watch.
+        if let Some(pipeline) = self.pipeline.as_ref() {
+            let _ = pipeline.set_state(gstreamer::State::Null);
+        }
+
         // Cancel any still-armed timer sources so glib doesn't
         // fire a callback against a now-dropped runtime. The
         // callback's `with_main_thread_runtime` lookup would
@@ -826,8 +836,45 @@ impl VoiceRuntime {
         // the way through is the simplest preservation that
         // still helps an operator distinguish "plugin missing"
         // from "pipeline rejected the element."
+        // Build webrtcbin with `bundle-policy=max-bundle`. This
+        // is critical for the multi-mline case (join-second
+        // client receives an SDP offer carrying BOTH a=mid:send
+        // for our outgoing leg AND a=mid:user-N for forwarded
+        // audio from another participant).
+        //
+        // Default `bundle-policy` is `none`. Reading
+        // gstwebrtcbin.c:6212-6214:
+        //
+        //   if (webrtc->bundle_policy != GST_WEBRTC_BUNDLE_POLICY_NONE)
+        //     if (!_parse_bundle (sdp->sdp, &bundled, error))
+        //       goto done;
+        //
+        // …with `none`, webrtcbin SKIPS parsing the BUNDLE
+        // group from the offer entirely. It then creates a
+        // SEPARATE transportstream per mline. Janus's offer
+        // includes `a=group:BUNDLE 0 1`, but our default-policy
+        // answer ignores it, so the receive side ends up on
+        // its own transportstream1 with its own session 1 in
+        // rtpbin. Incoming RTP arriving on the bundled UDP
+        // socket goes through transportstream0/session 0 (the
+        // send transceiver's), where rtpbin can't find a
+        // matching recvonly transceiver, doesn't fire its
+        // pad-added, doesn't create a jitterbuffer, and our
+        // webrtcbin.pad-added never gets called. The receive
+        // leg dies silently and Janus times the session out.
+        //
+        // `max-bundle` makes webrtcbin parse + honour the
+        // BUNDLE group, share a single transportstream + rtp
+        // session across all mlines, and demux incoming RTP
+        // via the MID extension to the right transceiver.
+        // The fix complements the codec-preferences pin we set
+        // in `connect_on_new_transceiver`: without that, the
+        // answer mline lacks a codec; without this, the
+        // answer lacks a working BUNDLE group. Both have to
+        // be in place for the receive side to function.
         let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
             .name("hxvoice-webrtcbin")
+            .property_from_str("bundle-policy", "max-bundle")
             .build()
             .map_err(|e| {
                 gstreamer::warning!(
@@ -845,6 +892,124 @@ impl VoiceRuntime {
                 );
                 RuntimeError::WebrtcbinUnavailable
             })?;
+        // Add the send-leg stub so webrtcbin has something to
+        // advertise on the audio mline when it answers. Without
+        // a sink pad attached, webrtcbin produces an answer with
+        // `a=inactive` for the audio media — Janus then has nothing
+        // to route the media stream through, and the ICE
+        // connection-state walks new → checking → failed at the
+        // ~7 second mark.
+        //
+        // The send bin captures from `autoaudiosrc` (system-
+        // default microphone). Phase 8.E adds settings-driven
+        // device override via the DEVICE_PREFS in audio.rs; the
+        // encoder + payloader chain is identical either way.
+        //
+        // Build failure here means the user's GStreamer install
+        // is missing `mulawenc` or `rtppcmupay` (both in
+        // gst-plugins-good); collapse to WebrtcbinUnavailable
+        // since the runtime can't function without the send leg
+        // either way.
+        let send_bin = crate::audio::make_send_bin("hxvoice-send-bin")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: failed to build the send bin — check that \
+                     mulawenc and rtppcmupay are installed (both ship in \
+                     gst-plugins-good)"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        pipeline.add(&send_bin).map_err(|e| {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to add send bin to pipeline: {e}"
+            );
+            RuntimeError::WebrtcbinUnavailable
+        })?;
+        // Request a sink pad on webrtcbin and link the send bin's
+        // src ghost pad to it. `sink_%u` returns a new sink pad
+        // backed by a fresh transceiver — webrtcbin picks the
+        // mline index. We DO NOT pre-add a transceiver via
+        // `add-transceiver` because that creates a second,
+        // unwired transceiver: SDP negotiation matches our
+        // pre-added one to mline 0 (a=mid:send) leaving its
+        // freshly-created send pad orphaned, then matches the
+        // `request_pad_simple` transceiver to mline 1
+        // (a=mid:user-N) collapsing it to recvonly. End result:
+        // our send chain is wired into a recvonly transceiver,
+        // packets get dropped, and the receive pad on the same
+        // transceiver never gets exposed via `pad-added` because
+        // webrtcbin thinks the output stream is "already
+        // connected" from the sink_%u setup. Janus's per-user
+        // mlines are the canonical way receive transceivers
+        // materialise here: this `sink_%u` request creates one
+        // sendonly transceiver for our outgoing audio, and
+        // webrtcbin auto-creates a recvonly transceiver (with a
+        // src pad) for every `a=mid:user-N` line in the offer.
+        //
+        // The link must happen BEFORE pipeline.set_state(Playing)
+        // so the negotiation sees a populated transceiver
+        // direction when create-answer fires later.
+        let webrtc_sink = webrtcbin
+            .request_pad_simple("sink_%u")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: webrtcbin refused to grant a sink_%u pad"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        let send_src = send_bin
+            .static_pad("src")
+            .ok_or_else(|| {
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "hxvoice: send_bin missing its ghost src pad"
+                );
+                RuntimeError::WebrtcbinUnavailable
+            })?;
+        send_src.link(&webrtc_sink).map_err(|e| {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to link send_bin → webrtcbin sink: {e:?}"
+            );
+            RuntimeError::WebrtcbinUnavailable
+        })?;
+        // Note: we deliberately do NOT pre-add a Recvonly
+        // transceiver here, even though the receive pad-added
+        // misfire suggests it might help.
+        //
+        // We tried that on claude/voice-pre-add-recvonly: SDP
+        // matching DID become symmetric (transceiver0 →
+        // sendonly for the send mline, transceiver1 → recvonly
+        // for the user-N mline) and the test trace showed both
+        // transceivers reaching the SDP processor's "creating
+        // new receive pad" branch. But:
+        //
+        //   (a) pad-added STILL didn't fire — the receive
+        //       src_0 pad stayed in detached state and the
+        //       "stream already connected to rtpbin" short-
+        //       circuit kept firing exactly as before. So
+        //       pre-adding the transceiver doesn't solve the
+        //       underlying gst_element_add_pad gating.
+        //   (b) ICE connectivity checks now fail — the peer
+        //       connection state goes `new → connecting →
+        //       failed` at the 30 s checking timeout, instead
+        //       of reaching `connected` as it did with one
+        //       transceiver. Something about the second
+        //       transceiver's SDP shape or BUNDLE wiring
+        //       confuses libnice or Janus.
+        //
+        // Until we understand the receive pad-add gate
+        // (probably needs reading gstwebrtcbin.c source for
+        // `_update_transceiver_from_sdp_media` and whatever
+        // pad-add path it expects after "creating new receive
+        // pad"), the right move is to stay on the single-
+        // transceiver setup that at least has working ICE +
+        // working send-direction RTP, and pick this back up
+        // once we have a clearer picture of the webrtcbin
+        // internals.
         let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
         // Wire the on-ice-candidate signal BEFORE registering.
         // The signal callback only looks the runtime up via
@@ -853,9 +1018,78 @@ impl VoiceRuntime {
         // doing it pre-register keeps the construction sequence
         // strictly linear.
         connect_on_ice_candidate(&webrtcbin, runtime_id);
-        connect_pad_added(&webrtcbin, runtime_id);
+        connect_pad_added(&webrtcbin, &pipeline, runtime_id);
         connect_connection_state_notify(&webrtcbin, runtime_id);
+        connect_on_new_transceiver(&webrtcbin);
         let bus_watch_guard = attach_pipeline_bus_watch(&pipeline);
+        // Transition the pipeline out of Null so webrtcbin's
+        // internal peer connection becomes usable. While the
+        // pipeline is in Null, webrtcbin reports its peer
+        // connection as `closed` and silently aborts every task
+        // we hand it — set-remote-description, create-answer,
+        // add-ice-candidate, the lot. That manifests as the
+        // state machine getting stuck in OfferPending: webrtcbin
+        // accepts the call, logs "Peerconnection is closed,
+        // aborting execution" at DEBUG level, and never resolves
+        // the promise.
+        //
+        // Playing is the production target — that's the state
+        // webrtcbin needs to actually flow media. A failure here
+        // (state-change rejected by an element) is fatal to the
+        // session, so collapse to WebrtcbinUnavailable rather
+        // than soldier on with a half-initialised pipeline.
+        // Move the pipeline to Playing. webrtcbin's internal
+        // `is_closed` flag mirrors the bin's element state: it's
+        // TRUE while in Null, FALSE in any higher state. With
+        // is_closed=TRUE every peer-connection task (set-remote-
+        // description, create-answer, add-ice-candidate, ...)
+        // logs "Peerconnection is closed, aborting execution" at
+        // DEBUG level and returns silently — which manifests
+        // user-side as the state machine getting stuck in
+        // OfferPending forever.
+        //
+        // The state change is best-effort: in test environments
+        // (no audio devices, no GLib main loop driving the bus)
+        // rtpbin and other internal elements may refuse to
+        // preroll and the call returns StateChangeError. That's
+        // fine for the unit tests, which exit the dispatch arms
+        // cleanly regardless of peer-connection state. In
+        // production the pipeline reaches at least Ready (often
+        // Async toward Playing as transceivers are added by the
+        // SDP exchange) which is enough to clear `is_closed` so
+        // the negotiation can proceed.
+        if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+            // Failure here is usually one of two things:
+            //   1. Missing GStreamer nice plugin (libnice).
+            //      webrtcbin refuses to leave NULL when nicesink /
+            //      nicesrc aren't registered, and silently aborts
+            //      every peer-connection task afterwards
+            //      ("Peerconnection is closed, aborting execution"
+            //      at DEBUG level). On Debian / Ubuntu the plugin
+            //      lives in its own package — gst-plugins-bad
+            //      doesn't include it because of libnice's split
+            //      licensing. Fix: `apt install gstreamer1.0-nice`.
+            //      Fedora: gstreamer1-plugins-bad-free-extras or
+            //      build gst-plugins-bad with --enable-nice.
+            //   2. Test environment with no audio devices and no
+            //      GLib main loop driving the bus — rtpbin can't
+            //      preroll. Unit tests hit this path deliberately
+            //      and don't drive real peer-connection work, so
+            //      they exit cleanly even with the pipeline stuck
+            //      in NULL.
+            // (1) is the user-visible production case and the
+            // reason this warning is loud about the package name.
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: pipeline set_state(Playing) returned {e:?}. \
+                 If you see 'libnice elements are not available' on the \
+                 webrtcbin channel just above, install the GStreamer nice \
+                 plugin: `apt install gstreamer1.0-nice` on Debian/Ubuntu, \
+                 or gstreamer1-plugins-bad-free-extras on Fedora. \
+                 webrtcbin won't leave NULL without it and every SDP / \
+                 ICE op will silently no-op."
+            );
+        }
         let runtime = VoiceRuntime {
             inner: Rc::new(RefCell::new(Inner {
                 machine: SessionMachine::new(),
@@ -1151,6 +1385,27 @@ impl VoiceRuntime {
                         inner.answer_generation,
                     )
                 };
+                // Loud dump of every `a=mid:` line in the offer
+                // so we can see what Janus is actually labelling
+                // its media lines with. cache_offer_mids in the
+                // state machine only learns user_id from
+                // `a=mid:user-N`; anything else (audio0, a
+                // numeric mid, or Janus's reused `send` for
+                // forwarded streams) still gets a receive bin
+                // built — the WebrtcPadAdded handler falls back
+                // to user_id = 0 ("anonymous receive") and audio
+                // still plays, the UI just can't attribute it to
+                // a specific speaker until we extend the mid
+                // cache.
+                for line in sdp.lines() {
+                    let trimmed = line.trim_end_matches('\r');
+                    if let Some(rest) = trimmed.strip_prefix("a=mid:") {
+                        crate::debug::log!(
+                            "voice-pipe",
+                            "SDP offer carries a=mid:{rest}"
+                        );
+                    }
+                }
                 if let Some(bin) = webrtcbin {
                     apply_remote_offer_and_chain_answer(
                         &bin, &sdp, runtime_id, generation,
@@ -1735,9 +1990,11 @@ fn lookup_local_sdp_mid(
 /// `handle_event` after parking the pad.
 fn connect_pad_added(
     webrtcbin: &gstreamer::Element,
+    pipeline: &gstreamer::Pipeline,
     runtime_id: u64,
 ) {
     let main_ctx = gstreamer::glib::MainContext::default();
+    let pipeline = pipeline.clone();
     webrtcbin.connect_pad_added(move |_bin, pad| {
         if pad.direction() != gstreamer::PadDirection::Src {
             // Sink pads (request pads from the send leg) come
@@ -1747,6 +2004,11 @@ fn connect_pad_added(
         let mid = match lookup_pad_mid(pad) {
             Some(m) => m,
             None => {
+                crate::debug::log!(
+                    "voice-pipe",
+                    "pad-added with no resolvable mid (pad={}); dropping",
+                    pad.name()
+                );
                 gstreamer::warning!(
                     gstreamer::CAT_RUST,
                     "hxvoice: pad-added with no resolvable mid \
@@ -1756,17 +2018,115 @@ fn connect_pad_added(
                 return;
             }
         };
-        // Clone the pad — gst::Pad is Send + Sync (GObject), so
-        // we can hand it across the main-thread hop. Capture
-        // (mid, pad) in the closure; both are Send.
+        // Log the resolved mid so we can see exactly what mid
+        // webrtcbin assigned to the receive pad. If this doesn't
+        // match what the state machine cached from the SDP
+        // offer's a=mid: lines, StartReceivePipeline never fires
+        // and audio never reaches the speakers — the
+        // silent-failure that bit us in the multi-client test.
+        crate::debug::log!(
+            "voice-pipe",
+            "pad-added pad={} mid={} dir={:?}",
+            pad.name(),
+            mid,
+            pad.direction()
+        );
+
+        // SYNCHRONOUS receive-bin build + link, BEFORE we return
+        // from this signal handler.
+        //
+        // This signal fires from webrtcbin's worker thread the
+        // moment `on_rtpbin_pad_added` calls `gst_element_add_pad`
+        // (gstwebrtcbin.c:7724). rtpbin starts pushing the first
+        // buffer downstream into the bin's internal target
+        // immediately after, on its streaming thread. If we
+        // marshal to the main GLib loop to build the receive bin
+        // and link the pad (the old path), there's a ~milliseconds-
+        // to-tens-of-milliseconds gap during which buffers get
+        // pushed to a pad with no peer, return GST_FLOW_NOT_LINKED,
+        // and rtpjitterbuffer / rtpbin can interpret the consumer
+        // as gone — leading to the "one buffer at webrtcbin src_0,
+        // then silence" pattern we observed in voice.log /
+        // voice-2.log even after codec-preferences + bundle-policy
+        // were correct.
+        //
+        // gst::Pipeline::add, gst::Element::link, and
+        // sync_state_with_parent are all thread-safe (GObject +
+        // PADD lock); we don't need the main thread to do them.
+        // The main-thread hop later is only for bookkeeping
+        // (recording the bin in receive_bins so LeaveRequested
+        // can tear it down).
+        let recv_bin = start_receive_bin(&pipeline, pad, &mid);
         let pad = pad.clone();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
             with_main_thread_runtime(runtime_id, |rt| {
-                rt.inner
-                    .borrow_mut()
-                    .pending_pads
-                    .insert(mid.clone(), pad);
+                // If the synchronous link succeeded, store the
+                // bin in receive_bins so LeaveRequested's
+                // teardown can find it later — BUT ONLY when the
+                // state machine is in a state that will accept
+                // `Event::WebrtcPadAdded` and own the bin's
+                // lifecycle. Otherwise we'd leak the bin: e.g.
+                // a late pad-added arriving after `Leaving` has
+                // already torn down everything else won't reach
+                // an arm that returns
+                // `Action::StopReceivePipeline`, so without
+                // this gate the bin would keep pulling RTP
+                // forever until the entire session is dropped.
+                //
+                // Active states are the same three the
+                // state machine's WebrtcPadAdded arm accepts:
+                // OfferPending (renegotiation drain),
+                // Connecting (between SDP answer and ICE
+                // complete), Connected (steady-state). Anything
+                // else (Idle, JoinSent, Leaving) — tear the
+                // bin back down right here.
+                if let Some(ref bin) = recv_bin {
+                    let state = rt.state();
+                    let active = matches!(
+                        state,
+                        SessionState::OfferPending
+                            | SessionState::Connecting
+                            | SessionState::Connected,
+                    );
+                    if active {
+                        rt.inner
+                            .borrow_mut()
+                            .receive_bins
+                            .insert(mid.clone(), bin.clone());
+                    } else {
+                        // Salvage the pipeline handle, then tear
+                        // the bin down. The pipeline handle is
+                        // cloned (GObject ref); `stop_receive_bin`
+                        // calls `pipeline.remove(bin)` and sets
+                        // the bin to Null, dropping our local
+                        // reference releases the last refcount.
+                        let pipeline =
+                            rt.inner.borrow().pipeline.clone();
+                        if let Some(pipeline) = pipeline {
+                            stop_receive_bin(&pipeline, bin);
+                        }
+                    }
+                }
+                // Park the pad too, mostly for backwards-compat
+                // with the existing pending_pads cleanup logic.
+                // The state machine still emits
+                // StartReceivePipeline for this mid, but the
+                // dispatch handler's `pending_pads.remove`
+                // returns the pad we put here — and the
+                // existing-bin teardown branch will tear down the
+                // bin we just linked, which we DON'T want. So we
+                // skip parking the pad if the sync link
+                // succeeded. The state machine's
+                // StartReceivePipeline will hit the
+                // "no pending pad" early return and leave our
+                // pre-linked bin alone.
+                if recv_bin.is_none() {
+                    rt.inner
+                        .borrow_mut()
+                        .pending_pads
+                        .insert(mid.clone(), pad);
+                }
                 rt.handle_event(Event::WebrtcPadAdded {
                     mid: mid.clone(),
                 });
@@ -1795,12 +2155,23 @@ fn connect_pad_added(
                 with_main_thread_runtime(runtime_id, |rt| {
                     let stale =
                         rt.inner.borrow_mut().pending_pads.remove(&mid);
-                    // The local send leg's transceiver shows up
-                    // here with `mid == "send"` and the state
-                    // machine intentionally drops it
-                    // (hxvoice::state). Don't warn for that —
-                    // it's expected on every join.
-                    if stale.is_some() && mid != "send" {
+                    // A stale entry at idle time means the state
+                    // machine didn't consume the pad — either it
+                    // wasn't in a state that accepts
+                    // `WebrtcPadAdded`, or the event was queued
+                    // but dropped during a tear-down. The state
+                    // machine no longer ignores any specific mid
+                    // label (the old `mid == "send"` guard was
+                    // removed once we observed Janus reusing
+                    // `send` for forwarded receive mlines), so
+                    // any stale parking is worth surfacing.
+                    if stale.is_some() {
+                        crate::debug::log!(
+                            "voice-pipe",
+                            "pad mid={mid} produced no \
+                             StartReceivePipeline — state machine \
+                             rejected WebrtcPadAdded in current state"
+                        );
                         gstreamer::warning!(
                             gstreamer::CAT_RUST,
                             "hxvoice: pad-added for mid={mid} produced \
@@ -1834,6 +2205,105 @@ fn lookup_pad_mid(pad: &gstreamer::Pad) -> Option<String> {
     let mid: Option<String> =
         trans.property_value("mid").get().ok().flatten();
     mid
+}
+
+/// Wire `webrtcbin::on-new-transceiver` so we can set
+/// `codec-preferences` on every transceiver the SDP processor
+/// creates for us.
+///
+/// ## Why this matters
+///
+/// When Janus's initial SDP offer carries both `a=mid:send`
+/// (our outgoing leg) and `a=mid:user-N` (audio forwarded from
+/// another participant), webrtcbin's
+/// `_create_and_associate_transceivers_from_sdp`
+/// (gstwebrtcbin.c:6601) auto-creates a recvonly transceiver
+/// for the user-N mline. The auto-created transceiver has no
+/// `codec-preferences` set.
+///
+/// `_create_sdp_task` then runs immediately after to build the
+/// answer SDP. For each transceiver it calls
+/// `_find_codec_preferences` (gstwebrtcbin.c:2058). That
+/// function reads `rtp_trans->codec_preferences` (the property
+/// we're setting here). If unset, it tries to find a pad to
+/// query caps from — but the receive-side pad doesn't exist
+/// yet, since pad-added is gated on rtpbin demuxing data
+/// (which can't happen until the answer is shipped and Janus
+/// starts forwarding). So `_find_codec_preferences` returns
+/// NULL and logs "Could not find caps for mline N".
+///
+/// The resulting answer SDP has no valid codec on that mline.
+/// Janus parses our answer, sees the mline as effectively
+/// rejected, and never forwards real audio for that user. No
+/// audio → no rtpbin demux → no `_add_pad` → no pad-added
+/// signal → no receive bin → no audio playback. The receive
+/// leg dies silently.
+///
+/// The renegotiation path (when a participant joins AFTER we
+/// joined an empty room) doesn't hit this because by the time
+/// the user-N mline is added, the existing session already
+/// has caps context wired up.
+///
+/// ## What this handler does
+///
+/// `on-new-transceiver` (gstwebrtcbin.c:9549) fires
+/// synchronously from `_create_and_associate_transceivers_from_sdp`
+/// with `PC_LOCK` released (lines 6607-6610). The signal is
+/// emitted in the SAME synchronous task that goes on to call
+/// `_find_codec_preferences`, so anything we set on the
+/// transceiver is visible to the answer generation moments
+/// later.
+///
+/// We set `codec-preferences` to PCMU 8 kHz mono — the only
+/// codec Hotline voice supports. This applies to every
+/// transceiver webrtcbin creates: the one from our
+/// `request_pad_simple` (called once at startup; harmless to
+/// also pin its preferences), the auto-created recvonly ones
+/// (the actual fix target), and any explicit `add-transceiver`
+/// calls.
+///
+/// The handler runs on whatever thread is processing the SDP
+/// task (typically a webrtcbin internal worker). Setting a
+/// GObject property is thread-safe. We don't hop to the main
+/// thread because the answer-creation code path is
+/// synchronous after this signal and would race with a
+/// deferred property set.
+fn connect_on_new_transceiver(webrtcbin: &gstreamer::Element) {
+    // Build the caps once and hand a clone to the closure.
+    let pcmu_caps = gstreamer::Caps::builder("application/x-rtp")
+        .field("media", "audio")
+        .field("encoding-name", "PCMU")
+        .field("payload", 0i32)
+        .field("clock-rate", 8000i32)
+        .build();
+    // Use `connect_closure` with the cross-thread `closure!`
+    // macro from glib. We can't use `closure_local!` (the
+    // single-thread variant) because the signal fires from
+    // webrtcbin's internal SDP-task worker, NOT the main GLib
+    // loop. `closure_local!` enforces same-thread access via
+    // glib's ThreadGuard and panics if invoked off-thread.
+    //
+    // `closure!` requires captures to be Send + Sync. `gst::Caps`
+    // is — it's a refcounted GObject — so the move is safe.
+    use gstreamer::glib;
+    webrtcbin.connect_closure(
+        "on-new-transceiver",
+        false,
+        glib::closure!(
+            move |_bin: &gstreamer::Element,
+                  transceiver: &gstreamer_webrtc::WebRTCRTPTransceiver| {
+                transceiver.set_property("codec-preferences", &pcmu_caps);
+                let dir: gstreamer_webrtc::WebRTCRTPTransceiverDirection =
+                    transceiver.property("direction");
+                let mid: Option<String> = transceiver.property("mid");
+                crate::debug::log!(
+                    "voice-pipe",
+                    "on-new-transceiver: pinned PCMU codec-preferences \
+                     on transceiver direction={dir:?} mid={mid:?}"
+                );
+            }
+        ),
+    );
 }
 
 /// Wire `webrtcbin.notify::connection-state` so peer-connection-state
@@ -1995,6 +2465,32 @@ fn start_receive_bin(
     src_pad: &gstreamer::Pad,
     mid: &str,
 ) -> Option<gstreamer::Bin> {
+    // Diagnostic: probe webrtcbin's src_0 BEFORE we link the
+    // depay bin to it. If this probe never fires while the
+    // downstream depay.sink probe in audio.rs is also silent,
+    // webrtcbin isn't pushing data and the failure is in
+    // webrtcbin / rtpbin / jitterbuffer (upstream of us). If
+    // this probe fires but depay.sink doesn't, the link or
+    // sync_state_with_parent is the problem.
+    //
+    // Gated on `voice-flow` so the per-RTP-packet counter
+    // increment doesn't run in production.
+    if crate::debug::category_enabled("voice-flow") {
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let mid_owned = mid.to_string();
+        src_pad.add_probe(gstreamer::PadProbeType::BUFFER, move |_pad, _info| {
+            let n = counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
+            if n == 1 || n % 50 == 0 {
+                crate::debug::log!(
+                    "voice-flow",
+                    "webrtcbin src_0 (mid={mid_owned}): buffer #{n}"
+                );
+            }
+            gstreamer::PadProbeReturn::Ok
+        });
+    }
     let bin_name = format!("hxvoice-recv-{mid}");
     let bin = match crate::audio::make_receive_bin(&bin_name) {
         Some(b) => b,
@@ -2040,10 +2536,24 @@ fn start_receive_bin(
         // Not fatal — the pipeline state machine will retry on
         // its own state-change pass. Log so an operator can see
         // it if audio doesn't materialize.
+        crate::debug::log!(
+            "voice-pipe",
+            "sync_state_with_parent FAILED for receive bin mid={mid}"
+        );
         gstreamer::warning!(
             gstreamer::CAT_RUST,
             "hxvoice: sync_state_with_parent failed on receive bin \
              (mid={mid}); audio may not flow until next state change"
+        );
+    } else {
+        // Success log: if you see this and still no audio, the
+        // failure is downstream — autoaudiosink can't open a
+        // device, or PulseAudio is rejecting the connection. If
+        // you DON'T see this on a remote join, the path from
+        // pad-added to here is broken.
+        crate::debug::log!(
+            "voice-pipe",
+            "receive bin LINKED for mid={mid} — audio should be flowing"
         );
     }
     Some(bin)

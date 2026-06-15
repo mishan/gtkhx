@@ -249,12 +249,201 @@ pub fn make_receive_bin(name: &str) -> Option<gst::Bin> {
     let sink = gst::ElementFactory::make("autoaudiosink").build().ok()?;
     bin.add_many([&depay, &dec, &conv, &res, &sink]).ok()?;
     gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    // Diagnostic: attach pad probes at FOUR points along the
+    // receive chain so we can tell exactly where buffers stop
+    // flowing. With "receive bin LINKED" already logged but no
+    // audible audio and an empty PulseAudio Playback tab, the
+    // remaining unknown is whether ANY data is making it through
+    // the receive chain. The probe counters answer that without
+    // disturbing the data flow.
+    //
+    // Points instrumented:
+    //   1. depay sink — the bin's ingress, immediately downstream
+    //      of webrtcbin's `src_0`. If this never fires, the
+    //      BUNDLE'd RTP demuxer in webrtcbin isn't routing
+    //      packets to the receive transceiver at all.
+    //   2. dec src — after mulaw decode. If 1 fires but 2 doesn't,
+    //      the RTP payload type or caps negotiation broke
+    //      depay→dec.
+    //   3. res src — after resample. If 2 fires but 3 doesn't,
+    //      the conv/resample stage is rejecting the format.
+    //   4. autoaudiosink sink — the final ingress to the
+    //      PulseAudio sink. If 3 fires but 4 doesn't, the link
+    //      audioresample→autoaudiosink dropped. If 4 fires but
+    //      pavucontrol shows nothing, autoaudiosink isn't
+    //      opening a real device.
+    //
+    // Each probe logs the first buffer it sees + every 50th.
+    // At rtppcmupay's default 20 ms ptime (50 packets/sec) that's
+    // "buffer #50" landing at ~1 s of live audio.
+    //
+    // Gated on `voice-flow` so the probe (counter increment +
+    // modulo per buffer) doesn't run in production where the
+    // diagnostic isn't useful.
+    if crate::debug::category_enabled("voice-flow") {
+        let bin_name = bin.name().to_string();
+        attach_buffer_probe(&depay, "sink", &bin_name, "depay.sink");
+        attach_buffer_probe(&dec, "src", &bin_name, "dec.src");
+        attach_buffer_probe(&res, "src", &bin_name, "res.src");
+        attach_buffer_probe(&sink, "sink", &bin_name, "sink.sink");
+    }
     // Expose the depayloader's sink as a ghost pad on the bin so
     // the caller can link the webrtcbin source pad to it.
     let depay_sink = depay.static_pad("sink")?;
     let ghost = gst::GhostPad::with_target(&depay_sink).ok()?;
     bin.add_pad(&ghost).ok()?;
     Some(bin)
+}
+
+/// Attach a buffer-counting `gst::Pad` probe to a named pad on an
+/// element and `eprintln` the first observed buffer plus every 50th.
+///
+/// `where_` is a label like `"depay.sink"` so the diagnostic line
+/// makes clear which stage of the receive chain the count belongs
+/// to. The probe is `BUFFER` only (not `BUFFER_LIST`), since the
+/// PCMU receive chain uses one-buffer-per-RTP-packet flow.
+fn attach_buffer_probe(
+    element: &gst::Element,
+    pad_name: &str,
+    bin_name: &str,
+    where_: &'static str,
+) {
+    let Some(pad) = element.static_pad(pad_name) else {
+        crate::debug::log!(
+            "voice-flow",
+            "{bin_name} {where_}: could not get pad to probe"
+        );
+        return;
+    };
+    let bin_name = bin_name.to_string();
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+        let n = counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if n == 1 || n % 50 == 0 {
+            crate::debug::log!(
+                "voice-flow",
+                "{bin_name} {where_}: buffer #{n}"
+            );
+        }
+        gst::PadProbeReturn::Ok
+    });
+}
+
+/// Build a send-leg `gst::Bin` that captures audio from the system
+/// microphone, encodes to μ-law, payloads as RTP/PCMU, and exposes
+/// a single source pad ready to link to `webrtcbin`'s sink request
+/// pad.
+///
+/// Chain:
+///
+/// ```text
+/// autoaudiosrc -> audioconvert -> audioresample -> capsfilter(PCM 8 kHz mono)
+///              -> mulawenc -> rtppcmupay -> (ghost src)
+/// ```
+///
+/// `autoaudiosrc` is GStreamer's auto-plugger that picks the host
+/// default capture device — `pulsesrc` on a PulseAudio /
+/// PipeWire-PA-shim setup, `pipewiresrc` if `gst-plugins-rs`'s
+/// pipewire element is registered and PA isn't, `alsasrc` on bare
+/// ALSA, etc. The capture device shows up under pavucontrol's
+/// "Recording" tab while the call is active, just like any
+/// pulse-aware audio app (zoom, discord, etc.).
+///
+/// A user-pickable device selection comes in a follow-up phase
+/// (settings UI for input device — see voice spec §8.E); for now,
+/// system-default microphone is the right behavior.
+///
+/// Returns `None` on any factory failure. The eventual missing
+/// element is whichever one the user's GStreamer install doesn't
+/// ship; `autoaudiosrc` lives in `gst-plugins-good`, `mulawenc`
+/// and `rtppcmupay` in `gst-plugins-good` as well — production
+/// already has all of those via the audio runtime install.
+///
+/// Linking note: the chain ends in a ghost src pad, NOT a direct
+/// link to webrtcbin. The caller asks webrtcbin for a sink request
+/// pad (`sink_%u`) and links the ghost src to it. That gives
+/// webrtcbin the chance to advertise the right SDP media
+/// description (PCMU caps, sendrecv direction) when answering an
+/// incoming offer — without a send-leg attached, webrtcbin answers
+/// with `a=inactive` and the peer connection never carries media.
+pub fn make_send_bin(name: &str) -> Option<gst::Bin> {
+    let bin = gst::Bin::builder().name(name).build();
+    // System-default microphone via autoaudiosrc — the auto-plugger
+    // picks pulsesrc / pipewiresrc / alsasrc / etc. based on what's
+    // available. No `is-live` setting needed; real capture sources
+    // are intrinsically live and the wrapper handles timing.
+    let src = gst::ElementFactory::make("autoaudiosrc")
+        .build()
+        .ok()?;
+    let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
+    let res = gst::ElementFactory::make("audioresample").build().ok()?;
+    let caps = make_pcm8khz_caps_filter()?;
+    let enc = make_mulaw_encoder()?;
+    let pay = gst::ElementFactory::make("rtppcmupay").build().ok()?;
+    bin.add_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
+    gst::Element::link_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
+    // Diagnostic probe: count buffers as they exit the
+    // payloader. If both peers receive exactly one packet over
+    // a working WebRTC session and then go silent, the question
+    // is whether OUR send chain is actually pushing packets
+    // continuously past the first one or stalling somewhere.
+    // The probe fires once per RTP-packet pushed downstream
+    // (autoaudiosrc → rtppcmupay default ptime = 20 ms → 50
+    // packets/sec, so "buffer #50" lands at ~1 s of live audio).
+    //
+    // If the send probe ticks continuously while the remote
+    // peer sees only one packet, the failure is downstream of
+    // us (webrtcbin / DTLS-SRTP encrypt / Janus forwarding).
+    // If the send probe also stalls after #1, our send
+    // pipeline is the problem (mic feed stalled, negotiated
+    // payload-type mismatch, etc.).
+    //
+    // Gated on `voice-flow` to keep the per-buffer counter
+    // increment out of production.
+    if crate::debug::category_enabled("voice-flow") {
+        let bin_name = bin.name().to_string();
+        attach_send_buffer_probe(&pay, "src", &bin_name);
+    }
+    // Expose the payloader's src as a ghost pad on the bin so the
+    // caller can link it to webrtcbin's sink request pad.
+    let pay_src = pay.static_pad("src")?;
+    let ghost = gst::GhostPad::with_target(&pay_src).ok()?;
+    bin.add_pad(&ghost).ok()?;
+    Some(bin)
+}
+
+/// Attach a buffer-counting probe to the send chain's payloader
+/// src pad. Same shape as `attach_buffer_probe` above but with a
+/// distinct log prefix so it's easy to tell apart from the
+/// receive-side counters.
+fn attach_send_buffer_probe(
+    element: &gst::Element,
+    pad_name: &str,
+    bin_name: &str,
+) {
+    let Some(pad) = element.static_pad(pad_name) else {
+        crate::debug::log!(
+            "voice-flow",
+            "send {bin_name}: could not get pad to probe"
+        );
+        return;
+    };
+    let bin_name = bin_name.to_string();
+    let counter = std::sync::atomic::AtomicU64::new(0);
+    pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+        let n = counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if n == 1 || n % 50 == 0 {
+            crate::debug::log!(
+                "voice-flow",
+                "{bin_name} pay.src: buffer #{n}"
+            );
+        }
+        gst::PadProbeReturn::Ok
+    });
 }
 
 // glib import kept above for completeness even though no glib symbol
