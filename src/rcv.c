@@ -63,6 +63,7 @@
 #include "chat_history.h"
 #include "hl_access.h"
 #include "voice_runtime.h"
+#include "voice_model.h"
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -1159,6 +1160,17 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
             gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
                                              blob, blob_len);
         }
+        /* Speaker indicator: refresh the canonical per-uid voice
+         * model from the new participants blob. The model emits
+         * "indicator-changed" per uid whose state flipped; the
+         * user list view subscribes and repaints the affected
+         * rows. Independent of the runtime — the C side computes
+         * indicator state from raw wire data, no extra round-trip
+         * required. */
+        if (sess && sess->voice_model) {
+            hx_voice_model_ingest_participants (sess->voice_model, blob,
+                                                blob_len);
+        }
     }
 }
 
@@ -1303,6 +1315,15 @@ rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
                                                sdp_str);
                 g_free (sdp_str);
             }
+        }
+        /* Speaker indicator: feed the canonical voice model too.
+         * The JOIN reply's participants blob is the first
+         * authoritative list we'll see for this room, so the
+         * indicator column starts painting the moment our own
+         * JOIN lands rather than waiting for the first 605. */
+        if (sess && sess->voice_model) {
+            hx_voice_model_ingest_participants (sess->voice_model, blob,
+                                                blob_len);
         }
     }
 }

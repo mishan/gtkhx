@@ -25,7 +25,9 @@
 #include "debug.h"
 #include "hl_access.h"
 #include "hotline.h"
+#include "toolbar.h" /* toolbar_show_toast */
 #include "voice.h"
+#include "voice_model.h"
 #include "voice_runtime.h"
 
 /* Bridge from the Rust runtime's Action::SendWireFrame dispatch to
@@ -137,6 +139,9 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
 static void voice_runtime_state_changed_cb (void *user_data,
                                             gtkhx_voice_state state);
 static void voice_runtime_mute_changed_cb (void *user_data, int muted);
+static void voice_runtime_speaker_changed_cb (void *user_data, uint16_t uid,
+                                              int is_speaking);
+static void voice_runtime_error_cb (void *user_data, const char *text);
 
 /* Lazy-create the per-session voice runtime on first use. Returns
  * sess->voice_runtime, NULL on construction failure (GStreamer not
@@ -157,8 +162,10 @@ ensure_voice_runtime (session *sess)
         return NULL;
     if (!sess->voice_runtime) {
         gtkhx_voice_runtime_signal_callbacks signals = {
-            .state_changed = voice_runtime_state_changed_cb,
-            .mute_changed  = voice_runtime_mute_changed_cb,
+            .state_changed   = voice_runtime_state_changed_cb,
+            .mute_changed    = voice_runtime_mute_changed_cb,
+            .speaker_changed = voice_runtime_speaker_changed_cb,
+            .error           = voice_runtime_error_cb,
         };
         sess->voice_runtime = gtkhx_voice_runtime_new_v2 (
             &sess->htlc, voice_runtime_send_wire_frame_cb, &signals);
@@ -530,6 +537,18 @@ voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
         }
         update_button_labels (gchat->voice_panel);
     }
+
+    /* When we transition to a non-joined state (LEAVING terminal
+     * collapse, or IDLE if a future state-machine revision adds
+     * Leaving → Idle), every speaker indicator we've been showing
+     * is now lying — we're no longer in the room, so we won't
+     * receive the 605 updates that would otherwise show users
+     * leaving / muting. Clear the model so the column blanks
+     * synchronously. Re-population happens on the next JOIN
+     * reply / 605, exactly like a fresh connect would. */
+    if (!joined_now && sess->voice_model) {
+        hx_voice_model_clear (sess->voice_model);
+    }
 }
 
 /* Signal handler: voice_runtime emitted SignalKind::MuteChanged.
@@ -555,6 +574,52 @@ voice_runtime_mute_changed_cb (void *user_data, int muted)
         return;
     panel_set_bool (gchat->voice_panel, KEY_MUTED, muted ? TRUE : FALSE);
     update_button_labels (gchat->voice_panel);
+}
+
+/* Signal handler: voice_runtime emitted SignalKind::Error.
+ * Routes the message into the application toast overlay so the
+ * user sees soft-failure notices (Media-timeout soft toast,
+ * server task-error replies, DTLS / ICE connectivity warnings)
+ * instead of silent state churn.
+ *
+ * Pairs with the (Connected, Timeout::Media) softening in
+ * hxvoice::state — the state machine emits Error+keeps-connected
+ * for the post-Phase-8.G softened timeouts (DTLS / ICE / Media)
+ * and for ServerTaskError replies on 600/601/603/606. Without
+ * this slot wired, those events would be visible only in the
+ * voice debug log and the session would appear to stall
+ * silently. */
+static void
+voice_runtime_error_cb (void *user_data, const char *text)
+{
+    (void) user_data;
+    if (!text) {
+        return;
+    }
+    debug_log ("voice", "error: %s", text);
+    toolbar_show_toast (text);
+}
+
+/* Signal handler: voice_runtime emitted SignalKind::SpeakerChanged
+ * from the per-pad RTP-activity evaluator (every ~200 ms when
+ * activity flips). Forwards the flip into the canonical voice
+ * model; the user list view subscribes to the model and repaints.
+ *
+ * Decoupled from the panel UI deliberately — the speaker indicator
+ * lives in the user list column, not on the voice panel. The
+ * runtime → model → users_view chain keeps the indicator policy
+ * (NONE / IN_VOICE / SPEAKING / MUTED) in one place. */
+static void
+voice_runtime_speaker_changed_cb (void *user_data, uint16_t uid,
+                                  int is_speaking)
+{
+    (void) user_data;
+    session *sess = &the_session;
+    if (!sess->voice_model) {
+        return;
+    }
+    hx_voice_model_set_speaking (sess->voice_model, uid,
+                                 is_speaking ? TRUE : FALSE);
 }
 
 void

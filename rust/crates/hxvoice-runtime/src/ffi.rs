@@ -23,8 +23,9 @@ use hxvoice::event::Event;
 use hxvoice::event::ServerError;
 
 use crate::runtime::{
-    CallbackBackend, MuteChangedCallback, NoopBackend, SendWireFrameCallback,
-    SignalCallbacks, StateChangedCallback, VoiceRuntime,
+    CallbackBackend, ErrorCallback, MuteChangedCallback, NoopBackend,
+    SendWireFrameCallback, SignalCallbacks, SpeakerChangedCallback,
+    StateChangedCallback, VoiceRuntime,
 };
 
 /// FFI mirror of [`crate::runtime::SignalCallbacks`]. The C header
@@ -40,6 +41,8 @@ use crate::runtime::{
 pub struct GtkhxVoiceRuntimeSignalCallbacks {
     pub state_changed: Option<StateChangedCallback>,
     pub mute_changed: Option<MuteChangedCallback>,
+    pub speaker_changed: Option<SpeakerChangedCallback>,
+    pub error: Option<ErrorCallback>,
 }
 
 impl From<&GtkhxVoiceRuntimeSignalCallbacks> for SignalCallbacks {
@@ -47,6 +50,8 @@ impl From<&GtkhxVoiceRuntimeSignalCallbacks> for SignalCallbacks {
         SignalCallbacks {
             state_changed: c.state_changed,
             mute_changed: c.mute_changed,
+            speaker_changed: c.speaker_changed,
+            error: c.error,
         }
     }
 }

@@ -271,31 +271,37 @@ Sub-phases:
 
 ---
 
-## Phase 8 — Voice chat (fogWraith capability extension)
+## Phase 8 — Voice chat (fogWraith capability extension) ✅
 
 The fogWraith spec adds voice chat to Hotline via a server-side SFU: clients negotiate `CAPABILITY_VOICE` (bit 2 of `DATA_CAPABILITIES`, already reserved as `HTLC_CAP_VOICE` in `src/hotline.h`), then run a WebRTC session against the server on UDP base+4. PCMU only, DTLS+SRTP, ICE — all handled by the WebRTC stack. Seven new TRAN opcodes (600–606) and five new data fields (0x01F5–0x01F9) ride the existing TCP control channel for signaling. Full plan at `docs/voice-chat-plan.md`.
 
-Locked-in choices:
+**Status**: Phase 8.A through 8.G have all shipped. End-to-end voice works against the Janus VoiceRoom container with DTLS-SRTP audio + the seven new opcodes wired through the Rust runtime, plus the per-uid voice indicator column in the user list. The post-R3-R4 follow-up below also already shipped — the C-side GStreamer glue replaced itself with `hxvoice-runtime` (gstreamer-rs + gstreamer-webrtc-rs) early in 8.C rather than waiting for R3/R4.
 
-- **WebRTC stack: GStreamer `webrtcbin`** (gst-plugins-bad ≥ 1.20) via the C bindings. The GLib-native option, brings audio I/O via `autoaudiosrc` / `autoaudiosink` for free, matches the existing main-loop / threading model. Migration to `gstreamer-rs` deferred to after R3-R4 (tokio runtime + `glib::MainContext` interop + Rust-side `GtkhxSession` signal emit) — bundling those prerequisites into a feature phase would inflate it; the hybrid split below preserves cheap migration when the time comes.
-- **Hybrid Rust/C split** per `docs/RUST-ROADMAP.md` Phase R2 + a small new `hxvoice` crate:
-  - **Wire protocol → Rust** (`rust/crates/hotline-proto/src/voice.rs`): typed builders/parsers, SDP-summary + ICE-JSON + participant-blob walkers, mid-label decoder. Same shape chat-history / tracker-v3 / news already use.
-  - **Session state machine → Rust** (`rust/crates/hxvoice/`): pure `SessionMachine` with `step(Event) -> Vec<Action>`. No GLib, no GStreamer, no GTK — just typed events in, typed actions out. Owns the renegotiation queue, mid→UID map, mute flag, timeout policy, implicit-leave logic. Fully testable in isolated Rust against the spec's annotated lifecycle examples.
-  - **Transport / GStreamer / UI → C** (`src/voice.{c,h}`, `src/voice_audio.{c,h}`, `src/voice_panel.{c,h}`, `src/voice_settings.{c,h}`): owns `GstPipeline*` / `GstWebRTCBin*` instances, translates GStreamer signals ↔ Rust events, dispatches the action list to GStreamer / `hlwrite_chunks` / `g_signal_emit_by_name`. No protocol decisions in C.
-- **Test target: Janus**, which already implements the voice extension and is already in our Tier 3 matrix as the TLS test target. No mock SFU required for v1 — happy-path tests run against Janus, adversarial cases land as state-machine property tests in `hxvoice`. The Janus container just needs UDP base+4 exposed alongside the existing TCP control + TLS ports. (If we ever need a mock SFU later — adversarial fuzz inputs Janus won't generate — Go + Pion is the obvious template, mirroring the chat-history mock.)
+Locked-in choices (kept for the historical record):
 
-Sub-phases (full detail in `docs/voice-chat-plan.md`):
+- **WebRTC stack: gstreamer-rs + gstreamer-webrtc-rs** in the `hxvoice-runtime` crate. The original plan staged a C `webrtcbin` first with a Rust runtime as the post-R3/R4 follow-up; in practice the all-Rust runtime landed during 8.C without needing the broader R3/R4 prerequisites. See voice-chat-plan §3 and §11.
+- **Hybrid Rust/C split** per `docs/RUST-ROADMAP.md` Phase R2 + the `hxvoice` and `hxvoice-runtime` crates:
+  - **Wire protocol → Rust** (`rust/crates/hotline-proto/src/voice.rs`): typed builders/parsers, SDP-summary + ICE-JSON + participant-blob walkers, mid-label decoder. Same shape chat-history / tracker-v3 / news use.
+  - **Session state machine → Rust** (`rust/crates/hxvoice/`): pure `SessionMachine` with `step(Event) -> Vec<Action>`. No GLib, no GStreamer, no GTK — just typed events in, typed actions out. Owns the renegotiation queue, mid→UID map, mute flag, timeout policy, implicit-leave logic. Tested against the spec's annotated lifecycle examples + targeted regressions.
+  - **GStreamer pipeline + webrtcbin runtime → Rust** (`rust/crates/hxvoice-runtime/`): owns the `gst::Pipeline` / `webrtcbin` instances, runs the SDP / ICE / pad-added / connection-state dispatch, threads the per-pad RTP-activity counter through the receive bins for the voice indicator. Talks to C via the `gtkhx_voice_runtime_*` FFI surface.
+  - **UI → C** (`src/voice.{c,h}`, `src/voice_panel.{c,h}`, `src/voice_model.{c,h}`, `src/users_view.c`): per-chat voice toolbar, settings page, the `HxVoiceModel` canonical per-uid state, the voice indicator column.
+- **Test target: Janus**, in the Tier 3 matrix on host networking with `HX_TEST_CAP_VOICE` + `voice_port` 5514. Seven integration binaries plus state-machine property tests in `hxvoice` and wire-fixture tests in `hotline-proto::voice`.
 
-- **Phase 8.A — capability + signaling.** Rust opcode/field constants + builders/parsers in `hotline-proto::voice`. C-side `src/voice.{c,h}` stub that just sends Join/Leave through `hlwrite_chunks`. `rcv_task_voice_*` arms in `src/rcv.c`. `HL_ACCESS_VOICE_CHAT 55` define in `src/hl_access.h`. Capability bit advertised. No media yet.
-- **Phase 8.B — GStreamer dependency + bare pipeline.** `meson.build` deps, `gst_init`, `src/voice_audio.{c,h}` with `GstDeviceMonitor`-based device enumeration, Tier 1 loopback smoke test.
-- **Phase 8.C — state machine + webrtcbin glue.** The hard one. New `hxvoice` crate ships first with property tests against the spec's annotated lifecycle, then the C glue lands as event-source / action-dispatch translation. SDP offer/answer flow, ICE trickle, pad-added/pad-removed track-to-user mapping, renegotiation serialization, timeouts — all decisions live in Rust; only the GStreamer calls live in C.
-- **Phase 8.D — UI.** Per-chat-tab voice toolbar (Join/Leave/Mute), speaker indicators in the user list driven by `voice-room-status` GtkhxSession signals, single-room-at-a-time confirm dialog.
-- **Phase 8.E — Settings + push-to-talk.** Audio device pickers, "start muted" toggle, PTT keybind (local-to-window scope; global PTT punted).
-- **Phase 8.F — Tests against Janus.** Extend the existing Janus container with UDP base+4 + an `HX_TEST_CAP_VOICE` matrix flag. Tier 2 wire-fixture tests in `hotline-proto`, Tier 2 state-machine property tests in `hxvoice`, Tier 3 integration suite covering join/leave, SDP round-trip, ICE trickle, mute, implicit-leave, disconnect cleanup. No mock SFU.
+Sub-phases — all shipped (full detail in `docs/voice-chat-plan.md`):
 
-Rough total: ~1.55 k C LOC + ~900 Rust LOC + tests. No mock SFU — Janus is the Tier 3 voice target the same way it's the TLS target today.
+- **8.A** — capability + signaling.
+- **8.B** — GStreamer dependency + bare pipeline.
+- **8.C** — state machine + webrtcbin runtime (the hard one — five debugging weeks).
+- **8.D** — UI: chat-tab toolbar + signal bridge + bridge backend.
+- **8.E** — Settings device pickers.
+- **8.F** — Tier 3 integration matrix vs Janus.
+- **8.G** — Per-uid voice indicator column in the user list. In-voice + muted ship; "actively speaking" plumbing is in place but demoted to IN_VOICE pending real VAD (GStreamer `level` or RFC 6464). See voice-chat-plan §12 step 4.
 
-**Post-R3-R4 follow-up**: replace the C `voice.{c,h}` glue with a `rust/crates/hxvoice-runtime/` crate using `gstreamer-rs` + `gstreamer-webrtc-rs`. `hxvoice` itself doesn't change — the state machine slides across unchanged because it never directly held a GstElement pointer. See voice-chat-plan §11.
+Phase 8 follow-ups (small):
+
+- "Start muted" toggle, PTT keybind capture, "Auto-join voice when joining a chat room" toggle in `settings_page_voice()`.
+- Real volume-graded speaker detection (the §12 step 4 flip).
+- Flatpak mic-capture permission decision (between `--device=all` and the `org.freedesktop.portal.Device` portal).
 
 ---
 

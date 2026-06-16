@@ -20,8 +20,9 @@ Spec pinned at
 | 8.C | State machine (`hxvoice`) + webrtcbin runtime (`hxvoice-runtime`) | **Shipped** | multiple |
 | 8.D | Voice toolbar in chat tab + runtime wire-up + signal bridge | **Shipped** | multiple |
 | 8.E | Settings → Voice device pickers | **Shipped** | merged from `claude/voice-phase-e-devices` |
-| 8.F | Tier 3 integration matrix vs Janus | **Partial** — manual end-to-end works against Janus; automated suite not built | — |
-| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening | **Mixed** — wedge shipped; PTT / Start-muted / Auto-join open | `claude/voice-wedge-deadline` (wedge) |
+| 8.F | Tier 3 integration matrix vs Janus | **Shipped** | merged from `claude/voice-phase-f-tests` |
+| 8.G | Per-uid voice indicators in user list | **Shipped** (in-voice + muted) | `claude/voice-speaker-indicator` |
+| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge + soft-Media shipped; PTT / Start-muted / Auto-join / real-VAD open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media) |
 
 What also shipped that wasn't in the original plan:
 
@@ -40,6 +41,25 @@ What also shipped that wasn't in the original plan:
   earlier `NoopBackend` for outgoing wire frames. The state machine
   is now the single source of truth for 603 / 604 / 606 emission;
   the C side no longer double-sends.
+- **Soft Media timeout + Error toast bridge**
+  (`claude/voice-speaker-indicator`): the spec's `(Connected,
+  Timeout::Media) → fail()` arm was softening sessions to LEAVING after
+  30 s of quiet, which was the wrong call once servers started defaulting
+  new joiners to MUTED — a fully-quiet room is the common case, not a
+  failure. The arm now emits an Error toast and stays in Connected
+  (same shape as the DTLS / IceConnectivity softenings). To make that
+  toast visible, `SignalCallbacks` grew an `error` slot and
+  `voice_panel.c` routes the message through `toolbar_show_toast`.
+- **Per-uid voice indicator column** (`claude/voice-speaker-indicator`):
+  the user list now shows a small icon per row — empty when the user is
+  not in voice, dim speaker when they're in voice, mic-disabled when
+  they're muted. Driven by a new GObject `HxVoiceModel` keyed on uid,
+  ingested from the existing `VOICE_PARTICIPANTS` blob path (no new
+  wire) and updated synchronously. The "actively speaking" arm is
+  scaffolded end-to-end (per-pad RTP counter in `hxvoice-runtime`,
+  `SignalKind::SpeakerChanged`, `HxVoiceModel::set_speaking`) but
+  deliberately demoted to IN_VOICE in render until real VAD ships —
+  see §12 step 7 below for the rationale and revert path.
 
 ---
 
@@ -286,31 +306,38 @@ the runtime infrastructure for mute toggling is already in place,
 and PTT just needs a `GtkEventControllerKey` on the chat input
 widget that toggles mute on key down / up.
 
-### Phase 8.F — Tier 3 integration matrix ⚠️ Partial
+### Phase 8.F — Tier 3 integration matrix ✅
 
-What's been done:
+Shipped on `claude/voice-phase-f-tests` (merged June 2026). The Tier
+3 matrix now exercises the voice extension end-to-end against the
+Janus container:
 
-- Manual end-to-end voice round-trips against a local Janus
-  VoiceRoom container. Audio confirmed flowing in both directions
-  with DTLS-SRTP, ICE trickle, proper `pad-added` linkage,
-  receive-bin teardown on leave.
-- Janus container at `tests/janus/` already in the Tier 3 matrix as
-  the TLS test target.
-- Janus's voice port (5006 / UDP base+4) exposed in the Dockerfile.
-- Bundled accounts have `accessVoiceChat` bit 55 set.
-
-What's still open:
-
-- Tier 3 integration tests (`test_voice_join.c`, `_sdp_roundtrip.c`,
-  `_ice_trickle.c`, `_mute.c`, `_participants.c`, `_implicit_leave.c`,
-  `_disconnect_cleanup.c`). None of these have been written yet.
-- Janus voice matrix row in `tests/integration/server_matrix.c` with
-  `HX_TEST_CAP_VOICE` + `voice_port`.
-- Tier 3 negative tests (voice disabled, user without access bit).
+- **`HX_TEST_CAP_VOICE`** + **`voice_port`** added to
+  `tests/integration/server_matrix.{c,h}`. Janus is the only entry
+  advertising the cap today (voice_port = 5514).
+- **Seven new test binaries** under `tests/integration/`:
+  `test_voice_join.c`, `_sdp_roundtrip.c`, `_ice_trickle.c`,
+  `_mute.c`, `_implicit_leave.c`, `_participants.c`,
+  `_disconnect_cleanup.c`. All seven follow the no-silent-skips
+  policy (fail loudly when no voice-capable target is in the matrix)
+  and are gated `is_parallel: false` per the per-IP connect-rate
+  caveat documented on the other Janus tests.
+- **Janus container shifted to `--network=host`** so libnice can
+  negotiate ICE against 127.0.0.1 — Docker's default bridge strips
+  the kernel route the server-reflexive candidate path needs. With
+  host networking the container's listen ports ARE the host ports,
+  so `tests/janus/conf/config.yaml` is now pinned to the matrix-
+  published numbers directly: `Port: 5510`, `TLSPort: 5610`,
+  `VoiceUDPPort: 5514`. mhxd at the conventional 5500/5501 still
+  coexists via the usual bridge-net mapping.
+- **Janus voice config** (`EnableVoice: true`, `VoiceUDPPort: 5514`,
+  per-account `VoiceChat: true` on the bundled guest / admin accounts
+  via `seed-hope-passwords.sh`) wires through the access bit gate
+  on the toolbar.
 
 Wire-fixture tests in `hotline-proto::voice` and state-machine
-property tests in `hxvoice` are already in place; they're not what
-8.F's primary scope is about.
+property tests in `hxvoice` remain the unit-test floor; the Tier 3
+suite covers the live-wire shapes those tiers can't replicate.
 
 ### Unplanned: wedge watchdog ✅ (shipped on `claude/voice-wedge-deadline`)
 
@@ -339,6 +366,84 @@ no buffer arrivals on the receive bin's depay sink → inject
 - Test hooks: `bump_rtp_buffers_received_for_test`,
   `fire_wedge_watchdog_for_test`, `wedge_watchdog_armed`. The 60 s
   glib timeout is exercised indirectly via the manual tick.
+
+### Phase 8.G — Voice indicators in the user list ✅
+
+Shipped on `claude/voice-speaker-indicator`. A small symbolic icon
+appears next to each user in the chat / standalone users list,
+reflecting their voice state. Three render values:
+
+| Indicator | Shown when                              | Icon                              |
+|-----------|-----------------------------------------|-----------------------------------|
+| NONE      | uid is not in voice chat                | empty cell                        |
+| IN_VOICE  | uid is in voice, not muted              | `audio-volume-low-symbolic`       |
+| MUTED     | uid is in voice + server-flagged muted  | `microphone-disabled-symbolic`    |
+
+A fourth value `SPEAKING` exists in the `HxVoiceIndicator` enum and
+the runtime plumbing fires its underlying signal, but the C-side
+`compute_indicator` deliberately demotes SPEAKING → IN_VOICE in the
+current shipping configuration. The reason — and the revert path —
+live in §12 step 7 below.
+
+Architecture:
+
+```
+                 wire 605/JOIN reply
+                          │
+                          ▼
+              rcv.c::hx_rcv_voice_room_status
+                          │
+              hx_voice_model_ingest_participants
+                          │
+                          ▼
+              ┌─ HxVoiceModel (per-uid {in_voice, muted, speaking}) ─┐
+              │                                                       │
+              ▲                                                       ▼
+runtime per-pad RTP probe                      "indicator-changed" (uid, ind)
+              │                                                       │
+              ▲                                                       ▼
+        SignalKind::SpeakerChanged                        users_view voice column
+              │                                                       │
+              ▲                                                       ▼
+voice_panel.c::voice_runtime_speaker_changed_cb            row repaint (icon swap)
+              │
+       hx_voice_model_set_speaking
+```
+
+Key pieces:
+
+- **`src/voice_model.{c,h}`** — GObject keyed on uid, owns the
+  canonical per-uid state. Two ingest paths (`_ingest_participants`
+  for the wire blob, `_set_speaking` for the runtime). One signal
+  (`indicator-changed`) fires per real visible flip.
+- **`src/users_view.c`** — new 22 px column between UID and Name.
+  Each cell subscribes to the model once and filters by row uid.
+- **`hxvoice-runtime`** — `Inner::per_user_rtp_buffers:
+  Arc<Mutex<HashMap<u16, Arc<AtomicU64>>>>` allocated lazily in
+  `connect_pad_added` when `parse_voice_mid_label` resolves the pad's
+  mid to `User(uid)`. A 200 ms `glib::timeout_add_local`
+  (`speaker_tick`) diffs the counters against a previous snapshot
+  and fires `SignalKind::SpeakerChanged` per uid whose state flips.
+- **`SignalCallbacks`** grew two slots — `speaker_changed` (uid,
+  is_speaking) and `error` (text) — wired through the FFI mirror,
+  C header, and `voice_panel.c` handlers. The Error slot routes
+  through `toolbar_show_toast` so the softened DTLS / ICE / Media
+  timeouts now surface as visible AdwToasts instead of silent state
+  churn.
+
+Limitations and the cleanup path for "speaking":
+
+- The runtime probe counts every PCMU buffer that lands on a
+  participant's receive bin, but PCMU + WebRTC + `mulawenc` has no
+  VAD — 50 pps arrive continuously while a peer is unmuted, with no
+  per-packet volume information. Reporting "speaking" from the probe
+  alone is therefore equivalent to "unmuted + pipeline alive", which
+  the mute bit already conveys.
+- Until real VAD ships, `voice_model.c::compute_indicator` falls
+  through to IN_VOICE for the SPEAKING case behind a
+  `#if HX_VOICE_INDICATOR_SHIPS_SPEAKING` gate. Flipping the gate
+  to 1 (and updating the matching expectation in
+  `tests/unit/test_voice_model.c`) re-enables the SPEAKING render.
 
 ---
 
@@ -430,7 +535,8 @@ Closed gotchas (no longer relevant):
 | 8.C | 3–4 weeks | ~5 weeks (the debugging weeks) | ~2,350 | ~3,500 (state machine + runtime + the eight sub-steps) |
 | 8.D | 1–2 weeks | ~2 weeks | ~800 | ~600 (panel + runtime wire + bridge backend + signal bridge) |
 | 8.E | 1 week | ~3 days | ~450 | ~500 (device pickers + FFI + prefs) |
-| 8.F | 1 week | partial | ~950 | ~50 (Janus container port + access bits) |
+| 8.F | 1 week | ~2 days | ~950 | ~1,800 (matrix + 7 Tier 3 binaries + Janus host-net repinning) |
+| 8.G | — | ~1 day | — | ~1,900 (voice indicator column + model + runtime per-pad probe + signal bridge + soft Media + Error toast) |
 | wedge | — | ~3 days | — | ~500 |
 
 Biggest underestimate: Phase 8.C. The webrtcbin pad-added race, the
@@ -504,31 +610,40 @@ Voice works end-to-end. The remaining roadmap:
    - PTT key capture + `GtkEventControllerKey` on the chat input.
    - "Auto-join voice when joining a chat room" toggle (default OFF).
    Persist via the existing `cfgvars` table.
-2. **Speaker indicator in the user list** — add a `GtkColumnView`
-   column on `users_view.c` driven by the runtime's participant
-   list. Mechanism: extend `SignalCallbacks` with a
-   `participants_changed` slot (same shape as the existing
-   `state_changed` / `mute_changed` ones); the runtime calls it
-   whenever the state machine ingests an `Event::ParticipantsUpdated`
-   from a 605. C-side handler diffs against the previous list, marks
-   the user_id column on `users_view`'s row model, and the column
-   builder renders the speaker icon. Audio-level support (a louder /
-   talking variant) waits on the RTP `audio-level` header extension,
-   which is its own follow-up.
-3. **Phase 8.F automated Tier 3 tests** — `test_voice_join.c`,
-   `_sdp_roundtrip.c`, `_ice_trickle.c`, `_mute.c`, `_participants.c`,
-   `_implicit_leave.c`, `_disconnect_cleanup.c`. Janus voice matrix
-   row in `server_matrix.c`. Negative tests for voice-disabled
-   server config and missing access bit.
-4. **Ping VesperNet** for confirmation that Janus's voice impl is
+2. **Ping VesperNet** for confirmation that Janus's voice impl is
    feature-complete (server-side mute enforcement, room-full
    handling, access-bit check, ~100 ms mute debounce).
-5. **Flatpak mic-capture permission**: pick between the cheap
+3. **Flatpak mic-capture permission**: pick between the cheap
    `--device=all` finish-arg vs the sandboxed
    `org.freedesktop.portal.Device` portal and update
    `com.nasledov.gtkhx.yml`. Neither is shipped today — the manifest
    only grants `--socket=pulseaudio` for playback. Decision and the
    one-line manifest change belong with Phase 8.E or a packaging
    follow-up.
-6. **Phase ∞**: video, group video, etc. Out of scope; would need
+4. **Real voice-activity detection** for the speaker indicator. The
+   Phase 8.G plumbing already wires runtime → C end-to-end; what's
+   missing is a volume-graded signal to feed it. Two paths:
+
+   a. **Client-side VAD via GStreamer `level`.** Insert the `level`
+      element into each receive bin's decoded PCM path
+      (`mulawdec ! audioconvert ! level interval=100ms ! audioresample
+      ! autoaudiosink`); hook the bus for `"level"` messages; threshold
+      the RMS at around -45 to -50 dB; feed the result into
+      `Inner::per_user_speaking` instead of (or in addition to) the
+      per-pad RTP-arrival probe. ~100–150 LOC of Rust. No server
+      changes. CPU cost is negligible: per participant ~8 kHz × 1 ch ×
+      one RMS sum per 100 ms interval ≈ 8 000 sample-ops/sec; even
+      a 16-participant room runs at <1 % of one core.
+
+   b. **RFC 6464 `audio-level` header extension.** Best signal quality
+      eventually but requires fogWraith `Capabilities-Voice.md` to
+      ratify the extension and Janus to advertise it. Calendar-coupled
+      to upstream; don't block on this.
+
+   When either lands, flip `HX_VOICE_INDICATOR_SHIPS_SPEAKING` to 1 in
+   `src/voice_model.c` and update the matching expectations in
+   `tests/unit/test_voice_model.c::test_speaking_overlay` and
+   `_signal_emitted` (both annotate the flip point inline).
+
+5. **Phase ∞**: video, group video, etc. Out of scope; would need
    its own capability bit and a new scoping doc.

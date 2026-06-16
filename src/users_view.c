@@ -26,6 +26,7 @@
 #include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
+#include "voice_model.h"
 
 /* Right-click handler — pops user_popup over the row under (x,y).
  * Installed by hx_user_list_view_new on the column view; locates
@@ -585,6 +586,205 @@ name_unbind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     hx_user_cell_name_set_row (cell, NULL);
 }
 
+/* ---- Voice indicator column ---------------------------------- */
+/*
+ * Renders a single small icon per row reflecting the user's voice
+ * state per HxVoiceModel:
+ *
+ *   NONE      — empty cell (not in voice chat)
+ *   IN_VOICE  — dim speaker glyph (in voice, silent)
+ *   SPEAKING  — accent speaker glyph (in voice, actively producing
+ *               audio per the runtime's per-pad RTP probe)
+ *   MUTED     — microphone-disabled glyph (in voice, server-flagged
+ *               muted)
+ *
+ * Cell wiring uses one connection to the voice model's
+ * "indicator-changed" signal per cell, installed at setup and
+ * removed at finalize. The handler ignores frames whose uid
+ * doesn't match the cell's currently-bound row, which means a 16-
+ * row column gets 16 model subscriptions — cheap because the
+ * signal fires at most a few times per second per uid and each
+ * dispatch is O(1).
+ *
+ * Storage: a small VoiceCellData struct lives on the GtkImage's
+ * qdata. It holds borrowed pointers to the view's model and the
+ * bound row, plus the signal handler id so the unbind / dispose
+ * paths can disconnect cleanly.
+ */
+
+typedef struct {
+    /* Strong ref: the cell takes its own ref at setup time and
+     * releases it at finalize. Borrowing the session's pointer
+     * (the original shape) was a use-after-free in waiting if
+     * the model ever got freed before the column view (a NULL-
+     * unref in network.c::hx_htlc_close would do it). The ref
+     * holds the model alive for the cell's full lifetime; cells
+     * outlive bind/unbind cycles (GtkColumnView recycles widgets)
+     * so disconnect happens at finalize. */
+    HxVoiceModel *model; /* owned strong ref; NULL allowed (no model) */
+    HxUserRow *row;      /* borrowed; NULL when unbound */
+    gulong indicator_changed_id;
+} VoiceCellData;
+
+static const char *
+voice_indicator_icon (HxVoiceIndicator i)
+{
+    switch (i) {
+    case HX_VOICE_INDICATOR_NONE:
+        return NULL;
+    case HX_VOICE_INDICATOR_IN_VOICE:
+        /* Dim speaker — "in voice, silent right now." Stock Adwaita
+         * icon. */
+        return "audio-volume-low-symbolic";
+    case HX_VOICE_INDICATOR_SPEAKING:
+        return "audio-volume-high-symbolic";
+    case HX_VOICE_INDICATOR_MUTED:
+        return "microphone-disabled-symbolic";
+    }
+    return NULL;
+}
+
+static void
+voice_cell_refresh (GtkImage *img, HxVoiceModel *model, guint16 uid)
+{
+    HxVoiceIndicator ind
+        = model ? hx_voice_model_get_indicator (model, uid)
+                : HX_VOICE_INDICATOR_NONE;
+    const char *icon = voice_indicator_icon (ind);
+    if (icon) {
+        gtk_image_set_from_icon_name (img, icon);
+        gtk_widget_set_visible (GTK_WIDGET (img), TRUE);
+    } else {
+        gtk_image_clear (img);
+        gtk_widget_set_visible (GTK_WIDGET (img), FALSE);
+    }
+    /* Speaking gets an accent colour via Adwaita's `.accent` style
+     * class; the other states use `.dim-label` so they read as
+     * present-but-quiet next to the name. Apply additively rather
+     * than swapping — both classes coexist harmlessly when neither
+     * applies, but the visual distinction needs the right one to
+     * win the cascade. */
+    GtkWidget *w = GTK_WIDGET (img);
+    if (ind == HX_VOICE_INDICATOR_SPEAKING) {
+        gtk_widget_remove_css_class (w, "dim-label");
+        gtk_widget_add_css_class (w, "accent");
+    } else {
+        gtk_widget_remove_css_class (w, "accent");
+        gtk_widget_add_css_class (w, "dim-label");
+    }
+}
+
+/* Fires whenever ANY uid's indicator flips. Each cell only cares
+ * about its currently-bound row's uid; skip the rest. */
+static void
+on_voice_model_indicator_changed (HxVoiceModel *model, guint uid,
+                                  guint indicator, gpointer user_data)
+{
+    GtkImage *img = user_data;
+    VoiceCellData *data
+        = g_object_get_data (G_OBJECT (img), "voice-cell-data");
+    (void) indicator; /* fresh value re-read from the model below */
+    if (!data || !data->row) {
+        return;
+    }
+    if ((guint) hx_user_row_get_uid (data->row) != uid) {
+        return;
+    }
+    voice_cell_refresh (img, model, (guint16) uid);
+}
+
+/* Cleanup at GtkImage finalize. The image outlives the cell binds
+ * (GtkColumnView recycles widgets), so the per-cell signal
+ * subscription installed at setup needs to be torn down here, not
+ * on unbind. */
+static void
+voice_cell_data_free (gpointer p)
+{
+    VoiceCellData *data = p;
+    if (!data) {
+        return;
+    }
+    /* The strong ref we took in voice_setup keeps the model alive
+     * across the cell's full lifetime, so disconnecting + unref is
+     * always safe — no G_IS_OBJECT guard (which can touch freed
+     * memory) needed. */
+    if (data->model) {
+        if (data->indicator_changed_id) {
+            g_signal_handler_disconnect (data->model,
+                                         data->indicator_changed_id);
+        }
+        g_object_unref (data->model);
+    }
+    g_free (data);
+}
+
+static void
+voice_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    HxUserListView *v = d;
+    GtkWidget *img = gtk_image_new ();
+    (void) f;
+    gtk_image_set_pixel_size (GTK_IMAGE (img), 12);
+    gtk_widget_set_halign (img, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign (img, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class (img, "dim-label");
+    /* Hidden until a bind reveals the row carries a non-NONE
+     * indicator. Otherwise GtkImage with no icon paints a faint
+     * 1px placeholder that's distracting in dense user lists. */
+    gtk_widget_set_visible (img, FALSE);
+
+    VoiceCellData *data = g_new0 (VoiceCellData, 1);
+    HxVoiceModel *model = (v && v->sess) ? v->sess->voice_model : NULL;
+    if (model) {
+        /* Strong ref: the cell keeps the model alive for its full
+         * lifetime regardless of whether the session releases its
+         * pointer first (e.g. a disconnect-on-quit race). The
+         * matching unref + signal disconnect runs in
+         * voice_cell_data_free. */
+        data->model = g_object_ref (model);
+        data->indicator_changed_id = g_signal_connect (
+            data->model, "indicator-changed",
+            G_CALLBACK (on_voice_model_indicator_changed), img);
+    }
+    g_object_set_data_full (G_OBJECT (img), "voice-cell-data", data,
+                            voice_cell_data_free);
+    gtk_list_item_set_child (item, img);
+}
+
+static void
+voice_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkImage *img = GTK_IMAGE (gtk_list_item_get_child (item));
+    HxUserRow *row = gtk_list_item_get_item (item);
+    VoiceCellData *data
+        = g_object_get_data (G_OBJECT (img), "voice-cell-data");
+    (void) f;
+    (void) d;
+    stash_list_item (GTK_WIDGET (img), item);
+    if (!data) {
+        return;
+    }
+    data->row = row;
+    voice_cell_refresh (img, data->model,
+                        row ? hx_user_row_get_uid (row) : 0);
+}
+
+static void
+voice_unbind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
+{
+    GtkImage *img = GTK_IMAGE (gtk_list_item_get_child (item));
+    VoiceCellData *data
+        = g_object_get_data (G_OBJECT (img), "voice-cell-data");
+    (void) f;
+    (void) d;
+    if (!data) {
+        return;
+    }
+    data->row = NULL;
+    gtk_image_clear (img);
+    gtk_widget_set_visible (GTK_WIDGET (img), FALSE);
+}
+
 /* ---- Activate (double-click / Enter) — open msgwin ---------- */
 
 static void
@@ -683,8 +883,8 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
 {
     HxUserListView *v = g_object_new (HX_TYPE_USER_LIST_VIEW, NULL);
     GtkColumnView *cv;
-    GtkColumnViewColumn *col_uid, *col_name;
-    GtkListItemFactory *factory_uid, *factory_name;
+    GtkColumnViewColumn *col_uid, *col_voice, *col_name;
+    GtkListItemFactory *factory_uid, *factory_voice, *factory_name;
     GtkSorter *sorter_uid, *sorter_name;
 
     v->sess = sess;
@@ -753,6 +953,31 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
     g_object_unref (sorter_uid);
     gtk_column_view_append_column (cv, col_uid);
     g_object_unref (col_uid);
+
+    /* Voice indicator column. Sits between UID and Name so the eye
+     * naturally scans uid → state → name. 22 px is wide enough for
+     * the 12 px symbolic icon plus minimal padding; the column has
+     * no sorter (sorting by voice state would be more confusing
+     * than useful — the indicator shifts in real time). The factory
+     * is a no-op against a session that doesn't have a voice model
+     * (sess->voice_model NULL) — the cells stay empty and invisible
+     * in that case, so no visible regression for legacy code paths
+     * that hadn't migrated to the model yet. */
+    factory_voice = gtk_signal_list_item_factory_new ();
+    g_signal_connect (factory_voice, "setup", G_CALLBACK (voice_setup), v);
+    g_signal_connect (factory_voice, "bind", G_CALLBACK (voice_bind), v);
+    g_signal_connect (factory_voice, "unbind",
+                      G_CALLBACK (voice_unbind), v);
+    /* Column header glyph: a small speaker icon would be ideal, but
+     * GtkColumnViewColumn only accepts a title string. Use a single-
+     * character speaker emoji as a compact label — universally
+     * available in the system font, narrow enough not to expand the
+     * column past the data width. */
+    col_voice = gtk_column_view_column_new ("\xf0\x9f\x94\x88", factory_voice);
+    gtk_column_view_column_set_fixed_width (col_voice, 22);
+    gtk_column_view_column_set_resizable (col_voice, FALSE);
+    gtk_column_view_append_column (cv, col_voice);
+    g_object_unref (col_voice);
 
     /* Name column — uses the custom HxUserCellName widget. */
     factory_name = gtk_signal_list_item_factory_new ();

@@ -61,6 +61,7 @@
 #include "cipher_aead.h"
 #include "cipher.h"
 #include "voice_runtime.h"
+#include "voice_model.h"
 
 /* Phase R1: Rust FFI for the Blowfish OFB-64 state — only used here
  * to free the state on hx_htlc_close. cipher.c owns the alloc and
@@ -230,6 +231,14 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     if (sess->voice_runtime) {
         gtkhx_voice_runtime_free (sess->voice_runtime);
         sess->voice_runtime = NULL;
+    }
+    /* Clear the voice indicator model so a reconnect starts with
+     * an empty user list (no lingering speaker indicators from a
+     * dropped session). The model object itself stays alive — it's
+     * subscribed by users_view via the long-lived chat / users
+     * windows. */
+    if (sess->voice_model) {
+        hx_voice_model_clear (sess->voice_model);
     }
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic

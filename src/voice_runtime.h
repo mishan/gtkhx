@@ -209,6 +209,44 @@ typedef void (*gtkhx_voice_runtime_mute_changed_cb) (void *user_data,
                                                      int muted);
 
 /*
+ * `voice-speaker-changed` signal callback. Per-participant talking
+ * indicator. Fires whenever the runtime's per-pad RTP-activity
+ * evaluator observes a uid's speaking state flip (default cadence
+ * 200 ms — see `SPEAKER_EVAL_INTERVAL_MS` in
+ * hxvoice-runtime/src/runtime.rs). `is_speaking` is 0 or 1.
+ *
+ * The producer is NOT the state machine — it's the runtime's
+ * receive-bin probe + glib timeout pair. uid maps to Hotline user
+ * IDs from the SDP `a=mid:user-{uid}` labels resolved at
+ * pad-added; the C side cross-references it with the chat user
+ * list to repaint the speaker indicator column.
+ *
+ * The signal is sticky between flips: once a uid is reported
+ * speaking, the runtime won't re-emit `speaker_changed(uid, 1)`
+ * for that uid until it transitions to silent and back to
+ * speaking. Repaint logic on the C side can therefore conflate
+ * "received signal" with "state actually changed."
+ */
+typedef void (*gtkhx_voice_runtime_speaker_changed_cb) (void *user_data,
+                                                        uint16_t uid,
+                                                        int is_speaking);
+
+/*
+ * `voice-error` signal callback. Carries a user-facing message
+ * (NUL-terminated UTF-8) intended for display via AdwToast. The
+ * `text` pointer is valid for the duration of the call only; the
+ * runtime drops the underlying CString after the callback returns.
+ * Implementations should copy out anything they want to retain.
+ *
+ * Producers: spec-defined session timeouts softened to non-fatal
+ * in the state machine (DTLS, IceConnectivity, Media), plus the
+ * ServerTaskError arm covering 600 / 601 / 603 / 606 task replies.
+ * 604 (ICE notification) has no task reply and never reaches this.
+ */
+typedef void (*gtkhx_voice_runtime_error_cb) (void *user_data,
+                                              const char *text);
+
+/*
  * Bundle of per-SignalKind callbacks. Pass a pointer to one of
  * these to gtkhx_voice_runtime_new_v2 to subscribe to the runtime's
  * state-machine signals. The struct is read once at construction;
@@ -228,14 +266,26 @@ typedef void (*gtkhx_voice_runtime_mute_changed_cb) (void *user_data,
  * are built in lockstep by the same Meson invocation, "the
  * runtime build" is the only consumer in practice.
  *
- * RoomStatus and Error signal slots are not present yet; they'll
- * land in a follow-up step that wires up users.c mic icons +
- * AdwToastOverlay, and that follow-up will require a full rebuild
- * of both the staticlib and the C binary.
+ * Current signal slots:
+ *
+ *   state_changed   — voice session state machine transitions
+ *                     (Idle → JoinSent → … → Connected → Leaving).
+ *   mute_changed    — local mute toggle reflection.
+ *   speaker_changed — per-uid speaker indicator activity from the
+ *                     runtime's per-pad RTP probe.
+ *   error           — user-facing AdwToast text from softened
+ *                     spec timeouts (DTLS / IceConnectivity / Media)
+ *                     and ServerTaskError replies.
+ *
+ * RoomStatus has no C subscriber slot today: the participants blob
+ * the C side cares about flows into hx_voice_model_ingest_participants
+ * directly from rcv.c, with no round-trip through the runtime signal.
  */
 typedef struct {
-    gtkhx_voice_runtime_state_changed_cb state_changed;
-    gtkhx_voice_runtime_mute_changed_cb  mute_changed;
+    gtkhx_voice_runtime_state_changed_cb    state_changed;
+    gtkhx_voice_runtime_mute_changed_cb     mute_changed;
+    gtkhx_voice_runtime_speaker_changed_cb  speaker_changed;
+    gtkhx_voice_runtime_error_cb            error;
 } gtkhx_voice_runtime_signal_callbacks;
 
 /*

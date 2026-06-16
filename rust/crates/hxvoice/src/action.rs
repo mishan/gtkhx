@@ -194,6 +194,20 @@ pub enum SignalKind {
     /// (server-reported flips don't change our local state); a
     /// future revision may wire that path through.
     MuteChanged,
+    /// `voice-speaker-changed` — per-participant talking indicator.
+    /// Fired by the runtime's periodic per-pad RTP activity
+    /// evaluator (NOT by the state machine), so the payload is
+    /// always [`SignalPayload::SpeakerChanged`].
+    ///
+    /// State-machine code never produces this — it's emitted from
+    /// the runtime side directly via
+    /// `backend.borrow_mut().emit_signal`, bypassing the state-
+    /// machine `Action::EmitSignal` channel. Including it in this
+    /// enum keeps the signal taxonomy consistent so the runtime's
+    /// `CallbackBackend::emit_signal` dispatch arm + the C-side
+    /// `SignalCallbacks` struct have the same vocabulary, even
+    /// though the producer is different from the rest.
+    SpeakerChanged,
 }
 
 /// Typed payload carried with an `EmitSignal` action. Variants
@@ -220,6 +234,17 @@ pub enum SignalPayload {
     },
     MuteChanged {
         muted: bool,
+    },
+    /// Per-participant speaker activity transition. The runtime
+    /// fires this whenever a uid's "speaking" state flips between
+    /// the runtime's per-pad RTP-activity probe ticks (default
+    /// cadence: 200 ms). `uid` is the Hotline user id from the
+    /// SDP `a=mid:user-{uid}` label resolved at pad-added; the C
+    /// side cross-references it with the chat user list to repaint
+    /// the indicator column.
+    SpeakerChanged {
+        uid: u16,
+        is_speaking: bool,
     },
 }
 

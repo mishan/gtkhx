@@ -454,6 +454,25 @@ test_hx_user_hash = executable('test_hx_user_hash',
 test('hx_user_hash', test_hx_user_hash,
      suite : 'unit')
 
+# voice_model — per-uid voice presence + state used to drive the
+# speaker indicator column in the user list. Pure GObject + GLib
+# data structure; no GTK, no GStreamer. Pins down the indicator-
+# policy contract (MUTED beats SPEAKING, leavers drop to NONE,
+# set_speaking on an unknown uid is a no-op) plus the
+# "indicator-changed" signal emission discipline (one emit per
+# uid whose computed indicator actually flipped, none for
+# unchanged-flip ingest passes). Pulls in the hotline-proto Rust
+# staticlib (via proto_test_deps) because voice_model.c calls
+# gtkhx_proto_parse_voice_participants to walk the wire blob.
+test_voice_model = executable('test_voice_model',
+  'unit/test_voice_model.c',
+  '../src/voice_model.c',
+  dependencies        : proto_test_deps,
+  include_directories : test_inc,
+)
+test('voice_model', test_voice_model,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #
