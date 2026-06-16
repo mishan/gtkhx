@@ -123,7 +123,7 @@ swap_to_error (hx_media_dialog *md, const char *message)
 {
     if (md->error_label) {
         gtk_label_set_text (GTK_LABEL (md->error_label),
-                            message ? message : "Failed to load image");
+                            message ? message : _ ("Failed to load image"));
     }
     if (md->stack) {
         gtk_stack_set_visible_child_name (GTK_STACK (md->stack), "error");
@@ -175,7 +175,7 @@ on_save_clicked (GtkButton *btn, gpointer user_data)
         return;
     }
     GtkFileDialog *fd = gtk_file_dialog_new ();
-    gtk_file_dialog_set_title (fd, "Save Image");
+    gtk_file_dialog_set_title (fd, _ ("Save Image"));
     gchar *suggested
         = g_strdup_printf ("image%s", mime_to_suffix (md->mime));
     gtk_file_dialog_set_initial_name (fd, suggested);
@@ -263,16 +263,17 @@ on_download_done (struct htlc_conn *htlc,
     if (!result->bytes) {
         /* Surface the spec MediaErrorCode meaningfully. */
         char buf[256];
-        const char *what = "Failed to load image";
+        const char *what = _ ("Failed to load image");
         switch (result->error_code) {
-        case 1: what = "Image too large"; break;
-        case 2: what = "Unsupported image format"; break;
-        case 3: what = "Rate limited — try again shortly"; break;
-        case 4: what = "Not authorised to view this image"; break;
-        case 5: what = "Server temporarily busy"; break;
+        case 1: what = _ ("Image too large"); break;
+        case 2: what = _ ("Unsupported image format"); break;
+        case 3: what = _ ("Rate limited — try again shortly"); break;
+        case 4: what = _ ("Not authorised to view this image"); break;
+        case 5: what = _ ("Server temporarily busy"); break;
         default: break;
         }
         if (result->error_message && result->error_message_len > 0) {
+            /* Pure layout combiner — no translatable content. */
             g_snprintf (buf, sizeof (buf), "%s\n%.*s", what,
                         (int) (result->error_message_len > 200
                                    ? 200
@@ -294,9 +295,9 @@ on_download_done (struct htlc_conn *htlc,
         result->bytes->data, result->bytes->len, &caps);
     if (!decoded.texture) {
         char buf[256];
-        g_snprintf (buf, sizeof (buf), "Image decoder rejected: %s",
+        g_snprintf (buf, sizeof (buf), _ ("Image decoder rejected: %s"),
                     decoded.error_message ? decoded.error_message
-                                          : "unknown error");
+                                          : _ ("unknown error"));
         swap_to_error (md, buf);
         return;
     }
@@ -332,7 +333,7 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     /* AdwDialog with a content child = AdwToolbarView (header +
 	 * scrollable body). */
     md->dialog = adw_dialog_new ();
-    adw_dialog_set_title (md->dialog, "Image");
+    adw_dialog_set_title (md->dialog, _ ("Image"));
     adw_dialog_set_content_width (md->dialog, 720);
     adw_dialog_set_content_height (md->dialog, 540);
 
