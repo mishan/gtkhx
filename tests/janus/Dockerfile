@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 # updates the public binary. Same sha256-pin model — any change at
 # the URL produces a checksum mismatch here and we bump deliberately.
 ARG JANUS_URL=https://misha.nasledov.com/janus-linux-amd64.tar.gz
-ARG JANUS_SHA256=0a79f8c6fc724229a7f013ad227c285698027c1eb0eb569226012ba5b50670d4
+ARG JANUS_SHA256=6661c6dc8c767c7397998af104cc16cc45bac124deabc48ebce8763d7b7ee080
 
 WORKDIR /build
 RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
@@ -145,6 +145,40 @@ RUN mkdir -p /opt/janus/Server/tls \
         -subj "/CN=localhost" \
         -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
  && chmod 600 /opt/janus/Server/tls/key.pem
+
+# Pre-create the relative-path directories referenced by config.yaml.
+#
+# Older Janus builds (Linux amd64 tarball <= 2.0.8-dev) auto-created
+# these dirs on first startup if they didn't exist. Newer builds
+# fail-fast at config load with:
+#   Error loading config: DataRoot "/opt/janus/Server/Data": stat
+#   /opt/janus/Server/Data: no such file or directory
+# and exit before binding the listener — which dead-locks the
+# seed-hope-passwords script's 30 s poll for the API to come up.
+#
+# We pre-create every relative-path dir referenced by the checked-in
+# config.yaml so a Janus tarball bump doesn't reintroduce this
+# failure. Files/ is also re-created in a later RUN step that seeds
+# fixture content into it; `mkdir -p` is idempotent so double-creating
+# is harmless.
+#
+# Paths covered:
+#   Server/Data   ← DataRoot. The fail-loud path observed on the
+#                   2026-06 Janus tarball.
+#   Server/Files  ← FileRoot. Seeded later with fixture content; pre-
+#                   create here so the seed-time Janus instance
+#                   doesn't trip the same validation if the binary
+#                   ever extends the check.
+#   Server/Plugins ← PluginsDir. EnablePlugins is false but the path
+#                    may still be validated.
+#   Server/Logs    ← LogFile: Logs/janus.log. Janus may or may not
+#                    create the parent dir for its log file; safer to
+#                    pre-create.
+RUN mkdir -p \
+        /opt/janus/Server/Data \
+        /opt/janus/Server/Files \
+        /opt/janus/Server/Plugins \
+        /opt/janus/Server/Logs
 
 # Seed HOPE-compatible password hashes onto the bundled accounts.
 # Standalone script — see its preamble for the full background;
