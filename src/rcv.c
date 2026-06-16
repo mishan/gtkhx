@@ -1981,6 +1981,27 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 }
             }
 
+            /* Phase 9.A: clear inline-media advisory limits BEFORE
+			 * walking the LOGIN reply. Each MAX_* field is
+			 * independently optional on the wire (spec: "Clients
+			 * MUST tolerate any individual field being absent"),
+			 * so the chunk walker below only writes the ones the
+			 * server advertised — any field omitted from this
+			 * particular LOGIN would otherwise inherit a stale
+			 * value from a prior session on the same htlc_conn
+			 * struct (network.c::hx_htlc_close also zeroes them
+			 * on disconnect, but a server reconfiguration mid-
+			 * lifetime that re-LOGINs without going through
+			 * close would otherwise still carry stale fields).
+			 * htlc->caps is overwritten outright by the chunk
+			 * walker; these can't piggyback on that. */
+            htlc->media_max_bytes = 0;
+            htlc->media_max_dimension = 0;
+            htlc->media_max_pixels = 0;
+            htlc->media_chunk_size = 0;
+            htlc->media_max_frames = 0;
+            htlc->media_max_duration_ms = 0;
+
             dh_start (htlc)
             {
                 switch (_type) {

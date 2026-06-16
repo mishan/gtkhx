@@ -220,6 +220,19 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * retention doesn't carry stale numbers into the UI. */
     htlc->history_max_msgs = 0;
     htlc->history_max_days = 0;
+    /* Inline-media advisory limits from the LOGIN reply — same
+	 * reasoning. The accessors in src/inline_media.h gate on
+	 * CAP_INLINE_MEDIA being lit so callers see spec defaults
+	 * when the new server doesn't echo the cap; this reset is
+	 * defence-in-depth for any future path that reads the raw
+	 * fields directly (and matches the pattern history_max_*
+	 * uses one line up). */
+    htlc->media_max_bytes = 0;
+    htlc->media_max_dimension = 0;
+    htlc->media_max_pixels = 0;
+    htlc->media_chunk_size = 0;
+    htlc->media_max_frames = 0;
+    htlc->media_max_duration_ms = 0;
 
     /* Phase 8.D runtime wiring: tear down the voice runtime.
      * gtkhx_voice_runtime_free walks the state machine to its
