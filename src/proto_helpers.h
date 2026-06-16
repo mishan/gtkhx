@@ -849,6 +849,29 @@ extern void hx_chat_event_attach_media (HxChatEvent *ev,
  * meta yet. */
 extern char *hx_chat_media_placeholder_line (const HxChatMedia *m);
 
+/* Clickable variant of hx_chat_media_placeholder_line for the
+ * xtext output path. Returns a NBSP-joined string so xtext's
+ * word tokenizer (which splits on ASCII space) treats the whole
+ * row as one clickable token, and embeds a `hxmedia:N` substring
+ * where N is the caller's per-chat token id. The word_click
+ * handler in chat.c scans for that substring on click and
+ * dispatches to the inline-media dialog via a hashtable lookup
+ * keyed on the token id.
+ *
+ * Format-wise identical to hx_chat_media_placeholder_line except
+ * spaces are replaced by NBSP (U+00A0, "\xc2\xa0") and a
+ * `hxmedia:N` token is interpolated before the "click to view"
+ * trailer. Caller g_free()'s the result. */
+extern char *hx_chat_media_placeholder_clickable (const HxChatMedia *m,
+                                                  guint token_id);
+
+/* Walk a placeholder string for the `hxmedia:N` substring. If
+ * found, returns TRUE and writes N into *out_token; otherwise
+ * returns FALSE. Used by the word_click handler to recover the
+ * token from the clicked word. NUL-terminated input. */
+extern gboolean hx_chat_media_parse_token (const char *word,
+                                           guint *out_token);
+
 /*
  * HxMsgEvent — a parsed private-message value object.
  *

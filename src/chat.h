@@ -72,6 +72,15 @@ extern const char *hx_loading_older_sentinel (void);
  * gchats and matching the xtext widget. */
 extern void chat_history_word_click (GtkWidget *xtext, char *word,
                                      GdkEvent *event, gpointer data);
+
+/* Phase 9.D inline-media click handler. Filters on words that
+ * embed the `hxmedia:N` token the placeholder formatter
+ * generates. Looks up the token in the gchat's media_handles
+ * table and pops the click-to-view dialog. Connected alongside
+ * chat_history_word_click + gtkurl_xtext_word_click on every
+ * chat / pchat output xtext at construction time. */
+extern void inline_media_chat_word_click (GtkWidget *xtext, char *word,
+                                          GdkEvent *event, gpointer data);
 /* Phase 3 follow-up: hx_printf / hx_printf_prefix moved to
  * gtkhx_log.{c,h}; #include "gtkhx_log.h" rather than chat.h to
  * pull the decls in (chat.h forwards the include for source

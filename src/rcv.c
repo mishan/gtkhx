@@ -558,7 +558,8 @@ hx_rcv_task (struct htlc_conn *htlc)
             = tsk->str
               && (!strcmp (tsk->str, "xfer_go")
                   || !strcmp (tsk->str, "xfer_go_folder")
-                  || !strcmp (tsk->str, "upload-media"));
+                  || !strcmp (tsk->str, "upload-media")
+                  || !strcmp (tsk->str, "download-media"));
         if (tsk->rcv && (!error || dispatch_on_error)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }

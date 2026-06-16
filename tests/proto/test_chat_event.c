@@ -481,6 +481,58 @@ test_chat_event_media_placeholder_rejects_invalid_utf8_mime (void)
     g_free (p);
 }
 
+static void
+test_chat_event_media_placeholder_clickable_embeds_token (void)
+{
+    /* Clickable variant: NBSP-joined + `hxmedia:N` embedded so
+	 * xtext word_click recovers the token. */
+    HxChatMedia m = {
+        .id = (guint8 *) "x",
+        .id_len = 1,
+        .mime = "image/png",
+        .mime_len = 9,
+        .width = 800,
+        .height = 600,
+        .bytes = 124000,
+        .width_present = TRUE,
+        .height_present = TRUE,
+        .bytes_present = TRUE,
+    };
+    char *p = hx_chat_media_placeholder_clickable (&m, 42);
+    g_assert_nonnull (p);
+    /* Must contain the hxmedia:N substring. */
+    g_assert_nonnull (g_strstr_len (p, -1, "hxmedia:42"));
+    /* Must not contain any ASCII space (NBSP-joined). */
+    g_assert_null (g_strstr_len (p, -1, " "));
+    g_free (p);
+}
+
+static void
+test_chat_event_media_parse_token_finds_embedded (void)
+{
+    /* Word the click handler receives: a NBSP-joined string with
+	 * `hxmedia:N` somewhere in it. Validate the parser. */
+    guint token = 0;
+    g_assert_true (hx_chat_media_parse_token (
+        "[image\xc2\xa0\xc2\xb7\xc2\xa0hxmedia:7\xc2\xa0\xc2\xb7\xc2\xa0xyz]",
+        &token));
+    g_assert_cmpuint (token, ==, 7);
+
+    /* Edge case: token at end. */
+    g_assert_true (hx_chat_media_parse_token ("foo hxmedia:12345", &token));
+    g_assert_cmpuint (token, ==, 12345);
+
+    /* No token. */
+    g_assert_false (hx_chat_media_parse_token ("[image · plain]", &token));
+
+    /* Empty digits after the colon. */
+    g_assert_false (hx_chat_media_parse_token ("hxmedia:", &token));
+
+    /* NULL safety. */
+    g_assert_false (hx_chat_media_parse_token (NULL, &token));
+    g_assert_false (hx_chat_media_parse_token ("hxmedia:9", NULL));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -545,6 +597,10 @@ main (int argc, char **argv)
                      test_chat_event_media_placeholder_unknown_mime_passes_through);
     g_test_add_func ("/proto/chat_event/media_placeholder_rejects_invalid_utf8",
                      test_chat_event_media_placeholder_rejects_invalid_utf8_mime);
+    g_test_add_func ("/proto/chat_event/media_placeholder_clickable_embeds_token",
+                     test_chat_event_media_placeholder_clickable_embeds_token);
+    g_test_add_func ("/proto/chat_event/media_parse_token_finds_embedded",
+                     test_chat_event_media_parse_token_finds_embedded);
 
     return g_test_run ();
 }
