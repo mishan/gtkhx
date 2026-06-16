@@ -274,7 +274,12 @@ VoiceMaxPerRoom: 16
 # inline in public and private chat. Disabled by default. Sending
 # additionally requires the per-account `SendMedia` privilege bit.
 InlineMedia:
-  Enabled: false
+  # Test-target setting: enabled so the Phase 9.F Tier 3
+  # (test_integration_inline_media) finds the cap echoed back in
+  # the LOGIN reply. Janus's defaults match the spec recommended
+  # limits; we don't override them so the test exercises the
+  # spec-conformant configuration. See docs/inline-media-plan.md.
+  Enabled: true
 
   # Per-image ceilings. Defaults match the spec; tighten on smaller hosts.
   # MaxEncodedBytes: 262144     # 256 KiB hard cap on encoded image size.
@@ -657,7 +662,16 @@ NewUserDefaults:
   # the end of that script.
   VoiceChat:            true    # Join voice chat rooms
   ReadChatHistory:      false   # Request chat history (replay on demand)
-  SendMedia:            false   # Attach inline images in chat
+  # Test-target setting: SendMedia enabled so the integration
+  # suite's full-round-trip Phase 9.F follow-ups (upload + chat-
+  # with-handle + relay + download) work end-to-end out of the
+  # box. The cap-negotiation + advisory-limits probes that ship in
+  # the first 9.F commit don't require this — but enabling it now
+  # keeps the test-account template consistent for follow-ups.
+  # Bundled accounts (guest / admin) inherit from this template
+  # at account-create time; pre-existing bundled YAMLs are
+  # patched separately in seed-hope-passwords.sh.
+  SendMedia:            true    # Attach inline images in chat
 
 # ─── IRC Bridge ─────────────────────────────────────────────────────────────
 # IRC bridge configuration. This is optional and can be left disabled.

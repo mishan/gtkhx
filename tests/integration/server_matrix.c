@@ -138,17 +138,14 @@ const hx_test_server hx_test_server_matrix[] = {
                         * cover both the cap echo and the per-account
                         * access bit the toolbar gates on. */
                        | HX_TEST_CAP_VOICE
-                       /* Phase 9.F inline-media tests. Per
-                        * [[gtkhx_janus]], Misha noted 2026-06 that
-                        * Janus ships the fogWraith inline-media
-                        * extension. The Tier 3 binary
-                        * (test_integration_inline_media) starts by
-                        * probing the LOGIN reply for the cap echo —
-                        * if Janus isn't actually emitting it, the
-                        * test fails loudly rather than silently
-                        * skipping (per [[feedback_no_test_skips]]),
-                        * which is the cheapest way to learn whether
-                        * the assumption holds. */
+                       /* Phase 9.F inline-media tests. Janus
+                        * ships the extension but defaults
+                        * InlineMedia.Enabled to false — the Tier
+                        * 3 container's config.yaml flips it on
+                        * (and bumps SendMedia: true on the
+                        * account template) so the cap-negotiation
+                        * probe finds it echoed in the LOGIN reply.
+                        * See docs/inline-media-plan.md. */
                        | HX_TEST_CAP_INLINE_MEDIA,
     },
 };

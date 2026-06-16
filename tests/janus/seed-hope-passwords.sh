@@ -181,6 +181,28 @@ for u in guest admin; do
         tail -40 "$LOG" >&2
         exit 1
     fi
+
+    # Phase 9.F follow-up: flip SendMedia: true onto the same
+    # bundled accounts so the inline-media full-round-trip tests
+    # (upload + chat-with-handle + relay + download) can run end-
+    # to-end. The NewUserDefaults block in config.yaml already
+    # carries SendMedia: true for any account created at runtime;
+    # this is the matching patch for the pre-shipped guest /
+    # admin YAMLs. Same defensive grep-and-verify shape as the
+    # VoiceChat seed above.
+    sed -i \
+        -e 's/^\(  SendMedia:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
+        -e 's/^\(SendMedia:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
+        "$yaml"
+    if ! grep -E '^[[:space:]]*SendMedia:[[:space:]]+true' "$yaml" \
+            >/dev/null; then
+        echo "SendMedia seed failed for $u" >&2
+        echo "--- $yaml ---" >&2
+        cat "$yaml" >&2
+        echo "--- janus log tail ---" >&2
+        tail -40 "$LOG" >&2
+        exit 1
+    fi
 done
 
 echo "HOPE seed OK"
