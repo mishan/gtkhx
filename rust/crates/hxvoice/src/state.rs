@@ -942,6 +942,29 @@ impl SessionMachine {
         // tear the pipeline down. The runtime decides when (or
         // whether) to walk back to Idle — typically immediately
         // after TearDown returns.
+        //
+        // Critically: if we were in any joined state, ship a
+        // VOICE_LEAVE (601) to the server before the TearDown.
+        // The user-driven LeaveRequested arm already does this;
+        // fail() used to skip it, on the assumption that the
+        // failure had broken the control channel too. In practice
+        // most fail() paths (renegotiation wedge, soft Media
+        // expiry, ServerTaskError on a non-control opcode) leave
+        // the TCP control channel perfectly healthy — the server
+        // just doesn't know we've given up on the room. Without
+        // a 601, the server keeps the participant slot occupied
+        // (its 605 ROOM_STATUS still lists us), other clients
+        // see a ghost user in the room, and Janus keeps relaying
+        // audio toward our about-to-be-dropped pipeline. Sending
+        // the LEAVE closes the divergence even if the
+        // disconnection / wedge took the media path down.
+        //
+        // We only emit LEAVE when there's an `active_cid` to
+        // address — the (Idle, ServerTaskError) and
+        // (JoinSent, JoinReply-timeout) paths still have one,
+        // so this covers everything that matters. Capture it
+        // BEFORE clearing `active_cid` below.
+        let cid_to_leave = self.active_cid;
         self.active_cid = None;
         self.queued_offer = None;
         let prior_state = mem::replace(&mut self.state, SessionState::Leaving);
@@ -967,6 +990,17 @@ impl SessionMachine {
                 new_state: SessionState::Leaving,
             },
         });
+        // Order matters: ship LEAVE before TearDown. The runtime's
+        // TearDown handler tears the local pipeline down — once
+        // it's gone, we can't observe a server reply to the LEAVE
+        // anyway, but sending while the control channel is still
+        // up costs nothing and lets the server clean up its side.
+        if let Some(cid) = cid_to_leave {
+            actions.push(Action::SendWireFrame {
+                opcode: HTLC_HDR_VOICE_LEAVE,
+                body: WireFrameBody(encode_cid_only(cid)),
+            });
+        }
         actions.push(Action::TearDown);
         actions
     }
@@ -2089,6 +2123,78 @@ mod tests {
             m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
         assert_eq!(m.state(), SessionState::Leaving);
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+    }
+
+    /// Regression: pre-fix, `fail()` walked the local session to
+    /// Leaving without telling the server. The server kept the
+    /// participant slot occupied, other clients saw a ghost user
+    /// in the room, and Janus kept relaying audio toward our
+    /// torn-down pipeline. Now every fail() with an active_cid
+    /// emits a VOICE_LEAVE (601) before TearDown so the server
+    /// cleans up its side. Pins the wedge-watchdog fail path as
+    /// the most user-visible example; the other fail() entry
+    /// points (DTLS would-fail, ICE would-fail, Failed PCS,
+    /// JoinReply timeout, ServerTaskError on JOIN/SDP_ANSWER)
+    /// share the same code path.
+    #[test]
+    fn fail_emits_voice_leave_before_tear_down() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 42 });
+        m.step(Event::SdpOfferReceived { cid: 42, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::Connecting);
+        let acts =
+            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+
+        // VOICE_LEAVE must appear, carrying the active cid.
+        let leave_idx = acts.iter().position(|a| matches!(
+            a,
+            Action::SendWireFrame { opcode: 601, .. }
+        )).expect("fail() must emit a VOICE_LEAVE wire frame");
+        if let Action::SendWireFrame { body, .. } = &acts[leave_idx] {
+            assert_eq!(
+                body.0,
+                42u32.to_be_bytes(),
+                "VOICE_LEAVE body must encode the active cid"
+            );
+        }
+
+        // TearDown must still fire — and must come AFTER the
+        // LEAVE wire frame. Otherwise the local pipeline goes down
+        // before the LEAVE has been queued onto the control
+        // channel.
+        let tear_idx = acts.iter().position(|a| matches!(
+            a,
+            Action::TearDown
+        )).expect("fail() must still emit TearDown");
+        assert!(
+            leave_idx < tear_idx,
+            "VOICE_LEAVE must be emitted before TearDown so the wire frame \
+             is queued while the control channel is still alive"
+        );
+    }
+
+    /// fail() from JoinSent (server didn't reply): we joined a
+    /// cid, server-side state exists, so even the JoinReply-
+    /// timeout path should ship VOICE_LEAVE. The server might or
+    /// might not have built our room slot before timing us out
+    /// — sending a LEAVE either reaches a no-op cleanup path or
+    /// closes a real slot, both of which are correct.
+    #[test]
+    fn fail_from_join_sent_still_emits_voice_leave() {
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 9 });
+        assert_eq!(m.state(), SessionState::JoinSent);
+        let acts = m.step(Event::Timeout { kind: Timeout::JoinReply });
+        assert_eq!(m.state(), SessionState::Leaving);
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                Action::SendWireFrame { opcode: 601, .. }
+            )),
+            "JoinReply-timeout fail() must still try VOICE_LEAVE — the \
+             server might have built room state we want cleaned up"
+        );
     }
 
     #[test]

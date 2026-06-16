@@ -33,6 +33,28 @@ What also shipped that wasn't in the original plan:
   `Arc<AtomicU64>` RTP counter from the receive bin's depay sink and
   injects `Timeout::WedgeDeadline` if the counter doesn't advance.
   Full design lives inline in §5 below ("Unplanned: wedge watchdog").
+- **Renegotiation Connected-resync + cleanup-on-fail**
+  (`claude/voice-renegotiate-fix`): four-part fix for an idle-mute
+  scenario where a renegotiation cycle left the state machine
+  stranded in `Connecting`, the wedge watchdog eventually tore the
+  session down, the server never learned, and a manual rejoin
+  inherited the broken webrtcbin's stale ICE / DTLS credentials.
+  Fixes: (1) when the state machine re-enters `Connecting` after a
+  renegotiation, the runtime synthesises a
+  `WebrtcConnectionStateChanged(Connected)` event so the machine
+  advances back to `Connected` without waiting on a notify that
+  webrtcbin won't emit (its `connection-state` property never
+  changed). (2) Per-session `has_been_connected_since_join`
+  bookkeeping suppresses wedge-watchdog arming on re-entries to
+  `Connecting`, so a future renegotiation cycle that slipped past
+  the synthesis can't trigger the wedge alone. (3) `fail()` in the
+  state machine now emits `VOICE_LEAVE` (601) before `TearDown` so
+  the server cleans up the participant slot instead of keeping a
+  ghost user in the room. (4) `Action::TearDown` walks the
+  pipeline back to `Null` synchronously and rebuilds fresh
+  pipeline-bits via `build_pipeline_bits`, so the next
+  `JoinRequested` builds a clean webrtcbin instead of renegotiating
+  against the previous session's keys.
 - **Signal bridge** (`voice-phase-d-signal-bridge`): the runtime
   dispatches `state-changed` and `mute-changed` signals back into the
   C UI via the `SignalCallbacks` FFI struct, so `voice_panel.c`
