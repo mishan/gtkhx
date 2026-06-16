@@ -2146,10 +2146,15 @@ mod tests {
         let acts =
             m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
 
-        // VOICE_LEAVE must appear, carrying the active cid.
+        // VOICE_LEAVE must appear, carrying the active cid. We
+        // match on the module-local HTLC_HDR_VOICE_LEAVE constant
+        // rather than the literal `601` so a future opcode-table
+        // move (e.g. consolidating the wire-protocol numbers into
+        // hotline-proto::messages) doesn't silently leave the
+        // assertion checking a stale number.
         let leave_idx = acts.iter().position(|a| matches!(
             a,
-            Action::SendWireFrame { opcode: 601, .. }
+            Action::SendWireFrame { opcode, .. } if *opcode == HTLC_HDR_VOICE_LEAVE
         )).expect("fail() must emit a VOICE_LEAVE wire frame");
         if let Action::SendWireFrame { body, .. } = &acts[leave_idx] {
             assert_eq!(
@@ -2190,7 +2195,8 @@ mod tests {
         assert!(
             acts.iter().any(|a| matches!(
                 a,
-                Action::SendWireFrame { opcode: 601, .. }
+                Action::SendWireFrame { opcode, .. }
+                    if *opcode == HTLC_HDR_VOICE_LEAVE
             )),
             "JoinReply-timeout fail() must still try VOICE_LEAVE — the \
              server might have built room state we want cleaned up"

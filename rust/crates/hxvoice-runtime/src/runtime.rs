@@ -1530,11 +1530,16 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
 /// underlying problem was transient).
 fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
     // Snapshot what we need under a short borrow, then drop it
-    // before touching GStreamer. The pipeline.set_state(Null)
-    // below blocks until the state change settles, and the
-    // bus-message handlers it drives can re-enter `handle_event`
-    // — releasing the Inner borrow now keeps that path free of
-    // borrow_mut panics.
+    // before touching GStreamer. The pipeline.set_state(Null) call
+    // below may complete synchronously (Success / NoPreroll) or
+    // hand the transition off to the streaming thread (Async); in
+    // either case it can drive bus-message handlers that re-enter
+    // `handle_event`, so releasing the Inner borrow first keeps
+    // that path free of borrow_mut panics regardless of which
+    // return shape we get. The async return value is handled
+    // explicitly below — we do NOT wait for the transition to
+    // land before continuing, see the comment at the set_state
+    // call.
     let (pipeline, runtime_id) = {
         let mut inner = runtime.inner.borrow_mut();
         // Drop the receive-bin map first so the streaming-thread
@@ -1597,25 +1602,42 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         return;
     };
 
-    // Synchronous walk back to Null. `Async` is acceptable here:
+    // Walk back to Null. `Async` is acceptable here:
     // gstreamer-rs returns `Success`, `Async`, or `NoPreroll`
     // from `set_state`, and only `Failure` indicates a problem
-    // we should log. Even `Async` means the state change has
-    // been issued and will land on the streaming thread; we
-    // accept that for the same reason `VoiceRuntime::new`
-    // accepts an async `Playing` transition: the test harness
-    // doesn't drive a main loop, so a strictly synchronous
-    // expectation would deadlock there.
+    // we should log.
+    //
+    // We deliberately do NOT block on Async with
+    // `pipeline.state(ClockTime::NONE)` here. Production runs
+    // this function on the GLib main thread (the dispatch loop is
+    // main-thread-only) and webrtcbin's internal state-change
+    // worker posts bus messages back onto that same main
+    // context to finish the transition. A blocking wait on the
+    // main thread would deadlock the message drain it depends on.
+    // The same reasoning applies in test environments where the
+    // main loop isn't running at all.
+    //
+    // The "settle before rebuild" guarantee we DO need is on UDP
+    // socket / ICE-agent ownership, not on bin state. The
+    // `drop(pipeline)` immediately below releases the strong
+    // reference to the bin; gstreamer-rs's GObject Drop machinery
+    // walks element children, releasing nicesrc / nicesink
+    // resources and unbinding their sockets BEFORE
+    // `build_pipeline_bits` constructs the replacement. That
+    // socket release is what makes the rebuild's fresh ICE agent
+    // safe to bind on the same port; the Null-state transition
+    // is a precursor to the drop, not a substitute for it.
     if let Err(e) = pipeline.set_state(gstreamer::State::Null) {
         gstreamer::warning!(
             gstreamer::CAT_RUST,
             "hxvoice: pipeline.set_state(Null) on teardown returned {e:?}"
         );
     }
-    // Explicitly drop the pipeline before rebuilding. Without
-    // this, the old pipeline's UDP sockets could outlive the
-    // construction of the new webrtcbin and the new ICE agent's
-    // bind would race against the old one.
+    // Explicitly drop the pipeline before rebuilding. The drop
+    // releases the strong ref, which walks the element children
+    // and releases UDP socket / ICE agent ownership; without that
+    // release, the rebuilt webrtcbin's nice elements would race
+    // for the same UDP port the old one still holds.
     drop(pipeline);
 
     // Rebuild. Failure here means the next session can't drive

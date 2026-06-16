@@ -2251,3 +2251,15 @@ test('voice_disconnect_cleanup', test_integration_voice_disconnect_cleanup,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 120)
+
+test_integration_voice_rejoin_cycle = executable(
+  'test_integration_voice_rejoin_cycle',
+  'integration/test_voice_rejoin_cycle.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_rejoin_cycle', test_integration_voice_rejoin_cycle,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
