@@ -305,6 +305,32 @@ Phase 8 follow-ups (small):
 
 ---
 
+## Phase 9 — Inline media (fogWraith capability extension)
+
+The fogWraith spec adds inline images to chat via a server-validated upload/download pipeline: capable clients send `TranUploadMedia` (750) to get an opaque media handle, attach the handle + canonical MIME to a normal `TranChatSend` / `TranSendInstantMsg`, and capable recipients fetch the canonical bytes via `TranDownloadMedia` (751). Capability bit 3 (`HTLC_CAP_INLINE_MEDIA = 0x0008`) is already reserved in `src/hotline.h`. Full plan at `docs/inline-media-plan.md`.
+
+The honest design risk is the receive-render path: xtext's vertical layout is line-uniform everywhere (`fontsize × subline_count`), and no existing patch in HexChat's lineage carries inline images. The plan splits "spec conformance" from "true inline render" so the wire stack ships against real servers before any xtext surgery lands.
+
+Sub-phases:
+
+- **9.A** — Wire protocol foundation. `hotline-proto::inline_media` module: typed builders/parsers for 750/751 (single-shot + chunked), `LimitsAdvertisement` parser for the new `DATA_CHAT_MEDIA_MAX_*` LOGIN-reply fields (0x020C–0x0211), `MediaErrorCode` enum (0–5). C-side dispatcher hookup. Tier 2 wire fixtures. No UI yet.
+- **9.B** — Bounded decoder. New `media_decode` module that magic-byte sniffs + bounds-checks before decoding via `GdkPixbufLoader`. Allowlist is JPEG/PNG/GIF only; SVG/WebP/AVIF/HEIC rejected at sniff time per the spec. Reuses the `src/preview.{c,h}` worker-thread loader pipeline. Animated GIF deferred to v2 (first-frame still in v1).
+- **9.C** — Send UX. Paperclip in chat / pchat / PM input bars; paste-from-clipboard for `GdkTexture` clipboard content; drag-and-drop image files via `GtkDropTarget`. Pre-flight against server-advertised limits with a resize/recompress offer. Chunked upload state machine cancellable mid-upload.
+- **9.D** — Receive UX (placeholder + dialog). Inbound media renders as a styled placeholder row (`[image · PNG · 800×600 · 124 KB · click to view]`). Click opens an in-app dialog backed by the existing image-preview pipeline. Right-click context menu: Save As, Copy Image, Open in External Viewer. End-of-9.D, the client is spec-conformant with zero xtext changes.
+- **9.E** — Inline render via multi-subline padding. Extend `textentry` with a media-kind discriminator + `GdkTexture *`. Reserve `ceil(img_h / fontsize)` blank sublines and paint the texture into the band during `gtk_xtext_render_line`. Reuses existing scroll/click/calc math; selection over media is all-or-nothing with alt text on copy. ~200–400 LOC focused on xtext.c. Variable-height xtext (Option 4) remains a possible follow-up if the line-grid compromises chafe.
+- **9.F** — Tier 3 integration against Janus. Janus is the fogWraith reference server and ships inline-media support alongside the spec (same pattern as chat-history and voice). Add `HX_TEST_CAP_INLINE_MEDIA` to the Janus matrix entry, write end-to-end binaries for send (single + chunked), receive, error-code surfacing, authorization, and handle expiry. Legacy-fallback / mixed-audience cases are covered by mixing a capable Janus member with mhxd or Mobius observers in the existing multi-server Tier 3 setup — no mock server needed. (If the supports-check at the start of 9.F finds Janus doesn't actually implement it, fall back to a Go mock under `tests/integration/mock-server/inline-media/` per the alternate plan in `docs/inline-media-plan.md`.)
+
+Locked-in choices:
+
+- **Animated GIF deferred to v2** — v1 decodes the first frame and renders as a still.
+- **In-app dialog for click-to-view**, reusing `src/preview.{c,h}`. External viewer is available via the right-click context menu, not the default click.
+- **Right-click context menu** on every media surface (placeholder in 9.D, inline row in 9.E): Save As, Copy Image, Open in External Viewer.
+- **JPEG / PNG / GIF only.** Spec-mandated; explicit reject of SVG / WebP / AVIF / HEIC at sniff time.
+
+Janus is the inline-media Tier 3 target. Confirming Janus's actual support is the first step of 9.F (look for capability echo of bit 3 + the `DATA_CHAT_MEDIA_MAX_*` advisory fields in the LOGIN reply); the fallback if support isn't there is a Go mock server under `tests/integration/mock-server/inline-media/`.
+
+---
+
 ## Phase ∞ — Modernized Hotline protocol (joint with mhxd)
 
 This is the back-of-the-roadmap "if we ever want real modern crypto" section. Calling it out separately because it's a fundamentally different kind of work.
