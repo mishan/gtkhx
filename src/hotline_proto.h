@@ -1464,4 +1464,156 @@ extern bool gtkhx_proto_voice_reply_field (const uint8_t *buf, size_t len,
                                            const uint8_t **out_ptr,
                                            size_t *out_len);
 
+/* =====================================================================
+ * Inline-media extension (fogWraith Capabilities-Inline-Media.md).
+ *
+ * Phase 9.A FFI surface — wire-protocol builders + parsers for the
+ * upload (750) / download (751) transactions, the LOGIN-reply
+ * advisory limits, and the receive-side chat companion fields.
+ * Mirrors src/voice.c's pattern: builders take caller-owned (chunks,
+ * scratch) pairs; parsers fill a packed struct and expose per-field
+ * accessors for variable-length payloads.
+ * ===================================================================== */
+
+/* C-ABI mirror of LimitsAdvertisement. Per-field *_present flags
+ * distinguish "server advertised 0" from "server didn't advertise
+ * this field." When *_present is false the value is left at 0 — the
+ * C caller substitutes HX_MEDIA_DEFAULT_* from hotline.h. */
+struct gtkhx_proto_inline_media_limits {
+    uint32_t max_bytes;
+    uint32_t max_dimension;
+    uint32_t max_pixels;
+    uint32_t chunk_size;
+    uint32_t max_frames;
+    uint32_t max_duration_ms;
+    bool max_bytes_present;
+    bool max_dimension_present;
+    bool max_pixels_present;
+    bool chunk_size_present;
+    bool max_frames_present;
+    bool max_duration_ms_present;
+};
+
+/* Walk a LOGIN-reply body and populate *out with the inline-media
+ * advisory limits. Returns true if *out was populated (always when
+ * non-NULL). False on NULL out. */
+extern bool gtkhx_proto_extract_inline_media_limits (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_inline_media_limits *out);
+
+/* Result of gtkhx_proto_extract_chat_media_meta. id_ptr / type_ptr
+ * borrow into the input buffer and stay valid for its lifetime. */
+struct gtkhx_proto_chat_media_meta {
+    const uint8_t *id_ptr;
+    size_t id_len;
+    const uint8_t *type_ptr;
+    size_t type_len;
+    uint32_t width;
+    uint32_t height;
+    uint32_t bytes;
+    bool width_present;
+    bool height_present;
+    bool bytes_present;
+};
+
+/* Outcome enum. Matches Rust's ChatMediaMetaStatus repr. */
+#define GTKHX_PROTO_MEDIA_META_NONE   0
+#define GTKHX_PROTO_MEDIA_META_PRESENT 1
+#define GTKHX_PROTO_MEDIA_META_ORPHAN  2
+
+/* Walk a chat-transaction body (105/106/108/104) for the
+ * CHAT_MEDIA_ID + CHAT_MEDIA_TYPE companion fields. Returns:
+ *   GTKHX_PROTO_MEDIA_META_NONE     no media on this chat (*out
+ *                                    unchanged)
+ *   GTKHX_PROTO_MEDIA_META_PRESENT  *out populated
+ *   GTKHX_PROTO_MEDIA_META_ORPHAN   exactly one companion present —
+ *                                    per spec receiver MUST reject
+ *                                    the inbound chat (*out unchanged)
+ */
+extern int gtkhx_proto_extract_chat_media_meta (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_chat_media_meta *out);
+
+/* Parsed TranUploadMedia success reply on the final chunk. id_ptr
+ * / type_ptr borrow into the reply buffer; copy out before the
+ * buffer is recycled. */
+struct gtkhx_proto_upload_final_reply {
+    const uint8_t *id_ptr;
+    size_t id_len;
+    const uint8_t *type_ptr;
+    size_t type_len;
+    uint32_t width;
+    uint32_t height;
+    uint32_t bytes;
+    bool width_present;
+    bool height_present;
+    bool bytes_present;
+};
+
+extern bool gtkhx_proto_parse_upload_final_reply (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_upload_final_reply *out);
+
+/* Extract the upload-session token from an intermediate TranUploadMedia
+ * reply. On success writes *out_ptr / *out_len pointing into `buf`;
+ * pointer stays valid for the lifetime of `buf`. */
+extern bool gtkhx_proto_parse_upload_token_reply (
+    const uint8_t *buf, size_t len,
+    const uint8_t **out_ptr, size_t *out_len);
+
+/* Parsed TranDownloadMedia reply. payload_ptr / type_ptr borrow
+ * into the reply buffer; the C-side accumulator copies bytes out
+ * across chunks until final_chunk is set. */
+struct gtkhx_proto_download_reply {
+    const uint8_t *payload_ptr;
+    size_t payload_len;
+    const uint8_t *type_ptr;
+    size_t type_len;
+    uint16_t part_count;
+    bool final_chunk;
+};
+
+extern bool gtkhx_proto_parse_download_reply (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_download_reply *out);
+
+/* Optional machine-readable rejection category on TranUploadMedia /
+ * TranDownloadMedia error replies. Returns 0..=5; unknown codes
+ * collapse to 0 (Generic) per spec. */
+extern uint16_t gtkhx_proto_extract_media_error_code (const uint8_t *buf,
+                                                      size_t len);
+
+/* Build single-shot TranUploadMedia (750). Returns 2 (no declared
+ * type) or 3 (with declared type) on success, 0 on validation
+ * failure. */
+extern int32_t gtkhx_proto_build_upload_media_single_chunks (
+    const uint8_t *payload_ptr, size_t payload_len,
+    const uint8_t *declared_type_ptr, size_t declared_type_len,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* Build first-chunk TranUploadMedia (750). part_count ≥ 2. */
+extern int32_t gtkhx_proto_build_upload_media_first_chunks (
+    const uint8_t *payload_ptr, size_t payload_len,
+    const uint8_t *declared_type_ptr, size_t declared_type_len,
+    uint16_t part_count,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* Build follow-up-chunk TranUploadMedia (750). part_index ≥ 1. */
+extern int32_t gtkhx_proto_build_upload_media_followup_chunks (
+    const uint8_t *upload_token_ptr, size_t upload_token_len,
+    const uint8_t *payload_ptr, size_t payload_len,
+    uint16_t part_index, bool final_chunk,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* Build TranDownloadMedia (751). part_index_present == false omits
+ * the CHAT_MEDIA_PART_INDEX chunk (first request). */
+extern int32_t gtkhx_proto_build_download_media_chunks (
+    const uint8_t *media_id_ptr, size_t media_id_len,
+    uint16_t part_index, bool part_index_present,
+    struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
 #endif /* _HOTLINE_PROTO_H */

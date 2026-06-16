@@ -4548,6 +4548,491 @@ pub unsafe extern "C" fn gtkhx_proto_voice_reply_field(
     }
 }
 
+// =====================================================================
+// Inline-media extension (fogWraith Capabilities-Inline-Media.md).
+//
+// Phase 9.A: wire-protocol FFI for the upload (750) / download (751)
+// transactions, the LOGIN-reply advisory limits, the receive-side chat
+// companion fields (CHAT_MEDIA_ID + CHAT_MEDIA_TYPE), and the upload /
+// download reply parsers. Mirrors the voice FFI pattern: builders take
+// caller-owned (chunks, scratch) pairs; parsers fill a packed struct
+// and expose per-field accessors for the variable-length payloads
+// (handle / type / payload bytes / upload token).
+// =====================================================================
+
+use crate::inline_media::{
+    self, ChatMediaMeta, DownloadMedia, DownloadReply, LimitsAdvertisement, MediaErrorCode,
+    UploadFinalReply, UploadMediaFirst, UploadMediaFollowup, UploadMediaSingle,
+};
+use crate::wire::ChunkIter;
+
+/// C-ABI mirror of [`LimitsAdvertisement`]. `*_present` flags
+/// distinguish "server advertised 0" from "server didn't advertise
+/// this field at all." When `*_present` is false the value field is
+/// left at 0 — the C caller uses the spec-recommended default
+/// (`HX_MEDIA_DEFAULT_*` in `src/hotline.h`).
+#[repr(C)]
+pub struct InlineMediaLimitsOut {
+    pub max_bytes: u32,
+    pub max_dimension: u32,
+    pub max_pixels: u32,
+    pub chunk_size: u32,
+    pub max_frames: u32,
+    pub max_duration_ms: u32,
+    pub max_bytes_present: bool,
+    pub max_dimension_present: bool,
+    pub max_pixels_present: bool,
+    pub chunk_size_present: bool,
+    pub max_frames_present: bool,
+    pub max_duration_ms_present: bool,
+}
+
+/// Walk a LOGIN-reply body and populate `out` with the inline-media
+/// advisory limits. Returns true if `out` was populated (always,
+/// when non-NULL). Returns false on NULL `out`.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out` a valid writable
+/// `InlineMediaLimitsOut` pointer or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_extract_inline_media_limits(
+    buf: *const u8,
+    len: usize,
+    out: *mut InlineMediaLimitsOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let limits: LimitsAdvertisement = inline_media::extract_limits_from_message(s, s.len());
+    *out = InlineMediaLimitsOut {
+        max_bytes: limits.max_bytes.unwrap_or(0),
+        max_dimension: limits.max_dimension.unwrap_or(0),
+        max_pixels: limits.max_pixels.unwrap_or(0),
+        chunk_size: limits.chunk_size.unwrap_or(0),
+        max_frames: limits.max_frames.unwrap_or(0),
+        max_duration_ms: limits.max_duration_ms.unwrap_or(0),
+        max_bytes_present: limits.max_bytes.is_some(),
+        max_dimension_present: limits.max_dimension.is_some(),
+        max_pixels_present: limits.max_pixels.is_some(),
+        chunk_size_present: limits.chunk_size.is_some(),
+        max_frames_present: limits.max_frames.is_some(),
+        max_duration_ms_present: limits.max_duration_ms.is_some(),
+    };
+    true
+}
+
+/// Result of [`gtkhx_proto_extract_chat_media_meta`].
+#[repr(C)]
+pub struct ChatMediaMetaOut {
+    /// Borrowed pointer into the input buffer at the CHAT_MEDIA_ID
+    /// payload start. Stays valid for as long as the input buffer
+    /// does.
+    pub id_ptr: *const u8,
+    pub id_len: usize,
+    /// Borrowed pointer into the input buffer at the CHAT_MEDIA_TYPE
+    /// payload start.
+    pub type_ptr: *const u8,
+    pub type_len: usize,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u32,
+    pub width_present: bool,
+    pub height_present: bool,
+    pub bytes_present: bool,
+}
+
+/// Outcome of [`gtkhx_proto_extract_chat_media_meta`].
+#[repr(C)]
+pub enum ChatMediaMetaStatus {
+    /// No media — neither CHAT_MEDIA_ID nor CHAT_MEDIA_TYPE was
+    /// present. `out` left unwritten.
+    None = 0,
+    /// Both companion fields present; `out` populated.
+    Present = 1,
+    /// Exactly one companion field present. Per spec the receiver
+    /// MUST reject; the caller should drop the inbound chat with a
+    /// log line. `out` left unwritten.
+    Orphan = 2,
+}
+
+/// Walk a chat (105/106/108/104) body and pull the inline-media
+/// companion fields out, if present.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out` a valid writable
+/// pointer or NULL. NULL `out` returns `None`/`Orphan` correctly but
+/// can't populate the Present branch; callers should pass a real
+/// pointer in production.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_extract_chat_media_meta(
+    buf: *const u8,
+    len: usize,
+    out: *mut ChatMediaMetaOut,
+) -> ChatMediaMetaStatus {
+    let s = as_slice(buf, len);
+    let walker = ChunkIter::over_message(s, s.len());
+    match inline_media::extract_chat_media_meta(walker) {
+        Ok(None) => ChatMediaMetaStatus::None,
+        Err(_) => ChatMediaMetaStatus::Orphan,
+        Ok(Some(meta)) => {
+            if !out.is_null() {
+                let ChatMediaMeta {
+                    id,
+                    type_,
+                    width,
+                    height,
+                    bytes,
+                } = meta;
+                *out = ChatMediaMetaOut {
+                    id_ptr: id.as_ptr(),
+                    id_len: id.len(),
+                    type_ptr: type_.as_ptr(),
+                    type_len: type_.len(),
+                    width: width.unwrap_or(0),
+                    height: height.unwrap_or(0),
+                    bytes: bytes.unwrap_or(0),
+                    width_present: width.is_some(),
+                    height_present: height.is_some(),
+                    bytes_present: bytes.is_some(),
+                };
+            }
+            ChatMediaMetaStatus::Present
+        }
+    }
+}
+
+/// C-ABI mirror of [`UploadFinalReply`]. Borrowed pointers into the
+/// reply buffer; valid until the buffer is recycled.
+#[repr(C)]
+pub struct UploadFinalReplyOut {
+    pub id_ptr: *const u8,
+    pub id_len: usize,
+    pub type_ptr: *const u8,
+    pub type_len: usize,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u32,
+    pub width_present: bool,
+    pub height_present: bool,
+    pub bytes_present: bool,
+}
+
+/// Parse a TranUploadMedia final-chunk success reply. Returns true
+/// when `out` was populated, false when either required field
+/// (`CHAT_MEDIA_ID`, `CHAT_MEDIA_TYPE`) was absent.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out` a valid writable
+/// pointer or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_upload_final_reply(
+    buf: *const u8,
+    len: usize,
+    out: *mut UploadFinalReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let walker = ChunkIter::over_message(s, s.len());
+    let Some(r): Option<UploadFinalReply> = inline_media::parse_upload_final_reply(walker) else {
+        return false;
+    };
+    *out = UploadFinalReplyOut {
+        id_ptr: r.media_id.as_ptr(),
+        id_len: r.media_id.len(),
+        type_ptr: r.media_type.as_ptr(),
+        type_len: r.media_type.len(),
+        width: r.width.unwrap_or(0),
+        height: r.height.unwrap_or(0),
+        bytes: r.bytes.unwrap_or(0),
+        width_present: r.width.is_some(),
+        height_present: r.height.is_some(),
+        bytes_present: r.bytes.is_some(),
+    };
+    true
+}
+
+/// Extract the upload-session token from a TranUploadMedia
+/// intermediate-chunk reply. Returns true when the token field was
+/// present; writes a borrowed pointer + length into `*out_ptr` /
+/// `*out_len`. Pointer stays valid for as long as `buf` does.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); out pointers valid
+/// writable or NULL (NULL out pointers return the presence flag
+/// without writing).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_upload_token_reply(
+    buf: *const u8,
+    len: usize,
+    out_ptr: *mut *const u8,
+    out_len: *mut usize,
+) -> bool {
+    let s = as_slice(buf, len);
+    let walker = ChunkIter::over_message(s, s.len());
+    match inline_media::parse_upload_token_reply(walker) {
+        Some(t) => {
+            if !out_ptr.is_null() {
+                *out_ptr = t.as_ptr();
+            }
+            if !out_len.is_null() {
+                *out_len = t.len();
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// C-ABI mirror of [`DownloadReply`].
+#[repr(C)]
+pub struct DownloadReplyOut {
+    pub payload_ptr: *const u8,
+    pub payload_len: usize,
+    pub type_ptr: *const u8,
+    pub type_len: usize,
+    pub part_count: u16,
+    pub final_chunk: bool,
+}
+
+/// Parse a TranDownloadMedia reply. Returns true when both
+/// required fields are present.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out` valid writable
+/// pointer or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_download_reply(
+    buf: *const u8,
+    len: usize,
+    out: *mut DownloadReplyOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let walker = ChunkIter::over_message(s, s.len());
+    let Some(r): Option<DownloadReply> = inline_media::parse_download_reply(walker) else {
+        return false;
+    };
+    *out = DownloadReplyOut {
+        payload_ptr: r.payload.as_ptr(),
+        payload_len: r.payload.len(),
+        type_ptr: r.media_type.as_ptr(),
+        type_len: r.media_type.len(),
+        part_count: r.part_count,
+        final_chunk: r.final_chunk,
+    };
+    true
+}
+
+/// Pull the optional [`MediaErrorCode`] out of an error reply.
+/// Returns the wire value (0..=5). Unknown codes collapse to 0 per
+/// spec.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_extract_media_error_code(
+    buf: *const u8,
+    len: usize,
+) -> u16 {
+    let s = as_slice(buf, len);
+    let walker = ChunkIter::over_message(s, s.len());
+    inline_media::extract_error_code(walker).as_u16()
+}
+
+// ---- Build shims ---------------------------------------------------------
+
+/// Build chunks for a single-shot TranUploadMedia (750).
+///
+/// On success returns the chunk count (2 without declared type, 3
+/// with). Returns 0 on validation failure.
+///
+/// # Safety
+/// `payload_ptr` valid for `payload_len` bytes (or NULL with
+/// `payload_len == 0`); `declared_type_ptr` valid for
+/// `declared_type_len` bytes (or NULL); `chunks` valid for
+/// `chunks_cap` `HxChunk` slots (or NULL); `scratch` valid for
+/// `scratch_cap` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_upload_media_single_chunks(
+    payload_ptr: *const u8,
+    payload_len: usize,
+    declared_type_ptr: *const u8,
+    declared_type_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 3;
+    const MAX_SCRATCH: usize = 1;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let payload = as_slice(payload_ptr, payload_len);
+    let declared = if declared_type_ptr.is_null() || declared_type_len == 0 {
+        None
+    } else {
+        Some(as_slice(declared_type_ptr, declared_type_len))
+    };
+    let req = UploadMediaSingle {
+        payload,
+        declared_type: declared,
+    };
+    inline_media::build_upload_media_single_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for the first chunk of a chunked TranUploadMedia
+/// (750). `part_count` must be ≥ 2 (single-shot uses the dedicated
+/// builder).
+///
+/// # Safety
+/// As [`gtkhx_proto_build_upload_media_single_chunks`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_upload_media_first_chunks(
+    payload_ptr: *const u8,
+    payload_len: usize,
+    declared_type_ptr: *const u8,
+    declared_type_len: usize,
+    part_count: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 5;
+    const MAX_SCRATCH: usize = 5;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let payload = as_slice(payload_ptr, payload_len);
+    let declared = if declared_type_ptr.is_null() || declared_type_len == 0 {
+        None
+    } else {
+        Some(as_slice(declared_type_ptr, declared_type_len))
+    };
+    let req = UploadMediaFirst {
+        payload,
+        declared_type: declared,
+        part_count,
+    };
+    inline_media::build_upload_media_first_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for a non-first chunk of a chunked
+/// TranUploadMedia (750). `part_index` must be ≥ 1.
+///
+/// # Safety
+/// As [`gtkhx_proto_build_upload_media_single_chunks`], plus
+/// `upload_token_ptr` valid for `upload_token_len` bytes (or NULL
+/// with `upload_token_len == 0` — which the builder rejects).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_upload_media_followup_chunks(
+    upload_token_ptr: *const u8,
+    upload_token_len: usize,
+    payload_ptr: *const u8,
+    payload_len: usize,
+    part_index: u16,
+    final_chunk: bool,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    const MAX_SCRATCH: usize = 3;
+    if chunks.is_null() || scratch.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    let upload_token = as_slice(upload_token_ptr, upload_token_len);
+    let payload = as_slice(payload_ptr, payload_len);
+    let req = UploadMediaFollowup {
+        upload_token,
+        payload,
+        part_index,
+        final_chunk,
+    };
+    inline_media::build_upload_media_followup_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+/// Build chunks for TranDownloadMedia (751).
+///
+/// `part_index_present == false` means "first request, omit
+/// CHAT_MEDIA_PART_INDEX." Returns 1 or 2 on success, 0 on
+/// validation failure.
+///
+/// # Safety
+/// `media_id_ptr` valid for `media_id_len` bytes (or NULL with
+/// `media_id_len == 0` — which the builder rejects). `chunks` /
+/// `scratch` as elsewhere.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_download_media_chunks(
+    media_id_ptr: *const u8,
+    media_id_len: usize,
+    part_index: u16,
+    part_index_present: bool,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_CHUNKS: usize = 2;
+    const MAX_SCRATCH: usize = 2;
+    if chunks.is_null() {
+        return 0;
+    }
+    if chunks_cap < MAX_CHUNKS {
+        return 0;
+    }
+    // When part_index isn't present the builder doesn't read
+    // scratch — but allow NULL scratch in that case too, mirroring
+    // the spec's "PART_INDEX absent on first request."
+    let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch_slice: &mut [u8] = if part_index_present {
+        if scratch.is_null() || scratch_cap < MAX_SCRATCH {
+            return 0;
+        }
+        slice::from_raw_parts_mut(scratch, MAX_SCRATCH)
+    } else {
+        &mut []
+    };
+    let media_id = as_slice(media_id_ptr, media_id_len);
+    let req = DownloadMedia {
+        media_id,
+        part_index: if part_index_present {
+            Some(part_index)
+        } else {
+            None
+        },
+    };
+    inline_media::build_download_media_chunks(&req, chunks_slice, scratch_slice) as i32
+}
+
+// Suppress unused-import warning for MediaErrorCode — only used via
+// type alias above for documentation continuity.
+const _: fn() = || {
+    let _ = MediaErrorCode::Generic;
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

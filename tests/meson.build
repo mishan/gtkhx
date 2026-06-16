@@ -921,6 +921,26 @@ test_voice = executable('test_voice',
 test('voice', test_voice,
      suite : 'proto')
 
+# inline_media — fogWraith inline-media extension wire shape (Phase 9.A).
+# Pins HTLC_CAP_INLINE_MEDIA (bit 3 = 0x0008), the 0x0201-0x0212 field
+# IDs, the 750 / 751 opcode block, the spec-recommended default cap
+# values, the CAP gate on the send wrappers, the limits-fallback
+# accessors, and the FFI ABI of every gtkhx_proto_build_* / parse_* /
+# extract_* entry point against hand-packed messages. Source:
+# fogWraith Capabilities-Inline-Media.md.
+test_inline_media = executable('test_inline_media',
+  'proto/test_inline_media.c',
+  '../src/inline_media.c',
+  '../src/proto_helpers.c',
+  '../src/text_util.c',
+  '../src/debug.c',
+  dependencies        : proto_test_deps,
+  include_directories : proto_test_inc,
+  link_with           : wire_fixture_lib,
+)
+test('inline_media', test_inline_media,
+     suite : 'proto')
+
 # large_file — Capabilities-Large-File extension. Pins the 64-bit
 # field IDs (DATA_FILESIZE64 / OFFSET64 / XFERSIZE64 /
 # FOLDER_ITEM_COUNT64), the HTXF handshake flag constants

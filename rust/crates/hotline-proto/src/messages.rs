@@ -71,6 +71,20 @@ pub enum ClientHdr {
     VoiceIce = 0x0000_025c,
     /// Voice-chat extension: client toggles mute on a room.
     VoiceMute = 0x0000_025e,
+    /// Inline-media extension (fogWraith
+    /// `Capabilities-Inline-Media.md`): client uploads image bytes
+    /// to the server. Single-shot when the bytes fit in one chunk,
+    /// chunked otherwise (token echo + part index/count/final).
+    /// Reply on the final chunk carries the opaque media handle the
+    /// client then references from a subsequent chat send.
+    /// `TranUploadMedia` = 750 (`0x02EE`).
+    UploadMedia = 0x0000_02ee,
+    /// Inline-media extension: client fetches the canonical bytes
+    /// for a media handle previously announced in a chat
+    /// transaction. Reply may itself be chunked (PART_INDEX /
+    /// PART_FINAL on the server side).
+    /// `TranDownloadMedia` = 751 (`0x02EF`).
+    DownloadMedia = 0x0000_02ef,
 }
 
 /// Server → client transaction opcodes (`HTLS_HDR_*`).
@@ -305,6 +319,75 @@ pub mod tag {
     /// reflects the new state to other participants via
     /// VOICE_PARTICIPANTS in a VOICE_ROOM_STATUS notification.
     pub const VOICE_MUTED: u16 = 0x01f8;
+    /// `0x0201` — Inline-media extension: canonical MIME type
+    /// (server-supplied on relay; sender's declared type is a hint
+    /// only and gets overwritten). Companion to [`CHAT_MEDIA_ID`].
+    pub const CHAT_MEDIA_TYPE: u16 = 0x0201;
+    /// `0x0202` — Inline-media extension: opaque server-issued
+    /// media handle (≤ 64 bytes). Carried on chat transactions
+    /// alongside [`CHAT_MEDIA_TYPE`]; either both present or
+    /// neither.
+    pub const CHAT_MEDIA_ID: u16 = 0x0202;
+    /// `0x0203` — Inline-media extension: image bytes. Used ONLY
+    /// in TranUploadMedia (request) and TranDownloadMedia (reply).
+    /// Never on chat transactions.
+    pub const CHAT_MEDIA_PAYLOAD: u16 = 0x0203;
+    /// `0x0204` — Inline-media extension: sender's declared MIME
+    /// type (hint, server doesn't trust it for sniff decisions).
+    /// Used ONLY in TranUploadMedia request, first chunk only.
+    pub const CHAT_MEDIA_DECLARED_TYPE: u16 = 0x0204;
+    /// `0x0205` — Inline-media extension: canonical image width in
+    /// pixels (u32 BE).
+    pub const CHAT_MEDIA_WIDTH: u16 = 0x0205;
+    /// `0x0206` — Inline-media extension: canonical image height
+    /// in pixels (u32 BE).
+    pub const CHAT_MEDIA_HEIGHT: u16 = 0x0206;
+    /// `0x0207` — Inline-media extension: canonical image byte
+    /// size (u32 BE).
+    pub const CHAT_MEDIA_BYTES: u16 = 0x0207;
+    /// `0x0208` — Inline-media extension: chunked-upload session
+    /// token (≤ 64 bytes), issued by the server with the first
+    /// chunk's reply, echoed by the client on every subsequent
+    /// chunk.
+    pub const CHAT_MEDIA_UPLOAD_TOKEN: u16 = 0x0208;
+    /// `0x0209` — Inline-media extension: zero-based chunk index
+    /// (u16 BE).
+    pub const CHAT_MEDIA_PART_INDEX: u16 = 0x0209;
+    /// `0x020a` — Inline-media extension: total chunk count (u16
+    /// BE). Sent only on the first chunk of a chunked upload.
+    pub const CHAT_MEDIA_PART_COUNT: u16 = 0x020a;
+    /// `0x020b` — Inline-media extension: non-zero on the final
+    /// chunk (u8). Single-shot uploads set this on the only chunk.
+    pub const CHAT_MEDIA_PART_FINAL: u16 = 0x020b;
+    /// `0x020c` — Inline-media extension: server-advertised
+    /// maximum encoded payload size in bytes (u32 BE). LOGIN reply
+    /// only.
+    pub const CHAT_MEDIA_MAX_BYTES: u16 = 0x020c;
+    /// `0x020d` — Inline-media extension: server-advertised
+    /// maximum width OR height in pixels (u32 BE). LOGIN reply only.
+    pub const CHAT_MEDIA_MAX_DIMENSION: u16 = 0x020d;
+    /// `0x020e` — Inline-media extension: server-advertised
+    /// maximum width × height pixel count (u32 BE). LOGIN reply
+    /// only.
+    pub const CHAT_MEDIA_MAX_PIXELS: u16 = 0x020e;
+    /// `0x020f` — Inline-media extension: server-recommended
+    /// per-chunk byte size for chunked uploads, also the per-chunk
+    /// size in TranDownloadMedia replies (u32 BE). LOGIN reply
+    /// only.
+    pub const CHAT_MEDIA_CHUNK_SIZE: u16 = 0x020f;
+    /// `0x0210` — Inline-media extension: server-advertised
+    /// maximum animation frame count (u32 BE). LOGIN reply only.
+    pub const CHAT_MEDIA_MAX_FRAMES: u16 = 0x0210;
+    /// `0x0211` — Inline-media extension: server-advertised
+    /// maximum animation duration in ms (u32 BE). LOGIN reply only.
+    pub const CHAT_MEDIA_MAX_DURATION_MS: u16 = 0x0211;
+    /// `0x0212` — Inline-media extension: optional u16 BE machine-
+    /// readable rejection category on TranUploadMedia /
+    /// TranDownloadMedia error replies. Mapped through
+    /// [`crate::inline_media::MediaErrorCode`]. Unknown codes MUST
+    /// be treated as `Generic` (0).
+    pub const CHAT_MEDIA_ERROR_CODE: u16 = 0x0212;
+
     /// `0x01f9` — Voice-chat extension: packed participant list,
     /// binary. Each entry is 6 bytes: `u16 uid` + `u16 flags` (bit 0 =
     /// muted, bits 1-15 reserved) + `u16 codec_id` (see Codec ID
@@ -373,5 +456,37 @@ mod tests {
         assert_eq!(tag::VOICE_CODEC, 0x01f7);
         assert_eq!(tag::VOICE_MUTED, 0x01f8);
         assert_eq!(tag::VOICE_PARTICIPANTS, 0x01f9);
+    }
+
+    #[test]
+    fn inline_media_opcode_values_match_spec() {
+        // fogWraith Capabilities-Inline-Media.md: 750 / 751 decimal.
+        assert_eq!(ClientHdr::UploadMedia.as_u32(), 750);
+        assert_eq!(ClientHdr::DownloadMedia.as_u32(), 751);
+        assert_eq!(ClientHdr::UploadMedia.as_u32(), 0x02ee);
+        assert_eq!(ClientHdr::DownloadMedia.as_u32(), 0x02ef);
+    }
+
+    #[test]
+    fn inline_media_field_tag_values_match_spec() {
+        // Each tag matches the table in the spec's "New Data Objects".
+        assert_eq!(tag::CHAT_MEDIA_TYPE, 0x0201);
+        assert_eq!(tag::CHAT_MEDIA_ID, 0x0202);
+        assert_eq!(tag::CHAT_MEDIA_PAYLOAD, 0x0203);
+        assert_eq!(tag::CHAT_MEDIA_DECLARED_TYPE, 0x0204);
+        assert_eq!(tag::CHAT_MEDIA_WIDTH, 0x0205);
+        assert_eq!(tag::CHAT_MEDIA_HEIGHT, 0x0206);
+        assert_eq!(tag::CHAT_MEDIA_BYTES, 0x0207);
+        assert_eq!(tag::CHAT_MEDIA_UPLOAD_TOKEN, 0x0208);
+        assert_eq!(tag::CHAT_MEDIA_PART_INDEX, 0x0209);
+        assert_eq!(tag::CHAT_MEDIA_PART_COUNT, 0x020a);
+        assert_eq!(tag::CHAT_MEDIA_PART_FINAL, 0x020b);
+        assert_eq!(tag::CHAT_MEDIA_MAX_BYTES, 0x020c);
+        assert_eq!(tag::CHAT_MEDIA_MAX_DIMENSION, 0x020d);
+        assert_eq!(tag::CHAT_MEDIA_MAX_PIXELS, 0x020e);
+        assert_eq!(tag::CHAT_MEDIA_CHUNK_SIZE, 0x020f);
+        assert_eq!(tag::CHAT_MEDIA_MAX_FRAMES, 0x0210);
+        assert_eq!(tag::CHAT_MEDIA_MAX_DURATION_MS, 0x0211);
+        assert_eq!(tag::CHAT_MEDIA_ERROR_CODE, 0x0212);
     }
 }

@@ -1251,7 +1251,8 @@ send_login (struct gtkhx_connect_ctx *ctx)
         req.display_name = NULL; /* production sends NAME via USER_CHANGE later */
         req.client_version = 185;
         req.caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE;
+                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
+                 | HTLC_CAP_INLINE_MEDIA;
         req.send_caps = 1;
     }
 
