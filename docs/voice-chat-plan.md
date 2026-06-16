@@ -480,16 +480,20 @@ in practice. What did matter:
 - **`libnice-gstreamer1` (Debian) / `gstreamer1-plugins-bad-free-extras`
   (Fedora)** are required runtime deps for libnice — webrtcbin
   won't leave NULL without them. CI install instructions updated.
-- **Audio device permissions on Flatpak.** Still open. The current
-  `com.nasledov.gtkhx.yml` grants `--socket=pulseaudio` (good
-  enough for playback against a host PulseAudio / pipewire-pulse
-  shim), `--share=network`, `--share=ipc`, `--device=dri`. There is
-  no mic-capture permission yet — neither `--device=all` nor the
-  `org.freedesktop.portal.Device` portal. Voice capture works in
-  practice on hosts where the PulseAudio socket exposes the mic
-  through pipewire-pulse, but we haven't deliberately shipped a
-  capture strategy. Decision and manifest change are a Phase 8.E /
-  packaging follow-up.
+- **Audio device permissions on Flatpak.** Partially shipped on
+  `claude/flatpak-pipewire-mic`. The manifest keeps
+  `--socket=pulseaudio` (which already gives capture in practice
+  via pipewire-pulse, the pipewire-pulse shim doesn't gate mic
+  separately from playback) and additionally exposes the native
+  PipeWire socket via `--filesystem=xdg-run/pipewire-0` so
+  GStreamer's pipewiresrc / pipewiresink can use it directly.
+  Same belt-and-suspenders shape every other voice-capable
+  Flatpak (Discord, Element, Signal, OBS) ships. Narrower than
+  `--device=all` (no `/dev/snd`) but not per-app-prompted — a
+  dedicated Audio portal that would let us drop the PipeWire
+  socket exposure in favour of a system permission prompt is
+  under discussion upstream (flatpak/xdg-desktop-portal #1129)
+  but hasn't shipped. Revisit when it does.
 - **GStreamer 1.20 floor.** Fine in practice. GNOME runtime 49 ships
   1.26.
 
@@ -636,13 +640,22 @@ Voice works end-to-end. The remaining roadmap:
 2. **Ping VesperNet** for confirmation that Janus's voice impl is
    feature-complete (server-side mute enforcement, room-full
    handling, access-bit check, ~100 ms mute debounce).
-3. **Flatpak mic-capture permission**: pick between the cheap
-   `--device=all` finish-arg vs the sandboxed
-   `org.freedesktop.portal.Device` portal and update
-   `com.nasledov.gtkhx.yml`. Neither is shipped today — the manifest
-   only grants `--socket=pulseaudio` for playback. Decision and the
-   one-line manifest change belong with Phase 8.E or a packaging
-   follow-up.
+3. **Flatpak mic-capture permission** — partially shipped on
+   `claude/flatpak-pipewire-mic`. The "true" portal route I
+   originally floated turned out not to be purchasable: Flatpak
+   has no `--socket=pipewire` (closed allowlist), and an Audio
+   portal sibling to the Camera portal is still in upstream
+   discussion (flatpak/xdg-desktop-portal #1129). What shipped
+   instead is the conventional PipeWire-native pathway every
+   current voice-capable Flatpak uses: keep `--socket=pulseaudio`
+   (it already grants capture in practice via the pipewire-pulse
+   shim) and additionally expose the native PipeWire socket via
+   `--filesystem=xdg-run/pipewire-0` so GStreamer's pipewiresrc /
+   pipewiresink can use it directly. Narrower than `--device=all`
+   (no `/dev/snd` access) but not per-app-prompted — that final
+   step waits for the upstream Audio portal to land. Zero code
+   changes; `gst::DeviceMonitor` in the Phase 8.E device picker
+   enumerates through PipeWire the same way it did before.
 4. **Real voice-activity detection** for the speaker indicator. The
    Phase 8.G plumbing already wires runtime → C end-to-end; what's
    missing is a volume-graded signal to feed it. Two paths:

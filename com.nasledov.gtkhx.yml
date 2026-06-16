@@ -66,11 +66,31 @@ finish-args:
   # "no GPU" warnings on every redraw.
   - --device=dri
 
-  # Sound effects (chat/msg/news ping sounds) via gsound, which
-  # talks to PulseAudio / PipeWire on the host. Without this
-  # gsound silently no-ops — fine for testing but disappoints
-  # users on first launch.
+  # Audio I/O: chat/msg/news ping sounds via gsound, and the
+  # voice-chat extension's full-duplex capture + playback via
+  # GStreamer's autoaudiosrc / autoaudiosink.
+  #
+  # --socket=pulseaudio exposes $XDG_RUNTIME_DIR/pulse/native to
+  # the sandbox; on every modern desktop pipewire-pulse provides
+  # that socket on top of PipeWire, so gsound and GStreamer's
+  # default pulsesrc / pulsesink elements work transparently.
+  # Capture goes through here as well — PipeWire-pulse doesn't
+  # gate microphone access separately from playback.
+  #
+  # --filesystem=xdg-run/pipewire-0 additionally exposes the
+  # native PipeWire socket at $XDG_RUNTIME_DIR/pipewire-0, so
+  # GStreamer's pipewiresrc / pipewiresink (preferred by
+  # autoaudio* in 1.22+) can pick it up. Same shape Discord,
+  # Element, Signal, and OBS ship.
+  #
+  # We deliberately do NOT request --device=all (raw /dev/snd
+  # access — too broad for Flathub review). A dedicated Audio
+  # portal that would let us drop the PipeWire socket exposure in
+  # favour of a per-app permission prompt is under discussion
+  # upstream (flatpak/xdg-desktop-portal #1129) but hasn't
+  # shipped — revisit once it does.
   - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0
 
   # ~/Downloads access for received-file destinations. The user
   # picks the path in Settings; XDG_DOWNLOAD_DIR is the default.
