@@ -130,11 +130,34 @@ swap_to_error (hx_media_dialog *md, const char *message)
     }
 }
 
-/* Save As button handler. */
+/* Save As button handler.
+ *
+ * gtk_file_dialog_save is async and the user can close the parent
+ * AdwDialog while the file chooser is still open, which would free
+ * the hx_media_dialog out from under on_save_finished. Pass an
+ * own-lifetime save_ctx (holding its own GBytes ref) instead of md
+ * — the file chooser's pending pick keeps the payload alive
+ * regardless of what happens to the parent dialog. */
+typedef struct {
+    GBytes *bytes; /* owned ref */
+} save_ctx;
+
+static void
+save_ctx_free (save_ctx *sc)
+{
+    if (!sc) {
+        return;
+    }
+    if (sc->bytes) {
+        g_bytes_unref (sc->bytes);
+    }
+    g_free (sc);
+}
+
 static void
 on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
 {
-    hx_media_dialog *md = user_data;
+    save_ctx *sc = user_data;
     GError *err = NULL;
     GFile *file = gtk_file_dialog_save_finish (GTK_FILE_DIALOG (src), res, &err);
     if (!file) {
@@ -143,15 +166,12 @@ on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
             debug_log ("media", "save-as cancel/error: %s", err->message);
         }
         g_clear_error (&err);
+        save_ctx_free (sc);
         return;
     }
 
-    if (!md->bytes) {
-        g_object_unref (file);
-        return;
-    }
     gsize len = 0;
-    const void *data = g_bytes_get_data (md->bytes, &len);
+    const void *data = g_bytes_get_data (sc->bytes, &len);
 
     /* g_file_replace_contents writes synchronously. The payload
 	 * is ≤ MAX_BYTES (256 KiB by default) so this is fine on the
@@ -164,6 +184,7 @@ on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
         g_clear_error (&err);
     }
     g_object_unref (file);
+    save_ctx_free (sc);
 }
 
 static void
@@ -186,7 +207,10 @@ on_save_clicked (GtkButton *btn, gpointer user_data)
     if (GTK_IS_WINDOW (root)) {
         parent = GTK_WINDOW (root);
     }
-    gtk_file_dialog_save (fd, parent, NULL, on_save_finished, md);
+
+    save_ctx *sc = g_new0 (save_ctx, 1);
+    sc->bytes = g_bytes_ref (md->bytes);
+    gtk_file_dialog_save (fd, parent, NULL, on_save_finished, sc);
     g_object_unref (fd);
 }
 
@@ -385,13 +409,13 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     AdwToolbarView *tv = ADW_TOOLBAR_VIEW (adw_toolbar_view_new ());
 
     GtkWidget *header = adw_header_bar_new ();
-    md->save_btn = gtk_button_new_with_label ("Save As…");
+    md->save_btn = gtk_button_new_with_label (_("Save As…"));
     gtk_widget_set_sensitive (md->save_btn, FALSE);
     g_signal_connect (md->save_btn, "clicked", G_CALLBACK (on_save_clicked),
                       md);
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), md->save_btn);
 
-    md->open_btn = gtk_button_new_with_label ("Open Externally");
+    md->open_btn = gtk_button_new_with_label (_("Open Externally"));
     gtk_widget_set_sensitive (md->open_btn, FALSE);
     g_signal_connect (md->open_btn, "clicked", G_CALLBACK (on_open_clicked),
                       md);
@@ -412,11 +436,11 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     gtk_box_append (GTK_BOX (loading_box), spinner);
     char hint_buf[128] = "Loading…";
     if (width_hint && height_hint && bytes_hint) {
-        g_snprintf (hint_buf, sizeof (hint_buf), "Loading %u×%u (%u KB)…",
+        g_snprintf (hint_buf, sizeof (hint_buf), _("Loading %u×%u (%u KB)…"),
                     (unsigned) width_hint, (unsigned) height_hint,
                     (unsigned) (bytes_hint + 1023) / 1024);
     } else if (width_hint && height_hint) {
-        g_snprintf (hint_buf, sizeof (hint_buf), "Loading %u×%u…",
+        g_snprintf (hint_buf, sizeof (hint_buf), _("Loading %u×%u…"),
                     (unsigned) width_hint, (unsigned) height_hint);
     }
     GtkWidget *loading_label = gtk_label_new (hint_buf);
@@ -443,7 +467,7 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     GtkWidget *err_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_valign (err_box, GTK_ALIGN_CENTER);
     gtk_widget_set_halign (err_box, GTK_ALIGN_CENTER);
-    md->error_label = gtk_label_new ("Failed to load image");
+    md->error_label = gtk_label_new (_("Failed to load image"));
     gtk_label_set_wrap (GTK_LABEL (md->error_label), TRUE);
     gtk_widget_add_css_class (md->error_label, "dim-label");
     gtk_box_append (GTK_BOX (err_box), md->error_label);
@@ -463,7 +487,7 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     md->download = inline_media_download_start (
         htlc, media_id, media_id_len, on_download_done, md);
     if (!md->download) {
-        swap_to_error (md, "Inline media unavailable on this server");
+        swap_to_error (md, _("Inline media unavailable on this server"));
     }
 
     adw_dialog_present (md->dialog, parent_widget);
