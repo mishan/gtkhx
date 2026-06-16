@@ -539,11 +539,25 @@ hx_rcv_task (struct htlc_conn *htlc)
 		 * it. Their rcv functions (rcv_task_file_get /
 		 * rcv_task_file_put) already check task_inerror internally
 		 * and free the htxf on that path, so we run them on error
-		 * too. Non-transfer handlers (login, user-info, news, …)
-		 * don't have per-task state to free; the error toast above
-		 * is enough and we skip them as before. */
-        gboolean is_xfer = tsk->str && !strcmp (tsk->str, "xfer_go");
-        if (tsk->rcv && (!error || is_xfer)) {
+		 * too.
+		 *
+		 * Phase 9.C inline-media upload tasks ("upload-media")
+		 * follow the same shape: rcv_task_upload_media owns the
+		 * per-upload context (callback + user_data + heap state),
+		 * checks task_inerror at its entry and routes to the
+		 * failure-delivery path which invokes the caller's on_done
+		 * with the spec MediaErrorCode + DATA_ERROR text. Without
+		 * the dispatch, the ctx leaks and the caller's UI sits
+		 * forever waiting for a callback that never fires.
+		 *
+		 * Non-transfer handlers (login, user-info, news, …) don't
+		 * have per-task state to free; the error toast above is
+		 * enough and we skip them as before. */
+        gboolean dispatch_on_error
+            = tsk->str
+              && (!strcmp (tsk->str, "xfer_go")
+                  || !strcmp (tsk->str, "upload-media"));
+        if (tsk->rcv && (!error || dispatch_on_error)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore

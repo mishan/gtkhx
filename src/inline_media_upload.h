@@ -45,25 +45,33 @@
 
 /* ---- Upload completion ---- */
 
-/* Result handed to the upload callback. On success error_code is
- * 0 and media_id / media_type point at owned buffers the callback
- * MAY take ownership of by g_strndup-ing or by setting the
- * `take_ownership_*` flag (TBD — Phase 9.C2). Today they are
- * borrowed and the helper g_free's them after the callback
- * returns; callers that need to retain the handle MUST copy out.
+/* Result handed to the upload callback.
  *
- * On failure media_id / media_type are NULL and error_code is the
+ * Lifetime: every pointer field below is borrowed and valid ONLY
+ * for the duration of the callback. The helper reuses caller-
+ * external storage for each field (htlc->in.buf for media_id,
+ * stack buffers in rcv_task_upload_media for media_type and
+ * error_message); none of them are heap-owned, and none are
+ * freed by the helper afterwards. Callers that need to retain
+ * any field across the callback MUST copy out (e.g. g_memdup2
+ * the handle bytes, g_strdup the mime + error message).
+ *
+ * On success error_code == 0, media_id + media_type are
+ * non-NULL, and error_message is NULL.
+ *
+ * On failure media_id + media_type are NULL, error_code is the
  * spec MediaErrorCode wire value (0 generic, 1 too-large, 2
- * unsupported, 3 rate-limited, 4 not-authorized, 5 server-busy).
- * error_message is a borrowed pointer to the server's
- * DATA_ERROR text — owned by the htlc->in buffer and only valid
- * for the duration of the callback. */
+ * unsupported, 3 rate-limited, 4 not-authorized, 5 server-busy),
+ * and error_message may be NULL or point at the server's
+ * DATA_ERROR text. */
 typedef struct {
-    /* Server-issued opaque handle, length bytes. NULL on failure. */
+    /* Server-issued opaque handle. NULL on failure. Borrows into
+	 * htlc->in.buf; only valid during the callback. */
     const guint8 *media_id;
     gsize media_id_len;
 
-    /* Server-canonical MIME (NUL-terminated). NULL on failure. */
+    /* Server-canonical MIME (NUL-terminated). NULL on failure.
+	 * Borrows a transient buffer; only valid during the callback. */
     const char *media_type;
     gsize media_type_len;
 
@@ -76,8 +84,12 @@ typedef struct {
     gboolean height_present;
     gboolean bytes_present;
 
-    /* Error reporting (only meaningful when error_code != 0 OR
-	 * the success fields above are NULL). */
+    /* Error reporting. Only meaningful when error_code != 0 OR
+	 * the success fields above are NULL. error_message may be
+	 * NULL when the server didn't include DATA_ERROR; when set,
+	 * it borrows a transient buffer (NOT htlc->in.buf — the
+	 * helper copies the text out under sanitisation before
+	 * invoking the callback). Only valid during the callback. */
     guint16 error_code;
     const char *error_message;
     gsize error_message_len;

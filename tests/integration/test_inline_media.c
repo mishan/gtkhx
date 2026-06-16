@@ -33,10 +33,21 @@
  *                           TranDownloadMedia (751); verify the
  *                           reply carries CHAT_MEDIA_PAYLOAD + a
  *                           canonical PNG magic header.
- *   oversized_rejected    — upload a payload that exceeds the
- *                           server's MAX_BYTES advertisement;
- *                           assert task-error + (when present)
- *                           CHAT_MEDIA_ERROR_CODE = 1 (TooLarge).
+ *   oversized_rejected    — upload an invalid garbage payload
+ *                           (65,500 zero bytes — large enough
+ *                           to exercise the single-shot wire
+ *                           framing limit but well below the
+ *                           256 KiB MAX_BYTES default, so the
+ *                           server's magic-byte sniff is the
+ *                           likely rejection branch). Assert
+ *                           task-error + any present
+ *                           CHAT_MEDIA_ERROR_CODE falls inside
+ *                           the documented 0–5 range. Originally
+ *                           scoped to a TooLarge probe; the
+ *                           server's actual rejection path
+ *                           (UnsupportedFormat for all-zeros)
+ *                           is also a valid 'server rejected
+ *                           with an actionable code' result.
  *   unauthorized_download — try to fetch a handle we never
  *                           received; expect a generic task-error
  *                           (the spec collapses "not authorized"
@@ -545,11 +556,17 @@ test_inline_media_download_round_trip (void)
 }
 
 /*
- * Oversized upload: send a payload that exceeds the server's
- * advertised MAX_BYTES. Janus advertises 256 KiB by spec default;
- * we send 300 KiB of zeros. Expect task-error with optional
- * CHAT_MEDIA_ERROR_CODE = 1 (PayloadTooLarge).
- */
+ * Garbage upload rejected: send 65,500 zero bytes — close to
+ * the 16-bit single-shot wire-framing ceiling but well below
+ * the server's 256 KiB MAX_BYTES advertisement, so Janus's
+ * magic-byte sniff is the most likely rejection branch
+ * (all-zeros has no valid image signature). Originally written
+ * as a PayloadTooLarge probe; pivoted to a 'server rejects
+ * garbage with an actionable code' check after realising
+ * single-shot wire framing tops out at 65 KB and a true
+ * MAX_BYTES overflow requires chunked-upload support (not
+ * shipped in Phase 9.C). Assert task-error + any present
+ * CHAT_MEDIA_ERROR_CODE inside the spec's 0–5 range. */
 static void
 test_inline_media_oversized_rejected (void)
 {

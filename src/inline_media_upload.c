@@ -263,13 +263,26 @@ hx_send_chat_with_media (struct htlc_conn *htlc, const char *str,
                                       /*is_body=*/TRUE, &wire_len);
 
     /* Decide whether to attach media: cap negotiated AND caller
-	 * supplied both id + mime. Per spec receivers MUST reject a
-	 * chat that carries exactly one of the two — we don't even
-	 * send that shape from the client. The cap gate avoids the
-	 * round-trip when the server has already said it won't relay
-	 * media for our session. */
-    gboolean have_media = (media_id && media_id_len > 0 && mime
-                           && mime_len > 0);
+	 * supplied both id + mime, with both lengths fitting in the
+	 * 16-bit Hotline chunk-length field. Per spec receivers MUST
+	 * reject a chat that carries exactly one of the two — we
+	 * don't send that shape from the client. The cap gate avoids
+	 * the round-trip when the server has already said it won't
+	 * relay media for our session.
+	 *
+	 * The u16 guard below is defence-in-depth: handles in
+	 * practice are far below 64 KB (the spec caps them at 64
+	 * bytes; Janus issues much smaller tokens), and MIME strings
+	 * are tens of bytes, but a buggy caller passing a
+	 * pathologically-large length would otherwise silently
+	 * truncate when the (guint16) cast trims the high bits — the
+	 * wire would carry the low-16-bits of the length with the
+	 * full payload bytes following, and the server would parse
+	 * either a short handle or run past it into the next chunk.
+	 * Refuse to attach in that case; fall back to plain chat. */
+    gboolean have_media = (media_id && media_id_len > 0
+                           && media_id_len <= G_MAXUINT16 && mime
+                           && mime_len > 0 && mime_len <= G_MAXUINT16);
     if (have_media && !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         debug_log ("media",
                    "chat-with-media: dropping companions, CAP_INLINE_MEDIA "
