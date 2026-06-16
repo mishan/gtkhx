@@ -417,7 +417,7 @@ test_extract_limits_picks_up_advertised_fields (void)
     /* 22-byte header (zeroed) + the LOGIN reply's chunk run. */
     uint8_t buf[256];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22; /* SIZEOF_HL_HDR */
+    size_t pos = SIZEOF_HL_HDR;
 
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_MAX_BYTES, 65536);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION, 1024);
@@ -446,7 +446,7 @@ test_extract_chat_media_meta_present (void)
 {
     uint8_t buf[256];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
 
     pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *) "hi", 2);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
@@ -478,7 +478,7 @@ test_extract_chat_media_meta_none_when_text_only (void)
 {
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *) "hi", 2);
 
     struct gtkhx_proto_chat_media_meta meta;
@@ -491,7 +491,7 @@ test_extract_chat_media_meta_rejects_orphan (void)
 {
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     /* ID present, TYPE absent → orphan; spec says receiver MUST
 	 * reject. */
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
@@ -509,7 +509,7 @@ test_parse_upload_final_reply_extracts_handle (void)
 {
     uint8_t buf[256];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
                         (const uint8_t *) "new-handle", 10);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_TYPE,
@@ -535,7 +535,7 @@ test_parse_upload_token_reply (void)
 {
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN,
                         (const uint8_t *) "tok-X", 5);
 
@@ -554,7 +554,7 @@ test_parse_download_reply_single_shot (void)
 {
     uint8_t buf[256];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_PAYLOAD,
                         (const uint8_t *) "\x89PNG...", 7);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_TYPE,
@@ -581,7 +581,7 @@ test_extract_error_code_picks_up_when_present (void)
 {
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_TASKERROR,
                         (const uint8_t *) "Media rejected", 14);
     /* CODE = 1 (PayloadTooLarge), BE u16. */
@@ -597,7 +597,7 @@ test_extract_error_code_unknown_collapses_to_generic (void)
 {
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
-    size_t pos = 22;
+    size_t pos = SIZEOF_HL_HDR;
     /* CODE = 99 (unspecified-by-spec) — must collapse to 0. */
     uint8_t code[2] = {0, 99};
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ERROR_CODE, code, 2);
