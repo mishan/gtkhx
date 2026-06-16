@@ -606,8 +606,31 @@ Voice works end-to-end. The remaining roadmap:
 
 1. **Phase 8.E follow-ups** — small additions to
    `settings_page_voice()`:
-   - "Start muted" toggle (default ON).
-   - PTT key capture + `GtkEventControllerKey` on the chat input.
+   - "Start muted" toggle (default ON) — partially shipped; the
+     `on_join_toggled` path in `voice_panel.c` already forces
+     `gtkhx_voice_runtime_mute(rt, 1)` after every JOIN. A
+     user-facing toggle to disable that "always-mute-on-join"
+     default still hasn't landed; punt unless someone asks.
+   - ~~PTT key capture + `GtkEventControllerKey`~~ — **Shipped on
+     `claude/voice-ptt`** (June 2026). Window-scoped key controller
+     (not chat-input-scoped — the captured key works while focus is
+     on any widget in the GtkHx window). Two prefs:
+     `CFG_VOICE_PTT_ENABLED` (BOOLEAN) and `CFG_VOICE_PTT_KEY`
+     (STRING — canonical `gtk_accelerator_name` output). Capture
+     dialog rejects plain typing keys (letters, digits, Space, Tab,
+     Return) so PTT can never eat chat-input keystrokes; accepts
+     F1–F24, Pause, Scroll Lock, Insert, Print, Menu, and any
+     Ctrl/Alt/Super-modified combination. `src/voice_ptt_keyspec.{c,h}`
+     hosts the pure vocabulary + canonicalisation; `src/voice_ptt.{c,h}`
+     attaches the controller in `toolbar.c::create_toolbar_window`
+     and drives `hx_send_voice_mute` + `gtkhx_voice_runtime_mute`
+     on press/release edges. Unit-tested via
+     `tests/unit/test_voice_ptt_keyspec.c`, which pins the
+     vocabulary contract (acceptance + rejection lists), the
+     canonicalisation round-trip, and the deterministic modifier
+     ordering. Start-muted is the existing default — the toolbar
+     already forces `mute=1` after every JOIN — so PTT layers on
+     top with no additional code on the runtime side.
    - "Auto-join voice when joining a chat room" toggle (default OFF).
    Persist via the existing `cfgvars` table.
 2. **Ping VesperNet** for confirmation that Janus's voice impl is

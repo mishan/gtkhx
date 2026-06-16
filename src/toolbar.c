@@ -41,6 +41,7 @@
 #include "chat.h"
 #include "tasks.h"
 #include "options.h"
+#include "voice_ptt.h"
 #include "connect.h"
 #include "files.h"
 #include "hl_access.h"
@@ -1301,6 +1302,17 @@ create_toolbar_window (session *sess)
         changetitlespecific (toolbar_window, "GtkHx");
     }
     sess->toolbar_window = toolbar_window;
+
+    /* Phase 8.E follow-up: install the push-to-talk key controller.
+     * Window-scoped (not chat-input-scoped) so PTT works while
+     * focus is anywhere in the app — users list, news, files
+     * browser. CAPTURE phase means the bound key is consumed
+     * before reaching the chat input; the keyspec vocabulary
+     * (function keys, modifier+ combos, Pause/Insert/etc.)
+     * guarantees no plain typing key can land in this binding.
+     * Idempotent — safe to call again on reconnect-after-disconnect
+     * if that ever wires through here. */
+    hx_voice_ptt_attach (toolbar_window, sess);
 
     /* Phase 5 / docking (Phase 2): eager-construct the sidebar
      * panels (Users + Tasks) so the sidebar has real residents

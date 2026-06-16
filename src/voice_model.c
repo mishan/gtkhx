@@ -295,8 +295,8 @@ hx_voice_model_ingest_participants (HxVoiceModel *self, const uint8_t *blob,
     }
     for (guint i = 0; i < leavers->len; i++) {
         guint16 uid = g_array_index (leavers, guint16, i);
-        gpointer key = GUINT_TO_POINTER ((guint) uid);
-        struct entry *e = g_hash_table_lookup (self->by_uid, key);
+        gpointer leaver_key = GUINT_TO_POINTER ((guint) uid);
+        struct entry *e = g_hash_table_lookup (self->by_uid, leaver_key);
         if (!e) {
             continue;
         }
@@ -315,7 +315,7 @@ hx_voice_model_ingest_participants (HxVoiceModel *self, const uint8_t *blob,
          * adversarial traffic the table could grow to consume
          * non-trivial memory. Re-allocation on a re-join is
          * cheap (one g_new0 + one hashtable insert). */
-        g_hash_table_remove (self->by_uid, key);
+        g_hash_table_remove (self->by_uid, leaver_key);
     }
 }
 

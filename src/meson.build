@@ -96,6 +96,8 @@ gtkhx_sources = files(
   'voice.c',
   'voice_model.c',
   'voice_panel.c',
+  'voice_ptt.c',
+  'voice_ptt_keyspec.c',
   'xfers.c',
   'xtext.c',
 )
