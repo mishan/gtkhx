@@ -191,6 +191,23 @@ struct gtkhx_chat {
     gboolean   history_loading;
     textentry *history_anchor_ent;
     textentry *history_load_older_ent;
+
+    /* Inline-media extension (Phase 9.D dialog). Per-chat token
+	 * → HxChatMedia* lookup. When a chat carries inline media,
+	 * output_chat_from_event allocates a new token via
+	 * media_next_id++, deep-copies the HxChatMedia into the
+	 * table, and embeds the token in the placeholder row text
+	 * as `hxmedia:N`. The xtext word_click handler
+	 * (inline_media_chat_word_click) scans the clicked word for
+	 * that substring and dispatches the lookup.
+	 *
+	 * Lazy-allocated; lives for the chat's lifetime. Freed in
+	 * chat_free.
+	 *
+	 * The HxChatMedia values are owned by the table (the
+	 * GHashTable destroy function frees them). */
+    GHashTable *media_handles;
+    guint       media_next_id;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */

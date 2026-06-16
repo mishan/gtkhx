@@ -42,6 +42,7 @@
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "history.h"
 #include "chat_history.h"
+#include "inline_media_dialog.h"
 #include "gtkutil.h"
 #include "xtext.h"
 #include "users.h"
@@ -592,7 +593,67 @@ gchat_free (gpointer p)
      * the comment in session.h ("Freed via g_free … at chat
      * teardown") is actually true. */
     g_free (gchat->chat_history_draft);
+    /* Phase 9.D inline-media: drop the per-chat handle table. The
+	 * destroy func (hx_chat_media_free, registered at table-create
+	 * time) frees each HxChatMedia. */
+    if (gchat->media_handles) {
+        g_hash_table_destroy (gchat->media_handles);
+        gchat->media_handles = NULL;
+    }
     g_free (gchat);
+}
+
+/* GHashTable value destroy func — HxChatMedia carries owned id +
+ * mime allocations. Used by ensure_media_handles below + matches
+ * the proto_helpers's internal hx_chat_media_free shape (which
+ * isn't exposed in the header, so we duplicate here). */
+static void
+gchat_media_value_free (gpointer p)
+{
+    HxChatMedia *m = p;
+    if (!m) {
+        return;
+    }
+    g_free (m->id);
+    g_free (m->mime);
+    g_free (m);
+}
+
+/* Lazy-allocate gchat->media_handles. */
+static void
+ensure_media_handles (struct gtkhx_chat *gchat)
+{
+    if (!gchat->media_handles) {
+        gchat->media_handles = g_hash_table_new_full (
+            g_direct_hash, g_direct_equal, NULL, gchat_media_value_free);
+    }
+}
+
+/* Register a deep-copy of media on gchat under a freshly-allocated
+ * token id. Returns the token id; the caller embeds it in the
+ * placeholder via hx_chat_media_placeholder_clickable. */
+static guint
+gchat_register_media (struct gtkhx_chat *gchat, const HxChatMedia *src)
+{
+    ensure_media_handles (gchat);
+    HxChatMedia *copy = g_new0 (HxChatMedia, 1);
+    copy->id_len = src->id_len;
+    if (src->id_len) {
+        copy->id = g_memdup2 (src->id, src->id_len);
+    }
+    copy->mime_len = src->mime_len;
+    if (src->mime) {
+        copy->mime = g_strndup (src->mime, src->mime_len);
+    }
+    copy->width = src->width;
+    copy->height = src->height;
+    copy->bytes = src->bytes;
+    copy->width_present = src->width_present;
+    copy->height_present = src->height_present;
+    copy->bytes_present = src->bytes_present;
+    guint id = ++gchat->media_next_id; /* 0 reserved for "absent" */
+    g_hash_table_insert (gchat->media_handles, GUINT_TO_POINTER (id), copy);
+    return id;
 }
 
 /* Forward decl so gchats_init can install pchat_close as the tab-
@@ -807,17 +868,26 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 
     /* Phase 9.D — inline-media placeholder. When the chat carried
 	 * companion CHAT_MEDIA_ID + CHAT_MEDIA_TYPE fields (rcv.c
-	 * attached them to the event), append a styled placeholder
-	 * row right after the body. Click-to-view + right-click
-	 * context menu (Save As / Copy / Open External) wire up in
-	 * follow-up commits — Phase D minimum just renders the
-	 * placeholder so the round-trip is visible end-to-end. */
+	 * attached them to the event), allocate a per-chat token,
+	 * deep-copy the metadata into gchat->media_handles, and emit
+	 * a NBSP-joined placeholder row that embeds the token as
+	 * `hxmedia:N`. inline_media_chat_word_click recovers the
+	 * token from the clicked word and pops the click-to-view
+	 * dialog.
+	 *
+	 * mIRC colour 14 ("dark grey") styles the row to read like a
+	 * subdued caption rather than chat text; the placeholder
+	 * still inherits the "wholerow is a hyperlink" feel since
+	 * the click handler triggers on any byte of it. */
     if (e->media) {
-        char *placeholder = hx_chat_media_placeholder_line (e->media);
+        guint token = gchat_register_media (gchat, e->media);
+        char *placeholder
+            = hx_chat_media_placeholder_clickable (e->media, token);
         if (placeholder) {
+            gchar *styled = g_strdup_printf ("\003" "14%s", placeholder);
             gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
-                              (unsigned char *) placeholder,
-                              strlen (placeholder), 0);
+                              (unsigned char *) styled, strlen (styled), 0);
+            g_free (styled);
             g_free (placeholder);
         }
     }
@@ -1255,6 +1325,60 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
             (int) strlen (loading_row), 0);
         g_free (loading_row);
     }
+}
+
+/* Phase 9.D inline-media click handler. Filters on words that
+ * contain the `hxmedia:N` token embedded by the placeholder
+ * formatter (hx_chat_media_placeholder_clickable). Looks up the
+ * token in the chat's media_handles table and pops the dialog.
+ * Same is_parallel-with-other-handlers pattern as
+ * chat_history_word_click — primary-button only; URL handler
+ * gets secondary/middle. */
+void
+inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
+                              gpointer data)
+{
+    (void) data;
+    guint button;
+    GdkEventType evtype;
+
+    if (!event || !word || !*word) {
+        return;
+    }
+    evtype = gdk_event_get_event_type (event);
+    if (evtype != GDK_BUTTON_PRESS && evtype != GDK_BUTTON_RELEASE) {
+        return;
+    }
+    button = gdk_button_event_get_button (event);
+    if (button != GDK_BUTTON_PRIMARY) {
+        return;
+    }
+
+    guint token = 0;
+    if (!hx_chat_media_parse_token (word, &token)) {
+        return;
+    }
+
+    struct gtkhx_chat *gchat = find_gchat_by_output (xtext);
+    if (!gchat || !gchat->media_handles) {
+        return;
+    }
+    HxChatMedia *m
+        = g_hash_table_lookup (gchat->media_handles, GUINT_TO_POINTER (token));
+    if (!m) {
+        debug_log ("media",
+                   "inline-media click: token %u not found on gchat cid=%u",
+                   token, gchat->cid);
+        return;
+    }
+
+    debug_log ("media",
+               "inline-media click: dispatch token=%u mime=%s id_len=%zu",
+               token, m->mime ? m->mime : "?", m->id_len);
+    inline_media_show_dialog (xtext, &the_session.htlc, m->id, m->id_len,
+                              m->mime, m->width_present ? m->width : 0,
+                              m->height_present ? m->height : 0,
+                              m->bytes_present ? m->bytes : 0);
 }
 
 void
@@ -2051,6 +2175,11 @@ create_chat (session *sess)
 	 * load-older = PRIMARY) so they never collide. */
     g_signal_connect (text, "word_click",
                       G_CALLBACK (chat_history_word_click), NULL);
+    /* Phase 9.D inline-media click handler — same coexistence
+	 * pattern as chat_history (different word patterns, same
+	 * primary-button discipline). */
+    g_signal_connect (text, "word_click",
+                      G_CALLBACK (inline_media_chat_word_click), NULL);
 
     vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
@@ -2354,6 +2483,11 @@ pchat_new (session *sess, struct chat *chat)
 	 * load-older = PRIMARY) so they never collide. */
     g_signal_connect (text, "word_click",
                       G_CALLBACK (chat_history_word_click), NULL);
+    /* Phase 9.D inline-media click handler — same coexistence
+	 * pattern as chat_history (different word patterns, same
+	 * primary-button discipline). */
+    g_signal_connect (text, "word_click",
+                      G_CALLBACK (inline_media_chat_word_click), NULL);
 
     vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
