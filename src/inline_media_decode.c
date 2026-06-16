@@ -94,6 +94,18 @@ inline_media_sniff (const guint8 *bytes, gsize len)
         return INLINE_MEDIA_FORMAT_UNKNOWN;
     }
 
+    /* Bound the sniff window at 32 bytes regardless of input
+	 * length. Every magic signature in the allowlist + blocklist
+	 * below fits in the first 12 bytes; the SVG check
+	 * additionally scans past leading whitespace, so clamping
+	 * `len` here is what enforces the documented "bounded hot
+	 * path" contract — without it sniff_svg could walk an
+	 * arbitrarily long leading-whitespace run, defeating the
+	 * O(1)-sniff promise in the header. */
+    if (len > 32) {
+        len = 32;
+    }
+
     /* JPEG: SOI marker FF D8 FF (then a third byte that's any
 	 * APPn / SOI marker). The third FF byte is checked to rule
 	 * out 0xFFD8 in random data. */
@@ -335,7 +347,13 @@ inline_media_decode (const guint8 *bytes, gsize len,
         return out;
     }
     gboolean closed = gdk_pixbuf_loader_close (loader, &err);
-    if (!closed && err) {
+    if (!closed) {
+        /* close() == FALSE is a decode failure regardless of
+		 * whether GError was set — gdk_pixbuf_loader_close()
+		 * promises a meaningful GError on most paths, but the
+		 * contract is the boolean. Treating "false + NULL err"
+		 * as success would let us proceed against a loader the
+		 * library already considers invalid. */
         out.error_code = MEDIA_ERROR_UNSUPPORTED;
         out.error_message = "decoder error on close";
         g_clear_error (&err);
@@ -363,7 +381,8 @@ inline_media_decode (const guint8 *bytes, gsize len,
     g_object_unref (loader);
 
     /* GdkTexture wants raw bytes; the cleanest GTK 4 path is
-	 * gdk_texture_new_for_pixbuf (deprecated in 4.12) — but it
+	 * gdk_texture_new_for_pixbuf (deprecated in 4.16, same as
+	 * the other gtkutil.c wrappers around the helper) — but it
 	 * still works and replaces our progressive-loader pixbuf
 	 * with a paintable suitable for GtkPicture. The receive
 	 * dialog (Phase 9.D) consumes the GdkTexture directly. */

@@ -12,13 +12,17 @@
  *
  * Two layers:
  *
- *   inline_media_sniff — magic-byte sniff. Pure C, no GLib / GTK
- *     deps, unit-testable in isolation. Returns the detected
- *     format (JPEG / PNG / GIF / blocked / unknown). The
- *     allowlist mirrors the spec's "Supported Formats" table:
- *     JPEG, PNG, GIF only; SVG / WebP / AVIF / HEIC / TIFF are
- *     explicitly recognised so we can reject them even if a
- *     hostile or buggy server claims a different canonical MIME.
+ *   inline_media_sniff — magic-byte sniff. GTK-free (only basic
+ *     GLib scalar typedefs in the signature: guint8, gsize,
+ *     gboolean — no GObject / GTK / pixbuf), unit-testable in
+ *     isolation, and bounded: inspects at most the first 32
+ *     bytes of the input regardless of total length. Returns
+ *     the detected format (JPEG / PNG / GIF / blocked /
+ *     unknown). The allowlist mirrors the spec's "Supported
+ *     Formats" table: JPEG, PNG, GIF only; SVG / WebP / AVIF /
+ *     HEIC / TIFF are explicitly recognised so we can reject
+ *     them even if a hostile or buggy server claims a different
+ *     canonical MIME.
  *
  *   inline_media_decode — full decode pipeline. Calls sniff,
  *     enforces a dimension + pixel cap via the loader's
@@ -43,6 +47,12 @@
 
 #include <glib.h>
 #include <stdint.h>
+
+/* Forward declaration keeps this header GTK-free while letting
+ * the result struct carry a strongly-typed GdkTexture pointer.
+ * Consumers that actually use the texture pull in
+ * <gdk/gdk.h> themselves. */
+typedef struct _GdkTexture GdkTexture;
 
 /* Detected image format. The "blocked" variants are recognised
  * specifically so the rejection log line is honest about WHY
@@ -109,7 +119,7 @@ typedef struct {
  * sniffed_format is the format the magic-byte sniff identified
  * (useful for logging). Always set, even on failure. */
 typedef struct {
-    void *texture; /* GdkTexture *, opaque to keep this header GTK-free */
+    GdkTexture *texture;
     const char *canonical_mime;
     HxInlineMediaFormat sniffed_format;
     /* Maps to inline_media.rs::MediaErrorCode wire values

@@ -277,6 +277,40 @@ test_decode_accepts_well_formed_jpeg (void)
 }
 
 static void
+test_decode_accepts_well_formed_gif (void)
+{
+    /* gdk_pixbuf_save_to_buffer ("gif", ...) isn't available by
+	 * default — GIF write-support depends on the libgif loader's
+	 * encoder which isn't always built. Use a hand-crafted
+	 * minimal valid 1×1 transparent GIF89a (43 bytes) so the
+	 * test is self-contained and fails loudly per the
+	 * no-silent-skips rule. The byte sequence is the canonical
+	 * minimal GIF89a documented in the GIF89a spec appendix —
+	 * header + screen descriptor + GCE + image descriptor + LZW
+	 * + trailer. */
+    static const guint8 minimal_gif_1x1[] = {
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, /* "GIF89a" */
+        0x01, 0x00, 0x01, 0x00,             /* width=1 height=1 */
+        0x80, 0x00, 0x00,                   /* global color table flag, bg, aspect */
+        0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, /* 2-color global palette */
+        0x21, 0xF9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, /* GCE block */
+        0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, /* image desc */
+        0x02, 0x02, 0x44, 0x01, 0x00,       /* LZW-encoded pixel */
+        0x3B,                                /* GIF trailer */
+    };
+
+    HxInlineMediaCaps caps = {0};
+    HxInlineMediaDecoded r = inline_media_decode (
+        minimal_gif_1x1, sizeof (minimal_gif_1x1), &caps);
+
+    g_assert_nonnull (r.texture);
+    g_assert_cmpuint (r.error_code, ==, 0);
+    g_assert_cmpstr (r.canonical_mime, ==, "image/gif");
+    g_assert_cmpint (r.sniffed_format, ==, INLINE_MEDIA_FORMAT_GIF);
+    g_object_unref (r.texture);
+}
+
+static void
 test_decode_byte_cap_rejects_oversized (void)
 {
     GBytes *bytes = encode_test_image ("png", 16, 16);
@@ -437,6 +471,8 @@ main (int argc, char **argv)
                      test_decode_accepts_well_formed_png);
     g_test_add_func ("/inline_media_decode/decode/jpeg",
                      test_decode_accepts_well_formed_jpeg);
+    g_test_add_func ("/inline_media_decode/decode/gif",
+                     test_decode_accepts_well_formed_gif);
     g_test_add_func ("/inline_media_decode/decode/byte_cap",
                      test_decode_byte_cap_rejects_oversized);
     g_test_add_func ("/inline_media_decode/decode/dim_cap",
