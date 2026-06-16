@@ -1036,7 +1036,25 @@ hx_chat_event_attach_media (HxChatEvent *ev,
 
 /* Map a canonical MIME like "image/png" → short label "PNG". The
  * placeholder line uses the short label so the row stays compact
- * in a typical chat width. */
+ * in a typical chat width.
+ *
+ * NULL `mime` returns "?" (the placeholder formatter treats "?"
+ * as "omit this column" — so the row reads "[image · ... · click
+ * to view]" without a format label).
+ *
+ * Known allowlisted MIMEs (PNG / JPEG / GIF) return their short
+ * literal label.
+ *
+ * Unknown MIME types are passed through verbatim — but only after
+ * a g_utf8_validate check. The Rust extractor doesn't UTF-8-
+ * validate CHAT_MEDIA_TYPE (it borrows the wire bytes; UTF-8
+ * validation is the responsibility of the C side that
+ * interpolates them into UI text). A hostile or buggy server
+ * could otherwise emit a CHAT_MEDIA_TYPE chunk with arbitrary
+ * bytes — embedded NULs, control characters, partial UTF-8
+ * sequences — and have them land verbatim in the chat output via
+ * the placeholder line. Collapsing invalid-UTF-8 input to "?"
+ * (which the formatter elides) is the safer default. */
 static const char *
 mime_short_label (const char *mime)
 {
@@ -1051,6 +1069,14 @@ mime_short_label (const char *mime)
     }
     if (g_ascii_strcasecmp (mime, "image/gif") == 0) {
         return "GIF";
+    }
+    /* Unknown MIME — only pass through verbatim if UTF-8-valid.
+	 * `mime` is NUL-terminated (hx_chat_event_attach_media
+	 * g_strndup'd it), so g_utf8_validate's length=-1 walk
+	 * terminates. Pass NULL for the end-of-valid-bytes out param;
+	 * we only care about the all-or-nothing verdict. */
+    if (!g_utf8_validate (mime, -1, NULL)) {
+        return "?";
     }
     return mime;
 }

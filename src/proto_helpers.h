@@ -760,10 +760,12 @@ typedef struct {
     gsize id_len;
     char *mime;    /* canonical MIME (NUL-terminated, owned) */
     gsize mime_len;
-    /* Server-advertised hints (`0`/`FALSE` when absent on the
-	 * wire — the C side substitutes "unknown" in the placeholder
-	 * formatter). Per spec, advisory only; clients MUST NOT trust
-	 * these as a substitute for actually decoding the bytes. */
+    /* Server-advertised hints. value is 0 / *_present is FALSE
+	 * when the field was absent on the wire; the placeholder
+	 * formatter elides any column whose *_present flag is FALSE
+	 * (no literal "unknown" substitution). Per spec, advisory
+	 * only; clients MUST NOT trust these as a substitute for
+	 * actually decoding the bytes. */
     guint32 width;
     guint32 height;
     guint32 bytes;
@@ -809,16 +811,7 @@ extern void hx_chat_event_free (HxChatEvent *e);
  * mime bytes into freshly-owned buffers; caller's pointers may
  * be released afterwards. Replaces any previously-attached
  * media. Idempotent on NULL `ev`. Setting `mime` to NULL or
- * `id_len`/`mime_len` to 0 detaches existing media.
- *
- * Format-friendly helper for the placeholder line. Returns a
- * newly-allocated UTF-8 string the caller must g_free. Example:
- *
- *   [image · PNG · 800×600 · 124 KB]
- *
- * When width/height/bytes are not present on the wire, the
- * corresponding columns are elided. When the mime is unknown,
- * the format reads "[image]" verbatim. */
+ * `id_len`/`mime_len` to 0 detaches existing media. */
 extern void hx_chat_event_attach_media (HxChatEvent *ev,
                                         const guint8 *id, gsize id_len,
                                         const char *mime, gsize mime_len,
@@ -828,6 +821,32 @@ extern void hx_chat_event_attach_media (HxChatEvent *ev,
                                         guint32 bytes,
                                         gboolean bytes_present);
 
+/* Format-friendly helper for the placeholder row. Returns a
+ * newly-allocated UTF-8 string the caller must g_free. Example
+ * output with every field present:
+ *
+ *   [image · PNG · 800×600 · 121.1 KB · click to view]
+ *
+ * The trailing " · click to view]" suffix is always present (the
+ * placeholder is a clickable affordance — the UX is part of the
+ * line, not metadata that gets omitted). The interior columns
+ * are conditional:
+ *
+ *   - When the MIME matches one of the spec-allowlisted types
+ *     (image/png, image/jpeg, image/gif), the short label (PNG /
+ *     JPEG / GIF) is used. Any other UTF-8-valid MIME is printed
+ *     verbatim. UTF-8-invalid MIME bytes are replaced with "?"
+ *     defensively (the Rust extractor doesn't UTF-8-validate
+ *     CHAT_MEDIA_TYPE; a hostile or buggy server could otherwise
+ *     interpolate arbitrary bytes into UI text).
+ *   - width/height pair: only printed when BOTH *_present flags
+ *     are set on the wire.
+ *   - bytes: only printed when bytes_present is set; formatted
+ *     short (e.g. "121.1 KB" or "1.2 MB") rather than literal.
+ *
+ * NULL `m` returns the bare "[image]" sentinel — used by call
+ * sites that have signalled media presence but haven't extracted
+ * meta yet. */
 extern char *hx_chat_media_placeholder_line (const HxChatMedia *m);
 
 /*
