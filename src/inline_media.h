@@ -52,18 +52,38 @@
 extern gboolean inline_media_cap_ok (struct htlc_conn *htlc);
 
 /* Resolve a server-advisory limit to the effective value the
- * client should enforce: the LOGIN-reply value when the server
- * advertised it (non-zero check is insufficient because 0 is a
- * legitimate "explicit 0 cap" value; the parser writes 0 for
- * "absent" too, hence presence flags also kept on htlc — see
- * hotline.h's HX_MEDIA_DEFAULT_* and rcv.c).
+ * client should enforce.
+ *
+ * Gates on two things:
+ *
+ *   1. HTLC_CAP_INLINE_MEDIA being lit in htlc->caps for the
+ *      current session. struct htlc_conn is reused across
+ *      reconnects: htlc->caps gets overwritten by every LOGIN
+ *      reply, but htlc->media_max_* aren't cleared at connect
+ *      time. Without this gate a prior session's advertisement
+ *      could leak into a new session against a server that
+ *      doesn't echo the cap, leading the upload pre-flight to
+ *      enforce caps the new server may not actually honour.
+ *      When the cap isn't lit, return the spec default — the
+ *      caller has no business uploading anyway, but the safer
+ *      value is what we want.
+ *
+ *   2. htlc->media_max_* being non-zero. The LOGIN-reply chunk
+ *      walker in rcv.c writes 0 for fields the server didn't
+ *      advertise; spec recommends client-side fallback to
+ *      HX_MEDIA_DEFAULT_* per missing field. 0 isn't a
+ *      meaningful "explicit 0 cap" value here — every cap is in
+ *      units (bytes / pixels / frames / ms) where 0 means "no
+ *      image is small enough to satisfy this," which would
+ *      block every upload. Treating 0 as "absent" is what every
+ *      field is documented to mean in hotline.h.
  *
  * Phase 9.A keeps these inline accessors trivial; the Phase 9.C
  * upload-state-machine consumes them in the pre-flight UI step. */
 static inline guint32
 inline_media_max_bytes (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_BYTES;
     }
     return htlc->media_max_bytes ? htlc->media_max_bytes
@@ -73,7 +93,7 @@ inline_media_max_bytes (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_max_dimension (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_DIMENSION;
     }
     return htlc->media_max_dimension ? htlc->media_max_dimension
@@ -83,7 +103,7 @@ inline_media_max_dimension (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_max_pixels (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_PIXELS;
     }
     return htlc->media_max_pixels ? htlc->media_max_pixels
@@ -93,7 +113,7 @@ inline_media_max_pixels (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_chunk_size (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_CHUNK_SIZE;
     }
     guint32 v = htlc->media_chunk_size;
@@ -118,7 +138,7 @@ inline_media_chunk_size (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_max_frames (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_FRAMES;
     }
     return htlc->media_max_frames ? htlc->media_max_frames
@@ -128,7 +148,7 @@ inline_media_max_frames (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_max_duration_ms (const struct htlc_conn *htlc)
 {
-    if (!htlc) {
+    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_DURATION_MS;
     }
     return htlc->media_max_duration_ms ? htlc->media_max_duration_ms

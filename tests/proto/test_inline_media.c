@@ -115,9 +115,9 @@ test_limits_accessors_use_defaults_when_zero (void)
 {
     struct htlc_conn h;
     memset (&h, 0, sizeof (h));
+    /* Cap echoed but every field absent on the wire. */
+    h.caps = HTLC_CAP_INLINE_MEDIA;
 
-    /* Zero on every field — server didn't advertise, so fall
-	 * back to spec recommended defaults. */
     g_assert_cmpuint (inline_media_max_bytes (&h), ==,
                       HX_MEDIA_DEFAULT_MAX_BYTES);
     g_assert_cmpuint (inline_media_max_dimension (&h), ==,
@@ -141,6 +141,7 @@ test_limits_accessors_pass_through_server_values (void)
 {
     struct htlc_conn h;
     memset (&h, 0, sizeof (h));
+    h.caps = HTLC_CAP_INLINE_MEDIA;
     h.media_max_bytes        = 65536;
     h.media_max_dimension    = 1024;
     h.media_max_pixels       = 1024u * 768u;
@@ -159,11 +160,52 @@ test_chunk_size_clamps_oversized_advertisement (void)
 {
     struct htlc_conn h;
     memset (&h, 0, sizeof (h));
+    h.caps = HTLC_CAP_INLINE_MEDIA;
     /* Server advertises an absurd chunk size — gtkhx clamps to
 	 * a sane ceiling to avoid alloc-of-the-month attacks. */
     h.media_chunk_size = 5u * 1024u * 1024u;
     g_assert_cmpuint (inline_media_chunk_size (&h), ==,
                       HX_MEDIA_DEFAULT_CHUNK_SIZE);
+}
+
+/* Regression for the stale-limits-across-reconnect bug. The
+ * htlc_conn struct is recycled across reconnect cycles; htlc->caps
+ * gets overwritten on every fresh LOGIN reply, but the
+ * media_max_* fields don't get zeroed. If the previous session
+ * had the cap negotiated and the new server doesn't, the
+ * accessors must hand back HX_MEDIA_DEFAULT_* rather than the
+ * stale advertisement — caller has no business uploading anyway,
+ * but the safer value is what we want surfacing to the
+ * pre-flight UI. */
+static void
+test_limits_accessors_drop_stale_on_cap_lost (void)
+{
+    struct htlc_conn h;
+    memset (&h, 0, sizeof (h));
+    /* Stale advertisement from a prior session. */
+    h.media_max_bytes        = 65536;
+    h.media_max_dimension    = 1024;
+    h.media_max_pixels       = 1024u * 768u;
+    h.media_chunk_size       = 32000;
+    h.media_max_frames       = 50;
+    h.media_max_duration_ms  = 5000;
+    /* New session: cap NOT echoed by the new server. */
+    h.caps = 0;
+
+    /* Every accessor falls through to its spec default rather
+	 * than honouring the stale advertised values. */
+    g_assert_cmpuint (inline_media_max_bytes (&h), ==,
+                      HX_MEDIA_DEFAULT_MAX_BYTES);
+    g_assert_cmpuint (inline_media_max_dimension (&h), ==,
+                      HX_MEDIA_DEFAULT_MAX_DIMENSION);
+    g_assert_cmpuint (inline_media_max_pixels (&h), ==,
+                      HX_MEDIA_DEFAULT_MAX_PIXELS);
+    g_assert_cmpuint (inline_media_chunk_size (&h), ==,
+                      HX_MEDIA_DEFAULT_CHUNK_SIZE);
+    g_assert_cmpuint (inline_media_max_frames (&h), ==,
+                      HX_MEDIA_DEFAULT_MAX_FRAMES);
+    g_assert_cmpuint (inline_media_max_duration_ms (&h), ==,
+                      HX_MEDIA_DEFAULT_MAX_DURATION_MS);
 }
 
 /* ---------- FFI builder: single-shot upload ---------- */
@@ -580,6 +622,8 @@ main (int argc, char **argv)
                      test_limits_accessors_pass_through_server_values);
     g_test_add_func ("/proto/inline_media/limits_clamp_chunk_size",
                      test_chunk_size_clamps_oversized_advertisement);
+    g_test_add_func ("/proto/inline_media/limits_drop_stale_on_cap_lost",
+                     test_limits_accessors_drop_stale_on_cap_lost);
     g_test_add_func ("/proto/inline_media/build_upload_single",
                      test_build_upload_single_shape);
     g_test_add_func ("/proto/inline_media/build_upload_single_empty",
