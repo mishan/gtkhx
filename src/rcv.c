@@ -1995,12 +1995,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * close would otherwise still carry stale fields).
 			 * htlc->caps is overwritten outright by the chunk
 			 * walker; these can't piggyback on that. */
-            htlc->media_max_bytes = 0;
-            htlc->media_max_dimension = 0;
-            htlc->media_max_pixels = 0;
-            htlc->media_chunk_size = 0;
-            htlc->media_max_frames = 0;
-            htlc->media_max_duration_ms = 0;
+            inline_media_reset_advisory_limits (htlc);
 
             dh_start (htlc)
             {

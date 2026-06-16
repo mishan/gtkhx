@@ -162,4 +162,24 @@ inline_media_max_duration_ms (const struct htlc_conn *htlc)
  * INFO chat. */
 extern void inline_media_log_advertised_limits (struct htlc_conn *htlc);
 
+/* Zero every advisory-limit field on htlc.
+ *
+ * Two call sites:
+ *
+ *   network.c::hx_htlc_close — wipe at disconnect so a reconnect
+ *     to a server that doesn't advertise the cap can't inherit
+ *     a prior session's caps. Lined up with the existing
+ *     htlc->caps + history_max_* resets there.
+ *
+ *   rcv.c::rcv_task_login — wipe BEFORE walking the LOGIN-reply
+ *     chunk run. Each MAX_* field is independently optional on
+ *     the wire (spec: 'Clients MUST tolerate any individual field
+ *     being absent') and the walker only writes the ones the
+ *     server advertised. Without this reset, a server
+ *     reconfiguration that re-LOGINs without going through
+ *     disconnect would leave previously-advertised fields stale.
+ *
+ * Safe to call with NULL htlc (no-op). */
+extern void inline_media_reset_advisory_limits (struct htlc_conn *htlc);
+
 #endif /* HX_INLINE_MEDIA_H */

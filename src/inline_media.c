@@ -51,6 +51,20 @@ inline_media_cap_ok (struct htlc_conn *htlc)
 }
 
 void
+inline_media_reset_advisory_limits (struct htlc_conn *htlc)
+{
+    if (!htlc) {
+        return;
+    }
+    htlc->media_max_bytes = 0;
+    htlc->media_max_dimension = 0;
+    htlc->media_max_pixels = 0;
+    htlc->media_chunk_size = 0;
+    htlc->media_max_frames = 0;
+    htlc->media_max_duration_ms = 0;
+}
+
+void
 inline_media_log_advertised_limits (struct htlc_conn *htlc)
 {
     if (!htlc) {

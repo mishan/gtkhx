@@ -53,6 +53,7 @@
 #include "proto_trace.h"
 #include "tls_trust.h"
 #include "tls_trust_dialog.h"
+#include "inline_media.h"
 #include "toolbar.h"
 #include "tracker.h"
 #include "network.h"
@@ -227,12 +228,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * defence-in-depth for any future path that reads the raw
 	 * fields directly (and matches the pattern history_max_*
 	 * uses one line up). */
-    htlc->media_max_bytes = 0;
-    htlc->media_max_dimension = 0;
-    htlc->media_max_pixels = 0;
-    htlc->media_chunk_size = 0;
-    htlc->media_max_frames = 0;
-    htlc->media_max_duration_ms = 0;
+    inline_media_reset_advisory_limits (htlc);
 
     /* Phase 8.D runtime wiring: tear down the voice runtime.
      * gtkhx_voice_runtime_free walks the state machine to its
