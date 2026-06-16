@@ -146,10 +146,15 @@ typedef struct {
  * On success the texture is a strong reference; caller is
  * responsible for g_object_unref when done.
  *
- * Safe to call from any thread that can use GdkPixbufLoader
- * (Phase 9.D's main-thread call site is fine; a worker-thread
- * variant comes for free since the loader is thread-safe per its
- * own docs). The caller never holds the GDK lock — pure compute.
+ * Phase 9.D's call site is the main thread (the dialog
+ * download callback). The decoder itself is pure compute over
+ * the input bytes and only touches GdkPixbufLoader +
+ * GdkTexture; a worker-thread variant is straightforward to
+ * arrange as long as the caller marshals the resulting
+ * GdkTexture back to the main thread before handing it to a
+ * widget. (Widget mutation must stay on the main thread per
+ * the GTK threading model; the GDK lock doesn't exist in
+ * GTK 4.)
  */
 extern HxInlineMediaDecoded inline_media_decode (const guint8 *bytes,
                                                  gsize len,

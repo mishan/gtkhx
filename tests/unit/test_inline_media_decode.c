@@ -205,9 +205,13 @@ test_sniff_short_input_doesnt_overread (void)
 
 /* ---- Decoder layer ---- */
 
-/* Build a small PNG/JPEG/GIF/BMP in-memory by encoding a
- * known-good pixbuf via gdk_pixbuf_save_to_buffer. Returns the
- * GBytes; caller unrefs. NULL on failure. */
+/* Build a small image in-memory by encoding a known-good
+ * pixbuf via gdk_pixbuf_save_to_buffer. Only PNG and JPEG are
+ * exercised by the tests below; GIF / BMP encoders aren't
+ * reliably present in gdk-pixbuf builds so this file uses a
+ * hand-crafted minimal GIF89a for the GIF success-decode path
+ * (see test_decode_accepts_well_formed_gif). Returns the GBytes;
+ * caller unrefs. NULL on failure. */
 static GBytes *
 encode_test_image (const char *format, int w, int h)
 {
@@ -413,19 +417,33 @@ test_decode_rejects_empty (void)
 }
 
 static void
-test_decode_truncated_png_fails_cleanly (void)
+test_decode_corrupted_png_fails_cleanly (void)
 {
-    /* Take a real PNG and chop off the last few bytes — the
-	 * loader should fail at close, mapped to UnsupportedFormat.
-	 * Decoder must NOT crash or return a partial texture. */
+    /* Take a real PNG and corrupt a byte inside the IHDR chunk
+	 * (offset ~20 into the file, past the 8-byte signature and
+	 * into the IHDR length/type/data run). This breaks the
+	 * chunk's CRC and forces every PNG decoder to reject —
+	 * unlike end-truncation, which gdk-pixbuf is lenient about
+	 * in some versions (it'll happily return a partial pixbuf
+	 * if the IDAT was complete enough to inflate). The
+	 * decoder must NOT crash; error_code maps to
+	 * UnsupportedFormat (2). */
     GBytes *bytes = encode_test_image ("png", 32, 32);
     g_assert_nonnull (bytes);
     gsize full_len;
     const guint8 *raw = g_bytes_get_data (bytes, &full_len);
-    g_assert_cmpuint (full_len, >, 16);
+    g_assert_cmpuint (full_len, >, 24);
+
+    guint8 *corrupted = g_memdup2 (raw, full_len);
+    /* Flip every bit at offset 20 — well inside the IHDR chunk
+	 * (signature is 8, IHDR length+type+CRC frames the next 25
+	 * bytes). The CRC at the end of IHDR will fail to verify. */
+    corrupted[20] ^= 0xFF;
 
     HxInlineMediaCaps caps = {0};
-    HxInlineMediaDecoded r = inline_media_decode (raw, full_len - 16, &caps);
+    HxInlineMediaDecoded r
+        = inline_media_decode (corrupted, full_len, &caps);
+    g_free (corrupted);
     g_bytes_unref (bytes);
 
     g_assert_null (r.texture);
@@ -487,8 +505,8 @@ main (int argc, char **argv)
                      test_decode_rejects_random_bytes);
     g_test_add_func ("/inline_media_decode/decode/reject_empty",
                      test_decode_rejects_empty);
-    g_test_add_func ("/inline_media_decode/decode/truncated_png",
-                     test_decode_truncated_png_fails_cleanly);
+    g_test_add_func ("/inline_media_decode/decode/corrupted_png",
+                     test_decode_corrupted_png_fails_cleanly);
 
     return g_test_run ();
 }

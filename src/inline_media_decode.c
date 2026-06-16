@@ -380,12 +380,19 @@ inline_media_decode (const guint8 *bytes, gsize len,
     g_object_ref (pixbuf);
     g_object_unref (loader);
 
-    /* GdkTexture wants raw bytes; the cleanest GTK 4 path is
-	 * gdk_texture_new_for_pixbuf (deprecated in 4.16, same as
-	 * the other gtkutil.c wrappers around the helper) — but it
-	 * still works and replaces our progressive-loader pixbuf
-	 * with a paintable suitable for GtkPicture. The receive
-	 * dialog (Phase 9.D) consumes the GdkTexture directly. */
+    /* Promote the loader's GdkPixbuf to a GdkTexture suitable
+	 * for GtkPicture. gdk_texture_new_for_pixbuf is deprecated
+	 * in 4.16 (same status as the other gtkutil.c wrappers
+	 * around the helper) but still works and is the cleanest
+	 * Pixbuf → GdkPaintable conversion in the GTK 4 line-up.
+	 * The receive dialog (Phase 9.D) consumes the GdkTexture
+	 * directly.
+	 *
+	 * (The src/preview.c image path uses gdk_texture_new_from_bytes
+	 * because it has the raw encoded bytes on hand. Here we
+	 * already drove them through a loader to gate on
+	 * size-prepared before allocating the pixel buffer, so the
+	 * pixbuf is what we have.) */
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     GdkTexture *tex = gdk_texture_new_for_pixbuf (pixbuf);
     G_GNUC_END_IGNORE_DEPRECATIONS
