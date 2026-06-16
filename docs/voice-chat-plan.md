@@ -22,7 +22,7 @@ Spec pinned at
 | 8.E | Settings → Voice device pickers | **Shipped** | merged from `claude/voice-phase-e-devices` |
 | 8.F | Tier 3 integration matrix vs Janus | **Shipped** | merged from `claude/voice-phase-f-tests` |
 | 8.G | Per-uid voice indicators in user list | **Shipped** (in-voice + muted) | `claude/voice-speaker-indicator` |
-| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge + soft-Media shipped; PTT / Start-muted / Auto-join / real-VAD open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media) |
+| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge, soft-Media, PTT shipped; Start-muted / Auto-join / real-VAD open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media) |
 
 What also shipped that wasn't in the original plan:
 
@@ -89,8 +89,7 @@ Stripping it down to the client's contract:
   **Shipped** — state machine's `JoinRequested` handling drives the
   implicit leave.
 - **Mute** as a server-side enforced flag (606). Push-to-talk is just
-  rapid mute/unmute from the client's side. **Mute shipped, PTT
-  open.**
+  rapid mute/unmute from the client's side. **Mute and PTT shipped.**
 - **Disconnect = automatic leave.** Server cleans up if the TCP
   control connection drops. **Shipped** — runtime teardown on
   session free + `Action::TearDown` drives the pipeline back to
@@ -521,7 +520,7 @@ Closed gotchas (no longer relevant):
   (The "Auto-join" pref toggle is still open per Phase 8.E
   follow-ups.)
 - **PTT keybind capture UI**: local-to-the-window for v1. Punt global
-  PTT. **Open** — PTT not yet implemented at all.
+  PTT. ✅
 - **CAP_EXTENDED_PRIV scope**: toast-only for Phase 8, decode later.
   Not blocking voice.
 - **GtkhxSession voice signals**: re-scoped to NONE. The runtime
