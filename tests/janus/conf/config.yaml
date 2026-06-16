@@ -305,10 +305,23 @@ InlineMedia:
   # JPEGQuality:     85          # 1-100. Used when re-encoding to JPEG.
 
   # Upload rate limits. Tune down on busy public servers.
+  #
+  # Test-target setting: the Phase 9.F Tier 3 integration suite
+  # runs multiple uploads back-to-back through a single shared
+  # guest account, well inside the spec-recommended 10 s per-
+  # account interval. Without permissive limits here the second
+  # test bails on a rate-limit task-error. Production / public-
+  # server operators should restore the spec defaults (10s / 30 /
+  # 100 — see fogWraith Capabilities-Inline-Media.md
+  # § Resource Limits).
   RateLimit:
-    PerAccountInterval: 10s     # Min gap between two uploads per account.
-    PerAccountHourly:   30      # Per-account uploads per rolling hour.
-    PerIPHourly:        100     # Per-source-IP uploads per rolling hour.
+    # Janus's Go YAML parser treats `0s` as 'unset / use default'
+    # (the 10s spec default fires anyway), so use an explicit
+    # tiny non-zero value here. 1ms is below the round-trip
+    # latency of any reasonable test sequence.
+    PerAccountInterval: 1ms
+    PerAccountHourly:   1000    # Generous hourly cap.
+    PerIPHourly:        10000   # Generous per-IP cap.
 
   # Optional public-chat fallback gateway. Strictly opt-in. When enabled
   # the server forwards inline images to an external HTTPS endpoint so
