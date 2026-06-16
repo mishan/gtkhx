@@ -214,29 +214,74 @@ on_open_clicked (GtkButton *btn, gpointer user_data)
     if (!md->bytes) {
         return;
     }
-    /* Mktemp-ish path under the runtime dir. unique per launch. */
     const char *tmp = g_get_user_runtime_dir ();
     if (!tmp || !*tmp) {
         tmp = g_get_tmp_dir ();
     }
-    char *fname = g_strdup_printf ("gtkhx-media-%u%s",
-                                   g_random_int (),
-                                   mime_to_suffix (md->mime));
-    char *path = g_build_filename (tmp, fname, NULL);
-    g_free (fname);
 
-    gsize len = 0;
-    const void *data = g_bytes_get_data (md->bytes, &len);
+    /* Exclusive-create the temp file to avoid the symlink /
+	 * clobber race a predictable name + g_file_set_contents
+	 * would expose, especially when XDG_RUNTIME_DIR isn't
+	 * private (the spec requires 0700 but some
+	 * misconfigurations fall back to /tmp which is world-
+	 * writable). g_file_create with G_FILE_CREATE_PRIVATE opens
+	 * with O_CREAT|O_EXCL and 0600, so an existing path —
+	 * whether a stale leftover or an attacker-planted symlink —
+	 * fails the open rather than overwriting / following the
+	 * link. Retry up to a handful of times in case of a 64-bit
+	 * random-name collision (vanishingly unlikely but cheap to
+	 * defend against). */
+    char *path = NULL;
+    GFile *file = NULL;
+    GFileOutputStream *out = NULL;
     GError *err = NULL;
-    if (!g_file_set_contents (path, data, (gssize) len, &err)) {
-        debug_log ("media", "open-externally tempfile write failed: %s",
+    for (int attempt = 0; attempt < 8; attempt++) {
+        g_free (path);
+        guint32 a = g_random_int ();
+        guint32 b = g_random_int ();
+        char *fname = g_strdup_printf (
+            "gtkhx-media-%08x%08x%s", a, b, mime_to_suffix (md->mime));
+        path = g_build_filename (tmp, fname, NULL);
+        g_free (fname);
+
+        g_clear_object (&file);
+        file = g_file_new_for_path (path);
+        g_clear_error (&err);
+        out = g_file_create (file, G_FILE_CREATE_PRIVATE, NULL, &err);
+        if (out) {
+            break;
+        }
+        if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
+            break; /* genuine failure — bail */
+        }
+        /* Existed — try again with a fresh random tail. */
+    }
+    if (!out) {
+        debug_log ("media", "open-externally tempfile create failed: %s",
                    err ? err->message : "unknown");
         g_clear_error (&err);
+        g_clear_object (&file);
         g_free (path);
         return;
     }
 
-    GFile *file = g_file_new_for_path (path);
+    gsize len = 0;
+    const void *data = g_bytes_get_data (md->bytes, &len);
+    gsize written = 0;
+    if (!g_output_stream_write_all (G_OUTPUT_STREAM (out), data, len,
+                                    &written, NULL, &err)) {
+        debug_log ("media", "open-externally tempfile write failed: %s",
+                   err ? err->message : "unknown");
+        g_clear_error (&err);
+        g_output_stream_close (G_OUTPUT_STREAM (out), NULL, NULL);
+        g_object_unref (out);
+        g_object_unref (file);
+        g_free (path);
+        return;
+    }
+    g_output_stream_close (G_OUTPUT_STREAM (out), NULL, NULL);
+    g_object_unref (out);
+
     GtkFileLauncher *fl = gtk_file_launcher_new (file);
     GtkWindow *parent = NULL;
     GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (md->dialog));

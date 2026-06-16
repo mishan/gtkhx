@@ -232,7 +232,7 @@ rcv_task_download_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
         HxInlineMediaDownloadResult r;
         memset (&r, 0, sizeof (r));
         r.error_code = 0;
-        r.error_message = "Download reply malformed";
+        r.error_message = _ ("Download reply malformed");
         r.error_message_len = strlen (r.error_message);
         if (ctx->on_done) {
             ctx->on_done (htlc, &r, ctx->user_data);
@@ -258,6 +258,37 @@ rcv_task_download_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
         return;
     }
 
+    /* Defence against an out-of-spec server: if the chunk count
+	 * we've already issued has reached PART_COUNT, we should
+	 * have seen PART_FINAL by now. A server that never sets
+	 * PART_FINAL (or sends a smaller-than-advertised
+	 * PART_COUNT) would otherwise loop us indefinitely until
+	 * next_part_index wraps the u16. Treat this as a malformed
+	 * reply: stop, deliver a synthetic failure, free the ctx.
+	 *
+	 * The chunk-index-at-this-point semantics: we've just
+	 * consumed the (next_part_index)-th chunk (0 on the first
+	 * reply since next_part_index starts at 1 for the first
+	 * follow-up; counting starts at 0). PART_COUNT is the spec
+	 * total. So 'we've consumed >= total' is the wrap guard. */
+    if (parsed.part_count > 0
+        && (guint32) ctx->next_part_index >= (guint32) parsed.part_count) {
+        debug_log ("media",
+                   "DOWNLOAD_MEDIA exhausted PART_COUNT=%u without "
+                   "PART_FINAL — treating as malformed",
+                   (unsigned) parsed.part_count);
+        HxInlineMediaDownloadResult r;
+        memset (&r, 0, sizeof (r));
+        r.error_code = 0;
+        r.error_message = _ ("Server didn't terminate chunked download");
+        r.error_message_len = strlen (r.error_message);
+        if (ctx->on_done) {
+            ctx->on_done (htlc, &r, ctx->user_data);
+        }
+        ctx_free (ctx);
+        return;
+    }
+
     /* More chunks coming — issue the next request. */
     debug_log ("media",
                "DOWNLOAD_MEDIA chunk %u/%u accumulated (%u bytes so far)",
@@ -270,7 +301,7 @@ rcv_task_download_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
         HxInlineMediaDownloadResult r;
         memset (&r, 0, sizeof (r));
         r.error_code = 0;
-        r.error_message = "Chunked-download resend failed";
+        r.error_message = _ ("Chunked-download resend failed");
         r.error_message_len = strlen (r.error_message);
         if (ctx->on_done) {
             ctx->on_done (htlc, &r, ctx->user_data);

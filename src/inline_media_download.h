@@ -73,8 +73,16 @@ typedef struct {
     const char *canonical_mime;
     /* Spec MediaErrorCode wire value. 0 on success. */
     guint16 error_code;
-    /* Best-effort error text borrowed from htlc->in.buf. NULL on
-	 * success. */
+    /* Best-effort error text describing the failure. NULL on
+	 * success and may be NULL on failure when the server didn't
+	 * include DATA_ERROR. When non-NULL the pointer borrows
+	 * transient storage — sometimes a stack buffer the helper
+	 * filled via task_error_extract before invoking the
+	 * callback, sometimes a string literal for synthesised
+	 * failure paths (malformed reply, chunked-download resend
+	 * failed). NEVER points into htlc->in.buf directly. Valid
+	 * only for the duration of the callback; copy out
+	 * (g_strndup) if needed afterwards. */
     const char *error_message;
     gsize error_message_len;
 } HxInlineMediaDownloadResult;
