@@ -317,6 +317,170 @@ test_chat_event_copy_null_returns_null (void)
     g_assert_null (hx_chat_event_copy (NULL));
 }
 
+/* ---------- Phase 9.D inline-media attach + placeholder ---------- */
+
+static void
+test_chat_event_media_attach_round_trips (void)
+{
+    HxChatEvent *e = hx_chat_event_new ("alice: look", strlen ("alice: look"),
+                                        0, NULL);
+    g_assert_nonnull (e);
+    g_assert_null (e->media);
+
+    const guint8 id[] = {0xAB, 0xCD, 0xEF, 0x01};
+    hx_chat_event_attach_media (e, id, sizeof (id), "image/png",
+                                strlen ("image/png"),
+                                800, TRUE, 600, TRUE, 124000, TRUE);
+    g_assert_nonnull (e->media);
+    g_assert_cmpuint (e->media->id_len, ==, 4);
+    g_assert (memcmp (e->media->id, id, 4) == 0);
+    g_assert_cmpstr (e->media->mime, ==, "image/png");
+    g_assert_cmpuint (e->media->width, ==, 800);
+    g_assert_true (e->media->width_present);
+    g_assert_cmpuint (e->media->height, ==, 600);
+    g_assert_cmpuint (e->media->bytes, ==, 124000);
+    hx_chat_event_free (e);
+}
+
+static void
+test_chat_event_media_attach_copy_deep (void)
+{
+    HxChatEvent *e = hx_chat_event_new ("alice: look", strlen ("alice: look"),
+                                        7, NULL);
+    g_assert_nonnull (e);
+    const guint8 id[] = {0x01, 0x02, 0x03};
+    hx_chat_event_attach_media (e, id, sizeof (id), "image/gif",
+                                strlen ("image/gif"),
+                                64, TRUE, 64, TRUE, 0, FALSE);
+
+    HxChatEvent *c = hx_chat_event_copy (e);
+    g_assert_nonnull (c);
+    g_assert_nonnull (c->media);
+    /* Distinct allocations — modify e's media and verify c's
+	 * remained intact. */
+    g_assert (c->media != e->media);
+    g_assert (c->media->id != e->media->id);
+    g_assert (c->media->mime != e->media->mime);
+    g_assert_cmpuint (c->media->id_len, ==, 3);
+    g_assert_cmpstr (c->media->mime, ==, "image/gif");
+    g_assert_cmpuint (c->cid, ==, 7);
+
+    hx_chat_event_free (e);
+    /* c should still have valid media bytes — UAF would crash here. */
+    g_assert_cmpuint (c->media->id[0], ==, 1);
+    g_assert_cmpstr (c->media->mime, ==, "image/gif");
+    hx_chat_event_free (c);
+}
+
+static void
+test_chat_event_media_attach_detach (void)
+{
+    HxChatEvent *e = hx_chat_event_new ("alice: hi", strlen ("alice: hi"),
+                                        0, NULL);
+    const guint8 id[] = {0xFF};
+    hx_chat_event_attach_media (e, id, 1, "image/png", 9, 0, FALSE, 0, FALSE,
+                                0, FALSE);
+    g_assert_nonnull (e->media);
+
+    /* Re-attach with NULL id detaches. */
+    hx_chat_event_attach_media (e, NULL, 0, NULL, 0, 0, FALSE, 0, FALSE, 0,
+                                FALSE);
+    g_assert_null (e->media);
+
+    /* Idempotent on NULL ev. */
+    hx_chat_event_attach_media (NULL, id, 1, "image/png", 9, 0, FALSE, 0,
+                                FALSE, 0, FALSE);
+    hx_chat_event_free (e);
+}
+
+static void
+test_chat_event_media_placeholder_full (void)
+{
+    HxChatMedia m = {
+        .id = (guint8 *) "x",
+        .id_len = 1,
+        .mime = "image/png",
+        .mime_len = 9,
+        .width = 800,
+        .height = 600,
+        .bytes = 124000,
+        .width_present = TRUE,
+        .height_present = TRUE,
+        .bytes_present = TRUE,
+    };
+    char *p = hx_chat_media_placeholder_line (&m);
+    g_assert_nonnull (p);
+    /* Format: "[image · PNG · 800×600 · 121.1 KB · click to view]" */
+    g_assert (g_str_has_prefix (p, "[image · PNG · 800×600 · "));
+    g_assert (g_str_has_suffix (p, " · click to view]"));
+    g_free (p);
+}
+
+static void
+test_chat_event_media_placeholder_minimal (void)
+{
+    /* No dims, no bytes — formatter should elide those columns. */
+    HxChatMedia m = {
+        .id = (guint8 *) "x",
+        .id_len = 1,
+        .mime = "image/jpeg",
+        .mime_len = 10,
+    };
+    char *p = hx_chat_media_placeholder_line (&m);
+    g_assert_nonnull (p);
+    g_assert_cmpstr (p, ==, "[image · JPEG · click to view]");
+    g_free (p);
+}
+
+static void
+test_chat_event_media_placeholder_null (void)
+{
+    /* NULL media is safe and returns a generic placeholder. */
+    char *p = hx_chat_media_placeholder_line (NULL);
+    g_assert_cmpstr (p, ==, "[image]");
+    g_free (p);
+}
+
+static void
+test_chat_event_media_placeholder_unknown_mime_passes_through (void)
+{
+    /* Unknown but UTF-8-valid MIME — formatter prints it
+	 * verbatim. Future-proofs the placeholder against a server
+	 * that advertises image/webp / image/avif / etc. without
+	 * breaking the row. */
+    HxChatMedia m = {
+        .id = (guint8 *) "x",
+        .id_len = 1,
+        .mime = "image/webp",
+        .mime_len = 10,
+    };
+    char *p = hx_chat_media_placeholder_line (&m);
+    g_assert_nonnull (p);
+    g_assert_cmpstr (p, ==, "[image · image/webp · click to view]");
+    g_free (p);
+}
+
+static void
+test_chat_event_media_placeholder_rejects_invalid_utf8_mime (void)
+{
+    /* Hostile / buggy server emits a CHAT_MEDIA_TYPE chunk with
+	 * invalid UTF-8 bytes (a lone 0xC3 continuation byte). The
+	 * Rust extractor doesn't UTF-8-validate the type field; the
+	 * placeholder formatter must defensively elide the column
+	 * rather than interpolate arbitrary bytes into UI text. The
+	 * row falls through to mime-less "[image · click to view]". */
+    HxChatMedia m = {
+        .id = (guint8 *) "x",
+        .id_len = 1,
+        .mime = "\xC3\xC3invalid",
+        .mime_len = 9,
+    };
+    char *p = hx_chat_media_placeholder_line (&m);
+    g_assert_nonnull (p);
+    g_assert_cmpstr (p, ==, "[image · click to view]");
+    g_free (p);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -363,6 +527,24 @@ main (int argc, char **argv)
                      test_chat_event_free_null_is_noop);
     g_test_add_func ("/proto/chat_event/copy_null_returns_null",
                      test_chat_event_copy_null_returns_null);
+
+    /* Phase 9.D — inline-media attach + placeholder formatter. */
+    g_test_add_func ("/proto/chat_event/media_attach_round_trips",
+                     test_chat_event_media_attach_round_trips);
+    g_test_add_func ("/proto/chat_event/media_attach_copy_deep",
+                     test_chat_event_media_attach_copy_deep);
+    g_test_add_func ("/proto/chat_event/media_attach_detach",
+                     test_chat_event_media_attach_detach);
+    g_test_add_func ("/proto/chat_event/media_placeholder_full",
+                     test_chat_event_media_placeholder_full);
+    g_test_add_func ("/proto/chat_event/media_placeholder_minimal",
+                     test_chat_event_media_placeholder_minimal);
+    g_test_add_func ("/proto/chat_event/media_placeholder_null",
+                     test_chat_event_media_placeholder_null);
+    g_test_add_func ("/proto/chat_event/media_placeholder_unknown_mime",
+                     test_chat_event_media_placeholder_unknown_mime_passes_through);
+    g_test_add_func ("/proto/chat_event/media_placeholder_rejects_invalid_utf8",
+                     test_chat_event_media_placeholder_rejects_invalid_utf8_mime);
 
     return g_test_run ();
 }

@@ -805,6 +805,23 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         }
     }
 
+    /* Phase 9.D — inline-media placeholder. When the chat carried
+	 * companion CHAT_MEDIA_ID + CHAT_MEDIA_TYPE fields (rcv.c
+	 * attached them to the event), append a styled placeholder
+	 * row right after the body. Click-to-view + right-click
+	 * context menu (Save As / Copy / Open External) wire up in
+	 * follow-up commits — Phase D minimum just renders the
+	 * placeholder so the round-trip is visible end-to-end. */
+    if (e->media) {
+        char *placeholder = hx_chat_media_placeholder_line (e->media);
+        if (placeholder) {
+            gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
+                              (unsigned char *) placeholder,
+                              strlen (placeholder), 0);
+            g_free (placeholder);
+        }
+    }
+
     /* Phase 3 / docking: incoming pchat lines mark the tab + Chat
      * panel needs-attention. Public chat (cid 0) skips this — the
      * public-chat tab is what the user sees by default and we

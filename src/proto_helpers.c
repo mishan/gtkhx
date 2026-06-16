@@ -940,6 +940,42 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
     return e;
 }
 
+static HxChatMedia *
+hx_chat_media_copy (const HxChatMedia *m)
+{
+    if (!m) {
+        return NULL;
+    }
+    HxChatMedia *c = g_new0 (HxChatMedia, 1);
+    c->id_len = m->id_len;
+    if (m->id_len) {
+        c->id = g_malloc (m->id_len);
+        memcpy (c->id, m->id, m->id_len);
+    }
+    c->mime_len = m->mime_len;
+    if (m->mime) {
+        c->mime = g_strndup (m->mime, m->mime_len);
+    }
+    c->width = m->width;
+    c->height = m->height;
+    c->bytes = m->bytes;
+    c->width_present = m->width_present;
+    c->height_present = m->height_present;
+    c->bytes_present = m->bytes_present;
+    return c;
+}
+
+static void
+hx_chat_media_free (HxChatMedia *m)
+{
+    if (!m) {
+        return;
+    }
+    g_free (m->id);
+    g_free (m->mime);
+    g_free (m);
+}
+
 HxChatEvent *
 hx_chat_event_copy (HxChatEvent *e)
 {
@@ -950,6 +986,7 @@ hx_chat_event_copy (HxChatEvent *e)
     c = g_new0 (HxChatEvent, 1);
     *c = *e; /* shallow copy first */
     c->line = g_strndup (e->line, e->line_len);
+    c->media = hx_chat_media_copy (e->media);
     return c;
 }
 
@@ -960,7 +997,127 @@ hx_chat_event_free (HxChatEvent *e)
         return;
     }
     g_free (e->line);
+    hx_chat_media_free (e->media);
     g_free (e);
+}
+
+void
+hx_chat_event_attach_media (HxChatEvent *ev,
+                            const guint8 *id, gsize id_len,
+                            const char *mime, gsize mime_len,
+                            guint32 width, gboolean width_present,
+                            guint32 height, gboolean height_present,
+                            guint32 bytes, gboolean bytes_present)
+{
+    if (!ev) {
+        return;
+    }
+    if (ev->media) {
+        hx_chat_media_free (ev->media);
+        ev->media = NULL;
+    }
+    if (!id || id_len == 0 || !mime || mime_len == 0) {
+        return; /* detach */
+    }
+    HxChatMedia *m = g_new0 (HxChatMedia, 1);
+    m->id_len = id_len;
+    m->id = g_malloc (id_len);
+    memcpy (m->id, id, id_len);
+    m->mime_len = mime_len;
+    m->mime = g_strndup (mime, mime_len);
+    m->width = width;
+    m->width_present = width_present;
+    m->height = height;
+    m->height_present = height_present;
+    m->bytes = bytes;
+    m->bytes_present = bytes_present;
+    ev->media = m;
+}
+
+/* Map a canonical MIME like "image/png" → short label "PNG". The
+ * placeholder line uses the short label so the row stays compact
+ * in a typical chat width.
+ *
+ * NULL `mime` returns "?" (the placeholder formatter treats "?"
+ * as "omit this column" — so the row reads "[image · ... · click
+ * to view]" without a format label).
+ *
+ * Known allowlisted MIMEs (PNG / JPEG / GIF) return their short
+ * literal label.
+ *
+ * Unknown MIME types are passed through verbatim — but only after
+ * a g_utf8_validate check. The Rust extractor doesn't UTF-8-
+ * validate CHAT_MEDIA_TYPE (it borrows the wire bytes; UTF-8
+ * validation is the responsibility of the C side that
+ * interpolates them into UI text). A hostile or buggy server
+ * could otherwise emit a CHAT_MEDIA_TYPE chunk with arbitrary
+ * bytes — embedded NULs, control characters, partial UTF-8
+ * sequences — and have them land verbatim in the chat output via
+ * the placeholder line. Collapsing invalid-UTF-8 input to "?"
+ * (which the formatter elides) is the safer default. */
+static const char *
+mime_short_label (const char *mime)
+{
+    if (!mime) {
+        return "?";
+    }
+    if (g_ascii_strcasecmp (mime, "image/png") == 0) {
+        return "PNG";
+    }
+    if (g_ascii_strcasecmp (mime, "image/jpeg") == 0) {
+        return "JPEG";
+    }
+    if (g_ascii_strcasecmp (mime, "image/gif") == 0) {
+        return "GIF";
+    }
+    /* Unknown MIME — only pass through verbatim if UTF-8-valid.
+	 * `mime` is NUL-terminated (hx_chat_event_attach_media
+	 * g_strndup'd it), so g_utf8_validate's length=-1 walk
+	 * terminates. Pass NULL for the end-of-valid-bytes out param;
+	 * we only care about the all-or-nothing verdict. */
+    if (!g_utf8_validate (mime, -1, NULL)) {
+        return "?";
+    }
+    return mime;
+}
+
+/* Pretty-print a byte count in the spirit of GLib's
+ * g_format_size_for_display. Kept local + lossy on purpose — the
+ * placeholder doesn't need precise byte counts, just an order-of-
+ * magnitude. */
+static char *
+format_bytes_short (guint32 bytes)
+{
+    if (bytes < 1024) {
+        return g_strdup_printf ("%u B", bytes);
+    }
+    if (bytes < 1024 * 1024) {
+        return g_strdup_printf ("%.1f KB", (double) bytes / 1024.0);
+    }
+    return g_strdup_printf ("%.1f MB", (double) bytes / (1024.0 * 1024.0));
+}
+
+char *
+hx_chat_media_placeholder_line (const HxChatMedia *m)
+{
+    if (!m) {
+        return g_strdup ("[image]");
+    }
+    const char *fmt_label = mime_short_label (m->mime);
+    GString *out = g_string_new ("[image");
+    if (fmt_label && *fmt_label && g_strcmp0 (fmt_label, "?") != 0) {
+        g_string_append_printf (out, " · %s", fmt_label);
+    }
+    if (m->width_present && m->height_present) {
+        g_string_append_printf (out, " · %u×%u", m->width, m->height);
+    }
+    if (m->bytes_present) {
+        char *bytes_str = format_bytes_short (m->bytes);
+        g_string_append_printf (out, " · %s", bytes_str);
+        g_free (bytes_str);
+    }
+    g_string_append (out, " · click to view]");
+    return g_string_free (out, FALSE);
 }
 
 G_DEFINE_BOXED_TYPE (HxChatEvent, hx_chat_event, hx_chat_event_copy,

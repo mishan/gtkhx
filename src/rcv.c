@@ -280,6 +280,34 @@ hx_rcv_chat (struct htlc_conn *htlc)
     }
 #endif
 
+    /* Phase 9.D — inline-media companion fields. The relayed
+	 * chat may carry CHAT_MEDIA_ID + CHAT_MEDIA_TYPE plus the
+	 * server-supplied advisory width/height/bytes. The Phase A
+	 * Rust extractor enforces the spec's "both or neither" rule
+	 * and reports orphan pairs separately so the receiver can
+	 * drop them per spec rather than render a half-blank
+	 * placeholder. Only fires when the server confirmed the
+	 * inline-media cap — receiving media chunks despite the cap
+	 * not being negotiated implies a server bug, safer to
+	 * ignore. */
+    struct gtkhx_proto_chat_media_meta media_meta;
+    int media_status = GTKHX_PROTO_MEDIA_META_NONE;
+    if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
+        memset (&media_meta, 0, sizeof (media_meta));
+        media_status = gtkhx_proto_extract_chat_media_meta (
+            htlc->in.buf, htlc->in.pos, &media_meta);
+        if (media_status == GTKHX_PROTO_MEDIA_META_ORPHAN) {
+            /* Spec: receivers MUST reject a transaction with
+			 * exactly one companion field present. Drop the chat
+			 * entirely — orphans imply server bug / wire damage. */
+            debug_log ("media",
+                       "drop chat with orphaned media companion (cid=%u, "
+                       "uid=%u)",
+                       (unsigned) msg.cid, (unsigned) msg.uid);
+            return;
+        }
+    }
+
     /* Phase 3+: hx_output.chat → "chat" signal on the session
 	 * emitter. Phase 5+: payload is a boxed HxChatEvent that
 	 * bundles the UTF-8-validated line, sender/body slices, and
@@ -289,6 +317,23 @@ hx_rcv_chat (struct htlc_conn *htlc)
         HxChatEvent *ev = hx_chat_event_new (
             msg.text, msg.text_len, msg.cid,
             the_session.htlc.name[0] ? the_session.htlc.name : NULL);
+        if (media_status == GTKHX_PROTO_MEDIA_META_PRESENT) {
+            hx_chat_event_attach_media (
+                ev, media_meta.id_ptr, media_meta.id_len,
+                (const char *) media_meta.type_ptr, media_meta.type_len,
+                media_meta.width, media_meta.width_present,
+                media_meta.height, media_meta.height_present,
+                media_meta.bytes, media_meta.bytes_present);
+            debug_log ("media",
+                       "chat with media: cid=%u uid=%u mime=%.*s "
+                       "dims=%ux%u bytes=%u",
+                       (unsigned) msg.cid, (unsigned) msg.uid,
+                       (int) media_meta.type_len,
+                       (const char *) media_meta.type_ptr,
+                       (unsigned) media_meta.width,
+                       (unsigned) media_meta.height,
+                       (unsigned) media_meta.bytes);
+        }
         gtkhx_session_emit_chat (gtkhx_session_get_default (), htlc, ev);
         hx_chat_event_free (ev);
     }

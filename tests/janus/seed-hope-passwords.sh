@@ -161,20 +161,46 @@ for u in guest admin; do
         echo "missing $yaml after Janus first-run; cannot seed VoiceChat" >&2
         exit 1
     fi
-    # The upstream YAML shape under Access: is two-space-indented:
-    #   Access:
-    #     VoiceChat: false
-    # Match both indented and non-indented variants in case the
-    # serialiser ever changes its whitespace policy. If neither
-    # matches, fall back to a no-op and let the verify step fail
-    # loudly with the YAML dumped.
-    sed -i \
-        -e 's/^\(  VoiceChat:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
-        -e 's/^\(VoiceChat:\)[[:space:]]\+false[[:space:]]*$/\1 true/' \
+    # Indent-agnostic match. Upstream Janus has historically shipped
+    # the per-bit lines under `Access:` two-space-indented, but newer
+    # builds (≥ 2.0.8) write them four-space-indented (verified
+    # 2026-06 against the version that pulled CI's container build).
+    # Pin to extended-regex `^[[:space:]]*` so future indent changes
+    # don't regress this script silently.
+    #
+    # Hazard the earlier two-space-only version masked: VoiceChat
+    # happens to default `true` in upstream Janus's `NewUserDefaults`
+    # now, so the verify grep below was passing-by-accident — the sed
+    # never matched. Discovered while debugging the matching
+    # SendMedia seed below, which is genuinely `false` upstream and
+    # therefore doesn't have the same false-positive shield.
+    sed -i -E \
+        "s/^([[:space:]]*VoiceChat:)[[:space:]]+false[[:space:]]*$/\\1 true/" \
         "$yaml"
     if ! grep -E '^[[:space:]]*VoiceChat:[[:space:]]+true' "$yaml" \
             >/dev/null; then
         echo "VoiceChat seed failed for $u" >&2
+        echo "--- $yaml ---" >&2
+        cat "$yaml" >&2
+        echo "--- janus log tail ---" >&2
+        tail -40 "$LOG" >&2
+        exit 1
+    fi
+
+    # Phase 9.F follow-up: flip SendMedia: true onto the same
+    # bundled accounts so the inline-media full-round-trip tests
+    # (upload + chat-with-handle + relay + download) can run end-
+    # to-end. The NewUserDefaults block in config.yaml already
+    # carries SendMedia: true for any account created at runtime;
+    # this is the matching patch for the pre-shipped guest /
+    # admin YAMLs. Same defensive grep-and-verify shape as the
+    # VoiceChat seed above.
+    sed -i -E \
+        "s/^([[:space:]]*SendMedia:)[[:space:]]+false[[:space:]]*$/\\1 true/" \
+        "$yaml"
+    if ! grep -E '^[[:space:]]*SendMedia:[[:space:]]+true' "$yaml" \
+            >/dev/null; then
+        echo "SendMedia seed failed for $u" >&2
         echo "--- $yaml ---" >&2
         cat "$yaml" >&2
         echo "--- janus log tail ---" >&2
