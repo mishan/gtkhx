@@ -53,6 +53,7 @@
 #include "proto_trace.h"
 #include "tls_trust.h"
 #include "tls_trust_dialog.h"
+#include "inline_media.h"
 #include "toolbar.h"
 #include "tracker.h"
 #include "network.h"
@@ -220,6 +221,14 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * retention doesn't carry stale numbers into the UI. */
     htlc->history_max_msgs = 0;
     htlc->history_max_days = 0;
+    /* Inline-media advisory limits from the LOGIN reply — same
+	 * reasoning. The accessors in src/inline_media.h gate on
+	 * CAP_INLINE_MEDIA being lit so callers see spec defaults
+	 * when the new server doesn't echo the cap; this reset is
+	 * defence-in-depth for any future path that reads the raw
+	 * fields directly (and matches the pattern history_max_*
+	 * uses one line up). */
+    inline_media_reset_advisory_limits (htlc);
 
     /* Phase 8.D runtime wiring: tear down the voice runtime.
      * gtkhx_voice_runtime_free walks the state machine to its
@@ -1251,7 +1260,8 @@ send_login (struct gtkhx_connect_ctx *ctx)
         req.display_name = NULL; /* production sends NAME via USER_CHANGE later */
         req.client_version = 185;
         req.caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE;
+                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
+                 | HTLC_CAP_INLINE_MEDIA;
         req.send_caps = 1;
     }
 

@@ -40,6 +40,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 pub mod build;
+pub mod inline_media;
 pub mod messages;
 pub mod parse;
 pub mod sanitize;

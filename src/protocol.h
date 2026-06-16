@@ -320,6 +320,19 @@ struct htlc_conn {
 	 * Populated only when the server echoes CAP_CHAT_HISTORY. */
     guint32 history_max_msgs;
     guint32 history_max_days;
+    /* Inline-media extension: server-advertised advisory limits
+	 * from the LOGIN reply (DATA_CHAT_MEDIA_MAX_*, fogWraith
+	 * Capabilities-Inline-Media.md). Populated only when the
+	 * server echoes CAP_INLINE_MEDIA. Unset fields land as 0;
+	 * clients SHOULD treat 0 as "use spec recommended default"
+	 * (HX_MEDIA_DEFAULT_*). Pre-flight UI consults these before
+	 * round-tripping a known-bad upload. */
+    guint32 media_max_bytes;
+    guint32 media_max_dimension;
+    guint32 media_max_pixels;
+    guint32 media_chunk_size;
+    guint32 media_max_frames;
+    guint32 media_max_duration_ms;
     /* Chat-history extension Phase 4 (in-session reconnect
 	 * catch-up): newest message_id we've ever rendered for this
 	 * htlc — across all chats and all history batches received

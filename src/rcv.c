@@ -61,6 +61,7 @@
 #include "connect.h"
 #include "banner.h"
 #include "chat_history.h"
+#include "inline_media.h"
 #include "hl_access.h"
 #include "voice_runtime.h"
 #include "voice_model.h"
@@ -1871,7 +1872,8 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * advertises (network.c::send_login). */
             .client_version = 185,
             .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE,
+                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
+                  | HTLC_CAP_INLINE_MEDIA,
             .login_field = login,
             .login_field_len = (guint16) llen,
             .password_mac = password_mac,
@@ -1979,6 +1981,22 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 }
             }
 
+            /* Phase 9.A: clear inline-media advisory limits BEFORE
+			 * walking the LOGIN reply. Each MAX_* field is
+			 * independently optional on the wire (spec: "Clients
+			 * MUST tolerate any individual field being absent"),
+			 * so the chunk walker below only writes the ones the
+			 * server advertised — any field omitted from this
+			 * particular LOGIN would otherwise inherit a stale
+			 * value from a prior session on the same htlc_conn
+			 * struct (network.c::hx_htlc_close also zeroes them
+			 * on disconnect, but a server reconfiguration mid-
+			 * lifetime that re-LOGINs without going through
+			 * close would otherwise still carry stale fields).
+			 * htlc->caps is overwritten outright by the chunk
+			 * walker; these can't piggyback on that. */
+            inline_media_reset_advisory_limits (htlc);
+
             dh_start (htlc)
             {
                 switch (_type) {
@@ -2044,6 +2062,54 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                                 _ ("server confirmed chat-history extension "
                                    "for this session\n"));
                         }
+                        if (caps & HTLC_CAP_INLINE_MEDIA) {
+                            hx_printf_prefix (
+                                htlc, 0, INFOPREFIX,
+                                _ ("server confirmed inline-media extension "
+                                   "for this session\n"));
+                        }
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_MAX_BYTES:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_max_bytes = v;
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_max_dimension = v;
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_MAX_PIXELS:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_max_pixels = v;
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_chunk_size = v;
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_MAX_FRAMES:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_max_frames = v;
+                    }
+                    break;
+                case HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS:
+                    if (_len >= 4) {
+                        guint32 v;
+                        HN32 (&v, dh->data);
+                        htlc->media_max_duration_ms = v;
                     }
                     break;
                 case HTLS_DATA_HISTORY_MAX_MSGS:
@@ -2068,6 +2134,14 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 }
             }
             dh_end ();
+
+            /* Phase 9.A: log the server's advertised inline-media
+			 * limits at debug-category "media". Routed through a
+			 * stable helper so future logging adjustments don't
+			 * spider out across rcv.c. */
+            if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
+                inline_media_log_advertised_limits (htlc);
+            }
 
             /* Re-run setbtns now that HTLS_DATA_VERSION has been
 			 * parsed out of this same LOGIN reply. The earlier

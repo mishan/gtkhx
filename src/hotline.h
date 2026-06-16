@@ -376,6 +376,82 @@ struct hl_user_data {
 #define HTLS_DATA_HISTORY_MAX_MSGS ((guint16)0x0f07)
 #define HTLS_DATA_HISTORY_MAX_DAYS ((guint16)0x0f08)
 
+/* Inline-media extension (fogWraith
+ * Capabilities-Inline-Media.md). Wire-side gated by
+ * HTLC_CAP_INLINE_MEDIA (bit 3) in DATA_CAPABILITIES.
+ *
+ * Field IDs 0x0201–0x021F are reserved for this extension.
+ * Bytes never appear in chat transactions — only handles do; the
+ * bytes flow through dedicated TranUploadMedia (750 / 0x02EE)
+ * and TranDownloadMedia (751 / 0x02EF) transactions. */
+#define HTLC_HDR_UPLOAD_MEDIA ((guint32)0x000002ee)
+#define HTLC_HDR_DOWNLOAD_MEDIA ((guint32)0x000002ef)
+
+/* Companion fields on chat transactions (105 / 106 / 108 / 104).
+ * Both ID + TYPE present together or neither. Server overwrites
+ * TYPE with the canonical MIME after re-encoding before relay. */
+#define HTLC_DATA_CHAT_MEDIA_TYPE ((guint16)0x0201)
+#define HTLS_DATA_CHAT_MEDIA_TYPE ((guint16)0x0201)
+#define HTLC_DATA_CHAT_MEDIA_ID ((guint16)0x0202)
+#define HTLS_DATA_CHAT_MEDIA_ID ((guint16)0x0202)
+
+/* Payload + upload metadata. Used ONLY in 750 / 751. Never in
+ * chat transactions. */
+#define HTLC_DATA_CHAT_MEDIA_PAYLOAD ((guint16)0x0203)
+#define HTLS_DATA_CHAT_MEDIA_PAYLOAD ((guint16)0x0203)
+#define HTLC_DATA_CHAT_MEDIA_DECLARED_TYPE ((guint16)0x0204)
+
+/* Server-supplied canonical metadata (set on chat transactions
+ * with media + on TranDownloadMedia replies + on TranUploadMedia
+ * success). u32 BE, 4 bytes. */
+#define HTLS_DATA_CHAT_MEDIA_WIDTH ((guint16)0x0205)
+#define HTLS_DATA_CHAT_MEDIA_HEIGHT ((guint16)0x0206)
+#define HTLS_DATA_CHAT_MEDIA_BYTES ((guint16)0x0207)
+
+/* Chunked-upload bookkeeping. The server issues an upload token
+ * with the first chunk's reply; subsequent chunks echo it back.
+ * PART_INDEX is zero-based u16 BE; PART_COUNT is total chunk
+ * count u16 BE; PART_FINAL is u8 non-zero on the last chunk. */
+#define HTLC_DATA_CHAT_MEDIA_UPLOAD_TOKEN ((guint16)0x0208)
+#define HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN ((guint16)0x0208)
+#define HTLC_DATA_CHAT_MEDIA_PART_INDEX ((guint16)0x0209)
+#define HTLS_DATA_CHAT_MEDIA_PART_INDEX ((guint16)0x0209)
+#define HTLC_DATA_CHAT_MEDIA_PART_COUNT ((guint16)0x020a)
+#define HTLS_DATA_CHAT_MEDIA_PART_COUNT ((guint16)0x020a)
+#define HTLC_DATA_CHAT_MEDIA_PART_FINAL ((guint16)0x020b)
+#define HTLS_DATA_CHAT_MEDIA_PART_FINAL ((guint16)0x020b)
+
+/* Server-advertised advisory limits, carried in the LOGIN reply
+ * alongside the echoed DATA_CAPABILITIES when the cap is
+ * confirmed. All u32 BE. Clients use these for pre-flight
+ * validation; the server still enforces them on every upload.
+ * Absent means "use the spec recommended default." See
+ * docs/inline-media-plan.md. */
+#define HTLS_DATA_CHAT_MEDIA_MAX_BYTES ((guint16)0x020c)
+#define HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION ((guint16)0x020d)
+#define HTLS_DATA_CHAT_MEDIA_MAX_PIXELS ((guint16)0x020e)
+#define HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE ((guint16)0x020f)
+#define HTLS_DATA_CHAT_MEDIA_MAX_FRAMES ((guint16)0x0210)
+#define HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS ((guint16)0x0211)
+
+/* Optional machine-readable rejection category on TranUploadMedia
+ * / TranDownloadMedia error replies. u16 BE. See the
+ * inline-media spec's "Error Codes" table; the human DATA_ERROR
+ * text remains authoritative for display. Unknown codes MUST be
+ * treated as 0 (generic). */
+#define HTLS_DATA_CHAT_MEDIA_ERROR_CODE ((guint16)0x0212)
+
+/* Recommended-default cap values for clients to fall back on when
+ * the server doesn't advertise them. Spec § "Resource Limits"
+ * defaults. Phase A pre-flight uses the live server caps when
+ * present and these otherwise. */
+#define HX_MEDIA_DEFAULT_MAX_BYTES ((guint32)262144)        /* 256 KB */
+#define HX_MEDIA_DEFAULT_MAX_DIMENSION ((guint32)2048)
+#define HX_MEDIA_DEFAULT_MAX_PIXELS ((guint32)(2048 * 2048))
+#define HX_MEDIA_DEFAULT_CHUNK_SIZE ((guint32)60000)        /* under u16 cap with header room */
+#define HX_MEDIA_DEFAULT_MAX_FRAMES ((guint32)150)
+#define HX_MEDIA_DEFAULT_MAX_DURATION_MS ((guint32)15000)
+
 /* HTXF handshake flags. Default (0x00) is the 16-byte legacy
  * handshake. In large-file mode the handshake grows to 24 bytes
  * with an 8-byte big-endian length field appended.
