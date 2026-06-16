@@ -531,19 +531,35 @@ hx_rcv_task (struct htlc_conn *htlc)
     }
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
-        /* HTXF transfer tasks (the ones xfer_go fires for FILE_GET /
-		 * FILE_PUT, identified by the "xfer_go" label) own an
-		 * htxf_conn that needs to be reclaimed when the request
-		 * errors — otherwise the orphaned transfer hangs in the
-		 * tasks UI forever with no progress and no way to dismiss
-		 * it. Their rcv functions (rcv_task_file_get /
-		 * rcv_task_file_put) already check task_inerror internally
-		 * and free the htxf on that path, so we run them on error
-		 * too. Non-transfer handlers (login, user-info, news, …)
-		 * don't have per-task state to free; the error toast above
-		 * is enough and we skip them as before. */
-        gboolean is_xfer = tsk->str && !strcmp (tsk->str, "xfer_go");
-        if (tsk->rcv && (!error || is_xfer)) {
+        /* HTXF transfer tasks own an htxf_conn that needs to be
+		 * reclaimed when the request errors — otherwise the
+		 * orphaned transfer hangs in the Tasks UI forever with
+		 * no progress and no way to dismiss it. The two labels
+		 * are 'xfer_go' (single-file FILE_GET / FILE_PUT, fired
+		 * from xfers.c) and 'xfer_go_folder' (folder transfers,
+		 * fired from files.c). Their rcv functions
+		 * (rcv_task_file_get / rcv_task_file_put) already check
+		 * task_inerror internally and free the htxf on that
+		 * path, so we run them on error too.
+		 *
+		 * Phase 9.C inline-media upload tasks ('upload-media')
+		 * follow the same shape: rcv_task_upload_media owns the
+		 * per-upload context (callback + user_data + heap state),
+		 * checks task_inerror at its entry and routes to the
+		 * failure-delivery path which invokes the caller's on_done
+		 * with the spec MediaErrorCode + DATA_ERROR text. Without
+		 * the dispatch, the ctx leaks and the caller's UI sits
+		 * forever waiting for a callback that never fires.
+		 *
+		 * Non-transfer handlers (login, user-info, news, …) don't
+		 * have per-task state to free; the error toast above is
+		 * enough and we skip them as before. */
+        gboolean dispatch_on_error
+            = tsk->str
+              && (!strcmp (tsk->str, "xfer_go")
+                  || !strcmp (tsk->str, "xfer_go_folder")
+                  || !strcmp (tsk->str, "upload-media"));
+        if (tsk->rcv && (!error || dispatch_on_error)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore

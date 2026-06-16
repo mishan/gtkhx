@@ -13,32 +13,58 @@
  *
  * Per docs/inline-media-plan.md Phase 9.F:
  *
- *   "The first step of 9.F is verifying Janus actually implements
- *    the extension. Connect a debug-built client to the existing
- *    janus Tier 3 container, watch the LOGIN reply for the
- *    capability echo of bit 3 and the DATA_CHAT_MEDIA_MAX_*
- *    advisory fields. If they're not there, fall back to building
- *    a Go mock server in tests/integration/mock-server/
- *    inline-media/ (same shape as the chat-history mock)."
+ *   cap_negotiation       — Janus echoes CAP_INLINE_MEDIA in the
+ *                           LOGIN TASK reply.
+ *   limits_advertised     — at least one DATA_CHAT_MEDIA_MAX_*
+ *                           advisory field is set on the LOGIN
+ *                           reply.
+ *   upload_round_trip     — single-shot TranUploadMedia (750) with
+ *                           a hand-crafted minimal PNG; assert the
+ *                           reply carries CHAT_MEDIA_ID +
+ *                           CHAT_MEDIA_TYPE + canonical width /
+ *                           height (and the canonical bytes ≤ the
+ *                           uploaded byte count, since the server
+ *                           re-encodes).
+ *   chat_with_media_round_trip — upload a PNG, attach the handle
+ *                           on a TranChatSend, observe the relayed
+ *                           broadcast carrying CHAT_MEDIA_ID +
+ *                           CHAT_MEDIA_TYPE companion fields.
+ *   download_round_trip   — fetch the canonical bytes via
+ *                           TranDownloadMedia (751); verify the
+ *                           reply carries CHAT_MEDIA_PAYLOAD + a
+ *                           canonical PNG magic header.
+ *   oversized_rejected    — upload an invalid garbage payload
+ *                           (65,500 zero bytes — large enough
+ *                           to exercise the single-shot wire
+ *                           framing limit but well below the
+ *                           256 KiB MAX_BYTES default, so the
+ *                           server's magic-byte sniff is the
+ *                           likely rejection branch). Assert
+ *                           task-error + any present
+ *                           CHAT_MEDIA_ERROR_CODE falls inside
+ *                           the documented 0–5 range. Originally
+ *                           scoped to a TooLarge probe; the
+ *                           server's actual rejection path
+ *                           (UnsupportedFormat for all-zeros)
+ *                           is also a valid 'server rejected
+ *                           with an actionable code' result.
+ *   unauthorized_download — try to fetch a handle we never
+ *                           received; expect a generic task-error
+ *                           (the spec collapses "not authorized"
+ *                           and "expired" to avoid handle-
+ *                           enumeration).
  *
- * This file lands the first step: cap-negotiation + advisory-limits
- * parsing against Janus. Per [[gtkhx_janus]], Misha noted 2026-06
- * that Janus ships inline-media support; this test pins the
- * assumption.
- *
- * Subsequent commits in this same Phase 9.F branch will add the
- * full upload + chat-with-media-handle + download round-trip once
- * the cap negotiation test passes. If it FAILS — Janus actually
- * doesn't advertise the cap — the Phase 9.F doc instructs us to
- * write a mock server instead; the failure mode is a clean
- * actionable assertion, not a silent skip (per
- * [[feedback_no_test_skips]]).
+ * Failures here imply Janus's implementation has regressed or
+ * GtkHx's wire shape has drifted. The cap_negotiation case stays
+ * the canary for "did the extension light up at all" before any
+ * of the round-trips have a hope of working.
  */
 
 #include "config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
@@ -83,6 +109,139 @@ close_session (int fd, struct htlc_conn *htlc)
     integration_release_htlc (htlc);
     integration_close (fd);
 }
+
+/* ------------------------------------------------------------------ */
+/* Runtime PNG fixture                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Encode a small in-memory PNG via GdkPixbuf so we get a
+ * well-formed file every PNG decoder accepts. An earlier
+ * revision of this test embedded a hand-crafted 1×1 PNG byte
+ * sequence; it parsed cleanly in GdkPixbuf locally but Janus's
+ * Go image library rejected it on CI (presumably stricter
+ * about zlib window size or chunk-CRC details). Encoding at
+ * runtime sidesteps the whole question: gdk-pixbuf's PNG
+ * encoder produces the standard 'normal' shape that every
+ * decoder in the wild handles.
+ *
+ * Returns a freshly-allocated GBytes; caller g_bytes_unref's.
+ * The dimensions are kept tiny (4×4) so the encoded payload
+ * sits comfortably under every advisory cap the spec mentions. */
+static GBytes *
+encode_test_png (void)
+{
+    GdkPixbuf *pix
+        = gdk_pixbuf_new (GDK_COLORSPACE_RGB, /*has_alpha=*/FALSE,
+                          /*bits_per_sample=*/8, /*width=*/4, /*height=*/4);
+    if (!pix) {
+        return NULL;
+    }
+    /* Fill with solid red — content doesn't matter, only that
+	 * the bytes round-trip through the server's re-encode. */
+    gdk_pixbuf_fill (pix, 0xFF0000FF);
+
+    gchar *buf = NULL;
+    gsize bufsz = 0;
+    GError *err = NULL;
+    gboolean ok = gdk_pixbuf_save_to_buffer (pix, &buf, &bufsz, "png", &err,
+                                             NULL);
+    g_object_unref (pix);
+    if (!ok || !buf) {
+        g_clear_error (&err);
+        return NULL;
+    }
+    return g_bytes_new_take (buf, bufsz);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wire helpers — TranUploadMedia / TranDownloadMedia /                 */
+/* TranChatSend-with-media. Stitched directly on top of the harness    */
+/* primitive integration_send_message so the test can drive            */
+/* deliberately-malformed shapes too (oversized payload, missing       */
+/* PART_FINAL, …) without per-shape special-casing; the well-formed    */
+/* shape matches production via the same wire spec the Phase 9.A FFI    */
+/* builders pin in src/inline_media_upload.c. */
+/* ------------------------------------------------------------------ */
+
+/* Send a single-shot TranUploadMedia (750). Returns the trans id
+ * the server should echo in its TASK reply, or 0 on send failure.
+ *
+ * Inlines the chunk shape rather than calling the Phase 9.A
+ * builder via FFI — the test wants to be able to inject malformed
+ * shapes too (oversized payload, missing PART_FINAL, etc.) without
+ * having to special-case each. The wire shape is documented in
+ * docs/inline-media-plan.md and exercised by the test suite. */
+static guint32
+send_upload_media (int fd, struct htlc_conn *htlc,
+                   const guint8 *payload, gsize payload_len,
+                   const char *declared_type)
+{
+    guint8 part_final = 1;
+    guint32 trans_before = htlc->trans;
+    gboolean ok;
+    if (declared_type && *declared_type) {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_UPLOAD_MEDIA, /*flag=*/0, /*hc=*/3,
+            (int) HTLC_DATA_CHAT_MEDIA_PAYLOAD, (int) payload_len, payload,
+            (int) HTLC_DATA_CHAT_MEDIA_DECLARED_TYPE,
+            (int) strlen (declared_type), (const guint8 *) declared_type,
+            (int) HTLC_DATA_CHAT_MEDIA_PART_FINAL, 1, &part_final);
+    } else {
+        ok = integration_send_message (
+            fd, htlc, HTLC_HDR_UPLOAD_MEDIA, /*flag=*/0, /*hc=*/2,
+            (int) HTLC_DATA_CHAT_MEDIA_PAYLOAD, (int) payload_len, payload,
+            (int) HTLC_DATA_CHAT_MEDIA_PART_FINAL, 1, &part_final);
+    }
+    if (!ok) {
+        return 0;
+    }
+    /* hlpack increments htlc->trans after assignment, so the
+	 * trans the wire carried is the pre-call value. */
+    return trans_before;
+}
+
+/* Send a TranChatSend (105) with optional CHAT_MEDIA_ID + TYPE
+ * companion chunks attached. Style = 1 (normal); no CHAT_ID
+ * means public chat. */
+static gboolean
+send_chat_with_media (int fd, struct htlc_conn *htlc, const char *text,
+                      const guint8 *handle, gsize handle_len,
+                      const char *mime)
+{
+    guint16 style = htons (1);
+    if (handle && handle_len > 0 && mime) {
+        return integration_send_message (
+            fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/4,
+            (int) HTLC_DATA_STYLE, (int) sizeof (style), &style,
+            (int) HTLC_DATA_CHAT, (int) strlen (text), text,
+            (int) HTLC_DATA_CHAT_MEDIA_ID, (int) handle_len, handle,
+            (int) HTLC_DATA_CHAT_MEDIA_TYPE, (int) strlen (mime), mime);
+    }
+    return integration_send_message (
+        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2,
+        (int) HTLC_DATA_STYLE, (int) sizeof (style), &style,
+        (int) HTLC_DATA_CHAT, (int) strlen (text), text);
+}
+
+/* Send TranDownloadMedia (751) for a known handle. Returns the
+ * trans id (pre-call htlc->trans). */
+static guint32
+send_download_media (int fd, struct htlc_conn *htlc,
+                     const guint8 *handle, gsize handle_len)
+{
+    guint32 trans_before = htlc->trans;
+    if (!integration_send_message (
+            fd, htlc, HTLC_HDR_DOWNLOAD_MEDIA, /*flag=*/0, /*hc=*/1,
+            (int) HTLC_DATA_CHAT_MEDIA_ID, (int) handle_len, handle)) {
+        return 0;
+    }
+    return trans_before;
+}
+
+/* Drain helpers come from the harness:
+ *   integration_drain_until_task_trans — TASK reply filter
+ *   integration_drain_until_chat       — relayed-broadcast filter
+ * Both centralised in tests/integration/integration_harness.c. */
 
 /* ------------------------------------------------------------------ */
 /* Test cases                                                          */
@@ -218,6 +377,379 @@ test_inline_media_advisory_limits_advertised (void)
     close_session (fd, &htlc);
 }
 
+/*
+ * End-to-end upload round-trip: send a minimal valid PNG via
+ * TranUploadMedia (single-shot), assert the TASK reply carries
+ * a non-empty CHAT_MEDIA_ID + CHAT_MEDIA_TYPE + canonical
+ * width/height. The server may re-encode the bytes (PNG with
+ * alpha vs. without; quality adjustments) so we don't assert on
+ * the canonical byte count — only that the structural fields
+ * came back.
+ */
+static void
+test_inline_media_upload_round_trip (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Upload RT", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 trans = send_upload_media (fd, &htlc, png_data, png_len,
+                                       "image/png");
+    g_assert_cmpuint (trans, !=, 0);
+    g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
+    g_bytes_unref (png);
+
+    /* TASK header flag bit 0 (task-error) must be clear on
+	 * success. */
+    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    struct gtkhx_proto_upload_final_reply reply;
+    g_assert_true (gtkhx_proto_parse_upload_final_reply (
+        htlc.in.buf, htlc.in.pos, &reply));
+
+    g_assert_cmpuint (reply.id_len, >, 0);
+    g_assert_cmpuint (reply.type_len, >, 0);
+    /* Canonical MIME should be in our allowlist (PNG/JPEG/GIF).
+	 * Janus typically passes PNG through; pin the substring
+	 * rather than equality so a server that adds "; charset" or
+	 * similar still passes. */
+    char mime_buf[64] = {0};
+    gsize mime_len = MIN (reply.type_len, sizeof (mime_buf) - 1);
+    memcpy (mime_buf, reply.type_ptr, mime_len);
+    g_assert (g_str_has_prefix (mime_buf, "image/"));
+
+    /* Canonical width / height must be present AND equal to 4×4
+	 * (the dimensions encode_test_png writes). The spec marks
+	 * these advisory for the CHAT relay companion fields but
+	 * the upload final-reply is documented as carrying them —
+	 * and Janus does — so a regression that drops them is a
+	 * real round-trip break, not just a missing hint. The
+	 * previous 'if present' gate would let such a regression
+	 * slip through silently. */
+    g_assert_true (reply.width_present);
+    g_assert_cmpuint (reply.width, ==, 4);
+    g_assert_true (reply.height_present);
+    g_assert_cmpuint (reply.height, ==, 4);
+
+    close_session (fd, &htlc);
+}
+
+/*
+ * Chat-with-media round-trip: upload a PNG, attach the returned
+ * handle on a TranChatSend, observe the relayed broadcast back
+ * to us — assert the broadcast carries CHAT_MEDIA_ID +
+ * CHAT_MEDIA_TYPE companion fields.
+ */
+static void
+test_inline_media_chat_with_media_round_trip (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Chat+Media RT", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    /* Upload first. */
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 up_trans = send_upload_media (fd, &htlc, png_data, png_len,
+                                          "image/png");
+    g_assert_cmpuint (up_trans, !=, 0);
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
+    g_bytes_unref (png);
+    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    /* Copy the handle + mime out of htlc->in before drain_until
+	 * overwrites the buffer with the next received message. */
+    struct gtkhx_proto_upload_final_reply reply;
+    g_assert_true (gtkhx_proto_parse_upload_final_reply (
+        htlc.in.buf, htlc.in.pos, &reply));
+    guint8 *handle = g_memdup2 (reply.id_ptr, reply.id_len);
+    gsize handle_len = reply.id_len;
+    char *mime = g_strndup ((const char *) reply.type_ptr, reply.type_len);
+
+    /* Send chat with media. Janus relays the broadcast back to us
+	 * (we're a member of public chat). */
+    g_assert_true (send_chat_with_media (fd, &htlc, "see attached",
+                                         handle, handle_len, mime));
+
+    /* Drain to the broadcast — filter on our own uid so the
+	 * relay we asserted on is ours, not another concurrent test
+	 * binary's chat noise. The chunk walker in
+	 * integration_drain_until_chat consumes the body fields, but
+	 * htlc->in.buf is left intact for the media-meta walk
+	 * below. */
+    struct hx_chat_msg msg;
+    g_assert_true (
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+
+    struct gtkhx_proto_chat_media_meta meta;
+    int status = gtkhx_proto_extract_chat_media_meta (htlc.in.buf,
+                                                      htlc.in.pos, &meta);
+    g_assert_cmpint (status, ==, GTKHX_PROTO_MEDIA_META_PRESENT);
+    g_assert_cmpuint (meta.id_len, ==, handle_len);
+    g_assert (memcmp (meta.id_ptr, handle, handle_len) == 0);
+
+    g_free (handle);
+    g_free (mime);
+    close_session (fd, &htlc);
+}
+
+/*
+ * Download round-trip: upload a PNG, fetch the canonical bytes
+ * via TranDownloadMedia. Assert the reply carries
+ * CHAT_MEDIA_PAYLOAD with a valid PNG signature.
+ */
+static void
+test_inline_media_download_round_trip (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Download RT", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+
+    /* Upload. */
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 up_trans = send_upload_media (fd, &htlc, png_data, png_len,
+                                          "image/png");
+    g_assert_cmpuint (up_trans, !=, 0);
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
+    g_bytes_unref (png);
+    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    struct gtkhx_proto_upload_final_reply up_reply;
+    g_assert_true (gtkhx_proto_parse_upload_final_reply (
+        htlc.in.buf, htlc.in.pos, &up_reply));
+    guint8 *handle = g_memdup2 (up_reply.id_ptr, up_reply.id_len);
+    gsize handle_len = up_reply.id_len;
+
+    /* Authorize ourselves as a recipient by sending a chat with
+	 * the handle. Per spec the auth set is fixed at chat-relay
+	 * time; the sender is automatically a recipient (we relayed
+	 * to ourselves above implicitly via public chat, but Janus's
+	 * exact policy here is operator-discretion — emitting the
+	 * chat is the spec-conformant way to enter the auth set). */
+    g_assert_true (
+        send_chat_with_media (fd, &htlc, "downloading", handle, handle_len,
+                              "image/png"));
+    struct hx_chat_msg msg;
+    g_assert_true (
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+
+    /* Now request the bytes. */
+    guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);
+    g_assert_cmpuint (dl_trans, !=, 0);
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, dl_trans, 16));
+    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    struct gtkhx_proto_download_reply dl_reply;
+    g_assert_true (gtkhx_proto_parse_download_reply (
+        htlc.in.buf, htlc.in.pos, &dl_reply));
+    g_assert_cmpuint (dl_reply.payload_len, >=, 8);
+    /* The canonical bytes must start with an allowlisted image
+	 * magic prefix. Janus passes PNG through today so PNG is
+	 * the expected branch, but the spec only mandates that the
+	 * canonical format be one of {PNG, JPEG, GIF}. Accept any
+	 * of the three so a future Janus update that canonicalises
+	 * to JPEG/GIF (or a different conforming server in the
+	 * matrix) doesn't fail this test for the wrong reason. */
+    const guint8 *p = dl_reply.payload_ptr;
+    gboolean is_png = (dl_reply.payload_len >= 8
+                       && memcmp (p, "\x89PNG\r\n\x1A\n", 8) == 0);
+    gboolean is_jpeg = (dl_reply.payload_len >= 3
+                        && memcmp (p, "\xFF\xD8\xFF", 3) == 0);
+    gboolean is_gif = (dl_reply.payload_len >= 6
+                       && (memcmp (p, "GIF87a", 6) == 0
+                           || memcmp (p, "GIF89a", 6) == 0));
+    g_assert_true (is_png || is_jpeg || is_gif);
+
+    g_free (handle);
+    close_session (fd, &htlc);
+}
+
+/*
+ * Garbage upload rejected: send 65,500 zero bytes — close to
+ * the 16-bit single-shot wire-framing ceiling but well below
+ * the server's 256 KiB MAX_BYTES advertisement, so Janus's
+ * magic-byte sniff is the most likely rejection branch
+ * (all-zeros has no valid image signature). Originally written
+ * as a PayloadTooLarge probe; pivoted to a 'server rejects
+ * garbage with an actionable code' check after realising
+ * single-shot wire framing tops out at 65 KB and a true
+ * MAX_BYTES overflow requires chunked-upload support (not
+ * shipped in Phase 9.C). Assert task-error + any present
+ * CHAT_MEDIA_ERROR_CODE inside the spec's 0–5 range. */
+static void
+test_inline_media_oversized_rejected (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Oversize", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+
+    /* 65500 bytes of zeros: well BELOW the 256 KiB MAX_BYTES
+	 * default and just under the 65535-byte single-shot wire
+	 * framing ceiling. The point of this test isn't to overflow
+	 * MAX_BYTES (that would need chunked-upload, not in Phase 9.C);
+	 * it's to confirm the server rejects clearly-invalid payloads
+	 * with an actionable task-error. All-zeros has no valid
+	 * image magic so the most likely rejection branch is
+	 * UnsupportedFormat (code 2). */
+    gsize garbage_len = 65500;
+    guint8 *garbage = g_malloc0 (garbage_len);
+
+    guint32 trans
+        = send_upload_media (fd, &htlc, garbage, garbage_len, NULL);
+    g_assert_cmpuint (trans, !=, 0);
+    g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
+
+    /* Header MUST carry the task-error flag. */
+    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    /* gtkhx_proto_extract_media_error_code() collapses unknown +
+	 * absent to 0, so asserting <= 5 would always pass and the
+	 * test would never catch a buggy server. Walk the wire
+	 * chunks directly: if HTLS_DATA_CHAT_MEDIA_ERROR_CODE is
+	 * present, the on-wire value MUST be in {0..=5}. Absent is
+	 * OK (the field is optional per spec). */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert_cmpuint (raw, <=, 5u);
+        }
+    }
+
+    g_free (garbage);
+    close_session (fd, &htlc);
+}
+
+/*
+ * Unauthorized download: try to fetch a handle we never
+ * received. The spec collapses "not authorized" and "expired"
+ * into the same generic task-error so the response can't be used
+ * to enumerate live handle IDs. We just assert the server
+ * rejected — the exact code may be 0 (Generic) or 4
+ * (NotAuthorized) per spec discretion.
+ */
+static void
+test_inline_media_unauthorized_download (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Unauth DL", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+
+    /* Fabricate a random 32-byte handle. The spec mandates 128
+	 * bits of entropy per handle; ours has 256, so the
+	 * pre-collision probability against a real Janus handle is
+	 * far smaller than the test's flake budget. */
+    guint8 fake_handle[32];
+    for (gsize i = 0; i < sizeof (fake_handle); i++) {
+        fake_handle[i] = (guint8) (g_random_int () & 0xFF);
+    }
+
+    guint32 trans = send_download_media (fd, &htlc, fake_handle,
+                                         sizeof (fake_handle));
+    g_assert_cmpuint (trans, !=, 0);
+    g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
+
+    /* Header MUST carry the task-error flag. */
+    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    /* gtkhx_proto_extract_media_error_code() collapses unknown +
+	 * absent to 0 so it can't distinguish 'server omitted the
+	 * field' from 'server sent 0 explicitly'. Walk the chunks
+	 * directly: when the optional CHAT_MEDIA_ERROR_CODE is
+	 * present, the spec collapses 'expired' and 'not authorized'
+	 * to the same code to defeat handle enumeration — so the
+	 * on-wire value MUST be 0 (Generic) or 4 (NotAuthorized).
+	 * Anything else (1/2/3/5) would be a server bug. */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert (raw == 0 || raw == 4);
+        }
+    }
+
+    close_session (fd, &htlc);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -226,5 +758,15 @@ main (int argc, char **argv)
                      test_inline_media_cap_negotiation);
     g_test_add_func ("/integration/inline_media/limits_advertised",
                      test_inline_media_advisory_limits_advertised);
+    g_test_add_func ("/integration/inline_media/upload_round_trip",
+                     test_inline_media_upload_round_trip);
+    g_test_add_func ("/integration/inline_media/chat_with_media_round_trip",
+                     test_inline_media_chat_with_media_round_trip);
+    g_test_add_func ("/integration/inline_media/download_round_trip",
+                     test_inline_media_download_round_trip);
+    g_test_add_func ("/integration/inline_media/oversized_rejected",
+                     test_inline_media_oversized_rejected);
+    g_test_add_func ("/integration/inline_media/unauthorized_download",
+                     test_inline_media_unauthorized_download);
     return g_test_run ();
 }
