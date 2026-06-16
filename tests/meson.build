@@ -487,6 +487,24 @@ test_voice_model = executable('test_voice_model',
 test('voice_model', test_voice_model,
      suite : 'unit')
 
+# inline_media_decode — Phase 9.B bounded image decoder.
+# Sniff cases over hand-crafted prefixes pin the JPEG / PNG / GIF
+# allowlist and the explicit-reject set (SVG / WebP / AVIF / HEIC /
+# TIFF / BMP / ICO). Decode cases exercise the full pipeline
+# (sniff → byte cap → size-prepared gate → GdkPixbufLoader) against
+# dynamically-generated PNG / JPEG test pixbufs, verifying that the
+# byte cap maps to PayloadTooLarge (1), the dimension + pixel caps
+# map to PayloadTooLarge (1), and unsupported formats map to
+# UnsupportedFormat (2). Pulls in gtk_dep for GdkPixbuf.
+test_inline_media_decode = executable('test_inline_media_decode',
+  'unit/test_inline_media_decode.c',
+  '../src/inline_media_decode.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('inline_media_decode', test_inline_media_decode,
+     suite : 'unit')
+
 # -----------------------------------------------------------------------------
 # Tier 2 — proto/
 #

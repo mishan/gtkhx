@@ -48,6 +48,7 @@ gtkhx_sources = files(
   'htxf_io.c',
   'htxf_subchannel.c',
   'inline_media.c',
+  'inline_media_decode.c',
   'hl_code.c',
   'hl_date.c',
   'human_readable.c',
