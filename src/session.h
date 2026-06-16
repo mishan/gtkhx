@@ -192,6 +192,16 @@ struct gtkhx_chat {
     textentry *history_anchor_ent;
     textentry *history_load_older_ent;
 
+    /* Inline-media extension (Phase 9.C UI). Pointer to the
+	 * paperclip 'Attach Image' button in this chat's input row.
+	 * Visibility is gated on HTLC_CAP_INLINE_MEDIA — initially
+	 * hidden, flipped on by inline_media_attach_refresh_all_chats
+	 * (called from setbtns alongside the voice-panel refresh)
+	 * once the LOGIN reply populates htlc->caps. Stays NULL on
+	 * gchats whose input row hasn't been built yet (e.g. before
+	 * create_chat_window runs). */
+    GtkWidget *media_attach_btn;
+
     /* Inline-media extension (Phase 9.D dialog). Per-chat token
 	 * → HxChatMedia* lookup. When a chat carries inline media,
 	 * output_chat_from_event allocates a new token via

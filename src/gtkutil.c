@@ -45,6 +45,7 @@
 #include "gtkutil.h"
 #include "hl_access.h"
 #include "voice_panel.h"
+#include "inline_media_attach.h"
 
 /* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
@@ -359,6 +360,15 @@ setbtns (session *sess, int stat)
      * (stat==0), the refresh hides them again — htlc->caps will
      * have been cleared by network.c. */
     voice_panel_refresh_all_chats (sess);
+
+    /* Same gating discipline for the Phase 9.C inline-media
+	 * attach buttons: visible only when the server echoed
+	 * HTLC_CAP_INLINE_MEDIA. Most Hotline servers don't ship
+	 * the extension; hiding the button on those sessions is
+	 * less confusing than a button that always shows an
+	 * inert toast. Cleared on disconnect via the same caps
+	 * reset path. */
+    inline_media_attach_refresh_all_chats (sess);
 
     /* Phase 5: News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape

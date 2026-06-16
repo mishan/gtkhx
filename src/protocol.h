@@ -433,6 +433,15 @@ struct task {
 
     char *str;
     void *ptr;
+    /* Optional destructor for `ptr`. When non-NULL, task_free
+	 * invokes it as ptr_free(ptr) before reclaiming the task
+	 * struct itself. Callers that allocate a per-task context
+	 * — and want it freed when the connection is torn down
+	 * (sess->tasks is cleared with g_hash_table_remove_all,
+	 * which fires task_free per entry) — assign this after
+	 * task_new returns. NULL means "no owned state", matching
+	 * the historic default. */
+    GDestroyNotify ptr_free;
     rcv_task_fn rcv;
 };
 

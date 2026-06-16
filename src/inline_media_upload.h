@@ -127,22 +127,32 @@ typedef void (*HxInlineMediaUploadCallback) (
  * as advisory only — magic-byte sniff is authoritative. NULL with
  * declared_type_len=0 is fine.
  *
- * user_data is opaque; passed to on_done as-is. The helper does
- * NOT free it.
+ * user_data is opaque; passed to on_done as-is. When on_done
+ * fires (success OR failure path), the helper does NOT free
+ * user_data — the callback claims ownership. When the upload
+ * is cancelled before on_done can fire — most importantly, when
+ * the connection is torn down and sess->tasks is cleared — the
+ * helper invokes user_data_free (if non-NULL) so the caller's
+ * own per-upload context is reclaimed at the same time as the
+ * internal upload-helper context. Pass NULL for user_data_free
+ * when user_data has no heap ownership semantics.
  *
  * Production state machine: hx_send_upload_media_single allocates
  * a per-upload context, registers task_new(rcv_task_upload_media)
  * keyed on the TASK trans id, then calls hlwrite_chunks. When the
  * TASK reply lands, rcv.c dispatches to rcv_task_upload_media,
  * which parses the reply (success → final-reply parser; failure
- * → task_error_extract + error-code extractor), invokes
- * on_done, and frees the context. */
+ * → task_error_extract + error-code extractor) and invokes
+ * on_done. The upload-helper context is reclaimed via the task
+ * table's ptr_free hook (task_free → upload_ctx_free), which also
+ * runs on disconnect-time g_hash_table_remove_all. */
 extern gboolean hx_send_upload_media_single (
     struct htlc_conn *htlc,
     const guint8 *payload, gsize payload_len,
     const char *declared_type, gsize declared_type_len,
     HxInlineMediaUploadCallback on_done,
-    gpointer user_data);
+    gpointer user_data,
+    GDestroyNotify user_data_free);
 
 /* ---- Chat with attached media ---- */
 

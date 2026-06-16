@@ -56,13 +56,27 @@
 #include "inline_media_upload.h"
 #include "debug.h"
 
-/* Per-upload heap context. Lives from hx_send_upload_media_single
- * until rcv_task_upload_media fires (success or task_inerror). */
+/* Per-upload heap context. Lifetime is tied to the task table
+ * entry via task->ptr_free = upload_ctx_free, so:
+ *   - The normal TASK reply path: rcv_task_upload_media delivers
+ *     on_done, sets callback_fired=TRUE, returns. rcv.c then
+ *     runs task_delete, which fires task_free → ptr_free →
+ *     upload_ctx_free.
+ *   - The disconnect path: sess->tasks is cleared via
+ *     g_hash_table_remove_all in hx_htlc_close, which fires
+ *     task_free → ptr_free → upload_ctx_free for every
+ *     still-in-flight upload. on_done never runs, so
+ *     callback_fired stays FALSE and upload_ctx_free invokes
+ *     user_data_free (when set) so the caller's per-upload
+ *     context is reclaimed in the same pass.
+ *
+ * Future: chunk index, accumulated bytes, upload token for
+ * chunked uploads. Single-shot needs none of this. */
 typedef struct {
     HxInlineMediaUploadCallback on_done;
     gpointer user_data;
-    /* Future: chunk index, accumulated bytes, upload token for
-	 * chunked uploads. Single-shot needs none of this. */
+    GDestroyNotify user_data_free;
+    gboolean callback_fired;
 } hx_upload_ctx;
 
 static void
@@ -70,6 +84,11 @@ upload_ctx_free (hx_upload_ctx *ctx)
 {
     if (!ctx) {
         return;
+    }
+    if (!ctx->callback_fired && ctx->user_data_free && ctx->user_data) {
+        /* Connection torn down before on_done fired — release
+		 * the caller's per-upload context too. */
+        ctx->user_data_free (ctx->user_data);
     }
     g_free (ctx);
 }
@@ -84,7 +103,8 @@ hx_send_upload_media_single (struct htlc_conn *htlc,
                              const char *declared_type,
                              gsize declared_type_len,
                              HxInlineMediaUploadCallback on_done,
-                             gpointer user_data)
+                             gpointer user_data,
+                             GDestroyNotify user_data_free)
 {
     if (!inline_media_cap_ok (htlc)) {
         return FALSE;
@@ -119,6 +139,7 @@ hx_send_upload_media_single (struct htlc_conn *htlc,
     hx_upload_ctx *ctx = g_new0 (hx_upload_ctx, 1);
     ctx->on_done = on_done;
     ctx->user_data = user_data;
+    ctx->user_data_free = user_data_free;
 
     debug_log ("media",
                "→ UPLOAD_MEDIA single-shot (payload_len=%zu, "
@@ -126,9 +147,14 @@ hx_send_upload_media_single (struct htlc_conn *htlc,
                payload_len, declared_type_len);
 
     /* Register the TASK-reply hook BEFORE hlwrite_chunks consumes
-	 * htlc->trans. Mirrors voice.c::hx_send_voice_join. */
-    task_new (htlc, RCV_TASK_FN (rcv_task_upload_media), ctx, NULL,
-              "upload-media");
+	 * htlc->trans. Mirrors voice.c::hx_send_voice_join. The
+	 * ptr_free hook ties ctx's lifetime to the task entry — see
+	 * the typedef block above for the full rationale. */
+    struct task *tsk = task_new (
+        htlc, RCV_TASK_FN (rcv_task_upload_media), ctx, NULL, "upload-media");
+    if (tsk) {
+        tsk->ptr_free = (GDestroyNotify) upload_ctx_free;
+    }
     hlwrite_chunks (htlc, HTLC_HDR_UPLOAD_MEDIA, 0, chunks, hc);
     return TRUE;
 }
@@ -164,6 +190,7 @@ deliver_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx)
                (int) (r.error_message_len > 256 ? 256 : r.error_message_len),
                r.error_message ? r.error_message : "");
 
+    ctx->callback_fired = TRUE;
     if (ctx->on_done) {
         ctx->on_done (htlc, &r, ctx->user_data);
     }
@@ -186,6 +213,7 @@ deliver_success (struct htlc_conn *htlc, hx_upload_ctx *ctx)
         r.error_code = 0;
         r.error_message = "Upload reply malformed";
         r.error_message_len = strlen (r.error_message);
+        ctx->callback_fired = TRUE;
         if (ctx->on_done) {
             ctx->on_done (htlc, &r, ctx->user_data);
         }
@@ -223,6 +251,7 @@ deliver_success (struct htlc_conn *htlc, hx_upload_ctx *ctx)
                (unsigned) r.width, (unsigned) r.height,
                (unsigned) r.bytes);
 
+    ctx->callback_fired = TRUE;
     if (ctx->on_done) {
         ctx->on_done (htlc, &r, ctx->user_data);
     }
@@ -242,7 +271,8 @@ rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
     } else {
         deliver_success (htlc, ctx);
     }
-    upload_ctx_free (ctx);
+    /* ctx is reclaimed via task->ptr_free when rcv.c runs
+	 * task_delete after this handler returns. Don't free here. */
 }
 
 /* ---- Chat send with attached media ---- */
