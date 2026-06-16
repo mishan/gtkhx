@@ -301,7 +301,7 @@ Phase 8 follow-ups (small):
 
 - "Start muted" toggle, PTT keybind capture, "Auto-join voice when joining a chat room" toggle in `settings_page_voice()`.
 - Real volume-graded speaker detection (the §12 step 4 flip).
-- Flatpak mic-capture permission decision (between `--device=all` and the `org.freedesktop.portal.Device` portal).
+- Flatpak mic-capture permission — partially shipped on `claude/flatpak-pipewire-mic`: kept `--socket=pulseaudio` and added `--filesystem=xdg-run/pipewire-0` for native PipeWire access. The dedicated Audio portal (would give a per-app permission prompt) is still upstream-discussion-only.
 
 ---
 
