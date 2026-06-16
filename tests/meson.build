@@ -2175,6 +2175,30 @@ test('chat_history', test_integration_chat_history,
      is_parallel : false,
      timeout     : 60)
 
+# inline_media — Phase 9.F Tier 3 coverage. First step per
+# docs/inline-media-plan.md: verify Janus actually implements the
+# fogWraith inline-media extension by asserting the LOGIN reply
+# echoes CAP_INLINE_MEDIA and advertises at least one
+# DATA_CHAT_MEDIA_MAX_* advisory field. Filtered on
+# HX_TEST_CAP_INLINE_MEDIA — today only Janus advertises the bit.
+# Follow-up commits in the same Phase 9.F branch will add full
+# upload + chat-with-media-handle + download round-trip once
+# this first step is green. Failure mode is a clean assertion,
+# not a silent skip (per the no-test-skips feedback memory),
+# which gives a fast signal if Janus turns out to not actually
+# implement the extension and the mock-server fallback path
+# needs to be taken.
+test_integration_inline_media = executable('test_integration_inline_media',
+  'integration/test_inline_media.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('inline_media', test_integration_inline_media,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 60)
+
 # folder_put — HTLC_HDR_FILE_PUTFOLDER (0xd5) request/reply phase.
 # Mirror of test_file_put's scope: sends the opcode targeted at
 # Uploads/<random>, verifies the TASK reply correlates by trans

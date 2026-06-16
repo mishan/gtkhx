@@ -866,6 +866,36 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                     htlc->name[nlen] = '\0';
                 } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
                     htlc->caps = hl_capabilities_decode (dh->data, _len);
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_BYTES
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_bytes = v;
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_dimension = v;
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_PIXELS
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_pixels = v;
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_chunk_size = v;
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_FRAMES
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_frames = v;
+                } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS
+                           && _len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_duration_ms = v;
                 }
             }
             dh_end ();
@@ -1408,6 +1438,32 @@ integration_open_login_hope_or_skip (
                 htlc->name[nlen] = '\0';
             } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
                 htlc->caps = hl_capabilities_decode (dh->data, _len);
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_BYTES && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_max_bytes = v;
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION
+                       && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_max_dimension = v;
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_PIXELS && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_max_pixels = v;
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_chunk_size = v;
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_FRAMES && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_max_frames = v;
+            } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS
+                       && _len >= 4) {
+                guint32 v;
+                HN32 (&v, dh->data);
+                htlc->media_max_duration_ms = v;
             }
         }
         dh_end ();

@@ -749,6 +749,29 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
  * prose) — consumers should render `line` verbatim with no
  * special handling.
  */
+/* Optional inline-media metadata attached to a chat event. Only
+ * populated when the inbound chat carried both DATA_CHAT_MEDIA_ID
+ * and DATA_CHAT_MEDIA_TYPE (per spec, either both or neither —
+ * orphan pairs are dropped at the receive site rather than
+ * surfaced here). Owned by the parent HxChatEvent; freed alongside
+ * it. */
+typedef struct {
+    guint8 *id;    /* opaque handle bytes (owned) */
+    gsize id_len;
+    char *mime;    /* canonical MIME (NUL-terminated, owned) */
+    gsize mime_len;
+    /* Server-advertised hints (`0`/`FALSE` when absent on the
+	 * wire — the C side substitutes "unknown" in the placeholder
+	 * formatter). Per spec, advisory only; clients MUST NOT trust
+	 * these as a substitute for actually decoding the bytes. */
+    guint32 width;
+    guint32 height;
+    guint32 bytes;
+    gboolean width_present;
+    gboolean height_present;
+    gboolean bytes_present;
+} HxChatMedia;
+
 typedef struct _HxChatEvent HxChatEvent;
 struct _HxChatEvent {
     guint32 cid;
@@ -760,6 +783,12 @@ struct _HxChatEvent {
 
     gboolean is_info; /* "[hx]" info-prefix line */
     gboolean is_self; /* sender == own nick */
+
+    /* Inline-media extension (Phase 9.D). NULL when the chat
+	 * carried no media chunks. The companion-fields-orphan case
+	 * (exactly one of ID / TYPE present) never reaches here —
+	 * rcv.c drops those at the receive site per spec. */
+    HxChatMedia *media;
 };
 
 #define HX_TYPE_CHAT_EVENT (hx_chat_event_get_type ())
@@ -775,6 +804,31 @@ extern HxChatEvent *hx_chat_event_new (const char *raw, gsize raw_len,
 
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
 extern void hx_chat_event_free (HxChatEvent *e);
+
+/* Attach inline-media metadata to a chat event. Copies the id +
+ * mime bytes into freshly-owned buffers; caller's pointers may
+ * be released afterwards. Replaces any previously-attached
+ * media. Idempotent on NULL `ev`. Setting `mime` to NULL or
+ * `id_len`/`mime_len` to 0 detaches existing media.
+ *
+ * Format-friendly helper for the placeholder line. Returns a
+ * newly-allocated UTF-8 string the caller must g_free. Example:
+ *
+ *   [image · PNG · 800×600 · 124 KB]
+ *
+ * When width/height/bytes are not present on the wire, the
+ * corresponding columns are elided. When the mime is unknown,
+ * the format reads "[image]" verbatim. */
+extern void hx_chat_event_attach_media (HxChatEvent *ev,
+                                        const guint8 *id, gsize id_len,
+                                        const char *mime, gsize mime_len,
+                                        guint32 width, gboolean width_present,
+                                        guint32 height,
+                                        gboolean height_present,
+                                        guint32 bytes,
+                                        gboolean bytes_present);
+
+extern char *hx_chat_media_placeholder_line (const HxChatMedia *m);
 
 /*
  * HxMsgEvent — a parsed private-message value object.
