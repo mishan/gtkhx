@@ -51,16 +51,15 @@ struct hx_inline_media_download {
     /* Canonical MIME from the first reply that carried it.
 	 * Owned heap copy (NUL-terminated). */
     char *mime;
-    /* Spec says PART_INDEX defaults absent on the first request,
-	 * present on subsequent requests. We track the next index
-	 * to send (0 means we haven't sent the first request yet,
-	 * but state_first_sent below distinguishes "haven't sent"
-	 * from "sent index 0 then need 1 next" — the spec's
-	 * convention is for clients to start at index 1 on follow-
-	 * ups because the server's first chunk implicitly carries
-	 * index 0). */
+    /* Spec says PART_INDEX is absent on the first request and
+	 * present on every follow-up. The first-request vs follow-up
+	 * distinction is driven by the `with_part_index` argument
+	 * send_download_request takes — FALSE at start() time, TRUE
+	 * when the rcv handler resends for the next chunk. This
+	 * field is the index value to send on the next follow-up;
+	 * the server's first chunk implicitly carries index 0, so
+	 * follow-ups start at 1. */
     guint16 next_part_index;
-    gboolean state_first_sent;
     /* When TRUE, rcv_task_download_media silently drops the
 	 * reply and frees the context. Flipped by cancel(). */
     gboolean cancelled;
@@ -139,7 +138,6 @@ inline_media_download_start (struct htlc_conn *htlc,
         ctx_free (ctx);
         return NULL;
     }
-    ctx->state_first_sent = TRUE;
     return ctx;
 }
 
