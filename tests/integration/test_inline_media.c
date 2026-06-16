@@ -64,6 +64,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
@@ -110,28 +111,56 @@ close_session (int fd, struct htlc_conn *htlc)
 }
 
 /* ------------------------------------------------------------------ */
-/* Hand-crafted minimal PNG test fixtures                              */
+/* Runtime PNG fixture                                                  */
 /* ------------------------------------------------------------------ */
 
-/* 67-byte valid 1×1 RGB PNG. Hand-checked CRCs; standard widely
- * known sequence. Janus's spec-recommended-default caps
- * (MAX_BYTES = 256 KiB, MAX_DIMENSION = 2048, MAX_PIXELS = 4 MP)
- * have no trouble with this. */
-static const guint8 minimal_png_1x1[] = {
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
-    0x54, 0x08, 0x99, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
-    0x00, 0x00, 0x03, 0x00, 0x01, 0x5B, 0xB6, 0xEE,
-    0x56, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E,
-    0x44, 0xAE, 0x42, 0x60, 0x82,
-};
+/* Encode a small in-memory PNG via GdkPixbuf so we get a
+ * well-formed file every PNG decoder accepts. An earlier
+ * revision of this test embedded a hand-crafted 1×1 PNG byte
+ * sequence; it parsed cleanly in GdkPixbuf locally but Janus's
+ * Go image library rejected it on CI (presumably stricter
+ * about zlib window size or chunk-CRC details). Encoding at
+ * runtime sidesteps the whole question: gdk-pixbuf's PNG
+ * encoder produces the standard 'normal' shape that every
+ * decoder in the wild handles.
+ *
+ * Returns a freshly-allocated GBytes; caller g_bytes_unref's.
+ * The dimensions are kept tiny (4×4) so the encoded payload
+ * sits comfortably under every advisory cap the spec mentions. */
+static GBytes *
+encode_test_png (void)
+{
+    GdkPixbuf *pix
+        = gdk_pixbuf_new (GDK_COLORSPACE_RGB, /*has_alpha=*/FALSE,
+                          /*bits_per_sample=*/8, /*width=*/4, /*height=*/4);
+    if (!pix) {
+        return NULL;
+    }
+    /* Fill with solid red — content doesn't matter, only that
+	 * the bytes round-trip through the server's re-encode. */
+    gdk_pixbuf_fill (pix, 0xFF0000FF);
+
+    gchar *buf = NULL;
+    gsize bufsz = 0;
+    GError *err = NULL;
+    gboolean ok = gdk_pixbuf_save_to_buffer (pix, &buf, &bufsz, "png", &err,
+                                             NULL);
+    g_object_unref (pix);
+    if (!ok || !buf) {
+        g_clear_error (&err);
+        return NULL;
+    }
+    return g_bytes_new_take (buf, bufsz);
+}
 
 /* ------------------------------------------------------------------ */
-/* Wire helpers — sit on top of integration_send_message + the         */
-/* Phase 9.A FFI builders so the wire shape matches production.        */
+/* Wire helpers — TranUploadMedia / TranDownloadMedia /                 */
+/* TranChatSend-with-media. Stitched directly on top of the harness    */
+/* primitive integration_send_message so the test can drive            */
+/* deliberately-malformed shapes too (oversized payload, missing       */
+/* PART_FINAL, …) without per-shape special-casing; the well-formed    */
+/* shape matches production via the same wire spec the Phase 9.A FFI    */
+/* builders pin in src/inline_media_upload.c. */
 /* ------------------------------------------------------------------ */
 
 /* Send a single-shot TranUploadMedia (750). Returns the trans id
@@ -375,11 +404,15 @@ test_inline_media_upload_round_trip (void)
     g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
                      HTLC_CAP_INLINE_MEDIA);
 
-    guint32 trans = send_upload_media (fd, &htlc, minimal_png_1x1,
-                                       sizeof (minimal_png_1x1),
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 trans = send_upload_media (fd, &htlc, png_data, png_len,
                                        "image/png");
     g_assert_cmpuint (trans, !=, 0);
     g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
+    g_bytes_unref (png);
 
     /* TASK header flag bit 0 (task-error) must be clear on
 	 * success. */
@@ -400,15 +433,18 @@ test_inline_media_upload_round_trip (void)
     memcpy (mime_buf, reply.type_ptr, mime_len);
     g_assert (g_str_has_prefix (mime_buf, "image/"));
 
-    /* Canonical width / height must be 1×1 (the bytes we uploaded).
-	 * Spec says these are advisory but every spec-compliant server
-	 * populates them on a successful upload. */
-    if (reply.width_present) {
-        g_assert_cmpuint (reply.width, ==, 1);
-    }
-    if (reply.height_present) {
-        g_assert_cmpuint (reply.height, ==, 1);
-    }
+    /* Canonical width / height must be present AND equal to 4×4
+	 * (the dimensions encode_test_png writes). The spec marks
+	 * these advisory for the CHAT relay companion fields but
+	 * the upload final-reply is documented as carrying them —
+	 * and Janus does — so a regression that drops them is a
+	 * real round-trip break, not just a missing hint. The
+	 * previous 'if present' gate would let such a regression
+	 * slip through silently. */
+    g_assert_true (reply.width_present);
+    g_assert_cmpuint (reply.width, ==, 4);
+    g_assert_true (reply.height_present);
+    g_assert_cmpuint (reply.height, ==, 4);
 
     close_session (fd, &htlc);
 }
@@ -438,12 +474,16 @@ test_inline_media_chat_with_media_round_trip (void)
                      HTLC_CAP_INLINE_MEDIA);
 
     /* Upload first. */
-    guint32 up_trans = send_upload_media (fd, &htlc, minimal_png_1x1,
-                                          sizeof (minimal_png_1x1),
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 up_trans = send_upload_media (fd, &htlc, png_data, png_len,
                                           "image/png");
     g_assert_cmpuint (up_trans, !=, 0);
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
+    g_bytes_unref (png);
     g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
 
     /* Copy the handle + mime out of htlc->in before drain_until
@@ -504,12 +544,16 @@ test_inline_media_download_round_trip (void)
     }
 
     /* Upload. */
-    guint32 up_trans = send_upload_media (fd, &htlc, minimal_png_1x1,
-                                          sizeof (minimal_png_1x1),
+    GBytes *png = encode_test_png ();
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    guint32 up_trans = send_upload_media (fd, &htlc, png_data, png_len,
                                           "image/png");
     g_assert_cmpuint (up_trans, !=, 0);
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
+    g_bytes_unref (png);
     g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
 
     struct gtkhx_proto_upload_final_reply up_reply;
@@ -542,14 +586,22 @@ test_inline_media_download_round_trip (void)
     g_assert_true (gtkhx_proto_parse_download_reply (
         htlc.in.buf, htlc.in.pos, &dl_reply));
     g_assert_cmpuint (dl_reply.payload_len, >=, 8);
-    /* The first 8 bytes must be a valid PNG signature
-	 * (the server canonicalised to PNG; even if it picked
-	 * JPEG/GIF, the sniff would still recognise one of the
-	 * allowlisted magic prefixes). Check PNG first since we
-	 * uploaded a PNG and Janus passes those through. */
-    static const guint8 png_sig[8]
-        = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    g_assert (memcmp (dl_reply.payload_ptr, png_sig, 8) == 0);
+    /* The canonical bytes must start with an allowlisted image
+	 * magic prefix. Janus passes PNG through today so PNG is
+	 * the expected branch, but the spec only mandates that the
+	 * canonical format be one of {PNG, JPEG, GIF}. Accept any
+	 * of the three so a future Janus update that canonicalises
+	 * to JPEG/GIF (or a different conforming server in the
+	 * matrix) doesn't fail this test for the wrong reason. */
+    const guint8 *p = dl_reply.payload_ptr;
+    gboolean is_png = (dl_reply.payload_len >= 8
+                       && memcmp (p, "\x89PNG\r\n\x1A\n", 8) == 0);
+    gboolean is_jpeg = (dl_reply.payload_len >= 3
+                        && memcmp (p, "\xFF\xD8\xFF", 3) == 0);
+    gboolean is_gif = (dl_reply.payload_len >= 6
+                       && (memcmp (p, "GIF87a", 6) == 0
+                           || memcmp (p, "GIF89a", 6) == 0));
+    g_assert_true (is_png || is_jpeg || is_gif);
 
     g_free (handle);
     close_session (fd, &htlc);

@@ -29,9 +29,21 @@
  *
  * The cap gate (HTLC_CAP_INLINE_MEDIA) is enforced inside both
  * helpers; the production UI never has to gate its own click
- * handler. NULL htlc / empty payload / oversized payload all
- * surface as a return-value reject and a debug_log line under
- * the "media" category.
+ * handler. Specific reject behaviour differs by helper:
+ *
+ *   hx_send_upload_media_single — returns FALSE for NULL htlc,
+ *     missing cap, empty payload, oversized payload (> u16::MAX
+ *     single-shot ceiling), or a builder validation failure.
+ *     The cap-missing / payload-validation paths additionally
+ *     emit a debug_log("media", …) line; NULL htlc is dropped
+ *     silently by inline_media_cap_ok.
+ *
+ *   hx_send_chat_with_media — void return. NULL htlc, NULL
+ *     body, or any media validation failure (oversized id_len /
+ *     mime_len, cap not negotiated) drops the companion fields
+ *     and falls back to a plain chat send; the cap-drop and
+ *     wire-length rejects log under category 'media'. NULL ev
+ *     and NULL str return early without sending.
  */
 
 #ifndef HX_INLINE_MEDIA_UPLOAD_H
