@@ -583,22 +583,14 @@ test_inline_media_oversized_rejected (void)
         return;
     }
 
-    /* Pick a size strictly above the server's advertised cap (or
-	 * the spec default 256 KiB) so we provoke the right rejection
-	 * branch. Capped at 65500 bytes — single-shot wire framing
-	 * uses 16-bit chunk lengths, so a SHOULD-overflow upload has
-	 * to either fit a single chunk OR fan out via chunked upload;
-	 * we exercise the single-chunk path here. Cap of ~64 KiB is
-	 * well below 256 KiB MAX_BYTES, so we want the server to
-	 * reject for SOMETHING (most likely magic-byte sniff, since
-	 * a buffer of all-zeros isn't a valid image format).
-	 *
-	 * Branch coverage: this exercises the "unsupported format"
-	 * reject (code 2) rather than the "too large" (code 1) we
-	 * mentioned in the doc header. Both are valid failures for
-	 * this test's purpose — "the server rejected garbage with
-	 * an actionable code" is the contract. The exact code is
-	 * server policy. */
+    /* 65500 bytes of zeros: well BELOW the 256 KiB MAX_BYTES
+	 * default and just under the 65535-byte single-shot wire
+	 * framing ceiling. The point of this test isn't to overflow
+	 * MAX_BYTES (that would need chunked-upload, not in Phase 9.C);
+	 * it's to confirm the server rejects clearly-invalid payloads
+	 * with an actionable task-error. All-zeros has no valid
+	 * image magic so the most likely rejection branch is
+	 * UnsupportedFormat (code 2). */
     gsize garbage_len = 65500;
     guint8 *garbage = g_malloc0 (garbage_len);
 
@@ -610,12 +602,28 @@ test_inline_media_oversized_rejected (void)
     /* Header MUST carry the task-error flag. */
     g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
 
-    /* Error code is OPTIONAL on the wire; when present, it must
-	 * be one of the documented values (0–5). Treat anything outside
-	 * that range as a failure regardless of presence. */
-    guint16 code
-        = gtkhx_proto_extract_media_error_code (htlc.in.buf, htlc.in.pos);
-    g_assert_cmpuint (code, <=, 5u);
+    /* gtkhx_proto_extract_media_error_code() collapses unknown +
+	 * absent to 0, so asserting <= 5 would always pass and the
+	 * test would never catch a buggy server. Walk the wire
+	 * chunks directly: if HTLS_DATA_CHAT_MEDIA_ERROR_CODE is
+	 * present, the on-wire value MUST be in {0..=5}. Absent is
+	 * OK (the field is optional per spec). */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert_cmpuint (raw, <=, 5u);
+        }
+    }
 
     g_free (garbage);
     close_session (fd, &htlc);
@@ -662,11 +670,30 @@ test_inline_media_unauthorized_download (void)
     /* Header MUST carry the task-error flag. */
     g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
 
-    /* Error code optional; if present, MUST be 0 or 4 per spec
-	 * (the two values collapsed for the auth case). */
-    guint16 code
-        = gtkhx_proto_extract_media_error_code (htlc.in.buf, htlc.in.pos);
-    g_assert (code == 0 || code == 4);
+    /* gtkhx_proto_extract_media_error_code() collapses unknown +
+	 * absent to 0 so it can't distinguish 'server omitted the
+	 * field' from 'server sent 0 explicitly'. Walk the chunks
+	 * directly: when the optional CHAT_MEDIA_ERROR_CODE is
+	 * present, the spec collapses 'expired' and 'not authorized'
+	 * to the same code to defeat handle enumeration — so the
+	 * on-wire value MUST be 0 (Generic) or 4 (NotAuthorized).
+	 * Anything else (1/2/3/5) would be a server bug. */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert (raw == 0 || raw == 4);
+        }
+    }
 
     close_session (fd, &htlc);
 }
