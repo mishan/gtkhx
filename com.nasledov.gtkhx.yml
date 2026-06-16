@@ -131,7 +131,7 @@ finish-args:
   # GNOME Shell, KWin, etc.). Without this permission the call
   # silently no-ops behind xdg-dbus-proxy.
   - --talk-name=org.freedesktop.Notifications
-
+  - --talk-name=org.freedesktop.portal.Desktop
 modules:
   # libcanberra — gsound's audio backend. Last upstream release
   # is 0.30 from 2012; no successor has shipped because the API
