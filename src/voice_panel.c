@@ -43,12 +43,31 @@
  *   - 604 ICE:              4 bytes BE cid + JSON bytes (no NUL)
  *   - 606 MUTE:             4 bytes BE cid + 2 bytes BE muted-flag
  *
- * 600 / 601 / 606 originate from the UI click handlers, which call
- * hx_send_voice_* directly with proper return-value handling and
- * only feed the runtime its matching event on success. The bridge
- * therefore SKIPS those opcodes here to avoid double-send. 603
- * (SDP answer) and 604 (ICE) come from webrtcbin events that only
- * the runtime sees — those go on the wire via the bridge. */
+ * 603 (SDP answer) and 604 (ICE) come from webrtcbin events that
+ * only the runtime sees — those go on the wire via the bridge.
+ *
+ * 601 LEAVE: ALSO emitted from the runtime (state.rs's fail()
+ * path on ICE failure / wedge timeout / server task error), so
+ * the bridge is the wire-out path for LEAVE too. The UI click
+ * handler is now runtime-driven: on_join_toggled fires
+ * gtkhx_voice_runtime_leave, the state machine's LeaveRequested
+ * arm emits Action::SendWireFrame { opcode: 601, ... }, and
+ * this bridge calls hx_send_voice_leave. Pre-fix, the UI handler
+ * called hx_send_voice_leave directly and the bridge skipped
+ * LEAVE to avoid double-send — but Fix #3's fail()-path LEAVE
+ * was silently dropped at the bridge because the bridge couldn't
+ * tell "UI already sent it" from "runtime needs to send it."
+ * Moving the wire-out responsibility to the runtime side closes
+ * that gap.
+ *
+ * 600 JOIN and 606 MUTE remain UI-driven: JOIN's return value
+ * gates runtime construction (we need to roll back with a wire
+ * LEAVE if the runtime fails to come up), and MUTE fires often
+ * enough during PTT that an extra runtime-dispatch hop would
+ * add measurable jitter to the press/release edges. Both stay
+ * in the skip list below; fail() doesn't emit either of them
+ * today, so the divergence Fix #3 closed for LEAVE doesn't
+ * apply. */
 static void
 voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
                                   const uint8_t *body, size_t body_len)
@@ -112,13 +131,36 @@ voice_runtime_send_wire_frame_cb (void *user_data, uint32_t opcode,
                        cid, payload_len);
         }
         return;
-    case HTLC_HDR_VOICE_JOIN:
     case HTLC_HDR_VOICE_LEAVE:
+        /* Runtime-driven: the state machine emits SendWireFrame
+         * for LEAVE from BOTH the UI-click LeaveRequested arm AND
+         * the failure-collapse fail() path. The bridge no longer
+         * tries to disambiguate; it just ships the frame. The UI
+         * handler in on_join_toggled used to call hx_send_voice_leave
+         * directly + drive the runtime, with a skip-here for the
+         * runtime's matching emit — Fix #3 made the runtime drive
+         * the wire frame from fail() too, and the skip-here was
+         * silently dropping that path's wire-out (the bug visible
+         * in voice.log around line 467 of ninja/voice.log).
+         *
+         * payload_len is 0 for LEAVE (the body is just the cid,
+         * which we already extracted). hx_send_voice_leave's
+         * signature only takes htlc + cid. */
+        sent = hx_send_voice_leave (htlc, cid);
+        if (!sent) {
+            debug_log ("voice",
+                       "bridge: hx_send_voice_leave FAILED cid=%u",
+                       cid);
+        }
+        return;
+    case HTLC_HDR_VOICE_JOIN:
     case HTLC_HDR_VOICE_MUTE:
         /* Already sent by the UI click handler — skipping here
-         * prevents double-send. The runtime's
-         * SendWireFrame action is unconditional, so the bridge
-         * is the right place to enforce the split. */
+         * prevents double-send. The runtime's SendWireFrame
+         * action is unconditional, so the bridge is the right
+         * place to enforce the split. LEAVE used to be in this
+         * skip group too; see the new dedicated arm above for the
+         * rationale and the bug it closes. */
         debug_log ("voice",
                    "bridge: opcode 0x%x for cid=%u handled by UI (skipped)",
                    opcode, cid);
@@ -323,13 +365,31 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
             }
         }
     } else {
-        sent = hx_send_voice_leave (&sess->htlc, cid);
-        if (sent) {
-            /* Runtime LeaveRequested fires StateChanged
-             * (→Leaving), which our signal handler picks up to
-             * clear KEY_JOINED + KEY_MUTED on this panel. */
+        /* Runtime-driven LEAVE. We don't call hx_send_voice_leave
+         * here: the state machine's LeaveRequested arm emits
+         * Action::SendWireFrame(601), and the bridge above (the
+         * HTLC_HDR_VOICE_LEAVE case in voice_runtime_send_wire_frame_cb)
+         * is what calls hx_send_voice_leave on the wire.
+         *
+         * Pre-Fix-#3 this handler called hx_send_voice_leave directly
+         * and the bridge skipped LEAVE to avoid a double-send. That
+         * was fine for the UI path, but it meant Fix #3's fail()-
+         * emitted LEAVE was also dropped at the bridge — the bridge
+         * couldn't tell which path the LEAVE came from. Moving the
+         * single wire-out path into the bridge closes that gap.
+         *
+         * Side-effects via the StateChanged signal: the runtime
+         * walks the state machine to Leaving (LeaveRequested arm)
+         * and our signal handler picks up the transition to clear
+         * KEY_JOINED + KEY_MUTED on this panel.
+         *
+         * If sess->voice_runtime is NULL (lazy construction never
+         * fired — shouldn't happen with the button enabled in the
+         * "leave" state, but defensive), drop silently. */
+        if (sess->voice_runtime) {
             gtkhx_voice_runtime_leave (sess->voice_runtime, cid);
         }
+        sent = TRUE;
     }
 
     if (!sent) {

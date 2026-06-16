@@ -183,7 +183,7 @@ use gstreamer::prelude::*;
 use gstreamer_webrtc::WebRTCSDPType;
 
 use hxvoice::action::{Action, SignalKind, SignalPayload};
-use hxvoice::event::{Event, Timeout};
+use hxvoice::event::{ConnectionState, Event, Timeout};
 use hxvoice::state::{SessionMachine, SessionState};
 
 /// Monotonically increasing id for each `VoiceRuntime` ever built
@@ -885,6 +885,54 @@ struct Inner {
     /// activity from a previous join is therefore baked into the
     /// snapshot's baseline and ignored by the comparison.
     wedge_watchdog_last_snapshot: u64,
+    /// `true` when the wedge watchdog is conceptually armed, i.e.
+    /// `arm_wedge_watchdog` ran for the current `Connecting`
+    /// entry and `cancel_wedge_watchdog` has not yet fired.
+    ///
+    /// Pre-Fix-#2 the public accessor [`VoiceRuntime::wedge_watchdog_armed`]
+    /// inferred this from `machine.state() == Connecting` — a
+    /// reasonable approximation while every Connecting entry
+    /// armed the watchdog. With Fix #2's "skip on re-entry after
+    /// Connected" behaviour the state alone no longer
+    /// distinguishes armed from unarmed, so we track it
+    /// explicitly. Tests can still rely on the accessor returning
+    /// the same answer in production and in cargo's parallel
+    /// runner (where the glib source slot may be `None` even
+    /// when the watchdog is conceptually armed).
+    wedge_watchdog_armed_flag: bool,
+    /// Last `WebRTCPeerConnectionState` we observed via the
+    /// `notify::connection-state` watch, translated through
+    /// [`map_peer_connection_state`]. `None` until the first
+    /// notify fires for this session.
+    ///
+    /// **Why we track it.** webrtcbin emits `notify::connection-
+    /// state` only on actual changes to the property. After the
+    /// initial handshake settles, a server-initiated SDP
+    /// renegotiation (which the state machine processes as
+    /// `Connected → OfferPending → Connecting → Connected`)
+    /// produces no fresh `Connected` notify because the property
+    /// was already `Connected` when the offer arrived. The state
+    /// machine's `(Connecting, Connected)` arm therefore never
+    /// fires, and we'd sit in `Connecting` indefinitely — long
+    /// enough for the wedge watchdog to tear down a perfectly
+    /// healthy session.
+    ///
+    /// Reset to `None` on every transition into `JoinSent` so a
+    /// fresh join starts from a clean slate.
+    last_seen_peer_state: Option<ConnectionState>,
+    /// `true` once the state machine has reached `Connected` since
+    /// the most recent `JoinSent` entry. Tracks "this session has
+    /// ever been fully connected" so subsequent re-entries to
+    /// `Connecting` (renegotiation cycles) can skip the wedge
+    /// watchdog without losing it for genuine never-connected
+    /// joins.
+    ///
+    /// Set on `(Connecting → Connected)`. Reset on every transition
+    /// into `JoinSent`. The reset path covers the room-switch case
+    /// too (`JoinRequested { cid }` for a different cid walks
+    /// through JoinSent) — a fresh room is a fresh session for
+    /// wedge purposes.
+    has_been_connected_since_join: bool,
     /// Per-user-id receive-leg RTP buffer counters. Allocated
     /// lazily on `pad-added` for each new mid → user_id mapping;
     /// the [`start_receive_bin`] probe captures a clone of the
@@ -1032,18 +1080,139 @@ impl VoiceRuntime {
     /// side then disables voice UI for the rest of the session.
     pub fn new(backend: Box<dyn Backend>) -> Result<Self, RuntimeError> {
         gstreamer::init().map_err(RuntimeError::GstInitFailed)?;
-        let pipeline = gstreamer::Pipeline::builder()
-            .name("hxvoice-pipeline")
-            .build();
-        // Log the underlying gstreamer-rs `BoolError` at each
-        // failure site before collapsing it into the
-        // payload-less `WebrtcbinUnavailable` variant. The error
-        // type isn't `std::error::Error` and doesn't carry
-        // enough structure to be wrappable cleanly; logging on
-        // the way through is the simplest preservation that
-        // still helps an operator distinguish "plugin missing"
-        // from "pipeline rejected the element."
-        // Build webrtcbin with `bundle-policy=max-bundle`. This
+        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        let bits = build_pipeline_bits(runtime_id)?;
+        let runtime = VoiceRuntime {
+            inner: Rc::new(RefCell::new(Inner {
+                machine: SessionMachine::new(),
+                pipeline: Some(bits.pipeline),
+                webrtcbin: Some(bits.webrtcbin),
+                armed_timer_sources: HashMap::new(),
+                dispatching: false,
+                pending: VecDeque::new(),
+                runtime_id,
+                answer_generation: 0,
+                pending_pads: HashMap::new(),
+                receive_bins: HashMap::new(),
+                bus_watch_guard: bits.bus_watch_guard,
+                rtp_buffers_received: bits.rtp_buffers_received,
+                wedge_watchdog_source: None,
+                wedge_watchdog_last_snapshot: 0,
+                wedge_watchdog_armed_flag: false,
+                last_seen_peer_state: None,
+                has_been_connected_since_join: false,
+                per_user_rtp_buffers: bits.per_user_rtp_buffers,
+                per_user_rtp_prev_snapshot: HashMap::new(),
+                per_user_speaking: HashMap::new(),
+                speaker_timer_source: None,
+            })),
+            backend: Rc::new(RefCell::new(backend)),
+        };
+        register(&runtime);
+        // Arm the periodic speaker-activity evaluator. Idempotent
+        // and best-effort — see `arm_speaker_timer` for the
+        // test-fallback semantics. Production: starts immediately,
+        // emits SpeakerChanged signals every
+        // SPEAKER_EVAL_INTERVAL_MS as RTP activity flips.
+        runtime.arm_speaker_timer();
+        Ok(runtime)
+    }
+
+    /// Construct a runtime without the GStreamer pipeline. Tests
+    /// that exercise the action dispatch don't need `webrtcbin`
+    /// alive; using this constructor lets them skip the
+    /// `gst::init()` requirement.
+    ///
+    /// The SDP / ICE / pad dispatch arms early-return when there
+    /// is no `webrtcbin` to drive, so the same tests still cover
+    /// the Backend + timer paths cleanly.
+    pub fn new_without_pipeline(backend: Box<dyn Backend>) -> Self {
+        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        let runtime = VoiceRuntime {
+            inner: Rc::new(RefCell::new(Inner {
+                machine: SessionMachine::new(),
+                pipeline: None,
+                webrtcbin: None,
+                armed_timer_sources: HashMap::new(),
+                dispatching: false,
+                pending: VecDeque::new(),
+                runtime_id,
+                answer_generation: 0,
+                pending_pads: HashMap::new(),
+                receive_bins: HashMap::new(),
+                bus_watch_guard: None,
+                rtp_buffers_received: Arc::new(AtomicU64::new(0)),
+                wedge_watchdog_source: None,
+                wedge_watchdog_last_snapshot: 0,
+                wedge_watchdog_armed_flag: false,
+                last_seen_peer_state: None,
+                has_been_connected_since_join: false,
+                per_user_rtp_buffers: Arc::new(std::sync::Mutex::new(
+                    HashMap::new(),
+                )),
+                per_user_rtp_prev_snapshot: HashMap::new(),
+                per_user_speaking: HashMap::new(),
+                speaker_timer_source: None,
+            })),
+            backend: Rc::new(RefCell::new(backend)),
+        };
+        register(&runtime);
+        // Speaker-activity timer left UNARMED in the pipeline-less
+        // path. Tests that exercise the evaluator directly drive
+        // it via `speaker_tick_for_test`; tests that don't care
+        // about per-pad activity wouldn't see anything change
+        // either way.
+        runtime
+    }
+}
+
+/// Bundle of the GStreamer-side resources that
+/// [`build_pipeline_bits`] produces — kept as a struct so
+/// `VoiceRuntime::new` and the `Action::TearDown` rebuild path
+/// (in `dispatch_inner`) consume the same shape.
+///
+/// Each rebuild produces fresh `Arc<AtomicU64>` allocations for the
+/// two RTP-activity counters. Reusing the previous session's
+/// counters would leak the wedge-watchdog snapshot delta from one
+/// session into the next, and the per-pad probes drop their
+/// streaming-thread closure handles when the receive bins drop
+/// during the Null transition.
+struct PipelineBits {
+    pipeline: gstreamer::Pipeline,
+    webrtcbin: gstreamer::Element,
+    bus_watch_guard: Option<gstreamer::bus::BusWatchGuard>,
+    rtp_buffers_received: Arc<AtomicU64>,
+    per_user_rtp_buffers:
+        Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
+}
+
+/// Construct a fresh pipeline + webrtcbin + signal wiring for a
+/// given `runtime_id`. Called from [`VoiceRuntime::new`] at
+/// session-build time and again from the `Action::TearDown`
+/// dispatch arm when the runtime needs a clean WebRTC slate
+/// after a `fail()` collapse (renegotiation wedge, ICE failure,
+/// server task error). The latter path is what makes "click Join
+/// Voice again after a wedge" recover cleanly — without
+/// rebuilding webrtcbin, the next session inherits the previous
+/// session's ICE credentials + DTLS fingerprints, and Janus's
+/// fresh session-side credentials don't match.
+///
+/// Returns the freshly-allocated handles; the caller stores them
+/// in `Inner`.
+fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
+    let pipeline = gstreamer::Pipeline::builder()
+        .name("hxvoice-pipeline")
+        .build();
+    // Log the underlying gstreamer-rs `BoolError` at each
+    // failure site before collapsing it into the
+    // payload-less `WebrtcbinUnavailable` variant. The error
+    // type isn't `std::error::Error` and doesn't carry
+    // enough structure to be wrappable cleanly; logging on
+    // the way through is the simplest preservation that
+    // still helps an operator distinguish "plugin missing"
+    // from "pipeline rejected the element."
+    //
+    // Build webrtcbin with `bundle-policy=max-bundle`. This
         // is critical for the multi-mline case (join-second
         // client receives an SDP offer carrying BOTH a=mid:send
         // for our outgoing leg AND a=mid:user-N for forwarded
@@ -1221,7 +1390,11 @@ impl VoiceRuntime {
         // working send-direction RTP, and pick this back up
         // once we have a clearer picture of the webrtcbin
         // internals.
-        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
+        //
+        // `runtime_id` is taken from the caller — `VoiceRuntime::new`
+        // allocates a fresh id on construction; the
+        // `Action::TearDown` rebuild path reuses the existing id so
+        // the registry entry survives the wedge → rejoin cycle.
         // Allocate the RTP-activity counter UPFRONT so we can both
         // (a) clone an `Arc` into `connect_pad_added`'s streaming-
         // thread closure for the receive-bin liveness probe to
@@ -1324,83 +1497,181 @@ impl VoiceRuntime {
                  ICE op will silently no-op."
             );
         }
-        let runtime = VoiceRuntime {
-            inner: Rc::new(RefCell::new(Inner {
-                machine: SessionMachine::new(),
-                pipeline: Some(pipeline),
-                webrtcbin: Some(webrtcbin),
-                armed_timer_sources: HashMap::new(),
-                dispatching: false,
-                pending: VecDeque::new(),
-                runtime_id,
-                answer_generation: 0,
-                pending_pads: HashMap::new(),
-                receive_bins: HashMap::new(),
-                bus_watch_guard,
-                rtp_buffers_received,
-                wedge_watchdog_source: None,
-                wedge_watchdog_last_snapshot: 0,
-                per_user_rtp_buffers,
-                per_user_rtp_prev_snapshot: HashMap::new(),
-                per_user_speaking: HashMap::new(),
-                speaker_timer_source: None,
-            })),
-            backend: Rc::new(RefCell::new(backend)),
-        };
-        register(&runtime);
-        // Arm the periodic speaker-activity evaluator. Idempotent
-        // and best-effort — see `arm_speaker_timer` for the
-        // test-fallback semantics. Production: starts immediately,
-        // emits SpeakerChanged signals every
-        // SPEAKER_EVAL_INTERVAL_MS as RTP activity flips.
-        runtime.arm_speaker_timer();
-        Ok(runtime)
+        Ok(PipelineBits {
+            pipeline,
+            webrtcbin,
+            bus_watch_guard,
+            rtp_buffers_received,
+            per_user_rtp_buffers,
+        })
     }
 
-    /// Construct a runtime without the GStreamer pipeline. Tests
-    /// that exercise the action dispatch don't need `webrtcbin`
-    /// alive; using this constructor lets them skip the
-    /// `gst::init()` requirement.
-    ///
-    /// The SDP / ICE / pad dispatch arms early-return when there
-    /// is no `webrtcbin` to drive, so the same tests still cover
-    /// the Backend + timer paths cleanly.
-    pub fn new_without_pipeline(backend: Box<dyn Backend>) -> Self {
-        let runtime_id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
-        let runtime = VoiceRuntime {
-            inner: Rc::new(RefCell::new(Inner {
-                machine: SessionMachine::new(),
-                pipeline: None,
-                webrtcbin: None,
-                armed_timer_sources: HashMap::new(),
-                dispatching: false,
-                pending: VecDeque::new(),
-                runtime_id,
-                answer_generation: 0,
-                pending_pads: HashMap::new(),
-                receive_bins: HashMap::new(),
-                bus_watch_guard: None,
-                rtp_buffers_received: Arc::new(AtomicU64::new(0)),
-                wedge_watchdog_source: None,
-                wedge_watchdog_last_snapshot: 0,
-                per_user_rtp_buffers: Arc::new(std::sync::Mutex::new(
-                    HashMap::new(),
-                )),
-                per_user_rtp_prev_snapshot: HashMap::new(),
-                per_user_speaking: HashMap::new(),
-                speaker_timer_source: None,
-            })),
-            backend: Rc::new(RefCell::new(backend)),
-        };
-        register(&runtime);
-        // Speaker-activity timer left UNARMED in the pipeline-less
-        // path. Tests that exercise the evaluator directly drive
-        // it via `speaker_tick_for_test`; tests that don't care
-        // about per-pad activity wouldn't see anything change
-        // either way.
-        runtime
-    }
+/// Drive the existing pipeline back to Null, drop every
+/// per-session GStreamer resource, then rebuild fresh handles via
+/// [`build_pipeline_bits`] and re-arm the speaker-activity timer.
+///
+/// Called from the `Action::TearDown` dispatch arm so a subsequent
+/// `JoinRequested` builds against a clean webrtcbin instead of
+/// renegotiating against the previous session's ICE / DTLS keys.
+///
+/// No-op when the runtime was constructed via
+/// [`VoiceRuntime::new_without_pipeline`] (test path) — the
+/// pipeline slot is empty and the early return keeps the test
+/// surfaces unchanged.
+///
+/// On rebuild failure we log loudly and leave `Inner`'s pipeline
+/// / webrtcbin slots empty. The runtime stays usable for control-
+/// channel-only operations (the SDP / ICE dispatch arms early-
+/// return on a missing bin), but voice won't recover until the
+/// session is recycled — same behaviour as if the original
+/// `VoiceRuntime::new` had failed. The state machine has already
+/// walked to `Leaving` by this point; the next `JoinRequested`
+/// will surface the rebuild failure (or succeed, if the
+/// underlying problem was transient).
+fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
+    // Snapshot what we need under a short borrow, then drop it
+    // before touching GStreamer. The pipeline.set_state(Null) call
+    // below may complete synchronously (Success / NoPreroll) or
+    // hand the transition off to the streaming thread (Async); in
+    // either case it can drive bus-message handlers that re-enter
+    // `handle_event`, so releasing the Inner borrow first keeps
+    // that path free of borrow_mut panics regardless of which
+    // return shape we get. The async return value is handled
+    // explicitly below — we do NOT wait for the transition to
+    // land before continuing, see the comment at the set_state
+    // call.
+    let (pipeline, runtime_id) = {
+        let mut inner = runtime.inner.borrow_mut();
+        // Drop the receive-bin map first so the streaming-thread
+        // probes attached to them release their `Arc` clones of
+        // the old `rtp_buffers_received`. The bin elements get
+        // walked to Null by the parent pipeline transition
+        // below; explicit drop here is bookkeeping, not lifecycle.
+        inner.receive_bins.clear();
+        inner.pending_pads.clear();
+        inner.answer_generation = 0;
+        inner.last_seen_peer_state = None;
+        inner.has_been_connected_since_join = false;
+        // Cancel every armed timer source. The state machine's
+        // CancelTimer cleanup before TearDown should have done
+        // this already, but defense-in-depth: a stray timer
+        // callback firing against a torn-down runtime would
+        // re-enter the dispatch loop with confusing events.
+        for (_kind, source) in core::mem::take(&mut inner.armed_timer_sources) {
+            if let Some(s) = source {
+                s.remove();
+            }
+        }
+        if let Some(s) = inner.wedge_watchdog_source.take() {
+            s.remove();
+        }
+        inner.wedge_watchdog_armed_flag = false;
+        if let Some(s) = inner.speaker_timer_source.take() {
+            s.remove();
+        }
+        // Drop the bus watch BEFORE the pipeline so its watch
+        // source releases cleanly. `bus_watch_guard` is held only
+        // for its drop side effect anyway.
+        inner.bus_watch_guard = None;
+        // Per-user RTP tracking is per-session — drop it so the
+        // next session starts from an empty speaker-evaluator
+        // baseline.
+        if let Ok(mut map) = inner.per_user_rtp_buffers.lock() {
+            map.clear();
+        }
+        inner.per_user_rtp_prev_snapshot.clear();
+        inner.per_user_speaking.clear();
+        // Pull the webrtcbin slot now so the late bus-message
+        // handlers that read it during the Null transition see
+        // `None` and skip cleanly. The element itself stays
+        // alive until the pipeline's drop walks its children.
+        let _webrtcbin = inner.webrtcbin.take();
+        // Move the pipeline out before issuing the synchronous
+        // state change. Owning the value rather than borrowing it
+        // lets the function consume `pipeline` on drop after the
+        // Null transition lands.
+        let pipeline = inner.pipeline.take();
+        let runtime_id = inner.runtime_id;
+        (pipeline, runtime_id)
+    };
 
+    let Some(pipeline) = pipeline else {
+        // Pipeline-less runtime (test path). Nothing to walk
+        // down or rebuild — leave Inner's pipeline / webrtcbin
+        // slots empty as they were.
+        return;
+    };
+
+    // Walk back to Null. `Async` is acceptable here:
+    // gstreamer-rs returns `Success`, `Async`, or `NoPreroll`
+    // from `set_state`, and only `Failure` indicates a problem
+    // we should log.
+    //
+    // We deliberately do NOT block on Async with
+    // `pipeline.state(ClockTime::NONE)` here. Production runs
+    // this function on the GLib main thread (the dispatch loop is
+    // main-thread-only) and webrtcbin's internal state-change
+    // worker posts bus messages back onto that same main
+    // context to finish the transition. A blocking wait on the
+    // main thread would deadlock the message drain it depends on.
+    // The same reasoning applies in test environments where the
+    // main loop isn't running at all.
+    //
+    // The "settle before rebuild" guarantee we DO need is on UDP
+    // socket / ICE-agent ownership, not on bin state. The
+    // `drop(pipeline)` immediately below releases the strong
+    // reference to the bin; gstreamer-rs's GObject Drop machinery
+    // walks element children, releasing nicesrc / nicesink
+    // resources and unbinding their sockets BEFORE
+    // `build_pipeline_bits` constructs the replacement. That
+    // socket release is what makes the rebuild's fresh ICE agent
+    // safe to bind on the same port; the Null-state transition
+    // is a precursor to the drop, not a substitute for it.
+    if let Err(e) = pipeline.set_state(gstreamer::State::Null) {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: pipeline.set_state(Null) on teardown returned {e:?}"
+        );
+    }
+    // Explicitly drop the pipeline before rebuilding. The drop
+    // releases the strong ref, which walks the element children
+    // and releases UDP socket / ICE agent ownership; without that
+    // release, the rebuilt webrtcbin's nice elements would race
+    // for the same UDP port the old one still holds.
+    drop(pipeline);
+
+    // Rebuild. Failure here means the next session can't drive
+    // voice, but the state machine is already in Leaving and
+    // the user will see the error toast that fail() emitted.
+    let bits = match build_pipeline_bits(runtime_id) {
+        Ok(b) => b,
+        Err(e) => {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: rebuild_pipeline failed: {e:?} — voice unavailable \
+                 until the runtime is recycled"
+            );
+            return;
+        }
+    };
+    {
+        let mut inner = runtime.inner.borrow_mut();
+        inner.pipeline = Some(bits.pipeline);
+        inner.webrtcbin = Some(bits.webrtcbin);
+        inner.bus_watch_guard = bits.bus_watch_guard;
+        inner.rtp_buffers_received = bits.rtp_buffers_received;
+        inner.wedge_watchdog_last_snapshot = 0;
+        inner.per_user_rtp_buffers = bits.per_user_rtp_buffers;
+    }
+    // Re-arm the periodic speaker-activity evaluator against the
+    // fresh `per_user_rtp_buffers` allocation. The old timer was
+    // cancelled above; this restores production cadence so the
+    // next session emits SpeakerChanged signals at the same
+    // 200 ms interval.
+    runtime.arm_speaker_timer();
+}
+
+impl VoiceRuntime {
     /// Drive one transition. Pumps `event` through the state
     /// machine, walks the returned action list, dispatches each
     /// effect.
@@ -1457,6 +1728,19 @@ impl VoiceRuntime {
                 break;
             };
 
+            // Mirror the WebRTC connection-state observation onto
+            // `Inner::last_seen_peer_state` so the post-step diff
+            // below can detect "renegotiation while already
+            // Connected" regardless of whether the event came
+            // from the real webrtcbin notify or from a test
+            // injection. (The notify callback also writes this
+            // field before invoking `handle_event`; the duplicate
+            // write here is idempotent for that path and
+            // load-bearing for the test-injection path.)
+            if let Event::WebrtcConnectionStateChanged { state } = event {
+                self.inner.borrow_mut().last_seen_peer_state = Some(state);
+            }
+
             // Sample state BEFORE step() so we can compare against
             // the post-step state and detect whether this event
             // caused an entry into or exit from `Connecting`.
@@ -1474,16 +1758,108 @@ impl VoiceRuntime {
             }
             let after = self.inner.borrow().machine.state();
             match (before, after) {
+                // ---- Fresh join (Idle / Leaving → JoinSent) ----
+                //
+                // Reset the per-session wedge-watchdog tracking so a
+                // new session starts from a clean slate. The
+                // mid-session room-switch path (JoinRequested for a
+                // different cid) also walks through JoinSent, and we
+                // want it treated as a fresh session for wedge
+                // purposes — switching rooms means new webrtcbin
+                // negotiation, new ICE handshake, new "have we
+                // reached Connected yet?" timeline.
+                (b, SessionState::JoinSent)
+                    if b != SessionState::JoinSent =>
+                {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.has_been_connected_since_join = false;
+                    inner.last_seen_peer_state = None;
+                }
+
+                // ---- Entry into Connecting ----
+                //
+                // Three sub-cases, in order:
+                //
+                //   1. Renegotiation while webrtcbin is already
+                //      Connected. The state machine bounced
+                //      Connected → OfferPending → Connecting, but
+                //      webrtcbin won't fire a fresh `Connected`
+                //      notify because its property never changed.
+                //      Synthesize one so the (Connecting, Connected)
+                //      arm advances us back to Connected without
+                //      waiting on a notify that will never come.
+                //
+                //   2. Re-entry to Connecting after we've already
+                //      been Connected at least once in this session.
+                //      Even if last_seen_peer_state isn't Connected
+                //      yet (race: notify is racing the SDP path), we
+                //      know the network leg is healthy enough that
+                //      arming the wedge watchdog would only ever
+                //      tear down a working session in the "everyone
+                //      is muted" common case. Skip the watchdog.
+                //
+                //   3. First entry to Connecting — the genuine
+                //      never-connected case the wedge watchdog
+                //      was designed for. Arm it.
                 (b, SessionState::Connecting)
                     if b != SessionState::Connecting =>
                 {
-                    arm_wedge_watchdog(self);
+                    let (already_connected, has_been_connected) = {
+                        let inner = self.inner.borrow();
+                        (
+                            matches!(
+                                inner.last_seen_peer_state,
+                                Some(ConnectionState::Connected),
+                            ),
+                            inner.has_been_connected_since_join,
+                        )
+                    };
+                    if already_connected {
+                        // Case 1: synthesize. The state machine will
+                        // pick it up on the next loop iteration and
+                        // transition (Connecting → Connected). No
+                        // need to arm/cancel the wedge — the
+                        // synthetic step will land before any timer
+                        // could fire anyway, and the
+                        // (Connecting, Connected) arm below cancels
+                        // along its normal path.
+                        self.inner.borrow_mut().pending.push_back(
+                            Event::WebrtcConnectionStateChanged {
+                                state: ConnectionState::Connected,
+                            },
+                        );
+                    } else if !has_been_connected {
+                        // Case 3: first entry. Arm the wedge.
+                        arm_wedge_watchdog(self);
+                    }
+                    // Case 2 (re-entry after Connected, but
+                    // last_seen isn't Connected yet — racy notify):
+                    // fall through, no wedge armed.
                 }
-                (SessionState::Connecting, a)
-                    if a != SessionState::Connecting =>
-                {
+
+                // ---- Reached Connected ----
+                //
+                // Mark "session has been Connected at least once"
+                // so subsequent renegotiation cycles skip the
+                // wedge. Cancel any wedge that was armed by the
+                // initial Connecting entry. Same cancellation
+                // semantics as the legacy code, plus the new
+                // bookkeeping bit.
+                (SessionState::Connecting, SessionState::Connected) => {
+                    self.inner.borrow_mut().has_been_connected_since_join =
+                        true;
                     cancel_wedge_watchdog(self);
                 }
+
+                // ---- Left Connecting for any other state ----
+                //
+                // The wedge watchdog is conceptually armed only
+                // while the machine is in Connecting; clean it
+                // up on every exit just like the legacy code did.
+                (SessionState::Connecting, _) => {
+                    cancel_wedge_watchdog(self);
+                }
+
                 _ => {}
             }
         }
@@ -1529,7 +1905,7 @@ impl VoiceRuntime {
     /// production (where `Some(source_id)` is set) and tests
     /// (where it stays `None`) both report the same answer.
     pub fn wedge_watchdog_armed(&self) -> bool {
-        self.inner.borrow().machine.state() == SessionState::Connecting
+        self.inner.borrow().wedge_watchdog_armed_flag
     }
 
     /// Number of RTP buffers the receive-side liveness probe has
@@ -1687,6 +2063,32 @@ impl VoiceRuntime {
             }
             Action::TearDown => {
                 self.backend.borrow_mut().tear_down();
+                // Synchronously reset the GStreamer side of the
+                // session: walk the existing pipeline back to Null
+                // (which tears down webrtcbin's ICE agent + DTLS
+                // keys + transceivers + UDP sockets), drop the
+                // receive-bin map + pending pad slots, cancel
+                // every armed timer source, and rebuild fresh
+                // pipeline-bits so the next `JoinRequested`
+                // negotiation flows through a clean webrtcbin.
+                //
+                // Why: pre-fix, fail() emitted TearDown and the
+                // backend's `tear_down` was a stub. The pipeline
+                // kept running with the previous session's ICE
+                // credentials + DTLS fingerprint; on the next
+                // join, Janus issued a fresh SDP offer with new
+                // server-side credentials and the stale webrtcbin
+                // tried to consummate it against the old keys,
+                // landing the ICE handshake on `failed`. The
+                // visible symptom was "rejoin after wedge
+                // succeeds briefly, then 30 seconds later the
+                // connection fails outright."
+                //
+                // `new_without_pipeline` runtimes never built a
+                // pipeline in the first place, so the rebuild is
+                // a no-op on the test path; the early-return on
+                // `pipeline.is_none()` keeps that pathway alive.
+                reset_and_rebuild_pipeline(self);
             }
 
             // ---- Timers (Phase 8.C step 7) ----
@@ -2799,6 +3201,16 @@ fn connect_connection_state_notify(
             let main_ctx = main_ctx.clone();
             main_ctx.invoke(move || {
                 with_main_thread_runtime(runtime_id, |rt| {
+                    // Mirror the post-translate state onto Inner
+                    // BEFORE firing the event. The state machine's
+                    // step() runs synchronously inside handle_event,
+                    // and the post-step state diff (in handle_event)
+                    // reads `last_seen_peer_state` to decide whether
+                    // to synthesize a Connected event for a stuck
+                    // renegotiation. Updating before keeps the post-
+                    // step diff strictly post-mortem on the latest
+                    // notify.
+                    rt.inner.borrow_mut().last_seen_peer_state = Some(mapped);
                     rt.handle_event(
                         Event::WebrtcConnectionStateChanged { state: mapped },
                     );
@@ -3231,6 +3643,7 @@ fn arm_wedge_watchdog(runtime: &VoiceRuntime) {
         }
         inner.wedge_watchdog_last_snapshot =
             inner.rtp_buffers_received.load(Ordering::Relaxed);
+        inner.wedge_watchdog_armed_flag = true;
     }
 
     let runtime_id = runtime.inner.borrow().runtime_id;
@@ -3267,7 +3680,11 @@ fn arm_wedge_watchdog(runtime: &VoiceRuntime) {
 /// machine leaves `Connecting` (whether to `Connected`,
 /// `Leaving`, or `Idle`).
 fn cancel_wedge_watchdog(runtime: &VoiceRuntime) {
-    let prev = runtime.inner.borrow_mut().wedge_watchdog_source.take();
+    let prev = {
+        let mut inner = runtime.inner.borrow_mut();
+        inner.wedge_watchdog_armed_flag = false;
+        inner.wedge_watchdog_source.take()
+    };
     if let Some(s) = prev {
         s.remove();
     }
@@ -3684,6 +4101,114 @@ mod tests {
         runtime.fire_wedge_watchdog_for_test();
         assert_eq!(runtime.state(), SessionState::Connected);
         assert_eq!(backend.borrow().tear_downs, 0);
+    }
+
+    /// Regression: a server-initiated SDP renegotiation while the
+    /// peer connection is already `Connected` used to leave the
+    /// state machine stuck in `Connecting`. The webrtcbin's
+    /// `notify::connection-state` only fires on actual property
+    /// changes, and the property was already `Connected` when the
+    /// new offer arrived, so the `(Connecting, Connected)` arm
+    /// never ran and the wedge watchdog eventually tore down a
+    /// perfectly healthy session.
+    ///
+    /// Fix: when the runtime observes the state machine entering
+    /// `Connecting` after `last_seen_peer_state` has been
+    /// `Connected`, it synthesises a fresh
+    /// `WebrtcConnectionStateChanged { Connected }` event so the
+    /// state machine advances back to `Connected` immediately.
+    /// This test pins that path.
+    #[test]
+    fn renegotiation_while_already_connected_returns_to_connected() {
+        let (runtime, _backend) = rec();
+        // Walk through the initial join → Connected sequence.
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        assert_eq!(runtime.state(), SessionState::Connected);
+
+        // Server sends a renegotiation offer. The state machine
+        // walks Connected → OfferPending → (after answer creation)
+        // Connecting. In production webrtcbin would NOT emit a
+        // fresh `connection-state == Connected` notify here, so we
+        // do not feed one in below — the runtime must synthesise
+        // it on its own.
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nrenegotiated\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\nanswer-2\n".into(),
+        });
+        assert_eq!(
+            runtime.state(),
+            SessionState::Connected,
+            "renegotiation must land back at Connected even without a fresh \
+             webrtcbin connection-state notify — the runtime synthesises one \
+             from `last_seen_peer_state`"
+        );
+    }
+
+    /// Companion to
+    /// `renegotiation_while_already_connected_returns_to_connected`:
+    /// even if the synthesis didn't run for some reason, the wedge
+    /// watchdog must not be armed on a re-entry to Connecting that
+    /// follows a prior Connected. Pin that with a fresh runtime
+    /// where we deliberately suppress the `last_seen_peer_state`
+    /// view by walking through the state machine without a
+    /// `Connected` notify between offers.
+    ///
+    /// In this test the WebrtcConnectionStateChanged events are
+    /// supplied explicitly so `last_seen_peer_state` is tracked
+    /// honestly. The assertion target is the watchdog status, NOT
+    /// the post-renegotiation SessionState.
+    #[test]
+    fn wedge_not_armed_on_renegotiation_reentry() {
+        let (runtime, _backend) = rec();
+        runtime.handle_event(Event::JoinRequested { cid: 1 });
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
+        // Initial Connecting entry: wedge armed.
+        assert!(runtime.wedge_watchdog_armed());
+        runtime.handle_event(Event::WebrtcConnectionStateChanged {
+            state: ConnectionState::Connected,
+        });
+        // Connected: wedge cancelled.
+        assert!(!runtime.wedge_watchdog_armed());
+
+        // Renegotiation: drives Connected → OfferPending →
+        // (answer) → Connecting. The synthesis push-back from
+        // Fix #1 immediately drains us back to Connected, but
+        // even if it didn't, the `has_been_connected_since_join`
+        // gate must prevent the wedge from arming on re-entry.
+        // We assert the watchdog is NOT armed once dispatch
+        // settles.
+        runtime.handle_event(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\nrenegotiated\n".into(),
+        });
+        runtime.handle_event(Event::WebrtcAnswerCreated {
+            sdp: "v=0\nanswer-2\n".into(),
+        });
+        assert!(
+            !runtime.wedge_watchdog_armed(),
+            "renegotiation re-entry to Connecting must not re-arm the wedge \
+             watchdog — a never-Connected first-join is what the wedge is \
+             for, not a renegotiation cycle"
+        );
     }
 
     // ---- Speaker-activity evaluator ------------------------------
