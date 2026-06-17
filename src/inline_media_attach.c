@@ -73,22 +73,15 @@ attach_ctx_free (hx_attach_ctx *ctx)
     g_free (ctx);
 }
 
-/* Effective per-upload byte cap: the smaller of the server's
- * advertised MAX_BYTES (or spec default when absent) and the
- * 16-bit single-shot wire-framing ceiling that
- * hx_send_upload_media_single hard-rejects above. Chunked
- * upload isn't shipped in Phase 9.C, so a server advertising
- * 256 KiB MAX_BYTES still gates this client at ~64 KiB until
- * the chunked path lands — that's the gap the pre-flight has
- * to honour, otherwise users see a generic 'couldn't start
- * upload' toast after a long file read. */
+/* Effective per-upload byte cap. The server's
+ * CHAT_MEDIA_MAX_BYTES is the authoritative ceiling; we don't
+ * impose a wire-framing cap on top of it any more because
+ * hx_send_upload_media dispatches to the chunked state machine
+ * when the payload exceeds a single chunk. */
 static guint32
 effective_max_bytes (struct htlc_conn *htlc)
 {
-    guint32 server_cap = inline_media_max_bytes (htlc);
-    /* hx_send_upload_media_single rejects > u16::MAX. */
-    guint32 wire_cap = 65535;
-    return server_cap < wire_cap ? server_cap : wire_cap;
+    return inline_media_max_bytes (htlc);
 }
 
 /* Format-conditional pre-flight: size cap against the
@@ -262,8 +255,12 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
 	 * itself; the hook only fires when the upload helper's
 	 * task_table entry is reclaimed without on_done having run
 	 * (the connection-tear-down case). Without this the attach
-	 * ctx leaks one-per-click during the disconnected window. */
-    if (!hx_send_upload_media_single (
+	 * ctx leaks one-per-click during the disconnected window.
+	 *
+	 * The dispatcher picks single-shot vs chunked framing
+	 * automatically based on the server-advertised CHAT_MEDIA_
+	 * CHUNK_SIZE. */
+    if (!hx_send_upload_media (
             ctx->htlc, data, len, declared,
             declared ? strlen (declared) : 0,
             on_upload_done, ctx, (GDestroyNotify) attach_ctx_free)) {

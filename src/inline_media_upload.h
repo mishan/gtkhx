@@ -10,15 +10,27 @@
 /*
  * Inline-media extension send-side glue (Phase 9.C).
  *
- * Two entry points wire the Phase 9.A wire builders into the live
- * connection:
+ * Three send entry points wire the Phase 9.A wire builders into
+ * the live connection:
  *
- *   hx_send_upload_media_single — single-shot TranUploadMedia (750).
- *     Caller hands raw bytes + optional declared MIME hint + a
- *     completion callback; the helper registers a task waiting on
- *     the server's reply, builds + sends the upload chunk, and
- *     fires the callback when the TASK reply lands. Single-shot
- *     only; chunked-upload follow-up tracked separately.
+ *   hx_send_upload_media — dispatcher. Picks single-shot when
+ *     the payload fits in one chunk, otherwise drives the
+ *     chunked-upload state machine. This is the entry point
+ *     production callers should use; the lower-level
+ *     _single / _chunked siblings exist for tests and for
+ *     callers that want to force a specific framing.
+ *
+ *   hx_send_upload_media_single — single-shot TranUploadMedia
+ *     (750). Payload must fit in one chunk (≤ u16::MAX bytes
+ *     after the wire framing overhead).
+ *
+ *   hx_send_upload_media_chunked — chunked TranUploadMedia.
+ *     Caller hands the whole payload; the helper splits it into
+ *     server-advertised CHAT_MEDIA_CHUNK_SIZE pieces, sends them
+ *     one at a time, echoes the upload session token from the
+ *     first reply onto every follow-up, and fires the same
+ *     completion callback shape as single-shot when the final
+ *     reply lands.
  *
  *   hx_send_chat_with_media — TranChatSend (105) with optional
  *     CHAT_MEDIA_ID + CHAT_MEDIA_TYPE companion chunks attached.
@@ -27,16 +39,16 @@
  *     instead of the bare 2/3-chunk variant when media is
  *     attached.
  *
- * The cap gate (HTLC_CAP_INLINE_MEDIA) is enforced inside both
- * helpers; the production UI never has to gate its own click
+ * The cap gate (HTLC_CAP_INLINE_MEDIA) is enforced inside every
+ * helper; the production UI never has to gate its own click
  * handler. Specific reject behaviour differs by helper:
  *
- *   hx_send_upload_media_single — returns FALSE for NULL htlc,
- *     missing cap, empty payload, oversized payload (> u16::MAX
- *     single-shot ceiling), or a builder validation failure.
- *     The cap-missing / payload-validation paths additionally
- *     emit a debug_log("media", …) line; NULL htlc is dropped
- *     silently by inline_media_cap_ok.
+ *   hx_send_upload_media / _single / _chunked — return FALSE for
+ *     NULL htlc, missing cap, empty payload, oversized payload
+ *     (each helper enforces its own ceiling), or a builder
+ *     validation failure. The cap-missing / payload-validation
+ *     paths additionally emit a debug_log("media", …) line;
+ *     NULL htlc is dropped silently by inline_media_cap_ok.
  *
  *   hx_send_chat_with_media — void return. NULL htlc, NULL
  *     body, or any media validation failure (oversized id_len /
@@ -127,15 +139,28 @@ typedef void (*HxInlineMediaUploadCallback) (
  * as advisory only — magic-byte sniff is authoritative. NULL with
  * declared_type_len=0 is fine.
  *
- * user_data is opaque; passed to on_done as-is. When on_done
- * fires (success OR failure path), the helper does NOT free
- * user_data — the callback claims ownership. When the upload
- * is cancelled before on_done can fire — most importantly, when
- * the connection is torn down and sess->tasks is cleared — the
- * helper invokes user_data_free (if non-NULL) so the caller's
- * own per-upload context is reclaimed at the same time as the
- * internal upload-helper context. Pass NULL for user_data_free
- * when user_data has no heap ownership semantics.
+ * user_data is opaque; passed to on_done as-is. The helper
+ * never frees user_data on a NORMAL completion (success,
+ * failure, or synthetic-failure delivery). user_data_free is
+ * only invoked when the upload is CANCELLED before delivery
+ * can run — most importantly, when the connection is torn down
+ * and sess->tasks is cleared, every still-in-flight upload's
+ * ptr_free hook fires upload_ctx_free which in turn invokes
+ * user_data_free on contexts that never reached a deliver_*
+ * callsite.
+ *
+ * Caller responsibilities by handler shape:
+ *   - on_done non-NULL: the callback claims ownership of
+ *     user_data; free it (and your per-upload heap state) in
+ *     the callback regardless of success / failure. The helper
+ *     does not touch user_data on the normal-completion path.
+ *   - on_done NULL: fire-and-forget. The caller MUST either
+ *     pass NULL user_data + NULL user_data_free (no per-upload
+ *     state to manage), or accept that user_data outlives the
+ *     upload on normal completion — the helper has no callback
+ *     to hand it off to, so user_data_free does NOT run on
+ *     completion. Only the cancellation / disconnect path
+ *     invokes user_data_free.
  *
  * Production state machine: hx_send_upload_media_single allocates
  * a per-upload context, registers task_new(rcv_task_upload_media)
@@ -147,6 +172,47 @@ typedef void (*HxInlineMediaUploadCallback) (
  * table's ptr_free hook (task_free → upload_ctx_free), which also
  * runs on disconnect-time g_hash_table_remove_all. */
 extern gboolean hx_send_upload_media_single (
+    struct htlc_conn *htlc,
+    const guint8 *payload, gsize payload_len,
+    const char *declared_type, gsize declared_type_len,
+    HxInlineMediaUploadCallback on_done,
+    gpointer user_data,
+    GDestroyNotify user_data_free);
+
+/* Send a chunked TranUploadMedia request.
+ *
+ * Drives the multi-chunk send-then-receive state machine: chunk 0
+ * goes out with CHAT_MEDIA_PART_INDEX/COUNT and the optional
+ * declared MIME hint; the server's intermediate reply carries an
+ * UPLOAD_TOKEN; every follow-up echoes that token; the final
+ * chunk sets PART_FINAL = 1 and the server's final reply carries
+ * the canonical handle + MIME (same shape as single-shot's reply).
+ *
+ * Validates cap, payload non-empty, and that the resulting
+ * part_count fits in u16 (i.e. payload doesn't need more chunks
+ * than the spec allows). Returns FALSE on synchronous validation
+ * reject without invoking on_done.
+ *
+ * payload is copied into the upload context — the caller's buffer
+ * doesn't need to outlive this call. Each chunk slice is sent
+ * straight from the ctx's owned copy.
+ *
+ * user_data + user_data_free semantics match _single. */
+extern gboolean hx_send_upload_media_chunked (
+    struct htlc_conn *htlc,
+    const guint8 *payload, gsize payload_len,
+    const char *declared_type, gsize declared_type_len,
+    HxInlineMediaUploadCallback on_done,
+    gpointer user_data,
+    GDestroyNotify user_data_free);
+
+/* Dispatcher: chooses single-shot vs chunked based on payload
+ * size against the effective per-chunk cap (the smaller of the
+ * server-advertised CHAT_MEDIA_CHUNK_SIZE and the 16-bit wire-
+ * framing ceiling). Production callers should use this entry
+ * point; single-shot and chunked siblings stay public for tests
+ * and for callers wanting explicit framing. */
+extern gboolean hx_send_upload_media (
     struct htlc_conn *htlc,
     const guint8 *payload, gsize payload_len,
     const char *declared_type, gsize declared_type_len,

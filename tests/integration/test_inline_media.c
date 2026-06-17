@@ -153,6 +153,75 @@ encode_test_png (void)
     return g_bytes_new_take (buf, bufsz);
 }
 
+/* Encode a PNG whose payload is guaranteed to exceed `min_bytes`
+ * after PNG's deflate stage. We fill the pixbuf with a
+ * deterministic but non-trivially-compressible pattern (a
+ * pseudo-random byte sequence) so the encoded payload grows in
+ * step with the pixel count. Doubling the dimensions until the
+ * encoded size clears the threshold lets us tolerate variation
+ * across gdk-pixbuf builds without hard-coding pixel counts.
+ *
+ * Used by the chunked-upload test to push past Janus's advertised
+ * CHAT_MEDIA_CHUNK_SIZE without exceeding the 256 KiB MAX_BYTES
+ * default. */
+static GBytes *
+encode_chunky_png (gsize min_bytes)
+{
+    /* Start at 128×128. Each step doubles linear → 4× pixel
+	 * count → encoded size roughly quadruples on a noise pattern.
+	 * Bail at 1024×1024 (~3 MB raw → typically > 1 MB encoded)
+	 * since anything larger is clearly past the spec MAX_BYTES
+	 * default and we'd have nothing to test. */
+    int dim = 128;
+    while (dim <= 1024) {
+        GdkPixbuf *pix = gdk_pixbuf_new (GDK_COLORSPACE_RGB,
+                                         /*has_alpha=*/FALSE,
+                                         /*bits_per_sample=*/8, dim, dim);
+        if (!pix) {
+            return NULL;
+        }
+        /* Fill with a noise pattern that PNG can't deflate away.
+		 * Per-pixel random RGB triples seeded deterministically so
+		 * the test is reproducible.
+		 *
+		 * GdkPixbuf rows can carry trailing padding bytes (rowstride
+		 * > width * n_channels for alignment), so walk rowstride x
+		 * height not width x height x channels — otherwise the
+		 * padding bytes stay uninitialised and the encoded payload
+		 * gains a stochastic dependency on whatever the allocator
+		 * left behind, which both breaks reproducibility and could
+		 * leave us below the encoded-size threshold the caller
+		 * asked for. */
+        guchar *p = gdk_pixbuf_get_pixels (pix);
+        gsize rowstride = (gsize) gdk_pixbuf_get_rowstride (pix);
+        gsize n_bytes = rowstride * (gsize) dim;
+        guint32 r = 0xc0ffee01;
+        for (gsize i = 0; i < n_bytes; i++) {
+            /* xorshift32 — cheap, good entropy for compressor. */
+            r ^= r << 13;
+            r ^= r >> 17;
+            r ^= r << 5;
+            p[i] = (guchar) (r & 0xff);
+        }
+        gchar *buf = NULL;
+        gsize bufsz = 0;
+        GError *err = NULL;
+        gboolean ok = gdk_pixbuf_save_to_buffer (pix, &buf, &bufsz, "png",
+                                                 &err, NULL);
+        g_object_unref (pix);
+        if (!ok || !buf) {
+            g_clear_error (&err);
+            return NULL;
+        }
+        if (bufsz > min_bytes) {
+            return g_bytes_new_take (buf, bufsz);
+        }
+        g_free (buf);
+        dim *= 2;
+    }
+    return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* Wire helpers — TranUploadMedia / TranDownloadMedia /                 */
 /* TranChatSend-with-media. Stitched directly on top of the harness    */
@@ -200,6 +269,106 @@ send_upload_media (int fd, struct htlc_conn *htlc,
     return trans_before;
 }
 
+/* Send a chunked TranUploadMedia (750). Drives the multi-step
+ * send-then-receive state machine inline, but with all the
+ * chunk-shape construction (PART_INDEX endianness, PART_COUNT,
+ * PART_FINAL toggling, which chunks belong on the first vs the
+ * follow-ups) deferred to the same hotline-proto builders the
+ * production helper uses — the test stays a pure orchestration
+ * loop and doesn't reimplement protocol decisions.
+ *
+ * Returns the trans id of the FINAL chunk (the one whose reply
+ * carries the canonical handle). Returns 0 on any send/recv
+ * failure. On success the final reply is left in htlc->in.buf
+ * for the caller to parse via gtkhx_proto_parse_upload_final_reply. */
+static guint32
+send_upload_media_chunked (int fd, struct htlc_conn *htlc,
+                           const guint8 *payload, gsize payload_len,
+                           guint32 chunk_size, const char *declared_type)
+{
+    if (chunk_size == 0 || payload_len <= chunk_size) {
+        return 0;
+    }
+    guint64 pc = ((guint64) payload_len + chunk_size - 1) / chunk_size;
+    if (pc < 2 || pc > G_MAXUINT16) {
+        return 0;
+    }
+    guint16 part_count = (guint16) pc;
+
+    /* Chunk 0 — production first-chunk builder. */
+    struct hx_chunk first_chunks[5];
+    guint8 first_scratch[5];
+    int32_t first_hc = gtkhx_proto_build_upload_media_first_chunks (
+        payload, chunk_size,
+        (const uint8_t *) (declared_type && *declared_type ? declared_type
+                                                           : NULL),
+        declared_type && *declared_type ? strlen (declared_type) : 0,
+        part_count, first_chunks, G_N_ELEMENTS (first_chunks), first_scratch,
+        sizeof (first_scratch));
+    if (first_hc <= 0) {
+        return 0;
+    }
+    if (!integration_send_chunks (fd, htlc, HTLC_HDR_UPLOAD_MEDIA, 0,
+                                  first_chunks, first_hc)) {
+        return 0;
+    }
+    guint32 chunk0_trans = htlc->trans - 1;
+    if (!integration_drain_until_task_trans (fd, htlc, chunk0_trans, 16)) {
+        return 0;
+    }
+    if (gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos)) {
+        return 0;
+    }
+    const guint8 *tok_ptr = NULL;
+    size_t tok_len = 0;
+    if (!gtkhx_proto_parse_upload_token_reply (htlc->in.buf, htlc->in.pos,
+                                               &tok_ptr, &tok_len)
+        || tok_len == 0) {
+        return 0;
+    }
+    /* Token bytes borrow into htlc->in.buf; copy them so subsequent
+	 * recvs into the same buffer don't pull the rug out. */
+    guint8 *token = g_memdup2 (tok_ptr, tok_len);
+    gsize token_len = tok_len;
+    guint32 last_trans = 0;
+
+    /* Follow-ups via the production follow-up builder. */
+    for (guint16 i = 1; i < part_count; i++) {
+        gsize off = (gsize) i * (gsize) chunk_size;
+        gsize remaining = payload_len > off ? payload_len - off : 0;
+        gsize this_len
+            = remaining < (gsize) chunk_size ? remaining : (gsize) chunk_size;
+
+        struct hx_chunk fu_chunks[4];
+        guint8 fu_scratch[3];
+        int32_t fu_hc = gtkhx_proto_build_upload_media_followup_chunks (
+            token, token_len, payload + off, this_len, i,
+            /*final_chunk=*/(i + 1 == part_count), fu_chunks,
+            G_N_ELEMENTS (fu_chunks), fu_scratch, sizeof (fu_scratch));
+        if (fu_hc <= 0) {
+            g_free (token);
+            return 0;
+        }
+        if (!integration_send_chunks (fd, htlc, HTLC_HDR_UPLOAD_MEDIA, 0,
+                                      fu_chunks, fu_hc)) {
+            g_free (token);
+            return 0;
+        }
+        guint32 trans = htlc->trans - 1;
+        if (!integration_drain_until_task_trans (fd, htlc, trans, 32)) {
+            g_free (token);
+            return 0;
+        }
+        if (gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos)) {
+            g_free (token);
+            return 0;
+        }
+        last_trans = trans;
+    }
+    g_free (token);
+    return last_trans;
+}
+
 /* Send a TranChatSend (105) with optional CHAT_MEDIA_ID + TYPE
  * companion chunks attached. Style = 1 (normal); no CHAT_ID
  * means public chat. */
@@ -233,6 +402,32 @@ send_download_media (int fd, struct htlc_conn *htlc,
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_DOWNLOAD_MEDIA, /*flag=*/0, /*hc=*/1,
             (int) HTLC_DATA_CHAT_MEDIA_ID, (int) handle_len, handle)) {
+        return 0;
+    }
+    return trans_before;
+}
+
+/* Send TranDownloadMedia (751) for a specific chunk by index.
+ * Routes through the production Rust builder so the wire shape
+ * (the CHAT_MEDIA_PART_INDEX presence rule on follow-ups) stays
+ * pinned to one source of truth. */
+static guint32
+send_download_media_part (int fd, struct htlc_conn *htlc,
+                          const guint8 *handle, gsize handle_len,
+                          guint16 part_index)
+{
+    struct hx_chunk chunks[2];
+    guint8 scratch[2];
+    int32_t hc = gtkhx_proto_build_download_media_chunks (
+        handle, handle_len, part_index,
+        /*part_index_present=*/true, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
+    if (hc <= 0) {
+        return 0;
+    }
+    guint32 trans_before = htlc->trans;
+    if (!integration_send_chunks (fd, htlc, HTLC_HDR_DOWNLOAD_MEDIA, 0, chunks,
+                                  hc)) {
         return 0;
     }
     return trans_before;
@@ -450,6 +645,162 @@ test_inline_media_upload_round_trip (void)
 }
 
 /*
+ * Chunked upload round-trip: send a PNG large enough to cross the
+ * server-advertised CHAT_MEDIA_CHUNK_SIZE, driving the multi-step
+ * UPLOAD_TOKEN echo state machine. Assert the final reply carries
+ * a valid handle + canonical MIME, same shape as the single-shot
+ * round-trip.
+ */
+static void
+test_inline_media_chunked_upload_round_trip (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Chunked RT", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    /* Match the production clamp in inline_media_chunk_size: the
+	 * server-advertised value tops out at HX_MEDIA_DEFAULT_CHUNK_SIZE
+	 * so a hostile or misconfigured server can't push the client
+	 * into outsized per-chunk allocations. Mirroring the clamp
+	 * here keeps the test's chunk-size match production framing
+	 * decisions; without it, an outlier advertisement could push
+	 * us toward a >1 MiB PNG (or out the encode_chunky_png 1024²
+	 * bail-out) for no reason production would ever hit. */
+    guint32 chunk_size = htlc.media_chunk_size ? htlc.media_chunk_size
+                                               : HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    if (chunk_size > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
+        chunk_size = HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    }
+    /* Build a PNG that comfortably exceeds chunk_size so the
+	 * test exercises ≥ 2 chunks. Asking for chunk_size + 8 KiB
+	 * worth of encoded bytes leaves enough headroom for the
+	 * actual encoder's compression efficiency to wobble without
+	 * dropping below the threshold. */
+    GBytes *png = encode_chunky_png ((gsize) chunk_size + 8 * 1024);
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    g_assert_cmpuint (png_len, >, chunk_size);
+
+    guint32 final_trans = send_upload_media_chunked (
+        fd, &htlc, png_data, png_len, chunk_size, "image/png");
+    g_assert_cmpuint (final_trans, !=, 0);
+    /* The drain loop inside the helper has already validated the
+	 * final reply is non-error and left it parsed in htlc.in. */
+    struct gtkhx_proto_upload_final_reply reply;
+    g_assert_true (gtkhx_proto_parse_upload_final_reply (
+        htlc.in.buf, htlc.in.pos, &reply));
+    g_assert_cmpuint (reply.id_len, >, 0);
+    g_assert_cmpuint (reply.type_len, >, 0);
+    char mime_buf[64] = {0};
+    gsize mime_len = MIN (reply.type_len, sizeof (mime_buf) - 1);
+    memcpy (mime_buf, reply.type_ptr, mime_len);
+    g_assert (g_str_has_prefix (mime_buf, "image/"));
+
+    g_bytes_unref (png);
+    close_session (fd, &htlc);
+}
+
+/*
+ * Chunked-upload over the server's MAX_BYTES cap: send a noise
+ * PNG whose total length exceeds the advertised
+ * CHAT_MEDIA_MAX_BYTES, and assert the chunked state machine
+ * lands on a task-error with the spec PayloadTooLarge (1) code.
+ *
+ * Rejection can land on any chunk reply (Janus may pre-flight
+ * via PART_COUNT * chunk_size, or accumulate and reject the
+ * canonicalise step at the final chunk). The send helper
+ * returns 0 the moment a task-error reply arrives, leaving
+ * the error reply in htlc.in.buf for us to inspect.
+ */
+static void
+test_inline_media_chunked_upload_too_large (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Chunked TooBig", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    /* Mirror inline_media_chunk_size's production clamp. */
+    guint32 chunk_size = htlc.media_chunk_size ? htlc.media_chunk_size
+                                               : HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    if (chunk_size > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
+        chunk_size = HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    }
+    /* Resolve the server's advertised MAX_BYTES ceiling. We need
+	 * a PNG whose encoded form sits above that — encode_chunky_png
+	 * grows by powers of two so add a generous headroom margin to
+	 * land cleanly past the threshold. */
+    guint32 max_bytes = htlc.media_max_bytes ? htlc.media_max_bytes
+                                             : HX_MEDIA_DEFAULT_MAX_BYTES;
+    GBytes *png = encode_chunky_png ((gsize) max_bytes + 64 * 1024);
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+    g_assert_cmpuint (png_len, >, max_bytes);
+
+    /* Send. Either the helper returns 0 (rejection at some chunk
+	 * reply, error left in htlc.in.buf) or we have a server bug. */
+    guint32 final_trans = send_upload_media_chunked (
+        fd, &htlc, png_data, png_len, chunk_size, "image/png");
+    g_bytes_unref (png);
+    g_assert_cmpuint (final_trans, ==, 0);
+
+    /* The error reply that aborted the chunked loop is sitting in
+	 * htlc.in.buf — assert it's actually a task-error, not a
+	 * transport hiccup. */
+    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    /* If the spec error-code field is present, it MUST sit inside
+	 * 0..=5; the PayloadTooLarge (1) branch is what the server
+	 * SHOULD pick for this scenario, but we accept any
+	 * spec-conforming code so a server that signals 0 (Generic)
+	 * doesn't drag the test into rejecting valid behaviour. The
+	 * stronger assertion would be raw == 1, but pinning that here
+	 * couples the test to a specific Janus version's error
+	 * mapping; the spec allows the server discretion. */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert_cmpuint (raw, <=, 5u);
+        }
+    }
+
+    close_session (fd, &htlc);
+}
+
+/*
  * Chat-with-media round-trip: upload a PNG, attach the returned
  * handle on a TranChatSend, observe the relayed broadcast back
  * to us — assert the broadcast carries CHAT_MEDIA_ID +
@@ -608,6 +959,132 @@ test_inline_media_download_round_trip (void)
 }
 
 /*
+ * Chunked download round-trip: upload a payload whose canonical
+ * form is large enough that the server splits the download reply
+ * across multiple PART_COUNT chunks. Walk the chunked-reply
+ * accumulator loop (PART_INDEX = 1, 2, …) until PART_FINAL,
+ * stitch the payload back together, and assert the result starts
+ * with an allowlisted image magic.
+ *
+ * The production receive path
+ * (src/inline_media_download.c::rcv_task_download_media) drives
+ * the same loop in the client — this test confirms it works
+ * end-to-end against Janus rather than just at the proto layer.
+ */
+static void
+test_inline_media_chunked_download_round_trip (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "Chunked DL RT", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    guint32 chunk_size = htlc.media_chunk_size ? htlc.media_chunk_size
+                                               : HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    if (chunk_size > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
+        chunk_size = HX_MEDIA_DEFAULT_CHUNK_SIZE;
+    }
+
+    /* Upload a high-entropy PNG large enough that the server-side
+	 * canonical form should still exceed one chunk_size after the
+	 * server's re-encode. Asking for ~3 × chunk_size headroom
+	 * lets the canonical re-encode shrink by up to 2/3 without
+	 * dropping the test into single-chunk territory. */
+    GBytes *png = encode_chunky_png ((gsize) chunk_size * 3);
+    g_assert_nonnull (png);
+    gsize png_len = 0;
+    const guint8 *png_data = g_bytes_get_data (png, &png_len);
+
+    guint32 up_trans = send_upload_media_chunked (
+        fd, &htlc, png_data, png_len, chunk_size, "image/png");
+    g_bytes_unref (png);
+    g_assert_cmpuint (up_trans, !=, 0);
+
+    struct gtkhx_proto_upload_final_reply up_reply;
+    g_assert_true (gtkhx_proto_parse_upload_final_reply (
+        htlc.in.buf, htlc.in.pos, &up_reply));
+    guint8 *handle = g_memdup2 (up_reply.id_ptr, up_reply.id_len);
+    gsize handle_len = up_reply.id_len;
+
+    /* Enter the authorization set via a chat-relay, same shape
+	 * download_round_trip uses. */
+    g_assert_true (send_chat_with_media (fd, &htlc, "chunked-dl", handle,
+                                         handle_len, "image/png"));
+    struct hx_chat_msg msg;
+    g_assert_true (
+        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+
+    /* Chunk 0: bare TranDownloadMedia (no PART_INDEX). */
+    guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);
+    g_assert_cmpuint (dl_trans, !=, 0);
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, dl_trans, 16));
+    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    struct gtkhx_proto_download_reply dl_reply;
+    g_assert_true (gtkhx_proto_parse_download_reply (
+        htlc.in.buf, htlc.in.pos, &dl_reply));
+    /* The whole point of this test is exercising the
+	 * multi-chunk path. If the server's canonical form fits in
+	 * one chunk after all (the upload's noise PNG re-encoded
+	 * smaller than we expected), the chunked download flow is
+	 * tautologically tested by every other download test —
+	 * fail loud so we know to grow the upload payload rather
+	 * than silently passing through the single-chunk branch. */
+    g_assert_cmpuint (dl_reply.part_count, >=, 2);
+
+    GByteArray *accumulator = g_byte_array_new ();
+    g_byte_array_append (accumulator, dl_reply.payload_ptr,
+                         dl_reply.payload_len);
+    guint16 part_count = dl_reply.part_count;
+    gboolean saw_final = dl_reply.final_chunk;
+
+    /* Follow-up requests: PART_INDEX 1, 2, …, until PART_FINAL. */
+    for (guint16 i = 1; i < part_count && !saw_final; i++) {
+        guint32 t = send_download_media_part (fd, &htlc, handle, handle_len,
+                                              i);
+        g_assert_cmpuint (t, !=, 0);
+        g_assert_true (integration_drain_until_task_trans (fd, &htlc, t, 16));
+        g_assert_false (
+            gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+        g_assert_true (gtkhx_proto_parse_download_reply (
+            htlc.in.buf, htlc.in.pos, &dl_reply));
+        g_byte_array_append (accumulator, dl_reply.payload_ptr,
+                             dl_reply.payload_len);
+        saw_final = dl_reply.final_chunk;
+    }
+
+    g_assert_true (saw_final);
+    g_assert_cmpuint (accumulator->len, >=, chunk_size);
+
+    /* Accumulated bytes must start with an allowlisted image
+	 * magic prefix (same set the single-shot download asserts). */
+    const guint8 *p = accumulator->data;
+    gboolean is_png = (accumulator->len >= 8
+                       && memcmp (p, "\x89PNG\r\n\x1A\n", 8) == 0);
+    gboolean is_jpeg = (accumulator->len >= 3
+                        && memcmp (p, "\xFF\xD8\xFF", 3) == 0);
+    gboolean is_gif = (accumulator->len >= 6
+                       && (memcmp (p, "GIF87a", 6) == 0
+                           || memcmp (p, "GIF89a", 6) == 0));
+    g_assert_true (is_png || is_jpeg || is_gif);
+
+    g_byte_array_unref (accumulator);
+    g_free (handle);
+    close_session (fd, &htlc);
+}
+
+/*
  * Garbage upload rejected: send 65,500 zero bytes — close to
  * the 16-bit single-shot wire-framing ceiling but well below
  * the server's 256 KiB MAX_BYTES advertisement, so Janus's
@@ -638,11 +1115,11 @@ test_inline_media_oversized_rejected (void)
     /* 65500 bytes of zeros: well BELOW the 256 KiB MAX_BYTES
 	 * default and just under the 65535-byte single-shot wire
 	 * framing ceiling. The point of this test isn't to overflow
-	 * MAX_BYTES (that would need chunked-upload, not in Phase 9.C);
+	 * MAX_BYTES — the chunked_too_large case covers that path —
 	 * it's to confirm the server rejects clearly-invalid payloads
-	 * with an actionable task-error. All-zeros has no valid
-	 * image magic so the most likely rejection branch is
-	 * UnsupportedFormat (code 2). */
+	 * on the single-shot frame with an actionable task-error.
+	 * All-zeros has no valid image magic so the most likely
+	 * rejection branch is UnsupportedFormat (code 2). */
     gsize garbage_len = 65500;
     guint8 *garbage = g_malloc0 (garbage_len);
 
@@ -678,6 +1155,79 @@ test_inline_media_oversized_rejected (void)
     }
 
     g_free (garbage);
+    close_session (fd, &htlc);
+}
+
+/*
+ * Unsupported-format upload: send a structurally valid SVG
+ * (declared type image/svg+xml) and assert the server rejects.
+ *
+ * The spec forbids SVG / WebP / AVIF / HEIC under
+ * CAPABILITY_INLINE_MEDIA — only PNG, JPEG, and GIF round-trip.
+ * Janus enforces this server-side via a magic-byte sniff that
+ * runs BEFORE canonicalisation, so a syntactically-valid SVG
+ * payload with the right declared MIME hint should still bounce
+ * with MediaErrorCode UnsupportedFormat (2).
+ *
+ * The single-shot frame is fine here — a tiny SVG sits well
+ * inside the wire framing ceiling.
+ */
+static void
+test_inline_media_unsupported_format_upload (void)
+{
+    const hx_test_server *srv = pick_inline_media_server ();
+    if (!srv) {
+        g_test_fail_printf ("no inline-media-capable server in matrix.");
+        return;
+    }
+
+    struct htlc_conn htlc;
+    int fd = integration_open_login_to_caps_or_skip (
+        srv, &htlc, "SVG Reject", 412, HTLC_CAP_INLINE_MEDIA);
+    if (fd < 0) {
+        return;
+    }
+    g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
+                     HTLC_CAP_INLINE_MEDIA);
+
+    /* Smallest legal SVG that parses cleanly — a 1×1 black square.
+	 * The point isn't that this renders, it's that the magic bytes
+	 * ('<?xml' / '<svg') aren't in the inline-media allowlist. */
+    const char *svg
+        = "<?xml version=\"1.0\"?>"
+          "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\">"
+          "<rect width=\"1\" height=\"1\"/>"
+          "</svg>";
+    gsize svg_len = strlen (svg);
+
+    guint32 trans = send_upload_media (fd, &htlc, (const guint8 *) svg,
+                                       svg_len, "image/svg+xml");
+    g_assert_cmpuint (trans, !=, 0);
+    g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
+
+    /* Header MUST carry the task-error flag. */
+    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+
+    /* If CHAT_MEDIA_ERROR_CODE is present, it MUST sit inside 0..=5
+	 * — UnsupportedFormat (2) is the spec-preferred branch, but a
+	 * server signalling Generic (0) is spec-conforming too. */
+    {
+        gboolean saw_code = FALSE;
+        guint16 raw = 0;
+        dh_start (&htlc)
+        {
+            if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
+                guint8 *p = dh->data;
+                raw = ((guint16) p[0] << 8) | (guint16) p[1];
+                saw_code = TRUE;
+            }
+        }
+        dh_end ();
+        if (saw_code) {
+            g_assert_cmpuint (raw, <=, 5u);
+        }
+    }
+
     close_session (fd, &htlc);
 }
 
@@ -760,12 +1310,20 @@ main (int argc, char **argv)
                      test_inline_media_advisory_limits_advertised);
     g_test_add_func ("/integration/inline_media/upload_round_trip",
                      test_inline_media_upload_round_trip);
+    g_test_add_func ("/integration/inline_media/chunked_upload_round_trip",
+                     test_inline_media_chunked_upload_round_trip);
+    g_test_add_func ("/integration/inline_media/chunked_upload_too_large",
+                     test_inline_media_chunked_upload_too_large);
     g_test_add_func ("/integration/inline_media/chat_with_media_round_trip",
                      test_inline_media_chat_with_media_round_trip);
     g_test_add_func ("/integration/inline_media/download_round_trip",
                      test_inline_media_download_round_trip);
+    g_test_add_func ("/integration/inline_media/chunked_download_round_trip",
+                     test_inline_media_chunked_download_round_trip);
     g_test_add_func ("/integration/inline_media/oversized_rejected",
                      test_inline_media_oversized_rejected);
+    g_test_add_func ("/integration/inline_media/unsupported_format_upload",
+                     test_inline_media_unsupported_format_upload);
     g_test_add_func ("/integration/inline_media/unauthorized_download",
                      test_inline_media_unauthorized_download);
     return g_test_run ();
