@@ -18,9 +18,6 @@ Docs:
 Tracker:
 - Ship with some more built in trackers configured
 
-Inline Media:
-- Research spike to determine how difficult it would be to add to xtext (see spec https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/Capabilities-Inline-Media.md)
-
 Code Modernization:
 - Better modules with more code reuse
 - Define string / resource consts instead of repeating them (or having them littered throughout the code)

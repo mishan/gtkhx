@@ -1,6 +1,7 @@
 ## 1.1.0-dev
 
-- Voice Chat
+- Voice chat
+- Inline media
 - User Interface
   - New multi-panel interface with support for custom layouts and undocking panels into their
     own windows so that users can still have the nostalgic multi-window experience if they prefer
