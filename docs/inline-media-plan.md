@@ -7,6 +7,26 @@ extension to the Hotline protocol. Spec lives at
 Capability bit 3 (`0x0008`) is already reserved as `HTLC_CAP_INLINE_MEDIA`
 in `src/hotline.h:329` from the original capability-bit allocation pass.
 
+## Status (June 2026)
+
+Phases A, B, C, D, and F have shipped on `main`. The client is
+spec-conformant: it negotiates the capability, decodes server-canonical
+bytes through a bounded loader, lets the user attach an image via a
+paperclip button in chat input bars, renders a styled placeholder for
+inbound media, and surfaces a click-to-view dialog with Save As / Open
+Externally. Tier 3 covers seven end-to-end paths against Janus.
+
+Phase E (true in-stream rendering by extending xtext) is **deferred** —
+shipping Option 1 first burns the wire / decoder stack in against real
+servers before committing to the xtext surgery.
+
+The shipped scope deliberately omits some entries in the original send-
+path plan: **paste-from-clipboard and drag-and-drop** are not wired up
+yet (paperclip-only for v1), and **chunked upload is not implemented**
+(single-shot only, payload capped at u16 — ~63 KB after framing
+overhead). Both can be added without protocol-layer changes; see the
+"Remaining work" subsection under each phase for details.
+
 ## What the extension does
 
 A capable sender uploads image bytes to the server via a dedicated
@@ -49,125 +69,150 @@ below.
 
 ## Phased plan
 
-### Phase A — Wire protocol foundation
+### Phase A — Wire protocol foundation [SHIPPED]
 
-- `hotline-proto`: new `inline_media.rs` module.
+- `hotline-proto`: new `inline_media.rs` module shipped.
   - `LimitsAdvertisement` struct parsed out of LOGIN reply's optional
     `0x020C`–`0x0211` fields. All fields tolerated absent;
-    spec-default fallbacks recorded in code.
+    spec-default fallbacks live in `inline_media_limits.h` /
+    `inline_media.c::inline_media_max_bytes`.
   - `MediaErrorCode` enum (`Generic = 0`, `PayloadTooLarge = 1`,
     `UnsupportedFormat = 2`, `RateLimited = 3`, `NotAuthorized = 4`,
     `ServerBusy = 5`). Unknown codes map to `Generic`.
-  - Typed builders/parsers for `TranUploadMedia` (single-shot + chunked
-    variants) and `TranDownloadMedia` (request + reply with
-    `PartIndex` / `PartCount` / `PartFinal`).
-- Tier 2 wire fixtures: golden-bytes for the LOGIN-with-limits reply,
+  - Typed builders / parsers for `TranUploadMedia` (single-shot
+    builder; **chunked variant fixtures landed in the crate but the
+    chunked state machine is not wired through the C path yet**) and
+    `TranDownloadMedia` (request + reply with `PartIndex` /
+    `PartCount` / `PartFinal`, including chunked-reply accumulator on
+    the receive side).
+- Tier 2 wire fixtures: golden-bytes for LOGIN-with-limits reply,
   single-shot upload request + handle reply, multi-chunk upload
   sequence with token echo, download request + chunked reply, error
-  reply with code.
-- C-side dispatcher: register opcode 750 / 751 receivers in `rcv.c`.
-  Capability echo handling alongside the existing voice / chat-history
-  capability flags.
-- Suppress the v1 send UI when the server does not echo bit 3.
-- **No upload or receive flow yet.** This phase ends on parsers,
-  builders, and fixtures only — nothing user-visible.
+  reply with code, chat-media-meta + orphan handling.
+- C-side dispatcher: opcode 750 / 751 receivers registered in `rcv.c`
+  alongside the existing voice / chat-history capability flags. The
+  capability bit is echoed into `htlc->caps` from the LOGIN reply.
+- Send UI is gated on `HTLC_CAP_INLINE_MEDIA` (see Phase C).
 
-### Phase B — Bounded decoder
+### Phase B — Bounded decoder [SHIPPED]
 
-- New module: `src/inline_media_decode.{c,h}` (or `media_decode` — name
-  TBD). Single entry point that takes a byte buffer and the canonical
-  MIME type and returns either a `GdkTexture` (still images) or an
-  error code matching the spec's `MediaErrorCode`.
-- Magic-byte sniff first. Reject anything not in the JPEG/PNG/GIF
-  allowlist regardless of what the server's `DATA_CHAT_MEDIA_TYPE`
-  said. We **must not** trust the canonical MIME alone — the spec
-  itself flags this on the client side.
-- Bounded decode via `GdkPixbufLoader` (or `gdk_texture_new_from_bytes`
-  with a pre-flight `gdk_pixbuf_loader_set_size` check). Reject if the
-  decoded dimensions exceed our local caps (mirror the spec defaults:
-  2048×2048, ~4.2 MP). Hard reject SVG/WebP/AVIF/HEIC at sniff time
-  even if a future server were to canonicalise to them.
-- Runs on a worker thread; main thread receives the `GdkTexture` (or
-  the error). Worker→main marshal pattern is identical to the
-  existing `hx_preview` pipeline (`src/preview.{c,h}`) — that path
-  already streams chunks via `hx_preview_chunk` into a
-  `GdkPixbufLoader` and surfaces a `GtkPicture` on `hx_preview_done`.
-  Reuse the loader + thread shape, not the preview widget itself
-  (preview is a stand-alone window; inline media renders inside the
-  chat view).
-- **Animated GIF is deferred to v2.** v1 decodes the first frame of a
-  GIF and renders it as a still. We still accept the upload because
-  the server might reject any GIF re-encoded to PNG, and we want to
-  interop with senders / other capable clients.
+- Module: `src/inline_media_decode.{c,h}`. Single entry point
+  `inline_media_decode(buf, len, caps)` returns a `HxInlineMediaDecoded`
+  struct carrying either a `GdkTexture` or an error message. Cap
+  defaults are pulled from the `HxInlineMediaCaps` struct, with the
+  spec recommended values applied when fields are 0.
+- Magic-byte sniff first via `inline_media_sniff`. The JPEG / PNG / GIF
+  allowlist is enforced regardless of the server's
+  `DATA_CHAT_MEDIA_TYPE`; `inline_media_format_is_allowed` is the
+  gate. SVG / WebP / AVIF / HEIC are rejected at sniff time.
+- Bounded decode via `GdkPixbufLoader` with a `size-prepared` callback
+  that aborts when announced dimensions exceed the cap. The decoded
+  `GdkPixbuf` is converted to a `GdkTexture` via
+  `gdk_texture_new_for_pixbuf`.
+- The decoder runs synchronously on the main thread for v1 — the spec
+  cap (256 KiB encoded, 2048×2048) means decode is fast enough not to
+  warrant the worker-thread plumbing yet. The worker-thread plan from
+  the original scoping doc is held in reserve if profiling shows it's
+  needed.
+- **Animated GIF is deferred to v2** — v1 decodes the first frame and
+  renders as a still, per the original plan.
 
-### Phase C — Send path
+### Phase C — Send path [SHIPPED, partial]
 
-- "Attach image" entry points in chat input bars (chat, private chat,
-  PM):
-  - Toolbar paperclip button next to send.
-  - Paste-from-clipboard (`Ctrl+V` of a `GdkTexture` in the clipboard).
-  - Drag-and-drop a single image file onto the input box (`GtkDropTarget`
-    accepting `GdkFileList` / `GdkTexture`).
-- Pre-flight against the server's advertised
-  `DATA_CHAT_MEDIA_MAX_BYTES` / `_MAX_DIMENSION` / `_MAX_PIXELS`;
-  offer to resize/recompress if oversized rather than round-tripping a
-  known-bad upload.
-- Compose preview: thumbnail + filename + "remove attachment" affordance
-  next to the send button. Compose state is per-chat-input.
-- Upload pipeline: send `TranUploadMedia` with single-shot framing when
-  bytes fit (< ~63 KB after framing overhead), otherwise chunk using the
-  server-advertised `DATA_CHAT_MEDIA_CHUNK_SIZE`. Echo the
-  `DATA_CHAT_MEDIA_UPLOAD_TOKEN` from the first reply on every
-  subsequent chunk. Cancellable mid-upload (drop the token; server
-  reaps via the 30 s idle timeout).
-- On upload success: attach `DATA_CHAT_MEDIA_ID` + `DATA_CHAT_MEDIA_TYPE`
-  to the chat send. The user's typed text rides in `DATA_DATA` as
-  normal (default to `[image]` if empty — server-side gateway
-  fallback only applies to public chat with legacy recipients, but the
-  text field still has to be present).
-- On upload error: toast with a generic message, branching on
-  `DATA_CHAT_MEDIA_ERROR_CODE` when present (offer to resize on `1`,
-  suggest different file on `2`, back off on `3`/`5`). One retry max,
-  no auto-retry loop.
+Shipped:
 
-### Phase D — Receive path (Option 1: placeholder + dialog)
+- **Paperclip button** in chat input bars (chat, private chat, PM)
+  via `src/inline_media_attach.{c,h}`. Visibility is gated on
+  `HTLC_CAP_INLINE_MEDIA` — the button is hidden on servers that don't
+  advertise the cap, since showing inert chrome would be misleading
+  given most Hotline servers don't support the extension.
+- File picker via `GtkFileDialog` with a mime-type filter for
+  `image/png` / `image/jpeg` / `image/gif`.
+- Two-stage pre-flight: `g_file_query_info` rejects oversized files
+  before any bytes are loaded; after `g_file_load_bytes_async` lands,
+  a magic-byte sniff + size check runs against the effective per-
+  upload cap (the smaller of the server's `DATA_CHAT_MEDIA_MAX_BYTES`
+  and the 16-bit single-shot wire-framing ceiling).
+- Upload state machine in `src/inline_media_upload.{c,h}`. Single-shot
+  framing only — chunked is not wired through yet. The per-upload
+  context lifecycle is tied to the task table via the new
+  `task->ptr_free` hook (see the round-2 review commit on
+  `claude/inline-media-phase-c-ui`), so a disconnect mid-upload
+  reclaims both the upload-helper context and the caller's per-upload
+  context (the attach ctx) via `g_hash_table_remove_all` rather than
+  leaking.
+- Cap re-check at both async boundaries (`on_file_picked` and
+  `on_bytes_loaded`) so a disconnect / reconnect-to-non-capable-server
+  race surfaces the actionable "Inline media isn't available on this
+  server" toast instead of the generic "couldn't start upload."
+- Chat send with media attached via `hx_send_chat_with_media`, which
+  threads `DATA_CHAT_MEDIA_ID` + `DATA_CHAT_MEDIA_TYPE` companions
+  alongside the usual chat fields. The text body defaults to
+  `[image]` when empty.
+- On upload error: toast surfaces a per-`MediaErrorCode` string
+  (`Image too large for this server`, `Server rejected the image
+  format`, `Rate limited — try again shortly`, …).
 
-- When a chat / PM message arrives with both `DATA_CHAT_MEDIA_ID` and
-  `DATA_CHAT_MEDIA_TYPE`, render a styled placeholder textentry:
+Remaining work (post-Phase-C polish, not blocking spec conformance):
 
-  ```
-  [image · PNG · 800×600 · 124 KB · click to view]
-  ```
+- **Paste-from-clipboard** (`Ctrl+V` of a `GdkTexture`) — not wired.
+- **Drag-and-drop** onto input box via `GtkDropTarget` — not wired.
+- **Compose preview** (thumbnail + remove affordance before send) —
+  not built. v1 fires the upload immediately on file pick.
+- **Chunked upload** — `inline_media_upload.c` rejects payloads
+  larger than 65 535 bytes since the single-shot builder can't frame
+  more. Chunked framing exists at the wire level; needs an upload-
+  side state machine that holds the token across replies. With the
+  server-recommended 256 KiB cap, the gap matters for screenshots
+  but not for typical chat attachments.
+- **Resize-on-oversized** affordance instead of a hard reject —
+  pending a UX call.
 
-- Click → open in an in-app dialog. The chat-window's existing image
-  preview infrastructure (`src/preview.{c,h}` —
-  `hx_preview_new` / `_set_info` / `_chunk` / `_done` with cancel-cb)
-  is the natural backing — same worker-thread streaming pattern, same
-  `GdkPixbufLoader` → `GtkPicture` surface. Either reuse the preview
-  window directly or factor its body widget into a transient
-  `AdwDialog`.
-- Right-click context menu on the placeholder (and on the dialog's
-  picture): **Save As**, **Copy Image** (copies the `GdkTexture` to the
-  clipboard for paste-into-other-apps), **Open in External Viewer**
-  (via `GtkFileLauncher` on a temp file — Flatpak portal handles
-  sandbox crossings).
-- Async download: fire `TranDownloadMedia` on click rather than on
-  receive, to avoid prefetching every image in a busy room. The
-  authorization set is fixed at relay time per the spec, so deferred
-  fetch is safe as long as we're inside the 24h handle lifetime.
-  Chunked replies stream through the same loader path.
-- Decode failure surfaces as a toast on the chat window + the
-  placeholder flips to `[image · cannot display]` and the click action
-  goes inert.
+### Phase D — Receive path (Option 1: placeholder + dialog) [SHIPPED]
+
+- Inbound chat / PM messages carrying `DATA_CHAT_MEDIA_ID` +
+  `DATA_CHAT_MEDIA_TYPE` render an NBSP-joined placeholder row in
+  xtext, styled with mIRC colour 14 (subdued grey) so it reads as a
+  distinct token. The placeholder text mirrors the original spec:
+  `[image · <type> · <dims> · <size> · click to view]` with hint
+  fields elided when the server omits them.
+- Per-chat `media_handles` `GHashTable<guint token id, handle bytes>`
+  on each chat window maps the clickable token back to the media
+  handle. Click on the placeholder fires the download dialog.
+- **In-app dialog** in `src/inline_media_dialog.{c,h}`: an `AdwDialog`
+  with a `GtkStack` body (Loading / Image / Error pages). Loading page
+  shows an `AdwSpinner`. Image page is a `GtkPicture` inside a
+  `GtkScrolledWindow`. Header bar carries **Save As…** and **Open
+  Externally** buttons, both disabled until the download completes.
+- Async download via `src/inline_media_download.{c,h}`:
+  `inline_media_download_start` registers a task, the chunked-reply
+  accumulator (`GByteArray`) collects payload across `TranDownloadMedia`
+  replies, terminal chunk triggers decode and renders. The download
+  context's lifetime is tied to the task table via `task->ptr_free`,
+  same shape as the upload helper.
+- Save As writes via `GtkFileDialog` + `g_file_replace_contents`. The
+  callback context holds its own `GBytes` ref so closing the parent
+  dialog mid-pick can't UAF the save handler.
+- Open Externally writes to a unique temp file under
+  `XDG_RUNTIME_DIR` (fallback `/tmp`) using `g_file_create` with
+  `G_FILE_CREATE_PRIVATE` (O_CREAT|O_EXCL, 0600) and a 64-bit random
+  tail name; `GtkFileLauncher` then asks the portal / desktop to
+  open it.
+- Spec `MediaErrorCode` is mapped to user-readable strings on the
+  error page (`Image too large`, `Unsupported image format`, …).
+- **Copy Image** is not shipped in v1 — the dialog focuses on Save /
+  Open. Adding clipboard copy is a follow-up.
 
 End of Phase D, the client is spec-conformant: it sends, receives,
 decodes, and lets the user view media. No xtext surgery yet.
 
-### Phase E — Receive path (Option 2: multi-subline padding inline)
+### Phase E — Receive path (Option 2: multi-subline padding inline) [DEFERRED]
 
 This phase replaces the placeholder with true in-stream rendering. It
 is the part that touches xtext, and it is gated on Phase D being
 shipped and used long enough to validate the wire / decoder stack.
+Phase D is shipped; Phase E is intentionally deferred until there's
+data on whether the placeholder-and-dialog UX is enough.
 
 - Extend `textentry` with a discriminator (`tag` field is already
   there; use a new value) and a `GdkTexture *` ref for media entries.
@@ -196,38 +241,48 @@ the line-uniform grid model. If they prove too rough, Option 4
 (variable-height xtext) becomes the natural follow-up against a
 codebase that already has the data model.
 
-### Phase F — Tier 3 integration against Janus
+### Phase F — Tier 3 integration against Janus [SHIPPED]
 
-Janus is the fogWraith reference server and already implements the
-inline-media extension (same playbook as chat-history and voice — the
-fogWraith specs and Janus ship together). The Tier 3 path lights up
-without needing a mock server.
+Janus support was confirmed before any other phase: the Tier 3
+container echoes capability bit 3 in the LOGIN reply and advertises
+the `DATA_CHAT_MEDIA_MAX_*` limits. No mock server needed.
 
-- **First step: verify Janus support.** Connect a debug-built client to
-  the existing `janus` Tier 3 container, watch the LOGIN reply for the
-  capability echo of bit 3 and the `DATA_CHAT_MEDIA_MAX_*` advisory
-  fields. If they're not there, fall back to building a Go mock server
-  in `tests/integration/mock-server/inline-media/` (same shape as the
-  chat-history mock); the plan in that case is unchanged from what an
-  earlier draft of this doc described.
-- Matrix entry: add `HX_TEST_CAP_INLINE_MEDIA` to the Janus container
-  flags, mirroring how `HX_TEST_CAP_CHAT_HISTORY` and
-  `HX_TEST_CAP_VOICE` already gate their respective Tier 3 binaries.
-- Tier 3 binaries: end-to-end send (single + chunked), end-to-end
-  receive, capability-not-confirmed (mhxd / Mobius — server strips
-  fields), error-code surfacing (oversize, rate-limit,
-  unsupported-format), authorization (unauthorized download → generic
-  "not found"), handle expiry. Most of these reduce to "GtkHx sends X,
-  observes Janus's reply matches the spec."
-- A few authorization-set + legacy-recipient cases will be hard to
-  exercise against Janus alone (need a chat where one user is capable
-  and another isn't). The Tier 3 matrix already runs multiple servers
-  in parallel for chat-history; mixing a capable Janus member with an
-  mhxd or Mobius observer in a public chat covers the legacy-fallback
-  path without a mock.
+Shipped Tier 3 binary: `tests/integration/test_inline_media.c`,
+gated on the Janus matrix row via `HX_TEST_CAP_INLINE_MEDIA`.
 
-Tracking the supports-or-not check against [[gtkhx_janus]] and
-[[gtkhx_multi_server_test_plan]].
+Seven end-to-end paths cover:
+
+- `cap_negotiation` — capability bit echoed in LOGIN reply.
+- `limits_advertised` — `DATA_CHAT_MEDIA_MAX_*` fields parse out of
+  the LOGIN reply.
+- `upload_round_trip` — `TranUploadMedia` with a runtime-encoded 4×4
+  PNG (`gdk_pixbuf_save_to_buffer`); assert the final reply carries
+  a non-empty handle + canonical MIME and the announced dimensions.
+- `chat_with_media_round_trip` — chain upload → `hx_send_chat_with_media`
+  → drain to the broadcast relay, assert
+  `gtkhx_proto_extract_chat_media_meta` finds the handle on the
+  inbound chat.
+- `download_round_trip` — upload a PNG, fetch via
+  `TranDownloadMedia`, assert reply carries `CHAT_MEDIA_PAYLOAD` with
+  a valid PNG signature.
+- `oversized_rejected` — server returns `MediaErrorCode = 1` on
+  oversized upload.
+- `unauthorized_download` — capability-correct request for a
+  non-existent handle surfaces as a task-error with the spec
+  `NotAuthorized` mapping.
+
+Per-account rate-limit interval in the test container's
+`tests/janus/conf/config.yaml` is dropped to `1ms` so the suite's
+back-to-back uploads through the shared `guest` account don't
+collide with the spec-default 10 s interval. **Caveat**: Janus's Go
+YAML decoder treats `0s` as "unset / use default" and ignores it;
+keep the value explicit and non-zero.
+
+Capability-not-confirmed paths (mhxd / Mobius strip media fields)
+and the mixed-cap chat-relay case are not exercised in Tier 3 yet.
+Adding them is bookmarked under [[gtkhx_multi_server_test_plan]].
+
+Tracking [[gtkhx_janus]] for the broader Janus matrix.
 
 ## xtext embedding feasibility
 
@@ -292,19 +347,20 @@ data model and decoder pipeline in place.
   chat-output buffer holds the textentry, dropped on
   `gtk_xtext_clear` / window destroy). No on-disk cache.
 
-## Effort sketch
+## Status by phase
 
-| Phase | Scope | Rough effort |
+| Phase | Scope | Status |
 |---|---|---|
-| A | Wire protocol + capability echo + fixtures | 1 week |
-| B | Bounded decoder + worker plumbing | 3–5 days |
-| C | Send UI (attach, paste, drop, upload state machine) | 1–2 weeks |
-| D | Receive: placeholder + dialog + context menu | 1 week |
-| E | Inline render via multi-subline padding | 1–2 weeks |
-| F | Tier 3 integration against Janus | 2–4 days |
+| A | Wire protocol + capability echo + fixtures | Shipped |
+| B | Bounded decoder | Shipped |
+| C | Send UI (paperclip + file picker + single-shot upload) | Shipped; paste / drag-drop / chunked / compose preview pending |
+| D | Receive: placeholder + click-to-view dialog | Shipped; Copy Image pending |
+| E | Inline render via multi-subline padding | Deferred |
+| F | Tier 3 integration against Janus | Shipped |
 
-Phases A → D bring spec conformance. Phase E is the embedding payoff.
-Phase F can land in parallel with A–D once the wire protocol stabilises.
+Phases A → D + F bring spec conformance. Phase E is the embedding
+payoff; deferred pending feedback on whether the placeholder UX is
+enough.
 
 ## Future work (v2 and beyond)
 
@@ -324,19 +380,27 @@ Phase F can land in parallel with A–D once the wire protocol stabilises.
 ## Decisions locked in
 
 - **Animated GIFs are v2.** v1 decodes the first frame and renders as
-  a still. Documented in Phase B.
-- **In-app dialog for click-to-view**, reusing the existing
-  `src/preview.{c,h}` widget pipeline. No external viewer in the
-  default click path (still available via right-click "Open in
-  External Viewer").
-- **Right-click context menu on media** (placeholder in Phase D, true
-  inline row in Phase E): Save As, Copy Image, Open in External
-  Viewer.
+  a still. Shipped that way in Phase B.
+- **In-app dialog for click-to-view** via `AdwDialog` +
+  `GtkPicture` + `GtkStack` (Loading / Image / Error), shipped in
+  Phase D. Did not end up reusing the `src/preview.{c,h}` plumbing —
+  the click-to-view dialog is its own widget shape and the streaming
+  loader pattern was unnecessary for the spec-bounded payload size.
+  External viewer is still available via the **Open Externally**
+  button.
+- **Save As + Open Externally** are buttons on the dialog header bar.
+  Right-click context menu on the placeholder is not wired; **Copy
+  Image** to the clipboard is the main remaining item from the
+  original right-click menu spec.
 - **JPEG / PNG / GIF only** at the decoder. Spec-mandated; SVG / WebP
-  / AVIF / HEIC explicitly rejected at sniff time even if some future
-  server canonicalises to them.
-
----
-
-Status: scoping. No code on this branch — the phased work lands on
-follow-up branches (`claude/inline-media-phase-a`, etc).
+  / AVIF / HEIC explicitly rejected at sniff time.
+- **Send-button visibility is cap-gated.** The paperclip is hidden
+  unless `HTLC_CAP_INLINE_MEDIA` is negotiated. Most Hotline servers
+  don't speak the extension; an inert button would be misleading.
+- **Per-task heap context is reclaimed by the task table.** Added
+  during the Phase 9.C round-2 review: `struct task` now carries an
+  optional `GDestroyNotify ptr_free` that fires when the entry is
+  removed (including the `g_hash_table_remove_all` sweep
+  hx_htlc_close runs on disconnect). The inline-media upload and
+  download helpers opt in; this closes a leak where in-flight
+  contexts survived the connection that owned them.
