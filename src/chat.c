@@ -42,6 +42,7 @@
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "history.h"
 #include "chat_history.h"
+#include "inline_media_attach.h"
 #include "inline_media_dialog.h"
 #include "gtkutil.h"
 #include "xtext.h"
@@ -2380,6 +2381,17 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
         GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
         gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
         gtk_box_append (GTK_BOX (hbox), emoji_btn);
+
+        /* Phase 9.C inline-media attach. Initially hidden; the
+		 * setbtns→inline_media_attach_refresh_all_chats path
+		 * flips it visible once the LOGIN reply confirms
+		 * CAP_INLINE_MEDIA. Most Hotline servers don't ship the
+		 * extension, so the button stays hidden on those
+		 * sessions — same shape as the voice toolbar gating. */
+        gchat->media_attach_btn = hx_inline_media_attach_button_new (
+            gchat, &sess->htlc);
+        gtk_widget_set_valign (gchat->media_attach_btn, GTK_ALIGN_END);
+        gtk_box_append (GTK_BOX (hbox), gchat->media_attach_btn);
     }
 
     /* Phase 3 / docking: the Chat panel's content is an AdwTabView
@@ -2797,6 +2809,14 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
         GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
         gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
         gtk_box_append (GTK_BOX (hbox), emoji_btn);
+
+        /* Phase 9.C inline-media attach — same cap-gated
+		 * visibility as the main chat input, scoped to this
+		 * pchat's cid. */
+        gchat->media_attach_btn = hx_inline_media_attach_button_new (
+            gchat, &sess->htlc);
+        gtk_widget_set_valign (gchat->media_attach_btn, GTK_ALIGN_END);
+        gtk_box_append (GTK_BOX (hbox), gchat->media_attach_btn);
     }
 
     /* HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,

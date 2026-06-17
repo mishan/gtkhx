@@ -21,13 +21,26 @@
  * value is replaced (g_hash_table_insert with an existing key),
  * removed (g_hash_table_remove / _foreach_remove / _iter_remove), or
  * the table itself is destroyed. Frees the task's owned heap state
- * (the optional `str` label) and the task struct itself. */
+ * (the optional `str` label, the optional per-task `ptr` context if
+ * a destructor was registered) and the task struct itself.
+ *
+ * The ptr_free hook lets callers tie a per-task heap context's
+ * lifetime to the task entry. The biggest win is disconnect-time
+ * cleanup: hx_htlc_close walks sess->tasks with
+ * g_hash_table_remove_all, which fires task_free per surviving
+ * entry — previously the rcv_task callback's owned context (e.g.
+ * inline-media upload/download ctx) leaked because the callback
+ * never ran. With ptr_free wired up the context is reclaimed
+ * automatically. */
 static void
 task_free (gpointer p)
 {
     struct task *tsk = p;
     if (!tsk) {
         return;
+    }
+    if (tsk->ptr && tsk->ptr_free) {
+        tsk->ptr_free (tsk->ptr);
     }
     g_free (tsk->str);
     g_free (tsk);
