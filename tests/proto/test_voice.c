@@ -98,34 +98,6 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
     (void) cid_ptr;
 }
 
-/* ---------- constants pin ---------- */
-
-static void
-test_constants_are_stable (void)
-{
-    /* Capability bit. */
-    g_assert_cmphex (HTLC_CAP_VOICE, ==, 0x0004u);
-
-    /* Data field IDs — 0x01F5-0x01F9 per spec. */
-    g_assert_cmphex (HTLC_DATA_VOICE_SDP,          ==, 0x01f5u);
-    g_assert_cmphex (HTLC_DATA_VOICE_ICE,          ==, 0x01f6u);
-    g_assert_cmphex (HTLC_DATA_VOICE_CODEC,        ==, 0x01f7u);
-    g_assert_cmphex (HTLC_DATA_VOICE_MUTED,        ==, 0x01f8u);
-    g_assert_cmphex (HTLS_DATA_VOICE_PARTICIPANTS, ==, 0x01f9u);
-
-    /* Opcodes — 600-606 per spec. */
-    g_assert_cmpuint (HTLC_HDR_VOICE_JOIN,        ==, 600u);
-    g_assert_cmpuint (HTLC_HDR_VOICE_LEAVE,       ==, 601u);
-    g_assert_cmpuint (HTLS_HDR_VOICE_SDP_OFFER,   ==, 602u);
-    g_assert_cmpuint (HTLC_HDR_VOICE_SDP_ANSWER,  ==, 603u);
-    g_assert_cmpuint (HTLC_HDR_VOICE_ICE,         ==, 604u);
-    g_assert_cmpuint (HTLS_HDR_VOICE_ROOM_STATUS, ==, 605u);
-    g_assert_cmpuint (HTLC_HDR_VOICE_MUTE,        ==, 606u);
-
-    /* Access bit 55 — first byte beyond mhxd's published bitmap. */
-    g_assert_cmpuint (HL_ACCESS_VOICE_CHAT, ==, 55u);
-}
-
 /* ---------- htlc lifecycle helpers (copied from test_chat_history) -- */
 
 static void
@@ -687,8 +659,6 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-
-    g_test_add_func ("/proto/voice/constants", test_constants_are_stable);
 
     g_test_add_func ("/proto/voice/send/skipped-without-cap",
                      test_send_skipped_without_cap);

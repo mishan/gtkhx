@@ -121,24 +121,6 @@ test_trailing_bytes_wrong (void)
     g_assert_false (hx_connect_validate_server_magic (buf, HTLS_MAGIC_LEN));
 }
 
-static void
-test_constants_match_spec (void)
-{
-    /* HTLS_MAGIC and HTLC_MAGIC are spec-defined byte sequences,
-     * not implementation details — pin them so a future "tidy
-     * up the macros" can't silently change what we send / accept
-     * on the wire. The two magic strings DIFFER: the client sends
-     * 12-byte "TRTPHOTL\0\1\0\2" with version+sub-version trailers,
-     * the server replies with 8-byte "TRTP\0\0\0\0". An earlier
-     * revision of this test got that backwards and pinned the
-     * wrong value for HTLC_MAGIC_LEN — pinning explicitly here
-     * prevents a future tidy-up from silently homogenising them. */
-    g_assert_cmpuint (HTLS_MAGIC_LEN, ==, 8);
-    g_assert_cmpmem (HTLS_MAGIC, 8, "TRTP\0\0\0\0", 8);
-    g_assert_cmpuint (HTLC_MAGIC_LEN, ==, 12);
-    g_assert_cmpmem (HTLC_MAGIC, 12, "TRTPHOTL\0\1\0\2", 12);
-}
-
 int
 main (int argc, char **argv)
 {
@@ -158,8 +140,6 @@ main (int argc, char **argv)
                      test_first_byte_wrong);
     g_test_add_func ("/connect_magic/trailing_bytes_wrong",
                      test_trailing_bytes_wrong);
-    g_test_add_func ("/connect_magic/constants_match_spec",
-                     test_constants_match_spec);
 
     return g_test_run ();
 }

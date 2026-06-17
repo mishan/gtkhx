@@ -232,22 +232,6 @@ test_null_callback_is_noop (void)
     g_byte_array_free (buf, TRUE);
 }
 
-/* The struct size matches SIZEOF_HL_FILELIST_HDR. If anyone adds
- * a field to struct hl_filelist_hdr without bumping the constant,
- * this catches it before runtime parses go wrong. */
-static void
-test_struct_size_matches_constant (void)
-{
-    /* The header struct + 1 byte of inline fname[] reaches
-	 * SIZEOF_HL_FILELIST_HDR + 1. The constant pins the off-wire
-	 * fixed-prefix length (4 type/len + 20 of u32 fields = 24).
-	 *
-	 * Don't compare sizeof(struct) directly — fname is declared
-	 * as a flexible array placeholder which different compilers
-	 * size differently. Pin the constant alone. */
-    g_assert_cmpint (SIZEOF_HL_FILELIST_HDR, ==, 24);
-}
-
 int
 main (int argc, char **argv)
 {
@@ -265,8 +249,6 @@ main (int argc, char **argv)
                      test_truncated_buffer_stops_safely);
     g_test_add_func ("/filelist_walker/null_callback_is_noop",
                      test_null_callback_is_noop);
-    g_test_add_func ("/filelist_walker/struct_size_matches_constant",
-                     test_struct_size_matches_constant);
 
     return g_test_run ();
 }

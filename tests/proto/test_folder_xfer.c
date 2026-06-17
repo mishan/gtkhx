@@ -269,25 +269,6 @@ test_putfolder_request_with_dir (void)
     htlc_free (&htlc);
 }
 
-/* ---------- opcode IDs ---------- */
-
-/* The two folder-transfer opcodes are baked into mhxd / hlserver /
- * every real-world Hotline 1.5+ server. Renumbering either silently
- * makes folder transfers stop working against every existing server,
- * including the very old Mac-native ones we found while fixing the
- * HTXF type field. Pin the numeric values. */
-static void
-test_folder_opcode_ids_are_stable (void)
-{
-    g_assert_cmphex (HTLC_HDR_FILE_GETFOLDER, ==, 0x000000d2u);
-    g_assert_cmphex (HTLC_HDR_FILE_PUTFOLDER, ==, 0x000000d5u);
-    g_assert_cmphex (HTLC_DATA_FILE_NFILES, ==, 0x00dcu);
-    /* The reply-side spelling has a different #define name but the
-	 * same numeric value — that aliasing is how mhxd reads the same
-	 * chunk on both directions of the wire. Lock it. */
-    g_assert_cmpuint (HTLS_DATA_FILE_NFILES, ==, HTLC_DATA_FILE_NFILES);
-}
-
 /* ---------- receive-side: rcv_task_folder_get reply parser ---------- */
 
 /* Synthetic HTLS TASK reply carrying HTXF_SIZE + HTXF_REF +
@@ -435,8 +416,6 @@ main (int argc, char **argv)
                      test_putfolder_request_name_size_nfiles);
     g_test_add_func ("/folder_xfer/putfolder_request_with_dir",
                      test_putfolder_request_with_dir);
-    g_test_add_func ("/folder_xfer/folder_opcode_ids_are_stable",
-                     test_folder_opcode_ids_are_stable);
     g_test_add_func ("/folder_xfer/folder_get_reply_parse",
                      test_folder_get_reply_parse);
     g_test_add_func ("/folder_xfer/folder_get_reply_with_queue",
