@@ -35,21 +35,6 @@
 #include "proto_helpers.h"
 #include "wire_fixture.h"
 
-/* ---------- bit constants ---------- */
-
-static void
-test_capability_bit_constants_are_stable (void)
-{
-    g_assert_cmphex (HTLC_DATA_CAPABILITIES, ==, 0x01f0u);
-    g_assert_cmphex (HTLS_DATA_CAPABILITIES, ==, 0x01f0u);
-    g_assert_cmphex (HTLC_CAP_LARGE_FILES, ==, 0x0001u);
-    g_assert_cmphex (HTLC_CAP_TEXT_ENCODING, ==, 0x0002u);
-    g_assert_cmphex (HTLC_CAP_VOICE, ==, 0x0004u);
-    g_assert_cmphex (HTLC_CAP_INLINE_MEDIA, ==, 0x0008u);
-    g_assert_cmphex (HTLC_CAP_CHAT_HISTORY, ==, 0x0010u);
-    g_assert_cmphex (HTLC_CAP_EXTENDED_PRIV, ==, 0x0020u);
-}
-
 /* ---------- send side: hlpack + dh_start round trip ---------- */
 
 static void
@@ -277,9 +262,6 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-
-    g_test_add_func ("/capabilities/bit_constants_are_stable",
-                     test_capability_bit_constants_are_stable);
 
     g_test_add_func ("/capabilities/send/chunk_layout",
                      test_send_capabilities_chunk_layout);

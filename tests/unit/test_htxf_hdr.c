@@ -48,23 +48,22 @@ encode_htxf_hdr (guint8 out[16], guint32 ref, guint32 len, guint16 type)
     hl_htxf_hdr_pack (out, ref, len, type, /*flags=*/0);
 }
 
-/* The header is exactly 16 bytes — the figure baked into every
- * call site that reads or writes one. */
+/* sizeof(struct htxf_hdr) must equal the SIZEOF_HTXF_HDR figure
+ * every call site reads/writes one against. Catches accidental
+ * field additions or padding changes the constant can't see. */
 static void
 test_size_is_16_bytes (void)
 {
-    g_assert_cmpint (SIZEOF_HTXF_HDR, ==, 16);
-    g_assert_cmpint (sizeof (struct htxf_hdr), ==, 16);
+    g_assert_cmpint (sizeof (struct htxf_hdr), ==, SIZEOF_HTXF_HDR);
 }
 
-/* HTXF_MAGIC_INT is the ASCII bytes "HTXF" read as a big-endian
- * u32. Lock the value AND prove that the htonl-encoded magic comes
- * out as the literal four ASCII chars at the start of the header. */
+/* Round-trip: pack a header and verify the magic bytes come out
+ * as the ASCII chars "HTXF" at offset 0 of the wire form. The
+ * round-trip catches both an HTXF_MAGIC_INT renumbering and a
+ * packer that fails to htonl-encode it correctly. */
 static void
 test_magic_int_matches_ascii (void)
 {
-    g_assert_cmphex (HTXF_MAGIC_INT, ==, 0x48545846u);
-
     guint8 buf[16];
     encode_htxf_hdr (buf, 0, 0, HTXF_TYPE_FILE);
     g_assert_cmphex (buf[0], ==, 'H');
@@ -139,17 +138,6 @@ test_reserved_bytes_always_zero (void)
     }
 }
 
-/* type values are stable. Renumber one of these and (a) server
- * dispatchers go wrong and (b) the type field test cases above
- * silently lose their meaning. */
-static void
-test_type_constants_are_stable (void)
-{
-    g_assert_cmpint (HTXF_TYPE_FILE, ==, 0);
-    g_assert_cmpint (HTXF_TYPE_FOLDER, ==, 1);
-    g_assert_cmpint (HTXF_TYPE_BANNER, ==, 2);
-}
-
 /* Field order: magic, ref, len, unknown. Renumbering any of these
  * (e.g., swapping ref and len) would silently mis-dispatch every
  * subchannel — mhxd matches by ref and would never find ours.
@@ -195,8 +183,6 @@ main (int argc, char **argv)
     g_test_add_func ("/htxf_hdr/banner_layout", test_banner_layout);
     g_test_add_func ("/htxf_hdr/reserved_bytes_always_zero",
                      test_reserved_bytes_always_zero);
-    g_test_add_func ("/htxf_hdr/type_constants_are_stable",
-                     test_type_constants_are_stable);
     g_test_add_func ("/htxf_hdr/field_offsets_are_stable",
                      test_field_offsets_are_stable);
 

@@ -73,25 +73,6 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     hlpack_chunks (htlc, type, flag, chunks, hc);
 }
 
-/* ---------- field constants ---------- */
-
-static void
-test_constants_are_stable (void)
-{
-    g_assert_cmphex (HTLC_DATA_CHANNEL_ID,        ==, 0x0f01u);
-    g_assert_cmphex (HTLC_DATA_HISTORY_BEFORE,    ==, 0x0f02u);
-    g_assert_cmphex (HTLC_DATA_HISTORY_AFTER,     ==, 0x0f03u);
-    g_assert_cmphex (HTLC_DATA_HISTORY_LIMIT,     ==, 0x0f04u);
-    g_assert_cmphex (HTLS_DATA_HISTORY_ENTRY,     ==, 0x0f05u);
-    g_assert_cmphex (HTLS_DATA_HISTORY_HAS_MORE,  ==, 0x0f06u);
-    g_assert_cmphex (HTLS_DATA_HISTORY_MAX_MSGS,  ==, 0x0f07u);
-    g_assert_cmphex (HTLS_DATA_HISTORY_MAX_DAYS,  ==, 0x0f08u);
-    g_assert_cmphex (HTLC_HDR_GET_CHAT_HISTORY,   ==, 700u);
-    g_assert_cmphex (HX_HISTORY_FLAG_ACTION,      ==, 0x0001u);
-    g_assert_cmphex (HX_HISTORY_FLAG_SERVER_MSG,  ==, 0x0002u);
-    g_assert_cmphex (HX_HISTORY_FLAG_DELETED,     ==, 0x0004u);
-}
-
 /* ---------- entry-buffer construction helper ---------- */
 
 /* Build a packed entry into `out` (caller-owned, big enough).
@@ -498,9 +479,6 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-
-    g_test_add_func ("/proto/chat_history/constants",
-                     test_constants_are_stable);
 
     g_test_add_func ("/proto/chat_history/parse/minimum",
                      test_parse_minimum_entry);

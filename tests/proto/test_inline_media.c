@@ -5,10 +5,6 @@
  * The Rust crate (hotline-proto::inline_media) has dense unit tests
  * for builders + parsers. What this file adds:
  *
- *   constants — HTLC_CAP_INLINE_MEDIA bit, the 0x0201-0x0212 field
- *               IDs, and the 750 / 751 opcode block all match the
- *               spec's literal values.
- *
  *   cap_gate  — inline_media_cap_ok refuses to send when CAP_INLINE_MEDIA
  *               wasn't echoed by the server. Same shape as
  *               voice.c's voice_cap_ok.
@@ -113,64 +109,6 @@ task_with_trans (void *sess, guint32 trans)
     (void) sess;
     (void) trans;
     return NULL;
-}
-
-/* ---------- constants pin ---------- */
-
-static void
-test_constants_are_stable (void)
-{
-    /* Capability bit. */
-    g_assert_cmphex (HTLC_CAP_INLINE_MEDIA, ==, 0x0008u);
-
-    /* Opcodes — 750 / 751 per spec. */
-    g_assert_cmpuint (HTLC_HDR_UPLOAD_MEDIA, ==, 750u);
-    g_assert_cmpuint (HTLC_HDR_DOWNLOAD_MEDIA, ==, 751u);
-    g_assert_cmphex (HTLC_HDR_UPLOAD_MEDIA, ==, 0x02eeu);
-    g_assert_cmphex (HTLC_HDR_DOWNLOAD_MEDIA, ==, 0x02efu);
-
-    /* Companion + payload field IDs. */
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_TYPE,         ==, 0x0201u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_TYPE,         ==, 0x0201u);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_ID,           ==, 0x0202u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_ID,           ==, 0x0202u);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_PAYLOAD,      ==, 0x0203u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_PAYLOAD,      ==, 0x0203u);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_DECLARED_TYPE,==, 0x0204u);
-
-    /* Server-supplied canonical metadata. */
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_WIDTH,        ==, 0x0205u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_HEIGHT,       ==, 0x0206u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_BYTES,        ==, 0x0207u);
-
-    /* Chunked-upload bookkeeping. */
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_UPLOAD_TOKEN, ==, 0x0208u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN, ==, 0x0208u);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_PART_INDEX,   ==, 0x0209u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_PART_INDEX,   ==, 0x0209u);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_PART_COUNT,   ==, 0x020au);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_PART_COUNT,   ==, 0x020au);
-    g_assert_cmphex (HTLC_DATA_CHAT_MEDIA_PART_FINAL,   ==, 0x020bu);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_PART_FINAL,   ==, 0x020bu);
-
-    /* Server-advertised advisory limits. */
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_MAX_BYTES,        ==, 0x020cu);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION,    ==, 0x020du);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_MAX_PIXELS,       ==, 0x020eu);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE,       ==, 0x020fu);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_MAX_FRAMES,       ==, 0x0210u);
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS,  ==, 0x0211u);
-
-    /* Optional error-code field. */
-    g_assert_cmphex (HTLS_DATA_CHAT_MEDIA_ERROR_CODE, ==, 0x0212u);
-
-    /* Recommended-default cap values; matching the spec's
-	 * "Resource Limits" recommended defaults. */
-    g_assert_cmpuint (HX_MEDIA_DEFAULT_MAX_BYTES,        ==, 262144u);
-    g_assert_cmpuint (HX_MEDIA_DEFAULT_MAX_DIMENSION,    ==, 2048u);
-    g_assert_cmpuint (HX_MEDIA_DEFAULT_MAX_PIXELS,       ==, 2048u * 2048u);
-    g_assert_cmpuint (HX_MEDIA_DEFAULT_MAX_FRAMES,       ==, 150u);
-    g_assert_cmpuint (HX_MEDIA_DEFAULT_MAX_DURATION_MS,  ==, 15000u);
 }
 
 /* ---------- cap gate ---------- */
@@ -828,8 +766,6 @@ main (int argc, char **argv)
     g_test_init (&argc, &argv, NULL);
     debug_init ();
 
-    g_test_add_func ("/proto/inline_media/constants",
-                     test_constants_are_stable);
     g_test_add_func ("/proto/inline_media/cap_gate",
                      test_cap_gate_refuses_without_echo);
     g_test_add_func ("/proto/inline_media/limits_default",

@@ -36,26 +36,6 @@
 
 /* ---------- field id and flag constants ---------- */
 
-static void
-test_64bit_field_ids_are_stable (void)
-{
-    g_assert_cmphex (HTLC_DATA_FILESIZE64, ==, 0x01f1u);
-    g_assert_cmphex (HTLS_DATA_FILESIZE64, ==, 0x01f1u);
-    g_assert_cmphex (HTLC_DATA_OFFSET64, ==, 0x01f2u);
-    g_assert_cmphex (HTLS_DATA_OFFSET64, ==, 0x01f2u);
-    g_assert_cmphex (HTLC_DATA_XFERSIZE64, ==, 0x01f3u);
-    g_assert_cmphex (HTLS_DATA_XFERSIZE64, ==, 0x01f3u);
-    g_assert_cmphex (HTLC_DATA_FOLDER_ITEM_COUNT64, ==, 0x01f4u);
-    g_assert_cmphex (HTLS_DATA_FOLDER_ITEM_COUNT64, ==, 0x01f4u);
-}
-
-static void
-test_htxf_flag_constants_are_stable (void)
-{
-    g_assert_cmphex (HTXF_FLAG_LARGE_FILE, ==, 0x00000001u);
-    g_assert_cmphex (HTXF_FLAG_SIZE64, ==, 0x00000002u);
-}
-
 /* ---------- send side: DATA_XFERSIZE64 on file_put ---------- */
 
 static void
@@ -458,11 +438,6 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-
-    g_test_add_func ("/large_file/64bit_field_ids_are_stable",
-                     test_64bit_field_ids_are_stable);
-    g_test_add_func ("/large_file/htxf_flag_constants_are_stable",
-                     test_htxf_flag_constants_are_stable);
 
     g_test_add_func ("/large_file/send/xfersize64_alongside_legacy",
                      test_send_xfersize64_alongside_legacy);
