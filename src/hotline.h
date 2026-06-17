@@ -452,6 +452,14 @@ struct hl_user_data {
 #define HX_MEDIA_DEFAULT_MAX_FRAMES ((guint32)150)
 #define HX_MEDIA_DEFAULT_MAX_DURATION_MS ((guint32)15000)
 
+/* Hard client-side ceiling on the chunked-upload session token
+ * (HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN). The spec describes tokens
+ * as ≤ 64 bytes; we accept up to 1 KiB to absorb future spec
+ * evolution but refuse anything beyond that so a hostile server
+ * can't force us into 64 KiB allocations on every chunk reply
+ * (and have us echo them back on every follow-up). */
+#define HX_MEDIA_MAX_UPLOAD_TOKEN ((gsize)1024)
+
 /* HTXF handshake flags. Default (0x00) is the 16-byte legacy
  * handshake. In large-file mode the handshake grows to 24 bytes
  * with an 8-byte big-endian length field appended.

@@ -286,6 +286,28 @@ integration_send_message (int fd, struct htlc_conn *htlc, guint32 type,
 }
 
 gboolean
+integration_send_chunks (int fd, struct htlc_conn *htlc, guint32 type,
+                         guint32 flag, const struct hx_chunk *chunks, int hc)
+{
+    /* Same buffer-reset shape as integration_send_message — keeps
+	 * back-to-back sends from interleaving in htlc->out. */
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+
+    hlpack_chunks (htlc, type, flag, chunks, hc);
+
+    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
+
+    g_free (htlc->out.buf);
+    htlc->out.buf = NULL;
+    htlc->out.pos = 0;
+    htlc->out.len = 0;
+    return ok;
+}
+
+gboolean
 integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
 {
     /* Reset in buffer. */

@@ -138,6 +138,7 @@ extern int hx_integration_connect_to (const char *host, int port,
 /* ---- Higher-level helpers built on send / recv ----------------- */
 
 struct htlc_conn;
+struct hx_chunk;
 
 /*
  * Pack and send a Hotline message via the production hlpack helper.
@@ -157,6 +158,23 @@ struct htlc_conn;
 extern gboolean integration_send_message (int fd, struct htlc_conn *htlc,
                                           guint32 type, guint32 flag, int hc,
                                           ...);
+
+/*
+ * Array-shaped variant of integration_send_message. Same packing
+ * + framing semantics, but takes a pre-built struct hx_chunk
+ * array (as the Phase R2 Rust builders produce) rather than
+ * the variadic shape. Use this when a test wants to route the
+ * wire shape through the production hotline-proto builders
+ * instead of hand-rolling the chunk layout in the test —
+ * keeps the test honest by exercising the same builder code the
+ * production helper exercises.
+ *
+ * Returns TRUE on full send.
+ */
+extern gboolean integration_send_chunks (int fd, struct htlc_conn *htlc,
+                                         guint32 type, guint32 flag,
+                                         const struct hx_chunk *chunks,
+                                         int hc);
 
 /*
  * Read one full Hotline message into htlc->in (overwriting any

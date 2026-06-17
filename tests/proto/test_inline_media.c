@@ -30,7 +30,90 @@
 #include "proto_helpers.h"
 #include "hotline_proto.h"
 #include "inline_media.h"
+#include "inline_media_upload.h"
 #include "debug.h"
+
+/* inline_media_upload.c uses task_new (in tasks.c) + hlwrite_chunks
+ * (in network.c) + the_session global (in hx.c). All three pull in
+ * GTK / pthread / GIOChannel state that doesn't make sense in a
+ * Tier 2 binary. Stub them with just the bookkeeping the tests
+ * actually inspect:
+ *
+ *   task_new — record the ctx pointer the upload helper allocated
+ *              on a static fake_task, return a pointer to it so
+ *              hx_send_upload_media_chunked doesn't bail with
+ *              ENOENT. The test reads captured_upload_ctx after
+ *              the call to drive rcv_task_upload_media directly.
+ *   hlwrite_chunks — delegate to hlpack_chunks so the first chunk's
+ *              wire shape lands in htlc->out.buf, where the test
+ *              can choose to inspect or discard.
+ *   the_session — zeroed; the only test path that would touch
+ *              it (chunked-continuation task_with_trans lookup)
+ *              bails BEFORE the lookup on the oversized-token
+ *              branch. */
+static struct task fake_task;
+static void *captured_upload_ctx = NULL;
+
+extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
+                              void *ptr, void *data, const char *str);
+struct task *
+task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
+          const char *str)
+{
+    (void) htlc;
+    (void) rcv;
+    (void) data;
+    (void) str;
+    fake_task.ptr = ptr;
+    captured_upload_ctx = ptr;
+    return &fake_task;
+}
+
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type,
+                            guint32 flag, const struct hx_chunk *chunks,
+                            int hc);
+void
+hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                const struct hx_chunk *chunks, int hc)
+{
+    hlpack_chunks (htlc, type, flag, chunks, hc);
+}
+
+/* the_session is a session*, dereferenced by inline_media_upload.c
+ * (chunked-continuation task_with_trans lookup). The oversized-token
+ * test path bails BEFORE that lookup, so an opaque-pointer extern
+ * is enough to satisfy the linker without dragging in src/hx.h's
+ * full session typedef. */
+extern void *the_session;
+void *the_session = NULL;
+
+/* task_inerror is in tasks.c; we want the test to drive a NON-error
+ * intermediate reply (the oversized-token branch sits behind a
+ * task_inerror==FALSE check). Return 0 unconditionally — the
+ * oversized-token test won't go anywhere near an actual error
+ * reply. */
+extern int task_inerror (struct htlc_conn *htlc);
+int
+task_inerror (struct htlc_conn *htlc)
+{
+    (void) htlc;
+    return 0;
+}
+
+/* task_with_trans only gets called on the chunked-continuation
+ * hand-off path; the oversized-token branch bails first. Stub
+ * returns NULL — if the test ever reaches the lookup, the production
+ * code will treat the lookup failure as "cannot identify current
+ * task" and bail to deliver_synthetic_failure with a different
+ * message (caught by the message-substring assertion below). */
+extern struct task *task_with_trans (void *sess, guint32 trans);
+struct task *
+task_with_trans (void *sess, guint32 trans)
+{
+    (void) sess;
+    (void) trans;
+    return NULL;
+}
 
 /* ---------- constants pin ---------- */
 
@@ -547,6 +630,139 @@ test_parse_upload_token_reply (void)
     g_assert (memcmp (tok, "tok-X", 5) == 0);
 }
 
+/* ---------- rcv_task_upload_media: oversized token rejection ---------- */
+
+/* Captures the result the callback fires with so the test can
+ * inspect after the rcv handler returns. */
+typedef struct
+{
+    gboolean fired;
+    guint16 error_code;
+    gboolean has_media_id;
+    char error_message[256];
+} upload_callback_capture;
+
+static void
+capture_upload_callback (struct htlc_conn *htlc,
+                         const HxInlineMediaUploadResult *r, gpointer user_data)
+{
+    (void) htlc;
+    upload_callback_capture *cap = user_data;
+    cap->fired = TRUE;
+    cap->error_code = r->error_code;
+    cap->has_media_id = (r->media_id != NULL);
+    if (r->error_message && r->error_message_len > 0) {
+        gsize n = r->error_message_len < sizeof (cap->error_message) - 1
+                      ? r->error_message_len
+                      : sizeof (cap->error_message) - 1;
+        memcpy (cap->error_message, r->error_message, n);
+        cap->error_message[n] = '\0';
+    }
+}
+
+/* Reset the upload-helper task globals between cases. fake_task
+ * and the task table are write-once shared state, so successive
+ * tests in the same binary need a clean slate. */
+static void
+reset_upload_stub_state (void)
+{
+    memset (&fake_task, 0, sizeof (fake_task));
+    captured_upload_ctx = NULL;
+}
+
+/* A malicious / buggy server sends a CHAT_MEDIA_UPLOAD_TOKEN
+ * exceeding our HX_MEDIA_MAX_UPLOAD_TOKEN client-side ceiling on
+ * the first intermediate reply of a chunked upload. The state
+ * machine MUST refuse the token, surface a synthetic
+ * "token oversized" failure via the caller's callback, and
+ * NEVER copy the token bytes into the per-upload context.
+ *
+ * Without the bound, a hostile server could force us into a
+ * per-chunk-reply allocation up to u16::MAX, plus echo the same
+ * blob back on every follow-up — a cheap amplification vector.
+ *
+ * The test drives the production rcv_task_upload_media on a real
+ * hx_upload_ctx allocated by hx_send_upload_media_chunked, so it
+ * exercises the exact code path production runs through. The
+ * task table / hlwrite_chunks plumbing is stubbed at the file
+ * scope (see the stubs near the top of this file). */
+static void
+test_rcv_task_upload_media_rejects_oversized_token (void)
+{
+    reset_upload_stub_state ();
+
+    struct htlc_conn htlc;
+    memset (&htlc, 0, sizeof (htlc));
+    htlc.caps = HTLC_CAP_INLINE_MEDIA;
+    htlc.trans = 1;
+    /* Pick a chunk size that forces hx_send_upload_media_chunked
+	 * into the chunked path on a small payload — keeps the test
+	 * cheap. inline_media_chunk_size clamps to
+	 * HX_MEDIA_DEFAULT_CHUNK_SIZE on the upper end, so anything
+	 * smaller than that passes through unchanged. */
+    htlc.media_chunk_size = 100;
+
+    guint8 payload[300];
+    memset (payload, 0xAB, sizeof (payload));
+
+    upload_callback_capture cap;
+    memset (&cap, 0, sizeof (cap));
+
+    g_assert_true (hx_send_upload_media_chunked (
+        &htlc, payload, sizeof (payload), "image/png", 9,
+        capture_upload_callback, &cap, /*user_data_free=*/NULL));
+    /* The stubbed task_new captured the upload ctx; without it
+	 * the test can't drive rcv_task_upload_media. */
+    g_assert_nonnull (captured_upload_ctx);
+
+    /* Build an intermediate reply with an UPLOAD_TOKEN that
+	 * deliberately overshoots the client-side ceiling. We hand-
+	 * roll the buffer instead of going through hlpack_chunks so
+	 * the oversized chunk length lands intact on the wire even
+	 * though no production sender would emit one. */
+    gsize oversized_len = HX_MEDIA_MAX_UPLOAD_TOKEN + 1;
+    /* Each chunk on the wire is {2 byte tag, 2 byte len, len
+	 * bytes payload}, on top of the SIZEOF_HL_HDR transaction
+	 * header. */
+    gsize chunk_overhead = SIZEOF_HL_HDR + 4;
+    g_free (htlc.in.buf);
+    htlc.in.buf = g_malloc0 (chunk_overhead + oversized_len);
+    htlc.in.pos = chunk_overhead + oversized_len;
+    htlc.in.len = htlc.in.pos;
+    /* Tag = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN, big-endian. */
+    htlc.in.buf[SIZEOF_HL_HDR + 0]
+        = (HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN >> 8) & 0xff;
+    htlc.in.buf[SIZEOF_HL_HDR + 1]
+        = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN & 0xff;
+    htlc.in.buf[SIZEOF_HL_HDR + 2] = (oversized_len >> 8) & 0xff;
+    htlc.in.buf[SIZEOF_HL_HDR + 3] = oversized_len & 0xff;
+    /* Payload bytes left at zero — content doesn't matter, only
+	 * length does. */
+
+    /* Drive the production rcv handler. */
+    rcv_task_upload_media (&htlc, captured_upload_ctx, NULL);
+
+    /* Callback must have fired with a synthetic failure. */
+    g_assert_true (cap.fired);
+    g_assert_false (cap.has_media_id);
+    /* error_code is the spec MediaErrorCode — synthetic failures
+	 * use Generic (0). */
+    g_assert_cmpuint (cap.error_code, ==, 0);
+    /* Message must call out the oversized-token branch so we
+	 * don't silently treat any other synthetic-failure code path
+	 * as a pass. */
+    g_assert_nonnull (strstr (cap.error_message, "oversized"));
+
+    /* Clean ctx + buffers. fake_task.ptr_free was populated by
+	 * hx_send_upload_media_chunked when it registered the
+	 * task. */
+    if (fake_task.ptr_free && captured_upload_ctx) {
+        fake_task.ptr_free (captured_upload_ctx);
+    }
+    g_free (htlc.in.buf);
+    g_free (htlc.out.buf);
+}
+
 /* ---------- FFI parser: download reply + error code ---------- */
 
 static void
@@ -652,6 +868,8 @@ main (int argc, char **argv)
                      test_parse_upload_final_reply_extracts_handle);
     g_test_add_func ("/proto/inline_media/upload_token_reply",
                      test_parse_upload_token_reply);
+    g_test_add_func ("/proto/inline_media/upload_token_oversized_rejected",
+                     test_rcv_task_upload_media_rejects_oversized_token);
     g_test_add_func ("/proto/inline_media/download_reply_single",
                      test_parse_download_reply_single_shot);
     g_test_add_func ("/proto/inline_media/error_code_present",

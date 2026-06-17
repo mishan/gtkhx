@@ -22,10 +22,11 @@ servers before committing to the xtext surgery.
 
 The shipped scope deliberately omits some entries in the original send-
 path plan: **paste-from-clipboard and drag-and-drop** are not wired up
-yet (paperclip-only for v1), and **chunked upload is not implemented**
-(single-shot only, payload capped at u16 — ~63 KB after framing
-overhead). Both can be added without protocol-layer changes; see the
-"Remaining work" subsection under each phase for details.
+yet (paperclip-only for v1). **Chunked upload now ships** — the
+attach module routes through the new dispatcher that picks
+single-shot when the payload fits a single chunk, otherwise drives
+the multi-step UPLOAD_TOKEN echo state machine. Both shapes are
+spec-conformant and Tier 3 covers each round-trip.
 
 ## What the extension does
 
@@ -133,14 +134,29 @@ Shipped:
   a magic-byte sniff + size check runs against the effective per-
   upload cap (the smaller of the server's `DATA_CHAT_MEDIA_MAX_BYTES`
   and the 16-bit single-shot wire-framing ceiling).
-- Upload state machine in `src/inline_media_upload.{c,h}`. Single-shot
-  framing only — chunked is not wired through yet. The per-upload
-  context lifecycle is tied to the task table via the new
+- Upload state machine in `src/inline_media_upload.{c,h}`. Three
+  send entry points:
+  - `hx_send_upload_media_single` — single-shot framing.
+  - `hx_send_upload_media_chunked` — multi-chunk state machine
+    that builds chunk 0 via `gtkhx_proto_build_upload_media_first_chunks`,
+    parses the `UPLOAD_TOKEN` out of the intermediate reply, echoes
+    it on every follow-up via `_followup_chunks` with incrementing
+    `PART_INDEX`, and sets `PART_FINAL = 1` on the last chunk. The
+    final reply lands in the same `parse_upload_final_reply` path
+    as single-shot.
+  - `hx_send_upload_media` — production dispatcher; chooses
+    single-shot when the payload fits one chunk, otherwise the
+    chunked machine.
+  Per-upload context lifecycle is tied to the task table via the
   `task->ptr_free` hook (see the round-2 review commit on
   `claude/inline-media-phase-c-ui`), so a disconnect mid-upload
   reclaims both the upload-helper context and the caller's per-upload
   context (the attach ctx) via `g_hash_table_remove_all` rather than
-  leaking.
+  leaking. For chunked uploads, each chunk's reply hand-off works
+  the same shape `inline_media_download.c::rcv_task_download_media`
+  uses — the rcv handler clears the current task's `ptr` before
+  registering the next chunk's task so the post-rcv `task_delete`
+  doesn't reclaim a still-live ctx.
 - Cap re-check at both async boundaries (`on_file_picked` and
   `on_bytes_loaded`) so a disconnect / reconnect-to-non-capable-server
   race surfaces the actionable "Inline media isn't available on this
@@ -159,12 +175,6 @@ Remaining work (post-Phase-C polish, not blocking spec conformance):
 - **Drag-and-drop** onto input box via `GtkDropTarget` — not wired.
 - **Compose preview** (thumbnail + remove affordance before send) —
   not built. v1 fires the upload immediately on file pick.
-- **Chunked upload** — `inline_media_upload.c` rejects payloads
-  larger than 65 535 bytes since the single-shot builder can't frame
-  more. Chunked framing exists at the wire level; needs an upload-
-  side state machine that holds the token across replies. With the
-  server-recommended 256 KiB cap, the gap matters for screenshots
-  but not for typical chat attachments.
 - **Resize-on-oversized** affordance instead of a hard reject —
   pending a UX call.
 
@@ -250,23 +260,46 @@ the `DATA_CHAT_MEDIA_MAX_*` limits. No mock server needed.
 Shipped Tier 3 binary: `tests/integration/test_inline_media.c`,
 gated on the Janus matrix row via `HX_TEST_CAP_INLINE_MEDIA`.
 
-Seven end-to-end paths cover:
+Eleven end-to-end paths cover:
 
 - `cap_negotiation` — capability bit echoed in LOGIN reply.
 - `limits_advertised` — `DATA_CHAT_MEDIA_MAX_*` fields parse out of
   the LOGIN reply.
-- `upload_round_trip` — `TranUploadMedia` with a runtime-encoded 4×4
-  PNG (`gdk_pixbuf_save_to_buffer`); assert the final reply carries
-  a non-empty handle + canonical MIME and the announced dimensions.
+- `upload_round_trip` — single-shot `TranUploadMedia` with a
+  runtime-encoded 4×4 PNG; assert the final reply carries a
+  non-empty handle + canonical MIME and the announced dimensions.
+- `chunked_upload_round_trip` — multi-chunk `TranUploadMedia` with
+  a deterministically-noised PNG large enough to cross the server-
+  advertised `CHAT_MEDIA_CHUNK_SIZE`; drives the full
+  `UPLOAD_TOKEN` echo state machine and asserts the final reply
+  carries the canonical handle.
+- `chunked_upload_too_large` — chunked upload of a payload over
+  the server-advertised `CHAT_MEDIA_MAX_BYTES`; asserts the
+  state machine surfaces a task-error with a spec-conforming
+  `MediaErrorCode` (`PayloadTooLarge` (1) is what Janus picks; the
+  test accepts any code in 0..=5).
 - `chat_with_media_round_trip` — chain upload → `hx_send_chat_with_media`
   → drain to the broadcast relay, assert
   `gtkhx_proto_extract_chat_media_meta` finds the handle on the
   inbound chat.
 - `download_round_trip` — upload a PNG, fetch via
   `TranDownloadMedia`, assert reply carries `CHAT_MEDIA_PAYLOAD` with
-  a valid PNG signature.
-- `oversized_rejected` — server returns `MediaErrorCode = 1` on
-  oversized upload.
+  a valid image magic prefix.
+- `chunked_download_round_trip` — upload a noise PNG whose
+  canonical form exceeds `CHAT_MEDIA_CHUNK_SIZE`, then walk the
+  multi-chunk download loop (`PART_INDEX = 1, 2, …` until
+  `PART_FINAL`) and stitch the accumulator back together. Asserts
+  `part_count ≥ 2` so a future server that shrinks the canonical
+  payload into a single chunk would fail loud rather than
+  silently rejoin the single-chunk download path.
+- `oversized_rejected` — single-shot garbage payload; server
+  surfaces an actionable task-error code (Janus picks
+  `UnsupportedFormat` (2) since the magic-byte sniff trips first).
+- `unsupported_format_upload` — single-shot SVG payload with
+  declared MIME `image/svg+xml`; the spec forbids SVG / WebP /
+  AVIF / HEIC under the cap, so the server's magic-byte sniff
+  rejects with `UnsupportedFormat` (or `Generic`; both are
+  spec-conforming).
 - `unauthorized_download` — capability-correct request for a
   non-existent handle surfaces as a task-error with the spec
   `NotAuthorized` mapping.
@@ -353,7 +386,7 @@ data model and decoder pipeline in place.
 |---|---|---|
 | A | Wire protocol + capability echo + fixtures | Shipped |
 | B | Bounded decoder | Shipped |
-| C | Send UI (paperclip + file picker + single-shot upload) | Shipped; paste / drag-drop / chunked / compose preview pending |
+| C | Send UI (paperclip + file picker + single-shot & chunked upload) | Shipped; paste / drag-drop / compose preview pending |
 | D | Receive: placeholder + click-to-view dialog | Shipped; Copy Image pending |
 | E | Inline render via multi-subline padding | Deferred |
 | F | Tier 3 integration against Janus | Shipped |

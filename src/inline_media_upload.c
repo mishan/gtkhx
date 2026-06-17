@@ -70,13 +70,30 @@
  *     user_data_free (when set) so the caller's per-upload
  *     context is reclaimed in the same pass.
  *
- * Future: chunk index, accumulated bytes, upload token for
- * chunked uploads. Single-shot needs none of this. */
+ * Chunked uploads add a second wrinkle: each chunk sends a fresh
+ * UPLOAD_MEDIA transaction with its own trans id and its own
+ * task entry, but the SAME ctx threads through all of them.
+ * rcv_task_upload_media hands ctx ownership off to the next task
+ * by clearing the current entry's ptr before send_next_chunk runs
+ * (the same pattern inline_media_download.c::rcv_task_download_media
+ * uses for chunked replies). When the final reply lands, ctx falls
+ * out of the table via the final task's ptr_free hook. */
 typedef struct {
     HxInlineMediaUploadCallback on_done;
     gpointer user_data;
     GDestroyNotify user_data_free;
     gboolean callback_fired;
+
+    /* Chunked-upload state. payload == NULL for single-shot. */
+    guint8 *payload;        /* owned copy; freed in upload_ctx_free */
+    gsize payload_len;
+    char *declared_type;    /* NUL-terminated; or NULL */
+    gsize declared_type_len;
+    guint32 chunk_size;     /* per-chunk slice size */
+    guint16 part_count;     /* total number of chunks */
+    guint16 next_part_index; /* index of the chunk we'll send NEXT */
+    guint8 *upload_token;   /* owned copy; NULL until server hands one over */
+    gsize upload_token_len;
 } hx_upload_ctx;
 
 static void
@@ -90,6 +107,9 @@ upload_ctx_free (hx_upload_ctx *ctx)
 		 * the caller's per-upload context too. */
         ctx->user_data_free (ctx->user_data);
     }
+    g_free (ctx->payload);
+    g_free (ctx->declared_type);
+    g_free (ctx->upload_token);
     g_free (ctx);
 }
 
@@ -152,11 +172,292 @@ hx_send_upload_media_single (struct htlc_conn *htlc,
 	 * the typedef block above for the full rationale. */
     struct task *tsk = task_new (
         htlc, RCV_TASK_FN (rcv_task_upload_media), ctx, NULL, "upload-media");
-    if (tsk) {
-        tsk->ptr_free = (GDestroyNotify) upload_ctx_free;
+    if (!tsk) {
+        /* Synchronous reject. Same shape as the chunked entry —
+		 * no wire write, ctx reclaimed, user_data left to the
+		 * caller. */
+        debug_log ("media",
+                   "upload: task_new failed for single-shot; "
+                   "synchronous reject");
+        ctx->user_data = NULL;
+        ctx->user_data_free = NULL;
+        upload_ctx_free (ctx);
+        return FALSE;
     }
+    tsk->ptr_free = (GDestroyNotify) upload_ctx_free;
     hlwrite_chunks (htlc, HTLC_HDR_UPLOAD_MEDIA, 0, chunks, hc);
     return TRUE;
+}
+
+/* ---- Chunked upload state machine ----
+ *
+ * Wire shape (recap of inline_media.rs):
+ *
+ *   chunk 0:  PAYLOAD + optional DECLARED_TYPE + PART_INDEX=0 +
+ *             PART_COUNT + PART_FINAL=0
+ *   chunk k (1 ≤ k < part_count - 1):
+ *             UPLOAD_TOKEN + PART_INDEX=k + PAYLOAD + PART_FINAL=0
+ *   chunk part_count - 1 (final):
+ *             UPLOAD_TOKEN + PART_INDEX + PAYLOAD + PART_FINAL=1
+ *
+ * Server reply on chunk 0: intermediate, carries UPLOAD_TOKEN.
+ * Server reply on follow-ups except the last: intermediate (may
+ *   echo UPLOAD_TOKEN; the spec says safe-to-echo so we accept
+ *   both with-and-without).
+ * Server reply on final chunk: TranUploadMedia success reply with
+ *   CHAT_MEDIA_ID + CHAT_MEDIA_TYPE + advisory dims/bytes. Same
+ *   shape rcv_task_upload_media's success path already handles.
+ *
+ * State machine entry:
+ *   hx_send_upload_media_chunked
+ *     ├─ build chunk 0 via build_upload_media_first_chunks
+ *     ├─ task_new("upload-media", ctx, ptr_free=upload_ctx_free)
+ *     ├─ ctx->next_part_index = 1   (next chunk to send)
+ *     └─ hlwrite_chunks
+ *
+ * State machine continuation (inside rcv_task_upload_media):
+ *   ├─ if task_inerror → deliver_failure → done
+ *   ├─ if next_part_index >= part_count → final reply expected
+ *   │     parse_upload_final_reply → deliver_success → done
+ *   ├─ else (intermediate reply):
+ *   │     ├─ if next_part_index == 1 → parse_upload_token_reply,
+ *   │     │     stash token. (Required on first reply.)
+ *   │     ├─ else → optionally re-stash token if server echoed it.
+ *   │     ├─ hand ctx ownership off (clear current task's ptr)
+ *   │     ├─ send_next_chunk → builds via _followup_chunks +
+ *   │     │     task_new with ptr_free again
+ *   │     └─ ctx->next_part_index++
+ *   └─ return — rcv.c runs task_delete on the current entry,
+ *       which is now ptr=NULL → no double free.
+ */
+
+/* Slice into ctx->payload for the chunk at index k. Returns
+ * (slice_ptr, slice_len) without copying — the bytes live in
+ * ctx->payload's owned buffer for the full upload lifetime. */
+static void
+upload_chunk_slice (const hx_upload_ctx *ctx, guint16 index,
+                    const guint8 **out_ptr, gsize *out_len)
+{
+    gsize start = (gsize) index * (gsize) ctx->chunk_size;
+    gsize remaining
+        = ctx->payload_len > start ? ctx->payload_len - start : 0;
+    gsize len = remaining < (gsize) ctx->chunk_size ? remaining
+                                                   : (gsize) ctx->chunk_size;
+    *out_ptr = ctx->payload + start;
+    *out_len = len;
+}
+
+/* Send the chunk at ctx->next_part_index using the follow-up
+ * builder + UPLOAD_TOKEN echo. Returns TRUE on send success. The
+ * caller is responsible for handing ctx ownership off from the
+ * current task entry BEFORE invoking this. */
+static gboolean
+send_next_chunk (struct htlc_conn *htlc, hx_upload_ctx *ctx)
+{
+    if (!ctx->upload_token || ctx->upload_token_len == 0) {
+        debug_log ("media",
+                   "upload: chunked continuation without UPLOAD_TOKEN");
+        return FALSE;
+    }
+    if (ctx->next_part_index == 0
+        || ctx->next_part_index >= ctx->part_count) {
+        debug_log ("media",
+                   "upload: chunked continuation index %u out of range "
+                   "(part_count=%u)",
+                   (unsigned) ctx->next_part_index,
+                   (unsigned) ctx->part_count);
+        return FALSE;
+    }
+    const guint8 *slice = NULL;
+    gsize slice_len = 0;
+    upload_chunk_slice (ctx, ctx->next_part_index, &slice, &slice_len);
+
+    gboolean is_final
+        = (guint32) (ctx->next_part_index + 1) >= (guint32) ctx->part_count;
+
+    struct hx_chunk chunks[4];
+    guint8 scratch[3];
+    int32_t hc = gtkhx_proto_build_upload_media_followup_chunks (
+        ctx->upload_token, ctx->upload_token_len, slice, slice_len,
+        ctx->next_part_index, is_final, chunks, G_N_ELEMENTS (chunks),
+        scratch, sizeof (scratch));
+    if (hc <= 0) {
+        debug_log ("media",
+                   "upload: follow-up builder rejected chunk %u/%u",
+                   (unsigned) ctx->next_part_index,
+                   (unsigned) ctx->part_count);
+        return FALSE;
+    }
+
+    struct task *tsk = task_new (
+        htlc, RCV_TASK_FN (rcv_task_upload_media), ctx, NULL, "upload-media");
+    if (!tsk) {
+        /* No task entry means no rcv routing — sending the chunk
+		 * would put bytes on the wire we'd never reconcile a reply
+		 * for. Fail closed; the caller restores ctx ownership on
+		 * the current task entry and surfaces a synthetic failure. */
+        debug_log ("media",
+                   "upload: task_new failed for chunked follow-up %u/%u",
+                   (unsigned) ctx->next_part_index,
+                   (unsigned) ctx->part_count);
+        return FALSE;
+    }
+    tsk->ptr_free = (GDestroyNotify) upload_ctx_free;
+    hlwrite_chunks (htlc, HTLC_HDR_UPLOAD_MEDIA, 0, chunks, hc);
+
+    debug_log ("media",
+               "→ UPLOAD_MEDIA chunk %u/%u (slice=%zu, final=%d)",
+               (unsigned) ctx->next_part_index,
+               (unsigned) ctx->part_count, slice_len, (int) is_final);
+
+    ctx->next_part_index++;
+    return TRUE;
+}
+
+gboolean
+hx_send_upload_media_chunked (struct htlc_conn *htlc,
+                              const guint8 *payload, gsize payload_len,
+                              const char *declared_type,
+                              gsize declared_type_len,
+                              HxInlineMediaUploadCallback on_done,
+                              gpointer user_data,
+                              GDestroyNotify user_data_free)
+{
+    if (!inline_media_cap_ok (htlc)) {
+        return FALSE;
+    }
+    if (!payload || payload_len == 0) {
+        debug_log ("media", "upload: empty payload rejected");
+        return FALSE;
+    }
+
+    guint32 chunk_size = inline_media_chunk_size (htlc);
+    if (chunk_size == 0) {
+        debug_log ("media", "upload: chunk_size is 0; refusing chunked send");
+        return FALSE;
+    }
+
+    /* ceil(payload_len / chunk_size). part_count must fit in u16
+	 * (and the builder requires >= 2 for the chunked first-chunk
+	 * shape — payloads that fit in one chunk go via single-shot). */
+    guint64 pc = ((guint64) payload_len + chunk_size - 1) / chunk_size;
+    if (pc < 2) {
+        debug_log ("media",
+                   "upload: chunked called with single-chunk payload "
+                   "(%zu bytes, chunk_size=%u) — caller should use _single",
+                   payload_len, (unsigned) chunk_size);
+        return FALSE;
+    }
+    if (pc > G_MAXUINT16) {
+        debug_log ("media",
+                   "upload: payload %zu would need %" G_GUINT64_FORMAT
+                   " chunks at chunk_size=%u — exceeds u16 part_count",
+                   payload_len, pc, (unsigned) chunk_size);
+        return FALSE;
+    }
+    guint16 part_count = (guint16) pc;
+
+    /* Build chunk 0. */
+    const guint8 *first_slice = NULL;
+    gsize first_slice_len = 0;
+    hx_upload_ctx probe; /* stack scratch for upload_chunk_slice on the
+                            same shape we're about to allocate */
+    probe.payload = (guint8 *) payload;
+    probe.payload_len = payload_len;
+    probe.chunk_size = chunk_size;
+    upload_chunk_slice (&probe, 0, &first_slice, &first_slice_len);
+
+    struct hx_chunk chunks[5];
+    guint8 scratch[5];
+    int32_t hc = gtkhx_proto_build_upload_media_first_chunks (
+        first_slice, first_slice_len,
+        (const uint8_t *) declared_type, declared_type_len, part_count,
+        chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+    if (hc <= 0) {
+        debug_log ("media",
+                   "upload: first-chunk builder rejected (slice=%zu, "
+                   "declared_type_len=%zu, part_count=%u)",
+                   first_slice_len, declared_type_len,
+                   (unsigned) part_count);
+        return FALSE;
+    }
+
+    /* Allocate the upload ctx, copy in everything the state
+	 * machine needs to refer back to across replies. */
+    hx_upload_ctx *ctx = g_new0 (hx_upload_ctx, 1);
+    ctx->on_done = on_done;
+    ctx->user_data = user_data;
+    ctx->user_data_free = user_data_free;
+    ctx->payload = g_memdup2 (payload, payload_len);
+    ctx->payload_len = payload_len;
+    if (declared_type && declared_type_len > 0) {
+        ctx->declared_type = g_strndup (declared_type, declared_type_len);
+        ctx->declared_type_len = declared_type_len;
+    }
+    ctx->chunk_size = chunk_size;
+    ctx->part_count = part_count;
+    ctx->next_part_index = 1; /* chunk 0 is the one we're about to send */
+
+    struct task *tsk = task_new (
+        htlc, RCV_TASK_FN (rcv_task_upload_media), ctx, NULL, "upload-media");
+    if (!tsk) {
+        /* Synchronous reject — task_new couldn't register the rcv
+		 * hook (no session, OOM via GLib's fatal path, etc.). We
+		 * never wrote to the wire; treat this as a clean
+		 * failed-to-send and reclaim ctx without invoking
+		 * user_data_free (the caller still owns user_data — they
+		 * see a FALSE return rather than a callback). */
+        debug_log ("media",
+                   "upload: task_new failed for chunked first chunk; "
+                   "synchronous reject");
+        ctx->user_data = NULL;
+        ctx->user_data_free = NULL;
+        upload_ctx_free (ctx);
+        return FALSE;
+    }
+    tsk->ptr_free = (GDestroyNotify) upload_ctx_free;
+    hlwrite_chunks (htlc, HTLC_HDR_UPLOAD_MEDIA, 0, chunks, hc);
+
+    debug_log ("media",
+               "→ UPLOAD_MEDIA chunked: payload_len=%zu chunk_size=%u "
+               "part_count=%u declared_type_len=%zu",
+               payload_len, (unsigned) chunk_size, (unsigned) part_count,
+               declared_type_len);
+
+    return TRUE;
+}
+
+gboolean
+hx_send_upload_media (struct htlc_conn *htlc, const guint8 *payload,
+                      gsize payload_len, const char *declared_type,
+                      gsize declared_type_len,
+                      HxInlineMediaUploadCallback on_done, gpointer user_data,
+                      GDestroyNotify user_data_free)
+{
+    if (!inline_media_cap_ok (htlc)) {
+        return FALSE;
+    }
+    if (!payload || payload_len == 0) {
+        debug_log ("media", "upload: empty payload rejected");
+        return FALSE;
+    }
+
+    /* Pick framing: payload fits in one chunk → single-shot;
+	 * otherwise drive the chunked state machine. The single-shot
+	 * cap is the smaller of (server CHAT_MEDIA_CHUNK_SIZE, u16
+	 * wire ceiling). */
+    guint32 chunk_size = inline_media_chunk_size (htlc);
+    if (chunk_size > 65535) {
+        chunk_size = 65535;
+    }
+    if (payload_len <= (gsize) chunk_size && payload_len <= 65535) {
+        return hx_send_upload_media_single (
+            htlc, payload, payload_len, declared_type, declared_type_len,
+            on_done, user_data, user_data_free);
+    }
+    return hx_send_upload_media_chunked (
+        htlc, payload, payload_len, declared_type, declared_type_len,
+        on_done, user_data, user_data_free);
 }
 
 /* Parse error reply: DATA_ERROR text + optional
@@ -190,6 +491,14 @@ deliver_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx)
                (int) (r.error_message_len > 256 ? 256 : r.error_message_len),
                r.error_message ? r.error_message : "");
 
+    /* Normal completion. user_data_free fires ONLY on cancellation
+	 * / disconnect — flip callback_fired here regardless of whether
+	 * the caller registered an on_done handler. A caller passing
+	 * NULL on_done is signalling "I don't need notification" and
+	 * accepts that their user_data persists past completion (they
+	 * must arrange to free it themselves, or skip user_data_free
+	 * entirely). See the upload-callback contract in
+	 * inline_media_upload.h. */
     ctx->callback_fired = TRUE;
     if (ctx->on_done) {
         ctx->on_done (htlc, &r, ctx->user_data);
@@ -257,6 +566,29 @@ deliver_success (struct htlc_conn *htlc, hx_upload_ctx *ctx)
     }
 }
 
+/* Synthesise a generic failure reply (no error_code, custom
+ * message). Used when chunked-upload state machine hits an
+ * unrecoverable client-side condition (missing token in the first
+ * reply, builder rejects a follow-up, etc.) and needs to surface
+ * something useful to the caller's on_done. */
+static void
+deliver_synthetic_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx,
+                           const char *message)
+{
+    HxInlineMediaUploadResult r;
+    memset (&r, 0, sizeof (r));
+    r.error_code = 0;
+    r.error_message = message;
+    r.error_message_len = strlen (message);
+    /* Synthetic failure is still a normal completion (see
+	 * deliver_failure's comment for the contract). Mark fired
+	 * regardless of on_done. */
+    ctx->callback_fired = TRUE;
+    if (ctx->on_done) {
+        ctx->on_done (htlc, &r, ctx->user_data);
+    }
+}
+
 void
 rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
 {
@@ -268,11 +600,110 @@ rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
 
     if (task_inerror (htlc)) {
         deliver_failure (htlc, ctx);
-    } else {
-        deliver_success (htlc, ctx);
+        return;
     }
-    /* ctx is reclaimed via task->ptr_free when rcv.c runs
-	 * task_delete after this handler returns. Don't free here. */
+
+    /* Single-shot path: payload not stored on the ctx, so this is
+	 * the only reply we'll see — must be the final reply. */
+    if (!ctx->payload) {
+        deliver_success (htlc, ctx);
+        return;
+    }
+
+    /* Chunked path. We've just sent chunk (next_part_index - 1).
+	 * If that was the final chunk, the server's reply carries
+	 * CHAT_MEDIA_ID and we're done. Otherwise the reply is
+	 * intermediate and (on the first reply at least) carries the
+	 * UPLOAD_TOKEN we need to echo on every follow-up. */
+    if ((guint32) ctx->next_part_index >= (guint32) ctx->part_count) {
+        deliver_success (htlc, ctx);
+        return;
+    }
+
+    /* Intermediate reply. The first reply (after we sent chunk 0,
+	 * so next_part_index == 1) MUST carry the upload token; the
+	 * spec lets the server echo it on later replies too, so we
+	 * accept and refresh whenever the chunk is present.
+	 *
+	 * Bound the token at HX_MEDIA_MAX_UPLOAD_TOKEN bytes (well above
+	 * the spec's ≤ 64 byte ceiling, with headroom for benign spec
+	 * evolution). Without the bound, a malicious server could hand
+	 * us a 64 KiB token and force a fresh allocation on every chunk
+	 * reply — and an even larger one on every follow-up we
+	 * re-echo it on. */
+    const guint8 *tok_ptr = NULL;
+    size_t tok_len = 0;
+    if (gtkhx_proto_parse_upload_token_reply (htlc->in.buf, htlc->in.pos,
+                                              &tok_ptr, &tok_len)
+        && tok_len > 0) {
+        if (tok_len > HX_MEDIA_MAX_UPLOAD_TOKEN) {
+            debug_log ("media",
+                       "← UPLOAD_MEDIA intermediate: token_len=%zu exceeds "
+                       "ceiling %u — bailing",
+                       tok_len, (unsigned) HX_MEDIA_MAX_UPLOAD_TOKEN);
+            deliver_synthetic_failure (
+                htlc, ctx, "Upload reply token oversized");
+            return;
+        }
+        g_free (ctx->upload_token);
+        ctx->upload_token = g_memdup2 (tok_ptr, tok_len);
+        ctx->upload_token_len = tok_len;
+        debug_log ("media",
+                   "← UPLOAD_MEDIA intermediate: token_len=%zu (after chunk "
+                   "%u/%u)",
+                   tok_len, (unsigned) (ctx->next_part_index - 1),
+                   (unsigned) ctx->part_count);
+    }
+    if (!ctx->upload_token) {
+        debug_log ("media",
+                   "← UPLOAD_MEDIA intermediate without UPLOAD_TOKEN "
+                   "(next_part_index=%u) — bailing",
+                   (unsigned) ctx->next_part_index);
+        deliver_synthetic_failure (
+            htlc, ctx, "Upload reply missing session token");
+        return;
+    }
+
+    /* Hand ctx ownership off to the next task entry. rcv.c will
+	 * fire task_delete on the current entry after we return; if
+	 * we don't clear its ptr, task_free → ptr_free → upload_ctx_free
+	 * would reclaim ctx before the follow-up reply lands.
+	 *
+	 * Both lookups MUST succeed before we register the follow-up
+	 * task — if trans extraction or the table lookup fails, the
+	 * current task still owns ctx via its ptr_free hook AND
+	 * send_next_chunk would register a SECOND owner of the same
+	 * ctx on the new entry. That double ownership is a UAF /
+	 * double-free waiting for one of the task_delete sweeps to
+	 * fire. Fail closed instead. */
+    guint32 cur_trans = 0;
+    struct task *cur = NULL;
+    if (gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &cur_trans)) {
+        cur = task_with_trans (&the_session, cur_trans);
+    }
+    if (!cur) {
+        debug_log ("media",
+                   "upload: cannot identify current task for chunked "
+                   "follow-up (trans=%u) — bailing",
+                   (unsigned) cur_trans);
+        deliver_synthetic_failure (
+            htlc, ctx, "Chunked upload: lost task entry mid-stream");
+        return;
+    }
+    cur->ptr = NULL;
+
+    if (!send_next_chunk (htlc, ctx)) {
+        /* Builder / state-machine refused the follow-up. Restore
+		 * the current task's ptr so the standard ptr_free chain
+		 * reclaims ctx — we cleared it above expecting
+		 * send_next_chunk to take ownership. */
+        cur->ptr = ctx;
+        deliver_synthetic_failure (htlc, ctx, "Chunked upload resend failed");
+        return;
+    }
+    /* ctx now lives under the next task entry; the current
+	 * entry's task_delete is about to fire harmlessly with
+	 * ptr=NULL. */
 }
 
 /* ---- Chat send with attached media ---- */
