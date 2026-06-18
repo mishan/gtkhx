@@ -237,6 +237,43 @@ xtext_get_stamp_str (time_t tim, char **ret)
 
 static GtkWidgetClass *parent_class = NULL;
 
+/* Phase 9.E (inline media): per-entry kind discriminator. The
+ * tag field was already in textentry from upstream xchat but
+ * unused in GtkHx; we now claim it for entry-kind dispatch.
+ * Text entries leave tag==0 (XTEXT_TAG_TEXT) and don't touch
+ * the new media side-pointer. Media entries set tag==XTEXT_
+ * TAG_MEDIA and attach a heap-allocated xtext_media_data. */
+#define XTEXT_TAG_TEXT  0
+#define XTEXT_TAG_MEDIA 1
+
+/* Owned by a media-typed textentry. Allocated separately from
+ * the textentry block (the entry's str tail allocation only
+ * covers ent->str, not this) and freed via
+ * xtext_entry_media_data_free in the three textentry free
+ * sites. */
+struct xtext_media_data
+{
+	/* Strong ref to the decoded image; NULL while the
+	 * placeholder/loading state is active. When NULL,
+	 * lines_taken / render_line fall through to the text
+	 * rendering path so the entry looks like a Phase 9.D
+	 * styled placeholder until the texture arrives. */
+	GdkTexture *texture;
+	/* Cairo-friendly form of `texture`, derived once at
+	 * texture-set time via gdk_pixbuf_get_from_texture. Held
+	 * so render_line can `gdk_cairo_set_source_pixbuf` without
+	 * re-downloading texels on every paint. NULL iff
+	 * texture is NULL. */
+	GdkPixbuf *pixbuf;
+	/* Per-chat token id matching the gchat->media_handles
+	 * lookup table the click handler uses to route to the
+	 * Phase 9.D dialog. Surfaced via word_click as a
+	 * synthesised `hxmedia:N` word so the existing
+	 * inline_media_chat_word_click dispatch keeps working
+	 * across both placeholder + image renderings. */
+	guint media_token;
+};
+
 struct textentry
 {
 	struct textentry *next;
@@ -255,7 +292,43 @@ struct textentry
 	guchar pad1;
 	guchar pad2;	/* 32-bit align : 44 bytes total */
 	GList *marks;	/* List of found strings */
+	/* Phase 9.E (inline media): only non-NULL when
+	 * tag==XTEXT_TAG_MEDIA. Owned heap allocation; freed via
+	 * xtext_entry_media_data_free at every textentry free
+	 * site. */
+	struct xtext_media_data *media;
 };
+
+/* Free helper for the media side-pointer. Idempotent on NULL
+ * (no-op). Called by every textentry free site before the
+ * containing g_free(ent). */
+static void
+xtext_entry_media_data_free (struct xtext_media_data *m)
+{
+	if (!m)
+		return;
+	if (m->texture)
+		g_object_unref (m->texture);
+	if (m->pixbuf)
+		g_object_unref (m->pixbuf);
+	g_free (m);
+}
+
+/* Wraps the historical bare g_free(ent). Phase 9.E added the
+ * media side-pointer that needs explicit release on textentry
+ * free; route every free site through here so a future
+ * addition has one place to extend. */
+static void
+xtext_entry_free (textentry *ent)
+{
+	if (!ent)
+		return;
+	if (ent->tag == XTEXT_TAG_MEDIA) {
+		xtext_entry_media_data_free (ent->media);
+		ent->media = NULL;
+	}
+	g_free (ent);
+}
 
 enum
 {
@@ -1802,6 +1875,25 @@ gtk_xtext_selection_draw (GtkXText * xtext, gboolean render)
 			ent->mark_end = ent->str_len;
 			ent = ent->next;
 		}
+	}
+
+	/* Phase 9.E (inline media): media entries with a rendered
+	 * texture have multi-subline padded rows whose find_x
+	 * mapping returns offset 0 for sublines past the first
+	 * (find_subline → out-of-bounds path). Without an
+	 * override the in-row single-entry drag ends with
+	 * mark_start==mark_end==0 and nothing copies. Promote to
+	 * all-or-nothing: if the entry is media-typed-with-
+	 * texture AND it has any non-trivial selection on it
+	 * (low_ent==high_ent and the drag covered any pixels),
+	 * select the whole alt-text byte range. Media entries
+	 * with NULL texture render as ordinary styled text and
+	 * stay on the regular code path. */
+	if (low_ent == high_ent && low_ent->tag == XTEXT_TAG_MEDIA &&
+	    low_ent->media && low_ent->media->texture)
+	{
+		low_ent->mark_start = 0;
+		low_ent->mark_end = low_ent->str_len;
 	}
 
 	if (render)
@@ -3749,6 +3841,121 @@ gtk_xtext_render_stamp (GtkXText * xtext, textentry * ent,
 	}
 }
 
+/* Forward decl: defined alongside lines_taken's media branch
+ * below; used here by the render-line media path. */
+static void gtk_xtext_media_rendered_size (textentry *ent, int column_width,
+                                           int *out_w, int *out_h);
+
+/* Phase 9.E (inline media): paint a media-typed entry. The
+ * texture is rendered at native size when it fits the chat
+ * column, otherwise scaled down to fit by width while
+ * preserving aspect ratio. Painting hooks through the same
+ * cairo context render_str uses (xtext->cr) so clip + blend
+ * play nicely with the surrounding text. Returns the
+ * subline count consumed (matches the upstream return
+ * convention for render_line). */
+static int
+gtk_xtext_render_media_line (GtkXText * xtext, textentry * ent, int line,
+                             int lines_max, int subline, int win_width)
+{
+	int column_width, rw, rh, fontsize, rows, visible_rows;
+	int y_top, x_left;
+	cairo_t *cr;
+
+	fontsize = xtext->fontsize;
+	if (fontsize <= 0)
+		fontsize = 1;
+
+	column_width = win_width - ent->indent;
+	if (column_width < 1)
+		column_width = 1;
+	gtk_xtext_media_rendered_size (ent, column_width, &rw, &rh);
+	rows = (rh + fontsize - 1) / fontsize;
+	if (rows < 1)
+		rows = 1;
+	visible_rows = rows - subline;
+	if (visible_rows > lines_max - line)
+		visible_rows = lines_max - line;
+	if (visible_rows < 1)
+		visible_rows = 1;
+
+	cr = xtext->cr;
+	if (!cr)
+		return visible_rows; /* deferred to next snapshot pass */
+
+	/* y_top is the top of subline 0 of the entry. When we
+	 * scrolled mid-entry, subline > 0 — back up so the
+	 * texture lands at the correct screen y. */
+	y_top = (fontsize * line) - (fontsize * subline) - xtext->pixel_offset;
+	x_left = ent->indent;
+
+	/* Fill the row band with the chat background colour
+	 * before stamping the texture down. xtext text rows get
+	 * this fill implicitly via render_str's per-cell
+	 * background draw; for media rows the per-subline str
+	 * loop is skipped, so without this the band keeps
+	 * whatever the GTK widget chrome (theme background)
+	 * drew underneath — visible as grey gutters on either
+	 * side of textures narrower than the chat column,
+	 * against a black chat bg. Full widget width covers
+	 * both the stamp column (which we don't draw on media
+	 * rows) and the column whitespace around the image. */
+	{
+		int win_w = gtk_widget_get_width (GTK_WIDGET (xtext));
+		xtext_draw_bg (xtext, 0, y_top, win_w, rows * fontsize);
+	}
+
+	cairo_save (cr);
+
+	/* Honour the active clip rect (set by paint paths for
+	 * partial redraws of damaged regions). */
+	if (xtext->clip_x2 > xtext->clip_x &&
+	    xtext->clip_y2 > xtext->clip_y)
+	{
+		cairo_rectangle (cr, xtext->clip_x, xtext->clip_y,
+		                 xtext->clip_x2 - xtext->clip_x,
+		                 xtext->clip_y2 - xtext->clip_y);
+		cairo_clip (cr);
+	}
+
+	/* Paint the (already cairo-friendly) pixbuf at (x_left,
+	 * y_top), scaled to (rw, rh). gdk_cairo_set_source_pixbuf
+	 * builds the cairo surface from the pixbuf each call but
+	 * the texture is bounded by HX_MEDIA_DEFAULT_MAX_PIXELS
+	 * (~4M) and chat-rate paints are sparse, so the cost
+	 * stays well below render_str's per-line work. */
+	if (ent->media && ent->media->pixbuf)
+	{
+		int tw = gdk_pixbuf_get_width (ent->media->pixbuf);
+		int th = gdk_pixbuf_get_height (ent->media->pixbuf);
+		double sx = tw > 0 ? (double) rw / (double) tw : 1.0;
+		double sy = th > 0 ? (double) rh / (double) th : 1.0;
+
+		cairo_translate (cr, x_left, y_top);
+		cairo_scale (cr, sx, sy);
+		/* gdk_cairo_set_source_pixbuf is deprecated in GTK 4.10
+		 * (the GdkSnapshot path is the preferred GTK 4 way to
+		 * paint a paintable) but xtext renders directly into a
+		 * cairo context — the snapshot API isn't a drop-in
+		 * here, so the deprecated wrapper still does the job.
+		 * Same pattern + rationale as inline_media_decode.c's
+		 * gdk_texture_new_for_pixbuf call. */
+		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+		gdk_cairo_set_source_pixbuf (cr, ent->media->pixbuf, 0, 0);
+		G_GNUC_END_IGNORE_DEPRECATIONS
+		cairo_paint (cr);
+	}
+
+	cairo_restore (cr);
+
+	/* Marker still draws at the start of the band (matches
+	 * the text-entry convention — marker lands above the
+	 * entry, not interleaved). */
+	gtk_xtext_draw_marker (xtext, ent, y_top);
+
+	return visible_rows;
+}
+
 /* render a single line, which may wrap to more lines */
 
 static int
@@ -3758,6 +3965,18 @@ gtk_xtext_render_line (GtkXText * xtext, textentry * ent, int line,
 	unsigned char *str;
 	int indent, taken, entline, len, y, start_subline;
 	int emphasis = 0;
+
+	/* Phase 9.E (inline media): media entries with a decoded
+	 * texture short-circuit the per-subline text loop and
+	 * paint the texture instead. Media entries with a NULL
+	 * texture (auto-fetch still pending or failed) fall
+	 * through to the text path so the styled placeholder
+	 * still reads correctly. */
+	if (ent->tag == XTEXT_TAG_MEDIA && ent->media && ent->media->texture)
+	{
+		return gtk_xtext_render_media_line (xtext, ent, line, lines_max,
+		                                    subline, win_width);
+	}
 
 	entline = taken = 0;
 	str = ent->str;
@@ -3997,6 +4216,64 @@ gtk_xtext_save (GtkXText * xtext, int fh)
 	}
 }
 
+/* Phase 9.E (inline media): compute the rendered (width,
+ * height) for a media-typed textentry given the current
+ * available text-column width.
+ *
+ * Scaling rule (per Misha, June 2026): native size when it
+ * fits the column, otherwise scale down to fit by
+ * width while preserving aspect ratio. The dialog click-
+ * through still serves users who want the full-size view.
+ *
+ * `column_width` is the available pixel width to the right of
+ * the message indent (buf->window_width - MARGIN - indent).
+ * Returns (0,0) on a NULL or texture-less media entry. */
+static void
+gtk_xtext_media_rendered_size (textentry *ent, int column_width,
+                               int *out_w, int *out_h)
+{
+	int tw, th, rw, rh;
+	GdkTexture *tex;
+
+	*out_w = 0;
+	*out_h = 0;
+
+	if (!ent || ent->tag != XTEXT_TAG_MEDIA || !ent->media)
+		return;
+	tex = ent->media->texture;
+	if (!tex)
+		return;
+
+	tw = gdk_texture_get_width (tex);
+	th = gdk_texture_get_height (tex);
+	if (tw <= 0 || th <= 0)
+		return;
+	if (column_width < 1)
+		column_width = 1;
+
+	if (tw <= column_width)
+	{
+		rw = tw;
+		rh = th;
+	}
+	else
+	{
+		/* width-cap scale, preserve aspect ratio. The
+		 * intermediate multiplication is bounded by the
+		 * dimension cap (HX_MEDIA_DEFAULT_MAX_DIMENSION =
+		 * 2048 by default, rejected at decode time if
+		 * larger) × the largest plausible column width;
+		 * comfortably inside int range. */
+		rw = column_width;
+		rh = (int)(((gint64) th * (gint64) column_width) / (gint64) tw);
+		if (rh < 1)
+			rh = 1;
+	}
+
+	*out_w = rw;
+	*out_h = rh;
+}
+
 /* count how many lines 'ent' will take (with wraps) */
 
 static int
@@ -4009,6 +4286,42 @@ gtk_xtext_lines_taken (xtext_buffer *buf, textentry * ent)
 	g_slist_free (ent->sublines);
 	ent->sublines = NULL;
 	win_width = buf->window_width - MARGIN;
+
+	/* Phase 9.E (inline media): a media entry with a
+	 * decoded texture reserves ceil(rendered_h / fontsize)
+	 * blank sublines; render_line paints the texture into
+	 * that band. The text-rendering path below is skipped
+	 * — ent->str carries the alt-text placeholder for
+	 * clipboard / word-click dispatch but isn't drawn when
+	 * the texture is up. When texture is NULL (auto-fetch
+	 * still pending or failed) we fall through to the text
+	 * path so the entry reads as the Phase 9.D styled
+	 * placeholder. */
+	if (ent->tag == XTEXT_TAG_MEDIA && ent->media && ent->media->texture)
+	{
+		int column_width, rw, rh, rows, i;
+		int fontsize = buf->xtext->fontsize;
+
+		column_width = win_width - ent->indent;
+		if (column_width < 1)
+			column_width = 1;
+		gtk_xtext_media_rendered_size (ent, column_width, &rw, &rh);
+		if (fontsize <= 0)
+			fontsize = 1;
+		rows = (rh + fontsize - 1) / fontsize; /* ceil */
+		if (rows < 1)
+			rows = 1;
+		/* Each subline carries byte-offset 0 — the find_subline
+		 * fallback path turns the 0 into ent->str_len, which
+		 * find_x then treats as "click below the rendered text"
+		 * and returns offset 0 of ent->str. The word_click
+		 * path lifts the synthesised `hxmedia:N` token from
+		 * ent->str regardless. */
+		for (i = 0; i < rows; i++)
+			ent->sublines = g_slist_append (ent->sublines,
+			                                GINT_TO_POINTER (0));
+		return rows;
+	}
 
 	if (win_width >= ent->indent + ent->str_width)
 	{
@@ -4377,7 +4690,7 @@ gtk_xtext_kill_ent (xtext_buffer *buffer, textentry *ent)
 	g_slist_free_full (ent->slp, g_free);
 	g_slist_free (ent->sublines);
 
-	g_free (ent);
+	xtext_entry_free (ent);
 	return visible;
 }
 
@@ -4531,7 +4844,7 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 		while (buf->text_first)
 		{
 			next = buf->text_first->next;
-			g_free (buf->text_first);
+			xtext_entry_free (buf->text_first);
 			buf->text_first = next;
 		}
 		buf->text_last = NULL;
@@ -5294,7 +5607,12 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	if (right_text[right_len-1] == '\n')
 		right_len--;
 
-	ent = g_malloc (left_len + right_len + 2 + sizeof (textentry));
+	/* Phase 9.E (inline media): textentry now carries `media` (a
+	 * heap pointer) and the `tag` discriminator; zero-init via
+	 * g_malloc0 so text-entry append paths leave both at the
+	 * text-entry defaults without per-field assignment. The
+	 * memset cost is negligible against the per-line workload. */
+	ent = g_malloc0 (left_len + right_len + 2 + sizeof (textentry));
 	str = (unsigned char *) ent + sizeof (textentry);
 
 	if (left_len)
@@ -5377,7 +5695,12 @@ gtk_xtext_insert_indent_before (xtext_buffer *buf, textentry *anchor,
 	if (right_text[right_len-1] == '\n')
 		right_len--;
 
-	ent = g_malloc (left_len + right_len + 2 + sizeof (textentry));
+	/* Phase 9.E (inline media): textentry now carries `media` (a
+	 * heap pointer) and the `tag` discriminator; zero-init via
+	 * g_malloc0 so text-entry append paths leave both at the
+	 * text-entry defaults without per-field assignment. The
+	 * memset cost is negligible against the per-line workload. */
+	ent = g_malloc0 (left_len + right_len + 2 + sizeof (textentry));
 	str = (unsigned char *) ent + sizeof (textentry);
 
 	if (left_len)
@@ -5589,7 +5912,10 @@ gtk_xtext_append (xtext_buffer *buf, unsigned char *text, int len, time_t stamp)
 		truncate = TRUE;
 	}
 
-	ent = g_malloc (len + 1 + sizeof (textentry));
+	/* Phase 9.E (inline media): zero-init so the new tag /
+	 * media fields default cleanly. See the matching note in
+	 * gtk_xtext_append_indent. */
+	ent = g_malloc0 (len + 1 + sizeof (textentry));
 	ent->str = (unsigned char *) ent + sizeof (textentry);
 	ent->str_len = len;
 	if (len)
@@ -5616,6 +5942,157 @@ gtk_xtext_append (xtext_buffer *buf, unsigned char *text, int len, time_t stamp)
 	ent->left_len = -1;
 
 	gtk_xtext_append_entry (buf, ent, stamp);
+}
+
+/* Phase 9.E (inline media): cache a cairo-friendly GdkPixbuf
+ * alongside the GdkTexture on a media entry. The dialog
+ * download callback hands us a GdkTexture (decoder output);
+ * cairo wants pixel-data-on-CPU rather than GPU-side
+ * paintables, so flatten via gdk_pixbuf_get_from_texture
+ * once at texture-set time and keep the pixbuf live for the
+ * paint loop's lifetime. */
+static void
+xtext_media_update_pixbuf (struct xtext_media_data *m)
+{
+	if (!m)
+		return;
+	if (m->pixbuf)
+	{
+		g_object_unref (m->pixbuf);
+		m->pixbuf = NULL;
+	}
+	if (m->texture) {
+		/* gdk_pixbuf_get_from_texture is deprecated in 4.16
+		 * but the snapshot API isn't a drop-in for cairo
+		 * paint. Same allow-deprecation rationale as the
+		 * cairo_set_source_pixbuf site above. */
+		G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+		m->pixbuf = gdk_pixbuf_get_from_texture (m->texture);
+		G_GNUC_END_IGNORE_DEPRECATIONS
+	}
+}
+
+void
+gtk_xtext_append_media (xtext_buffer *buf, GdkTexture *texture,
+                        const char *alt_text, guint media_token, time_t stamp)
+{
+	textentry *ent;
+	struct xtext_media_data *m;
+	gsize alt_len;
+
+	if (!buf)
+		return;
+	alt_len = alt_text ? strlen (alt_text) : 0;
+	if (alt_len >= sizeof (buf->xtext->scratch_buffer))
+		alt_len = sizeof (buf->xtext->scratch_buffer) - 1;
+
+	/* Allocate the entry with tail-space for the alt text
+	 * (matches the bottom-line pattern in gtk_xtext_append).
+	 * The alt text doubles as ent->str so word_click can
+	 * synthesise `hxmedia:N` against the same string the
+	 * existing Phase 9.D placeholder formatter emits, and so
+	 * the placeholder-while-loading rendering path (texture
+	 * still NULL) hits the regular text render with the
+	 * caller's styled string intact. */
+	ent = g_malloc0 (alt_len + 1 + sizeof (textentry));
+	ent->str = (unsigned char *) ent + sizeof (textentry);
+	if (alt_len)
+		memcpy (ent->str, alt_text, alt_len);
+	ent->str[alt_len] = '\0';
+	ent->str_len = alt_len;
+	ent->indent = buf->indent;
+	ent->left_len = -1;
+	ent->tag = XTEXT_TAG_MEDIA;
+
+	m = g_new0 (struct xtext_media_data, 1);
+	m->media_token = media_token;
+	if (texture)
+	{
+		m->texture = g_object_ref (texture);
+		xtext_media_update_pixbuf (m);
+	}
+	ent->media = m;
+
+	gtk_xtext_append_entry (buf, ent, stamp);
+}
+
+void
+gtk_xtext_media_set_texture (xtext_buffer *buf, textentry *ent,
+                             GdkTexture *texture)
+{
+	int old_count, new_count;
+
+	if (!buf || !ent || ent->tag != XTEXT_TAG_MEDIA || !ent->media)
+		return;
+
+	if (ent->media->texture)
+	{
+		g_object_unref (ent->media->texture);
+		ent->media->texture = NULL;
+	}
+	if (texture)
+		ent->media->texture = g_object_ref (texture);
+	xtext_media_update_pixbuf (ent->media);
+
+	/* Recompute the entry's reserved sublines. Replacing the
+	 * sublines list and adjusting buf->num_lines by the
+	 * delta keeps scroll math accurate without re-walking
+	 * the whole buffer in calc_lines. */
+	old_count = g_slist_length (ent->sublines);
+	g_slist_free (ent->sublines);
+	ent->sublines = NULL;
+	new_count = gtk_xtext_lines_taken (buf, ent);
+	buf->num_lines += (new_count - old_count);
+
+	/* If the entry sits at-or-above the pagetop, the extra
+	 * sublines shift the viewport upwards. Bump the scroll
+	 * anchors so the user's visible content stays put. The
+	 * simpler full-recalc path is also acceptable (calc_lines
+	 * is O(N) but called rarely), but bumping inline avoids
+	 * the calc_lines side-effect of nulling pagetop_ent. */
+	if (buf->xtext->buffer == buf)
+	{
+		gtk_adjustment_set_upper (buf->xtext->adj, buf->num_lines);
+		if (buf->scrollbar_down)
+		{
+			buf->old_value = buf->num_lines
+			                 - gtk_adjustment_get_page_size (buf->xtext->adj);
+			if (buf->old_value < 0)
+				buf->old_value = 0;
+			gtk_adjustment_set_value (buf->xtext->adj, buf->old_value);
+		}
+		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
+	}
+}
+
+gboolean
+gtk_xtext_entry_is_media (textentry *ent)
+{
+	return ent && ent->tag == XTEXT_TAG_MEDIA;
+}
+
+guint
+gtk_xtext_entry_media_token (textentry *ent)
+{
+	if (!ent || ent->tag != XTEXT_TAG_MEDIA || !ent->media)
+		return 0;
+	return ent->media->media_token;
+}
+
+textentry *
+gtk_xtext_find_media_entry_by_token (xtext_buffer *buf, guint media_token)
+{
+	textentry *ent;
+
+	if (!buf || media_token == 0)
+		return NULL;
+	for (ent = buf->text_first; ent; ent = ent->next)
+	{
+		if (ent->tag == XTEXT_TAG_MEDIA && ent->media &&
+		    ent->media->media_token == media_token)
+			return ent;
+	}
+	return NULL;
 }
 
 gboolean
@@ -5933,7 +6410,7 @@ gtk_xtext_buffer_free (xtext_buffer *buf)
 	while (ent)
 	{
 		next = ent->next;
-		g_free (ent);
+		xtext_entry_free (ent);
 		ent = next;
 	}
 

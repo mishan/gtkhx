@@ -43,7 +43,10 @@
 #include "history.h"
 #include "chat_history.h"
 #include "inline_media_attach.h"
+#include "inline_media_decode.h"
 #include "inline_media_dialog.h"
+#include "inline_media_download.h"
+#include "inline_media.h"
 #include "gtkutil.h"
 #include "xtext.h"
 #include "users.h"
@@ -795,6 +798,87 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     }
 }
 
+/* Phase 9.E (inline media): auto-fetch a media handle on arrival
+ * and swap the styled placeholder row to a true inline-rendered
+ * texture once decoding finishes. The ctx is the smallest thing
+ * that can survive an entry being auto-trimmed mid-fetch — we
+ * carry the chat cid + the per-chat token, then look the entry
+ * up at callback time. Stale entry lookups are a quiet no-op:
+ * the placeholder stays, the user can still click to view in
+ * the dialog. */
+struct hx_media_autofetch_ctx {
+    guint32 cid;
+    guint token;
+};
+
+static void
+on_inline_media_autofetch_done (struct htlc_conn *htlc,
+                                const HxInlineMediaDownloadResult *result,
+                                gpointer user_data)
+{
+    struct hx_media_autofetch_ctx *ctx = user_data;
+    (void) htlc;
+
+    if (!ctx) {
+        return;
+    }
+    if (!result || !result->bytes) {
+        /* Download failed — leave the styled placeholder up.
+		 * Click-to-view in the dialog will surface the same
+		 * spec error message via the Phase 9.D path. */
+        debug_log ("media",
+                   "inline-media auto-fetch failed cid=%u token=%u code=%u",
+                   ctx->cid, ctx->token,
+                   result ? result->error_code : 0);
+        g_free (ctx);
+        return;
+    }
+
+    /* Decode under spec-default caps. The dialog
+	 * (on_download_done in inline_media_dialog.c) uses the
+	 * same {0} caps and relies on inline_media_decode's
+	 * fall-through to HX_MEDIA_DEFAULT_*; matching that
+	 * keeps the two paths consistent. */
+    HxInlineMediaCaps caps = {0};
+    HxInlineMediaDecoded decoded = inline_media_decode (
+        result->bytes->data, result->bytes->len, &caps);
+    if (!decoded.texture) {
+        debug_log ("media",
+                   "inline-media auto-fetch decode rejected (cid=%u "
+                   "token=%u): %s",
+                   ctx->cid, ctx->token,
+                   decoded.error_message ? decoded.error_message
+                                         : "unknown");
+        g_free (ctx);
+        return;
+    }
+
+    /* gchat may have been freed (disconnect / chat-close) and
+	 * a fresh one with the same cid may even exist — in which
+	 * case find_media_entry_by_token returns NULL (the token
+	 * lives on the gchat's media_handles, which was rebuilt
+	 * fresh). The texture quietly drops. */
+    struct gtkhx_chat *gchat
+        = gchat_with_cid (&the_session, ctx->cid);
+    if (gchat && gchat->output) {
+        xtext_buffer *buf = GTK_XTEXT (gchat->output)->buffer;
+        textentry *ent
+            = gtk_xtext_find_media_entry_by_token (buf, ctx->token);
+        if (ent) {
+            debug_log ("media",
+                       "inline-media auto-fetch swap-in cid=%u token=%u "
+                       "%dx%d",
+                       ctx->cid, ctx->token,
+                       gdk_texture_get_width (decoded.texture),
+                       gdk_texture_get_height (decoded.texture));
+            gtk_xtext_media_set_texture (buf, ent, decoded.texture);
+        }
+    }
+
+    g_object_unref (decoded.texture);
+    g_free (ctx);
+}
+
 /* Render an HxChatEvent (pre-parsed chat message) into a chat
  * window's xtext buffer. Bypasses the legacy hx_printf →
  * chat-log-line → xoutput_chat round-trip — the rcv.c emitter
@@ -847,6 +931,21 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     nl = e->body_len > 0 ? memchr (body, '\n', e->body_len) : NULL;
     first_body_len = nl ? (gsize)(nl - body) : e->body_len;
 
+    /* Phase 9.E (inline media): the send-half defaults the chat
+	 * body to "[image]" when the user attaches without typing
+	 * a caption (see inline_media_attach.c / hx_send_chat_with_
+	 * media). With Phase E rendering the image inline the row
+	 * below, that "[image]" text is redundant and clutters the
+	 * chat. Suppress the body for this exact match; nick column
+	 * (e.g. `<misha>`) still renders. A user who actually typed
+	 * "[image]" as a caption alongside a real image attachment
+	 * loses that text — vanishingly rare; the inline image
+	 * conveys the same intent. */
+    if (e->media && first_body_len == 7
+        && memcmp (body, "[image]", 7) == 0) {
+        first_body_len = 0;
+    }
+
     xprintline_render (gchat->output, e->line, e->body_off + first_body_len,
                        e->sender_off, e->sender_len, e->body_off,
                        first_body_len, e->is_info, e->is_self);
@@ -867,29 +966,59 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         }
     }
 
-    /* Phase 9.D — inline-media placeholder. When the chat carried
+    /* Phase 9.D + 9.E — inline-media row. When the chat carried
 	 * companion CHAT_MEDIA_ID + CHAT_MEDIA_TYPE fields (rcv.c
 	 * attached them to the event), allocate a per-chat token,
 	 * deep-copy the metadata into gchat->media_handles, and emit
-	 * a NBSP-joined placeholder row that embeds the token as
-	 * `hxmedia:N`. inline_media_chat_word_click recovers the
-	 * token from the clicked word and pops the click-to-view
-	 * dialog.
+	 * a media-typed row. The row's alt-text is the same NBSP-
+	 * joined `hxmedia:N`-embedding placeholder Phase 9.D shipped
+	 * — the existing inline_media_chat_word_click handler parses
+	 * the token off the clicked word and pops the dialog.
 	 *
-	 * mIRC colour 14 ("dark grey") styles the row to read like a
-	 * subdued caption rather than chat text; the placeholder
-	 * still inherits the "wholerow is a hyperlink" feel since
-	 * the click handler triggers on any byte of it. */
+	 * Phase 9.E layers auto-fetch on top: when the server
+	 * advertises HTLC_CAP_INLINE_MEDIA, kick off
+	 * inline_media_download_start immediately so the texture
+	 * arrives without the user clicking. On decode success the
+	 * callback finds the entry via its token and swaps the
+	 * placeholder for the rendered image in place. On failure
+	 * the placeholder stays — click-to-view in the dialog
+	 * surfaces the same error message.
+	 *
+	 * mIRC colour 14 ("dark grey") still styles the placeholder
+	 * (visible until the texture lands) so it reads as a
+	 * subdued caption rather than chat text. */
     if (e->media) {
         guint token = gchat_register_media (gchat, e->media);
         char *placeholder
             = hx_chat_media_placeholder_clickable (e->media, token);
         if (placeholder) {
             gchar *styled = g_strdup_printf ("\003" "14%s", placeholder);
-            gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
-                              (unsigned char *) styled, strlen (styled), 0);
+            gtk_xtext_append_media (
+                GTK_XTEXT (gchat->output)->buffer, NULL /* texture */,
+                styled, token, 0 /* stamp */);
             g_free (styled);
             g_free (placeholder);
+
+            /* Auto-fetch. Cap-gated: on a server that didn't
+			 * negotiate the extension the placeholder never
+			 * gets bytes back (the upload-half of the
+			 * conversation isn't possible there either, so a
+			 * cap-less server emitting a media-bearing
+			 * relay row is itself a contract violation —
+			 * but defend just in case). The id buffer comes
+			 * from rcv.c via hx_chat_event_attach_media — the
+			 * deep-copy on event_attach_media keeps it valid
+			 * for the synchronous send call. */
+            if (inline_media_cap_ok (&the_session.htlc)
+                && e->media->id_len > 0) {
+                struct hx_media_autofetch_ctx *ctx
+                    = g_new0 (struct hx_media_autofetch_ctx, 1);
+                ctx->cid = gchat->cid;
+                ctx->token = token;
+                inline_media_download_start (
+                    &the_session.htlc, e->media->id, e->media->id_len,
+                    on_inline_media_autofetch_done, ctx);
+            }
         }
     }
 
