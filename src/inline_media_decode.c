@@ -66,7 +66,13 @@ extern const char *hx_image_decode_format_to_mime (guint32 fmt);
 /* Static-assert that the Rust enum discriminants match the C enum
  * one-for-one. The Rust ffi.rs comment pins these as `#[repr(u32)]`;
  * if a future commit reorders either side, the build trips here
- * rather than silently miscategorising at runtime. */
+ * rather than silently miscategorising at runtime. The sizeof
+ * assert covers the corresponding `#[repr(u32)]` width pin — a C
+ * toolchain shrinking the enum to a byte (some embedded targets
+ * do this; not on our supported platforms but cheap to guard)
+ * would otherwise miscast the Rust u32 return at the call sites. */
+_Static_assert (sizeof (HxInlineMediaFormat) == 4,
+                "rust discriminant pin (sizeof matches #[repr(u32)])");
 _Static_assert (INLINE_MEDIA_FORMAT_UNKNOWN == 0,
                 "rust discriminant pin (unknown)");
 _Static_assert (INLINE_MEDIA_FORMAT_JPEG == 1,

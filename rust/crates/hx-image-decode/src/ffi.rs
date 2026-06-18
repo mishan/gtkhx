@@ -13,38 +13,49 @@ use std::slice;
 
 use crate::sniff::{format_is_allowed, sniff, Format};
 
-/// Borrow a `(*const u8, usize)` pair as a `&[u8]`. Returns an
-/// empty slice on NULL pointer or zero length — the sniff layer
-/// then returns `Unknown` cleanly without panicking.
+/// Window the sniff layer ever reads. Mirrors the 32-byte bound
+/// documented in `sniff` — every magic signature in the allowlist
+/// + blocklist fits in the first 12 bytes, the SVG check scans
+/// past leading whitespace but is bounded by `sniff` itself, and
+/// the FFI shim clamps before constructing the slice so
+/// `slice::from_raw_parts` only needs the *clamped* prefix to be
+/// valid, not the caller's claimed `len`.
+const SNIFF_WINDOW_BYTES: usize = 32;
+
+/// Borrow a `(*const u8, usize)` pair as a `&[u8]` covering at
+/// most the first [`SNIFF_WINDOW_BYTES`] bytes of the input.
+/// Returns an empty slice on NULL pointer or zero length — the
+/// sniff layer then returns `Unknown` cleanly without panicking.
 ///
 /// # Safety
 ///
-/// Standard FFI input contract: `bytes` must point to at least
-/// `len` initialised bytes if non-NULL, and the buffer must be
-/// valid for the duration of the call. The 32-byte sniff window
-/// means reads are bounded regardless of how large `len` claims to
-/// be — even a hostile caller passing a deliberately-oversized
-/// `len` is bounded by the slice's own length check in sniff.
+/// The caller must ensure the first
+/// `min(len, SNIFF_WINDOW_BYTES)` bytes starting at `bytes` are
+/// initialised and remain valid for the duration of the call.
+/// Bytes beyond the clamp are **not** touched — passing a `len`
+/// larger than the underlying allocation is safe as long as the
+/// first 32 bytes are real, which matches the only contract every
+/// caller of `inline_media_decode` already honours (the bytes
+/// come from `gdk_pixbuf_loader_write` / `g_bytes_get_data` /
+/// the chunked-download accumulator, all of which validate the
+/// full slice before handing it here).
 #[inline]
 unsafe fn slice_from_raw<'a>(bytes: *const u8, len: usize) -> &'a [u8] {
     if bytes.is_null() || len == 0 {
         return &[];
     }
-    // Defensive cap. `slice::from_raw_parts` UB-requires `len <=
-    // isize::MAX` per the safety contract; a hostile or buggy
-    // caller passing an absurd len would otherwise trip undefined
-    // behaviour. We clamp to a still-very-generous ceiling.
-    let safe_len = len.min(isize::MAX as usize);
-    slice::from_raw_parts(bytes, safe_len)
+    let clamped = len.min(SNIFF_WINDOW_BYTES);
+    slice::from_raw_parts(bytes, clamped)
 }
 
 /// C-ABI mirror of [`Format`]. The discriminants match the legacy
 /// C `HxInlineMediaFormat` enum byte-for-byte.
 ///
 /// We don't re-export the Rust enum directly across the FFI; the
-/// C `_Static_assert(sizeof(HxInlineMediaFormat) == 4, ...)` on
-/// the C side pins the width, and casting through `u32` keeps the
-/// surface explicit.
+/// `_Static_assert(sizeof(HxInlineMediaFormat) == 4, ...)` on the
+/// C side (in inline_media_decode.c) pins the enum width to match
+/// `#[repr(u32)]`, and casting through `u32` keeps the surface
+/// explicit.
 #[inline]
 fn format_to_u32(f: Format) -> u32 {
     f as u32
