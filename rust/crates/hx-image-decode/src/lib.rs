@@ -40,7 +40,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 pub(crate) mod caps;
-pub(crate) mod decode;
+pub mod decode;
 pub mod ffi;
 pub(crate) mod ffi_result;
 pub mod sniff;

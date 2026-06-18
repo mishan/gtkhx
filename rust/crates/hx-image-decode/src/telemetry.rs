@@ -80,6 +80,28 @@ pub(crate) fn log_decode_done(
     ));
 }
 
+pub(crate) fn log_decode_done_animation(
+    format: Format,
+    width: i32,
+    height: i32,
+    frame_count: usize,
+    total_duration_ms: u64,
+    elapsed: Duration,
+    encoded_bytes: usize,
+) {
+    emit(format!(
+        "decode-done fmt={} bytes={} dims={}x{} frames={} anim_ms={} \
+         decode_ms={}",
+        fmt_label(format),
+        encoded_bytes,
+        width,
+        height,
+        frame_count,
+        total_duration_ms,
+        elapsed.as_millis()
+    ));
+}
+
 pub(crate) fn log_decode_failed(format: Format, category: &str, elapsed: Duration) {
     emit(format!(
         "decode-failed fmt={} reason={:?} ms={}",

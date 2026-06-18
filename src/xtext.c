@@ -75,6 +75,11 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
+/* Glycin G.3: HxInlineMediaFrame is the per-frame struct the
+ * decoder hands us through gtk_xtext_media_set_animation. We
+ * read each element's texture + delay_ms from the GArray
+ * inside the tick callback. */
+#include "inline_media_decode.h"
 /* Phase 4.9: gdk/gdkx.h is the X11-specific GDK backend header. GTK 4
  * makes Wayland the assumed backend (per ROADMAP §Phase 4 gotchas) and
  * gdkx.h's contents (GdkX11Display* types, gdk_x11_*) aren't part of
@@ -257,7 +262,9 @@ struct xtext_media_data
 	 * placeholder/loading state is active. When NULL,
 	 * lines_taken / render_line fall through to the text
 	 * rendering path so the entry looks like a Phase 9.D
-	 * styled placeholder until the texture arrives. */
+	 * styled placeholder until the texture arrives. For an
+	 * animation, this is the current frame — swapped by the
+	 * tick callback as the animation advances. */
 	GdkTexture *texture;
 	/* Cairo-friendly cache of `texture`, materialised once at
 	 * texture-set time. We download the texture's pixels into
@@ -283,6 +290,23 @@ struct xtext_media_data
 	 * inline_media_chat_word_click dispatch keeps working
 	 * across both placeholder + image renderings. */
 	guint media_token;
+	/* Glycin G.3: animation frames. Strong ref to the GArray
+	 * the decoder handed us — each element is a
+	 * HxInlineMediaFrame with its own per-element texture
+	 * ref. NULL for static images. */
+	GArray *frames;
+	guint current_frame_idx;
+	/* GLib timeout id for the per-frame advance. 0 when
+	 * inactive (static image, single-frame "animation", or
+	 * mid-teardown). Cancelled in xtext_entry_media_data_
+	 * free before the array is dropped. */
+	guint anim_tick_id;
+	/* Backpointer to the owning GtkXText so the tick callback
+	 * can queue redraws on the widget. NOT a strong ref —
+	 * xtext_entry_media_data_free runs when the entry is
+	 * freed, which the widget destructor walks before
+	 * destroying itself. */
+	GtkXText *anim_owner;
 };
 
 struct textentry
@@ -318,6 +342,17 @@ xtext_entry_media_data_free (struct xtext_media_data *m)
 {
 	if (!m)
 		return;
+	/* Cancel the animation tick first — the callback
+	 * dereferences `m`, and a pending fire after free is the
+	 * easiest UAF to introduce in this codebase. */
+	if (m->anim_tick_id != 0) {
+		g_source_remove (m->anim_tick_id);
+		m->anim_tick_id = 0;
+	}
+	if (m->frames) {
+		g_array_unref (m->frames);
+		m->frames = NULL;
+	}
 	if (m->texture)
 		g_object_unref (m->texture);
 	/* Surface borrows the byte buffer (cairo_image_surface_
@@ -6108,6 +6143,108 @@ gtk_xtext_media_set_texture (xtext_buffer *buf, textentry *ent,
 		}
 		gtk_widget_queue_draw (GTK_WIDGET (buf->xtext));
 	}
+}
+
+/* Glycin G.3: animation tick. Fires on each frame's delay,
+ * advances current_frame_idx, swaps the texture in-place (and
+ * the surface cache), queues a redraw on the owning widget,
+ * and re-arms with the new frame's delay. The frames all have
+ * identical dimensions within a single animation per glycin's
+ * contract, so the per-tick swap doesn't re-run lines_taken.
+ *
+ * Returns G_SOURCE_REMOVE because each frame has its own
+ * delay — re-adding lets us pick up the next frame's timing
+ * without keeping the timeout id stale. */
+static gboolean
+xtext_media_animation_tick (gpointer data)
+{
+	textentry *ent = data;
+	struct xtext_media_data *m;
+	HxInlineMediaFrame *f;
+	guint next_idx;
+	guint32 next_delay;
+
+	if (!ent || !ent->media)
+		return G_SOURCE_REMOVE;
+	m = ent->media;
+	if (!m->frames || m->frames->len <= 1) {
+		m->anim_tick_id = 0;
+		return G_SOURCE_REMOVE;
+	}
+
+	next_idx = (m->current_frame_idx + 1) % m->frames->len;
+	f = &g_array_index (m->frames, HxInlineMediaFrame, next_idx);
+	m->current_frame_idx = next_idx;
+
+	if (m->texture)
+		g_object_unref (m->texture);
+	m->texture = f->texture ? g_object_ref (f->texture) : NULL;
+	xtext_media_update_surface (m);
+
+	if (m->anim_owner)
+		gtk_widget_queue_draw (GTK_WIDGET (m->anim_owner));
+
+	next_delay = f->delay_ms;
+	if (next_delay < 10)
+		next_delay = 10;
+	m->anim_tick_id = g_timeout_add (next_delay,
+	                                 xtext_media_animation_tick, ent);
+	return G_SOURCE_REMOVE;
+}
+
+void
+gtk_xtext_media_set_animation (xtext_buffer *buf, textentry *ent,
+                               GArray *frames)
+{
+	HxInlineMediaFrame *f0;
+	guint32 first_delay;
+
+	if (!buf || !ent || ent->tag != XTEXT_TAG_MEDIA || !ent->media)
+		return;
+
+	/* Stop any running animation first; release the prior
+	 * frames array before reassigning. */
+	if (ent->media->anim_tick_id != 0) {
+		g_source_remove (ent->media->anim_tick_id);
+		ent->media->anim_tick_id = 0;
+	}
+	if (ent->media->frames) {
+		g_array_unref (ent->media->frames);
+		ent->media->frames = NULL;
+	}
+	ent->media->current_frame_idx = 0;
+	ent->media->anim_owner = buf->xtext;
+
+	/* No frames → behave like clearing the media — fall back
+	 * to the placeholder text path. */
+	if (!frames || frames->len == 0) {
+		gtk_xtext_media_set_texture (buf, ent, NULL);
+		return;
+	}
+
+	ent->media->frames = g_array_ref (frames);
+
+	/* First frame goes through the regular set_texture path so
+	 * the cairo-surface cache is built and lines_taken /
+	 * scrollbar bookkeeping fires once. Subsequent ticks swap
+	 * the texture in-place without touching the line math —
+	 * all frames in a single animation share the same
+	 * dimensions per glycin's contract, so the row layout
+	 * doesn't move under us between frames. */
+	f0 = &g_array_index (frames, HxInlineMediaFrame, 0);
+	gtk_xtext_media_set_texture (buf, ent, f0->texture);
+
+	/* Single-frame "animations" are degenerate — no tick.
+	 * Multi-frame animations schedule the first tick at the
+	 * current frame's delay. */
+	if (frames->len <= 1)
+		return;
+
+	first_delay = f0->delay_ms;
+	if (first_delay < 10)
+		first_delay = 10;
+	ent->media->anim_tick_id = g_timeout_add (
+	    first_delay, xtext_media_animation_tick, ent);
 }
 
 gboolean

@@ -374,6 +374,23 @@ void gtk_xtext_append_media (xtext_buffer *buf, GdkTexture *texture,
 void gtk_xtext_media_set_texture (xtext_buffer *buf, textentry *ent,
                                   GdkTexture *texture);
 
+/* Glycin G.3: install an animation on a media entry. `frames`
+ * is a GArray of HxInlineMediaFrame (from
+ * src/inline_media_decode.h), one element per animation
+ * frame. The widget takes a strong ref on the array and
+ * schedules a per-frame g_timeout tick driven by the per-
+ * element delay_ms. Passing NULL or an empty array clears
+ * the animation (same effect as set_texture(NULL)).
+ *
+ * Subsequent calls replace any prior animation cleanly —
+ * the old tick is cancelled, the old array unref'd, the new
+ * animation kicks off from frame 0. All frames in a single
+ * animation must share dimensions (glycin's per-loader
+ * contract); the widget doesn't re-run lines_taken on a
+ * per-tick swap because of that. */
+void gtk_xtext_media_set_animation (xtext_buffer *buf, textentry *ent,
+                                    GArray *frames);
+
 /* Phase 9.E: TRUE iff the entry is a media-typed entry (paints
  * a texture or fell back to placeholder rendering). */
 gboolean gtk_xtext_entry_is_media (textentry *ent);

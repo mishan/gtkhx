@@ -38,17 +38,20 @@
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use glib::Bytes;
 use glib::MainContext;
 
 use crate::caps::HxInlineMediaCaps;
 use crate::ffi_result::{
-    decoded_alloc, decoded_set_error, decoded_set_texture, HxInlineMediaDecoded,
+    decoded_alloc, decoded_set_error, decoded_set_frames, decoded_set_texture,
+    HxInlineMediaDecoded,
 };
 use crate::sniff::{format_is_allowed, format_to_mime, sniff, Format};
-use crate::telemetry::{log_decode_done, log_decode_failed, log_decode_start};
+use crate::telemetry::{
+    log_decode_done, log_decode_done_animation, log_decode_failed, log_decode_start,
+};
 
 /// Spec MediaErrorCode mapping. Mirrors
 /// `hotline-proto::inline_media::MediaErrorCode`. The wire
@@ -171,6 +174,9 @@ pub(crate) fn decode_async(
     let max_dim = caps.max_dimension;
     let max_pix = caps.max_pixels;
 
+    let max_frames = caps.max_frames;
+    let max_duration_ms = caps.max_duration_ms;
+
     MainContext::default().spawn_local(async move {
         // Re-bind the captured user_data so we can move it out
         // across await points. The marker keeps it !Send-safe.
@@ -178,16 +184,50 @@ pub(crate) fn decode_async(
 
         let result = decoded_alloc();
 
-        match run_glycin_decode(gbytes, max_dim, max_pix, sniffed).await {
-            Ok(tex) => {
+        match run_glycin_decode(
+            gbytes,
+            max_dim,
+            max_pix,
+            max_frames,
+            max_duration_ms,
+            sniffed,
+        )
+        .await
+        {
+            Ok(DecodeOk::Static(tex)) => {
                 let w = gdk::prelude::TextureExt::width(&tex);
                 let h = gdk::prelude::TextureExt::height(&tex);
                 decoded_set_texture(result, tex, sniffed);
                 log_decode_done(sniffed, w, h, started.elapsed(), bytes_len);
             }
+            Ok(DecodeOk::Animation(frames)) => {
+                // The first frame's texture doubles as the
+                // top-level `texture` field so static-image
+                // consumers see something sensible without
+                // knowing about the array.
+                let (first_w, first_h, frame_count, total_ms) = {
+                    let f0 = &frames[0];
+                    (
+                        gdk::prelude::TextureExt::width(&f0.texture),
+                        gdk::prelude::TextureExt::height(&f0.texture),
+                        frames.len(),
+                        frames.iter().map(|f| f.delay_ms as u64).sum::<u64>(),
+                    )
+                };
+                decoded_set_frames(result, frames, sniffed);
+                log_decode_done_animation(
+                    sniffed,
+                    first_w,
+                    first_h,
+                    frame_count,
+                    total_ms,
+                    started.elapsed(),
+                    bytes_len,
+                );
+            }
             Err(GlycinErr { code, message }) => {
                 decoded_set_error(result, code, message, sniffed);
-                log_decode_failed(sniffed, &message, started.elapsed());
+                log_decode_failed(sniffed, message, started.elapsed());
             }
         }
 
@@ -204,6 +244,20 @@ pub(crate) fn decode_async(
     Some(token)
 }
 
+/// One frame collected from glycin.
+pub(crate) struct CollectedFrame {
+    pub texture: gdk::Texture,
+    pub delay_ms: u32,
+}
+
+/// Successful decode result. Static images yield a single
+/// texture without per-frame timing; animations yield a frame
+/// vector that the FFI marshals into a GArray.
+enum DecodeOk {
+    Static(gdk::Texture),
+    Animation(Vec<CollectedFrame>),
+}
+
 /// Error path internal to the async block. `message` is a
 /// 'static literal — keeps the FFI struct's error_message
 /// borrowed-pointer contract.
@@ -216,8 +270,10 @@ async fn run_glycin_decode(
     gbytes: Bytes,
     max_dimension: u32,
     max_pixels: u32,
+    max_frames: u32,
+    max_duration_ms: u32,
     _sniffed: Format,
-) -> Result<gdk::Texture, GlycinErr> {
+) -> Result<DecodeOk, GlycinErr> {
     // glycin::Loader::new_bytes is the GLib-Bytes-in entry point;
     // glycin keeps a ref + passes the buffer to the subprocess via
     // memfd. The default sandbox selector picks bwrap on the host
@@ -264,12 +320,73 @@ async fn run_glycin_decode(
         });
     }
 
-    let frame = image.next_frame().await.map_err(|ctx| GlycinErr {
+    // First frame is always present. `delay` distinguishes
+    // static images (None) from animated ones (Some). Glycin
+    // documents next_frame as looping back to frame 0 once the
+    // animation completes — we stop ourselves via max_frames /
+    // max_duration_ms rather than relying on a sentinel.
+    let first = image.next_frame().await.map_err(|ctx| GlycinErr {
         code: MEDIA_ERR_UNSUPPORTED,
         message: glycin_err_category(&ctx),
     })?;
+    let first_delay = first.delay();
+    let first_tex = first.texture();
 
-    Ok(frame.texture())
+    let Some(first_delay) = first_delay else {
+        // Static image — single frame, no animation.
+        return Ok(DecodeOk::Static(first_tex));
+    };
+
+    // Animation. Collect frames until the cap.
+    let mut frames = Vec::with_capacity(max_frames.min(64) as usize);
+    let mut total_ms: u64 = 0;
+    let push = |frames: &mut Vec<CollectedFrame>,
+                total_ms: &mut u64,
+                texture: gdk::Texture,
+                delay: Duration| {
+        let delay_ms = clamp_delay_ms(delay);
+        frames.push(CollectedFrame { texture, delay_ms });
+        *total_ms = total_ms.saturating_add(delay_ms as u64);
+    };
+    push(&mut frames, &mut total_ms, first_tex, first_delay);
+
+    while frames.len() < max_frames as usize && total_ms < max_duration_ms as u64
+    {
+        let frame = match image.next_frame().await {
+            Ok(f) => f,
+            // Anything other than success ends the loop. Glycin's
+            // documented behaviour is to loop back to frame 0
+            // rather than EOF, but a real decoder error here
+            // (corrupted IDAT mid-animation) shouldn't fail the
+            // whole render — return what we've got, log the
+            // truncation in telemetry.
+            Err(_) => break,
+        };
+        let delay = match frame.delay() {
+            Some(d) => d,
+            // Glycin returned a frame with no delay after the
+            // first delay-bearing frame — treat as
+            // end-of-animation. Some loaders flag this on the
+            // last frame.
+            None => break,
+        };
+        push(&mut frames, &mut total_ms, frame.texture(), delay);
+    }
+
+    Ok(DecodeOk::Animation(frames))
+}
+
+/// Map glycin's per-frame `Duration` to the wire's milli-second
+/// integer. Spec doesn't define a "0 ms = fastest" sentinel —
+/// we clamp to a sane floor (10 ms) so a malformed loader
+/// returning 0 doesn't busy-spin the tick timer.
+fn clamp_delay_ms(d: Duration) -> u32 {
+    let ms = d.as_millis().min(u32::MAX as u128) as u32;
+    if ms < 10 {
+        10
+    } else {
+        ms
+    }
 }
 
 /// Map a glycin ErrorCtx onto a static error-message category.

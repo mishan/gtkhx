@@ -102,11 +102,20 @@ extern const char *inline_media_format_to_mime (HxInlineMediaFormat f);
  * max_dimension: width OR height limit in pixels (each axis).
  * max_pixels: width × height limit (decoded pixel count). The
  *   size-prepared callback gates here BEFORE the full decode runs.
+ * max_frames: animation-frame count cap. 0 falls back to
+ *   HX_MEDIA_DEFAULT_MAX_FRAMES. Enforced AFTER the loop has
+ *   collected min(N, cap) frames; the decoder stops at the cap
+ *   even if the underlying loader would have yielded more.
+ * max_duration_ms: cumulative animation duration cap. Same
+ *   semantics as max_frames — the loop stops once sum(delays)
+ *   reaches the cap.
  */
 typedef struct {
     guint32 max_bytes;
     guint32 max_dimension;
     guint32 max_pixels;
+    guint32 max_frames;
+    guint32 max_duration_ms;
 } HxInlineMediaCaps;
 
 /* Result of a decode attempt. On success texture is a strong
@@ -137,13 +146,31 @@ typedef struct {
     /* Human-readable failure reason for the log. Static
 	 * string; caller doesn't free. NULL on success. */
     const char *error_message;
-    /* Animation frames (G.3 reservation; always NULL in G.2).
-	 * When non-NULL: a GArray<HxInlineMediaFrame> with the
-	 * full frame set + per-frame delay. The static-image case
-	 * leaves this NULL and the consumer reads `texture`
-	 * directly. */
+    /* Animation frames (G.3). When non-NULL: a
+	 * GArray<HxInlineMediaFrame> with the full frame set +
+	 * per-frame delay. The first entry's texture is the same
+	 * pointer as `texture` above (the GArray's clear_func
+	 * drops the per-element refs; the top-level texture ref
+	 * is separate). The static-image case leaves this NULL
+	 * and the consumer reads `texture` directly.
+	 *
+	 * Caller doesn't touch the GArray's storage layout;
+	 * iterate via the typed accessor or `g_array_index
+	 * (frames, HxInlineMediaFrame, i)`. */
     GArray *frames;
 } HxInlineMediaDecoded;
+
+/* One frame of an animation. The texture is a strong ref
+ * owned by the containing GArray; the GArray's clear_func
+ * drops the ref on free. delay_ms is the duration the frame
+ * should be shown for before advancing — typically 50–200 ms
+ * for GIFs. A NULL `frames` (static image) implies a single
+ * implicit frame of unlimited duration; only frames in an
+ * actual animation come through this struct. */
+typedef struct {
+    GdkTexture *texture;
+    guint32 delay_ms;
+} HxInlineMediaFrame;
 
 /* Async decode entry. The bytes pointer is consumed
  * synchronously (copied into a glib::Bytes that survives the

@@ -910,13 +910,29 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
         textentry *ent
             = gtk_xtext_find_media_entry_by_token (buf, ctx->token);
         if (ent) {
-            debug_log ("media",
-                       "inline-media auto-fetch swap-in cid=%u token=%u "
-                       "%dx%d",
-                       ctx->cid, ctx->token,
-                       gdk_texture_get_width (decoded->texture),
-                       gdk_texture_get_height (decoded->texture));
-            gtk_xtext_media_set_texture (buf, ent, decoded->texture);
+            if (decoded->frames && decoded->frames->len > 1) {
+                /* Animation (G.3). Install the frames array on
+				 * the entry; xtext drives the per-frame tick
+				 * from the array's per-element delay_ms. */
+                debug_log (
+                    "media",
+                    "inline-media auto-fetch swap-in animation cid=%u "
+                    "token=%u %dx%d frames=%u",
+                    ctx->cid, ctx->token,
+                    gdk_texture_get_width (decoded->texture),
+                    gdk_texture_get_height (decoded->texture),
+                    decoded->frames->len);
+                gtk_xtext_media_set_animation (buf, ent, decoded->frames);
+            } else {
+                debug_log (
+                    "media",
+                    "inline-media auto-fetch swap-in cid=%u token=%u "
+                    "%dx%d",
+                    ctx->cid, ctx->token,
+                    gdk_texture_get_width (decoded->texture),
+                    gdk_texture_get_height (decoded->texture));
+                gtk_xtext_media_set_texture (buf, ent, decoded->texture);
+            }
         }
     }
 

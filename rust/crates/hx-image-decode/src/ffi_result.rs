@@ -19,6 +19,7 @@ use std::ptr;
 
 use glib::translate::IntoGlibPtr;
 
+use crate::decode::CollectedFrame;
 use crate::sniff::Format;
 
 /// C-ABI mirror of `HxInlineMediaDecoded`. Matches the C struct
@@ -90,6 +91,106 @@ pub(crate) fn decoded_set_texture(
     r.error_message = ptr::null();
 }
 
+/// FFI mirror of `HxInlineMediaFrame`. Layout pinned
+/// `#[repr(C)]` to match the C struct (`GdkTexture *` +
+/// `guint32 delay_ms` + 4-byte pad = 16 bytes on every Linux
+/// ABI we ship for).
+#[repr(C)]
+pub struct HxInlineMediaFrame {
+    pub texture: *mut gdk::ffi::GdkTexture,
+    pub delay_ms: u32,
+    /// Explicit pad so Rust + C agree on the trailing slot.
+    /// `#[repr(C)]` would lay this out implicitly on 64-bit
+    /// targets, but writing it makes the layouts greppably
+    /// equivalent.
+    pub _pad0: u32,
+}
+
+/// Populate a result with an animation. `frames` is a Vec of
+/// glycin-decoded per-frame textures + delays; we marshal them
+/// into a `GArray` of `HxInlineMediaFrame` whose clear_func
+/// drops each per-element texture ref on free. The first
+/// frame's texture is *also* installed at `result->texture` so
+/// static-image consumers (callers that don't know about
+/// animation yet) keep working as before.
+pub(crate) fn decoded_set_frames(
+    result: *mut HxInlineMediaDecoded,
+    frames: Vec<CollectedFrame>,
+    sniffed: Format,
+) {
+    debug_assert!(!result.is_null());
+    debug_assert!(!frames.is_empty(), "animation must have at least one frame");
+    let r = unsafe { &mut *result };
+
+    // Build the GArray<HxInlineMediaFrame>. clear_func unrefs
+    // each per-frame texture on g_array_free; clear_func is
+    // mandatory here because we install raw GdkTexture * via
+    // into_glib_ptr (transfer-full into the array).
+    let element_size = std::mem::size_of::<HxInlineMediaFrame>() as u32;
+    let arr = unsafe {
+        glib::ffi::g_array_sized_new(
+            glib::ffi::GFALSE,
+            glib::ffi::GFALSE,
+            element_size,
+            frames.len() as u32,
+        )
+    };
+    unsafe {
+        glib::ffi::g_array_set_clear_func(arr, Some(frame_clear_cb));
+    }
+
+    let mut first_texture_ptr: *mut gdk::ffi::GdkTexture = ptr::null_mut();
+    for (i, f) in frames.into_iter().enumerate() {
+        let raw_tex = f.texture.into_glib_ptr();
+        let elem = HxInlineMediaFrame {
+            texture: raw_tex,
+            delay_ms: f.delay_ms,
+            _pad0: 0,
+        };
+        unsafe {
+            glib::ffi::g_array_append_vals(
+                arr,
+                &elem as *const _ as glib::ffi::gconstpointer,
+                1,
+            );
+        }
+        if i == 0 {
+            // Keep the first frame's texture available at the
+            // result's `texture` slot — but with an extra ref,
+            // because the array also holds a strong ref and
+            // will drop it on its own.
+            unsafe {
+                glib::gobject_ffi::g_object_ref(raw_tex as *mut _);
+            }
+            first_texture_ptr = raw_tex;
+        }
+    }
+
+    r.texture = first_texture_ptr;
+    r.frames = arr as *mut c_void;
+    r.canonical_mime = mime_cstr_for(sniffed);
+    r.sniffed_format = sniffed as u32;
+    r.error_code = 0;
+    r.error_message = ptr::null();
+}
+
+/// GDestroyNotify-shaped callback that the GArray clear_func
+/// invokes on each element when the array is freed. Element
+/// pointer is a `HxInlineMediaFrame *`; we drop the texture
+/// ref and let the GArray free the element storage.
+extern "C" fn frame_clear_cb(elem: glib::ffi::gpointer) {
+    if elem.is_null() {
+        return;
+    }
+    let frame = unsafe { &mut *(elem as *mut HxInlineMediaFrame) };
+    if !frame.texture.is_null() {
+        unsafe {
+            glib::gobject_ffi::g_object_unref(frame.texture as *mut _);
+        }
+        frame.texture = ptr::null_mut();
+    }
+}
+
 /// Populate a result with a failure. The error_message must
 /// be a `'static` literal; the C side reads it as a borrowed
 /// pointer and won't free.
@@ -121,6 +222,15 @@ pub(crate) fn decoded_drop(result: *mut HxInlineMediaDecoded) {
     if !boxed.texture.is_null() {
         unsafe {
             glib::gobject_ffi::g_object_unref(boxed.texture as *mut _);
+        }
+    }
+    // Frame array — g_array_unref with TRUE for the clear_func
+    // sweep at the same time it deallocates the buffer. The
+    // clear_func unrefs each frame's texture; the array storage
+    // gets freed alongside.
+    if !boxed.frames.is_null() {
+        unsafe {
+            glib::ffi::g_array_unref(boxed.frames as *mut glib::ffi::GArray);
         }
     }
     // canonical_mime + error_message point at 'static literals;
