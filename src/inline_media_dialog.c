@@ -66,6 +66,15 @@ typedef struct {
 
     struct htlc_conn *htlc;
     hx_inline_media_download *download;
+    /* Glycin async-decode handle (G.2). The dialog's
+	 * on_dialog_closed handler cancels via
+	 * inline_media_decode_cancel so a closed-while-decoding
+	 * dialog doesn't UAF when the callback finally lands. The
+	 * cancel function is ALSO the canonical free for the
+	 * token; even on the success path we need to call it once
+	 * (no-op cancel) to release the Rust-side Rc — done
+	 * inside on_dialog_decode_done. */
+    gpointer decode_token;
     /* Filled on download success — the canonical bytes the Save /
 	 * Open buttons write out. Both are NULL until the download
 	 * completes. */
@@ -104,8 +113,9 @@ md_free (hx_media_dialog *md)
     g_free (md);
 }
 
-/* AdwDialog ::closed handler. Cancel the in-flight download (if
- * any) and free the state. */
+/* AdwDialog ::closed handler. Cancel the in-flight download AND
+ * decode (either may be in flight if the user closes the dialog
+ * mid-stream) and free the state. */
 static void
 on_dialog_closed (AdwDialog *dialog, gpointer user_data)
 {
@@ -115,8 +125,17 @@ on_dialog_closed (AdwDialog *dialog, gpointer user_data)
         inline_media_download_cancel (md->download);
         md->download = NULL;
     }
+    if (md->decode_token) {
+        inline_media_decode_cancel (md->decode_token);
+        md->decode_token = NULL;
+    }
     md_free (md);
 }
+
+/* Forward declaration so on_download_done can reference the
+ * G.2 glycin decode callback before it's defined further down. */
+static void
+on_dialog_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data);
 
 static void
 swap_to_error (hx_media_dialog *md, const char *message)
@@ -355,35 +374,62 @@ on_download_done (struct htlc_conn *htlc,
         return;
     }
 
-    /* Decode under spec-default caps; we don't have per-server caps
-	 * threaded through to the dialog. Phase B's
-	 * inline_media_decode handles the cap fall-through internally
-	 * when caps fields are 0. */
-    HxInlineMediaCaps caps = {0};
-    HxInlineMediaDecoded decoded = inline_media_decode (
-        result->bytes->data, result->bytes->len, &caps);
-    if (!decoded.texture) {
-        char buf[256];
-        g_snprintf (buf, sizeof (buf), _ ("Image decoder rejected: %s"),
-                    decoded.error_message ? decoded.error_message
-                                          : _ ("unknown error"));
-        swap_to_error (md, buf);
-        return;
-    }
-
     /* Stash the canonical bytes + mime on the dialog so the Save /
-	 * Open handlers can use them. result->bytes is borrowed —
-	 * dup into a GBytes that owns its own copy. */
+	 * Open handlers can use them once the async decode lands.
+	 * result->bytes is borrowed — dup into a GBytes that owns
+	 * its own copy. */
     md->bytes = g_bytes_new (result->bytes->data, result->bytes->len);
     md->mime = g_strdup (result->canonical_mime);
 
+    /* Kick off the async glycin decode (G.2). The callback lands
+	 * on the GLib main thread; if the dialog was closed before
+	 * decode finishes, on_dialog_closed will have called
+	 * inline_media_decode_cancel and the callback won't fire. */
+    HxInlineMediaCaps caps = {0};
+    gsize len = 0;
+    const guint8 *data = g_bytes_get_data (md->bytes, &len);
+    md->decode_token = inline_media_decode_async (
+        data, len, &caps, on_dialog_decode_done, md);
+    /* NULL token means glycin rejected synchronously (sniff or
+	 * cap gate) and on_dialog_decode_done already fired. The
+	 * field stays NULL — nothing to cancel. */
+}
+
+/* Glycin decode callback (G.2). The dialog state pointer comes
+ * back unchanged via user_data; we know it's live because
+ * on_dialog_closed cancels the decode (which suppresses this
+ * callback) BEFORE freeing the state. */
+static void
+on_dialog_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
+{
+    hx_media_dialog *md = user_data;
+    /* The cancel-token is consumed regardless of success /
+	 * failure — the Rust side hands us a strong Rc reference
+	 * and we need to drop it. Cancel-after-completion is a
+	 * no-op cleanup so this is also the canonical free. */
+    if (md->decode_token) {
+        inline_media_decode_cancel (md->decode_token);
+        md->decode_token = NULL;
+    }
+
+    if (!decoded->texture) {
+        char buf[256];
+        g_snprintf (buf, sizeof (buf), _ ("Image decoder rejected: %s"),
+                    decoded->error_message ? decoded->error_message
+                                           : _ ("unknown error"));
+        swap_to_error (md, buf);
+        inline_media_decoded_free (decoded);
+        return;
+    }
+
     gtk_picture_set_paintable (GTK_PICTURE (md->picture),
-                               GDK_PAINTABLE (decoded.texture));
-    g_object_unref (decoded.texture);
+                               GDK_PAINTABLE (decoded->texture));
 
     gtk_widget_set_sensitive (md->save_btn, TRUE);
     gtk_widget_set_sensitive (md->open_btn, TRUE);
     gtk_stack_set_visible_child_name (GTK_STACK (md->stack), "image");
+
+    inline_media_decoded_free (decoded);
 }
 
 void

@@ -233,9 +233,16 @@ implementation looked like."
    later — its banner PNG decode is a natural sibling) or
    `inline-media-decode` (single-purpose, clear scope)? Leaning toward
    `hx-image-decode` for future reuse.
-2. **Glycin version pin.** Floor at `glycin 2.0` for the animation
-   API. Worth double-checking against the Flatpak platform's bundled
-   version once the manifest update is in flight.
+2. **Glycin version pin.** Floor at the Glycin 2.x project line
+   (libglycin-2 2.1.x on the host, in org.gnome.Platform 48). The
+   Rust crate we depend on (`glycin` on crates.io) has its own
+   independent version stream and is at 3.1.x currently — same
+   product, different versioning. Both speak the same loader
+   subprocess protocol at `/usr/libexec/glycin-loaders/2+/`. The
+   Rust crate's 3.x major reflects breaking changes in the *Rust*
+   API since extraction; it isn't a new "Glycin 3" product. The
+   Cargo.toml on `hx-image-decode` carries this same disambiguation
+   so future readers don't trip on the apparent number jump.
 3. **Loader sandboxing telemetry.** Glycin spawns a subprocess per
    decode; this surfaces in `ps`. Worth adding a debug-category
    `media` log line at decode start/end so the perf cost is visible

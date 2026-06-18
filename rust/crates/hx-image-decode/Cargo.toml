@@ -9,12 +9,54 @@ publish = false
 [lib]
 # staticlib: the C side (inline_media_decode.c shim) links the FFI
 # symbols.
-# rlib:      future Rust consumers (e.g. banner.c when it ports) depend
-#            on the typed Rust API.
+# rlib:      future Rust consumers (e.g. banner.c when it ports)
+#            depend on the typed Rust API.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# G.1 ships the sniff layer only. Glycin lands in G.2; the workspace
-# dep declaration goes here at that point. Kept GLib-free for G.1 so
-# the crate compiles without any system-library hookups beyond the
-# Rust toolchain itself — keeps the build-validation step honest.
+# Glycin's two versioning streams, which look confusingly
+# divergent at first glance:
+#
+#   - the project / C library `libglycin-2` is at 2.1.x (the
+#     pkg-config `glycin-2` version on the host + in
+#     org.gnome.Platform 48). That's the user-facing version of
+#     "Glycin 2.x".
+#   - the Rust crate on crates.io is at 3.1.x with its own
+#     breaking-change history. Both target the same loader
+#     subprocess protocol (`/usr/libexec/glycin-loaders/2+/`).
+#
+# We use the Rust crate directly — it spawns the loader
+# subprocesses itself, no libglycin-2 link surface. The loader
+# binaries (glycin-image-rs for the JPEG/PNG/GIF allowlist; the
+# heif / svg / jxl loaders also live in `2+/` but our sniff
+# layer rejects those formats before they ever see bytes) are
+# what ship in the platform runtime.
+#
+# Licence: MPL-2.0 OR LGPL-2.1-or-later. Both are GPL-2-compatible
+# (LGPL-2.1 expressly permits GPL-2 redistribution; MPL-2.0 is
+# explicitly designed to be GPL-compatible). Picked over the
+# permissively-licensed `glycin-ng` because we want the sandboxed
+# subprocess pipeline.
+#
+# Feature gates:
+#   default-features = false: the default pulls async-io plus a
+#     pile of tokio interop helpers; we only want async-io.
+#   "async-io": glycin spawns its loader subprocess and IPCs with
+#     it via zbus on async-io's reactor. Plays cleanly with the
+#     GLib main loop because we drive the future from
+#     `glib::MainContext::spawn_local`, which polls cooperatively.
+#   "gdk4": Frame::texture() returns a `gdk::Texture` we can hand
+#     directly to GdkPicture (Phase 9.D dialog) or stash on the
+#     xtext_media_data side-pointer (Phase 9.E inline render).
+glycin = { version = "3", default-features = false, features = ["async-io", "gdk4"] }
+
+# GLib types + main-loop integration (decode-result callback runs on
+# the main thread via `glib::MainContext::spawn_local`).
+glib = { workspace = true }
+gio = { workspace = true }
+
+# `gdk::Texture` for the FFI return type. gtk-rs ecosystem
+# convention: the crates.io name is `gdk4`, the package name in
+# source is `gdk`. The version pin matches the gtk4 0.11 family the
+# workspace dependencies already lock.
+gdk = { package = "gdk4", version = "0.11" }

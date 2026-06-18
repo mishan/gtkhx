@@ -499,7 +499,18 @@ test('voice_model', test_voice_model,
 test_inline_media_decode = executable('test_inline_media_decode',
   'unit/test_inline_media_decode.c',
   '../src/inline_media_decode.c',
-  dependencies        : test_deps + [rust_hx_image_decode_dep],
+  '../src/debug.c',
+  dependencies        : test_deps + [
+    rust_hx_image_decode_dep,
+    # G.2 glycin transitive sys deps (see notes in meson.build's
+    # `deps` array — same reason here for the test binary). The
+    # in-process glycin loader needs the seccomp + fontconfig +
+    # lcms2 surface even though our sniff-only tests don't
+    # actually invoke decode.
+    fontconfig_dep,
+    libseccomp_dep,
+    lcms2_dep,
+  ],
   include_directories : test_inc,
 )
 test('inline_media_decode', test_inline_media_decode,

@@ -8,9 +8,13 @@
 //! adds `hx_image_decode_async` + cancel-token; G.3 adds the
 //! animation-frame-iterator surface.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, c_void, CStr};
+use std::rc::Rc;
 use std::slice;
 
+use crate::caps::HxInlineMediaCaps;
+use crate::decode::{decode_async, DecodeCallback, DecodeToken};
+use crate::ffi_result::{decoded_drop, HxInlineMediaDecoded};
 use crate::sniff::{format_is_allowed, sniff, Format};
 
 /// Window the sniff layer ever reads. Mirrors the 32-byte bound
@@ -150,6 +154,80 @@ fn u32_to_format(v: u32) -> Format {
         10 => Format::Bmp,
         _ => Format::Unknown,
     }
+}
+
+/// ---- Async decode (G.2) ----------------------------------------
+///
+/// C signatures (mirror `src/inline_media_decode.h`):
+/// ```c
+/// extern gpointer inline_media_decode_async(
+///     const guint8 *bytes, gsize len,
+///     const HxInlineMediaCaps *caps,
+///     HxInlineMediaDecodeCallback cb, gpointer user_data);
+/// extern void inline_media_decode_cancel(gpointer token);
+/// extern void inline_media_decoded_free(HxInlineMediaDecoded *r);
+/// ```
+
+#[no_mangle]
+pub unsafe extern "C" fn inline_media_decode_async(
+    bytes: *const u8,
+    len: usize,
+    caps_in: *const HxInlineMediaCaps,
+    cb: DecodeCallback,
+    user_data: *mut c_void,
+) -> *mut c_void {
+    // Decode-pipeline reads aren't bounded to 32 bytes the way
+    // sniff is — glycin needs the whole payload. The slice
+    // contract is therefore the standard FFI one: caller's
+    // bytes pointer + len must be a real, initialised buffer.
+    // We still defend against NULL / zero-length up front; the
+    // pipeline produces a synchronous reject for empty input
+    // and the callback fires once before returning.
+    let slice: &[u8] = if bytes.is_null() || len == 0 {
+        &[]
+    } else {
+        // Defensive cap. `slice::from_raw_parts` UB-requires
+        // len ≤ isize::MAX per the safety contract. The
+        // inline-media byte cap is 256 KiB by default; clamping
+        // here at isize::MAX is a sanity floor against a buggy
+        // caller, not a policy decision.
+        let safe_len = len.min(isize::MAX as usize);
+        slice::from_raw_parts(bytes, safe_len)
+    };
+
+    // Caller may pass NULL caps — fall back to spec defaults.
+    let caps = if caps_in.is_null() {
+        HxInlineMediaCaps::SPEC
+    } else {
+        (*caps_in).with_defaults()
+    };
+
+    match decode_async(slice, caps, cb, user_data) {
+        Some(token) => Rc::into_raw(token) as *mut c_void,
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn inline_media_decode_cancel(token: *mut c_void) {
+    if token.is_null() {
+        return;
+    }
+    // Resurrect the Rc the FFI handed out — drop it, decrementing
+    // the strong count. The async block holds its own clone, so
+    // the underlying DecodeToken sticks around until the future
+    // completes; the future polls the `cancelled` cell on its
+    // way to the callback and bails if set.
+    let rc = Rc::from_raw(token as *const DecodeToken);
+    rc.cancelled.set(true);
+    drop(rc);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn inline_media_decoded_free(
+    result: *mut HxInlineMediaDecoded,
+) {
+    decoded_drop(result);
 }
 
 #[cfg(test)]

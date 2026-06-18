@@ -134,6 +134,18 @@ gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20')
 gstreamer_sdp_dep    = dependency('gstreamer-sdp-1.0',    version : '>= 1.20')
 gstreamer_webrtc_dep = dependency('gstreamer-webrtc-1.0', version : '>= 1.20')
 
+# Glycin migration G.2: the hx-image-decode Rust crate pulls in
+# glycin → gufo / lcms2 / libseccomp / fontconfig as transitive
+# system deps. The Rust crate's build emits cargo:rustc-link-lib
+# directives for these, but the Meson custom_target that produces
+# the staticlib doesn't propagate those flags to the C-side
+# executable link line — so the C-side `dependencies` list has to
+# include them explicitly. Versions follow the Debian/Ubuntu LTS
+# floor + the GNOME 48+ Flatpak runtime.
+fontconfig_dep = dependency('fontconfig', version : '>= 2.13')
+libseccomp_dep = dependency('libseccomp', version : '>= 2.5')
+lcms2_dep      = dependency('lcms2',      version : '>= 2.14')
+
 # Phase 5: libsoup-3 powers the URL-mode banner fetcher in banner.c.
 # Modern Hotline servers can advertise a banner via HTLS_HDR_BANNER as
 # either an http(s) URL (URL-mode) or as bytes pulled over the HTXF
@@ -214,6 +226,12 @@ deps = [
   intl_dep,
   dl_dep,
   math_dep,
+  # G.2 glycin migration: pulled in by the hx-image-decode Rust
+  # staticlib via cargo:rustc-link-lib directives the meson
+  # custom_target doesn't surface to the executable link line.
+  fontconfig_dep,
+  libseccomp_dep,
+  lcms2_dep,
 ]
 
 # Phase R1: zlib, liblz4, and libzstd are no longer linked into the
