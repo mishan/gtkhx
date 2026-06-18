@@ -14,7 +14,11 @@ use std::slice;
 
 use crate::caps::HxInlineMediaCaps;
 use crate::decode::{decode_async, DecodeCallback, DecodeToken};
-use crate::ffi_result::{decoded_drop, HxInlineMediaDecoded};
+use crate::ffi_result::decoded_drop;
+/// Re-export so integration tests and other Rust consumers can
+/// name the decoded-result type without touching the internal
+/// `ffi_result` module path.
+pub use crate::ffi_result::HxInlineMediaDecoded;
 use crate::sniff::{format_is_allowed, sniff, Format};
 
 /// Window the sniff layer ever reads. Mirrors the 32-byte bound
