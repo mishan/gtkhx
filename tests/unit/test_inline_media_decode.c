@@ -13,31 +13,9 @@
  *           rejection-at-the-door semantics that defend the
  *           rest of the decode pipeline.
  *
- *   decode — full pipeline (sniff + byte cap + size-prepared
- *            gate + GdkPixbufLoader). Uses dynamically-generated
- *            test pixbufs serialised to PNG / GIF / JPEG, which
- *            keeps the test data small and avoids checking
- *            binary fixtures into the repo. Verifies:
- *              - well-formed PNG / GIF / JPEG decode to a
- *                non-NULL GdkTexture with the spec-canonical
- *                MIME.
- *              - byte cap rejects oversized input with
- *                error_code = 1 (PayloadTooLarge).
- *              - dimension cap rejects oversized image with
- *                error_code = 1.
- *              - SVG / WebP-magic / random bytes reject with
- *                error_code = 2 (UnsupportedFormat).
- *              - empty input rejects with error_code = 2.
- *
- * The decoder layer needs a GdkPixbuf context (which requires
- * `g_test_init` + the gdk pixbuf loaders registered; gtk_init
- * is not required for pixbuf decoding). The test wraps the
- * decode cases in `g_test_add_func` so a CI failure tells
- * which scenario regressed.
+ *   decode — moved to the hx-image-decode Rust crate
  */
 
-#include <glib.h>
-#include <gtk/gtk.h>
 #include <stdint.h>
 #include <string.h>
 

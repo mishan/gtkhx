@@ -490,12 +490,7 @@ test('voice_model', test_voice_model,
 # inline_media_decode — Phase 9.B bounded image decoder.
 # Sniff cases over hand-crafted prefixes pin the JPEG / PNG / GIF
 # allowlist and the explicit-reject set (SVG / WebP / AVIF / HEIC /
-# TIFF / BMP / ICO). Decode cases exercise the full pipeline
-# (sniff → byte cap → size-prepared gate → GdkPixbufLoader) against
-# dynamically-generated PNG / JPEG test pixbufs, verifying that the
-# byte cap maps to PayloadTooLarge (1), the dimension + pixel caps
-# map to PayloadTooLarge (1), and unsupported formats map to
-# UnsupportedFormat (2). Pulls in gtk_dep for GdkPixbuf.
+# TIFF / BMP / ICO).
 # Sniff-only since the glycin migration G.2: the decode-layer
 # test cases moved to the Rust crate (cargo test -p
 # hx-image-decode), this target now exercises the C-side FFI

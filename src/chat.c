@@ -1080,14 +1080,17 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 			 * deep-copy on event_attach_media keeps it valid
 			 * for the synchronous send call. */
             if (inline_media_cap_ok (&the_session.htlc)
-                && e->media->id_len > 0) {
+                && e->media->id_len > 0 && e->media->id_len <= 65535) {
                 struct hx_media_autofetch_ctx *ctx
                     = g_new0 (struct hx_media_autofetch_ctx, 1);
                 ctx->cid = gchat->cid;
                 ctx->token = token;
-                inline_media_download_start (
+                hx_inline_media_download * dl = inline_media_download_start (
                     &the_session.htlc, e->media->id, e->media->id_len,
                     on_inline_media_autofetch_done, ctx);
+                if (!dl) {
+                    g_free(ctx);
+                }
             }
         }
     }

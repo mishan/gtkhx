@@ -98,13 +98,6 @@ pub(crate) type DecodeCallback = unsafe extern "C" fn(
 /// `spawn_local` runs on the main thread.
 struct UserData(*mut c_void);
 
-/// SAFETY: We never share `UserData` across threads. The
-/// `spawn_local` future lives on the same `MainContext` as the
-/// caller (main thread). Marking `Send` only allows the
-/// `Future` produced by `async move` to satisfy `'static` —
-/// `spawn_local` itself doesn't require it.
-unsafe impl Send for UserData {}
-
 /// Kick off an async decode. Mirrors the C contract documented in
 /// `inline_media_decode.h`. Returns `None` when the decode rejects
 /// synchronously (NULL/empty bytes, byte cap exceeded, sniff
