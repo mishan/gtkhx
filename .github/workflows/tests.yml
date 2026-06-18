@@ -114,7 +114,7 @@ jobs:
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
-            libseccomp-devel \
+            libseccomp-devel lcms2-devel \
             git rust cargo
 
       - name: assert rustc meets MSRV
@@ -342,7 +342,7 @@ jobs:
                 gettext-devel \
                 desktop-file-utils appstream \
                 libpanel-devel \
-                libseccomp-devel \
+                libseccomp-devel lcms2-devel \
                 git rust cargo
               meson setup build
               meson compile -C build
