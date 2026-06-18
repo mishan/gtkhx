@@ -79,6 +79,7 @@ jobs:
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
+            libseccomp-devel \
             git rust cargo
 
       - name: meson setup (sanitizers)
@@ -152,6 +153,7 @@ jobs:
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
+            libseccomp-devel \
             git rust cargo
 
       - name: meson setup (-fanalyzer)
@@ -222,6 +224,7 @@ jobs:
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
+            libseccomp-devel \
             git rust cargo
 
       - name: meson setup (export compile_commands.json)
