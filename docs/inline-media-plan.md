@@ -232,7 +232,12 @@ Implementation notes (vs. the original plan):
   now the entry-kind discriminator (`XTEXT_TAG_TEXT` /
   `XTEXT_TAG_MEDIA`), and a `void *media` side-pointer to a
   heap-allocated `struct xtext_media_data` carrying the
-  texture ref + a cairo-friendly `GdkPixbuf` cache + the
+  texture ref + a cairo image-surface cache (originally a
+  `GdkPixbuf` from `gdk_pixbuf_get_from_texture` on the Phase E
+  branch; rewritten on the glycin branch to use
+  `gdk_texture_download` + `cairo_image_surface_create_for_
+  data` so the paint hot path leaves no deprecated 4.16+
+  calls) + the
   per-chat token id. All three textentry free sites
   (`gtk_xtext_kill_ent`, `gtk_xtext_clear`,
   `gtk_xtext_buffer_free`) route through a new
@@ -259,7 +264,10 @@ Implementation notes (vs. the original plan):
   media entries fall through to the text-render path so
   the placeholder reads exactly like Phase 9.D's row.
 - `gtk_xtext_render_line` branches on the same condition:
-  `gtk_xtext_render_media_line` paints the cached pixbuf
+  `gtk_xtext_render_media_line` paints the cached cairo
+  image surface (built from a `gdk_texture_download` of the
+  current frame's pixels into a heap buffer wrapped in
+  `cairo_image_surface_create_for_data`)
   via cairo at the row's reserved band with clip honoured
   and `cairo_scale` covering the native-vs-column-width
   resize, then returns the same subline count as

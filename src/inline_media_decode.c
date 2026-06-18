@@ -128,7 +128,7 @@ inline_media_format_to_mime (HxInlineMediaFormat f)
  *   - C: the sizeof check below catches a stray pad / field
  *     reorder that would silently corrupt the FFI return.
  *
- * 40 bytes on every supported x86_64 / aarch64 Linux ABI:
+ * 40 bytes on every supported 64-bit Linux ABI:
  *   8  GdkTexture *texture
  *   8  const char *canonical_mime
  *   4  HxInlineMediaFormat sniffed_format
@@ -136,7 +136,16 @@ inline_media_format_to_mime (HxInlineMediaFormat f)
  *   2  guint16 _pad0
  *   8  const char *error_message
  *   8  GArray *frames
- */
+ *
+ * The pointer-width assert below makes the 64-bit-only
+ * expectation explicit. A 32-bit build (where pointers are 4
+ * bytes and the struct would size to 24) would trip both
+ * asserts and bail at compile time — naming the underlying
+ * cause keeps the failure mode greppable rather than a
+ * generic "40 != 24" mystery for someone retargeting. */
+_Static_assert (sizeof (void *) == 8,
+                "FFI struct layout pinned on 64-bit ABI; "
+                "32-bit builds need a separate sizeof pin");
 _Static_assert (sizeof (HxInlineMediaDecoded) == 40,
                 "FFI struct size pin (HxInlineMediaDecoded)");
 

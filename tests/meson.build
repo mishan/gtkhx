@@ -496,6 +496,14 @@ test('voice_model', test_voice_model,
 # byte cap maps to PayloadTooLarge (1), the dimension + pixel caps
 # map to PayloadTooLarge (1), and unsupported formats map to
 # UnsupportedFormat (2). Pulls in gtk_dep for GdkPixbuf.
+# Sniff-only since the glycin migration G.2: the decode-layer
+# test cases moved to the Rust crate (cargo test -p
+# hx-image-decode), this target now exercises the C-side FFI
+# shim against the same magic-byte fixtures the legacy C impl
+# had. The block-comment "Phase 9.B bounded image decoder"
+# above still applies to the *binary's purpose* (gating the
+# inline-media decoder's allowlist) but the implementation
+# layer it covers has narrowed.
 test_inline_media_decode = executable('test_inline_media_decode',
   'unit/test_inline_media_decode.c',
   '../src/inline_media_decode.c',

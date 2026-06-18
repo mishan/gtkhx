@@ -58,7 +58,7 @@ decoder. Specifically:
 
 | File / module                          | Disposition under this plan                                  |
 |----------------------------------------|--------------------------------------------------------------|
-| `src/inline_media_decode.c`            | **Deleted** — impl moves to Rust crate                       |
+| `src/inline_media_decode.c`            | **Body deleted, file kept** — sniff impl + decoder pipeline move to the Rust crate; the C file survives as a thin shim (FFI extern decls, `_Static_assert`s for the cross-language struct + enum layout pins, plus the `hx_image_decode_log` bridge that routes the Rust telemetry through `debug_log("media", ...)`). |
 | `src/inline_media_decode.h`            | **Stays** as the C surface; declares the new async API       |
 | `src/xtext.c` Phase E additions        | **Stays C** — paints `GdkTexture` via cairo, decoder-agnostic |
 | `src/chat.c` auto-fetch wiring          | **Stays C** — async-shape upgrade only; chat.c is R5 step 9  |
@@ -78,10 +78,16 @@ support (G.3 below), which adds a frames array + tick state to
 
 ### G.1 — Crate scaffold + magic-byte sniff (~150 LOC Rust)
 
-- New crate `rust/crates/hx-image-decode/`. Cargo deps:
-  - `glycin = "2"`
-  - `gtk4 = "0.10"` (or whatever pin matches the rest of the workspace
-    once gtk-rs lands in R5)
+- New crate `rust/crates/hx-image-decode/`. Cargo deps as shipped:
+  - `glycin = "3"` (the Rust *crate* version is 3.x; the
+    underlying Glycin *project* is at 2.x — see "Glycin
+    version pin" under Open questions for the
+    disambiguation. Both speak the same loader subprocess
+    protocol at `/usr/libexec/glycin-loaders/2+/`.)
+  - `gdk = { package = "gdk4", version = "0.11" }` — pulls
+    in the gtk-rs `gdk4` crate as `gdk` in source per the
+    ecosystem convention.
+  - `glib` + `gio` from the workspace pins (0.22 family).
   - `gdk-pixbuf` is **not** a dep here — that's the whole point.
 - Port `inline_media_sniff` + `inline_media_format_*` from C to Rust.
   Pure magic-byte logic; trivial.
