@@ -35,6 +35,23 @@
 # HAVE_GTKSOURCEVIEW config flags gate the corresponding
 # src/preview.c viewers. PDFs and source files fall through to the
 # plain-text viewer if either lib is absent on the build host.
+#
+# Glycin migration (docs/glycin-migration-plan.md G.5): the
+# Rust hx-image-decode crate consumes the `glycin` crate, which
+# at decode time spawns a sandboxed subprocess from
+# /usr/libexec/glycin-loaders/2+/ (glycin-image-rs covers the
+# JPEG/PNG/GIF allowlist; the heif/svg/jxl siblings live there
+# too but our sniff layer rejects those formats before they
+# ever spawn). The loaders + libglycin-2 / libseccomp /
+# fontconfig / lcms2 surface are all part of the GNOME 49
+# runtime — no extra modules needed.
+#
+# Sandbox subprocess mechanism: inside Flatpak glycin uses
+# `flatpak-spawn` to launch loaders, which requires
+# --talk-name=org.freedesktop.Flatpak on the host's D-Bus.
+# Without it glycin's SandboxSelector::Auto fails to spawn
+# the loader and decode returns UnsupportedFormat for every
+# image. See the finish-args block below.
 
 app-id: com.nasledov.gtkhx
 runtime: org.gnome.Platform
@@ -132,6 +149,17 @@ finish-args:
   # silently no-ops behind xdg-dbus-proxy.
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.portal.Desktop
+
+  # Inline-media decode (glycin G.5). Glycin's
+  # SandboxSelector::Auto detects /.flatpak-info and switches
+  # to flatpak-spawn, which calls into the host's Flatpak
+  # D-Bus service to launch the loader subprocess. Without
+  # this permission glycin can't spawn the loader and every
+  # image decode would return UnsupportedFormat — the
+  # inline-media auto-fetch path silently degrades to the
+  # styled placeholder, the click-to-view dialog shows the
+  # error page. Same shape Loupe and Image Viewer use.
+  - --talk-name=org.freedesktop.Flatpak
 modules:
   # libcanberra — gsound's audio backend. Last upstream release
   # is 0.30 from 2012; no successor has shipped because the API

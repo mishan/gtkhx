@@ -102,11 +102,20 @@ extern const char *inline_media_format_to_mime (HxInlineMediaFormat f);
  * max_dimension: width OR height limit in pixels (each axis).
  * max_pixels: width × height limit (decoded pixel count). The
  *   size-prepared callback gates here BEFORE the full decode runs.
+ * max_frames: animation-frame count cap. 0 falls back to
+ *   HX_MEDIA_DEFAULT_MAX_FRAMES. Enforced AFTER the loop has
+ *   collected min(N, cap) frames; the decoder stops at the cap
+ *   even if the underlying loader would have yielded more.
+ * max_duration_ms: cumulative animation duration cap. Same
+ *   semantics as max_frames — the loop stops once sum(delays)
+ *   reaches the cap.
  */
 typedef struct {
     guint32 max_bytes;
     guint32 max_dimension;
     guint32 max_pixels;
+    guint32 max_frames;
+    guint32 max_duration_ms;
 } HxInlineMediaCaps;
 
 /* Result of a decode attempt. On success texture is a strong
@@ -117,7 +126,14 @@ typedef struct {
  * caller doesn't free.
  *
  * sniffed_format is the format the magic-byte sniff identified
- * (useful for logging). Always set, even on failure. */
+ * (useful for logging). Always set, even on failure.
+ *
+ * Memory layout pinned `#[repr(C)]` on the Rust side
+ * (rust/crates/hx-image-decode); a `_Static_assert` in
+ * inline_media_decode.c catches drift at compile time.
+ *
+ * G.3 adds an animation-frames pointer here; G.2 leaves it
+ * NULL on every result. */
 typedef struct {
     GdkTexture *texture;
     const char *canonical_mime;
@@ -125,39 +141,83 @@ typedef struct {
     /* Maps to inline_media.rs::MediaErrorCode wire values
 	 * (0 = generic, 1 = too large, 2 = unsupported, etc.). */
     guint16 error_code;
+    /* 16-bit pad to match Rust #[repr(C)] field layout. */
+    guint16 _pad0;
     /* Human-readable failure reason for the log. Static
 	 * string; caller doesn't free. NULL on success. */
     const char *error_message;
+    /* Animation frames (G.3). When non-NULL: a
+	 * GArray<HxInlineMediaFrame> with the full frame set +
+	 * per-frame delay. The first entry's texture is the same
+	 * pointer as `texture` above (the GArray's clear_func
+	 * drops the per-element refs; the top-level texture ref
+	 * is separate). The static-image case leaves this NULL
+	 * and the consumer reads `texture` directly.
+	 *
+	 * Caller doesn't touch the GArray's storage layout;
+	 * iterate via the typed accessor or `g_array_index
+	 * (frames, HxInlineMediaFrame, i)`. */
+    GArray *frames;
 } HxInlineMediaDecoded;
 
-/* Decode bytes into a GdkTexture under the supplied caps.
+/* One frame of an animation. The texture is a strong ref
+ * owned by the containing GArray; the GArray's clear_func
+ * drops the ref on free. delay_ms is the duration the frame
+ * should be shown for before advancing — typically 50–200 ms
+ * for GIFs. A NULL `frames` (static image) implies a single
+ * implicit frame of unlimited duration; only frames in an
+ * actual animation come through this struct. */
+typedef struct {
+    GdkTexture *texture;
+    guint32 delay_ms;
+} HxInlineMediaFrame;
+
+/* Async decode entry. The bytes pointer is consumed
+ * synchronously (copied into a glib::Bytes that survives the
+ * subprocess hand-off), so the caller's buffer can be released
+ * as soon as this returns.
  *
- * Returns a populated HxInlineMediaDecoded:
- *   - texture non-NULL on success, NULL on failure.
- *   - error_code is the wire MediaErrorCode value.
- *   - sniffed_format is always set.
+ * The result is delivered to `cb(result, user_data)` on the GLib
+ * main thread once the glycin sandbox completes — typically
+ * 30–200 ms for the inline-media cap (256 KiB encoded, 2048×2048
+ * decoded). The callback OWNS the `HxInlineMediaDecoded *` and
+ * MUST call `inline_media_decoded_free(result)` to release it.
  *
- * Bound failures (max_bytes / max_dimension / max_pixels) map to
- * code 1 (PayloadTooLarge). Sniff failures (unknown or blocked
- * format) map to code 2 (UnsupportedFormat). Loader failures map
- * to code 2 (UnsupportedFormat) — the bytes claimed a known magic
- * but the actual decode failed.
+ * Returns an opaque cancel token, or NULL on synchronous reject
+ * (NULL bytes / zero-length / bytes-cap exceeded / blocked
+ * format from sniff). When NULL is returned, the callback fires
+ * exactly once before this call returns with the cap or sniff
+ * error encoded — no async work was scheduled. When non-NULL,
+ * the callback fires once async unless the caller invokes
+ * `inline_media_decode_cancel(token)` first.
  *
- * On success the texture is a strong reference; caller is
- * responsible for g_object_unref when done.
+ * The cancel token is reference-shared with the in-flight decode
+ * task — either side dropping its ref is safe, and a successful
+ * decode plus a late cancel are safely race-free. The caller
+ * MUST eventually call `inline_media_decode_cancel(token)` on
+ * non-NULL tokens (it's the canonical free function for the
+ * token; cancel-after-completion is a no-op but still frees).
  *
- * Phase 9.D's call site is the main thread (the dialog
- * download callback). The decoder itself is pure compute over
- * the input bytes and only touches GdkPixbufLoader +
- * GdkTexture; a worker-thread variant is straightforward to
- * arrange as long as the caller marshals the resulting
- * GdkTexture back to the main thread before handing it to a
- * widget. (Widget mutation must stay on the main thread per
- * the GTK threading model; the GDK lock doesn't exist in
- * GTK 4.)
- */
-extern HxInlineMediaDecoded inline_media_decode (const guint8 *bytes,
-                                                 gsize len,
-                                                 const HxInlineMediaCaps *caps);
+ * caps may be NULL — the decoder falls back to HX_MEDIA_DEFAULT_*
+ * per missing field. */
+typedef void (*HxInlineMediaDecodeCallback)(HxInlineMediaDecoded *result,
+                                            gpointer user_data);
+
+extern gpointer inline_media_decode_async (const guint8 *bytes,
+                                           gsize len,
+                                           const HxInlineMediaCaps *caps,
+                                           HxInlineMediaDecodeCallback cb,
+                                           gpointer user_data);
+
+/* Cancel an in-flight decode + release the cancel token. The
+ * callback will NOT fire after this call returns — the
+ * subprocess result, if it lands afterwards, is dropped on the
+ * floor. Safe to call with NULL. */
+extern void inline_media_decode_cancel (gpointer token);
+
+/* Release a HxInlineMediaDecoded handed to a callback. Drops
+ * the GdkTexture ref (if any), the G.3 frames GArray (if any),
+ * and frees the struct itself. NULL-safe. */
+extern void inline_media_decoded_free (HxInlineMediaDecoded *decoded);
 
 #endif /* HX_INLINE_MEDIA_DECODE_H */

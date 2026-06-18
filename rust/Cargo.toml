@@ -9,6 +9,7 @@ members = [
     "crates/hxbridge",
     "crates/hxvoice",
     "crates/hxvoice-runtime",
+    "crates/hx-image-decode",
 ]
 
 # Shared version pins for the gtk-rs + gstreamer-rs families. Phase R3.0

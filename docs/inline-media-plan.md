@@ -9,16 +9,19 @@ in `src/hotline.h:329` from the original capability-bit allocation pass.
 
 ## Status (June 2026)
 
-Phases A, B, C, D, and F have shipped on `main`. The client is
-spec-conformant: it negotiates the capability, decodes server-canonical
-bytes through a bounded loader, lets the user attach an image via a
-paperclip button in chat input bars, renders a styled placeholder for
-inbound media, and surfaces a click-to-view dialog with Save As / Open
-Externally. Tier 3 covers seven end-to-end paths against Janus.
+Phases A, B, C, D, E, and F have shipped on `main`. The client is
+spec-conformant AND renders inbound media inline: capability
+negotiated, decoded via bounded loader, attached via paperclip
+button on chat input bars, auto-fetched on arrival, and painted
+into the xtext output stream as a true multi-subline-padded
+texture row. Click on the rendered image still opens the Phase D
+dialog at full size with Save As / Open Externally. Tier 3
+covers eleven end-to-end paths against Janus.
 
-Phase E (true in-stream rendering by extending xtext) is **deferred** —
-shipping Option 1 first burns the wire / decoder stack in against real
-servers before committing to the xtext surgery.
+Phase E (true in-stream rendering by extending xtext) shipped
+on branch `claude/inline-media-phase-e` (June 2026). Approach
+matches the original Option 2 plan — multi-subline padding,
+texture painted into the reserved band during cairo render.
 
 The shipped scope deliberately omits some entries in the original send-
 path plan: **paste-from-clipboard and drag-and-drop** are not wired up
@@ -216,40 +219,98 @@ Remaining work (post-Phase-C polish, not blocking spec conformance):
 End of Phase D, the client is spec-conformant: it sends, receives,
 decodes, and lets the user view media. No xtext surgery yet.
 
-### Phase E — Receive path (Option 2: multi-subline padding inline) [DEFERRED]
+### Phase E — Receive path (Option 2: multi-subline padding inline) [SHIPPED]
 
-This phase replaces the placeholder with true in-stream rendering. It
-is the part that touches xtext, and it is gated on Phase D being
-shipped and used long enough to validate the wire / decoder stack.
-Phase D is shipped; Phase E is intentionally deferred until there's
-data on whether the placeholder-and-dialog UX is enough.
+Replaces the styled placeholder with a true in-stream rendered
+image. Shipped on branch `claude/inline-media-phase-e`
+(June 2026).
 
-- Extend `textentry` with a discriminator (`tag` field is already
-  there; use a new value) and a `GdkTexture *` ref for media entries.
-- New API: `gtk_xtext_append_media (buf, texture, alt_text, stamp)` —
-  appends a media entry. Height is `ceil(texture_height / fontsize)`
-  blank text rows, the texture is painted into the bounding box during
-  render.
-- `gtk_xtext_render_line` branches on the entry kind: text path
-  unchanged, media path is single-shot `cairo_set_source_surface` (or
-  equivalent `gdk_texture` paint) at the entry's reserved band, with
-  clipping to `clip_y` / `clip_y2`.
-- `gtk_xtext_lines_taken` returns the padded row count for media
-  entries; the rest of `calc_lines` / `nth` / scroll math sees a
-  normal multi-subline entry.
-- Selection over a media entry: all-or-nothing, with the alt text
-  going to the clipboard on copy (not whitespace from the blank
-  sublines).
-- Right-click on a media row surfaces the same Save As / Copy /
-  Open-External context menu Phase D introduced for the placeholder.
-- Click semantics: still opens the in-app dialog at full size, since
-  the rendered inline copy is sized down to fit the chat width.
+Implementation notes (vs. the original plan):
 
-The known compromises (selection-drag passes through blank rows;
-marker draw lands on blanks) are documented as the cost of staying in
-the line-uniform grid model. If they prove too rough, Option 4
-(variable-height xtext) becomes the natural follow-up against a
-codebase that already has the data model.
+- `textentry` now carries two new fields: the existing `tag`
+  guchar (which upstream xchat had but GtkHx never claimed) is
+  now the entry-kind discriminator (`XTEXT_TAG_TEXT` /
+  `XTEXT_TAG_MEDIA`), and a `void *media` side-pointer to a
+  heap-allocated `struct xtext_media_data` carrying the
+  texture ref + a cairo image-surface cache (originally a
+  `GdkPixbuf` from `gdk_pixbuf_get_from_texture` on the Phase E
+  branch; rewritten on the glycin branch to use
+  `gdk_texture_download` + `cairo_image_surface_create_for_
+  data` so the paint hot path leaves no deprecated 4.16+
+  calls) + the
+  per-chat token id. All three textentry free sites
+  (`gtk_xtext_kill_ent`, `gtk_xtext_clear`,
+  `gtk_xtext_buffer_free`) route through a new
+  `xtext_entry_free` helper that drops the media side-
+  pointer before the historical `g_free(ent)`.
+- New public API: `gtk_xtext_append_media (buf, texture,
+  alt_text, media_token, stamp)`. Texture may be NULL on
+  append — the row renders as styled placeholder text
+  (Phase 9.D behaviour) until `gtk_xtext_media_set_texture`
+  swaps in the decoded image. The `alt_text` carries the
+  Phase 9.D NBSP-joined `hxmedia:N`-embedding placeholder
+  string, doubling as both the clipboard payload for
+  selection copy and the source for the existing
+  `inline_media_chat_word_click` token parser. The async
+  swap-in finds the entry by media token via
+  `gtk_xtext_find_media_entry_by_token` so a disappearing
+  entry (auto-trim / chat clear mid-fetch) is a quiet
+  no-op rather than a UAF.
+- `gtk_xtext_lines_taken` branches on
+  `tag == XTEXT_TAG_MEDIA && texture != NULL`: computes
+  `ceil(rendered_h / fontsize)` blank sublines (each
+  carrying byte-offset 0, which `find_subline`'s fallback
+  path quietly normalises to `str_len`). NULL-texture
+  media entries fall through to the text-render path so
+  the placeholder reads exactly like Phase 9.D's row.
+- `gtk_xtext_render_line` branches on the same condition:
+  `gtk_xtext_render_media_line` paints the cached cairo
+  image surface (built from a `gdk_texture_download` of the
+  current frame's pixels into a heap buffer wrapped in
+  `cairo_image_surface_create_for_data`)
+  via cairo at the row's reserved band with clip honoured
+  and `cairo_scale` covering the native-vs-column-width
+  resize, then returns the same subline count as
+  `lines_taken`. Stamp / marker / per-subline str render
+  are all skipped — the texture owns the band.
+- Sizing rule (per Misha, June 2026 design call): native
+  size when it fits the column, otherwise scale down by
+  width while preserving aspect ratio. Click still opens
+  the dialog at full size.
+- Selection: media entries promoted to all-or-nothing.
+  When `low_ent == high_ent` and it's a media-typed
+  entry with texture, `gtk_xtext_selection_draw` rewrites
+  the entry's `mark_start = 0; mark_end = str_len` so the
+  whole alt-text byte range copies (without the
+  override, find_x's "out of bounds" return for sublines
+  past the first would collapse mark_start == mark_end
+  == 0 and nothing would land on the clipboard).
+- Click: re-uses the existing word_click signal. Get_word
+  on the media row's alt-text returns the NBSP-joined
+  string including `hxmedia:N`, the existing
+  `inline_media_chat_word_click` parses the token, and
+  the Phase 9.D click-to-view dialog opens. Right-click
+  context menu (Save As / Copy / Open Externally) is
+  still not wired — same status as Phase D — though
+  the dialog's header bar carries Save As + Open
+  Externally.
+- Auto-fetch on arrival (per Misha, June 2026 design
+  call): `output_chat_from_event` in chat.c kicks off
+  `inline_media_download_start` immediately after
+  appending the placeholder row. On decode success the
+  callback finds the entry by token and calls
+  `gtk_xtext_media_set_texture`. On any failure the
+  placeholder stays — click-to-view still works through
+  the dialog. The "Auto-load images" preference toggle
+  (deferred from this phase) is a one-line gate on the
+  cap-ok check.
+
+Known limitations carried from the original Option 2
+plan: selection-drag passes through blank padding rows;
+marker draws above the band rather than across the image.
+Both fall out of the line-uniform grid model. Option 4
+(variable-height xtext) remains the natural follow-up if
+the compromises chafe.
 
 ### Phase F — Tier 3 integration against Janus [SHIPPED]
 

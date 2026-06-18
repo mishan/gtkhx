@@ -332,6 +332,81 @@ gboolean gtk_xtext_remove_entry (xtext_buffer *buf, textentry *ent);
 /* Accessor: pointer to the tail (last-appended) entry. Useful
  * for saving an anchor right after gtk_xtext_append_indent. */
 textentry *gtk_xtext_get_last_entry (xtext_buffer *buf);
+
+/* Phase 9.E (inline media): append a media entry that paints a
+ * texture inline. The entry reserves ceil(rendered_h / fontsize)
+ * blank text rows; render_line paints the texture into that
+ * band. The texture renders at native size up to the chat
+ * column width; oversized textures scale down to fit while
+ * preserving aspect ratio.
+ *
+ * Until `texture` is non-NULL, the entry renders as ordinary
+ * styled text (the `alt_text` argument is used as ent->str —
+ * the same Phase 9.D NBSP-joined placeholder shape the
+ * existing word_click handler already parses for `hxmedia:N`).
+ * When the texture lands later (the auto-fetch + decode path),
+ * the chat-side caller swaps it in via
+ * gtk_xtext_media_set_texture and the row re-laid-out as an
+ * image.
+ *
+ * Selection across the row copies the alt_text bytes to the
+ * clipboard (the rendered image isn't text; falling back to
+ * the placeholder description is the cheap correct answer for
+ * v1).
+ *
+ * `media_token` is the per-chat token id used by the
+ * "media-click" path; if non-zero the click handler can route
+ * back to the chat's media_handles table. `alt_text` is taken
+ * as-is and stored on the entry (caller's pointer can be
+ * freed afterwards). */
+void gtk_xtext_append_media (xtext_buffer *buf, GdkTexture *texture,
+                             const char *alt_text, guint media_token,
+                             time_t stamp);
+
+/* Phase 9.E: swap or clear the texture on an already-appended
+ * media entry. Used by the auto-fetch path: chat.c appends the
+ * placeholder row immediately, kicks off the download, and
+ * calls this with the decoded texture on success. NULL
+ * texture reverts the row to its styled-text appearance
+ * (useful for "decode failed, fall back to placeholder"). The
+ * buffer's line count is recomputed so scroll math sees the
+ * padded height immediately. */
+void gtk_xtext_media_set_texture (xtext_buffer *buf, textentry *ent,
+                                  GdkTexture *texture);
+
+/* Glycin G.3: install an animation on a media entry. `frames`
+ * is a GArray of HxInlineMediaFrame (from
+ * src/inline_media_decode.h), one element per animation
+ * frame. The widget takes a strong ref on the array and
+ * schedules a per-frame g_timeout tick driven by the per-
+ * element delay_ms. Passing NULL or an empty array clears
+ * the animation (same effect as set_texture(NULL)).
+ *
+ * Subsequent calls replace any prior animation cleanly —
+ * the old tick is cancelled, the old array unref'd, the new
+ * animation kicks off from frame 0. All frames in a single
+ * animation must share dimensions (glycin's per-loader
+ * contract); the widget doesn't re-run lines_taken on a
+ * per-tick swap because of that. */
+void gtk_xtext_media_set_animation (xtext_buffer *buf, textentry *ent,
+                                    GArray *frames);
+
+/* Phase 9.E: TRUE iff the entry is a media-typed entry (paints
+ * a texture or fell back to placeholder rendering). */
+gboolean gtk_xtext_entry_is_media (textentry *ent);
+
+/* Phase 9.E: per-chat media token attached to the entry, or 0
+ * if the entry isn't a media entry. Used by the click handler
+ * to dispatch to the chat's media_handles lookup table. */
+guint gtk_xtext_entry_media_token (textentry *ent);
+
+/* Phase 9.E: linear scan for the first media entry in `buf`
+ * whose media_token matches. Returns NULL if not found (the
+ * entry was auto-trimmed or the buffer cleared mid-fetch).
+ * The auto-fetch callback in chat.c uses this rather than a
+ * raw textentry pointer so a disappearing entry can't UAF. */
+textentry *gtk_xtext_find_media_entry_by_token (xtext_buffer *buf,
+                                                guint media_token);
 int gtk_xtext_set_font (GtkXText *xtext, char *name);
 void gtk_xtext_set_palette (GtkXText * xtext, GdkRGBA palette[]);
 void gtk_xtext_clear (xtext_buffer *buf, int lines);

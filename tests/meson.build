@@ -490,16 +490,30 @@ test('voice_model', test_voice_model,
 # inline_media_decode — Phase 9.B bounded image decoder.
 # Sniff cases over hand-crafted prefixes pin the JPEG / PNG / GIF
 # allowlist and the explicit-reject set (SVG / WebP / AVIF / HEIC /
-# TIFF / BMP / ICO). Decode cases exercise the full pipeline
-# (sniff → byte cap → size-prepared gate → GdkPixbufLoader) against
-# dynamically-generated PNG / JPEG test pixbufs, verifying that the
-# byte cap maps to PayloadTooLarge (1), the dimension + pixel caps
-# map to PayloadTooLarge (1), and unsupported formats map to
-# UnsupportedFormat (2). Pulls in gtk_dep for GdkPixbuf.
+# TIFF / BMP / ICO).
+# Sniff-only since the glycin migration G.2: the decode-layer
+# test cases moved to the Rust crate (cargo test -p
+# hx-image-decode), this target now exercises the C-side FFI
+# shim against the same magic-byte fixtures the legacy C impl
+# had. The block-comment "Phase 9.B bounded image decoder"
+# above still applies to the *binary's purpose* (gating the
+# inline-media decoder's allowlist) but the implementation
+# layer it covers has narrowed.
 test_inline_media_decode = executable('test_inline_media_decode',
   'unit/test_inline_media_decode.c',
   '../src/inline_media_decode.c',
-  dependencies        : test_deps,
+  '../src/debug.c',
+  dependencies        : test_deps + [
+    rust_hx_image_decode_dep,
+    # G.2 glycin transitive sys deps (see notes in meson.build's
+    # `deps` array — same reason here for the test binary). The
+    # in-process glycin loader needs the seccomp + fontconfig +
+    # lcms2 surface even though our sniff-only tests don't
+    # actually invoke decode.
+    fontconfig_dep,
+    libseccomp_dep,
+    lcms2_dep,
+  ],
   include_directories : test_inc,
 )
 test('inline_media_decode', test_inline_media_decode,

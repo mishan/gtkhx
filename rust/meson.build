@@ -67,6 +67,13 @@ rust_sources = files(
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
   'crates/hxvoice-runtime/src/ffi.rs',
+  'crates/hx-image-decode/src/lib.rs',
+  'crates/hx-image-decode/src/sniff.rs',
+  'crates/hx-image-decode/src/ffi.rs',
+  'crates/hx-image-decode/src/caps.rs',
+  'crates/hx-image-decode/src/decode.rs',
+  'crates/hx-image-decode/src/ffi_result.rs',
+  'crates/hx-image-decode/src/telemetry.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/hxcrypto-hash/Cargo.toml',
@@ -77,6 +84,7 @@ rust_sources = files(
   'crates/hxbridge/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
+  'crates/hx-image-decode/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
 # offline build; it is not consumed by `cargo build` directly. Cargo.lock
@@ -185,5 +193,22 @@ rust_hxvoice_runtime_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxvoice_runtime',
+  ],
+)
+
+# Image decoder (glycin migration G.1+). G.1 ships the sniff layer +
+# FFI scaffold. G.2 lands the glycin loader (the actual decode) plus
+# the async ripple in the C consumers (inline_media_dialog.c,
+# chat.c::on_inline_media_autofetch_done). The link surface stays
+# small on G.1 — pure-Rust sniff has no system deps; glycin adds
+# libglycin-2 (already on the host via the gtk4 + gnome-platform
+# install) when G.2 lands.
+#
+# See docs/glycin-migration-plan.md for the full phased plan.
+rust_hx_image_decode_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhx_image_decode',
   ],
 )
