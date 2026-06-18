@@ -5,6 +5,37 @@ pipeline with a glycin-driven Rust decoder, and shipping Phase E of the
 inline-media extension on that decoder instead of the deprecated
 pixbuf-loader path.
 
+## Status (June 2026) — shipped
+
+All six sub-phases shipped on `claude/inline-media-glycin`:
+
+- **G.1**: `hx-image-decode` crate scaffold + magic-byte sniff in
+  Rust. FFI shims for sniff / format_is_allowed / format_to_mime.
+- **G.2**: Glycin static-image decode + async ripple in C. The
+  C-side `inline_media_decode` sync function is gone; the dialog
+  callback fires through `inline_media_decode_async` and a new
+  decode-done handler. `_Static_assert(sizeof(HxInlineMediaDecoded)
+  == 40)` pins the FFI struct shape both sides.
+- **G.3**: Animation in decoder + xtext. Frame collection loop
+  caps at `max_frames` / `max_duration_ms`. New
+  `gtk_xtext_media_set_animation` API with per-frame
+  `g_timeout_add` tick. chat.c branches on `frames->len > 1` to
+  install animations.
+- **G.4**: Pause-when-offscreen tick gating via cheap visibility
+  walk from `pagetop_ent`.
+- **G.5**: Flatpak manifest documents glycin runtime expectations
+  and adds `--talk-name=org.freedesktop.Flatpak` for the loader
+  subprocess.
+- **G.6**: Rust integration tests drive `inline_media_decode_async`
+  end-to-end against the fixture PNG/JPEG/GIF. Tier 3 animated-GIF
+  round-trip is the remaining follow-up (see "Future work" below).
+
+The pre-glycin Phase E branch (`claude/inline-media-phase-e`)
+stays as the reference checkpoint for the pixbuf-loader path; it
+does not merge to main.
+
+
+
 Glycin is the modern GTK image loader — sandboxed (each format's decoder
 runs in a `bwrap`+seccomp subprocess), supports animation natively,
 non-deprecated (vs. `gdk_pixbuf_*` which is widely deprecated in 4.16),
