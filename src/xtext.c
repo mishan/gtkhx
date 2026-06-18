@@ -6008,6 +6008,63 @@ xtext_media_update_surface (struct xtext_media_data *m)
 
 	if (!m)
 		return;
+
+	if (!m->texture)
+	{
+		/* No texture means clear the cache. The animation
+		 * tick path never gets here (it always has a frame
+		 * to install), so the "reuse on same dimensions"
+		 * branch below doesn't need a NULL-texture fallback. */
+		if (m->surface)
+		{
+			cairo_surface_destroy (m->surface);
+			m->surface = NULL;
+		}
+		if (m->surface_data)
+		{
+			g_free (m->surface_data);
+			m->surface_data = NULL;
+		}
+		return;
+	}
+
+	tw = gdk_texture_get_width (m->texture);
+	th = gdk_texture_get_height (m->texture);
+	if (tw <= 0 || th <= 0)
+		return;
+
+	stride = cairo_format_stride_for_width (CAIRO_FORMAT_ARGB32, tw);
+	if (stride <= 0)
+		return;
+
+	/* Animation hot-path: when the new texture matches the
+	 * cached surface's geometry (glycin guarantees this within
+	 * a single animation), re-download into the existing
+	 * buffer instead of churning the malloc + cairo_image_
+	 * surface_create_for_data pair every frame. For a 30 FPS
+	 * GIF that's 30 malloc/free pairs/sec eliminated.
+	 *
+	 * cairo_surface_flush before we mutate the backing buffer
+	 * forces cairo to commit any in-flight rendering it might
+	 * have queued against the old contents; cairo_surface_mark
+	 * _dirty after tells the next paint that the pixels have
+	 * changed and any caches it kept are stale. */
+	if (m->surface && m->surface_data
+	    && cairo_image_surface_get_width (m->surface) == tw
+	    && cairo_image_surface_get_height (m->surface) == th
+	    && cairo_image_surface_get_stride (m->surface) == stride)
+	{
+		cairo_surface_flush (m->surface);
+		gdk_texture_download (m->texture, m->surface_data,
+		                      (gsize) stride);
+		cairo_surface_mark_dirty (m->surface);
+		return;
+	}
+
+	/* Geometry mismatch (first install, or texture swap with
+	 * different dimensions — e.g. set_texture replacing the
+	 * placeholder for the first time). Drop the old cache
+	 * and rebuild from scratch. */
 	if (m->surface)
 	{
 		cairo_surface_destroy (m->surface);
@@ -6018,17 +6075,6 @@ xtext_media_update_surface (struct xtext_media_data *m)
 		g_free (m->surface_data);
 		m->surface_data = NULL;
 	}
-	if (!m->texture)
-		return;
-
-	tw = gdk_texture_get_width (m->texture);
-	th = gdk_texture_get_height (m->texture);
-	if (tw <= 0 || th <= 0)
-		return;
-
-	stride = cairo_format_stride_for_width (CAIRO_FORMAT_ARGB32, tw);
-	if (stride <= 0)
-		return;
 
 	m->surface_data = g_malloc ((gsize) stride * (gsize) th);
 	/* gdk_texture_download writes B8G8R8A8 premultiplied, which

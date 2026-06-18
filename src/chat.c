@@ -854,13 +854,22 @@ on_inline_media_autofetch_done (struct htlc_conn *htlc,
 	 * fall-through to HX_MEDIA_DEFAULT_*; matching that
 	 * keeps the two paths consistent. The ctx is preserved
 	 * across the async hop — the decode-done callback frees
-	 * it. NULL token means glycin rejected synchronously
-	 * (sniff or bytes cap) and on_inline_media_autofetch_decoded
-	 * has already fired — ctx has been freed too. */
+	 * it.
+	 *
+	 * Synchronous-reject path: when the decoder bails before
+	 * scheduling async work (empty payload / cap exceeded /
+	 * sniff reject) it fires the callback synchronously AND
+	 * returns NULL. The callback frees `ctx`, so writing
+	 * ctx->decode_token after the call would be a UAF.
+	 * Capture into a local first and only thread it into ctx
+	 * when the call returned a real token. */
     HxInlineMediaCaps caps = {0};
-    ctx->decode_token = inline_media_decode_async (
+    gpointer token = inline_media_decode_async (
         result->bytes->data, result->bytes->len, &caps,
         on_inline_media_autofetch_decoded, ctx);
+    if (token) {
+        ctx->decode_token = token;
+    }
     /* The download result + ctx ownership cross to the decode
 	 * callback. Do NOT free `ctx` here. */
 }
