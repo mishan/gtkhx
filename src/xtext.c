@@ -6145,12 +6145,74 @@ gtk_xtext_media_set_texture (xtext_buffer *buf, textentry *ent,
 	}
 }
 
+/* Glycin G.4: cheap visibility check on a textentry. Walks
+ * forward from the buffer's pagetop_ent counting sublines —
+ * if the target appears within `page_size` sublines from the
+ * pagetop, it's onscreen.
+ *
+ * Two early-outs make the common case O(1):
+ * - target == pagetop_ent: visible (its sublines straddle the
+ *   top of the viewport).
+ * - we walk past `page_size` lines without seeing target:
+ *   target is below the viewport (or in a different buffer).
+ *
+ * Targets ABOVE pagetop_ent return FALSE — they're invisible
+ * by definition; walking backwards to confirm would cost the
+ * same as walking forward but for no gain.
+ *
+ * Returns TRUE in defensive fallbacks (no pagetop yet, no
+ * measurable viewport, target's buffer can't be cross-checked)
+ * so animations don't silently freeze when the visibility
+ * model is uncertain. */
+static gboolean
+xtext_entry_is_visible (GtkXText *xt, textentry *target)
+{
+	xtext_buffer *buf;
+	textentry *ent;
+	int line;
+	int page_size;
+
+	if (!xt || !target)
+		return FALSE;
+	buf = xt->buffer;
+	if (!buf)
+		return FALSE;
+	if (!buf->pagetop_ent)
+		return TRUE; /* no scroll info yet — assume visible */
+
+	page_size = (int) gtk_adjustment_get_page_size (xt->adj);
+	if (page_size <= 0)
+		return TRUE; /* no measurable viewport */
+
+	/* pagetop_ent's first visible subline is pagetop_subline
+	 * — its earlier sublines (if any) sit above the viewport.
+	 * Account for that by starting the line counter negative;
+	 * target==pagetop_ent then trivially passes the
+	 * `line < page_size` check. */
+	line = -buf->pagetop_subline;
+	for (ent = buf->pagetop_ent; ent && line < page_size;
+	     ent = ent->next) {
+		if (ent == target)
+			return TRUE;
+		line += g_slist_length (ent->sublines);
+	}
+	return FALSE;
+}
+
 /* Glycin G.3: animation tick. Fires on each frame's delay,
  * advances current_frame_idx, swaps the texture in-place (and
  * the surface cache), queues a redraw on the owning widget,
  * and re-arms with the new frame's delay. The frames all have
  * identical dimensions within a single animation per glycin's
  * contract, so the per-tick swap doesn't re-run lines_taken.
+ *
+ * G.4: visibility-gated. Offscreen entries skip the texture
+ * swap + redraw — the tick still wakes the GLib main loop but
+ * does no per-frame work, and the current frame stays fixed
+ * until the entry scrolls back into view. Costs ~30-entry
+ * walk per skipped tick which is cheap compared to the
+ * download + paint cycle the work path would otherwise
+ * trigger.
  *
  * Returns G_SOURCE_REMOVE because each frame has its own
  * delay — re-adding lets us pick up the next frame's timing
@@ -6163,6 +6225,7 @@ xtext_media_animation_tick (gpointer data)
 	HxInlineMediaFrame *f;
 	guint next_idx;
 	guint32 next_delay;
+	gboolean visible;
 
 	if (!ent || !ent->media)
 		return G_SOURCE_REMOVE;
@@ -6172,17 +6235,27 @@ xtext_media_animation_tick (gpointer data)
 		return G_SOURCE_REMOVE;
 	}
 
-	next_idx = (m->current_frame_idx + 1) % m->frames->len;
-	f = &g_array_index (m->frames, HxInlineMediaFrame, next_idx);
-	m->current_frame_idx = next_idx;
+	visible = xtext_entry_is_visible (m->anim_owner, ent);
 
-	if (m->texture)
-		g_object_unref (m->texture);
-	m->texture = f->texture ? g_object_ref (f->texture) : NULL;
-	xtext_media_update_surface (m);
+	if (visible) {
+		next_idx = (m->current_frame_idx + 1) % m->frames->len;
+		f = &g_array_index (m->frames, HxInlineMediaFrame, next_idx);
+		m->current_frame_idx = next_idx;
 
-	if (m->anim_owner)
-		gtk_widget_queue_draw (GTK_WIDGET (m->anim_owner));
+		if (m->texture)
+			g_object_unref (m->texture);
+		m->texture = f->texture ? g_object_ref (f->texture) : NULL;
+		xtext_media_update_surface (m);
+
+		if (m->anim_owner)
+			gtk_widget_queue_draw (GTK_WIDGET (m->anim_owner));
+	} else {
+		/* Offscreen — keep the current frame, re-arm at the
+		 * SAME frame's delay so when the entry scrolls back
+		 * into view it picks up at a sensible cadence. */
+		f = &g_array_index (m->frames, HxInlineMediaFrame,
+		                    m->current_frame_idx);
+	}
 
 	next_delay = f->delay_ms;
 	if (next_delay < 10)
