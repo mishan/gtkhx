@@ -1,0 +1,20 @@
+[package]
+name = "hx-image-decode"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Bounded image decoder for GtkHx — glycin-based, replaces the inline_media_decode.c pixbuf-loader path. See docs/glycin-migration-plan.md."
+publish = false
+
+[lib]
+# staticlib: the C side (inline_media_decode.c shim) links the FFI
+# symbols.
+# rlib:      future Rust consumers (e.g. banner.c when it ports) depend
+#            on the typed Rust API.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# G.1 ships the sniff layer only. Glycin lands in G.2; the workspace
+# dep declaration goes here at that point. Kept GLib-free for G.1 so
+# the crate compiles without any system-library hookups beyond the
+# Rust toolchain itself — keeps the build-validation step honest.

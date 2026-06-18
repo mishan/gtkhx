@@ -832,6 +832,10 @@ name = "hotline-proto"
 version = "0.1.0"
 
 [[package]]
+name = "hx-image-decode"
+version = "0.1.0"
+
+[[package]]
 name = "hxbridge"
 version = "0.1.0"
 dependencies = [

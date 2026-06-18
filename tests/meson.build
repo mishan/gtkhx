@@ -499,7 +499,7 @@ test('voice_model', test_voice_model,
 test_inline_media_decode = executable('test_inline_media_decode',
   'unit/test_inline_media_decode.c',
   '../src/inline_media_decode.c',
-  dependencies        : test_deps,
+  dependencies        : test_deps + [rust_hx_image_decode_dep],
   include_directories : test_inc,
 )
 test('inline_media_decode', test_inline_media_decode,

@@ -48,177 +48,64 @@
 #include "compat.h"  /* PACKED — required before hotline.h */
 #include "hotline.h" /* HX_MEDIA_DEFAULT_* fallbacks */
 
-/* ---- Sniff ---------------------------------------------------- */
+/* ---- Sniff (glycin migration G.1) ---------------------------- */
+/* Sniff impl moved to rust/crates/hx-image-decode (sniff.rs +
+ * ffi.rs). The C entry points below are thin shims forwarding to
+ * the Rust functions; the wire-level contract is byte-identical to
+ * the pre-migration C impl, so tests/unit/test_inline_media_decode
+ * stays green without changes.
+ *
+ * Drift surfaces at link time as an undefined symbol — same
+ * discipline as the Phase R1 crypto crates. See
+ * docs/glycin-migration-plan.md.
+ */
+extern guint32 hx_image_decode_sniff (const guint8 *bytes, gsize len);
+extern gboolean hx_image_decode_format_is_allowed (guint32 fmt);
+extern const char *hx_image_decode_format_to_mime (guint32 fmt);
 
-static gboolean
-prefix_matches (const guint8 *buf, gsize len, const guint8 *needle,
-                gsize needle_len)
-{
-    if (len < needle_len) {
-        return FALSE;
-    }
-    return memcmp (buf, needle, needle_len) == 0;
-}
-
-/* Sniff SVG. Allowlisted by the spec for rejection: SVG is XML,
- * scriptable, can fetch network resources. The detection is
- * conservative — any leading whitespace / BOM, plus the literal
- * "<?xml" or "<svg" prefix. We don't bother with full XML
- * parsing; the bytes are getting rejected either way. */
-static gboolean
-sniff_svg (const guint8 *buf, gsize len)
-{
-    gsize i = 0;
-    /* Skip BOM. */
-    if (len >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF) {
-        i = 3;
-    }
-    /* Skip leading whitespace. */
-    while (i < len && (buf[i] == ' ' || buf[i] == '\t' || buf[i] == '\n'
-                       || buf[i] == '\r')) {
-        i++;
-    }
-    if (i + 5 <= len && memcmp (buf + i, "<?xml", 5) == 0) {
-        return TRUE;
-    }
-    if (i + 4 <= len && memcmp (buf + i, "<svg", 4) == 0) {
-        return TRUE;
-    }
-    return FALSE;
-}
+/* Static-assert that the Rust enum discriminants match the C enum
+ * one-for-one. The Rust ffi.rs comment pins these as `#[repr(u32)]`;
+ * if a future commit reorders either side, the build trips here
+ * rather than silently miscategorising at runtime. */
+_Static_assert (INLINE_MEDIA_FORMAT_UNKNOWN == 0,
+                "rust discriminant pin (unknown)");
+_Static_assert (INLINE_MEDIA_FORMAT_JPEG == 1,
+                "rust discriminant pin (jpeg)");
+_Static_assert (INLINE_MEDIA_FORMAT_PNG == 2,
+                "rust discriminant pin (png)");
+_Static_assert (INLINE_MEDIA_FORMAT_GIF == 3,
+                "rust discriminant pin (gif)");
+_Static_assert (INLINE_MEDIA_FORMAT_SVG == 4,
+                "rust discriminant pin (svg)");
+_Static_assert (INLINE_MEDIA_FORMAT_WEBP == 5,
+                "rust discriminant pin (webp)");
+_Static_assert (INLINE_MEDIA_FORMAT_AVIF == 6,
+                "rust discriminant pin (avif)");
+_Static_assert (INLINE_MEDIA_FORMAT_HEIC == 7,
+                "rust discriminant pin (heic)");
+_Static_assert (INLINE_MEDIA_FORMAT_TIFF == 8,
+                "rust discriminant pin (tiff)");
+_Static_assert (INLINE_MEDIA_FORMAT_ICO == 9,
+                "rust discriminant pin (ico)");
+_Static_assert (INLINE_MEDIA_FORMAT_BMP == 10,
+                "rust discriminant pin (bmp)");
 
 HxInlineMediaFormat
 inline_media_sniff (const guint8 *bytes, gsize len)
 {
-    if (!bytes || len == 0) {
-        return INLINE_MEDIA_FORMAT_UNKNOWN;
-    }
-
-    /* Bound the sniff window at 32 bytes regardless of input
-	 * length. Every magic signature in the allowlist + blocklist
-	 * below fits in the first 12 bytes; the SVG check
-	 * additionally scans past leading whitespace, so clamping
-	 * `len` here is what enforces the documented "bounded hot
-	 * path" contract — without it sniff_svg could walk an
-	 * arbitrarily long leading-whitespace run, defeating the
-	 * O(1)-sniff promise in the header. */
-    if (len > 32) {
-        len = 32;
-    }
-
-    /* JPEG: SOI marker FF D8 FF (then a third byte that's any
-	 * APPn / SOI marker). The third FF byte is checked to rule
-	 * out 0xFFD8 in random data. */
-    if (prefix_matches (bytes, len, (const guint8 *) "\xFF\xD8\xFF", 3)) {
-        return INLINE_MEDIA_FORMAT_JPEG;
-    }
-
-    /* PNG: 8-byte signature 89 50 4E 47 0D 0A 1A 0A. */
-    if (prefix_matches (bytes, len,
-                        (const guint8 *) "\x89PNG\r\n\x1A\n", 8)) {
-        return INLINE_MEDIA_FORMAT_PNG;
-    }
-
-    /* GIF: ASCII "GIF87a" or "GIF89a". */
-    if (prefix_matches (bytes, len, (const guint8 *) "GIF87a", 6)
-        || prefix_matches (bytes, len, (const guint8 *) "GIF89a", 6)) {
-        return INLINE_MEDIA_FORMAT_GIF;
-    }
-
-    /* RIFF...WEBP. RIFF is 4-byte magic at offset 0; WEBP is
-	 * 4 ASCII bytes at offset 8 (after the RIFF + 4-byte size). */
-    if (len >= 12 && prefix_matches (bytes, 4, (const guint8 *) "RIFF", 4)
-        && memcmp (bytes + 8, "WEBP", 4) == 0) {
-        return INLINE_MEDIA_FORMAT_WEBP;
-    }
-
-    /* ISO BMFF container: ....ftypavif / ....ftypheic / ....ftyphei[xcsm]
-	 * at offset 4. AVIF: brand "avif" / "avis". HEIC: brand
-	 * "heic" / "heix" / "hevc" / "hevx" / "heim" / "heis" / "mif1". */
-    if (len >= 12 && memcmp (bytes + 4, "ftyp", 4) == 0) {
-        const guint8 *brand = bytes + 8;
-        if (memcmp (brand, "avif", 4) == 0 || memcmp (brand, "avis", 4) == 0) {
-            return INLINE_MEDIA_FORMAT_AVIF;
-        }
-        if (memcmp (brand, "heic", 4) == 0 || memcmp (brand, "heix", 4) == 0
-            || memcmp (brand, "hevc", 4) == 0 || memcmp (brand, "hevx", 4) == 0
-            || memcmp (brand, "heim", 4) == 0 || memcmp (brand, "heis", 4) == 0
-            || memcmp (brand, "hevm", 4) == 0 || memcmp (brand, "hevs", 4) == 0
-            || memcmp (brand, "mif1", 4) == 0) {
-            return INLINE_MEDIA_FORMAT_HEIC;
-        }
-    }
-
-    /* TIFF: 49 49 2A 00 (little-endian) or 4D 4D 00 2A (big-endian). */
-    if (prefix_matches (bytes, len,
-                        (const guint8 *) "\x49\x49\x2A\x00", 4)
-        || prefix_matches (bytes, len,
-                           (const guint8 *) "\x4D\x4D\x00\x2A", 4)) {
-        return INLINE_MEDIA_FORMAT_TIFF;
-    }
-
-    /* ICO: 00 00 01 00 (reserved + image type). */
-    if (prefix_matches (bytes, len,
-                        (const guint8 *) "\x00\x00\x01\x00", 4)) {
-        return INLINE_MEDIA_FORMAT_ICO;
-    }
-
-    /* BMP: "BM" at offset 0. */
-    if (prefix_matches (bytes, len, (const guint8 *) "BM", 2)) {
-        return INLINE_MEDIA_FORMAT_BMP;
-    }
-
-    /* SVG check last — it requires scanning past whitespace
-	 * and is more expensive than the prefix-equality checks
-	 * above. */
-    if (sniff_svg (bytes, len)) {
-        return INLINE_MEDIA_FORMAT_SVG;
-    }
-
-    return INLINE_MEDIA_FORMAT_UNKNOWN;
+    return (HxInlineMediaFormat) hx_image_decode_sniff (bytes, len);
 }
 
 gboolean
 inline_media_format_is_allowed (HxInlineMediaFormat f)
 {
-    switch (f) {
-    case INLINE_MEDIA_FORMAT_JPEG:
-    case INLINE_MEDIA_FORMAT_PNG:
-    case INLINE_MEDIA_FORMAT_GIF:
-        return TRUE;
-    default:
-        return FALSE;
-    }
+    return hx_image_decode_format_is_allowed ((guint32) f);
 }
 
 const char *
 inline_media_format_to_mime (HxInlineMediaFormat f)
 {
-    switch (f) {
-    case INLINE_MEDIA_FORMAT_JPEG:
-        return "image/jpeg";
-    case INLINE_MEDIA_FORMAT_PNG:
-        return "image/png";
-    case INLINE_MEDIA_FORMAT_GIF:
-        return "image/gif";
-    case INLINE_MEDIA_FORMAT_SVG:
-        return "image/svg+xml";
-    case INLINE_MEDIA_FORMAT_WEBP:
-        return "image/webp";
-    case INLINE_MEDIA_FORMAT_AVIF:
-        return "image/avif";
-    case INLINE_MEDIA_FORMAT_HEIC:
-        return "image/heic";
-    case INLINE_MEDIA_FORMAT_TIFF:
-        return "image/tiff";
-    case INLINE_MEDIA_FORMAT_ICO:
-        return "image/x-icon";
-    case INLINE_MEDIA_FORMAT_BMP:
-        return "image/bmp";
-    case INLINE_MEDIA_FORMAT_UNKNOWN:
-    default:
-        return NULL;
-    }
+    return hx_image_decode_format_to_mime ((guint32) f);
 }
 
 /* ---- Decode pipeline ----------------------------------------- */
