@@ -427,6 +427,16 @@ msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
 	 * texture_new helper) and feed it to set_from_paintable. */
     load_icon (msg->info_image, icon, &icon_files, 1, &pixbuf, &unused_mask);
     if (pixbuf) {
+        /* load_icon transfers ownership of the freshly-allocated
+		 * pixbuf to us. gtkhx_texture_from_pixbuf takes its own
+		 * ref (via the GBytes free_func that holds the pixbuf
+		 * alive for the texture's lifetime), so we always drop
+		 * our reference — both on the success path AND on the
+		 * texture-conversion-failed path, otherwise every
+		 * msg_apply_user_view refresh would leak one pixbuf.
+		 * (The pre-migration code had the same shape and the
+		 * same leak; fixing it here as part of the texture
+		 * conversion review.) */
         GdkTexture *tex = gtkhx_texture_from_pixbuf (pixbuf);
         if (tex) {
             gtk_image_set_from_paintable (GTK_IMAGE (msg->info_image),
@@ -436,6 +446,7 @@ msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
         } else {
             gtk_image_clear (GTK_IMAGE (msg->info_image));
         }
+        g_object_unref (pixbuf);
     } else {
         gtk_image_clear (GTK_IMAGE (msg->info_image));
     }

@@ -799,11 +799,13 @@ gtkhx_texture_pixbuf_pixels_unref (gpointer data)
  * GdkMemoryFormat; stride + width + height come straight off
  * the pixbuf accessors.
  *
- * Pixel buffer ownership: gdk_pixbuf_get_pixels returns a
- * borrowed pointer into the pixbuf's internal buffer. The
- * pixbuf must outlive the GBytes (which the texture refs).
- * We hold a strong ref on the pixbuf in the bytes' free_func
- * and drop it when the bytes go away. */
+ * Pixel buffer ownership: gdk_pixbuf_read_pixels returns a
+ * `const guint8 *` borrowed pointer into the pixbuf's
+ * internal buffer (the const-correct successor to the older
+ * gdk_pixbuf_get_pixels — same backing storage, just typed as
+ * read-only). The pixbuf must outlive the GBytes (which the
+ * texture refs). We hold a strong ref on the pixbuf in the
+ * bytes' free_func and drop it when the bytes go away. */
 GdkTexture *
 gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf)
 {
