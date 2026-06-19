@@ -21,6 +21,7 @@
 #include "hx.h"
 #include "cicn.h"   /* load_icon */
 #include "gtkhx.h"  /* gtkhx_apply_userlist_style + icon_files */
+#include "gtkutil.h" /* gtkhx_texture_from_pixbuf */
 #include "msg.h"    /* msgwin_with_uid + create_msgwin */
 #include "chat_tabs.h"
 #include "users.h"  /* users_font_desc + user_popup_show */
@@ -146,6 +147,7 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     load_icon (GTK_WIDGET (cell), icon_id, &icon_files, 1, &pixbuf,
                &mask_unused);
     if (pixbuf) {
+        GdkTexture *tex;
         /* Wide-banner detection: anything >= 48 px gets the 200 px
 		 * left shift (clamped to the actual width for the rare
 		 * pathologically narrow "wide" icon). */
@@ -153,13 +155,12 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
         if (pb_w >= HX_USER_WIDE_ICON_THRESHOLD) {
             cell->icon_left_pad = MIN (HX_USER_WIDE_ICON_LEFT_PAD, pb_w);
         }
-        /* gdk_texture_new_for_pixbuf is deprecated in GTK 4.12+ but
-         * still the simplest way to bridge a GdkPixbuf into a
-         * paintable. Other call sites in the codebase do the same;
-         * the deprecation pragma keeps -Werror happy. */
-        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        cell->icon = GDK_PAINTABLE (gdk_texture_new_for_pixbuf (pixbuf));
-        G_GNUC_END_IGNORE_DEPRECATIONS
+        /* gtkhx_texture_from_pixbuf is the non-deprecated
+		 * GBytes / gdk_memory_texture_new wrapper; centralises
+		 * the conversion so the per-call-site deprecation
+		 * pragma is no longer needed. */
+        tex = gtkhx_texture_from_pixbuf (pixbuf);
+        cell->icon = tex ? GDK_PAINTABLE (tex) : NULL;
         g_object_unref (pixbuf);
     }
 }

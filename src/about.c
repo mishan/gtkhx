@@ -116,9 +116,7 @@ create_about_window (GtkWidget *widget, gpointer data)
 	 * stretched. */
     logo_pb = gdk_pixbuf_new_from_resource (
         "/com/nasledov/gtkhx/pixmaps/gtkhx.png", NULL);
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    logo_tex = gdk_texture_new_for_pixbuf (logo_pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    logo_tex = gtkhx_texture_from_pixbuf (logo_pb);
     logo = gtk_picture_new_for_paintable (GDK_PAINTABLE (logo_tex));
     gtk_picture_set_can_shrink (GTK_PICTURE (logo), FALSE);
     gtk_widget_set_halign (logo, GTK_ALIGN_CENTER);

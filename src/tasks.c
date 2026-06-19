@@ -219,9 +219,13 @@ gtask_make_icon (const char *resource_path)
         gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
         return picture;
     }
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (use_pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    tex = gtkhx_texture_from_pixbuf (use_pb);
+    if (!tex) {
+        g_object_unref (use_pb);
+        picture = gtk_picture_new ();
+        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        return picture;
+    }
     picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
     gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
     g_object_unref (tex);

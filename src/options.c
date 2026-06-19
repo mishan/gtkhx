@@ -306,13 +306,14 @@ list_icons (void)
 		 * size — same fix gtkhx_pixmap_button uses for the
 		 * toolbar buttons. */
         {
-            GdkTexture *tex;
-            G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-            tex = gdk_texture_new_for_pixbuf (pb);
-            G_GNUC_END_IGNORE_DEPRECATIONS
-            image = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-            g_object_unref (tex);
-            gtk_picture_set_can_shrink (GTK_PICTURE (image), FALSE);
+            GdkTexture *tex = gtkhx_texture_from_pixbuf (pb);
+            if (tex) {
+                image = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+                g_object_unref (tex);
+                gtk_picture_set_can_shrink (GTK_PICTURE (image), FALSE);
+            } else {
+                image = gtk_picture_new ();
+            }
         }
         label = gtk_label_new (buf);
         gtk_widget_add_css_class (label, "caption");
