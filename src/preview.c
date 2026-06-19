@@ -29,8 +29,11 @@
  * The viewer registry below picks a per-format renderer:
  *
  *   text_viewer  — GtkTextView; catch-all fallback (score = 1)
- *   image_viewer — GdkPixbufLoader → GtkPicture; (score ~= 10 on
- *                  image type/creator codes or known extensions)
+ *   image_viewer — async glycin decode → GtkPicture, with a
+ *                  PICT fallback chain (embedded-image sniff
+ *                  then ImageMagick raster opcodes) for
+ *                  classic QuickDraw input. Score ~= 10 on
+ *                  image type/creator codes or known extensions.
  *
  * Adding a new viewer: implement the four hx_viewer entry points,
  * append a pointer to the viewers[] table. Higher scores win on
@@ -59,6 +62,18 @@
 #include "pict_embed.h"
 #include "pict_magick.h"
 #include "gtkutil.h"
+/* Image decode (June 2026): primary decode path runs through
+ * the glycin loader via the same async FFI inline-media + the
+ * banner fetcher use. Drops the in-process gdk-pixbuf decoder
+ * surface, gets us sandboxed decode for the JPEG/PNG/GIF/BMP/
+ * TIFF/WebP/HEIC/ICO formats glycin's loaders handle.
+ * Preview uses HX_IMAGE_DECODE_WIDE — the user explicitly
+ * opened a file, so the inline-media spec's JPEG/PNG/GIF gate
+ * doesn't apply. PICT (QuickDraw raster opcodes) falls
+ * through to ImageMagick via the existing pict_magick chain;
+ * embedded-image-in-PICT recovery also runs through the
+ * glycin path now. */
+#include "inline_media_decode.h"
 
 /* ---- Viewer protocol ----------------------------------------------- */
 
@@ -247,7 +262,7 @@ static const struct hx_viewer text_viewer = {
     .close = text_close,
 };
 
-/* ---- Image viewer (GdkPixbufLoader → GtkPicture) ------------------- */
+/* ---- Image viewer (glycin → GtkPicture) ----------------------------- */
 
 /* Mac creator+type codes for image formats commonly served via
  * Hotline. Pre-OS X TextEdit / Preview / SimpleText era — these
@@ -263,13 +278,20 @@ static const char *const image_type_codes[] = {
     "BMPp", /* BMP (alt) */
     "WBMP", /* WebP — sometimes seen */
     "TIFF", /* TIFF */
-    "PICT", /* QuickDraw PICT — GdkPixbuf doesn't decode these
-	          * natively. image_done has a fallback path that sniffs
-	          * the byte stream for an embedded JPEG/PNG/GIF/TIFF
-	          * (typical for PICT v2 files; covers most screenshots
-	          * shared on Hotline). PICT files that use classic
-	          * QuickDraw raster opcodes still fall through with a
-	          * "couldn't decode" message — see pict_embed.h. */
+    "PICT", /* QuickDraw PICT — glycin has no PICT loader (the
+	          * format is essentially Mac-only and historically
+	          * tied to QuickDraw raster opcodes). image_done
+	          * walks a two-step fallback when the primary
+	          * glycin decode fails on PICT input: first a cheap
+	          * embedded-image sniff via hx_pict_extract_
+	          * embedded (covers v2 PICT files that wrapped a
+	          * JPEG/PNG/GIF/TIFF in opcode 0x8200/0x8201 — the
+	          * common case for mid-90s+ screenshots), then
+	          * ImageMagick's PICT decoder via hx_pict_magick_
+	          * decode for the long-tail classic-QuickDraw raster
+	          * files. The ImageMagick step is optional at build
+	          * time; when it's compiled out the classic-PICT
+	          * case degrades to a "couldn't decode" message. */
     NULL,
 };
 
@@ -332,20 +354,40 @@ image_score (const char *type, const char *creator, const char *filename)
     return 0;
 }
 
-/* The image viewer reads p->bytes once at end-of-stream and decodes
- * via gdk_texture_new_from_bytes.
+/* The image viewer reads p->bytes once at end-of-stream and
+ * decodes asynchronously through the glycin loader (the same
+ * sandboxed-subprocess pipeline inline-media + the banner
+ * fetcher use). Two fallback stages handle PICT — see
+ * image_decode_done for the chain.
  *
- * We could decode progressively with GdkPixbufLoader but the
- * pixbuf→GdkPaintable handoff used to go through gdk_texture_new_
- * for_pixbuf, which is deprecated in modern GTK 4. The from-bytes
- * texture API is the supported modern path, and it doesn't accept
- * a streaming feed — it wants the whole image as one GBytes. For
- * the preview use case (single image, kept fully in memory anyway
- * for the texture), this is fine and quite a bit simpler. */
+ * Async lifecycle: image_done starts the primary decode;
+ * image_close cancels any in-flight token via
+ * inline_media_decode_cancel (suppresses the callback so a
+ * dialog closed mid-decode doesn't dereference a freed
+ * viewer state). hx_preview itself owns p->bytes so we
+ * don't ref it separately — bytes live until the preview
+ * window tears down. */
+enum image_stage {
+    IMAGE_STAGE_PRIMARY = 0, /* glycin WIDE on the original input */
+    IMAGE_STAGE_EMBEDDED,    /* glycin WIDE on the PICT-extracted bytes */
+    IMAGE_STAGE_DONE,        /* terminal — texture shown or error rendered */
+};
+
 struct image_state {
     GtkWidget *picture;
     GtkWidget *status; /* caption shown while loading / on error */
+    hx_preview *preview; /* back-ref for callback bytes access */
+    gpointer decode_token; /* in-flight glycin decode, NULL when idle */
+    GBytes *embedded_bytes; /* alive across the embedded decode async hop */
+    enum image_stage stage;
 };
+
+static void image_kick_decode (struct image_state *s, const guint8 *bytes,
+                               gsize len, enum image_stage stage);
+static void image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data);
+static void image_try_magick_fallback (struct image_state *s);
+static void image_show_decode_error (struct image_state *s, const char *msg);
+static void image_show_texture (struct image_state *s, GdkTexture *tex);
 
 static GtkWidget *
 image_create (hx_preview *p)
@@ -398,99 +440,187 @@ static void
 image_done (hx_preview *p)
 {
     struct image_state *s = p->viewer_data;
-    GError *err = NULL;
-    GdkTexture *tex;
-    GBytes *bytes;
 
     if (!s) {
         return;
     }
+    s->preview = p;
 
     if (!p->bytes || p->bytes->len == 0) {
         gtk_label_set_text (GTK_LABEL (s->status), "No image data");
         return;
     }
 
-    /* Borrow the bytes — don't consume p->bytes (the Save button
-	 * still needs them). g_bytes_new_static would let us hand a
-	 * non-owning reference to the texture loader, but GdkTexture's
-	 * decoder may or may not retain the bytes after decode; safer
-	 * to give it a strong-ref GBytes with its own copy. */
-    bytes = g_bytes_new (p->bytes->data, p->bytes->len);
-    tex = gdk_texture_new_from_bytes (bytes, &err);
-    g_bytes_unref (bytes);
+    /* Kick off the primary glycin decode (WIDE policy — see
+	 * the file-header include comment). On success the
+	 * callback paints; on failure it walks the PICT fallback
+	 * chain (embedded sniff → glycin again, then ImageMagick
+	 * for classic QuickDraw raster opcodes). */
+    image_kick_decode (s, p->bytes->data, p->bytes->len,
+                       IMAGE_STAGE_PRIMARY);
+}
 
-    /* PICT fallback chain. GdkPixbuf doesn't decode QuickDraw PICT,
-	 * so the direct call above will have failed on PICT input. Two
-	 * layers of recovery, cheapest first:
-	 *
-	 *   1. hx_pict_extract_embedded — sniff for an embedded JPEG /
-	 *      PNG / GIF / TIFF inside a v2 PICT. Covers the common
-	 *      case of mid-90s+ tools that wrapped a real image format
-	 *      in QuickDraw opcode 0x8200 / 0x8201. Pure GLib, near
-	 *      zero cost when it succeeds.
-	 *
-	 *   2. hx_pict_magick_decode — ImageMagick's PICT decoder.
-	 *      Handles the long tail of classic QuickDraw raster
-	 *      opcodes (PackBits/DirectBits rect/region pixmaps), which
-	 *      is what original Mac OS screencapture emitted. Heavier
-	 *      dependency but the only way to render those files
-	 *      shy of a custom QuickDraw interpreter. Optional at
-	 *      build time — when ImageMagick isn't available the
-	 *      function is a stub that just sets an error, so the
-	 *      classic-PICT case degrades to "Failed to decode image".
-	 *
-	 * Both are tried only on the no-direct-decode path, so the
-	 * common-case JPEG/PNG/etc. preview is unaffected. */
-    if (!tex) {
-        GBytes *embedded;
-        embedded = hx_pict_extract_embedded (p->bytes->data, p->bytes->len);
-        if (embedded) {
-            GError *err2 = NULL;
-            tex = gdk_texture_new_from_bytes (embedded, &err2);
-            g_bytes_unref (embedded);
-            if (tex) {
-                /* Recovered via the sniff. Drop the first error and
-				 * proceed. */
-                g_clear_error (&err);
-            } else {
-                /* Sniff found a signature but the data after it
-				 * wasn't actually decodable. Keep the original err
-				 * for the user-visible message; clear the
-				 * intermediate. */
-                g_clear_error (&err2);
-            }
-        }
+/* Schedule an async glycin decode for the given bytes and
+ * stage. The active decode_token + stage are stashed on the
+ * viewer state so the completion callback can route the
+ * result. NULL-token return (sync reject) means the callback
+ * has already fired — image_decode_done handled the next
+ * fallback step before this returns. */
+static void
+image_kick_decode (struct image_state *s, const guint8 *bytes, gsize len,
+                   enum image_stage stage)
+{
+    HxInlineMediaCaps caps = {0};
+    gpointer token;
+
+    s->stage = stage;
+    /* Preview is user-driven — they explicitly opened the
+	 * file. Use the spec defaults (256 KiB / 2048×2048 /
+	 * ~4 megapixels) for the caps; max_frames=1 because the
+	 * image viewer renders a single still (animated GIF
+	 * preview is a follow-up, mirrors xtext's per-frame
+	 * tick). */
+    caps.max_frames = 1;
+    caps.max_duration_ms = 1;
+    /* Bump the byte cap: previewable files are routinely
+	 * larger than the 256 KiB inline-media spec floor (the
+	 * user explicitly opened it). Cap at 16 MiB — enough
+	 * for typical screenshots without letting a hostile
+	 * server pin the main thread on a multi-gig "image". */
+    caps.max_bytes = 16u * 1024u * 1024u;
+    /* Loosen the dimension / pixel caps too: a 4K JPEG is a
+	 * reasonable thing to preview. */
+    caps.max_dimension = 8192;
+    caps.max_pixels = 8192u * 8192u;
+
+    token = hx_image_decode_async_with_policy (
+        bytes, len, &caps, HX_IMAGE_DECODE_WIDE,
+        image_decode_done, s);
+    if (token) {
+        s->decode_token = token;
     }
-    if (!tex) {
-        GError *err2 = NULL;
-        GdkTexture *t
-            = hx_pict_magick_decode (p->bytes->data, p->bytes->len, &err2);
-        if (t) {
-            tex = t;
-            g_clear_error (&err);
-        } else {
-            /* Preserve original error if there was one, otherwise
-			 * adopt ImageMagick's. */
-            if (!err) {
-                g_propagate_error (&err, err2);
-            } else {
-                g_clear_error (&err2);
-            }
-        }
+}
+
+static void
+image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
+{
+    struct image_state *s = user_data;
+    hx_preview *p;
+
+    if (!s) {
+        inline_media_decoded_free (decoded);
+        return;
+    }
+    p = s->preview;
+
+    /* Release the cancel token regardless of result — cancel-
+	 * after-completion is the canonical free for it. */
+    if (s->decode_token) {
+        inline_media_decode_cancel (s->decode_token);
+        s->decode_token = NULL;
     }
 
-    if (!tex) {
-        gtk_label_set_text (GTK_LABEL (s->status),
-                            err ? err->message : "Failed to decode image");
-        g_clear_error (&err);
+    if (decoded->texture) {
+        image_show_texture (s, decoded->texture);
+        inline_media_decoded_free (decoded);
+        /* If we held an intermediate bytes buffer for the
+		 * embedded stage, the decoded texture is paintable
+		 * now and the embedded bytes can drop. */
+        g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
+        s->stage = IMAGE_STAGE_DONE;
         return;
     }
 
+    inline_media_decoded_free (decoded);
+
+    /* Primary decode failed. Walk the PICT fallback chain.
+	 *
+	 *   IMAGE_STAGE_PRIMARY → try hx_pict_extract_embedded
+	 *     against the original bytes. If a JPEG/PNG/GIF/TIFF
+	 *     prefix is found inside the PICT envelope, kick off
+	 *     another glycin decode on the extracted bytes.
+	 *
+	 *   IMAGE_STAGE_EMBEDDED → embedded sniff found a
+	 *     signature but glycin couldn't decode the payload.
+	 *     Fall through to the ImageMagick step.
+	 *
+	 * Both end-of-chain branches call image_try_magick_
+	 * fallback, which runs ImageMagick's QuickDraw raster
+	 * opcode decoder synchronously (it's the long-tail
+	 * recovery for classic PICT files). */
+    if (s->stage == IMAGE_STAGE_PRIMARY && p && p->bytes && p->bytes->len) {
+        GBytes *embedded
+            = hx_pict_extract_embedded (p->bytes->data, p->bytes->len);
+        if (embedded) {
+            gsize emb_len = 0;
+            const guint8 *emb_data = g_bytes_get_data (embedded, &emb_len);
+            /* Stash the GBytes so it outlives the async
+			 * decode hop — glycin copies internally so we
+			 * could unref now, but keeping it lets the
+			 * image_close path drop it cleanly if the
+			 * preview window closes mid-decode. */
+            g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
+            s->embedded_bytes = embedded;
+            image_kick_decode (s, emb_data, emb_len, IMAGE_STAGE_EMBEDDED);
+            return;
+        }
+    }
+
+    /* Either embedded sniff missed, or the embedded decode
+	 * itself failed. Either way, ImageMagick is the last
+	 * resort. */
+    g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
+    image_try_magick_fallback (s);
+}
+
+static void
+image_try_magick_fallback (struct image_state *s)
+{
+    hx_preview *p;
+    GError *err = NULL;
+    GdkTexture *tex;
+
+    p = s ? s->preview : NULL;
+    if (!s || !p || !p->bytes || p->bytes->len == 0) {
+        image_show_decode_error (s, "No image data");
+        return;
+    }
+
+    /* hx_pict_magick_decode is a no-op stub when ImageMagick
+	 * isn't compiled in — returns NULL and sets a "PICT
+	 * support not built" GError. The user-visible message
+	 * collapses to "Failed to decode image" in that case. */
+    tex = hx_pict_magick_decode (p->bytes->data, p->bytes->len, &err);
+    if (tex) {
+        image_show_texture (s, tex);
+        g_object_unref (tex);
+        s->stage = IMAGE_STAGE_DONE;
+        return;
+    }
+    image_show_decode_error (s, err ? err->message : "Failed to decode image");
+    g_clear_error (&err);
+}
+
+static void
+image_show_texture (struct image_state *s, GdkTexture *tex)
+{
+    if (!s || !tex || !s->picture) {
+        return;
+    }
     gtk_picture_set_paintable (GTK_PICTURE (s->picture), GDK_PAINTABLE (tex));
-    g_object_unref (tex);
     gtk_widget_set_visible (s->picture, TRUE);
     gtk_widget_set_visible (s->status, FALSE);
+}
+
+static void
+image_show_decode_error (struct image_state *s, const char *msg)
+{
+    if (!s || !s->status) {
+        return;
+    }
+    gtk_label_set_text (GTK_LABEL (s->status),
+                        msg ? msg : "Failed to decode image");
+    s->stage = IMAGE_STAGE_DONE;
 }
 
 static void
@@ -500,6 +630,15 @@ image_close (hx_preview *p)
     if (!s) {
         return;
     }
+    /* Cancel any in-flight glycin decode — the callback
+	 * would otherwise dereference the freed viewer state
+	 * when it lands. inline_media_decode_cancel suppresses
+	 * the callback AND drops the token reference. */
+    if (s->decode_token) {
+        inline_media_decode_cancel (s->decode_token);
+        s->decode_token = NULL;
+    }
+    g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
     g_free (s);
     p->viewer_data = NULL;
 }
