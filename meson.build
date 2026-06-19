@@ -55,13 +55,8 @@ add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c'
 
 # -----------------------------------------------------------------------------
 # Dependencies
-#
-# GTK pin advances per phase: 2 -> 3 -> 4. Phase 4 is in progress; floor is
-# 4.6 (the GtkApplication and snapshot APIs we lean on are stable from there).
-# Per ROADMAP: Nettle for legacy Hotline ciphers (Blowfish) + GLib hashes;
-# no GnuTLS (Phase ∞ work, requires server-side cooperation).
 # -----------------------------------------------------------------------------
-gtk_dep     = dependency('gtk4',      version : '>= 4.6')
+gtk_dep     = dependency('gtk4',      version : '>= 4.10')
 # Phase 5: libadwaita gives us AdwApplication (color-scheme tracking),
 # AdwPreferencesWindow (modern Settings layout), AdwHeaderBar, AdwToast,
 # AdwAboutDialog, AdwAlertDialog. 1.6 is the floor that ships the new

@@ -367,9 +367,7 @@ image_create (hx_preview *p)
     gtk_widget_set_vexpand (s->picture, TRUE);
     gtk_widget_set_hexpand (s->picture, TRUE);
     gtk_picture_set_can_shrink (GTK_PICTURE (s->picture), TRUE);
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gtk_picture_set_keep_aspect_ratio (GTK_PICTURE (s->picture), TRUE);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    gtk_picture_set_content_fit (GTK_PICTURE (s->picture), GTK_CONTENT_FIT_CONTAIN);
     gtk_widget_set_visible (s->picture, FALSE);
 
     scroll = gtk_scrolled_window_new ();
