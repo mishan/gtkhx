@@ -280,25 +280,20 @@ gtkurl_scan (const char *text, gssize length, gtkurl_match_cb cb, gpointer user)
 /* Open `url' through the system's default http handler. On Linux
  * this routes through gio → xdg-open; on Wayland / sandboxed
  * Flatpak, GtkUriLauncher uses the org.freedesktop.portal.OpenURI
- * portal automatically. GtkUriLauncher is GTK 4.10+; we depend on
- * 4.6 so feature-test at compile time and fall back to gtk_show_uri
- * on older systems (suppress its deprecation warning, since the
- * fallback only fires when the new API isn't there). */
+ * portal automatically. GtkUriLauncher needs GTK 4.10+; the rest of
+ * the codebase already uses 4.10+ APIs unconditionally
+ * (GtkFileDialog in inline_media_dialog.c, GtkColorDialogButton in
+ * options.c) so the legacy gtk_show_uri fallback that used to live
+ * here is dead — dropped. */
 static void
 launch_default_browser (GtkWidget *anchor, const char *url)
 {
     GtkWindow *parent = GTK_IS_WINDOW (anchor)
                             ? GTK_WINDOW (anchor)
                             : GTK_WINDOW (gtk_widget_get_root (anchor));
-#if GTK_CHECK_VERSION(4, 10, 0)
     GtkUriLauncher *launcher = gtk_uri_launcher_new (url);
     gtk_uri_launcher_launch (launcher, parent, NULL, NULL, NULL);
     g_object_unref (launcher);
-#else
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gtk_show_uri (parent, url, GDK_CURRENT_TIME);
-    G_GNUC_END_IGNORE_DEPRECATIONS
-#endif
 }
 
 static void
