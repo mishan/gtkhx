@@ -1305,88 +1305,109 @@ done_dispatch (gpointer data)
  * already-downloaded bytes to a user-chosen path. Avoids a
  * re-download for the common "preview, then keep" flow.
  *
- * GtkFileDialog (the modern GTK 4.10+ replacement for GtkFileChooser-
- * Dialog) would be cleaner, but the project's gtk4 floor is 4.6, so
- * we use GtkFileChooserDialog inside G_GNUC_BEGIN/END_IGNORE_
- * DEPRECATIONS — same pattern as files.c's upload dialog. */
-G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+ * GtkFileDialog (the modern GTK 4.10+ replacement for
+ * GtkFileChooserDialog) drives the picker. Same shape
+ * inline_media_dialog.c's Save-As button uses, with an
+ * own-lifetime save_ctx so the preview window closing while
+ * the file picker is still open doesn't UAF the callback. */
 
 struct save_dialog_ctx {
-    hx_preview *p;
+    hx_preview *p; /* strong ref via hx_preview_ref */
 };
 
 static void
-save_response (GtkDialog *dialog, gint response_id, gpointer user_data)
+save_ctx_free (struct save_dialog_ctx *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+    if (ctx->p) {
+        hx_preview_unref (ctx->p);
+    }
+    g_free (ctx);
+}
+
+static void
+on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
 {
     struct save_dialog_ctx *ctx = user_data;
     hx_preview *p = ctx->p;
+    GError *err = NULL;
+    GFile *gf;
 
-    if (response_id == GTK_RESPONSE_ACCEPT) {
-        GFile *gf = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
-        if (gf && p->bytes && p->bytes->len > 0) {
-            GError *err = NULL;
-            if (!g_file_replace_contents (gf, (const char *)p->bytes->data,
-                                          p->bytes->len, NULL, /* etag */
-                                          FALSE,               /* make_backup */
-                                          G_FILE_CREATE_NONE,
-                                          NULL, /* new_etag */
-                                          NULL, /* cancellable */
-                                          &err)) {
-                g_warning ("preview save: %s",
-                           err ? err->message : "(unknown)");
-                g_clear_error (&err);
-            }
+    gf = gtk_file_dialog_save_finish (GTK_FILE_DIALOG (src), res, &err);
+    if (!gf) {
+        /* GTK_DIALOG_ERROR_DISMISSED is the user-cancel case
+		 * — don't log it as an error. Anything else is worth
+		 * a warning. */
+        if (err && !g_error_matches (err, GTK_DIALOG_ERROR,
+                                     GTK_DIALOG_ERROR_DISMISSED)) {
+            g_warning ("preview save: %s", err->message);
         }
-        if (gf) {
-            g_object_unref (gf);
+        g_clear_error (&err);
+        save_ctx_free (ctx);
+        return;
+    }
+
+    if (p->bytes && p->bytes->len > 0) {
+        if (!g_file_replace_contents (gf, (const char *) p->bytes->data,
+                                      p->bytes->len, NULL, /* etag */
+                                      FALSE,               /* make_backup */
+                                      G_FILE_CREATE_NONE,
+                                      NULL, /* new_etag */
+                                      NULL, /* cancellable */
+                                      &err)) {
+            g_warning ("preview save: %s",
+                       err ? err->message : "(unknown)");
+            g_clear_error (&err);
         }
     }
-    gtkhx_widget_destroy (GTK_WIDGET (dialog));
-    hx_preview_unref (p);
-    g_free (ctx);
+    g_object_unref (gf);
+    save_ctx_free (ctx);
 }
 
 static void
 save_clicked (GtkButton *btn, gpointer user_data)
 {
     hx_preview *p = user_data;
-    GtkWidget *dialog;
+    GtkFileDialog *fd;
+    GtkWindow *parent = NULL;
     GtkRoot *root;
     struct save_dialog_ctx *ctx;
 
-    (void)btn;
+    (void) btn;
 
-    root = gtk_widget_get_root (p->window);
-    dialog = gtk_file_chooser_dialog_new (
-        "Save File", GTK_IS_WINDOW (root) ? GTK_WINDOW (root) : NULL,
-        GTK_FILE_CHOOSER_ACTION_SAVE, "_Cancel", GTK_RESPONSE_CANCEL, "_Save",
-        GTK_RESPONSE_ACCEPT, NULL);
+    fd = gtk_file_dialog_new ();
+    gtk_file_dialog_set_title (fd, "Save File");
 
     /* Suggest the file's original name as the destination
 	 * filename so the user just clicks Save in the common
 	 * case. */
     if (p->name && *p->name) {
-        gtk_file_chooser_set_current_name (GTK_FILE_CHOOSER (dialog), p->name);
+        gtk_file_dialog_set_initial_name (fd, p->name);
     }
 
-    /* Default folder = the preferences-configured download dir,
-	 * matching what a full Download would do. Falls back to
-	 * GTK's default if the pref is empty / nonexistent. */
+    /* Default folder = the preferences-configured download
+	 * dir, matching what a full Download would do. Falls back
+	 * to the platform default if the pref is empty /
+	 * nonexistent. */
     if (gtkhx_prefs.download_path && *gtkhx_prefs.download_path) {
         GFile *gd = g_file_new_for_path (gtkhx_prefs.download_path);
-        gtk_file_chooser_set_current_folder (GTK_FILE_CHOOSER (dialog), gd,
-                                             NULL);
+        gtk_file_dialog_set_initial_folder (fd, gd);
         g_object_unref (gd);
+    }
+
+    root = gtk_widget_get_root (p->window);
+    if (root && GTK_IS_WINDOW (root)) {
+        parent = GTK_WINDOW (root);
     }
 
     ctx = g_new0 (struct save_dialog_ctx, 1);
     ctx->p = hx_preview_ref (p);
-    g_signal_connect (dialog, "response", G_CALLBACK (save_response), ctx);
 
-    gtk_window_present (GTK_WINDOW (dialog));
+    gtk_file_dialog_save (fd, parent, NULL, on_save_finished, ctx);
+    g_object_unref (fd);
 }
-
-G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* ---- Public API --------------------------------------------------- */
 
