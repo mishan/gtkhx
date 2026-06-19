@@ -153,7 +153,15 @@ _Static_assert (sizeof (HxInlineMediaDecoded) == 40,
  * ffi.rs maps these via u32_to_policy; reordering or shifting
  * either constant would silently flip the sniff allowlist
  * behaviour (an inline-media caller would suddenly accept
- * BMP/TIFF/etc.) without anything else complaining. */
+ * BMP/TIFF/etc.) without anything else complaining. The
+ * sizeof assert pairs with the existing
+ * HxInlineMediaFormat width pin — HxImageDecodePolicy crosses
+ * the FFI as a u32 on the Rust side; a toolchain that shrinks
+ * the C enum to a single byte (some embedded targets, not
+ * one of our supported platforms but cheap to guard) would
+ * otherwise truncate the value at the call boundary. */
+_Static_assert (sizeof (HxImageDecodePolicy) == 4,
+                "rust policy width pin (#[repr(u32)] on Rust side)");
 _Static_assert (HX_IMAGE_DECODE_STRICT == 0,
                 "rust policy discriminant pin (STRICT)");
 _Static_assert (HX_IMAGE_DECODE_WIDE == 1,

@@ -334,6 +334,30 @@ mod tests {
     }
 
     #[test]
+    fn u32_to_policy_maps_known_discriminants() {
+        // Pin the discriminants so a renumber on either side
+        // surfaces here rather than at runtime.
+        assert_eq!(POLICY_STRICT, 0);
+        assert_eq!(POLICY_WIDE, 1);
+        assert_eq!(u32_to_policy(POLICY_STRICT), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(POLICY_WIDE), DecodePolicy::Wide);
+    }
+
+    #[test]
+    fn u32_to_policy_unknown_collapses_to_strict() {
+        // Conservative failure mode: a buggy caller passing
+        // a stale / future / garbage discriminant gets the
+        // tighter allowlist, not the looser one. Cover both
+        // a couple of representative wild values and the
+        // u32::MAX edge so a regression of the wildcard arm
+        // (e.g. someone replacing `_` with `2..=u32::MAX`)
+        // doesn't slip past.
+        assert_eq!(u32_to_policy(2), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(42), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(u32::MAX), DecodePolicy::Strict);
+    }
+
+    #[test]
     fn format_to_mime_ffi() {
         for (f, expected) in [
             (Format::Jpeg, "image/jpeg"),

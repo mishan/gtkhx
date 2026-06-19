@@ -388,6 +388,7 @@ static void image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data
 static void image_try_magick_fallback (struct image_state *s);
 static void image_show_decode_error (struct image_state *s, const char *msg);
 static void image_show_texture (struct image_state *s, GdkTexture *tex);
+static gboolean image_input_is_likely_pict (const hx_preview *p);
 
 static GtkWidget *
 image_create (hx_preview *p)
@@ -548,7 +549,8 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
 	 * fallback, which runs ImageMagick's QuickDraw raster
 	 * opcode decoder synchronously (it's the long-tail
 	 * recovery for classic PICT files). */
-    if (s->stage == IMAGE_STAGE_PRIMARY && p && p->bytes && p->bytes->len) {
+    if (s->stage == IMAGE_STAGE_PRIMARY && p && p->bytes && p->bytes->len
+        && image_input_is_likely_pict (p)) {
         GBytes *embedded
             = hx_pict_extract_embedded (p->bytes->data, p->bytes->len);
         if (embedded) {
@@ -567,10 +569,19 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     }
 
     /* Either embedded sniff missed, or the embedded decode
-	 * itself failed. Either way, ImageMagick is the last
-	 * resort. */
+	 * itself failed, or the input was never a plausible PICT.
+	 * ImageMagick is the last resort — gated to likely-PICT
+	 * inputs the same way the embedded-image recovery above
+	 * is. A corrupted JPEG/PNG falling through here would
+	 * uselessly invoke ImageMagick's QuickDraw decoder and
+	 * still surface a "Failed to decode image" message; cut
+	 * the round-trip and just render the error directly. */
     g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
-    image_try_magick_fallback (s);
+    if (image_input_is_likely_pict (p)) {
+        image_try_magick_fallback (s);
+    } else {
+        image_show_decode_error (s, "Failed to decode image");
+    }
 }
 
 static void
@@ -599,6 +610,47 @@ image_try_magick_fallback (struct image_state *s)
     }
     image_show_decode_error (s, err ? err->message : "Failed to decode image");
     g_clear_error (&err);
+}
+
+/* Gate the embedded-image PICT recovery to inputs that are
+ * actually plausible PICTs. `hx_pict_extract_embedded` is a
+ * generic forward signature scan — given a corrupted JPEG/
+ * PNG/etc., it can latch onto a stray JFIF/PNG marker later
+ * in the file and return a misleading tail slice. Walking
+ * that "recovered" data through glycin then falling through
+ * to the heavy ImageMagick raster-opcode decoder for every
+ * non-PICT decode failure is also wasteful.
+ *
+ * Heuristic: input is likely-PICT iff
+ *   - the FILP type code is "PICT", OR
+ *   - the filename ends in `.pict` / `.pct` (case-insensitive).
+ *
+ * Matches the existing image_score / image_type_codes /
+ * image_extensions tables — those are what dispatched us
+ * here in the first place, so the PICT marker came in via
+ * one of those channels for the recovery to be meaningful. */
+static gboolean
+image_input_is_likely_pict (const hx_preview *p)
+{
+    const char *name;
+    const char *dot;
+
+    if (!p) {
+        return FALSE;
+    }
+    if (g_strcmp0 (p->type, "PICT") == 0) {
+        return TRUE;
+    }
+    name = p->name;
+    if (!name) {
+        return FALSE;
+    }
+    dot = strrchr (name, '.');
+    if (!dot) {
+        return FALSE;
+    }
+    return g_ascii_strcasecmp (dot, ".pict") == 0
+           || g_ascii_strcasecmp (dot, ".pct") == 0;
 }
 
 static void
