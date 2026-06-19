@@ -119,6 +119,28 @@ extern void gtkhx_widget_destroy (GtkWidget *widget);
 extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
 
 /*
+ * Convert a GdkPixbuf to a GdkTexture without the deprecated
+ * gdk_texture_new_for_pixbuf path. Wraps the pixbuf's pixel
+ * buffer in a GBytes (with a free_func that holds a ref on
+ * the pixbuf for the bytes' lifetime, so the underlying
+ * memory survives the texture) and feeds that to
+ * gdk_memory_texture_new — the non-deprecated 4.16+
+ * replacement.
+ *
+ * Returns a newly-referenced GdkTexture the caller owns
+ * (g_object_unref to release). NULL pixbuf returns NULL —
+ * callers that handle missing icons gracefully should
+ * null-check the return.
+ *
+ * GdkPixbuf storage is always 8-bit per channel, RGB or RGBA
+ * (gdk_pixbuf_get_n_channels returns 3 or 4 respectively).
+ * Alpha in GdkPixbuf is straight, not premultiplied, so the
+ * `GDK_MEMORY_R8G8B8A8` format is the right choice (not the
+ * `_PREMULTIPLIED` variant).
+ */
+extern GdkTexture *gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf);
+
+/*
  * Phase 5: build a GtkButton with a pixel-art XPM icon loaded from a
  * GResource path. The pixbuf is scaled up by an integer factor with
  * nearest-neighbor interpolation before becoming the button's child,

@@ -774,19 +774,91 @@ gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child, gboolean expand,
     gtk_box_append (GTK_BOX (box), child);
 }
 
-/* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
- * The replacement chain is gdk_texture_new_for_pixbuf →
- * gtk_image_new_from_paintable. Wrap that here so the per-site
- * migration is just a name swap (and the returned floating GtkImage
- * has the same ownership story).
+/* gdk_memory_texture_new's GBytes-backed free path: when the
+ * texture (and thus the GBytes) drops, this fires and unrefs
+ * the pixbuf we kept alive. Bridging through GDestroyNotify
+ * keeps the function pointer types lined up — g_object_unref
+ * has a slightly different signature shape that the strict
+ * gcc -Wincompatible-pointer-types catches. */
+static void
+gtkhx_texture_pixbuf_pixels_unref (gpointer data)
+{
+    g_object_unref ((GObject *) data);
+}
+
+/* Phase 5+: gdk_texture_new_for_pixbuf is deprecated in GTK
+ * 4.16 in favour of the GBytes / gdk_memory_texture_new path.
+ * Every GtkHx icon comes through a GdkPixbuf source today
+ * (GResource lookups, the Mac CICN decoder, gdk-pixbuf loader
+ * paths, etc.), so this helper centralises the conversion to
+ * a non-deprecated GdkTexture and the per-site migration is
+ * just a name swap from the legacy call.
  *
- * gdk_texture_new_for_pixbuf is itself deprecated in GTK 4.16 (the
- * suggested replacement loads the pixbuf bytes via GBytes /
- * gdk_memory_texture_new). The pixbuf-first path is what the rest of
- * GtkHx hands us — every icon comes from gdk_pixbuf_new_from_resource —
- * so the GBytes round-trip is a Phase 5 follow-up alongside the
- * GResource-based texture loader. Suppress the inner deprecation
- * here so we keep the strict deprecation gate on. */
+ * GdkPixbuf storage is always 8-bit per channel, RGB or RGBA.
+ * Alpha is straight (not premultiplied). Map to the matching
+ * GdkMemoryFormat; stride + width + height come straight off
+ * the pixbuf accessors.
+ *
+ * Pixel buffer ownership: gdk_pixbuf_read_pixels returns a
+ * `const guint8 *` borrowed pointer into the pixbuf's
+ * internal buffer (the const-correct successor to the older
+ * gdk_pixbuf_get_pixels — same backing storage, just typed as
+ * read-only). The pixbuf must outlive the GBytes (which the
+ * texture refs). We hold a strong ref on the pixbuf in the
+ * bytes' free_func and drop it when the bytes go away. */
+GdkTexture *
+gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf)
+{
+    int width;
+    int height;
+    int channels;
+    int stride;
+    gsize buffer_size;
+    GdkMemoryFormat format;
+    GBytes *bytes;
+    GdkTexture *texture;
+
+    if (!pixbuf) {
+        return NULL;
+    }
+
+    channels = gdk_pixbuf_get_n_channels (pixbuf);
+    if (channels == 4) {
+        format = GDK_MEMORY_R8G8B8A8;
+    } else if (channels == 3) {
+        format = GDK_MEMORY_R8G8B8;
+    } else {
+        /* GdkPixbuf API contract: 8-bit-per-sample RGB or
+		 * RGBA, so n_channels is always 3 or 4. A buggy or
+		 * pre-loaded pixbuf reporting something else would
+		 * silently render garbage — fail closed instead. */
+        return NULL;
+    }
+
+    width = gdk_pixbuf_get_width (pixbuf);
+    height = gdk_pixbuf_get_height (pixbuf);
+    stride = gdk_pixbuf_get_rowstride (pixbuf);
+    if (width <= 0 || height <= 0 || stride <= 0) {
+        return NULL;
+    }
+
+    buffer_size = (gsize) stride * (gsize) height;
+
+    g_object_ref (pixbuf);
+    bytes = g_bytes_new_with_free_func (gdk_pixbuf_read_pixels (pixbuf),
+                                        buffer_size,
+                                        gtkhx_texture_pixbuf_pixels_unref,
+                                        pixbuf);
+    texture = gdk_memory_texture_new (width, height, format, bytes,
+                                      (gsize) stride);
+    g_bytes_unref (bytes);
+    return texture;
+}
+
+/* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
+ * Builds a GtkImage from a paintable backed by the texture helper
+ * above. Returns a fresh-floating GtkImage; the caller takes
+ * ownership the same way as the legacy gtk_image_new_from_pixbuf. */
 GtkWidget *
 gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
 {
@@ -797,9 +869,10 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
         return gtk_image_new ();
     }
 
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (pixbuf);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    tex = gtkhx_texture_from_pixbuf (pixbuf);
+    if (!tex) {
+        return gtk_image_new ();
+    }
 
     image = gtk_image_new_from_paintable (GDK_PAINTABLE (tex));
     g_object_unref (tex);
@@ -839,14 +912,17 @@ gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
     }
 
     if (use_pb) {
-        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        tex = gdk_texture_new_for_pixbuf (use_pb);
-        G_GNUC_END_IGNORE_DEPRECATIONS
-        picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-        g_object_unref (tex);
-        /* set_can_shrink(FALSE) pins the picture at the paintable's
-		 * natural size — GtkButton then sizes itself around that. */
-        gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+        tex = gtkhx_texture_from_pixbuf (use_pb);
+        if (tex) {
+            picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+            g_object_unref (tex);
+            /* set_can_shrink(FALSE) pins the picture at the
+			 * paintable's natural size — GtkButton then sizes
+			 * itself around that. */
+            gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+        } else {
+            picture = gtk_picture_new ();
+        }
     } else {
         picture = gtk_picture_new ();
     }
@@ -899,12 +975,14 @@ gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
         use_pb = g_object_ref (pixbuf);
     }
 
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (use_pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
-    picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-    g_object_unref (tex);
-    gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    tex = gtkhx_texture_from_pixbuf (use_pb);
+    if (tex) {
+        picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
+        g_object_unref (tex);
+        gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
+    } else {
+        picture = gtk_picture_new ();
+    }
     gtkhx_widget_set_child (btn, picture);
 
     if (tooltip) {

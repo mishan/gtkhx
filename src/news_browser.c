@@ -338,11 +338,9 @@ load_icon_paintable (const char *resource)
         }
     }
 
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    tex = gtkhx_texture_from_pixbuf (pb);
     g_object_unref (pb);
-    return GDK_PAINTABLE (tex);
+    return tex ? GDK_PAINTABLE (tex) : NULL;
 }
 
 static GdkPaintable *

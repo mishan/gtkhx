@@ -21,6 +21,7 @@
 #include "files_provider.h"
 #include "files_remote_provider.h" /* listing-error query for empty-state */
 #include "files_panel.h"
+#include "gtkutil.h" /* gtkhx_texture_from_pixbuf */
 
 /* hx.h pulls compat.h which defines _(s) as a passthrough; undef
  * before gi18n.h gives us the proper gettext() expansion without
@@ -214,11 +215,9 @@ load_icon_paintable (const char *resource)
         return NULL;
     }
 
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (scaled);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    tex = gtkhx_texture_from_pixbuf (scaled);
     g_object_unref (scaled);
-    return GDK_PAINTABLE (tex);
+    return tex ? GDK_PAINTABLE (tex) : NULL;
 }
 
 /* Lazy-cache lookup. Returns a borrowed GdkPaintable* (panel owns
