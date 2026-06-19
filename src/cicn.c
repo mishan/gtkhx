@@ -367,7 +367,7 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 	maskdata = (unsigned char *)cicn_rsrc + 82;
 	have_mask = (mbm->bounds.right != 0 && mbm->bounds.bottom != 0);
 
-	/* Phase 5: log the parser's understanding under GTKHX_DEBUG=icon
+	/* log the parser's understanding under GTKHX_DEBUG=icon
 	 * so wide / non-standard cicn formats (Badmoon banner icons etc.)
 	 * can be diagnosed without staring at hex dumps. Includes byte
 	 * offsets the parser computed for each sub-structure so it's

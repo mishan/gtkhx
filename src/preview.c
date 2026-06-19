@@ -1299,7 +1299,7 @@ done_dispatch (gpointer data)
 
 /* ---- Save dialog --------------------------------------------------- */
 
-/* Phase 5+: Save button on the preview headerbar — writes the
+/* Save button on the preview headerbar — writes the
  * already-downloaded bytes to a user-chosen path. Avoids a
  * re-download for the common "preview, then keep" flow.
  *

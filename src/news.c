@@ -390,7 +390,7 @@ void
 hx_get_news (struct htlc_conn *htlc)
 {
     task_new (htlc, RCV_TASK_FN (rcv_task_news_file), 0, 0, "news");
-    /* Phase R2: NEWS_GETFILE is a zero-chunk opcode. */
+    /* NEWS_GETFILE is a zero-chunk opcode. */
     hlwrite_chunks (htlc, HTLC_HDR_NEWS_GETFILE, 0, NULL, 0);
 }
 
@@ -406,7 +406,7 @@ hx_post_news (struct htlc_conn *htlc, const char *news, guint16 len)
     char *wire
         = gtkhx_text_for_wire (news, len, utf8, /*is_body=*/TRUE, &wire_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_post_chunks.
+    /* chunk layout moved to gtkhx_proto_build_news_post_chunks.
      * Build BEFORE task_new — see hx_send_msg for the rationale
      * (task_new snapshots htlc->trans into a pending entry; a builder
      * failure must not leave a phantom task behind). */
@@ -429,7 +429,7 @@ reload_news (GtkWidget *widget, gpointer data)
         return;
     }
 
-    /* Phase 5: ask the access bitmap before hitting the wire. The
+    /* ask the access bitmap before hitting the wire. The
 	 * server told us at SELFINFO time which permissions our account
 	 * has — see hx_rcv_user_selfinfo populating htlc->access — and
 	 * sending HTLC_HDR_NEWS_GETFILE without HL_ACCESS_READ_NEWS just
@@ -473,7 +473,7 @@ reload_news (GtkWidget *widget, gpointer data)
     }
 }
 
-/* Phase 5 / docking (Phase 2): close_news_window retired. The
+/* close_news_window retired. The
  * standalone News GtkWindow is gone; the News panel persists in
  * the toolbar window's center PanelGrid. Worker-thread update
  * paths (output_news_post / output_news_file) used to gate on
@@ -481,7 +481,7 @@ reload_news (GtkWidget *widget, gpointer data)
  * panel creation and stays set, so the gates remain truthy for
  * the lifetime of the process. */
 
-/* Phase 4.5: configure-event is gone in GTK 4. News window size is
+/* configure-event is gone in GTK 4. News window size is
  * captured at hx_quit() time alongside position; see gtkhx.c
  * gtkhx_save_window_positions. */
 
@@ -563,7 +563,7 @@ create_post_window (GtkWidget *widget, gpointer data)
     post_window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (post_window), _ ("Post News"));
     gtk_window_set_default_size (GTK_WINDOW (post_window), 540, 380);
-    /* Phase 5 / docking (Phase 2): News no longer has its own
+    /* News no longer has its own
      * window; transient-for the toolbar (the news panel's host). */
     gtk_window_set_transient_for (GTK_WINDOW (post_window),
                                   GTK_WINDOW (toolbar_window));
@@ -652,7 +652,7 @@ create_news_window (GtkWidget *parent_window, session *sess)
 
     (void)parent_window;  /* vestigial — see users.c */
 
-    /* Phase 5 / docking (Phase 2): News panel lives in the
+    /* News panel lives in the
      * toolbar's center PanelGrid. First call constructs it, later
      * calls raise it (which also flips the grid's current visible
      * tab to News if it was on Chat / Files). */
@@ -663,7 +663,7 @@ create_news_window (GtkWidget *parent_window, session *sess)
         return;
     }
 
-    /* Phase 5: 2x-scaled buttons via the shared helper. Find is
+    /* 2x-scaled buttons via the shared helper. Find is
      * added at unscaled size (1) since it's a stock GTK symbolic
      * icon — gtkhx_pixmap_button's XPM-upscale path would render
      * it blurry. Use a plain GtkButton instead. */
@@ -712,7 +712,7 @@ create_news_window (GtkWidget *parent_window, session *sess)
     g_signal_connect (findButton, "clicked", G_CALLBACK (on_find_btn_clicked),
                       search_ctx);
 
-    /* Phase 5 / docking (Phase 2): Post on start, Reload + Find on
+    /* Post on start, Reload + Find on
      * end — same start/end grouping the headerbar had. Slim
      * top-of-content GtkBox with an hexpand spacer. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
@@ -799,7 +799,7 @@ open_news (GtkWidget *widget, gpointer data)
     session *sess = data;
     HxPanel *panel;
 
-    /* Phase 5 / docking (Phase 2): News is a permanent resident of
+    /* News is a permanent resident of
      * the toolbar's center PanelGrid. The toolbar button just
      * raises it; the first connect triggers the hx_get_news()
      * fetch since the panel exists but the buffer is empty. */

@@ -57,7 +57,7 @@ hx_useredit_create (struct htlc_conn *htlc, const char *login, const char *pass,
         hl_encode (epass, pass, plen);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_account_modify
+    /* chunk layout moved to gtkhx_proto_build_account_modify
      * _chunks. Build BEFORE task_new — task_new snapshots htlc->trans
      * into a pending entry; a builder failure must not leave a phantom
      * "user create" task in the task table. */
@@ -82,7 +82,7 @@ hx_useredit_delete (struct htlc_conn *htlc, const char *login)
     llen = strlen (login);
     hl_encode (elogin, login, llen);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_account_delete
+    /* chunk layout moved to gtkhx_proto_build_account_delete
      * _chunks. Same build-before-task ordering as hx_useredit_create. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_account_delete_chunks (
@@ -99,7 +99,7 @@ hx_useredit_open (struct htlc_conn *htlc, const char *login,
                               const hl_access_bits),
                   void *uesp)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_account_read
+    /* chunk layout moved to gtkhx_proto_build_account_read
      * _chunks. Note the C call site passes login UNENCODED (a
      * deliberate mhxd convention — READ takes a raw login, MODIFY /
      * DELETE take an hl_encoded one). */
@@ -231,7 +231,7 @@ useredit_login (const char *login, struct useredit_session *ues)
     ues->login[len] = '\0';
 }
 
-/* Phase 5: AdwAlertDialog response callback. The "open" response opens
+/* AdwAlertDialog response callback. The "open" response opens
  * the User Editor for the entered login; "cancel" / window-close
  * just dismisses. */
 static void
@@ -460,7 +460,7 @@ useredit_generate_clicked (GtkWidget *button, gpointer data)
     gtk_editable_set_text (GTK_EDITABLE (ues->pass_entry), pw);
 }
 
-/* Phase 5: full Adwaita rewrite of the User Editor. The legacy layout
+/* full Adwaita rewrite of the User Editor. The legacy layout
  * was a vbox of GtkFrames containing GtkCheckButtons — functionally
  * fine but visually noisy and inconsistent with the rest of the app
  * (Settings dialog uses AdwPreferencesPage with AdwSwitchRow per
@@ -643,7 +643,7 @@ create_useredit_window (const char *login, int new)
     gtk_window_present (GTK_WINDOW (window));
 }
 
-/* Phase 5: AdwAlertDialog with an AdwEntryRow extra-child replaces
+/* AdwAlertDialog with an AdwEntryRow extra-child replaces
  * the hand-rolled GtkWindow + Open/Cancel buttons. The dialog
  * presents over the toolbar window, has Cancel + Open responses
  * (Open is the default + suggested-action style), and routes

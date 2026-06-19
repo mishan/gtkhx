@@ -75,7 +75,7 @@ static char *hx_timeformat = "%c";
  * before their definitions land later in the file. Prototypes come
  * from the headers we already #include. */
 
-/* Phase 5: post-login state-machine. The 1.5 flow per
+/* post-login state-machine. The 1.5 flow per
  * Capabilities/connect-spec is:
  *
  *   C → S  TranLogin
@@ -132,7 +132,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 * gated on HL_ACCESS_READ_NEWS. */
     task_new (htlc, RCV_TASK_FN (rcv_task_news_users),
               chat_with_cid (&the_session, 0), 0, "who");
-    /* Phase R2: USER_GETLIST is a zero-chunk opcode. */
+    /* USER_GETLIST is a zero-chunk opcode. */
     hlwrite_chunks (htlc, HTLC_HDR_USER_GETLIST, 0, NULL, 0);
 
     /* Chat-history extension: if the server echoed our cap bit in
@@ -246,7 +246,7 @@ void print_binary(char *buf, int len)
 int
 task_inerror (struct htlc_conn *htlc)
 {
-    /* Phase R2: the header error-bit test moved to the Rust
+    /* the header error-bit test moved to the Rust
 	 * hotline-proto crate (gtkhx_proto_header_in_error). Same
 	 * computation as the old ntohl(h->flag) & 1, with bounds
 	 * checking on a short buffer. */
@@ -308,7 +308,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
         }
     }
 
-    /* Phase 3+: hx_output.chat → "chat" signal on the session
+    /* hx_output.chat → "chat" signal on the session
 	 * emitter. Phase 5+: payload is a boxed HxChatEvent that
 	 * bundles the UTF-8-validated line, sender/body slices, and
 	 * info/self flags — every subscriber (chat.c renderer,
@@ -377,7 +377,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
     is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
 
     if (!is_broadcast && pm.uid > 0) {
-        /* Phase 5+: msg signal payload is a boxed HxMsgEvent
+        /* msg signal payload is a boxed HxMsgEvent
 		 * (parsed once; every subscriber sees the same
 		 * UTF-8-sanitised, self-classified view). */
         HxMsgEvent *ev = hx_msg_event_new (
@@ -409,7 +409,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 void
 hx_rcv_agreement_file (struct htlc_conn *htlc)
 {
-    /* Phase 5: chunk-walking + sanitisation lives in
+    /* chunk-walking + sanitisation lives in
 	 * hx_agreement_extract. The 16 KiB cap is generous; mhxd
 	 * agreements hover around 1-2 KiB on the public servers and
 	 * the protocol's chunk length is uint16 (max 65535) anyway. */
@@ -418,7 +418,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
     hx_agreement_result r
         = hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
 
-    /* Phase 5+: no-agreement auto-path — the user has nothing to
+    /* no-agreement auto-path — the user has nothing to
 	 * click Agree on, so we send AGREEMENTAGREE ourselves to:
 	 *   - complete login on mhxd-style servers (where finish_login
 	 *     runs inside rcv_agreementagree)
@@ -457,7 +457,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
                                   buf, (guint16)body_len);
 }
 
-/* Phase 5: rewritten to use hx_news_post_walk in proto_helpers.c.
+/* rewritten to use hx_news_post_walk in proto_helpers.c.
  * The previous version maintained an unbounded-growth news_buf
  * accumulator that the emit code never actually consumed —
  * hx_output.news_post was called with just the new chunk's `_len`
@@ -485,7 +485,7 @@ hx_rcv_task (struct htlc_conn *htlc)
     struct task *tsk;
     char error = 0;
 
-    /* Phase R2: transaction-id extraction moved to the Rust
+    /* transaction-id extraction moved to the Rust
 	 * hotline-proto crate (replaces HN32(&trans, &h->trans)). A
 	 * short buffer leaves trans at 0, which task_with_trans treats
 	 * as "no such task" — the same safe fallthrough as before. */
@@ -615,7 +615,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     char *name = uc.name;
     guint16 nlen = uc.name_len;
 
-    /* Phase 5: self-detection by name. Some 1.9-style servers
+    /* self-detection by name. Some 1.9-style servers
 	 * (e.g. The Mobius Strip) omit USER_LIST from SELFINFO, so
 	 * htlc->uid stays 0 after login. The first USER_CHANGE
 	 * broadcast we receive is the server echoing back the
@@ -689,7 +689,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         }
         gtkhx_session_emit_user_change (gtkhx_session_get_default (), htlc,
                                         chat, user, name, icon, color);
-        /* Phase 5: print "X is now known as Y" only when the name
+        /* print "X is now known as Y" only when the name
 		 * actually changed AND it isn't us. Suppressing the self
 		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
 		 * our nick on the server) from spamming a redundant
@@ -726,7 +726,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         if (got_nick_color) {
             htlc->nick_color = nick_color;
         }
-        /* Phase 5: deliberately do NOT copy user->name into
+        /* deliberately do NOT copy user->name into
 		 * htlc->name. Servers can legitimately override a user's
 		 * display name — guests get pinned to things like "Read
 		 * the agreement" before they have HL_ACCESS_USERNAME_CHANGE
@@ -833,7 +833,7 @@ hx_rcv_banner (struct htlc_conn *htlc)
 {
     struct hx_banner_msg bm;
 
-    /* Phase 5: HTLS_HDR_BANNER arrives unsolicited from the server
+    /* HTLS_HDR_BANNER arrives unsolicited from the server
 	 * after the AGREEMENTAGREE round-trip. Parse the type +
 	 * optional URL and hand off to banner.c, which owns the
 	 * toolbar widget and the URL/HTXF fetch state machines. */
@@ -883,7 +883,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * and push it back to the server immediately below. */
     hx_selfinfo_parse (htlc);
 
-    /* Phase 5: SELFINFO is the canonical 'login complete' signal.
+    /* SELFINFO is the canonical 'login complete' signal.
 	 * Track it on htlc->flags so the agreement Agree button can
 	 * tell whether to send AGREEMENTAGREE. See the comment on the
 	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
@@ -901,7 +901,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * arriving before "Accept agreement". The fetches now fire from
 	 * hx_send_agreement_agree, after AGREEMENTAGREE is on the wire.
 	 *
-	 * Phase 5+: the SELFINFO USE_ANY_NAME auto-push that used to
+	 * the SELFINFO USE_ANY_NAME auto-push that used to
 	 * live here is gone. It existed to deliver NAME + ICON to the
 	 * server on flows where AGREEMENTAGREE couldn't be relied on:
 	 *
@@ -1528,7 +1528,7 @@ rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn)
     char name[32], login[32], pass[32];
     hl_access_bits access;
 
-    /* Phase R2: chunk-walk + hl_decode (XOR-0xff) of LOGIN /
+    /* chunk-walk + hl_decode (XOR-0xff) of LOGIN /
 	 * PASSWORD moved to the Rust hotline-proto crate's
 	 * parse_account_read. The PASSWORD no-password sentinel
 	 * (single 0x00 byte, or empty) is preserved by the Rust
@@ -1682,7 +1682,7 @@ rcv_task_newsfolder_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
 void
 rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
 {
-    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to Rust
+    /* chunk-walk + CR2LF + strip_ansi moved to Rust
 	 * parse_news_thread_reply. The TASK_ERROR short-circuit is
 	 * preserved (the Rust parser drops the body on that path and
 	 * sets has_task_error). The C side keeps the news_post
@@ -2081,7 +2081,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                     if (server_addr) {
                         g_free (server_addr);
                     }
-                    /* Phase 5: server names from old Hotline servers are
+                    /* server names from old Hotline servers are
 					 * 8-bit Mac Roman text, not UTF-8 — and gtk_window_set_title
 					 * et al. assert UTF-8. gtkhx_text_to_utf8 handles the
 					 * already-UTF-8 / Mac-Roman / fall-back-to-substitute
@@ -2217,7 +2217,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 			 * refresh. */
             setbtns (sess, 1);
 
-            /* Phase 5: PING keepalive only on confirmed 1.5+ servers.
+            /* PING keepalive only on confirmed 1.5+ servers.
 			 * htlc->version is populated by the HTLS_DATA_VERSION
 			 * chunk just parsed above; servers that don't advertise
 			 * a version (1.0/1.2 originals like hlserver.com) leave
@@ -2254,7 +2254,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                 hx_change_name_icon (htlc);
                 hx_post_login_fetches (htlc);
             } else if (!already_fetched) {
-                /* Phase 5: do NOT fire HTLC_HDR_USER_GETLIST yet —
+                /* do NOT fire HTLC_HDR_USER_GETLIST yet —
 				 * wait for AGREEMENTAGREE to go out (or its no-
 				 * agreement auto-send). The fallback timer covers
 				 * 1.5+ servers that misbehave and don't send any
@@ -2269,7 +2269,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 void
 rcv_task_news_file (struct htlc_conn *htlc)
 {
-    /* Phase 5: parse + sanitise in hx_news_file_extract. We still
+    /* parse + sanitise in hx_news_file_extract. We still
 	 * use the file-scope news_buf scratch as the destination so
 	 * downstream-allocated callers reading news_len/news_buf get
 	 * the same shape as before (the lifetime is "until the next
@@ -2337,7 +2337,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
     }
     dh_end ();
 
-    /* Phase 4: advance the session-wide newest-msgid cursor used
+    /* advance the session-wide newest-msgid cursor used
 	 * for AFTER= reconnect catch-up. This is independent of the
 	 * per-chat oldest-msgid (gtkhx_chat::history_oldest_msgid) the
 	 * Load-older flow uses — the cursor we maintain here grows
@@ -2374,7 +2374,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
     dh_start (htlc)
     {
         if (_type == HTLS_DATA_USER_LIST) {
-            /* Phase R2: chunk-record parsing moved to Rust
+            /* chunk-record parsing moved to Rust
 			 * gtkhx_proto_parse_user_list_record. The parser handles
 			 * the 8-byte fixed header, two-stage nlen clamp
 			 * (avail-first, then cap-31), strip_ansi, and the
@@ -2392,7 +2392,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             }
             uid = rec.uid;
             user = hx_user_with_uid (chat, uid);
-            /* Phase 5: reset `new` per chunk. Previously declared
+            /* reset `new` per chunk. Previously declared
 			 * once at the top of the function and set to 1 inside
 			 * the "user not found" branch, then never reset — so
 			 * after the first new user in the response, every
@@ -2445,7 +2445,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             guint16 slen = (_len > 255) ? 255 : _len;
             memcpy (chat->subject, dh->data, slen);
             chat->subject[slen] = 0;
-            /* Phase 5+ (MVC boundary): route through the view
+            /* route through the view
 			 * vtable rather than poking the subject widget
 			 * directly. Initial-subject-discovery path — no
 			 * 'Subject Changed to X' log line. */
@@ -2486,7 +2486,7 @@ rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
     guint16 uid = *_uid;
     g_free (_uid);
 
-    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to the Rust
+    /* chunk-walk + CR2LF + strip_ansi moved to the Rust
 	 * hotline-proto crate's parse_user_info. The C side keeps the
 	 * uid carry-through (it's a task parameter, not a chunk) and
 	 * the `nlen && ilen` dispatch gate that filters out unanswered
@@ -2510,7 +2510,7 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
     guint16 fhlen;
 
     if (task_inerror (htlc)) {
-        /* Phase 5+: give the new-browser remote provider a chance
+        /* give the new-browser remote provider a chance
 		 * to react before we drop the cfl. The helper marks the
 		 * provider's listing_error flag and emits "navigated" so
 		 * the panel can show an empty-state hint ("Folder is
@@ -2554,7 +2554,7 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                 }
                 hldir = path_to_hldir (pathbuf, &hldirlen, 0);
 
-                /* Phase R2: chunk layout moved to
+                /* chunk layout moved to
 				 * gtkhx_proto_build_file_list_chunks. Build BEFORE
 				 * task_new — see hx_send_msg for the rationale. */
                 struct hx_chunk chunks[1];
@@ -2698,7 +2698,7 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
         return;
     }
 
-    /* Phase R2: chunk-walk + CR2LF + strip_ansi moved to Rust
+    /* chunk-walk + CR2LF + strip_ansi moved to Rust
 	 * parse_file_getinfo. The C side keeps the formatted-date
 	 * conversion (calls into hl_date which speaks the Hotline
 	 * date stamp format) and the per-call session emit. */
@@ -2764,7 +2764,7 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    /* Phase R2: chunk-walk moved to Rust parse_file_get_reply. The
+    /* chunk-walk moved to Rust parse_file_get_reply. The
 	 * `(!size && !size64_seen) || !ref` dispatch gate stays here —
 	 * malformed replies short-circuit the rest of the xfer kickoff. */
     struct gtkhx_proto_file_get_reply r;
@@ -2858,7 +2858,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    /* Phase R2: chunk-walk moved to Rust parse_folder_get_reply.
+    /* chunk-walk moved to Rust parse_folder_get_reply.
 	 * Same scalar shape as file_get plus FILE_NFILES (folder file
 	 * count). The C-side gate here is just `!ref` — folders are
 	 * legal at total_size 0 (the `total_size = ... : 1` clamp
@@ -2911,7 +2911,7 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    /* Phase R2: chunk-walk moved to Rust parse_file_put_reply. RFLT
+    /* chunk-walk moved to Rust parse_file_put_reply. RFLT
 	 * resume offsets (data_pos at +46, rsrc_pos at +62) gate on
 	 * len >= 66 in the Rust parser, matching the C extractor. */
     struct gtkhx_proto_file_put_reply r;
@@ -2970,7 +2970,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
         return;
     }
 
-    /* Phase R2: chunk-walk moved to Rust parse_folder_put_reply.
+    /* chunk-walk moved to Rust parse_folder_put_reply.
 	 * Strict subset of file_put — no RFLT (per-file resume happens
 	 * inside folder_put_thread, not at the task boundary). */
     struct gtkhx_proto_folder_put_reply r;
@@ -3013,7 +3013,7 @@ rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data)
         return;
     }
 
-    /* Phase R2: chunk-walk moved to Rust parse_banner_get_reply.
+    /* chunk-walk moved to Rust parse_banner_get_reply.
 	 * Just REF + SIZE — banner.c spins up an HTXF subchannel
 	 * worker on the back of these two scalars. */
     struct gtkhx_proto_banner_get_reply r;

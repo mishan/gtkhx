@@ -9,7 +9,7 @@ extern GtkWidget *news15_btn;
 extern GtkWidget *news_btn;
 extern GtkWidget *broadcast_btn;
 
-/* Phase 5: status_bar is a GtkLabel now (was GtkStatusbar — deprecated
+/* status_bar is a GtkLabel now (was GtkStatusbar — deprecated
  * in GTK 4.10 and we never used its message-stack model). The
  * status_msg / context_status globals are gone with it; set_status_bar()
  * just calls gtk_label_set_text() on this. */
@@ -74,7 +74,7 @@ extern GtkWidget *toolbar_end_frame;      /* Users default */
 extern GtkWidget *toolbar_bottom_frame;   /* Tasks default */
 extern GtkWidget *toolbar_center_frame;   /* Chat + Files + News 1.5 default */
 
-/* Phase 5: register the hamburger-menu's GActions on the application.
+/* register the hamburger-menu's GActions on the application.
  * Call from gtkhx_activate after the AdwApplication is constructed —
  * fe_init() runs create_toolbar_window earlier (before
  * g_application_run), so the actions can't be added at toolbar
@@ -100,7 +100,7 @@ extern void toolbar_install_panel_hooks_on_frame (GtkWidget *frame);
  * + margins ≈ 280 px) with a small margin. */
 #define DEFAULT_LEAF_MIN_WIDTH 300
 
-/* Phase 5: push a transient AdwToast onto the toolbar window's
+/* push a transient AdwToast onto the toolbar window's
  * AdwToastOverlay. Safe to call before the toolbar is built (no-op).
  * The toast auto-dismisses after libadwaita's default timeout. */
 extern void toolbar_show_toast (const char *text);
@@ -113,14 +113,14 @@ extern void toolbar_show_toast (const char *text);
  * Safe to call before the toolbar is built (no-op). */
 extern void toolbar_clear_toasts (void);
 
-/* Phase 5: reveal / hide the toolbar's AdwBanner. show_connection_lost
+/* reveal / hide the toolbar's AdwBanner. show_connection_lost
  * sets the banner text to "Lost connection to <server>" and reveals
  * the banner with a Reconnect button; hide_banner just sets revealed
  * to FALSE. Safe to call before the toolbar is built (no-op). */
 extern void toolbar_show_connection_lost (const char *server);
 extern void toolbar_hide_banner (void);
 
-/* Phase 5: rescan the bookmarks directory and refresh the Connect
+/* rescan the bookmarks directory and refresh the Connect
  * SplitButton's dropdown menu. Called from connect.c after a
  * successful Save Bookmark so newly-added entries show up without
  * restarting the app. */

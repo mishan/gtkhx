@@ -63,7 +63,7 @@ GtkWidget *toolbar_window, *files_btn, *connect_btn;
 GtkWidget *disconnect_btn, *news15_btn, *news_btn;
 GtkWidget *broadcast_btn;
 
-/* Phase 5 / docking: handles to the dock + four default-leaf
+/* handles to the dock + four default-leaf
  * PanelFrame globals that per-window panel factories use to
  * insert their HxPanels. See toolbar.h for the contract.
  *
@@ -84,14 +84,14 @@ GtkWidget *toolbar_center_frame   = NULL;
 GtkWidget *plugin_btn;
 #endif
 
-/* Phase 5: status_bar is now a GtkLabel. The previous GtkStatusbar
+/* status_bar is now a GtkLabel. The previous GtkStatusbar
  * was deprecated in GTK 4.10 and we never used its stack-of-messages
  * model — we always replaced the message wholesale. set_status_bar()
  * in gtkutil.c does a single gtk_label_set_text() now. The
  * status_msg / context_status globals are gone with it. */
 GtkWidget *status_bar;
 
-/* Phase 5: AdwToastOverlay anchors transient notifications over the
+/* AdwToastOverlay anchors transient notifications over the
  * toolbar content. set_status_bar() pushes a toast for "Logged in"
  * to give positive feedback at connection time; the persistent
  * status label still shows the current state for ambient awareness.
@@ -109,7 +109,7 @@ static AdwToastOverlay *toolbar_toast;
  * stays accurate without explicit cleanup. */
 static GList *live_toasts = NULL;
 
-/* Phase 5: AdwBanner sits above the content row and surfaces
+/* AdwBanner sits above the content row and surfaces
  * connection-issue state that needs user action — typically "Lost
  * connection — Reconnect" after an unexpected disconnect. Hidden by
  * default; toolbar_show_connection_lost / toolbar_hide_banner toggle
@@ -131,7 +131,7 @@ on_banner_button_clicked (AdwBanner *banner, gpointer user_data)
     connect_reconnect_last ();
 }
 
-/* Phase 5: New User / Edit User used to be standalone toolbar
+/* New User / Edit User used to be standalone toolbar
  * buttons. They're admin actions used rarely (only by sysops),
  * so they fold into an Admin submenu in the hamburger. The
  * GActions below carry the same dispatch the old click handlers
@@ -254,7 +254,7 @@ on_broadcast_button_clicked (GtkButton *btn, gpointer user_data)
     gtk_widget_grab_focus (entry);
 }
 
-/* Phase 5: app.open_bookmark fires from the AdwSplitButton's
+/* app.open_bookmark fires from the AdwSplitButton's
  * dropdown menu. The GVariant parameter carries the bookmark
  * name as a string; connect_open_bookmark_by_name reads the
  * file and dispatches to the existing connect path. */
@@ -273,7 +273,7 @@ on_action_open_bookmark (GSimpleAction *action, GVariant *param,
     connect_open_bookmark_by_name (name);
 }
 
-/* Phase 5: app.connect_builtin fires from the SplitButton's
+/* app.connect_builtin fires from the SplitButton's
  * dropdown for one of the hardcoded "well-known" Hotline servers.
  * Index 1..4 — same numbering the connect dialog's built-in combo
  * has used since forever. */
@@ -290,10 +290,10 @@ on_action_connect_builtin (GSimpleAction *action, GVariant *param,
     connect_open_builtin_bookmark (g_variant_get_int32 (param));
 }
 
-/* Phase 4.5: GTK 4 close-request signature is (GtkWindow *, gpointer)
+/* GTK 4 close-request signature is (GtkWindow *, gpointer)
  * returning gboolean. Returning TRUE inhibits the default destroy.
  *
- * Phase 5+: when the tray icon is enabled AND a tray host is around
+ * when the tray icon is enabled AND a tray host is around
  * to render it, X-button closes hide all windows instead of
  * quitting — the conventional "minimize-to-tray" pattern. We require
  * an actual host (not just the pref) so users with the toggle on
@@ -415,7 +415,7 @@ disconnect_clicked (void)
     }
 }
 
-/* Phase 5: app-level GActions backing the AdwHeaderBar's hamburger
+/* app-level GActions backing the AdwHeaderBar's hamburger
  * menu. The actions just dispatch to the existing window-creation
  * functions so the menu items stay one g_action_map_add_action_entries
  * call away from working alongside the historic toolbar buttons. The
@@ -509,7 +509,7 @@ on_action_reset_layout (GSimpleAction *action, GVariant *param, gpointer user_da
     toolbar_show_toast (_ ("Layout will reset on next launch."));
 }
 
-/* Phase 5 / docking (Phase 2 follow-up): on_files_button_clicked
+/* on_files_button_clicked
  * retired. The Files button now uses the toolbar_show_panel
  * helper directly; for the first click on Files (when the panel
  * doesn't exist yet) the panel factory runs at toolbar build
@@ -544,7 +544,7 @@ on_toast_dismissed (AdwToast *toast, gpointer user_data)
     live_toasts = g_list_remove (live_toasts, toast);
 }
 
-/* Phase 5: push a transient AdwToast onto the toolbar window's
+/* push a transient AdwToast onto the toolbar window's
  * AdwToastOverlay. No-op until the toolbar is built (toolbar_toast
  * starts NULL), so callers can safely fire toasts during early
  * startup without guarding. The toast auto-dismisses after libadwaita's
@@ -609,7 +609,7 @@ toolbar_clear_toasts (void)
     g_list_free (snapshot);
 }
 
-/* Phase 5: surface "lost connection" with a Reconnect button. The
+/* surface "lost connection" with a Reconnect button. The
  * banner is built once with the toolbar; here we just set the title
  * text to the live server name and reveal it. set_status_bar() drives
  * the show/hide on the 1/2 -> 0 (and 2 -> 0) transitions; a fresh
@@ -636,7 +636,7 @@ toolbar_hide_banner (void)
     }
 }
 
-/* Phase 5: register the hamburger-menu actions on the application.
+/* register the hamburger-menu actions on the application.
  * Called from gtkhx_activate AFTER the AdwApplication is constructed
  * — fe_init() runs the toolbar construction earlier (before
  * g_application_run), so gtkhx_app is still NULL at that point and
@@ -665,7 +665,7 @@ toolbar_register_actions (GApplication *app, session *sess)
     }
 }
 
-/* Phase 5: build the GtkMenuButton + GMenuModel that hangs off the
+/* build the GtkMenuButton + GMenuModel that hangs off the
  * end of the AdwHeaderBar. The connection-specific feature buttons
  * stay in the content row where the user clicks them often; the
  * menu collects the global / less-frequent actions:
@@ -709,7 +709,7 @@ build_hamburger (void)
     return btn;
 }
 
-/* Phase 5: 2x scale on the toolbar pixmap buttons. The historic
+/* 2x scale on the toolbar pixmap buttons. The historic
  * 16x16 XPMs read as tiny pixel-art runes at modern desktop sizes;
  * the gtkhx_pixmap_button helper in gtkutil.c upscales them with
  * nearest-neighbor before rendering, keeping the crisp blocky look
@@ -724,7 +724,7 @@ make_pixmap_button (const char *resource_name, const char *tooltip,
                                 user_data);
 }
 
-/* Phase 5: rebuild the AdwSplitButton's bookmark menu. Called from
+/* rebuild the AdwSplitButton's bookmark menu. Called from
  * connect.c after a successful Save Bookmark so newly-saved
  * entries appear in the dropdown without restarting the app. The
  * earlier lazy-rebuild-on-popover-show approach (a "show" signal
@@ -746,7 +746,7 @@ toolbar_refresh_bookmarks (void)
     g_object_unref (menu);
 }
 
-/* Phase 4.5: configure-event is gone in GTK 4 and the toolbar window
+/* configure-event is gone in GTK 4 and the toolbar window
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
@@ -787,7 +787,7 @@ install_leaf_hooks_cb (HxSplit *leaf, gpointer user_data)
         toolbar_install_panel_hooks_on_frame (GTK_WIDGET (frame));
 }
 
-/* Phase 5 / docking (Phase 2 follow-up): toolbar buttons "show
+/* toolbar buttons "show
  * panel X". The button's `data' is the panel's registry id (a
  * static string). Behaviour:
  *
@@ -886,7 +886,7 @@ create_toolbar_window (session *sess)
     GtkWidget *hbox;
     GtkWidget *toolbar_view;
 
-    /* Phase 5: stay on plain GtkWindow rather than AdwApplicationWindow.
+    /* stay on plain GtkWindow rather than AdwApplicationWindow.
 	 * fe_init() runs the toolbar construction BEFORE g_application_run
 	 * (so gtkhx_app is still NULL here — confirmed by an earlier
 	 * AdwApplicationWindow attempt that hit a NULL-app assertion at
@@ -897,7 +897,7 @@ create_toolbar_window (session *sess)
 	 * would have. The hamburger actions live on the application and
 	 * get registered from gtkhx_activate via toolbar_register_actions.
 	 *
-	 * Phase 5 / docking (Phase 1): the toolbar window is now the
+	 * the toolbar window is now the
 	 * dock host. The button row and banners stay where they always
 	 * were (top of the content), and a PanelDock fills the rest of
 	 * the window. The dock starts empty — Phase 2 migrates one
@@ -935,7 +935,7 @@ create_toolbar_window (session *sess)
     /* ------------- header bar (top) ------------- */
     header = adw_header_bar_new ();
 
-    /* Phase 5: AdwSplitButton — primary click opens the connect
+    /* AdwSplitButton — primary click opens the connect
 	 * dialog; the dropdown chevron exposes a menu of saved
 	 * bookmarks targeting app.open_bookmark with the bookmark name
 	 * as parameter. Refresh of the menu happens from the bookmark
@@ -969,7 +969,7 @@ create_toolbar_window (session *sess)
     gtk_widget_set_margin_end (hbox, 6);
     gtk_widget_set_margin_top (hbox, 6);
     gtk_widget_set_margin_bottom (hbox, 6);
-    /* Phase 5: AdwToolbarView's content slot fills vertically, which
+    /* AdwToolbarView's content slot fills vertically, which
 	 * stretches a single row of icon buttons into uncomfortably tall
 	 * rectangles. Pin the row to its natural height and center it
 	 * vertically so the toolbar reads as a strip of buttons rather
@@ -982,7 +982,7 @@ create_toolbar_window (session *sess)
         make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/tracker.png",
                             _ ("Tracker"), G_CALLBACK (create_tracker_window),
                             sess));
-    /* Phase 5 / docking (Phase 2 follow-up): Files / Users / Tasks
+    /* Files / Users / Tasks
      * buttons use the toolbar_show_panel helper so each one raises
      * its specific panel + reveals the area, rather than just
      * toggling area visibility. Chat and the two news entry
@@ -1006,21 +1006,21 @@ create_toolbar_window (session *sess)
                                     G_CALLBACK (toolbar_show_panel),
                                     (gpointer) HX_PANEL_ID_FILES);
     gtk_box_append (GTK_BOX (hbox), files_btn);
-    /* Phase 5 / docking (Phase 2 follow-up): Users defaults to
+    /* Users defaults to
      * the END (right) area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
                         "/com/nasledov/gtkhx/pixmaps/users.png", _ ("Users"),
                         G_CALLBACK (toolbar_show_panel),
                         (gpointer) HX_PANEL_ID_USERS));
-    /* Phase 5 / docking (Phase 2): Chat is a center-area panel
+    /* Chat is a center-area panel
      * resident; raise + reveal via the shared helper. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
                                         _ ("Chat"),
                                         G_CALLBACK (toolbar_show_panel),
                                         (gpointer) HX_PANEL_ID_CHAT));
-    /* Phase 5 / docking (Phase 2 follow-up): Tasks defaults to
+    /* Tasks defaults to
      * the BOTTOM area. Button raises + reveals. */
     gtk_box_append (GTK_BOX (hbox),
                     make_pixmap_button (
@@ -1041,7 +1041,7 @@ create_toolbar_window (session *sess)
     gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
 
-    /* Phase 5: New User / Edit User used to be toolbar buttons.
+    /* New User / Edit User used to be toolbar buttons.
 	 * They've moved into the hamburger menu's Admin submenu — sysop
 	 * actions don't need to occupy primary real estate. */
 
@@ -1063,12 +1063,12 @@ create_toolbar_window (session *sess)
     gtk_widget_set_margin_bottom (status_bar, 4);
 
     /* ------------- compose ------------- */
-    /* Phase 5: gtk_window_set_titlebar installs the AdwHeaderBar AS
+    /* gtk_window_set_titlebar installs the AdwHeaderBar AS
 	 * the window's title bar (no GTK default chrome on top of it),
 	 * which is what AdwApplicationWindow does implicitly. */
     gtk_window_set_titlebar (GTK_WINDOW (toolbar_window), header);
 
-    /* Phase 5: AdwBanner sits above the content row for "lost
+    /* AdwBanner sits above the content row for "lost
 	 * connection" state with an actionable Reconnect button.
 	 * Hidden by default; toolbar_show_connection_lost() reveals
 	 * it from set_status_bar() on the 1/2 -> 0 transition. */
@@ -1223,7 +1223,7 @@ create_toolbar_window (session *sess)
 	 * button strip + the server banner. Bottom bar gets the
 	 * status label. The dock fills the rest.
 	 *
-	 * Phase 5 / docking (Phase 2 follow-up): server banner row
+	 * server banner row
 	 * (banner.c, hidden until an HTLS_HDR_BANNER message arrives)
 	 * sits to the RIGHT of the button row rather than below it.
 	 * That kept the buttons compactly clustered on the left and
@@ -1246,7 +1246,7 @@ create_toolbar_window (session *sess)
     adw_toolbar_view_add_bottom_bar (ADW_TOOLBAR_VIEW (toolbar_view),
                                      status_bar);
 
-    /* Phase 5: AdwToastOverlay wraps the content so toolbar_show_toast()
+    /* AdwToastOverlay wraps the content so toolbar_show_toast()
 	 * can push transient notifications over the button row. Toasts
 	 * surface as a sliding banner at the bottom of the overlay; the
 	 * persistent status label stays visible underneath for ambient
@@ -1292,7 +1292,7 @@ create_toolbar_window (session *sess)
     g_signal_connect (toolbar_window, "notify::default-height",
                       G_CALLBACK (on_toolbar_size_notify), NULL);
 
-    /* Phase 4.2: gtk_window_move removed (Wayland) */
+    /* gtk_window_move removed (Wayland) */
 
     gtk_window_present (GTK_WINDOW (toolbar_window));
     init_keyaccel (toolbar_window);
@@ -1314,7 +1314,7 @@ create_toolbar_window (session *sess)
      * if that ever wires through here. */
     hx_voice_ptt_attach (toolbar_window, sess);
 
-    /* Phase 5 / docking (Phase 2): eager-construct the sidebar
+    /* eager-construct the sidebar
      * panels (Users + Tasks) so the sidebar has real residents
      * from the start. Revealing an empty side area would
      * auto-collapse immediately (panel_dock_notify_empty_cb).

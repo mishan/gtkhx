@@ -71,7 +71,7 @@ hx_change_name_icon (struct htlc_conn *htlc)
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
                                utf8, /*is_body=*/FALSE, &name_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_change
+    /* chunk layout moved to gtkhx_proto_build_user_change
      * _chunks. Colored-Nicknames extension: include DATA_COLOR ONLY
      * when the local pref has set a real color — we deliberately
      * don't send HX_NICK_COLOR_NONE because the spec's auto-opt-in
@@ -96,7 +96,7 @@ hx_change_name_icon (struct htlc_conn *htlc)
 void
 hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_kick_chunks.
+    /* chunk layout moved to gtkhx_proto_build_user_kick_chunks.
      * Build BEFORE task_new — see hx_send_msg for the rationale
      * (task_new snapshots htlc->trans into a pending entry; the
      * increment happens inside hlpack_chunks during packing). A
@@ -114,7 +114,7 @@ hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban)
 void
 hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_user_getinfo
+    /* chunk layout moved to gtkhx_proto_build_user_getinfo
 	 * _chunks. Same build-before-task ordering as hx_kick_user. */
     struct hx_chunk chunks[1];
     guint8 scratch[2];
@@ -381,7 +381,7 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
     gtk_widget_add_css_class (btn, "flat");
     gtk_widget_add_css_class (btn, "gtkhx-user-popup-item");
     gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
-    /* Phase 5: keyboard focus on the first button auto-paints a
+    /* keyboard focus on the first button auto-paints a
      * focus ring when the popover opens; the user reads that as
      * 'this item is hovered' and gets confused when cursor motion
      * doesn't update it. We don't expect the popup to be navigated
@@ -728,7 +728,7 @@ prompt_chat (session *sess, guint16 _uid)
                                     : NULL);
 }
 
-/* Phase 5 / docking (Phase 2): close_users_window dropped — the
+/* close_users_window dropped — the
  * standalone Users GtkWindow is gone, and the Users panel is a
  * permanent resident of the toolbar's sidebar PanelFrame. An
  * undocked Users panel's "X" affordance flows through libpanel's
@@ -739,7 +739,7 @@ user_list (session *sess)
 {
     struct chat *pub;
 
-    /* Phase 5 / docking (Phase 2): users_view, not users_window,
+    /* users_view, not users_window,
      * is the canonical "have we got a view?" signal now. The
      * standalone window is gone — the panel is always either
      * registered or not. */
@@ -898,14 +898,14 @@ create_users_window (GtkWidget *parent_window, gpointer data)
     HxPanel *panel;
     session *sess = data;
 
-    /* Phase 5 / docking (Phase 2): the parent_window argument is
+    /* the parent_window argument is
      * vestigial — we don't reparent the panel to it (it's already
      * a resident of the toolbar's sidebar frame). Kept on the
      * signature so the existing gtkhx.c auto-open and toolbar
      * button call sites compile unchanged. */
     (void)parent_window;
 
-    /* Phase 5 / docking (Phase 2): the standalone Users GtkWindow
+    /* the standalone Users GtkWindow
      * is gone. The panel is a permanent resident of the toolbar
      * window's start-area PanelFrame — first call constructs it
      * and slots it in; later calls just raise it to focus. */
@@ -970,7 +970,7 @@ create_users_window (GtkWidget *parent_window, gpointer data)
     gtk_widget_set_sensitive (chatbtn, FALSE);
     gtk_widget_set_sensitive (ignobtn, FALSE);
 
-    /* Phase 5 / docking (Phase 2): the headerbar in the old
+    /* the headerbar in the old
      * standalone Users window held Msg / Chat on the start and Ignore /
      * Ban / Kick / Info on the end. A PanelWidget's tab strip is too
      * narrow to host action buttons, so they relocate to a slim
@@ -1253,7 +1253,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         hx_user_list_view_update (sess->users_view, user, nam, icon, color);
     }
 
-    /* Phase 5: if this user has an open PM window, refresh its info
+    /* if this user has an open PM window, refresh its info
 	 * pane (icon / name / status) so it tracks the user changing
 	 * their nick or going idle. We pass the new nam/icon/color
 	 * through directly rather than re-reading user->* — rcv.c

@@ -166,7 +166,7 @@ void        hx_panel_install_close_dispatcher (GtkWidget *frame);
  * panel isn't currently in a frame ancestor. */
 void        hx_panel_undock (HxPanel *self);
 
-/* Phase 4 / docking: drag-out detection. libpanel's drag system
+/* drag-out detection. libpanel's drag system
  * lives on a "grab" button inside each PanelFrame's header bar
  * (PanelFrameHeaderBar). The drag produces a PANEL_TYPE_WIDGET
  * content; libpanel's drop targets accept drops only inside an
@@ -178,7 +178,7 @@ void        hx_panel_undock (HxPanel *self);
  * frame-create time. */
 void        hx_panel_install_drag_out_on_frame (GtkWidget *frame);
 
-/* Phase 4 / docking: disable libpanel's PanelDropControls overlay
+/* disable libpanel's PanelDropControls overlay
  * inside the frame so it doesn't claim drop events. The overlay is
  * meant to handle in-dock drops but it stays hidden / non-functional
  * in our setup, and while it's the deepest-hit drop target it
@@ -188,7 +188,7 @@ void        hx_panel_install_drag_out_on_frame (GtkWidget *frame);
  * Call once per frame at toolbar-build / frame-create time. */
 void        hx_panel_defang_drop_controls_on_frame (GtkWidget *frame);
 
-/* Phase 4 / docking: dock-level drop target. When per-frame drop
+/* dock-level drop target. When per-frame drop
  * targets don't receive events (libpanel internals consume them
  * before they bubble up), install one at the dock level. The
  * handler picks the target frame by hit-testing the drop

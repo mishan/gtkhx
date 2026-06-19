@@ -34,7 +34,7 @@ hx_agreement_agree_build_chunks (const hx_agreement_agree_request *req,
     if (chunks_cap < 0) {
         return 0;
     }
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_agreement_agree
+    /* chunk layout moved to gtkhx_proto_build_agreement_agree
      * _chunks in the Rust hotline-proto crate. The wire shape (ICON +
      * NAME + OPTIONS, all three mandatory — Mobius panics without
      * OPTIONS) is unchanged. */

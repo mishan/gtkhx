@@ -64,7 +64,7 @@
 #include "voice_runtime.h"
 #include "voice_model.h"
 
-/* Phase R1: Rust FFI for the Blowfish OFB-64 state — only used here
+/* Rust FFI for the Blowfish OFB-64 state — only used here
  * to free the state on hx_htlc_close. cipher.c owns the alloc and
  * crypt FFI. */
 extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
@@ -86,7 +86,7 @@ guint16 server_port;
 struct log *server_log = NULL;
 #endif
 
-/* Phase 5+ (async connect): pthread_t conn_tid is gone. The connect
+/* pthread_t conn_tid is gone. The connect
  * + magic-exchange flow runs on the main loop via GSocketClient's
  * async API; cancellation goes through current_cancel. */
 static GSocketConnection *current_conn; /* owns the post-handshake fd */
@@ -134,7 +134,7 @@ fd_lock_write (int fd)
     return fcntl (fd, F_SETLK, &lk);
 }
 
-/* Phase 5: PING keepalive. Some servers (hlserver.com is the known
+/* PING keepalive. Some servers (hlserver.com is the known
  * case) drop idle connections after a few minutes of silence. mhxd
  * defines HTLC_HDR_PING / HTLS_HDR_PING for client-driven keepalive;
  * we send an empty PING every PING_INTERVAL_SEC seconds while
@@ -162,7 +162,7 @@ ping_tick (gpointer data)
         ping_timer_id = 0;
         return G_SOURCE_REMOVE;
     }
-    /* Phase R2: PING is a zero-chunk opcode. Send directly through
+    /* PING is a zero-chunk opcode. Send directly through
 	 * hlwrite_chunks with hc=0 so the trace path matches the rest of
 	 * the SEND opcodes (no fallback to the variadic hlwrite). */
     hlwrite_chunks (htlc, HTLC_HDR_PING, 0, NULL, 0);
@@ -274,7 +274,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * stream. */
     control_remove_all_sources ();
 
-    /* Phase 5+: GSocketConnection owns the fd; releasing it closes
+    /* GSocketConnection owns the fd; releasing it closes
 	 * the socket. Replaces the legacy close(fd) call. */
     g_clear_object (&current_conn);
     htlc->ip_addr[0] = '\0';
@@ -311,7 +311,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->version = 0;
     memset (htlc->login, 0, sizeof (htlc->login));
 
-    /* Phase 5+: chats live in a GHashTable<u32 cid, struct chat*>.
+    /* chats live in a GHashTable<u32 cid, struct chat*>.
 	 * For each chat:
 	 *   1. Clear the UI's user-list rendering (users_clear is a no-op
 	 *      on cid != 0 since the global user-list widget only shows
@@ -352,7 +352,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_list_free (non_public);
     }
 
-    /* Phase 5+: tasks live in a GHashTable<u32 trans, struct task*>.
+    /* tasks live in a GHashTable<u32 trans, struct task*>.
 	 * Use foreach_remove so we can run the per-task UI cleanup
 	 * (gtask_delete_tsk) and let the table's value-destroy notify
 	 * (task_free) reclaim the task struct itself. Safe to call on a
@@ -367,7 +367,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_hash_table_remove_all (sess->tasks);
     }
 
-    /* Phase 5+ (HTXF rewrite): htlc no longer carries an addrinfo —
+    /* htlc no longer carries an addrinfo —
 	 * the post-connect peer-identification now lives in plain
 	 * htlc->serverhost / serverport / ip_addr fields, none of which
 	 * need explicit teardown. The legacy freeaddrinfo() call (and
@@ -375,7 +375,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     memset (htlc->cipher_encode_key, 0, sizeof (htlc->cipher_encode_key));
     memset (htlc->cipher_decode_key, 0, sizeof (htlc->cipher_decode_key));
-    /* Phase R1: the Blowfish state lives behind an opaque pointer
+    /* the Blowfish state lives behind an opaque pointer
      * allocated by rust/crates/hxcrypto-stream. Free it before
      * zeroing the union so the heap allocation isn't leaked.
      * AEAD state is inline in the union (no heap), so the memset
@@ -438,7 +438,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     g_free (server_addr);
     server_addr = NULL;
 }
-/* Phase 5+ (HOPE ChaCha20-Poly1305): pump complete AEAD frames
+/* pump complete AEAD frames
  * from htlc->read_in into htlc->aead_plain. Returns the number
  * of plaintext bytes newly available in aead_plain (relative to
  * its pos). Authentication failure or oversized frame returns 0
@@ -693,7 +693,7 @@ control_on_readable (GObject *source G_GNUC_UNUSED, gpointer user_data)
                         return G_SOURCE_REMOVE;
                     }
                 } else {
-                    /* Phase 5: body is fully buffered now;
+                    /* body is fully buffered now;
                      * dump its data chunks before dispatch.
                      * No-op when "proto" debug category is
                      * disabled. */
@@ -794,7 +794,7 @@ control_on_writable (GObject *source G_GNUC_UNUSED, gpointer user_data)
  * gtkhx_session_emit_tracker_server_create / hx_printf_prefix calls
  * happen directly. */
 
-/* Phase 5: HTLC_HDR_AGREEMENTAGREE with NAME + ICON. Sent from
+/* HTLC_HDR_AGREEMENTAGREE with NAME + ICON. Sent from
  * gtkhx.c::concurrence (Agree button) once the agreement-window
  * is dismissed. Two server-side effects:
  *
@@ -869,7 +869,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     hx_post_login_fetches (htlc);
 }
 
-/* Phase 5+: async connect via GSocketClient.
+/* async connect via GSocketClient.
  *
  * Replaces the legacy pthread worker (hx_thread_connect) that did
  * blocking DNS / connect / magic-exchange / login-send off the main
@@ -924,7 +924,7 @@ struct gtkhx_connect_ctx {
     int tls; /* TLS Phase 1: wrap control socket from byte zero */
     guint16 port;
 
-    /* Phase 3: identifying tuple for the accept-certificate
+    /* identifying tuple for the accept-certificate
      * handler. Populated when tls=1 right before the
      * GSocketClient connect kicks off; .host borrows from
      * serverstr (same lifetime). */
@@ -1175,7 +1175,7 @@ send_login (struct gtkhx_connect_ctx *ctx)
 
     connected = 1;
     htlc->gdk_input = 1;
-    /* Phase 5+: control-channel I/O is driven by GPollable
+    /* control-channel I/O is driven by GPollable
      * sources on current_conn's input / output streams (see the
      * control_arm_* helpers). The legacy hxd_fd_set GIOChannel
      * watch was tied to the raw socket fd and didn't see
@@ -1630,7 +1630,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     server_addr = g_strdup_printf ("%s:%u", serverstr, port);
     server_port = port;
 
-    /* Phase 4 (chat-history reconnect catch-up): the AFTER= cursor
+    /* the AFTER= cursor
 	 * is per-server, but the xtext scrollback we just wiped via
 	 * hx_clear_chat is per-connect. Reset the cursor every time we
 	 * connect (or reconnect) — the catch-up's invariant is "the
@@ -1679,7 +1679,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
 
-    /* Phase 2: also stamp the tls flag so HTXF subchannel connects
+    /* also stamp the tls flag so HTXF subchannel connects
      * (xfers.c::htxf_connect via htxf->htlc, banner.c via the
      * fetch snapshot) know to wrap their data ports too. The
      * Mobius / Janus separate-port model pairs TLS-HTLS on port N
@@ -1718,7 +1718,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 	 * behaviour the legacy getaddrinfo loop had. */
     g_socket_client_set_timeout (client, MAGIC_TIMEOUT_SEC);
     if (tls) {
-        /* Phase 1: TLS from byte zero (Mobius / Janus separate-port
+        /* TLS from byte zero (Mobius / Janus separate-port
 		 * model — no STARTTLS, no in-band negotiation). GIO routes
 		 * the underlying socket through whatever TLS backend
 		 * glib-networking provides (GnuTLS or OpenSSL depending on
@@ -1726,7 +1726,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 		 * event signal lets us attach accept-certificate during the
 		 * TLS_HANDSHAKING phase — see on_socket_client_event. */
         g_socket_client_set_tls (client, TRUE);
-        /* Phase 3: user_data is a tls_endpoint stashed on the
+        /* user_data is a tls_endpoint stashed on the
          * connect ctx (ep_host points at the same memory as
          * ctx->serverstr, alive until the connect completes).
          * Lives long enough — the GSocketClient is unref'd
@@ -1771,7 +1771,7 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
     GError *err = NULL;
 
     client = g_socket_client_new ();
-    /* Phase 2: optional TLS wrap on the HTXF subchannel. Same
+    /* optional TLS wrap on the HTXF subchannel. Same
      * shape as hx_connect's control-channel TLS plumbing — flip
      * set_tls before the connect and hook accept-everything via
      * the GSocketClient event signal at TLS_HANDSHAKING. Phase 3:
@@ -3281,7 +3281,7 @@ tracker_fetch_free (struct tracker_fetch_ctx *ctx)
 void
 kill_threads (void)
 {
-    /* Phase 5+: cancel the async connect chain. Safe whether or not
+    /* cancel the async connect chain. Safe whether or not
 	 * one's in flight. */
     if (current_cancel) {
         g_cancellable_cancel (current_cancel);
@@ -3304,7 +3304,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 
     this_off = htlc->out.pos + htlc->out.len;
 
-    /* Phase 5: the buffer-packing logic lives in hlpack
+    /* the buffer-packing logic lives in hlpack
 	 * (proto_helpers.c) so the Tier 2 unit tests can drive the
 	 * SEND path without the fd / proto_trace / compress / cipher
 	 * side effects. proto_trace stays here in hlwrite — it needs

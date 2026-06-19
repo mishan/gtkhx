@@ -266,7 +266,7 @@ gtkhx_apply_text_style (GtkWidget *w)
         gtkhx_refresh_css ();
     }
 
-    /* Phase 4.5: gtk_style_context_add_class is deprecated in GTK 4.10
+    /* gtk_style_context_add_class is deprecated in GTK 4.10
 	 * and was the source of a gtk_css_node_insert_after assertion when
 	 * adding the class on a widget whose CSS node hadn't been parented
 	 * yet. gtk_widget_add_css_class is the modern, safer path. */
@@ -322,13 +322,13 @@ session the_session;
  * needs to call g_application_quit on it, but loop() comes much later
  * in this TU and gtkhx_app's definition lives there.
  *
- * Phase 5: AdwApplication subclasses GtkApplication, so the existing
+ * AdwApplication subclasses GtkApplication, so the existing
  * gtk_application_* call sites keep working unchanged. The upgrade
  * gives us libadwaita's AdwStyleManager (color-scheme tracking,
  * Adwaita stylesheet) for free. */
 static AdwApplication *gtkhx_app;
 
-/* Phase 5: the dialog code paths in gtkutil.c (error_dialog) and
+/* the dialog code paths in gtkutil.c (error_dialog) and
  * options.c need a transient parent to satisfy GTK 4's "GtkDialog
  * mapped without a transient parent" warning. Expose the application's
  * currently-active window so callers without a widget context can
@@ -424,7 +424,7 @@ static void
 gtkhx_save_window_positions (void)
 {
     save_geo (toolbar_window, &gtkhx_prefs.geo.tool);
-    /* Phase 5 / docking (Phase 2): Chat / Users / Tasks / News
+    /* Chat / Users / Tasks / News
      * panels live inside the toolbar window; per-panel size
      * persistence is Phase 4 layout restore. */
 }
@@ -609,7 +609,7 @@ colorstr (guint16 color)
     return col;
 }
 
-/* Phase 5: scan a directory for *.rsrc files and append each one to
+/* scan a directory for *.rsrc files and append each one to
  * a GPtrArray of full paths. Skips entries whose path is already in
  * the array, so the same file showing up in both $CONFIG/icons and
  * the system data dir doesn't get loaded twice.
@@ -810,7 +810,7 @@ fe_init (void)
 
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
-    /* Phase 5 / docking (Phase 2): create_chat / create_tasks
+    /* create_chat / create_tasks
      * build per-session widget state (xtext + chat_hbox, gtask
      * scroll) that the toolbar window's eager-panel-construction
      * path consumes when it runs create_chat_window /
@@ -1010,7 +1010,7 @@ init (int argc, char **argv)
     textdomain (PACKAGE);
 #endif
     gtk_init ();
-    /* Phase 5 / docking: panel_init() registers libpanel's boxed
+    /* panel_init() registers libpanel's boxed
      * types and CSS provider. It has to run before the first
      * libpanel widget construction; fe_init -> create_toolbar_window
      * (below) builds the dock + grid, so init here. Idempotent and
@@ -1074,7 +1074,7 @@ output_user_info (guint16 uid, const char *nam, const char *info, guint16 len)
  * (output_chat_subject, output_news_*, msg_output, etc.) are
  * already declared in their respective headers.
  *
- * Phase 5+ (chat-event refactor): the chat-signal path bypasses
+ * the chat-signal path bypasses
  * the gtkhx.c output_chat stub — the renderer is
  * chat.c::output_chat_from_event, which takes the pre-parsed
  * HxChatEvent directly. */
@@ -1293,7 +1293,7 @@ on_file_list_signal (GtkhxSession *emitter, gpointer cfl, gpointer fh,
 {
     (void)emitter;
     (void)user_data;
-    /* Phase 5: only the new files browser remains; route the
+    /* only the new files browser remains; route the
 	 * response to its remote-files-provider. The legacy
 	 * output_file_list fallback is gone with the rest of the
 	 * legacy gfile_list UI. Responses without a recognised
@@ -1510,7 +1510,7 @@ concurrence (GtkWidget *widget, gpointer data)
     session *sess = data;
     (void)widget;
 
-    /* Phase 5+: deliver NAME + ICON to the server when the user
+    /* deliver NAME + ICON to the server when the user
 	 * clicks Agree. AGREEMENTAGREE carries both — same payload
 	 * regardless of whether login was already auto-completed (1.9-
 	 * style: SELFINFO before AGREEMENT) or gated on this very click
@@ -1561,7 +1561,7 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     GtkTextBuffer *agree_buf;
 
     agreementwin = gtk_window_new ();
-    /* Phase 5: AdwHeaderBar across all GtkHx windows for visual
+    /* AdwHeaderBar across all GtkHx windows for visual
 	 * consistency (chat, news, files, tasks, users, preview, this). */
     gtk_window_set_titlebar (GTK_WINDOW (agreementwin), adw_header_bar_new ());
     gtk_window_set_default_size (GTK_WINDOW (agreementwin), 460, 540);
@@ -1583,7 +1583,7 @@ output_agreement (session *sess, const char *agreement, guint16 len)
                                     GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     gtkhx_widget_set_child (agree_scroll, agreetext);
 
-    /* Phase 5: Adwaita action-class buttons. .suggested-action paints
+    /* Adwaita action-class buttons. .suggested-action paints
 	 * Agree in the accent colour, .destructive-action paints Disagree
 	 * red — the visual treatment HIG-compliant Adwaita apps use for
 	 * a primary / dismissive button pair. */
@@ -1618,7 +1618,7 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     gtkhx_box_pack (hbox, disagreebtn, FALSE, FALSE, 0);
     gtkhx_box_pack (hbox, agreebtn, FALSE, FALSE, 0);
 
-    /* Phase 5: pressing Enter activates Agree. The text view is
+    /* pressing Enter activates Agree. The text view is
 	 * read-only so it doesn't consume Return; setting the default
 	 * widget here is what makes Enter trigger the affirmative
 	 * action when nothing else has focus. */
@@ -1630,7 +1630,7 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     sess->agreementwin = agreementwin;
 }
 
-/* Phase 3.6: hx_output is gone. Every notification it used to
+/* hx_output is gone. Every notification it used to
  * carry is now a signal on GtkhxSession (see gtkhx_session.{c,h}).
  * The two lifecycle hooks (init, loop) only ever had one
  * implementation, so they're called by name from fe_init. */

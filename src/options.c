@@ -102,7 +102,7 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* inrate_limit */
     0, /* logging */
 
-    /* Phase 5: HexChat-style autocopy controls. Default-on for text
+    /* HexChat-style autocopy controls. Default-on for text
 	 * matches every modern chat client (HexChat, Discord, Slack, etc.)
 	 * and matches the Settings mockup. Stamp / color stay off — most
 	 * users want a clean copy of the message body. */
@@ -110,7 +110,7 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* autocopy_stamp */
     0, /* autocopy_color */
 
-    /* Phase 5+: notification toggles. Zero-initialised here;
+    /* notification toggles. Zero-initialised here;
 	 * init_variables sets the user-facing defaults (mentions on,
 	 * private messages on, etc.) and prefs_read overrides those
 	 * from gtkhxrc. The static-init defaults are deliberately
@@ -130,7 +130,7 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* out_bps */
     0, /* in_bps */
 
-    /* Phase 5+: chat-history initial fetch count. 50 matches the
+    /* chat-history initial fetch count. 50 matches the
 	 * fogWraith spec's recommended default and what Phase 1/2/3
 	 * shipped with hard-coded. */
     50, /* chat_history_initial */
@@ -174,7 +174,7 @@ struct icon_viewer {
 #define ICON_PICKER_WIDE_CROP 198
 #define ICON_PICKER_WIDE_HEIGHT 32 /* match cicn native vertical pixel count */
 
-/* Phase 5: forward declarations for the icon-picker FlowBox helpers.
+/* forward declarations for the icon-picker FlowBox helpers.
  * The implementations live further down (after struct cfgvar and
  * cfgvar_for_name) since they touch the cfgvar lookup table; the
  * forward decls let list_icons() and settings_page_identity() —
@@ -297,7 +297,7 @@ list_icons (void)
         g_snprintf (buf, sizeof (buf), "%u", r->resid);
 
         vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-        /* Phase 5: GtkPicture, not GtkImage. Adwaita's
+        /* GtkPicture, not GtkImage. Adwaita's
 		 * stylesheet sizes GtkImage to icon-button dimensions
 		 * (~16-24px) regardless of the paintable's natural
 		 * size, so set_size_request on a wrapper grew the cell
@@ -392,7 +392,7 @@ reinit_gtktexts (session *sess)
                 }
             }
         }
-        /* Phase 5+: walk the PM-window hashtable. The pre-port
+        /* walk the PM-window hashtable. The pre-port
 		 * code walked `sess->msg_list` here, but that field was
 		 * never populated — the real msg_list global lived in
 		 * msg.c, so this loop was a silent no-op for years and
@@ -443,7 +443,7 @@ changed_xtext (session *sess)
     }
 }
 
-/* Phase 5: apply the CFG_TIMESTAMP toggle to every live xtext buffer
+/* apply the CFG_TIMESTAMP toggle to every live xtext buffer
  * — chat / pchat outputs in gchat_list, plus PM outputs in msg_windows.
  * Native xtext stamps are flipped per-buffer via gtk_xtext_set_time_stamp.
  * gtk_xtext_refresh forces a full re-render so the new state is visible
@@ -478,7 +478,7 @@ changed_timestamp (session *sess)
     }
 }
 
-/* Phase 5: re-enabled. The Settings nick/icon controls used to be
+/* re-enabled. The Settings nick/icon controls used to be
  * inert — changing them updated gtkhx_prefs / the_session.htlc but
  * never told the server, so the user list still showed your old
  * nick/icon until reconnect. hlwrite is already a no-op when
@@ -551,7 +551,7 @@ changed_font (session *sess)
         gtkhx_prefs.font = g_strdup ("Monospace 10");
     }
 
-    /* Phase 3.5: rebuild the screen-wide CSS provider so already-tagged
+    /* rebuild the screen-wide CSS provider so already-tagged
 	 * widgets pick up the new font without needing per-widget calls. */
     gtkhx_refresh_css ();
 
@@ -569,7 +569,7 @@ static void changed_logging (session *sess)
 }
 #endif
 
-/* Phase 5: HexChat-style xtext autocopy. Each toggle in Settings →
+/* HexChat-style xtext autocopy. Each toggle in Settings →
  * Advanced → Auto Copy Behavior calls one of the three xtext setters
  * to flip the corresponding facet of the drag-end clipboard handler.
  * The cfgvars own the persisted state in gtkhx_prefs.autocopy_* bytes;
@@ -595,7 +595,7 @@ changed_autocopy_color (session *sess)
     gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
 }
 
-/* Phase 5: apply CFG_STAMP_FORMAT to every live xtext widget. The
+/* apply CFG_STAMP_FORMAT to every live xtext widget. The
  * setter stashes the new format in xtext's module-global, recomputes
  * stamp_width per widget (font-dependent), and grows the buffer
  * indent if the new column is wider than before. queue_draw fires
@@ -657,7 +657,7 @@ static void
 changed_case (session *sess)
 {
     (void)sess;
-    /* Phase 5+: case-fold lives on gtkhx_prefs.track_case and is read
+    /* case-fold lives on gtkhx_prefs.track_case and is read
      * directly by tracker.c::tracker_rerun_search when compiling the
      * GRegex (G_REGEX_CASELESS toggled per the pref). No global regex-
      * engine state to flip; just kick the live filter so the result
@@ -666,7 +666,7 @@ changed_case (session *sess)
     tracker_search_refresh ();
 }
 
-/* Phase 5: apply the THEME pref to libadwaita's style manager. The pref
+/* apply the THEME pref to libadwaita's style manager. The pref
  * is one of "system" / "light" / "dark"; anything else falls back to
  * the system default so a hand-edited gtkhxrc with a typo doesn't lock
  * the user into a broken state. Called both at startup (after prefs_read)
@@ -890,7 +890,7 @@ struct cfgvar {
     { CFG_SND_MSG, { &hxsnd.msg }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_NEWS, { &hxsnd.news }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_PART, { &hxsnd.part }, BOOLEAN, 0, NULL, NULL },
-    /* Phase 5: SOUNDPATH used to set a fallback directory for sound
+    /* SOUNDPATH used to set a fallback directory for sound
 	 * files. Auto-discovery in $CONFIG/sounds/ + $PREFIX/share/gtkhx/sounds/
 	 * replaces it; the cfgvar is gone so legacy gtkhxrc lines are
 	 * silently dropped at parse time. */
@@ -966,7 +966,7 @@ struct cfgvar {
     { CFG_XBUF_MAX, { &gtkhx_prefs.xbuf_max }, INT, 0, changed_xtext, NULL }
 };
 
-/* Phase 5: the parallel FOO_IDX enum that paired up with cfgvars[] is
+/* the parallel FOO_IDX enum that paired up with cfgvars[] is
  * gone. Every (*cfgvar_for_name(CFG_FOO)) reference is now cfgvar_for_name(CFG_FOO),
  * which bsearch-finds the entry by its config-file key. The enum was
  * a maintenance footgun: every new pref needed an entry in two places
@@ -1032,7 +1032,7 @@ cfgnamecmp_const (const void *key, const void *mem)
 /* prefs_write is defined after the row helpers but called by them
  * — the prototype lives in options.h. */
 
-/* Phase 5: helper to compare two flowbox children by their stored
+/* helper to compare two flowbox children by their stored
  * resource ID so the icon picker stays sorted by ID. Forward-declared
  * up near list_icons() because it's wired there too. */
 static int
@@ -1075,7 +1075,7 @@ icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
 }
 
 /* ------------------------------------------------------------------- *
- * Phase 5: AdwPreferencesRow helpers
+ * AdwPreferencesRow helpers
  *
  * Each helper builds an AdwPreferencesRow subclass for a cfgvars[]
  * entry, initialized from the cfgvar's current value, with a notify
@@ -1133,7 +1133,7 @@ pref_switch_row (const char *cfgname, const char *title, const char *subtitle)
     return row;
 }
 
-/* Phase 5: per-row debounce for entry-row apply.
+/* per-row debounce for entry-row apply.
  *
  * AdwEntryRow's notify::text fires on every keystroke. For most
  * STRING / STRING32 prefs that's harmless (font name, download dir,
@@ -1532,7 +1532,7 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
     (*cfgvar_for_name (CFG_FONT)).allocated = 1;
 
-    /* Phase 3.10: GdkRGBA defaults — light grey foreground on black,
+    /* GdkRGBA defaults — light grey foreground on black,
 	 * preserving the historic 0xcccc/0xffff fraction. */
     fg_col.red = 0xcccc / 65535.0;
     fg_col.green = 0xcccc / 65535.0;
@@ -1616,7 +1616,7 @@ prefs_allocate (char *tag, char *rest)
         break;
     }
     case BOOLEAN: {
-        /* Phase 5: prefs_write emits booleans via
+        /* prefs_write emits booleans via
 			 * g_key_file_set_boolean which writes the literal
 			 * "true" / "false" — but the historical parser only
 			 * accepted '0'/'1' and silently fell through on
@@ -1656,7 +1656,7 @@ prefs_allocate (char *tag, char *rest)
     }
     case STRING32: {
         gsize rest_len = strlen (rest);
-        /* Phase 5: trace every STRING32 load so the htlc->name
+        /* trace every STRING32 load so the htlc->name
 			 * corruption hunt has a full audit trail of what came
 			 * out of gtkhxrc before any sanitisation. The label
 			 * encodes the key name so we can disambiguate NICK
@@ -1755,7 +1755,7 @@ read_line (FILE *prefs, char **line, size_t *len)
     return 0;
 }
 
-/* Phase 5: prefs path resolution. Primary location is
+/* prefs path resolution. Primary location is
  *   $CONFIG/gtkhxrc
  * (where $CONFIG is gtkhx_config_dir()). Fall back to the legacy
  * ~/.gtkhxrc on first run so existing users don't lose their config —
@@ -1780,7 +1780,7 @@ prefs_legacy_path (void)
     return g_build_filename (home, ".gtkhxrc", NULL);
 }
 
-/* Phase 5: read a GKeyFile [gtkhx] section, feeding each entry through
+/* read a GKeyFile [gtkhx] section, feeding each entry through
  * prefs_allocate. Reuses the legacy parser's type dispatch — no
  * per-cfgvar plumbing change. Returns TRUE if the keyfile parsed
  * cleanly (whether or not the section was empty). The section name
@@ -1849,7 +1849,7 @@ prefs_read_legacy_lines (const char *path)
     return TRUE;
 }
 
-/* Phase 5: prefs_read intentionally does not run cfgvar changefuncs
+/* prefs_read intentionally does not run cfgvar changefuncs
  * (see comment on changed_nickoricon for the reasoning around the
  * wire-packet path). Most cfgvars don't need application at load —
  * the changefunc just propagates the value to a derived runtime
@@ -1974,7 +1974,7 @@ prefs_write (void)
                                   (gint64)*v->variable.timet);
             break;
         case STRING32: {
-            /* Phase 5: trace the value about to be persisted. If
+            /* trace the value about to be persisted. If
 			 * the htlc->name corruption has happened between the
 			 * explicit write site and this save, the hex here
 			 * shows what's actually going to disk. The gtkhxrc
@@ -2091,7 +2091,7 @@ parse_tracker_list (void)
     }
 }
 
-/* Phase 4.5: bookkeeping that runs on every dialog teardown path —
+/* bookkeeping that runs on every dialog teardown path —
  * Cancel button, OK button (close-on-OK), and the user clicking the
  * window's close X. We attach to GtkWidget::destroy because in GTK 4
  * gtk_window_destroy() does NOT emit close-request: the close-request
@@ -2118,7 +2118,7 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
     tracker_list = NULL;
     g_clear_object (&tracker_selection);
     g_clear_object (&tracker_store);
-    /* Phase 5: per-cfgvar widget pointers are populated as Settings
+    /* per-cfgvar widget pointers are populated as Settings
 	 * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
 	 * point at AdwPreferencesRow children of the dialog. Once the dialog
 	 * tears down those rows are freed; any external caller that later
@@ -2386,7 +2386,7 @@ settings_page_tracker (AdwPreferencesPage *page)
 
     adw_preferences_page_add (page, grp);
 
-    /* Phase 5: TRACKER_CASE used to be tucked into Misc → Behavior;
+    /* TRACKER_CASE used to be tucked into Misc → Behavior;
 	 * it's a tracker-specific search option, so it lives here in
 	 * its own Search group. */
     {
@@ -2401,7 +2401,7 @@ settings_page_tracker (AdwPreferencesPage *page)
     }
 }
 
-/* Phase 5: the "Interface" page that hosted the legacy
+/* the "Interface" page that hosted the legacy
  * file-browser "Browse in Same Window" toggle is gone — the new
  * files browser is always a single window (matching the news
  * browser's Phase 6 cleanup). Page is dropped from
@@ -2469,7 +2469,7 @@ settings_page_chat (AdwPreferencesPage *page)
                        _ ("0 keeps unlimited scrollback"), 0, 0xffff, 1));
     adw_preferences_page_add (page, output_grp);
 
-    /* Phase 5: timestamp format. Separate group so the strftime
+    /* timestamp format. Separate group so the strftime
      * hint can live as a group description without making the
      * Chat-output group feel cluttered. */
     {
@@ -2501,7 +2501,7 @@ settings_page_chat (AdwPreferencesPage *page)
         adw_preferences_page_add (page, hl_grp);
     }
 
-    /* Phase 5+: fogWraith chat-history extension (Janus and any
+    /* fogWraith chat-history extension (Janus and any
      * future server that implements Capabilities-Chat-History.md).
      * Single spin row for the initial pull count — also used as
      * the per-click Load-older count, with a 50-floor in the
@@ -2556,7 +2556,7 @@ settings_page_chat (AdwPreferencesPage *page)
                             "instead of all users")));
     adw_preferences_page_add (page, behavior_grp);
 
-    /* Phase 5: HexChat-style auto-copy controls. Three independent
+    /* HexChat-style auto-copy controls. Three independent
      * toggles drive xtext's drag-end clipboard behaviour. The three
      * gtk_xtext_set_autocopy_* setters take care of propagating the
      * value to the widget; the changefunc on each cfgvar calls the
@@ -2601,7 +2601,7 @@ settings_page_identity (AdwPreferencesPage *page)
     AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
     GtkWidget *picker_row, *vbox, *scroll, *icon_list, *wide_list;
 
-    /* Phase 5: g_malloc0 — zero-fill the struct so any read of
+    /* g_malloc0 — zero-fill the struct so any read of
      * iv->icon_list / nfound / icon_high before they're set later in
      * this function returns 0 / NULL deterministically. The previous
      * g_malloc gave us a struct full of whatever was at that address,
@@ -2704,7 +2704,7 @@ settings_page_identity (AdwPreferencesPage *page)
     adw_preferences_page_add (page, picker_grp);
 }
 
-/* Phase 5+: Notifications page. One row per event class that can
+/* Notifications page. One row per event class that can
  * fire a desktop notification, plus a global "don't notify when
  * the relevant window is focused" toggle. Mention matching uses
  * the same word list as the chat highlight colouring (own nick
@@ -3074,7 +3074,7 @@ settings_page_voice (AdwPreferencesPage *page)
     settings_page_voice_ptt_group (page);
 }
 
-/* Phase 5: Misc used to be a catchall for Behavior toggles. Most of
+/* Misc used to be a catchall for Behavior toggles. Most of
  * those have moved to the page they belong on (showjoin /
  * old_nickcomp → Chat, tracker_case → Trackers); what stays here is
  * Auto Reply plus the two genuinely cross-cutting behaviours
@@ -3108,7 +3108,7 @@ settings_page_misc (AdwPreferencesPage *page)
     adw_preferences_page_add (page, behavior);
 }
 
-/* Phase 5: General page consolidates Appearance (theme combo) + Paths
+/* General page consolidates Appearance (theme combo) + Paths
  * (download directory). Both pages were small enough to feel
  * silly as standalone sidebar entries — folding them together gives
  * a tidier first stop in the Settings sidebar. */
@@ -3196,7 +3196,7 @@ create_options_window (GtkWidget *widget, gpointer data)
         return;
     }
 
-    /* Phase 5: AdwPreferencesDialog (libadwaita 1.6+) replaces
+    /* AdwPreferencesDialog (libadwaita 1.6+) replaces
 	 * AdwPreferencesWindow, which became deprecated alongside the
 	 * old AdwAboutWindow / AdwMessageDialog when the new adaptive
 	 * AdwDialog family arrived. The settings construction is
@@ -3252,4 +3252,4 @@ create_options_window (GtkWidget *widget, gpointer data)
 }
 
 G_GNUC_END_IGNORE_DEPRECATIONS
-/* Phase 4.13: end of file-level deprecation suppression — see top of file. */
+/* end of file-level deprecation suppression — see top of file. */

@@ -42,7 +42,7 @@ task_error_extract (struct htlc_conn *htlc, char *out, gsize out_size,
         return FALSE;
     }
 
-    /* Phase R2: chunk walk + CR2LF + strip_ansi moved to
+    /* chunk walk + CR2LF + strip_ansi moved to
      * gtkhx_proto_parse_task_error. The crate sentinel SIZE_MAX
      * distinguishes "no TASK_ERROR chunk" from "empty error string". */
     size_t n = gtkhx_proto_parse_task_error (htlc->in.buf, htlc->in.pos,
@@ -63,7 +63,7 @@ hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: the chunk walk + CR2LF + strip_ansi + leading-LF strip
+    /* the chunk walk + CR2LF + strip_ansi + leading-LF strip
      * moved to the Rust hotline-proto crate (gtkhx_proto_parse_chat). It
      * writes the full sanitised line into out->buf (NUL-terminated, capped
      * at sizeof(out->buf)-1) and reports where the display text starts. */
@@ -89,7 +89,7 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_msg. */
+    /* chunk walk moved to gtkhx_proto_parse_msg. */
     struct gtkhx_proto_msg m;
     if (!gtkhx_proto_parse_msg (htlc->in.buf, htlc->in.pos,
                                 (uint8_t *) out->name, sizeof (out->name),
@@ -112,7 +112,7 @@ hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_banner. The type
+    /* chunk walk moved to gtkhx_proto_parse_banner. The type
      * is gated at exactly 4 bytes per mhxd's rcv_agreementagree (always
      * 4 bytes, right-padded with spaces for shorter codes like "URL").
      * The crate zeroes type_code when got_type is false; we still copy
@@ -134,7 +134,7 @@ hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
 unsigned
 hx_selfinfo_parse (struct htlc_conn *htlc)
 {
-    /* Phase R2: the chunk walk moved to the Rust hotline-proto crate
+    /* the chunk walk moved to the Rust hotline-proto crate
      * (gtkhx_proto_parse_selfinfo). The crate enforces the same
      * field-length gates the C code did (ACCESS exactly 8, USER_LIST
      * >= 8 fixed bytes, COLOR exactly 4) and clamps the cached name to
@@ -196,7 +196,7 @@ hx_user_part_extract (struct htlc_conn *htlc, struct hx_user_part_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_user_part. */
+    /* chunk walk moved to gtkhx_proto_parse_user_part. */
     struct gtkhx_proto_user_part p;
     if (!gtkhx_proto_parse_user_part (htlc->in.buf, htlc->in.pos, &p)) {
         return FALSE;
@@ -216,7 +216,7 @@ hx_chat_subject_extract (struct htlc_conn *htlc,
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_chat_subject.
+    /* chunk walk moved to gtkhx_proto_parse_chat_subject.
      * Subjects are NOT CR2LF'd / strip_ansi'd (they carry no line
      * endings); the crate preserves that. */
     struct gtkhx_proto_chat_subject sub;
@@ -239,7 +239,7 @@ hx_chat_invite_extract (struct htlc_conn *htlc, struct hx_chat_invite_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_chat_invite, which
+    /* chunk walk moved to gtkhx_proto_parse_chat_invite, which
      * strip_ansi's the inviter name (no CR2LF) and caps it at
      * sizeof(out->name)-1. */
     struct gtkhx_proto_chat_invite inv;
@@ -263,7 +263,7 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_user_change. The
+    /* chunk walk moved to gtkhx_proto_parse_user_change. The
      * crate strip_ansi's the nickname (no CR2LF — names carry no line
      * endings) and gates the Colored-Nicknames COLOR chunk at exactly
      * 4 bytes; nick_color defaults to HX_NICK_COLOR_NONE when absent. */
@@ -293,7 +293,7 @@ hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
         return FALSE;
     }
 
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_xfer_queue. */
+    /* chunk walk moved to gtkhx_proto_parse_xfer_queue. */
     struct gtkhx_proto_xfer_queue q;
     if (!gtkhx_proto_parse_xfer_queue (htlc->in.buf, htlc->in.pos, &q)) {
         return FALSE;
@@ -335,7 +335,7 @@ hx_agreement_result
 hx_agreement_extract (struct htlc_conn *htlc, char *out, gsize out_size,
                       gsize *out_len)
 {
-    /* Phase R2: chunk walk moved to gtkhx_proto_parse_agreement. The
+    /* chunk walk moved to gtkhx_proto_parse_agreement. The
      * Rust crate leaves *out untouched on NONE / MISSING (matching the
      * "untouched" sentinel assertions in tests/proto/test_agreement.c),
      * and only writes *out_len when both out and out_len are non-NULL. */
@@ -360,7 +360,7 @@ hx_news_file_extract (struct htlc_conn *htlc, char *out, gsize out_size,
         return FALSE;
     }
 
-    /* Phase R2: chunk walk + sanitise moved to
+    /* chunk walk + sanitise moved to
      * gtkhx_proto_parse_news_file. The SIZE_MAX sentinel return
      * preserves the "leave *out untouched when no NEWS chunk is
      * present" contract tests/proto/test_news_file.c pins. */
@@ -383,7 +383,7 @@ hx_news_dirlist_parse_categoryitem (const guint8 *data, gsize dlen,
         return FALSE;
     }
 
-    /* Phase R2: byte-level parse moved to
+    /* byte-level parse moved to
      * gtkhx_proto_parse_news_categoryitem. */
     struct gtkhx_proto_news_dir_entry e;
     if (!gtkhx_proto_parse_news_categoryitem (data, dlen,
@@ -404,7 +404,7 @@ hx_news_dirlist_parse_folderitem (const guint8 *data, gsize dlen,
         return FALSE;
     }
 
-    /* Phase R2: byte-level parse moved to
+    /* byte-level parse moved to
      * gtkhx_proto_parse_news_folderitem. The C extractor preserved a
      * subtle contract — folderitem == 1 ⇒ folder, anything else ⇒
      * category — which the Rust impl mirrors. */
@@ -462,7 +462,7 @@ hx_newscat_parse (struct htlc_conn *htlc, struct hx_newscat *out)
     }
     memset (out, 0, sizeof (*out));
 
-    /* Phase R2: chunk walk + bounds checks + pstring decoding moved to
+    /* chunk walk + bounds checks + pstring decoding moved to
      * gtkhx_proto_parse_catlist in the Rust hotline-proto crate. The
      * crate owns the parse tree; we copy each pstring out via
      * g_strndup so the per-post char* fields are g_malloc'd and
@@ -552,7 +552,7 @@ hx_news_post_emit (void *t, const uint8_t *bytes, size_t len)
 int
 hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb, void *user)
 {
-    /* Phase R2: chunk walk + sanitise moved to
+    /* chunk walk + sanitise moved to
      * gtkhx_proto_walk_news_post. Per-chunk buffer ownership is
      * Rust's; the trampoline above adapts the FFI callback signature
      * to the public hx_news_post_cb's (char *, gsize) shape. */
@@ -616,7 +616,7 @@ void
 hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
                   guint16 flags)
 {
-    /* Phase R2: delegate to the Rust hotline-proto crate. The wire
+    /* delegate to the Rust hotline-proto crate. The wire
      * layout (16 bytes, big-endian: magic, ref, len, (type<<16)|flags)
      * is byte-for-byte identical; callers in htxf_subchannel.c and the
      * Tier 3 harness use this as a leaf packer so the FFI signature
@@ -654,7 +654,7 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
 guint64
 hl_capabilities_decode (const guint8 *bytes, guint16 len)
 {
-    /* Phase R2: delegate to the Rust hotline-proto crate. The decode
+    /* delegate to the Rust hotline-proto crate. The decode
      * rule (1..8 bytes big-endian, MSB-first, truncate beyond 8, empty
      * is 0) is identical; this wrapper just bridges the GLib u16-len
      * signature to the FFI's size_t. */
@@ -666,7 +666,7 @@ hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
                guint32 *flag_out, guint16 *hc_out, guint32 *wire_len_out,
                guint32 *body_len_out)
 {
-    /* Phase R2: delegate the full 22-byte decode to the Rust crate.
+    /* delegate the full 22-byte decode to the Rust crate.
      * The wire_len → body_len clamp math (cap at MAX_HOTLINE_PACKET_LEN,
      * saturating_sub by sizeof(hc) so wire_len < 2 doesn't underflow)
      * lives in parse::decode_header_full. The C side just redistributes
@@ -705,7 +705,7 @@ void
 hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                const struct hx_chunk *chunks, int hc)
 {
-    /* Phase R2: the inner serialize loop (header byte layout, per-chunk
+    /* the inner serialize loop (header byte layout, per-chunk
      * data hdr + payload writes, len/len2 wire-length math) moved to the
      * Rust hotline-proto crate (build::pack_message). The C side keeps
      * the qbuf growth and the htlc->trans++ side effect because those

@@ -49,7 +49,7 @@
  * filter malformed presence need to validate at the wire layer
  * before reaching the typed view — this view is best-effort.
  *
- * Phase R2: scalar / bool readers + enum-clamp logic moved to the
+ * scalar / bool readers + enum-clamp logic moved to the
  * Rust hotline-proto crate. The strict-size + closed-vocab
  * behaviour is preserved byte-for-byte; the thin wrappers below
  * keep the in-file call shape so the on_tlv switch is unchanged.

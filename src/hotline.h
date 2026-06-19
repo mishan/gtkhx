@@ -246,7 +246,7 @@ struct hl_user_data {
 #define HTLC_HDR_POSTTHREAD ((guint32)0x0000019a)
 #define HTLC_HDR_DELETETHREAD ((guint32)0x0000019b)
 
-/* Phase 5: opcodes adopted from mhxd's protocol additions
+/* opcodes adopted from mhxd's protocol additions
  * (mhxd/src/common/hotline.h). Same wire values both ends agree on;
  * old (1.0/1.2) servers will reject the unknown header and the
  * client recovers gracefully. */

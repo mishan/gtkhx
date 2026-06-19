@@ -15,7 +15,7 @@ extern void close_connected_windows (session *sess);
 extern void error_dialog (char *title, char *msg);
 
 /*
- * Phase 5: gtkhx_text_to_utf8 is declared in text_util.h. The
+ * gtkhx_text_to_utf8 is declared in text_util.h. The
  * function lives in text_util.c (pure GLib, no GTK / Adwaita deps)
  * so the unit tests can link it without pulling in the rest of
  * gtkutil. We re-include the header here so the existing pile of
@@ -24,7 +24,7 @@ extern void error_dialog (char *title, char *msg);
 #include "text_util.h"
 
 /*
- * Phase 3.9: GtkTable → GtkGrid migration helpers. The two APIs have
+ * GtkTable → GtkGrid migration helpers. The two APIs have
  * different shapes: Table takes (left, right, top, bottom) inclusive
  * spans plus per-axis xoptions/yoptions/xpad/ypad; Grid takes
  * (left, top, width, height) and child-widget hexpand/vexpand +
@@ -38,7 +38,7 @@ extern void error_dialog (char *title, char *msg);
  * vocabulary at call sites.
  */
 /*
- * Phase 4.2: GtkAttachOptions / GTK_FILL / GTK_EXPAND were the legacy
+ * GtkAttachOptions / GTK_FILL / GTK_EXPAND were the legacy
  * bit flags for gtk_table_attach. They're gone in GTK 4. Provide
  * compat values keyed off the bit pattern that gtkhx_grid_attach_table
  * already understands so unmodified call sites continue to compile.
@@ -61,7 +61,7 @@ extern void gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
                                               int bottom);
 
 /*
- * Phase 4.2: GtkContainer is gone in GTK 4. Each widget that used to
+ * GtkContainer is gone in GTK 4. Each widget that used to
  * be a container exposes a type-specific child setter instead
  * (gtk_window_set_child / gtk_scrolled_window_set_child /
  * gtk_frame_set_child / gtk_button_set_child / etc.) and boxes use
@@ -75,14 +75,14 @@ extern void gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child,
 extern void gtkhx_widget_set_child (GtkWidget *parent, GtkWidget *child);
 
 /*
- * Phase 4.2: gtk_container_remove is gone too — dispatch to the
+ * gtk_container_remove is gone too — dispatch to the
  * type-specific remove call (gtk_box_remove / gtk_list_box_remove /
  * etc.), or unparent for plain children.
  */
 extern void gtkhx_widget_remove_child (GtkWidget *parent, GtkWidget *child);
 
 /*
- * Phase 4.2: gtk_box_pack_start / pack_end are gone too. The old API
+ * gtk_box_pack_start / pack_end are gone too. The old API
  * carried four parameters that GTK 4 splits across the box (which
  * just appends in order) and the child widget (hexpand / vexpand
  * for `expand`, halign / valign for `fill`, margin properties for
@@ -100,7 +100,7 @@ extern void gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
                                 gboolean expand, gboolean fill, guint padding);
 
 /*
- * Phase 4.2: gtk_widget_destroy is gone. Toplevels use
+ * gtk_widget_destroy is gone. Toplevels use
  * gtk_window_destroy; non-toplevel widgets get unparented (their
  * parent drops the only ref) or g_object_unrefed if floating. This
  * helper dispatches on type so the legacy gtk_widget_destroy(w)
@@ -109,7 +109,7 @@ extern void gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child,
 extern void gtkhx_widget_destroy (GtkWidget *widget);
 
 /*
- * Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12 in
+ * gtk_image_new_from_pixbuf is deprecated in GTK 4.12 in
  * favor of gtk_image_new_from_paintable + a GdkTexture built off the
  * pixbuf. This helper centralizes the conversion so the ~50 call
  * sites become a single sed-rename. Returns a fresh-floating
@@ -141,7 +141,7 @@ extern GtkWidget *gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf);
 extern GdkTexture *gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf);
 
 /*
- * Phase 5: build a GtkButton with a pixel-art XPM icon loaded from a
+ * build a GtkButton with a pixel-art XPM icon loaded from a
  * GResource path. The pixbuf is scaled up by an integer factor with
  * nearest-neighbor interpolation before becoming the button's child,
  * which preserves the crisp pixel-art look at modern desktop sizes
@@ -159,7 +159,7 @@ extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
                                        GCallback cb, gpointer user_data);
 
 /*
- * Phase 5+: like gtkhx_pixmap_button, but takes an already-loaded
+ * like gtkhx_pixmap_button, but takes an already-loaded
  * GdkPixbuf instead of a GResource path. Useful when the icon source
  * isn't a packaged GResource — e.g. the files browser pulling icons
  * out of icons.rsrc via load_icon(). Same scaling / GtkPicture

@@ -112,7 +112,7 @@ struct cicn_resource {
 struct ifn;
 
 /*
- * Phase 3.4: cicn decoder produces GdkPixbuf directly (alpha encodes the
+ * cicn decoder produces GdkPixbuf directly (alpha encodes the
  * Mac classic icon mask).  GdkPixmap/GdkBitmap are aliased to GdkPixbuf
  * in session.h for the GTK 3 transition, so the historical 5-arg
  * signature still works at call sites; the mask out-param is always set

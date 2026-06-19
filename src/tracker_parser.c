@@ -21,7 +21,7 @@
 #include "hotline_proto.h"     /* gtkhx_proto_parse_tracker_* */
 #include "tracker_parser.h"
 
-/* Phase R2: HTRK reply parsing moved to the Rust hotline-proto
+/* HTRK reply parsing moved to the Rust hotline-proto
  * crate. The public C surface in tracker_parser.h is preserved
  * unchanged — production callers (the async fetch state machine
  * in network.c) don't know the bodies delegate now. */

@@ -352,7 +352,7 @@ xfer_go (struct htxf_conn *htxf)
                 hldir = path_to_hldir (htxf->remotedir, &hldirlen, 0);
             }
 
-            /* Phase R2: chunk layout moved to
+            /* chunk layout moved to
 			 * gtkhx_proto_build_file_get_chunks. Build BEFORE
 			 * task_new — see hx_send_msg for the rationale. */
             struct hx_chunk chunks[3];
@@ -400,7 +400,7 @@ xfer_go (struct htxf_conn *htxf)
             = gtkhx_text_for_wire (htxf->remotename, htxf->remotename_len,
                                    utf8, FALSE, &nm_wire_len);
 
-        /* Phase R2: chunk layout moved to gtkhx_proto_build_file_put
+        /* chunk layout moved to gtkhx_proto_build_file_put
 		 * _chunks. Build BEFORE task_new — see hx_send_msg for the
 		 * rationale. Eight variants collapse to one builder call:
 		 * presence flags for DIR / FILE_PREVIEW / XFERSIZE64 select

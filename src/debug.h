@@ -32,7 +32,7 @@ extern gboolean debug_category_enabled (const char *cat);
 extern void debug_log (const char *cat, const char *fmt, ...)
     G_GNUC_PRINTF (2, 3);
 
-/* Phase 5: tracing helper for htlc->name corruption hunt. Logs every
+/* tracing helper for htlc->name corruption hunt. Logs every
  * htlc->name write under category 'name' with the call-site label,
  * byte count, and hex dump of the source bytes. Cheap when the
  * category is off; spammy but exhaustive when on. */

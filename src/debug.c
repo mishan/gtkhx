@@ -101,7 +101,7 @@ debug_log (const char *cat, const char *fmt, ...)
     }
 }
 
-/* Phase 5: tracing helper for the htlc->name corruption hunt. Each
+/* tracing helper for the htlc->name corruption hunt. Each
  * write site to htlc->name calls this with a label naming the call
  * site, the bytes about to be copied, and their length. With
  * GTKHX_DEBUG=name set, a per-write line dumps the source label, the

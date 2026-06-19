@@ -31,7 +31,7 @@
 #define HEXCHAT_XTEXT_H
 
 #include <gtk/gtk.h>
-/* Phase 3.2: pull in compat typedefs (GdkPixmap, GdkDrawable, GdkGC) so
+/* pull in compat typedefs (GdkPixmap, GdkDrawable, GdkGC) so
  * consumers of xtext.h compile under GTK 3 even though the actual cairo
  * rewrite of xtext.c is deferred to Phase 3.4. */
 #include "session.h"
@@ -63,7 +63,7 @@
 #define XTEXT_FG 34
 #define XTEXT_BG 35
 #define XTEXT_MARKER 36		/* for marker line */
-/* Phase 5+ (chat-history extension): muted secondary text colour
+/* muted secondary text colour
  * for rendered history rows. Recomputed alongside XTEXT_FG /
  * XTEXT_BG by gtkhx_apply_theme_palette so contrast against the
  * theme background is appropriate in both light and dark mode.
@@ -174,8 +174,8 @@ struct _GtkXText
 	int last_win_h;
 	int last_win_w;
 
-	/* Phase 3.4b: GdkGCs removed.  Drawing now uses cairo with palette colors directly. */
-	/* Phase 3.10: palette is GdkRGBA (4 doubles 0..1) — feeds directly
+	/* GdkGCs removed.  Drawing now uses cairo with palette colors directly. */
+	/* palette is GdkRGBA (4 doubles 0..1) — feeds directly
 	 * into cairo_set_source_rgba without any per-draw division. */
 	int cur_fg;						/* currently-active foreground palette index */
 	int cur_bg;						/* currently-active background palette index */
@@ -279,7 +279,7 @@ struct _GtkXText
 struct _GtkXTextClass
 {
 	GtkWidgetClass parent_class;
-	/* Phase 4.9: GdkEventButton is gone in GTK 4; the signal arg is now
+	/* GdkEventButton is gone in GTK 4; the signal arg is now
 	 * the bare GdkEvent. The signal is registered as G_TYPE_POINTER on
 	 * both endpoints, so the type-system marshalling was never reading
 	 * the concrete struct shape. Consumers (chat.c, msg.c) that handle
@@ -295,7 +295,7 @@ void gtk_xtext_append_indent (xtext_buffer *buf,
 										unsigned char *left_text, int left_len,
 										unsigned char *right_text, int right_len,
 										time_t stamp);
-/* Phase 5 (chat-history extension): insert a textentry just
+/* insert a textentry just
  * BEFORE the `anchor` entry. anchor==NULL falls back to
  * head-prepend (insert at text_first). Returns a pointer to the
  * inserted entry so callers can save it for future use as an
@@ -320,7 +320,7 @@ textentry *gtk_xtext_insert_indent_before (xtext_buffer *buf,
                                            unsigned char *right_text,
                                            int right_len,
                                            time_t stamp);
-/* Phase 5 (chat-history extension): remove a specific entry
+/* remove a specific entry
  * from the buffer. Returns TRUE if the entry was found and
  * unlinked + freed, FALSE if not (caller's pointer was stale).
  * The bookkeeping (num_lines / pagetop_line / last_pixel_pos /
@@ -437,7 +437,7 @@ void gtk_xtext_buffer_free (xtext_buffer *buf);
 void gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render);
 void gtk_xtext_copy_selection (GtkXText *xtext);
 
-/* Phase 5: HexChat-style autocopy controls. Each toggles a different
+/* HexChat-style autocopy controls. Each toggles a different
  * facet of the drag-end auto-clipboard behaviour:
  *
  *   text  — fire gtk_xtext_set_clip_owner on drag-end (off = drag
@@ -456,7 +456,7 @@ void gtk_xtext_set_autocopy_text  (gboolean enabled);
 void gtk_xtext_set_autocopy_stamp (gboolean enabled);
 void gtk_xtext_set_autocopy_color (gboolean enabled);
 
-/* Phase 5: strftime(3) format for the per-line timestamp column and
+/* strftime(3) format for the per-line timestamp column and
  * the autocopy_stamp clipboard prefix. NULL or empty restores the
  * built-in default '[%H:%M:%S] '. The implementation stores a copy of
  * the string; the caller's buffer can be freed afterwards. Calling

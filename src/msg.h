@@ -1,7 +1,7 @@
 #ifndef HX_MSG_H
 #define HX_MSG_H
 
-/* Phase 5+: lazy-allocate the session's PM-window GHashTable. Safe to
+/* lazy-allocate the session's PM-window GHashTable. Safe to
  * call multiple times — only the first call constructs the table.
  * gtkhx.c calls it before the first create_msgwin at startup. */
 extern void msg_windows_init (session *sess);
@@ -11,7 +11,7 @@ extern struct msgwin *msgwin_with_uid (guint16 uid);
 extern struct msgwin *create_msgwin (guint16 uid, char *name);
 extern void msg_output (char *name, guint16 uid, char *buf);
 
-/* Phase 5+: msg-signal renderer. Same as msg_output but reads from
+/* msg-signal renderer. Same as msg_output but reads from
  * a pre-parsed HxMsgEvent (uid + UTF-8-validated name/body +
  * is_self flag from hx_msg_event_new). */
 struct _HxMsgEvent;

@@ -28,7 +28,7 @@
 #include "hotline_proto.h"          /* gtkhx_proto_tracker_v3_* */
 #include "tracker_v3.h"
 
-/* Phase R2: pack / parse moved to the Rust hotline-proto crate's
+/* pack / parse moved to the Rust hotline-proto crate's
  * tracker_v3 module. The public C surface in tracker_v3.h is
  * preserved unchanged — production callers (the async fetch state
  * machine in network.c, and the meta-TLV walker in

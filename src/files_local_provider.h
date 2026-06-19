@@ -2,7 +2,7 @@
  * files_local_provider.h — local filesystem backend for the
  * orthodox files browser.
  *
- * Phase 1: read-only listing + mkdir / delete / rename. The
+ * read-only listing + mkdir / delete / rename. The
  * provider owns a `current_path` and a `listing` GListModel that
  * the panel widget consumes directly via GtkColumnView's
  * GtkSelectionModel chain.

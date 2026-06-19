@@ -243,7 +243,7 @@ create_tasks (session *sess)
 	 * it. Idempotent if already loaded. */
     ensure_tasks_css ();
 
-    /* Phase 3.2: ported from GtkList (removed in GTK 3) to GtkListBox.
+    /* ported from GtkList (removed in GTK 3) to GtkListBox.
 	 * Each transfer/task is a GtkListBoxRow holding the icon + title +
 	 * subtitle + progress-bar layout; gtsk->listitem points at the row,
 	 * with the gtsk pointer stashed via g_object_set_data on the row
@@ -256,7 +256,7 @@ create_tasks (session *sess)
     gtask_scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (gtask_scroll),
                                     GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    /* Phase 5 / docking (Phase 2): grow vertically inside the
+    /* grow vertically inside the
      * panel's content vbox so the scrolled area fills whichever
      * frame the panel resides in. Without this the scroll widget
      * shrinks to the list's natural height and the panel leaves
@@ -673,7 +673,7 @@ task_update (session *sess, struct task *tsk)
     }
 }
 
-/* Phase 5 / docking (Phase 2): tasks_destroy retired. The Tasks
+/* tasks_destroy retired. The Tasks
  * panel is a permanent resident of the toolbar's sidebar
  * PanelFrame; the standalone GtkWindow it used to hang under is
  * gone, so there's nothing to unparent on close. The
@@ -694,7 +694,7 @@ task_stop (GtkWidget *widget, gpointer data)
         return;
     }
 
-    /* Phase 3.2: gtk_list_box_get_selected_rows returns a GList* of
+    /* gtk_list_box_get_selected_rows returns a GList* of
 	 * GtkListBoxRow* (the rows themselves, not their children).
 	 * Caller owns the GList and must g_list_free() it; the rows
 	 * themselves are owned by the list box. */
@@ -737,7 +737,7 @@ task_stop (GtkWidget *widget, gpointer data)
     g_list_free (sel);
 }
 
-/* Phase 3.2: Move a GtkListBoxRow to a new index by ref'ing it,
+/* Move a GtkListBoxRow to a new index by ref'ing it,
  * removing it from the container, and re-inserting at the new index.
  * The list box re-acquires its ref on insert. */
 static void
@@ -854,7 +854,7 @@ task_go (GtkWidget *widget, gpointer data)
 
 /* Phase 3.x: see users.c users_move() for rationale — size on
  * configure, position deferred to quit.
- * Phase 4.5: gone — GTK 4 widgets don't fire configure-event. Tasks
+ * gone — GTK 4 widgets don't fire configure-event. Tasks
  * window size is captured at hx_quit() in gtkhx.c. */
 
 static void
@@ -873,7 +873,7 @@ task_tasks_update (session *sess)
     }
 }
 
-/* Phase 5: 2x scale on tasks-headerbar pixmap buttons (matches the
+/* 2x scale on tasks-headerbar pixmap buttons (matches the
  * toolbar treatment). gtkhx_pixmap_button in gtkutil.c handles the
  * upscale + button construction. */
 #define TASKS_ICON_SCALE 2
@@ -897,7 +897,7 @@ create_tasks_window (GtkWidget *widget, gpointer data)
 
     (void)widget;  /* vestigial parent_window arg, see users.c */
 
-    /* Phase 5 / docking (Phase 2): same pattern as Users — the
+    /* same pattern as Users — the
      * Tasks panel lives in the toolbar's bottom-area PanelFrame
      * (home_area=PANEL_AREA_BOTTOM, added to toolbar_bottom_frame
      * below). First call constructs + slots in; later calls raise. */
@@ -920,7 +920,7 @@ create_tasks_window (GtkWidget *widget, gpointer data)
                                  _ ("Move Xfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 
-    /* Phase 5 / docking (Phase 2): the four headerbar action
+    /* the four headerbar action
      * buttons (Stop/Start on start, Up/Down on end) relocate to a
      * slim top-of-content GtkBox. Same start/end grouping as the
      * old headerbar via an hexpand spacer between. */
@@ -1170,7 +1170,7 @@ task_error (struct htlc_conn *htlc)
      * they're just not blocked by it. The ERROR sound still
      * fires so the alert isn't fully silent.
      *
-     * Phase 5+: errormsg may contain MacRoman bytes (Mac servers
+     * errormsg may contain MacRoman bytes (Mac servers
      * commonly hand us curly quotes \xd2/\xd3 around filenames).
      * toolbar_show_toast sanitises to UTF-8 internally — the
      * accessibility announcement layer behind AdwToast aborts on

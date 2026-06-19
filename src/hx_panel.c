@@ -41,7 +41,7 @@ struct _HxPanel
     PanelArea    home_area;
     GWeakRef     home_frame;     /* PanelFrame the Undock action returns to */
 
-    /* Phase 3 — DYNAMIC panel close callback. NULL on static
+    /* DYNAMIC panel close callback. NULL on static
      * panels; for pchat / msg panels the factory installs a
      * tear-down function that runs from the frame dispatcher
      * (page-closed signal) before the registry unregisters the

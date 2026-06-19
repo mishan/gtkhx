@@ -1,7 +1,7 @@
 /*
  * files_browser.h — orthodox two-panel files browser.
  *
- * Phase 1: one toplevel window, two side-by-side
+ * one toplevel window, two side-by-side
  * files_panel widgets, both bound to local-files providers.
  * Tab switches the active panel. Headerbar carries the
  * cross-panel actions (Phase 1 just has Refresh / MkDir / Delete

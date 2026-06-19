@@ -34,14 +34,14 @@ extern unsigned int connect_cipher_byte_to_dropdown (unsigned char byte);
  * extra include. */
 #include "algo_list.h"
 
-/* Phase 5: build a fresh GMenu of saved bookmark names. Entries
+/* build a fresh GMenu of saved bookmark names. Entries
  * target the "app.open_bookmark" GAction with the bookmark name as
  * the parameter (g_variant string). The toolbar's AdwSplitButton
  * uses this to populate its dropdown. The returned GMenu is a
  * floating-ref new GMenu — caller takes ownership. */
 extern GMenu *connect_build_bookmark_menu (void);
 
-/* Phase 5: invoked from app.open_bookmark to load and connect to
+/* invoked from app.open_bookmark to load and connect to
  * a named bookmark. Wraps the file-IO heavy open_bookmark call
  * with a public name so toolbar.c (and any future caller) doesn't
  * have to reach into connect.c's static functions. */
@@ -56,7 +56,7 @@ extern void connect_open_bookmark_by_name (const char *name);
  * banner button. */
 extern void connect_reconnect_last (void);
 
-/* Phase 5: load one of the hardcoded "well-known" Hotline server
+/* load one of the hardcoded "well-known" Hotline server
  * bookmarks (Hotline Communications / CafeLinux / GtkHx / SiN
  * Grafix). idx is 1..4 — same numbering the connect dialog's
  * builtin combo uses. */

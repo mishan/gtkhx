@@ -2,7 +2,7 @@
  * files_remote_provider.h — Hotline files-server backend for the
  * orthodox files browser.
  *
- * Phase 2: implements HxFilesProvider against the existing wire
+ * implements HxFilesProvider against the existing wire
  * helpers in files.c (hx_list_dir, hx_make_dir, hx_file_delete,
  * hx_file_move). Listings come in via the GtkhxSession::file-list
  * signal; the gtkhx.c handler routes replies matching our pending

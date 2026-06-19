@@ -25,7 +25,7 @@
 #include "gtkhx.h"
 #include "gtkutil.h"
 
-/* Phase 5: keep the GtkHx-original "logo + custom credits" feel
+/* keep the GtkHx-original "logo + custom credits" feel
  * (AdwAboutDialog's rigid slot layout was too constraining), but
  * polish the implementation:
  *   - GtkBox/GtkGrid layout instead of GtkFixed pixel positioning

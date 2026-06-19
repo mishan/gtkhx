@@ -42,7 +42,7 @@
  * re-used by a future cipher. */
 #define CIPHER_BLOWFISH 2
 /* CIPHER_IDEA = 3 was reserved at the protocol level but never offered. */
-/* Phase 5+: ChaCha20-Poly1305 AEAD (fogWraith HOPE-ChaCha20-Poly1305.md
+/* ChaCha20-Poly1305 AEAD (fogWraith HOPE-ChaCha20-Poly1305.md
  * extension). Unlike Blowfish which runs as a byte-stream XOR cipher,
  * this one operates on length-prefixed authenticated frames. The cipher
  * type and the cipher MODE are negotiated independently: a server can

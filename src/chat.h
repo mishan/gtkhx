@@ -3,13 +3,13 @@
 
 extern GdkRGBA colors[];
 
-/* Phase 5+: lazy-allocate the session's chat GHashTable AND seed it
+/* lazy-allocate the session's chat GHashTable AND seed it
  * with the always-required public chat at cid=0. Safe to call
  * multiple times — only the first call constructs the table.
  * gtkhx.c calls it during init, before any other chat_* operation. */
 extern void chats_init (session *sess);
 
-/* Phase 5+: lazy-allocate the session's gtkhx_chat (UI side)
+/* lazy-allocate the session's gtkhx_chat (UI side)
  * GHashTable. create_chat seeds the public chat (cid=0) UI;
  * pchat_new inserts pchat windows. */
 extern void gchats_init (session *sess);
@@ -21,7 +21,7 @@ extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
 extern void xprintline (GtkWidget *text, char *chat, size_t len);
 
-/* Phase 5+: chat-signal renderer. Takes a pre-parsed HxChatEvent
+/* chat-signal renderer. Takes a pre-parsed HxChatEvent
  * (sender/body slices + is_info/is_self flags from
  * hx_chat_event_new). Bypasses the legacy hx_printf round-trip
  * the log-line path still uses. */
@@ -44,7 +44,7 @@ extern void output_chat_from_event (struct htlc_conn *htlc,
 extern void output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                        GPtrArray *entries, gboolean has_more);
 
-/* Phase 3.2: clickable "Load older messages" sentinel rendered when
+/* clickable "Load older messages" sentinel rendered when
  * the server says has_more=TRUE. The internal joiners are NBSP
  * (U+00A0 = "\xc2\xa0") so xtext's word tokenizer (is_del checks for
  * ASCII space / '\n' / '<' / '>' / NUL) treats the whole string as

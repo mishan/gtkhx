@@ -294,7 +294,7 @@ set_name_comment (GtkWidget *btn, gpointer data)
         hldir = path_to_hldir (path, &hldirlen, 1);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_setinfo_chunks.
+    /* chunk layout moved to gtkhx_proto_build_file_setinfo_chunks.
 	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[4];
     int hc = (int)gtkhx_proto_build_file_setinfo_chunks (
@@ -445,7 +445,7 @@ output_file_info (char *path, char *name, char *creator, char *type,
 struct cached_filelist *
 cfl_lookup (const char *path)
 {
-    /* Phase 5: the legacy implementation walked the global
+    /* the legacy implementation walked the global
 	 * gfile_list to share a cached_filelist with an open browser
 	 * window for that path. With the legacy browser retired the
 	 * sharing has nothing to share with — every caller now gets a
@@ -471,7 +471,7 @@ cfl_print (struct cached_filelist *cfl, void *data)
  * can link it without dragging in this TU's GTK + Adwaita pile.
  * The dir_char global below is what that extracted code references. */
 
-/* Phase 5: dirchar_basename is now a thin wrapper around the
+/* dirchar_basename is now a thin wrapper around the
  * dir_char-free path_basename(path, sep) so the unit tests can
  * exercise the underlying logic without linking files.c. The shape
  * stays identical for callers; dir_char is still the global the
@@ -500,7 +500,7 @@ dirchar_fix (char *lpath)
 int
 exists_remote (char *path)
 {
-    /* Phase 5: the legacy implementation walked the now-deleted
+    /* the legacy implementation walked the now-deleted
 	 * gfile_list cache to answer "is path present in any open
 	 * browser's last listing?" The new files browser doesn't
 	 * maintain that global cache — its listings live inside the
@@ -518,7 +518,7 @@ exists_remote (char *path)
     return 0;
 }
 
-/* Phase 5: hx_list_dir is gone. The files browser's remote provider
+/* hx_list_dir is gone. The files browser's remote provider
  * (files_remote_provider.c::remote_send_file_list) emits its own
  * HTLC_HDR_FILE_LIST with the provider as the signal-data carrier,
  * which is what lets the response route back through
@@ -533,7 +533,7 @@ hx_make_dir (struct htlc_conn *htlc, char *path)
 
     hldir = path_to_hldir (path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_mkdir_chunks.
+    /* chunk layout moved to gtkhx_proto_build_file_mkdir_chunks.
 	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_file_mkdir_chunks (
@@ -567,7 +567,7 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
         hldir = path_to_hldir (path, &hldirlen, 1);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_delete_chunks.
+    /* chunk layout moved to gtkhx_proto_build_file_delete_chunks.
 	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[2];
     int hc = (int)gtkhx_proto_build_file_delete_chunks (
@@ -617,7 +617,7 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
         hldir = path_to_hldir (dir_path, &hldirlen, 0);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_getinfo
+    /* chunk layout moved to gtkhx_proto_build_file_getinfo
 	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
 	 * rationale. task_label is owned by task_new on success and
 	 * leaked otherwise; free it on the failure path. */
@@ -726,7 +726,7 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
         hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_getfolder
+    /* chunk layout moved to gtkhx_proto_build_file_getfolder
 	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
 	 * rationale (the rcv-callback registration must still capture
 	 * htlc->trans before hlwrite_chunks bumps it, so task_new sits
@@ -830,7 +830,7 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
         hldir = path_to_hldir (rdir_buf, &hldirlen, 0);
     }
 
-    /* Phase R2: chunk layout moved to
+    /* chunk layout moved to
 	 * gtkhx_proto_build_file_putfolder_chunks. Build BEFORE task_new —
 	 * see hx_send_msg for the rationale. The builder takes host-order
 	 * u32s for SIZE and NFILES and big-endian-encodes them into scratch
@@ -879,7 +879,7 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
     char *dst_wire = gtkhx_text_for_wire (dst_file, strlen (dst_file), utf8,
                                           FALSE, &dst_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_file_symlink_chunks.
+    /* chunk layout moved to gtkhx_proto_build_file_symlink_chunks.
 	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[4];
     int hc = (int)gtkhx_proto_build_file_symlink_chunks (
@@ -925,7 +925,7 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
             || memcmp (dst_path, src_path, len) != 0)) {
         rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
 
-        /* Phase R2: chunk layout moved to gtkhx_proto_build_file_move
+        /* chunk layout moved to gtkhx_proto_build_file_move
 		 * _chunks. Build BEFORE task_new — see hx_send_msg for the
 		 * rationale. */
         struct hx_chunk chunks[3];
