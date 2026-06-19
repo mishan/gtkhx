@@ -98,6 +98,23 @@ pub(crate) type DecodeCallback = unsafe extern "C" fn(
 /// `spawn_local` runs on the main thread.
 struct UserData(*mut c_void);
 
+/// Format-acceptance policy applied at the sniff gate. The
+/// inline-media path uses [`DecodePolicy::Strict`] — only the
+/// spec-allowlisted JPEG/PNG/GIF formats pass; SVG/WebP/AVIF/
+/// HEIC/TIFF/BMP/ICO are rejected before glycin spawns. The
+/// preview path uses [`DecodePolicy::Wide`] — sniff still
+/// identifies the format for the result's canonical_mime and
+/// telemetry, but the gate accepts whatever bytes glycin's
+/// loader set can decode (the user explicitly opened the
+/// file). PICT and other formats glycin doesn't ship a loader
+/// for surface as glycin decode errors, which preview's
+/// caller falls back to its ImageMagick PICT chain on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DecodePolicy {
+    Strict,
+    Wide,
+}
+
 /// Kick off an async decode. Mirrors the C contract documented in
 /// `inline_media_decode.h`. Returns `None` when the decode rejects
 /// synchronously (NULL/empty bytes, byte cap exceeded, sniff
@@ -106,6 +123,7 @@ struct UserData(*mut c_void);
 pub(crate) fn decode_async(
     bytes: &[u8],
     caps: HxInlineMediaCaps,
+    policy: DecodePolicy,
     cb: DecodeCallback,
     user_data: *mut c_void,
 ) -> Option<Rc<DecodeToken>> {
@@ -137,9 +155,15 @@ pub(crate) fn decode_async(
         return None;
     }
 
-    // ---- Sync gate 3: magic-byte sniff -------------------------
+    // ---- Sync gate 3: magic-byte sniff (policy-gated) ----------
+    // Sniff always runs (gives us canonical_mime + telemetry
+    // label). Under Strict, only the inline-media spec
+    // allowlist passes. Under Wide, any non-empty input is
+    // handed to glycin; unrecognised formats just have NULL
+    // canonical_mime, which the preview caller is happy to
+    // tolerate.
     let sniffed = sniff(bytes);
-    if !format_is_allowed(sniffed) {
+    if policy == DecodePolicy::Strict && !format_is_allowed(sniffed) {
         let result = decoded_alloc();
         let msg = if format_to_mime(sniffed).is_some() {
             "format rejected by inline-media allowlist"

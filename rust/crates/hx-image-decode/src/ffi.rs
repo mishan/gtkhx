@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::slice;
 
 use crate::caps::HxInlineMediaCaps;
-use crate::decode::{decode_async, DecodeCallback, DecodeToken};
+use crate::decode::{decode_async, DecodeCallback, DecodePolicy, DecodeToken};
 use crate::ffi_result::decoded_drop;
 /// Re-export so integration tests and other Rust consumers can
 /// name the decoded-result type without touching the internal
@@ -172,11 +172,36 @@ fn u32_to_format(v: u32) -> Format {
 /// extern void inline_media_decoded_free(HxInlineMediaDecoded *r);
 /// ```
 
-#[no_mangle]
-pub unsafe extern "C" fn inline_media_decode_async(
+/// Wire values for `HxImageDecodePolicy`. Discriminants pinned
+/// `_Static_assert`-style on the C side so a reordering on
+/// either end trips the linker / compile rather than silently
+/// flipping the sniff allowlist behaviour.
+/// Wire value pinned to `HX_IMAGE_DECODE_STRICT` on the C side.
+/// Kept here even though `u32_to_policy` collapses everything
+/// other than `WIDE` to it — name + value match make the FFI
+/// constant table searchable in both directions.
+#[allow(dead_code)]
+const POLICY_STRICT: u32 = 0;
+const POLICY_WIDE: u32 = 1;
+
+#[inline]
+fn u32_to_policy(v: u32) -> DecodePolicy {
+    match v {
+        POLICY_WIDE => DecodePolicy::Wide,
+        // Default + STRICT fall through here. Treating an
+        // unknown discriminant as STRICT is the conservative
+        // failure mode — a buggy caller gets the tighter
+        // allowlist, not the looser one.
+        _ => DecodePolicy::Strict,
+    }
+}
+
+#[inline]
+unsafe fn decode_async_common(
     bytes: *const u8,
     len: usize,
     caps_in: *const HxInlineMediaCaps,
+    policy: DecodePolicy,
     cb: DecodeCallback,
     user_data: *mut c_void,
 ) -> *mut c_void {
@@ -206,10 +231,49 @@ pub unsafe extern "C" fn inline_media_decode_async(
         (*caps_in).with_defaults()
     };
 
-    match decode_async(slice, caps, cb, user_data) {
+    match decode_async(slice, caps, policy, cb, user_data) {
         Some(token) => Rc::into_raw(token) as *mut c_void,
         None => std::ptr::null_mut(),
     }
+}
+
+/// Strict inline-media decode entry. Sniff gate enforces the
+/// fogWraith inline-media spec allowlist (JPEG / PNG / GIF);
+/// other formats fail at sniff before glycin spawns.
+#[no_mangle]
+pub unsafe extern "C" fn inline_media_decode_async(
+    bytes: *const u8,
+    len: usize,
+    caps_in: *const HxInlineMediaCaps,
+    cb: DecodeCallback,
+    user_data: *mut c_void,
+) -> *mut c_void {
+    decode_async_common(bytes, len, caps_in, DecodePolicy::Strict, cb, user_data)
+}
+
+/// Generic decode entry with explicit format policy. Same
+/// contract as `inline_media_decode_async` modulo the gate:
+/// `policy == 0` (STRICT) is identical to the inline-media
+/// entry; `policy == 1` (WIDE) skips the sniff allowlist and
+/// hands anything non-empty to glycin. Used by the file-preview
+/// path where the user explicitly opened a BMP / TIFF / WebP /
+/// HEIC / etc. — formats the inline-media spec forbids but
+/// glycin's bundled loader set knows how to handle.
+///
+/// Cancel + free contract is the same as
+/// `inline_media_decode_async`; reuse the existing
+/// `inline_media_decode_cancel` / `inline_media_decoded_free`
+/// helpers regardless of which entry built the token.
+#[no_mangle]
+pub unsafe extern "C" fn hx_image_decode_async_with_policy(
+    bytes: *const u8,
+    len: usize,
+    caps_in: *const HxInlineMediaCaps,
+    policy: u32,
+    cb: DecodeCallback,
+    user_data: *mut c_void,
+) -> *mut c_void {
+    decode_async_common(bytes, len, caps_in, u32_to_policy(policy), cb, user_data)
 }
 
 #[no_mangle]
@@ -267,6 +331,30 @@ mod tests {
             0
         );
         assert_eq!(unsafe { hx_image_decode_format_is_allowed(99) }, 0);
+    }
+
+    #[test]
+    fn u32_to_policy_maps_known_discriminants() {
+        // Pin the discriminants so a renumber on either side
+        // surfaces here rather than at runtime.
+        assert_eq!(POLICY_STRICT, 0);
+        assert_eq!(POLICY_WIDE, 1);
+        assert_eq!(u32_to_policy(POLICY_STRICT), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(POLICY_WIDE), DecodePolicy::Wide);
+    }
+
+    #[test]
+    fn u32_to_policy_unknown_collapses_to_strict() {
+        // Conservative failure mode: a buggy caller passing
+        // a stale / future / garbage discriminant gets the
+        // tighter allowlist, not the looser one. Cover both
+        // a couple of representative wild values and the
+        // u32::MAX edge so a regression of the wildcard arm
+        // (e.g. someone replacing `_` with `2..=u32::MAX`)
+        // doesn't slip past.
+        assert_eq!(u32_to_policy(2), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(42), DecodePolicy::Strict);
+        assert_eq!(u32_to_policy(u32::MAX), DecodePolicy::Strict);
     }
 
     #[test]

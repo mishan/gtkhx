@@ -209,6 +209,30 @@ extern gpointer inline_media_decode_async (const guint8 *bytes,
                                            HxInlineMediaDecodeCallback cb,
                                            gpointer user_data);
 
+/* Format-acceptance policy for the async decode entry below.
+ * STRICT mirrors the inline-media spec allowlist (JPEG / PNG /
+ * GIF only; everything else fails at the sniff gate before
+ * glycin spawns). WIDE skips the allowlist check — sniff still
+ * runs for canonical_mime + telemetry, but any non-empty input
+ * is handed to glycin. Used by the file-preview path where the
+ * user explicitly opened a BMP / TIFF / WebP / HEIC / etc. that
+ * the inline-media spec forbids but glycin's bundled loader
+ * set can decode. The cancel + free contract is unchanged
+ * between policies — the same inline_media_decode_cancel /
+ * inline_media_decoded_free apply to both. */
+typedef enum {
+    HX_IMAGE_DECODE_STRICT = 0,
+    HX_IMAGE_DECODE_WIDE   = 1,
+} HxImageDecodePolicy;
+
+extern gpointer hx_image_decode_async_with_policy (
+    const guint8 *bytes,
+    gsize len,
+    const HxInlineMediaCaps *caps,
+    HxImageDecodePolicy policy,
+    HxInlineMediaDecodeCallback cb,
+    gpointer user_data);
+
 /* Cancel an in-flight decode + release the cancel token. The
  * callback will NOT fire after this call returns — the
  * subprocess result, if it lands afterwards, is dropped on the
