@@ -1330,21 +1330,25 @@ pref_spin_row (const char *cfgname, const char *title, const char *subtitle,
 }
 
 /* Colored-Nicknames Settings row. Adds an AdwActionRow
- * with a GtkColorButton suffix (the picker itself) and a Clear
- * button that resets to HX_NICK_COLOR_NONE / theme default. */
+ * with a GtkColorDialogButton suffix (the picker itself) and a
+ * Clear button that resets to HX_NICK_COLOR_NONE / theme
+ * default. */
 
 static void
-on_nick_color_set (GtkColorButton *btn, gpointer user_data)
+on_nick_color_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
 {
     struct cfgvar *v = user_data;
-    GdkRGBA rgba;
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gtk_color_chooser_get_rgba (GTK_COLOR_CHOOSER (btn), &rgba);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    const GdkRGBA *rgba;
+    (void) pspec;
+
+    rgba = gtk_color_dialog_button_get_rgba (GTK_COLOR_DIALOG_BUTTON (obj));
+    if (!rgba) {
+        return;
+    }
     /* Pack as 0x00RRGGBB per fogWraith spec — high byte reserved. */
-    guint8 r = (guint8) (rgba.red * 255.0 + 0.5);
-    guint8 g = (guint8) (rgba.green * 255.0 + 0.5);
-    guint8 b = (guint8) (rgba.blue * 255.0 + 0.5);
+    guint8 r = (guint8) (rgba->red * 255.0 + 0.5);
+    guint8 g = (guint8) (rgba->green * 255.0 + 0.5);
+    guint8 b = (guint8) (rgba->blue * 255.0 + 0.5);
     int packed = (int) (((guint32) r << 16) | ((guint32) g << 8) | (guint32) b);
     if (v && v->type == INT && *v->variable.integer != packed) {
         *v->variable.integer = packed;
@@ -1361,7 +1365,7 @@ static void
 on_nick_color_clear (GtkButton *btn, gpointer user_data)
 {
     struct cfgvar *v = user_data;
-    GtkColorButton *picker
+    GtkColorDialogButton *picker
         = g_object_get_data (G_OBJECT (btn), "pref-color-picker");
     (void)btn;
     if (!v || v->type != INT) {
@@ -1372,19 +1376,18 @@ on_nick_color_clear (GtkButton *btn, gpointer user_data)
     }
     *v->variable.integer = -1;
     /* Reset the picker swatch to black so the user gets a clear
-	 * "no color is set" visual cue. We block the color-set signal
-	 * around the call so the synthetic set doesn't fight the clear
-	 * (it would otherwise pack 0x000000 back into the pref). */
+	 * "no color is set" visual cue. We block the notify::rgba
+	 * signal around the call so the synthetic set doesn't fight
+	 * the clear (it would otherwise pack 0x000000 back into the
+	 * pref). */
     if (picker) {
         GdkRGBA black = { 0, 0, 0, 1.0 };
-        g_signal_handlers_block_by_func (picker, on_nick_color_set, v);
-        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        gtk_color_chooser_set_rgba (GTK_COLOR_CHOOSER (picker), &black);
-        G_GNUC_END_IGNORE_DEPRECATIONS
-        g_signal_handlers_unblock_by_func (picker, on_nick_color_set, v);
+        g_signal_handlers_block_by_func (picker, on_nick_color_changed, v);
+        gtk_color_dialog_button_set_rgba (picker, &black);
+        g_signal_handlers_unblock_by_func (picker, on_nick_color_changed, v);
     }
-    /* Same pref_apply routing as on_nick_color_set, for the same
-	 * reasons (consistent session-arg + persistence path). */
+    /* Same pref_apply routing as on_nick_color_changed, for the
+	 * same reasons (consistent session-arg + persistence path). */
     pref_apply (v);
 }
 
@@ -1392,6 +1395,8 @@ static GtkWidget *
 pref_nick_color_row (void)
 {
     struct cfgvar *v = cfgvar_for_name (CFG_NICK_COLOR);
+    GtkColorDialog *dialog;
+    GtkWidget *picker;
     GtkWidget *row = adw_action_row_new ();
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row),
                                    _ ("Nickname color"));
@@ -1405,23 +1410,32 @@ pref_nick_color_row (void)
         return row;
     }
 
-    /* Picker. GtkColorButton is deprecated in GTK 4.10 in favour of
-	 * GtkColorDialogButton but the project floor is 4.6, so we use
-	 * the older widget and silence the warning at the call sites —
-	 * same convention banner.c uses for gtk_picture_set_keep
-	 * _aspect_ratio. */
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    GtkWidget *picker = gtk_color_button_new ();
+    /* Picker. GtkColorDialogButton (4.10+) supersedes the
+	 * deprecated GtkColorButton; presents a GtkColorDialog
+	 * when the user clicks the swatch and exposes the picked
+	 * colour via the `rgba` property. We don't need to keep a
+	 * separate ref on the dialog — the button retains it
+	 * internally for the widget's lifetime. */
+    dialog = gtk_color_dialog_new ();
+    gtk_color_dialog_set_title (dialog, _ ("Pick Nickname Color"));
+    picker = gtk_color_dialog_button_new (dialog);
+
     if (*v->variable.integer != -1) {
         guint32 packed = (guint32) *v->variable.integer;
         GdkRGBA rgba = { ((packed >> 16) & 0xff) / 255.0,
                          ((packed >> 8) & 0xff) / 255.0,
                          (packed & 0xff) / 255.0, 1.0 };
-        gtk_color_chooser_set_rgba (GTK_COLOR_CHOOSER (picker), &rgba);
+        gtk_color_dialog_button_set_rgba (GTK_COLOR_DIALOG_BUTTON (picker),
+                                          &rgba);
     }
-    G_GNUC_END_IGNORE_DEPRECATIONS
     gtk_widget_set_valign (picker, GTK_ALIGN_CENTER);
-    g_signal_connect (picker, "color-set", G_CALLBACK (on_nick_color_set), v);
+    /* The GtkColorButton "color-set" signal was a per-pick
+	 * notification; on GtkColorDialogButton the equivalent is
+	 * the notify::rgba property change — fires whenever the
+	 * picked colour actually changes, which is the behaviour
+	 * we want here. */
+    g_signal_connect (picker, "notify::rgba",
+                      G_CALLBACK (on_nick_color_changed), v);
 
     GtkWidget *clear = gtk_button_new_with_label (_ ("Clear"));
     gtk_widget_set_valign (clear, GTK_ALIGN_CENTER);

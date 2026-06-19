@@ -35,7 +35,7 @@ extern gboolean gtkurl_is_url (const char *word);
 extern gboolean gtkurl_word_has_url_scheme (const char *word);
 
 /* Returns a malloc'd "openable" form of `word' — prepends "https://"
- * to bare "www.foo" / "ftp.foo" tokens so gtk_show_uri / xdg-open
+ * to bare "www.foo" / "ftp.foo" tokens so GtkUriLauncher / xdg-open
  * actually launch a browser instead of bouncing off scheme parsing.
  * Free with g_free. */
 extern char *gtkurl_normalize (const char *word);
