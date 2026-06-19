@@ -9,8 +9,11 @@
  *     dim "Server banner" caption that doubles as a fallback when
  *     the image can't be fetched / decoded).
  *   - The URL-mode fetch state machine: libsoup-3 async GET, then
- *     decode via gdk_pixbuf_new_from_stream, then set on the
- *     picture. Cancellable on banner_clear.
+ *     async decode via the glycin loader (the same sandboxed
+ *     subprocess pipeline the inline-media path uses), then
+ *     `gtk_picture_set_paintable` with the resulting
+ *     `GdkTexture`. Cancellable on `banner_clear` (both the
+ *     libsoup fetch and the in-flight glycin decode).
  *   - The HTXF-mode fetch will land in a follow-up commit; for
  *     now the file-mode banner shows the type-only caption and
  *     does NOT issue HTLC_HDR_BANNER_GET yet.
@@ -39,6 +42,14 @@
 #include "htxf_subchannel.h"
 #include "banner.h"
 #include "banner_dispatch.h"
+/* Glycin migration (June 2026): banner decode used to call
+ * gdk_pixbuf_new_from_stream directly, then promote to a
+ * GdkTexture via the deprecated gdk_texture_new_for_pixbuf.
+ * Both decode call sites now route through the same async
+ * glycin loader the inline-media path uses, which gives us
+ * sandboxed image decode + drops every deprecated pixbuf
+ * call from the banner hot path. */
+#include "inline_media_decode.h"
 
 /* Inline forward decl so we don't have to pull in hx.h (which
  * brings session + a transitive zoo of UI deps). task_new's real
@@ -120,12 +131,25 @@ struct htxf_fetch {
 
 static guint htxf_generation = 0;
 
+/* Glycin async-decode token. Tracks the in-flight banner
+ * image decode regardless of which fetch mode (URL or HTXF)
+ * fed it. A single static suffices because banner_clear /
+ * banner_handle_message always tear down a previous banner
+ * before kicking off a new one, so the two modes never run
+ * decodes concurrently. banner_clear cancels via
+ * inline_media_decode_cancel — same shape the inline-media
+ * dialog uses. */
+static gpointer decode_token = NULL;
+
 /* ------------------------------------------------------------------- *
  * Forward declarations
  * ------------------------------------------------------------------- */
 
 static void banner_show_caption (const char *text);
-static void banner_show_pixbuf (GdkPixbuf *pb);
+static void banner_show_texture (GdkTexture *tex);
+static void banner_start_image_decode (const guint8 *bytes, gsize len);
+static void on_banner_decode_done (HxInlineMediaDecoded *decoded,
+                                   gpointer user_data);
 #ifdef HAVE_LIBSOUP
 static void banner_start_url_fetch (const char *url);
 static void on_soup_send_done (GObject *source, GAsyncResult *result,
@@ -276,6 +300,16 @@ banner_clear (void)
 	 * mismatch and silently drops its result. */
     htxf_generation++;
 
+    /* Cancel any in-flight glycin decode — covers both URL and
+	 * HTXF modes (a fetch already finished but the subprocess
+	 * loader was still resolving). inline_media_decode_cancel
+	 * suppresses the callback, so banner_show_texture won't
+	 * race the impending banner replacement. */
+    if (decode_token) {
+        inline_media_decode_cancel (decode_token);
+        decode_token = NULL;
+    }
+
     g_free (current_url);
     current_url = NULL;
 
@@ -305,25 +339,19 @@ banner_show_caption (const char *text)
 }
 
 static void
-banner_show_pixbuf (GdkPixbuf *pb)
+banner_show_texture (GdkTexture *tex)
 {
-    GdkTexture *tex;
     int w, h;
 
-    if (!banner_picture || !pb) {
+    if (!banner_picture || !tex) {
         return;
     }
 
-    w = gdk_pixbuf_get_width (pb);
-    h = gdk_pixbuf_get_height (pb);
-
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    tex = gdk_texture_new_for_pixbuf (pb);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    w = gdk_texture_get_width (tex);
+    h = gdk_texture_get_height (tex);
 
     gtk_picture_set_paintable (GTK_PICTURE (banner_picture),
                                GDK_PAINTABLE (tex));
-    g_object_unref (tex);
 
     /* Pin the picture's allocation so the layout doesn't reflow
 	 * once the natural-size hint kicks in. Cap to BANNER_MAX_W /
@@ -338,6 +366,76 @@ banner_show_pixbuf (GdkPixbuf *pb)
     /* Once the image is up the URL-as-caption is redundant; the
 	 * tooltip and click-to-open carry that affordance. */
     banner_show_caption ("");
+}
+
+/* Common entry point shared by both fetch modes: spawn a
+ * glycin decode against the freshly-fetched bytes. Per-banner
+ * caps are loose-ish — max_dimension is BANNER_MAX_W (matches
+ * the displayed cap, with room for over-sized server banners
+ * we'd just scale down for display anyway), max_bytes is 256
+ * KiB to match the inline-media spec floor (Hotline banners
+ * are typically a few KB to ~50 KB in practice; the cap
+ * defends against a hostile server stuffing megabytes through
+ * the HTXF subchannel). The animation caps stay at 1 / 0:
+ * banner display is a single GtkPicture frame, so we don't
+ * collect (or run a tick over) per-frame data. A GIF with
+ * multiple frames decodes; the result's first frame is what
+ * we render and the rest gets dropped on decoded_free. */
+static void
+banner_start_image_decode (const guint8 *bytes, gsize len)
+{
+    HxInlineMediaCaps caps = {0};
+    gpointer token;
+
+    /* Cancel any prior in-flight decode (e.g. a previous
+	 * fetch raced ahead of banner_clear). Drops its callback. */
+    if (decode_token) {
+        inline_media_decode_cancel (decode_token);
+        decode_token = NULL;
+    }
+
+    caps.max_bytes = 256u * 1024u;
+    caps.max_dimension = BANNER_MAX_W; /* width AND height axis */
+    caps.max_pixels = (guint32)(BANNER_MAX_W) * (guint32)(BANNER_MAX_W);
+    caps.max_frames = 1;
+    caps.max_duration_ms = 1;
+
+    /* Per inline_media_decode_async's contract: NULL return =
+	 * synchronous reject + callback already fired. Store the
+	 * token ONLY when it's non-NULL so the sync-reject path
+	 * doesn't write into already-cleared state. */
+    token = inline_media_decode_async (bytes, len, &caps,
+                                       on_banner_decode_done, NULL);
+    if (token) {
+        decode_token = token;
+    }
+}
+
+static void
+on_banner_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
+{
+    (void) user_data;
+
+    /* The token has now been consumed by the callback firing;
+	 * canonical-free it (cancel-after-completion is a no-op
+	 * cancel but still drops the reference). */
+    if (decode_token) {
+        inline_media_decode_cancel (decode_token);
+        decode_token = NULL;
+    }
+
+    if (!decoded->texture) {
+        debug_log ("banner", "glycin decode rejected: code=%u msg=%s",
+                   decoded->error_code,
+                   decoded->error_message ? decoded->error_message
+                                          : "(none)");
+        banner_show_caption (_ ("Server banner: image not decodable"));
+        inline_media_decoded_free (decoded);
+        return;
+    }
+
+    banner_show_texture (decoded->texture);
+    inline_media_decoded_free (decoded);
 }
 
 /* libsoup async fetch ----------------------------------------------- */
@@ -388,9 +486,9 @@ on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
     SoupMessage *msg = SOUP_MESSAGE (user_data);
     GError *err = NULL;
     GBytes *bytes;
-    GdkPixbuf *pb;
-    GInputStream *stream;
     guint status;
+    gsize data_len = 0;
+    const guint8 *data;
 
     bytes = soup_session_send_and_read_finish (session, result, &err);
 
@@ -419,22 +517,13 @@ on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
         return;
     }
 
-    stream = g_memory_input_stream_new_from_bytes (bytes);
-    pb = gdk_pixbuf_new_from_stream (stream, NULL, &err);
-    g_object_unref (stream);
+    /* Hand the bytes off to glycin via the shared async decode
+	 * helper. `bytes` content is copied into the decoder's
+	 * internal glib::Bytes wrapper synchronously, so we can
+	 * unref the GBytes the moment the call returns. */
+    data = g_bytes_get_data (bytes, &data_len);
+    banner_start_image_decode (data, data_len);
     g_bytes_unref (bytes);
-
-    if (!pb) {
-        debug_log ("banner", "pixbuf decode failed: %s",
-                   err ? err->message : "?");
-        g_clear_error (&err);
-        banner_show_caption (_ ("Server banner: image not decodable"));
-        g_object_unref (msg);
-        return;
-    }
-
-    banner_show_pixbuf (pb);
-    g_object_unref (pb);
     g_object_unref (msg);
 }
 #endif /* HAVE_LIBSOUP — closes the #ifdef around banner_start_url_fetch */
@@ -450,8 +539,9 @@ on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
  *    opens base_port+1, sends the 16-byte HTXF header, reads
  *    `size` bytes into a buffer.
  * 4. Worker hands the buffer to the main thread via g_idle_add;
- *    main-thread idle decodes via gdk_pixbuf_new_from_stream
- *    and calls banner_show_pixbuf.
+ *    main-thread idle hands the bytes to the shared async
+ *    glycin decode helper (banner_start_image_decode); the
+ *    decode callback calls banner_show_texture on success.
  *
  * Cancellation: banner_clear bumps htxf_generation. The worker
  * captured its own generation at spawn; the completion idle
@@ -689,9 +779,6 @@ static gboolean
 banner_htxf_completion_idle (gpointer data)
 {
     struct htxf_fetch *f = data;
-    GdkPixbuf *pb = NULL;
-    GError *err = NULL;
-    GInputStream *stream;
 
     /* Drop stale completions (the user moved on while we were
 	 * reading the bytes). */
@@ -706,19 +793,12 @@ banner_htxf_completion_idle (gpointer data)
         goto cleanup;
     }
 
-    stream = g_memory_input_stream_new_from_data (f->bytes, f->bytes_len, NULL);
-    pb = gdk_pixbuf_new_from_stream (stream, NULL, &err);
-    g_object_unref (stream);
-    if (!pb) {
-        debug_log ("banner", "htxf pixbuf decode failed: %s",
-                   err ? err->message : "?");
-        g_clear_error (&err);
-        banner_show_caption (_ ("Server banner: image not decodable"));
-        goto cleanup;
-    }
-
-    banner_show_pixbuf (pb);
-    g_object_unref (pb);
+    /* Same async glycin decode the URL path uses. The bytes
+	 * are still owned by this fetch struct — banner_start_
+	 * image_decode hands them off to the decoder which copies
+	 * synchronously, so the cleanup below is safe to run
+	 * before the decode callback fires. */
+    banner_start_image_decode (f->bytes, f->bytes_len);
 
 cleanup:
     g_free (f->bytes);
