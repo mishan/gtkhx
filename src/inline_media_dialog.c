@@ -497,9 +497,7 @@ inline_media_show_dialog (GtkWidget *parent_widget, struct htlc_conn *htlc,
     /* Image page — scrolled GtkPicture. */
     md->picture = gtk_picture_new ();
     gtk_picture_set_can_shrink (GTK_PICTURE (md->picture), TRUE);
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gtk_picture_set_keep_aspect_ratio (GTK_PICTURE (md->picture), TRUE);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    gtk_picture_set_content_fit (GTK_PICTURE (md->picture), GTK_CONTENT_FIT_CONTAIN);
     GtkWidget *scroll = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
                                     GTK_POLICY_AUTOMATIC,

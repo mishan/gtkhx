@@ -185,18 +185,11 @@ banner_widget_new (void)
 	 * the icon-size CSS variable (~16px), which would silently
 	 * shrink any banner pixbuf. GtkPicture renders at the
 	 * paintable's natural size and we control bounds via
-	 * set_size_request.
-	 *
-	 * gtk_picture_set_keep_aspect_ratio is available on the 4.6
-	 * floor; it was deprecated in 4.8 in favour of set_content_fit
-	 * but the replacement isn't available pre-4.8 so we keep the
-	 * older call and suppress the deprecation. */
+	 * set_size_request. */
     banner_picture = gtk_picture_new ();
     gtk_widget_set_size_request (banner_picture, -1, BANNER_MAX_H);
     gtk_picture_set_can_shrink (GTK_PICTURE (banner_picture), TRUE);
-    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    gtk_picture_set_keep_aspect_ratio (GTK_PICTURE (banner_picture), TRUE);
-    G_GNUC_END_IGNORE_DEPRECATIONS
+    gtk_picture_set_content_fit (GTK_PICTURE (banner_picture), GTK_CONTENT_FIT_CONTAIN);
     gtk_widget_set_visible (banner_picture, FALSE);
     gtk_box_append (GTK_BOX (banner_root), banner_picture);
 
