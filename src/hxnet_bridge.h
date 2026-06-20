@@ -1,6 +1,7 @@
 /*
  * hxnet_bridge.h — translation layer between hxnet's callback FFI
- * and gtkhx's existing rcv state machine. Phase R3.3.e-4a.
+ * and gtkhx's existing rcv state machine. Phases R3.3.e-4a /
+ * R3.3.e-4b.
  *
  * hxnet emits plaintext Hotline frames as HxnetFrame structs
  * delivered to a C callback on the GLib main thread. The
@@ -14,16 +15,16 @@
  *
  * The bridge is intentionally side-effect-free outside of htlc:
  * it touches htlc->in, htlc->rcv, and the body handlers; it
- * does NOT call hxnet_frame_free (the caller's on_event closure
- * owns the lifetime of the supplied frame fields), and it does
- * NOT touch any GIOStream / GPollable state. R3.3.e-4b will
- * wire it into network.c's connection lifecycle.
+ * does NOT touch any GIOStream / GPollable state directly.
  *
- * Standalone (R3.3.e-4a) status: this module is dead from
- * production's perspective today. It's exercised by the tier-1
- * tests in tests/unit/test_hxnet_bridge.c so the translation
- * contract is locked before R3.3.e-4b's lifecycle refactor
- * lands on top.
+ * R3.3.e-4a (shipped): the dispatch translation (pack_header /
+ * dispatch_frame / dispatch_shutdown).
+ *
+ * R3.3.e-4b (this PR): install / send / uninstall helpers that
+ * wrap hxnet's callback FFI, with the C-side on_event /
+ * on_shutdown trampolines that call back into dispatch_*.
+ * Production glue (the env-var gating in network.c) is
+ * R3.3.e-4c.
  */
 
 #ifndef _HXNET_BRIDGE_H
@@ -97,6 +98,85 @@ extern void hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type,
  * silent disconnect.
  */
 extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
+
+/*
+ * Lifecycle helpers wrapping hxnet's callback FFI (R3.3.e-4b).
+ *
+ * The bridge owns one hxnet connection handle at a time — a
+ * single global, since gtkhx is single-connection today.
+ * Production wiring (R3.3.e-4c) calls these from network.c's
+ * send_login / hlwrite / hx_htlc_close sites; the standalone
+ * Tier 1 test exercises the install / send / uninstall
+ * lifecycle on a TCP loopback pair end-to-end.
+ */
+
+/*
+ * Adopt `fd` as the underlying TCP socket and spawn an hxnet
+ * Connection actor on it with a passthrough transform stack
+ * (cipher=NONE, compression=NONE). The actor's `on_event`
+ * callback routes through hx_bridge_dispatch_frame on the
+ * supplied htlc; `on_shutdown` routes through
+ * hx_bridge_dispatch_shutdown.
+ *
+ * Ownership: hxnet takes the fd. The C side must NOT
+ * `close(fd)` after a successful return — that's
+ * double-close UB.
+ *
+ * Returns TRUE on success. On failure, logs via `g_critical`,
+ * leaves the bridge uninstalled, and the fd is closed by
+ * hxnet's spawn path (so the caller still doesn't close it).
+ *
+ * Precondition: no prior install is live (call
+ * hx_bridge_uninstall first if you're recycling).
+ */
+extern gboolean hx_bridge_install_passthrough (struct htlc_conn *htlc,
+                                               int fd);
+
+/*
+ * TRUE when an hxnet connection is currently installed.
+ * Production code uses this as the gate between the new
+ * (hxnet) and legacy (GIOStream) read / write paths.
+ */
+extern gboolean hx_bridge_is_installed (void);
+
+/*
+ * Sentinel returned by [`hx_bridge_send_frame`] when no hxnet
+ * connection is currently installed. Sits outside the
+ * HXNET_SEND_* range (0, -1, -2, -3) so callers can
+ * distinguish "bridge not installed" from kernel backpressure
+ * or channel closure. -100 is well clear of any legitimate
+ * hxnet FFI return code.
+ */
+#define HX_BRIDGE_SEND_NOT_INSTALLED (-100)
+
+/*
+ * Enqueue `len` bytes of `data` for transmission via hxnet's
+ * `hxnet_connection_send_frame`. The bytes are typically a
+ * fully packed Hotline frame (header + body) from
+ * htlc->out — production's hlwrite path packs into a scratch
+ * buffer and calls this when an hxnet connection is live.
+ *
+ * Returns:
+ *   0                              — success
+ *   HXNET_SEND_FULL (-1)           — channel full, retry later
+ *   HXNET_SEND_CLOSED (-2)         — actor exited
+ *   HXNET_SEND_INVALID (-3)        — invalid args
+ *   HX_BRIDGE_SEND_NOT_INSTALLED   — bridge not installed
+ *
+ * All non-zero returns are logged via `g_critical`. See the
+ * HXNET_SEND_* constants in rust/crates/hxnet/src/ffi.rs for
+ * the FFI-level reasons.
+ */
+extern int hx_bridge_send_frame (const guint8 *data, guint32 len);
+
+/*
+ * Tear down the installed hxnet handle. Drops the
+ * ConnectionHandle, which signals the actor to flush pending
+ * writes and exit; the wrapped TcpStream's Drop closes the
+ * fd. Safe to call multiple times — second + subsequent calls
+ * are silent no-ops.
+ */
+extern void hx_bridge_uninstall (void);
 
 G_END_DECLS
 

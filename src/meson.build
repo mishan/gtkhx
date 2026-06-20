@@ -187,7 +187,7 @@ gtkhx_resources = gnome.compile_resources(
 executable('gtkhx',
   gtkhx_sources,
   gtkhx_resources,
-  dependencies        : deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hotline_proto_dep, rust_hxbridge_dep, rust_hxvoice_runtime_dep, rust_hx_image_decode_dep],
+  dependencies        : deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hotline_proto_dep, rust_hxbridge_dep, rust_hxnet_dep, rust_hxvoice_runtime_dep, rust_hx_image_decode_dep],
   include_directories : include_directories('.'),
   install             : true,
 )
