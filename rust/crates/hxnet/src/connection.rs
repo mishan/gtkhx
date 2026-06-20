@@ -191,6 +191,28 @@ impl Connection {
 
         Ok((ConnectionHandle { tx: cmd_tx }, evt_rx, join))
     }
+
+    /// Type-erased spawn entry — accepts a [`BoxedDuplex`] instead
+    /// of a concrete `S`. Used by the FFI to hand the actor a
+    /// stack composed at runtime by [`crate::transform::compose`]
+    /// (cipher + compression chosen after the HOPE handshake
+    /// resolved them).
+    ///
+    /// Behaviourally identical to [`Self::spawn`] — only the type
+    /// surface differs. The boxed trait object's `poll_*` calls
+    /// go through one virtual dispatch per poll, which costs the
+    /// price of an indirect call (negligible against the syscall
+    /// the call would trigger).
+    pub fn spawn_boxed(
+        stream: crate::transform::BoxedDuplex,
+    ) -> Result<(ConnectionHandle, mpsc::Receiver<Event>, JoinHandle<()>), SpawnError>
+    {
+        Self::spawn_with_capacities(
+            stream,
+            DEFAULT_COMMAND_CAPACITY,
+            DEFAULT_EVENT_CAPACITY,
+        )
+    }
 }
 
 /// The actor loop. Owns the stream and both channel endpoints
