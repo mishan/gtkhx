@@ -1424,12 +1424,15 @@ dependencies = [
 name = "hxnet"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "glib",
  "hotline-proto",
  "hxbridge",
  "hxcrypto-aead",
  "hxcrypto-stream",
+ "lz4_flex",
  "tokio",
+ "zstd",
 ]
 
 [[package]]

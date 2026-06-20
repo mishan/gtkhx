@@ -21,6 +21,25 @@ hotline-proto = { path = "../hotline-proto" }
 # rlib deps here doesn't change the link surface.
 hxcrypto-stream = { path = "../hxcrypto-stream" }
 hxcrypto-aead = { path = "../hxcrypto-aead" }
+# R3.3.d compression adapters: GZIP via flate2, LZ4 via lz4_flex,
+# ZSTD via zstd. We pull each crate directly (rather than going
+# through hxcompress's FFI-shaped opaque enum) because the
+# AsyncRead+AsyncWrite adapter's natural shape — feed input on
+# poll_write, Sync-flush per write / one frame per write,
+# decompress incrementally on poll_read — calls these libraries
+# differently from how hxcompress's transaction-shaped FFI does.
+# Same underlying crates and same wire format, just a different
+# framing strategy — hxnet's per-poll_write calls
+# (e.g. zstd::bulk::compress / lz4_flex::FrameEncoder per write,
+# flate2 Sync-flush per write) are wire-compatible with
+# hxcompress's persistent-encoder pipeline but not necessarily
+# byte-identical to it (block boundaries and stored-block headers
+# can differ when the encoder is reused across calls vs. fresh
+# per call). Versions track hxcompress so both paths decode the
+# same way on the other end.
+flate2 = "1"
+lz4_flex = "0.11"
+zstd = { version = "0.13", default-features = false }
 # hxbridge with `runtime` feature gives us Runtime::global() — the
 # shared process-wide tokio runtime R3.1 set up. R3.3.b's FFI uses
 # it for spawn; having two tokio runtimes in one process is the
