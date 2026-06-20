@@ -959,6 +959,116 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
+    /// Mirror the production Janus failure pattern: first
+    /// frame has NO marker (matches the TASK reply for step 2
+    /// LOGIN), second frame has the marker stamped (matches
+    /// what Janus does on the SELFINFO frame ~3/16 of the
+    /// time). The previous test runs always-on or always-off
+    /// markers — this one specifically exercises the no-then-
+    /// yes transition the wire produces in practice.
+    ///
+    /// We drive both sides by hand (no RNG) by writing
+    /// pre-encrypted bytes directly into the duplex, so we
+    /// control exactly which frame fires the marker and can
+    /// assert the exact stripped opcode the reader sees.
+    #[tokio::test]
+    async fn read_pattern_clean_frame_then_marker_frame() {
+        let (mut server_writer, client_inner) = duplex(64 * 1024);
+
+        let read_key = b"client-read-key-32bytes--padding".to_vec();
+        let write_key = b"client-write-key-32bytes-padding".to_vec();
+        let session_key = b"session-key-bytes-128bit--------".to_vec();
+
+        // Client: standard read direction. Two states because
+        // we'll roll our own server-side encryption with a
+        // parallel BlowfishOfb64State.
+        let client_read_state =
+            BlowfishOfb64State::new(&read_key).expect("read key");
+        let client_write_state =
+            BlowfishOfb64State::new(&write_key).expect("write key");
+        let mut client = HopeBlowfishStream::with_rng(
+            client_inner,
+            client_read_state,
+            read_key.clone(),
+            client_write_state,
+            write_key,
+            session_key.clone(),
+            HopeMacAlg::Sha256,
+            NoMarkerRng,
+        );
+
+        // "Server" side: parallel BlowfishOfb64State that
+        // encrypts the bytes we hand-craft into the duplex.
+        // Same starting key/ivec/num as the client's read
+        // state.
+        let mut server_state =
+            BlowfishOfb64State::new(&read_key).expect("server state");
+
+        // ---- Frame 1: TASK reply, no marker ----
+        // type=0x010000 (HTLS_HDR_TASK), trans=2, body 87 bytes.
+        let mut frame1 = make_frame(0x010000, 2, &vec![0xAAu8; 87]);
+        server_state.crypt_in_place(&mut frame1);
+        server_writer
+            .write_all(&frame1)
+            .await
+            .expect("write frame1 cipher");
+
+        let mut received1 = vec![0u8; HL_HDR_SIZE + 87];
+        client
+            .read_exact(&mut received1)
+            .await
+            .expect("read frame1");
+        // Plaintext header bytes — type=0x010000.
+        let type1 = u32::from_be_bytes([
+            received1[0], received1[1], received1[2], received1[3],
+        ]);
+        assert_eq!(type1, 0x010000, "frame 1 type should be HTLS_HDR_TASK");
+
+        // ---- Frame 2: marker = 0x26 stamped on type ----
+        // type = 0x26 << 24 | 0x000062 = 0x26000062 on the wire
+        // BEFORE strip; the reader should see 0x000062 after
+        // strip. body 14 bytes.
+        let marker: u8 = 0x26;
+        let opcode_low: u32 = 0x000062;
+        let stamped_type = ((marker as u32) << 24) | opcode_low;
+        let mut frame2 = make_frame(stamped_type, 1586751229, &vec![0xBBu8; 14]);
+        // Server side: encrypt header with current state,
+        // rotate key by `marker` HMAC iterations, encrypt body
+        // with new state.
+        server_state.crypt_in_place(&mut frame2[..HL_HDR_SIZE]);
+        // Rotate the server-side key (mirrors what Janus does).
+        let mut server_key = read_key.clone();
+        let new_len = rotate_key_in_place(
+            &mut server_key,
+            &session_key,
+            HopeMacAlg::Sha256,
+            marker as u32,
+        );
+        assert_eq!(new_len, 32);
+        assert!(server_state.set_key(&server_key));
+        server_state.crypt_in_place(&mut frame2[HL_HDR_SIZE..]);
+        server_writer
+            .write_all(&frame2)
+            .await
+            .expect("write frame2 cipher");
+
+        let mut received2 = vec![0u8; HL_HDR_SIZE + 14];
+        client
+            .read_exact(&mut received2)
+            .await
+            .expect("read frame2");
+        let type2 = u32::from_be_bytes([
+            received2[0], received2[1], received2[2], received2[3],
+        ]);
+        assert_eq!(
+            type2, opcode_low,
+            "frame 2 marker should have been stripped (got 0x{type2:08x})"
+        );
+        // Body bytes should round-trip too — proves the
+        // body decryption used the rotated key.
+        assert_eq!(&received2[HL_HDR_SIZE..], &vec![0xBBu8; 14]);
+    }
+
     #[test]
     fn rotate_key_in_place_matches_iteration_loop() {
         let mut key = b"initial-key-32-bytes--padding---".to_vec();

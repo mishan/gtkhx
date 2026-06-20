@@ -790,21 +790,16 @@ hx_install_hxnet_post_hope (struct htlc_conn *htlc)
     if (hx_bridge_is_installed ()) {
         return;
     }
-    /* HOPE-Blowfish ships a frame-aware per-message rekey trick
-     * (cipher_check_rekey_marker → cipher_change_decode_key, ~3/16
-     * probability per outgoing frame; the type field's high byte
-     * carries the rekey count and gets stripped before
-     * dispatch). The Rust BlowfishStream is a pure byte-streaming
-     * cipher — it doesn't know where Hotline frames start or end
-     * and can't rotate its key schedule mid-stream. Until we
-     * build a HOPE-aware Blowfish adapter (Phase R3.3.g or
-     * similar), keep Blowfish on the legacy GIOStream path so
-     * cipher_check_rekey_marker keeps doing its job. ChaCha20-
-     * Poly1305 (AEAD, frame-by-frame, no rekey markers) and the
-     * non-HOPE plaintext path still install. Caught against
-     * VesperNet/Janus: login succeeds, then any post-login
-     * server frame that trips the marker disconnects with an
-     * "unknown opcode 0x03010000"-style log. */
+    /* R3.3.e-4g safety gate (TEMPORARY): the HopeBlowfishStream
+     * adapter and the FFI plumbing it depends on are in place, but
+     * a live-server bug surfaces against Janus where the rekey
+     * marker on incoming SELFINFO isn't stripped (trace shows
+     * `type=0x26000062`). The Tier 1 round-trip tests pass, so
+     * the bug lives somewhere in the production install path
+     * (state capture, cfg marshalling, or a state-machine
+     * interaction my unit fixtures don't reproduce). Keep
+     * HOPE-Blowfish on the legacy GIOStream path until the
+     * Tier 3 fixture lands and the real bug is identified. */
     if (htlc->cipher_encode_type == CIPHER_BLOWFISH
         || htlc->cipher_decode_type == CIPHER_BLOWFISH) {
         return;

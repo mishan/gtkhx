@@ -191,6 +191,22 @@ where
         CipherLayer::Blowfish { read_state, write_state } => Box::new(
             crate::cipher::BlowfishStream::new(inner, read_state, write_state),
         ),
+        CipherLayer::HopeBlowfish {
+            read_state,
+            read_key,
+            write_state,
+            write_key,
+            session_key,
+            macalg,
+        } => Box::new(crate::hope_blowfish::HopeBlowfishStream::new(
+            inner,
+            read_state,
+            read_key,
+            write_state,
+            write_key,
+            session_key,
+            macalg,
+        )),
         CipherLayer::ChaCha20Poly1305 { read, write } => {
             Box::new(crate::cipher::AeadStream::new(inner, read, write))
         }
@@ -223,6 +239,21 @@ pub enum CipherLayer {
     Blowfish {
         read_state: hxcrypto_stream::BlowfishOfb64State,
         write_state: hxcrypto_stream::BlowfishOfb64State,
+    },
+    /// HOPE-aware Blowfish-OFB-64. Same OFB primitive as
+    /// [`Self::Blowfish`] but the resulting transport carries the
+    /// per-message rekey marker logic
+    /// ([`crate::hope_blowfish::HopeBlowfishStream`]). The
+    /// session key and HMAC algorithm are passed in so the
+    /// adapter can run the same HMAC iteration loop the legacy C
+    /// `cipher_change_decode_key` runs.
+    HopeBlowfish {
+        read_state: hxcrypto_stream::BlowfishOfb64State,
+        read_key: Vec<u8>,
+        write_state: hxcrypto_stream::BlowfishOfb64State,
+        write_key: Vec<u8>,
+        session_key: Vec<u8>,
+        macalg: crate::hope_blowfish::HopeMacAlg,
     },
     /// ChaCha20-Poly1305 with independent per-direction state
     /// (each direction has its own key, counter, and AEAD dir
