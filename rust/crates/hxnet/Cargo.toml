@@ -82,6 +82,34 @@ tokio = { workspace = true, features = [
     "time",
     "net",
 ] }
+# R3.3.e-TLS: tokio-rustls + rustls-native-certs for the
+# TLS-over-hxnet variant. The Hotline TLS port (5600) is plain TLS
+# from byte zero — no STARTTLS, no in-band negotiation — so we wrap
+# the TcpStream in `tokio_rustls::client::TlsStream` before the
+# Connection actor sees it. Trust verification routes through a
+# C-side callback (so the existing `tls_trust.c` + `tls_trust_dialog.c`
+# TOFU UX stays the source of truth); we plug `rustls`'s
+# `ServerCertVerifier` to call back into C with the DER bytes +
+# host + port.
+#
+# `rustls` doesn't bundle a CA bundle; `rustls-native-certs` loads
+# the system trust store (same store `glib-networking`'s GnuTLS or
+# OpenSSL backend uses on the C side, so trust decisions stay
+# consistent across the two paths).
+#
+# Crypto provider: `aws-lc-rs` is the default rustls 0.23 provider.
+# It's a FIPS-friendly fork of BoringSSL/AWS-LC. We pin it
+# explicitly so a future `default-features = false` on rustls
+# doesn't silently drop the crypto provider and break TLS at
+# runtime.
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs"] }
+rustls-native-certs = "0.8"
+# `rustls` is brought in transitively by `tokio-rustls`; depend on
+# it explicitly so we can reference `rustls::client::danger::ServerCertVerifier`
+# (the trait we implement to bridge cert verification into C) and
+# `rustls::DigitallySignedStruct` etc. without going through
+# tokio-rustls's re-exports.
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
 
 [dev-dependencies]
 # `#[tokio::test]` + `tokio::io::duplex` for in-memory paired
