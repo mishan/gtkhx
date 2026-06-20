@@ -19,7 +19,7 @@
  *
  * No GTK / Adwaita / xtext dependency. The unit-test binary pairs
  * this with src/debug.c (one direct extern import) and — since
- * Phase R2 — links the Rust hotline-proto staticlib for the
+ * links the Rust hotline-proto staticlib for the
  * MACINTOSH decode below. tests/meson.build declares both deps;
  * a future refactor that tries to drop either dependency will
  * see undefined symbols at link time.
@@ -27,7 +27,7 @@
  * See gtkutil.h for the full strategy comment on
  * gtkhx_text_to_utf8.
  *
- * Phase R2: the Mac Roman → UTF-8 decode table moved to the Rust
+ * the Mac Roman → UTF-8 decode table moved to the Rust
  * hotline-proto crate (text.rs::to_utf8, mirroring glibc's iconv
  * "MACINTOSH" mapping byte-for-byte). The C entry point below now
  * delegates: it sizes the worst-case output buffer (3× input, the

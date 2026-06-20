@@ -553,7 +553,7 @@ banner_send_download_request (struct htlc_conn *htlc)
     debug_log ("banner", "sending HTLC_HDR_DOWNLOAD_BANNER (file-mode fetch)");
     task_new (htlc, RCV_TASK_FN (rcv_task_banner_get), NULL, NULL,
               "banner_get");
-    /* Phase R2: DOWNLOAD_BANNER is a zero-chunk opcode. */
+    /* DOWNLOAD_BANNER is a zero-chunk opcode. */
     hlwrite_chunks (htlc, HTLC_HDR_DOWNLOAD_BANNER, 0, NULL, 0);
 }
 
@@ -600,7 +600,7 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
 	 * hands them straight to GSocketClient. */
     g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
     f->serverport = htlc->serverport + 1;
-    /* Phase 2: mirror the control-channel TLS mode so the HTXF
+    /* mirror the control-channel TLS mode so the HTXF
      * subchannel wraps in TLS too when the control did. Janus
      * binds TLS-HTXF on TLSPort+1 (5601), which falls out of the
      * existing port+1 arithmetic — the htlc->serverport already

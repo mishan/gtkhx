@@ -48,7 +48,7 @@ static struct log *loglist = NULL;
 struct log *create_log(char *name)
 {
 	struct log *log = malloc(sizeof(struct log));
-	/* Phase 5: logs live under $CONFIG/logs/. Drop the legacy
+	/* logs live under $CONFIG/logs/. Drop the legacy
 	 * ~/.hx/logs/ path entirely — the rest of this TU is wrapped in
 	 * an #if 0 (logging is the TODO Features 'Log chat history /
 	 * server' bullet, never finished), so there's no on-disk legacy

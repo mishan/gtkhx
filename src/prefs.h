@@ -20,7 +20,7 @@ typedef struct {
 
 struct gtkhx_prefs {
     int num_tracker;
-    /* Phase 5: color-scheme preference, applied via AdwStyleManager.
+    /* color-scheme preference, applied via AdwStyleManager.
 	 * Stored as one of "system" / "light" / "dark" (case-sensitive).
 	 * "system" follows the desktop-wide org.freedesktop.appearance
 	 * setting; the others force the corresponding scheme. */
@@ -28,12 +28,12 @@ struct gtkhx_prefs {
     char *auto_reply_msg;
     char *font;
     char *download_path;
-    /* Phase 5: strftime(3) format for the xtext per-line timestamp
+    /* strftime(3) format for the xtext per-line timestamp
 	 * column (Settings → Chat → Timestamp format). Default
 	 * '[%H:%M:%S] ' includes brackets + trailing space; user can
 	 * use any strftime spec ('%I:%M %p ', '%H:%M ', '<%H%M> ', ...). */
     char *stamp_format;
-    /* Phase 5: chat-highlight word list — comma-separated string
+    /* chat-highlight word list — comma-separated string
 	 * persisted as CFG_HIGHLIGHT_WORDS. Each entry matches case-
 	 * insensitive at word boundaries against incoming chat bodies;
 	 * when any matches (or the body mentions our own nick), the
@@ -56,7 +56,7 @@ struct gtkhx_prefs {
     unsigned char queuedl;
     unsigned char showjoin;
     unsigned char showback;
-    /* Phase 5+: show a system-tray icon (StatusNotifierItem). When
+    /* show a system-tray icon (StatusNotifierItem). When
 	 * on, the toolbar's close button hides all windows instead of
 	 * quitting; click on the tray icon toggles visibility; the
 	 * right-click menu offers Show/Hide, Connect, Disconnect, Quit.
@@ -72,7 +72,7 @@ struct gtkhx_prefs {
     unsigned char inrate_limit;
     unsigned char logging;
 
-    /* Phase 5: HexChat-style xtext autocopy controls — driven by
+    /* HexChat-style xtext autocopy controls — driven by
 	 * Settings → Advanced → Auto Copy Behavior, persisted as the
 	 * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied
 	 * to xtext via gtk_xtext_set_autocopy_*. See the comment on the
@@ -81,7 +81,7 @@ struct gtkhx_prefs {
     unsigned char autocopy_stamp;
     unsigned char autocopy_color;
 
-    /* Phase 5+: per-event desktop notification toggles. See the
+    /* per-event desktop notification toggles. See the
 	 * CFG_NOTIFY_* keys in cfgkeys.h for the user-facing surface
 	 * and src/notify.c for the dispatch logic. */
     unsigned char notify_chat;
@@ -98,7 +98,7 @@ struct gtkhx_prefs {
     int out_bps;
     int in_bps;
 
-    /* Phase 5+: fogWraith chat-history extension — number of
+    /* fogWraith chat-history extension — number of
 	 * entries to pull on the initial post-login fetch AND on each
 	 * subsequent "Load older messages" click. 0 disables the
 	 * initial pull entirely (the click handler still uses 50 as

@@ -50,7 +50,7 @@ static int num_found_total, num_total_total;
 
 /* Search filter for the tracker list.
  *
- * Phase 5+: was a hand-rolled `struct dfa *` from a vendored 2500-line
+ * was a hand-rolled `struct dfa *` from a vendored 2500-line
  * GNU regex; now a GLib GRegex (PCRE2). Two states matter:
  *   - current_search == NULL  → empty pattern, match-all (the common
  *                                case when the search entry is empty).
@@ -226,7 +226,7 @@ tracker_clear (void)
     num_total_total = 0;
 }
 
-/* Phase 4.5: GTK 4 close-request on (GtkWindow *, gpointer). */
+/* GTK 4 close-request on (GtkWindow *, gpointer). */
 static gboolean
 close_tracker_window (GtkWindow *window, gpointer data)
 {
@@ -252,7 +252,7 @@ close_tracker_window (GtkWindow *window, gpointer data)
     return FALSE;
 }
 
-/* Phase 5+ (async tracker rewrite): the pthread_t / SIGUSR1 /
+/* the pthread_t / SIGUSR1 /
  * pthread_kill / pthread_join dance that used to live here is gone.
  * The tracker fetch now runs on the main loop via GSocketClient +
  * GInputStream async; cancellation is a g_cancellable_cancel against
@@ -443,7 +443,7 @@ tracker_section_update_title (struct tracker_section *sec)
     g_free (url_escaped);
 }
 
-/* Phase 5: tracker_search runs every time the visible filter needs to
+/* tracker_search runs every time the visible filter needs to
  * be re-applied — when the search entry's text changes, when the user
  * hits Enter, or when the case-sensitive toggle flips. We always read
  * the current entry text out of the cached tracker_search_entry rather
@@ -2320,7 +2320,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     selected_section = NULL;
     selected_row = -1;
 
-    /* Phase 5: GtkSearchEntry replaces the legacy "Search:" label +
+    /* GtkSearchEntry replaces the legacy "Search:" label +
 	 * GtkEntry pair. SearchEntry has its own search-glass icon and
 	 * a clear-button when text is present, so the label becomes
 	 * redundant. The placeholder text takes the label's job.
@@ -2359,7 +2359,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     gtk_widget_add_css_class (lbl_found, "dim-label");
     gtk_widget_add_css_class (lbl_total, "dim-label");
 
-    /* Phase 5: action buttons live in the AdwHeaderBar now, not in a
+    /* action buttons live in the AdwHeaderBar now, not in a
 	 * row beneath. Refresh + Connect on the leading edge, the live
 	 * found-count "N / M" indicator on the trailing edge. */
     refreshbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",

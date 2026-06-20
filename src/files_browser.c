@@ -1913,7 +1913,7 @@ open_files_browser (void)
     GtkShortcut *sh;
     HxPanel *panel;
 
-    /* Phase 5 / docking (Phase 2): Files panel lives in the
+    /* Files panel lives in the
      * toolbar's center PanelGrid (shared with Chat / News). The
      * legacy the_browser file-static stays; we just replace the
      * standalone window with a PanelWidget container, and
@@ -2014,7 +2014,7 @@ open_files_browser (void)
     g_signal_connect (delete_btn, "clicked", G_CALLBACK (on_delete_clicked),
                       br);
 
-    /* Phase 5 / docking (Phase 2): the AdwHeaderBar (Refresh /
+    /* the AdwHeaderBar (Refresh /
      * MkDir / Preview / Info on start, Rename / Delete on end)
      * relocates to a slim GtkBox at the top of the panel content
      * with the same start/end grouping via an hexpand spacer. */
@@ -2317,7 +2317,7 @@ open_files_browser (void)
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (shortcuts),
                                           sh);
 
-    /* Phase 5 / docking (Phase 2): close-request belongs to
+    /* close-request belongs to
      * GtkWindow; the panel persists and uses libpanel's own
      * close-page machinery (the X on the tab). on_close stays
      * defined for the once-and-only case where the panel widget

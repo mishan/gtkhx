@@ -322,7 +322,7 @@ proto_data_name (guint16 type)
     case HTLC_DATA_HOPE_APP_STRING:
         return "HTLC/S_DATA_HOPE_APP_STRING";
 
-    /* Phase 5+ (Capabilities.md): post-login feature-flag exchange.
+    /* post-login feature-flag exchange.
      * Both directions share opcode 0x01f0. The 64-bit large-file
      * companion fields (FILESIZE64, OFFSET64, XFERSIZE64,
      * FOLDER_ITEM_COUNT64) ride alongside the legacy 32-bit
@@ -339,7 +339,7 @@ proto_data_name (guint16 type)
     case HTLC_DATA_FOLDER_ITEM_COUNT64:
         return "HTLC/S_DATA_FOLDER_ITEM_COUNT64";
 
-    /* Phase 5+ (Capabilities-Chat-History.md): chat-history
+    /* chat-history
      * extension. Request side carries channel + cursor + limit;
      * reply side carries an array of HISTORY_ENTRY records plus an
      * end-of-batch HAS_MORE flag and server-advertised retention

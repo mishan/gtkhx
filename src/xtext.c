@@ -80,7 +80,7 @@
  * read each element's texture + delay_ms from the GArray
  * inside the tick callback. */
 #include "inline_media_decode.h"
-/* Phase 4.9: gdk/gdkx.h is the X11-specific GDK backend header. GTK 4
+/* gdk/gdkx.h is the X11-specific GDK backend header. GTK 4
  * makes Wayland the assumed backend (per ROADMAP §Phase 4 gotchas) and
  * gdkx.h's contents (GdkX11Display* types, gdk_x11_*) aren't part of
  * what xtext touches anyway — the include was vestigial from XChat
@@ -123,7 +123,7 @@ struct hexchat_prefs_subset {
 	int hex_stamp_text;
 	int hex_text_indent;
 };
-/* Phase 5: not const — Settings drives autocopy_text / _stamp / _color
+/* not const — Settings drives autocopy_text / _stamp / _color
  * via gtk_xtext_set_autocopy_* (declared in xtext.h). The other two
  * fields stay 0; see comment above for the inline timestamps / no
  * left-column indent baseline. */
@@ -202,7 +202,7 @@ url_last (int *lstart, int *lend)
 }
 
 /* --- HexChat glue: timestamp formatter ----------------------------- *
- * Phase 5: format string is configurable via Settings → Chat →
+ * format string is configurable via Settings → Chat →
  * Timestamp format, persisted as CFG_STAMP_FORMAT. xtext stores a
  * private copy of the string here (single per-process, since every
  * xtext widget shares the same stamp format). gtk_xtext_set_stamp_format
@@ -442,7 +442,7 @@ static void gtk_xtext_motion_cb      (GtkEventControllerMotion *controller,
                                       gdouble dx, gdouble dy, gpointer user_data);
 static void gtk_xtext_leave_cb       (GtkEventControllerMotion *controller, gpointer user_data);
 
-/* Phase 3.10: palette colors are GdkRGBA, which is what
+/* palette colors are GdkRGBA, which is what
  * gdk_cairo_set_source_rgba consumes — no per-draw conversion. */
 static inline void
 xtext_cairo_set_source_color (cairo_t *cr, const GdkRGBA *col)
@@ -464,7 +464,7 @@ xtext_draw_bg (GtkXText *xt, int x, int y, int w, int h)
 	cairo_t *cr = xt->cr;
 	if (cr == NULL)
 	{
-		/* Phase 4.9: gtk_widget_queue_draw_area is gone — GTK 4 redraws
+		/* gtk_widget_queue_draw_area is gone — GTK 4 redraws
 		 * always cover the full widget. Position information is
 		 * unused, so the area-specific call collapses to a plain
 		 * queue_draw. */
@@ -711,7 +711,7 @@ xtext_draw_layout_line (cairo_t          *cr,
 	}
 }
 
-/* Phase 3.4b: GdkGC parameter dropped.  fg_idx/bg_idx are palette
+/* GdkGC parameter dropped.  fg_idx/bg_idx are palette
  * indices.  If called outside the draw signal (xtext->cr is NULL),
  * simply skip — paint() will redo the work on the next draw tick.
  *
@@ -868,7 +868,7 @@ gtk_xtext_init (GtkXText * xtext)
 	xtext->dont_render2 = FALSE;
 	gtk_xtext_scroll_adjustments (xtext, NULL, NULL);
 
-	/* Phase 4.9: install GTK 4 event controllers. The widgets-vs-event-
+	/* install GTK 4 event controllers. The widgets-vs-event-
 	 * signals split means clicks/motion/scroll/keys reach the widget via
 	 * controllers rather than ::button_press_event / ::motion_notify_event
 	 * / ::scroll_event. Each controller has its own bound-signal contract;
@@ -921,7 +921,7 @@ gtk_xtext_adjustment_set (xtext_buffer *buf, int fire_signal)
 	if (buf->xtext->buffer == buf)
 	{
 		double page_size;
-		/* Phase 4.13: gtk_widget_get_allocation is deprecated in 4.10
+		/* gtk_widget_get_allocation is deprecated in 4.10
 		 * (replacement is gtk_widget_compute_bounds, but we only need
 		 * width/height which the bare accessors give us). */
 		int alloc_h = gtk_widget_get_height (GTK_WIDGET (buf->xtext));
@@ -1010,7 +1010,7 @@ gtk_xtext_new (GdkRGBA palette[], int separator)
 	return GTK_WIDGET (xtext);
 }
 
-/* Phase 4.9: GtkWidget::destroy is gone in GTK 4 — teardown moved to
+/* GtkWidget::destroy is gone in GTK 4 — teardown moved to
  * GObjectClass::dispose. Same body, different signature. */
 static void
 gtk_xtext_dispose (GObject * object)
@@ -1084,7 +1084,7 @@ gtk_xtext_unrealize (GtkWidget * widget)
 }
 
 /*
- * Phase 3.4b: realize over the GTK 3 idioms.  GdkColormap is gone (the
+ * realize over the GTK 3 idioms.  GdkColormap is gone (the
  * window inherits visual + colormap from its parent), GdkGCs are
  * replaced by per-draw cairo source setup (the bgc/fgc/light/dark/thin
  * /marker GCs were just remembered colors with optional tiled fill —
@@ -1092,7 +1092,7 @@ gtk_xtext_unrealize (GtkWidget * widget)
  * gdk_window_set_back_pixmap call is no longer needed because cairo
  * draws fill the entire dirty rectangle each tick.
  */
-/* Phase 4.9: GTK 4 widgets are "windowless" — they don't own their
+/* GTK 4 widgets are "windowless" — they don't own their
  * own GdkSurface; GdkSurface only attaches to GtkRoot (toplevel /
  * popover / native). The whole "create a child GdkWindow with a
  * specific event mask" pattern is gone. The realize handler now
@@ -1106,13 +1106,13 @@ gtk_xtext_realize (GtkWidget * widget)
 
 	GTK_WIDGET_CLASS (parent_class)->realize (widget);
 
-	/* Phase 4.9: GdkCursor in GTK 4 is themed-name-based; depth is
+	/* GdkCursor in GTK 4 is themed-name-based; depth is
 	 * never read by the cairo draw path so leave it zero. */
 	xtext->depth = 0;
 	xtext->hand_cursor   = gdk_cursor_new_from_name ("pointer", NULL);
 	xtext->resize_cursor = gdk_cursor_new_from_name ("ew-resize", NULL);
 
-	/* Phase 4.9: GtkTargetEntry / gtk_selection_add_targets /
+	/* GtkTargetEntry / gtk_selection_add_targets /
 	 * GDK_SELECTION_PRIMARY are gone in GTK 4. PRIMARY-selection text
 	 * support migrates to gdk_clipboard_set_value on the surface's
 	 * primary clipboard — handled at the controller layer in a
@@ -1121,11 +1121,11 @@ gtk_xtext_realize (GtkWidget * widget)
 	backend_init (xtext);
 }
 
-/* Phase 3.4b: gtk_xtext_size_request removed.  GTK 3 widgets advertise
+/* gtk_xtext_size_request removed.  GTK 3 widgets advertise
  * their size via get_preferred_width/height — left as the implicit
  * default for now (the parent GtkScrolledWindow drives layout). */
 
-/* Phase 4.9: GTK 4 size_allocate vfunc takes (widget, width, height,
+/* GTK 4 size_allocate vfunc takes (widget, width, height,
  * baseline) instead of a GtkAllocation*. Position is implicit (the
  * widget is always at 0,0 in its own coordinate space — GTK 4 does
  * the offset on the parent's behalf). gtk_widget_set_allocation /
@@ -1459,7 +1459,7 @@ gtk_xtext_draw_marker (GtkXText * xtext, textentry * ent, int y)
 	}
 
 	{
-		/* Phase 4.9: gtk_widget_get_toplevel and
+		/* gtk_widget_get_toplevel and
 		 * gtk_window_has_toplevel_focus are gone in GTK 4. The
 		 * replacements are gtk_widget_get_root (returns a GtkRoot,
 		 * which a GtkWindow implements) and gtk_window_is_active. */
@@ -1540,11 +1540,11 @@ xit:
 		gtk_xtext_draw_sep (xtext, -1);
 }
 
-/* Phase 3.4b: GTK 3 draw signal handler.  Cairo gives us a clipped cr
+/* GTK 3 draw signal handler.  Cairo gives us a clipped cr
  * directly; we compute the dirty rectangle via cairo_clip_extents and
  * stash cr on the xtext for the rendering primitives to use during this
  * paint, then clear it on exit. */
-/* Phase 4.9: GtkWidget::draw is gone in GTK 4 — replaced by ::snapshot,
+/* GtkWidget::draw is gone in GTK 4 — replaced by ::snapshot,
  * which hands us a GtkSnapshot that records render nodes rather than
  * a pre-clipped cairo_t. We preserve the existing cairo paint path
  * (unchanged since Phase 3.4b) by asking the snapshot for a cairo_t
@@ -1764,7 +1764,7 @@ lamejump:
 	xtext->skip_stamp = FALSE;
 }
 
-/* Phase 4.9: GtkEventControllerScroll callback for the wheel.
+/* GtkEventControllerScroll callback for the wheel.
  *
  * Replaces the GTK 3 ::scroll-event handler. The controller is created
  * with GTK_EVENT_CONTROLLER_SCROLL_VERTICAL so dy is meaningful (down
@@ -1801,7 +1801,7 @@ gtk_xtext_scroll_cb (GtkEventControllerScroll *controller,
 	return GDK_EVENT_STOP;
 }
 
-/* Phase 4.9: GTK 4 input layer.
+/* GTK 4 input layer.
  *
  * GTK 4 widgets no longer emit ::button_press_event, ::motion_notify_event,
  * ::leave_notify_event, ::scroll_event, ::selection_get, or
@@ -1969,7 +1969,7 @@ gtk_xtext_scrolldown_timeout (GtkXText * xtext)
 	xtext_buffer *buf = xtext->buffer;
 	GtkAdjustment *adj = xtext->adj;
 
-	/* Phase 4.9: GTK 4 has no synchronous "where is the pointer right now"
+	/* GTK 4 has no synchronous "where is the pointer right now"
 	 * accessor on a widget; the motion controller updates select_end_y on
 	 * every move, so we use that as the pointer's last known y. The timer
 	 * keeps firing as long as last-known-y is past the edge. */
@@ -2133,7 +2133,7 @@ gtk_xtext_get_word (GtkXText * xtext, int x, int y, textentry ** ret_ent,
 	{
 		int start, end;
 
-		/* Phase 5: url_last is a stub that returns 0 (no sub-word match
+		/* url_last is a stub that returns 0 (no sub-word match
 		 * info — see comment near its definition). The HexChat code
 		 * here used the start/end out-params to crop a partial match
 		 * inside the larger token; with no match info we fall back to
@@ -2380,7 +2380,7 @@ gtk_xtext_set_clip_owner (GtkWidget * widget)
 	{
 		if (str[0])
 		{
-			/* Phase 4.9: GTK 4 unified the GtkClipboard / X11-selection
+			/* GTK 4 unified the GtkClipboard / X11-selection
 			 * model into GdkClipboard. The regular clipboard is what
 			 * Ctrl+V pastes from; the primary clipboard is the X-style
 			 * "select to copy, middle-click to paste" selection that
@@ -2813,7 +2813,7 @@ gtk_xtext_selection_get_text (GtkXText *xtext, int *len_ret)
 	return stripped;
 }
 
-/* Phase 4.9: gtk_xtext_selection_get (X11 selection-protocol callback) and
+/* gtk_xtext_selection_get (X11 selection-protocol callback) and
  * gtk_xtext_selection_kill (called when another client took the selection)
  * went away with the GtkClipboard → GdkClipboard transition. GdkClipboard
  * owns its data via a GValue, so we don't supply text on demand and we
@@ -2864,9 +2864,9 @@ gtk_xtext_class_init (GtkXTextClass * class)
 
 	parent_class = g_type_class_peek (gtk_widget_get_type ());
 
-	/* Phase 2.6: HexChat carries hand-written marshallers in
+	/* HexChat carries hand-written marshallers in
 	 * common/marshal.c; we use g_cclosure_marshal_generic instead.
-	 * Phase 3.4b: GtkObject is gone in GTK 3 — every signal now hangs
+	 * GtkObject is gone in GTK 3 — every signal now hangs
 	 * off the GObjectClass / GtkWidgetClass directly. */
 	xtext_signals[WORD_CLICK] =
 		g_signal_new ("word_click",
@@ -2887,7 +2887,7 @@ gtk_xtext_class_init (GtkXTextClass * class)
 							G_TYPE_NONE,
 							2, GTK_TYPE_ADJUSTMENT, GTK_TYPE_ADJUSTMENT);
 
-	/* Phase 4.9: GTK 4 vfunc wiring.
+	/* GTK 4 vfunc wiring.
 	 *  - GtkWidgetClass::destroy is gone; teardown moved to
 	 *    GObjectClass::dispose.
 	 *  - GtkWidgetClass::draw is gone; widgets implement ::snapshot.
@@ -3111,7 +3111,7 @@ gtk_xtext_text_width (GtkXText *xtext, unsigned char *text, int len)
 
 /* actually draw text to screen (one run with the same color/attribs)
  *
- * Phase 3.4b: the previous implementation built a per-run GdkPixmap,
+ * the previous implementation built a per-run GdkPixmap,
  * tile-aligned the bg GC, drew text into it, then blitted via
  * gdk_draw_drawable to align the background pattern across runs.  Cairo
  * achieves the same effect natively: a CAIRO_EXTEND_REPEAT pattern set
@@ -3304,7 +3304,7 @@ gtk_xtext_render_str (GtkXText * xtext, int y, textentry * ent,
 	xtext->in_hilight = FALSE;
 
 	offset = str - ent->str;
-	/* Phase 3.4b: GdkGC removed; xtext->cur_fg/cur_bg track current colors. */
+	/* GdkGC removed; xtext->cur_fg/cur_bg track current colors. */
 
 	if (ent->mark_start != -1 &&
 		 ent->mark_start <= i + offset && ent->mark_end > i + offset)
@@ -4166,7 +4166,7 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 	if (xtext->font)
 		backend_font_close (xtext);
 
-	/* Phase 3.4b: the GTK 1.2-era forced realize here was needed so the
+	/* the GTK 1.2-era forced realize here was needed so the
 	 * old XDrawString backend had a XDisplay. The cairo+Pango backend
 	 * resolves fonts through the widget's Pango context, which falls
 	 * back to the default screen on unrealized widgets — and forcing
@@ -4194,7 +4194,7 @@ gtk_xtext_set_font (GtkXText *xtext, char *name)
 	return TRUE;
 }
 
-/* Phase 5: live update of the timestamp format. Stores a copy in the
+/* live update of the timestamp format. Stores a copy in the
  * module-global xtext_stamp_format (single per-process — every xtext
  * widget shares the same format). Recomputes xtext->stamp_width
  * against the new format, since the pixel width depends on what
@@ -4398,7 +4398,7 @@ gtk_xtext_calc_lines (xtext_buffer *buf, int fire_signal)
 	int height;
 	int lines;
 
-	/* Phase 4.9: gtk_widget_get_window / gdk_window_get_width / _height
+	/* gtk_widget_get_window / gdk_window_get_width / _height
 	 * are gone in GTK 4. Widget size is available directly via
 	 * gtk_widget_get_width / gtk_widget_get_height (the same numbers
 	 * the size_allocate vfunc receives). */
@@ -4516,7 +4516,7 @@ gtk_xtext_render_ents (GtkXText * xtext, textentry * enta, textentry * entb)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	/* Phase 4.9: see gtk_xtext_calc_lines / gtk_xtext_render_page note. */
+	/* see gtk_xtext_calc_lines / gtk_xtext_render_page note. */
 	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
 	width -= MARGIN;
@@ -4606,7 +4606,7 @@ gtk_xtext_render_page (GtkXText * xtext)
 	if (xtext->buffer->indent < MARGIN)
 		xtext->buffer->indent = MARGIN;	  /* 2 pixels is our left margin */
 
-	/* Phase 4.9: GdkWindow / gdk_window_get_width / _height /
+	/* GdkWindow / gdk_window_get_width / _height /
 	 * gtk_widget_get_window are gone in GTK 4. Widget pixel size is
 	 * available directly off the widget. */
 	width  = gtk_widget_get_width  (GTK_WIDGET (xtext));
@@ -4681,7 +4681,7 @@ gtk_xtext_refresh (GtkXText * xtext)
 {
 	if (gtk_widget_get_realized (GTK_WIDGET (xtext)))
 	{
-		/* Phase 5: render_page only paints when xtext->cr is non-NULL
+		/* render_page only paints when xtext->cr is non-NULL
 		 * (i.e. inside the snapshot pass). Calling it from a regular
 		 * callback like changed_xtext / changed_timestamp finds cr
 		 * NULL and silently no-ops — the toggle takes effect on the
@@ -4856,7 +4856,7 @@ gtk_xtext_clear (xtext_buffer *buf, int lines)
 		if (buf->search_found)
 			gtk_xtext_search_fini (buf);
 		if (buf->xtext->auto_indent) {
-			/* Phase 5: preserve the timestamp-column indent. When
+			/* preserve the timestamp-column indent. When
 			 * buf->time_stamp is on, gtk_xtext_set_time_stamp grew
 			 * buf->indent to stamp_width + space_width so the
 			 * message body draws to the right of the bare-HH:MM:SS
@@ -4919,7 +4919,7 @@ gtk_xtext_check_ent_visibility (GtkXText * xtext, textentry *find_ent, int add)
 		return FALSE;
 	}
 
-	/* Phase 4.9: see render_page note. */
+	/* see render_page note. */
 	height = gtk_widget_get_height (GTK_WIDGET (xtext));
 
 	ent = buf->pagetop_ent;
@@ -5419,7 +5419,7 @@ gtk_xtext_append_entry (xtext_buffer *buf, textentry * ent, time_t stamp)
 	buf->num_lines += gtk_xtext_lines_taken (buf, ent);
 
 	{
-		/* Phase 4.9: gtk_widget_get_toplevel and
+		/* gtk_widget_get_toplevel and
 		 * gtk_window_has_toplevel_focus are gone; use the GtkRoot path
 		 * (matches the gtk_xtext_draw_marker site). */
 		GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (buf->xtext));
@@ -5707,7 +5707,7 @@ gtk_xtext_append_indent (xtext_buffer *buf,
 	gtk_xtext_append_entry (buf, ent, stamp);
 }
 
-/* Phase 5 (chat-history extension): insert a textentry just
+/* insert a textentry just
  * before the `anchor` entry. anchor==NULL falls back to
  * head-prepend. Identical to gtk_xtext_append_indent's struct
  * setup + auto-indent grow logic — only the linked-list splice
@@ -5974,7 +5974,7 @@ gtk_xtext_append (xtext_buffer *buf, unsigned char *text, int len, time_t stamp)
 			ent->str_len = strlen (ent->str);
 		}
 	}
-	/* Phase 5: respect buf->indent so the message text starts to the
+	/* respect buf->indent so the message text starts to the
 	 * right of the stamp column (gtk_xtext_set_time_stamp grew indent
 	 * to cover stamp_width). Without this the message draws over the
 	 * stamp — append_entry bumps a 0 to MARGIN (2 px), and render_str
@@ -6492,7 +6492,7 @@ gtk_xtext_set_thin_separator (GtkXText *xtext, gboolean thin_separator)
 	xtext->thinline = thin_separator;
 }
 
-/* Phase 5: gtk_xtext_set_time_stamp also grows buf->indent so the
+/* gtk_xtext_set_time_stamp also grows buf->indent so the
  * message body text starts to the right of the stamp column. Without
  * this, every entry added via gtk_xtext_append gets ent->indent
  * bumped to MARGIN (2 px) in append_entry, and the message
@@ -6617,7 +6617,7 @@ gtk_xtext_buffer_show (GtkXText *xtext, xtext_buffer *buf, int render)
 	if (!gtk_widget_get_realized (GTK_WIDGET (xtext)))
 		gtk_widget_realize (GTK_WIDGET (xtext));
 
-	/* Phase 4.9: see render_page note. */
+	/* see render_page note. */
 	h = gtk_widget_get_height (GTK_WIDGET (xtext));
 	w = gtk_widget_get_width  (GTK_WIDGET (xtext));
 

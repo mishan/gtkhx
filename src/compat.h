@@ -88,7 +88,7 @@ extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
 #define RED "\033[0;31m"
 #define RED_BOLD "\033[1;31m"
 
-/* Phase 3.10: GdkRGBA initializer from a 16-bit-per-channel literal.
+/* GdkRGBA initializer from a 16-bit-per-channel literal.
  * Used to express the historic Mac/IRC color values (which were
  * naturally 16-bit per channel under GdkColor) without manually
  * re-computing each fraction. Always opaque (alpha=1). The divisions

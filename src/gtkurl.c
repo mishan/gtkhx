@@ -479,7 +479,7 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
         return;
     }
 
-    /* Phase 5: GtkPopover has to be parented to a widget that's safe
+    /* GtkPopover has to be parented to a widget that's safe
 	 * to grab from. Anchoring directly to a GtkTextView nested inside
 	 * a GtkScrolledWindow (or an xtext deep in the chat layout) tripped
 	 * GDK's "Tried to map a grabbing popup with a non-top most parent"

@@ -38,7 +38,7 @@
 #include "bookmarks.h"
 #include "hotline_url.h"
 
-/* Phase 5: the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
+/* the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
  * that used to live here suppressed warnings from the GtkComboBoxText
  * dropdowns + the GtkDialog bookmark prompts. Both migrations are
  * done (AdwComboRow / AdwAlertDialog), so the pragma is no longer
@@ -81,8 +81,7 @@ static GtkWidget *tls_switch;
  * connect_dropdown_to_cipher_byte and connect_cipher_byte_to_dropdown
  * live at the boundary. */
 char *valid_ciphers[] = { "BLOWFISH",
-                          /* Phase 5+ (fogWraith HOPE-ChaCha20-Poly1305.md):
-						   * preferred AEAD cipher, advertised when the
+                          /* preferred AEAD cipher, advertised when the
 						   * connection is encrypted. The negotiation sends
 						   * a multi-entry list strongest-first; server
 						   * picks whichever it supports. */
@@ -272,7 +271,7 @@ connect_set_entries (const char *address, const char *login,
     gtk_editable_set_text (GTK_EDITABLE (port_entry), buf);
 }
 
-/* Phase 5: shared "actually connect" path. Plumbs the compress /
+/* shared "actually connect" path. Plumbs the compress /
  * cipher algorithm strings onto sess->htlc (zeroing them when the
  * connection isn't HOPE-secure or when no algorithm is selected),
  * resolves the port string, and fires hx_connect.
@@ -602,7 +601,7 @@ strip_lf (char *buf)
     return;
 }
 
-/* Phase 5: legacy-bookmark conversion runs from the AdwAlertDialog
+/* legacy-bookmark conversion runs from the AdwAlertDialog
  * "convert" response. Path is passed through user_data; freed via
  * the dialog's "closed" signal once the response is handled.
  *
@@ -737,7 +736,7 @@ prompt_conversion (char *name)
                         toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }
 
-/* Phase 5: bookmarks live under $CONFIG/bookmarks/. Legacy
+/* bookmarks live under $CONFIG/bookmarks/. Legacy
  * ~/.hx/bookmarks/ is consulted as a read-fallback only — bookmarks
  * saved from this version always go to the new path. */
 static char *
@@ -796,7 +795,7 @@ open_bookmark_file (const char *name, char **out_path)
     return bm;
 }
 
-/* Phase 5: parsed contents of an HTsc-format bookmark file.
+/* parsed contents of an HTsc-format bookmark file.
  * server/port are split (port populated only if the bookmark stored
  * "host:port"); login/pass are NUL-terminated within their 33-byte
  * fields. */
@@ -811,7 +810,7 @@ struct bookmark_parsed {
     char tls;          /* Phase 4: TLS over dedicated server port */
 };
 
-/* Phase 5: read the new-format (HTsc) bookmark at $name and fill *out.
+/* read the new-format (HTsc) bookmark at $name and fill *out.
  * Returns 0 on success.
  *  -1: bookmark doesn't exist
  *  -2: file is in the legacy format (caller should run prompt_conversion)
@@ -890,7 +889,7 @@ bookmark_parse (const char *name, struct bookmark_parsed *out,
     if (read (bm, &out->cipher, 1) != 1) {
         goto bad;
     }
-    /* Phase 4: TLS flag — 4th byte after the server field. Old
+    /* TLS flag — 4th byte after the server field. Old
 	 * bookmarks zero-padded the slot, so a short read returns 0
 	 * = TLS off, which is the right back-compat default. */
     if (read (bm, &out->tls, 1) != 1) {
@@ -969,7 +968,7 @@ open_bookmark (GtkWidget *widget, gpointer data)
                      bm.compress, bm.cipher, bm.tls);
 }
 
-/* Phase 5: scan a bookmarks dir and append each entry as a menu item
+/* scan a bookmarks dir and append each entry as a menu item
  * targeting app.open_bookmark with the bookmark name as a string
  * variant. Skips dotfiles (".", "..", and any hidden override files)
  * and de-dupes against names already in the menu so the legacy
@@ -1028,7 +1027,7 @@ build_bookmark_menu_from_dir (GMenu *menu, const char *path)
     closedir (dir);
 }
 
-/* Phase 5: same display names the connect-dialog combo uses (in
+/* same display names the connect-dialog combo uses (in
  * create_connect_window's builtin_names array). Indexes here MUST
  * line up with builtin_bookmark's switch on GPOINTER_TO_INT(data) —
  * 1..4 maps to hlserver / cafelinux / nasledov / singrafix. */
@@ -1077,7 +1076,7 @@ connect_build_bookmark_menu (void)
     return menu;
 }
 
-/* Phase 5: connect to a saved bookmark directly — no dialog. The
+/* connect to a saved bookmark directly — no dialog. The
  * SplitButton dropdown calls this when the user picks a bookmark.
  * Parses the file via bookmark_parse, sets up the session's
  * compress/cipher state, and calls hx_connect.
@@ -1136,7 +1135,7 @@ connect_open_bookmark_by_name (const char *name)
                        bm.secure, bm.compress, bm.cipher, bm.tls);
 }
 
-/* Phase 5: connect to a built-in "well-known" Hotline server. After
+/* connect to a built-in "well-known" Hotline server. After
  * the recent cleanup only Hotline Communications (idx 1, hlserver.com)
  * remains; the switch is preserved as a structure so adding more
  * built-ins later is a single new case. */
@@ -1261,7 +1260,7 @@ connect_save_hotline_url_as_bookmark (const char *url, char **out_name,
     return ok;
 }
 
-/* Phase 5: bookmark save migrates to AdwAlertDialog with the name
+/* bookmark save migrates to AdwAlertDialog with the name
  * entry as extra-child. The response handler reads the entry, does
  * the file-write work, and lets the dialog auto-dismiss. The
  * cancel_save click handler is gone — "cancel" response (and ESC,
@@ -1355,7 +1354,7 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     len_total = 256 - len;
     fprintf (bookmark, "%c%s", (int)len, server_str);
 
-    /* Phase 4: flags[3] (tls) is a forward-compatible extension —
+    /* flags[3] (tls) is a forward-compatible extension —
 	 * pre-TLS readers stop at flags[2] and ignore the rest of the
 	 * 256-byte block; pre-TLS files have a zero in flags[3] from
 	 * the original zero-padding, which loads as tls=0 = off. */
@@ -1365,7 +1364,7 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
 
     fclose (bookmark);
 
-    /* Phase 5: refresh the SplitButton's bookmark dropdown so the
+    /* refresh the SplitButton's bookmark dropdown so the
 	 * just-saved entry shows up without an app restart. Skipped on
 	 * the failure paths via the goto out below. */
     toolbar_refresh_bookmarks ();
@@ -1419,7 +1418,7 @@ save_dialog (GtkWidget *widget, gpointer data)
                         toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
 }
 
-/* Phase 5: AdwDialog with AdwPreferencesGroup form rows replaces the
+/* AdwDialog with AdwPreferencesGroup form rows replaces the
  * hand-laid GtkGrid + GtkFrame + per-cell label/entry layout. The
  * bookmark combo is gone — the SplitButton dropdown on the toolbar
  * Connect button does that job now, and there's no point repeating

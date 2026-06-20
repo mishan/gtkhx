@@ -33,7 +33,7 @@
  * sys/types only — so the include is safe here. */
 #include "htxf_io.h"
 
-/* Phase 5+ (HTXF rewrite): the connection and transfer structs used
+/* the connection and transfer structs used
  * to carry addrinfo / sockaddr_in for the network stack. The new
  * GSocketClient-based connect path stores a plain host + port instead,
  * so neither header is needed here anymore. */
@@ -145,7 +145,7 @@ struct htxf_conn {
             large : 1, reserved : 28;
     } opt;
 
-    /* Phase 5: when opt.preview is set, the preview window is created
+    /* when opt.preview is set, the preview window is created
 	 * on the main thread (in rcv_task_file_get) and stashed here so
 	 * the download worker thread doesn't have to construct GTK widgets
 	 * itself. The worker only feeds bytes through preview->output()
@@ -208,7 +208,7 @@ struct htlc_conn {
 
     struct {
         guint32 visible : 1,
-            /* Phase 5: set on the first HTLS_HDR_USER_SELFINFO. Used
+            /* set on the first HTLS_HDR_USER_SELFINFO. Used
 		 * by the agreement-window Agree button to decide whether
 		 * sending HTLC_HDR_AGREEMENTAGREE is appropriate.
 		 *
@@ -225,7 +225,7 @@ struct htlc_conn {
 		 *
 		 * Reset to 0 in hx_htlc_close so reconnect starts fresh. */
             logged_in : 1,
-            /* Phase 5+: set when hx_post_login_fetches runs (either
+            /* set when hx_post_login_fetches runs (either
 		 * via AGREEMENTAGREE-send for 1.5+ servers or the 1.0/1.2
 		 * fallback timer). This is the spec-correct "we're a fully
 		 * joined user" boundary — earlier than this, sending RPCs
@@ -356,7 +356,7 @@ struct htlc_conn {
     guint64 chat_history_last_msgid;
 };
 
-/* Phase 5: LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize
+/* LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize
  * cross-thread access to the global xfers[] array between worker
  * threads (get_thread, put_thread, the connect worker) and main.
  * After every xfer-related mutator was moved onto the main thread
@@ -422,7 +422,7 @@ typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
 #define RCV_TASK_FN(f) ((rcv_task_fn)(void (*) (void)) (f))
 
 struct task {
-    /* Phase 5+: no next/prev — tasks live in session->tasks, a
+    /* no next/prev — tasks live in session->tasks, a
 	 * GHashTable<u32 trans, struct task*>. Lookup by trans goes
 	 * through task_with_trans (now an O(1) wrapper around
 	 * g_hash_table_lookup); iteration goes through GHashTableIter
@@ -538,7 +538,7 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 /* ---- Walking data-header lists in incoming packets ----------------- */
 
 /*
- * Phase 5: dh_start moved from while-with-tail-increment to a for
+ * dh_start moved from while-with-tail-increment to a for
  * loop with the position increment in the third clause. The two
  * shapes are equivalent for normal break/iteration, but they
  * differ on `continue`:

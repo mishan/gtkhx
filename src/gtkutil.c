@@ -47,7 +47,7 @@
 #include "voice_panel.h"
 #include "inline_media_attach.h"
 
-/* Phase 4.11: GtkAccelGroup / gtk_accel_group_new /
+/* GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
  * in GTK 4 — replaced by GtkShortcutController plus GtkShortcut
  * instances bound to GtkKeyvalTrigger triggers and GtkCallbackAction
@@ -87,7 +87,7 @@ keyaccel_quit_cb (GtkWidget *w, GVariant *args, gpointer data)
     return TRUE;
 }
 
-/* Phase 5: Ctrl+W — close the focused window. Skips the toolbar
+/* Ctrl+W — close the focused window. Skips the toolbar
  * (the toolbar is the application's anchor; closing it via the WM's
  * X button does drive hx_quit, but we don't want a casual Ctrl+W to
  * tear down the whole app). For every other window, route through
@@ -106,7 +106,7 @@ keyaccel_close_cb (GtkWidget *w, GVariant *args, gpointer data)
     return TRUE;
 }
 
-/* Phase 5: Ctrl+T — open (or focus) the Tracker window. Same
+/* Ctrl+T — open (or focus) the Tracker window. Same
  * everywhere init_keyaccel runs, including the toolbar, so the
  * shortcut works even with no other window in focus. tracker.c's
  * create_tracker_window is idempotent: if the tracker is already
@@ -244,7 +244,7 @@ set_disconnect_btn (session *sess, int stat)
     gtk_widget_set_sensitive (disconnect_btn, stat);
 }
 
-/* Phase 5: helper to flip a hamburger-menu GAction's enabled state.
+/* helper to flip a hamburger-menu GAction's enabled state.
  * The Admin submenu's New User / Edit User entries used to be
  * standalone toolbar buttons whose sensitivity was driven by the
  * connection state; with the actions on the application instead,
@@ -273,7 +273,7 @@ setbtns (session *sess, int stat)
         gtk_widget_set_sensitive (infobtn, stat);
         gtk_widget_set_sensitive (chatbtn, stat);
         gtk_widget_set_sensitive (ignobtn, stat);
-        /* Phase 5: kick / ban get visibility gating in the Users
+        /* kick / ban get visibility gating in the Users
 		 * window — hide them entirely when the account doesn't
 		 * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
 		 * mhxd's struct.) On disconnect, hide them too: we don't
@@ -323,7 +323,7 @@ setbtns (session *sess, int stat)
         gtk_widget_set_sensitive (broadcast_btn, can_broadcast);
     }
 
-    /* Phase 5: New User / Edit User moved from toolbar buttons to
+    /* New User / Edit User moved from toolbar buttons to
 	 * the hamburger menu's Admin submenu. Flip the corresponding
 	 * GActions instead of the old GtkWidget pointers. Each item is
 	 * gated independently on its access bit so a sysop with view-
@@ -370,7 +370,7 @@ setbtns (session *sess, int stat)
 	 * reset path. */
     inline_media_attach_refresh_all_chats (sess);
 
-    /* Phase 5: News-related toolbar buttons get sensitivity-only
+    /* News-related toolbar buttons get sensitivity-only
 	 * gating — they always remain visible so the toolbar shape
 	 * doesn't reshape between connections.
 	 *
@@ -404,7 +404,7 @@ setbtns (session *sess, int stat)
     }
 }
 
-/* Phase 5: status_bar is now a GtkLabel (was GtkStatusbar — deprecated
+/* status_bar is now a GtkLabel (was GtkStatusbar — deprecated
  * in GTK 4.10). The toolbar always replaced the message wholesale, so
  * the message-stack model the GtkStatusbar provided was overhead that
  * earned us nothing. A single gtk_label_set_text per state change
@@ -481,7 +481,7 @@ changetitlesconnected (session *sess)
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), tooltitle);
     g_free (tooltitle);
 
-    /* Phase 5 / docking (Phase 2): the per-window title-setting
+    /* the per-window title-setting
      * loop for News / Chat / Users / Tasks is gone — those panels
      * live inside the toolbar window now, so their "title" is the
      * tab label set by the panel factory. Per-server attribution
@@ -512,13 +512,13 @@ changetitlespecific (GtkWidget *widget, char *name)
 void
 changetitlesdisconnected (session *sess)
 {
-    /* Phase 5 / docking (Phase 2): see News note in
+    /* see News note in
      * changetitlesconnected. */
-    /* Phase 5 / docking (Phase 2): see Chat note in
+    /* see Chat note in
      * changetitlesconnected. */
-    /* Phase 5 / docking (Phase 2): Users panel title — see the
+    /* Users panel title — see the
      * matching note in changetitlesconnected. */
-    /* Phase 5 / docking (Phase 2): see Tasks note in
+    /* see Tasks note in
      * changetitlesconnected. */
 
     gtk_window_set_title (GTK_WINDOW (sess->toolbar_window), _ ("GtkHx"));
@@ -531,12 +531,12 @@ close_connected_windows (session *sess)
         gtkhx_widget_destroy (sess->agreementwin);
         sess->agreementwin = NULL;
     }
-    /* Phase 5: legacy gfile_list cleanup is gone with the legacy
+    /* legacy gfile_list cleanup is gone with the legacy
 	 * files browser. The new browser (files_browser.c) is a
 	 * singleton owned by its open_files_browser entry point and
 	 * cleans itself up via the close-request handler. */
 
-    /* Phase 5+: walk the gchats hashtable, closing every non-public
+    /* walk the gchats hashtable, closing every non-public
 	 * pchat tab via the chat_tabs API. The public chat (cid=0) UI
 	 * persists across reconnects, like its model-side counterpart
 	 * in sess->chats.
@@ -548,7 +548,7 @@ close_connected_windows (session *sess)
 	 * mutated would invalidate the iterator, so collect cids in a
 	 * first pass and close in a second.
 	 *
-	 * Phase 3 / docking: this was destroying gchat->window
+	 * this was destroying gchat->window
 	 * directly, but gchat->window now points at the tab content
 	 * widget (hpane). Destroying that unparented the child but
 	 * left the AdwTabPage and the pchat_tabs index entry stale —
@@ -573,13 +573,13 @@ close_connected_windows (session *sess)
     }
 }
 
-/* Phase 5: gtkhx_text_to_utf8 lives in text_util.c now so the unit
+/* gtkhx_text_to_utf8 lives in text_util.c now so the unit
  * tests can compile it without dragging in gtkutil's GTK / Adwaita
  * dependency tree. The prototype is forwarded via gtkutil.h →
  * text_util.h so existing #include "gtkutil.h" callers don't need to
  * change. */
 
-/* Phase 5: error_dialog is an AdwAlertDialog now. The old GtkDialog
+/* error_dialog is an AdwAlertDialog now. The old GtkDialog
  * + manual GtkLabel + manual OK button + manual line-wrapping path
  * was the canonical example of "things AdwAlertDialog gives you for
  * free". libadwaita handles line wrapping inside the body text, the
@@ -656,7 +656,7 @@ gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child, int left,
     gtk_grid_attach (grid, child, left, top, right - left, bottom - top);
 }
 
-/* Phase 4.2: GtkContainer is gone — dispatch on parent type to the
+/* GtkContainer is gone — dispatch on parent type to the
  * right child setter. Box gets append (call sites that want
  * gtk_box_pack_start semantics should use gtkhx_box_pack instead;
  * this helper covers the simple "put one child in a parent" case
@@ -786,7 +786,7 @@ gtkhx_texture_pixbuf_pixels_unref (gpointer data)
     g_object_unref ((GObject *) data);
 }
 
-/* Phase 5+: gdk_texture_new_for_pixbuf is deprecated in GTK
+/* gdk_texture_new_for_pixbuf is deprecated in GTK
  * 4.16 in favour of the GBytes / gdk_memory_texture_new path.
  * Every GtkHx icon comes through a GdkPixbuf source today
  * (GResource lookups, the Mac CICN decoder, gdk-pixbuf loader
@@ -855,7 +855,7 @@ gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf)
     return texture;
 }
 
-/* Phase 4.13: gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
+/* gtk_image_new_from_pixbuf is deprecated in GTK 4.12.
  * Builds a GtkImage from a paintable backed by the texture helper
  * above. Returns a fresh-floating GtkImage; the caller takes
  * ownership the same way as the legacy gtk_image_new_from_pixbuf. */
@@ -879,7 +879,7 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
     return image;
 }
 
-/* Phase 5: build a button around a GResource pixbuf icon. The
+/* build a button around a GResource pixbuf icon. The
  * default toolbar XPMs are 16x16 pixel art that looks tiny at
  * modern desktop sizes, so scale up by an integer factor with
  * GDK_INTERP_NEAREST (preserves the crisp blocky pixels — bilinear
@@ -995,7 +995,7 @@ gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
     return btn;
 }
 
-/* Phase 4.2: gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
+/* gtkhx_widget_destroy is gone. Toplevels (GtkWindow) use
  * gtk_window_destroy which tears down the surface and drops refs.
  * Non-toplevels: if the widget has a parent, unparent it (the
  * parent drops its ref); if floating, sink + unref. */

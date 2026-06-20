@@ -130,7 +130,7 @@ static char *termed_buf = 0;
  * past slot 19 and was getting uninitialized memory, which is why the
  * default background looked weird.
  */
-/* Phase 3.10: GdkColor (16-bit per channel + paletted-X11 pixel slot)
+/* GdkColor (16-bit per channel + paletted-X11 pixel slot)
  * → GdkRGBA (4 doubles 0..1, no pixel slot). Each row is one color
  * literal preserved exactly via the RGB16 macro from compat.h, which
  * folds (channel/65535.0) at compile time. */
@@ -280,7 +280,7 @@ hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
     char *wire = gtkhx_text_for_wire (str, strlen (str), utf8,
                                       /*is_body=*/TRUE, &wire_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_chunks.
+    /* chunk layout moved to gtkhx_proto_build_chat_chunks.
 	 * Scratch holds the BE style (offset 0, 2 bytes) and BE cid
 	 * (offset 2, 4 bytes); the chunk array's data pointers reference
 	 * into scratch and into the local wire buffer below — both
@@ -301,7 +301,7 @@ hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid, guint16 style)
 void
 hx_chat_user (struct htlc_conn *htlc, guint16 uid)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_create_chunks.
+    /* chunk layout moved to gtkhx_proto_build_chat_create_chunks.
 	 * Build chunks BEFORE task_new — task_new consumes htlc->trans and
 	 * parks an entry in the task table waiting for the server's TASK
 	 * reply. If the builder ever fails (validation reject), an early
@@ -319,7 +319,7 @@ hx_chat_user (struct htlc_conn *htlc, guint16 uid)
 void
 hx_invite_user (struct htlc_conn *htlc, guint16 uid, guint32 cid)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_invite_chunks.
+    /* chunk layout moved to gtkhx_proto_build_chat_invite_chunks.
 	 * See hx_chat_user for the task_new-after-build rationale. */
     struct hx_chunk chunks[2];
     guint8 scratch[6];
@@ -351,7 +351,7 @@ hx_chat_join (struct htlc_conn *htlc, guint32 cid)
         chat = chat_new (&the_session, cid);
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_join_chunks.
+    /* chunk layout moved to gtkhx_proto_build_chat_join_chunks.
 	 * See hx_chat_user for the task_new-after-build rationale. */
     struct hx_chunk chunks[1];
     guint8 scratch[4];
@@ -378,7 +378,7 @@ hx_part_chat (struct htlc_conn *htlc, guint32 cid)
         return;
     }
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_part_chunks. */
+    /* chunk layout moved to gtkhx_proto_build_chat_part_chunks. */
     struct hx_chunk chunks[1];
     guint8 scratch[4];
     int hc = (int)gtkhx_proto_build_chat_part_chunks (
@@ -398,7 +398,7 @@ hx_change_subject (struct htlc_conn *htlc, guint32 cid, char *subject)
     char *subj_wire = gtkhx_text_for_wire (subject, strlen (subject), utf8,
                                            FALSE, &subj_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_subject_chunks. */
+    /* chunk layout moved to gtkhx_proto_build_chat_subject_chunks. */
     struct hx_chunk chunks[2];
     guint8 scratch[4];
     int hc = (int)gtkhx_proto_build_chat_subject_chunks (
@@ -484,13 +484,13 @@ word_check (GtkWidget *xtext, char *word)
     return 0;
 }
 
-/* Phase 5: timecpy is gone. The "[HH:MM:SS] " inline-timestamp prefix
+/* timecpy is gone. The "[HH:MM:SS] " inline-timestamp prefix
  * it produced is now drawn by xtext as a left-column stamp via
  * gtk_xtext_set_time_stamp on each buffer. xprintline / xoutput_chat
  * just append the bare message text; the per-entry timestamp is
  * auto-set in gtk_xtext_append_entry. */
 
-/* Phase 5+: chat lifecycle on GHashTable.
+/* chat lifecycle on GHashTable.
  *
  * chat_free() is the GDestroyNotify the hashtable invokes when an
  * entry is replaced, removed, or the table itself is destroyed.
@@ -570,7 +570,7 @@ chat_with_cid (session *sess, guint32 cid)
     return g_hash_table_lookup (sess->chats, GUINT_TO_POINTER (cid));
 }
 
-/* Phase 5+: gtkhx_chat (UI side) lifecycle on GHashTable.
+/* gtkhx_chat (UI side) lifecycle on GHashTable.
  *
  * The table's destroy notify just g_frees the struct; the widget
  * subtree (window, output, input, subject, userlist, vscroll) is
@@ -671,7 +671,7 @@ gchats_init (session *sess)
         sess->gchats = g_hash_table_new_full (g_direct_hash, g_direct_equal,
                                               NULL, gchat_free);
     }
-    /* Phase 3 / docking: route user-clicks on a private-chat tab's
+    /* route user-clicks on a private-chat tab's
      * X through pchat_close (which sends hx_part_chat and tears
      * down the gchat). Idempotent. */
     gtkhx_chat_tabs_set_close_pchat_handler (pchat_close);
@@ -1095,7 +1095,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         }
     }
 
-    /* Phase 3 / docking: incoming pchat lines mark the tab + Chat
+    /* incoming pchat lines mark the tab + Chat
      * panel needs-attention. Public chat (cid 0) skips this — the
      * public-chat tab is what the user sees by default and we
      * don't want the constant attention flag from a busy public
@@ -1135,7 +1135,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         return;
     }
 
-    /* Phase 3.4: if history_loading was TRUE on entry, this batch
+    /* if history_loading was TRUE on entry, this batch
 	 * is the response to a "Load older" click — render with the
 	 * prepend path so the older entries land ABOVE the existing
 	 * buffer content. Otherwise this is the initial post-login
@@ -1146,7 +1146,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * (Phase 3.1). */
     gboolean prepend_mode = gchat->history_loading;
 
-    /* Phase 3.1: maintain the "oldest msgid we have rendered" anchor
+    /* maintain the "oldest msgid we have rendered" anchor
 	 * and the has_more flag on the gtkhx_chat. A "Load older" click
 	 * uses oldest as BEFORE= cursor; rendering the Load-older row is
 	 * gated on has_more. We update both BEFORE bailing on the
@@ -1170,7 +1170,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
     xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
 
-    /* Phase 3.5: evict the existing Load-older sentinel up front.
+    /* evict the existing Load-older sentinel up front.
 	 * We'll re-insert a fresh one below if has_more is still true
 	 * on the new batch. Stored pointer; cleared regardless of
 	 * remove_entry's return — a stale pointer means the entry
@@ -1246,7 +1246,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         gchat->history_anchor_ent = gtk_xtext_get_last_entry (xbuf);
     }
 
-    /* Phase 3.6: insert the "Load older messages" sentinel BEFORE
+    /* insert the "Load older messages" sentinel BEFORE
 	 * the entry loop runs. This keeps the sentinel pinned at the
 	 * TOP of the chat-history block in both modes:
 	 *
@@ -1597,7 +1597,7 @@ xprintline (GtkWidget *text, char *chat, size_t len)
         len = 1;
     }
 
-    /* Phase 5: chat / msg bytes from the wire arrive in whatever
+    /* chat / msg bytes from the wire arrive in whatever
 	 * encoding the server happened to use — historically Mac Roman
 	 * on Mac-OS-classic servers, occasionally Latin-1 from later
 	 * Unix forks, sometimes already UTF-8 on modern stacks. xtext
@@ -1613,7 +1613,7 @@ xprintline (GtkWidget *text, char *chat, size_t len)
         return;
     }
 
-    /* Phase 5: timestamps move from inline "[HH:MM:SS] " prefix into
+    /* timestamps move from inline "[HH:MM:SS] " prefix into
 	 * xtext's native left-column stamp. Two reasons:
 	 *
 	 *   1. HexChat-style drag-select: stamps are visually separate
@@ -1794,7 +1794,7 @@ nick_comp_get_nick (char *tx, char *n)
     return -1;
 }
 
-/* Phase 5+: materialise the public chat's users into a name-sorted
+/* materialise the public chat's users into a name-sorted
  * GPtrArray so tab-completion has a deterministic walk order across
  * calls. Before the GHashTable migration the underlying linked list
  * happened to be in join order, which was arbitrary anyway — sorting
@@ -2171,7 +2171,7 @@ tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
     return 0;
 }
 
-/* Phase 4.5: GTK 4 widgets don't fire key-press-event. The chat input's
+/* GTK 4 widgets don't fire key-press-event. The chat input's
  * Tab nick completion + Return-to-send + Up/Down history is the most
  * complex key handler in the codebase per ROADMAP. It now hangs off a
  * GtkEventControllerKey installed on the chat input view; the
@@ -2305,14 +2305,14 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
     return FALSE;
 }
 
-/* Phase 4.5: configure-event is gone in GTK 4. Window size for the
+/* configure-event is gone in GTK 4. Window size for the
  * chat window is captured at hx_quit() in gtkhx.c gtkhx_save_window_positions
  * alongside position. */
 
 static GtkWidget *chat_hbox;
 static GtkWidget *wind_tmp;
 
-/* Phase 5 / docking (Phase 2): chat_close retired. Public chat is
+/* chat_close retired. Public chat is
  * a permanent resident of the toolbar's center PanelGrid; the
  * destroy-time chat_hbox re-parent trick that used to live here is
  * unneeded because the panel never goes away. Kept the wind_tmp /
@@ -2324,7 +2324,7 @@ void
 generate_colors (GtkWidget *widget)
 {
     (void)widget;
-    /* Phase 3.10: nothing to do — the colors[] palette is GdkRGBA now,
+    /* nothing to do — the colors[] palette is GdkRGBA now,
 	 * which has no .pixel field. The function is kept as a stub for
 	 * the existing caller in fe_init() and could be deleted as a
 	 * follow-up. */
@@ -2354,7 +2354,7 @@ create_chat (session *sess)
     GTK_XTEXT (text)->wordwrap = gtkhx_prefs.word_wrap;
     GTK_XTEXT (text)->urlcheck_function = word_check;
     GTK_XTEXT (text)->max_lines = gtkhx_prefs.xbuf_max;
-    /* Phase 5: enable xtext's left-column timestamp rendering. The
+    /* enable xtext's left-column timestamp rendering. The
 	 * stamp draws iff auto_indent && buf->time_stamp; the latter is
 	 * flipped from CFG_TIMESTAMP / gtkhx_prefs.timestamp. See xprintline
 	 * for the rationale (HexChat-style stamps separate from message
@@ -2371,7 +2371,7 @@ create_chat (session *sess)
     gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
-    /* Phase 3.3: chat-history "Load older" sentinel handler runs
+    /* chat-history "Load older" sentinel handler runs
 	 * alongside the URL handler — each self-filters on its own
 	 * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
 	 * and on a different button (URL = SECONDARY/MIDDLE,
@@ -2391,7 +2391,7 @@ create_chat (session *sess)
     g_object_ref_sink (vscroll);
 
     chat_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    /* Phase 5: dropped GTK 1.2-era set_size_request derived from saved
+    /* dropped GTK 1.2-era set_size_request derived from saved
 	 * xsize/ysize. set_size_request sets BOTH minimum and natural
 	 * size in GTK 4 — so saving a wide chat window then re-opening it
 	 * baked the previous width in as a hard floor that prevented the
@@ -2406,7 +2406,7 @@ create_chat (session *sess)
 
     wind_tmp = gtk_window_new ();
     gtkhx_widget_set_child (wind_tmp, chat_hbox);
-    /* Phase 4.5: dropped explicit gtk_widget_realize(text). Forcing
+    /* dropped explicit gtk_widget_realize(text). Forcing
 	 * realize before the toplevel maps was a GTK 1.2/2 idiom; under
 	 * GTK 4 widgets are windowless and realize automatically once
 	 * their root widget is shown. The early-realize call here was
@@ -2455,7 +2455,7 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
 
     (void)parent_window;  /* vestigial — see users.c */
 
-    /* Phase 5 / docking (Phase 2): public chat is a permanent
+    /* public chat is a permanent
      * resident of the toolbar's center PanelGrid. First call
      * builds and inserts; later calls raise. */
     panel = hx_panel_registry_lookup (HX_PANEL_ID_CHAT);
@@ -2596,7 +2596,7 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
         gtk_box_append (GTK_BOX (hbox), gchat->media_attach_btn);
     }
 
-    /* Phase 3 / docking: the Chat panel's content is an AdwTabView
+    /* the Chat panel's content is an AdwTabView
      * rather than the public-chat vbox directly. The public chat
      * goes into a pinned tab at position 0; per-conversation tabs
      * (private chats, private messages) get appended alongside it
@@ -2683,14 +2683,14 @@ pchat_new (session *sess, struct chat *chat)
     GTK_XTEXT (text)->wordwrap = gtkhx_prefs.word_wrap;
     GTK_XTEXT (text)->urlcheck_function = word_check;
     GTK_XTEXT (text)->max_lines = gtkhx_prefs.xbuf_max;
-    /* Phase 5: native xtext timestamps — see the matching call in
+    /* native xtext timestamps — see the matching call in
 	 * create_chat_window above for the rationale. */
     gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
     gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer, gtkhx_prefs.timestamp);
     gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
-    /* Phase 3.3: chat-history "Load older" sentinel handler runs
+    /* chat-history "Load older" sentinel handler runs
 	 * alongside the URL handler — each self-filters on its own
 	 * word pattern (URL scheme prefix vs HX_LOAD_OLDER_SENTINEL)
 	 * and on a different button (URL = SECONDARY/MIDDLE,
@@ -2734,7 +2734,7 @@ pchat_new (session *sess, struct chat *chat)
     return gchat;
 }
 
-/* Phase 3 / docking: this used to be a GtkWindow::destroy handler
+/* this used to be a GtkWindow::destroy handler
  * (sess pulled from g_object_get_data on the closing window, gchat
  * passed via the signal's data argument). The standalone window is
  * gone; the chat_tabs close-page dispatcher calls us with just the
@@ -2760,7 +2760,7 @@ pchat_close (guint32 cid)
  * needs to see it. */
 void hx_reject_chat (struct htlc_conn *htlc, guint32 _cid);
 
-/* Phase 5: Phase 4 invitation flow used qdata on the Join button to
+/* Phase 4 invitation flow used qdata on the Join button to
  * thread state into the click handler; AdwAlertDialog dispatches by
  * response id, so we carry the htlc + cid pair through the response
  * signal as a small heap-allocated context. The dialog's "closed"
@@ -2794,7 +2794,7 @@ chat_invite_response (AdwAlertDialog *dialog, const char *response,
     g_free (ctx);
 }
 
-/* Phase 5+ (MVC boundary): pure view function — just paints the
+/* pure view function — just paints the
  * new subject into the chat-window subject entry. The broadcast
  * handler in rcv.c (hx_rcv_chat_subject) is responsible for the
  * 'Subject Changed to X' chat log line; the initial-subject
@@ -2838,7 +2838,7 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
 void
 hx_reject_chat (struct htlc_conn *htlc, guint32 _cid)
 {
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_decline_chunks. */
+    /* chunk layout moved to gtkhx_proto_build_chat_decline_chunks. */
     struct hx_chunk chunks[1];
     guint8 scratch[4];
     int hc = (int)gtkhx_proto_build_chat_decline_chunks (
@@ -2848,7 +2848,7 @@ hx_reject_chat (struct htlc_conn *htlc, guint32 _cid)
     }
 }
 
-/* Phase 5: AdwAlertDialog with two responses (Join / Decline) replaces
+/* AdwAlertDialog with two responses (Join / Decline) replaces
  * the hand-rolled GtkDialog + label + two buttons. Decline (and ESC)
  * declines the invite via hx_reject_chat; Join calls hx_chat_join.
  * Both go through the same response handler: the response id keys
@@ -2885,7 +2885,7 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
     g_free (body);
 }
 
-/* Phase 4.5: pchat_update_trans was a configure-event handler that
+/* pchat_update_trans was a configure-event handler that
  * forced an xtext refresh on every resize so transparency would track
  * the new window position. configure-event is gone in GTK 4 and
  * Wayland doesn't expose true window-relative transparency anyway. */
@@ -2917,7 +2917,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
 
-    /* Phase 3 / docking: pchat content lives in a tab on the Chat
+    /* pchat content lives in a tab on the Chat
      * panel's tab view. No standalone window. The tab's title is
      * the chat title; pchat_window points at the tab content widget
      * (the hpane) so other code keying off gchat->window keeps
@@ -2944,7 +2944,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 
     inputframe = gtk_frame_new (0);
 
-    /* Phase 5+: drop GtkPaned in favour of a plain box so the input
+    /* drop GtkPaned in favour of a plain box so the input
 	 * area can shrink to a single line by default and auto-grow up
 	 * to a 5-line cap as the user types. See the matching note in
 	 * create_chat_window above for the rationale. */
@@ -2977,7 +2977,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     {
-        /* Phase 4.5: pchat input — same controller as the main chat. */
+        /* pchat input — same controller as the main chat. */
         GtkEventController *kctrl = gtk_event_controller_key_new ();
         g_signal_connect (kctrl, "key-pressed",
                           G_CALLBACK (chat_input_key_pressed), NULL);
@@ -3127,7 +3127,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtk_paned_set_end_child (GTK_PANED (hpane), user_vbox);
     gtk_paned_set_position (GTK_PANED (hpane), 435);
 
-    /* Phase 3 / docking: gchat->window points at the tab content
+    /* gchat->window points at the tab content
      * widget (hpane). Existing code that uses gchat->window — the
      * init_keyaccel below, sub-dialogs parented through
      * gtkhx_widget_get_root, etc. — keeps compiling unchanged.

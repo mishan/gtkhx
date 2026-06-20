@@ -30,7 +30,7 @@
 
 struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
-/* Phase 5: resolve a sound file by name across the layered sound
+/* resolve a sound file by name across the layered sound
  * search path:
  *   1. $CONFIG/sounds/<name>        — per-user drop-ins
  *   2. $PREFIX/share/gtkhx/sounds/  — distro / system default
@@ -57,7 +57,7 @@ sound_resolve (const char *name)
     return NULL;
 }
 
-/* Phase 5: GSound (a thin GLib-style wrapper over libcanberra) is the
+/* GSound (a thin GLib-style wrapper over libcanberra) is the
  * one and only playback path. Fire-and-forget, in-process, async — no
  * fork, no execlp, no zombie children, no waitpid. The "snd_cmd"
  * preference and the legacy fork+exec fallback have been retired;

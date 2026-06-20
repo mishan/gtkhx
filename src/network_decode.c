@@ -35,7 +35,7 @@
 #include "gtkhx_log.h"    /* hx_printf_prefix + INFOPREFIX forward-decls */
 #include "network_decode.h"
 
-/* Phase R1: Blowfish save/restore for the rollback path below.
+/* Blowfish save/restore for the rollback path below.
  * Snapshots the 9-byte OFB feedback state (ivec + num) rather than
  * cloning the full key schedule — see the comment in hx_decode for
  * the rationale. */
@@ -140,7 +140,7 @@ hx_decode (struct htlc_conn *htlc)
     memset (&cipher_out, 0, sizeof (struct qbuf));
     memset (&compress_out, 0, sizeof (struct qbuf));
 
-    /* Phase 5+ (HOPE-ChaCha20-Poly1305): AEAD-framed path. Pump
+    /* AEAD-framed path. Pump
      * complete frames from read_in into aead_plain, then bulk
      * memcpy from aead_plain into htlc->in based on how many
      * bytes the rcv parser is waiting for (htlc->in.len).
@@ -251,7 +251,7 @@ hx_decode (struct htlc_conn *htlc)
         }
         out = &cipher_out;
         len = cipher_decode (htlc, out, in, max, &inused);
-        /* Phase R1: cipher_decode can call hx_htlc_close on a NULL
+        /* cipher_decode can call hx_htlc_close on a NULL
          * Blowfish state (insurance against the never-init'd-state
          * footgun). hx_htlc_close zeros htlc->fd; bail before doing
          * any more decode/rollback work that would operate on a

@@ -11,8 +11,8 @@
  * news_browser.c — unified 1.5 threaded-news browser. See
  * news_browser.h for the design overview.
  *
- * Phase 1: window + 2-pane layout, empty tree.
- * Phase 2: root NEWSDIRLIST on open populates the top level
+ * window + 2-pane layout, empty tree.
+ * root NEWSDIRLIST on open populates the top level
  *          (folders + categories).
  *
  * Built on the modern GTK 4 list stack:
@@ -131,7 +131,7 @@ hx_news_node_new (int kind, const char *name, const char *path)
 /* ---------- Browser ---------- */
 
 struct _gnews_browser {
-    /* Phase 5 / docking (Phase 2): window points at the HxPanel
+    /* window points at the HxPanel
      * widget that hosts the browser content (was a standalone
      * GtkWindow). adw_dialog_present and gtk_widget_get_root keep
      * working via the duck-typed widget walk to the toplevel
@@ -1613,7 +1613,7 @@ open_compose_window (gnews_browser *br, const char *category_path,
     gtk_window_set_title (GTK_WINDOW (window),
                           reply_to ? _ ("Reply") : _ ("New Post"));
     gtk_widget_set_size_request (window, 560, reply_to ? 540 : 380);
-    /* Phase 5 / docking (Phase 2): br->window is a PanelWidget,
+    /* br->window is a PanelWidget,
      * not a GtkWindow. Transient-for the toolbar window which now
      * hosts the panel — same target every other panel uses for
      * sub-dialog parenting. */
@@ -1929,7 +1929,7 @@ on_panel_presented (PanelWidget *panel, gpointer user_data)
 
 /* ---------- Window lifecycle ---------- */
 
-/* Phase 5 / docking (Phase 2): kept defined for the void-cast at
+/* kept defined for the void-cast at
  * the bottom of build_browser_window. Was wired to close-request
  * on the standalone GtkWindow; the HxPanel persists across opens
  * and uses libpanel's own close-page machinery instead. Phase 4
@@ -1977,7 +1977,7 @@ build_browser_window (void)
     br->icon_post
         = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
 
-    /* Phase 5 / docking (Phase 2): no standalone GtkWindow. The
+    /* no standalone GtkWindow. The
      * browser content lives inside an HxPanel resident of the
      * toolbar's center PanelGrid. br->window points at the panel
      * widget so the dialog-parent calls (adw_dialog_present) keep
@@ -2025,7 +2025,7 @@ build_browser_window (void)
         "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), 2,
         G_CALLBACK (on_delete_clicked), br);
 
-    /* Phase 5 / docking (Phase 2): the AdwHeaderBar with Refresh /
+    /* the AdwHeaderBar with Refresh /
      * NewFolder / NewCategory / NewPost on start and Reply /
      * Delete on end relocates to a slim top-of-content GtkBox,
      * matching the other Phase 2 migrations. */
@@ -2150,7 +2150,7 @@ build_browser_window (void)
     gtkhx_box_pack (right_box, right_scroll, TRUE, TRUE, 0);
     gtk_paned_set_end_child (GTK_PANED (paned), right_box);
 
-    /* Phase 5 / docking (Phase 2): assemble the panel content
+    /* assemble the panel content
      * vbox (button bar + breadcrumb + paned) and wrap it in an
      * HxPanel. on_window_close stays defined (see comment on the
      * function) but is no longer wired — the panel persists and
@@ -2233,7 +2233,7 @@ open_news_browser (GtkWidget *widget, struct _session *sess)
     (void)widget;
     (void)sess;
 
-    /* Phase 5 / docking (Phase 2): the browser panel lives in the
+    /* the browser panel lives in the
      * toolbar's center PanelGrid. First call (the eager-construct
      * from create_toolbar_window) builds it before any
      * connection — so we skip the NEWSDIRLIST until we're actually
@@ -2267,7 +2267,7 @@ open_news_browser (GtkWidget *widget, struct _session *sess)
 	 * scope while the panel is focused. */
     init_keyaccel (the_browser->window);
 
-    /* Phase 2: kick off the root NEWSDIRLIST so the top level
+    /* kick off the root NEWSDIRLIST so the top level
 	 * populates as soon as the panel appears — but only when
 	 * connected. Eager-construct from create_toolbar_window runs
 	 * pre-connection and just leaves the tree empty; the first

@@ -15,7 +15,7 @@
 #include "protocol.h"
 #include "tasks_table.h"
 
-/* Phase 5+: task lifecycle on GHashTable.
+/* task lifecycle on GHashTable.
  *
  * task_free() is the GDestroyNotify the hashtable invokes whenever a
  * value is replaced (g_hash_table_insert with an existing key),

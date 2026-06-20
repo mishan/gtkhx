@@ -25,7 +25,7 @@
 HxHistoryEntry *
 hx_history_entry_parse (const guint8 *data, gsize len)
 {
-    /* Phase R2: packed-binary decode (24-byte fixed header + nick
+    /* packed-binary decode (24-byte fixed header + nick
 	 * + message + best-effort mini-TLV walk) moved to the Rust
 	 * hotline-proto crate's parse_history_entry. The C side keeps
 	 * the HxHistoryEntry allocation and the by-length nick /

@@ -47,7 +47,7 @@ void
 hl_filelist_walk (const void *buf, gsize buflen, hl_filelist_entry_cb cb,
                   void *user_data)
 {
-    /* Phase R2: per-entry packed-binary decode moved to the Rust
+    /* per-entry packed-binary decode moved to the Rust
 	 * hotline-proto crate's parse_file_list_entry. The C callback
 	 * surface stays the same — files_remote_provider.c keeps its
 	 * existing cb signature without knowing the FFI exists. */

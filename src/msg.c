@@ -60,7 +60,7 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
     char *wire
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_msg_chunks.
+    /* chunk layout moved to gtkhx_proto_build_msg_chunks.
 	 * Build chunks BEFORE registering the task — task_new() snapshots
 	 * the current htlc->trans into a new task table entry (which then
 	 * waits for the server's matching TASK reply); the actual increment
@@ -123,7 +123,7 @@ hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
     wire = gtkhx_text_for_wire (msg, safe_len, utf8, /*is_body=*/TRUE,
                                 &wire_len);
 
-    /* Phase R2: chunk layout moved to
+    /* chunk layout moved to
 	 * gtkhx_proto_build_broadcast_chunks. No scratch (single body
 	 * chunk, no integer fields). Build chunks BEFORE registering the
 	 * task — see hx_send_msg for the rationale (task_new snapshots
@@ -140,7 +140,7 @@ hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
     g_free (wire);
 }
 
-/* Phase 5+: msgwin lifecycle on GHashTable.
+/* msgwin lifecycle on GHashTable.
  *
  * msgwin_free() is the GDestroyNotify the hashtable invokes when an
  * entry is removed or the table itself is destroyed. Mirrors the
@@ -180,7 +180,7 @@ msg_windows_init (session *sess)
         sess->msg_windows = g_hash_table_new_full (
             g_direct_hash, g_direct_equal, NULL, msgwin_free);
     }
-    /* Phase 3 / docking: register the close-tab dispatcher target
+    /* register the close-tab dispatcher target
      * so user-clicks on a msg tab's X end up calling msgwin_delete.
      * Idempotent — re-registers the same callback on each session
      * init. */
@@ -214,7 +214,7 @@ msgwin_with_uid (guint16 uid)
 
 static void msg_input_activate (GtkWidget *widget, gpointer data);
 
-/* Phase 4.5: GTK 4 widgets don't emit key-press-event; keyboard input
+/* GTK 4 widgets don't emit key-press-event; keyboard input
  * comes via a GtkEventControllerKey installed on the widget. The
  * "key-pressed" signal carries (controller, keyval, keycode, state,
  * user_data). Returning TRUE inhibits further propagation, FALSE lets
@@ -303,7 +303,7 @@ msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     return FALSE;
 }
 
-/* Phase 4.5: msg_update_trans was a configure-event handler that
+/* msg_update_trans was a configure-event handler that
  * forced an xtext refresh on resize so transparency would track the
  * new window position. configure-event is gone in GTK 4, and Wayland
  * doesn't expose true window-relative transparency anyway. */
@@ -346,7 +346,7 @@ msg_input_activate (GtkWidget *widget, gpointer data)
     g_free (termed_buf);
 }
 
-/* Phase 5: header pane above the PM chat that mirrors the bits of
+/* header pane above the PM chat that mirrors the bits of
  * the recipient's identity that the global user list shows — icon,
  * name, idle/admin status. Built from the cached hx_user the chat
  * keeps for that uid; falls back to the name we were created with
@@ -507,7 +507,7 @@ create_msg (guint16 _uid, char *name)
 
     msg->history = history_new ();
 
-    /* Phase 3 / docking: msg->window is no longer a standalone
+    /* msg->window is no longer a standalone
      * GtkWindow. It's the content widget of an AdwTabPage inside
      * the Chat panel's tab view; create_msgwin builds the layout
      * vbox and points msg->window at it after gtkhx_chat_tabs_add_msg.
@@ -522,7 +522,7 @@ create_msg (guint16 _uid, char *name)
     GTK_XTEXT (msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
     GTK_XTEXT (msg->outputbuf)->urlcheck_function = word_check;
     GTK_XTEXT (msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-    /* Phase 5: native xtext timestamps — see chat.c::create_chat_window
+    /* native xtext timestamps — see chat.c::create_chat_window
 	 * for the rationale. */
     gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
     gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
@@ -551,7 +551,7 @@ create_msg (guint16 _uid, char *name)
     g_object_set_data (G_OBJECT (msg->inputbuf), "sess", &the_session);
     /* Note: GtkTextView has no "activate" signal — Return is dispatched
 	 * from msg_input_key_pressed, which calls msg_input_activate().
-	 * Phase 4.5: key-press-event is gone in GTK 4; install a
+	 * key-press-event is gone in GTK 4; install a
 	 * GtkEventControllerKey on the input view instead. */
     {
         GtkEventController *kctrl = gtk_event_controller_key_new ();
@@ -560,7 +560,7 @@ create_msg (guint16 _uid, char *name)
         gtk_widget_add_controller (msg->inputbuf, kctrl);
     }
 
-    /* Phase 5+: stash the msgwin in the session's PM-windows table
+    /* stash the msgwin in the session's PM-windows table
 	 * keyed on uid. msg_windows_init() at startup guarantees the
 	 * table exists by the time we land here. */
     g_hash_table_insert (the_session.msg_windows,
@@ -568,7 +568,7 @@ create_msg (guint16 _uid, char *name)
     return msg;
 }
 
-/* Phase 3 / docking: this used to be a GtkWindow::close-request
+/* this used to be a GtkWindow::close-request
  * handler returning FALSE to allow default destroy. Now we ride
  * AdwTabView::close-page via the chat_tabs dispatcher, which calls
  * us with the uid of the tab being closed. msgwin_delete drops
@@ -603,7 +603,7 @@ create_msgwin (guint16 uid, char *name)
      * "title" property after we've added the tab below. */
     title = g_strdup_printf ("%s (%u)", name, uid);
 
-    /* Phase 3 / docking: the window-level layout (default-size,
+    /* the window-level layout (default-size,
      * resizable, margins) is gone — the tab content sits inside the
      * Chat panel's tab view, which the dock controls. */
     hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -613,7 +613,7 @@ create_msgwin (guint16 uid, char *name)
     gtkhx_box_pack (hbox, msg->outputbuf, 1, 1, 0);
     gtkhx_box_pack (hbox, msg->vscroll, 0, 0, 0);
 
-    /* Phase 5+: wrap the GtkTextView inputbuf in a scrolled window
+    /* wrap the GtkTextView inputbuf in a scrolled window
 	 * with content-driven natural height (1 line minimum, 5 line
 	 * max). Matches the chat window'"'"'s auto-grow input box. */
     GtkWidget *input_scroll = gtk_scrolled_window_new ();
@@ -687,7 +687,7 @@ create_msgwin (guint16 uid, char *name)
     gtk_widget_set_vexpand (vpane, TRUE);
     gtk_box_append (GTK_BOX (outer_vbox), vpane);
 
-    /* Phase 3 / docking: msg->window points at the AdwTabPage's
+    /* msg->window points at the AdwTabPage's
      * content widget — outer_vbox here. Code paths that key off
      * msg->window (init_keyaccel, etc.) keep compiling unchanged.
      * The tab is appended to the Chat panel's tab view; the close-
@@ -716,7 +716,7 @@ create_msgwin (guint16 uid, char *name)
 /* Render a private message into its msgwin's xtext, with the
  * "<name>" coloured nick prefix prepended.
  *
- * Phase 5+: this is the shared body for both msg_output (legacy
+ * this is the shared body for both msg_output (legacy
  * raw-strings call site — kept for plugin / outgoing-msg / xfer-
  * status code paths that hand-roll a name + body string pair) and
  * msg_output_from_event (the msg-signal path that has the
@@ -787,7 +787,7 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     g_free (nick_wrapped);
     g_free (valid_body);
 
-    /* Phase 3 / docking: incoming messages set needs-attention on
+    /* incoming messages set needs-attention on
      * the tab + the Chat dock panel so the user notices a new PM
      * arrived while they're elsewhere. Self-echoes (the user just
      * typed) skip the indicator — no need to flag yourself. */
@@ -813,7 +813,7 @@ msg_output_from_event (HxMsgEvent *event)
     msg_output_render (event->name, event->uid, event->body, event->is_self);
 }
 
-/* Phase 5: short broadcasts go through toolbar_show_toast, long ones
+/* short broadcasts go through toolbar_show_toast, long ones
  * through an AdwAlertDialog with a scrolled GtkTextView extra child.
  *
  * The split exists because servers use HTLS_HDR_MSG_BROADCAST for two
@@ -902,7 +902,7 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
     GtkTextBuffer *tbuf;
     gsize len = text ? strlen (text) : 0;
 
-    /* Phase 5+: notify-dispatch happens before the toast/alert so
+    /* notify-dispatch happens before the toast/alert so
 	 * the user sees a system-level alert regardless of whether
 	 * the broadcast renders as a transient toast or a modal
 	 * dialog. */

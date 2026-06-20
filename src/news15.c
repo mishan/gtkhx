@@ -56,7 +56,7 @@ hx_news15_get_post (struct htlc_conn *htlc, struct news_item *item)
 
     hldir = path_to_hldir (item->group->path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_getthread
+    /* chunk layout moved to gtkhx_proto_build_news_getthread
 	 * _chunks. See hx_news15_cat_list for the task ordering rationale. */
     struct hx_chunk chunks[3];
     guint8 scratch[4];
@@ -80,7 +80,7 @@ hx_news15_cat_list (struct htlc_conn *htlc, struct gnews_catalog *gcnews)
     gcnews->listing = 1;
     hldir = path_to_hldir (gcnews->path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_catlist
+    /* chunk layout moved to gtkhx_proto_build_news_catlist
 	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
 	 * rationale (a builder failure must not leave a phantom task
 	 * behind). */
@@ -104,7 +104,7 @@ hx_news15_fldr_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
     gfnews->listing = 1;
     hldir = path_to_hldir (gfnews->path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_dirlist
+    /* chunk layout moved to gtkhx_proto_build_news_dirlist
 	 * _chunks. See hx_news15_cat_list for the task ordering note. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_news_dirlist_chunks (
@@ -142,7 +142,7 @@ hx_news15_post_thread (struct htlc_conn *htlc, char *path, const char *subject,
     char *text_wire = gtkhx_text_for_wire (text, strlen (text), utf8,
                                            /*is_body=*/TRUE, &text_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_post
+    /* chunk layout moved to gtkhx_proto_build_news_post
 	 * _thread_chunks. NEWSTYPE is hard-coded "text/plain" — gtkhx
 	 * only sends plain-text articles. See hx_news15_cat_list for the
 	 * task ordering rationale. */
@@ -171,7 +171,7 @@ hx_news15_delete_thread (struct htlc_conn *htlc, char *path, guint32 threadid)
 
     hldir = path_to_hldir (path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_delete
+    /* chunk layout moved to gtkhx_proto_build_news_delete
 	 * _thread_chunks. See hx_news15_cat_list for the task ordering. */
     struct hx_chunk chunks[2];
     guint8 scratch[4];
@@ -193,7 +193,7 @@ hx_news15_delete (struct htlc_conn *htlc, char *path)
 
     hldir = path_to_hldir (path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_delete
+    /* chunk layout moved to gtkhx_proto_build_news_delete
 	 * _chunks. See hx_news15_cat_list for the task ordering note. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_news_delete_chunks (
@@ -222,7 +222,7 @@ hx_news15_mkcat (struct htlc_conn *htlc, char *path, const char *name)
     char *name_wire
         = gtkhx_text_for_wire (name, strlen (name), utf8, FALSE, &name_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_mkcat
+    /* chunk layout moved to gtkhx_proto_build_news_mkcat
 	 * _chunks. See hx_news15_cat_list for the task ordering. */
     struct hx_chunk chunks[2];
     int hc = (int)gtkhx_proto_build_news_mkcat_chunks (
@@ -244,7 +244,7 @@ hx_news15_mkdir (struct htlc_conn *htlc, char *path)
 
     hldir = path_to_hldir (path, &hldirlen, 0);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_news_mkdir
+    /* chunk layout moved to gtkhx_proto_build_news_mkdir
 	 * _chunks. See hx_news15_cat_list for the task ordering note. */
     struct hx_chunk chunks[1];
     int hc = (int)gtkhx_proto_build_news_mkdir_chunks (

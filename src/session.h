@@ -21,7 +21,7 @@
 
 /* ---- GTK 3 compat shims ------------------------------------------- */
 /*
- * Phase 3.2: GdkPixmap, GdkBitmap, and GdkColormap were removed in GTK 3.
+ * GdkPixmap, GdkBitmap, and GdkColormap were removed in GTK 3.
  * Code throughout this tree still declares variables of those types — most
  * of which are eventually fed into gtk_image_new_from_pixbuf, which wants
  * GdkPixbuf*. Aliasing the legacy types to GdkPixbuf lets the bulk-
@@ -60,7 +60,7 @@ typedef gpointer GdkDrawable;
 
 /* ---- Message-window threading ------------------------------------- */
 
-/* Phase 5+ (GLib-collections): no more next/prev. Open PM windows
+/* no more next/prev. Open PM windows
  * live in session->msg_windows, a GHashTable<u16 uid, struct
  * msgwin*>. Lookup by uid is O(1) via msgwin_with_uid (now a thin
  * g_hash_table_lookup wrapper); the table owns the msgwin and frees
@@ -73,7 +73,7 @@ struct msgwin {
     GtkWidget *inputbuf;
     GtkWidget *vscroll;
     GtkWidget *window;
-    /* Phase 5: header pane above the chat showing the recipient's
+    /* header pane above the chat showing the recipient's
 	 * icon + name + status. info_image is a GtkImage (Mac classic
 	 * cicn rendered to GdkPixbuf via load_icon); info_label is a
 	 * single GtkLabel with Pango markup — bold (optionally
@@ -117,7 +117,7 @@ typedef struct textentry textentry;
 
 /* ---- Chat windows ------------------------------------------------- */
 
-/* Phase 5+ (GLib-collections): no more next/prev. Open chat-window
+/* no more next/prev. Open chat-window
  * UI lives in session->gchats, a GHashTable<u32 cid, struct
  * gtkhx_chat*>. cid=0 is the public chat's window (created at
  * startup by create_chat); pchat windows go in keyed on their
@@ -135,7 +135,7 @@ struct gtkhx_chat {
      * when HTLC_CAP_VOICE wasn't echoed (which is the common
      * case on most servers). */
     GtkWidget *voice_panel;
-    /* Phase 5 (Phase C of the users_view migration): per-pchat
+    /* per-pchat
 	 * sidebar is now an HxUserListView GObject (GtkColumnView-
 	 * backed). Forward-declared as an opaque typedef so this
 	 * header doesn't have to pull in users_view.h — the field
@@ -306,7 +306,7 @@ struct uesp_fn {
                 const hl_access_bits);
 };
 
-/* Phase 5+ (GLib-collections): no more next/prev. Users live in
+/* no more next/prev. Users live in
  * chat->users, a GHashTable<u16 uid, struct hx_user*>. Lookup by
  * uid via hx_user_with_uid is now O(1); name lookup (uncommon)
  * still walks. */
@@ -341,7 +341,7 @@ struct hx_user {
 };
 
 struct chat {
-    /* Phase 5+: no next/prev — chats live in session->chats, a
+    /* no next/prev — chats live in session->chats, a
 	 * GHashTable<u32 cid, struct chat*>. Members likewise live in
 	 * chat->users, a GHashTable<u16 uid, struct hx_user*>. */
     guint32 cid;
@@ -359,7 +359,7 @@ typedef struct _session {
     GtkWidget *tasks_window;
     GtkWidget *users_window;
 
-    /* Phase 5: the standalone Users window's row list is now a
+    /* the standalone Users window's row list is now a
 	 * HxUserListView GObject (GtkColumnView-backed). Forward-declared
 	 * as an opaque typedef so this header doesn't have to pull in
 	 * gtk-side users_view.h — the field is read/written from
@@ -394,7 +394,7 @@ typedef struct _session {
 
     GtkWidget *agreementwin;
 
-    /* Phase 5+: open chat-window UI keyed on cid. Replaces the
+    /* open chat-window UI keyed on cid. Replaces the
 	 * doubly-linked gchat_list. The public chat (cid=0) is added
 	 * by create_chat at startup; pchat_new adds private-chat
 	 * windows. */
@@ -405,12 +405,12 @@ typedef struct _session {
 
     struct gnews_folder *gfnews_list;
 
-    /* Phase 5: per-session gfile_list pointer retired with the
+    /* per-session gfile_list pointer retired with the
 	 * legacy files browser. The new orthodox-FM browser
 	 * (files_browser.c) is a singleton owned by its own static
 	 * `the_browser` variable. */
 
-    /* Phase 5+: open PM windows keyed on the recipient's uid.
+    /* open PM windows keyed on the recipient's uid.
 	 * Replaces the file-scope `msg_list` global in msg.c and the
 	 * dead `sess->msg_list` field that was declared here but never
 	 * populated (a long-standing bug — options.c font / wordwrap /
@@ -421,14 +421,14 @@ typedef struct _session {
 
     struct gnews_catalog *gcnews_list;
 
-    /* Phase 5+: tasks keyed on the 32-bit trans id. Replaces the
+    /* tasks keyed on the 32-bit trans id. Replaces the
 	 * intrusive __task_list / task_list / task_tail trio. Lookup
 	 * by trans is O(1); iteration is via GHashTableIter. The
 	 * hashtable owns each task; values get freed via task_free
 	 * (tasks.c) when removed. */
     GHashTable *tasks;
 
-    /* Phase 5: removed session-level user_list / user_tail / __user_list.
+    /* removed session-level user_list / user_tail / __user_list.
 	 * Those fields were declared but never wired up (network.c only ever
 	 * initializes chat_list->user_list, and every consumer reads through
 	 * chat->user_list — usually chat_with_cid(sess, 0)->user_list, the
@@ -437,7 +437,7 @@ typedef struct _session {
 	 * first PM open. The canonical "global user list" lookup is the
 	 * public chat at cid=0 — use chat_with_cid(sess, 0)->user_list. */
 
-    /* Phase 5+: chats keyed on the 32-bit chat-id. Replaces the
+    /* chats keyed on the 32-bit chat-id. Replaces the
 	 * chat_front / chat_tail / chat_list trio + the embedded
 	 * __chat_list sentinel. cid=0 is the public/server-wide chat
 	 * and is created at session init by chats_init() — it must
@@ -477,7 +477,7 @@ extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */
 
-/* Phase 5+ (GLib-collections): cached_filelist had next/prev fields
+/* cached_filelist had next/prev fields
  * left over from a long-defunct linked-list design that nothing
  * ever wired up. Dropped. Each cfl is owned by a gfile_list entry
  * (gfl->cfl) — the canonical "find a cfl for path P" lookup goes

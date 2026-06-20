@@ -343,7 +343,7 @@ COMMAND (me)
     char *wire = gtkhx_text_for_wire (p, strlen (p), utf8,
                                       /*is_body=*/TRUE, &wire_len);
 
-    /* Phase R2: chunk layout moved to gtkhx_proto_build_chat_chunks.
+    /* chunk layout moved to gtkhx_proto_build_chat_chunks.
 	 * Same shape as hx_send_chat; the only difference is the style
 	 * value — /me sends style=1 (emote) vs. style=0 (normal). The
 	 * builder takes style as host-order and big-endian-encodes it

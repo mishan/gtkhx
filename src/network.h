@@ -109,14 +109,14 @@ extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 
 extern void hl_code (void *__dst, const void *__src, size_t len);
 
-/* Phase 5: PING keepalive — start the periodic timer once login has
+/* PING keepalive — start the periodic timer once login has
  * succeeded and stop it when the connection ends. ping_stop is also
  * called from inside hx_htlc_close, so callers never need to pair
  * a stop with a start. */
 extern void ping_start (struct htlc_conn *htlc);
 extern void ping_stop (void);
 
-/* Phase 5: send HTLC_HDR_AGREEMENTAGREE carrying NAME + ICON. The
+/* send HTLC_HDR_AGREEMENTAGREE carrying NAME + ICON. The
  * legacy Hotline two-stage login flow defers identity disclosure
  * to this message; see the comment block above login_dispatch in
  * network.c. Triggered by the Agree button on the agreement window
