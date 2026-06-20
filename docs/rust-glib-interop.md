@@ -9,6 +9,13 @@
 > or "Phase 8.B will" the actual code already exists in
 > `rust/crates/hxvoice-runtime/`. The conventions described below still
 > apply; the tense just hasn't been swept.
+>
+> **R3.1 addendum:** the tokio runtime + tokio→GLib event ferry land
+> in this same `hxbridge` crate behind the `runtime` cargo feature.
+> See the [tokio runtime](#tokio-runtime-r31) and
+> [event ferry](#tokio--glib-event-ferry-r31) sections below for the
+> shipped APIs. Phase R3.2 (banner.c port) is the first planned
+> consumer that flips the feature on in the meson build.
 
 ## The problem
 
@@ -130,6 +137,117 @@ Use cases in Phase 8.B+:
 Pinned by the `spawn_local_actually_polls_future` test in
 `hxbridge::tests`.
 
+## Tokio runtime (R3.1)
+
+The `hxbridge::runtime` module (Cargo feature `runtime`) ships
+the single, shared, dedicated-thread tokio runtime that every R3+
+worker port schedules against. Locked-in decisions are encoded in
+the module's rustdoc; the short version:
+
+- **One runtime, process-wide.** Lazily started on the first call
+  to `Runtime::global()`. `OnceLock` guarantees the singleton.
+  Subsequent calls hand back the existing instance — no
+  per-connection or per-window runtimes.
+- **Dedicated OS thread.** `tokio::runtime::Builder::new_multi_thread()
+  .worker_threads(1)`. The GLib main loop owns the calling thread;
+  any tokio work needs its own. `worker_threads(1)` is fine for the
+  R3 workload (socket I/O, not CPU-bound); bump it when we have
+  evidence the single worker is saturated.
+- **No `spawn_local` on the runtime side.** Tokio's `spawn` requires
+  `Send + 'static` because the multi-thread scheduler can move
+  tasks across worker threads. The GLib half of the bridge is where
+  `!Send` UI state lives; the tokio half stays `Send`-clean.
+- **`enable_io` + `enable_time`.** I/O is on for R3.3 (`hxnet`
+  TcpStream); time is on for the ping keepalive port (R3.2+) that
+  replaces `network.c::ping_tick` (`g_timeout_add_seconds`).
+
+```rust
+use hxbridge::runtime::Runtime;
+
+let handle = Runtime::global().spawn(async move {
+    do_some_io().await
+});
+```
+
+Pinned by:
+
+- `runtime::tests::new_runtime_starts_and_runs_a_task`
+- `runtime::tests::spawn_returns_join_handle_that_resolves`
+- `runtime::tests::global_runtime_is_a_singleton`
+- `runtime::tests::global_runtime_actually_runs_tasks`
+- `runtime::tests::time_is_enabled_so_sleep_works`
+- `runtime::tests::spawn_runs_on_worker_thread_not_caller`
+
+## Tokio → GLib event ferry (R3.1)
+
+The `hxbridge::channel` module pairs a `tokio::task` producing
+events with a GLib-main-thread handler consuming them. Two pieces:
+
+```rust
+use glib::MainContext;
+use hxbridge::channel::{channel, forward_to_main};
+use hxbridge::runtime::Runtime;
+
+let (tx, rx) = channel::<HotlineEvent>(64);
+
+// On the main thread, install the ferry. The handler runs on the
+// main thread; it can freely touch GTK widgets, emit GtkhxSession
+// signals, etc. Holding the returned `MainForwarder` keeps the
+// ferry running; dropping it aborts (and closes the channel from
+// the receiver side, so producers see SendError on subsequent
+// sends — typical pattern is to drop senders + forwarder together).
+let _forwarder = forward_to_main(&MainContext::default(), rx, |evt| {
+    dispatch_to_ui(evt);
+});
+
+// On the tokio side, send events. `send` returns a future; awaiting
+// it parks under backpressure once the channel buffer fills.
+Runtime::global().spawn(async move {
+    while let Some(evt) = read_next_event().await {
+        if tx.send(evt).await.is_err() {
+            break; // forwarder went away
+        }
+    }
+});
+```
+
+### Why `async_channel` instead of `tokio::sync::mpsc`
+
+`tokio::sync::mpsc::Receiver` only polls cleanly inside a tokio
+executor; on the GLib main loop it requires `blocking_recv` (which
+blocks the UI) or a tokio `LocalSet`. `async_channel::Receiver` is
+just a future that runs under whatever executor polls it — the GLib
+executor drains it with no extra ceremony. `async-channel` also
+arrives in the workspace transitively via glycin, so the dep
+doesn't grow.
+
+### Backpressure and capacity
+
+`channel(capacity)` builds an `async_channel::bounded` pair. When
+the buffer is full, `Sender::send().await` parks until the GLib
+main loop drains an item. Pick a capacity that absorbs a typical
+event burst but kicks in before memory pressure does — 64 is a
+reasonable default for chat-style traffic; 256 for the initial
+USER_LIST flood on join.
+
+### `forward_to_main(ctx, rx, handler)` takes a context
+
+The context parameter is what lets unit tests use a private
+`MainContext::new()` instead of polluting `MainContext::default()`
+across parallel test runs. Production callers pass
+`MainContext::default()` and the panel of test cases in
+`channel::tests` exercises the cross-thread, backpressure,
+re-entrancy, and shutdown paths against a private context per test.
+
+Pinned by:
+
+- `channel::tests::forward_delivers_items_in_order`
+- `channel::tests::forward_resolves_when_all_senders_drop`
+- `channel::tests::handler_runs_on_main_thread`
+- `channel::tests::dropping_forwarder_stops_delivery`
+- `channel::tests::handler_dropping_sender_closes_loop_cleanly`
+- `channel::tests::channel_applies_backpressure_at_capacity`
+
 ## What's NOT allowed
 
 These patterns will be caught in review:
@@ -183,7 +301,8 @@ These were established in R2 and apply here too:
 
 ## Forward pointers
 
-Phase R3.0 (this doc) is the foothold. The same rules apply to:
+Phases R3.0 (wrapping helpers) and R3.1 (tokio runtime + ferry) are
+the foothold. The same rules apply to:
 
 - **Phase 8.B (gstreamer-rs pipeline).** `webrtcbin` is a GObject;
   emit calls on it go through `session_from_ptr_full` shape; bus

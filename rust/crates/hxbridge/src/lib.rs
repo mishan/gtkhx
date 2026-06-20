@@ -1,11 +1,15 @@
-//! Rust ↔ GLib bridge for GtkHx (Phase R3.0, see `docs/voice-chat-plan.md`
-//! §5 and `docs/rust-glib-interop.md` for the lifetime-model rationale).
+//! Rust ↔ GLib bridge for GtkHx (Phases R3.0 + R3.1, see
+//! `docs/voice-chat-plan.md` §5, `docs/RUST-ROADMAP.md` §R3, and
+//! `docs/rust-glib-interop.md` for the lifetime-model rationale).
 //!
 //! Phase R3.0 ships the C-owned-GObject wrapping helpers and a single
-//! reference signal emit. Phase R3 proper (tokio runtime + the
-//! tokio↔GLib forwarding pipeline) expands this same crate without
-//! revisiting the lifetime model; the helpers added here are the
-//! foundation everything downstream builds on.
+//! reference signal emit (this file). Phase R3.1 — the [`runtime`]
+//! and [`channel`] submodules — adds the dedicated-thread tokio
+//! runtime and the tokio→GLib event ferry that subsequent R3.x
+//! worker ports (banner.c R3.2, hxnet Connection actor R3.3,
+//! xfers.c R3.4) build on. Both R3.1 modules are gated behind the
+//! `runtime` cargo feature so the default hxbridge build stays lean
+//! until a consumer turns the feature on.
 //!
 //! # Lifetime model
 //!
@@ -39,6 +43,16 @@ use glib::translate::Borrowed;
 use glib::translate::FromGlibPtrBorrow;
 use glib::translate::FromGlibPtrNone;
 use std::ffi::{c_char, c_void, CStr};
+
+// Phase R3.1 submodules — gated behind the `runtime` feature so the
+// default build (the staticlib linked into the C binary) doesn't
+// drag in tokio + async-channel until a consumer activates them. The
+// first planned consumer is the R3.2 banner.c port; once that lands,
+// the meson cargo invocation flips `--features hxbridge/runtime` on.
+#[cfg(feature = "runtime")]
+pub mod channel;
+#[cfg(feature = "runtime")]
+pub mod runtime;
 
 // Phase 8.B forward-looking imports. These crates are listed in
 // Cargo.toml as optional deps under the `voice` feature, so they
