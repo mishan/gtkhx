@@ -1,0 +1,48 @@
+[package]
+name = "hxnet"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Hotline Connection actor for GtkHx (Phase R3.3 — tokio + hotline-proto)"
+publish = false
+
+# R3.3.a is the scaffold-only landing: rlib only. The staticlib +
+# meson hookup arrives in R3.3.b when network.c starts calling
+# through the C-ABI surface.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+hotline-proto = { path = "../hotline-proto" }
+# rt-multi-thread + sync + io are the minimum for the Connection
+# actor (the runtime the production caller spawns into is
+# multi-thread). io-util brings AsyncReadExt / AsyncWriteExt for
+# the actor's read/write helpers. `macros` is for the
+# `#[tokio::test]` attribute used by the duplex tests.
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "sync",
+    "io-util",
+    "macros",
+    "time",
+] }
+
+[dev-dependencies]
+# `#[tokio::test]` + `tokio::io::duplex` for in-memory paired
+# AsyncRead/AsyncWrite, and `test-util` for advanced control over
+# the runtime. With `rt-multi-thread` already enabled via the main
+# dep above, `#[tokio::test]` will spin up the multi-thread
+# scheduler by default — that matches production's shape, which is
+# what we want for these integration tests (in-process server +
+# tokio actor in the same runtime instance, two threads exercising
+# the channels). If we ever want the current-thread flavour for a
+# specific test, the attribute supports it via
+# `#[tokio::test(flavor = "current_thread")]`.
+tokio = { workspace = true, features = [
+    "rt",
+    "sync",
+    "io-util",
+    "macros",
+    "time",
+    "test-util",
+] }
