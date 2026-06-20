@@ -148,16 +148,18 @@ valid_cipher (const char *cipheralg)
 #define DEFAULT_COMPRESS "GZIP"
 /* Order matters here — the connect dialog shows these in the
  * compression picker, and the first-listed is the default. ZSTD
- * first if available (best ratio per the HOPE-Secure-Login spec),
- * LZ4 second (fastest), GZIP last (universally supported, the
- * legacy default). */
+ * first (best ratio per the HOPE-Secure-Login spec), LZ4 second
+ * (fastest), GZIP last (universally supported, the legacy
+ * default).
+ *
+ * Phase R1 moved the codec implementations into the Rust
+ * hxcompress crate, which always bundles flate2 + lz4_flex +
+ * zstd. The historical HAVE_LZ4 / HAVE_ZSTD probes that used to
+ * gate this list lost their defining sites with that move — they
+ * fell silent and the dialog showed GZIP only. Gates dropped. */
 char *valid_compressors[] = {
-#ifdef HAVE_ZSTD
     "ZSTD",
-#endif
-#ifdef HAVE_LZ4
     "LZ4",
-#endif
     "GZIP",
     0
 };
