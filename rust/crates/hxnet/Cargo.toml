@@ -6,25 +6,40 @@ license = "GPL-2.0-or-later"
 description = "Hotline Connection actor for GtkHx (Phase R3.3 — tokio + hotline-proto)"
 publish = false
 
-# R3.3.a is the scaffold-only landing: rlib only. The staticlib +
-# meson hookup arrives in R3.3.b when network.c starts calling
-# through the C-ABI surface.
+# R3.3.b adds `staticlib` so meson can link the FFI symbols into
+# the C binary. The rlib stays for cross-crate Rust consumers (the
+# integration tests, and R3.3.c+ that builds on the safe Rust API).
 [lib]
-crate-type = ["rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 hotline-proto = { path = "../hotline-proto" }
-# rt-multi-thread + sync + io are the minimum for the Connection
-# actor (the runtime the production caller spawns into is
-# multi-thread). io-util brings AsyncReadExt / AsyncWriteExt for
-# the actor's read/write helpers. `macros` is for the
-# `#[tokio::test]` attribute used by the duplex tests.
+# hxbridge with `runtime` feature gives us Runtime::global() — the
+# shared process-wide tokio runtime R3.1 set up. R3.3.b's FFI uses
+# it for spawn; having two tokio runtimes in one process is the
+# canonical anti-pattern, so we deliberately share. The dep brings
+# glib transitively, which the gtkhx C binary already links.
+hxbridge = { path = "../hxbridge", features = ["runtime"] }
+# Direct glib dep for `g_critical!` in the FFI error paths.
+# Already pulled in transitively via hxbridge but we depend on it
+# explicitly so the imports compile cleanly.
+glib = { workspace = true }
+# tokio features:
+#   rt-multi-thread + sync + macros + time: needed by Connection
+#       itself (the production runtime the caller spawns into is
+#       multi-thread). `macros` powers `#[tokio::test]` in the
+#       duplex integration tests.
+#   io-util: AsyncReadExt / AsyncWriteExt for the actor loop's
+#       read/write helpers.
+#   net: tokio::net::TcpStream + the from_std bridge used by
+#       the FFI's spawn_fd entry to wrap a C-side socket fd.
 tokio = { workspace = true, features = [
     "rt-multi-thread",
     "sync",
     "io-util",
     "macros",
     "time",
+    "net",
 ] }
 
 [dev-dependencies]

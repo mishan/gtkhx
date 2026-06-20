@@ -64,6 +64,13 @@ rust_sources = files(
   'crates/hxbridge/src/blocking.rs',
   'crates/hxbridge/src/channel.rs',
   'crates/hxbridge/src/runtime.rs',
+  # Phase R3.3 — hxnet Connection actor + FFI surface.
+  'crates/hxnet/src/lib.rs',
+  'crates/hxnet/src/command.rs',
+  'crates/hxnet/src/connection.rs',
+  'crates/hxnet/src/event.rs',
+  'crates/hxnet/src/ffi.rs',
+  'crates/hxnet/src/frame.rs',
   'crates/hxvoice/src/lib.rs',
   'crates/hxvoice/src/event.rs',
   'crates/hxvoice/src/action.rs',
@@ -87,6 +94,7 @@ rust_sources = files(
   'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
+  'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
@@ -209,6 +217,28 @@ rust_hxbridge_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxbridge',
+  ],
+)
+
+# Hotline Connection actor (Phase R3.3). hxnet wraps tokio + the
+# hotline-proto frame layer behind a C-callable FFI surface
+# (rust/crates/hxnet/src/ffi.rs). The first consumer is the smoke
+# test in tests/unit/test_hxnet_ffi.c; R3.3.c wires the production
+# switch in network.c. hxnet shares hxbridge's tokio runtime
+# singleton via the Runtime::global accessor, so the staticlib
+# doesn't bring a second tokio binary into the link.
+#
+# Depends on hxbridge for the tokio runtime. Static-archive
+# resolution wants the consumer (-lhxnet) listed BEFORE its
+# provider (-lhxbridge) so the linker has hxnet's unresolved
+# symbols on the table when it scans hxbridge — see
+# tests/meson.build's `[rust_hxnet_dep, rust_hxbridge_dep]`
+# ordering for the test binary.
+rust_hxnet_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxnet',
   ],
 )
 

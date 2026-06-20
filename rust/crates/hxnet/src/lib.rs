@@ -12,13 +12,15 @@
 //!    encoded bytes back out.
 //! 4. Tears down cleanly on EOF / cancel / handle drop.
 //!
-//! # What R3.3.a ships
+//! # What R3.3.a + R3.3.b ship
 //!
-//! This is the **scaffold-only** phase. The crate exists, the actor
-//! pattern is real (spawn / channel pair / shutdown), and the
-//! frame-level read/write loop is exercised against
-//! `tokio::io::duplex` in-memory streams. The crate is `rlib`-only
-//! — no C FFI, no `staticlib`, no `meson.build` hookup.
+//! R3.3.a built the actor itself (spawn / channel pair / shutdown)
+//! over a `tokio::io::duplex` test exerciser. R3.3.b adds the
+//! C-callable FFI surface ([`ffi`]) plus the meson hookup so the
+//! C binary can spawn an actor over a real fd. The FFI is the
+//! polling-style API: `hxnet_connection_try_recv_frame` returns
+//! events on demand; R3.3.c adds the callback-driven variant that
+//! routes through the hxbridge ferry to the GLib main loop.
 //!
 //! The HOPE cipher layer and the compression layer are NOT in this
 //! phase. The actor reads and writes **plaintext Hotline frames**
@@ -56,6 +58,7 @@
 pub mod command;
 pub mod connection;
 pub mod event;
+pub mod ffi;
 pub mod frame;
 
 pub use command::Command;
