@@ -822,7 +822,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
             return std::ptr::null_mut();
         }
     };
-    let (cmd, mut events, join) = match Connection::spawn(tcp) {
+    let (cmd, events, join) = match Connection::spawn(tcp) {
         Ok(triple) => triple,
         Err(e) => {
             glib::g_critical!(
@@ -835,24 +835,393 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
         }
     };
 
-    // forward_to_main is going to call MainContext::spawn_local,
-    // which **panics** if the calling thread doesn't own the
-    // context (see hxbridge::channel::forward_to_main and the
-    // upstream gtk-rs requirement). A panic across this
-    // `extern "C"` boundary is UB, so we defensively `acquire()`
-    // ownership ourselves and fail with `g_critical` + NULL on
-    // an Err. The guard binding must be a named local — letting
-    // it drop at the end of a boolean expression releases the
-    // context before forward_to_main attaches. Same pattern as
-    // hxvoice-runtime's bus-watch attach.
-    //
-    // We do this BEFORE Box::into_raw so the failure path
-    // doesn't leak the box: a returned NULL with `cmd`,
-    // `events`, and `join` going out of scope is clean — `cmd`
-    // dropping signals HandleDropped to the actor, which exits;
-    // `events` dropping discards any in-flight buffered events;
-    // the actor task runs to completion on the runtime and the
-    // TcpStream's Drop closes the fd.
+    // Hand the post-spawn wiring (MainContext acquire,
+    // Box::into_raw, pump spawn, forwarder attach,
+    // callback_state stash) to the shared helper so this entry
+    // and the transform-config variant below stay aligned. See
+    // [`wire_callback_state`] for the rationale on ordering and
+    // the cleanup-on-failure contract.
+    wire_callback_state(rt, cmd, events, join, on_event, on_shutdown, user_data)
+}
+
+// ============================================================
+// Transform-config FFI (R3.3.e-2)
+// ============================================================
+//
+// Lets the C side pass a HOPE-negotiated cipher + compression
+// stack and have hxnet hand the resulting layered transport to
+// the Connection actor. The shape is a flat `#[repr(C)]` struct
+// — all per-direction key material is held inline, the cipher /
+// compression kind tags pick which subset of fields are
+// load-bearing on any given call.
+//
+// Behaviourally identical to `spawn_fd_with_callback` once the
+// transports are built — the same SendCallbacks + pump +
+// forward_to_main wiring runs underneath.
+
+/// Cipher selection tag, matches [`crate::transform::CipherKind`].
+pub const HXNET_CIPHER_NONE: c_uint = 0;
+pub const HXNET_CIPHER_BLOWFISH: c_uint = 1;
+pub const HXNET_CIPHER_CHACHA20_POLY1305: c_uint = 2;
+
+/// Compression selection tag, matches
+/// [`crate::transform::CompressionKind`].
+pub const HXNET_COMPRESSION_NONE: c_uint = 0;
+pub const HXNET_COMPRESSION_GZIP: c_uint = 1;
+pub const HXNET_COMPRESSION_LZ4: c_uint = 2;
+pub const HXNET_COMPRESSION_ZSTD: c_uint = 3;
+
+/// Maximum Blowfish key length the cipher accepts (matches
+/// `Blowfish::new_from_slice`'s 1..=56 range).
+pub const HXNET_BLOWFISH_MAX_KEY_LEN: c_uint = 56;
+
+/// C-facing config for the layered transport. Flat POD struct so
+/// the C side mirrors it with an explicit `_Static_assert` on
+/// size + the relevant field offsets — same ABI-pinning
+/// discipline as [`HxnetFrame`].
+///
+/// Field usage depends on the kind tags:
+///
+/// - `cipher_kind == HXNET_CIPHER_BLOWFISH` reads
+///   `blowfish_key[..blowfish_key_len]`, `blowfish_read_ivec`,
+///   `blowfish_write_ivec`.
+/// - `cipher_kind == HXNET_CIPHER_CHACHA20_POLY1305` reads
+///   `aead_read_*` / `aead_write_*`.
+/// - Either compression tag uses no extra fields — the codec
+///   is fully described by the tag.
+///
+/// All fields not used by the active variant are ignored; the C
+/// side may leave them zeroed.
+#[repr(C)]
+pub struct HxnetTransformConfig {
+    pub cipher_kind: c_uint,
+    pub compression_kind: c_uint,
+
+    /// Blowfish key length in bytes (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`).
+    pub blowfish_key_len: c_uint,
+    /// Blowfish key buffer; only the first `blowfish_key_len`
+    /// bytes are used.
+    pub blowfish_key: [u8; 56],
+    /// Per-direction OFB ivecs. The legacy HOPE handshake
+    /// derives these from the session keystream.
+    pub blowfish_read_ivec: [u8; 8],
+    pub blowfish_write_ivec: [u8; 8],
+
+    /// ChaCha20-Poly1305 keys per direction.
+    pub aead_read_key: [u8; 32],
+    pub aead_write_key: [u8; 32],
+    /// Frame counters per direction.
+    pub aead_read_counter: u64,
+    pub aead_write_counter: u64,
+    /// Direction tags — `AEAD_DIR_SERVER_TO_CLIENT` /
+    /// `AEAD_DIR_CLIENT_TO_SERVER` from hxcrypto-aead.
+    pub aead_read_dir: u8,
+    pub aead_write_dir: u8,
+
+    /// Explicit trailing padding so the struct's total size is
+    /// stable and the C side's `_Static_assert sizeof(...)`
+    /// catches drift.
+    pub _pad: [u8; 6],
+}
+
+// Pin the cross-language ABI layout from the Rust side; the C
+// side mirrors with the same offsets. Drift on either side
+// trips a compile error before any byte hits the wire.
+const _: () = {
+    assert!(std::mem::offset_of!(HxnetTransformConfig, cipher_kind) == 0);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, compression_kind) == 4);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key_len) == 8);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key) == 12);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 68);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 76);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 84);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 116);
+    // aead_read_counter is u64 — needs 8-byte alignment, so
+    // there are 4 bytes of padding after aead_write_key (which
+    // ends at offset 148) before the counter starts at 152.
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 152);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 160);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 168);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 169);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 170);
+    // Total size: padding to 8-byte alignment for the u64
+    // counters means the struct's natural alignment is 8;
+    // 170 + 6 = 176 lines up at an 8-byte boundary.
+    assert!(std::mem::size_of::<HxnetTransformConfig>() == 176);
+    assert!(std::mem::align_of::<HxnetTransformConfig>() == 8);
+};
+
+/// Translate the C-side config into a [`crate::transform::CipherLayer`].
+/// Returns the layer plus a descriptive label for `g_critical`
+/// messages on the failure path. Caller validates the kind tags
+/// before this point.
+fn cipher_layer_from_config(
+    cfg: &HxnetTransformConfig,
+) -> Result<crate::transform::CipherLayer, &'static str> {
+    match cfg.cipher_kind {
+        HXNET_CIPHER_NONE => Ok(crate::transform::CipherLayer::None),
+        HXNET_CIPHER_BLOWFISH => {
+            let key_len = cfg.blowfish_key_len as usize;
+            if key_len == 0 || key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
+                return Err("blowfish_key_len out of range (1..=56)");
+            }
+            let key = &cfg.blowfish_key[..key_len];
+            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+                Some(mut s) => {
+                    s.restore_ofb_state(&cfg.blowfish_read_ivec, 0);
+                    s
+                }
+                None => return Err("blowfish read state init failed"),
+            };
+            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+                Some(mut s) => {
+                    s.restore_ofb_state(&cfg.blowfish_write_ivec, 0);
+                    s
+                }
+                None => return Err("blowfish write state init failed"),
+            };
+            Ok(crate::transform::CipherLayer::Blowfish {
+                read_state,
+                write_state,
+            })
+        }
+        HXNET_CIPHER_CHACHA20_POLY1305 => {
+            // The dir tag is one byte of the ChaCha20-Poly1305
+            // nonce derivation; a value outside the defined set
+            // would derive a non-interoperable (and potentially
+            // unsafe) nonce. Reject anything other than the
+            // two canonical SERVER_TO_CLIENT / CLIENT_TO_SERVER
+            // tags before handing them to AeadState.
+            if cfg.aead_read_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
+                && cfg.aead_read_dir
+                    != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
+            {
+                return Err("aead_read_dir is not a defined direction tag");
+            }
+            if cfg.aead_write_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
+                && cfg.aead_write_dir
+                    != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
+            {
+                return Err("aead_write_dir is not a defined direction tag");
+            }
+            // For a working bidirectional channel the read and
+            // write directions must disagree — same direction
+            // tag on both ends produces matching nonces, which
+            // breaks the AEAD's per-direction counter
+            // invariant. Refuse the obviously-broken config
+            // up front.
+            if cfg.aead_read_dir == cfg.aead_write_dir {
+                return Err(
+                    "aead_read_dir and aead_write_dir must disagree",
+                );
+            }
+            Ok(crate::transform::CipherLayer::ChaCha20Poly1305 {
+                read: hxcrypto_aead::AeadState {
+                    key: cfg.aead_read_key,
+                    counter: cfg.aead_read_counter,
+                    dir: cfg.aead_read_dir,
+                },
+                write: hxcrypto_aead::AeadState {
+                    key: cfg.aead_write_key,
+                    counter: cfg.aead_write_counter,
+                    dir: cfg.aead_write_dir,
+                },
+            })
+        }
+        _ => Err("unknown cipher_kind"),
+    }
+}
+
+fn compression_kind_from_config(
+    cfg: &HxnetTransformConfig,
+) -> Result<crate::transform::CompressionKind, &'static str> {
+    match cfg.compression_kind {
+        HXNET_COMPRESSION_NONE => Ok(crate::transform::CompressionKind::None),
+        HXNET_COMPRESSION_GZIP => Ok(crate::transform::CompressionKind::Gzip),
+        HXNET_COMPRESSION_LZ4 => Ok(crate::transform::CompressionKind::Lz4),
+        HXNET_COMPRESSION_ZSTD => Ok(crate::transform::CompressionKind::Zstd),
+        _ => Err("unknown compression_kind"),
+    }
+}
+
+/// Like [`hxnet_connection_spawn_fd_with_callback`], but wraps
+/// the adopted TCP socket in a cipher + compression stack
+/// described by `config` before handing it to the actor.
+///
+/// `config` is dereferenced read-only; the C side may free /
+/// reuse its storage as soon as this function returns. NULL
+/// `config` is rejected with `g_critical` + NULL.
+///
+/// All fd / callback / runtime semantics are identical to the
+/// non-transform variant. The layered transport is built via
+/// [`crate::transform::compose`]; the only new failure modes
+/// it can surface are "invalid cipher/compression tag" and
+/// "ZSTD decoder init failed". Both log via `g_critical` and
+/// return NULL.
+///
+/// # Safety
+///
+/// `config` must point at a valid, fully-initialised
+/// `HxnetTransformConfig`. All other parameters carry the same
+/// safety preconditions as
+/// [`hxnet_connection_spawn_fd_with_callback`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_transforms_and_callback(
+    fd: c_int,
+    config: *const HxnetTransformConfig,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if config.is_null() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_transforms_and_callback: NULL config"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_transforms_and_callback: NULL \
+             callback"
+        );
+        return std::ptr::null_mut();
+    }
+    if fd < 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_transforms_and_callback: negative fd"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let cfg = &*config;
+    let cipher_layer = match cipher_layer_from_config(cfg) {
+        Ok(l) => l,
+        Err(msg) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: {}",
+                msg
+            );
+            return std::ptr::null_mut();
+        }
+    };
+    let compression_kind = match compression_kind_from_config(cfg) {
+        Ok(k) => k,
+        Err(msg) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: {}",
+                msg
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+                 Runtime::global panicked; aborting to avoid unwinding \
+                 across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    // Same fd-prep + TCP wrap as the non-transform variant.
+    let std_stream = std::net::TcpStream::from_raw_fd(fd);
+    if let Err(e) = std_stream.set_nonblocking(true) {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+             set_nonblocking failed: {}",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+    if let Err(e) = std_stream.peer_addr() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+             peer_addr failed ({}); fd is not a connected TCP socket",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+
+    let _guard = rt.handle().enter();
+    let tcp = match TcpStream::from_std(std_stream) {
+        Ok(s) => s,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+                 TcpStream::from_std failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Layer the cipher + compression on top of the raw TCP.
+    let boxed = match crate::transform::compose(tcp, cipher_layer, compression_kind)
+    {
+        Ok(b) => b,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+                 transform compose failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let (cmd, events, join) = match Connection::spawn_boxed(boxed) {
+        Ok(triple) => triple,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
+                 Connection::spawn_boxed failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    wire_callback_state(rt, cmd, events, join, on_event, on_shutdown, user_data)
+}
+
+/// Common post-Connection-spawn callback wiring. Builds the
+/// HxnetConnection box, spawns the pump task, acquires the
+/// MainContext, attaches the forwarder. Returns the C-side
+/// handle pointer or NULL on the MainContext-acquisition
+/// failure path (with `g_critical` already logged). Same
+/// shape used by both
+/// [`hxnet_connection_spawn_fd_with_callback`] and the
+/// transform-config variant above so the wiring stays in one
+/// place.
+fn wire_callback_state(
+    rt: &Runtime,
+    cmd: ConnectionHandle,
+    mut events: mpsc::Receiver<Event>,
+    join: JoinHandle<()>,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    // Acquire MainContext before Box::into_raw so a failure
+    // doesn't leak the handle — see the matching comment in
+    // hxnet_connection_spawn_fd_with_callback for the rationale.
     let main_ctx = glib::MainContext::ref_thread_default();
     let _acquire_guard = if main_ctx.is_owner() {
         None
@@ -862,20 +1231,16 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
             Err(_) => {
                 glib::g_critical!(
                     "hxnet",
-                    "hxnet_connection_spawn_fd_with_callback: thread-default \
-                     MainContext is owned by another thread; cannot acquire \
-                     for spawn_local. The Connection was spawned on the \
-                     tokio runtime but is being dropped because the GLib \
-                     wiring cannot attach."
+                    "wire_callback_state: thread-default MainContext is owned \
+                     by another thread; cannot acquire for spawn_local. The \
+                     Connection was spawned on the tokio runtime but is being \
+                     dropped because the GLib wiring cannot attach."
                 );
                 return std::ptr::null_mut();
             }
         }
     };
 
-    // Build the box first so we can capture its raw pointer in
-    // the callback closure (so the C callback receives a stable
-    // handle pointer it can correlate to its own state).
     let handle_box = Box::new(HxnetConnection {
         cmd,
         events: None,
@@ -884,24 +1249,16 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
     });
     let handle_ptr = Box::into_raw(handle_box);
 
-    // tokio→GLib ferry: pump task forwards every Event from
-    // the actor's mpsc receiver into the async_channel; the
-    // GLib forward_to_main drains the async_channel and
-    // invokes the C callback.
     let (ferry_tx, ferry_rx) =
         async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
     let pump = rt.handle().spawn(async move {
         while let Some(evt) = events.recv().await {
             if ferry_tx.send(evt).await.is_err() {
-                // GLib side dropped (handle destroyed). Stop
-                // pumping; the actor will eventually exit when
-                // its cmd channel closes too.
                 break;
             }
         }
     });
 
-    // Capture the C callbacks behind the SendCallbacks marker.
     let cb = SendCallbacks {
         on_event,
         on_shutdown,
@@ -909,30 +1266,11 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
         handle_ptr,
     };
 
-    // forward_to_main runs on the current thread's
-    // MainContext, which in production is the GLib main loop.
-    // The handler runs on that thread and is free to touch GTK
-    // state, call the C callback, etc. We've already acquired
-    // ownership above, so the spawn_local inside forward_to_main
-    // is guaranteed not to panic.
     let forwarder =
         hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| {
             match evt {
                 Event::Frame(frame) => {
-                    // Allocate the HxnetFrame on the stack so
-                    // the C callback receives a stable pointer
-                    // for the duration of its call. After the
-                    // callback returns, the C side either has
-                    // called hxnet_frame_free already (in which
-                    // case the body has been moved into Rust's
-                    // free path) or will eventually call it;
-                    // either way the stack HxnetFrame is fine
-                    // to drop here because body_ptr ownership
-                    // has been formally transferred to C by the
-                    // callback contract.
                     let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
-                    // SAFETY: write_frame_to_out fully
-                    // initialises *out.
                     unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
                     // Hand the raw *mut pointer to the callback —
                     // hxnet_frame_free writes through the struct
@@ -941,9 +1279,6 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
                     // contract and saves the C side a const-cast.
                     let frame_ptr = out.as_mut_ptr();
                     if let Some(on_event) = cb.on_event {
-                        // SAFETY: caller guarantees the
-                        // function pointer is valid and that
-                        // user_data outlives the connection.
                         unsafe {
                             on_event(cb.handle_ptr, frame_ptr, cb.user_data);
                         }
@@ -952,8 +1287,6 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
                 Event::Shutdown(reason) => {
                     let code = shutdown_code(reason);
                     if let Some(on_shutdown) = cb.on_shutdown {
-                        // SAFETY: caller guarantees the
-                        // function pointer is valid.
                         unsafe {
                             on_shutdown(cb.handle_ptr, code, cb.user_data);
                         }
@@ -962,8 +1295,6 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
             }
         });
 
-    // Now stuff the callback state into the handle. Re-borrow
-    // through the raw pointer.
     let handle_ref = unsafe { &mut *handle_ptr };
     handle_ref._callback_state = Some(CallbackState {
         _pump: pump,
