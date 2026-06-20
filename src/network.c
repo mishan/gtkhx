@@ -42,6 +42,7 @@
 
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "hxnet_bridge.h"
 #include "rcv.h"
 #include "gtkthreads.h"
 #include "gtkutil.h"
@@ -273,6 +274,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * current_conn so the callbacks can't fire on a freed
      * stream. */
     control_remove_all_sources ();
+
+    /* R3.3.e-4c: tear down the hxnet handle if it was installed
+     * (see the GTKHX_USE_HXNET branch in send_login). Drops the
+     * ConnectionHandle, which the actor sees as HandleDropped;
+     * the wrapped TcpStream's Drop closes the duped fd. Safe
+     * to call whether or not the bridge was active. */
+    hx_bridge_uninstall ();
 
     /* GSocketConnection owns the fd; releasing it closes
 	 * the socket. Replaces the legacy close(fd) call. */
@@ -545,6 +553,12 @@ control_arm_write_source (struct htlc_conn *htlc)
     GOutputStream *out_stream;
     GSource *src;
 
+    /* The hxnet path drives writes via hx_bridge_send_frame; the
+     * GIOStream's output source must stay disarmed so it doesn't
+     * race with hxnet's send loop on the kernel buffer. */
+    if (hx_bridge_is_installed ()) {
+        return;
+    }
     if (!current_conn || control_write_src_id != 0) {
         return;
     }
@@ -1175,14 +1189,59 @@ send_login (struct gtkhx_connect_ctx *ctx)
 
     connected = 1;
     htlc->gdk_input = 1;
-    /* control-channel I/O is driven by GPollable
-     * sources on current_conn's input / output streams (see the
-     * control_arm_* helpers). The legacy hxd_fd_set GIOChannel
-     * watch was tied to the raw socket fd and didn't see
-     * TLS-internal buffering; the pollable sources do.
-     * hxd_files[] stays unset for the control fd — only the
-     * /exec pipe consumers in commands.c use it now. */
-    control_arm_read_source (htlc);
+
+    /* R3.3.e-4c opt-in: when GTKHX_USE_HXNET is set in the
+     * environment, the control connection is driven by the
+     * hxnet Connection actor (Rust + tokio) instead of the
+     * legacy GPollable sources. Three preconditions gate the
+     * switch:
+     *
+     *   (a) the env var must be set,
+     *   (b) the connection must not be TLS (the hxnet path
+     *       adopts a raw TCP fd; TLS lives in GTlsConnection
+     *       and stays on the GIOStream path until Phase 7),
+     *   (c) the install must not race a prior install
+     *       (single-conn assumption).
+     *
+     * On install we dup() the socket so hxnet's TcpStream and
+     * the GSocketConnection each have their own kernel
+     * reference. The GIOStream's read source is NOT armed —
+     * hxnet's callback drives reception. Writes through
+     * hlwrite route to hxnet_connection_send_frame via the
+     * bridge gate further down the file.
+     *
+     * Cipher / compression negotiation isn't yet supported on
+     * the hxnet path; if HOPE activates them mid-session the
+     * code below in rcv.c tears the connection down with a
+     * clear message. */
+    gboolean use_hxnet = (g_getenv ("GTKHX_USE_HXNET") != NULL)
+                         && !htlc->tls && !hx_bridge_is_installed ();
+    if (use_hxnet) {
+        int dup_fd = dup (s);
+        if (dup_fd < 0) {
+            g_critical (
+                "GTKHX_USE_HXNET set but dup() failed (%s); falling back to "
+                "GIOStream path",
+                g_strerror (errno));
+            use_hxnet = FALSE;
+        } else if (!hx_bridge_install_passthrough (htlc, dup_fd)) {
+            /* hx_bridge_install_passthrough logs its own
+             * g_critical on failure; dup_fd has been closed
+             * by hxnet's spawn path already. */
+            use_hxnet = FALSE;
+        }
+    }
+
+    if (!use_hxnet) {
+        /* control-channel I/O is driven by GPollable
+         * sources on current_conn's input / output streams (see the
+         * control_arm_* helpers). The legacy hxd_fd_set GIOChannel
+         * watch was tied to the raw socket fd and didn't see
+         * TLS-internal buffering; the pollable sources do.
+         * hxd_files[] stays unset for the control fd — only the
+         * /exec pipe consumers in commands.c use it now. */
+        control_arm_read_source (htlc);
+    }
 
     if (ctx->login) {
         strcpy (htlc->login, ctx->login);
@@ -3339,6 +3398,35 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	 * cipher / compress hooks below. */
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
+    /* R3.3.e-4c: when the bridge is installed and neither
+     * cipher nor compression is active, ship the packed
+     * plaintext through hxnet's send queue and pop the bytes
+     * out of htlc->out so the legacy write-source path doesn't
+     * also try to send them. The hxnet path doesn't support
+     * cipher / compression yet (HOPE-negotiated stacks live
+     * inside the C cipher state today); when those are set we
+     * fall through to the legacy in-place encode path. */
+    if (hx_bridge_is_installed ()
+        && htlc->cipher_encode_type == CIPHER_NONE
+        && htlc->compress_encode_type == COMPRESS_NONE) {
+        int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
+        if (rc == 0) {
+            htlc->out.len -= len;
+        } else {
+            /* hxnet refused the send (full / closed / invalid /
+             * not-installed-race). Don't drop the packed bytes
+             * silently — leave them in htlc->out and tear the
+             * connection down so the higher-level protocol
+             * state doesn't desync. hx_bridge_send_frame
+             * already logged the FFI code via g_critical. */
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "hxnet send failed (rc=%d); closing.\n",
+                              rc);
+            hx_htlc_close (htlc, /*expected=*/0);
+        }
+        return;
+    }
+
     control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
         len = compress_encode (htlc, this_off, len);
@@ -3407,6 +3495,29 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     proto_trace_send_end ();
 
     len = (htlc->out.pos + htlc->out.len) - this_off;
+
+    /* R3.3.e-4c hxnet routing — same gate / shape as hlwrite
+     * above; see that comment for the rationale. */
+    if (hx_bridge_is_installed ()
+        && htlc->cipher_encode_type == CIPHER_NONE
+        && htlc->compress_encode_type == COMPRESS_NONE) {
+        int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
+        if (rc == 0) {
+            htlc->out.len -= len;
+        } else {
+            /* hxnet refused the send (full / closed / invalid /
+             * not-installed-race). Don't drop the packed bytes
+             * silently — leave them in htlc->out and tear the
+             * connection down so the higher-level protocol
+             * state doesn't desync. hx_bridge_send_frame
+             * already logged the FFI code via g_critical. */
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              "hxnet send failed (rc=%d); closing.\n",
+                              rc);
+            hx_htlc_close (htlc, /*expected=*/0);
+        }
+        return;
+    }
 
     control_arm_write_source (htlc);
     if (htlc->compress_encode_type != COMPRESS_NONE) {
