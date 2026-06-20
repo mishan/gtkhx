@@ -9,12 +9,13 @@
 
 /*
  * tests/integration/test_real_connect_hxnet.c — R3.3.e-5 Tier 3
- * coverage that exercises the GTKHX_USE_HXNET production switch.
+ * coverage that exercises the hxnet production switch.
  *
  * Companion to test_real_connect.c. Same fake-server harness,
- * same production network.c symbol under test (hx_connect), but
- * the env var is set so send_login takes the bridge install path
- * instead of arming the GIOStream's read source.
+ * same production network.c symbol under test (hx_connect). As
+ * of R3.3.e-4e, hxnet is the default; this test runs with
+ * GTKHX_USE_HXNET unset so it covers the no-env-var default-on
+ * path.
  *
  * What this proves:
  *
@@ -36,10 +37,17 @@
  *       calls hxnet_connection_destroy and clears the globals.
  *
  *   real_connect_hxnet/tls_skips_install
- *       Negative gate: GTKHX_USE_HXNET set + htlc->tls=1 must
- *       leave the bridge UN-installed. TLS connections stay on
- *       the legacy GIOStream path (TLS lives in GTlsConnection,
- *       not on a raw fd hxnet's TcpStream::from_raw_fd can adopt).
+ *       Negative gate: htlc->tls=1 must leave the bridge
+ *       UN-installed even with hxnet as the default. TLS
+ *       connections stay on the legacy GIOStream path (TLS lives
+ *       in GTlsConnection, not on a raw fd hxnet's
+ *       TcpStream::from_raw_fd can adopt).
+ *
+ *   real_connect_hxnet/opt_out_with_env_zero
+ *       Opt-out gate: GTKHX_USE_HXNET=0 must leave the bridge
+ *       UN-installed across the same path that otherwise installs
+ *       it. Guards the only escape hatch users have if hxnet
+ *       misbehaves against a real server.
  *
  * The fake-server stops reading after HTLC_MAGIC_LEN bytes —
  * after HANDSHAKE_DONE the LOGIN frame is shipped through hxnet,
@@ -264,7 +272,7 @@ test_tls_skips_install (void)
     /* The connect either fails at TLS handshake (server not TLS)
      * or somewhere later. Either way the bridge must not have
      * been installed at any point — and the gate check in
-     * send_login is what enforces that. */
+     * hx_install_hxnet_post_hope is what enforces that. */
     g_assert_false (hx_bridge_is_installed ());
 
     observer_free (obs, gtkhx);
@@ -274,12 +282,54 @@ test_tls_skips_install (void)
     hx_fake_server_free (srv);
 }
 
+/* R3.3.e-4e: with hxnet as the default, GTKHX_USE_HXNET=0 is the
+ * users' opt-out. The other tests rely on the env-var being
+ * unset (covers the default-on path); this test sets it to "0"
+ * for its scope and confirms the bridge stays uninstalled all
+ * the way through a normal connect attempt. */
+static void
+test_opt_out_with_env_zero (void)
+{
+    g_setenv ("GTKHX_USE_HXNET", "0", TRUE);
+
+    GError *err = NULL;
+    hx_fake_server *srv = hx_fake_server_new (HX_FAKE_BEHAVIOR_SEND_MAGIC,
+                                              HTLC_MAGIC_LEN, &err);
+    g_assert_nonnull (srv);
+    g_assert_no_error (err);
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+    reset_test_htlc ();
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", hx_fake_server_get_port (srv),
+                "guest", "", 0, /*tls=*/0);
+    drive_until (obs, 5000);
+    g_assert_true (obs->wait_arrived);
+
+    /* The user opted out — bridge must not install regardless of
+     * how far the connect got. */
+    g_assert_false (hx_bridge_is_installed ());
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_fake_server_free (srv);
+    g_unsetenv ("GTKHX_USE_HXNET");
+}
+
 int
 main (int argc, char *argv[])
 {
-    /* Set the env-var BEFORE g_test_init / hx_connect — it's
-     * read in send_login. */
-    g_setenv ("GTKHX_USE_HXNET", "1", TRUE);
+    /* R3.3.e-4e: hxnet is the default. Leave GTKHX_USE_HXNET
+     * unset so the install/uninstall/TLS-gate tests run against
+     * the default-on path; the opt-out test scopes the env-var
+     * to its own scope. */
 
     g_test_init (&argc, &argv, NULL);
     connect_test_init_fd_table ();
@@ -288,6 +338,8 @@ main (int argc, char *argv[])
                      test_install_on_handshake);
     g_test_add_func ("/real_connect_hxnet/tls_skips_install",
                      test_tls_skips_install);
+    g_test_add_func ("/real_connect_hxnet/opt_out_with_env_zero",
+                     test_opt_out_with_env_zero);
 
     return g_test_run ();
 }

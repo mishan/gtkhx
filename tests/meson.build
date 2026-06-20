@@ -1309,16 +1309,13 @@ test('real_connect', test_integration_real_connect,
      timeout : 30)
 
 # real_connect_hxnet — R3.3.e-5 Tier 3 coverage for the
-# GTKHX_USE_HXNET production-switch path. Same source-pile as
-# real_connect (production network.c + cipher + hope + proto)
-# but the test main() sets GTKHX_USE_HXNET=1 before driving
-# hx_connect. Asserts the bridge is installed after
-# HANDSHAKE_DONE (proving the env-var gate fires and
-# hx_bridge_install_passthrough succeeded), that the LOGIN
-# frame was routed through hxnet rather than left in
-# htlc->out, and that hx_htlc_close uninstalls the bridge.
-# Plus a negative case: htlc->tls=1 + env-var set must leave
-# the bridge uninstalled (TLS keeps the legacy path).
+# hxnet production-switch path. Same source-pile as
+# real_connect (production network.c + cipher + hope + proto).
+# As of R3.3.e-4e, hxnet is the default, so the test runs
+# with GTKHX_USE_HXNET unset and walks through the post-login
+# install path. Asserts the deferred install + TLS gate; an
+# opt-out test scopes GTKHX_USE_HXNET=0 to confirm the escape
+# hatch.
 test_integration_real_connect_hxnet = executable(
   'test_integration_real_connect_hxnet',
   'integration/test_real_connect_hxnet.c',

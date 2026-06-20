@@ -283,7 +283,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     control_remove_all_sources ();
 
     /* R3.3.e-4c: tear down the hxnet handle if it was installed
-     * (see the GTKHX_USE_HXNET branch in send_login). Drops the
+     * (see hx_install_hxnet_post_hope). Drops the
      * ConnectionHandle, which the actor sees as HandleDropped;
      * the wrapped TcpStream's Drop closes the duped fd. Safe
      * to call whether or not the bridge was active. */
@@ -708,8 +708,9 @@ install_check_idle (gpointer user_data)
     int dup_fd = dup (htlc->fd);
     if (dup_fd < 0) {
         g_critical (
-            "GTKHX_USE_HXNET set but dup(htlc->fd=%d) failed (%s); "
-            "staying on legacy GIOStream path",
+            "hxnet install: dup(htlc->fd=%d) failed (%s); staying "
+            "on legacy GIOStream path (set GTKHX_USE_HXNET=0 to "
+            "silence)",
             htlc->fd, g_strerror (errno));
         pending_install_source_id = 0;
         return G_SOURCE_REMOVE;
@@ -757,10 +758,30 @@ install_check_idle (gpointer user_data)
     return G_SOURCE_REMOVE;
 }
 
+/* R3.3.e-4e: hxnet is the default. Set GTKHX_USE_HXNET=0 to
+ * opt out and stay on the legacy GIOStream path. Any other
+ * value (including the env-var being unset) opts in.
+ *
+ * Why a string compare rather than a boolean: we keep the same
+ * env-var name as the 4c/4d opt-in flag so test harnesses and
+ * shell aliases don't need to change; we just flip the
+ * polarity. "0" is the universally-understood opt-out token.
+ * "off" / "false" / "no" are not honored — keep the surface
+ * minimal so there's no ambiguity in bug reports. */
+static gboolean
+hxnet_opt_in (void)
+{
+    const char *v = g_getenv ("GTKHX_USE_HXNET");
+    if (v != NULL && g_strcmp0 (v, "0") == 0) {
+        return FALSE;
+    }
+    return TRUE;
+}
+
 void
 hx_install_hxnet_post_hope (struct htlc_conn *htlc)
 {
-    if (g_getenv ("GTKHX_USE_HXNET") == NULL) {
+    if (!hxnet_opt_in ()) {
         return;
     }
     if (!htlc || htlc->tls || htlc->fd == 0) {
