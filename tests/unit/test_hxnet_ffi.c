@@ -138,10 +138,18 @@ extern hxnet_connection *hxnet_connection_spawn_fd_with_callback (
 #define HXNET_COMPRESSION_ZSTD 3
 
 typedef struct {
-    unsigned int cipher_kind;
-    unsigned int compression_kind;
-    unsigned int blowfish_read_key_len;
-    unsigned int blowfish_write_key_len;
+    /* All u32-shaped fields use uint32_t (not `unsigned int`) so
+     * the wire layout is the same on every target — `unsigned
+     * int` is whatever-width on a hypothetical 16-bit
+     * platform, while uint32_t is pinned. The Rust side
+     * (HxnetTransformConfig in ffi.rs) uses c_uint which the
+     * ABI const-asserts also assume is 4 bytes; the assertions
+     * below verify that, and using uint32_t here keeps the
+     * mirror struct stable for the same reason. */
+    uint32_t cipher_kind;
+    uint32_t compression_kind;
+    uint32_t blowfish_read_key_len;
+    uint32_t blowfish_write_key_len;
     uint8_t      blowfish_read_key[56];
     uint8_t      blowfish_write_key[56];
     uint8_t      blowfish_read_ivec[8];

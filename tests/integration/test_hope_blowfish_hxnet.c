@@ -96,10 +96,12 @@
 #define HXNET_MACALG_MD5    2
 
 typedef struct {
-    unsigned int cipher_kind;
-    unsigned int compression_kind;
-    unsigned int blowfish_read_key_len;
-    unsigned int blowfish_write_key_len;
+    /* uint32_t (not `unsigned int`) for portability — matches
+     * the discipline in tests/unit/test_hxnet_ffi.c. */
+    uint32_t cipher_kind;
+    uint32_t compression_kind;
+    uint32_t blowfish_read_key_len;
+    uint32_t blowfish_write_key_len;
     uint8_t      blowfish_read_key[56];
     uint8_t      blowfish_write_key[56];
     uint8_t      blowfish_read_ivec[8];

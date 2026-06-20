@@ -17,6 +17,7 @@
 
 #include <glib.h>
 
+#include "compat.h"             /* MAX_HOTLINE_PACKET_LEN */
 #include "hxnet_bridge.h"
 #include "protocol.h"
 #include "proto_helpers.h"
@@ -95,6 +96,25 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
 {
     g_return_if_fail (htlc != NULL);
     g_return_if_fail (body_len == 0 || body != NULL);
+
+    /* `hx_rcv_hdr` calls `hl_hdr_decode` which clamps the wire
+     * `len` field to `MAX_HOTLINE_PACKET_LEN` and uses the
+     * clamp when sizing the body qbuf. If we accepted a
+     * larger `body_len` here, the memcpy below would write
+     * past the end of htlc->in.buf. hxnet's actor enforces
+     * the same ceiling (`MAX_BODY_LEN` = 1 MiB) so any real
+     * server traffic that reaches us is already within
+     * range — but the bridge shouldn't depend on that
+     * coincidence. Refuse the frame and tear the connection
+     * down rather than silently truncating or overflowing. */
+    if (body_len > MAX_HOTLINE_PACKET_LEN) {
+        g_critical (
+            "hxnet_bridge: dispatch_frame body_len %u exceeds "
+            "MAX_HOTLINE_PACKET_LEN %u; closing connection",
+            (unsigned) body_len, (unsigned) MAX_HOTLINE_PACKET_LEN);
+        hx_htlc_close (htlc, /*expected=*/0);
+        return;
+    }
 
     /* Stage the header into htlc->in. qbuf_set both grows the
      * underlying buffer if needed and sets pos+len in one call.
