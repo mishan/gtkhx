@@ -123,4 +123,19 @@ extern void ping_stop (void);
  * (gtkhx.c::concurrence). */
 extern void hx_send_agreement_agree (struct htlc_conn *htlc);
 
+/* Phase R3.3.e-4d: install the hxnet bridge over the current
+ * connection's fd if GTKHX_USE_HXNET is set and TLS is not
+ * active. Called from rcv.c after HOPE handshake completes
+ * (or after non-HOPE login succeeds, for 1.0/1.2 servers).
+ * Builds the transform stack from the negotiated cipher /
+ * compression state on `htlc`, dup()s the fd, disarms the
+ * legacy GIOStream sources, and clears `htlc->cipher_*_type`
+ * / `htlc->compress_*_type` so the C-side encoders don't
+ * double-cipher / double-compress on the send path.
+ *
+ * Silent no-op when the env var is unset, the connection is
+ * TLS, or the bridge is already installed. Logs the failure
+ * mode via `g_critical` on any reachable error path. */
+extern void hx_install_hxnet_post_hope (struct htlc_conn *htlc);
+
 #endif /* HX_NETWORK_H */

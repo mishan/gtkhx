@@ -185,18 +185,20 @@ test_install_on_handshake (void)
     g_assert_cmpint (idx_tcp,        >, idx_connecting);
     g_assert_cmpint (idx_handshake,  >, idx_tcp);
 
-    /* Load-bearing assertion: the bridge is installed at this
-     * point. send_login's GTKHX_USE_HXNET branch ran (env var was
-     * set in main, no TLS, no prior install) and called
-     * hx_bridge_install_passthrough. */
-    g_assert_true (hx_bridge_is_installed ());
+    /* R3.3.e-4d moved the bridge install out of send_login (which
+     * fires HANDSHAKE_DONE) and into rcv_task_login (which runs
+     * after the server's LOGIN response). The fake server stops
+     * at MAGIC and never sends a LOGIN response, so the install
+     * never fires in this fixture — that's the regression guard.
+     * (An end-to-end Tier 3 against a real mhxd / Janus is what
+     * actually exercises the install path; that's the live
+     * matrix follow-up in R3.3.e-5.) */
+    g_assert_false (hx_bridge_is_installed ());
 
-    /* The LOGIN frame went through hx_bridge_send_frame (which
-     * pops the bytes from htlc->out) instead of the GIOStream
-     * write queue (which would have left them buffered). Verify
-     * by checking htlc->out.len == 0 — the non-hxnet test
-     * asserts > 0 here, so this is the symmetric assertion. */
-    g_assert_cmpuint (test_htlc.out.len, ==, 0);
+    /* With install deferred to post-login, the LOGIN frame
+     * still sits in the legacy htlc->out queue — same
+     * assertion as the non-hxnet real_connect test. */
+    g_assert_cmpuint (test_htlc.out.len, >, 0);
 
     /* The server should still have received exactly HTLC_MAGIC.
      * The LOGIN bytes that followed went on the wire through
@@ -215,7 +217,9 @@ test_install_on_handshake (void)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    /* hx_htlc_close calls hx_bridge_uninstall — verify. */
+    /* The install never fired (post-login is gated on a LOGIN
+     * response we don't get in this fixture), so the bridge
+     * stays uninstalled all the way through teardown. */
     g_assert_false (hx_bridge_is_installed ());
 
     hx_fake_server_free (srv);

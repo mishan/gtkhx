@@ -2015,38 +2015,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             cipher_decode_init (htlc);
         }
 
-        /* R3.3.e-4c: the hxnet bridge path is passthrough
-         * (NONE/NONE) only. If HOPE negotiated either a cipher
-         * OR a compression algorithm while the bridge is
-         * installed, we'd be writing plaintext bytes on the
-         * wire where the peer expects them ciphered/compressed
-         * (or vice versa on receive). Either case desynchronises
-         * the wire. Tear the connection down with a clear
-         * message — the legacy GIOStream path handles
-         * HOPE-negotiated stacks fine and is what you get when
-         * GTKHX_USE_HXNET is unset.
-         *
-         * The check sits AFTER both the compression and cipher
-         * activation branches so we catch any combination
-         * (cipher-only, compress-only, both). An earlier draft
-         * had the check inside the cipher branch — that missed
-         * the compress-only / cipher=NONE case, which would
-         * silently leave the bridge installed against a
-         * compressing peer and corrupt the wire. */
-        if (hx_bridge_is_installed ()
-            && (htlc->cipher_encode_type != CIPHER_NONE
-                || htlc->cipher_decode_type != CIPHER_NONE
-                || htlc->compress_encode_type != COMPRESS_NONE
-                || htlc->compress_decode_type != COMPRESS_NONE)) {
-            hx_printf_prefix (
-                htlc, 0, INFOPREFIX,
-                "GTKHX_USE_HXNET is set but server negotiated a HOPE "
-                "cipher or compression algorithm; the hxnet bridge "
-                "can't carry those sessions yet. Closing — unset "
-                "GTKHX_USE_HXNET to reconnect via the legacy path.\n");
-            hx_htlc_close (htlc, 0);
-            return;
-        }
+        /* R3.3.e-4d: HOPE step-2 is complete and any negotiated
+         * cipher / compression state is fully initialised. If
+         * GTKHX_USE_HXNET is set and TLS is not active, hand the
+         * fd over to hxnet now with the matching transform
+         * stack. Silent no-op when the env var is unset; the
+         * helper handles all gate / TLS / fd checks internally.
+         * After this returns successfully, htlc->cipher_*_type
+         * and compress_*_type are cleared to NONE so the C-side
+         * encoders downstream of hlwrite skip in-place encoding
+         * (hxnet's transform stack now owns it). */
+        hx_install_hxnet_post_hope (htlc);
     } else {
         if (!task_inerror (htlc)) {
             play_sound (LOGIN);
@@ -2054,6 +2033,15 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             setbtns (sess, 1);
             set_status_bar (2);
             connected = 1;
+
+            /* R3.3.e-4d: non-HOPE login completion (1.0/1.2
+             * server, or any HOPE-capable server that didn't
+             * negotiate a cipher/compress this session). Same
+             * hxnet install hook as the HOPE branch — for
+             * cipher_*_type == NONE it spawns the bridge with
+             * a passthrough transform stack. Silent no-op
+             * when GTKHX_USE_HXNET is unset. */
+            hx_install_hxnet_post_hope (htlc);
 
             /* Reset post-login fetch state before scheduling so
 			 * a reconnection during this process state starts clean.
