@@ -47,6 +47,13 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 /// + `flag` (u32) + `len` (u32) + `len2` (u32) + `hc` (u16).
 pub(crate) const HL_HDR_SIZE: usize = 22;
 
+/// Size of the `hc` field in bytes. The Hotline wire encodes
+/// `len = body_len + sizeof(hc)` — the `hc` field is part of
+/// the 22-byte header on the wire but the `len` field at offset
+/// 12 counts it as data. Subtract this to convert
+/// `wire_len → body_len` on read and add it on write.
+pub(crate) const HC_SIZE: usize = 2;
+
 /// Maximum body length we will accept on the read side before
 /// erroring out. Matches the cap in `hxnet::frame` (which is
 /// `hotline_proto::MAX_BODY_LEN` = 1 MiB), so the dispatcher
@@ -444,13 +451,32 @@ impl<S: AsyncRead + Unpin, R: HopeRng + Unpin> AsyncRead for HopeBlowfishStream<
                                 return Poll::Ready(Err(e));
                             }
                         }
-                        // Parse `len` (body length) from offset
-                        // 12 (network byte order). Defend the
-                        // dispatcher against bogus values up
-                        // front.
-                        let body_len = u32::from_be_bytes([
+                        // Parse the wire `len` field at offset
+                        // 12 (network byte order). The Hotline
+                        // wire encodes `len = body_len +
+                        // sizeof(hc) = body_len + 2`, so we
+                        // subtract 2 to get the actual body
+                        // byte count that comes off the wire
+                        // after the 22-byte header. Treating
+                        // `len` as body_len directly over-reads
+                        // by 2 bytes per frame and quietly
+                        // desyncs the frame boundary (and the
+                        // rekey rotation boundary with it) —
+                        // not what we want.
+                        let wire_len = u32::from_be_bytes([
                             hdr[12], hdr[13], hdr[14], hdr[15],
                         ]) as usize;
+                        if wire_len < HC_SIZE {
+                            return Poll::Ready(Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!(
+                                    "hope_blowfish: wire_len {wire_len} < \
+                                     sizeof(hc) {HC_SIZE} (likely keystream \
+                                     desync)"
+                                ),
+                            )));
+                        }
+                        let body_len = wire_len - HC_SIZE;
                         if body_len > MAX_BODY_LEN {
                             return Poll::Ready(Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -550,16 +576,31 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         let new_pos = pos + take;
 
         // Did we just complete the header (and so can parse the
-        // body length)?
+        // body length)? The wire `len` field at offset 12 is
+        // `body_len + sizeof(hc)`, so subtract HC_SIZE to get
+        // the actual on-wire body byte count that follows the
+        // 22-byte header. Same wire-format quirk hl_hdr_decode
+        // / hxnet's frame::decode_header_full handle on the
+        // receive side.
         let new_frame_len = match frame_len {
             Some(len) => Some(len),
             None if new_pos >= HL_HDR_SIZE => {
-                let body_len = u32::from_be_bytes([
+                let wire_len = u32::from_be_bytes([
                     this.write_plaintext[12],
                     this.write_plaintext[13],
                     this.write_plaintext[14],
                     this.write_plaintext[15],
                 ]) as usize;
+                if wire_len < HC_SIZE {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "hope_blowfish: outgoing wire_len {wire_len} < \
+                             sizeof(hc) {HC_SIZE}"
+                        ),
+                    )));
+                }
+                let body_len = wire_len - HC_SIZE;
                 if body_len > MAX_BODY_LEN {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -612,8 +653,15 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
             this.write_plaintext[0] |= ran;
         }
 
-        // Encrypt the header...
-        let mut ciphertext = this.write_plaintext.clone();
+        // Encrypt in place on the plaintext buffer. We move
+        // ownership into `ciphertext` so the in-place XOR is
+        // free — the previous `clone()` walked the whole frame
+        // just to drop the original right after, which adds a
+        // measurable cost for large frames (file-list,
+        // chat-history-block, news posts). The plaintext slot
+        // will be replaced with a fresh empty Vec for the next
+        // frame's accumulation.
+        let mut ciphertext = std::mem::take(&mut this.write_plaintext);
         this.write_state.crypt_in_place(&mut ciphertext[..HL_HDR_SIZE]);
 
         if fire {
@@ -634,11 +682,11 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         // Encrypt the body.
         this.write_state.crypt_in_place(&mut ciphertext[HL_HDR_SIZE..]);
 
-        // Stash ciphertext for draining, reset plaintext
-        // buffer, switch state.
+        // Stash ciphertext for draining and switch state. The
+        // plaintext slot was emptied by `mem::take` above —
+        // next frame's accumulation starts from a fresh Vec.
         this.write_ciphertext = ciphertext;
         this.write_ciphertext_pos = 0;
-        this.write_plaintext.clear();
         this.write_sm = WriteState::DrainCiphertext;
 
         // Return how many plaintext bytes we consumed from the
@@ -825,13 +873,21 @@ mod tests {
 
     /// Build a Hotline frame with the given type, trans, and
     /// body. Returns the full 22-byte header + body buffer.
+    /// The Hotline wire encodes `len = body_len + sizeof(hc)` so
+    /// the wire `len` field is `body.len() + 2` — same
+    /// off-by-hc encoding hl_hdr_decode reverses on the receive
+    /// side. Tests need to match this exactly; encoding `len`
+    /// as `body.len()` directly would produce wire-incompatible
+    /// fixtures that mask wire_len/body_len bugs in the
+    /// adapter under test.
     fn make_frame(type_: u32, trans: u32, body: &[u8]) -> Vec<u8> {
         let mut buf = Vec::with_capacity(HL_HDR_SIZE + body.len());
+        let wire_len = (body.len() + HC_SIZE) as u32;
         buf.extend_from_slice(&type_.to_be_bytes());
         buf.extend_from_slice(&trans.to_be_bytes());
         buf.extend_from_slice(&0u32.to_be_bytes()); // flag
-        buf.extend_from_slice(&(body.len() as u32).to_be_bytes()); // len
-        buf.extend_from_slice(&(body.len() as u32).to_be_bytes()); // len2
+        buf.extend_from_slice(&wire_len.to_be_bytes()); // len
+        buf.extend_from_slice(&wire_len.to_be_bytes()); // len2
         buf.extend_from_slice(&0u16.to_be_bytes()); // hc
         buf.extend_from_slice(body);
         buf
@@ -940,10 +996,18 @@ mod tests {
         // reject. Use a side state with the same key.
         let mut side_state =
             BlowfishOfb64State::new(&read_key).unwrap();
-        let bad_body_len = (MAX_BODY_LEN + 1) as u32;
+        // Patch the wire `len` field with the value that
+        // decodes to body_len = MAX_BODY_LEN + 1 after the
+        // adapter subtracts HC_SIZE — i.e. `len =
+        // (MAX_BODY_LEN + 1) + HC_SIZE`. With the framing fix
+        // in place, just dropping MAX_BODY_LEN + 1 into the
+        // wire would have parsed as body_len = MAX_BODY_LEN - 1,
+        // which is in range and would NOT trip the ceiling
+        // check we're trying to exercise.
+        let bad_wire_len = (MAX_BODY_LEN + 1 + HC_SIZE) as u32;
         let mut hdr = make_frame(0x6b, 1, &[]);
         // Patch len field to the bad value.
-        hdr[12..16].copy_from_slice(&bad_body_len.to_be_bytes());
+        hdr[12..16].copy_from_slice(&bad_wire_len.to_be_bytes());
         side_state.crypt_in_place(&mut hdr);
         let mut writer = a;
         writer

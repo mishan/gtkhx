@@ -493,14 +493,28 @@ test_marker_strip_against_janus (void)
     integration_hope_session_release (&hope);
     integration_close (fd);
 
-    /* Now check what we recorded. */
+    /* Now check what we recorded. Snapshot the relevant fields
+     * under the lock into local variables, then we can do
+     * everything else (diagnostic prints + asserts) without
+     * holding the lock, and observer_clear only runs at the
+     * very end after no more accesses to obs.lock. The previous
+     * shape called observer_clear mid-function and then went
+     * on to take obs.lock again for the diagnostic dump — UB
+     * (the mutex had already been destroyed). */
     g_mutex_lock (&obs.lock);
     guint count = obs.received_count;
+    int shutdown_seen = obs.shutdown_seen;
+    int shutdown_reason = obs.shutdown_reason;
+    guint32 recorded[G_N_ELEMENTS (obs.received_types)];
+    memcpy (recorded, obs.received_types,
+            obs.received_count * sizeof (recorded[0]));
+    g_mutex_unlock (&obs.lock);
+
     g_assert_cmpuint (count, >, 0);
     int marker_seen = 0;
     guint32 first_bad_type = 0;
     for (guint i = 0; i < count; i++) {
-        guint32 t = obs.received_types[i];
+        guint32 t = recorded[i];
         if ((t >> 24) != 0) {
             marker_seen = 1;
             if (first_bad_type == 0) {
@@ -508,8 +522,6 @@ test_marker_strip_against_janus (void)
             }
         }
     }
-    g_mutex_unlock (&obs.lock);
-    observer_clear (&obs);
 
     /* Diagnostic dump: print every recorded type + the
      * shutdown reason if the actor died. The shutdown reason
@@ -519,14 +531,14 @@ test_marker_strip_against_janus (void)
      * hxnet itself failed to decode incoming bytes (the bug
      * we're hunting). */
     g_test_message ("recorded %u frames, shutdown_seen=%d reason=%d:",
-                    count, obs.shutdown_seen, obs.shutdown_reason);
-    g_mutex_lock (&obs.lock);
-    for (guint i = 0; i < obs.received_count; i++) {
-        guint32 t = obs.received_types[i];
+                    count, shutdown_seen, shutdown_reason);
+    for (guint i = 0; i < count; i++) {
+        guint32 t = recorded[i];
         g_test_message ("  frame[%u] type=0x%08x high=0x%02x",
                         i, t, (t >> 24) & 0xff);
     }
-    g_mutex_unlock (&obs.lock);
+
+    observer_clear (&obs);
 
     if (marker_seen) {
         g_test_fail_printf (
