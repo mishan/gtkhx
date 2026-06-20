@@ -1308,6 +1308,58 @@ test('real_connect', test_integration_real_connect,
      suite   : 'integration',
      timeout : 30)
 
+# real_connect_hxnet — R3.3.e-5 Tier 3 coverage for the
+# GTKHX_USE_HXNET production-switch path. Same source-pile as
+# real_connect (production network.c + cipher + hope + proto)
+# but the test main() sets GTKHX_USE_HXNET=1 before driving
+# hx_connect. Asserts the bridge is installed after
+# HANDSHAKE_DONE (proving the env-var gate fires and
+# hx_bridge_install_passthrough succeeded), that the LOGIN
+# frame was routed through hxnet rather than left in
+# htlc->out, and that hx_htlc_close uninstalls the bridge.
+# Plus a negative case: htlc->tls=1 + env-var set must leave
+# the bridge uninstalled (TLS keeps the legacy path).
+test_integration_real_connect_hxnet = executable(
+  'test_integration_real_connect_hxnet',
+  'integration/test_real_connect_hxnet.c',
+  'integration/fake_server.c',
+  'integration/connect_test_stubs.c',
+  '../src/network.c',
+  '../src/hxnet_bridge.c',
+  '../src/tls_trust.c',
+  '../src/network_decode.c',
+  '../src/connect_magic.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/compress.c',
+  '../src/inline_media.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_session.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  '../src/tracker_event.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('real_connect_hxnet', test_integration_real_connect_hxnet,
+     suite   : 'integration',
+     timeout : 30)
+
 # real_tls — Tier 3 coverage for docs/tls-scoping.md Phase 1: the
 # Mobius / Janus separate-port TLS model, where the server speaks
 # HTLS-over-TLS from byte zero on a dedicated port. Drives the
