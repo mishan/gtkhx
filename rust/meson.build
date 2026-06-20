@@ -68,6 +68,7 @@ rust_sources = files(
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/cipher.rs',
   'crates/hxnet/src/command.rs',
+  'crates/hxnet/src/compress.rs',
   'crates/hxnet/src/connection.rs',
   'crates/hxnet/src/event.rs',
   'crates/hxnet/src/ffi.rs',
