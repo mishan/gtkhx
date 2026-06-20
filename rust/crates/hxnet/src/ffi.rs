@@ -863,6 +863,24 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
 pub const HXNET_CIPHER_NONE: c_uint = 0;
 pub const HXNET_CIPHER_BLOWFISH: c_uint = 1;
 pub const HXNET_CIPHER_CHACHA20_POLY1305: c_uint = 2;
+/// R3.3.e-4g: Hotline-frame-aware Blowfish that mirrors the
+/// legacy HOPE per-message rekey protocol
+/// ([`crate::hope_blowfish::HopeBlowfishStream`]). Use this
+/// for HOPE-Blowfish handshakes; the bare
+/// [`HXNET_CIPHER_BLOWFISH`] kind is wire-incompatible with any
+/// HOPE server that ever trips the rekey marker.
+pub const HXNET_CIPHER_HOPE_BLOWFISH: c_uint = 3;
+
+/// HMAC algorithm tag. Matches
+/// [`crate::hope_blowfish::HopeMacAlg`].
+pub const HXNET_MACALG_SHA256: u8 = 0;
+pub const HXNET_MACALG_SHA1: u8 = 1;
+pub const HXNET_MACALG_MD5: u8 = 2;
+
+/// Maximum HOPE session-key length the FFI accepts. The wire
+/// protocol caps the SESSIONKEY chunk at 64 bytes, which the C
+/// `htlc->sessionkey` field also pins; we mirror exactly.
+pub const HXNET_HOPE_SESSION_KEY_MAX: c_uint = 64;
 
 /// Compression selection tag, matches
 /// [`crate::transform::CompressionKind`].
@@ -897,15 +915,47 @@ pub struct HxnetTransformConfig {
     pub cipher_kind: c_uint,
     pub compression_kind: c_uint,
 
-    /// Blowfish key length in bytes (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`).
-    pub blowfish_key_len: c_uint,
-    /// Blowfish key buffer; only the first `blowfish_key_len`
-    /// bytes are used.
-    pub blowfish_key: [u8; 56],
+    /// Per-direction Blowfish key lengths in bytes
+    /// (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`). The HOPE chain derives
+    /// distinct keys for the two directions (client→server and
+    /// server→client); a single-key shortcut would desynchronise
+    /// the read keystream from anything the server sends — caught
+    /// against VesperNet/Janus, where the keys clearly differ.
+    pub blowfish_read_key_len: c_uint,
+    pub blowfish_write_key_len: c_uint,
+    /// Per-direction Blowfish key buffers; only the first
+    /// `blowfish_*_key_len` bytes of each are used.
+    pub blowfish_read_key: [u8; 56],
+    pub blowfish_write_key: [u8; 56],
     /// Per-direction OFB ivecs. The legacy HOPE handshake
     /// derives these from the session keystream.
     pub blowfish_read_ivec: [u8; 8],
     pub blowfish_write_ivec: [u8; 8],
+    /// Per-direction OFB byte-offset (0..7) into the current
+    /// keystream block. The bridge install can fire mid-block
+    /// — the C side may have decoded post-LOGIN-reply bytes (or
+    /// encoded step-2 LOGIN bytes) before `install_check_idle`'s
+    /// htlc->out drain wait completes, advancing `num` past 0.
+    /// Restoring with `num=0` would re-encrypt the ivec block on
+    /// the next crypt() and desynchronise the keystream. Caught
+    /// by VesperNet/Janus + Blowfish: Janus ships an empty
+    /// HTLS_DATA_CIPHER_IVEC and the post-LOGIN SELFINFO is
+    /// decoded by the legacy path before install fires.
+    pub blowfish_read_num: u8,
+    pub blowfish_write_num: u8,
+
+    /// R3.3.e-4g: HOPE-Blowfish per-message rekey inputs.
+    /// `hope_macalg` is one of `HXNET_MACALG_*`; the session
+    /// key (HOPE-Step-1 reply SESSIONKEY chunk, up to 64 bytes)
+    /// is hashed against the current direction key for each
+    /// HMAC iteration the marker triggers. Only consulted when
+    /// `cipher_kind == HXNET_CIPHER_HOPE_BLOWFISH`.
+    pub hope_macalg: u8,
+    /// 1 byte of padding so `hope_session_key_len` lands on a
+    /// 4-byte boundary.
+    pub _pad_macalg: u8,
+    pub hope_session_key_len: c_uint,
+    pub hope_session_key: [u8; 64],
 
     /// ChaCha20-Poly1305 keys per direction.
     pub aead_read_key: [u8; 32],
@@ -930,24 +980,35 @@ pub struct HxnetTransformConfig {
 const _: () = {
     assert!(std::mem::offset_of!(HxnetTransformConfig, cipher_kind) == 0);
     assert!(std::mem::offset_of!(HxnetTransformConfig, compression_kind) == 4);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key_len) == 8);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key) == 12);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 68);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 76);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 84);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 116);
-    // aead_read_counter is u64 — needs 8-byte alignment, so
-    // there are 4 bytes of padding after aead_write_key (which
-    // ends at offset 148) before the counter starts at 152.
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 152);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 160);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 168);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 169);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 170);
-    // Total size: padding to 8-byte alignment for the u64
-    // counters means the struct's natural alignment is 8;
-    // 170 + 6 = 176 lines up at an 8-byte boundary.
-    assert!(std::mem::size_of::<HxnetTransformConfig>() == 176);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key_len) == 8);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key_len) == 12);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key) == 16);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key) == 72);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 128);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 136);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_num) == 144);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_num) == 145);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_macalg) == 146);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad_macalg) == 147);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_session_key_len) == 148);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_session_key) == 152);
+    // hope_session_key is 64 bytes → ends at 216. aead_read_key
+    // ([u8; 32]) has 1-byte alignment so it falls right at 216
+    // with no padding.
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 216);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 248);
+    // aead_read_counter is u64 — needs 8-byte alignment. The
+    // aead_write_key array ends at 248+32=280, which is
+    // already 8-aligned, so no padding is inserted before
+    // the counter.
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 280);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 288);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 296);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 297);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 298);
+    // Total: 298 + 6 = 304, aligned to the struct's natural
+    // 8-byte alignment.
+    assert!(std::mem::size_of::<HxnetTransformConfig>() == 304);
     assert!(std::mem::align_of::<HxnetTransformConfig>() == 8);
 };
 
@@ -966,30 +1027,97 @@ fn cipher_layer_from_config(
 ) -> Result<crate::transform::CipherLayer, &'static str> {
     match cfg.cipher_kind {
         HXNET_CIPHER_NONE => Ok(crate::transform::CipherLayer::None),
-        HXNET_CIPHER_BLOWFISH => {
-            let key_len = cfg.blowfish_key_len as usize;
-            if key_len == 0 || key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
-                return Err("blowfish_key_len out of range (1..=56)");
+        HXNET_CIPHER_BLOWFISH | HXNET_CIPHER_HOPE_BLOWFISH => {
+            let read_key_len = cfg.blowfish_read_key_len as usize;
+            let write_key_len = cfg.blowfish_write_key_len as usize;
+            if read_key_len == 0
+                || read_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
+            {
+                return Err("blowfish_read_key_len out of range (1..=56)");
             }
-            let key = &cfg.blowfish_key[..key_len];
-            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+            if write_key_len == 0
+                || write_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
+            {
+                return Err("blowfish_write_key_len out of range (1..=56)");
+            }
+            let read_key = &cfg.blowfish_read_key[..read_key_len];
+            let write_key = &cfg.blowfish_write_key[..write_key_len];
+            // Use the per-direction num verbatim. restore_ofb_state
+            // already masks to 0..7 internally so an over-range
+            // value can't index ivec out of bounds — same defense
+            // the rollback path relies on. Threading num through
+            // is the fix for the Janus + Blowfish disconnect: the
+            // C-side may have advanced num past 0 by the time
+            // install_check_idle fires; restoring num=0 here would
+            // re-encrypt ivec on the next crypt() and desync the
+            // keystream against the server. The per-direction key
+            // split is the other half of the same fix — HOPE
+            // derives distinct read/write Blowfish keys from the
+            // session keystream, so loading the same key into both
+            // states gives the read side a wrong keystream against
+            // any server that doesn't happen to derive identical
+            // keys (the Janus case).
+            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(read_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_read_ivec, 0);
+                    s.restore_ofb_state(&cfg.blowfish_read_ivec,
+                                        cfg.blowfish_read_num as u32);
                     s
                 }
                 None => return Err("blowfish read state init failed"),
             };
-            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(write_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_write_ivec, 0);
+                    s.restore_ofb_state(&cfg.blowfish_write_ivec,
+                                        cfg.blowfish_write_num as u32);
                     s
                 }
                 None => return Err("blowfish write state init failed"),
             };
-            Ok(crate::transform::CipherLayer::Blowfish {
-                read_state,
-                write_state,
-            })
+            // Branch on the kind to pick the right wrapper. The
+            // plain Blowfish path stays for non-HOPE use cases
+            // (e.g. a future HTXF subchannel where there's no
+            // rekey marker to worry about); the HOPE path
+            // additionally captures the session key + HMAC alg
+            // the per-message rekey rotation needs.
+            if cfg.cipher_kind == HXNET_CIPHER_HOPE_BLOWFISH {
+                let sk_len = cfg.hope_session_key_len as usize;
+                if sk_len == 0
+                    || sk_len > HXNET_HOPE_SESSION_KEY_MAX as usize
+                {
+                    return Err(
+                        "hope_session_key_len out of range (1..=64)",
+                    );
+                }
+                let macalg = match cfg.hope_macalg {
+                    HXNET_MACALG_SHA256 => {
+                        crate::hope_blowfish::HopeMacAlg::Sha256
+                    }
+                    HXNET_MACALG_SHA1 => {
+                        crate::hope_blowfish::HopeMacAlg::Sha1
+                    }
+                    HXNET_MACALG_MD5 => {
+                        crate::hope_blowfish::HopeMacAlg::Md5
+                    }
+                    _ => {
+                        return Err("hope_macalg is not a known tag");
+                    }
+                };
+                let session_key =
+                    cfg.hope_session_key[..sk_len].to_vec();
+                Ok(crate::transform::CipherLayer::HopeBlowfish {
+                    read_state,
+                    read_key: read_key.to_vec(),
+                    write_state,
+                    write_key: write_key.to_vec(),
+                    session_key,
+                    macalg,
+                })
+            } else {
+                Ok(crate::transform::CipherLayer::Blowfish {
+                    read_state,
+                    write_state,
+                })
+            }
         }
         HXNET_CIPHER_CHACHA20_POLY1305 => {
             // The dir tag is one byte of the ChaCha20-Poly1305
@@ -1298,6 +1426,21 @@ fn wire_callback_state(
                     }
                 }
                 Event::Shutdown(reason) => {
+                    // Log the *full* reason — including the
+                    // StreamError's inner io::Error string —
+                    // before we collapse it to an integer code
+                    // for the FFI callback. The integer alone
+                    // tells the C side which BUCKET the actor
+                    // died in (StreamError vs FrameTooLarge vs
+                    // EOF) but not which specific failure
+                    // produced it. Without this stderr line
+                    // the actual cause of a mid-burst death is
+                    // unrecoverable from user logs — the C
+                    // side's bridge_on_shutdown_cb may also
+                    // get pre-empted by a synchronous send
+                    // failure path that uninstalls the bridge
+                    // and swallows the deferred event entirely.
+                    eprintln!("hxnet: actor shutting down: {reason:?}");
                     let code = shutdown_code(reason);
                     if let Some(on_shutdown) = cb.on_shutdown {
                         unsafe {

@@ -73,6 +73,7 @@ rust_sources = files(
   'crates/hxnet/src/event.rs',
   'crates/hxnet/src/ffi.rs',
   'crates/hxnet/src/frame.rs',
+  'crates/hxnet/src/hope_blowfish.rs',
   'crates/hxnet/src/transform.rs',
   'crates/hxvoice/src/lib.rs',
   'crates/hxvoice/src/event.rs',

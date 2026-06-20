@@ -21,6 +21,15 @@ hotline-proto = { path = "../hotline-proto" }
 # rlib deps here doesn't change the link surface.
 hxcrypto-stream = { path = "../hxcrypto-stream" }
 hxcrypto-aead = { path = "../hxcrypto-aead" }
+# R3.3.e-4g: HopeBlowfishStream needs HMAC iteration to mirror
+# the legacy cipher_change_decode_key / cipher_change_encode_key
+# rekey rotation. We call the safe inner helper directly rather
+# than the C-shaped gtkhx_hmac_xxx wrapper.
+hxcrypto-hash = { path = "../hxcrypto-hash" }
+# R3.3.e-4g: HopeBlowfishStream's write side needs OS randomness
+# for the marker-decision nibble. Same `getrandom(2)` backend
+# src/rand.c uses on the C side.
+getrandom = "0.3"
 # R3.3.d compression adapters: GZIP via flate2, LZ4 via lz4_flex,
 # ZSTD via zstd. We pull each crate directly (rather than going
 # through hxcompress's FFI-shaped opaque enum) because the

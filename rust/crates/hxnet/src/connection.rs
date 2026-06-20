@@ -55,9 +55,25 @@ const HL_HDR_LEN: usize = hotline_proto::HL_HDR_LEN;
 pub const DEFAULT_EVENT_CAPACITY: usize = 64;
 
 /// Default capacity of the command channel (consumer → actor).
-/// 32 is more than enough — the UI typically queues one command
-/// per user action.
-pub const DEFAULT_COMMAND_CAPACITY: usize = 32;
+///
+/// The C-side bridge maps every outgoing Hotline frame to one
+/// command, so the budget needs to cover bursty post-login
+/// fetches without blocking. A typical join sequence sends
+/// AGREEMENTAGREE + USER_CHANGE + USER_GETLIST +
+/// GET_CHAT_HISTORY + FILE_LIST + NEWSDIRLIST +
+/// DOWNLOAD_BANNER + a handful of follow-up reads — easily 6-10
+/// commands in tight succession before the actor's send loop
+/// drains them. Sizing at 256 gives a 25x headroom on that
+/// burst so `try_send` returning `Full` (which the C side
+/// surfaces as `HXNET_SEND_FULL` / -1 and which `hlwrite` would
+/// otherwise convert into a hard disconnect) effectively can't
+/// happen under any realistic workload.
+///
+/// If the cap is ever hit in practice the right next step is to
+/// implement a retry/drain idle on the C side so FULL becomes a
+/// soft backpressure signal, not a fatal error — captured as a
+/// follow-up in the roadmap.
+pub const DEFAULT_COMMAND_CAPACITY: usize = 256;
 
 /// Errors from [`Connection::spawn`]. There's only one variant
 /// today (no tokio runtime context), but the enum makes the API
