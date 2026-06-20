@@ -122,6 +122,73 @@ extern hxnet_connection *hxnet_connection_spawn_fd_with_callback (
     int fd, hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
     void *user_data);
 
+/* R3.3.e-2 transform-config FFI. Lets the C side hand hxnet a
+ * cipher + compression stack to compose around the adopted TCP
+ * socket before the Connection actor sees it. The Rust side
+ * pins this struct's offsets + size via const-asserts in
+ * rust/crates/hxnet/src/ffi.rs; the _Static_asserts below
+ * mirror those so drift on either side breaks both compiles. */
+#define HXNET_CIPHER_NONE              0
+#define HXNET_CIPHER_BLOWFISH          1
+#define HXNET_CIPHER_CHACHA20_POLY1305 2
+
+#define HXNET_COMPRESSION_NONE 0
+#define HXNET_COMPRESSION_GZIP 1
+#define HXNET_COMPRESSION_LZ4  2
+#define HXNET_COMPRESSION_ZSTD 3
+
+typedef struct {
+    /* `c_uint` on the Rust side is guaranteed 32-bit, but
+     * `unsigned int` on the C side is not (only required to be
+     * >= 16-bit). Use `uint32_t` for the u32-shaped fields so the
+     * offset asserts below don't bake in an implementation-
+     * defined size assumption. */
+    uint32_t cipher_kind;
+    uint32_t compression_kind;
+    uint32_t blowfish_key_len;
+    uint8_t      blowfish_key[56];
+    uint8_t      blowfish_read_ivec[8];
+    uint8_t      blowfish_write_ivec[8];
+    uint8_t      aead_read_key[32];
+    uint8_t      aead_write_key[32];
+    uint64_t     aead_read_counter;
+    uint64_t     aead_write_counter;
+    uint8_t      aead_read_dir;
+    uint8_t      aead_write_dir;
+    uint8_t      _pad[6];
+} hxnet_transform_config;
+
+_Static_assert (offsetof (hxnet_transform_config, cipher_kind) == 0,
+                "hxnet_transform_config.cipher_kind offset drift");
+_Static_assert (offsetof (hxnet_transform_config, compression_kind) == 4,
+                "hxnet_transform_config.compression_kind offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_key_len) == 8,
+                "hxnet_transform_config.blowfish_key_len offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_key) == 12,
+                "hxnet_transform_config.blowfish_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_read_ivec) == 68,
+                "hxnet_transform_config.blowfish_read_ivec offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_write_ivec) == 76,
+                "hxnet_transform_config.blowfish_write_ivec offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 84,
+                "hxnet_transform_config.aead_read_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 116,
+                "hxnet_transform_config.aead_write_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 152,
+                "hxnet_transform_config.aead_read_counter offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 160,
+                "hxnet_transform_config.aead_write_counter offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 168,
+                "hxnet_transform_config.aead_read_dir offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 169,
+                "hxnet_transform_config.aead_write_dir offset drift");
+_Static_assert (sizeof (hxnet_transform_config) == 176,
+                "hxnet_transform_config size drift");
+
+extern hxnet_connection *hxnet_connection_spawn_fd_with_transforms_and_callback (
+    int fd, const hxnet_transform_config *config,
+    hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown, void *user_data);
+
 /* Write `len` bytes of `buf` to `fd`, retrying on short writes
  * and on EINTR. A real I/O error (broken pipe, etc.) or a 0-byte
  * return aborts the test with a clear message — those signal a
@@ -523,6 +590,89 @@ test_callback_null_arg_rejects (void)
     g_assert_null (r);
 }
 
+static void
+test_transforms_null_config_rejected (void)
+{
+    /* NULL config must be rejected with g_critical + NULL — no
+     * fd is adopted, so nothing leaks. */
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL config*");
+    hxnet_connection *r =
+        hxnet_connection_spawn_fd_with_transforms_and_callback (
+            0, NULL, test_on_event, test_on_shutdown, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
+}
+
+static void
+test_transforms_unknown_kind_rejected (void)
+{
+    hxnet_transform_config cfg;
+    memset (&cfg, 0, sizeof (cfg));
+    cfg.cipher_kind = 42; /* not a defined HXNET_CIPHER_* */
+    cfg.compression_kind = HXNET_COMPRESSION_NONE;
+
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*unknown cipher_kind*");
+    hxnet_connection *r =
+        hxnet_connection_spawn_fd_with_transforms_and_callback (
+            0, &cfg, test_on_event, test_on_shutdown, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
+}
+
+static void
+test_transforms_passthrough_round_trip (void)
+{
+    /* Smoke test: passthrough config (cipher=NONE,
+     * compression=NONE) should behave identically to the
+     * non-transform spawn entry. We send a Hotline-framed
+     * message in, expect the callback to fire with the matching
+     * frame, then close + verify shutdown.
+     *
+     * The point is exercising the C ABI surface end to end —
+     * the C side builds an hxnet_transform_config, the Rust
+     * side decodes it, composes a no-op stack, and the
+     * Connection actor still drives the same Event::Frame path
+     * the non-transform variant uses. The cipher / compression
+     * variants are covered by the Rust-side transform.rs
+     * integration tests; the C smoke here just verifies that
+     * the new spawn entry is wired up. */
+    int sv[2];
+    tcp_loopback_pair (sv);
+
+    struct callback_state state;
+    memset (&state, 0, sizeof (state));
+
+    hxnet_transform_config cfg;
+    memset (&cfg, 0, sizeof (cfg));
+    cfg.cipher_kind = HXNET_CIPHER_NONE;
+    cfg.compression_kind = HXNET_COMPRESSION_NONE;
+
+    hxnet_connection *conn =
+        hxnet_connection_spawn_fd_with_transforms_and_callback (
+            sv[1], &cfg, test_on_event, test_on_shutdown, &state);
+    g_assert_nonnull (conn);
+
+    /* Send a frame using the same builder the callback test
+     * uses — type 0x69, trans 7, flag 0, body "abcd". */
+    uint8_t hdr[22];
+    build_header (hdr, 0x69, 7, 0, 4, 0);
+    write_all_or_die (sv[0], hdr, sizeof (hdr));
+    write_all_or_die (sv[0], (const uint8_t *) "abcd", 4);
+
+    g_assert_true (pump_main_until (saw_one_frame, &state, 5 * 1000000));
+    g_assert_cmpint (state.frames_seen, ==, 1);
+    g_assert_cmpuint (state.last_type, ==, 0x69);
+    g_assert_cmpuint (state.last_trans, ==, 7);
+    g_assert_cmpuint (state.last_body_len, ==, 4);
+    g_assert_cmpmem (state.last_body, state.last_body_len, "abcd", 4);
+
+    g_assert_cmpint (close (sv[0]), ==, 0);
+    g_assert_true (pump_main_until (saw_shutdown, &state, 5 * 1000000));
+    g_assert_cmpint (state.shutdown_reason, ==, HXNET_SHUTDOWN_EOF);
+
+    hxnet_connection_destroy (conn);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -536,5 +686,11 @@ main (int argc, char *argv[])
                      test_callback_frame_then_shutdown);
     g_test_add_func ("/hxnet/ffi/callback-null-arg-rejects",
                      test_callback_null_arg_rejects);
+    g_test_add_func ("/hxnet/ffi/transforms-null-config-rejected",
+                     test_transforms_null_config_rejected);
+    g_test_add_func ("/hxnet/ffi/transforms-unknown-kind-rejected",
+                     test_transforms_unknown_kind_rejected);
+    g_test_add_func ("/hxnet/ffi/transforms-passthrough-round-trip",
+                     test_transforms_passthrough_round_trip);
     return g_test_run ();
 }
