@@ -822,13 +822,10 @@ fe_init (void)
     create_toolbar_window (&the_session);
     init_colors (toolbar_window);
 
-    /* The auto-open checks below used to spawn standalone windows
-     * for each tool. With Phase 2 docking the panels are eager-
-     * constructed inside create_toolbar_window; these calls now
-     * just registry-lookup-hit and raise the corresponding tab,
-     * which preserves the "open chat when you reconnect" prefs
-     * semantics — the panel is the focused tab on launch when the
-     * init bit is set. */
+    /* Panels are eager-constructed inside create_toolbar_window;
+     * these init-bit checks just registry-lookup-hit and raise the
+     * corresponding tab, preserving the "open chat when you reconnect"
+     * prefs semantics — the panel becomes the focused tab on launch. */
     if (gtkhx_prefs.geo.chat.init == 1) {
         create_chat_window (toolbar_window, &the_session);
     }

@@ -49,10 +49,4 @@
  */
 extern void gtkhx_post_to_main (GSourceFunc fn, gpointer data);
 
-/* The synchronous worker → main bridge (gtkhx_invoke_sync) used to
- * live here. Phase 5+'s async-connect rewrite removed its only
- * caller; the implementation is gone too. If a future worker needs
- * to block on a main-thread callback again, restore it from
- * gtkthreads.c history. */
-
 #endif

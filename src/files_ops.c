@@ -315,7 +315,7 @@ copy_local_dir_recursive (GFile *src_dir, GFile *dst_dir, GError **err_out)
 /* local → local via GIO. For files: g_file_copy. For folders:
  * recursive walker that recreates the tree under dst. Blocking,
  * but fast enough for the user to not notice unless the file is
- * huge. Async progress UI is a Phase 4 polish item. */
+ * huge. Async progress UI is a polish-item follow-up. */
 static HxOpsResult
 copy_local_to_local (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
 {

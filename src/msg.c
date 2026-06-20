@@ -568,13 +568,11 @@ create_msg (guint16 _uid, char *name)
     return msg;
 }
 
-/* this used to be a GtkWindow::close-request
- * handler returning FALSE to allow default destroy. Now we ride
- * AdwTabView::close-page via the chat_tabs dispatcher, which calls
- * us with the uid of the tab being closed. msgwin_delete drops
- * the entry from sess->msg_windows; the value-destroy
- * (msgwin_free) reclaims the struct. AdwTabView destroys the page
- * + content widget tree as part of close-page-finish.
+/* Rides AdwTabView::close-page via the chat_tabs dispatcher, which
+ * calls us with the uid of the tab being closed. msgwin_delete drops
+ * the entry from sess->msg_windows; the value-destroy (msgwin_free)
+ * reclaims the struct. AdwTabView destroys the page + content widget
+ * tree as part of close-page-finish.
  *
  * Registered once at startup by msg_windows_init via
  * gtkhx_chat_tabs_set_close_handlers. */

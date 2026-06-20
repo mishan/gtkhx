@@ -890,10 +890,6 @@ struct cfgvar {
     { CFG_SND_MSG, { &hxsnd.msg }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_NEWS, { &hxsnd.news }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_PART, { &hxsnd.part }, BOOLEAN, 0, NULL, NULL },
-    /* SOUNDPATH used to set a fallback directory for sound
-	 * files. Auto-discovery in $CONFIG/sounds/ + $PREFIX/share/gtkhx/sounds/
-	 * replaces it; the cfgvar is gone so legacy gtkhxrc lines are
-	 * silently dropped at parse time. */
     { CFG_SOUNDS_ON, { &hxsnd.on }, BOOLEAN, 0, NULL, NULL },
     { CFG_TASK_XSIZE, { &gtkhx_prefs.geo.tasks.xsize }, INT, 0, NULL, NULL },
     { CFG_TASK_YSIZE, { &gtkhx_prefs.geo.tasks.ysize }, INT, 0, NULL, NULL },
@@ -2386,9 +2382,7 @@ settings_page_tracker (AdwPreferencesPage *page)
 
     adw_preferences_page_add (page, grp);
 
-    /* TRACKER_CASE used to be tucked into Misc → Behavior;
-	 * it's a tracker-specific search option, so it lives here in
-	 * its own Search group. */
+    /* Tracker-specific search option in its own Search group. */
     {
         AdwPreferencesGroup *search_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2401,13 +2395,10 @@ settings_page_tracker (AdwPreferencesPage *page)
     }
 }
 
-/* the "Interface" page that hosted the legacy
- * file-browser "Browse in Same Window" toggle is gone — the new
- * files browser is always a single window (matching the news
- * browser's Phase 6 cleanup). Page is dropped from
- * settings_add_page below; the cfgvars table also drops the
- * entry so any pre-existing FILE_SAMEWINDOW key in old gtkhxrc
- * files is silently ignored on load. */
+/* No Interface page anymore — the new files browser is always a
+ * single window. Legacy FILE_SAMEWINDOW prefs are dropped from the
+ * cfgvars table; any pre-existing key in an old gtkhxrc is silently
+ * ignored on load. */
 
 static void
 settings_page_sound (AdwPreferencesPage *page)
@@ -3074,11 +3065,10 @@ settings_page_voice (AdwPreferencesPage *page)
     settings_page_voice_ptt_group (page);
 }
 
-/* Misc used to be a catchall for Behavior toggles. Most of
- * those have moved to the page they belong on (showjoin /
- * old_nickcomp → Chat, tracker_case → Trackers); what stays here is
- * Auto Reply plus the two genuinely cross-cutting behaviours
- * (queue downloads, show pchats at back). */
+/* Misc holds Auto Reply plus the two genuinely cross-cutting
+ * behaviours (queue downloads, show pchats at back). Single-page
+ * behaviours live with their page (showjoin / old_nickcomp on Chat,
+ * tracker_case on Trackers). */
 static void
 settings_page_misc (AdwPreferencesPage *page)
 {

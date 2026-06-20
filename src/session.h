@@ -246,7 +246,7 @@ struct news_item {
     guint16 partcount;
     guint16 size;
     struct news_parts *parts;
-    GtkTreeIter iter; /* Phase 2.8: was GtkCTreeNode *node */
+    GtkTreeIter iter;
     struct news_group *group;
 };
 
@@ -261,7 +261,7 @@ struct gnews_catalog {
     struct gnews_catalog *next, *prev;
     char *path;
     GtkWidget *window;
-    GtkWidget *news_tree; /* GtkTreeView since Phase 2.8 */
+    GtkWidget *news_tree;
     GtkTreeStore *news_store;
     GtkWidget *news_text;
     GtkWidget *authorlbl, *subjectlbl, *datelbl;
@@ -428,14 +428,12 @@ typedef struct _session {
 	 * (tasks.c) when removed. */
     GHashTable *tasks;
 
-    /* removed session-level user_list / user_tail / __user_list.
-	 * Those fields were declared but never wired up (network.c only ever
-	 * initializes chat_list->user_list, and every consumer reads through
-	 * chat->user_list — usually chat_with_cid(sess, 0)->user_list, the
-	 * public chat). Dead fields are a hazard: I dereferenced
-	 * session.user_list in the new PM info pane and segfaulted on the
-	 * first PM open. The canonical "global user list" lookup is the
-	 * public chat at cid=0 — use chat_with_cid(sess, 0)->user_list. */
+    /* No session-level user_list / user_tail / __user_list — the
+	 * canonical "global user list" lookup is the public chat at cid=0
+	 * (use chat_with_cid(sess, 0)->user_list). Do not reintroduce
+	 * session.user_list — it was a dead field that had no writer but
+	 * looked plausible to read, and tripped a segfault from the PM info
+	 * pane the last time someone tried. */
 
     /* chats keyed on the 32-bit chat-id. Replaces the
 	 * chat_front / chat_tail / chat_list trio + the embedded

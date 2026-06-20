@@ -1,10 +1,9 @@
 /*
  * files_provider.h — abstract backend interface for the files browser.
  *
- * Phase 2 of the orthodox-files-browser plan introduces a remote
- * (Hotline) backend alongside the local-filesystem one. The panel
- * widget talks to providers through this GInterface, so the two
- * sides differ only in the implementation underneath.
+ * The panel widget talks to backends — a local GIO-based one and
+ * the remote Hotline one — through this GInterface, so the two sides
+ * differ only in the implementation underneath.
  *
  * Contract:
  *

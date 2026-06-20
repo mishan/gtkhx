@@ -270,10 +270,6 @@ xfer_go (struct htxf_conn *htxf)
 
     htxf->gone = 1;
 
-    /* (Pre-stats hook that used to increment nr_gets / nr_puts has
-     * been gone for years; the dispatch below is the live use of
-     * htxf->type.) */
-
     if (htxf->type == XFER_GET) {
         /* Resume vs rename decision for downloads (skipped for
 		 * previews, which don't write to disk):

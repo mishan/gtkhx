@@ -1,17 +1,10 @@
 /*
  * files_browser.h — orthodox two-panel files browser.
  *
- * one toplevel window, two side-by-side
- * files_panel widgets, both bound to local-files providers.
- * Tab switches the active panel. Headerbar carries the
- * cross-panel actions (Phase 1 just has Refresh / MkDir / Delete
- * scoped to the active panel — copy/move between panels comes
- * in Phase 3).
- *
- * Phase 2 will introduce remote providers and a per-panel side
- * selector (local ↔ remote). The plumbing in files_browser.c is
- * already side-agnostic in design — Phase 1 just instantiates
- * two locals.
+ * One toplevel window, two side-by-side files_panel widgets — one
+ * local, one remote by default. Tab switches the active panel.
+ * Headerbar carries the cross-panel actions (Refresh / MkDir /
+ * Delete on the active panel, F5/Copy across panels).
  */
 
 #ifndef HX_FILES_BROWSER_H

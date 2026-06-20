@@ -102,8 +102,8 @@ struct browser {
 
     /* Keep refs on the providers separately from the panels so
 	 * the connection-state hook can reach the remote one even if
-	 * the panel pointer ever needs to be swapped (Phase 2.5 side
-	 * selector, future). */
+	 * the panel pointer ever needs to be swapped (per-panel side
+	 * selector, deferred). */
     HxFilesProvider *left_provider;
     HxFilesProvider *right_provider;
 
@@ -637,7 +637,7 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
 		 * g_file_move (local) directly with absolute paths.
 		 * The provider interface gains a follow-up "move"
 		 * method later if cross-dir becomes a routine
-		 * operation. For Phase 4 we punch through the
+		 * operation. For now we punch through the
 		 * abstraction. */
         char *src_abs
             = g_build_filename (src_dir ? src_dir : "/", src_name, NULL);
@@ -1407,9 +1407,9 @@ attach_panel_dnd (struct browser *br, files_panel *p)
     }
 
     /* Source: drags initiated by clicking a row and pulling
-	 * past GTK's movement threshold. Action is COPY only (no
-	 * MOVE/LINK in Phase 4 — Move comes later, and Link doesn't
-	 * map cleanly onto either side). */
+	 * past GTK's movement threshold. Action is COPY only — Move is
+	 * a deferred follow-up and Link doesn't map cleanly onto
+	 * either side. */
     src = gtk_drag_source_new ();
     gtk_drag_source_set_actions (src, GDK_ACTION_COPY);
     g_object_set_data (G_OBJECT (src), "panel", p);
@@ -2321,8 +2321,8 @@ open_files_browser (void)
      * GtkWindow; the panel persists and uses libpanel's own
      * close-page machinery (the X on the tab). on_close stays
      * defined for the once-and-only case where the panel widget
-     * is destroyed wholesale — currently never; Phase 4 layout
-     * restore may grow a real teardown path. */
+     * is destroyed wholesale — currently never; a future layout-
+     * restore path may grow a real teardown. */
     (void)on_close;
 
     the_browser = br;

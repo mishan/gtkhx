@@ -852,7 +852,7 @@ task_go (GtkWidget *widget, gpointer data)
     }
 }
 
-/* Phase 3.x: see users.c users_move() for rationale — size on
+/* see users.c users_move() for rationale — size on
  * configure, position deferred to quit.
  * gone — GTK 4 widgets don't fire configure-event. Tasks
  * window size is captured at hx_quit() in gtkhx.c. */

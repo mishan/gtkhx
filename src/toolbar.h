@@ -18,7 +18,7 @@ extern GtkWidget *status_bar;
 extern void create_toolbar_window (session *sess);
 extern void disconnect_clicked (void);
 
-/* Phase 5b / docking: the dock is ONE recursive HxSplit tree.
+/* the dock is ONE recursive HxSplit tree.
  * The five globals below are the handles every other module
  * needs. NULL before create_toolbar_window has run.
  *
@@ -83,7 +83,7 @@ extern GtkWidget *toolbar_center_frame;   /* Chat + Files + News 1.5 default */
  * caller should only call this once). */
 extern void toolbar_register_actions (GApplication *app, session *sess);
 
-/* Phase 5a / docking: install the per-frame plumbing every leaf
+/* install the per-frame plumbing every leaf
  * PanelFrame in the dock needs (close-dispatcher, drag-out hook,
  * defanged drop-controls). Called once per area at dock build
  * time, and again whenever a user splits a leaf (the new sibling
