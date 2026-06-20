@@ -704,6 +704,27 @@ install_check_idle (gpointer user_data)
          * iteration's dispatch.) */
         return G_SOURCE_CONTINUE;
     }
+    if (htlc->in.len > 0) {
+        /* The legacy GIOStream's read path may have decrypted
+         * bytes from the socket that the rcv state machine
+         * hasn't fully consumed yet — they're sitting in
+         * htlc->in waiting for the next htlc->rcv() call. If we
+         * installed hxnet now, hxnet would start reading the
+         * NEXT undelivered socket byte, but its cipher state
+         * has been advanced past those leftover bytes too. The
+         * positions match, but the WIRE FRAME BOUNDARIES are
+         * off by `htlc->in.len` bytes — hxnet would treat the
+         * first 22 bytes it reads as a frame header even
+         * though those bytes are mid-frame on the wire,
+         * producing garbage that the actor surfaces as a
+         * StreamError and tearing the connection down. Wait
+         * for the rcv state machine to fully consume htlc->in
+         * before handing off; usually one more main-loop
+         * iteration. Caught by tests/integration/test_hope_
+         * blowfish_hxnet.c, which reproduces the bug against
+         * live Janus and the fix here unblocks it. */
+        return G_SOURCE_CONTINUE;
+    }
 
     int dup_fd = dup (htlc->fd);
     if (dup_fd < 0) {
@@ -788,20 +809,6 @@ hx_install_hxnet_post_hope (struct htlc_conn *htlc)
         return;
     }
     if (hx_bridge_is_installed ()) {
-        return;
-    }
-    /* R3.3.e-4g safety gate (TEMPORARY): the HopeBlowfishStream
-     * adapter and the FFI plumbing it depends on are in place, but
-     * a live-server bug surfaces against Janus where the rekey
-     * marker on incoming SELFINFO isn't stripped (trace shows
-     * `type=0x26000062`). The Tier 1 round-trip tests pass, so
-     * the bug lives somewhere in the production install path
-     * (state capture, cfg marshalling, or a state-machine
-     * interaction my unit fixtures don't reproduce). Keep
-     * HOPE-Blowfish on the legacy GIOStream path until the
-     * Tier 3 fixture lands and the real bug is identified. */
-    if (htlc->cipher_encode_type == CIPHER_BLOWFISH
-        || htlc->cipher_decode_type == CIPHER_BLOWFISH) {
         return;
     }
     if (pending_install_source_id != 0) {
