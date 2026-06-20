@@ -77,9 +77,30 @@ use crate::{Command, Connection, ConnectionHandle, Event, Frame, ShutdownReason}
 
 /// Opaque handle type. C sees `struct hxnet_connection;` and only
 /// uses pointers.
+///
+/// Holds state for both FFI modes:
+///
+/// - **Polling mode** (R3.3.b): `events` is `Some(receiver)`;
+///   `_callback_state` is `None`. `try_recv_frame` drains the
+///   receiver synchronously.
+/// - **Callback mode** (R3.3.e): `events` is `None`; the actor's
+///   event receiver has been moved into a tokio pump task that
+///   forwards into an async_channel; the GLib main context drains
+///   that channel via [`hxbridge::channel::forward_to_main`] and
+///   invokes the C callback per frame. `_callback_state` holds
+///   the pump's JoinHandle + the MainForwarder; both are kept
+///   alive for the connection's lifetime and dropped here on
+///   destroy.
+///
+/// `_callback_state` makes this type **not Send** (MainForwarder
+/// holds a `glib::JoinHandle` which is ThreadGuard-protected).
+/// That matches the documented FFI contract: HxnetConnection
+/// pointers are single-threaded.
 pub struct HxnetConnection {
     cmd: ConnectionHandle,
-    events: mpsc::Receiver<Event>,
+    events: Option<mpsc::Receiver<Event>>,
+    /// Callback-mode state. None in polling mode.
+    _callback_state: Option<CallbackState>,
     /// JoinHandle for the spawned actor task. Dropping a tokio
     /// `JoinHandle` only detaches the task (the task keeps
     /// running on the runtime until it exits naturally); this
@@ -91,6 +112,17 @@ pub struct HxnetConnection {
     /// flush + exit — so the underscore prefix marks it
     /// reserved-for-future-use.
     _join: JoinHandle<()>,
+}
+
+/// Callback-mode FFI state. Holds the tokio→async_channel pump
+/// task and the GLib main-thread forwarder that invokes the C
+/// callback per event. Both are dropped on destroy: pump's
+/// JoinHandle drop detaches the task (which exits on its own
+/// when the actor's event stream closes); MainForwarder's drop
+/// aborts the spawn_local future on the GLib main context.
+struct CallbackState {
+    _pump: JoinHandle<()>,
+    _forwarder: hxbridge::channel::MainForwarder,
 }
 
 /// Plain-old-data frame the C side reads after try_recv. Mirrors
@@ -328,7 +360,8 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd(
 
     let handle = Box::new(HxnetConnection {
         cmd,
-        events,
+        events: Some(events),
+        _callback_state: None,
         _join: join,
     });
     Box::into_raw(handle)
@@ -366,7 +399,24 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
     }
 
     let h = &mut *handle;
-    match h.events.try_recv() {
+    let events = match h.events.as_mut() {
+        Some(rx) => rx,
+        None => {
+            // Polling try_recv called on a callback-mode handle.
+            // No receiver to drain — the actor's events go
+            // straight to the C callback. Return EMPTY so any
+            // stray polling consumer doesn't see corrupted
+            // state; the right pattern is to use callback-mode
+            // OR polling-mode, never both.
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_try_recv_frame: handle is in callback \
+                 mode; no receiver to poll"
+            );
+            return HXNET_RECV_EMPTY;
+        }
+    };
+    match events.try_recv() {
         Ok(Event::Frame(frame)) => {
             write_frame_to_out(frame, out_frame);
             HXNET_RECV_FRAME
@@ -555,6 +605,372 @@ pub unsafe extern "C" fn hxnet_connection_destroy(
     // to completion but we don't await it — it gets detached
     // and dropped naturally on the runtime).
     drop(Box::from_raw(handle));
+}
+
+// ============================================================
+// Callback-driven FFI (R3.3.e)
+// ============================================================
+//
+// The polling-form FFI above (R3.3.b) makes the C side
+// responsible for draining events on a GLib idle. The
+// callback form here flips that: hxnet drives the C side
+// directly by invoking a registered callback on the GLib main
+// thread per event.
+//
+// Wiring:
+//   1. Connection actor (tokio task) emits Event into a
+//      tokio::sync::mpsc.
+//   2. Pump task (tokio task) forwards each Event into an
+//      async_channel::Sender. The async_channel ferries the
+//      data across the tokio↔GLib boundary because its
+//      Receiver future polls cleanly on any executor.
+//   3. forward_to_main (GLib main-thread spawn_local) reads
+//      from the async_channel Receiver and invokes the C
+//      callback per event. The closure also handles building
+//      the HxnetFrame struct for Frame events.
+//
+// The handler closure captures the C function pointers and
+// user_data inside a private SendCallbacks bundle so the
+// `forward_to_main` closure has everything it needs in one
+// place. Raw and function pointers are Send by default — the
+// bundle picks up Send auto-derivation, no `unsafe impl Send`
+// needed. See SendCallbacks's doc-comment for why we
+// deliberately avoid the explicit marker impl.
+
+/// C-side per-frame callback. Invoked on the GLib main thread
+/// (the same thread `MainContext::ref_thread_default()` returned
+/// at spawn time).
+///
+/// # Frame lifetime — read carefully
+///
+/// The `*mut HxnetFrame` argument points at a stack-allocated
+/// `HxnetFrame` whose storage is destroyed the moment the
+/// callback returns. The rule is: **don't keep the pointer past
+/// return.** Two valid patterns:
+///
+/// 1. Process and free inside the callback — call
+///    `hxnet_frame_free(frame)` on the supplied pointer before
+///    returning. The pointer is valid for the duration of the
+///    callback, so `hxnet_frame_free` here is safe; it only
+///    touches the body allocation behind `body_ptr` (with
+///    length `body_len`), not the stack-frame struct itself.
+/// 2. Defer freeing by copying the integer fields plus the
+///    `body_ptr`/`body_len` pair into a C-owned `HxnetFrame`
+///    struct, then later call `hxnet_frame_free(&copy)` on
+///    that copy. The body memory keeps the same address; only
+///    the `HxnetFrame` *struct* needs to be the C-side copy.
+///
+/// What's forbidden is **storing the original `*mut HxnetFrame`
+/// for use after the callback returns**, and *then* passing
+/// that stale pointer to anything — at that point the stack
+/// frame backing the struct is gone, so even though
+/// `hxnet_frame_free` only touches `body_ptr` / `body_len`,
+/// reading those fields through a dangling pointer is UB.
+///
+/// # Why `*mut`, not `*const`
+///
+/// `hxnet_frame_free` writes through the pointer (it zeroes
+/// `body_ptr` and `body_len` on the supplied struct so a
+/// follow-up double-free attempt is detectable). Marking the
+/// argument `*const` here would force every correct caller
+/// invoking `hxnet_frame_free(frame)` to cast away const — and
+/// const-cast-then-write is UB in C even when the underlying
+/// memory is writable. Taking `*mut` is the same ABI and
+/// matches the ownership contract.
+pub type HxnetEventCallback =
+    Option<unsafe extern "C" fn(*mut HxnetConnection, *mut HxnetFrame, *mut c_void)>;
+
+/// C-side per-shutdown callback. Invoked at most once, on the
+/// GLib main thread, when the actor exits. After this callback
+/// returns, no further callbacks will fire on this handle; the
+/// C side should call `hxnet_connection_destroy` to clean up.
+pub type HxnetShutdownCallback =
+    Option<unsafe extern "C" fn(*mut HxnetConnection, c_int, *mut c_void)>;
+
+/// Bundle of the C-side callback pointers + user_data we hand
+/// to the forwarder closure. All fields are raw / function
+/// pointers, so the compiler derives `Send` on its own — we
+/// don't need (and deliberately don't add) an `unsafe impl
+/// Send`. The reason: a future maintainer might add a non-Send
+/// field here (a `Cell`, a `Rc`, anything) without realising
+/// the marker impl would silently keep the type Send and hand
+/// the non-Send value across a spawn boundary. Letting auto-
+/// derivation do its job means such a field would correctly
+/// trip a compile error and force a re-think.
+///
+/// In practice the spawn_local future runs on the same thread
+/// as the FFI caller (per the documented thread-pinned
+/// contract), so Send is structural rather than evidence of
+/// cross-thread access — but that's an argument for being
+/// careful about what we add to this struct, not an argument
+/// for asserting Send manually.
+struct SendCallbacks {
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    user_data: *mut c_void,
+    handle_ptr: *mut HxnetConnection,
+}
+
+/// Default channel capacity for the tokio→GLib ferry. Big
+/// enough to absorb a chat-history burst without blocking the
+/// actor's read loop; small enough that the GLib main thread
+/// can drain it predictably under load.
+const CALLBACK_FERRY_CAPACITY: usize = 64;
+
+/// Spawn a Connection actor like
+/// [`hxnet_connection_spawn_fd`], but route events through a
+/// pair of C callbacks invoked on the GLib main thread instead
+/// of buffering them for polling retrieval. The fd contract
+/// (TCP, connected, Rust takes ownership) and the abort-on-
+/// runtime-panic semantics are identical.
+///
+/// `on_event` fires once per `Event::Frame` with a non-NULL
+/// `frame` pointer; the C side owns the frame until calling
+/// `hxnet_frame_free`. `on_shutdown` fires once with the
+/// shutdown reason code (`HXNET_SHUTDOWN_*`); after it returns,
+/// no further callbacks fire.
+///
+/// Both callback slots are required (NULL is rejected with
+/// `g_critical` + NULL return). `user_data` is opaque and
+/// passed through to both callbacks unchanged.
+///
+/// # Threading
+///
+/// The callbacks fire on the GLib main thread (whatever
+/// `MainContext::ref_thread_default()` resolved to at spawn
+/// time). C-side state touched from the callback should be
+/// safe to access on that thread; the per-handle thread-pinned
+/// contract documented in the module-level safety section
+/// continues to apply.
+///
+/// # Safety
+///
+/// `fd` requirements identical to
+/// [`hxnet_connection_spawn_fd`]. `on_event` and `on_shutdown`
+/// must be valid C function pointers when non-NULL. `user_data`
+/// must remain valid for the entire connection lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
+    fd: c_int,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_callback: NULL callback"
+        );
+        return std::ptr::null_mut();
+    }
+    if fd < 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_callback: negative fd"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_callback: Runtime::global \
+                 panicked; aborting to avoid unwinding across the FFI \
+                 boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    // Same fd-prep as the polling variant — adopt as
+    // std::net::TcpStream, switch to non-blocking, peer_addr
+    // probe, then hand to tokio.
+    let std_stream = std::net::TcpStream::from_raw_fd(fd);
+    if let Err(e) = std_stream.set_nonblocking(true) {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_callback: set_nonblocking \
+             failed: {}",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+    if let Err(e) = std_stream.peer_addr() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_callback: peer_addr failed \
+             ({}); fd is not a connected TCP socket",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+
+    let _guard = rt.handle().enter();
+    let tcp = match TcpStream::from_std(std_stream) {
+        Ok(s) => s,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_callback: TcpStream::\
+                 from_std failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+    let (cmd, mut events, join) = match Connection::spawn(tcp) {
+        Ok(triple) => triple,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_callback: \
+                 Connection::spawn failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // forward_to_main is going to call MainContext::spawn_local,
+    // which **panics** if the calling thread doesn't own the
+    // context (see hxbridge::channel::forward_to_main and the
+    // upstream gtk-rs requirement). A panic across this
+    // `extern "C"` boundary is UB, so we defensively `acquire()`
+    // ownership ourselves and fail with `g_critical` + NULL on
+    // an Err. The guard binding must be a named local — letting
+    // it drop at the end of a boolean expression releases the
+    // context before forward_to_main attaches. Same pattern as
+    // hxvoice-runtime's bus-watch attach.
+    //
+    // We do this BEFORE Box::into_raw so the failure path
+    // doesn't leak the box: a returned NULL with `cmd`,
+    // `events`, and `join` going out of scope is clean — `cmd`
+    // dropping signals HandleDropped to the actor, which exits;
+    // `events` dropping discards any in-flight buffered events;
+    // the actor task runs to completion on the runtime and the
+    // TcpStream's Drop closes the fd.
+    let main_ctx = glib::MainContext::ref_thread_default();
+    let _acquire_guard = if main_ctx.is_owner() {
+        None
+    } else {
+        match main_ctx.acquire() {
+            Ok(g) => Some(g),
+            Err(_) => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_connection_spawn_fd_with_callback: thread-default \
+                     MainContext is owned by another thread; cannot acquire \
+                     for spawn_local. The Connection was spawned on the \
+                     tokio runtime but is being dropped because the GLib \
+                     wiring cannot attach."
+                );
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    // Build the box first so we can capture its raw pointer in
+    // the callback closure (so the C callback receives a stable
+    // handle pointer it can correlate to its own state).
+    let handle_box = Box::new(HxnetConnection {
+        cmd,
+        events: None,
+        _callback_state: None,
+        _join: join,
+    });
+    let handle_ptr = Box::into_raw(handle_box);
+
+    // tokio→GLib ferry: pump task forwards every Event from
+    // the actor's mpsc receiver into the async_channel; the
+    // GLib forward_to_main drains the async_channel and
+    // invokes the C callback.
+    let (ferry_tx, ferry_rx) =
+        async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
+    let pump = rt.handle().spawn(async move {
+        while let Some(evt) = events.recv().await {
+            if ferry_tx.send(evt).await.is_err() {
+                // GLib side dropped (handle destroyed). Stop
+                // pumping; the actor will eventually exit when
+                // its cmd channel closes too.
+                break;
+            }
+        }
+    });
+
+    // Capture the C callbacks behind the SendCallbacks marker.
+    let cb = SendCallbacks {
+        on_event,
+        on_shutdown,
+        user_data,
+        handle_ptr,
+    };
+
+    // forward_to_main runs on the current thread's
+    // MainContext, which in production is the GLib main loop.
+    // The handler runs on that thread and is free to touch GTK
+    // state, call the C callback, etc. We've already acquired
+    // ownership above, so the spawn_local inside forward_to_main
+    // is guaranteed not to panic.
+    let forwarder =
+        hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| {
+            match evt {
+                Event::Frame(frame) => {
+                    // Allocate the HxnetFrame on the stack so
+                    // the C callback receives a stable pointer
+                    // for the duration of its call. After the
+                    // callback returns, the C side either has
+                    // called hxnet_frame_free already (in which
+                    // case the body has been moved into Rust's
+                    // free path) or will eventually call it;
+                    // either way the stack HxnetFrame is fine
+                    // to drop here because body_ptr ownership
+                    // has been formally transferred to C by the
+                    // callback contract.
+                    let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
+                    // SAFETY: write_frame_to_out fully
+                    // initialises *out.
+                    unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
+                    // Hand the raw *mut pointer to the callback —
+                    // hxnet_frame_free writes through the struct
+                    // to zero body_ptr / body_len, so a *mut
+                    // here matches the callback's documented
+                    // contract and saves the C side a const-cast.
+                    let frame_ptr = out.as_mut_ptr();
+                    if let Some(on_event) = cb.on_event {
+                        // SAFETY: caller guarantees the
+                        // function pointer is valid and that
+                        // user_data outlives the connection.
+                        unsafe {
+                            on_event(cb.handle_ptr, frame_ptr, cb.user_data);
+                        }
+                    }
+                }
+                Event::Shutdown(reason) => {
+                    let code = shutdown_code(reason);
+                    if let Some(on_shutdown) = cb.on_shutdown {
+                        // SAFETY: caller guarantees the
+                        // function pointer is valid.
+                        unsafe {
+                            on_shutdown(cb.handle_ptr, code, cb.user_data);
+                        }
+                    }
+                }
+            }
+        });
+
+    // Now stuff the callback state into the handle. Re-borrow
+    // through the raw pointer.
+    let handle_ref = unsafe { &mut *handle_ptr };
+    handle_ref._callback_state = Some(CallbackState {
+        _pump: pump,
+        _forwarder: forwarder,
+    });
+
+    handle_ptr
 }
 
 // Silence unused import warning when the runtime feature is on
