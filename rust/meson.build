@@ -59,6 +59,11 @@ rust_sources = files(
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',
+  # Phase R3.1+ submodules, gated behind the `runtime` Cargo feature
+  # that the rust_build custom_target turns on below.
+  'crates/hxbridge/src/blocking.rs',
+  'crates/hxbridge/src/channel.rs',
+  'crates/hxbridge/src/runtime.rs',
   'crates/hxvoice/src/lib.rs',
   'crates/hxvoice/src/event.rs',
   'crates/hxvoice/src/action.rs',
@@ -93,16 +98,26 @@ rust_sources = files(
 
 rust_target_dir = meson.project_build_root() / 'rust-target'
 
+# Phase R3.2 turns the hxbridge `runtime` cargo feature on so the
+# tokio runtime + blocking-pool shim + tokio→GLib channel ferry land
+# in the staticlib linked into src/gtkhx. The first production consumer
+# is banner.c's HTXF worker, which calls
+# gtkhx_bridge_spawn_blocking_with_idle in lieu of pthread_create.
+# Subsequent R3.x consumers (xfers.c in R3.4, hxnet Connection actor in
+# R3.3) inherit the feature without needing a second flip.
+cargo_features = 'hxbridge/runtime'
+
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
 # archives under rust_target_dir/release/.
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',
-    '@0@ build --release --manifest-path @1@ --target-dir @2@ && touch @3@'.format(
+    '@0@ build --release --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
       cargo.full_path(),
       meson.current_source_dir() / 'Cargo.toml',
       rust_target_dir,
+      cargo_features,
       '@OUTPUT@',
     ),
   ],
@@ -163,16 +178,34 @@ rust_hotline_proto_dep = declare_dependency(
   ],
 )
 
-# Rust ↔ GLib bridge (Phase R3.0). hxbridge wraps a C-owned
-# GtkhxSession GObject and exposes signal-emit shims for the C side.
-# The first reference is gtkhx_bridge_emit_pointer_pair_signal, used
-# by gtkhx_session_emit_task_update. Pulls in glib/gio 0.22 transitively,
-# which links libglib-2.0 + libgobject-2.0 + libgio-2.0 — already
-# in the C-side deps, so the link surface doesn't change. The
-# gstreamer-rs crate family pinned in workspace.dependencies isn't
-# consumed yet; Phase 8.B wires the gstreamer-webrtc bindings.
+# Rust ↔ GLib bridge (Phase R3.0 + R3.1 + R3.2). hxbridge wraps a
+# C-owned GtkhxSession GObject, exposes signal-emit shims for the C
+# side (R3.0), and — with the `runtime` cargo feature this meson
+# build now turns on — owns the process-wide tokio runtime, the
+# tokio→GLib event ferry, and the spawn_blocking_with_idle worker
+# shim (R3.1 + R3.2). The first production consumer of the runtime
+# pieces is banner.c's HTXF worker
+# (gtkhx_bridge_spawn_blocking_with_idle), which replaced the legacy
+# pthread_create + g_idle_add pair.
+#
+# Pulls in glib/gio 0.22 transitively, plus (now) tokio + async-channel
+# from crates.io. tokio is pure Rust — no new C-side system-lib link
+# surface. The gstreamer-rs crate family pinned in
+# workspace.dependencies isn't consumed yet; Phase 8.B wires the
+# gstreamer-webrtc bindings.
 rust_hxbridge_dep = declare_dependency(
   sources : rust_build,
+  # tokio's blocking-pool internals reference `pow` from libm
+  # (the exponential-backoff math in its worker scheduler).
+  # The main src/gtkhx binary picks libm up transitively via
+  # GTK; integration tests link a tighter set that doesn't,
+  # so libm is missing-DSO at link time without this. Wire it
+  # in via the top-level `math_dep` (cc.find_library('m',
+  # required:false)) rather than a hard-coded '-lm' link arg so
+  # the dep gracefully no-ops on platforms where libm doesn't
+  # need (or doesn't have) an explicit linker flag — matches
+  # how the rest of the project's libm consumers handle this.
+  dependencies : [math_dep],
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxbridge',
