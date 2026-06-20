@@ -897,15 +897,34 @@ pub struct HxnetTransformConfig {
     pub cipher_kind: c_uint,
     pub compression_kind: c_uint,
 
-    /// Blowfish key length in bytes (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`).
-    pub blowfish_key_len: c_uint,
-    /// Blowfish key buffer; only the first `blowfish_key_len`
-    /// bytes are used.
-    pub blowfish_key: [u8; 56],
+    /// Per-direction Blowfish key lengths in bytes
+    /// (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`). The HOPE chain derives
+    /// distinct keys for the two directions (client→server and
+    /// server→client); a single-key shortcut would desynchronise
+    /// the read keystream from anything the server sends — caught
+    /// against VesperNet/Janus, where the keys clearly differ.
+    pub blowfish_read_key_len: c_uint,
+    pub blowfish_write_key_len: c_uint,
+    /// Per-direction Blowfish key buffers; only the first
+    /// `blowfish_*_key_len` bytes of each are used.
+    pub blowfish_read_key: [u8; 56],
+    pub blowfish_write_key: [u8; 56],
     /// Per-direction OFB ivecs. The legacy HOPE handshake
     /// derives these from the session keystream.
     pub blowfish_read_ivec: [u8; 8],
     pub blowfish_write_ivec: [u8; 8],
+    /// Per-direction OFB byte-offset (0..7) into the current
+    /// keystream block. The bridge install can fire mid-block
+    /// — the C side may have decoded post-LOGIN-reply bytes (or
+    /// encoded step-2 LOGIN bytes) before `install_check_idle`'s
+    /// htlc->out drain wait completes, advancing `num` past 0.
+    /// Restoring with `num=0` would re-encrypt the ivec block on
+    /// the next crypt() and desynchronise the keystream. Caught
+    /// by VesperNet/Janus + Blowfish: Janus ships an empty
+    /// HTLS_DATA_CIPHER_IVEC and the post-LOGIN SELFINFO is
+    /// decoded by the legacy path before install fires.
+    pub blowfish_read_num: u8,
+    pub blowfish_write_num: u8,
 
     /// ChaCha20-Poly1305 keys per direction.
     pub aead_read_key: [u8; 32],
@@ -930,24 +949,27 @@ pub struct HxnetTransformConfig {
 const _: () = {
     assert!(std::mem::offset_of!(HxnetTransformConfig, cipher_kind) == 0);
     assert!(std::mem::offset_of!(HxnetTransformConfig, compression_kind) == 4);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key_len) == 8);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_key) == 12);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 68);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 76);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 84);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 116);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key_len) == 8);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key_len) == 12);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key) == 16);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key) == 72);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 128);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 136);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_num) == 144);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_num) == 145);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 146);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 178);
     // aead_read_counter is u64 — needs 8-byte alignment, so
-    // there are 4 bytes of padding after aead_write_key (which
-    // ends at offset 148) before the counter starts at 152.
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 152);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 160);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 168);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 169);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 170);
-    // Total size: padding to 8-byte alignment for the u64
-    // counters means the struct's natural alignment is 8;
-    // 170 + 6 = 176 lines up at an 8-byte boundary.
-    assert!(std::mem::size_of::<HxnetTransformConfig>() == 176);
+    // there are 6 bytes of padding after aead_write_key (which
+    // ends at offset 210) before the counter starts at 216.
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 216);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 224);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 232);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 233);
+    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 234);
+    // Total size: 234 + 6 = 240, aligned to the struct's
+    // natural 8-byte alignment.
+    assert!(std::mem::size_of::<HxnetTransformConfig>() == 240);
     assert!(std::mem::align_of::<HxnetTransformConfig>() == 8);
 };
 
@@ -961,21 +983,47 @@ fn cipher_layer_from_config(
     match cfg.cipher_kind {
         HXNET_CIPHER_NONE => Ok(crate::transform::CipherLayer::None),
         HXNET_CIPHER_BLOWFISH => {
-            let key_len = cfg.blowfish_key_len as usize;
-            if key_len == 0 || key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
-                return Err("blowfish_key_len out of range (1..=56)");
+            let read_key_len = cfg.blowfish_read_key_len as usize;
+            let write_key_len = cfg.blowfish_write_key_len as usize;
+            if read_key_len == 0
+                || read_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
+            {
+                return Err("blowfish_read_key_len out of range (1..=56)");
             }
-            let key = &cfg.blowfish_key[..key_len];
-            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+            if write_key_len == 0
+                || write_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
+            {
+                return Err("blowfish_write_key_len out of range (1..=56)");
+            }
+            let read_key = &cfg.blowfish_read_key[..read_key_len];
+            let write_key = &cfg.blowfish_write_key[..write_key_len];
+            // Use the per-direction num verbatim. restore_ofb_state
+            // already masks to 0..7 internally so an over-range
+            // value can't index ivec out of bounds — same defense
+            // the rollback path relies on. Threading num through
+            // is the fix for the Janus + Blowfish disconnect: the
+            // C-side may have advanced num past 0 by the time
+            // install_check_idle fires; restoring num=0 here would
+            // re-encrypt ivec on the next crypt() and desync the
+            // keystream against the server. The per-direction key
+            // split is the other half of the same fix — HOPE
+            // derives distinct read/write Blowfish keys from the
+            // session keystream, so loading the same key into both
+            // states gives the read side a wrong keystream against
+            // any server that doesn't happen to derive identical
+            // keys (the Janus case).
+            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(read_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_read_ivec, 0);
+                    s.restore_ofb_state(&cfg.blowfish_read_ivec,
+                                        cfg.blowfish_read_num as u32);
                     s
                 }
                 None => return Err("blowfish read state init failed"),
             };
-            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(key) {
+            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(write_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_write_ivec, 0);
+                    s.restore_ofb_state(&cfg.blowfish_write_ivec,
+                                        cfg.blowfish_write_num as u32);
                     s
                 }
                 None => return Err("blowfish write state init failed"),

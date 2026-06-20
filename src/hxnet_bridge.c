@@ -223,10 +223,23 @@ typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
 typedef struct {
     guint32 cipher_kind;
     guint32 compression_kind;
-    guint32 blowfish_key_len;
-    guint8  blowfish_key[56];
+    /* Per-direction Blowfish keys. HOPE derives distinct read /
+     * write keys from the session keystream — using a single key
+     * for both directions desynchronises the read keystream from
+     * anything the server sends. Caught against VesperNet/Janus,
+     * where the keys clearly differ. */
+    guint32 blowfish_read_key_len;
+    guint32 blowfish_write_key_len;
+    guint8  blowfish_read_key[56];
+    guint8  blowfish_write_key[56];
     guint8  blowfish_read_ivec[8];
     guint8  blowfish_write_ivec[8];
+    /* OFB byte-offset into the current keystream block (0..7).
+     * Threaded through so the bridge install can fire mid-block
+     * without desynchronising the Rust BlowfishStream from the
+     * server's keystream. */
+    guint8  blowfish_read_num;
+    guint8  blowfish_write_num;
     guint8  aead_read_key[32];
     guint8  aead_write_key[32];
     guint64 aead_read_counter;
@@ -242,7 +255,7 @@ typedef struct {
  * offset checks; here we just guard size + alignment so a
  * layout regression fails at production build time even when
  * the test suite isn't built. */
-_Static_assert (sizeof (hxnet_transform_config_t) == 176,
+_Static_assert (sizeof (hxnet_transform_config_t) == 240,
                 "hxnet_transform_config_t size drift — sync Rust "
                 "rust/crates/hxnet/src/ffi.rs const-asserts");
 _Static_assert (_Alignof (hxnet_transform_config_t) == 8,
@@ -435,14 +448,24 @@ hx_bridge_install_with_hope_state (struct htlc_conn *htlc, int fd)
         break;
     case CIPHER_BLOWFISH: {
         cfg.cipher_kind = HXNET_BRIDGE_CIPHER_BLOWFISH;
-        /* The symmetric key is the same on both directions;
-         * HOPE-Blowfish always uses one key per connection. We
-         * stored it on htlc->cipher_encode_key after the HOPE
-         * Step 2 reply. */
+        /* HOPE derives DISTINCT read and write Blowfish keys from
+         * the session keystream. The C side stores them on
+         * htlc->cipher_decode_key (incoming wire — what we read
+         * from the server) and htlc->cipher_encode_key (outgoing
+         * — what we send to the server). The previous
+         * single-key code worked only against servers that
+         * happened to derive identical encode / decode keys; it
+         * broke against VesperNet/Janus, whose keys differ. */
         if (htlc->cipher_encode_keylen == 0
-            || htlc->cipher_encode_keylen > sizeof (cfg.blowfish_key)) {
-            g_critical ("hxnet_bridge: invalid blowfish key length %u",
+            || htlc->cipher_encode_keylen > sizeof (cfg.blowfish_write_key)) {
+            g_critical ("hxnet_bridge: invalid blowfish write key length %u",
                         htlc->cipher_encode_keylen);
+            goto fail_close_fd;
+        }
+        if (htlc->cipher_decode_keylen == 0
+            || htlc->cipher_decode_keylen > sizeof (cfg.blowfish_read_key)) {
+            g_critical ("hxnet_bridge: invalid blowfish read key length %u",
+                        htlc->cipher_decode_keylen);
             goto fail_close_fd;
         }
         /* cipher_*_init can leave htlc->cipher_*_state.stream
@@ -458,17 +481,32 @@ hx_bridge_install_with_hope_state (struct htlc_conn *htlc, int fd)
                         htlc->cipher_decode_state.stream);
             goto fail_close_fd;
         }
-        cfg.blowfish_key_len = htlc->cipher_encode_keylen;
-        memcpy (cfg.blowfish_key, htlc->cipher_encode_key,
+        cfg.blowfish_write_key_len = htlc->cipher_encode_keylen;
+        memcpy (cfg.blowfish_write_key, htlc->cipher_encode_key,
                 htlc->cipher_encode_keylen);
-        /* Snapshot the live OFB ivec on each direction so the
-         * negotiated stream position survives the handoff. */
-        guint32 num_unused;
+        cfg.blowfish_read_key_len = htlc->cipher_decode_keylen;
+        memcpy (cfg.blowfish_read_key, htlc->cipher_decode_key,
+                htlc->cipher_decode_keylen);
+        /* Snapshot the live OFB ivec + num on each direction so
+         * the negotiated stream position survives the handoff.
+         * num is the byte offset (0..7) into the current
+         * keystream block — losing it would desync the Rust
+         * BlowfishStream from the server's keystream whenever
+         * install fires mid-block. See the doc-comment on
+         * blowfish_*_num in hxnet_transform_config_t. */
+        guint32 write_num = 0;
+        guint32 read_num  = 0;
         gtkhx_blowfish_ofb64_save_state (htlc->cipher_encode_state.stream,
                                          cfg.blowfish_write_ivec,
-                                         &num_unused);
+                                         &write_num);
         gtkhx_blowfish_ofb64_save_state (htlc->cipher_decode_state.stream,
-                                         cfg.blowfish_read_ivec, &num_unused);
+                                         cfg.blowfish_read_ivec,
+                                         &read_num);
+        /* save_state writes a u32 but the field is u8; num is
+         * always 0..7 by the OFB-64 block size invariant. Mask
+         * defensively in case the Rust side ever changes that. */
+        cfg.blowfish_write_num = (guint8) (write_num & 7);
+        cfg.blowfish_read_num  = (guint8) (read_num  & 7);
         break;
     }
     case CIPHER_CHACHA20_POLY1305: {

@@ -140,10 +140,14 @@ extern hxnet_connection *hxnet_connection_spawn_fd_with_callback (
 typedef struct {
     unsigned int cipher_kind;
     unsigned int compression_kind;
-    unsigned int blowfish_key_len;
-    uint8_t      blowfish_key[56];
+    unsigned int blowfish_read_key_len;
+    unsigned int blowfish_write_key_len;
+    uint8_t      blowfish_read_key[56];
+    uint8_t      blowfish_write_key[56];
     uint8_t      blowfish_read_ivec[8];
     uint8_t      blowfish_write_ivec[8];
+    uint8_t      blowfish_read_num;
+    uint8_t      blowfish_write_num;
     uint8_t      aead_read_key[32];
     uint8_t      aead_write_key[32];
     uint64_t     aead_read_counter;
@@ -157,27 +161,35 @@ _Static_assert (offsetof (hxnet_transform_config, cipher_kind) == 0,
                 "hxnet_transform_config.cipher_kind offset drift");
 _Static_assert (offsetof (hxnet_transform_config, compression_kind) == 4,
                 "hxnet_transform_config.compression_kind offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_key_len) == 8,
-                "hxnet_transform_config.blowfish_key_len offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_key) == 12,
-                "hxnet_transform_config.blowfish_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_read_ivec) == 68,
+_Static_assert (offsetof (hxnet_transform_config, blowfish_read_key_len) == 8,
+                "hxnet_transform_config.blowfish_read_key_len offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_write_key_len) == 12,
+                "hxnet_transform_config.blowfish_write_key_len offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_read_key) == 16,
+                "hxnet_transform_config.blowfish_read_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_write_key) == 72,
+                "hxnet_transform_config.blowfish_write_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_read_ivec) == 128,
                 "hxnet_transform_config.blowfish_read_ivec offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_write_ivec) == 76,
+_Static_assert (offsetof (hxnet_transform_config, blowfish_write_ivec) == 136,
                 "hxnet_transform_config.blowfish_write_ivec offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 84,
+_Static_assert (offsetof (hxnet_transform_config, blowfish_read_num) == 144,
+                "hxnet_transform_config.blowfish_read_num offset drift");
+_Static_assert (offsetof (hxnet_transform_config, blowfish_write_num) == 145,
+                "hxnet_transform_config.blowfish_write_num offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 146,
                 "hxnet_transform_config.aead_read_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 116,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 178,
                 "hxnet_transform_config.aead_write_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 152,
+_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 216,
                 "hxnet_transform_config.aead_read_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 160,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 224,
                 "hxnet_transform_config.aead_write_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 168,
+_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 232,
                 "hxnet_transform_config.aead_read_dir offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 169,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 233,
                 "hxnet_transform_config.aead_write_dir offset drift");
-_Static_assert (sizeof (hxnet_transform_config) == 176,
+_Static_assert (sizeof (hxnet_transform_config) == 240,
                 "hxnet_transform_config size drift");
 
 extern hxnet_connection *hxnet_connection_spawn_fd_with_transforms_and_callback (
