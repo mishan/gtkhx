@@ -1460,9 +1460,237 @@ fn wire_callback_state(
     handle_ptr
 }
 
-// Silence unused import warning when the runtime feature is on
-// but no test exercises the c_void path. The body of this module
-// uses c_int / c_uint exclusively; c_void is reserved for future
-// FFI growth (e.g. user_data parameters on callback variants).
-#[allow(dead_code)]
-fn _silence_unused_c_void(_p: *mut c_void) {}
+// ----------------------------------------------------------------- *
+// R3.3.e-tls — TLS-aware spawn surface                              *
+// ----------------------------------------------------------------- *
+
+/// Callback fired during the TLS handshake to validate the peer's
+/// leaf certificate. Production wires this to the C-side
+/// `tls_trust` module which consults the known-hosts file, the
+/// system CA bundle, and (for unknown / mismatched certs)
+/// surfaces the `tls_trust_dialog` AdwAlertDialog.
+///
+/// Called on the tokio runtime thread, once per handshake, with:
+/// `cert_der` / `cert_der_len`: the leaf certificate's DER bytes.
+/// `host` / `host_len`: the SNI hostname / IP literal as a
+/// non-NUL-terminated UTF-8 slice. `port`: the TCP port. `user_data`:
+/// opaque pointer the C side stashed at spawn time (typically the
+/// `struct htlc_conn *`).
+///
+/// Return 1 to accept the certificate, 0 to reject. Any other
+/// value is treated as reject.
+pub type HxnetTlsTrustCallback = unsafe extern "C" fn(
+    cert_der: *const u8,
+    cert_der_len: usize,
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    user_data: *mut c_void,
+) -> c_int;
+
+/// Configuration for a TLS-wrapped spawn. The C side fills this
+/// in and hands it to `hxnet_connection_spawn_fd_with_tls_and_callback`.
+///
+/// The host + port are surfaced to the trust callback for the
+/// user-facing prompt and known-hosts lookup. They also drive
+/// the SNI extension in the TLS ClientHello — rustls uses `host`
+/// directly, falling back to IP-literal handling for typed-in
+/// IPs.
+#[repr(C)]
+pub struct HxnetTlsConfig {
+    /// Trust callback fired once during handshake. Required.
+    pub on_verify_cert: HxnetTlsTrustCallback,
+    /// Opaque pointer passed back to `on_verify_cert`. The C side
+    /// stashes whatever it needs to identify the connection
+    /// (typically `struct htlc_conn *`); Rust never dereferences
+    /// it.
+    pub user_data: *mut c_void,
+    /// SNI hostname or IP literal. NOT NUL-terminated; uses
+    /// `host_len`.
+    pub host: *const u8,
+    pub host_len: usize,
+    /// TCP port the connection is targeting. Surfaced to the
+    /// trust callback for the user-facing prompt.
+    pub port: u16,
+}
+
+/// Like [`hxnet_connection_spawn_fd_with_callback`], but the
+/// adopted TCP socket is first wrapped in a TLS client
+/// connection. Used for the Mobius-style "TLS from byte zero on
+/// a dedicated port" model (control port 5600 / HTXF port 5601).
+///
+/// The TLS handshake runs asynchronously on the tokio runtime
+/// after this function returns. The returned [`HxnetConnection`]
+/// is fully functional from the C side's perspective from the
+/// moment of return: `hxnet_connection_send_frame` calls queue in
+/// the command channel and get processed once the handshake
+/// completes. Handshake failure surfaces as an
+/// `Event::Shutdown(StreamError)` callback before any frames
+/// flow.
+///
+/// `config` is dereferenced read-only during this call; the C
+/// side may free / reuse its storage as soon as the function
+/// returns. `config->on_verify_cert` and `config->user_data` are
+/// captured into the spawned task — they must remain valid for
+/// the connection's lifetime (production scopes them to the
+/// `htlc_conn` lifetime, which outlives the actor by design).
+///
+/// # Safety
+///
+/// `config` must point at a valid, fully-initialised
+/// `HxnetTlsConfig`. `config->host` must point at
+/// `config->host_len` readable bytes of valid UTF-8 (or an IP
+/// literal — IP literals are also valid UTF-8). All other
+/// parameters carry the same safety preconditions as
+/// [`hxnet_connection_spawn_fd_with_callback`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_tls_and_callback(
+    fd: c_int,
+    config: *const HxnetTlsConfig,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if config.is_null() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: NULL config"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: NULL callback"
+        );
+        return std::ptr::null_mut();
+    }
+    if fd < 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: negative fd"
+        );
+        return std::ptr::null_mut();
+    }
+    let cfg = &*config;
+    if cfg.host.is_null() || cfg.host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(cfg.host, cfg.host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_tls_and_callback: host is not \
+                 valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Install the rustls crypto provider once per process.
+    // Idempotent: subsequent calls no-op.
+    crate::tls::install_default_crypto_provider();
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_tls_and_callback: \
+                 Runtime::global panicked; aborting to avoid unwinding \
+                 across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    // Same fd-prep + TCP wrap as the non-TLS variants.
+    let std_stream = std::net::TcpStream::from_raw_fd(fd);
+    if let Err(e) = std_stream.set_nonblocking(true) {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: \
+             set_nonblocking failed: {}",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+    if let Err(e) = std_stream.peer_addr() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_spawn_fd_with_tls_and_callback: peer_addr \
+             failed ({}); fd is not a connected TCP socket",
+            e
+        );
+        return std::ptr::null_mut();
+    }
+
+    let _guard = rt.handle().enter();
+    let tcp = match TcpStream::from_std(std_stream) {
+        Ok(s) => s,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_spawn_fd_with_tls_and_callback: \
+                 TcpStream::from_std failed: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // Make channels up front so the C side gets a working handle
+    // immediately. The actor task awaits the handshake before
+    // entering the run loop; buffered sends queue safely
+    // (DEFAULT_COMMAND_CAPACITY = 256 slots).
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    // The TLS verifier needs Send + Sync + 'static — capture the
+    // raw pointer as a usize so the closure-state is Send. The
+    // pointer is only ever dereferenced inside the C callback on
+    // the tokio thread, which matches the existing single-thread
+    // invariant on `HxnetConnection`.
+    let on_verify_cert = cfg.on_verify_cert;
+    let verify_user_data_usize = cfg.user_data as usize;
+    let host_for_handshake = host_str.clone();
+    let port = cfg.port;
+
+    let join = rt.handle().spawn(async move {
+        let tls_cfg = crate::tls::build_client_config(
+            on_verify_cert,
+            verify_user_data_usize as *mut c_void,
+            host_for_handshake.clone(),
+            port,
+        );
+        match crate::tls::handshake(tcp, tls_cfg, host_for_handshake).await {
+            Ok(stream) => {
+                Connection::run_actor(stream, cmd_rx, evt_tx).await;
+            }
+            Err(e) => {
+                // Surface the handshake failure as a
+                // Shutdown(StreamError) so the C side's
+                // on_shutdown callback fires with a non-clean
+                // reason — same observable behaviour as a
+                // mid-stream IO error in the actor loop.
+                let _ = evt_tx
+                    .send(crate::Event::Shutdown(
+                        crate::ShutdownReason::StreamError(format!(
+                            "TLS handshake failed: {e}"
+                        )),
+                    ))
+                    .await;
+            }
+        }
+    });
+
+    wire_callback_state(rt, cmd, events, join, on_event, on_shutdown, user_data)
+}

@@ -208,6 +208,65 @@ impl Connection {
         Ok((ConnectionHandle { tx: cmd_tx }, evt_rx, join))
     }
 
+    /// Create the channels + handle without spawning the actor.
+    /// Used by the TLS-aware FFI spawn path: the C side gets a
+    /// fully-functional `ConnectionHandle` immediately, while
+    /// the actor task itself awaits the asynchronous handshake
+    /// before running [`actor_loop`]. Buffered sends on the
+    /// returned handle queue in the channel until the actor
+    /// comes online (DEFAULT_COMMAND_CAPACITY = 256 slots' worth
+    /// of buffering).
+    ///
+    /// The third return value is the [`Command`] receiver and
+    /// the fourth is the [`Event`] sender — caller is responsible
+    /// for driving them into [`actor_loop`] (typically inside a
+    /// `tokio::spawn` block that first awaits a handshake
+    /// future).
+    pub fn make_channels() -> (
+        ConnectionHandle,
+        mpsc::Receiver<Event>,
+        mpsc::Receiver<Command>,
+        mpsc::Sender<Event>,
+    ) {
+        Self::make_channels_with_capacities(
+            DEFAULT_COMMAND_CAPACITY,
+            DEFAULT_EVENT_CAPACITY,
+        )
+    }
+
+    /// Same as [`Self::make_channels`] with caller-chosen
+    /// capacities. Tests touch this directly to exercise
+    /// backpressure shapes the production capacities mask.
+    pub fn make_channels_with_capacities(
+        command_capacity: usize,
+        event_capacity: usize,
+    ) -> (
+        ConnectionHandle,
+        mpsc::Receiver<Event>,
+        mpsc::Receiver<Command>,
+        mpsc::Sender<Event>,
+    ) {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(command_capacity);
+        let (evt_tx, evt_rx) = mpsc::channel::<Event>(event_capacity);
+        (ConnectionHandle { tx: cmd_tx }, evt_rx, cmd_rx, evt_tx)
+    }
+
+    /// Run the actor loop against pre-existing channels. Used
+    /// by callers that own the channel allocation themselves
+    /// (TLS handshake path in the FFI). Equivalent to
+    /// [`Self::spawn`]'s post-channel-creation body — same
+    /// `actor_loop` is called; the same `Shutdown` event is
+    /// always sent on exit.
+    pub async fn run_actor<S>(
+        stream: S,
+        cmd_rx: mpsc::Receiver<Command>,
+        evt_tx: mpsc::Sender<Event>,
+    ) where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        actor_loop(stream, cmd_rx, evt_tx).await
+    }
+
     /// Type-erased spawn entry — accepts a [`BoxedDuplex`] instead
     /// of a concrete `S`. Used by the FFI to hand the actor a
     /// stack composed at runtime by [`crate::transform::compose`]
