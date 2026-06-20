@@ -63,6 +63,7 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'network_decode.c',
+  'hxnet_bridge.c',
   'news.c',
   'news_browser.c',
   'notify.c',

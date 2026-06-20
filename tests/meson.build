@@ -211,6 +211,23 @@ test_hxnet_ffi = executable('test_hxnet_ffi',
 test('hxnet_ffi', test_hxnet_ffi,
      suite : 'unit')
 
+# hxnet_bridge — translation layer between hxnet's HxnetFrame
+# callback shape and the existing rcv state machine in src/rcv.c.
+# Phase R3.3.e-4a ships only the header-packing leg as a Tier 1
+# test; the full dispatch path through htlc_conn lives behind
+# the production refactor that R3.3.e-4b will land. Links the
+# bridge source + proto_helpers.c (for hl_hdr_decode round-trip
+# verification) without dragging the GUI tree.
+test_hxnet_bridge = executable('test_hxnet_bridge',
+  'unit/test_hxnet_bridge.c',
+  '../src/hxnet_bridge.c',
+  '../src/proto_helpers.c',
+  dependencies        : test_deps + [rust_hotline_proto_dep],
+  include_directories : test_inc,
+)
+test('hxnet_bridge', test_hxnet_bridge,
+     suite : 'unit')
+
 # bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
 # bookmarks_io.c (carved out of bookmarks.c, which still holds the
 # GTK / libadwaita dialog) so this test can drive it without the
