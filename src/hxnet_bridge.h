@@ -181,6 +181,24 @@ extern gboolean hx_bridge_install_with_hope_state (struct htlc_conn *htlc,
                                                    int fd);
 
 /*
+ * TLS-aware install. Same role as `hx_bridge_install_with_hope_state`
+ * but for connections that use TLS as the transport instead of the
+ * legacy HOPE-negotiated cipher / compression stack. TLS provides
+ * confidentiality + integrity already; HOPE on top is double-
+ * encryption and the scoping doc forbids it. `htlc->host` /
+ * `htlc->serverport` are read for the SNI hostname + port that
+ * surface to the trust callback.
+ *
+ * The fd hand-over and install-defer semantics match
+ * `hx_bridge_install_with_hope_state`. The TLS handshake itself
+ * runs asynchronously on the tokio runtime after this function
+ * returns — the call is non-blocking. Handshake failures surface
+ * via the shutdown callback as `StreamError("TLS handshake
+ * failed: ...")` before any frames flow.
+ */
+extern gboolean hx_bridge_install_tls (struct htlc_conn *htlc, int fd);
+
+/*
  * TRUE when an hxnet connection is currently installed.
  * Production code uses this as the gate between the new
  * (hxnet) and legacy (GIOStream) read / write paths.

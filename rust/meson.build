@@ -74,6 +74,7 @@ rust_sources = files(
   'crates/hxnet/src/ffi.rs',
   'crates/hxnet/src/frame.rs',
   'crates/hxnet/src/hope_blowfish.rs',
+  'crates/hxnet/src/tls.rs',
   'crates/hxnet/src/transform.rs',
   'crates/hxvoice/src/lib.rs',
   'crates/hxvoice/src/event.rs',
@@ -241,6 +242,13 @@ rust_hxbridge_dep = declare_dependency(
 # ordering for the test binary.
 rust_hxnet_dep = declare_dependency(
   sources : rust_build,
+  # Same libm dep as hxbridge — hxnet pulls in tokio via the
+  # same `hxbridge::runtime::Runtime::global` shim, so the same
+  # pow-from-libm reference applies here. Tier 1 tests (e.g.
+  # test_hxnet_bridge with the R3.3.e-tls install path linked)
+  # need this explicitly; src/gtkhx picks libm up transitively
+  # via GTK.
+  dependencies : [math_dep],
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxnet',

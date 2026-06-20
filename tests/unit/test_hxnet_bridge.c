@@ -177,6 +177,31 @@ hxnet_frame_free (struct hxnet_frame_t *f)
  * Tier 1 test never invokes the install path, so a
  * g_assert_not_reached stub keeps the symbol satisfied without
  * dragging the staticlib in. */
+/* R3.3.e-tls: the new TLS spawn FFI is referenced by
+ * hx_bridge_install_tls but the Tier 1 test never exercises the
+ * install path. Stub same shape as the transforms variant
+ * above. */
+struct hxnet_tls_config_t;
+struct hxnet_connection_opaque *
+hxnet_connection_spawn_fd_with_tls_and_callback (
+    int fd, const struct hxnet_tls_config_t *config,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    void *user_data);
+struct hxnet_connection_opaque *
+hxnet_connection_spawn_fd_with_tls_and_callback (
+    int fd, const struct hxnet_tls_config_t *config,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    void *user_data)
+{
+    (void) fd;
+    (void) config;
+    (void) on_event;
+    (void) on_shutdown;
+    (void) user_data;
+    g_assert_not_reached ();
+    return NULL;
+}
+
 void
 gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
                                  guint32 *out_num);
@@ -278,6 +303,18 @@ test_pack_header_byte_layout (void)
     hx_bridge_pack_header (hdr, 0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e,
                            10);
     g_assert_cmpmem (hdr, sizeof (hdr), expected, sizeof (expected));
+}
+
+/* R3.3.e-tls pulled tls_trust.c into the bridge link surface
+ * (the bridge's TLS verify callback consults the known-hosts
+ * file). tls_trust uses gtkhx_config_dir to resolve that file's
+ * path. Stub it out the same way test_bookmarks / test_tls_trust
+ * do — Tier 1 tests here don't exercise the trust path so any
+ * return string works; the stub just satisfies the linker. */
+const char *
+gtkhx_config_dir (void)
+{
+    return "/tmp/test-hxnet-bridge-config-stub";
 }
 
 int

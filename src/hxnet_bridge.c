@@ -805,3 +805,147 @@ hx_bridge_uninstall (void)
     bridge_htlc   = NULL;
     hxnet_connection_destroy (h);
 }
+
+/* ============================================================ *
+ * Phase R3.3.e-tls — TLS install path                          *
+ * ============================================================ */
+
+#include "tls_trust.h"
+
+/* Mirror of the Rust-side HxnetTlsConfig + spawn surface. */
+typedef int (*hxnet_tls_trust_cb_t) (const guint8 *cert_der,
+                                     gsize         cert_der_len,
+                                     const guint8 *host,
+                                     gsize         host_len,
+                                     guint16       port,
+                                     void         *user_data);
+typedef struct {
+    hxnet_tls_trust_cb_t on_verify_cert;
+    void                *user_data;
+    const guint8        *host;
+    gsize                host_len;
+    guint16              port;
+} hxnet_tls_config_t;
+
+extern hxnet_connection_opaque *
+hxnet_connection_spawn_fd_with_tls_and_callback (
+    int fd, const hxnet_tls_config_t *config,
+    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
+    void *user_data);
+
+/* Bridge verify callback. Fires once during the TLS handshake on
+ * the tokio runtime thread. Computes a fingerprint over the DER
+ * bytes and consults the known-hosts file via the existing
+ * tls_trust API; on miss, defers to the GTKHX_TLS_AUTO_ACCEPT
+ * escape hatch (which Tier 3 tests set) or rejects.
+ *
+ * Production interactive prompt path (UNKNOWN / MISMATCH →
+ * tls_trust_dialog_run_sync marshalled to the main thread) is
+ * tracked as a follow-up — it shares the `trust_dialog_run_thread_safe`
+ * helper that's currently static in network.c, and exposing that
+ * helper is its own small refactor. For now the bridge's TLS
+ * path is gated by the env var, which is sufficient to drive the
+ * Tier 3 test that lands alongside this commit.
+ */
+static int
+bridge_tls_verify_cb (const guint8 *cert_der, gsize cert_der_len,
+                      const guint8 *host, gsize host_len,
+                      guint16 port, void *user_data G_GNUC_UNUSED)
+{
+    if (!cert_der || cert_der_len == 0 || !host || host_len == 0) {
+        g_warning ("hxnet_bridge: tls verify called with NULL/empty args");
+        return 0;
+    }
+
+    /* Same fingerprint shape as hx_tls_trust_fingerprint:
+     * `sha256:<64 hex chars>`. Recomputed here from raw DER
+     * rather than going through GTlsCertificate so the bridge
+     * doesn't have to round-trip the bytes through GIO. */
+    GChecksum *sha = g_checksum_new (G_CHECKSUM_SHA256);
+    g_checksum_update (sha, cert_der, cert_der_len);
+    g_autofree gchar *fingerprint =
+        g_strdup_printf ("sha256:%s", g_checksum_get_string (sha));
+    g_checksum_free (sha);
+
+    g_autofree gchar *host_str = g_strndup ((const char *) host, host_len);
+
+    hx_tls_trust_status status =
+        hx_tls_trust_lookup (host_str, port, fingerprint);
+
+    if (status == HX_TLS_TRUST_TRUSTED) {
+        return 1;
+    }
+
+    /* Cross-port silent-accept (same logic the legacy
+     * tls_accept_certificate uses). If this cert is already
+     * pinned for the host at any other port, accept silently
+     * and pin the new port too. UNKNOWN only — never override
+     * MISMATCH this way. */
+    if (status == HX_TLS_TRUST_UNKNOWN
+        && hx_tls_trust_host_has_fingerprint (host_str, fingerprint)) {
+        (void) hx_tls_trust_pin (host_str, port, fingerprint);
+        return 1;
+    }
+
+    /* GTKHX_TLS_AUTO_ACCEPT escape hatch — same shape Tier 3
+     * tests use against the Janus container. Production users
+     * never see this branch (the env var is undocumented and
+     * default-off); the dialog-driven interactive path lands
+     * in a follow-up. */
+    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
+    if (auto_accept && g_strcmp0 (auto_accept, "1") == 0) {
+        if (status == HX_TLS_TRUST_MISMATCH) {
+            g_warning (
+                "hxnet_bridge: GTKHX_TLS_AUTO_ACCEPT=1 silently accepted "
+                "a MISMATCHED cert for %s:%u (fp=%s). DO NOT set this in "
+                "production.",
+                host_str, (unsigned) port, fingerprint);
+        }
+        (void) hx_tls_trust_pin (host_str, port, fingerprint);
+        return 1;
+    }
+
+    g_message (
+        "hxnet_bridge: tls verify rejected %s:%u status=%d fp=%s "
+        "(no interactive dialog yet on this path; set "
+        "GTKHX_TLS_AUTO_ACCEPT=1 to accept).",
+        host_str, (unsigned) port, (int) status, fingerprint);
+    return 0;
+}
+
+gboolean
+hx_bridge_install_tls (struct htlc_conn *htlc, int fd)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (fd > 0, FALSE);
+    g_return_val_if_fail (bridge_handle == NULL, FALSE);
+
+    if (!htlc->serverhost[0]) {
+        g_critical ("hxnet_bridge: hx_bridge_install_tls: empty htlc->serverhost");
+        return FALSE;
+    }
+
+    /* hxnet's TLS spawn captures `on_verify_cert` + `user_data`
+     * into the spawned task — they must outlive the connection.
+     * `bridge_tls_verify_cb` is a static function pointer
+     * (lifetime = process); `htlc` is owned by the C side which
+     * guarantees it outlives the actor (the existing bridge
+     * lifetime contract). */
+    hxnet_tls_config_t cfg = {
+        .on_verify_cert = bridge_tls_verify_cb,
+        .user_data      = htlc,
+        .host           = (const guint8 *) htlc->serverhost,
+        .host_len       = strlen (htlc->serverhost),
+        .port           = (guint16) htlc->serverport,
+    };
+
+    hxnet_connection_opaque *h
+        = hxnet_connection_spawn_fd_with_tls_and_callback (
+            fd, &cfg, bridge_on_event_cb, bridge_on_shutdown_cb, htlc);
+    if (!h) {
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
+}
