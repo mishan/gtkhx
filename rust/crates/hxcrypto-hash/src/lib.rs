@@ -63,6 +63,25 @@ pub unsafe extern "C" fn gtkhx_hmac_xxx(
     hmac_xxx_inner(md_slice, key_slice, text_slice, alg)
 }
 
+/// Safe-Rust entry point: same semantics as [`gtkhx_hmac_xxx`]
+/// but without the C-shaped pointer wrangling. Used by
+/// in-workspace consumers (R3.3.e-4g's `HopeBlowfishStream` for
+/// the HOPE per-message rekey rotation; tests below for the
+/// known-vector pins).
+///
+/// `md` is fixed at 32 bytes (the largest digest any supported
+/// algorithm produces — HMAC-SHA256). Taking `&mut [u8; 32]`
+/// instead of `&mut [u8]` makes the buffer-length contract a
+/// compile-time guarantee: passing a shorter array fails to
+/// build rather than panicking at the unconditional `md[..32]`
+/// slice inside `hmac_xxx_inner`. The C FFI shim above still
+/// takes a raw pointer + length-of-32 promise from the caller —
+/// that promise is documented as a safety precondition on the
+/// extern "C" function.
+pub fn hmac_xxx(md: &mut [u8; 32], key: &[u8], text: &[u8], macalg: &str) -> u16 {
+    hmac_xxx_inner(md, key, text, macalg)
+}
+
 /// Inner implementation that works on safe slices.
 fn hmac_xxx_inner(md: &mut [u8], key: &[u8], text: &[u8], macalg: &str) -> u16 {
     match macalg {

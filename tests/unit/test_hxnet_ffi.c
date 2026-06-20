@@ -153,6 +153,10 @@ typedef struct {
     uint8_t      blowfish_write_ivec[8];
     uint8_t      blowfish_read_num;
     uint8_t      blowfish_write_num;
+    uint8_t      hope_macalg;
+    uint8_t      _pad_macalg;
+    uint32_t     hope_session_key_len;
+    uint8_t      hope_session_key[64];
     uint8_t      aead_read_key[32];
     uint8_t      aead_write_key[32];
     uint64_t     aead_read_counter;
@@ -182,19 +186,25 @@ _Static_assert (offsetof (hxnet_transform_config, blowfish_read_num) == 144,
                 "hxnet_transform_config.blowfish_read_num offset drift");
 _Static_assert (offsetof (hxnet_transform_config, blowfish_write_num) == 145,
                 "hxnet_transform_config.blowfish_write_num offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 146,
+_Static_assert (offsetof (hxnet_transform_config, hope_macalg) == 146,
+                "hxnet_transform_config.hope_macalg offset drift");
+_Static_assert (offsetof (hxnet_transform_config, hope_session_key_len) == 148,
+                "hxnet_transform_config.hope_session_key_len offset drift");
+_Static_assert (offsetof (hxnet_transform_config, hope_session_key) == 152,
+                "hxnet_transform_config.hope_session_key offset drift");
+_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 216,
                 "hxnet_transform_config.aead_read_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 178,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 248,
                 "hxnet_transform_config.aead_write_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 216,
+_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 280,
                 "hxnet_transform_config.aead_read_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 224,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 288,
                 "hxnet_transform_config.aead_write_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 232,
+_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 296,
                 "hxnet_transform_config.aead_read_dir offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 233,
+_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 297,
                 "hxnet_transform_config.aead_write_dir offset drift");
-_Static_assert (sizeof (hxnet_transform_config) == 240,
+_Static_assert (sizeof (hxnet_transform_config) == 304,
                 "hxnet_transform_config size drift");
 
 extern hxnet_connection *hxnet_connection_spawn_fd_with_transforms_and_callback (

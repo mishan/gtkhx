@@ -204,6 +204,47 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
 {
     g_return_if_fail (htlc != NULL);
 
+    /* Always log the reason BEFORE the close-race early return
+     * below. The race is: hxnet's actor errored out and posted
+     * Event::Shutdown to the GLib idle queue, but a synchronous
+     * `hx_bridge_send_frame` failure path on the C side already
+     * fired `hx_htlc_close` first — by the time the queued
+     * Event::Shutdown gets dispatched here, the bridge is
+     * uninstalled and the early return below kicks in to avoid
+     * a second teardown. The reason code is the only signal
+     * we have for WHY the actor exited (StreamError /
+     * FrameTooLarge / etc.), so log it regardless of whether
+     * we're going to act on it. Without this, the visible
+     * failure mode is just "hxnet_connection_send_frame returned
+     * -2" with no clue what killed the actor. */
+    const char *reason_str;
+    switch (reason) {
+    case HXNET_SHUTDOWN_EOF:             reason_str = "EOF (peer closed)"; break;
+    case HXNET_SHUTDOWN_STREAM_ERROR:    reason_str = "STREAM_ERROR (mid-stream IO error)"; break;
+    case HXNET_SHUTDOWN_FRAME_TOO_LARGE: reason_str = "FRAME_TOO_LARGE (oversized wire len)"; break;
+    case HXNET_SHUTDOWN_HANDLE_DROPPED:  reason_str = "HANDLE_DROPPED (we dropped the handle)"; break;
+    default:                             reason_str = "(unknown reason code)"; break;
+    }
+    /* Visibility: clean shutdowns (EOF, HANDLE_DROPPED) are
+     * expected during normal disconnect — keep them at
+     * `g_message` so they don't pollute logs. Error reasons
+     * (STREAM_ERROR, FRAME_TOO_LARGE, unknown) ARE the bug
+     * signal — promote to `g_warning` so they show up by
+     * default. */
+    if (reason == HXNET_SHUTDOWN_EOF
+        || reason == HXNET_SHUTDOWN_HANDLE_DROPPED) {
+        g_message ("hxnet_bridge: actor exited with reason=%d %s "
+                   "(htlc->fd=%d installed=%d)",
+                   reason, reason_str, htlc->fd, hx_bridge_is_installed ());
+    } else {
+        g_warning ("hxnet_bridge: actor exited with reason=%d %s "
+                   "(htlc->fd=%d installed=%d) — this is the "
+                   "actor-mid-burst death signal; see stderr for "
+                   "the full Rust-side ShutdownReason including the "
+                   "io::Error string for StreamError.",
+                   reason, reason_str, htlc->fd, hx_bridge_is_installed ());
+    }
+
     /* Drop in-flight shutdowns that the GLib idle queue
      * dispatched after `hx_htlc_close` already ran (e.g. the
      * synchronous send-path failure path called close, which
@@ -267,6 +308,18 @@ typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
 #define HXNET_BRIDGE_CIPHER_NONE              0
 #define HXNET_BRIDGE_CIPHER_BLOWFISH          1
 #define HXNET_BRIDGE_CIPHER_CHACHA20_POLY1305 2
+/* R3.3.e-4g: Hotline-frame-aware Blowfish (HopeBlowfishStream).
+ * Use this kind for any HOPE-Blowfish handshake; the bare
+ * HXNET_BRIDGE_CIPHER_BLOWFISH kind doesn't carry the per-
+ * message rekey-marker logic and breaks against servers that
+ * trip the marker (e.g. VesperNet/Janus). */
+#define HXNET_BRIDGE_CIPHER_HOPE_BLOWFISH     3
+
+/* HMAC algorithm tags for HOPE Blowfish — match
+ * HXNET_MACALG_* in rust/crates/hxnet/src/ffi.rs. */
+#define HXNET_BRIDGE_MACALG_SHA256 0
+#define HXNET_BRIDGE_MACALG_SHA1   1
+#define HXNET_BRIDGE_MACALG_MD5    2
 
 #define HXNET_BRIDGE_COMPRESSION_NONE 0
 #define HXNET_BRIDGE_COMPRESSION_GZIP 1
@@ -293,6 +346,14 @@ typedef struct {
      * server's keystream. */
     guint8  blowfish_read_num;
     guint8  blowfish_write_num;
+    /* HOPE-Blowfish per-message rekey inputs (only consulted
+     * when cipher_kind == HXNET_BRIDGE_CIPHER_HOPE_BLOWFISH).
+     * `hope_macalg` is one of HXNET_BRIDGE_MACALG_*; the
+     * session key is the HOPE-Step-1 SESSIONKEY chunk. */
+    guint8  hope_macalg;
+    guint8  _pad_macalg;
+    guint32 hope_session_key_len;
+    guint8  hope_session_key[64];
     guint8  aead_read_key[32];
     guint8  aead_write_key[32];
     guint64 aead_read_counter;
@@ -308,7 +369,7 @@ typedef struct {
  * offset checks; here we just guard size + alignment so a
  * layout regression fails at production build time even when
  * the test suite isn't built. */
-_Static_assert (sizeof (hxnet_transform_config_t) == 240,
+_Static_assert (sizeof (hxnet_transform_config_t) == 304,
                 "hxnet_transform_config_t size drift — sync Rust "
                 "rust/crates/hxnet/src/ffi.rs const-asserts");
 _Static_assert (_Alignof (hxnet_transform_config_t) == 8,
@@ -506,7 +567,14 @@ hx_bridge_install_with_hope_state (struct htlc_conn *htlc, int fd)
         cfg.cipher_kind = HXNET_BRIDGE_CIPHER_NONE;
         break;
     case CIPHER_BLOWFISH: {
-        cfg.cipher_kind = HXNET_BRIDGE_CIPHER_BLOWFISH;
+        /* R3.3.e-4g: HOPE-Blowfish goes through the
+         * HopeBlowfishStream adapter which carries the per-
+         * message rekey-marker logic. The bare
+         * HXNET_BRIDGE_CIPHER_BLOWFISH kind is reserved for
+         * future non-HOPE Blowfish use cases (e.g. a Blowfish
+         * HTXF subchannel); HOPE always wants the HOPE-aware
+         * variant. */
+        cfg.cipher_kind = HXNET_BRIDGE_CIPHER_HOPE_BLOWFISH;
         /* HOPE derives DISTINCT read and write Blowfish keys from
          * the session keystream. The C side stores them on
          * htlc->cipher_decode_key (incoming wire — what we read
@@ -566,6 +634,33 @@ hx_bridge_install_with_hope_state (struct htlc_conn *htlc, int fd)
          * defensively in case the Rust side ever changes that. */
         cfg.blowfish_write_num = (guint8) (write_num & 7);
         cfg.blowfish_read_num  = (guint8) (read_num  & 7);
+
+        /* R3.3.e-4g: populate the HOPE per-message rekey inputs.
+         * Translate the C-side `macalg` string to the protocol-
+         * level tag the Rust adapter consumes. Anything other
+         * than the three known names fails closed — the legacy
+         * code's `hmac_xxx` would silently return length 0
+         * here, which on the Rust side surfaces as an
+         * InvalidData read error. */
+        if (strcmp (htlc->macalg, "HMAC-SHA256") == 0) {
+            cfg.hope_macalg = HXNET_BRIDGE_MACALG_SHA256;
+        } else if (strcmp (htlc->macalg, "HMAC-SHA1") == 0) {
+            cfg.hope_macalg = HXNET_BRIDGE_MACALG_SHA1;
+        } else if (strcmp (htlc->macalg, "HMAC-MD5") == 0) {
+            cfg.hope_macalg = HXNET_BRIDGE_MACALG_MD5;
+        } else {
+            g_critical ("hxnet_bridge: HOPE-Blowfish: unsupported MAC "
+                        "algorithm \"%s\"", htlc->macalg);
+            goto fail_close_fd;
+        }
+        if (htlc->sklen == 0
+            || htlc->sklen > sizeof (cfg.hope_session_key)) {
+            g_critical ("hxnet_bridge: HOPE-Blowfish: invalid session "
+                        "key length %u", (unsigned) htlc->sklen);
+            goto fail_close_fd;
+        }
+        cfg.hope_session_key_len = htlc->sklen;
+        memcpy (cfg.hope_session_key, htlc->sessionkey, htlc->sklen);
         break;
     }
     case CIPHER_CHACHA20_POLY1305: {

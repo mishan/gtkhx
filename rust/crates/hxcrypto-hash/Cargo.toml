@@ -7,7 +7,12 @@ description = "HMAC/hash primitives for GtkHx — replaces src/hmac.c"
 publish = false
 
 [lib]
-crate-type = ["staticlib"]
+# rlib added so in-workspace Rust consumers (R3.3.e-4g's
+# HopeBlowfishStream calls hmac_xxx for the per-message rekey
+# rotation) can link this crate directly. The staticlib keeps
+# the C FFI link surface unchanged — gtkhx_hmac_xxx remains
+# the public C entry point.
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 md-5 = "0.10"

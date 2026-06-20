@@ -717,6 +717,36 @@ install_check_idle (gpointer user_data)
          * iteration's dispatch.) */
         return G_SOURCE_CONTINUE;
     }
+    if (htlc->in.pos != 0) {
+        /* The legacy GIOStream's read path may have decrypted
+         * bytes from the socket that the rcv state machine
+         * hasn't finished consuming yet — they're sitting at
+         * htlc->in.buf[0..pos] waiting for the next htlc->rcv()
+         * call. If we installed hxnet now, hxnet would start
+         * reading the NEXT undelivered socket byte, but its
+         * cipher state has been advanced past those leftover
+         * bytes too — the positions match but the WIRE FRAME
+         * BOUNDARIES are off by `htlc->in.pos` bytes, hxnet
+         * would treat the next 22 bytes it reads as a frame
+         * header even though those bytes are mid-frame on the
+         * wire, producing garbage that the actor surfaces as a
+         * StreamError.
+         *
+         * Note: the right indicator is `pos != 0`, not
+         * `len > 0`. `len` is the *bytes-remaining-to-receive*
+         * counter that the rcv state machine re-arms to
+         * SIZEOF_HL_HDR after every fully-consumed frame, so
+         * `len > 0` is true almost continuously and would
+         * prevent the install from ever firing. `pos != 0`
+         * specifically captures "we've buffered some bytes but
+         * haven't dispatched them yet". Wait for the rcv state
+         * machine to fully consume htlc->in before handing off;
+         * usually one more main-loop iteration. Caught by
+         * tests/integration/test_hope_blowfish_hxnet.c, which
+         * reproduces the bug against live Janus and the fix
+         * here unblocks it. */
+        return G_SOURCE_CONTINUE;
+    }
 
     int dup_fd = dup (htlc->fd);
     if (dup_fd < 0) {
@@ -801,25 +831,6 @@ hx_install_hxnet_post_hope (struct htlc_conn *htlc)
         return;
     }
     if (hx_bridge_is_installed ()) {
-        return;
-    }
-    /* HOPE-Blowfish ships a frame-aware per-message rekey trick
-     * (cipher_check_rekey_marker → cipher_change_decode_key, ~3/16
-     * probability per outgoing frame; the type field's high byte
-     * carries the rekey count and gets stripped before
-     * dispatch). The Rust BlowfishStream is a pure byte-streaming
-     * cipher — it doesn't know where Hotline frames start or end
-     * and can't rotate its key schedule mid-stream. Until we
-     * build a HOPE-aware Blowfish adapter (Phase R3.3.g or
-     * similar), keep Blowfish on the legacy GIOStream path so
-     * cipher_check_rekey_marker keeps doing its job. ChaCha20-
-     * Poly1305 (AEAD, frame-by-frame, no rekey markers) and the
-     * non-HOPE plaintext path still install. Caught against
-     * VesperNet/Janus: login succeeds, then any post-login
-     * server frame that trips the marker disconnects with an
-     * "unknown opcode 0x03010000"-style log. */
-    if (htlc->cipher_encode_type == CIPHER_BLOWFISH
-        || htlc->cipher_decode_type == CIPHER_BLOWFISH) {
         return;
     }
     if (pending_install_source_id != 0) {
