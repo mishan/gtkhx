@@ -105,6 +105,23 @@ extern int hxnet_connection_send_frame (hxnet_connection *handle,
 extern void hxnet_connection_destroy (hxnet_connection *handle);
 extern void hxnet_frame_free (hxnet_frame *f);
 
+/* R3.3.e callback FFI. The on_event callback fires on the GLib
+ * main thread per Event::Frame; on_shutdown fires once when the
+ * actor exits. user_data is opaque.
+ *
+ * `frame` is passed as `hxnet_frame *` (not const): the C side
+ * is expected to call `hxnet_frame_free(frame)` to release the
+ * body, and that function writes through the struct to zero
+ * body_ptr / body_len. Marking it const would force a const-
+ * cast at every correct call site. */
+typedef void (*hxnet_event_cb) (hxnet_connection *conn, hxnet_frame *frame,
+                                void *user_data);
+typedef void (*hxnet_shutdown_cb) (hxnet_connection *conn, int reason,
+                                   void *user_data);
+extern hxnet_connection *hxnet_connection_spawn_fd_with_callback (
+    int fd, hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
+    void *user_data);
+
 /* Write `len` bytes of `buf` to `fd`, retrying on short writes
  * and on EINTR. A real I/O error (broken pipe, etc.) or a 0-byte
  * return aborts the test with a clear message — those signal a
@@ -357,6 +374,139 @@ test_invalid_args_return_invalid_not_crash (void)
     hxnet_frame_free (NULL);
 }
 
+/* ------------------------------------------------------------------- *
+ * Callback-FFI smoke test (Phase R3.3.e). spawn_fd_with_callback
+ * routes events through the hxbridge ferry to the GLib main loop
+ * and invokes the C callback per frame. We use GMainContext
+ * iteration to drive the dispatch in the test (the production
+ * path uses the GtkApplication's main loop). */
+
+struct callback_state {
+    int frames_seen;
+    int shutdown_seen;
+    int shutdown_reason;
+    uint32_t last_type;
+    uint32_t last_trans;
+    uint32_t last_body_len;
+    uint8_t last_body[32];
+    /* Capture the handle pointer the callback received so we
+     * can verify it matches what spawn_fd_with_callback
+     * returned. */
+    void *got_handle;
+};
+
+static void
+test_on_event (hxnet_connection *conn, hxnet_frame *frame, void *user_data)
+{
+    struct callback_state *s = user_data;
+    s->got_handle = conn;
+    s->last_type = frame->type_;
+    s->last_trans = frame->trans;
+    s->last_body_len = frame->body_len;
+    if (frame->body_len <= sizeof (s->last_body)) {
+        memcpy (s->last_body, frame->body_ptr, frame->body_len);
+    }
+    s->frames_seen++;
+    /* C side owns the body until it calls hxnet_frame_free.
+     * The callback's frame pointer is mutable per the FFI
+     * contract — no const-cast required. */
+    hxnet_frame_free (frame);
+}
+
+static void
+test_on_shutdown (hxnet_connection *conn, int reason, void *user_data)
+{
+    struct callback_state *s = user_data;
+    s->got_handle = conn;
+    s->shutdown_reason = reason;
+    s->shutdown_seen++;
+}
+
+/* Iterate the default GMainContext until either `pred(state)` is
+ * true or `deadline` elapses. Returns true if pred satisfied. */
+static gboolean
+pump_main_until (gboolean (*pred) (struct callback_state *),
+                 struct callback_state *state, gint64 deadline_us)
+{
+    GMainContext *ctx = g_main_context_default ();
+    gint64 start = g_get_monotonic_time ();
+    while (g_get_monotonic_time () - start < deadline_us) {
+        if (pred (state)) {
+            return TRUE;
+        }
+        g_main_context_iteration (ctx, FALSE);
+        g_usleep (1000);
+    }
+    return pred (state);
+}
+
+static gboolean
+saw_one_frame (struct callback_state *s)
+{
+    return s->frames_seen >= 1;
+}
+
+static gboolean
+saw_shutdown (struct callback_state *s)
+{
+    return s->shutdown_seen >= 1;
+}
+
+static void
+test_callback_frame_then_shutdown (void)
+{
+    int sv[2];
+    tcp_loopback_pair (sv);
+
+    struct callback_state state;
+    memset (&state, 0, sizeof (state));
+
+    hxnet_connection *conn = hxnet_connection_spawn_fd_with_callback (
+        sv[1], test_on_event, test_on_shutdown, &state);
+    g_assert_nonnull (conn);
+
+    /* Write a frame from the server side. */
+    uint8_t hdr[22];
+    build_header (hdr, 0x69, 7, 0, 4, 0);
+    write_all_or_die (sv[0], hdr, sizeof (hdr));
+    write_all_or_die (sv[0], (const uint8_t *) "abcd", 4);
+
+    /* Pump main context until the callback fires. */
+    g_assert_true (pump_main_until (saw_one_frame, &state, 5 * 1000000));
+    g_assert_cmpint (state.frames_seen, ==, 1);
+    g_assert_cmpuint (state.last_type, ==, 0x69);
+    g_assert_cmpuint (state.last_trans, ==, 7);
+    g_assert_cmpuint (state.last_body_len, ==, 4);
+    g_assert_cmpmem (state.last_body, state.last_body_len, "abcd", 4);
+    g_assert_true (state.got_handle == conn);
+
+    /* Close the server side; shutdown callback should fire with
+     * HXNET_SHUTDOWN_EOF. */
+    g_assert_cmpint (close (sv[0]), ==, 0);
+    g_assert_true (pump_main_until (saw_shutdown, &state, 5 * 1000000));
+    g_assert_cmpint (state.shutdown_seen, ==, 1);
+    g_assert_cmpint (state.shutdown_reason, ==, HXNET_SHUTDOWN_EOF);
+
+    hxnet_connection_destroy (conn);
+}
+
+static void
+test_callback_null_arg_rejects (void)
+{
+    /* NULL on_event must be rejected with g_critical + NULL. */
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL callback*");
+    hxnet_connection *r = hxnet_connection_spawn_fd_with_callback (
+        0, NULL, test_on_shutdown, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
+
+    /* NULL on_shutdown likewise. */
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL callback*");
+    r = hxnet_connection_spawn_fd_with_callback (0, test_on_event, NULL, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -366,5 +516,9 @@ main (int argc, char *argv[])
     g_test_add_func ("/hxnet/ffi/send-frame-round-trip",
                      test_send_frame_round_trip);
     g_test_add_func ("/hxnet/ffi/invalid-args", test_invalid_args_return_invalid_not_crash);
+    g_test_add_func ("/hxnet/ffi/callback-frame-then-shutdown",
+                     test_callback_frame_then_shutdown);
+    g_test_add_func ("/hxnet/ffi/callback-null-arg-rejects",
+                     test_callback_null_arg_rejects);
     return g_test_run ();
 }

@@ -1424,6 +1424,7 @@ dependencies = [
 name = "hxnet"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "flate2",
  "glib",
  "hotline-proto",
