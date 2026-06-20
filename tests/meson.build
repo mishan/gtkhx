@@ -211,6 +211,23 @@ test_hxnet_ffi = executable('test_hxnet_ffi',
 test('hxnet_ffi', test_hxnet_ffi,
      suite : 'unit')
 
+# hxnet_bridge — translation layer between hxnet's HxnetFrame
+# callback shape and the existing rcv state machine in src/rcv.c.
+# Phase R3.3.e-4a ships only the header-packing leg as a Tier 1
+# test; the full dispatch path through htlc_conn lives behind
+# the production refactor that R3.3.e-4b will land. Links the
+# bridge source + proto_helpers.c (for hl_hdr_decode round-trip
+# verification) without dragging the GUI tree.
+test_hxnet_bridge = executable('test_hxnet_bridge',
+  'unit/test_hxnet_bridge.c',
+  '../src/hxnet_bridge.c',
+  '../src/proto_helpers.c',
+  dependencies        : test_deps + [rust_hotline_proto_dep],
+  include_directories : test_inc,
+)
+test('hxnet_bridge', test_hxnet_bridge,
+     suite : 'unit')
+
 # bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
 # bookmarks_io.c (carved out of bookmarks.c, which still holds the
 # GTK / libadwaita dialog) so this test can drive it without the
@@ -1256,6 +1273,7 @@ test_integration_real_connect = executable('test_integration_real_connect',
   'integration/fake_server.c',
   'integration/connect_test_stubs.c',
   '../src/network.c',
+  '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
   '../src/network_decode.c',
   '../src/connect_magic.c',
@@ -1283,10 +1301,59 @@ test_integration_real_connect = executable('test_integration_real_connect',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
+     suite   : 'integration',
+     timeout : 30)
+
+# real_connect_hxnet — R3.3.e-5 Tier 3 coverage for the
+# hxnet production-switch path. Same source-pile as
+# real_connect (production network.c + cipher + hope + proto).
+# As of R3.3.e-4e, hxnet is the default, so the test runs
+# with GTKHX_USE_HXNET unset and walks through the post-login
+# install path. Asserts the deferred install + TLS gate; an
+# opt-out test scopes GTKHX_USE_HXNET=0 to confirm the escape
+# hatch.
+test_integration_real_connect_hxnet = executable(
+  'test_integration_real_connect_hxnet',
+  'integration/test_real_connect_hxnet.c',
+  'integration/fake_server.c',
+  'integration/connect_test_stubs.c',
+  '../src/network.c',
+  '../src/hxnet_bridge.c',
+  '../src/tls_trust.c',
+  '../src/network_decode.c',
+  '../src/connect_magic.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/compress.c',
+  '../src/inline_media.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_session.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  '../src/tracker_event.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('real_connect_hxnet', test_integration_real_connect_hxnet,
      suite   : 'integration',
      timeout : 30)
 
@@ -1328,6 +1395,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   'integration/connect_test_stubs.c',
   'integration/server_matrix.c',
   '../src/network.c',
+  '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
   '../src/network_decode.c',
   '../src/connect_magic.c',
@@ -1355,7 +1423,7 @@ test_integration_real_tls = executable('test_integration_real_tls',
   '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
   include_directories : integration_test_inc,
 )
 # is_parallel: false — Janus-only, same per-IP connect-rate

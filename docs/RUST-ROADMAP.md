@@ -598,6 +598,76 @@ where the concurrency motivation pays off.
    `Interval`. Some stay (the post-login SELFINFO fallback timer, for
    example, is fine as a GLib timeout). Document which.
 
+### Work-item 1 detail: R3.3 sub-phases
+
+R3.3 is the `hxnet` work item above and is the largest of the seven. It
+broke into a planned chain of sub-phases. Status as of writing:
+
+| Sub-phase | Status | Scope |
+|---|---|---|
+| R3.3.a | ✅ merged | `hxnet` crate scaffold + `Connection` actor over `AsyncRead + AsyncWrite + Unpin + Send + 'static`; `tokio::io::duplex` integration tests. |
+| R3.3.b | ✅ merged | C-callable FFI (`hxnet_connection_spawn_fd` polling form + smoke test via TCP loopback). |
+| R3.3.c | ✅ merged | `cipher` module: `BlowfishStream` (Blowfish-OFB-64) + `AeadStream` (ChaCha20-Poly1305 length-prefixed AEAD) wrap any inner `AsyncRead + AsyncWrite`. |
+| R3.3.d | ✅ shipped | `compress` module: `GzipStream` / `Lz4Stream` / `ZstdStream` (zlib via flate2 with Sync flush; LZ4F via lz4_flex; ZSTD via zstd raw API). All three use buffer-and-drain on the write side and resize-read-truncate on the inner reads to avoid per-poll allocations. Zip-bomb / DoS caps documented at each ceiling. |
+| R3.3.e-1 | ✅ shipped | Callback-driven FFI variant — adds `hxnet_connection_spawn_fd_with_callback`. Events route through `hxbridge::channel::forward_to_main`; defensive `MainContext::acquire()` so a non-owning thread can't UB across the FFI. |
+| R3.3.e-2 | ✅ shipped | `transform::compose` lays cipher + compression onto a transport in HOPE order. `Connection::spawn_boxed` accepts the resulting `Box<dyn AsyncDuplex + 'static>`. |
+| R3.3.e-3 | ✅ shipped | C-side `HxnetTransformConfig` struct + `hxnet_connection_spawn_fd_with_transforms_and_callback`. Const-asserts pin ABI on both sides; AEAD direction tags validated. |
+| R3.3.e-4a | ✅ shipped | `src/hxnet_bridge.{c,h}` translation layer: `hx_bridge_pack_header`, `hx_bridge_dispatch_frame`, `hx_bridge_dispatch_shutdown`. Marshals an `HxnetFrame` into the existing rcv state machine without re-running `hx_decode`. Tier 1 tests round-trip header bytes through production `hl_hdr_decode`. |
+| R3.3.e-4b | ✅ shipped | Bridge install / send / uninstall helpers wrapping the callback FFI. `bridge_on_event_cb` / `bridge_on_shutdown_cb` trampolines route to dispatch_*. Production `gtkhx` executable now links `rust_hxnet_dep`. |
+| R3.3.e-4c | ✅ shipped | `GTKHX_USE_HXNET` env-var-gated install (non-TLS only). `hlwrite` / `hlwrite_chunks` route through `hx_bridge_send_frame` when installed. `control_arm_write_source` no-ops when bridge installed. `hx_htlc_close` uninstalls. The install was originally hooked into `send_login` here; R3.3.e-4d (below) moved it into `rcv.c::rcv_task_login` so HOPE-negotiated cipher / compression state could be passed through. |
+| R3.3.e-4d | ✅ shipped (Blowfish deferred) | HOPE-over-hxnet for ChaCha20-Poly1305 and the no-cipher / no-compression path. `hx_install_hxnet_post_hope` runs after `cipher_*_init` in `rcv_task_login` (HOPE path) and on the non-HOPE login-success branch. `hx_bridge_install_with_hope_state` builds `HxnetTransformConfig` from `htlc->cipher_*_state` (ChaCha20-Poly1305 directly off `chacha_aead_state`) and `htlc->compress_*_type`. Install is deferred via `g_idle_add` until `htlc->out` drains so HOPE step-2 LOGIN bytes flush through the legacy write source before we tear it down — caught against VesperNet's Janus with ChaCha20-Poly1305. Duped fd gets `CLOEXEC`. **HOPE-Blowfish stays on the legacy GIOStream path** for now: the HOPE per-message rekey marker (`cipher_check_rekey_marker` → `cipher_change_decode_key`, ~3/16 probability per frame) is frame-aware and the Rust `BlowfishStream` is a pure byte-streaming cipher. Building a HOPE-aware Blowfish adapter that rotates the key schedule between header and body is a follow-up phase. |
+| R3.3.e-4e | ✅ shipped | Flipped the default: `hx_install_hxnet_post_hope` runs unless `GTKHX_USE_HXNET=0` is set. `hxnet_opt_in()` helper in `network.c` centralises the polarity. Tier 3 test now runs the install/uninstall path with the env-var unset, plus a dedicated opt-out test scopes `GTKHX_USE_HXNET=0`. |
+| R3.3.e-4f | not started | Delete the legacy `GIOStream` + GPollable read/write loop, `compress_encode` / `cipher_encode` in-place call sites, the `control_*` helpers. TLS connections still keep `GIOStream` until TLS-over-hxnet (see below). |
+| R3.3.e-4h | not started, on-demand | Retry/drain mechanism for `hx_bridge_send_frame` returning `HXNET_SEND_FULL`. Today's policy is "treat FULL as a fatal actor-wedge signal" — paired with `DEFAULT_COMMAND_CAPACITY = 256` it should never fire under realistic workloads. If profiling ever shows FULL hitting in practice (heavy bursts on a slow consumer), the right fix is an ordered drain idle: leave bytes in `htlc->out` on FULL, arm a `g_idle_add` retry, and queue subsequent `hlwrite` calls behind the drain so frame ordering is preserved. Until then, closing-on-FULL is correct because FULL with cap=256 means the tokio task is genuinely stuck. |
+| R3.3.e-5 | ✅ harness-coverage / live matrix follow-up | Tier 3 `test_real_connect_hxnet.c` exercises the env-var path through the fake server. Live mhxd / Janus / hlserver.com matrix runs are the follow-up. |
+
+#### How R3.3.e-4d ended up resolving the open lifecycle questions
+
+- **Send-path framing.** `hlwrite` / `hlwrite_chunks` route through
+  `hx_bridge_send_frame` once the bridge is installed and the
+  packed slice is popped from `htlc->out` atomically. Send failures
+  are surfaced via `g_critical` + `hx_htlc_close` — never silently
+  drop the frame.
+- **fd ownership at the handover.** Confirmed `dup()` model. Set
+  `CLOEXEC` on the duped fd so it doesn't leak into child processes.
+- **HOPE bytes in flight.** Rather than asserting input-empty, we
+  observed that the C side's *output* queue can still hold HOPE
+  step-2 LOGIN bytes when `rcv_task_login` returns. Install is
+  deferred via a `G_PRIORITY_DEFAULT_IDLE` idle source that
+  re-arms until `htlc->out.len == 0`, letting the legacy write
+  source drain first. Counter consistency holds because any
+  encrypted server bytes that arrive in the window between
+  login-reply and install get decrypted on the legacy
+  `cipher_decode` path, which advances the live cipher state
+  object; the bridge snapshots that state at install time.
+
+### TLS over hxnet
+
+Out of scope for R3.3.e — the existing C-side `GTlsConnection` path
+keeps owning TLS connections. Three options exist:
+
+1. **`tokio-rustls` adapter** (preferred long-term). Same shape as
+   the cipher adapters — wrap any `AsyncRead + AsyncWrite` with a
+   TLS layer that fits into `transform::compose` underneath the
+   HOPE cipher (HOPE-on-TLS is redundant encryption — pointless
+   but harmless). Substantial work: cert validation against
+   gtkhx's existing `tls_trust.c` known-hosts store, SNI plumbing,
+   trust-on-first-use UX bridging from Rust back into the GTK
+   dialog.
+2. **TLS-terminates-in-C, plaintext over `socketpair`.** Keep
+   `GTlsConnection`; bridge decrypted bytes through a
+   `socketpair(AF_UNIX, SOCK_STREAM, 0)` into hxnet. Adds an
+   extra `read` + `write` syscall + memcpy per byte direction.
+   Tactical only — useful as a stepping stone but not a long-term
+   destination.
+3. **Permanent split**: TLS stays on the legacy `GIOStream` path
+   forever. Cheap in the short term, but means `control_*` and
+   `htlc_stream_*` helpers can never be deleted.
+
+The expected path is option 1 as a Phase R3.4 or R3.5 effort with
+its own scoping doc. Until then, R3.3.e-4f only deletes the
+non-TLS portion of the legacy GIOStream path; TLS keeps it.
+
 **Gotchas**
 
 - **Cancellation is the hard part.** tokio tasks cancel cooperatively on
