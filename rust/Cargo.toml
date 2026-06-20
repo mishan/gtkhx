@@ -7,6 +7,7 @@ members = [
     "crates/hxcompress",
     "crates/hotline-proto",
     "crates/hxbridge",
+    "crates/hxnet",
     "crates/hxvoice",
     "crates/hxvoice-runtime",
     "crates/hx-image-decode",
