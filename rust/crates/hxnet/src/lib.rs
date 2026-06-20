@@ -12,23 +12,28 @@
 //!    encoded bytes back out.
 //! 4. Tears down cleanly on EOF / cancel / handle drop.
 //!
-//! # What R3.3.a + R3.3.b ship
+//! # What R3.3.a + R3.3.b + R3.3.c ship
 //!
 //! R3.3.a built the actor itself (spawn / channel pair / shutdown)
-//! over a `tokio::io::duplex` test exerciser. R3.3.b adds the
+//! over a `tokio::io::duplex` test exerciser. R3.3.b added the
 //! C-callable FFI surface ([`ffi`]) plus the meson hookup so the
 //! C binary can spawn an actor over a real fd. The FFI is the
 //! polling-style API: `hxnet_connection_try_recv_frame` returns
-//! events on demand; R3.3.c adds the callback-driven variant that
-//! routes through the hxbridge ferry to the GLib main loop.
+//! events on demand; the callback-driven variant lands in R3.3.e
+//! alongside the production switch in network.c.
 //!
-//! The HOPE cipher layer and the compression layer are NOT in this
-//! phase. The actor reads and writes **plaintext Hotline frames**
-//! (i.e. what the C code sees AFTER `hx_decode` has stripped the
-//! cipher + decompressed). R3.3.c lands `CipherStream` /
-//! `CompressStream` adapters that wrap the inner `AsyncRead +
-//! AsyncWrite`, transparently extending what the actor already
-//! does at the frame layer.
+//! R3.3.c lands the HOPE cipher adapters in [`cipher`]:
+//! [`cipher::BlowfishStream`] wraps any `AsyncRead + AsyncWrite`
+//! in the Blowfish-OFB-64 stream cipher used by the legacy HOPE
+//! handshake, and [`cipher::AeadStream`] wraps it in
+//! ChaCha20-Poly1305 length-prefixed AEAD frames. Both are
+//! transparent — the actor above still sees plaintext Hotline
+//! frames; the cipher adapter is composed onto the inner
+//! transport at spawn time. Compression adapters land in R3.3.d
+//! as a sibling module; before either layer is composed, the
+//! actor reads and writes plaintext Hotline frames (i.e. what
+//! the C code sees AFTER `hx_decode` has stripped the cipher
+//! and decompressed).
 //!
 //! # The actor pattern
 //!
@@ -55,6 +60,7 @@
 //!
 //! See [`Connection`] for the API entry points.
 
+pub mod cipher;
 pub mod command;
 pub mod connection;
 pub mod event;

@@ -14,6 +14,13 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 hotline-proto = { path = "../hotline-proto" }
+# R3.3.c cipher adapters: BlowfishStream uses the Blowfish-OFB-64
+# primitive; AeadStream uses the ChaCha20-Poly1305 frame codec.
+# Both crates already live in the workspace and are linked into
+# the C binary via their own staticlibs — bringing them in as
+# rlib deps here doesn't change the link surface.
+hxcrypto-stream = { path = "../hxcrypto-stream" }
+hxcrypto-aead = { path = "../hxcrypto-aead" }
 # hxbridge with `runtime` feature gives us Runtime::global() — the
 # shared process-wide tokio runtime R3.1 set up. R3.3.b's FFI uses
 # it for spawn; having two tokio runtimes in one process is the

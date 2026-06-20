@@ -16,10 +16,11 @@
 //!
 //! R3.3.b ships the non-blocking, polling-style API only. The
 //! callback-driven variant that routes events through the hxbridge
-//! ferry to the GLib main loop arrives in R3.3.c alongside the
-//! production switch in network.c. The polling form is easier to
-//! reason about for the smoke-test goal, and the FFI surface
-//! stays additive when the callback path lands.
+//! ferry to the GLib main loop arrives in a later phase
+//! (R3.3.e) alongside the production switch in network.c. The
+//! polling form is easier to reason about for the smoke-test
+//! goal, and the FFI surface stays additive when the callback
+//! path lands.
 //!
 //! # Lifetime
 //!
