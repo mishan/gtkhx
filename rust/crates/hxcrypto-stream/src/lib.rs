@@ -149,6 +149,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blowfish_crypt_in_place_matches_crypt() {
+        // crypt_in_place should produce the same bytes as crypt
+        // against fresh state, byte-for-byte. Different scratch
+        // shapes — single big call vs. byte-at-a-time — should
+        // also agree, validating that the OFB state advances
+        // identically.
+        let key = b"keymaterial!!!";
+        let plaintext: &[u8] = b"The quick brown fox jumps over the lazy dog";
+
+        // Reference: classic two-buffer crypt.
+        let mut ref_state = BlowfishOfb64State::new(key).expect("valid key");
+        let mut reference = vec![0u8; plaintext.len()];
+        ref_state.crypt(plaintext, &mut reference);
+
+        // crypt_in_place, single big call.
+        let mut state1 = BlowfishOfb64State::new(key).expect("valid key");
+        let mut buf1 = plaintext.to_vec();
+        state1.crypt_in_place(&mut buf1);
+        assert_eq!(buf1, reference);
+
+        // crypt_in_place, byte at a time — proves OFB state
+        // advances per byte.
+        let mut state2 = BlowfishOfb64State::new(key).expect("valid key");
+        let mut buf2 = plaintext.to_vec();
+        for i in 0..buf2.len() {
+            state2.crypt_in_place(&mut buf2[i..i + 1]);
+        }
+        assert_eq!(buf2, reference);
+
+        // Symmetric: decrypt in place using a fresh state.
+        let mut decrypt_state = BlowfishOfb64State::new(key).expect("valid key");
+        decrypt_state.crypt_in_place(&mut buf1);
+        assert_eq!(buf1, plaintext);
+    }
+
+    #[test]
     fn blowfish_ofb64_roundtrip() {
         let key = b"blowfishkey";
         let plaintext = b"Hotline protocol data that spans multiple blocks!";

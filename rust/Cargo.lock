@@ -1427,6 +1427,8 @@ dependencies = [
  "glib",
  "hotline-proto",
  "hxbridge",
+ "hxcrypto-aead",
+ "hxcrypto-stream",
  "tokio",
 ]
 

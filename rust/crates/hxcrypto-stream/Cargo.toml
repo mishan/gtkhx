@@ -7,7 +7,10 @@ description = "Stream cipher primitives for GtkHx — replaces cipher.c"
 publish = false
 
 [lib]
-crate-type = ["staticlib"]
+# staticlib for the C-side linker, rlib so cross-crate Rust
+# consumers (the hxnet R3.3.c cipher adapter) can call into the
+# crate's safe Rust API without going through the FFI surface.
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 blowfish = "0.10"

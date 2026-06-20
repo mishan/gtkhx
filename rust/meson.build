@@ -66,6 +66,7 @@ rust_sources = files(
   'crates/hxbridge/src/runtime.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
+  'crates/hxnet/src/cipher.rs',
   'crates/hxnet/src/command.rs',
   'crates/hxnet/src/connection.rs',
   'crates/hxnet/src/event.rs',
@@ -223,8 +224,9 @@ rust_hxbridge_dep = declare_dependency(
 # Hotline Connection actor (Phase R3.3). hxnet wraps tokio + the
 # hotline-proto frame layer behind a C-callable FFI surface
 # (rust/crates/hxnet/src/ffi.rs). The first consumer is the smoke
-# test in tests/unit/test_hxnet_ffi.c; R3.3.c wires the production
-# switch in network.c. hxnet shares hxbridge's tokio runtime
+# test in tests/unit/test_hxnet_ffi.c; a later phase (R3.3.e)
+# wires the production switch in network.c. hxnet shares
+# hxbridge's tokio runtime
 # singleton via the Runtime::global accessor, so the staticlib
 # doesn't bring a second tokio binary into the link.
 #

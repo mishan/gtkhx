@@ -89,6 +89,27 @@ impl BlowfishOfb64State {
         self.num = n;
     }
 
+    /// In-place encrypt/decrypt (symmetric). Same loop as
+    /// [`Self::crypt`] but operates on a single buffer — useful
+    /// for streaming consumers that don't want a scratch
+    /// allocation per call. The R3.3.c `BlowfishStream` adapter
+    /// in `hxnet` calls this on every `poll_read` / `poll_write`
+    /// directly against the inner stream's buffer, avoiding a
+    /// per-poll memcpy.
+    pub fn crypt_in_place(&mut self, buf: &mut [u8]) {
+        let mut n = self.num;
+        for d in buf.iter_mut() {
+            if n == 0 {
+                #[allow(deprecated)]
+                let block = Array::from_mut_slice(&mut self.ivec);
+                self.cipher.encrypt_block(block);
+            }
+            *d ^= self.ivec[n];
+            n = (n + 1) & 7;
+        }
+        self.num = n;
+    }
+
     /// Snapshot the OFB feedback state — ivec + num — into `out_ivec` /
     /// `out_num`. Used by the receive-side rollback path in
     /// network_decode.c, which has to undo a speculative cipher_decode
