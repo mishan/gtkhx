@@ -68,6 +68,7 @@ pub mod event;
 pub mod ffi;
 pub mod frame;
 pub mod hope_blowfish;
+pub mod tls;
 pub mod transform;
 
 pub use command::Command;
