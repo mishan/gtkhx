@@ -24,6 +24,27 @@ crate-type = ["staticlib", "rlib"]
 # only slow builds and grow the link surface for no reason.
 glib = { workspace = true }
 
+# R3.1 async stack. See workspace `[workspace.dependencies]` for the
+# tokio feature picks (`rt-multi-thread`, `sync`, `time`) and why
+# `async-channel` is the GLib-side ferry. Both are gated on the
+# `runtime` feature below: the default hxbridge build (the staticlib
+# linked into the C binary today) doesn't compile tokio until a
+# subsequent R3.x phase activates it. The `runtime` feature carries
+# zero pkg-config / system-library surface — the C build pulls these
+# in by flipping `meson` to add `--features hxbridge/runtime` to the
+# cargo invocation when the first consumer (R3.2 banner.c) lands.
+tokio = { workspace = true, optional = true, features = [
+    "rt-multi-thread",
+    "sync",
+    "time",
+    # `net` gates `tokio::net::TcpStream` and the `enable_io` builder
+    # knob — both needed by R3.3 hxnet. Pulled in now so the R3.1
+    # runtime tests can call `enable_io` and so R3.2 banner consumers
+    # don't have to re-cycle the feature flags.
+    "net",
+] }
+async-channel = { workspace = true, optional = true }
+
 # Phase 8.B (gstreamer-rs voice pipeline) will consume these. Listed as
 # `optional = true` so the resolver locks a version for each (Cargo
 # records every optional dep in Cargo.lock so that a later
@@ -58,4 +79,13 @@ voice = [
     "dep:gstreamer-sdp",
     "dep:gstreamer-webrtc",
     "dep:gstreamer-rtp",
+]
+
+# Phase R3.1 — tokio runtime + async-channel ferry. Off by default;
+# `cargo test -p hxbridge --features runtime` exercises the modules,
+# and the first production consumer (R3.2 banner.c port) is what
+# turns it on in the meson build.
+runtime = [
+    "dep:tokio",
+    "dep:async-channel",
 ]
