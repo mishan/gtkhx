@@ -614,34 +614,31 @@ broke into a planned chain of sub-phases. Status as of writing:
 | R3.3.e-3 | ✅ shipped | C-side `HxnetTransformConfig` struct + `hxnet_connection_spawn_fd_with_transforms_and_callback`. Const-asserts pin ABI on both sides; AEAD direction tags validated. |
 | R3.3.e-4a | ✅ shipped | `src/hxnet_bridge.{c,h}` translation layer: `hx_bridge_pack_header`, `hx_bridge_dispatch_frame`, `hx_bridge_dispatch_shutdown`. Marshals an `HxnetFrame` into the existing rcv state machine without re-running `hx_decode`. Tier 1 tests round-trip header bytes through production `hl_hdr_decode`. |
 | R3.3.e-4b | ✅ shipped | Bridge install / send / uninstall helpers wrapping the callback FFI. `bridge_on_event_cb` / `bridge_on_shutdown_cb` trampolines route to dispatch_*. Production `gtkhx` executable now links `rust_hxnet_dep`. |
-| R3.3.e-4c | ✅ shipped | `GTKHX_USE_HXNET` env-var-gated install in `send_login` (non-TLS only). `hlwrite` / `hlwrite_chunks` route through `hx_bridge_send_frame` when installed and cipher/compress are both NONE. `control_arm_write_source` no-ops when bridge installed. `hx_htlc_close` uninstalls. `rcv.c` tears down if HOPE activates cipher or compression while the bridge is installed (passthrough-only). |
-| R3.3.e-4d | not started | HOPE-over-hxnet. Move the install from `send_login` to right after `cipher_*_init` in `rcv.c`. Build `HxnetTransformConfig` from the negotiated `htlc->cipher_*_state` / `htlc->compress_*_type`. Drop the cipher/compress gate in `hlwrite` and the tear-down safety check in `rcv.c`. Needs an extractor on `BlowfishOfb64State` for the OFB position so the negotiated state survives the handoff. ChaCha20-Poly1305 brings AEAD counter / key plumbing. Compression has its own state extraction. |
+| R3.3.e-4c | ✅ shipped | `GTKHX_USE_HXNET` env-var-gated install (non-TLS only). `hlwrite` / `hlwrite_chunks` route through `hx_bridge_send_frame` when installed. `control_arm_write_source` no-ops when bridge installed. `hx_htlc_close` uninstalls. The install was originally hooked into `send_login` here; R3.3.e-4d (below) moved it into `rcv.c::rcv_task_login` so HOPE-negotiated cipher / compression state could be passed through. |
+| R3.3.e-4d | ✅ shipped | HOPE-over-hxnet. `hx_install_hxnet_post_hope` runs after `cipher_*_init` in `rcv_task_login` (HOPE path) and on the non-HOPE login-success branch. `hx_bridge_install_with_hope_state` builds `HxnetTransformConfig` from `htlc->cipher_*_state` (Blowfish-OFB-64 via `gtkhx_blowfish_ofb64_save_state`; ChaCha20-Poly1305 directly off `chacha_aead_state`) and `htlc->compress_*_type`. Install is deferred via `g_idle_add` until `htlc->out` drains so HOPE step-2 LOGIN bytes flush through the legacy write source before we tear it down — caught against VesperNet's Janus with ChaCha20-Poly1305. Duped fd gets `CLOEXEC`. |
 | R3.3.e-4e | not started | Flip the default — hxnet on, `GTKHX_USE_HXNET=0` to opt out. |
 | R3.3.e-4f | not started | Delete the legacy `GIOStream` + GPollable read/write loop, `compress_encode` / `cipher_encode` in-place call sites, the `control_*` helpers. TLS connections still keep `GIOStream` until TLS-over-hxnet (see below). |
 | R3.3.e-5 | ✅ harness-coverage / live matrix follow-up | Tier 3 `test_real_connect_hxnet.c` exercises the env-var path through the fake server. Live mhxd / Janus / hlserver.com matrix runs are the follow-up. |
 
-#### Open lifecycle questions for R3.3.e-4d
+#### How R3.3.e-4d ended up resolving the open lifecycle questions
 
-- **Send-path framing.** `hxnet_connection_send_frame` wants one
-  complete Hotline frame per call. `hlwrite` packs into `htlc->out`
-  and the legacy queue drains incrementally; the bridge instead
-  passes the whole packed slice in one call and pops it from
-  `htlc->out`. No caller relies on the partial-frame state in
-  `htlc->out` for legitimate reasons, but the bridge fast-path
-  needs to handle `hxnet_connection_send_frame` failures (full
-  channel, closed channel, invalid args) without dropping the
-  packed frame on the floor — surfacing as a `hx_htlc_close` is
-  the safest current option.
-- **fd ownership at the handover.** The bridge `dup()`s the
-  `GSocketConnection`'s fd so hxnet's `TcpStream::from_raw_fd` has
-  its own kernel reference; both close cleanly on teardown via
-  kernel ref-counting.
-- **HOPE bytes in flight.** After HOPE selection completes in
-  `rcv_task_login`, the C side's `htlc->read_in` and the
-  `GIOStream` input buffer should be empty before the handoff (the
-  LOGIN response is consumed in full first; the server's cipher
-  doesn't activate until after that response). For 4d we should
-  assert this empty-buffer invariant at install time.
+- **Send-path framing.** `hlwrite` / `hlwrite_chunks` route through
+  `hx_bridge_send_frame` once the bridge is installed and the
+  packed slice is popped from `htlc->out` atomically. Send failures
+  are surfaced via `g_critical` + `hx_htlc_close` — never silently
+  drop the frame.
+- **fd ownership at the handover.** Confirmed `dup()` model. Set
+  `CLOEXEC` on the duped fd so it doesn't leak into child processes.
+- **HOPE bytes in flight.** Rather than asserting input-empty, we
+  observed that the C side's *output* queue can still hold HOPE
+  step-2 LOGIN bytes when `rcv_task_login` returns. Install is
+  deferred via a `G_PRIORITY_DEFAULT_IDLE` idle source that
+  re-arms until `htlc->out.len == 0`, letting the legacy write
+  source drain first. Counter consistency holds because any
+  encrypted server bytes that arrive in the window between
+  login-reply and install get decrypted on the legacy
+  `cipher_decode` path, which advances the live cipher state
+  object; the bridge snapshots that state at install time.
 
 ### TLS over hxnet
 
