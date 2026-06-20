@@ -192,6 +192,25 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# hxnet_ffi — smoke test for the hxnet C-callable FFI surface
+# (Phase R3.3.b). Builds a connected TCP loopback pair
+# (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-
+# trip a Hotline frame + bytes both directions → assert EOF
+# surfaces as HXNET_SHUTDOWN_EOF. The TCP loopback (rather than
+# AF_UNIX socketpair) matches what production passes: the FFI
+# wraps the fd as tokio::net::TcpStream and a peer_addr probe
+# rejects non-TCP sockets up front. Links the Rust hxnet
+# staticlib directly via rust_hxnet_dep; transitively pulls in
+# hxbridge for the shared tokio runtime. No C-side production
+# source is linked — the test exercises the FFI in isolation.
+test_hxnet_ffi = executable('test_hxnet_ffi',
+  'unit/test_hxnet_ffi.c',
+  dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
+  include_directories : test_inc,
+)
+test('hxnet_ffi', test_hxnet_ffi,
+     suite : 'unit')
+
 # bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
 # bookmarks_io.c (carved out of bookmarks.c, which still holds the
 # GTK / libadwaita dialog) so this test can drive it without the

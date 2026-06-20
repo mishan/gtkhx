@@ -1424,7 +1424,9 @@ dependencies = [
 name = "hxnet"
 version = "0.1.0"
 dependencies = [
+ "glib",
  "hotline-proto",
+ "hxbridge",
  "tokio",
 ]
 
