@@ -63,6 +63,19 @@ pub unsafe extern "C" fn gtkhx_hmac_xxx(
     hmac_xxx_inner(md_slice, key_slice, text_slice, alg)
 }
 
+/// Safe-Rust entry point: same semantics as [`gtkhx_hmac_xxx`]
+/// but without the C-shaped pointer wrangling. Used by
+/// in-workspace consumers (R3.3.e-4g's `HopeBlowfishStream` for
+/// the HOPE per-message rekey rotation; tests below for the
+/// known-vector pins).
+///
+/// Writes the digest into `md` (must be at least 32 bytes) and
+/// returns the digest length in bytes, or 0 if `macalg` is
+/// unrecognised.
+pub fn hmac_xxx(md: &mut [u8], key: &[u8], text: &[u8], macalg: &str) -> u16 {
+    hmac_xxx_inner(md, key, text, macalg)
+}
+
 /// Inner implementation that works on safe slices.
 fn hmac_xxx_inner(md: &mut [u8], key: &[u8], text: &[u8], macalg: &str) -> u16 {
     match macalg {
