@@ -13,6 +13,7 @@
 #include "config.h"
 
 #include <string.h>
+#include <unistd.h>             /* close() — fd cleanup on pre-spawn failure */
 
 #include <glib.h>
 
@@ -210,8 +211,14 @@ typedef void (*hxnet_event_cb_t) (hxnet_connection_opaque *conn,
 typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
                                      void *user_data);
 
-#define HXNET_BRIDGE_CIPHER_NONE      0
+#define HXNET_BRIDGE_CIPHER_NONE              0
+#define HXNET_BRIDGE_CIPHER_BLOWFISH          1
+#define HXNET_BRIDGE_CIPHER_CHACHA20_POLY1305 2
+
 #define HXNET_BRIDGE_COMPRESSION_NONE 0
+#define HXNET_BRIDGE_COMPRESSION_GZIP 1
+#define HXNET_BRIDGE_COMPRESSION_LZ4  2
+#define HXNET_BRIDGE_COMPRESSION_ZSTD 3
 
 typedef struct {
     guint32 cipher_kind;
@@ -362,6 +369,210 @@ hx_bridge_install_passthrough (struct htlc_conn *htlc, int fd)
     bridge_handle = h;
     bridge_htlc   = htlc;
     return TRUE;
+}
+
+/* R3.3.e-4d HOPE-state install. Builds an
+ * hxnet_transform_config_t from the negotiated cipher state
+ * already living on htlc, then spawns the actor with that
+ * stack. */
+#include "cipher.h" /* CIPHER_*, chacha_aead_state */
+#include "cipher_aead.h" /* CIPHER_AEAD_DIR_* tags */
+#include "compress.h" /* COMPRESS_* */
+#include "protocol.h" /* struct htlc_conn cipher_*_key fields */
+
+/* Same Rust-side function as hxcrypto-stream's
+ * gtkhx_blowfish_ofb64_save_state. Lets us read the live OFB
+ * ivec without copying the whole BlowfishOfb64State. */
+extern void
+gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
+                                 guint32 *out_num);
+
+gboolean
+hx_bridge_install_with_hope_state (struct htlc_conn *htlc, int fd)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (fd >= 0, FALSE);
+
+    /* Ownership contract: callers (network.c::install_check_idle)
+     * dup() the htlc fd and hand the dup to us; on every failure
+     * path that returns FALSE we close it, on success the
+     * spawned hxnet actor owns it via TcpStream::from_raw_fd and
+     * closes it on its own Drop. The pre-spawn checks below all
+     * jump to fail_close_fd; the post-spawn FFI failure has its
+     * own NULL-handle close because at that point the spawn may
+     * or may not have adopted the fd. */
+
+    if (bridge_handle) {
+        g_critical ("hxnet_bridge: install attempted while a connection is "
+                    "already installed; refusing");
+        goto fail_close_fd;
+    }
+
+    /* The encode and decode sides must agree on cipher /
+     * compression — HOPE negotiates one algorithm per layer for
+     * the whole connection. Refuse asymmetric configs up front;
+     * they'd produce a wire that can't round-trip. */
+    if (htlc->cipher_encode_type != htlc->cipher_decode_type) {
+        g_critical ("hxnet_bridge: asymmetric cipher (encode=%d decode=%d) "
+                    "unsupported",
+                    htlc->cipher_encode_type, htlc->cipher_decode_type);
+        goto fail_close_fd;
+    }
+    if (htlc->compress_encode_type != htlc->compress_decode_type) {
+        g_critical ("hxnet_bridge: asymmetric compression (encode=%d "
+                    "decode=%d) unsupported",
+                    htlc->compress_encode_type, htlc->compress_decode_type);
+        goto fail_close_fd;
+    }
+
+    hxnet_transform_config_t cfg;
+    memset (&cfg, 0, sizeof (cfg));
+
+    /* Cipher slot. */
+    switch (htlc->cipher_encode_type) {
+    case CIPHER_NONE:
+        cfg.cipher_kind = HXNET_BRIDGE_CIPHER_NONE;
+        break;
+    case CIPHER_BLOWFISH: {
+        cfg.cipher_kind = HXNET_BRIDGE_CIPHER_BLOWFISH;
+        /* The symmetric key is the same on both directions;
+         * HOPE-Blowfish always uses one key per connection. We
+         * stored it on htlc->cipher_encode_key after the HOPE
+         * Step 2 reply. */
+        if (htlc->cipher_encode_keylen == 0
+            || htlc->cipher_encode_keylen > sizeof (cfg.blowfish_key)) {
+            g_critical ("hxnet_bridge: invalid blowfish key length %u",
+                        htlc->cipher_encode_keylen);
+            goto fail_close_fd;
+        }
+        /* cipher_*_init can leave htlc->cipher_*_state.stream
+         * NULL on allocation failure — cipher.c explicitly
+         * checks for NULL in its consumers. Mirror that here
+         * so we don't hand a NULL through to the Rust save
+         * helper. */
+        if (htlc->cipher_encode_state.stream == NULL
+            || htlc->cipher_decode_state.stream == NULL) {
+            g_critical ("hxnet_bridge: blowfish state not initialised "
+                        "(encode=%p decode=%p)",
+                        htlc->cipher_encode_state.stream,
+                        htlc->cipher_decode_state.stream);
+            goto fail_close_fd;
+        }
+        cfg.blowfish_key_len = htlc->cipher_encode_keylen;
+        memcpy (cfg.blowfish_key, htlc->cipher_encode_key,
+                htlc->cipher_encode_keylen);
+        /* Snapshot the live OFB ivec on each direction so the
+         * negotiated stream position survives the handoff. */
+        guint32 num_unused;
+        gtkhx_blowfish_ofb64_save_state (htlc->cipher_encode_state.stream,
+                                         cfg.blowfish_write_ivec,
+                                         &num_unused);
+        gtkhx_blowfish_ofb64_save_state (htlc->cipher_decode_state.stream,
+                                         cfg.blowfish_read_ivec, &num_unused);
+        break;
+    }
+    case CIPHER_CHACHA20_POLY1305: {
+        cfg.cipher_kind = HXNET_BRIDGE_CIPHER_CHACHA20_POLY1305;
+        /* Validate the AEAD direction tags BEFORE handing fd to
+         * the Rust FFI. The FFI validates them too, but its
+         * order-of-operations is "validate direction tags →
+         * TcpStream::from_raw_fd → adopt fd". On a tag-validation
+         * failure the FFI returns NULL without having adopted the
+         * fd; our post-spawn NULL branch assumes adoption and
+         * skips close (avoiding double-close on the common
+         * failure paths that happen after from_raw_fd). Without
+         * this front-loaded check, a corrupted chacha.dir would
+         * leak the duped fd.
+         *
+         * Tags come from src/cipher_aead.h:
+         *   CIPHER_AEAD_DIR_SERVER_TO_CLIENT = 0
+         *   CIPHER_AEAD_DIR_CLIENT_TO_SERVER = 1
+         *
+         * Decode (read) must be S2C; encode (write) must be C2S.
+         * Equal directions would re-use the same nonce stream
+         * in both directions, breaking the AEAD security
+         * argument outright. */
+        if (htlc->cipher_decode_state.chacha.dir
+                != CIPHER_AEAD_DIR_SERVER_TO_CLIENT
+            || htlc->cipher_encode_state.chacha.dir
+                != CIPHER_AEAD_DIR_CLIENT_TO_SERVER) {
+            g_critical ("hxnet_bridge: AEAD direction tags invalid or "
+                        "swapped (decode=%u expected %u, encode=%u "
+                        "expected %u)",
+                        htlc->cipher_decode_state.chacha.dir,
+                        CIPHER_AEAD_DIR_SERVER_TO_CLIENT,
+                        htlc->cipher_encode_state.chacha.dir,
+                        CIPHER_AEAD_DIR_CLIENT_TO_SERVER);
+            goto fail_close_fd;
+        }
+        /* chacha_aead_state field-for-field matches AeadState in
+         * hxcrypto-aead — pinned by the _Static_assert on
+         * sizeof(chacha_aead_state) == 48 in cipher.h. We could
+         * memcpy the whole struct, but explicit field copies
+         * make the mapping obvious to future readers. */
+        memcpy (cfg.aead_write_key,
+                htlc->cipher_encode_state.chacha.key,
+                sizeof (cfg.aead_write_key));
+        cfg.aead_write_counter = htlc->cipher_encode_state.chacha.counter;
+        cfg.aead_write_dir     = htlc->cipher_encode_state.chacha.dir;
+        memcpy (cfg.aead_read_key, htlc->cipher_decode_state.chacha.key,
+                sizeof (cfg.aead_read_key));
+        cfg.aead_read_counter = htlc->cipher_decode_state.chacha.counter;
+        cfg.aead_read_dir     = htlc->cipher_decode_state.chacha.dir;
+        break;
+    }
+    default:
+        g_critical ("hxnet_bridge: unsupported cipher type %d",
+                    htlc->cipher_encode_type);
+        goto fail_close_fd;
+    }
+
+    /* Compression slot. */
+    switch (htlc->compress_encode_type) {
+    case COMPRESS_NONE:
+        cfg.compression_kind = HXNET_BRIDGE_COMPRESSION_NONE;
+        break;
+    case COMPRESS_GZIP:
+        cfg.compression_kind = HXNET_BRIDGE_COMPRESSION_GZIP;
+        break;
+    case COMPRESS_LZ4:
+        cfg.compression_kind = HXNET_BRIDGE_COMPRESSION_LZ4;
+        break;
+    case COMPRESS_ZSTD:
+        cfg.compression_kind = HXNET_BRIDGE_COMPRESSION_ZSTD;
+        break;
+    default:
+        g_critical ("hxnet_bridge: unsupported compression type %d",
+                    htlc->compress_encode_type);
+        goto fail_close_fd;
+    }
+
+    hxnet_connection_opaque *h
+        = hxnet_connection_spawn_fd_with_transforms_and_callback (
+            fd, &cfg, bridge_on_event_cb, bridge_on_shutdown_cb, htlc);
+    if (!h) {
+        /* The C side has already validated fd >= 0, config, and
+         * callbacks above, so the only paths through which the
+         * Rust FFI can fail-and-return-NULL all happen AFTER
+         * TcpStream::from_raw_fd has adopted the fd (the FFI's
+         * error log strings make this explicit:
+         * set_nonblocking, peer_addr, TcpStream::from_std,
+         * transform::compose, Connection::spawn_boxed). At that
+         * point the dropped std_stream's Drop closes the fd —
+         * closing it again here would be a double-close. */
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
+
+fail_close_fd:
+    /* Pre-spawn failure: the duped fd never reached the Rust
+     * actor, so we still own it. Close to honour the
+     * install-on-success / close-on-failure contract documented
+     * at the top of this function. */
+    close (fd);
+    return FALSE;
 }
 
 gboolean

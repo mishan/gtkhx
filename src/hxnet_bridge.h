@@ -133,6 +133,54 @@ extern gboolean hx_bridge_install_passthrough (struct htlc_conn *htlc,
                                                int fd);
 
 /*
+ * Adopt `fd` and spawn an hxnet Connection actor with a
+ * transform stack reconstructed from `htlc`'s post-HOPE cipher
+ * state. Phase R3.3.e-4d (HOPE-over-hxnet).
+ *
+ * Reads the negotiated cipher / compression choice from:
+ *
+ *   htlc->cipher_encode_type    — CIPHER_NONE / CIPHER_BLOWFISH /
+ *                                 CIPHER_CHACHA20_POLY1305
+ *   htlc->cipher_decode_type
+ *   htlc->cipher_encode_state   — union cipher_state
+ *   htlc->cipher_decode_state
+ *   htlc->cipher_encode_key     — Blowfish only (the symmetric
+ *                                 key used to construct
+ *                                 BlowfishOfb64State)
+ *   htlc->cipher_encode_keylen
+ *   (decode counterparts likewise)
+ *
+ * For Blowfish: extracts the live OFB ivec via
+ * `gtkhx_blowfish_ofb64_save_state` so the negotiated stream
+ * position survives the handoff, and reuses the symmetric key
+ * stored on htlc. For ChaCha20-Poly1305: copies the
+ * chacha_aead_state's key / counter / dir directly — they map
+ * 1:1 to hxcrypto-aead's `AeadState`.
+ *
+ * Compression is wired through the same way (HOPE-negotiated
+ * GZIP / LZ4 / ZSTD become the matching adapter in the
+ * transform stack).
+ *
+ * Ownership: same as `hx_bridge_install_passthrough` — hxnet
+ * adopts `fd`; the C side must not close() it after success.
+ *
+ * Returns TRUE on success. On failure (cipher state not
+ * extractable, hxnet spawn refused), logs via g_critical,
+ * leaves the bridge uninstalled, hxnet closes the fd.
+ *
+ * Precondition: no prior install is live; `htlc->fd > 0`;
+ * negotiated cipher state has been fully initialised by
+ * cipher_*_init.
+ *
+ * R3.3.e-4d (this PR) ships the bridge-side helper only. The
+ * matching production switch in rcv.c (move install from
+ * send_login to post-HOPE; drop the cipher-active tear-down)
+ * is the follow-up R3.3.e-4d-cont commit.
+ */
+extern gboolean hx_bridge_install_with_hope_state (struct htlc_conn *htlc,
+                                                   int fd);
+
+/*
  * TRUE when an hxnet connection is currently installed.
  * Production code uses this as the gate between the new
  * (hxnet) and legacy (GIOStream) read / write paths.

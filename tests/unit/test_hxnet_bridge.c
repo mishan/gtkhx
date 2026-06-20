@@ -172,6 +172,24 @@ hxnet_frame_free (struct hxnet_frame_t *f)
     g_assert_not_reached ();
 }
 
+/* R3.3.e-4d's hx_bridge_install_with_hope_state pulls in the
+ * Blowfish OFB state-snapshot helper from hxcrypto-stream. The
+ * Tier 1 test never invokes the install path, so a
+ * g_assert_not_reached stub keeps the symbol satisfied without
+ * dragging the staticlib in. */
+void
+gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
+                                 guint32 *out_num);
+void
+gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
+                                 guint32 *out_num)
+{
+    (void) state;
+    (void) out_ivec;
+    (void) out_num;
+    g_assert_not_reached ();
+}
+
 /* Round-trip a single (type, trans, flag, hc, body_len) tuple
  * through pack_header → hl_hdr_decode and assert the fields
  * survive intact. body_len is the application-level body byte
