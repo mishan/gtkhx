@@ -114,6 +114,27 @@ impl Runtime {
         self.inner.spawn(fut)
     }
 
+    /// Spawn a synchronous closure onto tokio's dedicated blocking
+    /// pool. Returns a `JoinHandle<R>` that resolves with the
+    /// closure's return value when it completes.
+    ///
+    /// The blocking pool is sized separately from the regular
+    /// worker pool — it can hold many more threads (default 512)
+    /// because they spend most of their time parked in syscalls.
+    /// This is the right knob for GIO blocking I/O, file-system
+    /// calls, and anything else that does long-running synchronous
+    /// work without yielding back to the executor.
+    ///
+    /// See [`crate::blocking::spawn_blocking_with_idle`] for the
+    /// FFI-shaped wrapper that R3.2 consumers use.
+    pub fn spawn_blocking<F, R>(&self, f: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.inner.spawn_blocking(f)
+    }
+
     /// Borrow the tokio `Handle`. Useful for cases where the caller
     /// wants `Handle::clone()` to hand a runtime reference into a
     /// closure or task that outlives the borrowing scope.

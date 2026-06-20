@@ -25,7 +25,6 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <gtk/gtk.h>
 #ifdef HAVE_LIBSOUP
 #include <libsoup/soup.h>
@@ -59,6 +58,19 @@
 struct task;
 extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
                               void *ptr, void *data, const char *str);
+
+/* Phase R3.2: tokio-blocking-pool replacement for the pthread + idle
+ * pair this worker used to run on. Implementation lives in the
+ * `hxbridge::blocking` module (rust/crates/hxbridge/src/blocking.rs);
+ * the worker callback runs on tokio's dedicated blocking pool, the
+ * completion runs on whatever GMainContext was thread-default at
+ * the call site — which in production is the GLib main context the
+ * UI iterates. The shim's lifetime contract is documented inline at
+ * the call site below. */
+extern void gtkhx_bridge_spawn_blocking_with_idle (
+    void (*worker) (void *),
+    void (*completion) (void *),
+    void *user_data);
 
 /* ------------------------------------------------------------------- *
  * Module state — single banner per process. The toolbar is the only
@@ -160,8 +172,8 @@ static void on_banner_clicked (GtkGestureClick *gesture, int n_press, double x,
 
 /* HTXF (file-mode) fetch */
 static void banner_send_download_request (struct htlc_conn *htlc);
-static void *banner_htxf_worker_thread (void *arg);
-static gboolean banner_htxf_completion_idle (gpointer data);
+static void banner_htxf_worker_run (void *arg);
+static void banner_htxf_completion_run (void *data);
 
 /* ------------------------------------------------------------------- *
  * Public API
@@ -528,21 +540,27 @@ on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
  *    callback is rcv_task_banner_get in rcv.c.
  * 2. Server replies with HTLS_DATA_HTXF_REF + HTLS_DATA_HTXF_SIZE.
  *    rcv_task_banner_get calls banner_handle_htxf_reply.
- * 3. banner_handle_htxf_reply spawns a detached pthread that
- *    opens base_port+1, sends the 16-byte HTXF header, reads
- *    `size` bytes into a buffer.
- * 4. Worker hands the buffer to the main thread via g_idle_add;
- *    main-thread idle hands the bytes to the shared async
- *    glycin decode helper (banner_start_image_decode); the
- *    decode callback calls banner_show_texture on success.
+ * 3. banner_handle_htxf_reply schedules a tokio blocking-pool task
+ *    via gtkhx_bridge_spawn_blocking_with_idle. The worker opens
+ *    base_port+1, sends the 16-byte HTXF header, reads `size` bytes
+ *    into a buffer.
+ * 4. When the worker returns, the shim posts the completion onto
+ *    the captured GMainContext (the GLib main loop). The completion
+ *    hands the bytes to the shared async glycin decode helper
+ *    (banner_start_image_decode); the decode callback calls
+ *    banner_show_texture on success.
  *
  * Cancellation: banner_clear bumps htxf_generation. The worker
- * captured its own generation at spawn; the completion idle
- * compares it to current and silently drops the result if it
- * was bumped (reconnect, banner_clear, new banner). The worker
- * itself can'"'"'t be interrupted mid-read (POSIX blocking sockets,
- * no GIO involvement), but it always finishes within seconds —
- * banner data is small (a few KB to ~50 KB in practice). */
+ * captured its own generation at spawn; the completion compares
+ * it to current and silently drops the result if it was bumped
+ * (reconnect, banner_clear, new banner). The worker itself can't
+ * be interrupted mid-read (GIO blocking calls inside a tokio
+ * spawn_blocking task — the same constraint POSIX blocking
+ * sockets put on the legacy pthread path), but it always
+ * finishes within seconds — banner data is small (a few KB to
+ * ~50 KB in practice). The R3.3 hxnet rewrite that swaps GIO
+ * for tokio::net::TcpStream is what eventually gives us a real
+ * mid-flight cancel. */
 
 static void
 banner_send_download_request (struct htlc_conn *htlc)
@@ -561,9 +579,6 @@ void
 banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
 {
     struct htxf_fetch *f;
-    pthread_t tid;
-    pthread_attr_t attr;
-    int err;
 
     if (!banner_root || !htlc) {
         debug_log ("banner", "htxf reply ignored: no widget / no htlc");
@@ -622,24 +637,26 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
         f->sklen = htlc->sklen;
     }
 
-    pthread_attr_init (&attr);
-    pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-    err = pthread_create (&tid, &attr, banner_htxf_worker_thread, f);
-    pthread_attr_destroy (&attr);
-
-    if (err) {
-        debug_log ("banner", "pthread_create failed: %s", g_strerror (err));
-        g_free (f->bytes);
-        g_free (f);
-        banner_show_caption (_ ("Server banner: fetch worker failed to start"));
-        return;
-    }
+    /* Hand the fetch off to tokio's blocking pool via hxbridge.
+     * The shim runs `banner_htxf_worker_run` on a dedicated
+     * blocking-pool thread, then posts `banner_htxf_completion_run`
+     * back onto the captured GMainContext (the GLib main loop) when
+     * the worker returns. The shim's only failure mode is a NULL
+     * callback (this call has both non-NULL), so we don't need to
+     * check a return value. Lazy runtime startup happens on the
+     * first call; if it fails, Runtime::global() panics, and
+     * hxbridge::blocking::spawn_blocking_with_idle catches the
+     * panic in its catch_unwind block and calls std::process::abort
+     * rather than let the panic unwind across the C ABI. The test
+     * suite already exercises that path. */
+    gtkhx_bridge_spawn_blocking_with_idle (
+        banner_htxf_worker_run, banner_htxf_completion_run, f);
     debug_log ("banner", "htxf worker spawned: ref=%u size=%u gen=%u", ref,
                size, f->generation);
 }
 
-static void *
-banner_htxf_worker_thread (void *arg)
+static void
+banner_htxf_worker_run (void *arg)
 {
     struct htxf_fetch *f = arg;
     GSocketConnection *conn = NULL;
@@ -762,14 +779,14 @@ out:
 	 * GSocket finaliser. NULL-safe. */
     g_clear_object (&conn);
 
-    /* Hand back to the main thread regardless of success — the
-	 * idle decides whether to display or surface an error. */
-    g_idle_add (banner_htxf_completion_idle, f);
-    return NULL;
+    /* The hxbridge shim posts banner_htxf_completion_run onto the
+	 * captured main context automatically as soon as this worker
+	 * returns. The user_data pointer (this `f`) flows through
+	 * unchanged. */
 }
 
-static gboolean
-banner_htxf_completion_idle (gpointer data)
+static void
+banner_htxf_completion_run (void *data)
 {
     struct htxf_fetch *f = data;
 
@@ -796,7 +813,6 @@ banner_htxf_completion_idle (gpointer data)
 cleanup:
     g_free (f->bytes);
     g_free (f);
-    return G_SOURCE_REMOVE;
 }
 
 /* Click handler ------------------------------------------------------ */

@@ -44,11 +44,12 @@ use glib::translate::FromGlibPtrBorrow;
 use glib::translate::FromGlibPtrNone;
 use std::ffi::{c_char, c_void, CStr};
 
-// Phase R3.1 submodules — gated behind the `runtime` feature so the
-// default build (the staticlib linked into the C binary) doesn't
-// drag in tokio + async-channel until a consumer activates them. The
-// first planned consumer is the R3.2 banner.c port; once that lands,
-// the meson cargo invocation flips `--features hxbridge/runtime` on.
+// Phase R3.1+ submodules — gated behind the `runtime` feature so
+// the default cargo-test build can still exercise the R3.0 wrapping
+// helpers without dragging in tokio. R3.2 (banner.c) flips the
+// feature on in the meson build.
+#[cfg(feature = "runtime")]
+pub mod blocking;
 #[cfg(feature = "runtime")]
 pub mod channel;
 #[cfg(feature = "runtime")]
