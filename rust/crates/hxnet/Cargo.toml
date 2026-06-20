@@ -50,6 +50,12 @@ hxbridge = { path = "../hxbridge", features = ["runtime"] }
 # Already pulled in transitively via hxbridge but we depend on it
 # explicitly so the imports compile cleanly.
 glib = { workspace = true }
+# async-channel for the R3.3.e callback-FFI's tokio→GLib ferry.
+# Already in the workspace transitively via glycin, so no new
+# crates.io dep. Used to bridge the Connection's tokio mpsc
+# Receiver into hxbridge::channel::forward_to_main on the GLib
+# main thread.
+async-channel = { workspace = true }
 # tokio features:
 #   rt-multi-thread + sync + macros + time: needed by Connection
 #       itself (the production runtime the caller spawns into is
