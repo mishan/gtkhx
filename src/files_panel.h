@@ -3,7 +3,7 @@
  *
  * A self-contained vertical box widget that owns a path-entry
  * row, a sortable GtkColumnView, and a status footer. Bound to
- * an HxLocalFilesProvider (Phase 1; Phase 2 adds remote).
+ * an HxFilesProvider (local or remote).
  *
  * The panel has a notion of "active": when the active panel
  * gets a CSS class for its accent border, and the browser's

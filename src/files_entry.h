@@ -1,10 +1,9 @@
 /*
  * files_entry.h — one row in the files browser model.
  *
- * A GObject so it can sit inside a GListStore that
- * GtkColumnView consumes. Both the local provider (Phase 1) and
- * the remote provider (Phase 2) produce HxFileEntry rows; the
- * panel widget doesn't care which side built them.
+ * A GObject so it can sit inside a GListStore that GtkColumnView
+ * consumes. Both providers (local and remote) produce HxFileEntry
+ * rows; the panel widget doesn't care which side built them.
  */
 
 #ifndef HX_FILES_ENTRY_H

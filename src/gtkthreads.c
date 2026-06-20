@@ -31,9 +31,3 @@ gtkhx_post_to_main (GSourceFunc fn, gpointer data)
     g_main_context_invoke (NULL, fn, data);
 }
 
-/* Phase 5+ async connect (network.c): gtkhx_invoke_sync used to live
- * here to let hx_thread_connect bracket short bits of main-thread
- * work synchronously from inside its worker. The connect path is
- * pure-async on the main loop now, so nothing needs sync-invoke.
- * Tracker fetch is still on a worker but only uses the async
- * gtkhx_post_to_main path above. */

@@ -828,7 +828,7 @@ hx_panel_ensure_attached (HxPanel *self)
         g_object_unref (self);
     }
 
-    /* Phase 5b / docking: prefer the panel's existing home_frame
+    /* prefer the panel's existing home_frame
      * weak ref. The user can move panels into user-created split
      * leaves (via Move-direction or DnD); home_frame records
      * which leaf they wanted, and the home_area is just a fallback
@@ -916,7 +916,7 @@ on_undocked_close_request (GtkWindow *window, gpointer user_data)
 
     if (home != NULL) {
         panel_frame_add (PANEL_FRAME (home), PANEL_WIDGET (self));
-        /* Phase 5b / docking: no more PanelDock revealers; the
+        /* no more PanelDock revealers; the
          * tree just shows everything that's in it. No area
          * reveal flip needed on Redock. */
         g_object_unref (home);  /* hx_panel_get_home_frame strong ref */
@@ -992,7 +992,7 @@ hx_panel_undock (HxPanel *self)
         return;
     }
 
-    /* Phase 5b / docking: if the panel is already in an undocked
+    /* if the panel is already in an undocked
      * window (its widget root is NOT the main toolbar window),
      * "Undock" is meaningless — what the user wants is "Dock"
      * (redock to main). Close the source window; its
@@ -1136,10 +1136,10 @@ hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
  * activate below. */
 
 /* ----------------------------------------------------------------- */
-/* Phase 5a / docking — relative move + split + close-frame          */
+/* relative move + split + close-frame          */
 /* ----------------------------------------------------------------- */
 
-/* Phase 5b / docking: panel_neighbor_across_areas removed. The
+/* panel_neighbor_across_areas removed. The
  * dock is now ONE recursive HxSplit tree (no PanelDock; no fixed
  * areas), so hx_split_neighbor walks the entire dock and finds
  * any neighbour the user could navigate to. The cross-area

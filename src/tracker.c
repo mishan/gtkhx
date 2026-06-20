@@ -2415,7 +2415,7 @@ create_tracker_window (GtkWidget *widget, gpointer data)
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sections_scroll),
                                    tracker_sections_box);
 
-    /* Phase 5 layout: actions live in the headerbar, content vbox
+    /* Actions live in the headerbar, content vbox
 	 * just holds the search row + the sections stack. 8 px outer
 	 * margin so content doesn't touch the window frame; 8 px gutter
 	 * between the search field and the sections area. */

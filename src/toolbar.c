@@ -750,7 +750,7 @@ toolbar_refresh_bookmarks (void)
  * has no resizable size to save anyway. Position is captured at
  * hx_quit() in gtkhx.c gtkhx_save_window_positions. */
 
-/* Phase 5a / docking: install the per-frame plumbing every leaf
+/* install the per-frame plumbing every leaf
  * PanelFrame in the dock needs. Three concerns:
  *
  *   - close-dispatcher: routes PanelFrame::page-closed to the
@@ -1041,10 +1041,6 @@ create_toolbar_window (session *sess)
     gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
 
-    /* New User / Edit User used to be toolbar buttons.
-	 * They've moved into the hamburger menu's Admin submenu — sysop
-	 * actions don't need to occupy primary real estate. */
-
 #ifdef USE_PLUGIN
     plugin_btn = gtk_button_new_with_label ("[ P ]");
     gtk_widget_set_tooltip_text (plugin_btn, _ ("Plugin Manager"));
@@ -1078,7 +1074,7 @@ create_toolbar_window (session *sess)
     g_signal_connect (toolbar_banner, "button-clicked",
                       G_CALLBACK (on_banner_button_clicked), sess);
 
-    /* Phase 5b / docking: the dock is ONE recursive HxSplit tree.
+    /* the dock is ONE recursive HxSplit tree.
      * The previous PanelDock-with-four-areas structure is gone;
      * splits / moves / closes operate over a single uniform tree.
      * The default layout below mimics the visual placement of the
@@ -1267,14 +1263,9 @@ create_toolbar_window (session *sess)
 	 * disconnected the panel shows whatever it has cached. */
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
 
-    /* Phase 3.x: this used to be G_CALLBACK(quit_btn) — but quit_btn is
-	 * a GtkWidget pointer, not a function. Calling a widget address as
-	 * code did nothing useful (and tripped CFI on hardened builds), so
-	 * closing the toolbar via the WM's X button skipped hx_quit and
-	 * with it the prefs_write + position-save pass. The app exited
-	 * because the last GtkApplication window was gone, but no prefs
-	 * survived. Wire this to close_toolbar_window, which calls
-	 * hx_quit() properly. */
+    /* Close-request → close_toolbar_window, which calls hx_quit() so
+	 * the prefs_write + position-save pass runs before the
+	 * GtkApplication unwinds the last window. */
     g_signal_connect (toolbar_window, "close-request",
                       G_CALLBACK (close_toolbar_window), 0);
 

@@ -2,15 +2,12 @@
  * files_local_provider.h — local filesystem backend for the
  * orthodox files browser.
  *
- * read-only listing + mkdir / delete / rename. The
- * provider owns a `current_path` and a `listing` GListModel that
- * the panel widget consumes directly via GtkColumnView's
- * GtkSelectionModel chain.
- *
- * Phase 2 will introduce HxRemoteFilesProvider with the same
- * surface (probably extracted into a real GInterface at that
- * point — for now duck-typing across the two providers is enough
- * since the panel widget only knows about HxLocalFilesProvider).
+ * Read-only listing + mkdir / delete / rename. The provider owns a
+ * `current_path` and a `listing` GListModel that the panel widget
+ * consumes directly via GtkColumnView's GtkSelectionModel chain.
+ * HxRemoteFilesProvider (files_remote_provider.{c,h}) mirrors this
+ * surface via duck typing — neither extracted into a real GInterface
+ * since the panel widget binds against the concrete types.
  */
 
 #ifndef HX_FILES_LOCAL_PROVIDER_H

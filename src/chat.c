@@ -2734,14 +2734,11 @@ pchat_new (session *sess, struct chat *chat)
     return gchat;
 }
 
-/* this used to be a GtkWindow::destroy handler
- * (sess pulled from g_object_get_data on the closing window, gchat
- * passed via the signal's data argument). The standalone window is
- * gone; the chat_tabs close-page dispatcher calls us with just the
- * cid. Look up the gchat from sess->gchats; if it's still there,
- * send the protocol-side leave and tear down the gchat struct (which
- * removes it from the hashtable via gchat_delete's value-destroy
- * notify). */
+/* Invoked from the chat_tabs close-page dispatcher with the cid of
+ * the tab being closed. Look up the gchat from sess->gchats; if it's
+ * still there, send the protocol-side leave and tear down the gchat
+ * struct (which removes it from the hashtable via gchat_delete's
+ * value-destroy notify). */
 static void
 pchat_close (guint32 cid)
 {
@@ -2760,11 +2757,10 @@ pchat_close (guint32 cid)
  * needs to see it. */
 void hx_reject_chat (struct htlc_conn *htlc, guint32 _cid);
 
-/* Phase 4 invitation flow used qdata on the Join button to
- * thread state into the click handler; AdwAlertDialog dispatches by
- * response id, so we carry the htlc + cid pair through the response
- * signal as a small heap-allocated context. The dialog's "closed"
- * signal frees it after the response handler runs. */
+/* AdwAlertDialog dispatches by response id, so we carry the htlc +
+ * cid pair through the response signal as a small heap-allocated
+ * context. The dialog's "closed" signal frees it after the response
+ * handler runs. */
 struct chat_invite_ctx {
     struct htlc_conn *htlc;
     guint32 cid;

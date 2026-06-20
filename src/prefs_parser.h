@@ -8,13 +8,12 @@
  * the parser without dragging in options.c's mountain of GTK +
  * Adwaita widget code.
  *
- * Phase 5 reminder: GKeyFile writes booleans as the literal strings
- * "true" / "false". The original gtkhxrc parser only accepted
- * '0'/'1' and silently fell through on anything else, which made
- * every BOOLEAN pref revert to its struct-init default on every
- * startup. The fix that shipped accepts both spellings,
- * case-insensitively, plus "yes"/"no" since GKeyFile's own
- * get_boolean tolerates them.
+ * GKeyFile writes booleans as the literal strings "true" / "false".
+ * The original gtkhxrc parser only accepted '0'/'1' and silently
+ * fell through on anything else, which made every BOOLEAN pref
+ * revert to its struct-init default on every startup. The parser
+ * now accepts both spellings, case-insensitively, plus "yes"/"no"
+ * since GKeyFile's own get_boolean tolerates them.
  */
 
 #include <glib.h>

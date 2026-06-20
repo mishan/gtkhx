@@ -140,10 +140,9 @@ hx_local_files_provider_get_label (HxLocalFilesProvider *self)
  * Why blocking GIO rather than the async enumerate? Local file
  * enumeration in practice completes in <1 ms for normal dir sizes,
  * and async adds either a cancellable / completion-callback dance
- * or a g_idle_add round-trip. For >10k-entry directories we'd want
- * incremental rendering, but that's a Phase 4-or-later polish item
- * (and the remote backend in Phase 2 already adds real async on
- * the slow path). */
+ * or a g_idle_add round-trip. >10k-entry directories would want
+ * incremental rendering — deferred. The remote backend already
+ * runs async on the slow path. */
 static void
 do_list (HxLocalFilesProvider *self, const char *path)
 {
@@ -204,7 +203,7 @@ do_list (HxLocalFilesProvider *self, const char *path)
 
         /* Skip dotfiles by default; matches most file managers'
 		 * out-of-the-box behaviour. A "show hidden" toggle is a
-		 * Phase 4 polish item. */
+		 * polish-item deferred. */
         if (is_hidden) {
             g_object_unref (info);
             continue;
@@ -222,10 +221,9 @@ do_list (HxLocalFilesProvider *self, const char *path)
         }
 
         /* icon_id 0 → hx_file_entry_new picks the generic folder
-		 * vs. file icon based on is_dir. Phase 4 polish item:
-		 * map the GIO content_type to richer icons (image/audio/
-		 * archive) the same way the remote provider does for
-		 * Hotline FourCCs. */
+		 * vs. file icon based on is_dir. Polish-item: map the GIO
+		 * content_type to richer icons (image/audio/archive) the
+		 * same way the remote provider does for Hotline FourCCs. */
         entry = hx_file_entry_new (name, is_dir, size, (gint64)mtime, kind, 0);
         g_list_store_append (self->listing, entry);
         g_object_unref (entry);
@@ -347,7 +345,7 @@ hx_local_files_provider_delete (HxLocalFilesProvider *self, const char *name,
     }
     f = g_file_new_for_path (path);
     /* g_file_delete is non-recursive — directories must be empty.
-	 * Phase 4 will add a trash/recursive option behind a confirm. */
+	 * Recursive / trash variants deferred. */
     ok = g_file_delete (f, NULL, err);
     g_object_unref (f);
     g_free (path);

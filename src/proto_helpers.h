@@ -443,16 +443,6 @@ extern gboolean hx_htxf_reply_extract (struct htlc_conn *htlc,
  * sanitised bytes. `bytes` is NUL-terminated for caller convenience;
  * `len` is the byte length excluding the NUL.
  *
- * Phase 5 cleanup: hx_rcv_news_post used to maintain a file-scope
- * news_buf accumulator that the caller never read — the accumulator
- * shifted older content right and put the newest chunk at offset 0,
- * but the emit always passed just the new chunk's `_len` bytes
- * through. The accumulator was dead code that also leaked memory
- * (grew on every news post, never freed) and raced against
- * rcv_task_news_file (which reuses news_buf as a wholesale-overwrite
- * scratch). This walker drops the accumulator and just sanitises +
- * emits each chunk to a stack buffer the cb sees as a const view.
- *
  * `cb` may be NULL (the walker still iterates and counts chunks).
  * Returns the number of NEWS chunks seen.
  */

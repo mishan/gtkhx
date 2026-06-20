@@ -10,7 +10,7 @@
 /*
  * chat_tabs.h — internal tab strip inside the Chat panel.
  *
- * Phase 3 / docking. The Chat panel hosts an AdwTabView whose tabs
+ * The Chat panel hosts an AdwTabView whose tabs
  * are: a pinned public-chat tab at position 0; one tab per private
  * chat (keyed on cid); one tab per private message conversation
  * (keyed on uid). This file owns the AdwTabView widget + indices

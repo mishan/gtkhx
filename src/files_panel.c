@@ -758,9 +758,9 @@ on_name_label_pressed (GtkGestureClick *gesture, int n_press, double x,
  * XPM paintables (folder vs. generic file), passed through to
  * the bind callback via the factory's user_data slot.
  *
- * Phase 2 will look at HxFileEntry's `kind` to pick richer icons
- * for known Hotline file types (text, image, archive) — for now
- * the folder/file binary is enough. */
+ * A polish follow-up would look at HxFileEntry's `kind` to pick
+ * richer icons for known Hotline file types (text, image, archive);
+ * for now the folder/file binary is enough. */
 static void
 name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 {
@@ -1166,15 +1166,9 @@ on_row_activated (GtkColumnView *view, guint pos, gpointer user_data)
     } else {
         /* Files: ask the provider to do its default action.
 		 * Local launches the OS default app (xdg-open style);
-		 * remote streams into the preview window. Phase 4
-		 * polish item — gates inside each provider's
-		 * activate_entry impl. */
+		 * remote streams into the preview window. */
         hx_files_provider_activate_entry (p->provider, e);
     }
-    /* Plain files: no-op here in Phase 1. Phase 3 wires F5 / Copy
-	 * to download/upload across panels; Phase 4 wires Enter on a
-	 * file to a default action (preview on remote, xdg-open on
-	 * local). */
 
     g_object_unref (e);
 }
