@@ -47,6 +47,14 @@ pub const HTLS_HDR_TASK: u32 = 0x0001_0000;
 /// `HTLS_DATA_ERROR_TEXT` (0x0100) in `src/hotline.h`.
 pub const TAG_ERROR_TEXT: u16 = 0x0100;
 
+/// `HTLС_DATA_LOGIN` / `HTLS_DATA_LOGIN` echo tag (0x0069). The
+/// HOPE step-1 reply echoes the login when the server is running
+/// the *secure_login* variant — its presence (and matching
+/// `HMAC(login, sessionkey)`) is how the client decides to HMAC the
+/// step-2 login field rather than XOR-encode it. mhxd guest uses
+/// this variant; Janus guest does not.
+pub const TAG_LOGIN_ECHO: u16 = 0x0069;
+
 /// HOPE chunks the server might include. The C-side names
 /// (with the `0x0e..` prefix) are from `src/hotline.h`.
 pub const TAG_HOPE_APP_ID: u16 = 0x0e01;
@@ -77,6 +85,9 @@ pub struct LoginReply {
     pub cipher_mode: Option<Vec<u8>>,
     pub hope_app_id: Option<Vec<u8>>,
     pub hope_app_string: Option<Vec<u8>>,
+    /// The server's echo of the `DATA_LOGIN` chunk (HOPE step-1
+    /// reply). Drives the secure_login decision for step 2.
+    pub login_echo: Option<Vec<u8>>,
     /// The verbatim on-wire bytes of this reply: the 22-byte header
     /// followed by `body_len` chunk bytes. Retained so the Phase G
     /// orchestrator can replay the reply to the C side as a synthetic
@@ -177,6 +188,7 @@ where
     for chunk in ChunkIter::over_message(&body_buf, body_buf.len()) {
         match chunk.tag {
             TAG_ERROR_TEXT => reply.error_text = Some(chunk.data.to_vec()),
+            TAG_LOGIN_ECHO => reply.login_echo = Some(chunk.data.to_vec()),
             TAG_SESSIONKEY => reply.sessionkey = Some(chunk.data.to_vec()),
             TAG_MAC_ALG => reply.mac_alg = Some(chunk.data.to_vec()),
             TAG_S_DATA_CIPHER_ALG => reply.cipher_alg = Some(chunk.data.to_vec()),
