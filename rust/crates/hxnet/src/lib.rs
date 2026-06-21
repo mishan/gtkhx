@@ -70,6 +70,7 @@ pub mod ffi;
 pub mod frame;
 pub mod hope_blowfish;
 pub mod login;
+pub mod login_reply;
 pub mod magic;
 pub mod transform;
 
