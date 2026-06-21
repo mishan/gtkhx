@@ -83,6 +83,14 @@ pub struct LoginReply {
     pub cipher_mode: Option<Vec<u8>>,
     pub hope_app_id: Option<Vec<u8>>,
     pub hope_app_string: Option<Vec<u8>>,
+    /// The verbatim on-wire bytes of this reply: the 22-byte header
+    /// followed by `body_len` chunk bytes. Retained so the Phase G
+    /// orchestrator can replay the reply to the C side as a synthetic
+    /// `Event::Frame` (`docs/phase-g-migration.md`, "Option B") after
+    /// consuming it here to decide success/failure. Empty only for a
+    /// default-constructed `LoginReply`; `recv_login_reply` always
+    /// populates it.
+    pub raw_frame: Vec<u8>,
 }
 
 impl LoginReply {
@@ -202,6 +210,11 @@ where
         }
     }
 
+    // Retain the full wire frame (header + body) for the Phase G
+    // replay path. The chunk walk above borrowed body_buf
+    // immutably; that borrow has ended, so we can move it in here.
+    reply.raw_frame = body_buf;
+
     Ok(reply)
 }
 
@@ -235,6 +248,15 @@ mod tests {
         assert!(reply.is_success());
         assert!(!reply.has_hope_handshake());
         assert!(reply.error_text.is_none());
+
+        // Phase G: the raw wire frame is retained for replay and
+        // round-trips through Frame::from_raw to the same opcode /
+        // flag the C side will dispatch on.
+        assert!(!reply.raw_frame.is_empty(), "raw_frame must be populated");
+        let frame = crate::Frame::from_raw(&reply.raw_frame)
+            .expect("raw_frame should decode");
+        assert_eq!(frame.header.type_, HTLS_HDR_TASK);
+        assert_eq!(frame.header.flag, 0);
 
         let evt = evt_rx.recv().await.expect("state event");
         assert!(matches!(evt, Event::State(ConnectionState::LoginReplyWait)));

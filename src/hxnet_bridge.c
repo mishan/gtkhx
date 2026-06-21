@@ -21,6 +21,7 @@
 #include "hxnet_bridge.h"
 #include "protocol.h"
 #include "proto_helpers.h"
+#include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 
 /* Forward declaration of the production header decoder
  * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
@@ -314,6 +315,20 @@ typedef void (*hxnet_event_cb_t) (hxnet_connection_opaque *conn,
                                   hxnet_frame_t *frame, void *user_data);
 typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
                                      void *user_data);
+/* Phase G state callback — fires once per ConnectionState
+ * transition. Mirror of HxnetStateCallback in
+ * rust/crates/hxnet/src/ffi.rs. `state` is a HXNET_BRIDGE_STATE_*
+ * discriminant. */
+typedef void (*hxnet_state_cb_t) (hxnet_connection_opaque *conn, guint32 state,
+                                  void *user_data);
+
+/* ConnectionState discriminants the Phase G state callback maps
+ * onto GtkhxConnectionState. Mirror of HXNET_STATE_* in
+ * rust/crates/hxnet/src/ffi.rs (only the two with a coarse
+ * GtkhxConnectionState equivalent are named here; the
+ * intermediate handshake states are dropped). */
+#define HXNET_BRIDGE_STATE_CONNECTED       2
+#define HXNET_BRIDGE_STATE_HANDSHAKE_DONE 10
 
 #define HXNET_BRIDGE_CIPHER_NONE              0
 #define HXNET_BRIDGE_CIPHER_BLOWFISH          1
@@ -396,6 +411,19 @@ extern int hxnet_connection_send_frame (hxnet_connection_opaque *handle,
                                         const guint8 *data, guint32 len);
 extern void hxnet_connection_destroy (hxnet_connection_opaque *handle);
 extern void hxnet_frame_free (hxnet_frame_t *f);
+
+/* Phase G: hxnet drives the whole plaintext lifecycle (DNS + TCP +
+ * magic + LOGIN + LOGIN-reply) and replays the reply as a synthetic
+ * frame. Mirror of hxnet_connection_open_plaintext in
+ * rust/crates/hxnet/src/ffi.rs. */
+extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
+    hxnet_state_cb_t on_state, void *user_data);
 
 /*
  * Single-connection state. gtkhx is single-conn today (the
@@ -499,6 +527,82 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn, int reason,
     if (to_destroy) {
         hxnet_connection_destroy (to_destroy);
     }
+}
+
+/* Phase G state trampoline. hxnet fires this on the GLib main
+ * thread once per ConnectionState transition; we map the
+ * fine-grained discriminants onto the coarse GtkhxConnectionState
+ * the toolbar / chat windows already listen to and emit on the
+ * default session. The legacy GIOStream connect path emits the same
+ * coarse sequence (CONNECTING in hx_connect → TCP_CONNECTED in
+ * on_async_connected → HANDSHAKE_DONE in send_login); the
+ * orchestrator just sources the transitions from the Rust state
+ * machine. Intermediate states (magic / login-sending /
+ * login-reply-wait / HOPE) have no coarse equivalent and are
+ * dropped — the throbber doesn't need that granularity, and
+ * CONNECTING was already emitted in hx_connect_via_orchestrator. */
+static void
+bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
+                    void *user_data G_GNUC_UNUSED)
+{
+    GtkhxSession *sess = gtkhx_session_get_default ();
+    switch (state) {
+    case HXNET_BRIDGE_STATE_CONNECTED:
+        gtkhx_session_emit_connection_state (sess,
+                                             GTKHX_CONNECTION_TCP_CONNECTED);
+        break;
+    case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
+        gtkhx_session_emit_connection_state (sess,
+                                             GTKHX_CONNECTION_HANDSHAKE_DONE);
+        break;
+    default:
+        break;
+    }
+}
+
+gboolean
+hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
+                                          const char *host, guint16 port,
+                                          const char *login, const char *pass,
+                                          const char *name, guint16 icon,
+                                          guint16 version, guint16 caps,
+                                          guint32 trans)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (host != NULL && *host, FALSE);
+
+    if (bridge_handle) {
+        g_critical ("hxnet_bridge: orchestrated install attempted while a "
+                    "connection is already installed; refusing");
+        return FALSE;
+    }
+
+    login = login ? login : "";
+    pass  = pass  ? pass  : "";
+    name  = name  ? name  : "";
+
+    /* open_plaintext spawns the lifecycle task and wires the
+     * forwarder synchronously; events don't fire until we return to
+     * the GLib main loop. Storing bridge_handle before that return
+     * is what makes the orchestrator's replayed LOGIN-reply frame
+     * pass hx_bridge_dispatch_frame's hx_bridge_is_installed() gate.
+     * user_data is the htlc for all three callbacks. */
+    hxnet_connection_opaque *h = hxnet_connection_open_plaintext (
+        (const guint8 *) host, strlen (host), port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) pass, strlen (pass),
+        (const guint8 *) name, strlen (name),
+        icon, version, caps, trans,
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+    if (!h) {
+        /* open_plaintext logs its own g_critical on the failure
+         * paths (NULL/empty host, non-UTF-8 host, trans==0, runtime
+         * panic). Leave the bridge uninstalled. */
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
 }
 
 gboolean

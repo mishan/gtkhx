@@ -192,6 +192,58 @@ gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
     g_assert_not_reached ();
 }
 
+/* Phase G adds hx_bridge_install_orchestrated_plaintext, which
+ * references hxnet_connection_open_plaintext (the lifecycle FFI)
+ * and the GtkhxSession state-emit pair (for the coarse
+ * connection-state signal mapping). Tier 1 never drives the
+ * orchestrator path — it's covered by the production network.c
+ * hookup + the Tier 3 real-mhxd test — so stub all three. The
+ * open_plaintext signature mirrors the production hand-declared
+ * extern in src/hxnet_bridge.c; the GtkhxSession stubs use an
+ * opaque local type (the test doesn't include gtkhx_session.h),
+ * which is fine for linking. */
+typedef void (*test_stub_state_cb) (struct hxnet_connection_opaque *conn,
+                                    guint32 state, void *user_data);
+struct hxnet_connection_opaque *hxnet_connection_open_plaintext (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data);
+struct hxnet_connection_opaque *
+hxnet_connection_open_plaintext (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data)
+{
+    (void) host; (void) host_len; (void) port; (void) login;
+    (void) login_len; (void) password; (void) password_len; (void) name;
+    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
+    (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
+    g_assert_not_reached ();
+    return NULL;
+}
+
+typedef struct _GtkhxSession GtkhxSession;
+GtkhxSession *gtkhx_session_get_default (void);
+GtkhxSession *
+gtkhx_session_get_default (void)
+{
+    return NULL;
+}
+void gtkhx_session_emit_connection_state (GtkhxSession *self, int state);
+void
+gtkhx_session_emit_connection_state (GtkhxSession *self, int state)
+{
+    (void) self;
+    (void) state;
+    g_assert_not_reached ();
+}
+
 /* Round-trip a single (type, trans, flag, hc, body_len) tuple
  * through pack_header → hl_hdr_decode and assert the fields
  * survive intact. body_len is the application-level body byte
