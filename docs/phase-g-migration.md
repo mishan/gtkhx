@@ -14,8 +14,22 @@
   existing callback-mode handle plumbing
   (`wire_callback_state_with_on_state`).
 - **Phase G part 2**: this doc.
-- **Phase G part 3**: the actual C-side surgery, in its own
-  branch with a live-server smoke test.
+- **Phase G part 3**: shipped on branch `claude/r3.3e-phase-g`
+  (plaintext, gated behind `GTKHX_NEW_CONNECT`). Option B replay in
+  the orchestrator (`Frame::from_raw` + `LoginReply::raw_frame` +
+  the pre-`HandshakeDone` `Event::Frame`); the C-side
+  `hx_connect_via_orchestrator` + `hx_bridge_install_orchestrated_plaintext`
+  per the corrected sketch below (trans pinning, `fd=-1` sentinel,
+  synchronous bridge install, state-callback mapping). Capabilities
+  (`HTLC_DATA_CAPABILITIES` = 0x001F) are advertised through the
+  `open_plaintext` FFI so extensions negotiate; `htlc->ip_addr` is
+  seeded from the server string. Validated end-to-end against live
+  mhxd + Janus via `tests/integration/test_phase_g_connect.c`
+  (`/phase_g/orchestrator_login` + `/phase_g/capabilities_negotiated`).
+  Still gated on the full matrix (incl. hlserver.com + HOPE/TLS in
+  the orchestrator) before the default flips — see "Test matrix
+  before flipping the default" and "Tier 3 coverage of the
+  production connect path" below.
 
 ## The integration challenge
 
@@ -440,6 +454,80 @@ Three risk axes:
 
 Each axis individually is manageable; together they're a
 ship-Friday-skip-the-weekend size, not a ship-overnight size.
+
+## Tier 3 coverage of the production connect path
+
+A capabilities-negotiation regression shipped on the orchestrator
+path (the LOGIN omitted `HTLC_DATA_CAPABILITIES`, so chat-history /
+inline-media / voice never negotiated) and **no Tier 3 test caught
+it**, even though the suite has chat-history coverage. Worth writing
+down why, and the plan to close the gap.
+
+### Why the existing Tier 3 suite doesn't exercise production connect
+
+There are effectively **two client wire implementations** in the
+tree:
+
+1. **`tests/integration/integration_harness.c`** — used by
+   `test_login`, `test_chat_history`, the HOPE tests, and ~30 others.
+   It opens a raw socket and hand-rolls its *own* magic + LOGIN +
+   recv loop (`integration_login_guest_caps` builds its own chunk
+   list). It links `proto_helpers` + `cipher` but **not** `network.c`
+   / `rcv.c`. So "chat-history works" proves the *server* supports
+   the extension against the *harness's* login — it never touches the
+   production client's LOGIN builder.
+2. **`connect_test_stubs.c`** tests (`real_connect`,
+   `real_connect_hxnet`, `phase_g_connect`) — these *do* drive
+   production `network.c::hx_connect`, but stub `rcv.c` + the UI.
+
+The capabilities bitmask lives in the production LOGIN builders
+(`login_packet.c` for legacy/HOPE — correct; `login.rs` for the
+orchestrator — regressed). No Tier 3 test drove either production
+builder *and* inspected the negotiated result, so the orchestrator
+regression was invisible. The legacy path happened to be right.
+
+### The blocker for "all of Tier 3 on production connect"
+
+`rcv.c`. Every `HTLS_HDR_*` handler (`rcv_task_login` included) calls
+directly into the GTK/libadwaita UI (chat, user list, news, files).
+A headless test binary can't link that — which is *why* the harness
+reimplements the wire path and why `connect_test_stubs.c` stubs
+`rcv_task_login`. So **connect + login + negotiation** can run
+headless against production code (that's what `phase_g_connect`
+does), but **post-login protocol handling** (chat/news/file
+round-trips) can't, until the UI coupling in `rcv.c` is unwound.
+
+### Plan — three increments, smallest payoff first
+
+1. **Negotiation assertion in `phase_g_connect`** — ✅ shipped
+   (`5555249`). `/phase_g/capabilities_negotiated` drives the
+   production orchestrator against a cap-aware matrix server (Janus)
+   and asserts the server echoed `HTLC_DATA_CAPABILITIES` back —
+   the direct guard for the class of bug above. The recording
+   `hx_rcv_hdr` grew a two-phase handoff so the LOGIN reply body is
+   inspectable; a `login.rs` unit test
+   (`build_login_frame_advertises_capabilities`) is the send-side
+   guard. ~70 LOC across the two.
+
+2. **Route the harness's connect + login through the orchestrator.**
+   `hxnet`'s `open_plaintext` is GTK-free, so the harness could call
+   it for connect / login / negotiation instead of its hand-rolled
+   version, then read frames via the bridge. That makes the *login
+   phase* of all ~30 existing Tier 3 tests exercise production
+   networking for free, collapsing the two client implementations
+   into one for the part that's testable headless. Bigger change —
+   the harness is blocking-socket shaped and the orchestrator is
+   async, so the harness's `integration_recv_message` family needs
+   an actor/bridge-backed variant. Scoped as its own branch.
+
+3. **Post-login coverage on production `rcv`.** Blocked on R5 (UI →
+   Rust) or a headless `rcv` seam that lets the dispatch handlers run
+   without a live widget tree. Not worth forcing before R5; tracked
+   here so the dependency is explicit.
+
+Recommendation: keep increment 1 as the merge gate for capability
+regressions, do increment 2 on its own branch when the harness
+async-recv work is worth it, and let increment 3 fall out of R5.
 
 ## Summary of branches the night left behind
 
