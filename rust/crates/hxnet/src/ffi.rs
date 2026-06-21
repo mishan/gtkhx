@@ -416,22 +416,38 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
             return HXNET_RECV_EMPTY;
         }
     };
-    match events.try_recv() {
-        Ok(Event::Frame(frame)) => {
-            write_frame_to_out(frame, out_frame);
-            HXNET_RECV_FRAME
-        }
-        Ok(Event::Shutdown(reason)) => {
-            *out_reason = shutdown_code(reason);
-            HXNET_RECV_SHUTDOWN
-        }
-        Err(mpsc::error::TryRecvError::Empty) => HXNET_RECV_EMPTY,
-        Err(mpsc::error::TryRecvError::Disconnected) => {
-            // The actor finished without emitting Shutdown (we
-            // try our best to ensure it always does, but defend
-            // anyway).
-            *out_reason = HXNET_SHUTDOWN_HANDLE_DROPPED;
-            HXNET_RECV_SHUTDOWN
+    loop {
+        match events.try_recv() {
+            Ok(Event::Frame(frame)) => {
+                write_frame_to_out(frame, out_frame);
+                return HXNET_RECV_FRAME;
+            }
+            Ok(Event::Shutdown(reason)) => {
+                *out_reason = shutdown_code(reason);
+                return HXNET_RECV_SHUTDOWN;
+            }
+            Ok(Event::State(_)) => {
+                // Polling API has no surface to expose
+                // connection-state events on. The polling
+                // spawn (`spawn_fd`) is only used by R3.3.b's
+                // smoke test which adopts a pre-connected fd
+                // and never sees connect-time state events. If
+                // a future caller wires the polling API
+                // through the Phase A connect path, we'll grow
+                // a separate `try_recv_state` entry; for now
+                // silently drop state events and continue the
+                // try_recv loop so the caller still gets to
+                // see Frame / Shutdown.
+                continue;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => return HXNET_RECV_EMPTY,
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                // The actor finished without emitting Shutdown (we
+                // try our best to ensure it always does, but defend
+                // anyway).
+                *out_reason = HXNET_SHUTDOWN_HANDLE_DROPPED;
+                return HXNET_RECV_SHUTDOWN;
+            }
         }
     }
 }
@@ -1447,6 +1463,24 @@ fn wire_callback_state(
                             on_shutdown(cb.handle_ptr, code, cb.user_data);
                         }
                     }
+                }
+                Event::State(state) => {
+                    // The post-HOPE callback FFI from R3.3.e-1
+                    // only carries Frame + Shutdown; the spawn
+                    // path adopts an already-connected fd so no
+                    // connect-time state events ever fire here.
+                    // When Phase A's connect-in-Rust spawn
+                    // function lands, it'll carry its own
+                    // on_state callback and route state events
+                    // through that. For now log + drop so any
+                    // future regression that wires a state-
+                    // event-emitting transform under the
+                    // existing spawn surfaces in dev logs
+                    // rather than silently disappearing.
+                    eprintln!(
+                        "hxnet: unexpected State({state:?}) on post-HOPE \
+                         callback path; ignoring (no consumer)"
+                    );
                 }
             }
         });
