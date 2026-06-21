@@ -1370,6 +1370,7 @@ test_integration_phase_g_connect = executable(
   'test_integration_phase_g_connect',
   'integration/test_phase_g_connect.c',
   'integration/connect_test_stubs.c',
+  'integration/server_matrix.c',
   '../src/network.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',

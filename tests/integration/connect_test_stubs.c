@@ -219,6 +219,14 @@ guint32 connect_test_last_rcv_type = 0;
 guint32 connect_test_last_rcv_trans = 0;
 guint32 connect_test_last_rcv_flag = 0;
 guint connect_test_rcv_count = 0;
+/* Capabilities echo from the FIRST dispatched frame's body (the
+ * replayed LOGIN reply). A capability-aware server (Janus) echoes
+ * the HTLC_DATA_CAPABILITIES bits we advertised back in the LOGIN
+ * reply; a cap-unaware server (mhxd) omits the chunk per spec. Lets
+ * the Phase G Tier 3 test prove the orchestrator advertised caps
+ * end-to-end against a real cap-aware server. */
+gboolean connect_test_first_rcv_caps_present = FALSE;
+guint16  connect_test_first_rcv_caps_value = 0;
 
 void connect_test_reset_rcv_record (void);
 void
@@ -231,25 +239,88 @@ connect_test_reset_rcv_record (void)
     connect_test_last_rcv_trans = 0;
     connect_test_last_rcv_flag = 0;
     connect_test_rcv_count = 0;
+    connect_test_first_rcv_caps_present = FALSE;
+    connect_test_first_rcv_caps_value = 0;
+}
+
+/* HTLS_DATA_CAPABILITIES wire tag (mirror of HTLC_DATA_CAPABILITIES
+ * 0x01f0 — same tag is reused server→client for the echo). */
+#define CONNECT_TEST_TAG_CAPABILITIES 0x01f0
+
+/* Body handler the recording hx_rcv_hdr installs for the FIRST
+ * dispatched frame. By the time hx_bridge_dispatch_frame calls this,
+ * the full frame (22-byte header + body) is staged in htlc->in.buf;
+ * walk the chunk list for the capabilities echo. */
+static void
+connect_test_rcv_body (struct htlc_conn *htlc)
+{
+    guint16 hc_be;
+    guint32 len_be;
+    memcpy (&hc_be, htlc->in.buf + 20, 2);    /* hl_hdr.hc  @ offset 20 */
+    memcpy (&len_be, htlc->in.buf + 12, 4);   /* hl_hdr.len @ offset 12 */
+    guint16 hc = GUINT16_FROM_BE (hc_be);
+    guint32 wire_len = GUINT32_FROM_BE (len_be);
+    gsize body_len = wire_len >= 2 ? (gsize) (wire_len - 2) : 0;
+    gsize off = SIZEOF_HL_HDR;
+    gsize end = SIZEOF_HL_HDR + body_len;
+
+    for (guint16 i = 0; i < hc && off + 4 <= end; i++) {
+        guint16 tag_be, dlen_be;
+        memcpy (&tag_be, htlc->in.buf + off, 2);
+        memcpy (&dlen_be, htlc->in.buf + off + 2, 2);
+        guint16 tag = GUINT16_FROM_BE (tag_be);
+        guint16 dlen = GUINT16_FROM_BE (dlen_be);
+        off += 4;
+        if (off + dlen > end) {
+            break;
+        }
+        if (tag == CONNECT_TEST_TAG_CAPABILITIES) {
+            connect_test_first_rcv_caps_present = TRUE;
+            if (dlen >= 2) {
+                guint16 caps_be;
+                memcpy (&caps_be, htlc->in.buf + off, 2);
+                connect_test_first_rcv_caps_value = GUINT16_FROM_BE (caps_be);
+            }
+        }
+        off += dlen;
+    }
 }
 
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
 {
-    if (htlc && htlc->in.buf) {
-        const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-        guint32 type = GUINT32_FROM_BE (h->type);
-        guint32 trans = GUINT32_FROM_BE (h->trans);
-        guint32 flag = GUINT32_FROM_BE (h->flag);
-        if (connect_test_rcv_count == 0) {
-            connect_test_first_rcv_type = type;
-            connect_test_first_rcv_trans = trans;
-            connect_test_first_rcv_flag = flag;
+    if (!htlc || !htlc->in.buf) {
+        return;
+    }
+    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    guint32 type = GUINT32_FROM_BE (h->type);
+    guint32 trans = GUINT32_FROM_BE (h->trans);
+    guint32 flag = GUINT32_FROM_BE (h->flag);
+    gboolean is_first = (connect_test_rcv_count == 0);
+    if (is_first) {
+        connect_test_first_rcv_type = type;
+        connect_test_first_rcv_trans = trans;
+        connect_test_first_rcv_flag = flag;
+    }
+    connect_test_last_rcv_type = type;
+    connect_test_last_rcv_trans = trans;
+    connect_test_last_rcv_flag = flag;
+    connect_test_rcv_count++;
+
+    /* For the first frame only, mirror the real hx_rcv_hdr two-phase
+     * handoff so hx_bridge_dispatch_frame stages the body and calls
+     * our body handler — letting us inspect the LOGIN reply's chunks
+     * for the capabilities echo. qbuf_set grows htlc->in to hold the
+     * body (g_realloc preserves the header already in buf[0..22]).
+     * Without this the dispatch returns after the header phase
+     * (htlc->rcv still == hx_rcv_hdr) and the body is never staged. */
+    if (is_first) {
+        guint32 wire_len = GUINT32_FROM_BE (h->len);
+        if (wire_len > 2) {
+            guint32 body_len = wire_len - 2; /* strip the 2-byte hc */
+            qbuf_set (&htlc->in, htlc->in.pos, body_len);
+            htlc->rcv = connect_test_rcv_body;
         }
-        connect_test_last_rcv_type = type;
-        connect_test_last_rcv_trans = trans;
-        connect_test_last_rcv_flag = flag;
-        connect_test_rcv_count++;
     }
 }
 

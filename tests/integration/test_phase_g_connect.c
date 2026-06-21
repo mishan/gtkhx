@@ -77,6 +77,7 @@
 #include "network.h"           /* hx_connect, hx_htlc_close */
 #include "gtkhx_session.h"     /* GtkhxConnectionState */
 #include "hxnet_bridge.h"      /* hx_bridge_is_installed */
+#include "server_matrix.h"     /* hx_test_servers_with — cap-aware server pick */
 
 /* From connect_test_stubs.c. */
 extern void connect_test_init_fd_table (void);
@@ -85,6 +86,24 @@ extern guint32 connect_test_first_rcv_type;
 extern guint32 connect_test_first_rcv_trans;
 extern guint32 connect_test_first_rcv_flag;
 extern guint connect_test_rcv_count;
+extern gboolean connect_test_first_rcv_caps_present;
+extern guint16 connect_test_first_rcv_caps_value;
+
+/* server_matrix.c references hx_integration_connect_to (via the
+ * unused-here hx_test_server_connect). This test never calls it, but
+ * the symbol must resolve under -Wl,--no-undefined. Stub it — same
+ * approach test_real_tls uses when it compiles server_matrix.c in
+ * directly rather than linking the full harness lib (whose
+ * hlwrite_chunks stub would collide with production network.c). */
+int hx_integration_connect_to (const char *host, int port, int timeout_ms);
+int
+hx_integration_connect_to (const char *host, int port, int timeout_ms)
+{
+    (void) host;
+    (void) port;
+    (void) timeout_ms;
+    return -1;
+}
 
 /* Mirror of HX_LOGIN_TRANS in src/network.c — the pinned LOGIN
  * transaction id the orchestrator stamps and the server echoes. */
@@ -241,6 +260,72 @@ test_orchestrator_login (void)
     g_unsetenv ("GTKHX_NEW_CONNECT");
 }
 
+/* Increment 1: prove the orchestrator advertises capabilities
+ * end-to-end through production code. The plain orchestrator_login
+ * test runs against the default server (mhxd), which is cap-UNAWARE
+ * and ignores the chunk per spec — so it can't prove negotiation.
+ * Here we drive the production hx_connect orchestrator against a
+ * capability-aware matrix server (Janus, which ships the fogWraith
+ * chat-history extension) and assert the server echoed our
+ * HTLC_DATA_CAPABILITIES back in the LOGIN reply. Had the
+ * orchestrator's LOGIN omitted the caps chunk (the bug this guards),
+ * a cap-aware server would echo nothing and caps_present stays FALSE.
+ *
+ * Fails loudly (not g_test_skip) if no cap-aware server is in the
+ * matrix — per the "no silent skips" rule. */
+static void
+test_orchestrator_capabilities_negotiated (void)
+{
+    GPtrArray *cand = hx_test_servers_with (HX_TEST_CAP_CHAT_HISTORY);
+    const hx_test_server *srv = NULL;
+    if (cand && cand->len > 0) {
+        srv = g_ptr_array_index (cand, 0);
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no capability-aware server in matrix; need "
+            "HX_TEST_CAP_CHAT_HISTORY (Janus). Start the Janus "
+            "container or set GTKHX_TEST_SERVERS=janus.");
+        return;
+    }
+
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+
+    hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
+                /*secure=*/0, /*tls=*/0);
+    drive_until (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+
+    /* The first dispatched frame is the replayed LOGIN reply. A
+     * cap-aware server echoes the capability bits it accepted; the
+     * orchestrator must therefore have advertised them. */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_true (connect_test_first_rcv_caps_present);
+    /* The server echoes the subset it accepted; chat-history (bit 4)
+     * is the one we picked this server for, so it must be lit. */
+    g_assert_cmphex (connect_test_first_rcv_caps_value & HTLC_CAP_CHAT_HISTORY,
+                     ==, HTLC_CAP_CHAT_HISTORY);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_ptr_array_unref (cand);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -248,6 +333,8 @@ main (int argc, char *argv[])
     connect_test_init_fd_table ();
 
     g_test_add_func ("/phase_g/orchestrator_login", test_orchestrator_login);
+    g_test_add_func ("/phase_g/capabilities_negotiated",
+                     test_orchestrator_capabilities_negotiated);
 
     return g_test_run ();
 }
