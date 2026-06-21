@@ -277,6 +277,11 @@ hxnet_connection_open_plaintext_tls (
     return NULL;
 }
 
+/* hx_bridge_dispatch_shutdown reads network.c's `connected` flag to
+ * pick the shutdown log level. Tier 1 never drives that path, but the
+ * symbol must resolve — define it here (test never reads it). */
+int connected;
+
 typedef struct _GtkhxSession GtkhxSession;
 GtkhxSession *gtkhx_session_get_default (void);
 GtkhxSession *

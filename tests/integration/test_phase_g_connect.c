@@ -475,6 +475,44 @@ test_orchestrator_tls_login (void)
     g_ptr_array_unref (cand);
 }
 
+/* Regression guard: a refused connection must surface gracefully as
+ * GTKHX_CONNECTION_DISCONNECTED (throbber off, tasks cleared, handle
+ * torn down) rather than leaving the UI stuck. This exercises the
+ * bridge_on_shutdown_cb → hx_bridge_dispatch_shutdown → hx_htlc_close
+ * path: the bug was that the handle was cleared before dispatch, so
+ * dispatch's !is_installed() guard skipped hx_htlc_close and the
+ * connect/login tasks span forever. Needs no server — port 1 is
+ * unbound, so the connect is refused. */
+static void
+test_orchestrator_connect_refused (void)
+{
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", 1, "guest", "",
+                /*secure=*/0, /*tls=*/0);
+    drive_until (obs, 10000);
+
+    /* The orchestrator surfaced the refused connect as DISCONNECTED
+     * (hx_htlc_close ran) — not a stuck throbber. */
+    g_assert_true (obs->wait_arrived);
+    /* hx_htlc_close tore the bridge handle down and reset fd. */
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -487,6 +525,8 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
     g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
     g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
+    g_test_add_func ("/phase_g/connect_refused",
+                     test_orchestrator_connect_refused);
 
     return g_test_run ();
 }
