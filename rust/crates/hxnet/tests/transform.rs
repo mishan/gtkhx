@@ -293,6 +293,7 @@ async fn connection_spawn_boxed_over_aead_plus_gzip() {
             assert_eq!(f.body, body, "frame body mismatch through transform stack");
         }
         Event::Shutdown(r) => panic!("expected Frame, got Shutdown: {r:?}"),
+        Event::State(s) => panic!("expected Frame, got State: {s:?}"),
     }
 
     // Drop the command sender so the actor exits cleanly.
