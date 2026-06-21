@@ -326,6 +326,86 @@ test_orchestrator_capabilities_negotiated (void)
     g_ptr_array_unref (cand);
 }
 
+/* Drive the production hx_connect HOPE-Secure-Login path through the
+ * orchestrator (GTKHX_NEW_CONNECT=1, secure=1) against a matrix
+ * server advertising `required_cap`, with `cipheralg` configured on
+ * the htlc. Asserts the full handshake reaches HANDSHAKE_DONE, the
+ * bridge installs, and the replayed step-2 reply dispatched to the C
+ * side with the right trans (HX_LOGIN_TRANS+1 — HOPE replays step 2,
+ * not the LOGIN) + success flag.
+ *
+ * This exercises the production Rust run_hope_lifecycle end-to-end:
+ * magic + step1 + key derivation + step2 + cipher transition + the
+ * encrypted step-2 reply read back through the negotiated cipher. The
+ * Blowfish variant is the regression guard for the secure_login probe
+ * (mhxd signals secure_login by echoing the macalg name; getting that
+ * wrong made mhxd silently close after step2). */
+static void
+run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
+{
+    GPtrArray *cand = hx_test_servers_with (required_cap);
+    const hx_test_server *srv = NULL;
+    if (cand && cand->len > 0) {
+        srv = g_ptr_array_index (cand, 0);
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no matrix server with cap 0x%x for HOPE cipher %s; start the "
+            "mhxd / Janus containers.",
+            required_cap, cipheralg);
+        return;
+    }
+
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, cipheralg, sizeof (test_htlc.cipheralg));
+    g_strlcpy (test_htlc.name, "PhaseGHope", sizeof (test_htlc.name));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
+                /*secure=*/1, /*tls=*/0);
+    drive_until (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+
+    /* HOPE replays the step-2 reply, which carries HX_LOGIN_TRANS+1
+     * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_ptr_array_unref (cand);
+}
+
+static void
+test_orchestrator_hope_blowfish (void)
+{
+    run_hope_orchestrator_against (HX_TEST_CAP_BLOWFISH, "BLOWFISH");
+}
+
+static void
+test_orchestrator_hope_chacha20 (void)
+{
+    run_hope_orchestrator_against (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -335,6 +415,8 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/orchestrator_login", test_orchestrator_login);
     g_test_add_func ("/phase_g/capabilities_negotiated",
                      test_orchestrator_capabilities_negotiated);
+    g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
+    g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
 
     return g_test_run ();
 }

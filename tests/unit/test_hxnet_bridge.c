@@ -226,6 +226,33 @@ hxnet_connection_open_plaintext (
     return NULL;
 }
 
+struct hxnet_connection_opaque *hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg,
+    gsize cipher_alg_len, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data);
+struct hxnet_connection_opaque *
+hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg,
+    gsize cipher_alg_len, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data)
+{
+    (void) host; (void) host_len; (void) port; (void) login;
+    (void) login_len; (void) password; (void) password_len; (void) name;
+    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
+    (void) cipher_alg; (void) cipher_alg_len;
+    (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
+    g_assert_not_reached ();
+    return NULL;
+}
+
 typedef struct _GtkhxSession GtkhxSession;
 GtkhxSession *gtkhx_session_get_default (void);
 GtkhxSession *

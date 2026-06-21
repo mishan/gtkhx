@@ -1902,16 +1902,19 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
  * docs/phase-g-migration.md. */
 #define HX_LOGIN_TRANS 1u
 
-/* Phase G (hxnet-owns-the-whole-lifecycle), plaintext path. Gated
- * behind GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy
- * GSocketClient connect + GPollable magic/LOGIN handshake with the
- * hxnet orchestrator: hxnet owns the socket from byte zero, drives
- * magic + LOGIN + LOGIN-reply itself, and replays the reply to us as
- * a synthetic frame so rcv_task_login (and its post-login side
- * effects) run unchanged. */
+/* Phase G (hxnet-owns-the-whole-lifecycle). Gated behind
+ * GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy GSocketClient
+ * connect + GPollable handshake with the hxnet orchestrator: hxnet
+ * owns the socket from byte zero, drives the whole handshake itself
+ * (magic + LOGIN for plaintext; magic + HOPE step1/step2 + cipher
+ * transition for secure), and replays the final reply to us as a
+ * synthetic frame so rcv_task_login (and its post-login side effects)
+ * run unchanged. `secure` selects the HOPE path (htlc->cipheralg must
+ * be set); otherwise the plaintext path. */
 static void
 hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
-                             guint16 port, const char *login, const char *pass)
+                             guint16 port, const char *login, const char *pass,
+                             gboolean secure)
 {
     struct task *login_tsk;
 
@@ -1932,7 +1935,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     htlc->chat_history_last_msgid = 0;
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
-    htlc->tls = 0; /* orchestrator path is plaintext-only */
+    htlc->tls = 0; /* orchestrator path is non-TLS (plaintext or HOPE) */
     htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
@@ -1960,11 +1963,19 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * post-login follow-up sends (issued from inside rcv_task_login)
      * from colliding with the login task — the legacy path got that
      * for free from the C-side LOGIN send's htlc->trans++. The ptr
-     * arg (pass) is NULL, selecting rcv_task_login's plaintext
-     * branch. */
-    htlc->trans = HX_LOGIN_TRANS;
+     * arg (pass) is NULL, selecting rcv_task_login's post-login (else)
+     * branch in both modes.
+     *
+     * The replayed reply's trans differs by mode: the plaintext path
+     * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
+     * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
+     * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1).
+     * Register the login task under whichever trans the replay will
+     * carry, then bump past it for the post-login sends. */
+    guint32 reply_trans = secure ? (HX_LOGIN_TRANS + 1) : HX_LOGIN_TRANS;
+    htlc->trans = reply_trans;
     login_tsk = task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-    htlc->trans = HX_LOGIN_TRANS + 1;
+    htlc->trans = reply_trans + 1;
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -1993,9 +2004,19 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
                  | HTLC_CAP_INLINE_MEDIA;
-    if (!hx_bridge_install_orchestrated_plaintext (
+    /* HOPE sends the display name in step 2; the plaintext path defers
+     * it to a post-login USER_CHANGE, so it omits the name here. */
+    gboolean ok;
+    if (secure) {
+        ok = hx_bridge_install_orchestrated_hope (
+            htlc, serverstr, port, login, pass, htlc->name, htlc->icon,
+            /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
+    } else {
+        ok = hx_bridge_install_orchestrated_plaintext (
             htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
-            /*version=*/185, caps, HX_LOGIN_TRANS)) {
+            /*version=*/185, caps, HX_LOGIN_TRANS);
+    }
+    if (!ok) {
         /* Spawn refused. Roll back the sentinel + login task and
          * surface a disconnect so the UI doesn't sit on the
          * CONNECTING throbber forever. */
@@ -2030,9 +2051,23 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
         const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
         const char *tls_env = g_getenv ("GTKHX_TLS");
         gboolean want_tls = tls || (tls_env && *tls_env);
-        if (new_env && *new_env && !secure && !want_tls) {
-            hx_connect_via_orchestrator (htlc, serverstr, port, login, pass);
-            return;
+        if (new_env && *new_env && !want_tls) {
+            if (!secure) {
+                /* Plaintext: orchestrator handles it. */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/FALSE);
+                return;
+            }
+            if (htlc->cipheralg[0]) {
+                /* HOPE-Secure-Login with a negotiable cipher: the
+                 * orchestrator drives the full handshake. (TLS still
+                 * routes to the legacy path below; so does a secure
+                 * connect with no cipher configured, which the
+                 * orchestrator's HOPE path can't represent.) */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/TRUE);
+                return;
+            }
         }
     }
 
