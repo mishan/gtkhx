@@ -873,17 +873,18 @@ task_tasks_update (session *sess)
     }
 }
 
-/* 2x scale on tasks-headerbar pixmap buttons (matches the
- * toolbar treatment). gtkhx_pixmap_button in gtkutil.c handles the
- * upscale + button construction. */
-#define TASKS_ICON_SCALE 2
-
+/* Tasks-headerbar pixmap buttons share the GTKHX_SCALE_WINDOW_BUTTONS
+ * theme area with the other secondary windows (Users / Files / News /
+ * Tracker). The default theme renders that area at 200% — the old
+ * hard-coded 2x — and the user can retune it in Settings → Appearance.
+ * gtkhx_pixmap_button in gtkutil.c handles the upscale + button
+ * construction. */
 static GtkWidget *
 tasks_pixmap_button (const char *resource_name, const char *tooltip,
                      GCallback cb, gpointer user_data)
 {
-    return gtkhx_pixmap_button (resource_name, tooltip, TASKS_ICON_SCALE, cb,
-                                user_data);
+    return gtkhx_pixmap_button (resource_name, tooltip,
+                                GTKHX_SCALE_WINDOW_BUTTONS, cb, user_data);
 }
 
 void

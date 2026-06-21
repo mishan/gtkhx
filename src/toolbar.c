@@ -708,18 +708,16 @@ build_hamburger (void)
     return btn;
 }
 
-/* 2x scale on the toolbar pixmap buttons. The historic
- * 16x16 XPMs read as tiny pixel-art runes at modern desktop sizes;
- * the gtkhx_pixmap_button helper in gtkutil.c upscales them with
- * nearest-neighbor before rendering, keeping the crisp blocky look
- * but at a more visually-prominent 32x32. */
-#define TOOLBAR_ICON_SCALE 2
-
+/* Toolbar pixmap buttons belong to the GTKHX_SCALE_TOOLBAR theme
+ * area. The historic 16x16 XPMs read as tiny pixel-art runes at modern
+ * desktop sizes; the default theme renders this area at 200% (the old
+ * hard-coded 2x), upscaled nearest-neighbor for the crisp blocky look,
+ * and the user can retune it in Settings → Appearance. */
 static GtkWidget *
 make_pixmap_button (const char *resource_name, const char *tooltip,
                     GCallback cb, gpointer user_data)
 {
-    return gtkhx_pixmap_button (resource_name, tooltip, TOOLBAR_ICON_SCALE, cb,
+    return gtkhx_pixmap_button (resource_name, tooltip, GTKHX_SCALE_TOOLBAR, cb,
                                 user_data);
 }
 

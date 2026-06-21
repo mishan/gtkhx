@@ -878,100 +878,97 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
     return image;
 }
 
-/* build a button around a GResource pixbuf icon. The
- * default toolbar XPMs are 16x16 pixel art that looks tiny at
- * modern desktop sizes, so scale up by an integer factor with
- * GDK_INTERP_NEAREST (preserves the crisp blocky pixels — bilinear
- * scaling would blur them into mush).
+/* ---- Theme-scaled icon buttons --------------------------------
  *
- * Rendering goes through GtkPicture rather than GtkImage:
- * GtkImage has a default min-width / min-height of ~16px from its
- * Adwaita CSS that clamps the visible size regardless of the
- * source paintable's natural dimensions, so a 32x32 pixbuf in a
- * GtkImage would still render at 16x16. GtkPicture doesn't carry
- * those constraints — with set_can_shrink(FALSE) it renders at
- * the paintable's natural size. */
-GtkWidget *
-gtkhx_pixmap_button (const char *resource_name, const char *tooltip, int scale,
-                     GCallback cb, gpointer user_data)
+ * The default toolbar / window-button pixmaps are 16x16 pixel art
+ * that looks tiny at modern desktop sizes, so they're scaled up with
+ * GDK_INTERP_NEAREST (preserves the crisp blocky pixels — bilinear
+ * scaling would blur them into mush). The scale factor comes entirely
+ * from the theme: gtkhx_theme_scale(area) times the source dimension,
+ * where the historical 2x upscale now lives honestly in the default
+ * theme rather than as a hidden constant here (see gtkhx_theme.{c,h}).
+ *
+ * Each button remembers its source (a GResource name or a held pixbuf
+ * ref) and its area as object data, and subscribes to the theme
+ * "changed" signal so a Settings tweak rescales it live with no
+ * restart. The subscription auto-drops on button finalize via
+ * g_signal_connect_object.
+ *
+ * Rendering goes through GtkPicture rather than GtkImage: GtkImage has
+ * a default min-width / min-height of ~16px from its Adwaita CSS that
+ * clamps the visible size regardless of the source paintable's natural
+ * dimensions, so a 32x32 pixbuf in a GtkImage would still render at
+ * 16x16. GtkPicture doesn't carry those constraints — with
+ * set_can_shrink(FALSE) it renders at the paintable's natural size. */
+
+#define BTN_KEY_RESOURCE "gtkhx-pixmap-resource"
+#define BTN_KEY_PIXBUF "gtkhx-pixmap-pixbuf"
+#define BTN_KEY_AREA "gtkhx-scale-area"
+
+/* Compute effective pixel dimensions for a source pixbuf at the
+ * button's area scale, clamped to >= 1. */
+static void
+button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w,
+                    int *out_h)
 {
-    GtkWidget *btn = gtk_button_new ();
+    double mul = gtkhx_theme_scale (area);
+    int w = (int)(gdk_pixbuf_get_width (src) * mul + 0.5);
+    int h = (int)(gdk_pixbuf_get_height (src) * mul + 0.5);
+    *out_w = w < 1 ? 1 : w;
+    *out_h = h < 1 ? 1 : h;
+}
+
+/* Load the source pixbuf for a tracked button. Returns a new ref the
+ * caller owns, or NULL if neither source is available. */
+static GdkPixbuf *
+button_load_source (GtkWidget *btn)
+{
+    const char *resource_name
+        = g_object_get_data (G_OBJECT (btn), BTN_KEY_RESOURCE);
+    GdkPixbuf *source_pb = g_object_get_data (G_OBJECT (btn), BTN_KEY_PIXBUF);
+
+    if (resource_name) {
+        return gdk_pixbuf_new_from_resource (resource_name, NULL);
+    }
+    if (source_pb) {
+        return g_object_ref (source_pb);
+    }
+    return NULL;
+}
+
+/* Rebuild a button's GtkPicture child from its tracked source at the
+ * current theme scale. Called once at construction and on every theme
+ * "changed" emission (connected swapped, so btn arrives first). */
+static void
+button_refresh_picture (GtkWidget *btn)
+{
+    GtkhxScaleArea area = (GtkhxScaleArea)GPOINTER_TO_INT (
+        g_object_get_data (G_OBJECT (btn), BTN_KEY_AREA));
     GdkPixbuf *src, *use_pb;
     GdkTexture *tex;
     GtkWidget *picture;
+    int w, h;
 
-    src = gdk_pixbuf_new_from_resource (resource_name, NULL);
-    if (src && scale > 1) {
-        int w = gdk_pixbuf_get_width (src) * scale;
-        int h = gdk_pixbuf_get_height (src) * scale;
+    src = button_load_source (btn);
+    if (!src) {
+        gtkhx_widget_set_child (btn, gtk_picture_new ());
+        return;
+    }
+
+    button_scaled_size (src, area, &w, &h);
+    /* Fast path: a scale that lands on the source size skips the
+     * scale_simple allocation. */
+    if (w == gdk_pixbuf_get_width (src) && h == gdk_pixbuf_get_height (src)) {
+        use_pb = src; /* transfer ownership */
+    } else {
         use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
         g_object_unref (src);
-    } else {
-        use_pb = src;
-    }
-
-    if (use_pb) {
-        tex = gtkhx_texture_from_pixbuf (use_pb);
-        if (tex) {
-            picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
-            g_object_unref (tex);
-            /* set_can_shrink(FALSE) pins the picture at the
-			 * paintable's natural size — GtkButton then sizes
-			 * itself around that. */
-            gtk_picture_set_can_shrink (GTK_PICTURE (picture), FALSE);
-        } else {
-            picture = gtk_picture_new ();
+        if (!use_pb) {
+            /* scale_simple can fail under OOM — blank rather than
+             * dereference NULL. */
+            gtkhx_widget_set_child (btn, gtk_picture_new ());
+            return;
         }
-    } else {
-        picture = gtk_picture_new ();
-    }
-    gtkhx_widget_set_child (btn, picture);
-
-    if (tooltip) {
-        gtk_widget_set_tooltip_text (btn, tooltip);
-    }
-    if (cb) {
-        g_signal_connect (btn, "clicked", cb, user_data);
-    }
-    g_clear_object (&use_pb);
-    return btn;
-}
-
-/* Pixbuf-source companion to gtkhx_pixmap_button. The caller already
- * has a GdkPixbuf in hand (e.g. from cicn_to_pixbuf via load_icon),
- * so we skip the GResource lookup and reuse the same scaling +
- * GtkPicture wrapping the resource variant does. Returns NULL only
- * if pixbuf is NULL — call sites that allow a missing-icon fallback
- * should null-check the return. */
-GtkWidget *
-gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
-                     GCallback cb, gpointer user_data)
-{
-    GtkWidget *btn;
-    GdkPixbuf *use_pb;
-    GdkTexture *tex;
-    GtkWidget *picture;
-
-    if (!pixbuf) {
-        return NULL;
-    }
-
-    btn = gtk_button_new ();
-
-    if (scale > 1) {
-        int w = gdk_pixbuf_get_width (pixbuf) * scale;
-        int h = gdk_pixbuf_get_height (pixbuf) * scale;
-        use_pb = gdk_pixbuf_scale_simple (pixbuf, w, h, GDK_INTERP_NEAREST);
-    } else {
-        use_pb = g_object_ref (pixbuf);
-    }
-
-    /* scale_simple may return NULL under OOM. Fall back to the
-	 * unscaled source rather than letting the next line dereference
-	 * a NULL pixbuf and crash. This matches gtkhx_pixmap_button's
-	 * defensive handling of its own allocation failures. */
-    if (!use_pb) {
-        use_pb = g_object_ref (pixbuf);
     }
 
     tex = gtkhx_texture_from_pixbuf (use_pb);
@@ -983,14 +980,60 @@ gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip, int scale,
         picture = gtk_picture_new ();
     }
     gtkhx_widget_set_child (btn, picture);
+    g_object_unref (use_pb);
+}
 
+/* Common tail: stash the area, render the first picture, subscribe to
+ * the theme, and wire tooltip + clicked. */
+static void
+button_finish_setup (GtkWidget *btn, GtkhxScaleArea area, const char *tooltip,
+                     GCallback cb, gpointer user_data)
+{
+    g_object_set_data (G_OBJECT (btn), BTN_KEY_AREA, GINT_TO_POINTER (area));
+    button_refresh_picture (btn);
+    g_signal_connect_object (gtkhx_theme_get_default (), "changed",
+                             G_CALLBACK (button_refresh_picture), btn,
+                             G_CONNECT_SWAPPED);
     if (tooltip) {
         gtk_widget_set_tooltip_text (btn, tooltip);
     }
     if (cb) {
         g_signal_connect (btn, "clicked", cb, user_data);
     }
-    g_object_unref (use_pb);
+}
+
+GtkWidget *
+gtkhx_pixmap_button (const char *resource_name, const char *tooltip,
+                     GtkhxScaleArea area, GCallback cb, gpointer user_data)
+{
+    GtkWidget *btn = gtk_button_new ();
+
+    /* Resource names are compile-time string literals with static
+     * lifetime, so store the pointer directly — no strdup / free. */
+    g_object_set_data (G_OBJECT (btn), BTN_KEY_RESOURCE,
+                       (gpointer)resource_name);
+    button_finish_setup (btn, area, tooltip, cb, user_data);
+    return btn;
+}
+
+/* Pixbuf-source companion. The caller already has a GdkPixbuf (e.g.
+ * from cicn_to_pixbuf via load_icon); the button takes its own ref so
+ * it can rescale live, and drops it on finalize. Returns NULL only if
+ * pixbuf is NULL — call sites that allow a missing icon should
+ * null-check the return. */
+GtkWidget *
+gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip,
+                     GtkhxScaleArea area, GCallback cb, gpointer user_data)
+{
+    GtkWidget *btn;
+
+    if (!pixbuf) {
+        return NULL;
+    }
+    btn = gtk_button_new ();
+    g_object_set_data_full (G_OBJECT (btn), BTN_KEY_PIXBUF,
+                            g_object_ref (pixbuf), g_object_unref);
+    button_finish_setup (btn, area, tooltip, cb, user_data);
     return btn;
 }
 

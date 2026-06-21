@@ -945,22 +945,22 @@ create_users_window (GtkWidget *parent_window, gpointer data)
 	 * its borrowed session pointer. Same handlers drive the chat.c
 	 * pchat sidebars; see view_msg_btn above for the shape. */
     msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.png",
-                                  _ ("Msg"), 2,
+                                  _ ("Msg"), GTKHX_SCALE_WINDOW_BUTTONS,
                                   G_CALLBACK (view_msg_btn), view);
     kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
-                                   _ ("Kick"), 2,
+                                   _ ("Kick"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (view_kick_btn), view);
     infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
-                                   _ ("User Info"), 2,
+                                   _ ("User Info"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (view_info_btn), view);
     banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png",
-                                  _ ("Ban"), 2,
+                                  _ ("Ban"), GTKHX_SCALE_WINDOW_BUTTONS,
                                   G_CALLBACK (view_ban_btn), view);
     chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
-                                   _ ("Private Chat"), 2,
+                                   _ ("Private Chat"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (view_chat_btn), view);
     ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
-                                   _ ("Ignore"), 2,
+                                   _ ("Ignore"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (view_igno_btn), view);
 
     gtk_widget_set_sensitive (msgbtn, FALSE);

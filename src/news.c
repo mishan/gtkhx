@@ -669,10 +669,10 @@ create_news_window (GtkWidget *parent_window, session *sess)
      * it blurry. Use a plain GtkButton instead. */
     postButton
         = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
-                               _ ("Post News"), 2, NULL, NULL);
+                               _ ("Post News"), GTKHX_SCALE_WINDOW_BUTTONS, NULL, NULL);
     reloadButton
         = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",
-                               _ ("Reload News"), 2, NULL, NULL);
+                               _ ("Reload News"), GTKHX_SCALE_WINDOW_BUTTONS, NULL, NULL);
     findButton = gtk_button_new_from_icon_name ("system-search-symbolic");
     gtk_widget_set_tooltip_text (findButton, _ ("Find in News (Ctrl+F)"));
 

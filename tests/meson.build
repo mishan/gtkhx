@@ -190,6 +190,18 @@ test_prefs_parser = executable('test_prefs_parser',
 test('prefs_parser', test_prefs_parser,
      suite : 'unit')
 
+# Per-area UI scale model (gtkhx_theme.c). Pure GObject + gtkhx_prefs;
+# the test provides its own gtkhx_prefs instead of linking the
+# GTK-heavy options.c.
+test_theme_scale = executable('test_theme_scale',
+  'unit/test_theme_scale.c',
+  '../src/gtkhx_theme.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('theme_scale', test_theme_scale,
+     suite : 'unit')
+
 # hxnet_ffi — smoke test for the hxnet C-callable FFI surface
 # (Phase R3.3.b). Builds a connected TCP loopback pair
 # (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-

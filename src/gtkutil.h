@@ -1,6 +1,8 @@
 #ifndef HX_GTKUTIL_H
 #define HX_GTKUTIL_H
 
+#include "gtkhx_theme.h" /* GtkhxScaleArea */
+
 extern void init_keyaccel (GtkWidget *widget);
 extern void init_keyaccel_dialog (GtkWidget *widget);
 extern void init_keyaccel_full (GtkWidget *widget, gboolean esc_closes);
@@ -153,21 +155,31 @@ extern GdkTexture *gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf);
  * user_data; if cb is NULL the caller is responsible for hooking up
  * the button. The returned button has its tooltip set; pack it into
  * an AdwHeaderBar / GtkBox / etc. as needed.
+ *
+ * `area` is the themable UI area the button belongs to: the icon is
+ * rendered at its source size times gtkhx_theme_scale(area), and the
+ * button subscribes to the theme "changed" signal so it rescales live
+ * when the user adjusts that area's scale in Settings. There is no
+ * caller-supplied multiplier — the theme owns the whole factor (the
+ * historical 2x toolbar/window-button upscale now lives in the default
+ * theme; see gtkhx_theme.{c,h}).
  */
 extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
-                                       const char *tooltip, int scale,
-                                       GCallback cb, gpointer user_data);
+                                       const char *tooltip,
+                                       GtkhxScaleArea area, GCallback cb,
+                                       gpointer user_data);
 
 /*
  * like gtkhx_pixmap_button, but takes an already-loaded
  * GdkPixbuf instead of a GResource path. Useful when the icon source
  * isn't a packaged GResource — e.g. the files browser pulling icons
- * out of icons.rsrc via load_icon(). Same scaling / GtkPicture
+ * out of icons.rsrc via load_icon(). Same theme-scaling / GtkPicture
  * treatment as the resource-based variant. The function does not
- * take ownership of pixbuf; the caller can g_object_unref after.
+ * take ownership of pixbuf; the caller can g_object_unref after
+ * (the button keeps its own ref for live rescaling).
  */
 extern GtkWidget *gtkhx_pixbuf_button (GdkPixbuf *pixbuf, const char *tooltip,
-                                       int scale, GCallback cb,
+                                       GtkhxScaleArea area, GCallback cb,
                                        gpointer user_data);
 
 #endif
