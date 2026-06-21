@@ -63,6 +63,7 @@
 pub mod cipher;
 pub mod command;
 pub mod compress;
+pub mod connect;
 pub mod connection;
 pub mod event;
 pub mod ffi;

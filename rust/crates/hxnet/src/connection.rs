@@ -208,6 +208,47 @@ impl Connection {
         Ok((ConnectionHandle { tx: cmd_tx }, evt_rx, join))
     }
 
+    /// Create the channels + handle without spawning the actor.
+    /// Used by spawn paths that need to do asynchronous setup
+    /// before the actor can start — Phase A's connect-in-Rust
+    /// is the first such consumer (TCP connect happens after
+    /// channel creation but before actor spawn so state events
+    /// can flow out the event channel during the connect).
+    ///
+    /// Buffered sends on the returned handle queue in the
+    /// channel until the actor comes online
+    /// (`DEFAULT_COMMAND_CAPACITY` slots of buffering).
+    ///
+    /// The third return value is the [`Command`] receiver and
+    /// the fourth is the [`Event`] sender — the caller is
+    /// responsible for driving them into [`Connection::run_actor`]
+    /// inside the spawned setup task.
+    pub fn make_channels() -> (
+        ConnectionHandle,
+        mpsc::Receiver<Event>,
+        mpsc::Receiver<Command>,
+        mpsc::Sender<Event>,
+    ) {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(DEFAULT_COMMAND_CAPACITY);
+        let (evt_tx, evt_rx) = mpsc::channel::<Event>(DEFAULT_EVENT_CAPACITY);
+        (ConnectionHandle { tx: cmd_tx }, evt_rx, cmd_rx, evt_tx)
+    }
+
+    /// Run the actor loop against pre-existing channels created
+    /// via [`Self::make_channels`]. Used by async-spawn paths
+    /// that need to do setup (DNS, connect, TLS handshake) on
+    /// the runtime before the actor starts processing the
+    /// transport.
+    pub async fn run_actor<S>(
+        stream: S,
+        cmd_rx: mpsc::Receiver<Command>,
+        evt_tx: mpsc::Sender<Event>,
+    ) where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        actor_loop(stream, cmd_rx, evt_tx).await
+    }
+
     /// Type-erased spawn entry — accepts a [`BoxedDuplex`] instead
     /// of a concrete `S`. Used by the FFI to hand the actor a
     /// stack composed at runtime by [`crate::transform::compose`]
