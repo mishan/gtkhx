@@ -45,6 +45,25 @@ set -eu
 
 CONF=/opt/mhxd/run/hxd.conf
 
+# Tracker registration target(s). hxd.conf ships with `trackers
+# 127.0.0.1;` (the standalone default — harmless when nothing is
+# listening on the host's 5499/udp). The docker-compose rig overrides
+# this with the tracker service names so mhxd's UDP heartbeats land on
+# the Argus + hxtrackd containers:
+#
+#   TRACKERS="argus, hxtrackd"
+#
+# Accepts the same comma-separated host list hxd.conf's `trackers`
+# directive does (bare host, host:port-not-applicable — registration
+# always targets 5499/udp; ids/passwords via id:password@host also pass
+# through verbatim). `tracker_register yes` is already set in conf, so
+# patching the host list is all that's needed.
+TRACKERS="${TRACKERS:-127.0.0.1}"
+sed -i \
+	-e "s|^\\([[:space:]]*\\)trackers .*;|\\1trackers $TRACKERS;|" \
+	"$CONF"
+echo "docker-entrypoint: trackers=\"$TRACKERS\""
+
 MODE="${BANNER_MODE:-URL}"
 URL_DEFAULT="https://placehold.co/468x60/png?text=GtkHx+Test+Banner"
 URL="${BANNER_URL:-$URL_DEFAULT}"

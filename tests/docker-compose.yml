@@ -1,0 +1,100 @@
+# GtkHx Tier 3 multi-server rig.
+#
+# Brings up the two Hotline servers (mhxd, Janus) and the two trackers
+# (Argus, hxtrackd) on one user-defined bridge network so the servers
+# can register with both trackers by service name. Once up:
+#
+#   * Servers   : mhxd @ localhost:5500, Janus @ localhost:5510 (+TLS 5610)
+#   * Trackers  : Argus @ localhost:5498 (+TLS 6498), hxtrackd @ localhost:5598
+#   * Both servers UDP-register with BOTH trackers (argus:5499 + hxtrackd:5499)
+#
+# Bring it up with the helper scripts:
+#
+#   ./build-all.sh     # build all four images
+#   ./run.sh           # rebuild + tear down + restart the whole rig
+#
+# or directly:
+#
+#   docker compose -f tests/docker-compose.yml up -d --build
+#   docker compose -f tests/docker-compose.yml down
+#
+# ── Networking note ──────────────────────────────────────────────────
+# This rig runs everything on a single bridge network rather than host
+# networking, because the two trackers both listen on 5498/5499 and
+# cannot coexist on the host's port table. The trade-off: Janus's
+# WebRTC voice path (5514/udp) needs `--network=host` to negotiate ICE
+# against 127.0.0.1 (see tests/janus/README.md). Voice manual-testing
+# therefore still wants the standalone host-net `docker run`; this
+# compose rig targets the base protocol + tracker-registration surface.
+# Everything else — chat, news, files, banner, HOPE, TLS, tracker
+# listing + registration — works over the bridge.
+#
+# Host port mappings match the per-container READMEs and the Tier 3
+# matrix (server_matrix.c / tracker_matrix.c), so existing tests keep
+# finding each target at the same host port whether it was launched
+# standalone or via this rig.
+
+name: gtkhx-rig
+
+networks:
+  hotline:
+    driver: bridge
+
+services:
+  # ── Trackers ──────────────────────────────────────────────────────
+  argus:
+    build:
+      context: ./argus
+    image: gtkhx-argus
+    container_name: gtkhx-argus
+    networks: [hotline]
+    ports:
+      - "5498:5498"        # HTRK listing (v1/v2/v3, plain TCP)
+      - "6498:6498"        # HTRK listing over TLS (stunnel sidecar)
+      - "5499:5499/udp"    # server registration heartbeats
+
+  hxtrackd:
+    build:
+      context: ./hxtrackd
+    image: gtkhx-hxtrackd
+    container_name: gtkhx-hxtrackd
+    networks: [hotline]
+    ports:
+      # Host 5598/5599 (not 5498/5499) so it doesn't collide with Argus
+      # on the host side; container-internal it's still 5498/5499.
+      - "5598:5498"        # HTRK listing (v1 only)
+      - "5599:5499/udp"    # server registration heartbeats
+
+  # ── Servers ───────────────────────────────────────────────────────
+  mhxd:
+    build:
+      context: ./mhxd
+    image: gtkhx-mhxd
+    container_name: gtkhx-mhxd
+    networks: [hotline]
+    depends_on: [argus, hxtrackd]
+    environment:
+      # Patched into hxd.conf's `trackers` directive by the entrypoint.
+      # Both trackers receive mhxd's classic HTRK UDP registration.
+      TRACKERS: "argus, hxtrackd"
+    ports:
+      - "5500:5500"        # HTLS — main client connection
+      - "5501:5501"        # HTXF — file transfer subchannel
+
+  janus:
+    build:
+      context: ./janus
+    image: gtkhx-janus
+    container_name: gtkhx-janus
+    networks: [hotline]
+    depends_on: [argus, hxtrackd]
+    environment:
+      # Flips EnableTrackerRegistration on and rewrites the Trackers:
+      # list in config.yaml (see tests/janus/docker-entrypoint.sh).
+      TRACKERS: "argus:5499,hxtrackd:5499"
+    ports:
+      - "5510:5510"        # HTLS — main client connection
+      - "5511:5511"        # HTXF — file transfer subchannel
+      - "5610:5610"        # HTLS over TLS
+      - "5611:5611"        # HTXF over TLS
+      - "5514:5514/udp"    # WebRTC voice (see networking note above)

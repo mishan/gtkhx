@@ -241,6 +241,15 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY --from=build /opt/janus /opt/janus
 RUN chown -R janus:janus /opt/janus
 
+# Entrypoint wrapper: optionally enables tracker registration from the
+# TRACKERS env var (set by docker-compose to the argus/hxtrackd service
+# names), then execs the Janus binary. With TRACKERS unset it's a
+# no-op, so the standalone `docker run --network=host gtkhx-janus` path
+# behaves exactly as before. config.yaml is owned by the janus user, so
+# the in-place sed runs fine as USER janus below.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+
 # Hotline ports (matching config.yaml — see WHY --network=host
 # in the file preamble for why these are pinned to the matrix-
 # published host ports rather than the upstream Janus defaults):
@@ -267,6 +276,7 @@ WORKDIR /opt/janus
 
 # Janus takes no required args. It looks for `Server/` next to the
 # executable, which our COPY placed at /opt/janus/Server. Logs go to
-# stdout/stderr so `docker logs` works without -d.
-ENTRYPOINT ["/opt/janus/janus"]
+# stdout/stderr so `docker logs` works without -d. The wrapper applies
+# the optional TRACKERS env override and then execs the binary.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD []
