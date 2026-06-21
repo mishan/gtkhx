@@ -56,11 +56,20 @@ use crate::{ConnectionState, Event};
 /// header's 4-byte BE field.
 pub const HTLC_HDR_LOGIN: u32 = 0x0000_006b;
 
-/// `HTLS_DATA_VERSION` chunk tag — 2-byte BE client version.
-/// Mirrors `HTLS_DATA_VERSION` (0x00a0) in `src/hotline.h`.
-/// Reused on the LOGIN send for the client's version
-/// advertisement.
+/// `HTLC_DATA_CLIENTVERSION` chunk tag — 2-byte BE client
+/// version. Mirrors `HTLC_DATA_CLIENTVERSION` (0x00a0) in
+/// `src/hotline.h`. Servers (mhxd) read this to set the
+/// `can_ping` access bit (>= 150 → PING keepalive accepted).
 pub const TAG_VERSION: u16 = 0x00a0;
+
+/// `HTLC_DATA_CAPABILITIES` chunk tag — 2-byte BE capability
+/// bitmask. Mirrors `HTLC_DATA_CAPABILITIES` (0x01f0) in
+/// `src/hotline.h`. Capability-aware servers (Janus) echo the
+/// agreed bits back in the LOGIN reply; cap-unaware servers
+/// (mhxd) ignore the chunk per spec. Omitting it entirely (as an
+/// earlier draft of this module did) means extensions like
+/// chat-history never negotiate.
+pub const TAG_CAPABILITIES: u16 = 0x01f0;
 
 /// XOR-0xFF obfuscate a credential buffer onto an output buffer.
 /// `out` must be at least `src.len()` bytes; the caller pre-
@@ -86,6 +95,12 @@ pub struct LoginRequest<'a> {
     pub icon: u16,
     /// Client version (BE u16 on the wire). 0 to omit.
     pub version: u16,
+    /// Capability bitmask (BE u16 on the wire, `HTLC_CAP_*`). 0
+    /// omits the chunk — but production should advertise the same
+    /// bits the legacy LOGIN does so extensions (chat-history,
+    /// inline-media, voice) negotiate. The C side owns the policy
+    /// and passes it through the FFI.
+    pub caps: u16,
     /// Transaction id for the frame header. Caller picks; the
     /// C side typically uses a counter starting at 1.
     pub trans: u32,
@@ -121,7 +136,9 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
     let icon_be = req.icon.to_be_bytes();
     let version_be = req.version.to_be_bytes();
 
-    let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(5);
+    let caps_be = req.caps.to_be_bytes();
+
+    let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(6);
     chunks.push(PackChunk { tag: tag::LOGIN, data: &login_x });
     chunks.push(PackChunk { tag: tag::PASSWORD, data: &pass_x });
     if !req.name.is_empty() {
@@ -132,6 +149,9 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
     }
     if req.version != 0 {
         chunks.push(PackChunk { tag: TAG_VERSION, data: &version_be });
+    }
+    if req.caps != 0 {
+        chunks.push(PackChunk { tag: TAG_CAPABILITIES, data: &caps_be });
     }
 
     let needed = pack_message_size(&chunks);
@@ -197,6 +217,7 @@ mod tests {
             name: b"",
             icon: 0,
             version: 0,
+            caps: 0,
             trans: 1,
         };
         let frame = build_login_frame(&req).expect("build");
@@ -240,6 +261,7 @@ mod tests {
             name: b"",
             icon: 0,
             version: 0,
+            caps: 0,
             trans: 2,
         };
         let frame = build_login_frame(&req).expect("build");
@@ -271,6 +293,7 @@ mod tests {
             name: b"Misha",
             icon: 0x7ffd,
             version: 0x00b9,
+            caps: 0,
             trans: 3,
         };
         let frame = build_login_frame(&req).expect("build");
@@ -291,6 +314,56 @@ mod tests {
         assert_eq!(pos, frame.len());
     }
 
+    /// Capabilities regression guard. The orchestrator LOGIN must
+    /// carry an HTLC_DATA_CAPABILITIES chunk (tag 0x01f0) whenever
+    /// caps != 0, with the bitmask big-endian — otherwise
+    /// extensions (chat-history / inline-media / voice) never
+    /// negotiate, which is exactly the bug that shipped when this
+    /// chunk was missing. Mirrors the legacy login_packet.c
+    /// LEGACY-mode advertisement (0x001F).
+    #[test]
+    fn build_login_frame_advertises_capabilities() {
+        const CAPS: u16 = 0x001F; // large-files|text-encoding|voice|inline|chat-history
+        let req = LoginRequest {
+            login: b"guest",
+            password: b"",
+            name: b"",
+            icon: 0,
+            version: 185,
+            caps: CAPS,
+            trans: 1,
+        };
+        let frame = build_login_frame(&req).expect("build");
+
+        // Walk the chunks and find the CAPABILITIES one.
+        let hc = u16::from_be_bytes([frame[20], frame[21]]);
+        let mut pos = 22usize;
+        let mut found = None;
+        for _ in 0..hc {
+            let tag = u16::from_be_bytes([frame[pos], frame[pos + 1]]);
+            let len = u16::from_be_bytes([frame[pos + 2], frame[pos + 3]]) as usize;
+            let data = &frame[pos + 4..pos + 4 + len];
+            if tag == TAG_CAPABILITIES {
+                found = Some(data.to_vec());
+            }
+            pos += 4 + len;
+        }
+        let caps_data = found.expect("LOGIN must include an HTLC_DATA_CAPABILITIES chunk");
+        assert_eq!(caps_data, CAPS.to_be_bytes(), "caps bitmask must round-trip big-endian");
+
+        // caps == 0 omits the chunk (matches legacy send_caps gate).
+        let req0 = LoginRequest { caps: 0, ..req };
+        let frame0 = build_login_frame(&req0).expect("build");
+        let hc0 = u16::from_be_bytes([frame0[20], frame0[21]]);
+        let mut pos0 = 22usize;
+        for _ in 0..hc0 {
+            let tag = u16::from_be_bytes([frame0[pos0], frame0[pos0 + 1]]);
+            let len = u16::from_be_bytes([frame0[pos0 + 2], frame0[pos0 + 3]]) as usize;
+            assert_ne!(tag, TAG_CAPABILITIES, "caps=0 should omit the chunk");
+            pos0 += 4 + len;
+        }
+    }
+
     /// send_login emits the LoginSending state event and
     /// writes the right bytes.
     #[tokio::test]
@@ -304,6 +377,7 @@ mod tests {
             name: b"",
             icon: 0,
             version: 0,
+            caps: 0,
             trans: 7,
         };
         let expected = build_login_frame(&req).expect("build");

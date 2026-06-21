@@ -18,7 +18,8 @@
 //! on top by calling the relevant `hotline_proto::parse` functions
 //! against `frame.body`.
 
-use hotline_proto::parse::HeaderDecoded;
+use hotline_proto::parse::{decode_header_full, HeaderDecoded};
+use hotline_proto::HL_HDR_LEN;
 
 /// Maximum body byte count the actor will accept on a single
 /// frame. Matches `MAX_HOTLINE_PACKET_LEN` from `src/compat.h`
@@ -52,5 +53,34 @@ impl Frame {
     /// tests; the actor builds frames internally.
     pub fn new(header: HeaderDecoded, body: Vec<u8>) -> Self {
         Self { header, body }
+    }
+
+    /// Reconstruct a frame from its full on-wire bytes: the
+    /// 22-byte `HL_HDR_LEN` header (which already includes the
+    /// 2-byte chunk-count field) followed by `body_len` bytes of
+    /// chunk data. Returns `None` if the header doesn't decode or
+    /// the buffer is shorter than `HL_HDR_LEN + body_len`.
+    ///
+    /// This is the Phase G login-reply replay path
+    /// (`docs/phase-g-migration.md`, "Option B"). The orchestrator
+    /// reads + parses the LOGIN reply once to decide
+    /// success/failure, then re-emits the verbatim wire bytes as an
+    /// `Event::Frame` so the C-side `rcv.c` dispatch (`rcv_task_login`)
+    /// runs unchanged and produces the post-login side effects. The
+    /// slicing here is deliberately identical to the actor's
+    /// `read_one_frame` (`HL_HDR_LEN` header + `body_len` body), so a
+    /// replayed frame and an actor-read frame are byte-for-byte the
+    /// same shape by the time they reach the FFI.
+    pub fn from_raw(raw: &[u8]) -> Option<Frame> {
+        let header = decode_header_full(raw, MAX_BODY_LEN + 2)?;
+        let body_len = header.body_len as usize;
+        let end = HL_HDR_LEN.checked_add(body_len)?;
+        if raw.len() < end {
+            return None;
+        }
+        Some(Frame {
+            header,
+            body: raw[HL_HDR_LEN..end].to_vec(),
+        })
     }
 }

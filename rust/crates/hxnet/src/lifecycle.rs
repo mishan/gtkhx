@@ -59,7 +59,7 @@ use tokio::sync::mpsc;
 use crate::{
     connect::resolve_and_connect, login::send_login, login::LoginRequest,
     login_reply::recv_login_reply, magic::run_magic_exchange, Connection,
-    ConnectionState, Event, ShutdownReason,
+    ConnectionState, Event, Frame, ShutdownReason,
 };
 
 /// Parameters for the plaintext lifecycle. Strings are passed by
@@ -74,6 +74,10 @@ pub struct PlaintextOpenRequest {
     pub name: Vec<u8>,
     pub icon: u16,
     pub version: u16,
+    /// Capability bitmask (`HTLC_CAP_*`) to advertise in the LOGIN.
+    /// 0 omits the chunk; production passes the same bits the legacy
+    /// LOGIN does so extensions negotiate.
+    pub caps: u16,
     pub trans: u32,
 }
 
@@ -137,6 +141,7 @@ pub async fn run_plaintext_lifecycle(
         name: &req.name,
         icon: req.icon,
         version: req.version,
+        caps: req.caps,
         trans: req.trans,
     };
     if let Err(e) = send_login(&mut stream, &login_req, &evt_tx).await {
@@ -173,6 +178,38 @@ pub async fn run_plaintext_lifecycle(
             ))))
             .await;
         return;
+    }
+
+    // Phase G (Option B): replay the LOGIN reply to the consumer as
+    // a synthetic frame, BEFORE HandshakeDone. The orchestrator
+    // already parsed the reply above to decide success/failure; here
+    // we hand the verbatim wire bytes back so the C-side rcv
+    // dispatch (rcv_task_login) re-parses them in its own path and
+    // produces the post-login side effects (version / banner /
+    // servername / USER_CHANGE / SELFINFO timer). Emitting before
+    // HandshakeDone matches the C-side install ordering: the bridge
+    // is installed synchronously in hx_connect_via_orchestrator
+    // before this task can deliver any event, so the replayed frame
+    // dispatches rather than being dropped by the install gate. See
+    // docs/phase-g-migration.md "Option B".
+    match Frame::from_raw(&reply.raw_frame) {
+        Some(frame) => {
+            if evt_tx.send(Event::Frame(frame)).await.is_err() {
+                return;
+            }
+        }
+        None => {
+            // raw_frame was just received and decoded above, so this
+            // is effectively unreachable. Fail closed rather than
+            // silently dropping the post-login side effects.
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(
+                    "login reply raw_frame failed to decode for replay"
+                        .to_string(),
+                )))
+                .await;
+            return;
+        }
     }
 
     // HandshakeDone — the actor takes over from here.
@@ -249,6 +286,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 4012,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -258,6 +296,12 @@ mod tests {
         let mut seen: Vec<ConnectionState> = Vec::new();
         let mut saw_handshake_done = false;
         let mut saw_shutdown = false;
+        // Phase G: the LOGIN reply is replayed as Event::Frame before
+        // HandshakeDone. Capture it + its ordering relative to the
+        // HandshakeDone state event.
+        let mut login_frame_type: Option<u32> = None;
+        let mut login_frame_flag: Option<u32> = None;
+        let mut saw_login_frame_before_handshake = false;
         while let Some(evt) =
             tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
                 .await
@@ -271,11 +315,17 @@ mod tests {
                     }
                     seen.push(s);
                 }
+                Event::Frame(f) => {
+                    if !saw_handshake_done {
+                        saw_login_frame_before_handshake = true;
+                    }
+                    login_frame_type = Some(f.header.type_);
+                    login_frame_flag = Some(f.header.flag);
+                }
                 Event::Shutdown(_) => {
                     saw_shutdown = true;
                     break;
                 }
-                _ => {}
             }
         }
         lifecycle.await.expect("lifecycle task");
@@ -300,6 +350,25 @@ mod tests {
         assert!(
             saw_shutdown,
             "expected actor Shutdown after server drop"
+        );
+
+        // Phase G replay assertions: the LOGIN reply came back as an
+        // Event::Frame, it carried the TASK opcode + success flag,
+        // and it arrived before HandshakeDone (so the C side's
+        // rcv_task_login runs before the connection is declared up).
+        assert!(
+            saw_login_frame_before_handshake,
+            "expected LOGIN reply replayed as Event::Frame before HandshakeDone"
+        );
+        assert_eq!(
+            login_frame_type,
+            Some(0x0001_0000),
+            "replayed frame should carry HTLS_HDR_TASK"
+        );
+        assert_eq!(
+            login_frame_flag,
+            Some(0),
+            "replayed frame should carry the success flag"
         );
     }
 
@@ -346,6 +415,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 0,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -397,6 +467,7 @@ mod tests {
             name: b"".to_vec(),
             icon: 0,
             version: 0,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -472,6 +543,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 0,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
