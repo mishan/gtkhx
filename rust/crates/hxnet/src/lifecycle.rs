@@ -141,6 +141,7 @@ pub async fn run_plaintext_lifecycle(
 /// caveat (accept-any in this first cut; TOFU bridge pending).
 pub async fn run_plaintext_tls_lifecycle(
     req: PlaintextOpenRequest,
+    verify: Option<Box<dyn Fn(&str) -> bool + Send>>,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
@@ -182,6 +183,39 @@ pub async fn run_plaintext_tls_lifecycle(
             return;
         }
     };
+
+    // TOFU cert check (post-handshake). The verifier inside wrap_tls
+    // accepts any cert so the handshake completes; the real trust
+    // decision is the C-side callback here, which looks the
+    // fingerprint up in the known-hosts store and (on UNKNOWN /
+    // MISMATCH) prompts the user. Doing it post-handshake — rather
+    // than inside the rustls verifier — keeps the (potentially
+    // blocking, main-thread-marshalled) decision off the handshake's
+    // critical path and means a reject just closes the stream before
+    // any LOGIN bytes flow. `None` (e.g. the live probe) skips the
+    // check and trusts the accept-any handshake.
+    if let Some(verify) = verify.as_ref() {
+        match crate::tls::peer_cert_fingerprint(&tls) {
+            Some(fp) => {
+                if !verify(&fp) {
+                    let _ = evt_tx
+                        .send(Event::Shutdown(ShutdownReason::StreamError(
+                            "tls certificate rejected by trust check".to_string(),
+                        )))
+                        .await;
+                    return;
+                }
+            }
+            None => {
+                let _ = evt_tx
+                    .send(Event::Shutdown(ShutdownReason::StreamError(
+                        "tls peer presented no certificate".to_string(),
+                    )))
+                    .await;
+                return;
+            }
+        }
+    }
 
     run_plaintext_over(tls, &req, cmd_rx, evt_tx).await;
 }
@@ -891,7 +925,13 @@ mod tests {
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let lc = tokio::spawn(run_plaintext_tls_lifecycle(req, cmd_rx, evt_tx));
+        let verify: Option<Box<dyn Fn(&str) -> bool + Send>> =
+            Some(Box::new(|fp: &str| {
+                eprintln!("CERT fingerprint: {fp}");
+                true
+            }));
+        let lc =
+            tokio::spawn(run_plaintext_tls_lifecycle(req, verify, cmd_rx, evt_tx));
         let mut saw_hd = false;
         let mut saw_frame = false;
         while let Some(evt) =

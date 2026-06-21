@@ -240,8 +240,9 @@ extern gboolean hx_bridge_install_orchestrated_hope (
  * over the encrypted stream. The replayed reply is the LOGIN reply
  * (trans = `trans`), same as the non-TLS plaintext path.
  *
- * SECURITY: the Rust TLS layer currently accepts any server cert
- * (TOFU bridge pending) — only reachable via GTKHX_NEW_CONNECT.
+ * Cert trust: the handshake accepts any cert, then the bridge's
+ * verify_cert callback runs the known-hosts TOFU decision
+ * (hx_tls_orchestrator_verify_cert) post-handshake, before LOGIN.
  */
 extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
     struct htlc_conn *htlc, const char *host, guint16 port,

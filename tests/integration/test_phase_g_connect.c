@@ -69,6 +69,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <glib/gstdio.h>      /* g_unlink, g_rmdir */
 #include <gio/gio.h>
 
 #include "compat.h"
@@ -441,6 +442,17 @@ test_orchestrator_tls_login (void)
         return;
     }
 
+    /* TOFU: isolate the known-hosts store to a tmp dir and auto-accept
+     * the prompt (the dialog is stubbed in this headless binary, so
+     * the prompt path would assert). With a fresh store the cert is
+     * UNKNOWN → auto-accept pins it; we then assert the pin landed,
+     * which proves the orchestrator's verify_cert bridge ran the real
+     * tls_trust.c TOFU path end-to-end. */
+    g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-tofu-XXXXXX", NULL);
+    g_assert_nonnull (tmpdir);
+    g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
+    g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
+    g_setenv ("GTKHX_TLS_AUTO_ACCEPT", "1", TRUE);
     g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
     g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
@@ -466,12 +478,49 @@ test_orchestrator_tls_login (void)
     g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
+    /* Flush the deferred pin (schedule_trust_pin → g_idle_add) and
+     * assert the cert was pinned to the known-hosts store — the TOFU
+     * bridge proof. */
+    while (g_main_context_iteration (NULL, FALSE)) {
+        /* drain pending idles */
+    }
+    g_autofree char *kh_contents = NULL;
+    g_file_get_contents (known_hosts, &kh_contents, NULL, NULL);
+    g_assert_nonnull (kh_contents);
+    g_assert_nonnull (g_strstr_len (kh_contents, -1, "sha256:"));
+
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
     g_assert_false (hx_bridge_is_installed ());
+
+    /* Second connect with AUTO_ACCEPT OFF: the cert is now pinned, so
+     * tls_trust_decide must resolve TRUSTED and accept silently — no
+     * prompt. (The dialog is stubbed with g_assert_not_reached in this
+     * headless binary, so if the TRUSTED lookup failed and the prompt
+     * fired, the test would crash.) This is the end-to-end proof that
+     * the orchestrator honours a pinned cert. */
+    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    test_observer *obs2 = observer_new (gtkhx,
+                                        GTKHX_CONNECTION_HANDSHAKE_DONE);
+    hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
+                /*secure=*/0, /*tls=*/1);
+    drive_until (obs2, 10000);
+    g_assert_true (obs2->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+    observer_free (obs2, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+
     g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_unsetenv ("GTKHX_KNOWN_HOSTS");
+    g_unlink (known_hosts);
+    g_rmdir (tmpdir);
     g_ptr_array_unref (cand);
 }
 

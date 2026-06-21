@@ -333,6 +333,12 @@ typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
  * discriminant. */
 typedef void (*hxnet_state_cb_t) (hxnet_connection_opaque *conn, guint32 state,
                                   void *user_data);
+/* Phase G TLS TOFU: invoked post-handshake with the peer leaf cert's
+ * "sha256:<hex>" fingerprint (NOT NUL-terminated — use fp_len).
+ * Returns non-zero to accept, zero to reject. Mirror of
+ * HxnetVerifyCertCallback in rust/crates/hxnet/src/ffi.rs. */
+typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
+                                       void *user_data);
 
 /* ConnectionState discriminants the Phase G state callback maps
  * onto GtkhxConnectionState. Mirror of HXNET_STATE_* in
@@ -454,8 +460,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_hope (
 /* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
  * Janus separate-port model). Mirror of
  * hxnet_connection_open_plaintext_tls in rust/crates/hxnet/src/ffi.rs.
- * SECURITY: the Rust side currently accepts any server cert (TOFU
- * bridge pending). */
+ * Cert trust is the verify_cert callback (TOFU, post-handshake). */
 extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *host, gsize host_len, guint16 port,
     const guint8 *login, gsize login_len,
@@ -463,7 +468,14 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
-    hxnet_state_cb_t on_state, void *user_data);
+    hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
+    void *user_data);
+
+/* Production TOFU verify, defined in network.c. Hand-declared (like
+ * hx_htlc_close above) rather than via network.h to avoid pulling the
+ * connect-ctx / GSocketClient surface into this file. */
+extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                                 const char *fingerprint);
 
 /*
  * Single-connection state. gtkhx is single-conn today (the
@@ -668,6 +680,20 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     return TRUE;
 }
 
+/* TLS TOFU trampoline: hxnet calls this on the lifecycle task with
+ * the peer cert fingerprint; route to the production verify, which
+ * keys on htlc->serverhost/serverport. */
+static int
+bridge_on_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
+{
+    struct htlc_conn *htlc = user_data;
+    if (!htlc || !fp) {
+        return 0; /* reject: no context / no fingerprint */
+    }
+    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    return hx_tls_orchestrator_verify_cert (htlc, fp_str) ? 1 : 0;
+}
+
 gboolean
 hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
                                               const char *host, guint16 port,
@@ -696,7 +722,8 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
         (const guint8 *) pass, strlen (pass),
         (const guint8 *) name, strlen (name),
         icon, version, caps, trans,
-        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
+        bridge_on_verify_cert_cb, htlc);
     if (!h) {
         return FALSE;
     }

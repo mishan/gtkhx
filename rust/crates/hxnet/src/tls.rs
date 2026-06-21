@@ -10,24 +10,32 @@
 //! lifecycle helpers are already generic over `AsyncRead +
 //! AsyncWrite`, and a TLS stream satisfies that.
 //!
-//! # Certificate trust — first cut
+//! # Certificate trust — two phases
 //!
-//! **This module currently accepts ANY server certificate.** That
-//! matches the *initial* state the legacy GIOStream TLS path shipped
-//! in (`docs/tls-scoping.md` Phase 1's accept-everything stub), but
-//! it is **not** the trust-on-first-use (TOFU) the legacy path now
-//! has via `src/tls_trust.c` + the Adwaita confirmation dialog. The
-//! orchestrator TLS path is gated behind `GTKHX_NEW_CONNECT` and is
-//! explicitly NOT production-safe until the TOFU bridge lands:
+//! Trust is enforced in two steps:
 //!
-//! - compute the SHA-256 fingerprint of the presented cert's DER,
-//! - look it up in the same `known_hosts` store `tls_trust.c` uses,
-//! - on UNKNOWN / MISMATCH, prompt the user (which means a callback
-//!   from this tokio thread back into the GTK main thread).
+//! 1. **Handshake (this module):** the rustls verifier
+//!    ([`AcceptAnyServerCert`]) accepts ANY certificate so the TLS
+//!    handshake always completes. It performs no identity or chain
+//!    check — by design.
+//! 2. **Post-handshake (the lifecycle):**
+//!    [`peer_cert_fingerprint`] extracts the leaf cert's SHA-256
+//!    fingerprint and `run_plaintext_tls_lifecycle` hands it to the
+//!    C-side `verify_cert` callback BEFORE any LOGIN. That callback
+//!    (`hx_tls_orchestrator_verify_cert` →
+//!    `hx_tls_trust_lookup`) runs the same trust-on-first-use (TOFU)
+//!    decision the legacy GIOStream path uses: look the fingerprint
+//!    up in `$CONFIG/known_hosts`, accept TRUSTED silently, and on
+//!    UNKNOWN / MISMATCH prompt the user (marshalled to the GLib main
+//!    thread) and pin on accept. A reject closes the stream before
+//!    any credentials are sent.
 //!
-//! That bridge is the TLS follow-up (tracked in the Phase G docs).
-//! Until it lands, do not flip `GTKHX_NEW_CONNECT` on by default for
-//! TLS connections.
+//! So the cert is genuinely untrusted-by-default: a permissive
+//! handshake followed by a real TOFU gate, rather than a handshake
+//! that silently trusts everything. The split keeps the (possibly
+//! blocking, main-thread) trust decision off the handshake's hot
+//! path. If `wrap_tls` is used without a post-handshake verify (e.g.
+//! the live test probe), the connection is accept-any.
 
 use std::io;
 use std::sync::Arc;
@@ -44,14 +52,13 @@ use tokio_rustls::TlsConnector;
 
 /// Certificate verifier that accepts any server certificate.
 ///
-/// SECURITY: this performs no identity or chain validation — see the
-/// module docs. It exists so the orchestrator TLS path can reach
-/// feature parity with the legacy path's *transport* (TLS-from-byte-
-/// zero) ahead of the TOFU trust bridge. The handshake-signature
-/// checks still run against the presented cert via the crypto
-/// provider, so a passive observer can't trivially inject — but an
-/// active MITM with any cert is accepted. Gated behind
-/// `GTKHX_NEW_CONNECT`.
+/// This performs no identity or chain validation at handshake time —
+/// that is deliberate. The real trust gate is the post-handshake
+/// `verify_cert` TOFU callback (see the module docs); a permissive
+/// handshake just lets us get the cert in hand to fingerprint it. The
+/// handshake-signature checks still run against the presented cert via
+/// the crypto provider. Used only on the `GTKHX_NEW_CONNECT`
+/// orchestrator TLS path.
 #[derive(Debug)]
 struct AcceptAnyServerCert {
     provider: Arc<CryptoProvider>,
@@ -118,6 +125,33 @@ fn accept_any_client_config() -> ClientConfig {
         .with_no_client_auth()
 }
 
+/// SHA-256 fingerprint of the peer's leaf certificate, formatted to
+/// match `src/tls_trust.c::hx_tls_trust_fingerprint` byte-for-byte:
+/// `"sha256:"` + lowercase hex of `SHA-256(leaf_cert_DER)`. Returns
+/// `None` if the peer presented no certificate (it always should
+/// after a completed handshake). The returned string is what the
+/// C-side TOFU check (`hx_tls_orchestrator_verify_cert` →
+/// `hx_tls_trust_lookup`) keys on, so the format must stay identical
+/// to the legacy GTlsCertificate path's fingerprint or pins won't
+/// interoperate.
+pub fn peer_cert_fingerprint(stream: &TlsStream<TcpStream>) -> Option<String> {
+    let (_io, conn) = stream.get_ref();
+    let leaf = conn.peer_certificates()?.first()?;
+    Some(fingerprint_sha256(leaf.as_ref()))
+}
+
+fn fingerprint_sha256(der: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let digest = Sha256::digest(der);
+    let mut out = String::with_capacity(7 + 64);
+    out.push_str("sha256:");
+    for b in digest {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 /// Wrap a connected TCP stream in a client TLS stream, performing
 /// the handshake against `host` (used as the SNI server name).
 ///
@@ -154,6 +188,17 @@ mod tests {
         assert!(
             !v.supported_verify_schemes().is_empty(),
             "verifier must advertise signature schemes for the ClientHello"
+        );
+    }
+
+    #[test]
+    fn fingerprint_matches_tls_trust_format() {
+        // SHA-256 of the empty input, lowercase hex, "sha256:"
+        // prefix — must match src/tls_trust.c's g_checksum output so
+        // pins interoperate between the legacy and orchestrator paths.
+        assert_eq!(
+            fingerprint_sha256(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
 

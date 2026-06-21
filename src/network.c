@@ -1739,6 +1739,87 @@ trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
     return m.accepted;
 }
 
+/* Shared TOFU decision over a (host, port, fingerprint) tuple: look
+ * the fingerprint up in the known-hosts store and accept silently
+ * (TRUSTED, or the same cert already pinned for this host on another
+ * port), auto-accept (GTKHX_TLS_AUTO_ACCEPT, for headless tests),
+ * or prompt the user (UNKNOWN / MISMATCH), pinning on accept.
+ * Returns TRUE to accept the cert, FALSE to reject.
+ *
+ * Used by BOTH the legacy GTlsConnection accept-certificate handler
+ * (tls_accept_certificate, which computes the fingerprint from a
+ * GTlsCertificate) and the orchestrator's post-handshake verify
+ * (hx_tls_orchestrator_verify_cert, fingerprint computed in Rust).
+ * Safe off the main thread — the prompt marshals via
+ * trust_dialog_run_thread_safe. */
+static gboolean
+tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
+{
+    hx_tls_trust_status status =
+        hx_tls_trust_lookup (host, port, fingerprint);
+    debug_log ("tls", "trust-decide: %s:%u fp=%s status=%d", host,
+               (unsigned) port, fingerprint, (int) status);
+
+    if (status == HX_TLS_TRUST_TRUSTED) {
+        return TRUE;
+    }
+
+    /* Same cert pinned for this host on another port (e.g. control
+     * channel pinned at :5600, HTXF subchannel now at :5601) — accept
+     * + pin the new port silently. Only on a strict-UNKNOWN; never
+     * overrides a MISMATCH. */
+    if (status == HX_TLS_TRUST_UNKNOWN
+        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Headless / scripted escape hatch. Tier 3 sets this; production
+     * never does. MISMATCH is logged loudly so a silent override
+     * can't hide a real fingerprint change. */
+    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
+    if (auto_accept && *auto_accept) {
+        if (status == HX_TLS_TRUST_MISMATCH) {
+            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS MISMATCH for "
+                       "%s:%u (fp=%s) — the pinned fingerprint differs from "
+                       "this one. Set this env var only for trusted test "
+                       "harnesses; production should never see this line.",
+                       host, (unsigned) port, fingerprint);
+        }
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Real user-facing TOFU prompt, marshalled to the main thread. */
+    GtkWindow *parent = NULL;
+    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
+        parent = GTK_WINDOW (toolbar_window);
+    }
+    gboolean accepted = trust_dialog_run_thread_safe (parent, host, port,
+                                                      fingerprint, status);
+    if (accepted) {
+        schedule_trust_pin (host, port, fingerprint);
+    }
+    return accepted;
+}
+
+/* Orchestrator (hxnet) TOFU verify. The Rust TLS lifecycle computes
+ * the peer leaf cert's SHA-256 fingerprint — matching
+ * hx_tls_trust_fingerprint's "sha256:<hex>" format — and calls this
+ * via the verify_cert bridge callback after the handshake, before any
+ * LOGIN. host/port come from htlc (stamped in
+ * hx_connect_via_orchestrator). Returns TRUE to accept, FALSE to
+ * reject (the Rust lifecycle then closes the stream). */
+gboolean
+hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                 const char *fingerprint)
+{
+    if (!htlc || !fingerprint) {
+        return FALSE;
+    }
+    return tls_trust_decide (htlc->serverhost, htlc->serverport, fingerprint);
+}
+
 /* Phase 3 TLS: TOFU accept-certificate handler. Pulls (host,
  * port) from the tls_endpoint (passed as user_data via the
  * GSocketClient event signal),
@@ -1780,87 +1861,11 @@ tls_accept_certificate (GTlsConnection *conn G_GNUC_UNUSED,
         return FALSE;
     }
 
-    hx_tls_trust_status status =
-        hx_tls_trust_lookup (host, port, fingerprint);
-    debug_log ("tls",
-               "accept-certificate: %s:%u fp=%s status=%d errors=0x%x",
-               host, (unsigned) port, fingerprint, (int) status,
-               (unsigned) errors);
-
-    if (status == HX_TLS_TRUST_TRUSTED) {
-        return TRUE;
-    }
-
-    /* If the user already pinned THIS cert for THIS host on
-     * some OTHER port, silently accept and pin the new port
-     * too. The canonical case: control channel was just pinned
-     * at host:5600, now the HTXF subchannel connects to
-     * host:5601 with the bit-identical cert — without this
-     * cross-port check the user would see the trust prompt
-     * twice for what they perceive as a single connection.
-     *
-     * Only consulted on a strict-UNKNOWN result. A
-     * strict-MISMATCH on this (host, port) is a security
-     * signal — we never let an any-port match override it. */
-    if (status == HX_TLS_TRUST_UNKNOWN
-        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
-        debug_log ("tls",
-                   "accept-certificate: %s:%u auto-accepted "
-                   "(same cert pinned for host on another port)",
-                   host, (unsigned) port);
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Auto-accept escape hatch for headless tests + scripted
-     * first-run pinning. Tier 3 sets this; production never
-     * does. The pin is queued via g_idle_add (schedule_trust_pin)
-     * rather than called inline because hx_tls_trust_pin's body
-     * uses to call g_mkdir_with_parents which wedges the TLS
-     * handshake when invoked from inside this accept-certificate
-     * signal handler. The pin function no longer calls mkdir, but
-     * keeping the work on the main thread is the conservative
-     * default — file I/O latency here would extend the handshake
-     * window even if it doesn't deadlock, and the trust DECISION
-     * (which is what the signal contract needs) doesn't depend
-     * on the pin write completing.
-     *
-     * MISMATCH inside the auto-accept branch is logged loudly
-     * via g_warning: a test or scripted run that silently
-     * overrides a real fingerprint change without anyone
-     * noticing is exactly the failure mode the warning is
-     * meant to surface. UNKNOWN doesn't need the warning —
-     * that's the documented first-run / fresh-server case. */
-    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
-    if (auto_accept && *auto_accept) {
-        if (status == HX_TLS_TRUST_MISMATCH) {
-            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS "
-                       "MISMATCH for %s:%u (fp=%s) — the pinned "
-                       "fingerprint differs from this one. Set "
-                       "this env var only for trusted test "
-                       "harnesses; production should never see "
-                       "this line.",
-                       host, (unsigned) port, fingerprint);
-        }
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Real user-facing prompt. Parent transient-for the toolbar
-     * window if it exists; otherwise float (still works, just
-     * less polished). trust_dialog_run_thread_safe handles
-     * marshalling to the main thread when this signal fires on
-     * an HTXF worker — see the docstring above. */
-    GtkWindow *parent = NULL;
-    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
-        parent = GTK_WINDOW (toolbar_window);
-    }
-    gboolean accepted = trust_dialog_run_thread_safe (
-        parent, host, port, fingerprint, status);
-    if (accepted) {
-        schedule_trust_pin (host, port, fingerprint);
-    }
-    return accepted;
+    debug_log ("tls", "accept-certificate: %s:%u errors=0x%x", host,
+               (unsigned) port, (unsigned) errors);
+    /* The decision (lookup → any-port → auto-accept → prompt → pin)
+     * is shared with the orchestrator path; see tls_trust_decide. */
+    return tls_trust_decide (host, port, fingerprint);
 }
 
 /* The GSocketClient event signal fires through every phase of the
@@ -2065,9 +2070,10 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
         gboolean want_tls = tls || (tls_env && *tls_env);
         if (new_env && *new_env) {
             if (want_tls && !secure) {
-                /* Plaintext LOGIN over TLS-from-byte-zero. NOTE: the
-                 * orchestrator TLS layer currently accepts any server
-                 * cert (TOFU bridge pending) — see src/tls (Rust). */
+                /* Plaintext LOGIN over TLS-from-byte-zero. Cert trust
+                 * is the same TOFU check the legacy path uses, run
+                 * post-handshake via the bridge's verify_cert callback
+                 * (hx_tls_orchestrator_verify_cert). */
                 hx_connect_via_orchestrator (htlc, serverstr, port, login,
                                              pass, /*secure=*/FALSE,
                                              /*tls=*/TRUE);

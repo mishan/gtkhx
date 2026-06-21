@@ -1513,6 +1513,30 @@ pub type HxnetStateCallback = Option<
     unsafe extern "C" fn(conn: *mut HxnetConnection, state: c_uint, user_data: *mut c_void),
 >;
 
+/// TLS certificate trust callback (TOFU bridge). Invoked once, on
+/// the tokio lifecycle task, right after the TLS handshake completes
+/// and before any LOGIN is sent. Gets the peer leaf cert's SHA-256
+/// fingerprint as a `"sha256:<hex>"` byte string (NOT NUL-terminated
+/// — use `fp_len`). Returns non-zero to accept the connection, zero
+/// to reject (the lifecycle then closes the stream before LOGIN).
+///
+/// The C side keys this to its known-hosts TOFU store
+/// (`hx_tls_orchestrator_verify_cert` → `hx_tls_trust_lookup`) and
+/// may prompt the user (marshalled to the GLib main thread). It runs
+/// on the tokio thread, so it may block on that prompt — fine during
+/// a single connection's handshake.
+pub type HxnetVerifyCertCallback =
+    Option<unsafe extern "C" fn(fp: *const u8, fp_len: usize, user_data: *mut c_void) -> c_int>;
+
+/// `Send` wrapper for the opaque C `user_data` pointer so the TLS
+/// verify closure (which captures it) can move into the spawned
+/// lifecycle task. Raw pointers aren't `Send`; the FFI contract
+/// already requires `user_data` to outlive the connection and be
+/// used single-threaded, and the verify closure only ever runs on
+/// the one lifecycle task.
+struct SendUserData(*mut c_void);
+unsafe impl Send for SendUserData {}
+
 /// Connection-state mirror constants for the C side. The
 /// hand-rolled mirror matches the
 /// `#[repr(u32)]` discriminants on
@@ -1824,12 +1848,15 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 /// stream). The TLS sibling of [`hxnet_connection_open_plaintext`];
 /// runs [`crate::lifecycle::run_plaintext_tls_lifecycle`].
 ///
-/// SECURITY: the current TLS path accepts ANY server certificate
-/// (see [`crate::tls`]). It is gated behind the C-side
-/// `GTKHX_NEW_CONNECT` env var and is not production-safe until the
-/// TOFU trust bridge lands.
+/// Certificate trust: the handshake accepts any cert, then the
+/// `verify_cert` callback (invoked post-handshake with the leaf
+/// cert's `"sha256:<hex>"` fingerprint, before any LOGIN) makes the
+/// real TOFU decision and may reject. Passing `verify_cert = NULL`
+/// leaves the connection accept-any — callers that want trust
+/// enforcement must supply it. See [`crate::tls`] and
+/// [`HxnetVerifyCertCallback`].
 ///
-/// Parameters and safety are identical to
+/// Other parameters and safety are identical to
 /// [`hxnet_connection_open_plaintext`].
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
@@ -1849,6 +1876,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
+    verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
@@ -1929,8 +1957,28 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         trans,
     };
 
+    // Wrap the C verify callback in a Rust closure the lifecycle
+    // calls post-handshake with the cert fingerprint. The opaque
+    // user_data is shared with the other callbacks; the SendUserData
+    // wrapper lets the closure move into the spawned task.
+    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> =
+        verify_cert.map(|cb| {
+            let ud = SendUserData(user_data);
+            let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
+                let ud = &ud;
+                unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
+            });
+            boxed
+        });
+
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_tls_lifecycle(req, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_plaintext_tls_lifecycle(
+            req,
+            verify_closure,
+            cmd_rx,
+            evt_tx,
+        )
+        .await;
     });
 
     wire_callback_state_with_on_state(
