@@ -1893,12 +1893,130 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
                       G_CALLBACK (tls_accept_certificate), user_data);
 }
 
+/* Phase G: pinned LOGIN transaction id. LOGIN is always the first
+ * transaction on a fresh connection, so the C side and the Rust
+ * orchestrator agree on a fixed value up front — the orchestrator
+ * stamps the LOGIN frame with this trans, the server echoes it in
+ * the TASK reply, and the synthetic-frame replay dispatches to the
+ * login task we register under the same value. See
+ * docs/phase-g-migration.md. */
+#define HX_LOGIN_TRANS 1u
+
+/* Phase G (hxnet-owns-the-whole-lifecycle), plaintext path. Gated
+ * behind GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy
+ * GSocketClient connect + GPollable magic/LOGIN handshake with the
+ * hxnet orchestrator: hxnet owns the socket from byte zero, drives
+ * magic + LOGIN + LOGIN-reply itself, and replays the reply to us as
+ * a synthetic frame so rcv_task_login (and its post-login side
+ * effects) run unchanged. */
+static void
+hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
+                             guint16 port, const char *login, const char *pass)
+{
+    struct task *login_tsk;
+
+    /* 1. Preamble — mirrors hx_connect's non-socket setup. */
+    if (current_cancel) {
+        g_cancellable_cancel (current_cancel);
+        g_clear_object (&current_cancel);
+    }
+    if (htlc->fd) {
+        hx_htlc_close (htlc, 1);
+    }
+    hx_clear_chat (htlc, 0, 1);
+
+    g_free (server_addr);
+    server_addr = g_strdup_printf ("%s:%u", serverstr, port);
+    server_port = port;
+
+    htlc->chat_history_last_msgid = 0;
+    g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
+    htlc->serverport = port;
+    htlc->tls = 0; /* orchestrator path is plaintext-only */
+    htlc->gdk_input = 0;
+    g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
+
+    hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
+                      server_addr);
+    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+                                         GTKHX_CONNECTION_CONNECTING);
+
+    /* 2. Pin the LOGIN trans and register the reply task. The
+     * replayed reply dispatches to rcv_task_login only if a task is
+     * registered under the trans the orchestrator's LOGIN carries
+     * (hx_rcv_task -> task_with_trans; a miss is a silent
+     * fallthrough). The orchestrator owns the send, so pin the trans
+     * to a shared constant. The final bump to TRANS+1 keeps the
+     * post-login follow-up sends (issued from inside rcv_task_login)
+     * from colliding with the login task — the legacy path got that
+     * for free from the C-side LOGIN send's htlc->trans++. The ptr
+     * arg (pass) is NULL, selecting rcv_task_login's plaintext
+     * branch. */
+    htlc->trans = HX_LOGIN_TRANS;
+    login_tsk = task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
+    htlc->trans = HX_LOGIN_TRANS + 1;
+
+    /* 3. fd sentinel. The orchestrator owns the socket; the C side
+     * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
+     * treats fd==0 as "connection closed, drop the frame", so 0 here
+     * would silently drop the replayed LOGIN reply. -1 keeps the
+     * `if (htlc->fd) hx_htlc_close()` close-time guards firing;
+     * close(-1) is a harmless EBADF and the socket is owned by
+     * hxnet's TcpStream anyway. */
+    htlc->fd = -1;
+
+    /* 4-6. Hand off to the bridge, which calls
+     * hxnet_connection_open_plaintext with the bridge's event /
+     * shutdown / state callbacks and stores the returned handle in
+     * the global slot synchronously, BEFORE returning. That ordering
+     * is load-bearing: hx_bridge_dispatch_frame gates on
+     * hx_bridge_is_installed(), and the orchestrator emits the
+     * replayed LOGIN-reply frame before HandshakeDone. The forwarder
+     * delivers events on the GLib main loop, which we don't re-enter
+     * until this function returns — so installing synchronously here
+     * closes the window. */
+    if (!hx_bridge_install_orchestrated_plaintext (
+            htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
+            /*version=*/185, HX_LOGIN_TRANS)) {
+        /* Spawn refused. Roll back the sentinel + login task and
+         * surface a disconnect so the UI doesn't sit on the
+         * CONNECTING throbber forever. */
+        htlc->fd = 0;
+        if (login_tsk) {
+            task_delete (&the_session, login_tsk);
+        }
+        gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
+                                             GTKHX_CONNECTION_DISCONNECTED);
+        hx_printf_prefix (htlc, 0, INFOPREFIX,
+                          _ ("could not start connection to %s\n"),
+                          server_addr);
+    }
+}
+
 void
 hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
             const char *login, const char *pass, char secure, char tls)
 {
     struct gtkhx_connect_ctx *ctx;
     GSocketClient *client;
+
+    /* Phase G: hxnet-owns-the-whole-lifecycle plaintext path, gated
+     * behind GTKHX_NEW_CONNECT while it bakes. Plaintext only — TLS
+     * and HOPE-secure logins still go through the legacy GIOStream
+     * connect path below until the orchestrator grows those (see
+     * docs/phase-g-migration.md "What about TLS and HOPE?"). The
+     * GTKHX_TLS env override is checked first so a GTKHX_TLS=1 +
+     * GTKHX_NEW_CONNECT=1 combo correctly stays on the legacy TLS
+     * path. */
+    {
+        const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
+        const char *tls_env = g_getenv ("GTKHX_TLS");
+        gboolean want_tls = tls || (tls_env && *tls_env);
+        if (new_env && *new_env && !secure && !want_tls) {
+            hx_connect_via_orchestrator (htlc, serverstr, port, login, pass);
+            return;
+        }
+    }
 
     /* GTKHX_TLS=1 env-var override. While Phase 4 (Connect dialog
 	 * TLS toggle) is unimplemented, this is how the test harness

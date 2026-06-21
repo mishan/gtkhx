@@ -181,6 +181,44 @@ extern gboolean hx_bridge_install_with_hope_state (struct htlc_conn *htlc,
                                                    int fd);
 
 /*
+ * Phase G (hxnet-owns-the-whole-lifecycle): open a plaintext
+ * Hotline connection with hxnet driving the entire pre-frame
+ * lifecycle (DNS + TCP + magic + LOGIN + LOGIN-reply), then
+ * install the resulting handle as the live bridge.
+ *
+ * Unlike hx_bridge_install_passthrough / _with_hope_state — which
+ * adopt an already-connected fd the C side handshook itself — this
+ * entry calls hxnet_connection_open_plaintext, so hxnet owns the
+ * socket from byte zero and the C side never has a real fd. The
+ * orchestrator replays the LOGIN reply back as a synthetic frame
+ * (Option B in docs/phase-g-migration.md) so the C-side rcv
+ * dispatch (rcv_task_login) runs unchanged.
+ *
+ * The bridge's own event / shutdown / state callbacks are wired
+ * in; state transitions are mapped onto GtkhxConnectionState and
+ * emitted on the default GtkhxSession (same coarse sequence the
+ * legacy GIOStream connect path emits: CONNECTING → TCP_CONNECTED
+ * → HANDSHAKE_DONE).
+ *
+ * `host` is a NUL-terminated server name / IP; `login` / `pass` /
+ * `name` are NUL-terminated (NULL treated as empty). `trans` is the
+ * transaction id the orchestrator stamps on the LOGIN frame — the
+ * caller pins it and registers a matching login task so the
+ * replayed reply dispatches correctly.
+ *
+ * Returns TRUE on a successful spawn (the handle is now the live
+ * bridge), FALSE on failure (open_plaintext logged its own
+ * g_critical; the bridge is left uninstalled).
+ *
+ * Precondition: no prior install is live. Plaintext only — TLS /
+ * HOPE-secure logins still go through the legacy connect path.
+ */
+extern gboolean hx_bridge_install_orchestrated_plaintext (
+    struct htlc_conn *htlc, const char *host, guint16 port,
+    const char *login, const char *pass, const char *name, guint16 icon,
+    guint16 version, guint32 trans);
+
+/*
  * TRUE when an hxnet connection is currently installed.
  * Production code uses this as the gate between the new
  * (hxnet) and legacy (GIOStream) read / write paths.

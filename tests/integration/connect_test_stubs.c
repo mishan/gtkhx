@@ -59,6 +59,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>          /* session.h drags this in */
 #include "compat.h"
+#include "hotline.h"            /* struct hl_hdr — Phase G replay recorder */
 #include "protocol.h"
 #include "session.h"
 #include "prefs.h"
@@ -193,15 +194,63 @@ rcv_login_reset (void)
 {
 }
 
-/* hx_rcv_hdr is the production receive callback — send_login
- * installs it on htlc->rcv after the LOGIN goes out. The test
- * never drives a receive (the fake server doesn't send LOGIN
- * replies), so this is a one-shot pointer the test never
- * dereferences. */
+/* hx_rcv_hdr is the production receive callback. In the legacy
+ * connect tests (fake server, GTKHX_NEW_CONNECT unset) the test
+ * never drives a receive, so it's a one-shot pointer that's never
+ * called. In the Phase G orchestrator path, though,
+ * hx_bridge_dispatch_frame stages the replayed LOGIN-reply header
+ * into htlc->in.buf and calls htlc->rcv (== this stub) — so we
+ * record the dispatched frame's header fields here. The real
+ * production hx_rcv_hdr lives in rcv.c and drags the whole UI
+ * stack; the orchestrator test only needs to prove the reply was
+ * replayed to the C dispatch with the pinned trans / TASK opcode /
+ * success flag, which the header alone carries. */
+/* "first_*" captures the FIRST dispatched frame, "last_*" the most
+ * recent. The Phase G test asserts on first_*: the orchestrator
+ * replays the LOGIN reply as a synthetic frame before HandshakeDone,
+ * so it's guaranteed to be the first frame dispatched. After
+ * HandshakeDone the actor starts reading real server pushes (mhxd
+ * sends SELFINFO / user-list / etc.), which also dispatch through
+ * here — so "last" would be one of those, not the login reply. */
+guint32 connect_test_first_rcv_type = 0;
+guint32 connect_test_first_rcv_trans = 0;
+guint32 connect_test_first_rcv_flag = 0;
+guint32 connect_test_last_rcv_type = 0;
+guint32 connect_test_last_rcv_trans = 0;
+guint32 connect_test_last_rcv_flag = 0;
+guint connect_test_rcv_count = 0;
+
+void connect_test_reset_rcv_record (void);
+void
+connect_test_reset_rcv_record (void)
+{
+    connect_test_first_rcv_type = 0;
+    connect_test_first_rcv_trans = 0;
+    connect_test_first_rcv_flag = 0;
+    connect_test_last_rcv_type = 0;
+    connect_test_last_rcv_trans = 0;
+    connect_test_last_rcv_flag = 0;
+    connect_test_rcv_count = 0;
+}
+
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
 {
-    (void) htlc;
+    if (htlc && htlc->in.buf) {
+        const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+        guint32 type = GUINT32_FROM_BE (h->type);
+        guint32 trans = GUINT32_FROM_BE (h->trans);
+        guint32 flag = GUINT32_FROM_BE (h->flag);
+        if (connect_test_rcv_count == 0) {
+            connect_test_first_rcv_type = type;
+            connect_test_first_rcv_trans = trans;
+            connect_test_first_rcv_flag = flag;
+        }
+        connect_test_last_rcv_type = type;
+        connect_test_last_rcv_trans = trans;
+        connect_test_last_rcv_flag = flag;
+        connect_test_rcv_count++;
+    }
 }
 
 void

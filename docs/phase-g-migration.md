@@ -91,14 +91,22 @@ reply dispatch (`rcv_task_login`).
 
 **Pros**: zero changes to the FFI shape, zero changes to
 rcv.c, the entire LOGIN reply dispatch path stays unchanged.
-The orchestrator is purely additive transport.
+The orchestrator is purely additive transport. *(Caveat,
+see Recommendation: "zero changes to rcv.c" only holds if the
+C side registers the login task under the orchestrator's
+LOGIN trans and installs the bridge before the Frame is
+replayed. Those aren't rcv.c changes, but they are required
+new glue.)*
 
 **Cons**: the orchestrator has to remember the full reply
 bytes (already does, via the `LoginReply` struct + the raw
-frame in the parser path) and re-emit them. Minor
-double-work — chunks get parsed once in Rust to decide
-success / failure, then a second time in C for the side
-effects.
+frame in the parser path) and re-emit them. The double-work
+is smaller than it looks — Rust parses only far enough to
+read the task-error bit (success vs failure); the rich fields
+(version / banner / servername) are parsed once, in C. The
+real cost is the trans-pinning + install-ordering glue, both
+of which fail silently — see the sketch and Recommendation
+below.
 
 ### Option C — keep magic + LOGIN on the C side
 
@@ -113,13 +121,59 @@ hxnet-owns-the-lifecycle so the C side's GIO/GPollable
 machinery can be deleted. Option C means Phase G part 3 is
 just "delete connect_ctx", which doesn't earn the new code.
 
-**Recommendation: Option B**. It's the lowest-risk shape —
-the C side's LOGIN reply dispatch is large and well-tested,
-and a synthetic Frame event lets it run unchanged. The
-orchestrator gains a small helper that holds onto the parsed
-reply frame's wire bytes (it already reads them; just need
-to not drop them) and ships them through `evt_tx` as
-`Event::Frame` before `HandshakeDone`.
+**Recommendation: Option B to bridge, Option A as the
+destination.**
+
+Option B is the right *migration* mechanism: it keeps the
+receive side byte-identical to the legacy path, so the
+coexistence ship can A/B the new transport against the old
+with zero behavioural delta on everything downstream of the
+LOGIN reply. The orchestrator gains a small helper that holds
+onto the parsed reply frame's wire bytes (it already reads
+them; just need to not drop them) and ships them through
+`evt_tx` as `Event::Frame` before `HandshakeDone`.
+
+But B is *not* zero-cost and is *not* the clean end state —
+contrary to the "zero changes to rcv.c / zero FFI changes"
+framing earlier in this doc:
+
+- It needs the trans-pinning + synchronous-install glue from
+  the `hx_connect_via_orchestrator` sketch above, both of
+  which fail *silently* when wrong. That glue is throwaway —
+  it exists only to make the legacy dispatch path swallow a
+  frame it never sent.
+- `rcv_task_login` cannot be deleted (see the corrected
+  delete list below). Only its HOPE `if (pass)` branch and
+  the send/connect orchestration around it go away; the
+  `!pass` post-login body (version / banner / capabilities /
+  `USER_CHANGE` / SELFINFO timer) is the whole reason the
+  replayed Frame exists.
+
+Option A (payload on `HandshakeDone`) is the cleaner
+*destination*. It sidesteps both silent-failure axes — no
+trans matching, no install ordering — because the reply never
+rides the rcv dispatch path; the `HANDSHAKE_DONE` handler
+gets the parsed chunks directly. Its one cost is factoring
+the field-extraction out of `rcv_task_login` into a callable
+parser, separate from the post-login orchestration. That
+refactor is wanted anyway: once HOPE and TLS fold into the
+orchestrator (`run_hope_lifecycle` + `tls_config`), the Rust
+side already parses the reply to decide success, and the C
+side wants a clean "parse-reply-fields" entry point decoupled
+from "arm the post-login machinery". At that point A's
+payload is just handing those already-parsed fields across,
+instead of re-serializing them into a synthetic frame for C
+to re-parse.
+
+So: ship B for the plaintext coexistence/validation pass,
+then converge on A as HOPE/TLS move into the orchestrator. If
+the `rcv_task_login` field-extraction refactor is going to
+happen regardless — and HOPE-in-orchestrator forces it —
+going straight to A may be *less* net plumbing than carrying
+B's trans-coordination glue through the HOPE work. Worth a
+checkpoint after the plaintext-vs-mhxd gate: if B's glue
+feels heavier than expected, that's the signal to skip to A
+rather than carry B forward.
 
 ## Replacement order — three sub-branches
 
@@ -165,34 +219,100 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 }
 ```
 
-`hx_connect_via_orchestrator` body (~80 LOC):
+`hx_connect_via_orchestrator` body (~90 LOC). The ordering
+below is load-bearing — steps 2, 3, and 6 exist only to make
+the synthetic LOGIN-reply Frame (Option B) dispatch
+correctly. Skip any one of them and login still "succeeds"
+while every post-login side effect silently vanishes.
 
-1. Common preamble: stamp `htlc->serverhost`, `htlc->serverport`,
-   `htlc->tls = 0`, reset `chat_history_last_msgid`, clear
-   `current_cancel`, hx_clear_chat, emit
-   `GTKHX_CONNECTION_CONNECTING`.
-2. Build `hxnet_connection_open_plaintext` callbacks. These
-   are sibling functions to the existing bridge_on_*_cb
-   triplet — same shape, NEW state callback that translates
-   `HXNET_STATE_*` constants to `GTKHX_CONNECTION_*` signal
-   values and emits them on the GtkhxSession.
-3. On `HXNET_STATE_HANDSHAKE_DONE`: install the bridge
-   handle into the global slot (same handle the existing
-   path uses) so subsequent `hlwrite` calls route through
-   `hxnet_connection_send_frame`. Set `htlc->trans = 1`,
-   `htlc->fd = -1` (sentinel — nothing should read it),
-   `connected = 1`.
-4. Call `hxnet_connection_open_plaintext` with credentials.
+1. **Common preamble.** Stamp `htlc->serverhost`,
+   `htlc->serverport`, `htlc->tls = 0`, reset
+   `chat_history_last_msgid`, clear `current_cancel`,
+   `hx_clear_chat`, emit `GTKHX_CONNECTION_CONNECTING`.
 
-Tier 1 test: `tests/integration/test_hxnet_open_smoke.c`
-— set GTKHX_NEW_CONNECT=1, point at mhxd container, verify
-LOGIN succeeds and the post-login Frame events flow.
+2. **Pin the LOGIN trans and register the reply task.** The
+   LOGIN reply dispatches by transaction id —
+   `hx_rcv_task` does `task_with_trans(trans)` (`rcv.c`
+   ~L494) and a miss is a *silent* fallthrough (trans 0 =
+   "no such task"). So the synthetic Frame only reaches
+   `rcv_task_login` if a task is registered under the exact
+   trans the orchestrator's LOGIN carries. The orchestrator
+   owns the send, so the two sides must agree on the trans
+   up front. LOGIN is always the first transaction — pin it
+   to a constant shared by C and Rust (`HX_LOGIN_TRANS == 1`):
 
-Risk: medium. Plumbing is mostly mirror of the existing
-post-handshake install path. The `htlc->fd = -1` sentinel
-is the risky bit — if anything calls `g_socket_*` on it
-we'll see EBADF crashes. Grep for `htlc->fd` reads in the
-control-plane code path:
+   ```c
+   htlc->trans = HX_LOGIN_TRANS;          /* = 1 */
+   task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0,
+             "login");                    /* stamps tsk->trans = 1 */
+   htlc->trans = HX_LOGIN_TRANS + 1;      /* = 2 */
+   ```
+
+   The final bump matters: the post-login follow-up sends
+   (`who` / `USER_GETLIST` / chat-history) fire from inside
+   `rcv_task_login` during the replayed-frame dispatch and
+   stamp `tsk->trans = htlc->trans` (`tasks.c` L1114). Left
+   at 1 they collide with the login task. The legacy path
+   got `trans = 2` for free because the C-side LOGIN send did
+   `htlc->trans++`; the orchestrator's send never touches the
+   C counter, so we advance it by hand.
+
+3. **Set the fd sentinel to -1, not 0.**
+   `hx_bridge_dispatch_frame` early-returns on
+   `htlc->fd == 0` (`hxnet_bridge.c` L114) — that's the
+   bridge's "connection closed, drop the frame" signal. The
+   orchestrator owns the socket, so the C side has no real
+   fd; use `-1` to mean "live but no C-visible fd". `0` would
+   silently drop every replayed frame. (`-1` also keeps the
+   `if (htlc->fd) hx_htlc_close(...)` close-time guards
+   firing, and `close(-1)` is a harmless EBADF.)
+
+4. **Build the callbacks.** Sibling functions to the existing
+   `bridge_on_*_cb` triplet — the event callback routes
+   through `hx_bridge_dispatch_frame` as today; the NEW state
+   callback translates `HXNET_STATE_*` constants to
+   `GTKHX_CONNECTION_*` signal values and emits them on the
+   GtkhxSession. On `HANDSHAKE_DONE` it sets `connected = 1`
+   (version / banner / servername are already handled by the
+   replayed Frame's `rcv_task_login` run, which fires *before*
+   this state event); on the failure states it calls the
+   shared failure handler (`connect_fail` today).
+
+5. **Call `hxnet_connection_open_plaintext`** with the
+   credentials and the pinned `HX_LOGIN_TRANS`, capturing the
+   returned handle.
+
+6. **Install the handle into the global slot — synchronously,
+   before returning.** This is what makes the
+   Frame-before-`HandshakeDone` order (the orchestrator-replay
+   branch) safe: `hx_bridge_dispatch_frame` also gates on
+   `hx_bridge_is_installed()` (`hxnet_bridge.c` L114), so the
+   bridge must be installed before the first event callback
+   fires. We're on the GLib main loop here and callbacks
+   arrive via the event ferry (`g_idle`), so they cannot run
+   until `hx_connect_via_orchestrator` returns — installing
+   synchronously after the open call closes the window. (This
+   replaces the earlier draft's "install on `HANDSHAKE_DONE`",
+   which would have dropped the LOGIN reply.)
+
+Tier 3 test: `tests/integration/test_hxnet_open_smoke.c`
+— set `GTKHX_NEW_CONNECT=1`, point at the mhxd container,
+verify LOGIN succeeds *and* that `rcv_task_login` actually
+ran: assert `htlc->version` is populated, the banner fetch
+was triggered, and the SELFINFO fallback timer armed. A test
+that only checks "login succeeded" passes even when the
+replayed Frame was dropped — the silent-failure modes from
+steps 2/3/6 hide there.
+
+Risk: medium, and the dangerous part is *silent*. The
+plumbing mostly mirrors the existing post-handshake install
+path; the new failure axes are the trans pinning (step 2)
+and install ordering (step 6), both of which let login
+"succeed" while version / banner / servername / USER_CHANGE
+never happen — hence the effect-level Tier 3 assertions
+above are the real gate. The `htlc->fd = -1` sentinel is the
+one loud-failure axis — if a straggler calls `g_socket_*` on
+it we get EBADF. Grep the control-plane reads:
 
 ```
 $ rg 'htlc->fd\b' src/ | wc -l
@@ -219,22 +339,38 @@ follow-up branch deletes:
 
 - `struct gtkhx_connect_ctx` and its 11 fields
 - `connect_ctx_free`
-- `connect_fail`
 - `send_login`
 - `populate_htlc_remote_ip`
 - `magic_timeout_cb`
 - `on_async_connected`
 - `on_magic_sent` / `on_magic_replied` / etc.
-- `rcv_task_login` (replaced by the synthetic Frame
-  replayed by the orchestrator + the existing post-login
-  dispatch in rcv.c)
+- the HOPE `if (pass)` branch of `rcv_task_login` (step-1
+  parse + key derivation + step-2 send) — dead once
+  `run_hope_lifecycle` owns the crypto. **The rest of
+  `rcv_task_login` stays.** Its `!pass` post-login body
+  (version / banner / servername / capabilities /
+  `USER_CHANGE` / SELFINFO-timer) is exactly what the
+  replayed Frame runs under Option B, and what Option A
+  would call directly. Deleting the whole function would
+  strand every post-login side effect — the synthetic Frame
+  has nothing else to dispatch to ("the existing post-login
+  dispatch in rcv.c" *is* `rcv_task_login`).
 - the GPollable read/write source plumbing
   (`control_arm_read_source`, `control_write_drain`, etc.)
 - `on_socket_client_event` (the TLS accept-cert handler —
   becomes the Rust `on_verify_cert` callback once TLS is
   folded into the orchestrator)
 
-Estimated delete: ~600 LOC.
+**Retained, not deleted:** `connect_fail`. It's the shared
+failure/dialog routine, and the orchestrator path's state
+callback reuses it for the `HXNET_STATE_*` error states (step
+4 of the sketch). When the legacy connect flow goes away,
+`connect_fail` stays as the single failure sink — or gets
+inlined into the state callback, but it doesn't disappear.
+
+Estimated delete: ~550 LOC (most of `rcv_task_login`'s bulk
+is its HOPE branch; the post-login body that survives is
+small).
 
 ## What about TLS and HOPE?
 
@@ -286,12 +422,21 @@ Three risk axes:
 2. **`htlc->fd` audit risk**: the sentinel pattern works
    only if no code path dereferences the fd post-orchestrator-
    handoff. Audit needs to be careful.
-3. **LOGIN reply replay correctness**: Option B above means
-   the orchestrator's `LoginReply` parser and the C-side
-   `rcv_task_login` dispatch see the same bytes. Any drift
-   between them surfaces as missing `htlc->version` /
-   missing banner / missing servername fields. Want a Tier
-   3 test that asserts equivalence before flipping.
+3. **LOGIN reply replay correctness**: under Option B the
+   rich fields (`htlc->version`, banner id, servername) are
+   parsed exactly *once*, on the C side, by `rcv_task_login`
+   — the orchestrator only parses far enough to read the
+   task-error bit and choose `HandshakeDone` vs `Failed`. So
+   the duplicated surface is just the success/failure
+   verdict, not the field set; the only equivalence to pin is
+   "Rust's success verdict == C's `task_inerror`". The
+   likelier silent-failure modes aren't parser drift at all —
+   they're the trans mismatch (step 2) and install ordering
+   (step 6) from the sketch above, i.e. the reply never
+   reaching `rcv_task_login`. So the Tier 3 gate asserts the
+   *effects* (`htlc->version` populated, banner fetch
+   triggered, SELFINFO timer armed), which catches both
+   classes at once.
 
 Each axis individually is manageable; together they're a
 ship-Friday-skip-the-weekend size, not a ship-overnight size.
