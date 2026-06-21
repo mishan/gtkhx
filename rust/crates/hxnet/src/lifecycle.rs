@@ -366,20 +366,18 @@ pub async fn run_hope_lifecycle(
         None => bail!("hope step1 reply missing sessionkey / mac / cipher"),
     };
 
-    // secure_login probe: the server runs the HMAC-login variant
-    // when its step-1 reply echoes DATA_LOGIN matching
-    // HMAC(login, sessionkey) under the chosen MAC. Mirrors
-    // src/hope.c::hope_parse_step1_reply. mhxd guest is secure;
-    // Janus guest is not.
-    let secure_login = match &step1_reply.login_echo {
-        Some(echo) if !echo.is_empty() => {
-            match crate::hope::hmac_password(&req.login, &choice.sessionkey, &choice.mac_alg) {
-                Ok(h) => *echo == h,
-                Err(_) => false,
-            }
-        }
-        _ => false,
-    };
+    // secure_login probe: the server signals the HMAC-login variant
+    // by echoing the *chosen MAC algorithm name* in the step-1
+    // reply's DATA_LOGIN chunk (e.g. mhxd echoes "HMAC-SHA1"). When
+    // it matches, the step-2 LOGIN field must be HMAC(login,
+    // sessionkey) rather than XOR. Mirrors
+    // src/hope.c::hope_parse_step1_reply L163-168 (memcmp of the
+    // login echo against reply->macalg). mhxd is secure_login; Janus
+    // guest is not (it echoes no login).
+    let secure_login = step1_reply
+        .login_echo
+        .as_deref()
+        .is_some_and(|echo| echo == choice.mac_alg.as_slice());
 
     // ---- derive keys (mirrors hope_store_chain_keys + the AEAD /
     // Blowfish key derivation in rcv.c) ----
