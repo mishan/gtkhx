@@ -69,6 +69,7 @@ pub mod event;
 pub mod ffi;
 pub mod frame;
 pub mod hope_blowfish;
+pub mod login;
 pub mod magic;
 pub mod transform;
 
