@@ -117,12 +117,25 @@ pub async fn resolve_and_connect(
 
     // Try each resolved address in turn; first successful
     // connect wins. Mirrors GSocketClient's iterate-until-
-    // success shape.
+    // success shape. Each attempt is bounded by the handshake
+    // timeout so an unresponsive host (SYN black-hole) fails
+    // instead of hanging the whole connect — the C side then
+    // tears down cleanly via the shutdown path.
+    let connect_timeout =
+        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
     let mut last_err: Option<io::Error> = None;
     for addr in candidates {
-        match TcpStream::connect(addr).await {
-            Ok(stream) => return Ok(stream),
-            Err(e) => last_err = Some(e),
+        match tokio::time::timeout(connect_timeout, TcpStream::connect(addr)).await
+        {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(e)) => last_err = Some(e),
+            Err(_elapsed) => {
+                last_err = Some(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("connect to {addr} timed out after {}s",
+                            crate::HANDSHAKE_TIMEOUT_SECS),
+                ));
+            }
         }
     }
     Err(last_err.unwrap_or_else(|| {

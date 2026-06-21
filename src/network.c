@@ -1739,6 +1739,87 @@ trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
     return m.accepted;
 }
 
+/* Shared TOFU decision over a (host, port, fingerprint) tuple: look
+ * the fingerprint up in the known-hosts store and accept silently
+ * (TRUSTED, or the same cert already pinned for this host on another
+ * port), auto-accept (GTKHX_TLS_AUTO_ACCEPT, for headless tests),
+ * or prompt the user (UNKNOWN / MISMATCH), pinning on accept.
+ * Returns TRUE to accept the cert, FALSE to reject.
+ *
+ * Used by BOTH the legacy GTlsConnection accept-certificate handler
+ * (tls_accept_certificate, which computes the fingerprint from a
+ * GTlsCertificate) and the orchestrator's post-handshake verify
+ * (hx_tls_orchestrator_verify_cert, fingerprint computed in Rust).
+ * Safe off the main thread — the prompt marshals via
+ * trust_dialog_run_thread_safe. */
+static gboolean
+tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
+{
+    hx_tls_trust_status status =
+        hx_tls_trust_lookup (host, port, fingerprint);
+    debug_log ("tls", "trust-decide: %s:%u fp=%s status=%d", host,
+               (unsigned) port, fingerprint, (int) status);
+
+    if (status == HX_TLS_TRUST_TRUSTED) {
+        return TRUE;
+    }
+
+    /* Same cert pinned for this host on another port (e.g. control
+     * channel pinned at :5600, HTXF subchannel now at :5601) — accept
+     * + pin the new port silently. Only on a strict-UNKNOWN; never
+     * overrides a MISMATCH. */
+    if (status == HX_TLS_TRUST_UNKNOWN
+        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Headless / scripted escape hatch. Tier 3 sets this; production
+     * never does. MISMATCH is logged loudly so a silent override
+     * can't hide a real fingerprint change. */
+    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
+    if (auto_accept && *auto_accept) {
+        if (status == HX_TLS_TRUST_MISMATCH) {
+            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS MISMATCH for "
+                       "%s:%u (fp=%s) — the pinned fingerprint differs from "
+                       "this one. Set this env var only for trusted test "
+                       "harnesses; production should never see this line.",
+                       host, (unsigned) port, fingerprint);
+        }
+        schedule_trust_pin (host, port, fingerprint);
+        return TRUE;
+    }
+
+    /* Real user-facing TOFU prompt, marshalled to the main thread. */
+    GtkWindow *parent = NULL;
+    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
+        parent = GTK_WINDOW (toolbar_window);
+    }
+    gboolean accepted = trust_dialog_run_thread_safe (parent, host, port,
+                                                      fingerprint, status);
+    if (accepted) {
+        schedule_trust_pin (host, port, fingerprint);
+    }
+    return accepted;
+}
+
+/* Orchestrator (hxnet) TOFU verify. The Rust TLS lifecycle computes
+ * the peer leaf cert's SHA-256 fingerprint — matching
+ * hx_tls_trust_fingerprint's "sha256:<hex>" format — and calls this
+ * via the verify_cert bridge callback after the handshake, before any
+ * LOGIN. host/port come from htlc (stamped in
+ * hx_connect_via_orchestrator). Returns TRUE to accept, FALSE to
+ * reject (the Rust lifecycle then closes the stream). */
+gboolean
+hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                 const char *fingerprint)
+{
+    if (!htlc || !fingerprint) {
+        return FALSE;
+    }
+    return tls_trust_decide (htlc->serverhost, htlc->serverport, fingerprint);
+}
+
 /* Phase 3 TLS: TOFU accept-certificate handler. Pulls (host,
  * port) from the tls_endpoint (passed as user_data via the
  * GSocketClient event signal),
@@ -1780,87 +1861,11 @@ tls_accept_certificate (GTlsConnection *conn G_GNUC_UNUSED,
         return FALSE;
     }
 
-    hx_tls_trust_status status =
-        hx_tls_trust_lookup (host, port, fingerprint);
-    debug_log ("tls",
-               "accept-certificate: %s:%u fp=%s status=%d errors=0x%x",
-               host, (unsigned) port, fingerprint, (int) status,
-               (unsigned) errors);
-
-    if (status == HX_TLS_TRUST_TRUSTED) {
-        return TRUE;
-    }
-
-    /* If the user already pinned THIS cert for THIS host on
-     * some OTHER port, silently accept and pin the new port
-     * too. The canonical case: control channel was just pinned
-     * at host:5600, now the HTXF subchannel connects to
-     * host:5601 with the bit-identical cert — without this
-     * cross-port check the user would see the trust prompt
-     * twice for what they perceive as a single connection.
-     *
-     * Only consulted on a strict-UNKNOWN result. A
-     * strict-MISMATCH on this (host, port) is a security
-     * signal — we never let an any-port match override it. */
-    if (status == HX_TLS_TRUST_UNKNOWN
-        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
-        debug_log ("tls",
-                   "accept-certificate: %s:%u auto-accepted "
-                   "(same cert pinned for host on another port)",
-                   host, (unsigned) port);
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Auto-accept escape hatch for headless tests + scripted
-     * first-run pinning. Tier 3 sets this; production never
-     * does. The pin is queued via g_idle_add (schedule_trust_pin)
-     * rather than called inline because hx_tls_trust_pin's body
-     * uses to call g_mkdir_with_parents which wedges the TLS
-     * handshake when invoked from inside this accept-certificate
-     * signal handler. The pin function no longer calls mkdir, but
-     * keeping the work on the main thread is the conservative
-     * default — file I/O latency here would extend the handshake
-     * window even if it doesn't deadlock, and the trust DECISION
-     * (which is what the signal contract needs) doesn't depend
-     * on the pin write completing.
-     *
-     * MISMATCH inside the auto-accept branch is logged loudly
-     * via g_warning: a test or scripted run that silently
-     * overrides a real fingerprint change without anyone
-     * noticing is exactly the failure mode the warning is
-     * meant to surface. UNKNOWN doesn't need the warning —
-     * that's the documented first-run / fresh-server case. */
-    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
-    if (auto_accept && *auto_accept) {
-        if (status == HX_TLS_TRUST_MISMATCH) {
-            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS "
-                       "MISMATCH for %s:%u (fp=%s) — the pinned "
-                       "fingerprint differs from this one. Set "
-                       "this env var only for trusted test "
-                       "harnesses; production should never see "
-                       "this line.",
-                       host, (unsigned) port, fingerprint);
-        }
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Real user-facing prompt. Parent transient-for the toolbar
-     * window if it exists; otherwise float (still works, just
-     * less polished). trust_dialog_run_thread_safe handles
-     * marshalling to the main thread when this signal fires on
-     * an HTXF worker — see the docstring above. */
-    GtkWindow *parent = NULL;
-    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
-        parent = GTK_WINDOW (toolbar_window);
-    }
-    gboolean accepted = trust_dialog_run_thread_safe (
-        parent, host, port, fingerprint, status);
-    if (accepted) {
-        schedule_trust_pin (host, port, fingerprint);
-    }
-    return accepted;
+    debug_log ("tls", "accept-certificate: %s:%u errors=0x%x", host,
+               (unsigned) port, (unsigned) errors);
+    /* The decision (lookup → any-port → auto-accept → prompt → pin)
+     * is shared with the orchestrator path; see tls_trust_decide. */
+    return tls_trust_decide (host, port, fingerprint);
 }
 
 /* The GSocketClient event signal fires through every phase of the
@@ -1902,16 +1907,23 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
  * docs/phase-g-migration.md. */
 #define HX_LOGIN_TRANS 1u
 
-/* Phase G (hxnet-owns-the-whole-lifecycle), plaintext path. Gated
- * behind GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy
- * GSocketClient connect + GPollable magic/LOGIN handshake with the
- * hxnet orchestrator: hxnet owns the socket from byte zero, drives
- * magic + LOGIN + LOGIN-reply itself, and replays the reply to us as
- * a synthetic frame so rcv_task_login (and its post-login side
- * effects) run unchanged. */
+/* Phase G (hxnet-owns-the-whole-lifecycle). Gated behind
+ * GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy GSocketClient
+ * connect + GPollable handshake with the hxnet orchestrator: hxnet
+ * owns the socket from byte zero, drives the whole handshake itself
+ * (magic + LOGIN for plaintext; magic + HOPE step1/step2 + cipher
+ * transition for secure; TLS handshake then plaintext LOGIN for tls),
+ * and replays the final reply to us as a synthetic frame so
+ * rcv_task_login (and its post-login side effects) run unchanged.
+ * `secure` selects the HOPE path (htlc->cipheralg must be set); `tls`
+ * selects TLS-from-byte-zero (separate-port model). The two are never
+ * both set when this is called — hx_connect rejects secure+tls
+ * (redundant double-encryption) up front, before the orchestrator
+ * gate, so it never reaches this function. */
 static void
 hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
-                             guint16 port, const char *login, const char *pass)
+                             guint16 port, const char *login, const char *pass,
+                             gboolean secure, gboolean tls)
 {
     struct task *login_tsk;
 
@@ -1932,7 +1944,11 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     htlc->chat_history_last_msgid = 0;
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
-    htlc->tls = 0; /* orchestrator path is plaintext-only */
+    /* Stamp the TLS flag so the HTXF subchannel workers (xfers.c /
+     * banner.c) wrap their data ports too. The control channel's TLS
+     * runs inside hxnet (rustls); HTXF keeps using the legacy
+     * GTlsConnection path, which reads htlc->tls. */
+    htlc->tls = tls ? 1 : 0;
     htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
@@ -1960,11 +1976,19 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * post-login follow-up sends (issued from inside rcv_task_login)
      * from colliding with the login task — the legacy path got that
      * for free from the C-side LOGIN send's htlc->trans++. The ptr
-     * arg (pass) is NULL, selecting rcv_task_login's plaintext
-     * branch. */
-    htlc->trans = HX_LOGIN_TRANS;
+     * arg (pass) is NULL, selecting rcv_task_login's post-login (else)
+     * branch in both modes.
+     *
+     * The replayed reply's trans differs by mode: the plaintext path
+     * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
+     * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
+     * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1).
+     * Register the login task under whichever trans the replay will
+     * carry, then bump past it for the post-login sends. */
+    guint32 reply_trans = secure ? (HX_LOGIN_TRANS + 1) : HX_LOGIN_TRANS;
+    htlc->trans = reply_trans;
     login_tsk = task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-    htlc->trans = HX_LOGIN_TRANS + 1;
+    htlc->trans = reply_trans + 1;
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -1994,9 +2018,24 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
                  | HTLC_CAP_INLINE_MEDIA;
-    if (!hx_bridge_install_orchestrated_plaintext (
+    /* HOPE sends the display name in step 2; the plaintext paths defer
+     * it to a post-login USER_CHANGE, so they omit the name here. */
+    gboolean ok;
+    if (tls) {
+        /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
+        ok = hx_bridge_install_orchestrated_plaintext_tls (
             htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
-            /*version=*/185, caps, HX_LOGIN_TRANS)) {
+            /*version=*/185, caps, HX_LOGIN_TRANS);
+    } else if (secure) {
+        ok = hx_bridge_install_orchestrated_hope (
+            htlc, serverstr, port, login, pass, htlc->name, htlc->icon,
+            /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
+    } else {
+        ok = hx_bridge_install_orchestrated_plaintext (
+            htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
+            /*version=*/185, caps, HX_LOGIN_TRANS);
+    }
+    if (!ok) {
         /* Spawn refused. Roll back the sentinel + login task and
          * surface a disconnect so the UI doesn't sit on the
          * CONNECTING throbber forever. */
@@ -2019,21 +2058,78 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     struct gtkhx_connect_ctx *ctx;
     GSocketClient *client;
 
-    /* Phase G: hxnet-owns-the-whole-lifecycle plaintext path, gated
-     * behind GTKHX_NEW_CONNECT while it bakes. Plaintext only — TLS
-     * and HOPE-secure logins still go through the legacy GIOStream
-     * connect path below until the orchestrator grows those (see
-     * docs/phase-g-migration.md "What about TLS and HOPE?"). The
-     * GTKHX_TLS env override is checked first so a GTKHX_TLS=1 +
-     * GTKHX_NEW_CONNECT=1 combo correctly stays on the legacy TLS
-     * path. */
+    /* HOPE-over-TLS is not a supported combination, on ANY path. TLS
+     * already secures the transport, so layering the HOPE cipher on
+     * top is redundant double-encryption we don't support. Reject it
+     * up front — before the orchestrator gate AND the legacy path
+     * below — rather than silently picking one. The Connect dialog
+     * greys out HOPE when TLS is on; this is the defensive backstop
+     * for bookmarks / programmatic callers. We leave an *established*
+     * connection alone (return before the teardown preamble), but we
+     * still cancel any in-flight async connect first — otherwise a
+     * connect that was still resolving/connecting when the user fired
+     * this rejected request would complete later and surface
+     * unexpectedly. */
+    {
+        const char *tls_env = g_getenv ("GTKHX_TLS");
+        gboolean want_tls = tls || (tls_env && *tls_env);
+        if (secure && want_tls) {
+            if (current_cancel) {
+                g_cancellable_cancel (current_cancel);
+                g_clear_object (&current_cancel);
+            }
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              _ ("HOPE-secure login over TLS is not "
+                                 "supported; use one or the other\n"));
+            error_dialog ("Error",
+                          "HOPE-secure login can't be combined with TLS. "
+                          "TLS already encrypts the connection — turn off "
+                          "the HOPE cipher (or turn off TLS) and reconnect.");
+            return;
+        }
+    }
+
+    /* Phase G: hxnet-owns-the-whole-lifecycle, gated behind
+     * GTKHX_NEW_CONNECT while it bakes. The orchestrator now covers
+     * plaintext, HOPE-Secure-Login, and plaintext-over-TLS
+     * (separate-port model). HOPE-over-TLS is rejected above;
+     * secure-without-a-cipher falls through to the legacy GIOStream
+     * path. The GTKHX_TLS env override is folded into
+     * want_tls so GTKHX_TLS=1 + GTKHX_NEW_CONNECT=1 takes the
+     * orchestrator TLS path. */
     {
         const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
         const char *tls_env = g_getenv ("GTKHX_TLS");
         gboolean want_tls = tls || (tls_env && *tls_env);
-        if (new_env && *new_env && !secure && !want_tls) {
-            hx_connect_via_orchestrator (htlc, serverstr, port, login, pass);
-            return;
+        if (new_env && *new_env) {
+            if (want_tls && !secure) {
+                /* Plaintext LOGIN over TLS-from-byte-zero. Cert trust
+                 * is the same TOFU check the legacy path uses, run
+                 * post-handshake via the bridge's verify_cert callback
+                 * (hx_tls_orchestrator_verify_cert). */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/FALSE,
+                                             /*tls=*/TRUE);
+                return;
+            }
+            if (!want_tls && !secure) {
+                /* Plaintext. */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/FALSE,
+                                             /*tls=*/FALSE);
+                return;
+            }
+            if (!want_tls && secure && htlc->cipheralg[0]) {
+                /* HOPE-Secure-Login with a negotiable cipher. */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/TRUE,
+                                             /*tls=*/FALSE);
+                return;
+            }
+            /* secure-without-a-negotiable-cipher (HOPE requested but
+             * htlc->cipheralg unset): fall through to the legacy path.
+             * secure+tls was already rejected up front, so it can't
+             * reach here. */
         }
     }
 
