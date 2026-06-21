@@ -63,16 +63,23 @@
 pub mod cipher;
 pub mod command;
 pub mod compress;
+pub mod connect;
 pub mod connection;
 pub mod event;
 pub mod ffi;
 pub mod frame;
+pub mod hope;
 pub mod hope_blowfish;
+pub mod hope_keys;
+pub mod lifecycle;
+pub mod login;
+pub mod login_reply;
+pub mod magic;
 pub mod transform;
 
 pub use command::Command;
 pub use connection::{Connection, ConnectionHandle, SpawnError};
-pub use event::{Event, ShutdownReason};
+pub use event::{ConnectionState, Event, ShutdownReason};
 pub use frame::{Frame, MAX_BODY_LEN};
 pub use transform::{
     compose, AsyncDuplex, BoxedDuplex, CipherKind, CipherLayer, CompressionKind,

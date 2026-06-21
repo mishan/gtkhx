@@ -416,22 +416,38 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
             return HXNET_RECV_EMPTY;
         }
     };
-    match events.try_recv() {
-        Ok(Event::Frame(frame)) => {
-            write_frame_to_out(frame, out_frame);
-            HXNET_RECV_FRAME
-        }
-        Ok(Event::Shutdown(reason)) => {
-            *out_reason = shutdown_code(reason);
-            HXNET_RECV_SHUTDOWN
-        }
-        Err(mpsc::error::TryRecvError::Empty) => HXNET_RECV_EMPTY,
-        Err(mpsc::error::TryRecvError::Disconnected) => {
-            // The actor finished without emitting Shutdown (we
-            // try our best to ensure it always does, but defend
-            // anyway).
-            *out_reason = HXNET_SHUTDOWN_HANDLE_DROPPED;
-            HXNET_RECV_SHUTDOWN
+    loop {
+        match events.try_recv() {
+            Ok(Event::Frame(frame)) => {
+                write_frame_to_out(frame, out_frame);
+                return HXNET_RECV_FRAME;
+            }
+            Ok(Event::Shutdown(reason)) => {
+                *out_reason = shutdown_code(reason);
+                return HXNET_RECV_SHUTDOWN;
+            }
+            Ok(Event::State(_)) => {
+                // Polling API has no surface to expose
+                // connection-state events on. The polling
+                // spawn (`spawn_fd`) is only used by R3.3.b's
+                // smoke test which adopts a pre-connected fd
+                // and never sees connect-time state events. If
+                // a future caller wires the polling API
+                // through the Phase A connect path, we'll grow
+                // a separate `try_recv_state` entry; for now
+                // silently drop state events and continue the
+                // try_recv loop so the caller still gets to
+                // see Frame / Shutdown.
+                continue;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => return HXNET_RECV_EMPTY,
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                // The actor finished without emitting Shutdown (we
+                // try our best to ensure it always does, but defend
+                // anyway).
+                *out_reason = HXNET_SHUTDOWN_HANDLE_DROPPED;
+                return HXNET_RECV_SHUTDOWN;
+            }
         }
     }
 }
@@ -1448,6 +1464,24 @@ fn wire_callback_state(
                         }
                     }
                 }
+                Event::State(state) => {
+                    // The post-HOPE callback FFI from R3.3.e-1
+                    // only carries Frame + Shutdown; the spawn
+                    // path adopts an already-connected fd so no
+                    // connect-time state events ever fire here.
+                    // When Phase A's connect-in-Rust spawn
+                    // function lands, it'll carry its own
+                    // on_state callback and route state events
+                    // through that. For now log + drop so any
+                    // future regression that wires a state-
+                    // event-emitting transform under the
+                    // existing spawn surfaces in dev logs
+                    // rather than silently disappearing.
+                    eprintln!(
+                        "hxnet: unexpected State({state:?}) on post-HOPE \
+                         callback path; ignoring (no consumer)"
+                    );
+                }
             }
         });
 
@@ -1459,6 +1493,304 @@ fn wire_callback_state(
 
     handle_ptr
 }
+
+// ============================================================ *
+// Phase A — hxnet does the TCP connect itself                  *
+// ============================================================ *
+
+/// Callback fired on each connection-state transition. The C
+/// side typically maps these onto the existing
+/// `gtkhx_session_emit_connection_state` GtkhxSession signals
+/// the toolbar / chat windows already listen to for throbber /
+/// status text.
+///
+/// `state` is the integer discriminant of
+/// [`crate::ConnectionState`] — see that enum's
+/// `#[repr(u32)]` for the exact values. Fired on the GLib main
+/// thread (forwarded through `forward_to_main`), same
+/// shape as `on_event` / `on_shutdown`.
+pub type HxnetStateCallback = Option<
+    unsafe extern "C" fn(conn: *mut HxnetConnection, state: c_uint, user_data: *mut c_void),
+>;
+
+/// Connection-state mirror constants for the C side. The
+/// hand-rolled mirror matches the
+/// `#[repr(u32)]` discriminants on
+/// [`crate::ConnectionState`]; drift surfaces at link time if
+/// the C side mirrors the values and they go out of sync.
+pub const HXNET_STATE_RESOLVING: c_uint = 0;
+pub const HXNET_STATE_CONNECTING: c_uint = 1;
+pub const HXNET_STATE_CONNECTED: c_uint = 2;
+pub const HXNET_STATE_TLS_HANDSHAKING: c_uint = 3;
+pub const HXNET_STATE_MAGIC_EXCHANGE: c_uint = 4;
+pub const HXNET_STATE_LOGIN_SENDING: c_uint = 5;
+pub const HXNET_STATE_LOGIN_REPLY_WAIT: c_uint = 6;
+pub const HXNET_STATE_HOPE_STEP1: c_uint = 7;
+pub const HXNET_STATE_HOPE_STEP2: c_uint = 8;
+pub const HXNET_STATE_CIPHER_TRANSITION: c_uint = 9;
+pub const HXNET_STATE_HANDSHAKE_DONE: c_uint = 10;
+
+const _: () = {
+    // Pin the discriminant mapping at compile time. Any reorder
+    // of ConnectionState variants without a matching update to
+    // the constants above trips a build error here rather than
+    // a runtime ABI surprise.
+    assert!(crate::ConnectionState::Resolving as u32 == HXNET_STATE_RESOLVING);
+    assert!(crate::ConnectionState::Connecting as u32 == HXNET_STATE_CONNECTING);
+    assert!(crate::ConnectionState::Connected as u32 == HXNET_STATE_CONNECTED);
+    assert!(crate::ConnectionState::TlsHandshaking as u32 == HXNET_STATE_TLS_HANDSHAKING);
+    assert!(crate::ConnectionState::MagicExchange as u32 == HXNET_STATE_MAGIC_EXCHANGE);
+    assert!(crate::ConnectionState::LoginSending as u32 == HXNET_STATE_LOGIN_SENDING);
+    assert!(crate::ConnectionState::LoginReplyWait as u32 == HXNET_STATE_LOGIN_REPLY_WAIT);
+    assert!(crate::ConnectionState::HopeStep1 as u32 == HXNET_STATE_HOPE_STEP1);
+    assert!(crate::ConnectionState::HopeStep2 as u32 == HXNET_STATE_HOPE_STEP2);
+    assert!(crate::ConnectionState::CipherTransition as u32 == HXNET_STATE_CIPHER_TRANSITION);
+    assert!(crate::ConnectionState::HandshakeDone as u32 == HXNET_STATE_HANDSHAKE_DONE);
+};
+
+/// Open a Hotline connection with hxnet driving the entire pre-
+/// frame lifecycle. Phase A scope: DNS resolution + TCP connect
+/// only. The actor enters frame mode immediately after the TCP
+/// handshake completes — subsequent phases (B-F) layer TLS /
+/// magic / LOGIN / HOPE on top before the frame-mode transition.
+///
+/// `host` is a non-NUL-terminated UTF-8 slice of length
+/// `host_len`. It can be a DNS name or an IP literal (v4 or v6).
+/// `port` is the TCP port. The three callbacks are wired exactly
+/// the same way as in `hxnet_connection_spawn_fd_with_callback`;
+/// `on_state` is new and fires once per `ConnectionState`
+/// transition.
+///
+/// The returned handle is fully functional from the moment of
+/// return — `hxnet_connection_send_frame` calls queue in the
+/// command channel and get processed once the actor comes
+/// online (i.e. once the TCP connect completes). DNS / connect
+/// failures surface as `Event::Shutdown(StreamError("..."))`
+/// before any frames flow; the on_shutdown callback fires
+/// with the matching reason code.
+///
+/// # Safety
+///
+/// `host` must point at `host_len` readable bytes of valid
+/// UTF-8 (or an IP literal — which is also valid UTF-8). The
+/// three callback pointers and `user_data` must remain valid
+/// for the connection's lifetime; production scopes them to
+/// the `htlc_conn` lifetime which outlives the actor.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_tcp(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_tcp: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_tcp: NULL on_event / on_shutdown"
+        );
+        return std::ptr::null_mut();
+    }
+    // on_state is optional — consumers that don't care about
+    // state transitions (e.g. R3.3.b's smoke test before it
+    // gets ported) can pass NULL.
+
+    // slice::from_raw_parts is documented UB for
+    // `len * size_of::<T>() > isize::MAX`. Reject explicitly — same
+    // defensive guard the other FFI entry points use — so a bogus
+    // host_len from C is a logged error, not UB.
+    if (host_len as u64) > (isize::MAX as u64) {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_tcp: host_len {} exceeds isize::MAX",
+            host_len
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_tcp: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_tcp: Runtime::global panicked; \
+                 aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    // Create the channels + handle up front so the C side gets a
+    // working ConnectionHandle immediately. Buffered sends queue
+    // in the channel until the actor comes online post-connect.
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    let join = rt.handle().spawn(async move {
+        match crate::connect::resolve_and_connect(&host_str, port, &evt_tx).await {
+            Ok(stream) => {
+                // Emit Connected here (vs. inside resolve_and_connect)
+                // so the future post-connect setup (TLS / etc.)
+                // gets a single state-event surface to thread
+                // through. Phase A just spawns the actor right
+                // after.
+                let _ = evt_tx.send(Event::State(crate::ConnectionState::Connected)).await;
+                Connection::run_actor(stream, cmd_rx, evt_tx).await;
+            }
+            Err(e) => {
+                let _ = evt_tx
+                    .send(Event::Shutdown(crate::ShutdownReason::StreamError(
+                        format!("connect failed: {e}"),
+                    )))
+                    .await;
+            }
+        }
+    });
+
+    wire_callback_state_with_on_state(
+        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+    )
+}
+
+/// Variant of `wire_callback_state` that routes
+/// `Event::State(...)` through an additional `on_state`
+/// callback instead of dropping it. Reuses the same
+/// pump→forward_to_main shape as the older wiring helper —
+/// only the per-event dispatch differs.
+fn wire_callback_state_with_on_state(
+    rt: &Runtime,
+    cmd: ConnectionHandle,
+    mut events: mpsc::Receiver<Event>,
+    join: JoinHandle<()>,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    let main_ctx = glib::MainContext::ref_thread_default();
+    let _acquire_guard = if main_ctx.is_owner() {
+        None
+    } else {
+        match main_ctx.acquire() {
+            Ok(g) => Some(g),
+            Err(_) => {
+                glib::g_critical!(
+                    "hxnet",
+                    "wire_callback_state_with_on_state: thread-default \
+                     MainContext is owned by another thread; cannot acquire \
+                     for spawn_local"
+                );
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
+    let handle_box = Box::new(HxnetConnection {
+        cmd,
+        events: None,
+        _callback_state: None,
+        _join: join,
+    });
+    let handle_ptr = Box::into_raw(handle_box);
+
+    let (ferry_tx, ferry_rx) =
+        async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
+    let pump = rt.handle().spawn(async move {
+        while let Some(evt) = events.recv().await {
+            if ferry_tx.send(evt).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let cb = SendCallbacks {
+        on_event,
+        on_shutdown,
+        user_data,
+        handle_ptr,
+    };
+    let state_cb = SendStateCallback {
+        on_state,
+        user_data,
+        handle_ptr,
+    };
+
+    let forwarder =
+        hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| match evt {
+            Event::Frame(frame) => {
+                let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
+                unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
+                let frame_ptr = out.as_mut_ptr();
+                if let Some(on_event) = cb.on_event {
+                    unsafe {
+                        on_event(cb.handle_ptr, frame_ptr, cb.user_data);
+                    }
+                }
+            }
+            Event::Shutdown(reason) => {
+                eprintln!("hxnet: actor shutting down: {reason:?}");
+                let code = shutdown_code(reason);
+                if let Some(on_shutdown) = cb.on_shutdown {
+                    unsafe {
+                        on_shutdown(cb.handle_ptr, code, cb.user_data);
+                    }
+                }
+            }
+            Event::State(state) => {
+                if let Some(on_state) = state_cb.on_state {
+                    unsafe {
+                        on_state(
+                            state_cb.handle_ptr,
+                            state as c_uint,
+                            state_cb.user_data,
+                        );
+                    }
+                }
+            }
+        });
+
+    let handle_ref = unsafe { &mut *handle_ptr };
+    handle_ref._callback_state = Some(CallbackState {
+        _pump: pump,
+        _forwarder: forwarder,
+    });
+
+    handle_ptr
+}
+
+/// Send-shaped copy of the state callback fields for use inside
+/// the `forward_to_main` closure. Same shape as `SendCallbacks`
+/// — the closure captures it by move and the C pointer
+/// invariants stay the same (single-threaded use, lifetime
+/// scoped to the connection).
+struct SendStateCallback {
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+    handle_ptr: *mut HxnetConnection,
+}
+unsafe impl Send for SendStateCallback {}
 
 // Silence unused import warning when the runtime feature is on
 // but no test exercises the c_void path. The body of this module
