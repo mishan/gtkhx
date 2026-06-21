@@ -71,6 +71,7 @@ pub mod frame;
 pub mod hope;
 pub mod hope_blowfish;
 pub mod hope_keys;
+pub mod lifecycle;
 pub mod login;
 pub mod login_reply;
 pub mod magic;
