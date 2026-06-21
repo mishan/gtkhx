@@ -81,16 +81,40 @@ not IP, exactly as the existing tracker tests do.
 
 ## Networking trade-off (voice)
 
-The rig uses a bridge network rather than host networking because the
-two trackers both listen on 5498/5499 and can't coexist on the host's
-port table. The cost is Janus's WebRTC **voice** path (5514/udp): ICE
-negotiation against 127.0.0.1 needs `--network=host` (see
-`tests/janus/README.md`). For voice manual-testing, keep using the
-standalone host-net invocation:
+The default rig uses a bridge network rather than host networking
+because the two trackers both listen on 5498/5499 and can't coexist on
+the host's port table. The cost is Janus's WebRTC **voice** path
+(5514/udp): ICE negotiation against 127.0.0.1 needs host networking
+(see `tests/janus/README.md`). Everything else — chat, PM, news, files,
+banner, HOPE/AEAD, TLS, and tracker listing + registration — works over
+the bridge.
+
+### Enabling voice: host-networking override for Janus
+
+The trackers stay on the bridge, but **Janus alone** can run with host
+networking via an override file. Bring the rig up with voice enabled:
+
+```sh
+JANUS_HOST_NET=1 ./run.sh
+# or directly:
+docker compose -f docker-compose.yml -f docker-compose.janus-host.yml up -d
+```
+
+With the override, Janus joins the host network namespace: its listeners
+(including 5514/udp) bind the host directly so ICE works, and since a
+host-net container can't also be on the `hotline` bridge, it registers
+with the trackers through their host-published ports on loopback —
+`127.0.0.1:5499` (Argus) and `127.0.0.1:5599` (hxtrackd) — instead of by
+service name. mhxd is unaffected and keeps registering by service name.
+
+Requirements: a **Linux host** (host networking on Docker Desktop for
+macOS/Windows is a limited beta with different loopback semantics) and
+**Docker Compose v2.24+** (for the `!reset` tag the override uses). Full
+rationale is in `docker-compose.janus-host.yml`.
+
+The standalone host-net invocation also still works for one-off voice
+testing without the rest of the rig:
 
 ```sh
 docker run --rm --network=host gtkhx-janus
 ```
-
-Everything else — chat, PM, news, files, banner, HOPE/AEAD, TLS, and
-tracker listing + registration — works over the bridge.

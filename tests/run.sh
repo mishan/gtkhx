@@ -11,12 +11,26 @@
 # e.g. force a clean rebuild:
 #   ./run.sh --no-cache
 #
+# Set JANUS_HOST_NET=1 to layer in the host-networking override so
+# Janus's WebRTC voice path works (Linux host only — see
+# docker-compose.janus-host.yml):
+#   JANUS_HOST_NET=1 ./run.sh
+#
 # Afterwards, tail logs with:
 #   docker compose -f tests/docker-compose.yml logs -f
 set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 COMPOSE_FILE="$DIR/docker-compose.yml"
+
+# Optional host-networking override for Janus (enables voice). Both the
+# down and up paths must see the same -f set so compose tears down and
+# brings up the identical project definition.
+COMPOSE_ARGS="-f $COMPOSE_FILE"
+if [ "${JANUS_HOST_NET:-0}" = "1" ]; then
+	COMPOSE_ARGS="$COMPOSE_ARGS -f $DIR/docker-compose.janus-host.yml"
+	echo ">> Janus host-networking override enabled (voice path active)"
+fi
 
 # Pick the available Compose CLI: prefer the `docker compose` plugin,
 # fall back to the legacy standalone `docker-compose` binary.
@@ -36,14 +50,14 @@ echo
 echo ">> Tearing down any running rig"
 # --remove-orphans cleans up containers from earlier compose revisions
 # (e.g. a service that was renamed). Safe no-op when nothing is running.
-$COMPOSE -f "$COMPOSE_FILE" down --remove-orphans
+$COMPOSE $COMPOSE_ARGS down --remove-orphans
 
 echo
 echo ">> Starting the rig"
-$COMPOSE -f "$COMPOSE_FILE" up -d
+$COMPOSE $COMPOSE_ARGS up -d
 
 echo
-$COMPOSE -f "$COMPOSE_FILE" ps
+$COMPOSE $COMPOSE_ARGS ps
 echo
 echo "Rig is up. Servers: mhxd localhost:5500, Janus localhost:5510."
 echo "Trackers: Argus localhost:5498, hxtrackd localhost:5598."
