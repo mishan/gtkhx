@@ -21,6 +21,16 @@ extern int fd_lock_write (int fd);
 
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
+/* Orchestrator (hxnet) TOFU certificate verify. Called from the
+ * hxnet bridge's verify_cert callback after the Rust TLS handshake,
+ * with the peer leaf cert's "sha256:<hex>" fingerprint (computed in
+ * Rust to match hx_tls_trust_fingerprint). Looks it up in the
+ * known-hosts store and accepts / prompts / pins exactly like the
+ * legacy GTlsConnection accept-certificate path. Returns TRUE to
+ * accept, FALSE to reject. */
+extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                                 const char *fingerprint);
+
 /* `secure` is the legacy hxd "secure server" password flag (not
  * transport security — it just selects an alternate password
  * encoding). `tls` is the transport-security flag: non-zero

@@ -69,6 +69,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <glib/gstdio.h>      /* g_unlink, g_rmdir */
 #include <gio/gio.h>
 
 #include "compat.h"
@@ -326,6 +327,274 @@ test_orchestrator_capabilities_negotiated (void)
     g_ptr_array_unref (cand);
 }
 
+/* Drive the production hx_connect HOPE-Secure-Login path through the
+ * orchestrator (GTKHX_NEW_CONNECT=1, secure=1) against a matrix
+ * server advertising `required_cap`, with `cipheralg` configured on
+ * the htlc. Asserts the full handshake reaches HANDSHAKE_DONE, the
+ * bridge installs, and the replayed step-2 reply dispatched to the C
+ * side with the right trans (HX_LOGIN_TRANS+1 — HOPE replays step 2,
+ * not the LOGIN) + success flag.
+ *
+ * This exercises the production Rust run_hope_lifecycle end-to-end:
+ * magic + step1 + key derivation + step2 + cipher transition + the
+ * encrypted step-2 reply read back through the negotiated cipher. The
+ * Blowfish variant is the regression guard for the secure_login probe
+ * (mhxd signals secure_login by echoing the macalg name; getting that
+ * wrong made mhxd silently close after step2). */
+static void
+run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
+{
+    GPtrArray *cand = hx_test_servers_with (required_cap);
+    const hx_test_server *srv = NULL;
+    if (cand && cand->len > 0) {
+        srv = g_ptr_array_index (cand, 0);
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no matrix server with cap 0x%x for HOPE cipher %s; start the "
+            "mhxd / Janus containers.",
+            required_cap, cipheralg);
+        return;
+    }
+
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, cipheralg, sizeof (test_htlc.cipheralg));
+    g_strlcpy (test_htlc.name, "PhaseGHope", sizeof (test_htlc.name));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
+                /*secure=*/1, /*tls=*/0);
+    drive_until (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+
+    /* HOPE replays the step-2 reply, which carries HX_LOGIN_TRANS+1
+     * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_ptr_array_unref (cand);
+}
+
+static void
+test_orchestrator_hope_blowfish (void)
+{
+    run_hope_orchestrator_against (HX_TEST_CAP_BLOWFISH, "BLOWFISH");
+}
+
+static void
+test_orchestrator_hope_chacha20 (void)
+{
+    run_hope_orchestrator_against (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305");
+}
+
+/* Drive the production hx_connect TLS path (GTKHX_NEW_CONNECT=1,
+ * tls=1, secure=0) against a matrix server's dedicated TLS port —
+ * the Mobius/Janus separate-port model: TLS handshake from byte zero,
+ * then a plaintext LOGIN over the encrypted stream. Asserts the full
+ * sequence reaches HANDSHAKE_DONE through the orchestrator's rustls
+ * path and the LOGIN reply was replayed (decrypted over TLS) to the C
+ * dispatch with the right trans + success flag.
+ *
+ * NOTE: the orchestrator TLS layer currently accepts any server cert
+ * (TOFU bridge pending), so this proves transport + framing, not cert
+ * trust. */
+static void
+test_orchestrator_tls_login (void)
+{
+    GPtrArray *cand = hx_test_servers_with (HX_TEST_CAP_TLS);
+    const hx_test_server *srv = NULL;
+    if (cand) {
+        for (guint i = 0; i < cand->len; i++) {
+            const hx_test_server *s = g_ptr_array_index (cand, i);
+            if (s->tls_port != 0) {
+                srv = s;
+                break;
+            }
+        }
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no TLS-capable server in matrix (need HX_TEST_CAP_TLS + a "
+            "tls_port; Janus). Start the Janus container with TLS ports.");
+        return;
+    }
+
+    /* TOFU: isolate the known-hosts store to a tmp dir and auto-accept
+     * the prompt (the dialog is stubbed in this headless binary, so
+     * the prompt path would assert). With a fresh store the cert is
+     * UNKNOWN → auto-accept pins it; we then assert the pin landed,
+     * which proves the orchestrator's verify_cert bridge ran the real
+     * tls_trust.c TOFU path end-to-end. */
+    g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-tofu-XXXXXX", NULL);
+    g_assert_nonnull (tmpdir);
+    g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
+    g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
+    g_setenv ("GTKHX_TLS_AUTO_ACCEPT", "1", TRUE);
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
+                /*secure=*/0, /*tls=*/1);
+    drive_until (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+
+    /* TLS carries a plaintext LOGIN, so the replayed reply is the
+     * LOGIN reply (trans HX_LOGIN_TRANS), like the non-TLS plaintext
+     * path. */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+
+    /* Flush the deferred pin (schedule_trust_pin → g_idle_add) and
+     * assert the cert was pinned to the known-hosts store — the TOFU
+     * bridge proof. */
+    while (g_main_context_iteration (NULL, FALSE)) {
+        /* drain pending idles */
+    }
+    g_autofree char *kh_contents = NULL;
+    g_file_get_contents (known_hosts, &kh_contents, NULL, NULL);
+    g_assert_nonnull (kh_contents);
+    g_assert_nonnull (g_strstr_len (kh_contents, -1, "sha256:"));
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+
+    /* Second connect with AUTO_ACCEPT OFF: the cert is now pinned, so
+     * tls_trust_decide must resolve TRUSTED and accept silently — no
+     * prompt. (The dialog is stubbed with g_assert_not_reached in this
+     * headless binary, so if the TRUSTED lookup failed and the prompt
+     * fired, the test would crash.) This is the end-to-end proof that
+     * the orchestrator honours a pinned cert. */
+    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    test_observer *obs2 = observer_new (gtkhx,
+                                        GTKHX_CONNECTION_HANDSHAKE_DONE);
+    hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
+                /*secure=*/0, /*tls=*/1);
+    drive_until (obs2, 10000);
+    g_assert_true (obs2->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+    observer_free (obs2, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_unsetenv ("GTKHX_KNOWN_HOSTS");
+    g_unlink (known_hosts);
+    g_rmdir (tmpdir);
+    g_ptr_array_unref (cand);
+}
+
+/* Regression guard: a refused connection must surface gracefully as
+ * GTKHX_CONNECTION_DISCONNECTED (throbber off, tasks cleared, handle
+ * torn down) rather than leaving the UI stuck. This exercises the
+ * bridge_on_shutdown_cb → hx_bridge_dispatch_shutdown → hx_htlc_close
+ * path: the bug was that the handle was cleared before dispatch, so
+ * dispatch's !is_installed() guard skipped hx_htlc_close and the
+ * connect/login tasks span forever. Needs no server — port 1 is
+ * unbound, so the connect is refused. */
+static void
+test_orchestrator_connect_refused (void)
+{
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", 1, "guest", "",
+                /*secure=*/0, /*tls=*/0);
+    drive_until (obs, 10000);
+
+    /* The orchestrator surfaced the refused connect as DISCONNECTED
+     * (hx_htlc_close ran) — not a stuck throbber. */
+    g_assert_true (obs->wait_arrived);
+    /* hx_htlc_close tore the bridge handle down and reset fd. */
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+}
+
+/* HOPE-over-TLS is unsupported on every path. hx_connect must reject
+ * it synchronously — no orchestrator install, no connection attempt,
+ * no path that quietly does it. Needs no server (rejected before any
+ * connect). */
+static void
+test_hope_tls_rejected (void)
+{
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", 5610, "guest", "",
+                /*secure=*/1, /*tls=*/1);
+
+    /* Rejected up front: no bridge, no fd, nothing started. */
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    /* Same via the GTKHX_TLS env override (bookmarks/power-user path). */
+    g_setenv ("GTKHX_TLS", "1", TRUE);
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
+    hx_connect (&test_htlc, "127.0.0.1", 5500, "guest", "",
+                /*secure=*/1, /*tls=*/0);
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    g_unsetenv ("GTKHX_TLS");
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -335,6 +604,12 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/orchestrator_login", test_orchestrator_login);
     g_test_add_func ("/phase_g/capabilities_negotiated",
                      test_orchestrator_capabilities_negotiated);
+    g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
+    g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
+    g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
+    g_test_add_func ("/phase_g/connect_refused",
+                     test_orchestrator_connect_refused);
+    g_test_add_func ("/phase_g/hope_tls_rejected", test_hope_tls_rejected);
 
     return g_test_run ();
 }

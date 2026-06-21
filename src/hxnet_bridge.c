@@ -34,6 +34,13 @@ extern void hx_rcv_hdr (struct htlc_conn *htlc);
  * inside hx_bridge_dispatch_shutdown. */
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
+/* network.c's "session is fully logged in" flag. Used here only to
+ * pick the shutdown log level: a failure before the session came up
+ * (connect refused / handshake / login reject) is routine and gets a
+ * user-facing error dialog, so it logs at g_message; a mid-session
+ * drop after login is the noteworthy case. */
+extern int connected;
+
 /* Mirror of the hxnet FFI's shutdown-reason constants
  * (rust/crates/hxnet/src/ffi.rs::HXNET_SHUTDOWN_*). The C side
  * has its own copies in tests/unit/test_hxnet_ffi.c; redeclaring
@@ -226,35 +233,50 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
     case HXNET_SHUTDOWN_HANDLE_DROPPED:  reason_str = "HANDLE_DROPPED (we dropped the handle)"; break;
     default:                             reason_str = "(unknown reason code)"; break;
     }
-    /* Visibility: clean shutdowns (EOF, HANDLE_DROPPED) are
-     * expected during normal disconnect — keep them at
-     * `g_message` so they don't pollute logs. Error reasons
-     * (STREAM_ERROR, FRAME_TOO_LARGE, unknown) ARE the bug
-     * signal — promote to `g_warning` so they show up by
-     * default. */
-    if (reason == HXNET_SHUTDOWN_EOF
-        || reason == HXNET_SHUTDOWN_HANDLE_DROPPED) {
-        g_message ("hxnet_bridge: actor exited with reason=%d %s "
-                   "(htlc->fd=%d installed=%d)",
-                   reason, reason_str, htlc->fd, hx_bridge_is_installed ());
+    /* Visibility / level. A clean shutdown (EOF, HANDLE_DROPPED) is
+     * expected during normal disconnect. So is ANY failure before the
+     * session is fully up (`connected == 0`): connect refused, DNS,
+     * magic / HOPE / TLS handshake, or a rejected login all surface as
+     * STREAM_ERROR with the actor never reaching frame mode. Those are
+     * routine and already get a user-facing error dialog from
+     * hx_htlc_close, so keep them at g_message rather than reading
+     * like a bug (a routine "connection refused" shouldn't spam an
+     * alarming warning to the console). Only a STREAM_ERROR /
+     * FRAME_TOO_LARGE *after* a working login (connected == 1) is the
+     * noteworthy mid-session-drop signal — promote that to g_warning. */
+    gboolean noteworthy = connected != 0
+                          && reason != HXNET_SHUTDOWN_EOF
+                          && reason != HXNET_SHUTDOWN_HANDLE_DROPPED;
+    if (noteworthy) {
+        g_warning ("hxnet_bridge: actor exited mid-session with reason=%d "
+                   "%s (htlc->fd=%d) — see stderr for the Rust-side "
+                   "ShutdownReason (io::Error string for StreamError).",
+                   reason, reason_str, htlc->fd);
     } else {
-        g_warning ("hxnet_bridge: actor exited with reason=%d %s "
-                   "(htlc->fd=%d installed=%d) — this is the "
-                   "actor-mid-burst death signal; see stderr for "
-                   "the full Rust-side ShutdownReason including the "
-                   "io::Error string for StreamError.",
-                   reason, reason_str, htlc->fd, hx_bridge_is_installed ());
+        g_message ("hxnet_bridge: actor exited with reason=%d %s "
+                   "(htlc->fd=%d connected=%d)",
+                   reason, reason_str, htlc->fd, connected);
     }
 
-    /* Drop in-flight shutdowns that the GLib idle queue
-     * dispatched after `hx_htlc_close` already ran (e.g. the
-     * synchronous send-path failure path called close, which
-     * uninstalled the bridge, but hxnet had already forwarded
-     * an `Event::Shutdown` onto the idle queue). Re-entering
-     * `hx_htlc_close` would run all of its teardown a second
-     * time. Same race shape as in `hx_bridge_dispatch_frame`;
-     * same fix. */
-    if (htlc->fd == 0 || !hx_bridge_is_installed ()) {
+    /* Drop in-flight shutdowns that the GLib idle queue dispatched
+     * after `hx_htlc_close` already ran (e.g. the synchronous
+     * send-path failure path called close, which uninstalled the
+     * bridge, but hxnet had already forwarded an `Event::Shutdown`
+     * onto the idle queue). Re-entering `hx_htlc_close` would run all
+     * of its teardown a second time.
+     *
+     * The re-entry guard is `htlc->fd == 0`: hx_htlc_close sets fd to
+     * 0 as its last act, so a second shutdown for the same connection
+     * sees fd==0 and bails. We deliberately do NOT also gate on
+     * `!hx_bridge_is_installed()` — bridge_on_shutdown_cb dispatches
+     * *before* it tears the handle down, precisely so this path can
+     * call hx_htlc_close (which then uninstalls). Gating on
+     * is_installed() here was the bug behind connect-refused (and any
+     * server-initiated shutdown) leaving the UI stuck: the handle was
+     * cleared first, so this early-returned and hx_htlc_close never
+     * ran. fd is -1 on the orchestrator path (no C-visible fd) and the
+     * real fd on the legacy path — both non-zero, so both proceed. */
+    if (htlc->fd == 0) {
         return;
     }
 
@@ -311,6 +333,12 @@ typedef void (*hxnet_shutdown_cb_t) (hxnet_connection_opaque *conn, int reason,
  * discriminant. */
 typedef void (*hxnet_state_cb_t) (hxnet_connection_opaque *conn, guint32 state,
                                   void *user_data);
+/* Phase G TLS TOFU: invoked post-handshake with the peer leaf cert's
+ * "sha256:<hex>" fingerprint (NOT NUL-terminated — use fp_len).
+ * Returns non-zero to accept, zero to reject. Mirror of
+ * HxnetVerifyCertCallback in rust/crates/hxnet/src/ffi.rs. */
+typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
+                                       void *user_data);
 
 /* ConnectionState discriminants the Phase G state callback maps
  * onto GtkhxConnectionState. Mirror of HXNET_STATE_* in
@@ -415,6 +443,40 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
+/* Phase G HOPE: hxnet drives the full HOPE-Secure-Login handshake
+ * (magic + step1 + step2 + cipher transition) and the encrypted
+ * post-login stream. Mirror of hxnet_connection_open_hope in
+ * rust/crates/hxnet/src/ffi.rs. */
+extern hxnet_connection_opaque *hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *cipher_alg, gsize cipher_alg_len,
+    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
+    hxnet_state_cb_t on_state, void *user_data);
+
+/* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
+ * Janus separate-port model). Mirror of
+ * hxnet_connection_open_plaintext_tls in rust/crates/hxnet/src/ffi.rs.
+ * Cert trust is the verify_cert callback (TOFU, post-handshake). */
+extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
+    hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
+    void *user_data);
+
+/* Production TOFU verify, defined in network.c. Hand-declared (like
+ * hx_htlc_close above) rather than via network.h to avoid pulling the
+ * connect-ctx / GSocketClient surface into this file. */
+extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                                 const char *fingerprint);
+
 /*
  * Single-connection state. gtkhx is single-conn today (the
  * MAX_CONN > 1 scaffolding in hx.h is a lie — see CLAUDE.md);
@@ -459,42 +521,44 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, int reason,
 {
     struct htlc_conn *htlc = user_data;
 
-    /* Tear down the hxnet handle here — the actor's already
-     * exited (that's what got us into this callback), so
-     * destroying the handle drops the cmd channel, the pump
-     * task, and the forwarder all together. Doing the destroy
-     * in this callback (instead of leaving it to a follow-up
-     * hx_bridge_uninstall) means the lifetime stays
-     * deterministic: the pump's JoinHandle and the
-     * MainForwarder are released before we return to the
-     * forwarder's outer scope, so there's no path where the
-     * handle survives the shutdown event.
+    /* The actor has already exited (that's what got us into this
+     * callback); we need to tear down the hxnet handle and the C-side
+     * connection state. The handle teardown (dropping the cmd
+     * channel, pump task, and forwarder) happens via
+     * hx_bridge_uninstall, reached through hx_htlc_close below — so
+     * the lifetime stays deterministic within this callback.
      *
-     * Order:
+     * Dispatch FIRST, while the handle is still installed. The actor
+     * has already exited (that's what got us here), so
+     * hx_bridge_dispatch_shutdown's only liveness gate is
+     * `htlc->fd != 0`; when that holds it runs hx_htlc_close, which
+     * emits DISCONNECTED, clears the pending tasks, and calls
+     * hx_bridge_uninstall — and uninstall is what destroys + clears
+     * bridge_handle. So after dispatch the handle is normally already
+     * gone.
      *
-     *   1. Snapshot the handle pointer + clear the globals.
-     *      Clearing first prevents re-entry via
-     *      hx_bridge_send_frame / hx_bridge_uninstall during
-     *      the dispatch (hx_htlc_close → hx_bridge_uninstall
-     *      below now sees no handle and short-circuits, as
-     *      designed).
-     *   2. Dispatch into hx_htlc_close. The legacy GIOStream
-     *      teardown code still runs (control_remove_all_sources
-     *      etc.) — it's a no-op for the hxnet path but does no
-     *      harm; mixing teardown sites isn't worth the
-     *      regression risk of branching it.
-     *   3. Destroy the snapshotted handle. Safe to do after
-     *      hx_htlc_close because nothing in the legacy
-     *      teardown path touches the hxnet globals (we
-     *      cleared them in step 1). */
-    hxnet_connection_opaque *to_destroy = bridge_handle;
-    bridge_handle = NULL;
-    bridge_htlc = NULL;
-
+     * (Earlier this cleared bridge_handle first and then dispatched,
+     * which combined with dispatch_shutdown's old !is_installed()
+     * guard to skip hx_htlc_close entirely — that left connect-refused
+     * and other server-initiated shutdowns stuck with a spinning
+     * throbber and dangling task rows.)
+     *
+     * Destroying the handle from inside hx_htlc_close runs within this
+     * forwarder closure — the same depth the previous explicit destroy
+     * ran at. */
     if (htlc) {
         hx_bridge_dispatch_shutdown (htlc, reason);
     }
-    if (to_destroy) {
+
+    /* Defensive: if dispatch didn't tear the handle down (htlc was
+     * NULL, or fd was already 0 from a prior close so dispatch bailed)
+     * release the actor's resources here so they're freed exactly
+     * once. Normal server-initiated shutdowns already cleared it via
+     * hx_htlc_close → hx_bridge_uninstall above. */
+    if (bridge_handle) {
+        hxnet_connection_opaque *to_destroy = bridge_handle;
+        bridge_handle = NULL;
+        bridge_htlc = NULL;
         hxnet_connection_destroy (to_destroy);
     }
 }
@@ -568,6 +632,99 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
         /* open_plaintext logs its own g_critical on the failure
          * paths (NULL/empty host, non-UTF-8 host, trans==0, runtime
          * panic). Leave the bridge uninstalled. */
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
+}
+
+gboolean
+hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
+                                     const char *host, guint16 port,
+                                     const char *login, const char *pass,
+                                     const char *name, guint16 icon,
+                                     guint16 version, guint16 caps,
+                                     guint32 trans, const char *cipher_alg)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (host != NULL && *host, FALSE);
+    g_return_val_if_fail (cipher_alg != NULL && *cipher_alg, FALSE);
+
+    if (bridge_handle) {
+        g_critical ("hxnet_bridge: orchestrated HOPE install attempted while "
+                    "a connection is already installed; refusing");
+        return FALSE;
+    }
+
+    login = login ? login : "";
+    pass  = pass  ? pass  : "";
+    name  = name  ? name  : "";
+
+    /* Same synchronous-install-before-return discipline as the
+     * plaintext variant: the bridge handle must be live before the
+     * forwarder can deliver the replayed step-2 reply. */
+    hxnet_connection_opaque *h = hxnet_connection_open_hope (
+        (const guint8 *) host, strlen (host), port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) pass, strlen (pass),
+        (const guint8 *) name, strlen (name),
+        icon, version, caps, trans,
+        (const guint8 *) cipher_alg, strlen (cipher_alg),
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+    if (!h) {
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
+}
+
+/* TLS TOFU trampoline: hxnet calls this on the lifecycle task with
+ * the peer cert fingerprint; route to the production verify, which
+ * keys on htlc->serverhost/serverport. */
+static int
+bridge_on_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
+{
+    struct htlc_conn *htlc = user_data;
+    if (!htlc || !fp) {
+        return 0; /* reject: no context / no fingerprint */
+    }
+    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    return hx_tls_orchestrator_verify_cert (htlc, fp_str) ? 1 : 0;
+}
+
+gboolean
+hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
+                                              const char *host, guint16 port,
+                                              const char *login,
+                                              const char *pass,
+                                              const char *name, guint16 icon,
+                                              guint16 version, guint16 caps,
+                                              guint32 trans)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (host != NULL && *host, FALSE);
+
+    if (bridge_handle) {
+        g_critical ("hxnet_bridge: orchestrated TLS install attempted while a "
+                    "connection is already installed; refusing");
+        return FALSE;
+    }
+
+    login = login ? login : "";
+    pass  = pass  ? pass  : "";
+    name  = name  ? name  : "";
+
+    hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
+        (const guint8 *) host, strlen (host), port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) pass, strlen (pass),
+        (const guint8 *) name, strlen (name),
+        icon, version, caps, trans,
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
+        bridge_on_verify_cert_cb, htlc);
+    if (!h) {
         return FALSE;
     }
     bridge_handle = h;

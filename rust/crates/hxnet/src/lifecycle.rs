@@ -54,6 +54,7 @@
 //! `LoginFailed` is a future variant; for Phase G-prelude every
 //! lifecycle failure is `StreamError` with a descriptive message.
 
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -61,6 +62,13 @@ use crate::{
     login_reply::recv_login_reply, magic::run_magic_exchange, Connection,
     ConnectionState, Event, Frame, ShutdownReason,
 };
+use crate::hope::{
+    build_step1_login, build_step2_login, select_algorithms, HopeStep1Request,
+    HopeStep2Request,
+};
+use crate::hope_blowfish::HopeMacAlg;
+use crate::hope_keys::{compute_blowfish_chain, derive_aead_keys, HopeCipherKind};
+use crate::transform::{compose, CipherLayer, CompressionKind};
 
 /// Parameters for the plaintext lifecycle. Strings are passed by
 /// owned `Vec<u8>` / `String` because the orchestrator runs as a
@@ -119,11 +127,114 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Wrap in a tokio buffer-mut wrapper isn't needed — TcpStream
-    // already implements AsyncRead+AsyncWrite. We pin via
-    // &mut binding within the function.
-    let mut stream = stream;
+    run_plaintext_over(stream, &req, cmd_rx, evt_tx).await;
+}
 
+/// Like [`run_plaintext_lifecycle`] but wraps the connected socket in
+/// TLS (the Mobius / Janus separate-port model: TLS-from-byte-zero on
+/// a dedicated port, then the ordinary Hotline protocol over the
+/// encrypted stream) before the magic exchange. The plaintext
+/// lifecycle then runs over the TLS stream unchanged.
+///
+/// State events: Resolving → Connecting → Connected → TlsHandshaking
+/// → MagicExchange → … . See [`crate::tls`] for the certificate-trust
+/// caveat (accept-any in this first cut; TOFU bridge pending).
+pub async fn run_plaintext_tls_lifecycle(
+    req: PlaintextOpenRequest,
+    verify: Option<Box<dyn Fn(&str) -> bool + Send>>,
+    cmd_rx: mpsc::Receiver<crate::Command>,
+    evt_tx: mpsc::Sender<Event>,
+) {
+    let tcp = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
+                    "connect: {e}"
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    if evt_tx
+        .send(Event::State(ConnectionState::Connected))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    if evt_tx
+        .send(Event::State(ConnectionState::TlsHandshaking))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    let (tls, webpki_ok) = match crate::tls::wrap_tls(tcp, &req.host).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
+                    "tls handshake: {e}"
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    // WebPKI first: if the server cert chained to a native trust root
+    // and the hostname matched (e.g. a Let's Encrypt cert), it's
+    // trusted silently — no prompt, no TOFU lookup, like a browser
+    // hitting a CA-signed site. Only when WebPKI did NOT validate do we
+    // fall back to the C-side TOFU callback, which looks the
+    // fingerprint up in the known-hosts store and (on UNKNOWN /
+    // MISMATCH) prompts the user. Running TOFU post-handshake — rather
+    // than inside the rustls verifier — keeps the (potentially
+    // blocking, main-thread-marshalled) decision off the handshake's
+    // critical path; a reject just closes the stream before any LOGIN
+    // bytes flow. `verify == None` (e.g. the live probe) skips TOFU.
+    if !webpki_ok.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(verify) = verify.as_ref() {
+            match crate::tls::peer_cert_fingerprint(&tls) {
+                Some(fp) => {
+                    if !verify(&fp) {
+                        let _ = evt_tx
+                            .send(Event::Shutdown(ShutdownReason::StreamError(
+                                "tls certificate rejected by trust check"
+                                    .to_string(),
+                            )))
+                            .await;
+                        return;
+                    }
+                }
+                None => {
+                    let _ = evt_tx
+                        .send(Event::Shutdown(ShutdownReason::StreamError(
+                            "tls peer presented no certificate".to_string(),
+                        )))
+                        .await;
+                    return;
+                }
+            }
+        }
+    }
+
+    run_plaintext_over(tls, &req, cmd_rx, evt_tx).await;
+}
+
+/// The post-connect plaintext lifecycle, generic over the transport
+/// so it runs identically over a raw TCP socket or a TLS stream:
+/// magic → LOGIN → reply → Option-B replay → HandshakeDone → actor.
+async fn run_plaintext_over<S>(
+    mut stream: S,
+    req: &PlaintextOpenRequest,
+    cmd_rx: mpsc::Receiver<crate::Command>,
+    evt_tx: mpsc::Sender<Event>,
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     // Phase C: magic exchange.
     if let Err(e) = run_magic_exchange(&mut stream, &evt_tx).await {
         let _ = evt_tx
@@ -180,18 +291,9 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Phase G (Option B): replay the LOGIN reply to the consumer as
-    // a synthetic frame, BEFORE HandshakeDone. The orchestrator
-    // already parsed the reply above to decide success/failure; here
-    // we hand the verbatim wire bytes back so the C-side rcv
-    // dispatch (rcv_task_login) re-parses them in its own path and
-    // produces the post-login side effects (version / banner /
-    // servername / USER_CHANGE / SELFINFO timer). Emitting before
-    // HandshakeDone matches the C-side install ordering: the bridge
-    // is installed synchronously in hx_connect_via_orchestrator
-    // before this task can deliver any event, so the replayed frame
-    // dispatches rather than being dropped by the install gate. See
-    // docs/phase-g-migration.md "Option B".
+    // Phase G (Option B): replay the LOGIN reply to the consumer as a
+    // synthetic frame, BEFORE HandshakeDone — see the plaintext-path
+    // rationale in docs/phase-g-migration.md "Option B".
     match Frame::from_raw(&reply.raw_frame) {
         Some(frame) => {
             if evt_tx.send(Event::Frame(frame)).await.is_err() {
@@ -199,9 +301,6 @@ pub async fn run_plaintext_lifecycle(
             }
         }
         None => {
-            // raw_frame was just received and decoded above, so this
-            // is effectively unreachable. Fail closed rather than
-            // silently dropping the post-login side effects.
             let _ = evt_tx
                 .send(Event::Shutdown(ShutdownReason::StreamError(
                     "login reply raw_frame failed to decode for replay"
@@ -212,7 +311,6 @@ pub async fn run_plaintext_lifecycle(
         }
     }
 
-    // HandshakeDone — the actor takes over from here.
     if evt_tx
         .send(Event::State(ConnectionState::HandshakeDone))
         .await
@@ -221,8 +319,299 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Phase R3.3.a actor: read/write plaintext Hotline frames.
     Connection::run_actor(stream, cmd_rx, evt_tx).await;
+}
+
+/// Parameters for the HOPE-Secure-Login lifecycle. Adds the cipher
+/// preference list to [`PlaintextOpenRequest`]'s fields; the MAC
+/// preference list is fixed (SHA256 → SHA1 → MD5, the spec order)
+/// and compression is not advertised in this first cut (the C side's
+/// compression negotiation is a follow-up — omitting it means the
+/// server simply doesn't compress).
+#[derive(Debug, Clone)]
+pub struct HopeOpenRequest {
+    pub host: String,
+    pub port: u16,
+    pub login: Vec<u8>,
+    pub password: Vec<u8>,
+    pub name: Vec<u8>,
+    pub icon: u16,
+    pub version: u16,
+    pub caps: u16,
+    pub trans: u32,
+    /// Cipher preference list, strongest-first wire labels (e.g.
+    /// `[b"CHACHA20-POLY1305", b"BLOWFISH"]`). The server picks one
+    /// and echoes it in the step-1 reply.
+    pub cipher_algs: Vec<Vec<u8>>,
+}
+
+/// Map a wire MAC-algorithm label onto the rekey enum the
+/// HopeBlowfish adapter uses.
+fn mac_label_to_hopemacalg(label: &[u8]) -> Option<HopeMacAlg> {
+    match label {
+        b"HMAC-SHA256" => Some(HopeMacAlg::Sha256),
+        b"HMAC-SHA1" => Some(HopeMacAlg::Sha1),
+        b"HMAC-MD5" => Some(HopeMacAlg::Md5),
+        _ => None,
+    }
+}
+
+/// Drive the HOPE-Secure-Login lifecycle end-to-end. Mirrors the
+/// legacy C handshake in `rcv.c::rcv_task_login` (the `if (pass)`
+/// branch) but in Rust, so the orchestrator owns the whole secure
+/// connect:
+///
+/// 1. DNS + TCP connect, magic exchange (plaintext, raw socket).
+/// 2. Step-1 LOGIN (empty creds + algorithm lists) → step-1 reply
+///    (server sessionkey + chosen MAC / cipher). Both plaintext.
+/// 3. Derive the HMAC chain + per-direction keys from the
+///    sessionkey + chosen MAC.
+/// 4. Step-2 LOGIN (real login + HMAC'd password) — sent **plaintext
+///    on the raw socket**, exactly like the C side which calls
+///    `hlwrite_chunks` before `cipher_*_init` (rcv.c L1965 vs
+///    L2014). Encryption begins *after* this send.
+/// 5. Wrap the transport in the negotiated cipher adapter
+///    (`compose`); the step-2 reply and everything after is read /
+///    written through it.
+/// 6. Replay the (decrypted) step-2 reply to the consumer as an
+///    `Event::Frame` before `HandshakeDone` — same Option B shape as
+///    the plaintext path — then hand the wrapped transport to the
+///    actor.
+pub async fn run_hope_lifecycle(
+    req: HopeOpenRequest,
+    cmd_rx: mpsc::Receiver<crate::Command>,
+    evt_tx: mpsc::Sender<Event>,
+) {
+    macro_rules! bail {
+        ($($arg:tt)*) => {{
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
+                    $($arg)*
+                ))))
+                .await;
+            return;
+        }};
+    }
+
+    let mut stream = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+        Ok(s) => s,
+        Err(e) => bail!("connect: {e}"),
+    };
+    if evt_tx
+        .send(Event::State(ConnectionState::Connected))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    if let Err(e) = run_magic_exchange(&mut stream, &evt_tx).await {
+        bail!("magic: {e}");
+    }
+
+    // ---- HOPE step 1 (plaintext) ----
+    let mac_algs: [&[u8]; 3] = [b"HMAC-SHA256", b"HMAC-SHA1", b"HMAC-MD5"];
+    let cipher_refs: Vec<&[u8]> = req.cipher_algs.iter().map(|v| v.as_slice()).collect();
+    let app_string = format!("hxnet {}", env!("CARGO_PKG_VERSION"));
+    let step1 = match build_step1_login(&HopeStep1Request {
+        trans: req.trans,
+        mac_algs: &mac_algs,
+        cipher_algs: &cipher_refs,
+        compress_algs: &[],
+        app_id: None,
+        app_string: Some(app_string.as_bytes()),
+    }) {
+        Ok(f) => f,
+        Err(e) => bail!("hope step1 build: {e}"),
+    };
+    if evt_tx
+        .send(Event::State(ConnectionState::HopeStep1))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    if let Err(e) = stream.write_all(&step1).await {
+        bail!("hope step1 send: {e}");
+    }
+    if let Err(e) = stream.flush().await {
+        bail!("hope step1 flush: {e}");
+    }
+
+    let step1_reply = match recv_login_reply(&mut stream, &evt_tx).await {
+        Ok(r) => r,
+        Err(e) => bail!("hope step1 reply: {e}"),
+    };
+    if !step1_reply.is_success() {
+        let txt = step1_reply
+            .error_text
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_else(|| format!("server flag={}", step1_reply.flag));
+        bail!("hope step1 rejected: {txt}");
+    }
+    let choice = match select_algorithms(&step1_reply) {
+        Some(c) => c,
+        None => bail!("hope step1 reply missing sessionkey / mac / cipher"),
+    };
+
+    // secure_login probe: the server signals the HMAC-login variant
+    // by echoing the *chosen MAC algorithm name* in the step-1
+    // reply's DATA_LOGIN chunk (e.g. mhxd echoes "HMAC-SHA1"). When
+    // it matches, the step-2 LOGIN field must be HMAC(login,
+    // sessionkey) rather than XOR. Mirrors
+    // src/hope.c::hope_parse_step1_reply L163-168 (memcmp of the
+    // login echo against reply->macalg). mhxd is secure_login; Janus
+    // guest is not (it echoes no login).
+    let secure_login = step1_reply
+        .login_echo
+        .as_deref()
+        .is_some_and(|echo| echo == choice.mac_alg.as_slice());
+
+    // ---- derive keys (mirrors hope_store_chain_keys + the AEAD /
+    // Blowfish key derivation in rcv.c) ----
+    let (password_mac, bfkeys) = match compute_blowfish_chain(
+        &req.password,
+        &choice.sessionkey,
+        &choice.mac_alg,
+    ) {
+        Ok(t) => t,
+        Err(e) => bail!("hope key derivation: {e}"),
+    };
+
+    // ---- HOPE step 2 (plaintext, raw socket) ----
+    let step2 = match build_step2_login(&HopeStep2Request {
+        trans: req.trans.wrapping_add(1),
+        login: &req.login,
+        password_mac: &password_mac,
+        choice: &choice,
+        name: &req.name,
+        icon: req.icon,
+        version: req.version,
+        caps: req.caps,
+        secure_login,
+    }) {
+        Ok(f) => f,
+        Err(e) => bail!("hope step2 build: {e}"),
+    };
+    if evt_tx
+        .send(Event::State(ConnectionState::HopeStep2))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    if let Err(e) = stream.write_all(&step2).await {
+        bail!("hope step2 send: {e}");
+    }
+    if let Err(e) = stream.flush().await {
+        bail!("hope step2 flush: {e}");
+    }
+
+    // ---- build the negotiated cipher layer; encryption starts here
+    // (everything after the step-2 send is ciphered) ----
+    let cipher_layer = match HopeCipherKind::from_label(&choice.cipher_alg) {
+        Some(HopeCipherKind::Blowfish) => {
+            let read_state =
+                match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
+                    Some(s) => s,
+                    None => bail!("blowfish read state init failed"),
+                };
+            let write_state =
+                match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.encode_key) {
+                    Some(s) => s,
+                    None => bail!("blowfish write state init failed"),
+                };
+            let macalg = match mac_label_to_hopemacalg(&choice.mac_alg) {
+                Some(m) => m,
+                None => bail!(
+                    "unknown MAC alg {:?} for HOPE-Blowfish rekey",
+                    String::from_utf8_lossy(&choice.mac_alg)
+                ),
+            };
+            CipherLayer::HopeBlowfish {
+                read_state,
+                read_key: bfkeys.decode_key.clone(),
+                write_state,
+                write_key: bfkeys.encode_key.clone(),
+                session_key: choice.sessionkey.clone(),
+                macalg,
+            }
+        }
+        Some(HopeCipherKind::ChaCha20Poly1305) => {
+            // derive_aead_keys takes (sessionkey, spec_encode_key,
+            // spec_decode_key). After compute_blowfish_chain's
+            // storage flip, bfkeys.decode_key holds spec_encode and
+            // bfkeys.encode_key holds spec_decode — the same
+            // (decode_key, encode_key) argument order the C side
+            // passes to cipher_aead_derive_session_keys.
+            let aead =
+                derive_aead_keys(&choice.sessionkey, &bfkeys.decode_key, &bfkeys.encode_key);
+            CipherLayer::ChaCha20Poly1305 {
+                read: hxcrypto_aead::AeadState {
+                    key: aead.decode_key,
+                    counter: 0,
+                    dir: hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT,
+                },
+                write: hxcrypto_aead::AeadState {
+                    key: aead.encode_key,
+                    counter: 0,
+                    dir: hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER,
+                },
+            }
+        }
+        None => bail!(
+            "server chose unsupported cipher {:?}",
+            String::from_utf8_lossy(&choice.cipher_alg)
+        ),
+    };
+
+    if evt_tx
+        .send(Event::State(ConnectionState::CipherTransition))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let mut wrapped = match compose(stream, cipher_layer, CompressionKind::None) {
+        Ok(w) => w,
+        Err(e) => bail!("cipher transport compose: {e}"),
+    };
+
+    // ---- step-2 reply, read THROUGH the cipher (encrypted) ----
+    let step2_reply = match recv_login_reply(&mut wrapped, &evt_tx).await {
+        Ok(r) => r,
+        Err(e) => bail!("hope step2 reply: {e}"),
+    };
+    if !step2_reply.is_success() {
+        let txt = step2_reply
+            .error_text
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_else(|| format!("server flag={}", step2_reply.flag));
+        bail!("hope login rejected: {txt}");
+    }
+
+    // Option B replay: hand the decrypted step-2 reply back to the C
+    // side as a synthetic frame before HandshakeDone.
+    match Frame::from_raw(&step2_reply.raw_frame) {
+        Some(frame) => {
+            if evt_tx.send(Event::Frame(frame)).await.is_err() {
+                return;
+            }
+        }
+        None => bail!("hope step2 reply raw_frame failed to decode for replay"),
+    }
+
+    if evt_tx
+        .send(Event::State(ConnectionState::HandshakeDone))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    Connection::run_actor(wrapped, cmd_rx, evt_tx).await;
 }
 
 #[cfg(test)]
@@ -452,6 +841,132 @@ mod tests {
             msg.contains("Login is incorrect"),
             "shutdown msg should carry server error text, got: {msg}"
         );
+    }
+
+    /// TEMPORARY live probe for run_hope_lifecycle against a real
+    /// HOPE server. Run with:
+    ///   GTKHX_LIVE_PORT=5510 GTKHX_LIVE_CIPHER=CHACHA20-POLY1305 \
+    ///     cargo test -p hxnet --lib live_hope -- --ignored --nocapture
+    /// (Janus = 5510 ChaCha20; mhxd = 5500 BLOWFISH.)
+    #[tokio::test]
+    #[ignore]
+    async fn live_hope_login() {
+        let port: u16 = std::env::var("GTKHX_LIVE_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5510);
+        let cipher = std::env::var("GTKHX_LIVE_CIPHER")
+            .unwrap_or_else(|_| "CHACHA20-POLY1305".into());
+        eprintln!("live_hope: port={port} cipher={cipher}");
+        let req = HopeOpenRequest {
+            host: "127.0.0.1".into(),
+            port,
+            login: b"guest".to_vec(),
+            password: b"".to_vec(),
+            name: b"HopeProbe".to_vec(),
+            icon: 412,
+            version: 185,
+            caps: 0x001F,
+            trans: 1,
+            cipher_algs: vec![cipher.into_bytes()],
+        };
+        let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
+        let lc = tokio::spawn(run_hope_lifecycle(req, cmd_rx, evt_tx));
+        let mut saw_hd = false;
+        let mut saw_frame = false;
+        while let Some(evt) =
+            tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
+                .await
+                .ok()
+                .flatten()
+        {
+            match &evt {
+                Event::Frame(f) => {
+                    eprintln!(
+                        "EVT Frame type=0x{:x} trans={} flag={} body={}",
+                        f.header.type_, f.header.trans, f.header.flag,
+                        f.body.len()
+                    );
+                    saw_frame = true;
+                }
+                other => eprintln!("EVT {other:?}"),
+            }
+            match evt {
+                Event::State(ConnectionState::HandshakeDone) => {
+                    saw_hd = true;
+                    break;
+                }
+                Event::Shutdown(_) => break,
+                _ => {}
+            }
+        }
+        drop(lc);
+        assert!(saw_frame, "no replay frame from server");
+        assert!(saw_hd, "no HandshakeDone from server");
+    }
+
+    /// TEMPORARY live probe for run_plaintext_tls_lifecycle against a
+    /// real separate-port-TLS server. Run with:
+    ///   GTKHX_LIVE_PORT=5610 cargo test -p hxnet --lib \
+    ///     live_plaintext_tls -- --ignored --nocapture
+    /// (Janus TLS = 5610.)
+    #[tokio::test]
+    #[ignore]
+    async fn live_plaintext_tls_login() {
+        let port: u16 = std::env::var("GTKHX_LIVE_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5610);
+        let req = PlaintextOpenRequest {
+            host: "127.0.0.1".into(),
+            port,
+            login: b"guest".to_vec(),
+            password: b"".to_vec(),
+            name: b"TlsProbe".to_vec(),
+            icon: 0,
+            version: 185,
+            caps: 0x001F,
+            trans: 1,
+        };
+        let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
+        let verify: Option<Box<dyn Fn(&str) -> bool + Send>> =
+            Some(Box::new(|fp: &str| {
+                eprintln!("CERT fingerprint: {fp}");
+                true
+            }));
+        let lc =
+            tokio::spawn(run_plaintext_tls_lifecycle(req, verify, cmd_rx, evt_tx));
+        let mut saw_hd = false;
+        let mut saw_frame = false;
+        while let Some(evt) =
+            tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
+                .await
+                .ok()
+                .flatten()
+        {
+            match &evt {
+                Event::Frame(f) => {
+                    eprintln!(
+                        "EVT Frame type=0x{:x} trans={} flag={} body={}",
+                        f.header.type_, f.header.trans, f.header.flag,
+                        f.body.len()
+                    );
+                    saw_frame = true;
+                }
+                other => eprintln!("EVT {other:?}"),
+            }
+            match evt {
+                Event::State(ConnectionState::HandshakeDone) => {
+                    saw_hd = true;
+                    break;
+                }
+                Event::Shutdown(_) => break,
+                _ => {}
+            }
+        }
+        drop(lc);
+        assert!(saw_frame, "no replay frame from TLS server");
+        assert!(saw_hd, "no HandshakeDone from TLS server");
     }
 
     /// Connect to a port nothing is listening on. Lifecycle

@@ -219,6 +219,37 @@ extern gboolean hx_bridge_install_orchestrated_plaintext (
     guint16 version, guint16 caps, guint32 trans);
 
 /*
+ * HOPE sibling of hx_bridge_install_orchestrated_plaintext: hxnet
+ * drives the full HOPE-Secure-Login handshake (magic + step1 + step2
+ * + cipher transition) and the encrypted post-login stream, then the
+ * handle becomes the live bridge. `cipher_alg` is the wire cipher
+ * label to advertise ("BLOWFISH" / "CHACHA20-POLY1305"); HOPE
+ * requires a non-empty cipher. `trans` is the step-1 transaction id
+ * (the step-2 reply, which gets replayed, carries `trans + 1` — the
+ * caller registers its login task under that value).
+ */
+extern gboolean hx_bridge_install_orchestrated_hope (
+    struct htlc_conn *htlc, const char *host, guint16 port,
+    const char *login, const char *pass, const char *name, guint16 icon,
+    guint16 version, guint16 caps, guint32 trans, const char *cipher_alg);
+
+/*
+ * TLS sibling of hx_bridge_install_orchestrated_plaintext: plaintext
+ * Hotline over TLS-from-byte-zero (Mobius / Janus separate-port
+ * model). hxnet does the TLS handshake then the plaintext lifecycle
+ * over the encrypted stream. The replayed reply is the LOGIN reply
+ * (trans = `trans`), same as the non-TLS plaintext path.
+ *
+ * Cert trust: the handshake accepts any cert, then the bridge's
+ * verify_cert callback runs the known-hosts TOFU decision
+ * (hx_tls_orchestrator_verify_cert) post-handshake, before LOGIN.
+ */
+extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
+    struct htlc_conn *htlc, const char *host, guint16 port,
+    const char *login, const char *pass, const char *name, guint16 icon,
+    guint16 version, guint16 caps, guint32 trans);
+
+/*
  * TRUE when an hxnet connection is currently installed.
  * Production code uses this as the gate between the new
  * (hxnet) and legacy (GIOStream) read / write paths.

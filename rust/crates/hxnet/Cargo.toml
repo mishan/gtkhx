@@ -88,6 +88,20 @@ tokio = { workspace = true, features = [
     "time",
     "net",
 ] }
+# TLS-in-orchestrator (separate-port model — Mobius / Janus ship TLS
+# on a dedicated port, TLS-from-byte-zero, then the regular Hotline
+# protocol over the encrypted stream). rustls via tokio-rustls; the
+# `ring` crypto provider is selected explicitly (default-features off)
+# so we don't depend on a process-wide default provider being
+# installed and avoid aws-lc-rs's heavier C-toolchain build deps.
+# rustls types are re-exported through `tokio_rustls::rustls`.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+# Native trust roots for WebPKI verification of server certs (so a
+# CA-valid cert — e.g. Let's Encrypt — validates and connects without a
+# trust prompt; only unverifiable certs fall through to the TOFU
+# known-hosts gate). 0.7 is the rustls-0.23 / pki-types-1.x line and
+# builds on the workspace's rustc-1.85 floor.
+rustls-native-certs = "0.7"
 
 [dev-dependencies]
 # `#[tokio::test]` + `tokio::io::duplex` for in-memory paired

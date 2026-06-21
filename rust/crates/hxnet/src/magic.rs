@@ -67,8 +67,24 @@ where
     stream.write_all(HTLC_MAGIC).await?;
     stream.flush().await?;
 
+    // Bound the server-magic read: a server that accepts the TCP
+    // connection but never sends its magic (or hangs) must not wedge
+    // the handshake forever. Mirrors the legacy MAGIC_TIMEOUT_SEC.
     let mut reply = [0u8; HTLS_MAGIC.len()];
-    stream.read_exact(&mut reply).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
+        stream.read_exact(&mut reply),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "server magic not received within {}s",
+                crate::HANDSHAKE_TIMEOUT_SECS
+            ),
+        )
+    })??;
     if &reply != HTLS_MAGIC {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
