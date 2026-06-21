@@ -74,6 +74,10 @@ pub struct PlaintextOpenRequest {
     pub name: Vec<u8>,
     pub icon: u16,
     pub version: u16,
+    /// Capability bitmask (`HTLC_CAP_*`) to advertise in the LOGIN.
+    /// 0 omits the chunk; production passes the same bits the legacy
+    /// LOGIN does so extensions negotiate.
+    pub caps: u16,
     pub trans: u32,
 }
 
@@ -137,6 +141,7 @@ pub async fn run_plaintext_lifecycle(
         name: &req.name,
         icon: req.icon,
         version: req.version,
+        caps: req.caps,
         trans: req.trans,
     };
     if let Err(e) = send_login(&mut stream, &login_req, &evt_tx).await {
@@ -281,6 +286,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 4012,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -409,6 +415,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 0,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -460,6 +467,7 @@ mod tests {
             name: b"".to_vec(),
             icon: 0,
             version: 0,
+            caps: 0,
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
@@ -535,6 +543,7 @@ mod tests {
             name: b"GtkHx".to_vec(),
             icon: 0,
             version: 150,
+            caps: 0,
             trans: 1,
         };
         let (handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();

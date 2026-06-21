@@ -411,7 +411,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *login, gsize login_len,
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint32 trans,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
@@ -535,7 +535,8 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
                                           const char *host, guint16 port,
                                           const char *login, const char *pass,
                                           const char *name, guint16 icon,
-                                          guint16 version, guint32 trans)
+                                          guint16 version, guint16 caps,
+                                          guint32 trans)
 {
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
@@ -561,7 +562,7 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
         (const guint8 *) login, strlen (login),
         (const guint8 *) pass, strlen (pass),
         (const guint8 *) name, strlen (name),
-        icon, version, trans,
+        icon, version, caps, trans,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         /* open_plaintext logs its own g_critical on the failure

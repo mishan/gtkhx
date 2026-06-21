@@ -1936,6 +1936,16 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
+    /* Seed htlc->ip_addr from the server string so the post-login
+	 * "<addr>: login successful" line in rcv_task_login isn't "?".
+	 * The legacy path fills this with the resolved numeric IP via
+	 * populate_htlc_remote_ip; the orchestrator owns the socket and
+	 * doesn't surface the peer addr yet, so the connect target is
+	 * the best display string we have. TODO: plumb the resolved
+	 * SocketAddr out of the hxnet lifecycle to match the legacy
+	 * numeric-IP display exactly. */
+    g_strlcpy (htlc->ip_addr, serverstr, sizeof (htlc->ip_addr));
+
     hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
                       server_addr);
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
@@ -1975,9 +1985,17 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * delivers events on the GLib main loop, which we don't re-enter
      * until this function returns — so installing synchronously here
      * closes the window. */
+    /* Advertise the same capability bits the legacy LOGIN does
+	 * (network.c::send_login) so extensions — chat-history,
+	 * inline-media, voice — negotiate on the orchestrator path too.
+	 * Without this chunk the server never sees our capabilities and
+	 * silently falls back to the legacy feature set. */
+    guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
+                 | HTLC_CAP_INLINE_MEDIA;
     if (!hx_bridge_install_orchestrated_plaintext (
             htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
-            /*version=*/185, HX_LOGIN_TRANS)) {
+            /*version=*/185, caps, HX_LOGIN_TRANS)) {
         /* Spawn refused. Roll back the sentinel + login task and
          * surface a disconnect so the UI doesn't sit on the
          * CONNECTING throbber forever. */

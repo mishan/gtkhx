@@ -216,7 +216,7 @@ extern gboolean hx_bridge_install_with_hope_state (struct htlc_conn *htlc,
 extern gboolean hx_bridge_install_orchestrated_plaintext (
     struct htlc_conn *htlc, const char *host, guint16 port,
     const char *login, const char *pass, const char *name, guint16 icon,
-    guint16 version, guint32 trans);
+    guint16 version, guint16 caps, guint32 trans);
 
 /*
  * TRUE when an hxnet connection is currently installed.

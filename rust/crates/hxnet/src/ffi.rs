@@ -1685,9 +1685,12 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
 /// - `name` (length `name_len`) — display name. Empty omits
 ///   the chunk.
 ///
-/// `icon` and `version` are 2-byte BE wire fields; 0 omits
-/// the chunk. `trans` is the transaction id for the LOGIN
-/// frame — pick a non-zero value (production uses a counter).
+/// `icon`, `version`, and `caps` are 2-byte BE wire fields; 0
+/// omits the chunk. `caps` is the `HTLC_CAP_*` bitmask — pass the
+/// same bits the legacy LOGIN advertises so extensions
+/// (chat-history / inline-media / voice) negotiate. `trans` is the
+/// transaction id for the LOGIN frame — pick a non-zero value
+/// (production uses a counter).
 ///
 /// **Plaintext only**: this FFI does NOT speak TLS or HOPE.
 /// Callers who need either route through the legacy
@@ -1718,6 +1721,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     name_len: usize,
     icon: u16,
     version: u16,
+    caps: u16,
     trans: u32,
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
@@ -1801,6 +1805,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         name: name_vec,
         icon,
         version,
+        caps,
         trans,
     };
 
