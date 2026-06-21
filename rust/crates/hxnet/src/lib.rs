@@ -75,6 +75,7 @@ pub mod lifecycle;
 pub mod login;
 pub mod login_reply;
 pub mod magic;
+pub mod tls;
 pub mod transform;
 
 pub use command::Command;

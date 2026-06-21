@@ -88,6 +88,14 @@ tokio = { workspace = true, features = [
     "time",
     "net",
 ] }
+# TLS-in-orchestrator (separate-port model — Mobius / Janus ship TLS
+# on a dedicated port, TLS-from-byte-zero, then the regular Hotline
+# protocol over the encrypted stream). rustls via tokio-rustls; the
+# `ring` crypto provider is selected explicitly (default-features off)
+# so we don't depend on a process-wide default provider being
+# installed and avoid aws-lc-rs's heavier C-toolchain build deps.
+# rustls types are re-exported through `tokio_rustls::rustls`.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 
 [dev-dependencies]
 # `#[tokio::test]` + `tokio::io::duplex` for in-memory paired

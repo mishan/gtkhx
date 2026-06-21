@@ -127,11 +127,76 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Wrap in a tokio buffer-mut wrapper isn't needed — TcpStream
-    // already implements AsyncRead+AsyncWrite. We pin via
-    // &mut binding within the function.
-    let mut stream = stream;
+    run_plaintext_over(stream, &req, cmd_rx, evt_tx).await;
+}
 
+/// Like [`run_plaintext_lifecycle`] but wraps the connected socket in
+/// TLS (the Mobius / Janus separate-port model: TLS-from-byte-zero on
+/// a dedicated port, then the ordinary Hotline protocol over the
+/// encrypted stream) before the magic exchange. The plaintext
+/// lifecycle then runs over the TLS stream unchanged.
+///
+/// State events: Resolving → Connecting → Connected → TlsHandshaking
+/// → MagicExchange → … . See [`crate::tls`] for the certificate-trust
+/// caveat (accept-any in this first cut; TOFU bridge pending).
+pub async fn run_plaintext_tls_lifecycle(
+    req: PlaintextOpenRequest,
+    cmd_rx: mpsc::Receiver<crate::Command>,
+    evt_tx: mpsc::Sender<Event>,
+) {
+    let tcp = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
+                    "connect: {e}"
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    if evt_tx
+        .send(Event::State(ConnectionState::Connected))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    if evt_tx
+        .send(Event::State(ConnectionState::TlsHandshaking))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    let tls = match crate::tls::wrap_tls(tcp, &req.host).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = evt_tx
+                .send(Event::Shutdown(ShutdownReason::StreamError(format!(
+                    "tls handshake: {e}"
+                ))))
+                .await;
+            return;
+        }
+    };
+
+    run_plaintext_over(tls, &req, cmd_rx, evt_tx).await;
+}
+
+/// The post-connect plaintext lifecycle, generic over the transport
+/// so it runs identically over a raw TCP socket or a TLS stream:
+/// magic → LOGIN → reply → Option-B replay → HandshakeDone → actor.
+async fn run_plaintext_over<S>(
+    mut stream: S,
+    req: &PlaintextOpenRequest,
+    cmd_rx: mpsc::Receiver<crate::Command>,
+    evt_tx: mpsc::Sender<Event>,
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     // Phase C: magic exchange.
     if let Err(e) = run_magic_exchange(&mut stream, &evt_tx).await {
         let _ = evt_tx
@@ -188,18 +253,9 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Phase G (Option B): replay the LOGIN reply to the consumer as
-    // a synthetic frame, BEFORE HandshakeDone. The orchestrator
-    // already parsed the reply above to decide success/failure; here
-    // we hand the verbatim wire bytes back so the C-side rcv
-    // dispatch (rcv_task_login) re-parses them in its own path and
-    // produces the post-login side effects (version / banner /
-    // servername / USER_CHANGE / SELFINFO timer). Emitting before
-    // HandshakeDone matches the C-side install ordering: the bridge
-    // is installed synchronously in hx_connect_via_orchestrator
-    // before this task can deliver any event, so the replayed frame
-    // dispatches rather than being dropped by the install gate. See
-    // docs/phase-g-migration.md "Option B".
+    // Phase G (Option B): replay the LOGIN reply to the consumer as a
+    // synthetic frame, BEFORE HandshakeDone — see the plaintext-path
+    // rationale in docs/phase-g-migration.md "Option B".
     match Frame::from_raw(&reply.raw_frame) {
         Some(frame) => {
             if evt_tx.send(Event::Frame(frame)).await.is_err() {
@@ -207,9 +263,6 @@ pub async fn run_plaintext_lifecycle(
             }
         }
         None => {
-            // raw_frame was just received and decoded above, so this
-            // is effectively unreachable. Fail closed rather than
-            // silently dropping the post-login side effects.
             let _ = evt_tx
                 .send(Event::Shutdown(ShutdownReason::StreamError(
                     "login reply raw_frame failed to decode for replay"
@@ -220,7 +273,6 @@ pub async fn run_plaintext_lifecycle(
         }
     }
 
-    // HandshakeDone — the actor takes over from here.
     if evt_tx
         .send(Event::State(ConnectionState::HandshakeDone))
         .await
@@ -229,7 +281,6 @@ pub async fn run_plaintext_lifecycle(
         return;
     }
 
-    // Phase R3.3.a actor: read/write plaintext Hotline frames.
     Connection::run_actor(stream, cmd_rx, evt_tx).await;
 }
 
@@ -814,6 +865,64 @@ mod tests {
         drop(lc);
         assert!(saw_frame, "no replay frame from server");
         assert!(saw_hd, "no HandshakeDone from server");
+    }
+
+    /// TEMPORARY live probe for run_plaintext_tls_lifecycle against a
+    /// real separate-port-TLS server. Run with:
+    ///   GTKHX_LIVE_PORT=5610 cargo test -p hxnet --lib \
+    ///     live_plaintext_tls -- --ignored --nocapture
+    /// (Janus TLS = 5610.)
+    #[tokio::test]
+    #[ignore]
+    async fn live_plaintext_tls_login() {
+        let port: u16 = std::env::var("GTKHX_LIVE_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5610);
+        let req = PlaintextOpenRequest {
+            host: "127.0.0.1".into(),
+            port,
+            login: b"guest".to_vec(),
+            password: b"".to_vec(),
+            name: b"TlsProbe".to_vec(),
+            icon: 0,
+            version: 185,
+            caps: 0x001F,
+            trans: 1,
+        };
+        let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
+        let lc = tokio::spawn(run_plaintext_tls_lifecycle(req, cmd_rx, evt_tx));
+        let mut saw_hd = false;
+        let mut saw_frame = false;
+        while let Some(evt) =
+            tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
+                .await
+                .ok()
+                .flatten()
+        {
+            match &evt {
+                Event::Frame(f) => {
+                    eprintln!(
+                        "EVT Frame type=0x{:x} trans={} flag={} body={}",
+                        f.header.type_, f.header.trans, f.header.flag,
+                        f.body.len()
+                    );
+                    saw_frame = true;
+                }
+                other => eprintln!("EVT {other:?}"),
+            }
+            match evt {
+                Event::State(ConnectionState::HandshakeDone) => {
+                    saw_hd = true;
+                    break;
+                }
+                Event::Shutdown(_) => break,
+                _ => {}
+            }
+        }
+        drop(lc);
+        assert!(saw_frame, "no replay frame from TLS server");
+        assert!(saw_hd, "no HandshakeDone from TLS server");
     }
 
     /// Connect to a port nothing is listening on. Lifecycle
