@@ -1907,14 +1907,17 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
  * connect + GPollable handshake with the hxnet orchestrator: hxnet
  * owns the socket from byte zero, drives the whole handshake itself
  * (magic + LOGIN for plaintext; magic + HOPE step1/step2 + cipher
- * transition for secure), and replays the final reply to us as a
- * synthetic frame so rcv_task_login (and its post-login side effects)
- * run unchanged. `secure` selects the HOPE path (htlc->cipheralg must
- * be set); otherwise the plaintext path. */
+ * transition for secure; TLS handshake then plaintext LOGIN for tls),
+ * and replays the final reply to us as a synthetic frame so
+ * rcv_task_login (and its post-login side effects) run unchanged.
+ * `secure` selects the HOPE path (htlc->cipheralg must be set); `tls`
+ * selects TLS-from-byte-zero (separate-port model). The two are
+ * mutually exclusive here — secure+tls (redundant double-encryption)
+ * stays on the legacy path. */
 static void
 hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
                              guint16 port, const char *login, const char *pass,
-                             gboolean secure)
+                             gboolean secure, gboolean tls)
 {
     struct task *login_tsk;
 
@@ -1935,7 +1938,11 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     htlc->chat_history_last_msgid = 0;
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
-    htlc->tls = 0; /* orchestrator path is non-TLS (plaintext or HOPE) */
+    /* Stamp the TLS flag so the HTXF subchannel workers (xfers.c /
+     * banner.c) wrap their data ports too. The control channel's TLS
+     * runs inside hxnet (rustls); HTXF keeps using the legacy
+     * GTlsConnection path, which reads htlc->tls. */
+    htlc->tls = tls ? 1 : 0;
     htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
@@ -2004,10 +2011,15 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
                  | HTLC_CAP_INLINE_MEDIA;
-    /* HOPE sends the display name in step 2; the plaintext path defers
-     * it to a post-login USER_CHANGE, so it omits the name here. */
+    /* HOPE sends the display name in step 2; the plaintext paths defer
+     * it to a post-login USER_CHANGE, so they omit the name here. */
     gboolean ok;
-    if (secure) {
+    if (tls) {
+        /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
+        ok = hx_bridge_install_orchestrated_plaintext_tls (
+            htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
+            /*version=*/185, caps, HX_LOGIN_TRANS);
+    } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
             htlc, serverstr, port, login, pass, htlc->name, htlc->icon,
             /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
@@ -2039,35 +2051,44 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     struct gtkhx_connect_ctx *ctx;
     GSocketClient *client;
 
-    /* Phase G: hxnet-owns-the-whole-lifecycle plaintext path, gated
-     * behind GTKHX_NEW_CONNECT while it bakes. Plaintext only — TLS
-     * and HOPE-secure logins still go through the legacy GIOStream
-     * connect path below until the orchestrator grows those (see
-     * docs/phase-g-migration.md "What about TLS and HOPE?"). The
-     * GTKHX_TLS env override is checked first so a GTKHX_TLS=1 +
-     * GTKHX_NEW_CONNECT=1 combo correctly stays on the legacy TLS
-     * path. */
+    /* Phase G: hxnet-owns-the-whole-lifecycle, gated behind
+     * GTKHX_NEW_CONNECT while it bakes. The orchestrator now covers
+     * plaintext, HOPE-Secure-Login, and plaintext-over-TLS
+     * (separate-port model). Only HOPE-over-TLS (redundant double
+     * encryption) and secure-without-a-cipher fall through to the
+     * legacy GIOStream path. The GTKHX_TLS env override is folded into
+     * want_tls so GTKHX_TLS=1 + GTKHX_NEW_CONNECT=1 takes the
+     * orchestrator TLS path. */
     {
         const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
         const char *tls_env = g_getenv ("GTKHX_TLS");
         gboolean want_tls = tls || (tls_env && *tls_env);
-        if (new_env && *new_env && !want_tls) {
-            if (!secure) {
-                /* Plaintext: orchestrator handles it. */
+        if (new_env && *new_env) {
+            if (want_tls && !secure) {
+                /* Plaintext LOGIN over TLS-from-byte-zero. NOTE: the
+                 * orchestrator TLS layer currently accepts any server
+                 * cert (TOFU bridge pending) — see src/tls (Rust). */
                 hx_connect_via_orchestrator (htlc, serverstr, port, login,
-                                             pass, /*secure=*/FALSE);
+                                             pass, /*secure=*/FALSE,
+                                             /*tls=*/TRUE);
                 return;
             }
-            if (htlc->cipheralg[0]) {
-                /* HOPE-Secure-Login with a negotiable cipher: the
-                 * orchestrator drives the full handshake. (TLS still
-                 * routes to the legacy path below; so does a secure
-                 * connect with no cipher configured, which the
-                 * orchestrator's HOPE path can't represent.) */
+            if (!want_tls && !secure) {
+                /* Plaintext. */
                 hx_connect_via_orchestrator (htlc, serverstr, port, login,
-                                             pass, /*secure=*/TRUE);
+                                             pass, /*secure=*/FALSE,
+                                             /*tls=*/FALSE);
                 return;
             }
+            if (!want_tls && secure && htlc->cipheralg[0]) {
+                /* HOPE-Secure-Login with a negotiable cipher. */
+                hx_connect_via_orchestrator (htlc, serverstr, port, login,
+                                             pass, /*secure=*/TRUE,
+                                             /*tls=*/FALSE);
+                return;
+            }
+            /* secure+tls (redundant) or secure-without-cipher: fall
+             * through to the legacy path. */
         }
     }
 

@@ -406,6 +406,75 @@ test_orchestrator_hope_chacha20 (void)
     run_hope_orchestrator_against (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305");
 }
 
+/* Drive the production hx_connect TLS path (GTKHX_NEW_CONNECT=1,
+ * tls=1, secure=0) against a matrix server's dedicated TLS port —
+ * the Mobius/Janus separate-port model: TLS handshake from byte zero,
+ * then a plaintext LOGIN over the encrypted stream. Asserts the full
+ * sequence reaches HANDSHAKE_DONE through the orchestrator's rustls
+ * path and the LOGIN reply was replayed (decrypted over TLS) to the C
+ * dispatch with the right trans + success flag.
+ *
+ * NOTE: the orchestrator TLS layer currently accepts any server cert
+ * (TOFU bridge pending), so this proves transport + framing, not cert
+ * trust. */
+static void
+test_orchestrator_tls_login (void)
+{
+    GPtrArray *cand = hx_test_servers_with (HX_TEST_CAP_TLS);
+    const hx_test_server *srv = NULL;
+    if (cand) {
+        for (guint i = 0; i < cand->len; i++) {
+            const hx_test_server *s = g_ptr_array_index (cand, i);
+            if (s->tls_port != 0) {
+                srv = s;
+                break;
+            }
+        }
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no TLS-capable server in matrix (need HX_TEST_CAP_TLS + a "
+            "tls_port; Janus). Start the Janus container with TLS ports.");
+        return;
+    }
+
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx,
+                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
+                /*secure=*/0, /*tls=*/1);
+    drive_until (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+
+    /* TLS carries a plaintext LOGIN, so the replayed reply is the
+     * LOGIN reply (trans HX_LOGIN_TRANS), like the non-TLS plaintext
+     * path. */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_ptr_array_unref (cand);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -417,6 +486,7 @@ main (int argc, char *argv[])
                      test_orchestrator_capabilities_negotiated);
     g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
     g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
+    g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
 
     return g_test_run ();
 }

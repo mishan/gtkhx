@@ -429,6 +429,20 @@ extern hxnet_connection_opaque *hxnet_connection_open_hope (
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
+/* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
+ * Janus separate-port model). Mirror of
+ * hxnet_connection_open_plaintext_tls in rust/crates/hxnet/src/ffi.rs.
+ * SECURITY: the Rust side currently accepts any server cert (TOFU
+ * bridge pending). */
+extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
+    hxnet_state_cb_t on_state, void *user_data);
+
 /*
  * Single-connection state. gtkhx is single-conn today (the
  * MAX_CONN > 1 scaffolding in hx.h is a lie — see CLAUDE.md);
@@ -621,6 +635,43 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
         (const guint8 *) name, strlen (name),
         icon, version, caps, trans,
         (const guint8 *) cipher_alg, strlen (cipher_alg),
+        bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
+    if (!h) {
+        return FALSE;
+    }
+    bridge_handle = h;
+    bridge_htlc   = htlc;
+    return TRUE;
+}
+
+gboolean
+hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
+                                              const char *host, guint16 port,
+                                              const char *login,
+                                              const char *pass,
+                                              const char *name, guint16 icon,
+                                              guint16 version, guint16 caps,
+                                              guint32 trans)
+{
+    g_return_val_if_fail (htlc != NULL, FALSE);
+    g_return_val_if_fail (host != NULL && *host, FALSE);
+
+    if (bridge_handle) {
+        g_critical ("hxnet_bridge: orchestrated TLS install attempted while a "
+                    "connection is already installed; refusing");
+        return FALSE;
+    }
+
+    login = login ? login : "";
+    pass  = pass  ? pass  : "";
+    name  = name  ? name  : "";
+
+    hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
+        (const guint8 *) host, strlen (host), port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) pass, strlen (pass),
+        (const guint8 *) name, strlen (name),
+        icon, version, caps, trans,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         return FALSE;

@@ -1818,6 +1818,126 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     )
 }
 
+/// Open a plaintext-Hotline-over-TLS connection (the Mobius / Janus
+/// separate-port model: TLS-from-byte-zero on a dedicated port, then
+/// the ordinary plaintext Hotline protocol over the encrypted
+/// stream). The TLS sibling of [`hxnet_connection_open_plaintext`];
+/// runs [`crate::lifecycle::run_plaintext_tls_lifecycle`].
+///
+/// SECURITY: the current TLS path accepts ANY server certificate
+/// (see [`crate::tls`]). It is gated behind the C-side
+/// `GTKHX_NEW_CONNECT` env var and is not production-safe until the
+/// TOFU trust bridge lands.
+///
+/// Parameters and safety are identical to
+/// [`hxnet_connection_open_plaintext`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: NULL on_event / on_shutdown"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: trans=0 is reserved"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let login_vec = if login_len == 0 || login.is_null() {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 || password.is_null() {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 || name.is_null() {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls: Runtime::global \
+                 panicked; aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    let req = crate::lifecycle::PlaintextOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+    };
+
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_plaintext_tls_lifecycle(req, cmd_rx, evt_tx).await;
+    });
+
+    wire_callback_state_with_on_state(
+        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+    )
+}
+
 /// Open a HOPE-Secure-Login connection with hxnet driving the full
 /// handshake — magic + step-1 + step-2 + cipher transition — and the
 /// post-handshake encrypted stream. The HOPE sibling of

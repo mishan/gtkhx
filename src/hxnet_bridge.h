@@ -234,6 +234,21 @@ extern gboolean hx_bridge_install_orchestrated_hope (
     guint16 version, guint16 caps, guint32 trans, const char *cipher_alg);
 
 /*
+ * TLS sibling of hx_bridge_install_orchestrated_plaintext: plaintext
+ * Hotline over TLS-from-byte-zero (Mobius / Janus separate-port
+ * model). hxnet does the TLS handshake then the plaintext lifecycle
+ * over the encrypted stream. The replayed reply is the LOGIN reply
+ * (trans = `trans`), same as the non-TLS plaintext path.
+ *
+ * SECURITY: the Rust TLS layer currently accepts any server cert
+ * (TOFU bridge pending) — only reachable via GTKHX_NEW_CONNECT.
+ */
+extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
+    struct htlc_conn *htlc, const char *host, guint16 port,
+    const char *login, const char *pass, const char *name, guint16 icon,
+    guint16 version, guint16 caps, guint32 trans);
+
+/*
  * TRUE when an hxnet connection is currently installed.
  * Production code uses this as the gate between the new
  * (hxnet) and legacy (GIOStream) read / write paths.
