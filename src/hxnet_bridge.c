@@ -22,6 +22,7 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
+#include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
 
 /* Forward declaration of the production header decoder
  * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
@@ -346,6 +347,7 @@ typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
  * GtkhxConnectionState equivalent are named here; the
  * intermediate handshake states are dropped). */
 #define HXNET_BRIDGE_STATE_CONNECTED       2
+#define HXNET_BRIDGE_STATE_LOGIN_SENDING   5
 #define HXNET_BRIDGE_STATE_HANDSHAKE_DONE 10
 
 #define HXNET_BRIDGE_CIPHER_NONE              0
@@ -471,11 +473,9 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
     void *user_data);
 
-/* Production TOFU verify, defined in network.c. Hand-declared (like
- * hx_htlc_close above) rather than via network.h to avoid pulling the
- * connect-ctx / GSocketClient surface into this file. */
-extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
-                                                 const char *fingerprint);
+/* hx_tls_orchestrator_verify_cert (production TOFU verify, defined in
+ * network.c) and hx_orchestrator_register_login_task are both declared
+ * in network.h, included above. */
 
 /*
  * Single-connection state. gtkhx is single-conn today (the
@@ -577,7 +577,7 @@ bridge_on_shutdown_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, int reason,
  * CONNECTING was already emitted in hx_connect_via_orchestrator. */
 static void
 bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
-                    void *user_data G_GNUC_UNUSED)
+                    void *user_data)
 {
     GtkhxSession *sess = gtkhx_session_get_default ();
     switch (state) {
@@ -585,9 +585,25 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
         gtkhx_session_emit_connection_state (sess,
                                              GTKHX_CONNECTION_TCP_CONNECTED);
         break;
-    case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
+    case HXNET_BRIDGE_STATE_LOGIN_SENDING:
+        /* Magic done, credentials about to go out — the orchestrator's
+         * equivalent of the legacy path's send_login moment. Drive the
+         * same two UI effects, in the same order, so the Tasks window
+         * looks identical to legacy: emit HANDSHAKE_DONE (which deletes
+         * the coarse "Connecting" task), then register the "login"
+         * protocol task. The login task must exist before the replayed
+         * LOGIN/step-2 reply frame arrives to dispatch to it; that
+         * frame is emitted strictly after this state on the same
+         * ordered event channel, so registering here is in time. */
         gtkhx_session_emit_connection_state (sess,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
+        hx_orchestrator_register_login_task ((struct htlc_conn *) user_data);
+        break;
+    case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
+        /* Rust's end-of-handshake state. No view transition here: the
+         * coarse HANDSHAKE_DONE already fired at LOGIN_SENDING above,
+         * and login completion is signalled by LOGIN_READY, which
+         * rcv_task_login emits when the replayed reply dispatches. */
         break;
     default:
         break;

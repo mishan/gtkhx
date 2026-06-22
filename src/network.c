@@ -1907,6 +1907,42 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
  * docs/phase-g-migration.md. */
 #define HX_LOGIN_TRANS 1u
 
+/* Trans the replayed LOGIN (or HOPE step-2) reply will carry, stashed
+ * by hx_connect_via_orchestrator and consumed by
+ * hx_orchestrator_register_login_task when the bridge's LOGIN_SENDING
+ * state fires. Single-connection scope (see sess_from_htlc). */
+static guint32 orchestrator_login_reply_trans = HX_LOGIN_TRANS;
+
+/* Register the orchestrator's "login" protocol task. Called from the
+ * bridge's LOGIN_SENDING state callback — i.e. after magic completes
+ * and just before the credentials reply comes back, matching the
+ * legacy send_login timing so the Tasks window shows the login task
+ * only once the connection is up (not concurrently with the coarse
+ * "Connecting" task the way an up-front registration did).
+ *
+ * The replayed reply dispatches here via hx_rcv_hdr -> task_with_trans,
+ * so the task must be keyed on orchestrator_login_reply_trans. The
+ * NULL ptr arg selects rcv_task_login's post-login (else) branch.
+ * htlc->trans is currently the post-login send counter
+ * (reply_trans + 1); set it to reply_trans for the task_new key, then
+ * restore so post-login sends don't collide. */
+void
+hx_orchestrator_register_login_task (struct htlc_conn *htlc)
+{
+    if (!htlc) {
+        return;
+    }
+    /* Idempotent: never double-register (LOGIN_SENDING fires once, but
+     * guard anyway so a stray repeat can't strand a duplicate row). */
+    if (task_with_trans (&the_session, orchestrator_login_reply_trans)) {
+        return;
+    }
+    guint32 saved = htlc->trans;
+    htlc->trans = orchestrator_login_reply_trans;
+    task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
+    htlc->trans = saved;
+}
+
 /* Phase G (hxnet-owns-the-whole-lifecycle). Gated behind
  * GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy GSocketClient
  * connect + GPollable handshake with the hxnet orchestrator: hxnet
@@ -1924,8 +1960,6 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
                              guint16 port, const char *login, const char *pass,
                              gboolean secure, gboolean tls)
 {
-    struct task *login_tsk;
-
     /* 1. Preamble — mirrors hx_connect's non-socket setup. */
     if (current_cancel) {
         g_cancellable_cancel (current_cancel);
@@ -1966,28 +2000,32 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                          GTKHX_CONNECTION_CONNECTING);
 
-    /* 2. Pin the LOGIN trans and register the reply task. The
-     * replayed reply dispatches to rcv_task_login only if a task is
-     * registered under the trans the orchestrator's LOGIN carries
-     * (hx_rcv_task -> task_with_trans; a miss is a silent
-     * fallthrough). The orchestrator owns the send, so pin the trans
-     * to a shared constant. The final bump to TRANS+1 keeps the
-     * post-login follow-up sends (issued from inside rcv_task_login)
-     * from colliding with the login task — the legacy path got that
-     * for free from the C-side LOGIN send's htlc->trans++. The ptr
-     * arg (pass) is NULL, selecting rcv_task_login's post-login (else)
-     * branch in both modes.
+    /* 2. Pin the LOGIN trans. The replayed reply dispatches to
+     * rcv_task_login only if a task is registered under the trans the
+     * orchestrator's LOGIN carries (hx_rcv_task -> task_with_trans; a
+     * miss is a silent fallthrough). The orchestrator owns the send,
+     * so pin the trans to a shared constant.
+     *
+     * Unlike the earlier draft, the login task is NOT registered here.
+     * Registering it up front made it appear in the Tasks window
+     * concurrently with the coarse "Connecting" task for the whole
+     * connect — different from the legacy path, where the login task
+     * only appears once the connection is up and credentials are going
+     * out. Instead we stash the reply trans and register the task
+     * lazily from the bridge's LOGIN_SENDING state callback
+     * (hx_orchestrator_register_login_task), which fires after magic
+     * and before the replayed reply — matching legacy's send_login
+     * timing. The +1 bump keeps post-login follow-up sends (issued
+     * from inside rcv_task_login) from colliding with the login task;
+     * the deferred registration restores this value afterwards.
      *
      * The replayed reply's trans differs by mode: the plaintext path
      * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
      * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
-     * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1).
-     * Register the login task under whichever trans the replay will
-     * carry, then bump past it for the post-login sends. */
-    guint32 reply_trans = secure ? (HX_LOGIN_TRANS + 1) : HX_LOGIN_TRANS;
-    htlc->trans = reply_trans;
-    login_tsk = task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-    htlc->trans = reply_trans + 1;
+     * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
+    orchestrator_login_reply_trans = secure ? (HX_LOGIN_TRANS + 1)
+                                            : HX_LOGIN_TRANS;
+    htlc->trans = orchestrator_login_reply_trans + 1;
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -2035,19 +2073,50 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
             /*version=*/185, caps, HX_LOGIN_TRANS);
     }
     if (!ok) {
-        /* Spawn refused. Roll back the sentinel + login task and
-         * surface a disconnect so the UI doesn't sit on the
-         * CONNECTING throbber forever. */
+        /* Spawn refused. Roll back the sentinel and surface a
+         * disconnect so the UI doesn't sit on the CONNECTING throbber
+         * forever. No login task to roll back — it isn't registered
+         * until the LOGIN_SENDING state, which a refused spawn never
+         * reaches. */
         htlc->fd = 0;
-        if (login_tsk) {
-            task_delete (&the_session, login_tsk);
-        }
         gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                              GTKHX_CONNECTION_DISCONNECTED);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           _ ("could not start connection to %s\n"),
                           server_addr);
     }
+}
+
+/* Phase G default-flip control. PHASE_G_DEFAULT_ON lives in network.h
+ * (shared with the /phase_g/gate_default trip-wire test). Precedence:
+ * an explicit GTKHX_OLD_CONNECT=1 (force legacy) beats an explicit
+ * GTKHX_NEW_CONNECT (force orchestrator) — a user debugging a
+ * connection issue can always force the legacy path. With neither set,
+ * PHASE_G_DEFAULT_ON decides. */
+
+/* "0" is the universally-understood opt-out token (matches the
+ * GTKHX_USE_HXNET convention in hxnet_opt_in above); any other value,
+ * including empty, counts as "set". */
+static gboolean
+env_flag_set (const char *name)
+{
+    const char *v = g_getenv (name);
+    return v != NULL && *v != '\0' && g_strcmp0 (v, "0") != 0;
+}
+
+/* TRUE when hx_connect should route through the Phase G orchestrator
+ * rather than the legacy GIOStream connect path. Centralizes the gate
+ * polarity so the default-flip is a single constant change. */
+static gboolean
+hx_connect_use_orchestrator (void)
+{
+    if (env_flag_set ("GTKHX_OLD_CONNECT")) {
+        return FALSE; /* explicit opt-out wins */
+    }
+    if (env_flag_set ("GTKHX_NEW_CONNECT")) {
+        return TRUE; /* explicit opt-in */
+    }
+    return PHASE_G_DEFAULT_ON;
 }
 
 void
@@ -2080,19 +2149,19 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
         }
     }
 
-    /* Phase G: hxnet-owns-the-whole-lifecycle, gated behind
-     * GTKHX_NEW_CONNECT while it bakes. The orchestrator now covers
-     * plaintext, HOPE-Secure-Login, and plaintext-over-TLS
-     * (separate-port model). HOPE-over-TLS is rejected above;
-     * secure-without-a-cipher falls through to the legacy GIOStream
-     * path. The GTKHX_TLS env override is folded into
-     * want_tls so GTKHX_TLS=1 + GTKHX_NEW_CONNECT=1 takes the
-     * orchestrator TLS path. */
+    /* Phase G: hxnet-owns-the-whole-lifecycle. The path selection is
+     * centralized in hx_connect_use_orchestrator() (opt-in/opt-out env
+     * vars + PHASE_G_DEFAULT_ON) so the eventual default-flip is a
+     * one-line change. The orchestrator now covers plaintext,
+     * HOPE-Secure-Login, and plaintext-over-TLS (separate-port model).
+     * HOPE-over-TLS is rejected above; secure-without-a-cipher falls
+     * through to the legacy GIOStream path. The GTKHX_TLS env override
+     * is folded into want_tls so GTKHX_TLS=1 takes the orchestrator TLS
+     * path when the orchestrator is selected. */
     {
-        const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
         const char *tls_env = g_getenv ("GTKHX_TLS");
         gboolean want_tls = tls || (tls_env && *tls_env);
-        if (new_env && *new_env) {
+        if (hx_connect_use_orchestrator ()) {
             if (want_tls && !secure) {
                 /* Plaintext LOGIN over TLS-from-byte-zero. Cert trust
                  * is the same TOFU check the legacy path uses, run

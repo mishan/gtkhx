@@ -99,6 +99,211 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     }
 }
 
+/* ================================================================== *
+ *  Orchestrated transport (Phase G increment 2)                       *
+ * ================================================================== *
+ *
+ * The legacy harness hand-rolls connect + magic + LOGIN + recv over a
+ * raw blocking socket — a second client wire implementation that never
+ * exercises the production connect path (the gap that let the
+ * capabilities regression ship; see docs/phase-g-migration.md).
+ *
+ * When GTKHX_HARNESS_ORCHESTRATED is set, the login entry points
+ * (integration_open_login_or_skip + _to_caps_or_skip) instead drive
+ * connect + magic + LOGIN + reply through the SAME production
+ * orchestrator the GUI uses (hxnet's run_plaintext_lifecycle, via the
+ * polling FFI hxnet_connection_open_plaintext_polling). They return a
+ * *synthetic* fd in the ORCH_FD_BASE range; integration_send,
+ * integration_recv_message, and integration_close detect that range
+ * and route through the actor (send_frame / try_recv_frame / destroy).
+ * Real socket fds (xfer data channels, tracker connections) are below
+ * the base and stay on the legacy path untouched.
+ *
+ * Net effect: the existing ~30 Tier 3 binaries run unchanged under
+ * either transport. CI runs the suite twice — legacy and orchestrated
+ * — so the production connect+login path is continuously exercised
+ * against live servers.
+ *
+ * The HOPE and TLS open helpers are deliberately NOT routed here: they
+ * drive their own crypto/transport over a raw fd and are covered by
+ * the dedicated orchestrator tests (test_phase_g_connect). Setting the
+ * env var leaves those paths on the legacy transport.
+ */
+
+typedef struct hxnet_connection hxnet_connection;
+
+typedef struct {
+    guint32 type_;
+    guint32 trans;
+    guint32 flag;
+    guint16 hc;
+    guint16 _pad;
+    guint32 body_len;
+    guint8 *body_ptr;
+} hxnet_frame_t;
+
+#define HXNET_RECV_EMPTY    0
+#define HXNET_RECV_FRAME    1
+#define HXNET_RECV_SHUTDOWN 2
+
+#define HXNET_SEND_OK 0
+
+extern hxnet_connection *hxnet_connection_open_plaintext_polling (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans);
+extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
+                                            hxnet_frame_t *out_frame,
+                                            int *out_reason);
+extern int hxnet_connection_send_frame (hxnet_connection *handle,
+                                        const guint8 *data, guint len);
+extern void hxnet_connection_destroy (hxnet_connection *handle);
+extern void hxnet_frame_free (hxnet_frame_t *frame);
+
+/* Synthetic-fd space for orchestrated control connections. Picked far
+ * above any real socket fd so orch_lookup can branch on the value
+ * alone. ORCH_MAX bounds concurrent orchestrated connections — two is
+ * the most any test needs today (test_two_client_chat), 8 is slack. */
+#define ORCH_FD_BASE 0x40000000
+#define ORCH_MAX     8
+
+static hxnet_connection *orch_table[ORCH_MAX];
+
+gboolean
+integration_harness_orchestrated (void)
+{
+    const char *e = g_getenv ("GTKHX_HARNESS_ORCHESTRATED");
+    return e && *e && g_strcmp0 (e, "0") != 0;
+}
+
+static int
+orch_register (hxnet_connection *h)
+{
+    for (int i = 0; i < ORCH_MAX; i++) {
+        if (!orch_table[i]) {
+            orch_table[i] = h;
+            return ORCH_FD_BASE + i;
+        }
+    }
+    return -1;
+}
+
+static hxnet_connection *
+orch_lookup (int fd)
+{
+    if (fd < ORCH_FD_BASE) {
+        return NULL;
+    }
+    int i = fd - ORCH_FD_BASE;
+    if (i < 0 || i >= ORCH_MAX) {
+        return NULL;
+    }
+    return orch_table[i];
+}
+
+static void
+orch_unregister (int fd)
+{
+    hxnet_connection *h = orch_lookup (fd);
+    if (h) {
+        hxnet_connection_destroy (h);
+        orch_table[fd - ORCH_FD_BASE] = NULL;
+    }
+}
+
+/* Pack a 22-byte Hotline header byte-for-byte the way
+ * src/hxnet_bridge.c::hx_bridge_pack_header does — reconstructing the
+ * wire frame the actor already parsed so the downstream chunk walkers
+ * (dh_start / hdr_type) see exactly what a legacy raw read would have
+ * left in htlc->in.buf. Reimplemented locally rather than linking
+ * hxnet_bridge.c, which would drag in the GTK-side session/bridge
+ * state the harness deliberately excludes. The wire `len` encodes
+ * body_len + sizeof(hc) (Hotline's hc-counts-as-data quirk that
+ * hl_hdr_decode reverses); len2 is the legacy unused zero field. */
+static void
+orch_pack_header (guint8 *dst, guint32 type, guint32 trans, guint32 flag,
+                  guint16 hc, guint32 body_len)
+{
+    const guint32 wire_len = body_len + (guint32) sizeof (guint16);
+    dst[0]  = (guint8) ((type     >> 24) & 0xff);
+    dst[1]  = (guint8) ((type     >> 16) & 0xff);
+    dst[2]  = (guint8) ((type     >>  8) & 0xff);
+    dst[3]  = (guint8) ( type            & 0xff);
+    dst[4]  = (guint8) ((trans    >> 24) & 0xff);
+    dst[5]  = (guint8) ((trans    >> 16) & 0xff);
+    dst[6]  = (guint8) ((trans    >>  8) & 0xff);
+    dst[7]  = (guint8) ( trans           & 0xff);
+    dst[8]  = (guint8) ((flag     >> 24) & 0xff);
+    dst[9]  = (guint8) ((flag     >> 16) & 0xff);
+    dst[10] = (guint8) ((flag     >>  8) & 0xff);
+    dst[11] = (guint8) ( flag            & 0xff);
+    dst[12] = (guint8) ((wire_len >> 24) & 0xff);
+    dst[13] = (guint8) ((wire_len >> 16) & 0xff);
+    dst[14] = (guint8) ((wire_len >>  8) & 0xff);
+    dst[15] = (guint8) ( wire_len        & 0xff);
+    dst[16] = 0;
+    dst[17] = 0;
+    dst[18] = 0;
+    dst[19] = 0;
+    dst[20] = (guint8) ((hc >> 8) & 0xff);
+    dst[21] = (guint8) ( hc       & 0xff);
+}
+
+/* Drive connect + magic + LOGIN + reply-replay through the production
+ * orchestrator and register the resulting actor as a synthetic fd.
+ * Returns the synthetic fd, or -1 (with g_test_fail_printf already
+ * called) on open failure. The caller runs the same post-LOGIN drain
+ * (integration_drain_until_selfinfo_or_error) it would for a legacy
+ * connection — the replayed LOGIN reply is the first frame the actor
+ * delivers, exactly as the GUI's rcv path sees it. */
+static int
+orch_open_login (struct htlc_conn *htlc, const char *host, int port,
+                 const char *login, const char *display_name, guint16 icon,
+                 guint16 caps)
+{
+    if (!login) {
+        login = "guest";
+    }
+    const char *name = (display_name && *display_name) ? display_name : "";
+    hxnet_connection *h = hxnet_connection_open_plaintext_polling (
+        (const guint8 *) host, strlen (host), (guint16) port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) "", 0,             /* guest: empty password */
+        (const guint8 *) name, strlen (name),
+        icon, /*version=*/185, caps, /*trans=*/1);
+    if (!h) {
+        g_test_fail_printf (
+            "hxnet_connection_open_plaintext_polling(%s:%d) returned NULL — "
+            "orchestrator could not start the connection.",
+            host, port);
+        return -1;
+    }
+    int fd = orch_register (h);
+    if (fd < 0) {
+        hxnet_connection_destroy (h);
+        g_test_fail_printf ("orchestrated transport table full (>%d "
+                            "concurrent connections).",
+                            ORCH_MAX);
+        return -1;
+    }
+
+    /* hlpack assigns each outgoing frame's trans from htlc->trans, then
+     * increments (proto_helpers.c). In the legacy path the LOGIN send
+     * bumps htlc->trans off zero; here the orchestrator owns LOGIN (it
+     * used trans=1 internally), so the harness's htlc->trans is still
+     * the memset-zero value. Seed it past the LOGIN trans so the first
+     * post-login send the test makes gets a unique nonzero trans —
+     * test helpers capture htlc->trans as the "expected reply trans"
+     * and g_assert it's nonzero. Mirrors production's
+     * network.c htlc->trans = reply_trans + 1 convention. */
+    if (htlc) {
+        htlc->trans = 2;
+    }
+    return fd;
+}
+
 int
 hx_integration_connect_to (const char *host, int port, int timeout_ms)
 {
@@ -212,6 +417,19 @@ integration_recv (int fd, void *buf, gsize len)
 gboolean
 integration_send (int fd, const void *buf, gsize len)
 {
+    /* Orchestrated control connection: the actor owns the socket, so
+     * a "send" is a full pre-framed Hotline message (header + body, as
+     * the hlpack helpers produced it) handed to the actor's write
+     * channel. Real fds fall through to the raw write loop below. */
+    hxnet_connection *oh = orch_lookup (fd);
+    if (oh) {
+        if (len > G_MAXUINT) {
+            return FALSE;
+        }
+        return hxnet_connection_send_frame (oh, buf, (guint) len)
+               == HXNET_SEND_OK;
+    }
+
     const guint8 *p = buf;
     gsize remaining = len;
 
@@ -252,6 +470,10 @@ integration_handshake (int fd)
 void
 integration_close (int fd)
 {
+    if (orch_lookup (fd)) {
+        orch_unregister (fd);
+        return;
+    }
     if (fd >= 0) {
         close (fd);
     }
@@ -315,6 +537,43 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
     htlc->in.buf = NULL;
     htlc->in.pos = 0;
     htlc->in.len = 0;
+
+    /* Orchestrated control connection: the actor delivers whole,
+     * already-parsed frames. Poll the event queue, then rebuild the
+     * 22-byte header + body into htlc->in so every downstream chunk
+     * walker (dh_start / hdr_type / extractors) works byte-identically
+     * to the legacy raw-read path. */
+    hxnet_connection *oh = orch_lookup (fd);
+    if (oh) {
+        gint64 deadline = g_get_monotonic_time ()
+                          + (gint64) timeout_ms * 1000;
+        for (;;) {
+            hxnet_frame_t f;
+            int reason = 0;
+            int rc = hxnet_connection_try_recv_frame (oh, &f, &reason);
+            if (rc == HXNET_RECV_FRAME) {
+                gsize total = SIZEOF_HL_HDR + f.body_len;
+                htlc->in.buf = g_malloc (total);
+                orch_pack_header (htlc->in.buf, f.type_, f.trans, f.flag,
+                                  f.hc, f.body_len);
+                if (f.body_len > 0 && f.body_ptr) {
+                    memcpy (htlc->in.buf + SIZEOF_HL_HDR, f.body_ptr,
+                            f.body_len);
+                }
+                htlc->in.pos = total;
+                htlc->in.len = total;
+                hxnet_frame_free (&f);
+                return TRUE;
+            }
+            if (rc == HXNET_RECV_SHUTDOWN) {
+                return FALSE;
+            }
+            if (g_get_monotonic_time () >= deadline) {
+                return FALSE;
+            }
+            g_usleep (5000); /* 5 ms */
+        }
+    }
 
     /* Wait for the first header byte to be available. */
     fd_set rfds;
@@ -939,16 +1198,33 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 {
     memset (htlc, 0, sizeof (*htlc));
 
-    int fd = integration_open_or_skip ();
-    if (fd < 0) {
-        return -1;
-    }
+    int fd;
+    if (integration_harness_orchestrated ()) {
+        /* Production connect + magic + LOGIN through the orchestrator.
+         * The non-caps legacy login advertises no capabilities
+         * (send_caps=0), so we pass caps=0 to match. */
+        const hx_test_server *srv = hx_test_server_default ();
+        if (!srv) {
+            g_test_fail_printf ("no default test server configured.");
+            return -1;
+        }
+        fd = orch_open_login (htlc, srv->host, srv->port, "guest",
+                              display_name, icon, /*caps=*/0);
+        if (fd < 0) {
+            return -1;
+        }
+    } else {
+        fd = integration_open_or_skip ();
+        if (fd < 0) {
+            return -1;
+        }
 
-    if (!integration_login_guest (fd, htlc, display_name, icon)) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("integration_login_guest failed");
-        return -1;
+        if (!integration_login_guest (fd, htlc, display_name, icon)) {
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            g_test_fail_printf ("integration_login_guest failed");
+            return -1;
+        }
     }
 
     guint32 type = integration_drain_until_selfinfo_or_error (fd, htlc, 8);
@@ -1038,30 +1314,44 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
     g_return_val_if_fail (srv != NULL, -1);
     memset (htlc, 0, sizeof (*htlc));
 
-    int fd = hx_test_server_connect (srv);
-    if (fd < 0) {
-        gchar *msg = g_strdup_printf (
-            "integration server %s not reachable at %s:%d — start the "
-            "container first (see tests/%s/README.md).",
-            srv->name, srv->host, (int) srv->port, srv->name);
-        g_test_fail_printf (msg);
-        g_free (msg);
-        return -1;
-    }
-    if (!integration_handshake (fd)) {
-        integration_close (fd);
-        g_test_fail_printf (
-            "connected to %s (%s:%d) but the magic-handshake "
-            "exchange failed — is this actually a Hotline server?",
-            srv->name, srv->host, (int) srv->port);
-        return -1;
-    }
+    int fd;
+    if (integration_harness_orchestrated ()) {
+        /* Production connect + magic + LOGIN through the orchestrator,
+         * advertising the requested capabilities so cap-aware servers
+         * (Janus) echo the agreed bits back in the LOGIN reply — the
+         * drain below stashes that echo into htlc->caps the same way. */
+        fd = orch_open_login (htlc, srv->host, srv->port, "guest",
+                              display_name, icon, caps);
+        if (fd < 0) {
+            return -1;
+        }
+    } else {
+        fd = hx_test_server_connect (srv);
+        if (fd < 0) {
+            gchar *msg = g_strdup_printf (
+                "integration server %s not reachable at %s:%d — start the "
+                "container first (see tests/%s/README.md).",
+                srv->name, srv->host, (int) srv->port, srv->name);
+            g_test_fail_printf (msg);
+            g_free (msg);
+            return -1;
+        }
+        if (!integration_handshake (fd)) {
+            integration_close (fd);
+            g_test_fail_printf (
+                "connected to %s (%s:%d) but the magic-handshake "
+                "exchange failed — is this actually a Hotline server?",
+                srv->name, srv->host, (int) srv->port);
+            return -1;
+        }
 
-    if (!integration_login_guest_caps (fd, htlc, display_name, icon, caps)) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("integration_login_guest_caps failed");
-        return -1;
+        if (!integration_login_guest_caps (fd, htlc, display_name, icon,
+                                           caps)) {
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            g_test_fail_printf ("integration_login_guest_caps failed");
+            return -1;
+        }
     }
 
     guint32 type = integration_drain_until_selfinfo_or_error (fd, htlc, 12);

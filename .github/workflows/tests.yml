@@ -353,8 +353,19 @@ jobs:
                 git rust cargo
               meson setup build
               meson compile -C build
+              # Pass 1: legacy raw-socket transport.
               meson test -C build --suite integration \
                 --print-errorlogs
+              # Pass 2: same binaries, but the login entry points drive
+              # connect + magic + LOGIN through the production hxnet
+              # orchestrator (Phase G increment 2). This is what keeps
+              # the production connect path continuously exercised
+              # against the live servers — the gap that let the
+              # capabilities regression ship. HOPE/TLS tests stay on the
+              # legacy transport (they drive their own crypto) and are
+              # covered separately by test_phase_g_connect.
+              GTKHX_HARNESS_ORCHESTRATED=1 meson test -C build \
+                --suite integration --print-errorlogs
             '
 
       - name: dump mhxd logs on failure
