@@ -595,6 +595,88 @@ test_hope_tls_rejected (void)
     g_unsetenv ("GTKHX_NEW_CONNECT");
 }
 
+/* ---- Phase G default-flip prep: gate-selection guards ------------ *
+ *
+ * These pin the path-selection logic in
+ * src/network.c::hx_connect_use_orchestrator (the centralized gate the
+ * eventual default-flip toggles via PHASE_G_DEFAULT_ON). They observe
+ * which path hx_connect chose WITHOUT needing a live server: the
+ * orchestrator path installs the bridge SYNCHRONOUSLY before
+ * hx_connect returns (fd=-1 sentinel, then the tokio connect runs
+ * async), while the legacy GIOStream path returns with no bridge
+ * installed. So hx_bridge_is_installed() sampled immediately after
+ * hx_connect returns — before we pump the main loop — is a clean,
+ * deterministic signal for which gate branch ran.
+ *
+ * We connect to 127.0.0.1:1 (unbound → refused) so the async attempt
+ * always fails and tears down cleanly; the gate decision has already
+ * been observed by then.
+ */
+static void
+assert_gate_selects_orchestrator (gboolean expect_orchestrator)
+{
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", 1, "guest", "",
+                /*secure=*/0, /*tls=*/0);
+
+    /* Sampled synchronously, before the main loop runs: only the
+     * orchestrator path installs the bridge inside hx_connect. */
+    g_assert_cmpint (hx_bridge_is_installed (), ==, expect_orchestrator);
+
+    /* Let the refused connect tear down on whichever path. */
+    drive_until (obs, 10000);
+    g_assert_true (obs->wait_arrived);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+}
+
+/* Default (neither env var set): PHASE_G_DEFAULT_ON decides. While it's
+ * 0 the legacy path is the default, so no bridge install. This
+ * assertion is the deliberate trip-wire for the flip: when
+ * PHASE_G_DEFAULT_ON becomes 1, this expectation flips to TRUE in the
+ * same commit — a visible, reviewed part of changing the default. */
+static void
+test_gate_default (void)
+{
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_unsetenv ("GTKHX_OLD_CONNECT");
+    assert_gate_selects_orchestrator (PHASE_G_DEFAULT_ON ? TRUE : FALSE);
+}
+
+/* Explicit opt-in selects the orchestrator regardless of the default. */
+static void
+test_gate_opt_in (void)
+{
+    g_unsetenv ("GTKHX_OLD_CONNECT");
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    assert_gate_selects_orchestrator (TRUE);
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+}
+
+/* Explicit opt-out beats explicit opt-in: a user can always force the
+ * legacy path. This is the escape hatch that makes the flip safe — and
+ * it's testable now, before it becomes load-bearing. */
+static void
+test_gate_opt_out_wins (void)
+{
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_setenv ("GTKHX_OLD_CONNECT", "1", TRUE);
+    assert_gate_selects_orchestrator (FALSE);
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_unsetenv ("GTKHX_OLD_CONNECT");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -610,6 +692,11 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/connect_refused",
                      test_orchestrator_connect_refused);
     g_test_add_func ("/phase_g/hope_tls_rejected", test_hope_tls_rejected);
+
+    /* Default-flip prep: gate-selection guards (no server needed). */
+    g_test_add_func ("/phase_g/gate_default", test_gate_default);
+    g_test_add_func ("/phase_g/gate_opt_in", test_gate_opt_in);
+    g_test_add_func ("/phase_g/gate_opt_out_wins", test_gate_opt_out_wins);
 
     return g_test_run ();
 }

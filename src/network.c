@@ -2049,6 +2049,38 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     }
 }
 
+/* Phase G default-flip control. PHASE_G_DEFAULT_ON lives in network.h
+ * (shared with the /phase_g/gate_default trip-wire test). Precedence:
+ * an explicit GTKHX_OLD_CONNECT=1 (force legacy) beats an explicit
+ * GTKHX_NEW_CONNECT (force orchestrator) — a user debugging a
+ * connection issue can always force the legacy path. With neither set,
+ * PHASE_G_DEFAULT_ON decides. */
+
+/* "0" is the universally-understood opt-out token (matches the
+ * GTKHX_USE_HXNET convention in hxnet_opt_in above); any other value,
+ * including empty, counts as "set". */
+static gboolean
+env_flag_set (const char *name)
+{
+    const char *v = g_getenv (name);
+    return v != NULL && *v != '\0' && g_strcmp0 (v, "0") != 0;
+}
+
+/* TRUE when hx_connect should route through the Phase G orchestrator
+ * rather than the legacy GIOStream connect path. Centralizes the gate
+ * polarity so the default-flip is a single constant change. */
+static gboolean
+hx_connect_use_orchestrator (void)
+{
+    if (env_flag_set ("GTKHX_OLD_CONNECT")) {
+        return FALSE; /* explicit opt-out wins */
+    }
+    if (env_flag_set ("GTKHX_NEW_CONNECT")) {
+        return TRUE; /* explicit opt-in */
+    }
+    return PHASE_G_DEFAULT_ON;
+}
+
 void
 hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
             const char *login, const char *pass, char secure, char tls)
@@ -2079,19 +2111,19 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
         }
     }
 
-    /* Phase G: hxnet-owns-the-whole-lifecycle, gated behind
-     * GTKHX_NEW_CONNECT while it bakes. The orchestrator now covers
-     * plaintext, HOPE-Secure-Login, and plaintext-over-TLS
-     * (separate-port model). HOPE-over-TLS is rejected above;
-     * secure-without-a-cipher falls through to the legacy GIOStream
-     * path. The GTKHX_TLS env override is folded into
-     * want_tls so GTKHX_TLS=1 + GTKHX_NEW_CONNECT=1 takes the
-     * orchestrator TLS path. */
+    /* Phase G: hxnet-owns-the-whole-lifecycle. The path selection is
+     * centralized in hx_connect_use_orchestrator() (opt-in/opt-out env
+     * vars + PHASE_G_DEFAULT_ON) so the eventual default-flip is a
+     * one-line change. The orchestrator now covers plaintext,
+     * HOPE-Secure-Login, and plaintext-over-TLS (separate-port model).
+     * HOPE-over-TLS is rejected above; secure-without-a-cipher falls
+     * through to the legacy GIOStream path. The GTKHX_TLS env override
+     * is folded into want_tls so GTKHX_TLS=1 takes the orchestrator TLS
+     * path when the orchestrator is selected. */
     {
-        const char *new_env = g_getenv ("GTKHX_NEW_CONNECT");
         const char *tls_env = g_getenv ("GTKHX_TLS");
         gboolean want_tls = tls || (tls_env && *tls_env);
-        if (new_env && *new_env) {
+        if (hx_connect_use_orchestrator ()) {
             if (want_tls && !secure) {
                 /* Plaintext LOGIN over TLS-from-byte-zero. Cert trust
                  * is the same TOFU check the legacy path uses, run

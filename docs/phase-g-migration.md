@@ -339,15 +339,43 @@ installs in `gtkhx.c::hxd_fd_set` — these were
 already wrapped after R3.3.e-4. Audit needed for any
 straggler.)
 
+### Default-flip prep (shipped)
+
+The gate polarity is now centralized in
+`src/network.c::hx_connect_use_orchestrator()`, driven by a single
+constant `PHASE_G_DEFAULT_ON` in `src/network.h` (currently `0`).
+Precedence: `GTKHX_OLD_CONNECT=1` (force legacy) beats
+`GTKHX_NEW_CONNECT=1` (force orchestrator); with neither set,
+`PHASE_G_DEFAULT_ON` decides. Both env vars are honored now so the
+opt-out escape hatch is exercised *before* it becomes load-bearing.
+
+Three deterministic Tier 3 guards pin the gate without needing a
+server (`test_phase_g_connect.c`): `/phase_g/gate_default`,
+`/phase_g/gate_opt_in`, `/phase_g/gate_opt_out_wins`. They observe the
+chosen path via the synchronous bridge-install signal (the orchestrator
+installs the bridge inside `hx_connect`; the legacy path doesn't).
+`gate_default` references the same `PHASE_G_DEFAULT_ON` the gate does,
+so its expectation flips automatically with the constant.
+
+**The actual flip** is then: change `PHASE_G_DEFAULT_ON` to `1` (one
+line; `gate_default` updates with it). Do that only after the live
+validation below is done — in particular a human clicking through a
+real TLS trust-on-first-use dialog, which CI's auto-accept can't prove.
+Asserting the downstream `rcv_task_login` effects (`htlc->version`,
+banner fetch, SELFINFO timer) headlessly still needs the R5 rcv seam
+(increment 3) — the headless test stubs `rcv_task_login`, so the
+header-level replay assertion remains the strongest automated proof
+until then.
+
 ### `claude/r3.3e-phase-g-delete-old-connect`
 
-Once GTKHX_NEW_CONNECT=1 has been validated against:
+Once `PHASE_G_DEFAULT_ON=1` has been validated against:
 
 - mhxd (1.x server with HOPE support)
 - hlserver.com (1.0/1.2 fallback)
 - Janus (1.9 + chat-history extension)
 
-…the gate flips to default-on, the env var becomes opt-OUT
+…the env var stays as the opt-OUT escape hatch
 (`GTKHX_OLD_CONNECT=1` keeps the legacy path), and a
 follow-up branch deletes:
 
